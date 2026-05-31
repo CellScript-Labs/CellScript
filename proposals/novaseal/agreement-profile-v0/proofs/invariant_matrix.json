@@ -37,7 +37,7 @@
       "id": "receipt_materialized",
       "claim": "Each implemented terminal path creates a NovaAgreementReceiptV0 output.",
       "location": "create receipt statements",
-      "coverage": "generated-audit-covered"
+      "coverage": "resolved-transaction-covered + live-devnet-covered"
     },
     {
       "id": "terms_hash_output_binding",

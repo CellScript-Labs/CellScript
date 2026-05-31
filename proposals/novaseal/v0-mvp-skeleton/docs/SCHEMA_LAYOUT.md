@@ -1,6 +1,6 @@
 # NovaSeal v0 Schema Layout
 
-**Date**: 2026-05-30
+**Date**: 2026-05-31
 **Extractor**: `scripts/novaseal_schema_layout.py`
 **Report**: `target/novaseal-schema-layout.json`
 **Encoding profile**: `packed-fixed-v0-reference`
@@ -20,8 +20,11 @@ Current expected sizes:
 | Type | Fields | Static size |
 | --- | ---: | ---: |
 | `NovaSealCellV0` | 7 | 146 bytes |
-| `NovaSealIntentV0` | 9 | 213 bytes |
-| `ProofReceiptV0` | 12 | 279 bytes |
+| `NovaSealCellCommitmentV0` | 6 | 114 bytes |
+| `NovaSealIntentCoreV0` | 11 | 222 bytes |
+| `NovaSealSignedIntentV0` | 2 | 254 bytes |
+| `ProofReceiptCommitmentV0` | 13 | 310 bytes |
+| `ProofReceiptV0` | 16 | 382 bytes |
 
 Primitive encodings:
 
@@ -40,11 +43,12 @@ The packed reference profile uses no padding.
 
 This is not yet enough for production or wallet signing:
 
-- no canonical byte vectors are emitted,
+- canonical packed-reference vectors exist, but they are not Molecule output,
 - no Molecule table/schema file is generated,
 - no comparison is made against CellScript compiler ABI metadata,
 - no BTC wallet/PSBT signing implementation consumes the output,
-- no CKB VM fixture runner consumes the output.
+- CKB VM and resolved transaction harnesses consume compatible packed data, but
+  this is still not a published wallet/Molecule reference implementation.
 
 The report is still useful because it freezes the first mechanically testable interpretation of field order, widths, offsets, and source hashes.
 

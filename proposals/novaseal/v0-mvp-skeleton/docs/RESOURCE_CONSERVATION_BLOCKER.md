@@ -1,73 +1,68 @@
 # NovaSeal v0 Resource Conservation Status
 
-**Date**: 2026-05-30
-**Scope**: `resource-conservation:NovaSealCellV0` in the current `key_auth_transition` action.
-**Status**: Closed for the current guarded transition shape; strict 0.16 ProofPlan soundness now passes.
+**Date**: 2026-05-31
+**Scope**: `resource-conservation:NovaSealCellV0` and related output records in `key_auth_transition`.
+**Status**: open at strict generated ProofPlan level; covered by source, CKB VM, combined transaction, and live local devnet evidence.
 
-## Current Generated Record
+## Current Generated Gap
 
-`cellc audit-bundle --target-profile ckb --json` now emits a covered conservation record:
-
-```text
-feature: resource-conservation:NovaSealCellV0
-status: checked-runtime
-codegen_coverage_status: covered
-on_chain_checked: true
-detail: Compiler-emitted runtime verifier checks one consumed 'NovaSealCellV0' Input is advanced into one created Output by a guarded resource transition; resource-conservation=checked-runtime; preserved fields: version, btc_authority_hash, policy_hash, latest_receipt_hash; guarded fields: state_hash, nonce, expiry; allowed fresh fields: -; unchecked fields: -
-```
-
-The generated ProofPlan record exposes the same facts as machine-readable relation checks:
+`cellc check --target-profile ckb --primitive-strict 0.16` currently fails with:
 
 ```text
-resource-conservation
-resource-field:version=preserved
-resource-field:btc_authority_hash=preserved
-resource-field:policy_hash=preserved
-resource-field:latest_receipt_hash=preserved
-resource-field:state_hash=guarded
-resource-field:nonce=guarded
-resource-field:expiry=guarded
-resource-conservation:NovaSealCellV0=checked-runtime
+PP0150 action:key_auth_transition:create-output:NovaSealCellV0:new_cell
+PP0150 action:key_auth_transition:create-output:ProofReceiptV0:receipt
+PP0150 action:key_auth_transition:resource-conservation:NovaSealCellV0
 ```
 
-The derived extractor records zero `runtime_gaps` in `target/novaseal-audit-surface.json`.
+The generated audit bundle marks these records as `runtime-required`, not
+strict-clean on-chain-checked generated obligations.
 
-## What Changed
+## Runtime Evidence That Exists
 
-The action now includes a generic hash-commitment guard for the changed state field:
+The runtime path is not untested:
+
+- the state-type CKB VM harness executes all eight fixtures at action/type scope;
+- the combined lock + type transaction harness executes all eight fixtures
+  through `ckb-script` and the local CKB contextual verifier stack;
+- the live local devnet runner commits bootstrap -> key-auth transition by RPC;
+- the live runner verifies the old state is dead and the new state + receipt
+  outputs are live;
+- the live runner dry-runs wrong-signature rejection without consuming the state.
+
+This evidence is stronger than source-only review, but it is not the same thing
+as strict generated ProofPlan closure.
+
+## What Changed From The Older Note
+
+Earlier documentation said the resource-conservation blocker was closed. That
+was no longer accurate after the split-intent and explicit
+`ProofReceiptCommitmentV0` refactor. The current honest status is:
 
 ```text
-let actual_state_hash_commitment = hash_blake2b(intent.new_state_hash)
-require actual_state_hash_commitment == state_hash_commitment
+source guards: present
+state/type harness: passed
+combined tx harness: passed
+live local devnet: passed
+strict generated ProofPlan: still open
 ```
 
-The compiler recogniser remains protocol-agnostic. It does not know about NovaSeal fields; it sees a one-input/one-output resource transition where every output field is preserved, explicitly guarded, or explicitly allowed fresh. Because `state_hash`, `nonce`, and `expiry` are now guarded, no output field remains unchecked.
+## Closure Path
 
-The compiler backend was also tightened so CKB metadata recognises verifier-coverable fixed-byte comparisons involving `hash_blake2b(...)` outputs. Without that, this source-level guard would merely swap the old PP0150 blocker for a `fixed-byte-comparison` fail-closed path.
+The compiler/audit surface needs to recognize the lowered output relation:
 
-## Strict 0.16 Impact
+```text
+new_cell.latest_receipt_hash
+  == hash_blake2b_packed(ProofReceiptCommitmentV0)
+  == intent.expected_receipt_hash
+```
 
-`cellc check --target-profile ckb --primitive-strict 0.16` now passes.
+and then mark the matching `create-output:*` and
+`resource-conservation:NovaSealCellV0` records as generated checked obligations
+when the verifier actually enforces those fields.
 
-- No `PP0150` remains for `resource-conservation:NovaSealCellV0`.
-- No `PP0103` remains for `ckb-runtime` context records. Strict PP0103 now applies only to true `checked-runtime` records whose `on_chain_checked` flag is missing.
+## What Not To Claim
 
-This is useful progress: the NovaSeal protocol-level conservation relation is generated-audit-covered, and the strict soundness gate no longer reports metadata consistency errors for this package.
-
-## What This Does Not Prove
-
-This does not prove on-chain BTC signature correctness. The `btc_authority` lock now has generated spawn/IPC shell wiring and the delegated RISC-V shell has local plus child-verifier CKB VM BIP340 evidence, but no parent/child CKB VM transaction result is generated in the ProofPlan.
-
-Receipt output materialisation is now covered separately by `create-output:ProofReceiptV0:receipt`; resource conservation still only proves the `NovaSealCellV0` linear transition.
-
-This does not provide live-chain NovaSeal transaction submission. Harness-level CKB VM, cycle, transaction-size, and occupied-capacity evidence is tracked separately.
-
-## What Not To Do
-
-Do not reclassify the whole MVP as production-ready because conservation is now covered.
-
-Do not treat strict ProofPlan soundness as production readiness.
-
-Do not treat the model-level fixture harness as CKB VM execution evidence.
-
-Do not add SPV, OP_RETURN, Fiber channel logic, or receipt output cells as part of this closure; those remain outside the v0 slice.
+- Do not claim strict 0.16 ProofPlan soundness for NovaSeal core.
+- Do not claim production readiness from harness success alone.
+- Do not claim a historical receipt accumulator; v0 only stores
+  `latest_receipt_hash`.

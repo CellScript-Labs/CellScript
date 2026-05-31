@@ -21,12 +21,15 @@ slice intentionally reduces the scope to CKB/CKB so no external price ratio is
 needed.
 
 The current package includes a local transaction-shape harness for native CKB
-output capacities and modeled settlement amounts, an action CKB VM harness for
-the compiled CellScript terminal-path guards, and a resolved
+output capacities and modeled settlement amounts, a resolved
 `ckb-verification` transaction harness over deterministic in-memory
-transactions. Payout intent is now bound by typed `NativeCkbPayoutV0` outputs,
-and the resolved transaction harness covers wrong settlement amount rejection.
+transactions, and a live local devnet lifecycle runner. Payout intent is bound
+by typed `NativeCkbPayoutV0` outputs; the resolved transaction harness covers
+wrong settlement amount rejection, and the live runner covers originate ->
+repay, originate -> claim, and negative dry-runs for wrong signer, non-CKB
+asset kind, payout capacity, payout lock args, wrong payout amount, and early
+claim.
 
-It is still not live deployment evidence: real CellDep liveness, mempool/miner
-acceptance, production locks, and full Molecule/wallet signing vectors remain
-future work.
+It is still not production deployment evidence: public/shared CellDep pinning,
+production locks, primitive-strict generated ProofPlan closure, and full
+Molecule/wallet signing vectors remain future work.

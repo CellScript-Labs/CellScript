@@ -1,6 +1,6 @@
 # NovaSeal v0 CKB VM Child Verifier Harness
 
-**Date**: 2026-05-30
+**Date**: 2026-05-31
 **Harness**: `harness/ckb_vm`
 **Report**: `target/novaseal-ckb-vm-child-verifier-report.json`
 **Classification**: child verifier CKB VM dry-run evidence.
@@ -29,12 +29,12 @@ Expected summary:
 ```text
 child_vm_executed=true
 parent_spawn_executed=false
-total=59
-accepted=24
-rejected=35
-matched_expected=59
+total=77
+accepted=32
+rejected=45
+matched_expected=77
 mismatched=0
-max_cycles=3487024
+max_cycles=3552601
 ```
 
 The staged ELF used by this run is:
@@ -56,8 +56,8 @@ It proves:
 - the staged child ELF loads in `ckb-vm`,
 - child-side `inherited_fd`, `pipe_read`, and `close` calls follow the intended
   VM2 register convention,
-- all 24 valid IPC vectors exit `0`,
-- all 35 invalid/malformed IPC vectors exit non-zero,
+- all 32 valid IPC vectors exit `0`,
+- all 45 invalid/malformed IPC vectors exit non-zero,
 - malformed truncated input becomes a spawn-input failure instead of accidental
   acceptance,
 - cycle counts are collected for the child verifier path.
@@ -76,5 +76,4 @@ It does not prove:
 ## Closure Path
 
 The child harness now remains a lower-level oracle under the parent-lock
-harness. The remaining production path is live-chain NovaSeal RPC submission and
-six-fixture transaction coverage.
+harness. The remaining production path is public/shared deployment pinning after the current eight-fixture transaction coverage.

@@ -4,37 +4,37 @@
   "local_shape_artifact": "target/nova-agreement-tx-shape-report.json",
   "action_vm_artifact": "target/nova-agreement-ckb-vm-action-report.json",
   "resolved_tx_artifact": "target/nova-agreement-ckb-tx-report.json",
-  "status": "generated-audit-local-shape-action-vm-and-resolved-tx-refreshed",
+  "status": "generated-audit-local-shape-resolved-tx-and-live-devnet-refreshed",
   "last_verified": {
     "check": "passed",
     "audit_bundle": "passed",
     "explain_assumptions": "passed",
-    "primitive_strict_0_16": "passed",
+    "primitive_strict_0_16": "fails_on_generated_proofplan_strictness",
     "actions": 3,
     "locks": 0,
-    "source_units": 2,
-    "proof_plan_records": 71,
-    "builder_assumptions": 21,
+    "source_units": 3,
+    "proof_plan_records": 140,
+    "builder_assumptions": 85,
     "tx_shape_harness": "passed",
     "tx_shape_cases": 8,
     "tx_shape_matched_expected": 8,
-    "action_vm_harness": "passed",
-    "action_vm_cases": 14,
-    "action_vm_matched_expected": 14,
-    "action_vm_max_cycles": 28721,
+    "action_vm_harness": "superseded_legacy_abi_not_release_gate",
+    "action_vm_cases": null,
+    "action_vm_matched_expected": null,
+    "action_vm_max_cycles": null,
     "resolved_tx_harness": "passed",
-    "resolved_tx_cases": 15,
-    "resolved_tx_script_matched_expected": 15,
-    "resolved_tx_node_matched_expected": 15,
+    "resolved_tx_cases": 20,
+    "resolved_tx_script_matched_expected": 20,
+    "resolved_tx_node_matched_expected": 20,
     "resolved_tx_fixture_partition_matches_expected": true,
-    "resolved_tx_max_script_cycles": 38244,
-    "resolved_tx_max_node_cycles": 38244,
-    "resolved_tx_max_tx_size_bytes": 1565
+    "resolved_tx_max_script_cycles": 7601060,
+    "resolved_tx_max_node_cycles": 7601060,
+    "resolved_tx_max_tx_size_bytes": 2050
   },
   "claims": [
     {
       "claim": "Three Agreement Profile actions compile under the CKB target profile.",
-      "classification": "generated-audit-covered",
+      "classification": "non_strict_check_covered",
       "evidence": "cellc check --target-profile ckb"
     },
     {
@@ -44,13 +44,13 @@
     },
     {
       "claim": "Receipts are materialized as outputs by implemented actions.",
-      "classification": "generated-audit-covered",
-      "evidence": "audit-bundle create-output:NovaAgreementReceiptV0:receipt records"
+      "classification": "resolved-transaction-covered + live-devnet-covered",
+      "evidence": "resolved transaction harness and live devnet lifecycle runner materialize receipt outputs; generated ProofPlan strictness still has runtime-required records"
     },
     {
       "claim": "Terminal AgreementCell resource transitions are strict-mode sound.",
-      "classification": "generated-audit-covered",
-      "evidence": "primitive-strict 0.16 passes after preserve closed from active plus explicit status/latest_receipt_hash/nonce guards"
+      "classification": "source_and_runtime_covered_strict_generated_gap",
+      "evidence": "non-strict check, resolved transaction harness, and live devnet lifecycle pass; primitive-strict 0.16 still fails on generated ProofPlan output/runtime records"
     },
     {
       "claim": "Fixture semantics are executable.",
@@ -82,5 +82,8 @@
       "classification": "resolved-transaction-covered + live-devnet-covered",
       "evidence": "wrong_settlement_amount_reject mutates the typed NativeCkbPayoutV0 lender repayment output and is rejected by the resolved transaction harness; the live devnet runner also dry-runs a wrong payout amount rejection"
     }
-  ]
+  ],
+  "current_status": {
+    "primitive_strict_0_16": "fails_on_generated_proofplan_strictness"
+  }
 }

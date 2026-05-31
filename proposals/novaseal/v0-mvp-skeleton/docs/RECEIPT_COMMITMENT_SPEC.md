@@ -1,97 +1,116 @@
 # NovaSeal v0 Receipt Commitment Spec
 
-**Date**: 2026-05-30
-**Status**: packed-reference candidate rule.
-**Applies to**: `scripts/novaseal_canonical_vectors.py` and `target/novaseal-canonical-vectors.json`.
+**Date**: 2026-05-31
+**Status**: split-intent v0 rule implemented in CellScript source and packed-reference vectors.
+**Applies to**: `src/nova_state_type.cell`, `scripts/novaseal_canonical_vectors.py`, and `target/novaseal-canonical-vectors.json`.
 
-This document resolves the direct `receipt_hash` / `intent_hash` commitment cycle for the current packed-reference vectors. The `.cell` action now materialises a `ProofReceiptV0` output, but its `intent_hash` field still uses the current placeholder signing digest rule (`hash_blake2b(intent.domain)`) until Molecule/wallet signing alignment is frozen.
+NovaSeal v0 no longer uses the old "hash ProofReceiptV0 while excluding
+intent_hash" candidate. The current rule splits the signed intent from the
+receipt commitment so the hash graph is acyclic and auditable.
 
-## Problem
+## Hash Rule
 
-The naive full-receipt rule is circular:
-
-1. `NovaSealIntentV0.receipt_hash` commits to a receipt.
-2. `ProofReceiptV0.intent_hash` commits to the signed intent.
-3. The signed intent includes `receipt_hash`.
-
-Hashing the full `ProofReceiptV0` including `intent_hash` therefore cannot produce the `receipt_hash` that is already inside the signed intent.
-
-## Selected v0 Candidate Rule
-
-For the packed-reference vectors:
+All hashes below use CellScript's canonical packed hash:
 
 ```text
-receipt_hash =
+hash_blake2b_packed(value) =
   blake2b-256(
-    label = "ProofReceiptV0.receipt_commitment_without_intent_hash",
-    preimage = packed ProofReceiptV0 fields in schema order, excluding intent_hash
+    "CellScriptPackedHashV0\0" ||
+    canonical_type_name ||
+    "\0" ||
+    u32_le(byte_len) ||
+    packed_bytes
   )
 ```
 
-Then:
+For a successful transition:
 
 ```text
+intent_core_hash =
+  hash_blake2b_packed(NovaSealIntentCoreV0)
+
+new_cell_commitment =
+  hash_blake2b_packed(NovaSealCellCommitmentV0)
+
+materialized_receipt_hash =
+  hash_blake2b_packed(ProofReceiptCommitmentV0)
+
 signed_intent_hash =
-  blake2b-256(full packed NovaSealIntentV0 including receipt_hash)
+  hash_blake2b_packed(NovaSealSignedIntentV0 {
+    core,
+    expected_receipt_hash: materialized_receipt_hash
+  })
 ```
 
-And the materialised `ProofReceiptV0.intent_hash` field is:
+`ProofReceiptCommitmentV0` is an explicit commitment type, not an implicit
+"ProofReceiptV0 minus fields" rule. Its fields are:
 
 ```text
-intent_hash = signed_intent_hash
+protocol_id
+package_hash
+policy_hash
+action
+terminal_path
+old_cell
+new_cell_commitment
+old_state_hash
+new_state_hash
+old_nonce
+new_nonce
+intent_core_hash
+payout_commitment_hash
 ```
 
-The excluded field list is exactly:
+`NovaSealCellCommitmentV0` excludes `latest_receipt_hash`, so the new cell can
+commit to its semantic fields without creating a cycle.
+
+## Checks
+
+The `.cell` transition checks:
 
 ```text
-intent_hash
+intent.core.old_cell == source::group_input(0).previous_outpoint
+intent_core_hash == hash_blake2b_packed(intent.core)
+materialized_receipt_hash == hash_blake2b_packed(ProofReceiptCommitmentV0)
+signed_intent_hash == hash_blake2b_packed(intent)
+BTC signature verifies signed_intent_hash
+intent.expected_receipt_hash == materialized_receipt_hash
+new_cell.latest_receipt_hash == materialized_receipt_hash
+receipt.intent_core_hash == intent_core_hash
+receipt.signed_intent_hash == signed_intent_hash
 ```
 
-## Why This Breaks The Cycle
-
-`receipt_hash` is computed first and does not depend on `intent_hash`.
-
-The BTC-signed intent then commits to that `receipt_hash`.
-
-The receipt can later carry the exact signed intent hash without changing the receipt commitment.
+In v0, `latest_receipt_hash` is only the hash of the current successful
+transition's receipt commitment. It is not a rolling root, MMR, Merkle root, or
+historical accumulator.
 
 ## Current Vector Evidence
 
-`python3 scripts/novaseal_canonical_vectors.py --pretty` currently reports:
+Run from `proposals/novaseal/v0-mvp-skeleton`:
 
-```text
-computed_receipt_candidate_hash_matches_intent = 0
-resolved_receipt_hash_matches_intent = 6
-resolved_receipt_verification_preimage_matches = 6
-receipt_commitment_status = resolved_candidate_without_intent_hash
+```bash
+python3 scripts/novaseal_schema_layout.py --pretty
+python3 scripts/novaseal_canonical_vectors.py --pretty
 ```
 
-The first number is the legacy full-receipt candidate. It remains zero, as expected.
+Current summary:
 
-The latter two numbers prove the selected candidate rule is internally consistent across all six fixtures.
-
-## Current On-Chain Skeleton Delta
-
-The generated state action now checks a `ProofReceiptV0` output at `Output#1`.
-That closes the former "no receipt output" audit blocker. It does not yet mean
-the packed-reference `signed_intent_hash = blake2b(full NovaSealIntentV0)` rule
-has been adopted by the lock, wallet, and verifier path.
+```text
+vectors=8
+signed_intent_vectors=8
+resolved_receipt_matches=8
+latest_receipt_matches=8
+receipt_commitment_status=split_intent_and_explicit_receipt_commitment
+```
 
 ## Remaining Limits
 
-This is still not production evidence:
+This is still packed-reference evidence:
 
 - not Molecule output,
-- not CKB VM witness encoding,
-- not BTC wallet signing material,
-- not implemented as the final lock/wallet/verifier signing digest rule,
-- the receipt output is generated-audit checked, but the final Molecule/wallet
-  receipt preimage alignment is still pending.
+- not final wallet signing material,
+- not a public/shared devnet deployment pin,
+- not a historical receipt accumulator.
 
-Before production, the same preimage rule must be adopted by:
-
-1. off-chain signer / wallet tooling,
-2. `nova_btc_authority_lock.cell` intent hash construction,
-3. external `novaseal_btc_verifier`,
-4. production receipt output checker and wallet preimage builder,
-5. fixture/VM transaction harness.
+Before production, the same preimage rule must be adopted by wallet tooling,
+Molecule/reference encoders, deployment manifests, and any external signer UX.

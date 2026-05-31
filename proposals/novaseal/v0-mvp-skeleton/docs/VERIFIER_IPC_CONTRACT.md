@@ -1,11 +1,11 @@
 # NovaSeal v0 Verifier IPC Contract
 
-**Date**: 2026-05-30
+**Date**: 2026-05-31
 **Generator**: `scripts/novaseal_btc_verifier_ipc_vectors.py`
 **No-std core**: `verifier/novaseal_btc_verifier_core`
 **RISC-V shell**: `verifier/novaseal_btc_verifier_riscv`
 **Report**: `target/novaseal-btc-verifier-ipc-vectors.json`
-**Status**: fixed lock-to-verifier envelope for host-reference validation, no-std/RISC-V BIP340 shell, child-verifier CKB VM, parent-lock CKB VM harness execution, official resolved lock-group verifier evidence, and official full transaction script-verifier evidence; no live-chain NovaSeal RPC submission evidence yet.
+**Status**: fixed lock-to-verifier envelope for host-reference validation, no-std/RISC-V BIP340 shell, child-verifier CKB VM, parent-lock CKB VM harness execution, official resolved lock-group verifier evidence, and official full transaction script-verifier evidence; no public/shared deployment pinning evidence yet.
 
 This document freezes the first v0 binary request shape that `nova_btc_authority_lock.cell` must eventually pass to `novaseal_btc_verifier`.
 
@@ -63,27 +63,27 @@ cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_parent_lock_h
 Current summary:
 
 ```text
-source_positive=24
-source_negative=30
-ipc_vectors=54
+source_positive=32
+source_negative=40
+ipc_vectors=72
 malformed_vectors=5
-total_vectors=59
-expected_accept=24
-expected_reject=35
-host_ipc_checked=59
-host_ipc_matched=59
+total_vectors=77
+expected_accept=32
+expected_reject=45
+host_ipc_checked=77
+host_ipc_matched=77
 core_unit_tests=2
 core_riscv_check=passed
 riscv_shell_build=passed
-riscv_shell_accepted=24
-riscv_shell_rejected=35
-riscv_shell_matched_expected=59
-child_vm_matched_expected=59
+riscv_shell_accepted=32
+riscv_shell_rejected=45
+riscv_shell_matched_expected=77
+child_vm_matched_expected=77
 parent_vm_matched_expected=3
 parent_resolved_script_verifier_matched_expected=true
 parent_full_transaction_verifier_matched_expected=true
 parent_lock_transaction_shape_constructed=true
-parent_lock_max_consensus_tx_size_bytes=850
+parent_lock_max_consensus_tx_size_bytes=859
 parent_lock_max_output_occupied_capacity_shannons=21900000000
 ```
 
@@ -100,7 +100,7 @@ This is still not criterion 6 on chain:
 - the current RISC-V verifier binary shell reads inherited fd index `0` as 18 little-endian `u64` words, matches all BIP340 IPC vectors, and now runs in the child-verifier CKB VM harness,
 - the no-std core currently covers both the envelope parser and BIP340 verification,
 - child-verifier and parent-lock CKB VM harness evidence exists, and the parent-lock harness now records transaction-shape tx-size/capacity facts plus official resolved lock-group verifier success and full transaction script-verifier success,
-- no live-chain NovaSeal RPC submission evidence exists,
+- no public/shared deployment pinning evidence exists yet,
 - the generated `btc_authority` lock surface proves Script.args binding and spawn/IPC wiring, while crypto execution remains external harness evidence.
 
-This contract is deliberately small so the next slice can turn the current full transaction script-verifier evidence into live-chain NovaSeal RPC submission evidence without changing the signed message or public vector set.
+This contract is deliberately small so the next slice can turn the current full transaction script-verifier evidence into public/shared deployment pinning evidence without changing the signed message or public vector set.

@@ -12,7 +12,7 @@
 
 **Rust harness boundary**: The Rust code under `harness/ckb_vm` is local evidence-generation tooling only. It is not part of the deployed NovaSeal contract surface, is not a runtime verifier CellDep, and is not called by the `.cell` code. Deployed/runtime verifier wiring is represented by `verifier::btc::bip340::require_signature(...)` plus the manifest-bound `cellscript_btc_bip340_verifier_riscv` CellDep.
 
-**State type CKB VM harness**: Build the action artifact with `/home/arthur/a19q3/CellScript/target/debug/cellc src/nova_state_type.cell --target riscv64-elf --target-profile ckb --entry-action key_auth_transition -o target/novaseal-state-type-action.elf`, then run `cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_state_type_harness -- --pretty`. This executes `key_auth_transition` in `ckb-vm` for all eight fixtures at action/type scope. The `.cell` intent ABI now uses the same 213-byte `old_cell: OutPoint` shape as `schemas/nova_intent_v0.schema`; no intent-shortening adapter is used. The action and lock now parse the same 389-byte `CSARGv1` witness payload order (`intent`, `receipt_hash`, `state_hash_commitment`, `SignaturePayload`), and the combined lock+type harness exercises that shared payload at full transaction verifier level.
+**State type CKB VM harness**: Build the action artifact with `/home/arthur/a19q3/CellScript/target/debug/cellc src/nova_state_type.cell --target riscv64-elf --target-profile ckb --entry-action key_auth_transition -o target/novaseal-state-type-action.elf`, then run `cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_state_type_harness -- --pretty`. This executes `key_auth_transition` in `ckb-vm` for all eight fixtures at action/type scope. The `.cell` intent ABI now uses `NovaSealSignedIntentV0 { core, expected_receipt_hash }`; the packed signed-intent size is 254 bytes. The action and lock parse the same 398-byte `CSARGv1` witness payload order (`NovaSealSignedIntentV0`, `state_hash_commitment`, `SignaturePayload`), and the combined lock+type harness exercises that shared payload at full transaction verifier level.
 
 **Schema layout**: Run `python3 scripts/novaseal_schema_layout.py --pretty` to produce `target/novaseal-schema-layout.json`, the current packed fixed-layout reference derived from the three `.schema` files. This is not yet full Molecule output.
 
@@ -26,9 +26,9 @@
 
 **Parent lock ABI preflight**: Run `python3 scripts/novaseal_parent_lock_abi_preflight.py --pretty` to build the `btc_authority` parent lock as ASM/ELF and check that Script.args binding, protected input binding, and VM2 spawn/pipe/wait surfaces are ready for a parent/child CKB VM harness. This is artifact inspection only, not parent-lock VM execution.
 
-**Parent lock CKB VM harness**: Run `cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_parent_lock_harness -- --pretty` after parent preflight and shell staging to produce `target/novaseal-parent-lock-ckb-vm-report.json`. This executes the parent lock ELF in `ckb-vm`, harnesses VM2 `spawn`, runs the staged child verifier ELF in nested `ckb-vm`, and records valid-signature accept plus wrong-signature reject evidence. It also builds a `ckb-types` consensus-packed transaction shape and runs the official `ckb-script` resolved lock-group verifier plus full transaction script verifier with `cell_deps[0]`, parent lock dep, lock ScriptGroup shape, tx size, occupied capacity, under-capacity shape checks, and verifier cycles. It is still not live-chain NovaSeal RPC submission; the separate combined harness now covers the six transition fixtures.
+**Parent lock CKB VM harness**: Run `cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_parent_lock_harness -- --pretty` after parent preflight and shell staging to produce `target/novaseal-parent-lock-ckb-vm-report.json`. This executes the parent lock ELF in `ckb-vm`, harnesses VM2 `spawn`, runs the staged child verifier ELF in nested `ckb-vm`, and records valid-signature accept plus wrong-signature reject evidence. It also builds a `ckb-types` consensus-packed transaction shape and runs the official `ckb-script` resolved lock-group verifier plus full transaction script verifier with `cell_deps[0]`, parent lock dep, lock ScriptGroup shape, tx size, occupied capacity, under-capacity shape checks, and verifier cycles. It is still a harnessed parent-authority path; the separate combined harness covers all eight transition fixtures, and the live devnet runner covers the core stateful lifecycle.
 
-**Combined lock + type transaction harness**: Run `cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_combined_tx_harness -- --pretty` after building the parent lock, state action, and child verifier artifacts to produce `target/novaseal-combined-tx-report.json`. This runs all eight fixtures through official `ckb-script` full transaction verification and the CKB `ckb-verification` non-contextual + contextual transaction verifier stack with both the parent lock and state type/action script present, a shared 389-byte `CSARGv1` witness payload, materialised `ProofReceiptV0` data at `Output#1`, and `cell_deps[0]` bound to the staged verifier shell. It also records builder-candidate fee, occupied-capacity, under-capacity, tx-size, and code-dep-role shape checks derived from the constructed transaction plus resolved deps. Negative fixtures must now match both accept/reject outcome and expected lock/type script scope in both verifier layers. This is local node-verification-stack evidence over deterministic builder outputs; live-chain NovaSeal RPC submission remains a later deployment evidence layer.
+**Combined lock + type transaction harness**: Run `cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_combined_tx_harness -- --pretty` after building the parent lock, state action, and child verifier artifacts to produce `target/novaseal-combined-tx-report.json`. This runs all eight fixtures through official `ckb-script` full transaction verification and the CKB `ckb-verification` non-contextual + contextual transaction verifier stack with both the parent lock and state type/action script present, a shared 398-byte `CSARGv1` witness payload, materialised `ProofReceiptV0` data at `Output#1`, and `cell_deps[0]` bound to the staged verifier shell. It also records builder-candidate fee, occupied-capacity, under-capacity, tx-size, and code-dep-role shape checks derived from the constructed transaction plus resolved deps. Negative fixtures must match both accept/reject outcome and expected lock/type script scope in both verifier layers. This is local node-verification-stack evidence over deterministic builder outputs; the live devnet runner is the separate stateful RPC evidence layer.
 
 **Devnet stateful gate**: Run `/home/arthur/a19q3/CellScript/scripts/novaseal_devnet_stateful_acceptance.sh --pretty` to produce `/home/arthur/a19q3/CellScript/target/novaseal-devnet-stateful-acceptance.json`. The core lifecycle blockers are resolved by `src/nova_state_lifecycle_type.cell:novaseal_lifecycle`, and `python3 /home/arthur/a19q3/CellScript/scripts/novaseal_devnet_stateful_live.py --pretty --ckb-repo /home/arthur/a19q3/ckb --ckb-bin /home/arthur/a19q3/ckb/target/debug/ckb` now provides live core bootstrap -> key-auth transition evidence. `python3 /home/arthur/a19q3/CellScript/scripts/novaseal_agreement_devnet_stateful_live.py --pretty --ckb-repo /home/arthur/a19q3/ckb --ckb-bin /home/arthur/a19q3/ckb/target/debug/ckb` provides Agreement originate -> repay, originate -> claim, and live negative-case evidence. The aggregate gate now reports `passed`. See [docs/DEVNET_STATEFUL_ACCEPTANCE.md](docs/DEVNET_STATEFUL_ACCEPTANCE.md).
 
@@ -54,7 +54,7 @@ The implemented MVP package + generated artifacts + fixtures MUST satisfy exactl
 5. An intent whose `expiry` has passed is rejected.
 6. A transition with an invalid / wrong BTC signature is rejected.
 7. A transition where `policy_hash` does not match the governing package is rejected.
-8. A transition where `receipt_hash` does not match the emitted receipt obligation is rejected.
+8. A transition where the signed `expected_receipt_hash` does not match the materialized receipt commitment is rejected.
 9. `cellc audit-bundle` (and the resulting ProofPlan + builder assumptions) can be generated and shows the above obligations as on-chain checked or builder-required.
 
 These 9 criteria are the **only** definition of "v0 success" for this skeleton.
@@ -115,6 +115,8 @@ novaseal-v0-mvp-skeleton/
 │   ├── wrong_signature_reject.json
 │   ├── replay_nonce_reject.json
 │   ├── expired_intent_reject.json
+│   ├── old_outpoint_index_mismatch_reject.json
+│   ├── old_outpoint_tx_hash_mismatch_reject.json
 │   ├── policy_hash_mismatch_reject.json
 │   └── receipt_hash_mismatch_reject.json
 └── proofs/
@@ -135,7 +137,7 @@ It becomes runtime-enforced **only** when:
 - Its hash/fields are explicitly asserted inside `nova_state_type` transition logic, **or**
 - The builder / test harness treats the receipt emission as a mandatory acceptance obligation (visible in ProofPlan + audit-bundle).
 
-In this skeleton, `nova_receipt_type.cell` is intentionally a stub. The primary enforcement path for v0 is (b) + (c): the state transition script checks `receipt_hash`, and the acceptance fixtures + ProofPlan make the obligation visible.
+In this skeleton, `nova_receipt_type.cell` is intentionally a stub. The primary enforcement path for v0 is (b) + (c): the state transition script checks the split-intent receipt commitment (`intent.expected_receipt_hash == hash_blake2b_packed(ProofReceiptCommitmentV0)`), and the acceptance fixtures, harnesses, and live devnet runner make the obligation visible.
 
 ### 2. BTC Signature Verifier is Part of the TCB
 The `nova_btc_authority_lock` delegates to a dedicated verifier binary via `spawn`.
@@ -154,7 +156,7 @@ For any real implementation the following MUST be specified before the verifier 
 
 Until the above is frozen in `schemas/` + a separate `novaseal_btc_verifier` spec, no production claim can be made.
 
-The `.cell` lock and state action now call `verifier::btc::bip340::require_signature(...)`; the compiler expands that generic verifier capability into the fixed 18-word spawn/IPC envelope and delegates to the `cellscript_btc_bip340_verifier_riscv` spawn verifier. The host verifier, no-std core, RISC-V shell, child-verifier `ckb-vm` harness, parent-lock `ckb-vm` harness, official resolved lock-group verifier, official full transaction script verifier, and local CKB contextual transaction verifier all check the same frozen BIP340 vector contract for the parent authority cases. The lock and state action also parse one shared witness ABI, and the combined harness now runs all six fixtures through both verifier layers with lock and type/action groups present, `Output#1` receipt materialisation, and fee/capacity/tx-size checks. The remaining real implementation work is Molecule/wallet signing alignment and later live-chain NovaSeal deployment evidence. The actual crypto still lives in the delegated verifier binary, so that binary remains a first-class TCB item.
+The `.cell` lock and state action now call `verifier::btc::bip340::require_signature(...)`; the compiler expands that generic verifier capability into the fixed 18-word spawn/IPC envelope and delegates to the `cellscript_btc_bip340_verifier_riscv` spawn verifier. The host verifier, no-std core, RISC-V shell, child-verifier `ckb-vm` harness, parent-lock `ckb-vm` harness, official resolved lock-group verifier, official full transaction script verifier, and local CKB contextual transaction verifier all check the same frozen BIP340 vector contract for the parent authority cases. The lock and state action also parse one shared witness ABI, and the combined harness now runs all eight fixtures through both verifier layers with lock and type/action groups present, `Output#1` receipt materialisation, and fee/capacity/tx-size checks. Core live devnet RPC evidence exists for bootstrap -> key-auth transition; the remaining real implementation work is Molecule/wallet signing alignment and public/shared deployment pinning. The actual crypto still lives in the delegated verifier binary, so that binary remains a first-class TCB item.
 
 ### 3. Schema / Molecule Alignment is a Hard Gate
 The three `.schema` files in this skeleton are the **source of truth** for on-chain layout.
@@ -198,9 +200,9 @@ entry = "src/nova_state_type.cell"
 3. **Source-unit visibility** in the audit-bundle already gives us hashes of all three files.
 
 **Why this matters for NovaSeal’s TCB**:
-The security-critical v0 logic (BTC key authorisation via `verifier::btc::bip340::require_signature(...)` + delegate to the external `cellscript_btc_bip340_verifier_riscv` verifier target) has crossed the parent/child CKB VM boundary, the official resolved lock-group verifier boundary, the official full transaction script verifier boundary, and the local CKB non-contextual + contextual transaction verifier stack for the combined six-fixture cases. The bundle sees the `btc_authority` lock, Script.args binding, generic BTC BIP340 verifier obligations, pipe/write/spawn/wait/close records, checked IPC envelope, checked exit status, and the manifest-bound spawn target. The no-std/RISC-V verifier shell executes the BIP340 decision against the frozen IPC vectors locally, through a child-verifier `ckb-vm` inherited-fd harness, and through a parent-lock `ckb-vm` harness that observes the compiler-lowered spawn/envelope/status path. The parent-lock harness also records transaction-shape facts and `ckb-script` verifier cycles for `cell_deps[0]`, parent lock dep, ScriptGroup shape, tx size, occupied capacity, under-capacity rejection, resolved lock-group verification, and full transaction script verification. The combined harness now runs all six fixtures through both verifier layers with lock and type/action groups present and `ProofReceiptV0` materialised as `Output#1`. Criterion 6 ("wrong BTC signature rejects") now has combined local node-verification-stack evidence; live-chain NovaSeal RPC submission remains a later deployment evidence layer.
+The security-critical v0 logic (BTC key authorisation via `verifier::btc::bip340::require_signature(...)` + delegate to the external `cellscript_btc_bip340_verifier_riscv` verifier target) has crossed the parent/child CKB VM boundary, the official resolved lock-group verifier boundary, the official full transaction script verifier boundary, and the local CKB non-contextual + contextual transaction verifier stack for the combined eight-fixture cases. The bundle sees the `btc_authority` lock, Script.args binding, generic BTC BIP340 verifier obligations, pipe/write/spawn/wait/close records, checked IPC envelope, checked exit status, and the manifest-bound spawn target. The no-std/RISC-V verifier shell executes the BIP340 decision against the frozen IPC vectors locally, through a child-verifier `ckb-vm` inherited-fd harness, and through a parent-lock `ckb-vm` harness that observes the compiler-lowered spawn/envelope/status path. The parent-lock harness also records transaction-shape facts and `ckb-script` verifier cycles for `cell_deps[0]`, parent lock dep, ScriptGroup shape, tx size, occupied capacity, under-capacity rejection, resolved lock-group verification, and full transaction script verification. The combined harness now runs all eight fixtures through both verifier layers with lock and type/action groups present and `ProofReceiptV0` materialised as `Output#1`. Criterion 6 ("wrong BTC signature rejects") now has combined local node-verification-stack evidence plus live devnet wrong-signature dry-run evidence; public/shared deployment pinning remains a later deployment evidence layer.
 
-The state transition side now has a separate CKB VM action harness: all six fixtures execute against `key_auth_transition` at type/action scope and match the expected type-layer result. Five of six also match the full fixture outcome directly; `wrong_signature_reject` is intentionally accepted at this layer because signature rejection belongs to `btc_authority`. The intent layout blocker found by the harness has been resolved at the `.cell`/schema boundary: canonical vectors and the compiled action ABI now both use `NovaSealIntentV0.old_cell: OutPoint` with the 213-byte packed shape.
+The state transition side now has a separate CKB VM action harness: all eight fixtures execute against `key_auth_transition` at type/action scope and match the expected type-layer result. Seven of eight also match the full fixture outcome directly; `wrong_signature_reject` is intentionally accepted at this layer because signature rejection belongs to `btc_authority`. The intent layout blocker found by the harness has been resolved at the `.cell`/schema boundary: canonical vectors and the compiled action ABI now both use `NovaSealSignedIntentV0 { core, expected_receipt_hash }` with the 254-byte packed shape.
 
 This is accurately reflected in `proofs/proofplan_mapping.json`. It is not a defect to hide — it is the current honest boundary of the tooling.
 
@@ -258,11 +260,11 @@ python3 scripts/novaseal_parent_lock_abi_preflight.py --pretty
 #     plus official ckb-script resolved lock-group verification
 cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_parent_lock_harness -- --pretty
 
-# 15. Build and run the state transition action in ckb-vm over all six fixtures
+# 15. Build and run the state transition action in ckb-vm over all eight fixtures
 /home/arthur/a19q3/CellScript/target/debug/cellc src/nova_state_type.cell --target riscv64-elf --target-profile ckb --entry-action key_auth_transition -o target/novaseal-state-type-action.elf
 cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_state_type_harness -- --pretty
 
-# 16. Run the combined six-fixture lock+type transaction verifier harness
+# 16. Run the combined eight-fixture lock+type transaction verifier harness
 cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_combined_tx_harness -- --pretty
 
 # 17. Run the deterministic fixture harness (source-model plus attached evidence)
@@ -274,7 +276,7 @@ cellc explain-assumptions --target-profile ckb
 cellc profile --target-profile ckb
 ```
 
-The value of this skeleton is **not** a complete working contract on day 1. The value is a package whose `audit-bundle` + hand-authored ProofPlan target + 6 fixtures can be reviewed by humans and machines against the 9 acceptance criteria above.
+The value of this skeleton is **not** a complete production contract on day 1. The value is a package whose `audit-bundle` + hand-authored ProofPlan target + eight fixtures + live local devnet evidence can be reviewed by humans and machines against the 9 acceptance criteria above.
 
 ---
 
@@ -287,10 +289,10 @@ Conservative, non-scope-creeping next slice priorities (in rough order):
 
 1. Preserve the generic verifier capability path: `verifier::btc::bip340::require_signature(...)` must continue lowering to `pipe`, `spawn_with_fd`, 18 `pipe_write` words, `fixed_u64_le(...)`, `close(write_fd)`, and `wait`. The low-level VM2 helper ecall blocker is closed, static spawn targets now have a strict `CellDep#0`/`code` manifest-bound builder model, and `spawn_with_fd(target, fd)` supplies a one-entry inherited-fd list to the child.
 2. Keep the lock path bound to the pinned `cellscript_btc_bip340_verifier_riscv` shell through the first `deploy.ckb.cell_deps` manifest entry, while keeping builder-required evidence honest.
-3. Freeze the three `.schema` files + publish the corresponding Molecule reference encoding and wallet signing vectors for the shared witness and `NovaSealIntentV0`.
-4. Preserve the current combined local CKB transaction verifier layer while adding live-chain NovaSeal RPC deployment evidence after signing/Molecule alignment is frozen.
+3. Freeze the three `.schema` files + publish the corresponding Molecule reference encoding and wallet signing vectors for the shared witness and `NovaSealSignedIntentV0`.
+4. Preserve the current combined local CKB transaction verifier layer and live local devnet stateful runner while adding public/shared deployment pinning after signing/Molecule alignment is frozen.
 5. Keep the materialised `ProofReceiptV0` output shape stable while adding Molecule and wallet signing vectors.
-6. Keep `NovaSealIntentV0.old_cell` schema/.cell alignment locked as `OutPoint`.
+6. Keep `NovaSealIntentCoreV0.old_cell` schema/.cell alignment locked as `OutPoint`.
 7. Only after the above items are closed: consider real Fiber admission tests and broader receipt history semantics.
 
 Do **not** add SPV, OP_RETURN, Fiber channel semantics, or any new protocol features in the next slice. The goal remains "make the audit surface honest and mechanically useful for what is already declared."

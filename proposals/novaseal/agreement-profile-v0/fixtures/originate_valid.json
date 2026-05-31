@@ -8,6 +8,6 @@
   "notes": [
     "Covered by scripts/nova_agreement_tx_shape_harness.py.",
     "Covered by harness/ckb_vm resolved transaction harness.",
-    "Production borrower/lender authority locks and live deployment evidence remain future work."
+    "Live local devnet evidence exists; public/shared deployment pinning and production borrower/lender authority lock review remain future work."
   ]
 }

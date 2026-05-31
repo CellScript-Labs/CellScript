@@ -1,6 +1,6 @@
 # NovaSeal v0 BTC Verifier Spec
 
-**Date**: 2026-05-30
+**Date**: 2026-05-31
 **Vector generator**: `scripts/novaseal_btc_verifier_vectors.py`
 **IPC generator**: `scripts/novaseal_btc_verifier_ipc_vectors.py`
 **Host verifier**: `verifier/novaseal_btc_verifier`
@@ -11,7 +11,7 @@
 **IPC report**: `target/novaseal-btc-verifier-ipc-vectors.json`
 **Child VM report**: `target/novaseal-ckb-vm-child-verifier-report.json`
 **Parent VM report**: `target/novaseal-parent-lock-ckb-vm-report.json`
-**Status**: reference vectors plus no-std/RISC-V verifier implementation plus child-verifier CKB VM, parent-lock CKB VM, official resolved lock-group verifier execution, and official full transaction script-verifier execution; no live-chain NovaSeal RPC submission evidence yet.
+**Status**: reference vectors plus no-std/RISC-V verifier implementation plus child-verifier CKB VM, parent-lock CKB VM, official resolved lock-group verifier execution, and official full transaction script-verifier execution; no public/shared deployment pinning evidence yet.
 
 This spec fixes the v0 MVP verifier shape to a single-key BIP340 Schnorr profile. ECDSA and multisig descriptors remain out of scope for this strict MVP slice.
 
@@ -52,35 +52,35 @@ cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_parent_lock_h
 Current summary:
 
 ```text
-positive=24
-negative=30
-positive_self_verified=24
-negative_self_rejected=30
-host_verifier_checked=54
-host_verifier_matched=54
-ipc_vectors=54
+positive=32
+negative=40
+positive_self_verified=32
+negative_self_rejected=40
+host_verifier_checked=72
+host_verifier_matched=72
+ipc_vectors=72
 malformed_ipc_vectors=5
-host_ipc_checked=59
-host_ipc_matched=59
+host_ipc_checked=77
+host_ipc_matched=77
 core_riscv_check=passed
 riscv_shell_build=passed
-riscv_shell_accepted=24
-riscv_shell_rejected=35
-riscv_shell_matched_expected=59
-child_vm_checked=59
-child_vm_matched_expected=59
-child_vm_max_cycles=3487024
+riscv_shell_accepted=32
+riscv_shell_rejected=45
+riscv_shell_matched_expected=77
+child_vm_checked=77
+child_vm_matched_expected=77
+child_vm_max_cycles=3552601
 parent_lock_ckb_vm_executed=true
 parent_spawn_executed=true
 parent_vm_matched_expected=3
-parent_vm_max_cycles=24949
+parent_vm_max_cycles=48060
 parent_resolved_script_verifier_matched_expected=true
-parent_resolved_script_verifier_max_cycles=3678905
+parent_resolved_script_verifier_max_cycles=3768400
 parent_full_transaction_verifier_matched_expected=true
-parent_full_transaction_verifier_max_cycles=3678905
+parent_full_transaction_verifier_max_cycles=3768400
 ```
 
-The positive set contains 4 deterministic test signers for each of the 6 fixtures.
+The positive set contains 4 deterministic test signers for each of the 8 fixtures.
 
 The negative set contains 5 mutations per fixture:
 
@@ -122,6 +122,6 @@ This does not yet prove criterion 6 on chain:
 - the current CellScript VM2 spawn helper emits executable VM2 `ecall` wrappers and static spawn targets have a strict first-CellDep `code` manifest-bound builder model; the NovaSeal lock uses `spawn_with_fd` and the fixed 18-word IPC envelope,
 - the Rust verifier is implemented in the shared no-std core and reused by the host verifier and RISC-V shell; the staged child ELF now executes in CKB VM with harness-provided inherited-fd input,
 - resolved lock-group and full transaction script-verifier evidence now record `cell_deps[0]`, parent lock dep, lock ScriptGroup shape, tx size, occupied capacity, under-capacity shape rejection, and `ckb-script` verifier cycles for the three parent authority cases,
-- no live-chain NovaSeal RPC submission exists; six-fixture combined transaction verifier evidence is harness-level only.
+- no public/shared deployment pinning exists; eight-fixture combined transaction verifier evidence is harness-level only.
 
-The next implementation slice should turn the current full transaction script-verifier execution into live-chain NovaSeal RPC submission evidence without pretending that harness-level VM success alone is production coverage.
+The next implementation slice should turn the current full transaction script-verifier execution into public/shared deployment pinning evidence without pretending that harness-level VM success alone is production coverage.

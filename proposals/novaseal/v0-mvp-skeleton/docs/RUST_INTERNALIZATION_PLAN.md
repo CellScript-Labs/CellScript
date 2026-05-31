@@ -471,14 +471,13 @@ Its lock should become smaller and protocol-specific:
 lock btc_authority(
     protected cell: NovaSealCellV0,
     lock_args expected_btc_authority_hash: Hash,
-    witness intent: NovaSealIntentV0,
-    witness receipt_hash: Hash,
+    witness intent: NovaSealSignedIntentV0,
     witness state_hash_commitment: Hash,
     witness sig: SignaturePayload
 ) -> bool {
-    let digest = compute_intent_hash(&intent)
+    let digest = hash_blake2b_packed(intent)
     require expected_btc_authority_hash == cell.btc_authority_hash
-    require intent.policy_hash == cell.policy_hash
+    require intent.core.policy_hash == cell.policy_hash
     verifier::btc::bip340::require_signature(digest, sig.pubkey, sig.signature)
     true
 }
@@ -564,9 +563,10 @@ generic BTC helper.
 
 Acceptance:
 
-- `cellc check --target-profile ckb --primitive-strict 0.16` passes;
+- `cellc check --target-profile ckb` passes;
+- `cellc check --target-profile ckb --primitive-strict 0.16` does not claim package readiness until the current generated output/resource ProofPlan gaps are closed;
 - NovaSeal audit bundle shows `verifier:btc-bip340:*` ProofPlan records;
-- combined six-fixture lock+type harness still accepts 1 and rejects 5;
+- combined eight-fixture lock+type harness still accepts 1 and rejects 7;
 - max cycle regression is recorded and explained.
 
 ### Phase 4: Retire Proposal-Owned Rust Verifier Crates
@@ -618,7 +618,7 @@ Internalization is not production readiness. Production claims still require:
 1. live/full-node or accepted dry-run evidence;
 2. deployment identity for the BTC verifier cell dep;
 3. stable Molecule/wallet signing vectors;
-4. live-chain NovaSeal RPC submission evidence for the materialised receipt output
+4. public/shared deployment pinning evidence for the materialised receipt output
    shape;
 5. artifact hash and source hash provenance;
 6. external review of the BTC verifier TCB;

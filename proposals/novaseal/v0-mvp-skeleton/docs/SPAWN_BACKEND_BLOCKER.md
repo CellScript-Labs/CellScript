@@ -1,10 +1,10 @@
 # NovaSeal v0 Spawn Backend Blocker
 
-**Date**: 2026-05-30
+**Date**: 2026-05-31
 **Report**: `target/novaseal-spawn-backend-probe.json`
-**Status**: source-level verifier calls, spawn/pipe lowering, and VM2 syscall helpers now emit executable `ecall` wrappers. The compiler now has a strict manifest-bound `CellDep#0`/`code` model for static spawn targets, including structured transaction/evidence checks for the first CellDep name, `dep_type`, and any manifest-pinned out-point/hash fields. The generic `verifier::btc::bip340::require_signature(...)` helper lowers to the fixed 18-word IPC envelope, a one-fd `spawn_with_fd` call, checked envelope emission, checked child exit status, and the `cellscript_btc_bip340_verifier_riscv` spawn target. Parent/child CKB VM, official resolved lock-group verifier evidence, official full transaction script-verifier evidence, checked `ProofReceiptV0` output materialisation, and combined six-fixture transaction verifier evidence with cycle/tx-size/capacity measurements now pass through the local CKB `ckb-verification` non-contextual + contextual stack. The remaining production limit is NovaSeal-specific live-chain RPC submission/dep-liveness evidence, not the compiler spawn backend.
+**Status**: source-level verifier calls, spawn/pipe lowering, and VM2 syscall helpers now emit executable `ecall` wrappers. The compiler now has a strict manifest-bound `CellDep#0`/`code` model for static spawn targets, including structured transaction/evidence checks for the first CellDep name, `dep_type`, and any manifest-pinned out-point/hash fields. The generic `verifier::btc::bip340::require_signature(...)` helper lowers to the fixed 18-word IPC envelope, a one-fd `spawn_with_fd` call, checked envelope emission, checked child exit status, and the `cellscript_btc_bip340_verifier_riscv` spawn target. Parent/child CKB VM, official resolved lock-group verifier evidence, official full transaction script-verifier evidence, materialized `ProofReceiptV0` output evidence, combined eight-fixture transaction verifier evidence, and live local devnet RPC evidence now exist. The remaining production limit is public/shared CellDep deployment pinning plus Molecule/wallet signing alignment, not the compiler spawn backend.
 
-This is no longer the parent/child VM execution blocker. A source-level verifier spawn without a matching first `Cell.toml [[deploy.ckb.cell_deps]]` entry with `dep_type = "code"` still strict-fails; the current manifest binding makes the target builder-required, and BTC authorisation now has local CKB node-verification-stack evidence for all six combined fixtures.
+This is no longer the parent/child VM execution blocker. A source-level verifier spawn without a matching first `Cell.toml [[deploy.ckb.cell_deps]]` entry with `dep_type = "code"` still strict-fails; the current manifest binding makes the target builder-required, and BTC authorisation now has local CKB node-verification-stack evidence for all eight combined fixtures.
 
 ## Command
 
@@ -44,13 +44,13 @@ combined_ckb_node_verification_stack_verified=true
 
 ## Consequence for NovaSeal
 
-The next implementation slice should not widen the lock protocol again. The lock and state package surface now call `verifier::btc::bip340::require_signature(...)`; the compiler lowers that generic helper to `spawn_with_fd`, the fixed 18-word IPC envelope, and the manifest-bound `cellscript_btc_bip340_verifier_riscv` target. The next risk is live-chain NovaSeal deployment evidence and Molecule/wallet signing alignment, not another NovaSeal-specific verifier namespace.
+The next implementation slice should not widen the lock protocol again. The lock and state package surface now call `verifier::btc::bip340::require_signature(...)`; the compiler lowers that generic helper to `spawn_with_fd`, the fixed 18-word IPC envelope, and the manifest-bound `cellscript_btc_bip340_verifier_riscv` target. The next risks are strict generated output/resource ProofPlan closure, public/shared deployment pinning, and Molecule/wallet signing alignment, not another NovaSeal-specific verifier namespace.
 
 The correct order is:
 
 1. Keep unmanifested spawn targets strict-failing and keep manifest-bound targets builder-required until builder evidence is supplied.
 2. Preserve the passing parent/child CKB VM, official resolved lock-group evidence, and official full transaction script-verifier evidence.
 3. Preserve the combined harness measurements for cycles, occupied capacity, transaction size, under-capacity rejection, and local CKB contextual verifier acceptance.
-4. Add NovaSeal-specific live full-node RPC submission/dep-liveness evidence only after the signing/Molecule preimage is frozen.
+4. Preserve the live local devnet RPC runner, then add public/shared deployment pinning only after the signing/Molecule preimage is frozen.
 
 It is tempting to write the pretty lock code first. Tempting, and exactly the sort of thing that later requires a very expensive apology.

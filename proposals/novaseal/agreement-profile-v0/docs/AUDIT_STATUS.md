@@ -12,8 +12,8 @@ transaction verifier evidence, and live devnet lifecycle evidence.
 | --- | --- |
 | `cellc check --target-profile ckb` | passed |
 | `cellc audit-bundle --target-profile ckb --json` | passed |
-| `cellc explain-assumptions --target-profile ckb` | passed; ProofPlan soundness passed |
-| `cellc check --target-profile ckb --primitive-strict 0.16` | passed |
+| `cellc explain-assumptions --target-profile ckb` | passed; runtime-required ProofPlan records remain visible |
+| `cellc check --target-profile ckb --primitive-strict 0.16` | fails on generated ProofPlan strictness |
 | `cellc src/nova_agreement_lifecycle_type.cell --target riscv64-asm --target-profile ckb --entry-action nova_agreement_lifecycle` | passed |
 | `python3 scripts/nova_agreement_tx_shape_harness.py --pretty` | passed; 8/8 expectations matched |
 | `cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_agreement_tx_harness -- --pretty` | passed; 20/20 script-layer and node-verifier expectations matched |
@@ -23,9 +23,14 @@ Generated audit surface:
 
 - actions: 3
 - locks: 0
-- source units: 2
-- ProofPlan records: 71
-- builder assumptions: 21
+- source units: 3
+- ProofPlan records: 140
+- builder assumptions: 85
+
+Primitive-strict 0.16 is not clean for this profile yet. The strict failure is
+generated-audit hygiene around runtime-required output/verifier records, not a
+live devnet lifecycle failure. Current executable evidence is the resolved
+transaction harness plus the live devnet lifecycle runner.
 
 ## Commands
 
@@ -33,6 +38,7 @@ Generated audit surface:
 /home/arthur/a19q3/CellScript/target/debug/cellc check --target-profile ckb
 /home/arthur/a19q3/CellScript/target/debug/cellc audit-bundle --target-profile ckb --json
 /home/arthur/a19q3/CellScript/target/debug/cellc explain-assumptions --target-profile ckb
+# Expected to fail until generated ProofPlan strict gaps are closed:
 /home/arthur/a19q3/CellScript/target/debug/cellc check --target-profile ckb --primitive-strict 0.16
 python3 scripts/nova_agreement_tx_shape_harness.py --pretty
 /home/arthur/a19q3/CellScript/target/debug/cellc src/nova_agreement_type.cell --target riscv64-elf --target-profile ckb --entry-action originate_agreement -o target/nova-agreement-originate-action.elf
@@ -53,8 +59,8 @@ python3 /home/arthur/a19q3/CellScript/scripts/novaseal_agreement_devnet_stateful
 | Repay before expiry | implemented | source-guard-present |
 | Claim after expiry | implemented | source-guard-present |
 | Stable lifecycle type-script identity | implemented | source-guard-present |
-| Receipt output materialization | implemented | generated-audit-covered |
-| Terminal AgreementCell resource transition soundness | implemented | generated-audit-covered |
+| Receipt output materialization | implemented | resolved-transaction-covered + live-devnet-covered |
+| Terminal AgreementCell resource transition soundness | implemented | source + resolved transaction + live devnet; strict generated gap remains |
 | Executable fixture shape harness | implemented | local-transaction-shape-covered |
 | Legacy per-action CKB VM fixture harness | superseded | legacy-action-harness-superseded |
 | Resolved transaction verifier harness | implemented | resolved-transaction-covered |

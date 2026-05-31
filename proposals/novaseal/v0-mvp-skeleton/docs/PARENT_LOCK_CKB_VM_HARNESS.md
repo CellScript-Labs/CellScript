@@ -56,10 +56,10 @@ rejected=2
 matched_expected=3
 mismatched=0
 parent_max_cycles=24949
-child_max_cycles=3487024
-resolved_script_verifier_max_cycles=3678905
-full_transaction_verifier_max_cycles=3678905
-max_consensus_tx_size_bytes=850
+child_max_cycles=3552593
+resolved_script_verifier_max_cycles=3768400
+full_transaction_verifier_max_cycles=3768400
+max_consensus_tx_size_bytes=859
 max_output_occupied_capacity_shannons=21900000000
 min_capacity_margin_shannons=10000000000
 capacity_shape_checks_passed=true
@@ -76,11 +76,11 @@ Cases:
 
 This is stronger than child-only evidence because the parent lock now constructs the IPC envelope, calls VM2 spawn, waits for the child, observes the child exit status, and the official `ckb-script` lock-group and full transaction script verifiers match the expected result for the three authority cases.
 
-The parent lock now parses the same 389-byte `CSARGv1` witness payload shape as the state action: `intent`, `receipt_hash`, `state_hash_commitment`, then `SignaturePayload`. The extra state/receipt fields are ignored by the lock, but they remove the former witness-format split between lock and type/action execution.
+The parent lock now parses the same 398-byte `CSARGv1` witness payload shape as the state action: `NovaSealSignedIntentV0`, `state_hash_commitment`, then `SignaturePayload`. The signed intent already contains `expected_receipt_hash`; the lock ignores the state commitment, but the shared payload removes the former witness-format split between lock and type/action execution.
 
 It is still not production acceptance evidence:
 
-- official `ckb-script` full transaction script verification is executed for the three parent authority cases, but not a live-chain NovaSeal RPC submission flow,
+- official `ckb-script` full transaction script verification is executed for the three parent authority cases, but not a public/shared deployment pinning flow,
 - the resolved transaction is harness-constructed and not yet produced by a production builder,
 - capacity, occupied-capacity, tx-size, and under-capacity rejection are still shape-level measurements,
-- the six transition fixtures are still model-level, not full parent-lock transaction runs.
+- the eight transition fixtures are still model-level, not full parent-lock transaction runs.

@@ -25,8 +25,8 @@ Implemented in this slice:
 | `repay_before_expiry` | compiles | source-guard-present |
 | `claim_after_expiry` | compiles | source-guard-present |
 | `nova_agreement_lifecycle` stable type entry | compiles | source-guard-present |
-| Receipt output materialization | implemented | generated-audit-covered |
-| Primitive-strict 0.16 | passes | generated-audit-covered |
+| Receipt output materialization | implemented | resolved-transaction-covered + live-devnet-covered |
+| Primitive-strict 0.16 | fails on generated ProofPlan strictness | strict-generated-gap |
 | Fixture shape harness | implemented | local-transaction-shape-covered |
 | Legacy per-action CKB VM harness | superseded | legacy-action-harness-superseded |
 | Resolved transaction harness | implemented | resolved-transaction-covered |
@@ -96,6 +96,7 @@ alignment remains future work.
 /home/arthur/a19q3/CellScript/target/debug/cellc check --target-profile ckb
 /home/arthur/a19q3/CellScript/target/debug/cellc audit-bundle --target-profile ckb --json
 /home/arthur/a19q3/CellScript/target/debug/cellc explain-assumptions --target-profile ckb
+# Expected to fail until generated ProofPlan strict gaps are closed:
 /home/arthur/a19q3/CellScript/target/debug/cellc check --target-profile ckb --primitive-strict 0.16
 python3 scripts/nova_agreement_tx_shape_harness.py --pretty
 /home/arthur/a19q3/CellScript/target/debug/cellc src/nova_agreement_type.cell --target riscv64-elf --target-profile ckb --entry-action originate_agreement -o target/nova-agreement-originate-action.elf
@@ -107,8 +108,9 @@ cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_agreement_tx_
 /home/arthur/a19q3/CellScript/scripts/novaseal_devnet_stateful_acceptance.sh --pretty --report-only
 ```
 
-Latest local result: all CellScript commands pass. The generated audit bundle
-reports 3 actions, 0 locks, 2 source units, 71 ProofPlan records, and 21 builder
+Latest local result: non-strict CellScript commands pass; primitive-strict 0.16
+currently fails on generated ProofPlan strictness around output/runtime records.
+The generated audit bundle reports 3 actions, 0 locks, 3 source units, 140 ProofPlan records, and 85 builder
 assumptions. The local transaction-shape harness reports 8/8 fixture
 expectations matched: 3 accepted shapes and 5 rejected shapes. The resolved
 transaction harness reports 20/20 script-layer expectations matched and 20/20

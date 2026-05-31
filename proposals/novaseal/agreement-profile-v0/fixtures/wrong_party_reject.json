@@ -8,5 +8,5 @@
     "actor_authority_hash == active.borrower_authority_hash",
     "actor_authority_hash == active.lender_authority_hash"
   ],
-  "description": "Borrower-only repay and lender-only default claim are encoded as explicit actor hash guards. Cryptographic authority lock is future work."
+  "description": "Borrower-only repay and lender-only default claim are encoded as explicit actor hash guards. BTC actor signatures are covered by resolved/live evidence; production authority-lock review remains future work."
 }
