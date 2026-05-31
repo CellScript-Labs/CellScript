@@ -1,36 +1,30 @@
-# NovaSealIntentV0 - Source of Truth Schema (v0 MVP)
+# NovaSeal intent schemas - Source of Truth Schema (v0 MVP)
 #
-# This is the exact structure that a BTC key or multisig signs.
-# The hash of this structure (after canonical encoding) is what the
-# BTC signature is taken over.
-#
-# Domain separation prefix: "NovaSealIntentV0" (exact bytes, no null terminator).
+# NovaSeal v0 splits the signed object to avoid an intent/receipt hash cycle.
+# `NovaSealIntentCoreV0` is the semantic transition intent. A BTC signer signs
+# `NovaSealSignedIntentV0`, which binds the core intent to the receipt
+# commitment expected from this exact transition.
 
-domain: Byte32                  # First 32 bytes of blake2b("NovaSealIntentV0") or the literal tag.
-
-action: u8                      # ActionKind enum (Transfer, RotateAuthority, UpdateState, etc.)
-                                # Exact values to be enumerated in a later governance doc.
-
-old_cell: OutPoint              # CKB OutPoint (tx_hash + index) of the cell being spent.
-                                # Provides single-use binding at the CKB layer.
-
+NovaSealIntentCoreV0:
+protocol_id: Byte32
+package_hash: Byte32
+policy_hash: Byte32
+action: u8
+terminal_path: u8
+old_cell: OutPoint
 old_state_hash: Byte32
 new_state_hash: Byte32
+old_nonce: u64
+new_nonce: u64
+expiry: u64
 
-policy_hash: Byte32             # Must match the cell's current policy_hash.
+NovaSealSignedIntentV0:
+core: NovaSealIntentCoreV0
+expected_receipt_hash: Byte32
 
-receipt_hash: Byte32            # Hash of the ProofReceipt commitment that this transition is obligated to emit.
-                                # v0 candidate rule: hash the ProofReceiptV0 commitment preimage
-                                # excluding intent_hash; see docs/RECEIPT_COMMITMENT_SPEC.md.
-                                # The type script will assert equality.
-
-nonce: u64                      # Must be exactly old_cell.nonce + 1.
-
-expiry: u64                     # Must be >= the time/epoch at which the transaction is mined.
-
-# Canonical encoding for signing (MUST be identical in three places):
-# 1. Off-chain BTC wallet / PSBT construction
-# 2. nova_btc_authority_lock.cell (compute_intent_hash)
-# 3. The external novaseal_btc_verifier binary
+# Canonical digest rule:
+# hash_blake2b_packed(value) =
+#   blake2b-256("CellScriptPackedHashV0\0" || canonical_type_name || "\0" ||
+#               u32_le(byte_len) || packed_bytes)
 #
-# Any mismatch = signature verification failures in the wild.
+# The BTC verifier receives hash_blake2b_packed(NovaSealSignedIntentV0).

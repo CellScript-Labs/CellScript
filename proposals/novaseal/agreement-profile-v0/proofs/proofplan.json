@@ -55,7 +55,7 @@
         "borrower_actor_guard",
         "status_active_to_repaid",
         "nonce_increment",
-        "receipt_root_update",
+        "latest_receipt_hash_update",
         "repayment_terminal_amount_principal_plus_fee",
         "repayment_receipt_output"
       ],
@@ -75,7 +75,7 @@
         "expired_repay_reject",
         "wrong_borrower_actor_reject",
         "nonce_mismatch_reject",
-        "receipt_root_mismatch_reject",
+        "latest_receipt_hash_mismatch_reject",
         "preserved_field_mutation_reject"
       ],
       "resolved_transaction_checked": [
@@ -83,7 +83,7 @@
         "expired_repay_reject",
         "wrong_party_reject:repay_wrong_party",
         "nonce_mismatch_reject",
-        "receipt_root_mismatch_reject",
+        "latest_receipt_hash_mismatch_reject",
         "preserved_field_mutation_reject",
         "under_capacity_reject_node_contextual_reject"
       ],
@@ -99,7 +99,7 @@
         "lender_actor_guard",
         "status_active_to_defaulted",
         "nonce_increment",
-        "receipt_root_update",
+        "latest_receipt_hash_update",
         "claim_terminal_amount_locked_collateral",
         "default_receipt_output"
       ],

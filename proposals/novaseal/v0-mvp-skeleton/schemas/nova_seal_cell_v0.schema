@@ -22,8 +22,9 @@ policy_hash: Byte32             # Hash of the governing CellScript package + ent
                                 # that define the allowed state machine for this cell.
                                 # Must be preserved across transitions (see invariant).
 
-receipt_root: Byte32            # Root (or rolling hash) of the ProofReceipt chain emitted
-                                # by transitions on this lineage.
+latest_receipt_hash: Byte32     # Hash of the receipt commitment for the current
+                                # successful transition. This is not a rolling root
+                                # or historical accumulator in v0.
 
 nonce: u64                      # Strictly monotonic replay protection counter.
                                 # Must increment by exactly 1 on every successful transition.
@@ -31,6 +32,14 @@ nonce: u64                      # Strictly monotonic replay protection counter.
 expiry: u64                     # Absolute or relative time/epoch bound after which
                                 # no further transitions using this cell are valid.
                                 # Interpretation (block number vs timestamp) is profile-dependent.
+
+NovaSealCellCommitmentV0:
+version: u16
+btc_authority_hash: Byte32
+state_hash: Byte32
+policy_hash: Byte32
+nonce: u64
+expiry: u64
 
 # v0 MVP deliberately does NOT contain:
 # - explicit seal_mode (added in later profiles)

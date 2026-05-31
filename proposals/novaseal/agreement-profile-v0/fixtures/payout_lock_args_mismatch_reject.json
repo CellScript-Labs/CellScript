@@ -1,0 +1,9 @@
+{
+  "schema": "novaseal-agreement-fixture-v0.1",
+  "fixture": "payout_lock_args_mismatch_reject",
+  "action": "repay_before_expiry",
+  "expected": "rejected",
+  "coverage": "source-guard-present + action-ckb-vm-covered + resolved-transaction-covered",
+  "reject_guard": "ckb::cell_lock_args32(payout_output) == recipient_authority_hash",
+  "description": "A typed CKB payout output must lock to the authority hash committed by the agreement."
+}

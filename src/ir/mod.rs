@@ -503,6 +503,7 @@ pub struct IrGenerator {
     flow_states: HashMap<String, Vec<String>>,
     flow_state_fields: HashMap<String, String>,
     flow_rules: HashMap<String, Vec<IrFlowRule>>,
+    type_field_order: HashMap<String, Vec<String>>,
     enum_variants: HashMap<String, HashMap<String, u64>>,
     constants: HashMap<String, (Type, Expr)>,
     function_effects: HashMap<String, EffectClass>,
@@ -543,6 +544,7 @@ impl IrGenerator {
             flow_states: HashMap::new(),
             flow_state_fields: HashMap::new(),
             flow_rules: HashMap::new(),
+            type_field_order: HashMap::new(),
             enum_variants: HashMap::new(),
             constants: HashMap::new(),
             function_effects: HashMap::new(),
@@ -565,6 +567,7 @@ impl IrGenerator {
         type_kinds: HashMap<String, IrTypeKind>,
         receipt_claim_outputs: HashMap<String, Option<IrType>>,
         flow_states: HashMap<String, Vec<String>>,
+        type_field_order: HashMap<String, Vec<String>>,
         external_function_effects: HashMap<String, EffectClass>,
         external_function_return_types: HashMap<String, Option<IrType>>,
     ) -> Self {
@@ -572,6 +575,7 @@ impl IrGenerator {
         generator.type_kinds.extend(type_kinds);
         generator.receipt_claim_outputs.extend(receipt_claim_outputs);
         generator.flow_states.extend(flow_states);
+        generator.type_field_order.extend(type_field_order);
         generator.external_function_effects = external_function_effects;
         generator.external_function_return_types = external_function_return_types;
         generator
@@ -585,6 +589,7 @@ impl IrGenerator {
             match item {
                 Item::Resource(r) => {
                     self.type_kinds.insert(r.name.clone(), IrTypeKind::Resource);
+                    self.type_field_order.insert(r.name.clone(), r.fields.iter().map(|field| field.name.clone()).collect());
                     self.type_fields.insert(
                         r.name.clone(),
                         r.fields.iter().map(|field| (field.name.clone(), Self::convert_type(&field.ty))).collect(),
@@ -592,6 +597,7 @@ impl IrGenerator {
                 }
                 Item::Shared(s) => {
                     self.type_kinds.insert(s.name.clone(), IrTypeKind::Shared);
+                    self.type_field_order.insert(s.name.clone(), s.fields.iter().map(|field| field.name.clone()).collect());
                     self.type_fields.insert(
                         s.name.clone(),
                         s.fields.iter().map(|field| (field.name.clone(), Self::convert_type(&field.ty))).collect(),
@@ -600,6 +606,7 @@ impl IrGenerator {
                 Item::Receipt(r) => {
                     self.type_kinds.insert(r.name.clone(), IrTypeKind::Receipt);
                     self.receipt_claim_outputs.insert(r.name.clone(), r.claim_output.as_ref().map(Self::convert_type));
+                    self.type_field_order.insert(r.name.clone(), r.fields.iter().map(|field| field.name.clone()).collect());
                     self.type_fields.insert(
                         r.name.clone(),
                         r.fields.iter().map(|field| (field.name.clone(), Self::convert_type(&field.ty))).collect(),
@@ -607,6 +614,7 @@ impl IrGenerator {
                 }
                 Item::Struct(s) => {
                     self.type_kinds.insert(s.name.clone(), IrTypeKind::Struct);
+                    self.type_field_order.insert(s.name.clone(), s.fields.iter().map(|field| field.name.clone()).collect());
                     self.type_fields.insert(
                         s.name.clone(),
                         s.fields.iter().map(|field| (field.name.clone(), Self::convert_type(&field.ty))).collect(),
@@ -2380,6 +2388,9 @@ impl IrGenerator {
         if left_ty == right_ty {
             return (left, right);
         }
+        if matches!(op, BinaryOp::Eq | BinaryOp::Ne) && Self::ir_hash_byte32_types_compatible(&left_ty, &right_ty) {
+            return (left, right);
+        }
         if matches!(op, BinaryOp::Add | BinaryOp::Sub) && left_ty == IrType::U128 && right_ty == IrType::U64 {
             return (left, right);
         }
@@ -2480,6 +2491,13 @@ impl IrGenerator {
                 }
             }
         }
+    }
+
+    fn ir_hash_byte32_types_compatible(left: &IrType, right: &IrType) -> bool {
+        matches!(
+            (left, right),
+            (IrType::Hash, IrType::Array(inner, 32)) | (IrType::Array(inner, 32), IrType::Hash) if **inner == IrType::U8
+        )
     }
 
     fn binary_result_type(&self, op: BinaryOp, left: &IrOperand, right: &IrOperand) -> IrType {
@@ -4307,7 +4325,8 @@ impl IrGenerator {
     ) -> LoweredExpr {
         let aggregate = self.new_var("struct_tmp", IrType::Named(init.ty.clone()));
         let mut field_map = HashMap::new();
-        let mut tuple_operands = Vec::new();
+        let mut tuple_operands_by_name = HashMap::new();
+        let mut fallback_tuple_operands = Vec::new();
         let mut active = current;
 
         for (field_name, field_expr) in &init.fields {
@@ -4327,11 +4346,21 @@ impl IrGenerator {
                 IrOperand::Const(value) => Self::const_type(value),
             };
             let field_var = self.new_var(format!("{}_{}", init.ty, field_name), field_ty);
-            tuple_operands.push(lowered.operand.clone());
+            let source_operand = lowered.operand.clone();
             self.block_mut(blocks, active).instructions.push(IrInstruction::Move { dest: field_var.clone(), src: lowered.operand });
+            self.copy_aggregate_metadata(&source_operand, field_var.id);
+            tuple_operands_by_name.insert(field_name.clone(), source_operand.clone());
+            fallback_tuple_operands.push(source_operand);
             field_map.insert(field_name.clone(), field_var);
         }
 
+        let tuple_operands = self
+            .type_field_order
+            .get(&init.ty)
+            .and_then(|order| {
+                order.iter().map(|field_name| tuple_operands_by_name.get(field_name).cloned()).collect::<Option<Vec<_>>>()
+            })
+            .unwrap_or(fallback_tuple_operands);
         self.block_mut(blocks, active).instructions.push(IrInstruction::Tuple { dest: aggregate.clone(), fields: tuple_operands });
         self.aggregate_fields.insert(aggregate.id, field_map);
         LoweredExpr { operand: IrOperand::Var(aggregate), current: Some(active) }
@@ -4866,6 +4895,51 @@ impl IrGenerator {
                     });
                     Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(current) })
                 }
+                "ckb::input_previous_tx_hash" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__ckb_input_previous_tx_hash",
+                    "ckb_input_previous_tx_hash",
+                    IrType::Hash,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "ckb::input_previous_index" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__ckb_input_previous_index",
+                    "ckb_input_previous_index",
+                    IrType::U32,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "ckb::cell_capacity" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__ckb_cell_capacity",
+                    "ckb_cell_capacity",
+                    IrType::U64,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "ckb::cell_data_hash" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__ckb_cell_data_hash",
+                    "ckb_cell_data_hash",
+                    IrType::Hash,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "ckb::cell_lock_args32" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__ckb_cell_lock_args32",
+                    "ckb_cell_lock_args32",
+                    IrType::Hash,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
                 "source::input" if call.args.len() == 1 => self.lower_simple_runtime_call(
                     "__ckb_source_input",
                     "source_input",
@@ -5047,6 +5121,24 @@ impl IrGenerator {
                 "hash_blake2b" if call.args.len() == 1 => self.lower_simple_runtime_call(
                     "__ckb_hash_blake2b",
                     "hash_blake2b",
+                    IrType::Hash,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "hash_blake2b_packed" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__ckb_hash_blake2b_packed",
+                    "hash_blake2b_packed",
+                    IrType::Hash,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "ckb::hash_data_packed" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__ckb_hash_data_packed",
+                    "ckb_hash_data_packed",
                     IrType::Hash,
                     &call.args,
                     current,
@@ -7193,6 +7285,7 @@ fn generate_with_resolver_inner(
     let mut type_kinds = HashMap::new();
     let mut receipt_claim_outputs = HashMap::new();
     let mut flow_states = HashMap::new();
+    let mut type_field_order = HashMap::new();
     let mut external_type_defs = Vec::new();
     let mut external_type_names = HashSet::new();
     let mut external_callable_abis = Vec::new();
@@ -7219,6 +7312,9 @@ fn generate_with_resolver_inner(
                 }
                 if let Some(fields) = resolver_type_fields_to_ir(&type_def) {
                     type_fields.insert(local_name.clone(), fields);
+                }
+                if let Some(order) = resolver_type_field_order(&type_def) {
+                    type_field_order.insert(local_name.clone(), order);
                 }
                 if external_type_names.insert(local_name.clone()) {
                     if let Some(ir_type_def) = resolver_type_def_to_ir(&local_name, &type_def) {
@@ -7247,6 +7343,7 @@ fn generate_with_resolver_inner(
         type_kinds,
         receipt_claim_outputs,
         flow_states,
+        type_field_order,
         external_function_effects,
         external_function_return_types,
     );
@@ -7816,6 +7913,18 @@ fn resolver_type_fields_to_ir(type_def: &TypeDef) -> Option<HashMap<String, IrTy
     };
 
     Some(fields.iter().map(|field| (field.name.clone(), ast_type_to_ir_type(&field.ty))).collect())
+}
+
+fn resolver_type_field_order(type_def: &TypeDef) -> Option<Vec<String>> {
+    let fields = match type_def {
+        TypeDef::Resource(resource) => &resource.fields,
+        TypeDef::Shared(shared) => &shared.fields,
+        TypeDef::Receipt(receipt) => &receipt.fields,
+        TypeDef::Struct(struct_def) => &struct_def.fields,
+        TypeDef::Enum(_) => return None,
+    };
+
+    Some(fields.iter().map(|field| field.name.clone()).collect())
 }
 
 fn resolver_type_def_to_ir(local_name: &str, type_def: &TypeDef) -> Option<IrTypeDef> {

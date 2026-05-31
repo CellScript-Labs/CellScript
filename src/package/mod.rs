@@ -150,6 +150,14 @@ pub struct CkbCellDepConfig {
     #[serde(default)]
     pub name: Option<String>,
     #[serde(default)]
+    pub role: Option<String>,
+    #[serde(default)]
+    pub verifier_id: Option<String>,
+    #[serde(default)]
+    pub ipc_abi: Option<String>,
+    #[serde(default)]
+    pub artifact_hash: Option<String>,
+    #[serde(default)]
     pub out_point: Option<String>,
     #[serde(default)]
     pub tx_hash: Option<String>,

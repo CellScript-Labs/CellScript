@@ -39,33 +39,42 @@ BASELINE = {
         "btc_authority_hash": "0xauthority",
         "state_hash": "0xstate-old",
         "policy_hash": "0xpolicy",
-        "receipt_root": "0xreceipt-root",
+        "latest_receipt_hash": "0xreceipt-root",
         "nonce": 42,
         "expiry": 999_999,
     },
     "intent": {
-        "domain": "0xnovaseal-domain",
+        "protocol_id": "0xnovaseal-domain",
+        "package_hash": "0xpackage",
         "action": 1,
+        "terminal_path": 0,
         "old_cell": "0xoutpoint",
         "old_state_hash": "0xstate-old",
         "new_state_hash": "0xstate-new",
         "policy_hash": "0xpolicy",
-        "receipt_hash": "0xreceipt",
-        "nonce": 43,
+        "expected_receipt_hash": "0xreceipt",
+        "old_nonce": 42,
+        "new_nonce": 43,
         "expiry": 1_000,
     },
     "current_timepoint": 200,
+    "actual_old_cell": "0xoutpoint",
     "btc_signature": "valid (source-model delegate success)",
 }
 
 REQUIRED_SOURCE_SNIPPETS = [
-    "let actual_state_hash_commitment = hash_blake2b(intent.new_state_hash)",
-    "require intent.old_state_hash == old_cell.state_hash",
+    "let intent_core_hash = hash_blake2b_packed(intent.core)",
+    "let signed_intent_hash = hash_blake2b_packed(intent)",
+    "let materialized_receipt_hash = hash_blake2b_packed(receipt_commitment)",
+    "require intent.core.old_cell.tx_hash == actual_old_tx_hash",
+    "require intent.core.old_cell.index == actual_old_index",
+    "require intent.core.old_state_hash == old_cell.state_hash",
     "require actual_state_hash_commitment == state_hash_commitment",
-    "require intent.policy_hash == old_cell.policy_hash",
-    "require intent.nonce == old_cell.nonce + 1",
-    "require now <= intent.expiry",
-    "require receipt_hash == intent.receipt_hash",
+    "require intent.core.policy_hash == old_cell.policy_hash",
+    "require intent.core.new_nonce == old_cell.nonce + 1",
+    "require now <= intent.core.expiry",
+    "require intent.expected_receipt_hash == materialized_receipt_hash",
+    "verifier::btc::bip340::require_signature(signed_intent_hash, sig.pubkey, sig.signature)",
 ]
 
 
@@ -118,13 +127,32 @@ def normalise_fixture_inputs(fixture: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(raw_inputs, dict):
         raw_inputs = {}
     model = merge_dict(BASELINE, raw_inputs)
+    old = model["old_cell"]
     intent = model["intent"]
-    receipt_hash = raw_inputs.get("receipt_hash", raw_inputs.get("actual_receipt_hash", intent["receipt_hash"]))
+    raw_intent = raw_inputs.get("intent", {})
+    if not isinstance(raw_intent, dict):
+        raw_intent = {}
+    if "nonce" in raw_intent and "new_nonce" not in raw_intent:
+        intent["new_nonce"] = raw_intent["nonce"]
+    intent.setdefault("old_nonce", old["nonce"])
+    intent.setdefault("new_nonce", old["nonce"] + 1)
+    intent.setdefault("protocol_id", intent.get("domain", BASELINE["intent"]["protocol_id"]))
+    intent.setdefault("package_hash", BASELINE["intent"]["package_hash"])
+    intent.setdefault("terminal_path", BASELINE["intent"]["terminal_path"])
+    if "receipt_hash" in raw_intent and "expected_receipt_hash" not in raw_intent:
+        intent["expected_receipt_hash"] = raw_intent["receipt_hash"]
+    materialized_receipt_hash = raw_inputs.get("actual_receipt_hash", intent["expected_receipt_hash"])
     state_hash_commitment = raw_inputs.get("state_hash_commitment", model_blake2b_byte32(intent["new_state_hash"]))
-    model["receipt_hash"] = receipt_hash
+    model["materialized_receipt_hash"] = materialized_receipt_hash
     model["state_hash_commitment"] = state_hash_commitment
     model["signature_ok"] = signature_ok(raw_inputs)
     return model
+
+
+def outpoint_components(value: Any) -> tuple[Any, int]:
+    if isinstance(value, dict):
+        return value.get("tx_hash"), int(value.get("index", 0))
+    return f"{value}:tx_hash", 0
 
 
 def run_model(model: dict[str, Any]) -> dict[str, Any]:
@@ -140,6 +168,12 @@ def run_model(model: dict[str, Any]) -> dict[str, Any]:
 
     if not add("btc_signature_delegate", bool(model["signature_ok"]), "btc_signature_verification_failed"):
         return rejected(checks)
+    intent_tx_hash, intent_index = outpoint_components(intent["old_cell"])
+    actual_tx_hash, actual_index = outpoint_components(model.get("actual_old_cell", intent["old_cell"]))
+    if not add("old_outpoint_tx_hash_matches", intent_tx_hash == actual_tx_hash, "old_outpoint_tx_hash_mismatch"):
+        return rejected(checks)
+    if not add("old_outpoint_index_matches", intent_index == actual_index, "old_outpoint_index_mismatch"):
+        return rejected(checks)
     if not add("old_state_hash_matches", intent["old_state_hash"] == old["state_hash"], "state_hash_mismatch"):
         return rejected(checks)
     if not add(
@@ -150,11 +184,17 @@ def run_model(model: dict[str, Any]) -> dict[str, Any]:
         return rejected(checks)
     if not add("policy_hash_matches", intent["policy_hash"] == old["policy_hash"], "policy_hash_mismatch"):
         return rejected(checks)
-    if not add("nonce_increments", intent["nonce"] == old["nonce"] + 1, "nonce_must_increment"):
+    if not add("old_nonce_matches", intent["old_nonce"] == old["nonce"], "old_nonce_mismatch"):
+        return rejected(checks)
+    if not add("nonce_increments", intent["new_nonce"] == old["nonce"] + 1, "nonce_must_increment"):
         return rejected(checks)
     if not add("intent_not_expired", now <= intent["expiry"], "intent_expired"):
         return rejected(checks)
-    if not add("receipt_hash_matches", model["receipt_hash"] == intent["receipt_hash"], "receipt_hash_mismatch"):
+    if not add(
+        "receipt_hash_matches",
+        model["materialized_receipt_hash"] == intent["expected_receipt_hash"],
+        "receipt_hash_mismatch",
+    ):
         return rejected(checks)
 
     new_cell = {
@@ -162,8 +202,8 @@ def run_model(model: dict[str, Any]) -> dict[str, Any]:
         "btc_authority_hash": old["btc_authority_hash"],
         "state_hash": intent["new_state_hash"],
         "policy_hash": old["policy_hash"],
-        "receipt_root": old["receipt_root"],
-        "nonce": intent["nonce"],
+        "latest_receipt_hash": model["materialized_receipt_hash"],
+        "nonce": intent["new_nonce"],
         "expiry": intent["expiry"],
     }
     return {"result": "accepted", "failure_mode": None, "checks": checks, "new_cell": new_cell}

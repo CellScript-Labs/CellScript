@@ -24,6 +24,7 @@ Implemented in this slice:
 | `originate_agreement` | compiles | source-guard-present |
 | `repay_before_expiry` | compiles | source-guard-present |
 | `claim_after_expiry` | compiles | source-guard-present |
+| `nova_agreement_lifecycle` stable type entry | compiles | source-guard-present |
 | Receipt output materialization | implemented | generated-audit-covered |
 | Primitive-strict 0.16 | passes | generated-audit-covered |
 | Fixture shape harness | implemented | local-transaction-shape-covered |
@@ -80,9 +81,9 @@ imply extra CKB is minted or supplied by the claimant.
 ## Receipt Semantics
 
 Receipts are runtime-relevant because the actions materialize
-`NovaAgreementReceiptV0` outputs. The actions also update `receipt_root` from
+`NovaAgreementReceiptV0` outputs. The actions also update `latest_receipt_hash` from
 the witness `receipt_hash`, and the materialized receipt output must carry the
-same new receipt root.
+same latest receipt hash.
 
 Native CKB settlement intent is materialized as `NativeCkbPayoutV0` outputs.
 The local transaction harness also checks that the CKB capacity/value shape
@@ -100,9 +101,11 @@ python3 scripts/nova_agreement_tx_shape_harness.py --pretty
 /home/arthur/a19q3/CellScript/target/debug/cellc src/nova_agreement_type.cell --target riscv64-elf --target-profile ckb --entry-action originate_agreement -o target/nova-agreement-originate-action.elf
 /home/arthur/a19q3/CellScript/target/debug/cellc src/nova_agreement_type.cell --target riscv64-elf --target-profile ckb --entry-action repay_before_expiry -o target/nova-agreement-repay-action.elf
 /home/arthur/a19q3/CellScript/target/debug/cellc src/nova_agreement_type.cell --target riscv64-elf --target-profile ckb --entry-action claim_after_expiry -o target/nova-agreement-claim-action.elf
+/home/arthur/a19q3/CellScript/target/debug/cellc src/nova_agreement_lifecycle_type.cell --target riscv64-elf --target-profile ckb --entry-action nova_agreement_lifecycle -o target/nova-agreement-lifecycle-type.elf
 /home/arthur/a19q3/CellScript/target/debug/cellc harness/ckb_vm/always_success_lock.cell --target riscv64-elf --target-profile ckb --entry-lock always_success -o target/nova-agreement-always-success-lock.elf
 cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_agreement_ckb_vm_harness -- --pretty
 cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_agreement_tx_harness -- --pretty
+/home/arthur/a19q3/CellScript/scripts/novaseal_devnet_stateful_acceptance.sh --pretty --report-only
 ```
 
 Latest local result: all CellScript commands pass. The generated audit bundle
@@ -110,8 +113,16 @@ reports 3 actions, 0 locks, 2 source units, 71 ProofPlan records, and 21 builder
 assumptions. The local transaction-shape harness reports 8/8 fixture
 expectations matched: 3 accepted shapes and 5 rejected shapes. The action CKB VM
 harness reports 14/14 expectations matched: 3 accepted action executions and 11
-rejected action executions. The resolved transaction harness reports 15/15
-script-layer expectations matched and 15/15 node-verifier expectations matched.
+rejected action executions. The resolved transaction harness reports 20/20
+script-layer expectations matched and 20/20 node-verifier expectations matched.
+The devnet stateful gate now reports zero lifecycle blockers and full live
+stateful acceptance. The Agreement live runner deploys the BIP340 runtime
+verifier and `src/nova_agreement_lifecycle_type.cell:nova_agreement_lifecycle`
+as live CellDeps, submits originate, dry-runs a wrong-borrower-signature repay
+without consuming state, submits valid repay, and verifies the active input is
+dead plus the closed agreement, payout, and receipt outputs are live. The
+current aggregate status is `passed`. See
+[docs/DEVNET_STATEFUL_ACCEPTANCE.md](docs/DEVNET_STATEFUL_ACCEPTANCE.md).
 
 ## Harness Boundary
 
@@ -130,9 +141,9 @@ deterministic resolved CKB transactions and runs both `ckb-script` and
 terminal input transactions can reach the Agreement Profile type/action script.
 All fixture files are now covered by the resolved transaction harness.
 
-These harnesses are still not live-chain evidence. Deployment wiring,
-Molecule/wallet signing preimage alignment, cryptographic authority locks, and
-live CellDep liveness remain future work.
+These harnesses remain local verifier evidence, distinct from the live devnet
+runner. Deployment wiring, Molecule/wallet signing preimage alignment, and
+mainnet/testnet CellDep publication remain future work.
 
 ## Honest Next Slice
 

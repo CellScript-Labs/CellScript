@@ -41,14 +41,14 @@ const DEFAULT_FIXTURES_DIR: &str = "fixtures";
 const DEFAULT_OUTPUT: &str = "target/novaseal-combined-tx-report.json";
 const VERIFY_MAX_CYCLES: u64 = 800_000_000;
 const VM2_ENABLED_EPOCH: u64 = 10;
-const REQUIRED_FIXTURE_COUNT: usize = 6;
+const REQUIRED_FIXTURE_COUNT: usize = 8;
 const TRANSACTION_SHAPE_OUTPUT_MARGIN_SHANNONS: u64 = 10_000_000_000;
 const BUILDER_FEE_SHANNONS: u64 = 100_000;
 const MIN_BUILDER_FEE_SHANNONS: u64 = 100_000;
 
 const NOVASEAL_CELL_LEN: usize = 146;
-const NOVASEAL_INTENT_LEN: usize = 213;
-const PROOF_RECEIPT_LEN: usize = 279;
+const NOVASEAL_INTENT_LEN: usize = 254;
+const PROOF_RECEIPT_LEN: usize = 382;
 const BYTE32_LEN: usize = 32;
 const SIGNATURE_PAYLOAD_LEN: usize = 96;
 const LOCK_WITNESS_MAGIC: &[u8; 8] = b"CSARGv1\0";
@@ -57,17 +57,15 @@ const CKB_BLAKE2B_PERSONAL: &[u8; 16] = b"ckb-default-hash";
 const CELL_BTC_AUTHORITY_HASH_OFFSET: usize = 2;
 const CELL_STATE_HASH_OFFSET: usize = 34;
 const CELL_POLICY_HASH_OFFSET: usize = 66;
-const CELL_RECEIPT_ROOT_OFFSET: usize = 98;
+const CELL_LATEST_RECEIPT_HASH_OFFSET: usize = 98;
 const CELL_NONCE_OFFSET: usize = 130;
 const CELL_EXPIRY_OFFSET: usize = 138;
-const INTENT_DOMAIN_OFFSET: usize = 0;
-const INTENT_ACTION_OFFSET: usize = 32;
-const INTENT_OLD_CELL_OFFSET: usize = 33;
-const INTENT_OLD_STATE_HASH_OFFSET: usize = 69;
-const INTENT_NEW_STATE_HASH_OFFSET: usize = 101;
-const INTENT_POLICY_HASH_OFFSET: usize = 133;
-const INTENT_NONCE_OFFSET: usize = 197;
-const INTENT_EXPIRY_OFFSET: usize = 205;
+const INTENT_OLD_CELL_OFFSET: usize = 98;
+const INTENT_NEW_STATE_HASH_OFFSET: usize = 166;
+const INTENT_NEW_NONCE_OFFSET: usize = 206;
+const INTENT_EXPIRY_OFFSET: usize = 214;
+const PACKED_HASH_DOMAIN: &[u8] = b"CellScriptPackedHashV0\0";
+const SIGNED_INTENT_TYPE_NAME: &[u8] = b"NovaSealSignedIntentV0";
 
 const TEST_SECRET_KEY: [u8; 32] = [
     0x3e, 0x74, 0x90, 0x68, 0x06, 0x39, 0xa2, 0xf7, 0xbb, 0xe8, 0x36, 0x1d, 0xd3, 0xf3, 0x4e, 0xb6, 0x42, 0x9a, 0x9c, 0x92, 0x4d,
@@ -180,6 +178,7 @@ struct CombinedCase {
     expected_failure_mode: Option<String>,
     current_timepoint: u64,
     old_cell: Vec<u8>,
+    input_out_point: packed::OutPoint,
     output_cell: Vec<u8>,
     receipt_cell: Vec<u8>,
     witness: Vec<u8>,
@@ -427,7 +426,7 @@ fn build_case(value: &Value, fixtures_dir: &Path) -> Result<CombinedCase, Harnes
         return Err(HarnessError::Message(format!("{fixture}: old_cell has {} bytes, expected {NOVASEAL_CELL_LEN}", old_cell.len())));
     }
     let intent = if fixture == "receipt_hash_mismatch_reject.json" {
-        hex_bytes(encoded.pointer("/intent/hex"), &fixture, "encoded.intent.hex")?
+        hex_bytes(encoded.pointer("/declared_intent/hex"), &fixture, "encoded.declared_intent.hex")?
     } else {
         hex_bytes(encoded.pointer("/resolved/resolved_intent/hex"), &fixture, "encoded.resolved.resolved_intent.hex")?
     };
@@ -440,7 +439,7 @@ fn build_case(value: &Value, fixtures_dir: &Path) -> Result<CombinedCase, Harnes
     }
     let state_hash_commitment =
         ckb_blake2b256(&intent[INTENT_NEW_STATE_HASH_OFFSET..INTENT_NEW_STATE_HASH_OFFSET + BYTE32_LEN]).to_vec();
-    let mut signature_payload = sign_intent_domain(&intent)?;
+    let mut signature_payload = sign_intent(&intent)?;
     let signature_mutation = if fixture == "wrong_signature_reject.json" {
         let last =
             signature_payload.last_mut().ok_or_else(|| HarnessError::Message("signature payload unexpectedly empty".to_string()))?;
@@ -449,9 +448,17 @@ fn build_case(value: &Value, fixtures_dir: &Path) -> Result<CombinedCase, Harnes
     } else {
         None
     };
-    let output_cell = build_output_cell(&old_cell, &intent);
-    let receipt_cell = build_receipt_cell(&old_cell, &intent)?;
-    let witness = build_witness(&intent, &receipt_hash, &state_hash_commitment, &signature_payload);
+    let output_cell = build_output_cell(&old_cell, &intent, &receipt_hash);
+    let receipt_cell = hex_bytes(
+        encoded.pointer("/resolved/resolved_receipt/hex"),
+        &fixture,
+        "encoded.resolved.resolved_receipt.hex",
+    )?;
+    if receipt_cell.len() != PROOF_RECEIPT_LEN {
+        return Err(HarnessError::Message(format!("{fixture}: receipt has {} bytes, expected {PROOF_RECEIPT_LEN}", receipt_cell.len())));
+    }
+    let input_out_point = input_out_point_from_fixture(&fixture_json, &intent)?;
+    let witness = build_witness(&intent, &state_hash_commitment, &signature_payload);
     Ok(CombinedCase {
         fixture,
         category,
@@ -459,6 +466,7 @@ fn build_case(value: &Value, fixtures_dir: &Path) -> Result<CombinedCase, Harnes
         expected_failure_mode,
         current_timepoint,
         old_cell,
+        input_out_point,
         output_cell,
         receipt_cell,
         witness,
@@ -677,7 +685,7 @@ fn build_transaction_context(
     let child_dep_out_point = build_out_point(&child_code_hash, 0);
     let parent_dep_out_point = build_out_point(&parent_code_hash, 0);
     let type_dep_out_point = build_out_point(&type_code_hash, 0);
-    let input_out_point = build_out_point(&ckb_blake2b256(case.fixture.as_bytes()), 0);
+    let input_out_point = case.input_out_point.clone();
     let child_dep = build_cell_dep_from_out_point(child_dep_out_point.clone());
     let parent_dep = build_cell_dep_from_out_point(parent_dep_out_point.clone());
     let type_dep = build_cell_dep_from_out_point(type_dep_out_point.clone());
@@ -832,61 +840,33 @@ fn build_report(args: &Args, parent_elf: &[u8], type_elf: &[u8], child_elf: &[u8
     }
 }
 
-fn build_output_cell(old_cell: &[u8], intent: &[u8]) -> Vec<u8> {
+fn build_output_cell(old_cell: &[u8], intent: &[u8], receipt_hash: &[u8]) -> Vec<u8> {
     let mut output = old_cell.to_vec();
     output[CELL_STATE_HASH_OFFSET..CELL_STATE_HASH_OFFSET + BYTE32_LEN]
         .copy_from_slice(&intent[INTENT_NEW_STATE_HASH_OFFSET..INTENT_NEW_STATE_HASH_OFFSET + BYTE32_LEN]);
     output[CELL_POLICY_HASH_OFFSET..CELL_POLICY_HASH_OFFSET + BYTE32_LEN]
         .copy_from_slice(&old_cell[CELL_POLICY_HASH_OFFSET..CELL_POLICY_HASH_OFFSET + BYTE32_LEN]);
-    output[CELL_RECEIPT_ROOT_OFFSET..CELL_RECEIPT_ROOT_OFFSET + BYTE32_LEN]
-        .copy_from_slice(&old_cell[CELL_RECEIPT_ROOT_OFFSET..CELL_RECEIPT_ROOT_OFFSET + BYTE32_LEN]);
-    output[CELL_NONCE_OFFSET..CELL_NONCE_OFFSET + 8].copy_from_slice(&intent[INTENT_NONCE_OFFSET..INTENT_NONCE_OFFSET + 8]);
+    output[CELL_LATEST_RECEIPT_HASH_OFFSET..CELL_LATEST_RECEIPT_HASH_OFFSET + BYTE32_LEN].copy_from_slice(receipt_hash);
+    output[CELL_NONCE_OFFSET..CELL_NONCE_OFFSET + 8].copy_from_slice(&intent[INTENT_NEW_NONCE_OFFSET..INTENT_NEW_NONCE_OFFSET + 8]);
     output[CELL_EXPIRY_OFFSET..CELL_EXPIRY_OFFSET + 8].copy_from_slice(&intent[INTENT_EXPIRY_OFFSET..INTENT_EXPIRY_OFFSET + 8]);
     output
 }
 
-fn build_receipt_cell(old_cell: &[u8], intent: &[u8]) -> Result<Vec<u8>, HarnessError> {
-    if old_cell.len() != NOVASEAL_CELL_LEN {
-        return Err(HarnessError::Message(format!("old_cell has {} bytes, expected {NOVASEAL_CELL_LEN}", old_cell.len())));
-    }
-    if intent.len() != NOVASEAL_INTENT_LEN {
-        return Err(HarnessError::Message(format!("intent has {} bytes, expected {NOVASEAL_INTENT_LEN}", intent.len())));
-    }
-    let mut receipt = Vec::with_capacity(PROOF_RECEIPT_LEN);
-    receipt.extend_from_slice(&intent[INTENT_DOMAIN_OFFSET..INTENT_DOMAIN_OFFSET + BYTE32_LEN]);
-    receipt.extend_from_slice(&old_cell[0..2]);
-    receipt.push(intent[INTENT_ACTION_OFFSET]);
-    receipt.extend_from_slice(&intent[INTENT_OLD_CELL_OFFSET..INTENT_OLD_CELL_OFFSET + 36]);
-    receipt.extend_from_slice(&intent[INTENT_OLD_STATE_HASH_OFFSET..INTENT_OLD_STATE_HASH_OFFSET + BYTE32_LEN]);
-    receipt.extend_from_slice(&intent[INTENT_NEW_STATE_HASH_OFFSET..INTENT_NEW_STATE_HASH_OFFSET + BYTE32_LEN]);
-    receipt.extend_from_slice(&ckb_blake2b256(&intent[INTENT_DOMAIN_OFFSET..INTENT_DOMAIN_OFFSET + BYTE32_LEN]));
-    receipt.extend_from_slice(&intent[INTENT_POLICY_HASH_OFFSET..INTENT_POLICY_HASH_OFFSET + BYTE32_LEN]);
-    receipt.extend_from_slice(&old_cell[CELL_BTC_AUTHORITY_HASH_OFFSET..CELL_BTC_AUTHORITY_HASH_OFFSET + BYTE32_LEN]);
-    receipt.extend_from_slice(&[0u8; BYTE32_LEN]);
-    receipt.extend_from_slice(&intent[INTENT_NONCE_OFFSET..INTENT_NONCE_OFFSET + 8]);
-    receipt.extend_from_slice(&intent[INTENT_EXPIRY_OFFSET..INTENT_EXPIRY_OFFSET + 8]);
-    if receipt.len() != PROOF_RECEIPT_LEN {
-        return Err(HarnessError::Message(format!("receipt has {} bytes, expected {PROOF_RECEIPT_LEN}", receipt.len())));
-    }
-    Ok(receipt)
-}
-
-fn build_witness(intent: &[u8], receipt_hash: &[u8], state_hash_commitment: &[u8], signature_payload: &[u8]) -> Vec<u8> {
+fn build_witness(intent: &[u8], state_hash_commitment: &[u8], signature_payload: &[u8]) -> Vec<u8> {
     let mut witness = Vec::with_capacity(
-        LOCK_WITNESS_MAGIC.len() + 4 + intent.len() + receipt_hash.len() + state_hash_commitment.len() + 4 + signature_payload.len(),
+        LOCK_WITNESS_MAGIC.len() + 4 + intent.len() + state_hash_commitment.len() + 4 + signature_payload.len(),
     );
     witness.extend_from_slice(LOCK_WITNESS_MAGIC);
     witness.extend_from_slice(&(intent.len() as u32).to_le_bytes());
     witness.extend_from_slice(intent);
-    witness.extend_from_slice(receipt_hash);
     witness.extend_from_slice(state_hash_commitment);
     witness.extend_from_slice(&(signature_payload.len() as u32).to_le_bytes());
     witness.extend_from_slice(signature_payload);
     witness
 }
 
-fn sign_intent_domain(intent: &[u8]) -> Result<Vec<u8>, HarnessError> {
-    let digest = ckb_blake2b256(&intent[INTENT_DOMAIN_OFFSET..INTENT_DOMAIN_OFFSET + BYTE32_LEN]);
+fn sign_intent(intent: &[u8]) -> Result<Vec<u8>, HarnessError> {
+    let digest = signed_intent_hash(intent);
     let signing_key = SigningKey::from_bytes(&TEST_SECRET_KEY)
         .map_err(|error| HarnessError::Message(format!("failed to construct test BIP340 signing key: {error}")))?;
     let signature = signing_key
@@ -943,6 +923,30 @@ fn build_out_point(tx_hash: &[u8; 32], index: u32) -> packed::OutPoint {
     packed::OutPoint::new_builder().tx_hash(packed_byte32(tx_hash)).index(index.pack()).build()
 }
 
+fn input_out_point_from_fixture(fixture: &Value, intent: &[u8]) -> Result<packed::OutPoint, HarnessError> {
+    if let Some(actual) = fixture.pointer("/inputs/actual_old_cell") {
+        let tx_hash = actual
+            .get("tx_hash")
+            .and_then(Value::as_str)
+            .ok_or_else(|| HarnessError::Message("actual_old_cell.tx_hash must be a 32-byte hex string".to_string()))?;
+        let tx_hash = decode_hex(tx_hash)?;
+        if tx_hash.len() != BYTE32_LEN {
+            return Err(HarnessError::Message(format!("actual_old_cell.tx_hash has {} bytes, expected {BYTE32_LEN}", tx_hash.len())));
+        }
+        let mut tx_hash_array = [0u8; 32];
+        tx_hash_array.copy_from_slice(&tx_hash);
+        let index = actual.get("index").and_then(Value::as_u64).unwrap_or(0);
+        let index = u32::try_from(index).map_err(|_| HarnessError::Message("actual_old_cell.index exceeds u32".to_string()))?;
+        return Ok(build_out_point(&tx_hash_array, index));
+    }
+    let mut tx_hash = [0u8; 32];
+    tx_hash.copy_from_slice(&intent[INTENT_OLD_CELL_OFFSET..INTENT_OLD_CELL_OFFSET + BYTE32_LEN]);
+    let index_start = INTENT_OLD_CELL_OFFSET + BYTE32_LEN;
+    let mut index = [0u8; 4];
+    index.copy_from_slice(&intent[index_start..index_start + 4]);
+    Ok(build_out_point(&tx_hash, u32::from_le_bytes(index)))
+}
+
 fn cell_authority_hash(cell: &[u8]) -> Result<[u8; 32], HarnessError> {
     if cell.len() < CELL_BTC_AUTHORITY_HASH_OFFSET + BYTE32_LEN {
         return Err(HarnessError::Message("cell is too short to contain btc_authority_hash".to_string()));
@@ -976,7 +980,13 @@ fn validate_expected_result(fixture: &str, expected: &str, failure_mode: Option<
 fn expected_failure_scope(failure_mode: Option<&str>) -> Option<&'static str> {
     match failure_mode {
         Some("btc_signature_verification_failed" | "policy_hash_mismatch") => Some("lock"),
-        Some("intent_expired" | "nonce_must_increment" | "receipt_hash_mismatch") => Some("type"),
+        Some(
+            "intent_expired"
+            | "nonce_must_increment"
+            | "receipt_hash_mismatch"
+            | "old_outpoint_tx_hash_mismatch"
+            | "old_outpoint_index_mismatch",
+        ) => Some("type"),
         Some(_) => Some("unknown"),
         None => None,
     }
@@ -1066,6 +1076,17 @@ fn ckb_blake2b256(data: &[u8]) -> [u8; 32] {
     let mut out = [0u8; 32];
     out.copy_from_slice(digest.as_bytes());
     out
+}
+
+fn signed_intent_hash(intent: &[u8]) -> [u8; 32] {
+    let mut preimage =
+        Vec::with_capacity(PACKED_HASH_DOMAIN.len() + SIGNED_INTENT_TYPE_NAME.len() + 1 + 4 + intent.len());
+    preimage.extend_from_slice(PACKED_HASH_DOMAIN);
+    preimage.extend_from_slice(SIGNED_INTENT_TYPE_NAME);
+    preimage.push(0);
+    preimage.extend_from_slice(&(intent.len() as u32).to_le_bytes());
+    preimage.extend_from_slice(intent);
+    ckb_blake2b256(&preimage)
 }
 
 fn packed_byte32(bytes: &[u8; 32]) -> packed::Byte32 {

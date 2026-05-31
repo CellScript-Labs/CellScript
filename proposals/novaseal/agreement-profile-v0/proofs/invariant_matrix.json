@@ -48,7 +48,7 @@
     {
       "id": "receipt_hash_output_binding",
       "claim": "Wrong receipt_hash output binding is rejected by Agreement Profile scripts.",
-      "location": "NovaAgreementReceiptV0.new_receipt_root output field checks",
+      "location": "NovaAgreementReceiptV0.new_latest_receipt_hash output field checks",
       "coverage": "action-ckb-vm-covered + resolved-transaction-covered"
     },
     {

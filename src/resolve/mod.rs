@@ -70,6 +70,12 @@ impl ModuleResolver {
 
     pub fn register_module(&mut self, module: Module) -> Result<()> {
         let name = module.name.clone();
+        if name == "verifier" || name.starts_with("verifier::") {
+            return Err(CompileError::new(
+                "module namespace 'verifier::*' is reserved for compiler-owned verifier capabilities",
+                module.span,
+            ));
+        }
         if self.modules.contains_key(&name) {
             return Err(CompileError::new(format!("duplicate module '{}'", name), module.span));
         }

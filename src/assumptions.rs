@@ -34,6 +34,10 @@ struct ExpectedCellDepBinding {
     out_index: Option<u32>,
     hash_type: Option<String>,
     data_hash: Option<String>,
+    artifact_hash: Option<String>,
+    role: Option<String>,
+    verifier_id: Option<String>,
+    ipc_abi: Option<String>,
     type_id: Option<String>,
 }
 
@@ -319,6 +323,18 @@ fn enrich_manifest_bound_spawn_target_assumptions(assumptions: &mut [BuilderAssu
         if let Some(data_hash) = dep.and_then(|dep| dep.data_hash.as_deref()) {
             required.push_str(&format!(":data_hash={data_hash}"));
         }
+        if let Some(artifact_hash) = dep.and_then(|dep| dep.artifact_hash.as_deref()) {
+            required.push_str(&format!(":artifact_hash={artifact_hash}"));
+        }
+        if let Some(role) = dep.and_then(|dep| dep.role.as_deref()) {
+            required.push_str(&format!(":role={role}"));
+        }
+        if let Some(verifier_id) = dep.and_then(|dep| dep.verifier_id.as_deref()) {
+            required.push_str(&format!(":verifier_id={verifier_id}"));
+        }
+        if let Some(ipc_abi) = dep.and_then(|dep| dep.ipc_abi.as_deref()) {
+            required.push_str(&format!(":ipc_abi={ipc_abi}"));
+        }
         if let Some(type_id) = dep.and_then(|dep| dep.type_id.as_deref()) {
             required.push_str(&format!(":type_id={type_id}"));
         }
@@ -577,6 +593,30 @@ fn validate_cell_dep_identity_fields(
             _ => mismatches.push(format!("{context} data_hash must be '{data_hash}'")),
         }
     }
+    if let Some(artifact_hash) = expected.artifact_hash.as_deref() {
+        match object.get("artifact_hash").and_then(Value::as_str) {
+            Some(actual) if actual == artifact_hash => {}
+            _ => mismatches.push(format!("{context} artifact_hash must be '{artifact_hash}'")),
+        }
+    }
+    if let Some(role) = expected.role.as_deref() {
+        match object.get("role").and_then(Value::as_str) {
+            Some(actual) if actual == role => {}
+            _ => mismatches.push(format!("{context} role must be '{role}'")),
+        }
+    }
+    if let Some(verifier_id) = expected.verifier_id.as_deref() {
+        match object.get("verifier_id").and_then(Value::as_str) {
+            Some(actual) if actual == verifier_id => {}
+            _ => mismatches.push(format!("{context} verifier_id must be '{verifier_id}'")),
+        }
+    }
+    if let Some(ipc_abi) = expected.ipc_abi.as_deref() {
+        match object.get("ipc_abi").and_then(Value::as_str) {
+            Some(actual) if actual == ipc_abi => {}
+            _ => mismatches.push(format!("{context} ipc_abi must be '{ipc_abi}'")),
+        }
+    }
     if let Some(type_id) = expected.type_id.as_deref() {
         match object.get("type_id").and_then(Value::as_str) {
             Some(actual) if actual == type_id => {}
@@ -602,6 +642,10 @@ fn parse_expected_cell_dep_binding(required: &str) -> Option<ExpectedCellDepBind
     let mut out_index = None;
     let mut hash_type = None;
     let mut data_hash = None;
+    let mut artifact_hash = None;
+    let mut role = None;
+    let mut verifier_id = None;
+    let mut ipc_abi = None;
     let mut type_id = None;
     for part in parts {
         if let Some(value) = part.strip_prefix("name=") {
@@ -616,11 +660,33 @@ fn parse_expected_cell_dep_binding(required: &str) -> Option<ExpectedCellDepBind
             hash_type = Some(value.to_string());
         } else if let Some(value) = part.strip_prefix("data_hash=") {
             data_hash = Some(value.to_string());
+        } else if let Some(value) = part.strip_prefix("artifact_hash=") {
+            artifact_hash = Some(value.to_string());
+        } else if let Some(value) = part.strip_prefix("role=") {
+            role = Some(value.to_string());
+        } else if let Some(value) = part.strip_prefix("verifier_id=") {
+            verifier_id = Some(value.to_string());
+        } else if let Some(value) = part.strip_prefix("ipc_abi=") {
+            ipc_abi = Some(value.to_string());
         } else if let Some(value) = part.strip_prefix("type_id=") {
             type_id = Some(value.to_string());
         }
     }
-    Some(ExpectedCellDepBinding { dep_source, index, name, dep_type, tx_hash, out_index, hash_type, data_hash, type_id })
+    Some(ExpectedCellDepBinding {
+        dep_source,
+        index,
+        name,
+        dep_type,
+        tx_hash,
+        out_index,
+        hash_type,
+        data_hash,
+        artifact_hash,
+        role,
+        verifier_id,
+        ipc_abi,
+        type_id,
+    })
 }
 
 fn requires_explicit_evidence(kind: &str) -> bool {

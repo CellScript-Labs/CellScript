@@ -11,6 +11,7 @@ path remains visible.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import subprocess
 import sys
@@ -20,21 +21,24 @@ from typing import Any
 
 SCHEMA = "novaseal-parent-lock-abi-preflight-v0.1"
 DEFAULT_CELLC = Path(__file__).resolve().parents[4] / "target/debug/cellc"
+DEFAULT_SOURCE = Path("src/nova_btc_authority_lock.cell")
 DEFAULT_OUTPUT = Path("target/novaseal-parent-lock-abi-preflight.json")
 
 
-def run_cellc(cellc: Path, target: str) -> dict[str, Any]:
+def run_cellc(cellc: Path, source: Path, target: str) -> dict[str, Any]:
+    artifact = Path("target") / f"novaseal-parent-lock-abi-preflight.{target_suffix(target)}"
     completed = subprocess.run(
         [
             str(cellc),
-            "build",
+            str(source),
             "--entry-lock",
             "btc_authority",
             "--target-profile",
             "ckb",
             "--target",
             target,
-            "--json",
+            "-o",
+            str(artifact),
         ],
         text=True,
         capture_output=True,
@@ -42,29 +46,29 @@ def run_cellc(cellc: Path, target: str) -> dict[str, Any]:
     )
     result: dict[str, Any] = {
         "target": target,
+        "source": str(source),
         "status_code": completed.returncode,
         "stdout": completed.stdout,
         "stderr": completed.stderr,
     }
     if completed.returncode == 0:
-        try:
-            parsed = json.loads(completed.stdout)
-        except json.JSONDecodeError as exc:
-            result["json_error"] = str(exc)
-        else:
-            result["summary"] = {
-                "artifact": parsed.get("artifact"),
-                "artifact_format": parsed.get("artifact_format"),
-                "artifact_hash": parsed.get("artifact_hash"),
-                "artifact_size_bytes": parsed.get("artifact_size_bytes"),
-                "status": parsed.get("status"),
-                "ckb_runtime_required": parsed.get("ckb_runtime_required"),
-                "transaction_runtime_input_requirements": parsed.get("transaction_runtime_input_requirements"),
-                "transaction_runtime_input_requirement_summaries": parsed.get(
-                    "transaction_runtime_input_requirement_summaries", []
-                ),
-            }
+        data = artifact.read_bytes()
+        result["summary"] = {
+            "artifact": str(artifact),
+            "artifact_format": target_suffix(target),
+            "artifact_hash": "0x" + hashlib.blake2b(data, digest_size=32).hexdigest(),
+            "artifact_size_bytes": len(data),
+            "status": "ok",
+        }
     return result
+
+
+def target_suffix(target: str) -> str:
+    if target.endswith("-asm"):
+        return "s"
+    if target.endswith("-elf"):
+        return "elf"
+    return target.replace("/", "_").replace("-", "_")
 
 
 def read_artifact_text(build_result: dict[str, Any]) -> str:
@@ -102,8 +106,8 @@ def parent_lock_checks(asm: str) -> dict[str, Any]:
 
 
 def build_report(args: argparse.Namespace) -> dict[str, Any]:
-    asm_result = run_cellc(args.cellc, "riscv64-asm")
-    elf_result = run_cellc(args.cellc, "riscv64-elf")
+    asm_result = run_cellc(args.cellc, args.source, "riscv64-asm")
+    elf_result = run_cellc(args.cellc, args.source, "riscv64-elf")
     asm = read_artifact_text(asm_result)
     checks = parent_lock_checks(asm)
     builds_ok = asm_result["status_code"] == 0 and elf_result["status_code"] == 0
@@ -111,6 +115,7 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
         "schema": SCHEMA,
         "classification": "parent_lock_elf_abi_preflight",
         "cellc": str(args.cellc),
+        "source": str(args.source),
         "builds": {
             "asm": asm_result.get("summary", {"status_code": asm_result["status_code"], "stderr": asm_result["stderr"]}),
             "elf": elf_result.get("summary", {"status_code": elf_result["status_code"], "stderr": elf_result["stderr"]}),
@@ -136,6 +141,7 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cellc", type=Path, default=DEFAULT_CELLC)
+    parser.add_argument("--source", type=Path, default=DEFAULT_SOURCE)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--pretty", action="store_true")
     args = parser.parse_args()

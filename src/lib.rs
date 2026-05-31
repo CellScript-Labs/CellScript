@@ -593,6 +593,12 @@ pub struct CkbDepGroupManifestMetadata {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CkbCellDepMetadata {
     pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verifier_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ipc_abi: Option<String>,
     pub artifact_hash: Option<String>,
     pub tx_hash: Option<String>,
     pub index: Option<u32>,
@@ -1467,6 +1473,9 @@ fn apply_manifest_deploy_metadata(metadata: &mut CompileMetadata, manifest: &Cel
             .unwrap_or((None, None));
         declared_cell_deps.push(CkbCellDepMetadata {
             name: "primary".to_string(),
+            role: None,
+            verifier_id: None,
+            ipc_abi: None,
             artifact_hash: ckb_manifest.artifact_hash.clone(),
             tx_hash,
             index,
@@ -1483,9 +1492,15 @@ fn apply_manifest_deploy_metadata(metadata: &mut CompileMetadata, manifest: &Cel
             validate_ckb_hash_type(hash_type)?;
         }
         let (tx_hash, dep_index) = parse_ckb_cell_dep_location(dep)?;
+        if manifest.policy.production && dep.role.as_deref() == Some("runtime_verifier") {
+            validate_production_runtime_verifier_cell_dep(index, dep, tx_hash.as_deref(), dep_index)?;
+        }
         declared_cell_deps.push(CkbCellDepMetadata {
             name: dep.name.clone().unwrap_or_else(|| format!("cell_dep_{}", index)),
-            artifact_hash: None,
+            role: dep.role.clone(),
+            verifier_id: dep.verifier_id.clone(),
+            ipc_abi: dep.ipc_abi.clone(),
+            artifact_hash: dep.artifact_hash.clone(),
             tx_hash,
             index: dep_index,
             dep_type: dep_type.to_string(),
@@ -1681,6 +1696,52 @@ fn parse_ckb_cell_dep_location(dep: &CellCkbCellDepConfig) -> Result<(Option<Str
         return Err(CompileError::without_span("CKB cell_dep split location must provide both tx_hash and index, or neither"));
     }
     Ok((dep.tx_hash.clone(), dep.index))
+}
+
+fn validate_production_runtime_verifier_cell_dep(
+    index: usize,
+    dep: &CellCkbCellDepConfig,
+    tx_hash: Option<&str>,
+    dep_index: Option<u32>,
+) -> Result<()> {
+    let missing = [
+        ("name", dep.name.is_none()),
+        ("out_point", tx_hash.is_none() || dep_index.is_none()),
+        ("dep_type", dep.dep_type.is_none()),
+        ("hash_type", dep.hash_type.is_none()),
+        ("data_hash", dep.data_hash.is_none()),
+        ("artifact_hash", dep.artifact_hash.is_none()),
+        ("verifier_id", dep.verifier_id.is_none()),
+        ("ipc_abi", dep.ipc_abi.is_none()),
+    ]
+    .into_iter()
+    .filter_map(|(field, missing)| missing.then_some(field))
+    .collect::<Vec<_>>();
+    if !missing.is_empty() {
+        return Err(CompileError::without_span(format!(
+            "production runtime_verifier cell_dep[{}] must pin {}; strict release templates may omit production=true until real CellDeps exist",
+            index,
+            missing.join(", ")
+        )));
+    }
+    if let Some(tx_hash) = tx_hash {
+        reject_placeholder_out_point_hash(index, tx_hash)?;
+    }
+    Ok(())
+}
+
+fn reject_placeholder_out_point_hash(index: usize, tx_hash: &str) -> Result<()> {
+    let hex = tx_hash.strip_prefix("0x").unwrap_or(tx_hash);
+    let lower = hex.to_ascii_lowercase();
+    let placeholder = lower.chars().all(|ch| ch == '0') || lower.chars().all(|ch| ch == '4') || lower.contains("placeholder");
+    if placeholder {
+        Err(CompileError::without_span(format!(
+            "production runtime_verifier cell_dep[{}] uses a placeholder out_point tx_hash '{}'",
+            index, tx_hash
+        )))
+    } else {
+        Ok(())
+    }
 }
 
 fn parse_ckb_out_point(out_point: &str) -> Result<(String, u32)> {
@@ -2432,6 +2493,8 @@ fn is_known_ckb_runtime_source(source: &str) -> bool {
             | "ScriptArgs"
             | "Process"
             | "Profile"
+            | "InputSource"
+            | "CellSource"
     )
 }
 
@@ -2464,8 +2527,9 @@ fn is_known_ckb_runtime_syscall(syscall: &str) -> bool {
 fn ckb_runtime_syscall_allows_source(syscall: &str, source: &str) -> bool {
     match syscall {
         "LOAD_CELL" => matches!(source, "Input" | "Output" | "CellDep" | "GroupInput" | "GroupOutput"),
-        "LOAD_CELL_BY_FIELD" => matches!(source, "Input" | "Output" | "GroupInput" | "GroupOutput"),
-        "LOAD_INPUT_BY_FIELD" | "CKB_SIGHASH_ALL" => source == "GroupInput",
+        "LOAD_CELL_BY_FIELD" => matches!(source, "Input" | "Output" | "GroupInput" | "GroupOutput" | "CellSource"),
+        "LOAD_INPUT_BY_FIELD" => matches!(source, "GroupInput" | "InputSource"),
+        "CKB_SIGHASH_ALL" => source == "GroupInput",
         "LOAD_SCRIPT_ARGS" => source == "ScriptArgs",
         "SOURCE_VIEW" => matches!(source, "Input" | "Output" | "CellDep" | "HeaderDep" | "GroupInput" | "GroupOutput"),
         "LOAD_WITNESS" => source == "Witness",
@@ -4570,6 +4634,8 @@ struct CellManifest {
     #[serde(default)]
     build: CellBuildConfig,
     #[serde(default)]
+    policy: CellPolicyConfig,
+    #[serde(default)]
     deploy: CellDeployConfig,
 }
 
@@ -4589,6 +4655,12 @@ struct CellBuildConfig {
     target_profile: Option<String>,
     #[serde(default)]
     out_dir: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct CellPolicyConfig {
+    #[serde(default)]
+    production: bool,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -4619,6 +4691,14 @@ struct CellCkbDeployConfig {
 struct CellCkbCellDepConfig {
     #[serde(default)]
     name: Option<String>,
+    #[serde(default)]
+    role: Option<String>,
+    #[serde(default)]
+    verifier_id: Option<String>,
+    #[serde(default)]
+    ipc_abi: Option<String>,
+    #[serde(default)]
+    artifact_hash: Option<String>,
     #[serde(default)]
     out_point: Option<String>,
     #[serde(default)]
@@ -6931,11 +7011,12 @@ fn metadata_guard_operand_labels(body: &ir::IrBody, params: &[ir::IrParam]) -> H
                     labels.insert(dest.id, format!("{left_label}{operator}{right_label}"));
                 }
                 ir::IrInstruction::Call { dest: Some(dest), func, args }
-                    if matches!(func.as_str(), "__ckb_hash_blake2b" | "__ckb_hash_chain") =>
+                    if matches!(func.as_str(), "__ckb_hash_blake2b" | "__ckb_hash_chain" | "__ckb_hash_blake2b_packed") =>
                 {
                     let helper = match func.as_str() {
                         "__ckb_hash_blake2b" => "hash_blake2b",
                         "__ckb_hash_chain" => "hash_chain",
+                        "__ckb_hash_blake2b_packed" => "hash_blake2b_packed",
                         _ => unreachable!("matched hash helper"),
                     };
                     let arg_labels = args.iter().map(|arg| metadata_guard_operand_label(arg, &labels)).collect::<Option<Vec<_>>>();
@@ -7861,7 +7942,7 @@ fn metadata_derived_alias_sources(
                     }
                 }
                 ir::IrInstruction::Call { dest: Some(dest), func, args }
-                    if matches!(func.as_str(), "__ckb_hash_chain" | "__ckb_hash_blake2b") =>
+                    if matches!(func.as_str(), "__ckb_hash_chain" | "__ckb_hash_blake2b" | "__ckb_hash_blake2b_packed") =>
                 {
                     let mut sources = BTreeSet::new();
                     for arg in args {
@@ -11647,6 +11728,15 @@ fn metadata_prelude_availability(
                 {
                     availability.fixed_value_vars.insert(dest.id);
                 }
+                ir::IrInstruction::Call { dest: Some(dest), func, args }
+                    if func == "__ckb_hash_blake2b_packed"
+                        && dest.ty == ir::IrType::Hash
+                        && args
+                            .first()
+                            .is_some_and(|arg| metadata_fixed_value_available_for_packed(arg, &availability, type_layouts)) =>
+                {
+                    availability.fixed_value_vars.insert(dest.id);
+                }
                 ir::IrInstruction::Create { dest, .. }
                 | ir::IrInstruction::CreateUnique { dest, .. }
                 | ir::IrInstruction::ReplaceUnique { dest, .. } => {
@@ -12207,6 +12297,24 @@ fn metadata_fixed_value_available(operand: &ir::IrOperand, availability: &Metada
     }
 }
 
+fn metadata_fixed_value_available_for_packed(
+    operand: &ir::IrOperand,
+    availability: &MetadataPreludeAvailability,
+    type_layouts: &MetadataTypeLayouts,
+) -> bool {
+    if metadata_fixed_value_available(operand, availability) {
+        return true;
+    }
+    match operand {
+        ir::IrOperand::Const(value) => {
+            metadata_fixed_byte_const_len(value).is_some() || metadata_fixed_scalar_const_value(value).is_some()
+        }
+        ir::IrOperand::Var(var) => {
+            availability.fixed_value_vars.contains(&var.id) && metadata_ir_type_fixed_width(&var.ty, type_layouts).is_some()
+        }
+    }
+}
+
 fn metadata_scalar_const_fits_width(value: &ir::IrConst, expected_width: usize) -> bool {
     let Some(value) = metadata_fixed_scalar_const_value(value) else {
         return false;
@@ -12703,6 +12811,21 @@ fn body_ckb_runtime_features(
                 ir::IrInstruction::Call { func, .. } if func == "__ckb_input_since" => {
                     features.insert("ckb-input-since".to_string());
                 }
+                ir::IrInstruction::Call { func, .. } if func == "__ckb_input_previous_tx_hash" => {
+                    features.insert("ckb-input-previous-output".to_string());
+                }
+                ir::IrInstruction::Call { func, .. } if func == "__ckb_input_previous_index" => {
+                    features.insert("ckb-input-previous-output".to_string());
+                }
+                ir::IrInstruction::Call { func, .. } if func == "__ckb_cell_capacity" => {
+                    features.insert("ckb-cell-capacity".to_string());
+                }
+                ir::IrInstruction::Call { func, .. } if func == "__ckb_cell_data_hash" => {
+                    features.insert("ckb-cell-data-hash".to_string());
+                }
+                ir::IrInstruction::Call { func, .. } if func == "__ckb_cell_lock_args32" => {
+                    features.insert("ckb-cell-lock-args32".to_string());
+                }
                 ir::IrInstruction::Call { func, args, .. } if func.starts_with("__ckb_spawn") => {
                     features.insert("ckb-spawn-ipc".to_string());
                     if is_btc_bip340_spawn_call(func, args) {
@@ -12743,6 +12866,9 @@ fn body_ckb_runtime_features(
                 }
                 ir::IrInstruction::Call { func, .. } if func == "__ckb_hash_blake2b" => {
                     features.insert("ckb-blake2b".to_string());
+                }
+                ir::IrInstruction::Call { func, .. } if func == "__ckb_hash_blake2b_packed" => {
+                    features.insert("ckb-packed-blake2b".to_string());
                 }
                 _ => {}
             }
@@ -13093,6 +13219,15 @@ fn ckb_v014_runtime_access(func: &str) -> Option<(&'static str, &'static str, &'
             Some(("witness-output-type", "LOAD_WITNESS_ARGS_OUTPUT_TYPE", "GroupOutput", "witness::output_type"))
         }
         "__ckb_sighash_all" => Some(("sighash-all", "CKB_SIGHASH_ALL", "GroupInput", "env::sighash_all")),
+        "__ckb_input_previous_tx_hash" => {
+            Some(("input-previous-tx-hash", "LOAD_INPUT_BY_FIELD", "InputSource", "ckb::input_previous_tx_hash"))
+        }
+        "__ckb_input_previous_index" => {
+            Some(("input-previous-index", "LOAD_INPUT_BY_FIELD", "InputSource", "ckb::input_previous_index"))
+        }
+        "__ckb_cell_capacity" => Some(("cell-capacity", "LOAD_CELL_BY_FIELD", "CellSource", "ckb::cell_capacity")),
+        "__ckb_cell_data_hash" => Some(("cell-data-hash", "LOAD_CELL_BY_FIELD", "CellSource", "ckb::cell_data_hash")),
+        "__ckb_cell_lock_args32" => Some(("cell-lock-args32", "LOAD_CELL_BY_FIELD", "CellSource", "ckb::cell_lock_args32")),
         "__ckb_require_maturity" => Some(("require-maturity", "LOAD_INPUT_BY_FIELD", "GroupInput", "require_maturity")),
         "__ckb_require_time" => Some(("require-time", "LOAD_INPUT_BY_FIELD", "GroupInput", "require_time")),
         "__ckb_require_epoch_after" => Some(("require-epoch-after", "LOAD_INPUT_BY_FIELD", "GroupInput", "require_epoch_after")),
@@ -13102,6 +13237,8 @@ fn ckb_v014_runtime_access(func: &str) -> Option<(&'static str, &'static str, &'
         "__ckb_occupied_capacity" => Some(("occupied-capacity", "CAPACITY_POLICY", "Output", "occupied_capacity")),
         "__ckb_hash_chain" => Some(("hash-chain", "CKB_BLAKE2B", "Profile", "hash_chain")),
         "__ckb_hash_blake2b" => Some(("hash-blake2b", "CKB_BLAKE2B", "Profile", "hash_blake2b")),
+        "__ckb_hash_data_packed" => Some(("hash-data-packed", "CKB_BLAKE2B", "Profile", "ckb::hash_data_packed")),
+        "__ckb_hash_blake2b_packed" => Some(("hash-blake2b-packed", "CKB_BLAKE2B", "Profile", "hash_blake2b_packed")),
         _ => None,
     }
 }

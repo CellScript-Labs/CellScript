@@ -22,5 +22,5 @@ fixed_fee_amount: u64
 expiry_timepoint: u64
 status: u8                      # 0 Offered, 1 Active, 2 Repaid, 3 Defaulted, 4 Cancelled
 
-receipt_root: Byte32            # latest receipt commitment chosen by the terminal transition
+latest_receipt_hash: Byte32     # latest receipt commitment chosen by the terminal transition
 nonce: u64                      # increments on terminal transitions

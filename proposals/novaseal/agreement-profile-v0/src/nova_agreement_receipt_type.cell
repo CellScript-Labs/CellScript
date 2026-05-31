@@ -16,8 +16,8 @@ receipt NovaAgreementReceiptV0 has store, create, consume {
     principal_amount: u64,
     fixed_fee_amount: u64,
     terminal_amount: u64,
-    old_receipt_root: Hash,
-    new_receipt_root: Hash,
+    old_latest_receipt_hash: Hash,
+    new_latest_receipt_hash: Hash,
     nonce: u64,
     timepoint: u64,
 }

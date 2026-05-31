@@ -24,9 +24,20 @@ exclude = []
 
 [policy]
 production = false
-deny_fail_closed = true
+deny_fail_closed = false
 deny_ckb_runtime = false
 deny_runtime_obligations = false
+
+[[deploy.ckb.cell_deps]]
+name = "cellscript_btc_bip340_verifier_riscv"
+role = "runtime_verifier"
+verifier_id = "btc-bip340"
+ipc_abi = "cellscript-btc-bip340-ipc-v0"
+out_point = "0x4444444444444444444444444444444444444444444444444444444444444444:0"
+dep_type = "code"
+hash_type = "data1"
+data_hash = "0x4444444444444444444444444444444444444444444444444444444444444444"
+artifact_hash = "0x4444444444444444444444444444444444444444444444444444444444444444"
 
 [metadata]
 protocol_family = "NovaSeal"
@@ -36,3 +47,4 @@ oracle_dependency = "none"
 margin_call_dependency = "none"
 btc_utxo_mirror = "not-implemented"
 receipt_mode = "materialized-output-cell"
+stateful_dispatcher = "src/nova_agreement_lifecycle_type.cell:nova_agreement_lifecycle"

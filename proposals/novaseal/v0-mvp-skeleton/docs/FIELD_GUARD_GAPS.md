@@ -35,7 +35,7 @@ The current expected output in `target/novaseal-audit-surface.json` is:
 The resource-conservation record reports:
 
 - `unchecked`: none
-- `preserved`: `version`, `btc_authority_hash`, `policy_hash`, `receipt_root`
+- `preserved`: `version`, `btc_authority_hash`, `policy_hash`, `latest_receipt_hash`
 - `guarded`: `state_hash`, `nonce`, `expiry`
 - `allowed fresh`: none
 

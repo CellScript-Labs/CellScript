@@ -85,9 +85,14 @@ target_profile = "ckb"
 
 [[deploy.ckb.cell_deps]]
 name = "cellscript_btc_bip340_verifier_riscv"
+role = "runtime_verifier"
+verifier_id = "btc-bip340"
+ipc_abi = "cellscript-btc-bip340-ipc-v0"
+artifact_hash = "0x5555555555555555555555555555555555555555555555555555555555555555"
 out_point = "0x4444444444444444444444444444444444444444444444444444444444444444:0"
 dep_type = "code"
 hash_type = "data1"
+data_hash = "0x6666666666666666666666666666666666666666666666666666666666666666"
 "#,
     )
     .unwrap();
@@ -107,6 +112,21 @@ hash_type = "data1"
         result.metadata.runtime.proof_plan.iter().find(|plan| plan.category == "spawn-target").expect("spawn target ProofPlan");
     assert_eq!(spawn_plan.status, "builder-required");
     assert!(spawn_plan.detail.contains("cellscript_btc_bip340_verifier_riscv"), "{spawn_plan:#?}");
+    let declared_dep = result
+        .metadata
+        .constraints
+        .ckb
+        .as_ref()
+        .expect("CKB constraints")
+        .dep_group_manifest
+        .declared_cell_deps
+        .iter()
+        .find(|dep| dep.name == "cellscript_btc_bip340_verifier_riscv")
+        .expect("declared verifier dep");
+    assert_eq!(declared_dep.role.as_deref(), Some("runtime_verifier"));
+    assert_eq!(declared_dep.verifier_id.as_deref(), Some("btc-bip340"));
+    assert_eq!(declared_dep.ipc_abi.as_deref(), Some("cellscript-btc-bip340-ipc-v0"));
+    assert_eq!(declared_dep.artifact_hash.as_deref(), Some("0x5555555555555555555555555555555555555555555555555555555555555555"));
     assert!(result.metadata.runtime.proof_plan.iter().any(|plan| {
         plan.category == "runtime-verifier" && plan.feature == "verifier:btc-bip340:signature" && plan.status == "builder-required"
     }));

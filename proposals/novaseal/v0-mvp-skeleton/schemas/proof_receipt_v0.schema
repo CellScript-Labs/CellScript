@@ -1,38 +1,38 @@
-# ProofReceiptV0 - Source of Truth Schema (v0 MVP)
+# ProofReceipt schemas - Source of Truth Schema (v0 MVP)
 #
-# This is the audit artefact of a NovaSeal transition.
-#
-# In the strict v0 MVP, the receipt is materialised as a first-class
-# ProofReceiptV0 output cell and the receipt_hash equality remains checked
-# inside the state transition script.
+# `ProofReceiptCommitmentV0` is the explicit commitment preimage whose packed
+# hash becomes `latest_receipt_hash`. It is intentionally not "ProofReceiptV0
+# minus some fields"; auditors should treat it as its own type.
 
-protocol: Byte32                # blake2b("NovaSeal") or equivalent fixed tag.
-
-version: u16                    # 0 for v0 MVP
-
-action: u8                      # Same ActionKind as in the signed intent.
-
+ProofReceiptCommitmentV0:
+protocol_id: Byte32
+package_hash: Byte32
+policy_hash: Byte32
+action: u8
+terminal_path: u8
 old_cell: OutPoint
+new_cell_commitment: Byte32
 old_state_hash: Byte32
 new_state_hash: Byte32
+old_nonce: u64
+new_nonce: u64
+intent_core_hash: Byte32
+payout_commitment_hash: Byte32
 
-intent_hash: Byte32             # The exact digest that the BTC key signed.
-                                # Excluded from the v0 receipt_hash commitment preimage
-                                # to avoid the intent_hash / receipt_hash cycle.
-
+ProofReceiptV0:
+protocol_id: Byte32
+package_hash: Byte32
 policy_hash: Byte32
-
-signer_authority_hash: Byte32   # The btc_authority_hash that was active for this transition.
-
-tx_hash: Byte32                 # The CKB transaction that performed the transition.
-
-nonce: u64
+action: u8
+terminal_path: u8
+old_cell: OutPoint
+new_cell_commitment: Byte32
+old_state_hash: Byte32
+new_state_hash: Byte32
+old_nonce: u64
+new_nonce: u64
+intent_core_hash: Byte32
+signed_intent_hash: Byte32
+payout_commitment_hash: Byte32
+signer_authority_hash: Byte32
 expiry: u64
-
-# Receipt modes supported in v0:
-# - Output receipt cell (implemented by nova_state_type.cell)
-# - ProofPlan receipt output obligation (visible in audit-bundle)
-# - Witness receipt hash equality (checked by the action)
-#
-# The current CellScript skeleton still uses a placeholder intent digest rule
-# until Molecule/wallet signing alignment is frozen.

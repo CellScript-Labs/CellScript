@@ -22,11 +22,12 @@ ENCODING_PROFILE = "packed-fixed-v0-reference"
 DEFAULT_OUTPUT = Path("target/novaseal-schema-layout.json")
 SCHEMA_SOURCES = [
     ("NovaSealCellV0", Path("schemas/nova_seal_cell_v0.schema")),
-    ("NovaSealIntentV0", Path("schemas/nova_intent_v0.schema")),
-    ("ProofReceiptV0", Path("schemas/proof_receipt_v0.schema")),
+    (None, Path("schemas/nova_intent_v0.schema")),
+    (None, Path("schemas/proof_receipt_v0.schema")),
 ]
 
 FIELD_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([A-Za-z][A-Za-z0-9_]*)\b")
+TYPE_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\s*:\s*$")
 
 TYPE_INFO = {
     "u8": {"size_bytes": 1, "encoding": "little-endian unsigned integer"},
@@ -49,20 +50,35 @@ def read_schema(path: Path) -> str:
         raise SystemExit(f"missing schema file: {path}") from None
 
 
-def parse_fields(path: Path, text: str) -> list[dict[str, Any]]:
-    fields = []
+def parse_schema_types(default_type_name: str | None, path: Path, text: str) -> list[tuple[str, list[dict[str, Any]]]]:
+    current_type = default_type_name
+    fields_by_type: list[tuple[str, list[dict[str, Any]]]] = []
+    current_fields: list[dict[str, Any]] = []
+
+    def finish_current() -> None:
+        nonlocal current_type, current_fields
+        if current_type is not None:
+            fields_by_type.append((current_type, current_fields))
+        current_fields = []
+
     for line_number, line in enumerate(text.splitlines(), start=1):
         stripped = line.split("#", 1)[0].strip()
         if not stripped:
             continue
+        type_match = TYPE_RE.match(stripped)
+        if type_match:
+            finish_current()
+            current_type = type_match.group(1)
+            continue
         match = FIELD_RE.match(stripped)
         if not match:
             raise SystemExit(f"unsupported schema syntax in {path}:{line_number}: {line}")
+        if current_type is None:
+            raise SystemExit(f"schema file {path}:{line_number} must declare TypeName: before fields")
         name, ty = match.groups()
-        if ty not in TYPE_INFO:
-            raise SystemExit(f"unsupported field type in {path}:{line_number}: {ty}")
-        fields.append({"name": name, "type": ty, "line": line_number})
-    return fields
+        current_fields.append({"name": name, "type": ty, "line": line_number})
+    finish_current()
+    return fields_by_type
 
 
 def field_components(field_name: str, field_type: str, offset: int) -> list[dict[str, Any]]:
@@ -86,13 +102,13 @@ def field_components(field_name: str, field_type: str, offset: int) -> list[dict
     ]
 
 
-def layout_type(type_name: str, path: Path) -> dict[str, Any]:
-    text = read_schema(path)
-    source_bytes = text.encode("utf-8")
+def layout_type(type_name: str, path: Path, source_bytes: bytes, parsed_fields: list[dict[str, Any]], known_types: dict[str, dict[str, Any]]) -> dict[str, Any]:
     offset = 0
     fields = []
-    for parsed in parse_fields(path, text):
-        info = TYPE_INFO[parsed["type"]]
+    for parsed in parsed_fields:
+        info = TYPE_INFO.get(parsed["type"]) or known_types.get(parsed["type"])
+        if info is None:
+            raise SystemExit(f"unsupported field type in {path}:{parsed['line']}: {parsed['type']}")
         size = int(info["size_bytes"])
         field = {
             "name": parsed["name"],
@@ -124,7 +140,15 @@ def layout_type(type_name: str, path: Path) -> dict[str, Any]:
 
 
 def build_layout() -> dict[str, Any]:
-    types = [layout_type(type_name, path) for type_name, path in SCHEMA_SOURCES]
+    types = []
+    known_types = dict(TYPE_INFO)
+    for default_type_name, path in SCHEMA_SOURCES:
+        text = read_schema(path)
+        source_bytes = text.encode("utf-8")
+        for type_name, fields in parse_schema_types(default_type_name, path, text):
+            ty = layout_type(type_name, path, source_bytes, fields, known_types)
+            known_types[type_name] = {"size_bytes": ty["total_static_size_bytes"], "encoding": f"packed {type_name}"}
+            types.append(ty)
     layout_fingerprint_input = json.dumps(
         {
             "encoding_profile": ENCODING_PROFILE,

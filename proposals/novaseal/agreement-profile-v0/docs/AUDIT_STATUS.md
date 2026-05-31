@@ -14,9 +14,10 @@ evidence, and resolved transaction verifier evidence.
 | `cellc audit-bundle --target-profile ckb --json` | passed |
 | `cellc explain-assumptions --target-profile ckb` | passed; ProofPlan soundness passed |
 | `cellc check --target-profile ckb --primitive-strict 0.16` | passed |
+| `cellc src/nova_agreement_lifecycle_type.cell --target riscv64-asm --target-profile ckb --entry-action nova_agreement_lifecycle` | passed |
 | `python3 scripts/nova_agreement_tx_shape_harness.py --pretty` | passed; 8/8 expectations matched |
 | `cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_agreement_ckb_vm_harness -- --pretty` | passed; 14/14 expectations matched |
-| `cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_agreement_tx_harness -- --pretty` | passed; 15/15 script-layer and node-verifier expectations matched |
+| `cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_agreement_tx_harness -- --pretty` | passed; 20/20 script-layer and node-verifier expectations matched |
 
 Generated audit surface:
 
@@ -51,6 +52,7 @@ cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_agreement_tx_
 | Origination guards | implemented | source-guard-present |
 | Repay before expiry | implemented | source-guard-present |
 | Claim after expiry | implemented | source-guard-present |
+| Stable lifecycle type-script identity | implemented | source-guard-present |
 | Receipt output materialization | implemented | generated-audit-covered |
 | Terminal AgreementCell resource transition soundness | implemented | generated-audit-covered |
 | Executable fixture shape harness | implemented | local-transaction-shape-covered |
@@ -85,7 +87,7 @@ transaction evidence.
 
 ## Receipt Honesty
 
-Receipts are materialized as outputs. The `receipt_hash`/`receipt_root` value is
+Receipts are materialized as outputs. The `receipt_hash`/`latest_receipt_hash` value is
 carried through state and receipt fields, and receipt output mismatches are
 covered in action VM plus resolved transaction evidence. Full Molecule/wallet
 signing preimage alignment remains future work.

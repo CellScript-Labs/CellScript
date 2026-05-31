@@ -69,8 +69,11 @@ use std::collections::{BTreeSet, HashMap};
 const CKB_HEADER_FIELD_EPOCH_NUMBER: u64 = 0;
 const CKB_HEADER_FIELD_EPOCH_START_BLOCK_NUMBER: u64 = 1;
 const CKB_HEADER_FIELD_EPOCH_LENGTH: u64 = 2;
+const CKB_INPUT_FIELD_PREVIOUS_OUTPUT: u64 = 0;
 const CKB_INPUT_FIELD_SINCE: u64 = 1;
 pub(crate) const CKB_CELL_FIELD_CAPACITY: u64 = 0;
+pub(crate) const CKB_CELL_FIELD_DATA_HASH: u64 = 1;
+pub(crate) const CKB_CELL_FIELD_LOCK: u64 = 2;
 pub(crate) const CKB_CELL_FIELD_LOCK_HASH: u64 = 3;
 pub(crate) const CKB_CELL_FIELD_TYPE_HASH: u64 = 5;
 const CKB_INDEX_OUT_OF_BOUND: u64 = 1;
@@ -1033,6 +1036,22 @@ impl CodeGenerator {
                                 obj_var_id: obj.id,
                                 type_name: type_name.to_string(),
                                 field: field.clone(),
+                                layout,
+                            })
+                        } else if let Some(parent) = self.schema_field_value_sources.get(&obj.id).cloned() {
+                            let Some(parent_type_name) = named_type_name(&parent.layout.ty) else {
+                                continue;
+                            };
+                            let Some(mut layout) =
+                                self.type_layouts.get(parent_type_name).and_then(|fields| fields.get(field)).cloned()
+                            else {
+                                continue;
+                            };
+                            layout.offset = parent.layout.offset.saturating_add(layout.offset);
+                            Some(SchemaFieldValueSource {
+                                obj_var_id: parent.obj_var_id,
+                                type_name: parent.type_name,
+                                field: format!("{}.{}", parent.field, field),
                                 layout,
                             })
                         } else {

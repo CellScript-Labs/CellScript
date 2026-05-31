@@ -1,9 +1,0 @@
-{
-  "schema": "novaseal-agreement-fixture-v0.1",
-  "fixture": "receipt_root_mismatch_reject",
-  "action": "repay_before_expiry / claim_after_expiry",
-  "expected": "rejected",
-  "coverage": "source-guard-present + action-ckb-vm-covered + resolved-transaction-covered",
-  "reject_guard": "closed.receipt_root == receipt_hash",
-  "description": "Terminal transitions must bind the closed AgreementCell receipt_root to the witness receipt_hash."
-}

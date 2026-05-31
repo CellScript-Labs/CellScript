@@ -1,0 +1,9 @@
+{
+  "schema": "novaseal-agreement-fixture-v0.1",
+  "fixture": "payout_capacity_short_reject",
+  "action": "repay_before_expiry",
+  "expected": "rejected",
+  "coverage": "source-guard-present + action-ckb-vm-covered + resolved-transaction-covered",
+  "reject_guard": "ckb::cell_capacity(payout_output) >= occupied_capacity(\"NativeCkbPayoutV0\") + amount",
+  "description": "A typed CKB payout output must carry at least occupied capacity plus the committed shannon amount."
+}

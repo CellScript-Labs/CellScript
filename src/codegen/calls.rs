@@ -11,8 +11,11 @@ use crate::runtime_errors::CellScriptRuntimeError;
 
 use super::abi::{abi_arg_label, call_abi_arg_count, outgoing_stack_arg_bytes, CallLengthKind};
 use super::runtime::{ckb_checked_runtime_status_reg, is_ckb_checked_runtime_helper, is_ckb_fixed_hash_helper};
-use super::schema::{const_usize_operand, fixed_aggregate_pointer_param_width, fixed_byte_pointer_param_width, named_type_name};
-use super::CodeGenerator;
+use super::schema::{
+    const_ir_type, const_usize_operand, fixed_aggregate_pointer_param_width, fixed_byte_pointer_param_width, named_type_name,
+    storage_type,
+};
+use super::{CodeGenerator, RUNTIME_SCRATCH_BUFFER_SIZE};
 
 impl CodeGenerator {
     fn emit_fixed_u64_le_call(&mut self, dest: Option<&IrVar>, func: &str, args: &[IrOperand]) -> Result<bool> {
@@ -74,7 +77,16 @@ impl CodeGenerator {
     }
 
     fn emit_ckb_fixed_hash_call(&mut self, dest: Option<&IrVar>, func: &str, args: &[IrOperand]) -> Result<bool> {
-        if !is_ckb_fixed_hash_helper(func) {
+        if !is_ckb_fixed_hash_helper(func)
+            || matches!(
+                func,
+                "__ckb_hash_blake2b_packed"
+                    | "__ckb_hash_data_packed"
+                    | "__ckb_input_previous_tx_hash"
+                    | "__ckb_cell_data_hash"
+                    | "__ckb_cell_lock_args32"
+            )
+        {
             return Ok(false);
         }
         self.emit(format!("# call {}", func));
@@ -112,8 +124,173 @@ impl CodeGenerator {
         Ok(true)
     }
 
+    fn emit_hash_blake2b_packed_call(&mut self, dest: Option<&IrVar>, func: &str, args: &[IrOperand]) -> Result<bool> {
+        if !matches!(func, "__ckb_hash_blake2b_packed" | "__ckb_hash_data_packed") {
+            return Ok(false);
+        }
+        self.emit(format!("# call {}", func));
+        let Some(dest) = dest else {
+            self.emit("# cellscript abi: fail closed because packed hash result has no destination");
+            self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+            return Ok(true);
+        };
+        let Some(arg) = args.first() else {
+            self.emit("# cellscript abi: fail closed because packed hash is missing input");
+            self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+            return Ok(true);
+        };
+        let Some(dest_offset) = self.fixed_byte_local_offsets.get(&dest.id).copied() else {
+            self.emit("# cellscript abi: fail closed because packed hash output buffer was not allocated");
+            self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+            return Ok(true);
+        };
+        let Some(width) = packed_hash_operand_width(self, arg) else {
+            self.emit("# cellscript abi: fail closed because hash_blake2b_packed input is not fixed-width");
+            self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+            return Ok(true);
+        };
+        let type_name = packed_hash_operand_type_name(arg);
+        if func == "__ckb_hash_blake2b_packed" && type_name.is_none() {
+            self.emit("# cellscript abi: fail closed because hash_blake2b_packed input type name is not canonical");
+            self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+            return Ok(true);
+        }
+        let mut header = Vec::new();
+        if func == "__ckb_hash_blake2b_packed" {
+            let type_name = type_name.as_deref().unwrap_or_default();
+            header.extend_from_slice(b"CellScriptPackedHashV0\0");
+            header.extend_from_slice(type_name.as_bytes());
+            header.push(0);
+            header.extend_from_slice(&(width as u32).to_le_bytes());
+        }
+        let preimage_len = header.len().saturating_add(width);
+        if preimage_len > RUNTIME_SCRATCH_BUFFER_SIZE {
+            self.emit(format!(
+                "# cellscript abi: fail closed because packed hash preimage size {} exceeds scratch buffer {}",
+                preimage_len, RUNTIME_SCRATCH_BUFFER_SIZE
+            ));
+            self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+            return Ok(true);
+        }
+
+        let buffer_offset = self.runtime_scratch_buffer_offset();
+        if func == "__ckb_hash_blake2b_packed" {
+            self.emit(format!(
+                "# cellscript abi: hash_blake2b_packed type={} packed_len={} preimage_len={}",
+                type_name.as_deref().unwrap_or_default(),
+                width,
+                preimage_len
+            ));
+        } else {
+            self.emit(format!("# cellscript abi: ckb::hash_data_packed packed_len={} preimage_len={}", width, preimage_len));
+        }
+        self.emit_sp_addi("t4", buffer_offset);
+        for (index, byte) in header.iter().enumerate() {
+            self.emit(format!("li t0, {}", byte));
+            self.emit(format!("sb t0, {}(t4)", index));
+        }
+        if !self.emit_packed_operand_bytes_to_scratch(arg, width, buffer_offset + header.len(), "hash_blake2b_packed input") {
+            self.emit("# cellscript abi: fail closed because packed hash input is not materializable as fixed bytes");
+            self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+            return Ok(true);
+        }
+
+        self.emit_sp_addi("a0", buffer_offset);
+        self.emit(format!("li a1, {}", preimage_len));
+        self.emit_sp_addi("a2", dest_offset);
+        self.emit("call __ckb_hash_blake2b_var");
+        self.emit_return_on_syscall_error(CellScriptRuntimeError::SyscallFailed);
+        self.emit_sp_addi("t0", dest_offset);
+        self.emit_stack_store("t0", dest.id * 8);
+        Ok(true)
+    }
+
+    fn emit_packed_operand_bytes_to_scratch(&mut self, operand: &IrOperand, width: usize, dest_offset: usize, context: &str) -> bool {
+        if let Some(source) = self.expected_fixed_byte_source(operand, width) {
+            self.emit_prepare_fixed_byte_source(&source, width, context);
+            if !self.emit_fixed_byte_source_pointer_or_const_to("t5", &source) {
+                return false;
+            }
+            self.emit_sp_addi("t4", dest_offset);
+            self.emit_copy_fixed_bytes_from_t5_to_t4(width);
+            return true;
+        }
+
+        let IrOperand::Var(var) = operand else {
+            return false;
+        };
+        let Some(fields) = self.tuple_aggregate_fields.get(&var.id).cloned() else {
+            return false;
+        };
+        let mut offset = 0usize;
+        for field in fields {
+            let Some(field_width) = packed_hash_operand_width(self, &field) else {
+                return false;
+            };
+            if !self.emit_packed_operand_bytes_to_scratch(&field, field_width, dest_offset + offset, context) {
+                return false;
+            }
+            let Some(next) = offset.checked_add(field_width) else {
+                return false;
+            };
+            offset = next;
+        }
+        offset == width
+    }
+
+    fn emit_copy_fixed_bytes_from_t5_to_t4(&mut self, width: usize) {
+        self.emit(format!("li t0, {}", width));
+        self.emit("li t1, 0");
+        let loop_label = self.fresh_label("packed_hash_copy_loop");
+        let done_label = self.fresh_label("packed_hash_copy_done");
+        self.emit_label(&loop_label);
+        self.emit(format!("beq t1, t0, {}", done_label));
+        self.emit("add t2, t5, t1");
+        self.emit("lbu t3, 0(t2)");
+        self.emit("add t2, t4, t1");
+        self.emit("sb t3, 0(t2)");
+        self.emit("addi t1, t1, 1");
+        self.emit(format!("j {}", loop_label));
+        self.emit_label(&done_label);
+    }
+
+    fn emit_ckb_fixed_hash_query_call(&mut self, dest: Option<&IrVar>, func: &str, args: &[IrOperand]) -> Result<bool> {
+        if !matches!(func, "__ckb_input_previous_tx_hash" | "__ckb_cell_data_hash" | "__ckb_cell_lock_args32") {
+            return Ok(false);
+        }
+        self.emit(format!("# call {}", func));
+        let Some(dest) = dest else {
+            self.emit("# cellscript abi: fail closed because CKB hash query result has no destination");
+            self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+            return Ok(true);
+        };
+        let Some(source_view) = args.first() else {
+            self.emit("# cellscript abi: fail closed because CKB hash query is missing source view");
+            self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+            return Ok(true);
+        };
+        let Some(dest_offset) = self.fixed_byte_local_offsets.get(&dest.id).copied() else {
+            self.emit("# cellscript abi: fail closed because CKB hash query output buffer was not allocated");
+            self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+            return Ok(true);
+        };
+        self.emit_operand_to_register("a0", source_view);
+        self.emit_sp_addi("a1", dest_offset);
+        self.emit(format!("call {}", func));
+        self.emit_checked_runtime_status(func);
+        self.emit_sp_addi("t0", dest_offset);
+        self.emit_stack_store("t0", dest.id * 8);
+        Ok(true)
+    }
+
     pub(crate) fn emit_call(&mut self, dest: Option<&IrVar>, func: &str, args: &[IrOperand]) -> Result<()> {
         if self.emit_fixed_u64_le_call(dest, func, args)? {
+            return Ok(());
+        }
+        if self.emit_hash_blake2b_packed_call(dest, func, args)? {
+            return Ok(());
+        }
+        if self.emit_ckb_fixed_hash_query_call(dest, func, args)? {
             return Ok(());
         }
         if self.emit_ckb_fixed_hash_call(dest, func, args)? {
@@ -449,5 +626,47 @@ fn fixed_u64_le_operand_width(operand: &IrOperand) -> Option<usize> {
             _ => None,
         },
         _ => None,
+    }
+}
+
+fn packed_hash_operand_width(codegen: &CodeGenerator, operand: &IrOperand) -> Option<usize> {
+    match operand {
+        IrOperand::Const(IrConst::Bool(_)) | IrOperand::Const(IrConst::U8(_)) => Some(1),
+        IrOperand::Const(IrConst::U16(_)) => Some(2),
+        IrOperand::Const(IrConst::U32(_)) => Some(4),
+        IrOperand::Const(IrConst::U64(_)) => Some(8),
+        IrOperand::Const(IrConst::U128(_)) => Some(16),
+        IrOperand::Const(IrConst::Address(_)) | IrOperand::Const(IrConst::Hash(_)) => Some(32),
+        IrOperand::Const(IrConst::Array(values)) if values.iter().all(|value| matches!(value, IrConst::U8(_))) => Some(values.len()),
+        IrOperand::Var(var) => codegen.fixed_byte_like_width(&var.ty),
+        _ => None,
+    }
+}
+
+fn packed_hash_operand_type_name(operand: &IrOperand) -> Option<String> {
+    match operand {
+        IrOperand::Const(value) => Some(canonical_ir_type_name(&const_ir_type(value))),
+        IrOperand::Var(var) => Some(canonical_ir_type_name(&var.ty)),
+    }
+}
+
+fn canonical_ir_type_name(ty: &IrType) -> String {
+    match storage_type(ty) {
+        IrType::U8 => "u8".to_string(),
+        IrType::U16 => "u16".to_string(),
+        IrType::U32 => "u32".to_string(),
+        IrType::U64 => "u64".to_string(),
+        IrType::U128 => "u128".to_string(),
+        IrType::Bool => "bool".to_string(),
+        IrType::Unit => "()".to_string(),
+        IrType::Address => "Address".to_string(),
+        IrType::Hash => "Hash".to_string(),
+        IrType::Array(inner, len) => format!("[{};{}]", canonical_ir_type_name(inner), len),
+        IrType::Tuple(items) => {
+            let items = items.iter().map(canonical_ir_type_name).collect::<Vec<_>>().join(",");
+            format!("({items})")
+        }
+        IrType::Named(name) => name.clone(),
+        IrType::Ref(inner) | IrType::MutRef(inner) => canonical_ir_type_name(inner),
     }
 }

@@ -22,7 +22,7 @@ resource NovaSealCellV0 has store, create, consume {
     btc_authority_hash: Hash,
     state_hash: Hash,
     policy_hash: Hash,
-    receipt_root: Hash,
+    latest_receipt_hash: Hash,
     nonce: u64,
     expiry: u64,
 }
@@ -32,16 +32,32 @@ struct OutPoint {
     index: u32,
 }
 
-struct NovaSealIntentV0 {
-    domain: Hash,
+struct NovaSealCellCommitmentV0 {
+    version: u16,
+    btc_authority_hash: Hash,
+    state_hash: Hash,
+    policy_hash: Hash,
+    nonce: u64,
+    expiry: u64,
+}
+
+struct NovaSealIntentCoreV0 {
+    protocol_id: Hash,
+    package_hash: Hash,
+    policy_hash: Hash,
     action: u8,
+    terminal_path: u8,
     old_cell: OutPoint,
     old_state_hash: Hash,
     new_state_hash: Hash,
-    policy_hash: Hash,
-    receipt_hash: Hash,
-    nonce: u64,
+    old_nonce: u64,
+    new_nonce: u64,
     expiry: u64,
+}
+
+struct NovaSealSignedIntentV0 {
+    core: NovaSealIntentCoreV0,
+    expected_receipt_hash: Hash,
 }
 
 struct SignaturePayload {
@@ -49,18 +65,38 @@ struct SignaturePayload {
     signature: [u8; 64],
 }
 
-receipt ProofReceiptV0 has store, create, consume {
-    protocol: Hash,
-    version: u16,
+struct ProofReceiptCommitmentV0 {
+    protocol_id: Hash,
+    package_hash: Hash,
+    policy_hash: Hash,
     action: u8,
+    terminal_path: u8,
     old_cell: OutPoint,
+    new_cell_commitment: Hash,
     old_state_hash: Hash,
     new_state_hash: Hash,
-    intent_hash: Hash,
+    old_nonce: u64,
+    new_nonce: u64,
+    intent_core_hash: Hash,
+    payout_commitment_hash: Hash,
+}
+
+receipt ProofReceiptV0 has store, create, consume {
+    protocol_id: Hash,
+    package_hash: Hash,
     policy_hash: Hash,
+    action: u8,
+    terminal_path: u8,
+    old_cell: OutPoint,
+    new_cell_commitment: Hash,
+    old_state_hash: Hash,
+    new_state_hash: Hash,
+    old_nonce: u64,
+    new_nonce: u64,
+    intent_core_hash: Hash,
+    signed_intent_hash: Hash,
+    payout_commitment_hash: Hash,
     signer_authority_hash: Hash,
-    tx_hash: Hash,
-    nonce: u64,
     expiry: u64,
 }
 
@@ -69,42 +105,80 @@ receipt ProofReceiptV0 has store, create, consume {
 
 // The core transition action. This is what builders and the acceptance harness
 // will target for the 9 criteria.
-action key_auth_transition(old_cell: NovaSealCellV0, witness intent: NovaSealIntentV0, witness receipt_hash: Hash, witness state_hash_commitment: Hash, witness sig: SignaturePayload) -> (new_cell: NovaSealCellV0, receipt: ProofReceiptV0)
+action key_auth_transition(old_cell: NovaSealCellV0, witness intent: NovaSealSignedIntentV0, witness state_hash_commitment: Hash, witness sig: SignaturePayload) -> (new_cell: NovaSealCellV0, receipt: ProofReceiptV0)
 where
     let now = env::current_timepoint()
-    let actual_state_hash_commitment = hash_blake2b(intent.new_state_hash)
-    let intent_hash = hash_blake2b(intent.domain)
-    require intent.old_state_hash == old_cell.state_hash
+    let input_source = source::group_input(0)
+    let actual_old_tx_hash = ckb::input_previous_tx_hash(input_source)
+    let actual_old_index = ckb::input_previous_index(input_source)
+    let actual_state_hash_commitment = hash_blake2b(intent.core.new_state_hash)
+    let intent_core_hash = hash_blake2b_packed(intent.core)
+    let signed_intent_hash = hash_blake2b_packed(intent)
+    let new_cell_commitment = hash_blake2b_packed(NovaSealCellCommitmentV0 {
+        version: old_cell.version,
+        btc_authority_hash: old_cell.btc_authority_hash,
+        state_hash: intent.core.new_state_hash,
+        policy_hash: old_cell.policy_hash,
+        nonce: intent.core.new_nonce,
+        expiry: intent.core.expiry
+    })
+    let receipt_commitment = ProofReceiptCommitmentV0 {
+        protocol_id: intent.core.protocol_id,
+        package_hash: intent.core.package_hash,
+        policy_hash: intent.core.policy_hash,
+        action: intent.core.action,
+        terminal_path: intent.core.terminal_path,
+        old_cell: intent.core.old_cell,
+        new_cell_commitment: new_cell_commitment,
+        old_state_hash: intent.core.old_state_hash,
+        new_state_hash: intent.core.new_state_hash,
+        old_nonce: intent.core.old_nonce,
+        new_nonce: intent.core.new_nonce,
+        intent_core_hash: intent_core_hash,
+        payout_commitment_hash: Hash::zero()
+    }
+    let materialized_receipt_hash = hash_blake2b_packed(receipt_commitment)
+    require intent.core.old_cell.tx_hash == actual_old_tx_hash
+    require intent.core.old_cell.index == actual_old_index
+    require intent.core.old_state_hash == old_cell.state_hash
     require actual_state_hash_commitment == state_hash_commitment
-    require intent.policy_hash == old_cell.policy_hash
-    require intent.nonce == old_cell.nonce + 1
-    require now <= intent.expiry
-    require receipt_hash == intent.receipt_hash
+    require intent.core.policy_hash == old_cell.policy_hash
+    require intent.core.old_nonce == old_cell.nonce
+    require intent.core.new_nonce == old_cell.nonce + 1
+    require now <= intent.core.expiry
+    require intent.expected_receipt_hash == materialized_receipt_hash
+    require receipt_commitment.intent_core_hash == intent_core_hash
+
+    verifier::btc::bip340::require_signature(signed_intent_hash, sig.pubkey, sig.signature)
 
     consume old_cell
     create new_cell = NovaSealCellV0 {
         version: old_cell.version,
         btc_authority_hash: old_cell.btc_authority_hash,
-        state_hash: intent.new_state_hash,
+        state_hash: intent.core.new_state_hash,
         policy_hash: old_cell.policy_hash,
-        receipt_root: old_cell.receipt_root,
-        nonce: intent.nonce,
-        expiry: intent.expiry
+        latest_receipt_hash: materialized_receipt_hash,
+        nonce: intent.core.new_nonce,
+        expiry: intent.core.expiry
     }
 
     create receipt = ProofReceiptV0 {
-        protocol: intent.domain,
-        version: old_cell.version,
-        action: intent.action,
-        old_cell: intent.old_cell,
-        old_state_hash: intent.old_state_hash,
-        new_state_hash: intent.new_state_hash,
-        intent_hash: intent_hash,
-        policy_hash: intent.policy_hash,
+        protocol_id: intent.core.protocol_id,
+        package_hash: intent.core.package_hash,
+        policy_hash: intent.core.policy_hash,
+        action: intent.core.action,
+        terminal_path: intent.core.terminal_path,
+        old_cell: intent.core.old_cell,
+        new_cell_commitment: new_cell_commitment,
+        old_state_hash: intent.core.old_state_hash,
+        new_state_hash: intent.core.new_state_hash,
+        old_nonce: intent.core.old_nonce,
+        new_nonce: intent.core.new_nonce,
+        intent_core_hash: intent_core_hash,
+        signed_intent_hash: signed_intent_hash,
+        payout_commitment_hash: Hash::zero(),
         signer_authority_hash: old_cell.btc_authority_hash,
-        tx_hash: Hash::zero(),
-        nonce: intent.nonce,
-        expiry: intent.expiry
+        expiry: intent.core.expiry
     }
 
 
@@ -117,16 +191,11 @@ where
 // nova_btc_authority_lock.cell for targeted standalone compilation, but this
 // copy makes the package audit-bundle expose a real locks[] record for the
 // active NovaSeal resource.
-lock btc_authority(protected cell: NovaSealCellV0, lock_args expected_btc_authority_hash: Hash, witness intent: NovaSealIntentV0, witness receipt_hash: Hash, witness state_hash_commitment: Hash, witness sig: SignaturePayload) -> bool {
-    let digest = compute_intent_hash(&intent)
+lock btc_authority(protected cell: NovaSealCellV0, lock_args expected_btc_authority_hash: Hash, witness intent: NovaSealSignedIntentV0, witness state_hash_commitment: Hash, witness sig: SignaturePayload) -> bool {
+    let digest = hash_blake2b_packed(intent)
     require expected_btc_authority_hash == cell.btc_authority_hash
-    require intent.policy_hash == cell.policy_hash
+    require intent.core.policy_hash == cell.policy_hash
 
     verifier::btc::bip340::require_signature(digest, sig.pubkey, sig.signature)
     true
-}
-
-fn compute_intent_hash(intent: &NovaSealIntentV0) -> Hash {
-    // Placeholder only. The canonical preimage is frozen in schemas/ and docs/.
-    hash_blake2b(intent.domain)
 }

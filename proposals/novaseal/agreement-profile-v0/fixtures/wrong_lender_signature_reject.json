@@ -1,0 +1,9 @@
+{
+  "schema": "novaseal-agreement-fixture-v0.1",
+  "fixture": "wrong_lender_signature_reject",
+  "action": "originate_agreement",
+  "expected": "rejected",
+  "coverage": "source-guard-present + action-ckb-vm-covered + resolved-transaction-covered",
+  "reject_guard": "verifier::btc::bip340::require_signature(signed_intent_hash, lender_sig.pubkey, lender_sig.signature)",
+  "description": "Origination requires the lender BIP340 signature over the canonical signed intent hash."
+}

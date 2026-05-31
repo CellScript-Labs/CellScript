@@ -511,6 +511,12 @@ impl<'a> TypeChecker<'a> {
         if self.current_module.is_none() {
             self.current_module = Some(module.name.clone());
         }
+        if module.name == "verifier" || module.name.starts_with("verifier::") {
+            return Err(CompileError::new(
+                "module namespace 'verifier::*' is reserved for compiler-owned verifier capabilities",
+                module.span,
+            ));
+        }
         self.validate_primitive_strict_capabilities(module)?;
         self.reject_imports_without_resolver(module)?;
         let mut seen_symbols = HashSet::new();
@@ -3439,6 +3445,7 @@ impl<'a> TypeChecker<'a> {
                     }
                     BinaryOp::Eq | BinaryOp::Ne => {
                         let same_or_widenable = self.types_equal(&left_ty, &right_ty)
+                            || Self::hash_byte32_types_compatible(&left_ty, &right_ty)
                             || (Self::widen_to(&left_ty, &right_ty).is_some()
                                 && !matches!(left_ty, Type::U128)
                                 && !matches!(right_ty, Type::U128));
@@ -5152,6 +5159,22 @@ impl<'a> TypeChecker<'a> {
                             self.validate_builtin_arity(name, 0, arg_types, call.span)?;
                             Type::U64
                         }
+                        ("ckb", "input_previous_tx_hash" | "cell_data_hash" | "cell_lock_args32") => {
+                            self.validate_source_view_builtin(name, arg_types, call.span)?;
+                            Type::Hash
+                        }
+                        ("ckb", "input_previous_index") => {
+                            self.validate_source_view_builtin(name, arg_types, call.span)?;
+                            Type::U32
+                        }
+                        ("ckb", "cell_capacity") => {
+                            self.validate_source_view_builtin(name, arg_types, call.span)?;
+                            Type::U64
+                        }
+                        ("ckb", "hash_data_packed") => {
+                            self.validate_hash_data_packed_call(call, arg_types)?;
+                            Type::Hash
+                        }
                         ("source", "input" | "output" | "cell_dep" | "header_dep" | "group_input" | "group_output") => {
                             self.validate_builtin_arity(name, 1, arg_types, call.span)?;
                             if arg_types[0] != Type::U64 {
@@ -5294,6 +5317,10 @@ impl<'a> TypeChecker<'a> {
                         if arg_types[0] != Type::Hash {
                             return Err(CompileError::new("hash_blake2b expects Hash input", call.span));
                         }
+                        return Ok(Type::Hash);
+                    }
+                    "hash_blake2b_packed" => {
+                        self.validate_hash_blake2b_packed_call(call, arg_types)?;
                         return Ok(Type::Hash);
                     }
                     _ => {}
@@ -5723,6 +5750,56 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
+    fn validate_source_view_builtin(&self, name: &str, arg_types: &[Type], span: Span) -> Result<()> {
+        self.validate_builtin_arity(name, 1, arg_types, span)?;
+        if arg_types[0] != Type::U64 {
+            return Err(CompileError::new(format!("{} expects a source view returned by source::*", name), span));
+        }
+        Ok(())
+    }
+
+    fn validate_hash_blake2b_packed_call(&self, call: &CallExpr, arg_types: &[Type]) -> Result<()> {
+        self.validate_builtin_arity("hash_blake2b_packed", 1, arg_types, call.span)?;
+        if self.packed_hash_static_width(&arg_types[0]).is_none() {
+            return Err(CompileError::new(
+                "hash_blake2b_packed expects a fixed-width value; String, Vec, dynamic arrays, and unknown layouts are rejected",
+                call.span,
+            ));
+        }
+        Ok(())
+    }
+
+    fn validate_hash_data_packed_call(&self, call: &CallExpr, arg_types: &[Type]) -> Result<()> {
+        self.validate_builtin_arity("ckb::hash_data_packed", 1, arg_types, call.span)?;
+        if self.packed_hash_static_width(&arg_types[0]).is_none() {
+            return Err(CompileError::new(
+                "ckb::hash_data_packed expects a fixed-width value; String, Vec, dynamic arrays, and unknown layouts are rejected",
+                call.span,
+            ));
+        }
+        Ok(())
+    }
+
+    fn packed_hash_static_width(&self, ty: &Type) -> Option<usize> {
+        match ty {
+            Type::Bool | Type::U8 => Some(1),
+            Type::U16 => Some(2),
+            Type::U32 => Some(4),
+            Type::U64 => Some(8),
+            Type::U128 => Some(16),
+            Type::Address | Type::Hash => Some(32),
+            Type::Array(inner, len) => self.packed_hash_static_width(inner)?.checked_mul(*len),
+            Type::Tuple(items) => items.iter().try_fold(0usize, |acc, item| acc.checked_add(self.packed_hash_static_width(item)?)),
+            Type::Unit => Some(0),
+            Type::Ref(inner) | Type::MutRef(inner) => self.packed_hash_static_width(inner),
+            Type::Named(name) if name == "String" || name == "Vec" || name.starts_with("Vec<") => None,
+            Type::Named(name) => {
+                let fields = self.resolve_named_type_fields(name)?;
+                fields.values().try_fold(0usize, |acc, field_ty| acc.checked_add(self.packed_hash_static_width(field_ty)?))
+            }
+        }
+    }
+
     fn validate_fixed_u64_le_call(&self, call: &CallExpr, arg_types: &[Type]) -> Result<()> {
         self.validate_builtin_arity("fixed_u64_le", 2, arg_types, call.span)?;
         let Some(width) = fixed_u64_le_input_width(&arg_types[0]) else {
@@ -5777,6 +5854,13 @@ impl<'a> TypeChecker<'a> {
             ));
         }
         Ok(())
+    }
+
+    fn hash_byte32_types_compatible(left: &Type, right: &Type) -> bool {
+        matches!(
+            (left, right),
+            (Type::Hash, Type::Array(elem, 32)) | (Type::Array(elem, 32), Type::Hash) if **elem == Type::U8
+        )
     }
 
     fn resolve_function(&self, name: &str) -> Option<FunctionDef> {

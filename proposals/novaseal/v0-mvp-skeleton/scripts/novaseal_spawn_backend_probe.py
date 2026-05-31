@@ -25,6 +25,7 @@ SCHEMA = "novaseal-spawn-backend-probe-v0.1"
 
 DEFAULT_OUTPUT = Path("target/novaseal-spawn-backend-probe.json")
 DEFAULT_AUDIT_SURFACE = Path("target/novaseal-audit-surface.json")
+DEFAULT_CELLC = Path(__file__).resolve().parents[4] / "target/debug/cellc"
 
 PROBE_SOURCE = """module novaseal::spawn_backend_probe
 
@@ -44,16 +45,21 @@ target_profile = "ckb"
 
 [[deploy.ckb.cell_deps]]
 name = "cellscript_btc_bip340_verifier_riscv"
+role = "runtime_verifier"
+verifier_id = "btc.bip340"
+ipc_abi = "cellscript.verifier.btc.bip340.v0"
 out_point = "0x4444444444444444444444444444444444444444444444444444444444444444:0"
 dep_type = "code"
 hash_type = "data1"
+data_hash = "0x5555555555555555555555555555555555555555555555555555555555555555"
+artifact_hash = "0x6666666666666666666666666666666666666666666666666666666666666666"
 """
 
 
-def run_command(args: list[str], cwd: Path) -> dict[str, Any]:
+def run_command(args: list[str | Path], cwd: Path) -> dict[str, Any]:
     completed = subprocess.run(args, cwd=cwd, text=True, capture_output=True, check=False)
     return {
-        "args": args,
+        "args": [str(arg) for arg in args],
         "returncode": completed.returncode,
         "stdout": completed.stdout,
         "stderr": completed.stderr,
@@ -278,7 +284,7 @@ def build_report(cellc: str, output: Path, audit_surface_path: Path) -> dict[str
     return {
         "schema": SCHEMA,
         "classification": classification,
-        "cellc": cellc,
+        "cellc": str(cellc),
         "probe_source": PROBE_SOURCE,
         "compile": {
             "passed": compile_result["passed"],
@@ -328,7 +334,7 @@ def build_report(cellc: str, output: Path, audit_surface_path: Path) -> dict[str
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--cellc", default="cellc", help="cellc binary to execute")
+    parser.add_argument("--cellc", default=DEFAULT_CELLC, help="cellc binary to execute")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--audit-surface", type=Path, default=DEFAULT_AUDIT_SURFACE)
     parser.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")

@@ -22,6 +22,7 @@ use ckb_types::{
     prelude::*,
 };
 use ckb_verification::{ContextualTransactionVerifier, NonContextualTransactionVerifier};
+use k256::schnorr::SigningKey;
 use serde::Serialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -31,6 +32,7 @@ const DEFAULT_ORIGINATE_ELF: &str = "target/nova-agreement-originate-action.elf"
 const DEFAULT_REPAY_ELF: &str = "target/nova-agreement-repay-action.elf";
 const DEFAULT_CLAIM_ELF: &str = "target/nova-agreement-claim-action.elf";
 const DEFAULT_LOCK_ELF: &str = "target/nova-agreement-always-success-lock.elf";
+const DEFAULT_CHILD_VERIFIER_ELF: &str = "../../../v0-mvp-skeleton/target/novaseal-btc-verifier-riscv-shell-release.elf";
 const DEFAULT_FIXTURES_DIR: &str = "fixtures";
 const DEFAULT_OUTPUT: &str = "target/nova-agreement-ckb-tx-report.json";
 const EXPECTED_TX_HARNESS_LIMIT_FIXTURES: &[&str] = &[];
@@ -52,8 +54,13 @@ const EXPIRY_TIMEPOINT: u64 = 200;
 
 const TERMS_LEN: usize = 237;
 const AGREEMENT_CELL_LEN: usize = 269;
-const AGREEMENT_RECEIPT_LEN: usize = 243;
+const AGREEMENT_INTENT_CORE_LEN: usize = 195;
+const AGREEMENT_SIGNED_INTENT_LEN: usize = 227;
+const AGREEMENT_RECEIPT_COMMITMENT_LEN: usize = 219;
+const AGREEMENT_SIGNATURE_PAYLOAD_LEN: usize = 96;
+const AGREEMENT_RECEIPT_LEN: usize = 339;
 const PAYOUT_LEN: usize = 147;
+const REPAY_PAYOUT_COMMITMENT_LEN: usize = 64;
 
 const AGREEMENT_VERSION: u16 = 0;
 const ASSET_KIND_CKB: u8 = 0;
@@ -71,21 +78,27 @@ const PAYOUT_BORROWER_COLLATERAL_RETURN: u8 = 2;
 const PAYOUT_LENDER_DEFAULT_CLAIM: u8 = 3;
 
 const LOCK_WITNESS_MAGIC: &[u8; 8] = b"CSARGv1\0";
+const PACKED_HASH_DOMAIN: &[u8] = b"CellScriptPackedHashV0\0";
+const INTENT_CORE_TYPE_NAME: &[u8] = b"NovaAgreementIntentCoreV0";
+const SIGNED_INTENT_TYPE_NAME: &[u8] = b"NovaAgreementSignedIntentV0";
+const RECEIPT_COMMITMENT_TYPE_NAME: &[u8] = b"NovaAgreementReceiptCommitmentV0";
+const PAYOUT_TYPE_NAME: &[u8] = b"NativeCkbPayoutV0";
+const REPAY_PAYOUT_COMMITMENT_TYPE_NAME: &[u8] = b"RepayPayoutCommitmentV0";
 const ZERO_HASH: [u8; 32] = [0x00; 32];
 const AGREEMENT_ID: [u8; 32] = [0xaa; 32];
 const TERMS_HASH: [u8; 32] = [0xbb; 32];
-const BORROWER_AUTHORITY: [u8; 32] = [0x11; 32];
-const LENDER_AUTHORITY: [u8; 32] = [0x22; 32];
-const STRANGER_AUTHORITY: [u8; 32] = [0x33; 32];
-const OLD_RECEIPT_ROOT: [u8; 32] = [0x44; 32];
-const NEW_RECEIPT_ROOT: [u8; 32] = [0x55; 32];
-const OTHER_RECEIPT_ROOT: [u8; 32] = [0x66; 32];
+const OLD_LATEST_RECEIPT_HASH: [u8; 32] = [0x44; 32];
+const OTHER_LATEST_RECEIPT_HASH: [u8; 32] = [0x66; 32];
 const OTHER_TERMS_HASH: [u8; 32] = [0xcc; 32];
+const TEST_BORROWER_SECRET_KEY: [u8; 32] = [0x07; 32];
+const TEST_LENDER_SECRET_KEY: [u8; 32] = [0x08; 32];
+const TEST_STRANGER_SECRET_KEY: [u8; 32] = [0x09; 32];
+const TEST_AUX_RAND: [u8; 32] = [0x42; 32];
 
 #[derive(Debug, Error)]
 enum HarnessError {
     #[error(
-        "usage: novaseal_agreement_tx_harness [--originate-elf PATH] [--repay-elf PATH] [--claim-elf PATH] [--lock-elf PATH] [--fixtures-dir PATH] [--output PATH] [--pretty]"
+        "usage: novaseal_agreement_tx_harness [--originate-elf PATH] [--repay-elf PATH] [--claim-elf PATH] [--lock-elf PATH] [--child-verifier-elf PATH] [--fixtures-dir PATH] [--output PATH] [--pretty]"
     )]
     Usage,
     #[error("{0}")]
@@ -102,6 +115,7 @@ struct Args {
     repay_elf: PathBuf,
     claim_elf: PathBuf,
     lock_elf: PathBuf,
+    child_verifier_elf: PathBuf,
     fixtures_dir: PathBuf,
     output: PathBuf,
     pretty: bool,
@@ -205,6 +219,7 @@ struct AgreementCase {
 struct PayoutOutput {
     role: &'static str,
     capacity: u64,
+    lock_args: [u8; 32],
     data: Vec<u8>,
 }
 
@@ -229,6 +244,7 @@ struct Report {
     classification: &'static str,
     action_elves: BTreeMap<&'static str, ElfReport>,
     lock_elf: ElfReport,
+    child_verifier_elf: ElfReport,
     summary: Summary,
     cases: Vec<CaseReport>,
     limits: Vec<&'static str>,
@@ -329,13 +345,20 @@ struct AgreementFields {
     early_close_policy: u8,
 }
 
+#[derive(Clone, Debug)]
+struct MaterializedTransition {
+    signed_intent: Vec<u8>,
+    latest_receipt_hash: [u8; 32],
+    receipt_data: Vec<u8>,
+}
+
 impl Default for AgreementFields {
     fn default() -> Self {
         Self {
             agreement_id: AGREEMENT_ID,
             terms_hash: TERMS_HASH,
-            borrower_authority_hash: BORROWER_AUTHORITY,
-            lender_authority_hash: LENDER_AUTHORITY,
+            borrower_authority_hash: ZERO_HASH,
+            lender_authority_hash: ZERO_HASH,
             collateral_asset_kind: ASSET_KIND_CKB,
             collateral_asset_hash: ZERO_HASH,
             collateral_amount: COLLATERAL_AMOUNT,
@@ -363,8 +386,9 @@ fn run() -> Result<(), HarnessError> {
     let repay_elf = fs::read(&args.repay_elf)?;
     let claim_elf = fs::read(&args.claim_elf)?;
     let lock_elf = fs::read(&args.lock_elf)?;
+    let child_verifier_elf = fs::read(&args.child_verifier_elf)?;
     let fixture_expectations = load_fixture_expectations(&args.fixtures_dir)?;
-    let cases = build_cases();
+    let cases = build_cases()?;
     ensure_fixture_coverage(&cases, &fixture_expectations)?;
     ensure_fixture_partition(&cases, &fixture_expectations)?;
     let reports = cases
@@ -375,10 +399,19 @@ fn run() -> Result<(), HarnessError> {
                 ActionKind::Repay => repay_elf.as_slice(),
                 ActionKind::Claim => claim_elf.as_slice(),
             };
-            run_case(action_elf, &lock_elf, case)
+            run_case(action_elf, &lock_elf, &child_verifier_elf, case)
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let report = build_report(&args, &originate_elf, &repay_elf, &claim_elf, &lock_elf, reports, &fixture_expectations);
+    let report = build_report(
+        &args,
+        &originate_elf,
+        &repay_elf,
+        &claim_elf,
+        &lock_elf,
+        &child_verifier_elf,
+        reports,
+        &fixture_expectations,
+    );
     write_report(&args.output, &report, args.pretty)?;
     print_summary(&args.output, &report);
     if report.summary.script_mismatched == 0 && report.summary.node_mismatched == 0 {
@@ -397,6 +430,7 @@ fn parse_args() -> Result<Args, HarnessError> {
         repay_elf: PathBuf::from(DEFAULT_REPAY_ELF),
         claim_elf: PathBuf::from(DEFAULT_CLAIM_ELF),
         lock_elf: PathBuf::from(DEFAULT_LOCK_ELF),
+        child_verifier_elf: PathBuf::from(DEFAULT_CHILD_VERIFIER_ELF),
         fixtures_dir: PathBuf::from(DEFAULT_FIXTURES_DIR),
         output: PathBuf::from(DEFAULT_OUTPUT),
         pretty: false,
@@ -408,6 +442,7 @@ fn parse_args() -> Result<Args, HarnessError> {
             "--repay-elf" => args.repay_elf = raw.next().map(PathBuf::from).ok_or(HarnessError::Usage)?,
             "--claim-elf" => args.claim_elf = raw.next().map(PathBuf::from).ok_or(HarnessError::Usage)?,
             "--lock-elf" => args.lock_elf = raw.next().map(PathBuf::from).ok_or(HarnessError::Usage)?,
+            "--child-verifier-elf" => args.child_verifier_elf = raw.next().map(PathBuf::from).ok_or(HarnessError::Usage)?,
             "--fixtures-dir" => args.fixtures_dir = raw.next().map(PathBuf::from).ok_or(HarnessError::Usage)?,
             "--output" => args.output = raw.next().map(PathBuf::from).ok_or(HarnessError::Usage)?,
             "--pretty" => args.pretty = true,
@@ -418,44 +453,55 @@ fn parse_args() -> Result<Args, HarnessError> {
     Ok(args)
 }
 
-fn build_cases() -> Vec<AgreementCase> {
-    let fields = AgreementFields::default();
+fn build_cases() -> Result<Vec<AgreementCase>, HarnessError> {
+    let borrower_authority = public_key(&TEST_BORROWER_SECRET_KEY)?;
+    let lender_authority = public_key(&TEST_LENDER_SECRET_KEY)?;
+    let stranger_authority = public_key(&TEST_STRANGER_SECRET_KEY)?;
+    let fields = AgreementFields {
+        borrower_authority_hash: borrower_authority,
+        lender_authority_hash: lender_authority,
+        ..AgreementFields::default()
+    };
     let terms = encode_terms(&fields);
-    let active = encode_agreement_cell(&fields, STATUS_ACTIVE, OLD_RECEIPT_ROOT, 0);
-    let originated = encode_agreement_cell(&fields, STATUS_ACTIVE, NEW_RECEIPT_ROOT, 0);
-    let repaid = encode_agreement_cell(&fields, STATUS_REPAID, NEW_RECEIPT_ROOT, 1);
-    let defaulted = encode_agreement_cell(&fields, STATUS_DEFAULTED, NEW_RECEIPT_ROOT, 1);
+    let active = encode_agreement_cell(&fields, STATUS_ACTIVE, OLD_LATEST_RECEIPT_HASH, 0);
     let mut bad_terms = fields.clone();
     bad_terms.terms_hash = OTHER_TERMS_HASH;
     let bad_terms_bytes = encode_terms(&bad_terms);
-    let originate_receipt =
-        encode_receipt(&fields, PATH_ORIGINATE, STATUS_OFFERED, STATUS_ACTIVE, 0, ZERO_HASH, NEW_RECEIPT_ROOT, 0, 120);
     let originate_payout = encode_payout(
         &fields,
         PATH_ORIGINATE,
         PAYOUT_BORROWER_PRINCIPAL,
-        BORROWER_AUTHORITY,
+        fields.borrower_authority_hash,
         ASSET_KIND_CKB,
         ZERO_HASH,
         PRINCIPAL_AMOUNT,
         0,
     );
-    let repay_receipt = encode_receipt(
+    let originate = materialize_transition(
         &fields,
-        PATH_REPAY_BEFORE_EXPIRY,
+        PATH_ORIGINATE,
+        STATUS_OFFERED,
         STATUS_ACTIVE,
-        STATUS_REPAID,
-        PRINCIPAL_AMOUNT + FIXED_FEE_AMOUNT,
-        OLD_RECEIPT_ROOT,
-        NEW_RECEIPT_ROOT,
-        1,
-        180,
+        0,
+        0,
+        PRINCIPAL_AMOUNT,
+        packed_hash(PAYOUT_TYPE_NAME, &originate_payout),
+        ZERO_HASH,
+        0,
+        120,
     );
+    let originated = encode_agreement_cell(&fields, STATUS_ACTIVE, originate.latest_receipt_hash, 0);
+    let borrower_originate_sig = sign_payload(&TEST_BORROWER_SECRET_KEY, &originate.signed_intent)?;
+    let lender_originate_sig = sign_payload(&TEST_LENDER_SECRET_KEY, &originate.signed_intent)?;
+    let stranger_originate_sig = sign_payload(&TEST_STRANGER_SECRET_KEY, &originate.signed_intent)?;
+    let mut bad_lender_originate_sig = lender_originate_sig.clone();
+    flip_last_byte(&mut bad_lender_originate_sig)?;
+
     let lender_repayment = encode_payout(
         &fields,
         PATH_REPAY_BEFORE_EXPIRY,
         PAYOUT_LENDER_REPAYMENT,
-        LENDER_AUTHORITY,
+        fields.lender_authority_hash,
         ASSET_KIND_CKB,
         ZERO_HASH,
         PRINCIPAL_AMOUNT + FIXED_FEE_AMOUNT,
@@ -465,53 +511,84 @@ fn build_cases() -> Vec<AgreementCase> {
         &fields,
         PATH_REPAY_BEFORE_EXPIRY,
         PAYOUT_BORROWER_COLLATERAL_RETURN,
-        BORROWER_AUTHORITY,
+        fields.borrower_authority_hash,
         ASSET_KIND_CKB,
         ZERO_HASH,
         COLLATERAL_AMOUNT,
         1,
     );
-    let claim_receipt = encode_receipt(
-        &fields,
-        PATH_CLAIM_AFTER_EXPIRY,
-        STATUS_ACTIVE,
-        STATUS_DEFAULTED,
-        COLLATERAL_AMOUNT,
-        OLD_RECEIPT_ROOT,
-        NEW_RECEIPT_ROOT,
-        1,
-        220,
+    let repay_payout_hash = packed_hash(
+        REPAY_PAYOUT_COMMITMENT_TYPE_NAME,
+        &encode_repay_payout_commitment(
+            packed_hash(PAYOUT_TYPE_NAME, &lender_repayment),
+            packed_hash(PAYOUT_TYPE_NAME, &borrower_collateral_return),
+        ),
     );
-    let lender_default_claim = encode_payout(
-        &fields,
-        PATH_CLAIM_AFTER_EXPIRY,
-        PAYOUT_LENDER_DEFAULT_CLAIM,
-        LENDER_AUTHORITY,
-        ASSET_KIND_CKB,
-        ZERO_HASH,
-        COLLATERAL_AMOUNT,
-        1,
-    );
-    let mut bad_nonce = repaid.clone();
-    overwrite_u64(&mut bad_nonce, 261, 2);
-    let mut mutated_principal = repaid.clone();
-    overwrite_u64(&mut mutated_principal, 204, PRINCIPAL_AMOUNT - CKB);
-    let receipt_root_mismatch = encode_agreement_cell(&fields, STATUS_REPAID, OTHER_RECEIPT_ROOT, 1);
-    let receipt_output_mismatch = encode_receipt(
+    let repay = materialize_transition(
         &fields,
         PATH_REPAY_BEFORE_EXPIRY,
         STATUS_ACTIVE,
         STATUS_REPAID,
+        0,
+        1,
         PRINCIPAL_AMOUNT + FIXED_FEE_AMOUNT,
-        OLD_RECEIPT_ROOT,
-        OTHER_RECEIPT_ROOT,
+        repay_payout_hash,
+        OLD_LATEST_RECEIPT_HASH,
         1,
         180,
     );
+    let repaid = encode_agreement_cell(&fields, STATUS_REPAID, repay.latest_receipt_hash, 1);
+    let borrower_repay_sig = sign_payload(&TEST_BORROWER_SECRET_KEY, &repay.signed_intent)?;
+    let stranger_repay_sig = sign_payload(&TEST_STRANGER_SECRET_KEY, &repay.signed_intent)?;
+    let mut bad_borrower_repay_sig = borrower_repay_sig.clone();
+    flip_last_byte(&mut bad_borrower_repay_sig)?;
+
+    let lender_default_claim = encode_payout(
+        &fields,
+        PATH_CLAIM_AFTER_EXPIRY,
+        PAYOUT_LENDER_DEFAULT_CLAIM,
+        fields.lender_authority_hash,
+        ASSET_KIND_CKB,
+        ZERO_HASH,
+        COLLATERAL_AMOUNT,
+        1,
+    );
+    let claim = materialize_transition(
+        &fields,
+        PATH_CLAIM_AFTER_EXPIRY,
+        STATUS_ACTIVE,
+        STATUS_DEFAULTED,
+        0,
+        1,
+        COLLATERAL_AMOUNT,
+        packed_hash(PAYOUT_TYPE_NAME, &lender_default_claim),
+        OLD_LATEST_RECEIPT_HASH,
+        1,
+        220,
+    );
+    let defaulted = encode_agreement_cell(&fields, STATUS_DEFAULTED, claim.latest_receipt_hash, 1);
+    let lender_claim_sig = sign_payload(&TEST_LENDER_SECRET_KEY, &claim.signed_intent)?;
+    let stranger_claim_sig = sign_payload(&TEST_STRANGER_SECRET_KEY, &claim.signed_intent)?;
+    let mut bad_nonce = repaid.clone();
+    overwrite_u64(&mut bad_nonce, 261, 2);
+    let mut mutated_principal = repaid.clone();
+    overwrite_u64(&mut mutated_principal, 204, PRINCIPAL_AMOUNT - CKB);
+    let latest_receipt_hash_mismatch = encode_agreement_cell(&fields, STATUS_REPAID, OTHER_LATEST_RECEIPT_HASH, 1);
+    let mut receipt_output_mismatch = repay.receipt_data.clone();
+    receipt_output_mismatch[195..227].copy_from_slice(&OTHER_LATEST_RECEIPT_HASH);
     let mut wrong_repayment_amount = lender_repayment.clone();
     overwrite_u64(&mut wrong_repayment_amount, 99, PRINCIPAL_AMOUNT + FIXED_FEE_AMOUNT - CKB);
+    let wrong_lender_lock = stranger_authority;
+    let wrong_lender_capacity = PAYOUT_OCCUPIED_CAPACITY + PRINCIPAL_AMOUNT + FIXED_FEE_AMOUNT - 1;
+    let mut non_ckb_terms = fields.clone();
+    non_ckb_terms.principal_asset_kind = 1;
+    let non_ckb_terms_bytes = encode_terms(&non_ckb_terms);
 
-    vec![
+    let originate_witness = build_originate_witness(&terms, &originate.signed_intent, &borrower_originate_sig, &lender_originate_sig);
+    let repay_witness = build_terminal_witness(&repay.signed_intent, &borrower_repay_sig);
+    let claim_witness = build_terminal_witness(&claim.signed_intent, &lender_claim_sig);
+
+    Ok(vec![
         AgreementCase {
             fixture: "originate_valid",
             variant: "originate_valid",
@@ -519,13 +596,14 @@ fn build_cases() -> Vec<AgreementCase> {
             expected: "accepted",
             expected_reason: "valid origination transaction with agreement, receipt, and principal payout outputs",
             current_timepoint: 120,
-            witness: build_originate_witness(&terms, &BORROWER_AUTHORITY, &NEW_RECEIPT_ROOT),
+            witness: originate_witness.clone(),
             active_cell_data: None,
             agreement_output_data: originated.clone(),
-            receipt_output_data: originate_receipt.clone(),
+            receipt_output_data: originate.receipt_data.clone(),
             payout_outputs: vec![PayoutOutput {
                 role: "borrower_principal_payout",
                 capacity: PAYOUT_OCCUPIED_CAPACITY + PRINCIPAL_AMOUNT,
+                lock_args: fields.borrower_authority_hash,
                 data: originate_payout.clone(),
             }],
             under_capacity_agreement_output: false,
@@ -537,13 +615,14 @@ fn build_cases() -> Vec<AgreementCase> {
             expected: "rejected",
             expected_reason: "created agreement, payout, and receipt outputs must bind the witness terms_hash",
             current_timepoint: 120,
-            witness: build_originate_witness(&bad_terms_bytes, &BORROWER_AUTHORITY, &NEW_RECEIPT_ROOT),
+            witness: build_originate_witness(&bad_terms_bytes, &originate.signed_intent, &borrower_originate_sig, &lender_originate_sig),
             active_cell_data: None,
             agreement_output_data: originated.clone(),
-            receipt_output_data: originate_receipt.clone(),
+            receipt_output_data: originate.receipt_data.clone(),
             payout_outputs: vec![PayoutOutput {
                 role: "borrower_principal_payout",
                 capacity: PAYOUT_OCCUPIED_CAPACITY + PRINCIPAL_AMOUNT,
+                lock_args: fields.borrower_authority_hash,
                 data: originate_payout.clone(),
             }],
             under_capacity_agreement_output: false,
@@ -555,14 +634,75 @@ fn build_cases() -> Vec<AgreementCase> {
             expected: "rejected",
             expected_reason: "originator_authority_hash must equal borrower_authority_hash",
             current_timepoint: 120,
-            witness: build_originate_witness(&terms, &STRANGER_AUTHORITY, &NEW_RECEIPT_ROOT),
+            witness: build_originate_witness(&terms, &originate.signed_intent, &stranger_originate_sig, &lender_originate_sig),
             active_cell_data: None,
-            agreement_output_data: originated,
-            receipt_output_data: originate_receipt,
+            agreement_output_data: originated.clone(),
+            receipt_output_data: originate.receipt_data.clone(),
             payout_outputs: vec![PayoutOutput {
                 role: "borrower_principal_payout",
                 capacity: PAYOUT_OCCUPIED_CAPACITY + PRINCIPAL_AMOUNT,
+                lock_args: fields.borrower_authority_hash,
+                data: originate_payout.clone(),
+            }],
+            under_capacity_agreement_output: false,
+        },
+        AgreementCase {
+            fixture: "wrong_lender_signature_reject",
+            variant: "originate_wrong_lender_signature",
+            action: ActionKind::Originate,
+            expected: "rejected",
+            expected_reason: "origination requires the lender BIP340 signature over the signed intent hash",
+            current_timepoint: 120,
+            witness: build_originate_witness(&terms, &originate.signed_intent, &borrower_originate_sig, &bad_lender_originate_sig),
+            active_cell_data: None,
+            agreement_output_data: originated,
+            receipt_output_data: originate.receipt_data,
+            payout_outputs: vec![PayoutOutput {
+                role: "borrower_principal_payout",
+                capacity: PAYOUT_OCCUPIED_CAPACITY + PRINCIPAL_AMOUNT,
+                lock_args: fields.borrower_authority_hash,
                 data: originate_payout,
+            }],
+            under_capacity_agreement_output: false,
+        },
+        AgreementCase {
+            fixture: "non_ckb_asset_kind_reject",
+            variant: "originate_non_ckb_asset_kind",
+            action: ActionKind::Originate,
+            expected: "rejected",
+            expected_reason: "Agreement Profile v0 only supports CKB principal and CKB collateral",
+            current_timepoint: 120,
+            witness: build_originate_witness(&non_ckb_terms_bytes, &originate.signed_intent, &borrower_originate_sig, &lender_originate_sig),
+            active_cell_data: None,
+            agreement_output_data: encode_agreement_cell(&non_ckb_terms, STATUS_ACTIVE, originate.latest_receipt_hash, 0),
+            receipt_output_data: encode_receipt(
+                &non_ckb_terms,
+                PATH_ORIGINATE,
+                STATUS_OFFERED,
+                STATUS_ACTIVE,
+                PRINCIPAL_AMOUNT,
+                ZERO_HASH,
+                originate.latest_receipt_hash,
+                packed_hash(INTENT_CORE_TYPE_NAME, &encode_intent_core(&fields, PATH_ORIGINATE, STATUS_OFFERED, STATUS_ACTIVE, 0, 0, PRINCIPAL_AMOUNT, packed_hash(PAYOUT_TYPE_NAME, &encode_payout(&fields, PATH_ORIGINATE, PAYOUT_BORROWER_PRINCIPAL, fields.borrower_authority_hash, ASSET_KIND_CKB, ZERO_HASH, PRINCIPAL_AMOUNT, 0)))),
+                packed_hash(SIGNED_INTENT_TYPE_NAME, &originate.signed_intent),
+                packed_hash(PAYOUT_TYPE_NAME, &encode_payout(&non_ckb_terms, PATH_ORIGINATE, PAYOUT_BORROWER_PRINCIPAL, non_ckb_terms.borrower_authority_hash, non_ckb_terms.principal_asset_kind, ZERO_HASH, PRINCIPAL_AMOUNT, 0)),
+                0,
+                120,
+            ),
+            payout_outputs: vec![PayoutOutput {
+                role: "borrower_principal_payout",
+                capacity: PAYOUT_OCCUPIED_CAPACITY + PRINCIPAL_AMOUNT,
+                lock_args: fields.borrower_authority_hash,
+                data: encode_payout(
+                    &non_ckb_terms,
+                    PATH_ORIGINATE,
+                    PAYOUT_BORROWER_PRINCIPAL,
+                    non_ckb_terms.borrower_authority_hash,
+                    non_ckb_terms.principal_asset_kind,
+                    ZERO_HASH,
+                    PRINCIPAL_AMOUNT,
+                    0,
+                ),
             }],
             under_capacity_agreement_output: false,
         },
@@ -573,19 +713,21 @@ fn build_cases() -> Vec<AgreementCase> {
             expected: "accepted",
             expected_reason: "valid repayment transaction before expiry",
             current_timepoint: 180,
-            witness: build_terminal_witness(&BORROWER_AUTHORITY, &NEW_RECEIPT_ROOT),
+            witness: repay_witness.clone(),
             active_cell_data: Some(active.clone()),
             agreement_output_data: repaid.clone(),
-            receipt_output_data: repay_receipt.clone(),
+            receipt_output_data: repay.receipt_data.clone(),
             payout_outputs: vec![
                 PayoutOutput {
                     role: "lender_repayment",
                     capacity: PAYOUT_OCCUPIED_CAPACITY + PRINCIPAL_AMOUNT + FIXED_FEE_AMOUNT,
+                    lock_args: fields.lender_authority_hash,
                     data: lender_repayment.clone(),
                 },
                 PayoutOutput {
                     role: "borrower_collateral_return",
                     capacity: PAYOUT_OCCUPIED_CAPACITY + COLLATERAL_AMOUNT,
+                    lock_args: fields.borrower_authority_hash,
                     data: borrower_collateral_return.clone(),
                 },
             ],
@@ -598,19 +740,21 @@ fn build_cases() -> Vec<AgreementCase> {
             expected: "rejected",
             expected_reason: "repayment after expiry must reject",
             current_timepoint: 220,
-            witness: build_terminal_witness(&BORROWER_AUTHORITY, &NEW_RECEIPT_ROOT),
+            witness: repay_witness.clone(),
             active_cell_data: Some(active.clone()),
             agreement_output_data: repaid.clone(),
-            receipt_output_data: repay_receipt.clone(),
+            receipt_output_data: repay.receipt_data.clone(),
             payout_outputs: vec![
                 PayoutOutput {
                     role: "lender_repayment",
                     capacity: PAYOUT_OCCUPIED_CAPACITY + PRINCIPAL_AMOUNT + FIXED_FEE_AMOUNT,
+                    lock_args: fields.lender_authority_hash,
                     data: lender_repayment.clone(),
                 },
                 PayoutOutput {
                     role: "borrower_collateral_return",
                     capacity: PAYOUT_OCCUPIED_CAPACITY + COLLATERAL_AMOUNT,
+                    lock_args: fields.borrower_authority_hash,
                     data: borrower_collateral_return.clone(),
                 },
             ],
@@ -623,19 +767,48 @@ fn build_cases() -> Vec<AgreementCase> {
             expected: "rejected",
             expected_reason: "repayment actor must be borrower",
             current_timepoint: 180,
-            witness: build_terminal_witness(&STRANGER_AUTHORITY, &NEW_RECEIPT_ROOT),
+            witness: build_terminal_witness(&repay.signed_intent, &stranger_repay_sig),
             active_cell_data: Some(active.clone()),
             agreement_output_data: repaid.clone(),
-            receipt_output_data: repay_receipt.clone(),
+            receipt_output_data: repay.receipt_data.clone(),
             payout_outputs: vec![
                 PayoutOutput {
                     role: "lender_repayment",
                     capacity: PAYOUT_OCCUPIED_CAPACITY + PRINCIPAL_AMOUNT + FIXED_FEE_AMOUNT,
+                    lock_args: fields.lender_authority_hash,
                     data: lender_repayment.clone(),
                 },
                 PayoutOutput {
                     role: "borrower_collateral_return",
                     capacity: PAYOUT_OCCUPIED_CAPACITY + COLLATERAL_AMOUNT,
+                    lock_args: fields.borrower_authority_hash,
+                    data: borrower_collateral_return.clone(),
+                },
+            ],
+            under_capacity_agreement_output: false,
+        },
+        AgreementCase {
+            fixture: "wrong_borrower_signature_reject",
+            variant: "repay_wrong_borrower_signature",
+            action: ActionKind::Repay,
+            expected: "rejected",
+            expected_reason: "repayment requires the borrower BIP340 signature over the signed intent hash",
+            current_timepoint: 180,
+            witness: build_terminal_witness(&repay.signed_intent, &bad_borrower_repay_sig),
+            active_cell_data: Some(active.clone()),
+            agreement_output_data: repaid.clone(),
+            receipt_output_data: repay.receipt_data.clone(),
+            payout_outputs: vec![
+                PayoutOutput {
+                    role: "lender_repayment",
+                    capacity: PAYOUT_OCCUPIED_CAPACITY + PRINCIPAL_AMOUNT + FIXED_FEE_AMOUNT,
+                    lock_args: fields.lender_authority_hash,
+                    data: lender_repayment.clone(),
+                },
+                PayoutOutput {
+                    role: "borrower_collateral_return",
+                    capacity: PAYOUT_OCCUPIED_CAPACITY + COLLATERAL_AMOUNT,
+                    lock_args: fields.borrower_authority_hash,
                     data: borrower_collateral_return.clone(),
                 },
             ],
@@ -648,19 +821,21 @@ fn build_cases() -> Vec<AgreementCase> {
             expected: "rejected",
             expected_reason: "closed nonce must equal active nonce plus one",
             current_timepoint: 180,
-            witness: build_terminal_witness(&BORROWER_AUTHORITY, &NEW_RECEIPT_ROOT),
+            witness: repay_witness.clone(),
             active_cell_data: Some(active.clone()),
             agreement_output_data: bad_nonce,
-            receipt_output_data: repay_receipt.clone(),
+            receipt_output_data: repay.receipt_data.clone(),
             payout_outputs: vec![
                 PayoutOutput {
                     role: "lender_repayment",
                     capacity: PAYOUT_OCCUPIED_CAPACITY + PRINCIPAL_AMOUNT + FIXED_FEE_AMOUNT,
+                    lock_args: fields.lender_authority_hash,
                     data: lender_repayment.clone(),
                 },
                 PayoutOutput {
                     role: "borrower_collateral_return",
                     capacity: PAYOUT_OCCUPIED_CAPACITY + COLLATERAL_AMOUNT,
+                    lock_args: fields.borrower_authority_hash,
                     data: borrower_collateral_return.clone(),
                 },
             ],
@@ -673,44 +848,48 @@ fn build_cases() -> Vec<AgreementCase> {
             expected: "rejected",
             expected_reason: "preserved agreement fields cannot mutate on terminal transition",
             current_timepoint: 180,
-            witness: build_terminal_witness(&BORROWER_AUTHORITY, &NEW_RECEIPT_ROOT),
+            witness: repay_witness.clone(),
             active_cell_data: Some(active.clone()),
             agreement_output_data: mutated_principal,
-            receipt_output_data: repay_receipt.clone(),
+            receipt_output_data: repay.receipt_data.clone(),
             payout_outputs: vec![
                 PayoutOutput {
                     role: "lender_repayment",
                     capacity: PAYOUT_OCCUPIED_CAPACITY + PRINCIPAL_AMOUNT + FIXED_FEE_AMOUNT,
+                    lock_args: fields.lender_authority_hash,
                     data: lender_repayment.clone(),
                 },
                 PayoutOutput {
                     role: "borrower_collateral_return",
                     capacity: PAYOUT_OCCUPIED_CAPACITY + COLLATERAL_AMOUNT,
+                    lock_args: fields.borrower_authority_hash,
                     data: borrower_collateral_return.clone(),
                 },
             ],
             under_capacity_agreement_output: false,
         },
         AgreementCase {
-            fixture: "receipt_root_mismatch_reject",
-            variant: "repay_receipt_root_mismatch",
+            fixture: "latest_receipt_hash_mismatch_reject",
+            variant: "repay_latest_receipt_hash_mismatch",
             action: ActionKind::Repay,
             expected: "rejected",
-            expected_reason: "closed receipt_root must equal witness receipt_hash",
+            expected_reason: "closed latest_receipt_hash must equal witness receipt_hash",
             current_timepoint: 180,
-            witness: build_terminal_witness(&BORROWER_AUTHORITY, &NEW_RECEIPT_ROOT),
+            witness: repay_witness.clone(),
             active_cell_data: Some(active.clone()),
-            agreement_output_data: receipt_root_mismatch,
-            receipt_output_data: repay_receipt.clone(),
+            agreement_output_data: latest_receipt_hash_mismatch,
+            receipt_output_data: repay.receipt_data.clone(),
             payout_outputs: vec![
                 PayoutOutput {
                     role: "lender_repayment",
                     capacity: PAYOUT_OCCUPIED_CAPACITY + PRINCIPAL_AMOUNT + FIXED_FEE_AMOUNT,
+                    lock_args: fields.lender_authority_hash,
                     data: lender_repayment.clone(),
                 },
                 PayoutOutput {
                     role: "borrower_collateral_return",
                     capacity: PAYOUT_OCCUPIED_CAPACITY + COLLATERAL_AMOUNT,
+                    lock_args: fields.borrower_authority_hash,
                     data: borrower_collateral_return.clone(),
                 },
             ],
@@ -723,7 +902,7 @@ fn build_cases() -> Vec<AgreementCase> {
             expected: "rejected",
             expected_reason: "materialized receipt output must bind the witness receipt_hash",
             current_timepoint: 180,
-            witness: build_terminal_witness(&BORROWER_AUTHORITY, &NEW_RECEIPT_ROOT),
+            witness: repay_witness.clone(),
             active_cell_data: Some(active.clone()),
             agreement_output_data: repaid.clone(),
             receipt_output_data: receipt_output_mismatch,
@@ -731,11 +910,13 @@ fn build_cases() -> Vec<AgreementCase> {
                 PayoutOutput {
                     role: "lender_repayment",
                     capacity: PAYOUT_OCCUPIED_CAPACITY + PRINCIPAL_AMOUNT + FIXED_FEE_AMOUNT,
+                    lock_args: fields.lender_authority_hash,
                     data: lender_repayment.clone(),
                 },
                 PayoutOutput {
                     role: "borrower_collateral_return",
                     capacity: PAYOUT_OCCUPIED_CAPACITY + COLLATERAL_AMOUNT,
+                    lock_args: fields.borrower_authority_hash,
                     data: borrower_collateral_return.clone(),
                 },
             ],
@@ -748,19 +929,75 @@ fn build_cases() -> Vec<AgreementCase> {
             expected: "rejected",
             expected_reason: "typed lender repayment output must equal principal plus fixed fee",
             current_timepoint: 180,
-            witness: build_terminal_witness(&BORROWER_AUTHORITY, &NEW_RECEIPT_ROOT),
+            witness: repay_witness.clone(),
             active_cell_data: Some(active.clone()),
             agreement_output_data: repaid.clone(),
-            receipt_output_data: repay_receipt.clone(),
+            receipt_output_data: repay.receipt_data.clone(),
             payout_outputs: vec![
                 PayoutOutput {
                     role: "lender_repayment",
                     capacity: PAYOUT_OCCUPIED_CAPACITY + PRINCIPAL_AMOUNT + FIXED_FEE_AMOUNT,
+                    lock_args: fields.lender_authority_hash,
                     data: wrong_repayment_amount,
                 },
                 PayoutOutput {
                     role: "borrower_collateral_return",
                     capacity: PAYOUT_OCCUPIED_CAPACITY + COLLATERAL_AMOUNT,
+                    lock_args: fields.borrower_authority_hash,
+                    data: borrower_collateral_return.clone(),
+                },
+            ],
+            under_capacity_agreement_output: false,
+        },
+        AgreementCase {
+            fixture: "payout_capacity_short_reject",
+            variant: "repay_payout_capacity_short",
+            action: ActionKind::Repay,
+            expected: "rejected",
+            expected_reason: "typed CKB payout capacity must carry at least occupied capacity plus the semantic amount",
+            current_timepoint: 180,
+            witness: repay_witness.clone(),
+            active_cell_data: Some(active.clone()),
+            agreement_output_data: repaid.clone(),
+            receipt_output_data: repay.receipt_data.clone(),
+            payout_outputs: vec![
+                PayoutOutput {
+                    role: "lender_repayment",
+                    capacity: wrong_lender_capacity,
+                    lock_args: fields.lender_authority_hash,
+                    data: lender_repayment.clone(),
+                },
+                PayoutOutput {
+                    role: "borrower_collateral_return",
+                    capacity: PAYOUT_OCCUPIED_CAPACITY + COLLATERAL_AMOUNT,
+                    lock_args: fields.borrower_authority_hash,
+                    data: borrower_collateral_return.clone(),
+                },
+            ],
+            under_capacity_agreement_output: false,
+        },
+        AgreementCase {
+            fixture: "payout_lock_args_mismatch_reject",
+            variant: "repay_payout_lock_args_mismatch",
+            action: ActionKind::Repay,
+            expected: "rejected",
+            expected_reason: "typed CKB payout lock args must equal the intended recipient authority hash",
+            current_timepoint: 180,
+            witness: repay_witness.clone(),
+            active_cell_data: Some(active.clone()),
+            agreement_output_data: repaid.clone(),
+            receipt_output_data: repay.receipt_data.clone(),
+            payout_outputs: vec![
+                PayoutOutput {
+                    role: "lender_repayment",
+                    capacity: PAYOUT_OCCUPIED_CAPACITY + PRINCIPAL_AMOUNT + FIXED_FEE_AMOUNT,
+                    lock_args: wrong_lender_lock,
+                    data: lender_repayment.clone(),
+                },
+                PayoutOutput {
+                    role: "borrower_collateral_return",
+                    capacity: PAYOUT_OCCUPIED_CAPACITY + COLLATERAL_AMOUNT,
+                    lock_args: fields.borrower_authority_hash,
                     data: borrower_collateral_return.clone(),
                 },
             ],
@@ -773,13 +1010,14 @@ fn build_cases() -> Vec<AgreementCase> {
             expected: "accepted",
             expected_reason: "valid default claim after expiry",
             current_timepoint: 220,
-            witness: build_terminal_witness(&LENDER_AUTHORITY, &NEW_RECEIPT_ROOT),
+            witness: claim_witness.clone(),
             active_cell_data: Some(active.clone()),
             agreement_output_data: defaulted.clone(),
-            receipt_output_data: claim_receipt.clone(),
+            receipt_output_data: claim.receipt_data.clone(),
             payout_outputs: vec![PayoutOutput {
                 role: "lender_default_claim",
                 capacity: PAYOUT_OCCUPIED_CAPACITY + COLLATERAL_AMOUNT,
+                lock_args: fields.lender_authority_hash,
                 data: lender_default_claim.clone(),
             }],
             under_capacity_agreement_output: false,
@@ -791,13 +1029,14 @@ fn build_cases() -> Vec<AgreementCase> {
             expected: "rejected",
             expected_reason: "claim before expiry must reject",
             current_timepoint: 180,
-            witness: build_terminal_witness(&LENDER_AUTHORITY, &NEW_RECEIPT_ROOT),
+            witness: claim_witness.clone(),
             active_cell_data: Some(active.clone()),
             agreement_output_data: defaulted.clone(),
-            receipt_output_data: claim_receipt.clone(),
+            receipt_output_data: claim.receipt_data.clone(),
             payout_outputs: vec![PayoutOutput {
                 role: "lender_default_claim",
                 capacity: PAYOUT_OCCUPIED_CAPACITY + COLLATERAL_AMOUNT,
+                lock_args: fields.lender_authority_hash,
                 data: lender_default_claim.clone(),
             }],
             under_capacity_agreement_output: false,
@@ -809,13 +1048,14 @@ fn build_cases() -> Vec<AgreementCase> {
             expected: "rejected",
             expected_reason: "claim actor must be lender",
             current_timepoint: 220,
-            witness: build_terminal_witness(&STRANGER_AUTHORITY, &NEW_RECEIPT_ROOT),
+            witness: build_terminal_witness(&claim.signed_intent, &stranger_claim_sig),
             active_cell_data: Some(active.clone()),
             agreement_output_data: defaulted.clone(),
-            receipt_output_data: claim_receipt.clone(),
+            receipt_output_data: claim.receipt_data.clone(),
             payout_outputs: vec![PayoutOutput {
                 role: "lender_default_claim",
                 capacity: PAYOUT_OCCUPIED_CAPACITY + COLLATERAL_AMOUNT,
+                lock_args: fields.lender_authority_hash,
                 data: lender_default_claim,
             }],
             under_capacity_agreement_output: false,
@@ -827,39 +1067,31 @@ fn build_cases() -> Vec<AgreementCase> {
             expected: "rejected",
             expected_reason: "agreement output below occupied capacity must be rejected by transaction validation",
             current_timepoint: 180,
-            witness: build_terminal_witness(&BORROWER_AUTHORITY, &NEW_RECEIPT_ROOT),
+            witness: repay_witness,
             active_cell_data: Some(active),
             agreement_output_data: repaid,
-            receipt_output_data: encode_receipt(
-                &fields,
-                PATH_REPAY_BEFORE_EXPIRY,
-                STATUS_ACTIVE,
-                STATUS_REPAID,
-                PRINCIPAL_AMOUNT + FIXED_FEE_AMOUNT,
-                OLD_RECEIPT_ROOT,
-                NEW_RECEIPT_ROOT,
-                1,
-                180,
-            ),
+            receipt_output_data: repay.receipt_data,
             payout_outputs: vec![
                 PayoutOutput {
                     role: "lender_repayment",
                     capacity: PAYOUT_OCCUPIED_CAPACITY + PRINCIPAL_AMOUNT + FIXED_FEE_AMOUNT,
+                    lock_args: fields.lender_authority_hash,
                     data: lender_repayment.clone(),
                 },
                 PayoutOutput {
                     role: "borrower_collateral_return",
                     capacity: PAYOUT_OCCUPIED_CAPACITY + COLLATERAL_AMOUNT,
+                    lock_args: fields.borrower_authority_hash,
                     data: borrower_collateral_return,
                 },
             ],
             under_capacity_agreement_output: true,
         },
-    ]
+    ])
 }
 
-fn run_case(action_elf: &[u8], lock_elf: &[u8], case: &AgreementCase) -> Result<CaseReport, HarnessError> {
-    let context = build_transaction_context(action_elf, lock_elf, case)?;
+fn run_case(action_elf: &[u8], lock_elf: &[u8], child_verifier_elf: &[u8], case: &AgreementCase) -> Result<CaseReport, HarnessError> {
+    let context = build_transaction_context(action_elf, lock_elf, child_verifier_elf, case)?;
     let consensus = Arc::new(resolved_script_consensus());
     let header = HeaderBuilder::default()
         .epoch(EpochNumberWithFraction::new(case.current_timepoint.max(VM2_ENABLED_EPOCH), 0, 1).pack())
@@ -946,16 +1178,31 @@ fn run_node_verifier(
     }
 }
 
-fn build_transaction_context(action_elf: &[u8], lock_elf: &[u8], case: &AgreementCase) -> Result<TransactionContext, HarnessError> {
-    let action_code_hash = ckb_blake2b256(action_elf);
-    let lock_code_hash = ckb_blake2b256(lock_elf);
+fn build_transaction_context(
+    action_elf: &[u8],
+    lock_elf: &[u8],
+    child_verifier_elf: &[u8],
+    case: &AgreementCase,
+) -> Result<TransactionContext, HarnessError> {
+    let action_role = match case.action {
+        ActionKind::Originate => "agreement-originate-action",
+        ActionKind::Repay => "agreement-repay-action",
+        ActionKind::Claim => "agreement-claim-action",
+    };
+    let action_code_hash = code_type_hash(action_role, action_elf);
+    let lock_code_hash = code_type_hash("agreement-always-success-lock", lock_elf);
+    let child_verifier_code_hash = code_type_hash("agreement-btc-bip340-child-verifier", child_verifier_elf);
     let type_script = build_data1_script(&action_code_hash);
     let lock_script = build_data1_script(&lock_code_hash);
 
+    let child_verifier_dep_out_point = build_out_point(&child_verifier_code_hash, 0);
     let action_dep_out_point = build_out_point(&action_code_hash, 0);
     let lock_dep_out_point = build_out_point(&lock_code_hash, 0);
-    let mut cell_deps =
-        vec![build_cell_dep_from_out_point(action_dep_out_point.clone()), build_cell_dep_from_out_point(lock_dep_out_point.clone())];
+    let mut cell_deps = vec![
+        build_cell_dep_from_out_point(child_verifier_dep_out_point.clone()),
+        build_cell_dep_from_out_point(action_dep_out_point.clone()),
+        build_cell_dep_from_out_point(lock_dep_out_point.clone()),
+    ];
 
     let header = HeaderBuilder::default()
         .epoch(EpochNumberWithFraction::new(case.current_timepoint.max(VM2_ENABLED_EPOCH), 0, 1).pack())
@@ -1012,8 +1259,11 @@ fn build_transaction_context(action_elf: &[u8], lock_elf: &[u8], case: &Agreemen
     let mut output_occupied_capacity = agreement_occupied + receipt_occupied;
 
     for payout in &case.payout_outputs {
-        let payout_output =
-            packed::CellOutput::new_builder().capacity(Capacity::shannons(payout.capacity).pack()).lock(lock_script.clone()).build();
+        let payout_lock_script = build_data1_script_with_args(&lock_code_hash, &payout.lock_args);
+        let payout_output = packed::CellOutput::new_builder()
+            .capacity(Capacity::shannons(payout.capacity).pack())
+            .lock(payout_lock_script)
+            .build();
         output_capacity = output_capacity
             .checked_add(payout.capacity)
             .ok_or_else(|| HarnessError::Message("output capacity overflow".to_string()))?;
@@ -1067,13 +1317,19 @@ fn build_transaction_context(action_elf: &[u8], lock_elf: &[u8], case: &Agreemen
 
     let action_bytes = CkbBytes::copy_from_slice(action_elf);
     let lock_bytes = CkbBytes::copy_from_slice(lock_elf);
+    let child_verifier_bytes = CkbBytes::copy_from_slice(child_verifier_elf);
+    data_loader.insert_cell(child_verifier_dep_out_point.clone(), child_verifier_bytes.clone());
     data_loader.insert_cell(action_dep_out_point.clone(), action_bytes.clone());
     data_loader.insert_cell(lock_dep_out_point.clone(), lock_bytes.clone());
-    let action_dep_output = code_cell_output(action_elf)?;
-    let lock_dep_output = code_cell_output(lock_elf)?;
+    let child_verifier_dep_output = code_cell_output("agreement-btc-bip340-child-verifier", child_verifier_elf)?;
+    let action_dep_output = code_cell_output(action_role, action_elf)?;
+    let lock_dep_output = code_cell_output("agreement-always-success-lock", lock_elf)?;
     let resolved_transaction = ResolvedTransaction {
         transaction: transaction_view.clone(),
         resolved_cell_deps: vec![
+            CellMetaBuilder::from_cell_output(child_verifier_dep_output, child_verifier_bytes)
+                .out_point(child_verifier_dep_out_point)
+                .build(),
             CellMetaBuilder::from_cell_output(action_dep_output, action_bytes).out_point(action_dep_out_point).build(),
             CellMetaBuilder::from_cell_output(lock_dep_output, lock_bytes).out_point(lock_dep_out_point).build(),
         ],
@@ -1118,6 +1374,7 @@ fn build_report(
     repay_elf: &[u8],
     claim_elf: &[u8],
     lock_elf: &[u8],
+    child_verifier_elf: &[u8],
     cases: Vec<CaseReport>,
     fixture_expectations: &BTreeMap<String, String>,
 ) -> Report {
@@ -1137,6 +1394,7 @@ fn build_report(
         classification: "agreement_profile_resolved_transaction_verification_stack_evidence",
         action_elves,
         lock_elf: elf_report(&args.lock_elf, lock_elf),
+        child_verifier_elf: elf_report(&args.child_verifier_elf, child_verifier_elf),
         summary: Summary {
             resolved_transaction_harness_executed: true,
             ckb_script_verifier_executed: true,
@@ -1206,7 +1464,7 @@ fn encode_terms(fields: &AgreementFields) -> Vec<u8> {
     out
 }
 
-fn encode_agreement_cell(fields: &AgreementFields, status: u8, receipt_root: [u8; 32], nonce: u64) -> Vec<u8> {
+fn encode_agreement_cell(fields: &AgreementFields, status: u8, latest_receipt_hash: [u8; 32], nonce: u64) -> Vec<u8> {
     let mut out = Vec::with_capacity(AGREEMENT_CELL_LEN);
     push_u16(&mut out, AGREEMENT_VERSION);
     push_hash(&mut out, &fields.agreement_id);
@@ -1222,9 +1480,130 @@ fn encode_agreement_cell(fields: &AgreementFields, status: u8, receipt_root: [u8
     push_u64(&mut out, fields.fixed_fee_amount);
     push_u64(&mut out, fields.expiry_timepoint);
     out.push(status);
-    push_hash(&mut out, &receipt_root);
+    push_hash(&mut out, &latest_receipt_hash);
     push_u64(&mut out, nonce);
     debug_assert_eq!(out.len(), AGREEMENT_CELL_LEN);
+    out
+}
+
+#[allow(clippy::too_many_arguments)]
+fn materialize_transition(
+    fields: &AgreementFields,
+    action: u8,
+    old_status: u8,
+    new_status: u8,
+    old_nonce: u64,
+    new_nonce: u64,
+    terminal_amount: u64,
+    payout_commitment_hash: [u8; 32],
+    previous_receipt_hash: [u8; 32],
+    receipt_nonce: u64,
+    timepoint: u64,
+) -> MaterializedTransition {
+    let intent_core = encode_intent_core(
+        fields,
+        action,
+        old_status,
+        new_status,
+        old_nonce,
+        new_nonce,
+        terminal_amount,
+        payout_commitment_hash,
+    );
+    let intent_core_hash = packed_hash(INTENT_CORE_TYPE_NAME, &intent_core);
+    let receipt_commitment = encode_receipt_commitment(
+        fields,
+        action,
+        old_status,
+        new_status,
+        terminal_amount,
+        old_nonce,
+        new_nonce,
+        intent_core_hash,
+        payout_commitment_hash,
+    );
+    let latest_receipt_hash = packed_hash(RECEIPT_COMMITMENT_TYPE_NAME, &receipt_commitment);
+    let signed_intent = encode_signed_intent(&intent_core, latest_receipt_hash);
+    let signed_intent_hash = packed_hash(SIGNED_INTENT_TYPE_NAME, &signed_intent);
+    let receipt_data = encode_receipt(
+        fields,
+        action,
+        old_status,
+        new_status,
+        terminal_amount,
+        previous_receipt_hash,
+        latest_receipt_hash,
+        intent_core_hash,
+        signed_intent_hash,
+        payout_commitment_hash,
+        receipt_nonce,
+        timepoint,
+    );
+    MaterializedTransition { signed_intent, latest_receipt_hash, receipt_data }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn encode_intent_core(
+    fields: &AgreementFields,
+    action: u8,
+    old_status: u8,
+    new_status: u8,
+    old_nonce: u64,
+    new_nonce: u64,
+    terminal_amount: u64,
+    payout_commitment_hash: [u8; 32],
+) -> Vec<u8> {
+    let mut out = Vec::with_capacity(AGREEMENT_INTENT_CORE_LEN);
+    out.push(action);
+    push_hash(&mut out, &fields.agreement_id);
+    push_hash(&mut out, &fields.terms_hash);
+    push_hash(&mut out, &fields.borrower_authority_hash);
+    push_hash(&mut out, &fields.lender_authority_hash);
+    out.push(old_status);
+    out.push(new_status);
+    push_u64(&mut out, old_nonce);
+    push_u64(&mut out, new_nonce);
+    push_u64(&mut out, terminal_amount);
+    push_hash(&mut out, &payout_commitment_hash);
+    push_u64(&mut out, fields.expiry_timepoint);
+    debug_assert_eq!(out.len(), AGREEMENT_INTENT_CORE_LEN);
+    out
+}
+
+fn encode_signed_intent(core: &[u8], expected_receipt_hash: [u8; 32]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(AGREEMENT_SIGNED_INTENT_LEN);
+    out.extend_from_slice(core);
+    push_hash(&mut out, &expected_receipt_hash);
+    debug_assert_eq!(out.len(), AGREEMENT_SIGNED_INTENT_LEN);
+    out
+}
+
+#[allow(clippy::too_many_arguments)]
+fn encode_receipt_commitment(
+    fields: &AgreementFields,
+    action: u8,
+    old_status: u8,
+    new_status: u8,
+    terminal_amount: u64,
+    old_nonce: u64,
+    new_nonce: u64,
+    intent_core_hash: [u8; 32],
+    payout_commitment_hash: [u8; 32],
+) -> Vec<u8> {
+    let mut out = Vec::with_capacity(AGREEMENT_RECEIPT_COMMITMENT_LEN);
+    out.push(action);
+    push_hash(&mut out, &fields.agreement_id);
+    out.push(old_status);
+    out.push(new_status);
+    push_hash(&mut out, &fields.terms_hash);
+    push_hash(&mut out, &fields.borrower_authority_hash);
+    push_hash(&mut out, &fields.lender_authority_hash);
+    push_u64(&mut out, terminal_amount);
+    push_u64(&mut out, old_nonce);
+    push_u64(&mut out, new_nonce);
+    push_hash(&mut out, &intent_core_hash);
+    push_hash(&mut out, &payout_commitment_hash);
+    debug_assert_eq!(out.len(), AGREEMENT_RECEIPT_COMMITMENT_LEN);
     out
 }
 
@@ -1235,8 +1614,11 @@ fn encode_receipt(
     old_status: u8,
     new_status: u8,
     terminal_amount: u64,
-    old_receipt_root: [u8; 32],
-    new_receipt_root: [u8; 32],
+    previous_receipt_hash: [u8; 32],
+    latest_receipt_hash: [u8; 32],
+    intent_core_hash: [u8; 32],
+    signed_intent_hash: [u8; 32],
+    payout_commitment_hash: [u8; 32],
     nonce: u64,
     timepoint: u64,
 ) -> Vec<u8> {
@@ -1252,8 +1634,11 @@ fn encode_receipt(
     push_u64(&mut out, fields.principal_amount);
     push_u64(&mut out, fields.fixed_fee_amount);
     push_u64(&mut out, terminal_amount);
-    push_hash(&mut out, &old_receipt_root);
-    push_hash(&mut out, &new_receipt_root);
+    push_hash(&mut out, &previous_receipt_hash);
+    push_hash(&mut out, &latest_receipt_hash);
+    push_hash(&mut out, &intent_core_hash);
+    push_hash(&mut out, &signed_intent_hash);
+    push_hash(&mut out, &payout_commitment_hash);
     push_u64(&mut out, nonce);
     push_u64(&mut out, timepoint);
     debug_assert_eq!(out.len(), AGREEMENT_RECEIPT_LEN);
@@ -1284,29 +1669,61 @@ fn encode_payout(
     out
 }
 
-fn build_originate_witness(terms: &[u8], originator: &[u8; 32], receipt_hash: &[u8; 32]) -> Vec<u8> {
-    let mut witness = Vec::with_capacity(LOCK_WITNESS_MAGIC.len() + 4 + terms.len() + originator.len() + receipt_hash.len());
+fn encode_repay_payout_commitment(lender_repayment_hash: [u8; 32], borrower_collateral_return_hash: [u8; 32]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(REPAY_PAYOUT_COMMITMENT_LEN);
+    push_hash(&mut out, &lender_repayment_hash);
+    push_hash(&mut out, &borrower_collateral_return_hash);
+    debug_assert_eq!(out.len(), REPAY_PAYOUT_COMMITMENT_LEN);
+    out
+}
+
+fn build_originate_witness(terms: &[u8], intent: &[u8], borrower_sig: &[u8], lender_sig: &[u8]) -> Vec<u8> {
+    let mut witness = Vec::with_capacity(
+        LOCK_WITNESS_MAGIC.len()
+            + 4
+            + terms.len()
+            + 4
+            + intent.len()
+            + 4
+            + borrower_sig.len()
+            + 4
+            + lender_sig.len(),
+    );
     witness.extend_from_slice(LOCK_WITNESS_MAGIC);
     witness.extend_from_slice(&(terms.len() as u32).to_le_bytes());
     witness.extend_from_slice(terms);
-    witness.extend_from_slice(originator);
-    witness.extend_from_slice(receipt_hash);
+    witness.extend_from_slice(&(intent.len() as u32).to_le_bytes());
+    witness.extend_from_slice(intent);
+    witness.extend_from_slice(&(borrower_sig.len() as u32).to_le_bytes());
+    witness.extend_from_slice(borrower_sig);
+    witness.extend_from_slice(&(lender_sig.len() as u32).to_le_bytes());
+    witness.extend_from_slice(lender_sig);
     witness
 }
 
-fn build_terminal_witness(actor: &[u8; 32], receipt_hash: &[u8; 32]) -> Vec<u8> {
-    let mut witness = Vec::with_capacity(LOCK_WITNESS_MAGIC.len() + actor.len() + receipt_hash.len());
+fn build_terminal_witness(intent: &[u8], signature_payload: &[u8]) -> Vec<u8> {
+    let mut witness = Vec::with_capacity(LOCK_WITNESS_MAGIC.len() + 4 + intent.len() + 4 + signature_payload.len());
     witness.extend_from_slice(LOCK_WITNESS_MAGIC);
-    witness.extend_from_slice(actor);
-    witness.extend_from_slice(receipt_hash);
+    witness.extend_from_slice(&(intent.len() as u32).to_le_bytes());
+    witness.extend_from_slice(intent);
+    witness.extend_from_slice(&(signature_payload.len() as u32).to_le_bytes());
+    witness.extend_from_slice(signature_payload);
     witness
 }
 
 fn build_data1_script(code_hash: &[u8; 32]) -> packed::Script {
+    build_data1_script_with_raw_args(code_hash, &[])
+}
+
+fn build_data1_script_with_args(code_hash: &[u8; 32], args: &[u8; 32]) -> packed::Script {
+    build_data1_script_with_raw_args(code_hash, args)
+}
+
+fn build_data1_script_with_raw_args(code_hash: &[u8; 32], args: &[u8]) -> packed::Script {
     packed::Script::new_builder()
         .code_hash(packed_byte32(code_hash))
-        .hash_type(ScriptHashType::Data1.into())
-        .args(CkbBytes::new().pack())
+        .hash_type(ScriptHashType::Type.into())
+        .args(CkbBytes::copy_from_slice(args).pack())
         .build()
 }
 
@@ -1318,8 +1735,25 @@ fn build_out_point(tx_hash: &[u8; 32], index: u32) -> packed::OutPoint {
     packed::OutPoint::new_builder().tx_hash(packed_byte32(tx_hash)).index(index.pack()).build()
 }
 
-fn code_cell_output(elf: &[u8]) -> Result<packed::CellOutput, HarnessError> {
-    Ok(packed::CellOutput::new_builder().capacity(capacity_with_margin(elf.len())?.pack()).build())
+fn code_cell_output(role: &str, elf: &[u8]) -> Result<packed::CellOutput, HarnessError> {
+    Ok(packed::CellOutput::new_builder()
+        .capacity(capacity_with_margin(elf.len())?.pack())
+        .type_(Some(build_code_type_script(role, elf)).pack())
+        .build())
+}
+
+fn build_code_type_script(role: &str, elf: &[u8]) -> packed::Script {
+    let role_code_hash = ckb_blake2b256(role.as_bytes());
+    let data_hash = ckb_blake2b256(elf);
+    packed::Script::new_builder()
+        .code_hash(packed_byte32(&role_code_hash))
+        .hash_type(ScriptHashType::Data1.into())
+        .args(CkbBytes::copy_from_slice(&data_hash).pack())
+        .build()
+}
+
+fn code_type_hash(role: &str, elf: &[u8]) -> [u8; 32] {
+    byte32_to_array(&build_code_type_script(role, elf).calc_script_hash())
 }
 
 fn push_u16(out: &mut Vec<u8>, value: u16) {
@@ -1336,6 +1770,34 @@ fn push_hash(out: &mut Vec<u8>, value: &[u8; 32]) {
 
 fn overwrite_u64(out: &mut [u8], offset: usize, value: u64) {
     out[offset..offset + 8].copy_from_slice(&value.to_le_bytes());
+}
+
+fn public_key(secret_key: &[u8; 32]) -> Result<[u8; 32], HarnessError> {
+    let signing_key = SigningKey::from_bytes(secret_key)
+        .map_err(|error| HarnessError::Message(format!("failed to construct test BIP340 signing key: {error}")))?;
+    let mut pubkey = [0u8; 32];
+    pubkey.copy_from_slice(signing_key.verifying_key().to_bytes().as_slice());
+    Ok(pubkey)
+}
+
+fn sign_payload(secret_key: &[u8; 32], signed_intent: &[u8]) -> Result<Vec<u8>, HarnessError> {
+    let digest = packed_hash(SIGNED_INTENT_TYPE_NAME, signed_intent);
+    let signing_key = SigningKey::from_bytes(secret_key)
+        .map_err(|error| HarnessError::Message(format!("failed to construct test BIP340 signing key: {error}")))?;
+    let signature = signing_key
+        .sign_prehash_with_aux_rand(&digest, &TEST_AUX_RAND)
+        .map_err(|error| HarnessError::Message(format!("failed to sign agreement digest: {error}")))?;
+    let mut payload = Vec::with_capacity(AGREEMENT_SIGNATURE_PAYLOAD_LEN);
+    payload.extend_from_slice(signing_key.verifying_key().to_bytes().as_slice());
+    payload.extend_from_slice(signature.to_bytes().as_slice());
+    debug_assert_eq!(payload.len(), AGREEMENT_SIGNATURE_PAYLOAD_LEN);
+    Ok(payload)
+}
+
+fn flip_last_byte(bytes: &mut [u8]) -> Result<(), HarnessError> {
+    let byte = bytes.last_mut().ok_or_else(|| HarnessError::Message("cannot mutate empty signature payload".to_string()))?;
+    *byte ^= 0x01;
+    Ok(())
 }
 
 fn expected_matches(expected: &str, accepted: bool) -> Result<bool, HarnessError> {
@@ -1429,11 +1891,27 @@ fn packed_byte32(bytes: &[u8; 32]) -> packed::Byte32 {
     packed::Byte32::from_slice(bytes).expect("32-byte fixed hash")
 }
 
+fn byte32_to_array(byte32: &packed::Byte32) -> [u8; 32] {
+    let mut bytes = [0u8; 32];
+    bytes.copy_from_slice(byte32.as_slice());
+    bytes
+}
+
 fn ckb_blake2b256(data: &[u8]) -> [u8; 32] {
     let digest = Blake2bParams::new().hash_length(32).personal(CKB_BLAKE2B_PERSONAL).hash(data);
     let mut out = [0u8; 32];
     out.copy_from_slice(digest.as_bytes());
     out
+}
+
+fn packed_hash(type_name: &[u8], packed_bytes: &[u8]) -> [u8; 32] {
+    let mut preimage = Vec::with_capacity(PACKED_HASH_DOMAIN.len() + type_name.len() + 1 + 4 + packed_bytes.len());
+    preimage.extend_from_slice(PACKED_HASH_DOMAIN);
+    preimage.extend_from_slice(type_name);
+    preimage.push(0);
+    preimage.extend_from_slice(&(packed_bytes.len() as u32).to_le_bytes());
+    preimage.extend_from_slice(packed_bytes);
+    ckb_blake2b256(&preimage)
 }
 
 fn elf_report(path: &Path, bytes: &[u8]) -> ElfReport {

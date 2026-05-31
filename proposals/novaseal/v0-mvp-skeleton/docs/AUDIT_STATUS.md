@@ -19,9 +19,23 @@ All commands run from inside the package directory against the current source tr
 
 ### Individual Script Compile Status (important for multi-script TCB)
 - `cellc src/nova_state_type.cell --target-profile ckb` → **passes**
+- `cellc src/nova_state_lifecycle_type.cell --target-profile ckb --entry-action novaseal_lifecycle` → **passes**
 - `cellc src/nova_btc_authority_lock.cell --target-profile ckb` → **passes**
 - `cellc src/nova_receipt_type.cell --target-profile ckb` → **passes**
 - Notes: All three source units are syntactically and semantically valid in isolation. The default entry module now also carries the same verifier-wiring `btc_authority` lock shape, so the package audit surface exposes one lock record while the standalone lock file remains independently compileable.
+
+### Live Devnet Stateful Core
+- Command: `python3 scripts/novaseal_devnet_stateful_live.py --pretty --ckb-repo ../ckb --ckb-bin ../ckb/target/debug/ckb`
+- Result: **passes**
+- Generated content (key facts):
+  - Deploys the BIP340 runtime verifier as a live CellDep.
+  - Deploys `novaseal_lifecycle` as a live VM2 (`data2`) type-script CellDep.
+  - Commits an output-only bootstrap state cell.
+  - Re-signs a key-auth transition against that exact bootstrap outpoint.
+  - Commits the transition and verifies the bootstrap output is no longer live.
+  - Verifies the new state and receipt outputs are live.
+  - Dry-runs a wrong-signature transition and observes script rejection without consuming the live state.
+- Interpretation: core NovaSeal and the Agreement Profile now both have real local devnet stateful evidence. The aggregate gate status is `passed`; this is live devnet acceptance evidence, not a claim that production CellDeps are published.
 
 ### Audit-Bundle Surface
 - Command: `cellc audit-bundle --target-profile ckb --json`
@@ -39,14 +53,14 @@ All commands run from inside the package directory against the current source tr
   - `resource-conservation:NovaSealCellV0` is now `checked-runtime`, `covered`, and `on_chain_checked = true`
   - The resource-conservation detail now classifies the guarded transition field-by-field:
     - `unchecked`: none
-    - `preserved`: `version`, `btc_authority_hash`, `policy_hash`, `receipt_root`
+    - `preserved`: `version`, `btc_authority_hash`, `policy_hash`, `latest_receipt_hash`
     - `guarded`: `state_hash`, `nonce`, `expiry`
     - `allowed fresh`: none
   - The same classification is now machine-readable in the generated ProofPlan record's `input_output_relation_checks`:
     - `resource-field:version=preserved`
     - `resource-field:btc_authority_hash=preserved`
     - `resource-field:policy_hash=preserved`
-    - `resource-field:receipt_root=preserved`
+    - `resource-field:latest_receipt_hash=preserved`
     - `resource-field:state_hash=guarded`
     - `resource-field:nonce=guarded`
     - `resource-field:expiry=guarded`

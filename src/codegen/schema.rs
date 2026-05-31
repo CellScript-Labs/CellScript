@@ -219,6 +219,11 @@ pub(crate) fn fixed_aggregate_pointer_param_width(ty: &IrType) -> Option<usize> 
 
 pub(crate) fn fixed_byte_const_bytes(value: &IrConst) -> Option<Vec<u8>> {
     match value {
+        IrConst::Bool(value) => Some(vec![u8::from(*value)]),
+        IrConst::U8(value) => Some(vec![*value]),
+        IrConst::U16(value) => Some(value.to_le_bytes().to_vec()),
+        IrConst::U32(value) => Some(value.to_le_bytes().to_vec()),
+        IrConst::U64(value) => Some(value.to_le_bytes().to_vec()),
         IrConst::Address(bytes) | IrConst::Hash(bytes) => Some(bytes.to_vec()),
         IrConst::U128(value) => Some(value.to_le_bytes().to_vec()),
         IrConst::Array(values) => values

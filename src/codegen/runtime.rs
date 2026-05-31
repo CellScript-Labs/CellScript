@@ -12,13 +12,15 @@ use crate::syscalls::{
     checked_runtime_helper_spec, fail_closed_helper_spec, fail_closed_runtime_helper_specs, runtime_helper_symbols,
     source_constant_specs, vm2_helper_specs, SyscallSpec, CKB_LOAD_CELL_BY_FIELD_SYSCALL_NUMBER, CKB_LOAD_CELL_DATA_SYSCALL_NUMBER,
     CKB_LOAD_HEADER_BY_FIELD_SYSCALL_NUMBER, CKB_LOAD_INPUT_BY_FIELD_SYSCALL_NUMBER, CKB_LOAD_SCRIPT_SYSCALL_NUMBER,
-    CKB_LOAD_WITNESS_SYSCALL_NUMBER, CKB_SOURCE_CELL_DEP, CKB_SOURCE_GROUP_INPUT, CKB_SOURCE_GROUP_OUTPUT, CKB_SOURCE_HEADER_DEP,
+    CKB_LOAD_WITNESS_SYSCALL_NUMBER, CKB_SOURCE_CELL_DEP, CKB_SOURCE_GROUP_FLAG, CKB_SOURCE_GROUP_INPUT, CKB_SOURCE_GROUP_OUTPUT,
+    CKB_SOURCE_HEADER_DEP,
 };
 use crate::TargetProfile;
 
 use super::{
-    CellScriptRuntimeError, CodeGenerator, CKB_HEADER_FIELD_EPOCH_LENGTH, CKB_HEADER_FIELD_EPOCH_NUMBER,
-    CKB_HEADER_FIELD_EPOCH_START_BLOCK_NUMBER, CKB_INPUT_FIELD_SINCE,
+    CellScriptRuntimeError, CodeGenerator, CKB_CELL_FIELD_CAPACITY, CKB_CELL_FIELD_DATA_HASH, CKB_CELL_FIELD_LOCK,
+    CKB_HEADER_FIELD_EPOCH_LENGTH, CKB_HEADER_FIELD_EPOCH_NUMBER, CKB_HEADER_FIELD_EPOCH_START_BLOCK_NUMBER,
+    CKB_INPUT_FIELD_PREVIOUS_OUTPUT, CKB_INPUT_FIELD_SINCE,
 };
 
 // ---------------------------------------------------------------------------
@@ -90,7 +92,16 @@ fn is_v014_runtime_helper(func: &str) -> bool {
 }
 
 pub(crate) fn is_ckb_fixed_hash_helper(func: &str) -> bool {
-    matches!(func, "__ckb_hash_chain" | "__ckb_hash_blake2b")
+    matches!(
+        func,
+        "__ckb_hash_chain"
+            | "__ckb_hash_blake2b"
+            | "__ckb_hash_blake2b_packed"
+            | "__ckb_hash_data_packed"
+            | "__ckb_input_previous_tx_hash"
+            | "__ckb_cell_data_hash"
+            | "__ckb_cell_lock_args32"
+    )
 }
 
 pub(crate) fn is_ckb_checked_runtime_helper(func: &str) -> bool {
@@ -103,6 +114,8 @@ pub(crate) fn is_ckb_checked_runtime_helper(func: &str) -> bool {
                 | "__ckb_header_epoch_start_block_number"
                 | "__ckb_header_epoch_length"
                 | "__ckb_input_since"
+                | "__ckb_input_previous_index"
+                | "__ckb_cell_capacity"
         )
 }
 
@@ -200,7 +213,11 @@ impl CodeGenerator {
             if !enabled {
                 self.emit_runtime_fail_ret(CellScriptRuntimeError::SyscallFailed);
             } else {
+                self.emit("# cellscript abi: encode source view as source | (u32(index) << 8)");
+                self.emit("slli t0, a0, 32");
+                self.emit("srli t0, t0, 24");
                 self.emit(format!("li a0, {}", spec.value));
+                self.emit("or a0, a0, t0");
                 self.emit("ret");
             }
         }
@@ -232,6 +249,27 @@ impl CodeGenerator {
         }
         if referenced_helpers.contains("__ckb_hash_chain") || referenced_helpers.contains("__ckb_hash_blake2b") {
             self.emit_runtime_blake2b_hash32(enabled);
+        }
+        if referenced_helpers.contains("__ckb_hash_blake2b_packed")
+            || referenced_helpers.contains("__ckb_hash_data_packed")
+            || referenced_helpers.contains("__ckb_hash_blake2b_var")
+        {
+            self.emit_runtime_blake2b_hash_var(enabled);
+        }
+        if referenced_helpers.contains("__ckb_input_previous_tx_hash") {
+            self.emit_runtime_input_previous_tx_hash(enabled);
+        }
+        if referenced_helpers.contains("__ckb_input_previous_index") {
+            self.emit_runtime_input_previous_index(enabled);
+        }
+        if referenced_helpers.contains("__ckb_cell_capacity") {
+            self.emit_runtime_cell_capacity(enabled);
+        }
+        if referenced_helpers.contains("__ckb_cell_data_hash") {
+            self.emit_runtime_cell_data_hash(enabled);
+        }
+        if referenced_helpers.contains("__ckb_cell_lock_args32") {
+            self.emit_runtime_cell_lock_args32(enabled);
         }
     }
 
@@ -527,6 +565,434 @@ impl CodeGenerator {
         self.emit_large_addi("sp", "sp", FRAME as i64);
         self.emit("li a0, 0");
         self.emit("ret");
+    }
+
+    fn emit_runtime_blake2b_hash_var(&mut self, enabled: bool) {
+        self.emit_global("__ckb_hash_blake2b_var");
+        self.emit_label("__ckb_hash_blake2b_var");
+        self.emit("# cellscript abi: CKB Blake2b-256 helper; a0=input, a1=len, a2=output[32], returns a0=0");
+        if !enabled {
+            self.emit_runtime_fail_ret(CellScriptRuntimeError::SyscallFailed);
+            return;
+        }
+
+        const IV: [u64; 8] = [
+            0x6a09e667f3bcc908,
+            0xbb67ae8584caa73b,
+            0x3c6ef372fe94f82b,
+            0xa54ff53a5f1d36f1,
+            0x510e527fade682d1,
+            0x9b05688c2b3e6c1f,
+            0x1f83d9abfb41bd6b,
+            0x5be0cd19137e2179,
+        ];
+        const SIGMA: [[usize; 16]; 12] = [
+            [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+            [14, 10, 4, 8, 9, 15, 13, 6, 1, 12, 0, 2, 11, 7, 5, 3],
+            [11, 8, 12, 0, 5, 2, 15, 13, 10, 14, 3, 6, 7, 1, 9, 4],
+            [7, 9, 3, 1, 13, 12, 11, 14, 2, 6, 5, 10, 4, 0, 15, 8],
+            [9, 0, 5, 7, 2, 4, 10, 15, 14, 1, 11, 12, 6, 8, 3, 13],
+            [2, 12, 6, 10, 0, 11, 8, 3, 4, 13, 7, 5, 15, 14, 1, 9],
+            [12, 5, 1, 15, 14, 13, 4, 10, 0, 7, 6, 3, 9, 2, 8, 11],
+            [13, 11, 7, 14, 12, 1, 3, 9, 5, 0, 15, 4, 8, 6, 2, 10],
+            [6, 15, 14, 9, 11, 3, 0, 8, 12, 2, 13, 7, 1, 4, 10, 5],
+            [10, 2, 8, 4, 7, 6, 1, 5, 15, 11, 9, 14, 3, 12, 13, 0],
+            [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+            [14, 10, 4, 8, 9, 15, 13, 6, 1, 12, 0, 2, 11, 7, 5, 3],
+        ];
+
+        const H_BASE: usize = 0;
+        const V_BASE: usize = 64;
+        const M_BASE: usize = 192;
+        const PTR_OFFSET: usize = 320;
+        const REM_OFFSET: usize = 328;
+        const COUNT_OFFSET: usize = 336;
+        const OUT_OFFSET: usize = 344;
+        const BLOCK_LEN_OFFSET: usize = 352;
+        const FINAL_OFFSET: usize = 360;
+        const FRAME: usize = 384;
+
+        let personal0 = u64::from_le_bytes(*b"ckb-defa");
+        let personal1 = u64::from_le_bytes(*b"ult-hash");
+        let h = [IV[0] ^ 0x01010020, IV[1], IV[2], IV[3], IV[4], IV[5], IV[6] ^ personal0, IV[7] ^ personal1];
+
+        let loop_label = self.fresh_label("blake2b_var_loop");
+        let full_block_label = self.fresh_label("blake2b_var_full_block");
+        let copy_loop = self.fresh_label("blake2b_var_copy_loop");
+        let copy_done = self.fresh_label("blake2b_var_copy_done");
+        let not_final_label = self.fresh_label("blake2b_var_not_final");
+        let next_block_label = self.fresh_label("blake2b_var_next_block");
+
+        self.emit_large_addi("sp", "sp", -(FRAME as i64));
+        self.emit_stack_store("a0", PTR_OFFSET);
+        self.emit_stack_store("a1", REM_OFFSET);
+        self.emit_stack_store("zero", COUNT_OFFSET);
+        self.emit_stack_store("a2", OUT_OFFSET);
+        for (index, value) in h.iter().enumerate() {
+            self.emit_blake2b_store_const(*value, H_BASE + index * 8);
+        }
+
+        self.emit_label(&loop_label);
+        self.emit_stack_load("t0", REM_OFFSET);
+        self.emit("li t1, 128");
+        self.emit(format!("bltu t1, t0, {}", full_block_label));
+        self.emit_stack_store("t0", BLOCK_LEN_OFFSET);
+        self.emit("li t2, 1");
+        self.emit_stack_store("t2", FINAL_OFFSET);
+        self.emit(format!("j {}", copy_done));
+        self.emit_label(&full_block_label);
+        self.emit("li t0, 128");
+        self.emit_stack_store("t0", BLOCK_LEN_OFFSET);
+        self.emit_stack_store("zero", FINAL_OFFSET);
+
+        self.emit_label(&copy_done);
+        for index in 0..16 {
+            self.emit_stack_store("zero", M_BASE + index * 8);
+        }
+        self.emit_stack_load("t3", BLOCK_LEN_OFFSET);
+        self.emit_stack_load("t1", PTR_OFFSET);
+        self.emit_sp_addi("t2", M_BASE);
+        self.emit("li t0, 0");
+        self.emit_label(&copy_loop);
+        self.emit(format!("beq t0, t3, {}", copy_done.clone() + "_data"));
+        self.emit("add t4, t1, t0");
+        self.emit("lbu t5, 0(t4)");
+        self.emit("add t4, t2, t0");
+        self.emit("sb t5, 0(t4)");
+        self.emit("addi t0, t0, 1");
+        self.emit(format!("j {}", copy_loop));
+        self.emit_label(&(copy_done.clone() + "_data"));
+
+        self.emit_stack_load("t0", COUNT_OFFSET);
+        self.emit_stack_load("t1", BLOCK_LEN_OFFSET);
+        self.emit("add t0, t0, t1");
+        self.emit_stack_store("t0", COUNT_OFFSET);
+
+        for index in 0..8 {
+            self.emit_stack_load("t0", H_BASE + index * 8);
+            self.emit_stack_store("t0", V_BASE + index * 8);
+        }
+        for (index, value) in IV.iter().enumerate() {
+            self.emit_blake2b_store_const(*value, V_BASE + (index + 8) * 8);
+        }
+        self.emit_stack_load("t0", V_BASE + 12 * 8);
+        self.emit_stack_load("t1", COUNT_OFFSET);
+        self.emit("xor t0, t0, t1");
+        self.emit_stack_store("t0", V_BASE + 12 * 8);
+        self.emit_stack_load("t0", FINAL_OFFSET);
+        self.emit(format!("beqz t0, {}", not_final_label));
+        self.emit_stack_load("t0", V_BASE + 14 * 8);
+        self.emit("xori t0, t0, -1");
+        self.emit_stack_store("t0", V_BASE + 14 * 8);
+        self.emit_label(&not_final_label);
+
+        for round in SIGMA {
+            self.emit_blake2b_g(V_BASE, M_BASE, 0, 4, 8, 12, round[0], round[1]);
+            self.emit_blake2b_g(V_BASE, M_BASE, 1, 5, 9, 13, round[2], round[3]);
+            self.emit_blake2b_g(V_BASE, M_BASE, 2, 6, 10, 14, round[4], round[5]);
+            self.emit_blake2b_g(V_BASE, M_BASE, 3, 7, 11, 15, round[6], round[7]);
+            self.emit_blake2b_g(V_BASE, M_BASE, 0, 5, 10, 15, round[8], round[9]);
+            self.emit_blake2b_g(V_BASE, M_BASE, 1, 6, 11, 12, round[10], round[11]);
+            self.emit_blake2b_g(V_BASE, M_BASE, 2, 7, 8, 13, round[12], round[13]);
+            self.emit_blake2b_g(V_BASE, M_BASE, 3, 4, 9, 14, round[14], round[15]);
+        }
+
+        for index in 0..8 {
+            self.emit_stack_load("t0", H_BASE + index * 8);
+            self.emit_stack_load("t1", V_BASE + index * 8);
+            self.emit("xor t0, t0, t1");
+            self.emit_stack_load("t1", V_BASE + (index + 8) * 8);
+            self.emit("xor t0, t0, t1");
+            self.emit_stack_store("t0", H_BASE + index * 8);
+        }
+
+        self.emit_stack_load("t0", FINAL_OFFSET);
+        self.emit(format!("beqz t0, {}", next_block_label));
+        self.emit_stack_load("t2", OUT_OFFSET);
+        for index in 0..4 {
+            self.emit_stack_load("t0", H_BASE + index * 8);
+            self.emit(format!("sd t0, {}(t2)", index * 8));
+        }
+        self.emit_large_addi("sp", "sp", FRAME as i64);
+        self.emit("li a0, 0");
+        self.emit("ret");
+
+        self.emit_label(&next_block_label);
+        self.emit_stack_load("t0", PTR_OFFSET);
+        self.emit_large_addi("t0", "t0", 128);
+        self.emit_stack_store("t0", PTR_OFFSET);
+        self.emit_stack_load("t0", REM_OFFSET);
+        self.emit_large_addi("t0", "t0", -128);
+        self.emit_stack_store("t0", REM_OFFSET);
+        self.emit(format!("j {}", loop_label));
+    }
+
+    fn emit_decode_ckb_source_view(&mut self, view_reg: &str, index_reg: &str, source_reg: &str, scratch_reg: &str) {
+        self.emit(format!("# cellscript abi: decode source view {} into source/index", view_reg));
+        self.emit(format!("srli {}, {}, 8", index_reg, view_reg));
+        self.emit(format!("slli {}, {}, 32", index_reg, index_reg));
+        self.emit(format!("srli {}, {}, 32", index_reg, index_reg));
+        self.emit(format!("andi {}, {}, 255", scratch_reg, view_reg));
+        self.emit(format!("li {}, {}", source_reg, CKB_SOURCE_GROUP_FLAG));
+        self.emit(format!("and {}, {}, {}", source_reg, view_reg, source_reg));
+        self.emit(format!("or {}, {}, {}", source_reg, source_reg, scratch_reg));
+    }
+
+    fn emit_runtime_input_previous_tx_hash(&mut self, enabled: bool) {
+        self.emit_global("__ckb_input_previous_tx_hash");
+        self.emit_label("__ckb_input_previous_tx_hash");
+        self.emit("# cellscript abi: a0=source_view, a1=output[32], returns a0=output, a1=status");
+        if !enabled {
+            self.emit_runtime_status_fail_ret(CellScriptRuntimeError::SyscallFailed);
+            return;
+        }
+        const SIZE_OFFSET: usize = 0;
+        const BUFFER_OFFSET: usize = 8;
+        const OUT_OFFSET: usize = 48;
+        const FRAME: usize = 80;
+        let fail = self.fresh_label("input_prev_tx_hash_fail");
+        self.emit_large_addi("sp", "sp", -(FRAME as i64));
+        self.emit_stack_store("a1", OUT_OFFSET);
+        self.emit_decode_ckb_source_view("a0", "t3", "t4", "t5");
+        self.emit("li t0, 36");
+        self.emit_stack_store("t0", SIZE_OFFSET);
+        self.emit_sp_addi("a0", BUFFER_OFFSET);
+        self.emit_sp_addi("a1", SIZE_OFFSET);
+        self.emit("li a2, 0");
+        self.emit("mv a3, t3");
+        self.emit("mv a4, t4");
+        self.emit(format!("li a5, {}", CKB_INPUT_FIELD_PREVIOUS_OUTPUT));
+        self.emit(format!("li a7, {}", CKB_LOAD_INPUT_BY_FIELD_SYSCALL_NUMBER));
+        self.emit("ecall");
+        self.emit(format!("bnez a0, {}", fail));
+        self.emit_stack_load("t0", SIZE_OFFSET);
+        self.emit("li t1, 36");
+        self.emit(format!("bne t0, t1, {}", fail));
+        self.emit_stack_load("t2", OUT_OFFSET);
+        self.emit_sp_addi("t3", BUFFER_OFFSET);
+        for index in 0..4 {
+            self.emit(format!("ld t0, {}(t3)", index * 8));
+            self.emit(format!("sd t0, {}(t2)", index * 8));
+        }
+        self.emit("mv a0, t2");
+        self.emit("li a1, 0");
+        self.emit_large_addi("sp", "sp", FRAME as i64);
+        self.emit("ret");
+        self.emit_label(&fail);
+        self.emit("li a0, 0");
+        self.emit(format!("li a1, {}", CellScriptRuntimeError::SyscallFailed.code()));
+        self.emit_large_addi("sp", "sp", FRAME as i64);
+        self.emit("ret");
+    }
+
+    fn emit_runtime_input_previous_index(&mut self, enabled: bool) {
+        self.emit_global("__ckb_input_previous_index");
+        self.emit_label("__ckb_input_previous_index");
+        self.emit("# cellscript abi: a0=source_view, returns a0=previous_output.index, a1=status");
+        if !enabled {
+            self.emit_runtime_status_fail_ret(CellScriptRuntimeError::SyscallFailed);
+            return;
+        }
+        const SIZE_OFFSET: usize = 0;
+        const BUFFER_OFFSET: usize = 8;
+        const FRAME: usize = 64;
+        let fail = self.fresh_label("input_prev_index_fail");
+        self.emit_large_addi("sp", "sp", -(FRAME as i64));
+        self.emit_decode_ckb_source_view("a0", "t3", "t4", "t5");
+        self.emit("li t0, 36");
+        self.emit_stack_store("t0", SIZE_OFFSET);
+        self.emit_sp_addi("a0", BUFFER_OFFSET);
+        self.emit_sp_addi("a1", SIZE_OFFSET);
+        self.emit("li a2, 0");
+        self.emit("mv a3, t3");
+        self.emit("mv a4, t4");
+        self.emit(format!("li a5, {}", CKB_INPUT_FIELD_PREVIOUS_OUTPUT));
+        self.emit(format!("li a7, {}", CKB_LOAD_INPUT_BY_FIELD_SYSCALL_NUMBER));
+        self.emit("ecall");
+        self.emit(format!("bnez a0, {}", fail));
+        self.emit_stack_load("t0", SIZE_OFFSET);
+        self.emit("li t1, 36");
+        self.emit(format!("bne t0, t1, {}", fail));
+        self.emit_sp_addi("t3", BUFFER_OFFSET);
+        self.emit("lbu a0, 32(t3)");
+        self.emit("lbu t0, 33(t3)");
+        self.emit("slli t0, t0, 8");
+        self.emit("or a0, a0, t0");
+        self.emit("lbu t0, 34(t3)");
+        self.emit("slli t0, t0, 16");
+        self.emit("or a0, a0, t0");
+        self.emit("lbu t0, 35(t3)");
+        self.emit("slli t0, t0, 24");
+        self.emit("or a0, a0, t0");
+        self.emit("li a1, 0");
+        self.emit_large_addi("sp", "sp", FRAME as i64);
+        self.emit("ret");
+        self.emit_label(&fail);
+        self.emit("li a0, 0");
+        self.emit(format!("li a1, {}", CellScriptRuntimeError::SyscallFailed.code()));
+        self.emit_large_addi("sp", "sp", FRAME as i64);
+        self.emit("ret");
+    }
+
+    fn emit_runtime_cell_capacity(&mut self, enabled: bool) {
+        self.emit_global("__ckb_cell_capacity");
+        self.emit_label("__ckb_cell_capacity");
+        self.emit("# cellscript abi: a0=source_view, returns a0=capacity, a1=status");
+        if !enabled {
+            self.emit_runtime_status_fail_ret(CellScriptRuntimeError::SyscallFailed);
+            return;
+        }
+        const SIZE_OFFSET: usize = 0;
+        const BUFFER_OFFSET: usize = 8;
+        const FRAME: usize = 32;
+        let fail = self.fresh_label("cell_capacity_fail");
+        self.emit_large_addi("sp", "sp", -(FRAME as i64));
+        self.emit_decode_ckb_source_view("a0", "t3", "t4", "t5");
+        self.emit("li t0, 8");
+        self.emit_stack_store("t0", SIZE_OFFSET);
+        self.emit_sp_addi("a0", BUFFER_OFFSET);
+        self.emit_sp_addi("a1", SIZE_OFFSET);
+        self.emit("li a2, 0");
+        self.emit("mv a3, t3");
+        self.emit("mv a4, t4");
+        self.emit(format!("li a5, {}", CKB_CELL_FIELD_CAPACITY));
+        self.emit(format!("li a7, {}", CKB_LOAD_CELL_BY_FIELD_SYSCALL_NUMBER));
+        self.emit("ecall");
+        self.emit(format!("bnez a0, {}", fail));
+        self.emit_stack_load("t0", SIZE_OFFSET);
+        self.emit("li t1, 8");
+        self.emit(format!("bne t0, t1, {}", fail));
+        self.emit_stack_load("a0", BUFFER_OFFSET);
+        self.emit("li a1, 0");
+        self.emit_large_addi("sp", "sp", FRAME as i64);
+        self.emit("ret");
+        self.emit_label(&fail);
+        self.emit("li a0, 0");
+        self.emit(format!("li a1, {}", CellScriptRuntimeError::SyscallFailed.code()));
+        self.emit_large_addi("sp", "sp", FRAME as i64);
+        self.emit("ret");
+    }
+
+    fn emit_runtime_cell_data_hash(&mut self, enabled: bool) {
+        self.emit_global("__ckb_cell_data_hash");
+        self.emit_label("__ckb_cell_data_hash");
+        self.emit("# cellscript abi: a0=source_view, a1=output[32], returns a0=output, a1=status");
+        if !enabled {
+            self.emit_runtime_status_fail_ret(CellScriptRuntimeError::SyscallFailed);
+            return;
+        }
+        const SIZE_OFFSET: usize = 0;
+        const BUFFER_OFFSET: usize = 8;
+        const OUT_OFFSET: usize = 40;
+        const FRAME: usize = 80;
+        let fail = self.fresh_label("cell_data_hash_fail");
+        self.emit_large_addi("sp", "sp", -(FRAME as i64));
+        self.emit_stack_store("a1", OUT_OFFSET);
+        self.emit_decode_ckb_source_view("a0", "t3", "t4", "t5");
+        self.emit("li t0, 32");
+        self.emit_stack_store("t0", SIZE_OFFSET);
+        self.emit_sp_addi("a0", BUFFER_OFFSET);
+        self.emit_sp_addi("a1", SIZE_OFFSET);
+        self.emit("li a2, 0");
+        self.emit("mv a3, t3");
+        self.emit("mv a4, t4");
+        self.emit(format!("li a5, {}", CKB_CELL_FIELD_DATA_HASH));
+        self.emit(format!("li a7, {}", CKB_LOAD_CELL_BY_FIELD_SYSCALL_NUMBER));
+        self.emit("ecall");
+        self.emit(format!("bnez a0, {}", fail));
+        self.emit_stack_load("t0", SIZE_OFFSET);
+        self.emit("li t1, 32");
+        self.emit(format!("bne t0, t1, {}", fail));
+        self.emit_stack_load("t2", OUT_OFFSET);
+        self.emit_sp_addi("t3", BUFFER_OFFSET);
+        for index in 0..4 {
+            self.emit(format!("ld t0, {}(t3)", index * 8));
+            self.emit(format!("sd t0, {}(t2)", index * 8));
+        }
+        self.emit("mv a0, t2");
+        self.emit("li a1, 0");
+        self.emit_large_addi("sp", "sp", FRAME as i64);
+        self.emit("ret");
+        self.emit_label(&fail);
+        self.emit("li a0, 0");
+        self.emit(format!("li a1, {}", CellScriptRuntimeError::SyscallFailed.code()));
+        self.emit_large_addi("sp", "sp", FRAME as i64);
+        self.emit("ret");
+    }
+
+    fn emit_runtime_cell_lock_args32(&mut self, enabled: bool) {
+        self.emit_global("__ckb_cell_lock_args32");
+        self.emit_label("__ckb_cell_lock_args32");
+        self.emit("# cellscript abi: a0=source_view, a1=output[32], returns a0=output, a1=status");
+        if !enabled {
+            self.emit_runtime_status_fail_ret(CellScriptRuntimeError::SyscallFailed);
+            return;
+        }
+        const SIZE_OFFSET: usize = 0;
+        const BUFFER_OFFSET: usize = 8;
+        const OUT_OFFSET: usize = 520;
+        const FRAME: usize = 544;
+        let fail = self.fresh_label("cell_lock_args32_fail");
+        self.emit_large_addi("sp", "sp", -(FRAME as i64));
+        self.emit_stack_store("a1", OUT_OFFSET);
+        self.emit_decode_ckb_source_view("a0", "t3", "t4", "t5");
+        self.emit("li t0, 512");
+        self.emit_stack_store("t0", SIZE_OFFSET);
+        self.emit_sp_addi("a0", BUFFER_OFFSET);
+        self.emit_sp_addi("a1", SIZE_OFFSET);
+        self.emit("li a2, 0");
+        self.emit("mv a3, t3");
+        self.emit("mv a4, t4");
+        self.emit(format!("li a5, {}", CKB_CELL_FIELD_LOCK));
+        self.emit(format!("li a7, {}", CKB_LOAD_CELL_BY_FIELD_SYSCALL_NUMBER));
+        self.emit("ecall");
+        self.emit(format!("bnez a0, {}", fail));
+        self.emit_stack_load("t0", SIZE_OFFSET);
+        self.emit("li t1, 85");
+        self.emit(format!("bne t0, t1, {}", fail));
+        self.emit_sp_addi("t3", BUFFER_OFFSET);
+        self.emit_unaligned_u32_from("t3", "t0", 0);
+        self.emit("li t1, 85");
+        self.emit(format!("bne t0, t1, {}", fail));
+        self.emit_unaligned_u32_from("t3", "t0", 4);
+        self.emit("li t1, 16");
+        self.emit(format!("bne t0, t1, {}", fail));
+        self.emit_unaligned_u32_from("t3", "t0", 8);
+        self.emit("li t1, 48");
+        self.emit(format!("bne t0, t1, {}", fail));
+        self.emit_unaligned_u32_from("t3", "t0", 12);
+        self.emit("li t1, 49");
+        self.emit(format!("bne t0, t1, {}", fail));
+        self.emit_unaligned_u32_from("t3", "t0", 49);
+        self.emit("li t1, 32");
+        self.emit(format!("bne t0, t1, {}", fail));
+        self.emit_stack_load("t2", OUT_OFFSET);
+        for index in 0..32 {
+            self.emit(format!("lbu t0, {}(t3)", 53 + index));
+            self.emit(format!("sb t0, {}(t2)", index));
+        }
+        self.emit("mv a0, t2");
+        self.emit("li a1, 0");
+        self.emit_large_addi("sp", "sp", FRAME as i64);
+        self.emit("ret");
+        self.emit_label(&fail);
+        self.emit("li a0, 0");
+        self.emit(format!("li a1, {}", CellScriptRuntimeError::SyscallFailed.code()));
+        self.emit_large_addi("sp", "sp", FRAME as i64);
+        self.emit("ret");
+    }
+
+    fn emit_unaligned_u32_from(&mut self, base_reg: &str, dest_reg: &str, offset: usize) {
+        self.emit(format!("lbu {}, {}({})", dest_reg, offset, base_reg));
+        self.emit(format!("lbu t6, {}({})", offset + 1, base_reg));
+        self.emit("slli t6, t6, 8");
+        self.emit(format!("or {}, {}, t6", dest_reg, dest_reg));
+        self.emit(format!("lbu t6, {}({})", offset + 2, base_reg));
+        self.emit("slli t6, t6, 16");
+        self.emit(format!("or {}, {}, t6", dest_reg, dest_reg));
+        self.emit(format!("lbu t6, {}({})", offset + 3, base_reg));
+        self.emit("slli t6, t6, 24");
+        self.emit(format!("or {}, {}, t6", dest_reg, dest_reg));
     }
 
     fn emit_blake2b_store_const(&mut self, value: u64, stack_offset: usize) {

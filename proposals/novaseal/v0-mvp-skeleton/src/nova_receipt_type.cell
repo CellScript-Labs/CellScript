@@ -18,16 +18,20 @@ struct OutPoint {
 }
 
 receipt ProofReceiptV0 has store, create, consume {
-    protocol: Hash,
-    version: u16,
+    protocol_id: Hash,
+    package_hash: Hash,
+    policy_hash: Hash,
     action: u8,
+    terminal_path: u8,
     old_cell: OutPoint,
+    new_cell_commitment: Hash,
     old_state_hash: Hash,
     new_state_hash: Hash,
-    intent_hash: Hash,
-    policy_hash: Hash,
+    old_nonce: u64,
+    new_nonce: u64,
+    intent_core_hash: Hash,
+    signed_intent_hash: Hash,
+    payout_commitment_hash: Hash,
     signer_authority_hash: Hash,
-    tx_hash: Hash,
-    nonce: u64,
     expiry: u64,
 }

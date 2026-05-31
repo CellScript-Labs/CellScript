@@ -28,6 +28,53 @@ const PAYOUT_LENDER_REPAYMENT: u8 = 1
 const PAYOUT_BORROWER_COLLATERAL_RETURN: u8 = 2
 const PAYOUT_LENDER_DEFAULT_CLAIM: u8 = 3
 
+const NATIVE_CKB_PAYOUT_OCCUPIED_CAPACITY: u64 = 4000000000
+
+struct AgreementSignaturePayload {
+    pubkey: [u8; 32],
+    signature: [u8; 64],
+}
+
+struct NovaAgreementIntentCoreV0 {
+    action: u8,
+    agreement_id: Hash,
+    terms_hash: Hash,
+    borrower_authority_hash: Hash,
+    lender_authority_hash: Hash,
+    old_status: u8,
+    new_status: u8,
+    old_nonce: u64,
+    new_nonce: u64,
+    terminal_amount: u64,
+    payout_commitment_hash: Hash,
+    expiry_timepoint: u64,
+}
+
+struct NovaAgreementSignedIntentV0 {
+    core: NovaAgreementIntentCoreV0,
+    expected_receipt_hash: Hash,
+}
+
+struct NovaAgreementReceiptCommitmentV0 {
+    action: u8,
+    agreement_id: Hash,
+    old_status: u8,
+    new_status: u8,
+    terms_hash: Hash,
+    borrower_authority_hash: Hash,
+    lender_authority_hash: Hash,
+    terminal_amount: u64,
+    old_nonce: u64,
+    new_nonce: u64,
+    intent_core_hash: Hash,
+    payout_commitment_hash: Hash,
+}
+
+struct RepayPayoutCommitmentV0 {
+    lender_repayment_hash: Hash,
+    borrower_collateral_return_hash: Hash,
+}
+
 struct NovaAgreementTermsV0 {
     version: u16,
     agreement_id: Hash,
@@ -61,7 +108,7 @@ resource NovaAgreementCellV0 has store, create, consume, replace {
     fixed_fee_amount: u64,
     expiry_timepoint: u64,
     status: u8,
-    receipt_root: Hash,
+    latest_receipt_hash: Hash,
     nonce: u64,
 }
 
@@ -77,8 +124,11 @@ receipt NovaAgreementReceiptV0 has store, create, consume {
     principal_amount: u64,
     fixed_fee_amount: u64,
     terminal_amount: u64,
-    old_receipt_root: Hash,
-    new_receipt_root: Hash,
+    previous_receipt_hash: Hash,
+    latest_receipt_hash: Hash,
+    intent_core_hash: Hash,
+    signed_intent_hash: Hash,
+    payout_commitment_hash: Hash,
     nonce: u64,
     timepoint: u64,
 }
@@ -95,9 +145,38 @@ receipt NativeCkbPayoutV0 has store, create, consume {
     nonce: u64,
 }
 
-action originate_agreement(witness terms: NovaAgreementTermsV0, witness originator_authority_hash: Hash, witness receipt_hash: Hash) -> (agreement: NovaAgreementCellV0, principal_payout: NativeCkbPayoutV0, receipt: NovaAgreementReceiptV0)
+action originate_agreement(witness terms: NovaAgreementTermsV0, witness intent: NovaAgreementSignedIntentV0, witness borrower_sig: AgreementSignaturePayload, witness lender_sig: AgreementSignaturePayload) -> (agreement: NovaAgreementCellV0, principal_payout: NativeCkbPayoutV0, receipt: NovaAgreementReceiptV0)
 where
     let now = env::current_timepoint()
+    let payout = NativeCkbPayoutV0 {
+        action: PATH_ORIGINATE,
+        agreement_id: terms.agreement_id,
+        role: PAYOUT_BORROWER_PRINCIPAL,
+        recipient_authority_hash: terms.borrower_authority_hash,
+        asset_kind: terms.principal_asset_kind,
+        asset_hash: terms.principal_asset_hash,
+        amount: terms.principal_amount,
+        terms_hash: terms.terms_hash,
+        nonce: 0
+    }
+    let payout_commitment_hash = hash_blake2b_packed(payout)
+    let intent_core_hash = hash_blake2b_packed(intent.core)
+    let signed_intent_hash = hash_blake2b_packed(intent)
+    let receipt_commitment = NovaAgreementReceiptCommitmentV0 {
+        action: PATH_ORIGINATE,
+        agreement_id: terms.agreement_id,
+        old_status: STATUS_OFFERED,
+        new_status: STATUS_ACTIVE,
+        terms_hash: terms.terms_hash,
+        borrower_authority_hash: terms.borrower_authority_hash,
+        lender_authority_hash: terms.lender_authority_hash,
+        terminal_amount: terms.principal_amount,
+        old_nonce: 0,
+        new_nonce: 0,
+        intent_core_hash: intent_core_hash,
+        payout_commitment_hash: payout_commitment_hash
+    }
+    let materialized_receipt_hash = hash_blake2b_packed(receipt_commitment)
     require terms.version == AGREEMENT_VERSION
     require terms.collateral_asset_kind == ASSET_KIND_CKB
     require terms.principal_asset_kind == ASSET_KIND_CKB
@@ -109,7 +188,27 @@ where
     require now <= terms.expiry_timepoint
     require terms.start_timepoint < terms.expiry_timepoint
     require terms.early_close_policy == EARLY_CLOSE_FIXED_FEE
-    require originator_authority_hash == terms.borrower_authority_hash
+    require intent.core.action == PATH_ORIGINATE
+    require intent.core.agreement_id == terms.agreement_id
+    require intent.core.terms_hash == terms.terms_hash
+    require intent.core.borrower_authority_hash == terms.borrower_authority_hash
+    require intent.core.lender_authority_hash == terms.lender_authority_hash
+    require intent.core.old_status == STATUS_OFFERED
+    require intent.core.new_status == STATUS_ACTIVE
+    require intent.core.old_nonce == 0
+    require intent.core.new_nonce == 0
+    require intent.core.terminal_amount == terms.principal_amount
+    require intent.core.payout_commitment_hash == payout_commitment_hash
+    require intent.core.expiry_timepoint == terms.expiry_timepoint
+    require intent.expected_receipt_hash == materialized_receipt_hash
+    require borrower_sig.pubkey == terms.borrower_authority_hash
+    require lender_sig.pubkey == terms.lender_authority_hash
+    verifier::btc::bip340::require_signature(signed_intent_hash, borrower_sig.pubkey, borrower_sig.signature)
+    verifier::btc::bip340::require_signature(signed_intent_hash, lender_sig.pubkey, lender_sig.signature)
+    let principal_output = source::output(1)
+    let principal_min_capacity = NATIVE_CKB_PAYOUT_OCCUPIED_CAPACITY + terms.principal_amount
+    require ckb::cell_capacity(principal_output) >= principal_min_capacity
+    require ckb::cell_lock_args32(principal_output) == terms.borrower_authority_hash
 
     create agreement = NovaAgreementCellV0 {
         version: terms.version,
@@ -126,7 +225,7 @@ where
         fixed_fee_amount: terms.fixed_fee_amount,
         expiry_timepoint: terms.expiry_timepoint,
         status: STATUS_ACTIVE,
-        receipt_root: receipt_hash,
+        latest_receipt_hash: materialized_receipt_hash,
         nonce: 0
     }
 
@@ -153,21 +252,91 @@ where
         collateral_amount: terms.collateral_amount,
         principal_amount: terms.principal_amount,
         fixed_fee_amount: terms.fixed_fee_amount,
-        terminal_amount: 0,
-        old_receipt_root: Hash::zero(),
-        new_receipt_root: receipt_hash,
+        terminal_amount: terms.principal_amount,
+        previous_receipt_hash: Hash::zero(),
+        latest_receipt_hash: materialized_receipt_hash,
+        intent_core_hash: intent_core_hash,
+        signed_intent_hash: signed_intent_hash,
+        payout_commitment_hash: payout_commitment_hash,
         nonce: 0,
         timepoint: now
     }
 
-action repay_before_expiry(active: NovaAgreementCellV0, witness actor_authority_hash: Hash, witness receipt_hash: Hash) -> (closed: NovaAgreementCellV0, lender_repayment: NativeCkbPayoutV0, borrower_collateral_return: NativeCkbPayoutV0, receipt: NovaAgreementReceiptV0)
+action repay_before_expiry(active: NovaAgreementCellV0, witness intent: NovaAgreementSignedIntentV0, witness borrower_sig: AgreementSignaturePayload) -> (closed: NovaAgreementCellV0, lender_repayment: NativeCkbPayoutV0, borrower_collateral_return: NativeCkbPayoutV0, receipt: NovaAgreementReceiptV0)
 where
     let now = env::current_timepoint()
     let repayment_amount = active.principal_amount + active.fixed_fee_amount
+    let lender_payout = NativeCkbPayoutV0 {
+        action: PATH_REPAY_BEFORE_EXPIRY,
+        agreement_id: active.agreement_id,
+        role: PAYOUT_LENDER_REPAYMENT,
+        recipient_authority_hash: active.lender_authority_hash,
+        asset_kind: active.principal_asset_kind,
+        asset_hash: active.principal_asset_hash,
+        amount: repayment_amount,
+        terms_hash: active.terms_hash,
+        nonce: active.nonce + 1
+    }
+    let borrower_payout = NativeCkbPayoutV0 {
+        action: PATH_REPAY_BEFORE_EXPIRY,
+        agreement_id: active.agreement_id,
+        role: PAYOUT_BORROWER_COLLATERAL_RETURN,
+        recipient_authority_hash: active.borrower_authority_hash,
+        asset_kind: active.collateral_asset_kind,
+        asset_hash: active.collateral_asset_hash,
+        amount: active.collateral_amount,
+        terms_hash: active.terms_hash,
+        nonce: active.nonce + 1
+    }
+    let payout_commitment_hash = hash_blake2b_packed(RepayPayoutCommitmentV0 {
+        lender_repayment_hash: hash_blake2b_packed(lender_payout),
+        borrower_collateral_return_hash: hash_blake2b_packed(borrower_payout)
+    })
+    let intent_core_hash = hash_blake2b_packed(intent.core)
+    let signed_intent_hash = hash_blake2b_packed(intent)
+    let receipt_commitment = NovaAgreementReceiptCommitmentV0 {
+        action: PATH_REPAY_BEFORE_EXPIRY,
+        agreement_id: active.agreement_id,
+        old_status: STATUS_ACTIVE,
+        new_status: STATUS_REPAID,
+        terms_hash: active.terms_hash,
+        borrower_authority_hash: active.borrower_authority_hash,
+        lender_authority_hash: active.lender_authority_hash,
+        terminal_amount: repayment_amount,
+        old_nonce: active.nonce,
+        new_nonce: active.nonce + 1,
+        intent_core_hash: intent_core_hash,
+        payout_commitment_hash: payout_commitment_hash
+    }
+    let materialized_receipt_hash = hash_blake2b_packed(receipt_commitment)
     require active.version == AGREEMENT_VERSION
     require active.status == STATUS_ACTIVE
+    require active.collateral_asset_kind == ASSET_KIND_CKB
+    require active.principal_asset_kind == ASSET_KIND_CKB
     require now <= active.expiry_timepoint
-    require actor_authority_hash == active.borrower_authority_hash
+    require intent.core.action == PATH_REPAY_BEFORE_EXPIRY
+    require intent.core.agreement_id == active.agreement_id
+    require intent.core.terms_hash == active.terms_hash
+    require intent.core.borrower_authority_hash == active.borrower_authority_hash
+    require intent.core.lender_authority_hash == active.lender_authority_hash
+    require intent.core.old_status == STATUS_ACTIVE
+    require intent.core.new_status == STATUS_REPAID
+    require intent.core.old_nonce == active.nonce
+    require intent.core.new_nonce == active.nonce + 1
+    require intent.core.terminal_amount == repayment_amount
+    require intent.core.payout_commitment_hash == payout_commitment_hash
+    require intent.core.expiry_timepoint == active.expiry_timepoint
+    require intent.expected_receipt_hash == materialized_receipt_hash
+    require borrower_sig.pubkey == active.borrower_authority_hash
+    verifier::btc::bip340::require_signature(signed_intent_hash, borrower_sig.pubkey, borrower_sig.signature)
+    let repayment_output = source::output(1)
+    let collateral_return_output = source::output(2)
+    let repayment_min_capacity = NATIVE_CKB_PAYOUT_OCCUPIED_CAPACITY + repayment_amount
+    let collateral_return_min_capacity = NATIVE_CKB_PAYOUT_OCCUPIED_CAPACITY + active.collateral_amount
+    require ckb::cell_capacity(repayment_output) >= repayment_min_capacity
+    require ckb::cell_lock_args32(repayment_output) == active.lender_authority_hash
+    require ckb::cell_capacity(collateral_return_output) >= collateral_return_min_capacity
+    require ckb::cell_lock_args32(collateral_return_output) == active.borrower_authority_hash
 
     preserve closed from active {
         version
@@ -185,7 +354,7 @@ where
         expiry_timepoint
     }
     require closed.status == STATUS_REPAID
-    require closed.receipt_root == receipt_hash
+    require closed.latest_receipt_hash == materialized_receipt_hash
     require closed.nonce == active.nonce + 1
 
     create lender_repayment = NativeCkbPayoutV0 {
@@ -224,20 +393,72 @@ where
         principal_amount: active.principal_amount,
         fixed_fee_amount: active.fixed_fee_amount,
         terminal_amount: repayment_amount,
-        old_receipt_root: active.receipt_root,
-        new_receipt_root: receipt_hash,
+        previous_receipt_hash: active.latest_receipt_hash,
+        latest_receipt_hash: materialized_receipt_hash,
+        intent_core_hash: intent_core_hash,
+        signed_intent_hash: signed_intent_hash,
+        payout_commitment_hash: payout_commitment_hash,
         nonce: active.nonce + 1,
         timepoint: now
     }
 
-action claim_after_expiry(active: NovaAgreementCellV0, witness actor_authority_hash: Hash, witness receipt_hash: Hash) -> (closed: NovaAgreementCellV0, lender_default_claim: NativeCkbPayoutV0, receipt: NovaAgreementReceiptV0)
+action claim_after_expiry(active: NovaAgreementCellV0, witness intent: NovaAgreementSignedIntentV0, witness lender_sig: AgreementSignaturePayload) -> (closed: NovaAgreementCellV0, lender_default_claim: NativeCkbPayoutV0, receipt: NovaAgreementReceiptV0)
 where
     let now = env::current_timepoint()
     let claim_amount = active.collateral_amount
+    let claim_payout = NativeCkbPayoutV0 {
+        action: PATH_CLAIM_AFTER_EXPIRY,
+        agreement_id: active.agreement_id,
+        role: PAYOUT_LENDER_DEFAULT_CLAIM,
+        recipient_authority_hash: active.lender_authority_hash,
+        asset_kind: active.collateral_asset_kind,
+        asset_hash: active.collateral_asset_hash,
+        amount: claim_amount,
+        terms_hash: active.terms_hash,
+        nonce: active.nonce + 1
+    }
+    let payout_commitment_hash = hash_blake2b_packed(claim_payout)
+    let intent_core_hash = hash_blake2b_packed(intent.core)
+    let signed_intent_hash = hash_blake2b_packed(intent)
+    let receipt_commitment = NovaAgreementReceiptCommitmentV0 {
+        action: PATH_CLAIM_AFTER_EXPIRY,
+        agreement_id: active.agreement_id,
+        old_status: STATUS_ACTIVE,
+        new_status: STATUS_DEFAULTED,
+        terms_hash: active.terms_hash,
+        borrower_authority_hash: active.borrower_authority_hash,
+        lender_authority_hash: active.lender_authority_hash,
+        terminal_amount: claim_amount,
+        old_nonce: active.nonce,
+        new_nonce: active.nonce + 1,
+        intent_core_hash: intent_core_hash,
+        payout_commitment_hash: payout_commitment_hash
+    }
+    let materialized_receipt_hash = hash_blake2b_packed(receipt_commitment)
     require active.version == AGREEMENT_VERSION
     require active.status == STATUS_ACTIVE
+    require active.collateral_asset_kind == ASSET_KIND_CKB
+    require active.principal_asset_kind == ASSET_KIND_CKB
     require now > active.expiry_timepoint
-    require actor_authority_hash == active.lender_authority_hash
+    require intent.core.action == PATH_CLAIM_AFTER_EXPIRY
+    require intent.core.agreement_id == active.agreement_id
+    require intent.core.terms_hash == active.terms_hash
+    require intent.core.borrower_authority_hash == active.borrower_authority_hash
+    require intent.core.lender_authority_hash == active.lender_authority_hash
+    require intent.core.old_status == STATUS_ACTIVE
+    require intent.core.new_status == STATUS_DEFAULTED
+    require intent.core.old_nonce == active.nonce
+    require intent.core.new_nonce == active.nonce + 1
+    require intent.core.terminal_amount == claim_amount
+    require intent.core.payout_commitment_hash == payout_commitment_hash
+    require intent.core.expiry_timepoint == active.expiry_timepoint
+    require intent.expected_receipt_hash == materialized_receipt_hash
+    require lender_sig.pubkey == active.lender_authority_hash
+    verifier::btc::bip340::require_signature(signed_intent_hash, lender_sig.pubkey, lender_sig.signature)
+    let claim_output = source::output(1)
+    let claim_min_capacity = NATIVE_CKB_PAYOUT_OCCUPIED_CAPACITY + claim_amount
+    require ckb::cell_capacity(claim_output) >= claim_min_capacity
+    require ckb::cell_lock_args32(claim_output) == active.lender_authority_hash
 
     preserve closed from active {
         version
@@ -255,7 +476,7 @@ where
         expiry_timepoint
     }
     require closed.status == STATUS_DEFAULTED
-    require closed.receipt_root == receipt_hash
+    require closed.latest_receipt_hash == materialized_receipt_hash
     require closed.nonce == active.nonce + 1
 
     create lender_default_claim = NativeCkbPayoutV0 {
@@ -282,8 +503,11 @@ where
         principal_amount: active.principal_amount,
         fixed_fee_amount: active.fixed_fee_amount,
         terminal_amount: claim_amount,
-        old_receipt_root: active.receipt_root,
-        new_receipt_root: receipt_hash,
+        previous_receipt_hash: active.latest_receipt_hash,
+        latest_receipt_hash: materialized_receipt_hash,
+        intent_core_hash: intent_core_hash,
+        signed_intent_hash: signed_intent_hash,
+        payout_commitment_hash: payout_commitment_hash,
         nonce: active.nonce + 1,
         timepoint: now
     }

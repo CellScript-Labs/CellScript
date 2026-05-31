@@ -50,7 +50,7 @@
     {
       "claim": "Terminal AgreementCell resource transitions are strict-mode sound.",
       "classification": "generated-audit-covered",
-      "evidence": "primitive-strict 0.16 passes after preserve closed from active plus explicit status/receipt_root/nonce guards"
+      "evidence": "primitive-strict 0.16 passes after preserve closed from active plus explicit status/latest_receipt_hash/nonce guards"
     },
     {
       "claim": "Fixture semantics are executable.",

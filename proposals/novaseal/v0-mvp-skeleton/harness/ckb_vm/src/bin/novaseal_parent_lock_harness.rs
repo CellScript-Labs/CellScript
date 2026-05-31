@@ -71,18 +71,22 @@ const IPC_BLOB_LEN: usize = 144;
 const TRANSACTION_SHAPE_OUTPUT_MARGIN_SHANNONS: u64 = 10_000_000_000;
 
 const NOVASEAL_CELL_LEN: usize = 146;
-const NOVASEAL_INTENT_LEN: usize = 213;
+const NOVASEAL_INTENT_LEN: usize = 254;
 const SIGNATURE_PAYLOAD_LEN: usize = 96;
 
 const CELL_BTC_AUTHORITY_HASH_OFFSET: usize = 2;
 const CELL_POLICY_HASH_OFFSET: usize = 66;
-const INTENT_DOMAIN_OFFSET: usize = 0;
-const INTENT_ACTION_OFFSET: usize = 32;
-const INTENT_POLICY_HASH_OFFSET: usize = 133;
-const INTENT_NONCE_OFFSET: usize = 197;
-const INTENT_EXPIRY_OFFSET: usize = 205;
+const INTENT_PROTOCOL_ID_OFFSET: usize = 0;
+const INTENT_POLICY_HASH_OFFSET: usize = 64;
+const INTENT_ACTION_OFFSET: usize = 96;
+const INTENT_OLD_NONCE_OFFSET: usize = 198;
+const INTENT_NEW_NONCE_OFFSET: usize = 206;
+const INTENT_EXPIRY_OFFSET: usize = 214;
+const SIGNED_INTENT_EXPECTED_RECEIPT_HASH_OFFSET: usize = 222;
 
 const CKB_BLAKE2B_PERSONAL: &[u8; 16] = b"ckb-default-hash";
+const PACKED_HASH_DOMAIN: &[u8] = b"CellScriptPackedHashV0\0";
+const SIGNED_INTENT_TYPE_NAME: &[u8] = b"NovaSealSignedIntentV0";
 const LOCK_WITNESS_MAGIC: &[u8; 8] = b"CSARGv1\0";
 const IPC_MAGIC: &[u8; 8] = b"NSBV0IPC";
 const IPC_VERSION: u16 = 0;
@@ -827,7 +831,7 @@ fn build_cases(parent_code_hash: [u8; 32]) -> Result<Vec<ParentCase>, HarnessErr
     let domain = ckb_blake2b256(b"novaseal-parent-lock-harness-domain-v0");
     let policy_hash = ckb_blake2b256(b"novaseal-parent-lock-harness-policy-v0");
     let authority_hash = ckb_blake2b256(b"novaseal-parent-lock-harness-authority-v0");
-    let digest = ckb_blake2b256(&domain);
+    let digest = signed_intent_hash(&build_intent(&domain, &policy_hash));
     let signing_key = SigningKey::from_bytes(&TEST_SECRET_KEY)
         .map_err(|error| HarnessError::Message(format!("failed to construct test BIP340 signing key: {error}")))?;
     let signature = signing_key
@@ -899,7 +903,8 @@ fn build_case(
     pubkey: [u8; 32],
     signature: [u8; 64],
 ) -> ParentCase {
-    let digest = ckb_blake2b256(&domain);
+    let intent = build_intent(&domain, &policy_hash);
+    let digest = signed_intent_hash(&intent);
     let expected_ipc_blob = (!matches!(kind, CaseKind::AuthorityHashMismatch)).then(|| build_ipc_blob(&digest, &pubkey, &signature));
 
     ParentCase {
@@ -909,7 +914,7 @@ fn build_case(
         kind,
         lock_args: lock_arg_authority_hash,
         script: build_script_with_args(&parent_code_hash, &lock_arg_authority_hash),
-        witness: build_witness(&domain, &policy_hash, &pubkey, &signature),
+        witness: build_witness(&intent, &pubkey, &signature),
         input_cell_data: build_input_cell(&cell_authority_hash, &policy_hash),
         expected_digest: digest,
         expected_pubkey: pubkey,
@@ -1438,18 +1443,14 @@ fn resolved_script_consensus() -> Consensus {
     ConsensusBuilder::default().hardfork_switch(hardfork_switch).build()
 }
 
-fn build_witness(domain: &[u8; 32], policy_hash: &[u8; 32], pubkey: &[u8; 32], signature: &[u8; 64]) -> Vec<u8> {
-    let intent = build_intent(domain, policy_hash);
+fn build_witness(intent: &[u8], pubkey: &[u8; 32], signature: &[u8; 64]) -> Vec<u8> {
     let sig_payload = build_signature_payload(pubkey, signature);
-    let receipt_hash = [0u8; 32];
     let state_hash_commitment = [0u8; 32];
-    let mut witness = Vec::with_capacity(
-        LOCK_WITNESS_MAGIC.len() + 4 + intent.len() + receipt_hash.len() + state_hash_commitment.len() + 4 + sig_payload.len(),
-    );
+    let mut witness =
+        Vec::with_capacity(LOCK_WITNESS_MAGIC.len() + 4 + intent.len() + state_hash_commitment.len() + 4 + sig_payload.len());
     witness.extend_from_slice(LOCK_WITNESS_MAGIC);
     witness.extend_from_slice(&(intent.len() as u32).to_le_bytes());
-    witness.extend_from_slice(&intent);
-    witness.extend_from_slice(&receipt_hash);
+    witness.extend_from_slice(intent);
     witness.extend_from_slice(&state_hash_commitment);
     witness.extend_from_slice(&(sig_payload.len() as u32).to_le_bytes());
     witness.extend_from_slice(&sig_payload);
@@ -1465,11 +1466,14 @@ fn build_input_cell(authority_hash: &[u8; 32], policy_hash: &[u8; 32]) -> Vec<u8
 
 fn build_intent(domain: &[u8; 32], policy_hash: &[u8; 32]) -> Vec<u8> {
     let mut intent = vec![0u8; NOVASEAL_INTENT_LEN];
-    intent[INTENT_DOMAIN_OFFSET..INTENT_DOMAIN_OFFSET + 32].copy_from_slice(domain);
+    intent[INTENT_PROTOCOL_ID_OFFSET..INTENT_PROTOCOL_ID_OFFSET + 32].copy_from_slice(domain);
     intent[INTENT_ACTION_OFFSET] = 1;
     intent[INTENT_POLICY_HASH_OFFSET..INTENT_POLICY_HASH_OFFSET + 32].copy_from_slice(policy_hash);
-    intent[INTENT_NONCE_OFFSET..INTENT_NONCE_OFFSET + 8].copy_from_slice(&1u64.to_le_bytes());
+    intent[INTENT_OLD_NONCE_OFFSET..INTENT_OLD_NONCE_OFFSET + 8].copy_from_slice(&0u64.to_le_bytes());
+    intent[INTENT_NEW_NONCE_OFFSET..INTENT_NEW_NONCE_OFFSET + 8].copy_from_slice(&1u64.to_le_bytes());
     intent[INTENT_EXPIRY_OFFSET..INTENT_EXPIRY_OFFSET + 8].copy_from_slice(&u64::MAX.to_le_bytes());
+    intent[SIGNED_INTENT_EXPECTED_RECEIPT_HASH_OFFSET..SIGNED_INTENT_EXPECTED_RECEIPT_HASH_OFFSET + 32]
+        .copy_from_slice(&ckb_blake2b256(b"novaseal-parent-lock-harness-receipt-v0"));
     intent
 }
 
@@ -1515,6 +1519,17 @@ fn ckb_blake2b256(data: &[u8]) -> [u8; 32] {
     let mut out = [0u8; 32];
     out.copy_from_slice(digest.as_bytes());
     out
+}
+
+fn signed_intent_hash(intent: &[u8]) -> [u8; 32] {
+    let mut preimage =
+        Vec::with_capacity(PACKED_HASH_DOMAIN.len() + SIGNED_INTENT_TYPE_NAME.len() + 1 + 4 + intent.len());
+    preimage.extend_from_slice(PACKED_HASH_DOMAIN);
+    preimage.extend_from_slice(SIGNED_INTENT_TYPE_NAME);
+    preimage.push(0);
+    preimage.extend_from_slice(&(intent.len() as u32).to_le_bytes());
+    preimage.extend_from_slice(intent);
+    ckb_blake2b256(&preimage)
 }
 
 fn write_report(path: &Path, report: &Report, pretty: bool) -> Result<(), HarnessError> {

@@ -13,7 +13,7 @@ feature: resource-conservation:NovaSealCellV0
 status: checked-runtime
 codegen_coverage_status: covered
 on_chain_checked: true
-detail: Compiler-emitted runtime verifier checks one consumed 'NovaSealCellV0' Input is advanced into one created Output by a guarded resource transition; resource-conservation=checked-runtime; preserved fields: version, btc_authority_hash, policy_hash, receipt_root; guarded fields: state_hash, nonce, expiry; allowed fresh fields: -; unchecked fields: -
+detail: Compiler-emitted runtime verifier checks one consumed 'NovaSealCellV0' Input is advanced into one created Output by a guarded resource transition; resource-conservation=checked-runtime; preserved fields: version, btc_authority_hash, policy_hash, latest_receipt_hash; guarded fields: state_hash, nonce, expiry; allowed fresh fields: -; unchecked fields: -
 ```
 
 The generated ProofPlan record exposes the same facts as machine-readable relation checks:
@@ -23,7 +23,7 @@ resource-conservation
 resource-field:version=preserved
 resource-field:btc_authority_hash=preserved
 resource-field:policy_hash=preserved
-resource-field:receipt_root=preserved
+resource-field:latest_receipt_hash=preserved
 resource-field:state_hash=guarded
 resource-field:nonce=guarded
 resource-field:expiry=guarded
