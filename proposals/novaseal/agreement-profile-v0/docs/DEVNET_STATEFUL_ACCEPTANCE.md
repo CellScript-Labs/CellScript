@@ -1,6 +1,6 @@
 # Agreement Profile Devnet Stateful Acceptance
 
-Status: Agreement originate -> repay live RPC passed.
+Status: Agreement originate -> repay and originate -> claim live RPC passed.
 
 The resolved transaction harness proves each Agreement action shape locally, but
 it is not a live devnet lifecycle. The shared NovaSeal gate is:
@@ -19,12 +19,15 @@ stable type-script entry that routes `PATH_ORIGINATE`,
 The Agreement live runner now:
 
 - deploy live CellDeps;
-- submit originate through RPC;
-- read the live agreement cell;
-- dry-run a wrong-borrower-signature repay and confirm rejection;
-- submit repay against that exact outpoint;
-- verify the resulting receipt and payout cells through RPC.
+- submit one originate through RPC and repay against that exact active outpoint;
+- submit a second originate through RPC, advance devnet epoch past expiry, and
+  claim against that exact active outpoint;
+- dry-run wrong lender signature, non-CKB asset kind, wrong borrower signature,
+  payout capacity short, payout lock args mismatch, wrong payout amount, early
+  claim, and wrong lender claim signature rejects;
+- verify the valid terminal paths consume active cells and leave the closed
+  agreement, payout, and receipt cells live.
 
 The shared gate currently reports `passed`: NovaSeal core has live bootstrap ->
 key-auth transition evidence, and this Agreement Profile has live originate ->
-repay evidence.
+repay plus originate -> claim evidence.

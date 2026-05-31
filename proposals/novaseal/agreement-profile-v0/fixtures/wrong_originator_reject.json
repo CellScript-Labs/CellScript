@@ -3,7 +3,7 @@
   "fixture": "wrong_originator_reject",
   "action": "originate_agreement",
   "expected": "rejected",
-  "coverage": "source-guard-present + action-ckb-vm-covered + resolved-transaction-covered",
+  "coverage": "source-guard-present + resolved-transaction-covered",
   "reject_guard": "originator_authority_hash == terms.borrower_authority_hash",
   "description": "Origination must be performed by the borrower authority hash named in the terms."
 }

@@ -152,7 +152,9 @@ def live_agreement_summary(report: dict[str, Any] | None) -> dict[str, Any]:
     if "_invalid_json" in report:
         return {"present": True, "valid_json": False, "error": report["_invalid_json"]}
     originate = report.get("originate") if isinstance(report.get("originate"), dict) else {}
+    claim_originate = report.get("claim_originate") if isinstance(report.get("claim_originate"), dict) else {}
     repay = report.get("repay") if isinstance(report.get("repay"), dict) else {}
+    claim = report.get("claim") if isinstance(report.get("claim"), dict) else {}
     negative = report.get("negative_cases") if isinstance(report.get("negative_cases"), dict) else {}
     return {
         "present": True,
@@ -164,19 +166,61 @@ def live_agreement_summary(report: dict[str, Any] | None) -> dict[str, Any]:
         if isinstance(originate.get("commit"), dict)
         else None,
         "repay_tx_hash": (repay.get("commit") or {}).get("tx_hash") if isinstance(repay.get("commit"), dict) else None,
+        "claim_originate_tx_hash": (claim_originate.get("commit") or {}).get("tx_hash")
+        if isinstance(claim_originate.get("commit"), dict)
+        else None,
+        "claim_tx_hash": (claim.get("commit") or {}).get("tx_hash") if isinstance(claim.get("commit"), dict) else None,
         "origin_active_live": originate.get("active_live"),
         "origin_principal_payout_live": originate.get("principal_payout_live"),
         "origin_receipt_live": originate.get("receipt_live"),
+        "claim_origin_active_live": claim_originate.get("active_live"),
+        "claim_origin_principal_payout_live": claim_originate.get("principal_payout_live"),
+        "claim_origin_receipt_live": claim_originate.get("receipt_live"),
         "repay_old_active_not_live": repay.get("old_active_not_live"),
         "repay_closed_live": repay.get("closed_live"),
         "repay_lender_repayment_live": repay.get("lender_repayment_live"),
         "repay_borrower_collateral_return_live": repay.get("borrower_collateral_return_live"),
         "repay_receipt_live": repay.get("receipt_live"),
+        "claim_old_active_not_live": claim.get("old_active_not_live"),
+        "claim_closed_live": claim.get("closed_live"),
+        "claim_lender_default_claim_live": claim.get("lender_default_claim_live"),
+        "claim_receipt_live": claim.get("receipt_live"),
+        "wrong_lender_signature_rejected": (negative.get("wrong_lender_signature_dry_run") or {}).get("status")
+        == "rejected"
+        if isinstance(negative.get("wrong_lender_signature_dry_run"), dict)
+        else None,
+        "non_ckb_asset_kind_rejected": (negative.get("non_ckb_asset_kind_dry_run") or {}).get("status") == "rejected"
+        if isinstance(negative.get("non_ckb_asset_kind_dry_run"), dict)
+        else None,
         "wrong_borrower_signature_rejected": (negative.get("wrong_borrower_signature_dry_run") or {}).get("status")
         == "rejected"
         if isinstance(negative.get("wrong_borrower_signature_dry_run"), dict)
         else None,
+        "repay_payout_capacity_short_rejected": (negative.get("repay_payout_capacity_short_dry_run") or {}).get("status")
+        == "rejected"
+        if isinstance(negative.get("repay_payout_capacity_short_dry_run"), dict)
+        else None,
+        "repay_payout_lock_args_mismatch_rejected": (
+            negative.get("repay_payout_lock_args_mismatch_dry_run") or {}
+        ).get("status")
+        == "rejected"
+        if isinstance(negative.get("repay_payout_lock_args_mismatch_dry_run"), dict)
+        else None,
+        "repay_wrong_payout_amount_rejected": (negative.get("repay_wrong_payout_amount_dry_run") or {}).get("status")
+        == "rejected"
+        if isinstance(negative.get("repay_wrong_payout_amount_dry_run"), dict)
+        else None,
+        "early_claim_rejected": (negative.get("early_claim_dry_run") or {}).get("status") == "rejected"
+        if isinstance(negative.get("early_claim_dry_run"), dict)
+        else None,
+        "wrong_lender_claim_signature_rejected": (
+            negative.get("wrong_lender_claim_signature_dry_run") or {}
+        ).get("status")
+        == "rejected"
+        if isinstance(negative.get("wrong_lender_claim_signature_dry_run"), dict)
+        else None,
         "post_negative_active_still_live": negative.get("post_negative_active_still_live"),
+        "post_claim_negative_active_still_live": negative.get("post_claim_negative_active_still_live"),
     }
 
 
@@ -211,13 +255,28 @@ def build_report(repo_root: Path) -> dict[str, Any]:
         and live_agreement.get("origin_active_live") is True
         and live_agreement.get("origin_principal_payout_live") is True
         and live_agreement.get("origin_receipt_live") is True
+        and live_agreement.get("claim_origin_active_live") is True
+        and live_agreement.get("claim_origin_principal_payout_live") is True
+        and live_agreement.get("claim_origin_receipt_live") is True
         and live_agreement.get("repay_old_active_not_live") is True
         and live_agreement.get("repay_closed_live") is True
         and live_agreement.get("repay_lender_repayment_live") is True
         and live_agreement.get("repay_borrower_collateral_return_live") is True
         and live_agreement.get("repay_receipt_live") is True
+        and live_agreement.get("claim_old_active_not_live") is True
+        and live_agreement.get("claim_closed_live") is True
+        and live_agreement.get("claim_lender_default_claim_live") is True
+        and live_agreement.get("claim_receipt_live") is True
+        and live_agreement.get("wrong_lender_signature_rejected") is True
+        and live_agreement.get("non_ckb_asset_kind_rejected") is True
         and live_agreement.get("wrong_borrower_signature_rejected") is True
+        and live_agreement.get("repay_payout_capacity_short_rejected") is True
+        and live_agreement.get("repay_payout_lock_args_mismatch_rejected") is True
+        and live_agreement.get("repay_wrong_payout_amount_rejected") is True
+        and live_agreement.get("early_claim_rejected") is True
+        and live_agreement.get("wrong_lender_claim_signature_rejected") is True
         and live_agreement.get("post_negative_active_still_live") is True
+        and live_agreement.get("post_claim_negative_active_still_live") is True
     )
 
     core_blockers: list[dict[str, str]] = []

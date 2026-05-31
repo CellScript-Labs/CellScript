@@ -3,7 +3,7 @@
   "fixture": "nonce_mismatch_reject",
   "action": "repay_before_expiry / claim_after_expiry",
   "expected": "rejected",
-  "coverage": "source-guard-present + action-ckb-vm-covered + resolved-transaction-covered",
+  "coverage": "source-guard-present + resolved-transaction-covered",
   "reject_guard": "closed.nonce == active.nonce + 1",
   "description": "A terminal AgreementCell must advance the nonce by exactly one."
 }

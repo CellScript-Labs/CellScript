@@ -34,8 +34,10 @@ const CKB_SOURCE_GROUP_INPUT: u64 = 0x0100_0000_0000_0000 | CKB_SOURCE_INPUT;
 const CKB_SOURCE_GROUP_OUTPUT: u64 = 0x0100_0000_0000_0000 | CKB_SOURCE_OUTPUT;
 
 const CKB_LOAD_WITNESS_SYSCALL_NUMBER: u64 = 2074;
+const CKB_LOAD_CELL_BY_FIELD_SYSCALL_NUMBER: u64 = 2081;
 const CKB_LOAD_HEADER_BY_FIELD_SYSCALL_NUMBER: u64 = 2082;
 const CKB_LOAD_CELL_DATA_SYSCALL_NUMBER: u64 = 2092;
+const CELL_FIELD_CAPACITY: u64 = 0;
 const HEADER_FIELD_EPOCH_NUMBER: u64 = 0;
 const LOCK_WITNESS_MAGIC: &[u8; 8] = b"CSARGv1\0";
 
@@ -43,6 +45,7 @@ const CKB: u64 = 100_000_000;
 const COLLATERAL_AMOUNT: u64 = 1_000 * CKB;
 const PRINCIPAL_AMOUNT: u64 = 700 * CKB;
 const FIXED_FEE_AMOUNT: u64 = 30 * CKB;
+const HARNESS_CELL_CAPACITY: u64 = 10_000 * CKB;
 const START_TIMEPOINT: u64 = 100;
 const EXPIRY_TIMEPOINT: u64 = 200;
 
@@ -118,6 +121,8 @@ struct AgreementTrace {
     load_witness_failures: usize,
     load_cell_data_calls: usize,
     load_cell_data_failures: usize,
+    load_cell_by_field_calls: usize,
+    load_cell_by_field_failures: usize,
     load_header_by_field_calls: usize,
     load_header_by_field_failures: usize,
 }
@@ -260,6 +265,10 @@ impl<Mac: SupportMachine<REG = u64>> Syscalls<Mac> for AgreementSyscalls {
                 self.load_cell_data(machine)?;
                 Ok(true)
             }
+            CKB_LOAD_CELL_BY_FIELD_SYSCALL_NUMBER => {
+                self.load_cell_by_field(machine)?;
+                Ok(true)
+            }
             CKB_LOAD_HEADER_BY_FIELD_SYSCALL_NUMBER => {
                 self.load_header_by_field(machine)?;
                 Ok(true)
@@ -309,6 +318,32 @@ impl AgreementSyscalls {
             return Ok(());
         };
         Self::load_bytes(machine, &source_bytes, buffer, size_ptr, offset)
+    }
+
+    fn load_cell_by_field<Mac: SupportMachine<REG = u64>>(&mut self, machine: &mut Mac) -> Result<(), ckb_vm::Error> {
+        self.trace.lock().expect("trace mutex poisoned").load_cell_by_field_calls += 1;
+        let buffer = machine.registers()[A0];
+        let size_ptr = machine.registers()[A1];
+        let offset = machine.registers()[A2];
+        let index = machine.registers()[A3];
+        let source = machine.registers()[A4];
+        let field = machine.registers()[A5];
+        let Ok(index) = usize::try_from(index) else {
+            self.trace.lock().expect("trace mutex poisoned").load_cell_by_field_failures += 1;
+            machine.set_register(A0, 1);
+            return Ok(());
+        };
+        let source_exists = match source {
+            CKB_SOURCE_INPUT | CKB_SOURCE_GROUP_INPUT => self.input_cell_data.get(index).is_some(),
+            CKB_SOURCE_OUTPUT | CKB_SOURCE_GROUP_OUTPUT => self.output_cell_data.get(index).is_some(),
+            _ => false,
+        };
+        if field != CELL_FIELD_CAPACITY || !source_exists {
+            self.trace.lock().expect("trace mutex poisoned").load_cell_by_field_failures += 1;
+            machine.set_register(A0, 1);
+            return Ok(());
+        }
+        Self::load_bytes(machine, &HARNESS_CELL_CAPACITY.to_le_bytes(), buffer, size_ptr, offset)
     }
 
     fn load_header_by_field<Mac: SupportMachine<REG = u64>>(&mut self, machine: &mut Mac) -> Result<(), ckb_vm::Error> {

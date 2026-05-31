@@ -43,7 +43,7 @@
         "non_contextual_transaction_valid",
         "contextual_transaction_valid_for_accepted_case"
       ],
-      "coverage": "source-guard-present + local-transaction-shape-covered + action-ckb-vm-covered + resolved-transaction-covered"
+      "coverage": "source-guard-present + local-transaction-shape-covered + resolved-transaction-covered"
     },
     {
       "origin": "nova_agreement_type::repay_before_expiry",
@@ -87,7 +87,7 @@
         "preserved_field_mutation_reject",
         "under_capacity_reject_node_contextual_reject"
       ],
-      "coverage": "source-guard-present + local-transaction-shape-covered + action-ckb-vm-covered + resolved-transaction-covered"
+      "coverage": "source-guard-present + local-transaction-shape-covered + resolved-transaction-covered"
     },
     {
       "origin": "nova_agreement_type::claim_after_expiry",
@@ -120,7 +120,7 @@
         "early_claim_reject",
         "wrong_party_reject:claim_wrong_party"
       ],
-      "coverage": "source-guard-present + local-transaction-shape-covered + action-ckb-vm-covered + resolved-transaction-covered"
+      "coverage": "source-guard-present + local-transaction-shape-covered + resolved-transaction-covered"
     }
   ],
   "non_goals": [

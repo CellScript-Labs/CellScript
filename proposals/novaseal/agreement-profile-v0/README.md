@@ -1,8 +1,8 @@
 # NovaSeal Agreement Profile v0
 
 **Status**: reviewable CKB-native agreement skeleton with audited terminal-path
-structure, local transaction-shape evidence, action VM evidence, and resolved
-transaction verifier evidence.
+structure, local transaction-shape evidence, resolved transaction verifier
+evidence, and live devnet lifecycle evidence.
 
 This package is inspired by Matt's Minimum Viable Borrowing idea, but it does
 not claim to implement production lending. It models a Cell-native financial
@@ -28,12 +28,12 @@ Implemented in this slice:
 | Receipt output materialization | implemented | generated-audit-covered |
 | Primitive-strict 0.16 | passes | generated-audit-covered |
 | Fixture shape harness | implemented | local-transaction-shape-covered |
-| Action CKB VM harness | implemented | action-ckb-vm-covered |
+| Legacy per-action CKB VM harness | superseded | legacy-action-harness-superseded |
 | Resolved transaction harness | implemented | resolved-transaction-covered |
 | Native CKB occupied-capacity rejection | implemented | resolved-transaction-covered |
-| Native CKB payout output binding | implemented | action-ckb-vm-covered + resolved-transaction-covered |
-| Terms hash output binding | implemented | action-ckb-vm-covered + resolved-transaction-covered |
-| Receipt hash output binding | implemented | action-ckb-vm-covered + resolved-transaction-covered |
+| Native CKB payout output binding | implemented | resolved-transaction-covered + live-devnet-covered |
+| Terms hash output binding | implemented | resolved-transaction-covered |
+| Receipt hash output binding | implemented | resolved-transaction-covered |
 | Full Molecule/wallet hash preimage alignment | not implemented | future work |
 | BTC UTXO mirror / SPV / OP_RETURN | out of scope | not implemented |
 
@@ -103,7 +103,6 @@ python3 scripts/nova_agreement_tx_shape_harness.py --pretty
 /home/arthur/a19q3/CellScript/target/debug/cellc src/nova_agreement_type.cell --target riscv64-elf --target-profile ckb --entry-action claim_after_expiry -o target/nova-agreement-claim-action.elf
 /home/arthur/a19q3/CellScript/target/debug/cellc src/nova_agreement_lifecycle_type.cell --target riscv64-elf --target-profile ckb --entry-action nova_agreement_lifecycle -o target/nova-agreement-lifecycle-type.elf
 /home/arthur/a19q3/CellScript/target/debug/cellc harness/ckb_vm/always_success_lock.cell --target riscv64-elf --target-profile ckb --entry-lock always_success -o target/nova-agreement-always-success-lock.elf
-cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_agreement_ckb_vm_harness -- --pretty
 cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_agreement_tx_harness -- --pretty
 /home/arthur/a19q3/CellScript/scripts/novaseal_devnet_stateful_acceptance.sh --pretty --report-only
 ```
@@ -111,17 +110,19 @@ cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_agreement_tx_
 Latest local result: all CellScript commands pass. The generated audit bundle
 reports 3 actions, 0 locks, 2 source units, 71 ProofPlan records, and 21 builder
 assumptions. The local transaction-shape harness reports 8/8 fixture
-expectations matched: 3 accepted shapes and 5 rejected shapes. The action CKB VM
-harness reports 14/14 expectations matched: 3 accepted action executions and 11
-rejected action executions. The resolved transaction harness reports 20/20
-script-layer expectations matched and 20/20 node-verifier expectations matched.
+expectations matched: 3 accepted shapes and 5 rejected shapes. The resolved
+transaction harness reports 20/20 script-layer expectations matched and 20/20
+node-verifier expectations matched. The older per-action CKB VM harness is a
+legacy ABI check for the pre-signed-intent action witness shape and is not part
+of the current live stateful release gate.
 The devnet stateful gate now reports zero lifecycle blockers and full live
 stateful acceptance. The Agreement live runner deploys the BIP340 runtime
 verifier and `src/nova_agreement_lifecycle_type.cell:nova_agreement_lifecycle`
-as live CellDeps, submits originate, dry-runs a wrong-borrower-signature repay
-without consuming state, submits valid repay, and verifies the active input is
-dead plus the closed agreement, payout, and receipt outputs are live. The
-current aggregate status is `passed`. See
+as live CellDeps, submits originate -> repay and originate -> claim paths,
+dry-runs wrong signer, non-CKB asset, payout capacity, payout lock args, wrong
+payout amount, and early-claim negatives without consuming state, then verifies
+the consumed active inputs are dead plus the closed agreement, payout, and
+receipt outputs are live. The current aggregate status is `passed`. See
 [docs/DEVNET_STATEFUL_ACCEPTANCE.md](docs/DEVNET_STATEFUL_ACCEPTANCE.md).
 
 ## Harness Boundary
@@ -129,11 +130,9 @@ current aggregate status is `passed`. See
 `scripts/nova_agreement_tx_shape_harness.py` checks builder-visible CKB output
 amount and occupied-capacity shapes.
 
-`harness/ckb_vm` executes the compiled action ELFs in `ckb-vm` with harnessed
-`LOAD_WITNESS`, `LOAD_CELL_DATA`, and `LOAD_HEADER_BY_FIELD` syscalls. It covers
-origination, repayment, default claim, time rejects, party rejects, nonce
-mismatch, receipt-root mismatch, receipt output mismatch, terms hash output
-mismatch, wrong settlement payout, and preserved-field mutation.
+`harness/ckb_vm` contains a legacy per-action `ckb-vm` runner for the older
+action witness ABI. The current release gate relies on the lifecycle type-script
+runner plus the resolved transaction harness below.
 
 `harness/ckb_vm` also contains `novaseal_agreement_tx_harness`, which constructs
 deterministic resolved CKB transactions and runs both `ckb-script` and

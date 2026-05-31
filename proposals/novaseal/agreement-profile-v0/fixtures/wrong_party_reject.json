@@ -3,7 +3,7 @@
   "fixture": "wrong_party_reject",
   "action": "repay_before_expiry / claim_after_expiry",
   "expected": "rejected",
-  "coverage": "source-guard-present + local-transaction-shape-covered + action-ckb-vm-covered + resolved-transaction-covered",
+  "coverage": "source-guard-present + local-transaction-shape-covered + resolved-transaction-covered",
   "reject_guards": [
     "actor_authority_hash == active.borrower_authority_hash",
     "actor_authority_hash == active.lender_authority_hash"

@@ -51,7 +51,7 @@ party rejects, and wrong-settlement rejects.
 `harness/ckb_vm` executes the compiled `originate_agreement`,
 `repay_before_expiry`, and `claim_after_expiry` action ELFs in `ckb-vm`. It
 covers the action/type-script layer for time guards, party guards, nonce
-increments, receipt-root binding, receipt output fields, typed payout output
+increments, latest-receipt-hash binding, receipt output fields, typed payout output
 fields, terms-hash output binding, and preserved-field checks.
 
 `novaseal_agreement_tx_harness` constructs deterministic resolved transactions

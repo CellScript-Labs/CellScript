@@ -54,8 +54,8 @@
     },
     {
       "claim": "Fixture semantics are executable.",
-      "classification": "local-transaction-shape-covered + action-ckb-vm-covered + resolved-transaction-covered",
-      "evidence": "python3 scripts/nova_agreement_tx_shape_harness.py --pretty matched 8/8 shape expectations; cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_agreement_ckb_vm_harness -- --pretty matched 14/14 action VM expectations; cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_agreement_tx_harness -- --pretty matched 15/15 script-layer and node-verifier expectations"
+      "classification": "local-transaction-shape-covered + resolved-transaction-covered + live-devnet-covered",
+      "evidence": "python3 scripts/nova_agreement_tx_shape_harness.py --pretty matched 8/8 shape expectations; cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_agreement_tx_harness -- --pretty matched 20/20 script-layer and node-verifier expectations; scripts/novaseal_agreement_devnet_stateful_live.py passed originate -> repay, originate -> claim, and live negative dry-runs"
     },
     {
       "claim": "Native CKB funding/settlement shapes are locally verified.",
@@ -64,13 +64,13 @@
     },
     {
       "claim": "Compiled Agreement Profile actions execute in CKB VM for positive and negative terminal-path cases.",
-      "classification": "action-ckb-vm-covered",
-      "evidence": "target/nova-agreement-ckb-vm-action-report.json covers originate, repay, claim, time reject, party reject, nonce mismatch, receipt-root mismatch, receipt output mismatch, terms hash output mismatch, wrong settlement payout, and preserved-field mutation"
+      "classification": "legacy-action-harness-superseded",
+      "evidence": "the older per-action CKB VM harness is superseded by the signed-intent lifecycle type-script runner and resolved transaction harness"
     },
     {
       "claim": "Resolved Agreement Profile transactions execute through ckb-script and ckb-verification.",
       "classification": "resolved-transaction-covered",
-      "evidence": "target/nova-agreement-ckb-tx-report.json covers deterministic resolved transactions with action code CellDeps, a local harness lock CellDep, lock/type script groups, non-contextual checks, contextual checks, 15/15 matched expectations, and zero not-executed fixture files"
+      "evidence": "target/nova-agreement-ckb-tx-report.json covers deterministic resolved transactions with action code CellDeps, a local harness lock CellDep, lock/type script groups, non-contextual checks, contextual checks, matched expectations, and zero not-executed fixture files"
     },
     {
       "claim": "Native CKB transaction validity and occupied-capacity rejection are verified by resolved transaction execution.",
@@ -79,8 +79,8 @@
     },
     {
       "claim": "Payout output settlement amounts are enforced by Agreement Profile scripts.",
-      "classification": "action-ckb-vm-covered + resolved-transaction-covered",
-      "evidence": "wrong_settlement_amount_reject mutates the typed NativeCkbPayoutV0 lender repayment output and is rejected by both action VM and resolved transaction harnesses"
+      "classification": "resolved-transaction-covered + live-devnet-covered",
+      "evidence": "wrong_settlement_amount_reject mutates the typed NativeCkbPayoutV0 lender repayment output and is rejected by the resolved transaction harness; the live devnet runner also dry-runs a wrong payout amount rejection"
     }
   ]
 }

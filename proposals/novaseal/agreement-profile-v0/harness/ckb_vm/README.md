@@ -3,18 +3,17 @@
 This Rust harness is local evidence tooling only. It is not part of the deployed
 Agreement Profile contract surface and is not a verifier CellDep.
 
-The default binary executes the three compiled Agreement Profile action ELFs in
-`ckb-vm`:
+The default `novaseal_agreement_ckb_vm_harness` binary is legacy evidence for
+the older per-action witness ABI. It executes the three compiled Agreement
+Profile action ELFs in `ckb-vm`:
 
 - `originate_agreement`
 - `repay_before_expiry`
 - `claim_after_expiry`
 
-The harness supplies deterministic `LOAD_WITNESS`, `LOAD_CELL_DATA`, and
-`LOAD_HEADER_BY_FIELD` syscall responses. It covers action/type-script guards
-for valid terminal paths, time rejects, party rejects, nonce mismatch,
-receipt-root mismatch, receipt output mismatch, terms hash output mismatch,
-wrong settlement payout, and preserved-field mutation.
+The current Agreement release gate does not depend on this legacy binary; the
+stateful lifecycle path uses `nova_agreement_lifecycle` and the live devnet
+runner in `/home/arthur/a19q3/CellScript/scripts`.
 
 `novaseal_agreement_tx_harness` constructs deterministic in-memory resolved CKB
 transactions and runs both `ckb-script` and the CKB non-contextual/contextual
@@ -28,7 +27,7 @@ cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_agreement_tx_
 ```
 
 The transaction harness covers resolved originate, repay, claim, time rejects,
-party rejects, nonce mismatch, receipt-root mismatch, preserved-field mutation,
+party rejects, nonce mismatch, latest-receipt-hash mismatch, preserved-field mutation,
 typed payout output binding, receipt hash output binding, terms hash output
 binding, and occupied-capacity rejection. It now fails unless every fixture file
 is covered by tx-harness evidence. It still does not prove live-chain

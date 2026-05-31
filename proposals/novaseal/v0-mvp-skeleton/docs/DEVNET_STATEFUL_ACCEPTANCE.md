@@ -1,6 +1,6 @@
 # NovaSeal Devnet Stateful Acceptance
 
-Status: core lifecycle and Agreement originate -> repay live RPC passed.
+Status: core lifecycle and Agreement originate -> repay / claim live RPC passed.
 
 NovaSeal now has local CKB-VM, `ckb-script`, and `ckb-verification` evidence, but
 that is not the same as a live devnet lifecycle. The release gate for this is:
@@ -48,9 +48,11 @@ Current live evidence:
 - `scripts/novaseal_agreement_devnet_stateful_live.py --pretty --ckb-repo ../ckb --ckb-bin ../ckb/target/debug/ckb`
   passed for the Agreement Profile.
 - The Agreement runner deployed the BIP340 verifier and
-  `nova_agreement_lifecycle` type script as live CellDeps, submitted originate,
-  confirmed active/principal-payout/receipt outputs were live, dry-ran a wrong
-  borrower signature repay and observed rejection, then submitted valid repay
-  against that exact active outpoint and confirmed the active output was dead
-  plus closed/payout/receipt outputs were live.
+  `nova_agreement_lifecycle` type script as live CellDeps, submitted separate
+  originate transactions for repay and claim paths, confirmed
+  active/principal-payout/receipt outputs were live, dry-ran wrong signer,
+  non-CKB asset, payout capacity, payout lock args, wrong payout amount, and
+  early-claim negatives, submitted valid repay and valid claim against their
+  exact active outpoints, and confirmed both active outputs were dead plus
+  closed/payout/receipt outputs were live.
 - The aggregate gate status is `passed`.
