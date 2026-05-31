@@ -4,6 +4,10 @@ NovaSeal Agreement Profile v0 is a profile package, not a change to NovaSeal
 core. It gives financial meaning to an otherwise thin NovaSeal-style state
 transition discipline.
 
+In the staged NovaSeal roadmap, this work is **v0.2 Agreement Profile**. The
+`v0` in this package name means "first version of the Agreement Profile schema
+and package", not "the base NovaSeal roadmap stage".
+
 ## Design Motto
 
 Core stays thin; profiles carry meaning.

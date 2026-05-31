@@ -104,7 +104,7 @@ claim.
 1. Add typed CKB source primitives for headers, outpoints, script role, script
    args, occupied capacity, and cell deps.
 2. Lower aggregate invariants into executable CKB runtime checks for exact
-   equality and bounded inequality over typed cell groups.
+   equality and bounded inequality over CellScript-typed CKB Cell groups.
 3. Add `std::dao` and `std::xudt` modules with deployed ABI-compatible helpers.
 4. Add signed integer and checked `u256`/`C256` arithmetic support.
 5. Build an actual CKB testtool differential harness once iCKB Capsule binaries

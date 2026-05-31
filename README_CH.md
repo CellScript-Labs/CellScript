@@ -250,7 +250,7 @@ language examples 覆盖 CKB source/witness、capacity/time、TYPE_ID、Spawn/IP
 
 ## 对比
 
-CellScript 为什么围绕 typed Cells、线性资源、显式交易 effect 和 ckb-vm
+CellScript 为什么围绕 CellScript 类型化的 CKB Cell 视图、线性资源、显式交易 effect 和 ckb-vm
 artifact 设计——而不是围绕账户存储或单链专用 VM：
 
 | 维度 | CellScript | Solidity | Move | Sway |

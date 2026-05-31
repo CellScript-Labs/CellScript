@@ -35,9 +35,10 @@
 **Purpose**: Set up the strict feasibility target for the core NovaSeal v0 thesis ("BTC key or multisig authorises a typed CKB Cell transition under explicit policy, with nonce/expiry replay protection and an auditable ProofReceipt") as a first-class CellScript package using current 0.16 capabilities where available.
 
 This skeleton deliberately **excludes**:
-- SPV / Bitcoin UTXO closure proofs (v0.3+)
-- OP_RETURN commitment (v0.2)
-- Full Fiber channel open/close/force-close integration (only xUDT-compatible shape + admission fixture)
+- Agreement Profile semantics (roadmap v0.2; implemented as a separate package)
+- Full Fiber channel open/close/force-close integration (roadmap v0.3)
+- OP_RETURN / BTC transaction commitment profile (roadmap v0.4)
+- SPV / Bitcoin UTXO closure proofs (v1)
 - Dual-sealed / production profiles (v1)
 - Any claim that ProofReceipt is "automatic runtime logging"
 
@@ -301,7 +302,7 @@ Do **not** add SPV, OP_RETURN, Fiber channel semantics, or any new protocol feat
 
 ## Versioning & Governance Note
 
-This skeleton is **not** a declaration that "NovaSeal exists". It is an engineering artifact that lets the community evaluate whether the CellScript + explicit typed Cell + ProofPlan model is a good host for Bitcoin-authorised CKB objects.
+This skeleton is **not** a declaration that "NovaSeal exists". It is an engineering artifact that lets the community evaluate whether the CellScript + explicit schema-backed CKB Cell state + ProofPlan model is a good host for Bitcoin-authorised CKB objects.
 
 If the 9 criteria can be met cleanly, then the design thesis has survived its first serious implementation filter.
 

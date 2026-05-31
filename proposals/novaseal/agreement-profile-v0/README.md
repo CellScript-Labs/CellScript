@@ -4,6 +4,10 @@
 structure, local transaction-shape evidence, resolved transaction verifier
 evidence, and live devnet lifecycle evidence.
 
+**Roadmap position**: this package is the current NovaSeal **v0.2 Agreement
+Profile** stage. The package/schema name remains `agreement-profile-v0` because
+it is the first version of this profile, not because the roadmap stage is v0.
+
 This package is inspired by Matt's Minimum Viable Borrowing idea, but it does
 not claim to implement production lending. It models a Cell-native financial
 agreement with pre-agreed terms and deterministic terminal paths.

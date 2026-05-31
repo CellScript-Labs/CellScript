@@ -59,7 +59,7 @@ CellScript is currently in a CKB-focused alpha / stabilisation phase.
 It is suitable for:
 - experimenting with CKB Cell-contract authoring;
 - compiling and inspecting the bundled examples;
-- exploring typed Cell effects, metadata, constraints, and CKB target-profile
+- exploring schema-backed CKB Cell effects, metadata, constraints, and CKB target-profile
   checks;
 - trying the local VS Code extension and LSP tooling.
 
@@ -362,14 +362,14 @@ TYPE_ID, Spawn/IPC, and dynamic BLAKE2b surfaces as compiler/tooling examples.
 
 ## Comparison
 
-Why CellScript is shaped around typed Cells, linear resources, explicit
+Why CellScript is shaped around schema-backed CKB Cell state, linear resources, explicit
 transaction effects, and ckb-vm artifacts — instead of account storage or a
 chain-specific VM:
 
 | Dimension | CellScript | Solidity | Move | Sway |
 |---|---|---|---|---|
 | Execution target | RISC-V ELF / asm on ckb-vm | EVM bytecode | Move bytecode | FuelVM bytecode |
-| State model | Typed Cells, explicit inputs/deps/outputs | Account storage slots | Resources in global storage | UTXO + native assets |
+| State model | Schema-backed views over CKB Cells, explicit inputs/deps/outputs | Account storage slots | Resources in global storage | UTXO + native assets |
 | Asset model | Native `resource`, state transitions, receipts, shared Cells | Manual token contracts | Native resources | Native assets |
 | Linear ownership | Compiler-enforced | No | Yes (abilities) | No general user-defined |
 | Shared state | Explicit `shared` Cells | Implicit contract storage | Shared objects (some chains) | No shared Cell analogue |
@@ -378,7 +378,7 @@ chain-specific VM:
 | CKB compatibility | Production-gated CKB ckb-vm artifact profile for the bundled Cell suite | Requires different VM | Requires different VM | Requires FuelVM |
 
 Compared with hand-written CKB scripts, CellScript keeps the same
-runtime substrate but replaces raw byte and syscall programming with typed Cell
+runtime substrate but replaces raw byte and syscall programming with schema-backed CKB Cell
 operations, linear checking, schema metadata, and policy-verifiable artifacts.
 
 ---
