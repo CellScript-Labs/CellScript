@@ -1492,8 +1492,11 @@ fn apply_manifest_deploy_metadata(metadata: &mut CompileMetadata, manifest: &Cel
             validate_ckb_hash_type(hash_type)?;
         }
         let (tx_hash, dep_index) = parse_ckb_cell_dep_location(dep)?;
-        if manifest.policy.production && dep.role.as_deref() == Some("runtime_verifier") {
-            validate_production_runtime_verifier_cell_dep(index, dep, tx_hash.as_deref(), dep_index)?;
+        if dep.role.as_deref() == Some("runtime_verifier") {
+            validate_runtime_verifier_cell_dep_binding(index, dep, dep_type)?;
+            if manifest.policy.production {
+                validate_production_runtime_verifier_cell_dep(index, dep, tx_hash.as_deref(), dep_index)?;
+            }
         }
         declared_cell_deps.push(CkbCellDepMetadata {
             name: dep.name.clone().unwrap_or_else(|| format!("cell_dep_{}", index)),
@@ -1725,19 +1728,64 @@ fn validate_production_runtime_verifier_cell_dep(
         )));
     }
     if let Some(tx_hash) = tx_hash {
-        reject_placeholder_out_point_hash(index, tx_hash)?;
+        reject_placeholder_hash(index, "out_point tx_hash", tx_hash)?;
+    }
+    if let Some(artifact_hash) = dep.artifact_hash.as_deref() {
+        reject_placeholder_hash(index, "artifact_hash", artifact_hash)?;
+    }
+    if let Some(data_hash) = dep.data_hash.as_deref() {
+        reject_placeholder_hash(index, "data_hash", data_hash)?;
     }
     Ok(())
 }
 
-fn reject_placeholder_out_point_hash(index: usize, tx_hash: &str) -> Result<()> {
-    let hex = tx_hash.strip_prefix("0x").unwrap_or(tx_hash);
+fn validate_runtime_verifier_cell_dep_binding(index: usize, dep: &CellCkbCellDepConfig, dep_type: &str) -> Result<()> {
+    if index != 0 {
+        return Err(CompileError::without_span(format!(
+            "runtime_verifier cell_dep[{}] must be deploy.ckb.cell_deps[0]; current VM2 spawn lowering resolves only the first code CellDep",
+            index
+        )));
+    }
+    if dep_type != "code" {
+        return Err(CompileError::without_span(format!(
+            "runtime_verifier cell_dep[{}] must use dep_type='code'; current VM2 spawn lowering does not resolve verifier dep_groups",
+            index
+        )));
+    }
+    let name = dep.name.as_deref().ok_or_else(|| {
+        CompileError::without_span(format!(
+            "runtime_verifier cell_dep[{}] must name a registered spawn target, such as '{}'",
+            index,
+            verifier_registry::btc::BIP340_RISCV_TARGET
+        ))
+    })?;
+    let capability =
+        verifier_registry::capabilities().into_iter().find(|capability| capability.spawn_target == name).ok_or_else(|| {
+            CompileError::without_span(format!("runtime_verifier cell_dep[{}] has unknown spawn target '{}'", index, name))
+        })?;
+    if dep.verifier_id.as_deref().is_some_and(|actual| actual != capability.verifier_id) {
+        return Err(CompileError::without_span(format!(
+            "runtime_verifier cell_dep[{}] verifier_id must be '{}' for spawn target '{}'",
+            index, capability.verifier_id, capability.spawn_target
+        )));
+    }
+    if dep.ipc_abi.as_deref().is_some_and(|actual| actual != capability.ipc_abi) {
+        return Err(CompileError::without_span(format!(
+            "runtime_verifier cell_dep[{}] ipc_abi must be '{}' for spawn target '{}'",
+            index, capability.ipc_abi, capability.spawn_target
+        )));
+    }
+    Ok(())
+}
+
+fn reject_placeholder_hash(index: usize, field: &str, value: &str) -> Result<()> {
+    let hex = value.strip_prefix("0x").unwrap_or(value);
     let lower = hex.to_ascii_lowercase();
-    let placeholder = lower.chars().all(|ch| ch == '0') || lower.chars().all(|ch| ch == '4') || lower.contains("placeholder");
+    let placeholder = lower.contains("placeholder") || lower.chars().next().is_some_and(|first| lower.chars().all(|ch| ch == first));
     if placeholder {
         Err(CompileError::without_span(format!(
-            "production runtime_verifier cell_dep[{}] uses a placeholder out_point tx_hash '{}'",
-            index, tx_hash
+            "production runtime_verifier cell_dep[{}] uses a placeholder {} '{}'",
+            index, field, value
         )))
     } else {
         Ok(())

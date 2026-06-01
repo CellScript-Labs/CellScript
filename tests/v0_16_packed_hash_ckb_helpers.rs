@@ -403,5 +403,83 @@ data_hash = "0x2222222222222222222222222222222222222222222222222222222222222222"
         },
     )
     .unwrap_err();
+    assert!(err.message.contains("verifier_id must be 'btc.bip340.v0'"), "unexpected error: {}", err.message);
+
+    std::fs::write(
+        root.join("Cell.toml"),
+        r#"
+[package]
+name = "production_pin_placeholder"
+version = "0.1.0"
+entry = "src/main.cell"
+
+[build]
+target_profile = "ckb"
+
+[policy]
+production = true
+
+[[deploy.ckb.cell_deps]]
+name = "cellscript_btc_bip340_verifier_riscv"
+role = "runtime_verifier"
+verifier_id = "btc.bip340.v0"
+ipc_abi = "cellscript-btc-bip340-ipc-v0"
+artifact_hash = "0x3333333333333333333333333333333333333333333333333333333333333333"
+out_point = "0x4444444444444444444444444444444444444444444444444444444444444444:0"
+dep_type = "code"
+hash_type = "data1"
+data_hash = "0x2222222222222222222222222222222222222222222222222222222222222222"
+"#,
+    )
+    .unwrap();
+    let err = compile_path(
+        root,
+        CompileOptions {
+            target_profile: Some("ckb".to_string()),
+            primitive_compat: Some("0.16".to_string()),
+            ..CompileOptions::default()
+        },
+    )
+    .unwrap_err();
     assert!(err.message.contains("uses a placeholder out_point tx_hash"), "unexpected error: {}", err.message);
+
+    std::fs::write(
+        root.join("Cell.toml"),
+        r#"
+[package]
+name = "runtime_verifier_second_dep"
+version = "0.1.0"
+entry = "src/main.cell"
+
+[build]
+target_profile = "ckb"
+
+[[deploy.ckb.cell_deps]]
+name = "unrelated_code"
+dep_type = "code"
+out_point = "0x1111111111111111111111111111111111111111111111111111111111111111:0"
+
+[[deploy.ckb.cell_deps]]
+name = "cellscript_btc_bip340_verifier_riscv"
+role = "runtime_verifier"
+verifier_id = "btc.bip340.v0"
+ipc_abi = "cellscript-btc-bip340-ipc-v0"
+artifact_hash = "0x036aad492412142735deee7821e69ec8752db4fd52de1f87e0b51608bee7ff82"
+out_point = "0x6418f34fa16dc691febc1ce3870ff411c0bf6600f53ff27f57ca9723ae1d2c31:0"
+dep_type = "code"
+hash_type = "data1"
+data_hash = "0x8a89ae9b140960aa4cc4389b04ba1d4606d9251821cb0fa31baf5e6207a01e7a"
+"#,
+    )
+    .unwrap();
+    let err = compile_path(
+        root,
+        CompileOptions {
+            target_profile: Some("ckb".to_string()),
+            primitive_compat: Some("0.16".to_string()),
+            ..CompileOptions::default()
+        },
+    )
+    .unwrap_err();
+    assert!(err.message.contains("must be deploy.ckb.cell_deps[0]"), "unexpected error: {}", err.message);
 }
