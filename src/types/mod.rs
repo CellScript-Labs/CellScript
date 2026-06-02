@@ -5706,10 +5706,7 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn call_argument_type_compatible(&self, expected: &Type, actual: &Type) -> bool {
-        match (expected, actual) {
-            (Type::Ref(expected_inner), Type::MutRef(actual_inner)) => self.types_equal(expected_inner, actual_inner),
-            _ => self.types_equal(expected, actual),
-        }
+        self.types_equal(expected, actual)
     }
 
     fn validate_builtin_arity(&self, name: &str, expected: usize, actual: &[Type], span: Span) -> Result<()> {
@@ -7883,6 +7880,14 @@ where
             !checker.named_type_contains_reference("Vec<Foo&Bar>"),
             "an ampersand inside an opaque named payload must not be treated as a reference sigil"
         );
+    }
+
+    #[test]
+    fn call_arguments_do_not_coerce_mut_ref_to_ref() {
+        let checker = TypeChecker::new();
+
+        assert!(!checker.call_argument_type_compatible(&Type::Ref(Box::new(Type::U64)), &Type::MutRef(Box::new(Type::U64))));
+        assert!(checker.call_argument_type_compatible(&Type::Ref(Box::new(Type::U64)), &Type::Ref(Box::new(Type::U64))));
     }
 
     #[test]
