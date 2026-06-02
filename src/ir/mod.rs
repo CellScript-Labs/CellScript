@@ -561,6 +561,7 @@ impl IrGenerator {
         generator
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn with_import_context(
         module_name: String,
         type_fields: HashMap<String, HashMap<String, IrType>>,
