@@ -1501,10 +1501,6 @@ impl<'a> Parser<'a> {
     }
 
     fn action_where_block_is_done(&self) -> bool {
-        if self.current().span.column != 1 {
-            return false;
-        }
-
         matches!(
             &self.current().kind,
             TokenKind::Pound
@@ -1989,29 +1985,20 @@ impl<'a> Parser<'a> {
 
     fn parse_assignment(&mut self) -> Result<Expr> {
         let left = self.parse_range()?;
-        let start_span = self.current().span;
 
         if self.check(&TokenKind::Eq) {
             self.advance();
             let right = self.parse_expr()?;
-            return Ok(Expr::Assign(AssignExpr {
-                target: Box::new(left),
-                op: AssignOp::Assign,
-                value: Box::new(right),
-                span: start_span,
-            }));
+            let span = left.span().combine(&right.span());
+            return Ok(Expr::Assign(AssignExpr { target: Box::new(left), op: AssignOp::Assign, value: Box::new(right), span }));
         }
 
         if self.check(&TokenKind::Plus) && self.peek(1).kind == TokenKind::Eq {
             self.advance();
             self.advance();
             let right = self.parse_expr()?;
-            return Ok(Expr::Assign(AssignExpr {
-                target: Box::new(left),
-                op: AssignOp::AddAssign,
-                value: Box::new(right),
-                span: start_span,
-            }));
+            let span = left.span().combine(&right.span());
+            return Ok(Expr::Assign(AssignExpr { target: Box::new(left), op: AssignOp::AddAssign, value: Box::new(right), span }));
         }
 
         Ok(left)
@@ -2020,11 +2007,11 @@ impl<'a> Parser<'a> {
     fn parse_range(&mut self) -> Result<Expr> {
         let left = self.parse_or()?;
         if self.check(&TokenKind::Dot) && self.peek(1).kind == TokenKind::Dot {
-            let start_span = self.current().span;
             self.advance();
             self.advance();
             let right = self.parse_or()?;
-            Ok(Expr::Range(RangeExpr { start: Box::new(left), end: Box::new(right), span: start_span }))
+            let span = left.span().combine(&right.span());
+            Ok(Expr::Range(RangeExpr { start: Box::new(left), end: Box::new(right), span }))
         } else {
             Ok(left)
         }
@@ -2039,11 +2026,11 @@ impl<'a> Parser<'a> {
                 break;
             }
             let op = BinaryOp::Or;
-            let start_span = self.current().span;
             self.advance();
             self.skip_newlines();
             let right = self.parse_and()?;
-            left = Expr::Binary(BinaryExpr { op, left: Box::new(left), right: Box::new(right), span: start_span });
+            let span = left.span().combine(&right.span());
+            left = Expr::Binary(BinaryExpr { op, left: Box::new(left), right: Box::new(right), span });
         }
 
         Ok(left)
@@ -2058,11 +2045,11 @@ impl<'a> Parser<'a> {
                 break;
             }
             let op = BinaryOp::And;
-            let start_span = self.current().span;
             self.advance();
             self.skip_newlines();
             let right = self.parse_equality()?;
-            left = Expr::Binary(BinaryExpr { op, left: Box::new(left), right: Box::new(right), span: start_span });
+            let span = left.span().combine(&right.span());
+            left = Expr::Binary(BinaryExpr { op, left: Box::new(left), right: Box::new(right), span });
         }
 
         Ok(left)
@@ -2074,21 +2061,20 @@ impl<'a> Parser<'a> {
         loop {
             self.skip_newlines();
             let op = if self.check(&TokenKind::EqEq) {
-                let start_span = self.current().span;
                 self.advance();
-                Some((BinaryOp::Eq, start_span))
+                Some(BinaryOp::Eq)
             } else if self.check(&TokenKind::NotEq) {
-                let start_span = self.current().span;
                 self.advance();
-                Some((BinaryOp::Ne, start_span))
+                Some(BinaryOp::Ne)
             } else {
                 None
             };
 
-            if let Some((op, start_span)) = op {
+            if let Some(op) = op {
                 self.skip_newlines();
                 let right = self.parse_comparison()?;
-                left = Expr::Binary(BinaryExpr { op, left: Box::new(left), right: Box::new(right), span: start_span });
+                let span = left.span().combine(&right.span());
+                left = Expr::Binary(BinaryExpr { op, left: Box::new(left), right: Box::new(right), span });
             } else {
                 break;
             }
@@ -2103,29 +2089,26 @@ impl<'a> Parser<'a> {
         loop {
             self.skip_newlines();
             let op = if self.check(&TokenKind::Lt) {
-                let start_span = self.current().span;
                 self.advance();
-                Some((BinaryOp::Lt, start_span))
+                Some(BinaryOp::Lt)
             } else if self.check(&TokenKind::Le) {
-                let start_span = self.current().span;
                 self.advance();
-                Some((BinaryOp::Le, start_span))
+                Some(BinaryOp::Le)
             } else if self.check(&TokenKind::Gt) {
-                let start_span = self.current().span;
                 self.advance();
-                Some((BinaryOp::Gt, start_span))
+                Some(BinaryOp::Gt)
             } else if self.check(&TokenKind::Ge) {
-                let start_span = self.current().span;
                 self.advance();
-                Some((BinaryOp::Ge, start_span))
+                Some(BinaryOp::Ge)
             } else {
                 None
             };
 
-            if let Some((op, start_span)) = op {
+            if let Some(op) = op {
                 self.skip_newlines();
                 let right = self.parse_term()?;
-                left = Expr::Binary(BinaryExpr { op, left: Box::new(left), right: Box::new(right), span: start_span });
+                let span = left.span().combine(&right.span());
+                left = Expr::Binary(BinaryExpr { op, left: Box::new(left), right: Box::new(right), span });
             } else {
                 break;
             }
@@ -2140,21 +2123,20 @@ impl<'a> Parser<'a> {
         loop {
             self.skip_newlines();
             let op = if self.check(&TokenKind::Plus) && !matches!(&self.peek(1).kind, TokenKind::Eq) {
-                let start_span = self.current().span;
                 self.advance();
-                Some((BinaryOp::Add, start_span))
+                Some(BinaryOp::Add)
             } else if self.check(&TokenKind::Minus) {
-                let start_span = self.current().span;
                 self.advance();
-                Some((BinaryOp::Sub, start_span))
+                Some(BinaryOp::Sub)
             } else {
                 None
             };
 
-            if let Some((op, start_span)) = op {
+            if let Some(op) = op {
                 self.skip_newlines();
                 let right = self.parse_factor()?;
-                left = Expr::Binary(BinaryExpr { op, left: Box::new(left), right: Box::new(right), span: start_span });
+                let span = left.span().combine(&right.span());
+                left = Expr::Binary(BinaryExpr { op, left: Box::new(left), right: Box::new(right), span });
             } else {
                 break;
             }
@@ -2169,25 +2151,23 @@ impl<'a> Parser<'a> {
         loop {
             self.skip_newlines();
             let op = if self.check(&TokenKind::Star) {
-                let start_span = self.current().span;
                 self.advance();
-                Some((BinaryOp::Mul, start_span))
+                Some(BinaryOp::Mul)
             } else if self.check(&TokenKind::Slash) {
-                let start_span = self.current().span;
                 self.advance();
-                Some((BinaryOp::Div, start_span))
+                Some(BinaryOp::Div)
             } else if self.check(&TokenKind::Percent) {
-                let start_span = self.current().span;
                 self.advance();
-                Some((BinaryOp::Mod, start_span))
+                Some(BinaryOp::Mod)
             } else {
                 None
             };
 
-            if let Some((op, start_span)) = op {
+            if let Some(op) = op {
                 self.skip_newlines();
                 let right = self.parse_cast()?;
-                left = Expr::Binary(BinaryExpr { op, left: Box::new(left), right: Box::new(right), span: start_span });
+                let span = left.span().combine(&right.span());
+                left = Expr::Binary(BinaryExpr { op, left: Box::new(left), right: Box::new(right), span });
             } else {
                 break;
             }
@@ -2204,11 +2184,16 @@ impl<'a> Parser<'a> {
             if !is_as {
                 break;
             }
-            let start_span = self.current().span;
             self.advance();
             self.skip_newlines();
+            let start_span = expr.span();
             let ty = self.parse_type()?;
-            expr = Expr::Cast(CastExpr { expr: Box::new(expr), ty, span: start_span });
+            let end = self.current().span.start.max(start_span.end);
+            expr = Expr::Cast(CastExpr {
+                expr: Box::new(expr),
+                ty,
+                span: Span::new(start_span.start, end, start_span.line, start_span.column),
+            });
         }
         Ok(expr)
     }
@@ -3216,7 +3201,7 @@ mod tests {
     }
 
     #[test]
-    fn binary_expr_spans_keep_operator_token() {
+    fn binary_expr_spans_cover_full_expression() {
         let input = r#"
 module test
 
@@ -3255,7 +3240,7 @@ where
             (10, BinaryOp::Mod, "5 % 2", "%"),
         ];
 
-        for (stmt_index, expected_op, expression_text, operator_text) in cases {
+        for (stmt_index, expected_op, expression_text, _operator_text) in cases {
             let Stmt::Let(let_stmt) = &action.body[stmt_index] else {
                 panic!("expected let statement");
             };
@@ -3263,12 +3248,70 @@ where
                 panic!("expected binary expression");
             };
             let expression_start = input.find(expression_text).unwrap();
-            let operator_start = expression_start + expression_text.find(operator_text).unwrap();
 
             assert_eq!(binary.op, expected_op);
-            assert_eq!(binary.span.start, operator_start);
-            assert_eq!(binary.span.end, operator_start + operator_text.len());
+            assert_eq!(binary.span.start, expression_start);
+            assert_eq!(binary.span.end, expression_start + expression_text.len());
         }
+    }
+
+    #[test]
+    fn assignment_range_and_cast_spans_cover_full_expression() {
+        let input = r#"
+module test
+
+action test() -> u64
+where
+    let value = 1
+    value = 2
+    value += 3
+    let range = 0..10
+    let casted = value as u64
+    return value
+"#;
+        let tokens = lex(input).unwrap();
+        let module = parse(&tokens).unwrap();
+        let Item::Action(action) = &module.items[0] else {
+            panic!("expected action");
+        };
+
+        let Stmt::Expr(Expr::Assign(assign)) = &action.body[1] else {
+            panic!("expected assignment expression statement");
+        };
+        let assign_text = "value = 2";
+        let assign_start = input.find(assign_text).unwrap();
+        assert_eq!(assign.span.start, assign_start);
+        assert_eq!(assign.span.end, assign_start + assign_text.len());
+
+        let Stmt::Expr(Expr::Assign(add_assign)) = &action.body[2] else {
+            panic!("expected add-assignment expression statement");
+        };
+        let add_assign_text = "value += 3";
+        let add_assign_start = input.find(add_assign_text).unwrap();
+        assert_eq!(add_assign.span.start, add_assign_start);
+        assert_eq!(add_assign.span.end, add_assign_start + add_assign_text.len());
+
+        let Stmt::Let(range_stmt) = &action.body[3] else {
+            panic!("expected range let statement");
+        };
+        let Expr::Range(range) = &range_stmt.value else {
+            panic!("expected range expression");
+        };
+        let range_text = "0..10";
+        let range_start = input.find(range_text).unwrap();
+        assert_eq!(range.span.start, range_start);
+        assert_eq!(range.span.end, range_start + range_text.len());
+
+        let Stmt::Let(cast_stmt) = &action.body[4] else {
+            panic!("expected cast let statement");
+        };
+        let Expr::Cast(cast) = &cast_stmt.value else {
+            panic!("expected cast expression");
+        };
+        let cast_text = "value as u64";
+        let cast_start = input.find(cast_text).unwrap();
+        assert_eq!(cast.span.start, cast_start);
+        assert_eq!(cast.span.end, cast_start + cast_text.len());
     }
 
     #[test]
@@ -3695,6 +3738,26 @@ flow
 
         assert_eq!(action.body.len(), 2);
         assert!(matches!(&action.body[0], Stmt::Expr(Expr::Identifier(name, _)) if name == "flow"));
+    }
+
+    #[test]
+    fn action_where_block_allows_indented_following_top_level_item() {
+        let input = r#"
+module test
+
+action test() -> u64
+where
+    return 1
+ resource Token {
+    amount: u64
+}
+"#;
+        let tokens = lex(input).unwrap();
+        let module = parse(&tokens).unwrap();
+
+        assert_eq!(module.items.len(), 2);
+        assert!(matches!(&module.items[0], Item::Action(action) if action.body.len() == 1));
+        assert!(matches!(&module.items[1], Item::Resource(resource) if resource.name == "Token"));
     }
 
     #[test]
