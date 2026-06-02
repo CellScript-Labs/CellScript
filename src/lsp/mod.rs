@@ -1851,6 +1851,7 @@ fn apply_incremental_change(content: &str, range: Range, new_text: &str) -> Stri
 }
 
 fn span_to_range(source: &str, span: Span) -> Range {
+    // AUDIT-FINDING: LSP range conversion clamps raw byte spans but does not reject default, reversed, or non-character-boundary spans, so diagnostics/navigation can collapse to misleading positions when upstream parsers synthesize bad spans — severity: MEDIUM — validate span invariants here and fall back to span.line/span.column or a known safe range when byte offsets are unusable
     let start = offset_to_position(source, span.start.min(source.len()));
     let end = offset_to_position(source, span.end.min(source.len()));
     Range { start, end }
@@ -1980,6 +1981,7 @@ fn item_span(item: &Item) -> Span {
 fn stmt_span(stmt: &Stmt) -> Span {
     match stmt {
         Stmt::Let(s) => s.span,
+        // AUDIT-FINDING: statements without stored spans are mapped to Span::default, causing LSP local-scope, selection, and highlight ranges to treat returns/expr statements as line 0 rather than their source location — severity: MEDIUM — carry spans on all statement variants and remove default span fallbacks
         Stmt::Return(_) => Span::default(),
         Stmt::If(s) => s.span,
         Stmt::For(s) => s.span,
