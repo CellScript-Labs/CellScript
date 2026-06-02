@@ -1501,22 +1501,25 @@ impl<'a> Parser<'a> {
     }
 
     fn action_where_block_is_done(&self) -> bool {
-        matches!(
-            &self.current().kind,
-            TokenKind::Pound
-                | TokenKind::Module
-                | TokenKind::Use
-                | TokenKind::Resource
-                | TokenKind::Shared
-                | TokenKind::Receipt
-                | TokenKind::Struct
-                | TokenKind::Const
-                | TokenKind::Enum
-                | TokenKind::Action
-                | TokenKind::Fn
-                | TokenKind::Lock
-        ) || self.looks_like_top_level_flow_decl()
-            || self.looks_like_top_level_type_policy_decl()
+        self.looks_like_top_level_item_decl() || self.looks_like_top_level_flow_decl() || self.looks_like_top_level_type_policy_decl()
+    }
+
+    fn looks_like_top_level_item_decl(&self) -> bool {
+        match &self.current().kind {
+            TokenKind::Pound => true,
+            TokenKind::Module
+            | TokenKind::Use
+            | TokenKind::Resource
+            | TokenKind::Shared
+            | TokenKind::Receipt
+            | TokenKind::Struct
+            | TokenKind::Const
+            | TokenKind::Enum
+            | TokenKind::Action
+            | TokenKind::Fn
+            | TokenKind::Lock => Self::token_ident_like_name(&self.peek(1).kind).is_some(),
+            _ => false,
+        }
     }
 
     fn looks_like_top_level_flow_decl(&self) -> bool {
@@ -3758,6 +3761,33 @@ where
         assert_eq!(module.items.len(), 2);
         assert!(matches!(&module.items[0], Item::Action(action) if action.body.len() == 1));
         assert!(matches!(&module.items[1], Item::Resource(resource) if resource.name == "Token"));
+    }
+
+    #[test]
+    fn action_where_block_keeps_indented_keyword_like_binding_in_body() {
+        let input = r#"
+module test
+
+resource Receipt {
+    amount: u64
+}
+
+action mint() -> Receipt
+where
+    let receipt = create Receipt {
+        amount: 1
+    }
+    receipt
+"#;
+        let tokens = lex(input).unwrap();
+        let module = parse(&tokens).unwrap();
+        let action = match &module.items[1] {
+            Item::Action(action) => action,
+            other => panic!("expected action, found {:?}", other),
+        };
+
+        assert_eq!(action.body.len(), 2);
+        assert!(matches!(&action.body[1], Stmt::Expr(Expr::Identifier(name, _)) if name == "receipt"));
     }
 
     #[test]
