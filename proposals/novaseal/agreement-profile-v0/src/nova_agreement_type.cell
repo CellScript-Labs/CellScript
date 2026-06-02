@@ -1,10 +1,24 @@
 module novaseal::agreement_profile::v0;
 
+// Arthur Zhang, 2026.
+//
 // NovaSeal Agreement Profile v0
 //
 // This is a CKB-native agreement skeleton inspired by Matt's Minimum Viable
 // Borrowing framing. It deliberately models pre-agreed terminal paths rather
 // than oracle-driven lending, dynamic liquidation, or BTC UTXO custody.
+//
+// Plain-language model:
+// - originate: create an active agreement and pay principal to the borrower,
+// - repay: borrower repays principal + fixed fee before expiry,
+// - claim: lender claims the locked collateral after expiry.
+//
+// AUDIT BOUNDARY:
+// This v0 profile is CKB/CKB only. The `*_authority_hash` fields are used as
+// the 32-byte authority identifiers checked against BIP340 pubkeys and CKB
+// lock args in the current harnesses. Production wallet support still needs a
+// precise pubkey/hash/lock-args mapping and real borrower/lender authority
+// locks.
 
 const AGREEMENT_VERSION: u16 = 0
 
@@ -30,6 +44,8 @@ const PAYOUT_LENDER_DEFAULT_CLAIM: u8 = 3
 
 const NATIVE_CKB_PAYOUT_OCCUPIED_CAPACITY: u64 = 30000000000
 
+// The current verifier slice uses single-key BIP340 signatures. Multisig or
+// script-policy descriptors are deliberately outside this v0 profile.
 struct AgreementSignaturePayload {
     pubkey: [u8; 32],
     signature: [u8; 64],
@@ -145,6 +161,12 @@ receipt NativeCkbPayoutV0 has store, create, consume {
     nonce: u64,
 }
 
+// Create an active agreement from pre-agreed CKB/CKB terms.
+//
+// Output convention for the current harness:
+// - output 0: active NovaAgreementCellV0,
+// - output 1: typed principal payout to the borrower,
+// - output 2: typed receipt.
 action originate_agreement(witness terms: NovaAgreementTermsV0, witness intent: NovaAgreementSignedIntentV0, witness borrower_sig: AgreementSignaturePayload, witness lender_sig: AgreementSignaturePayload) -> (agreement: NovaAgreementCellV0, principal_payout: NativeCkbPayoutV0, receipt: NovaAgreementReceiptV0)
 where
     let now = env::current_timepoint()
@@ -201,10 +223,15 @@ where
     require intent.core.payout_commitment_hash == payout_commitment_hash
     require intent.core.expiry_timepoint == terms.expiry_timepoint
     require intent.expected_receipt_hash == materialized_receipt_hash
+    // In this v0 profile the authority hash is the 32-byte key/lock identifier
+    // used by the harness. It is not yet a general wallet identity scheme.
     require borrower_sig.pubkey == terms.borrower_authority_hash
     require lender_sig.pubkey == terms.lender_authority_hash
     verifier::btc::bip340::require_signature(signed_intent_hash, borrower_sig.pubkey, borrower_sig.signature)
     verifier::btc::bip340::require_signature(signed_intent_hash, lender_sig.pubkey, lender_sig.signature)
+    // The typed payout receipt and the actual CKB output are checked together:
+    // the data commits to the intended payout, while capacity and lock args
+    // make the builder-visible CKB amount and recipient inspectable.
     let principal_output = source::output(1)
     let principal_min_capacity = NATIVE_CKB_PAYOUT_OCCUPIED_CAPACITY + terms.principal_amount
     require ckb::cell_capacity(principal_output) >= principal_min_capacity
@@ -262,6 +289,13 @@ where
         timepoint: now
     }
 
+// Borrower closes the agreement before expiry.
+//
+// Output convention for the current harness:
+// - output 0: terminal Repaid agreement,
+// - output 1: principal + fixed fee to the lender,
+// - output 2: collateral return to the borrower,
+// - output 3: typed receipt.
 action repay_before_expiry(active: NovaAgreementCellV0, witness intent: NovaAgreementSignedIntentV0, witness borrower_sig: AgreementSignaturePayload) -> (closed: NovaAgreementCellV0, lender_repayment: NativeCkbPayoutV0, borrower_collateral_return: NativeCkbPayoutV0, receipt: NovaAgreementReceiptV0)
 where
     let now = env::current_timepoint()
@@ -402,6 +436,16 @@ where
         timepoint: now
     }
 
+// Lender closes the agreement after expiry.
+//
+// The default path claims only the locked collateral. It does not add the fixed
+// fee, because that fee is only part of the repayment path and no extra CKB is
+// minted by this contract.
+//
+// Output convention for the current harness:
+// - output 0: terminal Defaulted agreement,
+// - output 1: collateral claim to the lender,
+// - output 2: typed receipt.
 action claim_after_expiry(active: NovaAgreementCellV0, witness intent: NovaAgreementSignedIntentV0, witness lender_sig: AgreementSignaturePayload) -> (closed: NovaAgreementCellV0, lender_default_claim: NativeCkbPayoutV0, receipt: NovaAgreementReceiptV0)
 where
     let now = env::current_timepoint()

@@ -1,5 +1,7 @@
 module novaseal::btc_authority_lock::v0_mvp;
 
+// Arthur Zhang, 2026.
+//
 // =============================================================================
 // NovaSeal v0 MVP - BTC Authority Lock
 // =============================================================================
@@ -16,6 +18,11 @@ module novaseal::btc_authority_lock::v0_mvp;
 // CKB VM transaction proves spawn/IPC/exit-status behaviour end to end.
 // =============================================================================
 
+// REVIEW NOTE:
+// This file is the standalone lock module. The package entry file also keeps a
+// copy of the same lock shape so `cellc audit-bundle` can expose the lock
+// together with the primary state transition. Keep the two lock bodies aligned.
+//
 // The lock receives:
 // - protected: the current NovaSealCellV0 view guarded by this lock group
 // - lock_args: the expected BTC authority hash bound to Script.args
@@ -37,9 +44,11 @@ lock btc_authority(protected cell: NovaSealCellV0, lock_args expected_btc_author
 }
 
 
-// Placeholder types for standalone lock compilation. The default entry module
-// carries the same resource and lock shape so package audit-bundle exposes
-// this lock in its locks[] surface.
+// AUDIT PLACEHOLDER:
+// These local type definitions exist only so this lock file can compile on its
+// own during targeted review. The source-of-truth layout lives in the package
+// schemas and in the primary state files. Do not treat this block as a second
+// schema or an independent runtime data model.
 resource NovaSealCellV0 has store, create, consume {
     version: u16,
     btc_authority_hash: Hash,

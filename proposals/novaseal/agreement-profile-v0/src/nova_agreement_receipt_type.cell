@@ -1,8 +1,13 @@
 module novaseal::agreement_profile::receipt_v0;
 
+// Arthur Zhang, 2026.
+//
+// AUDIT PLACEHOLDER:
 // Standalone receipt shape for tools that want to inspect the profile without
 // compiling the primary type/action entry. The runtime-enforced receipt output
-// is declared in src/nova_agreement_type.cell.
+// is declared in src/nova_agreement_type.cell and mirrored by
+// src/nova_agreement_lifecycle_type.cell; keep this file in lockstep with the
+// source-of-truth schema and those runtime shapes.
 
 receipt NovaAgreementReceiptV0 has store, create, consume {
     action: u8,
@@ -16,8 +21,11 @@ receipt NovaAgreementReceiptV0 has store, create, consume {
     principal_amount: u64,
     fixed_fee_amount: u64,
     terminal_amount: u64,
-    old_latest_receipt_hash: Hash,
-    new_latest_receipt_hash: Hash,
+    previous_receipt_hash: Hash,
+    latest_receipt_hash: Hash,
+    intent_core_hash: Hash,
+    signed_intent_hash: Hash,
+    payout_commitment_hash: Hash,
     nonce: u64,
     timepoint: u64,
 }

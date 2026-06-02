@@ -1,5 +1,24 @@
 module novaseal::agreement_lifecycle_type::v0;
 
+// Arthur Zhang, 2026.
+//
+// NovaSeal Agreement Profile v0 lifecycle type script.
+//
+// This is the stateful CKB-facing entry shape for the agreement profile. It
+// keeps the three terminal workflows under one type-script identity:
+// - PATH_ORIGINATE creates the active agreement and pays principal to borrower.
+// - PATH_REPAY_BEFORE_EXPIRY closes as repaid, pays lender principal + fixed
+//   fee, and returns collateral to borrower.
+// - PATH_CLAIM_AFTER_EXPIRY closes as defaulted and pays the locked collateral
+//   to lender.
+//
+// AUDIT BOUNDARY:
+// v0 is intentionally CKB/CKB only. `Hash::zero()` is the native-CKB asset
+// marker, not a general asset identifier. The `*_authority_hash` fields are
+// also used as the 32-byte authority identifiers checked against BIP340 x-only
+// pubkeys and CKB lock args in the harness. A production wallet profile should
+// spell out the exact pubkey/hash/lock-args mapping.
+
 const AGREEMENT_VERSION: u16 = 0
 
 const ASSET_KIND_CKB: u8 = 0
@@ -22,6 +41,9 @@ const PAYOUT_LENDER_DEFAULT_CLAIM: u8 = 3
 
 const NATIVE_CKB_PAYOUT_OCCUPIED_CAPACITY: u64 = 30000000000
 
+// Current verifier slice: one BIP340 key per required signer. Multisig,
+// script-policy descriptors and delegated authority are deliberately outside
+// this v0 profile.
 struct AgreementSignaturePayload {
     pubkey: [u8; 32],
     signature: [u8; 64],
@@ -142,6 +164,9 @@ where
     let now = env::current_timepoint()
 
     if (op == PATH_ORIGINATE) {
+        // Origination has no active agreement input. The builder provides the
+        // terms witness, the future active agreement output, a principal payout
+        // output for the borrower, and a materialised receipt output.
         let payout = NativeCkbPayoutV0 {
             action: PATH_ORIGINATE,
             agreement_id: terms.agreement_id,
@@ -232,9 +257,13 @@ where
         assert(intent.core.payout_commitment_hash == payout_commitment_hash, "intent payout")
         assert(intent.core.expiry_timepoint == terms.expiry_timepoint, "intent expiry")
         assert(intent.expected_receipt_hash == materialized_receipt_hash, "expected receipt")
+        // In this harness profile the authority identifier is the same 32-byte
+        // value used for BIP340 pubkeys and payout lock args.
         assert(borrower_sig.pubkey == terms.borrower_authority_hash, "borrower pubkey")
         assert(lender_sig.pubkey == terms.lender_authority_hash, "lender pubkey")
         assert(ckb::cell_data_hash(source::group_output(0)) == ckb::hash_data_packed(active), "agreement output")
+        // The typed payout data and the actual output capacity/lock args are
+        // checked together, so the receipt says what the transaction does.
         assert(ckb::cell_data_hash(source::output(1)) == ckb::hash_data_packed(payout), "principal payout output")
         assert(ckb::cell_capacity(source::output(1)) >= NATIVE_CKB_PAYOUT_OCCUPIED_CAPACITY + terms.principal_amount, "principal capacity")
         assert(ckb::cell_lock_args32(source::output(1)) == terms.borrower_authority_hash, "principal lock")
@@ -244,6 +273,9 @@ where
         verifier::btc::bip340::require_signature(signed_intent_hash, lender_sig.pubkey, lender_sig.signature)
     } else {
         if (op == PATH_REPAY_BEFORE_EXPIRY) {
+            // Borrower closes before expiry. The fixed fee exists only on this
+            // repayment path; the transaction must provide the CKB paid to the
+            // lender and the collateral-return output for the borrower.
             let repayment_amount = active.principal_amount + active.fixed_fee_amount
             let lender_payout = NativeCkbPayoutV0 {
                 action: PATH_REPAY_BEFORE_EXPIRY,
@@ -352,6 +384,7 @@ where
             assert(intent.core.payout_commitment_hash == payout_commitment_hash, "intent payout")
             assert(intent.core.expiry_timepoint == active.expiry_timepoint, "intent expiry")
             assert(intent.expected_receipt_hash == materialized_receipt_hash, "expected receipt")
+            // Repayment is borrower-authorised in v0.
             assert(borrower_sig.pubkey == active.borrower_authority_hash, "borrower pubkey")
             assert(ckb::cell_data_hash(source::group_input(0)) == ckb::hash_data_packed(active), "active input")
             assert(ckb::cell_data_hash(source::group_output(0)) == ckb::hash_data_packed(closed), "closed output")
@@ -367,6 +400,9 @@ where
         } else {
             assert(op == PATH_CLAIM_AFTER_EXPIRY, "claim op")
 
+            // Lender closes after expiry. The default claim pays the locked
+            // collateral only; fixed fee is not added here because no extra CKB
+            // is created by the agreement cell.
             let claim_amount = active.collateral_amount
             let claim_payout = NativeCkbPayoutV0 {
                 action: PATH_CLAIM_AFTER_EXPIRY,
@@ -461,6 +497,7 @@ where
             assert(intent.core.payout_commitment_hash == payout_commitment_hash, "intent payout")
             assert(intent.core.expiry_timepoint == active.expiry_timepoint, "intent expiry")
             assert(intent.expected_receipt_hash == materialized_receipt_hash, "expected receipt")
+            // Default claim is lender-authorised in v0.
             assert(lender_sig.pubkey == active.lender_authority_hash, "lender pubkey")
             assert(ckb::cell_data_hash(source::group_input(0)) == ckb::hash_data_packed(active), "active input")
             assert(ckb::cell_data_hash(source::group_output(0)) == ckb::hash_data_packed(closed), "closed output")

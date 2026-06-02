@@ -1,5 +1,25 @@
 module novaseal::state_lifecycle_type::v0_mvp;
 
+// Arthur Zhang, 2026.
+//
+// NovaSeal core lifecycle type script.
+//
+// This file is the stable live/devnet entry point. It dispatches between:
+// - OP_BOOTSTRAP: create the first NovaSealCellV0 output.
+// - OP_KEY_AUTH_TRANSITION: consume an old NovaSealCellV0, create the next
+//   state, and materialise a ProofReceiptV0 output.
+//
+// REVIEW NOTE:
+// The older nova_state_type.cell action remains useful for focused compiler and
+// VM harnesses. This lifecycle wrapper is the shape a real stateful CKB cell
+// needs because bootstrap and later transitions share one type-script identity.
+//
+// AUDIT BOUNDARY:
+// In this v0 evidence slice, `btc_authority_hash` is used as the 32-byte
+// authority identifier that must match the BIP340 x-only pubkey and payout lock
+// args used by the harnesses. A production wallet profile should spell out the
+// exact pubkey/hash/lock-args mapping instead of relying on this shorthand.
+
 const NOVASEAL_VERSION: u16 = 0
 const OP_BOOTSTRAP: u8 = 0
 const OP_KEY_AUTH_TRANSITION: u8 = 1
@@ -92,10 +112,14 @@ where
     let now = env::current_timepoint()
 
     if (op == OP_BOOTSTRAP) {
+        // Bootstrap has no old input Cell. It accepts exactly one freshly
+        // materialised output matching the witness old_cell shape.
         assert(old_cell.version == NOVASEAL_VERSION, "bootstrap version")
         assert(old_cell.nonce == 0, "bootstrap nonce")
         assert(ckb::cell_data_hash(source::group_output(0)) == ckb::hash_data_packed(old_cell), "bootstrap output")
     } else {
+        // Key-authorised transition. The assertions below bind the old outpoint,
+        // successor state, receipt output, nonce, expiry and BIP340 signature.
         assert(op == OP_KEY_AUTH_TRANSITION, "transition op")
         assert(ckb::cell_data_hash(source::group_input(0)) == ckb::hash_data_packed(old_cell), "transition input")
         assert(ckb::cell_data_hash(source::group_output(0)) == ckb::hash_data_packed(NovaSealCellV0 {

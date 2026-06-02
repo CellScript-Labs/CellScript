@@ -1,12 +1,14 @@
 module novaseal::state_type::v0_mvp;
 
+// Arthur Zhang, 2026.
+//
 // =============================================================================
 // NovaSeal v0 MVP - State Transition Type Script
 // =============================================================================
 //
 // This is the primary executable artefact for v0.
 //
-// It starts the 9 strict acceptance criteria using only CellScript 0.16
+// It covers the strict acceptance criteria using only CellScript 0.16
 // constructs: resource, consume/create, require guards, explicit policy_hash
 // binding, and ProofPlan-visible obligations. Signature verification remains
 // delegated to nova_btc_authority_lock plus its external verifier TCB.
@@ -15,8 +17,14 @@ module novaseal::state_type::v0_mvp;
 // output cell. The receipt hash remains checked as a fail-closed obligation.
 // =============================================================================
 
-// Types inlined for skeleton. See schemas/ for the source-of-truth definitions.
-// NovaSealCellV0 must be a resource because it represents a linear Cell that is consumed + recreated.
+// REVIEW NOTE:
+// Types are inlined here so the transition can compile as one self-contained
+// CellScript entry. The schema files remain the source of truth for field
+// order, width and packed layout.
+//
+// NovaSealCellV0 is a resource because a valid transition consumes one old Cell
+// and creates one successor Cell. That linear movement is the CKB-side safety
+// property this file is trying to make explicit.
 resource NovaSealCellV0 has store, create, consume {
     version: u16,
     btc_authority_hash: Hash,
@@ -100,11 +108,14 @@ receipt ProofReceiptV0 has store, create, consume {
     expiry: u64,
 }
 
-// Top-level invariant (skeleton): policy preservation will be declared here in the real implementation.
-
-
 // The core transition action. This is what builders and the acceptance harness
-// will target for the 9 criteria.
+// target for the v0 evidence. It checks old-cell binding, policy preservation,
+// nonce increment, expiry, receipt commitment, and BIP340 signature validity.
+//
+// AUDIT BOUNDARY:
+// `payout_commitment_hash` is Hash::zero() in core v0 because the base movement
+// profile does not model concrete payouts. Agreement Profile adds typed payout
+// outputs separately.
 action key_auth_transition(old_cell: NovaSealCellV0, witness intent: NovaSealSignedIntentV0, witness state_hash_commitment: Hash, witness sig: SignaturePayload) -> (new_cell: NovaSealCellV0, receipt: ProofReceiptV0)
 where
     let now = env::current_timepoint()
@@ -182,10 +193,11 @@ where
     }
 
 
-// The type script entry point will normally be a thin wrapper that
-// dispatches to the appropriate action based on witness action kind.
-// For the MVP skeleton we expose the single key_auth_transition action
-// explicitly so that `cellc --entry-action key_auth_transition` works.
+// AUDIT BOUNDARY:
+// The type script entry point will normally be a thin dispatcher that selects
+// the action from witness data. For this v0 action file, the single
+// key_auth_transition action remains exposed so targeted compiler and VM
+// harnesses can call it directly.
 
 // Default-entry lock surface. The same lock shape is also kept in
 // nova_btc_authority_lock.cell for targeted standalone compilation, but this
