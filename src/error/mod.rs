@@ -242,12 +242,77 @@ impl ErrorReporter {
     pub fn print_errors(&self) {
         for error in &self.errors {
             eprintln!("\x1b[31merror\x1b[0m: {}", error);
-            if let Some(line) = self.source.lines().nth(error.span.line.saturating_sub(1)) {
+            if let Some((_, line)) = source_line(&self.source, error.span.line) {
                 eprintln!("  \x1b[34m{}\x1b[0m | {}", error.span.line, line);
-                let spaces = " ".repeat(error.span.line.to_string().len() + 3);
-                let carets = "^".repeat(error.span.end.saturating_sub(error.span.start).max(1));
-                eprintln!("{}  \x1b[32m{}\x1b[0m", spaces, carets);
+                let (padding, width) = caret_padding_and_width(&self.source, error.span);
+                let spaces = " ".repeat(padding);
+                let carets = "^".repeat(width);
+                eprintln!("{}\x1b[32m{}\x1b[0m", spaces, carets);
             }
         }
+    }
+}
+
+fn source_line(source: &str, target_line: usize) -> Option<(usize, &str)> {
+    if target_line == 0 {
+        return None;
+    }
+
+    let mut current_line = 1usize;
+    let mut line_start = 0usize;
+    for (idx, ch) in source.char_indices() {
+        if ch == '\n' {
+            if current_line == target_line {
+                let line = source[line_start..idx].strip_suffix('\r').unwrap_or(&source[line_start..idx]);
+                return Some((line_start, line));
+            }
+            current_line = current_line.saturating_add(1);
+            line_start = idx + ch.len_utf8();
+        }
+    }
+
+    if current_line == target_line {
+        let line = source[line_start..].strip_suffix('\r').unwrap_or(&source[line_start..]);
+        Some((line_start, line))
+    } else {
+        None
+    }
+}
+
+fn caret_padding_and_width(source: &str, span: Span) -> (usize, usize) {
+    let gutter_width = span.line.to_string().len() + 5;
+    let Some((line_start, line)) = source_line(source, span.line) else {
+        return (gutter_width + span.column.saturating_sub(1), span.end.saturating_sub(span.start).max(1));
+    };
+
+    let line_end = line_start + line.len();
+    let span_start = span.start.clamp(line_start, line_end);
+    let span_end = span.end.clamp(span_start, line_end);
+    let start_columns =
+        source.get(line_start..span_start).map(str::chars).map(Iterator::count).unwrap_or_else(|| span.column.saturating_sub(1));
+    let width = source.get(span_start..span_end).map(str::chars).map(Iterator::count).filter(|count| *count > 0).unwrap_or(1);
+
+    (gutter_width + start_columns, width)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{caret_padding_and_width, Span};
+
+    #[test]
+    fn caret_padding_starts_at_span_column() {
+        let source = "let answer = 42\n";
+        let span = Span::new(4, 10, 1, 5);
+
+        assert_eq!(caret_padding_and_width(source, span), (10, 6));
+    }
+
+    #[test]
+    fn caret_width_counts_characters_not_bytes() {
+        let source = "let café = 1\n";
+        let start = source.find("café").expect("fixture contains non-ascii word");
+        let span = Span::new(start, start + "café".len(), 1, 5);
+
+        assert_eq!(caret_padding_and_width(source, span), (10, 4));
     }
 }
