@@ -1,0 +1,4 @@
+== stdout ==
+wrote /Users/arthur/RustroverProjects/CellScript/target/novaseal-devnet-stateful-acceptance.json status=passed live_devnet_rpc_executed=True blockers=0
+
+== stderr ==

@@ -24,6 +24,7 @@ DEFAULT_SOURCE = Path("src/nova_state_type.cell")
 DEFAULT_AUDIT_SURFACE = Path("target/novaseal-audit-surface.json")
 DEFAULT_CANONICAL_VECTORS = Path("target/novaseal-canonical-vectors.json")
 DEFAULT_BTC_VERIFIER_VECTORS = Path("target/novaseal-btc-verifier-vectors.json")
+DEFAULT_WALLET_SIGNING_ALIGNMENT_REPORT = Path("target/novaseal-wallet-signing-alignment.json")
 DEFAULT_BTC_VERIFIER_IPC_VECTORS = Path("target/novaseal-btc-verifier-ipc-vectors.json")
 DEFAULT_BTC_VERIFIER_SHELL_REPORT = Path("target/novaseal-btc-verifier-shell-report.json")
 DEFAULT_CKB_VM_CHILD_VERIFIER_REPORT = Path("target/novaseal-ckb-vm-child-verifier-report.json")
@@ -274,6 +275,25 @@ def btc_verifier_vector_checks(path: Path) -> dict[str, Any]:
     }
 
 
+def wallet_signing_alignment_checks(path: Path) -> dict[str, Any]:
+    report = optional_json(path)
+    if report is None:
+        return {
+            "artifact": str(path),
+            "available": False,
+            "summary": None,
+            "classification": None,
+            "message_rules": None,
+        }
+    return {
+        "artifact": str(path),
+        "available": True,
+        "summary": report.get("summary"),
+        "classification": report.get("classification"),
+        "message_rules": report.get("message_rules"),
+    }
+
+
 def btc_verifier_ipc_vector_checks(path: Path) -> dict[str, Any]:
     vectors = optional_json(path)
     if vectors is None:
@@ -454,6 +474,7 @@ def build_report(
     audit_surface_path: Path,
     canonical_vectors_path: Path,
     btc_verifier_vectors_path: Path,
+    wallet_signing_alignment_report_path: Path,
     btc_verifier_ipc_vectors_path: Path,
     btc_verifier_shell_report_path: Path,
     ckb_vm_child_verifier_report_path: Path,
@@ -507,6 +528,10 @@ def build_report(
     combined_summary = combined_checks.get("summary", {})
     if not isinstance(combined_summary, dict):
         combined_summary = {}
+    wallet_alignment_checks = wallet_signing_alignment_checks(wallet_signing_alignment_report_path)
+    wallet_alignment_summary = wallet_alignment_checks.get("summary", {})
+    if not isinstance(wallet_alignment_summary, dict):
+        wallet_alignment_summary = {}
     return {
         "schema": SCHEMA,
         "fixture_dir": str(fixtures_dir),
@@ -582,11 +607,18 @@ def build_report(
             "combined_full_transaction_max_cycles": combined_summary.get("max_full_transaction_cycles"),
             "combined_max_consensus_tx_size_bytes": combined_summary.get("max_consensus_tx_size_bytes"),
             "combined_max_output_occupied_capacity_shannons": combined_summary.get("max_output_occupied_capacity_shannons"),
+            "wallet_signing_alignment_report_available": bool(wallet_alignment_checks.get("available")),
+            "wallet_lock_alignment_ready": bool(wallet_alignment_summary.get("wallet_lock_alignment_ready")),
+            "wallet_current_lock_digest_matches_canonical": wallet_alignment_summary.get(
+                "current_lock_digest_matches_canonical"
+            ),
+            "wallet_current_lock_digest_mismatches": wallet_alignment_summary.get("current_lock_digest_mismatches"),
             "classification": "model_level_fixture_evidence",
         },
         "artifact_checks": artifact_checks(audit_surface),
         "canonical_vector_checks": canonical_vector_checks(canonical_vectors_path),
         "btc_verifier_vector_checks": btc_verifier_vector_checks(btc_verifier_vectors_path),
+        "wallet_signing_alignment_checks": wallet_alignment_checks,
         "btc_verifier_ipc_vector_checks": btc_verifier_ipc_vector_checks(btc_verifier_ipc_vectors_path),
         "btc_verifier_shell_checks": btc_verifier_shell_checks(btc_verifier_shell_report_path),
         "ckb_vm_child_verifier_checks": child_checks,
@@ -606,6 +638,7 @@ def build_report(
             "The state-type CKB VM harness uses the canonical 213-byte NovaSealIntentV0 old_cell: OutPoint shape without an intent-shortening adapter.",
             "The parent-lock and state-type CKB VM harnesses now parse the same CSARGv1 witness payload order: intent, receipt_hash, state_hash_commitment, SignaturePayload.",
             "Combined lock+type full transaction script-verifier evidence is attached separately when target/novaseal-combined-tx-report.json exists; it is still an in-memory harness ResolvedTransaction flow, not production builder/full-node acceptance.",
+            "Wallet signing alignment evidence is attached separately when target/novaseal-wallet-signing-alignment.json exists; it currently keeps production_wallet_ready=false when the lock digest is still the domain-hash compatibility rule.",
             "The generated authority lock surface covers Script.args binding and spawn/IPC shell wiring; parent-lock CKB VM evidence is still harness-level, not generated ProofPlan transaction coverage.",
             "Passing source-model fixtures do not replace builder-backed/full-node acceptance evidence.",
         ],
@@ -619,6 +652,7 @@ def main() -> int:
     parser.add_argument("--audit-surface", type=Path, default=DEFAULT_AUDIT_SURFACE)
     parser.add_argument("--canonical-vectors", type=Path, default=DEFAULT_CANONICAL_VECTORS)
     parser.add_argument("--btc-verifier-vectors", type=Path, default=DEFAULT_BTC_VERIFIER_VECTORS)
+    parser.add_argument("--wallet-signing-alignment-report", type=Path, default=DEFAULT_WALLET_SIGNING_ALIGNMENT_REPORT)
     parser.add_argument("--btc-verifier-ipc-vectors", type=Path, default=DEFAULT_BTC_VERIFIER_IPC_VECTORS)
     parser.add_argument("--btc-verifier-shell-report", type=Path, default=DEFAULT_BTC_VERIFIER_SHELL_REPORT)
     parser.add_argument("--ckb-vm-child-verifier-report", type=Path, default=DEFAULT_CKB_VM_CHILD_VERIFIER_REPORT)
@@ -636,6 +670,7 @@ def main() -> int:
         args.audit_surface,
         args.canonical_vectors,
         args.btc_verifier_vectors,
+        args.wallet_signing_alignment_report,
         args.btc_verifier_ipc_vectors,
         args.btc_verifier_shell_report,
         args.ckb_vm_child_verifier_report,
@@ -669,7 +704,8 @@ def main() -> int:
         f"state_type_matched_expected={summary['state_type_action_matched_expected']} "
         f"shared_witness_abi_aligned={summary['shared_lock_type_witness_abi_aligned']} "
         f"combined_full_tx_executed={summary['combined_full_transaction_executed']} "
-        f"combined_full_tx_matched_expected={summary['combined_full_transaction_matched_expected']}"
+        f"combined_full_tx_matched_expected={summary['combined_full_transaction_matched_expected']} "
+        f"wallet_lock_alignment_ready={summary['wallet_lock_alignment_ready']}"
     )
     return 0 if summary["mismatched"] == 0 else 1
 

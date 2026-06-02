@@ -1,0 +1,323 @@
+- generic [active] [ref=e1]:
+  - banner [ref=e2]:
+    - navigation "主导航" [ref=e3]:
+      - link "CellScript 首页" [ref=e4] [cursor=pointer]:
+        - /url: "#top"
+        - generic [ref=e6]: CellScript
+      - generic [ref=e7]:
+        - link "文档" [ref=e8] [cursor=pointer]:
+          - /url: https://github.com/a19q3/CellScript/tree/main/docs
+          - img [ref=e9]
+          - generic [ref=e12]: 文档
+        - link "源码" [ref=e13] [cursor=pointer]:
+          - /url: https://github.com/a19q3/CellScript
+          - img [ref=e14]
+          - generic [ref=e16]: 源码
+        - button "切换语言" [ref=e17] [cursor=pointer]:
+          - generic [ref=e18]: English
+        - button "切换到深色模式" [pressed] [ref=e19] [cursor=pointer]:
+          - generic [ref=e22]: 深色
+  - main [ref=e23]:
+    - region "CellScript" [ref=e24]:
+      - generic [ref=e25]:
+        - heading "CellScript" [level=1] [ref=e26]
+        - paragraph [ref=e27]: 用 typed transitions 编写 Cell contracts，而不是手写 raw wire format。
+        - generic [ref=e28]:
+          - link "开始使用" [ref=e29] [cursor=pointer]:
+            - /url: "#getting-started"
+          - link "核心模型" [ref=e30] [cursor=pointer]:
+            - /url: "#core-model"
+        - generic "CellScript 合约表面" [ref=e31]:
+          - generic [ref=e32]:
+            - term [ref=e33]: 目标
+            - definition [ref=e34]: ckb-vm RISC-V
+          - generic [ref=e35]:
+            - term [ref=e36]: 模型
+            - definition [ref=e37]: schema-backed Cells
+          - generic [ref=e38]:
+            - term [ref=e39]: 输出
+            - definition [ref=e40]: metadata + ProofPlan
+      - generic [ref=e41]:
+        - generic [ref=e43]: token.cell
+        - tablist "CellScript 示例" [ref=e45]:
+          - tab "Fungible Token" [selected] [ref=e46] [cursor=pointer]
+          - tab "NFT" [ref=e47] [cursor=pointer]
+          - tab "AMM Pool" [ref=e48] [cursor=pointer]
+          - tab "Vesting" [ref=e49] [cursor=pointer]
+        - tabpanel "Fungible Token" [ref=e51]:
+          - generic [ref=e52]:
+            - generic [ref=e53]: "1"
+            - generic [ref=e54]: module cellscript::fungible_token
+          - generic [ref=e55]:
+            - generic [ref=e56]: "2"
+            - generic [ref=e57]: // ... invariant and MintAuthority omitted
+          - generic [ref=e58]:
+            - generic [ref=e59]: "3"
+            - generic [ref=e60]: "resource Token has store, create, consume, replace, burn, relock {"
+          - generic [ref=e61]:
+            - generic [ref=e62]: "4"
+            - generic [ref=e63]: "amount: u64,"
+          - generic [ref=e64]:
+            - generic [ref=e65]: "5"
+            - generic [ref=e66]: "symbol: [u8; 8],"
+          - generic [ref=e67]:
+            - generic [ref=e68]: "6"
+            - generic [ref=e69]: "}"
+          - generic [ref=e71]: "7"
+          - generic [ref=e72]:
+            - generic [ref=e73]: "8"
+            - generic [ref=e74]: "action transfer_token(token: Token, to: Address) -> next_token: Token"
+          - generic [ref=e75]:
+            - generic [ref=e76]: "9"
+            - generic [ref=e77]: where
+          - generic [ref=e78]:
+            - generic [ref=e79]: "10"
+            - generic [ref=e80]: consume token
+          - generic [ref=e81]:
+            - generic [ref=e82]: "11"
+            - generic [ref=e83]: "create next_token = Token { amount: token.amount, symbol: token.symbol } with_lock(to)"
+          - generic [ref=e85]: "12"
+          - generic [ref=e86]:
+            - generic [ref=e87]: "13"
+            - generic [ref=e88]: "action burn(token: Token)"
+          - generic [ref=e89]:
+            - generic [ref=e90]: "14"
+            - generic [ref=e91]: where
+          - generic [ref=e92]:
+            - generic [ref=e93]: "15"
+            - generic [ref=e94]: assert(token.amount > 0, "cannot burn zero")
+          - generic [ref=e95]:
+            - generic [ref=e96]: "16"
+            - generic [ref=e97]: destroy token
+        - generic [ref=e98]:
+          - generic [ref=e99]: $
+          - generic [ref=e100]: cellc examples/token.cell --target-profile ckb
+    - region "开始使用" [ref=e101]:
+      - heading "开始使用" [level=2] [ref=e102]
+      - generic [ref=e103]:
+        - article [ref=e104]:
+          - generic [ref=e105]: "1"
+          - heading "安装" [level=3] [ref=e106]
+          - paragraph [ref=e107]:
+            - code [ref=e108]: cargo install --path .
+        - article [ref=e109]:
+          - generic [ref=e110]: "2"
+          - heading "编译" [level=3] [ref=e111]
+          - paragraph [ref=e112]:
+            - code [ref=e113]: cellc examples/token.cell --target riscv64-elf --target-profile ckb
+        - article [ref=e114]:
+          - generic [ref=e115]: "3"
+          - heading "检查" [level=3] [ref=e116]
+          - paragraph [ref=e117]:
+            - code [ref=e118]: cellc check --target-profile ckb
+    - region "编译流程" [ref=e119]:
+      - heading "编译流程" [level=2] [ref=e120]
+      - generic [ref=e121]:
+        - generic "从 .cell source 到 CKB artefact 的 compiler workflow" [ref=e122]:
+          - article [ref=e123]:
+            - img [ref=e125]:
+              - generic [ref=e128]: .cell
+            - heading "CellScript source" [level=3] [ref=e129]
+          - img [ref=e131]
+          - article [ref=e133]:
+            - img [ref=e135]
+            - heading "解析与检查" [level=3] [ref=e139]
+            - paragraph [ref=e140]: 语法、类型、effects
+          - img [ref=e142]
+          - article [ref=e144]:
+            - img [ref=e146]
+            - heading "IR + Metadata" [level=3] [ref=e152]
+            - paragraph [ref=e153]: typed model 与 assurance 信息
+          - img [ref=e155]
+          - article [ref=e157]:
+            - img [ref=e159]
+            - heading "Lower 到 RISC-V" [level=3] [ref=e163]
+            - paragraph [ref=e164]: ckb-vm codegen 与 optimisations
+          - img [ref=e166]
+          - article [ref=e168]:
+            - img [ref=e170]:
+              - generic [ref=e173]: .elf
+            - heading "ELF / Assembly" [level=3] [ref=e174]
+            - paragraph [ref=e175]: 面向 ckb-vm 的 RISC-V 产物
+        - complementary "为 CKB 构建" [ref=e176]:
+          - heading "为 CKB 构建" [level=3] [ref=e177]
+          - list [ref=e178]:
+            - listitem [ref=e179]:
+              - img [ref=e180]
+              - generic [ref=e182]: ckb-vm 兼容
+            - listitem [ref=e183]:
+              - img [ref=e184]
+              - generic [ref=e186]: 确定性执行
+            - listitem [ref=e187]:
+              - img [ref=e188]
+              - generic [ref=e190]: 最小 syscalls
+            - listitem [ref=e191]:
+              - img [ref=e192]
+              - generic [ref=e194]: 感知 scheduler
+    - region "核心模型" [ref=e195]:
+      - heading "核心模型" [level=2] [ref=e196]
+      - paragraph [ref=e197]: CellScript 让 contract model 保持可见：Cell shapes、effects、locks、flows 与 review metadata 都留在同一个 typed surface 中。
+      - paragraph [ref=e198]: 刻意保持窄边界：不是 general-purpose runtime，不是 new VM，也不是 account storage 的伪装。
+      - generic [ref=e199]:
+        - tablist "CellScript core primitives" [ref=e200]:
+          - tab "resource" [selected] [ref=e201] [cursor=pointer]:
+            - generic [ref=e202]: resource
+          - tab "shared" [ref=e203] [cursor=pointer]:
+            - generic [ref=e204]: shared
+          - tab "receipt" [ref=e205] [cursor=pointer]:
+            - generic [ref=e206]: receipt
+          - tab "action" [ref=e207] [cursor=pointer]:
+            - generic [ref=e208]: action
+          - tab "lock" [ref=e209] [cursor=pointer]:
+            - generic [ref=e210]: lock
+          - tab "flow" [ref=e211] [cursor=pointer]:
+            - generic [ref=e212]: flow
+          - tab "invariant" [ref=e213] [cursor=pointer]:
+            - generic [ref=e214]: invariant
+          - tab "struct / enum" [ref=e215] [cursor=pointer]:
+            - generic [ref=e216]: struct / enum
+          - tab "identity" [ref=e217] [cursor=pointer]:
+            - generic [ref=e218]: identity
+        - tabpanel "resource" [ref=e220]:
+          - paragraph [ref=e222]: 带有显式 lifecycle effects 的 owned Cell state。
+          - generic [ref=e223]:
+            - generic [ref=e224]:
+              - generic [ref=e225]: 示例摘录
+              - generic [ref=e226]: examples/token.cell
+            - generic [ref=e227]: "// examples/token.cell resource Token has store, create, consume, replace, burn, relock { amount: u64, symbol: [u8; 8], }"
+    - region "Assurance 输出" [ref=e228]:
+      - generic [ref=e229]:
+        - heading "Assurance 输出" [level=2] [ref=e230]
+        - paragraph [ref=e231]: 本地 build 会输出 review metadata。sidecar 是有用 evidence，但离开 build boundary 后不是 authenticated proof。
+      - article [ref=e233]:
+        - generic "Assurance 输出摘要" [ref=e234]:
+          - article [ref=e235]:
+            - text: Schema
+            - strong [ref=e236]: v42
+            - paragraph [ref=e237]: 当前 compiler metadata schema
+          - article [ref=e238]:
+            - text: Source
+            - strong [ref=e239]: vesting.cell
+            - paragraph [ref=e240]: shared + receipt + flow
+          - article [ref=e241]:
+            - text: Boundary
+            - strong [ref=e242]: local sidecar
+            - paragraph [ref=e243]: validated；shared 时仍需 provenance
+        - group [ref=e244]:
+          - generic "- Metadata 摘录" [ref=e245] [cursor=pointer]
+          - generic [ref=e246]: "# 来自本地 build 的代表性 sidecar excerpt；provenance checks 需要单独处理。"
+          - generic [ref=e247]: "{ \"metadata_schema_version\": 42, \"module\": \"cellscript::vesting\", \"target_profile\": \"ckb\", \"types\": { \"VestingConfig\": { \"kind\": \"shared\", \"capabilities\": [\"store\", \"create\", \"read_ref\"] }, \"VestingGrant\": { \"kind\": \"receipt\", \"flow\": \"Granted -> Claimable -> FullyClaimed\" } }, \"actions\": [{ \"name\": \"claim_vested\", \"effect_class\": \"Mutating\", \"consume_set\": [\"grant\"], \"create_set\": [\"tokens\", \"updated_grant\"], \"ckb_runtime_features\": [\"current_timepoint\"] }], \"proof_plan\": { \"status\": \"review evidence\", \"limit\": \"sidecar provenance must be checked outside the compiler\" } }"
+    - region "工具接口" [ref=e248]:
+      - heading "工具接口" [level=2] [ref=e249]
+      - generic [ref=e250]:
+        - tablist "CellScript tooling commands" [ref=e251]:
+          - tab "cellc metadata 读写表面" [selected] [ref=e252] [cursor=pointer]:
+            - code [ref=e253]: cellc metadata
+            - generic [ref=e254]: 读写表面
+          - tab "cellc constraints Transaction 形状" [ref=e255] [cursor=pointer]:
+            - code [ref=e256]: cellc constraints
+            - generic [ref=e257]: Transaction 形状
+          - tab "cellc audit-bundle 审阅包" [ref=e258] [cursor=pointer]:
+            - code [ref=e259]: cellc audit-bundle
+            - generic [ref=e260]: 审阅包
+          - tab "cellc lsp 编辑器反馈" [ref=e261] [cursor=pointer]:
+            - code [ref=e262]: cellc lsp
+            - generic [ref=e263]: 编辑器反馈
+        - tabpanel "cellc metadata 读写表面" [ref=e265]:
+          - generic [ref=e266]:
+            - generic [ref=e267]: 使用时机
+            - paragraph [ref=e268]: review 或 integration 前使用。
+            - generic [ref=e269]: 输出
+            - paragraph [ref=e270]: Schema、effects、source hashes、target profile。
+          - generic [ref=e271]:
+            - code [ref=e272]: cellc metadata examples/vesting.cell --target-profile ckb --json
+            - generic [ref=e273]: "# 为真实 example 输出 review metadata。"
+    - region "示例" [ref=e274]:
+      - heading "示例" [level=2] [ref=e275]
+      - generic [ref=e276]:
+        - tablist "示例分组" [ref=e277]:
+          - tab "协议 6 个文件" [selected] [ref=e278] [cursor=pointer]:
+            - generic [ref=e279]: 协议
+            - generic [ref=e280]: 6 个文件
+          - tab "原语 6 个文件" [ref=e281] [cursor=pointer]:
+            - generic [ref=e282]: 原语
+            - generic [ref=e283]: 6 个文件
+          - tab "语言 6 个文件" [ref=e284] [cursor=pointer]:
+            - generic [ref=e285]: 语言
+            - generic [ref=e286]: 6 个文件
+        - tabpanel "协议 6 个文件" [ref=e288]:
+          - generic [ref=e289]:
+            - paragraph [ref=e290]: 包含 Cells、actions 与 constraints 的端到端 contract examples。
+            - link "打开 examples 目录" [ref=e291] [cursor=pointer]:
+              - /url: https://github.com/a19q3/CellScript/tree/main/examples
+          - generic [ref=e292]:
+            - link "examples/token.cell Fungible Token Mint、transfer、burn、merge 与 amount invariant。 resource invariant burn" [ref=e293] [cursor=pointer]:
+              - /url: https://github.com/a19q3/CellScript/blob/main/examples/token.cell
+              - generic [ref=e294]: examples/token.cell
+              - heading "Fungible Token" [level=3] [ref=e295]
+              - paragraph [ref=e296]: Mint、transfer、burn、merge 与 amount invariant。
+              - generic [ref=e297]:
+                - generic [ref=e298]: resource
+                - generic [ref=e299]: invariant
+                - generic [ref=e300]: burn
+            - link "examples/nft.cell NFT 市场 Collection state、listing receipts、transfer 与 royalty payment。 resource receipt preserve" [ref=e301] [cursor=pointer]:
+              - /url: https://github.com/a19q3/CellScript/blob/main/examples/nft.cell
+              - generic [ref=e302]: examples/nft.cell
+              - heading "NFT 市场" [level=3] [ref=e303]
+              - paragraph [ref=e304]: Collection state、listing receipts、transfer 与 royalty payment。
+              - generic [ref=e305]:
+                - generic [ref=e306]: resource
+                - generic [ref=e307]: receipt
+                - generic [ref=e308]: preserve
+            - link "examples/amm_pool.cell AMM Pool Shared reserves、LP receipts、swap 与 liquidity actions。 shared receipt slippage" [ref=e309] [cursor=pointer]:
+              - /url: https://github.com/a19q3/CellScript/blob/main/examples/amm_pool.cell
+              - generic [ref=e310]: examples/amm_pool.cell
+              - heading "AMM Pool" [level=3] [ref=e311]
+              - paragraph [ref=e312]: Shared reserves、LP receipts、swap 与 liquidity actions。
+              - generic [ref=e313]:
+                - generic [ref=e314]: shared
+                - generic [ref=e315]: receipt
+                - generic [ref=e316]: slippage
+            - link "examples/vesting.cell Vesting Grant flow、timepoint checks、claim 与 revoke paths。 flow receipt env" [ref=e317] [cursor=pointer]:
+              - /url: https://github.com/a19q3/CellScript/blob/main/examples/vesting.cell
+              - generic [ref=e318]: examples/vesting.cell
+              - heading "Vesting" [level=3] [ref=e319]
+              - paragraph [ref=e320]: Grant flow、timepoint checks、claim 与 revoke paths。
+              - generic [ref=e321]:
+                - generic [ref=e322]: flow
+                - generic [ref=e323]: receipt
+                - generic [ref=e324]: env
+            - link "examples/launch.cell Launch 流程 Launch state、settlement 与 sale lifecycle。 flow settle claim" [ref=e325] [cursor=pointer]:
+              - /url: https://github.com/a19q3/CellScript/blob/main/examples/launch.cell
+              - generic [ref=e326]: examples/launch.cell
+              - heading "Launch 流程" [level=3] [ref=e327]
+              - paragraph [ref=e328]: Launch state、settlement 与 sale lifecycle。
+              - generic [ref=e329]:
+                - generic [ref=e330]: flow
+                - generic [ref=e331]: settle
+                - generic [ref=e332]: claim
+            - link "examples/registry.cell Registry Name ownership 与 registry-style state transitions。 resource identity replace" [ref=e333] [cursor=pointer]:
+              - /url: https://github.com/a19q3/CellScript/blob/main/examples/registry.cell
+              - generic [ref=e334]: examples/registry.cell
+              - heading "Registry" [level=3] [ref=e335]
+              - paragraph [ref=e336]: Name ownership 与 registry-style state transitions。
+              - generic [ref=e337]:
+                - generic [ref=e338]: resource
+                - generic [ref=e339]: identity
+                - generic [ref=e340]: replace
+  - contentinfo [ref=e341]:
+    - generic [ref=e342]:
+      - generic [ref=e343]:
+        - link "CellScript" [ref=e344] [cursor=pointer]:
+          - /url: "#top"
+          - generic [ref=e346]: CellScript
+        - paragraph [ref=e347]: CellScript 是面向 CKB Cell-based smart contracts 的语义 DSL，内置 typed metadata 与 assurance by design。Docs、spec、examples 与 source 都随 repository 管理。
+      - generic [ref=e348]:
+        - link "文档" [ref=e349] [cursor=pointer]:
+          - /url: https://github.com/a19q3/CellScript/wiki
+        - link "规范" [ref=e350] [cursor=pointer]:
+          - /url: https://github.com/a19q3/CellScript/tree/main/docs
+        - link "示例" [ref=e351] [cursor=pointer]:
+          - /url: https://github.com/a19q3/CellScript/tree/main/examples
+        - link "源码" [ref=e352] [cursor=pointer]:
+          - /url: https://github.com/a19q3/CellScript

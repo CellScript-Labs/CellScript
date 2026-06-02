@@ -17,10 +17,17 @@ import shutil
 import subprocess
 import sys
 import textwrap
-import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - exercised only by older Python runners.
+    try:
+        import tomli as tomllib  # type: ignore[import-not-found]
+    except ModuleNotFoundError:
+        tomllib = None  # type: ignore[assignment]
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -64,7 +71,57 @@ class AuditCase:
 def read_matrix() -> dict[str, Any]:
     if not MATRIX.exists():
         return {}
-    return tomllib.loads(MATRIX.read_text(encoding="utf-8"))
+    text = MATRIX.read_text(encoding="utf-8")
+    if tomllib is not None:
+        return tomllib.loads(text)
+    return parse_matrix_toml_subset(text)
+
+
+def parse_matrix_toml_subset(text: str) -> dict[str, Any]:
+    """Parse the matrix file subset needed by this runner.
+
+    This fallback intentionally supports only the simple TOML shapes used by
+    tests/syntax_combo/matrix.toml: dotted tables, scalar ints/bools/strings,
+    and string arrays.
+    """
+    root: dict[str, Any] = {}
+    current = root
+    lines = text.splitlines()
+    index = 0
+    while index < len(lines):
+        raw = lines[index].strip()
+        index += 1
+        if not raw or raw.startswith("#"):
+            continue
+        if raw.startswith("[") and raw.endswith("]"):
+            current = root
+            for part in raw[1:-1].split("."):
+                current = current.setdefault(part, {})
+            continue
+        if "=" not in raw:
+            continue
+        key, value = [part.strip() for part in raw.split("=", 1)]
+        if value == "[":
+            items: list[str] = []
+            while index < len(lines):
+                item = lines[index].strip()
+                index += 1
+                if item == "]":
+                    break
+                item = item.rstrip(",")
+                if item.startswith('"') and item.endswith('"'):
+                    items.append(item[1:-1])
+            current[key] = items
+        elif value.startswith("[") and value.endswith("]"):
+            raw_items = value[1:-1].strip()
+            current[key] = [] if not raw_items else [item.strip().strip('"') for item in raw_items.split(",")]
+        elif value.startswith('"') and value.endswith('"'):
+            current[key] = value[1:-1]
+        elif value in {"true", "false"}:
+            current[key] = value == "true"
+        else:
+            current[key] = int(value)
+    return root
 
 
 def compact(text: str, limit: int = 1200) -> str:
@@ -1354,7 +1411,7 @@ def main(argv: list[str]) -> int:
     require_tool("python3")
     cellc = cellc_bin()
 
-    timestamp = dt.datetime.now(dt.UTC).strftime("%Y%m%d-%H%M%S")
+    timestamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%d-%H%M%S")
     run_dir = ROOT / "target" / "syntax-combo-audit" / f"{timestamp}-{args.mode}-{args.seed}"
     run_dir.mkdir(parents=True, exist_ok=True)
 
