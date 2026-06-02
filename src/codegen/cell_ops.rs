@@ -2365,6 +2365,7 @@ impl CodeGenerator {
             return Ok(());
         }
         if let Some(output_index) = self.operation_output_indices.get(&dest.id).copied() {
+            // AUDIT-FINDING: transfer/claim/settle emitters materialise an output handle even when the relation is explicitly marked unverified, letting later generated code treat an index as a semantic output value — severity: HIGH — fail closed or carry a distinct unverified-handle type that cannot feed verified field/codegen paths
             self.emit(format!("# cellscript abi: transfer output handle Output#{} (unverified)", output_index));
             self.emit(format!("li t0, {}", output_index));
             self.emit_stack_store("t0", dest.id * 8);

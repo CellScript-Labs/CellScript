@@ -339,6 +339,7 @@ impl Collections {
         asm.push_str("    j __cellscript_collection_runtime_unavailable\n\n");
 
         asm.push_str("# Vec::push unchecked body retained as non-entry documentation only\n");
+        // AUDIT-FINDING: collection helper assembly is hand-authored string output with an unreachable pseudo-implementation retained after a fail-closed jump, outside the main typed emitter/register-contract path — severity: MEDIUM — remove dead helper bodies or generate them through the same emitter/assembler contract with executable regression coverage
         asm.push_str(".Lvec_push_unreachable_body:\n");
         asm.push_str("    addi sp, sp, -32\n");
         asm.push_str("    sd ra, 24(sp)\n");

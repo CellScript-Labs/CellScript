@@ -1758,6 +1758,7 @@ pub(crate) fn scratch_register_avoiding(registers: &[&str]) -> &'static str {
             return candidate;
         }
     }
+    // AUDIT-FINDING: scratch register selection falls back to t6 even when every scratch register is excluded, so large-immediate rewriting can silently clobber a live register instead of reporting an impossible allocation — severity: HIGH — return Result<Option<register>> and make emitters fail closed when no scratch register is available
     "t6"
 }
 
