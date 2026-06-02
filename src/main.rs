@@ -232,10 +232,11 @@ fn main() {
         process::exit(1);
     }
 
+    let compile_input = resolved_input.as_path();
     let compile_result = match (cli.entry_action, cli.entry_lock) {
-        (Some(action), None) => compile_path_with_entry_action(Utf8Path::new(&input_file), options, action),
-        (None, Some(lock)) => compile_path_with_entry_lock(Utf8Path::new(&input_file), options, lock),
-        (None, None) => compile_path(Utf8Path::new(&input_file), options),
+        (Some(action), None) => compile_path_with_entry_action(compile_input, options, action),
+        (None, Some(lock)) => compile_path_with_entry_lock(compile_input, options, lock),
+        (None, None) => compile_path(compile_input, options),
         (Some(_), Some(_)) => unreachable!("validated above"),
     };
 
