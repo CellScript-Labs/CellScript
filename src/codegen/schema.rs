@@ -87,6 +87,39 @@ pub(crate) fn fixed_scalar_width(ty: &IrType, fixed_size: Option<usize>) -> Opti
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fixed_width_helpers_classify_scalar_and_byte_storage() {
+        assert_eq!(fixed_scalar_width(&IrType::U64, Some(8)), Some(8));
+        assert_eq!(fixed_scalar_width(&IrType::U64, None), None);
+        assert_eq!(fixed_scalar_width(&IrType::Hash, None), None);
+        assert_eq!(fixed_byte_width(&IrType::Hash, Some(32)), Some(32));
+        assert_eq!(fixed_byte_width(&IrType::Array(Box::new(IrType::U8), 7), Some(7)), Some(7));
+        assert_eq!(fixed_register_width(&IrType::U128, Some(16)), None);
+    }
+
+    #[test]
+    fn fixed_byte_constants_materialize_little_endian_bytes() {
+        assert_eq!(fixed_byte_const_bytes(&IrConst::U16(0x1234)), Some(vec![0x34, 0x12]));
+        assert_eq!(fixed_byte_const_bytes(&IrConst::Bool(true)), Some(vec![1]));
+        assert_eq!(fixed_byte_const_bytes(&IrConst::Unit), None);
+    }
+
+    #[test]
+    fn aggregate_field_layouts_track_tuple_offsets() {
+        let layout = aggregate_field_layout(&IrType::Tuple(vec![IrType::U8, IrType::U64]), "1")
+            .expect("tuple field layout should be available");
+
+        assert_eq!(layout.index, 1);
+        assert_eq!(layout.offset, 1);
+        assert_eq!(layout.fixed_size, Some(8));
+        assert_eq!(tuple_return_field_type(&IrType::Tuple(vec![IrType::Bool, IrType::Hash]), "1"), Some(IrType::Hash));
+    }
+}
+
 pub(crate) fn fixed_register_width(ty: &IrType, fixed_size: Option<usize>) -> Option<usize> {
     let w = fixed_scalar_width(ty, fixed_size)?;
     (w <= 8).then_some(w)

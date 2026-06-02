@@ -670,3 +670,34 @@ fn canonical_ir_type_name(ty: &IrType) -> String {
         IrType::Ref(inner) | IrType::MutRef(inner) => canonical_ir_type_name(inner),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::codegen::{CodeGenerator, CodegenOptions};
+
+    #[test]
+    fn fixed_u64_le_width_accepts_hashes_and_byte_arrays() {
+        assert_eq!(fixed_u64_le_operand_width(&IrOperand::Const(IrConst::Hash([0; 32]))), Some(32));
+        assert_eq!(fixed_u64_le_operand_width(&IrOperand::Const(IrConst::Array(vec![IrConst::U8(1), IrConst::U8(2)]))), Some(2));
+        assert_eq!(fixed_u64_le_operand_width(&IrOperand::Const(IrConst::U64(1))), None);
+    }
+
+    #[test]
+    fn packed_hash_width_uses_codegen_fixed_byte_type_rules() {
+        let codegen = CodeGenerator::new(CodegenOptions::default());
+        let operand = IrOperand::Var(IrVar { id: 0, name: "hash".to_string(), ty: IrType::Hash });
+
+        assert_eq!(packed_hash_operand_width(&codegen, &operand), Some(32));
+        assert_eq!(packed_hash_operand_type_name(&operand), Some("Hash".to_string()));
+    }
+
+    #[test]
+    fn canonical_type_names_strip_reference_wrappers() {
+        assert_eq!(canonical_ir_type_name(&IrType::Ref(Box::new(IrType::U64))), "u64");
+        assert_eq!(
+            canonical_ir_type_name(&IrType::Tuple(vec![IrType::Bool, IrType::Array(Box::new(IrType::U8), 4)])),
+            "(bool,[u8;4])"
+        );
+    }
+}

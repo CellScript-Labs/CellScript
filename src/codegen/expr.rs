@@ -383,3 +383,30 @@ impl CodeGenerator {
         self.emit(format!("#   {}", rendered));
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::codegen::{CodeGenerator, CodegenOptions};
+
+    #[test]
+    fn bool_canonical_check_emits_zero_one_guard() {
+        let mut codegen = CodeGenerator::new(CodegenOptions::default());
+
+        codegen.emit_bool_canonical_check("t0");
+
+        assert!(codegen.assembly.iter().any(|line| line.trim_start().starts_with("beqz t0, .Lbool_canonical_ok_")));
+        assert!(codegen.assembly.iter().any(|line| line.trim_start() == "li t2, 1"));
+        assert!(codegen.assembly.iter().any(|line| line.trim_start().starts_with("beq t0, t2, .Lbool_canonical_ok_")));
+        assert!(codegen.assembly.iter().any(|line| line.contains("cellscript runtime error 20")));
+    }
+
+    #[test]
+    fn divisor_nonzero_guard_fails_closed_on_zero() {
+        let mut codegen = CodeGenerator::new(CodegenOptions::default());
+
+        codegen.emit_divisor_nonzero_guard("t1");
+
+        assert!(codegen.assembly.iter().any(|line| line.trim_start().starts_with("bnez t1, .Ldivisor_nonzero_")));
+        assert!(codegen.assembly.iter().any(|line| line.contains("cellscript runtime error 20")));
+    }
+}

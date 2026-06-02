@@ -57,6 +57,38 @@ pub(crate) fn runtime_syscall_abi(profile: TargetProfile) -> RuntimeSyscallAbi {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ckb_runtime_syscall_abi_matches_declared_constants() {
+        let abi = runtime_syscall_abi(TargetProfile::Ckb);
+
+        assert_eq!(abi.load_cell_data, CKB_LOAD_CELL_DATA_SYSCALL_NUMBER);
+        assert_eq!(abi.load_cell_by_field, CKB_LOAD_CELL_BY_FIELD_SYSCALL_NUMBER);
+        assert_eq!(abi.load_witness, CKB_LOAD_WITNESS_SYSCALL_NUMBER);
+        assert_eq!(abi.source_group_input, CKB_SOURCE_GROUP_INPUT);
+        assert_eq!(abi.source_group_output, CKB_SOURCE_GROUP_OUTPUT);
+    }
+
+    #[test]
+    fn runtime_helper_classification_tracks_checked_and_hash_helpers() {
+        assert!(is_ckb_fixed_hash_helper("__ckb_hash_blake2b"));
+        assert!(is_ckb_fixed_hash_helper("__ckb_cell_lock_args32"));
+        assert!(!is_ckb_fixed_hash_helper("__ckb_cell_capacity"));
+
+        assert!(is_ckb_checked_runtime_helper("__ckb_cell_capacity"));
+        assert!(is_ckb_checked_runtime_helper("__env_current_timepoint"));
+        assert!(!is_ckb_checked_runtime_helper("__not_a_helper"));
+    }
+
+    #[test]
+    fn checked_runtime_status_register_defaults_to_a1_for_unknown_helpers() {
+        assert_eq!(ckb_checked_runtime_status_reg("__not_a_helper"), "a1");
+    }
+}
+
 // ---------------------------------------------------------------------------
 // v0.14 runtime helper analysis
 // ---------------------------------------------------------------------------

@@ -30,6 +30,44 @@ pub(crate) fn identity_policy_label(identity: &IrIdentityPolicy) -> String {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn named_var(id: usize, name: &str, ty: &str) -> IrVar {
+        IrVar { id, name: name.to_string(), ty: IrType::Named(ty.to_string()) }
+    }
+
+    #[test]
+    fn identity_and_destruction_policy_labels_are_stable() {
+        assert_eq!(identity_policy_label(&IrIdentityPolicy::CkbTypeId), "ckb_type_id");
+        assert_eq!(identity_policy_label(&IrIdentityPolicy::Field("owner".to_string())), "field(owner)");
+        assert_eq!(destruction_policy_label(&IrDestructionPolicy::Unique { identity: "type_id".to_string() }), "unique(type_id)");
+    }
+
+    #[test]
+    fn destroy_absence_scan_is_limited_to_singleton_and_type_id_unique_policies() {
+        assert!(destroy_policy_uses_output_absence_scan(&IrDestructionPolicy::Default));
+        assert!(destroy_policy_uses_output_absence_scan(&IrDestructionPolicy::SingletonType));
+        assert!(destroy_policy_uses_output_absence_scan(&IrDestructionPolicy::Unique { identity: "ckb_type_id".to_string() }));
+        assert!(!destroy_policy_uses_output_absence_scan(&IrDestructionPolicy::Unique { identity: "owner".to_string() }));
+        assert!(!destroy_policy_uses_output_absence_scan(&IrDestructionPolicy::BurnAmount { field: "amount".to_string() }));
+    }
+
+    #[test]
+    fn consumed_operand_var_accepts_named_cell_operands_only() {
+        let token = named_var(7, "token", "Token");
+        let scalar = IrVar { id: 8, name: "amount".to_string(), ty: IrType::U64 };
+
+        assert_eq!(
+            consumed_operand_var(&IrInstruction::Consume { operand: IrOperand::Var(token.clone()) }).map(|var| var.id),
+            Some(7)
+        );
+        assert!(consumed_operand_var(&IrInstruction::Consume { operand: IrOperand::Var(scalar) }).is_none());
+        assert!(consumed_operand_var(&IrInstruction::LoadConst { dest: token, value: IrConst::U64(1) }).is_none());
+    }
+}
+
 fn destruction_policy_label(policy: &IrDestructionPolicy) -> String {
     match policy {
         IrDestructionPolicy::Default => "default".to_string(),
