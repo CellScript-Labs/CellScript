@@ -3087,8 +3087,10 @@ impl<'a> TypeChecker<'a> {
                     let mut else_env = env.child();
                     self.check_stmt_list(&mut else_env, else_branch, allow_tail_expr)?;
                     let else_returns = self.stmts_always_return(else_branch);
+                    self.merge_if_type_refinements(env, &then_env, then_returns, Some(&else_env), else_returns, if_stmt.span)?;
                     env.merge_branch_linear_states(&then_env, then_returns, Some(&else_env), else_returns, if_stmt.span)?;
                 } else {
+                    self.merge_if_type_refinements(env, &then_env, then_returns, None, false, if_stmt.span)?;
                     env.merge_branch_linear_states(&then_env, then_returns, None, false, if_stmt.span)?;
                 }
                 Ok(())
@@ -3116,6 +3118,99 @@ impl<'a> TypeChecker<'a> {
                 env.merge_existing_type_refinements_from(&while_env);
                 Ok(())
             }
+        }
+    }
+
+    fn merge_if_type_refinements(
+        &self,
+        env: &mut TypeEnv,
+        then_env: &TypeEnv,
+        then_returns: bool,
+        else_env: Option<&TypeEnv>,
+        else_returns: bool,
+        span: Span,
+    ) -> Result<()> {
+        match (then_returns, else_env, else_returns) {
+            (true, Some(_), true) => Ok(()),
+            (true, Some(else_env), false) => {
+                env.merge_existing_type_refinements_from(else_env);
+                Ok(())
+            }
+            (false, Some(_), true) => {
+                env.merge_existing_type_refinements_from(then_env);
+                Ok(())
+            }
+            (false, Some(else_env), false) => self.merge_type_refinements_from_continuing_paths(env, &[then_env, else_env], span),
+            (true, None, _) => Ok(()),
+            (false, None, _) => {
+                let original_env = env.clone();
+                self.merge_type_refinements_from_continuing_paths(env, &[then_env, &original_env], span)
+            }
+        }
+    }
+
+    fn merge_type_refinements_from_continuing_paths(&self, env: &mut TypeEnv, paths: &[&TypeEnv], span: Span) -> Result<()> {
+        if paths.is_empty() {
+            return Ok(());
+        }
+        if paths.len() == 1 {
+            env.merge_existing_type_refinements_from(paths[0]);
+            return Ok(());
+        }
+
+        for name in Self::existing_type_names(env) {
+            let Some(original_ty) = env.lookup(&name).cloned() else {
+                continue;
+            };
+            let mut merged_ty = None::<Type>;
+            let mut changed = false;
+            for path in paths {
+                let Some(path_ty) = path.lookup(&name).cloned() else {
+                    continue;
+                };
+                changed |= !self.types_equal(&original_ty, &path_ty);
+                if let Some(existing) = &merged_ty {
+                    if !self.types_equal(existing, &path_ty) {
+                        return Err(CompileError::new(
+                            format!(
+                                "inconsistent type refinement for '{}' across if branches: {} vs {}",
+                                name,
+                                type_repr(existing),
+                                type_repr(&path_ty)
+                            ),
+                            span,
+                        ));
+                    }
+                } else {
+                    merged_ty = Some(path_ty);
+                }
+            }
+            if changed {
+                if let Some(ty) = merged_ty {
+                    env.update_type(&name, ty);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn existing_type_names(env: &TypeEnv) -> Vec<String> {
+        let mut names = Vec::new();
+        let mut seen = HashSet::new();
+        Self::collect_existing_type_names(env, &mut seen, &mut names);
+        names.sort();
+        names
+    }
+
+    fn collect_existing_type_names(env: &TypeEnv, seen: &mut HashSet<String>, names: &mut Vec<String>) {
+        for name in env.vars.keys() {
+            if seen.insert(name.clone()) {
+                names.push(name.clone());
+            }
+        }
+        if let Some(parent) = env.parent.as_deref() {
+            Self::collect_existing_type_names(parent, seen, names);
         }
     }
 
@@ -3304,14 +3399,41 @@ impl<'a> TypeChecker<'a> {
     fn untyped_vec_constructor_matches_expected(&self, expr: &Expr, actual_ty: &Type, expected_ty: &Type) -> bool {
         matches!(actual_ty, Type::Named(name) if name == "Vec")
             && matches!(expected_ty, Type::Named(name) if self.parse_named_collection_item_type(name).is_some())
-            && matches!(
-                expr,
-                Expr::Call(call)
-                    if matches!(
-                        call.func.as_ref(),
-                        Expr::Identifier(name, _) if matches!(name.as_str(), "Vec::new" | "Vec::with_capacity")
-                    )
-            )
+            && Self::expr_is_untyped_vec_constructor(expr)
+    }
+
+    fn expr_is_untyped_vec_constructor(expr: &Expr) -> bool {
+        match expr {
+            Expr::Call(call) => {
+                matches!(
+                    call.func.as_ref(),
+                    Expr::Identifier(name, _) if matches!(name.as_str(), "Vec::new" | "Vec::with_capacity")
+                )
+            }
+            Expr::Block(stmts, _) => {
+                matches!(stmts.last(), Some(Stmt::Expr(expr)) if Self::expr_is_untyped_vec_constructor(expr))
+            }
+            _ => false,
+        }
+    }
+
+    fn unify_if_expression_branch_types(
+        &self,
+        then_ty: &Type,
+        else_ty: &Type,
+        then_branch: &Expr,
+        else_branch: &Expr,
+    ) -> Option<Type> {
+        if self.types_equal(then_ty, else_ty) {
+            return Some(then_ty.clone());
+        }
+        if self.untyped_vec_constructor_matches_expected(else_branch, else_ty, then_ty) {
+            return Some(then_ty.clone());
+        }
+        if self.untyped_vec_constructor_matches_expected(then_branch, then_ty, else_ty) {
+            return Some(else_ty.clone());
+        }
+        None
     }
 
     fn infer_integer_literal_with_expected_type(&self, value: u64, expected_ty: &Type, span: Span) -> Result<Type> {
@@ -3676,6 +3798,7 @@ impl<'a> TypeChecker<'a> {
                 let mut block_env = env.child();
                 let last_ty = self.infer_tail_block_value(&mut block_env, stmts)?;
                 block_env.check_linear_complete()?;
+                env.merge_existing_type_refinements_from(&block_env);
                 env.merge_existing_linear_states_from(&block_env);
                 Ok(last_ty)
             }
@@ -3708,12 +3831,19 @@ impl<'a> TypeChecker<'a> {
                 let then_ty = self.infer_expr(&mut then_env, &if_expr.then_branch)?;
                 let mut else_env = env.child();
                 let else_ty = self.infer_expr(&mut else_env, &if_expr.else_branch)?;
-                if self.types_equal(&then_ty, &else_ty) {
+                if let Some(result_ty) =
+                    self.unify_if_expression_branch_types(&then_ty, &else_ty, &if_expr.then_branch, &if_expr.else_branch)
+                {
+                    self.merge_type_refinements_from_continuing_paths(env, &[&then_env, &else_env], if_expr.span)?;
                     env.merge_branch_linear_states(&then_env, false, Some(&else_env), false, if_expr.span)?;
-                    Ok(then_ty)
+                    Ok(result_ty)
                 } else {
                     Err(CompileError::new(
-                        format!("if expression branches must have matching types, got {:?} and {:?}", then_ty, else_ty),
+                        format!(
+                            "if expression branches must have matching types, got {} and {}",
+                            type_repr(&then_ty),
+                            type_repr(&else_ty)
+                        ),
                         if_expr.span,
                     ))
                 }
@@ -4107,11 +4237,12 @@ impl<'a> TypeChecker<'a> {
 
         if !self.types_equal(&then_ty, &else_ty) {
             return Err(CompileError::new(
-                format!("if expression branches must have matching types, got {:?} and {:?}", then_ty, else_ty),
+                format!("if expression branches must have matching types, got {} and {}", type_repr(&then_ty), type_repr(&else_ty)),
                 if_stmt.span,
             ));
         }
 
+        self.merge_type_refinements_from_continuing_paths(env, &[&then_env, &else_env], if_stmt.span)?;
         env.merge_branch_linear_states(&then_env, false, Some(&else_env), false, if_stmt.span)?;
         Ok(then_ty)
     }
@@ -7868,6 +7999,115 @@ where
 "#,
         ))
         .expect("Vec::with_capacity should inherit a declared Vec<T> element type");
+    }
+
+    #[test]
+    fn if_statement_merges_matching_vec_refinements() {
+        check(&source_module(
+            r#"
+module types::if_refinement_merge
+
+action good(cond: bool) -> u64
+where
+    let values = Vec::new()
+    if cond {
+        values.push(1)
+    } else {
+        values.push(2)
+    }
+    return values.first()
+"#,
+        ))
+        .expect("matching branch refinements should type the Vec after the if statement");
+    }
+
+    #[test]
+    fn if_statement_rejects_divergent_vec_refinements() {
+        let err = check(&source_module(
+            r#"
+module types::if_refinement_divergence
+
+action bad(cond: bool) -> u64
+where
+    let values = Vec::new()
+    if cond {
+        values.push(1)
+    } else {
+        values.push(true)
+    }
+    return 0
+"#,
+        ))
+        .expect_err("divergent branch refinements must be rejected");
+
+        assert!(
+            err.message.contains("inconsistent type refinement for 'values' across if branches"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn if_statement_rejects_one_sided_vec_refinement() {
+        let err = check(&source_module(
+            r#"
+module types::if_refinement_one_sided
+
+action bad(cond: bool) -> u64
+where
+    let values = Vec::new()
+    if cond {
+        values.push(1)
+    }
+    return 0
+"#,
+        ))
+        .expect_err("one-sided branch refinements must be rejected");
+
+        assert!(
+            err.message.contains("inconsistent type refinement for 'values' across if branches"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn block_expression_merges_existing_vec_refinements() {
+        check(&source_module(
+            r#"
+module types::block_refinement_merge
+
+action good() -> u64
+where
+    let values = Vec::new()
+    {
+        values.push(1)
+    }
+    return values.first()
+"#,
+        ))
+        .expect("definite block expression refinements should type the outer Vec");
+    }
+
+    #[test]
+    fn if_expression_preserves_typed_vec_result_with_empty_constructor_branch() {
+        check(&source_module(
+            r#"
+module types::if_expression_vec_result
+
+action good(cond: bool) -> u64
+where
+    let values = if cond {
+        let branch_values = Vec::new()
+        branch_values.push(1)
+        branch_values
+    } else {
+        Vec::new()
+    }
+    return values.first()
+"#,
+        ))
+        .expect("typed Vec branch should type an empty Vec constructor branch");
     }
 
     #[test]
