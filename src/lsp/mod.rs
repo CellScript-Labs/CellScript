@@ -2522,6 +2522,7 @@ fn file_uri_to_utf8_path(uri: &str) -> Option<Utf8PathBuf> {
     let path = uri.strip_prefix("file://")?;
     let decoded = percent_decode(path)?;
     let candidate = Utf8PathBuf::from(decoded);
+    // AUDIT-FINDING: file URI decoding falls back to the raw, non-canonical candidate when canonicalization fails, so later package-root discovery can observe unresolved user input instead of a stable filesystem identity — severity: MEDIUM — require canonicalization for existing workspace files and represent missing files separately
     std::fs::canonicalize(&candidate).ok().and_then(|path| Utf8PathBuf::from_path_buf(path).ok()).or(Some(candidate))
 }
 
