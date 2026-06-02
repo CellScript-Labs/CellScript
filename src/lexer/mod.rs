@@ -239,6 +239,7 @@ impl<'a> Lexer<'a> {
                     Some(c) => {
                         return Err(CompileError::new(
                             format!("unknown escape sequence: \\{}", c),
+                            // AUDIT-FINDING: escape diagnostics add one byte to self.position for the offending character, which truncates spans for non-ASCII escaped characters and can produce invalid byte ranges — severity: LOW — advance by c.len_utf8() or capture the current character span before building the diagnostic
                             Span::new(self.position, self.position + 1, self.line, self.column),
                         ));
                     }

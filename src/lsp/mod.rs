@@ -2226,6 +2226,7 @@ fn is_ident_char(ch: char) -> bool {
 }
 
 fn word_at_offset(source: &str, offset: usize) -> Option<String> {
+    // AUDIT-FINDING: word extraction slices at caller-provided byte offsets without first checking UTF-8 character boundaries, so any future non-LSP caller passing a raw byte index can panic on multibyte source — severity: MEDIUM — reject non-boundary offsets with source.is_char_boundary before slicing
     if source.is_empty() || offset > source.len() {
         return None;
     }
