@@ -1834,10 +1834,10 @@ pub struct TextDocumentContentChangeEvent {
 ///
 /// Replaces the text in `range` with `new_text`.
 fn apply_incremental_change(content: &str, range: Range, new_text: &str) -> String {
-    let Some(start_offset) = position_to_offset(content, range.start) else {
+    let Some(start_offset) = position_to_offset_strict(content, range.start) else {
         return content.to_string();
     };
-    let Some(end_offset) = position_to_offset(content, range.end) else {
+    let Some(end_offset) = position_to_offset_strict(content, range.end) else {
         return content.to_string();
     };
     if start_offset > end_offset {
@@ -2130,6 +2130,20 @@ fn action_metadata_hover(name: &str, metadata: Option<&crate::CompileMetadata>) 
 }
 
 fn position_to_offset(source: &str, position: Position) -> Option<usize> {
+    position_to_offset_with_boundary(source, position, Utf16BoundaryMode::SnapForward)
+}
+
+fn position_to_offset_strict(source: &str, position: Position) -> Option<usize> {
+    position_to_offset_with_boundary(source, position, Utf16BoundaryMode::Strict)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Utf16BoundaryMode {
+    Strict,
+    SnapForward,
+}
+
+fn position_to_offset_with_boundary(source: &str, position: Position, boundary_mode: Utf16BoundaryMode) -> Option<usize> {
     let mut line = 0u32;
     let mut col = 0u32;
     let mut iter = source.char_indices().peekable();
@@ -2152,7 +2166,10 @@ fn position_to_offset(source: &str, position: Position) -> Option<usize> {
                 return Some(idx + ch.len_utf8());
             }
             if line == position.line && col > position.character {
-                return None;
+                return match boundary_mode {
+                    Utf16BoundaryMode::Strict => None,
+                    Utf16BoundaryMode::SnapForward => Some(idx + ch.len_utf8()),
+                };
             }
         }
     }
@@ -2558,7 +2575,8 @@ mod tests {
 
         assert_eq!(offset_to_position(source, b_offset), Position { line: 0, character: 3 });
         assert_eq!(position_to_offset(source, Position { line: 0, character: 3 }), Some(b_offset));
-        assert_eq!(position_to_offset(source, Position { line: 0, character: 2 }), None);
+        assert_eq!(position_to_offset(source, Position { line: 0, character: 2 }), Some(b_offset));
+        assert_eq!(position_to_offset_strict(source, Position { line: 0, character: 2 }), None);
         assert_eq!(offset_to_position(source, beta_offset), Position { line: 1, character: 0 });
         assert_eq!(position_to_offset(source, Position { line: 1, character: 1 }), Some(beta_offset + 'β'.len_utf8()));
     }
