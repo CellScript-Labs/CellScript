@@ -4690,6 +4690,7 @@ impl<'a> TypeChecker<'a> {
 
     fn initializer_types_equal(&self, actual: &Type, expected: &Type) -> bool {
         self.types_equal(actual, expected)
+            // AUDIT-FINDING: untyped `Vec` is accepted as any `Vec<T>` at initializer boundaries without proving the value is a fresh empty constructor, so a value with lost element provenance can satisfy a typed collection field — severity: MEDIUM — restrict this compatibility to syntactically fresh empty constructors or carry an explicit unknown-empty collection type
             || matches!((actual, expected), (Type::Named(actual), Type::Named(expected)) if actual == "Vec" && expected.starts_with("Vec<"))
     }
 
@@ -5985,6 +5986,7 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn hash_byte32_types_compatible(left: &Type, right: &Type) -> bool {
+        // AUDIT-FINDING: equality permits `Hash` and `[u8; 32]` as compatible solely by width, creating an implicit semantic subtype relation not shared by assignments, calls, or field initializers — severity: MEDIUM — require explicit casts/conversion helpers or model fixed-byte hashes as a distinct newtype relation
         matches!(
             (left, right),
             (Type::Hash, Type::Array(elem, 32)) | (Type::Array(elem, 32), Type::Hash) if **elem == Type::U8
@@ -6377,6 +6379,7 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn is_address_like_type(ty: &Type) -> bool {
+        // AUDIT-FINDING: transfer and lock-target checks classify `Hash` as address-like because both are 32 bytes, allowing semantically non-address hashes to pass destination validation — severity: HIGH — split address-like from byte32-like types and require explicit address construction for transfer/lock destinations
         matches!(ty, Type::Address | Type::Hash)
     }
 
