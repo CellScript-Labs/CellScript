@@ -360,6 +360,7 @@ impl<'a> Parser<'a> {
                                     _ => return Err(CompileError::new("expected integer estimated_cycles", self.current().span)),
                                 };
                             }
+                            // AUDIT-FINDING: scheduler_hint metadata silently ignores unknown names, allowing misspelled or malformed scheduler policy to parse as a valid attribute — severity: MEDIUM — reject unrecognised scheduler hint keys with a diagnostic at the key span
                             _ => {}
                         }
 
@@ -2476,6 +2477,7 @@ impl<'a> Parser<'a> {
                 self.advance();
                 self.skip_newlines();
             } else {
+                // AUDIT-FINDING: create field lists continue after a missing comma, so `field: value next: value` is accepted as two fields instead of a syntax error — severity: MEDIUM — require a comma, newline-sensitive terminator, or closing brace after each field
                 self.skip_newlines();
             }
         }
@@ -2774,6 +2776,7 @@ impl<'a> Parser<'a> {
             if self.check(&TokenKind::Comma) {
                 self.advance();
             }
+            // AUDIT-FINDING: generic field initializer lists do not require a separator before the next field, so malformed adjacent initializers can be parsed silently — severity: MEDIUM — enforce a comma or closing brace after each initializer
             self.skip_newlines();
         }
         self.expect(TokenKind::RBrace)?;
@@ -3046,6 +3049,7 @@ impl<'a> Parser<'a> {
             if self.check(&TokenKind::Comma) {
                 self.advance();
             }
+            // AUDIT-FINDING: struct initializers accept adjacent fields without a comma, matching the broader field-list parser gap and weakening parse-time malformed-input rejection — severity: MEDIUM — share a strict field-list parser that requires separators
             self.skip_newlines();
         }
 
@@ -3086,6 +3090,7 @@ impl<'a> Parser<'a> {
                 let end = self.current().span.start.max(block_span.end);
                 Expr::Block(stmts, Span::new(block_span.start, end, block_span.line, block_span.column))
             };
+            // AUDIT-FINDING: match arm span is captured after parse_block, so it points at the following comma/brace token rather than covering the pattern and block — severity: LOW — capture arm start before the pattern and combine it with the parsed block span
             let arm_span = self.current().span;
             arms.push(MatchArm { pattern, value, span: arm_span });
             self.skip_newlines();
