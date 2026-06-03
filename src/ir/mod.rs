@@ -8,6 +8,10 @@ use crate::syscalls::{
 use crate::types::lifecycle_effect_keys;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
+const MAX_IR_EXPR_RECURSION_DEPTH: u32 = 4096;
+const IR_STACK_RED_ZONE: usize = 64 * 1024;
+const IR_STACK_GROWTH: usize = 8 * 1024 * 1024;
+
 #[derive(Debug, Clone)]
 pub struct IrModule {
     pub name: String,
@@ -511,6 +515,7 @@ pub struct IrGenerator {
     function_return_types: HashMap<String, Option<IrType>>,
     external_function_return_types: HashMap<String, Option<IrType>>,
     errors: Vec<CompileError>,
+    expr_recursion_depth: u32,
 }
 
 struct LoweredExpr {
@@ -552,6 +557,7 @@ impl IrGenerator {
             function_return_types: HashMap::new(),
             external_function_return_types: HashMap::new(),
             errors: Vec::new(),
+            expr_recursion_depth: 0,
         }
     }
 
@@ -2047,6 +2053,30 @@ impl IrGenerator {
     }
 
     fn lower_expr(
+        &mut self,
+        expr: &Expr,
+        current: BlockId,
+        blocks: &mut Vec<IrBlock>,
+        vars: &mut HashMap<String, IrVar>,
+    ) -> LoweredExpr {
+        if self.expr_recursion_depth >= MAX_IR_EXPR_RECURSION_DEPTH {
+            self.record_error(
+                format!(
+                    "IR expression recursion limit exceeded while lowering nested expression (limit {})",
+                    MAX_IR_EXPR_RECURSION_DEPTH
+                ),
+                expr.span(),
+            );
+            return Self::poisoned_expr(Some(current));
+        }
+
+        self.expr_recursion_depth += 1;
+        let lowered = stacker::maybe_grow(IR_STACK_RED_ZONE, IR_STACK_GROWTH, || self.lower_expr_inner(expr, current, blocks, vars));
+        self.expr_recursion_depth -= 1;
+        lowered
+    }
+
+    fn lower_expr_inner(
         &mut self,
         expr: &Expr,
         current: BlockId,
@@ -8387,6 +8417,14 @@ mod tests {
         generate(&ast)
     }
 
+    fn left_deep_add_expr(depth: usize, span: Span) -> Expr {
+        let mut expr = Expr::Integer(1, span);
+        for _ in 0..depth {
+            expr = Expr::Binary(BinaryExpr { op: BinaryOp::Add, left: Box::new(expr), right: Box::new(Expr::Integer(1, span)), span });
+        }
+        expr
+    }
+
     fn first_action_body_mut(ir: &mut IrModule) -> &mut IrBody {
         ir.items
             .iter_mut()
@@ -8616,6 +8654,25 @@ where\n\
             blocks[0].instructions.iter().all(|instruction| !matches!(instruction, IrInstruction::Binary { .. })),
             "poisoned operands must not be folded into a real binary instruction: {:#?}",
             blocks[0].instructions
+        );
+    }
+
+    #[test]
+    fn ir_lowering_rejects_deep_expression_before_stack_overflow() {
+        let span = Span::new(1, 28, 1, 1);
+        let expr = left_deep_add_expr(MAX_IR_EXPR_RECURSION_DEPTH as usize + 1, span);
+        let mut generator = IrGenerator::new("ir::deep".to_string());
+        let mut blocks = vec![IrBlock::synthetic(BlockId(0), Vec::new(), IrTerminator::Return(None))];
+        let mut vars = HashMap::new();
+
+        let lowered = generator.lower_expr(&expr, BlockId(0), &mut blocks, &mut vars);
+
+        assert_eq!(lowered.current, Some(BlockId(0)));
+        assert!(IrGenerator::is_poisoned_operand(&lowered.operand), "unexpected operand: {:?}", lowered.operand);
+        assert!(
+            generator.errors.iter().any(|error| error.message.contains("IR expression recursion limit exceeded")),
+            "expected IR recursion diagnostic, got: {:#?}",
+            generator.errors
         );
     }
 

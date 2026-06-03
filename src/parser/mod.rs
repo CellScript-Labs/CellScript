@@ -2,10 +2,9 @@ use crate::ast::*;
 use crate::error::{CompileError, Result, Span};
 use crate::lexer::token::{Token, TokenKind};
 
-// Each syntactic nesting level crosses several recursive-descent frames.
-// Keep this below the point where the default Rust test stack can abort before
-// the guard has a chance to return a controlled parser error.
-const MAX_PARSE_RECURSION_DEPTH: u16 = 32;
+const MAX_PARSE_RECURSION_DEPTH: u16 = 128;
+const PARSER_STACK_RED_ZONE: usize = 64 * 1024;
+const PARSER_STACK_GROWTH: usize = 1024 * 1024;
 
 pub struct Parser<'a> {
     tokens: &'a [Token],
@@ -58,7 +57,7 @@ impl<'a> Parser<'a> {
         }
 
         self.recursion_depth += 1;
-        let result = f(self);
+        let result = stacker::maybe_grow(PARSER_STACK_RED_ZONE, PARSER_STACK_GROWTH, || f(self));
         self.recursion_depth -= 1;
         result
     }

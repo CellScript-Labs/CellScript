@@ -4,6 +4,10 @@ use crate::resolve::{FunctionDef, ModuleResolver, TypeDef};
 use crate::type_graph::{visit_type_dependency_graph, TypeDependencyEdge};
 use std::collections::{HashMap, HashSet};
 
+const MAX_TYPE_EXPR_RECURSION_DEPTH: u32 = 4096;
+const TYPECHECK_STACK_RED_ZONE: usize = 64 * 1024;
+const TYPECHECK_STACK_GROWTH: usize = 8 * 1024 * 1024;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CallableKind {
     Action,
@@ -351,6 +355,7 @@ pub struct TypeChecker<'a> {
     current_callable: Option<CallableKind>,
     current_return_type: Option<Option<Type>>,
     primitive_strict: bool,
+    expr_recursion_depth: u32,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -484,6 +489,7 @@ impl<'a> TypeChecker<'a> {
             current_callable: None,
             current_return_type: None,
             primitive_strict: false,
+            expr_recursion_depth: 0,
         }
     }
 
@@ -507,6 +513,216 @@ impl<'a> TypeChecker<'a> {
         Self::with_resolver(resolver, current_module).with_primitive_strict(primitive_strict)
     }
 
+    fn validate_module_expr_recursion_budget(&self, module: &Module) -> Result<()> {
+        enum Frame<'a> {
+            Expr(&'a Expr, u32),
+            Stmt(&'a Stmt, u32),
+        }
+
+        let mut stack = Vec::new();
+        for item in &module.items {
+            match item {
+                Item::Const(const_def) => stack.push(Frame::Expr(&const_def.value, 1)),
+                Item::Invariant(invariant) => {
+                    for expr in &invariant.asserts {
+                        stack.push(Frame::Expr(expr, 1));
+                    }
+                }
+                Item::Action(action) => {
+                    for stmt in &action.body {
+                        stack.push(Frame::Stmt(stmt, 1));
+                    }
+                }
+                Item::Function(function) => {
+                    for stmt in &function.body {
+                        stack.push(Frame::Stmt(stmt, 1));
+                    }
+                }
+                Item::Lock(lock) => {
+                    for stmt in &lock.body {
+                        stack.push(Frame::Stmt(stmt, 1));
+                    }
+                }
+                Item::Resource(_)
+                | Item::Shared(_)
+                | Item::Receipt(_)
+                | Item::Struct(_)
+                | Item::Flow(_)
+                | Item::Enum(_)
+                | Item::Use(_) => {}
+            }
+        }
+
+        while let Some(frame) = stack.pop() {
+            match frame {
+                Frame::Stmt(stmt, depth) => {
+                    if depth > MAX_TYPE_EXPR_RECURSION_DEPTH {
+                        return Err(CompileError::new(
+                            format!(
+                                "type checker expression recursion limit exceeded while analysing nested expression (limit {})",
+                                MAX_TYPE_EXPR_RECURSION_DEPTH
+                            ),
+                            stmt_span(stmt),
+                        ));
+                    }
+                    let child_depth = depth.saturating_add(1);
+                    match stmt {
+                        Stmt::Let(let_stmt) => stack.push(Frame::Expr(&let_stmt.value, child_depth)),
+                        Stmt::Expr(expr) | Stmt::Return(Some(expr)) => stack.push(Frame::Expr(expr, child_depth)),
+                        Stmt::Return(None) => {}
+                        Stmt::If(if_stmt) => {
+                            stack.push(Frame::Expr(&if_stmt.condition, child_depth));
+                            for stmt in &if_stmt.then_branch {
+                                stack.push(Frame::Stmt(stmt, child_depth));
+                            }
+                            if let Some(else_branch) = &if_stmt.else_branch {
+                                for stmt in else_branch {
+                                    stack.push(Frame::Stmt(stmt, child_depth));
+                                }
+                            }
+                        }
+                        Stmt::For(for_stmt) => {
+                            stack.push(Frame::Expr(&for_stmt.iterable, child_depth));
+                            for stmt in &for_stmt.body {
+                                stack.push(Frame::Stmt(stmt, child_depth));
+                            }
+                        }
+                        Stmt::While(while_stmt) => {
+                            stack.push(Frame::Expr(&while_stmt.condition, child_depth));
+                            for stmt in &while_stmt.body {
+                                stack.push(Frame::Stmt(stmt, child_depth));
+                            }
+                        }
+                    }
+                }
+                Frame::Expr(expr, depth) => {
+                    if depth > MAX_TYPE_EXPR_RECURSION_DEPTH {
+                        return Err(CompileError::new(
+                            format!(
+                                "type checker expression recursion limit exceeded while analysing nested expression (limit {})",
+                                MAX_TYPE_EXPR_RECURSION_DEPTH
+                            ),
+                            expr_span(expr),
+                        ));
+                    }
+                    let child_depth = depth.saturating_add(1);
+                    match expr {
+                        Expr::Integer(..)
+                        | Expr::Bool(..)
+                        | Expr::String(..)
+                        | Expr::ByteString(..)
+                        | Expr::Identifier(..)
+                        | Expr::ReadRef(_)
+                        | Expr::Preserve(_) => {}
+                        Expr::Assign(assign) => {
+                            stack.push(Frame::Expr(&assign.target, child_depth));
+                            stack.push(Frame::Expr(&assign.value, child_depth));
+                        }
+                        Expr::Binary(binary) => {
+                            stack.push(Frame::Expr(&binary.left, child_depth));
+                            stack.push(Frame::Expr(&binary.right, child_depth));
+                        }
+                        Expr::Unary(unary) => stack.push(Frame::Expr(&unary.expr, child_depth)),
+                        Expr::Call(call) => {
+                            stack.push(Frame::Expr(&call.func, child_depth));
+                            for arg in &call.args {
+                                stack.push(Frame::Expr(arg, child_depth));
+                            }
+                        }
+                        Expr::FieldAccess(field) => stack.push(Frame::Expr(&field.expr, child_depth)),
+                        Expr::Index(index) => {
+                            stack.push(Frame::Expr(&index.expr, child_depth));
+                            stack.push(Frame::Expr(&index.index, child_depth));
+                        }
+                        Expr::Create(create) => {
+                            for (_, expr) in &create.fields {
+                                stack.push(Frame::Expr(expr, child_depth));
+                            }
+                            if let Some(lock) = &create.lock {
+                                stack.push(Frame::Expr(lock, child_depth));
+                            }
+                        }
+                        Expr::Consume(consume) => stack.push(Frame::Expr(&consume.expr, child_depth)),
+                        Expr::Transfer(transfer) => {
+                            stack.push(Frame::Expr(&transfer.expr, child_depth));
+                            stack.push(Frame::Expr(&transfer.to, child_depth));
+                        }
+                        Expr::Destroy(destroy) => stack.push(Frame::Expr(&destroy.expr, child_depth)),
+                        Expr::Claim(claim) => stack.push(Frame::Expr(&claim.receipt, child_depth)),
+                        Expr::Settle(settle) => stack.push(Frame::Expr(&settle.expr, child_depth)),
+                        Expr::CreateUnique(create) => {
+                            for (_, expr) in &create.fields {
+                                stack.push(Frame::Expr(expr, child_depth));
+                            }
+                            if let Some(lock) = &create.lock {
+                                stack.push(Frame::Expr(lock, child_depth));
+                            }
+                        }
+                        Expr::ReplaceUnique(replace) => {
+                            stack.push(Frame::Expr(&replace.expr, child_depth));
+                            for (_, expr) in &replace.fields {
+                                stack.push(Frame::Expr(expr, child_depth));
+                            }
+                        }
+                        Expr::Assert(assert_expr) => {
+                            stack.push(Frame::Expr(&assert_expr.condition, child_depth));
+                            stack.push(Frame::Expr(&assert_expr.message, child_depth));
+                        }
+                        Expr::Require(require) => {
+                            stack.push(Frame::Expr(&require.condition, child_depth));
+                            if let Some(message) = &require.message {
+                                stack.push(Frame::Expr(message, child_depth));
+                            }
+                        }
+                        Expr::RequireBlock(require_block) => {
+                            for expr in &require_block.expressions {
+                                stack.push(Frame::Expr(expr, child_depth));
+                            }
+                        }
+                        Expr::Block(stmts, _) => {
+                            for stmt in stmts {
+                                stack.push(Frame::Stmt(stmt, child_depth));
+                            }
+                        }
+                        Expr::Tuple(elems, _) | Expr::Array(elems, _) => {
+                            for elem in elems {
+                                stack.push(Frame::Expr(elem, child_depth));
+                            }
+                        }
+                        Expr::If(if_expr) => {
+                            stack.push(Frame::Expr(&if_expr.condition, child_depth));
+                            stack.push(Frame::Expr(&if_expr.then_branch, child_depth));
+                            stack.push(Frame::Expr(&if_expr.else_branch, child_depth));
+                        }
+                        Expr::Cast(cast) => stack.push(Frame::Expr(&cast.expr, child_depth)),
+                        Expr::Range(range) => {
+                            stack.push(Frame::Expr(&range.start, child_depth));
+                            stack.push(Frame::Expr(&range.end, child_depth));
+                        }
+                        Expr::StructInit(init) => {
+                            for (_, expr) in &init.fields {
+                                stack.push(Frame::Expr(expr, child_depth));
+                            }
+                        }
+                        Expr::Match(match_expr) => {
+                            stack.push(Frame::Expr(&match_expr.expr, child_depth));
+                            for arm in &match_expr.arms {
+                                stack.push(Frame::Expr(&arm.value, child_depth));
+                            }
+                        }
+                        Expr::StdlibCall(call) => {
+                            for arg in &call.args {
+                                stack.push(Frame::Expr(arg, child_depth));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     pub fn check_module(&mut self, module: &Module) -> Result<()> {
         if self.current_module.is_none() {
             self.current_module = Some(module.name.clone());
@@ -517,6 +733,7 @@ impl<'a> TypeChecker<'a> {
                 module.span,
             ));
         }
+        self.validate_module_expr_recursion_budget(module)?;
         self.validate_primitive_strict_capabilities(module)?;
         self.reject_imports_without_resolver(module)?;
         let mut seen_symbols = HashSet::new();
@@ -3512,7 +3729,29 @@ impl<'a> TypeChecker<'a> {
         self.infer_expr(env, &Expr::Array(elems.to_vec(), span))
     }
 
+    fn with_expr_recursion_guard<T>(&mut self, span: Span, f: impl FnOnce(&mut Self) -> Result<T>) -> Result<T> {
+        if self.expr_recursion_depth >= MAX_TYPE_EXPR_RECURSION_DEPTH {
+            return Err(CompileError::new(
+                format!(
+                    "type checker expression recursion limit exceeded while analysing nested expression (limit {})",
+                    MAX_TYPE_EXPR_RECURSION_DEPTH
+                ),
+                span,
+            ));
+        }
+
+        self.expr_recursion_depth += 1;
+        let result = stacker::maybe_grow(TYPECHECK_STACK_RED_ZONE, TYPECHECK_STACK_GROWTH, || f(self));
+        self.expr_recursion_depth -= 1;
+        result
+    }
+
     fn infer_expr(&mut self, env: &mut TypeEnv, expr: &Expr) -> Result<Type> {
+        let span = expr_span(expr);
+        self.with_expr_recursion_guard(span, |this| this.infer_expr_inner(env, expr))
+    }
+
+    fn infer_expr_inner(&mut self, env: &mut TypeEnv, expr: &Expr) -> Result<Type> {
         self.validate_expr_allowed_in_current_callable(expr)?;
         match expr {
             Expr::Integer(..) => Ok(Type::U64),
@@ -7356,6 +7595,20 @@ mod tests {
     fn source_module(source: &str) -> Module {
         let tokens = lexer::lex(source).unwrap();
         parser::parse(&tokens).unwrap()
+    }
+
+    fn left_associative_addition_source(term_count: usize) -> String {
+        let expr = std::iter::repeat_n("1", term_count).collect::<Vec<_>>().join(" + ");
+        format!("module test\n\naction test() -> u64\nwhere\n    return {}\n", expr)
+    }
+
+    #[test]
+    fn type_checker_rejects_deep_expression_before_stack_overflow() {
+        let source = left_associative_addition_source(MAX_TYPE_EXPR_RECURSION_DEPTH as usize + 2);
+        let module = source_module(&source);
+        let err = check(&module).unwrap_err();
+
+        assert!(err.message.contains("type checker expression recursion limit exceeded"), "{}", err.message);
     }
 
     #[test]
