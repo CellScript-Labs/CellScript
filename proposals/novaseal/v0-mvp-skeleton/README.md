@@ -37,8 +37,9 @@
 The package manifest declares `canonical_schema = "NovaSealCanonicalV0"` and
 pins the schema hash for `schemas/nova_seal_canonical_envelope_v0.schema`. A
 downstream package must declare `conforms_to = "NovaSealCanonicalV0"`, pin the
-same `canonical_schema_hash`, and pass the deterministic conformance gate before
-it may be treated as a NovaSeal profile rather than a NovaSeal-inspired package.
+same `canonical_schema_hash`, and pass the deterministic compiler certification
+gate `cellc certify --plugin novaseal-profile-v0` before it may be treated as a
+NovaSeal profile rather than a NovaSeal-inspired package.
 
 This skeleton deliberately **excludes**:
 - Agreement Profile semantics (roadmap v0.2; implemented as a separate package)

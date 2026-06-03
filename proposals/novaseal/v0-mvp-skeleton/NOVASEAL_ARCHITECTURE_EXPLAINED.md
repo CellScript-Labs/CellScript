@@ -5,7 +5,7 @@ NovaSeal starts from a narrower observation: Bitcoin keys and UTXOs provide wide
 
 The working split is that Bitcoin-side authority signs the intent, CKB enforces Cell state, and CellScript packages the evidence.
 
-Rather than acting as an asset issuance protocol, trustless bridge, native Lightning transport layer, or RGB++ replacement, NovaSeal is designed to be a **Bitcoin-authorised CKB object framework written in CellScript**. In plain terms, it lets Bitcoin-side approval control a CKB Cell transition.
+Rather than acting as an asset issuance protocol, trustless bridge, or RGB++ replacement, NovaSeal is designed to be a **Bitcoin-authorised CKB object framework written in CellScript**. In plain terms, it lets Bitcoin-side approval control a CKB Cell transition.
 
 ### Glossary:
 
@@ -18,7 +18,8 @@ Some terms below are NovaSeal-specific. We use them in this narrow sense:
 | ProofReceipt      | The receipt written into the contract source as an **explicit receipt output**. `cellc` produces the checks that make the transaction include that receipt in the right output slot |
 | Canonical schema  | The shared NovaSeal envelope, encoding rule and schema hash that every profile must commit to                                                                                       |
 | Profile           | An upper level package layer that gives the canonical NovaSeal rules a concrete meaning, such as an agreement                                                                       |
-| Conformance gate  | The deterministic manifest, schema-hash, source and evidence check that decides whether a package may claim to be a NovaSeal profile                                                |
+| Certification gate | The deterministic compiler check that decides whether a package may claim to be a NovaSeal profile                                                                                  |
+| Certification module | The Rust implementation inside `cellc` that evaluates NovaSeal manifest, schema, source and evidence files for a profile                                                          |
 | Terminal path     | One of the agreed ending branches of a contract, such as repay or claim                                                                                                             |
 | Proof plan        | A CellScript package's list of assumptions, checks and evidence obligations, emitted by `cellc`                                                                                     |
 | Audit bundle      | The generated review file that collects the package facts and evidence, emitted by `cellc`                                                                                          |
@@ -48,7 +49,7 @@ In v0, Bitcoin authority means key or multisig authorisation. It lets a BTC key 
 
 ## 3. NovaSeal Canonical
 
-NovaSeal should be treated as a protocol family, not as a monolithic runtime core contract. The shared anchor is `NovaSealCanonicalV0`: a canonical schema, encoding rule and conformance target. Its job is to define the common envelope that every NovaSeal profile must commit to: authority, action, subject, nonce, expiry, policy hash, state commitment, profile body hash and payout commitment.
+NovaSeal should be treated as a protocol family, not as a monolithic runtime core contract. The shared anchor is `NovaSealCanonicalV0`: a canonical schema, encoding rule and certification target. Its job is to define the common envelope that every NovaSeal profile must commit to: authority, action, subject, nonce, expiry, policy hash, state commitment, profile body hash and payout commitment.
 
 Canonical should not know what a borrower or lender is. It should not carry interest rate logic, liquidation rules, collateral ratios, repayment schedules or product names. Once those ideas enter the canonical layer, NovaSeal becomes a lending protocol by accident. Canonical stays focused on the common signed envelope and evidence obligations; profiles describe the object being moved.
 
@@ -65,6 +66,8 @@ Canonical should not know what a borrower or lender is. It should not carry inte
 Package boundaries matter. NovaSeal should be inspectable as a package, not only as a compiled contract. A reviewer should be able to see the schemas, fixtures, receipts, proof plan and assumptions that make the object meaningful.
 
 The current v0 skeleton declares this boundary in its manifest as `canonical_schema = "NovaSealCanonicalV0"` and pins the schema hash of `schemas/nova_seal_canonical_envelope_v0.schema`. That package is a canonical example and fixture baseline. It is not a runtime boss contract that Agreement must call.
+
+This is an intentional naming choice. `Canonical` is the shared rule anchor; it is not a monolithic `Core` contract. If the base package became a runtime supervisor that every profile had to call, NovaSeal would inherit unnecessary chain machinery and the first profile would start dictating the shape of later ones. The canonical layer stays as schema, envelope and evidence discipline. Profiles stay responsible for their own runtime state machines.
 
 ## 4. Seal and Authority Modes
 
@@ -116,7 +119,7 @@ flowchart TD
     A ==> C
 ```
 
-This prevents scope creep into specific verticals such as lending, RWA or Bitcoin assets, keeping the core framework auditable and composable.
+This prevents scope creep into specific verticals such as lending, RWA or Bitcoin assets, keeping the framework auditable and composable.
 
 Profiles do not call a separate NovaSeal Core runtime action. The constraint is schema and package level: a profile must declare `conforms_to = "NovaSealCanonicalV0"`, pin `canonical_schema_hash`, commit its signed intent to `NovaSealCanonicalEnvelopeV0`, and pass the deterministic compiler gate `cellc certify --plugin novaseal-profile-v0`. The compiler owns the certification entry and report verification; NovaSeal-specific policy is implemented by the built-in Rust certification module behind that entry. The gate checks the manifest, schema hash, required source surface, wallet signing vectors, runtime verifier pinning and live/devnet evidence. If that check fails, the package may be NovaSeal-inspired, but it is not a NovaSeal profile. A gentleman may wear a top hat; the gate still checks the ticket.
 
@@ -133,6 +136,50 @@ flowchart LR
 This is close in spirit to RGB's strict-encoding discipline: do not trust a compiler label when a schema hash, canonical preimage and recomputable digest can be checked. NovaSeal keeps CKB runtime enforcement, but borrows the habit of making type commitments explicit.
 
 NovaSeal does not copy RGB's schema implementation. The current gate uses a smaller CellScript-native rule: hash the normalised canonical schema lines, require exact canonical field order, bind that hash in both manifests, and require the Agreement signed intent to carry a runtime-checked `canonical_envelope_hash`. This is deliberately less general than RGB Strict Types, but it removes the weak "manifest string only" attack. The compiler gate adds no chain-facing runtime machinery; it is a deterministic certification surface for public profile claims.
+
+### Compiler Certification Module
+
+`--plugin novaseal-profile-v0` is the public selector for the certification policy. It does not mean that `cellc` shells out to a Python plugin or loads arbitrary external code. The current implementation is compiled into the CellScript CLI as `src/cli/novaseal_certification.rs`.
+
+The certification module writes and verifies three report layers:
+
+| Report | Purpose |
+| --- | --- |
+| `target/novaseal-production-gates.json` | NovaSeal local production-prep gate, profile certification result, and external-attestation blockers |
+| `target/novaseal-devnet-stateful-acceptance.json` | Aggregated core plus Agreement live/devnet stateful acceptance evidence |
+| `target/cellscript-certification/novaseal-profile-v0.json` | Public `cellc certify` summary, plugin implementation hash, report hash, checks and status |
+
+This gives profile certification production-grade local meaning without making a production-mainnet claim by accident. A package can pass public ecosystem profile certification while still failing `--require-production` until public/shared CellDep pinning and external verifier TCB attestation are supplied. It is a rather British distinction: admitted to the club, but still waiting for the paperwork before touching the silver.
+
+The v0 skeleton is also a deliberate stress test of CellScript as a package-first contract system. It exercises typed schemas, signed intents, generated receipts, proof plans, audit bundles, devnet acceptance evidence and deterministic certification in one coherent workflow. The result is not a production-mainnet claim, but it is stronger than a toy demo: it demonstrates quasi-production local readiness and a proof-plan discipline that external builders can inspect, reproduce and challenge.
+
+### Profile Freedom
+
+Canonical conformance is a narrow obligation, not a full product template. A profile must bind itself to the canonical envelope and pass the certification gate, but it is free to define its own:
+
+| Free profile surface | Required NovaSeal boundary |
+| --- | --- |
+| State machine and terminal paths | Signed intent commits to `NovaSealCanonicalEnvelopeV0` |
+| Profile body schema | Body hash is included in the canonical envelope |
+| Payout model | Payout commitment hash is included in the canonical envelope |
+| Runtime checks | Manifest, source and live/devnet evidence pass certification |
+| Wallet display | Signing vectors expose the canonical envelope hash and profile fields |
+
+This keeps Agreement from becoming the hidden default for all future profiles. A future fungible, receipt, RWA, Fiber-facing or BTC-commitment profile can carry different business meaning while still sharing the NovaSeal certification boundary.
+
+### Compiler-Attack Boundary
+
+The certification gate cannot make `cellc` magically incorruptible; no serious architecture document should make that sort of claim before lunch. It reduces the specific profile-claim attack surface by making the certification output reproducible from checked-in inputs:
+
+- the canonical schema hash is recomputed from normalised schema lines,
+- the expected canonical field order is checked,
+- the profile manifest must pin the same schema hash and certification command,
+- required source patterns and fixture sets are checked,
+- wallet vectors, invariant matrix, live/devnet reports and verifier pins are checked,
+- the summary report records the Rust implementation path and implementation hash,
+- the gate avoids external Python adapter execution for the production-prep decision.
+
+The remaining trust boundary is explicit: users still trust the `cellc` binary, the reviewed Rust certification module, and the evidence files being certified. That is a smaller and more reviewable surface than a manifest string plus an external script, but it is not a claim that compilers have become saints.
 
 ## 6. Agreement Profile: Terminal Paths
 
@@ -206,13 +253,11 @@ Reference boundary:
 
 The reference is conceptual and architectural. No RGB, Strict Types, or RGB++ code is vendored into this package, and the NovaSeal schema gate is intentionally CellScript-native and compiler-hosted through `src/cli/novaseal_certification.rs`.
 
-## 8. Fiber and Lightning
+## 8. Fiber
 
-NovaSeal considers Fiber in its design direction, but it does not integrate with Fiber yet and is not Lightning native. Because Fiber is CKB-native, it is the channel system to test once a future NovaSeal object has a balance-bearing or xUDT-compatible profile. A future profile could move payment legs, position receipts or liquidity paths towards shapes that Fiber can evaluate for admission, provided the object model is kept simple enough for channel use.
+NovaSeal considers Fiber in its design direction, but it does not integrate with Fiber yet. Because Fiber is CKB-native, it is the channel system to test once a future NovaSeal object has a balance-bearing or xUDT-compatible profile. A future profile could move payment legs, position receipts or liquidity paths towards shapes that Fiber can evaluate for admission, provided the object model is kept simple enough for channel use.
 
-Lightning remains relevant as a comparison point, payment rail, or part of a swap or coordination flow. It should not be described as the native asset transport layer for NovaSeal.
-
-**Description boundary: Fiber considered, Lightning adjacent; no Fiber or Lightning integration yet.**
+**Description boundary: Fiber considered; no Fiber integration yet.**
 
 ```mermaid
 flowchart LR
@@ -224,9 +269,6 @@ flowchart LR
 
     G[Agreement Profile] ==> H[Payment legs / position receipts]
     H ==> C
-
-    I[Lightning] ==> J[Swap, rail or comparison]
-    J ==> C
 ```
 
 NovaSeal should design balance-bearing profiles so later Fiber admission testing has concrete layouts to evaluate. Arbitrary NovaSeal state should not be described as channel-ready.
@@ -249,7 +291,7 @@ We want the developer experience to be package first. We should not overclaim th
 novaseal/
   Cell.toml
   src/
-    core/
+    canonical/
     profiles/
   schemas/
   fixtures/
@@ -268,7 +310,7 @@ For the Agreement profile, devnet acceptance now includes conformance evidence. 
 
 NovaSeal v0 should claim only what the current evidence supports. It can say that BTC key or multisig authority can authorise CKB Cell transitions, that CKB can enforce deterministic state movement, that receipts can record outcomes, and that profiles can express specific financial objects.
 
-It should not claim Bitcoin finality, BTC collateral seizure, native Lightning support, trustless bridge semantics, oracle free lending solved, or production mainnet readiness. Those are separate claims, and each needs evidence.
+It should not claim Bitcoin finality, BTC collateral seizure, trustless bridge semantics, oracle free lending solved, or production mainnet readiness. Those are separate claims, and each needs evidence.
 
 | Risk | Boundary |
 | --- | --- |
@@ -276,7 +318,7 @@ It should not claim Bitcoin finality, BTC collateral seizure, native Lightning s
 | Wrong intent signing | Canonical typed intent and clear wallet display are needed |
 | Replay | Nonce, expiry and old Cell binding |
 | Fake verifier | Verifier namespace and artefact pinning are required |
-| Fake profile claim | `conforms_to = "NovaSealCanonicalV0"`, `canonical_schema_hash`, signed canonical envelope commitment and the conformance gate are required |
+| Fake profile claim | `conforms_to = "NovaSealCanonicalV0"`, `canonical_schema_hash`, signed canonical envelope commitment and the compiler certification gate are required |
 | BTC reorg | Not relevant until BTC commitment or SPV profiles |
 | CKB reorg | Wait for CKB maturity |
 | Receipt mismatch | Receipt must be checked or clearly audit only |
