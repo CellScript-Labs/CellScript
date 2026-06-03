@@ -50,7 +50,7 @@ python3 scripts/novaseal_btc_verifier_shell_report.py --pretty
 cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_ckb_vm_harness -- --pretty
 cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_parent_lock_harness -- --pretty
 python3 /home/arthur/a19q3/CellScript/scripts/novaseal_bip340_tcb_review.py --pretty
-python3 /home/arthur/a19q3/CellScript/scripts/novaseal_production_gates.py --pretty
+/home/arthur/a19q3/CellScript/target/debug/cellc certify --plugin novaseal-profile-v0 --json
 ```
 
 Current summary:

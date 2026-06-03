@@ -22,7 +22,10 @@ Agreement Profile now declares:
 
 ```toml
 conforms_to = "NovaSealCanonicalV0"
-canonical_schema_hash = "0x703cef6e07983f8c25f9d3f467aa74246d972a839592c9689418e9785b8b5136"
+canonical_schema_hash = "0xe9a157d0211d63586f2e9334878f8354f87d4786f94aa9e5ea163fed5360aec6"
+conformance_gate = "cellc certify --plugin novaseal-profile-v0"
+certification_plugin = "novaseal-profile-v0"
+certification_report = "target/cellscript-certification/novaseal-profile-v0.json"
 ```
 
 The contract does not call a Core runtime. Instead, `NovaAgreementSignedIntentV0`
@@ -55,6 +58,61 @@ The signed intent must contain the matching `canonical_envelope_hash`. This
 makes Canonical influence the signed and verified Agreement transition without
 forcing Agreement to import or call a separate Core contract. Rather civilised,
 by protocol standards.
+
+The schema-security reference point is RGB Strict Types, but only at the design
+level. Agreement does not use RGB's schema engine, Vesper/STL files, operation
+commitments, or client-side validation flow. The borrowed discipline is narrower:
+
+- a canonical schema hash is computed from normalised schema lines,
+- the manifest pins that schema hash,
+- the gate checks exact canonical field order,
+- the wallet vector exposes the canonical envelope hash,
+- the `.cell` runtime recomputes and checks the same hash before accepting the
+  signed intent.
+
+RGB++ was reviewed as a CKB/Bitcoin binding and lockscript reference, not as a
+schema source. Its public design material describes isomorphic bindings and
+CKB script validation; it does not provide the strict schema machinery used as
+the reference point here.
+
+## Public Certification Gate
+
+The public compiler entry is:
+
+```text
+cellc certify --plugin novaseal-profile-v0
+```
+
+`cellc certify` is the stable compiler-hosted boundary. The NovaSeal-specific
+rules live behind that boundary as the Rust built-in `novaseal-profile-v0`
+certification module, which produces and verifies
+`target/novaseal-production-gates.json`. The public
+ecosystem gate inside that report is:
+
+```text
+agreement_profile_public_ecosystem_certification_v0
+```
+
+The gate is local and deterministic: it does not call an external service, does
+not add a Core runtime dependency, and does not add new on-chain machinery.
+
+The gate passes only when all local certification evidence is present:
+
+| Requirement | Evidence |
+| --- | --- |
+| Canonical conformance | manifest `conforms_to`, normalised canonical schema hash, exact canonical field order, source-level canonical envelope checks |
+| Profile schema set | exact checked-in Agreement schema files and SHA-256 hashes in the report |
+| Fixture set | exact checked-in Agreement fixture files |
+| Signing boundary | originate, repay and claim wallet vectors with fixed-width signed intent bytes, signer sets, BIP340 message hashes and displayed `canonical_envelope_hash` |
+| Runtime behaviour | fresh live devnet originate -> repay and originate -> claim evidence |
+| Negative cases | live dry-run rejects for wrong signatures, wrong asset kind, wrong payout, early claim and payout binding failures |
+| TCB status | local BIP340 verifier review bundle plus manifest verifier pinning |
+
+This is enough for **public ecosystem profile certification of the local
+package**. A production statement still requires the external gates in the same
+report: public/shared CellDep pinning and external BIP340 verifier TCB
+attestation. This distinction is deliberate; otherwise the certification would
+be wearing borrowed robes.
 
 ## v0 Shape
 

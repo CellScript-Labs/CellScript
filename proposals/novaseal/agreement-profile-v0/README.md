@@ -116,7 +116,7 @@ python3 scripts/nova_agreement_tx_shape_harness.py --pretty
 /home/arthur/a19q3/CellScript/target/debug/cellc harness/ckb_vm/always_success_lock.cell --target riscv64-elf --target-profile ckb --entry-lock always_success -o target/nova-agreement-always-success-lock.elf
 cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_agreement_tx_harness -- --pretty
 python3 /home/arthur/a19q3/CellScript/scripts/novaseal_wallet_signing_vectors.py --pretty
-python3 /home/arthur/a19q3/CellScript/scripts/novaseal_production_gates.py --pretty
+/home/arthur/a19q3/CellScript/target/debug/cellc certify --plugin novaseal-profile-v0 --json
 /home/arthur/a19q3/CellScript/scripts/novaseal_devnet_stateful_acceptance.sh --pretty --report-only
 ```
 

@@ -25,6 +25,13 @@
 - Resolved transaction harness runs deterministic CKB transactions through
   `ckb-script` and `ckb-verification`, including transaction-layer
   under-capacity rejection.
+- Canonical NovaSeal conformance is enforced by manifest schema hash, exact
+  canonical field order, wallet signing vectors, and runtime
+  `canonical_envelope_hash` recomputation.
+- Public ecosystem profile certification is checked by
+  `cellc certify --plugin novaseal-profile-v0`, which verifies the NovaSeal
+  Rust certification report containing
+  `agreement_profile_public_ecosystem_certification_v0`.
 
 ## Not Implemented
 
@@ -39,6 +46,15 @@
 
 ## Risk Posture
 
-This is not production ready. It is a reviewable skeleton for terminal-path
-semantics, local builder-shape evidence, resolved transaction evidence, live
-devnet lifecycle evidence, and audit surface development.
+The Agreement package is locally certifiable as a NovaSeal profile: canonical
+conformance, wallet signing vectors, resolved transaction evidence, live devnet
+lifecycle evidence, invariant matrix coverage, and local verifier TCB review are
+machine checked by the compiler-hosted certification gate. The gate adds no
+Core runtime call and no new chain-facing machinery.
+
+That is still not a standalone mainnet production statement. The production
+claim remains blocked until the public/shared CellDep pinning attestation and
+external BIP340 verifier TCB attestation are supplied. Terms-hash and
+receipt-hash preimage policies also remain wallet/builder obligations in this
+v0 profile; the chain enforces their bindings to outputs and signed intents, not
+a universal terms-document registry.

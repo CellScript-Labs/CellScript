@@ -43,7 +43,7 @@ artifact_hash = "0xd0d1c14c811728c680d8646283cf7961dd850eebea856ac0e281fb493c4bc
 [metadata]
 protocol_family = "NovaSeal"
 canonical_schema = "NovaSealCanonicalV0"
-canonical_schema_hash = "0x703cef6e07983f8c25f9d3f467aa74246d972a839592c9689418e9785b8b5136"
+canonical_schema_hash = "0xe9a157d0211d63586f2e9334878f8354f87d4786f94aa9e5ea163fed5360aec6"
 package_role = "canonical-example"
 v0_slice = "key-auth-cell-movement-only"
 strict_acceptance_criteria = 9

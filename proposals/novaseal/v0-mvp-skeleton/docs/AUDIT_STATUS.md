@@ -21,7 +21,7 @@ Package and script checks:
 - `cellc src/nova_receipt_type.cell --target-profile ckb` passes.
 - `python3 /home/arthur/a19q3/CellScript/scripts/novaseal_wallet_signing_vectors.py --pretty` passes.
 - `python3 /home/arthur/a19q3/CellScript/scripts/novaseal_bip340_tcb_review.py --pretty` passes local review gates and records that external attestation is still required.
-- `python3 /home/arthur/a19q3/CellScript/scripts/novaseal_production_gates.py --pretty` reports `local_production_prep_ready_external_attestation_required`.
+- `/home/arthur/a19q3/CellScript/target/debug/cellc certify --plugin novaseal-profile-v0 --json` reports `local_production_prep_ready_external_attestation_required` in the Rust-generated production-gate report.
 
 Live local devnet:
 
@@ -34,7 +34,7 @@ Live local devnet:
 
 Aggregate stateful gate:
 
-- `scripts/novaseal_devnet_stateful_acceptance.py --pretty --report-only` reports `status=passed`, `live_devnet_rpc_executed=true`, `blockers=0`.
+- `scripts/novaseal_devnet_stateful_acceptance.sh --pretty --report-only` reports `status=passed`, `live_devnet_rpc_executed=true`, `blockers=0` by delegating to `cellc certify --plugin novaseal-profile-v0`.
 - The same aggregate gate includes Agreement Profile originate -> repay, originate -> claim, and live negative dry-runs.
 
 ## Current Generated Audit Surface
@@ -167,10 +167,10 @@ external reviewer attesting the exact runtime verifier artifact hash.
 
 ## Production Gate
 
-The current production gate is:
+The current production gate is the Rust compiler certification entry:
 
 ```bash
-python3 /home/arthur/a19q3/CellScript/scripts/novaseal_production_gates.py --pretty
+/home/arthur/a19q3/CellScript/target/debug/cellc certify --plugin novaseal-profile-v0 --json
 ```
 
 Current status:

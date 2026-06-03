@@ -5,7 +5,8 @@
 NovaSeal Agreement Profile v0 is a reviewable CKB-native agreement skeleton with
 audited terminal-path structure, local transaction-shape evidence, resolved
 transaction verifier evidence, live devnet lifecycle evidence, and fixed-width
-wallet signing vectors.
+wallet signing vectors. It now also has a deterministic public profile
+certification gate exposed through `cellc certify --plugin novaseal-profile-v0`.
 
 ## Latest Results
 
@@ -19,8 +20,8 @@ wallet signing vectors.
 | `python3 scripts/nova_agreement_tx_shape_harness.py --pretty` | passed; 8/8 expectations matched |
 | `cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_agreement_tx_harness -- --pretty` | passed; 20/20 script-layer and node-verifier expectations matched |
 | `scripts/novaseal_agreement_devnet_stateful_live.py --pretty --ckb-repo ../ckb --ckb-bin ../ckb/target/debug/ckb` | passed; originate -> repay, originate -> claim, and live negative dry-runs |
-| `python3 /home/arthur/a19q3/CellScript/scripts/novaseal_wallet_signing_vectors.py --pretty` | passed; includes 3 Agreement vectors |
-| `python3 /home/arthur/a19q3/CellScript/scripts/novaseal_production_gates.py --pretty` | passed local gates; external production attestations still required |
+| `python3 ../../../scripts/novaseal_wallet_signing_vectors.py --pretty` | passed; includes 3 Agreement vectors |
+| `../../../target/debug/cellc certify --plugin novaseal-profile-v0 --json` | passed local Rust compiler-hosted production-prep and profile certification gates, including `agreement_profile_public_ecosystem_certification_v0`; external production attestations still required |
 
 Generated audit surface:
 
@@ -38,19 +39,19 @@ lifecycle runner.
 ## Commands
 
 ```bash
-/home/arthur/a19q3/CellScript/target/debug/cellc check --target-profile ckb
-/home/arthur/a19q3/CellScript/target/debug/cellc audit-bundle --target-profile ckb --json
-/home/arthur/a19q3/CellScript/target/debug/cellc explain-assumptions --target-profile ckb
-/home/arthur/a19q3/CellScript/target/debug/cellc check --target-profile ckb --primitive-strict 0.16
+../../../target/debug/cellc check --target-profile ckb
+../../../target/debug/cellc audit-bundle --target-profile ckb --json
+../../../target/debug/cellc explain-assumptions --target-profile ckb
+../../../target/debug/cellc check --target-profile ckb --primitive-strict 0.16
 python3 scripts/nova_agreement_tx_shape_harness.py --pretty
-/home/arthur/a19q3/CellScript/target/debug/cellc src/nova_agreement_type.cell --target riscv64-elf --target-profile ckb --entry-action originate_agreement -o target/nova-agreement-originate-action.elf
-/home/arthur/a19q3/CellScript/target/debug/cellc src/nova_agreement_type.cell --target riscv64-elf --target-profile ckb --entry-action repay_before_expiry -o target/nova-agreement-repay-action.elf
-/home/arthur/a19q3/CellScript/target/debug/cellc src/nova_agreement_type.cell --target riscv64-elf --target-profile ckb --entry-action claim_after_expiry -o target/nova-agreement-claim-action.elf
-/home/arthur/a19q3/CellScript/target/debug/cellc harness/ckb_vm/always_success_lock.cell --target riscv64-elf --target-profile ckb --entry-lock always_success -o target/nova-agreement-always-success-lock.elf
+../../../target/debug/cellc src/nova_agreement_type.cell --target riscv64-elf --target-profile ckb --entry-action originate_agreement -o target/nova-agreement-originate-action.elf
+../../../target/debug/cellc src/nova_agreement_type.cell --target riscv64-elf --target-profile ckb --entry-action repay_before_expiry -o target/nova-agreement-repay-action.elf
+../../../target/debug/cellc src/nova_agreement_type.cell --target riscv64-elf --target-profile ckb --entry-action claim_after_expiry -o target/nova-agreement-claim-action.elf
+../../../target/debug/cellc harness/ckb_vm/always_success_lock.cell --target riscv64-elf --target-profile ckb --entry-lock always_success -o target/nova-agreement-always-success-lock.elf
 cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_agreement_tx_harness -- --pretty
-python3 /home/arthur/a19q3/CellScript/scripts/novaseal_agreement_devnet_stateful_live.py --pretty --ckb-repo /home/arthur/a19q3/ckb --ckb-bin /home/arthur/a19q3/ckb/target/debug/ckb
-python3 /home/arthur/a19q3/CellScript/scripts/novaseal_wallet_signing_vectors.py --pretty
-python3 /home/arthur/a19q3/CellScript/scripts/novaseal_production_gates.py --pretty
+python3 ../../../scripts/novaseal_agreement_devnet_stateful_live.py --pretty --ckb-repo /path/to/ckb --ckb-bin /path/to/ckb/target/debug/ckb
+python3 ../../../scripts/novaseal_wallet_signing_vectors.py --pretty
+../../../target/debug/cellc certify --plugin novaseal-profile-v0 --json
 ```
 
 ## Claim Classification
@@ -73,6 +74,7 @@ python3 /home/arthur/a19q3/CellScript/scripts/novaseal_production_gates.py --pre
 | Terms hash output binding | implemented | resolved-transaction-covered |
 | Receipt hash output binding | implemented | resolved-transaction-covered |
 | Fixed-width wallet signing vectors | implemented | production-gate-covered |
+| Public ecosystem profile certification | implemented | compiler-certification-covered |
 | BTC collateral support | out of scope | not implemented |
 
 ## Fixture Honesty
@@ -99,7 +101,17 @@ transaction evidence.
 Receipts are materialized as outputs. The `receipt_hash`/`latest_receipt_hash` value is
 carried through state and receipt fields, and receipt output mismatches are
 covered by resolved transaction evidence plus the live devnet lifecycle runner.
-Fixed-width wallet signing vectors are generated by
-`/home/arthur/a19q3/CellScript/scripts/novaseal_wallet_signing_vectors.py` and
-checked by the production gate. Public/shared CellDep attestation and external
-BIP340 TCB review remain production blockers.
+Fixed-width wallet signing vectors are generated by the root
+`scripts/novaseal_wallet_signing_vectors.py` and checked by the compiler-hosted
+certification gate through the Rust-generated NovaSeal certification report.
+Public/shared CellDep attestation and external BIP340 TCB review remain
+production blockers.
+
+## Production Statement Boundary
+
+The current local certification result is sufficient to say that the checked-in
+Agreement package satisfies NovaSeal profile certification requirements for the
+local evidence set. It is not sufficient to say that a public mainnet deployment
+is production ready until the two external attestations named by
+`target/novaseal-production-gates.json` are present and
+`cellc certify --plugin novaseal-profile-v0 --require-production` passes.

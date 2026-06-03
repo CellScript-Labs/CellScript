@@ -5,7 +5,7 @@ NovaSeal starts from a narrower observation: Bitcoin keys and UTXOs provide wide
 
 The working split is that Bitcoin-side authority signs the intent, CKB enforces Cell state, and CellScript packages the evidence.
 
-Rather than acting as an asset issuance protocol, trustless bridge, native Lightning transport layer, or RGB++ replacement, NovaSeal is designed to be a **Bitcoin-authorised CKB object framework written in CellScript** In plain terms, it is a way to let Bitcoin-side approval control a CKB Cell transition.
+Rather than acting as an asset issuance protocol, trustless bridge, native Lightning transport layer, or RGB++ replacement, NovaSeal is designed to be a **Bitcoin-authorised CKB object framework written in CellScript**. In plain terms, it lets Bitcoin-side approval control a CKB Cell transition.
 
 ### Glossary:
 
@@ -29,7 +29,7 @@ As mentioned above, many Bitcoin adjacent/attached systems begin from issuance, 
 
 CKB's Cell model natively supports explicit objects. A Cell can be consumed once, replaced, split into terminal outputs, or checked by separate lock and type logic. That provides a strict vocabulary for financial agreements, receipts, policy hashes, expiry rules and composable assets.
 
-Instead of copying oracle-heavy DeFi designs into a Bitcoin wrapper, NovaSeal intends to build Cell-native financial objects with explicit authority, terminal paths and audit records， as **contracts settled by pre agreed terms rather than continuous off chain price probably feeds fit CKB's object model more directly than account-based lending pools.**
+Instead of copying oracle-heavy DeFi designs into a Bitcoin wrapper, NovaSeal intends to build Cell-native financial objects with explicit authority, terminal paths and audit records. Contracts settled by pre-agreed terms fit CKB's object model more directly than account-based lending pools.
 
 ## 2. Core Flow
 
@@ -118,11 +118,11 @@ flowchart TD
 
 This prevents scope creep into specific verticals such as lending, RWA or Bitcoin assets, keeping the core framework auditable and composable.
 
-Profiles do not call a separate NovaSeal Core runtime action. The constraint is schema and package level: a profile must declare `conforms_to = "NovaSealCanonicalV0"`, pin `canonical_schema_hash`, commit its signed intent to `NovaSealCanonicalEnvelopeV0`, and pass the deterministic conformance gate. The gate checks the manifest, schema hash, required source surface, wallet signing vectors, runtime verifier pinning and live/devnet evidence. If that check fails, the package may be NovaSeal-inspired, but it is not a NovaSeal profile. A gentleman may wear a top hat; the gate still checks the ticket.
+Profiles do not call a separate NovaSeal Core runtime action. The constraint is schema and package level: a profile must declare `conforms_to = "NovaSealCanonicalV0"`, pin `canonical_schema_hash`, commit its signed intent to `NovaSealCanonicalEnvelopeV0`, and pass the deterministic compiler gate `cellc certify --plugin novaseal-profile-v0`. The compiler owns the certification entry and report verification; NovaSeal-specific policy is implemented by the built-in Rust certification module behind that entry. The gate checks the manifest, schema hash, required source surface, wallet signing vectors, runtime verifier pinning and live/devnet evidence. If that check fails, the package may be NovaSeal-inspired, but it is not a NovaSeal profile. A gentleman may wear a top hat; the gate still checks the ticket.
 
 ```mermaid
 flowchart LR
-    A[Profile manifest<br/>conforms_to = NovaSealCanonicalV0] ==> B[Deterministic conformance gate]
+    A[Profile manifest<br/>conforms_to = NovaSealCanonicalV0] ==> B[Compiler certification gate]
     C[Canonical schema hash] ==> B
     D[Profile signed intent<br/>canonical_envelope_hash] ==> B
     E[Wallet vectors and verifier pins] ==> B
@@ -132,21 +132,18 @@ flowchart LR
 
 This is close in spirit to RGB's strict-encoding discipline: do not trust a compiler label when a schema hash, canonical preimage and recomputable digest can be checked. NovaSeal keeps CKB runtime enforcement, but borrows the habit of making type commitments explicit.
 
+NovaSeal does not copy RGB's schema implementation. The current gate uses a smaller CellScript-native rule: hash the normalised canonical schema lines, require exact canonical field order, bind that hash in both manifests, and require the Agreement signed intent to carry a runtime-checked `canonical_envelope_hash`. This is deliberately less general than RGB Strict Types, but it removes the weak "manifest string only" attack. The compiler gate adds no chain-facing runtime machinery; it is a deterministic certification surface for public profile claims.
+
 ## 6. Agreement Profile: Terminal Paths
 
-Agreement Profile is directly inspired by Matt Quinn's [Minimum Viable Borrowing (MVB) on CKB](https://talk.nervos.org/t/minimum-viable-borrowing-mvb-on-ckb/8627) discussion, and by Phroi's careful pushback in the same thread. Matt supplied the useful spark; Phroi supplied the necessary discipline around naming, incentives and risk.
+Agreement Profile is the first concrete NovaSeal profile. It models a bilateral
+CKB/CKB agreement with fixed terms, fixed terminal paths and materialised
+receipts. It is deliberately not a lending pool, oracle market, CDP, bridge, or
+BTC-collateral protocol.
 
-The core intuition of MVB is not to rebuild Aave without an oracle. The better reading is that two parties can pre agree a finite financial object: one side locks collateral, the other side provides liquidity, the term and fee are fixed in advance, and the contract has a small number of terminal paths. If repayment happens before expiry, one terminal path executes. If expiry arrives without repayment, another path executes. The Cell does not need to know the live market price every block; it needs to enforce what the parties already agreed.
-
-Without margin calls and oracle repricing, this should not be sold as ordinary overcollateralised DeFi lending. It is closer to an option-style contract with pre agreed ending rights. The party who has a profitable ending branch will exercise it; the other party should have priced that possibility before entering the agreement. The model is narrower than a general lending market, but easier to specify and test.
-
-Recent research also questions whether debt, CDP machinery, forced liquidation and real-time oracle assumptions are the right primitives for every financial object; one example is the June 2026 Ethereum Research note on building index-tracking assets on options rather than debt ([Buterin, 2026](https://ethresear.ch/t/building-index-tracking-assets-on-top-of-options-instead-of-debt/25036)). If a design stacks several complex primitives merely to recreate a centralised-finance user experience, the simpler object underneath should be identified first.
-
-For NovaSeal, the conservative first slice is CKB/CKB: CKB collateral and CKB principal. That removes cross-asset price-ratio claims from the protocol surface. BTC authority or a mirrored BTC UTXO, meaning a Bitcoin UTXO represented or proven on the CKB side, can become interesting later as an authority or seal mode, but the Agreement Profile should not smuggle that into v0. The v0 target is narrower: express a finite CKB-native agreement whose state, payout intent and receipt are explicit enough to test.
-
-Economically, that makes borrower optionality the object being priced. The borrower gets temporary liquid CKB while keeping a defined path back to the locked position; the lender gets a pre-agreed return for locking capital under the terminal rules. In the v0 profile there is no fractional reserve, no lender-side commingling, no pool accounting and no hidden liquidation bot. It is intentionally closer to a bilateral instrument than to a lending venue.
-
-The parties decide the important facts upfront: who they are, what assets are involved, what the term is, when it expires, what happens if repayment occurs, what happens if it does not, and what receipt is produced when the path closes. Once those facts are committed, the contract does not need an oracle to keep repricing collateral every block. It only needs to enforce the agreed terminal paths.
+The profile keeps the part of the MVB discussion that fits CKB well: two parties
+commit to terms, CKB enforces one live Cell lifecycle, and the terminal output is
+checked directly instead of inferred from off-chain accounting.
 
 ```mermaid
 flowchart TD
@@ -158,12 +155,31 @@ flowchart TD
 
     E ==> G[Repay before expiry]
     E ==> H[Claim after expiry]
-    E ==> I[Exercise or transfer position]
 ```
 
-This enables a more limited financial model on CKB: rather than asking a protocol to know the live market price of everything, two parties can agree in advance on terminal rights and let Cells enforce the result. The resulting object is narrower than a dynamic lending market, but it gives builders something explicit to test, explain and compose.
+| Path | Authority | Time rule | Required output evidence |
+| --- | --- | --- | --- |
+| Originate | borrower and lender | `now <= expiry` | active agreement, principal payout, receipt |
+| Repay | borrower | `now <= expiry` | closed agreement, lender repayment, borrower collateral return, receipt |
+| Claim | lender | `now > expiry` | closed agreement, lender default claim, receipt |
 
-The current Agreement Profile is a technical reduction of the MVB idea, not a declaration that MVB is finished. It keeps the part that fits CKB particularly well: pre agreed terms, deterministic terminal paths, typed payout intent and receipts created as output Cells. It leaves the harder extensions, such as BTC collateral, mirrored UTXO authority, iCKB ratios, production wallet flow and market-wide liquidity design, for later evidence-backed profiles.
+Certification evidence is machine checked through
+`cellc certify --plugin novaseal-profile-v0`, which verifies the Rust-generated
+certification report containing
+`agreement_profile_public_ecosystem_certification_v0`. The gate requires
+canonical conformance, exact profile schema and fixture sets, wallet signing
+vectors for originate/repay/claim, invariant matrix coverage, fresh live-devnet
+provenance, negative dry-run rejects, runtime verifier pinning and local BIP340
+TCB review.
+
+Out of scope for Agreement v0:
+
+| Excluded claim | Reason |
+| --- | --- |
+| BTC collateral or Bitcoin finality | Requires a BTC transaction or UTXO-seal profile |
+| Dynamic liquidation or margin calls | Requires oracle and market machinery |
+| iCKB/xUDT/Fiber execution | Requires separate balance-bearing profile |
+| Production mainnet claim by local files alone | Requires public CellDep pinning and external verifier TCB attestation |
 
 ## 7. Relationship to RGB++
 
@@ -179,6 +195,16 @@ RGB++ and NovaSeal sit in the same broad design space because both care about Bi
 | Fiber relation | Plausible through xUDT style assets | Considered from profile design |
 
 NovaSeal should not be presented as a replacement for RGB++. It is a clean room exploration of the same broader design space from a more CKB native, package first angle. This keeps the scope distinct, allowing NovaSeal to build alongside existing protocols without overlapping unnecessarily.
+
+Reference boundary:
+
+| Source inspected | What NovaSeal borrows | What NovaSeal does not borrow |
+| --- | --- | --- |
+| RGB Core `doc/Commitments.md` and `rgb-core` strict-encoding usage | Schema IDs, domain-separated commitment discipline, recomputable type-bound hashes | RGB client-side validation architecture, operation/bundle commitment algorithms, RGB contract model |
+| Strict Types / Strict Encoding libraries | Schema-based semantic typing, deterministic encoding, type library identity as a security boundary | Rust derive macros, Vesper/STL implementation, category-theory type system internals |
+| RGB++ design documents | Isomorphic binding and CKB lockscript/security-boundary context | A schema library; RGB++ was not used as the source for NovaSeal canonical schema design |
+
+The reference is conceptual and architectural. No RGB, Strict Types, or RGB++ code is vendored into this package, and the NovaSeal schema gate is intentionally CellScript-native and compiler-hosted through `src/cli/novaseal_certification.rs`.
 
 ## 8. Fiber and Lightning
 

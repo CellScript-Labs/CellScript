@@ -134,7 +134,7 @@ novaseal-v0-mvp-skeleton/
     └── invariant_matrix.json
 ```
 
-Repository-root NovaSeal scripts such as `scripts/novaseal_wallet_signing_vectors.py`, `scripts/novaseal_bip340_tcb_review.py`, and `scripts/novaseal_production_gates.py` are outside this package's `scripts/` directory.
+Repository-root NovaSeal evidence scripts such as `scripts/novaseal_wallet_signing_vectors.py` and `scripts/novaseal_bip340_tcb_review.py` are outside this package's `scripts/` directory. The production-prep/profile certification gate is now owned by the Rust compiler entry `cellc certify --plugin novaseal-profile-v0`.
 
 ---
 
@@ -287,8 +287,8 @@ python3 /home/arthur/a19q3/CellScript/scripts/novaseal_wallet_signing_vectors.py
 # 19. Generate the local BIP340 TCB review bundle from the repository root
 python3 /home/arthur/a19q3/CellScript/scripts/novaseal_bip340_tcb_review.py --pretty
 
-# 20. Run the local production-prep gate from the repository root
-python3 /home/arthur/a19q3/CellScript/scripts/novaseal_production_gates.py --pretty
+# 20. Run the local production-prep/profile certification gate from the repository root
+/home/arthur/a19q3/CellScript/target/debug/cellc certify --plugin novaseal-profile-v0 --json
 
 # 21. Check strict 0.16 primitive closure
 cellc check --target-profile ckb --primitive-strict 0.16
