@@ -140,8 +140,58 @@ def pack_agreement_intent_core(core: dict[str, Any]) -> bytes:
     )
 
 
-def pack_agreement_signed_intent(core_bytes: bytes, expected_receipt_hash: bytes) -> bytes:
-    return core_bytes + expected_receipt_hash
+def pack_canonical_envelope(envelope: dict[str, Any]) -> bytes:
+    return (
+        envelope["profile_id"]
+        + envelope["policy_hash"]
+        + u8(envelope["action"])
+        + u8(envelope["terminal_path"])
+        + envelope["subject_id"]
+        + envelope["old_state_commitment"]
+        + envelope["new_state_commitment"]
+        + u64(envelope["old_nonce"])
+        + u64(envelope["new_nonce"])
+        + u64(envelope["expiry"])
+        + envelope["authority_hash"]
+        + envelope["profile_body_hash"]
+        + envelope["payout_commitment_hash"]
+    )
+
+
+def canonical_envelope_hash(
+    *,
+    action: int,
+    agreement_id: bytes,
+    terms_hash: bytes,
+    old_state_commitment: bytes,
+    new_state_commitment: bytes,
+    old_nonce: int,
+    new_nonce: int,
+    expiry: int,
+    authority_hash: bytes,
+    profile_body_hash: bytes,
+    payout_commitment_hash: bytes,
+) -> bytes:
+    envelope = {
+        "profile_id": agreement_id,
+        "policy_hash": terms_hash,
+        "action": action,
+        "terminal_path": action,
+        "subject_id": agreement_id,
+        "old_state_commitment": old_state_commitment,
+        "new_state_commitment": new_state_commitment,
+        "old_nonce": old_nonce,
+        "new_nonce": new_nonce,
+        "expiry": expiry,
+        "authority_hash": authority_hash,
+        "profile_body_hash": profile_body_hash,
+        "payout_commitment_hash": payout_commitment_hash,
+    }
+    return packed_hash("NovaSealCanonicalEnvelopeV0", pack_canonical_envelope(envelope))
+
+
+def pack_agreement_signed_intent(core_bytes: bytes, canonical_hash: bytes, expected_receipt_hash: bytes) -> bytes:
+    return core_bytes + canonical_hash + expected_receipt_hash
 
 
 def pack_agreement_receipt_commitment(commitment: dict[str, Any]) -> bytes:
@@ -308,7 +358,20 @@ def build_origin_material(
     }
     receipt_commitment_data = pack_agreement_receipt_commitment(receipt_commitment)
     materialized_receipt_hash = packed_hash("NovaAgreementReceiptCommitmentV0", receipt_commitment_data)
-    signed_intent = pack_agreement_signed_intent(core_data, materialized_receipt_hash)
+    canonical_hash = canonical_envelope_hash(
+        action=PATH_ORIGINATE,
+        agreement_id=terms["agreement_id"],
+        terms_hash=terms["terms_hash"],
+        old_state_commitment=ZERO_HASH,
+        new_state_commitment=materialized_receipt_hash,
+        old_nonce=0,
+        new_nonce=0,
+        expiry=terms["expiry_timepoint"],
+        authority_hash=terms["borrower_authority_hash"],
+        profile_body_hash=intent_core_hash,
+        payout_commitment_hash=payout_commitment_hash,
+    )
+    signed_intent = pack_agreement_signed_intent(core_data, canonical_hash, materialized_receipt_hash)
     signed_intent_hash = packed_hash("NovaAgreementSignedIntentV0", signed_intent)
     active_cell = {
         "version": AGREEMENT_VERSION,
@@ -445,7 +508,20 @@ def build_repay_material(
         "NovaAgreementReceiptCommitmentV0",
         pack_agreement_receipt_commitment(receipt_commitment),
     )
-    signed_intent = pack_agreement_signed_intent(core_data, materialized_receipt_hash)
+    canonical_hash = canonical_envelope_hash(
+        action=PATH_REPAY_BEFORE_EXPIRY,
+        agreement_id=active_cell["agreement_id"],
+        terms_hash=active_cell["terms_hash"],
+        old_state_commitment=previous_receipt_hash,
+        new_state_commitment=materialized_receipt_hash,
+        old_nonce=active_cell["nonce"],
+        new_nonce=next_nonce,
+        expiry=active_cell["expiry_timepoint"],
+        authority_hash=active_cell["borrower_authority_hash"],
+        profile_body_hash=intent_core_hash,
+        payout_commitment_hash=payout_commitment_hash,
+    )
+    signed_intent = pack_agreement_signed_intent(core_data, canonical_hash, materialized_receipt_hash)
     signed_intent_hash = packed_hash("NovaAgreementSignedIntentV0", signed_intent)
     closed_cell = dict(active_cell)
     closed_cell.update({"status": STATUS_REPAID, "latest_receipt_hash": materialized_receipt_hash, "nonce": next_nonce})
@@ -553,7 +629,20 @@ def build_claim_material(
         "NovaAgreementReceiptCommitmentV0",
         pack_agreement_receipt_commitment(receipt_commitment),
     )
-    signed_intent = pack_agreement_signed_intent(core_data, materialized_receipt_hash)
+    canonical_hash = canonical_envelope_hash(
+        action=PATH_CLAIM_AFTER_EXPIRY,
+        agreement_id=active_cell["agreement_id"],
+        terms_hash=active_cell["terms_hash"],
+        old_state_commitment=previous_receipt_hash,
+        new_state_commitment=materialized_receipt_hash,
+        old_nonce=active_cell["nonce"],
+        new_nonce=next_nonce,
+        expiry=active_cell["expiry_timepoint"],
+        authority_hash=active_cell["lender_authority_hash"],
+        profile_body_hash=intent_core_hash,
+        payout_commitment_hash=payout_commitment_hash,
+    )
+    signed_intent = pack_agreement_signed_intent(core_data, canonical_hash, materialized_receipt_hash)
     signed_intent_hash = packed_hash("NovaAgreementSignedIntentV0", signed_intent)
     closed_cell = dict(active_cell)
     closed_cell.update({"status": STATUS_DEFAULTED, "latest_receipt_hash": materialized_receipt_hash, "nonce": next_nonce})

@@ -55,7 +55,8 @@ const EXPIRY_TIMEPOINT: u64 = 200;
 const TERMS_LEN: usize = 237;
 const AGREEMENT_CELL_LEN: usize = 269;
 const AGREEMENT_INTENT_CORE_LEN: usize = 195;
-const AGREEMENT_SIGNED_INTENT_LEN: usize = 227;
+const CANONICAL_ENVELOPE_LEN: usize = 282;
+const AGREEMENT_SIGNED_INTENT_LEN: usize = 259;
 const AGREEMENT_RECEIPT_COMMITMENT_LEN: usize = 219;
 const AGREEMENT_SIGNATURE_PAYLOAD_LEN: usize = 96;
 const AGREEMENT_RECEIPT_LEN: usize = 339;
@@ -79,6 +80,7 @@ const PAYOUT_LENDER_DEFAULT_CLAIM: u8 = 3;
 
 const LOCK_WITNESS_MAGIC: &[u8; 8] = b"CSARGv1\0";
 const PACKED_HASH_DOMAIN: &[u8] = b"CellScriptPackedHashV0\0";
+const CANONICAL_ENVELOPE_TYPE_NAME: &[u8] = b"NovaSealCanonicalEnvelopeV0";
 const INTENT_CORE_TYPE_NAME: &[u8] = b"NovaAgreementIntentCoreV0";
 const SIGNED_INTENT_TYPE_NAME: &[u8] = b"NovaAgreementSignedIntentV0";
 const RECEIPT_COMMITMENT_TYPE_NAME: &[u8] = b"NovaAgreementReceiptCommitmentV0";
@@ -402,16 +404,8 @@ fn run() -> Result<(), HarnessError> {
             run_case(action_elf, &lock_elf, &child_verifier_elf, case)
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let report = build_report(
-        &args,
-        &originate_elf,
-        &repay_elf,
-        &claim_elf,
-        &lock_elf,
-        &child_verifier_elf,
-        reports,
-        &fixture_expectations,
-    );
+    let report =
+        build_report(&args, &originate_elf, &repay_elf, &claim_elf, &lock_elf, &child_verifier_elf, reports, &fixture_expectations);
     write_report(&args.output, &report, args.pretty)?;
     print_summary(&args.output, &report);
     if report.summary.script_mismatched == 0 && report.summary.node_mismatched == 0 {
@@ -615,7 +609,12 @@ fn build_cases() -> Result<Vec<AgreementCase>, HarnessError> {
             expected: "rejected",
             expected_reason: "created agreement, payout, and receipt outputs must bind the witness terms_hash",
             current_timepoint: 120,
-            witness: build_originate_witness(&bad_terms_bytes, &originate.signed_intent, &borrower_originate_sig, &lender_originate_sig),
+            witness: build_originate_witness(
+                &bad_terms_bytes,
+                &originate.signed_intent,
+                &borrower_originate_sig,
+                &lender_originate_sig,
+            ),
             active_cell_data: None,
             agreement_output_data: originated.clone(),
             receipt_output_data: originate.receipt_data.clone(),
@@ -672,7 +671,12 @@ fn build_cases() -> Result<Vec<AgreementCase>, HarnessError> {
             expected: "rejected",
             expected_reason: "Agreement Profile v0 only supports CKB principal and CKB collateral",
             current_timepoint: 120,
-            witness: build_originate_witness(&non_ckb_terms_bytes, &originate.signed_intent, &borrower_originate_sig, &lender_originate_sig),
+            witness: build_originate_witness(
+                &non_ckb_terms_bytes,
+                &originate.signed_intent,
+                &borrower_originate_sig,
+                &lender_originate_sig,
+            ),
             active_cell_data: None,
             agreement_output_data: encode_agreement_cell(&non_ckb_terms, STATUS_ACTIVE, originate.latest_receipt_hash, 0),
             receipt_output_data: encode_receipt(
@@ -683,9 +687,45 @@ fn build_cases() -> Result<Vec<AgreementCase>, HarnessError> {
                 PRINCIPAL_AMOUNT,
                 ZERO_HASH,
                 originate.latest_receipt_hash,
-                packed_hash(INTENT_CORE_TYPE_NAME, &encode_intent_core(&fields, PATH_ORIGINATE, STATUS_OFFERED, STATUS_ACTIVE, 0, 0, PRINCIPAL_AMOUNT, packed_hash(PAYOUT_TYPE_NAME, &encode_payout(&fields, PATH_ORIGINATE, PAYOUT_BORROWER_PRINCIPAL, fields.borrower_authority_hash, ASSET_KIND_CKB, ZERO_HASH, PRINCIPAL_AMOUNT, 0)))),
+                packed_hash(
+                    INTENT_CORE_TYPE_NAME,
+                    &encode_intent_core(
+                        &fields,
+                        PATH_ORIGINATE,
+                        STATUS_OFFERED,
+                        STATUS_ACTIVE,
+                        0,
+                        0,
+                        PRINCIPAL_AMOUNT,
+                        packed_hash(
+                            PAYOUT_TYPE_NAME,
+                            &encode_payout(
+                                &fields,
+                                PATH_ORIGINATE,
+                                PAYOUT_BORROWER_PRINCIPAL,
+                                fields.borrower_authority_hash,
+                                ASSET_KIND_CKB,
+                                ZERO_HASH,
+                                PRINCIPAL_AMOUNT,
+                                0,
+                            ),
+                        ),
+                    ),
+                ),
                 packed_hash(SIGNED_INTENT_TYPE_NAME, &originate.signed_intent),
-                packed_hash(PAYOUT_TYPE_NAME, &encode_payout(&non_ckb_terms, PATH_ORIGINATE, PAYOUT_BORROWER_PRINCIPAL, non_ckb_terms.borrower_authority_hash, non_ckb_terms.principal_asset_kind, ZERO_HASH, PRINCIPAL_AMOUNT, 0)),
+                packed_hash(
+                    PAYOUT_TYPE_NAME,
+                    &encode_payout(
+                        &non_ckb_terms,
+                        PATH_ORIGINATE,
+                        PAYOUT_BORROWER_PRINCIPAL,
+                        non_ckb_terms.borrower_authority_hash,
+                        non_ckb_terms.principal_asset_kind,
+                        ZERO_HASH,
+                        PRINCIPAL_AMOUNT,
+                        0,
+                    ),
+                ),
                 0,
                 120,
             ),
@@ -1260,10 +1300,8 @@ fn build_transaction_context(
 
     for payout in &case.payout_outputs {
         let payout_lock_script = build_data1_script_with_args(&lock_code_hash, &payout.lock_args);
-        let payout_output = packed::CellOutput::new_builder()
-            .capacity(Capacity::shannons(payout.capacity).pack())
-            .lock(payout_lock_script)
-            .build();
+        let payout_output =
+            packed::CellOutput::new_builder().capacity(Capacity::shannons(payout.capacity).pack()).lock(payout_lock_script).build();
         output_capacity = output_capacity
             .checked_add(payout.capacity)
             .ok_or_else(|| HarnessError::Message("output capacity overflow".to_string()))?;
@@ -1500,16 +1538,8 @@ fn materialize_transition(
     receipt_nonce: u64,
     timepoint: u64,
 ) -> MaterializedTransition {
-    let intent_core = encode_intent_core(
-        fields,
-        action,
-        old_status,
-        new_status,
-        old_nonce,
-        new_nonce,
-        terminal_amount,
-        payout_commitment_hash,
-    );
+    let intent_core =
+        encode_intent_core(fields, action, old_status, new_status, old_nonce, new_nonce, terminal_amount, payout_commitment_hash);
     let intent_core_hash = packed_hash(INTENT_CORE_TYPE_NAME, &intent_core);
     let receipt_commitment = encode_receipt_commitment(
         fields,
@@ -1523,7 +1553,20 @@ fn materialize_transition(
         payout_commitment_hash,
     );
     let latest_receipt_hash = packed_hash(RECEIPT_COMMITMENT_TYPE_NAME, &receipt_commitment);
-    let signed_intent = encode_signed_intent(&intent_core, latest_receipt_hash);
+    let authority_hash = if action == PATH_CLAIM_AFTER_EXPIRY { fields.lender_authority_hash } else { fields.borrower_authority_hash };
+    let canonical_envelope = encode_canonical_envelope(
+        fields,
+        action,
+        previous_receipt_hash,
+        latest_receipt_hash,
+        old_nonce,
+        new_nonce,
+        authority_hash,
+        intent_core_hash,
+        payout_commitment_hash,
+    );
+    let canonical_envelope_hash = packed_hash(CANONICAL_ENVELOPE_TYPE_NAME, &canonical_envelope);
+    let signed_intent = encode_signed_intent(&intent_core, canonical_envelope_hash, latest_receipt_hash);
     let signed_intent_hash = packed_hash(SIGNED_INTENT_TYPE_NAME, &signed_intent);
     let receipt_data = encode_receipt(
         fields,
@@ -1540,6 +1583,36 @@ fn materialize_transition(
         timepoint,
     );
     MaterializedTransition { signed_intent, latest_receipt_hash, receipt_data }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn encode_canonical_envelope(
+    fields: &AgreementFields,
+    action: u8,
+    old_state_commitment: [u8; 32],
+    new_state_commitment: [u8; 32],
+    old_nonce: u64,
+    new_nonce: u64,
+    authority_hash: [u8; 32],
+    profile_body_hash: [u8; 32],
+    payout_commitment_hash: [u8; 32],
+) -> Vec<u8> {
+    let mut out = Vec::with_capacity(CANONICAL_ENVELOPE_LEN);
+    push_hash(&mut out, &fields.agreement_id);
+    push_hash(&mut out, &fields.terms_hash);
+    out.push(action);
+    out.push(action);
+    push_hash(&mut out, &fields.agreement_id);
+    push_hash(&mut out, &old_state_commitment);
+    push_hash(&mut out, &new_state_commitment);
+    push_u64(&mut out, old_nonce);
+    push_u64(&mut out, new_nonce);
+    push_u64(&mut out, fields.expiry_timepoint);
+    push_hash(&mut out, &authority_hash);
+    push_hash(&mut out, &profile_body_hash);
+    push_hash(&mut out, &payout_commitment_hash);
+    debug_assert_eq!(out.len(), CANONICAL_ENVELOPE_LEN);
+    out
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1570,9 +1643,10 @@ fn encode_intent_core(
     out
 }
 
-fn encode_signed_intent(core: &[u8], expected_receipt_hash: [u8; 32]) -> Vec<u8> {
+fn encode_signed_intent(core: &[u8], canonical_envelope_hash: [u8; 32], expected_receipt_hash: [u8; 32]) -> Vec<u8> {
     let mut out = Vec::with_capacity(AGREEMENT_SIGNED_INTENT_LEN);
     out.extend_from_slice(core);
+    push_hash(&mut out, &canonical_envelope_hash);
     push_hash(&mut out, &expected_receipt_hash);
     debug_assert_eq!(out.len(), AGREEMENT_SIGNED_INTENT_LEN);
     out
@@ -1679,15 +1753,7 @@ fn encode_repay_payout_commitment(lender_repayment_hash: [u8; 32], borrower_coll
 
 fn build_originate_witness(terms: &[u8], intent: &[u8], borrower_sig: &[u8], lender_sig: &[u8]) -> Vec<u8> {
     let mut witness = Vec::with_capacity(
-        LOCK_WITNESS_MAGIC.len()
-            + 4
-            + terms.len()
-            + 4
-            + intent.len()
-            + 4
-            + borrower_sig.len()
-            + 4
-            + lender_sig.len(),
+        LOCK_WITNESS_MAGIC.len() + 4 + terms.len() + 4 + intent.len() + 4 + borrower_sig.len() + 4 + lender_sig.len(),
     );
     witness.extend_from_slice(LOCK_WITNESS_MAGIC);
     witness.extend_from_slice(&(terms.len() as u32).to_le_bytes());

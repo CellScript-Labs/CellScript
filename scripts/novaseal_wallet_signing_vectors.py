@@ -133,8 +133,16 @@ def core_vectors(path: Path) -> list[dict[str, Any]]:
             continue
         signed_intent = resolved.get("signed_intent")
         if not isinstance(signed_intent, dict):
+            signed_intent = resolved.get("resolved_intent") or encoded.get("intent")
+        if not isinstance(signed_intent, dict):
             continue
-        core = field_map(signed_intent["fields"][0]["nested"])
+        if not signed_intent.get("hash_preimage_hex") and isinstance(signed_intent.get("hex"), str):
+            preimage, digest = packed_hash(signed_intent.get("type", "NovaSealIntentV0"), bytes.fromhex(signed_intent["hex"][2:]))
+            signed_intent = {**signed_intent, "hash_preimage_hex": preimage, "digest_blake2b_256": digest}
+        if signed_intent.get("fields") and "nested" in signed_intent["fields"][0]:
+            core = field_map(signed_intent["fields"][0]["nested"])
+        else:
+            core = field_map(signed_intent)
         display = {
             "protocol": "NovaSeal Core v0",
             "fixture": vector.get("fixture"),
@@ -156,7 +164,9 @@ def core_vectors(path: Path) -> list[dict[str, Any]]:
                 signers=["btc_authority"],
                 signed_intent=signed_intent,
                 display=display,
-                expected_receipt_hash=field_map(signed_intent).get("expected_receipt_hash"),
+                expected_receipt_hash=field_map(signed_intent).get("expected_receipt_hash")
+                or resolved.get("resolved_receipt_hash")
+                or vector.get("hashes", {}).get("resolved_receipt_hash"),
             )
         )
     return vectors
@@ -211,6 +221,39 @@ def encode_agreement_intent_core(
     return {"type": "NovaAgreementIntentCoreV0", "hex": hex0x(packed), "hash_preimage_hex": preimage, "digest_blake2b_256": digest}
 
 
+def encode_canonical_envelope(
+    action: int,
+    agreement_id: str,
+    terms_hash: str,
+    old_state_commitment: str,
+    new_state_commitment: str,
+    old_nonce: int,
+    new_nonce: int,
+    authority_hash: str,
+    profile_body_hash: str,
+    payout_commitment_hash: str,
+) -> dict[str, Any]:
+    packed = b"".join(
+        [
+            as_bytes32(agreement_id),
+            as_bytes32(terms_hash),
+            uint(action, 1),
+            uint(action, 1),
+            as_bytes32(agreement_id),
+            as_bytes32(old_state_commitment),
+            as_bytes32(new_state_commitment),
+            uint(old_nonce, 8),
+            uint(new_nonce, 8),
+            uint(EXPIRY_TIMEPOINT, 8),
+            as_bytes32(authority_hash),
+            as_bytes32(profile_body_hash),
+            as_bytes32(payout_commitment_hash),
+        ]
+    )
+    preimage, digest = packed_hash("NovaSealCanonicalEnvelopeV0", packed)
+    return {"type": "NovaSealCanonicalEnvelopeV0", "hex": hex0x(packed), "hash_preimage_hex": preimage, "digest_blake2b_256": digest}
+
+
 def encode_agreement_receipt_commitment(
     action: int,
     agreement_id: str,
@@ -243,8 +286,8 @@ def encode_agreement_receipt_commitment(
     return {"type": "NovaAgreementReceiptCommitmentV0", "hex": hex0x(packed), "hash_preimage_hex": preimage, "digest_blake2b_256": digest}
 
 
-def encode_agreement_signed_intent(core: dict[str, Any], expected_receipt_hash: str) -> dict[str, Any]:
-    packed = bytes.fromhex(core["hex"][2:]) + as_bytes32(expected_receipt_hash)
+def encode_agreement_signed_intent(core: dict[str, Any], canonical_envelope_hash: str, expected_receipt_hash: str) -> dict[str, Any]:
+    packed = bytes.fromhex(core["hex"][2:]) + as_bytes32(canonical_envelope_hash) + as_bytes32(expected_receipt_hash)
     preimage, digest = packed_hash("NovaAgreementSignedIntentV0", packed)
     return {"type": "NovaAgreementSignedIntentV0", "hex": hex0x(packed), "hash_preimage_hex": preimage, "digest_blake2b_256": digest}
 
@@ -271,7 +314,20 @@ def agreement_case(name: str, action: int, old_status: int, new_status: int, old
     receipt = encode_agreement_receipt_commitment(
         action, agreement_id, terms_hash, old_status, new_status, terminal_amount, old_nonce, new_nonce, core["digest_blake2b_256"], payout_hash
     )
-    signed = encode_agreement_signed_intent(core, receipt["digest_blake2b_256"])
+    authority_hash = LENDER_AUTHORITY if action == 2 else BORROWER_AUTHORITY
+    canonical = encode_canonical_envelope(
+        action,
+        agreement_id,
+        terms_hash,
+        ZERO_HASH if action == 0 else stable_hash("previous_receipt_hash", "agreement-active-v0"),
+        receipt["digest_blake2b_256"],
+        old_nonce,
+        new_nonce,
+        authority_hash,
+        core["digest_blake2b_256"],
+        payout_hash,
+    )
+    signed = encode_agreement_signed_intent(core, canonical["digest_blake2b_256"], receipt["digest_blake2b_256"])
     action_name = {0: "originate_agreement", 1: "repay_before_expiry", 2: "claim_after_expiry"}[action]
     return wallet_record(
         suite="novaseal-agreement-profile-v0",
@@ -292,6 +348,7 @@ def agreement_case(name: str, action: int, old_status: int, new_status: int, old
             "old_nonce": old_nonce,
             "new_nonce": new_nonce,
             "terminal_amount_shannons": terminal_amount,
+            "canonical_envelope_hash": canonical["digest_blake2b_256"],
             "payout_commitment_hash": payout_hash,
             "expiry_timepoint": EXPIRY_TIMEPOINT,
         },

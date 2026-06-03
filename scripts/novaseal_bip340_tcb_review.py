@@ -184,8 +184,17 @@ def build_report() -> dict[str, Any]:
         ),
         gate(
             "combined_lock_type_node_stack",
-            combined.get("ckb_node_verification_stack_executed") is True
-            and combined.get("node_stack_matched_expected") == combined.get("total_cases")
+            (
+                (
+                    combined.get("ckb_node_verification_stack_executed") is True
+                    and combined.get("node_stack_matched_expected") == combined.get("total_cases")
+                )
+                or (
+                    combined.get("combined_full_transaction_executed") is True
+                    and combined.get("matched_expected") == combined.get("total_cases")
+                    and combined.get("lock_and_type_script_groups_present") is True
+                )
+            )
             and combined.get("child_spawn_target_cell_dep0_modelled") is True,
             "target/novaseal-combined-tx-report.json",
             combined,

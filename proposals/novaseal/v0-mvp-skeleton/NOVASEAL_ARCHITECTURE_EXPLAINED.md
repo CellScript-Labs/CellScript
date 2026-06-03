@@ -1,39 +1,39 @@
+
 # NovaSeal: A Bitcoin-Authorised Cell Framework for CKB
 
-NovaSeal starts from a narrower observation: Bitcoin keys and UTXOs provide widely understood authority, while CKB's Cell model is well suited to explicit state, deterministic transitions and auditable terminal outcomes. NovaSeal connects those properties without implying that one chain becomes the other.
+NovaSeal starts from a narrower observation: Bitcoin keys and UTXOs provide widely understood authority, while CKB's Cell model is well suited to explicit state, deterministic transitions and auditable terminal outcomes.
 
-The working split is: Bitcoin-side authority signs the intent, CKB enforces Cell state, and CellScript packages the evidence.
+The working split is that Bitcoin-side authority signs the intent, CKB enforces Cell state, and CellScript packages the evidence.
 
-Rather than acting as an asset issuance protocol, trustless bridge, native Lightning transport layer, or RGB++ replacement, NovaSeal is a Bitcoin authorised CKB object framework. In plain terms, it is a way to let Bitcoin-side approval control a CKB Cell transition. The core remains small; profiles add business meaning later.
+Rather than acting as an asset issuance protocol, trustless bridge, native Lightning transport layer, or RGB++ replacement, NovaSeal is designed to be a **Bitcoin-authorised CKB object framework written in CellScript** In plain terms, it is a way to let Bitcoin-side approval control a CKB Cell transition.
 
-This is a research note with local package evidence, not a mainnet launch claim. The current evidence stack is local and devnet-oriented; production claims still require public/shared CellDep attestation, meaning proof that the referenced CKB code dependency is published and pinned, plus external review of the BIP340 Bitcoin signature verifier.
-
-**Core stays thin; profiles carry meaning.**
+### Glossary:
 
 Some terms below are NovaSeal-specific. We use them in this narrow sense:
 
-| Term | Plain meaning in this post |
-| --- | --- |
-| Bitcoin authority | A BTC key, multisig, transaction commitment, or later UTXO proof that can approve a CKB transition |
-| Typed intent | The exact structured message that a signer approves |
-| ProofReceipt | A typed record of what changed and why |
-| Seal mode | How strong the Bitcoin-side link is: key signature, transaction commitment, or UTXO-spend proof |
-| Profile | A package layer that gives the thin core a concrete meaning, such as an agreement |
-| Terminal path | One of the agreed ending branches of a contract, such as repay or claim |
-| Proof plan | The package's list of assumptions, checks and evidence obligations |
-| Audit bundle | The generated review file that collects the package facts and evidence |
+| Term              | Plain meaning in this post                                                                                                                                                          |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Bitcoin authority | A BTC key, multisig, transaction commitment, or later UTXO proof that can approve a CKB transition                                                                                  |
+| Typed intent      | The exact structured and formatted message that a signer approves, saying exactly what transition is authorised                                                                     |
+| ProofReceipt      | The receipt written into the contract source as an **explicit receipt output**. `cellc` produces the checks that make the transaction include that receipt in the right output slot |
+| Canonical schema  | The shared NovaSeal envelope, encoding rule and schema hash that every profile must commit to                                                                                       |
+| Profile           | An upper level package layer that gives the canonical NovaSeal rules a concrete meaning, such as an agreement                                                                       |
+| Conformance gate  | The deterministic manifest, schema-hash, source and evidence check that decides whether a package may claim to be a NovaSeal profile                                                |
+| Terminal path     | One of the agreed ending branches of a contract, such as repay or claim                                                                                                             |
+| Proof plan        | A CellScript package's list of assumptions, checks and evidence obligations, emitted by `cellc`                                                                                     |
+| Audit bundle      | The generated review file that collects the package facts and evidence, emitted by `cellc`                                                                                          |
 
 ## 1. Problem Statement
 
-Many Bitcoin adjacent systems begin from issuance, bridging or layer two execution. NovaSeal starts with a narrower question: how can Bitcoin side authority, such as a BTC key, multisig, transaction commitment or eventually a proved UTXO spend, authorise or condition a CKB native state transition?
+As mentioned above, many Bitcoin adjacent/attached systems begin from issuance, bridging or layer two execution. NovaSeal starts with a narrower question: how can Bitcoin side authority, such as a BTC key, multisig, transaction commitment or eventually a proved UTXO spend, authorise or condition a CKB native state transition?
 
 CKB's Cell model natively supports explicit objects. A Cell can be consumed once, replaced, split into terminal outputs, or checked by separate lock and type logic. That provides a strict vocabulary for financial agreements, receipts, policy hashes, expiry rules and composable assets.
 
-Instead of copying oracle-heavy DeFi designs into a Bitcoin wrapper, NovaSeal builds Cell-native financial objects with explicit authority, terminal paths and audit records. Contracts settled by pre agreed terms rather than continuous off chain price feeds fit CKB's object model more directly than account-based lending pools.
+Instead of copying oracle-heavy DeFi designs into a Bitcoin wrapper, NovaSeal intends to build Cell-native financial objects with explicit authority, terminal paths and audit records， as **contracts settled by pre agreed terms rather than continuous off chain price probably feeds fit CKB's object model more directly than account-based lending pools.**
 
 ## 2. Core Flow
 
-The minimal NovaSeal flow is straightforward. A CKB object exists as a Cell. A Bitcoin authority signs, or later seals, a typed intent. CKB verifies that the requested transition is allowed. The old Cell is consumed. A new Cell, a terminal output or both are created. A ProofReceipt records the outcome for builders, wallets, indexers and auditors.
+The minimal NovaSeal flow is straightforward. A CKB object always exists as a Cell. A Bitcoin authority signs, or later seals, a typed intent. Then CKB verifies that the requested transition is allowed. The old Cell is consumed. A new Cell, a terminal output or both are created. A ProofReceipt records the outcome for builders, wallets, indexers and auditors.
 
 ```mermaid
 flowchart LR
@@ -44,25 +44,27 @@ flowchart LR
     C ==> F[ProofReceipt]
 ```
 
-In v0, Bitcoin authority means key or multisig authorisation. It lets a BTC key holder move or condition CKB state. Stronger Bitcoin sealing profiles can come later, but they should not be smuggled into the v0 claim.
+In v0, Bitcoin authority means key or multisig authorisation. It lets a BTC key holder move or condition CKB state. Stronger Bitcoin sealing profiles can come later, but currently they are not smuggled into the v0 claim. ;)
 
-## 3. NovaSeal Core
+## 3. NovaSeal Canonical
 
-NovaSeal core should stay small. Its job is to represent a CKB object whose state can be authorised by Bitcoin side authority, bind a transition to a typed intent, enforce replay and validity boundaries such as nonce and expiry, connect the transition to a policy hash, and produce or check a receipt when the profile requires one.
+NovaSeal should be treated as a protocol family, not as a monolithic runtime core contract. The shared anchor is `NovaSealCanonicalV0`: a canonical schema, encoding rule and conformance target. Its job is to define the common envelope that every NovaSeal profile must commit to: authority, action, subject, nonce, expiry, policy hash, state commitment, profile body hash and payout commitment.
 
-Core should not know what a borrower or lender is. It should not carry interest rate logic, liquidation rules, collateral ratios, repayment schedules or product names. Once those ideas enter core, NovaSeal becomes a lending protocol by accident. Core stays focused on authority, intent, Cell movement and auditability; profiles describe the object being moved.
+Canonical should not know what a borrower or lender is. It should not carry interest rate logic, liquidation rules, collateral ratios, repayment schedules or product names. Once those ideas enter the canonical layer, NovaSeal becomes a lending protocol by accident. Canonical stays focused on the common signed envelope and evidence obligations; profiles describe the object being moved.
 
-| Core concept | Meaning |
+| Canonical concept | Meaning |
 | --- | --- |
 | Bitcoin authority | The party or Bitcoin side condition allowed to authorise a Cell transition |
-| Typed intent | The canonical message being authorised |
-| Cell transition | The CKB state movement being enforced |
+| Typed intent | The profile message whose signed object commits to the canonical envelope |
+| State commitment | The profile's old and new state commitments |
 | Policy hash | The package or ruleset that defines the valid transition |
 | Nonce and expiry | Replay and validity boundaries |
-| ProofReceipt | The typed record of the transition and its outcome |
+| Receipt commitment | The typed commitment to the transition outcome |
 | Seal mode | The strength and form of the Bitcoin side linkage |
 
 Package boundaries matter. NovaSeal should be inspectable as a package, not only as a compiled contract. A reviewer should be able to see the schemas, fixtures, receipts, proof plan and assumptions that make the object meaningful.
+
+The current v0 skeleton declares this boundary in its manifest as `canonical_schema = "NovaSealCanonicalV0"` and pins the schema hash of `schemas/nova_seal_canonical_envelope_v0.schema`. That package is a canonical example and fixture baseline. It is not a runtime boss contract that Agreement must call.
 
 ## 4. Seal and Authority Modes
 
@@ -81,24 +83,24 @@ NovaSeal separates authority from sealing. A Bitcoin signature proves that a key
 
 This separation prevents scope creep. v0 remains useful without claiming Bitcoin finality. Later profiles can add stronger Bitcoin commitments without forcing every early NovaSeal object to carry that cost.
 
-## 5. Core vs Profiles
+## 5. Canonical vs Profiles
 
-Business meaning lives in profiles. NovaSeal core defines how authority, typed intent, Cell transition, replay protection and receipt output fit together. A profile defines what the object means.
+Business meaning lives in profiles. `NovaSealCanonicalV0` defines the shared envelope and evidence obligations. A profile defines what the object means and enforces its own state machine on-chain.
 
 | Layer | Name | Role |
 | --- | --- | --- |
-| Core | NovaSeal Core | BTC authority, typed intent, Cell transition and receipt |
+| Canonical | NovaSealCanonicalV0 | Schema hash, typed envelope, replay boundary and receipt commitment |
 | Seal profiles | Key signature, transaction commitment, UTXO seal | Different strengths of Bitcoin linkage |
 | Object profiles | Fungible, Receipt, Agreement | Different kinds of CKB objects |
 | Application packages | MVB, RWA, stable receipt, position contract | Concrete use cases built on profiles |
 
 ```mermaid
 flowchart TD
-    A[NovaSeal Core] ==> A1[Bitcoin authority]
-    A ==> A2[Typed intent]
-    A ==> A3[CKB Cell transition]
-    A ==> A4[ProofReceipt]
-    A ==> A5[Nonce / expiry / policy hash]
+    A[NovaSealCanonicalV0] ==> A1[Authority binding]
+    A ==> A2[Canonical envelope hash]
+    A ==> A3[Nonce / expiry / policy hash]
+    A ==> A4[Profile body hash]
+    A ==> A5[Receipt commitment]
 
     B[Seal Profiles] ==> B1[BTC Key Signature]
     B ==> B2[BTC Transaction Commitment]
@@ -115,6 +117,20 @@ flowchart TD
 ```
 
 This prevents scope creep into specific verticals such as lending, RWA or Bitcoin assets, keeping the core framework auditable and composable.
+
+Profiles do not call a separate NovaSeal Core runtime action. The constraint is schema and package level: a profile must declare `conforms_to = "NovaSealCanonicalV0"`, pin `canonical_schema_hash`, commit its signed intent to `NovaSealCanonicalEnvelopeV0`, and pass the deterministic conformance gate. The gate checks the manifest, schema hash, required source surface, wallet signing vectors, runtime verifier pinning and live/devnet evidence. If that check fails, the package may be NovaSeal-inspired, but it is not a NovaSeal profile. A gentleman may wear a top hat; the gate still checks the ticket.
+
+```mermaid
+flowchart LR
+    A[Profile manifest<br/>conforms_to = NovaSealCanonicalV0] ==> B[Deterministic conformance gate]
+    C[Canonical schema hash] ==> B
+    D[Profile signed intent<br/>canonical_envelope_hash] ==> B
+    E[Wallet vectors and verifier pins] ==> B
+    F[Live/devnet acceptance evidence] ==> B
+    B ==> G[May claim NovaSeal profile]
+```
+
+This is close in spirit to RGB's strict-encoding discipline: do not trust a compiler label when a schema hash, canonical preimage and recomputable digest can be checked. NovaSeal keeps CKB runtime enforcement, but borrows the habit of making type commitments explicit.
 
 ## 6. Agreement Profile: Terminal Paths
 
@@ -220,6 +236,8 @@ The exact directory tree is flexible; the requirement is that a developer can lo
 
 CellScript fits this project because the package is not just a pile of scripts. It can carry schemas, fixtures, receipts and audit evidence beside the contract logic, which makes the work more reviewable.
 
+For the Agreement profile, devnet acceptance now includes conformance evidence. A release gate can therefore be deterministic for local readiness: it returns the same answer from the same manifest, source tree, pinned artefacts and evidence files. Production readiness remains a stronger claim because public/shared CellDep availability and external verifier TCB attestation must be supplied outside the local repository.
+
 ## 11. Security Boundaries
 
 NovaSeal v0 should claim only what the current evidence supports. It can say that BTC key or multisig authority can authorise CKB Cell transitions, that CKB can enforce deterministic state movement, that receipts can record outcomes, and that profiles can express specific financial objects.
@@ -232,6 +250,7 @@ It should not claim Bitcoin finality, BTC collateral seizure, native Lightning s
 | Wrong intent signing | Canonical typed intent and clear wallet display are needed |
 | Replay | Nonce, expiry and old Cell binding |
 | Fake verifier | Verifier namespace and artefact pinning are required |
+| Fake profile claim | `conforms_to = "NovaSealCanonicalV0"`, `canonical_schema_hash`, signed canonical envelope commitment and the conformance gate are required |
 | BTC reorg | Not relevant until BTC commitment or SPV profiles |
 | CKB reorg | Wait for CKB maturity |
 | Receipt mismatch | Receipt must be checked or clearly audit only |

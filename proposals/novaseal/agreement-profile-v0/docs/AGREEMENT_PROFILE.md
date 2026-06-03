@@ -1,8 +1,8 @@
 # Agreement Profile
 
 NovaSeal Agreement Profile v0 is a profile package, not a change to NovaSeal
-core. It gives financial meaning to an otherwise thin NovaSeal-style state
-transition discipline.
+Canonical. It gives financial meaning to the shared NovaSeal transition
+discipline.
 
 In the staged NovaSeal roadmap, this work is **v0.2 Agreement Profile**. The
 `v0` in this package name means "first version of the Agreement Profile schema
@@ -10,11 +10,51 @@ and package", not "the base NovaSeal roadmap stage".
 
 ## Design Motto
 
-Core stays thin; profiles carry meaning.
+Canonical stays thin; profiles carry meaning.
 
-NovaSeal core should remain focused on authority, typed intents, CKB Cell
-transitions, nonce/expiry, policy hashes, and ProofReceipts. Agreement semantics
-belong here.
+`NovaSealCanonicalV0` remains focused on authority, typed envelopes, CKB Cell
+transition commitments, nonce/expiry, policy hashes, and receipt commitments.
+Agreement semantics belong here.
+
+## Canonical Conformance
+
+Agreement Profile now declares:
+
+```toml
+conforms_to = "NovaSealCanonicalV0"
+canonical_schema_hash = "0x703cef6e07983f8c25f9d3f467aa74246d972a839592c9689418e9785b8b5136"
+```
+
+The contract does not call a Core runtime. Instead, `NovaAgreementSignedIntentV0`
+contains:
+
+```text
+core: NovaAgreementIntentCoreV0
+canonical_envelope_hash: Byte32
+expected_receipt_hash: Byte32
+```
+
+Each transition recomputes `NovaSealCanonicalEnvelopeV0` from the Agreement
+body:
+
+| Canonical field | Agreement mapping |
+| --- | --- |
+| `profile_id` | `agreement_id` |
+| `policy_hash` | `terms_hash` |
+| `action` / `terminal_path` | originate, repay, or claim path id |
+| `subject_id` | `agreement_id` |
+| `old_state_commitment` | previous `latest_receipt_hash`, or zero at origination |
+| `new_state_commitment` | new materialised receipt commitment |
+| `old_nonce` / `new_nonce` | Agreement nonce transition |
+| `expiry` | `expiry_timepoint` |
+| `authority_hash` | borrower for originate/repay, lender for claim |
+| `profile_body_hash` | `hash_blake2b_packed(NovaAgreementIntentCoreV0)` |
+| `payout_commitment_hash` | typed payout or payout-pair commitment |
+
+The signed intent must contain the matching `canonical_envelope_hash`. This
+makes Canonical influence the signed and verified Agreement transition without
+forcing Agreement to import or call a separate Core contract. Rather civilised,
+by protocol standards.
 
 ## v0 Shape
 
@@ -56,7 +96,8 @@ party rejects, and wrong-settlement rejects.
 `repay_before_expiry`, and `claim_after_expiry` action ELFs in `ckb-vm`. It
 covers the action/type-script layer for time guards, party guards, nonce
 increments, latest-receipt-hash binding, receipt output fields, typed payout output
-fields, terms-hash output binding, and preserved-field checks.
+fields, terms-hash output binding, canonical-envelope-hash binding, and
+preserved-field checks.
 
 `novaseal_agreement_tx_harness` constructs deterministic resolved transactions
 and runs them through `ckb-script` plus the CKB non-contextual/contextual

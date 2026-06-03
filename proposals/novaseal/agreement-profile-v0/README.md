@@ -20,6 +20,10 @@ NovaSeal core stays thin; profiles carry meaning.
 
 This package is separate from `../v0-mvp-skeleton/`. It does not modify the
 NovaSeal core state type, BTC verifier surface, or generic verifier registry.
+It is allowed to call itself a NovaSeal profile only because `Cell.toml`
+declares `conforms_to = "NovaSealCanonicalV0"`, pins `canonical_schema_hash`,
+and the deterministic production and devnet acceptance gates verify that
+declaration against the canonical schema hash, manifest and source surface.
 
 Implemented in this slice:
 

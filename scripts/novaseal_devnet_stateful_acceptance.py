@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from novaseal_devnet_stateful_live import file_sha256_hex, git_commit, source_tree_hash
+from novaseal_production_gates import validate_agreement_profile_conformance
 
 
 CORE_ROOT = Path("proposals/novaseal/v0-mvp-skeleton")
@@ -302,6 +303,11 @@ def build_report(repo_root: Path) -> dict[str, Any]:
         load_json(repo_root / "target/novaseal-agreement-devnet-stateful-live.json"),
         repo_root,
     )
+    agreement_conformance = validate_agreement_profile_conformance(
+        repo_root / CORE_ROOT / "Cell.toml",
+        repo_root / AGREEMENT_ROOT / "Cell.toml",
+        repo_root / AGREEMENT_ROOT,
+    )
     core_live_passed = (
         live_core.get("status") == "passed"
         and live_core.get("live_devnet_rpc_executed") is True
@@ -342,6 +348,7 @@ def build_report(repo_root: Path) -> dict[str, Any]:
         and live_agreement.get("wrong_lender_claim_signature_rejected") is True
         and live_agreement.get("post_negative_active_still_live") is True
         and live_agreement.get("post_claim_negative_active_still_live") is True
+        and agreement_conformance.get("status") == "passed"
     )
 
     core_blockers: list[dict[str, str]] = []
@@ -377,6 +384,14 @@ def build_report(repo_root: Path) -> dict[str, Any]:
                 required_for="first live agreement cell creation",
             )
         )
+    if agreement_conformance.get("status") != "passed":
+        failed = [name for name, value in agreement_conformance.get("checks", {}).items() if value is not True]
+        agreement_blockers.append(
+            blocker(
+                f"Agreement Profile does not satisfy NovaSealCanonicalV0 conformance: {', '.join(failed)}.",
+                required_for="claiming Agreement Profile as a NovaSeal profile",
+            )
+        )
 
     scenarios = [
         {
@@ -407,6 +422,7 @@ def build_report(repo_root: Path) -> dict[str, Any]:
             "actions": [action.name for action in agreement_actions],
             "blockers": agreement_blockers,
             "live_devnet_evidence": live_agreement,
+            "conformance_evidence": agreement_conformance,
             "existing_local_evidence": summary_from_report(
                 agreement_tx,
                 [
@@ -448,6 +464,7 @@ def build_report(repo_root: Path) -> dict[str, Any]:
             "prove negative dry-runs fail from the expected lifecycle script and artifact hash",
             "use one stable type-script identity for a lifecycle, or an explicitly audited dispatcher/bootstrap surface",
             "run negative cases as dry-run/send-test rejections without mutating live state",
+            "require every NovaSeal profile to pass conforms_to = NovaSealCanonicalV0 conformance",
         ],
         "scenarios": scenarios,
         "blocker_count": len(all_blockers),

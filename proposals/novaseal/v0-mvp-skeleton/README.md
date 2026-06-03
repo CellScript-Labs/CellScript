@@ -34,6 +34,12 @@
 
 **Purpose**: Set up the strict feasibility target for the core NovaSeal v0 thesis ("BTC key or multisig authorises a typed CKB Cell transition under explicit policy, with nonce/expiry replay protection and an auditable ProofReceipt") as a first-class CellScript package using current 0.16 capabilities where available.
 
+The package manifest declares `canonical_schema = "NovaSealCanonicalV0"` and
+pins the schema hash for `schemas/nova_seal_canonical_envelope_v0.schema`. A
+downstream package must declare `conforms_to = "NovaSealCanonicalV0"`, pin the
+same `canonical_schema_hash`, and pass the deterministic conformance gate before
+it may be treated as a NovaSeal profile rather than a NovaSeal-inspired package.
+
 This skeleton deliberately **excludes**:
 - Agreement Profile semantics (roadmap v0.2; implemented as a separate package)
 - Full Fiber channel open/close/force-close integration (roadmap v0.3)

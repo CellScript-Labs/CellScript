@@ -51,6 +51,22 @@ struct AgreementSignaturePayload {
     signature: [u8; 64],
 }
 
+struct NovaSealCanonicalEnvelopeV0 {
+    profile_id: Hash,
+    policy_hash: Hash,
+    action: u8,
+    terminal_path: u8,
+    subject_id: Hash,
+    old_state_commitment: Hash,
+    new_state_commitment: Hash,
+    old_nonce: u64,
+    new_nonce: u64,
+    expiry: u64,
+    authority_hash: Hash,
+    profile_body_hash: Hash,
+    payout_commitment_hash: Hash,
+}
+
 struct NovaAgreementIntentCoreV0 {
     action: u8,
     agreement_id: Hash,
@@ -68,6 +84,7 @@ struct NovaAgreementIntentCoreV0 {
 
 struct NovaAgreementSignedIntentV0 {
     core: NovaAgreementIntentCoreV0,
+    canonical_envelope_hash: Hash,
     expected_receipt_hash: Hash,
 }
 
@@ -199,6 +216,21 @@ where
         payout_commitment_hash: payout_commitment_hash
     }
     let materialized_receipt_hash = hash_blake2b_packed(receipt_commitment)
+    let canonical_envelope_hash = hash_blake2b_packed(NovaSealCanonicalEnvelopeV0 {
+        profile_id: terms.agreement_id,
+        policy_hash: terms.terms_hash,
+        action: PATH_ORIGINATE,
+        terminal_path: PATH_ORIGINATE,
+        subject_id: terms.agreement_id,
+        old_state_commitment: Hash::zero(),
+        new_state_commitment: materialized_receipt_hash,
+        old_nonce: 0,
+        new_nonce: 0,
+        expiry: terms.expiry_timepoint,
+        authority_hash: terms.borrower_authority_hash,
+        profile_body_hash: intent_core_hash,
+        payout_commitment_hash: payout_commitment_hash
+    })
     require terms.version == AGREEMENT_VERSION
     require terms.collateral_asset_kind == ASSET_KIND_CKB
     require terms.principal_asset_kind == ASSET_KIND_CKB
@@ -222,6 +254,7 @@ where
     require intent.core.terminal_amount == terms.principal_amount
     require intent.core.payout_commitment_hash == payout_commitment_hash
     require intent.core.expiry_timepoint == terms.expiry_timepoint
+    require intent.canonical_envelope_hash == canonical_envelope_hash
     require intent.expected_receipt_hash == materialized_receipt_hash
     // In this v0 profile the authority hash is the 32-byte key/lock identifier
     // used by the harness. It is not yet a general wallet identity scheme.
@@ -343,6 +376,21 @@ where
         payout_commitment_hash: payout_commitment_hash
     }
     let materialized_receipt_hash = hash_blake2b_packed(receipt_commitment)
+    let canonical_envelope_hash = hash_blake2b_packed(NovaSealCanonicalEnvelopeV0 {
+        profile_id: active.agreement_id,
+        policy_hash: active.terms_hash,
+        action: PATH_REPAY_BEFORE_EXPIRY,
+        terminal_path: PATH_REPAY_BEFORE_EXPIRY,
+        subject_id: active.agreement_id,
+        old_state_commitment: active.latest_receipt_hash,
+        new_state_commitment: materialized_receipt_hash,
+        old_nonce: active.nonce,
+        new_nonce: active.nonce + 1,
+        expiry: active.expiry_timepoint,
+        authority_hash: active.borrower_authority_hash,
+        profile_body_hash: intent_core_hash,
+        payout_commitment_hash: payout_commitment_hash
+    })
     require active.version == AGREEMENT_VERSION
     require active.status == STATUS_ACTIVE
     require active.collateral_asset_kind == ASSET_KIND_CKB
@@ -360,6 +408,7 @@ where
     require intent.core.terminal_amount == repayment_amount
     require intent.core.payout_commitment_hash == payout_commitment_hash
     require intent.core.expiry_timepoint == active.expiry_timepoint
+    require intent.canonical_envelope_hash == canonical_envelope_hash
     require intent.expected_receipt_hash == materialized_receipt_hash
     require borrower_sig.pubkey == active.borrower_authority_hash
     verifier::btc::bip340::require_signature(signed_intent_hash, borrower_sig.pubkey, borrower_sig.signature)
@@ -479,6 +528,21 @@ where
         payout_commitment_hash: payout_commitment_hash
     }
     let materialized_receipt_hash = hash_blake2b_packed(receipt_commitment)
+    let canonical_envelope_hash = hash_blake2b_packed(NovaSealCanonicalEnvelopeV0 {
+        profile_id: active.agreement_id,
+        policy_hash: active.terms_hash,
+        action: PATH_CLAIM_AFTER_EXPIRY,
+        terminal_path: PATH_CLAIM_AFTER_EXPIRY,
+        subject_id: active.agreement_id,
+        old_state_commitment: active.latest_receipt_hash,
+        new_state_commitment: materialized_receipt_hash,
+        old_nonce: active.nonce,
+        new_nonce: active.nonce + 1,
+        expiry: active.expiry_timepoint,
+        authority_hash: active.lender_authority_hash,
+        profile_body_hash: intent_core_hash,
+        payout_commitment_hash: payout_commitment_hash
+    })
     require active.version == AGREEMENT_VERSION
     require active.status == STATUS_ACTIVE
     require active.collateral_asset_kind == ASSET_KIND_CKB
@@ -496,6 +560,7 @@ where
     require intent.core.terminal_amount == claim_amount
     require intent.core.payout_commitment_hash == payout_commitment_hash
     require intent.core.expiry_timepoint == active.expiry_timepoint
+    require intent.canonical_envelope_hash == canonical_envelope_hash
     require intent.expected_receipt_hash == materialized_receipt_hash
     require lender_sig.pubkey == active.lender_authority_hash
     verifier::btc::bip340::require_signature(signed_intent_hash, lender_sig.pubkey, lender_sig.signature)
