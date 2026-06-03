@@ -2,7 +2,10 @@ use crate::ast::*;
 use crate::error::{CompileError, Result, Span};
 use crate::lexer::token::{Token, TokenKind};
 
-const MAX_PARSE_RECURSION_DEPTH: u16 = 128;
+// Each syntactic nesting level crosses several recursive-descent frames.
+// Keep this below the point where the default Rust test stack can abort before
+// the guard has a chance to return a controlled parser error.
+const MAX_PARSE_RECURSION_DEPTH: u16 = 32;
 
 pub struct Parser<'a> {
     tokens: &'a [Token],
@@ -3202,6 +3205,16 @@ mod tests {
             "if true ".repeat(depth),
             " else 1".repeat(depth)
         );
+        let tokens = lex(&input).unwrap();
+        let err = parse(&tokens).unwrap_err();
+
+        assert!(err.message.contains("parser recursion limit exceeded"), "{}", err.message);
+    }
+
+    #[test]
+    fn parser_rejects_deep_parenthesized_expression_before_stack_overflow() {
+        let depth = MAX_PARSE_RECURSION_DEPTH as usize + 8;
+        let input = format!("module test\n\naction test() -> u64\nwhere\n    return {}1{}\n", "(".repeat(depth), ")".repeat(depth));
         let tokens = lex(&input).unwrap();
         let err = parse(&tokens).unwrap_err();
 
