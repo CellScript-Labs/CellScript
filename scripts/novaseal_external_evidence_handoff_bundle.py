@@ -27,6 +27,9 @@ REPORT_PERSON = b"NovaExtHandoff"
 PUBLIC_BTC_SPV_EVIDENCE = "proposals/novaseal/v0-mvp-skeleton/proofs/public_btc_spv_evidence.json"
 PUBLIC_CELLDEP_ATTESTATION = "proposals/novaseal/v0-mvp-skeleton/proofs/public_shared_cell_dep_attestation.json"
 EXTERNAL_TCB_ATTESTATION = "proposals/novaseal/v0-mvp-skeleton/proofs/bip340_external_tcb_review_attestation.json"
+RWA_LEGAL_REGISTRY_REVIEW_EVIDENCE = (
+    "proposals/novaseal/rwa-receipt-profile-v0/proofs/legal_registry_review_evidence.json"
+)
 
 REQUIRED_BTC_SPV_PROFILES = [
     "btc-transaction-commitment-profile-v0",
@@ -70,6 +73,47 @@ REQUIRED_EXTERNAL_TCB_FIELDS = [
     "request_handoff.group",
 ]
 
+REQUIRED_RWA_LEGAL_REVIEW_FIELDS = [
+    "profile",
+    "reviewer",
+    "review_date",
+    "review_scope",
+    "registry.authority",
+    "registry.jurisdiction",
+    "registry.registry_report_hash",
+    "profile_source_tree_sha256",
+    "report_uri",
+    "request_handoff.bundle",
+    "request_handoff.bundle_hash",
+    "request_handoff.bundle_hash_algorithm",
+    "request_handoff.group",
+]
+
+RWA_LEGAL_REVIEW_SOURCE_HASH_PATHS = [
+    "proposals/novaseal/rwa-receipt-profile-v0/Cell.toml",
+    "proposals/novaseal/rwa-receipt-profile-v0/src/nova_rwa_receipt_type.cell",
+    "proposals/novaseal/rwa-receipt-profile-v0/src/nova_rwa_receipt_lifecycle_type.cell",
+    "proposals/novaseal/rwa-receipt-profile-v0/schemas",
+    "proposals/novaseal/rwa-receipt-profile-v0/fixtures",
+    "proposals/novaseal/rwa-receipt-profile-v0/proofs/invariant_matrix.json",
+]
+
+RWA_LEGAL_REVIEW_FIELD_CONSTRAINTS = {
+    "profile": "rwa-receipt-profile-v0",
+    "reviewer": "real external legal or registry reviewer identity; placeholder, example, and unknown tokens are rejected",
+    "review_date": "UTC date in YYYY-MM-DD form; future dates are rejected",
+    "review_scope": "exact RWA receipt legal-title, custody, registry-state, oracle-fact, and enforceability review scope",
+    "registry.authority": "real registry or custodian authority identity; placeholder, example, and unknown tokens are rejected",
+    "registry.jurisdiction": "explicit real-world jurisdiction; placeholder, example, and unknown tokens are rejected",
+    "registry.registry_report_hash": "0x-prefixed 32-byte non-placeholder hash of the external registry/legal review report",
+    "profile_source_tree_sha256": "0x-prefixed 32-byte non-placeholder SHA-256 hash of the RWA profile source tree",
+    "report_uri": "HTTPS URI for the public legal/registry review report or source-controlled review commit; example domains are rejected",
+    "request_handoff.bundle": "target/novaseal-external-evidence-handoff-bundle.json",
+    "request_handoff.bundle_hash": "0x-prefixed 32-byte hash of the NovaSeal external evidence handoff bundle",
+    "request_handoff.bundle_hash_algorithm": "blake2b-256(person=NovaExtHandoff)",
+    "request_handoff.group": "rwa_legal_registry_review_evidence",
+}
+
 
 def hex0x(data: bytes) -> str:
     return "0x" + data.hex()
@@ -84,6 +128,26 @@ def report_hash(label: str, value: Any) -> str:
     h.update(label.encode("utf-8"))
     h.update(b"\x00")
     h.update(canonical_json(value))
+    return hex0x(h.digest())
+
+
+def source_tree_hash(paths: list[str]) -> str:
+    files: set[Path] = set()
+    allowed_suffixes = {".cell", ".schema", ".toml", ".py", ".json", ".rs"}
+    for raw in paths:
+        path = ROOT / raw
+        if path.is_file():
+            files.add(path)
+        elif path.is_dir():
+            for child in path.rglob("*"):
+                if child.is_file() and (child.name == "Cargo.lock" or child.suffix in allowed_suffixes):
+                    files.add(child)
+    h = hashlib.sha256()
+    for path in sorted(files):
+        rel_path = str(path.relative_to(ROOT))
+        h.update(rel_path.encode("utf-8"))
+        h.update(b"\x00")
+        h.update(hashlib.sha256(path.read_bytes()).digest())
     return hex0x(h.digest())
 
 
@@ -227,6 +291,33 @@ def attestation_case(
     return result
 
 
+def rwa_legal_registry_review_case(external_attestation_adapter: dict[str, Any]) -> dict[str, Any]:
+    source_hash = source_tree_hash(RWA_LEGAL_REVIEW_SOURCE_HASH_PATHS)
+    checks = {
+        "source_external_attestation_adapter_passed": external_attestation_adapter.get("status") == "passed",
+        "source_external_attestation_adapter_status_request_ready": external_attestation_adapter.get("adapter_status")
+        == "request_ready_external_attestations_required",
+        "production_output_matches": RWA_LEGAL_REGISTRY_REVIEW_EVIDENCE.endswith(
+            "legal_registry_review_evidence.json"
+        ),
+        "profile_source_tree_hash_current": len(source_hash) == 66 and source_hash.startswith("0x"),
+    }
+    return {
+        "group": "rwa_legal_registry_review_evidence",
+        "status": "passed" if all(checks.values()) else "failed",
+        "checks": checks,
+        "source_adapter": str(DEFAULT_EXTERNAL_ATTESTATION_ADAPTER.relative_to(ROOT)),
+        "source_adapter_hash": report_hash("external_attestation_adapter", external_attestation_adapter),
+        "production_output": RWA_LEGAL_REGISTRY_REVIEW_EVIDENCE,
+        "required_external_fields": REQUIRED_RWA_LEGAL_REVIEW_FIELDS,
+        "field_constraints": RWA_LEGAL_REVIEW_FIELD_CONSTRAINTS,
+        "expected_values": {
+            "profile": "rwa-receipt-profile-v0",
+            "profile_source_tree_sha256": source_hash,
+        },
+    }
+
+
 def build_report(btc_spv_adapter: dict[str, Any], external_attestation_adapter: dict[str, Any]) -> dict[str, Any]:
     cases = [
         btc_spv_handoff_case(btc_spv_adapter),
@@ -244,6 +335,7 @@ def build_report(btc_spv_adapter: dict[str, Any], external_attestation_adapter: 
             production_output=EXTERNAL_TCB_ATTESTATION,
             required_fields=REQUIRED_EXTERNAL_TCB_FIELDS,
         ),
+        rwa_legal_registry_review_case(external_attestation_adapter),
     ]
     production_outputs = [case["production_output"] for case in cases]
     status = "passed" if all(case["status"] == "passed" for case in cases) else "failed"

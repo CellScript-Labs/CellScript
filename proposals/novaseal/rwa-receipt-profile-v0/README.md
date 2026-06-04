@@ -38,6 +38,7 @@ price, legal enforceability, or oracle facts.
 | Invariant matrix | implemented | reviewable |
 | Live devnet materialise -> claim -> settle | implemented | `target/novaseal-rwa-receipt-devnet-stateful-live.json` |
 | Profile-specific wallet/service fixtures | implemented | `target/novaseal-profile-operator-fixtures.json` + `target/novaseal-service-builder-fixtures.json` |
+| Legal/registry review evidence | missing | `proposals/novaseal/rwa-receipt-profile-v0/proofs/legal_registry_review_evidence.json` external-required |
 | Public/shared CellDep attestation | missing | external-required |
 | External BIP340 TCB review | missing | external-required |
 

@@ -45,11 +45,15 @@ const TCB_REVIEW: &str = "target/novaseal-bip340-tcb-review.json";
 const PUBLIC_CELLDEP_ATTESTATION: &str = "proposals/novaseal/v0-mvp-skeleton/proofs/public_shared_cell_dep_attestation.json";
 const EXTERNAL_TCB_ATTESTATION: &str = "proposals/novaseal/v0-mvp-skeleton/proofs/bip340_external_tcb_review_attestation.json";
 const PUBLIC_BTC_SPV_EVIDENCE: &str = "proposals/novaseal/v0-mvp-skeleton/proofs/public_btc_spv_evidence.json";
+const RWA_LEGAL_REGISTRY_REVIEW_EVIDENCE: &str =
+    "proposals/novaseal/rwa-receipt-profile-v0/proofs/legal_registry_review_evidence.json";
 const PUBLIC_CELLDEP_ATTESTATION_TEMPLATE: &str =
     "proposals/novaseal/v0-mvp-skeleton/proofs/public_shared_cell_dep_attestation.template.json";
 const EXTERNAL_TCB_ATTESTATION_TEMPLATE: &str =
     "proposals/novaseal/v0-mvp-skeleton/proofs/bip340_external_tcb_review_attestation.template.json";
 const PUBLIC_BTC_SPV_EVIDENCE_TEMPLATE: &str = "proposals/novaseal/v0-mvp-skeleton/proofs/public_btc_spv_evidence.template.json";
+const RWA_LEGAL_REGISTRY_REVIEW_TEMPLATE: &str =
+    "proposals/novaseal/rwa-receipt-profile-v0/proofs/legal_registry_review_evidence.template.json";
 
 const EXPECTED_NOVASEAL_CANONICAL_SCHEMA: &str = "NovaSealCanonicalV0";
 const EXPECTED_NOVASEAL_CANONICAL_ENVELOPE: &str = "NovaSealCanonicalEnvelopeV0";
@@ -397,6 +401,68 @@ const EXPECTED_EXTERNAL_TCB_REVIEW_SCOPE: &[&str] = &[
 ];
 const EXPECTED_EXTERNAL_TCB_EXPECTED_VALUE_FIELDS: &[&str] =
     &["artifact_hash", "artifact_hash_algorithm", "review_scope", "source_tree_sha256"];
+const EXPECTED_RWA_LEGAL_REVIEW_EVIDENCE_FIELDS: &[&str] = &[
+    "notes",
+    "profile",
+    "profile_source_tree_sha256",
+    "registry",
+    "report_uri",
+    "request_handoff",
+    "review_date",
+    "review_scope",
+    "reviewer",
+    "schema",
+    "status",
+];
+const EXPECTED_RWA_LEGAL_REVIEW_REGISTRY_FIELDS: &[&str] = &["authority", "jurisdiction", "registry_report_hash"];
+const EXPECTED_RWA_LEGAL_REVIEW_REQUIRED_FIELDS: &[&str] = &[
+    "profile",
+    "reviewer",
+    "review_date",
+    "review_scope",
+    "registry.authority",
+    "registry.jurisdiction",
+    "registry.registry_report_hash",
+    "profile_source_tree_sha256",
+    "report_uri",
+    "request_handoff.bundle",
+    "request_handoff.bundle_hash",
+    "request_handoff.bundle_hash_algorithm",
+    "request_handoff.group",
+];
+const EXPECTED_RWA_LEGAL_REVIEW_FIELD_CONSTRAINTS: &[(&str, &str)] = &[
+    ("profile", "rwa-receipt-profile-v0"),
+    ("reviewer", "real external legal or registry reviewer identity; placeholder, example, and unknown tokens are rejected"),
+    ("review_date", "UTC date in YYYY-MM-DD form; future dates are rejected"),
+    ("review_scope", "exact RWA receipt legal-title, custody, registry-state, oracle-fact, and enforceability review scope"),
+    ("registry.authority", "real registry or custodian authority identity; placeholder, example, and unknown tokens are rejected"),
+    ("registry.jurisdiction", "explicit real-world jurisdiction; placeholder, example, and unknown tokens are rejected"),
+    ("registry.registry_report_hash", "0x-prefixed 32-byte non-placeholder hash of the external registry/legal review report"),
+    ("profile_source_tree_sha256", "0x-prefixed 32-byte non-placeholder SHA-256 hash of the RWA profile source tree"),
+    (
+        "report_uri",
+        "HTTPS URI for the public legal/registry review report or source-controlled review commit; example domains are rejected",
+    ),
+    ("request_handoff.bundle", "target/novaseal-external-evidence-handoff-bundle.json"),
+    ("request_handoff.bundle_hash", "0x-prefixed 32-byte hash of the NovaSeal external evidence handoff bundle"),
+    ("request_handoff.bundle_hash_algorithm", "blake2b-256(person=NovaExtHandoff)"),
+    ("request_handoff.group", "rwa_legal_registry_review_evidence"),
+];
+const EXPECTED_RWA_LEGAL_REVIEW_SCOPE: &[&str] = &[
+    "RWA receipt legal title boundary",
+    "RWA receipt custody and registry-state provenance",
+    "RWA receipt oracle-fact exclusion boundary",
+    "RWA receipt enforceability and jurisdiction boundary",
+];
+const EXPECTED_RWA_LEGAL_REVIEW_EXPECTED_VALUE_FIELDS: &[&str] = &["profile", "profile_source_tree_sha256"];
+const RWA_LEGAL_REVIEW_SOURCE_HASH_PATHS: &[&str] = &[
+    RWA_RECEIPT_MANIFEST,
+    "proposals/novaseal/rwa-receipt-profile-v0/src/nova_rwa_receipt_type.cell",
+    "proposals/novaseal/rwa-receipt-profile-v0/src/nova_rwa_receipt_lifecycle_type.cell",
+    "proposals/novaseal/rwa-receipt-profile-v0/schemas",
+    "proposals/novaseal/rwa-receipt-profile-v0/fixtures",
+    "proposals/novaseal/rwa-receipt-profile-v0/proofs/invariant_matrix.json",
+];
 
 const EXPECTED_FIBER_NODE_EXECUTION_SCHEMA: &str = "novaseal-fiber-node-execution-v0.3";
 const EXPECTED_FIBER_REPO_ORIGIN: &str = "https://github.com/nervosnetwork/fiber.git";
@@ -810,6 +876,8 @@ pub(crate) fn build_report(repo_root: &Path) -> Result<Value> {
         &external_evidence_handoff,
     )?;
     let btc_spv_evidence = validate_btc_spv_evidence(repo_root, PUBLIC_BTC_SPV_EVIDENCE, &external_evidence_handoff)?;
+    let rwa_legal_registry_review =
+        validate_rwa_legal_registry_review(repo_root, RWA_LEGAL_REGISTRY_REVIEW_EVIDENCE, &external_evidence_handoff)?;
     let core_security = validate_core_security_source(repo_root)?;
     let agreement_conformance = validate_agreement_profile_conformance(
         repo_root,
@@ -835,6 +903,7 @@ pub(crate) fn build_report(repo_root: &Path) -> Result<Value> {
         public_attestation: &public_attestation,
         external_review: &external_review,
         btc_spv_evidence: &btc_spv_evidence,
+        rwa_legal_registry_review: &rwa_legal_registry_review,
     })?;
 
     let gates = vec![
@@ -968,6 +1037,12 @@ pub(crate) fn build_report(repo_root: &Path) -> Result<Value> {
             PUBLIC_BTC_SPV_EVIDENCE,
             btc_spv_evidence.clone(),
         ),
+        gate(
+            "rwa_legal_registry_review_evidence",
+            json_pointer_str(&rwa_legal_registry_review, "/status").unwrap_or("failed"),
+            RWA_LEGAL_REGISTRY_REVIEW_EVIDENCE,
+            rwa_legal_registry_review.clone(),
+        ),
     ];
 
     let local_ready = gates
@@ -1003,13 +1078,14 @@ pub(crate) fn build_report(repo_root: &Path) -> Result<Value> {
         "v1_readiness": v1_readiness,
         "gates": gates,
         "policy": {
-            "no_placeholder_closure": "production remains false until public/shared CellDep, public BTC SPV evidence, and external TCB attestations are present",
+            "no_placeholder_closure": "production remains false until public/shared CellDep, public BTC SPV evidence, RWA legal/registry review evidence, and external TCB attestations are present",
             "attestation_templates": [
                 "proposals/novaseal/v0-mvp-skeleton/proofs/public_shared_cell_dep_attestation.template.json",
                 "proposals/novaseal/v0-mvp-skeleton/proofs/bip340_external_tcb_review_attestation.template.json",
             ],
             "external_evidence_templates": [
                 "proposals/novaseal/v0-mvp-skeleton/proofs/public_btc_spv_evidence.template.json",
+                "proposals/novaseal/rwa-receipt-profile-v0/proofs/legal_registry_review_evidence.template.json",
             ],
         },
         "generated_by": {
@@ -1139,6 +1215,12 @@ fn build_v1_readiness(
             PUBLIC_BTC_SPV_EVIDENCE,
             "public BTC inclusion and confirmation proof provenance",
         ),
+        readiness_dimension(
+            "rwa_legal_registry_review_evidence",
+            gate_status("rwa_legal_registry_review_evidence") == "passed",
+            RWA_LEGAL_REGISTRY_REVIEW_EVIDENCE,
+            "external legal and registry review for RWA production claims",
+        ),
     ];
     let local_dimension_names = [
         "architecture_and_profile_conformance",
@@ -1197,6 +1279,7 @@ fn build_v1_readiness(
             "production_ready_requires": [
                 "public/shared CellDep pinning attestation",
                 "public BTC SPV evidence for BTC-facing profiles",
+                "RWA legal/registry review evidence for RWA receipt production claims",
                 "external BIP340 runtime verifier TCB review attestation",
                 "cellc certify --plugin novaseal-profile-v0 --require-production passes",
             ],
@@ -2676,6 +2759,7 @@ struct ProfileCertificationInputs<'a> {
     public_attestation: &'a Value,
     external_review: &'a Value,
     btc_spv_evidence: &'a Value,
+    rwa_legal_registry_review: &'a Value,
 }
 
 fn validate_profile_certification(input: ProfileCertificationInputs<'_>) -> Result<Value> {
@@ -2695,6 +2779,7 @@ fn validate_profile_certification(input: ProfileCertificationInputs<'_>) -> Resu
         public_attestation,
         external_review,
         btc_spv_evidence,
+        rwa_legal_registry_review,
     } = input;
     let schema_files = expected_files(repo_root, &repo_root.join(AGREEMENT_ROOT).join("schemas"), EXPECTED_AGREEMENT_SCHEMA_FILES)?;
     let fixture_files = expected_files(repo_root, &repo_root.join(AGREEMENT_ROOT).join("fixtures"), EXPECTED_AGREEMENT_FIXTURES)?;
@@ -2703,8 +2788,12 @@ fn validate_profile_certification(input: ProfileCertificationInputs<'_>) -> Resu
     let service_builder_fixture_detail = validate_service_builder_fixture_detail(service_builder_fixtures);
     let btc_spv_adapter_detail = validate_btc_spv_evidence_adapter_detail(btc_spv_evidence_adapter);
     let external_attestation_adapter_detail = validate_external_attestation_adapter_detail(external_attestation_adapter);
-    let external_evidence_handoff_detail =
-        validate_external_evidence_handoff_detail(external_evidence_handoff, btc_spv_evidence_adapter, external_attestation_adapter);
+    let external_evidence_handoff_detail = validate_external_evidence_handoff_detail(
+        repo_root,
+        external_evidence_handoff,
+        btc_spv_evidence_adapter,
+        external_attestation_adapter,
+    );
     let invariant_matrix = validate_invariant_matrix(repo_root, &repo_root.join(AGREEMENT_ROOT).join("proofs/invariant_matrix.json"))?;
     let fungible_xudt_profile = validate_fungible_xudt_profile_package(repo_root)?;
     let rwa_receipt_profile = validate_rwa_receipt_profile_package(repo_root)?;
@@ -2742,6 +2831,7 @@ fn validate_profile_certification(input: ProfileCertificationInputs<'_>) -> Resu
         "public_shared_cell_dep_attested": json_pointer_str(public_attestation, "/status") == Some("passed"),
         "external_bip340_tcb_review_attested": json_pointer_str(external_review, "/status") == Some("passed"),
         "public_btc_spv_evidence_attested": json_pointer_str(btc_spv_evidence, "/status") == Some("passed"),
+        "rwa_legal_registry_review_attested": json_pointer_str(rwa_legal_registry_review, "/status") == Some("passed"),
     });
     let local_checks = json!({
         "conformance_gate_passed": json_pointer_str(agreement_conformance, "/status") == Some("passed"),
@@ -2794,6 +2884,7 @@ fn validate_profile_certification(input: ProfileCertificationInputs<'_>) -> Resu
         "local_checks": local_checks,
         "external_checks": external_checks,
         "public_btc_spv_evidence": btc_spv_evidence,
+        "rwa_legal_registry_review": rwa_legal_registry_review,
         "schema_files": schema_files,
         "fixture_files": fixture_files,
         "wallet_vectors": wallet_detail,
@@ -3229,7 +3320,12 @@ fn validate_external_attestation_adapter_detail(report: &Value) -> Value {
     })
 }
 
-fn validate_external_evidence_handoff_detail(report: &Value, btc_spv_adapter: &Value, external_attestation_adapter: &Value) -> Value {
+fn validate_external_evidence_handoff_detail(
+    repo_root: &Path,
+    report: &Value,
+    btc_spv_adapter: &Value,
+    external_attestation_adapter: &Value,
+) -> Value {
     let cases = report.get("cases").and_then(Value::as_array).cloned().unwrap_or_default();
     let mut by_group: BTreeMap<String, Vec<Value>> = BTreeMap::new();
     for case in &cases {
@@ -3242,6 +3338,7 @@ fn validate_external_evidence_handoff_detail(report: &Value, btc_spv_adapter: &V
         ("public_btc_spv_evidence", PUBLIC_BTC_SPV_EVIDENCE),
         ("public_shared_cell_dep_attestation", PUBLIC_CELLDEP_ATTESTATION),
         ("external_bip340_tcb_review_attestation", EXTERNAL_TCB_ATTESTATION),
+        ("rwa_legal_registry_review_evidence", RWA_LEGAL_REGISTRY_REVIEW_EVIDENCE),
     ];
     let expected_groups = expected.iter().map(|(group, _)| (*group).to_string()).collect::<BTreeSet<_>>();
     let expected_outputs = expected.iter().map(|(_, output)| (*output).to_string()).collect::<BTreeSet<_>>();
@@ -3300,6 +3397,9 @@ fn validate_external_evidence_handoff_detail(report: &Value, btc_spv_adapter: &V
         "external_bip340_tcb_review_attestation",
         "/request/expected_review_scope",
     );
+    let expected_rwa_profile_source_hash = source_tree_hash(repo_root, RWA_LEGAL_REVIEW_SOURCE_HASH_PATHS)
+        .ok()
+        .and_then(|value| normalize_hex(json_pointer_str(&value, "/sha256")));
 
     let mut case_checks = Map::new();
     for (group, production_output) in expected {
@@ -3319,11 +3419,13 @@ fn validate_external_evidence_handoff_detail(report: &Value, btc_spv_adapter: &V
         let expected_required_external_fields = match group {
             "public_btc_spv_evidence" => EXPECTED_PUBLIC_BTC_SPV_HANDOFF_FIELDS,
             "public_shared_cell_dep_attestation" => EXPECTED_PUBLIC_CELLDEP_REQUIRED_FIELDS,
+            "rwa_legal_registry_review_evidence" => EXPECTED_RWA_LEGAL_REVIEW_REQUIRED_FIELDS,
             _ => EXPECTED_EXTERNAL_TCB_REQUIRED_FIELDS,
         };
         let expected_field_constraints = match group {
             "public_btc_spv_evidence" => EXPECTED_BTC_SPV_FIELD_CONSTRAINTS,
             "public_shared_cell_dep_attestation" => EXPECTED_PUBLIC_CELLDEP_FIELD_CONSTRAINTS,
+            "rwa_legal_registry_review_evidence" => EXPECTED_RWA_LEGAL_REVIEW_FIELD_CONSTRAINTS,
             _ => EXPECTED_EXTERNAL_TCB_FIELD_CONSTRAINTS,
         };
         let expected_scenarios_match_source_adapter = group != "public_btc_spv_evidence"
@@ -3361,6 +3463,13 @@ fn validate_external_evidence_handoff_detail(report: &Value, btc_spv_adapter: &V
                         == expected_external_tcb_artifact_hash_algorithm
                     && json_array_strings(&case, "/expected_values/review_scope") == expected_external_tcb_review_scope
                     && json_pointer_str(&case, "/expected_values/source_tree_sha256") == expected_external_tcb_source_tree_hash
+            }
+            "rwa_legal_registry_review_evidence" => {
+                exact_object_keys(case.get("expected_values").unwrap_or(&Value::Null), EXPECTED_RWA_LEGAL_REVIEW_EXPECTED_VALUE_FIELDS)
+                    && expected_rwa_profile_source_hash.as_deref().is_some_and(is_hex32)
+                    && json_pointer_str(&case, "/expected_values/profile") == Some(EXPECTED_RWA_RECEIPT_PROFILE)
+                    && normalize_hex(json_pointer_str(&case, "/expected_values/profile_source_tree_sha256"))
+                        == expected_rwa_profile_source_hash
             }
             _ => true,
         };
@@ -4524,26 +4633,92 @@ fn validate_external_review(
     }))
 }
 
+fn validate_rwa_legal_registry_review(repo_root: &Path, rel_path: &str, external_evidence_handoff: &Value) -> Result<Value> {
+    let source_hash = source_tree_hash(repo_root, RWA_LEGAL_REVIEW_SOURCE_HASH_PATHS)?;
+    let expected_source_hash = normalize_hex(json_pointer_str(&source_hash, "/sha256"));
+    let path = repo_root.join(rel_path);
+    if !path.exists() {
+        return Ok(json!({
+            "status": "external_required",
+            "reason": "missing RWA legal/registry review evidence",
+            "required_report": rel_path,
+            "required_template": RWA_LEGAL_REGISTRY_REVIEW_TEMPLATE,
+            "required_handoff": EXTERNAL_EVIDENCE_HANDOFF,
+            "expected_profile_source_tree_sha256": expected_source_hash,
+        }));
+    }
+    let payload = json_load_path(repo_root, &path)?;
+    let registry = payload.get("registry").cloned().unwrap_or(Value::Null);
+    let handoff_hash = novaseal_handoff_report_hash("external_evidence_handoff_bundle", external_evidence_handoff);
+    let handoff_expected_values =
+        handoff_case_expected_values(external_evidence_handoff, "rwa_legal_registry_review_evidence").unwrap_or(&Value::Null);
+    let checks = json!({
+        "schema": json_pointer_str(&payload, "/schema") == Some("novaseal-rwa-legal-registry-review-evidence-v0.1"),
+        "top_level_fields_exact": exact_object_keys(&payload, EXPECTED_RWA_LEGAL_REVIEW_EVIDENCE_FIELDS),
+        "status": json_pointer_str(&payload, "/status") == Some("accepted"),
+        "profile": json_pointer_str(&payload, "/profile") == Some(EXPECTED_RWA_RECEIPT_PROFILE),
+        "profile_matches_handoff": json_pointer_str(&payload, "/profile") == json_pointer_str(handoff_expected_values, "/profile"),
+        "request_handoff_fields_exact": exact_object_keys(payload.get("request_handoff").unwrap_or(&Value::Null), EXPECTED_EXTERNAL_REQUEST_HANDOFF_FIELDS),
+        "request_handoff_bundle_path": json_pointer_str(&payload, "/request_handoff/bundle") == Some(EXTERNAL_EVIDENCE_HANDOFF),
+        "request_handoff_bundle_hash_matches_current": normalize_hex(json_pointer_str(&payload, "/request_handoff/bundle_hash")).as_deref()
+            == Some(handoff_hash.as_str()),
+        "request_handoff_bundle_hash_algorithm": json_pointer_str(&payload, "/request_handoff/bundle_hash_algorithm")
+            == Some(NOVASEAL_HANDOFF_HASH_ALGORITHM),
+        "request_handoff_group": json_pointer_str(&payload, "/request_handoff/group") == Some("rwa_legal_registry_review_evidence"),
+        "handoff_expected_values_exact": exact_object_keys(handoff_expected_values, EXPECTED_RWA_LEGAL_REVIEW_EXPECTED_VALUE_FIELDS),
+        "reviewer_present": json_pointer_str(&payload, "/reviewer").is_some_and(|value| !value.is_empty()),
+        "reviewer_identity": json_pointer_str(&payload, "/reviewer").is_some_and(is_external_identity),
+        "review_date_present": json_pointer_str(&payload, "/review_date").is_some_and(|value| !value.is_empty()),
+        "review_date_utc_date": json_pointer_str(&payload, "/review_date").is_some_and(is_utc_date),
+        "review_date_not_future": json_pointer_str(&payload, "/review_date").is_some_and(is_utc_date_not_future),
+        "report_uri_https": json_pointer_str(&payload, "/report_uri").is_some_and(is_https_report_uri),
+        "review_scope_exact": exact_string_set(&json_array_strings(&payload, "/review_scope"), EXPECTED_RWA_LEGAL_REVIEW_SCOPE),
+        "registry_fields_exact": exact_object_keys(&registry, EXPECTED_RWA_LEGAL_REVIEW_REGISTRY_FIELDS),
+        "registry_authority_identity": json_pointer_str(&registry, "/authority").is_some_and(is_external_identity),
+        "registry_jurisdiction_present": json_pointer_str(&registry, "/jurisdiction")
+            .is_some_and(|value| value_is_present(&Value::String(value.to_string())) && !contains_placeholder_token(value)),
+        "registry_report_hash_valid": normalize_hex(json_pointer_str(&registry, "/registry_report_hash")).as_deref().is_some_and(is_hex32),
+        "registry_report_hash_non_placeholder": !placeholder_hash(normalize_hex(json_pointer_str(&registry, "/registry_report_hash")).as_deref()),
+        "profile_source_tree_sha256_valid": normalize_hex(json_pointer_str(&payload, "/profile_source_tree_sha256")).as_deref().is_some_and(is_hex32),
+        "profile_source_tree_sha256_non_placeholder": !placeholder_hash(normalize_hex(json_pointer_str(&payload, "/profile_source_tree_sha256")).as_deref()),
+        "profile_source_tree_sha256_matches_current": normalize_hex(json_pointer_str(&payload, "/profile_source_tree_sha256")) == expected_source_hash,
+        "profile_source_tree_sha256_matches_handoff": normalize_hex(json_pointer_str(&payload, "/profile_source_tree_sha256"))
+            == normalize_hex(json_pointer_str(handoff_expected_values, "/profile_source_tree_sha256")),
+    });
+    Ok(json!({
+        "status": if object_values_all_true(Some(&checks)) { "passed" } else { "failed" },
+        "checks": checks,
+        "evidence": payload,
+        "profile_source_tree": source_hash,
+    }))
+}
+
 fn validate_attestation_templates(
     repo_root: &Path,
     artifact_hash: Option<&str>,
     artifact_hash_algorithm: Option<&str>,
-    source_tree_hash: Option<&str>,
+    expected_tcb_source_tree_hash: Option<&str>,
 ) -> Result<Value> {
     let public_path = repo_root.join(PUBLIC_CELLDEP_ATTESTATION_TEMPLATE);
     let external_path = repo_root.join(EXTERNAL_TCB_ATTESTATION_TEMPLATE);
     let btc_spv_path = repo_root.join(PUBLIC_BTC_SPV_EVIDENCE_TEMPLATE);
+    let rwa_legal_path = repo_root.join(RWA_LEGAL_REGISTRY_REVIEW_TEMPLATE);
     let public_payload = if public_path.is_file() { Some(json_load_path(repo_root, &public_path)?) } else { None };
     let external_payload = if external_path.is_file() { Some(json_load_path(repo_root, &external_path)?) } else { None };
     let btc_spv_payload = if btc_spv_path.is_file() { Some(json_load_path(repo_root, &btc_spv_path)?) } else { None };
+    let rwa_legal_payload = if rwa_legal_path.is_file() { Some(json_load_path(repo_root, &rwa_legal_path)?) } else { None };
     let public = public_payload.as_ref().unwrap_or(&Value::Null);
     let external = external_payload.as_ref().unwrap_or(&Value::Null);
     let btc_spv = btc_spv_payload.as_ref().unwrap_or(&Value::Null);
+    let rwa_legal = rwa_legal_payload.as_ref().unwrap_or(&Value::Null);
     let public_release = public.get("release").unwrap_or(&Value::Null);
     let public_verifier = public.get("runtime_verifier").unwrap_or(&Value::Null);
     let public_handoff = public.get("request_handoff").unwrap_or(&Value::Null);
     let external_handoff = external.get("request_handoff").unwrap_or(&Value::Null);
     let btc_spv_handoff = btc_spv.get("request_handoff").unwrap_or(&Value::Null);
+    let rwa_legal_handoff = rwa_legal.get("request_handoff").unwrap_or(&Value::Null);
+    let rwa_legal_registry = rwa_legal.get("registry").unwrap_or(&Value::Null);
+    let rwa_source_hash = source_tree_hash(repo_root, RWA_LEGAL_REVIEW_SOURCE_HASH_PATHS)?;
     let btc_spv_profiles = btc_spv
         .get("required_profiles")
         .and_then(Value::as_array)
@@ -4552,62 +4727,127 @@ fn validate_attestation_templates(
         .filter_map(Value::as_str)
         .collect::<BTreeSet<_>>();
     let expected_btc_spv_profiles = EXPECTED_BTC_SPV_EVIDENCE_PROFILES.iter().copied().collect::<BTreeSet<_>>();
-    let checks = json!({
-        "public_template_present": public_path.is_file(),
-        "external_template_present": external_path.is_file(),
-        "btc_spv_template_present": btc_spv_path.is_file(),
-        "public_schema": json_pointer_str(public, "/schema") == Some("novaseal-public-shared-cell-dep-attestation-v0.1"),
-        "external_schema": json_pointer_str(external, "/schema") == Some("novaseal-bip340-external-tcb-review-attestation-v0.1"),
-        "btc_spv_schema": json_pointer_str(btc_spv, "/schema") == Some("novaseal-public-btc-spv-evidence-v0.1"),
-        "public_top_level_fields_exact": exact_object_keys(public, EXPECTED_PUBLIC_CELLDEP_ATTESTATION_FIELDS),
-        "public_release_fields_exact": exact_object_keys(public_release, EXPECTED_PUBLIC_CELLDEP_RELEASE_FIELDS),
-        "public_release_package": json_pointer_str(public_release, "/package") == Some("novaseal"),
-        "public_release_version_current": json_pointer_str(public_release, "/version") == Some(EXPECTED_NOVASEAL_RELEASE_VERSION),
-        "public_release_manifest_commit_present": public_release.get("manifest_commit").is_some_and(value_is_present),
-        "public_request_handoff_fields_exact": exact_object_keys(public_handoff, EXPECTED_EXTERNAL_REQUEST_HANDOFF_FIELDS),
-        "public_request_handoff_bundle_path": json_pointer_str(public_handoff, "/bundle") == Some(EXTERNAL_EVIDENCE_HANDOFF),
-        "public_request_handoff_hash_algorithm": json_pointer_str(public_handoff, "/bundle_hash_algorithm")
-            == Some(NOVASEAL_HANDOFF_HASH_ALGORITHM),
-        "public_request_handoff_group": json_pointer_str(public_handoff, "/group") == Some("public_shared_cell_dep_attestation"),
-        "public_runtime_verifier_fields_exact": exact_object_keys(public_verifier, EXPECTED_PUBLIC_CELLDEP_RUNTIME_VERIFIER_FIELDS),
-        "external_top_level_fields_exact": exact_object_keys(external, EXPECTED_EXTERNAL_TCB_REVIEW_ATTESTATION_FIELDS),
-        "external_request_handoff_fields_exact": exact_object_keys(external_handoff, EXPECTED_EXTERNAL_REQUEST_HANDOFF_FIELDS),
-        "external_request_handoff_bundle_path": json_pointer_str(external_handoff, "/bundle") == Some(EXTERNAL_EVIDENCE_HANDOFF),
-        "external_request_handoff_hash_algorithm": json_pointer_str(external_handoff, "/bundle_hash_algorithm")
-            == Some(NOVASEAL_HANDOFF_HASH_ALGORITHM),
-        "external_request_handoff_group": json_pointer_str(external_handoff, "/group") == Some("external_bip340_tcb_review_attestation"),
-        "external_artifact_hash_algorithm": json_pointer_str(external, "/artifact_hash_algorithm") == Some("sha256"),
-        "external_artifact_hash_algorithm_matches_current_tcb": json_pointer_str(external, "/artifact_hash_algorithm") == artifact_hash_algorithm,
-        "btc_spv_top_level_fields_exact": exact_object_keys(btc_spv, EXPECTED_PUBLIC_BTC_SPV_EVIDENCE_FIELDS),
-        "btc_spv_request_handoff_fields_exact": exact_object_keys(btc_spv_handoff, EXPECTED_EXTERNAL_REQUEST_HANDOFF_FIELDS),
-        "btc_spv_request_handoff_bundle_path": json_pointer_str(btc_spv_handoff, "/bundle") == Some(EXTERNAL_EVIDENCE_HANDOFF),
-        "btc_spv_request_handoff_hash_algorithm": json_pointer_str(btc_spv_handoff, "/bundle_hash_algorithm")
-            == Some(NOVASEAL_HANDOFF_HASH_ALGORITHM),
-        "btc_spv_request_handoff_group": json_pointer_str(btc_spv_handoff, "/group") == Some("public_btc_spv_evidence"),
-        "btc_spv_required_profiles_exact": btc_spv_profiles == expected_btc_spv_profiles,
-        "public_template_network_not_local_devnet": json_pointer_str(public, "/network").is_some_and(|network| !network.is_empty() && network != "local-devnet"),
-        "public_artifact_hash_matches_current_tcb": normalize_hex(json_pointer_str(public_verifier, "/artifact_hash")).as_deref() == artifact_hash,
-        "public_dep_type": json_pointer_str(public_verifier, "/dep_type") == Some(EXPECTED_NOVASEAL_CELLDEP_DEP_TYPE),
-        "public_hash_type": matches!(json_pointer_str(public_verifier, "/hash_type"), Some("data" | "data1" | "type")),
-        "public_hash_type_matches_expected": json_pointer_str(public_verifier, "/hash_type")
-            == Some(EXPECTED_NOVASEAL_CELLDEP_HASH_TYPE),
-        "external_artifact_hash_matches_current_tcb": normalize_hex(json_pointer_str(external, "/artifact_hash")).as_deref() == artifact_hash,
-        "external_source_tree_hash_matches_current_tcb": normalize_hex(json_pointer_str(external, "/source_tree_sha256")).as_deref() == source_tree_hash,
-        "public_verifier_id": json_pointer_str(public_verifier, "/verifier_id") == Some("btc.bip340.v0"),
-        "external_verifier_id": json_pointer_str(external, "/verifier_id") == Some("btc.bip340.v0"),
-        "public_ipc_abi": json_pointer_str(public_verifier, "/ipc_abi") == Some("cellscript-btc-bip340-ipc-v0"),
-        "external_ipc_abi": json_pointer_str(external, "/ipc_abi") == Some("cellscript-btc-bip340-ipc-v0"),
-    });
+    let checks = Value::Object(
+        [
+            ("public_template_present", public_path.is_file()),
+            ("external_template_present", external_path.is_file()),
+            ("btc_spv_template_present", btc_spv_path.is_file()),
+            ("rwa_legal_template_present", rwa_legal_path.is_file()),
+            ("public_schema", json_pointer_str(public, "/schema") == Some("novaseal-public-shared-cell-dep-attestation-v0.1")),
+            ("external_schema", json_pointer_str(external, "/schema") == Some("novaseal-bip340-external-tcb-review-attestation-v0.1")),
+            ("btc_spv_schema", json_pointer_str(btc_spv, "/schema") == Some("novaseal-public-btc-spv-evidence-v0.1")),
+            ("rwa_legal_schema", json_pointer_str(rwa_legal, "/schema") == Some("novaseal-rwa-legal-registry-review-evidence-v0.1")),
+            ("public_top_level_fields_exact", exact_object_keys(public, EXPECTED_PUBLIC_CELLDEP_ATTESTATION_FIELDS)),
+            ("public_release_fields_exact", exact_object_keys(public_release, EXPECTED_PUBLIC_CELLDEP_RELEASE_FIELDS)),
+            ("public_release_package", json_pointer_str(public_release, "/package") == Some("novaseal")),
+            (
+                "public_release_version_current",
+                json_pointer_str(public_release, "/version") == Some(EXPECTED_NOVASEAL_RELEASE_VERSION),
+            ),
+            ("public_release_manifest_commit_present", public_release.get("manifest_commit").is_some_and(value_is_present)),
+            ("public_request_handoff_fields_exact", exact_object_keys(public_handoff, EXPECTED_EXTERNAL_REQUEST_HANDOFF_FIELDS)),
+            ("public_request_handoff_bundle_path", json_pointer_str(public_handoff, "/bundle") == Some(EXTERNAL_EVIDENCE_HANDOFF)),
+            (
+                "public_request_handoff_hash_algorithm",
+                json_pointer_str(public_handoff, "/bundle_hash_algorithm") == Some(NOVASEAL_HANDOFF_HASH_ALGORITHM),
+            ),
+            ("public_request_handoff_group", json_pointer_str(public_handoff, "/group") == Some("public_shared_cell_dep_attestation")),
+            (
+                "public_runtime_verifier_fields_exact",
+                exact_object_keys(public_verifier, EXPECTED_PUBLIC_CELLDEP_RUNTIME_VERIFIER_FIELDS),
+            ),
+            ("external_top_level_fields_exact", exact_object_keys(external, EXPECTED_EXTERNAL_TCB_REVIEW_ATTESTATION_FIELDS)),
+            ("external_request_handoff_fields_exact", exact_object_keys(external_handoff, EXPECTED_EXTERNAL_REQUEST_HANDOFF_FIELDS)),
+            ("external_request_handoff_bundle_path", json_pointer_str(external_handoff, "/bundle") == Some(EXTERNAL_EVIDENCE_HANDOFF)),
+            (
+                "external_request_handoff_hash_algorithm",
+                json_pointer_str(external_handoff, "/bundle_hash_algorithm") == Some(NOVASEAL_HANDOFF_HASH_ALGORITHM),
+            ),
+            (
+                "external_request_handoff_group",
+                json_pointer_str(external_handoff, "/group") == Some("external_bip340_tcb_review_attestation"),
+            ),
+            ("external_artifact_hash_algorithm", json_pointer_str(external, "/artifact_hash_algorithm") == Some("sha256")),
+            (
+                "external_artifact_hash_algorithm_matches_current_tcb",
+                json_pointer_str(external, "/artifact_hash_algorithm") == artifact_hash_algorithm,
+            ),
+            ("btc_spv_top_level_fields_exact", exact_object_keys(btc_spv, EXPECTED_PUBLIC_BTC_SPV_EVIDENCE_FIELDS)),
+            ("btc_spv_request_handoff_fields_exact", exact_object_keys(btc_spv_handoff, EXPECTED_EXTERNAL_REQUEST_HANDOFF_FIELDS)),
+            ("btc_spv_request_handoff_bundle_path", json_pointer_str(btc_spv_handoff, "/bundle") == Some(EXTERNAL_EVIDENCE_HANDOFF)),
+            (
+                "btc_spv_request_handoff_hash_algorithm",
+                json_pointer_str(btc_spv_handoff, "/bundle_hash_algorithm") == Some(NOVASEAL_HANDOFF_HASH_ALGORITHM),
+            ),
+            ("btc_spv_request_handoff_group", json_pointer_str(btc_spv_handoff, "/group") == Some("public_btc_spv_evidence")),
+            ("btc_spv_required_profiles_exact", btc_spv_profiles == expected_btc_spv_profiles),
+            ("rwa_legal_top_level_fields_exact", exact_object_keys(rwa_legal, EXPECTED_RWA_LEGAL_REVIEW_EVIDENCE_FIELDS)),
+            ("rwa_legal_registry_fields_exact", exact_object_keys(rwa_legal_registry, EXPECTED_RWA_LEGAL_REVIEW_REGISTRY_FIELDS)),
+            ("rwa_legal_request_handoff_fields_exact", exact_object_keys(rwa_legal_handoff, EXPECTED_EXTERNAL_REQUEST_HANDOFF_FIELDS)),
+            (
+                "rwa_legal_request_handoff_bundle_path",
+                json_pointer_str(rwa_legal_handoff, "/bundle") == Some(EXTERNAL_EVIDENCE_HANDOFF),
+            ),
+            (
+                "rwa_legal_request_handoff_hash_algorithm",
+                json_pointer_str(rwa_legal_handoff, "/bundle_hash_algorithm") == Some(NOVASEAL_HANDOFF_HASH_ALGORITHM),
+            ),
+            (
+                "rwa_legal_request_handoff_group",
+                json_pointer_str(rwa_legal_handoff, "/group") == Some("rwa_legal_registry_review_evidence"),
+            ),
+            ("rwa_legal_profile", json_pointer_str(rwa_legal, "/profile") == Some(EXPECTED_RWA_RECEIPT_PROFILE)),
+            (
+                "rwa_legal_review_scope_exact",
+                exact_string_set(&json_array_strings(rwa_legal, "/review_scope"), EXPECTED_RWA_LEGAL_REVIEW_SCOPE),
+            ),
+            (
+                "rwa_legal_profile_source_tree_hash_matches_current",
+                normalize_hex(json_pointer_str(rwa_legal, "/profile_source_tree_sha256")).as_deref()
+                    == normalize_hex(json_pointer_str(&rwa_source_hash, "/sha256")).as_deref(),
+            ),
+            (
+                "public_template_network_not_local_devnet",
+                json_pointer_str(public, "/network").is_some_and(|network| !network.is_empty() && network != "local-devnet"),
+            ),
+            (
+                "public_artifact_hash_matches_current_tcb",
+                normalize_hex(json_pointer_str(public_verifier, "/artifact_hash")).as_deref() == artifact_hash,
+            ),
+            ("public_dep_type", json_pointer_str(public_verifier, "/dep_type") == Some(EXPECTED_NOVASEAL_CELLDEP_DEP_TYPE)),
+            ("public_hash_type", matches!(json_pointer_str(public_verifier, "/hash_type"), Some("data" | "data1" | "type"))),
+            (
+                "public_hash_type_matches_expected",
+                json_pointer_str(public_verifier, "/hash_type") == Some(EXPECTED_NOVASEAL_CELLDEP_HASH_TYPE),
+            ),
+            (
+                "external_artifact_hash_matches_current_tcb",
+                normalize_hex(json_pointer_str(external, "/artifact_hash")).as_deref() == artifact_hash,
+            ),
+            (
+                "external_source_tree_hash_matches_current_tcb",
+                normalize_hex(json_pointer_str(external, "/source_tree_sha256")).as_deref() == expected_tcb_source_tree_hash,
+            ),
+            ("public_verifier_id", json_pointer_str(public_verifier, "/verifier_id") == Some("btc.bip340.v0")),
+            ("external_verifier_id", json_pointer_str(external, "/verifier_id") == Some("btc.bip340.v0")),
+            ("public_ipc_abi", json_pointer_str(public_verifier, "/ipc_abi") == Some("cellscript-btc-bip340-ipc-v0")),
+            ("external_ipc_abi", json_pointer_str(external, "/ipc_abi") == Some("cellscript-btc-bip340-ipc-v0")),
+        ]
+        .into_iter()
+        .map(|(key, passed)| (key.to_string(), Value::Bool(passed)))
+        .collect(),
+    );
     Ok(json!({
         "status": if object_values_all_true(Some(&checks)) { "passed" } else { "failed" },
         "expected_artifact_hash": artifact_hash,
         "expected_artifact_hash_algorithm": artifact_hash_algorithm,
-        "expected_source_tree_sha256": source_tree_hash,
+        "expected_source_tree_sha256": expected_tcb_source_tree_hash,
         "checks": checks,
         "templates": {
             "public_shared_cell_dep": rel(repo_root, &public_path),
             "external_bip340_tcb_review": rel(repo_root, &external_path),
             "public_btc_spv_evidence": rel(repo_root, &btc_spv_path),
+            "rwa_legal_registry_review_evidence": rel(repo_root, &rwa_legal_path),
         },
     }))
 }
@@ -4927,7 +5167,7 @@ fn external_attestation_adapter_gate_passed(report: &Value) -> bool {
 fn external_evidence_handoff_gate_passed(report: &Value) -> bool {
     json_pointer_str(report, "/status") == Some("passed")
         && json_pointer_str(report, "/handoff_status") == Some("request_bundle_ready_external_evidence_required")
-        && json_pointer_i64(report, "/summary/total") == Some(3)
+        && json_pointer_i64(report, "/summary/total") == Some(4)
         && json_pointer_i64(report, "/summary/matched") == json_pointer_i64(report, "/summary/total")
 }
 
@@ -5396,6 +5636,7 @@ mod tests {
         let btc_handoff_fields = EXPECTED_PUBLIC_BTC_SPV_HANDOFF_FIELDS;
         let public_attestation_handoff_fields = EXPECTED_PUBLIC_CELLDEP_REQUIRED_FIELDS;
         let external_review_handoff_fields = EXPECTED_EXTERNAL_TCB_REQUIRED_FIELDS;
+        let rwa_legal_review_handoff_fields = EXPECTED_RWA_LEGAL_REVIEW_REQUIRED_FIELDS;
         let public_manifest_commit = "0123456789abcdef0123456789abcdef01234567";
         let public_release_package = "novaseal";
         let public_release_version = EXPECTED_NOVASEAL_RELEASE_VERSION;
@@ -5406,6 +5647,12 @@ mod tests {
         let public_artifact_hash = format!("0x{}", "99".repeat(32));
         let external_artifact_hash = format!("0x{}", "aa".repeat(32));
         let external_source_tree_hash = format!("0x{}", "bb".repeat(32));
+        let rwa_profile_source_hash = source_tree_hash(Path::new("."), RWA_LEGAL_REVIEW_SOURCE_HASH_PATHS)
+            .unwrap()
+            .get("sha256")
+            .and_then(Value::as_str)
+            .unwrap()
+            .to_string();
         let expected_btc_scenarios = EXPECTED_BTC_SPV_PROFILE_SCENARIOS
             .iter()
             .map(|(profile, scenario)| ((*profile).to_string(), Value::String((*scenario).to_string())))
@@ -5475,10 +5722,11 @@ mod tests {
                 PUBLIC_BTC_SPV_EVIDENCE,
                 PUBLIC_CELLDEP_ATTESTATION,
                 EXTERNAL_TCB_ATTESTATION,
+                RWA_LEGAL_REGISTRY_REVIEW_EVIDENCE,
             ],
             "summary": {
-                "total": 3,
-                "matched": 3,
+                "total": 4,
+                "matched": 4,
             },
             "cases": [
                 {
@@ -5529,44 +5777,71 @@ mod tests {
                     },
                     "checks": { "ok": true },
                 },
+                {
+                    "group": "rwa_legal_registry_review_evidence",
+                    "status": "passed",
+                    "source_adapter": EXTERNAL_ATTESTATION_ADAPTER,
+                    "source_adapter_hash": attestation_hash,
+                    "production_output": RWA_LEGAL_REGISTRY_REVIEW_EVIDENCE,
+                    "required_external_fields": rwa_legal_review_handoff_fields,
+                    "field_constraints": constraint_object(EXPECTED_RWA_LEGAL_REVIEW_FIELD_CONSTRAINTS),
+                    "expected_values": {
+                        "profile": EXPECTED_RWA_RECEIPT_PROFILE,
+                        "profile_source_tree_sha256": rwa_profile_source_hash,
+                    },
+                    "checks": { "ok": true },
+                },
             ],
         });
 
-        let valid = validate_external_evidence_handoff_detail(&report, &btc_spv_adapter, &external_attestation_adapter);
+        let valid =
+            validate_external_evidence_handoff_detail(Path::new("."), &report, &btc_spv_adapter, &external_attestation_adapter);
         assert_eq!(json_pointer_str(&valid, "/status"), Some("passed"));
         assert!(json_pointer_bool(&valid, "/cases/public_btc_spv_evidence/expected_scenarios_match_source_adapter"));
         assert!(json_pointer_bool(&valid, "/cases/public_shared_cell_dep_attestation/expected_values_match_source_adapter"));
         assert!(json_pointer_bool(&valid, "/cases/external_bip340_tcb_review_attestation/expected_values_match_source_adapter"));
+        assert!(json_pointer_bool(&valid, "/cases/rwa_legal_registry_review_evidence/expected_values_match_source_adapter"));
 
         let mut stale_hash = report.clone();
         stale_hash["source_btc_spv_adapter_hash"] = json!(format!("0x{}", "11".repeat(32)));
-        let stale = validate_external_evidence_handoff_detail(&stale_hash, &btc_spv_adapter, &external_attestation_adapter);
+        let stale =
+            validate_external_evidence_handoff_detail(Path::new("."), &stale_hash, &btc_spv_adapter, &external_attestation_adapter);
         assert_eq!(json_pointer_str(&stale, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&stale, "/checks/source_btc_spv_adapter_hash_matches_current"));
 
         let mut wrong_path = report.clone();
         wrong_path["cases"][1]["source_adapter"] = json!("target/other-report.json");
-        let failed_path = validate_external_evidence_handoff_detail(&wrong_path, &btc_spv_adapter, &external_attestation_adapter);
+        let failed_path =
+            validate_external_evidence_handoff_detail(Path::new("."), &wrong_path, &btc_spv_adapter, &external_attestation_adapter);
         assert_eq!(json_pointer_str(&failed_path, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&failed_path, "/cases/public_shared_cell_dep_attestation/source_adapter_path_matches_current"));
 
         let mut missing_required_field = report.clone();
         missing_required_field["cases"][0]["required_external_fields"] = json!(btc_handoff_fields[..20].to_vec());
-        let failed_fields =
-            validate_external_evidence_handoff_detail(&missing_required_field, &btc_spv_adapter, &external_attestation_adapter);
+        let failed_fields = validate_external_evidence_handoff_detail(
+            Path::new("."),
+            &missing_required_field,
+            &btc_spv_adapter,
+            &external_attestation_adapter,
+        );
         assert_eq!(json_pointer_str(&failed_fields, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&failed_fields, "/cases/public_btc_spv_evidence/required_external_fields_complete"));
 
         let mut missing_constraint = report.clone();
         missing_constraint["cases"][0]["field_constraints"].as_object_mut().unwrap().remove("source_service.commit");
-        let failed_constraint =
-            validate_external_evidence_handoff_detail(&missing_constraint, &btc_spv_adapter, &external_attestation_adapter);
+        let failed_constraint = validate_external_evidence_handoff_detail(
+            Path::new("."),
+            &missing_constraint,
+            &btc_spv_adapter,
+            &external_attestation_adapter,
+        );
         assert_eq!(json_pointer_str(&failed_constraint, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&failed_constraint, "/cases/public_btc_spv_evidence/field_constraints_exact"));
 
         let mut missing_report_hash_constraint = report.clone();
         missing_report_hash_constraint["cases"][0]["field_constraints"].as_object_mut().unwrap().remove("source_service.report_hash");
         let failed_report_hash_constraint = validate_external_evidence_handoff_detail(
+            Path::new("."),
             &missing_report_hash_constraint,
             &btc_spv_adapter,
             &external_attestation_adapter,
@@ -5580,6 +5855,7 @@ mod tests {
             .unwrap()
             .remove("spv_client_cell_dep.out_point");
         let failed_celldep_out_point_constraint = validate_external_evidence_handoff_detail(
+            Path::new("."),
             &missing_celldep_out_point_constraint,
             &btc_spv_adapter,
             &external_attestation_adapter,
@@ -5589,14 +5865,19 @@ mod tests {
 
         let mut missing_btc_txid_constraint = report.clone();
         missing_btc_txid_constraint["cases"][0]["field_constraints"].as_object_mut().unwrap().remove("btc_txid");
-        let failed_btc_txid_constraint =
-            validate_external_evidence_handoff_detail(&missing_btc_txid_constraint, &btc_spv_adapter, &external_attestation_adapter);
+        let failed_btc_txid_constraint = validate_external_evidence_handoff_detail(
+            Path::new("."),
+            &missing_btc_txid_constraint,
+            &btc_spv_adapter,
+            &external_attestation_adapter,
+        );
         assert_eq!(json_pointer_str(&failed_btc_txid_constraint, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&failed_btc_txid_constraint, "/cases/public_btc_spv_evidence/field_constraints_exact"));
 
         let mut missing_handoff_group_constraint = report.clone();
         missing_handoff_group_constraint["cases"][0]["field_constraints"].as_object_mut().unwrap().remove("request_handoff.group");
         let failed_handoff_group_constraint = validate_external_evidence_handoff_detail(
+            Path::new("."),
             &missing_handoff_group_constraint,
             &btc_spv_adapter,
             &external_attestation_adapter,
@@ -5610,6 +5891,7 @@ mod tests {
             .unwrap()
             .remove("runtime_verifier.artifact_hash");
         let failed_public_artifact_constraint = validate_external_evidence_handoff_detail(
+            Path::new("."),
             &missing_public_artifact_constraint,
             &btc_spv_adapter,
             &external_attestation_adapter,
@@ -5623,6 +5905,7 @@ mod tests {
         let mut missing_external_source_constraint = report.clone();
         missing_external_source_constraint["cases"][2]["field_constraints"].as_object_mut().unwrap().remove("source_tree_sha256");
         let failed_external_source_constraint = validate_external_evidence_handoff_detail(
+            Path::new("."),
             &missing_external_source_constraint,
             &btc_spv_adapter,
             &external_attestation_adapter,
@@ -5636,8 +5919,12 @@ mod tests {
         let mut stale_expected_scenario = report.clone();
         stale_expected_scenario["cases"][0]["expected_scenarios"][EXPECTED_BTC_TX_COMMITMENT_PROFILE] =
             json!("generic-public-btc-proof");
-        let failed_expected_scenario =
-            validate_external_evidence_handoff_detail(&stale_expected_scenario, &btc_spv_adapter, &external_attestation_adapter);
+        let failed_expected_scenario = validate_external_evidence_handoff_detail(
+            Path::new("."),
+            &stale_expected_scenario,
+            &btc_spv_adapter,
+            &external_attestation_adapter,
+        );
         assert_eq!(json_pointer_str(&failed_expected_scenario, "/status"), Some("failed"));
         assert!(!json_pointer_bool(
             &failed_expected_scenario,
@@ -5647,8 +5934,12 @@ mod tests {
         let mut stale_expected_value = report.clone();
         stale_expected_value["cases"][1]["expected_values"]["release.manifest_commit"] =
             json!("fedcba9876543210fedcba9876543210fedcba98");
-        let failed_expected_value =
-            validate_external_evidence_handoff_detail(&stale_expected_value, &btc_spv_adapter, &external_attestation_adapter);
+        let failed_expected_value = validate_external_evidence_handoff_detail(
+            Path::new("."),
+            &stale_expected_value,
+            &btc_spv_adapter,
+            &external_attestation_adapter,
+        );
         assert_eq!(json_pointer_str(&failed_expected_value, "/status"), Some("failed"));
         assert!(!json_pointer_bool(
             &failed_expected_value,
@@ -5657,8 +5948,12 @@ mod tests {
 
         let mut stale_release_package = report.clone();
         stale_release_package["cases"][1]["expected_values"]["release.package"] = json!("other-package");
-        let failed_release_package =
-            validate_external_evidence_handoff_detail(&stale_release_package, &btc_spv_adapter, &external_attestation_adapter);
+        let failed_release_package = validate_external_evidence_handoff_detail(
+            Path::new("."),
+            &stale_release_package,
+            &btc_spv_adapter,
+            &external_attestation_adapter,
+        );
         assert_eq!(json_pointer_str(&failed_release_package, "/status"), Some("failed"));
         assert!(!json_pointer_bool(
             &failed_release_package,
@@ -5667,8 +5962,12 @@ mod tests {
 
         let mut stale_release_version = report.clone();
         stale_release_version["cases"][1]["expected_values"]["release.version"] = json!("0.0.2");
-        let failed_release_version =
-            validate_external_evidence_handoff_detail(&stale_release_version, &btc_spv_adapter, &external_attestation_adapter);
+        let failed_release_version = validate_external_evidence_handoff_detail(
+            Path::new("."),
+            &stale_release_version,
+            &btc_spv_adapter,
+            &external_attestation_adapter,
+        );
         assert_eq!(json_pointer_str(&failed_release_version, "/status"), Some("failed"));
         assert!(!json_pointer_bool(
             &failed_release_version,
@@ -5677,8 +5976,12 @@ mod tests {
 
         let mut stale_hash_type = report.clone();
         stale_hash_type["cases"][1]["expected_values"]["runtime_verifier.hash_type"] = json!("type");
-        let failed_hash_type =
-            validate_external_evidence_handoff_detail(&stale_hash_type, &btc_spv_adapter, &external_attestation_adapter);
+        let failed_hash_type = validate_external_evidence_handoff_detail(
+            Path::new("."),
+            &stale_hash_type,
+            &btc_spv_adapter,
+            &external_attestation_adapter,
+        );
         assert_eq!(json_pointer_str(&failed_hash_type, "/status"), Some("failed"));
         assert!(!json_pointer_bool(
             &failed_hash_type,
@@ -5687,8 +5990,12 @@ mod tests {
 
         let mut stale_dep_type = report.clone();
         stale_dep_type["cases"][1]["expected_values"]["runtime_verifier.dep_type"] = json!("dep_group");
-        let failed_dep_type =
-            validate_external_evidence_handoff_detail(&stale_dep_type, &btc_spv_adapter, &external_attestation_adapter);
+        let failed_dep_type = validate_external_evidence_handoff_detail(
+            Path::new("."),
+            &stale_dep_type,
+            &btc_spv_adapter,
+            &external_attestation_adapter,
+        );
         assert_eq!(json_pointer_str(&failed_dep_type, "/status"), Some("failed"));
         assert!(!json_pointer_bool(
             &failed_dep_type,
@@ -5698,14 +6005,18 @@ mod tests {
         let mut stale_ipc_abi = report.clone();
         stale_ipc_abi["cases"][1]["expected_values"]["runtime_verifier.ipc_abi"] = json!("cellscript-btc-bip340-ipc-v1");
         let failed_ipc_abi =
-            validate_external_evidence_handoff_detail(&stale_ipc_abi, &btc_spv_adapter, &external_attestation_adapter);
+            validate_external_evidence_handoff_detail(Path::new("."), &stale_ipc_abi, &btc_spv_adapter, &external_attestation_adapter);
         assert_eq!(json_pointer_str(&failed_ipc_abi, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&failed_ipc_abi, "/cases/public_shared_cell_dep_attestation/expected_values_match_source_adapter"));
 
         let mut stale_verifier_id = report.clone();
         stale_verifier_id["cases"][1]["expected_values"]["runtime_verifier.verifier_id"] = json!("btc.bip340.v1");
-        let failed_verifier_id =
-            validate_external_evidence_handoff_detail(&stale_verifier_id, &btc_spv_adapter, &external_attestation_adapter);
+        let failed_verifier_id = validate_external_evidence_handoff_detail(
+            Path::new("."),
+            &stale_verifier_id,
+            &btc_spv_adapter,
+            &external_attestation_adapter,
+        );
         assert_eq!(json_pointer_str(&failed_verifier_id, "/status"), Some("failed"));
         assert!(!json_pointer_bool(
             &failed_verifier_id,
@@ -5714,8 +6025,12 @@ mod tests {
 
         let mut stale_expected_review_scope = report.clone();
         stale_expected_review_scope["cases"][2]["expected_values"]["review_scope"] = json!(["BIP340 runtime verifier TCB"]);
-        let failed_review_scope =
-            validate_external_evidence_handoff_detail(&stale_expected_review_scope, &btc_spv_adapter, &external_attestation_adapter);
+        let failed_review_scope = validate_external_evidence_handoff_detail(
+            Path::new("."),
+            &stale_expected_review_scope,
+            &btc_spv_adapter,
+            &external_attestation_adapter,
+        );
         assert_eq!(json_pointer_str(&failed_review_scope, "/status"), Some("failed"));
         assert!(!json_pointer_bool(
             &failed_review_scope,
@@ -5726,8 +6041,12 @@ mod tests {
         let mut extended_btc_fields = btc_handoff_fields.to_vec();
         extended_btc_fields.push("unexpected.shadow_field");
         unexpected_required_field["cases"][0]["required_external_fields"] = json!(extended_btc_fields);
-        let failed_exact =
-            validate_external_evidence_handoff_detail(&unexpected_required_field, &btc_spv_adapter, &external_attestation_adapter);
+        let failed_exact = validate_external_evidence_handoff_detail(
+            Path::new("."),
+            &unexpected_required_field,
+            &btc_spv_adapter,
+            &external_attestation_adapter,
+        );
         assert_eq!(json_pointer_str(&failed_exact, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&failed_exact, "/cases/public_btc_spv_evidence/required_external_fields_exact"));
     }
@@ -6048,8 +6367,29 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let proofs = temp.path().join("proposals/novaseal/v0-mvp-skeleton/proofs");
         std::fs::create_dir_all(&proofs).unwrap();
+        let rwa_root = temp.path().join(RWA_RECEIPT_ROOT);
+        let rwa_src = rwa_root.join("src");
+        let rwa_schemas = rwa_root.join("schemas");
+        let rwa_fixtures = rwa_root.join("fixtures");
+        let rwa_proofs = rwa_root.join("proofs");
+        std::fs::create_dir_all(&rwa_src).unwrap();
+        std::fs::create_dir_all(&rwa_schemas).unwrap();
+        std::fs::create_dir_all(&rwa_fixtures).unwrap();
+        std::fs::create_dir_all(&rwa_proofs).unwrap();
+        std::fs::write(rwa_root.join("Cell.toml"), "profile = \"rwa-receipt-profile-v0\"\n").unwrap();
+        std::fs::write(rwa_src.join("nova_rwa_receipt_type.cell"), "action materialize_rwa_receipt() {}\n").unwrap();
+        std::fs::write(rwa_src.join("nova_rwa_receipt_lifecycle_type.cell"), "action nova_rwa_receipt_lifecycle() {}\n").unwrap();
+        std::fs::write(rwa_schemas.join("nova_rwa_receipt_cell_v0.schema"), "cell: Byte32\n").unwrap();
+        std::fs::write(rwa_fixtures.join("materialize_valid.json"), "{}\n").unwrap();
+        std::fs::write(rwa_proofs.join("invariant_matrix.json"), "{}\n").unwrap();
         let artifact_hash = format!("0x{}", "aa".repeat(32));
-        let source_tree_hash = format!("0x{}", "bb".repeat(32));
+        let tcb_source_tree_hash = format!("0x{}", "bb".repeat(32));
+        let rwa_profile_source_hash = source_tree_hash(temp.path(), RWA_LEGAL_REVIEW_SOURCE_HASH_PATHS)
+            .unwrap()
+            .get("sha256")
+            .and_then(Value::as_str)
+            .unwrap()
+            .to_string();
         std::fs::write(
             proofs.join("public_shared_cell_dep_attestation.template.json"),
             serde_json::to_vec_pretty(&json!({
@@ -6092,7 +6432,7 @@ mod tests {
                 "ipc_abi": "cellscript-btc-bip340-ipc-v0",
                 "artifact_hash": artifact_hash,
                 "artifact_hash_algorithm": "sha256",
-                "source_tree_sha256": source_tree_hash,
+                "source_tree_sha256": tcb_source_tree_hash,
                 "reviewer": "REPLACE_WITH_EXTERNAL_REVIEWER",
                 "review_date": "YYYY-MM-DD",
                 "review_scope": EXPECTED_EXTERNAL_TCB_REVIEW_SCOPE,
@@ -6129,14 +6469,41 @@ mod tests {
             .unwrap(),
         )
         .unwrap();
+        std::fs::write(
+            rwa_proofs.join("legal_registry_review_evidence.template.json"),
+            serde_json::to_vec_pretty(&json!({
+                "schema": "novaseal-rwa-legal-registry-review-evidence-v0.1",
+                "status": "accepted",
+                "profile": EXPECTED_RWA_RECEIPT_PROFILE,
+                "reviewer": "REPLACE_WITH_EXTERNAL_LEGAL_OR_REGISTRY_REVIEWER",
+                "review_date": "YYYY-MM-DD",
+                "review_scope": EXPECTED_RWA_LEGAL_REVIEW_SCOPE,
+                "registry": {
+                    "authority": "REPLACE_WITH_REAL_REGISTRY_OR_CUSTODIAN_AUTHORITY",
+                    "jurisdiction": "REPLACE_WITH_REAL_WORLD_JURISDICTION",
+                    "registry_report_hash": format!("0x{}", "66".repeat(32)),
+                },
+                "profile_source_tree_sha256": rwa_profile_source_hash,
+                "report_uri": "REPLACE_WITH_EXTERNAL_LEGAL_OR_REGISTRY_REVIEW_REPORT_URI",
+                "request_handoff": {
+                    "bundle": EXTERNAL_EVIDENCE_HANDOFF,
+                    "bundle_hash": format!("0x{}", "77".repeat(32)),
+                    "bundle_hash_algorithm": NOVASEAL_HANDOFF_HASH_ALGORITHM,
+                    "group": "rwa_legal_registry_review_evidence",
+                },
+                "notes": ["template fixture"],
+            }))
+            .unwrap(),
+        )
+        .unwrap();
 
         let passed =
-            validate_attestation_templates(temp.path(), Some(&artifact_hash), Some("sha256"), Some(&source_tree_hash)).unwrap();
+            validate_attestation_templates(temp.path(), Some(&artifact_hash), Some("sha256"), Some(&tcb_source_tree_hash)).unwrap();
         let failed = validate_attestation_templates(
             temp.path(),
             Some(&format!("0x{}", "cc".repeat(32))),
             Some("sha256"),
-            Some(&source_tree_hash),
+            Some(&tcb_source_tree_hash),
         )
         .unwrap();
 
@@ -6151,6 +6518,9 @@ mod tests {
         assert!(json_pointer_bool(&passed, "/checks/external_request_handoff_group"));
         assert!(json_pointer_bool(&passed, "/checks/btc_spv_request_handoff_bundle_path"));
         assert!(json_pointer_bool(&passed, "/checks/btc_spv_request_handoff_group"));
+        assert!(json_pointer_bool(&passed, "/checks/rwa_legal_request_handoff_bundle_path"));
+        assert!(json_pointer_bool(&passed, "/checks/rwa_legal_request_handoff_group"));
+        assert!(json_pointer_bool(&passed, "/checks/rwa_legal_profile_source_tree_hash_matches_current"));
         assert_eq!(json_pointer_str(&failed, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&failed, "/checks/public_artifact_hash_matches_current_tcb"));
         assert!(!json_pointer_bool(&failed, "/checks/external_artifact_hash_matches_current_tcb"));
@@ -6164,7 +6534,7 @@ mod tests {
         )
         .unwrap();
         let failed_release_version =
-            validate_attestation_templates(temp.path(), Some(&artifact_hash), Some("sha256"), Some(&source_tree_hash)).unwrap();
+            validate_attestation_templates(temp.path(), Some(&artifact_hash), Some("sha256"), Some(&tcb_source_tree_hash)).unwrap();
         assert_eq!(json_pointer_str(&failed_release_version, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&failed_release_version, "/checks/public_release_version_current"));
 
@@ -6176,7 +6546,7 @@ mod tests {
         )
         .unwrap();
         let failed_shape =
-            validate_attestation_templates(temp.path(), Some(&artifact_hash), Some("sha256"), Some(&source_tree_hash)).unwrap();
+            validate_attestation_templates(temp.path(), Some(&artifact_hash), Some("sha256"), Some(&tcb_source_tree_hash)).unwrap();
         assert_eq!(json_pointer_str(&failed_shape, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&failed_shape, "/checks/public_runtime_verifier_fields_exact"));
 
@@ -6188,7 +6558,7 @@ mod tests {
         )
         .unwrap();
         let failed_dep_type =
-            validate_attestation_templates(temp.path(), Some(&artifact_hash), Some("sha256"), Some(&source_tree_hash)).unwrap();
+            validate_attestation_templates(temp.path(), Some(&artifact_hash), Some("sha256"), Some(&tcb_source_tree_hash)).unwrap();
         assert_eq!(json_pointer_str(&failed_dep_type, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&failed_dep_type, "/checks/public_dep_type"));
 
@@ -6200,7 +6570,7 @@ mod tests {
         )
         .unwrap();
         let failed_stale_hash_type =
-            validate_attestation_templates(temp.path(), Some(&artifact_hash), Some("sha256"), Some(&source_tree_hash)).unwrap();
+            validate_attestation_templates(temp.path(), Some(&artifact_hash), Some("sha256"), Some(&tcb_source_tree_hash)).unwrap();
         assert_eq!(json_pointer_str(&failed_stale_hash_type, "/status"), Some("failed"));
         assert!(json_pointer_bool(&failed_stale_hash_type, "/checks/public_hash_type"));
         assert!(!json_pointer_bool(&failed_stale_hash_type, "/checks/public_hash_type_matches_expected"));
@@ -6212,7 +6582,7 @@ mod tests {
         )
         .unwrap();
         let failed_hash_type =
-            validate_attestation_templates(temp.path(), Some(&artifact_hash), Some("sha256"), Some(&source_tree_hash)).unwrap();
+            validate_attestation_templates(temp.path(), Some(&artifact_hash), Some("sha256"), Some(&tcb_source_tree_hash)).unwrap();
         assert_eq!(json_pointer_str(&failed_hash_type, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&failed_hash_type, "/checks/public_hash_type"));
 
@@ -6223,7 +6593,7 @@ mod tests {
         )
         .unwrap();
         let failed_algorithm =
-            validate_attestation_templates(temp.path(), Some(&artifact_hash), Some("ckb-blake2b256"), Some(&source_tree_hash))
+            validate_attestation_templates(temp.path(), Some(&artifact_hash), Some("ckb-blake2b256"), Some(&tcb_source_tree_hash))
                 .unwrap();
         assert_eq!(json_pointer_str(&failed_algorithm, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&failed_algorithm, "/checks/external_artifact_hash_algorithm_matches_current_tcb"));
@@ -6237,7 +6607,7 @@ mod tests {
         )
         .unwrap();
         let failed_public_handoff_bundle =
-            validate_attestation_templates(temp.path(), Some(&artifact_hash), Some("sha256"), Some(&source_tree_hash)).unwrap();
+            validate_attestation_templates(temp.path(), Some(&artifact_hash), Some("sha256"), Some(&tcb_source_tree_hash)).unwrap();
         assert_eq!(json_pointer_str(&failed_public_handoff_bundle, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&failed_public_handoff_bundle, "/checks/public_request_handoff_bundle_path"));
 
@@ -6257,7 +6627,7 @@ mod tests {
         )
         .unwrap();
         let failed_external_handoff_group =
-            validate_attestation_templates(temp.path(), Some(&artifact_hash), Some("sha256"), Some(&source_tree_hash)).unwrap();
+            validate_attestation_templates(temp.path(), Some(&artifact_hash), Some("sha256"), Some(&tcb_source_tree_hash)).unwrap();
         assert_eq!(json_pointer_str(&failed_external_handoff_group, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&failed_external_handoff_group, "/checks/external_request_handoff_group"));
 
@@ -6276,7 +6646,7 @@ mod tests {
         )
         .unwrap();
         let failed_btc_handoff_group =
-            validate_attestation_templates(temp.path(), Some(&artifact_hash), Some("sha256"), Some(&source_tree_hash)).unwrap();
+            validate_attestation_templates(temp.path(), Some(&artifact_hash), Some("sha256"), Some(&tcb_source_tree_hash)).unwrap();
         assert_eq!(json_pointer_str(&failed_btc_handoff_group, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&failed_btc_handoff_group, "/checks/btc_spv_request_handoff_group"));
     }
@@ -7644,6 +8014,7 @@ mod tests {
             gate("public_shared_cell_dep_pinning_attestation", "passed", PUBLIC_CELLDEP_ATTESTATION, Value::Null),
             gate("external_bip340_runtime_verifier_tcb_review_attestation", "passed", EXTERNAL_TCB_ATTESTATION, Value::Null),
             gate("public_btc_spv_evidence", "passed", PUBLIC_BTC_SPV_EVIDENCE, Value::Null),
+            gate("rwa_legal_registry_review_evidence", "passed", RWA_LEGAL_REGISTRY_REVIEW_EVIDENCE, Value::Null),
         ];
 
         let readiness = build_v1_readiness(&profile_certification, &stateful_acceptance, &gates, true, true);
