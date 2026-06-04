@@ -4591,23 +4591,20 @@ fn relative_file_array_all_exist(root: &Path, value: Option<&Value>, require_non
 }
 
 fn bruno_compatibility_patch_contract(repo_root: &Path, bruno_cwd: Option<&str>, patches: Option<&Value>) -> bool {
-    let Some(patches) = patches else {
-        return true;
-    };
-    let Some(patches) = patches.as_array() else {
-        return false;
-    };
-    if patches.is_empty() {
-        return true;
+    match (bruno_cwd, patches) {
+        (None, None) => true,
+        (Some(bruno_cwd), Some(patches)) if safe_relative_path(bruno_cwd) => {
+            let Some(patches) = patches.as_array() else {
+                return false;
+            };
+            if patches.is_empty() {
+                return false;
+            }
+            let bruno_root = repo_root.join(bruno_cwd);
+            bruno_root.is_dir() && patches.iter().all(|path| relative_file_exists(&bruno_root, path.as_str(), true))
+        }
+        _ => false,
     }
-    let Some(bruno_cwd) = bruno_cwd else {
-        return false;
-    };
-    if !safe_relative_path(bruno_cwd) {
-        return false;
-    }
-    let bruno_root = repo_root.join(bruno_cwd);
-    bruno_root.is_dir() && patches.iter().all(|path| relative_file_exists(&bruno_root, path.as_str(), true))
 }
 
 fn parse_out_point(value: Option<&str>) -> Value {
@@ -5445,6 +5442,16 @@ mod tests {
         let failed_patch = fiber_node_execution_summary(&repo_root, Some(&missing_patch_file));
         assert!(!json_pointer_bool(&failed_patch, "/all_required_workflows_executed_passed"));
         assert!(!json_pointer_bool(&failed_patch, "/workflow_checks/cross-chain-hub/bruno_compatibility_patch_files_exist"));
+
+        let mut unsafe_empty_patch_metadata = complete_fiber_node_execution_report(&repo_root, &fiber_repo);
+        unsafe_empty_patch_metadata["workflows"][0]["execution"]["bruno_cwd"] = Value::String("/tmp/fiber/tests/bruno".to_string());
+        unsafe_empty_patch_metadata["workflows"][0]["execution"]["bruno_compatibility_patches"] = json!([]);
+        let failed_unsafe_empty_patch_metadata = fiber_node_execution_summary(&repo_root, Some(&unsafe_empty_patch_metadata));
+        assert!(!json_pointer_bool(&failed_unsafe_empty_patch_metadata, "/all_required_workflows_executed_passed"));
+        assert!(!json_pointer_bool(
+            &failed_unsafe_empty_patch_metadata,
+            "/workflow_checks/open-use-close-a-channel/bruno_compatibility_patch_files_exist"
+        ));
     }
 
     #[test]

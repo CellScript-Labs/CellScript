@@ -455,18 +455,20 @@ def run_workflow(args: argparse.Namespace, workflow: FiberWorkflow) -> dict[str,
         completed = run_cmd(command, bruno_cwd, timeout=args.timeout_seconds, env=env)
         write_text(log_dir / "bruno.stdout", completed.stdout)
         write_text(log_dir / "bruno.stderr", completed.stderr)
-        return {
+        execution = {
             "status": "passed" if completed.returncode == 0 else "failed",
             "started_node": started_node,
             "command": command,
-            "bruno_cwd": rel(bruno_cwd, args.repo_root.resolve()),
-            "bruno_compatibility_patches": bruno_compatibility_patches,
             "returncode": completed.returncode,
             "noninteractive_ckb_cli_account_import_wrapper": (log_dir / "tool-bin" / "ckb-cli").is_file(),
             "stdout_log": rel(log_dir / "bruno.stdout", args.repo_root.resolve()),
             "stderr_log": rel(log_dir / "bruno.stderr", args.repo_root.resolve()),
             "duration_seconds": round(time.time() - started_at, 3),
         }
+        if bruno_compatibility_patches:
+            execution["bruno_cwd"] = rel(bruno_cwd, args.repo_root.resolve())
+            execution["bruno_compatibility_patches"] = bruno_compatibility_patches
+        return execution
     finally:
         if node_process is not None and node_process.poll() is None:
             if hasattr(os, "killpg"):
