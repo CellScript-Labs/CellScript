@@ -89,8 +89,8 @@ def profile_cases(service_builder: dict[str, Any], template: dict[str, Any]) -> 
             "field_constraints": {
                 "network": "explicit public mainnet/testnet name; placeholders and local-devnet are rejected",
                 "generated_at": "UTC timestamp in YYYY-MM-DDTHH:MM:SSZ form",
-                "evidence_provider": "real external provider identity; placeholder tokens are rejected",
-                "source_service.name": "real external SPV service identity; placeholder tokens are rejected",
+                "evidence_provider": "real external provider identity; placeholder, example, and unknown tokens are rejected",
+                "source_service.name": "real external SPV service identity; placeholder, example, and unknown tokens are rejected",
                 "source_service.commit": "40-character hex service source commit",
                 "request_handoff.bundle_hash_algorithm": "blake2b-256(person=NovaExtHandoff)",
             },

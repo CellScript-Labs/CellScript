@@ -285,8 +285,8 @@ const EXPECTED_PUBLIC_BTC_SPV_HANDOFF_FIELDS: &[&str] = EXPECTED_BTC_SPV_ADAPTER
 const EXPECTED_BTC_SPV_FIELD_CONSTRAINTS: &[(&str, &str)] = &[
     ("network", "explicit public mainnet/testnet name; placeholders and local-devnet are rejected"),
     ("generated_at", "UTC timestamp in YYYY-MM-DDTHH:MM:SSZ form"),
-    ("evidence_provider", "real external provider identity; placeholder tokens are rejected"),
-    ("source_service.name", "real external SPV service identity; placeholder tokens are rejected"),
+    ("evidence_provider", "real external provider identity; placeholder, example, and unknown tokens are rejected"),
+    ("source_service.name", "real external SPV service identity; placeholder, example, and unknown tokens are rejected"),
     ("source_service.commit", "40-character hex service source commit"),
     ("request_handoff.bundle_hash_algorithm", "blake2b-256(person=NovaExtHandoff)"),
 ];
@@ -312,7 +312,7 @@ const EXPECTED_PUBLIC_CELLDEP_REQUIRED_FIELDS: &[&str] = &[
 const EXPECTED_PUBLIC_CELLDEP_FIELD_CONSTRAINTS: &[(&str, &str)] = &[
     ("network", "explicit public CKB mainnet/testnet name; placeholders and local-devnet are rejected"),
     ("attested_at", "UTC timestamp in YYYY-MM-DDTHH:MM:SSZ form"),
-    ("attestor", "real release signer or deployer identity; placeholder tokens are rejected"),
+    ("attestor", "real release signer or deployer identity; placeholder, example, and unknown tokens are rejected"),
     ("release.manifest_commit", "40-character hex source commit matching the reviewed TCB repo_commit"),
     ("runtime_verifier.out_point", "0x-prefixed 32-byte CKB transaction hash plus numeric output index"),
     ("runtime_verifier.data_hash", "0x-prefixed 32-byte non-placeholder CellDep data hash"),
@@ -337,11 +337,11 @@ const EXPECTED_EXTERNAL_TCB_REQUIRED_FIELDS: &[&str] = &[
     "request_handoff.group",
 ];
 const EXPECTED_EXTERNAL_TCB_FIELD_CONSTRAINTS: &[(&str, &str)] = &[
-    ("reviewer", "real external reviewer identity; placeholder tokens are rejected"),
+    ("reviewer", "real external reviewer identity; placeholder, example, and unknown tokens are rejected"),
     ("review_date", "UTC date in YYYY-MM-DD form"),
     ("review_scope", "exact BIP340 verifier, RISC-V shell, IPC envelope, and artifact/CellDep pinning scope"),
     ("artifact_hash_algorithm", "sha256"),
-    ("report_uri", "HTTPS URI for the public review report or source-controlled review commit"),
+    ("report_uri", "HTTPS URI for the public review report or source-controlled review commit; example domains are rejected"),
     ("request_handoff.bundle_hash_algorithm", "blake2b-256(person=NovaExtHandoff)"),
 ];
 const EXPECTED_EXTERNAL_TCB_REVIEW_SCOPE: &[&str] = &[
@@ -4779,7 +4779,22 @@ fn is_public_network(value: &str) -> bool {
 
 fn contains_placeholder_token(value: &str) -> bool {
     let lower = value.to_ascii_lowercase();
-    ["replace_with", "replace-", "placeholder", "todo", "tbd"].iter().any(|token| lower.contains(token))
+    [
+        "replace_with",
+        "replace-",
+        "placeholder",
+        "todo",
+        "tbd",
+        "unknown",
+        "example",
+        "sample",
+        "dummy",
+        "not_applicable",
+        "not-applicable",
+        "n/a",
+    ]
+    .iter()
+    .any(|token| lower.contains(token))
 }
 
 fn is_https_report_uri(value: &str) -> bool {
@@ -5683,6 +5698,13 @@ mod tests {
         assert_eq!(json_pointer_str(&failed_provider, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&failed_provider, "/checks/evidence_provider_identity"));
 
+        let mut unknown_provider = spv_report.clone();
+        unknown_provider["evidence_provider"] = json!("unknown-spv-provider");
+        std::fs::write(proofs.join("public_btc_spv_evidence.json"), serde_json::to_vec_pretty(&unknown_provider).unwrap()).unwrap();
+        let failed_unknown_provider = validate_btc_spv_evidence(temp.path(), PUBLIC_BTC_SPV_EVIDENCE, &handoff).unwrap();
+        assert_eq!(json_pointer_str(&failed_unknown_provider, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&failed_unknown_provider, "/checks/evidence_provider_identity"));
+
         let mut placeholder_network = spv_report.clone();
         placeholder_network["network"] = json!("testnet-or-mainnet");
         std::fs::write(proofs.join("public_btc_spv_evidence.json"), serde_json::to_vec_pretty(&placeholder_network).unwrap()).unwrap();
@@ -6101,7 +6123,7 @@ mod tests {
             "reviewer": "external-tcb-reviewer",
             "review_date": "2026-06-05",
             "review_scope": EXPECTED_EXTERNAL_TCB_REVIEW_SCOPE,
-            "report_uri": "https://audits.nervos.example.org/novaseal-bip340-tcb-review",
+            "report_uri": "https://audits.nervos.org/novaseal-bip340-tcb-review",
             "notes": "external review fixture",
             "request_handoff": {
                 "bundle": EXTERNAL_EVIDENCE_HANDOFF,
@@ -6183,6 +6205,19 @@ mod tests {
         assert_eq!(json_pointer_str(&review_reviewer_failed, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&review_reviewer_failed, "/checks/reviewer_identity"));
 
+        let mut review_unknown_reviewer = external_review.clone();
+        review_unknown_reviewer["reviewer"] = json!("unknown-reviewer");
+        std::fs::write(
+            proofs.join("bip340_external_tcb_review_attestation.json"),
+            serde_json::to_vec_pretty(&review_unknown_reviewer).unwrap(),
+        )
+        .unwrap();
+        let review_unknown_reviewer_failed =
+            validate_external_review(temp.path(), EXTERNAL_TCB_ATTESTATION, Some(&artifact_hash), Some(&source_tree_hash), &handoff)
+                .unwrap();
+        assert_eq!(json_pointer_str(&review_unknown_reviewer_failed, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&review_unknown_reviewer_failed, "/checks/reviewer_identity"));
+
         let mut review_placeholder_uri = external_review.clone();
         review_placeholder_uri["report_uri"] = json!("REPLACE_WITH_EXTERNAL_REVIEW_REPORT_OR_COMMIT_URI");
         std::fs::write(
@@ -6195,6 +6230,19 @@ mod tests {
                 .unwrap();
         assert_eq!(json_pointer_str(&review_uri_failed, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&review_uri_failed, "/checks/report_uri_https"));
+
+        let mut review_example_uri = external_review.clone();
+        review_example_uri["report_uri"] = json!("https://audits.nervos.example.org/novaseal-bip340-tcb-review");
+        std::fs::write(
+            proofs.join("bip340_external_tcb_review_attestation.json"),
+            serde_json::to_vec_pretty(&review_example_uri).unwrap(),
+        )
+        .unwrap();
+        let review_example_uri_failed =
+            validate_external_review(temp.path(), EXTERNAL_TCB_ATTESTATION, Some(&artifact_hash), Some(&source_tree_hash), &handoff)
+                .unwrap();
+        assert_eq!(json_pointer_str(&review_example_uri_failed, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&review_example_uri_failed, "/checks/report_uri_https"));
 
         let mut review_extra = external_review.clone();
         review_extra["unexpected_provider_field"] = Value::String("must-fail".to_string());

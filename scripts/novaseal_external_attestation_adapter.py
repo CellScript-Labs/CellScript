@@ -76,7 +76,7 @@ def public_celldep_case(template: dict[str, Any], tcb: dict[str, Any]) -> dict[s
         "field_constraints": {
             "network": "explicit public CKB mainnet/testnet name; placeholders and local-devnet are rejected",
             "attested_at": "UTC timestamp in YYYY-MM-DDTHH:MM:SSZ form",
-            "attestor": "real release signer or deployer identity; placeholder tokens are rejected",
+            "attestor": "real release signer or deployer identity; placeholder, example, and unknown tokens are rejected",
             "release.manifest_commit": "40-character hex source commit matching the reviewed TCB repo_commit",
             "runtime_verifier.out_point": "0x-prefixed 32-byte CKB transaction hash plus numeric output index",
             "runtime_verifier.data_hash": "0x-prefixed 32-byte non-placeholder CellDep data hash",
@@ -136,11 +136,11 @@ def external_tcb_case(template: dict[str, Any], tcb: dict[str, Any]) -> dict[str
             "request_handoff.group",
         ],
         "field_constraints": {
-            "reviewer": "real external reviewer identity; placeholder tokens are rejected",
+            "reviewer": "real external reviewer identity; placeholder, example, and unknown tokens are rejected",
             "review_date": "UTC date in YYYY-MM-DD form",
             "review_scope": "exact BIP340 verifier, RISC-V shell, IPC envelope, and artifact/CellDep pinning scope",
             "artifact_hash_algorithm": "sha256",
-            "report_uri": "HTTPS URI for the public review report or source-controlled review commit",
+            "report_uri": "HTTPS URI for the public review report or source-controlled review commit; example domains are rejected",
             "request_handoff.bundle_hash_algorithm": "blake2b-256(person=NovaExtHandoff)",
         },
         "verifier_id": template.get("verifier_id"),
