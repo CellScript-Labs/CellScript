@@ -74,7 +74,7 @@ def public_celldep_case(template: dict[str, Any], tcb: dict[str, Any]) -> dict[s
             "request_handoff.group",
         ],
         "field_constraints": {
-            "network": "explicit public CKB mainnet/testnet name; placeholders and local-devnet are rejected",
+            "network": "explicit public CKB mainnet/testnet name; placeholders and local/devnet/regtest/simnet/private/fake labels are rejected",
             "attested_at": "UTC timestamp in YYYY-MM-DDTHH:MM:SSZ form",
             "attestor": "real release signer or deployer identity; placeholder, example, and unknown tokens are rejected",
             "release.manifest_commit": "40-character hex source commit matching the reviewed TCB repo_commit",

@@ -283,7 +283,7 @@ const EXPECTED_BTC_SPV_ADAPTER_PUBLIC_FIELDS: &[&str] = &[
 ];
 const EXPECTED_PUBLIC_BTC_SPV_HANDOFF_FIELDS: &[&str] = EXPECTED_BTC_SPV_ADAPTER_PUBLIC_FIELDS;
 const EXPECTED_BTC_SPV_FIELD_CONSTRAINTS: &[(&str, &str)] = &[
-    ("network", "explicit public mainnet/testnet name; placeholders and local-devnet are rejected"),
+    ("network", "explicit public mainnet/testnet name; placeholders and local/devnet/regtest/simnet/private/fake labels are rejected"),
     ("generated_at", "UTC timestamp in YYYY-MM-DDTHH:MM:SSZ form"),
     ("evidence_provider", "real external provider identity; placeholder, example, and unknown tokens are rejected"),
     ("source_service.name", "real external SPV service identity; placeholder, example, and unknown tokens are rejected"),
@@ -310,7 +310,10 @@ const EXPECTED_PUBLIC_CELLDEP_REQUIRED_FIELDS: &[&str] = &[
     "request_handoff.group",
 ];
 const EXPECTED_PUBLIC_CELLDEP_FIELD_CONSTRAINTS: &[(&str, &str)] = &[
-    ("network", "explicit public CKB mainnet/testnet name; placeholders and local-devnet are rejected"),
+    (
+        "network",
+        "explicit public CKB mainnet/testnet name; placeholders and local/devnet/regtest/simnet/private/fake labels are rejected",
+    ),
     ("attested_at", "UTC timestamp in YYYY-MM-DDTHH:MM:SSZ form"),
     ("attestor", "real release signer or deployer identity; placeholder, example, and unknown tokens are rejected"),
     ("release.manifest_commit", "40-character hex source commit matching the reviewed TCB repo_commit"),
@@ -4774,7 +4777,17 @@ fn is_public_network(value: &str) -> bool {
         return false;
     }
     let lower = trimmed.to_ascii_lowercase();
-    lower != "local-devnet" && lower != "testnet-or-mainnet" && (lower.contains("mainnet") || lower.contains("testnet"))
+    if lower == "testnet-or-mainnet"
+        || ["local", "devnet", "regtest", "simnet", "private", "fake"].iter().any(|token| lower.contains(token))
+    {
+        return false;
+    }
+    lower == "mainnet"
+        || lower == "testnet"
+        || lower.ends_with("-mainnet")
+        || lower.ends_with("-testnet")
+        || lower.ends_with(" mainnet")
+        || lower.ends_with(" testnet")
 }
 
 fn contains_placeholder_token(value: &str) -> bool {
@@ -5712,6 +5725,14 @@ mod tests {
         assert_eq!(json_pointer_str(&failed_network, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&failed_network, "/checks/network_public"));
 
+        let mut local_testnet_network = spv_report.clone();
+        local_testnet_network["network"] = json!("local-testnet");
+        std::fs::write(proofs.join("public_btc_spv_evidence.json"), serde_json::to_vec_pretty(&local_testnet_network).unwrap())
+            .unwrap();
+        let failed_local_testnet = validate_btc_spv_evidence(temp.path(), PUBLIC_BTC_SPV_EVIDENCE, &handoff).unwrap();
+        assert_eq!(json_pointer_str(&failed_local_testnet, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&failed_local_testnet, "/checks/network_public"));
+
         let mut top_level_extra = spv_report.clone();
         top_level_extra["unexpected_provider_field"] = Value::String("must-fail".to_string());
         std::fs::write(proofs.join("public_btc_spv_evidence.json"), serde_json::to_vec_pretty(&top_level_extra).unwrap()).unwrap();
@@ -5934,6 +5955,24 @@ mod tests {
         .unwrap();
         assert_eq!(json_pointer_str(&public_network_failed, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&public_network_failed, "/checks/network_public"));
+
+        let mut public_private_network = public_attestation.clone();
+        public_private_network["network"] = json!("ckb-private-mainnet");
+        std::fs::write(
+            proofs.join("public_shared_cell_dep_attestation.json"),
+            serde_json::to_vec_pretty(&public_private_network).unwrap(),
+        )
+        .unwrap();
+        let public_private_network_failed = validate_public_attestation(
+            temp.path(),
+            PUBLIC_CELLDEP_ATTESTATION,
+            Some(&artifact_hash),
+            Some(tcb_repo_commit),
+            &handoff,
+        )
+        .unwrap();
+        assert_eq!(json_pointer_str(&public_private_network_failed, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&public_private_network_failed, "/checks/network_public"));
 
         let mut public_invalid_out_point = public_attestation.clone();
         public_invalid_out_point["runtime_verifier"]["out_point"] = json!(format!("0x{}:not-an-index", "11".repeat(32)));
