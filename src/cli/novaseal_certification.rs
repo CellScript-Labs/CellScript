@@ -4902,8 +4902,9 @@ fn validate_security_audit_coverage(
         "external_attestation_templates_current": json_pointer_str(attestation_templates, "/status") == Some("passed"),
         "production_blockers_explicit": agreement_security.contains("public/shared CellDep")
             && agreement_security.contains("public BTC SPV")
+            && agreement_security.contains("RWA legal/registry review")
             && agreement_security.contains("external BIP340")
-            && agreement_audit.contains("external production attestations and public BTC SPV evidence still required"),
+            && agreement_audit.contains("external production attestations, public BTC SPV evidence, and RWA legal/registry review evidence still required"),
     });
     Ok(json!({
         "schema": "novaseal-security-audit-coverage-v0.1",
@@ -4919,6 +4920,7 @@ fn validate_security_audit_coverage(
         "residual_production_blockers": [
             "public/shared CellDep pinning attestation",
             "public BTC SPV evidence for BTC-facing profiles",
+            "RWA legal/registry review evidence",
             "external BIP340 runtime verifier TCB review attestation",
         ],
     }))
@@ -7838,12 +7840,12 @@ mod tests {
         std::fs::create_dir_all(&riscv_src).unwrap();
         std::fs::write(
             agreement_docs.join("SECURITY.md"),
-            "## Implemented Guards\npublic/shared CellDep\npublic BTC SPV\nexternal BIP340\n## Not Implemented\n## Risk Posture\n",
+            "## Implemented Guards\npublic/shared CellDep\npublic BTC SPV\nRWA legal/registry review evidence\nexternal BIP340\n## Not Implemented\n## Risk Posture\n",
         )
         .unwrap();
         std::fs::write(
             agreement_docs.join("AUDIT_STATUS.md"),
-            "## Claim Classification\n## Fixture Honesty\nexternal production attestations and public BTC SPV evidence still required\n## Production Statement Boundary\n",
+            "## Claim Classification\n## Fixture Honesty\nexternal production attestations, public BTC SPV evidence, and RWA legal/registry review evidence still required\n## Production Statement Boundary\n",
         )
         .unwrap();
         std::fs::write(core_docs.join("RISCV_VERIFIER_SHELL.md"), "## Unsafe Boundary\nsyscall register ABI only\n").unwrap();

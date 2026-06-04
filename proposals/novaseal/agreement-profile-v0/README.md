@@ -4,8 +4,8 @@
 structure, local transaction-shape evidence, resolved transaction verifier
 evidence, live devnet lifecycle evidence, fixed-width wallet signing vectors,
 and local production-gate checks. Public/shared CellDep attestation, public BTC
-SPV evidence for BTC-facing profiles, and external BIP340 TCB review are still
-required before production claims.
+SPV evidence for BTC-facing profiles, RWA legal/registry review evidence, and
+external BIP340 TCB review are still required before production claims.
 
 **Roadmap position**: this package is the current NovaSeal **v0.2 Agreement
 Profile** stage. The package/schema name remains `agreement-profile-v0` because
@@ -171,6 +171,6 @@ external evidence, not local facts.
 
 The next conservative slice should replace the local always-success lock with
 real borrower/lender authority locks, then add public/shared CellDep
-attestation, public BTC SPV evidence, and external BIP340 TCB review. Only
-after that should we consider expanding BTC authority hooks or iCKB/xUDT
-variants.
+attestation, public BTC SPV evidence, RWA legal/registry review evidence, and
+external BIP340 TCB review. Only after that should we consider expanding BTC
+authority hooks or iCKB/xUDT variants.

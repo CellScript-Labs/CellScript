@@ -64,8 +64,9 @@ Core runtime call and no new chain-facing machinery.
 
 That is still not a standalone mainnet production statement. The production
 claim remains blocked until the public/shared CellDep pinning attestation and
-public BTC SPV evidence for BTC-facing profiles, plus the external BIP340
-verifier TCB attestation, are supplied. Terms-hash and
+public BTC SPV evidence for BTC-facing profiles, RWA legal/registry review
+evidence, and the external BIP340 verifier TCB attestation are supplied.
+Terms-hash and
 receipt-hash preimage policies also remain wallet/builder obligations in this
 v0 profile; the chain enforces their bindings to outputs and signed intents, not
 a universal terms-document registry.
