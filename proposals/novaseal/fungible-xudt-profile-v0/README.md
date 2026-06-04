@@ -1,8 +1,8 @@
 # NovaSeal Fungible xUDT Profile v0
 
-**Status**: reviewable profile package. It is not V1-ready and not production
-ready because profile-specific wallet/service fixtures and external production
-attestations are still missing.
+**Status**: reviewable profile package with live stateful and operator-fixture
+evidence. It is not production ready because external production attestations
+are still missing.
 
 This package implements the planned NovaSeal Fungible/xUDT object profile as a
 source-level package with schemas, fixtures, invariant matrix, and security
@@ -34,7 +34,7 @@ accounting, market flows, or a general ledger.
 | Schemas and fixture labels | implemented | reviewable |
 | Invariant matrix | implemented | reviewable |
 | Live devnet issue -> transfer -> settle | implemented | `target/novaseal-fungible-xudt-devnet-stateful-live.json` |
-| Profile-specific wallet/service fixtures | missing | builder-fixture-required |
+| Profile-specific wallet/service fixtures | implemented | `target/novaseal-profile-operator-fixtures.json` |
 | Public/shared CellDep attestation | missing | external-required |
 | External BIP340 TCB review | missing | external-required |
 
@@ -44,6 +44,6 @@ The V1 readiness matrix may count `object_profile_fungible_xudt` as a package
 implementation only when the certification gate sees this manifest, source
 actions, lifecycle dispatcher, schemas, fixtures, docs, invariant matrix, and
 live stateful evidence. The business scenario `fungible_xudt_value_flow` now
-passes at the live devnet stateful layer; production wallet/operator claims
-remain blocked until profile-specific builder fixtures are generated and
-checked.
+passes at the live devnet stateful layer, and profile-specific wallet/operator
+fixtures are generated and checked by
+`scripts/novaseal_profile_operator_fixtures.py`.

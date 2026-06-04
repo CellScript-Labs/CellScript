@@ -4,6 +4,7 @@
 
 - NovaSeal repository: `research/nsv1`, after commit `3db1afb8`.
 - NovaSeal local gate: `target/novaseal-production-gates.json` reports `local_production_prep_ready_external_attestation_required`.
+- NovaSeal planned-profile operator fixtures: `target/novaseal-profile-operator-fixtures.json` covers the planned profile signing and witness surfaces.
 - NovaSeal planned-profile stateful matrix: all planned live scenarios pass with no missing entries.
 - NovaSeal external Fiber-node matrix: `target/novaseal-fiber-node-experiments.json` reports `16/16` required suites present, executed, and passed, including embedded and separate-service cross-chain hub send-BTC and receive-BTC workflows.
 - RGB++ active SDK clone: `/Users/arthur/RustroverProjects/rgbpp-sdk-active`, commit `ee21eb9735c1adeb277e3a02b7f6c2f6fd1d0556`.
@@ -14,7 +15,7 @@
 
 RGB++ is more mature in Bitcoin/CKB operational integration. It has explicit isomorphic binding, BTC SPV service integration, BTC time lock handling, paymaster handling, service APIs, SDK examples, and workflow-oriented transaction builders.
 
-NovaSeal is cleaner as a typed contract and certification framework. Its strengths are explicit profile packages, canonical envelopes, negative-case live reports, source/artifact provenance, a single certification gate that now verifies all planned profile live paths, and a separate Fiber-node execution matrix that now passes across the tracked Fiber workflows. Its main remaining weakness is no longer basic Fiber execution. It is the absence of production-grade external BTC SPV provenance, public/shared CellDep attestation, external BIP340 verifier TCB attestation, and service-facing builders that make those facts easy for wallets and operators to reproduce.
+NovaSeal is cleaner as a typed contract and certification framework. Its strengths are explicit profile packages, canonical envelopes, negative-case live reports, source/artifact provenance, a single certification gate that now verifies all planned profile live paths, planned-profile operator fixtures, and a separate Fiber-node execution matrix that now passes across the tracked Fiber workflows. Its main remaining weakness is no longer basic Fiber execution or first-pass operator fixture binding. It is the absence of production-grade external BTC SPV provenance, public/shared CellDep attestation, external BIP340 verifier TCB attestation, and SDK/service builders that make those facts easy for wallets and operators to reproduce in production systems.
 
 ## Comparison
 
@@ -49,21 +50,21 @@ NovaSeal is cleaner as a typed contract and certification framework. Its strengt
    - Move each profile into `scripts/novaseal_live_profiles/<profile>.py`.
    - Keep a shared transaction/devnet/provenance module and a registry that preserves report contracts.
 
-5. Add wallet and service-facing builders.
+5. Promote operator fixtures into wallet and service-facing builders.
    - RGB++ has SDK builders for virtual CKB tx, BTC commitment, service queue, paymaster, and SPV proof retrieval.
-   - NovaSeal should add builder-backed JSON fixtures for each planned profile, not only Python live scripts.
-   - These builders should output signing preimages, witness bytes, CKB tx skeletons, and expected report hashes.
+   - NovaSeal now has certification-checked JSON fixtures for each planned profile.
+   - The next step is to turn those fixtures into reusable builder libraries that output signing preimages, witness bytes, CKB tx skeletons, and expected report hashes from application inputs.
 
-6. Promote Fiber evidence from execution proof to operator-ready fixture.
+6. Promote Fiber evidence from operator fixture to production integration fixture.
    - The separate Fiber-node execution report now exists and passes the currently tracked required suites.
-   - Keep the report as a certification input, but add wallet/operator fixtures that bind each Fiber suite to a NovaSeal profile witness hash, channel topology summary, before/after channel state, and copied-Bruno compatibility patch provenance.
-   - This turns the current execution matrix into reproducible integration evidence rather than a one-off local experiment.
+   - The NovaSeal operator fixture now binds the Fiber candidate witness path to the local evidence.
+   - The next step is to bind each Fiber suite to channel topology summaries, before/after channel state, and copied-Bruno compatibility patch provenance for production integration evidence.
 
 ## Priority
 
 1. External BTC SPV evidence adapter.
-2. Builder-backed wallet/service fixtures.
-3. Fiber operator fixture binding.
+2. Reusable wallet/service builder libraries from the checked fixtures.
+3. Fiber production integration fixture binding.
 4. Profile live-runner modularisation.
 5. BTC time-lock profile.
 6. Production attestations and public BTC SPV report collection.
@@ -73,6 +74,7 @@ Completed hardening since the comparison was first drafted:
 - Fiber-node execution evidence is now present and passing for the tracked required suites.
 - BTC transaction, BTC UTXO, and Fiber manifests and validators now use explicit lifecycle dispatcher action names rather than `missing-live-dispatcher`.
 - Public BTC SPV evidence now has a fail-closed production gate and checked template.
+- Planned-profile operator fixtures now bind each profile action to source, schema, invariant, witness, and live-report evidence where local stateful evidence exists.
 
 ## Decision
 

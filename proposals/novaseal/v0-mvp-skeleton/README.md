@@ -289,16 +289,19 @@ python3 scripts/novaseal_fixture_harness.py --pretty
 # 18. Generate fixed-width wallet signing vectors from the repository root
 python3 /home/arthur/a19q3/CellScript/scripts/novaseal_wallet_signing_vectors.py --pretty
 
-# 19. Generate the local BIP340 TCB review bundle from the repository root
+# 19. Generate planned-profile operator fixtures from the repository root
+python3 /home/arthur/a19q3/CellScript/scripts/novaseal_profile_operator_fixtures.py --pretty
+
+# 20. Generate the local BIP340 TCB review bundle from the repository root
 python3 /home/arthur/a19q3/CellScript/scripts/novaseal_bip340_tcb_review.py --pretty
 
-# 20. Run the local production-prep/profile certification gate from the repository root
+# 21. Run the local production-prep/profile certification gate from the repository root
 /home/arthur/a19q3/CellScript/target/debug/cellc certify --plugin novaseal-profile-v0 --json
 
-# 21. Check strict 0.16 primitive closure
+# 22. Check strict 0.16 primitive closure
 cellc check --target-profile ckb --primitive-strict 0.16
 
-# 22. Inspect obligations
+# 23. Inspect obligations
 cellc constraints --target-profile ckb
 cellc explain-assumptions --target-profile ckb
 cellc profile --target-profile ckb

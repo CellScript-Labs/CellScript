@@ -34,6 +34,7 @@ const FIBER_CANDIDATE_LIVE: &str = "target/novaseal-fiber-candidate-devnet-state
 const FIBER_NODE_EXPERIMENTS: &str = "target/novaseal-fiber-node-experiments.json";
 const STATEFUL_ACCEPTANCE: &str = "target/novaseal-devnet-stateful-acceptance.json";
 const WALLET_VECTORS: &str = "target/novaseal-wallet-signing-vectors.json";
+const PROFILE_OPERATOR_FIXTURES: &str = "target/novaseal-profile-operator-fixtures.json";
 const TCB_REVIEW: &str = "target/novaseal-bip340-tcb-review.json";
 const PUBLIC_CELLDEP_ATTESTATION: &str = "proposals/novaseal/v0-mvp-skeleton/proofs/public_shared_cell_dep_attestation.json";
 const EXTERNAL_TCB_ATTESTATION: &str = "proposals/novaseal/v0-mvp-skeleton/proofs/bip340_external_tcb_review_attestation.json";
@@ -458,6 +459,16 @@ struct ExpectedWalletAction {
     new_nonce: i64,
 }
 
+#[derive(Clone, Copy)]
+struct ExpectedOperatorFixture {
+    profile: &'static str,
+    action: &'static str,
+    fixture: &'static str,
+    signers: &'static [&'static str],
+    live_required: bool,
+    fiber_required: bool,
+}
+
 const EXPECTED_AGREEMENT_WALLET_ACTIONS: &[(&str, ExpectedWalletAction)] = &[
     (
         "originate_agreement",
@@ -467,10 +478,94 @@ const EXPECTED_AGREEMENT_WALLET_ACTIONS: &[(&str, ExpectedWalletAction)] = &[
     ("claim_after_expiry", ExpectedWalletAction { signers: &["lender"], old_status: 1, new_status: 3, old_nonce: 0, new_nonce: 1 }),
 ];
 
+const EXPECTED_PROFILE_OPERATOR_FIXTURES: &[ExpectedOperatorFixture] = &[
+    ExpectedOperatorFixture {
+        profile: EXPECTED_FUNGIBLE_XUDT_PROFILE,
+        action: "issue_xudt",
+        fixture: "issue_valid.json",
+        signers: &["issuer"],
+        live_required: true,
+        fiber_required: false,
+    },
+    ExpectedOperatorFixture {
+        profile: EXPECTED_FUNGIBLE_XUDT_PROFILE,
+        action: "transfer_xudt",
+        fixture: "transfer_valid.json",
+        signers: &["holder"],
+        live_required: true,
+        fiber_required: false,
+    },
+    ExpectedOperatorFixture {
+        profile: EXPECTED_FUNGIBLE_XUDT_PROFILE,
+        action: "settle_xudt",
+        fixture: "settle_valid.json",
+        signers: &["holder"],
+        live_required: true,
+        fiber_required: false,
+    },
+    ExpectedOperatorFixture {
+        profile: EXPECTED_RWA_RECEIPT_PROFILE,
+        action: "materialize_rwa_receipt",
+        fixture: "materialize_valid.json",
+        signers: &["issuer"],
+        live_required: true,
+        fiber_required: false,
+    },
+    ExpectedOperatorFixture {
+        profile: EXPECTED_RWA_RECEIPT_PROFILE,
+        action: "claim_rwa_receipt",
+        fixture: "claim_valid.json",
+        signers: &["holder"],
+        live_required: true,
+        fiber_required: false,
+    },
+    ExpectedOperatorFixture {
+        profile: EXPECTED_RWA_RECEIPT_PROFILE,
+        action: "settle_rwa_receipt",
+        fixture: "settle_valid.json",
+        signers: &["issuer", "holder"],
+        live_required: true,
+        fiber_required: false,
+    },
+    ExpectedOperatorFixture {
+        profile: EXPECTED_BTC_TX_COMMITMENT_PROFILE,
+        action: "commit_btc_transaction_transition",
+        fixture: "commit_transaction_valid.json",
+        signers: &["committer"],
+        live_required: true,
+        fiber_required: false,
+    },
+    ExpectedOperatorFixture {
+        profile: EXPECTED_BTC_UTXO_SEAL_PROFILE,
+        action: "close_btc_utxo_seal",
+        fixture: "close_utxo_seal_valid.json",
+        signers: &["owner"],
+        live_required: true,
+        fiber_required: false,
+    },
+    ExpectedOperatorFixture {
+        profile: EXPECTED_DUAL_SEAL_PROFILE,
+        action: "finalize_dual_seal",
+        fixture: "finalize_dual_seal_valid.json",
+        signers: &["btc_owner", "ckb_authority"],
+        live_required: false,
+        fiber_required: false,
+    },
+    ExpectedOperatorFixture {
+        profile: EXPECTED_FIBER_CANDIDATE_PROFILE,
+        action: "settle_fiber_candidate",
+        fixture: "settle_fiber_candidate_valid.json",
+        signers: &["operator"],
+        live_required: true,
+        fiber_required: true,
+    },
+];
+
 pub(crate) fn build_report(repo_root: &Path) -> Result<Value> {
     let core_live = live_verifier_facts(repo_root, CORE_LIVE)?;
     let agreement_live = live_verifier_facts(repo_root, AGREEMENT_LIVE)?;
     let wallet = json_load(repo_root, WALLET_VECTORS)?;
+    let profile_operator_fixtures = json_load(repo_root, PROFILE_OPERATOR_FIXTURES)?;
     let tcb = json_load(repo_root, TCB_REVIEW)?;
     let artifact_hash = normalize_hex(json_pointer_str(&tcb, "/runtime_artifact/artifact_hash"));
 
@@ -494,6 +589,7 @@ pub(crate) fn build_report(repo_root: &Path) -> Result<Value> {
         agreement_manifest: &agreement_manifest,
         core_security: &core_security,
         wallet: &wallet,
+        profile_operator_fixtures: &profile_operator_fixtures,
         stateful_acceptance: &stateful_acceptance,
         tcb: &tcb,
         public_attestation: &public_attestation,
@@ -517,7 +613,7 @@ pub(crate) fn build_report(repo_root: &Path) -> Result<Value> {
         gate(
             "agreement_profile_public_ecosystem_certification_v0",
             json_pointer_str(&profile_certification, "/status").unwrap_or("failed"),
-            "proposals/novaseal/agreement-profile-v0/Cell.toml + proposals/novaseal/agreement-profile-v0/schemas + proposals/novaseal/agreement-profile-v0/fixtures + target/novaseal-devnet-stateful-acceptance.json + target/novaseal-wallet-signing-vectors.json",
+            "proposals/novaseal/agreement-profile-v0/Cell.toml + proposals/novaseal/agreement-profile-v0/schemas + proposals/novaseal/agreement-profile-v0/fixtures + target/novaseal-devnet-stateful-acceptance.json + target/novaseal-wallet-signing-vectors.json + target/novaseal-profile-operator-fixtures.json",
             profile_certification.clone(),
         ),
         gate(
@@ -537,6 +633,12 @@ pub(crate) fn build_report(repo_root: &Path) -> Result<Value> {
             if wallet_gate_passed(&wallet) { "passed" } else { "failed" },
             WALLET_VECTORS,
             wallet.get("summary").cloned().unwrap_or(Value::Null),
+        ),
+        gate(
+            "planned_profile_operator_fixtures",
+            if profile_operator_fixture_gate_passed(&profile_operator_fixtures) { "passed" } else { "failed" },
+            PROFILE_OPERATOR_FIXTURES,
+            profile_operator_fixtures.get("summary").cloned().unwrap_or(Value::Null),
         ),
         gate(
             "bip340_runtime_verifier_local_tcb_review",
@@ -695,6 +797,12 @@ fn build_v1_readiness(
             "wallet-facing signing safety",
         ),
         readiness_dimension(
+            "profile_operator_fixtures",
+            json_pointer_bool(profile_certification, "/local_checks/profile_operator_fixture_detail_passed"),
+            "target/novaseal-profile-operator-fixtures.json",
+            "planned-profile wallet and service reproducibility",
+        ),
+        readiness_dimension(
             "local_bip340_tcb_review",
             json_pointer_bool(profile_certification, "/local_checks/local_bip340_tcb_review_passed"),
             "target/novaseal-bip340-tcb-review.json",
@@ -733,6 +841,7 @@ fn build_v1_readiness(
         "multi_business_scenario_coverage",
         "full_stateful_acceptance",
         "wallet_signing_vectors",
+        "profile_operator_fixtures",
         "local_bip340_tcb_review",
         "local_v1_gate",
     ];
@@ -769,7 +878,7 @@ fn build_v1_readiness(
         "failed_dimensions": failed_dimensions,
         "external_blockers": external_blockers,
         "acceptance_boundary": {
-            "local_ready_means": "architecture, audit, wallet, TCB, multi-profile devnet, multi-business scenarios, and full stateful acceptance are machine checked locally",
+            "local_ready_means": "architecture, audit, wallet, planned-profile operator fixtures, TCB, multi-profile devnet, multi-business scenarios, and full stateful acceptance are machine checked locally",
             "production_ready_requires": [
                 "public/shared CellDep pinning attestation",
                 "public BTC SPV evidence for BTC-facing profiles",
@@ -2054,6 +2163,7 @@ struct ProfileCertificationInputs<'a> {
     agreement_manifest: &'a Value,
     core_security: &'a Value,
     wallet: &'a Value,
+    profile_operator_fixtures: &'a Value,
     stateful_acceptance: &'a Value,
     tcb: &'a Value,
     public_attestation: &'a Value,
@@ -2068,6 +2178,7 @@ fn validate_profile_certification(input: ProfileCertificationInputs<'_>) -> Resu
         agreement_manifest,
         core_security,
         wallet,
+        profile_operator_fixtures,
         stateful_acceptance,
         tcb,
         public_attestation,
@@ -2077,6 +2188,7 @@ fn validate_profile_certification(input: ProfileCertificationInputs<'_>) -> Resu
     let schema_files = expected_files(repo_root, &repo_root.join(AGREEMENT_ROOT).join("schemas"), EXPECTED_AGREEMENT_SCHEMA_FILES)?;
     let fixture_files = expected_files(repo_root, &repo_root.join(AGREEMENT_ROOT).join("fixtures"), EXPECTED_AGREEMENT_FIXTURES)?;
     let wallet_detail = validate_wallet_vector_detail(wallet);
+    let profile_operator_fixture_detail = validate_profile_operator_fixture_detail(profile_operator_fixtures);
     let invariant_matrix = validate_invariant_matrix(repo_root, &repo_root.join(AGREEMENT_ROOT).join("proofs/invariant_matrix.json"))?;
     let fungible_xudt_profile = validate_fungible_xudt_profile_package(repo_root)?;
     let rwa_receipt_profile = validate_rwa_receipt_profile_package(repo_root)?;
@@ -2118,6 +2230,7 @@ fn validate_profile_certification(input: ProfileCertificationInputs<'_>) -> Resu
         "profile_schema_set_exact": json_pointer_bool(&schema_files, "/exact"),
         "profile_fixture_set_exact": json_pointer_bool(&fixture_files, "/exact"),
         "wallet_vector_detail_passed": json_pointer_str(&wallet_detail, "/status") == Some("passed"),
+        "profile_operator_fixture_detail_passed": json_pointer_str(&profile_operator_fixture_detail, "/status") == Some("passed"),
         "invariant_matrix_passed": json_pointer_str(&invariant_matrix, "/status") == Some("passed"),
         "live_devnet_evidence_passed": json_pointer_str(&live_evidence, "/status") == Some("passed"),
         "agreement_runtime_verifier_pin_passed": object_values_all_true(agreement_manifest.get("checks")),
@@ -2161,6 +2274,7 @@ fn validate_profile_certification(input: ProfileCertificationInputs<'_>) -> Resu
         "schema_files": schema_files,
         "fixture_files": fixture_files,
         "wallet_vectors": wallet_detail,
+        "profile_operator_fixtures": profile_operator_fixture_detail,
         "invariant_matrix": invariant_matrix,
         "planned_profile_packages": {
             "btc_tx_commitment": btc_tx_commitment_profile,
@@ -2247,6 +2361,85 @@ fn validate_wallet_vector_detail(wallet: &Value) -> Value {
         "actions": action_checks,
         "expected_actions": expected_actions.into_iter().collect::<Vec<_>>(),
         "agreement_vector_count": agreement_vectors.len(),
+    })
+}
+
+fn validate_profile_operator_fixture_detail(report: &Value) -> Value {
+    let cases = report.get("cases").and_then(Value::as_array).cloned().unwrap_or_default();
+    let mut by_profile_action: BTreeMap<(String, String), Vec<Value>> = BTreeMap::new();
+    for case in &cases {
+        if let (Some(profile), Some(action)) = (json_pointer_str(case, "/profile"), json_pointer_str(case, "/action")) {
+            by_profile_action.entry((profile.to_string(), action.to_string())).or_default().push(case.clone());
+        }
+    }
+
+    let expected_profiles =
+        EXPECTED_PROFILE_OPERATOR_FIXTURES.iter().map(|fixture| fixture.profile.to_string()).collect::<BTreeSet<_>>();
+    let expected_actions = EXPECTED_PROFILE_OPERATOR_FIXTURES
+        .iter()
+        .map(|fixture| format!("{}:{}", fixture.profile, fixture.action))
+        .collect::<BTreeSet<_>>();
+    let actual_profiles =
+        cases.iter().filter_map(|case| json_pointer_str(case, "/profile").map(ToString::to_string)).collect::<BTreeSet<_>>();
+    let actual_actions = cases
+        .iter()
+        .filter_map(|case| Some(format!("{}:{}", json_pointer_str(case, "/profile")?, json_pointer_str(case, "/action")?)))
+        .collect::<BTreeSet<_>>();
+
+    let mut case_checks = Map::new();
+    for expected in EXPECTED_PROFILE_OPERATOR_FIXTURES {
+        let matches = by_profile_action.get(&(expected.profile.to_string(), expected.action.to_string())).cloned().unwrap_or_default();
+        let case = matches.first().cloned().unwrap_or(Value::Null);
+        let display = case.get("wallet_display").cloned().unwrap_or(Value::Null);
+        let checks = json!({
+            "exactly_one_fixture": matches.len() == 1,
+            "status_passed": json_pointer_str(&case, "/status") == Some("passed"),
+            "fixture_matches": json_pointer_str(&case, "/fixture") == Some(expected.fixture),
+            "signers_match": json_array_strings(&case, "/signers") == expected.signers,
+            "signed_type_named": json_pointer_str(&case, "/signed_type").is_some_and(|value| value.starts_with("Nova") && value.ends_with("SignedIntentV0")),
+            "signed_intent_hash": json_pointer_str(&case, "/signed_intent_hash").is_some_and(is_hex32),
+            "bip340_message_hash_matches": json_pointer_str(&case, "/bip340_message_hash") == json_pointer_str(&case, "/signed_intent_hash"),
+            "signed_intent_body_hex": json_pointer_str(&case, "/signed_intent_body_hex").is_some_and(is_hex_bytes),
+            "signed_intent_preimage_hex": json_pointer_str(&case, "/signed_intent_hash_preimage_hex").is_some_and(is_hex_bytes),
+            "witness_shape_hash": json_pointer_str(&case, "/witness_shape_hash").is_some_and(is_hex32),
+            "tx_skeleton_hash": json_pointer_str(&case, "/tx_skeleton_hash").is_some_and(is_hex32),
+            "fixture_hash": json_pointer_str(&case, "/fixture_hash").is_some_and(is_hex32),
+            "source_tree_hash": json_pointer_str(&case, "/source_tree_hash").is_some_and(is_hex32),
+            "schema_set_hash": json_pointer_str(&case, "/schema_set_hash").is_some_and(is_hex32),
+            "proof_matrix_hash": json_pointer_str(&case, "/proof_matrix_hash").is_some_and(is_hex32),
+            "display_profile_matches": json_pointer_str(&display, "/profile") == Some(expected.profile),
+            "display_action_matches": json_pointer_str(&display, "/action") == Some(expected.action),
+            "live_evidence_present_when_required": !expected.live_required
+                || json_pointer_str(&case, "/live_report_hash").is_some_and(is_hex32),
+            "live_tx_hash_present_when_required": !expected.live_required
+                || json_pointer_str(&case, "/live_devnet_tx_hash").is_some_and(is_hex32),
+            "external_boundary_documented_when_not_live": expected.live_required
+                || json_pointer_str(&display, "/external_boundary") == Some("package_fixture_only_external_btc_and_ckb_finality_required"),
+            "fiber_execution_bound_when_required": !expected.fiber_required
+                || json_pointer_str(&case, "/fiber_report_hash").is_some_and(is_hex32),
+            "fixture_checks_passed": object_values_all_true(case.get("checks")),
+        });
+        case_checks.insert(format!("{}:{}", expected.profile, expected.action), checks);
+    }
+
+    let checks = json!({
+        "report_passed": json_pointer_str(report, "/status") == Some("passed"),
+        "schema_current": json_pointer_str(report, "/schema") == Some("novaseal-profile-operator-fixtures-v0.1"),
+        "summary_counts_match": json_pointer_i64(report, "/summary/total") == Some(EXPECTED_PROFILE_OPERATOR_FIXTURES.len() as i64)
+            && json_pointer_i64(report, "/summary/matched") == json_pointer_i64(report, "/summary/total")
+            && json_pointer_i64(report, "/summary/profile_count") == Some(expected_profiles.len() as i64),
+        "exact_profiles": actual_profiles == expected_profiles,
+        "exact_profile_actions": actual_actions == expected_actions,
+        "case_details": case_checks.values().all(|row| object_values_all_true(Some(row))),
+    });
+
+    json!({
+        "status": if object_values_all_true(Some(&checks)) { "passed" } else { "failed" },
+        "checks": checks,
+        "cases": case_checks,
+        "expected_profiles": expected_profiles.into_iter().collect::<Vec<_>>(),
+        "expected_actions": expected_actions.into_iter().collect::<Vec<_>>(),
+        "case_count": cases.len(),
     })
 }
 
@@ -2391,7 +2584,7 @@ fn validate_fungible_xudt_profile_package(repo_root: &Path) -> Result<Value> {
             "coverage_by_id": coverage_by_id,
         },
         "checks": checks,
-        "remaining_acceptance_gap": "profile-specific wallet/service fixtures are still required before fungible_xudt_value_flow is operator-ready",
+        "operator_fixture_evidence": PROFILE_OPERATOR_FIXTURES,
     }))
 }
 
@@ -2509,7 +2702,8 @@ fn validate_rwa_receipt_profile_package(repo_root: &Path) -> Result<Value> {
             "coverage_by_id": coverage_by_id,
         },
         "checks": checks,
-        "remaining_acceptance_gap": "profile-specific wallet/service fixtures and legal/registry review evidence are still required before rwa_receipt_lifecycle is operator-ready",
+        "operator_fixture_evidence": PROFILE_OPERATOR_FIXTURES,
+        "remaining_acceptance_gap": "legal/registry review evidence is still required before rwa_receipt_lifecycle can make production RWA title or registry claims",
     }))
 }
 
@@ -2961,7 +3155,7 @@ fn validate_fiber_candidate_profile_package(repo_root: &Path) -> Result<Value> {
             "coverage_by_id": coverage_by_id,
         },
         "checks": checks,
-        "remaining_acceptance_gap": "operator-ready Fiber witness fixtures are still required before the Fiber evidence is fully reproducible by wallets and service operators",
+        "operator_fixture_evidence": PROFILE_OPERATOR_FIXTURES,
     }))
 }
 
@@ -3494,6 +3688,13 @@ fn wallet_gate_passed(wallet: &Value) -> bool {
         && json_pointer_i64(wallet, "/summary/core_vectors").unwrap_or_default() >= 6
         && json_pointer_i64(wallet, "/summary/agreement_vectors").unwrap_or_default() >= 3
         && json_pointer_i64(wallet, "/summary/matched") == json_pointer_i64(wallet, "/summary/total")
+}
+
+fn profile_operator_fixture_gate_passed(report: &Value) -> bool {
+    json_pointer_str(report, "/status") == Some("passed")
+        && json_pointer_i64(report, "/summary/total") == Some(EXPECTED_PROFILE_OPERATOR_FIXTURES.len() as i64)
+        && json_pointer_i64(report, "/summary/matched") == json_pointer_i64(report, "/summary/total")
+        && json_pointer_i64(report, "/summary/profile_count").unwrap_or_default() >= 6
 }
 
 fn stateful_acceptance_passed(stateful_acceptance: &Value) -> bool {
