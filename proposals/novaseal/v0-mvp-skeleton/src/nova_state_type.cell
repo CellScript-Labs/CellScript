@@ -25,6 +25,8 @@ module novaseal::state_type::v0_mvp;
 // NovaSealCellV0 is a resource because a valid transition consumes one old Cell
 // and creates one successor Cell. That linear movement is the CKB-side safety
 // property this file is trying to make explicit.
+const U64_MAX: u64 = 18446744073709551615
+
 resource NovaSealCellV0 has store, create, consume {
     version: u16,
     btc_authority_hash: Hash,
@@ -155,10 +157,12 @@ where
     require actual_state_hash_commitment == state_hash_commitment
     require intent.core.policy_hash == old_cell.policy_hash
     require intent.core.old_nonce == old_cell.nonce
+    require old_cell.nonce < U64_MAX
     require intent.core.new_nonce == old_cell.nonce + 1
     require now <= intent.core.expiry
     require intent.expected_receipt_hash == materialized_receipt_hash
     require receipt_commitment.intent_core_hash == intent_core_hash
+    require sig.pubkey == old_cell.btc_authority_hash
 
     verifier::btc::bip340::require_signature(signed_intent_hash, sig.pubkey, sig.signature)
 
@@ -207,6 +211,7 @@ lock btc_authority(protected cell: NovaSealCellV0, lock_args expected_btc_author
     let digest = hash_blake2b_packed(intent)
     require expected_btc_authority_hash == cell.btc_authority_hash
     require intent.core.policy_hash == cell.policy_hash
+    require sig.pubkey == cell.btc_authority_hash
 
     verifier::btc::bip340::require_signature(digest, sig.pubkey, sig.signature)
     true

@@ -5,7 +5,7 @@
 **Report**: `target/novaseal-canonical-vectors.json`
 **Encoding profile**: `packed-fixed-v0-reference`
 
-This slice produces deterministic packed-reference byte vectors from the eight
+This slice produces deterministic packed-reference byte vectors from the eleven
 current fixture JSON files and `target/novaseal-schema-layout.json`.
 
 It is not Molecule output, not CKB VM witness encoding, and not BTC wallet
@@ -27,13 +27,13 @@ python3 scripts/novaseal_canonical_vectors.py --pretty
 Current summary:
 
 ```text
-vectors=8
-intent_core_vectors=8
-signed_intent_vectors=8
-receipt_commitment_vectors=8
+vectors=11
+intent_core_vectors=11
+signed_intent_vectors=11
+receipt_commitment_vectors=11
 accepted_new_cell_vectors=1
-resolved_receipt_hash_matches_intent=8
-new_cell_latest_receipt_hash_matches=8
+resolved_receipt_hash_matches_intent=11
+new_cell_latest_receipt_hash_matches=11
 classification=packed_reference_test_vectors
 receipt_commitment_status=split_intent_and_explicit_receipt_commitment
 ```

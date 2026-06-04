@@ -33,11 +33,13 @@ DEFAULT_PARENT_LOCK_CKB_VM_REPORT = Path("target/novaseal-parent-lock-ckb-vm-rep
 DEFAULT_STATE_TYPE_CKB_VM_REPORT = Path("target/novaseal-state-type-ckb-vm-report.json")
 DEFAULT_COMBINED_TX_REPORT = Path("target/novaseal-combined-tx-report.json")
 DEFAULT_OUTPUT = Path("target/novaseal-fixture-report.json")
+TEST_AUTHORITY_PUBKEY = "0xc89fe99d72fcfa969434ddd87bb186a48213e9df3ec4b8a77042cf9559fc5765"
+U64_MAX = (1 << 64) - 1
 
 BASELINE = {
     "old_cell": {
         "version": 0,
-        "btc_authority_hash": "0xauthority",
+        "btc_authority_hash": TEST_AUTHORITY_PUBKEY,
         "state_hash": "0xstate-old",
         "policy_hash": "0xpolicy",
         "latest_receipt_hash": "0xreceipt-root",
@@ -61,6 +63,9 @@ BASELINE = {
     "current_timepoint": 200,
     "actual_old_cell": "0xoutpoint",
     "btc_signature": "valid (source-model delegate success)",
+    "btc_authority_pubkey_matches": True,
+    "lock_args_authority_matches": True,
+    "proposed_new_cell": {},
 }
 
 REQUIRED_SOURCE_SNIPPETS = [
@@ -72,10 +77,13 @@ REQUIRED_SOURCE_SNIPPETS = [
     "require intent.core.old_state_hash == old_cell.state_hash",
     "require actual_state_hash_commitment == state_hash_commitment",
     "require intent.core.policy_hash == old_cell.policy_hash",
+    "require sig.pubkey == old_cell.btc_authority_hash",
     "require intent.core.new_nonce == old_cell.nonce + 1",
+    "require old_cell.nonce < U64_MAX",
     "require now <= intent.core.expiry",
     "require intent.expected_receipt_hash == materialized_receipt_hash",
     "verifier::btc::bip340::require_signature(signed_intent_hash, sig.pubkey, sig.signature)",
+    "require sig.pubkey == cell.btc_authority_hash",
 ]
 
 
@@ -147,6 +155,8 @@ def normalise_fixture_inputs(fixture: dict[str, Any]) -> dict[str, Any]:
     model["materialized_receipt_hash"] = materialized_receipt_hash
     model["state_hash_commitment"] = state_hash_commitment
     model["signature_ok"] = signature_ok(raw_inputs)
+    model["btc_authority_pubkey_matches"] = bool(raw_inputs.get("btc_authority_pubkey_matches", BASELINE["btc_authority_pubkey_matches"]))
+    model["lock_args_authority_matches"] = bool(raw_inputs.get("lock_args_authority_matches", BASELINE["lock_args_authority_matches"]))
     return model
 
 
@@ -169,6 +179,10 @@ def run_model(model: dict[str, Any]) -> dict[str, Any]:
 
     if not add("btc_signature_delegate", bool(model["signature_ok"]), "btc_signature_verification_failed"):
         return rejected(checks)
+    if not add("lock_args_authority_matches", bool(model["lock_args_authority_matches"]), "authority_hash_mapping_mismatch"):
+        return rejected(checks)
+    if not add("btc_authority_pubkey_bound", bool(model["btc_authority_pubkey_matches"]), "btc_authority_pubkey_mismatch"):
+        return rejected(checks)
     intent_tx_hash, intent_index = outpoint_components(intent["old_cell"])
     actual_tx_hash, actual_index = outpoint_components(model.get("actual_old_cell", intent["old_cell"]))
     if not add("old_outpoint_tx_hash_matches", intent_tx_hash == actual_tx_hash, "old_outpoint_tx_hash_mismatch"):
@@ -187,6 +201,8 @@ def run_model(model: dict[str, Any]) -> dict[str, Any]:
         return rejected(checks)
     if not add("old_nonce_matches", intent["old_nonce"] == old["nonce"], "old_nonce_mismatch"):
         return rejected(checks)
+    if not add("nonce_not_at_u64_max", int(old["nonce"]) < U64_MAX, "nonce_overflow"):
+        return rejected(checks)
     if not add("nonce_increments", intent["new_nonce"] == old["nonce"] + 1, "nonce_must_increment"):
         return rejected(checks)
     if not add("intent_not_expired", now <= intent["expiry"], "intent_expired"):
@@ -196,6 +212,10 @@ def run_model(model: dict[str, Any]) -> dict[str, Any]:
         model["materialized_receipt_hash"] == intent["expected_receipt_hash"],
         "receipt_hash_mismatch",
     ):
+        return rejected(checks)
+    proposed_new_cell = model.get("proposed_new_cell") if isinstance(model.get("proposed_new_cell"), dict) else {}
+    proposed_authority = proposed_new_cell.get("btc_authority_hash", old["btc_authority_hash"])
+    if not add("authority_not_rotated_implicitly", proposed_authority == old["btc_authority_hash"], "implicit_authority_rotation"):
         return rejected(checks)
 
     new_cell = {
@@ -586,7 +606,7 @@ def build_report(
                 state_type_summary.get("schema_cell_intent_mismatch_detected")
             ),
             "state_type_schema_cell_intent_aligned": bool(state_type_summary.get("schema_cell_intent_aligned")),
-            "shared_lock_type_witness_abi": "CSARGv1:intent,receipt_hash,state_hash_commitment,SignaturePayload",
+            "shared_lock_type_witness_abi": "CSARGv1:NovaSealSignedIntentV0,state_hash_commitment,SignaturePayload",
             "shared_lock_type_witness_abi_aligned": bool(shared_witness_sizes),
             "shared_lock_type_witness_size_bytes": min(shared_witness_sizes) if shared_witness_sizes else None,
             "combined_full_transaction_executed": bool(combined_summary.get("combined_full_transaction_executed")),
@@ -633,8 +653,8 @@ def build_report(
             "BTC signature verification in the source-model portion is represented by fixture-declared delegate success/failure.",
             "Child-verifier CKB VM evidence is attached separately when target/novaseal-ckb-vm-child-verifier-report.json exists; it is not per-fixture parent-lock execution.",
             "Parent-lock ELF/ASM ABI preflight is attached separately when target/novaseal-parent-lock-abi-preflight.json exists; it is not parent-lock CKB VM execution.",
-            "Parent-lock CKB VM evidence is attached separately when target/novaseal-parent-lock-ckb-vm-report.json exists; it now includes consensus-packed transaction shape, tx-size, occupied-capacity, under-capacity shape checks, resolved ckb-script lock-group verifier execution, and full ckb-script transaction script verification for the three parent authority cases, but it is not a six-fixture transaction runner.",
-            "State-type CKB VM evidence is attached separately when target/novaseal-state-type-ckb-vm-report.json exists; it executes the key_auth_transition action over all six fixtures at action/type scope, not lock scope.",
+            "Parent-lock CKB VM evidence is attached separately when target/novaseal-parent-lock-ckb-vm-report.json exists; it now includes consensus-packed transaction shape, tx-size, occupied-capacity, under-capacity shape checks, resolved ckb-script lock-group verifier execution, and full ckb-script transaction script verification for the four parent authority cases, but it is not the full fixture transaction runner.",
+            "State-type CKB VM evidence is attached separately when target/novaseal-state-type-ckb-vm-report.json exists; it executes the key_auth_transition action over the fixture set at action/type scope, not lock scope.",
             "The state-type CKB VM harness uses the canonical 213-byte NovaSealIntentV0 old_cell: OutPoint shape without an intent-shortening adapter.",
             "The parent-lock and state-type CKB VM harnesses now parse the same CSARGv1 witness payload order: intent, receipt_hash, state_hash_commitment, SignaturePayload.",
             "Combined lock+type full transaction script-verifier evidence is attached separately when target/novaseal-combined-tx-report.json exists; it is still an in-memory harness ResolvedTransaction flow, not production builder/full-node acceptance.",

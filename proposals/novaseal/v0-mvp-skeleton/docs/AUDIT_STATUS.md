@@ -92,10 +92,10 @@ ProofReceiptV0: fields=16 size=382 bytes
 `python3 scripts/novaseal_canonical_vectors.py --pretty` reports:
 
 ```text
-vectors=8
-signed_intent_vectors=8
-resolved_receipt_matches=8
-latest_receipt_matches=8
+vectors=11
+signed_intent_vectors=11
+resolved_receipt_matches=11
+latest_receipt_matches=11
 receipt_commitment_status=split_intent_and_explicit_receipt_commitment
 ```
 
@@ -115,29 +115,41 @@ The old "ProofReceiptV0 excluding intent_hash" candidate is obsolete.
 State type CKB VM harness:
 
 ```text
-total_cases=8
-accepted=2
-rejected=6
-state_type_matched_expected=8
-source_fixture_matched_by_state_type_only=7
-source_fixture_requires_lock_or_external_context=1
+total_cases=11
+accepted=3
+rejected=8
+state_type_matched_expected=11
+source_fixture_matched_by_state_type_only=9
+source_fixture_requires_lock_or_external_context=2
 shared witness payload size=398 bytes
 ```
 
-The unmatched source fixture is expected: `wrong_signature_reject` belongs to
-authority-lock/runtime-verifier scope, not type-action scope.
+The two unmatched source fixtures are expected: `wrong_signature_reject` and
+`authority_hash_mapping_mismatch_reject` belong to authority-lock scope, not
+type-action scope.
+
+Criterion 6 is intentionally split in this evidence ledger:
+
+- Criterion 6a: `wrong_signature_reject` proves invalid BTC signatures reject.
+- Criterion 6b: `wrong_pubkey_valid_signature_reject` proves a valid BIP340
+  signature by the wrong x-only pubkey rejects by explicit authority binding.
+
+`authority_hash_mapping_mismatch_reject` separately proves lock args /
+authority-id mismatch rejection, and
+`authority_rotation_without_explicit_action_reject` proves an ordinary key-auth
+transition cannot silently rotate authority.
 
 Combined lock + type transaction harness:
 
 ```text
-total_cases=8
+total_cases=11
 expected_accept=1
-expected_reject=7
-matched_expected=8
-node_stack_matched_expected=8
+expected_reject=10
+matched_expected=11
+node_stack_matched_expected=11
 shared_witness_size_bytes=398
-max_full_transaction_cycles=7651736
-max_node_stack_cycles=7651736
+max_full_transaction_cycles=7521003
+max_node_stack_cycles=7521003
 max_consensus_tx_size_bytes=1484
 max_output_occupied_capacity_shannons=70700000000
 ```
@@ -157,7 +169,9 @@ for it includes:
 - child-verifier CKB VM execution,
 - parent-lock CKB VM execution,
 - resolved lock-group and full transaction script-verifier evidence,
-- combined eight-fixture local CKB contextual verifier evidence,
+- combined eleven-fixture local CKB contextual verifier evidence, including
+  wrong-pubkey-valid-signature rejection, authority mapping mismatch rejection,
+  and implicit authority-rotation rejection,
 - live local devnet key-auth transition evidence.
 - a local TCB review bundle at
   `/home/arthur/a19q3/CellScript/target/novaseal-bip340-tcb-review.json`.

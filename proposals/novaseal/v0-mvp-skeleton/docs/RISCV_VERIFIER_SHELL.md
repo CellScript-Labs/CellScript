@@ -8,7 +8,7 @@
 **Child VM report**: `target/novaseal-ckb-vm-child-verifier-report.json`
 **Status**: RISC-V ELF shell exists; inherited-fd spawn input adapter uses the official VM2 buffer/length ABI; no-std BIP340 verification is wired; child-verifier CKB VM, parent-lock CKB VM, official resolved lock-group execution, and official full transaction script-verifier execution exist.
 
-This slice turns the previous parse-only shell into a real BIP340 verifier boundary and then executes the staged child ELF in CKB VM. A separate parent-lock harness now executes parent spawn plus nested child verification, official resolved lock-group verification, and official full transaction script verification; the combined harness now executes all eight fixtures with both lock and type/action ScriptGroups present. The remaining production gaps are public/shared deployment attestation and external TCB review.
+This slice turns the previous parse-only shell into a real BIP340 verifier boundary and then executes the staged child ELF in CKB VM. A separate parent-lock harness now executes parent spawn plus nested child verification, official resolved lock-group verification, and official full transaction script verification; the combined harness now executes all eleven fixtures with both lock and type/action ScriptGroups present, including valid-signature-by-wrong-pubkey rejection, authority mapping mismatch rejection, and implicit authority-rotation rejection. The remaining production gaps are public/shared deployment attestation and external TCB review.
 
 ## Current Behaviour
 

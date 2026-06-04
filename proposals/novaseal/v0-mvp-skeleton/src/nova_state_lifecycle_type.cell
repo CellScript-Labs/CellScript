@@ -23,6 +23,7 @@ module novaseal::state_lifecycle_type::v0_mvp;
 const NOVASEAL_VERSION: u16 = 0
 const OP_BOOTSTRAP: u8 = 0
 const OP_KEY_AUTH_TRANSITION: u8 = 1
+const U64_MAX: u64 = 18446744073709551615
 
 struct NovaSealCellV0 {
     version: u16,
@@ -183,6 +184,7 @@ where
         assert(hash_blake2b(intent.core.new_state_hash) == state_hash_commitment, "state commitment")
         assert(intent.core.policy_hash == old_cell.policy_hash, "policy")
         assert(intent.core.old_nonce == old_cell.nonce, "old nonce")
+        assert(old_cell.nonce < U64_MAX, "nonce overflow")
         assert(intent.core.new_nonce == old_cell.nonce + 1, "new nonce")
         assert(now <= intent.core.expiry, "expiry")
         assert(intent.expected_receipt_hash == hash_blake2b_packed(ProofReceiptCommitmentV0 {

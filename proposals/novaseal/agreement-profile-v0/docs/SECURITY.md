@@ -4,6 +4,11 @@
 
 - CKB-only asset kind/hash checks at origination.
 - Positive collateral and principal.
+- Checked `u64` arithmetic guards before terminal-path `principal + fixed_fee`,
+  `nonce + 1`, and native CKB payout capacity-floor additions.
+- Local arithmetic-boundary fixtures cover `principal + fixed_fee` max/overflow
+  and terminal nonce max/max-1 cases. These are local regression fixtures, not
+  production deployment evidence.
 - Start timepoint before expiry.
 - Origination only during the agreed window.
 - Borrower-only repayment terminal path.
@@ -28,6 +33,8 @@
 - Canonical NovaSeal conformance is enforced by manifest schema hash, exact
   canonical field order, wallet signing vectors, and runtime
   `canonical_envelope_hash` recomputation.
+- The NovaSeal certification gate fails if Agreement source drops the checked
+  arithmetic guard patterns required for value-bearing terminal paths.
 - Public ecosystem profile certification is checked by
   `cellc certify --plugin novaseal-profile-v0`, which verifies the NovaSeal
   Rust certification report containing
@@ -39,7 +46,10 @@
 - Canonical receipt hash preimage verification.
 - Wallet/builder plumbing that maps typed payout outputs to production CKB
   recipient locks and change handling.
-- Cryptographic borrower/lender authority locks.
+- Production wallet authority mapping beyond the current v0 shorthand where
+  each authority hash is the BIP340 x-only pubkey used by the harness.
+- Cryptographic borrower/lender authority locks outside the local BIP340 verifier
+  slice.
 - BTC UTXO mirror, SPV, OP_RETURN, or BTC finality.
 - iCKB, xUDT, Fiber, or channel execution.
 - Dynamic interest, oracle price, margin call, or liquidation bot.

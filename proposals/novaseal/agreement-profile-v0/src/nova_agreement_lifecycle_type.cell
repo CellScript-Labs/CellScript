@@ -20,6 +20,7 @@ module novaseal::agreement_lifecycle_type::v0;
 // spell out the exact pubkey/hash/lock-args mapping.
 
 const AGREEMENT_VERSION: u16 = 0
+const U64_MAX: u64 = 18446744073709551615
 
 const ASSET_KIND_CKB: u8 = 0
 
@@ -260,6 +261,7 @@ where
         assert(now <= terms.expiry_timepoint, "expiry")
         assert(terms.start_timepoint < terms.expiry_timepoint, "term order")
         assert(terms.early_close_policy == EARLY_CLOSE_FIXED_FEE, "early close policy")
+        assert(terms.principal_amount <= U64_MAX - NATIVE_CKB_PAYOUT_OCCUPIED_CAPACITY, "principal capacity overflow")
         assert(active.version == AGREEMENT_VERSION, "agreement version")
         assert(active.agreement_id == terms.agreement_id, "agreement id")
         assert(active.terms_hash == terms.terms_hash, "agreement terms hash")
@@ -309,7 +311,11 @@ where
             // Borrower closes before expiry. The fixed fee exists only on this
             // repayment path; the transaction must provide the CKB paid to the
             // lender and the collateral-return output for the borrower.
+            assert(active.nonce < U64_MAX, "nonce overflow")
+            assert(active.fixed_fee_amount <= U64_MAX - active.principal_amount, "repayment overflow")
             let repayment_amount = active.principal_amount + active.fixed_fee_amount
+            assert(repayment_amount <= U64_MAX - NATIVE_CKB_PAYOUT_OCCUPIED_CAPACITY, "repayment capacity overflow")
+            assert(active.collateral_amount <= U64_MAX - NATIVE_CKB_PAYOUT_OCCUPIED_CAPACITY, "collateral capacity overflow")
             let lender_payout = NativeCkbPayoutV0 {
                 action: PATH_REPAY_BEFORE_EXPIRY,
                 agreement_id: active.agreement_id,
@@ -452,7 +458,9 @@ where
             // Lender closes after expiry. The default claim pays the locked
             // collateral only; fixed fee is not added here because no extra CKB
             // is created by the agreement cell.
+            assert(active.nonce < U64_MAX, "nonce overflow")
             let claim_amount = active.collateral_amount
+            assert(claim_amount <= U64_MAX - NATIVE_CKB_PAYOUT_OCCUPIED_CAPACITY, "claim capacity overflow")
             let claim_payout = NativeCkbPayoutV0 {
                 action: PATH_CLAIM_AFTER_EXPIRY,
                 agreement_id: active.agreement_id,

@@ -97,6 +97,7 @@ const TEST_SECRET_KEY: [u8; 32] = [
     0x3e, 0x74, 0x90, 0x68, 0x06, 0x39, 0xa2, 0xf7, 0xbb, 0xe8, 0x36, 0x1d, 0xd3, 0xf3, 0x4e, 0xb6, 0x42, 0x9a, 0x9c, 0x92, 0x4d,
     0x8b, 0x34, 0x2c, 0x01, 0x5e, 0x55, 0x5e, 0x62, 0x8f, 0x94, 0xe5,
 ];
+const TEST_WRONG_SECRET_KEY: [u8; 32] = [0x44; 32];
 const TEST_AUX_RAND: [u8; 32] = [0x42; 32];
 
 type HarnessMachine = TraceMachine<DefaultCoreMachine<u64, WXorXMemory<SparseMemory<u64>>>>;
@@ -160,6 +161,7 @@ enum CaseKind {
     ValidSignature,
     SignatureBitflip,
     AuthorityHashMismatch,
+    WrongPubkeyValidSignature,
 }
 
 #[derive(Clone, Debug)]
@@ -830,7 +832,6 @@ fn parse_args() -> Result<Args, HarnessError> {
 fn build_cases(parent_code_hash: [u8; 32]) -> Result<Vec<ParentCase>, HarnessError> {
     let domain = ckb_blake2b256(b"novaseal-parent-lock-harness-domain-v0");
     let policy_hash = ckb_blake2b256(b"novaseal-parent-lock-harness-policy-v0");
-    let authority_hash = ckb_blake2b256(b"novaseal-parent-lock-harness-authority-v0");
     let digest = signed_intent_hash(&build_intent(&domain, &policy_hash));
     let signing_key = SigningKey::from_bytes(&TEST_SECRET_KEY)
         .map_err(|error| HarnessError::Message(format!("failed to construct test BIP340 signing key: {error}")))?;
@@ -839,8 +840,19 @@ fn build_cases(parent_code_hash: [u8; 32]) -> Result<Vec<ParentCase>, HarnessErr
         .map_err(|error| HarnessError::Message(format!("failed to sign parent digest: {error}")))?;
     let mut pubkey = [0u8; 32];
     pubkey.copy_from_slice(signing_key.verifying_key().to_bytes().as_slice());
+    let authority_hash = pubkey;
     let mut signature_bytes = [0u8; 64];
     signature_bytes.copy_from_slice(signature.to_bytes().as_slice());
+
+    let wrong_signing_key = SigningKey::from_bytes(&TEST_WRONG_SECRET_KEY)
+        .map_err(|error| HarnessError::Message(format!("failed to construct wrong-authority BIP340 signing key: {error}")))?;
+    let wrong_signature = wrong_signing_key
+        .sign_prehash_with_aux_rand(&digest, &TEST_AUX_RAND)
+        .map_err(|error| HarnessError::Message(format!("failed to sign parent digest with wrong authority: {error}")))?;
+    let mut wrong_pubkey = [0u8; 32];
+    wrong_pubkey.copy_from_slice(wrong_signing_key.verifying_key().to_bytes().as_slice());
+    let mut wrong_signature_bytes = [0u8; 64];
+    wrong_signature_bytes.copy_from_slice(wrong_signature.to_bytes().as_slice());
 
     let valid_case = build_case(
         "parent_valid_signature_accept",
@@ -887,7 +899,21 @@ fn build_cases(parent_code_hash: [u8; 32]) -> Result<Vec<ParentCase>, HarnessErr
         signature_bytes,
     );
 
-    Ok(vec![valid_case, signature_case, authority_case])
+    let wrong_pubkey_case = build_case(
+        "parent_wrong_pubkey_valid_signature_reject",
+        "reject",
+        Some("witness pubkey signs the digest but does not match Input#0 btc_authority_hash"),
+        CaseKind::WrongPubkeyValidSignature,
+        domain,
+        policy_hash,
+        authority_hash,
+        authority_hash,
+        parent_code_hash,
+        wrong_pubkey,
+        wrong_signature_bytes,
+    );
+
+    Ok(vec![valid_case, signature_case, authority_case, wrong_pubkey_case])
 }
 
 fn build_case(
@@ -905,7 +931,10 @@ fn build_case(
 ) -> ParentCase {
     let intent = build_intent(&domain, &policy_hash);
     let digest = signed_intent_hash(&intent);
-    let expected_ipc_blob = (!matches!(kind, CaseKind::AuthorityHashMismatch)).then(|| build_ipc_blob(&digest, &pubkey, &signature));
+    let expected_ipc_blob =
+        (!matches!(kind, CaseKind::AuthorityHashMismatch | CaseKind::WrongPubkeyValidSignature)).then(|| {
+            build_ipc_blob(&digest, &pubkey, &signature)
+        });
 
     ParentCase {
         id,
@@ -960,7 +989,11 @@ fn run_case(args: &Args, parent_elf: &[u8], child_elf: &[u8], case: &ParentCase)
     let accepted = exit_code == 0;
     let matched_expected = match case.expected {
         "accept" => accepted && ipc_blob_matches_expected,
-        "reject" => !accepted && (matches!(case.kind, CaseKind::AuthorityHashMismatch) || ipc_blob_matches_expected),
+        "reject" => {
+            !accepted
+                && (matches!(case.kind, CaseKind::AuthorityHashMismatch | CaseKind::WrongPubkeyValidSignature)
+                    || ipc_blob_matches_expected)
+        }
         other => return Err(HarnessError::Message(format!("case {} has unsupported expected value: {other}", case.id))),
     };
 

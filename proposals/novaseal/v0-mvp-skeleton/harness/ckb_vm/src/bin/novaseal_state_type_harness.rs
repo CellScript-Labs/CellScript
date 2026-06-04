@@ -60,6 +60,7 @@ const IPC_WORD_COUNT: usize = 18;
 const NOVASEAL_CELL_LEN: usize = 146;
 const INTENT_LEN: usize = 254;
 const PROOF_RECEIPT_LEN: usize = 382;
+const CELL_BTC_AUTHORITY_HASH_OFFSET: usize = 2;
 const CELL_STATE_HASH_OFFSET: usize = 34;
 const CELL_POLICY_HASH_OFFSET: usize = 66;
 const CELL_LATEST_RECEIPT_HASH_OFFSET: usize = 98;
@@ -69,6 +70,7 @@ const INTENT_OLD_CELL_OFFSET: usize = 98;
 const INTENT_NEW_STATE_HASH_OFFSET: usize = 166;
 const INTENT_NEW_NONCE_OFFSET: usize = 206;
 const INTENT_EXPIRY_OFFSET: usize = 214;
+const ROTATED_AUTHORITY_HASH: [u8; 32] = [0x11; 32];
 const BYTE32_LEN: usize = 32;
 const OUTPOINT_LEN: usize = 36;
 const SIGNATURE_PAYLOAD_LEN: usize = 96;
@@ -542,10 +544,10 @@ fn build_case(value: &Value, fixtures_dir: &Path) -> Result<StateTypeCase, Harne
     let current_timepoint = fixture_json.pointer("/inputs/current_timepoint").and_then(Value::as_u64).unwrap_or(200);
     let source_fixture_expected =
         value.pointer("/source_model_result/result").and_then(Value::as_str).unwrap_or("unknown").to_string();
-    let wrong_signature_scope = fixture == "wrong_signature_reject.json";
-    let state_type_expected = if wrong_signature_scope { "accepted" } else { source_fixture_expected.as_str() }.to_string();
-    let state_type_expected_reason = if wrong_signature_scope {
-        "BTC signature rejection is authority-lock scope; the state transition guards are otherwise valid.".to_string()
+    let lock_scope = matches!(fixture.as_str(), "wrong_signature_reject.json" | "authority_hash_mapping_mismatch_reject.json");
+    let state_type_expected = if lock_scope { "accepted" } else { source_fixture_expected.as_str() }.to_string();
+    let state_type_expected_reason = if lock_scope {
+        "This fixture is authority-lock scope; the state transition guards are otherwise valid.".to_string()
     } else {
         "State transition fixture expectation is enforced by key_auth_transition guards.".to_string()
     };
@@ -570,7 +572,7 @@ fn build_case(value: &Value, fixtures_dir: &Path) -> Result<StateTypeCase, Harne
     }
     let state_hash_commitment =
         ckb_blake2b256(&intent[INTENT_NEW_STATE_HASH_OFFSET..INTENT_NEW_STATE_HASH_OFFSET + BYTE32_LEN]).to_vec();
-    let output_cell_data = build_output_cell(&old_cell, &intent, &receipt_hash);
+    let output_cell_data = build_output_cell(&fixture, &old_cell, &intent, &receipt_hash);
     let receipt_cell_data = hex_bytes(
         encoded.pointer("/resolved/resolved_receipt/hex"),
         &fixture,
@@ -583,7 +585,7 @@ fn build_case(value: &Value, fixtures_dir: &Path) -> Result<StateTypeCase, Harne
         )));
     }
     let previous_output = previous_output_from_fixture(&fixture_json, &intent)?;
-    let witness = build_witness(&intent, &state_hash_commitment);
+    let witness = build_witness(&intent, &state_hash_commitment, &old_cell, fixture == "wrong_pubkey_valid_signature_reject.json");
     Ok(StateTypeCase {
         fixture,
         category,
@@ -662,8 +664,12 @@ fn run_case(args: &Args, action_elf: &[u8], case: &StateTypeCase) -> Result<Case
     })
 }
 
-fn build_output_cell(old_cell: &[u8], intent: &[u8], receipt_hash: &[u8]) -> Vec<u8> {
+fn build_output_cell(fixture: &str, old_cell: &[u8], intent: &[u8], receipt_hash: &[u8]) -> Vec<u8> {
     let mut output = old_cell.to_vec();
+    if fixture == "authority_rotation_without_explicit_action_reject.json" {
+        output[CELL_BTC_AUTHORITY_HASH_OFFSET..CELL_BTC_AUTHORITY_HASH_OFFSET + BYTE32_LEN]
+            .copy_from_slice(&ROTATED_AUTHORITY_HASH);
+    }
     output[CELL_STATE_HASH_OFFSET..CELL_STATE_HASH_OFFSET + BYTE32_LEN]
         .copy_from_slice(&intent[INTENT_NEW_STATE_HASH_OFFSET..INTENT_NEW_STATE_HASH_OFFSET + BYTE32_LEN]);
     output[CELL_POLICY_HASH_OFFSET..CELL_POLICY_HASH_OFFSET + BYTE32_LEN]
@@ -674,8 +680,11 @@ fn build_output_cell(old_cell: &[u8], intent: &[u8], receipt_hash: &[u8]) -> Vec
     output
 }
 
-fn build_witness(intent: &[u8], state_hash_commitment: &[u8]) -> Vec<u8> {
-    let signature_payload = [0u8; SIGNATURE_PAYLOAD_LEN];
+fn build_witness(intent: &[u8], state_hash_commitment: &[u8], old_cell: &[u8], wrong_pubkey: bool) -> Vec<u8> {
+    let mut signature_payload = [0u8; SIGNATURE_PAYLOAD_LEN];
+    if !wrong_pubkey {
+        signature_payload[..BYTE32_LEN].copy_from_slice(&old_cell[CELL_BTC_AUTHORITY_HASH_OFFSET..CELL_BTC_AUTHORITY_HASH_OFFSET + BYTE32_LEN]);
+    }
     let mut witness = Vec::with_capacity(
         LOCK_WITNESS_MAGIC.len() + 4 + intent.len() + state_hash_commitment.len() + 4 + signature_payload.len(),
     );

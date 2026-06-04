@@ -17,8 +17,8 @@
     "builder_assumptions": 78,
     "runtime_gaps": 0,
     "tx_shape_harness": "passed",
-    "tx_shape_cases": 8,
-    "tx_shape_matched_expected": 8,
+    "tx_shape_cases": 12,
+    "tx_shape_matched_expected": 12,
     "action_vm_harness": "superseded_legacy_abi_not_release_gate",
     "action_vm_cases": null,
     "action_vm_matched_expected": null,
@@ -59,7 +59,7 @@
     {
       "claim": "Fixture semantics are executable.",
       "classification": "local-transaction-shape-covered + resolved-transaction-covered + live-devnet-covered",
-      "evidence": "python3 scripts/nova_agreement_tx_shape_harness.py --pretty matched 8/8 shape expectations; cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_agreement_tx_harness -- --pretty matched 20/20 script-layer and node-verifier expectations; scripts/novaseal_agreement_devnet_stateful_live.py passed originate -> repay, originate -> claim, and live negative dry-runs"
+      "evidence": "python3 scripts/nova_agreement_tx_shape_harness.py --pretty matched 12/12 shape and arithmetic-boundary expectations; cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_agreement_tx_harness -- --pretty matched 20/20 script-layer and node-verifier expectations; scripts/novaseal_agreement_devnet_stateful_live.py passed originate -> repay, originate -> claim, and live negative dry-runs"
     },
     {
       "claim": "Native CKB funding/settlement shapes are locally verified.",
@@ -90,6 +90,16 @@
       "claim": "Agreement terminal intents have fixed-width wallet signing vectors.",
       "classification": "production-gate-covered",
       "evidence": "/home/arthur/a19q3/CellScript/target/novaseal-wallet-signing-vectors.json includes originate_valid, repay_before_expiry_valid, and claim_after_expiry_valid"
+    },
+    {
+      "claim": "authority-binding",
+      "classification": "runtime-checked",
+      "evidence": "borrower/lender signature pubkeys are checked against Agreement authority fields; payout lock args are checked through typed NativeCkbPayoutV0 recipient evidence and live negative dry-runs"
+    },
+    {
+      "claim": "u64-overflow-prevention",
+      "classification": "runtime-checked",
+      "evidence": "source guards cover principal+fixed_fee, nonce+1, and payout capacity additions; arithmetic boundary fixtures repay_principal_max_fee_1_overflow_reject, repay_principal_max_fee_0_accept, nonce_max_increment_reject, and nonce_max_minus_1_increment_accept pass the local shape harness"
     }
   ],
   "current_status": {

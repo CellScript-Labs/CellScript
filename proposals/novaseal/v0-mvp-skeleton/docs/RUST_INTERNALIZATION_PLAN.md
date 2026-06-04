@@ -566,7 +566,7 @@ Acceptance:
 - `cellc check --target-profile ckb` passes;
 - `cellc check --target-profile ckb --primitive-strict 0.16` passes for the current NovaSeal core package;
 - NovaSeal audit bundle shows `verifier:btc-bip340:*` ProofPlan records;
-- combined eight-fixture lock+type harness still accepts 1 and rejects 7;
+- combined eleven-fixture lock+type harness still accepts 1 and rejects 10;
 - max cycle regression is recorded and explained.
 
 ### Phase 4: Retire Proposal-Owned Rust Verifier Crates

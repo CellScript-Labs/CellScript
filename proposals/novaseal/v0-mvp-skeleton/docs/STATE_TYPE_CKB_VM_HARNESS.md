@@ -16,20 +16,20 @@ cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_state_type_ha
 
 ```text
 state_type_action_ckb_vm_executed=true
-total_cases=8
-accepted=2
-rejected=6
-state_type_matched_expected=8
+total_cases=11
+accepted=3
+rejected=8
+state_type_matched_expected=11
 state_type_mismatched=0
-source_fixture_matched_by_state_type_only=7
-source_fixture_requires_lock_or_external_context=1
-max_cycles=153923
-load_witness_calls=8
-load_cell_data_calls=24
-load_input_by_field_calls=16
-load_header_by_field_calls=8
-spawn_calls=2
-wait_calls=2
+source_fixture_matched_by_state_type_only=9
+source_fixture_requires_lock_or_external_context=2
+max_cycles=154779
+load_witness_calls=11
+load_cell_data_calls=33
+load_input_by_field_calls=22
+load_header_by_field_calls=11
+spawn_calls=4
+wait_calls=4
 wrong_signature_is_lock_scope=true
 schema_cell_intent_mismatch_detected=false
 schema_cell_intent_aligned=true
@@ -41,7 +41,7 @@ This executes the compiled `key_auth_transition` action ELF in `ckb-vm` with har
 
 The action now parses the same 398-byte `CSARGv1` witness payload shape as the authority lock: `NovaSealSignedIntentV0`, `state_hash_commitment`, then `SignaturePayload`. The signed intent already contains `expected_receipt_hash`; there is no separate receipt-hash witness field. The type/action layer emits the verifier call through a harnessed child result; the combined lock+type harness covers the full parent lock + type/action transaction shape.
 
-Important: `wrong_signature_reject` is expected to pass at this layer because signature rejection belongs to `btc_authority`. The full fixture result still requires the lock path.
+Important: `wrong_signature_reject` and `authority_hash_mapping_mismatch_reject` are expected to pass at this layer because those checks belong to `btc_authority`. `wrong_pubkey_valid_signature_reject` rejects at this layer because the action also binds `sig.pubkey` to the old cell's declared authority. `authority_rotation_without_explicit_action_reject` rejects at this layer because the output cell authority is not allowed to change in an ordinary key-auth transition. The full fixture result still requires the lock path.
 
 ## Schema Alignment
 

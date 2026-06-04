@@ -50,7 +50,7 @@ body:
 | `new_state_commitment` | new materialised receipt commitment |
 | `old_nonce` / `new_nonce` | Agreement nonce transition |
 | `expiry` | `expiry_timepoint` |
-| `authority_hash` | borrower for originate/repay, lender for claim |
+| `authority_hash` | borrower/lender authority identifier for signature and display; not a payout recipient lock hash |
 | `profile_body_hash` | `hash_blake2b_packed(NovaAgreementIntentCoreV0)` |
 | `payout_commitment_hash` | typed payout or payout-pair commitment |
 
@@ -58,6 +58,10 @@ The signed intent must contain the matching `canonical_envelope_hash`. This
 makes Canonical influence the signed and verified Agreement transition without
 forcing Agreement to import or call a separate Core contract. Rather civilised,
 by protocol standards.
+
+Payout routing remains Agreement profile and builder surface. It is committed by
+`payout_commitment_hash` and materialised typed payout outputs, not inferred from
+the BTC authority identifier.
 
 The schema-security reference point is RGB Strict Types, but only at the design
 level. Agreement does not use RGB's schema engine, Vesper/STL files, operation
@@ -102,10 +106,11 @@ The gate passes only when all local certification evidence is present:
 | --- | --- |
 | Canonical conformance | manifest `conforms_to`, normalised canonical schema hash, exact canonical field order, source-level canonical envelope checks |
 | Profile schema set | exact checked-in Agreement schema files and SHA-256 hashes in the report |
-| Fixture set | exact checked-in Agreement fixture files |
+| Fixture set | exact checked-in Agreement fixture files, including `principal + fixed_fee` and nonce max/max-1 arithmetic boundary fixtures |
 | Signing boundary | originate, repay and claim wallet vectors with fixed-width signed intent bytes, signer sets, BIP340 message hashes and displayed `canonical_envelope_hash` |
 | Runtime behaviour | fresh live devnet originate -> repay and originate -> claim evidence |
-| Negative cases | live dry-run rejects for wrong signatures, wrong asset kind, wrong payout, early claim and payout binding failures |
+| Negative cases | live dry-run rejects for wrong signatures, wrong asset kind, wrong payout, early claim and payout binding failures; local arithmetic-boundary rejects for terminal amount and nonce overflow |
+| Invariant matrix | `authority-binding` and `u64-overflow-prevention` obligations are recorded as runtime-checked |
 | TCB status | local BIP340 verifier review bundle plus manifest verifier pinning |
 
 This is enough for **public ecosystem profile certification of the local
@@ -148,7 +153,8 @@ are deterministic.
 `scripts/nova_agreement_tx_shape_harness.py` checks the builder-visible output
 shape for the CKB/CKB profile: occupied-capacity floors, principal payout,
 repayment amount, collateral return, default collateral claim, time rejects,
-party rejects, and wrong-settlement rejects.
+party rejects, wrong-settlement rejects, `principal + fixed_fee` overflow and
+max-boundary behaviour, and nonce max/max-1 increment behaviour.
 
 `harness/ckb_vm` executes the compiled `originate_agreement`,
 `repay_before_expiry`, and `claim_after_expiry` action ELFs in `ckb-vm`. It

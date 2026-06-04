@@ -41,7 +41,7 @@ const DEFAULT_FIXTURES_DIR: &str = "fixtures";
 const DEFAULT_OUTPUT: &str = "target/novaseal-combined-tx-report.json";
 const VERIFY_MAX_CYCLES: u64 = 800_000_000;
 const VM2_ENABLED_EPOCH: u64 = 10;
-const REQUIRED_FIXTURE_COUNT: usize = 8;
+const REQUIRED_FIXTURE_COUNT: usize = 11;
 const TRANSACTION_SHAPE_OUTPUT_MARGIN_SHANNONS: u64 = 10_000_000_000;
 const BUILDER_FEE_SHANNONS: u64 = 100_000;
 const MIN_BUILDER_FEE_SHANNONS: u64 = 100_000;
@@ -71,7 +71,9 @@ const TEST_SECRET_KEY: [u8; 32] = [
     0x3e, 0x74, 0x90, 0x68, 0x06, 0x39, 0xa2, 0xf7, 0xbb, 0xe8, 0x36, 0x1d, 0xd3, 0xf3, 0x4e, 0xb6, 0x42, 0x9a, 0x9c, 0x92, 0x4d,
     0x8b, 0x34, 0x2c, 0x01, 0x5e, 0x55, 0x5e, 0x62, 0x8f, 0x94, 0xe5,
 ];
+const TEST_WRONG_SECRET_KEY: [u8; 32] = [0x44; 32];
 const TEST_AUX_RAND: [u8; 32] = [0x42; 32];
+const ROTATED_AUTHORITY_HASH: [u8; 32] = [0x11; 32];
 
 #[derive(Clone, Debug, Default)]
 struct HarnessDataLoader {
@@ -439,7 +441,11 @@ fn build_case(value: &Value, fixtures_dir: &Path) -> Result<CombinedCase, Harnes
     }
     let state_hash_commitment =
         ckb_blake2b256(&intent[INTENT_NEW_STATE_HASH_OFFSET..INTENT_NEW_STATE_HASH_OFFSET + BYTE32_LEN]).to_vec();
-    let mut signature_payload = sign_intent(&intent)?;
+    let mut signature_payload = if fixture == "wrong_pubkey_valid_signature_reject.json" {
+        sign_intent_with_key(&intent, &TEST_WRONG_SECRET_KEY)?
+    } else {
+        sign_intent(&intent)?
+    };
     let signature_mutation = if fixture == "wrong_signature_reject.json" {
         let last =
             signature_payload.last_mut().ok_or_else(|| HarnessError::Message("signature payload unexpectedly empty".to_string()))?;
@@ -448,7 +454,7 @@ fn build_case(value: &Value, fixtures_dir: &Path) -> Result<CombinedCase, Harnes
     } else {
         None
     };
-    let output_cell = build_output_cell(&old_cell, &intent, &receipt_hash);
+    let output_cell = build_output_cell(&fixture, &old_cell, &intent, &receipt_hash);
     let receipt_cell = hex_bytes(
         encoded.pointer("/resolved/resolved_receipt/hex"),
         &fixture,
@@ -648,7 +654,10 @@ fn build_transaction_context(
     let parent_code_hash = code_type_hash("novaseal-parent-lock-code-type-v0", parent_elf);
     let type_code_hash = code_type_hash("novaseal-state-type-action-code-type-v0", type_elf);
     let child_code_hash = ckb_blake2b256(child_elf);
-    let lock_args = cell_authority_hash(&case.old_cell)?;
+    let mut lock_args = cell_authority_hash(&case.old_cell)?;
+    if case.fixture == "authority_hash_mapping_mismatch_reject.json" {
+        lock_args[0] ^= 0x01;
+    }
     let lock_script = build_packed_script(&parent_code_hash, &lock_args);
     let type_script = build_packed_script_no_args(&type_code_hash);
     let state_output_without_capacity =
@@ -840,8 +849,12 @@ fn build_report(args: &Args, parent_elf: &[u8], type_elf: &[u8], child_elf: &[u8
     }
 }
 
-fn build_output_cell(old_cell: &[u8], intent: &[u8], receipt_hash: &[u8]) -> Vec<u8> {
+fn build_output_cell(fixture: &str, old_cell: &[u8], intent: &[u8], receipt_hash: &[u8]) -> Vec<u8> {
     let mut output = old_cell.to_vec();
+    if fixture == "authority_rotation_without_explicit_action_reject.json" {
+        output[CELL_BTC_AUTHORITY_HASH_OFFSET..CELL_BTC_AUTHORITY_HASH_OFFSET + BYTE32_LEN]
+            .copy_from_slice(&ROTATED_AUTHORITY_HASH);
+    }
     output[CELL_STATE_HASH_OFFSET..CELL_STATE_HASH_OFFSET + BYTE32_LEN]
         .copy_from_slice(&intent[INTENT_NEW_STATE_HASH_OFFSET..INTENT_NEW_STATE_HASH_OFFSET + BYTE32_LEN]);
     output[CELL_POLICY_HASH_OFFSET..CELL_POLICY_HASH_OFFSET + BYTE32_LEN]
@@ -866,8 +879,12 @@ fn build_witness(intent: &[u8], state_hash_commitment: &[u8], signature_payload:
 }
 
 fn sign_intent(intent: &[u8]) -> Result<Vec<u8>, HarnessError> {
+    sign_intent_with_key(intent, &TEST_SECRET_KEY)
+}
+
+fn sign_intent_with_key(intent: &[u8], secret_key: &[u8; 32]) -> Result<Vec<u8>, HarnessError> {
     let digest = signed_intent_hash(intent);
-    let signing_key = SigningKey::from_bytes(&TEST_SECRET_KEY)
+    let signing_key = SigningKey::from_bytes(secret_key)
         .map_err(|error| HarnessError::Message(format!("failed to construct test BIP340 signing key: {error}")))?;
     let signature = signing_key
         .sign_prehash_with_aux_rand(&digest, &TEST_AUX_RAND)
@@ -979,13 +996,15 @@ fn validate_expected_result(fixture: &str, expected: &str, failure_mode: Option<
 
 fn expected_failure_scope(failure_mode: Option<&str>) -> Option<&'static str> {
     match failure_mode {
-        Some("btc_signature_verification_failed" | "policy_hash_mismatch") => Some("lock"),
+        Some("btc_signature_verification_failed" | "policy_hash_mismatch" | "authority_hash_mapping_mismatch") => Some("lock"),
+        Some("btc_authority_pubkey_mismatch") => Some("lock"),
         Some(
             "intent_expired"
             | "nonce_must_increment"
             | "receipt_hash_mismatch"
             | "old_outpoint_tx_hash_mismatch"
-            | "old_outpoint_index_mismatch",
+            | "old_outpoint_index_mismatch"
+            | "implicit_authority_rotation",
         ) => Some("type"),
         Some(_) => Some("unknown"),
         None => None,

@@ -143,11 +143,14 @@ def core_vectors(path: Path) -> list[dict[str, Any]]:
             core = field_map(signed_intent["fields"][0]["nested"])
         else:
             core = field_map(signed_intent)
+        old_cell = field_map(encoded.get("old_cell", {}))
         display = {
             "protocol": "NovaSeal Core v0",
             "fixture": vector.get("fixture"),
             "action": core.get("action"),
             "terminal_path": core.get("terminal_path"),
+            "btc_authority_hash": old_cell.get("btc_authority_hash"),
+            "btc_authority_hash_semantics": "legacy field name; for NovaSeal v0 this equals the 32-byte BIP340 x-only public key and is not a CKB recipient lock hash or payout script identifier",
             "old_cell": core.get("old_cell"),
             "old_state_hash": core.get("old_state_hash"),
             "new_state_hash": core.get("new_state_hash"),
@@ -377,6 +380,12 @@ def main() -> int:
         "status": status,
         "hash_algorithm": "ckb_blake2b_256",
         "signature_scheme": "BIP340 Schnorr over 32-byte signed intent hash",
+        "authority_identifier_semantics": {
+            "btc_authority_hash": "legacy-named NovaSeal core field; in v0 it equals the 32-byte BIP340 x-only public key",
+            "not_ckb_recipient_lock_hash": True,
+            "not_payout_script_identifier": True,
+            "agreement_payout_mapping": "profile/builder surface; payout recipients must not be inferred from the core BTC authority field",
+        },
         "molecule_alignment": "fixed-width v0 structs use declared-field little-endian concatenation; no dynamic tables/vectors in these signing objects",
         "summary": {
             "total": len(vectors),

@@ -121,7 +121,7 @@ flowchart TD
 
 This prevents scope creep into specific verticals such as lending, RWA or Bitcoin assets, keeping the framework auditable and composable.
 
-Profiles do not call a separate NovaSeal Core runtime action. The constraint is schema and package level: a profile must declare `conforms_to = "NovaSealCanonicalV0"`, pin `canonical_schema_hash`, commit its signed intent to `NovaSealCanonicalEnvelopeV0`, and pass the deterministic compiler gate `cellc certify --plugin novaseal-profile-v0`. The compiler owns the certification entry and report verification; NovaSeal-specific policy is implemented by the built-in Rust certification module behind that entry. The gate checks the manifest, schema hash, required source surface, wallet signing vectors, runtime verifier pinning and live/devnet evidence. If that check fails, the package may be NovaSeal-inspired, but it is not a NovaSeal profile. A gentleman may wear a top hat; the gate still checks the ticket.
+Profiles do not call a separate NovaSeal Core runtime action. The constraint is schema and package level: a profile must declare `conforms_to = "NovaSealCanonicalV0"`, pin `canonical_schema_hash`, commit its signed intent to `NovaSealCanonicalEnvelopeV0`, and pass the deterministic compiler gate `cellc certify --plugin novaseal-profile-v0`. The compiler owns the certification entry and report verification; NovaSeal-specific policy is implemented by the built-in Rust certification module behind that entry. The gate checks the manifest, schema hash, required source surface, wallet signing vectors, invariant matrix, runtime verifier pinning and live/devnet evidence. If that check fails, the package may be NovaSeal-inspired, but it is not a NovaSeal profile. A gentleman may wear a top hat; the gate still checks the ticket.
 
 ```mermaid
 flowchart LR
@@ -167,6 +167,11 @@ Canonical conformance is a narrow obligation, not a full product template. A pro
 
 This keeps Agreement from becoming the hidden default for all future profiles. A future fungible, receipt, RWA, Fiber-facing or BTC-commitment profile can carry different business meaning while still sharing the NovaSeal certification boundary.
 
+For NovaSeal v0, authority identifiers are not payout script identifiers. The
+legacy-named `btc_authority_hash` is the BIP340 x-only public key in the
+current key-signature profile, while payout routing remains profile-defined and
+is committed through `payout_commitment_hash` plus typed payout outputs.
+
 ### Compiler-Attack Boundary
 
 The certification gate cannot make `cellc` magically incorruptible; no serious architecture document should make that sort of claim before lunch. It reduces the specific profile-claim attack surface by making the certification output reproducible from checked-in inputs:
@@ -176,6 +181,7 @@ The certification gate cannot make `cellc` magically incorruptible; no serious a
 - the profile manifest must pin the same schema hash and certification command,
 - required source patterns and fixture sets are checked,
 - wallet vectors, invariant matrix, live/devnet reports and verifier pins are checked,
+- the invariant matrix records authority binding and checked `u64` arithmetic as runtime obligations,
 - the summary report records the Rust implementation path and implementation hash,
 - the gate avoids external Python adapter execution for the production-prep decision.
 

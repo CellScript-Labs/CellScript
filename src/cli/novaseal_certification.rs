@@ -62,6 +62,20 @@ const EXPECTED_AGREEMENT_SCHEMA_FILES: &[&str] = &[
     "nova_terminal_path_v0.schema",
 ];
 
+const EXPECTED_CORE_FIXTURES: &[&str] = &[
+    "keyauth_transfer_valid.json",
+    "expired_intent_reject.json",
+    "old_outpoint_index_mismatch_reject.json",
+    "old_outpoint_tx_hash_mismatch_reject.json",
+    "policy_hash_mismatch_reject.json",
+    "receipt_hash_mismatch_reject.json",
+    "replay_nonce_reject.json",
+    "authority_hash_mapping_mismatch_reject.json",
+    "authority_rotation_without_explicit_action_reject.json",
+    "wrong_signature_reject.json",
+    "wrong_pubkey_valid_signature_reject.json",
+];
+
 const EXPECTED_AGREEMENT_FIXTURES: &[&str] = &[
     "originate_valid.json",
     "repay_before_expiry_valid.json",
@@ -82,6 +96,10 @@ const EXPECTED_AGREEMENT_FIXTURES: &[&str] = &[
     "receipt_hash_mismatch_reject.json",
     "preserved_field_mutation_reject.json",
     "wrong_terms_hash_reject.json",
+    "repay_principal_max_fee_1_overflow_reject.json",
+    "repay_principal_max_fee_0_accept.json",
+    "nonce_max_increment_reject.json",
+    "nonce_max_minus_1_increment_accept.json",
 ];
 
 const EXPECTED_CERTIFICATION_INVARIANTS: &[&str] = &[
@@ -98,6 +116,9 @@ const EXPECTED_CERTIFICATION_INVARIANTS: &[&str] = &[
     "ckb_vm_capacity_settlement",
     "payout_cell_binding",
     "canonical_envelope_binding",
+    "checked_financial_arithmetic",
+    "authority-binding",
+    "u64-overflow-prevention",
     "wallet_signing_vectors",
     "live_devnet_lifecycle",
 ];
@@ -127,6 +148,10 @@ const REQUIRED_AGREEMENT_CORE_PATTERNS: &[(&str, &str)] = &[
     ("latest_receipt_hash", "latest_receipt_hash"),
     ("authority_signature", "verifier::btc::bip340::require_signature"),
     ("nonce_rule", "new_nonce == active.nonce + 1"),
+    ("checked_u64_max", "const U64_MAX: u64 = 18446744073709551615"),
+    ("checked_repayment_sum", "active.fixed_fee_amount <= U64_MAX - active.principal_amount"),
+    ("checked_terminal_nonce_increment", "active.nonce < U64_MAX"),
+    ("checked_payout_capacity_sum", "repayment_amount <= U64_MAX - NATIVE_CKB_PAYOUT_OCCUPIED_CAPACITY"),
     ("expiry_rule", "expiry_timepoint"),
     ("payout_commitment", "payout_commitment_hash"),
 ];
@@ -160,6 +185,7 @@ pub(crate) fn build_report(repo_root: &Path) -> Result<Value> {
     let agreement_manifest = compare_manifest_dep(repo_root, AGREEMENT_MANIFEST, &agreement_live, artifact_hash.as_deref())?;
     let public_attestation = validate_public_attestation(repo_root, PUBLIC_CELLDEP_ATTESTATION, artifact_hash.as_deref())?;
     let external_review = validate_external_review(repo_root, EXTERNAL_TCB_ATTESTATION, artifact_hash.as_deref())?;
+    let core_security = validate_core_security_source(repo_root)?;
     let agreement_conformance = validate_agreement_profile_conformance(
         repo_root,
         &repo_root.join(CORE_MANIFEST),
@@ -185,6 +211,12 @@ pub(crate) fn build_report(repo_root: &Path) -> Result<Value> {
             json_pointer_str(&agreement_conformance, "/status").unwrap_or("failed"),
             "proposals/novaseal/v0-mvp-skeleton/Cell.toml + proposals/novaseal/v0-mvp-skeleton/schemas/nova_seal_canonical_envelope_v0.schema + proposals/novaseal/agreement-profile-v0/Cell.toml + proposals/novaseal/agreement-profile-v0/src",
             agreement_conformance.clone(),
+        ),
+        gate(
+            "core_authority_binding_and_checked_arithmetic_source",
+            json_pointer_str(&core_security, "/status").unwrap_or("failed"),
+            "proposals/novaseal/v0-mvp-skeleton/src + proposals/novaseal/v0-mvp-skeleton/fixtures",
+            core_security.clone(),
         ),
         gate(
             "agreement_profile_public_ecosystem_certification_v0",
@@ -769,6 +801,34 @@ fn summary_from_report(report: Option<&Value>, summary_keys: &[&str]) -> Value {
 
 fn blocker(text: &str, required_for: &str) -> Value {
     json!({"blocker": text, "required_for": required_for})
+}
+
+fn validate_core_security_source(repo_root: &Path) -> Result<Value> {
+    let source = read_cell_sources(&repo_root.join(CORE_ROOT).join("src"))?;
+    let fixture_files = expected_files(repo_root, &repo_root.join(CORE_ROOT).join("fixtures"), EXPECTED_CORE_FIXTURES)?;
+    let checks = json!({
+        "fixture_set_exact": json_pointer_bool(&fixture_files, "/exact"),
+        "wrong_pubkey_valid_signature_fixture_present": repo_root
+            .join("proposals/novaseal/v0-mvp-skeleton/fixtures/wrong_pubkey_valid_signature_reject.json")
+            .is_file(),
+        "authority_hash_mapping_mismatch_fixture_present": repo_root
+            .join("proposals/novaseal/v0-mvp-skeleton/fixtures/authority_hash_mapping_mismatch_reject.json")
+            .is_file(),
+        "authority_rotation_without_explicit_action_fixture_present": repo_root
+            .join("proposals/novaseal/v0-mvp-skeleton/fixtures/authority_rotation_without_explicit_action_reject.json")
+            .is_file(),
+        "state_action_binds_sig_pubkey_to_old_cell_authority": source.contains("require sig.pubkey == old_cell.btc_authority_hash"),
+        "lifecycle_binds_sig_pubkey_to_old_cell_authority": source.contains("assert(sig.pubkey == old_cell.btc_authority_hash"),
+        "lock_binds_sig_pubkey_to_cell_authority_in_both_lock_surfaces": source.matches("require sig.pubkey == cell.btc_authority_hash").count() >= 2,
+        "core_nonce_increment_guarded": source.contains("require old_cell.nonce < U64_MAX")
+            && source.contains("assert(old_cell.nonce < U64_MAX"),
+    });
+    Ok(json!({
+        "status": if object_values_all_true(Some(&checks)) { "passed" } else { "failed" },
+        "checks": checks,
+        "fixture_files": fixture_files,
+        "security_boundary": "BIP340 verification is only authority-enforcing when the verified x-only pubkey is bound to the Cell-declared authority.",
+    }))
 }
 
 pub(crate) fn validate_agreement_profile_conformance(

@@ -36,8 +36,8 @@ resource-conservation:NovaSealCellV0 = checked-runtime
 
 The runtime path is also covered by local and live evidence:
 
-- the state-type CKB VM harness executes all eight fixtures at action/type scope;
-- the combined lock + type transaction harness executes all eight fixtures
+- the state-type CKB VM harness executes all eleven fixtures at action/type scope;
+- the combined lock + type transaction harness executes all eleven fixtures
   through `ckb-script` and the local CKB contextual verifier stack;
 - the live local devnet runner commits bootstrap -> key-auth transition by RPC;
 - the live runner verifies the old state is dead and the new state + receipt

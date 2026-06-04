@@ -17,6 +17,7 @@ from typing import Any
 
 
 CKB = 100_000_000
+U64_MAX = (1 << 64) - 1
 
 AGREEMENT_OCCUPIED_CAPACITY = 40 * CKB
 RECEIPT_OCCUPIED_CAPACITY = 20 * CKB
@@ -68,6 +69,9 @@ class HarnessCase:
     actor_authority_hash: str
     outputs: tuple[OutputShape, ...]
     note: str
+    principal_amount: int = PRINCIPAL_AMOUNT
+    fixed_fee_amount: int = FIXED_FEE_AMOUNT
+    active_nonce: int = 0
 
 
 def output(role: str, owner: str, occupied_capacity: int, economic_value: int) -> OutputShape:
@@ -261,6 +265,50 @@ def canonical_cases() -> tuple[HarnessCase, ...]:
             ),
             note="The lender repayment output must equal principal plus fixed fee.",
         ),
+        HarnessCase(
+            fixture="repay_principal_max_fee_1_overflow_reject",
+            action="repay_arithmetic_boundary",
+            current_timepoint=180,
+            actor_authority_hash=BORROWER_AUTHORITY,
+            outputs=(),
+            note="Repay terminal amount must reject when principal + fixed_fee would overflow u64.",
+            principal_amount=U64_MAX,
+            fixed_fee_amount=1,
+            active_nonce=0,
+        ),
+        HarnessCase(
+            fixture="repay_principal_max_fee_0_accept",
+            action="repay_arithmetic_boundary",
+            current_timepoint=180,
+            actor_authority_hash=BORROWER_AUTHORITY,
+            outputs=(),
+            note="Repay terminal amount arithmetic accepts the u64 boundary principal + zero-fee case; full payout capacity guards are separate.",
+            principal_amount=U64_MAX,
+            fixed_fee_amount=0,
+            active_nonce=0,
+        ),
+        HarnessCase(
+            fixture="nonce_max_increment_reject",
+            action="repay_arithmetic_boundary",
+            current_timepoint=180,
+            actor_authority_hash=BORROWER_AUTHORITY,
+            outputs=(),
+            note="Terminal nonce increment must reject when active.nonce is already U64_MAX.",
+            principal_amount=PRINCIPAL_AMOUNT,
+            fixed_fee_amount=FIXED_FEE_AMOUNT,
+            active_nonce=U64_MAX,
+        ),
+        HarnessCase(
+            fixture="nonce_max_minus_1_increment_accept",
+            action="repay_arithmetic_boundary",
+            current_timepoint=180,
+            actor_authority_hash=BORROWER_AUTHORITY,
+            outputs=(),
+            note="Terminal nonce increment accepts U64_MAX - 1 because the new nonce is exactly U64_MAX.",
+            principal_amount=PRINCIPAL_AMOUNT,
+            fixed_fee_amount=FIXED_FEE_AMOUNT,
+            active_nonce=U64_MAX - 1,
+        ),
     )
 
 
@@ -319,6 +367,38 @@ def protocol_input_capacity(case: HarnessCase) -> int:
 def evaluate_case(case: HarnessCase, expected: str) -> dict[str, Any]:
     failures: list[str] = []
 
+    terminal_amount: int | None = None
+    if case.fixed_fee_amount > U64_MAX - case.principal_amount:
+        failures.append("principal plus fixed fee would overflow u64")
+    else:
+        terminal_amount = case.principal_amount + case.fixed_fee_amount
+    if case.active_nonce >= U64_MAX:
+        failures.append("nonce increment would overflow u64")
+
+    if case.action == "repay_arithmetic_boundary":
+        accepted = not failures
+        expected_accepted = expected == "accepted"
+        return {
+            "fixture": case.fixture,
+            "action": case.action,
+            "expected": expected,
+            "accepted": accepted,
+            "matched_expected": accepted == expected_accepted,
+            "current_timepoint": case.current_timepoint,
+            "actor_authority_hash": case.actor_authority_hash,
+            "principal_amount_shannons": case.principal_amount,
+            "fixed_fee_amount_shannons": case.fixed_fee_amount,
+            "terminal_amount_shannons": terminal_amount,
+            "old_nonce": case.active_nonce,
+            "new_nonce": None if case.active_nonce >= U64_MAX else case.active_nonce + 1,
+            "outputs": [],
+            "total_output_capacity_shannons": 0,
+            "protocol_input_capacity_shannons": 0,
+            "builder_min_additional_input_capacity_shannons": 0,
+            "failures": failures,
+            "note": case.note,
+        }
+
     for candidate in case.outputs:
         if candidate.capacity_shannons < candidate.occupied_capacity_shannons:
             failures.append(
@@ -346,7 +426,8 @@ def evaluate_case(case: HarnessCase, expected: str) -> dict[str, Any]:
         if case.actor_authority_hash != BORROWER_AUTHORITY:
             failures.append("actor is not borrower")
         require_economic_value(case, "closed_agreement", 0, failures)
-        require_economic_value(case, "lender_repayment", PRINCIPAL_AMOUNT + FIXED_FEE_AMOUNT, failures)
+        if terminal_amount is not None:
+            require_economic_value(case, "lender_repayment", terminal_amount, failures)
         require_economic_value(case, "borrower_collateral_return", COLLATERAL_AMOUNT, failures)
         require_economic_value(case, "receipt", 0, failures)
     elif case.action == "claim_after_expiry":

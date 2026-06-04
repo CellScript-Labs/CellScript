@@ -50,15 +50,15 @@ resolved_script_verifier_matched_expected=true
 full_transaction_constructed=true
 full_transaction_executed=true
 full_transaction_verifier_matched_expected=true
-total_cases=3
+total_cases=4
 accepted=1
-rejected=2
-matched_expected=3
+rejected=3
+matched_expected=4
 mismatched=0
-parent_max_cycles=24949
-child_max_cycles=3552593
-resolved_script_verifier_max_cycles=3768400
-full_transaction_verifier_max_cycles=3768400
+parent_max_cycles=48783
+child_max_cycles=3487016
+resolved_script_verifier_max_cycles=3702919
+full_transaction_verifier_max_cycles=3702919
 max_consensus_tx_size_bytes=859
 max_output_occupied_capacity_shannons=21900000000
 min_capacity_margin_shannons=10000000000
@@ -70,19 +70,20 @@ Cases:
 
 - valid parent-computed digest + BIP340 signature: accepted
 - signature bitflip: rejected after parent spawn + child verifier reject
+- valid BIP340 signature from a non-authority x-only pubkey: rejected before spawn
 - authority hash mismatch: rejected before spawn
 
 ## Boundary
 
-This is stronger than child-only evidence because the parent lock now constructs the IPC envelope, calls VM2 spawn, waits for the child, observes the child exit status, and the official `ckb-script` lock-group and full transaction script verifiers match the expected result for the three authority cases.
+This is stronger than child-only evidence because the parent lock now constructs the IPC envelope, calls VM2 spawn, waits for the child, observes the child exit status, and the official `ckb-script` lock-group and full transaction script verifiers match the expected result for the four authority cases.
 
 The parent lock now parses the same 398-byte `CSARGv1` witness payload shape as the state action: `NovaSealSignedIntentV0`, `state_hash_commitment`, then `SignaturePayload`. The signed intent already contains `expected_receipt_hash`; the lock ignores the state commitment, but the shared payload removes the former witness-format split between lock and type/action execution.
 
 It is still not production acceptance evidence:
 
-- official `ckb-script` full transaction script verification is executed for the three parent authority cases, but not a public/shared deployment attestation flow,
+- official `ckb-script` full transaction script verification is executed for the four parent authority cases, but not a public/shared deployment attestation flow,
 - the resolved transaction is harness-constructed and not yet produced by a production builder,
 - capacity, occupied-capacity, tx-size, and under-capacity rejection are still shape-level measurements,
-- this parent-lock harness covers the three authority cases; full lock+type
-  transaction evidence for all eight transition fixtures is recorded in
+- this parent-lock harness covers the four authority cases; full lock+type
+  transaction evidence for all eleven transition fixtures is recorded in
   `docs/COMBINED_TX_HARNESS.md` and `target/novaseal-combined-tx-report.json`.

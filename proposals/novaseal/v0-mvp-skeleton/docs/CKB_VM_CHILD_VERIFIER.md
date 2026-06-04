@@ -77,4 +77,4 @@ It does not prove:
 
 The child harness now remains a lower-level oracle under the parent-lock
 harness. The remaining production path is public/shared CellDep attestation and
-external TCB review after the current eight-fixture transaction coverage.
+external TCB review after the current eleven-fixture transaction coverage.

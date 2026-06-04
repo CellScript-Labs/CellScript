@@ -96,10 +96,10 @@ python3 scripts/novaseal_canonical_vectors.py --pretty
 Current summary:
 
 ```text
-vectors=8
-signed_intent_vectors=8
-resolved_receipt_matches=8
-latest_receipt_matches=8
+vectors=11
+signed_intent_vectors=11
+resolved_receipt_matches=11
+latest_receipt_matches=11
 receipt_commitment_status=split_intent_and_explicit_receipt_commitment
 ```
 

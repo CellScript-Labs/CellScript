@@ -44,6 +44,7 @@ Implemented in this slice:
 | Native CKB payout output binding | implemented | resolved-transaction-covered + live-devnet-covered |
 | Terms hash output binding | implemented | resolved-transaction-covered |
 | Receipt hash output binding | implemented | resolved-transaction-covered |
+| Checked terminal arithmetic | implemented | source-guard-present + local-arithmetic-boundary-covered + production-gate-covered |
 | Fixed-width wallet signing vectors | implemented | production-gate-covered |
 | BTC UTXO mirror / SPV / OP_RETURN | out of scope | not implemented |
 
@@ -73,7 +74,7 @@ Do not call this "trustless borrowing". Better names:
 - requires borrower actor hash
 - creates a terminal `Repaid` agreement
 - creates typed lender repayment and borrower collateral-return payout outputs
-- creates a receipt with `terminal_amount = principal + fixed_fee`
+- creates a receipt with checked `terminal_amount = principal + fixed_fee`
 
 `claim_after_expiry`
 
@@ -101,6 +102,10 @@ matches those typed payout amounts. Fixed-width wallet signing vectors for the
 Agreement terminal intents are generated in
 `/home/arthur/a19q3/CellScript/target/novaseal-wallet-signing-vectors.json`.
 
+Authority identifiers are signature and display identifiers in this profile.
+They are not a general payout-recipient schema: payout routing is committed by
+`payout_commitment_hash`, typed payout outputs, and the transaction output shape.
+
 ## Commands
 
 ```bash
@@ -123,8 +128,8 @@ python3 /home/arthur/a19q3/CellScript/scripts/novaseal_wallet_signing_vectors.py
 Latest local result: non-strict and primitive-strict CellScript commands pass.
 The generated audit bundle reports 3 actions, 0 locks, 3 source units, 170
 ProofPlan records, 78 builder assumptions, and zero runtime gaps. The local
-transaction-shape harness reports 8/8 fixture
-expectations matched: 3 accepted shapes and 5 rejected shapes. The resolved
+transaction-shape harness reports 12/12 fixture expectations matched, including
+four `principal + fixed_fee` and nonce max/max-1 arithmetic boundary cases. The resolved
 transaction harness reports 20/20 script-layer expectations matched and 20/20
 node-verifier expectations matched. The older per-action CKB VM harness is a
 legacy ABI check for the pre-signed-intent action witness shape and is not part
@@ -142,7 +147,8 @@ receipt outputs are live. The current aggregate status is `passed`. See
 ## Harness Boundary
 
 `scripts/nova_agreement_tx_shape_harness.py` checks builder-visible CKB output
-amount and occupied-capacity shapes.
+amount, occupied-capacity shapes, and local terminal-arithmetic boundary cases
+for repayment amount and nonce increment overflow.
 
 `harness/ckb_vm` contains a legacy per-action `ckb-vm` runner for the older
 action witness ABI. The current release gate relies on the lifecycle type-script

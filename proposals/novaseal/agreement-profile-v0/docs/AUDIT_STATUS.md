@@ -7,6 +7,8 @@ audited terminal-path structure, local transaction-shape evidence, resolved
 transaction verifier evidence, live devnet lifecycle evidence, and fixed-width
 wallet signing vectors. It now also has a deterministic public profile
 certification gate exposed through `cellc certify --plugin novaseal-profile-v0`.
+The current source includes explicit checked arithmetic guards for repayment
+amounts, terminal nonce increments, and native CKB payout capacity-floor sums.
 
 ## Latest Results
 
@@ -17,7 +19,7 @@ certification gate exposed through `cellc certify --plugin novaseal-profile-v0`.
 | `cellc explain-assumptions --target-profile ckb` | passed |
 | `cellc check --target-profile ckb --primitive-strict 0.16` | passed |
 | `cellc src/nova_agreement_lifecycle_type.cell --target riscv64-asm --target-profile ckb --entry-action nova_agreement_lifecycle` | passed |
-| `python3 scripts/nova_agreement_tx_shape_harness.py --pretty` | passed; 8/8 expectations matched |
+| `python3 scripts/nova_agreement_tx_shape_harness.py --pretty` | passed; 12/12 shape and arithmetic-boundary expectations matched |
 | `cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_agreement_tx_harness -- --pretty` | passed; 20/20 script-layer and node-verifier expectations matched |
 | `scripts/novaseal_agreement_devnet_stateful_live.py --pretty --ckb-repo ../ckb --ckb-bin ../ckb/target/debug/ckb` | passed; originate -> repay, originate -> claim, and live negative dry-runs |
 | `python3 ../../../scripts/novaseal_wallet_signing_vectors.py --pretty` | passed; includes 3 Agreement vectors |
@@ -73,6 +75,7 @@ python3 ../../../scripts/novaseal_wallet_signing_vectors.py --pretty
 | Native CKB payout output binding | implemented | resolved-transaction-covered + live-devnet-covered |
 | Terms hash output binding | implemented | resolved-transaction-covered |
 | Receipt hash output binding | implemented | resolved-transaction-covered |
+| Checked terminal-path arithmetic | implemented | source-guard-present + local-arithmetic-boundary-covered + production-gate-covered |
 | Fixed-width wallet signing vectors | implemented | production-gate-covered |
 | Public ecosystem profile certification | implemented | compiler-certification-covered |
 | BTC collateral support | out of scope | not implemented |
@@ -81,7 +84,17 @@ python3 ../../../scripts/novaseal_wallet_signing_vectors.py --pretty
 
 The local harness executes the builder-visible transaction shapes for
 origination, repayment, default claim, time rejects, party rejects,
-under-capacity reject, and wrong-settlement reject.
+under-capacity reject, wrong-settlement reject, and the four arithmetic boundary
+fixtures:
+
+- `repay_principal_max_fee_1_overflow_reject`
+- `repay_principal_max_fee_0_accept`
+- `nonce_max_increment_reject`
+- `nonce_max_minus_1_increment_accept`
+
+The `repay_principal_max_fee_0_accept` case covers terminal amount arithmetic
+only. Full payout capacity remains a separate guard because a CKB output
+capacity also has to carry occupied capacity.
 
 The legacy action CKB VM harness is no longer part of the current pass/fail
 claim because the Agreement surface moved to signed-intent witness shapes and a

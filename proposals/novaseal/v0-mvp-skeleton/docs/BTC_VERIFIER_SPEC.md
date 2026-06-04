@@ -76,15 +76,16 @@ child_vm_matched_expected=77
 child_vm_max_cycles=3552601
 parent_lock_ckb_vm_executed=true
 parent_spawn_executed=true
-parent_vm_matched_expected=3
-parent_vm_max_cycles=48060
+parent_vm_matched_expected=4
+parent_vm_max_cycles=48783
 parent_resolved_script_verifier_matched_expected=true
-parent_resolved_script_verifier_max_cycles=3768400
+parent_resolved_script_verifier_max_cycles=3702919
 parent_full_transaction_verifier_matched_expected=true
-parent_full_transaction_verifier_max_cycles=3768400
+parent_full_transaction_verifier_max_cycles=3702919
 ```
 
-The positive set contains 4 deterministic test signers for each of the 8 fixtures.
+The positive set contains 4 deterministic test signers for each of the 9
+fixtures.
 
 The negative set contains 5 mutations per fixture:
 
@@ -93,6 +94,11 @@ The negative set contains 5 mutations per fixture:
 - signature bit flip,
 - `s` out of range,
 - `r` out of range.
+
+The parent-lock harness also covers `parent_wrong_pubkey_valid_signature_reject`:
+the signature is cryptographically valid for the witness pubkey, but that pubkey
+does not match the protected Cell's declared BTC authority, so the lock rejects
+before spawning the verifier.
 
 ## Test-Only Secrets
 
@@ -120,7 +126,10 @@ It should return:
 ## Current Limits
 
 Criterion 6 now has local and local-devnet evidence, not public/shared production
-attestation or external BIP340 TCB acceptance:
+attestation or external BIP340 TCB acceptance. The audit split is:
+
+- Criterion 6a: invalid BTC signatures reject.
+- Criterion 6b: valid BTC signatures from non-authority x-only pubkeys reject.
 
 - the `.cell` lock delegates to the RISC-V BIP340 shell and the parent-lock CKB VM harness now executes parent spawn plus nested child verification,
 - the generated audit bundle exposes `btc_authority` lock-args binding and spawn/IPC shell wiring, while cryptographic execution evidence remains harness-level rather than generated ProofPlan transaction coverage,
@@ -128,6 +137,6 @@ attestation or external BIP340 TCB acceptance:
 - the Rust verifier is implemented in the shared no-std core and reused by the host verifier and RISC-V shell; the staged child ELF now executes in CKB VM with harness-provided inherited-fd input,
 - resolved lock-group and full transaction script-verifier evidence now record `cell_deps[0]`, parent lock dep, lock ScriptGroup shape, tx size, occupied capacity, under-capacity shape rejection, and `ckb-script` verifier cycles for the three parent authority cases,
 - the local TCB review bundle is written to `target/novaseal-bip340-tcb-review.json`, and the local production gate report is written to `target/novaseal-production-gates.json`,
-- no public/shared deployment attestation or external TCB review exists; eight-fixture combined transaction verifier evidence is local node-verification-stack evidence.
+- no public/shared deployment attestation or external TCB review exists; eleven-fixture combined transaction verifier evidence is local node-verification-stack evidence.
 
 The next implementation slice should attach real public/shared CellDep attestation and external TCB review without pretending that harness-level VM success alone is production coverage.

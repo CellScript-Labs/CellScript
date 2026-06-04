@@ -3,7 +3,7 @@
 **Date**: 2026-05-31
 **Harness**: `harness/ckb_vm/src/bin/novaseal_combined_tx_harness.rs`
 **Report**: `target/novaseal-combined-tx-report.json`
-**Classification**: eight-fixture combined lock + type local CKB node-verification-stack evidence.
+**Classification**: eleven-fixture combined lock + type local CKB node-verification-stack evidence.
 
 ## Command
 
@@ -16,18 +16,18 @@ cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_combined_tx_h
 ```text
 combined_full_transaction_executed=true
 ckb_node_stack_executed=true
-total_cases=8
+total_cases=11
 expected_accept=1
-expected_reject=7
+expected_reject=10
 accepted=1
-rejected=7
-matched_expected=8
+rejected=10
+matched_expected=11
 mismatched=0
-node_stack_matched_expected=8
+node_stack_matched_expected=11
 node_stack_mismatched=0
-failure_scope_matched=8
+failure_scope_matched=11
 failure_scope_mismatched=0
-node_stack_failure_scope_matched=8
+node_stack_failure_scope_matched=11
 lock_and_type_script_groups_present=true
 child_spawn_target_cell_dep0_modelled=true
 shared_witness_abi_aligned=true
@@ -39,8 +39,8 @@ non_contextual_checks_passed=true
 contextual_checks_match_expected=true
 min_fee_shannons=100000
 max_fee_shannons=100000
-max_full_transaction_cycles=7651736
-max_node_stack_cycles=7651736
+max_full_transaction_cycles=7521003
+max_node_stack_cycles=7521003
 max_consensus_tx_size_bytes=1484
 max_output_occupied_capacity_shannons=70700000000
 min_capacity_margin_shannons=10000000000
@@ -48,7 +48,7 @@ min_capacity_margin_shannons=10000000000
 
 ## What It Executes
 
-For each of the eight fixture JSONs, the harness constructs an in-memory `ckb-types` `ResolvedTransaction` with:
+For each of the eleven fixture JSONs, the harness constructs an in-memory `ckb-types` `ResolvedTransaction` with:
 
 - the compiled `btc_authority` parent lock,
 - the compiled `key_auth_transition` type/action script,
@@ -58,7 +58,7 @@ For each of the eight fixture JSONs, the harness constructs an in-memory `ckb-ty
 - materialised `ProofReceiptV0` data at `Output#1`,
 - a header dep carrying the fixture timepoint used by `env::current_timepoint()`.
 
-It then runs official `ckb-script::TransactionScriptsVerifier::verify` and the CKB `ckb-verification` non-contextual + contextual transaction verifier stack over the same transaction. The valid fixture accepts; the seven negative fixtures reject for the expected fixture-level outcome and expected lock/type script scope in both verifier layers.
+It then runs official `ckb-script::TransactionScriptsVerifier::verify` and the CKB `ckb-verification` non-contextual + contextual transaction verifier stack over the same transaction. The valid fixture accepts; the ten negative fixtures reject for the expected fixture-level outcome and expected lock/type script scope in both verifier layers. `wrong_signature_reject` proves invalid signatures fail; `wrong_pubkey_valid_signature_reject` proves a valid signature by a non-authority x-only pubkey still fails authority binding; `authority_hash_mapping_mismatch_reject` proves lock args / authority-id mismatch fails at lock scope; `authority_rotation_without_explicit_action_reject` proves output authority cannot change as an implicit side effect.
 
 The same report now records production-builder candidate shape facts:
 
@@ -70,7 +70,7 @@ The same report now records production-builder candidate shape facts:
 
 ## Boundary
 
-This closes the previous "no combined lock+type transaction evidence" gap at the local CKB node verification-stack layer for the current eight-fixture set.
+This closes the previous "no combined lock+type transaction evidence" gap at the local CKB node verification-stack layer for the current eleven-fixture set.
 
 Remaining production limits:
 
