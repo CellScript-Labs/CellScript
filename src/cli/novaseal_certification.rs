@@ -749,13 +749,9 @@ pub(crate) fn build_report(repo_root: &Path) -> Result<Value> {
         .filter(|row| json_pointer_str(row, "/status") != Some("external_required"))
         .all(|row| json_pointer_str(row, "/status") == Some("passed"));
     let production_ready = gates.iter().all(|row| json_pointer_str(row, "/status") == Some("passed"));
-    let status = if production_ready {
-        "production_ready"
-    } else if local_ready && gates.iter().any(|row| json_pointer_str(row, "/status") == Some("external_required")) {
-        "local_production_prep_ready_external_attestation_required"
-    } else {
-        "failed"
-    };
+    let production_statement_eligible = json_pointer_bool(&profile_certification, "/production_statement_eligible");
+    let external_required = gates.iter().any(|row| json_pointer_str(row, "/status") == Some("external_required"));
+    let status = production_gate_status(production_ready, production_statement_eligible, local_ready, external_required);
     let v1_readiness = build_v1_readiness(&profile_certification, &stateful_acceptance, &gates, local_ready, production_ready);
     let failed_dimensions = v1_readiness.get("failed_dimensions").cloned().unwrap_or_else(|| Value::Array(Vec::new()));
     let external_blockers = v1_readiness.get("external_blockers").cloned().unwrap_or_else(|| Value::Array(Vec::new()));
@@ -765,7 +761,7 @@ pub(crate) fn build_report(repo_root: &Path) -> Result<Value> {
         "status": status,
         "production_ready": production_ready,
         "local_production_prep_ready": local_ready,
-        "production_statement_eligible": json_pointer_bool(&v1_readiness, "/production_statement_eligible"),
+        "production_statement_eligible": production_statement_eligible,
         "failed_dimensions": failed_dimensions,
         "external_blockers": external_blockers,
         "runtime_artifact_hash": json_pointer_str(&tcb, "/runtime_artifact/artifact_hash").and_then(|value| normalize_hex(Some(value))),
@@ -946,6 +942,8 @@ fn build_v1_readiness(
     let production_statement_eligible = json_pointer_bool(profile_certification, "/production_statement_eligible");
     let status = if production_ready && production_statement_eligible {
         "v1_prod_ready"
+    } else if production_ready {
+        "production_statement_ineligible"
     } else if local_dimensions_passed {
         "local_v1_ready_external_attestation_required"
     } else if !planned_matrix_passed {
@@ -974,6 +972,23 @@ fn build_v1_readiness(
             ],
         },
     })
+}
+
+fn production_gate_status(
+    production_ready: bool,
+    production_statement_eligible: bool,
+    local_ready: bool,
+    external_required: bool,
+) -> &'static str {
+    if production_ready && production_statement_eligible {
+        "production_ready"
+    } else if production_ready {
+        "production_statement_ineligible"
+    } else if local_ready && external_required {
+        "local_production_prep_ready_external_attestation_required"
+    } else {
+        "failed"
+    }
 }
 
 fn build_planned_profile_matrix(profile_certification: &Value, stateful_acceptance: &Value) -> Value {
@@ -5014,6 +5029,83 @@ mod tests {
         let missing = json_array_strings(&local, "/planned_profile_matrix/missing");
         assert!(missing.iter().any(|id| id == "object_profile_fungible_xudt"));
         assert!(missing.iter().any(|id| id == "seal_profile_btc_utxo_seal"));
+    }
+
+    #[test]
+    fn production_status_requires_statement_eligibility_even_when_gates_pass() {
+        assert_eq!(production_gate_status(true, true, true, false), "production_ready");
+        assert_eq!(production_gate_status(true, false, true, false), "production_statement_ineligible");
+        assert_eq!(production_gate_status(false, false, true, true), "local_production_prep_ready_external_attestation_required");
+        assert_eq!(production_gate_status(false, false, false, true), "failed");
+    }
+
+    #[test]
+    fn v1_readiness_rejects_production_claim_when_statement_ineligible() {
+        let profile_certification = json!({
+            "status": "passed",
+            "production_statement_eligible": false,
+            "production_statement_blockers": ["manual_production_statement_missing"],
+            "local_checks": {
+                "conformance_gate_passed": true,
+                "wallet_vector_detail_passed": true,
+                "profile_operator_fixture_detail_passed": true,
+                "service_builder_fixture_detail_passed": true,
+                "btc_spv_evidence_adapter_passed": true,
+                "external_attestation_adapter_passed": true,
+                "external_evidence_handoff_passed": true,
+                "local_bip340_tcb_review_passed": true,
+            },
+            "security_audit_coverage": { "status": "passed" },
+            "planned_profile_packages": {
+                "btc_tx_commitment": { "status": "passed" },
+                "btc_utxo_seal": { "status": "passed" },
+                "dual_seal": { "status": "passed" },
+                "fiber_candidate": { "status": "passed" },
+                "fungible_xudt": { "status": "passed" },
+                "rwa_receipt": { "status": "passed" }
+            },
+        });
+        let stateful_acceptance = json!({
+            "status": "passed",
+            "blocker_count": 0,
+            "live_devnet_rpc_executed": true,
+            "stateful_lifecycle_executed": true,
+            "profile_coverage": {
+                "status": "passed",
+                "covered_profiles": [
+                    { "status": "passed" },
+                    { "status": "passed" }
+                ]
+            },
+            "business_scenario_coverage": {
+                "status": "passed",
+                "checks": {
+                    "agreement_originate_live": true,
+                    "agreement_repay_live": true,
+                    "agreement_claim_live": true,
+                    "agreement_negative_business_cases_preserve_live_state": true,
+                    "btc_transaction_commitment_transition_live": true,
+                    "btc_utxo_seal_closure_live": true,
+                    "fungible_xudt_value_flow_live": true,
+                    "rwa_receipt_lifecycle_live": true,
+                    "fiber_candidate_path_live": true
+                }
+            },
+        });
+        let gates = vec![
+            gate("public_shared_cell_dep_pinning_attestation", "passed", PUBLIC_CELLDEP_ATTESTATION, Value::Null),
+            gate("external_bip340_runtime_verifier_tcb_review_attestation", "passed", EXTERNAL_TCB_ATTESTATION, Value::Null),
+            gate("public_btc_spv_evidence", "passed", PUBLIC_BTC_SPV_EVIDENCE, Value::Null),
+        ];
+
+        let readiness = build_v1_readiness(&profile_certification, &stateful_acceptance, &gates, true, true);
+
+        assert_eq!(json_pointer_str(&readiness, "/status"), Some("production_statement_ineligible"));
+        assert!(json_pointer_bool(&readiness, "/local_v1_ready"));
+        assert!(json_pointer_bool(&readiness, "/production_ready"));
+        assert!(!json_pointer_bool(&readiness, "/production_statement_eligible"));
+        assert!(json_array_strings(&readiness, "/failed_dimensions").is_empty());
+        assert_eq!(json_array_strings(&readiness, "/external_blockers"), vec!["manual_production_statement_missing".to_string()]);
     }
 
     #[test]
