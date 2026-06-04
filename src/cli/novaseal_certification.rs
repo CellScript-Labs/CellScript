@@ -215,6 +215,36 @@ const EXPECTED_FIBER_CANDIDATE_FIXTURES: &[&str] =
 const EXPECTED_FIBER_CANDIDATE_DOCS: &[&str] =
     &["AUDIT_STATUS.md", "DEVNET_STATEFUL_ACCEPTANCE.md", "FIBER_NODE_EXPERIMENTS.md", "SECURITY.md"];
 
+const EXPECTED_FIBER_NODE_EXECUTION_SCHEMA: &str = "novaseal-fiber-node-execution-v0.3";
+const EXPECTED_FIBER_REPO_ORIGIN: &str = "https://github.com/nervosnetwork/fiber.git";
+const EXPECTED_FIBER_NODE_PROFILES: &[&str] = &[
+    EXPECTED_BTC_TX_COMMITMENT_PROFILE,
+    EXPECTED_BTC_UTXO_SEAL_PROFILE,
+    EXPECTED_FIBER_CANDIDATE_PROFILE,
+    EXPECTED_FUNGIBLE_XUDT_PROFILE,
+];
+const EXPECTED_FIBER_WORKFLOWS: &[(&str, &[&str])] = &[
+    ("open-use-close-a-channel", &[EXPECTED_FIBER_CANDIDATE_PROFILE]),
+    ("3-nodes-transfer", &[EXPECTED_FIBER_CANDIDATE_PROFILE]),
+    ("router-pay", &[EXPECTED_FIBER_CANDIDATE_PROFILE]),
+    ("invoice-ops", &[EXPECTED_FIBER_CANDIDATE_PROFILE]),
+    ("shutdown-force", &[EXPECTED_FIBER_CANDIDATE_PROFILE]),
+    ("reestablish", &[EXPECTED_FIBER_CANDIDATE_PROFILE]),
+    ("external-funding-open", &[EXPECTED_FIBER_CANDIDATE_PROFILE, EXPECTED_BTC_TX_COMMITMENT_PROFILE]),
+    ("funding-tx-verification", &[EXPECTED_FIBER_CANDIDATE_PROFILE, EXPECTED_BTC_TX_COMMITMENT_PROFILE]),
+    ("udt", &[EXPECTED_FIBER_CANDIDATE_PROFILE, EXPECTED_FUNGIBLE_XUDT_PROFILE]),
+    ("udt-router-pay", &[EXPECTED_FIBER_CANDIDATE_PROFILE, EXPECTED_FUNGIBLE_XUDT_PROFILE]),
+    ("watchtower/force-close-after-open-channel", &[EXPECTED_FIBER_CANDIDATE_PROFILE]),
+    ("watchtower/force-close-with-pending-tlcs", &[EXPECTED_FIBER_CANDIDATE_PROFILE]),
+    ("watchtower/force-close-with-pending-tlcs-and-udt", &[EXPECTED_FIBER_CANDIDATE_PROFILE, EXPECTED_FUNGIBLE_XUDT_PROFILE]),
+    ("watchtower/force-close-preimage-multiple", &[EXPECTED_FIBER_CANDIDATE_PROFILE]),
+    ("cross-chain-hub", &[EXPECTED_FIBER_CANDIDATE_PROFILE, EXPECTED_BTC_TX_COMMITMENT_PROFILE, EXPECTED_BTC_UTXO_SEAL_PROFILE]),
+    (
+        "cross-chain-hub-separate",
+        &[EXPECTED_FIBER_CANDIDATE_PROFILE, EXPECTED_BTC_TX_COMMITMENT_PROFILE, EXPECTED_BTC_UTXO_SEAL_PROFILE],
+    ),
+];
+
 const EXPECTED_CERTIFICATION_INVARIANTS: &[&str] = &[
     "profile_separation",
     "ckb_native_only",
@@ -1883,6 +1913,7 @@ fn fiber_node_execution_summary(report: Option<&Value>) -> Value {
     let Some(report) = report else {
         return json!({
             "present": false,
+            "status": "missing",
             "discovery_ready": false,
             "all_required_workflows_executed_passed": false,
             "required_report": FIBER_NODE_EXPERIMENTS,
@@ -1899,11 +1930,92 @@ fn fiber_node_execution_summary(report: Option<&Value>) -> Value {
         });
     }
 
+    let workflows = report.get("workflows").and_then(Value::as_array).cloned().unwrap_or_default();
+    let workflow_suites =
+        workflows.iter().filter_map(|workflow| json_pointer_str(workflow, "/suite").map(str::to_string)).collect::<Vec<_>>();
+    let workflow_suites_exact =
+        exact_string_set(&workflow_suites, &EXPECTED_FIBER_WORKFLOWS.iter().map(|(suite, _)| *suite).collect::<Vec<_>>());
+    let workflows_by_suite = workflows
+        .iter()
+        .filter_map(|workflow| json_pointer_str(workflow, "/suite").map(|suite| (suite.to_string(), workflow)))
+        .collect::<BTreeMap<_, _>>();
+    let duplicate_free_workflow_suites = workflows_by_suite.len() == workflow_suites.len();
+
+    let mut workflow_checks = Map::new();
+    let mut failed_workflows = Vec::new();
+    for (suite, expected_profiles) in EXPECTED_FIBER_WORKFLOWS {
+        let Some(workflow) = workflows_by_suite.get(*suite) else {
+            failed_workflows.push(Value::String((*suite).to_string()));
+            workflow_checks.insert((*suite).to_string(), json!({ "present": false }));
+            continue;
+        };
+        let mapped_profiles = json_array_strings(workflow, "/mapped_profiles");
+        let evidence_files_present = workflow
+            .get("evidence_files")
+            .and_then(Value::as_array)
+            .is_some_and(|files| !files.is_empty() && files.iter().all(|file| file.as_str().is_some_and(|file| !file.is_empty())));
+        let rpc_methods_present = workflow.get("rpc_methods").and_then(Value::as_array).is_some_and(|methods| {
+            !methods.is_empty() && methods.iter().all(|method| method.as_str().is_some_and(|method| !method.is_empty()))
+        });
+        let execution_logs_present = value_is_present(workflow.pointer("/execution/stdout_log").unwrap_or(&Value::Null))
+            && value_is_present(workflow.pointer("/execution/stderr_log").unwrap_or(&Value::Null));
+        let checks = json!({
+            "present": json_pointer_bool(workflow, "/present"),
+            "status_passed": json_pointer_str(workflow, "/status") == Some("passed"),
+            "execution_passed": json_pointer_str(workflow, "/execution/status") == Some("passed"),
+            "mapped_profiles_exact": exact_string_set(&mapped_profiles, expected_profiles),
+            "expected_terms_present": object_values_all_true(workflow.get("expected_terms")),
+            "evidence_files_present": evidence_files_present,
+            "rpc_methods_present": rpc_methods_present,
+            "execution_logs_present": execution_logs_present,
+        });
+        if !object_values_all_true(Some(&checks)) {
+            failed_workflows.push(Value::String((*suite).to_string()));
+        }
+        workflow_checks.insert((*suite).to_string(), checks);
+    }
+
     let all_present = json_pointer_bool(report, "/workflow_coverage/all_required_workflows_present");
     let runnable_devnet_contract_present = json_pointer_bool(report, "/devnet_contract/runnable_devnet_contract_present");
-    let all_executed_passed = json_pointer_bool(report, "/workflow_coverage/all_required_workflows_executed_passed");
-    let partial_execution_passed = json_pointer_bool(report, "/workflow_coverage/partial_execution_passed");
-    let discovery_ready = all_present && runnable_devnet_contract_present;
+    let all_executed_passed_reported = json_pointer_bool(report, "/workflow_coverage/all_required_workflows_executed_passed");
+    let partial_execution_passed_reported = json_pointer_bool(report, "/workflow_coverage/partial_execution_passed");
+    let profiles_covered = json_array_strings(report, "/profiles_covered");
+    let schema_ok = json_pointer_str(report, "/schema") == Some(EXPECTED_FIBER_NODE_EXECUTION_SCHEMA);
+    let status_passed = json_pointer_str(report, "/status") == Some("passed");
+    let clean_expected_repo = json_pointer_str(report, "/fiber_repo/origin") == Some(EXPECTED_FIBER_REPO_ORIGIN)
+        && json_pointer_str(report, "/fiber_repo/branch").is_some_and(|branch| !branch.is_empty())
+        && json_pointer_str(report, "/fiber_repo/commit")
+            .is_some_and(|commit| commit.len() == 40 && commit.chars().all(|char| char.is_ascii_hexdigit()))
+        && !json_pointer_bool(report, "/fiber_repo/dirty");
+    let count_contract_exact = json_pointer_i64(report, "/workflow_coverage/required_count")
+        == Some(EXPECTED_FIBER_WORKFLOWS.len() as i64)
+        && json_pointer_i64(report, "/workflow_coverage/present_count") == Some(EXPECTED_FIBER_WORKFLOWS.len() as i64)
+        && json_pointer_i64(report, "/workflow_coverage/executed_count") == Some(EXPECTED_FIBER_WORKFLOWS.len() as i64)
+        && json_pointer_i64(report, "/workflow_coverage/passed_execution_count") == Some(EXPECTED_FIBER_WORKFLOWS.len() as i64);
+    let profiles_exact = exact_string_set(&profiles_covered, EXPECTED_FIBER_NODE_PROFILES);
+    let workflow_rows_passed = workflow_suites_exact && duplicate_free_workflow_suites && failed_workflows.is_empty();
+    let discovery_ready =
+        schema_ok && all_present && runnable_devnet_contract_present && workflow_suites_exact && duplicate_free_workflow_suites;
+    let all_executed_passed = discovery_ready
+        && status_passed
+        && clean_expected_repo
+        && count_contract_exact
+        && profiles_exact
+        && all_executed_passed_reported
+        && workflow_rows_passed;
+    let checks = json!({
+        "schema_ok": schema_ok,
+        "status_passed": status_passed,
+        "clean_expected_fiber_repo": clean_expected_repo,
+        "runnable_devnet_contract_present": runnable_devnet_contract_present,
+        "coverage_counts_exact": count_contract_exact,
+        "profiles_covered_exact": profiles_exact,
+        "workflow_suites_exact": workflow_suites_exact,
+        "duplicate_free_workflow_suites": duplicate_free_workflow_suites,
+        "workflow_rows_passed": workflow_rows_passed,
+        "reported_all_required_workflows_present": all_present,
+        "reported_all_required_workflows_executed_passed": all_executed_passed_reported,
+    });
     json!({
         "present": true,
         "valid_json": true,
@@ -1919,10 +2031,15 @@ fn fiber_node_execution_summary(report: Option<&Value>) -> Value {
         "workflow_coverage": report.get("workflow_coverage").cloned().unwrap_or(Value::Null),
         "profiles_covered": report.get("profiles_covered").cloned().unwrap_or(Value::Null),
         "tooling": report.get("tooling").cloned().unwrap_or(Value::Null),
+        "checks": checks,
+        "workflow_checks": workflow_checks,
+        "failed_workflows": failed_workflows,
+        "expected_workflows": EXPECTED_FIBER_WORKFLOWS.iter().map(|(suite, _)| *suite).collect::<Vec<_>>(),
+        "expected_profiles": EXPECTED_FIBER_NODE_PROFILES,
         "discovery_ready": discovery_ready,
-        "partial_execution_passed": partial_execution_passed,
+        "partial_execution_passed": partial_execution_passed_reported && !all_executed_passed,
         "all_required_workflows_executed_passed": all_executed_passed,
-        "execution_boundary": "discovery_ready is not live Fiber devnet evidence; all_required_workflows_executed_passed is required for external Fiber-node execution coverage",
+        "execution_boundary": "discovery_ready is not live Fiber devnet evidence; all_required_workflows_executed_passed requires exact suite/profile coverage, clean Nervos Fiber provenance, runnable devnet tooling, and per-workflow passed execution logs",
         "required_report": FIBER_NODE_EXPERIMENTS,
     })
 }
@@ -2377,6 +2494,7 @@ fn validate_profile_certification(input: ProfileCertificationInputs<'_>) -> Resu
         "btc_utxo_seal_profile_package_passed": json_pointer_str(&btc_utxo_seal_profile, "/status") == Some("passed"),
         "dual_seal_profile_package_passed": json_pointer_str(&dual_seal_profile, "/status") == Some("passed"),
         "fiber_candidate_profile_package_passed": json_pointer_str(&fiber_candidate_profile, "/status") == Some("passed"),
+        "external_fiber_node_experiments_passed": json_pointer_bool(&fiber_node_experiments, "/all_required_workflows_executed_passed"),
         "required_docs_present": object_values_all_true(Some(&docs)),
     });
     let local_passed = object_values_all_true(Some(&local_checks));
@@ -4912,6 +5030,92 @@ mod tests {
 
         report["business_scenario_coverage"]["status"] = Value::String("failed".to_string());
         assert!(!stateful_acceptance_passed(&report));
+    }
+
+    fn fiber_workflow_fixture(suite: &str, mapped_profiles: &[&str]) -> Value {
+        json!({
+            "suite": suite,
+            "status": "passed",
+            "present": true,
+            "mapped_profiles": mapped_profiles,
+            "expected_terms": {
+                "term-a": true,
+                "term-b": true,
+            },
+            "rpc_methods": ["open_channel"],
+            "evidence_files": [format!("tests/bruno/e2e/{suite}/step.bru")],
+            "execution": {
+                "status": "passed",
+                "stdout_log": format!("target/novaseal-fiber-node-experiments/{suite}/bruno.stdout"),
+                "stderr_log": format!("target/novaseal-fiber-node-experiments/{suite}/bruno.stderr"),
+            },
+        })
+    }
+
+    fn complete_fiber_node_execution_report() -> Value {
+        json!({
+            "schema": EXPECTED_FIBER_NODE_EXECUTION_SCHEMA,
+            "status": "passed",
+            "fiber_repo": {
+                "path": "/tmp/fiber",
+                "origin": EXPECTED_FIBER_REPO_ORIGIN,
+                "branch": "develop",
+                "commit": "27d458b8529e3b4ed76a3abd5f8babd2a0120f15",
+                "dirty": false,
+            },
+            "devnet_contract": {
+                "runnable_devnet_contract_present": true,
+            },
+            "workflow_coverage": {
+                "required_count": EXPECTED_FIBER_WORKFLOWS.len(),
+                "present_count": EXPECTED_FIBER_WORKFLOWS.len(),
+                "executed_count": EXPECTED_FIBER_WORKFLOWS.len(),
+                "passed_execution_count": EXPECTED_FIBER_WORKFLOWS.len(),
+                "all_required_workflows_present": true,
+                "all_required_workflows_executed_passed": true,
+                "partial_execution_passed": true,
+            },
+            "profiles_covered": EXPECTED_FIBER_NODE_PROFILES,
+            "workflows": EXPECTED_FIBER_WORKFLOWS
+                .iter()
+                .map(|(suite, profiles)| fiber_workflow_fixture(suite, profiles))
+                .collect::<Vec<_>>(),
+        })
+    }
+
+    #[test]
+    fn fiber_node_execution_requires_exact_suite_profile_and_execution_contract() {
+        let passed = fiber_node_execution_summary(Some(&complete_fiber_node_execution_report()));
+        assert!(json_pointer_bool(&passed, "/all_required_workflows_executed_passed"));
+        assert!(json_pointer_bool(&passed, "/checks/workflow_suites_exact"));
+        assert!(json_pointer_bool(&passed, "/checks/profiles_covered_exact"));
+
+        let mut extra_suite = complete_fiber_node_execution_report();
+        extra_suite["workflows"]
+            .as_array_mut()
+            .unwrap()
+            .push(fiber_workflow_fixture("unexpected-suite", &[EXPECTED_FIBER_CANDIDATE_PROFILE]));
+        let failed_extra_suite = fiber_node_execution_summary(Some(&extra_suite));
+        assert!(!json_pointer_bool(&failed_extra_suite, "/all_required_workflows_executed_passed"));
+        assert!(!json_pointer_bool(&failed_extra_suite, "/checks/workflow_suites_exact"));
+
+        let mut wrong_profile = complete_fiber_node_execution_report();
+        wrong_profile["workflows"][0]["mapped_profiles"] = json!([EXPECTED_FUNGIBLE_XUDT_PROFILE]);
+        let failed_profile = fiber_node_execution_summary(Some(&wrong_profile));
+        assert!(!json_pointer_bool(&failed_profile, "/all_required_workflows_executed_passed"));
+        assert!(!json_pointer_bool(&failed_profile, "/workflow_checks/open-use-close-a-channel/mapped_profiles_exact"));
+
+        let mut dirty_repo = complete_fiber_node_execution_report();
+        dirty_repo["fiber_repo"]["dirty"] = Value::Bool(true);
+        let failed_dirty_repo = fiber_node_execution_summary(Some(&dirty_repo));
+        assert!(!json_pointer_bool(&failed_dirty_repo, "/all_required_workflows_executed_passed"));
+        assert!(!json_pointer_bool(&failed_dirty_repo, "/checks/clean_expected_fiber_repo"));
+
+        let mut missing_logs = complete_fiber_node_execution_report();
+        missing_logs["workflows"][0]["execution"]["stdout_log"] = Value::String(String::new());
+        let failed_logs = fiber_node_execution_summary(Some(&missing_logs));
+        assert!(!json_pointer_bool(&failed_logs, "/all_required_workflows_executed_passed"));
+        assert!(!json_pointer_bool(&failed_logs, "/workflow_checks/open-use-close-a-channel/execution_logs_present"));
     }
 
     #[test]
