@@ -2815,10 +2815,13 @@ fn validate_external_evidence_handoff_detail(report: &Value, btc_spv_adapter: &V
         } else {
             expected_external_attestation_adapter_hash.as_str()
         };
+        let expected_source_adapter =
+            if group == "public_btc_spv_evidence" { BTC_SPV_EVIDENCE_ADAPTER } else { EXTERNAL_ATTESTATION_ADAPTER };
         let checks = json!({
             "exactly_one_case": matches.len() == 1,
             "status_passed": json_pointer_str(&case, "/status") == Some("passed"),
             "production_output_matches": json_pointer_str(&case, "/production_output") == Some(production_output),
+            "source_adapter_path_matches_current": json_pointer_str(&case, "/source_adapter") == Some(expected_source_adapter),
             "source_adapter_hash_matches_current": json_pointer_str(&case, "/source_adapter_hash") == Some(expected_source_hash),
             "required_external_fields_present": !required_external_fields.is_empty(),
             "btc_profiles_complete": group != "public_btc_spv_evidence"
@@ -2832,6 +2835,9 @@ fn validate_external_evidence_handoff_detail(report: &Value, btc_spv_adapter: &V
         "report_passed": json_pointer_str(report, "/status") == Some("passed"),
         "schema_current": json_pointer_str(report, "/schema") == Some("novaseal-external-evidence-handoff-bundle-v0.1"),
         "handoff_status_request_ready": json_pointer_str(report, "/handoff_status") == Some("request_bundle_ready_external_evidence_required"),
+        "source_btc_spv_adapter_path_matches_current": json_pointer_str(report, "/source_btc_spv_adapter") == Some(BTC_SPV_EVIDENCE_ADAPTER),
+        "source_external_attestation_adapter_path_matches_current": json_pointer_str(report, "/source_external_attestation_adapter")
+            == Some(EXTERNAL_ATTESTATION_ADAPTER),
         "source_btc_spv_adapter_hash_matches_current": json_pointer_str(report, "/source_btc_spv_adapter_hash")
             == Some(expected_btc_spv_adapter_hash.as_str()),
         "source_external_attestation_adapter_hash_matches_current": json_pointer_str(report, "/source_external_attestation_adapter_hash")
@@ -4304,6 +4310,108 @@ mod tests {
             novaseal_handoff_report_hash("test_label", &value),
             "0x91f5e5cc38c16e792d27a3738a7a7c77053fa15f902e2ccb4b210fd7239a476f"
         );
+    }
+
+    #[test]
+    fn external_evidence_handoff_rejects_stale_source_hashes_and_paths() {
+        let btc_spv_adapter = json!({
+            "status": "passed",
+            "adapter_status": "request_ready_external_evidence_required",
+            "production_output": PUBLIC_BTC_SPV_EVIDENCE,
+            "summary": { "total": 3, "matched": 3 },
+            "cases": EXPECTED_BTC_SPV_EVIDENCE_PROFILES
+                .iter()
+                .map(|profile| json!({ "profile": profile, "status": "passed" }))
+                .collect::<Vec<_>>(),
+        });
+        let external_attestation_adapter = json!({
+            "status": "passed",
+            "adapter_status": "request_ready_external_attestations_required",
+            "summary": { "total": 2, "matched": 2 },
+            "cases": [
+                {
+                    "name": "public_shared_cell_dep_attestation",
+                    "status": "passed",
+                    "request": {
+                        "production_output": PUBLIC_CELLDEP_ATTESTATION,
+                        "required_public_fields": ["network"],
+                    },
+                },
+                {
+                    "name": "external_bip340_tcb_review_attestation",
+                    "status": "passed",
+                    "request": {
+                        "production_output": EXTERNAL_TCB_ATTESTATION,
+                        "required_public_fields": ["reviewer"],
+                    },
+                },
+            ],
+        });
+        let btc_hash = novaseal_handoff_report_hash("btc_spv_adapter", &btc_spv_adapter);
+        let attestation_hash = novaseal_handoff_report_hash("external_attestation_adapter", &external_attestation_adapter);
+        let report = json!({
+            "schema": "novaseal-external-evidence-handoff-bundle-v0.1",
+            "status": "passed",
+            "handoff_status": "request_bundle_ready_external_evidence_required",
+            "source_btc_spv_adapter": BTC_SPV_EVIDENCE_ADAPTER,
+            "source_btc_spv_adapter_hash": btc_hash,
+            "source_external_attestation_adapter": EXTERNAL_ATTESTATION_ADAPTER,
+            "source_external_attestation_adapter_hash": attestation_hash,
+            "production_outputs": [
+                PUBLIC_BTC_SPV_EVIDENCE,
+                PUBLIC_CELLDEP_ATTESTATION,
+                EXTERNAL_TCB_ATTESTATION,
+            ],
+            "summary": {
+                "total": 3,
+                "matched": 3,
+            },
+            "cases": [
+                {
+                    "group": "public_btc_spv_evidence",
+                    "status": "passed",
+                    "source_adapter": BTC_SPV_EVIDENCE_ADAPTER,
+                    "source_adapter_hash": btc_hash,
+                    "production_output": PUBLIC_BTC_SPV_EVIDENCE,
+                    "required_profiles": EXPECTED_BTC_SPV_EVIDENCE_PROFILES,
+                    "required_external_fields": ["network"],
+                    "checks": { "ok": true },
+                },
+                {
+                    "group": "public_shared_cell_dep_attestation",
+                    "status": "passed",
+                    "source_adapter": EXTERNAL_ATTESTATION_ADAPTER,
+                    "source_adapter_hash": attestation_hash,
+                    "production_output": PUBLIC_CELLDEP_ATTESTATION,
+                    "required_external_fields": ["network"],
+                    "checks": { "ok": true },
+                },
+                {
+                    "group": "external_bip340_tcb_review_attestation",
+                    "status": "passed",
+                    "source_adapter": EXTERNAL_ATTESTATION_ADAPTER,
+                    "source_adapter_hash": attestation_hash,
+                    "production_output": EXTERNAL_TCB_ATTESTATION,
+                    "required_external_fields": ["reviewer"],
+                    "checks": { "ok": true },
+                },
+            ],
+        });
+
+        let valid = validate_external_evidence_handoff_detail(&report, &btc_spv_adapter, &external_attestation_adapter);
+        assert_eq!(json_pointer_str(&valid, "/status"), Some("passed"));
+
+        let mut stale_hash = report.clone();
+        stale_hash["source_btc_spv_adapter_hash"] = json!(format!("0x{}", "11".repeat(32)));
+        let stale = validate_external_evidence_handoff_detail(&stale_hash, &btc_spv_adapter, &external_attestation_adapter);
+        assert_eq!(json_pointer_str(&stale, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&stale, "/checks/source_btc_spv_adapter_hash_matches_current"));
+
+        let mut wrong_path = report;
+        wrong_path["cases"][1]["source_adapter"] = json!("target/other-report.json");
+        let failed_path = validate_external_evidence_handoff_detail(&wrong_path, &btc_spv_adapter, &external_attestation_adapter);
+        assert_eq!(json_pointer_str(&failed_path, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&failed_path, "/cases/public_shared_cell_dep_attestation/source_adapter_path_matches_current"));
     }
 
     #[test]
