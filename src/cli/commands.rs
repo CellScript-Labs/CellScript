@@ -2831,9 +2831,14 @@ fn novaseal_certification_summary(
         checks.push(("v1_readiness_local_ready", json_pointer_bool(v1_readiness, "/local_v1_ready")));
     }
 
+    let production_statement_eligible = plugin_report
+        .pointer("/production_statement_eligible")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or_else(|| json_pointer_bool(profile_certification, "/production_statement_eligible"));
+
     if require_production {
         checks.push(("production_ready", json_pointer_bool(plugin_report, "/production_ready")));
-        checks.push(("production_statement_eligible", json_pointer_bool(profile_certification, "/production_statement_eligible")));
+        checks.push(("production_statement_eligible", production_statement_eligible));
     }
 
     let checks_json =
@@ -2844,8 +2849,17 @@ fn novaseal_certification_summary(
         .map(|(name, _)| serde_json::Value::String((*name).to_string()))
         .collect::<Vec<_>>();
     let passed = failed_checks.is_empty();
-    let external_blockers =
-        profile_certification.get("production_statement_blockers").cloned().unwrap_or_else(|| serde_json::Value::Array(Vec::new()));
+    let external_blockers = plugin_report
+        .get("external_blockers")
+        .cloned()
+        .or_else(|| v1_readiness.get("external_blockers").cloned())
+        .or_else(|| profile_certification.get("production_statement_blockers").cloned())
+        .unwrap_or_else(|| serde_json::Value::Array(Vec::new()));
+    let failed_dimensions = plugin_report
+        .get("failed_dimensions")
+        .cloned()
+        .or_else(|| v1_readiness.get("failed_dimensions").cloned())
+        .unwrap_or_else(|| serde_json::Value::Array(Vec::new()));
     let certification_level = json_pointer_str(profile_certification, "/certification_level").unwrap_or("unknown");
     let failure_reason = if passed {
         serde_json::Value::Null
@@ -2859,7 +2873,8 @@ fn novaseal_certification_summary(
     } else if require_production && json_pointer_bool(plugin_report, "/local_production_prep_ready") {
         serde_json::json!({
             "message": "NovaSeal production certification requires remaining external attestations",
-            "external_blockers": external_blockers,
+            "external_blockers": external_blockers.clone(),
+            "failed_dimensions": failed_dimensions.clone(),
             "failed_checks": failed_checks,
         })
     } else {
@@ -2895,7 +2910,9 @@ fn novaseal_certification_summary(
         "profile": NOVASEAL_AGREEMENT_PROFILE,
         "conforms_to": NOVASEAL_CANONICAL_SCHEMA,
         "certification_level": certification_level,
-        "production_statement_eligible": json_pointer_bool(profile_certification, "/production_statement_eligible"),
+        "production_statement_eligible": production_statement_eligible,
+        "failed_dimensions": failed_dimensions,
+        "external_blockers": external_blockers,
         "require_production": require_production,
         "repo_root": repo_root.display().to_string(),
         "checks": checks_json,
@@ -6149,6 +6166,15 @@ mod tests {
             "status": if production_ready { "production_ready" } else { "local_production_prep_ready_external_attestation_required" },
             "production_ready": production_ready,
             "local_production_prep_ready": true,
+            "production_statement_eligible": production_statement_eligible,
+            "failed_dimensions": [
+                "public_shared_cell_dep_attestation",
+                "external_bip340_tcb_review_attestation",
+            ],
+            "external_blockers": [
+                "top_level_public_shared_cell_dep_attested",
+                "top_level_external_bip340_tcb_review_attested",
+            ],
             "profile_certification": {
                 "schema": NOVASEAL_PROFILE_CERTIFICATION_SCHEMA,
                 "profile": NOVASEAL_AGREEMENT_PROFILE,
@@ -6185,6 +6211,8 @@ mod tests {
         assert_eq!(summary["plugin"]["kind"], "compiler-builtin-rust");
         assert_eq!(summary["plugin_report"]["schema"], NOVASEAL_PLUGIN_REPORT_SCHEMA);
         assert_eq!(summary["checks"]["local_production_prep_ready"], true);
+        assert_eq!(summary["failed_dimensions"][0], "public_shared_cell_dep_attestation");
+        assert_eq!(summary["external_blockers"][0], "top_level_public_shared_cell_dep_attested");
     }
 
     #[test]
@@ -6230,6 +6258,8 @@ mod tests {
         assert_eq!(summary["status"], "failed");
         assert!(failed_checks.iter().any(|check| check == "production_ready"));
         assert!(failed_checks.iter().any(|check| check == "production_statement_eligible"));
+        assert_eq!(summary["failure_reason"]["failed_dimensions"][0], "public_shared_cell_dep_attestation");
+        assert_eq!(summary["failure_reason"]["external_blockers"][0], "top_level_public_shared_cell_dep_attested");
     }
 
     #[test]

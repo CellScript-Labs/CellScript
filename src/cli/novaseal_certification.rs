@@ -757,12 +757,17 @@ pub(crate) fn build_report(repo_root: &Path) -> Result<Value> {
         "failed"
     };
     let v1_readiness = build_v1_readiness(&profile_certification, &stateful_acceptance, &gates, local_ready, production_ready);
+    let failed_dimensions = v1_readiness.get("failed_dimensions").cloned().unwrap_or_else(|| Value::Array(Vec::new()));
+    let external_blockers = v1_readiness.get("external_blockers").cloned().unwrap_or_else(|| Value::Array(Vec::new()));
 
     Ok(json!({
         "schema": "novaseal-production-gates-v0.2",
         "status": status,
         "production_ready": production_ready,
         "local_production_prep_ready": local_ready,
+        "production_statement_eligible": json_pointer_bool(&v1_readiness, "/production_statement_eligible"),
+        "failed_dimensions": failed_dimensions,
+        "external_blockers": external_blockers,
         "runtime_artifact_hash": json_pointer_str(&tcb, "/runtime_artifact/artifact_hash").and_then(|value| normalize_hex(Some(value))),
         "conforms_to": {
             "agreement_profile": json_pointer_str(&agreement_conformance, "/conforms_to"),
