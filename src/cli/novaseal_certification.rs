@@ -2,7 +2,7 @@ use crate::error::{CompileError, Result};
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
+use std::path::{Component, Path};
 
 pub(crate) const IMPLEMENTATION_ID: &str = "cellscript::cli::novaseal_certification";
 
@@ -1384,7 +1384,7 @@ fn build_stateful_acceptance_report(repo_root: &Path, agreement_conformance: &Va
             ("balance_commitment_replay_rejected", "balance_commitment_replay_dry_run"),
         ],
     )?;
-    let fiber_node_experiments = fiber_node_execution_summary(fiber_node_experiments_report.as_ref());
+    let fiber_node_experiments = fiber_node_execution_summary(repo_root, fiber_node_experiments_report.as_ref());
 
     let core_live_passed = json_pointer_str(&live_core, "/status") == Some("passed")
         && json_pointer_bool(&live_core, "/live_devnet_rpc_executed")
@@ -1909,7 +1909,7 @@ fn live_planned_profile_summary(
     }))
 }
 
-fn fiber_node_execution_summary(report: Option<&Value>) -> Value {
+fn fiber_node_execution_summary(repo_root: &Path, report: Option<&Value>) -> Value {
     let Some(report) = report else {
         return json!({
             "present": false,
@@ -1940,6 +1940,8 @@ fn fiber_node_execution_summary(report: Option<&Value>) -> Value {
         .filter_map(|workflow| json_pointer_str(workflow, "/suite").map(|suite| (suite.to_string(), workflow)))
         .collect::<BTreeMap<_, _>>();
     let duplicate_free_workflow_suites = workflows_by_suite.len() == workflow_suites.len();
+    let fiber_repo_path = json_pointer_str(report, "/fiber_repo/path").map(Path::new);
+    let fiber_repo_exists = fiber_repo_path.is_some_and(Path::is_dir);
 
     let mut workflow_checks = Map::new();
     let mut failed_workflows = Vec::new();
@@ -1954,11 +1956,15 @@ fn fiber_node_execution_summary(report: Option<&Value>) -> Value {
             .get("evidence_files")
             .and_then(Value::as_array)
             .is_some_and(|files| !files.is_empty() && files.iter().all(|file| file.as_str().is_some_and(|file| !file.is_empty())));
+        let evidence_files_exist =
+            fiber_repo_path.is_some_and(|fiber_repo| relative_file_array_all_exist(fiber_repo, workflow.get("evidence_files"), true));
         let rpc_methods_present = workflow.get("rpc_methods").and_then(Value::as_array).is_some_and(|methods| {
             !methods.is_empty() && methods.iter().all(|method| method.as_str().is_some_and(|method| !method.is_empty()))
         });
         let execution_logs_present = value_is_present(workflow.pointer("/execution/stdout_log").unwrap_or(&Value::Null))
             && value_is_present(workflow.pointer("/execution/stderr_log").unwrap_or(&Value::Null));
+        let execution_logs_exist = relative_file_exists(repo_root, json_pointer_str(workflow, "/execution/stdout_log"), true)
+            && relative_file_exists(repo_root, json_pointer_str(workflow, "/execution/stderr_log"), false);
         let checks = json!({
             "present": json_pointer_bool(workflow, "/present"),
             "status_passed": json_pointer_str(workflow, "/status") == Some("passed"),
@@ -1966,8 +1972,10 @@ fn fiber_node_execution_summary(report: Option<&Value>) -> Value {
             "mapped_profiles_exact": exact_string_set(&mapped_profiles, expected_profiles),
             "expected_terms_present": object_values_all_true(workflow.get("expected_terms")),
             "evidence_files_present": evidence_files_present,
+            "evidence_files_exist": evidence_files_exist,
             "rpc_methods_present": rpc_methods_present,
             "execution_logs_present": execution_logs_present,
+            "execution_logs_exist": execution_logs_exist,
         });
         if !object_values_all_true(Some(&checks)) {
             failed_workflows.push(Value::String((*suite).to_string()));
@@ -1982,7 +1990,8 @@ fn fiber_node_execution_summary(report: Option<&Value>) -> Value {
     let profiles_covered = json_array_strings(report, "/profiles_covered");
     let schema_ok = json_pointer_str(report, "/schema") == Some(EXPECTED_FIBER_NODE_EXECUTION_SCHEMA);
     let status_passed = json_pointer_str(report, "/status") == Some("passed");
-    let clean_expected_repo = json_pointer_str(report, "/fiber_repo/origin") == Some(EXPECTED_FIBER_REPO_ORIGIN)
+    let clean_expected_repo = fiber_repo_exists
+        && json_pointer_str(report, "/fiber_repo/origin") == Some(EXPECTED_FIBER_REPO_ORIGIN)
         && json_pointer_str(report, "/fiber_repo/branch").is_some_and(|branch| !branch.is_empty())
         && json_pointer_str(report, "/fiber_repo/commit")
             .is_some_and(|commit| commit.len() == 40 && commit.chars().all(|char| char.is_ascii_hexdigit()))
@@ -2007,6 +2016,7 @@ fn fiber_node_execution_summary(report: Option<&Value>) -> Value {
         "schema_ok": schema_ok,
         "status_passed": status_passed,
         "clean_expected_fiber_repo": clean_expected_repo,
+        "fiber_repo_exists": fiber_repo_exists,
         "runnable_devnet_contract_present": runnable_devnet_contract_present,
         "coverage_counts_exact": count_contract_exact,
         "profiles_covered_exact": profiles_exact,
@@ -4497,6 +4507,30 @@ fn exact_string_set(actual: &[String], expected: &[&str]) -> bool {
     actual.len() == expected.len() && expected.iter().all(|field| actual.iter().any(|actual| actual == field))
 }
 
+fn safe_relative_path(path: &str) -> bool {
+    let path = Path::new(path);
+    !path.is_absolute() && path.components().all(|component| matches!(component, Component::Normal(_)))
+}
+
+fn relative_file_exists(root: &Path, rel_path: Option<&str>, require_nonempty: bool) -> bool {
+    let Some(rel_path) = rel_path else {
+        return false;
+    };
+    if !safe_relative_path(rel_path) {
+        return false;
+    }
+    let Ok(metadata) = root.join(rel_path).metadata() else {
+        return false;
+    };
+    metadata.is_file() && (!require_nonempty || metadata.len() > 0)
+}
+
+fn relative_file_array_all_exist(root: &Path, value: Option<&Value>, require_nonempty: bool) -> bool {
+    value
+        .and_then(Value::as_array)
+        .is_some_and(|paths| !paths.is_empty() && paths.iter().all(|path| relative_file_exists(root, path.as_str(), require_nonempty)))
+}
+
 fn parse_out_point(value: Option<&str>) -> Value {
     let Some(raw) = value else {
         return json!({"valid": false, "raw": Value::Null});
@@ -5032,7 +5066,20 @@ mod tests {
         assert!(!stateful_acceptance_passed(&report));
     }
 
-    fn fiber_workflow_fixture(suite: &str, mapped_profiles: &[&str]) -> Value {
+    fn write_fiber_workflow_fixture_files(repo_root: &Path, fiber_repo: &Path, suite: &str) {
+        let evidence_file = fiber_repo.join(format!("tests/bruno/e2e/{suite}/step.bru"));
+        let stdout_log = repo_root.join(format!("target/novaseal-fiber-node-experiments/{suite}/bruno.stdout"));
+        let stderr_log = repo_root.join(format!("target/novaseal-fiber-node-experiments/{suite}/bruno.stderr"));
+        std::fs::create_dir_all(evidence_file.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(stdout_log.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(stderr_log.parent().unwrap()).unwrap();
+        std::fs::write(evidence_file, "meta { name: step }\n").unwrap();
+        std::fs::write(stdout_log, "Bruno suite passed\n").unwrap();
+        std::fs::write(stderr_log, "").unwrap();
+    }
+
+    fn fiber_workflow_fixture(repo_root: &Path, fiber_repo: &Path, suite: &str, mapped_profiles: &[&str]) -> Value {
+        write_fiber_workflow_fixture_files(repo_root, fiber_repo, suite);
         json!({
             "suite": suite,
             "status": "passed",
@@ -5052,12 +5099,12 @@ mod tests {
         })
     }
 
-    fn complete_fiber_node_execution_report() -> Value {
+    fn complete_fiber_node_execution_report(repo_root: &Path, fiber_repo: &Path) -> Value {
         json!({
             "schema": EXPECTED_FIBER_NODE_EXECUTION_SCHEMA,
             "status": "passed",
             "fiber_repo": {
-                "path": "/tmp/fiber",
+                "path": fiber_repo.display().to_string(),
                 "origin": EXPECTED_FIBER_REPO_ORIGIN,
                 "branch": "develop",
                 "commit": "27d458b8529e3b4ed76a3abd5f8babd2a0120f15",
@@ -5078,44 +5125,61 @@ mod tests {
             "profiles_covered": EXPECTED_FIBER_NODE_PROFILES,
             "workflows": EXPECTED_FIBER_WORKFLOWS
                 .iter()
-                .map(|(suite, profiles)| fiber_workflow_fixture(suite, profiles))
+                .map(|(suite, profiles)| fiber_workflow_fixture(repo_root, fiber_repo, suite, profiles))
                 .collect::<Vec<_>>(),
         })
     }
 
     #[test]
     fn fiber_node_execution_requires_exact_suite_profile_and_execution_contract() {
-        let passed = fiber_node_execution_summary(Some(&complete_fiber_node_execution_report()));
+        let temp = tempfile::tempdir().unwrap();
+        let repo_root = temp.path().join("cellscript");
+        let fiber_repo = temp.path().join("fiber");
+        std::fs::create_dir_all(&repo_root).unwrap();
+        std::fs::create_dir_all(&fiber_repo).unwrap();
+
+        let passed = fiber_node_execution_summary(&repo_root, Some(&complete_fiber_node_execution_report(&repo_root, &fiber_repo)));
         assert!(json_pointer_bool(&passed, "/all_required_workflows_executed_passed"));
         assert!(json_pointer_bool(&passed, "/checks/workflow_suites_exact"));
         assert!(json_pointer_bool(&passed, "/checks/profiles_covered_exact"));
+        assert!(json_pointer_bool(&passed, "/checks/fiber_repo_exists"));
+        assert!(json_pointer_bool(&passed, "/workflow_checks/open-use-close-a-channel/evidence_files_exist"));
+        assert!(json_pointer_bool(&passed, "/workflow_checks/open-use-close-a-channel/execution_logs_exist"));
 
-        let mut extra_suite = complete_fiber_node_execution_report();
-        extra_suite["workflows"]
-            .as_array_mut()
-            .unwrap()
-            .push(fiber_workflow_fixture("unexpected-suite", &[EXPECTED_FIBER_CANDIDATE_PROFILE]));
-        let failed_extra_suite = fiber_node_execution_summary(Some(&extra_suite));
+        let mut extra_suite = complete_fiber_node_execution_report(&repo_root, &fiber_repo);
+        extra_suite["workflows"].as_array_mut().unwrap().push(fiber_workflow_fixture(
+            &repo_root,
+            &fiber_repo,
+            "unexpected-suite",
+            &[EXPECTED_FIBER_CANDIDATE_PROFILE],
+        ));
+        let failed_extra_suite = fiber_node_execution_summary(&repo_root, Some(&extra_suite));
         assert!(!json_pointer_bool(&failed_extra_suite, "/all_required_workflows_executed_passed"));
         assert!(!json_pointer_bool(&failed_extra_suite, "/checks/workflow_suites_exact"));
 
-        let mut wrong_profile = complete_fiber_node_execution_report();
+        let mut wrong_profile = complete_fiber_node_execution_report(&repo_root, &fiber_repo);
         wrong_profile["workflows"][0]["mapped_profiles"] = json!([EXPECTED_FUNGIBLE_XUDT_PROFILE]);
-        let failed_profile = fiber_node_execution_summary(Some(&wrong_profile));
+        let failed_profile = fiber_node_execution_summary(&repo_root, Some(&wrong_profile));
         assert!(!json_pointer_bool(&failed_profile, "/all_required_workflows_executed_passed"));
         assert!(!json_pointer_bool(&failed_profile, "/workflow_checks/open-use-close-a-channel/mapped_profiles_exact"));
 
-        let mut dirty_repo = complete_fiber_node_execution_report();
+        let mut dirty_repo = complete_fiber_node_execution_report(&repo_root, &fiber_repo);
         dirty_repo["fiber_repo"]["dirty"] = Value::Bool(true);
-        let failed_dirty_repo = fiber_node_execution_summary(Some(&dirty_repo));
+        let failed_dirty_repo = fiber_node_execution_summary(&repo_root, Some(&dirty_repo));
         assert!(!json_pointer_bool(&failed_dirty_repo, "/all_required_workflows_executed_passed"));
         assert!(!json_pointer_bool(&failed_dirty_repo, "/checks/clean_expected_fiber_repo"));
 
-        let mut missing_logs = complete_fiber_node_execution_report();
+        let mut missing_logs = complete_fiber_node_execution_report(&repo_root, &fiber_repo);
         missing_logs["workflows"][0]["execution"]["stdout_log"] = Value::String(String::new());
-        let failed_logs = fiber_node_execution_summary(Some(&missing_logs));
+        let failed_logs = fiber_node_execution_summary(&repo_root, Some(&missing_logs));
         assert!(!json_pointer_bool(&failed_logs, "/all_required_workflows_executed_passed"));
         assert!(!json_pointer_bool(&failed_logs, "/workflow_checks/open-use-close-a-channel/execution_logs_present"));
+
+        let mut missing_evidence_file = complete_fiber_node_execution_report(&repo_root, &fiber_repo);
+        missing_evidence_file["workflows"][0]["evidence_files"] = json!(["tests/bruno/e2e/open-use-close-a-channel/missing.bru"]);
+        let failed_evidence = fiber_node_execution_summary(&repo_root, Some(&missing_evidence_file));
+        assert!(!json_pointer_bool(&failed_evidence, "/all_required_workflows_executed_passed"));
+        assert!(!json_pointer_bool(&failed_evidence, "/workflow_checks/open-use-close-a-channel/evidence_files_exist"));
     }
 
     #[test]
