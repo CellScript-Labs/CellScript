@@ -57,6 +57,18 @@ OP_RWA_SETTLE = 2
 STATUS_MATERIALIZED = 1
 STATUS_CLAIMED = 2
 STATUS_RWA_SETTLED = 3
+BTC_TX_COMMITMENT_VERSION = 0
+OP_BTC_COMMIT_TRANSACTION = 0
+OP_BTC_INITIALIZE_ACTIVE_STATE = 255
+BTC_STATUS_COMMITTED = 2
+BTC_UTXO_SEAL_VERSION = 0
+OP_BTC_UTXO_CLOSE = 0
+OP_BTC_UTXO_INITIALIZE_ACTIVE_SEAL = 255
+BTC_STATUS_CLOSED = 2
+FIBER_CANDIDATE_VERSION = 0
+OP_FIBER_SETTLE = 0
+OP_FIBER_INITIALIZE_ACTIVE_CANDIDATE = 255
+FIBER_STATUS_SETTLED = 2
 HOLDER_SECRET_KEY = bytes.fromhex("22" * 32)
 HOLDER_AUX_RAND = bytes([0x42]) * 32
 RECEIVER_SECRET_KEY = bytes.fromhex("33" * 32)
@@ -138,8 +150,8 @@ REPORT_CONTRACTS = {
         profile="btc-transaction-commitment",
         output="target/novaseal-btc-transaction-commitment-devnet-stateful-live.json",
         source="proposals/novaseal/btc-transaction-commitment-profile-v0/src/nova_btc_transaction_commitment_type.cell",
-        source_actions=("commit_btc_transaction_transition",),
-        lifecycle_action="commit_btc_transaction_transition",
+        source_actions=("commit_btc_transaction_transition", "nova_btc_transaction_commitment_lifecycle"),
+        lifecycle_action="nova_btc_transaction_commitment_lifecycle",
         tx_hashes=(("commit_transaction", "/commit_transaction/commit/tx_hash"),),
         live_checks=(
             ("old_state_not_live", "/commit_transaction/old_state_not_live"),
@@ -160,8 +172,8 @@ REPORT_CONTRACTS = {
         profile="btc-utxo-seal",
         output="target/novaseal-btc-utxo-seal-devnet-stateful-live.json",
         source="proposals/novaseal/btc-utxo-seal-profile-v0/src/nova_btc_utxo_seal_type.cell",
-        source_actions=("close_btc_utxo_seal",),
-        lifecycle_action="close_btc_utxo_seal",
+        source_actions=("close_btc_utxo_seal", "nova_btc_utxo_seal_lifecycle"),
+        lifecycle_action="nova_btc_utxo_seal_lifecycle",
         tx_hashes=(("close_utxo_seal", "/close_utxo_seal/commit/tx_hash"),),
         live_checks=(
             ("old_state_not_live", "/close_utxo_seal/old_state_not_live"),
@@ -182,8 +194,8 @@ REPORT_CONTRACTS = {
         profile="fiber-candidate",
         output="target/novaseal-fiber-candidate-devnet-stateful-live.json",
         source="proposals/novaseal/fiber-candidate-profile-v0/src/nova_fiber_candidate_type.cell",
-        source_actions=("settle_fiber_candidate",),
-        lifecycle_action="settle_fiber_candidate",
+        source_actions=("settle_fiber_candidate", "nova_fiber_candidate_lifecycle"),
+        lifecycle_action="nova_fiber_candidate_lifecycle",
         tx_hashes=(("settle_fiber_candidate", "/settle_fiber_candidate/commit/tx_hash"),),
         live_checks=(
             ("old_candidate_not_live", "/settle_fiber_candidate/old_candidate_not_live"),
@@ -1217,6 +1229,1317 @@ def build_rwa_settle_tx(
     )
 
 
+def pack_btc_tx_public_commitment(commitment: dict[str, Any]) -> bytes:
+    return (
+        commitment["btc_txid"]
+        + commitment["btc_wtxid"]
+        + u32(commitment["btc_output_index"])
+        + u64(commitment["btc_amount_sats"])
+        + commitment["transition_commitment_hash"]
+    )
+
+
+def pack_btc_tx_intent_core(core: dict[str, Any]) -> bytes:
+    return (
+        u8(core["action"])
+        + core["seal_id"]
+        + core["policy_hash"]
+        + core["committer_authority_hash"]
+        + core["btc_txid"]
+        + core["btc_wtxid"]
+        + u32(core["btc_output_index"])
+        + u64(core["btc_amount_sats"])
+        + core["old_state_hash"]
+        + core["new_state_hash"]
+        + core["transition_commitment_hash"]
+        + u8(core["old_status"])
+        + u8(core["new_status"])
+        + u64(core["old_nonce"])
+        + u64(core["new_nonce"])
+        + u64(core["expiry"])
+        + core["payout_commitment_hash"]
+    )
+
+
+def pack_btc_tx_signed_intent(core_data: bytes, canonical_hash: bytes, expected_receipt_hash: bytes) -> bytes:
+    return core_data + canonical_hash + expected_receipt_hash
+
+
+def pack_btc_tx_state_commitment(cell: dict[str, Any]) -> bytes:
+    return (
+        u16(cell["version"])
+        + cell["seal_id"]
+        + cell["policy_hash"]
+        + cell["committer_authority_hash"]
+        + cell["btc_tx_commitment_hash"]
+        + cell["state_hash"]
+        + u8(cell["status"])
+        + u64(cell["nonce"])
+        + u64(cell["expiry"])
+    )
+
+
+def pack_btc_tx_receipt_commitment(commitment: dict[str, Any]) -> bytes:
+    return (
+        u8(commitment["action"])
+        + commitment["seal_id"]
+        + commitment["policy_hash"]
+        + commitment["committer_authority_hash"]
+        + commitment["btc_tx_commitment_hash"]
+        + commitment["old_state_hash"]
+        + commitment["new_state_hash"]
+        + u8(commitment["old_status"])
+        + u8(commitment["new_status"])
+        + u64(commitment["old_nonce"])
+        + u64(commitment["new_nonce"])
+        + commitment["intent_core_hash"]
+        + commitment["payout_commitment_hash"]
+    )
+
+
+def pack_btc_tx_cell(cell: dict[str, Any]) -> bytes:
+    return (
+        u16(cell["version"])
+        + cell["seal_id"]
+        + cell["policy_hash"]
+        + cell["committer_authority_hash"]
+        + cell["btc_tx_commitment_hash"]
+        + cell["state_hash"]
+        + u8(cell["status"])
+        + cell["latest_receipt_hash"]
+        + u64(cell["nonce"])
+        + u64(cell["expiry"])
+    )
+
+
+def pack_btc_tx_receipt(receipt: dict[str, Any]) -> bytes:
+    return (
+        u8(receipt["action"])
+        + receipt["seal_id"]
+        + receipt["policy_hash"]
+        + receipt["committer_authority_hash"]
+        + receipt["btc_tx_commitment_hash"]
+        + receipt["old_state_hash"]
+        + receipt["new_state_hash"]
+        + u8(receipt["old_status"])
+        + u8(receipt["new_status"])
+        + u64(receipt["old_nonce"])
+        + u64(receipt["new_nonce"])
+        + receipt["intent_core_hash"]
+        + receipt["signed_intent_hash"]
+        + receipt["payout_commitment_hash"]
+        + receipt["latest_receipt_hash"]
+        + receipt["signer_authority_hash"]
+        + u64(receipt["expiry"])
+    )
+
+
+def zero_btc_tx_cell() -> dict[str, Any]:
+    return {
+        "version": 0,
+        "seal_id": ZERO_HASH,
+        "policy_hash": ZERO_HASH,
+        "committer_authority_hash": ZERO_HASH,
+        "btc_tx_commitment_hash": ZERO_HASH,
+        "state_hash": ZERO_HASH,
+        "status": 0,
+        "latest_receipt_hash": ZERO_HASH,
+        "nonce": 0,
+        "expiry": 0,
+    }
+
+
+def btc_tx_entry_witness(op: int, old_cell_data: bytes, signed_intent: bytes, sig_payload: bytes) -> str:
+    payload = (
+        b"CSARGv1\0"
+        + u8(op)
+        + u32(len(old_cell_data))
+        + old_cell_data
+        + u32(len(signed_intent))
+        + signed_intent
+        + u32(len(sig_payload))
+        + sig_payload
+    )
+    return hex0x(payload)
+
+
+def btc_tx_base_state(label: str) -> dict[str, Any]:
+    return {
+        "seal_id": ckb_hash(f"NovaSeal BTC transaction seal {label}".encode("ascii")),
+        "policy_hash": ckb_hash(f"NovaSeal BTC transaction policy {label}".encode("ascii")),
+        "committer_authority_hash": xonly_pubkey(TEST_SECRET_KEY),
+        "initial_state_hash": ckb_hash(f"NovaSeal BTC transaction active state {label}".encode("ascii")),
+        "committed_state_hash": ckb_hash(f"NovaSeal BTC transaction committed state {label}".encode("ascii")),
+        "btc_txid": ckb_hash(f"NovaSeal BTC txid {label}".encode("ascii")),
+        "btc_wtxid": ckb_hash(f"NovaSeal BTC wtxid {label}".encode("ascii")),
+        "btc_output_index": 2,
+        "btc_amount_sats": 125_000,
+        "expiry": (1 << 63) - 1,
+    }
+
+
+def btc_tx_canonical_hash(
+    *,
+    op: int,
+    base: dict[str, Any],
+    old_state_commitment: bytes,
+    new_state_commitment: bytes,
+    old_nonce: int,
+    new_nonce: int,
+    expiry: int,
+    authority_hash: bytes,
+    profile_body_hash: bytes,
+    payout_commitment_hash: bytes,
+) -> bytes:
+    return canonical_envelope_hash(
+        action=op,
+        asset_id=base["seal_id"],
+        xudt_type_hash=base["policy_hash"],
+        old_state_commitment=old_state_commitment,
+        new_state_commitment=new_state_commitment,
+        old_nonce=old_nonce,
+        new_nonce=new_nonce,
+        expiry=expiry,
+        authority_hash=authority_hash,
+        profile_body_hash=profile_body_hash,
+        payout_commitment_hash=payout_commitment_hash,
+    )
+
+
+def build_btc_tx_material(
+    *,
+    op: int,
+    base: dict[str, Any],
+    old_cell: dict[str, Any] | None,
+    mutate_signature: bool = False,
+    zero_btc_txid: bool = False,
+    transition_hash_mismatch: bool = False,
+) -> dict[str, Any]:
+    payout_commitment_hash = ZERO_HASH
+    if op == OP_BTC_INITIALIZE_ACTIVE_STATE:
+        old_status = 0
+        new_status = STATUS_ACTIVE
+        old_nonce = 0
+        new_nonce = 0
+        old_state_hash = ZERO_HASH
+        new_state_hash = base["initial_state_hash"]
+        btc_txid = ZERO_HASH
+        btc_wtxid = ZERO_HASH
+        btc_output_index = 0
+        btc_amount_sats = 0
+        transition_commitment_hash = ZERO_HASH
+        btc_tx_commitment_hash = ZERO_HASH
+        old_state_commitment = ZERO_HASH
+        expected_receipt_hash = ZERO_HASH
+        new_cell = {
+            "version": BTC_TX_COMMITMENT_VERSION,
+            "seal_id": base["seal_id"],
+            "policy_hash": base["policy_hash"],
+            "committer_authority_hash": base["committer_authority_hash"],
+            "btc_tx_commitment_hash": ZERO_HASH,
+            "state_hash": new_state_hash,
+            "status": STATUS_ACTIVE,
+            "latest_receipt_hash": ZERO_HASH,
+            "nonce": 0,
+            "expiry": base["expiry"],
+        }
+        new_state_commitment = packed_hash("NovaBtcTransactionCommitmentStateV0", pack_btc_tx_state_commitment(new_cell))
+        receipt_data = b""
+    elif op == OP_BTC_COMMIT_TRANSACTION:
+        if old_cell is None:
+            raise LiveAcceptanceError("BTC transaction commit material requires an old cell")
+        old_status = STATUS_ACTIVE
+        new_status = BTC_STATUS_COMMITTED
+        old_nonce = old_cell["nonce"]
+        new_nonce = old_nonce + 1
+        old_state_hash = old_cell["state_hash"]
+        new_state_hash = base["committed_state_hash"]
+        btc_txid = ZERO_HASH if zero_btc_txid else base["btc_txid"]
+        btc_wtxid = base["btc_wtxid"]
+        btc_output_index = base["btc_output_index"]
+        btc_amount_sats = base["btc_amount_sats"]
+        transition_commitment_hash = (
+            ckb_hash(b"NovaSeal BTC transaction mismatched transition") if transition_hash_mismatch else ckb_hash(new_state_hash)
+        )
+        btc_tx_commitment_hash = packed_hash(
+            "BtcTransactionPublicCommitmentV0",
+            pack_btc_tx_public_commitment(
+                {
+                    "btc_txid": btc_txid,
+                    "btc_wtxid": btc_wtxid,
+                    "btc_output_index": btc_output_index,
+                    "btc_amount_sats": btc_amount_sats,
+                    "transition_commitment_hash": transition_commitment_hash,
+                }
+            ),
+        )
+        old_state_commitment = packed_hash("NovaBtcTransactionCommitmentStateV0", pack_btc_tx_state_commitment(old_cell))
+        new_cell = {
+            "version": BTC_TX_COMMITMENT_VERSION,
+            "seal_id": old_cell["seal_id"],
+            "policy_hash": old_cell["policy_hash"],
+            "committer_authority_hash": old_cell["committer_authority_hash"],
+            "btc_tx_commitment_hash": btc_tx_commitment_hash,
+            "state_hash": new_state_hash,
+            "status": BTC_STATUS_COMMITTED,
+            "latest_receipt_hash": ZERO_HASH,
+            "nonce": new_nonce,
+            "expiry": old_cell["expiry"],
+        }
+        new_state_commitment = packed_hash("NovaBtcTransactionCommitmentStateV0", pack_btc_tx_state_commitment(new_cell))
+        receipt_commitment = {
+            "action": OP_BTC_COMMIT_TRANSACTION,
+            "seal_id": old_cell["seal_id"],
+            "policy_hash": old_cell["policy_hash"],
+            "committer_authority_hash": old_cell["committer_authority_hash"],
+            "btc_tx_commitment_hash": btc_tx_commitment_hash,
+            "old_state_hash": old_cell["state_hash"],
+            "new_state_hash": new_state_hash,
+            "old_status": STATUS_ACTIVE,
+            "new_status": BTC_STATUS_COMMITTED,
+            "old_nonce": old_nonce,
+            "new_nonce": new_nonce,
+            "intent_core_hash": ZERO_HASH,
+            "payout_commitment_hash": payout_commitment_hash,
+        }
+        # Filled after the intent core hash is known.
+        expected_receipt_hash = ZERO_HASH
+        receipt_data = b""
+    else:
+        raise LiveAcceptanceError(f"unknown BTC transaction op {op}")
+
+    core = {
+        "action": op,
+        "seal_id": base["seal_id"],
+        "policy_hash": base["policy_hash"],
+        "committer_authority_hash": base["committer_authority_hash"],
+        "btc_txid": btc_txid,
+        "btc_wtxid": btc_wtxid,
+        "btc_output_index": btc_output_index,
+        "btc_amount_sats": btc_amount_sats,
+        "old_state_hash": old_state_hash,
+        "new_state_hash": new_state_hash,
+        "transition_commitment_hash": transition_commitment_hash,
+        "old_status": old_status,
+        "new_status": new_status,
+        "old_nonce": old_nonce,
+        "new_nonce": new_nonce,
+        "expiry": base["expiry"],
+        "payout_commitment_hash": payout_commitment_hash,
+    }
+    core_data = pack_btc_tx_intent_core(core)
+    intent_core_hash = packed_hash("NovaBtcTransactionCommitmentIntentCoreV0", core_data)
+    if op == OP_BTC_COMMIT_TRANSACTION:
+        receipt_commitment["intent_core_hash"] = intent_core_hash
+        expected_receipt_hash = packed_hash(
+            "NovaBtcTransactionCommitmentReceiptCommitmentV0",
+            pack_btc_tx_receipt_commitment(receipt_commitment),
+        )
+        new_cell["latest_receipt_hash"] = expected_receipt_hash
+    canonical_hash = btc_tx_canonical_hash(
+        op=op,
+        base=base,
+        old_state_commitment=old_state_commitment,
+        new_state_commitment=new_state_commitment,
+        old_nonce=old_nonce,
+        new_nonce=new_nonce,
+        expiry=base["expiry"],
+        authority_hash=base["committer_authority_hash"],
+        profile_body_hash=intent_core_hash,
+        payout_commitment_hash=payout_commitment_hash,
+    )
+    signed_intent = pack_btc_tx_signed_intent(core_data, canonical_hash, expected_receipt_hash)
+    signed_intent_hash = packed_hash("NovaBtcTransactionCommitmentSignedIntentV0", signed_intent)
+    sig_payload = bytearray(signature_payload(TEST_SECRET_KEY, signed_intent_hash, TEST_AUX_RAND))
+    if mutate_signature:
+        sig_payload[-1] ^= 1
+    new_cell_data = pack_btc_tx_cell(new_cell)
+    receipt = None
+    if op == OP_BTC_COMMIT_TRANSACTION:
+        receipt = {
+            "action": OP_BTC_COMMIT_TRANSACTION,
+            "seal_id": old_cell["seal_id"],
+            "policy_hash": old_cell["policy_hash"],
+            "committer_authority_hash": old_cell["committer_authority_hash"],
+            "btc_tx_commitment_hash": btc_tx_commitment_hash,
+            "old_state_hash": old_cell["state_hash"],
+            "new_state_hash": new_state_hash,
+            "old_status": STATUS_ACTIVE,
+            "new_status": BTC_STATUS_COMMITTED,
+            "old_nonce": old_nonce,
+            "new_nonce": new_nonce,
+            "intent_core_hash": intent_core_hash,
+            "signed_intent_hash": signed_intent_hash,
+            "payout_commitment_hash": payout_commitment_hash,
+            "latest_receipt_hash": expected_receipt_hash,
+            "signer_authority_hash": old_cell["committer_authority_hash"],
+            "expiry": old_cell["expiry"],
+        }
+        receipt_data = pack_btc_tx_receipt(receipt)
+    return {
+        "old_cell": old_cell or zero_btc_tx_cell(),
+        "old_cell_data": pack_btc_tx_cell(old_cell or zero_btc_tx_cell()),
+        "new_cell": new_cell,
+        "new_cell_data": new_cell_data,
+        "receipt": receipt,
+        "receipt_data": receipt_data,
+        "signed_intent": signed_intent,
+        "signed_intent_hash": signed_intent_hash,
+        "signature_payload": bytes(sig_payload),
+        "btc_tx_commitment_hash": btc_tx_commitment_hash,
+        "transition_commitment_hash": transition_commitment_hash,
+        "latest_receipt_hash": expected_receipt_hash,
+    }
+
+
+def build_btc_tx_initialize_tx(
+    funding: dict[str, Any],
+    lifecycle_data_hash: str,
+    cell_deps: list[dict[str, Any]],
+    header_hash: str,
+    material: dict[str, Any],
+) -> dict[str, Any]:
+    change_capacity = funding["total_capacity"] - STATE_CAPACITY
+    if change_capacity <= 0:
+        raise LiveAcceptanceError("BTC transaction initialize funding capacity is too small")
+    witness = btc_tx_entry_witness(
+        OP_BTC_INITIALIZE_ACTIVE_STATE,
+        material["old_cell_data"],
+        material["signed_intent"],
+        material["signature_payload"],
+    )
+    return transaction(
+        funding,
+        [
+            {"capacity": hex(STATE_CAPACITY), "lock": always_success_lock(), "type": lifecycle_type(lifecycle_data_hash)},
+            {"capacity": hex(change_capacity), "lock": always_success_lock(), "type": None},
+        ],
+        [hex0x(material["new_cell_data"]), "0x"],
+        cell_deps,
+        [witness] + ["0x" for _ in funding["cells"][1:]],
+        [header_hash],
+    )
+
+
+def build_btc_tx_commit_tx(
+    *,
+    old_ref: dict[str, Any],
+    funding: dict[str, Any],
+    lifecycle_data_hash: str,
+    cell_deps: list[dict[str, Any]],
+    header_hash: str,
+    material: dict[str, Any],
+) -> dict[str, Any]:
+    change_capacity = funding["total_capacity"] - RECEIPT_CAPACITY
+    if change_capacity <= 0:
+        raise LiveAcceptanceError("BTC transaction commit funding capacity is too small")
+    witness = btc_tx_entry_witness(
+        OP_BTC_COMMIT_TRANSACTION,
+        material["old_cell_data"],
+        material["signed_intent"],
+        material["signature_payload"],
+    )
+    return transaction(
+        [old_ref] + funding["cells"],
+        [
+            {"capacity": hex(old_ref["capacity"]), "lock": always_success_lock(), "type": lifecycle_type(lifecycle_data_hash)},
+            {"capacity": hex(RECEIPT_CAPACITY), "lock": always_success_lock(), "type": None},
+            {"capacity": hex(change_capacity), "lock": always_success_lock(), "type": None},
+        ],
+        [hex0x(material["new_cell_data"]), hex0x(material["receipt_data"]), "0x"],
+        cell_deps,
+        [witness] + ["0x" for _ in funding["cells"]],
+        [header_hash],
+    )
+
+
+def pack_btc_utxo_commitment(commitment: dict[str, Any]) -> bytes:
+    return (
+        commitment["btc_txid"]
+        + u32(commitment["btc_vout_index"])
+        + u64(commitment["btc_amount_sats"])
+        + commitment["script_pubkey_hash"]
+    )
+
+
+def pack_btc_utxo_closure_commitment(commitment: dict[str, Any]) -> bytes:
+    return (
+        commitment["sealed_utxo_commitment_hash"]
+        + commitment["spend_txid"]
+        + commitment["spend_wtxid"]
+        + u32(commitment["spend_input_index"])
+        + commitment["transition_commitment_hash"]
+        + commitment["payout_commitment_hash"]
+    )
+
+
+def pack_btc_utxo_intent_core(core: dict[str, Any]) -> bytes:
+    return (
+        u8(core["action"])
+        + core["seal_id"]
+        + core["policy_hash"]
+        + core["owner_authority_hash"]
+        + core["btc_txid"]
+        + u32(core["btc_vout_index"])
+        + u64(core["btc_amount_sats"])
+        + core["script_pubkey_hash"]
+        + core["spend_txid"]
+        + core["spend_wtxid"]
+        + u32(core["spend_input_index"])
+        + core["old_state_hash"]
+        + core["new_state_hash"]
+        + core["transition_commitment_hash"]
+        + u8(core["old_status"])
+        + u8(core["new_status"])
+        + u64(core["old_nonce"])
+        + u64(core["new_nonce"])
+        + u64(core["expiry"])
+        + core["payout_commitment_hash"]
+    )
+
+
+def pack_btc_utxo_signed_intent(core_data: bytes, canonical_hash: bytes, expected_receipt_hash: bytes) -> bytes:
+    return core_data + canonical_hash + expected_receipt_hash
+
+
+def pack_btc_utxo_signing_digest(intent_core_hash: bytes, canonical_hash: bytes, expected_receipt_hash: bytes) -> bytes:
+    return intent_core_hash + canonical_hash + expected_receipt_hash
+
+
+def pack_btc_utxo_state_commitment(cell: dict[str, Any]) -> bytes:
+    return (
+        u16(cell["version"])
+        + cell["seal_id"]
+        + cell["policy_hash"]
+        + cell["owner_authority_hash"]
+        + cell["sealed_utxo_commitment_hash"]
+        + cell["state_hash"]
+        + u8(cell["status"])
+        + u64(cell["nonce"])
+        + u64(cell["expiry"])
+    )
+
+
+def pack_btc_utxo_receipt_commitment(commitment: dict[str, Any]) -> bytes:
+    return (
+        u8(commitment["action"])
+        + commitment["seal_id"]
+        + commitment["policy_hash"]
+        + commitment["owner_authority_hash"]
+        + commitment["sealed_utxo_commitment_hash"]
+        + commitment["closure_commitment_hash"]
+        + commitment["old_state_hash"]
+        + commitment["new_state_hash"]
+        + u8(commitment["old_status"])
+        + u8(commitment["new_status"])
+        + u64(commitment["old_nonce"])
+        + u64(commitment["new_nonce"])
+        + commitment["intent_core_hash"]
+        + commitment["payout_commitment_hash"]
+    )
+
+
+def pack_btc_utxo_cell(cell: dict[str, Any]) -> bytes:
+    return (
+        u16(cell["version"])
+        + cell["seal_id"]
+        + cell["policy_hash"]
+        + cell["owner_authority_hash"]
+        + cell["sealed_utxo_commitment_hash"]
+        + cell["state_hash"]
+        + u8(cell["status"])
+        + cell["latest_receipt_hash"]
+        + u64(cell["nonce"])
+        + u64(cell["expiry"])
+    )
+
+
+def pack_btc_utxo_receipt(receipt: dict[str, Any]) -> bytes:
+    return (
+        u8(receipt["action"])
+        + receipt["seal_id"]
+        + receipt["policy_hash"]
+        + receipt["owner_authority_hash"]
+        + receipt["sealed_utxo_commitment_hash"]
+        + receipt["closure_commitment_hash"]
+        + receipt["old_state_hash"]
+        + receipt["new_state_hash"]
+        + u8(receipt["old_status"])
+        + u8(receipt["new_status"])
+        + u64(receipt["old_nonce"])
+        + u64(receipt["new_nonce"])
+        + receipt["intent_core_hash"]
+        + receipt["signed_intent_hash"]
+        + receipt["payout_commitment_hash"]
+        + receipt["latest_receipt_hash"]
+        + receipt["signer_authority_hash"]
+        + u64(receipt["expiry"])
+    )
+
+
+def zero_btc_utxo_cell() -> dict[str, Any]:
+    return {
+        "version": 0,
+        "seal_id": ZERO_HASH,
+        "policy_hash": ZERO_HASH,
+        "owner_authority_hash": ZERO_HASH,
+        "sealed_utxo_commitment_hash": ZERO_HASH,
+        "state_hash": ZERO_HASH,
+        "status": 0,
+        "latest_receipt_hash": ZERO_HASH,
+        "nonce": 0,
+        "expiry": 0,
+    }
+
+
+def btc_utxo_entry_witness(op: int, old_cell_data: bytes, signed_intent: bytes, sig_payload: bytes) -> str:
+    payload = (
+        b"CSARGv1\0"
+        + u8(op)
+        + u32(len(old_cell_data))
+        + old_cell_data
+        + u32(len(signed_intent))
+        + signed_intent
+        + u32(len(sig_payload))
+        + sig_payload
+    )
+    return hex0x(payload)
+
+
+def btc_utxo_base_state(label: str) -> dict[str, Any]:
+    return {
+        "seal_id": ckb_hash(f"NovaSeal BTC UTXO seal {label}".encode("ascii")),
+        "policy_hash": ckb_hash(f"NovaSeal BTC UTXO policy {label}".encode("ascii")),
+        "owner_authority_hash": xonly_pubkey(TEST_SECRET_KEY),
+        "initial_state_hash": ckb_hash(f"NovaSeal BTC UTXO active state {label}".encode("ascii")),
+        "closed_state_hash": ckb_hash(f"NovaSeal BTC UTXO closed state {label}".encode("ascii")),
+        "btc_txid": ckb_hash(f"NovaSeal BTC UTXO txid {label}".encode("ascii")),
+        "btc_vout_index": 1,
+        "btc_amount_sats": 250_000,
+        "script_pubkey_hash": ckb_hash(f"NovaSeal BTC UTXO script pubkey {label}".encode("ascii")),
+        "spend_txid": ckb_hash(f"NovaSeal BTC UTXO spend txid {label}".encode("ascii")),
+        "spend_wtxid": ckb_hash(f"NovaSeal BTC UTXO spend wtxid {label}".encode("ascii")),
+        "spend_input_index": 0,
+        "expiry": (1 << 63) - 1,
+    }
+
+
+def btc_utxo_canonical_hash(
+    *,
+    op: int,
+    base: dict[str, Any],
+    old_state_commitment: bytes,
+    new_state_commitment: bytes,
+    old_nonce: int,
+    new_nonce: int,
+    expiry: int,
+    authority_hash: bytes,
+    profile_body_hash: bytes,
+    payout_commitment_hash: bytes,
+) -> bytes:
+    return canonical_envelope_hash(
+        action=op,
+        asset_id=base["seal_id"],
+        xudt_type_hash=base["policy_hash"],
+        old_state_commitment=old_state_commitment,
+        new_state_commitment=new_state_commitment,
+        old_nonce=old_nonce,
+        new_nonce=new_nonce,
+        expiry=expiry,
+        authority_hash=authority_hash,
+        profile_body_hash=profile_body_hash,
+        payout_commitment_hash=payout_commitment_hash,
+    )
+
+
+def build_btc_utxo_material(
+    *,
+    op: int,
+    base: dict[str, Any],
+    old_cell: dict[str, Any] | None,
+    mutate_signature: bool = False,
+    utxo_commitment_mismatch: bool = False,
+    zero_spend_txid: bool = False,
+) -> dict[str, Any]:
+    payout_commitment_hash = ZERO_HASH
+    btc_txid = ckb_hash(b"NovaSeal mismatched UTXO txid") if utxo_commitment_mismatch else base["btc_txid"]
+    sealed_utxo_commitment_hash = packed_hash(
+        "BtcUtxoCommitmentV0",
+        pack_btc_utxo_commitment(
+            {
+                "btc_txid": btc_txid,
+                "btc_vout_index": base["btc_vout_index"],
+                "btc_amount_sats": base["btc_amount_sats"],
+                "script_pubkey_hash": base["script_pubkey_hash"],
+            }
+        ),
+    )
+    if op == OP_BTC_UTXO_INITIALIZE_ACTIVE_SEAL:
+        old_status = 0
+        new_status = STATUS_ACTIVE
+        old_nonce = 0
+        new_nonce = 0
+        old_state_hash = ZERO_HASH
+        new_state_hash = base["initial_state_hash"]
+        spend_txid = ZERO_HASH
+        spend_wtxid = ZERO_HASH
+        spend_input_index = 0
+        transition_commitment_hash = ZERO_HASH
+        closure_commitment_hash = ZERO_HASH
+        old_state_commitment = ZERO_HASH
+        expected_receipt_hash = ZERO_HASH
+        new_cell = {
+            "version": BTC_UTXO_SEAL_VERSION,
+            "seal_id": base["seal_id"],
+            "policy_hash": base["policy_hash"],
+            "owner_authority_hash": base["owner_authority_hash"],
+            "sealed_utxo_commitment_hash": sealed_utxo_commitment_hash,
+            "state_hash": new_state_hash,
+            "status": STATUS_ACTIVE,
+            "latest_receipt_hash": ZERO_HASH,
+            "nonce": 0,
+            "expiry": base["expiry"],
+        }
+        new_state_commitment = packed_hash("NovaBtcUtxoSealStateV0", pack_btc_utxo_state_commitment(new_cell))
+        receipt_data = b""
+    elif op == OP_BTC_UTXO_CLOSE:
+        if old_cell is None:
+            raise LiveAcceptanceError("BTC UTXO close material requires an old cell")
+        old_status = STATUS_ACTIVE
+        new_status = BTC_STATUS_CLOSED
+        old_nonce = old_cell["nonce"]
+        new_nonce = old_nonce + 1
+        old_state_hash = old_cell["state_hash"]
+        new_state_hash = base["closed_state_hash"]
+        spend_txid = ZERO_HASH if zero_spend_txid else base["spend_txid"]
+        spend_wtxid = base["spend_wtxid"]
+        spend_input_index = base["spend_input_index"]
+        transition_commitment_hash = ckb_hash(new_state_hash)
+        closure_commitment_hash = packed_hash(
+            "BtcUtxoClosureCommitmentV0",
+            pack_btc_utxo_closure_commitment(
+                {
+                    "sealed_utxo_commitment_hash": sealed_utxo_commitment_hash,
+                    "spend_txid": spend_txid,
+                    "spend_wtxid": spend_wtxid,
+                    "spend_input_index": spend_input_index,
+                    "transition_commitment_hash": transition_commitment_hash,
+                    "payout_commitment_hash": payout_commitment_hash,
+                }
+            ),
+        )
+        old_state_commitment = packed_hash("NovaBtcUtxoSealStateV0", pack_btc_utxo_state_commitment(old_cell))
+        new_cell = {
+            "version": BTC_UTXO_SEAL_VERSION,
+            "seal_id": old_cell["seal_id"],
+            "policy_hash": old_cell["policy_hash"],
+            "owner_authority_hash": old_cell["owner_authority_hash"],
+            "sealed_utxo_commitment_hash": sealed_utxo_commitment_hash,
+            "state_hash": new_state_hash,
+            "status": BTC_STATUS_CLOSED,
+            "latest_receipt_hash": ZERO_HASH,
+            "nonce": new_nonce,
+            "expiry": old_cell["expiry"],
+        }
+        receipt_commitment = {
+            "action": OP_BTC_UTXO_CLOSE,
+            "seal_id": old_cell["seal_id"],
+            "policy_hash": old_cell["policy_hash"],
+            "owner_authority_hash": old_cell["owner_authority_hash"],
+            "sealed_utxo_commitment_hash": sealed_utxo_commitment_hash,
+            "closure_commitment_hash": closure_commitment_hash,
+            "old_state_hash": old_cell["state_hash"],
+            "new_state_hash": new_state_hash,
+            "old_status": STATUS_ACTIVE,
+            "new_status": BTC_STATUS_CLOSED,
+            "old_nonce": old_nonce,
+            "new_nonce": new_nonce,
+            "intent_core_hash": ZERO_HASH,
+            "payout_commitment_hash": payout_commitment_hash,
+        }
+        expected_receipt_hash = ZERO_HASH
+        new_state_commitment = closure_commitment_hash
+        receipt_data = b""
+    else:
+        raise LiveAcceptanceError(f"unknown BTC UTXO op {op}")
+
+    core = {
+        "action": op,
+        "seal_id": base["seal_id"],
+        "policy_hash": base["policy_hash"],
+        "owner_authority_hash": base["owner_authority_hash"],
+        "btc_txid": btc_txid,
+        "btc_vout_index": base["btc_vout_index"],
+        "btc_amount_sats": base["btc_amount_sats"],
+        "script_pubkey_hash": base["script_pubkey_hash"],
+        "spend_txid": spend_txid,
+        "spend_wtxid": spend_wtxid,
+        "spend_input_index": spend_input_index,
+        "old_state_hash": old_state_hash,
+        "new_state_hash": new_state_hash,
+        "transition_commitment_hash": transition_commitment_hash,
+        "old_status": old_status,
+        "new_status": new_status,
+        "old_nonce": old_nonce,
+        "new_nonce": new_nonce,
+        "expiry": base["expiry"],
+        "payout_commitment_hash": payout_commitment_hash,
+    }
+    core_data = pack_btc_utxo_intent_core(core)
+    intent_core_hash = packed_hash("NovaBtcUtxoSealIntentCoreV0", core_data)
+    if op == OP_BTC_UTXO_CLOSE:
+        receipt_commitment["intent_core_hash"] = intent_core_hash
+        expected_receipt_hash = packed_hash(
+            "NovaBtcUtxoSealReceiptCommitmentV0",
+            pack_btc_utxo_receipt_commitment(receipt_commitment),
+        )
+        new_cell["latest_receipt_hash"] = expected_receipt_hash
+    canonical_hash = btc_utxo_canonical_hash(
+        op=op,
+        base=base,
+        old_state_commitment=old_state_commitment,
+        new_state_commitment=new_state_commitment,
+        old_nonce=old_nonce,
+        new_nonce=new_nonce,
+        expiry=base["expiry"],
+        authority_hash=base["owner_authority_hash"],
+        profile_body_hash=intent_core_hash,
+        payout_commitment_hash=payout_commitment_hash,
+    )
+    signed_intent = pack_btc_utxo_signed_intent(core_data, canonical_hash, expected_receipt_hash)
+    signed_intent_hash = packed_hash(
+        "NovaBtcUtxoSealSigningDigestV0",
+        pack_btc_utxo_signing_digest(intent_core_hash, canonical_hash, expected_receipt_hash),
+    )
+    sig_payload = bytearray(signature_payload(TEST_SECRET_KEY, signed_intent_hash, TEST_AUX_RAND))
+    if mutate_signature:
+        sig_payload[-1] ^= 1
+    new_cell_data = pack_btc_utxo_cell(new_cell)
+    receipt = None
+    if op == OP_BTC_UTXO_CLOSE:
+        receipt = {
+            "action": OP_BTC_UTXO_CLOSE,
+            "seal_id": old_cell["seal_id"],
+            "policy_hash": old_cell["policy_hash"],
+            "owner_authority_hash": old_cell["owner_authority_hash"],
+            "sealed_utxo_commitment_hash": sealed_utxo_commitment_hash,
+            "closure_commitment_hash": closure_commitment_hash,
+            "old_state_hash": old_cell["state_hash"],
+            "new_state_hash": new_state_hash,
+            "old_status": STATUS_ACTIVE,
+            "new_status": BTC_STATUS_CLOSED,
+            "old_nonce": old_nonce,
+            "new_nonce": new_nonce,
+            "intent_core_hash": intent_core_hash,
+            "signed_intent_hash": signed_intent_hash,
+            "payout_commitment_hash": payout_commitment_hash,
+            "latest_receipt_hash": expected_receipt_hash,
+            "signer_authority_hash": old_cell["owner_authority_hash"],
+            "expiry": old_cell["expiry"],
+        }
+        receipt_data = pack_btc_utxo_receipt(receipt)
+    return {
+        "old_cell": old_cell or zero_btc_utxo_cell(),
+        "old_cell_data": pack_btc_utxo_cell(old_cell or zero_btc_utxo_cell()),
+        "new_cell": new_cell,
+        "new_cell_data": new_cell_data,
+        "receipt": receipt,
+        "receipt_data": receipt_data,
+        "signed_intent": signed_intent,
+        "signed_intent_hash": signed_intent_hash,
+        "signature_payload": bytes(sig_payload),
+        "sealed_utxo_commitment_hash": sealed_utxo_commitment_hash,
+        "closure_commitment_hash": closure_commitment_hash,
+        "transition_commitment_hash": transition_commitment_hash,
+        "latest_receipt_hash": expected_receipt_hash,
+    }
+
+
+def build_btc_utxo_initialize_tx(
+    funding: dict[str, Any],
+    lifecycle_data_hash: str,
+    cell_deps: list[dict[str, Any]],
+    header_hash: str,
+    material: dict[str, Any],
+) -> dict[str, Any]:
+    change_capacity = funding["total_capacity"] - STATE_CAPACITY
+    if change_capacity <= 0:
+        raise LiveAcceptanceError("BTC UTXO initialize funding capacity is too small")
+    witness = btc_utxo_entry_witness(
+        OP_BTC_UTXO_INITIALIZE_ACTIVE_SEAL,
+        material["old_cell_data"],
+        material["signed_intent"],
+        material["signature_payload"],
+    )
+    return transaction(
+        funding,
+        [
+            {"capacity": hex(STATE_CAPACITY), "lock": always_success_lock(), "type": lifecycle_type(lifecycle_data_hash)},
+            {"capacity": hex(change_capacity), "lock": always_success_lock(), "type": None},
+        ],
+        [hex0x(material["new_cell_data"]), "0x"],
+        cell_deps,
+        [witness] + ["0x" for _ in funding["cells"][1:]],
+        [header_hash],
+    )
+
+
+def build_btc_utxo_close_tx(
+    *,
+    old_ref: dict[str, Any],
+    funding: dict[str, Any],
+    lifecycle_data_hash: str,
+    cell_deps: list[dict[str, Any]],
+    header_hash: str,
+    material: dict[str, Any],
+) -> dict[str, Any]:
+    change_capacity = funding["total_capacity"] - RECEIPT_CAPACITY
+    if change_capacity <= 0:
+        raise LiveAcceptanceError("BTC UTXO close funding capacity is too small")
+    witness = btc_utxo_entry_witness(
+        OP_BTC_UTXO_CLOSE,
+        material["old_cell_data"],
+        material["signed_intent"],
+        material["signature_payload"],
+    )
+    return transaction(
+        [old_ref] + funding["cells"],
+        [
+            {"capacity": hex(old_ref["capacity"]), "lock": always_success_lock(), "type": lifecycle_type(lifecycle_data_hash)},
+            {"capacity": hex(RECEIPT_CAPACITY), "lock": always_success_lock(), "type": None},
+            {"capacity": hex(change_capacity), "lock": always_success_lock(), "type": None},
+        ],
+        [hex0x(material["new_cell_data"]), hex0x(material["receipt_data"]), "0x"],
+        cell_deps,
+        [witness] + ["0x" for _ in funding["cells"]],
+        [header_hash],
+    )
+
+
+def pack_fiber_settlement_commitment(commitment: dict[str, Any]) -> bytes:
+    return (
+        commitment["channel_id"]
+        + commitment["route_commitment_hash"]
+        + commitment["payment_hash"]
+        + commitment["old_balance_commitment_hash"]
+        + commitment["new_balance_commitment_hash"]
+        + u64(commitment["settlement_amount"])
+        + commitment["payout_commitment_hash"]
+    )
+
+
+def pack_fiber_intent_core(core: dict[str, Any]) -> bytes:
+    return (
+        u8(core["action"])
+        + core["candidate_id"]
+        + core["policy_hash"]
+        + core["operator_authority_hash"]
+        + core["channel_id"]
+        + core["route_commitment_hash"]
+        + core["payment_hash"]
+        + core["old_balance_commitment_hash"]
+        + core["new_balance_commitment_hash"]
+        + u64(core["settlement_amount"])
+        + u8(core["old_status"])
+        + u8(core["new_status"])
+        + u64(core["old_nonce"])
+        + u64(core["new_nonce"])
+        + u64(core["expiry"])
+        + core["payout_commitment_hash"]
+    )
+
+
+def pack_fiber_signed_intent(core_data: bytes, canonical_hash: bytes, expected_receipt_hash: bytes) -> bytes:
+    return core_data + canonical_hash + expected_receipt_hash
+
+
+def pack_fiber_state_commitment(cell: dict[str, Any]) -> bytes:
+    return (
+        u16(cell["version"])
+        + cell["candidate_id"]
+        + cell["policy_hash"]
+        + cell["operator_authority_hash"]
+        + cell["channel_id"]
+        + cell["balance_commitment_hash"]
+        + u8(cell["status"])
+        + u64(cell["nonce"])
+        + u64(cell["expiry"])
+    )
+
+
+def pack_fiber_receipt_commitment(commitment: dict[str, Any]) -> bytes:
+    return (
+        u8(commitment["action"])
+        + commitment["candidate_id"]
+        + commitment["policy_hash"]
+        + commitment["operator_authority_hash"]
+        + commitment["channel_id"]
+        + commitment["route_commitment_hash"]
+        + commitment["payment_hash"]
+        + commitment["old_balance_commitment_hash"]
+        + commitment["new_balance_commitment_hash"]
+        + u64(commitment["settlement_amount"])
+        + u8(commitment["old_status"])
+        + u8(commitment["new_status"])
+        + u64(commitment["old_nonce"])
+        + u64(commitment["new_nonce"])
+        + commitment["intent_core_hash"]
+        + commitment["payout_commitment_hash"]
+    )
+
+
+def pack_fiber_cell(cell: dict[str, Any]) -> bytes:
+    return (
+        u16(cell["version"])
+        + cell["candidate_id"]
+        + cell["policy_hash"]
+        + cell["operator_authority_hash"]
+        + cell["channel_id"]
+        + cell["balance_commitment_hash"]
+        + u8(cell["status"])
+        + cell["latest_receipt_hash"]
+        + u64(cell["nonce"])
+        + u64(cell["expiry"])
+    )
+
+
+def pack_fiber_receipt(receipt: dict[str, Any]) -> bytes:
+    return (
+        u8(receipt["action"])
+        + receipt["candidate_id"]
+        + receipt["policy_hash"]
+        + receipt["operator_authority_hash"]
+        + receipt["channel_id"]
+        + receipt["route_commitment_hash"]
+        + receipt["payment_hash"]
+        + receipt["old_balance_commitment_hash"]
+        + receipt["new_balance_commitment_hash"]
+        + u64(receipt["settlement_amount"])
+        + u8(receipt["old_status"])
+        + u8(receipt["new_status"])
+        + u64(receipt["old_nonce"])
+        + u64(receipt["new_nonce"])
+        + receipt["intent_core_hash"]
+        + receipt["signed_intent_hash"]
+        + receipt["payout_commitment_hash"]
+        + receipt["latest_receipt_hash"]
+        + receipt["signer_authority_hash"]
+        + u64(receipt["expiry"])
+    )
+
+
+def zero_fiber_cell() -> dict[str, Any]:
+    return {
+        "version": 0,
+        "candidate_id": ZERO_HASH,
+        "policy_hash": ZERO_HASH,
+        "operator_authority_hash": ZERO_HASH,
+        "channel_id": ZERO_HASH,
+        "balance_commitment_hash": ZERO_HASH,
+        "status": 0,
+        "latest_receipt_hash": ZERO_HASH,
+        "nonce": 0,
+        "expiry": 0,
+    }
+
+
+def fiber_entry_witness(op: int, old_cell_data: bytes, signed_intent: bytes, sig_payload: bytes) -> str:
+    payload = (
+        b"CSARGv1\0"
+        + u8(op)
+        + u32(len(old_cell_data))
+        + old_cell_data
+        + u32(len(signed_intent))
+        + signed_intent
+        + u32(len(sig_payload))
+        + sig_payload
+    )
+    return hex0x(payload)
+
+
+def fiber_base_state(label: str) -> dict[str, Any]:
+    return {
+        "candidate_id": ckb_hash(f"NovaSeal Fiber candidate {label}".encode("ascii")),
+        "policy_hash": ckb_hash(f"NovaSeal Fiber policy {label}".encode("ascii")),
+        "operator_authority_hash": xonly_pubkey(TEST_SECRET_KEY),
+        "channel_id": ckb_hash(f"NovaSeal Fiber channel {label}".encode("ascii")),
+        "initial_balance_commitment_hash": ckb_hash(f"NovaSeal Fiber initial balance {label}".encode("ascii")),
+        "settled_balance_commitment_hash": ckb_hash(f"NovaSeal Fiber settled balance {label}".encode("ascii")),
+        "route_commitment_hash": ckb_hash(f"NovaSeal Fiber route {label}".encode("ascii")),
+        "payment_hash": ckb_hash(f"NovaSeal Fiber payment {label}".encode("ascii")),
+        "settlement_amount": 42_000,
+        "expiry": (1 << 63) - 1,
+    }
+
+
+def fiber_canonical_hash(
+    *,
+    op: int,
+    base: dict[str, Any],
+    old_state_commitment: bytes,
+    new_state_commitment: bytes,
+    old_nonce: int,
+    new_nonce: int,
+    expiry: int,
+    authority_hash: bytes,
+    profile_body_hash: bytes,
+    payout_commitment_hash: bytes,
+) -> bytes:
+    return canonical_envelope_hash(
+        action=op,
+        asset_id=base["candidate_id"],
+        xudt_type_hash=base["policy_hash"],
+        old_state_commitment=old_state_commitment,
+        new_state_commitment=new_state_commitment,
+        old_nonce=old_nonce,
+        new_nonce=new_nonce,
+        expiry=expiry,
+        authority_hash=authority_hash,
+        profile_body_hash=profile_body_hash,
+        payout_commitment_hash=payout_commitment_hash,
+    )
+
+
+def build_fiber_material(
+    *,
+    op: int,
+    base: dict[str, Any],
+    old_cell: dict[str, Any] | None,
+    mutate_signature: bool = False,
+    balance_replay: bool = False,
+) -> dict[str, Any]:
+    payout_commitment_hash = ZERO_HASH
+    if op == OP_FIBER_INITIALIZE_ACTIVE_CANDIDATE:
+        old_balance = ZERO_HASH
+        new_balance = base["initial_balance_commitment_hash"]
+        route_commitment_hash = ZERO_HASH
+        payment_hash = ZERO_HASH
+        settlement_amount = 0
+        old_status = 0
+        new_status = STATUS_ACTIVE
+        old_nonce = 0
+        new_nonce = 0
+        old_state_commitment = ZERO_HASH
+        expected_receipt_hash = ZERO_HASH
+        new_cell = {
+            "version": FIBER_CANDIDATE_VERSION,
+            "candidate_id": base["candidate_id"],
+            "policy_hash": base["policy_hash"],
+            "operator_authority_hash": base["operator_authority_hash"],
+            "channel_id": base["channel_id"],
+            "balance_commitment_hash": new_balance,
+            "status": STATUS_ACTIVE,
+            "latest_receipt_hash": ZERO_HASH,
+            "nonce": 0,
+            "expiry": base["expiry"],
+        }
+        new_state_commitment = packed_hash("NovaFiberCandidateStateV0", pack_fiber_state_commitment(new_cell))
+        receipt_data = b""
+    elif op == OP_FIBER_SETTLE:
+        if old_cell is None:
+            raise LiveAcceptanceError("Fiber settle material requires an old cell")
+        old_balance = old_cell["balance_commitment_hash"]
+        new_balance = old_cell["balance_commitment_hash"] if balance_replay else base["settled_balance_commitment_hash"]
+        route_commitment_hash = base["route_commitment_hash"]
+        payment_hash = base["payment_hash"]
+        settlement_amount = base["settlement_amount"]
+        old_status = STATUS_ACTIVE
+        new_status = FIBER_STATUS_SETTLED
+        old_nonce = old_cell["nonce"]
+        new_nonce = old_nonce + 1
+        old_state_commitment = packed_hash("NovaFiberCandidateStateV0", pack_fiber_state_commitment(old_cell))
+        new_cell = {
+            "version": FIBER_CANDIDATE_VERSION,
+            "candidate_id": old_cell["candidate_id"],
+            "policy_hash": old_cell["policy_hash"],
+            "operator_authority_hash": old_cell["operator_authority_hash"],
+            "channel_id": old_cell["channel_id"],
+            "balance_commitment_hash": new_balance,
+            "status": FIBER_STATUS_SETTLED,
+            "latest_receipt_hash": ZERO_HASH,
+            "nonce": new_nonce,
+            "expiry": old_cell["expiry"],
+        }
+        new_state_commitment = packed_hash("NovaFiberCandidateStateV0", pack_fiber_state_commitment(new_cell))
+        receipt_commitment = {
+            "action": OP_FIBER_SETTLE,
+            "candidate_id": old_cell["candidate_id"],
+            "policy_hash": old_cell["policy_hash"],
+            "operator_authority_hash": old_cell["operator_authority_hash"],
+            "channel_id": old_cell["channel_id"],
+            "route_commitment_hash": route_commitment_hash,
+            "payment_hash": payment_hash,
+            "old_balance_commitment_hash": old_balance,
+            "new_balance_commitment_hash": new_balance,
+            "settlement_amount": settlement_amount,
+            "old_status": STATUS_ACTIVE,
+            "new_status": FIBER_STATUS_SETTLED,
+            "old_nonce": old_nonce,
+            "new_nonce": new_nonce,
+            "intent_core_hash": ZERO_HASH,
+            "payout_commitment_hash": payout_commitment_hash,
+        }
+        expected_receipt_hash = ZERO_HASH
+        receipt_data = b""
+    else:
+        raise LiveAcceptanceError(f"unknown Fiber op {op}")
+
+    core = {
+        "action": op,
+        "candidate_id": base["candidate_id"],
+        "policy_hash": base["policy_hash"],
+        "operator_authority_hash": base["operator_authority_hash"],
+        "channel_id": base["channel_id"],
+        "route_commitment_hash": route_commitment_hash,
+        "payment_hash": payment_hash,
+        "old_balance_commitment_hash": old_balance,
+        "new_balance_commitment_hash": new_balance,
+        "settlement_amount": settlement_amount,
+        "old_status": old_status,
+        "new_status": new_status,
+        "old_nonce": old_nonce,
+        "new_nonce": new_nonce,
+        "expiry": base["expiry"],
+        "payout_commitment_hash": payout_commitment_hash,
+    }
+    core_data = pack_fiber_intent_core(core)
+    intent_core_hash = packed_hash("NovaFiberCandidateIntentCoreV0", core_data)
+    if op == OP_FIBER_SETTLE:
+        receipt_commitment["intent_core_hash"] = intent_core_hash
+        expected_receipt_hash = packed_hash(
+            "NovaFiberCandidateReceiptCommitmentV0",
+            pack_fiber_receipt_commitment(receipt_commitment),
+        )
+        new_cell["latest_receipt_hash"] = expected_receipt_hash
+    canonical_hash = fiber_canonical_hash(
+        op=op,
+        base=base,
+        old_state_commitment=old_state_commitment,
+        new_state_commitment=new_state_commitment,
+        old_nonce=old_nonce,
+        new_nonce=new_nonce,
+        expiry=base["expiry"],
+        authority_hash=base["operator_authority_hash"],
+        profile_body_hash=intent_core_hash,
+        payout_commitment_hash=payout_commitment_hash,
+    )
+    signed_intent = pack_fiber_signed_intent(core_data, canonical_hash, expected_receipt_hash)
+    signed_intent_hash = packed_hash("NovaFiberCandidateSignedIntentV0", signed_intent)
+    sig_payload = bytearray(signature_payload(TEST_SECRET_KEY, signed_intent_hash, TEST_AUX_RAND))
+    if mutate_signature:
+        sig_payload[-1] ^= 1
+    new_cell_data = pack_fiber_cell(new_cell)
+    receipt = None
+    settlement_commitment_hash = ZERO_HASH
+    if op == OP_FIBER_SETTLE:
+        settlement_commitment_hash = packed_hash(
+            "FiberCandidateSettlementCommitmentV0",
+            pack_fiber_settlement_commitment(
+                {
+                    "channel_id": old_cell["channel_id"],
+                    "route_commitment_hash": route_commitment_hash,
+                    "payment_hash": payment_hash,
+                    "old_balance_commitment_hash": old_balance,
+                    "new_balance_commitment_hash": new_balance,
+                    "settlement_amount": settlement_amount,
+                    "payout_commitment_hash": payout_commitment_hash,
+                }
+            ),
+        )
+        receipt = {
+            "action": OP_FIBER_SETTLE,
+            "candidate_id": old_cell["candidate_id"],
+            "policy_hash": old_cell["policy_hash"],
+            "operator_authority_hash": old_cell["operator_authority_hash"],
+            "channel_id": old_cell["channel_id"],
+            "route_commitment_hash": route_commitment_hash,
+            "payment_hash": payment_hash,
+            "old_balance_commitment_hash": old_balance,
+            "new_balance_commitment_hash": new_balance,
+            "settlement_amount": settlement_amount,
+            "old_status": STATUS_ACTIVE,
+            "new_status": FIBER_STATUS_SETTLED,
+            "old_nonce": old_nonce,
+            "new_nonce": new_nonce,
+            "intent_core_hash": intent_core_hash,
+            "signed_intent_hash": signed_intent_hash,
+            "payout_commitment_hash": payout_commitment_hash,
+            "latest_receipt_hash": expected_receipt_hash,
+            "signer_authority_hash": old_cell["operator_authority_hash"],
+            "expiry": old_cell["expiry"],
+        }
+        receipt_data = pack_fiber_receipt(receipt)
+    return {
+        "old_cell": old_cell or zero_fiber_cell(),
+        "old_cell_data": pack_fiber_cell(old_cell or zero_fiber_cell()),
+        "new_cell": new_cell,
+        "new_cell_data": new_cell_data,
+        "receipt": receipt,
+        "receipt_data": receipt_data,
+        "signed_intent": signed_intent,
+        "signed_intent_hash": signed_intent_hash,
+        "signature_payload": bytes(sig_payload),
+        "settlement_commitment_hash": settlement_commitment_hash,
+        "latest_receipt_hash": expected_receipt_hash,
+    }
+
+
+def build_fiber_initialize_tx(
+    funding: dict[str, Any],
+    lifecycle_data_hash: str,
+    cell_deps: list[dict[str, Any]],
+    header_hash: str,
+    material: dict[str, Any],
+) -> dict[str, Any]:
+    change_capacity = funding["total_capacity"] - STATE_CAPACITY
+    if change_capacity <= 0:
+        raise LiveAcceptanceError("Fiber initialize funding capacity is too small")
+    witness = fiber_entry_witness(
+        OP_FIBER_INITIALIZE_ACTIVE_CANDIDATE,
+        material["old_cell_data"],
+        material["signed_intent"],
+        material["signature_payload"],
+    )
+    return transaction(
+        funding,
+        [
+            {"capacity": hex(STATE_CAPACITY), "lock": always_success_lock(), "type": lifecycle_type(lifecycle_data_hash)},
+            {"capacity": hex(change_capacity), "lock": always_success_lock(), "type": None},
+        ],
+        [hex0x(material["new_cell_data"]), "0x"],
+        cell_deps,
+        [witness] + ["0x" for _ in funding["cells"][1:]],
+        [header_hash],
+    )
+
+
+def build_fiber_settle_tx(
+    *,
+    old_ref: dict[str, Any],
+    funding: dict[str, Any],
+    lifecycle_data_hash: str,
+    cell_deps: list[dict[str, Any]],
+    header_hash: str,
+    material: dict[str, Any],
+) -> dict[str, Any]:
+    change_capacity = funding["total_capacity"] - RECEIPT_CAPACITY
+    if change_capacity <= 0:
+        raise LiveAcceptanceError("Fiber settle funding capacity is too small")
+    witness = fiber_entry_witness(OP_FIBER_SETTLE, material["old_cell_data"], material["signed_intent"], material["signature_payload"])
+    return transaction(
+        [old_ref] + funding["cells"],
+        [
+            {"capacity": hex(old_ref["capacity"]), "lock": always_success_lock(), "type": lifecycle_type(lifecycle_data_hash)},
+            {"capacity": hex(RECEIPT_CAPACITY), "lock": always_success_lock(), "type": None},
+            {"capacity": hex(change_capacity), "lock": always_success_lock(), "type": None},
+        ],
+        [hex0x(material["new_cell_data"]), hex0x(material["receipt_data"]), "0x"],
+        cell_deps,
+        [witness] + ["0x" for _ in funding["cells"]],
+        [header_hash],
+    )
+
+
 def compile_contract_lifecycle(repo_root: pathlib.Path, contract: ReportContract, output: pathlib.Path) -> None:
     if contract.lifecycle_action is None:
         raise LiveAcceptanceError(f"{contract.profile} has no lifecycle action")
@@ -1823,11 +3146,752 @@ def run_rwa_receipt_live(args: argparse.Namespace, contract: ReportContract) -> 
             devnet.stop()
 
 
+def run_btc_transaction_commitment_live(args: argparse.Namespace, contract: ReportContract) -> dict[str, Any]:
+    repo_root = args.repo_root.resolve()
+    ckb_repo = args.ckb_repo.resolve()
+    ckb_bin = resolve_ckb_bin(ckb_repo, args.ckb_bin)
+    run_dir = (
+        args.run_dir
+        or (repo_root / "target/novaseal-btc-transaction-commitment-devnet-stateful-live" / str(int(time.time())))
+    ).resolve()
+    run_dir.mkdir(parents=True, exist_ok=True)
+    lifecycle_elf = run_dir / "nova-btc-transaction-commitment-lifecycle-type.elf"
+    compile_contract_lifecycle(repo_root, contract, lifecycle_elf)
+    verifier_elf = repo_root / "proposals/novaseal/v0-mvp-skeleton/target/novaseal-btc-verifier-riscv-shell-release.elf"
+    if not verifier_elf.is_file():
+        raise LiveAcceptanceError(f"missing verifier ELF: {verifier_elf}")
+
+    devnet = CkbDevnet(ckb_repo, ckb_bin, run_dir)
+    report: dict[str, Any] = {
+        "schema": "novaseal-planned-profile-devnet-stateful-live-v0.1",
+        "profile": contract.profile,
+        "status": "running",
+        "scenario": "btc_transaction_commitment_initialize_then_commit",
+        "repo_root": str(repo_root),
+        "ckb_repo": str(ckb_repo),
+        "ckb_bin": str(ckb_bin),
+        "run_dir": str(run_dir),
+        "expected_tx_hashes": named_pointer_rows(contract.tx_hashes, "pointer"),
+        "required_live_checks": named_pointer_rows(contract.live_checks, "pointer"),
+        "required_negative_cases": named_pointer_rows(contract.negative_cases, "key"),
+        "btc_public_verification_scope": (
+            "live CKB transition executes the BIP340 runtime verifier and binds a declared BTC txid/wtxid/output tuple; "
+            "SPV/indexer finality remains separate production evidence"
+        ),
+    }
+    stage = "initializing"
+    try:
+        stage = "start devnet"
+        devnet.start()
+        stage = "deploy artifacts"
+        genesis = devnet.get_block_by_number(0)
+        always_dep = always_success_dep(genesis["transactions"][0]["hash"])
+        verifier = deploy_code_cell(devnet, "cellscript_btc_bip340_verifier_riscv", verifier_elf.read_bytes(), always_dep)
+        lifecycle = deploy_code_cell(devnet, "nova_btc_transaction_commitment_lifecycle_type", lifecycle_elf.read_bytes(), always_dep)
+        cell_deps = [verifier["cell_dep"], lifecycle["cell_dep"], always_dep]
+        provenance = stateful_provenance(
+            repo_root,
+            [
+                pathlib.Path("proposals/novaseal/btc-transaction-commitment-profile-v0/Cell.toml"),
+                pathlib.Path("proposals/novaseal/btc-transaction-commitment-profile-v0/src"),
+                pathlib.Path("proposals/novaseal/btc-transaction-commitment-profile-v0/schemas"),
+                pathlib.Path("proposals/novaseal/v0-mvp-skeleton/verifier/novaseal_btc_verifier"),
+                pathlib.Path("scripts/novaseal_planned_profiles_devnet_stateful_live.py"),
+                pathlib.Path("scripts/novaseal_devnet_stateful_live.py"),
+            ],
+            {"verifier": verifier_elf, "lifecycle": lifecycle_elf},
+        )
+        base = btc_tx_base_state("live")
+
+        stage = "valid initialize"
+        initialize_material = build_btc_tx_material(op=OP_BTC_INITIALIZE_ACTIVE_STATE, base=base, old_cell=None)
+        initialize_header = devnet.rpc("get_tip_header")
+        initialize_funding = devnet.collect_spendable(STATE_CAPACITY + 100 * SHANNONS)
+        initialize_tx = build_btc_tx_initialize_tx(
+            initialize_funding,
+            lifecycle["data_hash"],
+            cell_deps,
+            initialize_header["hash"],
+            initialize_material,
+        )
+        initialize_dry_run = devnet.rpc("dry_run_transaction", [initialize_tx])
+        initialize_commit = devnet.submit_and_commit(initialize_tx, "BTC transaction commitment initialize")
+        initial_state_live = devnet.assert_live_cell(
+            initialize_commit["tx_hash"],
+            0,
+            label="BTC transaction active state",
+            expected_capacity=STATE_CAPACITY,
+            expected_lock=always_success_lock(),
+            expected_type=lifecycle_type(lifecycle["data_hash"]),
+            expected_data=initialize_material["new_cell_data"],
+        )
+        initial_ref = {"tx_hash": initialize_commit["tx_hash"], "index": 0, "capacity": STATE_CAPACITY}
+
+        stage = "negative wrong committer signature"
+        negative_header = devnet.rpc("get_tip_header")
+        wrong_sig_material = build_btc_tx_material(
+            op=OP_BTC_COMMIT_TRANSACTION,
+            base=base,
+            old_cell=initialize_material["new_cell"],
+            mutate_signature=True,
+        )
+        wrong_sig_funding = devnet.collect_spendable(RECEIPT_CAPACITY + 100 * SHANNONS)
+        wrong_sig_tx = build_btc_tx_commit_tx(
+            old_ref=initial_ref,
+            funding=wrong_sig_funding,
+            lifecycle_data_hash=lifecycle["data_hash"],
+            cell_deps=cell_deps,
+            header_hash=negative_header["hash"],
+            material=wrong_sig_material,
+        )
+        wrong_committer_signature_reject = devnet.dry_run_rejects(
+            wrong_sig_tx,
+            "BTC transaction wrong committer signature",
+            expected_source="Inputs[0].Type",
+            expected_data_hash=lifecycle["data_hash"],
+            expected_error_code=5,
+        )
+
+        stage = "negative zero BTC txid"
+        zero_txid_material = build_btc_tx_material(
+            op=OP_BTC_COMMIT_TRANSACTION,
+            base=base,
+            old_cell=initialize_material["new_cell"],
+            zero_btc_txid=True,
+        )
+        zero_txid_funding = devnet.collect_spendable(RECEIPT_CAPACITY + 100 * SHANNONS)
+        zero_txid_tx = build_btc_tx_commit_tx(
+            old_ref=initial_ref,
+            funding=zero_txid_funding,
+            lifecycle_data_hash=lifecycle["data_hash"],
+            cell_deps=cell_deps,
+            header_hash=negative_header["hash"],
+            material=zero_txid_material,
+        )
+        zero_btc_txid_reject = devnet.dry_run_rejects(
+            zero_txid_tx,
+            "BTC transaction zero txid",
+            expected_source="Inputs[0].Type",
+            expected_data_hash=lifecycle["data_hash"],
+            expected_error_code=5,
+        )
+
+        stage = "negative transition hash mismatch"
+        mismatch_material = build_btc_tx_material(
+            op=OP_BTC_COMMIT_TRANSACTION,
+            base=base,
+            old_cell=initialize_material["new_cell"],
+            transition_hash_mismatch=True,
+        )
+        mismatch_funding = devnet.collect_spendable(RECEIPT_CAPACITY + 100 * SHANNONS)
+        mismatch_tx = build_btc_tx_commit_tx(
+            old_ref=initial_ref,
+            funding=mismatch_funding,
+            lifecycle_data_hash=lifecycle["data_hash"],
+            cell_deps=cell_deps,
+            header_hash=negative_header["hash"],
+            material=mismatch_material,
+        )
+        transition_hash_mismatch_reject = devnet.dry_run_rejects(
+            mismatch_tx,
+            "BTC transaction transition hash mismatch",
+            expected_source="Inputs[0].Type",
+            expected_data_hash=lifecycle["data_hash"],
+            expected_error_code=5,
+        )
+        post_negative_state_live = devnet.assert_live_cell(
+            initial_ref["tx_hash"],
+            initial_ref["index"],
+            label="post-negative BTC transaction active state",
+            expected_capacity=STATE_CAPACITY,
+            expected_lock=always_success_lock(),
+            expected_type=lifecycle_type(lifecycle["data_hash"]),
+            expected_data=initialize_material["new_cell_data"],
+        )
+
+        stage = "valid commit transaction"
+        commit_header = devnet.rpc("get_tip_header")
+        commit_material = build_btc_tx_material(
+            op=OP_BTC_COMMIT_TRANSACTION,
+            base=base,
+            old_cell=initialize_material["new_cell"],
+        )
+        commit_funding = devnet.collect_spendable(RECEIPT_CAPACITY + 100 * SHANNONS)
+        commit_tx = build_btc_tx_commit_tx(
+            old_ref=initial_ref,
+            funding=commit_funding,
+            lifecycle_data_hash=lifecycle["data_hash"],
+            cell_deps=cell_deps,
+            header_hash=commit_header["hash"],
+            material=commit_material,
+        )
+        commit_dry_run = devnet.rpc("dry_run_transaction", [commit_tx])
+        commit_commit = devnet.submit_and_commit(commit_tx, "BTC transaction commitment transition")
+        old_state_dead = devnet.wait_dead_cell(initial_ref["tx_hash"], initial_ref["index"])
+        committed_state_live = devnet.assert_live_cell(
+            commit_commit["tx_hash"],
+            0,
+            label="BTC transaction committed state",
+            expected_capacity=STATE_CAPACITY,
+            expected_lock=always_success_lock(),
+            expected_type=lifecycle_type(lifecycle["data_hash"]),
+            expected_data=commit_material["new_cell_data"],
+        )
+        receipt_live = devnet.assert_live_cell(
+            commit_commit["tx_hash"],
+            1,
+            label="BTC transaction commitment receipt",
+            expected_capacity=RECEIPT_CAPACITY,
+            expected_lock=always_success_lock(),
+            expected_type=None,
+            expected_data=commit_material["receipt_data"],
+        )
+
+        report.update(
+            {
+                "status": "passed",
+                "live_devnet_rpc_executed": True,
+                "stateful_lifecycle_executed": True,
+                "ckb_log": str(devnet.log_path),
+                "rpc_url": devnet.rpc_url,
+                "artifacts": {"verifier": verifier, "lifecycle": lifecycle},
+                "provenance": provenance,
+                "initialize": {
+                    "dry_run_cycles": initialize_dry_run.get("cycles"),
+                    "commit": initialize_commit,
+                    "state_live": initial_state_live.get("status") == "live",
+                    "state_data_hash": hex0x(cell_data_hash(initialize_material["new_cell_data"])),
+                },
+                "commit_transaction": {
+                    "dry_run_cycles": commit_dry_run.get("cycles"),
+                    "commit": commit_commit,
+                    "old_state_not_live": old_state_dead.get("status") != "live",
+                    "new_state_live": committed_state_live.get("status") == "live",
+                    "receipt_live": receipt_live.get("status") == "live",
+                    "btc_tx_tuple_bound": (
+                        commit_material["new_cell"]["btc_tx_commitment_hash"] == commit_material["btc_tx_commitment_hash"]
+                        and commit_material["new_cell"]["btc_tx_commitment_hash"] != ZERO_HASH
+                    ),
+                    "transition_commitment_bound": commit_material["transition_commitment_hash"] == ckb_hash(base["committed_state_hash"]),
+                    "public_btc_verification_executed": True,
+                    "public_btc_verification_scope": "BIP340 runtime verifier execution over the signed BTC commitment intent",
+                    "btc_tx_commitment_hash": hex0x(commit_material["btc_tx_commitment_hash"]),
+                    "signed_intent_hash": hex0x(commit_material["signed_intent_hash"]),
+                    "receipt_hash": hex0x(commit_material["latest_receipt_hash"]),
+                },
+                "negative_cases": {
+                    "wrong_committer_signature_dry_run": wrong_committer_signature_reject,
+                    "zero_btc_txid_dry_run": zero_btc_txid_reject,
+                    "transition_hash_mismatch_dry_run": transition_hash_mismatch_reject,
+                    "post_negative_state_still_live": post_negative_state_live.get("status") == "live",
+                },
+            }
+        )
+        return report
+    except Exception as error:
+        report.update(
+            {
+                "status": "failed",
+                "stage": stage,
+                "error": str(error),
+                "ckb_log": str(devnet.log_path),
+                "rpc_url": devnet.rpc_url,
+            }
+        )
+        return report
+    finally:
+        if not args.keep_node:
+            devnet.stop()
+
+
+def run_btc_utxo_seal_live(args: argparse.Namespace, contract: ReportContract) -> dict[str, Any]:
+    repo_root = args.repo_root.resolve()
+    ckb_repo = args.ckb_repo.resolve()
+    ckb_bin = resolve_ckb_bin(ckb_repo, args.ckb_bin)
+    run_dir = (args.run_dir or (repo_root / "target/novaseal-btc-utxo-seal-devnet-stateful-live" / str(int(time.time())))).resolve()
+    run_dir.mkdir(parents=True, exist_ok=True)
+    lifecycle_elf = run_dir / "nova-btc-utxo-seal-lifecycle-type.elf"
+    compile_contract_lifecycle(repo_root, contract, lifecycle_elf)
+    verifier_elf = repo_root / "proposals/novaseal/v0-mvp-skeleton/target/novaseal-btc-verifier-riscv-shell-release.elf"
+    if not verifier_elf.is_file():
+        raise LiveAcceptanceError(f"missing verifier ELF: {verifier_elf}")
+
+    devnet = CkbDevnet(ckb_repo, ckb_bin, run_dir)
+    report: dict[str, Any] = {
+        "schema": "novaseal-planned-profile-devnet-stateful-live-v0.1",
+        "profile": contract.profile,
+        "status": "running",
+        "scenario": "btc_utxo_seal_initialize_then_close",
+        "repo_root": str(repo_root),
+        "ckb_repo": str(ckb_repo),
+        "ckb_bin": str(ckb_bin),
+        "run_dir": str(run_dir),
+        "expected_tx_hashes": named_pointer_rows(contract.tx_hashes, "pointer"),
+        "required_live_checks": named_pointer_rows(contract.live_checks, "pointer"),
+        "required_negative_cases": named_pointer_rows(contract.negative_cases, "key"),
+        "btc_public_verification_scope": (
+            "live CKB closure executes the BIP340 runtime verifier and binds a declared BTC UTXO/spend tuple; "
+            "SPV/indexer spend-finality evidence remains separate production evidence"
+        ),
+    }
+    stage = "initializing"
+    try:
+        stage = "start devnet"
+        devnet.start()
+        stage = "deploy artifacts"
+        genesis = devnet.get_block_by_number(0)
+        always_dep = always_success_dep(genesis["transactions"][0]["hash"])
+        verifier = deploy_code_cell(devnet, "cellscript_btc_bip340_verifier_riscv", verifier_elf.read_bytes(), always_dep)
+        lifecycle = deploy_code_cell(devnet, "nova_btc_utxo_seal_lifecycle_type", lifecycle_elf.read_bytes(), always_dep)
+        cell_deps = [verifier["cell_dep"], lifecycle["cell_dep"], always_dep]
+        provenance = stateful_provenance(
+            repo_root,
+            [
+                pathlib.Path("proposals/novaseal/btc-utxo-seal-profile-v0/Cell.toml"),
+                pathlib.Path("proposals/novaseal/btc-utxo-seal-profile-v0/src"),
+                pathlib.Path("proposals/novaseal/btc-utxo-seal-profile-v0/schemas"),
+                pathlib.Path("proposals/novaseal/v0-mvp-skeleton/verifier/novaseal_btc_verifier"),
+                pathlib.Path("scripts/novaseal_planned_profiles_devnet_stateful_live.py"),
+                pathlib.Path("scripts/novaseal_devnet_stateful_live.py"),
+            ],
+            {"verifier": verifier_elf, "lifecycle": lifecycle_elf},
+        )
+        base = btc_utxo_base_state("live")
+
+        stage = "valid initialize"
+        initialize_material = build_btc_utxo_material(op=OP_BTC_UTXO_INITIALIZE_ACTIVE_SEAL, base=base, old_cell=None)
+        initialize_header = devnet.rpc("get_tip_header")
+        initialize_funding = devnet.collect_spendable(STATE_CAPACITY + 100 * SHANNONS)
+        initialize_tx = build_btc_utxo_initialize_tx(
+            initialize_funding,
+            lifecycle["data_hash"],
+            cell_deps,
+            initialize_header["hash"],
+            initialize_material,
+        )
+        initialize_dry_run = devnet.rpc("dry_run_transaction", [initialize_tx])
+        initialize_commit = devnet.submit_and_commit(initialize_tx, "BTC UTXO seal initialize")
+        initial_state_live = devnet.assert_live_cell(
+            initialize_commit["tx_hash"],
+            0,
+            label="BTC UTXO active seal",
+            expected_capacity=STATE_CAPACITY,
+            expected_lock=always_success_lock(),
+            expected_type=lifecycle_type(lifecycle["data_hash"]),
+            expected_data=initialize_material["new_cell_data"],
+        )
+        initial_ref = {"tx_hash": initialize_commit["tx_hash"], "index": 0, "capacity": STATE_CAPACITY}
+
+        stage = "negative wrong owner signature"
+        negative_header = devnet.rpc("get_tip_header")
+        wrong_sig_material = build_btc_utxo_material(
+            op=OP_BTC_UTXO_CLOSE,
+            base=base,
+            old_cell=initialize_material["new_cell"],
+            mutate_signature=True,
+        )
+        wrong_sig_funding = devnet.collect_spendable(RECEIPT_CAPACITY + 100 * SHANNONS)
+        wrong_sig_tx = build_btc_utxo_close_tx(
+            old_ref=initial_ref,
+            funding=wrong_sig_funding,
+            lifecycle_data_hash=lifecycle["data_hash"],
+            cell_deps=cell_deps,
+            header_hash=negative_header["hash"],
+            material=wrong_sig_material,
+        )
+        wrong_owner_signature_reject = devnet.dry_run_rejects(
+            wrong_sig_tx,
+            "BTC UTXO wrong owner signature",
+            expected_source="Inputs[0].Type",
+            expected_data_hash=lifecycle["data_hash"],
+            expected_error_code=5,
+        )
+
+        stage = "negative UTXO commitment mismatch"
+        mismatch_material = build_btc_utxo_material(
+            op=OP_BTC_UTXO_CLOSE,
+            base=base,
+            old_cell=initialize_material["new_cell"],
+            utxo_commitment_mismatch=True,
+        )
+        mismatch_funding = devnet.collect_spendable(RECEIPT_CAPACITY + 100 * SHANNONS)
+        mismatch_tx = build_btc_utxo_close_tx(
+            old_ref=initial_ref,
+            funding=mismatch_funding,
+            lifecycle_data_hash=lifecycle["data_hash"],
+            cell_deps=cell_deps,
+            header_hash=negative_header["hash"],
+            material=mismatch_material,
+        )
+        utxo_commitment_mismatch_reject = devnet.dry_run_rejects(
+            mismatch_tx,
+            "BTC UTXO commitment mismatch",
+            expected_source="Inputs[0].Type",
+            expected_data_hash=lifecycle["data_hash"],
+            expected_error_code=5,
+        )
+
+        stage = "negative zero spend txid"
+        zero_spend_material = build_btc_utxo_material(
+            op=OP_BTC_UTXO_CLOSE,
+            base=base,
+            old_cell=initialize_material["new_cell"],
+            zero_spend_txid=True,
+        )
+        zero_spend_funding = devnet.collect_spendable(RECEIPT_CAPACITY + 100 * SHANNONS)
+        zero_spend_tx = build_btc_utxo_close_tx(
+            old_ref=initial_ref,
+            funding=zero_spend_funding,
+            lifecycle_data_hash=lifecycle["data_hash"],
+            cell_deps=cell_deps,
+            header_hash=negative_header["hash"],
+            material=zero_spend_material,
+        )
+        zero_spend_txid_reject = devnet.dry_run_rejects(
+            zero_spend_tx,
+            "BTC UTXO zero spend txid",
+            expected_source="Inputs[0].Type",
+            expected_data_hash=lifecycle["data_hash"],
+            expected_error_code=5,
+        )
+        post_negative_state_live = devnet.assert_live_cell(
+            initial_ref["tx_hash"],
+            initial_ref["index"],
+            label="post-negative BTC UTXO active seal",
+            expected_capacity=STATE_CAPACITY,
+            expected_lock=always_success_lock(),
+            expected_type=lifecycle_type(lifecycle["data_hash"]),
+            expected_data=initialize_material["new_cell_data"],
+        )
+
+        stage = "valid close UTXO seal"
+        close_header = devnet.rpc("get_tip_header")
+        close_material = build_btc_utxo_material(
+            op=OP_BTC_UTXO_CLOSE,
+            base=base,
+            old_cell=initialize_material["new_cell"],
+        )
+        close_funding = devnet.collect_spendable(RECEIPT_CAPACITY + 100 * SHANNONS)
+        close_tx = build_btc_utxo_close_tx(
+            old_ref=initial_ref,
+            funding=close_funding,
+            lifecycle_data_hash=lifecycle["data_hash"],
+            cell_deps=cell_deps,
+            header_hash=close_header["hash"],
+            material=close_material,
+        )
+        close_dry_run = devnet.rpc("dry_run_transaction", [close_tx])
+        close_commit = devnet.submit_and_commit(close_tx, "BTC UTXO seal closure")
+        old_state_dead = devnet.wait_dead_cell(initial_ref["tx_hash"], initial_ref["index"])
+        closed_state_live = devnet.assert_live_cell(
+            close_commit["tx_hash"],
+            0,
+            label="BTC UTXO closed seal",
+            expected_capacity=STATE_CAPACITY,
+            expected_lock=always_success_lock(),
+            expected_type=lifecycle_type(lifecycle["data_hash"]),
+            expected_data=close_material["new_cell_data"],
+        )
+        receipt_live = devnet.assert_live_cell(
+            close_commit["tx_hash"],
+            1,
+            label="BTC UTXO closure receipt",
+            expected_capacity=RECEIPT_CAPACITY,
+            expected_lock=always_success_lock(),
+            expected_type=None,
+            expected_data=close_material["receipt_data"],
+        )
+
+        report.update(
+            {
+                "status": "passed",
+                "live_devnet_rpc_executed": True,
+                "stateful_lifecycle_executed": True,
+                "ckb_log": str(devnet.log_path),
+                "rpc_url": devnet.rpc_url,
+                "artifacts": {"verifier": verifier, "lifecycle": lifecycle},
+                "provenance": provenance,
+                "initialize": {
+                    "dry_run_cycles": initialize_dry_run.get("cycles"),
+                    "commit": initialize_commit,
+                    "state_live": initial_state_live.get("status") == "live",
+                    "state_data_hash": hex0x(cell_data_hash(initialize_material["new_cell_data"])),
+                },
+                "close_utxo_seal": {
+                    "dry_run_cycles": close_dry_run.get("cycles"),
+                    "commit": close_commit,
+                    "old_state_not_live": old_state_dead.get("status") != "live",
+                    "new_state_live": closed_state_live.get("status") == "live",
+                    "receipt_live": receipt_live.get("status") == "live",
+                    "sealed_utxo_tuple_bound": (
+                        initialize_material["new_cell"]["sealed_utxo_commitment_hash"] == close_material["sealed_utxo_commitment_hash"]
+                    ),
+                    "spend_tuple_bound": close_material["closure_commitment_hash"] != ZERO_HASH,
+                    "public_btc_spend_verification_executed": True,
+                    "public_btc_verification_scope": "BIP340 runtime verifier execution over the signed BTC UTXO closure intent",
+                    "sealed_utxo_commitment_hash": hex0x(close_material["sealed_utxo_commitment_hash"]),
+                    "closure_commitment_hash": hex0x(close_material["closure_commitment_hash"]),
+                    "signed_intent_hash": hex0x(close_material["signed_intent_hash"]),
+                    "receipt_hash": hex0x(close_material["latest_receipt_hash"]),
+                },
+                "negative_cases": {
+                    "wrong_owner_signature_dry_run": wrong_owner_signature_reject,
+                    "utxo_commitment_mismatch_dry_run": utxo_commitment_mismatch_reject,
+                    "zero_spend_txid_dry_run": zero_spend_txid_reject,
+                    "post_negative_state_still_live": post_negative_state_live.get("status") == "live",
+                },
+            }
+        )
+        return report
+    except Exception as error:
+        report.update(
+            {
+                "status": "failed",
+                "stage": stage,
+                "error": str(error),
+                "ckb_log": str(devnet.log_path),
+                "rpc_url": devnet.rpc_url,
+            }
+        )
+        return report
+    finally:
+        if not args.keep_node:
+            devnet.stop()
+
+
+def run_fiber_candidate_live(args: argparse.Namespace, contract: ReportContract) -> dict[str, Any]:
+    repo_root = args.repo_root.resolve()
+    ckb_repo = args.ckb_repo.resolve()
+    ckb_bin = resolve_ckb_bin(ckb_repo, args.ckb_bin)
+    run_dir = (args.run_dir or (repo_root / "target/novaseal-fiber-candidate-devnet-stateful-live" / str(int(time.time())))).resolve()
+    run_dir.mkdir(parents=True, exist_ok=True)
+    lifecycle_elf = run_dir / "nova-fiber-candidate-lifecycle-type.elf"
+    compile_contract_lifecycle(repo_root, contract, lifecycle_elf)
+    verifier_elf = repo_root / "proposals/novaseal/v0-mvp-skeleton/target/novaseal-btc-verifier-riscv-shell-release.elf"
+    if not verifier_elf.is_file():
+        raise LiveAcceptanceError(f"missing verifier ELF: {verifier_elf}")
+
+    devnet = CkbDevnet(ckb_repo, ckb_bin, run_dir)
+    report: dict[str, Any] = {
+        "schema": "novaseal-planned-profile-devnet-stateful-live-v0.1",
+        "profile": contract.profile,
+        "status": "running",
+        "scenario": "fiber_candidate_initialize_then_settle",
+        "repo_root": str(repo_root),
+        "ckb_repo": str(ckb_repo),
+        "ckb_bin": str(ckb_bin),
+        "run_dir": str(run_dir),
+        "expected_tx_hashes": named_pointer_rows(contract.tx_hashes, "pointer"),
+        "required_live_checks": named_pointer_rows(contract.live_checks, "pointer"),
+        "required_negative_cases": named_pointer_rows(contract.negative_cases, "key"),
+        "fiber_execution_scope": "live CKB stateful settlement path; real Fiber node/channel execution remains a later external experiment",
+    }
+    stage = "initializing"
+    try:
+        stage = "start devnet"
+        devnet.start()
+        stage = "deploy artifacts"
+        genesis = devnet.get_block_by_number(0)
+        always_dep = always_success_dep(genesis["transactions"][0]["hash"])
+        verifier = deploy_code_cell(devnet, "cellscript_btc_bip340_verifier_riscv", verifier_elf.read_bytes(), always_dep)
+        lifecycle = deploy_code_cell(devnet, "nova_fiber_candidate_lifecycle_type", lifecycle_elf.read_bytes(), always_dep)
+        cell_deps = [verifier["cell_dep"], lifecycle["cell_dep"], always_dep]
+        provenance = stateful_provenance(
+            repo_root,
+            [
+                pathlib.Path("proposals/novaseal/fiber-candidate-profile-v0/Cell.toml"),
+                pathlib.Path("proposals/novaseal/fiber-candidate-profile-v0/src"),
+                pathlib.Path("proposals/novaseal/fiber-candidate-profile-v0/schemas"),
+                pathlib.Path("proposals/novaseal/v0-mvp-skeleton/verifier/novaseal_btc_verifier"),
+                pathlib.Path("scripts/novaseal_planned_profiles_devnet_stateful_live.py"),
+                pathlib.Path("scripts/novaseal_devnet_stateful_live.py"),
+            ],
+            {"verifier": verifier_elf, "lifecycle": lifecycle_elf},
+        )
+        base = fiber_base_state("live")
+
+        stage = "valid initialize"
+        initialize_material = build_fiber_material(op=OP_FIBER_INITIALIZE_ACTIVE_CANDIDATE, base=base, old_cell=None)
+        initialize_header = devnet.rpc("get_tip_header")
+        initialize_funding = devnet.collect_spendable(STATE_CAPACITY + 100 * SHANNONS)
+        initialize_tx = build_fiber_initialize_tx(
+            initialize_funding,
+            lifecycle["data_hash"],
+            cell_deps,
+            initialize_header["hash"],
+            initialize_material,
+        )
+        initialize_dry_run = devnet.rpc("dry_run_transaction", [initialize_tx])
+        initialize_commit = devnet.submit_and_commit(initialize_tx, "Fiber candidate initialize")
+        initial_state_live = devnet.assert_live_cell(
+            initialize_commit["tx_hash"],
+            0,
+            label="Fiber active candidate",
+            expected_capacity=STATE_CAPACITY,
+            expected_lock=always_success_lock(),
+            expected_type=lifecycle_type(lifecycle["data_hash"]),
+            expected_data=initialize_material["new_cell_data"],
+        )
+        initial_ref = {"tx_hash": initialize_commit["tx_hash"], "index": 0, "capacity": STATE_CAPACITY}
+
+        stage = "negative wrong operator signature"
+        negative_header = devnet.rpc("get_tip_header")
+        wrong_sig_material = build_fiber_material(
+            op=OP_FIBER_SETTLE,
+            base=base,
+            old_cell=initialize_material["new_cell"],
+            mutate_signature=True,
+        )
+        wrong_sig_funding = devnet.collect_spendable(RECEIPT_CAPACITY + 100 * SHANNONS)
+        wrong_sig_tx = build_fiber_settle_tx(
+            old_ref=initial_ref,
+            funding=wrong_sig_funding,
+            lifecycle_data_hash=lifecycle["data_hash"],
+            cell_deps=cell_deps,
+            header_hash=negative_header["hash"],
+            material=wrong_sig_material,
+        )
+        wrong_operator_signature_reject = devnet.dry_run_rejects(
+            wrong_sig_tx,
+            "Fiber wrong operator signature",
+            expected_source="Inputs[0].Type",
+            expected_data_hash=lifecycle["data_hash"],
+            expected_error_code=5,
+        )
+
+        stage = "negative balance replay"
+        replay_material = build_fiber_material(
+            op=OP_FIBER_SETTLE,
+            base=base,
+            old_cell=initialize_material["new_cell"],
+            balance_replay=True,
+        )
+        replay_funding = devnet.collect_spendable(RECEIPT_CAPACITY + 100 * SHANNONS)
+        replay_tx = build_fiber_settle_tx(
+            old_ref=initial_ref,
+            funding=replay_funding,
+            lifecycle_data_hash=lifecycle["data_hash"],
+            cell_deps=cell_deps,
+            header_hash=negative_header["hash"],
+            material=replay_material,
+        )
+        balance_commitment_replay_reject = devnet.dry_run_rejects(
+            replay_tx,
+            "Fiber balance commitment replay",
+            expected_source="Inputs[0].Type",
+            expected_data_hash=lifecycle["data_hash"],
+            expected_error_code=5,
+        )
+        post_negative_state_live = devnet.assert_live_cell(
+            initial_ref["tx_hash"],
+            initial_ref["index"],
+            label="post-negative Fiber active candidate",
+            expected_capacity=STATE_CAPACITY,
+            expected_lock=always_success_lock(),
+            expected_type=lifecycle_type(lifecycle["data_hash"]),
+            expected_data=initialize_material["new_cell_data"],
+        )
+
+        stage = "valid settle"
+        settle_header = devnet.rpc("get_tip_header")
+        settle_material = build_fiber_material(op=OP_FIBER_SETTLE, base=base, old_cell=initialize_material["new_cell"])
+        settle_funding = devnet.collect_spendable(RECEIPT_CAPACITY + 100 * SHANNONS)
+        settle_tx = build_fiber_settle_tx(
+            old_ref=initial_ref,
+            funding=settle_funding,
+            lifecycle_data_hash=lifecycle["data_hash"],
+            cell_deps=cell_deps,
+            header_hash=settle_header["hash"],
+            material=settle_material,
+        )
+        settle_dry_run = devnet.rpc("dry_run_transaction", [settle_tx])
+        settle_commit = devnet.submit_and_commit(settle_tx, "Fiber candidate settlement")
+        old_candidate_dead = devnet.wait_dead_cell(initial_ref["tx_hash"], initial_ref["index"])
+        settled_candidate_live = devnet.assert_live_cell(
+            settle_commit["tx_hash"],
+            0,
+            label="Fiber settled candidate",
+            expected_capacity=STATE_CAPACITY,
+            expected_lock=always_success_lock(),
+            expected_type=lifecycle_type(lifecycle["data_hash"]),
+            expected_data=settle_material["new_cell_data"],
+        )
+        receipt_live = devnet.assert_live_cell(
+            settle_commit["tx_hash"],
+            1,
+            label="Fiber settlement receipt",
+            expected_capacity=RECEIPT_CAPACITY,
+            expected_lock=always_success_lock(),
+            expected_type=None,
+            expected_data=settle_material["receipt_data"],
+        )
+
+        report.update(
+            {
+                "status": "passed",
+                "live_devnet_rpc_executed": True,
+                "stateful_lifecycle_executed": True,
+                "ckb_log": str(devnet.log_path),
+                "rpc_url": devnet.rpc_url,
+                "artifacts": {"verifier": verifier, "lifecycle": lifecycle},
+                "provenance": provenance,
+                "initialize": {
+                    "dry_run_cycles": initialize_dry_run.get("cycles"),
+                    "commit": initialize_commit,
+                    "candidate_live": initial_state_live.get("status") == "live",
+                    "candidate_data_hash": hex0x(cell_data_hash(initialize_material["new_cell_data"])),
+                },
+                "settle_fiber_candidate": {
+                    "dry_run_cycles": settle_dry_run.get("cycles"),
+                    "commit": settle_commit,
+                    "old_candidate_not_live": old_candidate_dead.get("status") != "live",
+                    "new_candidate_live": settled_candidate_live.get("status") == "live",
+                    "receipt_live": receipt_live.get("status") == "live",
+                    "balance_commitment_progressed": (
+                        settle_material["new_cell"]["balance_commitment_hash"]
+                        != initialize_material["new_cell"]["balance_commitment_hash"]
+                    ),
+                    "fiber_execution_executed": True,
+                    "fiber_execution_scope": "profile-level live CKB settlement path; external Fiber node experiment is still separate",
+                    "settlement_commitment_hash": hex0x(settle_material["settlement_commitment_hash"]),
+                    "signed_intent_hash": hex0x(settle_material["signed_intent_hash"]),
+                    "receipt_hash": hex0x(settle_material["latest_receipt_hash"]),
+                },
+                "negative_cases": {
+                    "wrong_operator_signature_dry_run": wrong_operator_signature_reject,
+                    "balance_commitment_replay_dry_run": balance_commitment_replay_reject,
+                    "post_negative_state_still_live": post_negative_state_live.get("status") == "live",
+                },
+            }
+        )
+        return report
+    except Exception as error:
+        report.update(
+            {
+                "status": "failed",
+                "stage": stage,
+                "error": str(error),
+                "ckb_log": str(devnet.log_path),
+                "rpc_url": devnet.rpc_url,
+            }
+        )
+        return report
+    finally:
+        if not args.keep_node:
+            devnet.stop()
+
+
 def run_live(args: argparse.Namespace, contract: ReportContract) -> dict[str, Any]:
     if contract.profile == "fungible-xudt":
         return run_fungible_xudt_live(args, contract)
     if contract.profile == "rwa-receipt":
         return run_rwa_receipt_live(args, contract)
+    if contract.profile == "btc-transaction-commitment":
+        return run_btc_transaction_commitment_live(args, contract)
+    if contract.profile == "btc-utxo-seal":
+        return run_btc_utxo_seal_live(args, contract)
+    if contract.profile == "fiber-candidate":
+        return run_fiber_candidate_live(args, contract)
     report = not_run_report(contract)
     report["live_runner_gap"] = f"{contract.profile} live runner is not implemented yet"
     return report
