@@ -145,11 +145,11 @@ The certification module writes and verifies three report layers:
 
 | Report | Purpose |
 | --- | --- |
-| `target/novaseal-production-gates.json` | NovaSeal local production-prep gate, profile certification result, and external-attestation blockers |
+| `target/novaseal-production-gates.json` | NovaSeal local production-prep gate, profile certification result, public BTC SPV evidence state, and external-attestation blockers |
 | `target/novaseal-devnet-stateful-acceptance.json` | Aggregated core plus Agreement live/devnet stateful acceptance evidence |
 | `target/cellscript-certification/novaseal-profile-v0.json` | Public `cellc certify` summary, plugin implementation hash, report hash, checks and status |
 
-This gives profile certification production-grade local meaning without making a production-mainnet claim by accident. A package can pass public ecosystem profile certification while still failing `--require-production` until public/shared CellDep pinning and external verifier TCB attestation are supplied. It is a rather British distinction: admitted to the club, but still waiting for the paperwork before touching the silver.
+This gives profile certification production-grade local meaning without making a production-mainnet claim by accident. A package can pass public ecosystem profile certification while still failing `--require-production` until public/shared CellDep pinning, public BTC SPV evidence for BTC-facing profiles, and external verifier TCB attestation are supplied. It is a rather British distinction: admitted to the club, but still waiting for the paperwork before touching the silver.
 
 The v0 skeleton is also a deliberate stress test of CellScript as a package-first contract system. It exercises typed schemas, signed intents, generated receipts, proof plans, audit bundles, devnet acceptance evidence and deterministic certification in one coherent workflow. The result is not a production-mainnet claim, but it is stronger than a toy demo: it demonstrates quasi-production local readiness and a proof-plan discipline that external builders can inspect, reproduce and challenge.
 
@@ -232,7 +232,7 @@ Out of scope for Agreement v0:
 | BTC collateral or Bitcoin finality | Requires a BTC transaction or UTXO-seal profile |
 | Dynamic liquidation or margin calls | Requires oracle and market machinery |
 | iCKB/xUDT/Fiber execution | Requires separate balance-bearing profile |
-| Production mainnet claim by local files alone | Requires public CellDep pinning and external verifier TCB attestation |
+| Production mainnet claim by local files alone | Requires public CellDep pinning, public BTC SPV evidence for BTC-facing profiles, and external verifier TCB attestation |
 
 ## 7. Relationship to RGB++
 
@@ -313,7 +313,7 @@ The exact directory tree is flexible; the requirement is that a developer can lo
 
 CellScript fits this project because the package is not just a pile of scripts. It can carry schemas, fixtures, receipts and audit evidence beside the contract logic, which makes the work more reviewable.
 
-For the Agreement profile, devnet acceptance now includes conformance evidence. A release gate can therefore be deterministic for local readiness: it returns the same answer from the same manifest, source tree, pinned artefacts and evidence files. Production readiness remains a stronger claim because public/shared CellDep availability and external verifier TCB attestation must be supplied outside the local repository.
+For the Agreement profile, devnet acceptance now includes conformance evidence. A release gate can therefore be deterministic for local readiness: it returns the same answer from the same manifest, source tree, pinned artefacts and evidence files. Production readiness remains a stronger claim because public/shared CellDep availability, public BTC SPV evidence for BTC-facing profiles, and external verifier TCB attestation must be supplied outside the local repository.
 
 ## 11. Security Boundaries
 

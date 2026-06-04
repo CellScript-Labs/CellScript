@@ -37,10 +37,12 @@ const WALLET_VECTORS: &str = "target/novaseal-wallet-signing-vectors.json";
 const TCB_REVIEW: &str = "target/novaseal-bip340-tcb-review.json";
 const PUBLIC_CELLDEP_ATTESTATION: &str = "proposals/novaseal/v0-mvp-skeleton/proofs/public_shared_cell_dep_attestation.json";
 const EXTERNAL_TCB_ATTESTATION: &str = "proposals/novaseal/v0-mvp-skeleton/proofs/bip340_external_tcb_review_attestation.json";
+const PUBLIC_BTC_SPV_EVIDENCE: &str = "proposals/novaseal/v0-mvp-skeleton/proofs/public_btc_spv_evidence.json";
 const PUBLIC_CELLDEP_ATTESTATION_TEMPLATE: &str =
     "proposals/novaseal/v0-mvp-skeleton/proofs/public_shared_cell_dep_attestation.template.json";
 const EXTERNAL_TCB_ATTESTATION_TEMPLATE: &str =
     "proposals/novaseal/v0-mvp-skeleton/proofs/bip340_external_tcb_review_attestation.template.json";
+const PUBLIC_BTC_SPV_EVIDENCE_TEMPLATE: &str = "proposals/novaseal/v0-mvp-skeleton/proofs/public_btc_spv_evidence.template.json";
 
 const EXPECTED_NOVASEAL_CANONICAL_SCHEMA: &str = "NovaSealCanonicalV0";
 const EXPECTED_NOVASEAL_CANONICAL_ENVELOPE: &str = "NovaSealCanonicalEnvelopeV0";
@@ -55,6 +57,8 @@ const EXPECTED_AGREEMENT_CONFORMANCE_GATE: &str = "cellc certify --plugin novase
 const EXPECTED_PROFILE_CERTIFICATION_GATE: &str = "cellc certify --plugin novaseal-profile-v0";
 const EXPECTED_CERTIFICATION_PLUGIN: &str = "novaseal-profile-v0";
 const EXPECTED_CERTIFICATION_REPORT: &str = "target/cellscript-certification/novaseal-profile-v0.json";
+const EXPECTED_BTC_SPV_EVIDENCE_PROFILES: &[&str] =
+    &[EXPECTED_BTC_TX_COMMITMENT_PROFILE, EXPECTED_BTC_UTXO_SEAL_PROFILE, EXPECTED_DUAL_SEAL_PROFILE];
 
 const EXPECTED_VERIFIER: &[(&str, &str)] = &[
     ("name", "cellscript_btc_bip340_verifier_riscv"),
@@ -474,6 +478,7 @@ pub(crate) fn build_report(repo_root: &Path) -> Result<Value> {
     let agreement_manifest = compare_manifest_dep(repo_root, AGREEMENT_MANIFEST, &agreement_live, artifact_hash.as_deref())?;
     let public_attestation = validate_public_attestation(repo_root, PUBLIC_CELLDEP_ATTESTATION, artifact_hash.as_deref())?;
     let external_review = validate_external_review(repo_root, EXTERNAL_TCB_ATTESTATION, artifact_hash.as_deref())?;
+    let btc_spv_evidence = validate_btc_spv_evidence(repo_root, PUBLIC_BTC_SPV_EVIDENCE)?;
     let core_security = validate_core_security_source(repo_root)?;
     let agreement_conformance = validate_agreement_profile_conformance(
         repo_root,
@@ -493,6 +498,7 @@ pub(crate) fn build_report(repo_root: &Path) -> Result<Value> {
         tcb: &tcb,
         public_attestation: &public_attestation,
         external_review: &external_review,
+        btc_spv_evidence: &btc_spv_evidence,
     })?;
 
     let gates = vec![
@@ -574,6 +580,12 @@ pub(crate) fn build_report(repo_root: &Path) -> Result<Value> {
             EXTERNAL_TCB_ATTESTATION,
             external_review.clone(),
         ),
+        gate(
+            "public_btc_spv_evidence",
+            json_pointer_str(&btc_spv_evidence, "/status").unwrap_or("failed"),
+            PUBLIC_BTC_SPV_EVIDENCE,
+            btc_spv_evidence.clone(),
+        ),
     ];
 
     let local_ready = gates
@@ -606,10 +618,13 @@ pub(crate) fn build_report(repo_root: &Path) -> Result<Value> {
         "v1_readiness": v1_readiness,
         "gates": gates,
         "policy": {
-            "no_placeholder_closure": "production remains false until public/shared CellDep and external TCB attestations are present",
+            "no_placeholder_closure": "production remains false until public/shared CellDep, public BTC SPV evidence, and external TCB attestations are present",
             "attestation_templates": [
                 "proposals/novaseal/v0-mvp-skeleton/proofs/public_shared_cell_dep_attestation.template.json",
                 "proposals/novaseal/v0-mvp-skeleton/proofs/bip340_external_tcb_review_attestation.template.json",
+            ],
+            "external_evidence_templates": [
+                "proposals/novaseal/v0-mvp-skeleton/proofs/public_btc_spv_evidence.template.json",
             ],
         },
         "generated_by": {
@@ -703,6 +718,12 @@ fn build_v1_readiness(
             EXTERNAL_TCB_ATTESTATION,
             "external production TCB sign-off",
         ),
+        readiness_dimension(
+            "public_btc_spv_evidence",
+            gate_status("public_btc_spv_evidence") == "passed",
+            PUBLIC_BTC_SPV_EVIDENCE,
+            "public BTC inclusion and confirmation proof provenance",
+        ),
     ];
     let local_dimension_names = [
         "architecture_and_profile_conformance",
@@ -751,6 +772,7 @@ fn build_v1_readiness(
             "local_ready_means": "architecture, audit, wallet, TCB, multi-profile devnet, multi-business scenarios, and full stateful acceptance are machine checked locally",
             "production_ready_requires": [
                 "public/shared CellDep pinning attestation",
+                "public BTC SPV evidence for BTC-facing profiles",
                 "external BIP340 runtime verifier TCB review attestation",
                 "cellc certify --plugin novaseal-profile-v0 --require-production passes",
             ],
@@ -2036,6 +2058,7 @@ struct ProfileCertificationInputs<'a> {
     tcb: &'a Value,
     public_attestation: &'a Value,
     external_review: &'a Value,
+    btc_spv_evidence: &'a Value,
 }
 
 fn validate_profile_certification(input: ProfileCertificationInputs<'_>) -> Result<Value> {
@@ -2049,6 +2072,7 @@ fn validate_profile_certification(input: ProfileCertificationInputs<'_>) -> Resu
         tcb,
         public_attestation,
         external_review,
+        btc_spv_evidence,
     } = input;
     let schema_files = expected_files(repo_root, &repo_root.join(AGREEMENT_ROOT).join("schemas"), EXPECTED_AGREEMENT_SCHEMA_FILES)?;
     let fixture_files = expected_files(repo_root, &repo_root.join(AGREEMENT_ROOT).join("fixtures"), EXPECTED_AGREEMENT_FIXTURES)?;
@@ -2087,6 +2111,7 @@ fn validate_profile_certification(input: ProfileCertificationInputs<'_>) -> Resu
     let external_checks = json!({
         "public_shared_cell_dep_attested": json_pointer_str(public_attestation, "/status") == Some("passed"),
         "external_bip340_tcb_review_attested": json_pointer_str(external_review, "/status") == Some("passed"),
+        "public_btc_spv_evidence_attested": json_pointer_str(btc_spv_evidence, "/status") == Some("passed"),
     });
     let local_checks = json!({
         "conformance_gate_passed": json_pointer_str(agreement_conformance, "/status") == Some("passed"),
@@ -2132,6 +2157,7 @@ fn validate_profile_certification(input: ProfileCertificationInputs<'_>) -> Resu
         "production_statement_blockers": production_statement_blockers,
         "local_checks": local_checks,
         "external_checks": external_checks,
+        "public_btc_spv_evidence": btc_spv_evidence,
         "schema_files": schema_files,
         "fixture_files": fixture_files,
         "wallet_vectors": wallet_detail,
@@ -2985,6 +3011,78 @@ fn compare_manifest_dep(repo_root: &Path, manifest_rel: &str, live: &Value, arti
     }))
 }
 
+fn validate_btc_spv_evidence(repo_root: &Path, rel_path: &str) -> Result<Value> {
+    let path = repo_root.join(rel_path);
+    if !path.is_file() {
+        return Ok(json!({
+            "status": "external_required",
+            "reason": "missing public BTC SPV evidence",
+            "required_report": rel_path,
+            "template": PUBLIC_BTC_SPV_EVIDENCE_TEMPLATE,
+            "required_profiles": EXPECTED_BTC_SPV_EVIDENCE_PROFILES,
+        }));
+    }
+    let payload = json_load(repo_root, rel_path)?;
+    let cases = payload.get("cases").and_then(Value::as_array).cloned().unwrap_or_default();
+    let covered_profiles =
+        cases.iter().filter_map(|case| json_pointer_str(case, "/profile").map(str::to_string)).collect::<BTreeSet<_>>();
+    let required_profiles = EXPECTED_BTC_SPV_EVIDENCE_PROFILES.iter().map(|profile| (*profile).to_string()).collect::<BTreeSet<_>>();
+    let mut case_checks = Map::new();
+    for profile in EXPECTED_BTC_SPV_EVIDENCE_PROFILES {
+        let Some(case) = cases.iter().find(|case| json_pointer_str(case, "/profile") == Some(*profile)) else {
+            case_checks.insert((*profile).to_string(), json!({"present": false}));
+            continue;
+        };
+        let cell_dep = case.get("spv_client_cell_dep").unwrap_or(&Value::Null);
+        let source_service = case.get("source_service").unwrap_or(&Value::Null);
+        let out_point = parse_out_point(json_pointer_str(cell_dep, "/out_point"));
+        let hash_type = json_pointer_str(cell_dep, "/hash_type");
+        let confirmations = json_pointer_i64(case, "/confirmations").unwrap_or_default();
+        let minimum_confirmations = json_pointer_i64(case, "/minimum_confirmations").unwrap_or_default();
+        case_checks.insert(
+            (*profile).to_string(),
+            json!({
+                "present": true,
+                "scenario_present": case.get("scenario").is_some_and(value_is_present),
+                "btc_txid_valid": json_pointer_str(case, "/btc_txid").is_some_and(is_hex32),
+                "btc_block_hash_valid": json_pointer_str(case, "/btc_block_hash").is_some_and(is_hex32),
+                "spv_proof_hash_valid": json_pointer_str(case, "/spv_proof_hash").is_some_and(is_hex32),
+                "minimum_confirmations_at_least_six": minimum_confirmations >= 6,
+                "confirmations_meet_minimum": confirmations >= minimum_confirmations && minimum_confirmations >= 6,
+                "spv_client_cell_dep_out_point_valid": json_pointer_bool(&out_point, "/valid"),
+                "spv_client_cell_dep_data_hash_valid": json_pointer_str(cell_dep, "/data_hash").is_some_and(is_hex32),
+                "spv_client_cell_dep_dep_type": json_pointer_str(cell_dep, "/dep_type") == Some("code"),
+                "spv_client_cell_dep_hash_type": matches!(hash_type, Some("data" | "data1" | "type")),
+                "source_service_name_present": source_service.get("name").is_some_and(value_is_present),
+                "source_service_commit_present": source_service.get("commit").is_some_and(value_is_present),
+                "source_service_report_hash_valid": json_pointer_str(source_service, "/report_hash").is_some_and(is_hex32),
+            }),
+        );
+    }
+    let case_checks_passed = case_checks.values().all(|checks| object_values_all_true(Some(checks)));
+    let checks = json!({
+        "schema": json_pointer_str(&payload, "/schema") == Some("novaseal-public-btc-spv-evidence-v0.1"),
+        "status_attested": json_pointer_str(&payload, "/status") == Some("attested"),
+        "network_public": json_pointer_str(&payload, "/network").is_some_and(|network| !network.is_empty() && network != "local-devnet"),
+        "evidence_provider_present": payload.get("evidence_provider").is_some_and(value_is_present),
+        "generated_at_present": payload.get("generated_at").is_some_and(value_is_present),
+        "required_profiles_covered": required_profiles.is_subset(&covered_profiles),
+        "case_checks_passed": case_checks_passed,
+    });
+    let missing_profiles = required_profiles.difference(&covered_profiles).cloned().collect::<Vec<_>>();
+    Ok(json!({
+        "schema": "novaseal-public-btc-spv-evidence-validation-v0.1",
+        "status": if object_values_all_true(Some(&checks)) { "passed" } else { "failed" },
+        "path": rel(repo_root, &path),
+        "required_profiles": EXPECTED_BTC_SPV_EVIDENCE_PROFILES,
+        "covered_profiles": covered_profiles.into_iter().collect::<Vec<_>>(),
+        "missing_profiles": missing_profiles,
+        "checks": checks,
+        "case_checks": case_checks,
+        "evidence": payload,
+    }))
+}
+
 fn validate_public_attestation(repo_root: &Path, rel_path: &str, artifact_hash: Option<&str>) -> Result<Value> {
     let path = repo_root.join(rel_path);
     if !path.exists() {
@@ -3035,16 +3133,30 @@ fn validate_external_review(repo_root: &Path, rel_path: &str, artifact_hash: Opt
 fn validate_attestation_templates(repo_root: &Path, artifact_hash: Option<&str>, source_tree_hash: Option<&str>) -> Result<Value> {
     let public_path = repo_root.join(PUBLIC_CELLDEP_ATTESTATION_TEMPLATE);
     let external_path = repo_root.join(EXTERNAL_TCB_ATTESTATION_TEMPLATE);
+    let btc_spv_path = repo_root.join(PUBLIC_BTC_SPV_EVIDENCE_TEMPLATE);
     let public_payload = if public_path.is_file() { Some(json_load_path(repo_root, &public_path)?) } else { None };
     let external_payload = if external_path.is_file() { Some(json_load_path(repo_root, &external_path)?) } else { None };
+    let btc_spv_payload = if btc_spv_path.is_file() { Some(json_load_path(repo_root, &btc_spv_path)?) } else { None };
     let public = public_payload.as_ref().unwrap_or(&Value::Null);
     let external = external_payload.as_ref().unwrap_or(&Value::Null);
+    let btc_spv = btc_spv_payload.as_ref().unwrap_or(&Value::Null);
     let public_verifier = public.get("runtime_verifier").unwrap_or(&Value::Null);
+    let btc_spv_profiles = btc_spv
+        .get("required_profiles")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect::<BTreeSet<_>>();
+    let expected_btc_spv_profiles = EXPECTED_BTC_SPV_EVIDENCE_PROFILES.iter().copied().collect::<BTreeSet<_>>();
     let checks = json!({
         "public_template_present": public_path.is_file(),
         "external_template_present": external_path.is_file(),
+        "btc_spv_template_present": btc_spv_path.is_file(),
         "public_schema": json_pointer_str(public, "/schema") == Some("novaseal-public-shared-cell-dep-attestation-v0.1"),
         "external_schema": json_pointer_str(external, "/schema") == Some("novaseal-bip340-external-tcb-review-attestation-v0.1"),
+        "btc_spv_schema": json_pointer_str(btc_spv, "/schema") == Some("novaseal-public-btc-spv-evidence-v0.1"),
+        "btc_spv_required_profiles": expected_btc_spv_profiles.is_subset(&btc_spv_profiles),
         "public_template_network_not_local_devnet": json_pointer_str(public, "/network").is_some_and(|network| !network.is_empty() && network != "local-devnet"),
         "public_artifact_hash_matches_current_tcb": normalize_hex(json_pointer_str(public_verifier, "/artifact_hash")).as_deref() == artifact_hash,
         "external_artifact_hash_matches_current_tcb": normalize_hex(json_pointer_str(external, "/artifact_hash")).as_deref() == artifact_hash,
@@ -3062,6 +3174,7 @@ fn validate_attestation_templates(repo_root: &Path, artifact_hash: Option<&str>,
         "templates": {
             "public_shared_cell_dep": rel(repo_root, &public_path),
             "external_bip340_tcb_review": rel(repo_root, &external_path),
+            "public_btc_spv_evidence": rel(repo_root, &btc_spv_path),
         },
     }))
 }
@@ -3115,8 +3228,9 @@ fn validate_security_audit_coverage(
         "unsafe_blocks_have_safety_comments": unsafe_block_count > 0 && safety_comment_count >= unsafe_block_count,
         "external_attestation_templates_current": json_pointer_str(attestation_templates, "/status") == Some("passed"),
         "production_blockers_explicit": agreement_security.contains("public/shared CellDep")
+            && agreement_security.contains("public BTC SPV")
             && agreement_security.contains("external BIP340")
-            && agreement_audit.contains("external production attestations still required"),
+            && agreement_audit.contains("external production attestations and public BTC SPV evidence still required"),
     });
     Ok(json!({
         "schema": "novaseal-security-audit-coverage-v0.1",
@@ -3131,6 +3245,7 @@ fn validate_security_audit_coverage(
         },
         "residual_production_blockers": [
             "public/shared CellDep pinning attestation",
+            "public BTC SPV evidence for BTC-facing profiles",
             "external BIP340 runtime verifier TCB review attestation",
         ],
     }))
@@ -3514,6 +3629,16 @@ mod tests {
             .unwrap(),
         )
         .unwrap();
+        std::fs::write(
+            proofs.join("public_btc_spv_evidence.template.json"),
+            serde_json::to_vec_pretty(&json!({
+                "schema": "novaseal-public-btc-spv-evidence-v0.1",
+                "status": "template",
+                "required_profiles": EXPECTED_BTC_SPV_EVIDENCE_PROFILES,
+            }))
+            .unwrap(),
+        )
+        .unwrap();
 
         let passed = validate_attestation_templates(temp.path(), Some(&artifact_hash), Some(&source_tree_hash)).unwrap();
         let failed =
@@ -3523,6 +3648,57 @@ mod tests {
         assert_eq!(json_pointer_str(&failed, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&failed, "/checks/public_artifact_hash_matches_current_tcb"));
         assert!(!json_pointer_bool(&failed, "/checks/external_artifact_hash_matches_current_tcb"));
+    }
+
+    #[test]
+    fn btc_spv_evidence_requires_public_complete_profile_cases() {
+        let temp = tempfile::tempdir().unwrap();
+        let proofs = temp.path().join("proposals/novaseal/v0-mvp-skeleton/proofs");
+        std::fs::create_dir_all(&proofs).unwrap();
+
+        let missing = validate_btc_spv_evidence(temp.path(), PUBLIC_BTC_SPV_EVIDENCE).unwrap();
+        assert_eq!(json_pointer_str(&missing, "/status"), Some("external_required"));
+
+        let case_for = |profile: &str| {
+            json!({
+                "profile": profile,
+                "scenario": "public-btc-proof",
+                "btc_txid": format!("0x{}", "11".repeat(32)),
+                "btc_block_hash": format!("0x{}", "22".repeat(32)),
+                "spv_proof_hash": format!("0x{}", "33".repeat(32)),
+                "minimum_confirmations": 6,
+                "confirmations": 7,
+                "spv_client_cell_dep": {
+                    "out_point": format!("0x{}:0", "44".repeat(32)),
+                    "dep_type": "code",
+                    "hash_type": "type",
+                    "data_hash": format!("0x{}", "55".repeat(32)),
+                },
+                "source_service": {
+                    "name": "rgbpp-style-spv-service",
+                    "commit": "0123456789abcdef",
+                    "report_hash": format!("0x{}", "66".repeat(32)),
+                },
+            })
+        };
+        std::fs::write(
+            proofs.join("public_btc_spv_evidence.json"),
+            serde_json::to_vec_pretty(&json!({
+                "schema": "novaseal-public-btc-spv-evidence-v0.1",
+                "status": "attested",
+                "network": "testnet",
+                "evidence_provider": "external-spv-operator",
+                "generated_at": "2026-06-05T00:00:00Z",
+                "cases": EXPECTED_BTC_SPV_EVIDENCE_PROFILES.iter().map(|profile| case_for(profile)).collect::<Vec<_>>(),
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let passed = validate_btc_spv_evidence(temp.path(), PUBLIC_BTC_SPV_EVIDENCE).unwrap();
+        assert_eq!(json_pointer_str(&passed, "/status"), Some("passed"));
+        assert!(json_pointer_bool(&passed, "/checks/required_profiles_covered"));
+        assert!(json_pointer_bool(&passed, "/checks/case_checks_passed"));
     }
 
     #[test]
@@ -3553,12 +3729,12 @@ mod tests {
         std::fs::create_dir_all(&riscv_src).unwrap();
         std::fs::write(
             agreement_docs.join("SECURITY.md"),
-            "## Implemented Guards\npublic/shared CellDep\nexternal BIP340\n## Not Implemented\n## Risk Posture\n",
+            "## Implemented Guards\npublic/shared CellDep\npublic BTC SPV\nexternal BIP340\n## Not Implemented\n## Risk Posture\n",
         )
         .unwrap();
         std::fs::write(
             agreement_docs.join("AUDIT_STATUS.md"),
-            "## Claim Classification\n## Fixture Honesty\nexternal production attestations still required\n## Production Statement Boundary\n",
+            "## Claim Classification\n## Fixture Honesty\nexternal production attestations and public BTC SPV evidence still required\n## Production Statement Boundary\n",
         )
         .unwrap();
         std::fs::write(core_docs.join("RISCV_VERIFIER_SHELL.md"), "## Unsafe Boundary\nsyscall register ABI only\n").unwrap();

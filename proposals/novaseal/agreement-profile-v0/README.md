@@ -3,8 +3,9 @@
 **Status**: reviewable CKB-native agreement skeleton with audited terminal-path
 structure, local transaction-shape evidence, resolved transaction verifier
 evidence, live devnet lifecycle evidence, fixed-width wallet signing vectors,
-and local production-gate checks. Public/shared CellDep attestation and external
-BIP340 TCB review are still required before production claims.
+and local production-gate checks. Public/shared CellDep attestation, public BTC
+SPV evidence for BTC-facing profiles, and external BIP340 TCB review are still
+required before production claims.
 
 **Roadmap position**: this package is the current NovaSeal **v0.2 Agreement
 Profile** stage. The package/schema name remains `agreement-profile-v0` because
@@ -162,12 +163,14 @@ All fixture files are now covered by the resolved transaction harness.
 
 These harnesses remain local verifier evidence, distinct from the live devnet
 runner. Local devnet deployment pinning and wallet vectors are now gate-checked.
-Public/shared CellDep publication and external BIP340 TCB review remain
-production attestations, not local facts.
+Public/shared CellDep publication, public BTC SPV evidence for BTC-facing
+profiles, and external BIP340 TCB review remain production attestations or
+external evidence, not local facts.
 
 ## Honest Next Slice
 
 The next conservative slice should replace the local always-success lock with
-real borrower/lender authority locks, then add public/shared CellDep attestation
-and external BIP340 TCB review. Only after that should we consider BTC
-authority hooks or iCKB/xUDT variants.
+real borrower/lender authority locks, then add public/shared CellDep
+attestation, public BTC SPV evidence, and external BIP340 TCB review. Only
+after that should we consider expanding BTC authority hooks or iCKB/xUDT
+variants.

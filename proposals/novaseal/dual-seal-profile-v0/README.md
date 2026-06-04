@@ -34,7 +34,7 @@ finality, or live CKB maturity by itself.
 | Schemas and fixture labels | implemented | reviewable |
 | Invariant matrix | implemented | reviewable |
 | Live devnet dual-seal finality path | missing | missing-live-devnet-evidence |
-| Public BTC closure verification evidence | missing | missing-spv-or-indexer-evidence |
+| Public BTC closure verification evidence | missing | `proposals/novaseal/v0-mvp-skeleton/proofs/public_btc_spv_evidence.json` external-required |
 | Wallet signing vectors | missing | missing-wallet-evidence |
 | Public/shared CellDep attestation | missing | external-required |
 | External BIP340 TCB review | missing | external-required |
@@ -46,3 +46,10 @@ implementation only when the certification gate sees this manifest, source
 action, schemas, fixtures, docs, and invariant matrix. Live dual-seal finality
 must remain blocked until devnet stateful evidence and public BTC verification
 evidence are generated and checked.
+
+The public BTC evidence shape is now machine-readable. A real production report
+must follow
+`proposals/novaseal/v0-mvp-skeleton/proofs/public_btc_spv_evidence.template.json`
+and cover this profile with a non-local BTC closure transaction, block hash, SPV
+proof hash, public SPV client CellDep, source-service provenance, and at least
+six BTC confirmations.
