@@ -290,6 +290,11 @@ const EXPECTED_BTC_SPV_FIELD_CONSTRAINTS: &[(&str, &str)] = &[
     ("network", "explicit public mainnet/testnet name; placeholders and local/devnet/regtest/simnet/private/fake labels are rejected"),
     ("generated_at", "UTC timestamp in YYYY-MM-DDTHH:MM:SSZ form; future timestamps are rejected"),
     ("evidence_provider", "real external provider identity; placeholder, example, and unknown tokens are rejected"),
+    ("btc_txid", "0x-prefixed 32-byte non-placeholder Bitcoin transaction id"),
+    ("btc_block_hash", "0x-prefixed 32-byte non-placeholder Bitcoin block hash anchoring the SPV proof"),
+    ("spv_proof_hash", "0x-prefixed 32-byte non-placeholder hash of the SPV proof material"),
+    ("minimum_confirmations", "integer confirmation floor; at least 6"),
+    ("confirmations", "integer observed confirmations meeting minimum_confirmations"),
     ("spv_client_cell_dep.out_point", "0x-prefixed 32-byte CKB transaction hash plus numeric output index"),
     ("spv_client_cell_dep.data_hash", "0x-prefixed 32-byte non-placeholder SPV client data hash"),
     ("spv_client_cell_dep.dep_type", "code"),
@@ -5494,6 +5499,13 @@ mod tests {
         assert_eq!(json_pointer_str(&failed_celldep_out_point_constraint, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&failed_celldep_out_point_constraint, "/cases/public_btc_spv_evidence/field_constraints_exact"));
 
+        let mut missing_btc_txid_constraint = report.clone();
+        missing_btc_txid_constraint["cases"][0]["field_constraints"].as_object_mut().unwrap().remove("btc_txid");
+        let failed_btc_txid_constraint =
+            validate_external_evidence_handoff_detail(&missing_btc_txid_constraint, &btc_spv_adapter, &external_attestation_adapter);
+        assert_eq!(json_pointer_str(&failed_btc_txid_constraint, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&failed_btc_txid_constraint, "/cases/public_btc_spv_evidence/field_constraints_exact"));
+
         let mut stale_expected_scenario = report.clone();
         stale_expected_scenario["cases"][0]["expected_scenarios"][EXPECTED_BTC_TX_COMMITMENT_PROFILE] =
             json!("generic-public-btc-proof");
@@ -5805,6 +5817,18 @@ mod tests {
         assert_eq!(json_pointer_str(&failed_celldep_hash_type_constraint, "/status"), Some("failed"));
         assert!(!json_pointer_bool(
             &failed_celldep_hash_type_constraint,
+            "/cases/btc-transaction-commitment-profile-v0/field_constraints_exact"
+        ));
+
+        let mut missing_spv_proof_hash_constraint = report.clone();
+        missing_spv_proof_hash_constraint["cases"][0]["request"]["field_constraints"]
+            .as_object_mut()
+            .unwrap()
+            .remove("spv_proof_hash");
+        let failed_spv_proof_hash_constraint = validate_btc_spv_evidence_adapter_detail(&missing_spv_proof_hash_constraint);
+        assert_eq!(json_pointer_str(&failed_spv_proof_hash_constraint, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(
+            &failed_spv_proof_hash_constraint,
             "/cases/btc-transaction-commitment-profile-v0/field_constraints_exact"
         ));
 
