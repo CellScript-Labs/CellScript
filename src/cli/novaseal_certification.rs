@@ -3994,6 +3994,7 @@ fn validate_btc_spv_evidence(repo_root: &Path, rel_path: &str, external_evidence
         "network_public": json_pointer_str(&payload, "/network").is_some_and(|network| !network.is_empty() && network != "local-devnet"),
         "evidence_provider_present": payload.get("evidence_provider").is_some_and(value_is_present),
         "generated_at_present": payload.get("generated_at").is_some_and(value_is_present),
+        "generated_at_utc_timestamp": json_pointer_str(&payload, "/generated_at").is_some_and(is_utc_timestamp_z),
         "request_handoff_fields_exact": exact_object_keys(payload.get("request_handoff").unwrap_or(&Value::Null), EXPECTED_EXTERNAL_REQUEST_HANDOFF_FIELDS),
         "request_handoff_bundle_path": json_pointer_str(&payload, "/request_handoff/bundle") == Some(EXTERNAL_EVIDENCE_HANDOFF),
         "request_handoff_bundle_hash_matches_current": normalize_hex(json_pointer_str(&payload, "/request_handoff/bundle_hash")).as_deref()
@@ -4046,6 +4047,7 @@ fn validate_public_attestation(
         "top_level_fields_exact": exact_object_keys(&payload, EXPECTED_PUBLIC_CELLDEP_ATTESTATION_FIELDS),
         "status": json_pointer_str(&payload, "/status") == Some("attested"),
         "network_not_local_devnet": json_pointer_str(&payload, "/network").is_some_and(|network| !network.is_empty() && network != "local-devnet"),
+        "attested_at_utc_timestamp": json_pointer_str(&payload, "/attested_at").is_some_and(is_utc_timestamp_z),
         "release_fields_exact": exact_object_keys(&release, EXPECTED_PUBLIC_CELLDEP_RELEASE_FIELDS),
         "release_package": json_pointer_str(&release, "/package") == Some("novaseal"),
         "release_version_present": release.get("version").is_some_and(value_is_present),
@@ -4106,6 +4108,7 @@ fn validate_external_review(
         "ipc_abi": json_pointer_str(&payload, "/ipc_abi") == Some("cellscript-btc-bip340-ipc-v0"),
         "reviewer_present": json_pointer_str(&payload, "/reviewer").is_some_and(|value| !value.is_empty()),
         "review_date_present": json_pointer_str(&payload, "/review_date").is_some_and(|value| !value.is_empty()),
+        "review_date_utc_date": json_pointer_str(&payload, "/review_date").is_some_and(is_utc_date),
         "review_scope_items_present": payload
             .get("review_scope")
             .and_then(Value::as_array)
@@ -4569,6 +4572,92 @@ fn value_is_present(value: &Value) -> bool {
         Value::Object(value) => !value.is_empty(),
         Value::Number(_) => true,
     }
+}
+
+fn is_utc_timestamp_z(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() == 20
+        && bytes[4] == b'-'
+        && bytes[7] == b'-'
+        && bytes[10] == b'T'
+        && bytes[13] == b':'
+        && bytes[16] == b':'
+        && bytes[19] == b'Z'
+        && ascii_digits(&bytes[0..4])
+        && ascii_digits(&bytes[5..7])
+        && ascii_digits(&bytes[8..10])
+        && ascii_digits(&bytes[11..13])
+        && ascii_digits(&bytes[14..16])
+        && ascii_digits(&bytes[17..19])
+        && valid_ymd_time(
+            parse_digits(&bytes[0..4]),
+            parse_digits(&bytes[5..7]),
+            parse_digits(&bytes[8..10]),
+            parse_digits(&bytes[11..13]),
+            parse_digits(&bytes[14..16]),
+            parse_digits(&bytes[17..19]),
+        )
+}
+
+fn is_utc_date(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() == 10
+        && bytes[4] == b'-'
+        && bytes[7] == b'-'
+        && ascii_digits(&bytes[0..4])
+        && ascii_digits(&bytes[5..7])
+        && ascii_digits(&bytes[8..10])
+        && valid_ymd(parse_digits(&bytes[0..4]), parse_digits(&bytes[5..7]), parse_digits(&bytes[8..10]))
+}
+
+fn ascii_digits(bytes: &[u8]) -> bool {
+    bytes.iter().all(u8::is_ascii_digit)
+}
+
+fn parse_digits(bytes: &[u8]) -> Option<u32> {
+    if ascii_digits(bytes) {
+        Some(bytes.iter().fold(0, |acc, byte| (acc * 10) + u32::from(byte - b'0')))
+    } else {
+        None
+    }
+}
+
+fn valid_ymd_time(
+    year: Option<u32>,
+    month: Option<u32>,
+    day: Option<u32>,
+    hour: Option<u32>,
+    minute: Option<u32>,
+    second: Option<u32>,
+) -> bool {
+    valid_ymd(year, month, day)
+        && hour.is_some_and(|value| value < 24)
+        && minute.is_some_and(|value| value < 60)
+        && second.is_some_and(|value| value < 60)
+}
+
+fn valid_ymd(year: Option<u32>, month: Option<u32>, day: Option<u32>) -> bool {
+    let (Some(year), Some(month), Some(day)) = (year, month, day) else {
+        return false;
+    };
+    let Some(max_day) = days_in_month(year, month) else {
+        return false;
+    };
+    year > 0 && (1..=max_day).contains(&day)
+}
+
+fn days_in_month(year: u32, month: u32) -> Option<u32> {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => Some(31),
+        4 | 6 | 9 | 11 => Some(30),
+        2 if leap_year(year) => Some(29),
+        2 => Some(28),
+        _ => None,
+    }
+}
+
+fn leap_year(year: u32) -> bool {
+    year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
 }
 
 fn json_pointer_str<'a>(value: &'a Value, pointer: &str) -> Option<&'a str> {
@@ -5169,9 +5258,18 @@ mod tests {
         assert!(json_pointer_bool(&passed, "/checks/request_handoff_fields_exact"));
         assert!(json_pointer_bool(&passed, "/checks/request_handoff_bundle_hash_matches_current"));
         assert!(json_pointer_bool(&passed, "/checks/request_handoff_bundle_hash_algorithm"));
+        assert!(json_pointer_bool(&passed, "/checks/generated_at_utc_timestamp"));
         assert!(json_pointer_bool(&passed, "/checks/required_profiles_field_exact"));
         assert!(json_pointer_bool(&passed, "/checks/required_profiles_covered_exact"));
         assert!(json_pointer_bool(&passed, "/checks/case_checks_passed"));
+
+        let mut placeholder_generated_at = spv_report.clone();
+        placeholder_generated_at["generated_at"] = json!("YYYY-MM-DDTHH:MM:SSZ");
+        std::fs::write(proofs.join("public_btc_spv_evidence.json"), serde_json::to_vec_pretty(&placeholder_generated_at).unwrap())
+            .unwrap();
+        let failed_generated_at = validate_btc_spv_evidence(temp.path(), PUBLIC_BTC_SPV_EVIDENCE, &handoff).unwrap();
+        assert_eq!(json_pointer_str(&failed_generated_at, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&failed_generated_at, "/checks/generated_at_utc_timestamp"));
 
         let mut top_level_extra = spv_report.clone();
         top_level_extra["unexpected_provider_field"] = Value::String("must-fail".to_string());
@@ -5299,9 +5397,22 @@ mod tests {
         assert!(json_pointer_bool(&public_passed, "/checks/top_level_fields_exact"));
         assert!(json_pointer_bool(&public_passed, "/checks/release_fields_exact"));
         assert!(json_pointer_bool(&public_passed, "/checks/release_manifest_commit_present"));
+        assert!(json_pointer_bool(&public_passed, "/checks/attested_at_utc_timestamp"));
         assert!(json_pointer_bool(&public_passed, "/checks/request_handoff_fields_exact"));
         assert!(json_pointer_bool(&public_passed, "/checks/request_handoff_bundle_hash_algorithm"));
         assert!(json_pointer_bool(&public_passed, "/checks/runtime_verifier_fields_exact"));
+
+        let mut public_placeholder_attested_at = public_attestation.clone();
+        public_placeholder_attested_at["attested_at"] = json!("YYYY-MM-DDTHH:MM:SSZ");
+        std::fs::write(
+            proofs.join("public_shared_cell_dep_attestation.json"),
+            serde_json::to_vec_pretty(&public_placeholder_attested_at).unwrap(),
+        )
+        .unwrap();
+        let public_attested_at_failed =
+            validate_public_attestation(temp.path(), PUBLIC_CELLDEP_ATTESTATION, Some(&artifact_hash), &handoff).unwrap();
+        assert_eq!(json_pointer_str(&public_attested_at_failed, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&public_attested_at_failed, "/checks/attested_at_utc_timestamp"));
 
         let mut public_extra = public_attestation.clone();
         public_extra["unexpected_provider_field"] = Value::String("must-fail".to_string());
@@ -5391,7 +5502,20 @@ mod tests {
         assert!(json_pointer_bool(&review_passed, "/checks/request_handoff_fields_exact"));
         assert!(json_pointer_bool(&review_passed, "/checks/request_handoff_bundle_hash_algorithm"));
         assert!(json_pointer_bool(&review_passed, "/checks/artifact_hash_algorithm"));
+        assert!(json_pointer_bool(&review_passed, "/checks/review_date_utc_date"));
         assert!(json_pointer_bool(&review_passed, "/checks/review_scope_items_present"));
+
+        let mut review_placeholder_date = external_review.clone();
+        review_placeholder_date["review_date"] = json!("YYYY-MM-DD");
+        std::fs::write(
+            proofs.join("bip340_external_tcb_review_attestation.json"),
+            serde_json::to_vec_pretty(&review_placeholder_date).unwrap(),
+        )
+        .unwrap();
+        let review_date_failed =
+            validate_external_review(temp.path(), EXTERNAL_TCB_ATTESTATION, Some(&artifact_hash), &handoff).unwrap();
+        assert_eq!(json_pointer_str(&review_date_failed, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&review_date_failed, "/checks/review_date_utc_date"));
 
         let mut review_extra = external_review.clone();
         review_extra["unexpected_provider_field"] = Value::String("must-fail".to_string());
