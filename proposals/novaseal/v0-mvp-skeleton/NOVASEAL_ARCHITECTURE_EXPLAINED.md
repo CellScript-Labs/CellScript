@@ -238,6 +238,8 @@ Out of scope for Agreement v0:
 
 RGB++ and NovaSeal sit in the same broad design space because both care about Bitcoin authority and CKB execution. The difference is where the abstraction begins.
 
+Doitian's 2024 note on [1-on-1 binding between a Bitcoin UTXO and a CKB SUDT Cell](https://talk.nervos.org/t/1-on-1-binding-between-bitcoin-utxo-and-ckb-sudt-cell/7836) is a useful earlier reference here. It frames the problem as uniqueness and liveness for a canonical matching CKB Cell, then explores where the binding validation can live when the SUDT type script is already occupied. NovaSeal shares that concern for explicit one-to-one state objects and for making the relevant validation path actually run. It does not inherit the SUDT binding construction: v0 starts with a CKB-native Cell lifecycle plus BTC key authority, while proved Bitcoin UTXO sealing remains a later seal profile.
+
 | Dimension | RGB++ | NovaSeal |
 | --- | --- | --- |
 | Starting point | Bitcoin UTXO bound into CKB execution | Native CKB objects authorised by Bitcoin |
@@ -255,6 +257,7 @@ Reference boundary:
 | --- | --- | --- |
 | RGB Core `doc/Commitments.md` and `rgb-core` strict-encoding usage | Schema IDs, domain-separated commitment discipline, recomputable type-bound hashes | RGB client-side validation architecture, operation/bundle commitment algorithms, RGB contract model |
 | Strict Types / Strict Encoding libraries | Schema-based semantic typing, deterministic encoding, type library identity as a security boundary | Rust derive macros, Vesper/STL implementation, category-theory type system internals |
+| Doitian, `1-on-1 Binding Between Bitcoin UTXO and CKB SUDT Cell` | Uniqueness/liveness framing for canonical UTXO-bound CKB Cells, and the practical lockscript placement problem | The SUDT-specific BBCC lock construction, issuer-lock workaround, or a v0 claim of Bitcoin UTXO sealing |
 | RGB++ design documents | Isomorphic binding and CKB lockscript/security-boundary context | A schema library; RGB++ was not used as the source for NovaSeal canonical schema design |
 
 The reference is conceptual and architectural. No RGB, Strict Types, or RGB++ code is vendored into this package, and the NovaSeal schema gate is intentionally CellScript-native and compiler-hosted through `src/cli/novaseal_certification.rs`.
