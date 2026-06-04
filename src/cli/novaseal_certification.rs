@@ -290,6 +290,10 @@ const EXPECTED_BTC_SPV_FIELD_CONSTRAINTS: &[(&str, &str)] = &[
     ("network", "explicit public mainnet/testnet name; placeholders and local/devnet/regtest/simnet/private/fake labels are rejected"),
     ("generated_at", "UTC timestamp in YYYY-MM-DDTHH:MM:SSZ form; future timestamps are rejected"),
     ("evidence_provider", "real external provider identity; placeholder, example, and unknown tokens are rejected"),
+    ("spv_client_cell_dep.out_point", "0x-prefixed 32-byte CKB transaction hash plus numeric output index"),
+    ("spv_client_cell_dep.data_hash", "0x-prefixed 32-byte non-placeholder SPV client data hash"),
+    ("spv_client_cell_dep.dep_type", "code"),
+    ("spv_client_cell_dep.hash_type", "data, data1, or type CKB script hash type"),
     ("source_service.name", "real external SPV service identity; placeholder, example, and unknown tokens are rejected"),
     ("source_service.commit", "40-character hex service source commit"),
     ("source_service.report_hash", "0x-prefixed 32-byte non-placeholder SPV service report hash"),
@@ -4233,6 +4237,7 @@ fn validate_btc_spv_evidence(repo_root: &Path, rel_path: &str, external_evidence
                 "confirmations_meet_minimum": confirmations >= minimum_confirmations && minimum_confirmations >= 6,
                 "spv_client_cell_dep_fields_exact": exact_object_keys(cell_dep, EXPECTED_PUBLIC_BTC_SPV_CELLDEP_FIELDS),
                 "spv_client_cell_dep_out_point_valid": json_pointer_bool(&out_point, "/valid"),
+                "spv_client_cell_dep_out_point_non_placeholder": !placeholder_hash(json_pointer_str(&out_point, "/tx_hash")),
                 "spv_client_cell_dep_data_hash_valid": json_pointer_str(cell_dep, "/data_hash").is_some_and(is_hex32),
                 "spv_client_cell_dep_data_hash_non_placeholder": !placeholder_hash(json_pointer_str(cell_dep, "/data_hash")),
                 "spv_client_cell_dep_dep_type": json_pointer_str(cell_dep, "/dep_type") == Some("code"),
@@ -5476,6 +5481,19 @@ mod tests {
         assert_eq!(json_pointer_str(&failed_report_hash_constraint, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&failed_report_hash_constraint, "/cases/public_btc_spv_evidence/field_constraints_exact"));
 
+        let mut missing_celldep_out_point_constraint = report.clone();
+        missing_celldep_out_point_constraint["cases"][0]["field_constraints"]
+            .as_object_mut()
+            .unwrap()
+            .remove("spv_client_cell_dep.out_point");
+        let failed_celldep_out_point_constraint = validate_external_evidence_handoff_detail(
+            &missing_celldep_out_point_constraint,
+            &btc_spv_adapter,
+            &external_attestation_adapter,
+        );
+        assert_eq!(json_pointer_str(&failed_celldep_out_point_constraint, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&failed_celldep_out_point_constraint, "/cases/public_btc_spv_evidence/field_constraints_exact"));
+
         let mut stale_expected_scenario = report.clone();
         stale_expected_scenario["cases"][0]["expected_scenarios"][EXPECTED_BTC_TX_COMMITMENT_PROFILE] =
             json!("generic-public-btc-proof");
@@ -5775,6 +5793,18 @@ mod tests {
         assert_eq!(json_pointer_str(&failed_report_hash_constraint, "/status"), Some("failed"));
         assert!(!json_pointer_bool(
             &failed_report_hash_constraint,
+            "/cases/btc-transaction-commitment-profile-v0/field_constraints_exact"
+        ));
+
+        let mut missing_celldep_hash_type_constraint = report.clone();
+        missing_celldep_hash_type_constraint["cases"][0]["request"]["field_constraints"]
+            .as_object_mut()
+            .unwrap()
+            .remove("spv_client_cell_dep.hash_type");
+        let failed_celldep_hash_type_constraint = validate_btc_spv_evidence_adapter_detail(&missing_celldep_hash_type_constraint);
+        assert_eq!(json_pointer_str(&failed_celldep_hash_type_constraint, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(
+            &failed_celldep_hash_type_constraint,
             "/cases/btc-transaction-commitment-profile-v0/field_constraints_exact"
         ));
 
@@ -6157,6 +6187,20 @@ mod tests {
         assert!(!json_pointer_bool(
             &failed_zero_btc_txid,
             "/case_checks/btc-transaction-commitment-profile-v0/btc_txid_non_placeholder"
+        ));
+
+        let mut zero_spv_out_point = spv_report.clone();
+        zero_spv_out_point["cases"][0]["spv_client_cell_dep"]["out_point"] = json!(format!("0x{}:0", "00".repeat(32)));
+        std::fs::write(proofs.join("public_btc_spv_evidence.json"), serde_json::to_vec_pretty(&zero_spv_out_point).unwrap()).unwrap();
+        let failed_zero_spv_out_point = validate_btc_spv_evidence(temp.path(), PUBLIC_BTC_SPV_EVIDENCE, &handoff).unwrap();
+        assert_eq!(json_pointer_str(&failed_zero_spv_out_point, "/status"), Some("failed"));
+        assert!(json_pointer_bool(
+            &failed_zero_spv_out_point,
+            "/case_checks/btc-transaction-commitment-profile-v0/spv_client_cell_dep_out_point_valid"
+        ));
+        assert!(!json_pointer_bool(
+            &failed_zero_spv_out_point,
+            "/case_checks/btc-transaction-commitment-profile-v0/spv_client_cell_dep_out_point_non_placeholder"
         ));
 
         let mut cell_dep_extra = spv_report.clone();
