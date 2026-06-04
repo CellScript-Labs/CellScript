@@ -38,6 +38,7 @@ const PROFILE_OPERATOR_FIXTURES: &str = "target/novaseal-profile-operator-fixtur
 const SERVICE_BUILDER_FIXTURES: &str = "target/novaseal-service-builder-fixtures.json";
 const BTC_SPV_EVIDENCE_ADAPTER: &str = "target/novaseal-btc-spv-evidence-adapter.json";
 const EXTERNAL_ATTESTATION_ADAPTER: &str = "target/novaseal-external-attestation-adapter.json";
+const EXTERNAL_EVIDENCE_HANDOFF: &str = "target/novaseal-external-evidence-handoff-bundle.json";
 const TCB_REVIEW: &str = "target/novaseal-bip340-tcb-review.json";
 const PUBLIC_CELLDEP_ATTESTATION: &str = "proposals/novaseal/v0-mvp-skeleton/proofs/public_shared_cell_dep_attestation.json";
 const EXTERNAL_TCB_ATTESTATION: &str = "proposals/novaseal/v0-mvp-skeleton/proofs/bip340_external_tcb_review_attestation.json";
@@ -572,6 +573,7 @@ pub(crate) fn build_report(repo_root: &Path) -> Result<Value> {
     let service_builder_fixtures = json_load(repo_root, SERVICE_BUILDER_FIXTURES)?;
     let btc_spv_evidence_adapter = json_load(repo_root, BTC_SPV_EVIDENCE_ADAPTER)?;
     let external_attestation_adapter = json_load(repo_root, EXTERNAL_ATTESTATION_ADAPTER)?;
+    let external_evidence_handoff = json_load(repo_root, EXTERNAL_EVIDENCE_HANDOFF)?;
     let tcb = json_load(repo_root, TCB_REVIEW)?;
     let artifact_hash = normalize_hex(json_pointer_str(&tcb, "/runtime_artifact/artifact_hash"));
 
@@ -599,6 +601,7 @@ pub(crate) fn build_report(repo_root: &Path) -> Result<Value> {
         service_builder_fixtures: &service_builder_fixtures,
         btc_spv_evidence_adapter: &btc_spv_evidence_adapter,
         external_attestation_adapter: &external_attestation_adapter,
+        external_evidence_handoff: &external_evidence_handoff,
         stateful_acceptance: &stateful_acceptance,
         tcb: &tcb,
         public_attestation: &public_attestation,
@@ -622,7 +625,7 @@ pub(crate) fn build_report(repo_root: &Path) -> Result<Value> {
         gate(
             "agreement_profile_public_ecosystem_certification_v0",
             json_pointer_str(&profile_certification, "/status").unwrap_or("failed"),
-            "proposals/novaseal/agreement-profile-v0/Cell.toml + proposals/novaseal/agreement-profile-v0/schemas + proposals/novaseal/agreement-profile-v0/fixtures + target/novaseal-devnet-stateful-acceptance.json + target/novaseal-wallet-signing-vectors.json + target/novaseal-profile-operator-fixtures.json + target/novaseal-service-builder-fixtures.json",
+            "proposals/novaseal/agreement-profile-v0/Cell.toml + proposals/novaseal/agreement-profile-v0/schemas + proposals/novaseal/agreement-profile-v0/fixtures + target/novaseal-devnet-stateful-acceptance.json + target/novaseal-wallet-signing-vectors.json + target/novaseal-profile-operator-fixtures.json + target/novaseal-service-builder-fixtures.json + target/novaseal-external-evidence-handoff-bundle.json",
             profile_certification.clone(),
         ),
         gate(
@@ -678,6 +681,16 @@ pub(crate) fn build_report(repo_root: &Path) -> Result<Value> {
             },
             EXTERNAL_ATTESTATION_ADAPTER,
             external_attestation_adapter.get("summary").cloned().unwrap_or(Value::Null),
+        ),
+        gate(
+            "external_evidence_handoff_bundle",
+            if external_evidence_handoff_gate_passed(&external_evidence_handoff) {
+                "passed"
+            } else {
+                "failed"
+            },
+            EXTERNAL_EVIDENCE_HANDOFF,
+            external_evidence_handoff.get("summary").cloned().unwrap_or(Value::Null),
         ),
         gate(
             "bip340_runtime_verifier_local_tcb_review",
@@ -860,6 +873,12 @@ fn build_v1_readiness(
             "public CellDep and external TCB attestation request readiness",
         ),
         readiness_dimension(
+            "external_evidence_handoff",
+            json_pointer_bool(profile_certification, "/local_checks/external_evidence_handoff_passed"),
+            "target/novaseal-external-evidence-handoff-bundle.json",
+            "external production evidence provider handoff",
+        ),
+        readiness_dimension(
             "local_bip340_tcb_review",
             json_pointer_bool(profile_certification, "/local_checks/local_bip340_tcb_review_passed"),
             "target/novaseal-bip340-tcb-review.json",
@@ -902,6 +921,7 @@ fn build_v1_readiness(
         "service_builder_fixtures",
         "btc_spv_evidence_adapter",
         "external_attestation_adapter",
+        "external_evidence_handoff",
         "local_bip340_tcb_review",
         "local_v1_gate",
     ];
@@ -938,7 +958,7 @@ fn build_v1_readiness(
         "failed_dimensions": failed_dimensions,
         "external_blockers": external_blockers,
         "acceptance_boundary": {
-            "local_ready_means": "architecture, audit, wallet, planned-profile operator fixtures, service-builder fixtures, BTC SPV evidence adapter request, external attestation adapter request, TCB, multi-profile devnet, multi-business scenarios, and full stateful acceptance are machine checked locally",
+            "local_ready_means": "architecture, audit, wallet, planned-profile operator fixtures, service-builder fixtures, BTC SPV evidence adapter request, external attestation adapter request, external evidence handoff bundle, TCB, multi-profile devnet, multi-business scenarios, and full stateful acceptance are machine checked locally",
             "production_ready_requires": [
                 "public/shared CellDep pinning attestation",
                 "public BTC SPV evidence for BTC-facing profiles",
@@ -2227,6 +2247,7 @@ struct ProfileCertificationInputs<'a> {
     service_builder_fixtures: &'a Value,
     btc_spv_evidence_adapter: &'a Value,
     external_attestation_adapter: &'a Value,
+    external_evidence_handoff: &'a Value,
     stateful_acceptance: &'a Value,
     tcb: &'a Value,
     public_attestation: &'a Value,
@@ -2245,6 +2266,7 @@ fn validate_profile_certification(input: ProfileCertificationInputs<'_>) -> Resu
         service_builder_fixtures,
         btc_spv_evidence_adapter,
         external_attestation_adapter,
+        external_evidence_handoff,
         stateful_acceptance,
         tcb,
         public_attestation,
@@ -2258,6 +2280,7 @@ fn validate_profile_certification(input: ProfileCertificationInputs<'_>) -> Resu
     let service_builder_fixture_detail = validate_service_builder_fixture_detail(service_builder_fixtures);
     let btc_spv_adapter_detail = validate_btc_spv_evidence_adapter_detail(btc_spv_evidence_adapter);
     let external_attestation_adapter_detail = validate_external_attestation_adapter_detail(external_attestation_adapter);
+    let external_evidence_handoff_detail = validate_external_evidence_handoff_detail(external_evidence_handoff);
     let invariant_matrix = validate_invariant_matrix(repo_root, &repo_root.join(AGREEMENT_ROOT).join("proofs/invariant_matrix.json"))?;
     let fungible_xudt_profile = validate_fungible_xudt_profile_package(repo_root)?;
     let rwa_receipt_profile = validate_rwa_receipt_profile_package(repo_root)?;
@@ -2303,6 +2326,7 @@ fn validate_profile_certification(input: ProfileCertificationInputs<'_>) -> Resu
         "service_builder_fixture_detail_passed": json_pointer_str(&service_builder_fixture_detail, "/status") == Some("passed"),
         "btc_spv_evidence_adapter_passed": json_pointer_str(&btc_spv_adapter_detail, "/status") == Some("passed"),
         "external_attestation_adapter_passed": json_pointer_str(&external_attestation_adapter_detail, "/status") == Some("passed"),
+        "external_evidence_handoff_passed": json_pointer_str(&external_evidence_handoff_detail, "/status") == Some("passed"),
         "invariant_matrix_passed": json_pointer_str(&invariant_matrix, "/status") == Some("passed"),
         "live_devnet_evidence_passed": json_pointer_str(&live_evidence, "/status") == Some("passed"),
         "agreement_runtime_verifier_pin_passed": object_values_all_true(agreement_manifest.get("checks")),
@@ -2350,6 +2374,7 @@ fn validate_profile_certification(input: ProfileCertificationInputs<'_>) -> Resu
         "service_builder_fixtures": service_builder_fixture_detail,
         "btc_spv_evidence_adapter": btc_spv_adapter_detail,
         "external_attestation_adapter": external_attestation_adapter_detail,
+        "external_evidence_handoff": external_evidence_handoff_detail,
         "invariant_matrix": invariant_matrix,
         "planned_profile_packages": {
             "btc_tx_commitment": btc_tx_commitment_profile,
@@ -2748,6 +2773,71 @@ fn validate_external_attestation_adapter_detail(report: &Value) -> Value {
         "checks": checks,
         "cases": case_checks,
         "expected_attestations": expected_names.into_iter().collect::<Vec<_>>(),
+        "case_count": cases.len(),
+        "production_boundary": json_pointer_str(report, "/production_boundary"),
+    })
+}
+
+fn validate_external_evidence_handoff_detail(report: &Value) -> Value {
+    let cases = report.get("cases").and_then(Value::as_array).cloned().unwrap_or_default();
+    let mut by_group: BTreeMap<String, Vec<Value>> = BTreeMap::new();
+    for case in &cases {
+        if let Some(group) = json_pointer_str(case, "/group") {
+            by_group.entry(group.to_string()).or_default().push(case.clone());
+        }
+    }
+
+    let expected = [
+        ("public_btc_spv_evidence", PUBLIC_BTC_SPV_EVIDENCE),
+        ("public_shared_cell_dep_attestation", PUBLIC_CELLDEP_ATTESTATION),
+        ("external_bip340_tcb_review_attestation", EXTERNAL_TCB_ATTESTATION),
+    ];
+    let expected_groups = expected.iter().map(|(group, _)| (*group).to_string()).collect::<BTreeSet<_>>();
+    let expected_outputs = expected.iter().map(|(_, output)| (*output).to_string()).collect::<BTreeSet<_>>();
+    let actual_groups =
+        cases.iter().filter_map(|case| json_pointer_str(case, "/group").map(ToString::to_string)).collect::<BTreeSet<_>>();
+    let actual_outputs = json_array_strings(report, "/production_outputs").into_iter().collect::<BTreeSet<_>>();
+
+    let mut case_checks = Map::new();
+    for (group, production_output) in expected {
+        let matches = by_group.get(group).cloned().unwrap_or_default();
+        let case = matches.first().cloned().unwrap_or(Value::Null);
+        let required_external_fields = json_array_strings(&case, "/required_external_fields");
+        let required_profiles = json_array_strings(&case, "/required_profiles");
+        let expected_btc_profiles =
+            EXPECTED_BTC_SPV_EVIDENCE_PROFILES.iter().map(|profile| (*profile).to_string()).collect::<Vec<_>>();
+        let checks = json!({
+            "exactly_one_case": matches.len() == 1,
+            "status_passed": json_pointer_str(&case, "/status") == Some("passed"),
+            "production_output_matches": json_pointer_str(&case, "/production_output") == Some(production_output),
+            "source_adapter_hash": json_pointer_str(&case, "/source_adapter_hash").is_some_and(is_hex32),
+            "required_external_fields_present": !required_external_fields.is_empty(),
+            "btc_profiles_complete": group != "public_btc_spv_evidence"
+                || required_profiles == expected_btc_profiles,
+            "fixture_checks_passed": object_values_all_true(case.get("checks")),
+        });
+        case_checks.insert(group.to_string(), checks);
+    }
+
+    let checks = json!({
+        "report_passed": json_pointer_str(report, "/status") == Some("passed"),
+        "schema_current": json_pointer_str(report, "/schema") == Some("novaseal-external-evidence-handoff-bundle-v0.1"),
+        "handoff_status_request_ready": json_pointer_str(report, "/handoff_status") == Some("request_bundle_ready_external_evidence_required"),
+        "source_btc_spv_adapter_hash": json_pointer_str(report, "/source_btc_spv_adapter_hash").is_some_and(is_hex32),
+        "source_external_attestation_adapter_hash": json_pointer_str(report, "/source_external_attestation_adapter_hash").is_some_and(is_hex32),
+        "summary_counts_match": json_pointer_i64(report, "/summary/total") == Some(expected_groups.len() as i64)
+            && json_pointer_i64(report, "/summary/matched") == json_pointer_i64(report, "/summary/total"),
+        "exact_groups": actual_groups == expected_groups,
+        "exact_production_outputs": actual_outputs == expected_outputs,
+        "case_details": case_checks.values().all(|row| object_values_all_true(Some(row))),
+    });
+
+    json!({
+        "status": if object_values_all_true(Some(&checks)) { "passed" } else { "failed" },
+        "checks": checks,
+        "cases": case_checks,
+        "expected_groups": expected_groups.into_iter().collect::<Vec<_>>(),
+        "expected_production_outputs": expected_outputs.into_iter().collect::<Vec<_>>(),
         "case_count": cases.len(),
         "production_boundary": json_pointer_str(report, "/production_boundary"),
     })
@@ -4025,6 +4115,13 @@ fn external_attestation_adapter_gate_passed(report: &Value) -> bool {
     json_pointer_str(report, "/status") == Some("passed")
         && json_pointer_str(report, "/adapter_status") == Some("request_ready_external_attestations_required")
         && json_pointer_i64(report, "/summary/total") == Some(2)
+        && json_pointer_i64(report, "/summary/matched") == json_pointer_i64(report, "/summary/total")
+}
+
+fn external_evidence_handoff_gate_passed(report: &Value) -> bool {
+    json_pointer_str(report, "/status") == Some("passed")
+        && json_pointer_str(report, "/handoff_status") == Some("request_bundle_ready_external_evidence_required")
+        && json_pointer_i64(report, "/summary/total") == Some(3)
         && json_pointer_i64(report, "/summary/matched") == json_pointer_i64(report, "/summary/total")
 }
 

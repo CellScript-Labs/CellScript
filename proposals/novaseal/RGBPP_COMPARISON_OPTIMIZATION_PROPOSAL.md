@@ -8,6 +8,7 @@
 - NovaSeal service-builder fixtures: `target/novaseal-service-builder-fixtures.json` covers deterministic request/response skeletons for the planned profile actions.
 - NovaSeal BTC SPV evidence adapter: `target/novaseal-btc-spv-evidence-adapter.json` covers the external evidence request contract for BTC-facing profiles.
 - NovaSeal external attestation adapter: `target/novaseal-external-attestation-adapter.json` covers the public/shared CellDep and external BIP340 TCB review request contracts.
+- NovaSeal external evidence handoff bundle: `target/novaseal-external-evidence-handoff-bundle.json` packages all three external production evidence requests.
 - NovaSeal planned-profile stateful matrix: all planned live scenarios pass with no missing entries.
 - NovaSeal external Fiber-node matrix: `target/novaseal-fiber-node-experiments.json` reports `16/16` required suites present, executed, and passed, including embedded and separate-service cross-chain hub send-BTC and receive-BTC workflows.
 - RGB++ active SDK clone: `/Users/arthur/RustroverProjects/rgbpp-sdk-active`, commit `ee21eb9735c1adeb277e3a02b7f6c2f6fd1d0556`.
@@ -18,7 +19,7 @@
 
 RGB++ is more mature in Bitcoin/CKB operational integration. It has explicit isomorphic binding, BTC SPV service integration, BTC time lock handling, paymaster handling, service APIs, SDK examples, and workflow-oriented transaction builders.
 
-NovaSeal is cleaner as a typed contract and certification framework. Its strengths are explicit profile packages, canonical envelopes, negative-case live reports, source/artifact provenance, a single certification gate that now verifies all planned profile live paths, planned-profile operator fixtures, service-builder fixtures, BTC SPV and external-attestation adapter requests, and a separate Fiber-node execution matrix that now passes across the tracked Fiber workflows. Its main remaining weakness is no longer basic Fiber execution or first-pass builder fixture binding. It is the absence of real production-grade external BTC SPV attestations, public/shared CellDep attestation, external BIP340 verifier TCB attestation, and reusable SDK/service libraries that make those facts easy for wallets and operators to reproduce in production systems.
+NovaSeal is cleaner as a typed contract and certification framework. Its strengths are explicit profile packages, canonical envelopes, negative-case live reports, source/artifact provenance, a single certification gate that now verifies all planned profile live paths, planned-profile operator fixtures, service-builder fixtures, BTC SPV and external-attestation adapter requests, an external evidence handoff bundle, and a separate Fiber-node execution matrix that now passes across the tracked Fiber workflows. Its main remaining weakness is no longer basic Fiber execution or first-pass builder fixture binding. It is the absence of real production-grade external BTC SPV attestations, public/shared CellDep attestation, external BIP340 verifier TCB attestation, and reusable SDK/service libraries that make those facts easy for wallets and operators to reproduce in production systems.
 
 ## Comparison
 
@@ -81,6 +82,7 @@ Completed hardening since the comparison was first drafted:
 - Planned-profile service-builder fixtures now bind each profile action to deterministic request/response skeletons, queue keys, receipt binding hashes, and named production external inputs.
 - The BTC SPV evidence adapter now binds BTC-facing profiles to service-builder evidence and the public SPV report template, while preserving the external production blocker.
 - The external-attestation adapter now binds public/shared CellDep and external BIP340 TCB review requests to the current local TCB review and attestation templates, while preserving both external production blockers.
+- The external evidence handoff bundle now packages BTC SPV, public/shared CellDep, and external BIP340 TCB review requests into one certification-checked provider handoff, while preserving all three external production blockers.
 
 ## Decision
 

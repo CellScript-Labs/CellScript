@@ -304,13 +304,16 @@ python3 /home/arthur/a19q3/CellScript/scripts/novaseal_btc_spv_evidence_adapter.
 # 23. Generate public CellDep and external TCB attestation adapter requests from the repository root
 python3 /home/arthur/a19q3/CellScript/scripts/novaseal_external_attestation_adapter.py --pretty
 
-# 24. Run the local production-prep/profile certification gate from the repository root
+# 24. Generate the external evidence handoff bundle from the repository root
+python3 /home/arthur/a19q3/CellScript/scripts/novaseal_external_evidence_handoff_bundle.py --pretty
+
+# 25. Run the local production-prep/profile certification gate from the repository root
 /home/arthur/a19q3/CellScript/target/debug/cellc certify --plugin novaseal-profile-v0 --json
 
-# 25. Check strict 0.16 primitive closure
+# 26. Check strict 0.16 primitive closure
 cellc check --target-profile ckb --primitive-strict 0.16
 
-# 26. Inspect obligations
+# 27. Inspect obligations
 cellc constraints --target-profile ckb
 cellc explain-assumptions --target-profile ckb
 cellc profile --target-profile ckb
