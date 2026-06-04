@@ -3348,12 +3348,15 @@ fn adapter_case_request_strings(adapter: &Value, case_name: &str, pointer: &str)
         .map_or_else(Vec::new, |case| json_array_strings(case, pointer))
 }
 
-fn handoff_case_expected_values<'a>(handoff: &'a Value, group: &str) -> Option<&'a Value> {
+fn handoff_case<'a>(handoff: &'a Value, group: &str) -> Option<&'a Value> {
     handoff
         .get("cases")
         .and_then(Value::as_array)
         .and_then(|cases| cases.iter().find(|case| json_pointer_str(case, "/group") == Some(group)))
-        .and_then(|case| case.get("expected_values"))
+}
+
+fn handoff_case_expected_values<'a>(handoff: &'a Value, group: &str) -> Option<&'a Value> {
+    handoff_case(handoff, group).and_then(|case| case.get("expected_values"))
 }
 
 fn btc_spv_adapter_expected_scenarios(adapter: &Value) -> BTreeMap<String, String> {
@@ -4182,9 +4185,20 @@ fn validate_btc_spv_evidence(repo_root: &Path, rel_path: &str, external_evidence
     }
     let payload = json_load(repo_root, rel_path)?;
     let handoff_hash = novaseal_handoff_report_hash("external_evidence_handoff_bundle", external_evidence_handoff);
+    let handoff_case = handoff_case(external_evidence_handoff, "public_btc_spv_evidence").unwrap_or(&Value::Null);
+    let handoff_required_profiles = json_array_strings(handoff_case, "/required_profiles");
+    let handoff_expected_scenarios = json_object_string_map(handoff_case.get("expected_scenarios").unwrap_or(&Value::Null));
     let cases = payload.get("cases").and_then(Value::as_array).cloned().unwrap_or_default();
     let covered_profile_list =
         cases.iter().filter_map(|case| json_pointer_str(case, "/profile").map(str::to_string)).collect::<Vec<_>>();
+    let covered_scenarios = cases
+        .iter()
+        .filter_map(|case| {
+            let profile = json_pointer_str(case, "/profile")?;
+            let scenario = json_pointer_str(case, "/scenario")?;
+            Some((profile.to_string(), scenario.to_string()))
+        })
+        .collect::<BTreeMap<_, _>>();
     let covered_profiles = covered_profile_list.iter().cloned().collect::<BTreeSet<_>>();
     let required_profiles = EXPECTED_BTC_SPV_EVIDENCE_PROFILES.iter().map(|profile| (*profile).to_string()).collect::<BTreeSet<_>>();
     let mut case_checks = Map::new();
@@ -4205,6 +4219,9 @@ fn validate_btc_spv_evidence(repo_root: &Path, rel_path: &str, external_evidence
                 "present": true,
                 "fields_exact": exact_object_keys(case, EXPECTED_PUBLIC_BTC_SPV_CASE_FIELDS),
                 "scenario_matches_expected": json_pointer_str(case, "/scenario") == expected_btc_spv_scenario(profile),
+                "scenario_matches_handoff": handoff_expected_scenarios
+                    .get(*profile)
+                    .is_some_and(|scenario| json_pointer_str(case, "/scenario") == Some(scenario.as_str())),
                 "btc_txid_valid": json_pointer_str(case, "/btc_txid").is_some_and(is_hex32),
                 "btc_txid_non_placeholder": !placeholder_hash(json_pointer_str(case, "/btc_txid")),
                 "btc_block_hash_valid": json_pointer_str(case, "/btc_block_hash").is_some_and(is_hex32),
@@ -4246,8 +4263,15 @@ fn validate_btc_spv_evidence(repo_root: &Path, rel_path: &str, external_evidence
         "request_handoff_bundle_hash_algorithm": json_pointer_str(&payload, "/request_handoff/bundle_hash_algorithm")
             == Some(NOVASEAL_HANDOFF_HASH_ALGORITHM),
         "request_handoff_group": json_pointer_str(&payload, "/request_handoff/group") == Some("public_btc_spv_evidence"),
+        "handoff_required_profiles_exact": exact_string_set(&handoff_required_profiles, EXPECTED_BTC_SPV_EVIDENCE_PROFILES),
+        "handoff_expected_scenarios_exact": handoff_expected_scenarios == EXPECTED_BTC_SPV_PROFILE_SCENARIOS
+            .iter()
+            .map(|(profile, scenario)| ((*profile).to_string(), (*scenario).to_string()))
+            .collect::<BTreeMap<_, _>>(),
         "required_profiles_field_exact": exact_string_set(&json_array_strings(&payload, "/required_profiles"), EXPECTED_BTC_SPV_EVIDENCE_PROFILES),
+        "required_profiles_match_handoff": json_array_strings(&payload, "/required_profiles") == handoff_required_profiles,
         "required_profiles_covered_exact": exact_string_set(&covered_profile_list, EXPECTED_BTC_SPV_EVIDENCE_PROFILES),
+        "covered_scenarios_match_handoff": covered_scenarios == handoff_expected_scenarios,
         "case_checks_passed": case_checks_passed,
     });
     let missing_profiles = required_profiles.difference(&covered_profiles).cloned().collect::<Vec<_>>();
@@ -5939,9 +5963,20 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let proofs = temp.path().join("proposals/novaseal/v0-mvp-skeleton/proofs");
         std::fs::create_dir_all(&proofs).unwrap();
+        let expected_scenarios = EXPECTED_BTC_SPV_PROFILE_SCENARIOS
+            .iter()
+            .map(|(profile, scenario)| ((*profile).to_string(), json!(*scenario)))
+            .collect::<Map<_, _>>();
         let handoff = json!({
             "schema": "novaseal-external-evidence-handoff-bundle-v0.1",
             "status": "passed",
+            "cases": [
+                {
+                    "group": "public_btc_spv_evidence",
+                    "required_profiles": EXPECTED_BTC_SPV_EVIDENCE_PROFILES,
+                    "expected_scenarios": expected_scenarios,
+                },
+            ],
         });
         let handoff_hash = novaseal_handoff_report_hash("external_evidence_handoff_bundle", &handoff);
 
@@ -5994,14 +6029,36 @@ mod tests {
         assert!(json_pointer_bool(&passed, "/checks/request_handoff_fields_exact"));
         assert!(json_pointer_bool(&passed, "/checks/request_handoff_bundle_hash_matches_current"));
         assert!(json_pointer_bool(&passed, "/checks/request_handoff_bundle_hash_algorithm"));
+        assert!(json_pointer_bool(&passed, "/checks/handoff_required_profiles_exact"));
+        assert!(json_pointer_bool(&passed, "/checks/handoff_expected_scenarios_exact"));
         assert!(json_pointer_bool(&passed, "/checks/network_public"));
         assert!(json_pointer_bool(&passed, "/checks/evidence_provider_identity"));
         assert!(json_pointer_bool(&passed, "/checks/generated_at_utc_timestamp"));
         assert!(json_pointer_bool(&passed, "/checks/generated_at_not_future"));
         assert!(json_pointer_bool(&passed, "/checks/required_profiles_field_exact"));
+        assert!(json_pointer_bool(&passed, "/checks/required_profiles_match_handoff"));
         assert!(json_pointer_bool(&passed, "/checks/required_profiles_covered_exact"));
+        assert!(json_pointer_bool(&passed, "/checks/covered_scenarios_match_handoff"));
         assert!(json_pointer_bool(&passed, "/checks/case_checks_passed"));
         assert!(json_pointer_bool(&passed, "/case_checks/btc-transaction-commitment-profile-v0/scenario_matches_expected"));
+        assert!(json_pointer_bool(&passed, "/case_checks/btc-transaction-commitment-profile-v0/scenario_matches_handoff"));
+
+        let mut stale_handoff_scenario = handoff.clone();
+        stale_handoff_scenario["cases"][0]["expected_scenarios"][EXPECTED_BTC_TX_COMMITMENT_PROFILE] =
+            json!("generic-public-btc-proof");
+        let stale_handoff_hash = novaseal_handoff_report_hash("external_evidence_handoff_bundle", &stale_handoff_scenario);
+        let mut spv_with_stale_handoff = spv_report.clone();
+        spv_with_stale_handoff["request_handoff"]["bundle_hash"] = json!(stale_handoff_hash);
+        std::fs::write(proofs.join("public_btc_spv_evidence.json"), serde_json::to_vec_pretty(&spv_with_stale_handoff).unwrap())
+            .unwrap();
+        let failed_stale_handoff = validate_btc_spv_evidence(temp.path(), PUBLIC_BTC_SPV_EVIDENCE, &stale_handoff_scenario).unwrap();
+        assert_eq!(json_pointer_str(&failed_stale_handoff, "/status"), Some("failed"));
+        assert!(json_pointer_bool(&failed_stale_handoff, "/checks/request_handoff_bundle_hash_matches_current"));
+        assert!(!json_pointer_bool(
+            &failed_stale_handoff,
+            "/case_checks/btc-transaction-commitment-profile-v0/scenario_matches_handoff"
+        ));
+        assert!(!json_pointer_bool(&failed_stale_handoff, "/checks/covered_scenarios_match_handoff"));
 
         let mut placeholder_generated_at = spv_report.clone();
         placeholder_generated_at["generated_at"] = json!("YYYY-MM-DDTHH:MM:SSZ");
