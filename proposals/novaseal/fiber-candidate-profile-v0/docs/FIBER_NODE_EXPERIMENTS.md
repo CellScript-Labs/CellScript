@@ -14,41 +14,61 @@
 
 - status: `partial_execution_passed`
 - required Fiber workflow suites present: `15/15`
-- executed Fiber workflow suites: `2/15`
-- passed Fiber workflow suites: `2/2`
-- executed suites: `invoice-ops`, `open-use-close-a-channel`
+- executed Fiber workflow suites: `4/15`
+- passed Fiber workflow suites: `4/4`
+- executed suites: `invoice-ops`, `open-use-close-a-channel`,
+  `3-nodes-transfer`, `router-pay`
 
-Command:
+Commands:
 
 ```bash
 PATH="/Users/arthur/RustroverProjects/ckb/target/debug:/Users/arthur/RustroverProjects/ckb-cli/target/debug:$PATH" \
 REMOVE_OLD_STATE=y \
 python3 scripts/novaseal_fiber_node_experiments.py --pretty --run-suite invoice-ops --timeout-seconds 1800
+
+PATH="/Users/arthur/RustroverProjects/ckb/target/debug:/Users/arthur/RustroverProjects/ckb-cli/target/debug:$PATH" \
+REMOVE_OLD_STATE=y \
+python3 scripts/novaseal_fiber_node_experiments.py --pretty --run-suite open-use-close-a-channel --timeout-seconds 1800
+
+PATH="/Users/arthur/RustroverProjects/ckb/target/debug:/Users/arthur/RustroverProjects/ckb-cli/target/debug:$PATH" \
+REMOVE_OLD_STATE=y \
+python3 scripts/novaseal_fiber_node_experiments.py --pretty --run-suite 3-nodes-transfer --timeout-seconds 1800
+
+PATH="/Users/arthur/RustroverProjects/ckb/target/debug:/Users/arthur/RustroverProjects/ckb-cli/target/debug:$PATH" \
+REMOVE_OLD_STATE=y \
+python3 scripts/novaseal_fiber_node_experiments.py --pretty --run-suite router-pay --timeout-seconds 1800
 ```
 
-The run started a local CKB dev chain, built Fiber `fnn`, started three Fiber
-nodes, waited for ports `8344`, `21714`, `8345`, `21715`, `8346`, and `21716`,
-then ran Bruno `e2e/invoice-ops` and `e2e/open-use-close-a-channel`.
+Each run started a local CKB dev chain, built or reused Fiber `fnn`, started
+three Fiber nodes, waited for ports `8344`, `21714`, `8345`, `21715`, `8346`,
+and `21716`, then ran the selected Bruno suite. The harness preserved previous
+execution evidence in the aggregate report between runs.
 
 Observed Bruno result:
 
 - `invoice-ops`: `5/5` requests passed, `10/10` assertions passed
 - `open-use-close-a-channel`: `22/22` requests passed, `40/40` assertions passed
+- `3-nodes-transfer`: `23/23` requests passed, `41/41` assertions passed
+- `router-pay`: `39/39` requests passed, `50/50` assertions passed
 
 Covered live paths:
 
 - invoice generation, duplicate rejection, decode, lookup, and cancellation
 - single-channel connection/open flow
+- three-node channel graph setup
+- routed TLC transfer through the intermediate node
+- router payment, graph listing, status lookup, duplicate/failure coverage, and custom-record payment flow
 - TLC add/remove validation paths
 - cooperative shutdown
 - closed-channel state check after generated blocks
 
 ## Boundary
 
-This is real Fiber-node execution evidence for the invoice workflow and the
-basic channel lifecycle workflow. It
+This is real Fiber-node execution evidence for the invoice workflow, the basic
+channel lifecycle workflow, the three-node transfer workflow, and the router
+payment workflow. It
 does not complete NovaSeal's external Fiber requirement. Full coverage still
 requires all mapped Fiber suites in `scripts/novaseal_fiber_node_experiments.py`
-to execute and pass, including multi-hop channel transfers, router payments,
-UDT channel flows, force-close/watchtower workflows, external funding, and
-cross-chain hub paths.
+to execute and pass, including UDT channel flows, force-close/watchtower
+workflows, external funding, reconnect, force-shutdown, and cross-chain hub
+paths.
