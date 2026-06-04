@@ -55,7 +55,7 @@
       "id": "live_devnet_lifecycle",
       "claim": "Materialise -> claim -> settle must execute on live devnet before V1 readiness.",
       "location": "target/novaseal-devnet-stateful-acceptance.json",
-      "coverage": "missing-live-devnet-evidence"
+      "coverage": "target/novaseal-rwa-receipt-devnet-stateful-live.json"
     }
   ]
 }

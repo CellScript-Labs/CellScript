@@ -2365,7 +2365,10 @@ fn validate_fungible_xudt_profile_package(repo_root: &Path) -> Result<Value> {
         ),
         (
             "live_devnet_gap_explicit".to_string(),
-            Value::Bool(coverage_by_id.get("live_devnet_lifecycle").and_then(Value::as_str) == Some("missing-live-devnet-evidence")),
+            Value::Bool(
+                coverage_by_id.get("live_devnet_lifecycle").and_then(Value::as_str)
+                    == Some("target/novaseal-fungible-xudt-devnet-stateful-live.json"),
+            ),
         ),
     ]);
     let missing_invariants = required_invariants.difference(&invariant_ids).cloned().collect::<Vec<_>>();
@@ -2388,7 +2391,7 @@ fn validate_fungible_xudt_profile_package(repo_root: &Path) -> Result<Value> {
             "coverage_by_id": coverage_by_id,
         },
         "checks": checks,
-        "remaining_acceptance_gap": "live devnet issue -> transfer -> settle transactions are still required before fungible_xudt_value_flow can pass",
+        "remaining_acceptance_gap": "profile-specific wallet/service fixtures are still required before fungible_xudt_value_flow is operator-ready",
     }))
 }
 
@@ -2480,7 +2483,10 @@ fn validate_rwa_receipt_profile_package(repo_root: &Path) -> Result<Value> {
         ),
         (
             "live_devnet_gap_explicit".to_string(),
-            Value::Bool(coverage_by_id.get("live_devnet_lifecycle").and_then(Value::as_str) == Some("missing-live-devnet-evidence")),
+            Value::Bool(
+                coverage_by_id.get("live_devnet_lifecycle").and_then(Value::as_str)
+                    == Some("target/novaseal-rwa-receipt-devnet-stateful-live.json"),
+            ),
         ),
     ]);
     let missing_invariants = required_invariants.difference(&invariant_ids).cloned().collect::<Vec<_>>();
@@ -2503,7 +2509,7 @@ fn validate_rwa_receipt_profile_package(repo_root: &Path) -> Result<Value> {
             "coverage_by_id": coverage_by_id,
         },
         "checks": checks,
-        "remaining_acceptance_gap": "live devnet materialise -> claim -> settle transactions are still required before rwa_receipt_lifecycle can pass",
+        "remaining_acceptance_gap": "profile-specific wallet/service fixtures and legal/registry review evidence are still required before rwa_receipt_lifecycle is operator-ready",
     }))
 }
 
@@ -2521,7 +2527,10 @@ fn validate_btc_tx_commitment_profile_package(repo_root: &Path) -> Result<Value>
         .collect::<Map<_, _>>();
     let actions = find_actions(&source);
     let action_names = actions.iter().map(|action| action.name.clone()).collect::<BTreeSet<_>>();
-    let expected_actions = ["commit_btc_transaction_transition"].iter().map(|action| (*action).to_string()).collect::<BTreeSet<_>>();
+    let expected_actions = ["commit_btc_transaction_transition", "nova_btc_transaction_commitment_lifecycle"]
+        .iter()
+        .map(|action| (*action).to_string())
+        .collect::<BTreeSet<_>>();
     let schemas = expected_files(repo_root, &root.join("schemas"), EXPECTED_BTC_TX_COMMITMENT_SCHEMA_FILES)?;
     let fixtures = expected_files(repo_root, &root.join("fixtures"), EXPECTED_BTC_TX_COMMITMENT_FIXTURES)?;
     let docs = expected_files(repo_root, &root.join("docs"), EXPECTED_BTC_TX_COMMITMENT_DOCS)?;
@@ -2552,7 +2561,10 @@ fn validate_btc_tx_commitment_profile_package(repo_root: &Path) -> Result<Value>
         ),
         (
             "manifest_stateful_dispatcher".to_string(),
-            Value::Bool(metadata_str("stateful_dispatcher") == Some("missing-live-dispatcher")),
+            Value::Bool(
+                metadata_str("stateful_dispatcher")
+                    == Some("src/nova_btc_transaction_commitment_type.cell:nova_btc_transaction_commitment_lifecycle"),
+            ),
         ),
         (
             "manifest_btc_public_verification_gap".to_string(),
@@ -2562,7 +2574,9 @@ fn validate_btc_tx_commitment_profile_package(repo_root: &Path) -> Result<Value>
             "manifest_source_actions".to_string(),
             Value::Bool(
                 metadata_str("source_actions")
-                    == Some("src/nova_btc_transaction_commitment_type.cell:commit_btc_transaction_transition"),
+                    == Some(
+                        "src/nova_btc_transaction_commitment_type.cell:commit_btc_transaction_transition;src/nova_btc_transaction_commitment_type.cell:nova_btc_transaction_commitment_lifecycle",
+                    ),
             ),
         ),
         ("expected_actions_present".to_string(), Value::Bool(expected_actions.is_subset(&action_names))),
@@ -2582,7 +2596,10 @@ fn validate_btc_tx_commitment_profile_package(repo_root: &Path) -> Result<Value>
         ),
         (
             "live_devnet_gap_explicit".to_string(),
-            Value::Bool(coverage_by_id.get("live_devnet_lifecycle").and_then(Value::as_str) == Some("missing-live-devnet-evidence")),
+            Value::Bool(
+                coverage_by_id.get("live_devnet_lifecycle").and_then(Value::as_str)
+                    == Some("target/novaseal-btc-transaction-commitment-devnet-stateful-live.json"),
+            ),
         ),
         (
             "btc_public_verification_gap_explicit".to_string(),
@@ -2611,7 +2628,7 @@ fn validate_btc_tx_commitment_profile_package(repo_root: &Path) -> Result<Value>
             "coverage_by_id": coverage_by_id,
         },
         "checks": checks,
-        "remaining_acceptance_gap": "live devnet BTC transaction commitment transition and public BTC verification evidence are still required before btc_transaction_commitment_transition can pass",
+        "remaining_acceptance_gap": "public BTC SPV evidence is still required before btc_transaction_commitment_transition can make production BTC-finality claims",
     }))
 }
 
@@ -2629,7 +2646,8 @@ fn validate_btc_utxo_seal_profile_package(repo_root: &Path) -> Result<Value> {
         .collect::<Map<_, _>>();
     let actions = find_actions(&source);
     let action_names = actions.iter().map(|action| action.name.clone()).collect::<BTreeSet<_>>();
-    let expected_actions = ["close_btc_utxo_seal"].iter().map(|action| (*action).to_string()).collect::<BTreeSet<_>>();
+    let expected_actions =
+        ["close_btc_utxo_seal", "nova_btc_utxo_seal_lifecycle"].iter().map(|action| (*action).to_string()).collect::<BTreeSet<_>>();
     let schemas = expected_files(repo_root, &root.join("schemas"), EXPECTED_BTC_UTXO_SEAL_SCHEMA_FILES)?;
     let fixtures = expected_files(repo_root, &root.join("fixtures"), EXPECTED_BTC_UTXO_SEAL_FIXTURES)?;
     let docs = expected_files(repo_root, &root.join("docs"), EXPECTED_BTC_UTXO_SEAL_DOCS)?;
@@ -2660,7 +2678,7 @@ fn validate_btc_utxo_seal_profile_package(repo_root: &Path) -> Result<Value> {
         ),
         (
             "manifest_stateful_dispatcher".to_string(),
-            Value::Bool(metadata_str("stateful_dispatcher") == Some("missing-live-dispatcher")),
+            Value::Bool(metadata_str("stateful_dispatcher") == Some("src/nova_btc_utxo_seal_type.cell:nova_btc_utxo_seal_lifecycle")),
         ),
         (
             "manifest_btc_public_verification_gap".to_string(),
@@ -2668,7 +2686,10 @@ fn validate_btc_utxo_seal_profile_package(repo_root: &Path) -> Result<Value> {
         ),
         (
             "manifest_source_actions".to_string(),
-            Value::Bool(metadata_str("source_actions") == Some("src/nova_btc_utxo_seal_type.cell:close_btc_utxo_seal")),
+            Value::Bool(
+                metadata_str("source_actions")
+                    == Some("src/nova_btc_utxo_seal_type.cell:close_btc_utxo_seal;src/nova_btc_utxo_seal_type.cell:nova_btc_utxo_seal_lifecycle"),
+            ),
         ),
         ("expected_actions_present".to_string(), Value::Bool(expected_actions.is_subset(&action_names))),
         ("schemas_exact".to_string(), Value::Bool(json_pointer_bool(&schemas, "/exact"))),
@@ -2685,7 +2706,10 @@ fn validate_btc_utxo_seal_profile_package(repo_root: &Path) -> Result<Value> {
         ),
         (
             "live_devnet_gap_explicit".to_string(),
-            Value::Bool(coverage_by_id.get("live_devnet_lifecycle").and_then(Value::as_str) == Some("missing-live-devnet-evidence")),
+            Value::Bool(
+                coverage_by_id.get("live_devnet_lifecycle").and_then(Value::as_str)
+                    == Some("target/novaseal-btc-utxo-seal-devnet-stateful-live.json"),
+            ),
         ),
         (
             "btc_public_verification_gap_explicit".to_string(),
@@ -2714,7 +2738,7 @@ fn validate_btc_utxo_seal_profile_package(repo_root: &Path) -> Result<Value> {
             "coverage_by_id": coverage_by_id,
         },
         "checks": checks,
-        "remaining_acceptance_gap": "live devnet BTC UTXO seal closure and public BTC spend-verification evidence are still required before btc_utxo_seal_closure can pass",
+        "remaining_acceptance_gap": "public BTC SPV spend-verification evidence is still required before btc_utxo_seal_closure can make production BTC-spend claims",
     }))
 }
 
@@ -2845,7 +2869,10 @@ fn validate_fiber_candidate_profile_package(repo_root: &Path) -> Result<Value> {
         .collect::<Map<_, _>>();
     let actions = find_actions(&source);
     let action_names = actions.iter().map(|action| action.name.clone()).collect::<BTreeSet<_>>();
-    let expected_actions = ["settle_fiber_candidate"].iter().map(|action| (*action).to_string()).collect::<BTreeSet<_>>();
+    let expected_actions = ["settle_fiber_candidate", "nova_fiber_candidate_lifecycle"]
+        .iter()
+        .map(|action| (*action).to_string())
+        .collect::<BTreeSet<_>>();
     let schemas = expected_files(repo_root, &root.join("schemas"), EXPECTED_FIBER_CANDIDATE_SCHEMA_FILES)?;
     let fixtures = expected_files(repo_root, &root.join("fixtures"), EXPECTED_FIBER_CANDIDATE_FIXTURES)?;
     let docs = expected_files(repo_root, &root.join("docs"), EXPECTED_FIBER_CANDIDATE_DOCS)?;
@@ -2876,15 +2903,18 @@ fn validate_fiber_candidate_profile_package(repo_root: &Path) -> Result<Value> {
         ),
         (
             "manifest_stateful_dispatcher".to_string(),
-            Value::Bool(metadata_str("stateful_dispatcher") == Some("missing-live-dispatcher")),
+            Value::Bool(metadata_str("stateful_dispatcher") == Some("src/nova_fiber_candidate_type.cell:nova_fiber_candidate_lifecycle")),
         ),
         (
             "manifest_fiber_execution_gap".to_string(),
-            Value::Bool(metadata_str("fiber_execution") == Some("missing-live-fiber-evidence")),
+            Value::Bool(metadata_str("fiber_execution") == Some(FIBER_NODE_EXPERIMENTS)),
         ),
         (
             "manifest_source_actions".to_string(),
-            Value::Bool(metadata_str("source_actions") == Some("src/nova_fiber_candidate_type.cell:settle_fiber_candidate")),
+            Value::Bool(
+                metadata_str("source_actions")
+                    == Some("src/nova_fiber_candidate_type.cell:settle_fiber_candidate;src/nova_fiber_candidate_type.cell:nova_fiber_candidate_lifecycle"),
+            ),
         ),
         ("expected_actions_present".to_string(), Value::Bool(expected_actions.is_subset(&action_names))),
         ("schemas_exact".to_string(), Value::Bool(json_pointer_bool(&schemas, "/exact"))),
@@ -2901,18 +2931,21 @@ fn validate_fiber_candidate_profile_package(repo_root: &Path) -> Result<Value> {
         ),
         (
             "live_devnet_gap_explicit".to_string(),
-            Value::Bool(coverage_by_id.get("live_devnet_lifecycle").and_then(Value::as_str) == Some("missing-live-devnet-evidence")),
+            Value::Bool(
+                coverage_by_id.get("live_devnet_lifecycle").and_then(Value::as_str)
+                    == Some("target/novaseal-fiber-candidate-devnet-stateful-live.json"),
+            ),
         ),
         (
             "fiber_execution_gap_explicit".to_string(),
-            Value::Bool(coverage_by_id.get("fiber_execution").and_then(Value::as_str) == Some("missing-live-fiber-evidence")),
+            Value::Bool(coverage_by_id.get("fiber_execution").and_then(Value::as_str) == Some(FIBER_NODE_EXPERIMENTS)),
         ),
     ]);
     let missing_invariants = required_invariants.difference(&invariant_ids).cloned().collect::<Vec<_>>();
     Ok(json!({
         "schema": "novaseal-fiber-candidate-profile-package-validation-v0.1",
         "status": if object_values_all_true(Some(&Value::Object(checks.clone()))) { "passed" } else { "failed" },
-        "classification": "profile-package-evidence-not-live-fiber-or-stateful-acceptance",
+        "classification": "profile-package-with-live-stateful-and-fiber-node-execution-evidence",
         "root": rel(repo_root, &root),
         "manifest": rel(repo_root, &manifest_path),
         "canonical_schema_hash": schema_hash,
@@ -2928,7 +2961,7 @@ fn validate_fiber_candidate_profile_package(repo_root: &Path) -> Result<Value> {
             "coverage_by_id": coverage_by_id,
         },
         "checks": checks,
-        "remaining_acceptance_gap": "live devnet Fiber candidate path evidence is still required before fiber_candidate_path can pass",
+        "remaining_acceptance_gap": "operator-ready Fiber witness fixtures are still required before the Fiber evidence is fully reproducible by wallets and service operators",
     }))
 }
 

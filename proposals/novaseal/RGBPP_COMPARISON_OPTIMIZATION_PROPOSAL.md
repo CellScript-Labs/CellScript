@@ -39,9 +39,9 @@ NovaSeal is cleaner as a typed contract and certification framework. Its strengt
    - NovaSeal should add a planned profile for delayed release after BTC confirmation threshold.
    - Acceptance should include valid/invalid confirmation-depth evidence.
 
-3. Promote lifecycle dispatcher requirements into package validation.
-   - BTC transaction, BTC UTXO, and Fiber now have lifecycle entries.
-   - Update manifests and validators from `missing-live-dispatcher` to explicit lifecycle action names after the external-evidence schema is added.
+3. Preserve lifecycle dispatcher requirements in package validation.
+   - BTC transaction, BTC UTXO, and Fiber now have explicit lifecycle dispatcher metadata.
+   - Keep manifests and validators pinned to the dispatcher action names and live report paths.
    - This prevents future profiles from passing package validation while lacking a CKB-creatable first-state path.
 
 4. Split live-runner helper modules.
@@ -62,11 +62,17 @@ NovaSeal is cleaner as a typed contract and certification framework. Its strengt
 ## Priority
 
 1. External BTC SPV evidence adapter.
-2. Manifest/validator dispatcher upgrade.
-3. Profile live-runner modularisation.
-4. Builder-backed wallet/service fixtures.
+2. Builder-backed wallet/service fixtures.
+3. Fiber operator fixture binding.
+4. Profile live-runner modularisation.
 5. BTC time-lock profile.
-6. Fiber operator fixture binding.
+6. Production attestations and public BTC SPV report collection.
+
+Completed hardening since the comparison was first drafted:
+
+- Fiber-node execution evidence is now present and passing for the tracked required suites.
+- BTC transaction, BTC UTXO, and Fiber manifests and validators now use explicit lifecycle dispatcher action names rather than `missing-live-dispatcher`.
+- Public BTC SPV evidence now has a fail-closed production gate and checked template.
 
 ## Decision
 

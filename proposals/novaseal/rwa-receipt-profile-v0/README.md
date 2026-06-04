@@ -1,8 +1,8 @@
 # NovaSeal RWA Receipt Profile v0
 
 **Status**: reviewable profile package. It is not V1-ready and not production
-ready because live devnet RWA receipt lifecycle evidence, wallet vectors,
-external attestations, and legal/registry review are still missing.
+ready because profile-specific wallet/service fixtures, external attestations,
+and legal/registry review are still missing.
 
 This package implements the planned NovaSeal RWA/receipt object profile as a
 source-level package with schemas, fixtures, invariant matrix, and security
@@ -36,8 +36,8 @@ price, legal enforceability, or oracle facts.
 | Stable RWA receipt lifecycle type action | implemented | compiles-to-ckb-elf |
 | Schemas and fixture labels | implemented | reviewable |
 | Invariant matrix | implemented | reviewable |
-| Live devnet materialise -> claim -> settle | missing | missing-live-devnet-evidence |
-| Wallet signing vectors | missing | missing-wallet-evidence |
+| Live devnet materialise -> claim -> settle | implemented | `target/novaseal-rwa-receipt-devnet-stateful-live.json` |
+| Profile-specific wallet/service fixtures | missing | builder-fixture-required |
 | Public/shared CellDep attestation | missing | external-required |
 | External BIP340 TCB review | missing | external-required |
 
@@ -45,6 +45,8 @@ price, legal enforceability, or oracle facts.
 
 The V1 readiness matrix may count `object_profile_rwa_receipt` as a package
 implementation only when the certification gate sees this manifest, source
-actions, schemas, fixtures, docs, and invariant matrix. The business scenario
-`rwa_receipt_lifecycle` must remain missing until live devnet stateful evidence
-is generated and checked.
+actions, lifecycle dispatcher, schemas, fixtures, docs, invariant matrix, and
+live stateful evidence. The business scenario `rwa_receipt_lifecycle` now passes
+at the live devnet stateful layer; production wallet/operator and legal/registry
+claims remain blocked until profile-specific builder fixtures and external
+review evidence are generated and checked.

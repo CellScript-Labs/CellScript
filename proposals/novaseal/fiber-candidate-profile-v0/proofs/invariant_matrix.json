@@ -43,13 +43,13 @@
       "id": "live_devnet_lifecycle",
       "claim": "A live devnet Fiber candidate path must exist before V1 readiness.",
       "location": "target/novaseal-devnet-stateful-acceptance.json",
-      "coverage": "missing-live-devnet-evidence"
+      "coverage": "target/novaseal-fiber-candidate-devnet-stateful-live.json"
     },
     {
       "id": "fiber_execution",
       "claim": "Actual Fiber network execution remains external to this package.",
       "location": "docs/SECURITY.md",
-      "coverage": "missing-live-fiber-evidence"
+      "coverage": "target/novaseal-fiber-node-experiments.json"
     }
   ]
 }

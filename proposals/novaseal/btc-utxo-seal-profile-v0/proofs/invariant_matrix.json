@@ -49,7 +49,7 @@
       "id": "live_devnet_lifecycle",
       "claim": "A live devnet BTC UTXO seal closure must exist before V1 readiness.",
       "location": "target/novaseal-devnet-stateful-acceptance.json",
-      "coverage": "missing-live-devnet-evidence"
+      "coverage": "target/novaseal-btc-utxo-seal-devnet-stateful-live.json"
     },
     {
       "id": "btc_public_verification",

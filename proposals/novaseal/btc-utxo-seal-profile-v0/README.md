@@ -1,8 +1,8 @@
 # NovaSeal BTC UTXO Seal Profile v0
 
 **Status**: reviewable seal profile package. It is not V1-ready and not
-production ready because live devnet closure evidence, wallet vectors, public
-BTC spend-verification evidence, and external attestations are still missing.
+production ready because profile-specific wallet/service fixtures, public BTC
+spend-verification evidence, and external attestations are still missing.
 
 This package implements the planned NovaSeal BTC UTXO single-use seal profile
 as a source-level package with schemas, fixtures, invariant matrix, and security
@@ -34,9 +34,10 @@ depth, or finality.
 | Owner authority signature | implemented | source-guard-present |
 | Schemas and fixture labels | implemented | reviewable |
 | Invariant matrix | implemented | reviewable |
-| Live devnet BTC UTXO seal closure | missing | missing-live-devnet-evidence |
+| Live devnet BTC UTXO seal closure | implemented | `target/novaseal-btc-utxo-seal-devnet-stateful-live.json` |
 | Public BTC spend-verification evidence | missing | `proposals/novaseal/v0-mvp-skeleton/proofs/public_btc_spv_evidence.json` external-required |
-| Wallet signing vectors | missing | missing-wallet-evidence |
+| Lifecycle dispatcher | implemented | `src/nova_btc_utxo_seal_type.cell:nova_btc_utxo_seal_lifecycle` |
+| Profile-specific wallet/service fixtures | missing | builder-fixture-required |
 | Public/shared CellDep attestation | missing | external-required |
 | External BIP340 TCB review | missing | external-required |
 
@@ -44,9 +45,10 @@ depth, or finality.
 
 The V1 readiness matrix may count `seal_profile_btc_utxo_seal` as a package
 implementation only when the certification gate sees this manifest, source
-action, schemas, fixtures, docs, and invariant matrix. The business scenario
-`btc_utxo_seal_closure` must remain missing until live devnet stateful evidence
-and public BTC spend-verification evidence are generated and checked.
+actions, lifecycle dispatcher, schemas, fixtures, docs, invariant matrix, and
+live stateful evidence. The business scenario `btc_utxo_seal_closure` now
+passes at the live devnet stateful layer; production BTC spend claims remain
+blocked until public BTC spend-verification evidence is generated and checked.
 
 The public BTC evidence shape is now machine-readable. A real production report
 must follow

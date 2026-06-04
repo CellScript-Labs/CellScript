@@ -49,7 +49,7 @@
       "id": "live_devnet_lifecycle",
       "claim": "A live devnet transition authorised by public BTC transaction commitment must exist before V1 readiness.",
       "location": "target/novaseal-devnet-stateful-acceptance.json",
-      "coverage": "missing-live-devnet-evidence"
+      "coverage": "target/novaseal-btc-transaction-commitment-devnet-stateful-live.json"
     },
     {
       "id": "btc_public_verification",

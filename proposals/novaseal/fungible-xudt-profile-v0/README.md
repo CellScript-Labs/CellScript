@@ -1,8 +1,8 @@
 # NovaSeal Fungible xUDT Profile v0
 
 **Status**: reviewable profile package. It is not V1-ready and not production
-ready because live devnet xUDT lifecycle evidence, wallet vectors, and external
-production attestations are still missing.
+ready because profile-specific wallet/service fixtures and external production
+attestations are still missing.
 
 This package implements the planned NovaSeal Fungible/xUDT object profile as a
 source-level package with schemas, fixtures, invariant matrix, and security
@@ -33,8 +33,8 @@ accounting, market flows, or a general ledger.
 | Stable xUDT lifecycle type action | implemented | compiles-to-ckb-elf |
 | Schemas and fixture labels | implemented | reviewable |
 | Invariant matrix | implemented | reviewable |
-| Live devnet issue -> transfer -> settle | missing | missing-live-devnet-evidence |
-| Wallet signing vectors | missing | missing-wallet-evidence |
+| Live devnet issue -> transfer -> settle | implemented | `target/novaseal-fungible-xudt-devnet-stateful-live.json` |
+| Profile-specific wallet/service fixtures | missing | builder-fixture-required |
 | Public/shared CellDep attestation | missing | external-required |
 | External BIP340 TCB review | missing | external-required |
 
@@ -42,6 +42,8 @@ accounting, market flows, or a general ledger.
 
 The V1 readiness matrix may count `object_profile_fungible_xudt` as a package
 implementation only when the certification gate sees this manifest, source
-actions, schemas, fixtures, docs, and invariant matrix. The business scenario
-`fungible_xudt_value_flow` must remain missing until live devnet stateful
-evidence is generated and checked.
+actions, lifecycle dispatcher, schemas, fixtures, docs, invariant matrix, and
+live stateful evidence. The business scenario `fungible_xudt_value_flow` now
+passes at the live devnet stateful layer; production wallet/operator claims
+remain blocked until profile-specific builder fixtures are generated and
+checked.
