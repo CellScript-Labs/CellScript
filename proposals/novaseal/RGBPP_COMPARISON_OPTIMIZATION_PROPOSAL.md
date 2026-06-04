@@ -2,9 +2,10 @@
 
 ## Evidence Base
 
-- NovaSeal repository: `research/nsv1`, after commit `fc4c5d53`.
+- NovaSeal repository: `research/nsv1`, after commit `3db1afb8`.
 - NovaSeal local gate: `target/novaseal-production-gates.json` reports `local_production_prep_ready_external_attestation_required`.
 - NovaSeal planned-profile stateful matrix: all planned live scenarios pass with no missing entries.
+- NovaSeal external Fiber-node matrix: `target/novaseal-fiber-node-experiments.json` reports `16/16` required suites present, executed, and passed, including embedded and separate-service cross-chain hub send-BTC and receive-BTC workflows.
 - RGB++ active SDK clone: `/Users/arthur/RustroverProjects/rgbpp-sdk-active`, commit `ee21eb9735c1adeb277e3a02b7f6c2f6fd1d0556`.
 - RGB++ archived SDK reference: `/Users/arthur/RustroverProjects/rgbpp-sdk`, commit `2d547132ede28616647e87d603aea63daada4841`.
 - RGB++ design clone: `/Users/arthur/RustroverProjects/RGBPlusPlus-design`, commit `c0b065c8bb8cc0a1813d27e9352ff694e1975ca3`.
@@ -13,17 +14,17 @@
 
 RGB++ is more mature in Bitcoin/CKB operational integration. It has explicit isomorphic binding, BTC SPV service integration, BTC time lock handling, paymaster handling, service APIs, SDK examples, and workflow-oriented transaction builders.
 
-NovaSeal is cleaner as a typed contract and certification framework. Its strengths are explicit profile packages, canonical envelopes, negative-case live reports, source/artifact provenance, and a single certification gate that now verifies all planned profile live paths. Its main weakness is that BTC/Fiber external evidence is still represented as profile-level live CKB evidence rather than integrated SPV/Fiber-node proof.
+NovaSeal is cleaner as a typed contract and certification framework. Its strengths are explicit profile packages, canonical envelopes, negative-case live reports, source/artifact provenance, a single certification gate that now verifies all planned profile live paths, and a separate Fiber-node execution matrix that now passes across the tracked Fiber workflows. Its main remaining weakness is no longer basic Fiber execution. It is the absence of production-grade external BTC SPV provenance, public/shared CellDep attestation, external BIP340 verifier TCB attestation, and service-facing builders that make those facts easy for wallets and operators to reproduce.
 
 ## Comparison
 
 | Area | RGB++ | NovaSeal | Assessment |
 | --- | --- | --- | --- |
 | Core model | Isomorphic BTC UTXO to CKB Cell binding. | Typed NovaSeal profiles with canonical signed envelopes. | RGB++ is operationally concrete; NovaSeal is more formally structured. |
-| Workflow maturity | SDK builds virtual CKB tx, BTC tx commitment, queue/service flow, SPV proof retrieval. | Live devnet scripts now exercise all planned profile scenarios. | RGB++ has stronger product workflow coverage. |
+| Workflow maturity | SDK builds virtual CKB tx, BTC tx commitment, queue/service flow, SPV proof retrieval. | Live devnet scripts now exercise all planned profile scenarios; Fiber-node experiments now execute the tracked channel, watchtower, UDT, and cross-chain hub workflows. | RGB++ still has stronger product workflow integration; NovaSeal now has stronger machine-checked local and Fiber regression evidence. |
 | Contract clarity | Lock scripts and BTC time lock focus on RGB++ asset ownership. | Profile-specific CellScript sources encode business intent directly. | NovaSeal is easier to audit per business profile. |
-| Security posture | Strong BTC confirmation/SPV/time-lock design in docs and SDK surface. | Strong local stateful negative evidence and provenance; external BTC/Fiber evidence still outstanding. | RGB++ is stronger for public BTC binding; NovaSeal is stronger for local certification traceability. |
-| Robustness | Service/SDK split handles queueing, paymaster, proofs, offline data. | Devnet acceptance is deterministic but script-heavy and profile-specific. | NovaSeal should borrow RGB++ service abstraction patterns. |
+| Security posture | Strong BTC confirmation/SPV/time-lock design in docs and SDK surface. | Strong local stateful negative evidence, provenance, and external Fiber-node execution; public BTC SPV and external attestation remain outstanding. | RGB++ is stronger for public BTC binding; NovaSeal is stronger for local certification traceability and negative-path evidence. |
+| Robustness | Service/SDK split handles queueing, paymaster, proofs, offline data. | Devnet and Fiber acceptance are deterministic but script-heavy and profile-specific. | NovaSeal should borrow RGB++ service abstraction patterns without giving up deterministic certification. |
 | Elegance | Practical but spread across SDK/service/contract/docs. | Declarative profile contracts and one certification gate. | NovaSeal has the cleaner specification surface. |
 
 ## Optimisation Proposal
@@ -53,10 +54,10 @@ NovaSeal is cleaner as a typed contract and certification framework. Its strengt
    - NovaSeal should add builder-backed JSON fixtures for each planned profile, not only Python live scripts.
    - These builders should output signing preimages, witness bytes, CKB tx skeletons, and expected report hashes.
 
-6. Make Fiber evidence honest and staged.
-   - Current Fiber profile proves a live CKB stateful settlement path.
-   - Add a separate `fiber_node_execution_v0` evidence report before treating the Fiber profile as fully production-backed.
-   - The report should include cloned Fiber commit, scenario name, node topology, channel state before/after, and mapped NovaSeal profile witness.
+6. Promote Fiber evidence from execution proof to operator-ready fixture.
+   - The separate Fiber-node execution report now exists and passes the currently tracked required suites.
+   - Keep the report as a certification input, but add wallet/operator fixtures that bind each Fiber suite to a NovaSeal profile witness hash, channel topology summary, before/after channel state, and copied-Bruno compatibility patch provenance.
+   - This turns the current execution matrix into reproducible integration evidence rather than a one-off local experiment.
 
 ## Priority
 
@@ -65,8 +66,8 @@ NovaSeal is cleaner as a typed contract and certification framework. Its strengt
 3. Profile live-runner modularisation.
 4. Builder-backed wallet/service fixtures.
 5. BTC time-lock profile.
-6. Fiber node execution evidence.
+6. Fiber operator fixture binding.
 
 ## Decision
 
-Keep NovaSeal's typed profile and certification architecture. Borrow RGB++'s external proof and workflow integration style. The result should be a smaller trusted contract surface than RGB++ with stronger machine-checkable local evidence, while removing the remaining weakness around external BTC/Fiber proof provenance.
+Keep NovaSeal's typed profile and certification architecture. Borrow RGB++'s external proof and workflow integration style. The result should be a smaller trusted contract surface than RGB++ with stronger machine-checkable local and Fiber evidence, while removing the remaining weakness around public BTC proof provenance, service-facing builder ergonomics, and external production attestations.
