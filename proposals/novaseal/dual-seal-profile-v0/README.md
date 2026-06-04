@@ -34,6 +34,7 @@ finality, or live CKB maturity by itself.
 | Schemas and fixture labels | implemented | reviewable |
 | Invariant matrix | implemented | reviewable |
 | Live devnet dual-seal finality path | missing | missing-live-devnet-evidence |
+| Public BTC SPV evidence adapter request | implemented | `target/novaseal-btc-spv-evidence-adapter.json` |
 | Public BTC closure verification evidence | missing | `proposals/novaseal/v0-mvp-skeleton/proofs/public_btc_spv_evidence.json` external-required |
 | Profile-specific wallet/service fixtures | implemented | `target/novaseal-profile-operator-fixtures.json` + `target/novaseal-service-builder-fixtures.json` |
 | Public/shared CellDep attestation | missing | external-required |
@@ -53,6 +54,9 @@ intent and both required signing authorities, but it deliberately records an
 external finality boundary rather than claiming live BTC/CKB finality.
 `scripts/novaseal_service_builder_fixtures.py` generates the matching service
 request/response skeleton and preserves the same external finality boundary.
+`scripts/novaseal_btc_spv_evidence_adapter.py` generates the external BTC SPV
+request contract for the BTC closure side; it deliberately does not replace
+live dual-seal finality evidence.
 
 The public BTC evidence shape is now machine-readable. A real production report
 must follow

@@ -36,6 +36,7 @@ const STATEFUL_ACCEPTANCE: &str = "target/novaseal-devnet-stateful-acceptance.js
 const WALLET_VECTORS: &str = "target/novaseal-wallet-signing-vectors.json";
 const PROFILE_OPERATOR_FIXTURES: &str = "target/novaseal-profile-operator-fixtures.json";
 const SERVICE_BUILDER_FIXTURES: &str = "target/novaseal-service-builder-fixtures.json";
+const BTC_SPV_EVIDENCE_ADAPTER: &str = "target/novaseal-btc-spv-evidence-adapter.json";
 const TCB_REVIEW: &str = "target/novaseal-bip340-tcb-review.json";
 const PUBLIC_CELLDEP_ATTESTATION: &str = "proposals/novaseal/v0-mvp-skeleton/proofs/public_shared_cell_dep_attestation.json";
 const EXTERNAL_TCB_ATTESTATION: &str = "proposals/novaseal/v0-mvp-skeleton/proofs/bip340_external_tcb_review_attestation.json";
@@ -568,6 +569,7 @@ pub(crate) fn build_report(repo_root: &Path) -> Result<Value> {
     let wallet = json_load(repo_root, WALLET_VECTORS)?;
     let profile_operator_fixtures = json_load(repo_root, PROFILE_OPERATOR_FIXTURES)?;
     let service_builder_fixtures = json_load(repo_root, SERVICE_BUILDER_FIXTURES)?;
+    let btc_spv_evidence_adapter = json_load(repo_root, BTC_SPV_EVIDENCE_ADAPTER)?;
     let tcb = json_load(repo_root, TCB_REVIEW)?;
     let artifact_hash = normalize_hex(json_pointer_str(&tcb, "/runtime_artifact/artifact_hash"));
 
@@ -593,6 +595,7 @@ pub(crate) fn build_report(repo_root: &Path) -> Result<Value> {
         wallet: &wallet,
         profile_operator_fixtures: &profile_operator_fixtures,
         service_builder_fixtures: &service_builder_fixtures,
+        btc_spv_evidence_adapter: &btc_spv_evidence_adapter,
         stateful_acceptance: &stateful_acceptance,
         tcb: &tcb,
         public_attestation: &public_attestation,
@@ -652,6 +655,16 @@ pub(crate) fn build_report(repo_root: &Path) -> Result<Value> {
             },
             SERVICE_BUILDER_FIXTURES,
             service_builder_fixtures.get("summary").cloned().unwrap_or(Value::Null),
+        ),
+        gate(
+            "btc_spv_evidence_adapter_request",
+            if btc_spv_evidence_adapter_gate_passed(&btc_spv_evidence_adapter) {
+                "passed"
+            } else {
+                "failed"
+            },
+            BTC_SPV_EVIDENCE_ADAPTER,
+            btc_spv_evidence_adapter.get("summary").cloned().unwrap_or(Value::Null),
         ),
         gate(
             "bip340_runtime_verifier_local_tcb_review",
@@ -822,6 +835,12 @@ fn build_v1_readiness(
             "planned-profile service request and response reproducibility",
         ),
         readiness_dimension(
+            "btc_spv_evidence_adapter",
+            json_pointer_bool(profile_certification, "/local_checks/btc_spv_evidence_adapter_passed"),
+            "target/novaseal-btc-spv-evidence-adapter.json",
+            "public BTC SPV evidence request readiness",
+        ),
+        readiness_dimension(
             "local_bip340_tcb_review",
             json_pointer_bool(profile_certification, "/local_checks/local_bip340_tcb_review_passed"),
             "target/novaseal-bip340-tcb-review.json",
@@ -862,6 +881,7 @@ fn build_v1_readiness(
         "wallet_signing_vectors",
         "profile_operator_fixtures",
         "service_builder_fixtures",
+        "btc_spv_evidence_adapter",
         "local_bip340_tcb_review",
         "local_v1_gate",
     ];
@@ -898,7 +918,7 @@ fn build_v1_readiness(
         "failed_dimensions": failed_dimensions,
         "external_blockers": external_blockers,
         "acceptance_boundary": {
-            "local_ready_means": "architecture, audit, wallet, planned-profile operator fixtures, service-builder fixtures, TCB, multi-profile devnet, multi-business scenarios, and full stateful acceptance are machine checked locally",
+            "local_ready_means": "architecture, audit, wallet, planned-profile operator fixtures, service-builder fixtures, BTC SPV evidence adapter request, TCB, multi-profile devnet, multi-business scenarios, and full stateful acceptance are machine checked locally",
             "production_ready_requires": [
                 "public/shared CellDep pinning attestation",
                 "public BTC SPV evidence for BTC-facing profiles",
@@ -2185,6 +2205,7 @@ struct ProfileCertificationInputs<'a> {
     wallet: &'a Value,
     profile_operator_fixtures: &'a Value,
     service_builder_fixtures: &'a Value,
+    btc_spv_evidence_adapter: &'a Value,
     stateful_acceptance: &'a Value,
     tcb: &'a Value,
     public_attestation: &'a Value,
@@ -2201,6 +2222,7 @@ fn validate_profile_certification(input: ProfileCertificationInputs<'_>) -> Resu
         wallet,
         profile_operator_fixtures,
         service_builder_fixtures,
+        btc_spv_evidence_adapter,
         stateful_acceptance,
         tcb,
         public_attestation,
@@ -2212,6 +2234,7 @@ fn validate_profile_certification(input: ProfileCertificationInputs<'_>) -> Resu
     let wallet_detail = validate_wallet_vector_detail(wallet);
     let profile_operator_fixture_detail = validate_profile_operator_fixture_detail(profile_operator_fixtures);
     let service_builder_fixture_detail = validate_service_builder_fixture_detail(service_builder_fixtures);
+    let btc_spv_adapter_detail = validate_btc_spv_evidence_adapter_detail(btc_spv_evidence_adapter);
     let invariant_matrix = validate_invariant_matrix(repo_root, &repo_root.join(AGREEMENT_ROOT).join("proofs/invariant_matrix.json"))?;
     let fungible_xudt_profile = validate_fungible_xudt_profile_package(repo_root)?;
     let rwa_receipt_profile = validate_rwa_receipt_profile_package(repo_root)?;
@@ -2255,6 +2278,7 @@ fn validate_profile_certification(input: ProfileCertificationInputs<'_>) -> Resu
         "wallet_vector_detail_passed": json_pointer_str(&wallet_detail, "/status") == Some("passed"),
         "profile_operator_fixture_detail_passed": json_pointer_str(&profile_operator_fixture_detail, "/status") == Some("passed"),
         "service_builder_fixture_detail_passed": json_pointer_str(&service_builder_fixture_detail, "/status") == Some("passed"),
+        "btc_spv_evidence_adapter_passed": json_pointer_str(&btc_spv_adapter_detail, "/status") == Some("passed"),
         "invariant_matrix_passed": json_pointer_str(&invariant_matrix, "/status") == Some("passed"),
         "live_devnet_evidence_passed": json_pointer_str(&live_evidence, "/status") == Some("passed"),
         "agreement_runtime_verifier_pin_passed": object_values_all_true(agreement_manifest.get("checks")),
@@ -2300,6 +2324,7 @@ fn validate_profile_certification(input: ProfileCertificationInputs<'_>) -> Resu
         "wallet_vectors": wallet_detail,
         "profile_operator_fixtures": profile_operator_fixture_detail,
         "service_builder_fixtures": service_builder_fixture_detail,
+        "btc_spv_evidence_adapter": btc_spv_adapter_detail,
         "invariant_matrix": invariant_matrix,
         "planned_profile_packages": {
             "btc_tx_commitment": btc_tx_commitment_profile,
@@ -2556,6 +2581,80 @@ fn validate_service_builder_fixture_detail(report: &Value) -> Value {
         "expected_profiles": expected_profiles.into_iter().collect::<Vec<_>>(),
         "expected_actions": expected_actions.into_iter().collect::<Vec<_>>(),
         "case_count": cases.len(),
+    })
+}
+
+fn validate_btc_spv_evidence_adapter_detail(report: &Value) -> Value {
+    let cases = report.get("cases").and_then(Value::as_array).cloned().unwrap_or_default();
+    let mut by_profile: BTreeMap<String, Vec<Value>> = BTreeMap::new();
+    for case in &cases {
+        if let Some(profile) = json_pointer_str(case, "/profile") {
+            by_profile.entry(profile.to_string()).or_default().push(case.clone());
+        }
+    }
+    let expected_profiles = EXPECTED_BTC_SPV_EVIDENCE_PROFILES.iter().map(|profile| (*profile).to_string()).collect::<BTreeSet<_>>();
+    let actual_profiles =
+        cases.iter().filter_map(|case| json_pointer_str(case, "/profile").map(ToString::to_string)).collect::<BTreeSet<_>>();
+
+    let mut case_checks = Map::new();
+    for expected_profile in EXPECTED_BTC_SPV_EVIDENCE_PROFILES {
+        let matches = by_profile.get(*expected_profile).cloned().unwrap_or_default();
+        let case = matches.first().cloned().unwrap_or(Value::Null);
+        let required_fields = json_array_strings(&case, "/request/required_public_fields");
+        let external_inputs = json_array_strings(&case, "/request/required_external_inputs");
+        let required_public_fields_complete = [
+            "network",
+            "btc_txid",
+            "btc_block_hash",
+            "spv_proof_hash",
+            "confirmations",
+            "spv_client_cell_dep.out_point",
+            "spv_client_cell_dep.data_hash",
+            "spv_client_cell_dep.dep_type",
+            "spv_client_cell_dep.hash_type",
+            "source_service.name",
+            "source_service.commit",
+            "source_service.report_hash",
+        ]
+        .iter()
+        .all(|field| required_fields.iter().any(|actual| actual == field));
+        let checks = json!({
+            "exactly_one_case": matches.len() == 1,
+            "status_passed": json_pointer_str(&case, "/status") == Some("passed"),
+            "request_profile_matches": json_pointer_str(&case, "/request/profile") == Some(*expected_profile),
+            "scenario_present": json_pointer_str(&case, "/request/scenario").is_some_and(|value| !value.is_empty()),
+            "minimum_confirmations_at_least_six": json_pointer_i64(&case, "/request/minimum_confirmations").unwrap_or_default() >= 6,
+            "public_btc_spv_external_input_named": external_inputs.iter().any(|value| value == "public_btc_spv_evidence"),
+            "service_builder_case_hash": json_pointer_str(&case, "/request/service_builder_case_hash").is_some_and(is_hex32),
+            "service_builder_tx_skeleton_hash": json_pointer_str(&case, "/request/service_builder_tx_skeleton_hash").is_some_and(is_hex32),
+            "service_builder_receipt_binding_hash": json_pointer_str(&case, "/request/service_builder_receipt_binding_hash").is_some_and(is_hex32),
+            "template_case_hash": json_pointer_str(&case, "/request/template_case_hash").is_some_and(is_hex32),
+            "required_public_fields_complete": required_public_fields_complete,
+            "fixture_checks_passed": object_values_all_true(case.get("checks")),
+        });
+        case_checks.insert((*expected_profile).to_string(), checks);
+    }
+
+    let checks = json!({
+        "report_passed": json_pointer_str(report, "/status") == Some("passed"),
+        "schema_current": json_pointer_str(report, "/schema") == Some("novaseal-btc-spv-evidence-adapter-v0.1"),
+        "adapter_status_request_ready": json_pointer_str(report, "/adapter_status") == Some("request_ready_external_evidence_required"),
+        "service_builder_report_hash": json_pointer_str(report, "/source_service_builder_report_hash").is_some_and(is_hex32),
+        "public_btc_spv_template_hash": json_pointer_str(report, "/source_public_btc_spv_template_hash").is_some_and(is_hex32),
+        "production_output_named": json_pointer_str(report, "/production_output") == Some(PUBLIC_BTC_SPV_EVIDENCE),
+        "summary_counts_match": json_pointer_i64(report, "/summary/total") == Some(EXPECTED_BTC_SPV_EVIDENCE_PROFILES.len() as i64)
+            && json_pointer_i64(report, "/summary/matched") == json_pointer_i64(report, "/summary/total"),
+        "exact_profiles": actual_profiles == expected_profiles,
+        "case_details": case_checks.values().all(|row| object_values_all_true(Some(row))),
+    });
+
+    json!({
+        "status": if object_values_all_true(Some(&checks)) { "passed" } else { "failed" },
+        "checks": checks,
+        "cases": case_checks,
+        "expected_profiles": expected_profiles.into_iter().collect::<Vec<_>>(),
+        "case_count": cases.len(),
+        "production_boundary": json_pointer_str(report, "/production_boundary"),
     })
 }
 
@@ -3818,6 +3917,13 @@ fn service_builder_fixture_gate_passed(report: &Value) -> bool {
         && json_pointer_i64(report, "/summary/total") == Some(EXPECTED_PROFILE_OPERATOR_FIXTURES.len() as i64)
         && json_pointer_i64(report, "/summary/matched") == json_pointer_i64(report, "/summary/total")
         && json_pointer_i64(report, "/summary/profile_count").unwrap_or_default() >= 6
+}
+
+fn btc_spv_evidence_adapter_gate_passed(report: &Value) -> bool {
+    json_pointer_str(report, "/status") == Some("passed")
+        && json_pointer_str(report, "/adapter_status") == Some("request_ready_external_evidence_required")
+        && json_pointer_i64(report, "/summary/total") == Some(EXPECTED_BTC_SPV_EVIDENCE_PROFILES.len() as i64)
+        && json_pointer_i64(report, "/summary/matched") == json_pointer_i64(report, "/summary/total")
 }
 
 fn stateful_acceptance_passed(stateful_acceptance: &Value) -> bool {

@@ -74,6 +74,7 @@
   "notes": [
     "This file is a template, not production evidence.",
     "A real report must be saved as public_btc_spv_evidence.json and must not use local-devnet or placeholder fields.",
+    "The request contract generated at target/novaseal-btc-spv-evidence-adapter.json lists the exact BTC-facing profile cases and service-builder hashes this public report must satisfy.",
     "The production gate requires all three BTC-facing profiles to have public BTC SPV cases with at least six confirmations."
   ]
 }
