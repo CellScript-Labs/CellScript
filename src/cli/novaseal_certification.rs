@@ -1135,6 +1135,12 @@ fn build_planned_profile_matrix(profile_certification: &Value, stateful_acceptan
         .filter_map(|row| json_pointer_str(row, "/id").map(str::to_string))
         .collect::<Vec<_>>();
     let passed = missing_profiles.is_empty();
+    let remaining_items = missing_profiles.clone();
+    let not_implemented_yet = if passed {
+        "none; all planned NovaSeal V1 profiles and business scenarios have local package, fixture, and stateful evidence".to_string()
+    } else {
+        format!("remaining local evidence rows: {}", missing_profiles.join(", "))
+    };
     json!({
         "schema": "novaseal-planned-profile-matrix-v0.1",
         "status": if passed { "passed" } else { "incomplete" },
@@ -1143,8 +1149,13 @@ fn build_planned_profile_matrix(profile_certification: &Value, stateful_acceptan
         "business_scenarios": business_scenarios,
         "missing": missing_profiles,
         "boundary": {
-            "implemented_now": "BTC key-signature authority, planned profile package evidence, key-signed Cell movement, CKB-native Agreement terminal paths, and machine-readable live-report contracts for all remaining V1 business scenarios",
-            "not_implemented_yet": "fresh live devnet reports proving BTC transaction commitment, BTC UTXO closure, Fungible/xUDT value-flow, RWA receipt lifecycle, and Fiber candidate execution",
+            "implemented_now": if passed {
+                "BTC key-signature authority, all planned profile packages, key-signed Cell movement, CKB-native Agreement terminal paths, and local stateful live-report evidence for every planned V1 business scenario"
+            } else {
+                "BTC key-signature authority, implemented profile packages, key-signed Cell movement, CKB-native Agreement terminal paths, and any business scenario rows marked passed in this matrix"
+            },
+            "not_implemented_yet": not_implemented_yet,
+            "remaining_items": remaining_items,
         },
     })
 }
@@ -5131,5 +5142,60 @@ mod tests {
         assert!(missing.iter().any(|id| id == "fungible_xudt_value_flow"));
         assert!(missing.iter().any(|id| id == "rwa_receipt_lifecycle"));
         assert!(missing.iter().any(|id| id == "fiber_candidate_path"));
+        assert_eq!(json_array_strings(&matrix, "/boundary/remaining_items"), missing);
+        assert!(json_pointer_str(&matrix, "/boundary/not_implemented_yet")
+            .is_some_and(|text| text.contains("btc_transaction_commitment_transition")));
+    }
+
+    #[test]
+    fn planned_matrix_boundary_has_no_stale_missing_text_when_all_rows_pass() {
+        let profile_certification = json!({
+            "status": "passed",
+            "production_statement_eligible": false,
+            "local_checks": {
+                "conformance_gate_passed": true,
+                "wallet_vector_detail_passed": true,
+                "local_bip340_tcb_review_passed": true,
+            },
+            "planned_profile_packages": {
+                "btc_tx_commitment": { "status": "passed" },
+                "btc_utxo_seal": { "status": "passed" },
+                "dual_seal": { "status": "passed" },
+                "fiber_candidate": { "status": "passed" },
+                "fungible_xudt": { "status": "passed" },
+                "rwa_receipt": { "status": "passed" }
+            },
+        });
+        let stateful_acceptance = json!({
+            "profile_coverage": {
+                "covered_profiles": [
+                    { "status": "passed" },
+                    { "status": "passed" }
+                ]
+            },
+            "business_scenario_coverage": {
+                "status": "passed",
+                "checks": {
+                    "agreement_originate_live": true,
+                    "agreement_repay_live": true,
+                    "agreement_claim_live": true,
+                    "agreement_negative_business_cases_preserve_live_state": true,
+                    "btc_transaction_commitment_transition_live": true,
+                    "btc_utxo_seal_closure_live": true,
+                    "fungible_xudt_value_flow_live": true,
+                    "rwa_receipt_lifecycle_live": true,
+                    "fiber_candidate_path_live": true
+                }
+            },
+        });
+
+        let matrix = build_planned_profile_matrix(&profile_certification, &stateful_acceptance);
+        let not_implemented_yet = json_pointer_str(&matrix, "/boundary/not_implemented_yet").unwrap_or_default();
+
+        assert_eq!(json_pointer_str(&matrix, "/status"), Some("passed"));
+        assert!(json_array_strings(&matrix, "/missing").is_empty());
+        assert!(json_array_strings(&matrix, "/boundary/remaining_items").is_empty());
+        assert!(not_implemented_yet.starts_with("none;"));
+        assert!(!not_implemented_yet.contains("fresh live devnet reports proving"));
     }
 }
