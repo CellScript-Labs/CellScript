@@ -175,6 +175,8 @@ def attestation_case(
         "required_fields_complete": set(required_fields).issubset(fields),
     }
     expected_values = {}
+    if request.get("expected_release_version"):
+        expected_values["release.version"] = request["expected_release_version"]
     if request.get("expected_release_manifest_commit"):
         expected_values["release.manifest_commit"] = request["expected_release_manifest_commit"]
     if request.get("expected_artifact_hash"):
