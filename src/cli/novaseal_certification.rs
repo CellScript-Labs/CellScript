@@ -302,7 +302,10 @@ const EXPECTED_BTC_SPV_FIELD_CONSTRAINTS: &[(&str, &str)] = &[
     ("source_service.name", "real external SPV service identity; placeholder, example, and unknown tokens are rejected"),
     ("source_service.commit", "40-character hex service source commit"),
     ("source_service.report_hash", "0x-prefixed 32-byte non-placeholder SPV service report hash"),
+    ("request_handoff.bundle", "target/novaseal-external-evidence-handoff-bundle.json"),
+    ("request_handoff.bundle_hash", "0x-prefixed 32-byte hash of the NovaSeal external evidence handoff bundle"),
     ("request_handoff.bundle_hash_algorithm", "blake2b-256(person=NovaExtHandoff)"),
+    ("request_handoff.group", "public_btc_spv_evidence"),
 ];
 const EXPECTED_PUBLIC_CELLDEP_REQUIRED_FIELDS: &[&str] = &[
     "network",
@@ -337,7 +340,10 @@ const EXPECTED_PUBLIC_CELLDEP_FIELD_CONSTRAINTS: &[(&str, &str)] = &[
     ("runtime_verifier.data_hash", "0x-prefixed 32-byte non-placeholder CellDep data hash"),
     ("runtime_verifier.dep_type", EXPECTED_NOVASEAL_CELLDEP_DEP_TYPE),
     ("runtime_verifier.hash_type", "data1"),
+    ("request_handoff.bundle", "target/novaseal-external-evidence-handoff-bundle.json"),
+    ("request_handoff.bundle_hash", "0x-prefixed 32-byte hash of the NovaSeal external evidence handoff bundle"),
     ("request_handoff.bundle_hash_algorithm", "blake2b-256(person=NovaExtHandoff)"),
+    ("request_handoff.group", "public_shared_cell_dep_attestation"),
 ];
 const EXPECTED_PUBLIC_CELLDEP_EXPECTED_VALUE_FIELDS: &[&str] = &[
     "artifact_hash",
@@ -370,7 +376,10 @@ const EXPECTED_EXTERNAL_TCB_FIELD_CONSTRAINTS: &[(&str, &str)] = &[
     ("review_scope", "exact BIP340 verifier, RISC-V shell, IPC envelope, and artifact/CellDep pinning scope"),
     ("artifact_hash_algorithm", "sha256"),
     ("report_uri", "HTTPS URI for the public review report or source-controlled review commit; example domains are rejected"),
+    ("request_handoff.bundle", "target/novaseal-external-evidence-handoff-bundle.json"),
+    ("request_handoff.bundle_hash", "0x-prefixed 32-byte hash of the NovaSeal external evidence handoff bundle"),
     ("request_handoff.bundle_hash_algorithm", "blake2b-256(person=NovaExtHandoff)"),
+    ("request_handoff.group", "external_bip340_tcb_review_attestation"),
 ];
 const EXPECTED_EXTERNAL_TCB_REVIEW_SCOPE: &[&str] = &[
     "BIP340 verifier core",
@@ -5506,6 +5515,16 @@ mod tests {
         assert_eq!(json_pointer_str(&failed_btc_txid_constraint, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&failed_btc_txid_constraint, "/cases/public_btc_spv_evidence/field_constraints_exact"));
 
+        let mut missing_handoff_group_constraint = report.clone();
+        missing_handoff_group_constraint["cases"][0]["field_constraints"].as_object_mut().unwrap().remove("request_handoff.group");
+        let failed_handoff_group_constraint = validate_external_evidence_handoff_detail(
+            &missing_handoff_group_constraint,
+            &btc_spv_adapter,
+            &external_attestation_adapter,
+        );
+        assert_eq!(json_pointer_str(&failed_handoff_group_constraint, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&failed_handoff_group_constraint, "/cases/public_btc_spv_evidence/field_constraints_exact"));
+
         let mut stale_expected_scenario = report.clone();
         stale_expected_scenario["cases"][0]["expected_scenarios"][EXPECTED_BTC_TX_COMMITMENT_PROFILE] =
             json!("generic-public-btc-proof");
@@ -5698,6 +5717,31 @@ mod tests {
         assert_eq!(json_pointer_str(&failed_constraint, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&failed_constraint, "/cases/external_bip340_tcb_review_attestation/field_constraints_exact"));
 
+        let mut missing_public_handoff_hash_constraint = report.clone();
+        missing_public_handoff_hash_constraint["cases"][0]["request"]["field_constraints"]
+            .as_object_mut()
+            .unwrap()
+            .remove("request_handoff.bundle_hash");
+        let failed_public_handoff_hash_constraint =
+            validate_external_attestation_adapter_detail(&missing_public_handoff_hash_constraint);
+        assert_eq!(json_pointer_str(&failed_public_handoff_hash_constraint, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(
+            &failed_public_handoff_hash_constraint,
+            "/cases/public_shared_cell_dep_attestation/field_constraints_exact"
+        ));
+
+        let mut missing_tcb_handoff_group_constraint = report.clone();
+        missing_tcb_handoff_group_constraint["cases"][1]["request"]["field_constraints"]
+            .as_object_mut()
+            .unwrap()
+            .remove("request_handoff.group");
+        let failed_tcb_handoff_group_constraint = validate_external_attestation_adapter_detail(&missing_tcb_handoff_group_constraint);
+        assert_eq!(json_pointer_str(&failed_tcb_handoff_group_constraint, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(
+            &failed_tcb_handoff_group_constraint,
+            "/cases/external_bip340_tcb_review_attestation/field_constraints_exact"
+        ));
+
         let mut stale_review_scope = report.clone();
         stale_review_scope["cases"][1]["request"]["expected_review_scope"] = json!(["BIP340 runtime verifier TCB"]);
         let failed_review_scope = validate_external_attestation_adapter_detail(&stale_review_scope);
@@ -5829,6 +5873,18 @@ mod tests {
         assert_eq!(json_pointer_str(&failed_spv_proof_hash_constraint, "/status"), Some("failed"));
         assert!(!json_pointer_bool(
             &failed_spv_proof_hash_constraint,
+            "/cases/btc-transaction-commitment-profile-v0/field_constraints_exact"
+        ));
+
+        let mut missing_handoff_bundle_constraint = report.clone();
+        missing_handoff_bundle_constraint["cases"][0]["request"]["field_constraints"]
+            .as_object_mut()
+            .unwrap()
+            .remove("request_handoff.bundle");
+        let failed_handoff_bundle_constraint = validate_btc_spv_evidence_adapter_detail(&missing_handoff_bundle_constraint);
+        assert_eq!(json_pointer_str(&failed_handoff_bundle_constraint, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(
+            &failed_handoff_bundle_constraint,
             "/cases/btc-transaction-commitment-profile-v0/field_constraints_exact"
         ));
 

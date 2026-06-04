@@ -160,7 +160,10 @@ def btc_spv_handoff_case(adapter: dict[str, Any]) -> dict[str, Any]:
             "source_service.name": "real external SPV service identity; placeholder, example, and unknown tokens are rejected",
             "source_service.commit": "40-character hex service source commit",
             "source_service.report_hash": "0x-prefixed 32-byte non-placeholder SPV service report hash",
+            "request_handoff.bundle": "target/novaseal-external-evidence-handoff-bundle.json",
+            "request_handoff.bundle_hash": "0x-prefixed 32-byte hash of the NovaSeal external evidence handoff bundle",
             "request_handoff.bundle_hash_algorithm": "blake2b-256(person=NovaExtHandoff)",
+            "request_handoff.group": "public_btc_spv_evidence",
         },
     }
 
