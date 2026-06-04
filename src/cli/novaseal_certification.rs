@@ -4014,13 +4014,17 @@ fn validate_btc_spv_evidence(repo_root: &Path, rel_path: &str, external_evidence
                 "fields_exact": exact_object_keys(case, EXPECTED_PUBLIC_BTC_SPV_CASE_FIELDS),
                 "scenario_present": case.get("scenario").is_some_and(value_is_present),
                 "btc_txid_valid": json_pointer_str(case, "/btc_txid").is_some_and(is_hex32),
+                "btc_txid_non_placeholder": !placeholder_hash(json_pointer_str(case, "/btc_txid")),
                 "btc_block_hash_valid": json_pointer_str(case, "/btc_block_hash").is_some_and(is_hex32),
+                "btc_block_hash_non_placeholder": !placeholder_hash(json_pointer_str(case, "/btc_block_hash")),
                 "spv_proof_hash_valid": json_pointer_str(case, "/spv_proof_hash").is_some_and(is_hex32),
+                "spv_proof_hash_non_placeholder": !placeholder_hash(json_pointer_str(case, "/spv_proof_hash")),
                 "minimum_confirmations_at_least_six": minimum_confirmations >= 6,
                 "confirmations_meet_minimum": confirmations >= minimum_confirmations && minimum_confirmations >= 6,
                 "spv_client_cell_dep_fields_exact": exact_object_keys(cell_dep, EXPECTED_PUBLIC_BTC_SPV_CELLDEP_FIELDS),
                 "spv_client_cell_dep_out_point_valid": json_pointer_bool(&out_point, "/valid"),
                 "spv_client_cell_dep_data_hash_valid": json_pointer_str(cell_dep, "/data_hash").is_some_and(is_hex32),
+                "spv_client_cell_dep_data_hash_non_placeholder": !placeholder_hash(json_pointer_str(cell_dep, "/data_hash")),
                 "spv_client_cell_dep_dep_type": json_pointer_str(cell_dep, "/dep_type") == Some("code"),
                 "spv_client_cell_dep_hash_type": matches!(hash_type, Some("data" | "data1" | "type")),
                 "source_service_fields_exact": exact_object_keys(source_service, EXPECTED_PUBLIC_BTC_SPV_SOURCE_SERVICE_FIELDS),
@@ -4028,6 +4032,7 @@ fn validate_btc_spv_evidence(repo_root: &Path, rel_path: &str, external_evidence
                 "source_service_name_identity": json_pointer_str(source_service, "/name").is_some_and(is_external_identity),
                 "source_service_commit_40_hex": json_pointer_str(source_service, "/commit").is_some_and(is_git_commit_hash),
                 "source_service_report_hash_valid": json_pointer_str(source_service, "/report_hash").is_some_and(is_hex32),
+                "source_service_report_hash_non_placeholder": !placeholder_hash(json_pointer_str(source_service, "/report_hash")),
             }),
         );
     }
@@ -5413,6 +5418,16 @@ mod tests {
         assert_eq!(json_pointer_str(&failed_case, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&failed_case, "/case_checks/btc-transaction-commitment-profile-v0/fields_exact"));
 
+        let mut zero_btc_txid = spv_report.clone();
+        zero_btc_txid["cases"][0]["btc_txid"] = json!(format!("0x{}", "00".repeat(32)));
+        std::fs::write(proofs.join("public_btc_spv_evidence.json"), serde_json::to_vec_pretty(&zero_btc_txid).unwrap()).unwrap();
+        let failed_zero_btc_txid = validate_btc_spv_evidence(temp.path(), PUBLIC_BTC_SPV_EVIDENCE, &handoff).unwrap();
+        assert_eq!(json_pointer_str(&failed_zero_btc_txid, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(
+            &failed_zero_btc_txid,
+            "/case_checks/btc-transaction-commitment-profile-v0/btc_txid_non_placeholder"
+        ));
+
         let mut cell_dep_extra = spv_report.clone();
         cell_dep_extra["cases"][0]["spv_client_cell_dep"]["unexpected_cell_dep_field"] = Value::String("must-fail".to_string());
         std::fs::write(proofs.join("public_btc_spv_evidence.json"), serde_json::to_vec_pretty(&cell_dep_extra).unwrap()).unwrap();
@@ -5443,6 +5458,21 @@ mod tests {
         assert!(!json_pointer_bool(
             &failed_source_service_commit,
             "/case_checks/btc-transaction-commitment-profile-v0/source_service_commit_40_hex"
+        ));
+
+        let mut source_service_zero_report_hash = spv_report.clone();
+        source_service_zero_report_hash["cases"][0]["source_service"]["report_hash"] = json!(format!("0x{}", "00".repeat(32)));
+        std::fs::write(
+            proofs.join("public_btc_spv_evidence.json"),
+            serde_json::to_vec_pretty(&source_service_zero_report_hash).unwrap(),
+        )
+        .unwrap();
+        let failed_source_service_zero_report_hash =
+            validate_btc_spv_evidence(temp.path(), PUBLIC_BTC_SPV_EVIDENCE, &handoff).unwrap();
+        assert_eq!(json_pointer_str(&failed_source_service_zero_report_hash, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(
+            &failed_source_service_zero_report_hash,
+            "/case_checks/btc-transaction-commitment-profile-v0/source_service_report_hash_non_placeholder"
         ));
 
         let mut handoff_extra = spv_report.clone();
