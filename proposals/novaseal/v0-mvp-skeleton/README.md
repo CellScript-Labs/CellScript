@@ -295,19 +295,22 @@ python3 /home/arthur/a19q3/CellScript/scripts/novaseal_profile_operator_fixtures
 # 20. Generate planned-profile service-builder fixtures from the repository root
 python3 /home/arthur/a19q3/CellScript/scripts/novaseal_service_builder_fixtures.py --pretty
 
-# 21. Generate the BTC SPV external-evidence adapter request from the repository root
-python3 /home/arthur/a19q3/CellScript/scripts/novaseal_btc_spv_evidence_adapter.py --pretty
-
-# 22. Generate the local BIP340 TCB review bundle from the repository root
+# 21. Generate the local BIP340 TCB review bundle from the repository root
 python3 /home/arthur/a19q3/CellScript/scripts/novaseal_bip340_tcb_review.py --pretty
 
-# 23. Run the local production-prep/profile certification gate from the repository root
+# 22. Generate the BTC SPV external-evidence adapter request from the repository root
+python3 /home/arthur/a19q3/CellScript/scripts/novaseal_btc_spv_evidence_adapter.py --pretty
+
+# 23. Generate public CellDep and external TCB attestation adapter requests from the repository root
+python3 /home/arthur/a19q3/CellScript/scripts/novaseal_external_attestation_adapter.py --pretty
+
+# 24. Run the local production-prep/profile certification gate from the repository root
 /home/arthur/a19q3/CellScript/target/debug/cellc certify --plugin novaseal-profile-v0 --json
 
-# 24. Check strict 0.16 primitive closure
+# 25. Check strict 0.16 primitive closure
 cellc check --target-profile ckb --primitive-strict 0.16
 
-# 25. Inspect obligations
+# 26. Inspect obligations
 cellc constraints --target-profile ckb
 cellc explain-assumptions --target-profile ckb
 cellc profile --target-profile ckb

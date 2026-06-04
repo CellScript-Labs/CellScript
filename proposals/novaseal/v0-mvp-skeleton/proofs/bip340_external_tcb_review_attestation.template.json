@@ -17,6 +17,7 @@
   "report_uri": "REPLACE_WITH_EXTERNAL_REVIEW_REPORT_OR_COMMIT_URI",
   "notes": [
     "This file is a template, not an attestation.",
+    "The request contract generated at target/novaseal-external-attestation-adapter.json lists the exact external reviewer fields, artifact hash, and source tree hash this attestation must satisfy.",
     "A real attestation must come from an external reviewer and must match the reviewed artifact hash."
   ]
 }

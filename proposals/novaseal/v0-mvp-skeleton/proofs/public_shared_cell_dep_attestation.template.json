@@ -24,6 +24,7 @@
   "notes": [
     "This file is a template, not an attestation.",
     "A real attestation must describe a public/shared deployment, not a local devnet CellDep.",
+    "The request contract generated at target/novaseal-external-attestation-adapter.json lists the exact public CellDep fields and reviewed artifact hash this attestation must satisfy.",
     "The production gate rejects missing or placeholder out_point/data_hash/artifact_hash fields."
   ]
 }
