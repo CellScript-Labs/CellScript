@@ -4375,6 +4375,7 @@ fn validate_public_attestation(
         "hash_type_matches_expected": json_pointer_str(&verifier, "/hash_type") == Some(EXPECTED_NOVASEAL_CELLDEP_HASH_TYPE),
         "hash_type_matches_handoff": json_pointer_str(&verifier, "/hash_type")
             == json_pointer_str(handoff_expected_values, "/runtime_verifier.hash_type"),
+        "data_hash_valid": normalize_hex(json_pointer_str(&verifier, "/data_hash")).as_deref().is_some_and(is_hex32),
         "verifier_id": json_pointer_str(&verifier, "/verifier_id") == Some("btc.bip340.v0"),
         "verifier_id_matches_handoff": json_pointer_str(&verifier, "/verifier_id")
             == json_pointer_str(handoff_expected_values, "/runtime_verifier.verifier_id"),
@@ -6535,6 +6536,7 @@ mod tests {
         assert!(json_pointer_bool(&public_passed, "/checks/hash_type"));
         assert!(json_pointer_bool(&public_passed, "/checks/hash_type_matches_expected"));
         assert!(json_pointer_bool(&public_passed, "/checks/hash_type_matches_handoff"));
+        assert!(json_pointer_bool(&public_passed, "/checks/data_hash_valid"));
 
         let mut stale_public_handoff = handoff.clone();
         stale_public_handoff["cases"][0]["expected_values"]["release.version"] = json!("0.0.2");
@@ -6702,6 +6704,24 @@ mod tests {
         assert_eq!(json_pointer_str(&public_stale_hash_type_failed, "/status"), Some("failed"));
         assert!(json_pointer_bool(&public_stale_hash_type_failed, "/checks/hash_type"));
         assert!(!json_pointer_bool(&public_stale_hash_type_failed, "/checks/hash_type_matches_expected"));
+
+        let mut public_invalid_data_hash = public_attestation.clone();
+        public_invalid_data_hash["runtime_verifier"]["data_hash"] = json!("0xnot-a-32-byte-hash");
+        std::fs::write(
+            proofs.join("public_shared_cell_dep_attestation.json"),
+            serde_json::to_vec_pretty(&public_invalid_data_hash).unwrap(),
+        )
+        .unwrap();
+        let public_data_hash_failed = validate_public_attestation(
+            temp.path(),
+            PUBLIC_CELLDEP_ATTESTATION,
+            Some(&artifact_hash),
+            Some(tcb_repo_commit),
+            &handoff,
+        )
+        .unwrap();
+        assert_eq!(json_pointer_str(&public_data_hash_failed, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&public_data_hash_failed, "/checks/data_hash_valid"));
 
         let mut public_stale_manifest_commit = public_attestation.clone();
         public_stale_manifest_commit["release"]["manifest_commit"] = json!("fedcba9876543210fedcba9876543210fedcba98");
