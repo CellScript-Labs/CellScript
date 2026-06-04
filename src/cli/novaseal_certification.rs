@@ -335,11 +335,19 @@ const EXPECTED_EXTERNAL_TCB_REQUIRED_FIELDS: &[&str] = &[
 const EXPECTED_EXTERNAL_TCB_FIELD_CONSTRAINTS: &[(&str, &str)] = &[
     ("reviewer", "real external reviewer identity; placeholder tokens are rejected"),
     ("review_date", "UTC date in YYYY-MM-DD form"),
+    ("review_scope", "exact BIP340 verifier, RISC-V shell, IPC envelope, and artifact/CellDep pinning scope"),
     ("artifact_hash_algorithm", "sha256"),
     ("report_uri", "HTTPS URI for the public review report or source-controlled review commit"),
     ("request_handoff.bundle_hash_algorithm", "blake2b-256(person=NovaExtHandoff)"),
 ];
-const EXPECTED_EXTERNAL_TCB_EXPECTED_VALUE_FIELDS: &[&str] = &["artifact_hash", "artifact_hash_algorithm", "source_tree_sha256"];
+const EXPECTED_EXTERNAL_TCB_REVIEW_SCOPE: &[&str] = &[
+    "BIP340 verifier core",
+    "RISC-V runtime verifier shell",
+    "CellScript BIP340 IPC envelope",
+    "artifact hash and CellDep pinning requirements",
+];
+const EXPECTED_EXTERNAL_TCB_EXPECTED_VALUE_FIELDS: &[&str] =
+    &["artifact_hash", "artifact_hash_algorithm", "review_scope", "source_tree_sha256"];
 
 const EXPECTED_FIBER_NODE_EXECUTION_SCHEMA: &str = "novaseal-fiber-node-execution-v0.3";
 const EXPECTED_FIBER_REPO_ORIGIN: &str = "https://github.com/nervosnetwork/fiber.git";
@@ -3070,6 +3078,8 @@ fn validate_external_attestation_adapter_detail(report: &Value) -> Value {
             "artifact_hash_present": json_pointer_str(&case, "/request/expected_artifact_hash").is_some_and(is_hex32),
             "expected_release_manifest_commit_present": name != "public_shared_cell_dep_attestation"
                 || json_pointer_str(&case, "/request/expected_release_manifest_commit").is_some_and(is_git_commit_hash),
+            "expected_review_scope_exact": name != "external_bip340_tcb_review_attestation"
+                || exact_string_set(&json_array_strings(&case, "/request/expected_review_scope"), EXPECTED_EXTERNAL_TCB_REVIEW_SCOPE),
             "artifact_hash_algorithm_matches_tcb": name == "public_shared_cell_dep_attestation"
                 || (
                     json_pointer_str(&case, "/request/expected_artifact_hash_algorithm") == Some("sha256")
@@ -3152,6 +3162,11 @@ fn validate_external_evidence_handoff_detail(report: &Value, btc_spv_adapter: &V
         "external_bip340_tcb_review_attestation",
         "/request/expected_source_tree_sha256",
     );
+    let expected_external_tcb_review_scope = adapter_case_request_strings(
+        external_attestation_adapter,
+        "external_bip340_tcb_review_attestation",
+        "/request/expected_review_scope",
+    );
 
     let mut case_checks = Map::new();
     for (group, production_output) in expected {
@@ -3195,9 +3210,11 @@ fn validate_external_evidence_handoff_detail(report: &Value, btc_spv_adapter: &V
                 exact_object_keys(case.get("expected_values").unwrap_or(&Value::Null), EXPECTED_EXTERNAL_TCB_EXPECTED_VALUE_FIELDS)
                     && expected_external_tcb_artifact_hash.is_some_and(is_hex32)
                     && expected_external_tcb_source_tree_hash.is_some_and(is_hex32)
+                    && exact_string_set(&expected_external_tcb_review_scope, EXPECTED_EXTERNAL_TCB_REVIEW_SCOPE)
                     && json_pointer_str(&case, "/expected_values/artifact_hash") == expected_external_tcb_artifact_hash
                     && json_pointer_str(&case, "/expected_values/artifact_hash_algorithm")
                         == expected_external_tcb_artifact_hash_algorithm
+                    && json_array_strings(&case, "/expected_values/review_scope") == expected_external_tcb_review_scope
                     && json_pointer_str(&case, "/expected_values/source_tree_sha256") == expected_external_tcb_source_tree_hash
             }
             _ => true,
@@ -3261,6 +3278,14 @@ fn adapter_case_request_str<'a>(adapter: &'a Value, case_name: &str, pointer: &s
         .iter()
         .find(|case| json_pointer_str(case, "/name") == Some(case_name))
         .and_then(|case| json_pointer_str(case, pointer))
+}
+
+fn adapter_case_request_strings(adapter: &Value, case_name: &str, pointer: &str) -> Vec<String> {
+    adapter
+        .get("cases")
+        .and_then(Value::as_array)
+        .and_then(|cases| cases.iter().find(|case| json_pointer_str(case, "/name") == Some(case_name)))
+        .map_or_else(Vec::new, |case| json_array_strings(case, pointer))
 }
 
 fn btc_spv_adapter_expected_scenarios(adapter: &Value) -> BTreeMap<String, String> {
@@ -4267,10 +4292,7 @@ fn validate_external_review(
         "review_date_present": json_pointer_str(&payload, "/review_date").is_some_and(|value| !value.is_empty()),
         "review_date_utc_date": json_pointer_str(&payload, "/review_date").is_some_and(is_utc_date),
         "report_uri_https": json_pointer_str(&payload, "/report_uri").is_some_and(is_https_report_uri),
-        "review_scope_items_present": payload
-            .get("review_scope")
-            .and_then(Value::as_array)
-            .is_some_and(|items| !items.is_empty() && items.iter().all(value_is_present)),
+        "review_scope_exact": exact_string_set(&json_array_strings(&payload, "/review_scope"), EXPECTED_EXTERNAL_TCB_REVIEW_SCOPE),
     });
     Ok(json!({
         "status": if object_values_all_true(Some(&checks)) { "passed" } else { "failed" },
@@ -5092,6 +5114,7 @@ mod tests {
                         "expected_artifact_hash": external_artifact_hash,
                         "expected_artifact_hash_algorithm": "sha256",
                         "expected_source_tree_sha256": external_source_tree_hash,
+                        "expected_review_scope": EXPECTED_EXTERNAL_TCB_REVIEW_SCOPE,
                     },
                 },
             ],
@@ -5153,6 +5176,7 @@ mod tests {
                     "expected_values": {
                         "artifact_hash": external_artifact_hash,
                         "artifact_hash_algorithm": "sha256",
+                        "review_scope": EXPECTED_EXTERNAL_TCB_REVIEW_SCOPE,
                         "source_tree_sha256": external_source_tree_hash,
                     },
                     "checks": { "ok": true },
@@ -5214,6 +5238,16 @@ mod tests {
             "/cases/public_shared_cell_dep_attestation/expected_values_match_source_adapter"
         ));
 
+        let mut stale_expected_review_scope = report.clone();
+        stale_expected_review_scope["cases"][2]["expected_values"]["review_scope"] = json!(["BIP340 runtime verifier TCB"]);
+        let failed_review_scope =
+            validate_external_evidence_handoff_detail(&stale_expected_review_scope, &btc_spv_adapter, &external_attestation_adapter);
+        assert_eq!(json_pointer_str(&failed_review_scope, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(
+            &failed_review_scope,
+            "/cases/external_bip340_tcb_review_attestation/expected_values_match_source_adapter"
+        ));
+
         let mut unexpected_required_field = report;
         let mut extended_btc_fields = btc_handoff_fields.to_vec();
         extended_btc_fields.push("unexpected.shadow_field");
@@ -5269,6 +5303,7 @@ mod tests {
                         "expected_artifact_hash": format!("0x{}", "11".repeat(32)),
                         "expected_artifact_hash_algorithm": "sha256",
                         "template_artifact_hash_algorithm": "sha256",
+                        "expected_review_scope": EXPECTED_EXTERNAL_TCB_REVIEW_SCOPE,
                         "required_public_fields": full_review_fields,
                         "field_constraints": constraint_object(EXPECTED_EXTERNAL_TCB_FIELD_CONSTRAINTS),
                     },
@@ -5281,6 +5316,7 @@ mod tests {
         assert!(json_pointer_bool(&valid, "/cases/public_shared_cell_dep_attestation/field_constraints_exact"));
         assert!(json_pointer_bool(&valid, "/cases/public_shared_cell_dep_attestation/expected_release_manifest_commit_present"));
         assert!(json_pointer_bool(&valid, "/cases/external_bip340_tcb_review_attestation/field_constraints_exact"));
+        assert!(json_pointer_bool(&valid, "/cases/external_bip340_tcb_review_attestation/expected_review_scope_exact"));
 
         let mut missing_handoff_field = report.clone();
         missing_handoff_field["cases"][0]["request"]["required_public_fields"] = json!(full_public_fields[..15].to_vec());
@@ -5302,6 +5338,12 @@ mod tests {
         let failed_constraint = validate_external_attestation_adapter_detail(&stale_constraint);
         assert_eq!(json_pointer_str(&failed_constraint, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&failed_constraint, "/cases/external_bip340_tcb_review_attestation/field_constraints_exact"));
+
+        let mut stale_review_scope = report.clone();
+        stale_review_scope["cases"][1]["request"]["expected_review_scope"] = json!(["BIP340 runtime verifier TCB"]);
+        let failed_review_scope = validate_external_attestation_adapter_detail(&stale_review_scope);
+        assert_eq!(json_pointer_str(&failed_review_scope, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&failed_review_scope, "/cases/external_bip340_tcb_review_attestation/expected_review_scope_exact"));
 
         let mut missing_expected_commit = report.clone();
         missing_expected_commit["cases"][0]["request"]["expected_release_manifest_commit"] = json!("REPLACE_WITH_GIT_COMMIT");
@@ -5437,7 +5479,7 @@ mod tests {
                 "source_tree_sha256": source_tree_hash,
                 "reviewer": "REPLACE_WITH_EXTERNAL_REVIEWER",
                 "review_date": "YYYY-MM-DD",
-                "review_scope": ["BIP340 runtime verifier TCB"],
+                "review_scope": EXPECTED_EXTERNAL_TCB_REVIEW_SCOPE,
                 "report_uri": "REPLACE_WITH_EXTERNAL_REVIEW_REPORT_OR_COMMIT_URI",
                 "notes": "template fixture",
                 "request_handoff": {
@@ -5930,7 +5972,7 @@ mod tests {
             "ipc_abi": "cellscript-btc-bip340-ipc-v0",
             "reviewer": "external-tcb-reviewer",
             "review_date": "2026-06-05",
-            "review_scope": ["BIP340 runtime verifier TCB"],
+            "review_scope": EXPECTED_EXTERNAL_TCB_REVIEW_SCOPE,
             "report_uri": "https://audits.nervos.example.org/novaseal-bip340-tcb-review",
             "notes": "external review fixture",
             "request_handoff": {
@@ -5959,7 +6001,7 @@ mod tests {
         assert!(json_pointer_bool(&review_passed, "/checks/reviewer_identity"));
         assert!(json_pointer_bool(&review_passed, "/checks/review_date_utc_date"));
         assert!(json_pointer_bool(&review_passed, "/checks/report_uri_https"));
-        assert!(json_pointer_bool(&review_passed, "/checks/review_scope_items_present"));
+        assert!(json_pointer_bool(&review_passed, "/checks/review_scope_exact"));
 
         let mut review_placeholder_date = external_review.clone();
         review_placeholder_date["review_date"] = json!("YYYY-MM-DD");
@@ -6047,7 +6089,20 @@ mod tests {
             validate_external_review(temp.path(), EXTERNAL_TCB_ATTESTATION, Some(&artifact_hash), Some(&source_tree_hash), &handoff)
                 .unwrap();
         assert_eq!(json_pointer_str(&review_scope_failed, "/status"), Some("failed"));
-        assert!(!json_pointer_bool(&review_scope_failed, "/checks/review_scope_items_present"));
+        assert!(!json_pointer_bool(&review_scope_failed, "/checks/review_scope_exact"));
+
+        let mut review_scope_incomplete = external_review.clone();
+        review_scope_incomplete["review_scope"] = json!(["BIP340 verifier core"]);
+        std::fs::write(
+            proofs.join("bip340_external_tcb_review_attestation.json"),
+            serde_json::to_vec_pretty(&review_scope_incomplete).unwrap(),
+        )
+        .unwrap();
+        let review_scope_incomplete_failed =
+            validate_external_review(temp.path(), EXTERNAL_TCB_ATTESTATION, Some(&artifact_hash), Some(&source_tree_hash), &handoff)
+                .unwrap();
+        assert_eq!(json_pointer_str(&review_scope_incomplete_failed, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&review_scope_incomplete_failed, "/checks/review_scope_exact"));
 
         let mut review_handoff_extra = external_review.clone();
         review_handoff_extra["request_handoff"]["unexpected_handoff_field"] = Value::String("must-fail".to_string());

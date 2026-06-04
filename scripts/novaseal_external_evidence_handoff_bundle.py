@@ -181,6 +181,8 @@ def attestation_case(
         expected_values["artifact_hash"] = request["expected_artifact_hash"]
     if request.get("expected_artifact_hash_algorithm"):
         expected_values["artifact_hash_algorithm"] = request["expected_artifact_hash_algorithm"]
+    if request.get("expected_review_scope"):
+        expected_values["review_scope"] = request["expected_review_scope"]
     if request.get("expected_source_tree_sha256"):
         expected_values["source_tree_sha256"] = request["expected_source_tree_sha256"]
 

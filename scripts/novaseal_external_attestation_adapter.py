@@ -134,6 +134,7 @@ def external_tcb_case(template: dict[str, Any], tcb: dict[str, Any]) -> dict[str
         "field_constraints": {
             "reviewer": "real external reviewer identity; placeholder tokens are rejected",
             "review_date": "UTC date in YYYY-MM-DD form",
+            "review_scope": "exact BIP340 verifier, RISC-V shell, IPC envelope, and artifact/CellDep pinning scope",
             "artifact_hash_algorithm": "sha256",
             "report_uri": "HTTPS URI for the public review report or source-controlled review commit",
             "request_handoff.bundle_hash_algorithm": "blake2b-256(person=NovaExtHandoff)",
@@ -146,6 +147,7 @@ def external_tcb_case(template: dict[str, Any], tcb: dict[str, Any]) -> dict[str
         "template_artifact_hash_algorithm": template.get("artifact_hash_algorithm"),
         "expected_source_tree_sha256": source.get("source_tree_sha256"),
         "template_source_tree_sha256": template.get("source_tree_sha256"),
+        "expected_review_scope": template.get("review_scope"),
         "required_status": "accepted",
     }
     checks = {
@@ -160,7 +162,13 @@ def external_tcb_case(template: dict[str, Any], tcb: dict[str, Any]) -> dict[str
         and request["template_artifact_hash_algorithm"] == request["expected_artifact_hash_algorithm"],
         "source_tree_hash_matches_tcb": is_present(request["expected_source_tree_sha256"])
         and request["template_source_tree_sha256"] == request["expected_source_tree_sha256"],
-        "review_scope_present": bool(template.get("review_scope")),
+        "review_scope_exact": template.get("review_scope")
+        == [
+            "BIP340 verifier core",
+            "RISC-V runtime verifier shell",
+            "CellScript BIP340 IPC envelope",
+            "artifact hash and CellDep pinning requirements",
+        ],
         "required_fields_complete": len(request["required_public_fields"]) == 13,
     }
     return {

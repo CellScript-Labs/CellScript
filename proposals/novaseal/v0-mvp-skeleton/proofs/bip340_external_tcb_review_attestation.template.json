@@ -23,7 +23,7 @@
   "report_uri": "REPLACE_WITH_EXTERNAL_REVIEW_REPORT_OR_COMMIT_URI",
   "notes": [
     "This file is a template, not an attestation.",
-    "The request contract generated at target/novaseal-external-attestation-adapter.json lists the exact external reviewer fields, artifact hash, and source tree hash this attestation must satisfy.",
+    "The request contract generated at target/novaseal-external-attestation-adapter.json lists the exact external reviewer fields, review_scope, artifact hash, and source tree hash this attestation must satisfy.",
     "The request_handoff block must reference the current target/novaseal-external-evidence-handoff-bundle.json hash, blake2b-256(person=NovaExtHandoff) hash algorithm, and external_bip340_tcb_review_attestation group.",
     "A real attestation must come from an external reviewer and must match the reviewed artifact hash."
   ]
