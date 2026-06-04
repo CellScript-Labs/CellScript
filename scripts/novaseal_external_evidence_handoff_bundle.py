@@ -44,6 +44,9 @@ REQUIRED_PUBLIC_CELLDEP_FIELDS = [
     "runtime_verifier.dep_type",
     "runtime_verifier.hash_type",
     "runtime_verifier.artifact_hash",
+    "request_handoff.bundle",
+    "request_handoff.bundle_hash",
+    "request_handoff.group",
 ]
 
 REQUIRED_EXTERNAL_TCB_FIELDS = [
@@ -55,6 +58,9 @@ REQUIRED_EXTERNAL_TCB_FIELDS = [
     "artifact_hash",
     "source_tree_sha256",
     "report_uri",
+    "request_handoff.bundle",
+    "request_handoff.bundle_hash",
+    "request_handoff.group",
 ]
 
 

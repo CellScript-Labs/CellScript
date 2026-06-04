@@ -2852,13 +2852,56 @@ fn validate_external_evidence_handoff_detail(report: &Value, btc_spv_adapter: &V
         };
         let expected_source_adapter =
             if group == "public_btc_spv_evidence" { BTC_SPV_EVIDENCE_ADAPTER } else { EXTERNAL_ATTESTATION_ADAPTER };
+        let expected_required_external_fields = match group {
+            "public_btc_spv_evidence" => vec![
+                "network",
+                "btc_txid",
+                "btc_block_hash",
+                "spv_proof_hash",
+                "confirmations",
+                "spv_client_cell_dep",
+                "source_service",
+                "request_handoff.bundle",
+                "request_handoff.bundle_hash",
+                "request_handoff.group",
+            ],
+            "public_shared_cell_dep_attestation" => vec![
+                "network",
+                "attested_at",
+                "attestor",
+                "release.manifest_commit",
+                "runtime_verifier.out_point",
+                "runtime_verifier.data_hash",
+                "runtime_verifier.dep_type",
+                "runtime_verifier.hash_type",
+                "runtime_verifier.artifact_hash",
+                "request_handoff.bundle",
+                "request_handoff.bundle_hash",
+                "request_handoff.group",
+            ],
+            _ => vec![
+                "reviewer",
+                "review_date",
+                "review_scope",
+                "verifier_id",
+                "ipc_abi",
+                "artifact_hash",
+                "source_tree_sha256",
+                "report_uri",
+                "request_handoff.bundle",
+                "request_handoff.bundle_hash",
+                "request_handoff.group",
+            ],
+        };
         let checks = json!({
             "exactly_one_case": matches.len() == 1,
             "status_passed": json_pointer_str(&case, "/status") == Some("passed"),
             "production_output_matches": json_pointer_str(&case, "/production_output") == Some(production_output),
             "source_adapter_path_matches_current": json_pointer_str(&case, "/source_adapter") == Some(expected_source_adapter),
             "source_adapter_hash_matches_current": json_pointer_str(&case, "/source_adapter_hash") == Some(expected_source_hash),
-            "required_external_fields_present": !required_external_fields.is_empty(),
+            "required_external_fields_complete": expected_required_external_fields
+                .iter()
+                .all(|field| required_external_fields.iter().any(|actual| actual == field)),
             "btc_profiles_complete": group != "public_btc_spv_evidence"
                 || required_profiles == expected_btc_profiles,
             "fixture_checks_passed": object_values_all_true(case.get("checks")),
@@ -4385,6 +4428,45 @@ mod tests {
 
     #[test]
     fn external_evidence_handoff_rejects_stale_source_hashes_and_paths() {
+        let btc_handoff_fields = [
+            "network",
+            "btc_txid",
+            "btc_block_hash",
+            "spv_proof_hash",
+            "confirmations",
+            "spv_client_cell_dep",
+            "source_service",
+            "request_handoff.bundle",
+            "request_handoff.bundle_hash",
+            "request_handoff.group",
+        ];
+        let public_attestation_handoff_fields = [
+            "network",
+            "attested_at",
+            "attestor",
+            "release.manifest_commit",
+            "runtime_verifier.out_point",
+            "runtime_verifier.data_hash",
+            "runtime_verifier.dep_type",
+            "runtime_verifier.hash_type",
+            "runtime_verifier.artifact_hash",
+            "request_handoff.bundle",
+            "request_handoff.bundle_hash",
+            "request_handoff.group",
+        ];
+        let external_review_handoff_fields = [
+            "reviewer",
+            "review_date",
+            "review_scope",
+            "verifier_id",
+            "ipc_abi",
+            "artifact_hash",
+            "source_tree_sha256",
+            "report_uri",
+            "request_handoff.bundle",
+            "request_handoff.bundle_hash",
+            "request_handoff.group",
+        ];
         let btc_spv_adapter = json!({
             "status": "passed",
             "adapter_status": "request_ready_external_evidence_required",
@@ -4445,7 +4527,7 @@ mod tests {
                     "source_adapter_hash": btc_hash,
                     "production_output": PUBLIC_BTC_SPV_EVIDENCE,
                     "required_profiles": EXPECTED_BTC_SPV_EVIDENCE_PROFILES,
-                    "required_external_fields": ["network"],
+                    "required_external_fields": btc_handoff_fields,
                     "checks": { "ok": true },
                 },
                 {
@@ -4454,7 +4536,7 @@ mod tests {
                     "source_adapter": EXTERNAL_ATTESTATION_ADAPTER,
                     "source_adapter_hash": attestation_hash,
                     "production_output": PUBLIC_CELLDEP_ATTESTATION,
-                    "required_external_fields": ["network"],
+                    "required_external_fields": public_attestation_handoff_fields,
                     "checks": { "ok": true },
                 },
                 {
@@ -4463,7 +4545,7 @@ mod tests {
                     "source_adapter": EXTERNAL_ATTESTATION_ADAPTER,
                     "source_adapter_hash": attestation_hash,
                     "production_output": EXTERNAL_TCB_ATTESTATION,
-                    "required_external_fields": ["reviewer"],
+                    "required_external_fields": external_review_handoff_fields,
                     "checks": { "ok": true },
                 },
             ],
@@ -4478,11 +4560,18 @@ mod tests {
         assert_eq!(json_pointer_str(&stale, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&stale, "/checks/source_btc_spv_adapter_hash_matches_current"));
 
-        let mut wrong_path = report;
+        let mut wrong_path = report.clone();
         wrong_path["cases"][1]["source_adapter"] = json!("target/other-report.json");
         let failed_path = validate_external_evidence_handoff_detail(&wrong_path, &btc_spv_adapter, &external_attestation_adapter);
         assert_eq!(json_pointer_str(&failed_path, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&failed_path, "/cases/public_shared_cell_dep_attestation/source_adapter_path_matches_current"));
+
+        let mut missing_required_field = report;
+        missing_required_field["cases"][0]["required_external_fields"] = json!(btc_handoff_fields[..9].to_vec());
+        let failed_fields =
+            validate_external_evidence_handoff_detail(&missing_required_field, &btc_spv_adapter, &external_attestation_adapter);
+        assert_eq!(json_pointer_str(&failed_fields, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&failed_fields, "/cases/public_btc_spv_evidence/required_external_fields_complete"));
     }
 
     #[test]
