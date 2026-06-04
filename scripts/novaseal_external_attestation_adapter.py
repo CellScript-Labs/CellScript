@@ -63,6 +63,9 @@ def public_celldep_case(template: dict[str, Any], tcb: dict[str, Any]) -> dict[s
             "runtime_verifier.dep_type",
             "runtime_verifier.hash_type",
             "runtime_verifier.artifact_hash",
+            "request_handoff.bundle",
+            "request_handoff.bundle_hash",
+            "request_handoff.group",
         ],
         "verifier_id": verifier.get("verifier_id"),
         "ipc_abi": verifier.get("ipc_abi"),
@@ -77,7 +80,7 @@ def public_celldep_case(template: dict[str, Any], tcb: dict[str, Any]) -> dict[s
         "verifier_id_current": request["verifier_id"] == "btc.bip340.v0",
         "ipc_abi_current": request["ipc_abi"] == "cellscript-btc-bip340-ipc-v0",
         "artifact_hash_matches_tcb": request["template_artifact_hash"] == request["expected_artifact_hash"],
-        "required_fields_complete": len(request["required_public_fields"]) == 9,
+        "required_fields_complete": len(request["required_public_fields"]) == 12,
     }
     return {
         "name": "public_shared_cell_dep_attestation",
@@ -104,6 +107,9 @@ def external_tcb_case(template: dict[str, Any], tcb: dict[str, Any]) -> dict[str
             "artifact_hash",
             "source_tree_sha256",
             "report_uri",
+            "request_handoff.bundle",
+            "request_handoff.bundle_hash",
+            "request_handoff.group",
         ],
         "verifier_id": template.get("verifier_id"),
         "ipc_abi": template.get("ipc_abi"),
@@ -123,7 +129,7 @@ def external_tcb_case(template: dict[str, Any], tcb: dict[str, Any]) -> dict[str
         "source_tree_hash_matches_tcb": is_present(request["expected_source_tree_sha256"])
         and request["template_source_tree_sha256"] == request["expected_source_tree_sha256"],
         "review_scope_present": bool(template.get("review_scope")),
-        "required_fields_complete": len(request["required_public_fields"]) == 8,
+        "required_fields_complete": len(request["required_public_fields"]) == 11,
     }
     return {
         "name": "external_bip340_tcb_review_attestation",

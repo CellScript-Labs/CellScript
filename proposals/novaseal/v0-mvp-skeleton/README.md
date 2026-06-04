@@ -346,7 +346,7 @@ Do **not** add OP_RETURN, Fiber channel semantics, or new chain-facing protocol 
 
 This skeleton is **not** a declaration that "NovaSeal exists". It is an engineering artifact that lets the community evaluate whether the CellScript + explicit schema-backed CKB Cell state + ProofPlan model is a good host for Bitcoin-authorised CKB objects.
 
-The 9 criteria are met at the local evidence level. Production claims still require the external/public facts identified above: public/shared CellDep attestation, public BTC SPV evidence for BTC-facing profiles, and external BIP340 TCB review.
+The 9 criteria are met at the local evidence level. Production claims still require the external/public facts identified above: public/shared CellDep attestation, public BTC SPV evidence for BTC-facing profiles, and external BIP340 TCB review. Each final external artefact must include a `request_handoff` block that names `target/novaseal-external-evidence-handoff-bundle.json`, binds its current bundle hash, and selects the exact evidence group it satisfies.
 
 **Author of this skeleton**: Grok (acting on tightened feedback from human review, 2026-05-30)
 

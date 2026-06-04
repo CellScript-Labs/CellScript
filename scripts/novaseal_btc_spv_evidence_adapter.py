@@ -70,6 +70,9 @@ def profile_cases(service_builder: dict[str, Any], template: dict[str, Any]) -> 
                 "source_service.name",
                 "source_service.commit",
                 "source_service.report_hash",
+                "request_handoff.bundle",
+                "request_handoff.bundle_hash",
+                "request_handoff.group",
             ],
             "required_external_inputs": external_inputs,
             "service_builder_case_hash": report_hash("service_builder_case", builder_case),
@@ -84,7 +87,7 @@ def profile_cases(service_builder: dict[str, Any], template: dict[str, Any]) -> 
             "minimum_confirmations_at_least_six": request["minimum_confirmations"] >= 6,
             "service_builder_hashes_present": bool(request["service_builder_tx_skeleton_hash"])
             and bool(request["service_builder_receipt_binding_hash"]),
-            "required_public_fields_complete": len(request["required_public_fields"]) == 12,
+            "required_public_fields_complete": len(request["required_public_fields"]) == 15,
         }
         cases.append(
             {

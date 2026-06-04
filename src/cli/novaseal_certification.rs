@@ -579,9 +579,11 @@ pub(crate) fn build_report(repo_root: &Path) -> Result<Value> {
 
     let core_manifest = compare_manifest_dep(repo_root, CORE_MANIFEST, &core_live, artifact_hash.as_deref())?;
     let agreement_manifest = compare_manifest_dep(repo_root, AGREEMENT_MANIFEST, &agreement_live, artifact_hash.as_deref())?;
-    let public_attestation = validate_public_attestation(repo_root, PUBLIC_CELLDEP_ATTESTATION, artifact_hash.as_deref())?;
-    let external_review = validate_external_review(repo_root, EXTERNAL_TCB_ATTESTATION, artifact_hash.as_deref())?;
-    let btc_spv_evidence = validate_btc_spv_evidence(repo_root, PUBLIC_BTC_SPV_EVIDENCE)?;
+    let public_attestation =
+        validate_public_attestation(repo_root, PUBLIC_CELLDEP_ATTESTATION, artifact_hash.as_deref(), &external_evidence_handoff)?;
+    let external_review =
+        validate_external_review(repo_root, EXTERNAL_TCB_ATTESTATION, artifact_hash.as_deref(), &external_evidence_handoff)?;
+    let btc_spv_evidence = validate_btc_spv_evidence(repo_root, PUBLIC_BTC_SPV_EVIDENCE, &external_evidence_handoff)?;
     let core_security = validate_core_security_source(repo_root)?;
     let agreement_conformance = validate_agreement_profile_conformance(
         repo_root,
@@ -2666,6 +2668,9 @@ fn validate_btc_spv_evidence_adapter_detail(report: &Value) -> Value {
             "source_service.name",
             "source_service.commit",
             "source_service.report_hash",
+            "request_handoff.bundle",
+            "request_handoff.bundle_hash",
+            "request_handoff.group",
         ]
         .iter()
         .all(|field| required_fields.iter().any(|actual| actual == field));
@@ -3655,7 +3660,7 @@ fn compare_manifest_dep(repo_root: &Path, manifest_rel: &str, live: &Value, arti
     }))
 }
 
-fn validate_btc_spv_evidence(repo_root: &Path, rel_path: &str) -> Result<Value> {
+fn validate_btc_spv_evidence(repo_root: &Path, rel_path: &str, external_evidence_handoff: &Value) -> Result<Value> {
     let path = repo_root.join(rel_path);
     if !path.is_file() {
         return Ok(json!({
@@ -3663,10 +3668,12 @@ fn validate_btc_spv_evidence(repo_root: &Path, rel_path: &str) -> Result<Value> 
             "reason": "missing public BTC SPV evidence",
             "required_report": rel_path,
             "template": PUBLIC_BTC_SPV_EVIDENCE_TEMPLATE,
+            "required_handoff": EXTERNAL_EVIDENCE_HANDOFF,
             "required_profiles": EXPECTED_BTC_SPV_EVIDENCE_PROFILES,
         }));
     }
     let payload = json_load(repo_root, rel_path)?;
+    let handoff_hash = novaseal_handoff_report_hash("external_evidence_handoff_bundle", external_evidence_handoff);
     let cases = payload.get("cases").and_then(Value::as_array).cloned().unwrap_or_default();
     let covered_profiles =
         cases.iter().filter_map(|case| json_pointer_str(case, "/profile").map(str::to_string)).collect::<BTreeSet<_>>();
@@ -3710,6 +3717,10 @@ fn validate_btc_spv_evidence(repo_root: &Path, rel_path: &str) -> Result<Value> 
         "network_public": json_pointer_str(&payload, "/network").is_some_and(|network| !network.is_empty() && network != "local-devnet"),
         "evidence_provider_present": payload.get("evidence_provider").is_some_and(value_is_present),
         "generated_at_present": payload.get("generated_at").is_some_and(value_is_present),
+        "request_handoff_bundle_path": json_pointer_str(&payload, "/request_handoff/bundle") == Some(EXTERNAL_EVIDENCE_HANDOFF),
+        "request_handoff_bundle_hash_matches_current": normalize_hex(json_pointer_str(&payload, "/request_handoff/bundle_hash")).as_deref()
+            == Some(handoff_hash.as_str()),
+        "request_handoff_group": json_pointer_str(&payload, "/request_handoff/group") == Some("public_btc_spv_evidence"),
         "required_profiles_covered": required_profiles.is_subset(&covered_profiles),
         "case_checks_passed": case_checks_passed,
     });
@@ -3727,18 +3738,33 @@ fn validate_btc_spv_evidence(repo_root: &Path, rel_path: &str) -> Result<Value> 
     }))
 }
 
-fn validate_public_attestation(repo_root: &Path, rel_path: &str, artifact_hash: Option<&str>) -> Result<Value> {
+fn validate_public_attestation(
+    repo_root: &Path,
+    rel_path: &str,
+    artifact_hash: Option<&str>,
+    external_evidence_handoff: &Value,
+) -> Result<Value> {
     let path = repo_root.join(rel_path);
     if !path.exists() {
-        return Ok(json!({"status": "external_required", "reason": "missing public/shared CellDep attestation"}));
+        return Ok(json!({
+            "status": "external_required",
+            "reason": "missing public/shared CellDep attestation",
+            "required_report": rel_path,
+            "required_handoff": EXTERNAL_EVIDENCE_HANDOFF,
+        }));
     }
     let payload = json_load_path(repo_root, &path)?;
+    let handoff_hash = novaseal_handoff_report_hash("external_evidence_handoff_bundle", external_evidence_handoff);
     let verifier = payload.get("runtime_verifier").cloned().unwrap_or(Value::Null);
     let parsed = parse_out_point(json_pointer_str(&verifier, "/out_point"));
     let checks = json!({
         "schema": json_pointer_str(&payload, "/schema") == Some("novaseal-public-shared-cell-dep-attestation-v0.1"),
         "status": json_pointer_str(&payload, "/status") == Some("attested"),
         "network_not_local_devnet": json_pointer_str(&payload, "/network").is_some_and(|network| !network.is_empty() && network != "local-devnet"),
+        "request_handoff_bundle_path": json_pointer_str(&payload, "/request_handoff/bundle") == Some(EXTERNAL_EVIDENCE_HANDOFF),
+        "request_handoff_bundle_hash_matches_current": normalize_hex(json_pointer_str(&payload, "/request_handoff/bundle_hash")).as_deref()
+            == Some(handoff_hash.as_str()),
+        "request_handoff_group": json_pointer_str(&payload, "/request_handoff/group") == Some("public_shared_cell_dep_attestation"),
         "artifact_hash": normalize_hex(json_pointer_str(&verifier, "/artifact_hash")).as_deref() == artifact_hash,
         "data_hash_non_placeholder": !placeholder_hash(normalize_hex(json_pointer_str(&verifier, "/data_hash")).as_deref()),
         "out_point_non_placeholder": !placeholder_hash(json_pointer_str(&parsed, "/tx_hash")),
@@ -3752,15 +3778,30 @@ fn validate_public_attestation(repo_root: &Path, rel_path: &str, artifact_hash: 
     }))
 }
 
-fn validate_external_review(repo_root: &Path, rel_path: &str, artifact_hash: Option<&str>) -> Result<Value> {
+fn validate_external_review(
+    repo_root: &Path,
+    rel_path: &str,
+    artifact_hash: Option<&str>,
+    external_evidence_handoff: &Value,
+) -> Result<Value> {
     let path = repo_root.join(rel_path);
     if !path.exists() {
-        return Ok(json!({"status": "external_required", "reason": "missing external BIP340 TCB review attestation"}));
+        return Ok(json!({
+            "status": "external_required",
+            "reason": "missing external BIP340 TCB review attestation",
+            "required_report": rel_path,
+            "required_handoff": EXTERNAL_EVIDENCE_HANDOFF,
+        }));
     }
     let payload = json_load_path(repo_root, &path)?;
+    let handoff_hash = novaseal_handoff_report_hash("external_evidence_handoff_bundle", external_evidence_handoff);
     let checks = json!({
         "schema": json_pointer_str(&payload, "/schema") == Some("novaseal-bip340-external-tcb-review-attestation-v0.1"),
         "status": json_pointer_str(&payload, "/status") == Some("accepted"),
+        "request_handoff_bundle_path": json_pointer_str(&payload, "/request_handoff/bundle") == Some(EXTERNAL_EVIDENCE_HANDOFF),
+        "request_handoff_bundle_hash_matches_current": normalize_hex(json_pointer_str(&payload, "/request_handoff/bundle_hash")).as_deref()
+            == Some(handoff_hash.as_str()),
+        "request_handoff_group": json_pointer_str(&payload, "/request_handoff/group") == Some("external_bip340_tcb_review_attestation"),
         "artifact_hash": normalize_hex(json_pointer_str(&payload, "/artifact_hash")).as_deref() == artifact_hash,
         "verifier_id": json_pointer_str(&payload, "/verifier_id") == Some("btc.bip340.v0"),
         "ipc_abi": json_pointer_str(&payload, "/ipc_abi") == Some("cellscript-btc-bip340-ipc-v0"),
@@ -4483,8 +4524,13 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let proofs = temp.path().join("proposals/novaseal/v0-mvp-skeleton/proofs");
         std::fs::create_dir_all(&proofs).unwrap();
+        let handoff = json!({
+            "schema": "novaseal-external-evidence-handoff-bundle-v0.1",
+            "status": "passed",
+        });
+        let handoff_hash = novaseal_handoff_report_hash("external_evidence_handoff_bundle", &handoff);
 
-        let missing = validate_btc_spv_evidence(temp.path(), PUBLIC_BTC_SPV_EVIDENCE).unwrap();
+        let missing = validate_btc_spv_evidence(temp.path(), PUBLIC_BTC_SPV_EVIDENCE, &handoff).unwrap();
         assert_eq!(json_pointer_str(&missing, "/status"), Some("external_required"));
 
         let case_for = |profile: &str| {
@@ -4517,14 +4563,20 @@ mod tests {
                 "network": "testnet",
                 "evidence_provider": "external-spv-operator",
                 "generated_at": "2026-06-05T00:00:00Z",
+                "request_handoff": {
+                    "bundle": EXTERNAL_EVIDENCE_HANDOFF,
+                    "bundle_hash": handoff_hash,
+                    "group": "public_btc_spv_evidence",
+                },
                 "cases": EXPECTED_BTC_SPV_EVIDENCE_PROFILES.iter().map(|profile| case_for(profile)).collect::<Vec<_>>(),
             }))
             .unwrap(),
         )
         .unwrap();
 
-        let passed = validate_btc_spv_evidence(temp.path(), PUBLIC_BTC_SPV_EVIDENCE).unwrap();
+        let passed = validate_btc_spv_evidence(temp.path(), PUBLIC_BTC_SPV_EVIDENCE, &handoff).unwrap();
         assert_eq!(json_pointer_str(&passed, "/status"), Some("passed"));
+        assert!(json_pointer_bool(&passed, "/checks/request_handoff_bundle_hash_matches_current"));
         assert!(json_pointer_bool(&passed, "/checks/required_profiles_covered"));
         assert!(json_pointer_bool(&passed, "/checks/case_checks_passed"));
     }

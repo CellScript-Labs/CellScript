@@ -107,6 +107,9 @@ def btc_spv_handoff_case(adapter: dict[str, Any]) -> dict[str, Any]:
             "confirmations",
             "spv_client_cell_dep",
             "source_service",
+            "request_handoff.bundle",
+            "request_handoff.bundle_hash",
+            "request_handoff.group",
         ],
     }
 

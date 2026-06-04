@@ -9,6 +9,11 @@
     "CellScript BIP340 IPC envelope",
     "artifact hash and CellDep pinning requirements"
   ],
+  "request_handoff": {
+    "bundle": "target/novaseal-external-evidence-handoff-bundle.json",
+    "bundle_hash": "0xREPLACE_WITH_64_HEX_HANDOFF_BUNDLE_HASH",
+    "group": "external_bip340_tcb_review_attestation"
+  },
   "verifier_id": "btc.bip340.v0",
   "ipc_abi": "cellscript-btc-bip340-ipc-v0",
   "artifact_hash": "0xd0d1c14c811728c680d8646283cf7961dd850eebea856ac0e281fb493c4bc58d",
@@ -18,6 +23,7 @@
   "notes": [
     "This file is a template, not an attestation.",
     "The request contract generated at target/novaseal-external-attestation-adapter.json lists the exact external reviewer fields, artifact hash, and source tree hash this attestation must satisfy.",
+    "The request_handoff block must reference the current target/novaseal-external-evidence-handoff-bundle.json hash and external_bip340_tcb_review_attestation group.",
     "A real attestation must come from an external reviewer and must match the reviewed artifact hash."
   ]
 }
