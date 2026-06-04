@@ -47,6 +47,7 @@ def is_present(value: Any) -> bool:
 
 def public_celldep_case(template: dict[str, Any], tcb: dict[str, Any]) -> dict[str, Any]:
     verifier = template.get("runtime_verifier", {})
+    release = template.get("release", {})
     runtime = tcb.get("runtime_artifact", {})
     request = {
         "attestation_type": "public_shared_cell_dep_attestation",
@@ -77,6 +78,9 @@ def public_celldep_case(template: dict[str, Any], tcb: dict[str, Any]) -> dict[s
     checks = {
         "template_schema_current": request["template_schema"] == "novaseal-public-shared-cell-dep-attestation-v0.1",
         "template_status_attested": template.get("status") == "attested",
+        "release_fields_current": isinstance(release, dict) and set(release) == {"package", "version", "manifest_commit"},
+        "release_package_current": release.get("package") == "novaseal" if isinstance(release, dict) else False,
+        "release_manifest_commit_present": is_present(release.get("manifest_commit")) if isinstance(release, dict) else False,
         "verifier_id_current": request["verifier_id"] == "btc.bip340.v0",
         "ipc_abi_current": request["ipc_abi"] == "cellscript-btc-bip340-ipc-v0",
         "artifact_hash_matches_tcb": request["template_artifact_hash"] == request["expected_artifact_hash"],
@@ -126,6 +130,7 @@ def external_tcb_case(template: dict[str, Any], tcb: dict[str, Any]) -> dict[str
         "ipc_abi_current": request["ipc_abi"] == "cellscript-btc-bip340-ipc-v0",
         "artifact_hash_matches_tcb": is_present(request["expected_artifact_hash"])
         and request["template_artifact_hash"] == request["expected_artifact_hash"],
+        "artifact_hash_algorithm_current": template.get("artifact_hash_algorithm") == "ckb-blake2b256",
         "source_tree_hash_matches_tcb": is_present(request["expected_source_tree_sha256"])
         and request["template_source_tree_sha256"] == request["expected_source_tree_sha256"],
         "review_scope_present": bool(template.get("review_scope")),
