@@ -2280,7 +2280,8 @@ fn validate_profile_certification(input: ProfileCertificationInputs<'_>) -> Resu
     let service_builder_fixture_detail = validate_service_builder_fixture_detail(service_builder_fixtures);
     let btc_spv_adapter_detail = validate_btc_spv_evidence_adapter_detail(btc_spv_evidence_adapter);
     let external_attestation_adapter_detail = validate_external_attestation_adapter_detail(external_attestation_adapter);
-    let external_evidence_handoff_detail = validate_external_evidence_handoff_detail(external_evidence_handoff);
+    let external_evidence_handoff_detail =
+        validate_external_evidence_handoff_detail(external_evidence_handoff, btc_spv_evidence_adapter, external_attestation_adapter);
     let invariant_matrix = validate_invariant_matrix(repo_root, &repo_root.join(AGREEMENT_ROOT).join("proofs/invariant_matrix.json"))?;
     let fungible_xudt_profile = validate_fungible_xudt_profile_package(repo_root)?;
     let rwa_receipt_profile = validate_rwa_receipt_profile_package(repo_root)?;
@@ -2778,7 +2779,7 @@ fn validate_external_attestation_adapter_detail(report: &Value) -> Value {
     })
 }
 
-fn validate_external_evidence_handoff_detail(report: &Value) -> Value {
+fn validate_external_evidence_handoff_detail(report: &Value, btc_spv_adapter: &Value, external_attestation_adapter: &Value) -> Value {
     let cases = report.get("cases").and_then(Value::as_array).cloned().unwrap_or_default();
     let mut by_group: BTreeMap<String, Vec<Value>> = BTreeMap::new();
     for case in &cases {
@@ -2797,6 +2798,9 @@ fn validate_external_evidence_handoff_detail(report: &Value) -> Value {
     let actual_groups =
         cases.iter().filter_map(|case| json_pointer_str(case, "/group").map(ToString::to_string)).collect::<BTreeSet<_>>();
     let actual_outputs = json_array_strings(report, "/production_outputs").into_iter().collect::<BTreeSet<_>>();
+    let expected_btc_spv_adapter_hash = novaseal_handoff_report_hash("btc_spv_adapter", btc_spv_adapter);
+    let expected_external_attestation_adapter_hash =
+        novaseal_handoff_report_hash("external_attestation_adapter", external_attestation_adapter);
 
     let mut case_checks = Map::new();
     for (group, production_output) in expected {
@@ -2806,11 +2810,16 @@ fn validate_external_evidence_handoff_detail(report: &Value) -> Value {
         let required_profiles = json_array_strings(&case, "/required_profiles");
         let expected_btc_profiles =
             EXPECTED_BTC_SPV_EVIDENCE_PROFILES.iter().map(|profile| (*profile).to_string()).collect::<Vec<_>>();
+        let expected_source_hash = if group == "public_btc_spv_evidence" {
+            expected_btc_spv_adapter_hash.as_str()
+        } else {
+            expected_external_attestation_adapter_hash.as_str()
+        };
         let checks = json!({
             "exactly_one_case": matches.len() == 1,
             "status_passed": json_pointer_str(&case, "/status") == Some("passed"),
             "production_output_matches": json_pointer_str(&case, "/production_output") == Some(production_output),
-            "source_adapter_hash": json_pointer_str(&case, "/source_adapter_hash").is_some_and(is_hex32),
+            "source_adapter_hash_matches_current": json_pointer_str(&case, "/source_adapter_hash") == Some(expected_source_hash),
             "required_external_fields_present": !required_external_fields.is_empty(),
             "btc_profiles_complete": group != "public_btc_spv_evidence"
                 || required_profiles == expected_btc_profiles,
@@ -2823,8 +2832,10 @@ fn validate_external_evidence_handoff_detail(report: &Value) -> Value {
         "report_passed": json_pointer_str(report, "/status") == Some("passed"),
         "schema_current": json_pointer_str(report, "/schema") == Some("novaseal-external-evidence-handoff-bundle-v0.1"),
         "handoff_status_request_ready": json_pointer_str(report, "/handoff_status") == Some("request_bundle_ready_external_evidence_required"),
-        "source_btc_spv_adapter_hash": json_pointer_str(report, "/source_btc_spv_adapter_hash").is_some_and(is_hex32),
-        "source_external_attestation_adapter_hash": json_pointer_str(report, "/source_external_attestation_adapter_hash").is_some_and(is_hex32),
+        "source_btc_spv_adapter_hash_matches_current": json_pointer_str(report, "/source_btc_spv_adapter_hash")
+            == Some(expected_btc_spv_adapter_hash.as_str()),
+        "source_external_attestation_adapter_hash_matches_current": json_pointer_str(report, "/source_external_attestation_adapter_hash")
+            == Some(expected_external_attestation_adapter_hash.as_str()),
         "summary_counts_match": json_pointer_i64(report, "/summary/total") == Some(expected_groups.len() as i64)
             && json_pointer_i64(report, "/summary/matched") == json_pointer_i64(report, "/summary/total"),
         "exact_groups": actual_groups == expected_groups,
@@ -4125,6 +4136,39 @@ fn external_evidence_handoff_gate_passed(report: &Value) -> bool {
         && json_pointer_i64(report, "/summary/matched") == json_pointer_i64(report, "/summary/total")
 }
 
+fn novaseal_handoff_report_hash(label: &str, value: &Value) -> String {
+    let mut state = blake2b_simd::Params::new().hash_length(32).personal(b"NovaExtHandoff").to_state();
+    state.update(label.as_bytes());
+    state.update(b"\x00");
+    state.update(canonical_json_for_report_hash(value).as_bytes());
+    format!("0x{}", hex::encode(state.finalize().as_bytes()))
+}
+
+fn canonical_json_for_report_hash(value: &Value) -> String {
+    match value {
+        Value::Null => "null".to_string(),
+        Value::Bool(value) => value.to_string(),
+        Value::Number(value) => value.to_string(),
+        Value::String(value) => serde_json::to_string(value).unwrap_or_else(|_| "\"\"".to_string()),
+        Value::Array(values) => {
+            let items = values.iter().map(canonical_json_for_report_hash).collect::<Vec<_>>();
+            format!("[{}]", items.join(","))
+        }
+        Value::Object(object) => {
+            let mut entries = object.iter().collect::<Vec<_>>();
+            entries.sort_by_key(|(key, _)| *key);
+            let items = entries
+                .into_iter()
+                .map(|(key, value)| {
+                    let key = serde_json::to_string(key).unwrap_or_else(|_| "\"\"".to_string());
+                    format!("{}:{}", key, canonical_json_for_report_hash(value))
+                })
+                .collect::<Vec<_>>();
+            format!("{{{}}}", items.join(","))
+        }
+    }
+}
+
 fn stateful_acceptance_passed(stateful_acceptance: &Value) -> bool {
     json_pointer_str(stateful_acceptance, "/status") == Some("passed")
         && json_pointer_i64(stateful_acceptance, "/blocker_count") == Some(0)
@@ -4245,6 +4289,20 @@ mod tests {
         assert_eq!(
             canonical_schema_hash(&schema).unwrap().unwrap(),
             "0x6b4277f67ee3e47f391d8591f7efccc6e97dcac5436dd22568d72689ac4db130"
+        );
+    }
+
+    #[test]
+    fn novaseal_handoff_hash_matches_python_generator_vector() {
+        let value = json!({
+            "z": 1,
+            "a": ["b", true, null],
+        });
+
+        assert_eq!(canonical_json_for_report_hash(&value), r#"{"a":["b",true,null],"z":1}"#);
+        assert_eq!(
+            novaseal_handoff_report_hash("test_label", &value),
+            "0x91f5e5cc38c16e792d27a3738a7a7c77053fa15f902e2ccb4b210fd7239a476f"
         );
     }
 
