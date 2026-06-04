@@ -6172,10 +6172,14 @@ mod tests {
             "failed_dimensions": [
                 "public_shared_cell_dep_attestation",
                 "external_bip340_tcb_review_attestation",
+                "public_btc_spv_evidence",
+                "rwa_legal_registry_review_evidence",
             ],
             "external_blockers": [
-                "top_level_public_shared_cell_dep_attested",
-                "top_level_external_bip340_tcb_review_attested",
+                "public_shared_cell_dep_attested",
+                "external_bip340_tcb_review_attested",
+                "public_btc_spv_evidence_attested",
+                "rwa_legal_registry_review_attested",
             ],
             "profile_certification": {
                 "schema": NOVASEAL_PROFILE_CERTIFICATION_SCHEMA,
@@ -6184,7 +6188,12 @@ mod tests {
                 "status": "passed",
                 "certification_level": "public_ecosystem_profile_certification_local_ready",
                 "production_statement_eligible": production_statement_eligible,
-                "production_statement_blockers": ["public_shared_cell_dep_attested", "external_bip340_tcb_review_attested"]
+                "production_statement_blockers": [
+                    "public_shared_cell_dep_attested",
+                    "external_bip340_tcb_review_attested",
+                    "public_btc_spv_evidence_attested",
+                    "rwa_legal_registry_review_attested"
+                ]
             },
             "gates": [
                 {
@@ -6215,7 +6224,8 @@ mod tests {
         assert_eq!(summary["checks"]["local_production_prep_ready"], true);
         assert_eq!(summary["plugin_report"]["production_gates_passed"], false);
         assert_eq!(summary["failed_dimensions"][0], "public_shared_cell_dep_attestation");
-        assert_eq!(summary["external_blockers"][0], "top_level_public_shared_cell_dep_attested");
+        assert_eq!(summary["external_blockers"][0], "public_shared_cell_dep_attested");
+        assert_eq!(summary["external_blockers"][3], "rwa_legal_registry_review_attested");
     }
 
     #[test]
@@ -6265,7 +6275,9 @@ mod tests {
         assert!(failed_checks.iter().any(|check| check == "production_ready"));
         assert!(failed_checks.iter().any(|check| check == "production_statement_eligible"));
         assert_eq!(summary["failure_reason"]["failed_dimensions"][0], "public_shared_cell_dep_attestation");
-        assert_eq!(summary["failure_reason"]["external_blockers"][0], "top_level_public_shared_cell_dep_attested");
+        assert_eq!(summary["failure_reason"]["external_blockers"][0], "public_shared_cell_dep_attested");
+        assert_eq!(summary["failure_reason"]["external_blockers"][3], "rwa_legal_registry_review_attested");
+        assert_eq!(summary["failure_reason"]["failed_dimensions"][3], "rwa_legal_registry_review_evidence");
     }
 
     #[test]

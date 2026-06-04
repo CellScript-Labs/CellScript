@@ -4178,9 +4178,23 @@ fn write_novaseal_certification_report(path: &std::path::Path) {
             "production_statement_eligible": false,
             "production_statement_blockers": [
                 "public_shared_cell_dep_attested",
-                "external_bip340_tcb_review_attested"
+                "external_bip340_tcb_review_attested",
+                "public_btc_spv_evidence_attested",
+                "rwa_legal_registry_review_attested"
             ]
         },
+        "failed_dimensions": [
+            "public_shared_cell_dep_attestation",
+            "external_bip340_tcb_review_attestation",
+            "public_btc_spv_evidence",
+            "rwa_legal_registry_review_evidence"
+        ],
+        "external_blockers": [
+            "public_shared_cell_dep_attested",
+            "external_bip340_tcb_review_attested",
+            "public_btc_spv_evidence_attested",
+            "rwa_legal_registry_review_attested"
+        ],
         "gates": [
             {
                 "name": "agreement_profile_public_ecosystem_certification_v0",
@@ -4248,6 +4262,8 @@ fn cellc_certify_require_production_rejects_local_only_report() {
     assert_eq!(stdout["checks"]["production_ready"], false);
     assert_eq!(stdout["checks"]["production_statement_eligible"], false);
     assert!(stdout["failure_reason"]["message"].as_str().expect("failure reason").contains("external attestations"));
+    assert_eq!(stdout["failure_reason"]["external_blockers"][3], "rwa_legal_registry_review_attested");
+    assert_eq!(stdout["failure_reason"]["failed_dimensions"][3], "rwa_legal_registry_review_evidence");
 }
 
 #[test]
