@@ -3955,8 +3955,9 @@ fn validate_btc_spv_evidence(repo_root: &Path, rel_path: &str, external_evidence
     let payload = json_load(repo_root, rel_path)?;
     let handoff_hash = novaseal_handoff_report_hash("external_evidence_handoff_bundle", external_evidence_handoff);
     let cases = payload.get("cases").and_then(Value::as_array).cloned().unwrap_or_default();
-    let covered_profiles =
-        cases.iter().filter_map(|case| json_pointer_str(case, "/profile").map(str::to_string)).collect::<BTreeSet<_>>();
+    let covered_profile_list =
+        cases.iter().filter_map(|case| json_pointer_str(case, "/profile").map(str::to_string)).collect::<Vec<_>>();
+    let covered_profiles = covered_profile_list.iter().cloned().collect::<BTreeSet<_>>();
     let required_profiles = EXPECTED_BTC_SPV_EVIDENCE_PROFILES.iter().map(|profile| (*profile).to_string()).collect::<BTreeSet<_>>();
     let mut case_checks = Map::new();
     for profile in EXPECTED_BTC_SPV_EVIDENCE_PROFILES {
@@ -4005,10 +4006,12 @@ fn validate_btc_spv_evidence(repo_root: &Path, rel_path: &str, external_evidence
         "request_handoff_bundle_hash_matches_current": normalize_hex(json_pointer_str(&payload, "/request_handoff/bundle_hash")).as_deref()
             == Some(handoff_hash.as_str()),
         "request_handoff_group": json_pointer_str(&payload, "/request_handoff/group") == Some("public_btc_spv_evidence"),
-        "required_profiles_covered": required_profiles.is_subset(&covered_profiles),
+        "required_profiles_field_exact": exact_string_set(&json_array_strings(&payload, "/required_profiles"), EXPECTED_BTC_SPV_EVIDENCE_PROFILES),
+        "required_profiles_covered_exact": exact_string_set(&covered_profile_list, EXPECTED_BTC_SPV_EVIDENCE_PROFILES),
         "case_checks_passed": case_checks_passed,
     });
     let missing_profiles = required_profiles.difference(&covered_profiles).cloned().collect::<Vec<_>>();
+    let extra_profiles = covered_profiles.difference(&required_profiles).cloned().collect::<Vec<_>>();
     Ok(json!({
         "schema": "novaseal-public-btc-spv-evidence-validation-v0.1",
         "status": if object_values_all_true(Some(&checks)) { "passed" } else { "failed" },
@@ -4016,6 +4019,7 @@ fn validate_btc_spv_evidence(repo_root: &Path, rel_path: &str, external_evidence
         "required_profiles": EXPECTED_BTC_SPV_EVIDENCE_PROFILES,
         "covered_profiles": covered_profiles.into_iter().collect::<Vec<_>>(),
         "missing_profiles": missing_profiles,
+        "extra_profiles": extra_profiles,
         "checks": checks,
         "case_checks": case_checks,
         "evidence": payload,
@@ -5119,7 +5123,8 @@ mod tests {
         assert_eq!(json_pointer_str(&passed, "/status"), Some("passed"));
         assert!(json_pointer_bool(&passed, "/checks/top_level_fields_exact"));
         assert!(json_pointer_bool(&passed, "/checks/request_handoff_bundle_hash_matches_current"));
-        assert!(json_pointer_bool(&passed, "/checks/required_profiles_covered"));
+        assert!(json_pointer_bool(&passed, "/checks/required_profiles_field_exact"));
+        assert!(json_pointer_bool(&passed, "/checks/required_profiles_covered_exact"));
         assert!(json_pointer_bool(&passed, "/checks/case_checks_passed"));
 
         let mut top_level_extra = spv_report.clone();
@@ -5156,6 +5161,30 @@ mod tests {
             &failed_source_service,
             "/case_checks/btc-transaction-commitment-profile-v0/source_service_fields_exact"
         ));
+
+        let mut stale_required_profiles = spv_report.clone();
+        stale_required_profiles["required_profiles"] = json!([EXPECTED_BTC_TX_COMMITMENT_PROFILE]);
+        std::fs::write(proofs.join("public_btc_spv_evidence.json"), serde_json::to_vec_pretty(&stale_required_profiles).unwrap())
+            .unwrap();
+        let failed_required_profiles = validate_btc_spv_evidence(temp.path(), PUBLIC_BTC_SPV_EVIDENCE, &handoff).unwrap();
+        assert_eq!(json_pointer_str(&failed_required_profiles, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&failed_required_profiles, "/checks/required_profiles_field_exact"));
+
+        let mut extra_profile_case = spv_report.clone();
+        extra_profile_case["cases"].as_array_mut().unwrap().push(case_for("unexpected-profile-v0"));
+        std::fs::write(proofs.join("public_btc_spv_evidence.json"), serde_json::to_vec_pretty(&extra_profile_case).unwrap()).unwrap();
+        let failed_extra_profile = validate_btc_spv_evidence(temp.path(), PUBLIC_BTC_SPV_EVIDENCE, &handoff).unwrap();
+        assert_eq!(json_pointer_str(&failed_extra_profile, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&failed_extra_profile, "/checks/required_profiles_covered_exact"));
+        assert_eq!(json_array_strings(&failed_extra_profile, "/extra_profiles"), vec!["unexpected-profile-v0".to_string()]);
+
+        let mut duplicate_profile_case = spv_report.clone();
+        duplicate_profile_case["cases"].as_array_mut().unwrap().push(case_for(EXPECTED_BTC_TX_COMMITMENT_PROFILE));
+        std::fs::write(proofs.join("public_btc_spv_evidence.json"), serde_json::to_vec_pretty(&duplicate_profile_case).unwrap())
+            .unwrap();
+        let failed_duplicate_profile = validate_btc_spv_evidence(temp.path(), PUBLIC_BTC_SPV_EVIDENCE, &handoff).unwrap();
+        assert_eq!(json_pointer_str(&failed_duplicate_profile, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&failed_duplicate_profile, "/checks/required_profiles_covered_exact"));
     }
 
     #[test]
