@@ -85,10 +85,38 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn skip_newlines(&mut self) {
+    fn skip_newlines(&mut self) -> bool {
+        let mut skipped = false;
         while self.check(&TokenKind::Newline) {
+            skipped = true;
             self.advance();
         }
+        skipped
+    }
+
+    fn consume_field_initializer_separator(&mut self, context: &str) -> Result<()> {
+        if self.check(&TokenKind::Comma) {
+            self.advance();
+            self.skip_newlines();
+            return Ok(());
+        }
+
+        if self.previous_token_was_newline() {
+            return Ok(());
+        }
+
+        if self.skip_newlines() || self.check(&TokenKind::RBrace) || self.check(&TokenKind::Eof) {
+            return Ok(());
+        }
+
+        Err(CompileError::new(format!("expected ',', newline, or '}}' after {} field initialiser", context), self.current().span))
+    }
+
+    fn previous_token_was_newline(&self) -> bool {
+        self.position
+            .checked_sub(1)
+            .and_then(|index| self.tokens.get(index))
+            .is_some_and(|token| matches!(token.kind, TokenKind::Newline))
     }
 
     fn consume_optional_semi(&mut self) {
@@ -2460,31 +2488,7 @@ impl<'a> Parser<'a> {
             (None, first)
         };
 
-        self.expect(TokenKind::LBrace)?;
-        self.skip_newlines();
-
-        let mut fields = Vec::new();
-        while !self.check(&TokenKind::RBrace) && !self.check(&TokenKind::Eof) {
-            let field_span = self.current().span;
-            let field_name = self.parse_name()?;
-            let value = if self.check(&TokenKind::Colon) {
-                self.advance();
-                self.parse_expr()?
-            } else {
-                Expr::Identifier(field_name.clone(), field_span)
-            };
-            fields.push((field_name, value));
-
-            if self.check(&TokenKind::Comma) {
-                self.advance();
-                self.skip_newlines();
-            } else {
-                // AUDIT-FINDING: create field lists continue after a missing comma, so `field: value next: value` is accepted as two fields instead of a syntax error — severity: MEDIUM — require a comma, newline-sensitive terminator, or closing brace after each field
-                self.skip_newlines();
-            }
-        }
-
-        self.expect(TokenKind::RBrace)?;
+        let fields = self.parse_field_init_list_with(false, "create")?;
 
         let lock = match &self.current().kind {
             TokenKind::Identifier(s) if s == "with_lock" => {
@@ -2761,12 +2765,20 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_field_init_list(&mut self) -> Result<Vec<(String, Expr)>> {
+        self.parse_field_init_list_with(true, "generic initialiser")
+    }
+
+    fn parse_field_init_list_with(&mut self, allow_path_names: bool, context: &str) -> Result<Vec<(String, Expr)>> {
+        self.parse_field_init_list_with_end_span(allow_path_names, context).map(|(fields, _)| fields)
+    }
+
+    fn parse_field_init_list_with_end_span(&mut self, allow_path_names: bool, context: &str) -> Result<(Vec<(String, Expr)>, Span)> {
         self.expect(TokenKind::LBrace)?;
         self.skip_newlines();
         let mut fields = Vec::new();
         while !self.check(&TokenKind::RBrace) && !self.check(&TokenKind::Eof) {
             let name_span = self.current().span;
-            let name = self.parse_name_path()?;
+            let name = if allow_path_names { self.parse_name_path()? } else { self.parse_name()? };
             if self.check(&TokenKind::Colon) {
                 self.advance();
                 let value = self.parse_expr()?;
@@ -2775,14 +2787,10 @@ impl<'a> Parser<'a> {
                 // Field shorthand: `amount` means `amount: amount`
                 fields.push((name.clone(), Expr::Identifier(name, name_span)));
             }
-            if self.check(&TokenKind::Comma) {
-                self.advance();
-            }
-            // AUDIT-FINDING: generic field initializer lists do not require a separator before the next field, so malformed adjacent initializers can be parsed silently — severity: MEDIUM — enforce a comma or closing brace after each initializer
-            self.skip_newlines();
+            self.consume_field_initializer_separator(context)?;
         }
-        self.expect(TokenKind::RBrace)?;
-        Ok(fields)
+        let end_span = self.expect(TokenKind::RBrace)?.span;
+        Ok((fields, end_span))
     }
 
     fn parse_read_ref_expr(&mut self) -> Result<Expr> {
@@ -3033,29 +3041,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_struct_init(&mut self, ty: String, start_span: Span) -> Result<Expr> {
-        self.expect(TokenKind::LBrace)?;
-        self.skip_newlines();
-
-        let mut fields = Vec::new();
-        while !self.check(&TokenKind::RBrace) && !self.check(&TokenKind::Eof) {
-            let field_span = self.current().span;
-            let field_name = self.parse_name()?;
-            let value = if self.check(&TokenKind::Colon) {
-                self.advance();
-                self.parse_expr()?
-            } else {
-                Expr::Identifier(field_name.clone(), field_span)
-            };
-            fields.push((field_name, value));
-
-            if self.check(&TokenKind::Comma) {
-                self.advance();
-            }
-            // AUDIT-FINDING: struct initializers accept adjacent fields without a comma, matching the broader field-list parser gap and weakening parse-time malformed-input rejection — severity: MEDIUM — share a strict field-list parser that requires separators
-            self.skip_newlines();
-        }
-
-        let end_span = self.expect(TokenKind::RBrace)?.span;
+        let (fields, end_span) = self.parse_field_init_list_with_end_span(false, "struct")?;
         Ok(Expr::StructInit(StructInitExpr {
             ty,
             fields,
@@ -3443,6 +3429,69 @@ const SNAPSHOT: Token = Token { amount: 1 }
 
         assert_eq!(init.span.start, expected_start);
         assert_eq!(init.span.end, expected_end);
+    }
+
+    #[test]
+    fn field_initializers_accept_newline_separators() {
+        let input = r#"
+module test
+
+action mint(amount: u64, owner: Address) -> Token
+where
+    create Token {
+        amount: amount
+        owner: owner
+    }
+"#;
+        let tokens = lex(input).unwrap();
+        let module = parse(&tokens).unwrap();
+        assert_eq!(module.items.len(), 1);
+    }
+
+    #[test]
+    fn struct_initializers_reject_same_line_adjacent_fields() {
+        let input = r#"
+module test
+
+const SNAPSHOT: Pair = Pair { left: left right: right }
+"#;
+        let tokens = lex(input).unwrap();
+        let err = parse(&tokens).unwrap_err();
+
+        assert!(err.message.contains("expected ',', newline, or '}' after struct field initialiser"), "{}", err.message);
+        assert_eq!(err.span.start, input.find("right").unwrap());
+    }
+
+    #[test]
+    fn create_initializers_reject_same_line_adjacent_fields() {
+        let input = r#"
+module test
+
+action mint(amount: u64, owner: Address) -> Token
+where
+    create Token { amount: amount owner: owner }
+"#;
+        let tokens = lex(input).unwrap();
+        let err = parse(&tokens).unwrap_err();
+
+        assert!(err.message.contains("expected ',', newline, or '}' after create field initialiser"), "{}", err.message);
+        assert_eq!(err.span.start, input.find("owner: owner").unwrap());
+    }
+
+    #[test]
+    fn generic_initializers_reject_same_line_adjacent_fields() {
+        let input = r#"
+module test
+
+action mint(token_id: u64, owner: Address) -> NFT
+where
+    create_unique<NFT>(identity = field(token_id)) { token_id: token_id owner: owner }
+"#;
+        let tokens = lex(input).unwrap();
+        let err = parse(&tokens).unwrap_err();
+
+        assert!(err.message.contains("expected ',', newline, or '}' after generic initialiser field initialiser"), "{}", err.message);
+        assert_eq!(err.span.start, input.find("owner: owner").unwrap());
     }
 
     #[test]
