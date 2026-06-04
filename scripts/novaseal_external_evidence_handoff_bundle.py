@@ -136,6 +136,14 @@ def btc_spv_handoff_case(adapter: dict[str, Any]) -> dict[str, Any]:
             "request_handoff.bundle_hash_algorithm",
             "request_handoff.group",
         ],
+        "field_constraints": {
+            "network": "public network name; must not be local-devnet",
+            "generated_at": "UTC timestamp in YYYY-MM-DDTHH:MM:SSZ form",
+            "evidence_provider": "real external provider identity; placeholder tokens are rejected",
+            "source_service.name": "real external SPV service identity; placeholder tokens are rejected",
+            "source_service.commit": "40-character hex service source commit",
+            "request_handoff.bundle_hash_algorithm": "blake2b-256(person=NovaExtHandoff)",
+        },
     }
 
 
@@ -166,6 +174,7 @@ def attestation_case(
         "source_case": case_name,
         "production_output": production_output,
         "required_external_fields": required_fields,
+        "field_constraints": source_case.get("request", {}).get("field_constraints", {}),
     }
 
 

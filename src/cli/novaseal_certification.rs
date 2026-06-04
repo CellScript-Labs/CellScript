@@ -3981,7 +3981,8 @@ fn validate_btc_spv_evidence(repo_root: &Path, rel_path: &str, external_evidence
                 "spv_client_cell_dep_hash_type": matches!(hash_type, Some("data" | "data1" | "type")),
                 "source_service_fields_exact": exact_object_keys(source_service, EXPECTED_PUBLIC_BTC_SPV_SOURCE_SERVICE_FIELDS),
                 "source_service_name_present": source_service.get("name").is_some_and(value_is_present),
-                "source_service_commit_present": source_service.get("commit").is_some_and(value_is_present),
+                "source_service_name_identity": json_pointer_str(source_service, "/name").is_some_and(is_external_identity),
+                "source_service_commit_40_hex": json_pointer_str(source_service, "/commit").is_some_and(is_git_commit_hash),
                 "source_service_report_hash_valid": json_pointer_str(source_service, "/report_hash").is_some_and(is_hex32),
             }),
         );
@@ -3993,6 +3994,7 @@ fn validate_btc_spv_evidence(repo_root: &Path, rel_path: &str, external_evidence
         "status_attested": json_pointer_str(&payload, "/status") == Some("attested"),
         "network_public": json_pointer_str(&payload, "/network").is_some_and(|network| !network.is_empty() && network != "local-devnet"),
         "evidence_provider_present": payload.get("evidence_provider").is_some_and(value_is_present),
+        "evidence_provider_identity": json_pointer_str(&payload, "/evidence_provider").is_some_and(is_external_identity),
         "generated_at_present": payload.get("generated_at").is_some_and(value_is_present),
         "generated_at_utc_timestamp": json_pointer_str(&payload, "/generated_at").is_some_and(is_utc_timestamp_z),
         "request_handoff_fields_exact": exact_object_keys(payload.get("request_handoff").unwrap_or(&Value::Null), EXPECTED_EXTERNAL_REQUEST_HANDOFF_FIELDS),
@@ -4048,11 +4050,11 @@ fn validate_public_attestation(
         "status": json_pointer_str(&payload, "/status") == Some("attested"),
         "network_not_local_devnet": json_pointer_str(&payload, "/network").is_some_and(|network| !network.is_empty() && network != "local-devnet"),
         "attested_at_utc_timestamp": json_pointer_str(&payload, "/attested_at").is_some_and(is_utc_timestamp_z),
+        "attestor_identity": json_pointer_str(&payload, "/attestor").is_some_and(is_external_identity),
         "release_fields_exact": exact_object_keys(&release, EXPECTED_PUBLIC_CELLDEP_RELEASE_FIELDS),
         "release_package": json_pointer_str(&release, "/package") == Some("novaseal"),
         "release_version_present": release.get("version").is_some_and(value_is_present),
-        "release_manifest_commit_present": json_pointer_str(&release, "/manifest_commit")
-            .is_some_and(|commit| commit.len() == 40 && commit.chars().all(|char| char.is_ascii_hexdigit())),
+        "release_manifest_commit_present": json_pointer_str(&release, "/manifest_commit").is_some_and(is_git_commit_hash),
         "request_handoff_fields_exact": exact_object_keys(payload.get("request_handoff").unwrap_or(&Value::Null), EXPECTED_EXTERNAL_REQUEST_HANDOFF_FIELDS),
         "request_handoff_bundle_path": json_pointer_str(&payload, "/request_handoff/bundle") == Some(EXTERNAL_EVIDENCE_HANDOFF),
         "request_handoff_bundle_hash_matches_current": normalize_hex(json_pointer_str(&payload, "/request_handoff/bundle_hash")).as_deref()
@@ -4107,8 +4109,10 @@ fn validate_external_review(
         "verifier_id": json_pointer_str(&payload, "/verifier_id") == Some("btc.bip340.v0"),
         "ipc_abi": json_pointer_str(&payload, "/ipc_abi") == Some("cellscript-btc-bip340-ipc-v0"),
         "reviewer_present": json_pointer_str(&payload, "/reviewer").is_some_and(|value| !value.is_empty()),
+        "reviewer_identity": json_pointer_str(&payload, "/reviewer").is_some_and(is_external_identity),
         "review_date_present": json_pointer_str(&payload, "/review_date").is_some_and(|value| !value.is_empty()),
         "review_date_utc_date": json_pointer_str(&payload, "/review_date").is_some_and(is_utc_date),
+        "report_uri_https": json_pointer_str(&payload, "/report_uri").is_some_and(is_https_report_uri),
         "review_scope_items_present": payload
             .get("review_scope")
             .and_then(Value::as_array)
@@ -4574,6 +4578,31 @@ fn value_is_present(value: &Value) -> bool {
     }
 }
 
+fn is_external_identity(value: &str) -> bool {
+    let trimmed = value.trim();
+    trimmed == value && trimmed.len() >= 3 && !contains_placeholder_token(trimmed)
+}
+
+fn contains_placeholder_token(value: &str) -> bool {
+    let lower = value.to_ascii_lowercase();
+    ["replace_with", "replace-", "placeholder", "todo", "tbd"].iter().any(|token| lower.contains(token))
+}
+
+fn is_https_report_uri(value: &str) -> bool {
+    if value != value.trim() || contains_placeholder_token(value) || value.bytes().any(|byte| byte.is_ascii_whitespace()) {
+        return false;
+    }
+    let Some(rest) = value.strip_prefix("https://") else {
+        return false;
+    };
+    let host = rest.split('/').next().unwrap_or_default();
+    !host.is_empty()
+        && host.contains('.')
+        && !host.eq_ignore_ascii_case("localhost")
+        && !host.ends_with(".invalid")
+        && !host.ends_with(".local")
+}
+
 fn is_utc_timestamp_z(value: &str) -> bool {
     let bytes = value.as_bytes();
     bytes.len() == 20
@@ -4777,6 +4806,10 @@ fn is_hex32(value: &str) -> bool {
 
 fn is_hex_bytes(value: &str) -> bool {
     value.len() > 2 && value.len() % 2 == 0 && value.starts_with("0x") && value[2..].bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn is_git_commit_hash(value: &str) -> bool {
+    value.len() == 40 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 fn sha256_file_hex(path: &Path) -> Result<String> {
@@ -5229,7 +5262,7 @@ mod tests {
                 },
                 "source_service": {
                     "name": "rgbpp-style-spv-service",
-                    "commit": "0123456789abcdef",
+                    "commit": "0123456789abcdef0123456789abcdef01234567",
                     "report_hash": format!("0x{}", "66".repeat(32)),
                 },
             })
@@ -5258,6 +5291,7 @@ mod tests {
         assert!(json_pointer_bool(&passed, "/checks/request_handoff_fields_exact"));
         assert!(json_pointer_bool(&passed, "/checks/request_handoff_bundle_hash_matches_current"));
         assert!(json_pointer_bool(&passed, "/checks/request_handoff_bundle_hash_algorithm"));
+        assert!(json_pointer_bool(&passed, "/checks/evidence_provider_identity"));
         assert!(json_pointer_bool(&passed, "/checks/generated_at_utc_timestamp"));
         assert!(json_pointer_bool(&passed, "/checks/required_profiles_field_exact"));
         assert!(json_pointer_bool(&passed, "/checks/required_profiles_covered_exact"));
@@ -5270,6 +5304,14 @@ mod tests {
         let failed_generated_at = validate_btc_spv_evidence(temp.path(), PUBLIC_BTC_SPV_EVIDENCE, &handoff).unwrap();
         assert_eq!(json_pointer_str(&failed_generated_at, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&failed_generated_at, "/checks/generated_at_utc_timestamp"));
+
+        let mut placeholder_provider = spv_report.clone();
+        placeholder_provider["evidence_provider"] = json!("REPLACE_WITH_EXTERNAL_SPV_OPERATOR_OR_SERVICE");
+        std::fs::write(proofs.join("public_btc_spv_evidence.json"), serde_json::to_vec_pretty(&placeholder_provider).unwrap())
+            .unwrap();
+        let failed_provider = validate_btc_spv_evidence(temp.path(), PUBLIC_BTC_SPV_EVIDENCE, &handoff).unwrap();
+        assert_eq!(json_pointer_str(&failed_provider, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&failed_provider, "/checks/evidence_provider_identity"));
 
         let mut top_level_extra = spv_report.clone();
         top_level_extra["unexpected_provider_field"] = Value::String("must-fail".to_string());
@@ -5304,6 +5346,17 @@ mod tests {
         assert!(!json_pointer_bool(
             &failed_source_service,
             "/case_checks/btc-transaction-commitment-profile-v0/source_service_fields_exact"
+        ));
+
+        let mut source_service_short_commit = spv_report.clone();
+        source_service_short_commit["cases"][0]["source_service"]["commit"] = json!("0123456789abcdef");
+        std::fs::write(proofs.join("public_btc_spv_evidence.json"), serde_json::to_vec_pretty(&source_service_short_commit).unwrap())
+            .unwrap();
+        let failed_source_service_commit = validate_btc_spv_evidence(temp.path(), PUBLIC_BTC_SPV_EVIDENCE, &handoff).unwrap();
+        assert_eq!(json_pointer_str(&failed_source_service_commit, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(
+            &failed_source_service_commit,
+            "/case_checks/btc-transaction-commitment-profile-v0/source_service_commit_40_hex"
         ));
 
         let mut handoff_extra = spv_report.clone();
@@ -5398,6 +5451,7 @@ mod tests {
         assert!(json_pointer_bool(&public_passed, "/checks/release_fields_exact"));
         assert!(json_pointer_bool(&public_passed, "/checks/release_manifest_commit_present"));
         assert!(json_pointer_bool(&public_passed, "/checks/attested_at_utc_timestamp"));
+        assert!(json_pointer_bool(&public_passed, "/checks/attestor_identity"));
         assert!(json_pointer_bool(&public_passed, "/checks/request_handoff_fields_exact"));
         assert!(json_pointer_bool(&public_passed, "/checks/request_handoff_bundle_hash_algorithm"));
         assert!(json_pointer_bool(&public_passed, "/checks/runtime_verifier_fields_exact"));
@@ -5413,6 +5467,18 @@ mod tests {
             validate_public_attestation(temp.path(), PUBLIC_CELLDEP_ATTESTATION, Some(&artifact_hash), &handoff).unwrap();
         assert_eq!(json_pointer_str(&public_attested_at_failed, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&public_attested_at_failed, "/checks/attested_at_utc_timestamp"));
+
+        let mut public_placeholder_attestor = public_attestation.clone();
+        public_placeholder_attestor["attestor"] = json!("REPLACE_WITH_DEPLOYER_OR_RELEASE_SIGNER");
+        std::fs::write(
+            proofs.join("public_shared_cell_dep_attestation.json"),
+            serde_json::to_vec_pretty(&public_placeholder_attestor).unwrap(),
+        )
+        .unwrap();
+        let public_attestor_failed =
+            validate_public_attestation(temp.path(), PUBLIC_CELLDEP_ATTESTATION, Some(&artifact_hash), &handoff).unwrap();
+        assert_eq!(json_pointer_str(&public_attestor_failed, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&public_attestor_failed, "/checks/attestor_identity"));
 
         let mut public_extra = public_attestation.clone();
         public_extra["unexpected_provider_field"] = Value::String("must-fail".to_string());
@@ -5482,7 +5548,7 @@ mod tests {
             "reviewer": "external-tcb-reviewer",
             "review_date": "2026-06-05",
             "review_scope": ["BIP340 runtime verifier TCB"],
-            "report_uri": "https://example.invalid/novaseal-bip340-tcb-review",
+            "report_uri": "https://audits.nervos.example.org/novaseal-bip340-tcb-review",
             "notes": "external review fixture",
             "request_handoff": {
                 "bundle": EXTERNAL_EVIDENCE_HANDOFF,
@@ -5502,7 +5568,9 @@ mod tests {
         assert!(json_pointer_bool(&review_passed, "/checks/request_handoff_fields_exact"));
         assert!(json_pointer_bool(&review_passed, "/checks/request_handoff_bundle_hash_algorithm"));
         assert!(json_pointer_bool(&review_passed, "/checks/artifact_hash_algorithm"));
+        assert!(json_pointer_bool(&review_passed, "/checks/reviewer_identity"));
         assert!(json_pointer_bool(&review_passed, "/checks/review_date_utc_date"));
+        assert!(json_pointer_bool(&review_passed, "/checks/report_uri_https"));
         assert!(json_pointer_bool(&review_passed, "/checks/review_scope_items_present"));
 
         let mut review_placeholder_date = external_review.clone();
@@ -5516,6 +5584,30 @@ mod tests {
             validate_external_review(temp.path(), EXTERNAL_TCB_ATTESTATION, Some(&artifact_hash), &handoff).unwrap();
         assert_eq!(json_pointer_str(&review_date_failed, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&review_date_failed, "/checks/review_date_utc_date"));
+
+        let mut review_placeholder_reviewer = external_review.clone();
+        review_placeholder_reviewer["reviewer"] = json!("REPLACE_WITH_EXTERNAL_REVIEWER");
+        std::fs::write(
+            proofs.join("bip340_external_tcb_review_attestation.json"),
+            serde_json::to_vec_pretty(&review_placeholder_reviewer).unwrap(),
+        )
+        .unwrap();
+        let review_reviewer_failed =
+            validate_external_review(temp.path(), EXTERNAL_TCB_ATTESTATION, Some(&artifact_hash), &handoff).unwrap();
+        assert_eq!(json_pointer_str(&review_reviewer_failed, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&review_reviewer_failed, "/checks/reviewer_identity"));
+
+        let mut review_placeholder_uri = external_review.clone();
+        review_placeholder_uri["report_uri"] = json!("REPLACE_WITH_EXTERNAL_REVIEW_REPORT_OR_COMMIT_URI");
+        std::fs::write(
+            proofs.join("bip340_external_tcb_review_attestation.json"),
+            serde_json::to_vec_pretty(&review_placeholder_uri).unwrap(),
+        )
+        .unwrap();
+        let review_uri_failed =
+            validate_external_review(temp.path(), EXTERNAL_TCB_ATTESTATION, Some(&artifact_hash), &handoff).unwrap();
+        assert_eq!(json_pointer_str(&review_uri_failed, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&review_uri_failed, "/checks/report_uri_https"));
 
         let mut review_extra = external_review.clone();
         review_extra["unexpected_provider_field"] = Value::String("must-fail".to_string());
