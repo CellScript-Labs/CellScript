@@ -277,6 +277,14 @@ const EXPECTED_BTC_SPV_ADAPTER_PUBLIC_FIELDS: &[&str] = &[
     "request_handoff.group",
 ];
 const EXPECTED_PUBLIC_BTC_SPV_HANDOFF_FIELDS: &[&str] = EXPECTED_BTC_SPV_ADAPTER_PUBLIC_FIELDS;
+const EXPECTED_BTC_SPV_FIELD_CONSTRAINTS: &[(&str, &str)] = &[
+    ("network", "public network name; must not be local-devnet"),
+    ("generated_at", "UTC timestamp in YYYY-MM-DDTHH:MM:SSZ form"),
+    ("evidence_provider", "real external provider identity; placeholder tokens are rejected"),
+    ("source_service.name", "real external SPV service identity; placeholder tokens are rejected"),
+    ("source_service.commit", "40-character hex service source commit"),
+    ("request_handoff.bundle_hash_algorithm", "blake2b-256(person=NovaExtHandoff)"),
+];
 const EXPECTED_PUBLIC_CELLDEP_REQUIRED_FIELDS: &[&str] = &[
     "network",
     "attested_at",
@@ -296,6 +304,13 @@ const EXPECTED_PUBLIC_CELLDEP_REQUIRED_FIELDS: &[&str] = &[
     "request_handoff.bundle_hash_algorithm",
     "request_handoff.group",
 ];
+const EXPECTED_PUBLIC_CELLDEP_FIELD_CONSTRAINTS: &[(&str, &str)] = &[
+    ("network", "public CKB network name; must not be local-devnet"),
+    ("attested_at", "UTC timestamp in YYYY-MM-DDTHH:MM:SSZ form"),
+    ("attestor", "real release signer or deployer identity; placeholder tokens are rejected"),
+    ("release.manifest_commit", "40-character hex manifest source commit"),
+    ("request_handoff.bundle_hash_algorithm", "blake2b-256(person=NovaExtHandoff)"),
+];
 const EXPECTED_EXTERNAL_TCB_REQUIRED_FIELDS: &[&str] = &[
     "reviewer",
     "review_date",
@@ -310,6 +325,13 @@ const EXPECTED_EXTERNAL_TCB_REQUIRED_FIELDS: &[&str] = &[
     "request_handoff.bundle_hash",
     "request_handoff.bundle_hash_algorithm",
     "request_handoff.group",
+];
+const EXPECTED_EXTERNAL_TCB_FIELD_CONSTRAINTS: &[(&str, &str)] = &[
+    ("reviewer", "real external reviewer identity; placeholder tokens are rejected"),
+    ("review_date", "UTC date in YYYY-MM-DD form"),
+    ("artifact_hash_algorithm", "sha256"),
+    ("report_uri", "HTTPS URI for the public review report or source-controlled review commit"),
+    ("request_handoff.bundle_hash_algorithm", "blake2b-256(person=NovaExtHandoff)"),
 ];
 
 const EXPECTED_FIBER_NODE_EXECUTION_SCHEMA: &str = "novaseal-fiber-node-execution-v0.3";
@@ -2938,6 +2960,10 @@ fn validate_btc_spv_evidence_adapter_detail(report: &Value) -> Value {
             "template_case_hash": json_pointer_str(&case, "/request/template_case_hash").is_some_and(is_hex32),
             "required_public_fields_complete": required_public_fields_complete,
             "required_public_fields_exact": exact_string_set(&required_fields, EXPECTED_BTC_SPV_ADAPTER_PUBLIC_FIELDS),
+            "field_constraints_exact": exact_string_map(
+                case.pointer("/request/field_constraints").unwrap_or(&Value::Null),
+                EXPECTED_BTC_SPV_FIELD_CONSTRAINTS,
+            ),
             "fixture_checks_passed": object_values_all_true(case.get("checks")),
         });
         case_checks.insert((*expected_profile).to_string(), checks);
@@ -3002,6 +3028,11 @@ fn validate_external_attestation_adapter_detail(report: &Value) -> Value {
         } else {
             EXPECTED_EXTERNAL_TCB_REQUIRED_FIELDS
         };
+        let expected_field_constraints = if name == "public_shared_cell_dep_attestation" {
+            EXPECTED_PUBLIC_CELLDEP_FIELD_CONSTRAINTS
+        } else {
+            EXPECTED_EXTERNAL_TCB_FIELD_CONSTRAINTS
+        };
         let checks = json!({
             "exactly_one_case": matches.len() == 1,
             "status_passed": json_pointer_str(&case, "/status") == Some("passed"),
@@ -3013,6 +3044,10 @@ fn validate_external_attestation_adapter_detail(report: &Value) -> Value {
             "required_status_matches": json_pointer_str(&case, "/request/required_status") == Some(required_status),
             "required_fields_complete": expected_required_fields.iter().all(|field| required_fields.iter().any(|actual| actual == field)),
             "required_fields_exact": exact_string_set(&required_fields, expected_required_fields),
+            "field_constraints_exact": exact_string_map(
+                case.pointer("/request/field_constraints").unwrap_or(&Value::Null),
+                expected_field_constraints,
+            ),
             "artifact_hash_present": json_pointer_str(&case, "/request/expected_artifact_hash").is_some_and(is_hex32),
             "artifact_hash_algorithm_matches_tcb": name == "public_shared_cell_dep_attestation"
                 || (
@@ -3091,6 +3126,11 @@ fn validate_external_evidence_handoff_detail(report: &Value, btc_spv_adapter: &V
             "public_shared_cell_dep_attestation" => EXPECTED_PUBLIC_CELLDEP_REQUIRED_FIELDS,
             _ => EXPECTED_EXTERNAL_TCB_REQUIRED_FIELDS,
         };
+        let expected_field_constraints = match group {
+            "public_btc_spv_evidence" => EXPECTED_BTC_SPV_FIELD_CONSTRAINTS,
+            "public_shared_cell_dep_attestation" => EXPECTED_PUBLIC_CELLDEP_FIELD_CONSTRAINTS,
+            _ => EXPECTED_EXTERNAL_TCB_FIELD_CONSTRAINTS,
+        };
         let checks = json!({
             "exactly_one_case": matches.len() == 1,
             "status_passed": json_pointer_str(&case, "/status") == Some("passed"),
@@ -3101,6 +3141,10 @@ fn validate_external_evidence_handoff_detail(report: &Value, btc_spv_adapter: &V
                 .iter()
                 .all(|field| required_external_fields.iter().any(|actual| actual == field)),
             "required_external_fields_exact": exact_string_set(&required_external_fields, expected_required_external_fields),
+            "field_constraints_exact": exact_string_map(
+                case.get("field_constraints").unwrap_or(&Value::Null),
+                expected_field_constraints,
+            ),
             "btc_profiles_complete": group != "public_btc_spv_evidence"
                 || required_profiles == expected_btc_profiles,
             "fixture_checks_passed": object_values_all_true(case.get("checks")),
@@ -4724,6 +4768,16 @@ fn exact_object_keys(value: &Value, expected: &[&str]) -> bool {
         .is_some_and(|actual| exact_string_set(&actual, expected))
 }
 
+fn exact_string_map(value: &Value, expected: &[(&str, &str)]) -> bool {
+    let Some(object) = value.as_object() else {
+        return false;
+    };
+    object.len() == expected.len()
+        && expected.iter().all(|(key, expected_value)| {
+            object.get(*key).and_then(Value::as_str).is_some_and(|actual_value| actual_value == *expected_value)
+        })
+}
+
 fn safe_relative_path(path: &str) -> bool {
     let path = Path::new(path);
     !path.is_absolute() && path.components().all(|component| matches!(component, Component::Normal(_)))
@@ -4825,6 +4879,10 @@ fn rel(repo_root: &Path, path: &Path) -> String {
 mod tests {
     use super::*;
 
+    fn constraint_object(expected: &[(&str, &str)]) -> Value {
+        Value::Object(expected.iter().map(|(key, value)| ((*key).to_string(), Value::String((*value).to_string()))).collect())
+    }
+
     #[test]
     fn canonical_schema_normalisation_hashes_comment_free_lines() {
         let temp = tempfile::tempdir().unwrap();
@@ -4924,6 +4982,7 @@ mod tests {
                     "production_output": PUBLIC_BTC_SPV_EVIDENCE,
                     "required_profiles": EXPECTED_BTC_SPV_EVIDENCE_PROFILES,
                     "required_external_fields": btc_handoff_fields,
+                    "field_constraints": constraint_object(EXPECTED_BTC_SPV_FIELD_CONSTRAINTS),
                     "checks": { "ok": true },
                 },
                 {
@@ -4933,6 +4992,7 @@ mod tests {
                     "source_adapter_hash": attestation_hash,
                     "production_output": PUBLIC_CELLDEP_ATTESTATION,
                     "required_external_fields": public_attestation_handoff_fields,
+                    "field_constraints": constraint_object(EXPECTED_PUBLIC_CELLDEP_FIELD_CONSTRAINTS),
                     "checks": { "ok": true },
                 },
                 {
@@ -4942,6 +5002,7 @@ mod tests {
                     "source_adapter_hash": attestation_hash,
                     "production_output": EXTERNAL_TCB_ATTESTATION,
                     "required_external_fields": external_review_handoff_fields,
+                    "field_constraints": constraint_object(EXPECTED_EXTERNAL_TCB_FIELD_CONSTRAINTS),
                     "checks": { "ok": true },
                 },
             ],
@@ -4968,6 +5029,13 @@ mod tests {
             validate_external_evidence_handoff_detail(&missing_required_field, &btc_spv_adapter, &external_attestation_adapter);
         assert_eq!(json_pointer_str(&failed_fields, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&failed_fields, "/cases/public_btc_spv_evidence/required_external_fields_complete"));
+
+        let mut missing_constraint = report.clone();
+        missing_constraint["cases"][0]["field_constraints"].as_object_mut().unwrap().remove("source_service.commit");
+        let failed_constraint =
+            validate_external_evidence_handoff_detail(&missing_constraint, &btc_spv_adapter, &external_attestation_adapter);
+        assert_eq!(json_pointer_str(&failed_constraint, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&failed_constraint, "/cases/public_btc_spv_evidence/field_constraints_exact"));
 
         let mut unexpected_required_field = report;
         let mut extended_btc_fields = btc_handoff_fields.to_vec();
@@ -5005,6 +5073,7 @@ mod tests {
                         "required_status": "attested",
                         "expected_artifact_hash": format!("0x{}", "ee".repeat(32)),
                         "required_public_fields": full_public_fields,
+                        "field_constraints": constraint_object(EXPECTED_PUBLIC_CELLDEP_FIELD_CONSTRAINTS),
                     },
                 },
                 {
@@ -5022,6 +5091,7 @@ mod tests {
                         "expected_artifact_hash_algorithm": "sha256",
                         "template_artifact_hash_algorithm": "sha256",
                         "required_public_fields": full_review_fields,
+                        "field_constraints": constraint_object(EXPECTED_EXTERNAL_TCB_FIELD_CONSTRAINTS),
                     },
                 },
             ],
@@ -5029,6 +5099,8 @@ mod tests {
 
         let valid = validate_external_attestation_adapter_detail(&report);
         assert_eq!(json_pointer_str(&valid, "/status"), Some("passed"));
+        assert!(json_pointer_bool(&valid, "/cases/public_shared_cell_dep_attestation/field_constraints_exact"));
+        assert!(json_pointer_bool(&valid, "/cases/external_bip340_tcb_review_attestation/field_constraints_exact"));
 
         let mut missing_handoff_field = report.clone();
         missing_handoff_field["cases"][0]["request"]["required_public_fields"] = json!(full_public_fields[..15].to_vec());
@@ -5044,6 +5116,12 @@ mod tests {
             &failed_algorithm,
             "/cases/external_bip340_tcb_review_attestation/artifact_hash_algorithm_matches_tcb"
         ));
+
+        let mut stale_constraint = report.clone();
+        stale_constraint["cases"][1]["request"]["field_constraints"]["report_uri"] = json!("any URI");
+        let failed_constraint = validate_external_attestation_adapter_detail(&stale_constraint);
+        assert_eq!(json_pointer_str(&failed_constraint, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&failed_constraint, "/cases/external_bip340_tcb_review_attestation/field_constraints_exact"));
 
         let mut unexpected_public_field = report;
         let mut extended_public_fields = full_public_fields.to_vec();
@@ -5079,12 +5157,20 @@ mod tests {
                     "service_builder_receipt_binding_hash": format!("0x{}", "ee".repeat(32)),
                     "template_case_hash": format!("0x{}", "ff".repeat(32)),
                     "required_public_fields": full_public_fields,
+                    "field_constraints": constraint_object(EXPECTED_BTC_SPV_FIELD_CONSTRAINTS),
                 },
             })).collect::<Vec<_>>(),
         });
 
         let valid = validate_btc_spv_evidence_adapter_detail(&report);
         assert_eq!(json_pointer_str(&valid, "/status"), Some("passed"));
+        assert!(json_pointer_bool(&valid, "/cases/btc-transaction-commitment-profile-v0/field_constraints_exact"));
+
+        let mut missing_constraint = report.clone();
+        missing_constraint["cases"][0]["request"]["field_constraints"].as_object_mut().unwrap().remove("source_service.commit");
+        let failed_constraint = validate_btc_spv_evidence_adapter_detail(&missing_constraint);
+        assert_eq!(json_pointer_str(&failed_constraint, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&failed_constraint, "/cases/btc-transaction-commitment-profile-v0/field_constraints_exact"));
 
         let mut unexpected_public_field = report;
         let mut extended_public_fields = full_public_fields.to_vec();
