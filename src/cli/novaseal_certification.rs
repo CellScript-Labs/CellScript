@@ -320,6 +320,7 @@ const EXPECTED_PUBLIC_CELLDEP_FIELD_CONSTRAINTS: &[(&str, &str)] = &[
     ),
     ("attested_at", "UTC timestamp in YYYY-MM-DDTHH:MM:SSZ form; future timestamps are rejected"),
     ("attestor", "real release signer or deployer identity; placeholder, example, and unknown tokens are rejected"),
+    ("release.package", "novaseal"),
     ("release.version", "exact NovaSeal release version 0.0.1-v0-mvp"),
     ("release.manifest_commit", "40-character hex source commit matching the reviewed TCB repo_commit"),
     ("runtime_verifier.out_point", "0x-prefixed 32-byte CKB transaction hash plus numeric output index"),
@@ -331,6 +332,7 @@ const EXPECTED_PUBLIC_CELLDEP_FIELD_CONSTRAINTS: &[(&str, &str)] = &[
 const EXPECTED_PUBLIC_CELLDEP_EXPECTED_VALUE_FIELDS: &[&str] = &[
     "artifact_hash",
     "release.manifest_commit",
+    "release.package",
     "release.version",
     "runtime_verifier.dep_type",
     "runtime_verifier.hash_type",
@@ -3096,6 +3098,8 @@ fn validate_external_attestation_adapter_detail(report: &Value) -> Value {
                 expected_field_constraints,
             ),
             "artifact_hash_present": json_pointer_str(&case, "/request/expected_artifact_hash").is_some_and(is_hex32),
+            "expected_release_package_current": name != "public_shared_cell_dep_attestation"
+                || json_pointer_str(&case, "/request/expected_release_package") == Some("novaseal"),
             "expected_release_version_current": name != "public_shared_cell_dep_attestation"
                 || json_pointer_str(&case, "/request/expected_release_version") == Some(EXPECTED_NOVASEAL_RELEASE_VERSION),
             "expected_dep_type_current": name != "public_shared_cell_dep_attestation"
@@ -3167,6 +3171,11 @@ fn validate_external_evidence_handoff_detail(report: &Value, btc_spv_adapter: &V
         external_attestation_adapter,
         "public_shared_cell_dep_attestation",
         "/request/expected_release_manifest_commit",
+    );
+    let expected_public_release_package = adapter_case_request_str(
+        external_attestation_adapter,
+        "public_shared_cell_dep_attestation",
+        "/request/expected_release_package",
     );
     let expected_public_release_version = adapter_case_request_str(
         external_attestation_adapter,
@@ -3241,6 +3250,7 @@ fn validate_external_evidence_handoff_detail(report: &Value, btc_spv_adapter: &V
             "public_shared_cell_dep_attestation" => {
                 exact_object_keys(case.get("expected_values").unwrap_or(&Value::Null), EXPECTED_PUBLIC_CELLDEP_EXPECTED_VALUE_FIELDS)
                     && expected_public_manifest_commit.is_some_and(is_git_commit_hash)
+                    && expected_public_release_package == Some("novaseal")
                     && expected_public_release_version == Some(EXPECTED_NOVASEAL_RELEASE_VERSION)
                     && expected_public_artifact_hash.is_some_and(is_hex32)
                     && expected_public_dep_type == Some(EXPECTED_NOVASEAL_CELLDEP_DEP_TYPE)
@@ -3248,6 +3258,7 @@ fn validate_external_evidence_handoff_detail(report: &Value, btc_spv_adapter: &V
                     && expected_public_ipc_abi == Some("cellscript-btc-bip340-ipc-v0")
                     && expected_public_verifier_id == Some("btc.bip340.v0")
                     && json_pointer_str(&case, "/expected_values/artifact_hash") == expected_public_artifact_hash
+                    && json_pointer_str(&case, "/expected_values/release.package") == expected_public_release_package
                     && json_pointer_str(&case, "/expected_values/release.version") == expected_public_release_version
                     && json_pointer_str(&case, "/expected_values/release.manifest_commit") == expected_public_manifest_commit
                     && json_pointer_str(&case, "/expected_values/runtime_verifier.dep_type") == expected_public_dep_type
@@ -5225,6 +5236,7 @@ mod tests {
         let public_attestation_handoff_fields = EXPECTED_PUBLIC_CELLDEP_REQUIRED_FIELDS;
         let external_review_handoff_fields = EXPECTED_EXTERNAL_TCB_REQUIRED_FIELDS;
         let public_manifest_commit = "0123456789abcdef0123456789abcdef01234567";
+        let public_release_package = "novaseal";
         let public_release_version = EXPECTED_NOVASEAL_RELEASE_VERSION;
         let public_dep_type = EXPECTED_NOVASEAL_CELLDEP_DEP_TYPE;
         let public_hash_type = EXPECTED_NOVASEAL_CELLDEP_HASH_TYPE;
@@ -5265,6 +5277,7 @@ mod tests {
                         "production_output": PUBLIC_CELLDEP_ATTESTATION,
                         "required_public_fields": ["network"],
                         "expected_artifact_hash": public_artifact_hash,
+                        "expected_release_package": public_release_package,
                         "expected_release_version": public_release_version,
                         "expected_release_manifest_commit": public_manifest_commit,
                         "expected_dep_type": public_dep_type,
@@ -5329,6 +5342,7 @@ mod tests {
                     "field_constraints": constraint_object(EXPECTED_PUBLIC_CELLDEP_FIELD_CONSTRAINTS),
                     "expected_values": {
                         "artifact_hash": public_artifact_hash,
+                        "release.package": public_release_package,
                         "release.version": public_release_version,
                         "release.manifest_commit": public_manifest_commit,
                         "runtime_verifier.dep_type": public_dep_type,
@@ -5411,6 +5425,16 @@ mod tests {
             "/cases/public_shared_cell_dep_attestation/expected_values_match_source_adapter"
         ));
 
+        let mut stale_release_package = report.clone();
+        stale_release_package["cases"][1]["expected_values"]["release.package"] = json!("other-package");
+        let failed_release_package =
+            validate_external_evidence_handoff_detail(&stale_release_package, &btc_spv_adapter, &external_attestation_adapter);
+        assert_eq!(json_pointer_str(&failed_release_package, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(
+            &failed_release_package,
+            "/cases/public_shared_cell_dep_attestation/expected_values_match_source_adapter"
+        ));
+
         let mut stale_release_version = report.clone();
         stale_release_version["cases"][1]["expected_values"]["release.version"] = json!("0.0.2");
         let failed_release_version =
@@ -5483,6 +5507,7 @@ mod tests {
         let full_public_fields = EXPECTED_PUBLIC_CELLDEP_REQUIRED_FIELDS;
         let full_review_fields = EXPECTED_EXTERNAL_TCB_REQUIRED_FIELDS;
         let public_manifest_commit = "0123456789abcdef0123456789abcdef01234567";
+        let public_release_package = "novaseal";
         let public_release_version = EXPECTED_NOVASEAL_RELEASE_VERSION;
         let public_dep_type = EXPECTED_NOVASEAL_CELLDEP_DEP_TYPE;
         let public_hash_type = EXPECTED_NOVASEAL_CELLDEP_HASH_TYPE;
@@ -5507,6 +5532,7 @@ mod tests {
                         "ipc_abi": "cellscript-btc-bip340-ipc-v0",
                         "required_status": "attested",
                         "expected_artifact_hash": format!("0x{}", "ee".repeat(32)),
+                        "expected_release_package": public_release_package,
                         "expected_release_version": public_release_version,
                         "expected_release_manifest_commit": public_manifest_commit,
                         "expected_dep_type": public_dep_type,
@@ -5540,6 +5566,7 @@ mod tests {
         let valid = validate_external_attestation_adapter_detail(&report);
         assert_eq!(json_pointer_str(&valid, "/status"), Some("passed"));
         assert!(json_pointer_bool(&valid, "/cases/public_shared_cell_dep_attestation/field_constraints_exact"));
+        assert!(json_pointer_bool(&valid, "/cases/public_shared_cell_dep_attestation/expected_release_package_current"));
         assert!(json_pointer_bool(&valid, "/cases/public_shared_cell_dep_attestation/expected_release_version_current"));
         assert!(json_pointer_bool(&valid, "/cases/public_shared_cell_dep_attestation/expected_dep_type_current"));
         assert!(json_pointer_bool(&valid, "/cases/public_shared_cell_dep_attestation/expected_hash_type_current"));
@@ -5590,6 +5617,15 @@ mod tests {
         assert!(!json_pointer_bool(
             &failed_expected_version,
             "/cases/public_shared_cell_dep_attestation/expected_release_version_current"
+        ));
+
+        let mut stale_expected_package = report.clone();
+        stale_expected_package["cases"][0]["request"]["expected_release_package"] = json!("other-package");
+        let failed_expected_package = validate_external_attestation_adapter_detail(&stale_expected_package);
+        assert_eq!(json_pointer_str(&failed_expected_package, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(
+            &failed_expected_package,
+            "/cases/public_shared_cell_dep_attestation/expected_release_package_current"
         ));
 
         let mut stale_expected_hash_type = report.clone();
