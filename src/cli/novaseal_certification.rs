@@ -292,6 +292,7 @@ const EXPECTED_BTC_SPV_FIELD_CONSTRAINTS: &[(&str, &str)] = &[
     ("evidence_provider", "real external provider identity; placeholder, example, and unknown tokens are rejected"),
     ("source_service.name", "real external SPV service identity; placeholder, example, and unknown tokens are rejected"),
     ("source_service.commit", "40-character hex service source commit"),
+    ("source_service.report_hash", "0x-prefixed 32-byte non-placeholder SPV service report hash"),
     ("request_handoff.bundle_hash_algorithm", "blake2b-256(person=NovaExtHandoff)"),
 ];
 const EXPECTED_PUBLIC_CELLDEP_REQUIRED_FIELDS: &[&str] = &[
@@ -5465,6 +5466,16 @@ mod tests {
         assert_eq!(json_pointer_str(&failed_constraint, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&failed_constraint, "/cases/public_btc_spv_evidence/field_constraints_exact"));
 
+        let mut missing_report_hash_constraint = report.clone();
+        missing_report_hash_constraint["cases"][0]["field_constraints"].as_object_mut().unwrap().remove("source_service.report_hash");
+        let failed_report_hash_constraint = validate_external_evidence_handoff_detail(
+            &missing_report_hash_constraint,
+            &btc_spv_adapter,
+            &external_attestation_adapter,
+        );
+        assert_eq!(json_pointer_str(&failed_report_hash_constraint, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&failed_report_hash_constraint, "/cases/public_btc_spv_evidence/field_constraints_exact"));
+
         let mut stale_expected_scenario = report.clone();
         stale_expected_scenario["cases"][0]["expected_scenarios"][EXPECTED_BTC_TX_COMMITMENT_PROFILE] =
             json!("generic-public-btc-proof");
@@ -5754,6 +5765,18 @@ mod tests {
         let failed_constraint = validate_btc_spv_evidence_adapter_detail(&missing_constraint);
         assert_eq!(json_pointer_str(&failed_constraint, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&failed_constraint, "/cases/btc-transaction-commitment-profile-v0/field_constraints_exact"));
+
+        let mut missing_report_hash_constraint = report.clone();
+        missing_report_hash_constraint["cases"][0]["request"]["field_constraints"]
+            .as_object_mut()
+            .unwrap()
+            .remove("source_service.report_hash");
+        let failed_report_hash_constraint = validate_btc_spv_evidence_adapter_detail(&missing_report_hash_constraint);
+        assert_eq!(json_pointer_str(&failed_report_hash_constraint, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(
+            &failed_report_hash_constraint,
+            "/cases/btc-transaction-commitment-profile-v0/field_constraints_exact"
+        ));
 
         let mut stale_scenario = report.clone();
         stale_scenario["cases"][0]["request"]["scenario"] = json!("generic-public-btc-proof");

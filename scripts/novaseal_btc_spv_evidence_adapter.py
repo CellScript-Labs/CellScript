@@ -92,6 +92,7 @@ def profile_cases(service_builder: dict[str, Any], template: dict[str, Any]) -> 
                 "evidence_provider": "real external provider identity; placeholder, example, and unknown tokens are rejected",
                 "source_service.name": "real external SPV service identity; placeholder, example, and unknown tokens are rejected",
                 "source_service.commit": "40-character hex service source commit",
+                "source_service.report_hash": "0x-prefixed 32-byte non-placeholder SPV service report hash",
                 "request_handoff.bundle_hash_algorithm": "blake2b-256(person=NovaExtHandoff)",
             },
             "required_external_inputs": external_inputs,
