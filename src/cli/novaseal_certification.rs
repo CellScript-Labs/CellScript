@@ -64,6 +64,11 @@ const EXPECTED_CERTIFICATION_PLUGIN: &str = "novaseal-profile-v0";
 const EXPECTED_CERTIFICATION_REPORT: &str = "target/cellscript-certification/novaseal-profile-v0.json";
 const EXPECTED_BTC_SPV_EVIDENCE_PROFILES: &[&str] =
     &[EXPECTED_BTC_TX_COMMITMENT_PROFILE, EXPECTED_BTC_UTXO_SEAL_PROFILE, EXPECTED_DUAL_SEAL_PROFILE];
+const EXPECTED_BTC_SPV_PROFILE_SCENARIOS: &[(&str, &str)] = &[
+    (EXPECTED_BTC_TX_COMMITMENT_PROFILE, "btc-transaction-commitment-transition"),
+    (EXPECTED_BTC_UTXO_SEAL_PROFILE, "btc-utxo-seal-closure"),
+    (EXPECTED_DUAL_SEAL_PROFILE, "dual-seal-finality"),
+];
 
 const EXPECTED_VERIFIER: &[(&str, &str)] = &[
     ("name", "cellscript_btc_bip340_verifier_riscv"),
@@ -2965,7 +2970,7 @@ fn validate_btc_spv_evidence_adapter_detail(report: &Value) -> Value {
             "exactly_one_case": matches.len() == 1,
             "status_passed": json_pointer_str(&case, "/status") == Some("passed"),
             "request_profile_matches": json_pointer_str(&case, "/request/profile") == Some(*expected_profile),
-            "scenario_present": json_pointer_str(&case, "/request/scenario").is_some_and(|value| !value.is_empty()),
+            "scenario_matches_expected": json_pointer_str(&case, "/request/scenario") == expected_btc_spv_scenario(expected_profile),
             "minimum_confirmations_at_least_six": json_pointer_i64(&case, "/request/minimum_confirmations").unwrap_or_default() >= 6,
             "public_btc_spv_external_input_named": external_inputs.iter().any(|value| value == "public_btc_spv_evidence"),
             "service_builder_case_hash": json_pointer_str(&case, "/request/service_builder_case_hash").is_some_and(is_hex32),
@@ -3121,6 +3126,7 @@ fn validate_external_evidence_handoff_detail(report: &Value, btc_spv_adapter: &V
     let expected_btc_spv_adapter_hash = novaseal_handoff_report_hash("btc_spv_adapter", btc_spv_adapter);
     let expected_external_attestation_adapter_hash =
         novaseal_handoff_report_hash("external_attestation_adapter", external_attestation_adapter);
+    let expected_btc_spv_scenarios = btc_spv_adapter_expected_scenarios(btc_spv_adapter);
     let expected_public_manifest_commit = adapter_case_request_str(
         external_attestation_adapter,
         "public_shared_cell_dep_attestation",
@@ -3172,6 +3178,11 @@ fn validate_external_evidence_handoff_detail(report: &Value, btc_spv_adapter: &V
             "public_shared_cell_dep_attestation" => EXPECTED_PUBLIC_CELLDEP_FIELD_CONSTRAINTS,
             _ => EXPECTED_EXTERNAL_TCB_FIELD_CONSTRAINTS,
         };
+        let expected_scenarios_match_source_adapter = group != "public_btc_spv_evidence"
+            || (json_object_string_map(case.get("expected_scenarios").unwrap_or(&Value::Null)) == expected_btc_spv_scenarios
+                && EXPECTED_BTC_SPV_PROFILE_SCENARIOS
+                    .iter()
+                    .all(|(profile, scenario)| expected_btc_spv_scenarios.get(*profile).is_some_and(|actual| actual == *scenario)));
         let expected_values_match_source_adapter = match group {
             "public_shared_cell_dep_attestation" => {
                 exact_object_keys(case.get("expected_values").unwrap_or(&Value::Null), EXPECTED_PUBLIC_CELLDEP_EXPECTED_VALUE_FIELDS)
@@ -3205,6 +3216,7 @@ fn validate_external_evidence_handoff_detail(report: &Value, btc_spv_adapter: &V
                 case.get("field_constraints").unwrap_or(&Value::Null),
                 expected_field_constraints,
             ),
+            "expected_scenarios_match_source_adapter": expected_scenarios_match_source_adapter,
             "expected_values_match_source_adapter": expected_values_match_source_adapter,
             "btc_profiles_complete": group != "public_btc_spv_evidence"
                 || required_profiles == expected_btc_profiles,
@@ -3249,6 +3261,23 @@ fn adapter_case_request_str<'a>(adapter: &'a Value, case_name: &str, pointer: &s
         .iter()
         .find(|case| json_pointer_str(case, "/name") == Some(case_name))
         .and_then(|case| json_pointer_str(case, pointer))
+}
+
+fn btc_spv_adapter_expected_scenarios(adapter: &Value) -> BTreeMap<String, String> {
+    adapter
+        .get("cases")
+        .and_then(Value::as_array)
+        .map(|cases| {
+            cases
+                .iter()
+                .filter_map(|case| {
+                    let profile = json_pointer_str(case, "/profile")?;
+                    let scenario = json_pointer_str(case, "/request/scenario")?;
+                    Some((profile.to_string(), scenario.to_string()))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn validate_invariant_matrix(repo_root: &Path, path: &Path) -> Result<Value> {
@@ -4082,7 +4111,7 @@ fn validate_btc_spv_evidence(repo_root: &Path, rel_path: &str, external_evidence
             json!({
                 "present": true,
                 "fields_exact": exact_object_keys(case, EXPECTED_PUBLIC_BTC_SPV_CASE_FIELDS),
-                "scenario_present": case.get("scenario").is_some_and(value_is_present),
+                "scenario_matches_expected": json_pointer_str(case, "/scenario") == expected_btc_spv_scenario(profile),
                 "btc_txid_valid": json_pointer_str(case, "/btc_txid").is_some_and(is_hex32),
                 "btc_txid_non_placeholder": !placeholder_hash(json_pointer_str(case, "/btc_txid")),
                 "btc_block_hash_valid": json_pointer_str(case, "/btc_block_hash").is_some_and(is_hex32),
@@ -4838,6 +4867,19 @@ fn json_array_strings(value: &Value, pointer: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
+fn json_object_string_map(value: &Value) -> BTreeMap<String, String> {
+    value
+        .as_object()
+        .map(|object| object.iter().filter_map(|(key, value)| value.as_str().map(|value| (key.clone(), value.to_string()))).collect())
+        .unwrap_or_default()
+}
+
+fn expected_btc_spv_scenario(profile: &str) -> Option<&'static str> {
+    EXPECTED_BTC_SPV_PROFILE_SCENARIOS
+        .iter()
+        .find_map(|(expected_profile, scenario)| (*expected_profile == profile).then_some(*scenario))
+}
+
 fn exact_string_set(actual: &[String], expected: &[&str]) -> bool {
     actual.len() == expected.len() && expected.iter().all(|field| actual.iter().any(|actual| actual == field))
 }
@@ -5006,6 +5048,10 @@ mod tests {
         let public_artifact_hash = format!("0x{}", "99".repeat(32));
         let external_artifact_hash = format!("0x{}", "aa".repeat(32));
         let external_source_tree_hash = format!("0x{}", "bb".repeat(32));
+        let expected_btc_scenarios = EXPECTED_BTC_SPV_PROFILE_SCENARIOS
+            .iter()
+            .map(|(profile, scenario)| ((*profile).to_string(), Value::String((*scenario).to_string())))
+            .collect::<Map<String, Value>>();
         let btc_spv_adapter = json!({
             "status": "passed",
             "adapter_status": "request_ready_external_evidence_required",
@@ -5013,7 +5059,13 @@ mod tests {
             "summary": { "total": 3, "matched": 3 },
             "cases": EXPECTED_BTC_SPV_EVIDENCE_PROFILES
                 .iter()
-                .map(|profile| json!({ "profile": profile, "status": "passed" }))
+                .map(|profile| json!({
+                    "profile": profile,
+                    "status": "passed",
+                    "request": {
+                        "scenario": expected_btc_spv_scenario(profile).unwrap(),
+                    },
+                }))
                 .collect::<Vec<_>>(),
         });
         let external_attestation_adapter = json!({
@@ -5071,6 +5123,7 @@ mod tests {
                     "source_adapter_hash": btc_hash,
                     "production_output": PUBLIC_BTC_SPV_EVIDENCE,
                     "required_profiles": EXPECTED_BTC_SPV_EVIDENCE_PROFILES,
+                    "expected_scenarios": expected_btc_scenarios.clone(),
                     "required_external_fields": btc_handoff_fields,
                     "field_constraints": constraint_object(EXPECTED_BTC_SPV_FIELD_CONSTRAINTS),
                     "checks": { "ok": true },
@@ -5109,6 +5162,7 @@ mod tests {
 
         let valid = validate_external_evidence_handoff_detail(&report, &btc_spv_adapter, &external_attestation_adapter);
         assert_eq!(json_pointer_str(&valid, "/status"), Some("passed"));
+        assert!(json_pointer_bool(&valid, "/cases/public_btc_spv_evidence/expected_scenarios_match_source_adapter"));
         assert!(json_pointer_bool(&valid, "/cases/public_shared_cell_dep_attestation/expected_values_match_source_adapter"));
         assert!(json_pointer_bool(&valid, "/cases/external_bip340_tcb_review_attestation/expected_values_match_source_adapter"));
 
@@ -5137,6 +5191,17 @@ mod tests {
             validate_external_evidence_handoff_detail(&missing_constraint, &btc_spv_adapter, &external_attestation_adapter);
         assert_eq!(json_pointer_str(&failed_constraint, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&failed_constraint, "/cases/public_btc_spv_evidence/field_constraints_exact"));
+
+        let mut stale_expected_scenario = report.clone();
+        stale_expected_scenario["cases"][0]["expected_scenarios"][EXPECTED_BTC_TX_COMMITMENT_PROFILE] =
+            json!("generic-public-btc-proof");
+        let failed_expected_scenario =
+            validate_external_evidence_handoff_detail(&stale_expected_scenario, &btc_spv_adapter, &external_attestation_adapter);
+        assert_eq!(json_pointer_str(&failed_expected_scenario, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(
+            &failed_expected_scenario,
+            "/cases/public_btc_spv_evidence/expected_scenarios_match_source_adapter"
+        ));
 
         let mut stale_expected_value = report.clone();
         stale_expected_value["cases"][1]["expected_values"]["release.manifest_commit"] =
@@ -5273,7 +5338,7 @@ mod tests {
                 "checks": { "ok": true },
                 "request": {
                     "profile": profile,
-                    "scenario": "public-btc-proof",
+                    "scenario": expected_btc_spv_scenario(profile).unwrap(),
                     "minimum_confirmations": 6,
                     "required_external_inputs": ["public_btc_spv_evidence"],
                     "service_builder_case_hash": format!("0x{}", "cc".repeat(32)),
@@ -5289,12 +5354,19 @@ mod tests {
         let valid = validate_btc_spv_evidence_adapter_detail(&report);
         assert_eq!(json_pointer_str(&valid, "/status"), Some("passed"));
         assert!(json_pointer_bool(&valid, "/cases/btc-transaction-commitment-profile-v0/field_constraints_exact"));
+        assert!(json_pointer_bool(&valid, "/cases/btc-transaction-commitment-profile-v0/scenario_matches_expected"));
 
         let mut missing_constraint = report.clone();
         missing_constraint["cases"][0]["request"]["field_constraints"].as_object_mut().unwrap().remove("source_service.commit");
         let failed_constraint = validate_btc_spv_evidence_adapter_detail(&missing_constraint);
         assert_eq!(json_pointer_str(&failed_constraint, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&failed_constraint, "/cases/btc-transaction-commitment-profile-v0/field_constraints_exact"));
+
+        let mut stale_scenario = report.clone();
+        stale_scenario["cases"][0]["request"]["scenario"] = json!("generic-public-btc-proof");
+        let failed_scenario = validate_btc_spv_evidence_adapter_detail(&stale_scenario);
+        assert_eq!(json_pointer_str(&failed_scenario, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&failed_scenario, "/cases/btc-transaction-commitment-profile-v0/scenario_matches_expected"));
 
         let mut unexpected_public_field = report;
         let mut extended_public_fields = full_public_fields.to_vec();
@@ -5458,7 +5530,7 @@ mod tests {
         let case_for = |profile: &str| {
             json!({
                 "profile": profile,
-                "scenario": "public-btc-proof",
+                "scenario": expected_btc_spv_scenario(profile).unwrap_or("unexpected-profile-scenario"),
                 "btc_txid": format!("0x{}", "11".repeat(32)),
                 "btc_block_hash": format!("0x{}", "22".repeat(32)),
                 "spv_proof_hash": format!("0x{}", "33".repeat(32)),
@@ -5506,6 +5578,7 @@ mod tests {
         assert!(json_pointer_bool(&passed, "/checks/required_profiles_field_exact"));
         assert!(json_pointer_bool(&passed, "/checks/required_profiles_covered_exact"));
         assert!(json_pointer_bool(&passed, "/checks/case_checks_passed"));
+        assert!(json_pointer_bool(&passed, "/case_checks/btc-transaction-commitment-profile-v0/scenario_matches_expected"));
 
         let mut placeholder_generated_at = spv_report.clone();
         placeholder_generated_at["generated_at"] = json!("YYYY-MM-DDTHH:MM:SSZ");
@@ -5536,6 +5609,13 @@ mod tests {
         let failed_case = validate_btc_spv_evidence(temp.path(), PUBLIC_BTC_SPV_EVIDENCE, &handoff).unwrap();
         assert_eq!(json_pointer_str(&failed_case, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&failed_case, "/case_checks/btc-transaction-commitment-profile-v0/fields_exact"));
+
+        let mut stale_scenario = spv_report.clone();
+        stale_scenario["cases"][0]["scenario"] = json!("generic-public-btc-proof");
+        std::fs::write(proofs.join("public_btc_spv_evidence.json"), serde_json::to_vec_pretty(&stale_scenario).unwrap()).unwrap();
+        let failed_scenario = validate_btc_spv_evidence(temp.path(), PUBLIC_BTC_SPV_EVIDENCE, &handoff).unwrap();
+        assert_eq!(json_pointer_str(&failed_scenario, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&failed_scenario, "/case_checks/btc-transaction-commitment-profile-v0/scenario_matches_expected"));
 
         let mut zero_btc_txid = spv_report.clone();
         zero_btc_txid["cases"][0]["btc_txid"] = json!(format!("0x{}", "00".repeat(32)));

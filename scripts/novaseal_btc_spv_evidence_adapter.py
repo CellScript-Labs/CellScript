@@ -27,6 +27,11 @@ REQUIRED_PROFILES = [
     "btc-utxo-seal-profile-v0",
     "dual-seal-profile-v0",
 ]
+REQUIRED_SCENARIOS = {
+    "btc-transaction-commitment-profile-v0": "btc-transaction-commitment-transition",
+    "btc-utxo-seal-profile-v0": "btc-utxo-seal-closure",
+    "dual-seal-profile-v0": "dual-seal-finality",
+}
 
 
 def hex0x(data: bytes) -> str:
@@ -98,6 +103,7 @@ def profile_cases(service_builder: dict[str, Any], template: dict[str, Any]) -> 
         checks = {
             "service_builder_case_present": builder_case is not None,
             "template_case_present": template_case is not None,
+            "scenario_matches_required_profile": request["scenario"] == REQUIRED_SCENARIOS[profile],
             "public_btc_spv_external_input_named": "public_btc_spv_evidence" in external_inputs,
             "minimum_confirmations_at_least_six": request["minimum_confirmations"] >= 6,
             "service_builder_hashes_present": bool(request["service_builder_tx_skeleton_hash"])

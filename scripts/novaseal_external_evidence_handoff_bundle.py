@@ -95,6 +95,11 @@ def required_field_set(case: dict[str, Any]) -> set[str]:
 def btc_spv_handoff_case(adapter: dict[str, Any]) -> dict[str, Any]:
     cases = adapter.get("cases", [])
     profiles = {case.get("profile") for case in cases}
+    expected_scenarios = {
+        case.get("profile"): case.get("request", {}).get("scenario")
+        for case in cases
+        if isinstance(case.get("profile"), str) and isinstance(case.get("request", {}).get("scenario"), str)
+    }
     checks = {
         "source_adapter_passed": adapter.get("status") == "passed",
         "source_adapter_status_request_ready": adapter.get("adapter_status") == "request_ready_external_evidence_required",
@@ -102,6 +107,8 @@ def btc_spv_handoff_case(adapter: dict[str, Any]) -> dict[str, Any]:
         "summary_counts_match": adapter.get("summary", {}).get("total") == len(REQUIRED_BTC_SPV_PROFILES)
         and adapter.get("summary", {}).get("matched") == adapter.get("summary", {}).get("total"),
         "required_profiles_complete": profiles == set(REQUIRED_BTC_SPV_PROFILES),
+        "expected_scenarios_complete": set(expected_scenarios) == set(REQUIRED_BTC_SPV_PROFILES)
+        and all(expected_scenarios.values()),
         "source_cases_passed": all(case.get("status") == "passed" for case in cases),
     }
     return {
@@ -112,6 +119,7 @@ def btc_spv_handoff_case(adapter: dict[str, Any]) -> dict[str, Any]:
         "source_adapter_hash": report_hash("btc_spv_adapter", adapter),
         "production_output": PUBLIC_BTC_SPV_EVIDENCE,
         "required_profiles": REQUIRED_BTC_SPV_PROFILES,
+        "expected_scenarios": expected_scenarios,
         "required_external_fields": [
             "network",
             "generated_at",
