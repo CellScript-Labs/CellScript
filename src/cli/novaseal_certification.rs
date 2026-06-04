@@ -215,6 +215,26 @@ const EXPECTED_FIBER_CANDIDATE_FIXTURES: &[&str] =
 const EXPECTED_FIBER_CANDIDATE_DOCS: &[&str] =
     &["AUDIT_STATUS.md", "DEVNET_STATEFUL_ACCEPTANCE.md", "FIBER_NODE_EXPERIMENTS.md", "SECURITY.md"];
 
+const EXPECTED_PUBLIC_CELLDEP_ATTESTATION_FIELDS: &[&str] =
+    &["attested_at", "attestor", "network", "notes", "release", "request_handoff", "runtime_verifier", "schema", "status"];
+const EXPECTED_PUBLIC_CELLDEP_RUNTIME_VERIFIER_FIELDS: &[&str] =
+    &["artifact_hash", "data_hash", "dep_type", "hash_type", "ipc_abi", "out_point", "verifier_id"];
+const EXPECTED_EXTERNAL_TCB_REVIEW_ATTESTATION_FIELDS: &[&str] = &[
+    "artifact_hash",
+    "artifact_hash_algorithm",
+    "ipc_abi",
+    "notes",
+    "report_uri",
+    "request_handoff",
+    "review_date",
+    "review_scope",
+    "reviewer",
+    "schema",
+    "source_tree_sha256",
+    "status",
+    "verifier_id",
+];
+
 const EXPECTED_FIBER_NODE_EXECUTION_SCHEMA: &str = "novaseal-fiber-node-execution-v0.3";
 const EXPECTED_FIBER_REPO_ORIGIN: &str = "https://github.com/nervosnetwork/fiber.git";
 const EXPECTED_FIBER_NODE_PROFILES: &[&str] = &[
@@ -4004,12 +4024,14 @@ fn validate_public_attestation(
     let parsed = parse_out_point(json_pointer_str(&verifier, "/out_point"));
     let checks = json!({
         "schema": json_pointer_str(&payload, "/schema") == Some("novaseal-public-shared-cell-dep-attestation-v0.1"),
+        "top_level_fields_exact": exact_object_keys(&payload, EXPECTED_PUBLIC_CELLDEP_ATTESTATION_FIELDS),
         "status": json_pointer_str(&payload, "/status") == Some("attested"),
         "network_not_local_devnet": json_pointer_str(&payload, "/network").is_some_and(|network| !network.is_empty() && network != "local-devnet"),
         "request_handoff_bundle_path": json_pointer_str(&payload, "/request_handoff/bundle") == Some(EXTERNAL_EVIDENCE_HANDOFF),
         "request_handoff_bundle_hash_matches_current": normalize_hex(json_pointer_str(&payload, "/request_handoff/bundle_hash")).as_deref()
             == Some(handoff_hash.as_str()),
         "request_handoff_group": json_pointer_str(&payload, "/request_handoff/group") == Some("public_shared_cell_dep_attestation"),
+        "runtime_verifier_fields_exact": exact_object_keys(&verifier, EXPECTED_PUBLIC_CELLDEP_RUNTIME_VERIFIER_FIELDS),
         "artifact_hash": normalize_hex(json_pointer_str(&verifier, "/artifact_hash")).as_deref() == artifact_hash,
         "data_hash_non_placeholder": !placeholder_hash(normalize_hex(json_pointer_str(&verifier, "/data_hash")).as_deref()),
         "out_point_non_placeholder": !placeholder_hash(json_pointer_str(&parsed, "/tx_hash")),
@@ -4042,6 +4064,7 @@ fn validate_external_review(
     let handoff_hash = novaseal_handoff_report_hash("external_evidence_handoff_bundle", external_evidence_handoff);
     let checks = json!({
         "schema": json_pointer_str(&payload, "/schema") == Some("novaseal-bip340-external-tcb-review-attestation-v0.1"),
+        "top_level_fields_exact": exact_object_keys(&payload, EXPECTED_EXTERNAL_TCB_REVIEW_ATTESTATION_FIELDS),
         "status": json_pointer_str(&payload, "/status") == Some("accepted"),
         "request_handoff_bundle_path": json_pointer_str(&payload, "/request_handoff/bundle") == Some(EXTERNAL_EVIDENCE_HANDOFF),
         "request_handoff_bundle_hash_matches_current": normalize_hex(json_pointer_str(&payload, "/request_handoff/bundle_hash")).as_deref()
@@ -4511,6 +4534,13 @@ fn json_array_strings(value: &Value, pointer: &str) -> Vec<String> {
 
 fn exact_string_set(actual: &[String], expected: &[&str]) -> bool {
     actual.len() == expected.len() && expected.iter().all(|field| actual.iter().any(|actual| actual == field))
+}
+
+fn exact_object_keys(value: &Value, expected: &[&str]) -> bool {
+    value
+        .as_object()
+        .map(|object| object.keys().cloned().collect::<Vec<_>>())
+        .is_some_and(|actual| exact_string_set(&actual, expected))
 }
 
 fn safe_relative_path(path: &str) -> bool {
@@ -5073,6 +5103,110 @@ mod tests {
         assert!(json_pointer_bool(&passed, "/checks/request_handoff_bundle_hash_matches_current"));
         assert!(json_pointer_bool(&passed, "/checks/required_profiles_covered"));
         assert!(json_pointer_bool(&passed, "/checks/case_checks_passed"));
+    }
+
+    #[test]
+    fn external_attestations_require_exact_report_fields() {
+        let temp = tempfile::tempdir().unwrap();
+        let proofs = temp.path().join("proposals/novaseal/v0-mvp-skeleton/proofs");
+        std::fs::create_dir_all(&proofs).unwrap();
+        let artifact_hash = format!("0x{}", "aa".repeat(32));
+        let source_tree_hash = format!("0x{}", "bb".repeat(32));
+        let handoff = json!({
+            "schema": "novaseal-external-evidence-handoff-bundle-v0.1",
+            "status": "passed",
+        });
+        let handoff_hash = novaseal_handoff_report_hash("external_evidence_handoff_bundle", &handoff);
+        let public_attestation = json!({
+            "schema": "novaseal-public-shared-cell-dep-attestation-v0.1",
+            "status": "attested",
+            "network": "testnet",
+            "attested_at": "2026-06-05T00:00:00Z",
+            "attestor": "external-cell-dep-operator",
+            "release": "novaseal-btc-bip340-v0",
+            "notes": "external public CellDep attestation fixture",
+            "request_handoff": {
+                "bundle": EXTERNAL_EVIDENCE_HANDOFF,
+                "bundle_hash": handoff_hash,
+                "group": "public_shared_cell_dep_attestation",
+            },
+            "runtime_verifier": {
+                "verifier_id": "btc.bip340.v0",
+                "ipc_abi": "cellscript-btc-bip340-ipc-v0",
+                "artifact_hash": artifact_hash,
+                "out_point": format!("0x{}:0", "11".repeat(32)),
+                "data_hash": format!("0x{}", "22".repeat(32)),
+                "dep_type": "code",
+                "hash_type": "data1",
+            },
+        });
+        std::fs::write(
+            proofs.join("public_shared_cell_dep_attestation.json"),
+            serde_json::to_vec_pretty(&public_attestation).unwrap(),
+        )
+        .unwrap();
+        let public_passed =
+            validate_public_attestation(temp.path(), PUBLIC_CELLDEP_ATTESTATION, Some(&artifact_hash), &handoff).unwrap();
+        assert_eq!(json_pointer_str(&public_passed, "/status"), Some("passed"));
+        assert!(json_pointer_bool(&public_passed, "/checks/top_level_fields_exact"));
+        assert!(json_pointer_bool(&public_passed, "/checks/runtime_verifier_fields_exact"));
+
+        let mut public_extra = public_attestation.clone();
+        public_extra["unexpected_provider_field"] = Value::String("must-fail".to_string());
+        std::fs::write(proofs.join("public_shared_cell_dep_attestation.json"), serde_json::to_vec_pretty(&public_extra).unwrap())
+            .unwrap();
+        let public_failed =
+            validate_public_attestation(temp.path(), PUBLIC_CELLDEP_ATTESTATION, Some(&artifact_hash), &handoff).unwrap();
+        assert_eq!(json_pointer_str(&public_failed, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&public_failed, "/checks/top_level_fields_exact"));
+
+        let mut public_nested_extra = public_attestation.clone();
+        public_nested_extra["runtime_verifier"]["unexpected_runtime_field"] = Value::String("must-fail".to_string());
+        std::fs::write(
+            proofs.join("public_shared_cell_dep_attestation.json"),
+            serde_json::to_vec_pretty(&public_nested_extra).unwrap(),
+        )
+        .unwrap();
+        let public_nested_failed =
+            validate_public_attestation(temp.path(), PUBLIC_CELLDEP_ATTESTATION, Some(&artifact_hash), &handoff).unwrap();
+        assert_eq!(json_pointer_str(&public_nested_failed, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&public_nested_failed, "/checks/runtime_verifier_fields_exact"));
+
+        let external_review = json!({
+            "schema": "novaseal-bip340-external-tcb-review-attestation-v0.1",
+            "status": "accepted",
+            "artifact_hash": artifact_hash,
+            "artifact_hash_algorithm": "ckb-blake2b256",
+            "source_tree_sha256": source_tree_hash,
+            "verifier_id": "btc.bip340.v0",
+            "ipc_abi": "cellscript-btc-bip340-ipc-v0",
+            "reviewer": "external-tcb-reviewer",
+            "review_date": "2026-06-05",
+            "review_scope": "BIP340 runtime verifier TCB",
+            "report_uri": "https://example.invalid/novaseal-bip340-tcb-review",
+            "notes": "external review fixture",
+            "request_handoff": {
+                "bundle": EXTERNAL_EVIDENCE_HANDOFF,
+                "bundle_hash": handoff_hash,
+                "group": "external_bip340_tcb_review_attestation",
+            },
+        });
+        std::fs::write(
+            proofs.join("bip340_external_tcb_review_attestation.json"),
+            serde_json::to_vec_pretty(&external_review).unwrap(),
+        )
+        .unwrap();
+        let review_passed = validate_external_review(temp.path(), EXTERNAL_TCB_ATTESTATION, Some(&artifact_hash), &handoff).unwrap();
+        assert_eq!(json_pointer_str(&review_passed, "/status"), Some("passed"));
+        assert!(json_pointer_bool(&review_passed, "/checks/top_level_fields_exact"));
+
+        let mut review_extra = external_review.clone();
+        review_extra["unexpected_provider_field"] = Value::String("must-fail".to_string());
+        std::fs::write(proofs.join("bip340_external_tcb_review_attestation.json"), serde_json::to_vec_pretty(&review_extra).unwrap())
+            .unwrap();
+        let review_failed = validate_external_review(temp.path(), EXTERNAL_TCB_ATTESTATION, Some(&artifact_hash), &handoff).unwrap();
+        assert_eq!(json_pointer_str(&review_failed, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&review_failed, "/checks/top_level_fields_exact"));
     }
 
     #[test]
