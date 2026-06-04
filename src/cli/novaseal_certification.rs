@@ -64,6 +64,7 @@ const EXPECTED_PROFILE_CERTIFICATION_GATE: &str = "cellc certify --plugin novase
 const EXPECTED_CERTIFICATION_PLUGIN: &str = "novaseal-profile-v0";
 const EXPECTED_CERTIFICATION_REPORT: &str = "target/cellscript-certification/novaseal-profile-v0.json";
 const EXPECTED_NOVASEAL_RELEASE_VERSION: &str = "0.0.1-v0-mvp";
+const EXPECTED_NOVASEAL_CELLDEP_HASH_TYPE: &str = "data1";
 const EXPECTED_BTC_SPV_EVIDENCE_PROFILES: &[&str] =
     &[EXPECTED_BTC_TX_COMMITMENT_PROFILE, EXPECTED_BTC_UTXO_SEAL_PROFILE, EXPECTED_DUAL_SEAL_PROFILE];
 const EXPECTED_BTC_SPV_PROFILE_SCENARIOS: &[(&str, &str)] = &[
@@ -323,10 +324,11 @@ const EXPECTED_PUBLIC_CELLDEP_FIELD_CONSTRAINTS: &[(&str, &str)] = &[
     ("runtime_verifier.out_point", "0x-prefixed 32-byte CKB transaction hash plus numeric output index"),
     ("runtime_verifier.data_hash", "0x-prefixed 32-byte non-placeholder CellDep data hash"),
     ("runtime_verifier.dep_type", "code"),
-    ("runtime_verifier.hash_type", "data, data1, or type"),
+    ("runtime_verifier.hash_type", "data1"),
     ("request_handoff.bundle_hash_algorithm", "blake2b-256(person=NovaExtHandoff)"),
 ];
-const EXPECTED_PUBLIC_CELLDEP_EXPECTED_VALUE_FIELDS: &[&str] = &["artifact_hash", "release.manifest_commit", "release.version"];
+const EXPECTED_PUBLIC_CELLDEP_EXPECTED_VALUE_FIELDS: &[&str] =
+    &["artifact_hash", "release.manifest_commit", "release.version", "runtime_verifier.hash_type"];
 const EXPECTED_EXTERNAL_TCB_REQUIRED_FIELDS: &[&str] = &[
     "reviewer",
     "review_date",
@@ -3088,6 +3090,8 @@ fn validate_external_attestation_adapter_detail(report: &Value) -> Value {
             "artifact_hash_present": json_pointer_str(&case, "/request/expected_artifact_hash").is_some_and(is_hex32),
             "expected_release_version_current": name != "public_shared_cell_dep_attestation"
                 || json_pointer_str(&case, "/request/expected_release_version") == Some(EXPECTED_NOVASEAL_RELEASE_VERSION),
+            "expected_hash_type_current": name != "public_shared_cell_dep_attestation"
+                || json_pointer_str(&case, "/request/expected_hash_type") == Some(EXPECTED_NOVASEAL_CELLDEP_HASH_TYPE),
             "expected_release_manifest_commit_present": name != "public_shared_cell_dep_attestation"
                 || json_pointer_str(&case, "/request/expected_release_manifest_commit").is_some_and(is_git_commit_hash),
             "expected_review_scope_exact": name != "external_bip340_tcb_review_attestation"
@@ -3164,6 +3168,8 @@ fn validate_external_evidence_handoff_detail(report: &Value, btc_spv_adapter: &V
         "public_shared_cell_dep_attestation",
         "/request/expected_artifact_hash",
     );
+    let expected_public_hash_type =
+        adapter_case_request_str(external_attestation_adapter, "public_shared_cell_dep_attestation", "/request/expected_hash_type");
     let expected_external_tcb_artifact_hash = adapter_case_request_str(
         external_attestation_adapter,
         "external_bip340_tcb_review_attestation",
@@ -3221,9 +3227,11 @@ fn validate_external_evidence_handoff_detail(report: &Value, btc_spv_adapter: &V
                     && expected_public_manifest_commit.is_some_and(is_git_commit_hash)
                     && expected_public_release_version == Some(EXPECTED_NOVASEAL_RELEASE_VERSION)
                     && expected_public_artifact_hash.is_some_and(is_hex32)
+                    && expected_public_hash_type == Some(EXPECTED_NOVASEAL_CELLDEP_HASH_TYPE)
                     && json_pointer_str(&case, "/expected_values/artifact_hash") == expected_public_artifact_hash
                     && json_pointer_str(&case, "/expected_values/release.version") == expected_public_release_version
                     && json_pointer_str(&case, "/expected_values/release.manifest_commit") == expected_public_manifest_commit
+                    && json_pointer_str(&case, "/expected_values/runtime_verifier.hash_type") == expected_public_hash_type
             }
             "external_bip340_tcb_review_attestation" => {
                 exact_object_keys(case.get("expected_values").unwrap_or(&Value::Null), EXPECTED_EXTERNAL_TCB_EXPECTED_VALUE_FIELDS)
@@ -4266,6 +4274,7 @@ fn validate_public_attestation(
         "out_point_non_placeholder": !placeholder_hash(json_pointer_str(&parsed, "/tx_hash")),
         "dep_type": json_pointer_str(&verifier, "/dep_type") == Some("code"),
         "hash_type": matches!(json_pointer_str(&verifier, "/hash_type"), Some("data" | "data1" | "type")),
+        "hash_type_matches_expected": json_pointer_str(&verifier, "/hash_type") == Some(EXPECTED_NOVASEAL_CELLDEP_HASH_TYPE),
         "verifier_id": json_pointer_str(&verifier, "/verifier_id") == Some("btc.bip340.v0"),
         "ipc_abi": json_pointer_str(&verifier, "/ipc_abi") == Some("cellscript-btc-bip340-ipc-v0"),
     });
@@ -4386,6 +4395,8 @@ fn validate_attestation_templates(
         "public_artifact_hash_matches_current_tcb": normalize_hex(json_pointer_str(public_verifier, "/artifact_hash")).as_deref() == artifact_hash,
         "public_dep_type": json_pointer_str(public_verifier, "/dep_type") == Some("code"),
         "public_hash_type": matches!(json_pointer_str(public_verifier, "/hash_type"), Some("data" | "data1" | "type")),
+        "public_hash_type_matches_expected": json_pointer_str(public_verifier, "/hash_type")
+            == Some(EXPECTED_NOVASEAL_CELLDEP_HASH_TYPE),
         "external_artifact_hash_matches_current_tcb": normalize_hex(json_pointer_str(external, "/artifact_hash")).as_deref() == artifact_hash,
         "external_source_tree_hash_matches_current_tcb": normalize_hex(json_pointer_str(external, "/source_tree_sha256")).as_deref() == source_tree_hash,
         "public_verifier_id": json_pointer_str(public_verifier, "/verifier_id") == Some("btc.bip340.v0"),
@@ -5193,6 +5204,7 @@ mod tests {
         let external_review_handoff_fields = EXPECTED_EXTERNAL_TCB_REQUIRED_FIELDS;
         let public_manifest_commit = "0123456789abcdef0123456789abcdef01234567";
         let public_release_version = EXPECTED_NOVASEAL_RELEASE_VERSION;
+        let public_hash_type = EXPECTED_NOVASEAL_CELLDEP_HASH_TYPE;
         let public_artifact_hash = format!("0x{}", "99".repeat(32));
         let external_artifact_hash = format!("0x{}", "aa".repeat(32));
         let external_source_tree_hash = format!("0x{}", "bb".repeat(32));
@@ -5230,6 +5242,7 @@ mod tests {
                         "expected_artifact_hash": public_artifact_hash,
                         "expected_release_version": public_release_version,
                         "expected_release_manifest_commit": public_manifest_commit,
+                        "expected_hash_type": public_hash_type,
                     },
                 },
                 {
@@ -5290,6 +5303,7 @@ mod tests {
                         "artifact_hash": public_artifact_hash,
                         "release.version": public_release_version,
                         "release.manifest_commit": public_manifest_commit,
+                        "runtime_verifier.hash_type": public_hash_type,
                     },
                     "checks": { "ok": true },
                 },
@@ -5376,6 +5390,16 @@ mod tests {
             "/cases/public_shared_cell_dep_attestation/expected_values_match_source_adapter"
         ));
 
+        let mut stale_hash_type = report.clone();
+        stale_hash_type["cases"][1]["expected_values"]["runtime_verifier.hash_type"] = json!("type");
+        let failed_hash_type =
+            validate_external_evidence_handoff_detail(&stale_hash_type, &btc_spv_adapter, &external_attestation_adapter);
+        assert_eq!(json_pointer_str(&failed_hash_type, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(
+            &failed_hash_type,
+            "/cases/public_shared_cell_dep_attestation/expected_values_match_source_adapter"
+        ));
+
         let mut stale_expected_review_scope = report.clone();
         stale_expected_review_scope["cases"][2]["expected_values"]["review_scope"] = json!(["BIP340 runtime verifier TCB"]);
         let failed_review_scope =
@@ -5402,6 +5426,7 @@ mod tests {
         let full_review_fields = EXPECTED_EXTERNAL_TCB_REQUIRED_FIELDS;
         let public_manifest_commit = "0123456789abcdef0123456789abcdef01234567";
         let public_release_version = EXPECTED_NOVASEAL_RELEASE_VERSION;
+        let public_hash_type = EXPECTED_NOVASEAL_CELLDEP_HASH_TYPE;
         let report = json!({
             "schema": "novaseal-external-attestation-adapter-v0.1",
             "status": "passed",
@@ -5425,6 +5450,7 @@ mod tests {
                         "expected_artifact_hash": format!("0x{}", "ee".repeat(32)),
                         "expected_release_version": public_release_version,
                         "expected_release_manifest_commit": public_manifest_commit,
+                        "expected_hash_type": public_hash_type,
                         "required_public_fields": full_public_fields,
                         "field_constraints": constraint_object(EXPECTED_PUBLIC_CELLDEP_FIELD_CONSTRAINTS),
                     },
@@ -5455,6 +5481,7 @@ mod tests {
         assert_eq!(json_pointer_str(&valid, "/status"), Some("passed"));
         assert!(json_pointer_bool(&valid, "/cases/public_shared_cell_dep_attestation/field_constraints_exact"));
         assert!(json_pointer_bool(&valid, "/cases/public_shared_cell_dep_attestation/expected_release_version_current"));
+        assert!(json_pointer_bool(&valid, "/cases/public_shared_cell_dep_attestation/expected_hash_type_current"));
         assert!(json_pointer_bool(&valid, "/cases/public_shared_cell_dep_attestation/expected_release_manifest_commit_present"));
         assert!(json_pointer_bool(&valid, "/cases/external_bip340_tcb_review_attestation/field_constraints_exact"));
         assert!(json_pointer_bool(&valid, "/cases/external_bip340_tcb_review_attestation/expected_review_scope_exact"));
@@ -5502,6 +5529,15 @@ mod tests {
         assert!(!json_pointer_bool(
             &failed_expected_version,
             "/cases/public_shared_cell_dep_attestation/expected_release_version_current"
+        ));
+
+        let mut stale_expected_hash_type = report.clone();
+        stale_expected_hash_type["cases"][0]["request"]["expected_hash_type"] = json!("type");
+        let failed_expected_hash_type = validate_external_attestation_adapter_detail(&stale_expected_hash_type);
+        assert_eq!(json_pointer_str(&failed_expected_hash_type, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(
+            &failed_expected_hash_type,
+            "/cases/public_shared_cell_dep_attestation/expected_hash_type_current"
         ));
 
         let mut unexpected_public_field = report;
@@ -5677,6 +5713,7 @@ mod tests {
         assert_eq!(json_pointer_str(&passed, "/status"), Some("passed"));
         assert!(json_pointer_bool(&passed, "/checks/public_dep_type"));
         assert!(json_pointer_bool(&passed, "/checks/public_hash_type"));
+        assert!(json_pointer_bool(&passed, "/checks/public_hash_type_matches_expected"));
         assert!(json_pointer_bool(&passed, "/checks/public_release_version_current"));
         assert_eq!(json_pointer_str(&failed, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&failed, "/checks/public_artifact_hash_matches_current_tcb"));
@@ -5720,6 +5757,18 @@ mod tests {
         assert!(!json_pointer_bool(&failed_dep_type, "/checks/public_dep_type"));
 
         drifted_public_template["runtime_verifier"]["dep_type"] = json!("code");
+        drifted_public_template["runtime_verifier"]["hash_type"] = json!("type");
+        std::fs::write(
+            proofs.join("public_shared_cell_dep_attestation.template.json"),
+            serde_json::to_vec_pretty(&drifted_public_template).unwrap(),
+        )
+        .unwrap();
+        let failed_stale_hash_type =
+            validate_attestation_templates(temp.path(), Some(&artifact_hash), Some("sha256"), Some(&source_tree_hash)).unwrap();
+        assert_eq!(json_pointer_str(&failed_stale_hash_type, "/status"), Some("failed"));
+        assert!(json_pointer_bool(&failed_stale_hash_type, "/checks/public_hash_type"));
+        assert!(!json_pointer_bool(&failed_stale_hash_type, "/checks/public_hash_type_matches_expected"));
+
         drifted_public_template["runtime_verifier"]["hash_type"] = json!("invalid-hash-type");
         std::fs::write(
             proofs.join("public_shared_cell_dep_attestation.template.json"),
@@ -6046,6 +6095,7 @@ mod tests {
         assert!(json_pointer_bool(&public_passed, "/checks/out_point_valid"));
         assert!(json_pointer_bool(&public_passed, "/checks/dep_type"));
         assert!(json_pointer_bool(&public_passed, "/checks/hash_type"));
+        assert!(json_pointer_bool(&public_passed, "/checks/hash_type_matches_expected"));
 
         let mut public_placeholder_attested_at = public_attestation.clone();
         public_placeholder_attested_at["attested_at"] = json!("YYYY-MM-DDTHH:MM:SSZ");
@@ -6172,6 +6222,25 @@ mod tests {
         .unwrap();
         assert_eq!(json_pointer_str(&public_hash_type_failed, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&public_hash_type_failed, "/checks/hash_type"));
+
+        let mut public_stale_hash_type = public_attestation.clone();
+        public_stale_hash_type["runtime_verifier"]["hash_type"] = json!("type");
+        std::fs::write(
+            proofs.join("public_shared_cell_dep_attestation.json"),
+            serde_json::to_vec_pretty(&public_stale_hash_type).unwrap(),
+        )
+        .unwrap();
+        let public_stale_hash_type_failed = validate_public_attestation(
+            temp.path(),
+            PUBLIC_CELLDEP_ATTESTATION,
+            Some(&artifact_hash),
+            Some(tcb_repo_commit),
+            &handoff,
+        )
+        .unwrap();
+        assert_eq!(json_pointer_str(&public_stale_hash_type_failed, "/status"), Some("failed"));
+        assert!(json_pointer_bool(&public_stale_hash_type_failed, "/checks/hash_type"));
+        assert!(!json_pointer_bool(&public_stale_hash_type_failed, "/checks/hash_type_matches_expected"));
 
         let mut public_stale_manifest_commit = public_attestation.clone();
         public_stale_manifest_commit["release"]["manifest_commit"] = json!("fedcba9876543210fedcba9876543210fedcba98");

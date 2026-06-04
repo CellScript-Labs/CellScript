@@ -179,6 +179,8 @@ def attestation_case(
         expected_values["release.version"] = request["expected_release_version"]
     if request.get("expected_release_manifest_commit"):
         expected_values["release.manifest_commit"] = request["expected_release_manifest_commit"]
+    if request.get("expected_hash_type"):
+        expected_values["runtime_verifier.hash_type"] = request["expected_hash_type"]
     if request.get("expected_artifact_hash"):
         expected_values["artifact_hash"] = request["expected_artifact_hash"]
     if request.get("expected_artifact_hash_algorithm"):
