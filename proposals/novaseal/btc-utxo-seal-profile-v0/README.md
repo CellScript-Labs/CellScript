@@ -1,0 +1,49 @@
+# NovaSeal BTC UTXO Seal Profile v0
+
+**Status**: reviewable seal profile package. It is not V1-ready and not
+production ready because live devnet closure evidence, wallet vectors, public
+BTC spend-verification evidence, and external attestations are still missing.
+
+This package implements the planned NovaSeal BTC UTXO single-use seal profile
+as a source-level package with schemas, fixtures, invariant matrix, and security
+boundary documentation.
+
+## Boundary
+
+`close_btc_utxo_seal` binds:
+
+- sealed BTC txid,
+- sealed BTC vout index,
+- sealed BTC amount in satoshis,
+- sealed scriptPubKey hash,
+- spend txid/wtxid/input index,
+- transition commitment hash,
+- owner BIP340 authority.
+
+This package does not prove BTC inclusion, UTXO unspentness, spend validity,
+depth, or finality.
+
+## Evidence
+
+| Area | Status | Classification |
+| --- | --- | --- |
+| Separate BTC UTXO seal profile package | implemented | source-guard-present |
+| Canonical NovaSeal envelope binding | implemented | source-guard-present |
+| Sealed UTXO tuple binding | implemented | source-guard-present |
+| Single-use closure shape | implemented | source-guard-present |
+| Owner authority signature | implemented | source-guard-present |
+| Schemas and fixture labels | implemented | reviewable |
+| Invariant matrix | implemented | reviewable |
+| Live devnet BTC UTXO seal closure | missing | missing-live-devnet-evidence |
+| Public BTC spend-verification evidence | missing | missing-spv-or-indexer-evidence |
+| Wallet signing vectors | missing | missing-wallet-evidence |
+| Public/shared CellDep attestation | missing | external-required |
+| External BIP340 TCB review | missing | external-required |
+
+## Validation Boundary
+
+The V1 readiness matrix may count `seal_profile_btc_utxo_seal` as a package
+implementation only when the certification gate sees this manifest, source
+action, schemas, fixtures, docs, and invariant matrix. The business scenario
+`btc_utxo_seal_closure` must remain missing until live devnet stateful evidence
+and public BTC spend-verification evidence are generated and checked.

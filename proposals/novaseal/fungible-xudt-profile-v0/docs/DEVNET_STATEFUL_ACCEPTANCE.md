@@ -1,0 +1,19 @@
+# NovaSeal Fungible xUDT Profile v0 Devnet Stateful Acceptance
+
+Required V1 evidence is not present yet.
+
+The acceptance target is:
+
+1. Deploy the BIP340 runtime verifier and Fungible xUDT profile action/type
+   code as live CellDeps.
+2. Submit a valid issue transaction and prove the issued xUDT profile Cell and
+   receipt are live.
+3. Submit a valid transfer transaction and prove the old holder Cell is dead
+   and the new holder Cell and receipt are live.
+4. Submit a valid settlement transaction and prove the transferred Cell is dead
+   and the terminal receipt is live.
+5. Dry-run invalid wrong-signer and amount-mutation transactions and prove they
+   do not consume live state.
+
+Until this evidence is generated, `fungible_xudt_value_flow` must remain
+missing in the V1 readiness matrix.

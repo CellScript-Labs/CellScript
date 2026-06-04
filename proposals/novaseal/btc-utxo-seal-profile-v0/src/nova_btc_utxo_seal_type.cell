@@ -1,0 +1,262 @@
+module novaseal::btc_utxo_seal_profile::v0;
+
+// Arthur Zhang, 2026.
+//
+// NovaSeal BTC UTXO Seal Profile v0.
+//
+// This seal profile models a single-use BTC UTXO closure commitment. It binds a
+// CKB-side seal Cell to a declared BTC UTXO and a declared spend transaction
+// input. It does not prove BTC inclusion, spend validity, depth, or finality;
+// those remain explicit V1 gaps until an SPV/indexer-backed verifier is added.
+
+const BTC_UTXO_SEAL_VERSION: u16 = 0
+const U64_MAX: u64 = 18446744073709551615
+
+const OP_CLOSE_UTXO_SEAL: u8 = 0
+const STATUS_ACTIVE: u8 = 1
+const STATUS_CLOSED: u8 = 2
+
+struct SignaturePayload {
+    pubkey: [u8; 32],
+    signature: [u8; 64],
+}
+
+struct NovaSealCanonicalEnvelopeV0 {
+    profile_id: Hash,
+    policy_hash: Hash,
+    action: u8,
+    terminal_path: u8,
+    subject_id: Hash,
+    old_state_commitment: Hash,
+    new_state_commitment: Hash,
+    old_nonce: u64,
+    new_nonce: u64,
+    expiry: u64,
+    authority_hash: Hash,
+    profile_body_hash: Hash,
+    payout_commitment_hash: Hash,
+}
+
+struct BtcUtxoCommitmentV0 {
+    btc_txid: Hash,
+    btc_vout_index: u32,
+    btc_amount_sats: u64,
+    script_pubkey_hash: Hash,
+}
+
+struct BtcUtxoClosureCommitmentV0 {
+    sealed_utxo_commitment_hash: Hash,
+    spend_txid: Hash,
+    spend_wtxid: Hash,
+    spend_input_index: u32,
+    transition_commitment_hash: Hash,
+    payout_commitment_hash: Hash,
+}
+
+struct NovaBtcUtxoSealIntentCoreV0 {
+    action: u8,
+    seal_id: Hash,
+    policy_hash: Hash,
+    owner_authority_hash: Hash,
+    btc_txid: Hash,
+    btc_vout_index: u32,
+    btc_amount_sats: u64,
+    script_pubkey_hash: Hash,
+    spend_txid: Hash,
+    spend_wtxid: Hash,
+    spend_input_index: u32,
+    old_state_hash: Hash,
+    new_state_hash: Hash,
+    transition_commitment_hash: Hash,
+    old_status: u8,
+    new_status: u8,
+    old_nonce: u64,
+    new_nonce: u64,
+    expiry: u64,
+    payout_commitment_hash: Hash,
+}
+
+struct NovaBtcUtxoSealSignedIntentV0 {
+    core: NovaBtcUtxoSealIntentCoreV0,
+    canonical_envelope_hash: Hash,
+    expected_receipt_hash: Hash,
+}
+
+struct NovaBtcUtxoSealStateV0 {
+    version: u16,
+    seal_id: Hash,
+    policy_hash: Hash,
+    owner_authority_hash: Hash,
+    sealed_utxo_commitment_hash: Hash,
+    state_hash: Hash,
+    status: u8,
+    nonce: u64,
+    expiry: u64,
+}
+
+struct NovaBtcUtxoSealReceiptCommitmentV0 {
+    action: u8,
+    seal_id: Hash,
+    policy_hash: Hash,
+    owner_authority_hash: Hash,
+    sealed_utxo_commitment_hash: Hash,
+    closure_commitment_hash: Hash,
+    old_state_hash: Hash,
+    new_state_hash: Hash,
+    old_status: u8,
+    new_status: u8,
+    old_nonce: u64,
+    new_nonce: u64,
+    intent_core_hash: Hash,
+    payout_commitment_hash: Hash,
+}
+
+resource NovaBtcUtxoSealCellV0 has store, create, consume, replace {
+    version: u16,
+    seal_id: Hash,
+    policy_hash: Hash,
+    owner_authority_hash: Hash,
+    sealed_utxo_commitment_hash: Hash,
+    state_hash: Hash,
+    status: u8,
+    latest_receipt_hash: Hash,
+    nonce: u64,
+    expiry: u64,
+}
+
+receipt NovaBtcUtxoSealReceiptV0 has store, create, consume {
+    action: u8,
+    seal_id: Hash,
+    policy_hash: Hash,
+    owner_authority_hash: Hash,
+    sealed_utxo_commitment_hash: Hash,
+    closure_commitment_hash: Hash,
+    old_state_hash: Hash,
+    new_state_hash: Hash,
+    old_status: u8,
+    new_status: u8,
+    old_nonce: u64,
+    new_nonce: u64,
+    intent_core_hash: Hash,
+    signed_intent_hash: Hash,
+    payout_commitment_hash: Hash,
+    latest_receipt_hash: Hash,
+    signer_authority_hash: Hash,
+    expiry: u64,
+}
+
+action close_btc_utxo_seal(old_cell: NovaBtcUtxoSealCellV0, witness intent: NovaBtcUtxoSealSignedIntentV0, witness owner_sig: SignaturePayload) -> closure_receipt: NovaBtcUtxoSealReceiptV0
+where
+    let now = env::current_timepoint()
+    require old_cell.nonce < U64_MAX
+    let sealed_utxo_commitment_hash = hash_blake2b_packed(BtcUtxoCommitmentV0 {
+        btc_txid: intent.core.btc_txid,
+        btc_vout_index: intent.core.btc_vout_index,
+        btc_amount_sats: intent.core.btc_amount_sats,
+        script_pubkey_hash: intent.core.script_pubkey_hash
+    })
+    let closure_commitment_hash = hash_blake2b_packed(BtcUtxoClosureCommitmentV0 {
+        sealed_utxo_commitment_hash: sealed_utxo_commitment_hash,
+        spend_txid: intent.core.spend_txid,
+        spend_wtxid: intent.core.spend_wtxid,
+        spend_input_index: intent.core.spend_input_index,
+        transition_commitment_hash: intent.core.transition_commitment_hash,
+        payout_commitment_hash: intent.core.payout_commitment_hash
+    })
+    let old_state_commitment = hash_blake2b_packed(NovaBtcUtxoSealStateV0 {
+        version: old_cell.version,
+        seal_id: old_cell.seal_id,
+        policy_hash: old_cell.policy_hash,
+        owner_authority_hash: old_cell.owner_authority_hash,
+        sealed_utxo_commitment_hash: old_cell.sealed_utxo_commitment_hash,
+        state_hash: old_cell.state_hash,
+        status: old_cell.status,
+        nonce: old_cell.nonce,
+        expiry: old_cell.expiry
+    })
+    let intent_core_hash = hash_blake2b_packed(intent.core)
+    let signed_intent_hash = hash_blake2b_packed(intent)
+    let receipt_commitment = NovaBtcUtxoSealReceiptCommitmentV0 {
+        action: OP_CLOSE_UTXO_SEAL,
+        seal_id: old_cell.seal_id,
+        policy_hash: old_cell.policy_hash,
+        owner_authority_hash: old_cell.owner_authority_hash,
+        sealed_utxo_commitment_hash: sealed_utxo_commitment_hash,
+        closure_commitment_hash: closure_commitment_hash,
+        old_state_hash: old_cell.state_hash,
+        new_state_hash: intent.core.new_state_hash,
+        old_status: STATUS_ACTIVE,
+        new_status: STATUS_CLOSED,
+        old_nonce: old_cell.nonce,
+        new_nonce: old_cell.nonce + 1,
+        intent_core_hash: intent_core_hash,
+        payout_commitment_hash: intent.core.payout_commitment_hash
+    }
+    let materialized_receipt_hash = hash_blake2b_packed(receipt_commitment)
+    let canonical_envelope_hash = hash_blake2b_packed(NovaSealCanonicalEnvelopeV0 {
+        profile_id: old_cell.seal_id,
+        policy_hash: old_cell.policy_hash,
+        action: OP_CLOSE_UTXO_SEAL,
+        terminal_path: OP_CLOSE_UTXO_SEAL,
+        subject_id: old_cell.seal_id,
+        old_state_commitment: old_state_commitment,
+        new_state_commitment: closure_commitment_hash,
+        old_nonce: old_cell.nonce,
+        new_nonce: old_cell.nonce + 1,
+        expiry: old_cell.expiry,
+        authority_hash: old_cell.owner_authority_hash,
+        profile_body_hash: intent_core_hash,
+        payout_commitment_hash: intent.core.payout_commitment_hash
+    })
+
+    require old_cell.version == BTC_UTXO_SEAL_VERSION
+    require old_cell.status == STATUS_ACTIVE
+    require old_cell.seal_id != Hash::zero()
+    require old_cell.policy_hash != Hash::zero()
+    require old_cell.owner_authority_hash != Hash::zero()
+    require old_cell.sealed_utxo_commitment_hash == sealed_utxo_commitment_hash
+    require intent.core.action == OP_CLOSE_UTXO_SEAL
+    require intent.core.seal_id == old_cell.seal_id
+    require intent.core.policy_hash == old_cell.policy_hash
+    require intent.core.owner_authority_hash == old_cell.owner_authority_hash
+    require intent.core.btc_txid != Hash::zero()
+    require intent.core.script_pubkey_hash != Hash::zero()
+    require intent.core.btc_amount_sats > 0
+    require intent.core.spend_txid != Hash::zero()
+    require intent.core.spend_wtxid != Hash::zero()
+    require intent.core.old_state_hash == old_cell.state_hash
+    require intent.core.new_state_hash != old_cell.state_hash
+    require intent.core.transition_commitment_hash == hash_blake2b(intent.core.new_state_hash)
+    require intent.core.old_status == STATUS_ACTIVE
+    require intent.core.new_status == STATUS_CLOSED
+    require intent.core.old_nonce == old_cell.nonce
+    require intent.core.new_nonce == old_cell.nonce + 1
+    require intent.core.expiry == old_cell.expiry
+    require now <= old_cell.expiry
+    require intent.canonical_envelope_hash == canonical_envelope_hash
+    require intent.expected_receipt_hash == materialized_receipt_hash
+    require owner_sig.pubkey == old_cell.owner_authority_hash
+
+    verifier::btc::bip340::require_signature(signed_intent_hash, owner_sig.pubkey, owner_sig.signature)
+
+    consume old_cell
+    create closure_receipt = NovaBtcUtxoSealReceiptV0 {
+        action: OP_CLOSE_UTXO_SEAL,
+        seal_id: old_cell.seal_id,
+        policy_hash: old_cell.policy_hash,
+        owner_authority_hash: old_cell.owner_authority_hash,
+        sealed_utxo_commitment_hash: sealed_utxo_commitment_hash,
+        closure_commitment_hash: closure_commitment_hash,
+        old_state_hash: old_cell.state_hash,
+        new_state_hash: intent.core.new_state_hash,
+        old_status: STATUS_ACTIVE,
+        new_status: STATUS_CLOSED,
+        old_nonce: old_cell.nonce,
+        new_nonce: old_cell.nonce + 1,
+        intent_core_hash: intent_core_hash,
+        signed_intent_hash: signed_intent_hash,
+        payout_commitment_hash: intent.core.payout_commitment_hash,
+        latest_receipt_hash: materialized_receipt_hash,
+        signer_authority_hash: old_cell.owner_authority_hash,
+        expiry: old_cell.expiry
+    }

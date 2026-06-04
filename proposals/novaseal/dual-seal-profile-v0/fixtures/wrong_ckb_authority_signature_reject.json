@@ -1,0 +1,8 @@
+{
+  "schema": "novaseal-dual-seal-fixture-v0.1",
+  "fixture": "wrong_ckb_authority_signature_reject",
+  "action": "finalize_dual_seal",
+  "expected": "rejected",
+  "coverage": "source-guard-present",
+  "description": "Finalisation must reject a CKB authority signature payload whose pubkey is not the CKB authority hash."
+}

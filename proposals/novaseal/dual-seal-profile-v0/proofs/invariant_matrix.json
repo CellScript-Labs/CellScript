@@ -1,0 +1,67 @@
+{
+  "schema": "novaseal-dual-seal-invariant-matrix-v0.1",
+  "package": "novaseal-dual-seal-profile-v0 0.0.1",
+  "classification": "hand-authored-review-target",
+  "invariants": [
+    {
+      "id": "profile_separation",
+      "claim": "Dual-seal semantics live outside NovaSeal core.",
+      "location": "separate package path proposals/novaseal/dual-seal-profile-v0",
+      "coverage": "source-guard-present"
+    },
+    {
+      "id": "canonical_envelope_binding",
+      "claim": "Every signed dual-seal intent commits to NovaSealCanonicalEnvelopeV0.",
+      "location": "NovaDualSealSignedIntentV0.canonical_envelope_hash checks",
+      "coverage": "source-guard-present"
+    },
+    {
+      "id": "btc_closure_binding",
+      "claim": "Finalisation binds the sealed UTXO commitment and BTC closure commitment hash.",
+      "location": "DualSealFinalityCommitmentV0",
+      "coverage": "source-guard-present"
+    },
+    {
+      "id": "ckb_maturity_gate",
+      "claim": "Finalisation is rejected before the CKB maturity timepoint.",
+      "location": "now >= old_cell.maturity_timepoint guard",
+      "coverage": "source-guard-present"
+    },
+    {
+      "id": "dual_authority",
+      "claim": "Finalisation requires both BTC owner and CKB authority signatures.",
+      "location": "btc_owner_sig and ckb_sig guards plus BIP340 verifier calls",
+      "coverage": "source-guard-present"
+    },
+    {
+      "id": "single_use_finalization",
+      "claim": "Finalisation consumes the active dual-seal Cell and materialises a terminal receipt only.",
+      "location": "consume old_cell and create final_receipt statements",
+      "coverage": "source-guard-present"
+    },
+    {
+      "id": "nonce_monotonicity",
+      "claim": "Finalisation increments nonce exactly once and rejects u64 overflow.",
+      "location": "old_cell.nonce < U64_MAX and new_nonce guards",
+      "coverage": "source-guard-present"
+    },
+    {
+      "id": "live_devnet_lifecycle",
+      "claim": "A live devnet dual-seal finality path must exist before V1 readiness.",
+      "location": "target/novaseal-devnet-stateful-acceptance.json",
+      "coverage": "missing-live-devnet-evidence"
+    },
+    {
+      "id": "btc_public_verification",
+      "claim": "Public BTC closure verification remains external to this package.",
+      "location": "docs/SECURITY.md",
+      "coverage": "missing-spv-or-indexer-evidence"
+    },
+    {
+      "id": "ckb_finality_verification",
+      "claim": "CKB maturity evidence remains external to this package until live stateful acceptance exists.",
+      "location": "docs/DEVNET_STATEFUL_ACCEPTANCE.md",
+      "coverage": "missing-live-maturity-evidence"
+    }
+  ]
+}

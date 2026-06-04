@@ -1,0 +1,61 @@
+{
+  "schema": "novaseal-btc-utxo-seal-invariant-matrix-v0.1",
+  "package": "novaseal-btc-utxo-seal-profile-v0 0.0.1",
+  "classification": "hand-authored-review-target",
+  "invariants": [
+    {
+      "id": "profile_separation",
+      "claim": "BTC UTXO seal semantics live outside NovaSeal core.",
+      "location": "separate package path proposals/novaseal/btc-utxo-seal-profile-v0",
+      "coverage": "source-guard-present"
+    },
+    {
+      "id": "canonical_envelope_binding",
+      "claim": "Every signed BTC UTXO seal intent commits to NovaSealCanonicalEnvelopeV0.",
+      "location": "NovaBtcUtxoSealSignedIntentV0.canonical_envelope_hash checks",
+      "coverage": "source-guard-present"
+    },
+    {
+      "id": "sealed_utxo_tuple_binding",
+      "claim": "The active seal binds BTC txid, vout, satoshi amount, and scriptPubKey hash.",
+      "location": "BtcUtxoCommitmentV0 and old_cell.sealed_utxo_commitment_hash guard",
+      "coverage": "source-guard-present"
+    },
+    {
+      "id": "single_use_closure",
+      "claim": "Closure consumes the active seal Cell and materialises a terminal receipt only.",
+      "location": "consume old_cell and create receipt statements",
+      "coverage": "source-guard-present"
+    },
+    {
+      "id": "spend_tuple_binding",
+      "claim": "Closure binds spend txid, wtxid, input index, transition commitment, and payout commitment.",
+      "location": "BtcUtxoClosureCommitmentV0",
+      "coverage": "source-guard-present"
+    },
+    {
+      "id": "owner_authority",
+      "claim": "The seal owner authority signs the closure intent.",
+      "location": "owner_sig pubkey guard and BIP340 verifier call",
+      "coverage": "source-guard-present"
+    },
+    {
+      "id": "nonce_monotonicity",
+      "claim": "Closure increments nonce exactly once and rejects u64 overflow.",
+      "location": "old_cell.nonce < U64_MAX and new_nonce guards",
+      "coverage": "source-guard-present"
+    },
+    {
+      "id": "live_devnet_lifecycle",
+      "claim": "A live devnet BTC UTXO seal closure must exist before V1 readiness.",
+      "location": "target/novaseal-devnet-stateful-acceptance.json",
+      "coverage": "missing-live-devnet-evidence"
+    },
+    {
+      "id": "btc_public_verification",
+      "claim": "Public BTC UTXO spend verification remains external to this package.",
+      "location": "docs/SECURITY.md",
+      "coverage": "missing-spv-or-indexer-evidence"
+    }
+  ]
+}

@@ -1,0 +1,55 @@
+{
+  "schema": "novaseal-fungible-xudt-invariant-matrix-v0.1",
+  "package": "novaseal-fungible-xudt-profile-v0 0.0.1",
+  "classification": "hand-authored-review-target",
+  "invariants": [
+    {
+      "id": "profile_separation",
+      "claim": "Fungible/xUDT semantics live outside NovaSeal core.",
+      "location": "separate package path proposals/novaseal/fungible-xudt-profile-v0",
+      "coverage": "source-guard-present"
+    },
+    {
+      "id": "canonical_envelope_binding",
+      "claim": "Every signed xUDT profile intent commits to NovaSealCanonicalEnvelopeV0.",
+      "location": "NovaFungibleXudtSignedIntentV0.canonical_envelope_hash checks",
+      "coverage": "source-guard-present"
+    },
+    {
+      "id": "issuer_only_issue",
+      "claim": "Only the issuer authority may create a new xUDT balance object.",
+      "location": "issue_xudt issuer_sig.pubkey guard and BIP340 verifier call",
+      "coverage": "source-guard-present"
+    },
+    {
+      "id": "holder_only_transfer",
+      "claim": "Only the current holder authority may transfer the balance object.",
+      "location": "transfer_xudt holder_sig.pubkey guard and BIP340 verifier call",
+      "coverage": "source-guard-present"
+    },
+    {
+      "id": "amount_conservation",
+      "claim": "Transfer preserves the whole balance amount and xUDT type hash.",
+      "location": "transfer_xudt amount and xudt_type_hash guards",
+      "coverage": "source-guard-present"
+    },
+    {
+      "id": "settlement_terminal",
+      "claim": "Settlement consumes an active balance object and emits a terminal receipt with new_amount = 0.",
+      "location": "settle_xudt status and amount guards",
+      "coverage": "source-guard-present"
+    },
+    {
+      "id": "nonce_monotonicity",
+      "claim": "Transfer and settlement increment nonce exactly once and reject u64 overflow.",
+      "location": "old_cell.nonce < U64_MAX and new_nonce guards",
+      "coverage": "source-guard-present"
+    },
+    {
+      "id": "live_devnet_lifecycle",
+      "claim": "Issue -> transfer -> settle must execute on live devnet before V1 readiness.",
+      "location": "target/novaseal-devnet-stateful-acceptance.json",
+      "coverage": "missing-live-devnet-evidence"
+    }
+  ]
+}

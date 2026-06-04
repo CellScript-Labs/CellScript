@@ -1,0 +1,55 @@
+{
+  "schema": "novaseal-fiber-candidate-invariant-matrix-v0.1",
+  "package": "novaseal-fiber-candidate-profile-v0 0.0.1",
+  "classification": "hand-authored-review-target",
+  "invariants": [
+    {
+      "id": "profile_separation",
+      "claim": "Fiber candidate semantics live outside NovaSeal core.",
+      "location": "separate package path proposals/novaseal/fiber-candidate-profile-v0",
+      "coverage": "source-guard-present"
+    },
+    {
+      "id": "canonical_envelope_binding",
+      "claim": "Every signed Fiber candidate intent commits to NovaSealCanonicalEnvelopeV0.",
+      "location": "NovaFiberCandidateSignedIntentV0.canonical_envelope_hash checks",
+      "coverage": "source-guard-present"
+    },
+    {
+      "id": "candidate_settlement_binding",
+      "claim": "Settlement binds channel, route, payment, old balance, new balance, amount, and payout commitments.",
+      "location": "FiberCandidateSettlementCommitmentV0",
+      "coverage": "source-guard-present"
+    },
+    {
+      "id": "operator_authority",
+      "claim": "The operator authority signs the settlement intent.",
+      "location": "operator_sig pubkey guard and BIP340 verifier call",
+      "coverage": "source-guard-present"
+    },
+    {
+      "id": "balance_commitment_progress",
+      "claim": "Settlement rejects a no-op balance commitment replay.",
+      "location": "new_balance_commitment_hash != old_cell.balance_commitment_hash guard",
+      "coverage": "source-guard-present"
+    },
+    {
+      "id": "nonce_monotonicity",
+      "claim": "Settlement increments nonce exactly once and rejects u64 overflow.",
+      "location": "old_cell.nonce < U64_MAX and new_nonce guards",
+      "coverage": "source-guard-present"
+    },
+    {
+      "id": "live_devnet_lifecycle",
+      "claim": "A live devnet Fiber candidate path must exist before V1 readiness.",
+      "location": "target/novaseal-devnet-stateful-acceptance.json",
+      "coverage": "missing-live-devnet-evidence"
+    },
+    {
+      "id": "fiber_execution",
+      "claim": "Actual Fiber network execution remains external to this package.",
+      "location": "docs/SECURITY.md",
+      "coverage": "missing-live-fiber-evidence"
+    }
+  ]
+}

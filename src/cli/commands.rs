@@ -2813,6 +2813,7 @@ fn novaseal_certification_summary(
     })?;
     let implementation_hash = ckb_blake2b_file_hash(implementation_path)?;
     let profile_certification = plugin_report.get("profile_certification").unwrap_or(&serde_json::Value::Null);
+    let v1_readiness = plugin_report.get("v1_readiness").unwrap_or(&serde_json::Value::Null);
 
     let mut checks = vec![
         ("plugin_report_schema", json_pointer_str(plugin_report, "/schema") == Some(NOVASEAL_PLUGIN_REPORT_SCHEMA)),
@@ -2826,6 +2827,9 @@ fn novaseal_certification_summary(
         ("public_ecosystem_gate_passed", novaseal_gate_status(plugin_report, NOVASEAL_PROFILE_CERTIFICATION_GATE) == Some("passed")),
         ("local_production_prep_ready", json_pointer_bool(plugin_report, "/local_production_prep_ready")),
     ];
+    if !v1_readiness.is_null() {
+        checks.push(("v1_readiness_local_ready", json_pointer_bool(v1_readiness, "/local_v1_ready")));
+    }
 
     if require_production {
         checks.push(("production_ready", json_pointer_bool(plugin_report, "/production_ready")));
@@ -2845,6 +2849,13 @@ fn novaseal_certification_summary(
     let certification_level = json_pointer_str(profile_certification, "/certification_level").unwrap_or("unknown");
     let failure_reason = if passed {
         serde_json::Value::Null
+    } else if !v1_readiness.is_null() && !json_pointer_bool(v1_readiness, "/local_v1_ready") {
+        serde_json::json!({
+            "message": "NovaSeal V1 readiness requires remaining planned profiles and business scenarios",
+            "v1_status": json_pointer_str(v1_readiness, "/status"),
+            "missing": v1_readiness.pointer("/planned_profile_matrix/missing").cloned().unwrap_or(serde_json::Value::Null),
+            "failed_checks": failed_checks,
+        })
     } else if require_production && json_pointer_bool(plugin_report, "/local_production_prep_ready") {
         serde_json::json!({
             "message": "NovaSeal production certification requires remaining external attestations",
@@ -2878,6 +2889,8 @@ fn novaseal_certification_summary(
             "status": json_pointer_str(plugin_report, "/status"),
             "production_ready": json_pointer_bool(plugin_report, "/production_ready"),
             "local_production_prep_ready": json_pointer_bool(plugin_report, "/local_production_prep_ready"),
+            "v1_status": json_pointer_str(v1_readiness, "/status"),
+            "local_v1_ready": json_pointer_bool(v1_readiness, "/local_v1_ready"),
         },
         "profile": NOVASEAL_AGREEMENT_PROFILE,
         "conforms_to": NOVASEAL_CANONICAL_SCHEMA,
@@ -6172,6 +6185,33 @@ mod tests {
         assert_eq!(summary["plugin"]["kind"], "compiler-builtin-rust");
         assert_eq!(summary["plugin_report"]["schema"], NOVASEAL_PLUGIN_REPORT_SCHEMA);
         assert_eq!(summary["checks"]["local_production_prep_ready"], true);
+    }
+
+    #[test]
+    fn novaseal_certification_summary_requires_v1_local_ready_when_present() {
+        let temp = tempfile::tempdir().unwrap();
+        let report_path = temp.path().join("novaseal-production-gates.json");
+        let implementation_path = temp.path().join("novaseal_certification.rs");
+        let mut report = novaseal_test_plugin_report(false, false);
+        report["v1_readiness"] = serde_json::json!({
+            "status": "planned_profiles_incomplete",
+            "local_v1_ready": false,
+            "planned_profile_matrix": {
+                "missing": ["fungible_xudt_value_flow"]
+            }
+        });
+        std::fs::write(&report_path, serde_json::to_vec_pretty(&report).unwrap()).unwrap();
+        std::fs::write(&implementation_path, b"pub(crate) fn build_report() {}\n").unwrap();
+
+        let summary = novaseal_certification_summary(&report, temp.path(), &report_path, &implementation_path, false, false)
+            .expect("certification summary");
+
+        assert_eq!(summary["status"], "failed");
+        assert_eq!(summary["checks"]["v1_readiness_local_ready"], false);
+        assert_eq!(
+            summary["failure_reason"]["message"],
+            "NovaSeal V1 readiness requires remaining planned profiles and business scenarios"
+        );
     }
 
     #[test]

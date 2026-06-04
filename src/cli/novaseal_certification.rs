@@ -7,10 +7,22 @@ use std::path::Path;
 pub(crate) const IMPLEMENTATION_ID: &str = "cellscript::cli::novaseal_certification";
 
 const AGREEMENT_ROOT: &str = "proposals/novaseal/agreement-profile-v0";
+const FUNGIBLE_XUDT_ROOT: &str = "proposals/novaseal/fungible-xudt-profile-v0";
+const RWA_RECEIPT_ROOT: &str = "proposals/novaseal/rwa-receipt-profile-v0";
+const BTC_TX_COMMITMENT_ROOT: &str = "proposals/novaseal/btc-transaction-commitment-profile-v0";
+const BTC_UTXO_SEAL_ROOT: &str = "proposals/novaseal/btc-utxo-seal-profile-v0";
+const DUAL_SEAL_ROOT: &str = "proposals/novaseal/dual-seal-profile-v0";
+const FIBER_CANDIDATE_ROOT: &str = "proposals/novaseal/fiber-candidate-profile-v0";
 const CORE_ROOT: &str = "proposals/novaseal/v0-mvp-skeleton";
 const VERIFIER_ROOT: &str = "proposals/novaseal/v0-mvp-skeleton/verifier/novaseal_btc_verifier";
 const CORE_MANIFEST: &str = "proposals/novaseal/v0-mvp-skeleton/Cell.toml";
 const AGREEMENT_MANIFEST: &str = "proposals/novaseal/agreement-profile-v0/Cell.toml";
+const FUNGIBLE_XUDT_MANIFEST: &str = "proposals/novaseal/fungible-xudt-profile-v0/Cell.toml";
+const RWA_RECEIPT_MANIFEST: &str = "proposals/novaseal/rwa-receipt-profile-v0/Cell.toml";
+const BTC_TX_COMMITMENT_MANIFEST: &str = "proposals/novaseal/btc-transaction-commitment-profile-v0/Cell.toml";
+const BTC_UTXO_SEAL_MANIFEST: &str = "proposals/novaseal/btc-utxo-seal-profile-v0/Cell.toml";
+const DUAL_SEAL_MANIFEST: &str = "proposals/novaseal/dual-seal-profile-v0/Cell.toml";
+const FIBER_CANDIDATE_MANIFEST: &str = "proposals/novaseal/fiber-candidate-profile-v0/Cell.toml";
 const CANONICAL_SCHEMA: &str = "proposals/novaseal/v0-mvp-skeleton/schemas/nova_seal_canonical_envelope_v0.schema";
 const CORE_LIVE: &str = "target/novaseal-devnet-stateful-live.json";
 const AGREEMENT_LIVE: &str = "target/novaseal-agreement-devnet-stateful-live.json";
@@ -27,6 +39,12 @@ const EXTERNAL_TCB_ATTESTATION_TEMPLATE: &str =
 const EXPECTED_NOVASEAL_CANONICAL_SCHEMA: &str = "NovaSealCanonicalV0";
 const EXPECTED_NOVASEAL_CANONICAL_ENVELOPE: &str = "NovaSealCanonicalEnvelopeV0";
 const EXPECTED_AGREEMENT_PROFILE: &str = "agreement-profile-v0";
+const EXPECTED_FUNGIBLE_XUDT_PROFILE: &str = "fungible-xudt-profile-v0";
+const EXPECTED_RWA_RECEIPT_PROFILE: &str = "rwa-receipt-profile-v0";
+const EXPECTED_BTC_TX_COMMITMENT_PROFILE: &str = "btc-transaction-commitment-profile-v0";
+const EXPECTED_BTC_UTXO_SEAL_PROFILE: &str = "btc-utxo-seal-profile-v0";
+const EXPECTED_DUAL_SEAL_PROFILE: &str = "dual-seal-profile-v0";
+const EXPECTED_FIBER_CANDIDATE_PROFILE: &str = "fiber-candidate-profile-v0";
 const EXPECTED_AGREEMENT_CONFORMANCE_GATE: &str = "cellc certify --plugin novaseal-profile-v0";
 const EXPECTED_PROFILE_CERTIFICATION_GATE: &str = "cellc certify --plugin novaseal-profile-v0";
 const EXPECTED_CERTIFICATION_PLUGIN: &str = "novaseal-profile-v0";
@@ -65,6 +83,27 @@ const EXPECTED_AGREEMENT_SCHEMA_FILES: &[&str] = &[
     "nova_agreement_terms_v0.schema",
     "nova_terminal_path_v0.schema",
 ];
+
+const EXPECTED_FUNGIBLE_XUDT_SCHEMA_FILES: &[&str] =
+    &["nova_fungible_xudt_cell_v0.schema", "nova_fungible_xudt_intent_v0.schema", "nova_fungible_xudt_receipt_v0.schema"];
+
+const EXPECTED_RWA_RECEIPT_SCHEMA_FILES: &[&str] =
+    &["nova_rwa_receipt_cell_v0.schema", "nova_rwa_receipt_event_v0.schema", "nova_rwa_receipt_intent_v0.schema"];
+
+const EXPECTED_BTC_TX_COMMITMENT_SCHEMA_FILES: &[&str] = &[
+    "nova_btc_transaction_commitment_cell_v0.schema",
+    "nova_btc_transaction_commitment_intent_v0.schema",
+    "nova_btc_transaction_commitment_receipt_v0.schema",
+];
+
+const EXPECTED_BTC_UTXO_SEAL_SCHEMA_FILES: &[&str] =
+    &["nova_btc_utxo_seal_cell_v0.schema", "nova_btc_utxo_seal_intent_v0.schema", "nova_btc_utxo_seal_receipt_v0.schema"];
+
+const EXPECTED_DUAL_SEAL_SCHEMA_FILES: &[&str] =
+    &["nova_dual_seal_cell_v0.schema", "nova_dual_seal_intent_v0.schema", "nova_dual_seal_receipt_v0.schema"];
+
+const EXPECTED_FIBER_CANDIDATE_SCHEMA_FILES: &[&str] =
+    &["nova_fiber_candidate_cell_v0.schema", "nova_fiber_candidate_intent_v0.schema", "nova_fiber_candidate_receipt_v0.schema"];
 
 const EXPECTED_CORE_FIXTURES: &[&str] = &[
     "keyauth_transfer_valid.json",
@@ -106,6 +145,60 @@ const EXPECTED_AGREEMENT_FIXTURES: &[&str] = &[
     "nonce_max_minus_1_increment_accept.json",
 ];
 
+const EXPECTED_FUNGIBLE_XUDT_FIXTURES: &[&str] = &[
+    "issue_valid.json",
+    "transfer_valid.json",
+    "settle_valid.json",
+    "transfer_wrong_holder_signature_reject.json",
+    "transfer_amount_mismatch_reject.json",
+    "settle_wrong_holder_signature_reject.json",
+];
+
+const EXPECTED_FUNGIBLE_XUDT_DOCS: &[&str] = &["AUDIT_STATUS.md", "DEVNET_STATEFUL_ACCEPTANCE.md", "SECURITY.md"];
+
+const EXPECTED_RWA_RECEIPT_FIXTURES: &[&str] = &[
+    "materialize_valid.json",
+    "claim_valid.json",
+    "settle_valid.json",
+    "wrong_holder_claim_reject.json",
+    "wrong_issuer_settlement_reject.json",
+    "amount_mutation_reject.json",
+];
+
+const EXPECTED_RWA_RECEIPT_DOCS: &[&str] = &["AUDIT_STATUS.md", "DEVNET_STATEFUL_ACCEPTANCE.md", "SECURITY.md"];
+
+const EXPECTED_BTC_TX_COMMITMENT_FIXTURES: &[&str] = &[
+    "commit_transaction_valid.json",
+    "wrong_committer_signature_reject.json",
+    "zero_btc_txid_reject.json",
+    "transition_hash_mismatch_reject.json",
+];
+
+const EXPECTED_BTC_TX_COMMITMENT_DOCS: &[&str] = &["AUDIT_STATUS.md", "DEVNET_STATEFUL_ACCEPTANCE.md", "SECURITY.md"];
+
+const EXPECTED_BTC_UTXO_SEAL_FIXTURES: &[&str] = &[
+    "close_utxo_seal_valid.json",
+    "wrong_owner_signature_reject.json",
+    "utxo_commitment_mismatch_reject.json",
+    "zero_spend_txid_reject.json",
+];
+
+const EXPECTED_BTC_UTXO_SEAL_DOCS: &[&str] = &["AUDIT_STATUS.md", "DEVNET_STATEFUL_ACCEPTANCE.md", "SECURITY.md"];
+
+const EXPECTED_DUAL_SEAL_FIXTURES: &[&str] = &[
+    "finalize_dual_seal_valid.json",
+    "early_maturity_reject.json",
+    "wrong_btc_owner_signature_reject.json",
+    "wrong_ckb_authority_signature_reject.json",
+];
+
+const EXPECTED_DUAL_SEAL_DOCS: &[&str] = &["AUDIT_STATUS.md", "DEVNET_STATEFUL_ACCEPTANCE.md", "SECURITY.md"];
+
+const EXPECTED_FIBER_CANDIDATE_FIXTURES: &[&str] =
+    &["settle_fiber_candidate_valid.json", "wrong_operator_signature_reject.json", "balance_commitment_replay_reject.json"];
+
+const EXPECTED_FIBER_CANDIDATE_DOCS: &[&str] = &["AUDIT_STATUS.md", "DEVNET_STATEFUL_ACCEPTANCE.md", "SECURITY.md"];
+
 const EXPECTED_CERTIFICATION_INVARIANTS: &[&str] = &[
     "profile_separation",
     "ckb_native_only",
@@ -125,6 +218,77 @@ const EXPECTED_CERTIFICATION_INVARIANTS: &[&str] = &[
     "u64-overflow-prevention",
     "wallet_signing_vectors",
     "live_devnet_lifecycle",
+];
+
+const EXPECTED_FUNGIBLE_XUDT_INVARIANTS: &[&str] = &[
+    "profile_separation",
+    "canonical_envelope_binding",
+    "issuer_only_issue",
+    "holder_only_transfer",
+    "amount_conservation",
+    "settlement_terminal",
+    "nonce_monotonicity",
+    "live_devnet_lifecycle",
+];
+
+const EXPECTED_RWA_RECEIPT_INVARIANTS: &[&str] = &[
+    "profile_separation",
+    "canonical_envelope_binding",
+    "issuer_only_materialization",
+    "holder_only_claim",
+    "dual_authority_settlement",
+    "amount_conservation",
+    "immutable_event_audit_trail",
+    "nonce_monotonicity",
+    "live_devnet_lifecycle",
+];
+
+const EXPECTED_BTC_TX_COMMITMENT_INVARIANTS: &[&str] = &[
+    "profile_separation",
+    "canonical_envelope_binding",
+    "btc_public_tuple_binding",
+    "non_zero_btc_transaction",
+    "transition_commitment_binding",
+    "committer_authority",
+    "nonce_monotonicity",
+    "live_devnet_lifecycle",
+    "btc_public_verification",
+];
+
+const EXPECTED_BTC_UTXO_SEAL_INVARIANTS: &[&str] = &[
+    "profile_separation",
+    "canonical_envelope_binding",
+    "sealed_utxo_tuple_binding",
+    "single_use_closure",
+    "spend_tuple_binding",
+    "owner_authority",
+    "nonce_monotonicity",
+    "live_devnet_lifecycle",
+    "btc_public_verification",
+];
+
+const EXPECTED_DUAL_SEAL_INVARIANTS: &[&str] = &[
+    "profile_separation",
+    "canonical_envelope_binding",
+    "btc_closure_binding",
+    "ckb_maturity_gate",
+    "dual_authority",
+    "single_use_finalization",
+    "nonce_monotonicity",
+    "live_devnet_lifecycle",
+    "btc_public_verification",
+    "ckb_finality_verification",
+];
+
+const EXPECTED_FIBER_CANDIDATE_INVARIANTS: &[&str] = &[
+    "profile_separation",
+    "canonical_envelope_binding",
+    "candidate_settlement_binding",
+    "operator_authority",
+    "balance_commitment_progress",
+    "nonce_monotonicity",
+    "live_devnet_lifecycle",
+    "fiber_execution",
 ];
 
 const EXPECTED_LIVE_NEGATIVE_KEYS: &[&str] = &[
@@ -158,6 +322,116 @@ const REQUIRED_AGREEMENT_CORE_PATTERNS: &[(&str, &str)] = &[
     ("checked_payout_capacity_sum", "repayment_amount <= U64_MAX - NATIVE_CKB_PAYOUT_OCCUPIED_CAPACITY"),
     ("expiry_rule", "expiry_timepoint"),
     ("payout_commitment", "payout_commitment_hash"),
+];
+
+const REQUIRED_FUNGIBLE_XUDT_SOURCE_PATTERNS: &[(&str, &str)] = &[
+    ("canonical_envelope", "struct NovaSealCanonicalEnvelopeV0"),
+    ("signed_typed_intent", "struct NovaFungibleXudtSignedIntentV0"),
+    ("state_commitment", "NovaFungibleXudtStateCommitmentV0"),
+    ("receipt_commitment", "NovaFungibleXudtReceiptCommitmentV0"),
+    ("materialized_receipt", "NovaFungibleXudtReceiptV0"),
+    ("issue_action", "action issue_xudt"),
+    ("transfer_action", "action transfer_xudt"),
+    ("settle_action", "action settle_xudt"),
+    ("canonical_runtime_check", "intent.canonical_envelope_hash == canonical_envelope_hash"),
+    ("expected_receipt_hash", "intent.expected_receipt_hash == materialized_receipt_hash"),
+    ("authority_signature", "verifier::btc::bip340::require_signature"),
+    ("checked_u64_max", "const U64_MAX: u64 = 18446744073709551615"),
+    ("checked_nonce_increment", "old_cell.nonce < U64_MAX"),
+    ("amount_conservation", "intent.core.new_amount == old_cell.amount"),
+    ("terminal_settlement", "intent.core.new_amount == 0"),
+];
+
+const REQUIRED_RWA_RECEIPT_SOURCE_PATTERNS: &[(&str, &str)] = &[
+    ("canonical_envelope", "struct NovaSealCanonicalEnvelopeV0"),
+    ("signed_typed_intent", "struct NovaRwaReceiptSignedIntentV0"),
+    ("state_commitment", "NovaRwaReceiptStateCommitmentV0"),
+    ("event_commitment", "NovaRwaReceiptEventCommitmentV0"),
+    ("materialized_event", "NovaRwaReceiptEventV0"),
+    ("materialize_action", "action materialize_rwa_receipt"),
+    ("claim_action", "action claim_rwa_receipt"),
+    ("settle_action", "action settle_rwa_receipt"),
+    ("canonical_runtime_check", "intent.canonical_envelope_hash == canonical_envelope_hash"),
+    ("expected_receipt_hash", "intent.expected_receipt_hash == materialized_receipt_hash"),
+    ("authority_signature", "verifier::btc::bip340::require_signature"),
+    ("checked_u64_max", "const U64_MAX: u64 = 18446744073709551615"),
+    ("checked_nonce_increment", "old_cell.nonce < U64_MAX"),
+    ("amount_conservation", "intent.core.settlement_amount == old_cell.amount"),
+    ("dual_authority_settlement", "issuer_sig.pubkey == old_cell.issuer_authority_hash"),
+];
+
+const REQUIRED_BTC_TX_COMMITMENT_SOURCE_PATTERNS: &[(&str, &str)] = &[
+    ("canonical_envelope", "struct NovaSealCanonicalEnvelopeV0"),
+    ("btc_public_tuple", "struct BtcTransactionPublicCommitmentV0"),
+    ("signed_typed_intent", "struct NovaBtcTransactionCommitmentSignedIntentV0"),
+    ("state_commitment", "NovaBtcTransactionCommitmentStateV0"),
+    ("receipt_commitment", "NovaBtcTransactionCommitmentReceiptCommitmentV0"),
+    ("materialized_receipt", "NovaBtcTransactionCommitmentReceiptV0"),
+    ("commit_action", "action commit_btc_transaction_transition"),
+    ("canonical_runtime_check", "intent.canonical_envelope_hash == canonical_envelope_hash"),
+    ("expected_receipt_hash", "intent.expected_receipt_hash == materialized_receipt_hash"),
+    ("authority_signature", "verifier::btc::bip340::require_signature"),
+    ("checked_u64_max", "const U64_MAX: u64 = 18446744073709551615"),
+    ("checked_nonce_increment", "old_cell.nonce < U64_MAX"),
+    ("non_zero_btc_txid", "intent.core.btc_txid != Hash::zero()"),
+    ("non_zero_btc_wtxid", "intent.core.btc_wtxid != Hash::zero()"),
+    ("transition_commitment_binding", "intent.core.transition_commitment_hash == hash_blake2b(intent.core.new_state_hash)"),
+];
+
+const REQUIRED_BTC_UTXO_SEAL_SOURCE_PATTERNS: &[(&str, &str)] = &[
+    ("canonical_envelope", "struct NovaSealCanonicalEnvelopeV0"),
+    ("sealed_utxo_tuple", "struct BtcUtxoCommitmentV0"),
+    ("closure_tuple", "struct BtcUtxoClosureCommitmentV0"),
+    ("signed_typed_intent", "struct NovaBtcUtxoSealSignedIntentV0"),
+    ("state_commitment", "NovaBtcUtxoSealStateV0"),
+    ("receipt_commitment", "NovaBtcUtxoSealReceiptCommitmentV0"),
+    ("materialized_receipt", "NovaBtcUtxoSealReceiptV0"),
+    ("close_action", "action close_btc_utxo_seal"),
+    ("canonical_runtime_check", "intent.canonical_envelope_hash == canonical_envelope_hash"),
+    ("expected_receipt_hash", "intent.expected_receipt_hash == materialized_receipt_hash"),
+    ("authority_signature", "verifier::btc::bip340::require_signature"),
+    ("checked_u64_max", "const U64_MAX: u64 = 18446744073709551615"),
+    ("checked_nonce_increment", "old_cell.nonce < U64_MAX"),
+    ("utxo_commitment_binding", "old_cell.sealed_utxo_commitment_hash == sealed_utxo_commitment_hash"),
+    ("single_use_consume", "consume old_cell"),
+    ("non_zero_spend_txid", "intent.core.spend_txid != Hash::zero()"),
+    ("non_zero_spend_wtxid", "intent.core.spend_wtxid != Hash::zero()"),
+];
+
+const REQUIRED_DUAL_SEAL_SOURCE_PATTERNS: &[(&str, &str)] = &[
+    ("canonical_envelope", "struct NovaSealCanonicalEnvelopeV0"),
+    ("finality_commitment", "struct DualSealFinalityCommitmentV0"),
+    ("signed_typed_intent", "struct NovaDualSealSignedIntentV0"),
+    ("state_commitment", "NovaDualSealStateV0"),
+    ("receipt_commitment", "NovaDualSealReceiptCommitmentV0"),
+    ("materialized_receipt", "NovaDualSealReceiptV0"),
+    ("finalize_action", "action finalize_dual_seal"),
+    ("canonical_runtime_check", "intent.canonical_envelope_hash == canonical_envelope_hash"),
+    ("expected_receipt_hash", "intent.expected_receipt_hash == materialized_receipt_hash"),
+    ("authority_signature", "verifier::btc::bip340::require_signature"),
+    ("checked_u64_max", "const U64_MAX: u64 = 18446744073709551615"),
+    ("checked_nonce_increment", "old_cell.nonce < U64_MAX"),
+    ("ckb_maturity_gate", "now >= old_cell.maturity_timepoint"),
+    ("btc_owner_authority", "btc_owner_sig.pubkey == old_cell.btc_owner_authority_hash"),
+    ("ckb_authority", "ckb_sig.pubkey == old_cell.ckb_authority_hash"),
+    ("single_use_consume", "consume old_cell"),
+];
+
+const REQUIRED_FIBER_CANDIDATE_SOURCE_PATTERNS: &[(&str, &str)] = &[
+    ("canonical_envelope", "struct NovaSealCanonicalEnvelopeV0"),
+    ("settlement_commitment", "struct FiberCandidateSettlementCommitmentV0"),
+    ("signed_typed_intent", "struct NovaFiberCandidateSignedIntentV0"),
+    ("state_commitment", "NovaFiberCandidateStateV0"),
+    ("receipt_commitment", "NovaFiberCandidateReceiptCommitmentV0"),
+    ("materialized_receipt", "NovaFiberCandidateReceiptV0"),
+    ("settle_action", "action settle_fiber_candidate"),
+    ("canonical_runtime_check", "intent.canonical_envelope_hash == canonical_envelope_hash"),
+    ("expected_receipt_hash", "intent.expected_receipt_hash == materialized_receipt_hash"),
+    ("authority_signature", "verifier::btc::bip340::require_signature"),
+    ("checked_u64_max", "const U64_MAX: u64 = 18446744073709551615"),
+    ("checked_nonce_increment", "old_cell.nonce < U64_MAX"),
+    ("balance_progress", "intent.core.new_balance_commitment_hash != old_cell.balance_commitment_hash"),
+    ("operator_authority", "operator_sig.pubkey == old_cell.operator_authority_hash"),
 ];
 
 #[derive(Clone, Copy)]
@@ -479,6 +753,18 @@ fn build_planned_profile_matrix(profile_certification: &Value, stateful_acceptan
         && json_pointer_str(profile_certification, "/status") == Some("passed");
     let key_signature_passed = json_pointer_bool(profile_certification, "/local_checks/local_bip340_tcb_review_passed")
         && json_pointer_bool(profile_certification, "/local_checks/wallet_vector_detail_passed");
+    let btc_tx_commitment_package_passed =
+        json_pointer_str(profile_certification, "/planned_profile_packages/btc_tx_commitment/status") == Some("passed");
+    let btc_utxo_seal_package_passed =
+        json_pointer_str(profile_certification, "/planned_profile_packages/btc_utxo_seal/status") == Some("passed");
+    let dual_seal_package_passed =
+        json_pointer_str(profile_certification, "/planned_profile_packages/dual_seal/status") == Some("passed");
+    let fiber_candidate_package_passed =
+        json_pointer_str(profile_certification, "/planned_profile_packages/fiber_candidate/status") == Some("passed");
+    let fungible_xudt_package_passed =
+        json_pointer_str(profile_certification, "/planned_profile_packages/fungible_xudt/status") == Some("passed");
+    let rwa_receipt_package_passed =
+        json_pointer_str(profile_certification, "/planned_profile_packages/rwa_receipt/status") == Some("passed");
     let current_business_passed = json_pointer_str(stateful_acceptance, "/business_scenario_coverage/status") == Some("passed");
     let profiles = vec![
         planned_row(
@@ -492,22 +778,22 @@ fn build_planned_profile_matrix(profile_certification: &Value, stateful_acceptan
             "seal_profile_btc_transaction_commitment",
             "Seal profile",
             "BTC transaction commitment to a transition",
-            false,
-            "not implemented: no BTC transaction commitment verifier/profile evidence",
+            btc_tx_commitment_package_passed,
+            "proposals/novaseal/btc-transaction-commitment-profile-v0 package, schemas, fixtures, docs, source action, invariant matrix, and explicit public-BTC proof gap",
         ),
         planned_row(
             "seal_profile_btc_utxo_seal",
             "Seal profile",
             "proved BTC UTXO spend as a single-use seal",
-            false,
-            "not implemented: no BTC UTXO seal/SPV profile evidence",
+            btc_utxo_seal_package_passed,
+            "proposals/novaseal/btc-utxo-seal-profile-v0 package, schemas, fixtures, docs, source action, invariant matrix, and explicit public-BTC spend proof gap",
         ),
         planned_row(
             "seal_profile_dual_seal",
             "Seal profile",
             "combined BTC UTXO closure and CKB transition maturity",
-            false,
-            "not implemented: no dual-seal finality profile evidence",
+            dual_seal_package_passed,
+            "proposals/novaseal/dual-seal-profile-v0 package, schemas, fixtures, docs, source action, invariant matrix, and explicit BTC/CKB finality evidence gaps",
         ),
         planned_row(
             "object_profile_key_signed_cell_movement",
@@ -527,22 +813,22 @@ fn build_planned_profile_matrix(profile_certification: &Value, stateful_acceptan
             "object_profile_fungible_xudt",
             "Object profile",
             "Fungible/xUDT balance-bearing NovaSeal profile",
-            false,
-            "not implemented: no Fungible/xUDT profile package, schema, fixtures, wallet vectors, or devnet lifecycle evidence",
+            fungible_xudt_package_passed,
+            "proposals/novaseal/fungible-xudt-profile-v0 package, schemas, fixtures, docs, source actions, and invariant matrix",
         ),
         planned_row(
             "object_profile_rwa_receipt",
             "Object profile",
             "RWA/receipt object profile with materialised receipt lifecycle",
-            false,
-            "not implemented: no RWA/receipt profile package, schema, fixtures, wallet vectors, or devnet lifecycle evidence",
+            rwa_receipt_package_passed,
+            "proposals/novaseal/rwa-receipt-profile-v0 package, schemas, fixtures, docs, source actions, and invariant matrix",
         ),
         planned_row(
             "future_fiber_test_path",
             "Application profile",
             "Fiber-facing candidate test path",
-            false,
-            "not implemented: no Fiber-facing profile package or stateful acceptance evidence",
+            fiber_candidate_package_passed,
+            "proposals/novaseal/fiber-candidate-profile-v0 package, schemas, fixtures, docs, source action, invariant matrix, and explicit live Fiber evidence gap",
         ),
     ];
     let business_scenarios = vec![
@@ -611,8 +897,8 @@ fn build_planned_profile_matrix(profile_certification: &Value, stateful_acceptan
         "business_scenarios": business_scenarios,
         "missing": missing_profiles,
         "boundary": {
-            "implemented_now": "BTC key-signature authority, key-signed Cell movement, and CKB-native Agreement terminal paths",
-            "not_implemented_yet": "BTC transaction commitment, BTC UTXO seal, dual seal, Fungible/xUDT, RWA/receipt object profile, and Fiber-facing test path",
+            "implemented_now": "BTC key-signature authority, BTC transaction commitment profile package evidence, BTC UTXO seal profile package evidence, dual-seal profile package evidence, key-signed Cell movement, CKB-native Agreement terminal paths, Fungible/xUDT profile package evidence, RWA/receipt profile package evidence, and Fiber candidate profile package evidence",
+            "not_implemented_yet": "BTC transaction commitment live/public-BTC evidence, BTC UTXO seal live/public-BTC evidence, dual-seal live finality evidence, Fungible/xUDT live value-flow evidence, RWA/receipt live lifecycle evidence, and live Fiber candidate path evidence",
         },
     })
 }
@@ -1342,6 +1628,12 @@ fn validate_profile_certification(input: ProfileCertificationInputs<'_>) -> Resu
     let fixture_files = expected_files(repo_root, &repo_root.join(AGREEMENT_ROOT).join("fixtures"), EXPECTED_AGREEMENT_FIXTURES)?;
     let wallet_detail = validate_wallet_vector_detail(wallet);
     let invariant_matrix = validate_invariant_matrix(repo_root, &repo_root.join(AGREEMENT_ROOT).join("proofs/invariant_matrix.json"))?;
+    let fungible_xudt_profile = validate_fungible_xudt_profile_package(repo_root)?;
+    let rwa_receipt_profile = validate_rwa_receipt_profile_package(repo_root)?;
+    let btc_tx_commitment_profile = validate_btc_tx_commitment_profile_package(repo_root)?;
+    let btc_utxo_seal_profile = validate_btc_utxo_seal_profile_package(repo_root)?;
+    let dual_seal_profile = validate_dual_seal_profile_package(repo_root)?;
+    let fiber_candidate_profile = validate_fiber_candidate_profile_package(repo_root)?;
     let live_evidence = agreement_live_evidence(stateful_acceptance);
     let artifact_hash = normalize_hex(json_pointer_str(tcb, "/runtime_artifact/artifact_hash"));
     let source_tree_hash = normalize_hex(json_pointer_str(tcb, "/source_inventory/source_tree_sha256"));
@@ -1369,6 +1661,12 @@ fn validate_profile_certification(input: ProfileCertificationInputs<'_>) -> Resu
         "local_bip340_tcb_review_passed": json_pointer_str(tcb, "/status").is_some_and(|status| status.starts_with("passed_local_review")),
         "external_attestation_templates_current": json_pointer_str(&attestation_templates, "/status") == Some("passed"),
         "security_audit_coverage_passed": json_pointer_str(&security_audit_coverage, "/status") == Some("passed"),
+        "fungible_xudt_profile_package_passed": json_pointer_str(&fungible_xudt_profile, "/status") == Some("passed"),
+        "rwa_receipt_profile_package_passed": json_pointer_str(&rwa_receipt_profile, "/status") == Some("passed"),
+        "btc_tx_commitment_profile_package_passed": json_pointer_str(&btc_tx_commitment_profile, "/status") == Some("passed"),
+        "btc_utxo_seal_profile_package_passed": json_pointer_str(&btc_utxo_seal_profile, "/status") == Some("passed"),
+        "dual_seal_profile_package_passed": json_pointer_str(&dual_seal_profile, "/status") == Some("passed"),
+        "fiber_candidate_profile_package_passed": json_pointer_str(&fiber_candidate_profile, "/status") == Some("passed"),
         "required_docs_present": object_values_all_true(Some(&docs)),
     });
     let local_passed = object_values_all_true(Some(&local_checks));
@@ -1400,6 +1698,14 @@ fn validate_profile_certification(input: ProfileCertificationInputs<'_>) -> Resu
         "fixture_files": fixture_files,
         "wallet_vectors": wallet_detail,
         "invariant_matrix": invariant_matrix,
+        "planned_profile_packages": {
+            "btc_tx_commitment": btc_tx_commitment_profile,
+            "btc_utxo_seal": btc_utxo_seal_profile,
+            "dual_seal": dual_seal_profile,
+            "fiber_candidate": fiber_candidate_profile,
+            "fungible_xudt": fungible_xudt_profile,
+            "rwa_receipt": rwa_receipt_profile,
+        },
         "live_devnet": live_evidence,
         "attestation_templates": attestation_templates,
         "security_audit_coverage": security_audit_coverage,
@@ -1502,6 +1808,655 @@ fn validate_invariant_matrix(repo_root: &Path, path: &Path) -> Result<Value> {
         "present": ids.into_iter().collect::<Vec<_>>(),
         "missing": missing,
         "coverage_by_id": coverage_by_id,
+    }))
+}
+
+fn validate_fungible_xudt_profile_package(repo_root: &Path) -> Result<Value> {
+    let root = repo_root.join(FUNGIBLE_XUDT_ROOT);
+    let manifest_path = repo_root.join(FUNGIBLE_XUDT_MANIFEST);
+    let manifest = if manifest_path.is_file() { Some(manifest_metadata(&manifest_path)?) } else { None };
+    let metadata_str = |key: &str| manifest.as_ref().and_then(|metadata| toml_str(metadata, key));
+    let source = if root.join("src").is_dir() { read_cell_sources(&root.join("src"))? } else { String::new() };
+    let schema_path = repo_root.join(CANONICAL_SCHEMA);
+    let schema_hash = canonical_schema_hash(&schema_path)?;
+    let source_checks = REQUIRED_FUNGIBLE_XUDT_SOURCE_PATTERNS
+        .iter()
+        .map(|(name, pattern)| (format!("source_{name}"), Value::Bool(source.contains(pattern))))
+        .collect::<Map<_, _>>();
+    let actions = find_actions(&source);
+    let action_names = actions.iter().map(|action| action.name.clone()).collect::<BTreeSet<_>>();
+    let expected_actions =
+        ["issue_xudt", "transfer_xudt", "settle_xudt"].iter().map(|action| (*action).to_string()).collect::<BTreeSet<_>>();
+    let schemas = expected_files(repo_root, &root.join("schemas"), EXPECTED_FUNGIBLE_XUDT_SCHEMA_FILES)?;
+    let fixtures = expected_files(repo_root, &root.join("fixtures"), EXPECTED_FUNGIBLE_XUDT_FIXTURES)?;
+    let docs = expected_files(repo_root, &root.join("docs"), EXPECTED_FUNGIBLE_XUDT_DOCS)?;
+    let invariant_path = root.join("proofs/invariant_matrix.json");
+    let invariant_payload = if invariant_path.is_file() { json_load_path(repo_root, &invariant_path)? } else { Value::Null };
+    let invariants = invariant_payload.get("invariants").and_then(Value::as_array).cloned().unwrap_or_default();
+    let invariant_ids = invariants.iter().filter_map(|row| json_pointer_str(row, "/id").map(str::to_string)).collect::<BTreeSet<_>>();
+    let required_invariants = EXPECTED_FUNGIBLE_XUDT_INVARIANTS.iter().map(|value| (*value).to_string()).collect::<BTreeSet<_>>();
+    let coverage_by_id = invariants
+        .iter()
+        .filter_map(|row| Some((json_pointer_str(row, "/id")?.to_string(), row.get("coverage").cloned().unwrap_or(Value::Null))))
+        .collect::<Map<_, _>>();
+    let mut checks = source_checks;
+    checks.extend([
+        ("root_present".to_string(), Value::Bool(root.is_dir())),
+        ("manifest_present".to_string(), Value::Bool(manifest_path.is_file())),
+        (
+            "manifest_protocol_family".to_string(),
+            Value::Bool(metadata_str("protocol_family") == Some("NovaSeal")),
+        ),
+        ("manifest_profile".to_string(), Value::Bool(metadata_str("profile") == Some(EXPECTED_FUNGIBLE_XUDT_PROFILE))),
+        (
+            "manifest_conforms_to".to_string(),
+            Value::Bool(metadata_str("conforms_to") == Some(EXPECTED_NOVASEAL_CANONICAL_SCHEMA)),
+        ),
+        (
+            "manifest_canonical_schema_hash".to_string(),
+            Value::Bool(metadata_str("canonical_schema_hash") == schema_hash.as_deref()),
+        ),
+        (
+            "manifest_conformance_gate".to_string(),
+            Value::Bool(metadata_str("conformance_gate") == Some(EXPECTED_PROFILE_CERTIFICATION_GATE)),
+        ),
+        (
+            "manifest_certification_plugin".to_string(),
+            Value::Bool(metadata_str("certification_plugin") == Some(EXPECTED_CERTIFICATION_PLUGIN)),
+        ),
+        (
+            "manifest_stateful_dispatcher".to_string(),
+            Value::Bool(metadata_str("stateful_dispatcher") == Some("missing-live-dispatcher")),
+        ),
+        (
+            "manifest_source_actions".to_string(),
+            Value::Bool(
+                metadata_str("source_actions")
+                    == Some(
+                        "src/nova_fungible_xudt_type.cell:issue_xudt;src/nova_fungible_xudt_type.cell:transfer_xudt;src/nova_fungible_xudt_type.cell:settle_xudt",
+                    ),
+            ),
+        ),
+        ("expected_actions_present".to_string(), Value::Bool(expected_actions.is_subset(&action_names))),
+        ("schemas_exact".to_string(), Value::Bool(json_pointer_bool(&schemas, "/exact"))),
+        ("fixtures_exact".to_string(), Value::Bool(json_pointer_bool(&fixtures, "/exact"))),
+        ("docs_exact".to_string(), Value::Bool(json_pointer_bool(&docs, "/exact"))),
+        (
+            "invariant_schema".to_string(),
+            Value::Bool(json_pointer_str(&invariant_payload, "/schema") == Some("novaseal-fungible-xudt-invariant-matrix-v0.1")),
+        ),
+        (
+            "required_invariants_present".to_string(),
+            Value::Bool(required_invariants.is_subset(&invariant_ids)),
+        ),
+        (
+            "no_empty_invariant_coverage".to_string(),
+            Value::Bool(invariant_ids.iter().all(|id| coverage_by_id.get(id).is_some_and(value_is_present))),
+        ),
+        (
+            "live_devnet_gap_explicit".to_string(),
+            Value::Bool(coverage_by_id.get("live_devnet_lifecycle").and_then(Value::as_str) == Some("missing-live-devnet-evidence")),
+        ),
+    ]);
+    let missing_invariants = required_invariants.difference(&invariant_ids).cloned().collect::<Vec<_>>();
+    Ok(json!({
+        "schema": "novaseal-fungible-xudt-profile-package-validation-v0.1",
+        "status": if object_values_all_true(Some(&Value::Object(checks.clone()))) { "passed" } else { "failed" },
+        "classification": "profile-package-evidence-not-live-stateful-acceptance",
+        "root": rel(repo_root, &root),
+        "manifest": rel(repo_root, &manifest_path),
+        "canonical_schema_hash": schema_hash,
+        "actions": action_names.into_iter().collect::<Vec<_>>(),
+        "schemas": schemas,
+        "fixtures": fixtures,
+        "docs": docs,
+        "invariant_matrix": {
+            "path": rel(repo_root, &invariant_path),
+            "required": required_invariants.into_iter().collect::<Vec<_>>(),
+            "present": invariant_ids.into_iter().collect::<Vec<_>>(),
+            "missing": missing_invariants,
+            "coverage_by_id": coverage_by_id,
+        },
+        "checks": checks,
+        "remaining_acceptance_gap": "live devnet issue -> transfer -> settle evidence is still required before fungible_xudt_value_flow can pass",
+    }))
+}
+
+fn validate_rwa_receipt_profile_package(repo_root: &Path) -> Result<Value> {
+    let root = repo_root.join(RWA_RECEIPT_ROOT);
+    let manifest_path = repo_root.join(RWA_RECEIPT_MANIFEST);
+    let manifest = if manifest_path.is_file() { Some(manifest_metadata(&manifest_path)?) } else { None };
+    let metadata_str = |key: &str| manifest.as_ref().and_then(|metadata| toml_str(metadata, key));
+    let source = if root.join("src").is_dir() { read_cell_sources(&root.join("src"))? } else { String::new() };
+    let schema_path = repo_root.join(CANONICAL_SCHEMA);
+    let schema_hash = canonical_schema_hash(&schema_path)?;
+    let source_checks = REQUIRED_RWA_RECEIPT_SOURCE_PATTERNS
+        .iter()
+        .map(|(name, pattern)| (format!("source_{name}"), Value::Bool(source.contains(pattern))))
+        .collect::<Map<_, _>>();
+    let actions = find_actions(&source);
+    let action_names = actions.iter().map(|action| action.name.clone()).collect::<BTreeSet<_>>();
+    let expected_actions = ["materialize_rwa_receipt", "claim_rwa_receipt", "settle_rwa_receipt"]
+        .iter()
+        .map(|action| (*action).to_string())
+        .collect::<BTreeSet<_>>();
+    let schemas = expected_files(repo_root, &root.join("schemas"), EXPECTED_RWA_RECEIPT_SCHEMA_FILES)?;
+    let fixtures = expected_files(repo_root, &root.join("fixtures"), EXPECTED_RWA_RECEIPT_FIXTURES)?;
+    let docs = expected_files(repo_root, &root.join("docs"), EXPECTED_RWA_RECEIPT_DOCS)?;
+    let invariant_path = root.join("proofs/invariant_matrix.json");
+    let invariant_payload = if invariant_path.is_file() { json_load_path(repo_root, &invariant_path)? } else { Value::Null };
+    let invariants = invariant_payload.get("invariants").and_then(Value::as_array).cloned().unwrap_or_default();
+    let invariant_ids = invariants.iter().filter_map(|row| json_pointer_str(row, "/id").map(str::to_string)).collect::<BTreeSet<_>>();
+    let required_invariants = EXPECTED_RWA_RECEIPT_INVARIANTS.iter().map(|value| (*value).to_string()).collect::<BTreeSet<_>>();
+    let coverage_by_id = invariants
+        .iter()
+        .filter_map(|row| Some((json_pointer_str(row, "/id")?.to_string(), row.get("coverage").cloned().unwrap_or(Value::Null))))
+        .collect::<Map<_, _>>();
+    let mut checks = source_checks;
+    checks.extend([
+        ("root_present".to_string(), Value::Bool(root.is_dir())),
+        ("manifest_present".to_string(), Value::Bool(manifest_path.is_file())),
+        (
+            "manifest_protocol_family".to_string(),
+            Value::Bool(metadata_str("protocol_family") == Some("NovaSeal")),
+        ),
+        ("manifest_profile".to_string(), Value::Bool(metadata_str("profile") == Some(EXPECTED_RWA_RECEIPT_PROFILE))),
+        (
+            "manifest_conforms_to".to_string(),
+            Value::Bool(metadata_str("conforms_to") == Some(EXPECTED_NOVASEAL_CANONICAL_SCHEMA)),
+        ),
+        (
+            "manifest_canonical_schema_hash".to_string(),
+            Value::Bool(metadata_str("canonical_schema_hash") == schema_hash.as_deref()),
+        ),
+        (
+            "manifest_conformance_gate".to_string(),
+            Value::Bool(metadata_str("conformance_gate") == Some(EXPECTED_PROFILE_CERTIFICATION_GATE)),
+        ),
+        (
+            "manifest_certification_plugin".to_string(),
+            Value::Bool(metadata_str("certification_plugin") == Some(EXPECTED_CERTIFICATION_PLUGIN)),
+        ),
+        (
+            "manifest_stateful_dispatcher".to_string(),
+            Value::Bool(metadata_str("stateful_dispatcher") == Some("missing-live-dispatcher")),
+        ),
+        (
+            "manifest_source_actions".to_string(),
+            Value::Bool(
+                metadata_str("source_actions")
+                    == Some(
+                        "src/nova_rwa_receipt_type.cell:materialize_rwa_receipt;src/nova_rwa_receipt_type.cell:claim_rwa_receipt;src/nova_rwa_receipt_type.cell:settle_rwa_receipt",
+                    ),
+            ),
+        ),
+        ("expected_actions_present".to_string(), Value::Bool(expected_actions.is_subset(&action_names))),
+        ("schemas_exact".to_string(), Value::Bool(json_pointer_bool(&schemas, "/exact"))),
+        ("fixtures_exact".to_string(), Value::Bool(json_pointer_bool(&fixtures, "/exact"))),
+        ("docs_exact".to_string(), Value::Bool(json_pointer_bool(&docs, "/exact"))),
+        (
+            "invariant_schema".to_string(),
+            Value::Bool(json_pointer_str(&invariant_payload, "/schema") == Some("novaseal-rwa-receipt-invariant-matrix-v0.1")),
+        ),
+        (
+            "required_invariants_present".to_string(),
+            Value::Bool(required_invariants.is_subset(&invariant_ids)),
+        ),
+        (
+            "no_empty_invariant_coverage".to_string(),
+            Value::Bool(invariant_ids.iter().all(|id| coverage_by_id.get(id).is_some_and(value_is_present))),
+        ),
+        (
+            "live_devnet_gap_explicit".to_string(),
+            Value::Bool(coverage_by_id.get("live_devnet_lifecycle").and_then(Value::as_str) == Some("missing-live-devnet-evidence")),
+        ),
+    ]);
+    let missing_invariants = required_invariants.difference(&invariant_ids).cloned().collect::<Vec<_>>();
+    Ok(json!({
+        "schema": "novaseal-rwa-receipt-profile-package-validation-v0.1",
+        "status": if object_values_all_true(Some(&Value::Object(checks.clone()))) { "passed" } else { "failed" },
+        "classification": "profile-package-evidence-not-live-stateful-acceptance",
+        "root": rel(repo_root, &root),
+        "manifest": rel(repo_root, &manifest_path),
+        "canonical_schema_hash": schema_hash,
+        "actions": action_names.into_iter().collect::<Vec<_>>(),
+        "schemas": schemas,
+        "fixtures": fixtures,
+        "docs": docs,
+        "invariant_matrix": {
+            "path": rel(repo_root, &invariant_path),
+            "required": required_invariants.into_iter().collect::<Vec<_>>(),
+            "present": invariant_ids.into_iter().collect::<Vec<_>>(),
+            "missing": missing_invariants,
+            "coverage_by_id": coverage_by_id,
+        },
+        "checks": checks,
+        "remaining_acceptance_gap": "live devnet materialise -> claim -> settle evidence is still required before rwa_receipt_lifecycle can pass",
+    }))
+}
+
+fn validate_btc_tx_commitment_profile_package(repo_root: &Path) -> Result<Value> {
+    let root = repo_root.join(BTC_TX_COMMITMENT_ROOT);
+    let manifest_path = repo_root.join(BTC_TX_COMMITMENT_MANIFEST);
+    let manifest = if manifest_path.is_file() { Some(manifest_metadata(&manifest_path)?) } else { None };
+    let metadata_str = |key: &str| manifest.as_ref().and_then(|metadata| toml_str(metadata, key));
+    let source = if root.join("src").is_dir() { read_cell_sources(&root.join("src"))? } else { String::new() };
+    let schema_path = repo_root.join(CANONICAL_SCHEMA);
+    let schema_hash = canonical_schema_hash(&schema_path)?;
+    let source_checks = REQUIRED_BTC_TX_COMMITMENT_SOURCE_PATTERNS
+        .iter()
+        .map(|(name, pattern)| (format!("source_{name}"), Value::Bool(source.contains(pattern))))
+        .collect::<Map<_, _>>();
+    let actions = find_actions(&source);
+    let action_names = actions.iter().map(|action| action.name.clone()).collect::<BTreeSet<_>>();
+    let expected_actions = ["commit_btc_transaction_transition"].iter().map(|action| (*action).to_string()).collect::<BTreeSet<_>>();
+    let schemas = expected_files(repo_root, &root.join("schemas"), EXPECTED_BTC_TX_COMMITMENT_SCHEMA_FILES)?;
+    let fixtures = expected_files(repo_root, &root.join("fixtures"), EXPECTED_BTC_TX_COMMITMENT_FIXTURES)?;
+    let docs = expected_files(repo_root, &root.join("docs"), EXPECTED_BTC_TX_COMMITMENT_DOCS)?;
+    let invariant_path = root.join("proofs/invariant_matrix.json");
+    let invariant_payload = if invariant_path.is_file() { json_load_path(repo_root, &invariant_path)? } else { Value::Null };
+    let invariants = invariant_payload.get("invariants").and_then(Value::as_array).cloned().unwrap_or_default();
+    let invariant_ids = invariants.iter().filter_map(|row| json_pointer_str(row, "/id").map(str::to_string)).collect::<BTreeSet<_>>();
+    let required_invariants = EXPECTED_BTC_TX_COMMITMENT_INVARIANTS.iter().map(|value| (*value).to_string()).collect::<BTreeSet<_>>();
+    let coverage_by_id = invariants
+        .iter()
+        .filter_map(|row| Some((json_pointer_str(row, "/id")?.to_string(), row.get("coverage").cloned().unwrap_or(Value::Null))))
+        .collect::<Map<_, _>>();
+    let mut checks = source_checks;
+    checks.extend([
+        ("root_present".to_string(), Value::Bool(root.is_dir())),
+        ("manifest_present".to_string(), Value::Bool(manifest_path.is_file())),
+        ("manifest_protocol_family".to_string(), Value::Bool(metadata_str("protocol_family") == Some("NovaSeal"))),
+        ("manifest_profile".to_string(), Value::Bool(metadata_str("profile") == Some(EXPECTED_BTC_TX_COMMITMENT_PROFILE))),
+        ("manifest_conforms_to".to_string(), Value::Bool(metadata_str("conforms_to") == Some(EXPECTED_NOVASEAL_CANONICAL_SCHEMA))),
+        ("manifest_canonical_schema_hash".to_string(), Value::Bool(metadata_str("canonical_schema_hash") == schema_hash.as_deref())),
+        (
+            "manifest_conformance_gate".to_string(),
+            Value::Bool(metadata_str("conformance_gate") == Some(EXPECTED_PROFILE_CERTIFICATION_GATE)),
+        ),
+        (
+            "manifest_certification_plugin".to_string(),
+            Value::Bool(metadata_str("certification_plugin") == Some(EXPECTED_CERTIFICATION_PLUGIN)),
+        ),
+        (
+            "manifest_stateful_dispatcher".to_string(),
+            Value::Bool(metadata_str("stateful_dispatcher") == Some("missing-live-dispatcher")),
+        ),
+        (
+            "manifest_btc_public_verification_gap".to_string(),
+            Value::Bool(metadata_str("btc_public_verification") == Some("missing-spv-or-indexer-evidence")),
+        ),
+        (
+            "manifest_source_actions".to_string(),
+            Value::Bool(
+                metadata_str("source_actions")
+                    == Some("src/nova_btc_transaction_commitment_type.cell:commit_btc_transaction_transition"),
+            ),
+        ),
+        ("expected_actions_present".to_string(), Value::Bool(expected_actions.is_subset(&action_names))),
+        ("schemas_exact".to_string(), Value::Bool(json_pointer_bool(&schemas, "/exact"))),
+        ("fixtures_exact".to_string(), Value::Bool(json_pointer_bool(&fixtures, "/exact"))),
+        ("docs_exact".to_string(), Value::Bool(json_pointer_bool(&docs, "/exact"))),
+        (
+            "invariant_schema".to_string(),
+            Value::Bool(
+                json_pointer_str(&invariant_payload, "/schema") == Some("novaseal-btc-transaction-commitment-invariant-matrix-v0.1"),
+            ),
+        ),
+        ("required_invariants_present".to_string(), Value::Bool(required_invariants.is_subset(&invariant_ids))),
+        (
+            "no_empty_invariant_coverage".to_string(),
+            Value::Bool(invariant_ids.iter().all(|id| coverage_by_id.get(id).is_some_and(value_is_present))),
+        ),
+        (
+            "live_devnet_gap_explicit".to_string(),
+            Value::Bool(coverage_by_id.get("live_devnet_lifecycle").and_then(Value::as_str) == Some("missing-live-devnet-evidence")),
+        ),
+        (
+            "btc_public_verification_gap_explicit".to_string(),
+            Value::Bool(
+                coverage_by_id.get("btc_public_verification").and_then(Value::as_str) == Some("missing-spv-or-indexer-evidence"),
+            ),
+        ),
+    ]);
+    let missing_invariants = required_invariants.difference(&invariant_ids).cloned().collect::<Vec<_>>();
+    Ok(json!({
+        "schema": "novaseal-btc-transaction-commitment-profile-package-validation-v0.1",
+        "status": if object_values_all_true(Some(&Value::Object(checks.clone()))) { "passed" } else { "failed" },
+        "classification": "profile-package-evidence-not-btc-finality-or-live-stateful-acceptance",
+        "root": rel(repo_root, &root),
+        "manifest": rel(repo_root, &manifest_path),
+        "canonical_schema_hash": schema_hash,
+        "actions": action_names.into_iter().collect::<Vec<_>>(),
+        "schemas": schemas,
+        "fixtures": fixtures,
+        "docs": docs,
+        "invariant_matrix": {
+            "path": rel(repo_root, &invariant_path),
+            "required": required_invariants.into_iter().collect::<Vec<_>>(),
+            "present": invariant_ids.into_iter().collect::<Vec<_>>(),
+            "missing": missing_invariants,
+            "coverage_by_id": coverage_by_id,
+        },
+        "checks": checks,
+        "remaining_acceptance_gap": "live devnet BTC transaction commitment transition and public BTC verification evidence are still required before btc_transaction_commitment_transition can pass",
+    }))
+}
+
+fn validate_btc_utxo_seal_profile_package(repo_root: &Path) -> Result<Value> {
+    let root = repo_root.join(BTC_UTXO_SEAL_ROOT);
+    let manifest_path = repo_root.join(BTC_UTXO_SEAL_MANIFEST);
+    let manifest = if manifest_path.is_file() { Some(manifest_metadata(&manifest_path)?) } else { None };
+    let metadata_str = |key: &str| manifest.as_ref().and_then(|metadata| toml_str(metadata, key));
+    let source = if root.join("src").is_dir() { read_cell_sources(&root.join("src"))? } else { String::new() };
+    let schema_path = repo_root.join(CANONICAL_SCHEMA);
+    let schema_hash = canonical_schema_hash(&schema_path)?;
+    let source_checks = REQUIRED_BTC_UTXO_SEAL_SOURCE_PATTERNS
+        .iter()
+        .map(|(name, pattern)| (format!("source_{name}"), Value::Bool(source.contains(pattern))))
+        .collect::<Map<_, _>>();
+    let actions = find_actions(&source);
+    let action_names = actions.iter().map(|action| action.name.clone()).collect::<BTreeSet<_>>();
+    let expected_actions = ["close_btc_utxo_seal"].iter().map(|action| (*action).to_string()).collect::<BTreeSet<_>>();
+    let schemas = expected_files(repo_root, &root.join("schemas"), EXPECTED_BTC_UTXO_SEAL_SCHEMA_FILES)?;
+    let fixtures = expected_files(repo_root, &root.join("fixtures"), EXPECTED_BTC_UTXO_SEAL_FIXTURES)?;
+    let docs = expected_files(repo_root, &root.join("docs"), EXPECTED_BTC_UTXO_SEAL_DOCS)?;
+    let invariant_path = root.join("proofs/invariant_matrix.json");
+    let invariant_payload = if invariant_path.is_file() { json_load_path(repo_root, &invariant_path)? } else { Value::Null };
+    let invariants = invariant_payload.get("invariants").and_then(Value::as_array).cloned().unwrap_or_default();
+    let invariant_ids = invariants.iter().filter_map(|row| json_pointer_str(row, "/id").map(str::to_string)).collect::<BTreeSet<_>>();
+    let required_invariants = EXPECTED_BTC_UTXO_SEAL_INVARIANTS.iter().map(|value| (*value).to_string()).collect::<BTreeSet<_>>();
+    let coverage_by_id = invariants
+        .iter()
+        .filter_map(|row| Some((json_pointer_str(row, "/id")?.to_string(), row.get("coverage").cloned().unwrap_or(Value::Null))))
+        .collect::<Map<_, _>>();
+    let mut checks = source_checks;
+    checks.extend([
+        ("root_present".to_string(), Value::Bool(root.is_dir())),
+        ("manifest_present".to_string(), Value::Bool(manifest_path.is_file())),
+        ("manifest_protocol_family".to_string(), Value::Bool(metadata_str("protocol_family") == Some("NovaSeal"))),
+        ("manifest_profile".to_string(), Value::Bool(metadata_str("profile") == Some(EXPECTED_BTC_UTXO_SEAL_PROFILE))),
+        ("manifest_conforms_to".to_string(), Value::Bool(metadata_str("conforms_to") == Some(EXPECTED_NOVASEAL_CANONICAL_SCHEMA))),
+        ("manifest_canonical_schema_hash".to_string(), Value::Bool(metadata_str("canonical_schema_hash") == schema_hash.as_deref())),
+        (
+            "manifest_conformance_gate".to_string(),
+            Value::Bool(metadata_str("conformance_gate") == Some(EXPECTED_PROFILE_CERTIFICATION_GATE)),
+        ),
+        (
+            "manifest_certification_plugin".to_string(),
+            Value::Bool(metadata_str("certification_plugin") == Some(EXPECTED_CERTIFICATION_PLUGIN)),
+        ),
+        (
+            "manifest_stateful_dispatcher".to_string(),
+            Value::Bool(metadata_str("stateful_dispatcher") == Some("missing-live-dispatcher")),
+        ),
+        (
+            "manifest_btc_public_verification_gap".to_string(),
+            Value::Bool(metadata_str("btc_public_verification") == Some("missing-spv-or-indexer-evidence")),
+        ),
+        (
+            "manifest_source_actions".to_string(),
+            Value::Bool(metadata_str("source_actions") == Some("src/nova_btc_utxo_seal_type.cell:close_btc_utxo_seal")),
+        ),
+        ("expected_actions_present".to_string(), Value::Bool(expected_actions.is_subset(&action_names))),
+        ("schemas_exact".to_string(), Value::Bool(json_pointer_bool(&schemas, "/exact"))),
+        ("fixtures_exact".to_string(), Value::Bool(json_pointer_bool(&fixtures, "/exact"))),
+        ("docs_exact".to_string(), Value::Bool(json_pointer_bool(&docs, "/exact"))),
+        (
+            "invariant_schema".to_string(),
+            Value::Bool(json_pointer_str(&invariant_payload, "/schema") == Some("novaseal-btc-utxo-seal-invariant-matrix-v0.1")),
+        ),
+        ("required_invariants_present".to_string(), Value::Bool(required_invariants.is_subset(&invariant_ids))),
+        (
+            "no_empty_invariant_coverage".to_string(),
+            Value::Bool(invariant_ids.iter().all(|id| coverage_by_id.get(id).is_some_and(value_is_present))),
+        ),
+        (
+            "live_devnet_gap_explicit".to_string(),
+            Value::Bool(coverage_by_id.get("live_devnet_lifecycle").and_then(Value::as_str) == Some("missing-live-devnet-evidence")),
+        ),
+        (
+            "btc_public_verification_gap_explicit".to_string(),
+            Value::Bool(
+                coverage_by_id.get("btc_public_verification").and_then(Value::as_str) == Some("missing-spv-or-indexer-evidence"),
+            ),
+        ),
+    ]);
+    let missing_invariants = required_invariants.difference(&invariant_ids).cloned().collect::<Vec<_>>();
+    Ok(json!({
+        "schema": "novaseal-btc-utxo-seal-profile-package-validation-v0.1",
+        "status": if object_values_all_true(Some(&Value::Object(checks.clone()))) { "passed" } else { "failed" },
+        "classification": "profile-package-evidence-not-btc-spend-proof-or-live-stateful-acceptance",
+        "root": rel(repo_root, &root),
+        "manifest": rel(repo_root, &manifest_path),
+        "canonical_schema_hash": schema_hash,
+        "actions": action_names.into_iter().collect::<Vec<_>>(),
+        "schemas": schemas,
+        "fixtures": fixtures,
+        "docs": docs,
+        "invariant_matrix": {
+            "path": rel(repo_root, &invariant_path),
+            "required": required_invariants.into_iter().collect::<Vec<_>>(),
+            "present": invariant_ids.into_iter().collect::<Vec<_>>(),
+            "missing": missing_invariants,
+            "coverage_by_id": coverage_by_id,
+        },
+        "checks": checks,
+        "remaining_acceptance_gap": "live devnet BTC UTXO seal closure and public BTC spend-verification evidence are still required before btc_utxo_seal_closure can pass",
+    }))
+}
+
+fn validate_dual_seal_profile_package(repo_root: &Path) -> Result<Value> {
+    let root = repo_root.join(DUAL_SEAL_ROOT);
+    let manifest_path = repo_root.join(DUAL_SEAL_MANIFEST);
+    let manifest = if manifest_path.is_file() { Some(manifest_metadata(&manifest_path)?) } else { None };
+    let metadata_str = |key: &str| manifest.as_ref().and_then(|metadata| toml_str(metadata, key));
+    let source = if root.join("src").is_dir() { read_cell_sources(&root.join("src"))? } else { String::new() };
+    let schema_path = repo_root.join(CANONICAL_SCHEMA);
+    let schema_hash = canonical_schema_hash(&schema_path)?;
+    let source_checks = REQUIRED_DUAL_SEAL_SOURCE_PATTERNS
+        .iter()
+        .map(|(name, pattern)| (format!("source_{name}"), Value::Bool(source.contains(pattern))))
+        .collect::<Map<_, _>>();
+    let actions = find_actions(&source);
+    let action_names = actions.iter().map(|action| action.name.clone()).collect::<BTreeSet<_>>();
+    let expected_actions = ["finalize_dual_seal"].iter().map(|action| (*action).to_string()).collect::<BTreeSet<_>>();
+    let schemas = expected_files(repo_root, &root.join("schemas"), EXPECTED_DUAL_SEAL_SCHEMA_FILES)?;
+    let fixtures = expected_files(repo_root, &root.join("fixtures"), EXPECTED_DUAL_SEAL_FIXTURES)?;
+    let docs = expected_files(repo_root, &root.join("docs"), EXPECTED_DUAL_SEAL_DOCS)?;
+    let invariant_path = root.join("proofs/invariant_matrix.json");
+    let invariant_payload = if invariant_path.is_file() { json_load_path(repo_root, &invariant_path)? } else { Value::Null };
+    let invariants = invariant_payload.get("invariants").and_then(Value::as_array).cloned().unwrap_or_default();
+    let invariant_ids = invariants.iter().filter_map(|row| json_pointer_str(row, "/id").map(str::to_string)).collect::<BTreeSet<_>>();
+    let required_invariants = EXPECTED_DUAL_SEAL_INVARIANTS.iter().map(|value| (*value).to_string()).collect::<BTreeSet<_>>();
+    let coverage_by_id = invariants
+        .iter()
+        .filter_map(|row| Some((json_pointer_str(row, "/id")?.to_string(), row.get("coverage").cloned().unwrap_or(Value::Null))))
+        .collect::<Map<_, _>>();
+    let mut checks = source_checks;
+    checks.extend([
+        ("root_present".to_string(), Value::Bool(root.is_dir())),
+        ("manifest_present".to_string(), Value::Bool(manifest_path.is_file())),
+        ("manifest_protocol_family".to_string(), Value::Bool(metadata_str("protocol_family") == Some("NovaSeal"))),
+        ("manifest_profile".to_string(), Value::Bool(metadata_str("profile") == Some(EXPECTED_DUAL_SEAL_PROFILE))),
+        ("manifest_conforms_to".to_string(), Value::Bool(metadata_str("conforms_to") == Some(EXPECTED_NOVASEAL_CANONICAL_SCHEMA))),
+        ("manifest_canonical_schema_hash".to_string(), Value::Bool(metadata_str("canonical_schema_hash") == schema_hash.as_deref())),
+        (
+            "manifest_conformance_gate".to_string(),
+            Value::Bool(metadata_str("conformance_gate") == Some(EXPECTED_PROFILE_CERTIFICATION_GATE)),
+        ),
+        (
+            "manifest_certification_plugin".to_string(),
+            Value::Bool(metadata_str("certification_plugin") == Some(EXPECTED_CERTIFICATION_PLUGIN)),
+        ),
+        (
+            "manifest_stateful_dispatcher".to_string(),
+            Value::Bool(metadata_str("stateful_dispatcher") == Some("missing-live-dispatcher")),
+        ),
+        (
+            "manifest_btc_public_verification_gap".to_string(),
+            Value::Bool(metadata_str("btc_public_verification") == Some("missing-spv-or-indexer-evidence")),
+        ),
+        (
+            "manifest_ckb_finality_gap".to_string(),
+            Value::Bool(metadata_str("ckb_finality_verification") == Some("missing-live-maturity-evidence")),
+        ),
+        (
+            "manifest_source_actions".to_string(),
+            Value::Bool(metadata_str("source_actions") == Some("src/nova_dual_seal_type.cell:finalize_dual_seal")),
+        ),
+        ("expected_actions_present".to_string(), Value::Bool(expected_actions.is_subset(&action_names))),
+        ("schemas_exact".to_string(), Value::Bool(json_pointer_bool(&schemas, "/exact"))),
+        ("fixtures_exact".to_string(), Value::Bool(json_pointer_bool(&fixtures, "/exact"))),
+        ("docs_exact".to_string(), Value::Bool(json_pointer_bool(&docs, "/exact"))),
+        (
+            "invariant_schema".to_string(),
+            Value::Bool(json_pointer_str(&invariant_payload, "/schema") == Some("novaseal-dual-seal-invariant-matrix-v0.1")),
+        ),
+        ("required_invariants_present".to_string(), Value::Bool(required_invariants.is_subset(&invariant_ids))),
+        (
+            "no_empty_invariant_coverage".to_string(),
+            Value::Bool(invariant_ids.iter().all(|id| coverage_by_id.get(id).is_some_and(value_is_present))),
+        ),
+        (
+            "live_devnet_gap_explicit".to_string(),
+            Value::Bool(coverage_by_id.get("live_devnet_lifecycle").and_then(Value::as_str) == Some("missing-live-devnet-evidence")),
+        ),
+        (
+            "btc_public_verification_gap_explicit".to_string(),
+            Value::Bool(
+                coverage_by_id.get("btc_public_verification").and_then(Value::as_str) == Some("missing-spv-or-indexer-evidence"),
+            ),
+        ),
+        (
+            "ckb_finality_gap_explicit".to_string(),
+            Value::Bool(
+                coverage_by_id.get("ckb_finality_verification").and_then(Value::as_str) == Some("missing-live-maturity-evidence"),
+            ),
+        ),
+    ]);
+    let missing_invariants = required_invariants.difference(&invariant_ids).cloned().collect::<Vec<_>>();
+    Ok(json!({
+        "schema": "novaseal-dual-seal-profile-package-validation-v0.1",
+        "status": if object_values_all_true(Some(&Value::Object(checks.clone()))) { "passed" } else { "failed" },
+        "classification": "profile-package-evidence-not-btc-or-ckb-finality-or-live-stateful-acceptance",
+        "root": rel(repo_root, &root),
+        "manifest": rel(repo_root, &manifest_path),
+        "canonical_schema_hash": schema_hash,
+        "actions": action_names.into_iter().collect::<Vec<_>>(),
+        "schemas": schemas,
+        "fixtures": fixtures,
+        "docs": docs,
+        "invariant_matrix": {
+            "path": rel(repo_root, &invariant_path),
+            "required": required_invariants.into_iter().collect::<Vec<_>>(),
+            "present": invariant_ids.into_iter().collect::<Vec<_>>(),
+            "missing": missing_invariants,
+            "coverage_by_id": coverage_by_id,
+        },
+        "checks": checks,
+        "remaining_acceptance_gap": "live devnet dual-seal finality plus public BTC closure and CKB maturity evidence are still required before V1 finality claims",
+    }))
+}
+
+fn validate_fiber_candidate_profile_package(repo_root: &Path) -> Result<Value> {
+    let root = repo_root.join(FIBER_CANDIDATE_ROOT);
+    let manifest_path = repo_root.join(FIBER_CANDIDATE_MANIFEST);
+    let manifest = if manifest_path.is_file() { Some(manifest_metadata(&manifest_path)?) } else { None };
+    let metadata_str = |key: &str| manifest.as_ref().and_then(|metadata| toml_str(metadata, key));
+    let source = if root.join("src").is_dir() { read_cell_sources(&root.join("src"))? } else { String::new() };
+    let schema_path = repo_root.join(CANONICAL_SCHEMA);
+    let schema_hash = canonical_schema_hash(&schema_path)?;
+    let source_checks = REQUIRED_FIBER_CANDIDATE_SOURCE_PATTERNS
+        .iter()
+        .map(|(name, pattern)| (format!("source_{name}"), Value::Bool(source.contains(pattern))))
+        .collect::<Map<_, _>>();
+    let actions = find_actions(&source);
+    let action_names = actions.iter().map(|action| action.name.clone()).collect::<BTreeSet<_>>();
+    let expected_actions = ["settle_fiber_candidate"].iter().map(|action| (*action).to_string()).collect::<BTreeSet<_>>();
+    let schemas = expected_files(repo_root, &root.join("schemas"), EXPECTED_FIBER_CANDIDATE_SCHEMA_FILES)?;
+    let fixtures = expected_files(repo_root, &root.join("fixtures"), EXPECTED_FIBER_CANDIDATE_FIXTURES)?;
+    let docs = expected_files(repo_root, &root.join("docs"), EXPECTED_FIBER_CANDIDATE_DOCS)?;
+    let invariant_path = root.join("proofs/invariant_matrix.json");
+    let invariant_payload = if invariant_path.is_file() { json_load_path(repo_root, &invariant_path)? } else { Value::Null };
+    let invariants = invariant_payload.get("invariants").and_then(Value::as_array).cloned().unwrap_or_default();
+    let invariant_ids = invariants.iter().filter_map(|row| json_pointer_str(row, "/id").map(str::to_string)).collect::<BTreeSet<_>>();
+    let required_invariants = EXPECTED_FIBER_CANDIDATE_INVARIANTS.iter().map(|value| (*value).to_string()).collect::<BTreeSet<_>>();
+    let coverage_by_id = invariants
+        .iter()
+        .filter_map(|row| Some((json_pointer_str(row, "/id")?.to_string(), row.get("coverage").cloned().unwrap_or(Value::Null))))
+        .collect::<Map<_, _>>();
+    let mut checks = source_checks;
+    checks.extend([
+        ("root_present".to_string(), Value::Bool(root.is_dir())),
+        ("manifest_present".to_string(), Value::Bool(manifest_path.is_file())),
+        ("manifest_protocol_family".to_string(), Value::Bool(metadata_str("protocol_family") == Some("NovaSeal"))),
+        ("manifest_profile".to_string(), Value::Bool(metadata_str("profile") == Some(EXPECTED_FIBER_CANDIDATE_PROFILE))),
+        ("manifest_conforms_to".to_string(), Value::Bool(metadata_str("conforms_to") == Some(EXPECTED_NOVASEAL_CANONICAL_SCHEMA))),
+        ("manifest_canonical_schema_hash".to_string(), Value::Bool(metadata_str("canonical_schema_hash") == schema_hash.as_deref())),
+        (
+            "manifest_conformance_gate".to_string(),
+            Value::Bool(metadata_str("conformance_gate") == Some(EXPECTED_PROFILE_CERTIFICATION_GATE)),
+        ),
+        (
+            "manifest_certification_plugin".to_string(),
+            Value::Bool(metadata_str("certification_plugin") == Some(EXPECTED_CERTIFICATION_PLUGIN)),
+        ),
+        (
+            "manifest_stateful_dispatcher".to_string(),
+            Value::Bool(metadata_str("stateful_dispatcher") == Some("missing-live-dispatcher")),
+        ),
+        (
+            "manifest_fiber_execution_gap".to_string(),
+            Value::Bool(metadata_str("fiber_execution") == Some("missing-live-fiber-evidence")),
+        ),
+        (
+            "manifest_source_actions".to_string(),
+            Value::Bool(metadata_str("source_actions") == Some("src/nova_fiber_candidate_type.cell:settle_fiber_candidate")),
+        ),
+        ("expected_actions_present".to_string(), Value::Bool(expected_actions.is_subset(&action_names))),
+        ("schemas_exact".to_string(), Value::Bool(json_pointer_bool(&schemas, "/exact"))),
+        ("fixtures_exact".to_string(), Value::Bool(json_pointer_bool(&fixtures, "/exact"))),
+        ("docs_exact".to_string(), Value::Bool(json_pointer_bool(&docs, "/exact"))),
+        (
+            "invariant_schema".to_string(),
+            Value::Bool(json_pointer_str(&invariant_payload, "/schema") == Some("novaseal-fiber-candidate-invariant-matrix-v0.1")),
+        ),
+        ("required_invariants_present".to_string(), Value::Bool(required_invariants.is_subset(&invariant_ids))),
+        (
+            "no_empty_invariant_coverage".to_string(),
+            Value::Bool(invariant_ids.iter().all(|id| coverage_by_id.get(id).is_some_and(value_is_present))),
+        ),
+        (
+            "live_devnet_gap_explicit".to_string(),
+            Value::Bool(coverage_by_id.get("live_devnet_lifecycle").and_then(Value::as_str) == Some("missing-live-devnet-evidence")),
+        ),
+        (
+            "fiber_execution_gap_explicit".to_string(),
+            Value::Bool(coverage_by_id.get("fiber_execution").and_then(Value::as_str) == Some("missing-live-fiber-evidence")),
+        ),
+    ]);
+    let missing_invariants = required_invariants.difference(&invariant_ids).cloned().collect::<Vec<_>>();
+    Ok(json!({
+        "schema": "novaseal-fiber-candidate-profile-package-validation-v0.1",
+        "status": if object_values_all_true(Some(&Value::Object(checks.clone()))) { "passed" } else { "failed" },
+        "classification": "profile-package-evidence-not-live-fiber-or-stateful-acceptance",
+        "root": rel(repo_root, &root),
+        "manifest": rel(repo_root, &manifest_path),
+        "canonical_schema_hash": schema_hash,
+        "actions": action_names.into_iter().collect::<Vec<_>>(),
+        "schemas": schemas,
+        "fixtures": fixtures,
+        "docs": docs,
+        "invariant_matrix": {
+            "path": rel(repo_root, &invariant_path),
+            "required": required_invariants.into_iter().collect::<Vec<_>>(),
+            "present": invariant_ids.into_iter().collect::<Vec<_>>(),
+            "missing": missing_invariants,
+            "coverage_by_id": coverage_by_id,
+        },
+        "checks": checks,
+        "remaining_acceptance_gap": "live devnet Fiber candidate path and real Fiber execution evidence are still required before fiber_candidate_path can pass",
     }))
 }
 
@@ -2260,5 +3215,105 @@ mod tests {
         let missing = json_array_strings(&local, "/planned_profile_matrix/missing");
         assert!(missing.iter().any(|id| id == "object_profile_fungible_xudt"));
         assert!(missing.iter().any(|id| id == "seal_profile_btc_utxo_seal"));
+    }
+
+    #[test]
+    fn planned_matrix_counts_fungible_package_but_keeps_value_flow_missing() {
+        let profile_certification = json!({
+            "status": "passed",
+            "production_statement_eligible": false,
+            "local_checks": {
+                "wallet_vector_detail_passed": true,
+                "local_bip340_tcb_review_passed": true,
+            },
+            "planned_profile_packages": {
+                "btc_tx_commitment": { "status": "passed" },
+                "btc_utxo_seal": { "status": "passed" },
+                "dual_seal": { "status": "passed" },
+                "fungible_xudt": { "status": "passed" },
+                "rwa_receipt": { "status": "passed" }
+            },
+        });
+        let stateful_acceptance = json!({
+            "profile_coverage": {
+                "covered_profiles": [
+                    { "status": "passed" },
+                    { "status": "passed" }
+                ]
+            },
+            "business_scenario_coverage": { "status": "passed" },
+        });
+
+        let matrix = build_planned_profile_matrix(&profile_certification, &stateful_acceptance);
+        let fungible_profile_status = matrix
+            .pointer("/profiles")
+            .and_then(Value::as_array)
+            .and_then(|profiles| profiles.iter().find(|row| json_pointer_str(row, "/id") == Some("object_profile_fungible_xudt")))
+            .and_then(|row| json_pointer_str(row, "/status"));
+        let btc_tx_profile_status = matrix
+            .pointer("/profiles")
+            .and_then(Value::as_array)
+            .and_then(|profiles| {
+                profiles.iter().find(|row| json_pointer_str(row, "/id") == Some("seal_profile_btc_transaction_commitment"))
+            })
+            .and_then(|row| json_pointer_str(row, "/status"));
+        let btc_tx_flow_status = matrix
+            .pointer("/business_scenarios")
+            .and_then(Value::as_array)
+            .and_then(|scenarios| {
+                scenarios.iter().find(|row| json_pointer_str(row, "/id") == Some("btc_transaction_commitment_transition"))
+            })
+            .and_then(|row| json_pointer_str(row, "/status"));
+        let btc_utxo_profile_status = matrix
+            .pointer("/profiles")
+            .and_then(Value::as_array)
+            .and_then(|profiles| profiles.iter().find(|row| json_pointer_str(row, "/id") == Some("seal_profile_btc_utxo_seal")))
+            .and_then(|row| json_pointer_str(row, "/status"));
+        let btc_utxo_flow_status = matrix
+            .pointer("/business_scenarios")
+            .and_then(Value::as_array)
+            .and_then(|scenarios| scenarios.iter().find(|row| json_pointer_str(row, "/id") == Some("btc_utxo_seal_closure")))
+            .and_then(|row| json_pointer_str(row, "/status"));
+        let dual_seal_profile_status = matrix
+            .pointer("/profiles")
+            .and_then(Value::as_array)
+            .and_then(|profiles| profiles.iter().find(|row| json_pointer_str(row, "/id") == Some("seal_profile_dual_seal")))
+            .and_then(|row| json_pointer_str(row, "/status"));
+        let fungible_flow_status = matrix
+            .pointer("/business_scenarios")
+            .and_then(Value::as_array)
+            .and_then(|scenarios| scenarios.iter().find(|row| json_pointer_str(row, "/id") == Some("fungible_xudt_value_flow")))
+            .and_then(|row| json_pointer_str(row, "/status"));
+        let rwa_profile_status = matrix
+            .pointer("/profiles")
+            .and_then(Value::as_array)
+            .and_then(|profiles| profiles.iter().find(|row| json_pointer_str(row, "/id") == Some("object_profile_rwa_receipt")))
+            .and_then(|row| json_pointer_str(row, "/status"));
+        let rwa_flow_status = matrix
+            .pointer("/business_scenarios")
+            .and_then(Value::as_array)
+            .and_then(|scenarios| scenarios.iter().find(|row| json_pointer_str(row, "/id") == Some("rwa_receipt_lifecycle")))
+            .and_then(|row| json_pointer_str(row, "/status"));
+        let missing = json_array_strings(&matrix, "/missing");
+
+        assert_eq!(json_pointer_str(&matrix, "/status"), Some("incomplete"));
+        assert_eq!(btc_tx_profile_status, Some("passed"));
+        assert_eq!(btc_tx_flow_status, Some("missing"));
+        assert_eq!(btc_utxo_profile_status, Some("passed"));
+        assert_eq!(btc_utxo_flow_status, Some("missing"));
+        assert_eq!(dual_seal_profile_status, Some("passed"));
+        assert_eq!(fungible_profile_status, Some("passed"));
+        assert_eq!(fungible_flow_status, Some("missing"));
+        assert_eq!(rwa_profile_status, Some("passed"));
+        assert_eq!(rwa_flow_status, Some("missing"));
+        assert!(!missing.iter().any(|id| id == "seal_profile_btc_transaction_commitment"));
+        assert!(!missing.iter().any(|id| id == "seal_profile_btc_utxo_seal"));
+        assert!(!missing.iter().any(|id| id == "seal_profile_dual_seal"));
+        assert!(!missing.iter().any(|id| id == "object_profile_fungible_xudt"));
+        assert!(!missing.iter().any(|id| id == "object_profile_rwa_receipt"));
+        assert!(missing.iter().any(|id| id == "btc_transaction_commitment_transition"));
+        assert!(missing.iter().any(|id| id == "btc_utxo_seal_closure"));
+        assert!(missing.iter().any(|id| id == "fungible_xudt_value_flow"));
+        assert!(missing.iter().any(|id| id == "rwa_receipt_lifecycle"));
     }
 }

@@ -1,0 +1,62 @@
+[package]
+name = "novaseal-dual-seal-profile-v0"
+version = "0.0.1"
+authors = ["NovaSeal Design Team"]
+description = "NovaSeal Dual Seal Profile v0 - BTC UTXO closure plus CKB maturity seal skeleton"
+license = "MIT"
+repository = ""
+homepage = ""
+documentation = ""
+keywords = ["ckb", "novaseal", "bitcoin", "dual-seal"]
+categories = ["protocol", "seal", "audit"]
+cellscript_version = "0.16"
+entry = "src/nova_dual_seal_type.cell"
+
+source_roots = ["src"]
+include = ["schemas/**/*", "proofs/**/*", "fixtures/**/*", "docs/**/*"]
+exclude = []
+
+[dependencies]
+
+[dev_dependencies]
+
+[build.dependencies]
+
+[policy]
+production = false
+deny_fail_closed = false
+deny_ckb_runtime = false
+deny_runtime_obligations = false
+
+[[deploy.ckb.cell_deps]]
+name = "cellscript_btc_bip340_verifier_riscv"
+role = "runtime_verifier"
+verifier_id = "btc.bip340.v0"
+ipc_abi = "cellscript-btc-bip340-ipc-v0"
+out_point = "0x6418f34fa16dc691febc1ce3870ff411c0bf6600f53ff27f57ca9723ae1d2c31:0"
+dep_type = "code"
+hash_type = "data1"
+data_hash = "0xa4edd80d53e92488b1841a5f0ee5196f07857c0c347c496bca7dba7f49020e27"
+artifact_hash = "0xd0d1c14c811728c680d8646283cf7961dd850eebea856ac0e281fb493c4bc58d"
+
+[metadata]
+protocol_family = "NovaSeal"
+profile = "dual-seal-profile-v0"
+conforms_to = "NovaSealCanonicalV0"
+canonical_schema_hash = "0xe9a157d0211d63586f2e9334878f8354f87d4786f94aa9e5ea163fed5360aec6"
+conformance_gate = "cellc certify --plugin novaseal-profile-v0"
+certification_plugin = "novaseal-profile-v0"
+certification_report = "target/cellscript-certification/novaseal-profile-v0.json"
+status = "reviewable-dual-seal-profile-package"
+seal_profile = "dual-seal"
+business_scenario = "dual-seal-finality"
+receipt_mode = "materialized-output-cell"
+source_actions = "src/nova_dual_seal_type.cell:finalize_dual_seal"
+stateful_dispatcher = "missing-live-dispatcher"
+btc_public_verification = "missing-spv-or-indexer-evidence"
+ckb_finality_verification = "missing-live-maturity-evidence"
+deployment_pinning = "local-devnet-pinning-required-before-v1"
+wallet_signing_vectors = "target/novaseal-wallet-signing-vectors.json"
+tcb_review_bundle = "target/novaseal-bip340-tcb-review.json"
+production_gate = "target/novaseal-production-gates.json"
+external_attestations = "../v0-mvp-skeleton/proofs/public_shared_cell_dep_attestation.json;../v0-mvp-skeleton/proofs/bip340_external_tcb_review_attestation.json"

@@ -1,0 +1,44 @@
+# NovaSeal Fungible xUDT Profile v0
+
+**Status**: reviewable profile package. It is not V1-ready and not production
+ready because live devnet xUDT lifecycle evidence, wallet vectors, and external
+production attestations are still missing.
+
+This package implements the planned NovaSeal Fungible/xUDT object profile as a
+source-level package with schemas, fixtures, invariant matrix, and security
+boundary documentation.
+
+## Boundary
+
+The v0 profile models one balance-bearing xUDT object:
+
+- `issue_xudt`: issuer creates one active balance object for a holder.
+- `transfer_xudt`: current holder transfers the whole balance object to a new
+  holder without changing amount or xUDT type hash.
+- `settle_xudt`: current holder settles the active object into a terminal
+  receipt with `new_amount = 0`.
+
+This package intentionally does not implement partial transfers, split/merge
+accounting, market flows, or a general ledger.
+
+## Evidence
+
+| Area | Status | Classification |
+| --- | --- | --- |
+| Separate Fungible xUDT profile package | implemented | source-guard-present |
+| Canonical NovaSeal envelope binding | implemented | source-guard-present |
+| Issue, transfer, settle actions | implemented | source-guard-present |
+| Schemas and fixture labels | implemented | reviewable |
+| Invariant matrix | implemented | reviewable |
+| Live devnet issue -> transfer -> settle | missing | missing-live-devnet-evidence |
+| Wallet signing vectors | missing | missing-wallet-evidence |
+| Public/shared CellDep attestation | missing | external-required |
+| External BIP340 TCB review | missing | external-required |
+
+## Validation Boundary
+
+The V1 readiness matrix may count `object_profile_fungible_xudt` as a package
+implementation only when the certification gate sees this manifest, source
+actions, schemas, fixtures, docs, and invariant matrix. The business scenario
+`fungible_xudt_value_flow` must remain missing until live devnet stateful
+evidence is generated and checked.
