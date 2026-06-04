@@ -165,8 +165,14 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def run_cmd(args: list[str], cwd: pathlib.Path, *, timeout: int | None = None) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(args, cwd=cwd, text=True, capture_output=True, timeout=timeout)
+def run_cmd(
+    args: list[str],
+    cwd: pathlib.Path,
+    *,
+    timeout: int | None = None,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(args, cwd=cwd, text=True, capture_output=True, timeout=timeout, env=env)
 
 
 def git_value(fiber_repo: pathlib.Path, args: list[str]) -> str | None:
@@ -243,27 +249,64 @@ def write_text(path: pathlib.Path, value: str) -> None:
     path.write_text(value, encoding="utf-8")
 
 
+def cleanup_fiber_processes(fiber_repo: pathlib.Path) -> None:
+    patterns = [
+        r"\.\./\.\./target/.*/fnn -d [123]",
+        rf"ckb run -C {fiber_repo / 'tests' / 'deploy' / 'node-data'}",
+    ]
+    for pattern in patterns:
+        subprocess.run(["pkill", "-f", pattern], text=True, capture_output=True, check=False)
+
+
+def fiber_run_env(base_env: dict[str, str], log_dir: pathlib.Path) -> dict[str, str]:
+    env = dict(base_env)
+    real_ckb_cli = shutil.which("ckb-cli", path=env.get("PATH"))
+    if real_ckb_cli is None:
+        return env
+    tool_bin = log_dir / "tool-bin"
+    tool_bin.mkdir(parents=True, exist_ok=True)
+    wrapper = tool_bin / "ckb-cli"
+    wrapper.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        "if [[ \"$*\" == *\"account import\"* ]]; then\n"
+        "  echo 'novaseal test wrapper: skipped interactive ckb-cli account import' >&2\n"
+        "  exit 0\n"
+        "fi\n"
+        "exec \"${REAL_CKB_CLI}\" \"$@\"\n",
+        encoding="utf-8",
+    )
+    wrapper.chmod(0o755)
+    env["REAL_CKB_CLI"] = real_ckb_cli
+    env["PATH"] = f"{tool_bin}{os.pathsep}{env.get('PATH', '')}"
+    return env
+
+
 def run_workflow(args: argparse.Namespace, workflow: FiberWorkflow) -> dict[str, Any]:
     fiber_repo = args.fiber_repo.resolve()
     suite_arg = f"e2e/{workflow.suite}"
     log_dir = args.output.resolve().parent / "novaseal-fiber-node-experiments" / workflow.suite.replace("/", "__")
     log_dir.mkdir(parents=True, exist_ok=True)
+    env = fiber_run_env(os.environ, log_dir)
     started_node = False
     node_process: subprocess.Popen[str] | None = None
+    node_log_handle = None
     started_at = time.time()
     try:
         if not args.assume_nodes_running:
             node_log = log_dir / "start-node.log"
+            node_log_handle = node_log.open("w", encoding="utf-8")
             node_process = subprocess.Popen(
                 ["./tests/nodes/start.sh", suite_arg],
                 cwd=fiber_repo,
                 text=True,
-                stdout=subprocess.PIPE,
+                stdout=node_log_handle,
                 stderr=subprocess.STDOUT,
-                preexec_fn=os.setsid if hasattr(os, "setsid") else None,
+                start_new_session=True,
+                env=env,
             )
             started_node = True
-            wait = run_cmd(["./tests/nodes/wait.sh"], fiber_repo, timeout=args.timeout_seconds)
+            wait = run_cmd(["./tests/nodes/wait.sh"], fiber_repo, timeout=args.timeout_seconds, env=env)
             write_text(log_dir / "wait.stdout", wait.stdout)
             write_text(log_dir / "wait.stderr", wait.stderr)
             if wait.returncode != 0:
@@ -276,7 +319,7 @@ def run_workflow(args: argparse.Namespace, workflow: FiberWorkflow) -> dict[str,
                     "duration_seconds": round(time.time() - started_at, 3),
                 }
         command = ["npm", "exec", "--", "@usebruno/cli", "run", suite_arg, "-r", "--env", "test"]
-        completed = run_cmd(command, fiber_repo / "tests" / "bruno", timeout=args.timeout_seconds)
+        completed = run_cmd(command, fiber_repo / "tests" / "bruno", timeout=args.timeout_seconds, env=env)
         write_text(log_dir / "bruno.stdout", completed.stdout)
         write_text(log_dir / "bruno.stderr", completed.stderr)
         return {
@@ -284,6 +327,7 @@ def run_workflow(args: argparse.Namespace, workflow: FiberWorkflow) -> dict[str,
             "started_node": started_node,
             "command": command,
             "returncode": completed.returncode,
+            "noninteractive_ckb_cli_account_import_wrapper": (log_dir / "tool-bin" / "ckb-cli").is_file(),
             "stdout_log": rel(log_dir / "bruno.stdout", args.repo_root.resolve()),
             "stderr_log": rel(log_dir / "bruno.stderr", args.repo_root.resolve()),
             "duration_seconds": round(time.time() - started_at, 3),
@@ -295,11 +339,14 @@ def run_workflow(args: argparse.Namespace, workflow: FiberWorkflow) -> dict[str,
             else:
                 node_process.terminate()
             try:
-                stdout, _ = node_process.communicate(timeout=20)
+                node_process.wait(timeout=20)
             except subprocess.TimeoutExpired:
                 node_process.kill()
-                stdout, _ = node_process.communicate(timeout=20)
-            write_text(log_dir / "start-node.log", stdout or "")
+                node_process.wait(timeout=20)
+        if started_node:
+            cleanup_fiber_processes(fiber_repo)
+        if node_log_handle is not None:
+            node_log_handle.close()
 
 
 def build_report(args: argparse.Namespace) -> dict[str, Any]:
@@ -319,6 +366,7 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
     all_present = present_count == len(REQUIRED_WORKFLOWS)
     all_executed = executed_count == len(REQUIRED_WORKFLOWS)
     all_executed_passed = all_executed and passed_execution_count == len(REQUIRED_WORKFLOWS)
+    partial_execution_passed = 0 < executed_count == passed_execution_count
     runnable_contract_present = all(
         (fiber_repo / path).is_file()
         for path in (
@@ -336,6 +384,8 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
         status = "passed"
     elif executed_count > 0 and passed_execution_count != executed_count:
         status = "failed"
+    elif partial_execution_passed:
+        status = "partial_execution_passed"
     elif all_present and runnable_contract_present:
         status = "discovery_ready_live_not_run"
     else:
@@ -369,12 +419,14 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
             "all_required_workflows_present": all_present,
             "all_required_workflows_executed": all_executed,
             "all_required_workflows_executed_passed": all_executed_passed,
+            "partial_execution_passed": partial_execution_passed,
         },
         "profiles_covered": mapped_profiles,
         "workflows": workflows,
         "acceptance_boundary": {
             "discovery_ready_live_not_run": "the Fiber clone exposes the expected devnet/e2e workflow surface, but no live Fiber node execution is claimed",
             "passed": "all required Fiber workflow suites were executed through Fiber's devnet node runner and Bruno e2e harness",
+            "partial_execution_passed": "at least one selected Fiber workflow suite was executed and passed, but complete Fiber coverage is not claimed",
             "novaseal_mapping": "NovaSeal consumes this as external Fiber-node evidence; it does not replace NovaSeal's own CKB stateful profile reports",
         },
         "generated_by": {
@@ -385,6 +437,7 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
             "npm": shutil.which("npm"),
             "cargo": shutil.which("cargo"),
             "ckb": shutil.which("ckb"),
+            "ckb_cli": shutil.which("ckb-cli"),
         },
     }
 

@@ -1466,6 +1466,8 @@ fn build_stateful_acceptance_report(repo_root: &Path, agreement_conformance: &Va
         "external_experiment_coverage": {
             "status": if json_pointer_bool(&fiber_node_experiments, "/all_required_workflows_executed_passed") {
                 "passed"
+            } else if json_pointer_bool(&fiber_node_experiments, "/partial_execution_passed") {
+                "partial_execution_passed"
             } else if json_pointer_bool(&fiber_node_experiments, "/discovery_ready") {
                 "discovery_ready_live_not_run"
             } else {
@@ -1651,6 +1653,7 @@ fn fiber_node_execution_summary(report: Option<&Value>) -> Value {
     let all_present = json_pointer_bool(report, "/workflow_coverage/all_required_workflows_present");
     let runnable_devnet_contract_present = json_pointer_bool(report, "/devnet_contract/runnable_devnet_contract_present");
     let all_executed_passed = json_pointer_bool(report, "/workflow_coverage/all_required_workflows_executed_passed");
+    let partial_execution_passed = json_pointer_bool(report, "/workflow_coverage/partial_execution_passed");
     let discovery_ready = all_present && runnable_devnet_contract_present;
     json!({
         "present": true,
@@ -1668,6 +1671,7 @@ fn fiber_node_execution_summary(report: Option<&Value>) -> Value {
         "profiles_covered": report.get("profiles_covered").cloned().unwrap_or(Value::Null),
         "tooling": report.get("tooling").cloned().unwrap_or(Value::Null),
         "discovery_ready": discovery_ready,
+        "partial_execution_passed": partial_execution_passed,
         "all_required_workflows_executed_passed": all_executed_passed,
         "execution_boundary": "discovery_ready is not live Fiber devnet evidence; all_required_workflows_executed_passed is required for external Fiber-node execution coverage",
         "required_report": FIBER_NODE_EXPERIMENTS,
