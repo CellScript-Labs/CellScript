@@ -328,8 +328,15 @@ const EXPECTED_PUBLIC_CELLDEP_FIELD_CONSTRAINTS: &[(&str, &str)] = &[
     ("runtime_verifier.hash_type", "data1"),
     ("request_handoff.bundle_hash_algorithm", "blake2b-256(person=NovaExtHandoff)"),
 ];
-const EXPECTED_PUBLIC_CELLDEP_EXPECTED_VALUE_FIELDS: &[&str] =
-    &["artifact_hash", "release.manifest_commit", "release.version", "runtime_verifier.dep_type", "runtime_verifier.hash_type"];
+const EXPECTED_PUBLIC_CELLDEP_EXPECTED_VALUE_FIELDS: &[&str] = &[
+    "artifact_hash",
+    "release.manifest_commit",
+    "release.version",
+    "runtime_verifier.dep_type",
+    "runtime_verifier.hash_type",
+    "runtime_verifier.ipc_abi",
+    "runtime_verifier.verifier_id",
+];
 const EXPECTED_EXTERNAL_TCB_REQUIRED_FIELDS: &[&str] = &[
     "reviewer",
     "review_date",
@@ -3175,6 +3182,10 @@ fn validate_external_evidence_handoff_detail(report: &Value, btc_spv_adapter: &V
         adapter_case_request_str(external_attestation_adapter, "public_shared_cell_dep_attestation", "/request/expected_dep_type");
     let expected_public_hash_type =
         adapter_case_request_str(external_attestation_adapter, "public_shared_cell_dep_attestation", "/request/expected_hash_type");
+    let expected_public_ipc_abi =
+        adapter_case_request_str(external_attestation_adapter, "public_shared_cell_dep_attestation", "/request/ipc_abi");
+    let expected_public_verifier_id =
+        adapter_case_request_str(external_attestation_adapter, "public_shared_cell_dep_attestation", "/request/verifier_id");
     let expected_external_tcb_artifact_hash = adapter_case_request_str(
         external_attestation_adapter,
         "external_bip340_tcb_review_attestation",
@@ -3234,11 +3245,15 @@ fn validate_external_evidence_handoff_detail(report: &Value, btc_spv_adapter: &V
                     && expected_public_artifact_hash.is_some_and(is_hex32)
                     && expected_public_dep_type == Some(EXPECTED_NOVASEAL_CELLDEP_DEP_TYPE)
                     && expected_public_hash_type == Some(EXPECTED_NOVASEAL_CELLDEP_HASH_TYPE)
+                    && expected_public_ipc_abi == Some("cellscript-btc-bip340-ipc-v0")
+                    && expected_public_verifier_id == Some("btc.bip340.v0")
                     && json_pointer_str(&case, "/expected_values/artifact_hash") == expected_public_artifact_hash
                     && json_pointer_str(&case, "/expected_values/release.version") == expected_public_release_version
                     && json_pointer_str(&case, "/expected_values/release.manifest_commit") == expected_public_manifest_commit
                     && json_pointer_str(&case, "/expected_values/runtime_verifier.dep_type") == expected_public_dep_type
                     && json_pointer_str(&case, "/expected_values/runtime_verifier.hash_type") == expected_public_hash_type
+                    && json_pointer_str(&case, "/expected_values/runtime_verifier.ipc_abi") == expected_public_ipc_abi
+                    && json_pointer_str(&case, "/expected_values/runtime_verifier.verifier_id") == expected_public_verifier_id
             }
             "external_bip340_tcb_review_attestation" => {
                 exact_object_keys(case.get("expected_values").unwrap_or(&Value::Null), EXPECTED_EXTERNAL_TCB_EXPECTED_VALUE_FIELDS)
@@ -5213,6 +5228,8 @@ mod tests {
         let public_release_version = EXPECTED_NOVASEAL_RELEASE_VERSION;
         let public_dep_type = EXPECTED_NOVASEAL_CELLDEP_DEP_TYPE;
         let public_hash_type = EXPECTED_NOVASEAL_CELLDEP_HASH_TYPE;
+        let public_ipc_abi = "cellscript-btc-bip340-ipc-v0";
+        let public_verifier_id = "btc.bip340.v0";
         let public_artifact_hash = format!("0x{}", "99".repeat(32));
         let external_artifact_hash = format!("0x{}", "aa".repeat(32));
         let external_source_tree_hash = format!("0x{}", "bb".repeat(32));
@@ -5252,6 +5269,8 @@ mod tests {
                         "expected_release_manifest_commit": public_manifest_commit,
                         "expected_dep_type": public_dep_type,
                         "expected_hash_type": public_hash_type,
+                        "ipc_abi": public_ipc_abi,
+                        "verifier_id": public_verifier_id,
                     },
                 },
                 {
@@ -5314,6 +5333,8 @@ mod tests {
                         "release.manifest_commit": public_manifest_commit,
                         "runtime_verifier.dep_type": public_dep_type,
                         "runtime_verifier.hash_type": public_hash_type,
+                        "runtime_verifier.ipc_abi": public_ipc_abi,
+                        "runtime_verifier.verifier_id": public_verifier_id,
                     },
                     "checks": { "ok": true },
                 },
@@ -5417,6 +5438,23 @@ mod tests {
         assert_eq!(json_pointer_str(&failed_dep_type, "/status"), Some("failed"));
         assert!(!json_pointer_bool(
             &failed_dep_type,
+            "/cases/public_shared_cell_dep_attestation/expected_values_match_source_adapter"
+        ));
+
+        let mut stale_ipc_abi = report.clone();
+        stale_ipc_abi["cases"][1]["expected_values"]["runtime_verifier.ipc_abi"] = json!("cellscript-btc-bip340-ipc-v1");
+        let failed_ipc_abi =
+            validate_external_evidence_handoff_detail(&stale_ipc_abi, &btc_spv_adapter, &external_attestation_adapter);
+        assert_eq!(json_pointer_str(&failed_ipc_abi, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&failed_ipc_abi, "/cases/public_shared_cell_dep_attestation/expected_values_match_source_adapter"));
+
+        let mut stale_verifier_id = report.clone();
+        stale_verifier_id["cases"][1]["expected_values"]["runtime_verifier.verifier_id"] = json!("btc.bip340.v1");
+        let failed_verifier_id =
+            validate_external_evidence_handoff_detail(&stale_verifier_id, &btc_spv_adapter, &external_attestation_adapter);
+        assert_eq!(json_pointer_str(&failed_verifier_id, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(
+            &failed_verifier_id,
             "/cases/public_shared_cell_dep_attestation/expected_values_match_source_adapter"
         ));
 

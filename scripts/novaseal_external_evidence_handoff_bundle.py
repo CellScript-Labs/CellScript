@@ -183,6 +183,10 @@ def attestation_case(
         expected_values["runtime_verifier.dep_type"] = request["expected_dep_type"]
     if request.get("expected_hash_type"):
         expected_values["runtime_verifier.hash_type"] = request["expected_hash_type"]
+    if case_name == "public_shared_cell_dep_attestation" and request.get("ipc_abi"):
+        expected_values["runtime_verifier.ipc_abi"] = request["ipc_abi"]
+    if case_name == "public_shared_cell_dep_attestation" and request.get("verifier_id"):
+        expected_values["runtime_verifier.verifier_id"] = request["verifier_id"]
     if request.get("expected_artifact_hash"):
         expected_values["artifact_hash"] = request["expected_artifact_hash"]
     if request.get("expected_artifact_hash_algorithm"):
