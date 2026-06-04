@@ -4492,19 +4492,25 @@ fn validate_attestation_templates(
         "public_release_version_current": json_pointer_str(public_release, "/version") == Some(EXPECTED_NOVASEAL_RELEASE_VERSION),
         "public_release_manifest_commit_present": public_release.get("manifest_commit").is_some_and(value_is_present),
         "public_request_handoff_fields_exact": exact_object_keys(public_handoff, EXPECTED_EXTERNAL_REQUEST_HANDOFF_FIELDS),
+        "public_request_handoff_bundle_path": json_pointer_str(public_handoff, "/bundle") == Some(EXTERNAL_EVIDENCE_HANDOFF),
         "public_request_handoff_hash_algorithm": json_pointer_str(public_handoff, "/bundle_hash_algorithm")
             == Some(NOVASEAL_HANDOFF_HASH_ALGORITHM),
+        "public_request_handoff_group": json_pointer_str(public_handoff, "/group") == Some("public_shared_cell_dep_attestation"),
         "public_runtime_verifier_fields_exact": exact_object_keys(public_verifier, EXPECTED_PUBLIC_CELLDEP_RUNTIME_VERIFIER_FIELDS),
         "external_top_level_fields_exact": exact_object_keys(external, EXPECTED_EXTERNAL_TCB_REVIEW_ATTESTATION_FIELDS),
         "external_request_handoff_fields_exact": exact_object_keys(external_handoff, EXPECTED_EXTERNAL_REQUEST_HANDOFF_FIELDS),
+        "external_request_handoff_bundle_path": json_pointer_str(external_handoff, "/bundle") == Some(EXTERNAL_EVIDENCE_HANDOFF),
         "external_request_handoff_hash_algorithm": json_pointer_str(external_handoff, "/bundle_hash_algorithm")
             == Some(NOVASEAL_HANDOFF_HASH_ALGORITHM),
+        "external_request_handoff_group": json_pointer_str(external_handoff, "/group") == Some("external_bip340_tcb_review_attestation"),
         "external_artifact_hash_algorithm": json_pointer_str(external, "/artifact_hash_algorithm") == Some("sha256"),
         "external_artifact_hash_algorithm_matches_current_tcb": json_pointer_str(external, "/artifact_hash_algorithm") == artifact_hash_algorithm,
         "btc_spv_top_level_fields_exact": exact_object_keys(btc_spv, EXPECTED_PUBLIC_BTC_SPV_EVIDENCE_FIELDS),
         "btc_spv_request_handoff_fields_exact": exact_object_keys(btc_spv_handoff, EXPECTED_EXTERNAL_REQUEST_HANDOFF_FIELDS),
+        "btc_spv_request_handoff_bundle_path": json_pointer_str(btc_spv_handoff, "/bundle") == Some(EXTERNAL_EVIDENCE_HANDOFF),
         "btc_spv_request_handoff_hash_algorithm": json_pointer_str(btc_spv_handoff, "/bundle_hash_algorithm")
             == Some(NOVASEAL_HANDOFF_HASH_ALGORITHM),
+        "btc_spv_request_handoff_group": json_pointer_str(btc_spv_handoff, "/group") == Some("public_btc_spv_evidence"),
         "btc_spv_required_profiles_exact": btc_spv_profiles == expected_btc_spv_profiles,
         "public_template_network_not_local_devnet": json_pointer_str(public, "/network").is_some_and(|network| !network.is_empty() && network != "local-devnet"),
         "public_artifact_hash_matches_current_tcb": normalize_hex(json_pointer_str(public_verifier, "/artifact_hash")).as_deref() == artifact_hash,
@@ -6013,6 +6019,12 @@ mod tests {
         assert!(json_pointer_bool(&passed, "/checks/public_hash_type"));
         assert!(json_pointer_bool(&passed, "/checks/public_hash_type_matches_expected"));
         assert!(json_pointer_bool(&passed, "/checks/public_release_version_current"));
+        assert!(json_pointer_bool(&passed, "/checks/public_request_handoff_bundle_path"));
+        assert!(json_pointer_bool(&passed, "/checks/public_request_handoff_group"));
+        assert!(json_pointer_bool(&passed, "/checks/external_request_handoff_bundle_path"));
+        assert!(json_pointer_bool(&passed, "/checks/external_request_handoff_group"));
+        assert!(json_pointer_bool(&passed, "/checks/btc_spv_request_handoff_bundle_path"));
+        assert!(json_pointer_bool(&passed, "/checks/btc_spv_request_handoff_group"));
         assert_eq!(json_pointer_str(&failed, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&failed, "/checks/public_artifact_hash_matches_current_tcb"));
         assert!(!json_pointer_bool(&failed, "/checks/external_artifact_hash_matches_current_tcb"));
@@ -6089,6 +6101,58 @@ mod tests {
                 .unwrap();
         assert_eq!(json_pointer_str(&failed_algorithm, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&failed_algorithm, "/checks/external_artifact_hash_algorithm_matches_current_tcb"));
+
+        let mut public_wrong_handoff_bundle =
+            json_load_path(temp.path(), &proofs.join("public_shared_cell_dep_attestation.template.json")).unwrap();
+        public_wrong_handoff_bundle["request_handoff"]["bundle"] = json!("target/stale-handoff.json");
+        std::fs::write(
+            proofs.join("public_shared_cell_dep_attestation.template.json"),
+            serde_json::to_vec_pretty(&public_wrong_handoff_bundle).unwrap(),
+        )
+        .unwrap();
+        let failed_public_handoff_bundle =
+            validate_attestation_templates(temp.path(), Some(&artifact_hash), Some("sha256"), Some(&source_tree_hash)).unwrap();
+        assert_eq!(json_pointer_str(&failed_public_handoff_bundle, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&failed_public_handoff_bundle, "/checks/public_request_handoff_bundle_path"));
+
+        public_wrong_handoff_bundle["request_handoff"]["bundle"] = json!(EXTERNAL_EVIDENCE_HANDOFF);
+        std::fs::write(
+            proofs.join("public_shared_cell_dep_attestation.template.json"),
+            serde_json::to_vec_pretty(&public_wrong_handoff_bundle).unwrap(),
+        )
+        .unwrap();
+
+        let mut external_wrong_handoff_group =
+            json_load_path(temp.path(), &proofs.join("bip340_external_tcb_review_attestation.template.json")).unwrap();
+        external_wrong_handoff_group["request_handoff"]["group"] = json!("public_shared_cell_dep_attestation");
+        std::fs::write(
+            proofs.join("bip340_external_tcb_review_attestation.template.json"),
+            serde_json::to_vec_pretty(&external_wrong_handoff_group).unwrap(),
+        )
+        .unwrap();
+        let failed_external_handoff_group =
+            validate_attestation_templates(temp.path(), Some(&artifact_hash), Some("sha256"), Some(&source_tree_hash)).unwrap();
+        assert_eq!(json_pointer_str(&failed_external_handoff_group, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&failed_external_handoff_group, "/checks/external_request_handoff_group"));
+
+        external_wrong_handoff_group["request_handoff"]["group"] = json!("external_bip340_tcb_review_attestation");
+        std::fs::write(
+            proofs.join("bip340_external_tcb_review_attestation.template.json"),
+            serde_json::to_vec_pretty(&external_wrong_handoff_group).unwrap(),
+        )
+        .unwrap();
+
+        let mut btc_wrong_handoff_group = json_load_path(temp.path(), &proofs.join("public_btc_spv_evidence.template.json")).unwrap();
+        btc_wrong_handoff_group["request_handoff"]["group"] = json!("external_bip340_tcb_review_attestation");
+        std::fs::write(
+            proofs.join("public_btc_spv_evidence.template.json"),
+            serde_json::to_vec_pretty(&btc_wrong_handoff_group).unwrap(),
+        )
+        .unwrap();
+        let failed_btc_handoff_group =
+            validate_attestation_templates(temp.path(), Some(&artifact_hash), Some("sha256"), Some(&source_tree_hash)).unwrap();
+        assert_eq!(json_pointer_str(&failed_btc_handoff_group, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&failed_btc_handoff_group, "/checks/btc_spv_request_handoff_group"));
     }
 
     #[test]
