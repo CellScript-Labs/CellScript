@@ -336,10 +336,13 @@ const EXPECTED_PUBLIC_CELLDEP_FIELD_CONSTRAINTS: &[(&str, &str)] = &[
     ("release.package", "novaseal"),
     ("release.version", "exact NovaSeal release version 0.0.1-v0-mvp"),
     ("release.manifest_commit", "40-character hex source commit matching the reviewed TCB repo_commit"),
+    ("runtime_verifier.verifier_id", "btc.bip340.v0"),
+    ("runtime_verifier.ipc_abi", "cellscript-btc-bip340-ipc-v0"),
     ("runtime_verifier.out_point", "0x-prefixed 32-byte CKB transaction hash plus numeric output index"),
     ("runtime_verifier.data_hash", "0x-prefixed 32-byte non-placeholder CellDep data hash"),
     ("runtime_verifier.dep_type", EXPECTED_NOVASEAL_CELLDEP_DEP_TYPE),
     ("runtime_verifier.hash_type", "data1"),
+    ("runtime_verifier.artifact_hash", "0x-prefixed 32-byte non-placeholder BIP340 runtime verifier artifact hash"),
     ("request_handoff.bundle", "target/novaseal-external-evidence-handoff-bundle.json"),
     ("request_handoff.bundle_hash", "0x-prefixed 32-byte hash of the NovaSeal external evidence handoff bundle"),
     ("request_handoff.bundle_hash_algorithm", "blake2b-256(person=NovaExtHandoff)"),
@@ -374,7 +377,11 @@ const EXPECTED_EXTERNAL_TCB_FIELD_CONSTRAINTS: &[(&str, &str)] = &[
     ("reviewer", "real external reviewer identity; placeholder, example, and unknown tokens are rejected"),
     ("review_date", "UTC date in YYYY-MM-DD form; future dates are rejected"),
     ("review_scope", "exact BIP340 verifier, RISC-V shell, IPC envelope, and artifact/CellDep pinning scope"),
+    ("verifier_id", "btc.bip340.v0"),
+    ("ipc_abi", "cellscript-btc-bip340-ipc-v0"),
+    ("artifact_hash", "0x-prefixed 32-byte non-placeholder BIP340 runtime verifier artifact hash"),
     ("artifact_hash_algorithm", "sha256"),
+    ("source_tree_sha256", "0x-prefixed 32-byte non-placeholder SHA-256 source tree hash"),
     ("report_uri", "HTTPS URI for the public review report or source-controlled review commit; example domains are rejected"),
     ("request_handoff.bundle", "target/novaseal-external-evidence-handoff-bundle.json"),
     ("request_handoff.bundle_hash", "0x-prefixed 32-byte hash of the NovaSeal external evidence handoff bundle"),
@@ -5536,6 +5543,35 @@ mod tests {
         assert_eq!(json_pointer_str(&failed_handoff_group_constraint, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&failed_handoff_group_constraint, "/cases/public_btc_spv_evidence/field_constraints_exact"));
 
+        let mut missing_public_artifact_constraint = report.clone();
+        missing_public_artifact_constraint["cases"][1]["field_constraints"]
+            .as_object_mut()
+            .unwrap()
+            .remove("runtime_verifier.artifact_hash");
+        let failed_public_artifact_constraint = validate_external_evidence_handoff_detail(
+            &missing_public_artifact_constraint,
+            &btc_spv_adapter,
+            &external_attestation_adapter,
+        );
+        assert_eq!(json_pointer_str(&failed_public_artifact_constraint, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(
+            &failed_public_artifact_constraint,
+            "/cases/public_shared_cell_dep_attestation/field_constraints_exact"
+        ));
+
+        let mut missing_external_source_constraint = report.clone();
+        missing_external_source_constraint["cases"][2]["field_constraints"].as_object_mut().unwrap().remove("source_tree_sha256");
+        let failed_external_source_constraint = validate_external_evidence_handoff_detail(
+            &missing_external_source_constraint,
+            &btc_spv_adapter,
+            &external_attestation_adapter,
+        );
+        assert_eq!(json_pointer_str(&failed_external_source_constraint, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(
+            &failed_external_source_constraint,
+            "/cases/external_bip340_tcb_review_attestation/field_constraints_exact"
+        ));
+
         let mut stale_expected_scenario = report.clone();
         stale_expected_scenario["cases"][0]["expected_scenarios"][EXPECTED_BTC_TX_COMMITMENT_PROFILE] =
             json!("generic-public-btc-proof");
@@ -5741,6 +5777,18 @@ mod tests {
             "/cases/public_shared_cell_dep_attestation/field_constraints_exact"
         ));
 
+        let mut missing_public_artifact_constraint = report.clone();
+        missing_public_artifact_constraint["cases"][0]["request"]["field_constraints"]
+            .as_object_mut()
+            .unwrap()
+            .remove("runtime_verifier.artifact_hash");
+        let failed_public_artifact_constraint = validate_external_attestation_adapter_detail(&missing_public_artifact_constraint);
+        assert_eq!(json_pointer_str(&failed_public_artifact_constraint, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(
+            &failed_public_artifact_constraint,
+            "/cases/public_shared_cell_dep_attestation/field_constraints_exact"
+        ));
+
         let mut missing_tcb_handoff_group_constraint = report.clone();
         missing_tcb_handoff_group_constraint["cases"][1]["request"]["field_constraints"]
             .as_object_mut()
@@ -5750,6 +5798,18 @@ mod tests {
         assert_eq!(json_pointer_str(&failed_tcb_handoff_group_constraint, "/status"), Some("failed"));
         assert!(!json_pointer_bool(
             &failed_tcb_handoff_group_constraint,
+            "/cases/external_bip340_tcb_review_attestation/field_constraints_exact"
+        ));
+
+        let mut missing_tcb_source_constraint = report.clone();
+        missing_tcb_source_constraint["cases"][1]["request"]["field_constraints"]
+            .as_object_mut()
+            .unwrap()
+            .remove("source_tree_sha256");
+        let failed_tcb_source_constraint = validate_external_attestation_adapter_detail(&missing_tcb_source_constraint);
+        assert_eq!(json_pointer_str(&failed_tcb_source_constraint, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(
+            &failed_tcb_source_constraint,
             "/cases/external_bip340_tcb_review_attestation/field_constraints_exact"
         ));
 
