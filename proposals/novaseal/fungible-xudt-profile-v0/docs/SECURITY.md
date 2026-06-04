@@ -11,6 +11,9 @@
   settled, and `new_amount` is zero.
 - Every signed intent binds the shared `NovaSealCanonicalEnvelopeV0` hash and a
   materialised receipt hash.
+- `nova_fungible_xudt_lifecycle` keeps issue, transfer, and settlement under
+  one CKB type-script identity and checks actual transaction output data hashes
+  for the state Cell and receipt outputs.
 
 ## Not Implemented
 

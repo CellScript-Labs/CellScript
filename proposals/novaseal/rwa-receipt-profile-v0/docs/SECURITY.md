@@ -10,6 +10,9 @@
   `document_hash`, issuer, holder, amount, expiry, and increment nonce exactly
   once.
 - Every lifecycle edge emits an immutable `NovaRwaReceiptEventV0` audit event.
+- `nova_rwa_receipt_lifecycle` keeps materialisation, claim, and settlement
+  under one CKB type-script identity and checks actual transaction output data
+  hashes for receipt cells and event outputs.
 - All value fields are `u64`; no floating point or decimal rounding exists in
   this profile.
 

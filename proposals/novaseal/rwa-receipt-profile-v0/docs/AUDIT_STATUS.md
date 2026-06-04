@@ -10,6 +10,7 @@
 | Holder-only claim | source-guard-present |
 | Dual-authority settlement | source-guard-present |
 | Immutable receipt audit trail | source-guard-present |
+| Stable lifecycle type action | compiles-to-ckb-elf |
 | Live devnet materialise -> claim -> settle | missing-live-devnet-evidence |
 
 ## Fixture Honesty

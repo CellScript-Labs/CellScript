@@ -6,7 +6,9 @@ external attestations, and legal/registry review are still missing.
 
 This package implements the planned NovaSeal RWA/receipt object profile as a
 source-level package with schemas, fixtures, invariant matrix, and security
-boundary documentation.
+boundary documentation. It also includes
+`src/nova_rwa_receipt_lifecycle_type.cell:nova_rwa_receipt_lifecycle`, a single
+CKB-facing lifecycle action for materialisation, claim, and settlement.
 
 ## Boundary
 
@@ -31,6 +33,7 @@ price, legal enforceability, or oracle facts.
 | Materialise, claim, settle actions | implemented | source-guard-present |
 | Integer-only amount model | implemented | source-guard-present |
 | Immutable event audit trail | implemented | source-guard-present |
+| Stable RWA receipt lifecycle type action | implemented | compiles-to-ckb-elf |
 | Schemas and fixture labels | implemented | reviewable |
 | Invariant matrix | implemented | reviewable |
 | Live devnet materialise -> claim -> settle | missing | missing-live-devnet-evidence |

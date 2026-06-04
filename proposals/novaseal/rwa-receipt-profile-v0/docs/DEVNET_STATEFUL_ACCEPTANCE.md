@@ -4,8 +4,8 @@ Required V1 evidence is not present yet.
 
 The acceptance target is:
 
-1. Deploy the BIP340 runtime verifier and RWA receipt profile code as live
-   CellDeps.
+1. Deploy the BIP340 runtime verifier and `nova_rwa_receipt_lifecycle` type
+   code as live CellDeps.
 2. Submit a valid materialisation transaction and prove the receipt Cell and
    immutable event are live.
 3. Submit a valid claim transaction and prove the old materialised Cell is dead

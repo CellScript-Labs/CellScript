@@ -10,6 +10,7 @@
 | Holder-only transfer | source-guard-present |
 | Amount-preserving transfer | source-guard-present |
 | Terminal settlement receipt | source-guard-present |
+| Stable lifecycle type action | compiles-to-ckb-elf |
 | Live devnet issue -> transfer -> settle | missing-live-devnet-evidence |
 
 ## Fixture Honesty

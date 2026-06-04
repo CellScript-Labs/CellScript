@@ -26,6 +26,11 @@ const FIBER_CANDIDATE_MANIFEST: &str = "proposals/novaseal/fiber-candidate-profi
 const CANONICAL_SCHEMA: &str = "proposals/novaseal/v0-mvp-skeleton/schemas/nova_seal_canonical_envelope_v0.schema";
 const CORE_LIVE: &str = "target/novaseal-devnet-stateful-live.json";
 const AGREEMENT_LIVE: &str = "target/novaseal-agreement-devnet-stateful-live.json";
+const FUNGIBLE_XUDT_LIVE: &str = "target/novaseal-fungible-xudt-devnet-stateful-live.json";
+const RWA_RECEIPT_LIVE: &str = "target/novaseal-rwa-receipt-devnet-stateful-live.json";
+const BTC_TX_COMMITMENT_LIVE: &str = "target/novaseal-btc-transaction-commitment-devnet-stateful-live.json";
+const BTC_UTXO_SEAL_LIVE: &str = "target/novaseal-btc-utxo-seal-devnet-stateful-live.json";
+const FIBER_CANDIDATE_LIVE: &str = "target/novaseal-fiber-candidate-devnet-stateful-live.json";
 const STATEFUL_ACCEPTANCE: &str = "target/novaseal-devnet-stateful-acceptance.json";
 const WALLET_VECTORS: &str = "target/novaseal-wallet-signing-vectors.json";
 const TCB_REVIEW: &str = "target/novaseal-bip340-tcb-review.json";
@@ -333,6 +338,8 @@ const REQUIRED_FUNGIBLE_XUDT_SOURCE_PATTERNS: &[(&str, &str)] = &[
     ("issue_action", "action issue_xudt"),
     ("transfer_action", "action transfer_xudt"),
     ("settle_action", "action settle_xudt"),
+    ("lifecycle_action", "action nova_fungible_xudt_lifecycle"),
+    ("lifecycle_output_check", "source::group_output(0)"),
     ("canonical_runtime_check", "intent.canonical_envelope_hash == canonical_envelope_hash"),
     ("expected_receipt_hash", "intent.expected_receipt_hash == materialized_receipt_hash"),
     ("authority_signature", "verifier::btc::bip340::require_signature"),
@@ -351,6 +358,8 @@ const REQUIRED_RWA_RECEIPT_SOURCE_PATTERNS: &[(&str, &str)] = &[
     ("materialize_action", "action materialize_rwa_receipt"),
     ("claim_action", "action claim_rwa_receipt"),
     ("settle_action", "action settle_rwa_receipt"),
+    ("lifecycle_action", "action nova_rwa_receipt_lifecycle"),
+    ("lifecycle_output_check", "source::group_output(0)"),
     ("canonical_runtime_check", "intent.canonical_envelope_hash == canonical_envelope_hash"),
     ("expected_receipt_hash", "intent.expected_receipt_hash == materialized_receipt_hash"),
     ("authority_signature", "verifier::btc::bip340::require_signature"),
@@ -750,7 +759,7 @@ fn build_v1_readiness(
 fn build_planned_profile_matrix(profile_certification: &Value, stateful_acceptance: &Value) -> Value {
     let core_passed = json_pointer_str(stateful_acceptance, "/profile_coverage/covered_profiles/0/status") == Some("passed");
     let agreement_passed = json_pointer_str(stateful_acceptance, "/profile_coverage/covered_profiles/1/status") == Some("passed")
-        && json_pointer_str(profile_certification, "/status") == Some("passed");
+        && json_pointer_bool(profile_certification, "/local_checks/conformance_gate_passed");
     let key_signature_passed = json_pointer_bool(profile_certification, "/local_checks/local_bip340_tcb_review_passed")
         && json_pointer_bool(profile_certification, "/local_checks/wallet_vector_detail_passed");
     let btc_tx_commitment_package_passed =
@@ -765,7 +774,24 @@ fn build_planned_profile_matrix(profile_certification: &Value, stateful_acceptan
         json_pointer_str(profile_certification, "/planned_profile_packages/fungible_xudt/status") == Some("passed");
     let rwa_receipt_package_passed =
         json_pointer_str(profile_certification, "/planned_profile_packages/rwa_receipt/status") == Some("passed");
-    let current_business_passed = json_pointer_str(stateful_acceptance, "/business_scenario_coverage/status") == Some("passed");
+    let agreement_business_passed = [
+        "agreement_originate_live",
+        "agreement_repay_live",
+        "agreement_claim_live",
+        "agreement_negative_business_cases_preserve_live_state",
+    ]
+    .iter()
+    .all(|key| json_pointer_bool(stateful_acceptance, &format!("/business_scenario_coverage/checks/{key}")));
+    let btc_tx_commitment_business_passed =
+        json_pointer_bool(stateful_acceptance, "/business_scenario_coverage/checks/btc_transaction_commitment_transition_live");
+    let btc_utxo_seal_business_passed =
+        json_pointer_bool(stateful_acceptance, "/business_scenario_coverage/checks/btc_utxo_seal_closure_live");
+    let fungible_xudt_business_passed =
+        json_pointer_bool(stateful_acceptance, "/business_scenario_coverage/checks/fungible_xudt_value_flow_live");
+    let rwa_receipt_business_passed =
+        json_pointer_bool(stateful_acceptance, "/business_scenario_coverage/checks/rwa_receipt_lifecycle_live");
+    let fiber_candidate_business_passed =
+        json_pointer_bool(stateful_acceptance, "/business_scenario_coverage/checks/fiber_candidate_path_live");
     let profiles = vec![
         planned_row(
             "seal_profile_btc_key_signature",
@@ -843,43 +869,43 @@ fn build_planned_profile_matrix(profile_certification: &Value, stateful_acceptan
             "agreement_originate_repay_claim",
             "Business scenario",
             "Agreement originate, repay-before-expiry, claim-after-expiry, payout, receipt, and negative paths",
-            agreement_passed && current_business_passed,
+            agreement_passed && agreement_business_passed,
             "target/novaseal-devnet-stateful-acceptance.json#/business_scenario_coverage",
         ),
         planned_row(
             "btc_transaction_commitment_transition",
             "Business scenario",
             "Transition authorised by a public BTC transaction commitment",
-            false,
-            "not implemented: missing BTC transaction commitment profile",
+            btc_tx_commitment_package_passed && btc_tx_commitment_business_passed,
+            "target/novaseal-btc-transaction-commitment-devnet-stateful-live.json",
         ),
         planned_row(
             "btc_utxo_seal_closure",
             "Business scenario",
             "Single-use BTC UTXO seal closure over a CKB transition",
-            false,
-            "not implemented: missing BTC UTXO seal profile",
+            btc_utxo_seal_package_passed && btc_utxo_seal_business_passed,
+            "target/novaseal-btc-utxo-seal-devnet-stateful-live.json",
         ),
         planned_row(
             "fungible_xudt_value_flow",
             "Business scenario",
             "Fungible/xUDT issue, transfer, settlement, and negative accounting paths",
-            false,
-            "not implemented: missing Fungible/xUDT profile",
+            fungible_xudt_package_passed && fungible_xudt_business_passed,
+            "target/novaseal-fungible-xudt-devnet-stateful-live.json",
         ),
         planned_row(
             "rwa_receipt_lifecycle",
             "Business scenario",
             "RWA/receipt materialisation, claim, settlement, and negative paths",
-            false,
-            "not implemented: missing RWA/receipt profile",
+            rwa_receipt_package_passed && rwa_receipt_business_passed,
+            "target/novaseal-rwa-receipt-devnet-stateful-live.json",
         ),
         planned_row(
             "fiber_candidate_path",
             "Business scenario",
             "Fiber-compatible candidate settlement path",
-            false,
-            "not implemented: missing Fiber-facing profile",
+            fiber_candidate_package_passed && fiber_candidate_business_passed,
+            "target/novaseal-fiber-candidate-devnet-stateful-live.json",
         ),
     ];
     let missing_profiles = profiles
@@ -897,8 +923,8 @@ fn build_planned_profile_matrix(profile_certification: &Value, stateful_acceptan
         "business_scenarios": business_scenarios,
         "missing": missing_profiles,
         "boundary": {
-            "implemented_now": "BTC key-signature authority, BTC transaction commitment profile package evidence, BTC UTXO seal profile package evidence, dual-seal profile package evidence, key-signed Cell movement, CKB-native Agreement terminal paths, Fungible/xUDT profile package evidence, RWA/receipt profile package evidence, and Fiber candidate profile package evidence",
-            "not_implemented_yet": "BTC transaction commitment live/public-BTC evidence, BTC UTXO seal live/public-BTC evidence, dual-seal live finality evidence, Fungible/xUDT live value-flow evidence, RWA/receipt live lifecycle evidence, and live Fiber candidate path evidence",
+            "implemented_now": "BTC key-signature authority, planned profile package evidence, key-signed Cell movement, CKB-native Agreement terminal paths, and machine-readable live-report contracts for all remaining V1 business scenarios",
+            "not_implemented_yet": "fresh live devnet reports proving BTC transaction commitment, BTC UTXO closure, Fungible/xUDT value-flow, RWA receipt lifecycle, and Fiber candidate execution",
         },
     })
 }
@@ -931,8 +957,147 @@ fn build_stateful_acceptance_report(repo_root: &Path, agreement_conformance: &Va
     let agreement_tx = json_load_path_optional(&repo_root.join(AGREEMENT_ROOT).join("target/nova-agreement-ckb-tx-report.json"))?;
     let live_core_report = json_load_path_optional(&repo_root.join(CORE_LIVE))?;
     let live_agreement_report = json_load_path_optional(&repo_root.join(AGREEMENT_LIVE))?;
+    let live_fungible_xudt_report = json_load_path_optional(&repo_root.join(FUNGIBLE_XUDT_LIVE))?;
+    let live_rwa_receipt_report = json_load_path_optional(&repo_root.join(RWA_RECEIPT_LIVE))?;
+    let live_btc_tx_commitment_report = json_load_path_optional(&repo_root.join(BTC_TX_COMMITMENT_LIVE))?;
+    let live_btc_utxo_seal_report = json_load_path_optional(&repo_root.join(BTC_UTXO_SEAL_LIVE))?;
+    let live_fiber_candidate_report = json_load_path_optional(&repo_root.join(FIBER_CANDIDATE_LIVE))?;
     let live_core = live_core_summary(repo_root, live_core_report.as_ref())?;
     let live_agreement = live_agreement_summary(repo_root, live_agreement_report.as_ref())?;
+    let live_fungible_xudt = live_planned_profile_summary(
+        repo_root,
+        live_fungible_xudt_report.as_ref(),
+        &[
+            FUNGIBLE_XUDT_MANIFEST,
+            "proposals/novaseal/fungible-xudt-profile-v0/src",
+            "proposals/novaseal/fungible-xudt-profile-v0/schemas",
+            VERIFIER_ROOT,
+            "scripts/novaseal_planned_profiles_devnet_stateful_live.py",
+        ],
+        &[("issue", "/issue/commit/tx_hash"), ("transfer", "/transfer/commit/tx_hash"), ("settle", "/settle/commit/tx_hash")],
+        &[
+            ("issue_balance_live", "/issue/balance_live"),
+            ("issue_receipt_live", "/issue/receipt_live"),
+            ("transfer_old_balance_not_live", "/transfer/old_balance_not_live"),
+            ("transfer_sender_balance_live", "/transfer/sender_balance_live"),
+            ("transfer_receiver_balance_live", "/transfer/receiver_balance_live"),
+            ("transfer_receipt_live", "/transfer/receipt_live"),
+            ("transfer_amount_conserved", "/transfer/amount_conserved"),
+            ("settle_old_balance_not_live", "/settle/old_balance_not_live"),
+            ("settlement_receipt_live", "/settle/settlement_receipt_live"),
+            ("post_negative_state_still_live", "/negative_cases/post_negative_state_still_live"),
+        ],
+        &[
+            ("wrong_holder_signature_rejected", "wrong_holder_signature_dry_run"),
+            ("transfer_amount_mismatch_rejected", "transfer_amount_mismatch_dry_run"),
+            ("settle_wrong_holder_signature_rejected", "settle_wrong_holder_signature_dry_run"),
+        ],
+    )?;
+    let live_rwa_receipt = live_planned_profile_summary(
+        repo_root,
+        live_rwa_receipt_report.as_ref(),
+        &[
+            RWA_RECEIPT_MANIFEST,
+            "proposals/novaseal/rwa-receipt-profile-v0/src",
+            "proposals/novaseal/rwa-receipt-profile-v0/schemas",
+            VERIFIER_ROOT,
+            "scripts/novaseal_planned_profiles_devnet_stateful_live.py",
+        ],
+        &[("materialize", "/materialize/commit/tx_hash"), ("claim", "/claim/commit/tx_hash"), ("settle", "/settle/commit/tx_hash")],
+        &[
+            ("materialized_receipt_live", "/materialize/receipt_live"),
+            ("materialized_audit_event_live", "/materialize/audit_event_live"),
+            ("claim_old_receipt_not_live", "/claim/old_receipt_not_live"),
+            ("claimed_receipt_live", "/claim/claimed_receipt_live"),
+            ("claim_event_live", "/claim/claim_event_live"),
+            ("settle_old_claim_not_live", "/settle/old_claim_not_live"),
+            ("settlement_receipt_live", "/settle/settlement_receipt_live"),
+            ("settlement_event_live", "/settle/settlement_event_live"),
+            ("amount_conserved", "/settle/amount_conserved"),
+            ("post_negative_state_still_live", "/negative_cases/post_negative_state_still_live"),
+        ],
+        &[
+            ("wrong_holder_claim_rejected", "wrong_holder_claim_dry_run"),
+            ("wrong_issuer_settlement_rejected", "wrong_issuer_settlement_dry_run"),
+            ("amount_mutation_rejected", "amount_mutation_dry_run"),
+        ],
+    )?;
+    let live_btc_tx_commitment = live_planned_profile_summary(
+        repo_root,
+        live_btc_tx_commitment_report.as_ref(),
+        &[
+            BTC_TX_COMMITMENT_MANIFEST,
+            "proposals/novaseal/btc-transaction-commitment-profile-v0/src",
+            "proposals/novaseal/btc-transaction-commitment-profile-v0/schemas",
+            VERIFIER_ROOT,
+            "scripts/novaseal_planned_profiles_devnet_stateful_live.py",
+        ],
+        &[("commit_transaction", "/commit_transaction/commit/tx_hash")],
+        &[
+            ("old_state_not_live", "/commit_transaction/old_state_not_live"),
+            ("new_state_live", "/commit_transaction/new_state_live"),
+            ("receipt_live", "/commit_transaction/receipt_live"),
+            ("btc_tx_tuple_bound", "/commit_transaction/btc_tx_tuple_bound"),
+            ("transition_commitment_bound", "/commit_transaction/transition_commitment_bound"),
+            ("public_btc_verification_executed", "/commit_transaction/public_btc_verification_executed"),
+            ("post_negative_state_still_live", "/negative_cases/post_negative_state_still_live"),
+        ],
+        &[
+            ("wrong_committer_signature_rejected", "wrong_committer_signature_dry_run"),
+            ("zero_btc_txid_rejected", "zero_btc_txid_dry_run"),
+            ("transition_hash_mismatch_rejected", "transition_hash_mismatch_dry_run"),
+        ],
+    )?;
+    let live_btc_utxo_seal = live_planned_profile_summary(
+        repo_root,
+        live_btc_utxo_seal_report.as_ref(),
+        &[
+            BTC_UTXO_SEAL_MANIFEST,
+            "proposals/novaseal/btc-utxo-seal-profile-v0/src",
+            "proposals/novaseal/btc-utxo-seal-profile-v0/schemas",
+            VERIFIER_ROOT,
+            "scripts/novaseal_planned_profiles_devnet_stateful_live.py",
+        ],
+        &[("close_utxo_seal", "/close_utxo_seal/commit/tx_hash")],
+        &[
+            ("old_state_not_live", "/close_utxo_seal/old_state_not_live"),
+            ("new_state_live", "/close_utxo_seal/new_state_live"),
+            ("receipt_live", "/close_utxo_seal/receipt_live"),
+            ("sealed_utxo_tuple_bound", "/close_utxo_seal/sealed_utxo_tuple_bound"),
+            ("spend_tuple_bound", "/close_utxo_seal/spend_tuple_bound"),
+            ("public_btc_spend_verification_executed", "/close_utxo_seal/public_btc_spend_verification_executed"),
+            ("post_negative_state_still_live", "/negative_cases/post_negative_state_still_live"),
+        ],
+        &[
+            ("wrong_owner_signature_rejected", "wrong_owner_signature_dry_run"),
+            ("utxo_commitment_mismatch_rejected", "utxo_commitment_mismatch_dry_run"),
+            ("zero_spend_txid_rejected", "zero_spend_txid_dry_run"),
+        ],
+    )?;
+    let live_fiber_candidate = live_planned_profile_summary(
+        repo_root,
+        live_fiber_candidate_report.as_ref(),
+        &[
+            FIBER_CANDIDATE_MANIFEST,
+            "proposals/novaseal/fiber-candidate-profile-v0/src",
+            "proposals/novaseal/fiber-candidate-profile-v0/schemas",
+            VERIFIER_ROOT,
+            "scripts/novaseal_planned_profiles_devnet_stateful_live.py",
+        ],
+        &[("settle_fiber_candidate", "/settle_fiber_candidate/commit/tx_hash")],
+        &[
+            ("old_candidate_not_live", "/settle_fiber_candidate/old_candidate_not_live"),
+            ("new_candidate_live", "/settle_fiber_candidate/new_candidate_live"),
+            ("receipt_live", "/settle_fiber_candidate/receipt_live"),
+            ("balance_commitment_progressed", "/settle_fiber_candidate/balance_commitment_progressed"),
+            ("fiber_execution_executed", "/settle_fiber_candidate/fiber_execution_executed"),
+            ("post_negative_state_still_live", "/negative_cases/post_negative_state_still_live"),
+        ],
+        &[
+            ("wrong_operator_signature_rejected", "wrong_operator_signature_dry_run"),
+            ("balance_commitment_replay_rejected", "balance_commitment_replay_dry_run"),
+        ],
+    )?;
 
     let core_live_passed = json_pointer_str(&live_core, "/status") == Some("passed")
         && json_pointer_bool(&live_core, "/live_devnet_rpc_executed")
@@ -976,6 +1141,11 @@ fn build_stateful_acceptance_report(repo_root: &Path, agreement_conformance: &Va
         .iter()
         .all(|key| json_pointer_bool(&live_agreement, &format!("/{key}")))
         && json_pointer_str(agreement_conformance, "/status") == Some("passed");
+    let fungible_xudt_live_passed = json_pointer_bool(&live_fungible_xudt, "/required_live_checks_passed");
+    let rwa_receipt_live_passed = json_pointer_bool(&live_rwa_receipt, "/required_live_checks_passed");
+    let btc_tx_commitment_live_passed = json_pointer_bool(&live_btc_tx_commitment, "/required_live_checks_passed");
+    let btc_utxo_seal_live_passed = json_pointer_bool(&live_btc_utxo_seal, "/required_live_checks_passed");
+    let fiber_candidate_live_passed = json_pointer_bool(&live_fiber_candidate, "/required_live_checks_passed");
     let agreement_profile_actions_present = ["originate_agreement", "repay_before_expiry", "claim_after_expiry"]
         .iter()
         .all(|expected| agreement_actions.iter().any(|action| action.name == *expected));
@@ -1012,9 +1182,20 @@ fn build_stateful_acceptance_report(repo_root: &Path, agreement_conformance: &Va
     let profile_coverage_checks = json!({
         "core_profile_live_stateful": core_live_passed,
         "agreement_profile_live_stateful": agreement_live_passed,
+        "fungible_xudt_profile_live_stateful": fungible_xudt_live_passed,
+        "rwa_receipt_profile_live_stateful": rwa_receipt_live_passed,
+        "btc_transaction_commitment_live_stateful": btc_tx_commitment_live_passed,
+        "btc_utxo_seal_live_stateful": btc_utxo_seal_live_passed,
+        "fiber_candidate_live_stateful": fiber_candidate_live_passed,
         "core_profile_actions_present": !core_actions.is_empty(),
         "agreement_profile_actions_present": agreement_profile_actions_present,
-        "distinct_profiles_covered": core_live_passed && agreement_live_passed,
+        "distinct_profiles_covered": core_live_passed
+            && agreement_live_passed
+            && fungible_xudt_live_passed
+            && rwa_receipt_live_passed
+            && btc_tx_commitment_live_passed
+            && btc_utxo_seal_live_passed
+            && fiber_candidate_live_passed,
     });
     let profile_coverage_passed = object_values_all_true(Some(&profile_coverage_checks));
     let business_scenario_checks = json!({
@@ -1023,6 +1204,11 @@ fn build_stateful_acceptance_report(repo_root: &Path, agreement_conformance: &Va
         "agreement_repay_live": agreement_repay_live,
         "agreement_claim_live": agreement_claim_live,
         "agreement_negative_business_cases_preserve_live_state": agreement_negative_business_cases_preserve_live_state,
+        "fungible_xudt_value_flow_live": fungible_xudt_live_passed,
+        "rwa_receipt_lifecycle_live": rwa_receipt_live_passed,
+        "btc_transaction_commitment_transition_live": btc_tx_commitment_live_passed,
+        "btc_utxo_seal_closure_live": btc_utxo_seal_live_passed,
+        "fiber_candidate_path_live": fiber_candidate_live_passed,
     });
     let business_scenario_coverage_passed = object_values_all_true(Some(&business_scenario_checks));
 
@@ -1108,12 +1294,62 @@ fn build_stateful_acceptance_report(repo_root: &Path, agreement_conformance: &Va
                 "fixture_files_not_executed_by_tx_harness",
             ]),
         }),
+        json!({
+            "name": "fungible_xudt_issue_transfer_settle",
+            "status": if fungible_xudt_live_passed { "passed" } else { "ready_to_wire_live_devnet" },
+            "live_devnet_rpc_executed": fungible_xudt_live_passed,
+            "stateful_lifecycle_executed": fungible_xudt_live_passed,
+            "actions": ["issue_xudt", "transfer_xudt", "settle_xudt"],
+            "blockers": [],
+            "live_devnet_evidence": live_fungible_xudt,
+        }),
+        json!({
+            "name": "rwa_receipt_materialize_claim_settle",
+            "status": if rwa_receipt_live_passed { "passed" } else { "ready_to_wire_live_devnet" },
+            "live_devnet_rpc_executed": rwa_receipt_live_passed,
+            "stateful_lifecycle_executed": rwa_receipt_live_passed,
+            "actions": ["materialize_rwa_receipt", "claim_rwa_receipt", "settle_rwa_receipt"],
+            "blockers": [],
+            "live_devnet_evidence": live_rwa_receipt,
+        }),
+        json!({
+            "name": "btc_transaction_commitment_transition",
+            "status": if btc_tx_commitment_live_passed { "passed" } else { "ready_to_wire_live_devnet" },
+            "live_devnet_rpc_executed": btc_tx_commitment_live_passed,
+            "stateful_lifecycle_executed": btc_tx_commitment_live_passed,
+            "actions": ["commit_btc_transaction_transition"],
+            "blockers": [],
+            "live_devnet_evidence": live_btc_tx_commitment,
+        }),
+        json!({
+            "name": "btc_utxo_seal_closure",
+            "status": if btc_utxo_seal_live_passed { "passed" } else { "ready_to_wire_live_devnet" },
+            "live_devnet_rpc_executed": btc_utxo_seal_live_passed,
+            "stateful_lifecycle_executed": btc_utxo_seal_live_passed,
+            "actions": ["close_btc_utxo_seal"],
+            "blockers": [],
+            "live_devnet_evidence": live_btc_utxo_seal,
+        }),
+        json!({
+            "name": "fiber_candidate_settlement",
+            "status": if fiber_candidate_live_passed { "passed" } else { "ready_to_wire_live_devnet" },
+            "live_devnet_rpc_executed": fiber_candidate_live_passed,
+            "stateful_lifecycle_executed": fiber_candidate_live_passed,
+            "actions": ["settle_fiber_candidate"],
+            "blockers": [],
+            "live_devnet_evidence": live_fiber_candidate,
+        }),
     ];
     let profile_coverage = json!({
         "status": if profile_coverage_passed { "passed" } else { "failed" },
         "required_profiles": [
             "novaseal-core-v0",
             "agreement-profile-v0",
+            "fungible-xudt-profile-v0",
+            "rwa-receipt-profile-v0",
+            "btc-transaction-commitment-profile-v0",
+            "btc-utxo-seal-profile-v0",
+            "fiber-candidate-profile-v0",
         ],
         "covered_profiles": [
             {
@@ -1128,6 +1364,36 @@ fn build_stateful_acceptance_report(repo_root: &Path, agreement_conformance: &Va
                 "status": if agreement_live_passed { "passed" } else { "failed" },
                 "actions": agreement_actions.iter().map(|action| action.name.clone()).collect::<Vec<_>>(),
             },
+            {
+                "profile": "fungible-xudt-profile-v0",
+                "scenario": "fungible_xudt_issue_transfer_settle",
+                "status": if fungible_xudt_live_passed { "passed" } else { "failed" },
+                "actions": ["issue_xudt", "transfer_xudt", "settle_xudt"],
+            },
+            {
+                "profile": "rwa-receipt-profile-v0",
+                "scenario": "rwa_receipt_materialize_claim_settle",
+                "status": if rwa_receipt_live_passed { "passed" } else { "failed" },
+                "actions": ["materialize_rwa_receipt", "claim_rwa_receipt", "settle_rwa_receipt"],
+            },
+            {
+                "profile": "btc-transaction-commitment-profile-v0",
+                "scenario": "btc_transaction_commitment_transition",
+                "status": if btc_tx_commitment_live_passed { "passed" } else { "failed" },
+                "actions": ["commit_btc_transaction_transition"],
+            },
+            {
+                "profile": "btc-utxo-seal-profile-v0",
+                "scenario": "btc_utxo_seal_closure",
+                "status": if btc_utxo_seal_live_passed { "passed" } else { "failed" },
+                "actions": ["close_btc_utxo_seal"],
+            },
+            {
+                "profile": "fiber-candidate-profile-v0",
+                "scenario": "fiber_candidate_settlement",
+                "status": if fiber_candidate_live_passed { "passed" } else { "failed" },
+                "actions": ["settle_fiber_candidate"],
+            },
         ],
         "checks": profile_coverage_checks,
     });
@@ -1139,6 +1405,11 @@ fn build_stateful_acceptance_report(repo_root: &Path, agreement_conformance: &Va
             "agreement active -> repaid terminal plus lender repayment plus borrower collateral return plus receipt",
             "agreement active -> defaulted terminal plus lender collateral claim plus receipt",
             "negative business/security dry-runs reject without mutating live state",
+            "fungible/xUDT issue -> transfer -> settlement with negative accounting dry-runs",
+            "RWA receipt materialise -> claim -> settlement with immutable audit event evidence",
+            "public BTC transaction commitment authorised transition",
+            "BTC UTXO single-use seal closure over a CKB transition",
+            "Fiber-compatible candidate settlement with balance commitment progress",
         ],
         "checks": business_scenario_checks,
     });
@@ -1178,8 +1449,8 @@ fn build_stateful_acceptance_report(repo_root: &Path, agreement_conformance: &Va
             "use one stable type-script identity for a lifecycle, or an explicitly audited dispatcher/bootstrap surface",
             "run negative cases as dry-run/send-test rejections without mutating live state",
             "require every NovaSeal profile to pass conforms_to = NovaSealCanonicalV0 conformance",
-            "cover at least the core NovaSeal profile and Agreement business profile in the live stateful gate",
-            "cover bootstrap, origination, repayment, default claim, payout, receipt, and negative business/security paths",
+            "cover every planned NovaSeal V1 profile in the live stateful gate",
+            "cover bootstrap, origination, repayment, default claim, payout, xUDT value-flow, RWA receipt, BTC commitment, BTC UTXO closure, Fiber candidate, receipt, and negative business/security paths",
         ],
         "profile_coverage": profile_coverage,
         "business_scenario_coverage": business_scenario_coverage,
@@ -1189,7 +1460,7 @@ fn build_stateful_acceptance_report(repo_root: &Path, agreement_conformance: &Va
         "next_engineering_step": if status == "passed" {
             "Stateful live-devnet acceptance is complete; production readiness is now governed by public CellDep pinning, wallet/Molecule vectors, and external verifier TCB attestation."
         } else {
-            "Re-run the live core/agreement devnet runners after source or artifact changes; this gate fails closed until both reports have fresh provenance, strict output checks, and matched negative dry-run errors."
+            "Run the live devnet runners for core, Agreement, and every planned V1 profile after source or artifact changes; this gate fails closed until all reports have fresh provenance, strict output checks, and matched negative dry-run errors."
         },
         "generated_by": {
             "implementation": IMPLEMENTATION_ID,
@@ -1251,6 +1522,89 @@ fn has_agreement_origination_surface(source: &str) -> bool {
         return true;
     }
     actions.iter().any(|action| action.name == "originate_agreement" && !action.consumes_resource())
+}
+
+fn live_planned_profile_summary(
+    repo_root: &Path,
+    report: Option<&Value>,
+    source_paths: &[&str],
+    tx_hashes: &[(&str, &str)],
+    required_bools: &[(&str, &str)],
+    negative_cases: &[(&str, &str)],
+) -> Result<Value> {
+    let expected_tx_hashes = tx_hashes.iter().map(|(name, pointer)| json!({"name": name, "pointer": pointer})).collect::<Vec<_>>();
+    let required_live_checks =
+        required_bools.iter().map(|(name, pointer)| json!({"name": name, "pointer": pointer})).collect::<Vec<_>>();
+    let required_negative_cases = negative_cases.iter().map(|(name, key)| json!({"name": name, "key": key})).collect::<Vec<_>>();
+
+    let Some(report) = report else {
+        return Ok(json!({
+            "present": false,
+            "expected_tx_hashes": expected_tx_hashes,
+            "required_live_checks": required_live_checks,
+            "required_negative_cases": required_negative_cases,
+            "required_live_checks_passed": false,
+        }));
+    };
+    if report.get("_invalid_json").is_some() {
+        return Ok(json!({
+            "present": true,
+            "valid_json": false,
+            "error": report.get("_invalid_json"),
+            "expected_tx_hashes": expected_tx_hashes,
+            "required_live_checks": required_live_checks,
+            "required_negative_cases": required_negative_cases,
+            "required_live_checks_passed": false,
+        }));
+    }
+
+    let provenance = provenance_summary(report, repo_root, source_paths)?;
+    let mut tx_hash_summary = Map::new();
+    for (name, pointer) in tx_hashes {
+        tx_hash_summary.insert((*name).to_string(), json_pointer_str(report, pointer).map(Value::from).unwrap_or(Value::Null));
+    }
+
+    let mut live_checks = Map::new();
+    for (name, pointer) in required_bools {
+        live_checks.insert((*name).to_string(), Value::Bool(json_pointer_bool(report, pointer)));
+    }
+
+    let mut negative_checks = Map::new();
+    for (name, key) in negative_cases {
+        negative_checks.insert((*name).to_string(), negative_case_matched(report, key).map(Value::Bool).unwrap_or(Value::Null));
+    }
+
+    let status_passed = json_pointer_str(report, "/status") == Some("passed");
+    let rpc_executed = json_pointer_bool(report, "/live_devnet_rpc_executed");
+    let lifecycle_executed = json_pointer_bool(report, "/stateful_lifecycle_executed");
+    let provenance_freshness_matched = json_pointer_bool(&provenance, "/freshness_matched");
+    let tx_hashes_present = tx_hash_summary.values().all(value_is_present);
+    let required_bools_passed = live_checks.values().all(|value| value.as_bool() == Some(true));
+    let negative_cases_passed = negative_checks.values().all(|value| value.as_bool() == Some(true));
+    let required_live_checks_passed = status_passed
+        && rpc_executed
+        && lifecycle_executed
+        && provenance_freshness_matched
+        && tx_hashes_present
+        && required_bools_passed
+        && negative_cases_passed;
+
+    Ok(json!({
+        "present": true,
+        "valid_json": true,
+        "status": json_pointer_str(report, "/status"),
+        "live_devnet_rpc_executed": rpc_executed,
+        "stateful_lifecycle_executed": lifecycle_executed,
+        "provenance": provenance,
+        "provenance_freshness_matched": provenance_freshness_matched,
+        "expected_tx_hashes": expected_tx_hashes,
+        "required_live_checks": required_live_checks,
+        "required_negative_cases": required_negative_cases,
+        "tx_hashes": tx_hash_summary,
+        "live_checks": live_checks,
+        "negative_cases": negative_checks,
+        "required_live_checks_passed": required_live_checks_passed,
+    }))
 }
 
 fn live_core_summary(repo_root: &Path, report: Option<&Value>) -> Result<Value> {
@@ -1825,8 +2179,10 @@ fn validate_fungible_xudt_profile_package(repo_root: &Path) -> Result<Value> {
         .collect::<Map<_, _>>();
     let actions = find_actions(&source);
     let action_names = actions.iter().map(|action| action.name.clone()).collect::<BTreeSet<_>>();
-    let expected_actions =
-        ["issue_xudt", "transfer_xudt", "settle_xudt"].iter().map(|action| (*action).to_string()).collect::<BTreeSet<_>>();
+    let expected_actions = ["issue_xudt", "transfer_xudt", "settle_xudt", "nova_fungible_xudt_lifecycle"]
+        .iter()
+        .map(|action| (*action).to_string())
+        .collect::<BTreeSet<_>>();
     let schemas = expected_files(repo_root, &root.join("schemas"), EXPECTED_FUNGIBLE_XUDT_SCHEMA_FILES)?;
     let fixtures = expected_files(repo_root, &root.join("fixtures"), EXPECTED_FUNGIBLE_XUDT_FIXTURES)?;
     let docs = expected_files(repo_root, &root.join("docs"), EXPECTED_FUNGIBLE_XUDT_DOCS)?;
@@ -1866,14 +2222,17 @@ fn validate_fungible_xudt_profile_package(repo_root: &Path) -> Result<Value> {
         ),
         (
             "manifest_stateful_dispatcher".to_string(),
-            Value::Bool(metadata_str("stateful_dispatcher") == Some("missing-live-dispatcher")),
+            Value::Bool(
+                metadata_str("stateful_dispatcher")
+                    == Some("src/nova_fungible_xudt_lifecycle_type.cell:nova_fungible_xudt_lifecycle"),
+            ),
         ),
         (
             "manifest_source_actions".to_string(),
             Value::Bool(
                 metadata_str("source_actions")
                     == Some(
-                        "src/nova_fungible_xudt_type.cell:issue_xudt;src/nova_fungible_xudt_type.cell:transfer_xudt;src/nova_fungible_xudt_type.cell:settle_xudt",
+                        "src/nova_fungible_xudt_type.cell:issue_xudt;src/nova_fungible_xudt_type.cell:transfer_xudt;src/nova_fungible_xudt_type.cell:settle_xudt;src/nova_fungible_xudt_lifecycle_type.cell:nova_fungible_xudt_lifecycle",
                     ),
             ),
         ),
@@ -1902,7 +2261,7 @@ fn validate_fungible_xudt_profile_package(repo_root: &Path) -> Result<Value> {
     Ok(json!({
         "schema": "novaseal-fungible-xudt-profile-package-validation-v0.1",
         "status": if object_values_all_true(Some(&Value::Object(checks.clone()))) { "passed" } else { "failed" },
-        "classification": "profile-package-evidence-not-live-stateful-acceptance",
+        "classification": "profile-package-with-compiled-lifecycle-dispatcher-not-live-stateful-acceptance",
         "root": rel(repo_root, &root),
         "manifest": rel(repo_root, &manifest_path),
         "canonical_schema_hash": schema_hash,
@@ -1918,7 +2277,7 @@ fn validate_fungible_xudt_profile_package(repo_root: &Path) -> Result<Value> {
             "coverage_by_id": coverage_by_id,
         },
         "checks": checks,
-        "remaining_acceptance_gap": "live devnet issue -> transfer -> settle evidence is still required before fungible_xudt_value_flow can pass",
+        "remaining_acceptance_gap": "live devnet issue -> transfer -> settle transactions are still required before fungible_xudt_value_flow can pass",
     }))
 }
 
@@ -1936,7 +2295,7 @@ fn validate_rwa_receipt_profile_package(repo_root: &Path) -> Result<Value> {
         .collect::<Map<_, _>>();
     let actions = find_actions(&source);
     let action_names = actions.iter().map(|action| action.name.clone()).collect::<BTreeSet<_>>();
-    let expected_actions = ["materialize_rwa_receipt", "claim_rwa_receipt", "settle_rwa_receipt"]
+    let expected_actions = ["materialize_rwa_receipt", "claim_rwa_receipt", "settle_rwa_receipt", "nova_rwa_receipt_lifecycle"]
         .iter()
         .map(|action| (*action).to_string())
         .collect::<BTreeSet<_>>();
@@ -1979,14 +2338,16 @@ fn validate_rwa_receipt_profile_package(repo_root: &Path) -> Result<Value> {
         ),
         (
             "manifest_stateful_dispatcher".to_string(),
-            Value::Bool(metadata_str("stateful_dispatcher") == Some("missing-live-dispatcher")),
+            Value::Bool(
+                metadata_str("stateful_dispatcher") == Some("src/nova_rwa_receipt_lifecycle_type.cell:nova_rwa_receipt_lifecycle"),
+            ),
         ),
         (
             "manifest_source_actions".to_string(),
             Value::Bool(
                 metadata_str("source_actions")
                     == Some(
-                        "src/nova_rwa_receipt_type.cell:materialize_rwa_receipt;src/nova_rwa_receipt_type.cell:claim_rwa_receipt;src/nova_rwa_receipt_type.cell:settle_rwa_receipt",
+                        "src/nova_rwa_receipt_type.cell:materialize_rwa_receipt;src/nova_rwa_receipt_type.cell:claim_rwa_receipt;src/nova_rwa_receipt_type.cell:settle_rwa_receipt;src/nova_rwa_receipt_lifecycle_type.cell:nova_rwa_receipt_lifecycle",
                     ),
             ),
         ),
@@ -2015,7 +2376,7 @@ fn validate_rwa_receipt_profile_package(repo_root: &Path) -> Result<Value> {
     Ok(json!({
         "schema": "novaseal-rwa-receipt-profile-package-validation-v0.1",
         "status": if object_values_all_true(Some(&Value::Object(checks.clone()))) { "passed" } else { "failed" },
-        "classification": "profile-package-evidence-not-live-stateful-acceptance",
+        "classification": "profile-package-with-compiled-lifecycle-dispatcher-not-live-stateful-acceptance",
         "root": rel(repo_root, &root),
         "manifest": rel(repo_root, &manifest_path),
         "canonical_schema_hash": schema_hash,
@@ -2031,7 +2392,7 @@ fn validate_rwa_receipt_profile_package(repo_root: &Path) -> Result<Value> {
             "coverage_by_id": coverage_by_id,
         },
         "checks": checks,
-        "remaining_acceptance_gap": "live devnet materialise -> claim -> settle evidence is still required before rwa_receipt_lifecycle can pass",
+        "remaining_acceptance_gap": "live devnet materialise -> claim -> settle transactions are still required before rwa_receipt_lifecycle can pass",
     }))
 }
 
@@ -3230,6 +3591,7 @@ mod tests {
                 "btc_tx_commitment": { "status": "passed" },
                 "btc_utxo_seal": { "status": "passed" },
                 "dual_seal": { "status": "passed" },
+                "fiber_candidate": { "status": "passed" },
                 "fungible_xudt": { "status": "passed" },
                 "rwa_receipt": { "status": "passed" }
             },
@@ -3241,7 +3603,20 @@ mod tests {
                     { "status": "passed" }
                 ]
             },
-            "business_scenario_coverage": { "status": "passed" },
+            "business_scenario_coverage": {
+                "status": "failed",
+                "checks": {
+                    "agreement_originate_live": true,
+                    "agreement_repay_live": true,
+                    "agreement_claim_live": true,
+                    "agreement_negative_business_cases_preserve_live_state": true,
+                    "btc_transaction_commitment_transition_live": false,
+                    "btc_utxo_seal_closure_live": false,
+                    "fungible_xudt_value_flow_live": false,
+                    "rwa_receipt_lifecycle_live": false,
+                    "fiber_candidate_path_live": false
+                }
+            },
         });
 
         let matrix = build_planned_profile_matrix(&profile_certification, &stateful_acceptance);
@@ -3294,6 +3669,16 @@ mod tests {
             .and_then(Value::as_array)
             .and_then(|scenarios| scenarios.iter().find(|row| json_pointer_str(row, "/id") == Some("rwa_receipt_lifecycle")))
             .and_then(|row| json_pointer_str(row, "/status"));
+        let fiber_profile_status = matrix
+            .pointer("/profiles")
+            .and_then(Value::as_array)
+            .and_then(|profiles| profiles.iter().find(|row| json_pointer_str(row, "/id") == Some("future_fiber_test_path")))
+            .and_then(|row| json_pointer_str(row, "/status"));
+        let fiber_flow_status = matrix
+            .pointer("/business_scenarios")
+            .and_then(Value::as_array)
+            .and_then(|scenarios| scenarios.iter().find(|row| json_pointer_str(row, "/id") == Some("fiber_candidate_path")))
+            .and_then(|row| json_pointer_str(row, "/status"));
         let missing = json_array_strings(&matrix, "/missing");
 
         assert_eq!(json_pointer_str(&matrix, "/status"), Some("incomplete"));
@@ -3306,14 +3691,18 @@ mod tests {
         assert_eq!(fungible_flow_status, Some("missing"));
         assert_eq!(rwa_profile_status, Some("passed"));
         assert_eq!(rwa_flow_status, Some("missing"));
+        assert_eq!(fiber_profile_status, Some("passed"));
+        assert_eq!(fiber_flow_status, Some("missing"));
         assert!(!missing.iter().any(|id| id == "seal_profile_btc_transaction_commitment"));
         assert!(!missing.iter().any(|id| id == "seal_profile_btc_utxo_seal"));
         assert!(!missing.iter().any(|id| id == "seal_profile_dual_seal"));
         assert!(!missing.iter().any(|id| id == "object_profile_fungible_xudt"));
         assert!(!missing.iter().any(|id| id == "object_profile_rwa_receipt"));
+        assert!(!missing.iter().any(|id| id == "future_fiber_test_path"));
         assert!(missing.iter().any(|id| id == "btc_transaction_commitment_transition"));
         assert!(missing.iter().any(|id| id == "btc_utxo_seal_closure"));
         assert!(missing.iter().any(|id| id == "fungible_xudt_value_flow"));
         assert!(missing.iter().any(|id| id == "rwa_receipt_lifecycle"));
+        assert!(missing.iter().any(|id| id == "fiber_candidate_path"));
     }
 }

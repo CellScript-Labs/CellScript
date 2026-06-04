@@ -4,8 +4,8 @@ Required V1 evidence is not present yet.
 
 The acceptance target is:
 
-1. Deploy the BIP340 runtime verifier and Fungible xUDT profile action/type
-   code as live CellDeps.
+1. Deploy the BIP340 runtime verifier and
+   `nova_fungible_xudt_lifecycle` type code as live CellDeps.
 2. Submit a valid issue transaction and prove the issued xUDT profile Cell and
    receipt are live.
 3. Submit a valid transfer transaction and prove the old holder Cell is dead

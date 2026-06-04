@@ -6,7 +6,9 @@ production attestations are still missing.
 
 This package implements the planned NovaSeal Fungible/xUDT object profile as a
 source-level package with schemas, fixtures, invariant matrix, and security
-boundary documentation.
+boundary documentation. It also includes
+`src/nova_fungible_xudt_lifecycle_type.cell:nova_fungible_xudt_lifecycle`, a
+single CKB-facing lifecycle action for issue, transfer, and settlement.
 
 ## Boundary
 
@@ -28,6 +30,7 @@ accounting, market flows, or a general ledger.
 | Separate Fungible xUDT profile package | implemented | source-guard-present |
 | Canonical NovaSeal envelope binding | implemented | source-guard-present |
 | Issue, transfer, settle actions | implemented | source-guard-present |
+| Stable xUDT lifecycle type action | implemented | compiles-to-ckb-elf |
 | Schemas and fixture labels | implemented | reviewable |
 | Invariant matrix | implemented | reviewable |
 | Live devnet issue -> transfer -> settle | missing | missing-live-devnet-evidence |
