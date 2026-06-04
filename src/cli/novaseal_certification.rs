@@ -234,6 +234,21 @@ const EXPECTED_EXTERNAL_TCB_REVIEW_ATTESTATION_FIELDS: &[&str] = &[
     "status",
     "verifier_id",
 ];
+const EXPECTED_PUBLIC_BTC_SPV_EVIDENCE_FIELDS: &[&str] =
+    &["cases", "evidence_provider", "generated_at", "network", "notes", "request_handoff", "required_profiles", "schema", "status"];
+const EXPECTED_PUBLIC_BTC_SPV_CASE_FIELDS: &[&str] = &[
+    "btc_block_hash",
+    "btc_txid",
+    "confirmations",
+    "minimum_confirmations",
+    "profile",
+    "scenario",
+    "source_service",
+    "spv_client_cell_dep",
+    "spv_proof_hash",
+];
+const EXPECTED_PUBLIC_BTC_SPV_CELLDEP_FIELDS: &[&str] = &["data_hash", "dep_type", "hash_type", "out_point"];
+const EXPECTED_PUBLIC_BTC_SPV_SOURCE_SERVICE_FIELDS: &[&str] = &["commit", "name", "report_hash"];
 
 const EXPECTED_FIBER_NODE_EXECUTION_SCHEMA: &str = "novaseal-fiber-node-execution-v0.3";
 const EXPECTED_FIBER_REPO_ORIGIN: &str = "https://github.com/nervosnetwork/fiber.git";
@@ -3959,16 +3974,19 @@ fn validate_btc_spv_evidence(repo_root: &Path, rel_path: &str, external_evidence
             (*profile).to_string(),
             json!({
                 "present": true,
+                "fields_exact": exact_object_keys(case, EXPECTED_PUBLIC_BTC_SPV_CASE_FIELDS),
                 "scenario_present": case.get("scenario").is_some_and(value_is_present),
                 "btc_txid_valid": json_pointer_str(case, "/btc_txid").is_some_and(is_hex32),
                 "btc_block_hash_valid": json_pointer_str(case, "/btc_block_hash").is_some_and(is_hex32),
                 "spv_proof_hash_valid": json_pointer_str(case, "/spv_proof_hash").is_some_and(is_hex32),
                 "minimum_confirmations_at_least_six": minimum_confirmations >= 6,
                 "confirmations_meet_minimum": confirmations >= minimum_confirmations && minimum_confirmations >= 6,
+                "spv_client_cell_dep_fields_exact": exact_object_keys(cell_dep, EXPECTED_PUBLIC_BTC_SPV_CELLDEP_FIELDS),
                 "spv_client_cell_dep_out_point_valid": json_pointer_bool(&out_point, "/valid"),
                 "spv_client_cell_dep_data_hash_valid": json_pointer_str(cell_dep, "/data_hash").is_some_and(is_hex32),
                 "spv_client_cell_dep_dep_type": json_pointer_str(cell_dep, "/dep_type") == Some("code"),
                 "spv_client_cell_dep_hash_type": matches!(hash_type, Some("data" | "data1" | "type")),
+                "source_service_fields_exact": exact_object_keys(source_service, EXPECTED_PUBLIC_BTC_SPV_SOURCE_SERVICE_FIELDS),
                 "source_service_name_present": source_service.get("name").is_some_and(value_is_present),
                 "source_service_commit_present": source_service.get("commit").is_some_and(value_is_present),
                 "source_service_report_hash_valid": json_pointer_str(source_service, "/report_hash").is_some_and(is_hex32),
@@ -3978,6 +3996,7 @@ fn validate_btc_spv_evidence(repo_root: &Path, rel_path: &str, external_evidence
     let case_checks_passed = case_checks.values().all(|checks| object_values_all_true(Some(checks)));
     let checks = json!({
         "schema": json_pointer_str(&payload, "/schema") == Some("novaseal-public-btc-spv-evidence-v0.1"),
+        "top_level_fields_exact": exact_object_keys(&payload, EXPECTED_PUBLIC_BTC_SPV_EVIDENCE_FIELDS),
         "status_attested": json_pointer_str(&payload, "/status") == Some("attested"),
         "network_public": json_pointer_str(&payload, "/network").is_some_and(|network| !network.is_empty() && network != "local-devnet"),
         "evidence_provider_present": payload.get("evidence_provider").is_some_and(value_is_present),
@@ -5079,30 +5098,64 @@ mod tests {
                 },
             })
         };
-        std::fs::write(
-            proofs.join("public_btc_spv_evidence.json"),
-            serde_json::to_vec_pretty(&json!({
-                "schema": "novaseal-public-btc-spv-evidence-v0.1",
-                "status": "attested",
-                "network": "testnet",
-                "evidence_provider": "external-spv-operator",
-                "generated_at": "2026-06-05T00:00:00Z",
-                "request_handoff": {
-                    "bundle": EXTERNAL_EVIDENCE_HANDOFF,
-                    "bundle_hash": handoff_hash,
-                    "group": "public_btc_spv_evidence",
-                },
-                "cases": EXPECTED_BTC_SPV_EVIDENCE_PROFILES.iter().map(|profile| case_for(profile)).collect::<Vec<_>>(),
-            }))
-            .unwrap(),
-        )
-        .unwrap();
+        let spv_report = json!({
+            "schema": "novaseal-public-btc-spv-evidence-v0.1",
+            "status": "attested",
+            "network": "testnet",
+            "evidence_provider": "external-spv-operator",
+            "generated_at": "2026-06-05T00:00:00Z",
+            "notes": "external public BTC SPV evidence fixture",
+            "required_profiles": EXPECTED_BTC_SPV_EVIDENCE_PROFILES,
+            "request_handoff": {
+                "bundle": EXTERNAL_EVIDENCE_HANDOFF,
+                "bundle_hash": handoff_hash,
+                "group": "public_btc_spv_evidence",
+            },
+            "cases": EXPECTED_BTC_SPV_EVIDENCE_PROFILES.iter().map(|profile| case_for(profile)).collect::<Vec<_>>(),
+        });
+        std::fs::write(proofs.join("public_btc_spv_evidence.json"), serde_json::to_vec_pretty(&spv_report).unwrap()).unwrap();
 
         let passed = validate_btc_spv_evidence(temp.path(), PUBLIC_BTC_SPV_EVIDENCE, &handoff).unwrap();
         assert_eq!(json_pointer_str(&passed, "/status"), Some("passed"));
+        assert!(json_pointer_bool(&passed, "/checks/top_level_fields_exact"));
         assert!(json_pointer_bool(&passed, "/checks/request_handoff_bundle_hash_matches_current"));
         assert!(json_pointer_bool(&passed, "/checks/required_profiles_covered"));
         assert!(json_pointer_bool(&passed, "/checks/case_checks_passed"));
+
+        let mut top_level_extra = spv_report.clone();
+        top_level_extra["unexpected_provider_field"] = Value::String("must-fail".to_string());
+        std::fs::write(proofs.join("public_btc_spv_evidence.json"), serde_json::to_vec_pretty(&top_level_extra).unwrap()).unwrap();
+        let failed_top_level = validate_btc_spv_evidence(temp.path(), PUBLIC_BTC_SPV_EVIDENCE, &handoff).unwrap();
+        assert_eq!(json_pointer_str(&failed_top_level, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&failed_top_level, "/checks/top_level_fields_exact"));
+
+        let mut case_extra = spv_report.clone();
+        case_extra["cases"][0]["unexpected_case_field"] = Value::String("must-fail".to_string());
+        std::fs::write(proofs.join("public_btc_spv_evidence.json"), serde_json::to_vec_pretty(&case_extra).unwrap()).unwrap();
+        let failed_case = validate_btc_spv_evidence(temp.path(), PUBLIC_BTC_SPV_EVIDENCE, &handoff).unwrap();
+        assert_eq!(json_pointer_str(&failed_case, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&failed_case, "/case_checks/btc-transaction-commitment-profile-v0/fields_exact"));
+
+        let mut cell_dep_extra = spv_report.clone();
+        cell_dep_extra["cases"][0]["spv_client_cell_dep"]["unexpected_cell_dep_field"] = Value::String("must-fail".to_string());
+        std::fs::write(proofs.join("public_btc_spv_evidence.json"), serde_json::to_vec_pretty(&cell_dep_extra).unwrap()).unwrap();
+        let failed_cell_dep = validate_btc_spv_evidence(temp.path(), PUBLIC_BTC_SPV_EVIDENCE, &handoff).unwrap();
+        assert_eq!(json_pointer_str(&failed_cell_dep, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(
+            &failed_cell_dep,
+            "/case_checks/btc-transaction-commitment-profile-v0/spv_client_cell_dep_fields_exact"
+        ));
+
+        let mut source_service_extra = spv_report.clone();
+        source_service_extra["cases"][0]["source_service"]["unexpected_source_field"] = Value::String("must-fail".to_string());
+        std::fs::write(proofs.join("public_btc_spv_evidence.json"), serde_json::to_vec_pretty(&source_service_extra).unwrap())
+            .unwrap();
+        let failed_source_service = validate_btc_spv_evidence(temp.path(), PUBLIC_BTC_SPV_EVIDENCE, &handoff).unwrap();
+        assert_eq!(json_pointer_str(&failed_source_service, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(
+            &failed_source_service,
+            "/case_checks/btc-transaction-commitment-profile-v0/source_service_fields_exact"
+        ));
     }
 
     #[test]
