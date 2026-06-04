@@ -311,6 +311,7 @@ const EXPECTED_PUBLIC_CELLDEP_FIELD_CONSTRAINTS: &[(&str, &str)] = &[
     ("release.manifest_commit", "40-character hex source commit matching the reviewed TCB repo_commit"),
     ("request_handoff.bundle_hash_algorithm", "blake2b-256(person=NovaExtHandoff)"),
 ];
+const EXPECTED_PUBLIC_CELLDEP_EXPECTED_VALUE_FIELDS: &[&str] = &["artifact_hash", "release.manifest_commit"];
 const EXPECTED_EXTERNAL_TCB_REQUIRED_FIELDS: &[&str] = &[
     "reviewer",
     "review_date",
@@ -333,6 +334,7 @@ const EXPECTED_EXTERNAL_TCB_FIELD_CONSTRAINTS: &[(&str, &str)] = &[
     ("report_uri", "HTTPS URI for the public review report or source-controlled review commit"),
     ("request_handoff.bundle_hash_algorithm", "blake2b-256(person=NovaExtHandoff)"),
 ];
+const EXPECTED_EXTERNAL_TCB_EXPECTED_VALUE_FIELDS: &[&str] = &["artifact_hash", "artifact_hash_algorithm", "source_tree_sha256"];
 
 const EXPECTED_FIBER_NODE_EXECUTION_SCHEMA: &str = "novaseal-fiber-node-execution-v0.3";
 const EXPECTED_FIBER_REPO_ORIGIN: &str = "https://github.com/nervosnetwork/fiber.git";
@@ -3061,6 +3063,8 @@ fn validate_external_attestation_adapter_detail(report: &Value) -> Value {
                 expected_field_constraints,
             ),
             "artifact_hash_present": json_pointer_str(&case, "/request/expected_artifact_hash").is_some_and(is_hex32),
+            "expected_release_manifest_commit_present": name != "public_shared_cell_dep_attestation"
+                || json_pointer_str(&case, "/request/expected_release_manifest_commit").is_some_and(is_git_commit_hash),
             "artifact_hash_algorithm_matches_tcb": name == "public_shared_cell_dep_attestation"
                 || (
                     json_pointer_str(&case, "/request/expected_artifact_hash_algorithm") == Some("sha256")
@@ -3117,6 +3121,31 @@ fn validate_external_evidence_handoff_detail(report: &Value, btc_spv_adapter: &V
     let expected_btc_spv_adapter_hash = novaseal_handoff_report_hash("btc_spv_adapter", btc_spv_adapter);
     let expected_external_attestation_adapter_hash =
         novaseal_handoff_report_hash("external_attestation_adapter", external_attestation_adapter);
+    let expected_public_manifest_commit = adapter_case_request_str(
+        external_attestation_adapter,
+        "public_shared_cell_dep_attestation",
+        "/request/expected_release_manifest_commit",
+    );
+    let expected_public_artifact_hash = adapter_case_request_str(
+        external_attestation_adapter,
+        "public_shared_cell_dep_attestation",
+        "/request/expected_artifact_hash",
+    );
+    let expected_external_tcb_artifact_hash = adapter_case_request_str(
+        external_attestation_adapter,
+        "external_bip340_tcb_review_attestation",
+        "/request/expected_artifact_hash",
+    );
+    let expected_external_tcb_artifact_hash_algorithm = adapter_case_request_str(
+        external_attestation_adapter,
+        "external_bip340_tcb_review_attestation",
+        "/request/expected_artifact_hash_algorithm",
+    );
+    let expected_external_tcb_source_tree_hash = adapter_case_request_str(
+        external_attestation_adapter,
+        "external_bip340_tcb_review_attestation",
+        "/request/expected_source_tree_sha256",
+    );
 
     let mut case_checks = Map::new();
     for (group, production_output) in expected {
@@ -3143,6 +3172,25 @@ fn validate_external_evidence_handoff_detail(report: &Value, btc_spv_adapter: &V
             "public_shared_cell_dep_attestation" => EXPECTED_PUBLIC_CELLDEP_FIELD_CONSTRAINTS,
             _ => EXPECTED_EXTERNAL_TCB_FIELD_CONSTRAINTS,
         };
+        let expected_values_match_source_adapter = match group {
+            "public_shared_cell_dep_attestation" => {
+                exact_object_keys(case.get("expected_values").unwrap_or(&Value::Null), EXPECTED_PUBLIC_CELLDEP_EXPECTED_VALUE_FIELDS)
+                    && expected_public_manifest_commit.is_some_and(is_git_commit_hash)
+                    && expected_public_artifact_hash.is_some_and(is_hex32)
+                    && json_pointer_str(&case, "/expected_values/artifact_hash") == expected_public_artifact_hash
+                    && json_pointer_str(&case, "/expected_values/release.manifest_commit") == expected_public_manifest_commit
+            }
+            "external_bip340_tcb_review_attestation" => {
+                exact_object_keys(case.get("expected_values").unwrap_or(&Value::Null), EXPECTED_EXTERNAL_TCB_EXPECTED_VALUE_FIELDS)
+                    && expected_external_tcb_artifact_hash.is_some_and(is_hex32)
+                    && expected_external_tcb_source_tree_hash.is_some_and(is_hex32)
+                    && json_pointer_str(&case, "/expected_values/artifact_hash") == expected_external_tcb_artifact_hash
+                    && json_pointer_str(&case, "/expected_values/artifact_hash_algorithm")
+                        == expected_external_tcb_artifact_hash_algorithm
+                    && json_pointer_str(&case, "/expected_values/source_tree_sha256") == expected_external_tcb_source_tree_hash
+            }
+            _ => true,
+        };
         let checks = json!({
             "exactly_one_case": matches.len() == 1,
             "status_passed": json_pointer_str(&case, "/status") == Some("passed"),
@@ -3157,6 +3205,7 @@ fn validate_external_evidence_handoff_detail(report: &Value, btc_spv_adapter: &V
                 case.get("field_constraints").unwrap_or(&Value::Null),
                 expected_field_constraints,
             ),
+            "expected_values_match_source_adapter": expected_values_match_source_adapter,
             "btc_profiles_complete": group != "public_btc_spv_evidence"
                 || required_profiles == expected_btc_profiles,
             "fixture_checks_passed": object_values_all_true(case.get("checks")),
@@ -3191,6 +3240,15 @@ fn validate_external_evidence_handoff_detail(report: &Value, btc_spv_adapter: &V
         "case_count": cases.len(),
         "production_boundary": json_pointer_str(report, "/production_boundary"),
     })
+}
+
+fn adapter_case_request_str<'a>(adapter: &'a Value, case_name: &str, pointer: &str) -> Option<&'a str> {
+    adapter
+        .get("cases")?
+        .as_array()?
+        .iter()
+        .find(|case| json_pointer_str(case, "/name") == Some(case_name))
+        .and_then(|case| json_pointer_str(case, pointer))
 }
 
 fn validate_invariant_matrix(repo_root: &Path, path: &Path) -> Result<Value> {
@@ -4944,6 +5002,10 @@ mod tests {
         let btc_handoff_fields = EXPECTED_PUBLIC_BTC_SPV_HANDOFF_FIELDS;
         let public_attestation_handoff_fields = EXPECTED_PUBLIC_CELLDEP_REQUIRED_FIELDS;
         let external_review_handoff_fields = EXPECTED_EXTERNAL_TCB_REQUIRED_FIELDS;
+        let public_manifest_commit = "0123456789abcdef0123456789abcdef01234567";
+        let public_artifact_hash = format!("0x{}", "99".repeat(32));
+        let external_artifact_hash = format!("0x{}", "aa".repeat(32));
+        let external_source_tree_hash = format!("0x{}", "bb".repeat(32));
         let btc_spv_adapter = json!({
             "status": "passed",
             "adapter_status": "request_ready_external_evidence_required",
@@ -4965,6 +5027,8 @@ mod tests {
                     "request": {
                         "production_output": PUBLIC_CELLDEP_ATTESTATION,
                         "required_public_fields": ["network"],
+                        "expected_artifact_hash": public_artifact_hash,
+                        "expected_release_manifest_commit": public_manifest_commit,
                     },
                 },
                 {
@@ -4973,6 +5037,9 @@ mod tests {
                     "request": {
                         "production_output": EXTERNAL_TCB_ATTESTATION,
                         "required_public_fields": ["reviewer"],
+                        "expected_artifact_hash": external_artifact_hash,
+                        "expected_artifact_hash_algorithm": "sha256",
+                        "expected_source_tree_sha256": external_source_tree_hash,
                     },
                 },
             ],
@@ -5016,6 +5083,10 @@ mod tests {
                     "production_output": PUBLIC_CELLDEP_ATTESTATION,
                     "required_external_fields": public_attestation_handoff_fields,
                     "field_constraints": constraint_object(EXPECTED_PUBLIC_CELLDEP_FIELD_CONSTRAINTS),
+                    "expected_values": {
+                        "artifact_hash": public_artifact_hash,
+                        "release.manifest_commit": public_manifest_commit,
+                    },
                     "checks": { "ok": true },
                 },
                 {
@@ -5026,6 +5097,11 @@ mod tests {
                     "production_output": EXTERNAL_TCB_ATTESTATION,
                     "required_external_fields": external_review_handoff_fields,
                     "field_constraints": constraint_object(EXPECTED_EXTERNAL_TCB_FIELD_CONSTRAINTS),
+                    "expected_values": {
+                        "artifact_hash": external_artifact_hash,
+                        "artifact_hash_algorithm": "sha256",
+                        "source_tree_sha256": external_source_tree_hash,
+                    },
                     "checks": { "ok": true },
                 },
             ],
@@ -5033,6 +5109,8 @@ mod tests {
 
         let valid = validate_external_evidence_handoff_detail(&report, &btc_spv_adapter, &external_attestation_adapter);
         assert_eq!(json_pointer_str(&valid, "/status"), Some("passed"));
+        assert!(json_pointer_bool(&valid, "/cases/public_shared_cell_dep_attestation/expected_values_match_source_adapter"));
+        assert!(json_pointer_bool(&valid, "/cases/external_bip340_tcb_review_attestation/expected_values_match_source_adapter"));
 
         let mut stale_hash = report.clone();
         stale_hash["source_btc_spv_adapter_hash"] = json!(format!("0x{}", "11".repeat(32)));
@@ -5060,6 +5138,17 @@ mod tests {
         assert_eq!(json_pointer_str(&failed_constraint, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&failed_constraint, "/cases/public_btc_spv_evidence/field_constraints_exact"));
 
+        let mut stale_expected_value = report.clone();
+        stale_expected_value["cases"][1]["expected_values"]["release.manifest_commit"] =
+            json!("fedcba9876543210fedcba9876543210fedcba98");
+        let failed_expected_value =
+            validate_external_evidence_handoff_detail(&stale_expected_value, &btc_spv_adapter, &external_attestation_adapter);
+        assert_eq!(json_pointer_str(&failed_expected_value, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(
+            &failed_expected_value,
+            "/cases/public_shared_cell_dep_attestation/expected_values_match_source_adapter"
+        ));
+
         let mut unexpected_required_field = report;
         let mut extended_btc_fields = btc_handoff_fields.to_vec();
         extended_btc_fields.push("unexpected.shadow_field");
@@ -5074,6 +5163,7 @@ mod tests {
     fn external_attestation_adapter_requires_handoff_request_fields() {
         let full_public_fields = EXPECTED_PUBLIC_CELLDEP_REQUIRED_FIELDS;
         let full_review_fields = EXPECTED_EXTERNAL_TCB_REQUIRED_FIELDS;
+        let public_manifest_commit = "0123456789abcdef0123456789abcdef01234567";
         let report = json!({
             "schema": "novaseal-external-attestation-adapter-v0.1",
             "status": "passed",
@@ -5095,6 +5185,7 @@ mod tests {
                         "ipc_abi": "cellscript-btc-bip340-ipc-v0",
                         "required_status": "attested",
                         "expected_artifact_hash": format!("0x{}", "ee".repeat(32)),
+                        "expected_release_manifest_commit": public_manifest_commit,
                         "required_public_fields": full_public_fields,
                         "field_constraints": constraint_object(EXPECTED_PUBLIC_CELLDEP_FIELD_CONSTRAINTS),
                     },
@@ -5123,6 +5214,7 @@ mod tests {
         let valid = validate_external_attestation_adapter_detail(&report);
         assert_eq!(json_pointer_str(&valid, "/status"), Some("passed"));
         assert!(json_pointer_bool(&valid, "/cases/public_shared_cell_dep_attestation/field_constraints_exact"));
+        assert!(json_pointer_bool(&valid, "/cases/public_shared_cell_dep_attestation/expected_release_manifest_commit_present"));
         assert!(json_pointer_bool(&valid, "/cases/external_bip340_tcb_review_attestation/field_constraints_exact"));
 
         let mut missing_handoff_field = report.clone();
@@ -5145,6 +5237,15 @@ mod tests {
         let failed_constraint = validate_external_attestation_adapter_detail(&stale_constraint);
         assert_eq!(json_pointer_str(&failed_constraint, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&failed_constraint, "/cases/external_bip340_tcb_review_attestation/field_constraints_exact"));
+
+        let mut missing_expected_commit = report.clone();
+        missing_expected_commit["cases"][0]["request"]["expected_release_manifest_commit"] = json!("REPLACE_WITH_GIT_COMMIT");
+        let failed_expected_commit = validate_external_attestation_adapter_detail(&missing_expected_commit);
+        assert_eq!(json_pointer_str(&failed_expected_commit, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(
+            &failed_expected_commit,
+            "/cases/public_shared_cell_dep_attestation/expected_release_manifest_commit_present"
+        ));
 
         let mut unexpected_public_field = report;
         let mut extended_public_fields = full_public_fields.to_vec();

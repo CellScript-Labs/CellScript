@@ -157,15 +157,26 @@ def attestation_case(
 ) -> dict[str, Any]:
     cases = adapter.get("cases", [])
     source_case = next((case for case in cases if case.get("name") == case_name), {})
+    request = source_case.get("request", {})
     fields = required_field_set(source_case)
     checks = {
         "source_adapter_passed": adapter.get("status") == "passed",
         "source_adapter_status_request_ready": adapter.get("adapter_status") == "request_ready_external_attestations_required",
         "source_case_passed": source_case.get("status") == "passed",
-        "production_output_matches": source_case.get("request", {}).get("production_output") == production_output,
+        "production_output_matches": request.get("production_output") == production_output,
         "required_fields_complete": set(required_fields).issubset(fields),
     }
-    return {
+    expected_values = {}
+    if request.get("expected_release_manifest_commit"):
+        expected_values["release.manifest_commit"] = request["expected_release_manifest_commit"]
+    if request.get("expected_artifact_hash"):
+        expected_values["artifact_hash"] = request["expected_artifact_hash"]
+    if request.get("expected_artifact_hash_algorithm"):
+        expected_values["artifact_hash_algorithm"] = request["expected_artifact_hash_algorithm"]
+    if request.get("expected_source_tree_sha256"):
+        expected_values["source_tree_sha256"] = request["expected_source_tree_sha256"]
+
+    result = {
         "group": group,
         "status": "passed" if all(checks.values()) else "failed",
         "checks": checks,
@@ -176,6 +187,9 @@ def attestation_case(
         "required_external_fields": required_fields,
         "field_constraints": source_case.get("request", {}).get("field_constraints", {}),
     }
+    if expected_values:
+        result["expected_values"] = expected_values
+    return result
 
 
 def build_report(btc_spv_adapter: dict[str, Any], external_attestation_adapter: dict[str, Any]) -> dict[str, Any]:
