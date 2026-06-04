@@ -14,7 +14,6 @@ settlement_amount: u64
 old_nonce: u64
 new_nonce: u64
 intent_core_hash: Byte32
-signed_intent_hash: Byte32
 payout_commitment_hash: Byte32
 latest_receipt_hash: Byte32
 signer_authority_hash: Byte32

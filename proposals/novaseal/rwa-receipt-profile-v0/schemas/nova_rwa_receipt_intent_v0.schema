@@ -21,3 +21,5 @@ NovaRwaReceiptSignedIntentV0:
 core: NovaRwaReceiptIntentCoreV0
 canonical_envelope_hash: Byte32
 expected_receipt_hash: Byte32
+expected_cell_data_hash: Byte32
+expected_event_data_hash: Byte32

@@ -973,6 +973,7 @@ fn build_stateful_acceptance_report(repo_root: &Path, agreement_conformance: &Va
             "proposals/novaseal/fungible-xudt-profile-v0/schemas",
             VERIFIER_ROOT,
             "scripts/novaseal_planned_profiles_devnet_stateful_live.py",
+            "scripts/novaseal_devnet_stateful_live.py",
         ],
         &[("issue", "/issue/commit/tx_hash"), ("transfer", "/transfer/commit/tx_hash"), ("settle", "/settle/commit/tx_hash")],
         &[
@@ -1002,6 +1003,7 @@ fn build_stateful_acceptance_report(repo_root: &Path, agreement_conformance: &Va
             "proposals/novaseal/rwa-receipt-profile-v0/schemas",
             VERIFIER_ROOT,
             "scripts/novaseal_planned_profiles_devnet_stateful_live.py",
+            "scripts/novaseal_devnet_stateful_live.py",
         ],
         &[("materialize", "/materialize/commit/tx_hash"), ("claim", "/claim/commit/tx_hash"), ("settle", "/settle/commit/tx_hash")],
         &[
@@ -1031,6 +1033,7 @@ fn build_stateful_acceptance_report(repo_root: &Path, agreement_conformance: &Va
             "proposals/novaseal/btc-transaction-commitment-profile-v0/schemas",
             VERIFIER_ROOT,
             "scripts/novaseal_planned_profiles_devnet_stateful_live.py",
+            "scripts/novaseal_devnet_stateful_live.py",
         ],
         &[("commit_transaction", "/commit_transaction/commit/tx_hash")],
         &[
@@ -1057,6 +1060,7 @@ fn build_stateful_acceptance_report(repo_root: &Path, agreement_conformance: &Va
             "proposals/novaseal/btc-utxo-seal-profile-v0/schemas",
             VERIFIER_ROOT,
             "scripts/novaseal_planned_profiles_devnet_stateful_live.py",
+            "scripts/novaseal_devnet_stateful_live.py",
         ],
         &[("close_utxo_seal", "/close_utxo_seal/commit/tx_hash")],
         &[
@@ -1083,6 +1087,7 @@ fn build_stateful_acceptance_report(repo_root: &Path, agreement_conformance: &Va
             "proposals/novaseal/fiber-candidate-profile-v0/schemas",
             VERIFIER_ROOT,
             "scripts/novaseal_planned_profiles_devnet_stateful_live.py",
+            "scripts/novaseal_devnet_stateful_live.py",
         ],
         &[("settle_fiber_candidate", "/settle_fiber_candidate/commit/tx_hash")],
         &[
