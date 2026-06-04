@@ -4364,6 +4364,8 @@ fn validate_attestation_templates(
         "btc_spv_required_profiles_exact": btc_spv_profiles == expected_btc_spv_profiles,
         "public_template_network_not_local_devnet": json_pointer_str(public, "/network").is_some_and(|network| !network.is_empty() && network != "local-devnet"),
         "public_artifact_hash_matches_current_tcb": normalize_hex(json_pointer_str(public_verifier, "/artifact_hash")).as_deref() == artifact_hash,
+        "public_dep_type": json_pointer_str(public_verifier, "/dep_type") == Some("code"),
+        "public_hash_type": matches!(json_pointer_str(public_verifier, "/hash_type"), Some("data" | "data1" | "type")),
         "external_artifact_hash_matches_current_tcb": normalize_hex(json_pointer_str(external, "/artifact_hash")).as_deref() == artifact_hash,
         "external_source_tree_hash_matches_current_tcb": normalize_hex(json_pointer_str(external, "/source_tree_sha256")).as_deref() == source_tree_hash,
         "public_verifier_id": json_pointer_str(public_verifier, "/verifier_id") == Some("btc.bip340.v0"),
@@ -5541,6 +5543,8 @@ mod tests {
         .unwrap();
 
         assert_eq!(json_pointer_str(&passed, "/status"), Some("passed"));
+        assert!(json_pointer_bool(&passed, "/checks/public_dep_type"));
+        assert!(json_pointer_bool(&passed, "/checks/public_hash_type"));
         assert_eq!(json_pointer_str(&failed, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&failed, "/checks/public_artifact_hash_matches_current_tcb"));
         assert!(!json_pointer_bool(&failed, "/checks/external_artifact_hash_matches_current_tcb"));
@@ -5559,6 +5563,30 @@ mod tests {
         assert!(!json_pointer_bool(&failed_shape, "/checks/public_runtime_verifier_fields_exact"));
 
         drifted_public_template["runtime_verifier"].as_object_mut().unwrap().remove("unexpected_template_field");
+        drifted_public_template["runtime_verifier"]["dep_type"] = json!("dep_group");
+        std::fs::write(
+            proofs.join("public_shared_cell_dep_attestation.template.json"),
+            serde_json::to_vec_pretty(&drifted_public_template).unwrap(),
+        )
+        .unwrap();
+        let failed_dep_type =
+            validate_attestation_templates(temp.path(), Some(&artifact_hash), Some("sha256"), Some(&source_tree_hash)).unwrap();
+        assert_eq!(json_pointer_str(&failed_dep_type, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&failed_dep_type, "/checks/public_dep_type"));
+
+        drifted_public_template["runtime_verifier"]["dep_type"] = json!("code");
+        drifted_public_template["runtime_verifier"]["hash_type"] = json!("invalid-hash-type");
+        std::fs::write(
+            proofs.join("public_shared_cell_dep_attestation.template.json"),
+            serde_json::to_vec_pretty(&drifted_public_template).unwrap(),
+        )
+        .unwrap();
+        let failed_hash_type =
+            validate_attestation_templates(temp.path(), Some(&artifact_hash), Some("sha256"), Some(&source_tree_hash)).unwrap();
+        assert_eq!(json_pointer_str(&failed_hash_type, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&failed_hash_type, "/checks/public_hash_type"));
+
+        drifted_public_template["runtime_verifier"]["hash_type"] = json!("data1");
         std::fs::write(
             proofs.join("public_shared_cell_dep_attestation.template.json"),
             serde_json::to_vec_pretty(&drifted_public_template).unwrap(),
