@@ -4165,7 +4165,7 @@ fn cellc_ckb_hash_emits_default_blake2b_vector() {
 
 fn write_novaseal_certification_report(path: &std::path::Path) {
     let report = serde_json::json!({
-        "schema": "novaseal-production-gates-v0.2",
+        "schema": "novaseal-production-gates-v0.3",
         "status": "local_production_prep_ready_external_attestation_required",
         "production_ready": false,
         "local_production_prep_ready": true,

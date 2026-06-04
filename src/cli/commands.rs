@@ -25,7 +25,7 @@ use std::path::{Path, PathBuf};
 const CKB_HASH_FILE_SIZE_LIMIT_BYTES: u64 = 1024 * 1024;
 const NOVASEAL_CERTIFICATION_PLUGIN: &str = "novaseal-profile-v0";
 const NOVASEAL_CERTIFICATION_REPORT_SCHEMA: &str = "cellscript-certification-report-v0.1";
-const NOVASEAL_PLUGIN_REPORT_SCHEMA: &str = "novaseal-production-gates-v0.2";
+const NOVASEAL_PLUGIN_REPORT_SCHEMA: &str = "novaseal-production-gates-v0.3";
 const NOVASEAL_PROFILE_CERTIFICATION_SCHEMA: &str = "novaseal-profile-certification-v0.1";
 const NOVASEAL_AGREEMENT_PROFILE: &str = "agreement-profile-v0";
 const NOVASEAL_CANONICAL_SCHEMA: &str = "NovaSealCanonicalV0";
@@ -2903,6 +2903,7 @@ fn novaseal_certification_summary(
             "hash": plugin_report_hash,
             "status": json_pointer_str(plugin_report, "/status"),
             "production_ready": json_pointer_bool(plugin_report, "/production_ready"),
+            "production_gates_passed": json_pointer_bool(plugin_report, "/production_gates_passed"),
             "local_production_prep_ready": json_pointer_bool(plugin_report, "/local_production_prep_ready"),
             "v1_status": json_pointer_str(v1_readiness, "/status"),
             "local_v1_ready": json_pointer_bool(v1_readiness, "/local_v1_ready"),
@@ -6165,6 +6166,7 @@ mod tests {
             "schema": NOVASEAL_PLUGIN_REPORT_SCHEMA,
             "status": if production_ready { "production_ready" } else { "local_production_prep_ready_external_attestation_required" },
             "production_ready": production_ready,
+            "production_gates_passed": production_ready,
             "local_production_prep_ready": true,
             "production_statement_eligible": production_statement_eligible,
             "failed_dimensions": [
@@ -6211,6 +6213,7 @@ mod tests {
         assert_eq!(summary["plugin"]["kind"], "compiler-builtin-rust");
         assert_eq!(summary["plugin_report"]["schema"], NOVASEAL_PLUGIN_REPORT_SCHEMA);
         assert_eq!(summary["checks"]["local_production_prep_ready"], true);
+        assert_eq!(summary["plugin_report"]["production_gates_passed"], false);
         assert_eq!(summary["failed_dimensions"][0], "public_shared_cell_dep_attestation");
         assert_eq!(summary["external_blockers"][0], "top_level_public_shared_cell_dep_attested");
     }
@@ -6247,7 +6250,8 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let report_path = temp.path().join("novaseal-production-gates.json");
         let implementation_path = temp.path().join("novaseal_certification.rs");
-        let report = novaseal_test_plugin_report(false, false);
+        let mut report = novaseal_test_plugin_report(false, false);
+        report["production_gates_passed"] = serde_json::json!(true);
         std::fs::write(&report_path, serde_json::to_vec_pretty(&report).unwrap()).unwrap();
         std::fs::write(&implementation_path, b"pub(crate) fn build_report() {}\n").unwrap();
 
@@ -6256,6 +6260,8 @@ mod tests {
         let failed_checks = summary["failure_reason"]["failed_checks"].as_array().expect("failed checks");
 
         assert_eq!(summary["status"], "failed");
+        assert_eq!(summary["plugin_report"]["production_ready"], false);
+        assert_eq!(summary["plugin_report"]["production_gates_passed"], true);
         assert!(failed_checks.iter().any(|check| check == "production_ready"));
         assert!(failed_checks.iter().any(|check| check == "production_statement_eligible"));
         assert_eq!(summary["failure_reason"]["failed_dimensions"][0], "public_shared_cell_dep_attestation");

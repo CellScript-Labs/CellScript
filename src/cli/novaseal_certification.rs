@@ -748,18 +748,20 @@ pub(crate) fn build_report(repo_root: &Path) -> Result<Value> {
         .iter()
         .filter(|row| json_pointer_str(row, "/status") != Some("external_required"))
         .all(|row| json_pointer_str(row, "/status") == Some("passed"));
-    let production_ready = gates.iter().all(|row| json_pointer_str(row, "/status") == Some("passed"));
+    let production_gates_passed = gates.iter().all(|row| json_pointer_str(row, "/status") == Some("passed"));
     let production_statement_eligible = json_pointer_bool(&profile_certification, "/production_statement_eligible");
+    let production_ready = production_gates_passed && production_statement_eligible;
     let external_required = gates.iter().any(|row| json_pointer_str(row, "/status") == Some("external_required"));
-    let status = production_gate_status(production_ready, production_statement_eligible, local_ready, external_required);
-    let v1_readiness = build_v1_readiness(&profile_certification, &stateful_acceptance, &gates, local_ready, production_ready);
+    let status = production_gate_status(production_ready, production_gates_passed, local_ready, external_required);
+    let v1_readiness = build_v1_readiness(&profile_certification, &stateful_acceptance, &gates, local_ready, production_gates_passed);
     let failed_dimensions = v1_readiness.get("failed_dimensions").cloned().unwrap_or_else(|| Value::Array(Vec::new()));
     let external_blockers = v1_readiness.get("external_blockers").cloned().unwrap_or_else(|| Value::Array(Vec::new()));
 
     Ok(json!({
-        "schema": "novaseal-production-gates-v0.2",
+        "schema": "novaseal-production-gates-v0.3",
         "status": status,
         "production_ready": production_ready,
+        "production_gates_passed": production_gates_passed,
         "local_production_prep_ready": local_ready,
         "production_statement_eligible": production_statement_eligible,
         "failed_dimensions": failed_dimensions,
@@ -796,7 +798,7 @@ fn build_v1_readiness(
     stateful_acceptance: &Value,
     gates: &[Value],
     local_ready: bool,
-    production_ready: bool,
+    production_gates_passed: bool,
 ) -> Value {
     let gate_status = |name: &str| {
         gates
@@ -940,9 +942,10 @@ fn build_v1_readiness(
     let external_blockers =
         profile_certification.get("production_statement_blockers").cloned().unwrap_or_else(|| Value::Array(Vec::new()));
     let production_statement_eligible = json_pointer_bool(profile_certification, "/production_statement_eligible");
-    let status = if production_ready && production_statement_eligible {
+    let production_ready = production_gates_passed && production_statement_eligible;
+    let status = if production_ready {
         "v1_prod_ready"
-    } else if production_ready {
+    } else if production_gates_passed {
         "production_statement_ineligible"
     } else if local_dimensions_passed {
         "local_v1_ready_external_attestation_required"
@@ -957,6 +960,7 @@ fn build_v1_readiness(
         "status": status,
         "local_v1_ready": local_dimensions_passed,
         "production_ready": production_ready,
+        "production_gates_passed": production_gates_passed,
         "production_statement_eligible": production_statement_eligible,
         "planned_profile_matrix": planned_matrix,
         "dimensions": dimensions,
@@ -976,13 +980,13 @@ fn build_v1_readiness(
 
 fn production_gate_status(
     production_ready: bool,
-    production_statement_eligible: bool,
+    production_gates_passed: bool,
     local_ready: bool,
     external_required: bool,
 ) -> &'static str {
-    if production_ready && production_statement_eligible {
+    if production_ready {
         "production_ready"
-    } else if production_ready {
+    } else if production_gates_passed {
         "production_statement_ineligible"
     } else if local_ready && external_required {
         "local_production_prep_ready_external_attestation_required"
@@ -5034,7 +5038,7 @@ mod tests {
     #[test]
     fn production_status_requires_statement_eligibility_even_when_gates_pass() {
         assert_eq!(production_gate_status(true, true, true, false), "production_ready");
-        assert_eq!(production_gate_status(true, false, true, false), "production_statement_ineligible");
+        assert_eq!(production_gate_status(false, true, true, false), "production_statement_ineligible");
         assert_eq!(production_gate_status(false, false, true, true), "local_production_prep_ready_external_attestation_required");
         assert_eq!(production_gate_status(false, false, false, true), "failed");
     }
@@ -5102,7 +5106,8 @@ mod tests {
 
         assert_eq!(json_pointer_str(&readiness, "/status"), Some("production_statement_ineligible"));
         assert!(json_pointer_bool(&readiness, "/local_v1_ready"));
-        assert!(json_pointer_bool(&readiness, "/production_ready"));
+        assert!(!json_pointer_bool(&readiness, "/production_ready"));
+        assert!(json_pointer_bool(&readiness, "/production_gates_passed"));
         assert!(!json_pointer_bool(&readiness, "/production_statement_eligible"));
         assert!(json_array_strings(&readiness, "/failed_dimensions").is_empty());
         assert_eq!(json_array_strings(&readiness, "/external_blockers"), vec!["manual_production_statement_missing".to_string()]);
