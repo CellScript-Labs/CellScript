@@ -25,7 +25,11 @@ from dataclasses import dataclass
 from typing import Any
 
 
-SCHEMA = "novaseal-fiber-node-execution-v0.1"
+SCHEMA = "novaseal-fiber-node-execution-v0.2"
+SUPPORTED_PREVIOUS_SCHEMAS = {
+    "novaseal-fiber-node-execution-v0.1",
+    SCHEMA,
+}
 
 
 @dataclass(frozen=True)
@@ -257,7 +261,7 @@ def previous_executions(output: pathlib.Path) -> dict[str, dict[str, Any]]:
         report = json.loads(output.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return {}
-    if report.get("schema") != SCHEMA:
+    if report.get("schema") not in SUPPORTED_PREVIOUS_SCHEMAS:
         return {}
     executions: dict[str, dict[str, Any]] = {}
     for workflow in report.get("workflows", []):
@@ -274,6 +278,9 @@ def cleanup_fiber_processes(fiber_repo: pathlib.Path) -> None:
     patterns = [
         re.compile(r"\.\./\.\./target/[^ ]*/fnn -d [123](?:\s|$)"),
         re.compile(rf"ckb run -C {re.escape(str(fiber_repo / 'tests' / 'deploy' / 'node-data'))}"),
+        re.compile(rf"bitcoind -conf={re.escape(str(fiber_repo / 'tests' / 'deploy' / 'lnd-init' / 'bitcoind' / 'bitcoin.conf'))}"),
+        re.compile(rf"lnd --lnddir={re.escape(str(fiber_repo / 'tests' / 'deploy' / 'lnd-init' / 'lnd-bob'))}"),
+        re.compile(rf"lnd --lnddir={re.escape(str(fiber_repo / 'tests' / 'deploy' / 'lnd-init' / 'lnd-ingrid'))}"),
     ]
     completed = subprocess.run(["ps", "-axo", "pid=,command="], text=True, capture_output=True, check=False)
     matched_pids: list[int] = []
@@ -328,6 +335,40 @@ def fiber_run_env(base_env: dict[str, str], log_dir: pathlib.Path) -> dict[str, 
     return env
 
 
+def bruno_workspace_for_suite(
+    fiber_repo: pathlib.Path,
+    suite: str,
+    log_dir: pathlib.Path,
+) -> tuple[pathlib.Path, list[str]]:
+    """Return a Bruno workspace, applying explicit suite compatibility patches when needed."""
+    source = fiber_repo / "tests" / "bruno"
+    patches: list[str] = []
+    if suite != "watchtower/force-close-with-pending-tlcs-and-udt":
+        return source, patches
+
+    workspace = log_dir / "bruno-worktree"
+    if workspace.exists():
+        shutil.rmtree(workspace)
+    shutil.copytree(source, workspace, ignore=shutil.ignore_patterns("node_modules"))
+
+    replacements = {
+        'bru.setVar("NODE1_BALANCE", capacity);': 'bru.setVar("NODE1_BALANCE", capacity.toString());',
+        'bru.setVar("NODE2_BALANCE", capacity);': 'bru.setVar("NODE2_BALANCE", capacity.toString());',
+        'bru.setVar("NODE1_NEW_BALANCE", capacity);': 'bru.setVar("NODE1_NEW_BALANCE", capacity.toString());',
+        'bru.setVar("NODE2_NEW_BALANCE", capacity);': 'bru.setVar("NODE2_NEW_BALANCE", capacity.toString());',
+    }
+    suite_path = workspace / "e2e" / suite
+    for path in sorted(suite_path.glob("*.bru")):
+        text = path.read_text(encoding="utf-8")
+        updated = text
+        for old, new in replacements.items():
+            updated = updated.replace(old, new)
+        if updated != text:
+            path.write_text(updated, encoding="utf-8")
+            patches.append(rel(path, workspace))
+    return workspace, patches
+
+
 def run_workflow(args: argparse.Namespace, workflow: FiberWorkflow) -> dict[str, Any]:
     fiber_repo = args.fiber_repo.resolve()
     suite_arg = f"e2e/{workflow.suite}"
@@ -364,14 +405,17 @@ def run_workflow(args: argparse.Namespace, workflow: FiberWorkflow) -> dict[str,
                     "wait_returncode": wait.returncode,
                     "duration_seconds": round(time.time() - started_at, 3),
                 }
+        bruno_cwd, bruno_compatibility_patches = bruno_workspace_for_suite(fiber_repo, workflow.suite, log_dir)
         command = ["npm", "exec", "--", "@usebruno/cli", "run", suite_arg, "-r", "--env", "test"]
-        completed = run_cmd(command, fiber_repo / "tests" / "bruno", timeout=args.timeout_seconds, env=env)
+        completed = run_cmd(command, bruno_cwd, timeout=args.timeout_seconds, env=env)
         write_text(log_dir / "bruno.stdout", completed.stdout)
         write_text(log_dir / "bruno.stderr", completed.stderr)
         return {
             "status": "passed" if completed.returncode == 0 else "failed",
             "started_node": started_node,
             "command": command,
+            "bruno_cwd": rel(bruno_cwd, args.repo_root.resolve()),
+            "bruno_compatibility_patches": bruno_compatibility_patches,
             "returncode": completed.returncode,
             "noninteractive_ckb_cli_account_import_wrapper": (log_dir / "tool-bin" / "ckb-cli").is_file(),
             "stdout_log": rel(log_dir / "bruno.stdout", args.repo_root.resolve()),
