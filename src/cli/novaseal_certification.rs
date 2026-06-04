@@ -3,6 +3,7 @@ use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub(crate) const IMPLEMENTATION_ID: &str = "cellscript::cli::novaseal_certification";
 
@@ -284,7 +285,7 @@ const EXPECTED_BTC_SPV_ADAPTER_PUBLIC_FIELDS: &[&str] = &[
 const EXPECTED_PUBLIC_BTC_SPV_HANDOFF_FIELDS: &[&str] = EXPECTED_BTC_SPV_ADAPTER_PUBLIC_FIELDS;
 const EXPECTED_BTC_SPV_FIELD_CONSTRAINTS: &[(&str, &str)] = &[
     ("network", "explicit public mainnet/testnet name; placeholders and local/devnet/regtest/simnet/private/fake labels are rejected"),
-    ("generated_at", "UTC timestamp in YYYY-MM-DDTHH:MM:SSZ form"),
+    ("generated_at", "UTC timestamp in YYYY-MM-DDTHH:MM:SSZ form; future timestamps are rejected"),
     ("evidence_provider", "real external provider identity; placeholder, example, and unknown tokens are rejected"),
     ("source_service.name", "real external SPV service identity; placeholder, example, and unknown tokens are rejected"),
     ("source_service.commit", "40-character hex service source commit"),
@@ -314,7 +315,7 @@ const EXPECTED_PUBLIC_CELLDEP_FIELD_CONSTRAINTS: &[(&str, &str)] = &[
         "network",
         "explicit public CKB mainnet/testnet name; placeholders and local/devnet/regtest/simnet/private/fake labels are rejected",
     ),
-    ("attested_at", "UTC timestamp in YYYY-MM-DDTHH:MM:SSZ form"),
+    ("attested_at", "UTC timestamp in YYYY-MM-DDTHH:MM:SSZ form; future timestamps are rejected"),
     ("attestor", "real release signer or deployer identity; placeholder, example, and unknown tokens are rejected"),
     ("release.manifest_commit", "40-character hex source commit matching the reviewed TCB repo_commit"),
     ("runtime_verifier.out_point", "0x-prefixed 32-byte CKB transaction hash plus numeric output index"),
@@ -341,7 +342,7 @@ const EXPECTED_EXTERNAL_TCB_REQUIRED_FIELDS: &[&str] = &[
 ];
 const EXPECTED_EXTERNAL_TCB_FIELD_CONSTRAINTS: &[(&str, &str)] = &[
     ("reviewer", "real external reviewer identity; placeholder, example, and unknown tokens are rejected"),
-    ("review_date", "UTC date in YYYY-MM-DD form"),
+    ("review_date", "UTC date in YYYY-MM-DD form; future dates are rejected"),
     ("review_scope", "exact BIP340 verifier, RISC-V shell, IPC envelope, and artifact/CellDep pinning scope"),
     ("artifact_hash_algorithm", "sha256"),
     ("report_uri", "HTTPS URI for the public review report or source-controlled review commit; example domains are rejected"),
@@ -4177,6 +4178,7 @@ fn validate_btc_spv_evidence(repo_root: &Path, rel_path: &str, external_evidence
         "evidence_provider_identity": json_pointer_str(&payload, "/evidence_provider").is_some_and(is_external_identity),
         "generated_at_present": payload.get("generated_at").is_some_and(value_is_present),
         "generated_at_utc_timestamp": json_pointer_str(&payload, "/generated_at").is_some_and(is_utc_timestamp_z),
+        "generated_at_not_future": json_pointer_str(&payload, "/generated_at").is_some_and(is_utc_timestamp_z_not_future),
         "request_handoff_fields_exact": exact_object_keys(payload.get("request_handoff").unwrap_or(&Value::Null), EXPECTED_EXTERNAL_REQUEST_HANDOFF_FIELDS),
         "request_handoff_bundle_path": json_pointer_str(&payload, "/request_handoff/bundle") == Some(EXTERNAL_EVIDENCE_HANDOFF),
         "request_handoff_bundle_hash_matches_current": normalize_hex(json_pointer_str(&payload, "/request_handoff/bundle_hash")).as_deref()
@@ -4231,6 +4233,7 @@ fn validate_public_attestation(
         "status": json_pointer_str(&payload, "/status") == Some("attested"),
         "network_public": json_pointer_str(&payload, "/network").is_some_and(is_public_network),
         "attested_at_utc_timestamp": json_pointer_str(&payload, "/attested_at").is_some_and(is_utc_timestamp_z),
+        "attested_at_not_future": json_pointer_str(&payload, "/attested_at").is_some_and(is_utc_timestamp_z_not_future),
         "attestor_identity": json_pointer_str(&payload, "/attestor").is_some_and(is_external_identity),
         "release_fields_exact": exact_object_keys(&release, EXPECTED_PUBLIC_CELLDEP_RELEASE_FIELDS),
         "release_package": json_pointer_str(&release, "/package") == Some("novaseal"),
@@ -4301,6 +4304,7 @@ fn validate_external_review(
         "reviewer_identity": json_pointer_str(&payload, "/reviewer").is_some_and(is_external_identity),
         "review_date_present": json_pointer_str(&payload, "/review_date").is_some_and(|value| !value.is_empty()),
         "review_date_utc_date": json_pointer_str(&payload, "/review_date").is_some_and(is_utc_date),
+        "review_date_not_future": json_pointer_str(&payload, "/review_date").is_some_and(is_utc_date_not_future),
         "report_uri_https": json_pointer_str(&payload, "/report_uri").is_some_and(is_https_report_uri),
         "review_scope_exact": exact_string_set(&json_array_strings(&payload, "/review_scope"), EXPECTED_EXTERNAL_TCB_REVIEW_SCOPE),
     });
@@ -4850,6 +4854,16 @@ fn is_utc_timestamp_z(value: &str) -> bool {
         )
 }
 
+fn is_utc_timestamp_z_not_future(value: &str) -> bool {
+    let Some(timestamp) = utc_timestamp_seconds(value) else {
+        return false;
+    };
+    let Some(now) = current_unix_seconds() else {
+        return false;
+    };
+    timestamp <= now
+}
+
 fn is_utc_date(value: &str) -> bool {
     let bytes = value.as_bytes();
     bytes.len() == 10
@@ -4859,6 +4873,16 @@ fn is_utc_date(value: &str) -> bool {
         && ascii_digits(&bytes[5..7])
         && ascii_digits(&bytes[8..10])
         && valid_ymd(parse_digits(&bytes[0..4]), parse_digits(&bytes[5..7]), parse_digits(&bytes[8..10]))
+}
+
+fn is_utc_date_not_future(value: &str) -> bool {
+    let Some(days) = utc_date_days(value) else {
+        return false;
+    };
+    let Some(now) = current_unix_seconds() else {
+        return false;
+    };
+    days <= (now / 86_400) as i64
 }
 
 fn ascii_digits(bytes: &[u8]) -> bool {
@@ -4895,6 +4919,48 @@ fn valid_ymd(year: Option<u32>, month: Option<u32>, day: Option<u32>) -> bool {
         return false;
     };
     year > 0 && (1..=max_day).contains(&day)
+}
+
+fn utc_timestamp_seconds(value: &str) -> Option<u64> {
+    if !is_utc_timestamp_z(value) {
+        return None;
+    }
+    let bytes = value.as_bytes();
+    let days = utc_date_components_days(parse_digits(&bytes[0..4])?, parse_digits(&bytes[5..7])?, parse_digits(&bytes[8..10])?)?;
+    let seconds = days.checked_mul(86_400)?.checked_add(
+        parse_digits(&bytes[11..13])? as i64 * 3_600
+            + parse_digits(&bytes[14..16])? as i64 * 60
+            + parse_digits(&bytes[17..19])? as i64,
+    )?;
+    u64::try_from(seconds).ok()
+}
+
+fn utc_date_days(value: &str) -> Option<i64> {
+    if !is_utc_date(value) {
+        return None;
+    }
+    let bytes = value.as_bytes();
+    utc_date_components_days(parse_digits(&bytes[0..4])?, parse_digits(&bytes[5..7])?, parse_digits(&bytes[8..10])?)
+}
+
+fn utc_date_components_days(year: u32, month: u32, day: u32) -> Option<i64> {
+    if !valid_ymd(Some(year), Some(month), Some(day)) {
+        return None;
+    }
+    let mut year = i64::from(year);
+    let month = i64::from(month);
+    let day = i64::from(day);
+    year -= i64::from(month <= 2);
+    let era = if year >= 0 { year } else { year - 399 } / 400;
+    let year_of_era = year - era * 400;
+    let month_for_year = month + if month > 2 { -3 } else { 9 };
+    let day_of_year = (153 * month_for_year + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    Some(era * 146_097 + day_of_era - 719_468)
+}
+
+fn current_unix_seconds() -> Option<u64> {
+    SystemTime::now().duration_since(UNIX_EPOCH).ok().map(|duration| duration.as_secs())
 }
 
 fn days_in_month(year: u32, month: u32) -> Option<u32> {
@@ -5668,7 +5734,7 @@ mod tests {
             "status": "attested",
             "network": "testnet",
             "evidence_provider": "external-spv-operator",
-            "generated_at": "2026-06-05T00:00:00Z",
+            "generated_at": "2026-06-04T00:00:00Z",
             "notes": "external public BTC SPV evidence fixture",
             "required_profiles": EXPECTED_BTC_SPV_EVIDENCE_PROFILES,
             "request_handoff": {
@@ -5690,6 +5756,7 @@ mod tests {
         assert!(json_pointer_bool(&passed, "/checks/network_public"));
         assert!(json_pointer_bool(&passed, "/checks/evidence_provider_identity"));
         assert!(json_pointer_bool(&passed, "/checks/generated_at_utc_timestamp"));
+        assert!(json_pointer_bool(&passed, "/checks/generated_at_not_future"));
         assert!(json_pointer_bool(&passed, "/checks/required_profiles_field_exact"));
         assert!(json_pointer_bool(&passed, "/checks/required_profiles_covered_exact"));
         assert!(json_pointer_bool(&passed, "/checks/case_checks_passed"));
@@ -5702,6 +5769,13 @@ mod tests {
         let failed_generated_at = validate_btc_spv_evidence(temp.path(), PUBLIC_BTC_SPV_EVIDENCE, &handoff).unwrap();
         assert_eq!(json_pointer_str(&failed_generated_at, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&failed_generated_at, "/checks/generated_at_utc_timestamp"));
+
+        let mut future_generated_at = spv_report.clone();
+        future_generated_at["generated_at"] = json!("2999-01-01T00:00:00Z");
+        std::fs::write(proofs.join("public_btc_spv_evidence.json"), serde_json::to_vec_pretty(&future_generated_at).unwrap()).unwrap();
+        let failed_future_generated_at = validate_btc_spv_evidence(temp.path(), PUBLIC_BTC_SPV_EVIDENCE, &handoff).unwrap();
+        assert_eq!(json_pointer_str(&failed_future_generated_at, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&failed_future_generated_at, "/checks/generated_at_not_future"));
 
         let mut placeholder_provider = spv_report.clone();
         placeholder_provider["evidence_provider"] = json!("REPLACE_WITH_EXTERNAL_SPV_OPERATOR_OR_SERVICE");
@@ -5868,7 +5942,7 @@ mod tests {
             "schema": "novaseal-public-shared-cell-dep-attestation-v0.1",
             "status": "attested",
             "network": "testnet",
-            "attested_at": "2026-06-05T00:00:00Z",
+            "attested_at": "2026-06-04T00:00:00Z",
             "attestor": "external-cell-dep-operator",
             "release": {
                 "package": "novaseal",
@@ -5912,6 +5986,7 @@ mod tests {
         assert!(json_pointer_bool(&public_passed, "/checks/release_manifest_commit_matches_tcb"));
         assert!(json_pointer_bool(&public_passed, "/checks/network_public"));
         assert!(json_pointer_bool(&public_passed, "/checks/attested_at_utc_timestamp"));
+        assert!(json_pointer_bool(&public_passed, "/checks/attested_at_not_future"));
         assert!(json_pointer_bool(&public_passed, "/checks/attestor_identity"));
         assert!(json_pointer_bool(&public_passed, "/checks/request_handoff_fields_exact"));
         assert!(json_pointer_bool(&public_passed, "/checks/request_handoff_bundle_hash_algorithm"));
@@ -5937,6 +6012,24 @@ mod tests {
         .unwrap();
         assert_eq!(json_pointer_str(&public_attested_at_failed, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&public_attested_at_failed, "/checks/attested_at_utc_timestamp"));
+
+        let mut public_future_attested_at = public_attestation.clone();
+        public_future_attested_at["attested_at"] = json!("2999-01-01T00:00:00Z");
+        std::fs::write(
+            proofs.join("public_shared_cell_dep_attestation.json"),
+            serde_json::to_vec_pretty(&public_future_attested_at).unwrap(),
+        )
+        .unwrap();
+        let public_future_attested_at_failed = validate_public_attestation(
+            temp.path(),
+            PUBLIC_CELLDEP_ATTESTATION,
+            Some(&artifact_hash),
+            Some(tcb_repo_commit),
+            &handoff,
+        )
+        .unwrap();
+        assert_eq!(json_pointer_str(&public_future_attested_at_failed, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&public_future_attested_at_failed, "/checks/attested_at_not_future"));
 
         let mut public_placeholder_network = public_attestation.clone();
         public_placeholder_network["network"] = json!("testnet-or-mainnet");
@@ -6160,7 +6253,7 @@ mod tests {
             "verifier_id": "btc.bip340.v0",
             "ipc_abi": "cellscript-btc-bip340-ipc-v0",
             "reviewer": "external-tcb-reviewer",
-            "review_date": "2026-06-05",
+            "review_date": "2026-06-04",
             "review_scope": EXPECTED_EXTERNAL_TCB_REVIEW_SCOPE,
             "report_uri": "https://audits.nervos.org/novaseal-bip340-tcb-review",
             "notes": "external review fixture",
@@ -6189,6 +6282,7 @@ mod tests {
         assert!(json_pointer_bool(&review_passed, "/checks/source_tree_sha256_matches_current_tcb"));
         assert!(json_pointer_bool(&review_passed, "/checks/reviewer_identity"));
         assert!(json_pointer_bool(&review_passed, "/checks/review_date_utc_date"));
+        assert!(json_pointer_bool(&review_passed, "/checks/review_date_not_future"));
         assert!(json_pointer_bool(&review_passed, "/checks/report_uri_https"));
         assert!(json_pointer_bool(&review_passed, "/checks/review_scope_exact"));
 
@@ -6204,6 +6298,19 @@ mod tests {
                 .unwrap();
         assert_eq!(json_pointer_str(&review_date_failed, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&review_date_failed, "/checks/review_date_utc_date"));
+
+        let mut review_future_date = external_review.clone();
+        review_future_date["review_date"] = json!("2999-01-01");
+        std::fs::write(
+            proofs.join("bip340_external_tcb_review_attestation.json"),
+            serde_json::to_vec_pretty(&review_future_date).unwrap(),
+        )
+        .unwrap();
+        let review_future_date_failed =
+            validate_external_review(temp.path(), EXTERNAL_TCB_ATTESTATION, Some(&artifact_hash), Some(&source_tree_hash), &handoff)
+                .unwrap();
+        assert_eq!(json_pointer_str(&review_future_date_failed, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&review_future_date_failed, "/checks/review_date_not_future"));
 
         let mut review_stale_source_tree = external_review.clone();
         review_stale_source_tree["source_tree_sha256"] = json!(format!("0x{}", "cc".repeat(32)));

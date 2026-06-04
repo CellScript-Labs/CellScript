@@ -146,7 +146,7 @@ def btc_spv_handoff_case(adapter: dict[str, Any]) -> dict[str, Any]:
         ],
         "field_constraints": {
             "network": "explicit public mainnet/testnet name; placeholders and local/devnet/regtest/simnet/private/fake labels are rejected",
-            "generated_at": "UTC timestamp in YYYY-MM-DDTHH:MM:SSZ form",
+            "generated_at": "UTC timestamp in YYYY-MM-DDTHH:MM:SSZ form; future timestamps are rejected",
             "evidence_provider": "real external provider identity; placeholder, example, and unknown tokens are rejected",
             "source_service.name": "real external SPV service identity; placeholder, example, and unknown tokens are rejected",
             "source_service.commit": "40-character hex service source commit",
