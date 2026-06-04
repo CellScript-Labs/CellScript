@@ -6654,6 +6654,105 @@ mod tests {
     }
 
     #[test]
+    fn rwa_legal_registry_review_requires_current_external_evidence() {
+        let temp = tempfile::tempdir().unwrap();
+        let rwa_root = temp.path().join(RWA_RECEIPT_ROOT);
+        let rwa_src = rwa_root.join("src");
+        let rwa_schemas = rwa_root.join("schemas");
+        let rwa_fixtures = rwa_root.join("fixtures");
+        let rwa_proofs = rwa_root.join("proofs");
+        std::fs::create_dir_all(&rwa_src).unwrap();
+        std::fs::create_dir_all(&rwa_schemas).unwrap();
+        std::fs::create_dir_all(&rwa_fixtures).unwrap();
+        std::fs::create_dir_all(&rwa_proofs).unwrap();
+        std::fs::write(rwa_root.join("Cell.toml"), format!("profile = \"{}\"\n", EXPECTED_RWA_RECEIPT_PROFILE)).unwrap();
+        std::fs::write(rwa_src.join("nova_rwa_receipt_type.cell"), "action materialize_rwa_receipt() {}\n").unwrap();
+        std::fs::write(rwa_src.join("nova_rwa_receipt_lifecycle_type.cell"), "action nova_rwa_receipt_lifecycle() {}\n").unwrap();
+        std::fs::write(rwa_schemas.join("nova_rwa_receipt_cell_v0.schema"), "cell: Byte32\n").unwrap();
+        std::fs::write(rwa_fixtures.join("materialize_valid.json"), "{}\n").unwrap();
+        std::fs::write(rwa_proofs.join("invariant_matrix.json"), "{}\n").unwrap();
+
+        let source_hash = source_tree_hash(temp.path(), RWA_LEGAL_REVIEW_SOURCE_HASH_PATHS).unwrap();
+        let source_sha256 = json_pointer_str(&source_hash, "/sha256").unwrap().to_string();
+        let handoff = json!({
+            "schema": "novaseal-external-evidence-handoff-bundle-v0.1",
+            "status": "passed",
+            "cases": [
+                {
+                    "group": "rwa_legal_registry_review_evidence",
+                    "expected_values": {
+                        "profile": EXPECTED_RWA_RECEIPT_PROFILE,
+                        "profile_source_tree_sha256": source_sha256,
+                    },
+                },
+            ],
+        });
+        let handoff_hash = novaseal_handoff_report_hash("external_evidence_handoff_bundle", &handoff);
+        let evidence_path = temp.path().join(RWA_LEGAL_REGISTRY_REVIEW_EVIDENCE);
+        let evidence = json!({
+            "schema": "novaseal-rwa-legal-registry-review-evidence-v0.1",
+            "status": "accepted",
+            "profile": EXPECTED_RWA_RECEIPT_PROFILE,
+            "reviewer": "NervosRegistryReviewLtd",
+            "review_date": "2026-06-04",
+            "review_scope": EXPECTED_RWA_LEGAL_REVIEW_SCOPE,
+            "registry": {
+                "authority": "NervosCustodyRegistry",
+                "jurisdiction": "England-and-Wales",
+                "registry_report_hash": format!("0x{}", "66".repeat(32)),
+            },
+            "profile_source_tree_sha256": source_sha256,
+            "report_uri": "https://audits.nervos.org/novaseal-rwa-legal-registry-review",
+            "request_handoff": {
+                "bundle": EXTERNAL_EVIDENCE_HANDOFF,
+                "bundle_hash": handoff_hash,
+                "bundle_hash_algorithm": NOVASEAL_HANDOFF_HASH_ALGORITHM,
+                "group": "rwa_legal_registry_review_evidence",
+            },
+            "notes": "external RWA legal registry review fixture",
+        });
+        std::fs::write(&evidence_path, serde_json::to_vec_pretty(&evidence).unwrap()).unwrap();
+
+        let passed = validate_rwa_legal_registry_review(temp.path(), RWA_LEGAL_REGISTRY_REVIEW_EVIDENCE, &handoff).unwrap();
+        assert_eq!(json_pointer_str(&passed, "/status"), Some("passed"));
+        assert!(json_pointer_bool(&passed, "/checks/profile_source_tree_sha256_matches_current"));
+        assert!(json_pointer_bool(&passed, "/checks/profile_source_tree_sha256_matches_handoff"));
+        assert!(json_pointer_bool(&passed, "/checks/request_handoff_bundle_hash_matches_current"));
+
+        let mut stale_source = evidence.clone();
+        stale_source["profile_source_tree_sha256"] = json!(format!("0x{}", "77".repeat(32)));
+        std::fs::write(&evidence_path, serde_json::to_vec_pretty(&stale_source).unwrap()).unwrap();
+        let failed_stale_source =
+            validate_rwa_legal_registry_review(temp.path(), RWA_LEGAL_REGISTRY_REVIEW_EVIDENCE, &handoff).unwrap();
+        assert_eq!(json_pointer_str(&failed_stale_source, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&failed_stale_source, "/checks/profile_source_tree_sha256_matches_current"));
+
+        let mut placeholder_reviewer = evidence.clone();
+        placeholder_reviewer["reviewer"] = json!("REPLACE_WITH_EXTERNAL_LEGAL_OR_REGISTRY_REVIEWER");
+        std::fs::write(&evidence_path, serde_json::to_vec_pretty(&placeholder_reviewer).unwrap()).unwrap();
+        let failed_placeholder_reviewer =
+            validate_rwa_legal_registry_review(temp.path(), RWA_LEGAL_REGISTRY_REVIEW_EVIDENCE, &handoff).unwrap();
+        assert_eq!(json_pointer_str(&failed_placeholder_reviewer, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&failed_placeholder_reviewer, "/checks/reviewer_identity"));
+
+        let mut placeholder_registry_hash = evidence.clone();
+        placeholder_registry_hash["registry"]["registry_report_hash"] = json!(format!("0x{}", "00".repeat(32)));
+        std::fs::write(&evidence_path, serde_json::to_vec_pretty(&placeholder_registry_hash).unwrap()).unwrap();
+        let failed_placeholder_registry_hash =
+            validate_rwa_legal_registry_review(temp.path(), RWA_LEGAL_REGISTRY_REVIEW_EVIDENCE, &handoff).unwrap();
+        assert_eq!(json_pointer_str(&failed_placeholder_registry_hash, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&failed_placeholder_registry_hash, "/checks/registry_report_hash_non_placeholder"));
+
+        let mut stale_handoff_hash = evidence.clone();
+        stale_handoff_hash["request_handoff"]["bundle_hash"] = json!(format!("0x{}", "88".repeat(32)));
+        std::fs::write(&evidence_path, serde_json::to_vec_pretty(&stale_handoff_hash).unwrap()).unwrap();
+        let failed_stale_handoff_hash =
+            validate_rwa_legal_registry_review(temp.path(), RWA_LEGAL_REGISTRY_REVIEW_EVIDENCE, &handoff).unwrap();
+        assert_eq!(json_pointer_str(&failed_stale_handoff_hash, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&failed_stale_handoff_hash, "/checks/request_handoff_bundle_hash_matches_current"));
+    }
+
+    #[test]
     fn btc_spv_evidence_requires_public_complete_profile_cases() {
         let temp = tempfile::tempdir().unwrap();
         let proofs = temp.path().join("proposals/novaseal/v0-mvp-skeleton/proofs");
