@@ -31,6 +31,7 @@ const RWA_RECEIPT_LIVE: &str = "target/novaseal-rwa-receipt-devnet-stateful-live
 const BTC_TX_COMMITMENT_LIVE: &str = "target/novaseal-btc-transaction-commitment-devnet-stateful-live.json";
 const BTC_UTXO_SEAL_LIVE: &str = "target/novaseal-btc-utxo-seal-devnet-stateful-live.json";
 const FIBER_CANDIDATE_LIVE: &str = "target/novaseal-fiber-candidate-devnet-stateful-live.json";
+const FIBER_NODE_EXPERIMENTS: &str = "target/novaseal-fiber-node-experiments.json";
 const STATEFUL_ACCEPTANCE: &str = "target/novaseal-devnet-stateful-acceptance.json";
 const WALLET_VECTORS: &str = "target/novaseal-wallet-signing-vectors.json";
 const TCB_REVIEW: &str = "target/novaseal-bip340-tcb-review.json";
@@ -962,6 +963,7 @@ fn build_stateful_acceptance_report(repo_root: &Path, agreement_conformance: &Va
     let live_btc_tx_commitment_report = json_load_path_optional(&repo_root.join(BTC_TX_COMMITMENT_LIVE))?;
     let live_btc_utxo_seal_report = json_load_path_optional(&repo_root.join(BTC_UTXO_SEAL_LIVE))?;
     let live_fiber_candidate_report = json_load_path_optional(&repo_root.join(FIBER_CANDIDATE_LIVE))?;
+    let fiber_node_experiments_report = json_load_path_optional(&repo_root.join(FIBER_NODE_EXPERIMENTS))?;
     let live_core = live_core_summary(repo_root, live_core_report.as_ref())?;
     let live_agreement = live_agreement_summary(repo_root, live_agreement_report.as_ref())?;
     let live_fungible_xudt = live_planned_profile_summary(
@@ -1103,6 +1105,7 @@ fn build_stateful_acceptance_report(repo_root: &Path, agreement_conformance: &Va
             ("balance_commitment_replay_rejected", "balance_commitment_replay_dry_run"),
         ],
     )?;
+    let fiber_node_experiments = fiber_node_execution_summary(fiber_node_experiments_report.as_ref());
 
     let core_live_passed = json_pointer_str(&live_core, "/status") == Some("passed")
         && json_pointer_bool(&live_core, "/live_devnet_rpc_executed")
@@ -1343,6 +1346,7 @@ fn build_stateful_acceptance_report(repo_root: &Path, agreement_conformance: &Va
             "actions": ["settle_fiber_candidate"],
             "blockers": [],
             "live_devnet_evidence": live_fiber_candidate,
+            "external_fiber_node_evidence": fiber_node_experiments.clone(),
         }),
     ];
     let profile_coverage = json!({
@@ -1459,6 +1463,18 @@ fn build_stateful_acceptance_report(repo_root: &Path, agreement_conformance: &Va
         ],
         "profile_coverage": profile_coverage,
         "business_scenario_coverage": business_scenario_coverage,
+        "external_experiment_coverage": {
+            "status": if json_pointer_bool(&fiber_node_experiments, "/all_required_workflows_executed_passed") {
+                "passed"
+            } else if json_pointer_bool(&fiber_node_experiments, "/discovery_ready") {
+                "discovery_ready_live_not_run"
+            } else {
+                "missing"
+            },
+            "required_after_novaseal_local_v1": true,
+            "fiber_node_execution": fiber_node_experiments,
+            "boundary": "External Fiber-node workflow coverage is separate from NovaSeal's own CKB stateful profile acceptance. It must pass before claiming Fiber production execution coverage.",
+        },
         "scenarios": scenarios,
         "blocker_count": all_blockers.len(),
         "blockers": all_blockers,
@@ -1610,6 +1626,52 @@ fn live_planned_profile_summary(
         "negative_cases": negative_checks,
         "required_live_checks_passed": required_live_checks_passed,
     }))
+}
+
+fn fiber_node_execution_summary(report: Option<&Value>) -> Value {
+    let Some(report) = report else {
+        return json!({
+            "present": false,
+            "discovery_ready": false,
+            "all_required_workflows_executed_passed": false,
+            "required_report": FIBER_NODE_EXPERIMENTS,
+        });
+    };
+    if report.get("_invalid_json").is_some() {
+        return json!({
+            "present": true,
+            "valid_json": false,
+            "error": report.get("_invalid_json"),
+            "discovery_ready": false,
+            "all_required_workflows_executed_passed": false,
+            "required_report": FIBER_NODE_EXPERIMENTS,
+        });
+    }
+
+    let all_present = json_pointer_bool(report, "/workflow_coverage/all_required_workflows_present");
+    let runnable_devnet_contract_present = json_pointer_bool(report, "/devnet_contract/runnable_devnet_contract_present");
+    let all_executed_passed = json_pointer_bool(report, "/workflow_coverage/all_required_workflows_executed_passed");
+    let discovery_ready = all_present && runnable_devnet_contract_present;
+    json!({
+        "present": true,
+        "valid_json": true,
+        "schema": json_pointer_str(report, "/schema"),
+        "status": json_pointer_str(report, "/status"),
+        "fiber_repo": {
+            "path": json_pointer_str(report, "/fiber_repo/path"),
+            "origin": json_pointer_str(report, "/fiber_repo/origin"),
+            "branch": json_pointer_str(report, "/fiber_repo/branch"),
+            "commit": json_pointer_str(report, "/fiber_repo/commit"),
+            "dirty": json_pointer_bool(report, "/fiber_repo/dirty"),
+        },
+        "workflow_coverage": report.get("workflow_coverage").cloned().unwrap_or(Value::Null),
+        "profiles_covered": report.get("profiles_covered").cloned().unwrap_or(Value::Null),
+        "tooling": report.get("tooling").cloned().unwrap_or(Value::Null),
+        "discovery_ready": discovery_ready,
+        "all_required_workflows_executed_passed": all_executed_passed,
+        "execution_boundary": "discovery_ready is not live Fiber devnet evidence; all_required_workflows_executed_passed is required for external Fiber-node execution coverage",
+        "required_report": FIBER_NODE_EXPERIMENTS,
+    })
 }
 
 fn live_core_summary(repo_root: &Path, report: Option<&Value>) -> Result<Value> {
@@ -1994,6 +2056,18 @@ fn validate_profile_certification(input: ProfileCertificationInputs<'_>) -> Resu
     let dual_seal_profile = validate_dual_seal_profile_package(repo_root)?;
     let fiber_candidate_profile = validate_fiber_candidate_profile_package(repo_root)?;
     let live_evidence = agreement_live_evidence(stateful_acceptance);
+    let fiber_node_experiments = stateful_acceptance
+        .get("external_experiment_coverage")
+        .and_then(|coverage| coverage.get("fiber_node_execution"))
+        .cloned()
+        .unwrap_or_else(|| {
+            json!({
+                "present": false,
+                "discovery_ready": false,
+                "all_required_workflows_executed_passed": false,
+                "required_report": FIBER_NODE_EXPERIMENTS,
+            })
+        });
     let artifact_hash = normalize_hex(json_pointer_str(tcb, "/runtime_artifact/artifact_hash"));
     let source_tree_hash = normalize_hex(json_pointer_str(tcb, "/source_inventory/source_tree_sha256"));
     let attestation_templates = validate_attestation_templates(repo_root, artifact_hash.as_deref(), source_tree_hash.as_deref())?;
@@ -2066,6 +2140,7 @@ fn validate_profile_certification(input: ProfileCertificationInputs<'_>) -> Resu
             "rwa_receipt": rwa_receipt_profile,
         },
         "live_devnet": live_evidence,
+        "external_fiber_node_experiments": fiber_node_experiments,
         "attestation_templates": attestation_templates,
         "security_audit_coverage": security_audit_coverage,
         "docs": docs,

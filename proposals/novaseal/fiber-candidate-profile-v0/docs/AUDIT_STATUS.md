@@ -9,17 +9,20 @@
 | Candidate settlement binding | source-guard-present |
 | Operator BIP340 authority | source-guard-present |
 | Balance commitment progress | source-guard-present |
-| Live Fiber execution | missing-live-fiber-evidence |
-| Live devnet Fiber candidate path | missing-live-devnet-evidence |
+| Live devnet Fiber candidate path | live-ckb-stateful-evidence |
+| Fiber workflow discovery | discovery-ready-live-not-run |
+| Live Fiber-node execution | pending-fiber-node-suite-execution |
 
 ## Fixture Honesty
 
 The fixtures in `fixtures/` are review targets and negative-case labels. They
-are not builder-backed resolved transaction evidence, live devnet proof, or
-Fiber network proof.
+are not builder-backed resolved transaction evidence or Fiber network proof.
+The live CKB stateful report is separate from the external Fiber-node workflow
+report.
 
 ## Production Statement Boundary
 
-Production claims remain blocked by missing live Fiber candidate evidence,
-missing wallet vectors, missing public/shared CellDep attestation, and missing
-external BIP340 TCB review.
+Production Fiber execution claims remain blocked until
+`fiber_node_execution_v0` reports all required Fiber workflow suites executed
+and passed. General NovaSeal production claims remain blocked by public/shared
+CellDep attestation and external BIP340 TCB review.
