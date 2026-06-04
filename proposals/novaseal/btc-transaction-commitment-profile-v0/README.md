@@ -1,6 +1,7 @@
 # NovaSeal BTC Transaction Commitment Profile v0
 
-**Status**: reviewable seal profile package. It is not V1-ready and not
+**Status**: reviewable seal profile package with local V1, live stateful,
+operator-fixture, service-builder, and BTC SPV adapter evidence. It is not
 production ready because public BTC verification evidence and external
 attestations are still missing.
 
