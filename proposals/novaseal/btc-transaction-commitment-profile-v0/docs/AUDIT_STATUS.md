@@ -10,16 +10,18 @@
 | Transition commitment binding | source-guard-present |
 | Committer BIP340 authority | source-guard-present |
 | Public BTC inclusion/finality verification | missing-spv-or-indexer-evidence |
-| Live devnet BTC transaction commitment transition | missing-live-devnet-evidence |
+| Live devnet BTC transaction commitment transition | live-devnet-covered |
 
 ## Fixture Honesty
 
 The fixtures in `fixtures/` are review targets and negative-case labels. They
-are not builder-backed resolved transaction evidence, live devnet proof, or BTC
-network proof.
+are not the live proof themselves and are not BTC network proof. Live stateful
+evidence is recorded in
+`target/novaseal-btc-transaction-commitment-devnet-stateful-live.json`.
 
 ## Production Statement Boundary
 
-Production claims remain blocked by missing live transition evidence, missing
-public BTC verification evidence, missing wallet vectors, missing public/shared
-CellDep attestation, and missing external BIP340 TCB review.
+Production claims remain blocked by missing public BTC verification evidence,
+missing public/shared CellDep attestation, and missing external BIP340 TCB
+review. Local BTC transaction commitment stateful execution is covered by the
+live devnet runner.

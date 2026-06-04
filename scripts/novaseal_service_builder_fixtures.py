@@ -55,8 +55,6 @@ def external_inputs(profile: str) -> list[str]:
         required.append("public_btc_spv_evidence")
     if profile == "rwa-receipt-profile-v0":
         required.append("legal_registry_review_evidence")
-    if profile == "dual-seal-profile-v0":
-        required.append("live_dual_seal_finality_evidence")
     return required
 
 

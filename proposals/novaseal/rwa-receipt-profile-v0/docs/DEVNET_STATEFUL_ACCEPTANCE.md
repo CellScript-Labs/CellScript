@@ -1,6 +1,10 @@
 # NovaSeal RWA Receipt Profile v0 Devnet Stateful Acceptance
 
-Required V1 evidence is not present yet.
+Required local V1 stateful evidence is present in:
+
+```bash
+target/novaseal-rwa-receipt-devnet-stateful-live.json
+```
 
 The acceptance target is:
 
@@ -15,5 +19,6 @@ The acceptance target is:
 5. Dry-run wrong-holder, wrong-issuer, amount-mutation, and stale-status
    transactions and prove they do not consume live state.
 
-Until this evidence is generated, `rwa_receipt_lifecycle` must remain missing
-in the V1 readiness matrix.
+The `rwa_receipt_lifecycle` scenario is now covered in the V1 readiness matrix.
+Production remains blocked by the shared external attestation requirements and
+the external legal/registry review boundary.

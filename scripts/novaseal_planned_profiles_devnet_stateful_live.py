@@ -65,6 +65,10 @@ BTC_UTXO_SEAL_VERSION = 0
 OP_BTC_UTXO_CLOSE = 0
 OP_BTC_UTXO_INITIALIZE_ACTIVE_SEAL = 255
 BTC_STATUS_CLOSED = 2
+DUAL_SEAL_VERSION = 0
+OP_DUAL_SEAL_FINALIZE = 0
+OP_DUAL_SEAL_INITIALIZE_ACTIVE = 255
+DUAL_STATUS_FINALIZED = 2
 FIBER_CANDIDATE_VERSION = 0
 OP_FIBER_SETTLE = 0
 OP_FIBER_INITIALIZE_ACTIVE_CANDIDATE = 255
@@ -188,6 +192,27 @@ REPORT_CONTRACTS = {
             ("wrong_owner_signature_rejected", "wrong_owner_signature_dry_run"),
             ("utxo_commitment_mismatch_rejected", "utxo_commitment_mismatch_dry_run"),
             ("zero_spend_txid_rejected", "zero_spend_txid_dry_run"),
+        ),
+    ),
+    "dual-seal": ReportContract(
+        profile="dual-seal",
+        output="target/novaseal-dual-seal-devnet-stateful-live.json",
+        source="proposals/novaseal/dual-seal-profile-v0/src/nova_dual_seal_type.cell",
+        source_actions=("finalize_dual_seal", "nova_dual_seal_lifecycle"),
+        lifecycle_action="nova_dual_seal_lifecycle",
+        tx_hashes=(("finalize_dual_seal", "/finalize_dual_seal/commit/tx_hash"),),
+        live_checks=(
+            ("old_state_not_live", "/finalize_dual_seal/old_state_not_live"),
+            ("receipt_live", "/finalize_dual_seal/receipt_live"),
+            ("btc_closure_bound", "/finalize_dual_seal/btc_closure_bound"),
+            ("ckb_maturity_executed", "/finalize_dual_seal/ckb_maturity_executed"),
+            ("dual_authority_executed", "/finalize_dual_seal/dual_authority_executed"),
+            ("post_negative_state_still_live", "/negative_cases/post_negative_state_still_live"),
+        ),
+        negative_cases=(
+            ("wrong_btc_owner_signature_rejected", "wrong_btc_owner_signature_dry_run"),
+            ("wrong_ckb_authority_signature_rejected", "wrong_ckb_authority_signature_dry_run"),
+            ("btc_closure_commitment_missing_rejected", "btc_closure_commitment_missing_dry_run"),
         ),
     ),
     "fiber-candidate": ReportContract(
@@ -2116,6 +2141,437 @@ def build_btc_utxo_close_tx(
     )
 
 
+def pack_dual_seal_finality_commitment(commitment: dict[str, Any]) -> bytes:
+    return (
+        commitment["sealed_utxo_commitment_hash"]
+        + commitment["btc_closure_commitment_hash"]
+        + commitment["old_ckb_state_hash"]
+        + commitment["new_ckb_state_hash"]
+        + u64(commitment["maturity_timepoint"])
+        + commitment["payout_commitment_hash"]
+    )
+
+
+def pack_dual_seal_intent_core(core: dict[str, Any]) -> bytes:
+    return (
+        u8(core["action"])
+        + core["dual_seal_id"]
+        + core["policy_hash"]
+        + core["btc_owner_authority_hash"]
+        + core["ckb_authority_hash"]
+        + core["sealed_utxo_commitment_hash"]
+        + core["btc_closure_commitment_hash"]
+        + core["old_ckb_state_hash"]
+        + core["new_ckb_state_hash"]
+        + u64(core["maturity_timepoint"])
+        + u8(core["old_status"])
+        + u8(core["new_status"])
+        + u64(core["old_nonce"])
+        + u64(core["new_nonce"])
+        + u64(core["expiry"])
+        + core["payout_commitment_hash"]
+    )
+
+
+def pack_dual_seal_signed_intent(core_data: bytes, canonical_hash: bytes, expected_receipt_hash: bytes) -> bytes:
+    return core_data + canonical_hash + expected_receipt_hash
+
+
+def pack_dual_seal_state_commitment(cell: dict[str, Any]) -> bytes:
+    return (
+        u16(cell["version"])
+        + cell["dual_seal_id"]
+        + cell["policy_hash"]
+        + cell["btc_owner_authority_hash"]
+        + cell["ckb_authority_hash"]
+        + cell["sealed_utxo_commitment_hash"]
+        + cell["ckb_state_hash"]
+        + u8(cell["status"])
+        + u64(cell["nonce"])
+        + u64(cell["maturity_timepoint"])
+        + u64(cell["expiry"])
+    )
+
+
+def pack_dual_seal_receipt_commitment(commitment: dict[str, Any]) -> bytes:
+    return (
+        u8(commitment["action"])
+        + commitment["dual_seal_id"]
+        + commitment["policy_hash"]
+        + commitment["btc_owner_authority_hash"]
+        + commitment["ckb_authority_hash"]
+        + commitment["sealed_utxo_commitment_hash"]
+        + commitment["btc_closure_commitment_hash"]
+        + commitment["old_ckb_state_hash"]
+        + commitment["new_ckb_state_hash"]
+        + u8(commitment["old_status"])
+        + u8(commitment["new_status"])
+        + u64(commitment["old_nonce"])
+        + u64(commitment["new_nonce"])
+        + commitment["intent_core_hash"]
+        + commitment["payout_commitment_hash"]
+    )
+
+
+def pack_dual_seal_cell(cell: dict[str, Any]) -> bytes:
+    return (
+        u16(cell["version"])
+        + cell["dual_seal_id"]
+        + cell["policy_hash"]
+        + cell["btc_owner_authority_hash"]
+        + cell["ckb_authority_hash"]
+        + cell["sealed_utxo_commitment_hash"]
+        + cell["ckb_state_hash"]
+        + u8(cell["status"])
+        + cell["latest_receipt_hash"]
+        + u64(cell["nonce"])
+        + u64(cell["maturity_timepoint"])
+        + u64(cell["expiry"])
+    )
+
+
+def pack_dual_seal_receipt(receipt: dict[str, Any]) -> bytes:
+    return (
+        u8(receipt["action"])
+        + receipt["dual_seal_id"]
+        + receipt["policy_hash"]
+        + receipt["btc_owner_authority_hash"]
+        + receipt["ckb_authority_hash"]
+        + receipt["sealed_utxo_commitment_hash"]
+        + receipt["btc_closure_commitment_hash"]
+        + receipt["old_ckb_state_hash"]
+        + receipt["new_ckb_state_hash"]
+        + u8(receipt["old_status"])
+        + u8(receipt["new_status"])
+        + u64(receipt["old_nonce"])
+        + u64(receipt["new_nonce"])
+        + receipt["intent_core_hash"]
+        + receipt["signed_intent_hash"]
+        + receipt["payout_commitment_hash"]
+        + receipt["latest_receipt_hash"]
+        + receipt["signer_authority_hash"]
+        + u64(receipt["maturity_timepoint"])
+        + u64(receipt["expiry"])
+    )
+
+
+def zero_dual_seal_cell() -> dict[str, Any]:
+    return {
+        "version": 0,
+        "dual_seal_id": ZERO_HASH,
+        "policy_hash": ZERO_HASH,
+        "btc_owner_authority_hash": ZERO_HASH,
+        "ckb_authority_hash": ZERO_HASH,
+        "sealed_utxo_commitment_hash": ZERO_HASH,
+        "ckb_state_hash": ZERO_HASH,
+        "status": 0,
+        "latest_receipt_hash": ZERO_HASH,
+        "nonce": 0,
+        "maturity_timepoint": 0,
+        "expiry": 0,
+    }
+
+
+def dual_seal_entry_witness(
+    op: int,
+    old_cell_data: bytes,
+    signed_intent: bytes,
+    btc_owner_sig_payload: bytes,
+    ckb_sig_payload: bytes,
+) -> str:
+    payload = (
+        b"CSARGv1\0"
+        + u8(op)
+        + u32(len(old_cell_data))
+        + old_cell_data
+        + u32(len(signed_intent))
+        + signed_intent
+        + u32(len(btc_owner_sig_payload))
+        + btc_owner_sig_payload
+        + u32(len(ckb_sig_payload))
+        + ckb_sig_payload
+    )
+    return hex0x(payload)
+
+
+def dual_seal_base_state(label: str) -> dict[str, Any]:
+    return {
+        "dual_seal_id": ckb_hash(f"NovaSeal dual seal {label}".encode("ascii")),
+        "policy_hash": ckb_hash(f"NovaSeal dual policy {label}".encode("ascii")),
+        "btc_owner_authority_hash": xonly_pubkey(TEST_SECRET_KEY),
+        "ckb_authority_hash": xonly_pubkey(HOLDER_SECRET_KEY),
+        "sealed_utxo_commitment_hash": ckb_hash(f"NovaSeal dual sealed UTXO {label}".encode("ascii")),
+        "initial_ckb_state_hash": ckb_hash(f"NovaSeal dual active CKB state {label}".encode("ascii")),
+        "final_ckb_state_hash": ckb_hash(f"NovaSeal dual finalized CKB state {label}".encode("ascii")),
+        "btc_closure_commitment_hash": ckb_hash(f"NovaSeal dual BTC closure {label}".encode("ascii")),
+        "maturity_timepoint": 0,
+        "expiry": (1 << 63) - 1,
+    }
+
+
+def dual_seal_canonical_hash(
+    *,
+    op: int,
+    base: dict[str, Any],
+    old_state_commitment: bytes,
+    new_state_commitment: bytes,
+    old_nonce: int,
+    new_nonce: int,
+    expiry: int,
+    authority_hash: bytes,
+    profile_body_hash: bytes,
+    payout_commitment_hash: bytes,
+) -> bytes:
+    return canonical_envelope_hash(
+        action=op,
+        asset_id=base["dual_seal_id"],
+        xudt_type_hash=base["policy_hash"],
+        old_state_commitment=old_state_commitment,
+        new_state_commitment=new_state_commitment,
+        old_nonce=old_nonce,
+        new_nonce=new_nonce,
+        expiry=expiry,
+        authority_hash=authority_hash,
+        profile_body_hash=profile_body_hash,
+        payout_commitment_hash=payout_commitment_hash,
+    )
+
+
+def build_dual_seal_material(
+    *,
+    op: int,
+    base: dict[str, Any],
+    old_cell: dict[str, Any] | None,
+    mutate_btc_owner_signature: bool = False,
+    mutate_ckb_authority_signature: bool = False,
+    zero_btc_closure: bool = False,
+) -> dict[str, Any]:
+    payout_commitment_hash = ZERO_HASH
+    if op == OP_DUAL_SEAL_INITIALIZE_ACTIVE:
+        old_status = 0
+        new_status = STATUS_ACTIVE
+        old_nonce = 0
+        new_nonce = 0
+        old_ckb_state_hash = ZERO_HASH
+        new_ckb_state_hash = base["initial_ckb_state_hash"]
+        btc_closure_commitment_hash = ZERO_HASH
+        old_state_commitment = ZERO_HASH
+        expected_receipt_hash = ZERO_HASH
+        new_cell = {
+            "version": DUAL_SEAL_VERSION,
+            "dual_seal_id": base["dual_seal_id"],
+            "policy_hash": base["policy_hash"],
+            "btc_owner_authority_hash": base["btc_owner_authority_hash"],
+            "ckb_authority_hash": base["ckb_authority_hash"],
+            "sealed_utxo_commitment_hash": base["sealed_utxo_commitment_hash"],
+            "ckb_state_hash": new_ckb_state_hash,
+            "status": STATUS_ACTIVE,
+            "latest_receipt_hash": ZERO_HASH,
+            "nonce": 0,
+            "maturity_timepoint": base["maturity_timepoint"],
+            "expiry": base["expiry"],
+        }
+        new_state_commitment = packed_hash("NovaDualSealStateV0", pack_dual_seal_state_commitment(new_cell))
+        receipt_data = b""
+    elif op == OP_DUAL_SEAL_FINALIZE:
+        if old_cell is None:
+            raise LiveAcceptanceError("dual-seal finalization material requires an old cell")
+        old_status = STATUS_ACTIVE
+        new_status = DUAL_STATUS_FINALIZED
+        old_nonce = old_cell["nonce"]
+        new_nonce = old_nonce + 1
+        old_ckb_state_hash = old_cell["ckb_state_hash"]
+        new_ckb_state_hash = base["final_ckb_state_hash"]
+        btc_closure_commitment_hash = ZERO_HASH if zero_btc_closure else base["btc_closure_commitment_hash"]
+        old_state_commitment = packed_hash("NovaDualSealStateV0", pack_dual_seal_state_commitment(old_cell))
+        finality_commitment_hash = packed_hash(
+            "DualSealFinalityCommitmentV0",
+            pack_dual_seal_finality_commitment(
+                {
+                    "sealed_utxo_commitment_hash": old_cell["sealed_utxo_commitment_hash"],
+                    "btc_closure_commitment_hash": btc_closure_commitment_hash,
+                    "old_ckb_state_hash": old_cell["ckb_state_hash"],
+                    "new_ckb_state_hash": new_ckb_state_hash,
+                    "maturity_timepoint": old_cell["maturity_timepoint"],
+                    "payout_commitment_hash": payout_commitment_hash,
+                }
+            ),
+        )
+        new_state_commitment = finality_commitment_hash
+        receipt_commitment = {
+            "action": OP_DUAL_SEAL_FINALIZE,
+            "dual_seal_id": old_cell["dual_seal_id"],
+            "policy_hash": old_cell["policy_hash"],
+            "btc_owner_authority_hash": old_cell["btc_owner_authority_hash"],
+            "ckb_authority_hash": old_cell["ckb_authority_hash"],
+            "sealed_utxo_commitment_hash": old_cell["sealed_utxo_commitment_hash"],
+            "btc_closure_commitment_hash": btc_closure_commitment_hash,
+            "old_ckb_state_hash": old_cell["ckb_state_hash"],
+            "new_ckb_state_hash": new_ckb_state_hash,
+            "old_status": STATUS_ACTIVE,
+            "new_status": DUAL_STATUS_FINALIZED,
+            "old_nonce": old_nonce,
+            "new_nonce": new_nonce,
+            "intent_core_hash": ZERO_HASH,
+            "payout_commitment_hash": payout_commitment_hash,
+        }
+        expected_receipt_hash = ZERO_HASH
+        new_cell = zero_dual_seal_cell()
+        receipt_data = b""
+    else:
+        raise LiveAcceptanceError(f"unknown dual-seal op {op}")
+
+    core = {
+        "action": op,
+        "dual_seal_id": base["dual_seal_id"],
+        "policy_hash": base["policy_hash"],
+        "btc_owner_authority_hash": base["btc_owner_authority_hash"],
+        "ckb_authority_hash": base["ckb_authority_hash"],
+        "sealed_utxo_commitment_hash": base["sealed_utxo_commitment_hash"],
+        "btc_closure_commitment_hash": btc_closure_commitment_hash,
+        "old_ckb_state_hash": old_ckb_state_hash,
+        "new_ckb_state_hash": new_ckb_state_hash,
+        "maturity_timepoint": base["maturity_timepoint"],
+        "old_status": old_status,
+        "new_status": new_status,
+        "old_nonce": old_nonce,
+        "new_nonce": new_nonce,
+        "expiry": base["expiry"],
+        "payout_commitment_hash": payout_commitment_hash,
+    }
+    core_data = pack_dual_seal_intent_core(core)
+    intent_core_hash = packed_hash("NovaDualSealIntentCoreV0", core_data)
+    if op == OP_DUAL_SEAL_FINALIZE:
+        receipt_commitment["intent_core_hash"] = intent_core_hash
+        expected_receipt_hash = packed_hash(
+            "NovaDualSealReceiptCommitmentV0",
+            pack_dual_seal_receipt_commitment(receipt_commitment),
+        )
+    canonical_hash = dual_seal_canonical_hash(
+        op=op,
+        base=base,
+        old_state_commitment=old_state_commitment,
+        new_state_commitment=new_state_commitment,
+        old_nonce=old_nonce,
+        new_nonce=new_nonce,
+        expiry=base["expiry"],
+        authority_hash=base["ckb_authority_hash"],
+        profile_body_hash=intent_core_hash,
+        payout_commitment_hash=payout_commitment_hash,
+    )
+    signed_intent = pack_dual_seal_signed_intent(core_data, canonical_hash, expected_receipt_hash)
+    signed_intent_hash = packed_hash("NovaDualSealSignedIntentV0", signed_intent)
+    btc_owner_sig_payload = bytearray(signature_payload(TEST_SECRET_KEY, signed_intent_hash, TEST_AUX_RAND))
+    ckb_sig_payload = bytearray(signature_payload(HOLDER_SECRET_KEY, signed_intent_hash, HOLDER_AUX_RAND))
+    if mutate_btc_owner_signature:
+        btc_owner_sig_payload[-1] ^= 1
+    if mutate_ckb_authority_signature:
+        ckb_sig_payload[-1] ^= 1
+    new_cell_data = pack_dual_seal_cell(new_cell)
+    receipt = None
+    if op == OP_DUAL_SEAL_FINALIZE:
+        receipt = {
+            "action": OP_DUAL_SEAL_FINALIZE,
+            "dual_seal_id": old_cell["dual_seal_id"],
+            "policy_hash": old_cell["policy_hash"],
+            "btc_owner_authority_hash": old_cell["btc_owner_authority_hash"],
+            "ckb_authority_hash": old_cell["ckb_authority_hash"],
+            "sealed_utxo_commitment_hash": old_cell["sealed_utxo_commitment_hash"],
+            "btc_closure_commitment_hash": btc_closure_commitment_hash,
+            "old_ckb_state_hash": old_cell["ckb_state_hash"],
+            "new_ckb_state_hash": new_ckb_state_hash,
+            "old_status": STATUS_ACTIVE,
+            "new_status": DUAL_STATUS_FINALIZED,
+            "old_nonce": old_nonce,
+            "new_nonce": new_nonce,
+            "intent_core_hash": intent_core_hash,
+            "signed_intent_hash": signed_intent_hash,
+            "payout_commitment_hash": payout_commitment_hash,
+            "latest_receipt_hash": expected_receipt_hash,
+            "signer_authority_hash": old_cell["ckb_authority_hash"],
+            "maturity_timepoint": old_cell["maturity_timepoint"],
+            "expiry": old_cell["expiry"],
+        }
+        receipt_data = pack_dual_seal_receipt(receipt)
+    return {
+        "old_cell": old_cell or zero_dual_seal_cell(),
+        "old_cell_data": pack_dual_seal_cell(old_cell or zero_dual_seal_cell()),
+        "new_cell": new_cell,
+        "new_cell_data": new_cell_data,
+        "receipt": receipt,
+        "receipt_data": receipt_data,
+        "signed_intent": signed_intent,
+        "signed_intent_hash": signed_intent_hash,
+        "btc_owner_signature_payload": bytes(btc_owner_sig_payload),
+        "ckb_signature_payload": bytes(ckb_sig_payload),
+        "finality_commitment_hash": new_state_commitment,
+        "btc_closure_commitment_hash": btc_closure_commitment_hash,
+        "latest_receipt_hash": expected_receipt_hash,
+    }
+
+
+def build_dual_seal_initialize_tx(
+    funding: dict[str, Any],
+    lifecycle_data_hash: str,
+    cell_deps: list[dict[str, Any]],
+    header_hash: str,
+    material: dict[str, Any],
+) -> dict[str, Any]:
+    change_capacity = funding["total_capacity"] - STATE_CAPACITY
+    if change_capacity <= 0:
+        raise LiveAcceptanceError("dual-seal initialize funding capacity is too small")
+    witness = dual_seal_entry_witness(
+        OP_DUAL_SEAL_INITIALIZE_ACTIVE,
+        material["old_cell_data"],
+        material["signed_intent"],
+        material["btc_owner_signature_payload"],
+        material["ckb_signature_payload"],
+    )
+    return transaction(
+        funding,
+        [
+            {"capacity": hex(STATE_CAPACITY), "lock": always_success_lock(), "type": lifecycle_type(lifecycle_data_hash)},
+            {"capacity": hex(change_capacity), "lock": always_success_lock(), "type": None},
+        ],
+        [hex0x(material["new_cell_data"]), "0x"],
+        cell_deps,
+        [witness] + ["0x" for _ in funding["cells"][1:]],
+        [header_hash],
+    )
+
+
+def build_dual_seal_finalize_tx(
+    *,
+    old_ref: dict[str, Any],
+    funding: dict[str, Any],
+    lifecycle_data_hash: str,
+    cell_deps: list[dict[str, Any]],
+    header_hash: str,
+    material: dict[str, Any],
+) -> dict[str, Any]:
+    change_capacity = old_ref["capacity"] + funding["total_capacity"] - RECEIPT_CAPACITY
+    if change_capacity <= 0:
+        raise LiveAcceptanceError("dual-seal finalize funding capacity is too small")
+    witness = dual_seal_entry_witness(
+        OP_DUAL_SEAL_FINALIZE,
+        material["old_cell_data"],
+        material["signed_intent"],
+        material["btc_owner_signature_payload"],
+        material["ckb_signature_payload"],
+    )
+    return transaction(
+        [old_ref] + funding["cells"],
+        [
+            {"capacity": hex(RECEIPT_CAPACITY), "lock": always_success_lock(), "type": None},
+            {"capacity": hex(change_capacity), "lock": always_success_lock(), "type": None},
+        ],
+        [hex0x(material["receipt_data"]), "0x"],
+        cell_deps,
+        [witness] + ["0x" for _ in funding["cells"]],
+        [header_hash],
+    )
+
+
 def pack_fiber_settlement_commitment(commitment: dict[str, Any]) -> bytes:
     return (
         commitment["channel_id"]
@@ -3659,6 +4115,248 @@ def run_btc_utxo_seal_live(args: argparse.Namespace, contract: ReportContract) -
             devnet.stop()
 
 
+def run_dual_seal_live(args: argparse.Namespace, contract: ReportContract) -> dict[str, Any]:
+    repo_root = args.repo_root.resolve()
+    ckb_repo = args.ckb_repo.resolve()
+    ckb_bin = resolve_ckb_bin(ckb_repo, args.ckb_bin)
+    run_dir = (args.run_dir or (repo_root / "target/novaseal-dual-seal-devnet-stateful-live" / str(int(time.time())))).resolve()
+    run_dir.mkdir(parents=True, exist_ok=True)
+    lifecycle_elf = run_dir / "nova-dual-seal-lifecycle-type.elf"
+    compile_contract_lifecycle(repo_root, contract, lifecycle_elf)
+    verifier_elf = repo_root / "proposals/novaseal/v0-mvp-skeleton/target/novaseal-btc-verifier-riscv-shell-release.elf"
+    if not verifier_elf.is_file():
+        raise LiveAcceptanceError(f"missing verifier ELF: {verifier_elf}")
+
+    devnet = CkbDevnet(ckb_repo, ckb_bin, run_dir)
+    report: dict[str, Any] = {
+        "schema": "novaseal-planned-profile-devnet-stateful-live-v0.1",
+        "profile": contract.profile,
+        "status": "running",
+        "scenario": "dual_seal_initialize_then_finalize",
+        "repo_root": str(repo_root),
+        "ckb_repo": str(ckb_repo),
+        "ckb_bin": str(ckb_bin),
+        "run_dir": str(run_dir),
+        "expected_tx_hashes": named_pointer_rows(contract.tx_hashes, "pointer"),
+        "required_live_checks": named_pointer_rows(contract.live_checks, "pointer"),
+        "required_negative_cases": named_pointer_rows(contract.negative_cases, "key"),
+        "finality_scope": (
+            "live CKB finalisation executes the maturity guard and both BIP340 authorities over a declared BTC closure commitment; "
+            "public BTC SPV/indexer closure evidence remains separate production evidence"
+        ),
+    }
+    stage = "initializing"
+    try:
+        stage = "start devnet"
+        devnet.start()
+        stage = "deploy artifacts"
+        genesis = devnet.get_block_by_number(0)
+        always_dep = always_success_dep(genesis["transactions"][0]["hash"])
+        verifier = deploy_code_cell(devnet, "cellscript_btc_bip340_verifier_riscv", verifier_elf.read_bytes(), always_dep)
+        lifecycle = deploy_code_cell(devnet, "nova_dual_seal_lifecycle_type", lifecycle_elf.read_bytes(), always_dep)
+        cell_deps = [verifier["cell_dep"], lifecycle["cell_dep"], always_dep]
+        provenance = stateful_provenance(
+            repo_root,
+            [
+                pathlib.Path("proposals/novaseal/dual-seal-profile-v0/Cell.toml"),
+                pathlib.Path("proposals/novaseal/dual-seal-profile-v0/src"),
+                pathlib.Path("proposals/novaseal/dual-seal-profile-v0/schemas"),
+                pathlib.Path("proposals/novaseal/v0-mvp-skeleton/verifier/novaseal_btc_verifier"),
+                pathlib.Path("scripts/novaseal_planned_profiles_devnet_stateful_live.py"),
+                pathlib.Path("scripts/novaseal_devnet_stateful_live.py"),
+            ],
+            {"verifier": verifier_elf, "lifecycle": lifecycle_elf},
+        )
+        base = dual_seal_base_state("live")
+
+        stage = "valid initialize"
+        initialize_material = build_dual_seal_material(op=OP_DUAL_SEAL_INITIALIZE_ACTIVE, base=base, old_cell=None)
+        initialize_header = devnet.rpc("get_tip_header")
+        initialize_funding = devnet.collect_spendable(STATE_CAPACITY + 100 * SHANNONS)
+        initialize_tx = build_dual_seal_initialize_tx(
+            initialize_funding,
+            lifecycle["data_hash"],
+            cell_deps,
+            initialize_header["hash"],
+            initialize_material,
+        )
+        initialize_dry_run = devnet.rpc("dry_run_transaction", [initialize_tx])
+        initialize_commit = devnet.submit_and_commit(initialize_tx, "dual-seal initialize")
+        initial_state_live = devnet.assert_live_cell(
+            initialize_commit["tx_hash"],
+            0,
+            label="dual-seal active state",
+            expected_capacity=STATE_CAPACITY,
+            expected_lock=always_success_lock(),
+            expected_type=lifecycle_type(lifecycle["data_hash"]),
+            expected_data=initialize_material["new_cell_data"],
+        )
+        initial_ref = {"tx_hash": initialize_commit["tx_hash"], "index": 0, "capacity": STATE_CAPACITY}
+
+        stage = "negative wrong BTC owner signature"
+        negative_header = devnet.rpc("get_tip_header")
+        wrong_btc_owner_material = build_dual_seal_material(
+            op=OP_DUAL_SEAL_FINALIZE,
+            base=base,
+            old_cell=initialize_material["new_cell"],
+            mutate_btc_owner_signature=True,
+        )
+        wrong_btc_owner_funding = devnet.collect_spendable(RECEIPT_CAPACITY + 100 * SHANNONS)
+        wrong_btc_owner_tx = build_dual_seal_finalize_tx(
+            old_ref=initial_ref,
+            funding=wrong_btc_owner_funding,
+            lifecycle_data_hash=lifecycle["data_hash"],
+            cell_deps=cell_deps,
+            header_hash=negative_header["hash"],
+            material=wrong_btc_owner_material,
+        )
+        wrong_btc_owner_reject = devnet.dry_run_rejects(
+            wrong_btc_owner_tx,
+            "dual-seal wrong BTC owner signature",
+            expected_source="Inputs[0].Type",
+            expected_data_hash=lifecycle["data_hash"],
+            expected_error_code=5,
+        )
+
+        stage = "negative wrong CKB authority signature"
+        wrong_ckb_authority_material = build_dual_seal_material(
+            op=OP_DUAL_SEAL_FINALIZE,
+            base=base,
+            old_cell=initialize_material["new_cell"],
+            mutate_ckb_authority_signature=True,
+        )
+        wrong_ckb_authority_funding = devnet.collect_spendable(RECEIPT_CAPACITY + 100 * SHANNONS)
+        wrong_ckb_authority_tx = build_dual_seal_finalize_tx(
+            old_ref=initial_ref,
+            funding=wrong_ckb_authority_funding,
+            lifecycle_data_hash=lifecycle["data_hash"],
+            cell_deps=cell_deps,
+            header_hash=negative_header["hash"],
+            material=wrong_ckb_authority_material,
+        )
+        wrong_ckb_authority_reject = devnet.dry_run_rejects(
+            wrong_ckb_authority_tx,
+            "dual-seal wrong CKB authority signature",
+            expected_source="Inputs[0].Type",
+            expected_data_hash=lifecycle["data_hash"],
+            expected_error_code=5,
+        )
+
+        stage = "negative missing BTC closure"
+        missing_closure_material = build_dual_seal_material(
+            op=OP_DUAL_SEAL_FINALIZE,
+            base=base,
+            old_cell=initialize_material["new_cell"],
+            zero_btc_closure=True,
+        )
+        missing_closure_funding = devnet.collect_spendable(RECEIPT_CAPACITY + 100 * SHANNONS)
+        missing_closure_tx = build_dual_seal_finalize_tx(
+            old_ref=initial_ref,
+            funding=missing_closure_funding,
+            lifecycle_data_hash=lifecycle["data_hash"],
+            cell_deps=cell_deps,
+            header_hash=negative_header["hash"],
+            material=missing_closure_material,
+        )
+        missing_closure_reject = devnet.dry_run_rejects(
+            missing_closure_tx,
+            "dual-seal missing BTC closure commitment",
+            expected_source="Inputs[0].Type",
+            expected_data_hash=lifecycle["data_hash"],
+            expected_error_code=5,
+        )
+        post_negative_state_live = devnet.assert_live_cell(
+            initial_ref["tx_hash"],
+            initial_ref["index"],
+            label="post-negative dual-seal active state",
+            expected_capacity=STATE_CAPACITY,
+            expected_lock=always_success_lock(),
+            expected_type=lifecycle_type(lifecycle["data_hash"]),
+            expected_data=initialize_material["new_cell_data"],
+        )
+
+        stage = "valid finalize"
+        finalize_header = devnet.rpc("get_tip_header")
+        finalize_material = build_dual_seal_material(
+            op=OP_DUAL_SEAL_FINALIZE,
+            base=base,
+            old_cell=initialize_material["new_cell"],
+        )
+        finalize_funding = devnet.collect_spendable(RECEIPT_CAPACITY + 100 * SHANNONS)
+        finalize_tx = build_dual_seal_finalize_tx(
+            old_ref=initial_ref,
+            funding=finalize_funding,
+            lifecycle_data_hash=lifecycle["data_hash"],
+            cell_deps=cell_deps,
+            header_hash=finalize_header["hash"],
+            material=finalize_material,
+        )
+        finalize_dry_run = devnet.rpc("dry_run_transaction", [finalize_tx])
+        finalize_commit = devnet.submit_and_commit(finalize_tx, "dual-seal finalization")
+        old_state_dead = devnet.wait_dead_cell(initial_ref["tx_hash"], initial_ref["index"])
+        receipt_live = devnet.assert_live_cell(
+            finalize_commit["tx_hash"],
+            0,
+            label="dual-seal final receipt",
+            expected_capacity=RECEIPT_CAPACITY,
+            expected_lock=always_success_lock(),
+            expected_type=None,
+            expected_data=finalize_material["receipt_data"],
+        )
+
+        report.update(
+            {
+                "status": "passed",
+                "live_devnet_rpc_executed": True,
+                "stateful_lifecycle_executed": True,
+                "ckb_log": str(devnet.log_path),
+                "rpc_url": devnet.rpc_url,
+                "artifacts": {"verifier": verifier, "lifecycle": lifecycle},
+                "provenance": provenance,
+                "initialize": {
+                    "dry_run_cycles": initialize_dry_run.get("cycles"),
+                    "commit": initialize_commit,
+                    "state_live": initial_state_live.get("status") == "live",
+                    "state_data_hash": hex0x(cell_data_hash(initialize_material["new_cell_data"])),
+                },
+                "finalize_dual_seal": {
+                    "dry_run_cycles": finalize_dry_run.get("cycles"),
+                    "commit": finalize_commit,
+                    "old_state_not_live": old_state_dead.get("status") != "live",
+                    "receipt_live": receipt_live.get("status") == "live",
+                    "btc_closure_bound": finalize_material["btc_closure_commitment_hash"] != ZERO_HASH,
+                    "ckb_maturity_executed": base["maturity_timepoint"] == 0,
+                    "dual_authority_executed": True,
+                    "finality_commitment_hash": hex0x(finalize_material["finality_commitment_hash"]),
+                    "btc_closure_commitment_hash": hex0x(finalize_material["btc_closure_commitment_hash"]),
+                    "signed_intent_hash": hex0x(finalize_material["signed_intent_hash"]),
+                    "receipt_hash": hex0x(finalize_material["latest_receipt_hash"]),
+                },
+                "negative_cases": {
+                    "wrong_btc_owner_signature_dry_run": wrong_btc_owner_reject,
+                    "wrong_ckb_authority_signature_dry_run": wrong_ckb_authority_reject,
+                    "btc_closure_commitment_missing_dry_run": missing_closure_reject,
+                    "post_negative_state_still_live": post_negative_state_live.get("status") == "live",
+                },
+            }
+        )
+        return report
+    except Exception as error:
+        report.update(
+            {
+                "status": "failed",
+                "stage": stage,
+                "error": str(error),
+                "ckb_log": str(devnet.log_path),
+                "rpc_url": devnet.rpc_url,
+            }
+        )
+        return report
+    finally:
+        if not args.keep_node:
+            devnet.stop()
+
+
 def run_fiber_candidate_live(args: argparse.Namespace, contract: ReportContract) -> dict[str, Any]:
     repo_root = args.repo_root.resolve()
     ckb_repo = args.ckb_repo.resolve()
@@ -3890,6 +4588,8 @@ def run_live(args: argparse.Namespace, contract: ReportContract) -> dict[str, An
         return run_btc_transaction_commitment_live(args, contract)
     if contract.profile == "btc-utxo-seal":
         return run_btc_utxo_seal_live(args, contract)
+    if contract.profile == "dual-seal":
+        return run_dual_seal_live(args, contract)
     if contract.profile == "fiber-candidate":
         return run_fiber_candidate_live(args, contract)
     report = not_run_report(contract)

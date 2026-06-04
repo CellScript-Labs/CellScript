@@ -11,16 +11,16 @@
 | Amount-preserving transfer | source-guard-present |
 | Terminal settlement receipt | source-guard-present |
 | Stable lifecycle type action | compiles-to-ckb-elf |
-| Live devnet issue -> transfer -> settle | missing-live-devnet-evidence |
+| Live devnet issue -> transfer -> settle | live-devnet-covered |
 
 ## Fixture Honesty
 
 The fixtures in `fixtures/` are review targets and negative-case labels. They
-are not yet a builder-backed resolved transaction harness and are not live
-devnet proof.
+are not the live proof themselves. Live stateful evidence is recorded in
+`target/novaseal-fungible-xudt-devnet-stateful-live.json`.
 
 ## Production Statement Boundary
 
-Production claims remain blocked by missing xUDT stateful acceptance, missing
-wallet vectors, missing public/shared CellDep attestation, and missing external
-BIP340 TCB review.
+Production claims remain blocked by missing public/shared CellDep attestation
+and missing external BIP340 TCB review. Local xUDT stateful acceptance is
+covered by the live devnet runner.

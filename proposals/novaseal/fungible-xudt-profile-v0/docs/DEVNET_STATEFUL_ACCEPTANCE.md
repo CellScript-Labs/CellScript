@@ -1,6 +1,10 @@
 # NovaSeal Fungible xUDT Profile v0 Devnet Stateful Acceptance
 
-Required V1 evidence is not present yet.
+Required local V1 stateful evidence is present in:
+
+```bash
+target/novaseal-fungible-xudt-devnet-stateful-live.json
+```
 
 The acceptance target is:
 
@@ -15,5 +19,6 @@ The acceptance target is:
 5. Dry-run invalid wrong-signer and amount-mutation transactions and prove they
    do not consume live state.
 
-Until this evidence is generated, `fungible_xudt_value_flow` must remain
-missing in the V1 readiness matrix.
+The `fungible_xudt_value_flow` scenario is now covered in the V1 readiness
+matrix. Production remains blocked only by the shared external attestation
+requirements.

@@ -10,18 +10,18 @@
   materialised.
 - The transition increments nonce exactly once and recomputes the canonical
   NovaSeal envelope before acceptance.
+- The live devnet runner executes initialise -> finalise, wrong BTC owner,
+  wrong CKB authority, and missing BTC closure dry-runs against the deployed
+  lifecycle CellDep.
 
 ## Not Implemented
 
 - BTC SPV proof, indexer proof, inclusion depth, finality, or spend validity.
-- Live CKB maturity/finality evidence.
-- Live devnet dual-seal finalisation evidence.
-- Wallet signing vectors for this profile.
 - Public/shared CellDep attestation.
 - External BIP340 runtime verifier TCB review.
 
 ## Risk Posture
 
-This package is source-level dual-seal evidence, not production finality
-evidence. V1 readiness must remain blocked until live CKB maturity evidence and
-public BTC closure-verification evidence exist.
+This package has source-level and live CKB stateful dual-seal evidence, not
+production BTC finality evidence. Production readiness remains blocked until
+public BTC closure-verification evidence and external attestations exist.

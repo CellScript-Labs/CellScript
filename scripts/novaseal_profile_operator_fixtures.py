@@ -128,10 +128,9 @@ PROFILE_CASES: list[dict[str, Any]] = [
         "profile": "dual-seal-profile-v0",
         "root": "proposals/novaseal/dual-seal-profile-v0",
         "signed_type": "NovaDualSealSignedIntentV0",
-        "live_report": None,
-        "external_boundary": "package_fixture_only_external_btc_and_ckb_finality_required",
+        "live_report": "target/novaseal-dual-seal-devnet-stateful-live.json",
         "cases": [
-            ("finalize_dual_seal", "finalize_dual_seal_valid.json", ["btc_owner", "ckb_authority"], None),
+            ("finalize_dual_seal", "finalize_dual_seal_valid.json", ["btc_owner", "ckb_authority"], "/finalize_dual_seal/commit/tx_hash"),
         ],
     },
     {

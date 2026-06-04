@@ -1,6 +1,10 @@
 # NovaSeal BTC Transaction Commitment Profile v0 Devnet Stateful Acceptance
 
-Required V1 evidence is not present yet.
+Required local V1 stateful evidence is present in:
+
+```bash
+target/novaseal-btc-transaction-commitment-devnet-stateful-live.json
+```
 
 The acceptance target is:
 
@@ -14,5 +18,6 @@ The acceptance target is:
 4. Attach public BTC proof evidence from an SPV verifier or trusted indexer
    policy before any production claim.
 
-Until this evidence is generated, `btc_transaction_commitment_transition` must
-remain missing in the V1 readiness matrix.
+The `btc_transaction_commitment_transition` scenario is now covered in the V1
+readiness matrix. Production remains blocked until public BTC proof evidence
+and shared external attestations are supplied.

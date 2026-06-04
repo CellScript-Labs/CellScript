@@ -47,9 +47,9 @@
     },
     {
       "id": "live_devnet_lifecycle",
-      "claim": "A live devnet dual-seal finality path must exist before V1 readiness.",
-      "location": "target/novaseal-devnet-stateful-acceptance.json",
-      "coverage": "missing-live-devnet-evidence"
+      "claim": "A live devnet dual-seal finality path exists before local V1 readiness.",
+      "location": "target/novaseal-dual-seal-devnet-stateful-live.json",
+      "coverage": "live-devnet-covered"
     },
     {
       "id": "btc_public_verification",
@@ -59,9 +59,9 @@
     },
     {
       "id": "ckb_finality_verification",
-      "claim": "CKB maturity evidence remains external to this package until live stateful acceptance exists.",
-      "location": "docs/DEVNET_STATEFUL_ACCEPTANCE.md",
-      "coverage": "missing-live-maturity-evidence"
+      "claim": "CKB maturity evidence is covered by the live stateful finalisation runner.",
+      "location": "target/novaseal-dual-seal-devnet-stateful-live.json",
+      "coverage": "live-devnet-covered"
     }
   ]
 }

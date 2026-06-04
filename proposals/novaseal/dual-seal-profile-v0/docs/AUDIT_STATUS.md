@@ -10,17 +10,18 @@
 | CKB maturity guard | source-guard-present |
 | Dual authority signatures | source-guard-present |
 | Public BTC closure verification | missing-spv-or-indexer-evidence |
-| Live CKB maturity evidence | missing-live-maturity-evidence |
-| Live devnet dual-seal finality | missing-live-devnet-evidence |
+| Live CKB maturity evidence | live-devnet-covered |
+| Live devnet dual-seal finality | live-devnet-covered |
 
 ## Fixture Honesty
 
-The fixtures in `fixtures/` are review targets and negative-case labels. They
-are not builder-backed resolved transaction evidence, live devnet proof, or BTC
-network proof.
+The fixtures in `fixtures/` are review targets and negative-case labels. The
+live CKB stateful proof is `target/novaseal-dual-seal-devnet-stateful-live.json`;
+fixtures are still not BTC network proof.
 
 ## Production Statement Boundary
 
-Production claims remain blocked by missing live finality evidence, missing
-public BTC closure-verification evidence, missing wallet vectors, missing
-public/shared CellDep attestation, and missing external BIP340 TCB review.
+Production claims remain blocked by missing public BTC closure-verification
+evidence, missing public/shared CellDep attestation, and missing external
+BIP340 TCB review. Local CKB maturity/finality execution is covered by the live
+dual-seal runner.
