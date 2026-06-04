@@ -314,6 +314,10 @@ const EXPECTED_PUBLIC_CELLDEP_FIELD_CONSTRAINTS: &[(&str, &str)] = &[
     ("attested_at", "UTC timestamp in YYYY-MM-DDTHH:MM:SSZ form"),
     ("attestor", "real release signer or deployer identity; placeholder tokens are rejected"),
     ("release.manifest_commit", "40-character hex source commit matching the reviewed TCB repo_commit"),
+    ("runtime_verifier.out_point", "0x-prefixed 32-byte CKB transaction hash plus numeric output index"),
+    ("runtime_verifier.data_hash", "0x-prefixed 32-byte non-placeholder CellDep data hash"),
+    ("runtime_verifier.dep_type", "code"),
+    ("runtime_verifier.hash_type", "data, data1, or type"),
     ("request_handoff.bundle_hash_algorithm", "blake2b-256(person=NovaExtHandoff)"),
 ];
 const EXPECTED_PUBLIC_CELLDEP_EXPECTED_VALUE_FIELDS: &[&str] = &["artifact_hash", "release.manifest_commit"];
@@ -4240,7 +4244,10 @@ fn validate_public_attestation(
         "runtime_verifier_fields_exact": exact_object_keys(&verifier, EXPECTED_PUBLIC_CELLDEP_RUNTIME_VERIFIER_FIELDS),
         "artifact_hash": normalize_hex(json_pointer_str(&verifier, "/artifact_hash")).as_deref() == artifact_hash,
         "data_hash_non_placeholder": !placeholder_hash(normalize_hex(json_pointer_str(&verifier, "/data_hash")).as_deref()),
+        "out_point_valid": json_pointer_bool(&parsed, "/valid"),
         "out_point_non_placeholder": !placeholder_hash(json_pointer_str(&parsed, "/tx_hash")),
+        "dep_type": json_pointer_str(&verifier, "/dep_type") == Some("code"),
+        "hash_type": matches!(json_pointer_str(&verifier, "/hash_type"), Some("data" | "data1" | "type")),
         "verifier_id": json_pointer_str(&verifier, "/verifier_id") == Some("btc.bip340.v0"),
         "ipc_abi": json_pointer_str(&verifier, "/ipc_abi") == Some("cellscript-btc-bip340-ipc-v0"),
     });
@@ -5838,6 +5845,9 @@ mod tests {
         assert!(json_pointer_bool(&public_passed, "/checks/request_handoff_fields_exact"));
         assert!(json_pointer_bool(&public_passed, "/checks/request_handoff_bundle_hash_algorithm"));
         assert!(json_pointer_bool(&public_passed, "/checks/runtime_verifier_fields_exact"));
+        assert!(json_pointer_bool(&public_passed, "/checks/out_point_valid"));
+        assert!(json_pointer_bool(&public_passed, "/checks/dep_type"));
+        assert!(json_pointer_bool(&public_passed, "/checks/hash_type"));
 
         let mut public_placeholder_attested_at = public_attestation.clone();
         public_placeholder_attested_at["attested_at"] = json!("YYYY-MM-DDTHH:MM:SSZ");
@@ -5874,6 +5884,60 @@ mod tests {
         .unwrap();
         assert_eq!(json_pointer_str(&public_network_failed, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&public_network_failed, "/checks/network_public"));
+
+        let mut public_invalid_out_point = public_attestation.clone();
+        public_invalid_out_point["runtime_verifier"]["out_point"] = json!(format!("0x{}:not-an-index", "11".repeat(32)));
+        std::fs::write(
+            proofs.join("public_shared_cell_dep_attestation.json"),
+            serde_json::to_vec_pretty(&public_invalid_out_point).unwrap(),
+        )
+        .unwrap();
+        let public_out_point_failed = validate_public_attestation(
+            temp.path(),
+            PUBLIC_CELLDEP_ATTESTATION,
+            Some(&artifact_hash),
+            Some(tcb_repo_commit),
+            &handoff,
+        )
+        .unwrap();
+        assert_eq!(json_pointer_str(&public_out_point_failed, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&public_out_point_failed, "/checks/out_point_valid"));
+
+        let mut public_invalid_dep_type = public_attestation.clone();
+        public_invalid_dep_type["runtime_verifier"]["dep_type"] = json!("dep_group");
+        std::fs::write(
+            proofs.join("public_shared_cell_dep_attestation.json"),
+            serde_json::to_vec_pretty(&public_invalid_dep_type).unwrap(),
+        )
+        .unwrap();
+        let public_dep_type_failed = validate_public_attestation(
+            temp.path(),
+            PUBLIC_CELLDEP_ATTESTATION,
+            Some(&artifact_hash),
+            Some(tcb_repo_commit),
+            &handoff,
+        )
+        .unwrap();
+        assert_eq!(json_pointer_str(&public_dep_type_failed, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&public_dep_type_failed, "/checks/dep_type"));
+
+        let mut public_invalid_hash_type = public_attestation.clone();
+        public_invalid_hash_type["runtime_verifier"]["hash_type"] = json!("invalid-hash-type");
+        std::fs::write(
+            proofs.join("public_shared_cell_dep_attestation.json"),
+            serde_json::to_vec_pretty(&public_invalid_hash_type).unwrap(),
+        )
+        .unwrap();
+        let public_hash_type_failed = validate_public_attestation(
+            temp.path(),
+            PUBLIC_CELLDEP_ATTESTATION,
+            Some(&artifact_hash),
+            Some(tcb_repo_commit),
+            &handoff,
+        )
+        .unwrap();
+        assert_eq!(json_pointer_str(&public_hash_type_failed, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&public_hash_type_failed, "/checks/hash_type"));
 
         let mut public_stale_manifest_commit = public_attestation.clone();
         public_stale_manifest_commit["release"]["manifest_commit"] = json!("fedcba9876543210fedcba9876543210fedcba98");
