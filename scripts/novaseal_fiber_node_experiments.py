@@ -25,9 +25,10 @@ from dataclasses import dataclass
 from typing import Any
 
 
-SCHEMA = "novaseal-fiber-node-execution-v0.2"
+SCHEMA = "novaseal-fiber-node-execution-v0.3"
 SUPPORTED_PREVIOUS_SCHEMAS = {
     "novaseal-fiber-node-execution-v0.1",
+    "novaseal-fiber-node-execution-v0.2",
     SCHEMA,
 }
 
@@ -145,6 +146,18 @@ REQUIRED_WORKFLOWS: tuple[FiberWorkflow, ...] = (
         suite="cross-chain-hub",
         category="cross-chain",
         description="Fiber plus Lightning/BTC hub send and receive order workflow",
+        mapped_profiles=(
+            "fiber-candidate-profile-v0",
+            "btc-transaction-commitment-profile-v0",
+            "btc-utxo-seal-profile-v0",
+        ),
+        expected_terms=("btc", "lnd", "send-payment", "order", "wrapped-btc", "shutdown"),
+        requires_lnd=True,
+    ),
+    FiberWorkflow(
+        suite="cross-chain-hub-separate",
+        category="cross-chain",
+        description="Fiber plus Lightning/BTC hub workflow with CCH running as a separate service",
         mapped_profiles=(
             "fiber-candidate-profile-v0",
             "btc-transaction-commitment-profile-v0",
@@ -276,7 +289,7 @@ def previous_executions(output: pathlib.Path) -> dict[str, dict[str, Any]]:
 
 def cleanup_fiber_processes(fiber_repo: pathlib.Path) -> None:
     patterns = [
-        re.compile(r"\.\./\.\./target/[^ ]*/fnn -d [123](?:\s|$)"),
+        re.compile(r"\.\./\.\./target/[^ ]*/fnn -d (?:[123]|cch)(?:\s|$)"),
         re.compile(rf"ckb run -C {re.escape(str(fiber_repo / 'tests' / 'deploy' / 'node-data'))}"),
         re.compile(rf"bitcoind -conf={re.escape(str(fiber_repo / 'tests' / 'deploy' / 'lnd-init' / 'bitcoind' / 'bitcoin.conf'))}"),
         re.compile(rf"lnd --lnddir={re.escape(str(fiber_repo / 'tests' / 'deploy' / 'lnd-init' / 'lnd-bob'))}"),
@@ -343,7 +356,12 @@ def bruno_workspace_for_suite(
     """Return a Bruno workspace, applying explicit suite compatibility patches when needed."""
     source = fiber_repo / "tests" / "bruno"
     patches: list[str] = []
-    if suite != "watchtower/force-close-with-pending-tlcs-and-udt":
+    patched_suites = {
+        "watchtower/force-close-with-pending-tlcs-and-udt",
+        "cross-chain-hub",
+        "cross-chain-hub-separate",
+    }
+    if suite not in patched_suites:
         return source, patches
 
     workspace = log_dir / "bruno-worktree"
@@ -351,12 +369,39 @@ def bruno_workspace_for_suite(
         shutil.rmtree(workspace)
     shutil.copytree(source, workspace, ignore=shutil.ignore_patterns("node_modules"))
 
-    replacements = {
-        'bru.setVar("NODE1_BALANCE", capacity);': 'bru.setVar("NODE1_BALANCE", capacity.toString());',
-        'bru.setVar("NODE2_BALANCE", capacity);': 'bru.setVar("NODE2_BALANCE", capacity.toString());',
-        'bru.setVar("NODE1_NEW_BALANCE", capacity);': 'bru.setVar("NODE1_NEW_BALANCE", capacity.toString());',
-        'bru.setVar("NODE2_NEW_BALANCE", capacity);': 'bru.setVar("NODE2_NEW_BALANCE", capacity.toString());',
-    }
+    replacements: dict[str, str] = {}
+    if suite == "watchtower/force-close-with-pending-tlcs-and-udt":
+        replacements.update(
+            {
+                'bru.setVar("NODE1_BALANCE", capacity);': 'bru.setVar("NODE1_BALANCE", capacity.toString());',
+                'bru.setVar("NODE2_BALANCE", capacity);': 'bru.setVar("NODE2_BALANCE", capacity.toString());',
+                'bru.setVar("NODE1_NEW_BALANCE", capacity);': 'bru.setVar("NODE1_NEW_BALANCE", capacity.toString());',
+                'bru.setVar("NODE2_NEW_BALANCE", capacity);': 'bru.setVar("NODE2_NEW_BALANCE", capacity.toString());',
+            }
+        )
+    if suite in {"cross-chain-hub", "cross-chain-hub-separate"}:
+        replacements.update(
+            {
+                'bru.setVar("FIBER_PAY_REQ", res.body.result.invoice_address);\n  bru.setVar("PAYMENT_HASH", res.body.result.invoice.data.payment_hash);': (
+                    'bru.setVar("FIBER_PAY_REQ", res.body.result.invoice_address);\n'
+                    '  bru.setVar("PAYMENT_HASH", res.body.result.invoice.data.payment_hash);\n'
+                    '  console.log("receive_fiber_pay_req", res.body.result.invoice_address);\n'
+                    '  console.log("receive_payment_hash", res.body.result.invoice.data.payment_hash);'
+                ),
+                'bru.setVar("BTC_PAY_REQ", res.body.result.incoming_invoice.Lightning);\n  console.log(res.body.result.incoming_invoice.Lightning);': (
+                    'console.log("receive_btc_body", JSON.stringify(res.body));\n'
+                    '  if (res.body.result) {\n'
+                    '    bru.setVar("BTC_PAY_REQ", res.body.result.incoming_invoice.Lightning);\n'
+                    '    console.log(res.body.result.incoming_invoice.Lightning);\n'
+                    '  }'
+                ),
+                'if (resp.data !== undefined) {\n    resp.data.destroy();\n  }': (
+                    'if (resp.data !== undefined && typeof resp.data.destroy === "function") {\n'
+                    '    resp.data.destroy();\n'
+                    '  }'
+                ),
+            }
+        )
     suite_path = workspace / "e2e" / suite
     for path in sorted(suite_path.glob("*.bru")):
         text = path.read_text(encoding="utf-8")

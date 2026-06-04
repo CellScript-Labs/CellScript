@@ -6,24 +6,25 @@
 | --- | --- | --- | --- |
 | `https://github.com/nervosnetwork/fiber.git` | `develop` | `27d458b8529e3b4ed76a3abd5f8babd2a0120f15` | Fiber Network Node workflow execution |
 | `https://github.com/nervosnetwork/ckb-cli.git` | `develop` | `a3450f91aaebf97e98d517c8d9aad872dc21c9db` | Fiber dev-chain setup helper |
-| `https://github.com/lightningnetwork/lnd.git` | `v0.20.1-beta` | `848b72ce9` | LND and lncli binaries for cross-chain hub execution |
+| `https://github.com/lightningnetwork/lnd.git` | `v0.20.1-beta` | `848b72ce9` | LND and lncli binaries for cross-chain hub execution, built with `invoicesrpc routerrpc` tags |
 
 ## Live Execution Evidence
 
 `scripts/novaseal_fiber_node_experiments.py` generated
 `target/novaseal-fiber-node-experiments.json` with:
 
-- status: `failed`
-- required Fiber workflow suites present: `15/15`
-- executed Fiber workflow suites: `15/15`
-- passed Fiber workflow suites: `14/15`
+- status: `passed`
+- required Fiber workflow suites present: `16/16`
+- executed Fiber workflow suites: `16/16`
+- passed Fiber workflow suites: `16/16`
 - executed suites: `invoice-ops`, `open-use-close-a-channel`,
   `3-nodes-transfer`, `router-pay`, `shutdown-force`, `reestablish`,
   `external-funding-open`, `funding-tx-verification`, `udt`,
   `udt-router-pay`, `watchtower/force-close-after-open-channel`,
   `watchtower/force-close-with-pending-tlcs`,
   `watchtower/force-close-with-pending-tlcs-and-udt`,
-  `watchtower/force-close-preimage-multiple`, `cross-chain-hub`
+  `watchtower/force-close-preimage-multiple`, `cross-chain-hub`,
+  `cross-chain-hub-separate`
 
 Commands:
 
@@ -87,6 +88,10 @@ python3 scripts/novaseal_fiber_node_experiments.py --pretty --run-suite watchtow
 PATH="/Users/arthur/go/bin:/Users/arthur/RustroverProjects/ckb/target/debug:/Users/arthur/RustroverProjects/ckb-cli/target/debug:$PATH" \
 REMOVE_OLD_STATE=y \
 python3 scripts/novaseal_fiber_node_experiments.py --pretty --run-suite cross-chain-hub --timeout-seconds 2400
+
+PATH="/Users/arthur/go/bin:/Users/arthur/RustroverProjects/ckb/target/debug:/Users/arthur/RustroverProjects/ckb-cli/target/debug:$PATH" \
+REMOVE_OLD_STATE=y \
+python3 scripts/novaseal_fiber_node_experiments.py --pretty --run-suite cross-chain-hub-separate --timeout-seconds 2400
 ```
 
 Each run started a local CKB dev chain, built or reused Fiber `fnn`, started
@@ -100,9 +105,17 @@ The harness converts four UDT balance variables from JavaScript `BigInt` values
 to strings in that copied collection only, preserving the external Fiber checkout
 while avoiding a Bruno QuickJS assertion-runtime incompatibility.
 
-The cross-chain hub suite was executed twice after building `lnd` and `lncli`
-from LND `v0.20.1-beta`. Both runs repeated the same receive-BTC failure after
-the send-BTC half succeeded.
+The cross-chain hub suites require LND's `invoicesrpc` service for
+`AddHoldInvoice`. The local `lnd` and `lncli` binaries were rebuilt from LND
+`v0.20.1-beta` with `invoicesrpc routerrpc` build tags after an initial
+diagnostic run showed `unknown service invoicesrpc.Invoices`.
+
+The cross-chain suites were run from temporary copied Bruno collections under
+`target/novaseal-fiber-node-experiments/cross-chain-hub/bruno-worktree` and
+`target/novaseal-fiber-node-experiments/cross-chain-hub-separate/bruno-worktree`.
+The harness logs the receive-BTC JSON-RPC body and guards
+`resp.data.destroy()` in the copied collection only, preserving the external
+Fiber checkout while avoiding a Bruno QuickJS stream-runtime incompatibility.
 
 Observed Bruno result:
 
@@ -120,7 +133,8 @@ Observed Bruno result:
 - `watchtower/force-close-with-pending-tlcs`: `24/24` requests passed, `27/27` assertions passed
 - `watchtower/force-close-with-pending-tlcs-and-udt`: `28/28` requests passed, `32/32` assertions passed
 - `watchtower/force-close-preimage-multiple`: `25/25` requests passed, `25/25` assertions passed
-- `cross-chain-hub`: failed on repeated execution with `22/27` requests passed and `44/47` assertions passed
+- `cross-chain-hub`: `19/19` requests passed, `40/40` assertions passed
+- `cross-chain-hub-separate`: `19/19` requests passed, `40/40` assertions passed
 
 Covered live paths:
 
@@ -139,28 +153,30 @@ Covered live paths:
 - watchtower force-close with pending TLCs, on-chain timestamp updates, final settlement transactions, and balance transfer checks
 - watchtower force-close with pending UDT TLCs, UDT settlement balance checks, and CKB balance drift bounds
 - watchtower multiple-preimage settlement after force-close
-- cross-chain hub send-BTC half: LND invoice creation, CKB-to-hub payment, wrapped-BTC receipt, and LND payee balance check
+- cross-chain hub embedded mode: send-BTC half with LND invoice creation, CKB-to-hub payment, wrapped-BTC receipt, and LND payee balance check; receive-BTC half with hold-invoice creation, BTC payment into hub LND, wrapped-BTC delivery, and channel shutdown
+- cross-chain hub separate-service mode: same send-BTC and receive-BTC workflow with CCH running as a standalone service connected to Fiber node 3 by RPC/WebSocket
 - TLC add/remove validation paths
 - cooperative shutdown
 - closed-channel state check after generated blocks
 
-Repeated cross-chain failure:
+Resolved cross-chain issue:
 
-- `cross-chain-hub/11-create-receive-btc-order` returned a JSON-RPC error in
-  the receive-BTC half, so Bruno could not persist `BTC_PAY_REQ`.
-- `cross-chain-hub/13-pay-btc-invoice` then attempted to pay the previous
-  Lightning invoice and received HTTP 500 from LND router send.
-- `cross-chain-hub/14-check-hub-received-btc-in-lnd` exhausted `10/10` polling
-  attempts with `Hub has not received the payment`.
-- `cross-chain-hub/15-check-payee-received-wrapped-btc` observed local balance
-  `0x186a0` instead of the expected `0x249f0`.
+- Initial cross-chain runs failed at `receive_btc` because the local LND binary
+  had been built without the `invoicesrpc` tag, so `AddHoldInvoice` returned
+  `unknown service invoicesrpc.Invoices`.
+- Rebuilding LND `v0.20.1-beta` with `invoicesrpc routerrpc` enabled the hold
+  invoice service and both embedded and separate cross-chain suites passed.
+- The remaining Bruno runner mismatch was limited to `resp.data.destroy()` on
+  the LND streaming payment response; the harness guards that call in a copied
+  worktree, and the underlying payment/balance assertions pass.
 
 ## Boundary
 
 This is real Fiber-node execution evidence for the invoice workflow, the basic
 channel lifecycle workflow, the three-node transfer workflow, and the router
 payment, force-shutdown, reestablishment, UDT channel, and UDT routed-payment
-workflows, plus external funding, funding transaction verification, and all
-watchtower workflows. It does not complete NovaSeal's external Fiber
-requirement because `cross-chain-hub` executes but does not pass. Full coverage
-still requires the receive-BTC half of the cross-chain hub workflow to pass.
+workflows, plus external funding, funding transaction verification, all mapped
+watchtower workflows, and both embedded and separate-service cross-chain hub
+workflows. This completes the currently tracked NovaSeal external Fiber-node
+execution requirement: all required mapped Fiber workflow suites execute and
+pass through Fiber's devnet node runner and Bruno e2e harness.

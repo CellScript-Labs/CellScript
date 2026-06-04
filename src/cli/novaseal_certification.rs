@@ -203,7 +203,8 @@ const EXPECTED_DUAL_SEAL_DOCS: &[&str] = &["AUDIT_STATUS.md", "DEVNET_STATEFUL_A
 const EXPECTED_FIBER_CANDIDATE_FIXTURES: &[&str] =
     &["settle_fiber_candidate_valid.json", "wrong_operator_signature_reject.json", "balance_commitment_replay_reject.json"];
 
-const EXPECTED_FIBER_CANDIDATE_DOCS: &[&str] = &["AUDIT_STATUS.md", "DEVNET_STATEFUL_ACCEPTANCE.md", "SECURITY.md"];
+const EXPECTED_FIBER_CANDIDATE_DOCS: &[&str] =
+    &["AUDIT_STATUS.md", "DEVNET_STATEFUL_ACCEPTANCE.md", "FIBER_NODE_EXPERIMENTS.md", "SECURITY.md"];
 
 const EXPECTED_CERTIFICATION_INVARIANTS: &[&str] = &[
     "profile_separation",
@@ -2901,7 +2902,7 @@ fn validate_fiber_candidate_profile_package(repo_root: &Path) -> Result<Value> {
             "coverage_by_id": coverage_by_id,
         },
         "checks": checks,
-        "remaining_acceptance_gap": "live devnet Fiber candidate path and real Fiber execution evidence are still required before fiber_candidate_path can pass",
+        "remaining_acceptance_gap": "live devnet Fiber candidate path evidence is still required before fiber_candidate_path can pass",
     }))
 }
 
