@@ -7,6 +7,7 @@
   "request_handoff": {
     "bundle": "target/novaseal-external-evidence-handoff-bundle.json",
     "bundle_hash": "0xREPLACE_WITH_64_HEX_HANDOFF_BUNDLE_HASH",
+    "bundle_hash_algorithm": "blake2b-256(person=NovaExtHandoff)",
     "group": "public_btc_spv_evidence"
   },
   "required_profiles": [
@@ -80,7 +81,7 @@
     "This file is a template, not production evidence.",
     "A real report must be saved as public_btc_spv_evidence.json and must not use local-devnet or placeholder fields.",
     "The request contract generated at target/novaseal-btc-spv-evidence-adapter.json lists the exact BTC-facing profile cases and service-builder hashes this public report must satisfy.",
-    "The request_handoff block must reference the current target/novaseal-external-evidence-handoff-bundle.json hash and public_btc_spv_evidence group.",
+    "The request_handoff block must reference the current target/novaseal-external-evidence-handoff-bundle.json hash, blake2b-256(person=NovaExtHandoff) hash algorithm, and public_btc_spv_evidence group.",
     "The production gate requires all three BTC-facing profiles to have public BTC SPV cases with at least six confirmations."
   ]
 }

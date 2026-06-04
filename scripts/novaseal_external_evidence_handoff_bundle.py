@@ -50,6 +50,7 @@ REQUIRED_PUBLIC_CELLDEP_FIELDS = [
     "runtime_verifier.artifact_hash",
     "request_handoff.bundle",
     "request_handoff.bundle_hash",
+    "request_handoff.bundle_hash_algorithm",
     "request_handoff.group",
 ]
 
@@ -65,6 +66,7 @@ REQUIRED_EXTERNAL_TCB_FIELDS = [
     "report_uri",
     "request_handoff.bundle",
     "request_handoff.bundle_hash",
+    "request_handoff.bundle_hash_algorithm",
     "request_handoff.group",
 ]
 
@@ -131,6 +133,7 @@ def btc_spv_handoff_case(adapter: dict[str, Any]) -> dict[str, Any]:
             "source_service.report_hash",
             "request_handoff.bundle",
             "request_handoff.bundle_hash",
+            "request_handoff.bundle_hash_algorithm",
             "request_handoff.group",
         ],
     }
