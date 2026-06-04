@@ -2655,7 +2655,7 @@ fn validate_btc_spv_evidence_adapter_detail(report: &Value) -> Value {
         let case = matches.first().cloned().unwrap_or(Value::Null);
         let required_fields = json_array_strings(&case, "/request/required_public_fields");
         let external_inputs = json_array_strings(&case, "/request/required_external_inputs");
-        let required_public_fields_complete = [
+        let expected_required_public_fields = [
             "network",
             "btc_txid",
             "btc_block_hash",
@@ -2671,9 +2671,9 @@ fn validate_btc_spv_evidence_adapter_detail(report: &Value) -> Value {
             "request_handoff.bundle",
             "request_handoff.bundle_hash",
             "request_handoff.group",
-        ]
-        .iter()
-        .all(|field| required_fields.iter().any(|actual| actual == field));
+        ];
+        let required_public_fields_complete =
+            expected_required_public_fields.iter().all(|field| required_fields.iter().any(|actual| actual == field));
         let checks = json!({
             "exactly_one_case": matches.len() == 1,
             "status_passed": json_pointer_str(&case, "/status") == Some("passed"),
@@ -2686,6 +2686,7 @@ fn validate_btc_spv_evidence_adapter_detail(report: &Value) -> Value {
             "service_builder_receipt_binding_hash": json_pointer_str(&case, "/request/service_builder_receipt_binding_hash").is_some_and(is_hex32),
             "template_case_hash": json_pointer_str(&case, "/request/template_case_hash").is_some_and(is_hex32),
             "required_public_fields_complete": required_public_fields_complete,
+            "required_public_fields_exact": exact_string_set(&required_fields, &expected_required_public_fields),
             "fixture_checks_passed": object_values_all_true(case.get("checks")),
         });
         case_checks.insert((*expected_profile).to_string(), checks);
@@ -2785,6 +2786,7 @@ fn validate_external_attestation_adapter_detail(report: &Value) -> Value {
             "ipc_abi_current": json_pointer_str(&case, "/request/ipc_abi") == Some("cellscript-btc-bip340-ipc-v0"),
             "required_status_matches": json_pointer_str(&case, "/request/required_status") == Some(required_status),
             "required_fields_complete": expected_required_fields.iter().all(|field| required_fields.iter().any(|actual| actual == field)),
+            "required_fields_exact": exact_string_set(&required_fields, &expected_required_fields),
             "artifact_hash_present": json_pointer_str(&case, "/request/expected_artifact_hash").is_some_and(is_hex32),
             "fixture_checks_passed": object_values_all_true(case.get("checks")),
         });
@@ -2902,6 +2904,7 @@ fn validate_external_evidence_handoff_detail(report: &Value, btc_spv_adapter: &V
             "required_external_fields_complete": expected_required_external_fields
                 .iter()
                 .all(|field| required_external_fields.iter().any(|actual| actual == field)),
+            "required_external_fields_exact": exact_string_set(&required_external_fields, &expected_required_external_fields),
             "btc_profiles_complete": group != "public_btc_spv_evidence"
                 || required_profiles == expected_btc_profiles,
             "fixture_checks_passed": object_values_all_true(case.get("checks")),
@@ -4337,6 +4340,10 @@ fn json_array_strings(value: &Value, pointer: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
+fn exact_string_set(actual: &[String], expected: &[&str]) -> bool {
+    actual.len() == expected.len() && expected.iter().all(|field| actual.iter().any(|actual| actual == field))
+}
+
 fn parse_out_point(value: Option<&str>) -> Value {
     let Some(raw) = value else {
         return json!({"valid": false, "raw": Value::Null});
@@ -4566,12 +4573,21 @@ mod tests {
         assert_eq!(json_pointer_str(&failed_path, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&failed_path, "/cases/public_shared_cell_dep_attestation/source_adapter_path_matches_current"));
 
-        let mut missing_required_field = report;
+        let mut missing_required_field = report.clone();
         missing_required_field["cases"][0]["required_external_fields"] = json!(btc_handoff_fields[..9].to_vec());
         let failed_fields =
             validate_external_evidence_handoff_detail(&missing_required_field, &btc_spv_adapter, &external_attestation_adapter);
         assert_eq!(json_pointer_str(&failed_fields, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&failed_fields, "/cases/public_btc_spv_evidence/required_external_fields_complete"));
+
+        let mut unexpected_required_field = report;
+        let mut extended_btc_fields = btc_handoff_fields.to_vec();
+        extended_btc_fields.push("unexpected.shadow_field");
+        unexpected_required_field["cases"][0]["required_external_fields"] = json!(extended_btc_fields);
+        let failed_exact =
+            validate_external_evidence_handoff_detail(&unexpected_required_field, &btc_spv_adapter, &external_attestation_adapter);
+        assert_eq!(json_pointer_str(&failed_exact, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&failed_exact, "/cases/public_btc_spv_evidence/required_external_fields_exact"));
     }
 
     #[test]
@@ -4648,11 +4664,76 @@ mod tests {
         let valid = validate_external_attestation_adapter_detail(&report);
         assert_eq!(json_pointer_str(&valid, "/status"), Some("passed"));
 
-        let mut missing_handoff_field = report;
+        let mut missing_handoff_field = report.clone();
         missing_handoff_field["cases"][0]["request"]["required_public_fields"] = json!(full_public_fields[..11].to_vec());
         let failed = validate_external_attestation_adapter_detail(&missing_handoff_field);
         assert_eq!(json_pointer_str(&failed, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&failed, "/cases/public_shared_cell_dep_attestation/required_fields_complete"));
+
+        let mut unexpected_public_field = report;
+        let mut extended_public_fields = full_public_fields.to_vec();
+        extended_public_fields.push("unexpected.shadow_field");
+        unexpected_public_field["cases"][0]["request"]["required_public_fields"] = json!(extended_public_fields);
+        let failed_exact = validate_external_attestation_adapter_detail(&unexpected_public_field);
+        assert_eq!(json_pointer_str(&failed_exact, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&failed_exact, "/cases/public_shared_cell_dep_attestation/required_fields_exact"));
+    }
+
+    #[test]
+    fn btc_spv_adapter_requires_exact_public_field_contract() {
+        let full_public_fields = [
+            "network",
+            "btc_txid",
+            "btc_block_hash",
+            "spv_proof_hash",
+            "confirmations",
+            "spv_client_cell_dep.out_point",
+            "spv_client_cell_dep.data_hash",
+            "spv_client_cell_dep.dep_type",
+            "spv_client_cell_dep.hash_type",
+            "source_service.name",
+            "source_service.commit",
+            "source_service.report_hash",
+            "request_handoff.bundle",
+            "request_handoff.bundle_hash",
+            "request_handoff.group",
+        ];
+        let report = json!({
+            "schema": "novaseal-btc-spv-evidence-adapter-v0.1",
+            "status": "passed",
+            "adapter_status": "request_ready_external_evidence_required",
+            "source_service_builder_report_hash": format!("0x{}", "aa".repeat(32)),
+            "source_public_btc_spv_template_hash": format!("0x{}", "bb".repeat(32)),
+            "production_output": PUBLIC_BTC_SPV_EVIDENCE,
+            "summary": { "total": EXPECTED_BTC_SPV_EVIDENCE_PROFILES.len(), "matched": EXPECTED_BTC_SPV_EVIDENCE_PROFILES.len() },
+            "cases": EXPECTED_BTC_SPV_EVIDENCE_PROFILES.iter().map(|profile| json!({
+                "profile": profile,
+                "status": "passed",
+                "checks": { "ok": true },
+                "request": {
+                    "profile": profile,
+                    "scenario": "public-btc-proof",
+                    "minimum_confirmations": 6,
+                    "required_external_inputs": ["public_btc_spv_evidence"],
+                    "service_builder_case_hash": format!("0x{}", "cc".repeat(32)),
+                    "service_builder_tx_skeleton_hash": format!("0x{}", "dd".repeat(32)),
+                    "service_builder_receipt_binding_hash": format!("0x{}", "ee".repeat(32)),
+                    "template_case_hash": format!("0x{}", "ff".repeat(32)),
+                    "required_public_fields": full_public_fields,
+                },
+            })).collect::<Vec<_>>(),
+        });
+
+        let valid = validate_btc_spv_evidence_adapter_detail(&report);
+        assert_eq!(json_pointer_str(&valid, "/status"), Some("passed"));
+
+        let mut unexpected_public_field = report;
+        let mut extended_public_fields = full_public_fields.to_vec();
+        extended_public_fields.push("unexpected.shadow_field");
+        unexpected_public_field["cases"][0]["request"]["required_public_fields"] = json!(extended_public_fields);
+        let failed_exact = validate_btc_spv_evidence_adapter_detail(&unexpected_public_field);
+        assert_eq!(json_pointer_str(&failed_exact, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&failed_exact, "/cases/btc-transaction-commitment-profile-v0/required_public_fields_exact"));
     }
 
     #[test]
