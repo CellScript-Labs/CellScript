@@ -283,7 +283,7 @@ const EXPECTED_BTC_SPV_ADAPTER_PUBLIC_FIELDS: &[&str] = &[
 ];
 const EXPECTED_PUBLIC_BTC_SPV_HANDOFF_FIELDS: &[&str] = EXPECTED_BTC_SPV_ADAPTER_PUBLIC_FIELDS;
 const EXPECTED_BTC_SPV_FIELD_CONSTRAINTS: &[(&str, &str)] = &[
-    ("network", "public network name; must not be local-devnet"),
+    ("network", "explicit public mainnet/testnet name; placeholders and local-devnet are rejected"),
     ("generated_at", "UTC timestamp in YYYY-MM-DDTHH:MM:SSZ form"),
     ("evidence_provider", "real external provider identity; placeholder tokens are rejected"),
     ("source_service.name", "real external SPV service identity; placeholder tokens are rejected"),
@@ -310,7 +310,7 @@ const EXPECTED_PUBLIC_CELLDEP_REQUIRED_FIELDS: &[&str] = &[
     "request_handoff.group",
 ];
 const EXPECTED_PUBLIC_CELLDEP_FIELD_CONSTRAINTS: &[(&str, &str)] = &[
-    ("network", "public CKB network name; must not be local-devnet"),
+    ("network", "explicit public CKB mainnet/testnet name; placeholders and local-devnet are rejected"),
     ("attested_at", "UTC timestamp in YYYY-MM-DDTHH:MM:SSZ form"),
     ("attestor", "real release signer or deployer identity; placeholder tokens are rejected"),
     ("release.manifest_commit", "40-character hex source commit matching the reviewed TCB repo_commit"),
@@ -4165,7 +4165,7 @@ fn validate_btc_spv_evidence(repo_root: &Path, rel_path: &str, external_evidence
         "schema": json_pointer_str(&payload, "/schema") == Some("novaseal-public-btc-spv-evidence-v0.1"),
         "top_level_fields_exact": exact_object_keys(&payload, EXPECTED_PUBLIC_BTC_SPV_EVIDENCE_FIELDS),
         "status_attested": json_pointer_str(&payload, "/status") == Some("attested"),
-        "network_public": json_pointer_str(&payload, "/network").is_some_and(|network| !network.is_empty() && network != "local-devnet"),
+        "network_public": json_pointer_str(&payload, "/network").is_some_and(is_public_network),
         "evidence_provider_present": payload.get("evidence_provider").is_some_and(value_is_present),
         "evidence_provider_identity": json_pointer_str(&payload, "/evidence_provider").is_some_and(is_external_identity),
         "generated_at_present": payload.get("generated_at").is_some_and(value_is_present),
@@ -4222,7 +4222,7 @@ fn validate_public_attestation(
         "schema": json_pointer_str(&payload, "/schema") == Some("novaseal-public-shared-cell-dep-attestation-v0.1"),
         "top_level_fields_exact": exact_object_keys(&payload, EXPECTED_PUBLIC_CELLDEP_ATTESTATION_FIELDS),
         "status": json_pointer_str(&payload, "/status") == Some("attested"),
-        "network_not_local_devnet": json_pointer_str(&payload, "/network").is_some_and(|network| !network.is_empty() && network != "local-devnet"),
+        "network_public": json_pointer_str(&payload, "/network").is_some_and(is_public_network),
         "attested_at_utc_timestamp": json_pointer_str(&payload, "/attested_at").is_some_and(is_utc_timestamp_z),
         "attestor_identity": json_pointer_str(&payload, "/attestor").is_some_and(is_external_identity),
         "release_fields_exact": exact_object_keys(&release, EXPECTED_PUBLIC_CELLDEP_RELEASE_FIELDS),
@@ -4757,6 +4757,15 @@ fn value_is_present(value: &Value) -> bool {
 fn is_external_identity(value: &str) -> bool {
     let trimmed = value.trim();
     trimmed == value && trimmed.len() >= 3 && !contains_placeholder_token(trimmed)
+}
+
+fn is_public_network(value: &str) -> bool {
+    let trimmed = value.trim();
+    if trimmed != value || trimmed.is_empty() || contains_placeholder_token(trimmed) {
+        return false;
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    lower != "local-devnet" && lower != "testnet-or-mainnet" && (lower.contains("mainnet") || lower.contains("testnet"))
 }
 
 fn contains_placeholder_token(value: &str) -> bool {
@@ -5615,6 +5624,7 @@ mod tests {
         assert!(json_pointer_bool(&passed, "/checks/request_handoff_fields_exact"));
         assert!(json_pointer_bool(&passed, "/checks/request_handoff_bundle_hash_matches_current"));
         assert!(json_pointer_bool(&passed, "/checks/request_handoff_bundle_hash_algorithm"));
+        assert!(json_pointer_bool(&passed, "/checks/network_public"));
         assert!(json_pointer_bool(&passed, "/checks/evidence_provider_identity"));
         assert!(json_pointer_bool(&passed, "/checks/generated_at_utc_timestamp"));
         assert!(json_pointer_bool(&passed, "/checks/required_profiles_field_exact"));
@@ -5637,6 +5647,13 @@ mod tests {
         let failed_provider = validate_btc_spv_evidence(temp.path(), PUBLIC_BTC_SPV_EVIDENCE, &handoff).unwrap();
         assert_eq!(json_pointer_str(&failed_provider, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&failed_provider, "/checks/evidence_provider_identity"));
+
+        let mut placeholder_network = spv_report.clone();
+        placeholder_network["network"] = json!("testnet-or-mainnet");
+        std::fs::write(proofs.join("public_btc_spv_evidence.json"), serde_json::to_vec_pretty(&placeholder_network).unwrap()).unwrap();
+        let failed_network = validate_btc_spv_evidence(temp.path(), PUBLIC_BTC_SPV_EVIDENCE, &handoff).unwrap();
+        assert_eq!(json_pointer_str(&failed_network, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&failed_network, "/checks/network_public"));
 
         let mut top_level_extra = spv_report.clone();
         top_level_extra["unexpected_provider_field"] = Value::String("must-fail".to_string());
@@ -5815,6 +5832,7 @@ mod tests {
         assert!(json_pointer_bool(&public_passed, "/checks/release_fields_exact"));
         assert!(json_pointer_bool(&public_passed, "/checks/release_manifest_commit_present"));
         assert!(json_pointer_bool(&public_passed, "/checks/release_manifest_commit_matches_tcb"));
+        assert!(json_pointer_bool(&public_passed, "/checks/network_public"));
         assert!(json_pointer_bool(&public_passed, "/checks/attested_at_utc_timestamp"));
         assert!(json_pointer_bool(&public_passed, "/checks/attestor_identity"));
         assert!(json_pointer_bool(&public_passed, "/checks/request_handoff_fields_exact"));
@@ -5838,6 +5856,24 @@ mod tests {
         .unwrap();
         assert_eq!(json_pointer_str(&public_attested_at_failed, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&public_attested_at_failed, "/checks/attested_at_utc_timestamp"));
+
+        let mut public_placeholder_network = public_attestation.clone();
+        public_placeholder_network["network"] = json!("testnet-or-mainnet");
+        std::fs::write(
+            proofs.join("public_shared_cell_dep_attestation.json"),
+            serde_json::to_vec_pretty(&public_placeholder_network).unwrap(),
+        )
+        .unwrap();
+        let public_network_failed = validate_public_attestation(
+            temp.path(),
+            PUBLIC_CELLDEP_ATTESTATION,
+            Some(&artifact_hash),
+            Some(tcb_repo_commit),
+            &handoff,
+        )
+        .unwrap();
+        assert_eq!(json_pointer_str(&public_network_failed, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&public_network_failed, "/checks/network_public"));
 
         let mut public_stale_manifest_commit = public_attestation.clone();
         public_stale_manifest_commit["release"]["manifest_commit"] = json!("fedcba9876543210fedcba9876543210fedcba98");

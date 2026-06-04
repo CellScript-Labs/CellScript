@@ -87,7 +87,7 @@ def profile_cases(service_builder: dict[str, Any], template: dict[str, Any]) -> 
                 "request_handoff.group",
             ],
             "field_constraints": {
-                "network": "public network name; must not be local-devnet",
+                "network": "explicit public mainnet/testnet name; placeholders and local-devnet are rejected",
                 "generated_at": "UTC timestamp in YYYY-MM-DDTHH:MM:SSZ form",
                 "evidence_provider": "real external provider identity; placeholder tokens are rejected",
                 "source_service.name": "real external SPV service identity; placeholder tokens are rejected",
