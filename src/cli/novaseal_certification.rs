@@ -308,7 +308,7 @@ const EXPECTED_PUBLIC_CELLDEP_FIELD_CONSTRAINTS: &[(&str, &str)] = &[
     ("network", "public CKB network name; must not be local-devnet"),
     ("attested_at", "UTC timestamp in YYYY-MM-DDTHH:MM:SSZ form"),
     ("attestor", "real release signer or deployer identity; placeholder tokens are rejected"),
-    ("release.manifest_commit", "40-character hex manifest source commit"),
+    ("release.manifest_commit", "40-character hex source commit matching the reviewed TCB repo_commit"),
     ("request_handoff.bundle_hash_algorithm", "blake2b-256(person=NovaExtHandoff)"),
 ];
 const EXPECTED_EXTERNAL_TCB_REQUIRED_FIELDS: &[&str] = &[
@@ -726,11 +726,17 @@ pub(crate) fn build_report(repo_root: &Path) -> Result<Value> {
     let tcb = json_load(repo_root, TCB_REVIEW)?;
     let artifact_hash = normalize_hex(json_pointer_str(&tcb, "/runtime_artifact/artifact_hash"));
     let source_tree_hash = normalize_hex(json_pointer_str(&tcb, "/source_inventory/source_tree_sha256"));
+    let tcb_repo_commit = json_pointer_str(&tcb, "/repo_commit");
 
     let core_manifest = compare_manifest_dep(repo_root, CORE_MANIFEST, &core_live, artifact_hash.as_deref())?;
     let agreement_manifest = compare_manifest_dep(repo_root, AGREEMENT_MANIFEST, &agreement_live, artifact_hash.as_deref())?;
-    let public_attestation =
-        validate_public_attestation(repo_root, PUBLIC_CELLDEP_ATTESTATION, artifact_hash.as_deref(), &external_evidence_handoff)?;
+    let public_attestation = validate_public_attestation(
+        repo_root,
+        PUBLIC_CELLDEP_ATTESTATION,
+        artifact_hash.as_deref(),
+        tcb_repo_commit,
+        &external_evidence_handoff,
+    )?;
     let external_review = validate_external_review(
         repo_root,
         EXTERNAL_TCB_ATTESTATION,
@@ -4083,6 +4089,7 @@ fn validate_public_attestation(
     repo_root: &Path,
     rel_path: &str,
     artifact_hash: Option<&str>,
+    tcb_repo_commit: Option<&str>,
     external_evidence_handoff: &Value,
 ) -> Result<Value> {
     let path = repo_root.join(rel_path);
@@ -4110,6 +4117,7 @@ fn validate_public_attestation(
         "release_package": json_pointer_str(&release, "/package") == Some("novaseal"),
         "release_version_present": release.get("version").is_some_and(value_is_present),
         "release_manifest_commit_present": json_pointer_str(&release, "/manifest_commit").is_some_and(is_git_commit_hash),
+        "release_manifest_commit_matches_tcb": json_pointer_str(&release, "/manifest_commit") == tcb_repo_commit,
         "request_handoff_fields_exact": exact_object_keys(payload.get("request_handoff").unwrap_or(&Value::Null), EXPECTED_EXTERNAL_REQUEST_HANDOFF_FIELDS),
         "request_handoff_bundle_path": json_pointer_str(&payload, "/request_handoff/bundle") == Some(EXTERNAL_EVIDENCE_HANDOFF),
         "request_handoff_bundle_hash_matches_current": normalize_hex(json_pointer_str(&payload, "/request_handoff/bundle_hash")).as_deref()
@@ -5532,6 +5540,7 @@ mod tests {
         std::fs::create_dir_all(&proofs).unwrap();
         let artifact_hash = format!("0x{}", "aa".repeat(32));
         let source_tree_hash = format!("0x{}", "bb".repeat(32));
+        let tcb_repo_commit = "0123456789abcdef0123456789abcdef01234567";
         let handoff = json!({
             "schema": "novaseal-external-evidence-handoff-bundle-v0.1",
             "status": "passed",
@@ -5546,7 +5555,7 @@ mod tests {
             "release": {
                 "package": "novaseal",
                 "version": "0.0.1-v0-mvp",
-                "manifest_commit": "0123456789abcdef0123456789abcdef01234567",
+                "manifest_commit": tcb_repo_commit,
             },
             "notes": "external public CellDep attestation fixture",
             "request_handoff": {
@@ -5570,12 +5579,19 @@ mod tests {
             serde_json::to_vec_pretty(&public_attestation).unwrap(),
         )
         .unwrap();
-        let public_passed =
-            validate_public_attestation(temp.path(), PUBLIC_CELLDEP_ATTESTATION, Some(&artifact_hash), &handoff).unwrap();
+        let public_passed = validate_public_attestation(
+            temp.path(),
+            PUBLIC_CELLDEP_ATTESTATION,
+            Some(&artifact_hash),
+            Some(tcb_repo_commit),
+            &handoff,
+        )
+        .unwrap();
         assert_eq!(json_pointer_str(&public_passed, "/status"), Some("passed"));
         assert!(json_pointer_bool(&public_passed, "/checks/top_level_fields_exact"));
         assert!(json_pointer_bool(&public_passed, "/checks/release_fields_exact"));
         assert!(json_pointer_bool(&public_passed, "/checks/release_manifest_commit_present"));
+        assert!(json_pointer_bool(&public_passed, "/checks/release_manifest_commit_matches_tcb"));
         assert!(json_pointer_bool(&public_passed, "/checks/attested_at_utc_timestamp"));
         assert!(json_pointer_bool(&public_passed, "/checks/attestor_identity"));
         assert!(json_pointer_bool(&public_passed, "/checks/request_handoff_fields_exact"));
@@ -5589,10 +5605,34 @@ mod tests {
             serde_json::to_vec_pretty(&public_placeholder_attested_at).unwrap(),
         )
         .unwrap();
-        let public_attested_at_failed =
-            validate_public_attestation(temp.path(), PUBLIC_CELLDEP_ATTESTATION, Some(&artifact_hash), &handoff).unwrap();
+        let public_attested_at_failed = validate_public_attestation(
+            temp.path(),
+            PUBLIC_CELLDEP_ATTESTATION,
+            Some(&artifact_hash),
+            Some(tcb_repo_commit),
+            &handoff,
+        )
+        .unwrap();
         assert_eq!(json_pointer_str(&public_attested_at_failed, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&public_attested_at_failed, "/checks/attested_at_utc_timestamp"));
+
+        let mut public_stale_manifest_commit = public_attestation.clone();
+        public_stale_manifest_commit["release"]["manifest_commit"] = json!("fedcba9876543210fedcba9876543210fedcba98");
+        std::fs::write(
+            proofs.join("public_shared_cell_dep_attestation.json"),
+            serde_json::to_vec_pretty(&public_stale_manifest_commit).unwrap(),
+        )
+        .unwrap();
+        let public_manifest_commit_failed = validate_public_attestation(
+            temp.path(),
+            PUBLIC_CELLDEP_ATTESTATION,
+            Some(&artifact_hash),
+            Some(tcb_repo_commit),
+            &handoff,
+        )
+        .unwrap();
+        assert_eq!(json_pointer_str(&public_manifest_commit_failed, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&public_manifest_commit_failed, "/checks/release_manifest_commit_matches_tcb"));
 
         let mut public_placeholder_attestor = public_attestation.clone();
         public_placeholder_attestor["attestor"] = json!("REPLACE_WITH_DEPLOYER_OR_RELEASE_SIGNER");
@@ -5601,8 +5641,14 @@ mod tests {
             serde_json::to_vec_pretty(&public_placeholder_attestor).unwrap(),
         )
         .unwrap();
-        let public_attestor_failed =
-            validate_public_attestation(temp.path(), PUBLIC_CELLDEP_ATTESTATION, Some(&artifact_hash), &handoff).unwrap();
+        let public_attestor_failed = validate_public_attestation(
+            temp.path(),
+            PUBLIC_CELLDEP_ATTESTATION,
+            Some(&artifact_hash),
+            Some(tcb_repo_commit),
+            &handoff,
+        )
+        .unwrap();
         assert_eq!(json_pointer_str(&public_attestor_failed, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&public_attestor_failed, "/checks/attestor_identity"));
 
@@ -5610,8 +5656,14 @@ mod tests {
         public_extra["unexpected_provider_field"] = Value::String("must-fail".to_string());
         std::fs::write(proofs.join("public_shared_cell_dep_attestation.json"), serde_json::to_vec_pretty(&public_extra).unwrap())
             .unwrap();
-        let public_failed =
-            validate_public_attestation(temp.path(), PUBLIC_CELLDEP_ATTESTATION, Some(&artifact_hash), &handoff).unwrap();
+        let public_failed = validate_public_attestation(
+            temp.path(),
+            PUBLIC_CELLDEP_ATTESTATION,
+            Some(&artifact_hash),
+            Some(tcb_repo_commit),
+            &handoff,
+        )
+        .unwrap();
         assert_eq!(json_pointer_str(&public_failed, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&public_failed, "/checks/top_level_fields_exact"));
 
@@ -5622,8 +5674,14 @@ mod tests {
             serde_json::to_vec_pretty(&public_nested_extra).unwrap(),
         )
         .unwrap();
-        let public_nested_failed =
-            validate_public_attestation(temp.path(), PUBLIC_CELLDEP_ATTESTATION, Some(&artifact_hash), &handoff).unwrap();
+        let public_nested_failed = validate_public_attestation(
+            temp.path(),
+            PUBLIC_CELLDEP_ATTESTATION,
+            Some(&artifact_hash),
+            Some(tcb_repo_commit),
+            &handoff,
+        )
+        .unwrap();
         assert_eq!(json_pointer_str(&public_nested_failed, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&public_nested_failed, "/checks/runtime_verifier_fields_exact"));
 
@@ -5634,8 +5692,14 @@ mod tests {
             serde_json::to_vec_pretty(&public_release_string).unwrap(),
         )
         .unwrap();
-        let public_release_failed =
-            validate_public_attestation(temp.path(), PUBLIC_CELLDEP_ATTESTATION, Some(&artifact_hash), &handoff).unwrap();
+        let public_release_failed = validate_public_attestation(
+            temp.path(),
+            PUBLIC_CELLDEP_ATTESTATION,
+            Some(&artifact_hash),
+            Some(tcb_repo_commit),
+            &handoff,
+        )
+        .unwrap();
         assert_eq!(json_pointer_str(&public_release_failed, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&public_release_failed, "/checks/release_fields_exact"));
 
@@ -5646,8 +5710,14 @@ mod tests {
             serde_json::to_vec_pretty(&public_handoff_extra).unwrap(),
         )
         .unwrap();
-        let public_handoff_failed =
-            validate_public_attestation(temp.path(), PUBLIC_CELLDEP_ATTESTATION, Some(&artifact_hash), &handoff).unwrap();
+        let public_handoff_failed = validate_public_attestation(
+            temp.path(),
+            PUBLIC_CELLDEP_ATTESTATION,
+            Some(&artifact_hash),
+            Some(tcb_repo_commit),
+            &handoff,
+        )
+        .unwrap();
         assert_eq!(json_pointer_str(&public_handoff_failed, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&public_handoff_failed, "/checks/request_handoff_fields_exact"));
 
@@ -5658,8 +5728,14 @@ mod tests {
             serde_json::to_vec_pretty(&public_handoff_wrong_algorithm).unwrap(),
         )
         .unwrap();
-        let public_handoff_algorithm_failed =
-            validate_public_attestation(temp.path(), PUBLIC_CELLDEP_ATTESTATION, Some(&artifact_hash), &handoff).unwrap();
+        let public_handoff_algorithm_failed = validate_public_attestation(
+            temp.path(),
+            PUBLIC_CELLDEP_ATTESTATION,
+            Some(&artifact_hash),
+            Some(tcb_repo_commit),
+            &handoff,
+        )
+        .unwrap();
         assert_eq!(json_pointer_str(&public_handoff_algorithm_failed, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&public_handoff_algorithm_failed, "/checks/request_handoff_bundle_hash_algorithm"));
 
