@@ -1965,6 +1965,11 @@ fn fiber_node_execution_summary(repo_root: &Path, report: Option<&Value>) -> Val
             && value_is_present(workflow.pointer("/execution/stderr_log").unwrap_or(&Value::Null));
         let execution_logs_exist = relative_file_exists(repo_root, json_pointer_str(workflow, "/execution/stdout_log"), true)
             && relative_file_exists(repo_root, json_pointer_str(workflow, "/execution/stderr_log"), false);
+        let bruno_compatibility_patch_files_exist = bruno_compatibility_patch_contract(
+            repo_root,
+            json_pointer_str(workflow, "/execution/bruno_cwd"),
+            workflow.pointer("/execution/bruno_compatibility_patches"),
+        );
         let checks = json!({
             "present": json_pointer_bool(workflow, "/present"),
             "status_passed": json_pointer_str(workflow, "/status") == Some("passed"),
@@ -1976,6 +1981,7 @@ fn fiber_node_execution_summary(repo_root: &Path, report: Option<&Value>) -> Val
             "rpc_methods_present": rpc_methods_present,
             "execution_logs_present": execution_logs_present,
             "execution_logs_exist": execution_logs_exist,
+            "bruno_compatibility_patch_files_exist": bruno_compatibility_patch_files_exist,
         });
         if !object_values_all_true(Some(&checks)) {
             failed_workflows.push(Value::String((*suite).to_string()));
@@ -4531,6 +4537,26 @@ fn relative_file_array_all_exist(root: &Path, value: Option<&Value>, require_non
         .is_some_and(|paths| !paths.is_empty() && paths.iter().all(|path| relative_file_exists(root, path.as_str(), require_nonempty)))
 }
 
+fn bruno_compatibility_patch_contract(repo_root: &Path, bruno_cwd: Option<&str>, patches: Option<&Value>) -> bool {
+    let Some(patches) = patches else {
+        return true;
+    };
+    let Some(patches) = patches.as_array() else {
+        return false;
+    };
+    if patches.is_empty() {
+        return true;
+    }
+    let Some(bruno_cwd) = bruno_cwd else {
+        return false;
+    };
+    if !safe_relative_path(bruno_cwd) {
+        return false;
+    }
+    let bruno_root = repo_root.join(bruno_cwd);
+    bruno_root.is_dir() && patches.iter().all(|path| relative_file_exists(&bruno_root, path.as_str(), true))
+}
+
 fn parse_out_point(value: Option<&str>) -> Value {
     let Some(raw) = value else {
         return json!({"valid": false, "raw": Value::Null});
@@ -5080,6 +5106,20 @@ mod tests {
 
     fn fiber_workflow_fixture(repo_root: &Path, fiber_repo: &Path, suite: &str, mapped_profiles: &[&str]) -> Value {
         write_fiber_workflow_fixture_files(repo_root, fiber_repo, suite);
+        let mut execution = json!({
+            "status": "passed",
+            "stdout_log": format!("target/novaseal-fiber-node-experiments/{suite}/bruno.stdout"),
+            "stderr_log": format!("target/novaseal-fiber-node-experiments/{suite}/bruno.stderr"),
+        });
+        if suite == "cross-chain-hub" {
+            let bruno_cwd = "target/novaseal-fiber-node-experiments/cross-chain-hub/bruno-worktree";
+            let patch = "e2e/cross-chain-hub/10-node1-add-fiber-invoice.bru";
+            let patch_file = repo_root.join(bruno_cwd).join(patch);
+            std::fs::create_dir_all(patch_file.parent().unwrap()).unwrap();
+            std::fs::write(patch_file, "meta { name: patched }\n").unwrap();
+            execution["bruno_cwd"] = Value::String(bruno_cwd.to_string());
+            execution["bruno_compatibility_patches"] = json!([patch]);
+        }
         json!({
             "suite": suite,
             "status": "passed",
@@ -5091,11 +5131,7 @@ mod tests {
             },
             "rpc_methods": ["open_channel"],
             "evidence_files": [format!("tests/bruno/e2e/{suite}/step.bru")],
-            "execution": {
-                "status": "passed",
-                "stdout_log": format!("target/novaseal-fiber-node-experiments/{suite}/bruno.stdout"),
-                "stderr_log": format!("target/novaseal-fiber-node-experiments/{suite}/bruno.stderr"),
-            },
+            "execution": execution,
         })
     }
 
@@ -5145,6 +5181,7 @@ mod tests {
         assert!(json_pointer_bool(&passed, "/checks/fiber_repo_exists"));
         assert!(json_pointer_bool(&passed, "/workflow_checks/open-use-close-a-channel/evidence_files_exist"));
         assert!(json_pointer_bool(&passed, "/workflow_checks/open-use-close-a-channel/execution_logs_exist"));
+        assert!(json_pointer_bool(&passed, "/workflow_checks/cross-chain-hub/bruno_compatibility_patch_files_exist"));
 
         let mut extra_suite = complete_fiber_node_execution_report(&repo_root, &fiber_repo);
         extra_suite["workflows"].as_array_mut().unwrap().push(fiber_workflow_fixture(
@@ -5180,6 +5217,18 @@ mod tests {
         let failed_evidence = fiber_node_execution_summary(&repo_root, Some(&missing_evidence_file));
         assert!(!json_pointer_bool(&failed_evidence, "/all_required_workflows_executed_passed"));
         assert!(!json_pointer_bool(&failed_evidence, "/workflow_checks/open-use-close-a-channel/evidence_files_exist"));
+
+        let mut missing_patch_file = complete_fiber_node_execution_report(&repo_root, &fiber_repo);
+        let cross_chain_hub = missing_patch_file["workflows"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|workflow| json_pointer_str(workflow, "/suite") == Some("cross-chain-hub"))
+            .unwrap();
+        cross_chain_hub["execution"]["bruno_compatibility_patches"] = json!(["e2e/cross-chain-hub/missing-patch.bru"]);
+        let failed_patch = fiber_node_execution_summary(&repo_root, Some(&missing_patch_file));
+        assert!(!json_pointer_bool(&failed_patch, "/all_required_workflows_executed_passed"));
+        assert!(!json_pointer_bool(&failed_patch, "/workflow_checks/cross-chain-hub/bruno_compatibility_patch_files_exist"));
     }
 
     #[test]
