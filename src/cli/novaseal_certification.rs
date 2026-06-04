@@ -2745,6 +2745,36 @@ fn validate_external_attestation_adapter_detail(report: &Value) -> Value {
         let matches = by_name.get(name).cloned().unwrap_or_default();
         let case = matches.first().cloned().unwrap_or(Value::Null);
         let required_fields = json_array_strings(&case, "/request/required_public_fields");
+        let expected_required_fields = if name == "public_shared_cell_dep_attestation" {
+            vec![
+                "network",
+                "attested_at",
+                "attestor",
+                "release.manifest_commit",
+                "runtime_verifier.out_point",
+                "runtime_verifier.data_hash",
+                "runtime_verifier.dep_type",
+                "runtime_verifier.hash_type",
+                "runtime_verifier.artifact_hash",
+                "request_handoff.bundle",
+                "request_handoff.bundle_hash",
+                "request_handoff.group",
+            ]
+        } else {
+            vec![
+                "reviewer",
+                "review_date",
+                "review_scope",
+                "verifier_id",
+                "ipc_abi",
+                "artifact_hash",
+                "source_tree_sha256",
+                "report_uri",
+                "request_handoff.bundle",
+                "request_handoff.bundle_hash",
+                "request_handoff.group",
+            ]
+        };
         let checks = json!({
             "exactly_one_case": matches.len() == 1,
             "status_passed": json_pointer_str(&case, "/status") == Some("passed"),
@@ -2754,7 +2784,7 @@ fn validate_external_attestation_adapter_detail(report: &Value) -> Value {
             "verifier_id_current": json_pointer_str(&case, "/request/verifier_id") == Some("btc.bip340.v0"),
             "ipc_abi_current": json_pointer_str(&case, "/request/ipc_abi") == Some("cellscript-btc-bip340-ipc-v0"),
             "required_status_matches": json_pointer_str(&case, "/request/required_status") == Some(required_status),
-            "required_fields_present": !required_fields.is_empty(),
+            "required_fields_complete": expected_required_fields.iter().all(|field| required_fields.iter().any(|actual| actual == field)),
             "artifact_hash_present": json_pointer_str(&case, "/request/expected_artifact_hash").is_some_and(is_hex32),
             "fixture_checks_passed": object_values_all_true(case.get("checks")),
         });
@@ -4453,6 +4483,87 @@ mod tests {
         let failed_path = validate_external_evidence_handoff_detail(&wrong_path, &btc_spv_adapter, &external_attestation_adapter);
         assert_eq!(json_pointer_str(&failed_path, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&failed_path, "/cases/public_shared_cell_dep_attestation/source_adapter_path_matches_current"));
+    }
+
+    #[test]
+    fn external_attestation_adapter_requires_handoff_request_fields() {
+        let full_public_fields = [
+            "network",
+            "attested_at",
+            "attestor",
+            "release.manifest_commit",
+            "runtime_verifier.out_point",
+            "runtime_verifier.data_hash",
+            "runtime_verifier.dep_type",
+            "runtime_verifier.hash_type",
+            "runtime_verifier.artifact_hash",
+            "request_handoff.bundle",
+            "request_handoff.bundle_hash",
+            "request_handoff.group",
+        ];
+        let full_review_fields = [
+            "reviewer",
+            "review_date",
+            "review_scope",
+            "verifier_id",
+            "ipc_abi",
+            "artifact_hash",
+            "source_tree_sha256",
+            "report_uri",
+            "request_handoff.bundle",
+            "request_handoff.bundle_hash",
+            "request_handoff.group",
+        ];
+        let report = json!({
+            "schema": "novaseal-external-attestation-adapter-v0.1",
+            "status": "passed",
+            "adapter_status": "request_ready_external_attestations_required",
+            "source_tcb_review_hash": format!("0x{}", "aa".repeat(32)),
+            "source_public_cell_dep_template_hash": format!("0x{}", "bb".repeat(32)),
+            "source_external_tcb_template_hash": format!("0x{}", "cc".repeat(32)),
+            "summary": { "total": 2, "matched": 2 },
+            "cases": [
+                {
+                    "name": "public_shared_cell_dep_attestation",
+                    "status": "passed",
+                    "checks": { "ok": true },
+                    "request": {
+                        "production_output": PUBLIC_CELLDEP_ATTESTATION,
+                        "template_schema": "novaseal-public-shared-cell-dep-attestation-v0.1",
+                        "template_hash": format!("0x{}", "dd".repeat(32)),
+                        "verifier_id": "btc.bip340.v0",
+                        "ipc_abi": "cellscript-btc-bip340-ipc-v0",
+                        "required_status": "attested",
+                        "expected_artifact_hash": format!("0x{}", "ee".repeat(32)),
+                        "required_public_fields": full_public_fields,
+                    },
+                },
+                {
+                    "name": "external_bip340_tcb_review_attestation",
+                    "status": "passed",
+                    "checks": { "ok": true },
+                    "request": {
+                        "production_output": EXTERNAL_TCB_ATTESTATION,
+                        "template_schema": "novaseal-bip340-external-tcb-review-attestation-v0.1",
+                        "template_hash": format!("0x{}", "ff".repeat(32)),
+                        "verifier_id": "btc.bip340.v0",
+                        "ipc_abi": "cellscript-btc-bip340-ipc-v0",
+                        "required_status": "accepted",
+                        "expected_artifact_hash": format!("0x{}", "11".repeat(32)),
+                        "required_public_fields": full_review_fields,
+                    },
+                },
+            ],
+        });
+
+        let valid = validate_external_attestation_adapter_detail(&report);
+        assert_eq!(json_pointer_str(&valid, "/status"), Some("passed"));
+
+        let mut missing_handoff_field = report;
+        missing_handoff_field["cases"][0]["request"]["required_public_fields"] = json!(full_public_fields[..11].to_vec());
+        let failed = validate_external_attestation_adapter_detail(&missing_handoff_field);
+        assert_eq!(json_pointer_str(&failed, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&failed, "/cases/public_shared_cell_dep_attestation/required_fields_complete"));
     }
 
     #[test]
