@@ -19,6 +19,10 @@ const WALLET_VECTORS: &str = "target/novaseal-wallet-signing-vectors.json";
 const TCB_REVIEW: &str = "target/novaseal-bip340-tcb-review.json";
 const PUBLIC_CELLDEP_ATTESTATION: &str = "proposals/novaseal/v0-mvp-skeleton/proofs/public_shared_cell_dep_attestation.json";
 const EXTERNAL_TCB_ATTESTATION: &str = "proposals/novaseal/v0-mvp-skeleton/proofs/bip340_external_tcb_review_attestation.json";
+const PUBLIC_CELLDEP_ATTESTATION_TEMPLATE: &str =
+    "proposals/novaseal/v0-mvp-skeleton/proofs/public_shared_cell_dep_attestation.template.json";
+const EXTERNAL_TCB_ATTESTATION_TEMPLATE: &str =
+    "proposals/novaseal/v0-mvp-skeleton/proofs/bip340_external_tcb_review_attestation.template.json";
 
 const EXPECTED_NOVASEAL_CANONICAL_SCHEMA: &str = "NovaSealCanonicalV0";
 const EXPECTED_NOVASEAL_CANONICAL_ENVELOPE: &str = "NovaSealCanonicalEnvelopeV0";
@@ -198,6 +202,7 @@ pub(crate) fn build_report(repo_root: &Path) -> Result<Value> {
         repo_root,
         agreement_conformance: &agreement_conformance,
         agreement_manifest: &agreement_manifest,
+        core_security: &core_security,
         wallet: &wallet,
         stateful_acceptance: &stateful_acceptance,
         tcb: &tcb,
@@ -298,6 +303,7 @@ pub(crate) fn build_report(repo_root: &Path) -> Result<Value> {
     } else {
         "failed"
     };
+    let v1_readiness = build_v1_readiness(&profile_certification, &stateful_acceptance, &gates, local_ready, production_ready);
 
     Ok(json!({
         "schema": "novaseal-production-gates-v0.2",
@@ -312,6 +318,7 @@ pub(crate) fn build_report(repo_root: &Path) -> Result<Value> {
             "status": json_pointer_str(&agreement_conformance, "/status"),
         },
         "profile_certification": profile_certification,
+        "v1_readiness": v1_readiness,
         "gates": gates,
         "policy": {
             "no_placeholder_closure": "production remains false until public/shared CellDep and external TCB attestations are present",
@@ -325,6 +332,308 @@ pub(crate) fn build_report(repo_root: &Path) -> Result<Value> {
             "language": "rust",
         },
     }))
+}
+
+fn build_v1_readiness(
+    profile_certification: &Value,
+    stateful_acceptance: &Value,
+    gates: &[Value],
+    local_ready: bool,
+    production_ready: bool,
+) -> Value {
+    let gate_status = |name: &str| {
+        gates
+            .iter()
+            .find(|gate| json_pointer_str(gate, "/name") == Some(name))
+            .and_then(|gate| json_pointer_str(gate, "/status"))
+            .unwrap_or("missing")
+    };
+    let planned_matrix = build_planned_profile_matrix(profile_certification, stateful_acceptance);
+    let planned_matrix_passed = json_pointer_str(&planned_matrix, "/status") == Some("passed");
+    let dimensions = vec![
+        readiness_dimension(
+            "architecture_and_profile_conformance",
+            json_pointer_str(profile_certification, "/status") == Some("passed")
+                && json_pointer_bool(profile_certification, "/local_checks/conformance_gate_passed"),
+            "profile_certification.status + local_checks.conformance_gate_passed",
+            "V1 architecture profile eligibility",
+        ),
+        readiness_dimension(
+            "planned_profiles_and_business_scenarios",
+            planned_matrix_passed,
+            "v1_readiness.planned_profile_matrix",
+            "all planned NovaSeal profiles and business scenarios",
+        ),
+        readiness_dimension(
+            "security_audit_coverage",
+            json_pointer_str(profile_certification, "/security_audit_coverage/status") == Some("passed"),
+            "profile_certification.security_audit_coverage",
+            "complete security-audit consideration",
+        ),
+        readiness_dimension(
+            "devnet_multi_profile_coverage",
+            json_pointer_str(stateful_acceptance, "/profile_coverage/status") == Some("passed"),
+            "target/novaseal-devnet-stateful-acceptance.json#/profile_coverage",
+            "devnet multi-profile evidence",
+        ),
+        readiness_dimension(
+            "multi_business_scenario_coverage",
+            json_pointer_str(stateful_acceptance, "/business_scenario_coverage/status") == Some("passed"),
+            "target/novaseal-devnet-stateful-acceptance.json#/business_scenario_coverage",
+            "multi-business scenario evidence",
+        ),
+        readiness_dimension(
+            "full_stateful_acceptance",
+            stateful_acceptance_passed(stateful_acceptance),
+            "target/novaseal-devnet-stateful-acceptance.json",
+            "complete stateful acceptance",
+        ),
+        readiness_dimension(
+            "wallet_signing_vectors",
+            json_pointer_bool(profile_certification, "/local_checks/wallet_vector_detail_passed"),
+            "target/novaseal-wallet-signing-vectors.json",
+            "wallet-facing signing safety",
+        ),
+        readiness_dimension(
+            "local_bip340_tcb_review",
+            json_pointer_bool(profile_certification, "/local_checks/local_bip340_tcb_review_passed"),
+            "target/novaseal-bip340-tcb-review.json",
+            "local verifier TCB review",
+        ),
+        readiness_dimension(
+            "local_v1_gate",
+            local_ready,
+            "all non-external novaseal-production-gates rows",
+            "local V1 release readiness",
+        ),
+        readiness_dimension(
+            "public_shared_cell_dep_attestation",
+            gate_status("public_shared_cell_dep_pinning_attestation") == "passed",
+            PUBLIC_CELLDEP_ATTESTATION,
+            "public production deployment",
+        ),
+        readiness_dimension(
+            "external_bip340_tcb_review_attestation",
+            gate_status("external_bip340_runtime_verifier_tcb_review_attestation") == "passed",
+            EXTERNAL_TCB_ATTESTATION,
+            "external production TCB sign-off",
+        ),
+    ];
+    let local_dimension_names = [
+        "architecture_and_profile_conformance",
+        "planned_profiles_and_business_scenarios",
+        "security_audit_coverage",
+        "devnet_multi_profile_coverage",
+        "multi_business_scenario_coverage",
+        "full_stateful_acceptance",
+        "wallet_signing_vectors",
+        "local_bip340_tcb_review",
+        "local_v1_gate",
+    ];
+    let local_dimensions_passed = dimensions
+        .iter()
+        .filter(|dimension| json_pointer_str(dimension, "/name").is_some_and(|name| local_dimension_names.contains(&name)))
+        .all(|dimension| json_pointer_str(dimension, "/status") == Some("passed"));
+    let failed_dimensions = dimensions
+        .iter()
+        .filter(|dimension| json_pointer_str(dimension, "/status") != Some("passed"))
+        .filter_map(|dimension| json_pointer_str(dimension, "/name").map(str::to_string))
+        .collect::<Vec<_>>();
+    let external_blockers =
+        profile_certification.get("production_statement_blockers").cloned().unwrap_or_else(|| Value::Array(Vec::new()));
+    let production_statement_eligible = json_pointer_bool(profile_certification, "/production_statement_eligible");
+    let status = if production_ready && production_statement_eligible {
+        "v1_prod_ready"
+    } else if local_dimensions_passed {
+        "local_v1_ready_external_attestation_required"
+    } else if !planned_matrix_passed {
+        "planned_profiles_incomplete"
+    } else {
+        "failed"
+    };
+
+    json!({
+        "schema": "novaseal-v1-readiness-v0.1",
+        "status": status,
+        "local_v1_ready": local_dimensions_passed,
+        "production_ready": production_ready,
+        "production_statement_eligible": production_statement_eligible,
+        "planned_profile_matrix": planned_matrix,
+        "dimensions": dimensions,
+        "failed_dimensions": failed_dimensions,
+        "external_blockers": external_blockers,
+        "acceptance_boundary": {
+            "local_ready_means": "architecture, audit, wallet, TCB, multi-profile devnet, multi-business scenarios, and full stateful acceptance are machine checked locally",
+            "production_ready_requires": [
+                "public/shared CellDep pinning attestation",
+                "external BIP340 runtime verifier TCB review attestation",
+                "cellc certify --plugin novaseal-profile-v0 --require-production passes",
+            ],
+        },
+    })
+}
+
+fn build_planned_profile_matrix(profile_certification: &Value, stateful_acceptance: &Value) -> Value {
+    let core_passed = json_pointer_str(stateful_acceptance, "/profile_coverage/covered_profiles/0/status") == Some("passed");
+    let agreement_passed = json_pointer_str(stateful_acceptance, "/profile_coverage/covered_profiles/1/status") == Some("passed")
+        && json_pointer_str(profile_certification, "/status") == Some("passed");
+    let key_signature_passed = json_pointer_bool(profile_certification, "/local_checks/local_bip340_tcb_review_passed")
+        && json_pointer_bool(profile_certification, "/local_checks/wallet_vector_detail_passed");
+    let current_business_passed = json_pointer_str(stateful_acceptance, "/business_scenario_coverage/status") == Some("passed");
+    let profiles = vec![
+        planned_row(
+            "seal_profile_btc_key_signature",
+            "Seal profile",
+            "BTC key signature authority over a typed CKB transition",
+            key_signature_passed,
+            "target/novaseal-bip340-tcb-review.json + target/novaseal-wallet-signing-vectors.json",
+        ),
+        planned_row(
+            "seal_profile_btc_transaction_commitment",
+            "Seal profile",
+            "BTC transaction commitment to a transition",
+            false,
+            "not implemented: no BTC transaction commitment verifier/profile evidence",
+        ),
+        planned_row(
+            "seal_profile_btc_utxo_seal",
+            "Seal profile",
+            "proved BTC UTXO spend as a single-use seal",
+            false,
+            "not implemented: no BTC UTXO seal/SPV profile evidence",
+        ),
+        planned_row(
+            "seal_profile_dual_seal",
+            "Seal profile",
+            "combined BTC UTXO closure and CKB transition maturity",
+            false,
+            "not implemented: no dual-seal finality profile evidence",
+        ),
+        planned_row(
+            "object_profile_key_signed_cell_movement",
+            "Object profile",
+            "key-signed Cell movement under NovaSealCanonicalV0",
+            core_passed,
+            "target/novaseal-devnet-stateful-acceptance.json#/profile_coverage",
+        ),
+        planned_row(
+            "object_profile_agreement",
+            "Object profile",
+            "CKB-native Agreement profile with deterministic terminal paths",
+            agreement_passed,
+            "target/novaseal-devnet-stateful-acceptance.json#/profile_coverage + profile certification",
+        ),
+        planned_row(
+            "object_profile_fungible_xudt",
+            "Object profile",
+            "Fungible/xUDT balance-bearing NovaSeal profile",
+            false,
+            "not implemented: no Fungible/xUDT profile package, schema, fixtures, wallet vectors, or devnet lifecycle evidence",
+        ),
+        planned_row(
+            "object_profile_rwa_receipt",
+            "Object profile",
+            "RWA/receipt object profile with materialised receipt lifecycle",
+            false,
+            "not implemented: no RWA/receipt profile package, schema, fixtures, wallet vectors, or devnet lifecycle evidence",
+        ),
+        planned_row(
+            "future_fiber_test_path",
+            "Application profile",
+            "Fiber-facing candidate test path",
+            false,
+            "not implemented: no Fiber-facing profile package or stateful acceptance evidence",
+        ),
+    ];
+    let business_scenarios = vec![
+        planned_row(
+            "core_bootstrap_to_key_authorised_transition",
+            "Business scenario",
+            "Core bootstrap followed by key-authorised state transition",
+            core_passed,
+            "target/novaseal-devnet-stateful-acceptance.json#/business_scenario_coverage",
+        ),
+        planned_row(
+            "agreement_originate_repay_claim",
+            "Business scenario",
+            "Agreement originate, repay-before-expiry, claim-after-expiry, payout, receipt, and negative paths",
+            agreement_passed && current_business_passed,
+            "target/novaseal-devnet-stateful-acceptance.json#/business_scenario_coverage",
+        ),
+        planned_row(
+            "btc_transaction_commitment_transition",
+            "Business scenario",
+            "Transition authorised by a public BTC transaction commitment",
+            false,
+            "not implemented: missing BTC transaction commitment profile",
+        ),
+        planned_row(
+            "btc_utxo_seal_closure",
+            "Business scenario",
+            "Single-use BTC UTXO seal closure over a CKB transition",
+            false,
+            "not implemented: missing BTC UTXO seal profile",
+        ),
+        planned_row(
+            "fungible_xudt_value_flow",
+            "Business scenario",
+            "Fungible/xUDT issue, transfer, settlement, and negative accounting paths",
+            false,
+            "not implemented: missing Fungible/xUDT profile",
+        ),
+        planned_row(
+            "rwa_receipt_lifecycle",
+            "Business scenario",
+            "RWA/receipt materialisation, claim, settlement, and negative paths",
+            false,
+            "not implemented: missing RWA/receipt profile",
+        ),
+        planned_row(
+            "fiber_candidate_path",
+            "Business scenario",
+            "Fiber-compatible candidate settlement path",
+            false,
+            "not implemented: missing Fiber-facing profile",
+        ),
+    ];
+    let missing_profiles = profiles
+        .iter()
+        .chain(business_scenarios.iter())
+        .filter(|row| json_pointer_str(row, "/status") != Some("passed"))
+        .filter_map(|row| json_pointer_str(row, "/id").map(str::to_string))
+        .collect::<Vec<_>>();
+    let passed = missing_profiles.is_empty();
+    json!({
+        "schema": "novaseal-planned-profile-matrix-v0.1",
+        "status": if passed { "passed" } else { "incomplete" },
+        "source": "proposals/novaseal/v0-mvp-skeleton/NOVASEAL_ARCHITECTURE_EXPLAINED.md",
+        "profiles": profiles,
+        "business_scenarios": business_scenarios,
+        "missing": missing_profiles,
+        "boundary": {
+            "implemented_now": "BTC key-signature authority, key-signed Cell movement, and CKB-native Agreement terminal paths",
+            "not_implemented_yet": "BTC transaction commitment, BTC UTXO seal, dual seal, Fungible/xUDT, RWA/receipt object profile, and Fiber-facing test path",
+        },
+    })
+}
+
+fn planned_row(id: &str, category: &str, description: &str, passed: bool, evidence: &str) -> Value {
+    json!({
+        "id": id,
+        "category": category,
+        "description": description,
+        "status": if passed { "passed" } else { "missing" },
+        "evidence": evidence,
+    })
+}
+
+fn readiness_dimension(name: &str, passed: bool, evidence: &str, required_for: &str) -> Value {
+    json!({
+        "name": name,
+        "status": if passed { "passed" } else { "failed" },
+        "evidence": evidence,
+        "required_for": required_for,
+    })
 }
 
 fn build_stateful_acceptance_report(repo_root: &Path, agreement_conformance: &Value) -> Result<Value> {
@@ -381,6 +690,55 @@ fn build_stateful_acceptance_report(repo_root: &Path, agreement_conformance: &Va
         .iter()
         .all(|key| json_pointer_bool(&live_agreement, &format!("/{key}")))
         && json_pointer_str(agreement_conformance, "/status") == Some("passed");
+    let agreement_profile_actions_present = ["originate_agreement", "repay_before_expiry", "claim_after_expiry"]
+        .iter()
+        .all(|expected| agreement_actions.iter().any(|action| action.name == *expected));
+    let agreement_originate_live = ["origin_active_live", "origin_principal_payout_live", "origin_receipt_live"]
+        .iter()
+        .all(|key| json_pointer_bool(&live_agreement, &format!("/{key}")));
+    let agreement_repay_live = [
+        "repay_old_active_not_live",
+        "repay_closed_live",
+        "repay_lender_repayment_live",
+        "repay_borrower_collateral_return_live",
+        "repay_receipt_live",
+    ]
+    .iter()
+    .all(|key| json_pointer_bool(&live_agreement, &format!("/{key}")));
+    let agreement_claim_live =
+        ["claim_old_active_not_live", "claim_closed_live", "claim_lender_default_claim_live", "claim_receipt_live"]
+            .iter()
+            .all(|key| json_pointer_bool(&live_agreement, &format!("/{key}")));
+    let agreement_negative_business_cases_preserve_live_state = [
+        "wrong_lender_signature_rejected",
+        "non_ckb_asset_kind_rejected",
+        "wrong_borrower_signature_rejected",
+        "repay_payout_capacity_short_rejected",
+        "repay_payout_lock_args_mismatch_rejected",
+        "repay_wrong_payout_amount_rejected",
+        "early_claim_rejected",
+        "wrong_lender_claim_signature_rejected",
+        "post_negative_active_still_live",
+        "post_claim_negative_active_still_live",
+    ]
+    .iter()
+    .all(|key| json_pointer_bool(&live_agreement, &format!("/{key}")));
+    let profile_coverage_checks = json!({
+        "core_profile_live_stateful": core_live_passed,
+        "agreement_profile_live_stateful": agreement_live_passed,
+        "core_profile_actions_present": !core_actions.is_empty(),
+        "agreement_profile_actions_present": agreement_profile_actions_present,
+        "distinct_profiles_covered": core_live_passed && agreement_live_passed,
+    });
+    let profile_coverage_passed = object_values_all_true(Some(&profile_coverage_checks));
+    let business_scenario_checks = json!({
+        "core_bootstrap_transition_live": core_live_passed,
+        "agreement_originate_live": agreement_originate_live,
+        "agreement_repay_live": agreement_repay_live,
+        "agreement_claim_live": agreement_claim_live,
+        "agreement_negative_business_cases_preserve_live_state": agreement_negative_business_cases_preserve_live_state,
+    });
+    let business_scenario_coverage_passed = object_values_all_true(Some(&business_scenario_checks));
 
     let mut core_blockers = Vec::new();
     if !has_core_bootstrap_surface(&core_source) {
@@ -465,13 +823,49 @@ fn build_stateful_acceptance_report(repo_root: &Path, agreement_conformance: &Va
             ]),
         }),
     ];
+    let profile_coverage = json!({
+        "status": if profile_coverage_passed { "passed" } else { "failed" },
+        "required_profiles": [
+            "novaseal-core-v0",
+            "agreement-profile-v0",
+        ],
+        "covered_profiles": [
+            {
+                "profile": "novaseal-core-v0",
+                "scenario": "novaseal_core_key_auth_transition",
+                "status": if core_live_passed { "passed" } else { "failed" },
+                "actions": core_actions.iter().map(|action| action.name.clone()).collect::<Vec<_>>(),
+            },
+            {
+                "profile": "agreement-profile-v0",
+                "scenario": "agreement_profile_originate_to_terminal",
+                "status": if agreement_live_passed { "passed" } else { "failed" },
+                "actions": agreement_actions.iter().map(|action| action.name.clone()).collect::<Vec<_>>(),
+            },
+        ],
+        "checks": profile_coverage_checks,
+    });
+    let business_scenario_coverage = json!({
+        "status": if business_scenario_coverage_passed { "passed" } else { "failed" },
+        "required_business_scenarios": [
+            "core bootstrap -> key-authorised transition",
+            "agreement originate -> active agreement plus principal payout plus receipt",
+            "agreement active -> repaid terminal plus lender repayment plus borrower collateral return plus receipt",
+            "agreement active -> defaulted terminal plus lender collateral claim plus receipt",
+            "negative business/security dry-runs reject without mutating live state",
+        ],
+        "checks": business_scenario_checks,
+    });
     let all_blockers = scenarios
         .iter()
         .flat_map(|scenario| scenario.get("blockers").and_then(Value::as_array).into_iter().flatten().cloned())
         .collect::<Vec<_>>();
     let status = if !all_blockers.is_empty() {
         "blocked"
-    } else if scenarios.iter().all(|scenario| json_pointer_str(scenario, "/status") == Some("passed")) {
+    } else if scenarios.iter().all(|scenario| json_pointer_str(scenario, "/status") == Some("passed"))
+        && profile_coverage_passed
+        && business_scenario_coverage_passed
+    {
         "passed"
     } else if core_live_passed && !agreement_live_passed {
         "core_live_devnet_passed_agreement_pending"
@@ -498,7 +892,11 @@ fn build_stateful_acceptance_report(repo_root: &Path, agreement_conformance: &Va
             "use one stable type-script identity for a lifecycle, or an explicitly audited dispatcher/bootstrap surface",
             "run negative cases as dry-run/send-test rejections without mutating live state",
             "require every NovaSeal profile to pass conforms_to = NovaSealCanonicalV0 conformance",
+            "cover at least the core NovaSeal profile and Agreement business profile in the live stateful gate",
+            "cover bootstrap, origination, repayment, default claim, payout, receipt, and negative business/security paths",
         ],
+        "profile_coverage": profile_coverage,
+        "business_scenario_coverage": business_scenario_coverage,
         "scenarios": scenarios,
         "blocker_count": all_blockers.len(),
         "blockers": all_blockers,
@@ -920,6 +1318,7 @@ struct ProfileCertificationInputs<'a> {
     repo_root: &'a Path,
     agreement_conformance: &'a Value,
     agreement_manifest: &'a Value,
+    core_security: &'a Value,
     wallet: &'a Value,
     stateful_acceptance: &'a Value,
     tcb: &'a Value,
@@ -932,6 +1331,7 @@ fn validate_profile_certification(input: ProfileCertificationInputs<'_>) -> Resu
         repo_root,
         agreement_conformance,
         agreement_manifest,
+        core_security,
         wallet,
         stateful_acceptance,
         tcb,
@@ -943,6 +1343,11 @@ fn validate_profile_certification(input: ProfileCertificationInputs<'_>) -> Resu
     let wallet_detail = validate_wallet_vector_detail(wallet);
     let invariant_matrix = validate_invariant_matrix(repo_root, &repo_root.join(AGREEMENT_ROOT).join("proofs/invariant_matrix.json"))?;
     let live_evidence = agreement_live_evidence(stateful_acceptance);
+    let artifact_hash = normalize_hex(json_pointer_str(tcb, "/runtime_artifact/artifact_hash"));
+    let source_tree_hash = normalize_hex(json_pointer_str(tcb, "/source_inventory/source_tree_sha256"));
+    let attestation_templates = validate_attestation_templates(repo_root, artifact_hash.as_deref(), source_tree_hash.as_deref())?;
+    let security_audit_coverage =
+        validate_security_audit_coverage(repo_root, core_security, &invariant_matrix, &live_evidence, tcb, &attestation_templates)?;
     let docs = json!({
         "agreement_profile": repo_root.join(AGREEMENT_ROOT).join("docs/AGREEMENT_PROFILE.md").is_file(),
         "security": repo_root.join(AGREEMENT_ROOT).join("docs/SECURITY.md").is_file(),
@@ -962,6 +1367,8 @@ fn validate_profile_certification(input: ProfileCertificationInputs<'_>) -> Resu
         "live_devnet_evidence_passed": json_pointer_str(&live_evidence, "/status") == Some("passed"),
         "agreement_runtime_verifier_pin_passed": object_values_all_true(agreement_manifest.get("checks")),
         "local_bip340_tcb_review_passed": json_pointer_str(tcb, "/status").is_some_and(|status| status.starts_with("passed_local_review")),
+        "external_attestation_templates_current": json_pointer_str(&attestation_templates, "/status") == Some("passed"),
+        "security_audit_coverage_passed": json_pointer_str(&security_audit_coverage, "/status") == Some("passed"),
         "required_docs_present": object_values_all_true(Some(&docs)),
     });
     let local_passed = object_values_all_true(Some(&local_checks));
@@ -994,6 +1401,8 @@ fn validate_profile_certification(input: ProfileCertificationInputs<'_>) -> Resu
         "wallet_vectors": wallet_detail,
         "invariant_matrix": invariant_matrix,
         "live_devnet": live_evidence,
+        "attestation_templates": attestation_templates,
+        "security_audit_coverage": security_audit_coverage,
         "docs": docs,
         "design_boundary": {
             "agreement_calls_core_runtime": false,
@@ -1222,6 +1631,110 @@ fn validate_external_review(repo_root: &Path, rel_path: &str, artifact_hash: Opt
     }))
 }
 
+fn validate_attestation_templates(repo_root: &Path, artifact_hash: Option<&str>, source_tree_hash: Option<&str>) -> Result<Value> {
+    let public_path = repo_root.join(PUBLIC_CELLDEP_ATTESTATION_TEMPLATE);
+    let external_path = repo_root.join(EXTERNAL_TCB_ATTESTATION_TEMPLATE);
+    let public_payload = if public_path.is_file() { Some(json_load_path(repo_root, &public_path)?) } else { None };
+    let external_payload = if external_path.is_file() { Some(json_load_path(repo_root, &external_path)?) } else { None };
+    let public = public_payload.as_ref().unwrap_or(&Value::Null);
+    let external = external_payload.as_ref().unwrap_or(&Value::Null);
+    let public_verifier = public.get("runtime_verifier").unwrap_or(&Value::Null);
+    let checks = json!({
+        "public_template_present": public_path.is_file(),
+        "external_template_present": external_path.is_file(),
+        "public_schema": json_pointer_str(public, "/schema") == Some("novaseal-public-shared-cell-dep-attestation-v0.1"),
+        "external_schema": json_pointer_str(external, "/schema") == Some("novaseal-bip340-external-tcb-review-attestation-v0.1"),
+        "public_template_network_not_local_devnet": json_pointer_str(public, "/network").is_some_and(|network| !network.is_empty() && network != "local-devnet"),
+        "public_artifact_hash_matches_current_tcb": normalize_hex(json_pointer_str(public_verifier, "/artifact_hash")).as_deref() == artifact_hash,
+        "external_artifact_hash_matches_current_tcb": normalize_hex(json_pointer_str(external, "/artifact_hash")).as_deref() == artifact_hash,
+        "external_source_tree_hash_matches_current_tcb": normalize_hex(json_pointer_str(external, "/source_tree_sha256")).as_deref() == source_tree_hash,
+        "public_verifier_id": json_pointer_str(public_verifier, "/verifier_id") == Some("btc.bip340.v0"),
+        "external_verifier_id": json_pointer_str(external, "/verifier_id") == Some("btc.bip340.v0"),
+        "public_ipc_abi": json_pointer_str(public_verifier, "/ipc_abi") == Some("cellscript-btc-bip340-ipc-v0"),
+        "external_ipc_abi": json_pointer_str(external, "/ipc_abi") == Some("cellscript-btc-bip340-ipc-v0"),
+    });
+    Ok(json!({
+        "status": if object_values_all_true(Some(&checks)) { "passed" } else { "failed" },
+        "expected_artifact_hash": artifact_hash,
+        "expected_source_tree_sha256": source_tree_hash,
+        "checks": checks,
+        "templates": {
+            "public_shared_cell_dep": rel(repo_root, &public_path),
+            "external_bip340_tcb_review": rel(repo_root, &external_path),
+        },
+    }))
+}
+
+fn validate_security_audit_coverage(
+    repo_root: &Path,
+    core_security: &Value,
+    invariant_matrix: &Value,
+    live_evidence: &Value,
+    tcb: &Value,
+    attestation_templates: &Value,
+) -> Result<Value> {
+    let agreement_security = std::fs::read_to_string(repo_root.join(AGREEMENT_ROOT).join("docs/SECURITY.md")).unwrap_or_default();
+    let agreement_audit = std::fs::read_to_string(repo_root.join(AGREEMENT_ROOT).join("docs/AUDIT_STATUS.md")).unwrap_or_default();
+    let riscv_shell_doc = std::fs::read_to_string(repo_root.join(CORE_ROOT).join("docs/RISCV_VERIFIER_SHELL.md")).unwrap_or_default();
+    let riscv_main = std::fs::read_to_string(repo_root.join(VERIFIER_ROOT).join("../novaseal_btc_verifier_riscv/src/main.rs"))
+        .or_else(|_| std::fs::read_to_string(repo_root.join(CORE_ROOT).join("verifier/novaseal_btc_verifier_riscv/src/main.rs")))
+        .unwrap_or_default();
+    let unsafe_hits = tcb.pointer("/source_inventory/unsafe_hits").and_then(Value::as_array).cloned().unwrap_or_default();
+    let review_hits = tcb.pointer("/source_inventory/review_hits").and_then(Value::as_array).cloned().unwrap_or_default();
+    let unsafe_surface_isolated = unsafe_hits.iter().all(|hit| {
+        json_pointer_str(hit, "/path").is_some_and(|path| {
+            path.ends_with("Cargo.toml")
+                || path == "proposals/novaseal/v0-mvp-skeleton/verifier/novaseal_btc_verifier_riscv/src/main.rs"
+        })
+    });
+    let unsafe_block_count = riscv_main.matches("unsafe {").count();
+    let safety_comment_count = riscv_main.matches("// SAFETY:").count();
+    let local_tcb_gates = tcb.get("local_review_gates").and_then(Value::as_array).cloned().unwrap_or_default();
+    let local_tcb_gates_passed =
+        !local_tcb_gates.is_empty() && local_tcb_gates.iter().all(|gate| json_pointer_str(gate, "/status") == Some("passed"));
+    let checks = json!({
+        "agreement_security_sections_present": agreement_security.contains("## Implemented Guards")
+            && agreement_security.contains("## Not Implemented")
+            && agreement_security.contains("## Risk Posture"),
+        "agreement_audit_status_sections_present": agreement_audit.contains("## Claim Classification")
+            && agreement_audit.contains("## Fixture Honesty")
+            && agreement_audit.contains("## Production Statement Boundary"),
+        "core_authority_binding_security_passed": json_pointer_str(core_security, "/status") == Some("passed"),
+        "agreement_invariant_matrix_passed": json_pointer_str(invariant_matrix, "/status") == Some("passed"),
+        "live_negative_cases_rejected": json_pointer_bool(live_evidence, "/checks/negative_cases_rejected"),
+        "live_valid_paths_exercised": json_pointer_bool(live_evidence, "/checks/valid_originate_repay_claim_live"),
+        "local_bip340_tcb_review_passed": json_pointer_str(tcb, "/status").is_some_and(|status| status.starts_with("passed_local_review")),
+        "local_bip340_tcb_gates_passed": local_tcb_gates_passed,
+        "tcb_source_inventory_present": json_pointer_str(tcb, "/source_inventory/source_tree_sha256").is_some()
+            && json_pointer_i64(tcb, "/source_inventory/total_files").is_some(),
+        "tcb_review_hits_empty": review_hits.is_empty(),
+        "unsafe_boundary_documented": riscv_shell_doc.contains("## Unsafe Boundary")
+            && riscv_shell_doc.contains("syscall register ABI only"),
+        "unsafe_surface_isolated": unsafe_surface_isolated,
+        "unsafe_blocks_have_safety_comments": unsafe_block_count > 0 && safety_comment_count >= unsafe_block_count,
+        "external_attestation_templates_current": json_pointer_str(attestation_templates, "/status") == Some("passed"),
+        "production_blockers_explicit": agreement_security.contains("public/shared CellDep")
+            && agreement_security.contains("external BIP340")
+            && agreement_audit.contains("external production attestations still required"),
+    });
+    Ok(json!({
+        "schema": "novaseal-security-audit-coverage-v0.1",
+        "status": if object_values_all_true(Some(&checks)) { "passed" } else { "failed" },
+        "checks": checks,
+        "unsafe_inventory": {
+            "unsafe_hit_count": unsafe_hits.len(),
+            "review_hit_count": review_hits.len(),
+            "unsafe_block_count": unsafe_block_count,
+            "safety_comment_count": safety_comment_count,
+            "boundary": "RISC-V verifier shell syscall ABI only; no raw pointer dereference, transmute, mutable static, or C FFI memory access is accepted by this local audit gate.",
+        },
+        "residual_production_blockers": [
+            "public/shared CellDep pinning attestation",
+            "external BIP340 runtime verifier TCB review attestation",
+        ],
+    }))
+}
+
 fn live_verifier_facts(repo_root: &Path, rel_path: &str) -> Result<Value> {
     let payload = json_load(repo_root, rel_path)?;
     let verifier = payload.pointer("/artifacts/verifier").cloned().unwrap_or(Value::Null);
@@ -1439,6 +1952,8 @@ fn stateful_acceptance_passed(stateful_acceptance: &Value) -> bool {
         && json_pointer_i64(stateful_acceptance, "/blocker_count") == Some(0)
         && json_pointer_bool(stateful_acceptance, "/live_devnet_rpc_executed")
         && json_pointer_bool(stateful_acceptance, "/stateful_lifecycle_executed")
+        && json_pointer_str(stateful_acceptance, "/profile_coverage/status") == Some("passed")
+        && json_pointer_str(stateful_acceptance, "/business_scenario_coverage/status") == Some("passed")
 }
 
 fn object_values_all_true(value: Option<&Value>) -> bool {
@@ -1561,5 +2076,189 @@ mod tests {
 
         assert!(json_pointer_bool(&parsed, "/valid"));
         assert!(placeholder_hash(json_pointer_str(&parsed, "/tx_hash")));
+    }
+
+    #[test]
+    fn attestation_templates_must_match_current_tcb_hashes() {
+        let temp = tempfile::tempdir().unwrap();
+        let proofs = temp.path().join("proposals/novaseal/v0-mvp-skeleton/proofs");
+        std::fs::create_dir_all(&proofs).unwrap();
+        let artifact_hash = format!("0x{}", "aa".repeat(32));
+        let source_tree_hash = format!("0x{}", "bb".repeat(32));
+        std::fs::write(
+            proofs.join("public_shared_cell_dep_attestation.template.json"),
+            serde_json::to_vec_pretty(&json!({
+                "schema": "novaseal-public-shared-cell-dep-attestation-v0.1",
+                "status": "attested",
+                "network": "testnet",
+                "runtime_verifier": {
+                    "verifier_id": "btc.bip340.v0",
+                    "ipc_abi": "cellscript-btc-bip340-ipc-v0",
+                    "artifact_hash": artifact_hash,
+                },
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        std::fs::write(
+            proofs.join("bip340_external_tcb_review_attestation.template.json"),
+            serde_json::to_vec_pretty(&json!({
+                "schema": "novaseal-bip340-external-tcb-review-attestation-v0.1",
+                "status": "accepted",
+                "verifier_id": "btc.bip340.v0",
+                "ipc_abi": "cellscript-btc-bip340-ipc-v0",
+                "artifact_hash": artifact_hash,
+                "source_tree_sha256": source_tree_hash,
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let passed = validate_attestation_templates(temp.path(), Some(&artifact_hash), Some(&source_tree_hash)).unwrap();
+        let failed =
+            validate_attestation_templates(temp.path(), Some(&format!("0x{}", "cc".repeat(32))), Some(&source_tree_hash)).unwrap();
+
+        assert_eq!(json_pointer_str(&passed, "/status"), Some("passed"));
+        assert_eq!(json_pointer_str(&failed, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&failed, "/checks/public_artifact_hash_matches_current_tcb"));
+        assert!(!json_pointer_bool(&failed, "/checks/external_artifact_hash_matches_current_tcb"));
+    }
+
+    #[test]
+    fn stateful_acceptance_requires_profile_and_business_coverage() {
+        let mut report = json!({
+            "status": "passed",
+            "blocker_count": 0,
+            "live_devnet_rpc_executed": true,
+            "stateful_lifecycle_executed": true,
+            "profile_coverage": { "status": "passed" },
+            "business_scenario_coverage": { "status": "passed" },
+        });
+
+        assert!(stateful_acceptance_passed(&report));
+
+        report["business_scenario_coverage"]["status"] = Value::String("failed".to_string());
+        assert!(!stateful_acceptance_passed(&report));
+    }
+
+    #[test]
+    fn security_audit_coverage_requires_docs_tcb_and_live_negative_evidence() {
+        let temp = tempfile::tempdir().unwrap();
+        let agreement_docs = temp.path().join(AGREEMENT_ROOT).join("docs");
+        let core_docs = temp.path().join(CORE_ROOT).join("docs");
+        let riscv_src = temp.path().join(CORE_ROOT).join("verifier/novaseal_btc_verifier_riscv/src");
+        std::fs::create_dir_all(&agreement_docs).unwrap();
+        std::fs::create_dir_all(&core_docs).unwrap();
+        std::fs::create_dir_all(&riscv_src).unwrap();
+        std::fs::write(
+            agreement_docs.join("SECURITY.md"),
+            "## Implemented Guards\npublic/shared CellDep\nexternal BIP340\n## Not Implemented\n## Risk Posture\n",
+        )
+        .unwrap();
+        std::fs::write(
+            agreement_docs.join("AUDIT_STATUS.md"),
+            "## Claim Classification\n## Fixture Honesty\nexternal production attestations still required\n## Production Statement Boundary\n",
+        )
+        .unwrap();
+        std::fs::write(core_docs.join("RISCV_VERIFIER_SHELL.md"), "## Unsafe Boundary\nsyscall register ABI only\n").unwrap();
+        std::fs::write(
+            riscv_src.join("main.rs"),
+            "// SAFETY: test syscall boundary\nunsafe {\n}\n// SAFETY: second syscall boundary\nunsafe {\n}\n",
+        )
+        .unwrap();
+
+        let core_security = json!({ "status": "passed" });
+        let invariant_matrix = json!({ "status": "passed" });
+        let live_evidence = json!({
+            "checks": {
+                "negative_cases_rejected": true,
+                "valid_originate_repay_claim_live": true,
+            }
+        });
+        let tcb = json!({
+            "status": "passed_local_review_external_attestation_required",
+            "source_inventory": {
+                "source_tree_sha256": format!("0x{}", "11".repeat(32)),
+                "total_files": 3,
+                "unsafe_hits": [
+                    { "path": "proposals/novaseal/v0-mvp-skeleton/verifier/novaseal_btc_verifier_riscv/src/main.rs" }
+                ],
+                "review_hits": [],
+            },
+            "local_review_gates": [
+                { "name": "reference_bip340_vectors", "status": "passed" }
+            ],
+        });
+        let attestation_templates = json!({ "status": "passed" });
+
+        let passed = validate_security_audit_coverage(
+            temp.path(),
+            &core_security,
+            &invariant_matrix,
+            &live_evidence,
+            &tcb,
+            &attestation_templates,
+        )
+        .unwrap();
+        let mut failed_tcb = tcb.clone();
+        failed_tcb["source_inventory"]["review_hits"] = json!([{ "path": "todo.rs", "line": 1 }]);
+        let failed = validate_security_audit_coverage(
+            temp.path(),
+            &core_security,
+            &invariant_matrix,
+            &live_evidence,
+            &failed_tcb,
+            &attestation_templates,
+        )
+        .unwrap();
+
+        assert_eq!(json_pointer_str(&passed, "/status"), Some("passed"));
+        assert_eq!(json_pointer_str(&failed, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&failed, "/checks/tcb_review_hits_empty"));
+    }
+
+    #[test]
+    fn v1_readiness_requires_all_planned_profiles_before_external_only_status() {
+        let profile_certification = json!({
+            "status": "passed",
+            "production_statement_eligible": false,
+            "production_statement_blockers": [
+                "public_shared_cell_dep_attested",
+                "external_bip340_tcb_review_attested",
+            ],
+            "local_checks": {
+                "conformance_gate_passed": true,
+                "wallet_vector_detail_passed": true,
+                "local_bip340_tcb_review_passed": true,
+            },
+            "security_audit_coverage": { "status": "passed" },
+        });
+        let stateful_acceptance = json!({
+            "status": "passed",
+            "blocker_count": 0,
+            "live_devnet_rpc_executed": true,
+            "stateful_lifecycle_executed": true,
+            "profile_coverage": { "status": "passed" },
+            "business_scenario_coverage": { "status": "passed" },
+        });
+        let local_gates = vec![
+            gate("public_shared_cell_dep_pinning_attestation", "external_required", PUBLIC_CELLDEP_ATTESTATION, Value::Null),
+            gate(
+                "external_bip340_runtime_verifier_tcb_review_attestation",
+                "external_required",
+                EXTERNAL_TCB_ATTESTATION,
+                Value::Null,
+            ),
+        ];
+
+        let local = build_v1_readiness(&profile_certification, &stateful_acceptance, &local_gates, true, false);
+        assert_eq!(json_pointer_str(&local, "/status"), Some("planned_profiles_incomplete"));
+        assert!(!json_pointer_bool(&local, "/local_v1_ready"));
+        assert!(!json_pointer_bool(&local, "/production_ready"));
+        assert_eq!(json_pointer_str(&local, "/dimensions/1/status"), Some("failed"));
+        assert_eq!(json_pointer_str(&local, "/planned_profile_matrix/status"), Some("incomplete"));
+        let missing = json_array_strings(&local, "/planned_profile_matrix/missing");
+        assert!(missing.iter().any(|id| id == "object_profile_fungible_xudt"));
+        assert!(missing.iter().any(|id| id == "seal_profile_btc_utxo_seal"));
     }
 }
