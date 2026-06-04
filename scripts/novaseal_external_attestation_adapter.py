@@ -58,7 +58,11 @@ def public_celldep_case(template: dict[str, Any], tcb: dict[str, Any]) -> dict[s
             "network",
             "attested_at",
             "attestor",
+            "release.package",
+            "release.version",
             "release.manifest_commit",
+            "runtime_verifier.verifier_id",
+            "runtime_verifier.ipc_abi",
             "runtime_verifier.out_point",
             "runtime_verifier.data_hash",
             "runtime_verifier.dep_type",
@@ -84,7 +88,7 @@ def public_celldep_case(template: dict[str, Any], tcb: dict[str, Any]) -> dict[s
         "verifier_id_current": request["verifier_id"] == "btc.bip340.v0",
         "ipc_abi_current": request["ipc_abi"] == "cellscript-btc-bip340-ipc-v0",
         "artifact_hash_matches_tcb": request["template_artifact_hash"] == request["expected_artifact_hash"],
-        "required_fields_complete": len(request["required_public_fields"]) == 12,
+        "required_fields_complete": len(request["required_public_fields"]) == 16,
     }
     return {
         "name": "public_shared_cell_dep_attestation",
@@ -109,6 +113,7 @@ def external_tcb_case(template: dict[str, Any], tcb: dict[str, Any]) -> dict[str
             "verifier_id",
             "ipc_abi",
             "artifact_hash",
+            "artifact_hash_algorithm",
             "source_tree_sha256",
             "report_uri",
             "request_handoff.bundle",
@@ -119,6 +124,8 @@ def external_tcb_case(template: dict[str, Any], tcb: dict[str, Any]) -> dict[str
         "ipc_abi": template.get("ipc_abi"),
         "expected_artifact_hash": runtime.get("artifact_hash"),
         "template_artifact_hash": template.get("artifact_hash"),
+        "expected_artifact_hash_algorithm": runtime.get("artifact_hash_algorithm"),
+        "template_artifact_hash_algorithm": template.get("artifact_hash_algorithm"),
         "expected_source_tree_sha256": source.get("source_tree_sha256"),
         "template_source_tree_sha256": template.get("source_tree_sha256"),
         "required_status": "accepted",
@@ -130,11 +137,13 @@ def external_tcb_case(template: dict[str, Any], tcb: dict[str, Any]) -> dict[str
         "ipc_abi_current": request["ipc_abi"] == "cellscript-btc-bip340-ipc-v0",
         "artifact_hash_matches_tcb": is_present(request["expected_artifact_hash"])
         and request["template_artifact_hash"] == request["expected_artifact_hash"],
-        "artifact_hash_algorithm_current": template.get("artifact_hash_algorithm") == "ckb-blake2b256",
+        "artifact_hash_algorithm_current": template.get("artifact_hash_algorithm") == "sha256",
+        "artifact_hash_algorithm_matches_tcb": is_present(request["expected_artifact_hash_algorithm"])
+        and request["template_artifact_hash_algorithm"] == request["expected_artifact_hash_algorithm"],
         "source_tree_hash_matches_tcb": is_present(request["expected_source_tree_sha256"])
         and request["template_source_tree_sha256"] == request["expected_source_tree_sha256"],
         "review_scope_present": bool(template.get("review_scope")),
-        "required_fields_complete": len(request["required_public_fields"]) == 11,
+        "required_fields_complete": len(request["required_public_fields"]) == 12,
     }
     return {
         "name": "external_bip340_tcb_review_attestation",

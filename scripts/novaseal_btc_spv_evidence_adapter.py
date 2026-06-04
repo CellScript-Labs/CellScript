@@ -59,9 +59,15 @@ def profile_cases(service_builder: dict[str, Any], template: dict[str, Any]) -> 
             "minimum_confirmations": template_case.get("minimum_confirmations") if template_case else 6,
             "required_public_fields": [
                 "network",
+                "generated_at",
+                "evidence_provider",
+                "required_profiles",
+                "profile",
+                "scenario",
                 "btc_txid",
                 "btc_block_hash",
                 "spv_proof_hash",
+                "minimum_confirmations",
                 "confirmations",
                 "spv_client_cell_dep.out_point",
                 "spv_client_cell_dep.data_hash",
@@ -87,7 +93,7 @@ def profile_cases(service_builder: dict[str, Any], template: dict[str, Any]) -> 
             "minimum_confirmations_at_least_six": request["minimum_confirmations"] >= 6,
             "service_builder_hashes_present": bool(request["service_builder_tx_skeleton_hash"])
             and bool(request["service_builder_receipt_binding_hash"]),
-            "required_public_fields_complete": len(request["required_public_fields"]) == 15,
+            "required_public_fields_complete": len(request["required_public_fields"]) == 21,
         }
         cases.append(
             {

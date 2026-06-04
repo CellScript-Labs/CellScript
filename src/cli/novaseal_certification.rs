@@ -251,6 +251,62 @@ const EXPECTED_PUBLIC_BTC_SPV_CASE_FIELDS: &[&str] = &[
 ];
 const EXPECTED_PUBLIC_BTC_SPV_CELLDEP_FIELDS: &[&str] = &["data_hash", "dep_type", "hash_type", "out_point"];
 const EXPECTED_PUBLIC_BTC_SPV_SOURCE_SERVICE_FIELDS: &[&str] = &["commit", "name", "report_hash"];
+const EXPECTED_BTC_SPV_ADAPTER_PUBLIC_FIELDS: &[&str] = &[
+    "network",
+    "generated_at",
+    "evidence_provider",
+    "required_profiles",
+    "profile",
+    "scenario",
+    "btc_txid",
+    "btc_block_hash",
+    "spv_proof_hash",
+    "minimum_confirmations",
+    "confirmations",
+    "spv_client_cell_dep.out_point",
+    "spv_client_cell_dep.data_hash",
+    "spv_client_cell_dep.dep_type",
+    "spv_client_cell_dep.hash_type",
+    "source_service.name",
+    "source_service.commit",
+    "source_service.report_hash",
+    "request_handoff.bundle",
+    "request_handoff.bundle_hash",
+    "request_handoff.group",
+];
+const EXPECTED_PUBLIC_BTC_SPV_HANDOFF_FIELDS: &[&str] = EXPECTED_BTC_SPV_ADAPTER_PUBLIC_FIELDS;
+const EXPECTED_PUBLIC_CELLDEP_REQUIRED_FIELDS: &[&str] = &[
+    "network",
+    "attested_at",
+    "attestor",
+    "release.package",
+    "release.version",
+    "release.manifest_commit",
+    "runtime_verifier.verifier_id",
+    "runtime_verifier.ipc_abi",
+    "runtime_verifier.out_point",
+    "runtime_verifier.data_hash",
+    "runtime_verifier.dep_type",
+    "runtime_verifier.hash_type",
+    "runtime_verifier.artifact_hash",
+    "request_handoff.bundle",
+    "request_handoff.bundle_hash",
+    "request_handoff.group",
+];
+const EXPECTED_EXTERNAL_TCB_REQUIRED_FIELDS: &[&str] = &[
+    "reviewer",
+    "review_date",
+    "review_scope",
+    "verifier_id",
+    "ipc_abi",
+    "artifact_hash",
+    "artifact_hash_algorithm",
+    "source_tree_sha256",
+    "report_uri",
+    "request_handoff.bundle",
+    "request_handoff.bundle_hash",
+    "request_handoff.group",
+];
 
 const EXPECTED_FIBER_NODE_EXECUTION_SCHEMA: &str = "novaseal-fiber-node-execution-v0.3";
 const EXPECTED_FIBER_REPO_ORIGIN: &str = "https://github.com/nervosnetwork/fiber.git";
@@ -2510,8 +2566,10 @@ fn validate_profile_certification(input: ProfileCertificationInputs<'_>) -> Resu
             })
         });
     let artifact_hash = normalize_hex(json_pointer_str(tcb, "/runtime_artifact/artifact_hash"));
+    let artifact_hash_algorithm = json_pointer_str(tcb, "/runtime_artifact/artifact_hash_algorithm");
     let source_tree_hash = normalize_hex(json_pointer_str(tcb, "/source_inventory/source_tree_sha256"));
-    let attestation_templates = validate_attestation_templates(repo_root, artifact_hash.as_deref(), source_tree_hash.as_deref())?;
+    let attestation_templates =
+        validate_attestation_templates(repo_root, artifact_hash.as_deref(), artifact_hash_algorithm, source_tree_hash.as_deref())?;
     let security_audit_coverage =
         validate_security_audit_coverage(repo_root, core_security, &invariant_matrix, &live_evidence, tcb, &attestation_templates)?;
     let docs = json!({
@@ -2861,25 +2919,8 @@ fn validate_btc_spv_evidence_adapter_detail(report: &Value) -> Value {
         let case = matches.first().cloned().unwrap_or(Value::Null);
         let required_fields = json_array_strings(&case, "/request/required_public_fields");
         let external_inputs = json_array_strings(&case, "/request/required_external_inputs");
-        let expected_required_public_fields = [
-            "network",
-            "btc_txid",
-            "btc_block_hash",
-            "spv_proof_hash",
-            "confirmations",
-            "spv_client_cell_dep.out_point",
-            "spv_client_cell_dep.data_hash",
-            "spv_client_cell_dep.dep_type",
-            "spv_client_cell_dep.hash_type",
-            "source_service.name",
-            "source_service.commit",
-            "source_service.report_hash",
-            "request_handoff.bundle",
-            "request_handoff.bundle_hash",
-            "request_handoff.group",
-        ];
         let required_public_fields_complete =
-            expected_required_public_fields.iter().all(|field| required_fields.iter().any(|actual| actual == field));
+            EXPECTED_BTC_SPV_ADAPTER_PUBLIC_FIELDS.iter().all(|field| required_fields.iter().any(|actual| actual == field));
         let checks = json!({
             "exactly_one_case": matches.len() == 1,
             "status_passed": json_pointer_str(&case, "/status") == Some("passed"),
@@ -2892,7 +2933,7 @@ fn validate_btc_spv_evidence_adapter_detail(report: &Value) -> Value {
             "service_builder_receipt_binding_hash": json_pointer_str(&case, "/request/service_builder_receipt_binding_hash").is_some_and(is_hex32),
             "template_case_hash": json_pointer_str(&case, "/request/template_case_hash").is_some_and(is_hex32),
             "required_public_fields_complete": required_public_fields_complete,
-            "required_public_fields_exact": exact_string_set(&required_fields, &expected_required_public_fields),
+            "required_public_fields_exact": exact_string_set(&required_fields, EXPECTED_BTC_SPV_ADAPTER_PUBLIC_FIELDS),
             "fixture_checks_passed": object_values_all_true(case.get("checks")),
         });
         case_checks.insert((*expected_profile).to_string(), checks);
@@ -2953,34 +2994,9 @@ fn validate_external_attestation_adapter_detail(report: &Value) -> Value {
         let case = matches.first().cloned().unwrap_or(Value::Null);
         let required_fields = json_array_strings(&case, "/request/required_public_fields");
         let expected_required_fields = if name == "public_shared_cell_dep_attestation" {
-            vec![
-                "network",
-                "attested_at",
-                "attestor",
-                "release.manifest_commit",
-                "runtime_verifier.out_point",
-                "runtime_verifier.data_hash",
-                "runtime_verifier.dep_type",
-                "runtime_verifier.hash_type",
-                "runtime_verifier.artifact_hash",
-                "request_handoff.bundle",
-                "request_handoff.bundle_hash",
-                "request_handoff.group",
-            ]
+            EXPECTED_PUBLIC_CELLDEP_REQUIRED_FIELDS
         } else {
-            vec![
-                "reviewer",
-                "review_date",
-                "review_scope",
-                "verifier_id",
-                "ipc_abi",
-                "artifact_hash",
-                "source_tree_sha256",
-                "report_uri",
-                "request_handoff.bundle",
-                "request_handoff.bundle_hash",
-                "request_handoff.group",
-            ]
+            EXPECTED_EXTERNAL_TCB_REQUIRED_FIELDS
         };
         let checks = json!({
             "exactly_one_case": matches.len() == 1,
@@ -2992,8 +3008,14 @@ fn validate_external_attestation_adapter_detail(report: &Value) -> Value {
             "ipc_abi_current": json_pointer_str(&case, "/request/ipc_abi") == Some("cellscript-btc-bip340-ipc-v0"),
             "required_status_matches": json_pointer_str(&case, "/request/required_status") == Some(required_status),
             "required_fields_complete": expected_required_fields.iter().all(|field| required_fields.iter().any(|actual| actual == field)),
-            "required_fields_exact": exact_string_set(&required_fields, &expected_required_fields),
+            "required_fields_exact": exact_string_set(&required_fields, expected_required_fields),
             "artifact_hash_present": json_pointer_str(&case, "/request/expected_artifact_hash").is_some_and(is_hex32),
+            "artifact_hash_algorithm_matches_tcb": name == "public_shared_cell_dep_attestation"
+                || (
+                    json_pointer_str(&case, "/request/expected_artifact_hash_algorithm") == Some("sha256")
+                        && json_pointer_str(&case, "/request/template_artifact_hash_algorithm")
+                            == json_pointer_str(&case, "/request/expected_artifact_hash_algorithm")
+                ),
             "fixture_checks_passed": object_values_all_true(case.get("checks")),
         });
         case_checks.insert(name.to_string(), checks);
@@ -3061,45 +3083,9 @@ fn validate_external_evidence_handoff_detail(report: &Value, btc_spv_adapter: &V
         let expected_source_adapter =
             if group == "public_btc_spv_evidence" { BTC_SPV_EVIDENCE_ADAPTER } else { EXTERNAL_ATTESTATION_ADAPTER };
         let expected_required_external_fields = match group {
-            "public_btc_spv_evidence" => vec![
-                "network",
-                "btc_txid",
-                "btc_block_hash",
-                "spv_proof_hash",
-                "confirmations",
-                "spv_client_cell_dep",
-                "source_service",
-                "request_handoff.bundle",
-                "request_handoff.bundle_hash",
-                "request_handoff.group",
-            ],
-            "public_shared_cell_dep_attestation" => vec![
-                "network",
-                "attested_at",
-                "attestor",
-                "release.manifest_commit",
-                "runtime_verifier.out_point",
-                "runtime_verifier.data_hash",
-                "runtime_verifier.dep_type",
-                "runtime_verifier.hash_type",
-                "runtime_verifier.artifact_hash",
-                "request_handoff.bundle",
-                "request_handoff.bundle_hash",
-                "request_handoff.group",
-            ],
-            _ => vec![
-                "reviewer",
-                "review_date",
-                "review_scope",
-                "verifier_id",
-                "ipc_abi",
-                "artifact_hash",
-                "source_tree_sha256",
-                "report_uri",
-                "request_handoff.bundle",
-                "request_handoff.bundle_hash",
-                "request_handoff.group",
-            ],
+            "public_btc_spv_evidence" => EXPECTED_PUBLIC_BTC_SPV_HANDOFF_FIELDS,
+            "public_shared_cell_dep_attestation" => EXPECTED_PUBLIC_CELLDEP_REQUIRED_FIELDS,
+            _ => EXPECTED_EXTERNAL_TCB_REQUIRED_FIELDS,
         };
         let checks = json!({
             "exactly_one_case": matches.len() == 1,
@@ -3110,7 +3096,7 @@ fn validate_external_evidence_handoff_detail(report: &Value, btc_spv_adapter: &V
             "required_external_fields_complete": expected_required_external_fields
                 .iter()
                 .all(|field| required_external_fields.iter().any(|actual| actual == field)),
-            "required_external_fields_exact": exact_string_set(&required_external_fields, &expected_required_external_fields),
+            "required_external_fields_exact": exact_string_set(&required_external_fields, expected_required_external_fields),
             "btc_profiles_complete": group != "public_btc_spv_evidence"
                 || required_profiles == expected_btc_profiles,
             "fixture_checks_passed": object_values_all_true(case.get("checks")),
@@ -4105,7 +4091,7 @@ fn validate_external_review(
             == Some(handoff_hash.as_str()),
         "request_handoff_group": json_pointer_str(&payload, "/request_handoff/group") == Some("external_bip340_tcb_review_attestation"),
         "artifact_hash": normalize_hex(json_pointer_str(&payload, "/artifact_hash")).as_deref() == artifact_hash,
-        "artifact_hash_algorithm": json_pointer_str(&payload, "/artifact_hash_algorithm") == Some("ckb-blake2b256"),
+        "artifact_hash_algorithm": json_pointer_str(&payload, "/artifact_hash_algorithm") == Some("sha256"),
         "verifier_id": json_pointer_str(&payload, "/verifier_id") == Some("btc.bip340.v0"),
         "ipc_abi": json_pointer_str(&payload, "/ipc_abi") == Some("cellscript-btc-bip340-ipc-v0"),
         "reviewer_present": json_pointer_str(&payload, "/reviewer").is_some_and(|value| !value.is_empty()),
@@ -4122,7 +4108,12 @@ fn validate_external_review(
     }))
 }
 
-fn validate_attestation_templates(repo_root: &Path, artifact_hash: Option<&str>, source_tree_hash: Option<&str>) -> Result<Value> {
+fn validate_attestation_templates(
+    repo_root: &Path,
+    artifact_hash: Option<&str>,
+    artifact_hash_algorithm: Option<&str>,
+    source_tree_hash: Option<&str>,
+) -> Result<Value> {
     let public_path = repo_root.join(PUBLIC_CELLDEP_ATTESTATION_TEMPLATE);
     let external_path = repo_root.join(EXTERNAL_TCB_ATTESTATION_TEMPLATE);
     let btc_spv_path = repo_root.join(PUBLIC_BTC_SPV_EVIDENCE_TEMPLATE);
@@ -4160,7 +4151,8 @@ fn validate_attestation_templates(repo_root: &Path, artifact_hash: Option<&str>,
         "public_runtime_verifier_fields_exact": exact_object_keys(public_verifier, EXPECTED_PUBLIC_CELLDEP_RUNTIME_VERIFIER_FIELDS),
         "external_top_level_fields_exact": exact_object_keys(external, EXPECTED_EXTERNAL_TCB_REVIEW_ATTESTATION_FIELDS),
         "external_request_handoff_fields_exact": exact_object_keys(external_handoff, EXPECTED_EXTERNAL_REQUEST_HANDOFF_FIELDS),
-        "external_artifact_hash_algorithm": json_pointer_str(external, "/artifact_hash_algorithm") == Some("ckb-blake2b256"),
+        "external_artifact_hash_algorithm": json_pointer_str(external, "/artifact_hash_algorithm") == Some("sha256"),
+        "external_artifact_hash_algorithm_matches_current_tcb": json_pointer_str(external, "/artifact_hash_algorithm") == artifact_hash_algorithm,
         "btc_spv_top_level_fields_exact": exact_object_keys(btc_spv, EXPECTED_PUBLIC_BTC_SPV_EVIDENCE_FIELDS),
         "btc_spv_request_handoff_fields_exact": exact_object_keys(btc_spv_handoff, EXPECTED_EXTERNAL_REQUEST_HANDOFF_FIELDS),
         "btc_spv_required_profiles_exact": btc_spv_profiles == expected_btc_spv_profiles,
@@ -4176,6 +4168,7 @@ fn validate_attestation_templates(repo_root: &Path, artifact_hash: Option<&str>,
     Ok(json!({
         "status": if object_values_all_true(Some(&checks)) { "passed" } else { "failed" },
         "expected_artifact_hash": artifact_hash,
+        "expected_artifact_hash_algorithm": artifact_hash_algorithm,
         "expected_source_tree_sha256": source_tree_hash,
         "checks": checks,
         "templates": {
@@ -4729,45 +4722,9 @@ mod tests {
 
     #[test]
     fn external_evidence_handoff_rejects_stale_source_hashes_and_paths() {
-        let btc_handoff_fields = [
-            "network",
-            "btc_txid",
-            "btc_block_hash",
-            "spv_proof_hash",
-            "confirmations",
-            "spv_client_cell_dep",
-            "source_service",
-            "request_handoff.bundle",
-            "request_handoff.bundle_hash",
-            "request_handoff.group",
-        ];
-        let public_attestation_handoff_fields = [
-            "network",
-            "attested_at",
-            "attestor",
-            "release.manifest_commit",
-            "runtime_verifier.out_point",
-            "runtime_verifier.data_hash",
-            "runtime_verifier.dep_type",
-            "runtime_verifier.hash_type",
-            "runtime_verifier.artifact_hash",
-            "request_handoff.bundle",
-            "request_handoff.bundle_hash",
-            "request_handoff.group",
-        ];
-        let external_review_handoff_fields = [
-            "reviewer",
-            "review_date",
-            "review_scope",
-            "verifier_id",
-            "ipc_abi",
-            "artifact_hash",
-            "source_tree_sha256",
-            "report_uri",
-            "request_handoff.bundle",
-            "request_handoff.bundle_hash",
-            "request_handoff.group",
-        ];
+        let btc_handoff_fields = EXPECTED_PUBLIC_BTC_SPV_HANDOFF_FIELDS;
+        let public_attestation_handoff_fields = EXPECTED_PUBLIC_CELLDEP_REQUIRED_FIELDS;
+        let external_review_handoff_fields = EXPECTED_EXTERNAL_TCB_REQUIRED_FIELDS;
         let btc_spv_adapter = json!({
             "status": "passed",
             "adapter_status": "request_ready_external_evidence_required",
@@ -4868,7 +4825,7 @@ mod tests {
         assert!(!json_pointer_bool(&failed_path, "/cases/public_shared_cell_dep_attestation/source_adapter_path_matches_current"));
 
         let mut missing_required_field = report.clone();
-        missing_required_field["cases"][0]["required_external_fields"] = json!(btc_handoff_fields[..9].to_vec());
+        missing_required_field["cases"][0]["required_external_fields"] = json!(btc_handoff_fields[..20].to_vec());
         let failed_fields =
             validate_external_evidence_handoff_detail(&missing_required_field, &btc_spv_adapter, &external_attestation_adapter);
         assert_eq!(json_pointer_str(&failed_fields, "/status"), Some("failed"));
@@ -4886,33 +4843,8 @@ mod tests {
 
     #[test]
     fn external_attestation_adapter_requires_handoff_request_fields() {
-        let full_public_fields = [
-            "network",
-            "attested_at",
-            "attestor",
-            "release.manifest_commit",
-            "runtime_verifier.out_point",
-            "runtime_verifier.data_hash",
-            "runtime_verifier.dep_type",
-            "runtime_verifier.hash_type",
-            "runtime_verifier.artifact_hash",
-            "request_handoff.bundle",
-            "request_handoff.bundle_hash",
-            "request_handoff.group",
-        ];
-        let full_review_fields = [
-            "reviewer",
-            "review_date",
-            "review_scope",
-            "verifier_id",
-            "ipc_abi",
-            "artifact_hash",
-            "source_tree_sha256",
-            "report_uri",
-            "request_handoff.bundle",
-            "request_handoff.bundle_hash",
-            "request_handoff.group",
-        ];
+        let full_public_fields = EXPECTED_PUBLIC_CELLDEP_REQUIRED_FIELDS;
+        let full_review_fields = EXPECTED_EXTERNAL_TCB_REQUIRED_FIELDS;
         let report = json!({
             "schema": "novaseal-external-attestation-adapter-v0.1",
             "status": "passed",
@@ -4949,6 +4881,8 @@ mod tests {
                         "ipc_abi": "cellscript-btc-bip340-ipc-v0",
                         "required_status": "accepted",
                         "expected_artifact_hash": format!("0x{}", "11".repeat(32)),
+                        "expected_artifact_hash_algorithm": "sha256",
+                        "template_artifact_hash_algorithm": "sha256",
                         "required_public_fields": full_review_fields,
                     },
                 },
@@ -4959,10 +4893,19 @@ mod tests {
         assert_eq!(json_pointer_str(&valid, "/status"), Some("passed"));
 
         let mut missing_handoff_field = report.clone();
-        missing_handoff_field["cases"][0]["request"]["required_public_fields"] = json!(full_public_fields[..11].to_vec());
+        missing_handoff_field["cases"][0]["request"]["required_public_fields"] = json!(full_public_fields[..15].to_vec());
         let failed = validate_external_attestation_adapter_detail(&missing_handoff_field);
         assert_eq!(json_pointer_str(&failed, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&failed, "/cases/public_shared_cell_dep_attestation/required_fields_complete"));
+
+        let mut mismatched_algorithm = report.clone();
+        mismatched_algorithm["cases"][1]["request"]["template_artifact_hash_algorithm"] = json!("ckb-blake2b256");
+        let failed_algorithm = validate_external_attestation_adapter_detail(&mismatched_algorithm);
+        assert_eq!(json_pointer_str(&failed_algorithm, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(
+            &failed_algorithm,
+            "/cases/external_bip340_tcb_review_attestation/artifact_hash_algorithm_matches_tcb"
+        ));
 
         let mut unexpected_public_field = report;
         let mut extended_public_fields = full_public_fields.to_vec();
@@ -4975,23 +4918,7 @@ mod tests {
 
     #[test]
     fn btc_spv_adapter_requires_exact_public_field_contract() {
-        let full_public_fields = [
-            "network",
-            "btc_txid",
-            "btc_block_hash",
-            "spv_proof_hash",
-            "confirmations",
-            "spv_client_cell_dep.out_point",
-            "spv_client_cell_dep.data_hash",
-            "spv_client_cell_dep.dep_type",
-            "spv_client_cell_dep.hash_type",
-            "source_service.name",
-            "source_service.commit",
-            "source_service.report_hash",
-            "request_handoff.bundle",
-            "request_handoff.bundle_hash",
-            "request_handoff.group",
-        ];
+        let full_public_fields = EXPECTED_BTC_SPV_ADAPTER_PUBLIC_FIELDS;
         let report = json!({
             "schema": "novaseal-btc-spv-evidence-adapter-v0.1",
             "status": "passed",
@@ -5085,7 +5012,7 @@ mod tests {
                 "verifier_id": "btc.bip340.v0",
                 "ipc_abi": "cellscript-btc-bip340-ipc-v0",
                 "artifact_hash": artifact_hash,
-                "artifact_hash_algorithm": "ckb-blake2b256",
+                "artifact_hash_algorithm": "sha256",
                 "source_tree_sha256": source_tree_hash,
                 "reviewer": "REPLACE_WITH_EXTERNAL_REVIEWER",
                 "review_date": "YYYY-MM-DD",
@@ -5122,9 +5049,15 @@ mod tests {
         )
         .unwrap();
 
-        let passed = validate_attestation_templates(temp.path(), Some(&artifact_hash), Some(&source_tree_hash)).unwrap();
-        let failed =
-            validate_attestation_templates(temp.path(), Some(&format!("0x{}", "cc".repeat(32))), Some(&source_tree_hash)).unwrap();
+        let passed =
+            validate_attestation_templates(temp.path(), Some(&artifact_hash), Some("sha256"), Some(&source_tree_hash)).unwrap();
+        let failed = validate_attestation_templates(
+            temp.path(),
+            Some(&format!("0x{}", "cc".repeat(32))),
+            Some("sha256"),
+            Some(&source_tree_hash),
+        )
+        .unwrap();
 
         assert_eq!(json_pointer_str(&passed, "/status"), Some("passed"));
         assert_eq!(json_pointer_str(&failed, "/status"), Some("failed"));
@@ -5139,9 +5072,22 @@ mod tests {
             serde_json::to_vec_pretty(&drifted_public_template).unwrap(),
         )
         .unwrap();
-        let failed_shape = validate_attestation_templates(temp.path(), Some(&artifact_hash), Some(&source_tree_hash)).unwrap();
+        let failed_shape =
+            validate_attestation_templates(temp.path(), Some(&artifact_hash), Some("sha256"), Some(&source_tree_hash)).unwrap();
         assert_eq!(json_pointer_str(&failed_shape, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&failed_shape, "/checks/public_runtime_verifier_fields_exact"));
+
+        drifted_public_template["runtime_verifier"].as_object_mut().unwrap().remove("unexpected_template_field");
+        std::fs::write(
+            proofs.join("public_shared_cell_dep_attestation.template.json"),
+            serde_json::to_vec_pretty(&drifted_public_template).unwrap(),
+        )
+        .unwrap();
+        let failed_algorithm =
+            validate_attestation_templates(temp.path(), Some(&artifact_hash), Some("ckb-blake2b256"), Some(&source_tree_hash))
+                .unwrap();
+        assert_eq!(json_pointer_str(&failed_algorithm, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&failed_algorithm, "/checks/external_artifact_hash_algorithm_matches_current_tcb"));
     }
 
     #[test]
@@ -5375,7 +5321,7 @@ mod tests {
             "schema": "novaseal-bip340-external-tcb-review-attestation-v0.1",
             "status": "accepted",
             "artifact_hash": artifact_hash,
-            "artifact_hash_algorithm": "ckb-blake2b256",
+            "artifact_hash_algorithm": "sha256",
             "source_tree_sha256": source_tree_hash,
             "verifier_id": "btc.bip340.v0",
             "ipc_abi": "cellscript-btc-bip340-ipc-v0",
