@@ -14,9 +14,9 @@
 
 - status: `partial_execution_passed`
 - required Fiber workflow suites present: `15/15`
-- executed Fiber workflow suites: `1/15`
-- passed Fiber workflow suites: `1/1`
-- executed suite: `invoice-ops`
+- executed Fiber workflow suites: `2/15`
+- passed Fiber workflow suites: `2/2`
+- executed suites: `invoice-ops`, `open-use-close-a-channel`
 
 Command:
 
@@ -28,23 +28,27 @@ python3 scripts/novaseal_fiber_node_experiments.py --pretty --run-suite invoice-
 
 The run started a local CKB dev chain, built Fiber `fnn`, started three Fiber
 nodes, waited for ports `8344`, `21714`, `8345`, `21715`, `8346`, and `21716`,
-then ran Bruno `e2e/invoice-ops`.
+then ran Bruno `e2e/invoice-ops` and `e2e/open-use-close-a-channel`.
 
 Observed Bruno result:
 
-- requests: `5/5` passed
-- assertions: `10/10` passed
-- invoice generation: passed
-- duplicate invoice rejection: passed
-- invoice decode: passed
-- invoice lookup: passed
-- invoice cancellation: passed
+- `invoice-ops`: `5/5` requests passed, `10/10` assertions passed
+- `open-use-close-a-channel`: `22/22` requests passed, `40/40` assertions passed
+
+Covered live paths:
+
+- invoice generation, duplicate rejection, decode, lookup, and cancellation
+- single-channel connection/open flow
+- TLC add/remove validation paths
+- cooperative shutdown
+- closed-channel state check after generated blocks
 
 ## Boundary
 
-This is real Fiber-node execution evidence for the invoice workflow only. It
+This is real Fiber-node execution evidence for the invoice workflow and the
+basic channel lifecycle workflow. It
 does not complete NovaSeal's external Fiber requirement. Full coverage still
 requires all mapped Fiber suites in `scripts/novaseal_fiber_node_experiments.py`
-to execute and pass, including channel lifecycle, router payments, UDT channel
-flows, force-close/watchtower workflows, external funding, and cross-chain hub
-paths.
+to execute and pass, including multi-hop channel transfers, router payments,
+UDT channel flows, force-close/watchtower workflows, external funding, and
+cross-chain hub paths.

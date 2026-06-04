@@ -16,6 +16,7 @@ import argparse
 import json
 import os
 import pathlib
+import re
 import shutil
 import signal
 import subprocess
@@ -249,13 +250,58 @@ def write_text(path: pathlib.Path, value: str) -> None:
     path.write_text(value, encoding="utf-8")
 
 
+def previous_executions(output: pathlib.Path) -> dict[str, dict[str, Any]]:
+    if not output.is_file():
+        return {}
+    try:
+        report = json.loads(output.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+    if report.get("schema") != SCHEMA:
+        return {}
+    executions: dict[str, dict[str, Any]] = {}
+    for workflow in report.get("workflows", []):
+        if not isinstance(workflow, dict):
+            continue
+        suite = workflow.get("suite")
+        execution = workflow.get("execution")
+        if isinstance(suite, str) and isinstance(execution, dict):
+            executions[suite] = execution
+    return executions
+
+
 def cleanup_fiber_processes(fiber_repo: pathlib.Path) -> None:
     patterns = [
-        r"\.\./\.\./target/.*/fnn -d [123]",
-        rf"ckb run -C {fiber_repo / 'tests' / 'deploy' / 'node-data'}",
+        re.compile(r"\.\./\.\./target/[^ ]*/fnn -d [123](?:\s|$)"),
+        re.compile(rf"ckb run -C {re.escape(str(fiber_repo / 'tests' / 'deploy' / 'node-data'))}"),
     ]
-    for pattern in patterns:
-        subprocess.run(["pkill", "-f", pattern], text=True, capture_output=True, check=False)
+    completed = subprocess.run(["ps", "-axo", "pid=,command="], text=True, capture_output=True, check=False)
+    matched_pids: list[int] = []
+    for line in completed.stdout.splitlines():
+        fields = line.strip().split(maxsplit=1)
+        if len(fields) != 2:
+            continue
+        pid_text, command = fields
+        if not any(pattern.search(command) for pattern in patterns):
+            continue
+        try:
+            pid = int(pid_text)
+        except ValueError:
+            continue
+        if pid == os.getpid():
+            continue
+        try:
+            os.kill(pid, signal.SIGTERM)
+            matched_pids.append(pid)
+        except ProcessLookupError:
+            continue
+    time.sleep(2)
+    for pid in matched_pids:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            continue
+        os.kill(pid, signal.SIGKILL)
 
 
 def fiber_run_env(base_env: dict[str, str], log_dir: pathlib.Path) -> dict[str, str]:
@@ -354,7 +400,7 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
     fiber_repo = args.fiber_repo.resolve()
     run_suites = {workflow.suite for workflow in REQUIRED_WORKFLOWS} if args.run_all else set(args.run_suite or [])
 
-    executions: dict[str, dict[str, Any]] = {}
+    executions = previous_executions(args.output.resolve())
     for workflow in REQUIRED_WORKFLOWS:
         if workflow.suite in run_suites:
             executions[workflow.suite] = run_workflow(args, workflow)
