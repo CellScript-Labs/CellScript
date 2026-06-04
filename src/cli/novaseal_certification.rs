@@ -725,13 +725,19 @@ pub(crate) fn build_report(repo_root: &Path) -> Result<Value> {
     let external_evidence_handoff = json_load(repo_root, EXTERNAL_EVIDENCE_HANDOFF)?;
     let tcb = json_load(repo_root, TCB_REVIEW)?;
     let artifact_hash = normalize_hex(json_pointer_str(&tcb, "/runtime_artifact/artifact_hash"));
+    let source_tree_hash = normalize_hex(json_pointer_str(&tcb, "/source_inventory/source_tree_sha256"));
 
     let core_manifest = compare_manifest_dep(repo_root, CORE_MANIFEST, &core_live, artifact_hash.as_deref())?;
     let agreement_manifest = compare_manifest_dep(repo_root, AGREEMENT_MANIFEST, &agreement_live, artifact_hash.as_deref())?;
     let public_attestation =
         validate_public_attestation(repo_root, PUBLIC_CELLDEP_ATTESTATION, artifact_hash.as_deref(), &external_evidence_handoff)?;
-    let external_review =
-        validate_external_review(repo_root, EXTERNAL_TCB_ATTESTATION, artifact_hash.as_deref(), &external_evidence_handoff)?;
+    let external_review = validate_external_review(
+        repo_root,
+        EXTERNAL_TCB_ATTESTATION,
+        artifact_hash.as_deref(),
+        source_tree_hash.as_deref(),
+        &external_evidence_handoff,
+    )?;
     let btc_spv_evidence = validate_btc_spv_evidence(repo_root, PUBLIC_BTC_SPV_EVIDENCE, &external_evidence_handoff)?;
     let core_security = validate_core_security_source(repo_root)?;
     let agreement_conformance = validate_agreement_profile_conformance(
@@ -4129,6 +4135,7 @@ fn validate_external_review(
     repo_root: &Path,
     rel_path: &str,
     artifact_hash: Option<&str>,
+    source_tree_hash: Option<&str>,
     external_evidence_handoff: &Value,
 ) -> Result<Value> {
     let path = repo_root.join(rel_path);
@@ -4155,6 +4162,9 @@ fn validate_external_review(
         "request_handoff_group": json_pointer_str(&payload, "/request_handoff/group") == Some("external_bip340_tcb_review_attestation"),
         "artifact_hash": normalize_hex(json_pointer_str(&payload, "/artifact_hash")).as_deref() == artifact_hash,
         "artifact_hash_algorithm": json_pointer_str(&payload, "/artifact_hash_algorithm") == Some("sha256"),
+        "source_tree_sha256_valid": normalize_hex(json_pointer_str(&payload, "/source_tree_sha256")).as_deref().is_some_and(is_hex32),
+        "source_tree_sha256_non_placeholder": !placeholder_hash(normalize_hex(json_pointer_str(&payload, "/source_tree_sha256")).as_deref()),
+        "source_tree_sha256_matches_current_tcb": normalize_hex(json_pointer_str(&payload, "/source_tree_sha256")).as_deref() == source_tree_hash,
         "verifier_id": json_pointer_str(&payload, "/verifier_id") == Some("btc.bip340.v0"),
         "ipc_abi": json_pointer_str(&payload, "/ipc_abi") == Some("cellscript-btc-bip340-ipc-v0"),
         "reviewer_present": json_pointer_str(&payload, "/reviewer").is_some_and(|value| !value.is_empty()),
@@ -5678,12 +5688,17 @@ mod tests {
             serde_json::to_vec_pretty(&external_review).unwrap(),
         )
         .unwrap();
-        let review_passed = validate_external_review(temp.path(), EXTERNAL_TCB_ATTESTATION, Some(&artifact_hash), &handoff).unwrap();
+        let review_passed =
+            validate_external_review(temp.path(), EXTERNAL_TCB_ATTESTATION, Some(&artifact_hash), Some(&source_tree_hash), &handoff)
+                .unwrap();
         assert_eq!(json_pointer_str(&review_passed, "/status"), Some("passed"));
         assert!(json_pointer_bool(&review_passed, "/checks/top_level_fields_exact"));
         assert!(json_pointer_bool(&review_passed, "/checks/request_handoff_fields_exact"));
         assert!(json_pointer_bool(&review_passed, "/checks/request_handoff_bundle_hash_algorithm"));
         assert!(json_pointer_bool(&review_passed, "/checks/artifact_hash_algorithm"));
+        assert!(json_pointer_bool(&review_passed, "/checks/source_tree_sha256_valid"));
+        assert!(json_pointer_bool(&review_passed, "/checks/source_tree_sha256_non_placeholder"));
+        assert!(json_pointer_bool(&review_passed, "/checks/source_tree_sha256_matches_current_tcb"));
         assert!(json_pointer_bool(&review_passed, "/checks/reviewer_identity"));
         assert!(json_pointer_bool(&review_passed, "/checks/review_date_utc_date"));
         assert!(json_pointer_bool(&review_passed, "/checks/report_uri_https"));
@@ -5697,9 +5712,36 @@ mod tests {
         )
         .unwrap();
         let review_date_failed =
-            validate_external_review(temp.path(), EXTERNAL_TCB_ATTESTATION, Some(&artifact_hash), &handoff).unwrap();
+            validate_external_review(temp.path(), EXTERNAL_TCB_ATTESTATION, Some(&artifact_hash), Some(&source_tree_hash), &handoff)
+                .unwrap();
         assert_eq!(json_pointer_str(&review_date_failed, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&review_date_failed, "/checks/review_date_utc_date"));
+
+        let mut review_stale_source_tree = external_review.clone();
+        review_stale_source_tree["source_tree_sha256"] = json!(format!("0x{}", "cc".repeat(32)));
+        std::fs::write(
+            proofs.join("bip340_external_tcb_review_attestation.json"),
+            serde_json::to_vec_pretty(&review_stale_source_tree).unwrap(),
+        )
+        .unwrap();
+        let review_stale_source_tree_failed =
+            validate_external_review(temp.path(), EXTERNAL_TCB_ATTESTATION, Some(&artifact_hash), Some(&source_tree_hash), &handoff)
+                .unwrap();
+        assert_eq!(json_pointer_str(&review_stale_source_tree_failed, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&review_stale_source_tree_failed, "/checks/source_tree_sha256_matches_current_tcb"));
+
+        let mut review_zero_source_tree = external_review.clone();
+        review_zero_source_tree["source_tree_sha256"] = json!(format!("0x{}", "00".repeat(32)));
+        std::fs::write(
+            proofs.join("bip340_external_tcb_review_attestation.json"),
+            serde_json::to_vec_pretty(&review_zero_source_tree).unwrap(),
+        )
+        .unwrap();
+        let review_zero_source_tree_failed =
+            validate_external_review(temp.path(), EXTERNAL_TCB_ATTESTATION, Some(&artifact_hash), Some(&source_tree_hash), &handoff)
+                .unwrap();
+        assert_eq!(json_pointer_str(&review_zero_source_tree_failed, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&review_zero_source_tree_failed, "/checks/source_tree_sha256_non_placeholder"));
 
         let mut review_placeholder_reviewer = external_review.clone();
         review_placeholder_reviewer["reviewer"] = json!("REPLACE_WITH_EXTERNAL_REVIEWER");
@@ -5709,7 +5751,8 @@ mod tests {
         )
         .unwrap();
         let review_reviewer_failed =
-            validate_external_review(temp.path(), EXTERNAL_TCB_ATTESTATION, Some(&artifact_hash), &handoff).unwrap();
+            validate_external_review(temp.path(), EXTERNAL_TCB_ATTESTATION, Some(&artifact_hash), Some(&source_tree_hash), &handoff)
+                .unwrap();
         assert_eq!(json_pointer_str(&review_reviewer_failed, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&review_reviewer_failed, "/checks/reviewer_identity"));
 
@@ -5721,7 +5764,8 @@ mod tests {
         )
         .unwrap();
         let review_uri_failed =
-            validate_external_review(temp.path(), EXTERNAL_TCB_ATTESTATION, Some(&artifact_hash), &handoff).unwrap();
+            validate_external_review(temp.path(), EXTERNAL_TCB_ATTESTATION, Some(&artifact_hash), Some(&source_tree_hash), &handoff)
+                .unwrap();
         assert_eq!(json_pointer_str(&review_uri_failed, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&review_uri_failed, "/checks/report_uri_https"));
 
@@ -5729,7 +5773,9 @@ mod tests {
         review_extra["unexpected_provider_field"] = Value::String("must-fail".to_string());
         std::fs::write(proofs.join("bip340_external_tcb_review_attestation.json"), serde_json::to_vec_pretty(&review_extra).unwrap())
             .unwrap();
-        let review_failed = validate_external_review(temp.path(), EXTERNAL_TCB_ATTESTATION, Some(&artifact_hash), &handoff).unwrap();
+        let review_failed =
+            validate_external_review(temp.path(), EXTERNAL_TCB_ATTESTATION, Some(&artifact_hash), Some(&source_tree_hash), &handoff)
+                .unwrap();
         assert_eq!(json_pointer_str(&review_failed, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&review_failed, "/checks/top_level_fields_exact"));
 
@@ -5741,7 +5787,8 @@ mod tests {
         )
         .unwrap();
         let review_scope_failed =
-            validate_external_review(temp.path(), EXTERNAL_TCB_ATTESTATION, Some(&artifact_hash), &handoff).unwrap();
+            validate_external_review(temp.path(), EXTERNAL_TCB_ATTESTATION, Some(&artifact_hash), Some(&source_tree_hash), &handoff)
+                .unwrap();
         assert_eq!(json_pointer_str(&review_scope_failed, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&review_scope_failed, "/checks/review_scope_items_present"));
 
@@ -5753,7 +5800,8 @@ mod tests {
         )
         .unwrap();
         let review_handoff_failed =
-            validate_external_review(temp.path(), EXTERNAL_TCB_ATTESTATION, Some(&artifact_hash), &handoff).unwrap();
+            validate_external_review(temp.path(), EXTERNAL_TCB_ATTESTATION, Some(&artifact_hash), Some(&source_tree_hash), &handoff)
+                .unwrap();
         assert_eq!(json_pointer_str(&review_handoff_failed, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&review_handoff_failed, "/checks/request_handoff_fields_exact"));
 
@@ -5765,7 +5813,8 @@ mod tests {
         )
         .unwrap();
         let review_handoff_algorithm_failed =
-            validate_external_review(temp.path(), EXTERNAL_TCB_ATTESTATION, Some(&artifact_hash), &handoff).unwrap();
+            validate_external_review(temp.path(), EXTERNAL_TCB_ATTESTATION, Some(&artifact_hash), Some(&source_tree_hash), &handoff)
+                .unwrap();
         assert_eq!(json_pointer_str(&review_handoff_algorithm_failed, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&review_handoff_algorithm_failed, "/checks/request_handoff_bundle_hash_algorithm"));
     }
