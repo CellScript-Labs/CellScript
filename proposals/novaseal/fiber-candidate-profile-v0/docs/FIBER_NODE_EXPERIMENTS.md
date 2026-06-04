@@ -14,11 +14,11 @@
 
 - status: `partial_execution_passed`
 - required Fiber workflow suites present: `15/15`
-- executed Fiber workflow suites: `8/15`
-- passed Fiber workflow suites: `8/8`
+- executed Fiber workflow suites: `10/15`
+- passed Fiber workflow suites: `10/10`
 - executed suites: `invoice-ops`, `open-use-close-a-channel`,
-  `3-nodes-transfer`, `router-pay`, `shutdown-force`, `reestablish`, `udt`,
-  `udt-router-pay`
+  `3-nodes-transfer`, `router-pay`, `shutdown-force`, `reestablish`,
+  `external-funding-open`, `funding-tx-verification`, `udt`, `udt-router-pay`
 
 Commands:
 
@@ -49,6 +49,14 @@ python3 scripts/novaseal_fiber_node_experiments.py --pretty --run-suite reestabl
 
 PATH="/Users/arthur/RustroverProjects/ckb/target/debug:/Users/arthur/RustroverProjects/ckb-cli/target/debug:$PATH" \
 REMOVE_OLD_STATE=y \
+python3 scripts/novaseal_fiber_node_experiments.py --pretty --run-suite external-funding-open --timeout-seconds 1800
+
+PATH="/Users/arthur/RustroverProjects/ckb/target/debug:/Users/arthur/RustroverProjects/ckb-cli/target/debug:$PATH" \
+REMOVE_OLD_STATE=y \
+python3 scripts/novaseal_fiber_node_experiments.py --pretty --run-suite funding-tx-verification --timeout-seconds 1800
+
+PATH="/Users/arthur/RustroverProjects/ckb/target/debug:/Users/arthur/RustroverProjects/ckb-cli/target/debug:$PATH" \
+REMOVE_OLD_STATE=y \
 python3 scripts/novaseal_fiber_node_experiments.py --pretty --run-suite udt --timeout-seconds 1800
 
 PATH="/Users/arthur/RustroverProjects/ckb/target/debug:/Users/arthur/RustroverProjects/ckb-cli/target/debug:$PATH" \
@@ -69,6 +77,8 @@ Observed Bruno result:
 - `router-pay`: `39/39` requests passed, `50/50` assertions passed
 - `shutdown-force`: `30/30` requests passed, `39/39` assertions passed
 - `reestablish`: `9/9` requests passed, `15/15` assertions passed
+- `external-funding-open`: `22/22` requests passed, `38/38` assertions passed
+- `funding-tx-verification`: `3/3` requests passed, `7/7` assertions passed
 - `udt`: `15/15` requests passed, `27/27` assertions passed
 - `udt-router-pay`: `16/16` requests passed, `24/24` assertions passed
 
@@ -81,6 +91,8 @@ Covered live paths:
 - router payment, graph listing, status lookup, duplicate/failure coverage, and custom-record payment flow
 - force shutdown after peer disconnect, closed-channel state, and on-chain settlement trigger check
 - channel reestablishment after disconnect, followed by TLC removal and shutdown
+- external funding-script retrieval, externally funded channel open, funding transaction signing/submission, ready-state wait, balance checks, cooperative shutdown, and shutdown transaction inspection
+- funding transaction verification rejection for an unaccepted auto-opened channel
 - UDT channel open, invalid UDT channel rejection, UDT invoice/TLC flow, manual accept, two-channel listing, and shutdown
 - routed UDT payment, UDT invoice send, UDT keysend, and insufficient-liquidity rejection
 - TLC add/remove validation paths
@@ -92,8 +104,8 @@ Covered live paths:
 This is real Fiber-node execution evidence for the invoice workflow, the basic
 channel lifecycle workflow, the three-node transfer workflow, and the router
 payment, force-shutdown, reestablishment, UDT channel, and UDT routed-payment
-workflows. It
+workflows, plus external funding and funding transaction verification. It
 does not complete NovaSeal's external Fiber requirement. Full coverage still
 requires all mapped Fiber suites in `scripts/novaseal_fiber_node_experiments.py`
-to execute and pass, including force-close/watchtower workflows, external
-funding, and cross-chain hub paths.
+to execute and pass, including force-close/watchtower workflows and cross-chain
+hub paths.
