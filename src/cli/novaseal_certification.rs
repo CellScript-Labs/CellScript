@@ -4362,6 +4362,8 @@ fn validate_public_attestation(
         "release_manifest_commit_matches_handoff": json_pointer_str(&release, "/manifest_commit")
             == json_pointer_str(handoff_expected_values, "/release.manifest_commit"),
         "runtime_verifier_fields_exact": exact_object_keys(&verifier, EXPECTED_PUBLIC_CELLDEP_RUNTIME_VERIFIER_FIELDS),
+        "artifact_hash_valid": normalize_hex(json_pointer_str(&verifier, "/artifact_hash")).as_deref().is_some_and(is_hex32),
+        "artifact_hash_non_placeholder": !placeholder_hash(normalize_hex(json_pointer_str(&verifier, "/artifact_hash")).as_deref()),
         "artifact_hash": normalize_hex(json_pointer_str(&verifier, "/artifact_hash")).as_deref() == artifact_hash,
         "artifact_hash_matches_handoff": normalize_hex(json_pointer_str(&verifier, "/artifact_hash")).as_deref()
             == normalize_hex(json_pointer_str(handoff_expected_values, "/artifact_hash")).as_deref(),
@@ -4422,6 +4424,8 @@ fn validate_external_review(
             == Some(NOVASEAL_HANDOFF_HASH_ALGORITHM),
         "request_handoff_group": json_pointer_str(&payload, "/request_handoff/group") == Some("external_bip340_tcb_review_attestation"),
         "handoff_expected_values_exact": exact_object_keys(handoff_expected_values, EXPECTED_EXTERNAL_TCB_EXPECTED_VALUE_FIELDS),
+        "artifact_hash_valid": normalize_hex(json_pointer_str(&payload, "/artifact_hash")).as_deref().is_some_and(is_hex32),
+        "artifact_hash_non_placeholder": !placeholder_hash(normalize_hex(json_pointer_str(&payload, "/artifact_hash")).as_deref()),
         "artifact_hash": normalize_hex(json_pointer_str(&payload, "/artifact_hash")).as_deref() == artifact_hash,
         "artifact_hash_matches_handoff": normalize_hex(json_pointer_str(&payload, "/artifact_hash")).as_deref()
             == normalize_hex(json_pointer_str(handoff_expected_values, "/artifact_hash")).as_deref(),
@@ -6529,6 +6533,8 @@ mod tests {
         assert!(json_pointer_bool(&public_passed, "/checks/release_version_matches_handoff"));
         assert!(json_pointer_bool(&public_passed, "/checks/release_manifest_commit_matches_handoff"));
         assert!(json_pointer_bool(&public_passed, "/checks/runtime_verifier_fields_exact"));
+        assert!(json_pointer_bool(&public_passed, "/checks/artifact_hash_valid"));
+        assert!(json_pointer_bool(&public_passed, "/checks/artifact_hash_non_placeholder"));
         assert!(json_pointer_bool(&public_passed, "/checks/artifact_hash_matches_handoff"));
         assert!(json_pointer_bool(&public_passed, "/checks/out_point_valid"));
         assert!(json_pointer_bool(&public_passed, "/checks/dep_type"));
@@ -6723,6 +6729,42 @@ mod tests {
         assert_eq!(json_pointer_str(&public_data_hash_failed, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&public_data_hash_failed, "/checks/data_hash_valid"));
 
+        let mut public_invalid_artifact_hash = public_attestation.clone();
+        public_invalid_artifact_hash["runtime_verifier"]["artifact_hash"] = json!("0xnot-a-32-byte-hash");
+        std::fs::write(
+            proofs.join("public_shared_cell_dep_attestation.json"),
+            serde_json::to_vec_pretty(&public_invalid_artifact_hash).unwrap(),
+        )
+        .unwrap();
+        let public_artifact_hash_failed = validate_public_attestation(
+            temp.path(),
+            PUBLIC_CELLDEP_ATTESTATION,
+            Some(&artifact_hash),
+            Some(tcb_repo_commit),
+            &handoff,
+        )
+        .unwrap();
+        assert_eq!(json_pointer_str(&public_artifact_hash_failed, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&public_artifact_hash_failed, "/checks/artifact_hash_valid"));
+
+        let mut public_zero_artifact_hash = public_attestation.clone();
+        public_zero_artifact_hash["runtime_verifier"]["artifact_hash"] = json!(format!("0x{}", "00".repeat(32)));
+        std::fs::write(
+            proofs.join("public_shared_cell_dep_attestation.json"),
+            serde_json::to_vec_pretty(&public_zero_artifact_hash).unwrap(),
+        )
+        .unwrap();
+        let public_zero_artifact_hash_failed = validate_public_attestation(
+            temp.path(),
+            PUBLIC_CELLDEP_ATTESTATION,
+            Some(&artifact_hash),
+            Some(tcb_repo_commit),
+            &handoff,
+        )
+        .unwrap();
+        assert_eq!(json_pointer_str(&public_zero_artifact_hash_failed, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&public_zero_artifact_hash_failed, "/checks/artifact_hash_non_placeholder"));
+
         let mut public_stale_manifest_commit = public_attestation.clone();
         public_stale_manifest_commit["release"]["manifest_commit"] = json!("fedcba9876543210fedcba9876543210fedcba98");
         std::fs::write(
@@ -6897,6 +6939,8 @@ mod tests {
         assert!(json_pointer_bool(&review_passed, "/checks/request_handoff_fields_exact"));
         assert!(json_pointer_bool(&review_passed, "/checks/request_handoff_bundle_hash_algorithm"));
         assert!(json_pointer_bool(&review_passed, "/checks/handoff_expected_values_exact"));
+        assert!(json_pointer_bool(&review_passed, "/checks/artifact_hash_valid"));
+        assert!(json_pointer_bool(&review_passed, "/checks/artifact_hash_non_placeholder"));
         assert!(json_pointer_bool(&review_passed, "/checks/artifact_hash_matches_handoff"));
         assert!(json_pointer_bool(&review_passed, "/checks/artifact_hash_algorithm"));
         assert!(json_pointer_bool(&review_passed, "/checks/artifact_hash_algorithm_matches_handoff"));
@@ -6971,6 +7015,32 @@ mod tests {
                 .unwrap();
         assert_eq!(json_pointer_str(&review_stale_source_tree_failed, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&review_stale_source_tree_failed, "/checks/source_tree_sha256_matches_current_tcb"));
+
+        let mut review_invalid_artifact_hash = external_review.clone();
+        review_invalid_artifact_hash["artifact_hash"] = json!("0xnot-a-32-byte-hash");
+        std::fs::write(
+            proofs.join("bip340_external_tcb_review_attestation.json"),
+            serde_json::to_vec_pretty(&review_invalid_artifact_hash).unwrap(),
+        )
+        .unwrap();
+        let review_invalid_artifact_hash_failed =
+            validate_external_review(temp.path(), EXTERNAL_TCB_ATTESTATION, Some(&artifact_hash), Some(&source_tree_hash), &handoff)
+                .unwrap();
+        assert_eq!(json_pointer_str(&review_invalid_artifact_hash_failed, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&review_invalid_artifact_hash_failed, "/checks/artifact_hash_valid"));
+
+        let mut review_zero_artifact_hash = external_review.clone();
+        review_zero_artifact_hash["artifact_hash"] = json!(format!("0x{}", "00".repeat(32)));
+        std::fs::write(
+            proofs.join("bip340_external_tcb_review_attestation.json"),
+            serde_json::to_vec_pretty(&review_zero_artifact_hash).unwrap(),
+        )
+        .unwrap();
+        let review_zero_artifact_hash_failed =
+            validate_external_review(temp.path(), EXTERNAL_TCB_ATTESTATION, Some(&artifact_hash), Some(&source_tree_hash), &handoff)
+                .unwrap();
+        assert_eq!(json_pointer_str(&review_zero_artifact_hash_failed, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&review_zero_artifact_hash_failed, "/checks/artifact_hash_non_placeholder"));
 
         let mut review_zero_source_tree = external_review.clone();
         review_zero_source_tree["source_tree_sha256"] = json!(format!("0x{}", "00".repeat(32)));
