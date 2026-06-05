@@ -14,9 +14,17 @@
 `target/novaseal-fiber-node-experiments.json` with:
 
 - status: `passed`
+- schema: `novaseal-fiber-node-execution-v0.3`
+- latest clean-room rerun: 2026-06-05
+- clean-room worktree:
+  `/Users/arthur/RustroverProjects/CellScript-cleanrooms/novaseal-phase5-20260605-121420`
 - required Fiber workflow suites present: `16/16`
 - executed Fiber workflow suites: `16/16`
 - passed Fiber workflow suites: `16/16`
+- recorded suite duration: `2319.305s`
+- aggregate Bruno result: `317/317` requests passed, `473/473` assertions
+  passed
+- runnable devnet contract present: `true`
 - executed suites: `invoice-ops`, `open-use-close-a-channel`,
   `3-nodes-transfer`, `router-pay`, `shutdown-force`, `reestablish`,
   `external-funding-open`, `funding-tx-verification`, `udt`,
@@ -26,7 +34,39 @@
   `watchtower/force-close-preimage-multiple`, `cross-chain-hub`,
   `cross-chain-hub-separate`
 
-Commands:
+Current rerun command shape:
+
+```bash
+FIBER_REPO=/Users/arthur/RustroverProjects/fiber
+export PATH="/Users/arthur/go/bin:/Users/arthur/RustroverProjects/ckb/target/debug:/Users/arthur/RustroverProjects/ckb-cli/target/debug:$PATH"
+export REMOVE_OLD_STATE=y
+
+for suite in invoice-ops open-use-close-a-channel 3-nodes-transfer \
+             router-pay shutdown-force reestablish external-funding-open \
+             funding-tx-verification udt udt-router-pay \
+             watchtower/force-close-after-open-channel \
+             watchtower/force-close-with-pending-tlcs \
+             watchtower/force-close-with-pending-tlcs-and-udt \
+             watchtower/force-close-preimage-multiple; do
+  python3 scripts/novaseal_fiber_node_experiments.py \
+    --fiber-repo "$FIBER_REPO" \
+    --run-suite "$suite" \
+    --timeout-seconds 1800 \
+    --pretty
+done
+
+for suite in cross-chain-hub cross-chain-hub-separate; do
+  python3 scripts/novaseal_fiber_node_experiments.py \
+    --fiber-repo "$FIBER_REPO" \
+    --run-suite "$suite" \
+    --timeout-seconds 2400 \
+    --pretty
+done
+```
+
+The latest clean-room rerun used the loop above with explicit `--fiber-repo`.
+The earlier individual command transcript is retained below for suite-name and
+timeout traceability:
 
 ```bash
 PATH="/Users/arthur/RustroverProjects/ckb/target/debug:/Users/arthur/RustroverProjects/ckb-cli/target/debug:$PATH" \
@@ -108,7 +148,9 @@ while avoiding a Bruno QuickJS assertion-runtime incompatibility.
 The cross-chain hub suites require LND's `invoicesrpc` service for
 `AddHoldInvoice`. The local `lnd` and `lncli` binaries were rebuilt from LND
 `v0.20.1-beta` with `invoicesrpc routerrpc` build tags after an initial
-diagnostic run showed `unknown service invoicesrpc.Invoices`.
+diagnostic run showed `unknown service invoicesrpc.Invoices`. The 2026-06-05
+clean-room rerun used the rebuilt binaries from `/Users/arthur/go/bin` and did
+not reproduce the service-missing failure.
 
 The cross-chain suites were run from temporary copied Bruno collections under
 `target/novaseal-fiber-node-experiments/cross-chain-hub/bruno-worktree` and
@@ -135,6 +177,11 @@ Observed Bruno result:
 - `watchtower/force-close-preimage-multiple`: `25/25` requests passed, `25/25` assertions passed
 - `cross-chain-hub`: `19/19` requests passed, `40/40` assertions passed
 - `cross-chain-hub-separate`: `19/19` requests passed, `40/40` assertions passed
+
+Aggregate observed Bruno result:
+
+- requests: `317/317`
+- assertions: `473/473`
 
 Covered live paths:
 
@@ -169,6 +216,17 @@ Resolved cross-chain issue:
 - The remaining Bruno runner mismatch was limited to `resp.data.destroy()` on
   the LND streaming payment response; the harness guards that call in a copied
   worktree, and the underlying payment/balance assertions pass.
+
+Expected clean-room log noise:
+
+- Fiber network-secret permission warnings for generated local node keys.
+- CCH WebSocket `connection refused` retries while the separate service waits
+  for the Fiber WebSocket endpoint to become ready.
+- Watchtower duplicate settlement-transaction RPC errors when the retry loop
+  observes that the transaction is already in the local CKB transaction pool.
+
+These are not pass conditions. The pass condition remains the JSON report plus
+per-suite Bruno request/assertion success.
 
 ## Boundary
 

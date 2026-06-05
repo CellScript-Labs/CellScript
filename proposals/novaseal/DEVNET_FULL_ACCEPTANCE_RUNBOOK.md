@@ -5,6 +5,31 @@ acceptance from a clean checkout. Every profile doc links back here.
 
 ---
 
+## 0. Latest Evidence Snapshot
+
+Last full post-Phase-5 refresh: **2026-06-05**.
+
+- Phase 5 was rerun from a detached clean-room worktree:
+  `/Users/arthur/RustroverProjects/CellScript-cleanrooms/novaseal-phase5-20260605-121420`.
+- The clean-room Fiber report was copied back to
+  `target/novaseal-fiber-node-experiments.json` so Phase 6 and Phase 7 consume
+  the latest evidence.
+- Phase 5 report status: `passed`, `16/16` suites executed, `16/16` suites
+  passed, `317/317` Bruno requests passed, `473/473` Bruno assertions passed.
+- Phase 5 recorded duration: `2319.305s` across all suites.
+- Phase 6 was rerun in full after the Phase 5 refresh; all seven reports were
+  regenerated with pass/local-boundary statuses.
+- Phase 7 certification was rerun with:
+  `cargo run --locked -p cellscript --bin cellc -- certify --plugin novaseal-profile-v0 --repo-root . --json`.
+  It returned `status: "passed"`, `local_v1_ready: true`,
+  `production_ready: false`, and
+  `v1_status: "local_v1_ready_external_attestation_required"`.
+
+This snapshot proves local V1 readiness only. It does not satisfy the four
+external production attestations listed in Section 9.
+
+---
+
 ## 1. Prerequisites
 
 | Tool | Version / Commit | Purpose | Install |
@@ -20,6 +45,24 @@ acceptance from a clean checkout. Every profile doc links back here.
 
 **PATH requirements:** `ckb/target/debug` (or `release`), `ckb-cli/target/debug`,
 and Go bin dir must all be on `$PATH` before running scripts.
+
+Useful preflight:
+
+```bash
+command -v python3 cargo npm ckb ckb-cli
+command -v lnd lncli
+git -C /path/to/fiber rev-parse HEAD
+git -C /path/to/fiber status --short --branch
+```
+
+For the 2026-06-05 clean-room rerun, the resolved tools were:
+
+- `ckb`: `/Users/arthur/RustroverProjects/ckb/target/debug/ckb`
+- `ckb-cli`: `/Users/arthur/RustroverProjects/ckb-cli/target/debug/ckb-cli`
+- `npm`: `/opt/homebrew/bin/npm`
+- `cargo`: `/Users/arthur/.cargo/bin/cargo`
+- Fiber: `develop`, commit
+  `27d458b8529e3b4ed76a3abd5f8babd2a0120f15`, dirty `false`
 
 **Ports:** Scripts auto-pick free ports. No manual configuration needed unless
 you use `--keep-node` for debugging.
@@ -110,7 +153,9 @@ Docs: each `proposals/novaseal/<profile>/docs/DEVNET_STATEFUL_ACCEPTANCE.md`
 
 **This is the longest phase.** Each suite starts a local CKB dev chain, builds
 or reuses Fiber `fnn`, starts three Fiber nodes, then runs the Bruno e2e
-suite. Budget 20-40 minutes per suite, ~6 hours total.
+suite. Keep the `1800s` / `2400s` timeouts because local startup speed varies.
+The 2026-06-05 clean-room rerun completed much faster than the conservative
+budget: `16/16` suites passed in `2319.305s` total.
 
 ```bash
 FIBER_REPO=/path/to/fiber
@@ -146,6 +191,23 @@ done
 Output: `target/novaseal-fiber-node-experiments.json`
 
 Doc: `proposals/novaseal/fiber-candidate-profile-v0/docs/FIBER_NODE_EXPERIMENTS.md`
+
+Expected report after full execution:
+
+- `schema: "novaseal-fiber-node-execution-v0.3"`
+- `status: "passed"`
+- `workflow_coverage.present_count: 16`
+- `workflow_coverage.executed_count: 16`
+- `workflow_coverage.passed_execution_count: 16`
+- `devnet_contract.runnable_devnet_contract_present: true`
+
+The script may apply Bruno compatibility patches in copied per-suite worktrees
+under `target/novaseal-fiber-node-experiments/*/bruno-worktree`. These patches
+do not modify the external Fiber checkout. They are currently required for:
+
+- `watchtower/force-close-with-pending-tlcs-and-udt`
+- `cross-chain-hub`
+- `cross-chain-hub-separate`
 
 **Known issue:** The cross-chain suites require LND built with
 `invoicesrpc routerrpc`. Without those tags, `AddHoldInvoice` fails with
@@ -183,6 +245,19 @@ python3 scripts/novaseal_external_attestation_adapter.py --pretty
 python3 scripts/novaseal_external_evidence_handoff_bundle.py --pretty
 ```
 
+Expected refreshed statuses:
+
+- `target/novaseal-bip340-tcb-review.json`:
+  `passed_local_review_external_attestation_required`
+- `target/novaseal-wallet-signing-vectors.json`: `passed`, `14/14` vectors
+- `target/novaseal-profile-operator-fixtures.json`: `passed`, `10/10` cases
+- `target/novaseal-service-builder-fixtures.json`: `passed`, `10/10` cases
+- `target/novaseal-btc-spv-evidence-adapter.json`: `passed`, `3/3` profiles
+- `target/novaseal-external-attestation-adapter.json`: `passed`, `2/2`
+  attestation request groups
+- `target/novaseal-external-evidence-handoff-bundle.json`: `passed`, `4/4`
+  handoff groups
+
 ### Phase 7: Certification
 
 ```bash
@@ -197,6 +272,10 @@ Expected output on success:
 - `v1_status: "local_v1_ready_external_attestation_required"`
 
 Full report: `target/novaseal-production-gates.json`
+
+Phase 7 also writes `target/cellscript-certification/novaseal-profile-v0.json`.
+For the 2026-06-05 refresh, the certification report recorded eight true
+checks, four external blockers, and no local failure reason.
 
 ---
 
@@ -253,6 +332,9 @@ Adapter request: `target/novaseal-btc-spv-evidence-adapter.json`
 | `source_hash_matches: false` | Changed source tracked by provenance | Re-run the affected live devnet script |
 | Bruno suite timeout | Fiber node slow start | Increase `--timeout-seconds`; check port availability |
 | `unknown service invoicesrpc.Invoices` | LND built without `invoicesrpc routerrpc` | Rebuild LND with those tags |
+| Bruno QuickJS `BigInt` or stream-runtime mismatch | External Fiber Bruno collection expects Node runtime details that Bruno's runner does not expose identically | Let `scripts/novaseal_fiber_node_experiments.py` patch the copied per-suite worktree; do not patch the external Fiber checkout |
+| Early CCH WebSocket `connection refused` logs | Separate CCH service starts before Fiber node WebSocket is ready | Treat as startup retry noise if the Bruno suite and JSON report pass |
+| Duplicate watchtower settlement transaction log | Watchtower retry observes an already-submitted transaction in the pool | Treat as retry noise if the suite assertions and JSON report pass |
 | `cellc certify` shows `failed` | Any upstream gate failed | Read `target/novaseal-production-gates.json` for specific failed gates |
 | Provenance stale after git rebase | Source tree hash changed | Re-run phases 2-6, then phase 7 |
 

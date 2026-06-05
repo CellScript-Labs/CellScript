@@ -1,9 +1,10 @@
 # NovaSeal v0 MVP Skeleton — Audit Status
 
-**Date of this snapshot**: 2026-05-31
+**Date of this snapshot**: 2026-06-05
 **Package**: `proposals/novaseal/v0-mvp-skeleton`
-**Status**: local production-prep evidence is gate-checked; production readiness
-is still blocked by external/public facts.
+**Status**: local V1 and production-prep evidence is gate-checked through the
+full devnet runbook; production readiness is still blocked by external/public
+facts.
 
 This document is the current evidence ledger for NovaSeal core. It intentionally
 separates generated audit evidence, local verifier harness evidence, live local
@@ -19,9 +20,9 @@ Package and script checks:
 - `cellc src/nova_state_lifecycle_type.cell --target-profile ckb --entry-action novaseal_lifecycle` passes.
 - `cellc src/nova_btc_authority_lock.cell --target-profile ckb` passes.
 - `cellc src/nova_receipt_type.cell --target-profile ckb` passes.
-- `python3 /home/arthur/a19q3/CellScript/scripts/novaseal_wallet_signing_vectors.py --pretty` passes.
-- `python3 /home/arthur/a19q3/CellScript/scripts/novaseal_bip340_tcb_review.py --pretty` passes local review gates and records that external attestation is still required.
-- `/home/arthur/a19q3/CellScript/target/debug/cellc certify --plugin novaseal-profile-v0 --json` reports `local_production_prep_ready_external_attestation_required` in the Rust-generated production-gate report.
+- `python3 scripts/novaseal_wallet_signing_vectors.py --pretty` passes.
+- `python3 scripts/novaseal_bip340_tcb_review.py --pretty` passes local review gates and records that external attestation is still required.
+- `cargo run --locked -p cellscript --bin cellc -- certify --plugin novaseal-profile-v0 --repo-root . --json` reports `status=passed` and `local_production_prep_ready_external_attestation_required` in the Rust-generated production-gate report.
 
 Live local devnet:
 
@@ -36,6 +37,22 @@ Aggregate stateful gate:
 
 - `scripts/novaseal_devnet_stateful_acceptance.sh --pretty --report-only` reports `status=passed`, `live_devnet_rpc_executed=true`, `blockers=0` by delegating to `cellc certify --plugin novaseal-profile-v0`.
 - The same aggregate gate includes Agreement Profile originate -> repay, originate -> claim, and live negative dry-runs.
+
+Full runbook refresh, 2026-06-05:
+
+- Phase 5 Fiber clean-room rerun passed `16/16` suites with `317/317` Bruno
+  requests and `473/473` assertions.
+- Phase 6 report generation passed:
+  - BIP340 TCB local review:
+    `passed_local_review_external_attestation_required`
+  - wallet signing vectors: `14/14`
+  - profile operator fixtures: `10/10`
+  - service builder fixtures: `10/10`
+  - BTC SPV evidence adapter: `3/3`
+  - external attestation adapter: `2/2`
+  - external evidence handoff bundle: `4/4`
+- Phase 7 certification passed with local V1 readiness and four external
+  production blockers.
 
 ## Current Generated Audit Surface
 
@@ -174,7 +191,7 @@ for it includes:
   and implicit authority-rotation rejection,
 - live local devnet key-auth transition evidence.
 - a local TCB review bundle at
-  `/home/arthur/a19q3/CellScript/target/novaseal-bip340-tcb-review.json`.
+  `target/novaseal-bip340-tcb-review.json`.
 
 This is a strong local evidence stack, but it is not a substitute for an
 external reviewer attesting the exact runtime verifier artifact hash.
@@ -184,13 +201,17 @@ external reviewer attesting the exact runtime verifier artifact hash.
 The current production gate is the Rust compiler certification entry:
 
 ```bash
-/home/arthur/a19q3/CellScript/target/debug/cellc certify --plugin novaseal-profile-v0 --json
+cargo run --locked -p cellscript --bin cellc -- \
+  certify --plugin novaseal-profile-v0 --repo-root . --json
 ```
 
 Current status:
 
 ```text
+status=passed
+local_v1_ready=true
 local_production_prep_ready_external_attestation_required
+production_ready=false
 ```
 
 Passed local gates:
@@ -200,11 +221,17 @@ Passed local gates:
 - fixed-width Molecule-equivalent wallet signing vectors exist for core and Agreement
 - local BIP340 runtime-verifier TCB review bundle passes
 - live local devnet stateful core and Agreement reports pass
+- all six planned profile live devnet reports pass
+- Fiber node execution report passes with all required suites executed
+- planned profile operator fixtures and service builder fixtures pass
+- BTC SPV, external attestation, and external handoff request adapters pass
 
 External gates still required:
 
-- `proofs/public_shared_cell_dep_attestation.json`
-- `proofs/bip340_external_tcb_review_attestation.json`
+- `proposals/novaseal/v0-mvp-skeleton/proofs/public_shared_cell_dep_attestation.json`
+- `proposals/novaseal/v0-mvp-skeleton/proofs/bip340_external_tcb_review_attestation.json`
+- `proposals/novaseal/v0-mvp-skeleton/proofs/public_btc_spv_evidence.json`
+- `proposals/novaseal/rwa-receipt-profile-v0/proofs/legal_registry_review_evidence.json`
 
 Templates exist next to those expected files. They are templates only and are
 not counted as production facts.
@@ -213,6 +240,9 @@ not counted as production facts.
 
 - Public/shared devnet, testnet, or mainnet CellDep publication is not yet attested.
 - The runtime BIP340 verifier binary still needs an external TCB review attestation.
+- Public BTC SPV evidence is still an external production fact, not something
+  the local adapter can manufacture.
+- RWA legal/registry review evidence is still an external production fact.
 - v0 has only `latest_receipt_hash`; it does not provide a historical receipt accumulator.
 
 Any claim of "production ready", "mainnet ready", or "fully audited" is false

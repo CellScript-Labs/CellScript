@@ -27,6 +27,18 @@ fees, or revocations.
 
 The current `fiber_node_execution_v0` report records all required Fiber
 workflow suites executed and passed for the pinned devnet workflow evidence.
+
+Latest refreshed evidence, 2026-06-05:
+
+- clean-room worktree:
+  `/Users/arthur/RustroverProjects/CellScript-cleanrooms/novaseal-phase5-20260605-121420`
+- `target/novaseal-fiber-node-experiments.json`: `status=passed`
+- required suites present/executed/passed: `16/16`
+- aggregate Bruno result: `317/317` requests passed, `473/473` assertions
+  passed
+- Fiber checkout: `develop`,
+  `27d458b8529e3b4ed76a3abd5f8babd2a0120f15`, dirty `false`
+
 General NovaSeal production claims remain blocked by public/shared CellDep
 attestation, public BTC SPV evidence, RWA legal/registry review evidence, and
 external BIP340 TCB review.
