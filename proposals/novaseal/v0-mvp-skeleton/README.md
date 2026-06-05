@@ -4,6 +4,8 @@
 
 **Primary audit documentation**: See [docs/AUDIT_STATUS.md](docs/AUDIT_STATUS.md) for the exact evidence table, validation command results, and current status wording.
 
+**RGB++ comparison proposal**: See [docs/RGBPP_COMPARISON_OPTIMISATION_PROPOSAL.md](docs/RGBPP_COMPARISON_OPTIMISATION_PROPOSAL.md) for the RGB++ design/SDK comparison and the proposed NovaSeal optimisation work order.
+
 **ProofPlan mapping**: See [proofs/proofplan_mapping.json](proofs/proofplan_mapping.json) — the brutally honest, machine-readable comparison of the 9 strict acceptance criteria against the **real generated** `cellc audit-bundle` output.
 
 **Derived audit surface**: Run `python3 scripts/novaseal_audit_surface.py --pretty` after `cellc audit-bundle --target-profile ckb --json` to produce `target/novaseal-audit-surface.json`, a narrow NovaSeal-specific summary of actions, locks, ProofPlan gaps, field-guard visibility, strict-mode predictions, and combined transaction measurement evidence when present.
