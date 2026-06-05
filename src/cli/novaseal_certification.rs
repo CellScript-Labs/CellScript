@@ -749,7 +749,10 @@ struct ExpectedOperatorFixture {
     action: &'static str,
     fixture: &'static str,
     signers: &'static [&'static str],
+    live_report: &'static str,
+    live_tx_hash_pointer: &'static str,
     live_required: bool,
+    fiber_report: Option<&'static str>,
     fiber_required: bool,
 }
 
@@ -768,7 +771,10 @@ const EXPECTED_PROFILE_OPERATOR_FIXTURES: &[ExpectedOperatorFixture] = &[
         action: "issue_xudt",
         fixture: "issue_valid.json",
         signers: &["issuer"],
+        live_report: FUNGIBLE_XUDT_LIVE,
+        live_tx_hash_pointer: "/issue/commit/tx_hash",
         live_required: true,
+        fiber_report: None,
         fiber_required: false,
     },
     ExpectedOperatorFixture {
@@ -776,7 +782,10 @@ const EXPECTED_PROFILE_OPERATOR_FIXTURES: &[ExpectedOperatorFixture] = &[
         action: "transfer_xudt",
         fixture: "transfer_valid.json",
         signers: &["holder"],
+        live_report: FUNGIBLE_XUDT_LIVE,
+        live_tx_hash_pointer: "/transfer/commit/tx_hash",
         live_required: true,
+        fiber_report: None,
         fiber_required: false,
     },
     ExpectedOperatorFixture {
@@ -784,7 +793,10 @@ const EXPECTED_PROFILE_OPERATOR_FIXTURES: &[ExpectedOperatorFixture] = &[
         action: "settle_xudt",
         fixture: "settle_valid.json",
         signers: &["holder"],
+        live_report: FUNGIBLE_XUDT_LIVE,
+        live_tx_hash_pointer: "/settle/commit/tx_hash",
         live_required: true,
+        fiber_report: None,
         fiber_required: false,
     },
     ExpectedOperatorFixture {
@@ -792,7 +804,10 @@ const EXPECTED_PROFILE_OPERATOR_FIXTURES: &[ExpectedOperatorFixture] = &[
         action: "materialize_rwa_receipt",
         fixture: "materialize_valid.json",
         signers: &["issuer"],
+        live_report: RWA_RECEIPT_LIVE,
+        live_tx_hash_pointer: "/materialize/commit/tx_hash",
         live_required: true,
+        fiber_report: None,
         fiber_required: false,
     },
     ExpectedOperatorFixture {
@@ -800,7 +815,10 @@ const EXPECTED_PROFILE_OPERATOR_FIXTURES: &[ExpectedOperatorFixture] = &[
         action: "claim_rwa_receipt",
         fixture: "claim_valid.json",
         signers: &["holder"],
+        live_report: RWA_RECEIPT_LIVE,
+        live_tx_hash_pointer: "/claim/commit/tx_hash",
         live_required: true,
+        fiber_report: None,
         fiber_required: false,
     },
     ExpectedOperatorFixture {
@@ -808,7 +826,10 @@ const EXPECTED_PROFILE_OPERATOR_FIXTURES: &[ExpectedOperatorFixture] = &[
         action: "settle_rwa_receipt",
         fixture: "settle_valid.json",
         signers: &["issuer", "holder"],
+        live_report: RWA_RECEIPT_LIVE,
+        live_tx_hash_pointer: "/settle/commit/tx_hash",
         live_required: true,
+        fiber_report: None,
         fiber_required: false,
     },
     ExpectedOperatorFixture {
@@ -816,7 +837,10 @@ const EXPECTED_PROFILE_OPERATOR_FIXTURES: &[ExpectedOperatorFixture] = &[
         action: "commit_btc_transaction_transition",
         fixture: "commit_transaction_valid.json",
         signers: &["committer"],
+        live_report: BTC_TX_COMMITMENT_LIVE,
+        live_tx_hash_pointer: "/commit_transaction/commit/tx_hash",
         live_required: true,
+        fiber_report: None,
         fiber_required: false,
     },
     ExpectedOperatorFixture {
@@ -824,7 +848,10 @@ const EXPECTED_PROFILE_OPERATOR_FIXTURES: &[ExpectedOperatorFixture] = &[
         action: "close_btc_utxo_seal",
         fixture: "close_utxo_seal_valid.json",
         signers: &["owner"],
+        live_report: BTC_UTXO_SEAL_LIVE,
+        live_tx_hash_pointer: "/close_utxo_seal/commit/tx_hash",
         live_required: true,
+        fiber_report: None,
         fiber_required: false,
     },
     ExpectedOperatorFixture {
@@ -832,7 +859,10 @@ const EXPECTED_PROFILE_OPERATOR_FIXTURES: &[ExpectedOperatorFixture] = &[
         action: "finalize_dual_seal",
         fixture: "finalize_dual_seal_valid.json",
         signers: &["btc_owner", "ckb_authority"],
+        live_report: DUAL_SEAL_LIVE,
+        live_tx_hash_pointer: "/finalize_dual_seal/commit/tx_hash",
         live_required: true,
+        fiber_report: None,
         fiber_required: false,
     },
     ExpectedOperatorFixture {
@@ -840,7 +870,10 @@ const EXPECTED_PROFILE_OPERATOR_FIXTURES: &[ExpectedOperatorFixture] = &[
         action: "settle_fiber_candidate",
         fixture: "settle_fiber_candidate_valid.json",
         signers: &["operator"],
+        live_report: FIBER_CANDIDATE_LIVE,
+        live_tx_hash_pointer: "/settle_fiber_candidate/commit/tx_hash",
         live_required: true,
+        fiber_report: Some(FIBER_NODE_EXPERIMENTS),
         fiber_required: true,
     },
 ];
@@ -1701,48 +1734,8 @@ fn build_stateful_acceptance_report(repo_root: &Path, agreement_conformance: &Va
     )?;
     let fiber_node_experiments = fiber_node_execution_summary(repo_root, fiber_node_experiments_report.as_ref());
 
-    let core_live_passed = json_pointer_str(&live_core, "/status") == Some("passed")
-        && json_pointer_bool(&live_core, "/live_devnet_rpc_executed")
-        && json_pointer_bool(&live_core, "/stateful_lifecycle_executed")
-        && json_pointer_bool(&live_core, "/provenance_freshness_matched")
-        && json_pointer_bool(&live_core, "/old_state_not_live")
-        && json_pointer_bool(&live_core, "/new_state_live")
-        && json_pointer_bool(&live_core, "/receipt_live")
-        && json_pointer_bool(&live_core, "/wrong_signature_rejected");
-    let agreement_live_passed = json_pointer_str(&live_agreement, "/status") == Some("passed")
-        && json_pointer_bool(&live_agreement, "/live_devnet_rpc_executed")
-        && json_pointer_bool(&live_agreement, "/stateful_lifecycle_executed")
-        && json_pointer_bool(&live_agreement, "/provenance_freshness_matched")
-        && [
-            "origin_active_live",
-            "origin_principal_payout_live",
-            "origin_receipt_live",
-            "claim_origin_active_live",
-            "claim_origin_principal_payout_live",
-            "claim_origin_receipt_live",
-            "repay_old_active_not_live",
-            "repay_closed_live",
-            "repay_lender_repayment_live",
-            "repay_borrower_collateral_return_live",
-            "repay_receipt_live",
-            "claim_old_active_not_live",
-            "claim_closed_live",
-            "claim_lender_default_claim_live",
-            "claim_receipt_live",
-            "wrong_lender_signature_rejected",
-            "non_ckb_asset_kind_rejected",
-            "wrong_borrower_signature_rejected",
-            "repay_payout_capacity_short_rejected",
-            "repay_payout_lock_args_mismatch_rejected",
-            "repay_wrong_payout_amount_rejected",
-            "early_claim_rejected",
-            "wrong_lender_claim_signature_rejected",
-            "post_negative_active_still_live",
-            "post_claim_negative_active_still_live",
-        ]
-        .iter()
-        .all(|key| json_pointer_bool(&live_agreement, &format!("/{key}")))
-        && json_pointer_str(agreement_conformance, "/status") == Some("passed");
+    let core_live_passed = core_live_summary_passed(&live_core);
+    let agreement_live_passed = agreement_live_summary_passed(&live_agreement, agreement_conformance);
     let fungible_xudt_live_passed = json_pointer_bool(&live_fungible_xudt, "/required_live_checks_passed");
     let rwa_receipt_live_passed = json_pointer_bool(&live_rwa_receipt, "/required_live_checks_passed");
     let btc_tx_commitment_live_passed = json_pointer_bool(&live_btc_tx_commitment, "/required_live_checks_passed");
@@ -2216,7 +2209,7 @@ fn live_planned_profile_summary(
     let rpc_executed = json_pointer_bool(report, "/live_devnet_rpc_executed");
     let lifecycle_executed = json_pointer_bool(report, "/stateful_lifecycle_executed");
     let provenance_freshness_matched = json_pointer_bool(&provenance, "/freshness_matched");
-    let tx_hashes_present = tx_hash_summary.values().all(value_is_present);
+    let tx_hashes_present = tx_hash_summary.values().all(tx_hash_value_is_real);
     let required_bools_passed = live_checks.values().all(|value| value.as_bool() == Some(true));
     let negative_cases_passed = negative_checks.values().all(|value| value.as_bool() == Some(true));
     let required_live_checks_passed = status_passed
@@ -2424,11 +2417,13 @@ fn live_core_summary(repo_root: &Path, report: Option<&Value>) -> Result<Value> 
         "provenance": provenance,
         "provenance_freshness_matched": json_pointer_bool(&provenance, "/freshness_matched"),
         "bootstrap_tx_hash": json_pointer_str(report, "/bootstrap/commit/tx_hash"),
+        "bootstrap_state_cell_live": json_pointer_bool_opt(report, "/bootstrap/state_cell_live"),
         "transition_tx_hash": json_pointer_str(&transition, "/commit/tx_hash"),
         "old_state_not_live": json_pointer_bool_opt(&transition, "/old_state_not_live"),
         "new_state_live": json_pointer_bool_opt(&transition, "/new_state_live"),
         "receipt_live": json_pointer_bool_opt(&transition, "/receipt_live"),
         "wrong_signature_rejected": negative_case_matched(report, "wrong_signature_dry_run"),
+        "post_negative_state_still_live": json_pointer_bool_opt(report, "/negative_cases/post_negative_state_still_live"),
     }))
 }
 
@@ -2489,6 +2484,62 @@ fn live_agreement_summary(repo_root: &Path, report: Option<&Value>) -> Result<Va
         "post_negative_active_still_live": json_pointer_bool_opt(report, "/negative_cases/post_negative_active_still_live"),
         "post_claim_negative_active_still_live": json_pointer_bool_opt(report, "/negative_cases/post_claim_negative_active_still_live"),
     }))
+}
+
+fn summary_tx_hashes_real(summary: &Value, fields: &[&str]) -> bool {
+    fields.iter().all(|field| summary.get(*field).is_some_and(tx_hash_value_is_real))
+}
+
+fn core_live_summary_passed(live_core: &Value) -> bool {
+    json_pointer_str(live_core, "/status") == Some("passed")
+        && json_pointer_bool(live_core, "/live_devnet_rpc_executed")
+        && json_pointer_bool(live_core, "/stateful_lifecycle_executed")
+        && json_pointer_bool(live_core, "/provenance_freshness_matched")
+        && summary_tx_hashes_real(live_core, &["bootstrap_tx_hash", "transition_tx_hash"])
+        && json_pointer_bool(live_core, "/bootstrap_state_cell_live")
+        && json_pointer_bool(live_core, "/old_state_not_live")
+        && json_pointer_bool(live_core, "/new_state_live")
+        && json_pointer_bool(live_core, "/receipt_live")
+        && json_pointer_bool(live_core, "/wrong_signature_rejected")
+        && json_pointer_bool(live_core, "/post_negative_state_still_live")
+}
+
+fn agreement_live_summary_passed(live_agreement: &Value, agreement_conformance: &Value) -> bool {
+    json_pointer_str(live_agreement, "/status") == Some("passed")
+        && json_pointer_bool(live_agreement, "/live_devnet_rpc_executed")
+        && json_pointer_bool(live_agreement, "/stateful_lifecycle_executed")
+        && json_pointer_bool(live_agreement, "/provenance_freshness_matched")
+        && summary_tx_hashes_real(live_agreement, &["originate_tx_hash", "repay_tx_hash", "claim_originate_tx_hash", "claim_tx_hash"])
+        && [
+            "origin_active_live",
+            "origin_principal_payout_live",
+            "origin_receipt_live",
+            "claim_origin_active_live",
+            "claim_origin_principal_payout_live",
+            "claim_origin_receipt_live",
+            "repay_old_active_not_live",
+            "repay_closed_live",
+            "repay_lender_repayment_live",
+            "repay_borrower_collateral_return_live",
+            "repay_receipt_live",
+            "claim_old_active_not_live",
+            "claim_closed_live",
+            "claim_lender_default_claim_live",
+            "claim_receipt_live",
+            "wrong_lender_signature_rejected",
+            "non_ckb_asset_kind_rejected",
+            "wrong_borrower_signature_rejected",
+            "repay_payout_capacity_short_rejected",
+            "repay_payout_lock_args_mismatch_rejected",
+            "repay_wrong_payout_amount_rejected",
+            "early_claim_rejected",
+            "wrong_lender_claim_signature_rejected",
+            "post_negative_active_still_live",
+            "post_claim_negative_active_still_live",
+        ]
+        .iter()
+        .all(|key| json_pointer_bool(live_agreement, &format!("/{key}")))
+        && json_pointer_str(agreement_conformance, "/status") == Some("passed")
 }
 
 fn provenance_summary(report: &Value, repo_root: &Path, source_paths: &[&str]) -> Result<Value> {
@@ -2784,8 +2835,8 @@ fn validate_profile_certification(input: ProfileCertificationInputs<'_>) -> Resu
     let schema_files = expected_files(repo_root, &repo_root.join(AGREEMENT_ROOT).join("schemas"), EXPECTED_AGREEMENT_SCHEMA_FILES)?;
     let fixture_files = expected_files(repo_root, &repo_root.join(AGREEMENT_ROOT).join("fixtures"), EXPECTED_AGREEMENT_FIXTURES)?;
     let wallet_detail = validate_wallet_vector_detail(wallet);
-    let profile_operator_fixture_detail = validate_profile_operator_fixture_detail(profile_operator_fixtures);
-    let service_builder_fixture_detail = validate_service_builder_fixture_detail(service_builder_fixtures);
+    let profile_operator_fixture_detail = validate_profile_operator_fixture_detail(repo_root, profile_operator_fixtures)?;
+    let service_builder_fixture_detail = validate_service_builder_fixture_detail(service_builder_fixtures, profile_operator_fixtures);
     let btc_spv_adapter_detail = validate_btc_spv_evidence_adapter_detail(btc_spv_evidence_adapter);
     let external_attestation_adapter_detail = validate_external_attestation_adapter_detail(external_attestation_adapter);
     let external_evidence_handoff_detail = validate_external_evidence_handoff_detail(
@@ -2982,7 +3033,7 @@ fn validate_wallet_vector_detail(wallet: &Value) -> Value {
     })
 }
 
-fn validate_profile_operator_fixture_detail(report: &Value) -> Value {
+fn validate_profile_operator_fixture_detail(repo_root: &Path, report: &Value) -> Result<Value> {
     let cases = report.get("cases").and_then(Value::as_array).cloned().unwrap_or_default();
     let mut by_profile_action: BTreeMap<(String, String), Vec<Value>> = BTreeMap::new();
     for case in &cases {
@@ -3009,6 +3060,15 @@ fn validate_profile_operator_fixture_detail(report: &Value) -> Value {
         let matches = by_profile_action.get(&(expected.profile.to_string(), expected.action.to_string())).cloned().unwrap_or_default();
         let case = matches.first().cloned().unwrap_or(Value::Null);
         let display = case.get("wallet_display").cloned().unwrap_or(Value::Null);
+        let live_report = json_load_path(repo_root, &repo_root.join(expected.live_report))?;
+        let expected_live_report_hash = novaseal_profile_operator_report_hash(expected.live_report, &live_report);
+        let expected_live_tx_hash = json_pointer_str(&live_report, expected.live_tx_hash_pointer);
+        let expected_fiber_report_hash = expected
+            .fiber_report
+            .map(|path| {
+                json_load_path(repo_root, &repo_root.join(path)).map(|report| novaseal_profile_operator_report_hash(path, &report))
+            })
+            .transpose()?;
         let checks = json!({
             "exactly_one_fixture": matches.len() == 1,
             "status_passed": json_pointer_str(&case, "/status") == Some("passed"),
@@ -3029,12 +3089,20 @@ fn validate_profile_operator_fixture_detail(report: &Value) -> Value {
             "display_action_matches": json_pointer_str(&display, "/action") == Some(expected.action),
             "live_evidence_present_when_required": !expected.live_required
                 || json_pointer_str(&case, "/live_report_hash").is_some_and(is_hex32),
+            "live_report_hash_matches_current_report": !expected.live_required
+                || json_pointer_str(&case, "/live_report_hash") == Some(expected_live_report_hash.as_str()),
             "live_tx_hash_present_when_required": !expected.live_required
-                || json_pointer_str(&case, "/live_devnet_tx_hash").is_some_and(is_hex32),
+                || json_pointer_str(&case, "/live_devnet_tx_hash").is_some_and(is_real_tx_hash),
+            "live_tx_hash_matches_current_report": !expected.live_required
+                || json_pointer_str(&case, "/live_devnet_tx_hash") == expected_live_tx_hash,
+            "display_live_tx_hash_matches_current_report": !expected.live_required
+                || json_pointer_str(&display, "/live_devnet_tx_hash") == expected_live_tx_hash,
             "external_boundary_documented_when_not_live": expected.live_required
                 || json_pointer_str(&display, "/external_boundary") == Some("package_fixture_only_external_btc_and_ckb_finality_required"),
             "fiber_execution_bound_when_required": !expected.fiber_required
                 || json_pointer_str(&case, "/fiber_report_hash").is_some_and(is_hex32),
+            "fiber_report_hash_matches_current_report": !expected.fiber_required
+                || json_pointer_str(&case, "/fiber_report_hash") == expected_fiber_report_hash.as_deref(),
             "fixture_checks_passed": object_values_all_true(case.get("checks")),
         });
         case_checks.insert(format!("{}:{}", expected.profile, expected.action), checks);
@@ -3051,22 +3119,29 @@ fn validate_profile_operator_fixture_detail(report: &Value) -> Value {
         "case_details": case_checks.values().all(|row| object_values_all_true(Some(row))),
     });
 
-    json!({
+    Ok(json!({
         "status": if object_values_all_true(Some(&checks)) { "passed" } else { "failed" },
         "checks": checks,
         "cases": case_checks,
         "expected_profiles": expected_profiles.into_iter().collect::<Vec<_>>(),
         "expected_actions": expected_actions.into_iter().collect::<Vec<_>>(),
         "case_count": cases.len(),
-    })
+    }))
 }
 
-fn validate_service_builder_fixture_detail(report: &Value) -> Value {
+fn validate_service_builder_fixture_detail(report: &Value, operator_fixtures: &Value) -> Value {
     let cases = report.get("cases").and_then(Value::as_array).cloned().unwrap_or_default();
     let mut by_profile_action: BTreeMap<(String, String), Vec<Value>> = BTreeMap::new();
     for case in &cases {
         if let (Some(profile), Some(action)) = (json_pointer_str(case, "/profile"), json_pointer_str(case, "/action")) {
             by_profile_action.entry((profile.to_string(), action.to_string())).or_default().push(case.clone());
+        }
+    }
+    let operator_cases = operator_fixtures.get("cases").and_then(Value::as_array).cloned().unwrap_or_default();
+    let mut operator_by_profile_action: BTreeMap<(String, String), Vec<Value>> = BTreeMap::new();
+    for case in &operator_cases {
+        if let (Some(profile), Some(action)) = (json_pointer_str(case, "/profile"), json_pointer_str(case, "/action")) {
+            operator_by_profile_action.entry((profile.to_string(), action.to_string())).or_default().push(case.clone());
         }
     }
 
@@ -3082,18 +3157,26 @@ fn validate_service_builder_fixture_detail(report: &Value) -> Value {
         .iter()
         .filter_map(|case| Some(format!("{}:{}", json_pointer_str(case, "/profile")?, json_pointer_str(case, "/action")?)))
         .collect::<BTreeSet<_>>();
+    let expected_operator_report_hash = novaseal_service_builder_report_hash("operator_report", operator_fixtures);
 
     let mut case_checks = Map::new();
     for expected in EXPECTED_PROFILE_OPERATOR_FIXTURES {
         let matches = by_profile_action.get(&(expected.profile.to_string(), expected.action.to_string())).cloned().unwrap_or_default();
         let case = matches.first().cloned().unwrap_or(Value::Null);
+        let operator_matches =
+            operator_by_profile_action.get(&(expected.profile.to_string(), expected.action.to_string())).cloned().unwrap_or_default();
+        let operator_case = operator_matches.first().cloned().unwrap_or(Value::Null);
+        let expected_operator_case_hash = novaseal_service_builder_report_hash("operator_case", &operator_case);
         let checks = json!({
             "exactly_one_fixture": matches.len() == 1,
+            "exactly_one_operator_fixture": operator_matches.len() == 1,
             "status_passed": json_pointer_str(&case, "/status") == Some("passed"),
             "builder_name": json_pointer_str(&case, "/builder_name") == Some("novaseal-profile-service-builder-v0"),
             "fixture_matches": json_pointer_str(&case, "/fixture") == Some(expected.fixture),
             "signers_match": json_array_strings(&case, "/signers") == expected.signers,
             "operator_fixture_hash": json_pointer_str(&case, "/operator_fixture_hash").is_some_and(is_hex32),
+            "operator_fixture_hash_matches_current_operator_case": json_pointer_str(&case, "/operator_fixture_hash")
+                == Some(expected_operator_case_hash.as_str()),
             "request_schema": json_pointer_str(&case, "/request/schema") == Some("novaseal-service-builder-request-v0.1"),
             "request_profile_matches": json_pointer_str(&case, "/request/profile") == Some(expected.profile),
             "request_action_matches": json_pointer_str(&case, "/request/action") == Some(expected.action),
@@ -3106,9 +3189,17 @@ fn validate_service_builder_fixture_detail(report: &Value) -> Value {
                 && json_pointer_str(&case, "/request/required_profile_inputs/fixture_hash").is_some_and(is_hex32),
             "live_inputs_present_when_required": !expected.live_required
                 || (json_pointer_str(&case, "/request/required_live_inputs/live_report_hash").is_some_and(is_hex32)
-                    && json_pointer_str(&case, "/request/required_live_inputs/live_devnet_tx_hash").is_some_and(is_hex32)),
+                    && json_pointer_str(&case, "/request/required_live_inputs/live_devnet_tx_hash").is_some_and(is_real_tx_hash)),
+            "live_inputs_match_operator_fixture": !expected.live_required
+                || (json_pointer_str(&case, "/request/required_live_inputs/live_report_hash")
+                    == json_pointer_str(&operator_case, "/live_report_hash")
+                    && json_pointer_str(&case, "/request/required_live_inputs/live_devnet_tx_hash")
+                        == json_pointer_str(&operator_case, "/live_devnet_tx_hash")),
             "fiber_input_present_when_required": !expected.fiber_required
                 || json_pointer_str(&case, "/request/required_live_inputs/fiber_report_hash").is_some_and(is_hex32),
+            "fiber_input_matches_operator_fixture": !expected.fiber_required
+                || json_pointer_str(&case, "/request/required_live_inputs/fiber_report_hash")
+                    == json_pointer_str(&operator_case, "/fiber_report_hash"),
             "external_inputs_named": !json_array_strings(&case, "/request/production_external_inputs").is_empty(),
             "response_schema": json_pointer_str(&case, "/response/schema") == Some("novaseal-service-builder-response-v0.1"),
             "response_profile_matches": json_pointer_str(&case, "/response/profile") == Some(expected.profile),
@@ -3134,6 +3225,8 @@ fn validate_service_builder_fixture_detail(report: &Value) -> Value {
         "schema_current": json_pointer_str(report, "/schema") == Some("novaseal-service-builder-fixtures-v0.1"),
         "builder_name": json_pointer_str(report, "/builder_name") == Some("novaseal-profile-service-builder-v0"),
         "source_operator_fixture_report_hash": json_pointer_str(report, "/source_operator_fixture_report_hash").is_some_and(is_hex32),
+        "source_operator_fixture_report_hash_matches_current_report": json_pointer_str(report, "/source_operator_fixture_report_hash")
+            == Some(expected_operator_report_hash.as_str()),
         "summary_counts_match": json_pointer_i64(report, "/summary/total") == Some(EXPECTED_PROFILE_OPERATOR_FIXTURES.len() as i64)
             && json_pointer_i64(report, "/summary/matched") == json_pointer_i64(report, "/summary/total")
             && json_pointer_i64(report, "/summary/profile_count") == Some(expected_profiles.len() as i64),
@@ -5198,6 +5291,22 @@ fn novaseal_handoff_report_hash(label: &str, value: &Value) -> String {
     format!("0x{}", hex::encode(state.finalize().as_bytes()))
 }
 
+fn novaseal_profile_operator_report_hash(label: &str, value: &Value) -> String {
+    let mut state = blake2b_simd::Params::new().hash_length(32).personal(b"NovaProfileFxV0").to_state();
+    state.update(label.as_bytes());
+    state.update(b"\x00");
+    state.update(canonical_json_for_report_hash(value).as_bytes());
+    format!("0x{}", hex::encode(state.finalize().as_bytes()))
+}
+
+fn novaseal_service_builder_report_hash(label: &str, value: &Value) -> String {
+    let mut state = blake2b_simd::Params::new().hash_length(32).personal(b"NovaSvcBuildV0").to_state();
+    state.update(label.as_bytes());
+    state.update(b"\x00");
+    state.update(canonical_json_for_report_hash(value).as_bytes());
+    format!("0x{}", hex::encode(state.finalize().as_bytes()))
+}
+
 fn canonical_json_for_report_hash(value: &Value) -> String {
     match value {
         Value::Null => "null".to_string(),
@@ -5588,6 +5697,14 @@ fn placeholder_hash(value: Option<&str>) -> bool {
     value[2..].bytes().all(|byte| byte == b'0')
 }
 
+fn tx_hash_value_is_real(value: &Value) -> bool {
+    value.as_str().is_some_and(is_real_tx_hash)
+}
+
+fn is_real_tx_hash(value: &str) -> bool {
+    is_hex32(value) && !placeholder_hash(Some(value))
+}
+
 fn is_hex32(value: &str) -> bool {
     value.len() == 66 && value.starts_with("0x") && value[2..].bytes().all(|byte| byte.is_ascii_hexdigit())
 }
@@ -5615,6 +5732,168 @@ mod tests {
 
     fn constraint_object(expected: &[(&str, &str)]) -> Value {
         Value::Object(expected.iter().map(|(key, value)| ((*key).to_string(), Value::String((*value).to_string()))).collect())
+    }
+
+    fn test_hex32(byte: u8) -> String {
+        format!("0x{}", format!("{byte:02x}").repeat(32))
+    }
+
+    fn set_json_pointer_string(value: &mut Value, pointer: &str, content: String) {
+        let mut current = value;
+        let mut parts = pointer.trim_start_matches('/').split('/').peekable();
+        while let Some(part) = parts.next() {
+            if parts.peek().is_none() {
+                current.as_object_mut().unwrap().insert(part.to_string(), Value::String(content));
+                return;
+            }
+            current = current.as_object_mut().unwrap().entry(part.to_string()).or_insert_with(|| json!({}));
+        }
+    }
+
+    fn write_expected_live_fixture_reports(repo_root: &Path) -> BTreeMap<String, Value> {
+        let mut reports = BTreeMap::<String, Value>::new();
+        for (index, expected) in EXPECTED_PROFILE_OPERATOR_FIXTURES.iter().enumerate() {
+            let report = reports.entry(expected.live_report.to_string()).or_insert_with(|| json!({"status": "passed"}));
+            set_json_pointer_string(report, expected.live_tx_hash_pointer, test_hex32(index as u8 + 1));
+        }
+        for (path, report) in &reports {
+            let absolute = repo_root.join(path);
+            std::fs::create_dir_all(absolute.parent().unwrap()).unwrap();
+            std::fs::write(&absolute, serde_json::to_string(report).unwrap()).unwrap();
+        }
+        let fiber = json!({"workflow_coverage": {"all_required_workflows_executed_passed": true}});
+        let fiber_path = repo_root.join(FIBER_NODE_EXPERIMENTS);
+        std::fs::create_dir_all(fiber_path.parent().unwrap()).unwrap();
+        std::fs::write(&fiber_path, serde_json::to_string(&fiber).unwrap()).unwrap();
+        reports
+    }
+
+    fn operator_fixture_report(repo_root: &Path) -> Value {
+        let mut cases = Vec::new();
+        let mut profiles = BTreeSet::new();
+        for expected in EXPECTED_PROFILE_OPERATOR_FIXTURES {
+            profiles.insert(expected.profile);
+            let live_report = json_load_path(repo_root, &repo_root.join(expected.live_report)).unwrap();
+            let live_report_hash = novaseal_profile_operator_report_hash(expected.live_report, &live_report);
+            let live_tx_hash = json_pointer_str(&live_report, expected.live_tx_hash_pointer).unwrap();
+            let fiber_report_hash = expected.fiber_report.map(|path| {
+                let report = json_load_path(repo_root, &repo_root.join(path)).unwrap();
+                novaseal_profile_operator_report_hash(path, &report)
+            });
+            let hash = test_hex32(0xaa);
+            cases.push(json!({
+                "profile": expected.profile,
+                "action": expected.action,
+                "fixture": expected.fixture,
+                "status": "passed",
+                "checks": {"fixture_expected_accepted": true},
+                "signers": expected.signers,
+                "signed_type": "NovaFixtureSignedIntentV0",
+                "signed_intent_hash": hash,
+                "bip340_message_hash": hash,
+                "signed_intent_body_hex": "0x00",
+                "signed_intent_hash_preimage_hex": "0x01",
+                "witness_shape_hash": test_hex32(0x11),
+                "tx_skeleton_hash": test_hex32(0x12),
+                "fixture_hash": test_hex32(0x13),
+                "source_tree_hash": test_hex32(0x14),
+                "schema_set_hash": test_hex32(0x15),
+                "proof_matrix_hash": test_hex32(0x16),
+                "live_report_hash": live_report_hash,
+                "fiber_report_hash": fiber_report_hash,
+                "live_devnet_tx_hash": live_tx_hash,
+                "wallet_display": {
+                    "profile": expected.profile,
+                    "action": expected.action,
+                    "live_devnet_tx_hash": live_tx_hash,
+                },
+            }));
+        }
+        json!({
+            "schema": "novaseal-profile-operator-fixtures-v0.1",
+            "status": "passed",
+            "summary": {
+                "total": EXPECTED_PROFILE_OPERATOR_FIXTURES.len(),
+                "matched": EXPECTED_PROFILE_OPERATOR_FIXTURES.len(),
+                "profile_count": profiles.len(),
+            },
+            "cases": cases,
+        })
+    }
+
+    fn service_builder_report(operator_fixtures: &Value) -> Value {
+        let operator_cases = operator_fixtures.get("cases").and_then(Value::as_array).unwrap();
+        let mut cases = Vec::new();
+        let mut profiles = BTreeSet::new();
+        for operator_case in operator_cases {
+            let profile = json_pointer_str(operator_case, "/profile").unwrap();
+            let action = json_pointer_str(operator_case, "/action").unwrap();
+            let fixture = json_pointer_str(operator_case, "/fixture").unwrap();
+            let signers = json_array_strings(operator_case, "/signers");
+            profiles.insert(profile.to_string());
+            let operator_fixture_hash = novaseal_service_builder_report_hash("operator_case", operator_case);
+            let signed_hash = json_pointer_str(operator_case, "/signed_intent_hash").unwrap();
+            let witness_hash = json_pointer_str(operator_case, "/witness_shape_hash").unwrap();
+            cases.push(json!({
+                "profile": profile,
+                "action": action,
+                "fixture": fixture,
+                "status": "passed",
+                "checks": {"operator_case_passed": true},
+                "builder_name": "novaseal-profile-service-builder-v0",
+                "operator_fixture_hash": operator_fixture_hash,
+                "signers": signers,
+                "request": {
+                    "schema": "novaseal-service-builder-request-v0.1",
+                    "builder_name": "novaseal-profile-service-builder-v0",
+                    "profile": profile,
+                    "action": action,
+                    "signers": signers,
+                    "idempotency_key": test_hex32(0x20),
+                    "operator_fixture_hash": operator_fixture_hash,
+                    "required_profile_inputs": {
+                        "source_tree_hash": json_pointer_str(operator_case, "/source_tree_hash"),
+                        "schema_set_hash": json_pointer_str(operator_case, "/schema_set_hash"),
+                        "proof_matrix_hash": json_pointer_str(operator_case, "/proof_matrix_hash"),
+                        "fixture_hash": json_pointer_str(operator_case, "/fixture_hash"),
+                    },
+                    "required_live_inputs": {
+                        "live_report_hash": json_pointer_str(operator_case, "/live_report_hash"),
+                        "live_devnet_tx_hash": json_pointer_str(operator_case, "/live_devnet_tx_hash"),
+                        "fiber_report_hash": json_pointer_str(operator_case, "/fiber_report_hash"),
+                    },
+                    "production_external_inputs": ["public_shared_cell_dep_attestation"],
+                },
+                "response": {
+                    "schema": "novaseal-service-builder-response-v0.1",
+                    "profile": profile,
+                    "action": action,
+                    "service_queue_key": test_hex32(0x21),
+                    "tx_skeleton_hash": test_hex32(0x22),
+                    "witness_shape_hash": witness_hash,
+                    "signed_intent_hash": signed_hash,
+                    "bip340_message_hash": signed_hash,
+                    "receipt_binding_hash": test_hex32(0x23),
+                    "builder_trace_hash": test_hex32(0x24),
+                },
+                "tx_skeleton": {
+                    "schema": "novaseal-service-builder-tx-skeleton-v0.1",
+                    "operator_fixture_hash": operator_fixture_hash,
+                },
+            }));
+        }
+        json!({
+            "schema": "novaseal-service-builder-fixtures-v0.1",
+            "status": "passed",
+            "builder_name": "novaseal-profile-service-builder-v0",
+            "source_operator_fixture_report_hash": novaseal_service_builder_report_hash("operator_report", operator_fixtures),
+            "summary": {
+                "total": EXPECTED_PROFILE_OPERATOR_FIXTURES.len(),
+                "matched": EXPECTED_PROFILE_OPERATOR_FIXTURES.len(),
+                "profile_count": profiles.len(),
+            },
+            "cases": cases,
+        })
     }
 
     #[test]
@@ -5648,6 +5927,111 @@ mod tests {
             novaseal_handoff_report_hash("test_label", &value),
             "0x91f5e5cc38c16e792d27a3738a7a7c77053fa15f902e2ccb4b210fd7239a476f"
         );
+    }
+
+    #[test]
+    fn live_stateful_core_requires_tx_hashes_and_post_negative_liveness() {
+        let mut live_core = json!({
+            "status": "passed",
+            "live_devnet_rpc_executed": true,
+            "stateful_lifecycle_executed": true,
+            "provenance_freshness_matched": true,
+            "bootstrap_tx_hash": test_hex32(1),
+            "bootstrap_state_cell_live": true,
+            "transition_tx_hash": test_hex32(2),
+            "old_state_not_live": true,
+            "new_state_live": true,
+            "receipt_live": true,
+            "wrong_signature_rejected": true,
+            "post_negative_state_still_live": true,
+        });
+
+        assert!(core_live_summary_passed(&live_core));
+
+        live_core["transition_tx_hash"] = Value::Null;
+        assert!(!core_live_summary_passed(&live_core));
+
+        live_core["transition_tx_hash"] = Value::String(test_hex32(2));
+        live_core["post_negative_state_still_live"] = Value::Bool(false);
+        assert!(!core_live_summary_passed(&live_core));
+    }
+
+    #[test]
+    fn live_stateful_agreement_requires_all_transaction_hashes() {
+        let conformance = json!({"status": "passed"});
+        let mut live_agreement = json!({
+            "status": "passed",
+            "live_devnet_rpc_executed": true,
+            "stateful_lifecycle_executed": true,
+            "provenance_freshness_matched": true,
+            "originate_tx_hash": test_hex32(1),
+            "repay_tx_hash": test_hex32(2),
+            "claim_originate_tx_hash": test_hex32(3),
+            "claim_tx_hash": test_hex32(4),
+            "origin_active_live": true,
+            "origin_principal_payout_live": true,
+            "origin_receipt_live": true,
+            "claim_origin_active_live": true,
+            "claim_origin_principal_payout_live": true,
+            "claim_origin_receipt_live": true,
+            "repay_old_active_not_live": true,
+            "repay_closed_live": true,
+            "repay_lender_repayment_live": true,
+            "repay_borrower_collateral_return_live": true,
+            "repay_receipt_live": true,
+            "claim_old_active_not_live": true,
+            "claim_closed_live": true,
+            "claim_lender_default_claim_live": true,
+            "claim_receipt_live": true,
+            "wrong_lender_signature_rejected": true,
+            "non_ckb_asset_kind_rejected": true,
+            "wrong_borrower_signature_rejected": true,
+            "repay_payout_capacity_short_rejected": true,
+            "repay_payout_lock_args_mismatch_rejected": true,
+            "repay_wrong_payout_amount_rejected": true,
+            "early_claim_rejected": true,
+            "wrong_lender_claim_signature_rejected": true,
+            "post_negative_active_still_live": true,
+            "post_claim_negative_active_still_live": true,
+        });
+
+        assert!(agreement_live_summary_passed(&live_agreement, &conformance));
+
+        live_agreement["claim_tx_hash"] = Value::Null;
+        assert!(!agreement_live_summary_passed(&live_agreement, &conformance));
+    }
+
+    #[test]
+    fn profile_operator_fixtures_bind_current_live_reports() {
+        let temp = tempfile::tempdir().unwrap();
+        write_expected_live_fixture_reports(temp.path());
+        let report = operator_fixture_report(temp.path());
+
+        let detail = validate_profile_operator_fixture_detail(temp.path(), &report).unwrap();
+        assert_eq!(json_pointer_str(&detail, "/status"), Some("passed"));
+
+        let mut stale = report;
+        stale["cases"][0]["live_report_hash"] = Value::String(test_hex32(0xfe));
+        let detail = validate_profile_operator_fixture_detail(temp.path(), &stale).unwrap();
+        assert_eq!(json_pointer_str(&detail, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&detail, "/cases/fungible-xudt-profile-v0:issue_xudt/live_report_hash_matches_current_report",));
+    }
+
+    #[test]
+    fn service_builder_fixtures_bind_current_operator_report() {
+        let temp = tempfile::tempdir().unwrap();
+        write_expected_live_fixture_reports(temp.path());
+        let operator_report = operator_fixture_report(temp.path());
+        let report = service_builder_report(&operator_report);
+
+        let detail = validate_service_builder_fixture_detail(&report, &operator_report);
+        assert_eq!(json_pointer_str(&detail, "/status"), Some("passed"));
+
+        let mut stale = report;
+        stale["source_operator_fixture_report_hash"] = Value::String(test_hex32(0xfd));
+        let detail = validate_service_builder_fixture_detail(&stale, &operator_report);
+        assert_eq!(json_pointer_str(&detail, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&detail, "/checks/source_operator_fixture_report_hash_matches_current_report"));
     }
 
     #[test]
@@ -8344,5 +8728,57 @@ mod tests {
         assert!(json_array_strings(&matrix, "/boundary/remaining_items").is_empty());
         assert!(not_implemented_yet.starts_with("none;"));
         assert!(!not_implemented_yet.contains("fresh live devnet reports proving"));
+    }
+
+    #[test]
+    fn tx_hash_value_is_real_rejects_placeholder_and_accepts_real_hash() {
+        let real_hash = test_hex32(0xab);
+        assert!(tx_hash_value_is_real(&Value::String(real_hash.clone())));
+        assert!(!tx_hash_value_is_real(&Value::String("0x".to_string() + &"00".repeat(32))));
+        assert!(!tx_hash_value_is_real(&Value::Null));
+        assert!(!tx_hash_value_is_real(&Value::String("not-a-hash".to_string())));
+    }
+
+    #[test]
+    fn is_real_tx_hash_rejects_zero_hash_placeholder() {
+        let real_hash = test_hex32(0x01);
+        assert!(is_real_tx_hash(&real_hash));
+        assert!(!is_real_tx_hash(&format!("0x{}", "00".repeat(32))));
+        assert!(!is_real_tx_hash("0xdead"));
+        assert!(!is_real_tx_hash("not-even-hex"));
+    }
+
+    #[test]
+    fn planned_profile_package_cannot_pass_without_live_lifecycle_when_business_scenario_requires_it() {
+        let stateful = json!({
+            "status": "passed",
+            "blocker_count": 0,
+            "live_devnet_rpc_executed": true,
+            "stateful_lifecycle_executed": true,
+            "profile_coverage": {"status": "passed", "covered_profiles": []},
+            "business_scenario_coverage": {"status": "passed", "checks": {}},
+        });
+        let profile_cert = json!({
+            "status": "passed",
+            "local_checks": {"conformance_gate_passed": true},
+            "planned_profile_packages": {"fungible_xudt": {"status": "passed"}},
+        });
+
+        let matrix = build_planned_profile_matrix(&profile_cert, &stateful);
+        assert_eq!(json_pointer_str(&matrix, "/status"), Some("incomplete"));
+        let xudt_profile_row = matrix["profiles"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| json_pointer_str(row, "/id") == Some("object_profile_fungible_xudt"))
+            .unwrap();
+        assert_eq!(json_pointer_str(xudt_profile_row, "/status"), Some("passed"));
+        let xudt_scenario_row = matrix["business_scenarios"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| json_pointer_str(row, "/id") == Some("fungible_xudt_value_flow"))
+            .unwrap();
+        assert_eq!(json_pointer_str(xudt_scenario_row, "/status"), Some("missing"));
     }
 }
