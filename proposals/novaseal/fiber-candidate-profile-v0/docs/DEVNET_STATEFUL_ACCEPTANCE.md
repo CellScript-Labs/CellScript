@@ -21,3 +21,5 @@ The acceptance target is:
 It is external evidence only: the CellScript profile still does not verify
 Fiber HTLCs, routes, liquidity, fees, or revocations inside the NovaSeal
 transition.
+
+See [DEVNET_FULL_ACCEPTANCE_RUNBOOK.md](../../DEVNET_FULL_ACCEPTANCE_RUNBOOK.md) for prerequisites, freshness rules, and the full command sequence.

@@ -22,3 +22,5 @@ The acceptance target is:
 The `fungible_xudt_value_flow` scenario is now covered in the V1 readiness
 matrix. Production remains blocked only by the shared external attestation
 requirements.
+
+See [DEVNET_FULL_ACCEPTANCE_RUNBOOK.md](../../DEVNET_FULL_ACCEPTANCE_RUNBOOK.md) for prerequisites, freshness rules, and the full command sequence.

@@ -21,3 +21,5 @@ The acceptance target is:
 The `btc_transaction_commitment_transition` scenario is now covered in the V1
 readiness matrix. Production remains blocked until public BTC proof evidence
 and shared external attestations are supplied.
+
+See [DEVNET_FULL_ACCEPTANCE_RUNBOOK.md](../../DEVNET_FULL_ACCEPTANCE_RUNBOOK.md) for prerequisites, freshness rules, and the full command sequence.

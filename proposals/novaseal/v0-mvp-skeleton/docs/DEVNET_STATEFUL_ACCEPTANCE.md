@@ -56,3 +56,5 @@ Current live evidence:
   exact active outpoints, and confirmed both active outputs were dead plus
   closed/payout/receipt outputs were live.
 - The aggregate gate status is `passed`.
+
+See [DEVNET_FULL_ACCEPTANCE_RUNBOOK.md](../../DEVNET_FULL_ACCEPTANCE_RUNBOOK.md) for prerequisites, freshness rules, and the full command sequence.

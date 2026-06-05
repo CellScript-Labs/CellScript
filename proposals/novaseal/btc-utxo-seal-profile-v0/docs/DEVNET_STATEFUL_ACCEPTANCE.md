@@ -20,3 +20,5 @@ The acceptance target is:
 The `btc_utxo_seal_closure` scenario is now covered in the V1 readiness matrix.
 Production remains blocked until public BTC spend proof evidence and shared
 external attestations are supplied.
+
+See [DEVNET_FULL_ACCEPTANCE_RUNBOOK.md](../../DEVNET_FULL_ACCEPTANCE_RUNBOOK.md) for prerequisites, freshness rules, and the full command sequence.

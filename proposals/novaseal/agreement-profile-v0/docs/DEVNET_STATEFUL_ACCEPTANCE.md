@@ -31,3 +31,5 @@ The Agreement live runner now:
 The shared gate currently reports `passed`: NovaSeal core has live bootstrap ->
 key-auth transition evidence, and this Agreement Profile has live originate ->
 repay plus originate -> claim evidence.
+
+See [DEVNET_FULL_ACCEPTANCE_RUNBOOK.md](../../DEVNET_FULL_ACCEPTANCE_RUNBOOK.md) for prerequisites, freshness rules, and the full command sequence.

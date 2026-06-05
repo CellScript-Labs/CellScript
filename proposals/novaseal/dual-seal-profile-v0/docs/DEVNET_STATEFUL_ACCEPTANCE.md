@@ -20,3 +20,5 @@ The acceptance target is:
 The local CKB finality path is no longer a V1 blocker. Production remains
 blocked until public BTC closure proof evidence and the shared external
 attestations are supplied.
+
+See [DEVNET_FULL_ACCEPTANCE_RUNBOOK.md](../../DEVNET_FULL_ACCEPTANCE_RUNBOOK.md) for prerequisites, freshness rules, and the full command sequence.

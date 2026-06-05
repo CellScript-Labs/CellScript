@@ -180,3 +180,5 @@ watchtower workflows, and both embedded and separate-service cross-chain hub
 workflows. This completes the currently tracked NovaSeal external Fiber-node
 execution requirement: all required mapped Fiber workflow suites execute and
 pass through Fiber's devnet node runner and Bruno e2e harness.
+
+See [DEVNET_FULL_ACCEPTANCE_RUNBOOK.md](../../DEVNET_FULL_ACCEPTANCE_RUNBOOK.md) for prerequisites, freshness rules, and the full command sequence.
