@@ -3382,7 +3382,7 @@ fn cellc_explain_proof_summary_reports_fail_closed_diagnostics() {
 }
 
 #[test]
-fn cellc_check_denies_metadata_only_declared_invariant() {
+fn cellc_check_production_denies_metadata_only_declared_invariant() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
     std::fs::create_dir_all(root.join("src")).unwrap();
@@ -3419,8 +3419,7 @@ where
     )
     .unwrap();
 
-    let output =
-        Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("check").arg("--deny-runtime-obligations").output().unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("check").arg("--production").output().unwrap();
     assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
 
     let stderr = String::from_utf8_lossy(&output.stderr);

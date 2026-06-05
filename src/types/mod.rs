@@ -1214,20 +1214,7 @@ impl<'a> TypeChecker<'a> {
         }
 
         for read in &invariant.reads {
-            let base = read.split(['<', '.']).next().unwrap_or(read.as_str());
-            match base {
-                "input" | "inputs" | "output" | "outputs" | "group_input" | "group_inputs" | "group_output" | "group_outputs"
-                | "cell_dep" | "cell_deps" | "header_dep" | "header_deps" | "witness" | "lock_args" => {}
-                _ => {
-                    return Err(CompileError::new(
-                        format!(
-                            "invariant '{}' has unsupported read source '{}'; expected input/output/group_input/group_output/cell_dep/header_dep/witness/lock_args variants",
-                            invariant.name, read
-                        ),
-                        invariant.span,
-                    ));
-                }
-            }
+            self.validate_invariant_read_source(invariant, read)?;
         }
 
         if invariant.asserts.is_empty() && invariant.aggregates.is_empty() {
@@ -1261,6 +1248,63 @@ impl<'a> TypeChecker<'a> {
         self.current_callable = previous_callable;
         assert_result?;
 
+        Ok(())
+    }
+
+    fn validate_invariant_read_source(&self, invariant: &InvariantDef, read: &str) -> Result<()> {
+        let base = read.split(['<', '.']).next().unwrap_or(read);
+        match base {
+            "input" | "inputs" | "output" | "outputs" | "group_input" | "group_inputs" | "group_output" | "group_outputs"
+            | "cell_dep" | "cell_deps" | "header_dep" | "header_deps" | "witness" | "lock_args" => {}
+            _ => {
+                return Err(CompileError::new(
+                    format!(
+                        "invariant '{}' has unsupported read source '{}'; expected input/output/group_input/group_output/cell_dep/header_dep/witness/lock_args variants",
+                        invariant.name, read
+                    ),
+                    invariant.span,
+                ));
+            }
+        }
+
+        if read.contains('<') {
+            let Some((type_name, field_name)) = invariant_read_schema_type_and_field(read) else {
+                return Err(CompileError::new(
+                    format!(
+                        "invariant '{}' schema-qualified read source '{}' must name a concrete field like group_inputs<Token>.amount",
+                        invariant.name, read
+                    ),
+                    invariant.span,
+                ));
+            };
+            self.validate_invariant_read_schema_field(invariant, read, type_name, field_name)?;
+        }
+
+        Ok(())
+    }
+
+    fn validate_invariant_read_schema_field(
+        &self,
+        invariant: &InvariantDef,
+        read: &str,
+        type_name: &str,
+        field_name: &str,
+    ) -> Result<()> {
+        let Some(fields) = self.type_fields.get(type_name) else {
+            return Err(CompileError::new(
+                format!("invariant '{}' read source '{}' references unknown type '{}'", invariant.name, read, type_name),
+                invariant.span,
+            ));
+        };
+        if !fields.contains_key(field_name) {
+            return Err(CompileError::new(
+                format!(
+                    "invariant '{}' read source '{}' references unknown field '{}.{}'",
+                    invariant.name, read, type_name, field_name
+                ),
+                invariant.span,
+            ));
+        }
         Ok(())
     }
 
@@ -7148,6 +7192,21 @@ fn aggregate_target_type_and_field(target: &str) -> Option<(&str, &str)> {
     None
 }
 
+fn invariant_read_schema_type_and_field(read: &str) -> Option<(&str, &str)> {
+    let (source_and_type, field_path) = read.split_once('.')?;
+    if field_path.is_empty() {
+        return None;
+    }
+    let (_, type_name) = source_and_type.split_once('<')?;
+    let type_name = type_name.strip_suffix('>')?;
+    let field_name = field_path.split('.').next()?;
+    if type_name.is_empty() || field_name.is_empty() {
+        None
+    } else {
+        Some((type_name, field_name))
+    }
+}
+
 fn aggregate_field_type_is_supported(ty: &Type) -> bool {
     match ty {
         Type::U8 | Type::U16 | Type::U32 | Type::U64 | Type::U128 | Type::Address | Type::Hash => true,
@@ -8865,6 +8924,96 @@ enum Node {
         .unwrap_err();
 
         assert!(err.message.contains("cyclic type dependency detected: Node -> Node"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn invariant_reads_reject_unknown_schema_field() {
+        let err = check(&source_module(
+            r#"
+module types::invariant_bad_field
+
+invariant token_conservation {
+    trigger: type_group
+    scope: group
+    reads: group_inputs<Token>.missing
+    assert_invariant(true, "token amount is conserved")
+}
+
+resource Token {
+    amount: u64
+}
+"#,
+        ))
+        .unwrap_err();
+
+        assert!(err.message.contains("references unknown field 'Token.missing'"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn invariant_reads_reject_unknown_schema_type() {
+        let err = check(&source_module(
+            r#"
+module types::invariant_bad_type
+
+invariant token_conservation {
+    trigger: type_group
+    scope: group
+    reads: group_inputs<Missing>.amount
+    assert_invariant(true, "token amount is conserved")
+}
+
+resource Token {
+    amount: u64
+}
+"#,
+        ))
+        .unwrap_err();
+
+        assert!(err.message.contains("references unknown type 'Missing'"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn invariant_reads_reject_schema_qualified_source_without_field() {
+        let err = check(&source_module(
+            r#"
+module types::invariant_missing_field
+
+invariant token_conservation {
+    trigger: type_group
+    scope: group
+    reads: group_inputs<Token>
+    assert_invariant(true, "token amount is conserved")
+}
+
+resource Token {
+    amount: u64
+}
+"#,
+        ))
+        .unwrap_err();
+
+        assert!(err.message.contains("must name a concrete field"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn invariant_reads_allow_witness_delta_fields() {
+        check(&source_module(
+            r#"
+module types::invariant_witness_read
+
+invariant selected_token_delta {
+    trigger: explicit_entry
+    scope: selected_cells
+    reads: input<Token>.amount, output<Token>.amount, witness.expected_delta
+    assert_delta(Token.amount, witness.expected_delta, scope = selected_cells)
+}
+
+resource Token {
+    amount: u64
+}
+"#,
+        ))
+        .expect("witness field reads should remain runtime-bound metadata");
     }
 
     #[test]

@@ -4138,7 +4138,7 @@ fn validate_check_policy(metadata: &crate::CompileMetadata, args: &CheckArgs) ->
         }
     }
 
-    if args.deny_runtime_obligations {
+    if args.production || args.deny_runtime_obligations {
         let runtime_required_obligations = metadata
             .runtime
             .verifier_obligations
