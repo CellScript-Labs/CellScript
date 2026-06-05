@@ -4199,6 +4199,9 @@ fn validate_fiber_candidate_profile_package(repo_root: &Path) -> Result<Value> {
     let schemas = expected_files(repo_root, &root.join("schemas"), EXPECTED_FIBER_CANDIDATE_SCHEMA_FILES)?;
     let fixtures = expected_files(repo_root, &root.join("fixtures"), EXPECTED_FIBER_CANDIDATE_FIXTURES)?;
     let docs = expected_files(repo_root, &root.join("docs"), EXPECTED_FIBER_CANDIDATE_DOCS)?;
+    let audit_doc = std::fs::read_to_string(root.join("docs/AUDIT_STATUS.md")).unwrap_or_default();
+    let devnet_doc = std::fs::read_to_string(root.join("docs/DEVNET_STATEFUL_ACCEPTANCE.md")).unwrap_or_default();
+    let security_doc = std::fs::read_to_string(root.join("docs/SECURITY.md")).unwrap_or_default();
     let invariant_path = root.join("proofs/invariant_matrix.json");
     let invariant_payload = if invariant_path.is_file() { json_load_path(repo_root, &invariant_path)? } else { Value::Null };
     let invariants = invariant_payload.get("invariants").and_then(Value::as_array).cloned().unwrap_or_default();
@@ -4243,6 +4246,20 @@ fn validate_fiber_candidate_profile_package(repo_root: &Path) -> Result<Value> {
         ("schemas_exact".to_string(), Value::Bool(json_pointer_bool(&schemas, "/exact"))),
         ("fixtures_exact".to_string(), Value::Bool(json_pointer_bool(&fixtures, "/exact"))),
         ("docs_exact".to_string(), Value::Bool(json_pointer_bool(&docs, "/exact"))),
+        (
+            "docs_fiber_execution_claim_current".to_string(),
+            Value::Bool(
+                audit_doc.contains("live-fiber-node-execution-evidence")
+                    && audit_doc.contains("Fiber workflow discovery | live-fiber-workflow-suite-evidence")
+                    && !audit_doc.contains("pending-fiber-node-suite-execution")
+                    && !audit_doc.contains("discovery-ready-live-not-run")
+                    && devnet_doc.contains("all required Fiber workflow suites")
+                    && devnet_doc.contains("executed and passed")
+                    && !devnet_doc.contains("workflow execution remains pending")
+                    && security_doc.contains("external Fiber workflow execution evidence is present")
+                    && security_doc.contains("does not verify Fiber HTLCs, routes, liquidity, fees, or revocations"),
+            ),
+        ),
         (
             "invariant_schema".to_string(),
             Value::Bool(json_pointer_str(&invariant_payload, "/schema") == Some("novaseal-fiber-candidate-invariant-matrix-v0.1")),
@@ -7926,6 +7943,14 @@ mod tests {
             &failed_unsafe_empty_patch_metadata,
             "/workflow_checks/open-use-close-a-channel/bruno_compatibility_patch_files_exist"
         ));
+    }
+
+    #[test]
+    fn fiber_candidate_profile_docs_match_live_execution_boundary() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let report = validate_fiber_candidate_profile_package(repo_root).unwrap();
+        assert_eq!(json_pointer_str(&report, "/status"), Some("passed"));
+        assert!(json_pointer_bool(&report, "/checks/docs_fiber_execution_claim_current"));
     }
 
     #[test]

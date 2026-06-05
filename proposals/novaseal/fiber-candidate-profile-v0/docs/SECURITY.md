@@ -11,15 +11,17 @@
 
 ## Not Implemented
 
-- Live Fiber node/channel execution.
-- HTLC, path, route, fee, liquidity, or revocation verification.
-- Live devnet Fiber candidate evidence.
-- Wallet signing vectors for this profile.
+- In-contract verification of Fiber node state.
+- HTLC, path, route, fee, liquidity, or revocation verification inside the
+  NovaSeal transition.
 - Public/shared CellDep attestation.
 - External BIP340 runtime verifier TCB review.
 
 ## Risk Posture
 
-This package is source-level application-profile evidence, not proof of a Fiber
-payment-network execution. V1 readiness must remain blocked until live Fiber
-candidate evidence exists.
+This package has source-level application-profile evidence, live CKB stateful
+candidate evidence, and external Fiber workflow execution evidence is present.
+It does not verify Fiber HTLCs, routes, liquidity, fees, or revocations inside
+the CellScript profile. General NovaSeal production readiness remains blocked
+until the public/shared CellDep attestation, public BTC SPV evidence, RWA
+legal/registry review evidence, and external BIP340 TCB review are accepted.
