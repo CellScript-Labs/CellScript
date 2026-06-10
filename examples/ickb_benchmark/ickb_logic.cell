@@ -17,6 +17,7 @@ receipt IckbReceipt has store, create, consume {
     deposit_amount: u128
     deposit_accumulated_rate: u128
     logic_hash: Hash
+    owner: Address
 }
 
 resource IckbToken has store, create, consume, replace, burn, relock {
@@ -57,7 +58,8 @@ where
         deposit_quantity,
         deposit_amount,
         deposit_accumulated_rate,
-        logic_hash
+        logic_hash,
+        owner: depositor
     } with_lock(depositor)
 
 action mint_from_receipt(
@@ -71,6 +73,7 @@ where
         existing_tokens.xudt_args_hash == expected_xudt_args_hash,
         "wrong xudt binding"
     )
+    assert(receipt.owner == owner, "wrong receipt owner")
     assert(receipt.deposit_quantity != 0, "empty receipt")
     assert(receipt.deposit_accumulated_rate != 0, "missing accumulated rate")
 
@@ -129,7 +132,7 @@ where
 
 lock receipt_owner(protected receipt: IckbReceipt, witness claimed_owner: Address) -> bool {
     require receipt.deposit_quantity != 0
-    require claimed_owner == claimed_owner
+    require receipt.owner == claimed_owner
 }
 
 lock withdrawal_owner(protected request: WithdrawalRequest, witness claimed_owner: Address) -> bool {

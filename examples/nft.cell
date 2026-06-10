@@ -2,6 +2,8 @@ module cellscript::nft
 
 const MAX_SUPPLY: u64 = 10000
 
+const U64_MAX: u64 = 18446744073709551615
+
 const ROYALTY_BASIS_POINTS: u16 = 250
 
 struct Metadata {
@@ -53,6 +55,7 @@ receipt RoyaltyPayment has create {
 action mint(collection_before: Collection, to: Address, metadata_hash: Hash) -> (collection_after: Collection, nft: NFT)
 where
     assert(collection_before.total_supply < collection_before.max_supply, "Max supply reached")
+    assert(collection_before.total_supply < U64_MAX, "token id overflow")
     let token_id = collection_before.total_supply + 1
     preserve collection_after from collection_before {
         name
@@ -86,8 +89,17 @@ where
 
 action buy_from_listing(nft_before: NFT, listing: Listing, buyer: Address, seller: Address, payment: u64) -> (nft_after: NFT, royalty_payment: RoyaltyPayment, seller_payment: RoyaltyPayment)
 where
+    assert(listing.token_id == nft_before.token_id, "Listing token mismatch")
+    assert(listing.seller == seller, "Listing seller mismatch")
+    assert(nft_before.owner == seller, "Seller does not own NFT")
+    assert(listing.state == 0, "Listing inactive")
     assert(payment >= listing.price, "Insufficient payment")
-    let royalty_amount = payment * nft_before.royalty_bps as u64 / 10000
+    let royalty_bps = nft_before.royalty_bps as u64
+    assert(royalty_bps <= 10000, "Royalty too high")
+    if royalty_bps != 0 {
+        assert(payment <= U64_MAX / royalty_bps, "royalty overflow")
+    }
+    let royalty_amount = payment * royalty_bps / 10000
     let seller_amount = payment - royalty_amount
     preserve nft_after from nft_before {
         token_id
@@ -108,8 +120,18 @@ where
 
 action accept_offer(nft_before: NFT, offer: Offer, buyer: Address, seller: Address, price: u64, current_time: u64) -> (nft_after: NFT, royalty_payment: RoyaltyPayment, seller_payment: RoyaltyPayment)
 where
+    assert(offer.token_id == nft_before.token_id, "Offer token mismatch")
+    assert(offer.buyer == buyer, "Offer buyer mismatch")
+    assert(nft_before.owner == seller, "Seller does not own NFT")
+    assert(offer.state == 0, "Offer inactive")
+    assert(price == offer.price, "Offer price mismatch")
     assert(current_time < offer.expires_at, "Offer expired")
-    let royalty_amount = price * nft_before.royalty_bps as u64 / 10000
+    let royalty_bps = nft_before.royalty_bps as u64
+    assert(royalty_bps <= 10000, "Royalty too high")
+    if royalty_bps != 0 {
+        assert(price <= U64_MAX / royalty_bps, "royalty overflow")
+    }
+    let royalty_amount = price * royalty_bps / 10000
     let seller_amount = price - royalty_amount
     preserve nft_after from nft_before {
         token_id
@@ -128,6 +150,7 @@ where
 
 action batch_mint(collection_before: Collection, recipients: [Address; 4], metadata_hashes: [Hash; 4]) -> (collection_after: Collection, nft0: NFT, nft1: NFT, nft2: NFT, nft3: NFT)
 where
+    assert(collection_before.total_supply <= U64_MAX - 4, "batch token id overflow")
     assert(collection_before.total_supply + 4 <= collection_before.max_supply, "Max supply would be exceeded")
     let first_token_id = collection_before.total_supply + 1
     preserve collection_after from collection_before {

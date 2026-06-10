@@ -6,6 +6,8 @@ const MAX_SIGNERS: u8 = 10
 
 const DEFAULT_TIMEOUT: u64 = 1440
 
+const U64_MAX: u64 = 18446744073709551615
+
 enum ProposalStatus {
     Pending,
     Executed,
@@ -79,6 +81,8 @@ where
     assert(is_signer(&wallet_before, proposer), "Not a signer")
     assert(amount > 0, "Amount must be positive")
     assert(target != Address::zero(), "Invalid target address")
+    assert(wallet_before.nonce < U64_MAX, "proposal id overflow")
+    assert(current_time <= U64_MAX - DEFAULT_TIMEOUT, "proposal expiry overflow")
     let proposal_id = wallet_before.nonce + 1
     require wallet_after.wallet_id == wallet_before.wallet_id
     require wallet_after.signers == wallet_before.signers
@@ -92,6 +96,7 @@ where
     assert(current_time < proposal_before.expires_at, "Proposal expired")
     assert(is_signer(wallet, signer), "Not a signer")
     assert(!has_signed(&proposal_before, signer), "Already signed")
+    assert(proposal_before.signatures.len() < wallet.signers.len(), "too many signatures")
     require proposal_after.wallet_id == proposal_before.wallet_id
     require proposal_after.proposal_id == proposal_before.proposal_id
     require proposal_after.proposer == proposal_before.proposer
@@ -127,6 +132,8 @@ where
     assert(is_signer(&wallet_before, proposer), "Not a signer")
     assert(!is_signer(&wallet_before, new_signer), "Already a signer")
     assert(wallet_before.signers.len() < MAX_SIGNERS as usize, "Max signers reached")
+    assert(wallet_before.nonce < U64_MAX, "proposal id overflow")
+    assert(current_time <= U64_MAX - DEFAULT_TIMEOUT, "proposal expiry overflow")
     let proposal_id = wallet_before.nonce + 1
     require wallet_after.wallet_id == wallet_before.wallet_id
     require wallet_after.signers == wallet_before.signers
@@ -141,7 +148,10 @@ action propose_remove_signer(wallet_before: MultisigWallet, proposer: Address, s
 where
     assert(is_signer(&wallet_before, proposer), "Not a signer")
     assert(is_signer(&wallet_before, signer_to_remove), "Not a signer")
+    assert(wallet_before.signers.len() > 0, "empty signer set")
     assert(wallet_before.signers.len() - 1 >= wallet_before.threshold as usize, "Would fall below threshold")
+    assert(wallet_before.nonce < U64_MAX, "proposal id overflow")
+    assert(current_time <= U64_MAX - DEFAULT_TIMEOUT, "proposal expiry overflow")
     let proposal_id = wallet_before.nonce + 1
     require wallet_after.wallet_id == wallet_before.wallet_id
     require wallet_after.signers == wallet_before.signers
@@ -154,6 +164,8 @@ action propose_change_threshold(wallet_before: MultisigWallet, proposer: Address
 where
     assert(is_signer(&wallet_before, proposer), "Not a signer")
     assert(new_threshold >= MIN_SIGNERS && new_threshold <= wallet_before.signers.len() as u8, "Invalid threshold")
+    assert(wallet_before.nonce < U64_MAX, "proposal id overflow")
+    assert(current_time <= U64_MAX - DEFAULT_TIMEOUT, "proposal expiry overflow")
     let proposal_id = wallet_before.nonce + 1
     require wallet_after.wallet_id == wallet_before.wallet_id
     require wallet_after.signers == wallet_before.signers

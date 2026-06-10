@@ -2,6 +2,8 @@ module cellscript::amm_pool
 
 use cellscript::fungible_token::Token
 
+const U64_MAX: u64 = 18446744073709551615
+
 receipt LPReceipt has store, create, consume {
     pool_id: Hash,
     lp_amount: u64,
@@ -23,6 +25,7 @@ where
     assert(token_a.amount > 0 && token_b.amount > 0, "zero liquidity")
     assert(fee_rate_bps <= 10000, "fee too high")
     assert(token_a.type_hash() != token_b.type_hash(), "same token type")
+    assert(can_mul_u64(token_a.amount, token_b.amount), "liquidity overflow")
     let initial_lp = isqrt(token_a.amount * token_b.amount)
     consume token_a
     consume token_b
@@ -32,8 +35,20 @@ where
 action swap_a_for_b(pool_before: Pool, input: Token, min_output: u64, to: Address) -> (pool_after: Pool, token_out: Token)
 where
     assert(input.symbol == pool_before.token_a_symbol, "wrong input token")
-    let fee = input.amount * pool_before.fee_rate_bps as u64 / 10000
+    assert(input.amount > 0, "zero input")
+    assert(pool_before.reserve_a > 0 && pool_before.reserve_b > 0, "empty pool")
+    assert(pool_before.fee_rate_bps <= 10000, "fee too high")
+    let fee_rate = pool_before.fee_rate_bps as u64
+    if fee_rate != 0 {
+        assert(can_mul_u64(input.amount, fee_rate), "fee overflow")
+    }
+    let fee = input.amount * fee_rate / 10000
+    assert(fee <= input.amount, "fee exceeds input")
     let net_input = input.amount - fee
+    assert(net_input > 0, "zero net input")
+    assert(can_add_u64(pool_before.reserve_a, input.amount), "reserve a overflow")
+    assert(can_add_u64(pool_before.reserve_a, net_input), "denominator overflow")
+    assert(can_mul_u64(pool_before.reserve_b, net_input), "output overflow")
     let amount_out = pool_before.reserve_b * net_input / (pool_before.reserve_a + net_input)
     assert(amount_out >= min_output, "slippage exceeded")
     assert(amount_out < pool_before.reserve_b, "insufficient reserves")
@@ -52,9 +67,17 @@ action add_liquidity(pool_before: Pool, token_a: Token, token_b: Token, provider
 where
     assert(token_a.symbol == pool_before.token_a_symbol, "wrong token a")
     assert(token_b.symbol == pool_before.token_b_symbol, "wrong token b")
+    assert(pool_before.reserve_a > 0 && pool_before.reserve_b > 0, "empty pool")
+    assert(pool_before.total_lp > 0, "empty lp supply")
+    assert(can_mul_u64(token_a.amount, pool_before.total_lp), "lp a overflow")
+    assert(can_mul_u64(token_b.amount, pool_before.total_lp), "lp b overflow")
+    assert(can_add_u64(pool_before.reserve_a, token_a.amount), "reserve a overflow")
+    assert(can_add_u64(pool_before.reserve_b, token_b.amount), "reserve b overflow")
     let lp_from_a = token_a.amount * pool_before.total_lp / pool_before.reserve_a
     let lp_from_b = token_b.amount * pool_before.total_lp / pool_before.reserve_b
     let lp_amount = min(lp_from_a, lp_from_b)
+    assert(lp_amount > 0, "zero lp mint")
+    assert(can_add_u64(pool_before.total_lp, lp_amount), "lp supply overflow")
     preserve pool_after from pool_before {
         token_a_symbol
         token_b_symbol
@@ -70,6 +93,12 @@ where
 action remove_liquidity(pool_before: Pool, receipt: LPReceipt, provider: Address) -> (pool_after: Pool, token_a_out: Token, token_b_out: Token)
 where
     assert(receipt.pool_id == pool_before.type_hash(), "wrong pool")
+    assert(pool_before.reserve_a > 0 && pool_before.reserve_b > 0, "empty pool")
+    assert(pool_before.total_lp > 0, "empty lp supply")
+    assert(receipt.lp_amount > 0, "zero lp burn")
+    assert(receipt.lp_amount <= pool_before.total_lp, "lp exceeds supply")
+    assert(can_mul_u64(receipt.lp_amount, pool_before.reserve_a), "amount a overflow")
+    assert(can_mul_u64(receipt.lp_amount, pool_before.reserve_b), "amount b overflow")
     let amount_a = receipt.lp_amount * pool_before.reserve_a / pool_before.total_lp
     let amount_b = receipt.lp_amount * pool_before.reserve_b / pool_before.total_lp
     preserve pool_after from pool_before {
@@ -90,7 +119,7 @@ where
         return 0
     }
     let mut x = n
-    let mut y = (x + 1) / 2
+    let mut y = x / 2 + 1
     while y < x {
         x = y
         y = (x + n / x) / 2
@@ -104,3 +133,11 @@ where
     } else {
         b
     }
+
+fn can_add_u64(left: u64, right: u64) -> bool {
+    right <= U64_MAX - left
+}
+
+fn can_mul_u64(left: u64, right: u64) -> bool {
+    left == 0 || right <= U64_MAX / left
+}

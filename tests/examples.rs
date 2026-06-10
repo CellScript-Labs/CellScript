@@ -11,30 +11,30 @@ const BUNDLED_EXAMPLES: [&str; 7] =
 const BACKEND_SHAPE_BASELINE_JSON: &str = include_str!("backend_shape_baseline.json");
 
 const BUNDLED_EXAMPLE_ELF_SIZE_BUDGETS: [(&str, usize); 7] = [
-    ("amm_pool.cell", 40 * 1024),
+    ("amm_pool.cell", 48 * 1024),
     ("launch.cell", 30 * 1024),
-    ("multisig.cell", 100 * 1024),
-    ("nft.cell", 54 * 1024),
+    ("multisig.cell", 108 * 1024),
+    ("nft.cell", 60 * 1024),
     ("timelock.cell", 72 * 1024),
     ("token.cell", 16 * 1024),
-    ("vesting.cell", 24 * 1024),
+    ("vesting.cell", 26 * 1024),
 ];
 
 const BUNDLED_EXAMPLE_ASM_SHAPE_BUDGETS: [(&str, AssemblyShapeBudget); 7] = [
     (
         "amm_pool.cell",
         AssemblyShapeBudget {
-            max_lines: 9_000,
+            max_lines: 10_900,
             max_fail_handlers: 32,
             max_shared_epilogues: 8,
-            max_text_bytes: 36 * 1024,
+            max_text_bytes: 42 * 1024,
             max_relaxed_branches: 4,
             max_cond_branch_abs_distance: 4_096,
             max_machine_blocks: 1_600,
             max_machine_block_bytes: 512,
             max_cfg_edges: 2_700,
-            max_call_edges: 460,
-            max_unreachable_machine_blocks: 1_200,
+            max_call_edges: 540,
+            max_unreachable_machine_blocks: 1_250,
         },
     ),
     (
@@ -56,45 +56,45 @@ const BUNDLED_EXAMPLE_ASM_SHAPE_BUDGETS: [(&str, AssemblyShapeBudget); 7] = [
     (
         "multisig.cell",
         AssemblyShapeBudget {
-            max_lines: 25_000,
+            max_lines: 26_500,
             max_fail_handlers: 72,
             max_shared_epilogues: 20,
-            max_text_bytes: 96 * 1024,
+            max_text_bytes: 104 * 1024,
             max_relaxed_branches: 4,
             max_cond_branch_abs_distance: 8_900,
-            max_machine_blocks: 3_900,
+            max_machine_blocks: 4_200,
             max_machine_block_bytes: 512,
-            max_cfg_edges: 6_400,
-            max_call_edges: 510,
-            max_unreachable_machine_blocks: 3_700,
+            max_cfg_edges: 6_800,
+            max_call_edges: 540,
+            max_unreachable_machine_blocks: 3_950,
         },
     ),
     (
         "nft.cell",
         AssemblyShapeBudget {
-            max_lines: 13_000,
+            max_lines: 14_500,
             max_fail_handlers: 72,
             max_shared_epilogues: 18,
-            max_text_bytes: 50 * 1024,
+            max_text_bytes: 54 * 1024,
             max_relaxed_branches: 4,
             max_cond_branch_abs_distance: 7_500,
             max_machine_blocks: 2_500,
             max_machine_block_bytes: 320,
             max_cfg_edges: 4_100,
-            max_call_edges: 500,
+            max_call_edges: 560,
             max_unreachable_machine_blocks: 2_100,
         },
     ),
     (
         "timelock.cell",
         AssemblyShapeBudget {
-            max_lines: 17_000,
+            max_lines: 17_600,
             max_fail_handlers: 92,
             max_shared_epilogues: 22,
             max_text_bytes: 65 * 1024,
             max_relaxed_branches: 4,
             max_cond_branch_abs_distance: 4_300,
-            max_machine_blocks: 2_050,
+            max_machine_blocks: 2_100,
             max_machine_block_bytes: 21_000,
             max_cfg_edges: 3_500,
             max_call_edges: 420,
@@ -120,17 +120,17 @@ const BUNDLED_EXAMPLE_ASM_SHAPE_BUDGETS: [(&str, AssemblyShapeBudget); 7] = [
     (
         "vesting.cell",
         AssemblyShapeBudget {
-            max_lines: 5_100,
+            max_lines: 5_800,
             max_fail_handlers: 36,
             max_shared_epilogues: 6,
-            max_text_bytes: 20 * 1024,
+            max_text_bytes: 22 * 1024,
             max_relaxed_branches: 4,
             max_cond_branch_abs_distance: 3_000,
-            max_machine_blocks: 750,
+            max_machine_blocks: 820,
             max_machine_block_bytes: 512,
-            max_cfg_edges: 1_320,
+            max_cfg_edges: 1_400,
             max_call_edges: 250,
-            max_unreachable_machine_blocks: 670,
+            max_unreachable_machine_blocks: 740,
         },
     ),
 ];
@@ -276,6 +276,52 @@ fn checked_in_examples_do_not_contain_unclassified_placeholder_language() {
         for needle in forbidden {
             assert!(!source.contains(needle), "{path} contains unclassified placeholder language: {needle}");
         }
+    }
+}
+
+#[test]
+fn checked_in_examples_do_not_use_vacuous_identity_guards() {
+    let forbidden = [
+        "require claimed_owner == claimed_owner",
+        "assert(claimed_owner == claimed_owner",
+        "require owner == owner",
+        "assert(owner == owner",
+        "require seller == seller",
+        "assert(seller == seller",
+        "require buyer == buyer",
+        "assert(buyer == buyer",
+        "require signer == signer",
+        "assert(signer == signer",
+        "require proposer == proposer",
+        "assert(proposer == proposer",
+    ];
+    for path in checked_in_example_cell_files() {
+        let source = std::fs::read_to_string(&path).unwrap_or_else(|err| panic!("failed to read {path}: {err}"));
+        for needle in forbidden {
+            assert!(!source.contains(needle), "{path} contains vacuous identity guard: {needle}");
+        }
+    }
+}
+
+#[test]
+fn marketplace_and_ickb_examples_bind_consumed_receipts_to_domain_state() {
+    let nft_source = std::fs::read_to_string(example_path("nft.cell")).expect("nft source should be readable");
+    for needle in [
+        "assert(listing.token_id == nft_before.token_id",
+        "assert(listing.seller == seller",
+        "assert(nft_before.owner == seller",
+        "assert(listing.state == 0",
+        "assert(offer.token_id == nft_before.token_id",
+        "assert(offer.buyer == buyer",
+        "assert(offer.state == 0",
+        "assert(price == offer.price",
+    ] {
+        assert!(nft_source.contains(needle), "nft marketplace receipt binding missing: {needle}");
+    }
+
+    let ickb_source = std::fs::read_to_string(example_path("ickb_benchmark/ickb_logic.cell")).expect("iCKB source should be readable");
+    for needle in ["owner: Address", "assert(receipt.owner == owner", "require receipt.owner == claimed_owner"] {
+        assert!(ickb_source.contains(needle), "iCKB receipt ownership binding missing: {needle}");
     }
 }
 
@@ -1677,8 +1723,8 @@ fn launch_seed_pool_composition_is_scheduler_visible() {
     assert_eq!(launch_pool_primitive.status, "runtime-required");
     assert_eq!(launch_pool_primitive.callee, None);
     assert_eq!(launch_pool_primitive.binding.as_deref(), Some("pool"));
-    assert_eq!(launch_pool_primitive.source_invariant_count, 3);
-    assert_pool_component(launch_pool_primitive, "assert-invariant-cfg=3", "launch_token");
+    assert_eq!(launch_pool_primitive.source_invariant_count, 10);
+    assert_pool_component(launch_pool_primitive, "assert-invariant-cfg=10", "launch_token");
     assert_pool_component(launch_pool_primitive, "source-invariant:source-guard-0=checked-runtime", "launch_token");
     assert_pool_component(launch_pool_primitive, "source-invariant:source-guard-1=checked-runtime", "launch_token");
     assert_pool_component(launch_pool_primitive, "source-invariant:source-guard-2=checked-runtime", "launch_token");
