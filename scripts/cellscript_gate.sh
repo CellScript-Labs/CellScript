@@ -89,6 +89,7 @@ check_trailing_whitespace() {
         "tests/syntax_combo/seeds/require-block-lifecycle.cell"
         "tests/cli.rs"
         "tests/examples.rs"
+        "tests/novaseal_sources.rs"
     )
     if ((${#files[@]} > 0)) && rg -n '[ \t]+$' "${files[@]}"; then
         printf '\nTrailing whitespace found in tracked CellScript files.\n' >&2
@@ -185,6 +186,8 @@ check_novaseal_acceptance_boundaries() {
         'proposals/novaseal/DEVNET_FULL_ACCEPTANCE_RUNBOOK.md::missing public BTC SPV evidence'
         'docs/releases/CELLSCRIPT_0_16_RELEASE_NOTES_DRAFT.md::acceptance_blockers=0'
         'proposals/novaseal/v0-mvp-skeleton/docs/AUDIT_STATUS.md::acceptance_blockers=0'
+        'tests/novaseal_sources.rs::EXPECTED_TRACKED_NOVASEAL_CELL_SOURCES'
+        'tests/novaseal_sources.rs::all_novaseal_executable_entries_compile_for_ckb_profile'
     )
     local item file pattern
     for item in "${required[@]}"; do
