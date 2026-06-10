@@ -55,7 +55,7 @@ lock owned_unlock(protected owned: OwnedWithdrawal, protected owner_cell: OwnerC
     require owned.owned_index == owner_cell.owned_index
 }
 
-// TODO(ickb-benchmark): original Owned-Owner uses a signed little-endian i32
-// relative distance and validates lock/type roles across inputs and outputs.
-// Current CellScript has unsigned integer types only and no direct source-index
-// or role-introspection expression.
+// LIMITATION(ickb-benchmark:owned-owner-signed-relative-index): original
+// Owned-Owner uses a signed little-endian i32 relative distance and validates
+// lock/type roles across inputs and outputs. Current CellScript has unsigned
+// integer types only and no direct source-index or role-introspection expression.

@@ -136,17 +136,20 @@ lock withdrawal_owner(protected request: WithdrawalRequest, witness claimed_owne
     require request.owner == claimed_owner
 }
 
-// TODO(ickb-benchmark): first-class CKB HeaderDep access is required to prove
-// that `deposit_accumulated_rate` was loaded from the actual deposit or receipt
-// block header rather than supplied by witness or builder-side convention.
-// TODO(ickb-benchmark): first-class Script values are required to express the
-// exact iCKB Logic lock/type dual-use and xUDT args `[logic_hash, 0x80000000]`.
-// TODO(ickb-benchmark): executable aggregate invariant lowering is required
-// for transaction-wide exact equality across iCKB tokens, receipts, and deposits.
-// TODO(ickb-benchmark): the Rust fixture model exercises the 10% oversize
-// discount formula exactly; this CellScript surface keeps the helper linear
-// because current u128 support rejects the generic multiply/divide shape needed
-// here.
-// TODO(ickb-benchmark): current type rules reject ordering comparisons on u128,
-// so min/max capacity bounds stay in the Rust model fixtures until a checked
-// wide-integer comparison primitive exists.
+// LIMITATION(ickb-benchmark:header-dep-accumulated-rate): first-class CKB HeaderDep
+// access is required to prove that `deposit_accumulated_rate` was loaded from the
+// actual deposit or receipt block header rather than supplied by witness or
+// builder-side convention.
+// LIMITATION(ickb-benchmark:script-role-xudt-args): first-class Script values are
+// required to express the exact iCKB Logic lock/type dual-use and xUDT args
+// `[logic_hash, 0x80000000]`.
+// LIMITATION(ickb-benchmark:aggregate-invariant-lowering): executable aggregate
+// invariant lowering is required for transaction-wide exact equality across iCKB
+// tokens, receipts, and deposits.
+// LIMITATION(ickb-benchmark:oversize-discount-arithmetic): the Rust fixture model
+// exercises the 10% oversize discount formula exactly; this CellScript surface
+// keeps the helper linear because current u128 support rejects the generic
+// multiply/divide shape needed here.
+// LIMITATION(ickb-benchmark:u128-ordering-bounds): current type rules reject
+// ordering comparisons on u128, so min/max capacity bounds stay in the Rust model
+// fixtures until a checked wide-integer comparison primitive exists.

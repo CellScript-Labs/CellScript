@@ -8,6 +8,16 @@ const SOFT_CAP: u128 = 10_000_000_000_000;
 const MIN_DEPOSIT: u128 = 100_000_000_000;
 const MAX_DEPOSIT: u128 = 100_000_000_000_000;
 const ICKB_XUDT_BINDING: &str = "ickb_logic_hash+owner_mode_input_type";
+const EXPECTED_LIMITATION_IDS: [&str; 8] = [
+    "aggregate-invariant-lowering",
+    "header-dep-accumulated-rate",
+    "limit-order-metapoint-script-role",
+    "limit-order-wide-valuation",
+    "oversize-discount-arithmetic",
+    "owned-owner-signed-relative-index",
+    "script-role-xudt-args",
+    "u128-ordering-bounds",
+];
 
 const POSITIVE_FIXTURES: [&str; 6] = [
     "valid_deposit_phase_1.json",
@@ -104,14 +114,80 @@ fn ickb_diff_matrix_is_partial_and_consistent_with_model_fixtures() {
     }
 }
 
+#[test]
+fn ickb_limitations_manifest_matches_source_markers_and_model_fixtures() {
+    let manifest = read_example_json("limitations.json");
+    assert_eq!(manifest["schema"], "cellscript-ickb-benchmark-limitations-v0");
+    assert_eq!(manifest["status"], "model_level_only_known_gaps");
+
+    let limitations = manifest["limitations"].as_array().expect("limitations");
+    let manifest_ids = limitations.iter().map(|entry| str_field(entry, "id").to_string()).collect::<BTreeSet<_>>();
+    let expected_ids = EXPECTED_LIMITATION_IDS.iter().map(|id| (*id).to_string()).collect::<BTreeSet<_>>();
+    assert_eq!(manifest_ids, expected_ids);
+
+    let source_files = ["README.md", "ickb_logic.cell", "limit_order.cell", "owned_owner.cell"];
+    let mut source_marker_ids = BTreeSet::new();
+    for file in source_files {
+        let source = std::fs::read_to_string(example_path(file)).unwrap_or_else(|err| panic!("failed to read {file}: {err}"));
+        assert!(!source.contains("TODO(ickb-benchmark)"), "{file} still has stale TODO markers");
+        if file.ends_with(".cell") {
+            source_marker_ids.extend(ickb_limitation_ids(&source));
+        }
+    }
+    assert_eq!(source_marker_ids, expected_ids);
+
+    for entry in limitations {
+        let id = str_field(entry, "id");
+        assert!(!str_field(entry, "requires_compiler_feature").is_empty(), "{id} must name the missing compiler/runtime feature");
+        assert!(!str_field(entry, "production_readiness_impact").is_empty(), "{id} must state production-readiness impact");
+        for source_file in array_field(entry, "source_files") {
+            let source_file = source_file.as_str().expect("source file");
+            let source = std::fs::read_to_string(example_path(source_file))
+                .unwrap_or_else(|err| panic!("failed to read limitation source {source_file}: {err}"));
+            assert!(source.contains(&format!("LIMITATION(ickb-benchmark:{id})")), "{id} missing source marker in {source_file}");
+        }
+        let fixtures = array_field(entry, "model_fixtures");
+        assert!(!fixtures.is_empty(), "{id} must cite at least one model fixture");
+        for fixture in fixtures {
+            let fixture = fixture.as_str().expect("fixture path");
+            let payload = read_fixture_path(fixture);
+            assert_eq!(payload["model_level_only"], true, "{id} fixture {fixture} must stay honestly labelled");
+        }
+    }
+}
+
 fn example_path(file: &str) -> Utf8PathBuf {
     Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples").join("ickb_benchmark").join(file)
+}
+
+fn read_example_json(file: &str) -> Value {
+    let path = example_path(file);
+    let content = std::fs::read_to_string(&path).unwrap_or_else(|err| panic!("failed to read {path}: {err}"));
+    serde_json::from_str(&content).unwrap_or_else(|err| panic!("failed to parse {path}: {err}"))
 }
 
 fn read_fixture(dir: &str, file: &str) -> Value {
     let path = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests").join("benchmarks").join(dir).join(file);
     let content = std::fs::read_to_string(&path).unwrap_or_else(|err| panic!("failed to read {path}: {err}"));
     serde_json::from_str(&content).unwrap_or_else(|err| panic!("failed to parse {path}: {err}"))
+}
+
+fn read_fixture_path(path: &str) -> Value {
+    let (dir, file) = path.split_once('/').unwrap_or_else(|| panic!("fixture path must be dir/file: {path}"));
+    read_fixture(dir, file)
+}
+
+fn ickb_limitation_ids(source: &str) -> Vec<String> {
+    let prefix = "LIMITATION(ickb-benchmark:";
+    source
+        .match_indices(prefix)
+        .map(|(index, _)| {
+            let rest = &source[index + prefix.len()..];
+            rest.split_once(')')
+                .map(|(id, _)| id.to_string())
+                .unwrap_or_else(|| panic!("unterminated iCKB limitation marker near {rest}"))
+        })
+        .collect()
 }
 
 fn evaluate_fixture(fixture: &Value) -> Result<(), String> {

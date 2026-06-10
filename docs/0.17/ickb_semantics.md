@@ -41,7 +41,7 @@ stateDiagram-v2
 
 | Invariant | Source logic | Benchmark coverage |
 |---|---|---|
-| Empty script args for iCKB/Owned-Owner/Limit Order script uses | `has_empty_args` checks current script args and output lock args. `utils/src/utils.rs:14-35` | Model fixture `witness_malformation`; CellScript TODO for direct script args on all output roles |
+| Empty script args for iCKB/Owned-Owner/Limit Order script uses | `has_empty_args` checks current script args and output lock args. `utils/src/utils.rs:14-35` | Model fixture `witness_malformation`; unresolved source/role limitations are tracked in `examples/ickb_benchmark/limitations.json` |
 | DAO deposit receipt matching | Output deposits counted by unoccupied capacity must equal output receipt quantities. `ickb_logic/src/entry.rs:86-139` | Positive `valid_deposit_phase_1`; negative `forged_receipt` |
 | Deposit size bounds | `DepositTooSmall` and `DepositTooBig` at `ickb_logic/src/entry.rs:99-105` | Positive `valid_deposit_phase_1`; negative `capacity_violation` |
 | Receipt cannot be empty | `EmptyReceipt` at `ickb_logic/src/entry.rs:111-116` | Model code supports this failure class |
@@ -49,7 +49,7 @@ stateDiagram-v2
 | Correct accumulated rate | `deposit_to_ickb` loads header DAO AR via `extract_accumulated_rate`. `ickb_logic/src/entry.rs:71-83`; `utils/src/utils.rs:54-61` | Negative `wrong_accumulated_rate` is model-level because CellScript has no first-class HeaderDep binding |
 | Header dep required | `load_header` fails if header for input/source is absent. `utils/src/utils.rs:54-61` | Negative `missing_header_dep`, model-level |
 | xUDT args binding | Script hash computed from xUDT code hash and iCKB Logic hash plus flags. `ickb_logic/src/celltype.rs:116-124` | Positive `valid_ickb_transfer`; negative `wrong_xudt_binding` |
-| Script role confusion | iCKB rejects invalid lock/type combinations; Limit Order and Owned-Owner reject cells where script is both lock and type. | Negatives `script_role_confusion`; TODO in CellScript specs |
+| Script role confusion | iCKB rejects invalid lock/type combinations; Limit Order and Owned-Owner reject cells where script is both lock and type. | Negatives `script_role_confusion`; `script-role-xudt-args` and `limit-order-metapoint-script-role` limitations in `examples/ickb_benchmark/limitations.json` |
 | Owned-Owner pair cardinality | For each metapoint, owned and owner counts must both be 1. `owned_owner/src/entry.rs:28-62` | Positive `valid_owned_owner_unlock`; negative `wrong_owner` |
 | Limit Order value conservation | `i.ckb * ckb_mul + i.udt * udt_mul <= o.ckb * ckb_mul + o.udt * udt_mul`. `limit_order/src/entry.rs:102-105` | Positive `valid_limit_order_fulfillment`; negative `limit_order_underpayment` |
 | Limit Order asset binding | UDT type hash is part of `Info`; input and output info must match. `limit_order/src/entry.rs:86-89`, `244-259` | Negative `limit_order_wrong_asset` |

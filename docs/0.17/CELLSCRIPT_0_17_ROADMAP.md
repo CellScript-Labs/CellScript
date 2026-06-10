@@ -420,8 +420,8 @@ Extend the production gate so iCKB-grade claims require:
 4. Signed integer and checked 256-bit arithmetic support.
 5. Executable CKB fixture runner.
 6. Partial iCKB differential harness with honest pass/fail/unsupported labels.
-7. Updated iCKB benchmark specs with fewer TODO markers and more runtime-backed
-   tests.
+7. Updated iCKB benchmark specs with fewer unresolved limitation manifest
+   entries and more runtime-backed tests.
 8. Updated final report stating whether CellScript moved from incomplete to
    partially iCKB-grade, or remains blocked.
 
@@ -504,9 +504,9 @@ cargo test --locked -p cellscript --test ickb_diff
 
 0.17 is complete only when:
 
-1. iCKB benchmark specs compile without critical TODO markers for HeaderDep,
-   xUDT binding, script role, aggregate accounting, DAO maturity, or Limit
-   Order arithmetic.
+1. iCKB benchmark specs compile without unresolved limitation manifest entries
+   for HeaderDep, xUDT binding, script role, aggregate accounting, DAO maturity,
+   or Limit Order arithmetic.
 2. At least one iCKB Logic positive case executes in CKB VM.
 3. At least five iCKB adversarial cases fail in CKB VM for named invariant
    reasons.

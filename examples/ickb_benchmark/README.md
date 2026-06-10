@@ -4,9 +4,9 @@ This directory contains an iCKB-inspired CellScript benchmark, not a faithful
 port of the audited iCKB Rust scripts.
 
 The goal is to keep the scope explicit: each `.cell` file models the invariant
-shape that CellScript can currently express, while TODO markers identify the
-CKB-native semantics that still require compiler/runtime features or raw script
-code.
+shape that CellScript can currently express, while `LIMITATION(ickb-benchmark:*)`
+markers and `limitations.json` identify the CKB-native semantics that still
+require compiler/runtime features or raw script code.
 
 ## Scope
 
@@ -22,7 +22,8 @@ The benchmark does not prove behavioural equivalence with the original iCKB
 scripts. The Rust integration tests under `tests/ickb_benchmark.rs` compile
 these CellScript specs and run deterministic model-level positive, negative, and
 differential fixtures. Fixtures that do not execute a generated CKB VM binary
-are labelled `MODEL_LEVEL_ONLY`.
+are labelled `MODEL_LEVEL_ONLY`, and each unresolved protocol limitation is
+tracked in `limitations.json`.
 
 ## Original Semantics Mapped
 
@@ -50,11 +51,8 @@ git diff --check
 
 ## Known Limitations
 
-- HeaderDep access and accumulated-rate binding are modelled as explicit fields.
-- xUDT args construction is represented by an expected hash field.
-- lock/type script-role dual use is not first-class in CellScript.
-- transaction-wide group scans and exact iCKB accounting are tested by the
-  benchmark model, not by executable aggregate invariant lowering.
-- Owned-Owner signed relative indexes are approximated with unsigned indexes.
-- Limit Order C256 checked arithmetic and MetaPoint/OutPoint binding are not
-  native CellScript concepts.
+See `limitations.json` for the authoritative list. The current unresolved IDs
+cover HeaderDep accumulated-rate binding, first-class script role/args
+introspection, executable aggregate invariant lowering, iCKB discount and wide
+integer arithmetic, Limit Order MetaPoint/OutPoint binding, and Owned-Owner
+signed relative-index semantics.

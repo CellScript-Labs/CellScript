@@ -127,9 +127,11 @@ lock order_owner(protected order: LimitOrder, witness claimed_owner: Address) ->
     require order.owner == claimed_owner
 }
 
-// TODO(ickb-benchmark): CellScript has no native C256 checked arithmetic type,
-// no first-class OutPoint/MetaPoint relation, and no script-role primitive for
-// "same script as lock in the order cell and as type in the master cell".
-// TODO(ickb-benchmark): current u128 support rejects generic order comparisons
-// and wide multiply-add valuation checks, so exact price matching remains in
-// the Rust model fixtures until a checked wide-arithmetic primitive exists.
+// LIMITATION(ickb-benchmark:limit-order-metapoint-script-role): CellScript has no
+// native C256 checked arithmetic type, no first-class OutPoint/MetaPoint relation,
+// and no script-role primitive for "same script as lock in the order cell and as
+// type in the master cell".
+// LIMITATION(ickb-benchmark:limit-order-wide-valuation): current u128 support
+// rejects generic order comparisons and wide multiply-add valuation checks, so
+// exact price matching remains in the Rust model fixtures until a checked
+// wide-arithmetic primitive exists.
