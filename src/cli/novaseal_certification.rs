@@ -549,6 +549,11 @@ const RWA_LEGAL_REVIEW_SOURCE_HASH_PATHS: &[&str] = &[
     "proposals/novaseal/rwa-receipt-profile-v0/fixtures",
     "proposals/novaseal/rwa-receipt-profile-v0/proofs/invariant_matrix.json",
 ];
+const BIP340_TCB_SOURCE_HASH_PATHS: &[&str] = &[
+    "proposals/novaseal/v0-mvp-skeleton/verifier/novaseal_btc_verifier_core",
+    "proposals/novaseal/v0-mvp-skeleton/verifier/novaseal_btc_verifier_riscv",
+    "proposals/novaseal/v0-mvp-skeleton/verifier/novaseal_btc_verifier",
+];
 
 const EXPECTED_FIBER_NODE_EXECUTION_SCHEMA: &str = "novaseal-fiber-node-execution-v0.3";
 const EXPECTED_FIBER_REPO_ORIGIN: &str = "https://github.com/nervosnetwork/fiber.git";
@@ -2974,6 +2979,10 @@ fn provenance_summary(report: &Value, repo_root: &Path, source_paths: &[&str]) -
 }
 
 fn source_tree_hash(repo_root: &Path, paths: &[&str]) -> Result<Value> {
+    source_tree_hash_with_options(repo_root, paths, false)
+}
+
+fn source_tree_hash_with_options(repo_root: &Path, paths: &[&str], include_markdown: bool) -> Result<Value> {
     let canonical_repo_root = repo_root.canonicalize()?;
     let mut files = BTreeSet::new();
     let mut invalid_paths = BTreeSet::new();
@@ -2992,7 +3001,15 @@ fn source_tree_hash(repo_root: &Path, paths: &[&str]) -> Result<Value> {
             }
         } else if metadata.is_dir() {
             if safe_directory_within_root(&canonical_repo_root, &path)?.is_some() {
-                collect_source_tree_files(repo_root, &canonical_repo_root, &path, &path, &mut files, &mut invalid_paths)?;
+                collect_source_tree_files(
+                    repo_root,
+                    &canonical_repo_root,
+                    &path,
+                    &path,
+                    include_markdown,
+                    &mut files,
+                    &mut invalid_paths,
+                )?;
             } else {
                 invalid_paths.insert(rel(repo_root, &path));
             }
@@ -3023,6 +3040,7 @@ fn collect_source_tree_files(
     canonical_repo_root: &Path,
     root: &Path,
     path: &Path,
+    include_markdown: bool,
     files: &mut BTreeSet<PathBuf>,
     invalid_paths: &mut BTreeSet<String>,
 ) -> Result<()> {
@@ -3038,11 +3056,11 @@ fn collect_source_tree_files(
             invalid_paths.insert(rel(repo_root, &child));
         } else if metadata.is_dir() {
             if safe_directory_within_root(canonical_repo_root, &child)?.is_some() {
-                collect_source_tree_files(repo_root, canonical_repo_root, root, &child, files, invalid_paths)?;
+                collect_source_tree_files(repo_root, canonical_repo_root, root, &child, include_markdown, files, invalid_paths)?;
             } else {
                 invalid_paths.insert(rel(repo_root, &child));
             }
-        } else if metadata.is_file() && source_tree_file_allowed(&child) {
+        } else if metadata.is_file() && source_tree_file_allowed(&child, include_markdown) {
             if safe_regular_file_within_root(canonical_repo_root, &child)?.is_some() {
                 files.insert(child);
             } else {
@@ -3053,8 +3071,9 @@ fn collect_source_tree_files(
     Ok(())
 }
 
-fn source_tree_file_allowed(path: &Path) -> bool {
+fn source_tree_file_allowed(path: &Path, include_markdown: bool) -> bool {
     path.file_name().is_some_and(|name| name == "Cargo.lock")
+        || (include_markdown && path.file_name().is_some_and(|name| name == "README.md"))
         || path
             .extension()
             .and_then(|ext| ext.to_str())
@@ -5610,6 +5629,34 @@ fn validate_attestation_templates(
     }))
 }
 
+fn validate_bip340_tcb_source_inventory(repo_root: &Path, tcb: &Value) -> Result<Value> {
+    let current_source = source_tree_hash_with_options(repo_root, BIP340_TCB_SOURCE_HASH_PATHS, true)?;
+    let recorded_files = tcb
+        .pointer("/source_inventory/files")
+        .and_then(Value::as_array)
+        .map(|files| files.iter().filter_map(|row| json_pointer_str(row, "/path").map(str::to_string)).collect::<Vec<_>>())
+        .unwrap_or_default();
+    let current_files = json_array_strings(&current_source, "/files");
+    let checks = json!({
+        "current_source_tree_valid": json_pointer_bool(&current_source, "/valid"),
+        "source_tree_sha256_matches_current": normalize_hex(json_pointer_str(tcb, "/source_inventory/source_tree_sha256"))
+            == normalize_hex(json_pointer_str(&current_source, "/sha256")),
+        "source_tree_file_count_matches_current": json_pointer_i64(tcb, "/source_inventory/total_files")
+            == json_pointer_i64(&current_source, "/file_count"),
+        "source_tree_file_list_matches_current": recorded_files == current_files,
+        "source_tree_has_files": json_pointer_i64(&current_source, "/file_count").is_some_and(|count| count > 0),
+        "source_tree_invalid_paths_empty": json_array_strings(&current_source, "/invalid_paths").is_empty(),
+    });
+    Ok(json!({
+        "schema": "novaseal-bip340-tcb-source-inventory-validation-v0.1",
+        "status": if object_values_all_true(Some(&checks)) { "passed" } else { "failed" },
+        "checks": checks,
+        "recorded_source_tree_sha256": normalize_hex(json_pointer_str(tcb, "/source_inventory/source_tree_sha256")),
+        "current_source_tree": current_source,
+        "recorded_files": recorded_files,
+    }))
+}
+
 fn validate_security_audit_coverage(
     repo_root: &Path,
     core_security: &Value,
@@ -5637,6 +5684,7 @@ fn validate_security_audit_coverage(
     let local_tcb_gates = tcb.get("local_review_gates").and_then(Value::as_array).cloned().unwrap_or_default();
     let local_tcb_gates_passed =
         !local_tcb_gates.is_empty() && local_tcb_gates.iter().all(|gate| json_pointer_str(gate, "/status") == Some("passed"));
+    let tcb_source_inventory = validate_bip340_tcb_source_inventory(repo_root, tcb)?;
     let checks = json!({
         "agreement_security_sections_present": agreement_security.contains("## Implemented Guards")
             && agreement_security.contains("## Not Implemented")
@@ -5652,6 +5700,7 @@ fn validate_security_audit_coverage(
         "local_bip340_tcb_gates_passed": local_tcb_gates_passed,
         "tcb_source_inventory_present": json_pointer_str(tcb, "/source_inventory/source_tree_sha256").is_some()
             && json_pointer_i64(tcb, "/source_inventory/total_files").is_some(),
+        "tcb_source_inventory_matches_current": json_pointer_str(&tcb_source_inventory, "/status") == Some("passed"),
         "tcb_review_hits_empty": review_hits.is_empty(),
         "unsafe_boundary_documented": riscv_shell_doc.contains("## Unsafe Boundary")
             && riscv_shell_doc.contains("syscall register ABI only"),
@@ -5675,6 +5724,7 @@ fn validate_security_audit_coverage(
             "safety_comment_count": safety_comment_count,
             "boundary": "RISC-V verifier shell syscall ABI only; no raw pointer dereference, transmute, mutable static, or C FFI memory access is accepted by this local audit gate.",
         },
+        "tcb_source_inventory": tcb_source_inventory,
         "residual_production_blockers": [
             "public/shared CellDep pinning attestation",
             "public BTC SPV evidence for BTC-facing profiles",
@@ -10872,6 +10922,8 @@ mod tests {
             "// SAFETY: test syscall boundary\nunsafe {\n}\n// SAFETY: second syscall boundary\nunsafe {\n}\n",
         )
         .unwrap();
+        let tcb_source = source_tree_hash_with_options(temp.path(), BIP340_TCB_SOURCE_HASH_PATHS, true).unwrap();
+        let tcb_files = json_array_strings(&tcb_source, "/files").into_iter().map(|path| json!({ "path": path })).collect::<Vec<_>>();
 
         let core_security = json!({ "status": "passed" });
         let invariant_matrix = json!({ "status": "passed" });
@@ -10884,8 +10936,9 @@ mod tests {
         let tcb = json!({
             "status": "passed_local_review_external_attestation_required",
             "source_inventory": {
-                "source_tree_sha256": format!("0x{}", "11".repeat(32)),
-                "total_files": 3,
+                "source_tree_sha256": json_pointer_str(&tcb_source, "/sha256"),
+                "total_files": json_pointer_i64(&tcb_source, "/file_count"),
+                "files": tcb_files,
                 "unsafe_hits": [
                     { "path": "proposals/novaseal/v0-mvp-skeleton/verifier/novaseal_btc_verifier_riscv/src/main.rs" }
                 ],
@@ -10921,6 +10974,70 @@ mod tests {
         assert_eq!(json_pointer_str(&passed, "/status"), Some("passed"));
         assert_eq!(json_pointer_str(&failed, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&failed, "/checks/tcb_review_hits_empty"));
+    }
+
+    #[test]
+    fn bip340_tcb_source_inventory_must_match_current_safe_tree() {
+        let temp = tempfile::tempdir().unwrap();
+        let riscv_src = temp.path().join(CORE_ROOT).join("verifier/novaseal_btc_verifier_riscv/src");
+        std::fs::create_dir_all(&riscv_src).unwrap();
+        std::fs::write(riscv_src.join("main.rs"), "fn main() {}\n").unwrap();
+        let source = source_tree_hash_with_options(temp.path(), BIP340_TCB_SOURCE_HASH_PATHS, true).unwrap();
+        let files = json_array_strings(&source, "/files").into_iter().map(|path| json!({ "path": path })).collect::<Vec<_>>();
+        let tcb = json!({
+            "source_inventory": {
+                "source_tree_sha256": json_pointer_str(&source, "/sha256"),
+                "total_files": json_pointer_i64(&source, "/file_count"),
+                "files": files,
+            },
+        });
+
+        let passed = validate_bip340_tcb_source_inventory(temp.path(), &tcb).unwrap();
+        assert_eq!(json_pointer_str(&passed, "/status"), Some("passed"));
+
+        let mut stale_hash = tcb.clone();
+        stale_hash["source_inventory"]["source_tree_sha256"] = json!(format!("0x{}", "00".repeat(32)));
+        let failed_hash = validate_bip340_tcb_source_inventory(temp.path(), &stale_hash).unwrap();
+        assert_eq!(json_pointer_str(&failed_hash, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&failed_hash, "/checks/source_tree_sha256_matches_current"));
+
+        let mut missing_file = tcb;
+        missing_file["source_inventory"]["files"] = json!([]);
+        let failed_files = validate_bip340_tcb_source_inventory(temp.path(), &missing_file).unwrap();
+        assert_eq!(json_pointer_str(&failed_files, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&failed_files, "/checks/source_tree_file_list_matches_current"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bip340_tcb_source_inventory_rejects_symlinked_source() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().unwrap();
+        let riscv_src = temp.path().join(CORE_ROOT).join("verifier/novaseal_btc_verifier_riscv/src");
+        let outside = temp.path().join("outside");
+        std::fs::create_dir_all(&riscv_src).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(riscv_src.join("main.rs"), "fn main() {}\n").unwrap();
+        std::fs::write(outside.join("linked.rs"), "pub fn outside() {}\n").unwrap();
+        symlink(outside.join("linked.rs"), riscv_src.join("linked.rs")).unwrap();
+        let source = source_tree_hash_with_options(temp.path(), BIP340_TCB_SOURCE_HASH_PATHS, true).unwrap();
+        let tcb = json!({
+            "source_inventory": {
+                "source_tree_sha256": json_pointer_str(&source, "/sha256"),
+                "total_files": json_pointer_i64(&source, "/file_count"),
+                "files": json_array_strings(&source, "/files")
+                    .into_iter()
+                    .map(|path| json!({ "path": path }))
+                    .collect::<Vec<_>>(),
+            },
+        });
+
+        let failed = validate_bip340_tcb_source_inventory(temp.path(), &tcb).unwrap();
+
+        assert_eq!(json_pointer_str(&failed, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&failed, "/checks/current_source_tree_valid"));
+        assert!(!json_pointer_bool(&failed, "/checks/source_tree_invalid_paths_empty"));
     }
 
     #[test]
