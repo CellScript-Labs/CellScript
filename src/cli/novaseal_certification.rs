@@ -256,13 +256,18 @@ const EXPECTED_PUBLIC_BTC_SPV_EVIDENCE_FIELDS: &[&str] =
 const EXPECTED_PUBLIC_BTC_SPV_CASE_FIELDS: &[&str] = &[
     "btc_block_hash",
     "btc_txid",
+    "ckb_live_tx_hash",
     "confirmations",
+    "live_report_hash",
     "minimum_confirmations",
     "profile",
     "scenario",
     "source_service",
     "spv_client_cell_dep",
     "spv_proof_hash",
+    "service_builder_case_hash",
+    "service_builder_receipt_binding_hash",
+    "service_builder_tx_skeleton_hash",
 ];
 const EXPECTED_PUBLIC_BTC_SPV_CELLDEP_FIELDS: &[&str] = &["data_hash", "dep_type", "hash_type", "out_point"];
 const EXPECTED_PUBLIC_BTC_SPV_SOURCE_SERVICE_FIELDS: &[&str] = &["commit", "name", "report_hash"];
@@ -273,6 +278,11 @@ const EXPECTED_BTC_SPV_ADAPTER_PUBLIC_FIELDS: &[&str] = &[
     "required_profiles",
     "profile",
     "scenario",
+    "ckb_live_tx_hash",
+    "live_report_hash",
+    "service_builder_case_hash",
+    "service_builder_tx_skeleton_hash",
+    "service_builder_receipt_binding_hash",
     "btc_txid",
     "btc_block_hash",
     "spv_proof_hash",
@@ -295,6 +305,11 @@ const EXPECTED_BTC_SPV_FIELD_CONSTRAINTS: &[(&str, &str)] = &[
     ("network", "explicit public mainnet/testnet name; placeholders and local/devnet/regtest/simnet/private/fake labels are rejected"),
     ("generated_at", "UTC timestamp in YYYY-MM-DDTHH:MM:SSZ form; future timestamps are rejected"),
     ("evidence_provider", "real external provider identity; placeholder, example, and unknown tokens are rejected"),
+    ("ckb_live_tx_hash", "0x-prefixed 32-byte CKB live transaction hash matching the current NovaSeal service-builder case"),
+    ("live_report_hash", "0x-prefixed 32-byte hash of the current NovaSeal live devnet report for this profile"),
+    ("service_builder_case_hash", "0x-prefixed 32-byte hash of the current NovaSeal service-builder case for this profile"),
+    ("service_builder_tx_skeleton_hash", "0x-prefixed 32-byte service-builder transaction skeleton hash for this profile"),
+    ("service_builder_receipt_binding_hash", "0x-prefixed 32-byte service-builder receipt binding hash for this profile"),
     ("btc_txid", "0x-prefixed 32-byte non-placeholder Bitcoin transaction id"),
     ("btc_block_hash", "0x-prefixed 32-byte non-placeholder Bitcoin block hash anchoring the SPV proof"),
     ("spv_proof_hash", "0x-prefixed 32-byte non-placeholder hash of the SPV proof material"),
@@ -3733,6 +3748,7 @@ fn validate_external_evidence_handoff_detail(
         novaseal_handoff_report_hash("external_attestation_adapter", external_attestation_adapter);
     let expected_handoff_bundle_hash = external_evidence_handoff_reference_hash(report);
     let expected_btc_spv_scenarios = btc_spv_adapter_expected_scenarios(btc_spv_adapter);
+    let expected_btc_spv_case_bindings = btc_spv_adapter_expected_case_bindings(btc_spv_adapter);
     let expected_public_manifest_commit = adapter_case_request_str(
         external_attestation_adapter,
         "public_shared_cell_dep_attestation",
@@ -3817,6 +3833,9 @@ fn validate_external_evidence_handoff_detail(
                 && EXPECTED_BTC_SPV_PROFILE_SCENARIOS
                     .iter()
                     .all(|(profile, scenario)| expected_btc_spv_scenarios.get(*profile).is_some_and(|actual| actual == *scenario)));
+        let expected_case_bindings_match_source_adapter = group != "public_btc_spv_evidence"
+            || (case.get("expected_case_bindings").is_some_and(handoff_expected_bindings_exact)
+                && case.get("expected_case_bindings") == Some(&expected_btc_spv_case_bindings));
         let expected_values_match_source_adapter = match group {
             "public_shared_cell_dep_attestation" => {
                 exact_object_keys(case.get("expected_values").unwrap_or(&Value::Null), EXPECTED_PUBLIC_CELLDEP_EXPECTED_VALUE_FIELDS)
@@ -3872,6 +3891,7 @@ fn validate_external_evidence_handoff_detail(
                 expected_field_constraints,
             ),
             "expected_scenarios_match_source_adapter": expected_scenarios_match_source_adapter,
+            "expected_case_bindings_match_source_adapter": expected_case_bindings_match_source_adapter,
             "expected_values_match_source_adapter": expected_values_match_source_adapter,
             "btc_profiles_complete": group != "public_btc_spv_evidence"
                 || required_profiles == expected_btc_profiles,
@@ -3955,6 +3975,32 @@ fn btc_spv_adapter_expected_scenarios(adapter: &Value) -> BTreeMap<String, Strin
                 .collect()
         })
         .unwrap_or_default()
+}
+
+fn btc_spv_adapter_expected_case_bindings(adapter: &Value) -> Value {
+    let binding_fields = [
+        ("ckb_live_tx_hash", "/request/ckb_live_tx_hash"),
+        ("live_report_hash", "/request/live_report_hash"),
+        ("service_builder_case_hash", "/request/service_builder_case_hash"),
+        ("service_builder_tx_skeleton_hash", "/request/service_builder_tx_skeleton_hash"),
+        ("service_builder_receipt_binding_hash", "/request/service_builder_receipt_binding_hash"),
+    ];
+    let mut profiles = Map::new();
+    if let Some(cases) = adapter.get("cases").and_then(Value::as_array) {
+        for case in cases {
+            let Some(profile) = json_pointer_str(case, "/profile") else {
+                continue;
+            };
+            let mut binding = Map::new();
+            for (field, pointer) in binding_fields {
+                if let Some(value) = json_pointer_str(case, pointer) {
+                    binding.insert(field.to_string(), Value::String(value.to_string()));
+                }
+            }
+            profiles.insert(profile.to_string(), Value::Object(binding));
+        }
+    }
+    Value::Object(profiles)
 }
 
 fn validate_invariant_matrix(repo_root: &Path, path: &Path) -> Result<Value> {
@@ -4788,6 +4834,7 @@ fn validate_btc_spv_evidence(repo_root: &Path, rel_path: &str, external_evidence
     let handoff_case = handoff_case(external_evidence_handoff, "public_btc_spv_evidence").unwrap_or(&Value::Null);
     let handoff_required_profiles = json_array_strings(handoff_case, "/required_profiles");
     let handoff_expected_scenarios = json_object_string_map(handoff_case.get("expected_scenarios").unwrap_or(&Value::Null));
+    let handoff_expected_bindings = handoff_case.get("expected_case_bindings").unwrap_or(&Value::Null);
     let cases = payload.get("cases").and_then(Value::as_array).cloned().unwrap_or_default();
     let covered_profile_list =
         cases.iter().filter_map(|case| json_pointer_str(case, "/profile").map(str::to_string)).collect::<Vec<_>>();
@@ -4813,6 +4860,7 @@ fn validate_btc_spv_evidence(repo_root: &Path, rel_path: &str, external_evidence
         let hash_type = json_pointer_str(cell_dep, "/hash_type");
         let confirmations = json_pointer_i64(case, "/confirmations").unwrap_or_default();
         let minimum_confirmations = json_pointer_i64(case, "/minimum_confirmations").unwrap_or_default();
+        let expected_binding = handoff_expected_bindings.get(*profile).unwrap_or(&Value::Null);
         case_checks.insert(
             (*profile).to_string(),
             json!({
@@ -4822,6 +4870,26 @@ fn validate_btc_spv_evidence(repo_root: &Path, rel_path: &str, external_evidence
                 "scenario_matches_handoff": handoff_expected_scenarios
                     .get(*profile)
                     .is_some_and(|scenario| json_pointer_str(case, "/scenario") == Some(scenario.as_str())),
+                "ckb_live_tx_hash_valid": json_pointer_str(case, "/ckb_live_tx_hash").is_some_and(is_hex32),
+                "ckb_live_tx_hash_non_placeholder": !placeholder_hash(json_pointer_str(case, "/ckb_live_tx_hash")),
+                "ckb_live_tx_hash_matches_handoff": normalize_hex(json_pointer_str(case, "/ckb_live_tx_hash")).as_deref()
+                    == normalize_hex(json_pointer_str(expected_binding, "/ckb_live_tx_hash")).as_deref(),
+                "live_report_hash_valid": json_pointer_str(case, "/live_report_hash").is_some_and(is_hex32),
+                "live_report_hash_non_placeholder": !placeholder_hash(json_pointer_str(case, "/live_report_hash")),
+                "live_report_hash_matches_handoff": normalize_hex(json_pointer_str(case, "/live_report_hash")).as_deref()
+                    == normalize_hex(json_pointer_str(expected_binding, "/live_report_hash")).as_deref(),
+                "service_builder_case_hash_valid": json_pointer_str(case, "/service_builder_case_hash").is_some_and(is_hex32),
+                "service_builder_case_hash_non_placeholder": !placeholder_hash(json_pointer_str(case, "/service_builder_case_hash")),
+                "service_builder_case_hash_matches_handoff": normalize_hex(json_pointer_str(case, "/service_builder_case_hash")).as_deref()
+                    == normalize_hex(json_pointer_str(expected_binding, "/service_builder_case_hash")).as_deref(),
+                "service_builder_tx_skeleton_hash_valid": json_pointer_str(case, "/service_builder_tx_skeleton_hash").is_some_and(is_hex32),
+                "service_builder_tx_skeleton_hash_non_placeholder": !placeholder_hash(json_pointer_str(case, "/service_builder_tx_skeleton_hash")),
+                "service_builder_tx_skeleton_hash_matches_handoff": normalize_hex(json_pointer_str(case, "/service_builder_tx_skeleton_hash")).as_deref()
+                    == normalize_hex(json_pointer_str(expected_binding, "/service_builder_tx_skeleton_hash")).as_deref(),
+                "service_builder_receipt_binding_hash_valid": json_pointer_str(case, "/service_builder_receipt_binding_hash").is_some_and(is_hex32),
+                "service_builder_receipt_binding_hash_non_placeholder": !placeholder_hash(json_pointer_str(case, "/service_builder_receipt_binding_hash")),
+                "service_builder_receipt_binding_hash_matches_handoff": normalize_hex(json_pointer_str(case, "/service_builder_receipt_binding_hash")).as_deref()
+                    == normalize_hex(json_pointer_str(expected_binding, "/service_builder_receipt_binding_hash")).as_deref(),
                 "btc_txid_valid": json_pointer_str(case, "/btc_txid").is_some_and(is_hex32),
                 "btc_txid_non_placeholder": !placeholder_hash(json_pointer_str(case, "/btc_txid")),
                 "btc_block_hash_valid": json_pointer_str(case, "/btc_block_hash").is_some_and(is_hex32),
@@ -4869,6 +4937,7 @@ fn validate_btc_spv_evidence(repo_root: &Path, rel_path: &str, external_evidence
             .iter()
             .map(|(profile, scenario)| ((*profile).to_string(), (*scenario).to_string()))
             .collect::<BTreeMap<_, _>>(),
+        "handoff_expected_case_bindings_exact": handoff_expected_bindings_exact(handoff_expected_bindings),
         "required_profiles_field_exact": exact_string_set(&json_array_strings(&payload, "/required_profiles"), EXPECTED_BTC_SPV_EVIDENCE_PROFILES),
         "required_profiles_match_handoff": json_array_strings(&payload, "/required_profiles") == handoff_required_profiles,
         "required_profiles_covered_exact": exact_string_set(&covered_profile_list, EXPECTED_BTC_SPV_EVIDENCE_PROFILES),
@@ -5906,6 +5975,31 @@ fn expected_btc_spv_scenario(profile: &str) -> Option<&'static str> {
         .find_map(|(expected_profile, scenario)| (*expected_profile == profile).then_some(*scenario))
 }
 
+fn handoff_expected_bindings_exact(value: &Value) -> bool {
+    let Some(object) = value.as_object() else {
+        return false;
+    };
+    if object.len() != EXPECTED_BTC_SPV_EVIDENCE_PROFILES.len() {
+        return false;
+    }
+    let expected_fields = [
+        "ckb_live_tx_hash",
+        "live_report_hash",
+        "service_builder_case_hash",
+        "service_builder_tx_skeleton_hash",
+        "service_builder_receipt_binding_hash",
+    ];
+    EXPECTED_BTC_SPV_EVIDENCE_PROFILES.iter().all(|profile| {
+        object.get(*profile).is_some_and(|binding| {
+            exact_object_keys(binding, &expected_fields)
+                && expected_fields.iter().all(|field| {
+                    normalize_hex(json_pointer_str(binding, &format!("/{field}"))).as_deref().is_some_and(is_hex32)
+                        && !placeholder_hash(normalize_hex(json_pointer_str(binding, &format!("/{field}"))).as_deref())
+                })
+        })
+    })
+}
+
 fn exact_string_set(actual: &[String], expected: &[&str]) -> bool {
     actual.len() == expected.len() && expected.iter().all(|field| actual.iter().any(|actual| actual == field))
 }
@@ -6411,6 +6505,23 @@ mod tests {
             .iter()
             .map(|(profile, scenario)| ((*profile).to_string(), Value::String((*scenario).to_string())))
             .collect::<Map<String, Value>>();
+        let expected_btc_bindings = EXPECTED_BTC_SPV_EVIDENCE_PROFILES
+            .iter()
+            .enumerate()
+            .map(|(index, profile)| {
+                let byte = index as u8 + 0x50;
+                (
+                    (*profile).to_string(),
+                    json!({
+                        "ckb_live_tx_hash": test_hex32(byte),
+                        "live_report_hash": test_hex32(byte + 1),
+                        "service_builder_case_hash": test_hex32(byte + 2),
+                        "service_builder_tx_skeleton_hash": test_hex32(byte + 3),
+                        "service_builder_receipt_binding_hash": test_hex32(byte + 4),
+                    }),
+                )
+            })
+            .collect::<Map<String, Value>>();
         let btc_spv_adapter = json!({
             "status": "passed",
             "adapter_status": "request_ready_external_evidence_required",
@@ -6418,13 +6529,21 @@ mod tests {
             "summary": { "total": 3, "matched": 3 },
             "cases": EXPECTED_BTC_SPV_EVIDENCE_PROFILES
                 .iter()
-                .map(|profile| json!({
+                .map(|profile| {
+                    let profile = *profile;
+                    let bindings = expected_btc_bindings.get(profile).unwrap();
+                    json!({
                     "profile": profile,
                     "status": "passed",
                     "request": {
                         "scenario": expected_btc_spv_scenario(profile).unwrap(),
+                        "ckb_live_tx_hash": json_pointer_str(bindings, "/ckb_live_tx_hash").unwrap(),
+                        "live_report_hash": json_pointer_str(bindings, "/live_report_hash").unwrap(),
+                        "service_builder_case_hash": json_pointer_str(bindings, "/service_builder_case_hash").unwrap(),
+                        "service_builder_tx_skeleton_hash": json_pointer_str(bindings, "/service_builder_tx_skeleton_hash").unwrap(),
+                        "service_builder_receipt_binding_hash": json_pointer_str(bindings, "/service_builder_receipt_binding_hash").unwrap(),
                     },
-                }))
+                })})
                 .collect::<Vec<_>>(),
         });
         let external_attestation_adapter = json!({
@@ -6491,6 +6610,7 @@ mod tests {
                     "production_output": PUBLIC_BTC_SPV_EVIDENCE,
                     "required_profiles": EXPECTED_BTC_SPV_EVIDENCE_PROFILES,
                     "expected_scenarios": expected_btc_scenarios.clone(),
+                    "expected_case_bindings": expected_btc_bindings.clone(),
                     "required_external_fields": btc_handoff_fields,
                     "field_constraints": constraint_object(EXPECTED_BTC_SPV_FIELD_CONSTRAINTS),
                     "checks": { "ok": true },
@@ -6557,6 +6677,7 @@ mod tests {
         assert!(json_pointer_bool(&valid, "/checks/bundle_hash_matches_reference"));
         assert!(json_pointer_bool(&valid, "/checks/bundle_hash_algorithm"));
         assert!(json_pointer_bool(&valid, "/cases/public_btc_spv_evidence/expected_scenarios_match_source_adapter"));
+        assert!(json_pointer_bool(&valid, "/cases/public_btc_spv_evidence/expected_case_bindings_match_source_adapter"));
         assert!(json_pointer_bool(&valid, "/cases/public_shared_cell_dep_attestation/expected_values_match_source_adapter"));
         assert!(json_pointer_bool(&valid, "/cases/external_bip340_tcb_review_attestation/expected_values_match_source_adapter"));
         assert!(json_pointer_bool(&valid, "/cases/rwa_legal_registry_review_evidence/expected_values_match_source_adapter"));
@@ -7542,6 +7663,23 @@ mod tests {
             .iter()
             .map(|(profile, scenario)| ((*profile).to_string(), json!(*scenario)))
             .collect::<Map<_, _>>();
+        let expected_case_bindings = EXPECTED_BTC_SPV_EVIDENCE_PROFILES
+            .iter()
+            .enumerate()
+            .map(|(index, profile)| {
+                let byte = index as u8 + 0x77;
+                (
+                    (*profile).to_string(),
+                    json!({
+                        "ckb_live_tx_hash": test_hex32(byte),
+                        "live_report_hash": test_hex32(byte + 1),
+                        "service_builder_case_hash": test_hex32(byte + 2),
+                        "service_builder_tx_skeleton_hash": test_hex32(byte + 3),
+                        "service_builder_receipt_binding_hash": test_hex32(byte + 4),
+                    }),
+                )
+            })
+            .collect::<Map<_, _>>();
         let handoff = json!({
             "schema": "novaseal-external-evidence-handoff-bundle-v0.1",
             "status": "passed",
@@ -7550,6 +7688,7 @@ mod tests {
                     "group": "public_btc_spv_evidence",
                     "required_profiles": EXPECTED_BTC_SPV_EVIDENCE_PROFILES,
                     "expected_scenarios": expected_scenarios,
+                    "expected_case_bindings": expected_case_bindings,
                 },
             ],
         });
@@ -7559,9 +7698,16 @@ mod tests {
         assert_eq!(json_pointer_str(&missing, "/status"), Some("external_required"));
 
         let case_for = |profile: &str| {
+            let index = EXPECTED_BTC_SPV_EVIDENCE_PROFILES.iter().position(|expected| *expected == profile).unwrap_or(9);
+            let byte = index as u8 + 0x77;
             json!({
                 "profile": profile,
                 "scenario": expected_btc_spv_scenario(profile).unwrap_or("unexpected-profile-scenario"),
+                "ckb_live_tx_hash": test_hex32(byte),
+                "live_report_hash": test_hex32(byte + 1),
+                "service_builder_case_hash": test_hex32(byte + 2),
+                "service_builder_tx_skeleton_hash": test_hex32(byte + 3),
+                "service_builder_receipt_binding_hash": test_hex32(byte + 4),
                 "btc_txid": format!("0x{}", "11".repeat(32)),
                 "btc_block_hash": format!("0x{}", "22".repeat(32)),
                 "spv_proof_hash": format!("0x{}", "33".repeat(32)),
@@ -7606,6 +7752,7 @@ mod tests {
         assert!(json_pointer_bool(&passed, "/checks/request_handoff_bundle_hash_algorithm"));
         assert!(json_pointer_bool(&passed, "/checks/handoff_required_profiles_exact"));
         assert!(json_pointer_bool(&passed, "/checks/handoff_expected_scenarios_exact"));
+        assert!(json_pointer_bool(&passed, "/checks/handoff_expected_case_bindings_exact"));
         assert!(json_pointer_bool(&passed, "/checks/network_public"));
         assert!(json_pointer_bool(&passed, "/checks/evidence_provider_identity"));
         assert!(json_pointer_bool(&passed, "/checks/generated_at_utc_timestamp"));
@@ -7617,6 +7764,21 @@ mod tests {
         assert!(json_pointer_bool(&passed, "/checks/case_checks_passed"));
         assert!(json_pointer_bool(&passed, "/case_checks/btc-transaction-commitment-profile-v0/scenario_matches_expected"));
         assert!(json_pointer_bool(&passed, "/case_checks/btc-transaction-commitment-profile-v0/scenario_matches_handoff"));
+        assert!(json_pointer_bool(&passed, "/case_checks/btc-transaction-commitment-profile-v0/ckb_live_tx_hash_matches_handoff"));
+        assert!(json_pointer_bool(
+            &passed,
+            "/case_checks/btc-transaction-commitment-profile-v0/service_builder_tx_skeleton_hash_matches_handoff"
+        ));
+
+        let mut stale_live_binding = spv_report.clone();
+        stale_live_binding["cases"][0]["ckb_live_tx_hash"] = json!(test_hex32(0x22));
+        std::fs::write(proofs.join("public_btc_spv_evidence.json"), serde_json::to_vec_pretty(&stale_live_binding).unwrap()).unwrap();
+        let failed_stale_live_binding = validate_btc_spv_evidence(temp.path(), PUBLIC_BTC_SPV_EVIDENCE, &handoff).unwrap();
+        assert_eq!(json_pointer_str(&failed_stale_live_binding, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(
+            &failed_stale_live_binding,
+            "/case_checks/btc-transaction-commitment-profile-v0/ckb_live_tx_hash_matches_handoff"
+        ));
 
         let mut stale_handoff_scenario = handoff.clone();
         stale_handoff_scenario["cases"][0]["expected_scenarios"][EXPECTED_BTC_TX_COMMITMENT_PROFILE] =

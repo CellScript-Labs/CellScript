@@ -19,6 +19,11 @@
     {
       "profile": "btc-transaction-commitment-profile-v0",
       "scenario": "btc-transaction-commitment-transition",
+      "ckb_live_tx_hash": "0xREPLACE_WITH_64_HEX_CURRENT_CKB_LIVE_TX_HASH",
+      "live_report_hash": "0xREPLACE_WITH_64_HEX_CURRENT_LIVE_REPORT_HASH",
+      "service_builder_case_hash": "0xREPLACE_WITH_64_HEX_SERVICE_BUILDER_CASE_HASH",
+      "service_builder_tx_skeleton_hash": "0xREPLACE_WITH_64_HEX_SERVICE_BUILDER_TX_SKELETON_HASH",
+      "service_builder_receipt_binding_hash": "0xREPLACE_WITH_64_HEX_SERVICE_BUILDER_RECEIPT_BINDING_HASH",
       "btc_txid": "0xREPLACE_WITH_64_HEX_BTC_TXID",
       "btc_block_hash": "0xREPLACE_WITH_64_HEX_BTC_BLOCK_HASH",
       "minimum_confirmations": 6,
@@ -39,6 +44,11 @@
     {
       "profile": "btc-utxo-seal-profile-v0",
       "scenario": "btc-utxo-seal-closure",
+      "ckb_live_tx_hash": "0xREPLACE_WITH_64_HEX_CURRENT_CKB_LIVE_TX_HASH",
+      "live_report_hash": "0xREPLACE_WITH_64_HEX_CURRENT_LIVE_REPORT_HASH",
+      "service_builder_case_hash": "0xREPLACE_WITH_64_HEX_SERVICE_BUILDER_CASE_HASH",
+      "service_builder_tx_skeleton_hash": "0xREPLACE_WITH_64_HEX_SERVICE_BUILDER_TX_SKELETON_HASH",
+      "service_builder_receipt_binding_hash": "0xREPLACE_WITH_64_HEX_SERVICE_BUILDER_RECEIPT_BINDING_HASH",
       "btc_txid": "0xREPLACE_WITH_64_HEX_BTC_SPEND_TXID",
       "btc_block_hash": "0xREPLACE_WITH_64_HEX_BTC_BLOCK_HASH",
       "minimum_confirmations": 6,
@@ -59,6 +69,11 @@
     {
       "profile": "dual-seal-profile-v0",
       "scenario": "dual-seal-finality",
+      "ckb_live_tx_hash": "0xREPLACE_WITH_64_HEX_CURRENT_CKB_LIVE_TX_HASH",
+      "live_report_hash": "0xREPLACE_WITH_64_HEX_CURRENT_LIVE_REPORT_HASH",
+      "service_builder_case_hash": "0xREPLACE_WITH_64_HEX_SERVICE_BUILDER_CASE_HASH",
+      "service_builder_tx_skeleton_hash": "0xREPLACE_WITH_64_HEX_SERVICE_BUILDER_TX_SKELETON_HASH",
+      "service_builder_receipt_binding_hash": "0xREPLACE_WITH_64_HEX_SERVICE_BUILDER_RECEIPT_BINDING_HASH",
       "btc_txid": "0xREPLACE_WITH_64_HEX_BTC_CLOSURE_TXID",
       "btc_block_hash": "0xREPLACE_WITH_64_HEX_BTC_BLOCK_HASH",
       "minimum_confirmations": 6,
@@ -82,6 +97,7 @@
     "A real report must be saved as public_btc_spv_evidence.json and must not use local-devnet or placeholder fields.",
     "The request contract generated at target/novaseal-btc-spv-evidence-adapter.json lists the exact BTC-facing profile/scenario cases and service-builder hashes this public report must satisfy.",
     "The request_handoff block must reference the current target/novaseal-external-evidence-handoff-bundle.json hash, blake2b-256(person=NovaExtHandoff) hash algorithm, and public_btc_spv_evidence group.",
+    "Each case must also echo the current CKB live tx hash, live report hash, and service-builder binding hashes from the handoff bundle; unrelated BTC SPV proofs are rejected.",
     "The production gate requires all three BTC-facing profiles to have public BTC SPV cases with at least six confirmations."
   ]
 }

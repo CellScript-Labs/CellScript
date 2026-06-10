@@ -171,6 +171,24 @@ def btc_spv_handoff_case(adapter: dict[str, Any]) -> dict[str, Any]:
         for case in cases
         if isinstance(case.get("profile"), str) and isinstance(case.get("request", {}).get("scenario"), str)
     }
+    expected_case_bindings = {
+        case.get("profile"): {
+            "ckb_live_tx_hash": case.get("request", {}).get("ckb_live_tx_hash"),
+            "live_report_hash": case.get("request", {}).get("live_report_hash"),
+            "service_builder_case_hash": case.get("request", {}).get("service_builder_case_hash"),
+            "service_builder_tx_skeleton_hash": case.get("request", {}).get("service_builder_tx_skeleton_hash"),
+            "service_builder_receipt_binding_hash": case.get("request", {}).get("service_builder_receipt_binding_hash"),
+        }
+        for case in cases
+        if isinstance(case.get("profile"), str)
+    }
+    binding_fields = {
+        "ckb_live_tx_hash",
+        "live_report_hash",
+        "service_builder_case_hash",
+        "service_builder_tx_skeleton_hash",
+        "service_builder_receipt_binding_hash",
+    }
     checks = {
         "source_adapter_passed": adapter.get("status") == "passed",
         "source_adapter_status_request_ready": adapter.get("adapter_status") == "request_ready_external_evidence_required",
@@ -180,6 +198,11 @@ def btc_spv_handoff_case(adapter: dict[str, Any]) -> dict[str, Any]:
         "required_profiles_complete": profiles == set(REQUIRED_BTC_SPV_PROFILES),
         "expected_scenarios_complete": set(expected_scenarios) == set(REQUIRED_BTC_SPV_PROFILES)
         and all(expected_scenarios.values()),
+        "expected_case_bindings_complete": set(expected_case_bindings) == set(REQUIRED_BTC_SPV_PROFILES)
+        and all(
+            set(binding.keys()) == binding_fields and all(isinstance(value, str) and value.startswith("0x") for value in binding.values())
+            for binding in expected_case_bindings.values()
+        ),
         "source_cases_passed": all(case.get("status") == "passed" for case in cases),
     }
     return {
@@ -191,6 +214,7 @@ def btc_spv_handoff_case(adapter: dict[str, Any]) -> dict[str, Any]:
         "production_output": PUBLIC_BTC_SPV_EVIDENCE,
         "required_profiles": REQUIRED_BTC_SPV_PROFILES,
         "expected_scenarios": expected_scenarios,
+        "expected_case_bindings": expected_case_bindings,
         "required_external_fields": [
             "network",
             "generated_at",
@@ -198,6 +222,11 @@ def btc_spv_handoff_case(adapter: dict[str, Any]) -> dict[str, Any]:
             "required_profiles",
             "profile",
             "scenario",
+            "ckb_live_tx_hash",
+            "live_report_hash",
+            "service_builder_case_hash",
+            "service_builder_tx_skeleton_hash",
+            "service_builder_receipt_binding_hash",
             "btc_txid",
             "btc_block_hash",
             "spv_proof_hash",
@@ -219,6 +248,11 @@ def btc_spv_handoff_case(adapter: dict[str, Any]) -> dict[str, Any]:
             "network": "explicit public mainnet/testnet name; placeholders and local/devnet/regtest/simnet/private/fake labels are rejected",
             "generated_at": "UTC timestamp in YYYY-MM-DDTHH:MM:SSZ form; future timestamps are rejected",
             "evidence_provider": "real external provider identity; placeholder, example, and unknown tokens are rejected",
+            "ckb_live_tx_hash": "0x-prefixed 32-byte CKB live transaction hash matching the current NovaSeal service-builder case",
+            "live_report_hash": "0x-prefixed 32-byte hash of the current NovaSeal live devnet report for this profile",
+            "service_builder_case_hash": "0x-prefixed 32-byte hash of the current NovaSeal service-builder case for this profile",
+            "service_builder_tx_skeleton_hash": "0x-prefixed 32-byte service-builder transaction skeleton hash for this profile",
+            "service_builder_receipt_binding_hash": "0x-prefixed 32-byte service-builder receipt binding hash for this profile",
             "btc_txid": "0x-prefixed 32-byte non-placeholder Bitcoin transaction id",
             "btc_block_hash": "0x-prefixed 32-byte non-placeholder Bitcoin block hash anchoring the SPV proof",
             "spv_proof_hash": "0x-prefixed 32-byte non-placeholder hash of the SPV proof material",
