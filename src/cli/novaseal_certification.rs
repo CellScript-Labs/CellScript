@@ -342,7 +342,10 @@ const EXPECTED_BTC_SPV_FIELD_CONSTRAINTS: &[(&str, &str)] = &[
     ("btc_block_hash", "0x-prefixed 32-byte non-placeholder Bitcoin block hash anchoring the SPV proof"),
     ("btc_block_header", "0x-prefixed 80-byte Bitcoin block header whose double-SHA256 hash matches btc_block_hash"),
     ("btc_merkle_proof.tx_index", "zero-based transaction index used to orient the Merkle branch"),
-    ("btc_merkle_proof.merkle_branch", "array of 0x-prefixed 32-byte Bitcoin sibling hashes in display order"),
+    (
+        "btc_merkle_proof.merkle_branch",
+        "array of 0x-prefixed 32-byte Bitcoin sibling hashes in display order; empty only for tx_index 0 in a single-transaction block",
+    ),
     ("btc_merkle_proof.merkle_root", "0x-prefixed 32-byte Bitcoin Merkle root matching the block header"),
     ("btc_merkle_proof.block_height", "public Bitcoin block height containing btc_txid"),
     ("btc_merkle_proof.observed_tip_height", "public Bitcoin tip height used to compute confirmations"),
@@ -6141,7 +6144,12 @@ fn validate_btc_spv_case_proof(case: &Value, confirmations: i64) -> Value {
     let txid = json_pointer_str(case, "/btc_txid");
     let tx_index = json_pointer_i64(proof, "/tx_index");
     let branch = json_array_strings(proof, "/merkle_branch");
-    let branch_valid = !branch.is_empty() && branch.iter().all(|hash| is_hex32(hash) && !placeholder_hash(Some(hash)));
+    let branch_valid = match tx_index {
+        Some(0) if branch.is_empty() => true,
+        Some(_) if branch.is_empty() => false,
+        Some(_) => branch.iter().all(|hash| is_hex32(hash) && !placeholder_hash(Some(hash))),
+        None => false,
+    };
     let computed_merkle_root = txid.zip(tx_index).and_then(|(txid, tx_index)| bitcoin_merkle_root_display(txid, &branch, tx_index));
     let block_height = json_pointer_i64(proof, "/block_height");
     let observed_tip_height = json_pointer_i64(proof, "/observed_tip_height");
@@ -7061,6 +7069,39 @@ mod tests {
                 "tx_index": 0,
                 "merkle_branch": [sibling],
                 "merkle_root": merkle_root,
+                "block_height": block_height,
+                "observed_tip_height": observed_tip_height,
+            },
+        });
+        let proof_hash = btc_spv_proof_material_hash(&material).unwrap();
+        material["spv_proof_hash"] = json!(proof_hash);
+        material
+    }
+
+    fn test_btc_single_tx_block_spv_material(seed: u8, confirmations: i64, btc: &TestBtcProfileMaterial) -> Value {
+        let txid = btc.txid.clone();
+        let mut header = vec![0u8; 80];
+        header[0..4].copy_from_slice(&2u32.to_le_bytes());
+        let merkle_root_internal = bitcoin_internal_hash_from_display(&txid).unwrap();
+        header[36..68].copy_from_slice(&merkle_root_internal);
+        header[68..72].copy_from_slice(&1_800_000_000u32.to_le_bytes());
+        header[72..76].copy_from_slice(&0x1d00ffffu32.to_le_bytes());
+        header[76..80].copy_from_slice(&u32::from(seed).to_le_bytes());
+        let btc_block_header = format!("0x{}", hex::encode(&header));
+        let btc_block_hash = bitcoin_display_hash(&header);
+        let block_height = 910_000i64 + i64::from(seed);
+        let observed_tip_height = block_height + confirmations - 1;
+        let mut material = json!({
+            "btc_txid": txid,
+            "btc_wtxid": btc.wtxid.clone(),
+            "btc_tx_hex": btc.tx_hex.clone(),
+            "btc_transaction_binding": btc.binding.clone(),
+            "btc_block_hash": btc_block_hash,
+            "btc_block_header": btc_block_header,
+            "btc_merkle_proof": {
+                "tx_index": 0,
+                "merkle_branch": [],
+                "merkle_root": txid,
                 "block_height": block_height,
                 "observed_tip_height": observed_tip_height,
             },
@@ -8945,6 +8986,42 @@ mod tests {
         assert!(json_pointer_bool(
             &passed,
             "/case_checks/btc-transaction-commitment-profile-v0/service_builder_tx_skeleton_hash_matches_handoff"
+        ));
+
+        let single_tx_btc = test_btc_profile_material(EXPECTED_BTC_TX_COMMITMENT_PROFILE, 0x77);
+        let single_tx_material = test_btc_single_tx_block_spv_material(0x77, 7, &single_tx_btc);
+        let mut single_tx_block = spv_report.clone();
+        single_tx_block["cases"][0]["btc_txid"] = single_tx_material["btc_txid"].clone();
+        single_tx_block["cases"][0]["btc_wtxid"] = single_tx_material["btc_wtxid"].clone();
+        single_tx_block["cases"][0]["btc_tx_hex"] = single_tx_material["btc_tx_hex"].clone();
+        single_tx_block["cases"][0]["btc_transaction_binding"] = single_tx_material["btc_transaction_binding"].clone();
+        single_tx_block["cases"][0]["btc_block_hash"] = single_tx_material["btc_block_hash"].clone();
+        single_tx_block["cases"][0]["btc_block_header"] = single_tx_material["btc_block_header"].clone();
+        single_tx_block["cases"][0]["btc_merkle_proof"] = single_tx_material["btc_merkle_proof"].clone();
+        single_tx_block["cases"][0]["spv_proof_hash"] = single_tx_material["spv_proof_hash"].clone();
+        std::fs::write(proofs.join("public_btc_spv_evidence.json"), serde_json::to_vec_pretty(&single_tx_block).unwrap()).unwrap();
+        let passed_single_tx_block = validate_btc_spv_evidence(temp.path(), PUBLIC_BTC_SPV_EVIDENCE, &handoff).unwrap();
+        assert_eq!(json_pointer_str(&passed_single_tx_block, "/status"), Some("passed"));
+        assert!(json_pointer_bool(
+            &passed_single_tx_block,
+            "/case_checks/btc-transaction-commitment-profile-v0/btc_merkle_proof_branch_valid"
+        ));
+        assert!(json_pointer_bool(
+            &passed_single_tx_block,
+            "/case_checks/btc-transaction-commitment-profile-v0/btc_merkle_branch_verifies_txid"
+        ));
+
+        let mut single_tx_nonzero_index = single_tx_block.clone();
+        single_tx_nonzero_index["cases"][0]["btc_merkle_proof"]["tx_index"] = json!(1);
+        single_tx_nonzero_index["cases"][0]["spv_proof_hash"] =
+            json!(btc_spv_proof_material_hash(&single_tx_nonzero_index["cases"][0]).unwrap());
+        std::fs::write(proofs.join("public_btc_spv_evidence.json"), serde_json::to_vec_pretty(&single_tx_nonzero_index).unwrap())
+            .unwrap();
+        let failed_single_tx_nonzero_index = validate_btc_spv_evidence(temp.path(), PUBLIC_BTC_SPV_EVIDENCE, &handoff).unwrap();
+        assert_eq!(json_pointer_str(&failed_single_tx_nonzero_index, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(
+            &failed_single_tx_nonzero_index,
+            "/case_checks/btc-transaction-commitment-profile-v0/btc_merkle_proof_branch_valid"
         ));
 
         let mut stale_btc_commitment = spv_report.clone();

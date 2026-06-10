@@ -157,6 +157,6 @@
     "The request_handoff block must reference the current target/novaseal-external-evidence-handoff-bundle.json hash, blake2b-256(person=NovaExtHandoff) hash algorithm, and public_btc_spv_evidence group.",
     "Each case must also echo the current CKB live tx hash, live report hash, service-builder binding hashes, and CKB-side BTC commitment hash from the handoff bundle; unrelated BTC SPV proofs are rejected.",
     "The production gate requires all three BTC-facing profiles to have public BTC SPV cases with at least six confirmations.",
-    "The BTC block header hash, Merkle root, branch orientation, confirmation heights, raw transaction txid/wtxid, profile-specific transaction binding, and spv_proof_hash are recomputed during certification; hash-only SPV assertions are rejected."
+    "The BTC block header hash, Merkle root, branch orientation, confirmation heights, raw transaction txid/wtxid, profile-specific transaction binding, and spv_proof_hash are recomputed during certification; hash-only SPV assertions are rejected. Empty Merkle branches are valid only for tx_index 0 in a single-transaction block."
   ]
 }

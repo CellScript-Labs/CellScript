@@ -376,7 +376,10 @@ def btc_spv_handoff_case(adapter: dict[str, Any]) -> dict[str, Any]:
             "btc_block_hash": "0x-prefixed 32-byte non-placeholder Bitcoin block hash anchoring the SPV proof",
             "btc_block_header": "0x-prefixed 80-byte Bitcoin block header whose double-SHA256 hash matches btc_block_hash",
             "btc_merkle_proof.tx_index": "zero-based transaction index used to orient the Merkle branch",
-            "btc_merkle_proof.merkle_branch": "array of 0x-prefixed 32-byte Bitcoin sibling hashes in display order",
+            "btc_merkle_proof.merkle_branch": (
+                "array of 0x-prefixed 32-byte Bitcoin sibling hashes in display order; "
+                "empty only for tx_index 0 in a single-transaction block"
+            ),
             "btc_merkle_proof.merkle_root": "0x-prefixed 32-byte Bitcoin Merkle root matching the block header",
             "btc_merkle_proof.block_height": "public Bitcoin block height containing btc_txid",
             "btc_merkle_proof.observed_tip_height": "public Bitcoin tip height used to compute confirmations",
