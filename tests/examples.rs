@@ -1,6 +1,6 @@
 #![allow(clippy::too_many_arguments)]
 
-use camino::Utf8PathBuf;
+use camino::{Utf8Path, Utf8PathBuf};
 use cellscript::{
     codegen::{analyze_backend_shape, BackendShapeMetrics},
     compile_file, compile_file_with_entry_action, ArtifactFormat, CompileOptions, PoolPrimitiveMetadata, ProofPlanMetadata,
@@ -185,14 +185,37 @@ fn language_example_path(name: &str) -> Utf8PathBuf {
 
 fn checked_in_example_cell_files() -> Vec<Utf8PathBuf> {
     let examples_root = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples");
+    if let Some(files) = git_tracked_example_cell_files(&examples_root) {
+        return files;
+    }
+    discover_example_cell_files(&examples_root)
+}
+
+fn git_tracked_example_cell_files(examples_root: &Utf8Path) -> Option<Vec<Utf8PathBuf>> {
+    let repo_root = examples_root.parent()?;
+    let output = std::process::Command::new("git").args(["ls-files", "examples"]).current_dir(repo_root).output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    let stdout = String::from_utf8(output.stdout).ok()?;
+    let mut files = stdout.lines().filter(|line| line.ends_with(".cell")).map(|line| repo_root.join(line)).collect::<Vec<_>>();
+    if files.is_empty() {
+        return None;
+    }
+    files.sort();
+    Some(files)
+}
+
+fn discover_example_cell_files(examples_root: &Utf8Path) -> Vec<Utf8PathBuf> {
     let mut files = Vec::new();
-    let mut pending = vec![examples_root];
+    let mut pending = vec![examples_root.to_path_buf()];
     while let Some(root) = pending.pop() {
         let entries = std::fs::read_dir(&root).unwrap_or_else(|err| panic!("failed to read {root}: {err}"));
         for entry in entries {
             let path = Utf8PathBuf::from_path_buf(entry.expect("example directory entry should be readable").path())
                 .expect("example path should be valid UTF-8");
-            if path.is_dir() {
+            if path.is_dir() && example_source_dir(&path) {
                 pending.push(path);
             } else if path.is_file() && path.extension() == Some("cell") {
                 files.push(path);
@@ -201,6 +224,10 @@ fn checked_in_example_cell_files() -> Vec<Utf8PathBuf> {
     }
     files.sort();
     files
+}
+
+fn example_source_dir(path: &Utf8Path) -> bool {
+    !matches!(path.file_name(), Some(".cell" | "target"))
 }
 
 fn checked_in_example_audit_files() -> Vec<Utf8PathBuf> {
