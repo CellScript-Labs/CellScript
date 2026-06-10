@@ -28,14 +28,18 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-CELLC_BIN="${CELLC_BIN:-$ROOT_DIR/target/debug/cellc}"
-if [[ ! -x "$CELLC_BIN" ]]; then
-  cargo build --manifest-path "$ROOT_DIR/Cargo.toml" --bin cellc >/dev/null
-fi
-
 REPORT="$ROOT_DIR/target/novaseal-devnet-stateful-acceptance.json"
 cert_status=0
 if [[ "$REPORT_ONLY" != true ]]; then
+  if [[ -z "${CELLC_BIN:-}" ]]; then
+    CELLC_BIN="$ROOT_DIR/target/debug/cellc"
+    if [[ ! -x "$CELLC_BIN" ]]; then
+      cargo build --manifest-path "$ROOT_DIR/Cargo.toml" --bin cellc >/dev/null
+    fi
+  elif [[ ! -x "$CELLC_BIN" ]]; then
+    echo "CELLC_BIN is not executable: $CELLC_BIN" >&2
+    exit 2
+  fi
   "$CELLC_BIN" certify --plugin novaseal-profile-v0 --repo-root "$ROOT_DIR" --json >/dev/null || cert_status=$?
 fi
 
@@ -44,8 +48,22 @@ if [[ ! -f "$REPORT" ]]; then
   exit 1
 fi
 
-status="$(grep -m1 '"status"' "$REPORT" | sed 's/.*: *"//; s/".*//')"
-live_devnet_rpc_executed="$(grep -m1 '"live_devnet_rpc_executed"' "$REPORT" | sed 's/.*: *//; s/,.*//')"
-blockers="$(grep -m1 '"blocker_count"' "$REPORT" | sed 's/.*: *//; s/,.*//')"
+summary="$(python3 - "$REPORT" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    report = json.load(handle)
+
+def field(name):
+    value = report.get(name, "unknown")
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value)
+
+print("\t".join([field("status"), field("live_devnet_rpc_executed"), field("blocker_count")]))
+PY
+)"
+IFS=$'\t' read -r status live_devnet_rpc_executed blockers <<< "$summary"
 printf 'wrote %s status=%s live_devnet_rpc_executed=%s blockers=%s\n' "$REPORT" "$status" "$live_devnet_rpc_executed" "$blockers"
 exit "$cert_status"
