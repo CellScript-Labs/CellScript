@@ -4005,6 +4005,9 @@ impl<'a> TypeChecker<'a> {
                 self.require_create_target_cell_backed(&create.ty, create.span)?;
                 self.require_type_capability(&create.ty, Capability::Create, "create", create.span)?;
                 self.check_field_initializer(env, &create.ty, &create.fields, create.span, "create")?;
+                if let Some(lock) = &create.lock {
+                    self.validate_lock_target_address("create", lock, env)?;
+                }
                 if let Some(target) = &create.target {
                     let Some(target_ty) = env.lookup(target).cloned() else {
                         return Err(CompileError::new(
@@ -4039,8 +4042,8 @@ impl<'a> TypeChecker<'a> {
             Expr::Transfer(transfer) => {
                 let (expr_ty, name) = self.require_named_linear_cell_operand(env, &transfer.expr, "transfer", transfer.span)?;
                 let to_ty = self.infer_expr(env, &transfer.to)?;
-                if !Self::is_address_like_type(&to_ty) {
-                    return Err(CompileError::new("transfer destination must be address-like", transfer.span));
+                if !Self::is_address_type(&to_ty) {
+                    return Err(CompileError::new("transfer destination must be Address", transfer.span));
                 }
                 self.require_capability_or_kernel_effects(
                     &expr_ty,
@@ -4093,10 +4096,7 @@ impl<'a> TypeChecker<'a> {
                 self.check_field_initializer(env, &cu.ty, &cu.fields, cu.span, "create_unique")?;
                 self.validate_unique_identity_policy(&cu.ty, &cu.identity, cu.span, "create_unique")?;
                 if let Some(lock) = &cu.lock {
-                    let lock_ty = self.infer_expr(env, lock)?;
-                    if !Self::is_address_like_type(&lock_ty) {
-                        return Err(CompileError::new("lock target must be address-like", cu.span));
-                    }
+                    self.validate_lock_target_address("create_unique", lock, env)?;
                 }
                 Ok(Type::Named(cu.ty.clone()))
             }
@@ -4381,8 +4381,8 @@ impl<'a> TypeChecker<'a> {
                 let (input_ty, input_name) = self.require_named_linear_cell_operand(env, &call.args[0], &qualified, call.span)?;
                 let output_ty = self.require_named_cell_identifier(env, &call.args[1], &qualified, "output")?;
                 let lock_ty = self.infer_expr(env, &call.args[2])?;
-                if !matches!(lock_ty, Type::Address | Type::Hash) {
-                    return Err(CompileError::new("std::lifecycle::transfer lock target must be Address or Hash", call.span));
+                if !Self::is_address_type(&lock_ty) {
+                    return Err(CompileError::new("std::lifecycle::transfer lock target must be Address", call.span));
                 }
                 if !self.types_equal(&input_ty, &output_ty) {
                     return Err(CompileError::new(
@@ -4503,11 +4503,15 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn validate_stdlib_lock_arg(&mut self, qualified: &str, lock: &Expr, env: &mut TypeEnv) -> Result<()> {
+        self.validate_lock_target_address(qualified, lock, env)
+    }
+
+    fn validate_lock_target_address(&mut self, context: &str, lock: &Expr, env: &mut TypeEnv) -> Result<()> {
         let lock_ty = self.infer_expr(env, lock)?;
-        if matches!(lock_ty, Type::Address | Type::Hash) {
+        if Self::is_address_type(&lock_ty) {
             Ok(())
         } else {
-            Err(CompileError::new(format!("{} lock target must be Address or Hash", qualified), expr_span(lock)))
+            Err(CompileError::new(format!("{} lock target must be Address", context), expr_span(lock)))
         }
     }
 
@@ -6722,9 +6726,8 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
-    fn is_address_like_type(ty: &Type) -> bool {
-        // AUDIT-FINDING: transfer and lock-target checks classify `Hash` as address-like because both are 32 bytes, allowing semantically non-address hashes to pass destination validation — severity: HIGH — split address-like from byte32-like types and require explicit address construction for transfer/lock destinations
-        matches!(ty, Type::Address | Type::Hash)
+    fn is_address_type(ty: &Type) -> bool {
+        matches!(ty, Type::Address)
     }
 
     fn is_receipt_type(&self, ty: &Type) -> bool {
@@ -9565,6 +9568,153 @@ where
 
         let err = check(&module).unwrap_err();
         assert!(err.message.contains("require block contains assignment"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn hash_commitments_remain_valid_when_lock_targets_are_addresses() {
+        let module = source_module(
+            r#"
+module test
+
+resource Fingerprint has store, create {
+    digest: Hash
+}
+
+action mint(owner: Address, digest: Hash) -> fingerprint: Fingerprint
+where
+    create fingerprint = Fingerprint {
+        digest: digest
+    } with_lock(owner)
+
+action verify(digest: Hash) -> bool
+where
+    return digest == Hash::zero()
+"#,
+        );
+
+        check(&module).expect("hash commitments should remain valid outside lock-target positions");
+    }
+
+    #[test]
+    fn raw_transfer_rejects_hash_destination() {
+        let module = source_module(
+            r#"
+module test
+
+resource Coin has store, transfer {
+    amount: u64
+}
+
+action bad_transfer(coin: Coin, digest: Hash) -> Coin
+where
+    return transfer coin to digest
+"#,
+        );
+
+        let err = check(&module).unwrap_err();
+        assert!(err.message.contains("transfer destination must be Address"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn create_lock_rejects_hash_target() {
+        let module = source_module(
+            r#"
+module test
+
+resource Coin has store, create {
+    amount: u64
+}
+
+action bad_create(digest: Hash) -> coin: Coin
+where
+    create coin = Coin {
+        amount: 1
+    } with_lock(digest)
+"#,
+        );
+
+        let err = check(&module).unwrap_err();
+        assert!(err.message.contains("create lock target must be Address"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn create_unique_lock_rejects_hash_target() {
+        let module = source_module(
+            r#"
+module test
+
+resource Coin has store, create {
+    amount: u64
+}
+
+action bad_create_unique(digest: Hash) -> Coin
+where
+    return create_unique<Coin>(identity = ckb_type_id) {
+        amount: 1
+    } with_lock(digest)
+"#,
+        );
+
+        let err = check(&module).unwrap_err();
+        assert!(err.message.contains("create_unique lock target must be Address"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn stdlib_lifecycle_locks_reject_hash_targets() {
+        let cases = [
+            (
+                r#"
+module test
+
+resource Coin has store, transfer {
+    amount: u64
+}
+
+action bad_transfer(coin: Coin, digest: Hash) -> next_coin: Coin
+where
+    std::lifecycle::transfer(coin, next_coin, digest) { amount }
+"#,
+                "std::lifecycle::transfer lock target must be Address",
+            ),
+            (
+                r#"
+module test
+
+resource Coin has store, transfer {
+    amount: u64
+}
+
+receipt Voucher -> Coin has destroy {
+    amount: u64
+}
+
+action bad_claim(voucher: Voucher, digest: Hash) -> coin: Coin
+where
+    std::receipt::claim(voucher, coin, digest) { amount }
+"#,
+                "std::receipt::claim lock target must be Address",
+            ),
+            (
+                r#"
+module test
+
+resource Coin has store, consume {
+    amount: u64
+}
+
+action bad_settle(coin: Coin, digest: Hash) -> next_coin: Coin
+where
+    std::lifecycle::settle(coin, next_coin, digest) { amount }
+"#,
+                "std::lifecycle::settle lock target must be Address",
+            ),
+        ];
+
+        for (source, expected_message) in cases {
+            let module = source_module(source);
+            let err = check(&module).unwrap_err();
+            assert!(err.message.contains(expected_message), "unexpected error: {}", err.message);
+        }
     }
 
     #[test]
