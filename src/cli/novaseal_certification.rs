@@ -2573,7 +2573,9 @@ fn external_endpoint_coverage_summary(
     let fiber_node_workflows_passed =
         json_pointer_bool(fiber_node_experiments, "/all_required_workflows_executed_passed") && fiber_git_provenance_verified;
 
-    let btc_status = if btc_ckb_lifecycle_passed && public_btc_spv_passed {
+    let btc_status = if !btc_ckb_lifecycle_passed {
+        "failed"
+    } else if public_btc_spv_passed {
         "passed"
     } else if public_btc_spv_external_required {
         "external_required"
@@ -11027,6 +11029,13 @@ mod tests {
         assert!(!json_pointer_bool(&coverage, "/checks/public_btc_spv_evidence_passed"));
         assert!(json_pointer_bool(&coverage, "/checks/fiber_git_provenance_verified"));
         assert!(json_pointer_bool(&coverage, "/checks/fiber_node_workflows_passed"));
+
+        let ckb_missing = json!({"required_live_checks_passed": false});
+        let failed_local_btc = external_endpoint_coverage_summary(&btc_missing, &fiber, &ckb_missing, &ckb_live, &ckb_live, &ckb_live);
+        assert_eq!(json_pointer_str(&failed_local_btc, "/status"), Some("failed"));
+        assert_eq!(json_pointer_str(&failed_local_btc, "/btc/status"), Some("failed"));
+        assert!(!json_pointer_bool(&failed_local_btc, "/checks/btc_ckb_lifecycle_passed"));
+        assert!(!json_pointer_bool(&failed_local_btc, "/production_complete"));
 
         let mut missing_fiber_provenance = fiber;
         missing_fiber_provenance.as_object_mut().unwrap().remove("fiber_repo_git_provenance");
