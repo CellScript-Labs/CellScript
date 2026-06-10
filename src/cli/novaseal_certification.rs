@@ -1029,6 +1029,11 @@ pub(crate) fn build_report(repo_root: &Path) -> Result<Value> {
         &btc_spv_evidence,
         &rwa_legal_registry_review,
     );
+    let profile_operator_fixture_detail = certification_detail(&profile_certification, "/profile_operator_fixtures");
+    let service_builder_fixture_detail = certification_detail(&profile_certification, "/service_builder_fixtures");
+    let btc_spv_adapter_detail = certification_detail(&profile_certification, "/btc_spv_evidence_adapter");
+    let external_attestation_adapter_detail = certification_detail(&profile_certification, "/external_attestation_adapter");
+    let external_evidence_handoff_detail = certification_detail(&profile_certification, "/external_evidence_handoff");
 
     let gates = vec![
         gate(
@@ -1069,49 +1074,33 @@ pub(crate) fn build_report(repo_root: &Path) -> Result<Value> {
         ),
         gate(
             "planned_profile_operator_fixtures",
-            if profile_operator_fixture_gate_passed(&profile_operator_fixtures) { "passed" } else { "failed" },
+            certification_detail_status(&profile_certification, "/profile_operator_fixtures/status"),
             PROFILE_OPERATOR_FIXTURES,
-            profile_operator_fixtures.get("summary").cloned().unwrap_or(Value::Null),
+            profile_operator_fixture_detail,
         ),
         gate(
             "planned_profile_service_builder_fixtures",
-            if service_builder_fixture_gate_passed(&service_builder_fixtures) {
-                "passed"
-            } else {
-                "failed"
-            },
+            certification_detail_status(&profile_certification, "/service_builder_fixtures/status"),
             SERVICE_BUILDER_FIXTURES,
-            service_builder_fixtures.get("summary").cloned().unwrap_or(Value::Null),
+            service_builder_fixture_detail,
         ),
         gate(
             "btc_spv_evidence_adapter_request",
-            if btc_spv_evidence_adapter_gate_passed(&btc_spv_evidence_adapter) {
-                "passed"
-            } else {
-                "failed"
-            },
+            certification_detail_status(&profile_certification, "/btc_spv_evidence_adapter/status"),
             BTC_SPV_EVIDENCE_ADAPTER,
-            btc_spv_evidence_adapter.get("summary").cloned().unwrap_or(Value::Null),
+            btc_spv_adapter_detail,
         ),
         gate(
             "external_attestation_adapter_request",
-            if external_attestation_adapter_gate_passed(&external_attestation_adapter) {
-                "passed"
-            } else {
-                "failed"
-            },
+            certification_detail_status(&profile_certification, "/external_attestation_adapter/status"),
             EXTERNAL_ATTESTATION_ADAPTER,
-            external_attestation_adapter.get("summary").cloned().unwrap_or(Value::Null),
+            external_attestation_adapter_detail,
         ),
         gate(
             "external_evidence_handoff_bundle",
-            if external_evidence_handoff_gate_passed(&external_evidence_handoff) {
-                "passed"
-            } else {
-                "failed"
-            },
+            certification_detail_status(&profile_certification, "/external_evidence_handoff/status"),
             EXTERNAL_EVIDENCE_HANDOFF,
-            external_evidence_handoff.get("summary").cloned().unwrap_or(Value::Null),
+            external_evidence_handoff_detail,
         ),
         gate(
             "bip340_runtime_verifier_local_tcb_review",
@@ -5831,41 +5820,15 @@ fn gate(name: &str, status: &str, evidence: &str, detail: Value) -> Value {
     json!({"name": name, "status": status, "evidence": evidence, "detail": detail})
 }
 
-fn wallet_gate_passed(wallet: &Value) -> bool {
-    json_pointer_str(wallet, "/status") == Some("passed")
-        && json_pointer_i64(wallet, "/summary/core_vectors").unwrap_or_default() >= 6
-        && json_pointer_i64(wallet, "/summary/agreement_vectors").unwrap_or_default() >= 3
-        && json_pointer_i64(wallet, "/summary/matched") == json_pointer_i64(wallet, "/summary/total")
+fn certification_detail(profile_certification: &Value, pointer: &str) -> Value {
+    profile_certification.pointer(pointer).cloned().unwrap_or(Value::Null)
 }
 
-fn profile_operator_fixture_gate_passed(report: &Value) -> bool {
-    json_pointer_str(report, "/status") == Some("passed")
-        && json_pointer_i64(report, "/summary/total") == Some(EXPECTED_PROFILE_OPERATOR_FIXTURES.len() as i64)
-        && json_pointer_i64(report, "/summary/matched") == json_pointer_i64(report, "/summary/total")
-        && json_pointer_i64(report, "/summary/profile_count").unwrap_or_default() >= 6
+fn certification_detail_status<'a>(profile_certification: &'a Value, pointer: &str) -> &'a str {
+    json_pointer_str(profile_certification, pointer).unwrap_or("failed")
 }
 
-fn service_builder_fixture_gate_passed(report: &Value) -> bool {
-    json_pointer_str(report, "/status") == Some("passed")
-        && json_pointer_i64(report, "/summary/total") == Some(EXPECTED_PROFILE_OPERATOR_FIXTURES.len() as i64)
-        && json_pointer_i64(report, "/summary/matched") == json_pointer_i64(report, "/summary/total")
-        && json_pointer_i64(report, "/summary/profile_count").unwrap_or_default() >= 6
-}
-
-fn btc_spv_evidence_adapter_gate_passed(report: &Value) -> bool {
-    json_pointer_str(report, "/status") == Some("passed")
-        && json_pointer_str(report, "/adapter_status") == Some("request_ready_external_evidence_required")
-        && json_pointer_i64(report, "/summary/total") == Some(EXPECTED_BTC_SPV_EVIDENCE_PROFILES.len() as i64)
-        && json_pointer_i64(report, "/summary/matched") == json_pointer_i64(report, "/summary/total")
-}
-
-fn external_attestation_adapter_gate_passed(report: &Value) -> bool {
-    json_pointer_str(report, "/status") == Some("passed")
-        && json_pointer_str(report, "/adapter_status") == Some("request_ready_external_attestations_required")
-        && json_pointer_i64(report, "/summary/total") == Some(2)
-        && json_pointer_i64(report, "/summary/matched") == json_pointer_i64(report, "/summary/total")
-}
-
+#[cfg(test)]
 fn external_evidence_handoff_gate_passed(report: &Value) -> bool {
     json_pointer_str(report, "/status") == Some("passed")
         && json_pointer_str(report, "/handoff_status") == Some("request_bundle_ready_external_evidence_required")
@@ -5874,6 +5837,13 @@ fn external_evidence_handoff_gate_passed(report: &Value) -> bool {
         && json_pointer_str(report, "/bundle_hash_algorithm") == Some(NOVASEAL_HANDOFF_HASH_ALGORITHM)
         && json_pointer_i64(report, "/summary/total") == Some(4)
         && json_pointer_i64(report, "/summary/matched") == json_pointer_i64(report, "/summary/total")
+}
+
+fn wallet_gate_passed(wallet: &Value) -> bool {
+    json_pointer_str(wallet, "/status") == Some("passed")
+        && json_pointer_i64(wallet, "/summary/core_vectors").unwrap_or_default() >= 6
+        && json_pointer_i64(wallet, "/summary/agreement_vectors").unwrap_or_default() >= 3
+        && json_pointer_i64(wallet, "/summary/matched") == json_pointer_i64(wallet, "/summary/total")
 }
 
 fn novaseal_handoff_report_hash(label: &str, value: &Value) -> String {
@@ -7500,6 +7470,30 @@ mod tests {
             &detail,
             "/cases/btc-transaction-commitment-profile-v0:commit_btc_transaction_transition/public_btc_anchor_matches_current_report",
         ));
+    }
+
+    #[test]
+    fn certification_gate_status_uses_detailed_validator_result() {
+        let profile_certification = json!({
+            "profile_operator_fixtures": {
+                "status": "failed",
+                "checks": {
+                    "report_passed": true,
+                    "summary_counts_match": true,
+                    "case_details": false
+                }
+            }
+        });
+
+        let gate = gate(
+            "planned_profile_operator_fixtures",
+            certification_detail_status(&profile_certification, "/profile_operator_fixtures/status"),
+            PROFILE_OPERATOR_FIXTURES,
+            certification_detail(&profile_certification, "/profile_operator_fixtures"),
+        );
+
+        assert_eq!(json_pointer_str(&gate, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&gate, "/detail/checks/case_details"));
     }
 
     #[test]
