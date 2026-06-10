@@ -238,6 +238,45 @@ fn checked_in_example_audit_files() -> Vec<Utf8PathBuf> {
     files
 }
 
+fn docs_example_path(name: &str) -> Utf8PathBuf {
+    Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("docs").join("examples").join(name)
+}
+
+fn markdown_cellscript_blocks(path: &Utf8Path) -> Vec<String> {
+    let source = std::fs::read_to_string(path).unwrap_or_else(|err| panic!("failed to read {path}: {err}"));
+    let mut blocks = Vec::new();
+    let mut in_block = false;
+    let mut cellscript_block = false;
+    let mut current = Vec::new();
+
+    for line in source.lines() {
+        if let Some(lang) = line.strip_prefix("```") {
+            if in_block {
+                if cellscript_block {
+                    blocks.push(current.join("\n"));
+                }
+                in_block = false;
+                cellscript_block = false;
+                current.clear();
+            } else {
+                in_block = true;
+                cellscript_block = matches!(lang.trim(), "cellscript" | "cell");
+            }
+        } else if in_block && cellscript_block {
+            current.push(line.to_string());
+        }
+    }
+
+    blocks
+}
+
+fn write_wrapped_doc_snippet(temp_root: &Utf8Path, name: &str, source: &str) -> Utf8PathBuf {
+    let path = temp_root.join(format!("{name}.cell"));
+    let wrapped = format!("module docs::{name}\n\n{source}\n");
+    std::fs::write(&path, wrapped).unwrap_or_else(|err| panic!("failed to write {path}: {err}"));
+    path
+}
+
 #[test]
 fn canonical_examples_are_the_single_checked_in_business_source() {
     let examples_root = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples");
@@ -262,6 +301,50 @@ fn all_checked_in_cell_examples_compile() {
     for path in files {
         compile_file(&path, CompileOptions::default()).unwrap_or_else(|err| panic!("{path} should compile: {}", err.message));
     }
+}
+
+#[test]
+fn docs_examples_cellscript_blocks_match_declared_compile_boundary() {
+    let collections = markdown_cellscript_blocks(&docs_example_path("collections_matrix.md"));
+    assert_eq!(collections.len(), 2, "collections_matrix.md should have one positive and one negative CellScript block");
+    let output_append = markdown_cellscript_blocks(&docs_example_path("output_append.md"));
+    assert_eq!(output_append.len(), 1, "output_append.md should have one conceptual CellScript block");
+
+    let temp = tempfile::tempdir().expect("tempdir should be available");
+    let temp_root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).expect("temp path should be UTF-8");
+    let positive_collections = write_wrapped_doc_snippet(&temp_root, "collections_positive", &collections[0]);
+    compile_file(&positive_collections, CompileOptions::default())
+        .unwrap_or_else(|err| panic!("{positive_collections} should compile: {}", err.message));
+
+    let output_append_path = write_wrapped_doc_snippet(&temp_root, "output_append", &output_append[0]);
+    compile_file(&output_append_path, CompileOptions::default())
+        .unwrap_or_else(|err| panic!("{output_append_path} should compile: {}", err.message));
+
+    let negative_collections = write_wrapped_doc_snippet(&temp_root, "collections_negative", &collections[1]);
+    let negative_result = compile_file(&negative_collections, CompileOptions::default())
+        .unwrap_or_else(|err| panic!("{negative_collections} should compile as a schema-boundary example: {}", err.message));
+    let nested_dynamic = negative_result
+        .metadata
+        .molecule_schema_manifest
+        .entries
+        .iter()
+        .find(|entry| entry.type_name == "NestedDynamic")
+        .expect("negative collections block should expose NestedDynamic schema metadata");
+    assert_eq!(nested_dynamic.layout, "molecule-table-v1");
+    assert!(
+        nested_dynamic.dynamic_fields.iter().any(|field| field == "rows"),
+        "NestedDynamic should keep rows as an explicit dynamic schema field: {nested_dynamic:?}"
+    );
+    assert!(
+        negative_result.metadata.runtime.collection_instantiations.is_empty(),
+        "schema-boundary example must not be reported as stack-backed local collection helper support: {:?}",
+        negative_result.metadata.runtime.collection_instantiations
+    );
+    let hidden_ownership = action(&negative_result.metadata, "hidden_ownership");
+    assert!(
+        hidden_ownership.consume_set.is_empty() && hidden_ownership.create_set.is_empty() && hidden_ownership.mutate_set.is_empty(),
+        "cell-backed collection snippet must not claim resource ownership transitions: {hidden_ownership:?}"
+    );
 }
 
 #[test]
