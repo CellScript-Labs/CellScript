@@ -39,6 +39,12 @@ PY
 }
 
 check_trailing_whitespace() {
+    local tracked_rust_files=()
+    local tracked_rust_file
+    while IFS= read -r tracked_rust_file; do
+        tracked_rust_files+=("$tracked_rust_file")
+    done < <(git ls-files 'src/*.rs' 'src/**/*.rs' 'tests/*.rs' 'tests/**/*.rs')
+
     local files=(
         ".github/workflows/ci.yml"
         "Cargo.toml"
@@ -81,15 +87,10 @@ check_trailing_whitespace() {
         "scripts/ckb_cellscript_acceptance.sh"
         "scripts/validate_cellscript_tooling_release.py"
         "scripts/validate_ckb_cellscript_production_evidence.py"
-        "src/lib.rs"
-        "src/lsp/mod.rs"
-        "src/package/mod.rs"
         "tests/syntax_combo/matrix.toml"
         "tests/syntax_combo/seeds/legacy-transfer-capability.cell"
         "tests/syntax_combo/seeds/require-block-lifecycle.cell"
-        "tests/cli.rs"
-        "tests/examples.rs"
-        "tests/novaseal_sources.rs"
+        "${tracked_rust_files[@]}"
     )
     if ((${#files[@]} > 0)) && rg -n '[ \t]+$' "${files[@]}"; then
         printf '\nTrailing whitespace found in tracked CellScript files.\n' >&2
