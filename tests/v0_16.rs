@@ -381,6 +381,30 @@ fn validate_tx_checks_builder_assumption_evidence() {
         "{report:#?}"
     );
 
+    let scalar_evidence = assumptions
+        .iter()
+        .map(|assumption| {
+            json!({
+                "assumption_id": assumption.assumption_id,
+                "kind": assumption.kind,
+                "origin": assumption.origin,
+                "feature": assumption.feature,
+                "proof_plan_status": assumption.proof_plan_status,
+                "evidence": true
+            })
+        })
+        .collect::<Vec<_>>();
+    let with_scalar_evidence = json!({
+        "inputs": [{}],
+        "outputs": [{}],
+        "cell_deps": [],
+        "witnesses": [],
+        "builder_assumption_evidence": scalar_evidence
+    });
+    let report = cellscript::assumptions::validate_transaction_against_metadata(&result.metadata, &with_scalar_evidence);
+    assert_eq!(report.status, "failed");
+    assert!(report.violations.iter().any(|violation| violation.message.contains("structured evidence")), "{report:#?}");
+
     let evidence = assumptions.iter().map(evidence_for).collect::<Vec<_>>();
     let with_evidence = json!({
         "inputs": [{}],

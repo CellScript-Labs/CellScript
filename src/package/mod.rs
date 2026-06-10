@@ -327,7 +327,8 @@ dist/
             return Err(CompileError::without_span(format!("Circular dependency detected: {}", cycle.join(" -> "))));
         }
 
-        if self.resolved.contains_key(name) {
+        if let Some(existing) = self.resolved.get(name) {
+            validate_existing_resolution_matches(name, dep, base_root, existing)?;
             return Ok(());
         }
 
@@ -687,6 +688,70 @@ fn reject_package_path_escape(raw_path: &str, label: &str) -> Result<()> {
         return Err(CompileError::without_span(format!("{} '{}' must stay inside the package root", label, raw_path)));
     }
     Ok(())
+}
+
+fn validate_existing_resolution_matches(name: &str, dep: &Dependency, base_root: &Path, existing: &ResolvedPackage) -> Result<()> {
+    let declared_version = match dep {
+        Dependency::Simple(version) => Some(version.as_str()),
+        Dependency::Detailed(detailed) if detailed.version != "*" => Some(detailed.version.as_str()),
+        Dependency::Detailed(_) => None,
+    };
+    if let Some(version) = declared_version {
+        if version != existing.version {
+            return Err(CompileError::without_span(format!(
+                "conflicting dependency '{}' resolves to package version '{}' but another declaration requires '{}'",
+                name, existing.version, version
+            )));
+        }
+    }
+
+    match dep {
+        Dependency::Simple(version) => match &existing.source {
+            PackageSource::Registry { name: package_name, version: package_version }
+                if package_name == name && package_version == version =>
+            {
+                Ok(())
+            }
+            source => Err(conflicting_dependency_source_error(name, source, &format!("registry {}@{}", name, version))),
+        },
+        Dependency::Detailed(detailed) => {
+            if let Some(path) = &detailed.path {
+                let expected_path = canonical_package_child_path(base_root, path, &format!("dependency '{}' path", name))?;
+                if existing.path == expected_path {
+                    return Ok(());
+                }
+                return Err(conflicting_dependency_source_error(
+                    name,
+                    &existing.source,
+                    &format!("path '{}'", expected_path.display()),
+                ));
+            }
+            if let Some(git) = &detailed.git {
+                validate_git_url(git)?;
+                validate_git_dependency_pin(name, detailed)?;
+                let revision = detailed.rev.as_deref().unwrap_or_default();
+                return match &existing.source {
+                    PackageSource::Git { url, revision: existing_revision } if url == git && existing_revision == revision => Ok(()),
+                    source => Err(conflicting_dependency_source_error(name, source, &format!("git '{}#{}'", git, revision))),
+                };
+            }
+            match &existing.source {
+                PackageSource::Registry { name: package_name, version } if package_name == name && version == &detailed.version => {
+                    Ok(())
+                }
+                source => Err(conflicting_dependency_source_error(name, source, &format!("registry {}@{}", name, detailed.version))),
+            }
+        }
+    }
+}
+
+fn conflicting_dependency_source_error(name: &str, existing: &PackageSource, expected: &str) -> CompileError {
+    CompileError::without_span(format!(
+        "conflicting dependency '{}' resolves to {} but another declaration requires {}",
+        name,
+        package_source_display(existing),
+        expected
+    ))
 }
 
 fn validate_git_url(url: &str) -> Result<()> {
@@ -1485,6 +1550,81 @@ version = "0.1.0"
         assert!(manager.get_resolved().contains_key("math"));
         assert!(manager.get_resolved().contains_key("util"));
         assert_eq!(manager.get_resolved()["math"].dependencies, vec!["util"]);
+    }
+
+    #[test]
+    fn package_manager_rejects_conflicting_transitive_dependency_sources() {
+        let temp = tempdir().unwrap();
+        let root = temp.path();
+        std::fs::create_dir_all(root.join("deps/left/deps/util/src")).unwrap();
+        std::fs::create_dir_all(root.join("deps/right/deps/util/src")).unwrap();
+        std::fs::write(
+            root.join("Cell.toml"),
+            r#"
+[package]
+name = "app"
+version = "0.1.0"
+
+[dependencies.left]
+version = "0.1.0"
+path = "deps/left"
+
+[dependencies.right]
+version = "0.1.0"
+path = "deps/right"
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("deps/left/Cell.toml"),
+            r#"
+[package]
+name = "left"
+version = "0.1.0"
+
+[dependencies.util]
+version = "0.1.0"
+path = "deps/util"
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("deps/right/Cell.toml"),
+            r#"
+[package]
+name = "right"
+version = "0.1.0"
+
+[dependencies.util]
+version = "0.1.0"
+path = "deps/util"
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("deps/left/deps/util/Cell.toml"),
+            r#"
+[package]
+name = "util"
+version = "0.1.0"
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("deps/right/deps/util/Cell.toml"),
+            r#"
+[package]
+name = "util"
+version = "0.1.0"
+"#,
+        )
+        .unwrap();
+
+        let mut manager = PackageManager::new(root);
+        let error = manager.resolve_dependencies().unwrap_err();
+
+        assert!(error.message.contains("conflicting dependency 'util'"), "{}", error.message);
+        assert!(error.message.contains("deps/left/deps/util") || error.message.contains("deps/right/deps/util"), "{}", error.message);
     }
 
     #[test]

@@ -464,10 +464,12 @@ fn validate_evidence_object(
     }
 
     let payload = object.get("evidence").or_else(|| object.get("payload"));
-    let has_payload = payload.is_some_and(non_empty_evidence_payload);
+    let has_payload = payload.is_some_and(structured_evidence_payload);
     if !has_payload {
-        mismatches
-            .push(format!("builder_assumption_evidence for {} must include non-empty evidence or payload", assumption.assumption_id));
+        mismatches.push(format!(
+            "builder_assumption_evidence for {} must include structured evidence or payload as a non-empty object or array",
+            assumption.assumption_id
+        ));
     }
     if let Some(payload) = payload {
         validate_spawn_target_evidence_payload(payload, assumption, &mut mismatches);
@@ -487,13 +489,11 @@ fn push_evidence_mismatch(mismatches: &mut Vec<String>, object: &serde_json::Map
     }
 }
 
-fn non_empty_evidence_payload(value: &Value) -> bool {
+fn structured_evidence_payload(value: &Value) -> bool {
     match value {
-        Value::Null => false,
-        Value::Bool(_) | Value::Number(_) => true,
-        Value::String(text) => !text.is_empty(),
         Value::Array(items) => !items.is_empty(),
         Value::Object(object) => !object.is_empty(),
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => false,
     }
 }
 

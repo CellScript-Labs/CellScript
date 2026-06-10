@@ -3154,6 +3154,7 @@ fn transaction_solver_template(metadata: &CompileMetadata) -> serde_json::Value 
             let evidence_schema = if assumption.kind == "spawn_target_cell_dep_binding" {
                 serde_json::json!({
                     "required_fields": ["assumption_id", "kind", "origin", "feature", "proof_plan_status", "evidence"],
+                    "evidence_payload": "non-empty object or array; scalar booleans, numbers, and strings are rejected",
                     "evidence_required_fields": ["dep_source", "cell_dep_index", "cell_dep_name", "dep_type"],
                     "optional_manifest_identity_fields": ["tx_hash", "out_index", "hash_type", "data_hash", "type_id"],
                     "required_cell_deps": assumption.required_cell_deps,
@@ -3162,6 +3163,7 @@ fn transaction_solver_template(metadata: &CompileMetadata) -> serde_json::Value 
             } else {
                 serde_json::json!({
                     "required_fields": ["assumption_id", "kind", "origin", "feature", "proof_plan_status", "evidence"],
+                    "evidence_payload": "non-empty object or array; scalar booleans, numbers, and strings are rejected",
                     "note": "builder must replace this requirement with concrete evidence before validate-tx can pass"
                 })
             };
