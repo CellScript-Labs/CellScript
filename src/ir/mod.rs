@@ -1160,7 +1160,7 @@ impl IrGenerator {
             Stmt::Expr(expr) | Stmt::Let(LetStmt { value: expr, .. }) => {
                 self.check_expr_effects(expr, footprint);
             }
-            Stmt::Return(Some(expr)) => {
+            Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
                 self.check_expr_effects(expr, footprint);
             }
             Stmt::If(if_stmt) => {
@@ -1913,11 +1913,11 @@ impl IrGenerator {
                 Some(active)
             }
             Stmt::Expr(expr) => self.lower_expr(expr, current, blocks, vars).current,
-            Stmt::Return(None) => {
+            Stmt::Return(ReturnStmt { value: None, .. }) => {
                 self.block_mut(blocks, current).set_terminator(IrTerminator::Return(None), Some(stmt_source_span(stmt)));
                 None
             }
-            Stmt::Return(Some(expr)) => {
+            Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
                 let lowered = if let Some(expected_ty) = expected_return_type {
                     self.lower_expr_with_expected_type(expr, expected_ty, current, blocks, vars)
                 } else {
@@ -5912,8 +5912,8 @@ fn certify_straight_line_lifecycle_only(stmts: &[Stmt]) -> Result<StraightLineLi
 fn stmt_source_span(stmt: &Stmt) -> Span {
     match stmt {
         Stmt::Let(let_stmt) => let_stmt.span,
-        Stmt::Expr(expr) | Stmt::Return(Some(expr)) => expr.span(),
-        Stmt::Return(None) => Span::default(),
+        Stmt::Expr(expr) => expr.span(),
+        Stmt::Return(return_stmt) => return_stmt.span,
         Stmt::If(if_stmt) => if_stmt.span,
         Stmt::For(for_stmt) => for_stmt.span,
         Stmt::While(while_stmt) => while_stmt.span,
@@ -5924,8 +5924,10 @@ fn certify_lifecycle_stmts(stmts: &[Stmt], branch_local: bool, bindings: &mut Ha
     for stmt in stmts {
         match stmt {
             Stmt::Let(let_stmt) => certify_lifecycle_expr(&let_stmt.value, branch_local, bindings)?,
-            Stmt::Expr(expr) | Stmt::Return(Some(expr)) => certify_lifecycle_expr(expr, branch_local, bindings)?,
-            Stmt::Return(None) => {}
+            Stmt::Expr(expr) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
+                certify_lifecycle_expr(expr, branch_local, bindings)?
+            }
+            Stmt::Return(ReturnStmt { value: None, .. }) => {}
             Stmt::If(if_stmt) => {
                 certify_lifecycle_expr(&if_stmt.condition, branch_local, bindings)?;
                 certify_lifecycle_stmts(&if_stmt.then_branch, true, bindings)?;
@@ -7552,7 +7554,7 @@ fn collect_call_names_from_stmts(stmts: &[Stmt], names: &mut HashSet<String>) {
 
 fn collect_call_names_from_stmt(stmt: &Stmt, names: &mut HashSet<String>) {
     match stmt {
-        Stmt::Expr(expr) | Stmt::Let(LetStmt { value: expr, .. }) | Stmt::Return(Some(expr)) => {
+        Stmt::Expr(expr) | Stmt::Let(LetStmt { value: expr, .. }) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
             collect_call_names_from_expr(expr, names);
         }
         Stmt::If(if_stmt) => {
@@ -7570,7 +7572,7 @@ fn collect_call_names_from_stmt(stmt: &Stmt, names: &mut HashSet<String>) {
             collect_call_names_from_expr(&while_stmt.condition, names);
             collect_call_names_from_stmts(&while_stmt.body, names);
         }
-        Stmt::Return(None) => {}
+        Stmt::Return(ReturnStmt { value: None, .. }) => {}
     }
 }
 
@@ -7744,7 +7746,7 @@ fn infer_fn_effect_without_call_graph(function: &FnDef) -> EffectClass {
 
 fn collect_ast_stmt_effects(stmt: &Stmt, footprint: &mut EffectFootprint) {
     match stmt {
-        Stmt::Expr(expr) | Stmt::Let(LetStmt { value: expr, .. }) | Stmt::Return(Some(expr)) => {
+        Stmt::Expr(expr) | Stmt::Let(LetStmt { value: expr, .. }) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
             collect_ast_expr_effects(expr, footprint);
         }
         Stmt::If(if_stmt) => {
@@ -8167,8 +8169,10 @@ fn collect_consumed_bindings_from_stmts(stmts: &[Stmt], bindings: &mut HashSet<S
     for stmt in stmts {
         match stmt {
             Stmt::Let(let_stmt) => collect_consumed_bindings_from_expr(&let_stmt.value, bindings),
-            Stmt::Expr(expr) | Stmt::Return(Some(expr)) => collect_consumed_bindings_from_expr(expr, bindings),
-            Stmt::Return(None) => {}
+            Stmt::Expr(expr) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
+                collect_consumed_bindings_from_expr(expr, bindings)
+            }
+            Stmt::Return(ReturnStmt { value: None, .. }) => {}
             Stmt::If(if_stmt) => {
                 collect_consumed_bindings_from_expr(&if_stmt.condition, bindings);
                 collect_consumed_bindings_from_stmts(&if_stmt.then_branch, bindings);

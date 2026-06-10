@@ -375,7 +375,7 @@ impl<'a> Parser<'a> {
                     let mut parallelizable = true;
                     let mut estimated_cycles = 1000;
                     while !self.check(&TokenKind::RParen) && !self.check(&TokenKind::Eof) {
-                        let hint_name = self.parse_name()?;
+                        let (hint_name, hint_span) = self.parse_name_with_span()?;
                         match hint_name.as_str() {
                             "parallel" => parallelizable = true,
                             "sequential" => parallelizable = false,
@@ -390,8 +390,9 @@ impl<'a> Parser<'a> {
                                     _ => return Err(CompileError::new("expected integer estimated_cycles", self.current().span)),
                                 };
                             }
-                            // AUDIT-FINDING: scheduler_hint metadata silently ignores unknown names, allowing misspelled or malformed scheduler policy to parse as a valid attribute — severity: MEDIUM — reject unrecognised scheduler hint keys with a diagnostic at the key span
-                            _ => {}
+                            _ => {
+                                return Err(CompileError::new(format!("unknown scheduler_hint key '{}'", hint_name), hint_span));
+                            }
                         }
 
                         if self.check(&TokenKind::Comma) {
@@ -1938,14 +1939,17 @@ impl<'a> Parser<'a> {
         Ok(LetStmt { pattern, ty, value, is_mut, span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column) })
     }
 
-    fn parse_return(&mut self) -> Result<Option<Expr>> {
+    fn parse_return(&mut self) -> Result<ReturnStmt> {
+        let start_span = self.current().span;
         self.expect(TokenKind::Return)?;
 
-        if self.check(&TokenKind::Newline) || self.check(&TokenKind::RBrace) || self.check(&TokenKind::Eof) {
-            Ok(None)
+        let value = if self.check(&TokenKind::Newline) || self.check(&TokenKind::RBrace) || self.check(&TokenKind::Eof) {
+            None
         } else {
-            Ok(Some(self.parse_expr()?))
-        }
+            Some(self.parse_expr()?)
+        };
+        let end = value.as_ref().map_or(start_span.end, |expr| expr.span().end).max(start_span.end);
+        Ok(ReturnStmt { value, span: Span::new(start_span.start, end, start_span.line, start_span.column) })
     }
 
     fn parse_if(&mut self) -> Result<IfStmt> {
@@ -3059,6 +3063,7 @@ impl<'a> Parser<'a> {
 
         let mut arms = Vec::new();
         while !self.check(&TokenKind::RBrace) && !self.check(&TokenKind::Eof) {
+            let arm_start = self.current().span;
             let pattern =
                 if self.check(&TokenKind::Underscore) || matches!(&self.current().kind, TokenKind::Identifier(name) if name == "_") {
                     self.advance();
@@ -3078,8 +3083,8 @@ impl<'a> Parser<'a> {
                 let end = self.current().span.start.max(block_span.end);
                 Expr::Block(stmts, Span::new(block_span.start, end, block_span.line, block_span.column))
             };
-            // AUDIT-FINDING: match arm span is captured after parse_block, so it points at the following comma/brace token rather than covering the pattern and block — severity: LOW — capture arm start before the pattern and combine it with the parsed block span
-            let arm_span = self.current().span;
+            let value_span = value.span();
+            let arm_span = Span::new(arm_start.start, value_span.end, arm_start.line, arm_start.column);
             arms.push(MatchArm { pattern, value, span: arm_span });
             self.skip_newlines();
             if self.check(&TokenKind::Comma) {
@@ -3381,7 +3386,7 @@ where
         };
         assert_ne!(*integer_span, Span::default());
 
-        let Stmt::Return(Some(Expr::Identifier(_, identifier_span))) = &action.body[1] else {
+        let Stmt::Return(ReturnStmt { value: Some(Expr::Identifier(_, identifier_span)), .. }) = &action.body[1] else {
             panic!("expected identifier return expression");
         };
         assert_ne!(*identifier_span, Span::default());
@@ -3789,6 +3794,23 @@ where
     }
 
     #[test]
+    fn test_rejects_unknown_scheduler_hint_key() {
+        let input = r#"
+module test
+
+#[scheduler_hint(paralell)]
+action mint() -> u64
+where
+    return 1
+"#;
+        let tokens = lex(input).unwrap();
+        let err = parse(&tokens).unwrap_err();
+
+        assert!(err.message.contains("unknown scheduler_hint key 'paralell'"), "unexpected error: {}", err.message);
+        assert_eq!(&input[err.span.start..err.span.end], "paralell");
+    }
+
+    #[test]
     fn test_action_where_column_one_flow_identifier_stays_in_body() {
         let input = r#"
 module test
@@ -4190,6 +4212,39 @@ where
         let tokens = lex(input).unwrap();
         let err = parse(&tokens).unwrap_err();
         assert!(err.message.contains("match arms must use"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn test_match_arm_span_covers_pattern_and_block() {
+        let input = r#"
+module test
+
+enum Flag {
+    On,
+    Off,
+}
+
+action test(flag: Flag) -> u64
+where
+    match flag {
+        On => { 1 },
+        Off => { 0 },
+    }
+"#;
+        let tokens = lex(input).unwrap();
+        let module = parse(&tokens).unwrap();
+        let Item::Action(action) = &module.items[1] else {
+            panic!("expected action");
+        };
+        let Stmt::Expr(Expr::Match(match_expr)) = &action.body[0] else {
+            panic!("expected match expression");
+        };
+        let first_arm = &match_expr.arms[0];
+        let arm_start = input.find("On =>").unwrap();
+        let arm_end = arm_start + input[arm_start..].find("},").unwrap() + 1;
+
+        assert_eq!(first_arm.span.start, arm_start);
+        assert_eq!(first_arm.span.end, arm_end);
     }
 
     // === 0.13.1 preserve sugar and anonymous require block tests ===

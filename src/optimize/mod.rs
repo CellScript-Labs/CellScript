@@ -116,8 +116,10 @@ impl Optimizer {
                 span: let_stmt.span,
             })]),
             Stmt::Expr(expr) => Ok(vec![Stmt::Expr(self.optimize_expr(expr)?)]),
-            Stmt::Return(Some(expr)) => Ok(vec![Stmt::Return(Some(self.optimize_expr(expr)?))]),
-            Stmt::Return(None) => Ok(vec![Stmt::Return(None)]),
+            Stmt::Return(return_stmt) => Ok(vec![Stmt::Return(ReturnStmt {
+                value: return_stmt.value.as_ref().map(|expr| self.optimize_expr(expr)).transpose()?,
+                span: return_stmt.span,
+            })]),
             Stmt::If(if_stmt) => {
                 let condition = self.optimize_expr(&if_stmt.condition)?;
                 let then_branch = self.with_child_scope(|this| this.optimize_stmts(&if_stmt.then_branch))?;
@@ -413,7 +415,7 @@ impl Optimizer {
 
 fn inlineable_function_body(body: &[Stmt]) -> Option<&Expr> {
     match body {
-        [Stmt::Return(Some(expr))] | [Stmt::Expr(expr)] => Some(expr),
+        [Stmt::Return(ReturnStmt { value: Some(expr), .. })] | [Stmt::Expr(expr)] => Some(expr),
         _ => None,
     }
 }
@@ -531,8 +533,8 @@ fn collect_call_names_from_stmts(stmts: &[Stmt], names: &mut Vec<String>) {
 fn collect_call_names_from_stmt(stmt: &Stmt, names: &mut Vec<String>) {
     match stmt {
         Stmt::Let(let_stmt) => collect_call_names_from_expr(&let_stmt.value, names),
-        Stmt::Expr(expr) | Stmt::Return(Some(expr)) => collect_call_names_from_expr(expr, names),
-        Stmt::Return(None) => {}
+        Stmt::Expr(expr) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => collect_call_names_from_expr(expr, names),
+        Stmt::Return(ReturnStmt { value: None, .. }) => {}
         Stmt::If(if_stmt) => {
             collect_call_names_from_expr(&if_stmt.condition, names);
             collect_call_names_from_stmts(&if_stmt.then_branch, names);
@@ -656,8 +658,8 @@ fn walk_expr_children_for_calls(expr: &Expr, names: &mut Vec<String>) {
 fn collect_used_names_from_stmt(stmt: &Stmt, names: &mut HashSet<String>) {
     match stmt {
         Stmt::Let(let_stmt) => collect_used_names_from_expr(&let_stmt.value, names),
-        Stmt::Expr(expr) | Stmt::Return(Some(expr)) => collect_used_names_from_expr(expr, names),
-        Stmt::Return(None) => {}
+        Stmt::Expr(expr) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => collect_used_names_from_expr(expr, names),
+        Stmt::Return(ReturnStmt { value: None, .. }) => {}
         Stmt::If(if_stmt) => {
             collect_used_names_from_expr(&if_stmt.condition, names);
             for stmt in &if_stmt.then_branch {
@@ -969,6 +971,10 @@ fn substitute_expr(expr: &Expr, substitutions: &HashMap<String, Expr>) -> Expr {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn return_expr(expr: Expr) -> Stmt {
+        Stmt::Return(ReturnStmt { value: Some(expr), span: Span::default() })
+    }
     use crate::error::Span;
 
     #[test]
@@ -1065,10 +1071,10 @@ mod tests {
                         span: Span::default(),
                     }],
                     return_type: Some(Type::U64),
-                    body: vec![Stmt::Return(Some(Expr::Block(
+                    body: vec![return_expr(Expr::Block(
                         vec![Stmt::Expr(Expr::Identifier("x".to_string(), Span::default()))],
                         Span::default(),
-                    )))],
+                    ))],
                     doc_comment: None,
                     span: Span::default(),
                 }),
@@ -1086,11 +1092,11 @@ mod tests {
                             is_mut: false,
                             span: Span::default(),
                         }),
-                        Stmt::Return(Some(Expr::Call(CallExpr {
+                        return_expr(Expr::Call(CallExpr {
                             func: Box::new(Expr::Identifier("from_block".to_string(), Span::default())),
                             args: vec![Expr::Integer(2, Span::default())],
                             span: Span::default(),
-                        }))),
+                        })),
                     ],
                     effect: EffectClass::Pure,
                     effect_declared: false,
@@ -1112,7 +1118,7 @@ mod tests {
                 _ => None,
             })
             .unwrap();
-        assert!(matches!(action.body[1], Stmt::Return(Some(Expr::Call(_)))));
+        assert!(matches!(action.body[1], Stmt::Return(ReturnStmt { value: Some(Expr::Call(_)), .. })));
     }
 
     #[test]
@@ -1160,7 +1166,7 @@ mod tests {
                         is_mut: false,
                         span: Span::default(),
                     }),
-                    Stmt::Return(Some(Expr::Integer(1, Span::default()))),
+                    return_expr(Expr::Integer(1, Span::default())),
                 ],
                 effect: EffectClass::Pure,
                 effect_declared: false,
@@ -1179,7 +1185,7 @@ mod tests {
         assert_eq!(action.body.len(), 3, "unused literal should be removed, calls and constraints should stay");
         assert!(matches!(action.body[0], Stmt::Let(LetStmt { value: Expr::Call(_), .. })));
         assert!(matches!(action.body[1], Stmt::Let(LetStmt { value: Expr::StdlibCall(_), .. })));
-        assert!(matches!(action.body[2], Stmt::Return(Some(Expr::Integer(1, _)))));
+        assert!(matches!(action.body[2], Stmt::Return(ReturnStmt { value: Some(Expr::Integer(1, _)), .. })));
     }
 
     #[test]
@@ -1205,12 +1211,12 @@ mod tests {
                         span: Span::default(),
                     }],
                     return_type: Some(Type::U64),
-                    body: vec![Stmt::Return(Some(Expr::Binary(BinaryExpr {
+                    body: vec![return_expr(Expr::Binary(BinaryExpr {
                         op: BinaryOp::Add,
                         left: Box::new(Expr::Identifier("x".to_string(), Span::default())),
                         right: Box::new(Expr::Identifier("STEP".to_string(), Span::default())),
                         span: Span::default(),
-                    })))],
+                    }))],
                     doc_comment: None,
                     span: Span::default(),
                 }),
@@ -1218,7 +1224,7 @@ mod tests {
                     name: "unused".to_string(),
                     params: Vec::new(),
                     return_type: Some(Type::U64),
-                    body: vec![Stmt::Return(Some(Expr::Integer(99, Span::default())))],
+                    body: vec![return_expr(Expr::Integer(99, Span::default()))],
                     doc_comment: None,
                     span: Span::default(),
                 }),
@@ -1236,11 +1242,11 @@ mod tests {
                             is_mut: false,
                             span: Span::default(),
                         }),
-                        Stmt::Return(Some(Expr::Call(CallExpr {
+                        return_expr(Expr::Call(CallExpr {
                             func: Box::new(Expr::Identifier("add_step".to_string(), Span::default())),
                             args: vec![Expr::Integer(40, Span::default())],
                             span: Span::default(),
-                        }))),
+                        })),
                     ],
                     effect: EffectClass::Pure,
                     effect_declared: false,
@@ -1267,6 +1273,6 @@ mod tests {
             })
             .unwrap();
         assert_eq!(action.body.len(), 1, "unused local binding should be removed");
-        assert!(matches!(action.body[0], Stmt::Return(Some(Expr::Integer(42, _)))));
+        assert!(matches!(action.body[0], Stmt::Return(ReturnStmt { value: Some(Expr::Integer(42, _)), .. })));
     }
 }

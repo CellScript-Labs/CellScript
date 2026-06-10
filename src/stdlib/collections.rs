@@ -338,44 +338,6 @@ impl Collections {
         asm.push_str("__vec_push:\n");
         asm.push_str("    j __cellscript_collection_runtime_unavailable\n\n");
 
-        asm.push_str("# Vec::push unchecked body retained as non-entry documentation only\n");
-        // AUDIT-FINDING: collection helper assembly is hand-authored string output with an unreachable pseudo-implementation retained after a fail-closed jump, outside the main typed emitter/register-contract path — severity: MEDIUM — remove dead helper bodies or generate them through the same emitter/assembler contract with executable regression coverage
-        asm.push_str(".Lvec_push_unreachable_body:\n");
-        asm.push_str("    addi sp, sp, -32\n");
-        asm.push_str("    sd ra, 24(sp)\n");
-        asm.push_str("    sd s0, 16(sp)\n");
-        asm.push_str("    sd s1, 8(sp)\n");
-        asm.push_str("    mv s0, a0          # vec pointer\n");
-        asm.push_str("    mv s1, a1          # value to push\n");
-        asm.push_str("    ld t0, 0(s0)       # capacity\n");
-        asm.push_str("    ld t1, 8(s0)       # length\n");
-        asm.push_str("    bgeu t1, t0, .Lvec_push_grow\n");
-        asm.push_str(".Lvec_push_insert:\n");
-        asm.push_str("    ld t2, 16(s0)      # data pointer\n");
-        asm.push_str("    slli t3, t1, 3     # offset = length * 8\n");
-        asm.push_str("    add t2, t2, t3\n");
-        asm.push_str("    sd s1, 0(t2)       # store value\n");
-        asm.push_str("    addi t1, t1, 1\n");
-        asm.push_str("    sd t1, 8(s0)       # length++\n");
-        asm.push_str("    ld ra, 24(sp)\n");
-        asm.push_str("    ld s0, 16(sp)\n");
-        asm.push_str("    ld s1, 8(sp)\n");
-        asm.push_str("    addi sp, sp, 32\n");
-        asm.push_str("    ret\n");
-        asm.push_str(".Lvec_push_grow:\n");
-        asm.push_str("    # Grow capacity (simplified: double)\n");
-        asm.push_str("    beqz t0, .Lvec_push_init\n");
-        asm.push_str("    slli t0, t0, 1\n");
-        asm.push_str("    j .Lvec_push_alloc\n");
-        asm.push_str(".Lvec_push_init:\n");
-        asm.push_str("    li t0, 4           # initial capacity\n");
-        asm.push_str(".Lvec_push_alloc:\n");
-        asm.push_str("    sd t0, 0(s0)       # update capacity\n");
-        asm.push_str("    slli a0, t0, 3     # new_size = capacity * 8\n");
-        asm.push_str("    j __cellscript_collection_runtime_unavailable\n");
-        asm.push_str("    sd a0, 16(s0)      # update data pointer\n");
-        asm.push_str("    j .Lvec_push_insert\n\n");
-
         asm.push_str("# Vec::len\n");
         asm.push_str(".global __vec_len\n");
         asm.push_str("__vec_len:\n");
@@ -489,6 +451,10 @@ mod tests {
     fn collection_assembly_has_no_raw_syscalls_or_unclassified_helpers() {
         let asm = Collections::generate_assembly();
         assert!(!asm.lines().any(|line| line.split('#').next().unwrap_or_default().trim() == "ecall"), "{asm}");
+        assert!(
+            !asm.contains(".Lvec_push_unreachable_body") && !asm.contains("unchecked body retained"),
+            "collection assembly must not emit unreachable pseudo-implementation bodies:\n{asm}"
+        );
 
         for symbol in asm.lines().filter_map(|line| line.strip_prefix(".global ")) {
             assert!(

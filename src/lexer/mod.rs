@@ -244,8 +244,7 @@ impl<'a> Lexer<'a> {
                     Some(c) => {
                         return Err(CompileError::new(
                             format!("unknown escape sequence: \\{}", c),
-                            // AUDIT-FINDING: escape diagnostics add one byte to self.position for the offending character, which truncates spans for non-ASCII escaped characters and can produce invalid byte ranges — severity: LOW — advance by c.len_utf8() or capture the current character span before building the diagnostic
-                            Span::new(self.position, self.position + 1, self.line, self.column),
+                            Span::new(self.position, self.position + c.len_utf8(), self.line, self.column),
                         ));
                     }
                     None => {
@@ -329,7 +328,7 @@ impl<'a> Lexer<'a> {
                         if !hi.is_ascii_hexdigit() {
                             return Err(CompileError::new(
                                 format!("invalid hex escape in byte string: \\x{}", hi),
-                                Span::new(self.position, self.position + 1, self.line, self.column),
+                                Span::new(self.position, self.position + hi.len_utf8(), self.line, self.column),
                             ));
                         }
                         self.advance()?;
@@ -343,7 +342,7 @@ impl<'a> Lexer<'a> {
                         if !lo.is_ascii_hexdigit() {
                             return Err(CompileError::new(
                                 format!("invalid hex escape in byte string: \\x{}{}", hi, lo),
-                                Span::new(self.position, self.position + 1, self.line, self.column),
+                                Span::new(self.position, self.position + lo.len_utf8(), self.line, self.column),
                             ));
                         }
                         self.advance()?;
@@ -360,7 +359,7 @@ impl<'a> Lexer<'a> {
                     Some(c) => {
                         return Err(CompileError::new(
                             format!("unknown escape sequence in byte string: \\{}", c),
-                            Span::new(self.position, self.position + 1, self.line, self.column),
+                            Span::new(self.position, self.position + c.len_utf8(), self.line, self.column),
                         ));
                     }
                     None => {
@@ -376,7 +375,7 @@ impl<'a> Lexer<'a> {
             } else {
                 return Err(CompileError::new(
                     "non-ASCII character in byte string",
-                    Span::new(self.position, self.position + 1, self.line, self.column),
+                    Span::new(self.position, self.position + c.len_utf8(), self.line, self.column),
                 ));
             }
             self.ensure_limit(start, MAX_BYTE_STRING_LITERAL_BYTES, "byte string literal", start_line, start_col)?;
@@ -631,6 +630,16 @@ mod tests {
     }
 
     #[test]
+    fn string_unknown_escape_span_covers_non_ascii_character() {
+        let input = "\"\\é\"";
+        let error = lex(input).unwrap_err();
+
+        assert!(error.message.contains("unknown escape sequence"), "{}", error.message);
+        assert_eq!(error.span, Span::new(2, 4, 1, 3));
+        assert!(input.is_char_boundary(error.span.end));
+    }
+
+    #[test]
     fn rejects_oversized_identifier() {
         let input = "a".repeat(MAX_IDENTIFIER_BYTES + 1);
         let error = lex(&input).unwrap_err();
@@ -658,6 +667,32 @@ mod tests {
         let error = lex("b\"unterminated").unwrap_err();
 
         assert!(error.message.contains("unterminated byte string literal"), "{}", error.message);
+    }
+
+    #[test]
+    fn byte_string_invalid_character_spans_cover_non_ascii_character() {
+        let raw_error = lex("b\"é\"").unwrap_err();
+
+        assert!(raw_error.message.contains("non-ASCII character in byte string"), "{}", raw_error.message);
+        assert_eq!(raw_error.span, Span::new(2, 4, 1, 3));
+
+        let escape_error = lex("b\"\\é\"").unwrap_err();
+
+        assert!(escape_error.message.contains("unknown escape sequence in byte string"), "{}", escape_error.message);
+        assert_eq!(escape_error.span, Span::new(3, 5, 1, 4));
+    }
+
+    #[test]
+    fn byte_string_invalid_hex_escape_spans_cover_non_ascii_character() {
+        let hi_error = lex("b\"\\xé0\"").unwrap_err();
+
+        assert!(hi_error.message.contains("invalid hex escape in byte string"), "{}", hi_error.message);
+        assert_eq!(hi_error.span, Span::new(4, 6, 1, 5));
+
+        let lo_error = lex("b\"\\x0é\"").unwrap_err();
+
+        assert!(lo_error.message.contains("invalid hex escape in byte string"), "{}", lo_error.message);
+        assert_eq!(lo_error.span, Span::new(5, 7, 1, 6));
     }
 
     #[test]

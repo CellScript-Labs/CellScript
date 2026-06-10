@@ -1849,8 +1849,7 @@ fn stmt_span(stmt: &ast::Stmt) -> error::Span {
     match stmt {
         ast::Stmt::Let(let_stmt) => let_stmt.span,
         ast::Stmt::Expr(expr) => expr_span(expr),
-        ast::Stmt::Return(Some(expr)) => expr_span(expr),
-        ast::Stmt::Return(None) => error::Span::default(),
+        ast::Stmt::Return(return_stmt) => return_stmt.span,
         ast::Stmt::If(if_stmt) => if_stmt.span,
         ast::Stmt::For(for_stmt) => for_stmt.span,
         ast::Stmt::While(while_stmt) => while_stmt.span,

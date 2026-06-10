@@ -568,8 +568,10 @@ impl<'a> TypeChecker<'a> {
                     let child_depth = depth.saturating_add(1);
                     match stmt {
                         Stmt::Let(let_stmt) => stack.push(Frame::Expr(&let_stmt.value, child_depth)),
-                        Stmt::Expr(expr) | Stmt::Return(Some(expr)) => stack.push(Frame::Expr(expr, child_depth)),
-                        Stmt::Return(None) => {}
+                        Stmt::Expr(expr) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
+                            stack.push(Frame::Expr(expr, child_depth));
+                        }
+                        Stmt::Return(ReturnStmt { value: None, .. }) => {}
                         Stmt::If(if_stmt) => {
                             stack.push(Frame::Expr(&if_stmt.condition, child_depth));
                             for stmt in &if_stmt.then_branch {
@@ -1823,10 +1825,10 @@ impl<'a> TypeChecker<'a> {
         for stmt in stmts {
             match stmt {
                 Stmt::Let(let_stmt) => self.validate_lifecycle_effects_in_expr(&let_stmt.value, branch_local, summary)?,
-                Stmt::Expr(expr) | Stmt::Return(Some(expr)) => {
+                Stmt::Expr(expr) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
                     self.validate_lifecycle_effects_in_expr(expr, branch_local, summary)?;
                 }
-                Stmt::Return(None) => {}
+                Stmt::Return(ReturnStmt { value: None, .. }) => {}
                 Stmt::If(if_stmt) => {
                     self.validate_lifecycle_effects_in_expr(&if_stmt.condition, branch_local, summary)?;
                     self.validate_lifecycle_effects_in_stmts(&if_stmt.then_branch, true, summary)?;
@@ -1987,10 +1989,10 @@ impl<'a> TypeChecker<'a> {
                 Stmt::Let(let_stmt) => {
                     guaranteed = self.validate_branch_obligations_in_expr(&let_stmt.value, outputs, guaranteed)?;
                 }
-                Stmt::Expr(expr) | Stmt::Return(Some(expr)) => {
+                Stmt::Expr(expr) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
                     guaranteed = self.validate_branch_obligations_in_expr(expr, outputs, guaranteed)?;
                 }
-                Stmt::Return(None) => {}
+                Stmt::Return(ReturnStmt { value: None, .. }) => {}
                 Stmt::If(if_stmt) => {
                     self.validate_branch_obligations_in_expr(&if_stmt.condition, outputs, guaranteed.clone())?;
                     let then_guaranteed =
@@ -2195,8 +2197,10 @@ impl<'a> TypeChecker<'a> {
         for stmt in stmts {
             match stmt {
                 Stmt::Let(let_stmt) => self.validate_create_targets_in_expr(&let_stmt.value, outputs)?,
-                Stmt::Expr(expr) | Stmt::Return(Some(expr)) => self.validate_create_targets_in_expr(expr, outputs)?,
-                Stmt::Return(None) => {}
+                Stmt::Expr(expr) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
+                    self.validate_create_targets_in_expr(expr, outputs)?;
+                }
+                Stmt::Return(ReturnStmt { value: None, .. }) => {}
                 Stmt::If(if_stmt) => {
                     self.validate_create_targets_in_expr(&if_stmt.condition, outputs)?;
                     self.validate_create_targets_in_stmts(&if_stmt.then_branch, outputs)?;
@@ -3012,10 +3016,10 @@ impl<'a> TypeChecker<'a> {
                 self.validate_spawn_ipc_fd_usage_expr(&let_stmt.value, state)?;
                 self.bind_spawn_ipc_fd_pattern(let_stmt, state);
             }
-            Stmt::Expr(expr) | Stmt::Return(Some(expr)) => {
+            Stmt::Expr(expr) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
                 self.validate_spawn_ipc_fd_usage_expr(expr, state)?;
             }
-            Stmt::Return(None) => {}
+            Stmt::Return(ReturnStmt { value: None, .. }) => {}
             Stmt::If(if_stmt) => {
                 self.validate_spawn_ipc_fd_usage_expr(&if_stmt.condition, state)?;
                 let mut then_state = state.clone();
@@ -3364,7 +3368,7 @@ impl<'a> TypeChecker<'a> {
                 }
                 Ok(())
             }
-            Stmt::Return(None) => {
+            Stmt::Return(ReturnStmt { value: None, .. }) => {
                 if let Some(Some(expected)) = &self.current_return_type {
                     return Err(CompileError::new(
                         format!("return without value in function returning {:?}", expected),
@@ -3373,7 +3377,7 @@ impl<'a> TypeChecker<'a> {
                 }
                 Ok(())
             }
-            Stmt::Return(Some(expr)) => {
+            Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
                 let expected_return = self.current_return_type.clone();
                 let ty = match &expected_return {
                     Some(Some(expected)) => self.infer_expr_with_contextual_literals(env, expr, expected, expr_span(expr))?,
@@ -3566,8 +3570,10 @@ impl<'a> TypeChecker<'a> {
                 self.check_no_unreachable_expr(&while_stmt.condition)?;
                 self.check_no_unreachable_stmts(&while_stmt.body)?;
             }
-            Stmt::Expr(expr) | Stmt::Return(Some(expr)) => self.check_no_unreachable_expr(expr)?,
-            Stmt::Return(None) => {}
+            Stmt::Expr(expr) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
+                self.check_no_unreachable_expr(expr)?;
+            }
+            Stmt::Return(ReturnStmt { value: None, .. }) => {}
         }
         Ok(())
     }
@@ -5079,7 +5085,7 @@ impl<'a> TypeChecker<'a> {
     fn mark_stmt_as_returned(&mut self, env: &mut TypeEnv, tail_base: &TypeEnv, stmt: &Stmt) -> Result<()> {
         match stmt {
             Stmt::Expr(expr) => self.mark_expr_as_moved(env, expr),
-            Stmt::Return(Some(_)) => Ok(()),
+            Stmt::Return(ReturnStmt { value: Some(_), .. }) => Ok(()),
             Stmt::If(if_stmt) if matches!(self.current_return_type, Some(Some(_))) => {
                 let Some(else_branch) = &if_stmt.else_branch else {
                     return Ok(());
@@ -5193,7 +5199,7 @@ impl<'a> TypeChecker<'a> {
     fn infer_lock_terminal_stmt(&mut self, env: &mut TypeEnv, stmt: &Stmt) -> Result<Type> {
         match stmt {
             Stmt::Expr(expr) => self.infer_expr(env, expr),
-            Stmt::Return(Some(expr)) => self.infer_expr(env, expr),
+            Stmt::Return(ReturnStmt { value: Some(expr), .. }) => self.infer_expr(env, expr),
             Stmt::If(if_stmt) => {
                 let cond_ty = self.infer_expr(env, &if_stmt.condition)?;
                 if !self.is_bool_type(&cond_ty) {
@@ -5340,7 +5346,9 @@ impl<'a> TypeChecker<'a> {
             return Ok(());
         };
         match last {
-            Stmt::Expr(expr) | Stmt::Return(Some(expr)) => self.reject_stored_linear_reference_alias(env, expr, span),
+            Stmt::Expr(expr) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
+                self.reject_stored_linear_reference_alias(env, expr, span)
+            }
             Stmt::If(if_stmt) => {
                 self.reject_stored_linear_reference_alias_in_tail_stmt(env, &if_stmt.then_branch, span)?;
                 if let Some(else_branch) = &if_stmt.else_branch {
@@ -6878,8 +6886,7 @@ fn stmt_span(stmt: &Stmt) -> Span {
     match stmt {
         Stmt::Let(let_stmt) => let_stmt.span,
         Stmt::Expr(expr) => expr_span(expr),
-        Stmt::Return(Some(expr)) => expr_span(expr),
-        Stmt::Return(None) => Span::default(),
+        Stmt::Return(return_stmt) => return_stmt.span,
         Stmt::If(if_stmt) => if_stmt.span,
         Stmt::For(for_stmt) => for_stmt.span,
         Stmt::While(while_stmt) => while_stmt.span,
@@ -7116,8 +7123,10 @@ fn collect_required_output_fields(expr: &Expr, outputs: &HashSet<String>, fields
 fn collect_required_output_fields_from_stmt(stmt: &Stmt, outputs: &HashSet<String>, fields: &mut HashSet<String>) {
     match stmt {
         Stmt::Let(let_stmt) => collect_required_output_fields(&let_stmt.value, outputs, fields),
-        Stmt::Expr(expr) | Stmt::Return(Some(expr)) => collect_required_output_fields(expr, outputs, fields),
-        Stmt::Return(None) => {}
+        Stmt::Expr(expr) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
+            collect_required_output_fields(expr, outputs, fields);
+        }
+        Stmt::Return(ReturnStmt { value: None, .. }) => {}
         Stmt::If(if_stmt) => {
             collect_required_output_fields(&if_stmt.condition, outputs, fields);
             for stmt in &if_stmt.then_branch {
@@ -7367,8 +7376,10 @@ fn collect_consumed_bindings_from_stmts(stmts: &[Stmt], bindings: &mut HashSet<S
     for stmt in stmts {
         match stmt {
             Stmt::Let(let_stmt) => collect_consumed_bindings_from_expr(&let_stmt.value, bindings),
-            Stmt::Expr(expr) | Stmt::Return(Some(expr)) => collect_consumed_bindings_from_expr(expr, bindings),
-            Stmt::Return(None) => {}
+            Stmt::Expr(expr) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
+                collect_consumed_bindings_from_expr(expr, bindings);
+            }
+            Stmt::Return(ReturnStmt { value: None, .. }) => {}
             Stmt::If(if_stmt) => {
                 collect_consumed_bindings_from_expr(&if_stmt.condition, bindings);
                 collect_consumed_bindings_from_stmts(&if_stmt.then_branch, bindings);
@@ -7575,7 +7586,9 @@ fn collect_mutable_reference_root_names_from_tail_stmts<'a>(stmts: &'a [Stmt], r
         return;
     };
     match last {
-        Stmt::Expr(expr) | Stmt::Return(Some(expr)) => collect_mutable_reference_root_names(expr, roots),
+        Stmt::Expr(expr) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
+            collect_mutable_reference_root_names(expr, roots);
+        }
         Stmt::If(if_stmt) => {
             collect_mutable_reference_root_names_from_tail_stmts(&if_stmt.then_branch, roots);
             if let Some(else_branch) = &if_stmt.else_branch {

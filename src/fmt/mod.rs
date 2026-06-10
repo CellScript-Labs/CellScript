@@ -395,8 +395,8 @@ impl Formatter {
                 self.push_line(&line);
             }
             Stmt::Expr(expr) => self.push_line(&self.format_expr(expr)),
-            Stmt::Return(None) => self.push_line("return"),
-            Stmt::Return(Some(expr)) => self.push_line(&format!("return {}", self.format_expr(expr))),
+            Stmt::Return(ReturnStmt { value: None, .. }) => self.push_line("return"),
+            Stmt::Return(ReturnStmt { value: Some(expr), .. }) => self.push_line(&format!("return {}", self.format_expr(expr))),
             Stmt::If(if_stmt) => self.format_if_stmt(if_stmt),
             Stmt::For(for_stmt) => self.format_for_stmt(for_stmt),
             Stmt::While(while_stmt) => self.format_while_stmt(while_stmt),
@@ -431,8 +431,8 @@ impl Formatter {
                     formatter.output.trim_end().to_string()
                 }
                 Stmt::Expr(expr) => self.format_expr(expr),
-                Stmt::Return(None) => "return".to_string(),
-                Stmt::Return(Some(expr)) => format!("return {}", self.format_expr(expr)),
+                Stmt::Return(ReturnStmt { value: None, .. }) => "return".to_string(),
+                Stmt::Return(ReturnStmt { value: Some(expr), .. }) => format!("return {}", self.format_expr(expr)),
             })
             .collect::<Vec<_>>()
             .join("\n")

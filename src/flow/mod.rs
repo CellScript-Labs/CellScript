@@ -95,8 +95,10 @@ fn collect_state_context_from_stmts(specs: &HashMap<String, FlowSpec>, context: 
                 }
                 collect_state_context_from_expr(specs, context, &let_stmt.value);
             }
-            Stmt::Expr(expr) | Stmt::Return(Some(expr)) => collect_state_context_from_expr(specs, context, expr),
-            Stmt::Return(None) => {}
+            Stmt::Expr(expr) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
+                collect_state_context_from_expr(specs, context, expr)
+            }
+            Stmt::Return(ReturnStmt { value: None, .. }) => {}
             Stmt::If(if_stmt) => {
                 collect_state_context_from_expr(specs, context, &if_stmt.condition);
                 collect_state_context_from_stmts(specs, context, &if_stmt.then_branch);
@@ -251,8 +253,8 @@ fn validate_state_transition_stmt(specs: &HashMap<String, FlowSpec>, context: &A
     match stmt {
         Stmt::Let(let_stmt) => validate_state_transition_expr(specs, context, &let_stmt.value),
         Stmt::Expr(expr) => validate_state_transition_expr(specs, context, expr),
-        Stmt::Return(Some(expr)) => validate_state_transition_expr(specs, context, expr),
-        Stmt::Return(None) => Ok(()),
+        Stmt::Return(ReturnStmt { value: Some(expr), .. }) => validate_state_transition_expr(specs, context, expr),
+        Stmt::Return(ReturnStmt { value: None, .. }) => Ok(()),
         Stmt::If(if_stmt) => {
             validate_state_transition_expr(specs, context, &if_stmt.condition)?;
             validate_stmt_list(specs, context, &if_stmt.then_branch)?;

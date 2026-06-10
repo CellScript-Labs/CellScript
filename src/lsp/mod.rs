@@ -1851,10 +1851,14 @@ fn apply_incremental_change(content: &str, range: Range, new_text: &str) -> Stri
 }
 
 fn span_to_range(source: &str, span: Span) -> Range {
-    // AUDIT-FINDING: LSP range conversion clamps raw byte spans but does not reject default, reversed, or non-character-boundary spans, so diagnostics/navigation can collapse to misleading positions when upstream parsers synthesize bad spans — severity: MEDIUM — validate span invariants here and fall back to span.line/span.column or a known safe range when byte offsets are unusable
-    let start = offset_to_position(source, span.start.min(source.len()));
-    let end = offset_to_position(source, span.end.min(source.len()));
-    Range { start, end }
+    if span.start <= span.end && span.end <= source.len() && source.is_char_boundary(span.start) && source.is_char_boundary(span.end) {
+        return Range { start: offset_to_position(source, span.start), end: offset_to_position(source, span.end) };
+    }
+    let fallback = Position {
+        line: span.line.saturating_sub(1).min(u32::MAX as usize) as u32,
+        character: span.column.saturating_sub(1).min(u32::MAX as usize) as u32,
+    };
+    Range { start: fallback, end: fallback }
 }
 
 fn diagnostic_from_error(source: &str, error: &CompileError) -> Diagnostic {
@@ -1981,12 +1985,11 @@ fn item_span(item: &Item) -> Span {
 fn stmt_span(stmt: &Stmt) -> Span {
     match stmt {
         Stmt::Let(s) => s.span,
-        // AUDIT-FINDING: statements without stored spans are mapped to Span::default, causing LSP local-scope, selection, and highlight ranges to treat returns/expr statements as line 0 rather than their source location — severity: MEDIUM — carry spans on all statement variants and remove default span fallbacks
-        Stmt::Return(_) => Span::default(),
+        Stmt::Return(s) => s.span,
         Stmt::If(s) => s.span,
         Stmt::For(s) => s.span,
         Stmt::While(s) => s.span,
-        Stmt::Expr(_) => Span::default(),
+        Stmt::Expr(expr) => expr.span(),
     }
 }
 
@@ -2227,8 +2230,7 @@ fn is_ident_char(ch: char) -> bool {
 }
 
 fn word_at_offset(source: &str, offset: usize) -> Option<String> {
-    // AUDIT-FINDING: word extraction slices at caller-provided byte offsets without first checking UTF-8 character boundaries, so any future non-LSP caller passing a raw byte index can panic on multibyte source — severity: MEDIUM — reject non-boundary offsets with source.is_char_boundary before slicing
-    if source.is_empty() || offset > source.len() {
+    if source.is_empty() || offset > source.len() || !source.is_char_boundary(offset) {
         return None;
     }
     let mut start = offset;
@@ -2524,8 +2526,11 @@ fn file_uri_to_utf8_path(uri: &str) -> Option<Utf8PathBuf> {
     let path = uri.strip_prefix("file://")?;
     let decoded = percent_decode(path)?;
     let candidate = Utf8PathBuf::from(decoded);
-    // AUDIT-FINDING: file URI decoding falls back to the raw, non-canonical candidate when canonicalization fails, so later package-root discovery can observe unresolved user input instead of a stable filesystem identity — severity: MEDIUM — require canonicalization for existing workspace files and represent missing files separately
-    std::fs::canonicalize(&candidate).ok().and_then(|path| Utf8PathBuf::from_path_buf(path).ok()).or(Some(candidate))
+    match std::fs::canonicalize(&candidate) {
+        Ok(path) => Utf8PathBuf::from_path_buf(path).ok(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Some(candidate),
+        Err(_) => None,
+    }
 }
 
 fn utf8_path_to_file_uri(path: &camino::Utf8Path) -> String {
@@ -2584,6 +2589,48 @@ mod tests {
         assert_eq!(position_to_offset_strict(source, Position { line: 0, character: 2 }), None);
         assert_eq!(offset_to_position(source, beta_offset), Position { line: 1, character: 0 });
         assert_eq!(position_to_offset(source, Position { line: 1, character: 1 }), Some(beta_offset + 'β'.len_utf8()));
+    }
+
+    #[test]
+    fn span_to_range_rejects_invalid_utf8_boundaries() {
+        let source = "aβ\nz";
+        let range = span_to_range(source, Span::new(1, 2, 3, 4));
+
+        assert_eq!(range.start, Position { line: 2, character: 3 });
+        assert_eq!(range.end, range.start);
+    }
+
+    #[test]
+    fn word_at_offset_rejects_non_boundary_offsets() {
+        let source = "aβ";
+
+        assert_eq!(word_at_offset(source, 2), None);
+        assert_eq!(word_at_offset(source, source.len()), Some("aβ".to_string()));
+    }
+
+    #[test]
+    fn stmt_span_uses_return_statement_span() {
+        let return_span = Span::new(10, 16, 2, 5);
+        let expr_span = Span::new(17, 18, 2, 12);
+
+        let return_stmt = Stmt::Return(ReturnStmt { value: None, span: return_span });
+        let expr_stmt = Stmt::Expr(Expr::Integer(1, expr_span));
+
+        assert_eq!(stmt_span(&return_stmt), return_span);
+        assert_eq!(stmt_span(&expr_stmt), expr_span);
+    }
+
+    #[test]
+    fn file_uri_to_utf8_path_canonicalizes_existing_paths_and_preserves_missing_paths() {
+        let dir = tempdir().unwrap();
+        let file = Utf8PathBuf::from_path_buf(dir.path().join("source.cell")).unwrap();
+        std::fs::write(&file, "module source\n").unwrap();
+
+        let resolved = file_uri_to_utf8_path(&utf8_path_to_file_uri(&file)).unwrap();
+        assert_eq!(resolved, lsp_canonical_utf8_path(&file).unwrap());
+
+        let missing = Utf8PathBuf::from_path_buf(dir.path().join("missing.cell")).unwrap();
+        assert_eq!(file_uri_to_utf8_path(&utf8_path_to_file_uri(&missing)), Some(missing));
     }
 
     #[test]
