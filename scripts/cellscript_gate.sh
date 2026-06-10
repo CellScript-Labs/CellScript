@@ -214,30 +214,23 @@ check_package_contents() {
 }
 
 check_script_syntax() {
-    run bash -n scripts/cellscript_gate.sh
-    run bash -n scripts/cellscript_ckb_release_gate.sh
-    run bash -n scripts/cellscript_ckb_stateful_scenarios.sh
-    run bash -n scripts/cellscript_0_14_scope_audit.sh
-    run bash -n scripts/cellscript_syntax_combo_audit.sh
-    run bash -n scripts/cellscript_strict_backend_audit.sh
-    run bash -n scripts/ckb_cellscript_acceptance.sh
-    run bash -n scripts/novaseal_devnet_stateful_acceptance.sh
-    run python_syntax_check \
-        scripts/cellscript_syntax_combo_audit.py \
-        scripts/cellscript_strict_backend_audit.py \
-        scripts/validate_cellscript_tooling_release.py \
-        scripts/validate_ckb_cellscript_production_evidence.py \
-        scripts/novaseal_agreement_devnet_stateful_live.py \
-        scripts/novaseal_bip340_tcb_review.py \
-        scripts/novaseal_btc_spv_evidence_adapter.py \
-        scripts/novaseal_devnet_stateful_live.py \
-        scripts/novaseal_external_attestation_adapter.py \
-        scripts/novaseal_external_evidence_handoff_bundle.py \
-        scripts/novaseal_fiber_node_experiments.py \
-        scripts/novaseal_planned_profiles_devnet_stateful_live.py \
-        scripts/novaseal_profile_operator_fixtures.py \
-        scripts/novaseal_service_builder_fixtures.py \
-        scripts/novaseal_wallet_signing_vectors.py
+    local shell_scripts=()
+    local shell_script
+    while IFS= read -r shell_script; do
+        shell_scripts+=("$shell_script")
+    done < <(git ls-files '*.sh')
+    for shell_script in "${shell_scripts[@]}"; do
+        run bash -n "$shell_script"
+    done
+
+    local python_scripts=()
+    local python_script
+    while IFS= read -r python_script; do
+        python_scripts+=("$python_script")
+    done < <(git ls-files '*.py')
+    if ((${#python_scripts[@]} > 0)); then
+        run python_syntax_check "${python_scripts[@]}"
+    fi
 }
 
 run_dev_gate() {
