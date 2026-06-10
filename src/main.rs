@@ -238,7 +238,10 @@ fn main() {
         (Some(action), None) => compile_path_with_entry_action(compile_input, options, action),
         (None, Some(lock)) => compile_path_with_entry_lock(compile_input, options, lock),
         (None, None) => compile_path(compile_input, options),
-        (Some(_), Some(_)) => unreachable!("validated above"),
+        (Some(_), Some(_)) => {
+            eprintln!("{}: --entry-action and --entry-lock are mutually exclusive", "error".red());
+            process::exit(1);
+        }
     };
 
     match compile_result {

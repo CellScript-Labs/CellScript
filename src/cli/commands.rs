@@ -520,7 +520,9 @@ impl CommandExecutor {
             (Some(action), None) => compile_path_with_entry_action(input, options, action),
             (None, Some(lock)) => compile_path_with_entry_lock(input, options, lock),
             (None, None) => compile_path(input, options),
-            (Some(_), Some(_)) => unreachable!("validated above"),
+            (Some(_), Some(_)) => {
+                Err(crate::error::CompileError::without_span("--entry-action and --entry-lock are mutually exclusive"))
+            }
         }?;
         let policy_args = effective_build_check_args(&args)?;
         validate_check_policy(&result.metadata, &policy_args)?;
@@ -1240,7 +1242,9 @@ impl CommandExecutor {
             (Some(action), None) => compile_path_with_entry_action(input, options, action),
             (None, Some(lock)) => compile_path_with_entry_lock(input, options, lock),
             (None, None) => compile_path(input, options),
-            (Some(_), Some(_)) => unreachable!("validated above"),
+            (Some(_), Some(_)) => {
+                Err(crate::error::CompileError::without_span("constraints accepts either --entry-action or --entry-lock, not both"))
+            }
         }?;
         let json = serde_json::to_string_pretty(&result.metadata.constraints)
             .map_err(|error| crate::error::CompileError::without_span(format!("failed to serialize constraints: {}", error)))?;

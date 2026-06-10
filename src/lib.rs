@@ -2924,7 +2924,12 @@ fn validate_molecule_schema_metadata(metadata: &CompileMetadata) -> Result<()> {
                     )));
                 }
             }
-            _ => unreachable!("layout match guarded above"),
+            other => {
+                return Err(CompileError::without_span(format!(
+                    "metadata type '{}' has unsupported molecule_schema.layout '{}'",
+                    ty.name, other
+                )));
+            }
         }
         if schema.schema.is_empty() {
             return Err(CompileError::without_span(format!("metadata type '{}' has empty molecule_schema.schema", ty.name)));
@@ -7054,7 +7059,7 @@ fn metadata_guard_operand_labels(body: &ir::IrBody, params: &[ir::IrParam]) -> H
                     let operator = match instruction {
                         ir::IrInstruction::Binary { op: ast::BinaryOp::Add, .. } => "+",
                         ir::IrInstruction::Binary { op: ast::BinaryOp::Sub, .. } => "-",
-                        _ => unreachable!("matched arithmetic binary instruction"),
+                        _ => continue,
                     };
                     labels.insert(dest.id, format!("{left_label}{operator}{right_label}"));
                 }
@@ -7065,7 +7070,7 @@ fn metadata_guard_operand_labels(body: &ir::IrBody, params: &[ir::IrParam]) -> H
                         "__ckb_hash_blake2b" => "hash_blake2b",
                         "__ckb_hash_chain" => "hash_chain",
                         "__ckb_hash_blake2b_packed" => "hash_blake2b_packed",
-                        _ => unreachable!("matched hash helper"),
+                        _ => continue,
                     };
                     let arg_labels = args.iter().map(|arg| metadata_guard_operand_label(arg, &labels)).collect::<Option<Vec<_>>>();
                     if let Some(arg_labels) = arg_labels {
@@ -7123,21 +7128,19 @@ fn metadata_can_verify_scalar_guard_equality(
 
 fn metadata_guard_scalar_operand_width(operand: &ir::IrOperand) -> Option<usize> {
     match operand {
-        ir::IrOperand::Const(value) => metadata_fixed_scalar_const_value(value).map(|_| metadata_const_scalar_width(value)),
+        ir::IrOperand::Const(value) => metadata_const_scalar_width(value),
         ir::IrOperand::Var(var) => metadata_fixed_scalar_size(&var.ty),
     }
 }
 
-fn metadata_const_scalar_width(value: &ir::IrConst) -> usize {
+fn metadata_const_scalar_width(value: &ir::IrConst) -> Option<usize> {
     match value {
-        ir::IrConst::Bool(_) | ir::IrConst::U8(_) => 1,
-        ir::IrConst::U16(_) => 2,
-        ir::IrConst::U32(_) => 4,
-        ir::IrConst::U64(_) => 8,
-        ir::IrConst::U128(_) => 16,
-        ir::IrConst::Poisoned | ir::IrConst::Unit | ir::IrConst::Address(_) | ir::IrConst::Hash(_) | ir::IrConst::Array(_) => {
-            unreachable!("non-scalar const passed to scalar width")
-        }
+        ir::IrConst::Bool(_) | ir::IrConst::U8(_) => Some(1),
+        ir::IrConst::U16(_) => Some(2),
+        ir::IrConst::U32(_) => Some(4),
+        ir::IrConst::U64(_) => Some(8),
+        ir::IrConst::U128(_) => Some(16),
+        ir::IrConst::Poisoned | ir::IrConst::Unit | ir::IrConst::Address(_) | ir::IrConst::Hash(_) | ir::IrConst::Array(_) => None,
     }
 }
 
