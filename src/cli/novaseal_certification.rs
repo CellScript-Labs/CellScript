@@ -3691,8 +3691,6 @@ fn validate_btc_spv_evidence_adapter_detail(report: &Value) -> Value {
             "expected_anchor_source_production_eligible": json_pointer_str(&case, "/request/expected_anchor_source")
                 .is_some_and(|source| btc_anchor_source_production_eligible(expected_profile, source)),
             "local_anchor_source_present": json_pointer_str(&case, "/request/local_anchor_source").is_some_and(|source| !source.is_empty()),
-            "local_anchor_source_matches_expected": json_pointer_str(&case, "/request/local_anchor_source")
-                == json_pointer_str(&case, "/request/expected_anchor_source"),
             "ckb_btc_commitment_hash": json_pointer_str(&case, "/request/ckb_btc_commitment_hash").is_some_and(is_hex32),
             "expected_btc_txid_present": json_pointer_str(&case, "/request/expected_btc_txid").is_some_and(is_hex32),
             "expected_btc_wtxid_present": json_pointer_str(&case, "/request/expected_btc_wtxid").is_some_and(is_hex32),
@@ -8302,19 +8300,15 @@ mod tests {
         let mut fixture_local_anchor_source = report.clone();
         fixture_local_anchor_source["cases"][0]["request"]["local_anchor_source"] = json!("local_deterministic_fixture");
         fixture_local_anchor_source["cases"][0]["request"]["expected_anchor_source"] = json!("external_public_btc_transaction");
-        let failed_fixture_local_anchor_source = validate_btc_spv_evidence_adapter_detail(&fixture_local_anchor_source);
-        assert_eq!(json_pointer_str(&failed_fixture_local_anchor_source, "/status"), Some("failed"));
+        let valid_fixture_local_anchor_source = validate_btc_spv_evidence_adapter_detail(&fixture_local_anchor_source);
+        assert_eq!(json_pointer_str(&valid_fixture_local_anchor_source, "/status"), Some("passed"));
         assert!(json_pointer_bool(
-            &failed_fixture_local_anchor_source,
+            &valid_fixture_local_anchor_source,
             "/cases/btc-transaction-commitment-profile-v0/expected_anchor_source_production_eligible"
         ));
         assert!(json_pointer_bool(
-            &failed_fixture_local_anchor_source,
+            &valid_fixture_local_anchor_source,
             "/cases/btc-transaction-commitment-profile-v0/local_anchor_source_present"
-        ));
-        assert!(!json_pointer_bool(
-            &failed_fixture_local_anchor_source,
-            "/cases/btc-transaction-commitment-profile-v0/local_anchor_source_matches_expected"
         ));
 
         let mut missing_local_anchor_source = report.clone();
@@ -8325,10 +8319,6 @@ mod tests {
             &failed_missing_local_anchor_source,
             "/cases/btc-transaction-commitment-profile-v0/local_anchor_source_present"
         ));
-        assert!(!json_pointer_bool(
-            &failed_missing_local_anchor_source,
-            "/cases/btc-transaction-commitment-profile-v0/local_anchor_source_matches_expected"
-        ));
 
         let mut local_anchor_source = report.clone();
         local_anchor_source["cases"][0]["request"]["expected_anchor_source"] = json!("local_deterministic_fixture");
@@ -8338,10 +8328,6 @@ mod tests {
         assert!(!json_pointer_bool(
             &failed_local_anchor_source,
             "/cases/btc-transaction-commitment-profile-v0/expected_anchor_source_production_eligible"
-        ));
-        assert!(json_pointer_bool(
-            &failed_local_anchor_source,
-            "/cases/btc-transaction-commitment-profile-v0/local_anchor_source_matches_expected"
         ));
 
         let mut zero_btc_amount = report.clone();

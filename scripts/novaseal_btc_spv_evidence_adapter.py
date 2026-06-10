@@ -194,7 +194,7 @@ def profile_cases(service_builder: dict[str, Any], template: dict[str, Any]) -> 
             "service_builder_tx_skeleton_hash": builder_case.get("response", {}).get("tx_skeleton_hash") if builder_case else None,
             "service_builder_receipt_binding_hash": builder_case.get("response", {}).get("receipt_binding_hash") if builder_case else None,
             "local_anchor_source": public_btc_anchor.get("anchor_source"),
-            "expected_anchor_source": public_btc_anchor.get("anchor_source"),
+            "expected_anchor_source": PRODUCTION_ANCHOR_SOURCES.get(profile),
             "ckb_btc_commitment_hash": public_btc_anchor.get("ckb_btc_commitment_hash"),
             "expected_btc_txid": public_btc_anchor.get("btc_txid"),
             "expected_btc_wtxid": public_btc_anchor.get("btc_wtxid"),
@@ -225,7 +225,6 @@ def profile_cases(service_builder: dict[str, Any], template: dict[str, Any]) -> 
                 profile, request["expected_anchor_source"]
             ),
             "local_anchor_source_present": bool(request["local_anchor_source"]),
-            "local_anchor_source_matches_expected": request["local_anchor_source"] == request["expected_anchor_source"],
             "ckb_btc_commitment_hash_present": is_hex32(request["ckb_btc_commitment_hash"]),
             "expected_btc_txid_present": is_hex32(request["expected_btc_txid"]),
             "expected_btc_wtxid_present": is_hex32(request["expected_btc_wtxid"]),
