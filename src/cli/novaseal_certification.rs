@@ -1673,17 +1673,19 @@ fn build_stateful_acceptance_report(repo_root: &Path, agreement_conformance: &Va
     let agreement_source = read_cell_sources(&repo_root.join(AGREEMENT_ROOT).join("src"))?;
     let core_actions = find_actions(&core_source);
     let agreement_actions = find_actions(&agreement_source);
-    let core_combined = json_load_path_optional(&repo_root.join(CORE_ROOT).join("target/novaseal-combined-tx-report.json"))?;
-    let agreement_tx = json_load_path_optional(&repo_root.join(AGREEMENT_ROOT).join("target/nova-agreement-ckb-tx-report.json"))?;
-    let live_core_report = json_load_path_optional(&repo_root.join(CORE_LIVE))?;
-    let live_agreement_report = json_load_path_optional(&repo_root.join(AGREEMENT_LIVE))?;
-    let live_fungible_xudt_report = json_load_path_optional(&repo_root.join(FUNGIBLE_XUDT_LIVE))?;
-    let live_rwa_receipt_report = json_load_path_optional(&repo_root.join(RWA_RECEIPT_LIVE))?;
-    let live_btc_tx_commitment_report = json_load_path_optional(&repo_root.join(BTC_TX_COMMITMENT_LIVE))?;
-    let live_btc_utxo_seal_report = json_load_path_optional(&repo_root.join(BTC_UTXO_SEAL_LIVE))?;
-    let live_dual_seal_report = json_load_path_optional(&repo_root.join(DUAL_SEAL_LIVE))?;
-    let live_fiber_candidate_report = json_load_path_optional(&repo_root.join(FIBER_CANDIDATE_LIVE))?;
-    let fiber_node_experiments_report = json_load_path_optional(&repo_root.join(FIBER_NODE_EXPERIMENTS))?;
+    let core_combined =
+        json_load_path_optional(repo_root, &repo_root.join(CORE_ROOT).join("target/novaseal-combined-tx-report.json"))?;
+    let agreement_tx =
+        json_load_path_optional(repo_root, &repo_root.join(AGREEMENT_ROOT).join("target/nova-agreement-ckb-tx-report.json"))?;
+    let live_core_report = json_load_path_optional(repo_root, &repo_root.join(CORE_LIVE))?;
+    let live_agreement_report = json_load_path_optional(repo_root, &repo_root.join(AGREEMENT_LIVE))?;
+    let live_fungible_xudt_report = json_load_path_optional(repo_root, &repo_root.join(FUNGIBLE_XUDT_LIVE))?;
+    let live_rwa_receipt_report = json_load_path_optional(repo_root, &repo_root.join(RWA_RECEIPT_LIVE))?;
+    let live_btc_tx_commitment_report = json_load_path_optional(repo_root, &repo_root.join(BTC_TX_COMMITMENT_LIVE))?;
+    let live_btc_utxo_seal_report = json_load_path_optional(repo_root, &repo_root.join(BTC_UTXO_SEAL_LIVE))?;
+    let live_dual_seal_report = json_load_path_optional(repo_root, &repo_root.join(DUAL_SEAL_LIVE))?;
+    let live_fiber_candidate_report = json_load_path_optional(repo_root, &repo_root.join(FIBER_CANDIDATE_LIVE))?;
+    let fiber_node_experiments_report = json_load_path_optional(repo_root, &repo_root.join(FIBER_NODE_EXPERIMENTS))?;
     let live_core = live_core_summary(repo_root, live_core_report.as_ref())?;
     let live_agreement = live_agreement_summary(repo_root, live_agreement_report.as_ref())?;
     let live_fungible_xudt = live_planned_profile_summary(
@@ -5904,24 +5906,47 @@ fn json_load(repo_root: &Path, rel_path: &str) -> Result<Value> {
 }
 
 fn json_load_path(repo_root: &Path, path: &Path) -> Result<Value> {
-    if !path.exists() {
+    let Some(path) = safe_json_report_path(repo_root, path)? else {
         return Ok(json!({"missing": true, "path": rel(repo_root, path)}));
-    }
-    let bytes = std::fs::read(path)?;
+    };
+    let bytes = std::fs::read(&path)?;
     serde_json::from_slice(&bytes)
         .map_err(|error| CompileError::without_span(format!("failed to parse JSON '{}': {}", path.display(), error)))
 }
 
-fn json_load_path_optional(path: &Path) -> Result<Option<Value>> {
-    if !path.exists() {
+fn json_load_path_optional(repo_root: &Path, path: &Path) -> Result<Option<Value>> {
+    let Some(path) = safe_json_report_path(repo_root, path)? else {
         return Ok(None);
-    }
-    let bytes = std::fs::read(path)?;
+    };
+    let bytes = std::fs::read(&path)?;
     match serde_json::from_slice::<Value>(&bytes) {
         Ok(value) if value.is_object() => Ok(Some(value)),
         Ok(_) => Ok(Some(json!({"_invalid_json": "top-level value is not an object"}))),
         Err(error) => Ok(Some(json!({"_invalid_json": error.to_string()}))),
     }
+}
+
+fn safe_json_report_path(repo_root: &Path, path: &Path) -> Result<Option<PathBuf>> {
+    let Some(metadata) = symlink_metadata_optional(path)? else {
+        return Ok(None);
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(CompileError::without_span(format!(
+            "refusing to read JSON report '{}' because it is not a regular file within repository root '{}'",
+            path.display(),
+            repo_root.display()
+        )));
+    }
+    let canonical_repo_root = repo_root.canonicalize()?;
+    let canonical_path = path.canonicalize()?;
+    if !canonical_path.starts_with(&canonical_repo_root) {
+        return Err(CompileError::without_span(format!(
+            "refusing to read JSON report '{}' because it resolves outside repository root '{}'",
+            path.display(),
+            repo_root.display()
+        )));
+    }
+    Ok(Some(canonical_path))
 }
 
 fn write_json_report(path: &Path, value: &Value) -> Result<()> {
@@ -7709,6 +7734,35 @@ mod tests {
         assert!(!json_pointer_bool(&summary, "/artifact_hashes_match"));
         assert!(!json_pointer_bool(&summary, "/artifacts/verifier/regular_file_within_repo"));
         assert!(!json_pointer_bool(&summary, "/freshness_matched"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn json_evidence_reports_must_be_regular_files_within_repo_root() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().unwrap();
+        let repo_root = temp.path().join("repo");
+        let outside = temp.path().join("outside");
+        std::fs::create_dir_all(&repo_root).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("external.json"), "{}\n").unwrap();
+
+        symlink(outside.join("external.json"), repo_root.join("linked.json")).unwrap();
+        let err = json_load_path(&repo_root, &repo_root.join("linked.json")).unwrap_err();
+        assert!(
+            err.message.contains("refusing to read JSON report") && err.message.contains("regular file within repository root"),
+            "unexpected error: {}",
+            err.message
+        );
+
+        symlink(&outside, repo_root.join("linked-dir")).unwrap();
+        let err = json_load_path_optional(&repo_root, &repo_root.join("linked-dir/external.json")).unwrap_err();
+        assert!(
+            err.message.contains("refusing to read JSON report") && err.message.contains("resolves outside repository root"),
+            "unexpected error: {}",
+            err.message
+        );
     }
 
     #[test]
