@@ -3310,8 +3310,20 @@ fn validate_profile_certification(input: ProfileCertificationInputs<'_>) -> Resu
     let wallet_detail = validate_wallet_vector_detail(wallet);
     let profile_operator_fixture_detail = validate_profile_operator_fixture_detail(repo_root, profile_operator_fixtures)?;
     let service_builder_fixture_detail = validate_service_builder_fixture_detail(service_builder_fixtures, profile_operator_fixtures);
-    let btc_spv_adapter_detail = validate_btc_spv_evidence_adapter_detail(btc_spv_evidence_adapter);
-    let external_attestation_adapter_detail = validate_external_attestation_adapter_detail(external_attestation_adapter);
+    let public_btc_spv_template = json_load_path(repo_root, &repo_root.join(PUBLIC_BTC_SPV_EVIDENCE_TEMPLATE))?;
+    let public_cell_dep_template = json_load_path(repo_root, &repo_root.join(PUBLIC_CELLDEP_ATTESTATION_TEMPLATE))?;
+    let external_tcb_template = json_load_path(repo_root, &repo_root.join(EXTERNAL_TCB_ATTESTATION_TEMPLATE))?;
+    let btc_spv_adapter_detail = validate_btc_spv_evidence_adapter_detail_with_sources(
+        btc_spv_evidence_adapter,
+        Some(service_builder_fixtures),
+        Some(&public_btc_spv_template),
+    );
+    let external_attestation_adapter_detail = validate_external_attestation_adapter_detail_with_sources(
+        external_attestation_adapter,
+        Some(tcb),
+        Some(&public_cell_dep_template),
+        Some(&external_tcb_template),
+    );
     let external_evidence_handoff_detail = validate_external_evidence_handoff_detail(
         repo_root,
         external_evidence_handoff,
@@ -3759,7 +3771,16 @@ fn validate_service_builder_fixture_detail(report: &Value, operator_fixtures: &V
     })
 }
 
+#[cfg(test)]
 fn validate_btc_spv_evidence_adapter_detail(report: &Value) -> Value {
+    validate_btc_spv_evidence_adapter_detail_with_sources(report, None, None)
+}
+
+fn validate_btc_spv_evidence_adapter_detail_with_sources(
+    report: &Value,
+    service_builder: Option<&Value>,
+    public_btc_spv_template: Option<&Value>,
+) -> Value {
     let cases = report.get("cases").and_then(Value::as_array).cloned().unwrap_or_default();
     let mut by_profile: BTreeMap<String, Vec<Value>> = BTreeMap::new();
     for case in &cases {
@@ -3770,6 +3791,8 @@ fn validate_btc_spv_evidence_adapter_detail(report: &Value) -> Value {
     let expected_profiles = EXPECTED_BTC_SPV_EVIDENCE_PROFILES.iter().map(|profile| (*profile).to_string()).collect::<BTreeSet<_>>();
     let actual_profiles =
         cases.iter().filter_map(|case| json_pointer_str(case, "/profile").map(ToString::to_string)).collect::<BTreeSet<_>>();
+    let service_builder_cases = service_builder.and_then(|builder| builder.get("cases")).and_then(Value::as_array);
+    let service_builder_source_required = service_builder.is_some();
 
     let mut case_checks = Map::new();
     for expected_profile in EXPECTED_BTC_SPV_EVIDENCE_PROFILES {
@@ -3779,6 +3802,11 @@ fn validate_btc_spv_evidence_adapter_detail(report: &Value) -> Value {
         let external_inputs = json_array_strings(&case, "/request/required_external_inputs");
         let required_public_fields_complete =
             EXPECTED_BTC_SPV_ADAPTER_PUBLIC_FIELDS.iter().all(|field| required_fields.iter().any(|actual| actual == field));
+        let service_builder_case = service_builder_cases.and_then(|builder_cases| {
+            builder_cases.iter().find(|builder_case| json_pointer_str(builder_case, "/profile") == Some(*expected_profile))
+        });
+        let expected_service_builder_case_hash =
+            service_builder_case.map(|builder_case| novaseal_btc_spv_adapter_report_hash("service_builder_case", builder_case));
         let checks = json!({
             "exactly_one_case": matches.len() == 1,
             "status_passed": json_pointer_str(&case, "/status") == Some("passed"),
@@ -3786,13 +3814,60 @@ fn validate_btc_spv_evidence_adapter_detail(report: &Value) -> Value {
             "scenario_matches_expected": json_pointer_str(&case, "/request/scenario") == expected_btc_spv_scenario(expected_profile),
             "minimum_confirmations_at_least_six": json_pointer_i64(&case, "/request/minimum_confirmations").unwrap_or_default() >= 6,
             "public_btc_spv_external_input_named": external_inputs.iter().any(|value| value == "public_btc_spv_evidence"),
+            "ckb_live_tx_hash": json_pointer_str(&case, "/request/ckb_live_tx_hash").is_some_and(is_hex32),
+            "live_report_hash": json_pointer_str(&case, "/request/live_report_hash").is_some_and(is_hex32),
+            "service_builder_case_present_in_current_report": !service_builder_source_required || service_builder_case.is_some(),
             "service_builder_case_hash": json_pointer_str(&case, "/request/service_builder_case_hash").is_some_and(is_hex32),
+            "service_builder_case_hash_matches_current_report": if service_builder_source_required {
+                expected_service_builder_case_hash
+                    .as_deref()
+                    .is_some_and(|expected| json_pointer_str(&case, "/request/service_builder_case_hash") == Some(expected))
+            } else {
+                true
+            },
             "service_builder_tx_skeleton_hash": json_pointer_str(&case, "/request/service_builder_tx_skeleton_hash").is_some_and(is_hex32),
+            "service_builder_tx_skeleton_hash_matches_current_report": if service_builder_source_required {
+                service_builder_case
+                    .and_then(|builder_case| json_pointer_str(builder_case, "/response/tx_skeleton_hash"))
+                    .is_some_and(|expected| json_pointer_str(&case, "/request/service_builder_tx_skeleton_hash") == Some(expected))
+            } else {
+                true
+            },
             "service_builder_receipt_binding_hash": json_pointer_str(&case, "/request/service_builder_receipt_binding_hash").is_some_and(is_hex32),
+            "service_builder_receipt_binding_hash_matches_current_report": if service_builder_source_required {
+                service_builder_case
+                    .and_then(|builder_case| json_pointer_str(builder_case, "/response/receipt_binding_hash"))
+                    .is_some_and(|expected| json_pointer_str(&case, "/request/service_builder_receipt_binding_hash") == Some(expected))
+            } else {
+                true
+            },
+            "ckb_live_tx_hash_matches_current_report": if service_builder_source_required {
+                service_builder_case
+                    .and_then(|builder_case| json_pointer_str(builder_case, "/request/required_live_inputs/live_devnet_tx_hash"))
+                    .is_some_and(|expected| json_pointer_str(&case, "/request/ckb_live_tx_hash") == Some(expected))
+            } else {
+                true
+            },
+            "live_report_hash_matches_current_report": if service_builder_source_required {
+                service_builder_case
+                    .and_then(|builder_case| json_pointer_str(builder_case, "/request/required_live_inputs/live_report_hash"))
+                    .is_some_and(|expected| json_pointer_str(&case, "/request/live_report_hash") == Some(expected))
+            } else {
+                true
+            },
             "expected_anchor_source_production_eligible": json_pointer_str(&case, "/request/expected_anchor_source")
                 .is_some_and(|source| btc_anchor_source_production_eligible(expected_profile, source)),
             "local_anchor_source_present": json_pointer_str(&case, "/request/local_anchor_source").is_some_and(|source| !source.is_empty()),
             "ckb_btc_commitment_hash": json_pointer_str(&case, "/request/ckb_btc_commitment_hash").is_some_and(is_hex32),
+            "ckb_btc_commitment_hash_matches_current_report": if service_builder_source_required {
+                service_builder_case
+                    .and_then(|builder_case| {
+                        json_pointer_str(builder_case, "/request/required_live_inputs/public_btc_anchor/ckb_btc_commitment_hash")
+                    })
+                    .is_some_and(|expected| json_pointer_str(&case, "/request/ckb_btc_commitment_hash") == Some(expected))
+            } else {
+                true
+            },
             "expected_btc_txid_present": json_pointer_str(&case, "/request/expected_btc_txid").is_some_and(is_hex32),
             "expected_btc_wtxid_present": json_pointer_str(&case, "/request/expected_btc_wtxid").is_some_and(is_hex32),
             "expected_output_fields_present": *expected_profile != EXPECTED_BTC_TX_COMMITMENT_PROFILE
@@ -3819,12 +3894,22 @@ fn validate_btc_spv_evidence_adapter_detail(report: &Value) -> Value {
         case_checks.insert((*expected_profile).to_string(), checks);
     }
 
+    let expected_service_builder_report_hash =
+        service_builder.map(|builder| novaseal_btc_spv_adapter_report_hash("service_builder_report", builder));
+    let expected_public_btc_spv_template_hash =
+        public_btc_spv_template.map(|template| novaseal_btc_spv_adapter_report_hash("public_btc_spv_template", template));
     let checks = json!({
         "report_passed": json_pointer_str(report, "/status") == Some("passed"),
         "schema_current": json_pointer_str(report, "/schema") == Some("novaseal-btc-spv-evidence-adapter-v0.1"),
         "adapter_status_request_ready": json_pointer_str(report, "/adapter_status") == Some("request_ready_external_evidence_required"),
         "service_builder_report_hash": json_pointer_str(report, "/source_service_builder_report_hash").is_some_and(is_hex32),
+        "service_builder_report_hash_matches_current_report": expected_service_builder_report_hash
+            .as_deref()
+            .is_none_or(|expected| json_pointer_str(report, "/source_service_builder_report_hash") == Some(expected)),
         "public_btc_spv_template_hash": json_pointer_str(report, "/source_public_btc_spv_template_hash").is_some_and(is_hex32),
+        "public_btc_spv_template_hash_matches_current_template": expected_public_btc_spv_template_hash
+            .as_deref()
+            .is_none_or(|expected| json_pointer_str(report, "/source_public_btc_spv_template_hash") == Some(expected)),
         "production_output_named": json_pointer_str(report, "/production_output") == Some(PUBLIC_BTC_SPV_EVIDENCE),
         "summary_counts_match": json_pointer_i64(report, "/summary/total") == Some(EXPECTED_BTC_SPV_EVIDENCE_PROFILES.len() as i64)
             && json_pointer_i64(report, "/summary/matched") == json_pointer_i64(report, "/summary/total"),
@@ -3842,7 +3927,17 @@ fn validate_btc_spv_evidence_adapter_detail(report: &Value) -> Value {
     })
 }
 
+#[cfg(test)]
 fn validate_external_attestation_adapter_detail(report: &Value) -> Value {
+    validate_external_attestation_adapter_detail_with_sources(report, None, None, None)
+}
+
+fn validate_external_attestation_adapter_detail_with_sources(
+    report: &Value,
+    tcb_review: Option<&Value>,
+    public_cell_dep_template: Option<&Value>,
+    external_tcb_template: Option<&Value>,
+) -> Value {
     let cases = report.get("cases").and_then(Value::as_array).cloned().unwrap_or_default();
     let mut by_name: BTreeMap<String, Vec<Value>> = BTreeMap::new();
     for case in &cases {
@@ -3883,12 +3978,20 @@ fn validate_external_attestation_adapter_detail(report: &Value) -> Value {
         } else {
             EXPECTED_EXTERNAL_TCB_FIELD_CONSTRAINTS
         };
+        let expected_template_hash = if name == "public_shared_cell_dep_attestation" {
+            public_cell_dep_template.map(|template| novaseal_external_attestation_report_hash("public_celldep_template", template))
+        } else {
+            external_tcb_template.map(|template| novaseal_external_attestation_report_hash("external_tcb_template", template))
+        };
         let checks = json!({
             "exactly_one_case": matches.len() == 1,
             "status_passed": json_pointer_str(&case, "/status") == Some("passed"),
             "production_output_matches": json_pointer_str(&case, "/request/production_output") == Some(production_output),
             "template_schema_matches": json_pointer_str(&case, "/request/template_schema") == Some(template_schema),
             "template_hash": json_pointer_str(&case, "/request/template_hash").is_some_and(is_hex32),
+            "template_hash_matches_current_template": expected_template_hash
+                .as_deref()
+                .is_none_or(|expected| json_pointer_str(&case, "/request/template_hash") == Some(expected)),
             "verifier_id_current": json_pointer_str(&case, "/request/verifier_id") == Some("btc.bip340.v0"),
             "ipc_abi_current": json_pointer_str(&case, "/request/ipc_abi") == Some("cellscript-btc-bip340-ipc-v0"),
             "required_status_matches": json_pointer_str(&case, "/request/required_status") == Some(required_status),
@@ -3922,13 +4025,27 @@ fn validate_external_attestation_adapter_detail(report: &Value) -> Value {
         case_checks.insert(name.to_string(), checks);
     }
 
+    let expected_tcb_review_hash = tcb_review.map(|tcb| novaseal_external_attestation_report_hash("tcb_review", tcb));
+    let expected_public_cell_dep_template_hash =
+        public_cell_dep_template.map(|template| novaseal_external_attestation_report_hash("public_celldep_template", template));
+    let expected_external_tcb_template_hash =
+        external_tcb_template.map(|template| novaseal_external_attestation_report_hash("external_tcb_template", template));
     let checks = json!({
         "report_passed": json_pointer_str(report, "/status") == Some("passed"),
         "schema_current": json_pointer_str(report, "/schema") == Some("novaseal-external-attestation-adapter-v0.1"),
         "adapter_status_request_ready": json_pointer_str(report, "/adapter_status") == Some("request_ready_external_attestations_required"),
         "source_tcb_review_hash": json_pointer_str(report, "/source_tcb_review_hash").is_some_and(is_hex32),
+        "source_tcb_review_hash_matches_current_report": expected_tcb_review_hash
+            .as_deref()
+            .is_none_or(|expected| json_pointer_str(report, "/source_tcb_review_hash") == Some(expected)),
         "source_public_cell_dep_template_hash": json_pointer_str(report, "/source_public_cell_dep_template_hash").is_some_and(is_hex32),
+        "source_public_cell_dep_template_hash_matches_current_template": expected_public_cell_dep_template_hash
+            .as_deref()
+            .is_none_or(|expected| json_pointer_str(report, "/source_public_cell_dep_template_hash") == Some(expected)),
         "source_external_tcb_template_hash": json_pointer_str(report, "/source_external_tcb_template_hash").is_some_and(is_hex32),
+        "source_external_tcb_template_hash_matches_current_template": expected_external_tcb_template_hash
+            .as_deref()
+            .is_none_or(|expected| json_pointer_str(report, "/source_external_tcb_template_hash") == Some(expected)),
         "summary_counts_match": json_pointer_i64(report, "/summary/total") == Some(expected_names.len() as i64)
             && json_pointer_i64(report, "/summary/matched") == json_pointer_i64(report, "/summary/total"),
         "exact_attestations": actual_names == expected_names,
@@ -6481,6 +6598,22 @@ fn novaseal_service_builder_report_hash(label: &str, value: &Value) -> String {
     format!("0x{}", hex::encode(state.finalize().as_bytes()))
 }
 
+fn novaseal_btc_spv_adapter_report_hash(label: &str, value: &Value) -> String {
+    let mut state = blake2b_simd::Params::new().hash_length(32).personal(b"NovaBtcSpvReqV0").to_state();
+    state.update(label.as_bytes());
+    state.update(b"\x00");
+    state.update(canonical_json_for_report_hash(value).as_bytes());
+    format!("0x{}", hex::encode(state.finalize().as_bytes()))
+}
+
+fn novaseal_external_attestation_report_hash(label: &str, value: &Value) -> String {
+    let mut state = blake2b_simd::Params::new().hash_length(32).personal(b"NovaExtAttReqV0").to_state();
+    state.update(label.as_bytes());
+    state.update(b"\x00");
+    state.update(canonical_json_for_report_hash(value).as_bytes());
+    format!("0x{}", hex::encode(state.finalize().as_bytes()))
+}
+
 fn canonical_json_for_report_hash(value: &Value) -> String {
     match value {
         Value::Null => "null".to_string(),
@@ -8803,6 +8936,67 @@ mod tests {
         assert_eq!(json_pointer_str(&failed_expected_dep_type, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&failed_expected_dep_type, "/cases/public_shared_cell_dep_attestation/expected_dep_type_current"));
 
+        let tcb_review = json!({
+            "runtime_artifact": {
+                "artifact_hash": format!("0x{}", "11".repeat(32)),
+                "artifact_hash_algorithm": "sha256",
+            },
+            "source_inventory": {
+                "source_tree_sha256": format!("0x{}", "22".repeat(32)),
+            },
+        });
+        let public_template = json!({
+            "schema": "novaseal-public-shared-cell-dep-attestation-v0.1",
+            "status": "attested",
+        });
+        let external_template = json!({
+            "schema": "novaseal-bip340-external-tcb-review-attestation-v0.1",
+            "status": "accepted",
+        });
+        let mut source_bound = report.clone();
+        source_bound["source_tcb_review_hash"] = json!(novaseal_external_attestation_report_hash("tcb_review", &tcb_review));
+        source_bound["source_public_cell_dep_template_hash"] =
+            json!(novaseal_external_attestation_report_hash("public_celldep_template", &public_template));
+        source_bound["source_external_tcb_template_hash"] =
+            json!(novaseal_external_attestation_report_hash("external_tcb_template", &external_template));
+        source_bound["cases"][0]["request"]["template_hash"] =
+            json!(novaseal_external_attestation_report_hash("public_celldep_template", &public_template));
+        source_bound["cases"][1]["request"]["template_hash"] =
+            json!(novaseal_external_attestation_report_hash("external_tcb_template", &external_template));
+        let source_bound_valid = validate_external_attestation_adapter_detail_with_sources(
+            &source_bound,
+            Some(&tcb_review),
+            Some(&public_template),
+            Some(&external_template),
+        );
+        assert_eq!(json_pointer_str(&source_bound_valid, "/status"), Some("passed"));
+        assert!(json_pointer_bool(&source_bound_valid, "/checks/source_tcb_review_hash_matches_current_report"));
+
+        let mut stale_source_hash = source_bound.clone();
+        stale_source_hash["source_tcb_review_hash"] = json!(test_hex32(0xf1));
+        let failed_stale_source_hash = validate_external_attestation_adapter_detail_with_sources(
+            &stale_source_hash,
+            Some(&tcb_review),
+            Some(&public_template),
+            Some(&external_template),
+        );
+        assert_eq!(json_pointer_str(&failed_stale_source_hash, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&failed_stale_source_hash, "/checks/source_tcb_review_hash_matches_current_report"));
+
+        let mut stale_template_hash = source_bound.clone();
+        stale_template_hash["cases"][0]["request"]["template_hash"] = json!(test_hex32(0xf2));
+        let failed_stale_template_hash = validate_external_attestation_adapter_detail_with_sources(
+            &stale_template_hash,
+            Some(&tcb_review),
+            Some(&public_template),
+            Some(&external_template),
+        );
+        assert_eq!(json_pointer_str(&failed_stale_template_hash, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(
+            &failed_stale_template_hash,
+            "/cases/public_shared_cell_dep_attestation/template_hash_matches_current_template"
+        ));
+
         let mut unexpected_public_field = report;
         let mut extended_public_fields = full_public_fields.to_vec();
         extended_public_fields.push("unexpected.shadow_field");
@@ -8831,6 +9025,8 @@ mod tests {
                     "scenario": expected_btc_spv_scenario(profile).unwrap(),
                     "minimum_confirmations": 6,
                     "required_external_inputs": ["public_btc_spv_evidence"],
+                    "ckb_live_tx_hash": test_hex32(index as u8 + 0x70),
+                    "live_report_hash": test_hex32(index as u8 + 0x80),
                     "service_builder_case_hash": format!("0x{}", "cc".repeat(32)),
                     "service_builder_tx_skeleton_hash": format!("0x{}", "dd".repeat(32)),
                     "service_builder_receipt_binding_hash": format!("0x{}", "ee".repeat(32)),
@@ -8964,6 +9160,84 @@ mod tests {
         let failed_scenario = validate_btc_spv_evidence_adapter_detail(&stale_scenario);
         assert_eq!(json_pointer_str(&failed_scenario, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&failed_scenario, "/cases/btc-transaction-commitment-profile-v0/scenario_matches_expected"));
+
+        let mut source_bound = report.clone();
+        let service_builder_cases = source_bound["cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|case| {
+                let request = &case["request"];
+                json!({
+                    "profile": case["profile"].as_str().unwrap(),
+                    "response": {
+                        "tx_skeleton_hash": request["service_builder_tx_skeleton_hash"].clone(),
+                        "receipt_binding_hash": request["service_builder_receipt_binding_hash"].clone(),
+                    },
+                    "request": {
+                        "required_live_inputs": {
+                            "live_devnet_tx_hash": request["ckb_live_tx_hash"].clone(),
+                            "live_report_hash": request["live_report_hash"].clone(),
+                            "public_btc_anchor": {
+                                "ckb_btc_commitment_hash": request["ckb_btc_commitment_hash"].clone(),
+                            },
+                        },
+                    },
+                })
+            })
+            .collect::<Vec<_>>();
+        let service_builder = json!({ "cases": service_builder_cases });
+        for case in source_bound["cases"].as_array_mut().unwrap() {
+            let profile = case["profile"].as_str().unwrap();
+            let builder_case = service_builder["cases"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|builder_case| json_pointer_str(builder_case, "/profile") == Some(profile))
+                .unwrap();
+            case["request"]["service_builder_case_hash"] =
+                json!(novaseal_btc_spv_adapter_report_hash("service_builder_case", builder_case));
+        }
+        let public_template = json!({ "schema": "novaseal-public-btc-spv-evidence-template-test" });
+        source_bound["source_service_builder_report_hash"] =
+            json!(novaseal_btc_spv_adapter_report_hash("service_builder_report", &service_builder));
+        source_bound["source_public_btc_spv_template_hash"] =
+            json!(novaseal_btc_spv_adapter_report_hash("public_btc_spv_template", &public_template));
+        let source_bound_valid =
+            validate_btc_spv_evidence_adapter_detail_with_sources(&source_bound, Some(&service_builder), Some(&public_template));
+        assert_eq!(json_pointer_str(&source_bound_valid, "/status"), Some("passed"));
+        assert!(json_pointer_bool(&source_bound_valid, "/checks/service_builder_report_hash_matches_current_report"));
+        assert!(json_pointer_bool(
+            &source_bound_valid,
+            "/cases/btc-transaction-commitment-profile-v0/service_builder_case_hash_matches_current_report"
+        ));
+
+        let mut stale_source_hash = source_bound.clone();
+        stale_source_hash["source_service_builder_report_hash"] = json!(test_hex32(0xf3));
+        let failed_stale_source_hash =
+            validate_btc_spv_evidence_adapter_detail_with_sources(&stale_source_hash, Some(&service_builder), Some(&public_template));
+        assert_eq!(json_pointer_str(&failed_stale_source_hash, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&failed_stale_source_hash, "/checks/service_builder_report_hash_matches_current_report"));
+
+        let mut stale_case_hash = source_bound.clone();
+        stale_case_hash["cases"][0]["request"]["service_builder_case_hash"] = json!(test_hex32(0xf4));
+        let failed_stale_case_hash =
+            validate_btc_spv_evidence_adapter_detail_with_sources(&stale_case_hash, Some(&service_builder), Some(&public_template));
+        assert_eq!(json_pointer_str(&failed_stale_case_hash, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(
+            &failed_stale_case_hash,
+            "/cases/btc-transaction-commitment-profile-v0/service_builder_case_hash_matches_current_report"
+        ));
+
+        let mut stale_live_hash = source_bound.clone();
+        stale_live_hash["cases"][0]["request"]["live_report_hash"] = json!(test_hex32(0xf5));
+        let failed_stale_live_hash =
+            validate_btc_spv_evidence_adapter_detail_with_sources(&stale_live_hash, Some(&service_builder), Some(&public_template));
+        assert_eq!(json_pointer_str(&failed_stale_live_hash, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(
+            &failed_stale_live_hash,
+            "/cases/btc-transaction-commitment-profile-v0/live_report_hash_matches_current_report"
+        ));
 
         let mut unexpected_public_field = report;
         let mut extended_public_fields = full_public_fields.to_vec();
