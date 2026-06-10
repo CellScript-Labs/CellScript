@@ -5038,8 +5038,6 @@ impl<'a> TypeChecker<'a> {
 
     fn initializer_types_equal(&self, actual: &Type, expected: &Type) -> bool {
         self.types_equal(actual, expected)
-            // AUDIT-FINDING: untyped `Vec` is accepted as any `Vec<T>` at initializer boundaries without proving the value is a fresh empty constructor, so a value with lost element provenance can satisfy a typed collection field — severity: MEDIUM — restrict this compatibility to syntactically fresh empty constructors or carry an explicit unknown-empty collection type
-            || matches!((actual, expected), (Type::Named(actual), Type::Named(expected)) if actual == "Vec" && expected.starts_with("Vec<"))
     }
 
     fn bind_pattern(&self, env: &mut TypeEnv, pattern: &BindingPattern, ty: &Type, is_mut: bool, span: Span) -> Result<()> {
@@ -8378,6 +8376,53 @@ where
 "#,
         ))
         .expect("Vec::with_capacity should inherit a declared Vec<T> element type");
+    }
+
+    #[test]
+    fn fresh_untyped_vec_constructors_use_initializer_context() {
+        check(&source_module(
+            r#"
+module types::fresh_vec_initializer_context
+
+struct Holder {
+    members: Vec<Address>,
+    backups: Vec<Address>,
+}
+
+action good() -> u64
+where
+    let holder = Holder {
+        members: Vec::new(),
+        backups: Vec::with_capacity(2),
+    }
+    return holder.members.len() + holder.backups.capacity()
+"#,
+        ))
+        .expect("fresh Vec constructors should inherit the typed initializer context");
+    }
+
+    #[test]
+    fn named_untyped_vec_cannot_satisfy_typed_initializer() {
+        let err = check(&source_module(
+            r#"
+module types::stale_vec_initializer_context
+
+struct Holder {
+    members: Vec<Address>,
+}
+
+action bad() -> u64
+where
+    let members = Vec::new()
+    let holder = Holder {
+        members: members,
+    }
+    return holder.members.len()
+"#,
+        ))
+        .expect_err("bare Vec variables must not satisfy typed field initializers without element provenance");
+
+        assert!(err.message.contains("field 'members'") && err.message.contains("type mismatch"), "unexpected error: {}", err.message);
     }
 
     #[test]
