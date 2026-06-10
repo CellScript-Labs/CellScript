@@ -539,7 +539,7 @@ const EXPECTED_RWA_LEGAL_REVIEW_SCOPE: &[&str] = &[
     "RWA receipt oracle-fact exclusion boundary",
     "RWA receipt enforceability and jurisdiction boundary",
 ];
-const EXPECTED_RWA_LEGAL_REVIEW_EXPECTED_VALUE_FIELDS: &[&str] = &["profile", "profile_source_tree_sha256"];
+const EXPECTED_RWA_LEGAL_REVIEW_EXPECTED_VALUE_FIELDS: &[&str] = &["profile", "profile_source_tree_sha256", "review_scope"];
 const RWA_LEGAL_REVIEW_SOURCE_HASH_PATHS: &[&str] = &[
     RWA_RECEIPT_MANIFEST,
     "proposals/novaseal/rwa-receipt-profile-v0/src/nova_rwa_receipt_type.cell",
@@ -3989,6 +3989,7 @@ fn validate_external_evidence_handoff_detail(
                 exact_object_keys(case.get("expected_values").unwrap_or(&Value::Null), EXPECTED_RWA_LEGAL_REVIEW_EXPECTED_VALUE_FIELDS)
                     && expected_rwa_profile_source_hash.as_deref().is_some_and(is_hex32)
                     && json_pointer_str(&case, "/expected_values/profile") == Some(EXPECTED_RWA_RECEIPT_PROFILE)
+                    && exact_string_set(&json_array_strings(&case, "/expected_values/review_scope"), EXPECTED_RWA_LEGAL_REVIEW_SCOPE)
                     && normalize_hex(json_pointer_str(&case, "/expected_values/profile_source_tree_sha256"))
                         == expected_rwa_profile_source_hash
             }
@@ -5365,6 +5366,8 @@ fn validate_rwa_legal_registry_review(repo_root: &Path, rel_path: &str, external
         "review_date_not_future": json_pointer_str(&payload, "/review_date").is_some_and(is_utc_date_not_future),
         "report_uri_https": json_pointer_str(&payload, "/report_uri").is_some_and(is_https_report_uri),
         "review_scope_exact": exact_string_set(&json_array_strings(&payload, "/review_scope"), EXPECTED_RWA_LEGAL_REVIEW_SCOPE),
+        "review_scope_matches_handoff": json_array_strings(&payload, "/review_scope")
+            == json_array_strings(handoff_expected_values, "/review_scope"),
         "registry_fields_exact": exact_object_keys(&registry, EXPECTED_RWA_LEGAL_REVIEW_REGISTRY_FIELDS),
         "registry_authority_identity": json_pointer_str(&registry, "/authority").is_some_and(is_external_identity),
         "registry_jurisdiction_present": json_pointer_str(&registry, "/jurisdiction")
@@ -7758,6 +7761,7 @@ mod tests {
                     "expected_values": {
                         "profile": EXPECTED_RWA_RECEIPT_PROFILE,
                         "profile_source_tree_sha256": rwa_profile_source_hash,
+                        "review_scope": EXPECTED_RWA_LEGAL_REVIEW_SCOPE,
                     },
                     "checks": { "ok": true },
                 },
@@ -8770,6 +8774,7 @@ mod tests {
                     "expected_values": {
                         "profile": EXPECTED_RWA_RECEIPT_PROFILE,
                         "profile_source_tree_sha256": source_sha256,
+                        "review_scope": EXPECTED_RWA_LEGAL_REVIEW_SCOPE,
                     },
                 },
             ],
@@ -8804,7 +8809,19 @@ mod tests {
         assert_eq!(json_pointer_str(&passed, "/status"), Some("passed"));
         assert!(json_pointer_bool(&passed, "/checks/profile_source_tree_sha256_matches_current"));
         assert!(json_pointer_bool(&passed, "/checks/profile_source_tree_sha256_matches_handoff"));
+        assert!(json_pointer_bool(&passed, "/checks/review_scope_matches_handoff"));
         assert!(json_pointer_bool(&passed, "/checks/request_handoff_bundle_hash_matches_current"));
+
+        let mut stale_handoff_scope = handoff.clone();
+        stale_handoff_scope["cases"][0]["expected_values"]["review_scope"] = json!(["RWA receipt legal title boundary"]);
+        let stale_handoff_scope_hash = novaseal_handoff_report_hash("external_evidence_handoff_bundle", &stale_handoff_scope);
+        let mut stale_handoff_scope_evidence = evidence.clone();
+        stale_handoff_scope_evidence["request_handoff"]["bundle_hash"] = json!(stale_handoff_scope_hash);
+        std::fs::write(&evidence_path, serde_json::to_vec_pretty(&stale_handoff_scope_evidence).unwrap()).unwrap();
+        let failed_stale_handoff_scope =
+            validate_rwa_legal_registry_review(temp.path(), RWA_LEGAL_REGISTRY_REVIEW_EVIDENCE, &stale_handoff_scope).unwrap();
+        assert_eq!(json_pointer_str(&failed_stale_handoff_scope, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&failed_stale_handoff_scope, "/checks/review_scope_matches_handoff"));
 
         let mut stale_source = evidence.clone();
         stale_source["profile_source_tree_sha256"] = json!(format!("0x{}", "77".repeat(32)));

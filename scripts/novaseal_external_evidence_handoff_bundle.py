@@ -493,6 +493,12 @@ def rwa_legal_registry_review_case(external_attestation_adapter: dict[str, Any])
         "expected_values": {
             "profile": "rwa-receipt-profile-v0",
             "profile_source_tree_sha256": source_hash,
+            "review_scope": [
+                "RWA receipt legal title boundary",
+                "RWA receipt custody and registry-state provenance",
+                "RWA receipt oracle-fact exclusion boundary",
+                "RWA receipt enforceability and jurisdiction boundary",
+            ],
         },
     }
 
