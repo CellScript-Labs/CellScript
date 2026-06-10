@@ -86,6 +86,7 @@ def malformed_cases(seed_blob: bytes) -> list[dict[str, Any]]:
     nonzero_flags[12:16] = struct.pack("<I", 1)
 
     truncated = seed_blob[:-1]
+    trailing_word = seed_blob + b"NSBVTW00"
 
     return [
         {
@@ -122,6 +123,13 @@ def malformed_cases(seed_blob: bytes) -> list[dict[str, Any]]:
             "expected": "reject",
             "ipc_blob": hex0x(truncated),
             "ipc_blob_len": len(truncated),
+        },
+        {
+            "id": "malformed:trailing_word",
+            "mutation": "one complete trailing u64 word appended after the fixed IPC envelope",
+            "expected": "reject",
+            "ipc_blob": hex0x(trailing_word),
+            "ipc_blob_len": len(trailing_word),
         },
     ]
 

@@ -54,6 +54,11 @@ fn read_spawn_words(fd_index: u64) -> Result<[u64; IPC_WORD_COUNT], ()> {
             break;
         }
     }
+    // A successful nineteenth read means the inherited-fd stream is not the
+    // canonical 144-byte IPC envelope, even if the first 18 words are valid.
+    if ok && pipe_read(fd).is_ok() {
+        ok = false;
+    }
     let close_ok = close_fd(fd).is_ok();
     if ok && close_ok { Ok(words) } else { Err(()) }
 }

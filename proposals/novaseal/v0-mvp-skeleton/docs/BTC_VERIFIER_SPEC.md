@@ -56,35 +56,35 @@ python3 /home/arthur/a19q3/CellScript/scripts/novaseal_bip340_tcb_review.py --pr
 Current summary:
 
 ```text
-positive=32
-negative=40
-positive_self_verified=32
-negative_self_rejected=40
-host_verifier_checked=72
-host_verifier_matched=72
-ipc_vectors=72
-malformed_ipc_vectors=5
-host_ipc_checked=77
-host_ipc_matched=77
+positive=44
+negative=55
+positive_self_verified=44
+negative_self_rejected=55
+host_verifier_checked=99
+host_verifier_matched=99
+ipc_vectors=99
+malformed_ipc_vectors=6
+host_ipc_checked=105
+host_ipc_matched=105
 core_riscv_check=passed
 riscv_shell_build=passed
-riscv_shell_accepted=32
-riscv_shell_rejected=45
-riscv_shell_matched_expected=77
-child_vm_checked=77
-child_vm_matched_expected=77
-child_vm_max_cycles=3552601
+riscv_shell_accepted=44
+riscv_shell_rejected=61
+riscv_shell_matched_expected=105
+child_vm_checked=105
+child_vm_matched_expected=105
+child_vm_max_cycles=3487544
 parent_lock_ckb_vm_executed=true
 parent_spawn_executed=true
 parent_vm_matched_expected=4
 parent_vm_max_cycles=48783
 parent_resolved_script_verifier_matched_expected=true
-parent_resolved_script_verifier_max_cycles=3702919
+parent_resolved_script_verifier_max_cycles=3704249
 parent_full_transaction_verifier_matched_expected=true
-parent_full_transaction_verifier_max_cycles=3702919
+parent_full_transaction_verifier_max_cycles=3704249
 ```
 
-The positive set contains 4 deterministic test signers for each of the 9
+The positive set contains 4 deterministic test signers for each of the 11
 fixtures.
 
 The negative set contains 5 mutations per fixture:
@@ -94,6 +94,10 @@ The negative set contains 5 mutations per fixture:
 - signature bit flip,
 - `s` out of range,
 - `r` out of range.
+
+The malformed IPC set also includes a complete trailing `u64` word after an
+otherwise valid 144-byte envelope; the RISC-V entry rejects it before envelope
+parsing as spawn-input failure.
 
 The parent-lock harness also covers `parent_wrong_pubkey_valid_signature_reject`:
 the signature is cryptographically valid for the witness pubkey, but that pubkey

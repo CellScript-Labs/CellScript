@@ -20,8 +20,8 @@ Current summary:
 ```text
 preflight_passed=true
 staged_matches_release=true
-staged_release_elf_size_bytes=190040
-staged_release_elf_sha256=036aad492412142735deee7821e69ec8752db4fd52de1f87e0b51608bee7ff82
+staged_release_elf_size_bytes=187808
+staged_release_elf_sha256=b8a7e8e53d36979d74f55252b52f8b8cc6f3bc8277250d2f8d2d08abd5237459
 generated_spawn_visible=true
 lock_wiring_status=wired_to_bip340_shell
 ready_for_ckb_vm_dry_run=true
@@ -32,8 +32,8 @@ production_ready=false
 
 - The staged `target/` ELF is byte-for-byte equal to the current release RISC-V shell build.
 - The `.sha256` sidecar matches the staged ELF.
-- The shell report matches all 77 IPC vectors: 32 accepts, 45 rejects.
-- The shell input contract remains inherited fd index `0`, 18 little-endian `u64` words, 144-byte IPC envelope, implemented over the official VM2 buffer/length syscalls.
+- The shell report matches all 105 IPC vectors: 44 accepts, 61 rejects.
+- The shell input contract remains inherited fd index `0`, exactly 18 little-endian `u64` words, 144-byte IPC envelope, and complete trailing-word rejection, implemented over the official VM2 buffer/length syscalls.
 - The generated CellScript audit surface exposes lock spawn/pipe/wait records and the manifest-bound spawn target.
 
 ## What This Does Not Prove

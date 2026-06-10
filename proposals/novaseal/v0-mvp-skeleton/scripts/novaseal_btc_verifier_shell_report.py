@@ -62,10 +62,10 @@ def parse_envelope(blob: bytes) -> tuple[bool, str | None]:
     return True, None
 
 
-def blob_to_le_words(blob: bytes) -> list[int] | None:
-    if len(blob) != IPC_BLOB_LEN:
-        return None
-    return [struct.unpack("<Q", blob[offset : offset + 8])[0] for offset in range(0, IPC_BLOB_LEN, 8)]
+def blob_to_le_words(blob: bytes) -> tuple[list[int], int]:
+    chunks = len(blob) // 8
+    words = [struct.unpack("<Q", blob[offset : offset + 8])[0] for offset in range(0, chunks * 8, 8)]
+    return words, len(blob) % 8
 
 
 def blob_from_le_words(words: list[int]) -> bytes | None:
@@ -80,10 +80,29 @@ def verify_bip340_envelope(blob: bytes) -> bool:
 
 def shell_decision(case: dict[str, Any]) -> dict[str, Any]:
     blob = bytes_from_hex(case["ipc_blob"], case["ipc_blob_len"])
-    words = blob_to_le_words(blob)
-    roundtrip = words is not None and blob_from_le_words(words) == blob
-    parsed, failure = parse_envelope(blob)
+    words, partial_tail_bytes = blob_to_le_words(blob)
+    spawn_word_count = len(words)
+    spawn_word_canonical = spawn_word_count == IPC_WORD_COUNT and partial_tail_bytes == 0
+    roundtrip = spawn_word_canonical and blob_from_le_words(words) == blob
     expected_accept = case.get("expected") == "accept"
+    if not spawn_word_canonical:
+        reason = "partial_tail" if partial_tail_bytes else "word_count"
+        return {
+            "id": case["id"],
+            "parsed": False,
+            "accepted": False,
+            "expected": case.get("expected"),
+            "matched_expected": not expected_accept,
+            "exit_code": EXIT_REJECT_SPAWN_IO,
+            "spawn_words_representable": partial_tail_bytes == 0,
+            "spawn_word_count": spawn_word_count,
+            "partial_tail_bytes": partial_tail_bytes,
+            "spawn_word_roundtrip": roundtrip,
+            "spawn_entry_exit_code": EXIT_REJECT_SPAWN_IO,
+            "reason": reason,
+        }
+
+    parsed, failure = parse_envelope(blob)
     if parsed:
         accepted = verify_bip340_envelope(blob)
         exit_code = EXIT_ACCEPT if accepted else EXIT_REJECT_CRYPTO
@@ -94,7 +113,9 @@ def shell_decision(case: dict[str, Any]) -> dict[str, Any]:
             "expected": case.get("expected"),
             "matched_expected": accepted == expected_accept,
             "exit_code": exit_code,
-            "spawn_words_representable": words is not None,
+            "spawn_words_representable": True,
+            "spawn_word_count": spawn_word_count,
+            "partial_tail_bytes": partial_tail_bytes,
             "spawn_word_roundtrip": roundtrip,
             "spawn_entry_exit_code": exit_code,
             "reason": "accepted" if accepted else "crypto_reject",
@@ -106,9 +127,11 @@ def shell_decision(case: dict[str, Any]) -> dict[str, Any]:
         "expected": case.get("expected"),
         "matched_expected": not expected_accept,
         "exit_code": EXIT_REJECT_ENVELOPE,
-        "spawn_words_representable": words is not None,
+        "spawn_words_representable": True,
+        "spawn_word_count": spawn_word_count,
+        "partial_tail_bytes": partial_tail_bytes,
         "spawn_word_roundtrip": roundtrip,
-        "spawn_entry_exit_code": EXIT_REJECT_ENVELOPE if words is not None else EXIT_REJECT_SPAWN_IO,
+        "spawn_entry_exit_code": EXIT_REJECT_ENVELOPE,
         "reason": failure,
     }
 
@@ -167,7 +190,7 @@ def build_report(ipc_vectors_path: Path) -> dict[str, Any]:
         "decisions": decisions,
         "limits": [
             "Model-level shell report; it mirrors the no-std shell policy and the fixed u64 spawn-word adapter.",
-            "The RISC-V entry reads inherited fd index 0 as 18 little-endian u64 words, but this report does not execute CKB VM spawn.",
+            "The RISC-V entry requires inherited fd index 0 to contain exactly 18 little-endian u64 words, but this report does not execute CKB VM spawn.",
             "This report does not produce cycle, binary-size, or child-verifier CKB VM evidence; use the RISC-V artifact and ckb-vm harness reports for that.",
         ],
     }

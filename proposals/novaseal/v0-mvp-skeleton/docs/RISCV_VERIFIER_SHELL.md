@@ -21,7 +21,7 @@ The shell library applies this policy:
 | invalid BIP340 key/signature/message | reject with `EXIT_REJECT_CRYPTO = 12` |
 | valid BIP340 signature | accept with `EXIT_ACCEPT = 0` |
 
-The binary target provides a `_start` entry that, on `riscv64`, reads inherited fd index `0` using the official VM2 `inherited_fd(buffer, length_ptr)` syscall, then reads exactly 18 little-endian `u64` words with `pipe_read(fd, buffer, length_ptr)`. Those words reconstruct the fixed 144-byte IPC envelope and then feed the same no-std BIP340 policy.
+The binary target provides a `_start` entry that, on `riscv64`, reads inherited fd index `0` using the official VM2 `inherited_fd(buffer, length_ptr)` syscall, then requires exactly 18 little-endian `u64` words with `pipe_read(fd, buffer, length_ptr)`. It probes for a nineteenth word and rejects the stream as spawn-input failure if one exists. The canonical 18 words reconstruct the fixed 144-byte IPC envelope and then feed the same no-std BIP340 policy.
 
 ## Current Evidence
 
@@ -42,24 +42,23 @@ cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_ckb_vm_harnes
 Current summary:
 
 ```text
-core_unit_tests=4
-shell_lib_unit_tests=5
+core_unit_tests=7
+shell_lib_unit_tests=7
 riscv_binary_build=passed
-riscv_debug_elf_size_bytes=3360424
-riscv_release_elf_size_bytes=190040
-shell_vectors_total=77
-parse_ok=72
-parse_rejected=5
-spawn_word_roundtrip=76
-spawn_io_rejects=1
-accepted=32
-rejected=45
-matched_expected=77
+riscv_release_elf_size_bytes=187808
+shell_vectors_total=105
+parse_ok=99
+parse_rejected=6
+spawn_word_roundtrip=103
+spawn_io_rejects=2
+accepted=44
+rejected=61
+matched_expected=105
 all_expected_matched=true
-staged_release_elf_sha256=036aad492412142735deee7821e69ec8752db4fd52de1f87e0b51608bee7ff82
+staged_release_elf_sha256=b8a7e8e53d36979d74f55252b52f8b8cc6f3bc8277250d2f8d2d08abd5237459
 child_vm_executed=true
-child_vm_matched_expected=77
-child_vm_max_cycles=3552601
+child_vm_matched_expected=105
+child_vm_max_cycles=3487544
 ```
 
 The staged release ELF at `target/novaseal-btc-verifier-riscv-shell-release.elf` is now checked against the current release build by `scripts/novaseal_riscv_shell_artifact.py`. The preflight also confirms that the generated CellScript audit surface exposes the intended lock spawn/pipe/wait records.
@@ -75,7 +74,7 @@ There is still no raw pointer dereference, transmute, mutable static, or C FFI m
 
 This still does not prove criterion 6 on chain:
 
-- the binary reads inherited fd index `0`, and the child-verifier CKB VM harness now executes that child path,
+- the binary requires exactly 18 inherited-fd words at index `0`, rejects complete trailing words, and the child-verifier CKB VM harness now executes that child path,
 - `nova_btc_authority_lock.cell` now spawns this binary through `spawn_with_fd`, and the parent-lock CKB VM harness executes that parent/child path,
 - the current CellScript VM2 `spawn_with_fd` helper emits executable `ecall`, but only first-CellDep `code` target binding is modelled (see `docs/SPAWN_BACKEND_BLOCKER.md`),
 - the generated `btc_authority` lock surface covers Script.args binding and spawn/IPC shell wiring, while the crypto decision is evidenced by verifier vectors, RISC-V build/tests, child-verifier CKB VM execution, parent-lock CKB VM execution, official resolved lock-group execution, and official full transaction script-verifier execution,

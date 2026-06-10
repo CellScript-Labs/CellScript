@@ -63,22 +63,22 @@ cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_parent_lock_h
 Current summary:
 
 ```text
-source_positive=32
-source_negative=40
-ipc_vectors=72
-malformed_vectors=5
-total_vectors=77
-expected_accept=32
-expected_reject=45
-host_ipc_checked=77
-host_ipc_matched=77
-core_unit_tests=2
+source_positive=44
+source_negative=55
+ipc_vectors=99
+malformed_vectors=6
+total_vectors=105
+expected_accept=44
+expected_reject=61
+host_ipc_checked=105
+host_ipc_matched=105
+core_unit_tests=7
 core_riscv_check=passed
 riscv_shell_build=passed
-riscv_shell_accepted=32
-riscv_shell_rejected=45
-riscv_shell_matched_expected=77
-child_vm_matched_expected=77
+riscv_shell_accepted=44
+riscv_shell_rejected=61
+riscv_shell_matched_expected=105
+child_vm_matched_expected=105
 parent_vm_matched_expected=4
 parent_resolved_script_verifier_matched_expected=true
 parent_full_transaction_verifier_matched_expected=true
@@ -87,7 +87,7 @@ parent_lock_max_consensus_tx_size_bytes=859
 parent_lock_max_output_occupied_capacity_shannons=21900000000
 ```
 
-The malformed set covers wrong magic, unsupported version, unsupported scheme, non-zero flags, and truncated blob.
+The malformed set covers wrong magic, unsupported version, unsupported scheme, non-zero flags, truncated blob, and one complete trailing `u64` word after an otherwise valid envelope.
 
 ## Current Limits
 
@@ -97,7 +97,7 @@ This is still not production/public/shared criterion 6 evidence:
 - lock-level verifier spawn is generated and points at the BIP340 shell; the parent-lock CKB VM harness now executes parent spawn plus nested child verification,
 - current CellScript VM2 spawn helper lowering emits executable VM2 `ecall` wrappers and unmanifested spawn targets still strict-fail, while first-CellDep `code` manifest-bound targets become builder-required; the `spawn_with_fd(target, fd)` helper now supplies a one-entry inherited-fd list,
 - the compiler now has a protocol-agnostic `fixed_u64_le(bytes, word_index)` extractor for Hash/Address/[u8; N] values, so a lock can build the 18-word envelope without NovaSeal-specific compiler recognition,
-- the current RISC-V verifier binary shell reads inherited fd index `0` as 18 little-endian `u64` words, matches all BIP340 IPC vectors, and now runs in the child-verifier CKB VM harness,
+- the current RISC-V verifier binary shell requires inherited fd index `0` to contain exactly 18 little-endian `u64` words, rejects complete trailing words, matches all BIP340 IPC vectors, and now runs in the child-verifier CKB VM harness,
 - the no-std core currently covers both the envelope parser and BIP340 verification,
 - child-verifier and parent-lock CKB VM harness evidence exists, and the parent-lock harness now records transaction-shape tx-size/capacity facts plus official resolved lock-group verifier success and full transaction script-verifier success,
 - no public/shared CellDep attestation exists yet,
