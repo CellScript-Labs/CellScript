@@ -2,7 +2,8 @@ use crate::error::{CompileError, Result};
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Component, Path};
+use std::io::ErrorKind;
+use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub(crate) const IMPLEMENTATION_ID: &str = "cellscript::cli::novaseal_certification";
@@ -2921,6 +2922,7 @@ fn provenance_summary(report: &Value, repo_root: &Path, source_paths: &[&str]) -
     let source_hash_matches = json_pointer_str(&recorded_source, "/sha256") == json_pointer_str(&current_source, "/sha256");
     let mut artifact_checks = Map::new();
     let recorded_artifacts = provenance.get("artifacts").cloned().unwrap_or(Value::Null);
+    let canonical_repo_root = repo_root.canonicalize()?;
     for name in ["verifier", "lifecycle"] {
         let artifact = recorded_artifacts.get(name).cloned().unwrap_or(Value::Null);
         let raw_path = json_pointer_str(&artifact, "/path");
@@ -2932,14 +2934,16 @@ fn provenance_summary(report: &Value, repo_root: &Path, source_paths: &[&str]) -
                 repo_root.join(path)
             }
         });
-        let exists = path.as_ref().is_some_and(|path| path.is_file());
-        let current_sha = path.as_ref().filter(|path| path.is_file()).map(|path| sha256_file_hex(path)).transpose()?;
+        let canonical_path =
+            path.as_ref().map(|path| safe_regular_file_within_root(&canonical_repo_root, path)).transpose()?.flatten();
+        let current_sha = canonical_path.as_ref().map(|path| sha256_file_hex(path)).transpose()?;
         artifact_checks.insert(
             name.to_string(),
             json!({
                 "present": artifact.is_object(),
                 "path": raw_path,
-                "exists": exists,
+                "exists": canonical_path.is_some(),
+                "regular_file_within_repo": canonical_path.is_some(),
                 "sha256_matches": current_sha.as_deref() == json_pointer_str(&artifact, "/sha256"),
                 "recorded_sha256": json_pointer_str(&artifact, "/sha256"),
                 "current_sha256": current_sha,
@@ -2968,13 +2972,28 @@ fn provenance_summary(report: &Value, repo_root: &Path, source_paths: &[&str]) -
 }
 
 fn source_tree_hash(repo_root: &Path, paths: &[&str]) -> Result<Value> {
+    let canonical_repo_root = repo_root.canonicalize()?;
     let mut files = BTreeSet::new();
+    let mut invalid_paths = BTreeSet::new();
     for raw_path in paths {
         let path = repo_root.join(raw_path);
-        if path.is_file() {
-            files.insert(path);
-        } else if path.is_dir() {
-            collect_source_tree_files(&path, &path, &mut files)?;
+        let Some(metadata) = symlink_metadata_optional(&path)? else {
+            continue;
+        };
+        if metadata.file_type().is_symlink() {
+            invalid_paths.insert(rel(repo_root, &path));
+        } else if metadata.is_file() {
+            if safe_regular_file_within_root(&canonical_repo_root, &path)?.is_some() {
+                files.insert(path);
+            } else {
+                invalid_paths.insert(rel(repo_root, &path));
+            }
+        } else if metadata.is_dir() {
+            if safe_directory_within_root(&canonical_repo_root, &path)?.is_some() {
+                collect_source_tree_files(repo_root, &canonical_repo_root, &path, &path, &mut files, &mut invalid_paths)?;
+            } else {
+                invalid_paths.insert(rel(repo_root, &path));
+            }
         }
     }
     let mut hasher = Sha256::new();
@@ -2987,14 +3006,24 @@ fn source_tree_hash(repo_root: &Path, paths: &[&str]) -> Result<Value> {
         hasher.update(digest);
         rows.push(rel_path);
     }
+    let invalid_rows = invalid_paths.into_iter().collect::<Vec<_>>();
     Ok(json!({
-        "sha256": format!("0x{}", hex::encode(hasher.finalize())),
+        "sha256": if invalid_rows.is_empty() { Value::String(format!("0x{}", hex::encode(hasher.finalize()))) } else { Value::Null },
         "files": rows,
         "file_count": rows.len(),
+        "invalid_paths": invalid_rows,
+        "valid": invalid_rows.is_empty(),
     }))
 }
 
-fn collect_source_tree_files(root: &Path, path: &Path, files: &mut BTreeSet<std::path::PathBuf>) -> Result<()> {
+fn collect_source_tree_files(
+    repo_root: &Path,
+    canonical_repo_root: &Path,
+    root: &Path,
+    path: &Path,
+    files: &mut BTreeSet<PathBuf>,
+    invalid_paths: &mut BTreeSet<String>,
+) -> Result<()> {
     for entry in std::fs::read_dir(path)? {
         let entry = entry?;
         let child = entry.path();
@@ -3002,10 +3031,21 @@ fn collect_source_tree_files(root: &Path, path: &Path, files: &mut BTreeSet<std:
         if relative_parts.clone().any(|part| matches!(part.as_ref(), "target" | "build" | ".git" | "__pycache__")) {
             continue;
         }
-        if child.is_dir() {
-            collect_source_tree_files(root, &child, files)?;
-        } else if child.is_file() && source_tree_file_allowed(&child) {
-            files.insert(child);
+        let metadata = std::fs::symlink_metadata(&child)?;
+        if metadata.file_type().is_symlink() {
+            invalid_paths.insert(rel(repo_root, &child));
+        } else if metadata.is_dir() {
+            if safe_directory_within_root(canonical_repo_root, &child)?.is_some() {
+                collect_source_tree_files(repo_root, canonical_repo_root, root, &child, files, invalid_paths)?;
+            } else {
+                invalid_paths.insert(rel(repo_root, &child));
+            }
+        } else if metadata.is_file() && source_tree_file_allowed(&child) {
+            if safe_regular_file_within_root(canonical_repo_root, &child)?.is_some() {
+                files.insert(child);
+            } else {
+                invalid_paths.insert(rel(repo_root, &child));
+            }
         }
     }
     Ok(())
@@ -5687,20 +5727,32 @@ fn runtime_dep(manifest: &toml::Value) -> Result<toml::Value> {
 }
 
 fn expected_files(repo_root: &Path, root: &Path, names: &[&str]) -> Result<Value> {
+    let canonical_repo_root = repo_root.canonicalize()?;
     let expected = names.iter().map(|name| (*name).to_string()).collect::<BTreeSet<_>>();
-    let found = if root.is_dir() {
-        std::fs::read_dir(root)?
-            .filter_map(std::result::Result::ok)
-            .filter_map(|entry| entry.file_type().ok().filter(|ty| ty.is_file()).map(|_| entry.file_name()))
-            .filter_map(|name| name.into_string().ok())
-            .collect::<BTreeSet<_>>()
+    let mut invalid = BTreeSet::new();
+    let mut found = BTreeSet::new();
+    if safe_directory_within_root(&canonical_repo_root, root)?.is_some() {
+        for entry in std::fs::read_dir(root)? {
+            let entry = entry?;
+            let path = entry.path();
+            let name = match entry.file_name().into_string() {
+                Ok(name) => name,
+                Err(_) => continue,
+            };
+            let file_type = entry.file_type()?;
+            if file_type.is_symlink() {
+                invalid.insert(name);
+            } else if file_type.is_file() && safe_regular_file_within_root(&canonical_repo_root, &path)?.is_some() {
+                found.insert(name);
+            }
+        }
     } else {
-        BTreeSet::new()
-    };
+        invalid.insert(rel(repo_root, root));
+    }
     let mut hashes = Map::new();
     for name in &expected {
         let path = root.join(name);
-        if path.is_file() {
+        if safe_regular_file_within_root(&canonical_repo_root, &path)?.is_some() {
             hashes.insert(name.clone(), Value::String(sha256_file_hex(&path)?));
         }
     }
@@ -5710,9 +5762,48 @@ fn expected_files(repo_root: &Path, root: &Path, names: &[&str]) -> Result<Value
         "present": found.intersection(&expected).cloned().collect::<Vec<_>>(),
         "missing": expected.difference(&found).cloned().collect::<Vec<_>>(),
         "extra": found.difference(&expected).cloned().collect::<Vec<_>>(),
+        "invalid": invalid.iter().cloned().collect::<Vec<_>>(),
         "hashes": hashes,
-        "exact": found == expected,
+        "exact": found == expected && invalid.is_empty(),
     }))
+}
+
+fn symlink_metadata_optional(path: &Path) -> Result<Option<std::fs::Metadata>> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) => Ok(Some(metadata)),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn safe_regular_file_within_root(canonical_root: &Path, path: &Path) -> Result<Option<PathBuf>> {
+    let Some(metadata) = symlink_metadata_optional(path)? else {
+        return Ok(None);
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Ok(None);
+    }
+    let canonical_path = path.canonicalize()?;
+    if canonical_path.starts_with(canonical_root) {
+        Ok(Some(canonical_path))
+    } else {
+        Ok(None)
+    }
+}
+
+fn safe_directory_within_root(canonical_root: &Path, path: &Path) -> Result<Option<PathBuf>> {
+    let Some(metadata) = symlink_metadata_optional(path)? else {
+        return Ok(None);
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Ok(None);
+    }
+    let canonical_path = path.canonicalize()?;
+    if canonical_path.starts_with(canonical_root) {
+        Ok(Some(canonical_path))
+    } else {
+        Ok(None)
+    }
 }
 
 fn canonical_schema_lines(path: &Path) -> Result<Vec<String>> {
@@ -7559,6 +7650,64 @@ mod tests {
         assert!(json_pointer_bool(&summary, "/source_hash_matches"));
         assert!(json_pointer_bool(&summary, "/artifact_hashes_match"));
         assert!(!json_pointer_bool(&summary, "/repo_commit_matches"));
+        assert!(!json_pointer_bool(&summary, "/freshness_matched"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn source_tree_expected_files_and_provenance_reject_symlink_escape() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().unwrap();
+        let repo_root = temp.path().join("repo");
+        let src = repo_root.join("src");
+        let schemas = repo_root.join("schemas");
+        let outside = temp.path().join("outside");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::create_dir_all(&schemas).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(src.join("real.cell"), "module real;\n").unwrap();
+        std::fs::write(outside.join("external.cell"), "module external;\n").unwrap();
+        std::fs::write(outside.join("schema.schema"), "array External {}\n").unwrap();
+        symlink(outside.join("external.cell"), src.join("linked.cell")).unwrap();
+        symlink(outside.join("schema.schema"), schemas.join("expected.schema")).unwrap();
+
+        let source = source_tree_hash(&repo_root, &["src"]).unwrap();
+        assert!(!json_pointer_bool(&source, "/valid"));
+        assert!(json_pointer_str(&source, "/sha256").is_none());
+        let invalid_source_paths = json_array_strings(&source, "/invalid_paths");
+        assert!(invalid_source_paths.iter().any(|path| path.ends_with("src/linked.cell")));
+
+        let expected = expected_files(&repo_root, &schemas, &["expected.schema"]).unwrap();
+        assert!(!json_pointer_bool(&expected, "/exact"));
+        assert!(json_array_strings(&expected, "/invalid").iter().any(|path| path == "expected.schema"));
+        assert!(expected.pointer("/hashes/expected.schema").is_none());
+
+        let current_source = source_tree_hash(&repo_root, &["src/real.cell"]).unwrap();
+        assert!(json_pointer_bool(&current_source, "/valid"));
+        let outside_artifact = outside.join("artifact.elf");
+        std::fs::write(&outside_artifact, b"artifact").unwrap();
+        let artifact_sha = sha256_file_hex(&outside_artifact).unwrap();
+        let report = json!({
+            "provenance": {
+                "source_tree": current_source,
+                "artifacts": {
+                    "verifier": {
+                        "path": outside_artifact.display().to_string(),
+                        "sha256": artifact_sha,
+                    },
+                    "lifecycle": {
+                        "path": outside_artifact.display().to_string(),
+                        "sha256": artifact_sha,
+                    },
+                },
+            },
+        });
+
+        let summary = provenance_summary(&report, &repo_root, &["src/real.cell"]).unwrap();
+        assert!(json_pointer_bool(&summary, "/source_hash_matches"));
+        assert!(!json_pointer_bool(&summary, "/artifact_hashes_match"));
+        assert!(!json_pointer_bool(&summary, "/artifacts/verifier/regular_file_within_repo"));
         assert!(!json_pointer_bool(&summary, "/freshness_matched"));
     }
 
