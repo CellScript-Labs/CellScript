@@ -233,6 +233,29 @@ check_script_syntax() {
     fi
 }
 
+check_ckb_tx_measure_tool() {
+    local ckb_repo="$ROOT_DIR/../ckb"
+    local toolchain=""
+    if [[ -f "$ckb_repo/rust-toolchain.toml" ]]; then
+        toolchain="$(python3 - "$ckb_repo/rust-toolchain.toml" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+match = re.search(r'channel\s*=\s*"([^"]+)"', Path(sys.argv[1]).read_text(encoding="utf-8"))
+if match:
+    print(match.group(1))
+PY
+)"
+    fi
+
+    if [[ -n "$toolchain" ]]; then
+        run env RUSTUP_TOOLCHAIN="$toolchain" cargo test --manifest-path tools/ckb-tx-measure/Cargo.toml --locked
+    else
+        run cargo test --manifest-path tools/ckb-tx-measure/Cargo.toml --locked
+    fi
+}
+
 run_dev_gate() {
     if (($# != 0)); then
         printf 'usage: %s dev\n' "$0" >&2
@@ -297,6 +320,7 @@ run_release_auxiliary_checks() {
     check_ckb_release_docs
     check_ckb_acceptance_boundaries
     check_novaseal_acceptance_boundaries
+    check_ckb_tx_measure_tool
     run npm --prefix editors/vscode-cellscript run validate
     run npm --prefix editors/vscode-cellscript run publish:dry-run
 }

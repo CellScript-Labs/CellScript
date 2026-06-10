@@ -24,8 +24,10 @@ parent/
 Run:
 
 ```bash
-cargo run --manifest-path tools/ckb-tx-measure/Cargo.toml --locked < tx.json
-cargo test --manifest-path tools/ckb-tx-measure/Cargo.toml --locked
+RUSTUP_TOOLCHAIN="$(grep -E 'channel\\s*=' ../ckb/rust-toolchain.toml | sed -E 's/.*"([^"]+)".*/\\1/')" \
+  cargo run --manifest-path tools/ckb-tx-measure/Cargo.toml --locked < tx.json
+RUSTUP_TOOLCHAIN="$(grep -E 'channel\\s*=' ../ckb/rust-toolchain.toml | sed -E 's/.*"([^"]+)".*/\\1/')" \
+  cargo test --manifest-path tools/ckb-tx-measure/Cargo.toml --locked
 ```
 
 Those commands assume the standalone layout shown above. The CKB
