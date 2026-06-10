@@ -5078,7 +5078,7 @@ fn compile_test_obligation_summary(metadata: &crate::CompileMetadata, status: Op
 fn source_verification_root_for_artifact(artifact_path: &Utf8Path) -> Utf8PathBuf {
     let artifact_dir = artifact_path.parent().unwrap_or_else(|| Utf8Path::new("."));
     match artifact_dir.file_name() {
-        Some("artifacts" | "build" | "target") => artifact_dir.parent().unwrap_or(artifact_dir).to_path_buf(),
+        Some("artifacts" | "build" | "dist" | "target") => artifact_dir.parent().unwrap_or(artifact_dir).to_path_buf(),
         _ => artifact_dir.to_path_buf(),
     }
 }

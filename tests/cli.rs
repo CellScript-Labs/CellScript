@@ -283,6 +283,38 @@ where
 }
 
 #[test]
+fn cellc_verify_artifact_verifies_sources_from_dist_output() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("src");
+    let dist = dir.path().join("dist");
+    std::fs::create_dir_all(&src).unwrap();
+    std::fs::create_dir_all(&dist).unwrap();
+    let input = src.join("main.cell");
+    let output = dist.join("main.s");
+    std::fs::write(
+        &input,
+        r#"
+module demo::main
+
+action ping() -> u64
+where
+    1
+"#,
+    )
+    .unwrap();
+
+    let build = Command::new(env!("CARGO_BIN_EXE_cellc")).arg(&input).arg("-o").arg(&output).status().unwrap();
+    assert!(build.success());
+
+    let verify =
+        Command::new(env!("CARGO_BIN_EXE_cellc")).arg("verify-artifact").arg(&output).arg("--verify-sources").output().unwrap();
+
+    assert!(verify.status.success(), "{}", String::from_utf8_lossy(&verify.stderr));
+    let stdout = String::from_utf8_lossy(&verify.stdout);
+    assert!(stdout.contains("Sources: verified 1 unit(s)"), "{}", stdout);
+}
+
+#[test]
 fn cellc_verify_artifact_rejects_tampered_artifact() {
     let dir = tempfile::tempdir().unwrap();
     let input = dir.path().join("sample.cell");
