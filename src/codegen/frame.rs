@@ -12,7 +12,7 @@ use crate::error::{CompileError, Result};
 use crate::ir::*;
 
 use super::abi::{abi_arg_label, call_abi_arg_count, outgoing_stack_arg_bytes};
-use super::assembler::{align_frame, align_up, scratch_register_avoiding, small_signed_immediate};
+use super::assembler::{align_frame, align_up, small_signed_immediate};
 use super::cell_ops::consumed_operand_var;
 use super::runtime::is_ckb_fixed_hash_helper;
 use super::schema::{
@@ -83,7 +83,9 @@ impl CodeGenerator {
         if (-2048..=2047).contains(&imm) {
             self.emit(format!("addi {}, {}, {}", rd, rs1, imm));
         } else {
-            let scratch = scratch_register_avoiding(&[rs1]);
+            let Some(scratch) = self.scratch_register_avoiding_or_record(&[rs1], "large addi emission") else {
+                return;
+            };
             self.emit(format!("li {}, {}", scratch, imm));
             self.emit(format!("add {}, {}, {}", rd, rs1, scratch));
         }
@@ -128,7 +130,9 @@ impl CodeGenerator {
             let mut avoided = Vec::with_capacity(avoid.len() + 1);
             avoided.push(register);
             avoided.extend_from_slice(avoid);
-            let scratch = scratch_register_avoiding(&avoided);
+            let Some(scratch) = self.scratch_register_avoiding_or_record(&avoided, "large stack offset access") else {
+                return;
+            };
             self.emit(format!("li {}, {}", scratch, offset));
             self.emit(format!("add {}, sp, {}", scratch, scratch));
             self.emit(format!("{} {}, 0({})", opcode, register, scratch));

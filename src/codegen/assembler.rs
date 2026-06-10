@@ -1749,17 +1749,16 @@ pub(crate) fn small_signed_immediate(value: i64) -> bool {
     (-2048..=2047).contains(&value)
 }
 
-pub(crate) fn scratch_register_avoiding(registers: &[&str]) -> &'static str {
+pub(crate) fn scratch_register_avoiding(registers: &[&str]) -> Option<&'static str> {
     for candidate in ["t6", "t5", "t3", "t2", "t1", "t0"] {
         let Ok(candidate_id) = parse_register(candidate) else {
             continue;
         };
         if registers.iter().all(|register| parse_register(register).ok() != Some(candidate_id)) {
-            return candidate;
+            return Some(candidate);
         }
     }
-    // AUDIT-FINDING: scratch register selection falls back to t6 even when every scratch register is excluded, so large-immediate rewriting can silently clobber a live register instead of reporting an impossible allocation — severity: HIGH — return Result<Option<register>> and make emitters fail closed when no scratch register is available
-    "t6"
+    None
 }
 
 pub(crate) fn parse_register(name: &str) -> Result<u8> {
@@ -2125,6 +2124,12 @@ mod tests {
         assert_eq!(bytes.len(), 8, "negative 32-bit boundary should use LUI/ADDI");
 
         assert!(!li_fits_lui_addi_rv64(2_147_481_600));
+    }
+
+    #[test]
+    fn strict_audit_scratch_register_selection_fails_when_exhausted() {
+        assert_eq!(scratch_register_avoiding(&["x31"]), Some("t5"));
+        assert_eq!(scratch_register_avoiding(&["t6", "x30", "t3", "x7", "t1", "x5"]), None);
     }
 
     #[test]

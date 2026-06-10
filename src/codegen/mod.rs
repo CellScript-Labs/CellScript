@@ -518,6 +518,15 @@ impl CodeGenerator {
         }
     }
 
+    pub(crate) fn scratch_register_avoiding_or_record(&mut self, registers: &[&str], context: &str) -> Option<&'static str> {
+        let scratch = scratch_register_avoiding(registers);
+        if scratch.is_none() {
+            let avoided = if registers.is_empty() { "none".to_string() } else { registers.join(", ") };
+            self.record_fatal_error(format!("no scratch register available for {}; avoided registers: {}", context, avoided));
+        }
+        scratch
+    }
+
     pub(crate) fn runtime_expr_temp_offset_or_record(&mut self, depth: usize) -> Option<usize> {
         let offset = self.runtime_expr_temp_offset(depth);
         if offset.is_none() {
@@ -578,7 +587,9 @@ impl CodeGenerator {
                 if small_signed_immediate(offset) {
                     return false;
                 }
-                let scratch = scratch_register_avoiding(&[args[0], base]);
+                let Some(scratch) = self.scratch_register_avoiding_or_record(&[args[0], base], "large immediate load rewrite") else {
+                    return true;
+                };
                 self.assembly.push(format!("    li {}, {}", scratch, offset));
                 self.assembly.push(format!("    add {}, {}, {}", scratch, base, scratch));
                 self.assembly.push(format!("    {} {}, 0({})", opcode, args[0], scratch));
@@ -594,7 +605,9 @@ impl CodeGenerator {
                 if small_signed_immediate(offset) {
                     return false;
                 }
-                let scratch = scratch_register_avoiding(&[args[0], base]);
+                let Some(scratch) = self.scratch_register_avoiding_or_record(&[args[0], base], "large immediate store rewrite") else {
+                    return true;
+                };
                 self.assembly.push(format!("    li {}, {}", scratch, offset));
                 self.assembly.push(format!("    add {}, {}, {}", scratch, base, scratch));
                 self.assembly.push(format!("    {} {}, 0({})", opcode, args[0], scratch));
@@ -610,7 +623,9 @@ impl CodeGenerator {
                 if small_signed_immediate(offset) {
                     return false;
                 }
-                let scratch = scratch_register_avoiding(&[args[0], args[1]]);
+                let Some(scratch) = self.scratch_register_avoiding_or_record(&[args[0], args[1]], "large addi rewrite") else {
+                    return true;
+                };
                 self.assembly.push(format!("    li {}, {}", scratch, offset));
                 self.assembly.push(format!("    add {}, {}, {}", args[0], args[1], scratch));
                 true
@@ -2074,7 +2089,9 @@ impl CodeGenerator {
             registers.push(dst);
             registers.push(base);
             registers.extend_from_slice(avoid);
-            let scratch = scratch_register_avoiding(&registers);
+            let Some(scratch) = self.scratch_register_avoiding_or_record(&registers, "large memory load offset") else {
+                return;
+            };
             self.emit(format!("li {}, {}", scratch, offset));
             self.emit(format!("add {}, {}, {}", scratch, base, scratch));
             self.emit(format!("{} {}, 0({})", opcode, dst, scratch));
@@ -3536,6 +3553,21 @@ lock helpers(
         generator.emit_large_addi("t6", "t6", 4096);
 
         assert_eq!(generator.assembly, vec!["    li t5, 2048", "    add t0, t6, t5", "    li t5, 4096", "    add t6, t6, t5",]);
+    }
+
+    #[test]
+    fn exhausted_scratch_registers_report_compile_error() {
+        let mut generator = CodeGenerator::new(CodegenOptions::default());
+
+        generator.emit_memory_load_with_avoid("lbu", "t0", "t1", 4096, &["t2", "t3", "t5", "t6"]);
+
+        let error = generator.check_fatal_error().expect_err("scratch exhaustion should be a compile error");
+        assert!(error.message.contains("no scratch register available for large memory load offset"), "{}", error.message);
+        assert!(
+            generator.assembly.iter().all(|line| !line.contains("li t6, 4096")),
+            "scratch exhaustion must not fall back to t6:\n{}",
+            generator.assembly.join("\n")
+        );
     }
 
     #[test]
