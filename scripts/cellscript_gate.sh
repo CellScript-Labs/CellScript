@@ -43,7 +43,7 @@ check_trailing_whitespace() {
     local tracked_rust_file
     while IFS= read -r tracked_rust_file; do
         tracked_rust_files+=("$tracked_rust_file")
-    done < <(git ls-files 'src/*.rs' 'src/**/*.rs' 'tests/*.rs' 'tests/**/*.rs')
+    done < <(git ls-files '*.rs')
 
     local files=(
         ".github/workflows/ci.yml"
@@ -256,6 +256,16 @@ PY
     fi
 }
 
+check_novaseal_rust_tooling() {
+    run cargo test --locked --manifest-path proposals/novaseal/v0-mvp-skeleton/verifier/novaseal_btc_verifier_core/Cargo.toml
+    run cargo test --locked --manifest-path proposals/novaseal/v0-mvp-skeleton/verifier/novaseal_btc_verifier/Cargo.toml
+    run cargo test --locked --manifest-path proposals/novaseal/v0-mvp-skeleton/verifier/novaseal_btc_verifier_riscv/Cargo.toml --lib
+    run cargo check --locked --manifest-path proposals/novaseal/v0-mvp-skeleton/verifier/novaseal_btc_verifier_core/Cargo.toml --target riscv64imac-unknown-none-elf
+    run cargo build --locked --manifest-path proposals/novaseal/v0-mvp-skeleton/verifier/novaseal_btc_verifier_riscv/Cargo.toml --target riscv64imac-unknown-none-elf --bin novaseal_btc_verifier_riscv
+    run cargo check --locked --manifest-path proposals/novaseal/v0-mvp-skeleton/harness/ckb_vm/Cargo.toml --all-targets
+    run cargo check --locked --manifest-path proposals/novaseal/agreement-profile-v0/harness/ckb_vm/Cargo.toml --all-targets
+}
+
 run_dev_gate() {
     if (($# != 0)); then
         printf 'usage: %s dev\n' "$0" >&2
@@ -321,6 +331,7 @@ run_release_auxiliary_checks() {
     check_ckb_acceptance_boundaries
     check_novaseal_acceptance_boundaries
     check_ckb_tx_measure_tool
+    check_novaseal_rust_tooling
     run npm --prefix editors/vscode-cellscript run validate
     run npm --prefix editors/vscode-cellscript run publish:dry-run
 }
