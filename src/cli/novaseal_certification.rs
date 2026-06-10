@@ -485,7 +485,7 @@ const EXPECTED_EXTERNAL_TCB_REVIEW_SCOPE: &[&str] = &[
     "artifact hash and CellDep pinning requirements",
 ];
 const EXPECTED_EXTERNAL_TCB_EXPECTED_VALUE_FIELDS: &[&str] =
-    &["artifact_hash", "artifact_hash_algorithm", "review_scope", "source_tree_sha256"];
+    &["artifact_hash", "artifact_hash_algorithm", "ipc_abi", "review_scope", "source_tree_sha256", "verifier_id"];
 const EXPECTED_RWA_LEGAL_REVIEW_EVIDENCE_FIELDS: &[&str] = &[
     "notes",
     "profile",
@@ -3905,6 +3905,10 @@ fn validate_external_evidence_handoff_detail(
         "external_bip340_tcb_review_attestation",
         "/request/expected_artifact_hash_algorithm",
     );
+    let expected_external_tcb_ipc_abi =
+        adapter_case_request_str(external_attestation_adapter, "external_bip340_tcb_review_attestation", "/request/ipc_abi");
+    let expected_external_tcb_verifier_id =
+        adapter_case_request_str(external_attestation_adapter, "external_bip340_tcb_review_attestation", "/request/verifier_id");
     let expected_external_tcb_source_tree_hash = adapter_case_request_str(
         external_attestation_adapter,
         "external_bip340_tcb_review_attestation",
@@ -3978,10 +3982,14 @@ fn validate_external_evidence_handoff_detail(
                 exact_object_keys(case.get("expected_values").unwrap_or(&Value::Null), EXPECTED_EXTERNAL_TCB_EXPECTED_VALUE_FIELDS)
                     && expected_external_tcb_artifact_hash.is_some_and(is_hex32)
                     && expected_external_tcb_source_tree_hash.is_some_and(is_hex32)
+                    && expected_external_tcb_ipc_abi == Some("cellscript-btc-bip340-ipc-v0")
+                    && expected_external_tcb_verifier_id == Some("btc.bip340.v0")
                     && exact_string_set(&expected_external_tcb_review_scope, EXPECTED_EXTERNAL_TCB_REVIEW_SCOPE)
                     && json_pointer_str(&case, "/expected_values/artifact_hash") == expected_external_tcb_artifact_hash
                     && json_pointer_str(&case, "/expected_values/artifact_hash_algorithm")
                         == expected_external_tcb_artifact_hash_algorithm
+                    && json_pointer_str(&case, "/expected_values/ipc_abi") == expected_external_tcb_ipc_abi
+                    && json_pointer_str(&case, "/expected_values/verifier_id") == expected_external_tcb_verifier_id
                     && json_array_strings(&case, "/expected_values/review_scope") == expected_external_tcb_review_scope
                     && json_pointer_str(&case, "/expected_values/source_tree_sha256") == expected_external_tcb_source_tree_hash
             }
@@ -5308,7 +5316,11 @@ fn validate_external_review(
         "source_tree_sha256_matches_handoff": normalize_hex(json_pointer_str(&payload, "/source_tree_sha256")).as_deref()
             == normalize_hex(json_pointer_str(handoff_expected_values, "/source_tree_sha256")).as_deref(),
         "verifier_id": json_pointer_str(&payload, "/verifier_id") == Some("btc.bip340.v0"),
+        "verifier_id_matches_handoff": json_pointer_str(&payload, "/verifier_id")
+            == json_pointer_str(handoff_expected_values, "/verifier_id"),
         "ipc_abi": json_pointer_str(&payload, "/ipc_abi") == Some("cellscript-btc-bip340-ipc-v0"),
+        "ipc_abi_matches_handoff": json_pointer_str(&payload, "/ipc_abi")
+            == json_pointer_str(handoff_expected_values, "/ipc_abi"),
         "reviewer_present": json_pointer_str(&payload, "/reviewer").is_some_and(|value| !value.is_empty()),
         "reviewer_identity": json_pointer_str(&payload, "/reviewer").is_some_and(is_external_identity),
         "review_date_present": json_pointer_str(&payload, "/review_date").is_some_and(|value| !value.is_empty()),
@@ -7674,6 +7686,8 @@ mod tests {
                         "required_public_fields": ["reviewer"],
                         "expected_artifact_hash": external_artifact_hash,
                         "expected_artifact_hash_algorithm": "sha256",
+                        "ipc_abi": "cellscript-btc-bip340-ipc-v0",
+                        "verifier_id": "btc.bip340.v0",
                         "expected_source_tree_sha256": external_source_tree_hash,
                         "expected_review_scope": EXPECTED_EXTERNAL_TCB_REVIEW_SCOPE,
                     },
@@ -7745,8 +7759,10 @@ mod tests {
                     "expected_values": {
                         "artifact_hash": external_artifact_hash,
                         "artifact_hash_algorithm": "sha256",
+                        "ipc_abi": "cellscript-btc-bip340-ipc-v0",
                         "review_scope": EXPECTED_EXTERNAL_TCB_REVIEW_SCOPE,
                         "source_tree_sha256": external_source_tree_hash,
+                        "verifier_id": "btc.bip340.v0",
                     },
                     "checks": { "ok": true },
                 },
@@ -8069,6 +8085,34 @@ mod tests {
         assert_eq!(json_pointer_str(&failed_review_scope, "/status"), Some("failed"));
         assert!(!json_pointer_bool(
             &failed_review_scope,
+            "/cases/external_bip340_tcb_review_attestation/expected_values_match_source_adapter"
+        ));
+
+        let mut stale_external_ipc_abi = report.clone();
+        stale_external_ipc_abi["cases"][2]["expected_values"]["ipc_abi"] = json!("cellscript-btc-bip340-ipc-v1");
+        let failed_external_ipc_abi = validate_external_evidence_handoff_detail(
+            Path::new("."),
+            &stale_external_ipc_abi,
+            &btc_spv_adapter,
+            &external_attestation_adapter,
+        );
+        assert_eq!(json_pointer_str(&failed_external_ipc_abi, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(
+            &failed_external_ipc_abi,
+            "/cases/external_bip340_tcb_review_attestation/expected_values_match_source_adapter"
+        ));
+
+        let mut stale_external_verifier_id = report.clone();
+        stale_external_verifier_id["cases"][2]["expected_values"]["verifier_id"] = json!("btc.bip340.v1");
+        let failed_external_verifier_id = validate_external_evidence_handoff_detail(
+            Path::new("."),
+            &stale_external_verifier_id,
+            &btc_spv_adapter,
+            &external_attestation_adapter,
+        );
+        assert_eq!(json_pointer_str(&failed_external_verifier_id, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(
+            &failed_external_verifier_id,
             "/cases/external_bip340_tcb_review_attestation/expected_values_match_source_adapter"
         ));
 
@@ -9405,8 +9449,10 @@ mod tests {
                     "expected_values": {
                         "artifact_hash": artifact_hash,
                         "artifact_hash_algorithm": "sha256",
+                        "ipc_abi": "cellscript-btc-bip340-ipc-v0",
                         "review_scope": EXPECTED_EXTERNAL_TCB_REVIEW_SCOPE,
                         "source_tree_sha256": source_tree_hash,
+                        "verifier_id": "btc.bip340.v0",
                     },
                 },
             ],
@@ -9884,6 +9930,10 @@ mod tests {
         assert!(json_pointer_bool(&review_passed, "/checks/source_tree_sha256_non_placeholder"));
         assert!(json_pointer_bool(&review_passed, "/checks/source_tree_sha256_matches_current_tcb"));
         assert!(json_pointer_bool(&review_passed, "/checks/source_tree_sha256_matches_handoff"));
+        assert!(json_pointer_bool(&review_passed, "/checks/verifier_id"));
+        assert!(json_pointer_bool(&review_passed, "/checks/verifier_id_matches_handoff"));
+        assert!(json_pointer_bool(&review_passed, "/checks/ipc_abi"));
+        assert!(json_pointer_bool(&review_passed, "/checks/ipc_abi_matches_handoff"));
         assert!(json_pointer_bool(&review_passed, "/checks/reviewer_identity"));
         assert!(json_pointer_bool(&review_passed, "/checks/review_date_utc_date"));
         assert!(json_pointer_bool(&review_passed, "/checks/review_date_not_future"));
@@ -9912,6 +9962,52 @@ mod tests {
         assert_eq!(json_pointer_str(&review_stale_handoff_failed, "/status"), Some("failed"));
         assert!(json_pointer_bool(&review_stale_handoff_failed, "/checks/request_handoff_bundle_hash_matches_current"));
         assert!(!json_pointer_bool(&review_stale_handoff_failed, "/checks/source_tree_sha256_matches_handoff"));
+
+        let mut stale_review_ipc_handoff = handoff.clone();
+        stale_review_ipc_handoff["cases"][1]["expected_values"]["ipc_abi"] = json!("cellscript-btc-bip340-ipc-v1");
+        let stale_review_ipc_handoff_hash =
+            novaseal_handoff_report_hash("external_evidence_handoff_bundle", &stale_review_ipc_handoff);
+        let mut review_with_stale_ipc_handoff = external_review.clone();
+        review_with_stale_ipc_handoff["request_handoff"]["bundle_hash"] = json!(stale_review_ipc_handoff_hash);
+        std::fs::write(
+            proofs.join("bip340_external_tcb_review_attestation.json"),
+            serde_json::to_vec_pretty(&review_with_stale_ipc_handoff).unwrap(),
+        )
+        .unwrap();
+        let review_stale_ipc_handoff_failed = validate_external_review(
+            temp.path(),
+            EXTERNAL_TCB_ATTESTATION,
+            Some(&artifact_hash),
+            Some(&source_tree_hash),
+            &stale_review_ipc_handoff,
+        )
+        .unwrap();
+        assert_eq!(json_pointer_str(&review_stale_ipc_handoff_failed, "/status"), Some("failed"));
+        assert!(json_pointer_bool(&review_stale_ipc_handoff_failed, "/checks/request_handoff_bundle_hash_matches_current"));
+        assert!(!json_pointer_bool(&review_stale_ipc_handoff_failed, "/checks/ipc_abi_matches_handoff"));
+
+        let mut stale_review_verifier_handoff = handoff.clone();
+        stale_review_verifier_handoff["cases"][1]["expected_values"]["verifier_id"] = json!("btc.bip340.v1");
+        let stale_review_verifier_handoff_hash =
+            novaseal_handoff_report_hash("external_evidence_handoff_bundle", &stale_review_verifier_handoff);
+        let mut review_with_stale_verifier_handoff = external_review.clone();
+        review_with_stale_verifier_handoff["request_handoff"]["bundle_hash"] = json!(stale_review_verifier_handoff_hash);
+        std::fs::write(
+            proofs.join("bip340_external_tcb_review_attestation.json"),
+            serde_json::to_vec_pretty(&review_with_stale_verifier_handoff).unwrap(),
+        )
+        .unwrap();
+        let review_stale_verifier_handoff_failed = validate_external_review(
+            temp.path(),
+            EXTERNAL_TCB_ATTESTATION,
+            Some(&artifact_hash),
+            Some(&source_tree_hash),
+            &stale_review_verifier_handoff,
+        )
+        .unwrap();
+        assert_eq!(json_pointer_str(&review_stale_verifier_handoff_failed, "/status"), Some("failed"));
+        assert!(json_pointer_bool(&review_stale_verifier_handoff_failed, "/checks/request_handoff_bundle_hash_matches_current"));
+        assert!(!json_pointer_bool(&review_stale_verifier_handoff_failed, "/checks/verifier_id_matches_handoff"));
 
         let mut review_placeholder_date = external_review.clone();
         review_placeholder_date["review_date"] = json!("YYYY-MM-DD");
