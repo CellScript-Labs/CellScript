@@ -243,8 +243,8 @@ where
     require now <= old_cell.expiry
     require intent.canonical_envelope_hash == canonical_envelope_hash
     require intent.expected_receipt_hash == materialized_receipt_hash
-    require btc_owner_sig.pubkey == old_cell.btc_owner_authority_hash
-    require ckb_sig.pubkey == old_cell.ckb_authority_hash
+    require btc_owner_sig.pubkey == old_cell.btc_owner_authority_hash.0
+    require ckb_sig.pubkey == old_cell.ckb_authority_hash.0
 
     verifier::btc::bip340::require_signature(signed_intent_hash, btc_owner_sig.pubkey, btc_owner_sig.signature)
     verifier::btc::bip340::require_signature(signed_intent_hash, ckb_sig.pubkey, ckb_sig.signature)
@@ -339,8 +339,8 @@ where
         assert(now <= intent.core.expiry, "expiry")
         assert(intent.canonical_envelope_hash == canonical_envelope_hash, "canonical envelope")
         assert(intent.expected_receipt_hash == Hash::zero(), "expected receipt")
-        assert(btc_owner_sig.pubkey == intent.core.btc_owner_authority_hash, "btc owner signer")
-        assert(ckb_sig.pubkey == intent.core.ckb_authority_hash, "ckb signer")
+        assert(btc_owner_sig.pubkey == intent.core.btc_owner_authority_hash.0, "btc owner signer")
+        assert(ckb_sig.pubkey == intent.core.ckb_authority_hash.0, "ckb signer")
         assert(ckb::cell_data_hash(source::group_output(0)) == ckb::hash_data_packed(new_cell), "initial output")
 
         verifier::btc::bip340::require_signature(signed_intent_hash, btc_owner_sig.pubkey, btc_owner_sig.signature)
@@ -451,8 +451,8 @@ where
         assert(intent.core.expiry == old_cell.expiry, "intent expiry")
         assert(intent.canonical_envelope_hash == canonical_envelope_hash, "canonical envelope")
         assert(intent.expected_receipt_hash == materialized_receipt_hash, "expected receipt")
-        assert(btc_owner_sig.pubkey == old_cell.btc_owner_authority_hash, "btc owner signer")
-        assert(ckb_sig.pubkey == old_cell.ckb_authority_hash, "ckb signer")
+        assert(btc_owner_sig.pubkey == old_cell.btc_owner_authority_hash.0, "btc owner signer")
+        assert(ckb_sig.pubkey == old_cell.ckb_authority_hash.0, "ckb signer")
         assert(ckb::cell_data_hash(source::group_input(0)) == ckb::hash_data_packed(old_cell), "old input")
         assert(ckb::cell_data_hash(source::output(0)) == ckb::hash_data_packed(receipt), "final receipt")
 

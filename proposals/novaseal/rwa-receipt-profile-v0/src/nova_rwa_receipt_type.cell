@@ -207,7 +207,7 @@ where
     require now <= intent.core.expiry
     require intent.canonical_envelope_hash == canonical_envelope_hash
     require intent.expected_receipt_hash == materialized_receipt_hash
-    require issuer_sig.pubkey == intent.core.issuer_authority_hash
+    require issuer_sig.pubkey == intent.core.issuer_authority_hash.0
 
     verifier::btc::bip340::require_signature(signed_intent_hash, issuer_sig.pubkey, issuer_sig.signature)
 
@@ -333,7 +333,7 @@ where
     require intent.core.expiry == old_cell.expiry
     require intent.canonical_envelope_hash == canonical_envelope_hash
     require intent.expected_receipt_hash == materialized_receipt_hash
-    require holder_sig.pubkey == old_cell.holder_authority_hash
+    require holder_sig.pubkey == old_cell.holder_authority_hash.0
 
     verifier::btc::bip340::require_signature(signed_intent_hash, holder_sig.pubkey, holder_sig.signature)
 
@@ -446,8 +446,8 @@ where
     require intent.core.expiry == old_cell.expiry
     require intent.canonical_envelope_hash == canonical_envelope_hash
     require intent.expected_receipt_hash == materialized_receipt_hash
-    require issuer_sig.pubkey == old_cell.issuer_authority_hash
-    require holder_sig.pubkey == old_cell.holder_authority_hash
+    require issuer_sig.pubkey == old_cell.issuer_authority_hash.0
+    require holder_sig.pubkey == old_cell.holder_authority_hash.0
 
     verifier::btc::bip340::require_signature(signed_intent_hash, issuer_sig.pubkey, issuer_sig.signature)
     verifier::btc::bip340::require_signature(signed_intent_hash, holder_sig.pubkey, holder_sig.signature)

@@ -1054,21 +1054,25 @@ impl CodeGenerator {
                                 layout,
                             })
                         } else if let Some(parent) = self.schema_field_value_sources.get(&obj.id).cloned() {
-                            let Some(parent_type_name) = named_type_name(&parent.layout.ty) else {
-                                continue;
-                            };
-                            let Some(mut layout) =
-                                self.type_layouts.get(parent_type_name).and_then(|fields| fields.get(field)).cloned()
-                            else {
-                                continue;
-                            };
-                            layout.offset = parent.layout.offset.saturating_add(layout.offset);
-                            Some(SchemaFieldValueSource {
-                                obj_var_id: parent.obj_var_id,
-                                type_name: parent.type_name,
-                                field: format!("{}.{}", parent.field, field),
-                                layout,
-                            })
+                            if let Some(source) = schema_fixed_byte_view_source(&parent, field) {
+                                Some(source)
+                            } else {
+                                let Some(parent_type_name) = named_type_name(&parent.layout.ty) else {
+                                    continue;
+                                };
+                                let Some(mut layout) =
+                                    self.type_layouts.get(parent_type_name).and_then(|fields| fields.get(field)).cloned()
+                                else {
+                                    continue;
+                                };
+                                layout.offset = parent.layout.offset.saturating_add(layout.offset);
+                                Some(SchemaFieldValueSource {
+                                    obj_var_id: parent.obj_var_id,
+                                    type_name: parent.type_name,
+                                    field: format!("{}.{}", parent.field, field),
+                                    layout,
+                                })
+                            }
                         } else {
                             self.aggregate_pointer_sources.get(&obj.id).and_then(|source| {
                                 aggregate_field_layout(&source.ty, field).map(|layout| SchemaFieldValueSource {
@@ -2584,9 +2588,9 @@ pub(crate) use schema::{
     aggregate_field_layout, aggregate_type_label, const_ir_type, const_usize_operand, constructed_byte_vector_part_width,
     fixed_aggregate_pointer_param_width, fixed_byte_const_bytes, fixed_byte_pointer_param_width, fixed_byte_width,
     fixed_register_width, fixed_scalar_const_value, fixed_scalar_operand_width, fixed_scalar_width, layout_fixed_byte_width,
-    layout_fixed_scalar_width, molecule_vector_element_fixed_width, named_type_name, operand_fixed_byte_width, storage_type,
-    tuple_return_field_type, type_static_length, AggregatePointerSource, ExpectedFixedByteSource, SchemaFieldLayout,
-    SchemaFieldValueSource,
+    layout_fixed_scalar_width, molecule_vector_element_fixed_width, named_type_name, operand_fixed_byte_width,
+    schema_fixed_byte_view_source, storage_type, tuple_return_field_type, type_static_length, AggregatePointerSource,
+    ExpectedFixedByteSource, SchemaFieldLayout, SchemaFieldValueSource,
 };
 
 #[cfg(test)]
@@ -3241,6 +3245,53 @@ lock check(collection: protected Collection, expected: witness Address) -> bool 
                 && !assembly.contains("mv t4, a2")
                 && !assembly.contains("bne t1, t4, .L__cellscript_molecule_offsets_not_first"),
             "shared Molecule offset validator must not clobber t4, which validated field access keeps as the table base:\n{}",
+            assembly
+        );
+    }
+
+    #[test]
+    fn dynamic_molecule_hash_byte_view_preserves_schema_field_source() {
+        let program = r#"
+module codegen::dynamic_hash_byte_view
+
+resource Seal has store {
+    memo: String,
+    authority_hash: Hash,
+}
+
+struct SignaturePayload {
+    pubkey: [u8; 32],
+}
+
+lock authorize(seal: protected Seal, sig: witness SignaturePayload) -> bool {
+    sig.pubkey == seal.authority_hash.0
+}
+"#;
+        let result = crate::compile(
+            program,
+            crate::CompileOptions { target: Some("riscv64-asm".to_string()), ..crate::CompileOptions::default() },
+        )
+        .expect("dynamic Molecule Hash.0 byte view should compile");
+        let assembly = std::str::from_utf8(&result.artifact_bytes).expect("assembly should be utf-8");
+
+        assert!(
+            assembly.contains("# cellscript abi: schema fixed-byte view Seal.authority_hash.0 offset=0 size=32"),
+            "Hash.0 field access should materialise as a schema-backed byte view:\n{}",
+            assembly
+        );
+        assert!(
+            assembly.contains("# cellscript abi: CanonicalMoleculeTable field Seal.authority_hash.0 index=1 field_count=2 width=32"),
+            "Hash.0 byte view must validate the parent Molecule field index, not a synthetic .0 field:\n{}",
+            assembly
+        );
+        assert!(
+            assembly.contains("# cellscript abi: fixed-byte Eq comparison size=32"),
+            "Hash.0 byte view comparison should use fixed-byte verifier lowering:\n{}",
+            assembly
+        );
+        assert!(
+            !assembly.contains("field access .0 (unresolved)") && !assembly.contains("fixed-byte operand sources are not available"),
+            "Hash.0 byte view should not fall back to fail-closed field or comparison paths:\n{}",
             assembly
         );
     }

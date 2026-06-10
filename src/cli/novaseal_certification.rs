@@ -748,7 +748,7 @@ const REQUIRED_RWA_RECEIPT_SOURCE_PATTERNS: &[(&str, &str)] = &[
     ("checked_u64_max", "const U64_MAX: u64 = 18446744073709551615"),
     ("checked_nonce_increment", "old_cell.nonce < U64_MAX"),
     ("amount_conservation", "intent.core.settlement_amount == old_cell.amount"),
-    ("dual_authority_settlement", "issuer_sig.pubkey == old_cell.issuer_authority_hash"),
+    ("dual_authority_settlement", "issuer_sig.pubkey == old_cell.issuer_authority_hash.0"),
 ];
 
 const REQUIRED_BTC_TX_COMMITMENT_SOURCE_PATTERNS: &[(&str, &str)] = &[
@@ -804,8 +804,8 @@ const REQUIRED_DUAL_SEAL_SOURCE_PATTERNS: &[(&str, &str)] = &[
     ("checked_u64_max", "const U64_MAX: u64 = 18446744073709551615"),
     ("checked_nonce_increment", "old_cell.nonce < U64_MAX"),
     ("ckb_maturity_gate", "now >= old_cell.maturity_timepoint"),
-    ("btc_owner_authority", "btc_owner_sig.pubkey == old_cell.btc_owner_authority_hash"),
-    ("ckb_authority", "ckb_sig.pubkey == old_cell.ckb_authority_hash"),
+    ("btc_owner_authority", "btc_owner_sig.pubkey == old_cell.btc_owner_authority_hash.0"),
+    ("ckb_authority", "ckb_sig.pubkey == old_cell.ckb_authority_hash.0"),
     ("single_use_consume", "consume old_cell"),
 ];
 
@@ -823,7 +823,7 @@ const REQUIRED_FIBER_CANDIDATE_SOURCE_PATTERNS: &[(&str, &str)] = &[
     ("checked_u64_max", "const U64_MAX: u64 = 18446744073709551615"),
     ("checked_nonce_increment", "old_cell.nonce < U64_MAX"),
     ("balance_progress", "intent.core.new_balance_commitment_hash != old_cell.balance_commitment_hash"),
-    ("operator_authority", "operator_sig.pubkey == old_cell.operator_authority_hash"),
+    ("operator_authority", "operator_sig.pubkey == old_cell.operator_authority_hash.0"),
 ];
 
 #[derive(Clone, Copy)]
@@ -3129,9 +3129,9 @@ fn validate_core_security_source(repo_root: &Path) -> Result<Value> {
         "authority_rotation_without_explicit_action_fixture_present": repo_root
             .join("proposals/novaseal/v0-mvp-skeleton/fixtures/authority_rotation_without_explicit_action_reject.json")
             .is_file(),
-        "state_action_binds_sig_pubkey_to_old_cell_authority": source.contains("require sig.pubkey == old_cell.btc_authority_hash"),
-        "lifecycle_binds_sig_pubkey_to_old_cell_authority": source.contains("assert(sig.pubkey == old_cell.btc_authority_hash"),
-        "lock_binds_sig_pubkey_to_cell_authority_in_both_lock_surfaces": source.matches("require sig.pubkey == cell.btc_authority_hash").count() >= 2,
+        "state_action_binds_sig_pubkey_to_old_cell_authority": source.contains("require sig.pubkey == old_cell.btc_authority_hash.0"),
+        "lifecycle_binds_sig_pubkey_to_old_cell_authority": source.contains("assert(sig.pubkey == old_cell.btc_authority_hash.0"),
+        "lock_binds_sig_pubkey_to_cell_authority_in_both_lock_surfaces": source.matches("require sig.pubkey == cell.btc_authority_hash.0").count() >= 2,
         "core_nonce_increment_guarded": source.contains("require old_cell.nonce < U64_MAX")
             && source.contains("assert(old_cell.nonce < U64_MAX"),
     });

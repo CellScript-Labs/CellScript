@@ -77,13 +77,13 @@ REQUIRED_SOURCE_SNIPPETS = [
     "require intent.core.old_state_hash == old_cell.state_hash",
     "require actual_state_hash_commitment == state_hash_commitment",
     "require intent.core.policy_hash == old_cell.policy_hash",
-    "require sig.pubkey == old_cell.btc_authority_hash",
+    "require sig.pubkey == old_cell.btc_authority_hash.0",
     "require intent.core.new_nonce == old_cell.nonce + 1",
     "require old_cell.nonce < U64_MAX",
     "require now <= intent.core.expiry",
     "require intent.expected_receipt_hash == materialized_receipt_hash",
     "verifier::btc::bip340::require_signature(signed_intent_hash, sig.pubkey, sig.signature)",
-    "require sig.pubkey == cell.btc_authority_hash",
+    "require sig.pubkey == cell.btc_authority_hash.0",
 ]
 
 

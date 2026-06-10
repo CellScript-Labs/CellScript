@@ -280,7 +280,7 @@ where
     require now <= old_cell.expiry
     require intent.canonical_envelope_hash == canonical_envelope_hash
     require intent.expected_receipt_hash == materialized_receipt_hash
-    require owner_sig.pubkey == old_cell.owner_authority_hash
+    require owner_sig.pubkey == old_cell.owner_authority_hash.0
 
     verifier::btc::bip340::require_signature(signed_intent_hash, owner_sig.pubkey, owner_sig.signature)
 
@@ -381,7 +381,7 @@ where
         assert(now <= intent.core.expiry, "expiry")
         assert(intent.canonical_envelope_hash == canonical_envelope_hash, "canonical envelope")
         assert(intent.expected_receipt_hash == Hash::zero(), "expected receipt")
-        assert(owner_sig.pubkey == intent.core.owner_authority_hash, "owner signer")
+        assert(owner_sig.pubkey == intent.core.owner_authority_hash.0, "owner signer")
         assert(ckb::cell_data_hash(source::group_output(0)) == ckb::hash_data_packed(new_cell), "initial output")
 
         verifier::btc::bip340::require_signature(signed_intent_hash, owner_sig.pubkey, owner_sig.signature)
@@ -509,7 +509,7 @@ where
         assert(intent.core.expiry == old_cell.expiry, "intent expiry")
         assert(intent.canonical_envelope_hash == canonical_envelope_hash, "canonical envelope")
         assert(intent.expected_receipt_hash == materialized_receipt_hash, "expected receipt")
-        assert(owner_sig.pubkey == old_cell.owner_authority_hash, "owner signer")
+        assert(owner_sig.pubkey == old_cell.owner_authority_hash.0, "owner signer")
         assert(ckb::cell_data_hash(source::group_input(0)) == ckb::hash_data_packed(old_cell), "old input")
         assert(ckb::cell_data_hash(source::group_output(0)) == ckb::hash_data_packed(new_cell), "closed output")
         assert(ckb::cell_data_hash(source::output(1)) == ckb::hash_data_packed(receipt), "closure receipt")

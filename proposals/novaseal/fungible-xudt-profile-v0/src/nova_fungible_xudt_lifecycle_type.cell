@@ -222,7 +222,7 @@ where
         assert(new_cell.latest_receipt_hash == materialized_receipt_hash, "cell receipt")
         assert(new_cell.nonce == 0, "cell nonce")
         assert(new_cell.expiry == intent.core.expiry, "cell expiry")
-        assert(signer_sig.pubkey == intent.core.issuer_authority_hash, "signer")
+        assert(signer_sig.pubkey == intent.core.issuer_authority_hash.0, "signer")
         assert(ckb::cell_data_hash(source::group_output(0)) == ckb::hash_data_packed(new_cell), "issued output")
         assert(ckb::cell_data_hash(source::output(1)) == ckb::hash_data_packed(receipt), "issue receipt")
 
@@ -337,7 +337,7 @@ where
             assert(new_cell.latest_receipt_hash == materialized_receipt_hash, "new receipt")
             assert(new_cell.nonce == old_cell.nonce + 1, "new nonce")
             assert(new_cell.expiry == old_cell.expiry, "new expiry")
-            assert(signer_sig.pubkey == old_cell.holder_authority_hash, "signer")
+            assert(signer_sig.pubkey == old_cell.holder_authority_hash.0, "signer")
             assert(ckb::cell_data_hash(source::group_input(0)) == ckb::hash_data_packed(old_cell), "old input")
             assert(ckb::cell_data_hash(source::group_output(0)) == ckb::hash_data_packed(new_cell), "new output")
             assert(ckb::cell_data_hash(source::output(1)) == ckb::hash_data_packed(receipt), "transfer receipt")
@@ -418,7 +418,7 @@ where
             assert(intent.core.expiry == old_cell.expiry, "intent expiry")
             assert(intent.canonical_envelope_hash == canonical_envelope_hash, "canonical envelope")
             assert(intent.expected_receipt_hash == materialized_receipt_hash, "expected receipt")
-            assert(signer_sig.pubkey == old_cell.holder_authority_hash, "signer")
+            assert(signer_sig.pubkey == old_cell.holder_authority_hash.0, "signer")
             assert(ckb::cell_data_hash(source::group_input(0)) == ckb::hash_data_packed(old_cell), "old input")
             assert(ckb::cell_data_hash(source::output(0)) == ckb::hash_data_packed(receipt), "settlement receipt")
 

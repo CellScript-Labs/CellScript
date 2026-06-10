@@ -209,7 +209,7 @@ where
             intent_core_hash: hash_blake2b_packed(intent.core),
             payout_commitment_hash: Hash::zero()
         }), "expected receipt")
-        assert(sig.pubkey == old_cell.btc_authority_hash, "authority pubkey")
+        assert(sig.pubkey == old_cell.btc_authority_hash.0, "authority pubkey")
 
         verifier::btc::bip340::require_signature(hash_blake2b_packed(intent), sig.pubkey, sig.signature)
     }

@@ -260,8 +260,8 @@ where
     require intent.expected_receipt_hash == materialized_receipt_hash
     // In this v0 profile the authority hash is the 32-byte key/lock identifier
     // used by the harness. It is not yet a general wallet identity scheme.
-    require borrower_sig.pubkey == terms.borrower_authority_hash
-    require lender_sig.pubkey == terms.lender_authority_hash
+    require borrower_sig.pubkey == terms.borrower_authority_hash.0
+    require lender_sig.pubkey == terms.lender_authority_hash.0
     verifier::btc::bip340::require_signature(signed_intent_hash, borrower_sig.pubkey, borrower_sig.signature)
     verifier::btc::bip340::require_signature(signed_intent_hash, lender_sig.pubkey, lender_sig.signature)
     // The typed payout receipt and the actual CKB output are checked together:
@@ -416,7 +416,7 @@ where
     require intent.core.expiry_timepoint == active.expiry_timepoint
     require intent.canonical_envelope_hash == canonical_envelope_hash
     require intent.expected_receipt_hash == materialized_receipt_hash
-    require borrower_sig.pubkey == active.borrower_authority_hash
+    require borrower_sig.pubkey == active.borrower_authority_hash.0
     verifier::btc::bip340::require_signature(signed_intent_hash, borrower_sig.pubkey, borrower_sig.signature)
     let repayment_output = source::output(1)
     let collateral_return_output = source::output(2)
@@ -570,7 +570,7 @@ where
     require intent.core.expiry_timepoint == active.expiry_timepoint
     require intent.canonical_envelope_hash == canonical_envelope_hash
     require intent.expected_receipt_hash == materialized_receipt_hash
-    require lender_sig.pubkey == active.lender_authority_hash
+    require lender_sig.pubkey == active.lender_authority_hash.0
     verifier::btc::bip340::require_signature(signed_intent_hash, lender_sig.pubkey, lender_sig.signature)
     let claim_output = source::output(1)
     let claim_min_capacity = NATIVE_CKB_PAYOUT_OCCUPIED_CAPACITY + claim_amount

@@ -18,7 +18,7 @@ The harness applies the source-level guard semantics from `src/nova_state_type.c
 - `intent.core.old_nonce == old_cell.nonce`,
 - `old_cell.nonce < U64_MAX`,
 - `intent.core.new_nonce == old_cell.nonce + 1`,
-- `sig.pubkey == old_cell.btc_authority_hash`,
+- `sig.pubkey == old_cell.btc_authority_hash.0`,
 - lock args / authority id matches the protected Cell authority,
 - the proposed output Cell authority is not implicitly rotated,
 - `now <= intent.core.expiry`,

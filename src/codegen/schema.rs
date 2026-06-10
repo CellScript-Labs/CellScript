@@ -304,6 +304,21 @@ pub(crate) fn aggregate_field_layout(ty: &IrType, field: &str) -> Option<SchemaF
     }
 }
 
+pub(crate) fn schema_fixed_byte_view_source(parent: &SchemaFieldValueSource, field: &str) -> Option<SchemaFieldValueSource> {
+    let mut layout = match storage_type(&parent.layout.ty) {
+        IrType::Address | IrType::Hash if field == "0" => aggregate_field_layout(&parent.layout.ty, field)?,
+        _ => return None,
+    };
+    layout.index = parent.layout.index;
+    layout.offset = parent.layout.offset.saturating_add(layout.offset);
+    Some(SchemaFieldValueSource {
+        obj_var_id: parent.obj_var_id,
+        type_name: parent.type_name.clone(),
+        field: format!("{}.{}", parent.field, field),
+        layout,
+    })
+}
+
 pub(crate) fn tuple_return_field_type(ty: &IrType, field: &str) -> Option<IrType> {
     let IrType::Tuple(items) = ty else {
         return None;
@@ -1669,6 +1684,32 @@ impl CodeGenerator {
         let IrOperand::Var(var) = obj else {
             return false;
         };
+        if let Some(parent) = self.schema_field_value_sources.get(&var.id).cloned() {
+            if let Some(source) = schema_fixed_byte_view_source(&parent, field) {
+                let Some(width) = self.layout_fixed_byte_like_width(&source.layout) else {
+                    return false;
+                };
+
+                self.emit(format!("# field access .{}", field));
+                self.emit(format!(
+                    "# cellscript abi: schema fixed-byte view {}.{} offset={} size={}",
+                    source.type_name, source.field, source.layout.offset, width
+                ));
+                if !self.emit_schema_field_source_pointer_to("t4", &source, width) {
+                    return false;
+                }
+                if layout_fixed_scalar_width(&source.layout).is_some() {
+                    self.emit_unaligned_scalar_load("t4", "t0", "t2", 0, width);
+                    if dest.ty == IrType::Bool {
+                        self.emit_bool_canonical_check("t0");
+                    }
+                } else {
+                    self.emit("addi t0, t4, 0");
+                }
+                self.emit_stack_store("t0", dest.id * 8);
+                return true;
+            }
+        }
         if !self.schema_pointer_vars.contains(&var.id) {
             return false;
         }

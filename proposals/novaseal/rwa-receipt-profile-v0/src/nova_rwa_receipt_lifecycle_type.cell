@@ -238,7 +238,7 @@ where
         assert(intent.canonical_envelope_hash == canonical_envelope_hash, "canonical envelope")
         assert(intent.expected_receipt_hash == materialized_receipt_hash, "expected receipt")
         // new_cell is locally derived from the checked intent core; output binding below checks the actual cell bytes.
-        assert(signer_sig.pubkey == intent.core.issuer_authority_hash, "issuer signer")
+        assert(signer_sig.pubkey == intent.core.issuer_authority_hash.0, "issuer signer")
         assert(intent.expected_cell_data_hash != Hash::zero(), "expected cell data")
         assert(intent.expected_event_data_hash != Hash::zero(), "expected event data")
         assert(intent.expected_cell_data_hash == ckb::hash_data_packed(new_cell), "expected output cell")
@@ -366,7 +366,7 @@ where
             assert(intent.canonical_envelope_hash == canonical_envelope_hash, "canonical envelope")
             assert(intent.expected_receipt_hash == materialized_receipt_hash, "expected receipt")
             // new_cell is locally derived from the checked old cell and intent core; output binding below checks the actual cell bytes.
-            assert(signer_sig.pubkey == old_cell.holder_authority_hash, "holder signer")
+            assert(signer_sig.pubkey == old_cell.holder_authority_hash.0, "holder signer")
             assert(ckb::cell_data_hash(source::group_input(0)) == ckb::hash_data_packed(old_cell), "old input")
             assert(intent.expected_cell_data_hash != Hash::zero(), "expected cell data")
             assert(intent.expected_event_data_hash != Hash::zero(), "expected event data")
@@ -452,8 +452,8 @@ where
             assert(intent.core.expiry == old_cell.expiry, "intent expiry")
             assert(intent.canonical_envelope_hash == canonical_envelope_hash, "canonical envelope")
             assert(intent.expected_receipt_hash == materialized_receipt_hash, "expected receipt")
-            assert(signer_sig.pubkey == old_cell.issuer_authority_hash, "issuer signer")
-            assert(cosigner_sig.pubkey == old_cell.holder_authority_hash, "holder signer")
+            assert(signer_sig.pubkey == old_cell.issuer_authority_hash.0, "issuer signer")
+            assert(cosigner_sig.pubkey == old_cell.holder_authority_hash.0, "holder signer")
             assert(ckb::cell_data_hash(source::group_input(0)) == ckb::hash_data_packed(old_cell), "old input")
             assert(intent.expected_cell_data_hash == Hash::zero(), "expected cell data")
             assert(intent.expected_event_data_hash != Hash::zero(), "expected event data")

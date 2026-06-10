@@ -294,8 +294,8 @@ where
         assert(intent.expected_receipt_hash == materialized_receipt_hash, "expected receipt")
         // In this harness profile the authority identifier is the same 32-byte
         // value used for BIP340 pubkeys and payout lock args.
-        assert(borrower_sig.pubkey == terms.borrower_authority_hash, "borrower pubkey")
-        assert(lender_sig.pubkey == terms.lender_authority_hash, "lender pubkey")
+        assert(borrower_sig.pubkey == terms.borrower_authority_hash.0, "borrower pubkey")
+        assert(lender_sig.pubkey == terms.lender_authority_hash.0, "lender pubkey")
         assert(ckb::cell_data_hash(source::group_output(0)) == ckb::hash_data_packed(active), "agreement output")
         // The typed payout data and the actual output capacity/lock args are
         // checked together, so the receipt says what the transaction does.
@@ -440,7 +440,7 @@ where
             assert(intent.canonical_envelope_hash == canonical_envelope_hash, "canonical envelope")
             assert(intent.expected_receipt_hash == materialized_receipt_hash, "expected receipt")
             // Repayment is borrower-authorised in v0.
-            assert(borrower_sig.pubkey == active.borrower_authority_hash, "borrower pubkey")
+            assert(borrower_sig.pubkey == active.borrower_authority_hash.0, "borrower pubkey")
             assert(ckb::cell_data_hash(source::group_input(0)) == ckb::hash_data_packed(active), "active input")
             assert(ckb::cell_data_hash(source::group_output(0)) == ckb::hash_data_packed(closed), "closed output")
             assert(ckb::cell_data_hash(source::output(1)) == ckb::hash_data_packed(lender_payout), "repayment output")
@@ -571,7 +571,7 @@ where
             assert(intent.canonical_envelope_hash == canonical_envelope_hash, "canonical envelope")
             assert(intent.expected_receipt_hash == materialized_receipt_hash, "expected receipt")
             // Default claim is lender-authorised in v0.
-            assert(lender_sig.pubkey == active.lender_authority_hash, "lender pubkey")
+            assert(lender_sig.pubkey == active.lender_authority_hash.0, "lender pubkey")
             assert(ckb::cell_data_hash(source::group_input(0)) == ckb::hash_data_packed(active), "active input")
             assert(ckb::cell_data_hash(source::group_output(0)) == ckb::hash_data_packed(closed), "closed output")
             assert(ckb::cell_data_hash(source::output(1)) == ckb::hash_data_packed(claim_payout), "claim output")

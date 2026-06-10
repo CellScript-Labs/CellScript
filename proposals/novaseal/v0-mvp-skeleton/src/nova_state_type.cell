@@ -162,7 +162,7 @@ where
     require now <= intent.core.expiry
     require intent.expected_receipt_hash == materialized_receipt_hash
     require receipt_commitment.intent_core_hash == intent_core_hash
-    require sig.pubkey == old_cell.btc_authority_hash
+    require sig.pubkey == old_cell.btc_authority_hash.0
 
     verifier::btc::bip340::require_signature(signed_intent_hash, sig.pubkey, sig.signature)
 
@@ -211,7 +211,7 @@ lock btc_authority(protected cell: NovaSealCellV0, lock_args expected_btc_author
     let digest = hash_blake2b_packed(intent)
     require expected_btc_authority_hash == cell.btc_authority_hash
     require intent.core.policy_hash == cell.policy_hash
-    require sig.pubkey == cell.btc_authority_hash
+    require sig.pubkey == cell.btc_authority_hash.0
 
     verifier::btc::bip340::require_signature(digest, sig.pubkey, sig.signature)
     true
