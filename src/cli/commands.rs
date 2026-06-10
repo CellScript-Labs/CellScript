@@ -1054,6 +1054,8 @@ impl CommandExecutor {
             println!("{}", "Cleaning...".cyan());
         }
 
+        let package_root = std::env::current_dir()?.canonicalize()?;
+        let _manifest = PackageManager::new(".").read_manifest()?;
         let paths = vec!["target", ".cell/cache"];
         let mut removed_paths = Vec::new();
 
@@ -1062,7 +1064,7 @@ impl CommandExecutor {
                 if !args.json {
                     println!("  Removing {}", path);
                 }
-                remove_clean_path(Path::new(path))?;
+                remove_clean_path(&package_root, Path::new(path))?;
                 removed_paths.push(path.to_string());
             }
         }
@@ -3965,18 +3967,19 @@ fn init_git_repo(path: &Path) -> Result<bool> {
     Ok(true)
 }
 
-fn remove_clean_path(path: &Path) -> Result<()> {
+fn remove_clean_path(package_root: &Path, path: &Path) -> Result<()> {
     let metadata = std::fs::symlink_metadata(path)?;
     if metadata.file_type().is_symlink() {
-        std::fs::remove_file(path)?;
-        return Ok(());
+        return Err(crate::error::CompileError::without_span(format!(
+            "refusing to clean '{}' because it is a symbolic link",
+            path.display()
+        )));
     }
 
-    let cwd = std::env::current_dir()?.canonicalize()?;
     let canonical = path.canonicalize()?;
-    if !canonical.starts_with(&cwd) {
+    if !canonical.starts_with(package_root) {
         return Err(crate::error::CompileError::without_span(format!(
-            "refusing to remove '{}' because it resolves outside the current directory",
+            "refusing to remove '{}' because it resolves outside the package root",
             path.display()
         )));
     }

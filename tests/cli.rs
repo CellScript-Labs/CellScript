@@ -3499,6 +3499,15 @@ fn cellc_clean_subcommand_supports_json_summary() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
 
+    std::fs::write(
+        root.join("Cell.toml"),
+        r#"
+[package]
+name = "demo"
+version = "0.1.0"
+"#,
+    )
+    .unwrap();
     std::fs::create_dir_all(root.join("target")).unwrap();
     std::fs::create_dir_all(root.join(".cell").join("cache")).unwrap();
 
@@ -3511,6 +3520,50 @@ fn cellc_clean_subcommand_supports_json_summary() {
     assert_eq!(summary["removed_paths"].as_array().unwrap().len(), 2);
     assert!(!root.join("target").exists());
     assert!(!root.join(".cell").join("cache").exists());
+}
+
+#[test]
+fn cellc_clean_subcommand_requires_package_manifest() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    std::fs::create_dir_all(root.join("target")).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("clean").arg("--json").output().unwrap();
+
+    assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
+    assert!(root.join("target").exists());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Cell.toml not found"), "unexpected stderr: {}", stderr);
+}
+
+#[cfg(unix)]
+#[test]
+fn cellc_clean_subcommand_refuses_symlinked_artifacts() {
+    use std::os::unix::fs::symlink;
+
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("package");
+    let outside_target = temp.path().join("outside-target");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::create_dir_all(&outside_target).unwrap();
+    std::fs::write(
+        root.join("Cell.toml"),
+        r#"
+[package]
+name = "demo"
+version = "0.1.0"
+"#,
+    )
+    .unwrap();
+    symlink(&outside_target, root.join("target")).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(&root).arg("clean").arg("--json").output().unwrap();
+
+    assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
+    assert!(std::fs::symlink_metadata(root.join("target")).unwrap().file_type().is_symlink());
+    assert!(outside_target.exists());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("symbolic link"), "unexpected stderr: {}", stderr);
 }
 
 #[test]
