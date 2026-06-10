@@ -1850,9 +1850,7 @@ impl CommandExecutor {
         if summary["status"].as_str() == Some("passed") {
             Ok(())
         } else {
-            Err(crate::error::CompileError::without_span(
-                summary["failure_reason"].as_str().unwrap_or("certification failed").to_string(),
-            ))
+            Err(crate::error::CompileError::without_span(novaseal_certification_failure_message(&summary)))
         }
     }
 
@@ -2807,6 +2805,20 @@ fn novaseal_gate_status<'a>(report: &'a serde_json::Value, gate_name: &str) -> O
             None
         }
     })
+}
+
+fn novaseal_certification_failure_message(summary: &serde_json::Value) -> String {
+    let reason = summary.get("failure_reason").unwrap_or(&serde_json::Value::Null);
+    if let Some(message) = json_pointer_str(reason, "/message") {
+        return message.to_string();
+    }
+    if let Some(message) = reason.as_str() {
+        return message.to_string();
+    }
+    if !reason.is_null() {
+        return serde_json::to_string(reason).unwrap_or_else(|_| "certification failed".to_string());
+    }
+    "certification failed".to_string()
 }
 
 fn novaseal_certification_summary(
@@ -6459,6 +6471,26 @@ mod tests {
         assert_eq!(summary["failure_reason"]["external_blockers"][0], "public_shared_cell_dep_attested");
         assert_eq!(summary["failure_reason"]["external_blockers"][3], "rwa_legal_registry_review_attested");
         assert_eq!(summary["failure_reason"]["failed_dimensions"][3], "rwa_legal_registry_review_evidence");
+    }
+
+    #[test]
+    fn novaseal_certification_failure_message_uses_structured_reason_message() {
+        let summary = serde_json::json!({
+            "failure_reason": {
+                "message": "NovaSeal production certification requires remaining external attestations",
+                "failed_checks": ["production_ready"]
+            }
+        });
+        assert_eq!(
+            novaseal_certification_failure_message(&summary),
+            "NovaSeal production certification requires remaining external attestations"
+        );
+
+        let legacy = serde_json::json!({ "failure_reason": "legacy certification failure" });
+        assert_eq!(novaseal_certification_failure_message(&legacy), "legacy certification failure");
+
+        let missing = serde_json::json!({});
+        assert_eq!(novaseal_certification_failure_message(&missing), "certification failed");
     }
 
     #[test]
