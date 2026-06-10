@@ -3505,21 +3505,32 @@ fn cellc_clean_subcommand_supports_json_summary() {
 [package]
 name = "demo"
 version = "0.1.0"
+
+[build]
+out_dir = "artifacts"
 "#,
     )
     .unwrap();
     std::fs::create_dir_all(root.join("target")).unwrap();
+    std::fs::create_dir_all(root.join("build")).unwrap();
+    std::fs::create_dir_all(root.join("dist")).unwrap();
+    std::fs::create_dir_all(root.join("artifacts")).unwrap();
     std::fs::create_dir_all(root.join(".cell").join("cache")).unwrap();
+    std::fs::create_dir_all(root.join("src").join(".cell").join("build").join("cache")).unwrap();
 
     let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("clean").arg("--json").output().unwrap();
     assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
 
     let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(summary["status"], "ok");
-    assert_eq!(summary["removed"], 2);
-    assert_eq!(summary["removed_paths"].as_array().unwrap().len(), 2);
+    assert_eq!(summary["removed"], 6);
+    assert_eq!(summary["removed_paths"].as_array().unwrap().len(), 6);
     assert!(!root.join("target").exists());
-    assert!(!root.join(".cell").join("cache").exists());
+    assert!(!root.join("build").exists());
+    assert!(!root.join("dist").exists());
+    assert!(!root.join("artifacts").exists());
+    assert!(!root.join(".cell").exists());
+    assert!(!root.join("src").join(".cell").exists());
 }
 
 #[test]
@@ -3555,6 +3566,7 @@ version = "0.1.0"
 "#,
     )
     .unwrap();
+    std::fs::create_dir_all(root.join("build")).unwrap();
     symlink(&outside_target, root.join("target")).unwrap();
 
     let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(&root).arg("clean").arg("--json").output().unwrap();
@@ -3562,6 +3574,7 @@ version = "0.1.0"
     assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
     assert!(std::fs::symlink_metadata(root.join("target")).unwrap().file_type().is_symlink());
     assert!(outside_target.exists());
+    assert!(root.join("build").exists());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("symbolic link"), "unexpected stderr: {}", stderr);
 }

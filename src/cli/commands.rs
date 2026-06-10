@@ -1055,17 +1055,22 @@ impl CommandExecutor {
         }
 
         let package_root = std::env::current_dir()?.canonicalize()?;
-        let _manifest = PackageManager::new(".").read_manifest()?;
-        let paths = vec!["target", ".cell/cache"];
-        let mut removed_paths = Vec::new();
+        let manifest = PackageManager::new(&package_root).read_manifest()?;
+        let existing_paths =
+            clean_generated_paths(&package_root, &manifest).into_iter().filter(|path| path.exists()).collect::<Vec<_>>();
+        for path in &existing_paths {
+            validate_clean_path(&package_root, path)?;
+        }
 
-        for path in paths {
-            if std::path::Path::new(path).exists() {
+        let mut removed_paths = Vec::new();
+        for path in existing_paths {
+            let label = clean_path_label(&package_root, &path);
+            if path.exists() {
                 if !args.json {
-                    println!("  Removing {}", path);
+                    println!("  Removing {}", label);
                 }
-                remove_clean_path(&package_root, Path::new(path))?;
-                removed_paths.push(path.to_string());
+                remove_clean_path(&package_root, &path)?;
+                removed_paths.push(label);
             }
         }
 
@@ -3981,7 +3986,74 @@ fn init_git_repo(path: &Path) -> Result<bool> {
     Ok(true)
 }
 
-fn remove_clean_path(package_root: &Path, path: &Path) -> Result<()> {
+fn clean_generated_paths(package_root: &Path, manifest: &crate::package::PackageManifest) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    let mut seen = BTreeSet::new();
+    for raw_path in ["target", "build", "dist", ".cell"] {
+        push_clean_path(package_root, raw_path, &mut paths, &mut seen);
+    }
+
+    if let Some(out_dir) = manifest.build.out_dir.as_deref() {
+        push_clean_path(package_root, out_dir, &mut paths, &mut seen);
+    }
+
+    let mut source_roots = manifest.package.source_roots.clone();
+    if source_roots.is_empty() {
+        source_roots.push("src".to_string());
+    }
+    source_roots.push(
+        Path::new(&manifest.package.entry)
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."))
+            .display()
+            .to_string(),
+    );
+
+    for source_root in source_roots {
+        if let Some(raw_path) = source_root_clean_cache_path(&source_root) {
+            push_clean_path(package_root, &raw_path, &mut paths, &mut seen);
+        }
+    }
+
+    paths
+}
+
+fn source_root_clean_cache_path(source_root: &str) -> Option<String> {
+    let path = Path::new(source_root);
+    if source_root.is_empty()
+        || path.is_absolute()
+        || path.components().any(|component| {
+            matches!(component, std::path::Component::ParentDir | std::path::Component::Prefix(_) | std::path::Component::RootDir)
+        })
+    {
+        return None;
+    }
+    Some(path.join(".cell").display().to_string())
+}
+
+fn push_clean_path(package_root: &Path, raw_path: &str, paths: &mut Vec<PathBuf>, seen: &mut BTreeSet<PathBuf>) {
+    let path = Path::new(raw_path);
+    if raw_path.is_empty()
+        || path.is_absolute()
+        || path.components().any(|component| {
+            matches!(component, std::path::Component::ParentDir | std::path::Component::Prefix(_) | std::path::Component::RootDir)
+        })
+    {
+        return;
+    }
+
+    let candidate = package_root.join(path);
+    if seen.insert(candidate.clone()) {
+        paths.push(candidate);
+    }
+}
+
+fn clean_path_label(package_root: &Path, path: &Path) -> String {
+    path.strip_prefix(package_root).unwrap_or(path).display().to_string()
+}
+
+fn validate_clean_path(package_root: &Path, path: &Path) -> Result<()> {
     let metadata = std::fs::symlink_metadata(path)?;
     if metadata.file_type().is_symlink() {
         return Err(crate::error::CompileError::without_span(format!(
@@ -4005,6 +4077,11 @@ fn remove_clean_path(package_root: &Path, path: &Path) -> Result<()> {
         )));
     }
 
+    Ok(())
+}
+
+fn remove_clean_path(package_root: &Path, path: &Path) -> Result<()> {
+    validate_clean_path(package_root, path)?;
     std::fs::remove_dir_all(path)?;
     Ok(())
 }
