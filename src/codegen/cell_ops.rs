@@ -2365,11 +2365,7 @@ impl CodeGenerator {
             return Ok(());
         }
         if let Some(output_index) = self.operation_output_indices.get(&dest.id).copied() {
-            // AUDIT-FINDING: transfer/claim/settle emitters materialise an output handle even when the relation is explicitly marked unverified, letting later generated code treat an index as a semantic output value — severity: HIGH — fail closed or carry a distinct unverified-handle type that cannot feed verified field/codegen paths
-            self.emit(format!("# cellscript abi: transfer output handle Output#{} (unverified)", output_index));
-            self.emit(format!("li t0, {}", output_index));
-            self.emit_stack_store("t0", dest.id * 8);
-            self.next_virtual_output = self.next_virtual_output.max(output_index + 1);
+            self.emit_unverified_operation_output_relation_fail("transfer", output_index);
             return Ok(());
         }
         self.emit("# cellscript abi: fail closed because transfer output relation is unknown");
@@ -2385,10 +2381,7 @@ impl CodeGenerator {
             return Ok(());
         }
         if let Some(output_index) = self.operation_output_indices.get(&dest.id).copied() {
-            self.emit(format!("# cellscript abi: claim output handle Output#{} (unverified)", output_index));
-            self.emit(format!("li t0, {}", output_index));
-            self.emit_stack_store("t0", dest.id * 8);
-            self.next_virtual_output = self.next_virtual_output.max(output_index + 1);
+            self.emit_unverified_operation_output_relation_fail("claim", output_index);
             return Ok(());
         }
         self.emit("# cellscript abi: fail closed because claim output relation is unknown");
@@ -2404,15 +2397,21 @@ impl CodeGenerator {
             return Ok(());
         }
         if let Some(output_index) = self.operation_output_indices.get(&dest.id).copied() {
-            self.emit(format!("# cellscript abi: settle output handle Output#{} (unverified)", output_index));
-            self.emit(format!("li t0, {}", output_index));
-            self.emit_stack_store("t0", dest.id * 8);
-            self.next_virtual_output = self.next_virtual_output.max(output_index + 1);
+            self.emit_unverified_operation_output_relation_fail("settle", output_index);
             return Ok(());
         }
         self.emit("# cellscript abi: fail closed because settle output relation is unknown");
         self.emit_fail(CellScriptRuntimeError::DestroyInvalidOperand);
         Ok(())
+    }
+
+    fn emit_unverified_operation_output_relation_fail(&mut self, operation: &str, output_index: usize) {
+        self.next_virtual_output = self.next_virtual_output.max(output_index + 1);
+        self.emit(format!(
+            "# cellscript abi: fail closed because {} output relation Output#{} is not verifier-covered",
+            operation, output_index
+        ));
+        self.emit_fail(CellScriptRuntimeError::DestroyInvalidOperand);
     }
 
     pub(crate) fn emit_verified_operation_output_handle(&mut self, dest: &IrVar, operation: &str) -> bool {

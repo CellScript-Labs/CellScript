@@ -2831,6 +2831,38 @@ mod tests {
     }
 
     #[test]
+    fn unverified_operation_outputs_fail_closed_without_materialising_handles() {
+        for (operation, output_index) in [("transfer", 0usize), ("claim", 1usize), ("settle", 2usize)] {
+            let mut generator = CodeGenerator::new(CodegenOptions::default());
+            generator.current_function = Some(format!("{operation}_action"));
+            let dest = IrVar { id: output_index + 10, name: operation.to_string(), ty: IrType::Named("Asset".to_string()) };
+            generator.operation_output_indices.insert(dest.id, output_index);
+            let operand = IrOperand::Const(IrConst::U64(7));
+
+            match operation {
+                "transfer" => generator
+                    .emit_transfer(&dest, &operand, &IrOperand::Const(IrConst::Address([0x11; 32])))
+                    .expect("transfer emission should not return an error"),
+                "claim" => generator.emit_claim(&dest, &operand).expect("claim emission should not return an error"),
+                "settle" => generator.emit_settle(&dest, &operand).expect("settle emission should not return an error"),
+                _ => unreachable!(),
+            }
+
+            let assembly = generator.assembly.join("\n");
+            assert!(
+                assembly.contains(&format!(
+                    "fail closed because {operation} output relation Output#{output_index} is not verifier-covered"
+                )),
+                "{assembly}"
+            );
+            assert!(!assembly.contains("(unverified)"), "{assembly}");
+            assert!(!assembly.contains(&format!("li t0, {output_index}")), "{assembly}");
+            assert!(!assembly.contains(&format!("sd t0, {}(sp)", dest.id * 8)), "{assembly}");
+            assert_eq!(generator.next_virtual_output, output_index + 1);
+        }
+    }
+
+    #[test]
     fn register_contract_allows_only_entry_wrapper_writes_to_direct_registers() {
         let mut generator = CodeGenerator::new(CodegenOptions::default());
         generator.assembly = vec![
