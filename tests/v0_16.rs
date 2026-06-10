@@ -830,6 +830,9 @@ fn cli_verify_deploy_rejects_tampered_plan_integrity() {
     plan["artifact"]["hash"] = json!("not-a-canonical-hash");
     plan["metadata_schema_version"] = json!(0);
     plan["target_profile"] = json!(null);
+    plan.as_object_mut().unwrap().remove("code_cell_manifest");
+    plan["dep_group_manifest"] = json!("not a CKB deployment manifest");
+    plan["script_references"] = json!("not script references");
     plan["builder_assumptions"] = json!("not an assumption array");
     std::fs::write(&bad_plan_path, serde_json::to_vec_pretty(&plan).unwrap()).unwrap();
 
@@ -841,6 +844,9 @@ fn cli_verify_deploy_rejects_tampered_plan_integrity() {
     assert!(violations.iter().any(|violation| violation.as_str().is_some_and(|text| text.contains("artifact.hash"))));
     assert!(violations.iter().any(|violation| violation.as_str().is_some_and(|text| text.contains("metadata_schema_version"))));
     assert!(violations.iter().any(|violation| violation.as_str().is_some_and(|text| text.contains("target_profile.name"))));
+    assert!(violations.iter().any(|violation| violation.as_str().is_some_and(|text| text.contains("code_cell_manifest"))));
+    assert!(violations.iter().any(|violation| violation.as_str().is_some_and(|text| text.contains("dep_group_manifest"))));
+    assert!(violations.iter().any(|violation| violation.as_str().is_some_and(|text| text.contains("script_references"))));
     assert!(violations.iter().any(|violation| violation.as_str().is_some_and(|text| text.contains("builder_assumptions"))));
 }
 

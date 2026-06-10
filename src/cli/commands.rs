@@ -3305,6 +3305,84 @@ fn verify_deploy_plan_json(plan: &serde_json::Value) -> Vec<String> {
         Some(profile) => violations.push(format!("target_profile.name must be ckb, got {profile}")),
         None => violations.push("target_profile.name is required".to_string()),
     }
+    match plan.get("code_cell_manifest").and_then(serde_json::Value::as_object) {
+        Some(_) => {
+            match plan.pointer("/code_cell_manifest/hash_type").and_then(serde_json::Value::as_str) {
+                Some("data" | "type" | "data1" | "data2") => {}
+                Some(hash_type) => {
+                    violations.push(format!("code_cell_manifest.hash_type must be one of data, type, data1, data2, got {hash_type}"))
+                }
+                None => violations.push("code_cell_manifest.hash_type is required".to_string()),
+            }
+            match plan.pointer("/code_cell_manifest/capacity_policy").and_then(serde_json::Value::as_str) {
+                Some(policy) if !policy.is_empty() && policy != "unknown" => {}
+                Some(_) => violations.push("code_cell_manifest.capacity_policy must be a known non-empty string".to_string()),
+                None => violations.push("code_cell_manifest.capacity_policy is required".to_string()),
+            }
+        }
+        None => violations.push("code_cell_manifest must be an object".to_string()),
+    }
+    match plan.get("dep_group_manifest").and_then(serde_json::Value::as_object) {
+        Some(_) => {
+            if plan.pointer("/dep_group_manifest/source").and_then(serde_json::Value::as_str).is_none_or(str::is_empty) {
+                violations.push("dep_group_manifest.source must be a non-empty string".to_string());
+            }
+            if plan.pointer("/dep_group_manifest/status").and_then(serde_json::Value::as_str).is_none_or(str::is_empty) {
+                violations.push("dep_group_manifest.status must be a non-empty string".to_string());
+            }
+            if plan.pointer("/dep_group_manifest/dep_group_supported").and_then(serde_json::Value::as_bool).is_none() {
+                violations.push("dep_group_manifest.dep_group_supported must be a boolean".to_string());
+            }
+            if plan.pointer("/dep_group_manifest/production_manifest_required").and_then(serde_json::Value::as_bool).is_none() {
+                violations.push("dep_group_manifest.production_manifest_required must be a boolean".to_string());
+            }
+            match plan.pointer("/dep_group_manifest/declared_cell_deps").and_then(serde_json::Value::as_array) {
+                Some(deps) => {
+                    for (index, dep) in deps.iter().enumerate() {
+                        if !dep.is_object() {
+                            violations.push(format!("dep_group_manifest.declared_cell_deps[{index}] must be an object"));
+                            continue;
+                        }
+                        if dep.get("name").and_then(serde_json::Value::as_str).is_none_or(str::is_empty) {
+                            violations.push(format!("dep_group_manifest.declared_cell_deps[{index}].name must be a non-empty string"));
+                        }
+                        match dep.get("dep_type").and_then(serde_json::Value::as_str) {
+                            Some("code" | "dep_group") => {}
+                            Some(dep_type) => violations.push(format!(
+                                "dep_group_manifest.declared_cell_deps[{index}].dep_type must be code or dep_group, got {dep_type}"
+                            )),
+                            None => violations.push(format!("dep_group_manifest.declared_cell_deps[{index}].dep_type is required")),
+                        }
+                    }
+                }
+                None => violations.push("dep_group_manifest.declared_cell_deps must be an array".to_string()),
+            }
+        }
+        None => violations.push("dep_group_manifest must be an object".to_string()),
+    }
+    match plan.get("script_references").and_then(serde_json::Value::as_array) {
+        Some(references) => {
+            for (index, reference) in references.iter().enumerate() {
+                if !reference.is_object() {
+                    violations.push(format!("script_references[{index}] must be an object"));
+                    continue;
+                }
+                for field in ["scope", "purpose", "name", "dep_source", "profile", "status"] {
+                    if reference.get(field).and_then(serde_json::Value::as_str).is_none_or(str::is_empty) {
+                        violations.push(format!("script_references[{index}].{field} must be a non-empty string"));
+                    }
+                }
+                if let Some(hash_type) = reference.get("hash_type").and_then(serde_json::Value::as_str) {
+                    if !matches!(hash_type, "data" | "type" | "data1" | "data2") {
+                        violations.push(format!(
+                            "script_references[{index}].hash_type must be one of data, type, data1, data2, got {hash_type}"
+                        ));
+                    }
+                }
+            }
+        }
+        None => violations.push("script_references must be an array".to_string()),
+    }
     match plan.pointer("/proof_plan_soundness/status").and_then(serde_json::Value::as_str) {
         Some("passed") => {}
         Some(status) => violations.push(format!("proof_plan_soundness.status must be passed, got {status}")),
