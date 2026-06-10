@@ -14825,7 +14825,7 @@ fn collect_package_cell_files(package_root: &Utf8Path) -> Result<Vec<Utf8PathBuf
     if roots.is_empty() {
         let src_root = package_root.join("src");
         if src_root.exists() && src_root.is_dir() {
-            let src_root = canonical_utf8_path(&src_root)?;
+            let src_root = canonical_package_child_path(&package_root, "src", "default source root")?;
             if seen_roots.insert(src_root.clone()) {
                 roots.push(src_root);
             }
@@ -14865,15 +14865,16 @@ fn collect_package_cell_files(package_root: &Utf8Path) -> Result<Vec<Utf8PathBuf
 }
 
 fn collect_cell_files(root: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
+    let root = canonical_utf8_path(root)?;
     let mut files = Vec::new();
-    collect_cell_files_recursive(root, &mut files)?;
+    collect_cell_files_recursive(&root, &root, &mut files)?;
     files.sort();
     Ok(files)
 }
 
-fn collect_cell_files_recursive(root: &Utf8Path, files: &mut Vec<Utf8PathBuf>) -> Result<()> {
-    let entries = std::fs::read_dir(root)
-        .map_err(|e| CompileError::new(format!("failed to read module directory '{}': {}", root, e), error::Span::default()))?;
+fn collect_cell_files_recursive(source_root: &Utf8Path, dir: &Utf8Path, files: &mut Vec<Utf8PathBuf>) -> Result<()> {
+    let entries = std::fs::read_dir(dir)
+        .map_err(|e| CompileError::new(format!("failed to read module directory '{}': {}", dir, e), error::Span::default()))?;
 
     for entry in entries {
         let entry = entry.map_err(|e| CompileError::new(format!("failed to read directory entry: {}", e), error::Span::default()))?;
@@ -14881,17 +14882,28 @@ fn collect_cell_files_recursive(root: &Utf8Path, files: &mut Vec<Utf8PathBuf>) -
         let Ok(candidate) = Utf8PathBuf::from_path_buf(path) else {
             continue;
         };
+        let file_type = entry
+            .file_type()
+            .map_err(|e| CompileError::new(format!("failed to inspect module path '{}': {}", candidate, e), error::Span::default()))?;
 
-        if candidate.is_dir() {
+        if file_type.is_symlink() {
+            return Err(CompileError::new(
+                format!("refusing to follow symbolic link '{}' while collecting CellScript source files", candidate),
+                error::Span::default(),
+            ));
+        }
+
+        if file_type.is_dir() {
             if should_skip_cell_dir(&candidate) {
                 continue;
             }
-            collect_cell_files_recursive(&candidate, files)?;
+            let candidate = canonical_source_child_path(source_root, &candidate, "source directory")?;
+            collect_cell_files_recursive(source_root, &candidate, files)?;
             continue;
         }
 
-        if candidate.extension() == Some("cell") {
-            files.push(canonical_utf8_path(&candidate)?);
+        if file_type.is_file() && candidate.extension() == Some("cell") {
+            files.push(canonical_source_child_path(source_root, &candidate, "source file")?);
         }
     }
 
@@ -14928,6 +14940,17 @@ fn canonical_package_child_path(package_root: &Utf8Path, raw_path: &str, label: 
     if !canonical.starts_with(&package_root) {
         return Err(CompileError::new(
             format!("{} '{}' resolves outside package root '{}'", label, raw_path, package_root),
+            error::Span::default(),
+        ));
+    }
+    Ok(canonical)
+}
+
+fn canonical_source_child_path(source_root: &Utf8Path, candidate: &Utf8Path, label: &str) -> Result<Utf8PathBuf> {
+    let canonical = canonical_utf8_path(candidate)?;
+    if !canonical.starts_with(source_root) {
+        return Err(CompileError::new(
+            format!("{} '{}' resolves outside source root '{}'", label, candidate, source_root),
             error::Span::default(),
         ));
     }
@@ -28883,6 +28906,68 @@ source_roots = ["../outside"]
 
         assert!(err.message.contains("configured source root"));
         assert!(err.message.contains("package root"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn default_package_source_root_must_stay_inside_package_root() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempdir().unwrap();
+        let root = Utf8Path::from_path(temp.path()).unwrap().join("app");
+        let outside = Utf8Path::from_path(temp.path()).unwrap().join("outside");
+
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(
+            root.join("Cell.toml"),
+            r#"
+[package]
+name = "demo"
+version = "0.1.0"
+entry = "main.cell"
+"#,
+        )
+        .unwrap();
+        std::fs::write(root.join("main.cell"), "module demo::main\n").unwrap();
+        std::fs::write(outside.join("leak.cell"), "module outside\n").unwrap();
+        symlink(&outside, root.join("src")).unwrap();
+
+        let err = load_modules_for_input(&root).unwrap_err();
+
+        assert!(err.message.contains("default source root"), "unexpected error: {}", err.message);
+        assert!(err.message.contains("package root"), "unexpected error: {}", err.message);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn package_source_collection_rejects_symlinked_subdirectories() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempdir().unwrap();
+        let root = Utf8Path::from_path(temp.path()).unwrap().join("app");
+        let outside = Utf8Path::from_path(temp.path()).unwrap().join("outside");
+
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(
+            root.join("Cell.toml"),
+            r#"
+[package]
+name = "demo"
+version = "0.1.0"
+entry = "src/main.cell"
+"#,
+        )
+        .unwrap();
+        std::fs::write(root.join("src").join("main.cell"), "module demo::main\n").unwrap();
+        std::fs::write(outside.join("leak.cell"), "module outside\n").unwrap();
+        symlink(&outside, root.join("src").join("leak")).unwrap();
+
+        let err = load_modules_for_input(&root).unwrap_err();
+
+        assert!(err.message.contains("symbolic link"), "unexpected error: {}", err.message);
+        assert!(err.message.contains("CellScript source files"), "unexpected error: {}", err.message);
     }
 
     #[test]
