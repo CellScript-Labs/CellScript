@@ -88,7 +88,7 @@ REQUIRED_PUBLIC_FIELDS = [
 FIELD_CONSTRAINTS = {
     "network": "explicit public mainnet/testnet name; placeholders and local/devnet/regtest/simnet/private/fake labels are rejected",
     "generated_at": "UTC timestamp in YYYY-MM-DDTHH:MM:SSZ form; future timestamps are rejected",
-    "evidence_provider": "real external provider identity; placeholder, example, and unknown tokens are rejected",
+    "evidence_provider": "real external provider identity; placeholder, local/devnet/fake/internal, example, and unknown tokens are rejected",
     "ckb_live_tx_hash": "0x-prefixed 32-byte CKB live transaction hash matching the current NovaSeal service-builder case",
     "live_report_hash": "0x-prefixed 32-byte hash of the current NovaSeal live devnet report for this profile",
     "service_builder_case_hash": "0x-prefixed 32-byte hash of the current NovaSeal service-builder case for this profile",
@@ -125,7 +125,7 @@ FIELD_CONSTRAINTS = {
     "spv_client_cell_dep.data_hash": "0x-prefixed 32-byte non-placeholder SPV client data hash",
     "spv_client_cell_dep.dep_type": "code",
     "spv_client_cell_dep.hash_type": "data, data1, or type CKB script hash type",
-    "source_service.name": "real external SPV service identity; placeholder, example, and unknown tokens are rejected",
+    "source_service.name": "real external SPV service identity; placeholder, local/devnet/fake/internal, example, and unknown tokens are rejected",
     "source_service.commit": "40-character hex service source commit",
     "source_service.report_hash": "0x-prefixed 32-byte non-placeholder SPV service report hash",
     "request_handoff.bundle": "target/novaseal-external-evidence-handoff-bundle.json",

@@ -76,7 +76,7 @@ def public_celldep_case(template: dict[str, Any], tcb: dict[str, Any]) -> dict[s
         "field_constraints": {
             "network": "explicit public CKB mainnet/testnet name; placeholders and local/devnet/regtest/simnet/private/fake labels are rejected",
             "attested_at": "UTC timestamp in YYYY-MM-DDTHH:MM:SSZ form; future timestamps are rejected",
-            "attestor": "real release signer or deployer identity; placeholder, example, and unknown tokens are rejected",
+            "attestor": "real release signer or deployer identity; placeholder, local/devnet/fake/internal, example, and unknown tokens are rejected",
             "release.package": "novaseal",
             "release.version": "exact NovaSeal release version 0.0.1-v0-mvp",
             "release.manifest_commit": "40-character hex source commit matching the reviewed TCB repo_commit",
@@ -151,7 +151,7 @@ def external_tcb_case(template: dict[str, Any], tcb: dict[str, Any]) -> dict[str
             "request_handoff.group",
         ],
         "field_constraints": {
-            "reviewer": "real external reviewer identity; placeholder, example, and unknown tokens are rejected",
+            "reviewer": "real external reviewer identity; placeholder, local/devnet/fake/internal, example, and unknown tokens are rejected",
             "review_date": "UTC date in YYYY-MM-DD form; future dates are rejected",
             "review_scope": "exact BIP340 verifier, RISC-V shell, IPC envelope, and artifact/CellDep pinning scope",
             "verifier_id": "btc.bip340.v0",
@@ -159,7 +159,7 @@ def external_tcb_case(template: dict[str, Any], tcb: dict[str, Any]) -> dict[str
             "artifact_hash": "0x-prefixed 32-byte non-placeholder BIP340 runtime verifier artifact hash",
             "artifact_hash_algorithm": "sha256",
             "source_tree_sha256": "0x-prefixed 32-byte non-placeholder SHA-256 source tree hash",
-            "report_uri": "HTTPS URI for the public review report or source-controlled review commit; example domains are rejected",
+            "report_uri": "HTTPS URI for the public review report or source-controlled review commit; example, loopback, private, and reserved hosts are rejected",
             "request_handoff.bundle": "target/novaseal-external-evidence-handoff-bundle.json",
             "request_handoff.bundle_hash": "0x-prefixed 32-byte hash of the NovaSeal external evidence handoff bundle",
             "request_handoff.bundle_hash_algorithm": "blake2b-256(person=NovaExtHandoff)",

@@ -3,6 +3,7 @@ use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::ErrorKind;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -332,7 +333,10 @@ const EXPECTED_PUBLIC_BTC_SPV_HANDOFF_FIELDS: &[&str] = EXPECTED_BTC_SPV_ADAPTER
 const EXPECTED_BTC_SPV_FIELD_CONSTRAINTS: &[(&str, &str)] = &[
     ("network", "explicit public mainnet/testnet name; placeholders and local/devnet/regtest/simnet/private/fake labels are rejected"),
     ("generated_at", "UTC timestamp in YYYY-MM-DDTHH:MM:SSZ form; future timestamps are rejected"),
-    ("evidence_provider", "real external provider identity; placeholder, example, and unknown tokens are rejected"),
+    (
+        "evidence_provider",
+        "real external provider identity; placeholder, local/devnet/fake/internal, example, and unknown tokens are rejected",
+    ),
     ("ckb_live_tx_hash", "0x-prefixed 32-byte CKB live transaction hash matching the current NovaSeal service-builder case"),
     ("live_report_hash", "0x-prefixed 32-byte hash of the current NovaSeal live devnet report for this profile"),
     ("service_builder_case_hash", "0x-prefixed 32-byte hash of the current NovaSeal service-builder case for this profile"),
@@ -390,7 +394,10 @@ const EXPECTED_BTC_SPV_FIELD_CONSTRAINTS: &[(&str, &str)] = &[
     ("spv_client_cell_dep.data_hash", "0x-prefixed 32-byte non-placeholder SPV client data hash"),
     ("spv_client_cell_dep.dep_type", "code"),
     ("spv_client_cell_dep.hash_type", "data, data1, or type CKB script hash type"),
-    ("source_service.name", "real external SPV service identity; placeholder, example, and unknown tokens are rejected"),
+    (
+        "source_service.name",
+        "real external SPV service identity; placeholder, local/devnet/fake/internal, example, and unknown tokens are rejected",
+    ),
     ("source_service.commit", "40-character hex service source commit"),
     ("source_service.report_hash", "0x-prefixed 32-byte non-placeholder SPV service report hash"),
     ("request_handoff.bundle", "target/novaseal-external-evidence-handoff-bundle.json"),
@@ -423,7 +430,10 @@ const EXPECTED_PUBLIC_CELLDEP_FIELD_CONSTRAINTS: &[(&str, &str)] = &[
         "explicit public CKB mainnet/testnet name; placeholders and local/devnet/regtest/simnet/private/fake labels are rejected",
     ),
     ("attested_at", "UTC timestamp in YYYY-MM-DDTHH:MM:SSZ form; future timestamps are rejected"),
-    ("attestor", "real release signer or deployer identity; placeholder, example, and unknown tokens are rejected"),
+    (
+        "attestor",
+        "real release signer or deployer identity; placeholder, local/devnet/fake/internal, example, and unknown tokens are rejected",
+    ),
     ("release.package", "novaseal"),
     ("release.version", "exact NovaSeal release version 0.0.1-v0-mvp"),
     ("release.manifest_commit", "40-character hex source commit matching the reviewed TCB repo_commit"),
@@ -465,7 +475,10 @@ const EXPECTED_EXTERNAL_TCB_REQUIRED_FIELDS: &[&str] = &[
     "request_handoff.group",
 ];
 const EXPECTED_EXTERNAL_TCB_FIELD_CONSTRAINTS: &[(&str, &str)] = &[
-    ("reviewer", "real external reviewer identity; placeholder, example, and unknown tokens are rejected"),
+    (
+        "reviewer",
+        "real external reviewer identity; placeholder, local/devnet/fake/internal, example, and unknown tokens are rejected",
+    ),
     ("review_date", "UTC date in YYYY-MM-DD form; future dates are rejected"),
     ("review_scope", "exact BIP340 verifier, RISC-V shell, IPC envelope, and artifact/CellDep pinning scope"),
     ("verifier_id", "btc.bip340.v0"),
@@ -473,7 +486,10 @@ const EXPECTED_EXTERNAL_TCB_FIELD_CONSTRAINTS: &[(&str, &str)] = &[
     ("artifact_hash", "0x-prefixed 32-byte non-placeholder BIP340 runtime verifier artifact hash"),
     ("artifact_hash_algorithm", "sha256"),
     ("source_tree_sha256", "0x-prefixed 32-byte non-placeholder SHA-256 source tree hash"),
-    ("report_uri", "HTTPS URI for the public review report or source-controlled review commit; example domains are rejected"),
+    (
+        "report_uri",
+        "HTTPS URI for the public review report or source-controlled review commit; example, loopback, private, and reserved hosts are rejected",
+    ),
     ("request_handoff.bundle", "target/novaseal-external-evidence-handoff-bundle.json"),
     ("request_handoff.bundle_hash", "0x-prefixed 32-byte hash of the NovaSeal external evidence handoff bundle"),
     ("request_handoff.bundle_hash_algorithm", "blake2b-256(person=NovaExtHandoff)"),
@@ -518,16 +534,25 @@ const EXPECTED_RWA_LEGAL_REVIEW_REQUIRED_FIELDS: &[&str] = &[
 ];
 const EXPECTED_RWA_LEGAL_REVIEW_FIELD_CONSTRAINTS: &[(&str, &str)] = &[
     ("profile", "rwa-receipt-profile-v0"),
-    ("reviewer", "real external legal or registry reviewer identity; placeholder, example, and unknown tokens are rejected"),
+    (
+        "reviewer",
+        "real external legal or registry reviewer identity; placeholder, local/devnet/fake/internal, example, and unknown tokens are rejected",
+    ),
     ("review_date", "UTC date in YYYY-MM-DD form; future dates are rejected"),
     ("review_scope", "exact RWA receipt legal-title, custody, registry-state, oracle-fact, and enforceability review scope"),
-    ("registry.authority", "real registry or custodian authority identity; placeholder, example, and unknown tokens are rejected"),
-    ("registry.jurisdiction", "explicit real-world jurisdiction; placeholder, example, and unknown tokens are rejected"),
+    (
+        "registry.authority",
+        "real registry or custodian authority identity; placeholder, local/devnet/fake/internal, example, and unknown tokens are rejected",
+    ),
+    (
+        "registry.jurisdiction",
+        "explicit real-world jurisdiction; placeholder, local/devnet/fake/internal, example, and unknown tokens are rejected",
+    ),
     ("registry.registry_report_hash", "0x-prefixed 32-byte non-placeholder hash of the external registry/legal review report"),
     ("profile_source_tree_sha256", "0x-prefixed 32-byte non-placeholder SHA-256 hash of the RWA profile source tree"),
     (
         "report_uri",
-        "HTTPS URI for the public legal/registry review report or source-controlled review commit; example domains are rejected",
+        "HTTPS URI for the public legal/registry review report or source-controlled review commit; example, loopback, private, and reserved hosts are rejected",
     ),
     ("request_handoff.bundle", "target/novaseal-external-evidence-handoff-bundle.json"),
     ("request_handoff.bundle_hash", "0x-prefixed 32-byte hash of the NovaSeal external evidence handoff bundle"),
@@ -5452,8 +5477,11 @@ fn validate_rwa_legal_registry_review(repo_root: &Path, rel_path: &str, external
             == json_array_strings(handoff_expected_values, "/review_scope"),
         "registry_fields_exact": exact_object_keys(&registry, EXPECTED_RWA_LEGAL_REVIEW_REGISTRY_FIELDS),
         "registry_authority_identity": json_pointer_str(&registry, "/authority").is_some_and(is_external_identity),
-        "registry_jurisdiction_present": json_pointer_str(&registry, "/jurisdiction")
-            .is_some_and(|value| value_is_present(&Value::String(value.to_string())) && !contains_placeholder_token(value)),
+        "registry_jurisdiction_present": json_pointer_str(&registry, "/jurisdiction").is_some_and(|value| {
+            value_is_present(&Value::String(value.to_string()))
+                && !contains_placeholder_token(value)
+                && !contains_local_only_token(value)
+        }),
         "registry_report_hash_valid": normalize_hex(json_pointer_str(&registry, "/registry_report_hash")).as_deref().is_some_and(is_hex32),
         "registry_report_hash_non_placeholder": !placeholder_hash(normalize_hex(json_pointer_str(&registry, "/registry_report_hash")).as_deref()),
         "profile_source_tree_sha256_valid": normalize_hex(json_pointer_str(&payload, "/profile_source_tree_sha256")).as_deref().is_some_and(is_hex32),
@@ -6490,7 +6518,7 @@ fn value_is_present(value: &Value) -> bool {
 
 fn is_external_identity(value: &str) -> bool {
     let trimmed = value.trim();
-    trimmed == value && trimmed.len() >= 3 && !contains_placeholder_token(trimmed)
+    trimmed == value && trimmed.len() >= 3 && !contains_placeholder_token(trimmed) && !contains_local_only_token(trimmed)
 }
 
 fn is_public_network(value: &str) -> bool {
@@ -6532,6 +6560,11 @@ fn contains_placeholder_token(value: &str) -> bool {
     .any(|token| lower.contains(token))
 }
 
+fn contains_local_only_token(value: &str) -> bool {
+    let lower = value.to_ascii_lowercase();
+    ["local", "devnet", "regtest", "simnet", "fake", "internal", "mock"].iter().any(|token| lower.contains(token))
+}
+
 fn is_https_report_uri(value: &str) -> bool {
     if value != value.trim() || contains_placeholder_token(value) || value.bytes().any(|byte| byte.is_ascii_whitespace()) {
         return false;
@@ -6539,12 +6572,119 @@ fn is_https_report_uri(value: &str) -> bool {
     let Some(rest) = value.strip_prefix("https://") else {
         return false;
     };
-    let host = rest.split('/').next().unwrap_or_default();
-    !host.is_empty()
-        && host.contains('.')
-        && !host.eq_ignore_ascii_case("localhost")
-        && !host.ends_with(".invalid")
-        && !host.ends_with(".local")
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    let Some(host) = report_uri_host(authority) else {
+        return false;
+    };
+    is_public_report_host(host)
+}
+
+fn report_uri_host(authority: &str) -> Option<&str> {
+    if authority.is_empty() || authority.contains('@') {
+        return None;
+    }
+    if let Some(rest) = authority.strip_prefix('[') {
+        let (host, suffix) = rest.split_once(']')?;
+        if !valid_optional_port_suffix(suffix) {
+            return None;
+        }
+        return Some(host);
+    }
+    if authority.matches(':').count() > 1 {
+        return None;
+    }
+    match authority.split_once(':') {
+        Some((host, port)) if valid_port(port) && !host.is_empty() => Some(host),
+        Some(_) => None,
+        None => Some(authority),
+    }
+}
+
+fn valid_optional_port_suffix(suffix: &str) -> bool {
+    if suffix.is_empty() {
+        return true;
+    }
+    suffix.strip_prefix(':').is_some_and(valid_port)
+}
+
+fn valid_port(port: &str) -> bool {
+    port.parse::<u16>().is_ok_and(|value| value != 0)
+}
+
+fn is_public_report_host(host: &str) -> bool {
+    if host != host.trim() || host.is_empty() || contains_placeholder_token(host) {
+        return false;
+    }
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        return is_public_report_ip(ip);
+    }
+    let lower = host.to_ascii_lowercase();
+    if lower == "localhost"
+        || lower.ends_with(".localhost")
+        || lower.ends_with(".invalid")
+        || lower.ends_with(".local")
+        || lower.ends_with(".test")
+        || lower.starts_with('.')
+        || lower.ends_with('.')
+        || !lower.contains('.')
+    {
+        return false;
+    }
+    let mut has_alpha = false;
+    for label in lower.split('.') {
+        if label.is_empty()
+            || label.len() > 63
+            || label.starts_with('-')
+            || label.ends_with('-')
+            || !label.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        {
+            return false;
+        }
+        has_alpha |= label.bytes().any(|byte| byte.is_ascii_alphabetic());
+    }
+    has_alpha
+}
+
+fn is_public_report_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(value) => is_public_report_ipv4(value),
+        IpAddr::V6(value) => is_public_report_ipv6(value),
+    }
+}
+
+fn is_public_report_ipv4(ip: Ipv4Addr) -> bool {
+    let [a, b, c, _d] = ip.octets();
+    if a == 0
+        || a == 10
+        || a == 127
+        || a >= 224
+        || (a == 100 && (64..=127).contains(&b))
+        || (a == 169 && b == 254)
+        || (a == 172 && (16..=31).contains(&b))
+        || (a == 192 && b == 0 && c == 0)
+        || (a == 192 && b == 0 && c == 2)
+        || (a == 192 && b == 168)
+        || (a == 198 && (18..=19).contains(&b))
+        || (a == 198 && b == 51 && c == 100)
+        || (a == 203 && b == 0 && c == 113)
+    {
+        return false;
+    }
+    true
+}
+
+fn is_public_report_ipv6(ip: Ipv6Addr) -> bool {
+    let segments = ip.segments();
+    if ip.is_unspecified()
+        || ip.is_loopback()
+        || ip.is_multicast()
+        || (segments[0] & 0xfe00) == 0xfc00
+        || (segments[0] & 0xffc0) == 0xfe80
+        || (segments[0] == 0x2001 && segments[1] == 0x0db8)
+    {
+        return false;
+    }
+    true
 }
 
 fn is_utc_timestamp_z(value: &str) -> bool {
@@ -9212,6 +9352,14 @@ mod tests {
         assert_eq!(json_pointer_str(&failed_placeholder_reviewer, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&failed_placeholder_reviewer, "/checks/reviewer_identity"));
 
+        let mut local_jurisdiction = evidence.clone();
+        local_jurisdiction["registry"]["jurisdiction"] = json!("local-devnet-registry");
+        std::fs::write(&evidence_path, serde_json::to_vec_pretty(&local_jurisdiction).unwrap()).unwrap();
+        let failed_local_jurisdiction =
+            validate_rwa_legal_registry_review(temp.path(), RWA_LEGAL_REGISTRY_REVIEW_EVIDENCE, &handoff).unwrap();
+        assert_eq!(json_pointer_str(&failed_local_jurisdiction, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&failed_local_jurisdiction, "/checks/registry_jurisdiction_present"));
+
         let mut placeholder_registry_hash = evidence.clone();
         placeholder_registry_hash["registry"]["registry_report_hash"] = json!(format!("0x{}", "00".repeat(32)));
         std::fs::write(&evidence_path, serde_json::to_vec_pretty(&placeholder_registry_hash).unwrap()).unwrap();
@@ -9219,6 +9367,14 @@ mod tests {
             validate_rwa_legal_registry_review(temp.path(), RWA_LEGAL_REGISTRY_REVIEW_EVIDENCE, &handoff).unwrap();
         assert_eq!(json_pointer_str(&failed_placeholder_registry_hash, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&failed_placeholder_registry_hash, "/checks/registry_report_hash_non_placeholder"));
+
+        let mut private_report_uri = evidence.clone();
+        private_report_uri["report_uri"] = json!("https://10.0.0.7/novaseal-rwa-legal-registry-review");
+        std::fs::write(&evidence_path, serde_json::to_vec_pretty(&private_report_uri).unwrap()).unwrap();
+        let failed_private_report_uri =
+            validate_rwa_legal_registry_review(temp.path(), RWA_LEGAL_REGISTRY_REVIEW_EVIDENCE, &handoff).unwrap();
+        assert_eq!(json_pointer_str(&failed_private_report_uri, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&failed_private_report_uri, "/checks/report_uri_https"));
 
         let mut stale_handoff_hash = evidence.clone();
         stale_handoff_hash["request_handoff"]["bundle_hash"] = json!(format!("0x{}", "88".repeat(32)));
@@ -9600,6 +9756,13 @@ mod tests {
         let failed_unknown_provider = validate_btc_spv_evidence(temp.path(), PUBLIC_BTC_SPV_EVIDENCE, &handoff).unwrap();
         assert_eq!(json_pointer_str(&failed_unknown_provider, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&failed_unknown_provider, "/checks/evidence_provider_identity"));
+
+        let mut local_provider = spv_report.clone();
+        local_provider["evidence_provider"] = json!("local-devnet-spv-provider");
+        std::fs::write(proofs.join("public_btc_spv_evidence.json"), serde_json::to_vec_pretty(&local_provider).unwrap()).unwrap();
+        let failed_local_provider = validate_btc_spv_evidence(temp.path(), PUBLIC_BTC_SPV_EVIDENCE, &handoff).unwrap();
+        assert_eq!(json_pointer_str(&failed_local_provider, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&failed_local_provider, "/checks/evidence_provider_identity"));
 
         let mut placeholder_network = spv_report.clone();
         placeholder_network["network"] = json!("testnet-or-mainnet");
@@ -10130,6 +10293,24 @@ mod tests {
         assert_eq!(json_pointer_str(&public_attestor_failed, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&public_attestor_failed, "/checks/attestor_identity"));
 
+        let mut public_local_attestor = public_attestation.clone();
+        public_local_attestor["attestor"] = json!("local-devnet-deployer");
+        std::fs::write(
+            proofs.join("public_shared_cell_dep_attestation.json"),
+            serde_json::to_vec_pretty(&public_local_attestor).unwrap(),
+        )
+        .unwrap();
+        let public_local_attestor_failed = validate_public_attestation(
+            temp.path(),
+            PUBLIC_CELLDEP_ATTESTATION,
+            Some(&artifact_hash),
+            Some(tcb_repo_commit),
+            &handoff,
+        )
+        .unwrap();
+        assert_eq!(json_pointer_str(&public_local_attestor_failed, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&public_local_attestor_failed, "/checks/attestor_identity"));
+
         let mut public_extra = public_attestation.clone();
         public_extra["unexpected_provider_field"] = Value::String("must-fail".to_string());
         std::fs::write(proofs.join("public_shared_cell_dep_attestation.json"), serde_json::to_vec_pretty(&public_extra).unwrap())
@@ -10442,6 +10623,19 @@ mod tests {
         assert_eq!(json_pointer_str(&review_unknown_reviewer_failed, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&review_unknown_reviewer_failed, "/checks/reviewer_identity"));
 
+        let mut review_local_reviewer = external_review.clone();
+        review_local_reviewer["reviewer"] = json!("local-devnet-reviewer");
+        std::fs::write(
+            proofs.join("bip340_external_tcb_review_attestation.json"),
+            serde_json::to_vec_pretty(&review_local_reviewer).unwrap(),
+        )
+        .unwrap();
+        let review_local_reviewer_failed =
+            validate_external_review(temp.path(), EXTERNAL_TCB_ATTESTATION, Some(&artifact_hash), Some(&source_tree_hash), &handoff)
+                .unwrap();
+        assert_eq!(json_pointer_str(&review_local_reviewer_failed, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&review_local_reviewer_failed, "/checks/reviewer_identity"));
+
         let mut review_placeholder_uri = external_review.clone();
         review_placeholder_uri["report_uri"] = json!("REPLACE_WITH_EXTERNAL_REVIEW_REPORT_OR_COMMIT_URI");
         std::fs::write(
@@ -10467,6 +10661,19 @@ mod tests {
                 .unwrap();
         assert_eq!(json_pointer_str(&review_example_uri_failed, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&review_example_uri_failed, "/checks/report_uri_https"));
+
+        let mut review_private_uri = external_review.clone();
+        review_private_uri["report_uri"] = json!("https://192.168.1.1/novaseal-bip340-tcb-review");
+        std::fs::write(
+            proofs.join("bip340_external_tcb_review_attestation.json"),
+            serde_json::to_vec_pretty(&review_private_uri).unwrap(),
+        )
+        .unwrap();
+        let review_private_uri_failed =
+            validate_external_review(temp.path(), EXTERNAL_TCB_ATTESTATION, Some(&artifact_hash), Some(&source_tree_hash), &handoff)
+                .unwrap();
+        assert_eq!(json_pointer_str(&review_private_uri_failed, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&review_private_uri_failed, "/checks/report_uri_https"));
 
         let mut review_extra = external_review.clone();
         review_extra["unexpected_provider_field"] = Value::String("must-fail".to_string());
@@ -11389,6 +11596,58 @@ mod tests {
         assert!(!is_real_tx_hash(&format!("0x{}", "00".repeat(32))));
         assert!(!is_real_tx_hash("0xdead"));
         assert!(!is_real_tx_hash("not-even-hex"));
+    }
+
+    #[test]
+    fn external_identity_rejects_local_only_names() {
+        assert!(is_external_identity("NervosExternalAuditLtd"));
+        for identity in [
+            "REPLACE_WITH_EXTERNAL_REVIEWER",
+            "unknown-reviewer",
+            "local-reviewer",
+            "devnet-provider",
+            "regtest-spv-service",
+            "simnet-attestor",
+            "fake-registry",
+            "internal-review-team",
+            "mock-custodian",
+        ] {
+            assert!(!is_external_identity(identity), "{identity}");
+        }
+    }
+
+    #[test]
+    fn report_uri_must_use_public_https_host() {
+        assert!(is_https_report_uri("https://audits.nervos.org/novaseal-bip340-tcb-review"));
+        assert!(is_https_report_uri("https://audits.nervos.org:443/novaseal-bip340-tcb-review"));
+        assert!(is_https_report_uri("https://audits.nervos.org?report=novaseal"));
+
+        for uri in [
+            "http://audits.nervos.org/novaseal-bip340-tcb-review",
+            "https://localhost/novaseal-bip340-tcb-review",
+            "https://127.0.0.1/novaseal-bip340-tcb-review",
+            "https://10.0.0.7/novaseal-bip340-tcb-review",
+            "https://100.64.0.1/novaseal-bip340-tcb-review",
+            "https://169.254.1.1/novaseal-bip340-tcb-review",
+            "https://172.20.0.1/novaseal-bip340-tcb-review",
+            "https://192.168.1.1/novaseal-bip340-tcb-review",
+            "https://192.0.2.1/novaseal-bip340-tcb-review",
+            "https://198.18.0.1/novaseal-bip340-tcb-review",
+            "https://198.51.100.1/novaseal-bip340-tcb-review",
+            "https://203.0.113.1/novaseal-bip340-tcb-review",
+            "https://[::1]/novaseal-bip340-tcb-review",
+            "https://[fc00::1]/novaseal-bip340-tcb-review",
+            "https://[fe80::1]/novaseal-bip340-tcb-review",
+            "https://[2001:db8::1]/novaseal-bip340-tcb-review",
+            "https://audits.nervos.org:0/novaseal-bip340-tcb-review",
+            "https://audits.nervos.org:65536/novaseal-bip340-tcb-review",
+            "https://reviewer@audits.nervos.org/novaseal-bip340-tcb-review",
+            "https://audits.nervos.local/novaseal-bip340-tcb-review",
+            "https://audits.nervos.test/novaseal-bip340-tcb-review",
+            "https://123.456/novaseal-bip340-tcb-review",
+        ] {
+            assert!(!is_https_report_uri(uri), "{uri}");
+        }
     }
 
     #[test]
