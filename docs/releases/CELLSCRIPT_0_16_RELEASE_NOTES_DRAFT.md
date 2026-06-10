@@ -70,16 +70,21 @@ target/debug/cellc certify --plugin novaseal-profile-v0 --repo-root . --json
 ```
 
 The devnet wrapper writes
-`target/novaseal-devnet-stateful-acceptance.json` and the latest audited run
-reported:
+`target/novaseal-devnet-stateful-acceptance.json`. A current commit can only
+claim local NovaSeal devnet acceptance when the freshly regenerated report
+prints:
 
 ```text
 status=passed
 live_devnet_rpc_executed=true
+local_blockers=0
+acceptance_blockers=0
 blockers=0
 ```
 
-The certification report returns `status: "passed"` with
+Historical reports from older commits are not current evidence after source or
+certification-gate changes. The certification report must return
+`status: "passed"` with
 `certification_level: "public_ecosystem_profile_certification_local_ready"`.
 It also keeps the production boundary honest:
 

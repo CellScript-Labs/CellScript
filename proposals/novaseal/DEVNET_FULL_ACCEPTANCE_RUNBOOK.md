@@ -5,9 +5,9 @@ acceptance from a clean checkout. Every profile doc links back here.
 
 ---
 
-## 0. Latest Evidence Snapshot
+## 0. Evidence Snapshot Boundary
 
-Last full 0.16 acceptance refresh: **2026-06-10**.
+Last full historical 0.16 acceptance refresh: **2026-06-10**.
 
 - The 2026-06-10 `nightly-0.16` run regenerated the core live devnet report,
   Agreement live devnet report, all six planned-profile live reports, wallet
@@ -15,14 +15,31 @@ Last full 0.16 acceptance refresh: **2026-06-10**.
   service-builder fixtures, BTC SPV adapter, external attestation adapter, and
   external evidence handoff bundle.
 - `./scripts/novaseal_devnet_stateful_acceptance.sh --pretty` wrote
-  `target/novaseal-devnet-stateful-acceptance.json` with `status=passed`,
-  `live_devnet_rpc_executed=true`, and `blockers=0`.
+  `target/novaseal-devnet-stateful-acceptance.json` with historical
+  `status=passed`, `live_devnet_rpc_executed=true`, and `blockers=0` for that
+  exact commit.
 - `target/debug/cellc certify --plugin novaseal-profile-v0 --repo-root . --json`
-  returned `status: "passed"` and
-  `certification_level: "public_ecosystem_profile_certification_local_ready"`.
+  returned historical `status: "passed"` and
+  `certification_level: "public_ecosystem_profile_certification_local_ready"`
+  for that exact commit.
 - Production readiness still reports `production_ready: false` because the four
   external attestations in Section 9 are intentionally outside this local
   runbook.
+
+For a changed checkout, the historical reports are not current evidence. The
+aggregate gate must be rerun and must report all of:
+
+```text
+status=passed
+live_devnet_rpc_executed=true
+local_blockers=0
+acceptance_blockers=0
+blockers=0
+```
+
+Any `ready_to_run_live_devnet`, `ready_to_wire_live_devnet`, stale provenance,
+missing public BTC SPV evidence, or failed Fiber endpoint coverage is a blocker
+for current-commit acceptance, even when local static blockers are zero.
 
 Previous full post-Phase-5 refresh: **2026-06-05**.
 

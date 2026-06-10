@@ -2189,11 +2189,18 @@ fn build_stateful_acceptance_report(repo_root: &Path, agreement_conformance: &Va
         ],
         "checks": business_scenario_checks,
     });
-    let all_blockers = scenarios
+    let local_blockers = scenarios
         .iter()
         .flat_map(|scenario| scenario.get("blockers").and_then(Value::as_array).into_iter().flatten().cloned())
         .collect::<Vec<_>>();
-    let status = if !all_blockers.is_empty() {
+    let acceptance_blockers = stateful_live_acceptance_blockers(
+        &scenarios,
+        profile_coverage_passed,
+        business_scenario_coverage_passed,
+        &external_endpoint_coverage,
+    );
+    let all_blockers = local_blockers.iter().cloned().chain(acceptance_blockers.iter().cloned()).collect::<Vec<_>>();
+    let status = if !local_blockers.is_empty() {
         "blocked"
     } else if scenarios.iter().all(|scenario| json_pointer_str(scenario, "/status") == Some("passed"))
         && profile_coverage_passed
@@ -2246,6 +2253,10 @@ fn build_stateful_acceptance_report(repo_root: &Path, agreement_conformance: &Va
         },
         "external_endpoint_coverage": external_endpoint_coverage,
         "scenarios": scenarios,
+        "local_blocker_count": local_blockers.len(),
+        "local_blockers": local_blockers,
+        "acceptance_blocker_count": acceptance_blockers.len(),
+        "acceptance_blockers": acceptance_blockers,
         "blocker_count": all_blockers.len(),
         "blockers": all_blockers,
         "next_engineering_step": if status == "passed" {
@@ -2258,6 +2269,55 @@ fn build_stateful_acceptance_report(repo_root: &Path, agreement_conformance: &Va
             "language": "rust",
         },
     }))
+}
+
+fn stateful_live_acceptance_blockers(
+    scenarios: &[Value],
+    profile_coverage_passed: bool,
+    business_scenario_coverage_passed: bool,
+    external_endpoint_coverage: &Value,
+) -> Vec<Value> {
+    let mut blockers = Vec::new();
+    for scenario in scenarios {
+        if json_pointer_str(scenario, "/status") == Some("passed") {
+            continue;
+        }
+        let name = json_pointer_str(scenario, "/name").unwrap_or("unknown");
+        let status = json_pointer_str(scenario, "/status").unwrap_or("missing");
+        blockers.push(json!({
+            "blocker": format!("NovaSeal live devnet scenario `{name}` has not passed ({status})."),
+            "scenario": name,
+            "status": status,
+            "live_devnet_rpc_executed": json_pointer_bool(scenario, "/live_devnet_rpc_executed"),
+            "stateful_lifecycle_executed": json_pointer_bool(scenario, "/stateful_lifecycle_executed"),
+            "required_for": "full NovaSeal stateful devnet acceptance",
+        }));
+    }
+    if !profile_coverage_passed {
+        blockers.push(json!({
+            "blocker": "NovaSeal required profile coverage has not passed.",
+            "dimension": "profile_coverage",
+            "required_for": "multi-profile NovaSeal V1 acceptance",
+        }));
+    }
+    if !business_scenario_coverage_passed {
+        blockers.push(json!({
+            "blocker": "NovaSeal required business scenario coverage has not passed.",
+            "dimension": "business_scenario_coverage",
+            "required_for": "multi-scenario NovaSeal V1 acceptance",
+        }));
+    }
+    if json_pointer_str(external_endpoint_coverage, "/status") != Some("passed") {
+        blockers.push(json!({
+            "blocker": "NovaSeal BTC/Fiber external endpoint coverage has not passed.",
+            "dimension": "external_endpoint_coverage",
+            "status": json_pointer_str(external_endpoint_coverage, "/status").unwrap_or("missing"),
+            "btc_status": json_pointer_str(external_endpoint_coverage, "/btc/status").unwrap_or("missing"),
+            "fiber_status": json_pointer_str(external_endpoint_coverage, "/fiber/status").unwrap_or("missing"),
+            "required_for": "real BTC SPV and Fiber endpoint production acceptance",
+        }));
+    }
+    blockers
 }
 
 #[derive(Clone)]
@@ -11041,6 +11101,33 @@ mod tests {
 
         report["business_scenario_coverage"]["status"] = Value::String("failed".to_string());
         assert!(!stateful_acceptance_passed(&report));
+    }
+
+    #[test]
+    fn live_acceptance_blockers_include_unrun_devnet_and_external_endpoint_gaps() {
+        let scenarios = vec![json!({
+            "name": "fiber_candidate_settlement",
+            "status": "ready_to_wire_live_devnet",
+            "live_devnet_rpc_executed": false,
+            "stateful_lifecycle_executed": false,
+        })];
+        let external_endpoint_coverage = json!({
+            "status": "failed",
+            "btc": {"status": "external_required"},
+            "fiber": {"status": "failed"},
+        });
+
+        let blockers = stateful_live_acceptance_blockers(&scenarios, false, false, &external_endpoint_coverage);
+
+        assert_eq!(blockers.len(), 4);
+        assert_eq!(json_pointer_str(&blockers[0], "/scenario"), Some("fiber_candidate_settlement"));
+        assert!(!json_pointer_bool(&blockers[0], "/live_devnet_rpc_executed"));
+        assert!(blockers.iter().any(|blocker| json_pointer_str(blocker, "/dimension") == Some("profile_coverage")));
+        assert!(blockers.iter().any(|blocker| json_pointer_str(blocker, "/dimension") == Some("business_scenario_coverage")));
+        let endpoint =
+            blockers.iter().find(|blocker| json_pointer_str(blocker, "/dimension") == Some("external_endpoint_coverage")).unwrap();
+        assert_eq!(json_pointer_str(endpoint, "/btc_status"), Some("external_required"));
+        assert_eq!(json_pointer_str(endpoint, "/fiber_status"), Some("failed"));
     }
 
     fn write_fiber_workflow_fixture_files(repo_root: &Path, fiber_repo: &Path, suite: &str) {

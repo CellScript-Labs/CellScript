@@ -61,9 +61,20 @@ def field(name):
         return "true" if value else "false"
     return str(value)
 
-print("\t".join([field("status"), field("live_devnet_rpc_executed"), field("blocker_count")]))
+print(
+    "\t".join(
+        [
+            field("status"),
+            field("live_devnet_rpc_executed"),
+            field("local_blocker_count"),
+            field("acceptance_blocker_count"),
+            field("blocker_count"),
+        ]
+    )
+)
 PY
 )"
-IFS=$'\t' read -r status live_devnet_rpc_executed blockers <<< "$summary"
-printf 'wrote %s status=%s live_devnet_rpc_executed=%s blockers=%s\n' "$REPORT" "$status" "$live_devnet_rpc_executed" "$blockers"
+IFS=$'\t' read -r status live_devnet_rpc_executed local_blockers acceptance_blockers blockers <<< "$summary"
+printf 'wrote %s status=%s live_devnet_rpc_executed=%s local_blockers=%s acceptance_blockers=%s blockers=%s\n' \
+  "$REPORT" "$status" "$live_devnet_rpc_executed" "$local_blockers" "$acceptance_blockers" "$blockers"
 exit "$cert_status"

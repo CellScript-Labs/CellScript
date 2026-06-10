@@ -1,10 +1,11 @@
 # NovaSeal v0 MVP Skeleton — Audit Status
 
-**Date of this snapshot**: 2026-06-10
+**Date of this snapshot**: 2026-06-11
 **Package**: `proposals/novaseal/v0-mvp-skeleton`
-**Status**: local V1 and production-prep evidence is gate-checked through the
-full devnet runbook; production readiness is still blocked by external/public
-facts.
+**Status**: historical local V1 and production-prep evidence exists from the
+full devnet runbook, but it is not current for a changed checkout until every
+live report is regenerated on the exact commit being certified. Production
+readiness is still blocked by external/public facts.
 
 This document is the current evidence ledger for NovaSeal core. It intentionally
 separates generated audit evidence, local verifier harness evidence, live local
@@ -22,7 +23,7 @@ Package and script checks:
 - `cellc src/nova_receipt_type.cell --target-profile ckb` passes.
 - `python3 scripts/novaseal_wallet_signing_vectors.py --pretty` passes.
 - `python3 scripts/novaseal_bip340_tcb_review.py --pretty` passes local review gates and records that external attestation is still required.
-- `target/debug/cellc certify --plugin novaseal-profile-v0 --repo-root . --json` reports `status=passed`, `public_ecosystem_profile_certification_local_ready`, and `local_production_prep_ready_external_attestation_required` in the Rust-generated production-gate report.
+- A current `target/debug/cellc certify --plugin novaseal-profile-v0 --repo-root . --json` run is only locally acceptable when its generated reports are fresh for the exact git commit and its stateful acceptance report has `status=passed`, `live_devnet_rpc_executed=true`, `acceptance_blockers=0`, and `blockers=0`.
 
 Live local devnet:
 
@@ -35,10 +36,10 @@ Live local devnet:
 
 Aggregate stateful gate:
 
-- `scripts/novaseal_devnet_stateful_acceptance.sh --pretty` reports `status=passed`, `live_devnet_rpc_executed=true`, `blockers=0` by delegating to `cellc certify --plugin novaseal-profile-v0`.
+- `scripts/novaseal_devnet_stateful_acceptance.sh --pretty` delegates to `cellc certify --plugin novaseal-profile-v0` and reports both local blockers and live acceptance blockers. It is not a pass unless it prints `status=passed`, `live_devnet_rpc_executed=true`, `acceptance_blockers=0`, and `blockers=0`.
 - The same aggregate gate includes Agreement Profile originate -> repay, originate -> claim, and live negative dry-runs.
 
-Full runbook refresh, 2026-06-10:
+Historical full runbook refresh, 2026-06-10:
 
 - Core live devnet, Agreement live devnet, and all six planned-profile live
   reports passed with real CKB devnet RPC execution.
@@ -52,8 +53,10 @@ Full runbook refresh, 2026-06-10:
   - BTC SPV evidence adapter: `3/3`
   - external attestation adapter: `2/2`
   - external evidence handoff bundle: `4/4`
-- Phase 7 certification passed with local V1 readiness and four external
-  production blockers.
+- Phase 7 certification passed for that commit with local V1 readiness and four
+  external production blockers. Any later source, script, or Rust certification
+  change requires rerunning the live devnet/Fiber/BTC evidence before making the
+  same local-readiness claim for the new commit.
 
 ## Current Generated Audit Surface
 
