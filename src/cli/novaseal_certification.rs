@@ -2494,11 +2494,21 @@ fn fiber_node_execution_summary(repo_root: &Path, report: Option<&Value>) -> Val
         && json_pointer_str(report, "/fiber_repo/commit")
             .is_some_and(|commit| commit.len() == 40 && commit.chars().all(|char| char.is_ascii_hexdigit()))
         && !json_pointer_bool(report, "/fiber_repo/dirty");
-    let count_contract_exact = json_pointer_i64(report, "/workflow_coverage/required_count")
-        == Some(EXPECTED_FIBER_WORKFLOWS.len() as i64)
-        && json_pointer_i64(report, "/workflow_coverage/present_count") == Some(EXPECTED_FIBER_WORKFLOWS.len() as i64)
-        && json_pointer_i64(report, "/workflow_coverage/executed_count") == Some(EXPECTED_FIBER_WORKFLOWS.len() as i64)
-        && json_pointer_i64(report, "/workflow_coverage/passed_execution_count") == Some(EXPECTED_FIBER_WORKFLOWS.len() as i64);
+    let required_count = json_pointer_i64(report, "/workflow_coverage/required_count");
+    let present_count = json_pointer_i64(report, "/workflow_coverage/present_count");
+    let executed_count = json_pointer_i64(report, "/workflow_coverage/executed_count");
+    let passed_execution_count = json_pointer_i64(report, "/workflow_coverage/passed_execution_count");
+    let expected_workflow_count = EXPECTED_FIBER_WORKFLOWS.len() as i64;
+    let count_contract_exact = required_count == Some(expected_workflow_count)
+        && present_count == Some(expected_workflow_count)
+        && executed_count == Some(expected_workflow_count)
+        && passed_execution_count == Some(expected_workflow_count);
+    let partial_execution_contract_exact = match (required_count, executed_count, passed_execution_count) {
+        (Some(required), Some(executed), Some(passed)) => executed > 0 && executed < required && passed == executed,
+        _ => false,
+    };
+    let reported_partial_execution_semantics =
+        !partial_execution_passed_reported || (!all_executed_passed_reported && partial_execution_contract_exact);
     let profiles_exact = exact_string_set(&profiles_covered, EXPECTED_FIBER_NODE_PROFILES);
     let workflow_rows_passed = workflow_suites_exact && duplicate_free_workflow_suites && failed_workflows.is_empty();
     let discovery_ready =
@@ -2507,6 +2517,7 @@ fn fiber_node_execution_summary(repo_root: &Path, report: Option<&Value>) -> Val
         && status_passed
         && clean_expected_repo
         && count_contract_exact
+        && reported_partial_execution_semantics
         && profiles_exact
         && all_executed_passed_reported
         && workflow_rows_passed;
@@ -2518,6 +2529,7 @@ fn fiber_node_execution_summary(repo_root: &Path, report: Option<&Value>) -> Val
         "fiber_repo_git_provenance_verified": fiber_repo_git_verified,
         "runnable_devnet_contract_present": runnable_devnet_contract_present,
         "coverage_counts_exact": count_contract_exact,
+        "reported_partial_execution_semantics": reported_partial_execution_semantics,
         "profiles_covered_exact": profiles_exact,
         "workflow_suites_exact": workflow_suites_exact,
         "duplicate_free_workflow_suites": duplicate_free_workflow_suites,
@@ -2547,7 +2559,7 @@ fn fiber_node_execution_summary(repo_root: &Path, report: Option<&Value>) -> Val
         "expected_workflows": EXPECTED_FIBER_WORKFLOWS.iter().map(|(suite, _)| *suite).collect::<Vec<_>>(),
         "expected_profiles": EXPECTED_FIBER_NODE_PROFILES,
         "discovery_ready": discovery_ready,
-        "partial_execution_passed": partial_execution_passed_reported && !all_executed_passed,
+        "partial_execution_passed": partial_execution_passed_reported && partial_execution_contract_exact && !all_executed_passed,
         "all_required_workflows_executed_passed": all_executed_passed,
         "execution_boundary": "discovery_ready is not live Fiber devnet evidence; all_required_workflows_executed_passed requires exact suite/profile coverage, clean Nervos Fiber provenance, runnable devnet tooling, and per-workflow passed execution logs",
         "required_report": FIBER_NODE_EXPERIMENTS,
@@ -10872,7 +10884,7 @@ mod tests {
                 "passed_execution_count": EXPECTED_FIBER_WORKFLOWS.len(),
                 "all_required_workflows_present": true,
                 "all_required_workflows_executed_passed": true,
-                "partial_execution_passed": true,
+                "partial_execution_passed": false,
             },
             "profiles_covered": EXPECTED_FIBER_NODE_PROFILES,
             "workflows": workflows,
@@ -10902,6 +10914,13 @@ mod tests {
         assert!(json_pointer_bool(&passed, "/workflow_checks/open-use-close-a-channel/evidence_files_exist"));
         assert!(json_pointer_bool(&passed, "/workflow_checks/open-use-close-a-channel/execution_logs_exist"));
         assert!(json_pointer_bool(&passed, "/workflow_checks/cross-chain-hub/bruno_compatibility_patch_files_exist"));
+        assert!(json_pointer_bool(&passed, "/checks/reported_partial_execution_semantics"));
+
+        let mut contradictory_partial = complete_fiber_node_execution_report(&repo_root, &fiber_repo);
+        contradictory_partial["workflow_coverage"]["partial_execution_passed"] = json!(true);
+        let failed_contradictory_partial = fiber_node_execution_summary(&repo_root, Some(&contradictory_partial));
+        assert!(!json_pointer_bool(&failed_contradictory_partial, "/all_required_workflows_executed_passed"));
+        assert!(!json_pointer_bool(&failed_contradictory_partial, "/checks/reported_partial_execution_semantics"));
 
         let mut extra_suite = complete_fiber_node_execution_report(&repo_root, &fiber_repo);
         let mut unexpected_suite = extra_suite["workflows"][0].clone();

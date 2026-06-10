@@ -503,7 +503,7 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
     all_present = present_count == len(REQUIRED_WORKFLOWS)
     all_executed = executed_count == len(REQUIRED_WORKFLOWS)
     all_executed_passed = all_executed and passed_execution_count == len(REQUIRED_WORKFLOWS)
-    partial_execution_passed = 0 < executed_count == passed_execution_count
+    partial_execution_passed = 0 < executed_count < len(REQUIRED_WORKFLOWS) and executed_count == passed_execution_count
     runnable_contract_present = all(
         (fiber_repo / path).is_file()
         for path in (
