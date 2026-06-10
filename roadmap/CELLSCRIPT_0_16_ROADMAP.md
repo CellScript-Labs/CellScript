@@ -1,7 +1,8 @@
 # CellScript v0.16 Roadmap
 
 **Status**: Implemented on `nightly-0.16` for the scoped 0.16 release;
-compiler-freeze hardening is complete for the P0 plus key P1 freeze scope.
+compiler-freeze hardening and proposal-local NovaSeal devnet acceptance are
+complete for the P0 plus key P1 freeze scope.
 **Scope**: Metadata Semantics, Descriptive Standard Compatibility, Production
 Tooling Skeleton, and Rust-comparative compiler hardening.
 **Dependencies**: v0.13, v0.14, and v0.15 complete
@@ -11,8 +12,9 @@ Tooling Skeleton, and Rust-comparative compiler hardening.
 ## Implementation Status
 
 The `nightly-0.16` branch implements the scoped metadata-assurance release.
-It does not claim full production transaction solving, CKB VM compatibility
-execution, stable protocol stdlib implementations, or formal verification.
+It does not claim full production transaction solving, standard-suite CKB VM
+compatibility execution, stable protocol stdlib implementations, or formal
+verification.
 
 After the Rust comparative audit (`RUST_COMPARATIVE_AUDIT.md`), 0.16 also owns
 the freeze-critical compiler hardening needed to make the release credible as a
@@ -31,13 +33,16 @@ completeness and the non-critical comparative-audit cleanup remain 0.17 work.
 | Audit/debug UX | Implemented as metadata/IR reports | `cellc proof-diff`, `profile`, `trace-tx`, and `audit-bundle` | Full CellScript-to-RISC-V source maps |
 | Stdlib release track | Implemented as schema stubs only | `src/stdlib/ckb_protocols/*` descriptors marked `schema-stub` | ABI-compatible protocol stdlib implementations and executable coverage |
 | Compiler-freeze hardening | Implemented for P0 plus key P1 freeze scope | `RUST_COMPARATIVE_AUDIT.md`, IR poison lowering, register contract gate, syscall ABI contract baseline, IR provenance, error-line tests | Remaining comparative-audit cleanup is 0.17 scope |
+| NovaSeal proposal-local acceptance | Implemented as live devnet plus certification evidence | `scripts/novaseal_devnet_stateful_acceptance.sh`, `cellc certify --plugin novaseal-profile-v0`, live profile reports, Fiber report, adapter and handoff reports | External production attestations: BIP340 TCB, public BTC SPV, public/shared CellDep, RWA legal/registry |
 
 Boundary: v0.16 does not claim full formal verification or production CKB
 protocol equivalence. The branch implements metadata consistency checking,
 schema-bound builder evidence, descriptive fixtures, local deployment integrity
-checks, transaction template generation, and compiler-freeze hardening. CKB VM
-execution, real transaction solving, and protocol stdlib implementation are
-0.17 scope; non-critical Rust-comparative compiler cleanup is also 0.17 scope.
+checks, transaction template generation, compiler-freeze hardening, and
+proposal-local NovaSeal devnet/profile certification. Standard compatibility
+CKB VM execution, real transaction solving, and protocol stdlib implementation
+are 0.17 scope; non-critical Rust-comparative compiler cleanup is also 0.17
+scope. NovaSeal production readiness remains blocked on external attestations.
 
 ## Goal
 
@@ -61,6 +66,8 @@ v0.16 answers the next questions within compiler metadata and local tooling:
 - Can wallets/builders/indexers receive stable, schema-bound builder assumptions?
 - Can developers inspect deploy plans, proof diffs, profiles, tx traces, and
   audit bundles before moving to CKB VM evidence?
+- Can a proposal package such as NovaSeal carry live devnet, profile, adapter,
+  handoff, and certification evidence without overclaiming production?
 
 ---
 
@@ -105,6 +112,7 @@ production-equivalence release. Concretely:
 | Full `cellc explain-macro` source maps | macro provenance appears in ProofPlan/audit bundle records | source-to-expansion-to-code mapping |
 | Non-TYPE-ID global uniqueness proof | local anchors and builder/indexer assumptions are explicit | global uniqueness certification where possible |
 | Standard CKB compatibility fixtures | descriptive accepted/rejected fixture suite | executable CKB VM fixture runner |
+| NovaSeal BTC-facing profile evidence | live CKB devnet stateful reports plus public BTC SPV adapter/handoff contract | externally attested public BTC SPV reports |
 
 ---
 
@@ -609,6 +617,13 @@ v0.16 can ship when the scoped metadata/tooling release satisfies:
   baseline
 - key P1 audit hardening is present: instruction/terminator provenance wrappers
   and `expect-error-line:N:TEXT` diagnostics tests
+- NovaSeal proposal-local acceptance reports `status=passed`,
+  `live_devnet_rpc_executed=true`, and `blockers=0` while preserving external
+  production blockers in `cellc certify --plugin novaseal-profile-v0`
+- public BTC SPV evidence for NovaSeal BTC-facing profiles is bound to live CKB
+  report hashes, service-builder hashes, CKB-side BTC commitment hashes, raw
+  BTC transaction material, block-header/Merkle proof checks, confirmation
+  heights, and canonical SPV material hashes
 - all non-critical Rust-comparative audit cleanup is tracked in the 0.17 roadmap
   rather than blocking 0.16 freeze
 - `cargo fmt --all`, `cargo check --locked -p cellscript --all-targets`,

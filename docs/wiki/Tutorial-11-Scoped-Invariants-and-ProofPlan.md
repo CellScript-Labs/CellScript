@@ -282,7 +282,7 @@ CellScript uses a **progressive guarantee** model for invariant enforcement:
 | Stage | What happens to invariants |
 |---|---|
 | Development (default) | Invariants emit `gap:metadata-only` and `runtime-required`. Compilation succeeds. Warnings and builder assumptions are recorded for review. |
-| Pre-production (`--primitive-compat 0.16`) | Strict soundness rejects any ProofPlan record that is still `metadata-only` or `runtime-required` (PP0150). Every declared invariant must have matching action evidence or compilation fails. |
+| Pre-production (`--primitive-strict 0.16`) | Strict soundness rejects any ProofPlan record that is still `metadata-only` or `runtime-required` (PP0150). Every declared invariant must have matching action evidence or compilation fails. |
 | CI gate (`--deny-runtime-obligations`) | Additionally rejects unmatched invariant action coverage, runtime-required transaction invariants, and partial ProofPlan gaps. |
 
 Under strict mode, the compiler enforces the following invariant-specific
@@ -377,10 +377,10 @@ For package-level strict gates, run the check from a directory that contains
 
 ```bash
 cd path/to/your-cellscript-package
-cellc check --all-targets --target-profile ckb --production --primitive-compat 0.16
+cellc check --all-targets --target-profile ckb --production --primitive-strict 0.16
 ```
 
-Under `--primitive-compat 0.16`, strict soundness rejects invariants that
+Under `--primitive-strict 0.16`, strict soundness rejects invariants that
 remain `metadata-only` or `runtime-required` (PP0150). This means every
 declared invariant must have corresponding action evidence or the build fails.
 See *Strict Mode and Gradual Enforcement* for the full rule set.
@@ -404,4 +404,6 @@ commands unless you create a `Cell.toml` there.
 - Use `Tutorial-08-Bundled-Example-Contracts` to see production-oriented example
   contracts.
 - Read `docs/releases/CELLSCRIPT_0_15_RELEASE_NOTES.md` for the release boundary.
-- Read `roadmap/CELLSCRIPT_0_16_ROADMAP.md` for future ProofPlan soundness work.
+- Read `roadmap/CELLSCRIPT_0_16_ROADMAP.md` and
+  `docs/releases/CELLSCRIPT_0_16_RELEASE_NOTES_DRAFT.md` for the implemented
+  0.16 ProofPlan soundness and metadata-assurance boundary.

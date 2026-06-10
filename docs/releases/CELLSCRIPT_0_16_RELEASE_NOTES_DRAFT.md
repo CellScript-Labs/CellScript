@@ -1,8 +1,8 @@
 # CellScript 0.16 Release Notes Draft
 
-Status: freeze-complete branch draft for `nightly-0.16`.
+Status: devnet-accepted branch draft for `nightly-0.16`.
 
-Updated: 2026-06-01.
+Updated: 2026-06-10.
 
 CellScript 0.16 turns the v0.15 ProofPlan audit surface into a metadata
 assurance toolchain. The release adds operational semantics, ProofPlan
@@ -16,10 +16,11 @@ instruction-level IR provenance, reserved-register contract verification,
 checked syscall ABI baselines, and line-exact diagnostic regression tests.
 
 General production-completeness items such as executable CKB VM fixture
-execution, full transaction solving, source-to-assembly maps, and protocol
-stdlib implementations are deliberately deferred to 0.17. This does not negate
-proposal-local evidence such as NovaSeal's local CKB VM and full transaction
-harness runs.
+execution for the standard compatibility suite, full transaction solving,
+source-to-assembly maps, and protocol stdlib implementations are deliberately
+deferred to 0.17. This does not negate proposal-local evidence such as
+NovaSeal's local CKB VM, full transaction harness, live devnet, profile, Fiber,
+and certification runs.
 
 ## Highlights
 
@@ -57,6 +58,56 @@ the NovaSeal proposal-local bundle. PP0201 is scoped to executing
 `Script.args` fields only, so it no longer reports output lock args.
 
 **Note**: This is a metadata consistency checker, not a formal proof.
+
+### NovaSeal Devnet And Profile Certification
+
+The `nightly-0.16` branch also carries the NovaSeal proposal-local acceptance
+bundle. The current local acceptance boundary is:
+
+```bash
+./scripts/novaseal_devnet_stateful_acceptance.sh --pretty
+target/debug/cellc certify --plugin novaseal-profile-v0 --repo-root . --json
+```
+
+The devnet wrapper writes
+`target/novaseal-devnet-stateful-acceptance.json` and the latest audited run
+reported:
+
+```text
+status=passed
+live_devnet_rpc_executed=true
+blockers=0
+```
+
+The certification report returns `status: "passed"` with
+`certification_level: "public_ecosystem_profile_certification_local_ready"`.
+It also keeps the production boundary honest:
+
+```text
+production_ready=false
+v1_status=local_v1_ready_external_attestation_required
+```
+
+Production remains blocked by external BIP340 TCB review, public BTC SPV
+evidence, public/shared CellDep attestation, and RWA legal/registry review.
+Those blockers are intentional; a green devnet/local certification result is
+not a mainnet production statement.
+
+The BTC SPV evidence path now requires concrete transaction evidence. The public
+BTC report must satisfy the current handoff bundle and the certification code
+recomputes or checks:
+
+- live CKB transaction and report hashes for each BTC-facing case;
+- service-builder case, transaction-skeleton, and receipt-binding hashes;
+- CKB-side BTC commitment hashes;
+- raw Bitcoin transaction `txid`/`wtxid` consistency;
+- profile-specific transaction bindings for BTC transaction output, sealed
+  UTXO spend, or dual-seal closure;
+- Bitcoin block-header hash, Merkle root, Merkle branch orientation, observed
+  confirmation heights, and canonical SPV material hash.
+
+Metadata-only or unrelated BTC evidence is rejected by the local certification
+gate before any production claim can be made.
 
 ### Builder Assumption Contract
 
@@ -235,6 +286,26 @@ cargo clippy --locked -p cellscript --all-targets -- -D warnings
 git diff --check
 ```
 
+NovaSeal proposal-local acceptance gate:
+
+```bash
+python3 scripts/novaseal_devnet_stateful_live.py --pretty
+python3 scripts/novaseal_agreement_devnet_stateful_live.py --pretty
+for profile in fungible-xudt rwa-receipt btc-transaction-commitment btc-utxo-seal dual-seal fiber-candidate; do
+  python3 scripts/novaseal_planned_profiles_devnet_stateful_live.py --profile "$profile" --live --pretty
+done
+python3 scripts/novaseal_btc_spv_evidence_adapter.py --pretty
+python3 scripts/novaseal_external_attestation_adapter.py --pretty
+python3 scripts/novaseal_external_evidence_handoff_bundle.py --pretty
+./scripts/novaseal_devnet_stateful_acceptance.sh --pretty
+target/debug/cellc certify --plugin novaseal-profile-v0 --repo-root . --json
+```
+
+The NovaSeal gate is part of the `nightly-0.16` evidence bundle. It proves local
+devnet/profile acceptance for the proposal packages only; it does not convert
+the general 0.16 standard CKB compatibility fixtures into executable CKB VM
+equivalence tests.
+
 ## Deferred To 0.17
 
 The following items are outside the scoped 0.16 release and are tracked by
@@ -273,4 +344,7 @@ The following 0.16 boundaries remain intentional:
   transaction semantic validation;
 - `solve-tx` is a deterministic template emitter, not a final solver;
 - CKB stdlib protocol modules are `schema-stub`, not production-ready modules;
-- CKB dry-run/commit evidence remains the production acceptance layer
+- NovaSeal devnet/profile certification is proposal-local evidence, not a
+  blanket production claim for every CellScript package;
+- CKB dry-run/commit evidence and external attestations remain the production
+  acceptance layer.

@@ -9,7 +9,7 @@
 | BTC txid/wtxid/output tuple binding | source-guard-present |
 | Transition commitment binding | source-guard-present |
 | Committer BIP340 authority | source-guard-present |
-| Public BTC inclusion/finality verification | missing-spv-or-indexer-evidence |
+| Handoff-bound public BTC inclusion/finality SPV verification | missing-external-spv-evidence |
 | Live devnet BTC transaction commitment transition | live-devnet-covered |
 
 ## Fixture Honesty
@@ -21,7 +21,10 @@ evidence is recorded in
 
 ## Production Statement Boundary
 
-Production claims remain blocked by missing public BTC verification evidence,
-missing public/shared CellDep attestation, and missing external BIP340 TCB
-review. Local BTC transaction commitment stateful execution is covered by the
-live devnet runner.
+Production claims remain blocked by missing handoff-bound public BTC SPV
+evidence, missing public/shared CellDep attestation, and missing external
+BIP340 TCB review. The required public BTC report must echo the current live
+CKB and service-builder bindings, carry the CKB-side BTC commitment hash, and
+include recomputable raw transaction, block-header, Merkle, confirmation, and
+output-binding material. Local BTC transaction commitment stateful execution is
+covered by the live devnet runner.

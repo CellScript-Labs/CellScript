@@ -83,6 +83,7 @@ def build_case(operator_case: dict[str, Any]) -> dict[str, Any]:
             "live_report_hash": operator_case.get("live_report_hash"),
             "live_devnet_tx_hash": operator_case.get("live_devnet_tx_hash"),
             "fiber_report_hash": operator_case.get("fiber_report_hash"),
+            "public_btc_anchor": operator_case.get("public_btc_anchor"),
         },
         "production_external_inputs": external_inputs(profile),
     }
@@ -97,6 +98,7 @@ def build_case(operator_case: dict[str, Any]) -> dict[str, Any]:
         "witness_shape_hash": operator_case["witness_shape_hash"],
         "source_tree_hash": operator_case["source_tree_hash"],
         "live_devnet_tx_hash": operator_case.get("live_devnet_tx_hash"),
+        "public_btc_anchor": operator_case.get("public_btc_anchor"),
     }
     response = {
         "schema": "novaseal-service-builder-response-v0.1",
@@ -135,6 +137,10 @@ def build_case(operator_case: dict[str, Any]) -> dict[str, Any]:
         "receipt_binding_hash_present": is_hex32(response["receipt_binding_hash"]),
         "service_queue_key_present": is_hex32(response["service_queue_key"]),
         "external_requirements_named": bool(request["production_external_inputs"]),
+        "public_btc_anchor_bound_when_required": (
+            "public_btc_spv_evidence" not in request["production_external_inputs"]
+            or bool(request["required_live_inputs"].get("public_btc_anchor"))
+        ),
     }
     return {
         "profile": profile,

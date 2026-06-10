@@ -7,7 +7,24 @@ acceptance from a clean checkout. Every profile doc links back here.
 
 ## 0. Latest Evidence Snapshot
 
-Last full post-Phase-5 refresh: **2026-06-05**.
+Last full 0.16 acceptance refresh: **2026-06-10**.
+
+- The 2026-06-10 `nightly-0.16` run regenerated the core live devnet report,
+  Agreement live devnet report, all six planned-profile live reports, wallet
+  vectors, local BIP340 TCB review, Fiber report, operator fixtures,
+  service-builder fixtures, BTC SPV adapter, external attestation adapter, and
+  external evidence handoff bundle.
+- `./scripts/novaseal_devnet_stateful_acceptance.sh --pretty` wrote
+  `target/novaseal-devnet-stateful-acceptance.json` with `status=passed`,
+  `live_devnet_rpc_executed=true`, and `blockers=0`.
+- `target/debug/cellc certify --plugin novaseal-profile-v0 --repo-root . --json`
+  returned `status: "passed"` and
+  `certification_level: "public_ecosystem_profile_certification_local_ready"`.
+- Production readiness still reports `production_ready: false` because the four
+  external attestations in Section 9 are intentionally outside this local
+  runbook.
+
+Previous full post-Phase-5 refresh: **2026-06-05**.
 
 - Phase 5 was rerun from a detached clean-room worktree:
   `/Users/arthur/RustroverProjects/CellScript-cleanrooms/novaseal-phase5-20260605-121420`.
@@ -25,7 +42,7 @@ Last full post-Phase-5 refresh: **2026-06-05**.
   `production_ready: false`, and
   `v1_status: "local_v1_ready_external_attestation_required"`.
 
-This snapshot proves local V1 readiness only. It does not satisfy the four
+These snapshots prove local V1 readiness only. They do not satisfy the four
 external production attestations listed in Section 9.
 
 ---
@@ -72,18 +89,21 @@ you use `--keep-node` for debugging.
 ## 2. Freshness Rule
 
 The Rust certification reducer (`src/cli/novaseal_certification.rs`) enforces
-**content-addressed provenance**, not git-commit matching. A report is fresh
-only when:
+both **content-addressed provenance** and **git-commit matching**. A report is
+fresh only when:
 
 1. The SHA-256 of the tracked source files (.cell, .schema, .toml, .py, .rs)
    matches the `source_tree.sha256` recorded in the report.
 2. The SHA-256 of each tracked artifact (verifier ELF, lifecycle ELF) matches
    the `artifacts.*.sha256` recorded in the report.
+3. The report `provenance.repo_commit` matches the current repository commit.
 
 This means: if you change any tracked source file after generating a report,
 that report becomes stale and certification will fail. You must re-run the
-affected script. Changing untracked files (README, docs not in the source path)
-does **not** break freshness.
+affected script. If you create a new commit after generating reports, those
+reports also become stale even when the changed files are docs outside the
+source hash path. Generate reports after the final commit you intend to
+certify.
 
 **Do not** copy or cherry-pick JSON reports from older checkouts. Generate
 them fresh.
@@ -135,6 +155,7 @@ for profile in fungible-xudt rwa-receipt btc-transaction-commitment \
     --ckb-repo /path/to/ckb \
     --ckb-bin /path/to/ckb/target/debug/ckb \
     --profile "$profile" \
+    --live \
     --pretty
 done
 ```
@@ -312,10 +333,26 @@ BTC integration compiles, deploys, and processes transitions on a CKB devnet.
 It does **not** prove Bitcoin mainnet or testnet inclusion.
 
 Public BTC SPV evidence is an **external production gate** that requires:
-- A real external SPV service operating on public Bitcoin data
-- Non-placeholder `btc_txid`, `btc_block_hash`, `spv_proof_hash`
-- Minimum 6 confirmations
-- Evidence provider with a real identity (not placeholder)
+- a real external SPV service operating on public Bitcoin data;
+- exact profile/scenario cases from
+  `target/novaseal-btc-spv-evidence-adapter.json`;
+- current live CKB transaction and report hashes from the handoff bundle;
+- current service-builder case, transaction-skeleton, and receipt-binding
+  hashes;
+- the current CKB-side BTC commitment hash for each BTC-facing profile;
+- non-placeholder `btc_txid`, `btc_wtxid`, raw `btc_tx_hex`,
+  `btc_block_header`, `btc_block_hash`, Merkle branch, Merkle root, block
+  height, observed tip height, and `spv_proof_hash`;
+- profile-specific transaction binding data: BTC output index/amount for the
+  transaction-commitment profile, sealed UTXO fields for the UTXO-seal profile,
+  and closure spend input for the dual-seal profile;
+- minimum 6 confirmations;
+- an evidence provider with a real identity, not a placeholder.
+
+Certification recomputes or verifies the raw transaction `txid`/`wtxid`, block
+header hash, Merkle-root/header agreement, Merkle branch orientation,
+confirmation count, profile-specific transaction binding, and canonical SPV
+material hash. A hash-only or unrelated SPV assertion is rejected.
 
 Template: `proposals/novaseal/v0-mvp-skeleton/proofs/public_btc_spv_evidence.template.json`
 
@@ -330,13 +367,14 @@ Adapter request: `target/novaseal-btc-spv-evidence-adapter.json`
 | Script exits with `CKB RPC did not become ready` | Port conflict or stale node | Kill old ckb processes; use `--run-dir` for isolation |
 | `artifact_hashes_match: false` | Rebuilt ELF after generating report | Re-run the affected live devnet script |
 | `source_hash_matches: false` | Changed source tracked by provenance | Re-run the affected live devnet script |
+| `repo_commit_matches: false` | Created a new commit after generating reports | Re-run phases 2-6 on the final commit, then phase 7 |
 | Bruno suite timeout | Fiber node slow start | Increase `--timeout-seconds`; check port availability |
 | `unknown service invoicesrpc.Invoices` | LND built without `invoicesrpc routerrpc` | Rebuild LND with those tags |
 | Bruno QuickJS `BigInt` or stream-runtime mismatch | External Fiber Bruno collection expects Node runtime details that Bruno's runner does not expose identically | Let `scripts/novaseal_fiber_node_experiments.py` patch the copied per-suite worktree; do not patch the external Fiber checkout |
 | Early CCH WebSocket `connection refused` logs | Separate CCH service starts before Fiber node WebSocket is ready | Treat as startup retry noise if the Bruno suite and JSON report pass |
 | Duplicate watchtower settlement transaction log | Watchtower retry observes an already-submitted transaction in the pool | Treat as retry noise if the suite assertions and JSON report pass |
 | `cellc certify` shows `failed` | Any upstream gate failed | Read `target/novaseal-production-gates.json` for specific failed gates |
-| Provenance stale after git rebase | Source tree hash changed | Re-run phases 2-6, then phase 7 |
+| Provenance stale after git rebase | Source tree hash or commit changed | Re-run phases 2-6, then phase 7 |
 
 **Rerun policy:** You may re-run individual phases independently. Each phase
 writes to its own output file. Phase 7 reads all of them. Do not re-run phase 7
@@ -385,7 +423,9 @@ four external attestations that this runbook cannot generate:
 
 1. **Public/shared CellDep attestation** — real CKB mainnet/testnet deployment
 2. **External BIP340 TCB review** — independent security review
-3. **Public BTC SPV evidence** — external SPV service on real Bitcoin chain
+3. **Public BTC SPV evidence** — external SPV service on real Bitcoin chain,
+   bound to the current handoff bundle and recomputable BTC transaction,
+   block-header, Merkle, confirmation, and profile-binding material
 4. **RWA legal/registry review** — external legal review with real jurisdiction
 
 See `proposals/novaseal/v0-mvp-skeleton/proofs/*.template.json` for the expected

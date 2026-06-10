@@ -254,8 +254,14 @@ const EXPECTED_EXTERNAL_TCB_REVIEW_ATTESTATION_FIELDS: &[&str] = &[
 const EXPECTED_PUBLIC_BTC_SPV_EVIDENCE_FIELDS: &[&str] =
     &["cases", "evidence_provider", "generated_at", "network", "notes", "request_handoff", "required_profiles", "schema", "status"];
 const EXPECTED_PUBLIC_BTC_SPV_CASE_FIELDS: &[&str] = &[
+    "btc_block_header",
     "btc_block_hash",
+    "btc_merkle_proof",
+    "btc_transaction_binding",
+    "btc_tx_hex",
     "btc_txid",
+    "btc_wtxid",
+    "ckb_btc_commitment_hash",
     "ckb_live_tx_hash",
     "confirmations",
     "live_report_hash",
@@ -269,6 +275,8 @@ const EXPECTED_PUBLIC_BTC_SPV_CASE_FIELDS: &[&str] = &[
     "service_builder_receipt_binding_hash",
     "service_builder_tx_skeleton_hash",
 ];
+const EXPECTED_PUBLIC_BTC_SPV_MERKLE_PROOF_FIELDS: &[&str] =
+    &["block_height", "merkle_branch", "merkle_root", "observed_tip_height", "tx_index"];
 const EXPECTED_PUBLIC_BTC_SPV_CELLDEP_FIELDS: &[&str] = &["data_hash", "dep_type", "hash_type", "out_point"];
 const EXPECTED_PUBLIC_BTC_SPV_SOURCE_SERVICE_FIELDS: &[&str] = &["commit", "name", "report_hash"];
 const EXPECTED_BTC_SPV_ADAPTER_PUBLIC_FIELDS: &[&str] = &[
@@ -283,8 +291,27 @@ const EXPECTED_BTC_SPV_ADAPTER_PUBLIC_FIELDS: &[&str] = &[
     "service_builder_case_hash",
     "service_builder_tx_skeleton_hash",
     "service_builder_receipt_binding_hash",
+    "ckb_btc_commitment_hash",
     "btc_txid",
     "btc_block_hash",
+    "btc_block_header",
+    "btc_merkle_proof.tx_index",
+    "btc_merkle_proof.merkle_branch",
+    "btc_merkle_proof.merkle_root",
+    "btc_merkle_proof.block_height",
+    "btc_merkle_proof.observed_tip_height",
+    "btc_tx_hex",
+    "btc_wtxid",
+    "btc_transaction_binding.kind",
+    "btc_transaction_binding.btc_output_index",
+    "btc_transaction_binding.btc_amount_sats",
+    "btc_transaction_binding.spend_input_index",
+    "btc_transaction_binding.sealed_btc_txid",
+    "btc_transaction_binding.sealed_btc_vout_index",
+    "btc_transaction_binding.sealed_btc_amount_sats",
+    "btc_transaction_binding.script_pubkey_hash",
+    "btc_transaction_binding.sealed_btc_tx_hex",
+    "btc_transaction_binding.sealed_utxo_commitment_hash",
     "spv_proof_hash",
     "minimum_confirmations",
     "confirmations",
@@ -310,9 +337,49 @@ const EXPECTED_BTC_SPV_FIELD_CONSTRAINTS: &[(&str, &str)] = &[
     ("service_builder_case_hash", "0x-prefixed 32-byte hash of the current NovaSeal service-builder case for this profile"),
     ("service_builder_tx_skeleton_hash", "0x-prefixed 32-byte service-builder transaction skeleton hash for this profile"),
     ("service_builder_receipt_binding_hash", "0x-prefixed 32-byte service-builder receipt binding hash for this profile"),
+    ("ckb_btc_commitment_hash", "0x-prefixed 32-byte CKB-side BTC commitment hash from the current live profile report"),
     ("btc_txid", "0x-prefixed 32-byte non-placeholder Bitcoin transaction id"),
     ("btc_block_hash", "0x-prefixed 32-byte non-placeholder Bitcoin block hash anchoring the SPV proof"),
-    ("spv_proof_hash", "0x-prefixed 32-byte non-placeholder hash of the SPV proof material"),
+    ("btc_block_header", "0x-prefixed 80-byte Bitcoin block header whose double-SHA256 hash matches btc_block_hash"),
+    ("btc_merkle_proof.tx_index", "zero-based transaction index used to orient the Merkle branch"),
+    ("btc_merkle_proof.merkle_branch", "array of 0x-prefixed 32-byte Bitcoin sibling hashes in display order"),
+    ("btc_merkle_proof.merkle_root", "0x-prefixed 32-byte Bitcoin Merkle root matching the block header"),
+    ("btc_merkle_proof.block_height", "public Bitcoin block height containing btc_txid"),
+    ("btc_merkle_proof.observed_tip_height", "public Bitcoin tip height used to compute confirmations"),
+    ("btc_tx_hex", "0x-prefixed raw Bitcoin transaction bytes whose txid/wtxid match the public evidence case"),
+    ("btc_wtxid", "0x-prefixed 32-byte Bitcoin witness transaction id derived from btc_tx_hex"),
+    (
+        "btc_transaction_binding.kind",
+        "profile-specific binding kind: btc_transaction_output, btc_utxo_spend, or dual_seal_btc_closure",
+    ),
+    (
+        "btc_transaction_binding.btc_output_index",
+        "BTC transaction commitment output index; required for btc-transaction-commitment-profile-v0",
+    ),
+    (
+        "btc_transaction_binding.btc_amount_sats",
+        "BTC transaction commitment output amount in sats; required for btc-transaction-commitment-profile-v0",
+    ),
+    ("btc_transaction_binding.spend_input_index", "Bitcoin spend input index; required for UTXO and dual-seal closure profiles"),
+    (
+        "btc_transaction_binding.sealed_btc_txid",
+        "sealed Bitcoin transaction id whose output is spent; required for btc-utxo-seal-profile-v0",
+    ),
+    ("btc_transaction_binding.sealed_btc_vout_index", "sealed Bitcoin output index; required for btc-utxo-seal-profile-v0"),
+    ("btc_transaction_binding.sealed_btc_amount_sats", "sealed Bitcoin output amount in sats; required for btc-utxo-seal-profile-v0"),
+    (
+        "btc_transaction_binding.script_pubkey_hash",
+        "0x-prefixed CKB Blake2b-256 hash of the sealed output scriptPubKey bytes; required for btc-utxo-seal-profile-v0",
+    ),
+    (
+        "btc_transaction_binding.sealed_btc_tx_hex",
+        "0x-prefixed raw sealed Bitcoin transaction bytes; required for btc-utxo-seal-profile-v0",
+    ),
+    (
+        "btc_transaction_binding.sealed_utxo_commitment_hash",
+        "0x-prefixed 32-byte CKB-side sealed UTXO commitment hash; required for btc-utxo-seal-profile-v0",
+    ),
+    ("spv_proof_hash", "0x-prefixed SHA-256 hash of the canonical BTC SPV proof material carried in this case"),
     ("minimum_confirmations", "integer confirmation floor; at least 6"),
     ("confirmations", "integer observed confirmations meeting minimum_confirmations"),
     ("spv_client_cell_dep.out_point", "0x-prefixed 32-byte CKB transaction hash plus numeric output index"),
@@ -3368,6 +3435,15 @@ fn validate_profile_operator_fixture_detail(repo_root: &Path, report: &Value) ->
         let live_report = json_load_path(repo_root, &repo_root.join(expected.live_report))?;
         let expected_live_report_hash = novaseal_profile_operator_report_hash(expected.live_report, &live_report);
         let expected_live_tx_hash = json_pointer_str(&live_report, expected.live_tx_hash_pointer);
+        let public_btc_anchor_pointer = expected_public_btc_anchor_pointer(expected.profile);
+        let public_btc_anchor_required = public_btc_anchor_pointer.is_some();
+        let expected_public_btc_anchor = public_btc_anchor_pointer.and_then(|pointer| live_report.pointer(pointer));
+        let expected_public_btc_commitment_hash =
+            expected_public_btc_commitment_hash_pointer(expected.profile).and_then(|pointer| json_pointer_str(&live_report, pointer));
+        let case_public_btc_anchor = case.pointer("/public_btc_anchor");
+        let display_public_btc_anchor = display.pointer("/public_btc_anchor");
+        let case_public_btc_commitment_hash =
+            case_public_btc_anchor.and_then(|anchor| json_pointer_str(anchor, "/ckb_btc_commitment_hash"));
         let expected_fiber_report_hash = expected
             .fiber_report
             .map(|path| {
@@ -3402,6 +3478,18 @@ fn validate_profile_operator_fixture_detail(repo_root: &Path, report: &Value) ->
                 || json_pointer_str(&case, "/live_devnet_tx_hash") == expected_live_tx_hash,
             "display_live_tx_hash_matches_current_report": !expected.live_required
                 || json_pointer_str(&display, "/live_devnet_tx_hash") == expected_live_tx_hash,
+            "public_btc_anchor_empty_when_not_required": public_btc_anchor_required
+                || case_public_btc_anchor.is_none_or(Value::is_null),
+            "public_btc_anchor_present_when_required": !public_btc_anchor_required
+                || case_public_btc_anchor.is_some_and(|anchor| anchor.is_object()),
+            "public_btc_anchor_shape_matches_profile": !public_btc_anchor_required
+                || public_btc_anchor_shape_matches_profile(expected.profile, case_public_btc_anchor),
+            "public_btc_anchor_matches_current_report": !public_btc_anchor_required
+                || case_public_btc_anchor == expected_public_btc_anchor,
+            "public_btc_anchor_commitment_matches_current_report": !public_btc_anchor_required
+                || case_public_btc_commitment_hash == expected_public_btc_commitment_hash,
+            "display_public_btc_anchor_matches_case": !public_btc_anchor_required
+                || display_public_btc_anchor == case_public_btc_anchor,
             "external_boundary_documented_when_not_live": expected.live_required
                 || json_pointer_str(&display, "/external_boundary") == Some("package_fixture_only_external_btc_and_ckb_finality_required"),
             "fiber_execution_bound_when_required": !expected.fiber_required
@@ -3472,6 +3560,10 @@ fn validate_service_builder_fixture_detail(report: &Value, operator_fixtures: &V
             operator_by_profile_action.get(&(expected.profile.to_string(), expected.action.to_string())).cloned().unwrap_or_default();
         let operator_case = operator_matches.first().cloned().unwrap_or(Value::Null);
         let expected_operator_case_hash = novaseal_service_builder_report_hash("operator_case", &operator_case);
+        let public_btc_anchor_required = expected_public_btc_anchor_pointer(expected.profile).is_some();
+        let operator_public_btc_anchor = operator_case.pointer("/public_btc_anchor");
+        let request_public_btc_anchor = case.pointer("/request/required_live_inputs/public_btc_anchor");
+        let tx_skeleton_public_btc_anchor = case.pointer("/tx_skeleton/public_btc_anchor");
         let checks = json!({
             "exactly_one_fixture": matches.len() == 1,
             "exactly_one_operator_fixture": operator_matches.len() == 1,
@@ -3505,6 +3597,14 @@ fn validate_service_builder_fixture_detail(report: &Value, operator_fixtures: &V
             "fiber_input_matches_operator_fixture": !expected.fiber_required
                 || json_pointer_str(&case, "/request/required_live_inputs/fiber_report_hash")
                     == json_pointer_str(&operator_case, "/fiber_report_hash"),
+            "public_btc_anchor_input_empty_when_not_required": public_btc_anchor_required
+                || request_public_btc_anchor.is_none_or(Value::is_null),
+            "public_btc_anchor_input_present_when_required": !public_btc_anchor_required
+                || request_public_btc_anchor.is_some_and(|anchor| anchor.is_object()),
+            "public_btc_anchor_input_shape_matches_profile": !public_btc_anchor_required
+                || public_btc_anchor_shape_matches_profile(expected.profile, request_public_btc_anchor),
+            "public_btc_anchor_input_matches_operator_fixture": !public_btc_anchor_required
+                || request_public_btc_anchor == operator_public_btc_anchor,
             "external_inputs_named": !json_array_strings(&case, "/request/production_external_inputs").is_empty(),
             "response_schema": json_pointer_str(&case, "/response/schema") == Some("novaseal-service-builder-response-v0.1"),
             "response_profile_matches": json_pointer_str(&case, "/response/profile") == Some(expected.profile),
@@ -3520,6 +3620,14 @@ fn validate_service_builder_fixture_detail(report: &Value, operator_fixtures: &V
             "tx_skeleton_schema": json_pointer_str(&case, "/tx_skeleton/schema") == Some("novaseal-service-builder-tx-skeleton-v0.1"),
             "tx_skeleton_operator_hash_matches": json_pointer_str(&case, "/tx_skeleton/operator_fixture_hash")
                 == json_pointer_str(&case, "/operator_fixture_hash"),
+            "tx_skeleton_public_btc_anchor_empty_when_not_required": public_btc_anchor_required
+                || tx_skeleton_public_btc_anchor.is_none_or(Value::is_null),
+            "tx_skeleton_public_btc_anchor_present_when_required": !public_btc_anchor_required
+                || tx_skeleton_public_btc_anchor.is_some_and(|anchor| anchor.is_object()),
+            "tx_skeleton_public_btc_anchor_shape_matches_profile": !public_btc_anchor_required
+                || public_btc_anchor_shape_matches_profile(expected.profile, tx_skeleton_public_btc_anchor),
+            "tx_skeleton_public_btc_anchor_matches_operator_fixture": !public_btc_anchor_required
+                || tx_skeleton_public_btc_anchor == operator_public_btc_anchor,
             "fixture_checks_passed": object_values_all_true(case.get("checks")),
         });
         case_checks.insert(format!("{}:{}", expected.profile, expected.action), checks);
@@ -3580,6 +3688,24 @@ fn validate_btc_spv_evidence_adapter_detail(report: &Value) -> Value {
             "service_builder_case_hash": json_pointer_str(&case, "/request/service_builder_case_hash").is_some_and(is_hex32),
             "service_builder_tx_skeleton_hash": json_pointer_str(&case, "/request/service_builder_tx_skeleton_hash").is_some_and(is_hex32),
             "service_builder_receipt_binding_hash": json_pointer_str(&case, "/request/service_builder_receipt_binding_hash").is_some_and(is_hex32),
+            "expected_anchor_source_production_eligible": json_pointer_str(&case, "/request/expected_anchor_source")
+                .is_some_and(|source| btc_anchor_source_production_eligible(expected_profile, source)),
+            "local_anchor_source_present": json_pointer_str(&case, "/request/local_anchor_source").is_some_and(|source| !source.is_empty()),
+            "ckb_btc_commitment_hash": json_pointer_str(&case, "/request/ckb_btc_commitment_hash").is_some_and(is_hex32),
+            "expected_btc_txid_present": json_pointer_str(&case, "/request/expected_btc_txid").is_some_and(is_hex32),
+            "expected_btc_wtxid_present": json_pointer_str(&case, "/request/expected_btc_wtxid").is_some_and(is_hex32),
+            "expected_output_fields_present": *expected_profile != EXPECTED_BTC_TX_COMMITMENT_PROFILE
+                || (json_pointer_i64(&case, "/request/expected_btc_output_index").is_some_and(|value| value >= 0)
+                    && json_pointer_i64(&case, "/request/expected_btc_amount_sats").is_some_and(|value| value > 0)),
+            "expected_utxo_fields_present": *expected_profile != EXPECTED_BTC_UTXO_SEAL_PROFILE
+                || (json_pointer_str(&case, "/request/expected_sealed_btc_txid").is_some_and(is_hex32)
+                    && json_pointer_i64(&case, "/request/expected_sealed_btc_vout_index").is_some_and(|value| value >= 0)
+                    && json_pointer_i64(&case, "/request/expected_sealed_btc_amount_sats").is_some_and(|value| value > 0)
+                    && json_pointer_str(&case, "/request/expected_script_pubkey_hash").is_some_and(is_hex32)
+                    && json_pointer_i64(&case, "/request/expected_spend_input_index").is_some_and(|value| value >= 0)
+                    && json_pointer_str(&case, "/request/expected_sealed_utxo_commitment_hash").is_some_and(is_hex32)),
+            "expected_dual_spend_input_present": *expected_profile != EXPECTED_DUAL_SEAL_PROFILE
+                || json_pointer_i64(&case, "/request/expected_spend_input_index").is_some_and(|value| value >= 0),
             "template_case_hash": json_pointer_str(&case, "/request/template_case_hash").is_some_and(is_hex32),
             "required_public_fields_complete": required_public_fields_complete,
             "required_public_fields_exact": exact_string_set(&required_fields, EXPECTED_BTC_SPV_ADAPTER_PUBLIC_FIELDS),
@@ -3984,6 +4110,7 @@ fn btc_spv_adapter_expected_case_bindings(adapter: &Value) -> Value {
         ("service_builder_case_hash", "/request/service_builder_case_hash"),
         ("service_builder_tx_skeleton_hash", "/request/service_builder_tx_skeleton_hash"),
         ("service_builder_receipt_binding_hash", "/request/service_builder_receipt_binding_hash"),
+        ("ckb_btc_commitment_hash", "/request/ckb_btc_commitment_hash"),
     ];
     let mut profiles = Map::new();
     if let Some(cases) = adapter.get("cases").and_then(Value::as_array) {
@@ -3995,6 +4122,29 @@ fn btc_spv_adapter_expected_case_bindings(adapter: &Value) -> Value {
             for (field, pointer) in binding_fields {
                 if let Some(value) = json_pointer_str(case, pointer) {
                     binding.insert(field.to_string(), Value::String(value.to_string()));
+                }
+            }
+            for (field, pointer) in [
+                ("anchor_source", "/request/expected_anchor_source"),
+                ("btc_txid", "/request/expected_btc_txid"),
+                ("btc_wtxid", "/request/expected_btc_wtxid"),
+                ("sealed_btc_txid", "/request/expected_sealed_btc_txid"),
+                ("script_pubkey_hash", "/request/expected_script_pubkey_hash"),
+                ("sealed_utxo_commitment_hash", "/request/expected_sealed_utxo_commitment_hash"),
+            ] {
+                if let Some(value) = json_pointer_str(case, pointer) {
+                    binding.insert(field.to_string(), Value::String(value.to_string()));
+                }
+            }
+            for (field, pointer) in [
+                ("btc_output_index", "/request/expected_btc_output_index"),
+                ("btc_amount_sats", "/request/expected_btc_amount_sats"),
+                ("spend_input_index", "/request/expected_spend_input_index"),
+                ("sealed_btc_vout_index", "/request/expected_sealed_btc_vout_index"),
+                ("sealed_btc_amount_sats", "/request/expected_sealed_btc_amount_sats"),
+            ] {
+                if let Some(value) = json_pointer_u64(case, pointer) {
+                    binding.insert(field.to_string(), Value::Number(value.into()));
                 }
             }
             profiles.insert(profile.to_string(), Value::Object(binding));
@@ -4856,63 +5006,140 @@ fn validate_btc_spv_evidence(repo_root: &Path, rel_path: &str, external_evidence
         };
         let cell_dep = case.get("spv_client_cell_dep").unwrap_or(&Value::Null);
         let source_service = case.get("source_service").unwrap_or(&Value::Null);
+        let merkle_proof = case.get("btc_merkle_proof").unwrap_or(&Value::Null);
         let out_point = parse_out_point(json_pointer_str(cell_dep, "/out_point"));
         let hash_type = json_pointer_str(cell_dep, "/hash_type");
         let confirmations = json_pointer_i64(case, "/confirmations").unwrap_or_default();
         let minimum_confirmations = json_pointer_i64(case, "/minimum_confirmations").unwrap_or_default();
         let expected_binding = handoff_expected_bindings.get(*profile).unwrap_or(&Value::Null);
-        case_checks.insert(
-            (*profile).to_string(),
-            json!({
-                "present": true,
-                "fields_exact": exact_object_keys(case, EXPECTED_PUBLIC_BTC_SPV_CASE_FIELDS),
-                "scenario_matches_expected": json_pointer_str(case, "/scenario") == expected_btc_spv_scenario(profile),
-                "scenario_matches_handoff": handoff_expected_scenarios
-                    .get(*profile)
-                    .is_some_and(|scenario| json_pointer_str(case, "/scenario") == Some(scenario.as_str())),
-                "ckb_live_tx_hash_valid": json_pointer_str(case, "/ckb_live_tx_hash").is_some_and(is_hex32),
-                "ckb_live_tx_hash_non_placeholder": !placeholder_hash(json_pointer_str(case, "/ckb_live_tx_hash")),
-                "ckb_live_tx_hash_matches_handoff": normalize_hex(json_pointer_str(case, "/ckb_live_tx_hash")).as_deref()
-                    == normalize_hex(json_pointer_str(expected_binding, "/ckb_live_tx_hash")).as_deref(),
-                "live_report_hash_valid": json_pointer_str(case, "/live_report_hash").is_some_and(is_hex32),
-                "live_report_hash_non_placeholder": !placeholder_hash(json_pointer_str(case, "/live_report_hash")),
-                "live_report_hash_matches_handoff": normalize_hex(json_pointer_str(case, "/live_report_hash")).as_deref()
-                    == normalize_hex(json_pointer_str(expected_binding, "/live_report_hash")).as_deref(),
-                "service_builder_case_hash_valid": json_pointer_str(case, "/service_builder_case_hash").is_some_and(is_hex32),
-                "service_builder_case_hash_non_placeholder": !placeholder_hash(json_pointer_str(case, "/service_builder_case_hash")),
-                "service_builder_case_hash_matches_handoff": normalize_hex(json_pointer_str(case, "/service_builder_case_hash")).as_deref()
-                    == normalize_hex(json_pointer_str(expected_binding, "/service_builder_case_hash")).as_deref(),
-                "service_builder_tx_skeleton_hash_valid": json_pointer_str(case, "/service_builder_tx_skeleton_hash").is_some_and(is_hex32),
-                "service_builder_tx_skeleton_hash_non_placeholder": !placeholder_hash(json_pointer_str(case, "/service_builder_tx_skeleton_hash")),
-                "service_builder_tx_skeleton_hash_matches_handoff": normalize_hex(json_pointer_str(case, "/service_builder_tx_skeleton_hash")).as_deref()
-                    == normalize_hex(json_pointer_str(expected_binding, "/service_builder_tx_skeleton_hash")).as_deref(),
-                "service_builder_receipt_binding_hash_valid": json_pointer_str(case, "/service_builder_receipt_binding_hash").is_some_and(is_hex32),
-                "service_builder_receipt_binding_hash_non_placeholder": !placeholder_hash(json_pointer_str(case, "/service_builder_receipt_binding_hash")),
-                "service_builder_receipt_binding_hash_matches_handoff": normalize_hex(json_pointer_str(case, "/service_builder_receipt_binding_hash")).as_deref()
-                    == normalize_hex(json_pointer_str(expected_binding, "/service_builder_receipt_binding_hash")).as_deref(),
-                "btc_txid_valid": json_pointer_str(case, "/btc_txid").is_some_and(is_hex32),
-                "btc_txid_non_placeholder": !placeholder_hash(json_pointer_str(case, "/btc_txid")),
-                "btc_block_hash_valid": json_pointer_str(case, "/btc_block_hash").is_some_and(is_hex32),
-                "btc_block_hash_non_placeholder": !placeholder_hash(json_pointer_str(case, "/btc_block_hash")),
-                "spv_proof_hash_valid": json_pointer_str(case, "/spv_proof_hash").is_some_and(is_hex32),
-                "spv_proof_hash_non_placeholder": !placeholder_hash(json_pointer_str(case, "/spv_proof_hash")),
-                "minimum_confirmations_at_least_six": minimum_confirmations >= 6,
-                "confirmations_meet_minimum": confirmations >= minimum_confirmations && minimum_confirmations >= 6,
-                "spv_client_cell_dep_fields_exact": exact_object_keys(cell_dep, EXPECTED_PUBLIC_BTC_SPV_CELLDEP_FIELDS),
-                "spv_client_cell_dep_out_point_valid": json_pointer_bool(&out_point, "/valid"),
-                "spv_client_cell_dep_out_point_non_placeholder": !placeholder_hash(json_pointer_str(&out_point, "/tx_hash")),
-                "spv_client_cell_dep_data_hash_valid": json_pointer_str(cell_dep, "/data_hash").is_some_and(is_hex32),
-                "spv_client_cell_dep_data_hash_non_placeholder": !placeholder_hash(json_pointer_str(cell_dep, "/data_hash")),
-                "spv_client_cell_dep_dep_type": json_pointer_str(cell_dep, "/dep_type") == Some("code"),
-                "spv_client_cell_dep_hash_type": matches!(hash_type, Some("data" | "data1" | "type")),
-                "source_service_fields_exact": exact_object_keys(source_service, EXPECTED_PUBLIC_BTC_SPV_SOURCE_SERVICE_FIELDS),
-                "source_service_name_present": source_service.get("name").is_some_and(value_is_present),
-                "source_service_name_identity": json_pointer_str(source_service, "/name").is_some_and(is_external_identity),
-                "source_service_commit_40_hex": json_pointer_str(source_service, "/commit").is_some_and(is_git_commit_hash),
-                "source_service_report_hash_valid": json_pointer_str(source_service, "/report_hash").is_some_and(is_hex32),
-                "source_service_report_hash_non_placeholder": !placeholder_hash(json_pointer_str(source_service, "/report_hash")),
-            }),
+        let proof_checks = validate_btc_spv_case_proof(case, confirmations);
+        let tx_checks = validate_btc_transaction_binding(profile, case, expected_binding);
+        let mut checks = Map::new();
+        macro_rules! check {
+            ($name:literal, $value:expr) => {
+                checks.insert($name.to_string(), Value::Bool($value));
+            };
+        }
+        check!("present", true);
+        check!("fields_exact", exact_object_keys(case, EXPECTED_PUBLIC_BTC_SPV_CASE_FIELDS));
+        check!("scenario_matches_expected", json_pointer_str(case, "/scenario") == expected_btc_spv_scenario(profile));
+        check!(
+            "scenario_matches_handoff",
+            handoff_expected_scenarios
+                .get(*profile)
+                .is_some_and(|scenario| json_pointer_str(case, "/scenario") == Some(scenario.as_str()))
         );
+        check!("ckb_live_tx_hash_valid", json_pointer_str(case, "/ckb_live_tx_hash").is_some_and(is_hex32));
+        check!("ckb_live_tx_hash_non_placeholder", !placeholder_hash(json_pointer_str(case, "/ckb_live_tx_hash")));
+        check!(
+            "ckb_live_tx_hash_matches_handoff",
+            normalize_hex(json_pointer_str(case, "/ckb_live_tx_hash")).as_deref()
+                == normalize_hex(json_pointer_str(expected_binding, "/ckb_live_tx_hash")).as_deref()
+        );
+        check!("live_report_hash_valid", json_pointer_str(case, "/live_report_hash").is_some_and(is_hex32));
+        check!("live_report_hash_non_placeholder", !placeholder_hash(json_pointer_str(case, "/live_report_hash")));
+        check!(
+            "live_report_hash_matches_handoff",
+            normalize_hex(json_pointer_str(case, "/live_report_hash")).as_deref()
+                == normalize_hex(json_pointer_str(expected_binding, "/live_report_hash")).as_deref()
+        );
+        check!("service_builder_case_hash_valid", json_pointer_str(case, "/service_builder_case_hash").is_some_and(is_hex32));
+        check!("service_builder_case_hash_non_placeholder", !placeholder_hash(json_pointer_str(case, "/service_builder_case_hash")));
+        check!(
+            "service_builder_case_hash_matches_handoff",
+            normalize_hex(json_pointer_str(case, "/service_builder_case_hash")).as_deref()
+                == normalize_hex(json_pointer_str(expected_binding, "/service_builder_case_hash")).as_deref()
+        );
+        check!(
+            "service_builder_tx_skeleton_hash_valid",
+            json_pointer_str(case, "/service_builder_tx_skeleton_hash").is_some_and(is_hex32)
+        );
+        check!(
+            "service_builder_tx_skeleton_hash_non_placeholder",
+            !placeholder_hash(json_pointer_str(case, "/service_builder_tx_skeleton_hash"))
+        );
+        check!(
+            "service_builder_tx_skeleton_hash_matches_handoff",
+            normalize_hex(json_pointer_str(case, "/service_builder_tx_skeleton_hash")).as_deref()
+                == normalize_hex(json_pointer_str(expected_binding, "/service_builder_tx_skeleton_hash")).as_deref()
+        );
+        check!(
+            "service_builder_receipt_binding_hash_valid",
+            json_pointer_str(case, "/service_builder_receipt_binding_hash").is_some_and(is_hex32)
+        );
+        check!(
+            "service_builder_receipt_binding_hash_non_placeholder",
+            !placeholder_hash(json_pointer_str(case, "/service_builder_receipt_binding_hash"))
+        );
+        check!(
+            "service_builder_receipt_binding_hash_matches_handoff",
+            normalize_hex(json_pointer_str(case, "/service_builder_receipt_binding_hash")).as_deref()
+                == normalize_hex(json_pointer_str(expected_binding, "/service_builder_receipt_binding_hash")).as_deref()
+        );
+        check!("ckb_btc_commitment_hash_valid", json_pointer_str(case, "/ckb_btc_commitment_hash").is_some_and(is_hex32));
+        check!("ckb_btc_commitment_hash_non_placeholder", !placeholder_hash(json_pointer_str(case, "/ckb_btc_commitment_hash")));
+        check!(
+            "ckb_btc_commitment_hash_matches_handoff",
+            normalize_hex(json_pointer_str(case, "/ckb_btc_commitment_hash")).as_deref()
+                == normalize_hex(json_pointer_str(expected_binding, "/ckb_btc_commitment_hash")).as_deref()
+        );
+        check!("btc_txid_valid", json_pointer_str(case, "/btc_txid").is_some_and(is_hex32));
+        check!("btc_txid_non_placeholder", !placeholder_hash(json_pointer_str(case, "/btc_txid")));
+        check!(
+            "btc_txid_matches_handoff_when_bound",
+            json_pointer_str(expected_binding, "/btc_txid").is_none_or(|expected| {
+                normalize_hex(json_pointer_str(case, "/btc_txid")).as_deref() == normalize_hex(Some(expected)).as_deref()
+            })
+        );
+        check!("btc_wtxid_valid", json_pointer_str(case, "/btc_wtxid").is_some_and(is_hex32));
+        check!("btc_wtxid_non_placeholder", !placeholder_hash(json_pointer_str(case, "/btc_wtxid")));
+        check!(
+            "btc_wtxid_matches_handoff_when_bound",
+            json_pointer_str(expected_binding, "/btc_wtxid").is_none_or(|expected| {
+                normalize_hex(json_pointer_str(case, "/btc_wtxid")).as_deref() == normalize_hex(Some(expected)).as_deref()
+            })
+        );
+        check!("btc_tx_hex_valid", json_pointer_bool(&tx_checks, "/btc_tx_hex_valid"));
+        check!("btc_txid_matches_tx_hex", json_pointer_bool(&tx_checks, "/btc_txid_matches_tx_hex"));
+        check!("btc_wtxid_matches_tx_hex", json_pointer_bool(&tx_checks, "/btc_wtxid_matches_tx_hex"));
+        check!("btc_transaction_binding_fields_exact", json_pointer_bool(&tx_checks, "/binding_fields_exact"));
+        check!("btc_transaction_binding_kind_matches_profile", json_pointer_bool(&tx_checks, "/binding_kind_matches_profile"));
+        check!("btc_transaction_binding_matches_handoff", json_pointer_bool(&tx_checks, "/binding_matches_handoff"));
+        check!("btc_transaction_output_matches_anchor", json_pointer_bool(&tx_checks, "/transaction_output_matches_anchor"));
+        check!("btc_utxo_spend_input_matches_anchor", json_pointer_bool(&tx_checks, "/utxo_spend_input_matches_anchor"));
+        check!("btc_utxo_sealed_tx_matches_anchor", json_pointer_bool(&tx_checks, "/utxo_sealed_tx_matches_anchor"));
+        check!("btc_dual_spend_input_matches_anchor", json_pointer_bool(&tx_checks, "/dual_spend_input_matches_anchor"));
+        check!("btc_block_hash_valid", json_pointer_str(case, "/btc_block_hash").is_some_and(is_hex32));
+        check!("btc_block_hash_non_placeholder", !placeholder_hash(json_pointer_str(case, "/btc_block_hash")));
+        check!("btc_block_header_valid", json_pointer_str(case, "/btc_block_header").is_some_and(|value| is_hex_bytes_len(value, 80)));
+        check!("btc_block_hash_matches_header", json_pointer_bool(&proof_checks, "/block_hash_matches_header"));
+        check!("btc_merkle_proof_fields_exact", exact_object_keys(merkle_proof, EXPECTED_PUBLIC_BTC_SPV_MERKLE_PROOF_FIELDS));
+        check!("btc_merkle_proof_tx_index_non_negative", json_pointer_i64(merkle_proof, "/tx_index").is_some_and(|value| value >= 0));
+        check!("btc_merkle_proof_branch_valid", json_pointer_bool(&proof_checks, "/merkle_branch_valid"));
+        check!("btc_merkle_proof_merkle_root_valid", json_pointer_str(merkle_proof, "/merkle_root").is_some_and(is_hex32));
+        check!("btc_merkle_proof_merkle_root_non_placeholder", !placeholder_hash(json_pointer_str(merkle_proof, "/merkle_root")));
+        check!("btc_merkle_root_matches_header", json_pointer_bool(&proof_checks, "/merkle_root_matches_header"));
+        check!("btc_merkle_branch_verifies_txid", json_pointer_bool(&proof_checks, "/merkle_branch_verifies_txid"));
+        check!("btc_confirmations_match_heights", json_pointer_bool(&proof_checks, "/confirmations_match_heights"));
+        check!("spv_proof_hash_valid", json_pointer_str(case, "/spv_proof_hash").is_some_and(is_hex32));
+        check!("spv_proof_hash_non_placeholder", !placeholder_hash(json_pointer_str(case, "/spv_proof_hash")));
+        check!("spv_proof_hash_matches_material", json_pointer_bool(&proof_checks, "/proof_hash_matches_material"));
+        check!("minimum_confirmations_at_least_six", minimum_confirmations >= 6);
+        check!("confirmations_meet_minimum", confirmations >= minimum_confirmations && minimum_confirmations >= 6);
+        check!("spv_client_cell_dep_fields_exact", exact_object_keys(cell_dep, EXPECTED_PUBLIC_BTC_SPV_CELLDEP_FIELDS));
+        check!("spv_client_cell_dep_out_point_valid", json_pointer_bool(&out_point, "/valid"));
+        check!("spv_client_cell_dep_out_point_non_placeholder", !placeholder_hash(json_pointer_str(&out_point, "/tx_hash")));
+        check!("spv_client_cell_dep_data_hash_valid", json_pointer_str(cell_dep, "/data_hash").is_some_and(is_hex32));
+        check!("spv_client_cell_dep_data_hash_non_placeholder", !placeholder_hash(json_pointer_str(cell_dep, "/data_hash")));
+        check!("spv_client_cell_dep_dep_type", json_pointer_str(cell_dep, "/dep_type") == Some("code"));
+        check!("spv_client_cell_dep_hash_type", matches!(hash_type, Some("data" | "data1" | "type")));
+        check!("source_service_fields_exact", exact_object_keys(source_service, EXPECTED_PUBLIC_BTC_SPV_SOURCE_SERVICE_FIELDS));
+        check!("source_service_name_present", source_service.get("name").is_some_and(value_is_present));
+        check!("source_service_name_identity", json_pointer_str(source_service, "/name").is_some_and(is_external_identity));
+        check!("source_service_commit_40_hex", json_pointer_str(source_service, "/commit").is_some_and(is_git_commit_hash));
+        check!("source_service_report_hash_valid", json_pointer_str(source_service, "/report_hash").is_some_and(is_hex32));
+        check!("source_service_report_hash_non_placeholder", !placeholder_hash(json_pointer_str(source_service, "/report_hash")));
+        case_checks.insert((*profile).to_string(), Value::Object(checks));
     }
     let case_checks_passed = case_checks.values().all(|checks| object_values_all_true(Some(checks)));
     let checks = json!({
@@ -5666,6 +5893,368 @@ fn external_evidence_handoff_reference_hash(value: &Value) -> String {
     novaseal_handoff_report_hash("external_evidence_handoff_bundle", &payload)
 }
 
+#[derive(Debug)]
+struct BitcoinTxInput {
+    prev_txid: String,
+    prev_vout: u64,
+}
+
+#[derive(Debug)]
+struct BitcoinTxOutput {
+    amount_sats: u64,
+    script_pubkey: Vec<u8>,
+}
+
+#[derive(Debug)]
+struct BitcoinTxSummary {
+    txid: String,
+    wtxid: String,
+    inputs: Vec<BitcoinTxInput>,
+    outputs: Vec<BitcoinTxOutput>,
+}
+
+fn validate_btc_transaction_binding(profile: &str, case: &Value, expected_binding: &Value) -> Value {
+    let binding = case.get("btc_transaction_binding").unwrap_or(&Value::Null);
+    let tx = json_pointer_str(case, "/btc_tx_hex").and_then(parse_bitcoin_tx_hex);
+    let sealed_tx = json_pointer_str(binding, "/sealed_btc_tx_hex").and_then(parse_bitcoin_tx_hex);
+    let txid_matches =
+        tx.as_ref().is_some_and(|tx| normalize_hex(json_pointer_str(case, "/btc_txid")).as_deref() == Some(tx.txid.as_str()));
+    let wtxid_matches =
+        tx.as_ref().is_some_and(|tx| normalize_hex(json_pointer_str(case, "/btc_wtxid")).as_deref() == Some(tx.wtxid.as_str()));
+
+    json!({
+        "btc_tx_hex_valid": tx.is_some(),
+        "btc_txid_matches_tx_hex": txid_matches,
+        "btc_wtxid_matches_tx_hex": wtxid_matches,
+        "binding_fields_exact": btc_transaction_binding_fields_exact(profile, binding),
+        "binding_kind_matches_profile": btc_transaction_binding_kind_matches_profile(profile, binding),
+        "binding_matches_handoff": btc_binding_fields_match_handoff(profile, binding, expected_binding),
+        "transaction_output_matches_anchor": profile != EXPECTED_BTC_TX_COMMITMENT_PROFILE
+            || btc_transaction_output_matches_anchor(binding, tx.as_ref(), expected_binding),
+        "utxo_spend_input_matches_anchor": profile != EXPECTED_BTC_UTXO_SEAL_PROFILE
+            || btc_utxo_spend_input_matches_anchor(binding, tx.as_ref(), expected_binding),
+        "utxo_sealed_tx_matches_anchor": profile != EXPECTED_BTC_UTXO_SEAL_PROFILE
+            || btc_utxo_sealed_tx_matches_anchor(binding, sealed_tx.as_ref(), expected_binding),
+        "dual_spend_input_matches_anchor": profile != EXPECTED_DUAL_SEAL_PROFILE
+            || btc_dual_spend_input_matches_anchor(binding, tx.as_ref(), expected_binding),
+    })
+}
+
+fn btc_transaction_binding_fields_exact(profile: &str, binding: &Value) -> bool {
+    match profile {
+        EXPECTED_BTC_TX_COMMITMENT_PROFILE => exact_object_keys(binding, &["kind", "btc_output_index", "btc_amount_sats"]),
+        EXPECTED_BTC_UTXO_SEAL_PROFILE => exact_object_keys(
+            binding,
+            &[
+                "kind",
+                "spend_input_index",
+                "sealed_btc_txid",
+                "sealed_btc_vout_index",
+                "sealed_btc_amount_sats",
+                "script_pubkey_hash",
+                "sealed_btc_tx_hex",
+                "sealed_utxo_commitment_hash",
+            ],
+        ),
+        EXPECTED_DUAL_SEAL_PROFILE => exact_object_keys(binding, &["kind", "spend_input_index"]),
+        _ => false,
+    }
+}
+
+fn btc_transaction_binding_kind_matches_profile(profile: &str, binding: &Value) -> bool {
+    let expected = match profile {
+        EXPECTED_BTC_TX_COMMITMENT_PROFILE => "btc_transaction_output",
+        EXPECTED_BTC_UTXO_SEAL_PROFILE => "btc_utxo_spend",
+        EXPECTED_DUAL_SEAL_PROFILE => "dual_seal_btc_closure",
+        _ => return false,
+    };
+    json_pointer_str(binding, "/kind") == Some(expected)
+}
+
+fn btc_binding_fields_match_handoff(profile: &str, binding: &Value, expected_binding: &Value) -> bool {
+    match profile {
+        EXPECTED_BTC_TX_COMMITMENT_PROFILE => {
+            json_pointer_u64(binding, "/btc_output_index") == json_pointer_u64(expected_binding, "/btc_output_index")
+                && json_pointer_u64(binding, "/btc_amount_sats") == json_pointer_u64(expected_binding, "/btc_amount_sats")
+        }
+        EXPECTED_BTC_UTXO_SEAL_PROFILE => {
+            json_pointer_u64(binding, "/spend_input_index") == json_pointer_u64(expected_binding, "/spend_input_index")
+                && normalize_hex(json_pointer_str(binding, "/sealed_btc_txid")).as_deref()
+                    == normalize_hex(json_pointer_str(expected_binding, "/sealed_btc_txid")).as_deref()
+                && json_pointer_u64(binding, "/sealed_btc_vout_index") == json_pointer_u64(expected_binding, "/sealed_btc_vout_index")
+                && json_pointer_u64(binding, "/sealed_btc_amount_sats")
+                    == json_pointer_u64(expected_binding, "/sealed_btc_amount_sats")
+                && normalize_hex(json_pointer_str(binding, "/script_pubkey_hash")).as_deref()
+                    == normalize_hex(json_pointer_str(expected_binding, "/script_pubkey_hash")).as_deref()
+                && normalize_hex(json_pointer_str(binding, "/sealed_utxo_commitment_hash")).as_deref()
+                    == normalize_hex(json_pointer_str(expected_binding, "/sealed_utxo_commitment_hash")).as_deref()
+        }
+        EXPECTED_DUAL_SEAL_PROFILE => {
+            json_pointer_u64(binding, "/spend_input_index") == json_pointer_u64(expected_binding, "/spend_input_index")
+        }
+        _ => false,
+    }
+}
+
+fn btc_transaction_output_matches_anchor(binding: &Value, tx: Option<&BitcoinTxSummary>, expected_binding: &Value) -> bool {
+    let Some(tx) = tx else {
+        return false;
+    };
+    let Some(index) = json_pointer_u64(binding, "/btc_output_index") else {
+        return false;
+    };
+    let Some(expected_index) = json_pointer_u64(expected_binding, "/btc_output_index") else {
+        return false;
+    };
+    let Some(expected_amount) = json_pointer_u64(expected_binding, "/btc_amount_sats") else {
+        return false;
+    };
+    index == expected_index && tx.outputs.get(index as usize).is_some_and(|output| output.amount_sats == expected_amount)
+}
+
+fn btc_utxo_spend_input_matches_anchor(binding: &Value, tx: Option<&BitcoinTxSummary>, expected_binding: &Value) -> bool {
+    let Some(tx) = tx else {
+        return false;
+    };
+    let Some(index) = json_pointer_u64(binding, "/spend_input_index") else {
+        return false;
+    };
+    let Some(expected_index) = json_pointer_u64(expected_binding, "/spend_input_index") else {
+        return false;
+    };
+    let Some(expected_vout) = json_pointer_u64(expected_binding, "/sealed_btc_vout_index") else {
+        return false;
+    };
+    let expected_txid = normalize_hex(json_pointer_str(expected_binding, "/sealed_btc_txid"));
+    index == expected_index
+        && tx
+            .inputs
+            .get(index as usize)
+            .is_some_and(|input| Some(input.prev_txid.as_str()) == expected_txid.as_deref() && input.prev_vout == expected_vout)
+}
+
+fn btc_utxo_sealed_tx_matches_anchor(binding: &Value, sealed_tx: Option<&BitcoinTxSummary>, expected_binding: &Value) -> bool {
+    let Some(sealed_tx) = sealed_tx else {
+        return false;
+    };
+    let Some(index) = json_pointer_u64(binding, "/sealed_btc_vout_index") else {
+        return false;
+    };
+    let Some(expected_amount) = json_pointer_u64(expected_binding, "/sealed_btc_amount_sats") else {
+        return false;
+    };
+    let expected_txid = normalize_hex(json_pointer_str(expected_binding, "/sealed_btc_txid"));
+    let expected_script_hash = normalize_hex(json_pointer_str(expected_binding, "/script_pubkey_hash"));
+    Some(sealed_tx.txid.as_str()) == expected_txid.as_deref()
+        && sealed_tx.outputs.get(index as usize).is_some_and(|output| {
+            let actual_script_hash = format!("0x{}", hex::encode(crate::ckb_blake2b256(&output.script_pubkey)));
+            output.amount_sats == expected_amount && Some(actual_script_hash.as_str()) == expected_script_hash.as_deref()
+        })
+}
+
+fn btc_dual_spend_input_matches_anchor(binding: &Value, tx: Option<&BitcoinTxSummary>, expected_binding: &Value) -> bool {
+    let Some(tx) = tx else {
+        return false;
+    };
+    let Some(index) = json_pointer_u64(binding, "/spend_input_index") else {
+        return false;
+    };
+    json_pointer_u64(expected_binding, "/spend_input_index") == Some(index) && tx.inputs.get(index as usize).is_some()
+}
+
+fn parse_bitcoin_tx_hex(value: &str) -> Option<BitcoinTxSummary> {
+    parse_bitcoin_tx(&hex_bytes(value)?)
+}
+
+fn parse_bitcoin_tx(bytes: &[u8]) -> Option<BitcoinTxSummary> {
+    let mut cursor = 0usize;
+    let version = read_slice(bytes, &mut cursor, 4)?.to_vec();
+    let mut segwit = false;
+    if bytes.get(cursor) == Some(&0) && bytes.get(cursor + 1).is_some_and(|flag| *flag != 0) {
+        segwit = true;
+        cursor += 2;
+    }
+    let input_count_start = cursor;
+    let input_count = read_varint(bytes, &mut cursor)?;
+    if input_count == 0 {
+        return None;
+    }
+    let input_count_bytes = bytes.get(input_count_start..cursor)?.to_vec();
+    let inputs_start = cursor;
+    let mut inputs = Vec::new();
+    for _ in 0..input_count {
+        let prev_hash = read_slice(bytes, &mut cursor, 32)?;
+        let prev_txid = bitcoin_display_hash_from_internal(prev_hash);
+        let prev_vout = u64::from(read_u32_le(bytes, &mut cursor)?);
+        let script_len = read_varint(bytes, &mut cursor)?;
+        read_slice(bytes, &mut cursor, usize::try_from(script_len).ok()?)?;
+        read_slice(bytes, &mut cursor, 4)?;
+        inputs.push(BitcoinTxInput { prev_txid, prev_vout });
+    }
+    let inputs_bytes = bytes.get(inputs_start..cursor)?.to_vec();
+    let output_count_start = cursor;
+    let output_count = read_varint(bytes, &mut cursor)?;
+    if output_count == 0 {
+        return None;
+    }
+    let output_count_bytes = bytes.get(output_count_start..cursor)?.to_vec();
+    let outputs_start = cursor;
+    let mut outputs = Vec::new();
+    for _ in 0..output_count {
+        let amount_sats = read_u64_le(bytes, &mut cursor)?;
+        let script_len = read_varint(bytes, &mut cursor)?;
+        let script_pubkey = read_slice(bytes, &mut cursor, usize::try_from(script_len).ok()?)?.to_vec();
+        outputs.push(BitcoinTxOutput { amount_sats, script_pubkey });
+    }
+    let outputs_bytes = bytes.get(outputs_start..cursor)?.to_vec();
+    if segwit {
+        for _ in 0..input_count {
+            let item_count = read_varint(bytes, &mut cursor)?;
+            for _ in 0..item_count {
+                let item_len = read_varint(bytes, &mut cursor)?;
+                read_slice(bytes, &mut cursor, usize::try_from(item_len).ok()?)?;
+            }
+        }
+    }
+    let lock_time = read_slice(bytes, &mut cursor, 4)?.to_vec();
+    if cursor != bytes.len() {
+        return None;
+    }
+    let mut stripped = Vec::new();
+    stripped.extend_from_slice(&version);
+    stripped.extend_from_slice(&input_count_bytes);
+    stripped.extend_from_slice(&inputs_bytes);
+    stripped.extend_from_slice(&output_count_bytes);
+    stripped.extend_from_slice(&outputs_bytes);
+    stripped.extend_from_slice(&lock_time);
+    Some(BitcoinTxSummary {
+        txid: bitcoin_display_hash(&stripped),
+        wtxid: if segwit { bitcoin_display_hash(bytes) } else { bitcoin_display_hash(&stripped) },
+        inputs,
+        outputs,
+    })
+}
+
+fn read_slice<'a>(bytes: &'a [u8], cursor: &mut usize, len: usize) -> Option<&'a [u8]> {
+    let end = cursor.checked_add(len)?;
+    let slice = bytes.get(*cursor..end)?;
+    *cursor = end;
+    Some(slice)
+}
+
+fn read_u32_le(bytes: &[u8], cursor: &mut usize) -> Option<u32> {
+    Some(u32::from_le_bytes(read_slice(bytes, cursor, 4)?.try_into().ok()?))
+}
+
+fn read_u64_le(bytes: &[u8], cursor: &mut usize) -> Option<u64> {
+    Some(u64::from_le_bytes(read_slice(bytes, cursor, 8)?.try_into().ok()?))
+}
+
+fn read_varint(bytes: &[u8], cursor: &mut usize) -> Option<u64> {
+    let first = *read_slice(bytes, cursor, 1)?.first()?;
+    match first {
+        0x00..=0xfc => Some(u64::from(first)),
+        0xfd => {
+            let value: [u8; 2] = read_slice(bytes, cursor, 2)?.try_into().ok()?;
+            Some(u64::from(u16::from_le_bytes(value)))
+        }
+        0xfe => Some(u64::from(read_u32_le(bytes, cursor)?)),
+        0xff => read_u64_le(bytes, cursor),
+    }
+}
+
+fn validate_btc_spv_case_proof(case: &Value, confirmations: i64) -> Value {
+    let header = json_pointer_str(case, "/btc_block_header").and_then(|value| hex_bytes_exact(value, 80));
+    let header_hash = header.as_deref().map(bitcoin_display_hash);
+    let header_merkle_root = header.as_deref().map(bitcoin_header_merkle_root_display);
+    let proof = case.get("btc_merkle_proof").unwrap_or(&Value::Null);
+    let txid = json_pointer_str(case, "/btc_txid");
+    let tx_index = json_pointer_i64(proof, "/tx_index");
+    let branch = json_array_strings(proof, "/merkle_branch");
+    let branch_valid = !branch.is_empty() && branch.iter().all(|hash| is_hex32(hash) && !placeholder_hash(Some(hash)));
+    let computed_merkle_root = txid.zip(tx_index).and_then(|(txid, tx_index)| bitcoin_merkle_root_display(txid, &branch, tx_index));
+    let block_height = json_pointer_i64(proof, "/block_height");
+    let observed_tip_height = json_pointer_i64(proof, "/observed_tip_height");
+    let expected_confirmations = block_height.zip(observed_tip_height).and_then(|(block_height, observed_tip_height)| {
+        if block_height >= 0 && observed_tip_height >= block_height {
+            observed_tip_height.checked_sub(block_height)?.checked_add(1)
+        } else {
+            None
+        }
+    });
+    let proof_hash = btc_spv_proof_material_hash(case);
+    json!({
+        "block_hash_matches_header": header_hash.as_deref()
+            == normalize_hex(json_pointer_str(case, "/btc_block_hash")).as_deref(),
+        "merkle_branch_valid": branch_valid,
+        "merkle_root_matches_header": header_merkle_root.as_deref()
+            == normalize_hex(json_pointer_str(proof, "/merkle_root")).as_deref(),
+        "merkle_branch_verifies_txid": computed_merkle_root.as_deref()
+            == normalize_hex(json_pointer_str(proof, "/merkle_root")).as_deref(),
+        "confirmations_match_heights": expected_confirmations == Some(confirmations),
+        "proof_hash_matches_material": proof_hash.as_deref()
+            == normalize_hex(json_pointer_str(case, "/spv_proof_hash")).as_deref(),
+    })
+}
+
+fn btc_spv_proof_material_hash(case: &Value) -> Option<String> {
+    let material = json!({
+        "btc_txid": json_pointer_str(case, "/btc_txid")?,
+        "btc_wtxid": json_pointer_str(case, "/btc_wtxid")?,
+        "btc_tx_hex": json_pointer_str(case, "/btc_tx_hex")?,
+        "btc_transaction_binding": case.get("btc_transaction_binding")?,
+        "btc_block_hash": json_pointer_str(case, "/btc_block_hash")?,
+        "btc_block_header": json_pointer_str(case, "/btc_block_header")?,
+        "btc_merkle_proof": case.get("btc_merkle_proof")?,
+    });
+    Some(format!("0x{}", hex::encode(Sha256::digest(canonical_json_for_report_hash(&material).as_bytes()))))
+}
+
+fn bitcoin_merkle_root_display(txid_display: &str, branch_display: &[String], tx_index: i64) -> Option<String> {
+    let mut index = u64::try_from(tx_index).ok()?;
+    let mut current = bitcoin_internal_hash_from_display(txid_display)?;
+    for sibling in branch_display {
+        let sibling = bitcoin_internal_hash_from_display(sibling)?;
+        let mut preimage = Vec::with_capacity(64);
+        if index & 1 == 0 {
+            preimage.extend_from_slice(&current);
+            preimage.extend_from_slice(&sibling);
+        } else {
+            preimage.extend_from_slice(&sibling);
+            preimage.extend_from_slice(&current);
+        }
+        current = bitcoin_double_sha256(&preimage);
+        index >>= 1;
+    }
+    Some(bitcoin_display_hash_from_internal(&current))
+}
+
+fn bitcoin_header_merkle_root_display(header: &[u8]) -> String {
+    bitcoin_display_hash_from_internal(&header[36..68])
+}
+
+fn bitcoin_display_hash(header: &[u8]) -> String {
+    let digest = bitcoin_double_sha256(header);
+    bitcoin_display_hash_from_internal(&digest)
+}
+
+fn bitcoin_display_hash_from_internal(hash: &[u8]) -> String {
+    let mut display = hash.to_vec();
+    display.reverse();
+    format!("0x{}", hex::encode(display))
+}
+
+fn bitcoin_internal_hash_from_display(value: &str) -> Option<[u8; 32]> {
+    let mut bytes = hex_bytes_exact(value, 32)?;
+    bytes.reverse();
+    bytes.try_into().ok()
+}
+
+fn bitcoin_double_sha256(bytes: &[u8]) -> [u8; 32] {
+    let first = Sha256::digest(bytes);
+    Sha256::digest(first).into()
+}
+
 fn novaseal_profile_operator_report_hash(label: &str, value: &Value) -> String {
     let mut state = blake2b_simd::Params::new().hash_length(32).personal(b"NovaProfileFxV0").to_state();
     state.update(label.as_bytes());
@@ -5946,6 +6535,10 @@ fn json_pointer_i64(value: &Value, pointer: &str) -> Option<i64> {
     value.pointer(pointer).and_then(Value::as_i64)
 }
 
+fn json_pointer_u64(value: &Value, pointer: &str) -> Option<u64> {
+    value.pointer(pointer).and_then(Value::as_u64)
+}
+
 fn json_pointer_bool(value: &Value, pointer: &str) -> bool {
     value.pointer(pointer).and_then(Value::as_bool).unwrap_or(false)
 }
@@ -5975,6 +6568,102 @@ fn expected_btc_spv_scenario(profile: &str) -> Option<&'static str> {
         .find_map(|(expected_profile, scenario)| (*expected_profile == profile).then_some(*scenario))
 }
 
+fn expected_public_btc_anchor_pointer(profile: &str) -> Option<&'static str> {
+    match profile {
+        EXPECTED_BTC_TX_COMMITMENT_PROFILE => Some("/commit_transaction/public_btc_anchor"),
+        EXPECTED_BTC_UTXO_SEAL_PROFILE => Some("/close_utxo_seal/public_btc_anchor"),
+        EXPECTED_DUAL_SEAL_PROFILE => Some("/finalize_dual_seal/public_btc_anchor"),
+        _ => None,
+    }
+}
+
+fn expected_public_btc_commitment_hash_pointer(profile: &str) -> Option<&'static str> {
+    match profile {
+        EXPECTED_BTC_TX_COMMITMENT_PROFILE => Some("/commit_transaction/btc_tx_commitment_hash"),
+        EXPECTED_BTC_UTXO_SEAL_PROFILE => Some("/close_utxo_seal/closure_commitment_hash"),
+        EXPECTED_DUAL_SEAL_PROFILE => Some("/finalize_dual_seal/btc_closure_commitment_hash"),
+        _ => None,
+    }
+}
+
+fn public_btc_anchor_shape_matches_profile(profile: &str, anchor: Option<&Value>) -> bool {
+    let Some(anchor) = anchor else {
+        return false;
+    };
+    match profile {
+        EXPECTED_BTC_TX_COMMITMENT_PROFILE => {
+            exact_object_keys(
+                anchor,
+                &["kind", "anchor_source", "btc_txid", "btc_wtxid", "btc_output_index", "btc_amount_sats", "ckb_btc_commitment_hash"],
+            ) && json_pointer_str(anchor, "/kind") == Some("btc_transaction_commitment")
+                && json_pointer_str(anchor, "/anchor_source").is_some_and(|source| btc_anchor_source_matches_profile(profile, source))
+                && json_pointer_str(anchor, "/btc_txid").is_some_and(is_real_tx_hash)
+                && json_pointer_str(anchor, "/btc_wtxid").is_some_and(is_real_tx_hash)
+                && json_pointer_u64(anchor, "/btc_output_index").is_some()
+                && json_pointer_u64(anchor, "/btc_amount_sats").is_some_and(|amount| amount > 0)
+                && json_pointer_str(anchor, "/ckb_btc_commitment_hash").is_some_and(is_real_tx_hash)
+        }
+        EXPECTED_BTC_UTXO_SEAL_PROFILE => {
+            exact_object_keys(
+                anchor,
+                &[
+                    "kind",
+                    "anchor_source",
+                    "sealed_btc_txid",
+                    "sealed_btc_vout_index",
+                    "sealed_btc_amount_sats",
+                    "script_pubkey_hash",
+                    "btc_txid",
+                    "btc_wtxid",
+                    "spend_input_index",
+                    "ckb_btc_commitment_hash",
+                    "sealed_utxo_commitment_hash",
+                ],
+            ) && json_pointer_str(anchor, "/kind") == Some("btc_utxo_spend")
+                && json_pointer_str(anchor, "/anchor_source").is_some_and(|source| btc_anchor_source_matches_profile(profile, source))
+                && json_pointer_str(anchor, "/sealed_btc_txid").is_some_and(is_real_tx_hash)
+                && json_pointer_u64(anchor, "/sealed_btc_vout_index").is_some()
+                && json_pointer_u64(anchor, "/sealed_btc_amount_sats").is_some_and(|amount| amount > 0)
+                && json_pointer_str(anchor, "/script_pubkey_hash").is_some_and(is_real_tx_hash)
+                && json_pointer_str(anchor, "/btc_txid").is_some_and(is_real_tx_hash)
+                && json_pointer_str(anchor, "/btc_wtxid").is_some_and(is_real_tx_hash)
+                && json_pointer_u64(anchor, "/spend_input_index").is_some()
+                && json_pointer_str(anchor, "/ckb_btc_commitment_hash").is_some_and(is_real_tx_hash)
+                && json_pointer_str(anchor, "/sealed_utxo_commitment_hash").is_some_and(is_real_tx_hash)
+        }
+        EXPECTED_DUAL_SEAL_PROFILE => {
+            exact_object_keys(
+                anchor,
+                &["kind", "anchor_source", "btc_txid", "btc_wtxid", "spend_input_index", "ckb_btc_commitment_hash"],
+            ) && json_pointer_str(anchor, "/kind") == Some("dual_seal_btc_closure")
+                && json_pointer_str(anchor, "/anchor_source").is_some_and(|source| btc_anchor_source_matches_profile(profile, source))
+                && json_pointer_str(anchor, "/btc_txid").is_some_and(is_real_tx_hash)
+                && json_pointer_str(anchor, "/btc_wtxid").is_some_and(is_real_tx_hash)
+                && json_pointer_u64(anchor, "/spend_input_index").is_some()
+                && json_pointer_str(anchor, "/ckb_btc_commitment_hash").is_some_and(is_real_tx_hash)
+        }
+        _ => false,
+    }
+}
+
+fn btc_anchor_source_matches_profile(profile: &str, source: &str) -> bool {
+    match profile {
+        EXPECTED_BTC_TX_COMMITMENT_PROFILE => matches!(source, "local_deterministic_fixture" | "external_public_btc_transaction"),
+        EXPECTED_BTC_UTXO_SEAL_PROFILE | EXPECTED_DUAL_SEAL_PROFILE => {
+            matches!(source, "local_deterministic_fixture" | "external_public_btc_spend")
+        }
+        _ => false,
+    }
+}
+
+fn btc_anchor_source_production_eligible(profile: &str, source: &str) -> bool {
+    match profile {
+        EXPECTED_BTC_TX_COMMITMENT_PROFILE => source == "external_public_btc_transaction",
+        EXPECTED_BTC_UTXO_SEAL_PROFILE | EXPECTED_DUAL_SEAL_PROFILE => source == "external_public_btc_spend",
+        _ => false,
+    }
+}
+
 fn handoff_expected_bindings_exact(value: &Value) -> bool {
     let Some(object) = value.as_object() else {
         return false;
@@ -5982,22 +6671,62 @@ fn handoff_expected_bindings_exact(value: &Value) -> bool {
     if object.len() != EXPECTED_BTC_SPV_EVIDENCE_PROFILES.len() {
         return false;
     }
-    let expected_fields = [
+    let expected_hash_fields = [
         "ckb_live_tx_hash",
         "live_report_hash",
         "service_builder_case_hash",
         "service_builder_tx_skeleton_hash",
         "service_builder_receipt_binding_hash",
+        "ckb_btc_commitment_hash",
     ];
     EXPECTED_BTC_SPV_EVIDENCE_PROFILES.iter().all(|profile| {
         object.get(*profile).is_some_and(|binding| {
-            exact_object_keys(binding, &expected_fields)
-                && expected_fields.iter().all(|field| {
+            let profile_fields: &[&str] = match *profile {
+                EXPECTED_BTC_TX_COMMITMENT_PROFILE => {
+                    &["anchor_source", "btc_txid", "btc_wtxid", "btc_output_index", "btc_amount_sats"]
+                }
+                EXPECTED_BTC_UTXO_SEAL_PROFILE => &[
+                    "anchor_source",
+                    "btc_txid",
+                    "btc_wtxid",
+                    "spend_input_index",
+                    "sealed_btc_txid",
+                    "sealed_btc_vout_index",
+                    "sealed_btc_amount_sats",
+                    "script_pubkey_hash",
+                    "sealed_utxo_commitment_hash",
+                ],
+                EXPECTED_DUAL_SEAL_PROFILE => &["anchor_source", "btc_txid", "btc_wtxid", "spend_input_index"],
+                _ => return false,
+            };
+            let allowed_fields = expected_hash_fields.iter().chain(profile_fields.iter()).copied().collect::<Vec<_>>();
+            exact_object_keys(binding, &allowed_fields)
+                && expected_hash_fields.iter().all(|field| {
                     normalize_hex(json_pointer_str(binding, &format!("/{field}"))).as_deref().is_some_and(is_hex32)
                         && !placeholder_hash(normalize_hex(json_pointer_str(binding, &format!("/{field}"))).as_deref())
                 })
+                && profile_fields.iter().all(|field| btc_binding_expected_field_valid(profile, binding, field))
         })
     })
+}
+
+fn btc_binding_expected_field_valid(profile: &str, binding: &Value, field: &str) -> bool {
+    match field {
+        "anchor_source" => {
+            json_pointer_str(binding, "/anchor_source").is_some_and(|source| btc_anchor_source_production_eligible(profile, source))
+        }
+        "btc_txid" | "btc_wtxid" | "sealed_btc_txid" | "script_pubkey_hash" | "sealed_utxo_commitment_hash" => {
+            normalize_hex(json_pointer_str(binding, &format!("/{field}"))).as_deref().is_some_and(is_hex32)
+                && !placeholder_hash(normalize_hex(json_pointer_str(binding, &format!("/{field}"))).as_deref())
+        }
+        "btc_output_index" | "spend_input_index" | "sealed_btc_vout_index" => {
+            json_pointer_u64(binding, &format!("/{field}")).is_some()
+        }
+        "btc_amount_sats" | "sealed_btc_amount_sats" => {
+            json_pointer_u64(binding, &format!("/{field}")).is_some_and(|amount| amount > 0)
+        }
+        _ => false,
+    }
 }
 
 fn exact_string_set(actual: &[String], expected: &[&str]) -> bool {
@@ -6113,6 +6842,24 @@ fn is_hex_bytes(value: &str) -> bool {
     value.len() > 2 && value.len() % 2 == 0 && value.starts_with("0x") && value[2..].bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
+fn is_hex_bytes_len(value: &str, byte_len: usize) -> bool {
+    value.len() == 2 + byte_len * 2 && is_hex_bytes(value)
+}
+
+fn hex_bytes_exact(value: &str, byte_len: usize) -> Option<Vec<u8>> {
+    if !is_hex_bytes_len(value, byte_len) {
+        return None;
+    }
+    hex::decode(&value[2..]).ok().filter(|bytes| bytes.len() == byte_len)
+}
+
+fn hex_bytes(value: &str) -> Option<Vec<u8>> {
+    if !is_hex_bytes(value) {
+        return None;
+    }
+    hex::decode(&value[2..]).ok()
+}
+
 fn is_git_commit_hash(value: &str) -> bool {
     value.len() == 40 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
@@ -6138,6 +6885,221 @@ mod tests {
         format!("0x{}", format!("{byte:02x}").repeat(32))
     }
 
+    struct TestBtcProfileMaterial {
+        tx_hex: String,
+        txid: String,
+        wtxid: String,
+        binding: Value,
+        expected_binding: Value,
+    }
+
+    fn push_test_compact_size(target: &mut Vec<u8>, value: u64) {
+        match value {
+            0x00..=0xfc => target.push(value as u8),
+            0xfd..=0xffff => {
+                target.push(0xfd);
+                target.extend_from_slice(&(value as u16).to_le_bytes());
+            }
+            0x1_0000..=0xffff_ffff => {
+                target.push(0xfe);
+                target.extend_from_slice(&(value as u32).to_le_bytes());
+            }
+            _ => {
+                target.push(0xff);
+                target.extend_from_slice(&value.to_le_bytes());
+            }
+        }
+    }
+
+    fn test_bitcoin_tx_hex(prevouts: &[(String, u32)], outputs: &[(u64, Vec<u8>)]) -> String {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&2u32.to_le_bytes());
+        push_test_compact_size(&mut bytes, prevouts.len() as u64);
+        for (prev_txid, prev_vout) in prevouts {
+            bytes.extend_from_slice(&bitcoin_internal_hash_from_display(prev_txid).unwrap());
+            bytes.extend_from_slice(&prev_vout.to_le_bytes());
+            push_test_compact_size(&mut bytes, 0);
+            bytes.extend_from_slice(&0xffff_ffffu32.to_le_bytes());
+        }
+        push_test_compact_size(&mut bytes, outputs.len() as u64);
+        for (amount_sats, script_pubkey) in outputs {
+            bytes.extend_from_slice(&amount_sats.to_le_bytes());
+            push_test_compact_size(&mut bytes, script_pubkey.len() as u64);
+            bytes.extend_from_slice(script_pubkey);
+        }
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        format!("0x{}", hex::encode(bytes))
+    }
+
+    fn test_btc_script(seed: u8) -> Vec<u8> {
+        vec![0x51, seed, seed.wrapping_add(1)]
+    }
+
+    fn test_anchor_source(profile: &str) -> &'static str {
+        match profile {
+            EXPECTED_BTC_TX_COMMITMENT_PROFILE => "external_public_btc_transaction",
+            EXPECTED_BTC_UTXO_SEAL_PROFILE | EXPECTED_DUAL_SEAL_PROFILE => "external_public_btc_spend",
+            _ => "external_public_btc_transaction",
+        }
+    }
+
+    fn test_btc_profile_material(profile: &str, seed: u8) -> TestBtcProfileMaterial {
+        match profile {
+            EXPECTED_BTC_UTXO_SEAL_PROFILE => {
+                let sealed_script = test_btc_script(seed);
+                let sealed_amount = 75_000 + u64::from(seed);
+                let script_pubkey_hash = format!("0x{}", hex::encode(crate::ckb_blake2b256(&sealed_script)));
+                let sealed_tx_hex = test_bitcoin_tx_hex(
+                    &[(test_hex32(seed.wrapping_add(0x30)), 0)],
+                    &[(10_000, vec![0x51]), (sealed_amount, sealed_script)],
+                );
+                let sealed_tx = parse_bitcoin_tx_hex(&sealed_tx_hex).unwrap();
+                let tx_hex = test_bitcoin_tx_hex(&[(sealed_tx.txid.clone(), 1)], &[(20_000 + u64::from(seed), vec![0x51, seed])]);
+                let tx = parse_bitcoin_tx_hex(&tx_hex).unwrap();
+                let sealed_utxo_commitment_hash = test_hex32(seed.wrapping_add(0x06));
+                let binding = json!({
+                    "kind": "btc_utxo_spend",
+                    "spend_input_index": 0,
+                    "sealed_btc_txid": sealed_tx.txid,
+                    "sealed_btc_vout_index": 1,
+                    "sealed_btc_amount_sats": sealed_amount,
+                    "script_pubkey_hash": script_pubkey_hash,
+                    "sealed_btc_tx_hex": sealed_tx_hex,
+                    "sealed_utxo_commitment_hash": sealed_utxo_commitment_hash,
+                });
+                let expected_binding = json!({
+                    "anchor_source": test_anchor_source(profile),
+                    "btc_txid": tx.txid,
+                    "btc_wtxid": tx.wtxid,
+                    "spend_input_index": 0,
+                    "sealed_btc_txid": binding["sealed_btc_txid"].clone(),
+                    "sealed_btc_vout_index": 1,
+                    "sealed_btc_amount_sats": sealed_amount,
+                    "script_pubkey_hash": binding["script_pubkey_hash"].clone(),
+                    "sealed_utxo_commitment_hash": binding["sealed_utxo_commitment_hash"].clone(),
+                });
+                TestBtcProfileMaterial {
+                    tx_hex,
+                    txid: json_pointer_str(&expected_binding, "/btc_txid").unwrap().to_string(),
+                    wtxid: json_pointer_str(&expected_binding, "/btc_wtxid").unwrap().to_string(),
+                    binding,
+                    expected_binding,
+                }
+            }
+            EXPECTED_DUAL_SEAL_PROFILE => {
+                let tx_hex =
+                    test_bitcoin_tx_hex(&[(test_hex32(seed.wrapping_add(0x40)), 0)], &[(30_000 + u64::from(seed), vec![0x51, seed])]);
+                let tx = parse_bitcoin_tx_hex(&tx_hex).unwrap();
+                let binding = json!({
+                    "kind": "dual_seal_btc_closure",
+                    "spend_input_index": 0,
+                });
+                let expected_binding = json!({
+                    "anchor_source": test_anchor_source(profile),
+                    "btc_txid": tx.txid,
+                    "btc_wtxid": tx.wtxid,
+                    "spend_input_index": 0,
+                });
+                TestBtcProfileMaterial {
+                    tx_hex,
+                    txid: json_pointer_str(&expected_binding, "/btc_txid").unwrap().to_string(),
+                    wtxid: json_pointer_str(&expected_binding, "/btc_wtxid").unwrap().to_string(),
+                    binding,
+                    expected_binding,
+                }
+            }
+            _ => {
+                let amount = 50_000 + u64::from(seed);
+                let tx_hex = test_bitcoin_tx_hex(
+                    &[(test_hex32(seed.wrapping_add(0x20)), 0)],
+                    &[(10_000, vec![0x51]), (20_000, vec![0x51, seed]), (amount, test_btc_script(seed))],
+                );
+                let tx = parse_bitcoin_tx_hex(&tx_hex).unwrap();
+                let binding = json!({
+                    "kind": "btc_transaction_output",
+                    "btc_output_index": 2,
+                    "btc_amount_sats": amount,
+                });
+                let expected_binding = json!({
+                    "anchor_source": test_anchor_source(profile),
+                    "btc_txid": tx.txid,
+                    "btc_wtxid": tx.wtxid,
+                    "btc_output_index": 2,
+                    "btc_amount_sats": amount,
+                });
+                TestBtcProfileMaterial {
+                    tx_hex,
+                    txid: json_pointer_str(&expected_binding, "/btc_txid").unwrap().to_string(),
+                    wtxid: json_pointer_str(&expected_binding, "/btc_wtxid").unwrap().to_string(),
+                    binding,
+                    expected_binding,
+                }
+            }
+        }
+    }
+
+    fn merge_expected_btc_binding_fields(target: &mut Value, material: &TestBtcProfileMaterial) {
+        for (key, value) in material.expected_binding.as_object().unwrap() {
+            target.as_object_mut().unwrap().insert(key.clone(), value.clone());
+        }
+    }
+
+    fn add_expected_btc_request_fields(request: &mut Value, material: &TestBtcProfileMaterial) {
+        for (binding_field, request_field) in [
+            ("anchor_source", "local_anchor_source"),
+            ("anchor_source", "expected_anchor_source"),
+            ("btc_txid", "expected_btc_txid"),
+            ("btc_wtxid", "expected_btc_wtxid"),
+            ("btc_output_index", "expected_btc_output_index"),
+            ("btc_amount_sats", "expected_btc_amount_sats"),
+            ("spend_input_index", "expected_spend_input_index"),
+            ("sealed_btc_txid", "expected_sealed_btc_txid"),
+            ("sealed_btc_vout_index", "expected_sealed_btc_vout_index"),
+            ("sealed_btc_amount_sats", "expected_sealed_btc_amount_sats"),
+            ("script_pubkey_hash", "expected_script_pubkey_hash"),
+            ("sealed_utxo_commitment_hash", "expected_sealed_utxo_commitment_hash"),
+        ] {
+            if let Some(value) = material.expected_binding.get(binding_field) {
+                request.as_object_mut().unwrap().insert(request_field.to_string(), value.clone());
+            }
+        }
+    }
+
+    fn test_btc_spv_material(seed: u8, confirmations: i64, btc: &TestBtcProfileMaterial) -> Value {
+        let txid = btc.txid.clone();
+        let sibling = test_hex32(seed.wrapping_add(1));
+        let merkle_root = bitcoin_merkle_root_display(&txid, std::slice::from_ref(&sibling), 0).unwrap();
+        let mut header = vec![0u8; 80];
+        header[0..4].copy_from_slice(&2u32.to_le_bytes());
+        let merkle_root_internal = bitcoin_internal_hash_from_display(&merkle_root).unwrap();
+        header[36..68].copy_from_slice(&merkle_root_internal);
+        header[68..72].copy_from_slice(&1_800_000_000u32.to_le_bytes());
+        header[72..76].copy_from_slice(&0x1d00ffffu32.to_le_bytes());
+        header[76..80].copy_from_slice(&u32::from(seed).to_le_bytes());
+        let btc_block_header = format!("0x{}", hex::encode(&header));
+        let btc_block_hash = bitcoin_display_hash(&header);
+        let block_height = 900_000i64 + i64::from(seed);
+        let observed_tip_height = block_height + confirmations - 1;
+        let mut material = json!({
+            "btc_txid": txid,
+            "btc_wtxid": btc.wtxid.clone(),
+            "btc_tx_hex": btc.tx_hex.clone(),
+            "btc_transaction_binding": btc.binding.clone(),
+            "btc_block_hash": btc_block_hash,
+            "btc_block_header": btc_block_header,
+            "btc_merkle_proof": {
+                "tx_index": 0,
+                "merkle_branch": [sibling],
+                "merkle_root": merkle_root,
+                "block_height": block_height,
+                "observed_tip_height": observed_tip_height,
+            },
+        });
+        let proof_hash = btc_spv_proof_material_hash(&material).unwrap();
+        material["spv_proof_hash"] = json!(proof_hash);
+        material
+    }
+
     fn set_json_pointer_string(value: &mut Value, pointer: &str, content: String) {
         let mut current = value;
         let mut parts = pointer.trim_start_matches('/').split('/').peekable();
@@ -6150,11 +7112,67 @@ mod tests {
         }
     }
 
+    fn set_json_pointer_value(value: &mut Value, pointer: &str, content: Value) {
+        let mut current = value;
+        let mut parts = pointer.trim_start_matches('/').split('/').peekable();
+        while let Some(part) = parts.next() {
+            if parts.peek().is_none() {
+                current.as_object_mut().unwrap().insert(part.to_string(), content);
+                return;
+            }
+            current = current.as_object_mut().unwrap().entry(part.to_string()).or_insert_with(|| json!({}));
+        }
+    }
+
+    fn test_public_btc_anchor(profile: &str, seed: u8) -> Value {
+        match profile {
+            EXPECTED_BTC_TX_COMMITMENT_PROFILE => json!({
+                "kind": "btc_transaction_commitment",
+                "anchor_source": test_anchor_source(profile),
+                "btc_txid": test_hex32(seed),
+                "btc_wtxid": test_hex32(seed.wrapping_add(1)),
+                "btc_output_index": 0,
+                "btc_amount_sats": 50_000,
+                "ckb_btc_commitment_hash": test_hex32(seed.wrapping_add(2)),
+            }),
+            EXPECTED_BTC_UTXO_SEAL_PROFILE => json!({
+                "kind": "btc_utxo_spend",
+                "anchor_source": test_anchor_source(profile),
+                "sealed_btc_txid": test_hex32(seed),
+                "sealed_btc_vout_index": 1,
+                "sealed_btc_amount_sats": 75_000,
+                "script_pubkey_hash": test_hex32(seed.wrapping_add(1)),
+                "btc_txid": test_hex32(seed.wrapping_add(2)),
+                "btc_wtxid": test_hex32(seed.wrapping_add(3)),
+                "spend_input_index": 0,
+                "ckb_btc_commitment_hash": test_hex32(seed.wrapping_add(4)),
+                "sealed_utxo_commitment_hash": test_hex32(seed.wrapping_add(5)),
+            }),
+            EXPECTED_DUAL_SEAL_PROFILE => json!({
+                "kind": "dual_seal_btc_closure",
+                "anchor_source": test_anchor_source(profile),
+                "btc_txid": test_hex32(seed),
+                "btc_wtxid": test_hex32(seed.wrapping_add(1)),
+                "spend_input_index": 0,
+                "ckb_btc_commitment_hash": test_hex32(seed.wrapping_add(2)),
+            }),
+            _ => Value::Null,
+        }
+    }
+
     fn write_expected_live_fixture_reports(repo_root: &Path) -> BTreeMap<String, Value> {
         let mut reports = BTreeMap::<String, Value>::new();
         for (index, expected) in EXPECTED_PROFILE_OPERATOR_FIXTURES.iter().enumerate() {
             let report = reports.entry(expected.live_report.to_string()).or_insert_with(|| json!({"status": "passed"}));
             set_json_pointer_string(report, expected.live_tx_hash_pointer, test_hex32(index as u8 + 1));
+            if let Some(anchor_pointer) = expected_public_btc_anchor_pointer(expected.profile) {
+                let anchor = test_public_btc_anchor(expected.profile, index as u8 + 0x40);
+                let ckb_btc_commitment_hash = json_pointer_str(&anchor, "/ckb_btc_commitment_hash").unwrap().to_string();
+                set_json_pointer_value(report, anchor_pointer, anchor);
+                if let Some(commitment_pointer) = expected_public_btc_commitment_hash_pointer(expected.profile) {
+                    set_json_pointer_string(report, commitment_pointer, ckb_btc_commitment_hash);
+                }
+            }
         }
         for (path, report) in &reports {
             let absolute = repo_root.join(path);
@@ -6180,6 +7198,10 @@ mod tests {
                 let report = json_load_path(repo_root, &repo_root.join(path)).unwrap();
                 novaseal_profile_operator_report_hash(path, &report)
             });
+            let public_btc_anchor = expected_public_btc_anchor_pointer(expected.profile)
+                .and_then(|pointer| live_report.pointer(pointer))
+                .cloned()
+                .unwrap_or(Value::Null);
             let hash = test_hex32(0xaa);
             cases.push(json!({
                 "profile": expected.profile,
@@ -6202,10 +7224,12 @@ mod tests {
                 "live_report_hash": live_report_hash,
                 "fiber_report_hash": fiber_report_hash,
                 "live_devnet_tx_hash": live_tx_hash,
+                "public_btc_anchor": public_btc_anchor.clone(),
                 "wallet_display": {
                     "profile": expected.profile,
                     "action": expected.action,
                     "live_devnet_tx_hash": live_tx_hash,
+                    "public_btc_anchor": public_btc_anchor,
                 },
             }));
         }
@@ -6234,6 +7258,7 @@ mod tests {
             let operator_fixture_hash = novaseal_service_builder_report_hash("operator_case", operator_case);
             let signed_hash = json_pointer_str(operator_case, "/signed_intent_hash").unwrap();
             let witness_hash = json_pointer_str(operator_case, "/witness_shape_hash").unwrap();
+            let public_btc_anchor = operator_case.pointer("/public_btc_anchor").cloned().unwrap_or(Value::Null);
             cases.push(json!({
                 "profile": profile,
                 "action": action,
@@ -6261,6 +7286,7 @@ mod tests {
                         "live_report_hash": json_pointer_str(operator_case, "/live_report_hash"),
                         "live_devnet_tx_hash": json_pointer_str(operator_case, "/live_devnet_tx_hash"),
                         "fiber_report_hash": json_pointer_str(operator_case, "/fiber_report_hash"),
+                        "public_btc_anchor": public_btc_anchor.clone(),
                     },
                     "production_external_inputs": ["public_shared_cell_dep_attestation"],
                 },
@@ -6279,6 +7305,7 @@ mod tests {
                 "tx_skeleton": {
                     "schema": "novaseal-service-builder-tx-skeleton-v0.1",
                     "operator_fixture_hash": operator_fixture_hash,
+                    "public_btc_anchor": public_btc_anchor,
                 },
             }));
         }
@@ -6460,6 +7487,19 @@ mod tests {
         let detail = validate_profile_operator_fixture_detail(temp.path(), &stale).unwrap();
         assert_eq!(json_pointer_str(&detail, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&detail, "/cases/fungible-xudt-profile-v0:issue_xudt/live_report_hash_matches_current_report",));
+
+        let mut stale_anchor = operator_fixture_report(temp.path());
+        let btc_index = EXPECTED_PROFILE_OPERATOR_FIXTURES
+            .iter()
+            .position(|fixture| fixture.profile == EXPECTED_BTC_TX_COMMITMENT_PROFILE)
+            .unwrap();
+        stale_anchor["cases"][btc_index]["public_btc_anchor"]["ckb_btc_commitment_hash"] = Value::String(test_hex32(0xfc));
+        let detail = validate_profile_operator_fixture_detail(temp.path(), &stale_anchor).unwrap();
+        assert_eq!(json_pointer_str(&detail, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(
+            &detail,
+            "/cases/btc-transaction-commitment-profile-v0:commit_btc_transaction_transition/public_btc_anchor_matches_current_report",
+        ));
     }
 
     #[test]
@@ -6472,11 +7512,25 @@ mod tests {
         let detail = validate_service_builder_fixture_detail(&report, &operator_report);
         assert_eq!(json_pointer_str(&detail, "/status"), Some("passed"));
 
-        let mut stale = report;
+        let mut stale = report.clone();
         stale["source_operator_fixture_report_hash"] = Value::String(test_hex32(0xfd));
         let detail = validate_service_builder_fixture_detail(&stale, &operator_report);
         assert_eq!(json_pointer_str(&detail, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&detail, "/checks/source_operator_fixture_report_hash_matches_current_report"));
+
+        let mut stale_anchor = report;
+        let btc_index = EXPECTED_PROFILE_OPERATOR_FIXTURES
+            .iter()
+            .position(|fixture| fixture.profile == EXPECTED_BTC_TX_COMMITMENT_PROFILE)
+            .unwrap();
+        stale_anchor["cases"][btc_index]["request"]["required_live_inputs"]["public_btc_anchor"]["ckb_btc_commitment_hash"] =
+            Value::String(test_hex32(0xfb));
+        let detail = validate_service_builder_fixture_detail(&stale_anchor, &operator_report);
+        assert_eq!(json_pointer_str(&detail, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(
+            &detail,
+            "/cases/btc-transaction-commitment-profile-v0:commit_btc_transaction_transition/public_btc_anchor_input_matches_operator_fixture",
+        ));
     }
 
     #[test]
@@ -6510,16 +7564,17 @@ mod tests {
             .enumerate()
             .map(|(index, profile)| {
                 let byte = index as u8 + 0x50;
-                (
-                    (*profile).to_string(),
-                    json!({
-                        "ckb_live_tx_hash": test_hex32(byte),
-                        "live_report_hash": test_hex32(byte + 1),
-                        "service_builder_case_hash": test_hex32(byte + 2),
-                        "service_builder_tx_skeleton_hash": test_hex32(byte + 3),
-                        "service_builder_receipt_binding_hash": test_hex32(byte + 4),
-                    }),
-                )
+                let btc_material = test_btc_profile_material(profile, byte);
+                let mut binding = json!({
+                    "ckb_live_tx_hash": test_hex32(byte),
+                    "live_report_hash": test_hex32(byte + 1),
+                    "service_builder_case_hash": test_hex32(byte + 2),
+                    "service_builder_tx_skeleton_hash": test_hex32(byte + 3),
+                    "service_builder_receipt_binding_hash": test_hex32(byte + 4),
+                    "ckb_btc_commitment_hash": test_hex32(byte + 5),
+                });
+                merge_expected_btc_binding_fields(&mut binding, &btc_material);
+                ((*profile).to_string(), binding)
             })
             .collect::<Map<String, Value>>();
         let btc_spv_adapter = json!({
@@ -6529,21 +7584,27 @@ mod tests {
             "summary": { "total": 3, "matched": 3 },
             "cases": EXPECTED_BTC_SPV_EVIDENCE_PROFILES
                 .iter()
-                .map(|profile| {
+                .enumerate()
+                .map(|(index, profile)| {
                     let profile = *profile;
                     let bindings = expected_btc_bindings.get(profile).unwrap();
-                    json!({
-                    "profile": profile,
-                    "status": "passed",
-                    "request": {
+                    let mut request = json!({
                         "scenario": expected_btc_spv_scenario(profile).unwrap(),
                         "ckb_live_tx_hash": json_pointer_str(bindings, "/ckb_live_tx_hash").unwrap(),
                         "live_report_hash": json_pointer_str(bindings, "/live_report_hash").unwrap(),
                         "service_builder_case_hash": json_pointer_str(bindings, "/service_builder_case_hash").unwrap(),
                         "service_builder_tx_skeleton_hash": json_pointer_str(bindings, "/service_builder_tx_skeleton_hash").unwrap(),
                         "service_builder_receipt_binding_hash": json_pointer_str(bindings, "/service_builder_receipt_binding_hash").unwrap(),
-                    },
-                })})
+                        "ckb_btc_commitment_hash": json_pointer_str(bindings, "/ckb_btc_commitment_hash").unwrap(),
+                    });
+                    let btc_material = test_btc_profile_material(profile, index as u8 + 0x50);
+                    add_expected_btc_request_fields(&mut request, &btc_material);
+                    json!({
+                        "profile": profile,
+                        "status": "passed",
+                        "request": request,
+                    })
+                })
                 .collect::<Vec<_>>(),
         });
         let external_attestation_adapter = json!({
@@ -6681,6 +7742,37 @@ mod tests {
         assert!(json_pointer_bool(&valid, "/cases/public_shared_cell_dep_attestation/expected_values_match_source_adapter"));
         assert!(json_pointer_bool(&valid, "/cases/external_bip340_tcb_review_attestation/expected_values_match_source_adapter"));
         assert!(json_pointer_bool(&valid, "/cases/rwa_legal_registry_review_evidence/expected_values_match_source_adapter"));
+
+        let mut wrong_btc_anchor_source = report.clone();
+        wrong_btc_anchor_source["cases"][0]["expected_case_bindings"][EXPECTED_BTC_TX_COMMITMENT_PROFILE]["anchor_source"] =
+            json!("external_public_btc_spend");
+        let failed_btc_anchor_source = validate_external_evidence_handoff_detail(
+            Path::new("."),
+            &wrong_btc_anchor_source,
+            &btc_spv_adapter,
+            &external_attestation_adapter,
+        );
+        assert_eq!(json_pointer_str(&failed_btc_anchor_source, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&failed_btc_anchor_source, "/cases/public_btc_spv_evidence/expected_case_bindings_exact"));
+        assert!(!json_pointer_bool(
+            &failed_btc_anchor_source,
+            "/cases/public_btc_spv_evidence/expected_case_bindings_match_source_adapter"
+        ));
+
+        let mut zero_btc_amount = report.clone();
+        zero_btc_amount["cases"][0]["expected_case_bindings"][EXPECTED_BTC_TX_COMMITMENT_PROFILE]["btc_amount_sats"] = json!(0);
+        let failed_zero_btc_amount = validate_external_evidence_handoff_detail(
+            Path::new("."),
+            &zero_btc_amount,
+            &btc_spv_adapter,
+            &external_attestation_adapter,
+        );
+        assert_eq!(json_pointer_str(&failed_zero_btc_amount, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&failed_zero_btc_amount, "/cases/public_btc_spv_evidence/expected_case_bindings_exact"));
+        assert!(!json_pointer_bool(
+            &failed_zero_btc_amount,
+            "/cases/public_btc_spv_evidence/expected_case_bindings_match_source_adapter"
+        ));
 
         let mut stale_bundle_hash = report.clone();
         stale_bundle_hash["bundle_hash"] = json!(format!("0x{}", "22".repeat(32)));
@@ -7165,11 +8257,10 @@ mod tests {
             "source_public_btc_spv_template_hash": format!("0x{}", "bb".repeat(32)),
             "production_output": PUBLIC_BTC_SPV_EVIDENCE,
             "summary": { "total": EXPECTED_BTC_SPV_EVIDENCE_PROFILES.len(), "matched": EXPECTED_BTC_SPV_EVIDENCE_PROFILES.len() },
-            "cases": EXPECTED_BTC_SPV_EVIDENCE_PROFILES.iter().map(|profile| json!({
-                "profile": profile,
-                "status": "passed",
-                "checks": { "ok": true },
-                "request": {
+            "cases": EXPECTED_BTC_SPV_EVIDENCE_PROFILES.iter().enumerate().map(|(index, profile)| {
+                let profile = *profile;
+                let btc_material = test_btc_profile_material(profile, index as u8 + 0x60);
+                let mut request = json!({
                     "profile": profile,
                     "scenario": expected_btc_spv_scenario(profile).unwrap(),
                     "minimum_confirmations": 6,
@@ -7177,17 +8268,76 @@ mod tests {
                     "service_builder_case_hash": format!("0x{}", "cc".repeat(32)),
                     "service_builder_tx_skeleton_hash": format!("0x{}", "dd".repeat(32)),
                     "service_builder_receipt_binding_hash": format!("0x{}", "ee".repeat(32)),
+                    "ckb_btc_commitment_hash": format!("0x{}", "ab".repeat(32)),
                     "template_case_hash": format!("0x{}", "ff".repeat(32)),
                     "required_public_fields": full_public_fields,
                     "field_constraints": constraint_object(EXPECTED_BTC_SPV_FIELD_CONSTRAINTS),
-                },
-            })).collect::<Vec<_>>(),
+                });
+                add_expected_btc_request_fields(&mut request, &btc_material);
+                json!({
+                    "profile": profile,
+                    "status": "passed",
+                    "checks": { "ok": true },
+                    "request": request,
+                })
+            }).collect::<Vec<_>>(),
         });
 
         let valid = validate_btc_spv_evidence_adapter_detail(&report);
         assert_eq!(json_pointer_str(&valid, "/status"), Some("passed"));
         assert!(json_pointer_bool(&valid, "/cases/btc-transaction-commitment-profile-v0/field_constraints_exact"));
         assert!(json_pointer_bool(&valid, "/cases/btc-transaction-commitment-profile-v0/scenario_matches_expected"));
+
+        let mut wrong_anchor_source = report.clone();
+        wrong_anchor_source["cases"][0]["request"]["expected_anchor_source"] = json!("external_public_btc_spend");
+        let failed_anchor_source = validate_btc_spv_evidence_adapter_detail(&wrong_anchor_source);
+        assert_eq!(json_pointer_str(&failed_anchor_source, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(
+            &failed_anchor_source,
+            "/cases/btc-transaction-commitment-profile-v0/expected_anchor_source_production_eligible"
+        ));
+
+        let mut fixture_local_anchor_source = report.clone();
+        fixture_local_anchor_source["cases"][0]["request"]["local_anchor_source"] = json!("local_deterministic_fixture");
+        fixture_local_anchor_source["cases"][0]["request"]["expected_anchor_source"] = json!("external_public_btc_transaction");
+        let valid_fixture_local_anchor_source = validate_btc_spv_evidence_adapter_detail(&fixture_local_anchor_source);
+        assert_eq!(json_pointer_str(&valid_fixture_local_anchor_source, "/status"), Some("passed"));
+        assert!(json_pointer_bool(
+            &valid_fixture_local_anchor_source,
+            "/cases/btc-transaction-commitment-profile-v0/expected_anchor_source_production_eligible"
+        ));
+        assert!(json_pointer_bool(
+            &valid_fixture_local_anchor_source,
+            "/cases/btc-transaction-commitment-profile-v0/local_anchor_source_present"
+        ));
+
+        let mut missing_local_anchor_source = report.clone();
+        missing_local_anchor_source["cases"][0]["request"].as_object_mut().unwrap().remove("local_anchor_source");
+        let failed_missing_local_anchor_source = validate_btc_spv_evidence_adapter_detail(&missing_local_anchor_source);
+        assert_eq!(json_pointer_str(&failed_missing_local_anchor_source, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(
+            &failed_missing_local_anchor_source,
+            "/cases/btc-transaction-commitment-profile-v0/local_anchor_source_present"
+        ));
+
+        let mut local_anchor_source = report.clone();
+        local_anchor_source["cases"][0]["request"]["expected_anchor_source"] = json!("local_deterministic_fixture");
+        local_anchor_source["cases"][0]["request"]["local_anchor_source"] = json!("local_deterministic_fixture");
+        let failed_local_anchor_source = validate_btc_spv_evidence_adapter_detail(&local_anchor_source);
+        assert_eq!(json_pointer_str(&failed_local_anchor_source, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(
+            &failed_local_anchor_source,
+            "/cases/btc-transaction-commitment-profile-v0/expected_anchor_source_production_eligible"
+        ));
+
+        let mut zero_btc_amount = report.clone();
+        zero_btc_amount["cases"][0]["request"]["expected_btc_amount_sats"] = json!(0);
+        let failed_zero_btc_amount = validate_btc_spv_evidence_adapter_detail(&zero_btc_amount);
+        assert_eq!(json_pointer_str(&failed_zero_btc_amount, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(
+            &failed_zero_btc_amount,
+            "/cases/btc-transaction-commitment-profile-v0/expected_output_fields_present"
+        ));
 
         let mut missing_constraint = report.clone();
         missing_constraint["cases"][0]["request"]["field_constraints"].as_object_mut().unwrap().remove("source_service.commit");
@@ -7668,16 +8818,17 @@ mod tests {
             .enumerate()
             .map(|(index, profile)| {
                 let byte = index as u8 + 0x77;
-                (
-                    (*profile).to_string(),
-                    json!({
-                        "ckb_live_tx_hash": test_hex32(byte),
-                        "live_report_hash": test_hex32(byte + 1),
-                        "service_builder_case_hash": test_hex32(byte + 2),
-                        "service_builder_tx_skeleton_hash": test_hex32(byte + 3),
-                        "service_builder_receipt_binding_hash": test_hex32(byte + 4),
-                    }),
-                )
+                let btc_material = test_btc_profile_material(profile, byte);
+                let mut binding = json!({
+                    "ckb_live_tx_hash": test_hex32(byte),
+                    "live_report_hash": test_hex32(byte + 1),
+                    "service_builder_case_hash": test_hex32(byte + 2),
+                    "service_builder_tx_skeleton_hash": test_hex32(byte + 3),
+                    "service_builder_receipt_binding_hash": test_hex32(byte + 4),
+                    "ckb_btc_commitment_hash": test_hex32(byte + 5),
+                });
+                merge_expected_btc_binding_fields(&mut binding, &btc_material);
+                ((*profile).to_string(), binding)
             })
             .collect::<Map<_, _>>();
         let handoff = json!({
@@ -7700,6 +8851,8 @@ mod tests {
         let case_for = |profile: &str| {
             let index = EXPECTED_BTC_SPV_EVIDENCE_PROFILES.iter().position(|expected| *expected == profile).unwrap_or(9);
             let byte = index as u8 + 0x77;
+            let btc_material = test_btc_profile_material(profile, byte);
+            let spv_material = test_btc_spv_material(byte, 7, &btc_material);
             json!({
                 "profile": profile,
                 "scenario": expected_btc_spv_scenario(profile).unwrap_or("unexpected-profile-scenario"),
@@ -7708,9 +8861,15 @@ mod tests {
                 "service_builder_case_hash": test_hex32(byte + 2),
                 "service_builder_tx_skeleton_hash": test_hex32(byte + 3),
                 "service_builder_receipt_binding_hash": test_hex32(byte + 4),
-                "btc_txid": format!("0x{}", "11".repeat(32)),
-                "btc_block_hash": format!("0x{}", "22".repeat(32)),
-                "spv_proof_hash": format!("0x{}", "33".repeat(32)),
+                "ckb_btc_commitment_hash": test_hex32(byte + 5),
+                "btc_txid": spv_material["btc_txid"].clone(),
+                "btc_wtxid": spv_material["btc_wtxid"].clone(),
+                "btc_tx_hex": spv_material["btc_tx_hex"].clone(),
+                "btc_transaction_binding": spv_material["btc_transaction_binding"].clone(),
+                "btc_block_hash": spv_material["btc_block_hash"].clone(),
+                "btc_block_header": spv_material["btc_block_header"].clone(),
+                "btc_merkle_proof": spv_material["btc_merkle_proof"].clone(),
+                "spv_proof_hash": spv_material["spv_proof_hash"].clone(),
                 "minimum_confirmations": 6,
                 "confirmations": 7,
                 "spv_client_cell_dep": {
@@ -7767,7 +8926,161 @@ mod tests {
         assert!(json_pointer_bool(&passed, "/case_checks/btc-transaction-commitment-profile-v0/ckb_live_tx_hash_matches_handoff"));
         assert!(json_pointer_bool(
             &passed,
+            "/case_checks/btc-transaction-commitment-profile-v0/ckb_btc_commitment_hash_matches_handoff"
+        ));
+        assert!(json_pointer_bool(&passed, "/case_checks/btc-transaction-commitment-profile-v0/btc_txid_matches_handoff_when_bound"));
+        assert!(json_pointer_bool(&passed, "/case_checks/btc-transaction-commitment-profile-v0/btc_wtxid_matches_handoff_when_bound"));
+        assert!(json_pointer_bool(&passed, "/case_checks/btc-transaction-commitment-profile-v0/btc_txid_matches_tx_hex"));
+        assert!(json_pointer_bool(&passed, "/case_checks/btc-transaction-commitment-profile-v0/btc_wtxid_matches_tx_hex"));
+        assert!(json_pointer_bool(
+            &passed,
+            "/case_checks/btc-transaction-commitment-profile-v0/btc_transaction_binding_matches_handoff"
+        ));
+        assert!(json_pointer_bool(
+            &passed,
+            "/case_checks/btc-transaction-commitment-profile-v0/btc_transaction_output_matches_anchor"
+        ));
+        assert!(json_pointer_bool(&passed, "/case_checks/btc-utxo-seal-profile-v0/btc_utxo_spend_input_matches_anchor"));
+        assert!(json_pointer_bool(&passed, "/case_checks/btc-utxo-seal-profile-v0/btc_utxo_sealed_tx_matches_anchor"));
+        assert!(json_pointer_bool(&passed, "/case_checks/dual-seal-profile-v0/btc_dual_spend_input_matches_anchor"));
+        assert!(json_pointer_bool(&passed, "/case_checks/btc-transaction-commitment-profile-v0/btc_block_hash_matches_header"));
+        assert!(json_pointer_bool(&passed, "/case_checks/btc-transaction-commitment-profile-v0/btc_merkle_root_matches_header"));
+        assert!(json_pointer_bool(&passed, "/case_checks/btc-transaction-commitment-profile-v0/btc_merkle_branch_verifies_txid"));
+        assert!(json_pointer_bool(&passed, "/case_checks/btc-transaction-commitment-profile-v0/btc_confirmations_match_heights"));
+        assert!(json_pointer_bool(&passed, "/case_checks/btc-transaction-commitment-profile-v0/spv_proof_hash_matches_material"));
+        assert!(json_pointer_bool(
+            &passed,
             "/case_checks/btc-transaction-commitment-profile-v0/service_builder_tx_skeleton_hash_matches_handoff"
+        ));
+
+        let mut stale_btc_commitment = spv_report.clone();
+        stale_btc_commitment["cases"][0]["ckb_btc_commitment_hash"] = json!(test_hex32(0x19));
+        std::fs::write(proofs.join("public_btc_spv_evidence.json"), serde_json::to_vec_pretty(&stale_btc_commitment).unwrap())
+            .unwrap();
+        let failed_stale_btc_commitment = validate_btc_spv_evidence(temp.path(), PUBLIC_BTC_SPV_EVIDENCE, &handoff).unwrap();
+        assert_eq!(json_pointer_str(&failed_stale_btc_commitment, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(
+            &failed_stale_btc_commitment,
+            "/case_checks/btc-transaction-commitment-profile-v0/ckb_btc_commitment_hash_matches_handoff"
+        ));
+
+        let mut stale_tx_hex = spv_report.clone();
+        stale_tx_hex["cases"][0]["btc_tx_hex"] = json!("0x01000000000000000000");
+        let stale_tx_hex_hash = btc_spv_proof_material_hash(&stale_tx_hex["cases"][0]).unwrap();
+        stale_tx_hex["cases"][0]["spv_proof_hash"] = json!(stale_tx_hex_hash);
+        std::fs::write(proofs.join("public_btc_spv_evidence.json"), serde_json::to_vec_pretty(&stale_tx_hex).unwrap()).unwrap();
+        let failed_stale_tx_hex = validate_btc_spv_evidence(temp.path(), PUBLIC_BTC_SPV_EVIDENCE, &handoff).unwrap();
+        assert_eq!(json_pointer_str(&failed_stale_tx_hex, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&failed_stale_tx_hex, "/case_checks/btc-transaction-commitment-profile-v0/btc_tx_hex_valid"));
+
+        let mut wrong_valid_tx_hex = spv_report.clone();
+        let wrong_btc = test_btc_profile_material(EXPECTED_BTC_TX_COMMITMENT_PROFILE, 0x2a);
+        wrong_valid_tx_hex["cases"][0]["btc_tx_hex"] = json!(wrong_btc.tx_hex);
+        let wrong_valid_tx_hash = btc_spv_proof_material_hash(&wrong_valid_tx_hex["cases"][0]).unwrap();
+        wrong_valid_tx_hex["cases"][0]["spv_proof_hash"] = json!(wrong_valid_tx_hash);
+        std::fs::write(proofs.join("public_btc_spv_evidence.json"), serde_json::to_vec_pretty(&wrong_valid_tx_hex).unwrap()).unwrap();
+        let failed_wrong_valid_tx_hex = validate_btc_spv_evidence(temp.path(), PUBLIC_BTC_SPV_EVIDENCE, &handoff).unwrap();
+        assert_eq!(json_pointer_str(&failed_wrong_valid_tx_hex, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(
+            &failed_wrong_valid_tx_hex,
+            "/case_checks/btc-transaction-commitment-profile-v0/btc_txid_matches_tx_hex"
+        ));
+
+        let mut stale_output_handoff = handoff.clone();
+        stale_output_handoff["cases"][0]["expected_case_bindings"][EXPECTED_BTC_TX_COMMITMENT_PROFILE]["btc_amount_sats"] = json!(1);
+        let stale_output_handoff_hash = novaseal_handoff_report_hash("external_evidence_handoff_bundle", &stale_output_handoff);
+        let mut stale_output_amount = spv_report.clone();
+        stale_output_amount["request_handoff"]["bundle_hash"] = json!(stale_output_handoff_hash);
+        std::fs::write(proofs.join("public_btc_spv_evidence.json"), serde_json::to_vec_pretty(&stale_output_amount).unwrap()).unwrap();
+        let failed_stale_output_amount =
+            validate_btc_spv_evidence(temp.path(), PUBLIC_BTC_SPV_EVIDENCE, &stale_output_handoff).unwrap();
+        assert_eq!(json_pointer_str(&failed_stale_output_amount, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(
+            &failed_stale_output_amount,
+            "/case_checks/btc-transaction-commitment-profile-v0/btc_transaction_binding_matches_handoff"
+        ));
+        assert!(!json_pointer_bool(
+            &failed_stale_output_amount,
+            "/case_checks/btc-transaction-commitment-profile-v0/btc_transaction_output_matches_anchor"
+        ));
+
+        let mut stale_sealed_tx = spv_report.clone();
+        let wrong_sealed_tx_hex = stale_sealed_tx["cases"][0]["btc_tx_hex"].clone();
+        stale_sealed_tx["cases"][1]["btc_transaction_binding"]["sealed_btc_tx_hex"] = wrong_sealed_tx_hex;
+        let stale_sealed_hash = btc_spv_proof_material_hash(&stale_sealed_tx["cases"][1]).unwrap();
+        stale_sealed_tx["cases"][1]["spv_proof_hash"] = json!(stale_sealed_hash);
+        std::fs::write(proofs.join("public_btc_spv_evidence.json"), serde_json::to_vec_pretty(&stale_sealed_tx).unwrap()).unwrap();
+        let failed_stale_sealed_tx = validate_btc_spv_evidence(temp.path(), PUBLIC_BTC_SPV_EVIDENCE, &handoff).unwrap();
+        assert_eq!(json_pointer_str(&failed_stale_sealed_tx, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(
+            &failed_stale_sealed_tx,
+            "/case_checks/btc-utxo-seal-profile-v0/btc_utxo_sealed_tx_matches_anchor"
+        ));
+
+        let mut stale_bound_btc_txid = spv_report.clone();
+        let replacement_btc = test_btc_profile_material(EXPECTED_BTC_TX_COMMITMENT_PROFILE, 0x21);
+        let replacement_material = test_btc_spv_material(0x21, 7, &replacement_btc);
+        stale_bound_btc_txid["cases"][0]["btc_txid"] = replacement_material["btc_txid"].clone();
+        stale_bound_btc_txid["cases"][0]["btc_wtxid"] = replacement_material["btc_wtxid"].clone();
+        stale_bound_btc_txid["cases"][0]["btc_tx_hex"] = replacement_material["btc_tx_hex"].clone();
+        stale_bound_btc_txid["cases"][0]["btc_transaction_binding"] = replacement_material["btc_transaction_binding"].clone();
+        stale_bound_btc_txid["cases"][0]["btc_block_hash"] = replacement_material["btc_block_hash"].clone();
+        stale_bound_btc_txid["cases"][0]["btc_block_header"] = replacement_material["btc_block_header"].clone();
+        stale_bound_btc_txid["cases"][0]["btc_merkle_proof"] = replacement_material["btc_merkle_proof"].clone();
+        stale_bound_btc_txid["cases"][0]["spv_proof_hash"] = replacement_material["spv_proof_hash"].clone();
+        std::fs::write(proofs.join("public_btc_spv_evidence.json"), serde_json::to_vec_pretty(&stale_bound_btc_txid).unwrap())
+            .unwrap();
+        let failed_stale_bound_btc_txid = validate_btc_spv_evidence(temp.path(), PUBLIC_BTC_SPV_EVIDENCE, &handoff).unwrap();
+        assert_eq!(json_pointer_str(&failed_stale_bound_btc_txid, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(
+            &failed_stale_bound_btc_txid,
+            "/case_checks/btc-transaction-commitment-profile-v0/btc_txid_matches_handoff_when_bound"
+        ));
+
+        let mut stale_block_header = spv_report.clone();
+        stale_block_header["cases"][0]["btc_block_header"] = json!(format!("0x{}", "01".repeat(80)));
+        std::fs::write(proofs.join("public_btc_spv_evidence.json"), serde_json::to_vec_pretty(&stale_block_header).unwrap()).unwrap();
+        let failed_stale_block_header = validate_btc_spv_evidence(temp.path(), PUBLIC_BTC_SPV_EVIDENCE, &handoff).unwrap();
+        assert_eq!(json_pointer_str(&failed_stale_block_header, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(
+            &failed_stale_block_header,
+            "/case_checks/btc-transaction-commitment-profile-v0/btc_block_hash_matches_header"
+        ));
+
+        let mut stale_merkle_branch = spv_report.clone();
+        stale_merkle_branch["cases"][0]["btc_merkle_proof"]["merkle_branch"][0] = json!(test_hex32(0x99));
+        let stale_hash = btc_spv_proof_material_hash(&stale_merkle_branch["cases"][0]).unwrap();
+        stale_merkle_branch["cases"][0]["spv_proof_hash"] = json!(stale_hash);
+        std::fs::write(proofs.join("public_btc_spv_evidence.json"), serde_json::to_vec_pretty(&stale_merkle_branch).unwrap()).unwrap();
+        let failed_stale_merkle_branch = validate_btc_spv_evidence(temp.path(), PUBLIC_BTC_SPV_EVIDENCE, &handoff).unwrap();
+        assert_eq!(json_pointer_str(&failed_stale_merkle_branch, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(
+            &failed_stale_merkle_branch,
+            "/case_checks/btc-transaction-commitment-profile-v0/btc_merkle_branch_verifies_txid"
+        ));
+
+        let mut stale_confirmation_height = spv_report.clone();
+        stale_confirmation_height["cases"][0]["btc_merkle_proof"]["observed_tip_height"] = json!(900_001);
+        let stale_height_hash = btc_spv_proof_material_hash(&stale_confirmation_height["cases"][0]).unwrap();
+        stale_confirmation_height["cases"][0]["spv_proof_hash"] = json!(stale_height_hash);
+        std::fs::write(proofs.join("public_btc_spv_evidence.json"), serde_json::to_vec_pretty(&stale_confirmation_height).unwrap())
+            .unwrap();
+        let failed_stale_confirmation_height = validate_btc_spv_evidence(temp.path(), PUBLIC_BTC_SPV_EVIDENCE, &handoff).unwrap();
+        assert_eq!(json_pointer_str(&failed_stale_confirmation_height, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(
+            &failed_stale_confirmation_height,
+            "/case_checks/btc-transaction-commitment-profile-v0/btc_confirmations_match_heights"
+        ));
+
+        let mut stale_spv_proof_hash = spv_report.clone();
+        stale_spv_proof_hash["cases"][0]["spv_proof_hash"] = json!(test_hex32(0x88));
+        std::fs::write(proofs.join("public_btc_spv_evidence.json"), serde_json::to_vec_pretty(&stale_spv_proof_hash).unwrap())
+            .unwrap();
+        let failed_stale_spv_proof_hash = validate_btc_spv_evidence(temp.path(), PUBLIC_BTC_SPV_EVIDENCE, &handoff).unwrap();
+        assert_eq!(json_pointer_str(&failed_stale_spv_proof_hash, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(
+            &failed_stale_spv_proof_hash,
+            "/case_checks/btc-transaction-commitment-profile-v0/spv_proof_hash_matches_material"
         ));
 
         let mut stale_live_binding = spv_report.clone();

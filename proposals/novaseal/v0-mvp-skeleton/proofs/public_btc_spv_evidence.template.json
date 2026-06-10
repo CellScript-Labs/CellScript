@@ -24,11 +24,29 @@
       "service_builder_case_hash": "0xREPLACE_WITH_64_HEX_SERVICE_BUILDER_CASE_HASH",
       "service_builder_tx_skeleton_hash": "0xREPLACE_WITH_64_HEX_SERVICE_BUILDER_TX_SKELETON_HASH",
       "service_builder_receipt_binding_hash": "0xREPLACE_WITH_64_HEX_SERVICE_BUILDER_RECEIPT_BINDING_HASH",
+      "ckb_btc_commitment_hash": "0xREPLACE_WITH_64_HEX_CURRENT_CKB_BTC_COMMITMENT_HASH",
       "btc_txid": "0xREPLACE_WITH_64_HEX_BTC_TXID",
+      "btc_wtxid": "0xREPLACE_WITH_64_HEX_BTC_WTXID_DERIVED_FROM_RAW_TX",
+      "btc_tx_hex": "0xREPLACE_WITH_RAW_BTC_TRANSACTION_BYTES",
+      "btc_transaction_binding": {
+        "kind": "btc_transaction_output",
+        "btc_output_index": 0,
+        "btc_amount_sats": 0
+      },
       "btc_block_hash": "0xREPLACE_WITH_64_HEX_BTC_BLOCK_HASH",
+      "btc_block_header": "0xREPLACE_WITH_160_HEX_80_BYTE_BTC_BLOCK_HEADER",
+      "btc_merkle_proof": {
+        "tx_index": 0,
+        "merkle_branch": [
+          "0xREPLACE_WITH_64_HEX_MERKLE_SIBLING_HASH"
+        ],
+        "merkle_root": "0xREPLACE_WITH_64_HEX_BTC_MERKLE_ROOT",
+        "block_height": 0,
+        "observed_tip_height": 0
+      },
       "minimum_confirmations": 6,
       "confirmations": 6,
-      "spv_proof_hash": "0xREPLACE_WITH_64_HEX_SPV_PROOF_HASH",
+      "spv_proof_hash": "0xREPLACE_WITH_64_HEX_SHA256_OF_CANONICAL_SPV_PROOF_MATERIAL",
       "spv_client_cell_dep": {
         "out_point": "0xREPLACE_WITH_64_HEX_TX_HASH:0",
         "dep_type": "code",
@@ -49,11 +67,34 @@
       "service_builder_case_hash": "0xREPLACE_WITH_64_HEX_SERVICE_BUILDER_CASE_HASH",
       "service_builder_tx_skeleton_hash": "0xREPLACE_WITH_64_HEX_SERVICE_BUILDER_TX_SKELETON_HASH",
       "service_builder_receipt_binding_hash": "0xREPLACE_WITH_64_HEX_SERVICE_BUILDER_RECEIPT_BINDING_HASH",
+      "ckb_btc_commitment_hash": "0xREPLACE_WITH_64_HEX_CURRENT_CKB_BTC_COMMITMENT_HASH",
       "btc_txid": "0xREPLACE_WITH_64_HEX_BTC_SPEND_TXID",
+      "btc_wtxid": "0xREPLACE_WITH_64_HEX_BTC_SPEND_WTXID_DERIVED_FROM_RAW_TX",
+      "btc_tx_hex": "0xREPLACE_WITH_RAW_BTC_SPEND_TRANSACTION_BYTES",
+      "btc_transaction_binding": {
+        "kind": "btc_utxo_spend",
+        "spend_input_index": 0,
+        "sealed_btc_txid": "0xREPLACE_WITH_64_HEX_SEALED_BTC_TXID",
+        "sealed_btc_vout_index": 0,
+        "sealed_btc_amount_sats": 0,
+        "script_pubkey_hash": "0xREPLACE_WITH_64_HEX_CKB_BLAKE2B256_OF_SEALED_SCRIPT_PUBKEY",
+        "sealed_btc_tx_hex": "0xREPLACE_WITH_RAW_SEALED_BTC_TRANSACTION_BYTES",
+        "sealed_utxo_commitment_hash": "0xREPLACE_WITH_64_HEX_CURRENT_SEALED_UTXO_COMMITMENT_HASH"
+      },
       "btc_block_hash": "0xREPLACE_WITH_64_HEX_BTC_BLOCK_HASH",
+      "btc_block_header": "0xREPLACE_WITH_160_HEX_80_BYTE_BTC_BLOCK_HEADER",
+      "btc_merkle_proof": {
+        "tx_index": 0,
+        "merkle_branch": [
+          "0xREPLACE_WITH_64_HEX_MERKLE_SIBLING_HASH"
+        ],
+        "merkle_root": "0xREPLACE_WITH_64_HEX_BTC_MERKLE_ROOT",
+        "block_height": 0,
+        "observed_tip_height": 0
+      },
       "minimum_confirmations": 6,
       "confirmations": 6,
-      "spv_proof_hash": "0xREPLACE_WITH_64_HEX_SPV_PROOF_HASH",
+      "spv_proof_hash": "0xREPLACE_WITH_64_HEX_SHA256_OF_CANONICAL_SPV_PROOF_MATERIAL",
       "spv_client_cell_dep": {
         "out_point": "0xREPLACE_WITH_64_HEX_TX_HASH:0",
         "dep_type": "code",
@@ -74,11 +115,28 @@
       "service_builder_case_hash": "0xREPLACE_WITH_64_HEX_SERVICE_BUILDER_CASE_HASH",
       "service_builder_tx_skeleton_hash": "0xREPLACE_WITH_64_HEX_SERVICE_BUILDER_TX_SKELETON_HASH",
       "service_builder_receipt_binding_hash": "0xREPLACE_WITH_64_HEX_SERVICE_BUILDER_RECEIPT_BINDING_HASH",
+      "ckb_btc_commitment_hash": "0xREPLACE_WITH_64_HEX_CURRENT_CKB_BTC_COMMITMENT_HASH",
       "btc_txid": "0xREPLACE_WITH_64_HEX_BTC_CLOSURE_TXID",
+      "btc_wtxid": "0xREPLACE_WITH_64_HEX_BTC_CLOSURE_WTXID_DERIVED_FROM_RAW_TX",
+      "btc_tx_hex": "0xREPLACE_WITH_RAW_BTC_CLOSURE_TRANSACTION_BYTES",
+      "btc_transaction_binding": {
+        "kind": "dual_seal_btc_closure",
+        "spend_input_index": 0
+      },
       "btc_block_hash": "0xREPLACE_WITH_64_HEX_BTC_BLOCK_HASH",
+      "btc_block_header": "0xREPLACE_WITH_160_HEX_80_BYTE_BTC_BLOCK_HEADER",
+      "btc_merkle_proof": {
+        "tx_index": 0,
+        "merkle_branch": [
+          "0xREPLACE_WITH_64_HEX_MERKLE_SIBLING_HASH"
+        ],
+        "merkle_root": "0xREPLACE_WITH_64_HEX_BTC_MERKLE_ROOT",
+        "block_height": 0,
+        "observed_tip_height": 0
+      },
       "minimum_confirmations": 6,
       "confirmations": 6,
-      "spv_proof_hash": "0xREPLACE_WITH_64_HEX_SPV_PROOF_HASH",
+      "spv_proof_hash": "0xREPLACE_WITH_64_HEX_SHA256_OF_CANONICAL_SPV_PROOF_MATERIAL",
       "spv_client_cell_dep": {
         "out_point": "0xREPLACE_WITH_64_HEX_TX_HASH:0",
         "dep_type": "code",
@@ -97,7 +155,8 @@
     "A real report must be saved as public_btc_spv_evidence.json and must not use local-devnet or placeholder fields.",
     "The request contract generated at target/novaseal-btc-spv-evidence-adapter.json lists the exact BTC-facing profile/scenario cases and service-builder hashes this public report must satisfy.",
     "The request_handoff block must reference the current target/novaseal-external-evidence-handoff-bundle.json hash, blake2b-256(person=NovaExtHandoff) hash algorithm, and public_btc_spv_evidence group.",
-    "Each case must also echo the current CKB live tx hash, live report hash, and service-builder binding hashes from the handoff bundle; unrelated BTC SPV proofs are rejected.",
-    "The production gate requires all three BTC-facing profiles to have public BTC SPV cases with at least six confirmations."
+    "Each case must also echo the current CKB live tx hash, live report hash, service-builder binding hashes, and CKB-side BTC commitment hash from the handoff bundle; unrelated BTC SPV proofs are rejected.",
+    "The production gate requires all three BTC-facing profiles to have public BTC SPV cases with at least six confirmations.",
+    "The BTC block header hash, Merkle root, branch orientation, confirmation heights, raw transaction txid/wtxid, profile-specific transaction binding, and spv_proof_hash are recomputed during certification; hash-only SPV assertions are rejected."
   ]
 }

@@ -1,6 +1,6 @@
 # NovaSeal v0 MVP Skeleton — Audit Status
 
-**Date of this snapshot**: 2026-06-05
+**Date of this snapshot**: 2026-06-10
 **Package**: `proposals/novaseal/v0-mvp-skeleton`
 **Status**: local V1 and production-prep evidence is gate-checked through the
 full devnet runbook; production readiness is still blocked by external/public
@@ -22,7 +22,7 @@ Package and script checks:
 - `cellc src/nova_receipt_type.cell --target-profile ckb` passes.
 - `python3 scripts/novaseal_wallet_signing_vectors.py --pretty` passes.
 - `python3 scripts/novaseal_bip340_tcb_review.py --pretty` passes local review gates and records that external attestation is still required.
-- `cargo run --locked -p cellscript --bin cellc -- certify --plugin novaseal-profile-v0 --repo-root . --json` reports `status=passed` and `local_production_prep_ready_external_attestation_required` in the Rust-generated production-gate report.
+- `target/debug/cellc certify --plugin novaseal-profile-v0 --repo-root . --json` reports `status=passed`, `public_ecosystem_profile_certification_local_ready`, and `local_production_prep_ready_external_attestation_required` in the Rust-generated production-gate report.
 
 Live local devnet:
 
@@ -35,14 +35,15 @@ Live local devnet:
 
 Aggregate stateful gate:
 
-- `scripts/novaseal_devnet_stateful_acceptance.sh --pretty --report-only` reports `status=passed`, `live_devnet_rpc_executed=true`, `blockers=0` by delegating to `cellc certify --plugin novaseal-profile-v0`.
+- `scripts/novaseal_devnet_stateful_acceptance.sh --pretty` reports `status=passed`, `live_devnet_rpc_executed=true`, `blockers=0` by delegating to `cellc certify --plugin novaseal-profile-v0`.
 - The same aggregate gate includes Agreement Profile originate -> repay, originate -> claim, and live negative dry-runs.
 
-Full runbook refresh, 2026-06-05:
+Full runbook refresh, 2026-06-10:
 
-- Phase 5 Fiber clean-room rerun passed `16/16` suites with `317/317` Bruno
-  requests and `473/473` assertions.
-- Phase 6 report generation passed:
+- Core live devnet, Agreement live devnet, and all six planned-profile live
+  reports passed with real CKB devnet RPC execution.
+- Fiber report status remains passed for all required suites.
+- Report generation passed:
   - BIP340 TCB local review:
     `passed_local_review_external_attestation_required`
   - wallet signing vectors: `14/14`
@@ -225,6 +226,11 @@ Passed local gates:
 - Fiber node execution report passes with all required suites executed
 - planned profile operator fixtures and service builder fixtures pass
 - BTC SPV, external attestation, and external handoff request adapters pass
+- BTC SPV adapter and handoff bundle now require current CKB live report
+  bindings, service-builder bindings, CKB-side BTC commitment hashes, raw BTC
+  transaction material, block-header/Merkle evidence, confirmation heights, and
+  profile-specific transaction bindings before a public BTC evidence report can
+  satisfy production gates
 
 External gates still required:
 
@@ -241,7 +247,10 @@ not counted as production facts.
 - Public/shared devnet, testnet, or mainnet CellDep publication is not yet attested.
 - The runtime BIP340 verifier binary still needs an external TCB review attestation.
 - Public BTC SPV evidence is still an external production fact, not something
-  the local adapter can manufacture.
+  the local adapter can manufacture. It must satisfy the current handoff bundle
+  and the certification checks for raw transaction `txid`/`wtxid`, block-header
+  hash, Merkle branch, confirmation count, profile-specific binding, and
+  canonical SPV material hash.
 - RWA legal/registry review evidence is still an external production fact.
 - v0 has only `latest_receipt_hash`; it does not provide a historical receipt accumulator.
 

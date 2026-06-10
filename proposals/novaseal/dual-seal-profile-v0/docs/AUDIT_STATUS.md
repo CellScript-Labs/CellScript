@@ -9,7 +9,7 @@
 | BTC closure binding | source-guard-present |
 | CKB maturity guard | source-guard-present |
 | Dual authority signatures | source-guard-present |
-| Public BTC closure verification | missing-spv-or-indexer-evidence |
+| Handoff-bound public BTC closure SPV verification | missing-external-spv-evidence |
 | Live CKB maturity evidence | live-devnet-covered |
 | Live devnet dual-seal finality | live-devnet-covered |
 
@@ -21,7 +21,10 @@ fixtures are still not BTC network proof.
 
 ## Production Statement Boundary
 
-Production claims remain blocked by missing public BTC closure-verification
-evidence, missing public/shared CellDep attestation, and missing external
-BIP340 TCB review. Local CKB maturity/finality execution is covered by the live
-dual-seal runner.
+Production claims remain blocked by missing handoff-bound public BTC closure
+SPV evidence, missing public/shared CellDep attestation, and missing external
+BIP340 TCB review. The required public BTC report must echo the current live
+CKB and service-builder bindings, carry the CKB-side BTC commitment hash, and
+include recomputable raw closure transaction, block-header, Merkle,
+confirmation, and spend-input binding material. Local CKB maturity/finality
+execution is covered by the live dual-seal runner.

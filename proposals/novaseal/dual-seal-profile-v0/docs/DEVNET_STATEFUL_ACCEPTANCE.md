@@ -14,11 +14,15 @@ The acceptance target is:
    prove the active dual-seal Cell is dead and the terminal receipt is live.
 3. Dry-run wrong BTC owner, wrong CKB authority, and missing BTC closure
    negatives and prove they do not consume state.
-4. Attach public BTC closure proof evidence from an SPV verifier or trusted
-   indexer policy before any production claim.
+4. Attach public BTC closure SPV evidence before any production claim. The
+   report must satisfy the current external evidence handoff bundle, echo the
+   live CKB and service-builder binding hashes, carry the CKB-side BTC
+   commitment hash, and include raw closure transaction, block-header, Merkle
+   proof, confirmation, and spend-input binding material that certification can
+   recompute.
 
 The local CKB finality path is no longer a V1 blocker. Production remains
-blocked until public BTC closure proof evidence and the shared external
-attestations are supplied.
+blocked until handoff-bound public BTC closure SPV evidence and the shared
+external attestations are supplied.
 
 See [DEVNET_FULL_ACCEPTANCE_RUNBOOK.md](../../DEVNET_FULL_ACCEPTANCE_RUNBOOK.md) for prerequisites, freshness rules, and the full command sequence.

@@ -2,11 +2,12 @@
 
 ## Evidence Base
 
-- NovaSeal repository: `research/nsv1`, after commit `adc456e8`.
+- NovaSeal repository: `nightly-0.16`, current tracked source and generated
+  local evidence.
 - NovaSeal local gate: `target/novaseal-production-gates.json` reports `local_production_prep_ready_external_attestation_required`.
 - NovaSeal planned-profile operator fixtures: `target/novaseal-profile-operator-fixtures.json` covers the planned profile signing and witness surfaces.
 - NovaSeal service-builder fixtures: `target/novaseal-service-builder-fixtures.json` covers deterministic request/response skeletons for the planned profile actions.
-- NovaSeal BTC SPV evidence adapter: `target/novaseal-btc-spv-evidence-adapter.json` covers the external evidence request contract for BTC-facing profiles.
+- NovaSeal BTC SPV evidence adapter: `target/novaseal-btc-spv-evidence-adapter.json` covers the external evidence request contract for BTC-facing profiles, including live CKB report bindings, service-builder bindings, CKB-side BTC commitment hashes, raw BTC transaction material, block-header/Merkle proof material, confirmation heights, and profile-specific transaction bindings.
 - NovaSeal external attestation adapter: `target/novaseal-external-attestation-adapter.json` covers the public/shared CellDep and external BIP340 TCB review request contracts.
 - NovaSeal external evidence handoff bundle: `target/novaseal-external-evidence-handoff-bundle.json` packages all four external production evidence requests, including RWA legal/registry review evidence.
 - NovaSeal planned-profile stateful matrix: all planned live scenarios pass with no missing entries.
@@ -36,7 +37,10 @@ NovaSeal is cleaner as a typed contract and certification framework. Its strengt
 
 1. Collect external BTC SPV attestations through the adapter layer.
    - The NovaSeal BTC SPV evidence adapter request is now generated and certification-checked.
-   - A real external report must still provide `txid`, confirmations, SPV proof digest, CKB SPV client CellDep, and source service provenance.
+   - A real external report must still provide the current handoff-bound case
+     bindings, raw BTC transaction data, `txid`/`wtxid`, block header, Merkle
+     proof, confirmation heights, canonical SPV material hash, CKB SPV client
+     CellDep, and source service provenance.
    - Feed that provider report into `cellc certify --plugin novaseal-profile-v0` as `public_btc_spv_evidence.json` before making production BTC-finality claims.
 
 2. Add a `btc_time_lock` style delayed-unlock profile.
@@ -77,10 +81,15 @@ Completed hardening since the comparison was first drafted:
 
 - Fiber-node execution evidence is now present and passing for the tracked required suites.
 - BTC transaction, BTC UTXO, and Fiber manifests and validators now use explicit lifecycle dispatcher action names rather than `missing-live-dispatcher`.
-- Public BTC SPV evidence now has a fail-closed production gate and checked template.
+- Public BTC SPV evidence now has a fail-closed production gate, checked
+  template, handoff-bound live/service-builder/CKB commitment bindings, and
+  certification-time recomputation of the raw transaction, block-header,
+  Merkle, confirmation, and profile-binding material.
 - Planned-profile operator fixtures now bind each profile action to source, schema, invariant, witness, and live-report evidence where local stateful evidence exists.
 - Planned-profile service-builder fixtures now bind each profile action to deterministic request/response skeletons, queue keys, receipt binding hashes, and named production external inputs.
-- The BTC SPV evidence adapter now binds BTC-facing profiles to service-builder evidence and the public SPV report template, while preserving the external production blocker.
+- The BTC SPV evidence adapter now binds BTC-facing profiles to live devnet
+  reports, service-builder evidence, CKB-side BTC commitment hashes, and the
+  public SPV report template, while preserving the external production blocker.
 - The external-attestation adapter now binds public/shared CellDep and external BIP340 TCB review requests to the current local TCB review and attestation templates, while preserving both external production blockers.
 - The external evidence handoff bundle now packages BTC SPV, public/shared CellDep, RWA legal/registry review, and external BIP340 TCB review requests into one certification-checked provider handoff, while preserving all four external production blockers.
 

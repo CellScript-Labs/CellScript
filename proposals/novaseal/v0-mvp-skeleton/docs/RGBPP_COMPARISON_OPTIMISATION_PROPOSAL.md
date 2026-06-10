@@ -8,7 +8,7 @@ This comparison uses the current local checkouts:
 | --- | --- | --- | --- | --- |
 | RGB++ SDK | `https://github.com/ckb-cell/rgbpp-sdk.git` | `develop` | `2d547132ede28616647e87d603aea63daada4841` | transaction builders, BTC embedding, SPV witness plumbing, xUDT flows |
 | RGB++ design | `https://github.com/ckb-cell/RGBPlusPlus-design.git` | `main` | `c0b065c8bb8cc0a1813d27e9352ff694e1975ca3` | light paper, security analysis, lockscript design |
-| NovaSeal | `CellScript` `research/nsv1` | local branch | current checked-in source plus `target/novaseal-production-gates.json` | package-first profiles, certification gate, devnet evidence |
+| NovaSeal | `CellScript` `nightly-0.16` | local branch | current checked-in source plus `target/novaseal-production-gates.json` | package-first profiles, certification gate, devnet evidence |
 
 The comparison does not treat RGB++ as a library to vendor. It treats RGB++ as
 a mature neighbouring protocol whose sequencing, lockscript, and SDK surfaces
@@ -58,14 +58,19 @@ Current state:
   `dual-seal-profile-v0` exist as planned profiles with live devnet stateful
   evidence.
 - Production remains correctly blocked on `public_btc_spv_evidence_attested`.
-- The public BTC SPV template requires external cases for BTC-facing profiles.
+- The public BTC SPV template and adapter require external cases for
+  BTC-facing profiles, bound to current live CKB reports, service-builder
+  hashes, CKB-side BTC commitment hashes, raw BTC transaction material,
+  block-header/Merkle proof material, confirmation heights, and
+  profile-specific transaction bindings.
 
 Gap:
 
-The certification gate knows that public BTC evidence is required, but builders
-do not yet get an RGB++-style sequencing checklist: build CKB transition,
-derive commitment, embed in BTC transaction, wait for public proof, attach SPV
-witness, then submit or certify the CKB transition.
+The certification gate now knows that public BTC evidence must be
+handoff-bound and recomputable, but builders do not yet get an RGB++-style
+sequencing checklist: build CKB transition, derive commitment, embed in BTC
+transaction, wait for public proof, attach SPV witness, then submit or certify
+the CKB transition.
 
 Proposed artefact:
 
@@ -90,7 +95,8 @@ Acceptance gate:
 - `cellc certify --plugin novaseal-profile-v0` should treat the report as
   local builder evidence only.
 - `--require-production` must still fail until public BTC SPV evidence is
-  supplied by an external provider.
+  supplied by an external provider and passes the handoff-bound raw
+  transaction, block-header, Merkle, confirmation, and profile-binding checks.
 
 ### 2. Define A Cross-Profile Finality Matrix
 
