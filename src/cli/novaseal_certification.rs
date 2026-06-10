@@ -5573,6 +5573,9 @@ fn external_attestation_adapter_gate_passed(report: &Value) -> bool {
 fn external_evidence_handoff_gate_passed(report: &Value) -> bool {
     json_pointer_str(report, "/status") == Some("passed")
         && json_pointer_str(report, "/handoff_status") == Some("request_bundle_ready_external_evidence_required")
+        && normalize_hex(json_pointer_str(report, "/bundle_hash")).as_deref()
+            == Some(external_evidence_handoff_reference_hash(report).as_str())
+        && json_pointer_str(report, "/bundle_hash_algorithm") == Some(NOVASEAL_HANDOFF_HASH_ALGORITHM)
         && json_pointer_i64(report, "/summary/total") == Some(4)
         && json_pointer_i64(report, "/summary/matched") == json_pointer_i64(report, "/summary/total")
 }
@@ -6550,6 +6553,7 @@ mod tests {
         let valid =
             validate_external_evidence_handoff_detail(Path::new("."), &report, &btc_spv_adapter, &external_attestation_adapter);
         assert_eq!(json_pointer_str(&valid, "/status"), Some("passed"));
+        assert!(external_evidence_handoff_gate_passed(&report));
         assert!(json_pointer_bool(&valid, "/checks/bundle_hash_matches_reference"));
         assert!(json_pointer_bool(&valid, "/checks/bundle_hash_algorithm"));
         assert!(json_pointer_bool(&valid, "/cases/public_btc_spv_evidence/expected_scenarios_match_source_adapter"));
@@ -6566,7 +6570,20 @@ mod tests {
             &external_attestation_adapter,
         );
         assert_eq!(json_pointer_str(&stale_bundle, "/status"), Some("failed"));
+        assert!(!external_evidence_handoff_gate_passed(&stale_bundle_hash));
         assert!(!json_pointer_bool(&stale_bundle, "/checks/bundle_hash_matches_reference"));
+
+        let mut wrong_bundle_algorithm = report.clone();
+        wrong_bundle_algorithm["bundle_hash_algorithm"] = json!("sha256");
+        let wrong_algorithm = validate_external_evidence_handoff_detail(
+            Path::new("."),
+            &wrong_bundle_algorithm,
+            &btc_spv_adapter,
+            &external_attestation_adapter,
+        );
+        assert_eq!(json_pointer_str(&wrong_algorithm, "/status"), Some("failed"));
+        assert!(!external_evidence_handoff_gate_passed(&wrong_bundle_algorithm));
+        assert!(!json_pointer_bool(&wrong_algorithm, "/checks/bundle_hash_algorithm"));
 
         let mut stale_hash = report.clone();
         stale_hash["source_btc_spv_adapter_hash"] = json!(format!("0x{}", "11".repeat(32)));
