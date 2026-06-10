@@ -130,6 +130,7 @@ check_ckb_release_docs() {
         "./scripts/cellscript_gate.sh release"
         "primitive-strict original bundled-example coverage"
         "builder-backed action runs"
+        "source-bound acceptance provenance"
         "occupied-capacity evidence"
         "passed final production hardening gate"
     )
@@ -150,8 +151,12 @@ check_ckb_acceptance_boundaries() {
         'scripts/ckb_cellscript_acceptance.sh::language_examples_exact_order'
         'scripts/ckb_cellscript_acceptance.sh::strict_original_ckb_compile_policy_fail_closed'
         'scripts/ckb_cellscript_acceptance.sh::strict_original_ckb_compile_unexpected_failures'
+        'scripts/ckb_cellscript_acceptance.sh::SOURCE_PROVENANCE_SCHEMA'
+        'scripts/ckb_cellscript_acceptance.sh::tracked_source_sha256'
         'scripts/ckb_cellscript_acceptance.sh::builder_backed_action_count'
         'scripts/ckb_cellscript_acceptance.sh::final_production_hardening_gate'
+        'scripts/validate_ckb_cellscript_production_evidence.py::validate_source_provenance'
+        'scripts/validate_ckb_cellscript_production_evidence.py::tracked_source_sha256'
         'scripts/validate_ckb_cellscript_production_evidence.py::valid CKB CellScript'
         'scripts/validate_cellscript_tooling_release.py::valid CellScript tooling release boundary'
     )
@@ -219,8 +224,8 @@ run_ci_gate() {
 
     printf '{"status":"not-generated","reason":"test suite did not reach backend shape report generation"}\n' >"$CELLSCRIPT_BACKEND_SHAPE_REPORT"
     run cargo fmt --all --check
-    run cargo test --locked --manifest-path Cargo.toml -- --test-threads=1
-    run cargo clippy --locked --all-targets -- -D warnings
+    run cargo test --locked -p cellscript -- --test-threads=1
+    run cargo clippy --locked -p cellscript --all-targets -- -D warnings
     run ./scripts/cellscript_strict_backend_audit.sh ci
     check_package_contents
     run cargo package --locked --offline --allow-dirty

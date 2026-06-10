@@ -257,6 +257,8 @@ if [[ -z "$CELLC_BIN" || ! -x "$CELLC_BIN" ]]; then
 fi
 
 python3 - "$CELLC_BIN" "$REPO_ROOT" "$RUN_DIR" "$REPORT_JSON" "$ACCEPTANCE_MODE" <<'PY'
+import datetime
+import hashlib
 import json
 import os
 import pathlib
@@ -270,6 +272,18 @@ repo_root = pathlib.Path(sys.argv[2])
 run_dir = pathlib.Path(sys.argv[3])
 report_path = pathlib.Path(sys.argv[4])
 acceptance_mode = sys.argv[5]
+
+SOURCE_PROVENANCE_SCHEMA = "cellscript-ckb-acceptance-source-provenance-v0.1"
+SOURCE_PROVENANCE_PATHS = [
+    "Cargo.lock",
+    "Cargo.toml",
+    "src",
+    "examples",
+    "scripts/cellscript_gate.sh",
+    "scripts/cellscript_ckb_release_gate.sh",
+    "scripts/ckb_cellscript_acceptance.sh",
+    "scripts/validate_ckb_cellscript_production_evidence.py",
+]
 
 EXAMPLES = [
     "amm_pool.cell",
@@ -1469,6 +1483,51 @@ def run(args, *, env=None, timeout=180):
 def load_json(path):
     return json.loads(path.read_text(encoding="utf-8"))
 
+def git_stdout(args):
+    return subprocess.check_output(["git", *args], cwd=repo_root, text=True).strip()
+
+def tracked_source_files():
+    output = git_stdout(["ls-files", "--", *SOURCE_PROVENANCE_PATHS])
+    return [
+        line
+        for line in output.splitlines()
+        if line and (repo_root / line).is_file()
+    ]
+
+def file_sha256(path):
+    h = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+def tracked_source_sha256(files):
+    h = hashlib.sha256()
+    for rel in files:
+        h.update(rel.encode("utf-8"))
+        h.update(b"\0")
+        h.update(file_sha256(repo_root / rel).encode("ascii"))
+        h.update(b"\n")
+    return "0x" + h.hexdigest()
+
+def source_provenance_report():
+    files = tracked_source_files()
+    return {
+        "schema": SOURCE_PROVENANCE_SCHEMA,
+        "generated_at_utc": datetime.datetime.now(datetime.timezone.utc)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z"),
+        "repo_commit": git_stdout(["rev-parse", "HEAD"]),
+        "git_dirty": bool(git_stdout(["status", "--porcelain", "--untracked-files=no"])),
+        "tracked_source_paths": SOURCE_PROVENANCE_PATHS,
+        "tracked_source_files": files,
+        "tracked_source_file_count": len(files),
+        "tracked_source_sha256": tracked_source_sha256(files),
+        "acceptance_script_sha256": "0x" + file_sha256(repo_root / "scripts/ckb_cellscript_acceptance.sh"),
+        "validator_script_sha256": "0x" + file_sha256(repo_root / "scripts/validate_ckb_cellscript_production_evidence.py"),
+    }
+
 def source_entries(name, keyword):
     text = production_example_path(name).read_text(encoding="utf-8")
     pattern = re.compile(rf"^\s*{keyword}\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(", re.MULTILINE)
@@ -2001,6 +2060,7 @@ report = {
         "expected fail-closed entries, or non-original artifacts. Bounded mode is a development coverage matrix only."
     ),
     "cellc": str(cellc),
+    "source_provenance": source_provenance_report(),
     "bundled_examples_exact_order": EXAMPLES,
     "bundled_examples_count": len(EXAMPLES),
     "non_production_examples": NON_PRODUCTION_EXAMPLES,

@@ -4,6 +4,10 @@ use serde_json::json;
 use std::process::Command;
 use tempfile::tempdir;
 
+mod common;
+
+use common::cellc_command;
+
 const IDENTITY_CREATE_UNIQUE: &str = r#"
 module v016::identity
 
@@ -111,10 +115,6 @@ fn evidence_for(assumption: &BuilderAssumptionMetadata) -> serde_json::Value {
         "proof_plan_status": assumption.proof_plan_status,
         "evidence": evidence_payload
     })
-}
-
-fn cellc_command() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_cellc"))
 }
 
 fn write_manifest_bound_spawn_package(root: &Utf8Path) {
@@ -992,11 +992,11 @@ fn standard_ckb_compat_fixture_files_parse_and_have_required_fields() {
         let fixture_files = suite.get("fixture_files").unwrap().as_object().expect("fixture_files");
         for (fixture_name, file_name) in fixture_files {
             let file_name_str = file_name.as_str().expect("file name string");
-            let path = format!("tests/compat/ckb_standard/{}", file_name_str);
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/compat/ckb_standard").join(file_name_str);
             let content = std::fs::read_to_string(&path)
-                .unwrap_or_else(|e| panic!("fixture file {} for '{}' not found: {}", path, fixture_name, e));
+                .unwrap_or_else(|e| panic!("fixture file {} for '{}' not found: {}", path.display(), fixture_name, e));
             let fixture: serde_json::Value = serde_json::from_str(&content)
-                .unwrap_or_else(|e| panic!("fixture file {} for '{}' does not parse as JSON: {}", path, fixture_name, e));
+                .unwrap_or_else(|e| panic!("fixture file {} for '{}' does not parse as JSON: {}", path.display(), fixture_name, e));
             assert_eq!(fixture["schema"], "cellscript-ckb-fixture-v0.16", "fixture {} schema mismatch", fixture_name);
             assert!(fixture["status"].as_str().is_some(), "fixture {} missing status", fixture_name);
             assert!(fixture["transaction_shape"].is_object(), "fixture {} missing transaction_shape", fixture_name);

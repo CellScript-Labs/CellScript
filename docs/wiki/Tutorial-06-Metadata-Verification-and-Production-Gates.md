@@ -252,13 +252,15 @@ stateful scenario/action coverage.
 
 The CKB validator requires primitive-strict original bundled-example coverage,
 scoped action and lock compile coverage, builder-backed action runs,
-builder-backed lock valid-spend and invalid-spend matrices, valid transaction
-dry-runs, committed valid transactions, malformed rejection, measured cycles,
-consensus-serialized transaction size, occupied-capacity evidence, no
-under-capacity outputs, bundled example deployment, and a passed final
-production hardening gate.
+source-bound acceptance provenance, builder-backed lock valid-spend and
+invalid-spend matrices, valid transaction dry-runs, committed valid
+transactions, malformed rejection, measured cycles, consensus-serialized
+transaction size, occupied-capacity evidence, no under-capacity outputs,
+bundled example deployment, and a passed final production hardening gate.
 
-The report must explicitly record a passed final production hardening gate.
+The report must explicitly record a passed final production hardening gate and
+source provenance for the repository commit, tracked source file list, tracked
+source hash, acceptance runner hash, and evidence validator hash.
 
 The production gate compiles the seven checked-in top-level
 `examples/*.cell` bundled examples directly. Those files are the single

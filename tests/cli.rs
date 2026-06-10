@@ -1,8 +1,11 @@
+mod common;
+
+use common::cellc_command;
 use std::process::Command;
 
 #[test]
 fn cellc_lsp_flag_rejects_trailing_arguments() {
-    let run = Command::new(env!("CARGO_BIN_EXE_cellc")).arg("--lsp").arg("--unexpected").output().unwrap();
+    let run = cellc_command().arg("--lsp").arg("--unexpected").output().unwrap();
 
     assert!(!run.status.success(), "--lsp with extra args should fail before starting the server");
     assert_eq!(run.status.code(), Some(2));
@@ -25,7 +28,7 @@ where
 "#;
     std::fs::write(&input, source).unwrap();
 
-    let status = Command::new(env!("CARGO_BIN_EXE_cellc")).arg(&input).arg("-o").arg(&output).status().unwrap();
+    let status = cellc_command().arg(&input).arg("-o").arg(&output).status().unwrap();
 
     assert!(status.success());
 
@@ -75,14 +78,7 @@ where
     )
     .unwrap();
 
-    let run = Command::new(env!("CARGO_BIN_EXE_cellc"))
-        .arg(&input)
-        .arg("--primitive-strict")
-        .arg("0.15")
-        .arg("-o")
-        .arg(&output)
-        .output()
-        .unwrap();
+    let run = cellc_command().arg(&input).arg("--primitive-strict").arg("0.15").arg("-o").arg(&output).output().unwrap();
 
     assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
     assert!(output.exists());
@@ -108,7 +104,7 @@ where
     )
     .unwrap();
 
-    let run = Command::new(env!("CARGO_BIN_EXE_cellc")).arg(&input).arg("--primitive-strict").arg("0.15").output().unwrap();
+    let run = cellc_command().arg(&input).arg("--primitive-strict").arg("0.15").output().unwrap();
 
     assert!(!run.status.success(), "legacy capability should fail strict mode");
     let stderr = String::from_utf8_lossy(&run.stderr);
@@ -132,7 +128,7 @@ where
     )
     .unwrap();
 
-    let run = Command::new(env!("CARGO_BIN_EXE_cellc")).arg(&input).arg("--primitive-strict").arg("0.15").output().unwrap();
+    let run = cellc_command().arg(&input).arg("--primitive-strict").arg("0.15").output().unwrap();
 
     assert!(!run.status.success(), "legacy transfer capability should fail strict mode");
     let stderr = String::from_utf8_lossy(&run.stderr);
@@ -162,16 +158,10 @@ where
     )
     .unwrap();
 
-    let build = Command::new(env!("CARGO_BIN_EXE_cellc")).arg(&input).arg("-o").arg(&output).output().unwrap();
+    let build = cellc_command().arg(&input).arg("-o").arg(&output).output().unwrap();
     assert!(build.status.success(), "{}", String::from_utf8_lossy(&build.stderr));
 
-    let verify = Command::new(env!("CARGO_BIN_EXE_cellc"))
-        .arg("verify-artifact")
-        .arg(&output)
-        .arg("--primitive-strict")
-        .arg("0.15")
-        .output()
-        .unwrap();
+    let verify = cellc_command().arg("verify-artifact").arg(&output).arg("--primitive-strict").arg("0.15").output().unwrap();
 
     assert!(!verify.status.success(), "strict verification unexpectedly succeeded");
     let stderr = String::from_utf8_lossy(&verify.stderr);
@@ -215,7 +205,7 @@ where
     )
     .unwrap();
 
-    let run = Command::new(env!("CARGO_BIN_EXE_cellc"))
+    let run = cellc_command()
         .current_dir(root)
         .arg("constraints")
         .arg("--target-profile")
@@ -263,10 +253,10 @@ where
 "#;
     std::fs::write(&input, source).unwrap();
 
-    let build = Command::new(env!("CARGO_BIN_EXE_cellc")).arg(&input).arg("-o").arg(&output).status().unwrap();
+    let build = cellc_command().arg(&input).arg("-o").arg(&output).status().unwrap();
     assert!(build.success());
 
-    let verify = Command::new(env!("CARGO_BIN_EXE_cellc")).arg("verify-artifact").arg(&output).output().unwrap();
+    let verify = cellc_command().arg("verify-artifact").arg(&output).output().unwrap();
 
     assert!(verify.status.success(), "{}", String::from_utf8_lossy(&verify.stderr));
     let stdout = String::from_utf8_lossy(&verify.stdout);
@@ -275,8 +265,7 @@ where
     assert!(stdout.contains("Compiler"));
     assert!(stdout.contains("RISC-V assembly"));
 
-    let verify_sources =
-        Command::new(env!("CARGO_BIN_EXE_cellc")).arg("verify-artifact").arg(&output).arg("--verify-sources").output().unwrap();
+    let verify_sources = cellc_command().arg("verify-artifact").arg(&output).arg("--verify-sources").output().unwrap();
     assert!(verify_sources.status.success(), "{}", String::from_utf8_lossy(&verify_sources.stderr));
     let stdout = String::from_utf8_lossy(&verify_sources.stdout);
     assert!(stdout.contains("Sources: verified 1 unit(s)"), "{}", stdout);
@@ -303,11 +292,10 @@ where
     )
     .unwrap();
 
-    let build = Command::new(env!("CARGO_BIN_EXE_cellc")).arg(&input).arg("-o").arg(&output).status().unwrap();
+    let build = cellc_command().arg(&input).arg("-o").arg(&output).status().unwrap();
     assert!(build.success());
 
-    let verify =
-        Command::new(env!("CARGO_BIN_EXE_cellc")).arg("verify-artifact").arg(&output).arg("--verify-sources").output().unwrap();
+    let verify = cellc_command().arg("verify-artifact").arg(&output).arg("--verify-sources").output().unwrap();
 
     assert!(verify.status.success(), "{}", String::from_utf8_lossy(&verify.stderr));
     let stdout = String::from_utf8_lossy(&verify.stdout);
@@ -328,11 +316,11 @@ where
 "#;
     std::fs::write(&input, source).unwrap();
 
-    let build = Command::new(env!("CARGO_BIN_EXE_cellc")).arg(&input).arg("-o").arg(&output).status().unwrap();
+    let build = cellc_command().arg(&input).arg("-o").arg(&output).status().unwrap();
     assert!(build.success());
     std::fs::write(&output, b"tampered").unwrap();
 
-    let verify = Command::new(env!("CARGO_BIN_EXE_cellc")).arg("verify-artifact").arg(&output).output().unwrap();
+    let verify = cellc_command().arg("verify-artifact").arg(&output).output().unwrap();
 
     assert!(!verify.status.success());
     let stderr = String::from_utf8_lossy(&verify.stderr);
@@ -353,7 +341,7 @@ where
 "#;
     std::fs::write(&input, source).unwrap();
 
-    let build = Command::new(env!("CARGO_BIN_EXE_cellc")).arg(&input).arg("-o").arg(&output).status().unwrap();
+    let build = cellc_command().arg(&input).arg("-o").arg(&output).status().unwrap();
     assert!(build.success());
     std::fs::write(
         &input,
@@ -367,8 +355,7 @@ where
     )
     .unwrap();
 
-    let verify =
-        Command::new(env!("CARGO_BIN_EXE_cellc")).arg("verify-artifact").arg(&output).arg("--verify-sources").output().unwrap();
+    let verify = cellc_command().arg("verify-artifact").arg(&output).arg("--verify-sources").output().unwrap();
 
     assert!(!verify.status.success());
     let stderr = String::from_utf8_lossy(&verify.stderr);
@@ -390,7 +377,7 @@ where
 "#;
     std::fs::write(&input, source).unwrap();
 
-    let build = Command::new(env!("CARGO_BIN_EXE_cellc")).arg(&input).arg("-o").arg(&output).status().unwrap();
+    let build = cellc_command().arg(&input).arg("-o").arg(&output).status().unwrap();
     assert!(build.success());
 
     let metadata_path = dir.path().join("sample.s.meta.json");
@@ -399,13 +386,7 @@ where
     metadata_json["metadata_schema_version"] = serde_json::json!(current_schema - 1);
     std::fs::write(&tampered_metadata, serde_json::to_vec_pretty(&metadata_json).unwrap()).unwrap();
 
-    let verify = Command::new(env!("CARGO_BIN_EXE_cellc"))
-        .arg("verify-artifact")
-        .arg(&output)
-        .arg("--metadata")
-        .arg(&tampered_metadata)
-        .output()
-        .unwrap();
+    let verify = cellc_command().arg("verify-artifact").arg(&output).arg("--metadata").arg(&tampered_metadata).output().unwrap();
 
     assert!(!verify.status.success(), "unexpected success: {}", String::from_utf8_lossy(&verify.stdout));
     let stderr = String::from_utf8_lossy(&verify.stderr);
@@ -427,7 +408,7 @@ where
 "#;
     std::fs::write(&input, source).unwrap();
 
-    let build = Command::new(env!("CARGO_BIN_EXE_cellc")).arg(&input).arg("-o").arg(&output).status().unwrap();
+    let build = cellc_command().arg(&input).arg("-o").arg(&output).status().unwrap();
     assert!(build.success());
 
     let metadata_path = dir.path().join("sample.s.meta.json");
@@ -436,13 +417,7 @@ where
     metadata_json["source_units"][0]["hash"] = serde_json::json!(source_hash);
     std::fs::write(&tampered_metadata, serde_json::to_vec_pretty(&metadata_json).unwrap()).unwrap();
 
-    let verify = Command::new(env!("CARGO_BIN_EXE_cellc"))
-        .arg("verify-artifact")
-        .arg(&output)
-        .arg("--metadata")
-        .arg(&tampered_metadata)
-        .output()
-        .unwrap();
+    let verify = cellc_command().arg("verify-artifact").arg(&output).arg("--metadata").arg(&tampered_metadata).output().unwrap();
 
     assert!(!verify.status.success(), "unexpected success: {}", String::from_utf8_lossy(&verify.stdout));
     let stderr = String::from_utf8_lossy(&verify.stderr);
@@ -475,10 +450,10 @@ where
 "#;
     std::fs::write(&input, source).unwrap();
 
-    let build = Command::new(env!("CARGO_BIN_EXE_cellc")).arg(&input).arg("-o").arg(&output).status().unwrap();
+    let build = cellc_command().arg(&input).arg("-o").arg(&output).status().unwrap();
     assert!(build.success());
 
-    let verify = Command::new(env!("CARGO_BIN_EXE_cellc")).arg("verify-artifact").arg(&output).arg("--production").output().unwrap();
+    let verify = cellc_command().arg("verify-artifact").arg(&output).arg("--production").output().unwrap();
 
     assert!(!verify.status.success(), "unexpected success: {}", String::from_utf8_lossy(&verify.stdout));
     let stderr = String::from_utf8_lossy(&verify.stderr);
@@ -501,7 +476,7 @@ where
 "#;
     std::fs::write(&input, source).unwrap();
 
-    let build = Command::new(env!("CARGO_BIN_EXE_cellc")).arg(&input).arg("-o").arg(&output).status().unwrap();
+    let build = cellc_command().arg(&input).arg("-o").arg(&output).status().unwrap();
     assert!(build.success());
 
     let metadata_path = dir.path().join("sample.s.meta.json");
@@ -509,7 +484,7 @@ where
     let artifact_hash = metadata_json["artifact_hash"].as_str().unwrap();
     let source_content_hash = metadata_json["source_content_hash"].as_str().unwrap();
 
-    let verify = Command::new(env!("CARGO_BIN_EXE_cellc"))
+    let verify = cellc_command()
         .arg("verify-artifact")
         .arg(&output)
         .arg("--expect-artifact-hash")
@@ -522,7 +497,7 @@ where
     let stdout = String::from_utf8_lossy(&verify.stdout);
     assert!(stdout.contains("Expected hashes: verified"), "{}", stdout);
 
-    let verify = Command::new(env!("CARGO_BIN_EXE_cellc"))
+    let verify = cellc_command()
         .arg("verify-artifact")
         .arg(&output)
         .arg("--json")
@@ -543,18 +518,13 @@ where
     assert_eq!(stdout["runtime_required_verifier_obligations"], 0);
     assert_eq!(stdout["fail_closed_verifier_obligations"], 0);
 
-    let verify = Command::new(env!("CARGO_BIN_EXE_cellc"))
-        .arg("verify-artifact")
-        .arg(&output)
-        .arg("--expect-source-content-hash")
-        .arg("00".repeat(32))
-        .output()
-        .unwrap();
+    let verify =
+        cellc_command().arg("verify-artifact").arg(&output).arg("--expect-source-content-hash").arg("00".repeat(32)).output().unwrap();
     assert!(!verify.status.success(), "unexpected success: {}", String::from_utf8_lossy(&verify.stdout));
     let stderr = String::from_utf8_lossy(&verify.stderr);
     assert!(stderr.contains("source_content_hash") && stderr.contains("does not match expected"), "{}", stderr);
 
-    let verify = Command::new(env!("CARGO_BIN_EXE_cellc"))
+    let verify = cellc_command()
         .arg("verify-artifact")
         .arg(&output)
         .arg("--expect-artifact-hash")
@@ -576,7 +546,7 @@ fn cellc_compiles_bundled_examples_to_requested_outputs() {
         let input = examples_dir.join(example);
         let output = output_dir.path().join(example.replace(".cell", ".s"));
 
-        let status = Command::new(env!("CARGO_BIN_EXE_cellc")).arg(&input).arg("-o").arg(&output).status().unwrap();
+        let status = cellc_command().arg(&input).arg("-o").arg(&output).status().unwrap();
         assert!(status.success(), "cellc failed for {}", example);
 
         let written = std::fs::read_to_string(&output).unwrap();
@@ -645,7 +615,7 @@ where
     .unwrap();
 
     let output = app_root.join("build").join("main.s");
-    let status = Command::new(env!("CARGO_BIN_EXE_cellc")).arg(&app_root).status().unwrap();
+    let status = cellc_command().arg(&app_root).status().unwrap();
 
     assert!(status.success());
 
@@ -685,7 +655,7 @@ where
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).arg(root).output().unwrap();
+    let output = cellc_command().arg(root).output().unwrap();
 
     assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -761,7 +731,7 @@ where
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).arg(&app_root).output().unwrap();
+    let output = cellc_command().arg(&app_root).output().unwrap();
     assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("declared effect ReadOnly is too weak"), "unexpected stderr: {}", stderr);
@@ -782,7 +752,7 @@ where
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).arg(&app_root).output().unwrap();
+    let output = cellc_command().arg(&app_root).output().unwrap();
     assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("declared effect ReadOnly is too weak"), "unexpected stderr: {}", stderr);
@@ -844,7 +814,7 @@ where
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).arg(&app_root).output().unwrap();
+    let output = cellc_command().arg(&app_root).output().unwrap();
     assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("external function call 'dep::math::add_one' is not linkable yet"), "unexpected stderr: {}", stderr);
@@ -881,7 +851,7 @@ where
     .unwrap();
 
     let output = root.join("artifacts").join("main.s");
-    let status = Command::new(env!("CARGO_BIN_EXE_cellc")).arg(root).status().unwrap();
+    let status = cellc_command().arg(root).status().unwrap();
 
     assert!(status.success());
 
@@ -922,7 +892,7 @@ where
     .unwrap();
 
     let output = root.join("artifacts").join("main.s");
-    let status = Command::new(env!("CARGO_BIN_EXE_cellc")).arg(root).arg("--target").arg("riscv64-asm").status().unwrap();
+    let status = cellc_command().arg(root).arg("--target").arg("riscv64-asm").status().unwrap();
 
     assert!(status.success());
 
@@ -963,7 +933,7 @@ where
     .unwrap();
 
     let output = root.join("artifacts").join("main.elf");
-    let status = Command::new(env!("CARGO_BIN_EXE_cellc")).arg(root).status().unwrap();
+    let status = cellc_command().arg(root).status().unwrap();
 
     assert!(status.success());
 
@@ -999,10 +969,10 @@ where
     )
     .unwrap();
 
-    let check = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("check").status().unwrap();
+    let check = cellc_command().current_dir(root).arg("check").status().unwrap();
     assert!(check.success());
 
-    let build = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("build").status().unwrap();
+    let build = cellc_command().current_dir(root).arg("build").status().unwrap();
     assert!(build.success());
 
     let output = root.join("build").join("main.s");
@@ -1014,7 +984,7 @@ where
     assert!(metadata.contains("\"scheduler_witness_hex\""));
     assert!(!metadata.contains("\"scheduler_witness_molecule_hex\""));
 
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("build").arg("--json").output().unwrap();
+    let output = cellc_command().current_dir(root).arg("build").arg("--json").output().unwrap();
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     let stdout: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(stdout["status"], "ok");
@@ -1063,7 +1033,7 @@ where
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("check").arg("--all-targets").output().unwrap();
+    let output = cellc_command().current_dir(root).arg("check").arg("--all-targets").output().unwrap();
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Check succeeded"), "unexpected stdout: {}", stdout);
@@ -1074,8 +1044,7 @@ where
     assert!(!root.join("build").join("main.s.meta.json").exists());
     assert!(!root.join("build").join("main.elf.meta.json").exists());
 
-    let output =
-        Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("check").arg("--all-targets").arg("--json").output().unwrap();
+    let output = cellc_command().current_dir(root).arg("check").arg("--all-targets").arg("--json").output().unwrap();
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     let stdout: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(stdout["status"], "ok");
@@ -1119,7 +1088,7 @@ where
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc"))
+    let output = cellc_command()
         .current_dir(root)
         .arg("build")
         .arg("--target-profile")
@@ -1139,7 +1108,7 @@ where
     assert!(artifact.starts_with(b"\x7fELF"));
     assert!(!artifact.ends_with(b"CSABITR0\x01\x80\0\0\0\0\0\0"));
 
-    let verify = Command::new(env!("CARGO_BIN_EXE_cellc"))
+    let verify = cellc_command()
         .arg("verify-artifact")
         .arg(artifact_path)
         .arg("--expect-target-profile")
@@ -1152,13 +1121,8 @@ where
     assert_eq!(verify_stdout["target_profile"], "ckb");
     assert_eq!(verify_stdout["expected_target_profile_verified"], true);
 
-    let verify = Command::new(env!("CARGO_BIN_EXE_cellc"))
-        .arg("verify-artifact")
-        .arg(artifact_path)
-        .arg("--expect-target-profile")
-        .arg("unknown")
-        .output()
-        .unwrap();
+    let verify =
+        cellc_command().arg("verify-artifact").arg(artifact_path).arg("--expect-target-profile").arg("unknown").output().unwrap();
     assert!(!verify.status.success(), "unexpected success: {}", String::from_utf8_lossy(&verify.stdout));
 }
 
@@ -1189,14 +1153,7 @@ where
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc"))
-        .current_dir(root)
-        .arg("check")
-        .arg("--target-profile")
-        .arg("ckb")
-        .arg("--json")
-        .output()
-        .unwrap();
+    let output = cellc_command().current_dir(root).arg("check").arg("--target-profile").arg("ckb").arg("--json").output().unwrap();
 
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     let stdout: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -1235,8 +1192,7 @@ where
     )
     .unwrap();
 
-    let output =
-        Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("check").arg("--target-profile").arg("ckb").output().unwrap();
+    let output = cellc_command().current_dir(root).arg("check").arg("--target-profile").arg("ckb").output().unwrap();
 
     assert!(output.status.success(), "check should succeed with timepoint: {}", String::from_utf8_lossy(&output.stderr));
 }
@@ -1280,7 +1236,7 @@ where
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("check").arg("--production").output().unwrap();
+    let output = cellc_command().current_dir(root).arg("check").arg("--production").output().unwrap();
     assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
 
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -1318,7 +1274,7 @@ where
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("check").arg("--production").output().unwrap();
+    let output = cellc_command().current_dir(root).arg("check").arg("--production").output().unwrap();
     assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
 
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -1366,7 +1322,7 @@ where
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("check").arg("--production").output().unwrap();
+    let output = cellc_command().current_dir(root).arg("check").arg("--production").output().unwrap();
     assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
 
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -1414,7 +1370,7 @@ where
     )
     .unwrap();
 
-    let json_output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("check").arg("--json").output().unwrap();
+    let json_output = cellc_command().current_dir(root).arg("check").arg("--json").output().unwrap();
     assert!(json_output.status.success(), "unexpected failure: {}", String::from_utf8_lossy(&json_output.stderr));
     let stdout: serde_json::Value = serde_json::from_slice(&json_output.stdout).unwrap();
     let target = &stdout["checked_targets"][0];
@@ -1432,8 +1388,7 @@ where
         stdout
     );
 
-    let output =
-        Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("check").arg("--deny-runtime-obligations").output().unwrap();
+    let output = cellc_command().current_dir(root).arg("check").arg("--deny-runtime-obligations").output().unwrap();
     assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
 
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -1518,7 +1473,7 @@ where
     )
     .unwrap();
 
-    let json_output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("check").arg("--json").output().unwrap();
+    let json_output = cellc_command().current_dir(root).arg("check").arg("--json").output().unwrap();
     assert!(json_output.status.success(), "unexpected failure: {}", String::from_utf8_lossy(&json_output.stderr));
     let stdout: serde_json::Value = serde_json::from_slice(&json_output.stdout).unwrap();
     let target = &stdout["checked_targets"][0];
@@ -1592,8 +1547,7 @@ where
         .expect("runtime-required transaction runtime input blocker class summaries array");
     assert!(runtime_input_blocker_classes.is_empty(), "claim blocker classes should be checked-runtime now: {}", stdout);
 
-    let output =
-        Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("check").arg("--deny-runtime-obligations").output().unwrap();
+    let output = cellc_command().current_dir(root).arg("check").arg("--deny-runtime-obligations").output().unwrap();
     assert!(
         output.status.success(),
         "checked obligations should satisfy deny-runtime-obligations: {}",
@@ -1638,7 +1592,7 @@ where
     )
     .unwrap();
 
-    let json_output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("check").arg("--json").output().unwrap();
+    let json_output = cellc_command().current_dir(root).arg("check").arg("--json").output().unwrap();
     assert!(json_output.status.success(), "unexpected failure: {}", String::from_utf8_lossy(&json_output.stderr));
     let stdout: serde_json::Value = serde_json::from_slice(&json_output.stdout).unwrap();
     let target = &stdout["checked_targets"][0];
@@ -1661,8 +1615,7 @@ where
         stdout
     );
 
-    let output =
-        Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("check").arg("--deny-runtime-obligations").output().unwrap();
+    let output = cellc_command().current_dir(root).arg("check").arg("--deny-runtime-obligations").output().unwrap();
     assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("resource-conservation:Token"), "unexpected stderr: {}", stderr);
@@ -1703,7 +1656,7 @@ where
     )
     .unwrap();
 
-    let json_output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("check").arg("--json").output().unwrap();
+    let json_output = cellc_command().current_dir(root).arg("check").arg("--json").output().unwrap();
     assert!(json_output.status.success(), "unexpected failure: {}", String::from_utf8_lossy(&json_output.stderr));
     let stdout: serde_json::Value = serde_json::from_slice(&json_output.stdout).unwrap();
     let target = &stdout["checked_targets"][0];
@@ -1716,8 +1669,7 @@ where
         .expect("runtime-required transaction runtime input summaries array");
     assert!(runtime_inputs.is_empty(), "unexpected runtime-required transaction runtime input summaries: {}", stdout);
 
-    let output =
-        Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("check").arg("--deny-runtime-obligations").output().unwrap();
+    let output = cellc_command().current_dir(root).arg("check").arg("--deny-runtime-obligations").output().unwrap();
     assert!(
         output.status.success(),
         "explicit output requirements should not report mutable-state runtime blockers: {}",
@@ -1764,7 +1716,7 @@ where
     )
     .unwrap();
 
-    let json_output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("check").arg("--json").output().unwrap();
+    let json_output = cellc_command().current_dir(root).arg("check").arg("--json").output().unwrap();
     assert!(json_output.status.success(), "unexpected failure: {}", String::from_utf8_lossy(&json_output.stderr));
     let stdout: serde_json::Value = serde_json::from_slice(&json_output.stdout).unwrap();
     let target = &stdout["checked_targets"][0];
@@ -1786,8 +1738,7 @@ where
         stdout
     );
 
-    let output =
-        Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("check").arg("--deny-runtime-obligations").output().unwrap();
+    let output = cellc_command().current_dir(root).arg("check").arg("--deny-runtime-obligations").output().unwrap();
     assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("create-output:Fingerprint"), "unexpected stderr: {}", stderr);
@@ -1833,7 +1784,7 @@ where
     )
     .unwrap();
 
-    let json_output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("check").arg("--json").output().unwrap();
+    let json_output = cellc_command().current_dir(root).arg("check").arg("--json").output().unwrap();
     assert!(json_output.status.success(), "unexpected failure: {}", String::from_utf8_lossy(&json_output.stderr));
     let stdout: serde_json::Value = serde_json::from_slice(&json_output.stdout).unwrap();
     let target = &stdout["checked_targets"][0];
@@ -1858,8 +1809,7 @@ where
         stdout
     );
 
-    let output =
-        Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("check").arg("--deny-runtime-obligations").output().unwrap();
+    let output = cellc_command().current_dir(root).arg("check").arg("--deny-runtime-obligations").output().unwrap();
     assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("linear-collection:NFT"), "unexpected stderr: {}", stderr);
@@ -1905,7 +1855,7 @@ where
     )
     .unwrap();
 
-    let json_output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("check").arg("--json").output().unwrap();
+    let json_output = cellc_command().current_dir(root).arg("check").arg("--json").output().unwrap();
     assert!(json_output.status.success(), "unexpected failure: {}", String::from_utf8_lossy(&json_output.stderr));
     let stdout: serde_json::Value = serde_json::from_slice(&json_output.stdout).unwrap();
     let target = &stdout["checked_targets"][0];
@@ -1918,8 +1868,7 @@ where
         .expect("runtime-required transaction runtime input summaries array");
     assert!(runtime_inputs.is_empty(), "unexpected runtime-required transaction runtime input summaries: {}", stdout);
 
-    let output =
-        Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("check").arg("--deny-runtime-obligations").output().unwrap();
+    let output = cellc_command().current_dir(root).arg("check").arg("--deny-runtime-obligations").output().unwrap();
     assert!(output.status.success(), "unexpected failure: {}", String::from_utf8_lossy(&output.stderr));
 }
 
@@ -1967,7 +1916,7 @@ where
     )
     .unwrap();
 
-    let json_output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("check").arg("--json").output().unwrap();
+    let json_output = cellc_command().current_dir(root).arg("check").arg("--json").output().unwrap();
     assert!(json_output.status.success(), "unexpected failure: {}", String::from_utf8_lossy(&json_output.stderr));
     let stdout: serde_json::Value = serde_json::from_slice(&json_output.stdout).unwrap();
     let target = &stdout["checked_targets"][0];
@@ -2072,7 +2021,7 @@ where
     )
     .unwrap();
 
-    let json_output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("check").arg("--json").output().unwrap();
+    let json_output = cellc_command().current_dir(root).arg("check").arg("--json").output().unwrap();
     assert!(json_output.status.success(), "unexpected failure: {}", String::from_utf8_lossy(&json_output.stderr));
     let stdout: serde_json::Value = serde_json::from_slice(&json_output.stdout).unwrap();
     let target = &stdout["checked_targets"][0];
@@ -2082,8 +2031,7 @@ where
     let runtime_inputs = target["pool_runtime_input_requirement_summaries"].as_array().expect("runtime input summaries array");
     assert!(runtime_inputs.is_empty(), "checked seed_pool identity should leave no Pool runtime inputs: {}", stdout);
 
-    let output =
-        Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("check").arg("--deny-runtime-obligations").output().unwrap();
+    let output = cellc_command().current_dir(root).arg("check").arg("--deny-runtime-obligations").output().unwrap();
     assert!(
         output.status.success(),
         "checked seed_pool identity should satisfy deny-runtime-obligations: {}",
@@ -2113,7 +2061,7 @@ version = "0.1.0"
     .unwrap();
     std::fs::write(root.join("src").join("main.cell"), amm_source).unwrap();
 
-    let json_output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("check").arg("--json").output().unwrap();
+    let json_output = cellc_command().current_dir(root).arg("check").arg("--json").output().unwrap();
     assert!(json_output.status.success(), "unexpected failure: {}", String::from_utf8_lossy(&json_output.stderr));
     let stdout: serde_json::Value = serde_json::from_slice(&json_output.stdout).unwrap();
     let target = &stdout["checked_targets"][0];
@@ -2142,8 +2090,7 @@ version = "0.1.0"
         stdout
     );
 
-    let output =
-        Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("check").arg("--deny-runtime-obligations").output().unwrap();
+    let output = cellc_command().current_dir(root).arg("check").arg("--deny-runtime-obligations").output().unwrap();
     assert!(
         !output.status.success(),
         "full AMM policy debt should still fail deny-runtime-obligations: {}",
@@ -2193,7 +2140,7 @@ where
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("check").output().unwrap();
+    let output = cellc_command().current_dir(root).arg("check").output().unwrap();
     assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
 
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -2243,8 +2190,7 @@ where
     )
     .unwrap();
 
-    let output =
-        Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("build").arg("--target-profile").arg("ckb").output().unwrap();
+    let output = cellc_command().current_dir(root).arg("build").arg("--target-profile").arg("ckb").output().unwrap();
     assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
 
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -2293,15 +2239,14 @@ where
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("test").arg("--no-run").output().unwrap();
+    let output = cellc_command().current_dir(root).arg("test").arg("--no-run").output().unwrap();
     assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Test compile complete"));
     assert!(stdout.contains("Compiled 1 test file(s)"));
 
-    let output =
-        Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("test").arg("--no-run").arg("--json").output().unwrap();
+    let output = cellc_command().current_dir(root).arg("test").arg("--no-run").arg("--json").output().unwrap();
     assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
     let stdout: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(stdout["status"], "ok");
@@ -2360,7 +2305,7 @@ fn helper() -> u64 {
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("test").arg("--no-run").output().unwrap();
+    let output = cellc_command().current_dir(root).arg("test").arg("--no-run").output().unwrap();
     assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -2412,7 +2357,7 @@ fn helper() -> u64 {
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("test").arg("--no-run").output().unwrap();
+    let output = cellc_command().current_dir(root).arg("test").arg("--no-run").output().unwrap();
     assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
 }
 
@@ -2460,7 +2405,7 @@ fn helper() -> u64 {
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("test").arg("--no-run").output().unwrap();
+    let output = cellc_command().current_dir(root).arg("test").arg("--no-run").output().unwrap();
     assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
 
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -2511,7 +2456,7 @@ fn helper() -> u64 {
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("test").arg("--no-run").output().unwrap();
+    let output = cellc_command().current_dir(root).arg("test").arg("--no-run").output().unwrap();
     assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
 
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -2563,7 +2508,7 @@ fn helper() -> u64 {
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("test").arg("--no-run").output().unwrap();
+    let output = cellc_command().current_dir(root).arg("test").arg("--no-run").output().unwrap();
     assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
 
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -2610,7 +2555,7 @@ where
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("test").arg("--no-run").output().unwrap();
+    let output = cellc_command().current_dir(root).arg("test").arg("--no-run").output().unwrap();
     assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -2670,7 +2615,7 @@ where
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("test").arg("--no-run").output().unwrap();
+    let output = cellc_command().current_dir(root).arg("test").arg("--no-run").output().unwrap();
     assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -2734,7 +2679,7 @@ where
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("test").arg("--no-run").output().unwrap();
+    let output = cellc_command().current_dir(root).arg("test").arg("--no-run").output().unwrap();
     assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -2781,7 +2726,7 @@ where
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("test").arg("--no-run").output().unwrap();
+    let output = cellc_command().current_dir(root).arg("test").arg("--no-run").output().unwrap();
     assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
 
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -2836,7 +2781,7 @@ where
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("test").arg("--no-run").output().unwrap();
+    let output = cellc_command().current_dir(root).arg("test").arg("--no-run").output().unwrap();
     assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -2883,7 +2828,7 @@ where
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("test").arg("--no-run").output().unwrap();
+    let output = cellc_command().current_dir(root).arg("test").arg("--no-run").output().unwrap();
     assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
 
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -2930,7 +2875,7 @@ where
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("test").arg("--no-run").output().unwrap();
+    let output = cellc_command().current_dir(root).arg("test").arg("--no-run").output().unwrap();
     assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
 
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -2979,7 +2924,7 @@ where
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("test").arg("--no-run").output().unwrap();
+    let output = cellc_command().current_dir(root).arg("test").arg("--no-run").output().unwrap();
     assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
 
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -3013,14 +2958,7 @@ where
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc"))
-        .current_dir(root)
-        .arg("doc")
-        .arg("--format")
-        .arg("markdown")
-        .arg("--json")
-        .output()
-        .unwrap();
+    let output = cellc_command().current_dir(root).arg("doc").arg("--format").arg("markdown").arg("--json").output().unwrap();
     assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
 
     let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -3042,8 +2980,7 @@ fn cellc_init_subcommand_supports_json_summary() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().join("demo_pkg");
 
-    let output =
-        Command::new(env!("CARGO_BIN_EXE_cellc")).arg("init").arg("demo").arg(&root).arg("--lib").arg("--json").output().unwrap();
+    let output = cellc_command().arg("init").arg("demo").arg(&root).arg("--lib").arg("--json").output().unwrap();
     assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
 
     let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -3065,7 +3002,7 @@ fn cellc_new_subcommand_supports_json_summary_and_vcs_none() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().join("demo_pkg");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc"))
+    let output = cellc_command()
         .arg("new")
         .arg("demo")
         .arg("--path")
@@ -3105,8 +3042,7 @@ fn cellc_new_subcommand_initializes_git_by_default() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().join("git_pkg");
 
-    let output =
-        Command::new(env!("CARGO_BIN_EXE_cellc")).arg("new").arg("git_demo").arg("--path").arg(&root).arg("--json").output().unwrap();
+    let output = cellc_command().arg("new").arg("git_demo").arg("--path").arg(&root).arg("--json").output().unwrap();
     assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
 
     let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -3123,7 +3059,7 @@ fn cellc_new_subcommand_initializes_git_by_default() {
 
 #[test]
 fn cellc_explain_subcommand_reports_runtime_error() {
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).arg("explain").arg("E0018").arg("--json").output().unwrap();
+    let output = cellc_command().arg("explain").arg("E0018").arg("--json").output().unwrap();
     assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
 
     let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -3137,7 +3073,7 @@ fn cellc_explain_subcommand_reports_runtime_error() {
 
 #[test]
 fn cellc_explain_profile_reports_ckb_v0_14_contract() {
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).arg("explain-profile").arg("ckb").arg("--json").output().unwrap();
+    let output = cellc_command().arg("explain-profile").arg("ckb").arg("--json").output().unwrap();
     assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
 
     let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -3187,7 +3123,7 @@ where
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).arg("explain-proof").arg(&input).arg("--json").output().unwrap();
+    let output = cellc_command().arg("explain-proof").arg(&input).arg("--json").output().unwrap();
     assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
 
     let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -3234,7 +3170,7 @@ where
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).arg("explain-proof").arg(&input).output().unwrap();
+    let output = cellc_command().arg("explain-proof").arg(&input).output().unwrap();
     assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -3272,7 +3208,7 @@ where
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).arg("explain-proof").arg(&input).arg("--json").output().unwrap();
+    let output = cellc_command().arg("explain-proof").arg(&input).arg("--json").output().unwrap();
     assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
 
     let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -3329,7 +3265,7 @@ where
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).arg("explain-proof").arg(&input).arg("--json").output().unwrap();
+    let output = cellc_command().arg("explain-proof").arg(&input).arg("--json").output().unwrap();
     assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
 
     let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -3377,7 +3313,7 @@ where
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).arg("explain-proof").arg(&input).arg("--json").output().unwrap();
+    let output = cellc_command().arg("explain-proof").arg(&input).arg("--json").output().unwrap();
     assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
 
     let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -3402,7 +3338,7 @@ where
 fn cellc_explain_proof_summary_reports_fail_closed_diagnostics() {
     let input = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/language/v0_14_witness_source.cell");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).arg("explain-proof").arg(&input).arg("--json").output().unwrap();
+    let output = cellc_command().arg("explain-proof").arg(&input).arg("--json").output().unwrap();
     assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
 
     let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -3451,7 +3387,7 @@ where
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("check").arg("--production").output().unwrap();
+    let output = cellc_command().current_dir(root).arg("check").arg("--production").output().unwrap();
     assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
 
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -3501,7 +3437,7 @@ where
     )
     .unwrap();
 
-    let explain = Command::new(env!("CARGO_BIN_EXE_cellc")).arg("explain-proof").arg(root).arg("--json").output().unwrap();
+    let explain = cellc_command().arg("explain-proof").arg(root).arg("--json").output().unwrap();
     assert!(explain.status.success(), "stderr: {}", String::from_utf8_lossy(&explain.stderr));
     let summary: serde_json::Value = serde_json::from_slice(&explain.stdout).unwrap();
     assert_eq!(summary["proof_plan_summary"]["checked_partial_count"].as_u64().unwrap(), 1);
@@ -3515,8 +3451,7 @@ where
         .expect("state transition ProofPlan record");
     assert_eq!(partial["codegen_coverage_status"], "gap:checked-partial");
 
-    let output =
-        Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("check").arg("--deny-runtime-obligations").output().unwrap();
+    let output = cellc_command().current_dir(root).arg("check").arg("--deny-runtime-obligations").output().unwrap();
     assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
 
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -3550,7 +3485,7 @@ out_dir = "artifacts"
     std::fs::create_dir_all(root.join(".cell").join("cache")).unwrap();
     std::fs::create_dir_all(root.join("src").join(".cell").join("build").join("cache")).unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("clean").arg("--json").output().unwrap();
+    let output = cellc_command().current_dir(root).arg("clean").arg("--json").output().unwrap();
     assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
 
     let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -3571,7 +3506,7 @@ fn cellc_clean_subcommand_requires_package_manifest() {
     let root = temp.path();
     std::fs::create_dir_all(root.join("target")).unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("clean").arg("--json").output().unwrap();
+    let output = cellc_command().current_dir(root).arg("clean").arg("--json").output().unwrap();
 
     assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
     assert!(root.join("target").exists());
@@ -3601,7 +3536,7 @@ version = "0.1.0"
     std::fs::create_dir_all(root.join("build")).unwrap();
     symlink(&outside_target, root.join("target")).unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(&root).arg("clean").arg("--json").output().unwrap();
+    let output = cellc_command().current_dir(&root).arg("clean").arg("--json").output().unwrap();
 
     assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
     assert!(std::fs::symlink_metadata(root.join("target")).unwrap().file_type().is_symlink());
@@ -3636,7 +3571,7 @@ deny_fail_closed = true
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("info").arg("--json").output().unwrap();
+    let output = cellc_command().current_dir(root).arg("info").arg("--json").output().unwrap();
     assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
 
     let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -3670,7 +3605,7 @@ out_dir = "artifacts"
     )
     .unwrap();
 
-    let add_output = Command::new(env!("CARGO_BIN_EXE_cellc"))
+    let add_output = cellc_command()
         .current_dir(root)
         .arg("add")
         .arg("--dev")
@@ -3696,14 +3631,7 @@ out_dir = "artifacts"
     assert_eq!(manifest["dev_dependencies"]["math"]["path"].as_str().unwrap(), "../math");
     assert!(manifest.get("dependencies").and_then(|value| value.get("math")).is_none());
 
-    let remove_output = Command::new(env!("CARGO_BIN_EXE_cellc"))
-        .current_dir(root)
-        .arg("remove")
-        .arg("--dev")
-        .arg("--json")
-        .arg("math")
-        .output()
-        .unwrap();
+    let remove_output = cellc_command().current_dir(root).arg("remove").arg("--dev").arg("--json").arg("math").output().unwrap();
     assert!(remove_output.status.success(), "stderr: {}", String::from_utf8_lossy(&remove_output.stderr));
 
     let remove_summary: serde_json::Value = serde_json::from_slice(&remove_output.stdout).unwrap();
@@ -3735,14 +3663,8 @@ version = "0.1.0"
     )
     .unwrap();
 
-    let missing_rev = Command::new(env!("CARGO_BIN_EXE_cellc"))
-        .current_dir(root)
-        .arg("add")
-        .arg("--git")
-        .arg("https://example.com/math.git")
-        .arg("math")
-        .output()
-        .unwrap();
+    let missing_rev =
+        cellc_command().current_dir(root).arg("add").arg("--git").arg("https://example.com/math.git").arg("math").output().unwrap();
     assert!(!missing_rev.status.success(), "unexpected success: {}", String::from_utf8_lossy(&missing_rev.stdout));
     assert!(
         String::from_utf8_lossy(&missing_rev.stderr).contains("must specify --rev"),
@@ -3751,7 +3673,7 @@ version = "0.1.0"
     );
 
     let pinned_rev = "0123456789abcdef0123456789abcdef01234567";
-    let add_output = Command::new(env!("CARGO_BIN_EXE_cellc"))
+    let add_output = cellc_command()
         .current_dir(root)
         .arg("add")
         .arg("--git")
@@ -3814,14 +3736,7 @@ version = "0.1.0"
     )
     .unwrap();
 
-    let install = Command::new(env!("CARGO_BIN_EXE_cellc"))
-        .current_dir(root)
-        .arg("install")
-        .arg("math")
-        .arg("--path")
-        .arg("math")
-        .output()
-        .unwrap();
+    let install = cellc_command().current_dir(root).arg("install").arg("math").arg("--path").arg("math").output().unwrap();
     assert!(install.status.success(), "stderr: {}", String::from_utf8_lossy(&install.stderr));
 
     let manifest: toml::Value = std::fs::read_to_string(root.join("Cell.toml")).unwrap().parse().unwrap();
@@ -3834,13 +3749,13 @@ version = "0.1.0"
     let util = lockfile.dependencies.get("util").expect("transitive util should be locked");
     assert_eq!(util.version, "0.1.0");
 
-    let update = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("update").output().unwrap();
+    let update = cellc_command().current_dir(root).arg("update").output().unwrap();
     assert!(update.status.success(), "stderr: {}", String::from_utf8_lossy(&update.stderr));
     let update_stdout = String::from_utf8_lossy(&update.stdout);
     assert!(update_stdout.contains("Updated 2 dependencies"), "{update_stdout}");
     assert!(!update_stdout.contains("Warning: lockfile is not consistent"), "{update_stdout}");
 
-    let remove = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("remove").arg("math").output().unwrap();
+    let remove = cellc_command().current_dir(root).arg("remove").arg("math").output().unwrap();
     assert!(remove.status.success(), "stderr: {}", String::from_utf8_lossy(&remove.stderr));
 
     let pruned: cellscript::package::Lockfile = toml::from_str(&std::fs::read_to_string(root.join("Cell.lock")).unwrap()).unwrap();
@@ -3886,7 +3801,7 @@ where
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("metadata").output().unwrap();
+    let output = cellc_command().current_dir(root).arg("metadata").output().unwrap();
     assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -3960,8 +3875,7 @@ where
     )
     .unwrap();
 
-    let json_output =
-        Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("explain-generics").arg("--json").output().unwrap();
+    let json_output = cellc_command().current_dir(root).arg("explain-generics").arg("--json").output().unwrap();
     assert!(json_output.status.success(), "stderr: {}", String::from_utf8_lossy(&json_output.stderr));
     let summary: serde_json::Value = serde_json::from_slice(&json_output.stdout).unwrap();
     assert_eq!(summary["status"], "ok");
@@ -4007,7 +3921,7 @@ where
         assert!(hash_helpers.iter().any(|value| value.as_str() == Some(helper)), "missing Hash helper {helper}: {hash_helpers:?}");
     }
 
-    let text_output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("explain-generics").output().unwrap();
+    let text_output = cellc_command().current_dir(root).arg("explain-generics").output().unwrap();
     assert!(text_output.status.success(), "stderr: {}", String::from_utf8_lossy(&text_output.stderr));
     let stdout = String::from_utf8_lossy(&text_output.stdout);
     assert!(stdout.contains("Checked bounded generic collection instantiations"), "{}", stdout);
@@ -4050,15 +3964,8 @@ where
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc"))
-        .current_dir(root)
-        .arg("action")
-        .arg("build")
-        .arg("--action")
-        .arg("mint")
-        .arg("--json")
-        .output()
-        .unwrap();
+    let output =
+        cellc_command().current_dir(root).arg("action").arg("build").arg("--action").arg("mint").arg("--json").output().unwrap();
     assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
     let plan: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(plan["status"], "ok");
@@ -4098,7 +4005,7 @@ where
     .unwrap();
 
     let output_path = root.join("witness.bin");
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc"))
+    let output = cellc_command()
         .current_dir(root)
         .arg("entry-witness")
         .arg("--action")
@@ -4158,7 +4065,7 @@ where
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("abi").arg("--action").arg("main").output().unwrap();
+    let output = cellc_command().current_dir(root).arg("abi").arg("--action").arg("main").output().unwrap();
     assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
 
     let stdout: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -4219,13 +4126,7 @@ where
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc"))
-        .current_dir(root)
-        .arg("scheduler-plan")
-        .arg("--target-profile")
-        .arg("ckb")
-        .output()
-        .unwrap();
+    let output = cellc_command().current_dir(root).arg("scheduler-plan").arg("--target-profile").arg("ckb").output().unwrap();
     assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
 
     let stdout: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -4245,7 +4146,7 @@ where
 
 #[test]
 fn cellc_ckb_hash_emits_default_blake2b_vector() {
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).arg("ckb-hash").arg("--json").output().unwrap();
+    let output = cellc_command().arg("ckb-hash").arg("--json").output().unwrap();
     assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
 
     let stdout: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -4255,7 +4156,7 @@ fn cellc_ckb_hash_emits_default_blake2b_vector() {
     assert_eq!(stdout["input_bytes"], 0);
     assert_eq!(stdout["hash"], "44f4c69744d5f8c55d642062949dcae49bc4e7ef43d388c5a12f42b5633d163e");
 
-    let text = Command::new(env!("CARGO_BIN_EXE_cellc")).arg("ckb-hash").arg("--hex").arg("00").output().unwrap();
+    let text = cellc_command().arg("ckb-hash").arg("--hex").arg("00").output().unwrap();
     assert!(text.status.success(), "stderr: {}", String::from_utf8_lossy(&text.stderr));
     assert_eq!(String::from_utf8_lossy(&text.stdout).trim().len(), 64);
 }
@@ -4309,7 +4210,7 @@ fn cellc_certify_accepts_novaseal_local_ready_report() {
     let output_report = temp.path().join("cellscript-certification.json");
     write_novaseal_certification_report(&report);
 
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc"))
+    let output = cellc_command()
         .arg("certify")
         .arg("--plugin")
         .arg("novaseal-profile-v0")
@@ -4340,7 +4241,7 @@ fn cellc_certify_require_production_rejects_local_only_report() {
     let report = temp.path().join("novaseal-production-gates.json");
     write_novaseal_certification_report(&report);
 
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc"))
+    let output = cellc_command()
         .arg("certify")
         .arg("--plugin")
         .arg("novaseal-profile-v0")
@@ -4381,8 +4282,7 @@ where
     )
     .unwrap();
 
-    let output =
-        Command::new(env!("CARGO_BIN_EXE_cellc")).arg("opt-report").arg(&source).arg("--target").arg("riscv64-asm").output().unwrap();
+    let output = cellc_command().arg("opt-report").arg(&source).arg("--target").arg("riscv64-asm").output().unwrap();
     assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
 
     let stdout: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -4431,7 +4331,7 @@ where
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc"))
+    let output = cellc_command()
         .current_dir(root)
         .arg("entry-witness")
         .arg("--action")
@@ -4478,7 +4378,7 @@ where
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc"))
+    let output = cellc_command()
         .current_dir(root)
         .arg("entry-witness")
         .arg("--action")
@@ -4511,8 +4411,7 @@ version = "0.1.0"
     let source_path = root.join("src").join("main.cell");
     std::fs::write(&source_path, "module demo::main\naction ping(x:u64)->u64\nwhere\nx\n").unwrap();
 
-    let dirty_check =
-        Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("fmt").arg("--check").arg("--json").output().unwrap();
+    let dirty_check = cellc_command().current_dir(root).arg("fmt").arg("--check").arg("--json").output().unwrap();
     assert!(!dirty_check.status.success(), "unexpected success: {}", String::from_utf8_lossy(&dirty_check.stdout));
     let stdout: serde_json::Value = serde_json::from_slice(&dirty_check.stdout).unwrap();
     assert_eq!(stdout["status"], "failed");
@@ -4520,13 +4419,13 @@ version = "0.1.0"
     assert_eq!(stdout["changed"], 1);
     assert!(stdout["changed_files"][0].as_str().unwrap().ends_with("src/main.cell"));
 
-    let status = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("fmt").status().unwrap();
+    let status = cellc_command().current_dir(root).arg("fmt").status().unwrap();
     assert!(status.success());
 
     let formatted = std::fs::read_to_string(&source_path).unwrap();
     assert!(formatted.contains("action ping(x: u64) -> u64\nwhere"));
 
-    let check = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("fmt").arg("--check").arg("--json").output().unwrap();
+    let check = cellc_command().current_dir(root).arg("fmt").arg("--check").arg("--json").output().unwrap();
     assert!(check.status.success(), "{}", String::from_utf8_lossy(&check.stderr));
     let stdout: serde_json::Value = serde_json::from_slice(&check.stdout).unwrap();
     assert_eq!(stdout["status"], "ok");
@@ -4537,7 +4436,7 @@ version = "0.1.0"
 #[cfg(not(feature = "vm-runner"))]
 #[test]
 fn cellc_run_subcommand_without_vm_runner_degrades_gracefully() {
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).arg("run").output().unwrap();
+    let output = cellc_command().arg("run").output().unwrap();
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
@@ -4573,7 +4472,7 @@ where
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("run").output().unwrap();
+    let output = cellc_command().current_dir(root).arg("run").output().unwrap();
     assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -4614,7 +4513,7 @@ where
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("run").output().unwrap();
+    let output = cellc_command().current_dir(root).arg("run").output().unwrap();
     assert!(!output.status.success(), "stdout: {}", String::from_utf8_lossy(&output.stdout));
 
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -4655,7 +4554,7 @@ where
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("run").output().unwrap();
+    let output = cellc_command().current_dir(root).arg("run").output().unwrap();
     assert!(!output.status.success(), "stdout: {}", String::from_utf8_lossy(&output.stdout));
 
     let stderr = String::from_utf8_lossy(&output.stderr);

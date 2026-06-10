@@ -4,7 +4,8 @@ use cellscript::{
     CompileOptions, EntryWitnessArg, ParamMetadata,
 };
 use std::panic::{catch_unwind, AssertUnwindSafe};
-use std::process::Command;
+
+mod common;
 
 const ENTRY_WITNESS_ABI_MAGIC: &[u8; 8] = b"CSARGv1\0";
 
@@ -442,7 +443,7 @@ where
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc"))
+    let output = common::cellc_command()
         .current_dir(root)
         .arg("entry-witness")
         .arg("--action")

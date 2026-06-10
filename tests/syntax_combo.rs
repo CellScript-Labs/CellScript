@@ -1,14 +1,15 @@
 use std::{path::PathBuf, process::Command};
 
+mod common;
+
 #[test]
 fn syntax_combo_quick_matrix_is_cargo_test_visible() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let cellc_bin = env!("CARGO_BIN_EXE_cellc");
     let output = Command::new("bash")
         .arg("scripts/cellscript_syntax_combo_audit.sh")
         .arg("quick")
         .current_dir(&manifest_dir)
-        .env("CELLC_BIN", cellc_bin)
+        .env("CELLC_BIN", common::cellc_bin())
         .output()
         .expect("syntax combo quick runner should start");
 
