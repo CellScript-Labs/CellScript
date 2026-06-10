@@ -11,7 +11,7 @@ require compiler/runtime features or raw script code.
 ## Scope
 
 - `ickb_logic.cell` models deposit phase 1 receipt creation, receipt
-  consumption, iCKB accounting, xUDT binding as a hash placeholder, withdrawal
+  consumption, iCKB accounting, xUDT binding as an explicit model field, withdrawal
   request creation, maturity checks, and linear no-double-consume behaviour.
 - `limit_order.cell` models limit order creation, match value conservation,
   partial-fill minimums, cancellation through an owner/master cell, and malformed

@@ -203,6 +203,14 @@ fn checked_in_example_cell_files() -> Vec<Utf8PathBuf> {
     files
 }
 
+fn checked_in_example_audit_files() -> Vec<Utf8PathBuf> {
+    let mut files = checked_in_example_cell_files();
+    files.push(example_path("ickb_benchmark/README.md"));
+    files.push(example_path("ickb_benchmark/limitations.json"));
+    files.sort();
+    files
+}
+
 #[test]
 fn canonical_examples_are_the_single_checked_in_business_source() {
     let examples_root = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples");
@@ -241,6 +249,33 @@ fn release_examples_are_free_of_placeholder_hashes_and_formatter_artifacts() {
             !source.contains("{ { {") && !source.contains("} } }"),
             "{path} should not contain formatter/parser artifact brace nesting"
         );
+    }
+}
+
+#[test]
+fn checked_in_examples_do_not_contain_unclassified_placeholder_language() {
+    let forbidden = [
+        "TODO",
+        "FIXME",
+        "placeholder",
+        "PLACEHOLDER",
+        "mock",
+        "MOCK",
+        "stub",
+        "STUB",
+        "dummy",
+        "DUMMY",
+        "not implemented",
+        "unimplemented",
+        "Hash::zero()",
+        "fn hash_wallet",
+        "fn hash_lock",
+    ];
+    for path in checked_in_example_audit_files() {
+        let source = std::fs::read_to_string(&path).unwrap_or_else(|err| panic!("failed to read {path}: {err}"));
+        for needle in forbidden {
+            assert!(!source.contains(needle), "{path} contains unclassified placeholder language: {needle}");
+        }
     }
 }
 
