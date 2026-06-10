@@ -1,0 +1,8 @@
+{
+  "schema": "novaseal-rwa-receipt-fixture-v0.1",
+  "fixture": "wrong_issuer_settlement_reject",
+  "action": "settle_rwa_receipt",
+  "expected": "rejected",
+  "coverage": "source-guard-present",
+  "description": "Settlement must reject a signature payload whose issuer pubkey is not the issuer authority hash."
+}

@@ -1,0 +1,9 @@
+{
+  "schema": "novaseal-agreement-fixture-v0.1",
+  "fixture": "preserved_field_mutation_reject",
+  "action": "repay_before_expiry / claim_after_expiry",
+  "expected": "rejected",
+  "coverage": "source-guard-present + resolved-transaction-covered",
+  "reject_guard": "preserve closed from active",
+  "description": "Terminal transitions must preserve the agreement identity, parties, assets, amounts, fee, and expiry fields."
+}

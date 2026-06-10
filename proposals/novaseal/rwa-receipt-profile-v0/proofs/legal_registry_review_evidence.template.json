@@ -1,0 +1,32 @@
+{
+  "schema": "novaseal-rwa-legal-registry-review-evidence-v0.1",
+  "status": "accepted",
+  "profile": "rwa-receipt-profile-v0",
+  "reviewer": "REPLACE_WITH_EXTERNAL_LEGAL_OR_REGISTRY_REVIEWER",
+  "review_date": "YYYY-MM-DD",
+  "review_scope": [
+    "RWA receipt legal title boundary",
+    "RWA receipt custody and registry-state provenance",
+    "RWA receipt oracle-fact exclusion boundary",
+    "RWA receipt enforceability and jurisdiction boundary"
+  ],
+  "registry": {
+    "authority": "REPLACE_WITH_REAL_REGISTRY_OR_CUSTODIAN_AUTHORITY",
+    "jurisdiction": "REPLACE_WITH_REAL_WORLD_JURISDICTION",
+    "registry_report_hash": "0xREPLACE_WITH_64_HEX_REGISTRY_REVIEW_REPORT_HASH"
+  },
+  "profile_source_tree_sha256": "0x79e869186e85e88df34bc0cc65be41e0969c56c347b169a9f9903be2af2f94ad",
+  "report_uri": "REPLACE_WITH_EXTERNAL_LEGAL_OR_REGISTRY_REVIEW_REPORT_URI",
+  "request_handoff": {
+    "bundle": "target/novaseal-external-evidence-handoff-bundle.json",
+    "bundle_hash": "0xREPLACE_WITH_64_HEX_HANDOFF_BUNDLE_HASH",
+    "bundle_hash_algorithm": "blake2b-256(person=NovaExtHandoff)",
+    "group": "rwa_legal_registry_review_evidence"
+  },
+  "notes": [
+    "This file is a template, not production evidence.",
+    "A real report must come from an external legal, registry, or custodian reviewer and must not be a local NovaSeal fixture.",
+    "NovaSeal does not verify off-chain title, custody, registry state, market price, legal enforceability, or oracle facts in-script.",
+    "The request_handoff block must reference the current target/novaseal-external-evidence-handoff-bundle.json hash, blake2b-256(person=NovaExtHandoff) hash algorithm, and rwa_legal_registry_review_evidence group."
+  ]
+}

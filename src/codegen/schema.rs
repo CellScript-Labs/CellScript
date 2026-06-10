@@ -219,6 +219,11 @@ pub(crate) fn fixed_aggregate_pointer_param_width(ty: &IrType) -> Option<usize> 
 
 pub(crate) fn fixed_byte_const_bytes(value: &IrConst) -> Option<Vec<u8>> {
     match value {
+        IrConst::Bool(value) => Some(vec![u8::from(*value)]),
+        IrConst::U8(value) => Some(vec![*value]),
+        IrConst::U16(value) => Some(value.to_le_bytes().to_vec()),
+        IrConst::U32(value) => Some(value.to_le_bytes().to_vec()),
+        IrConst::U64(value) => Some(value.to_le_bytes().to_vec()),
         IrConst::Address(bytes) | IrConst::Hash(bytes) => Some(bytes.to_vec()),
         IrConst::U128(value) => Some(value.to_le_bytes().to_vec()),
         IrConst::Array(values) => values
@@ -326,6 +331,10 @@ impl CodeGenerator {
 
     pub(crate) fn fixed_byte_like_width(&self, ty: &IrType) -> Option<usize> {
         fixed_byte_width(ty, type_static_length(ty)).or_else(|| self.fixed_named_type_width(ty))
+    }
+
+    pub(crate) fn layout_fixed_byte_like_width(&self, layout: &SchemaFieldLayout) -> Option<usize> {
+        layout_fixed_byte_width(layout).or_else(|| self.fixed_byte_like_width(&layout.ty))
     }
 
     pub(crate) fn constructed_byte_vector_part_width(&self, operand: &IrOperand) -> Option<usize> {
@@ -663,7 +672,7 @@ impl CodeGenerator {
         let Some(output_start_offset) = self.runtime_expr_temp_offset_or_record(2) else {
             return;
         };
-        if let Some(width) = layout_fixed_byte_width(layout) {
+        if let Some(width) = self.layout_fixed_byte_like_width(layout) {
             self.emit_dynamic_table_fixed_field_pointer_to_stack(
                 input_size_offset,
                 input_buffer_offset,
@@ -894,7 +903,7 @@ impl CodeGenerator {
             self.emit_loaded_field_equals_expected(size_offset, buffer_offset, layout, expected, context);
             return true;
         }
-        let Some(width) = layout_fixed_byte_width(layout) else {
+        let Some(width) = self.layout_fixed_byte_like_width(layout) else {
             return false;
         };
         let Some(source) = self.expected_fixed_byte_source(expected, width) else {
@@ -1049,7 +1058,7 @@ impl CodeGenerator {
     pub(crate) fn emit_fixed_byte_source_pointer_to(&mut self, dest_reg: &str, source: &ExpectedFixedByteSource) -> bool {
         match source {
             ExpectedFixedByteSource::SchemaField(source) => {
-                let Some(width) = layout_fixed_byte_width(&source.layout) else {
+                let Some(width) = self.layout_fixed_byte_like_width(&source.layout) else {
                     return false;
                 };
                 self.emit_schema_field_source_pointer_to(dest_reg, source, width)
@@ -1182,7 +1191,7 @@ impl CodeGenerator {
             IrOperand::Var(var) if self.fixed_byte_like_width(&var.ty).is_some() => {
                 let var_width = self.fixed_byte_like_width(&var.ty)?;
                 if let Some(source) = self.schema_field_value_sources.get(&var.id).cloned() {
-                    let source_width = layout_fixed_byte_width(&source.layout)?;
+                    let source_width = self.layout_fixed_byte_like_width(&source.layout)?;
                     if source_width == expected_width {
                         return Some(ExpectedFixedByteSource::SchemaField(source));
                     }
@@ -1375,13 +1384,32 @@ impl CodeGenerator {
         start: usize,
         width: usize,
     ) {
-        self.emit(format!("li {}, 0", dest_reg));
-        for byte_index in 0..width {
-            self.emit_fixed_byte_source_byte_to(scratch_reg, base_reg, source, start + byte_index);
-            if byte_index != 0 {
-                self.emit(format!("slli {}, {}, {}", scratch_reg, scratch_reg, byte_index * 8));
+        match source {
+            ExpectedFixedByteSource::Const(bytes) => {
+                self.emit(format!("li {}, 0", dest_reg));
+                for byte_index in 0..width {
+                    self.emit(format!("li {}, {}", scratch_reg, bytes[start + byte_index]));
+                    if byte_index != 0 {
+                        self.emit(format!("slli {}, {}, {}", scratch_reg, scratch_reg, byte_index * 8));
+                    }
+                    self.emit(format!("or {}, {}, {}", dest_reg, dest_reg, scratch_reg));
+                }
             }
-            self.emit(format!("or {}, {}, {}", dest_reg, dest_reg, scratch_reg));
+            _ => {
+                if !self.emit_fixed_byte_source_pointer_to(base_reg, source) {
+                    self.emit("# cellscript abi: fail closed because fixed-byte scalar source is not addressable");
+                    self.emit_fail(CellScriptRuntimeError::DynamicFieldBoundsInvalid);
+                    return;
+                }
+                self.emit(format!("li {}, 0", dest_reg));
+                for byte_index in 0..width {
+                    self.emit(format!("lbu {}, {}({})", scratch_reg, start + byte_index, base_reg));
+                    if byte_index != 0 {
+                        self.emit(format!("slli {}, {}, {}", scratch_reg, scratch_reg, byte_index * 8));
+                    }
+                    self.emit(format!("or {}, {}, {}", dest_reg, dest_reg, scratch_reg));
+                }
+            }
         }
     }
 
@@ -1654,7 +1682,7 @@ impl CodeGenerator {
         let Some(layout) = layouts.get(field).cloned() else {
             return false;
         };
-        let Some(width) = layout_fixed_byte_width(&layout) else {
+        let Some(width) = self.layout_fixed_byte_like_width(&layout) else {
             return self.emit_dynamic_schema_field_access(dest, var, type_name, field, &layout);
         };
 
@@ -1753,7 +1781,7 @@ impl CodeGenerator {
         let Some(layout) = aggregate_field_layout(&source_ty, field) else {
             return false;
         };
-        let Some(width) = layout_fixed_byte_width(&layout) else {
+        let Some(width) = self.layout_fixed_byte_like_width(&layout) else {
             return false;
         };
 
@@ -1806,7 +1834,7 @@ impl CodeGenerator {
         let Some(layout) = self.type_layouts.get(type_name).and_then(|fields| fields.get(field)).cloned() else {
             return false;
         };
-        let Some(width) = layout_fixed_byte_width(&layout) else {
+        let Some(width) = self.layout_fixed_byte_like_width(&layout) else {
             return false;
         };
 
@@ -1833,5 +1861,38 @@ impl CodeGenerator {
         }
         self.emit_stack_store("t0", dest.id * 8);
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fixed_width_helpers_classify_scalar_and_byte_storage() {
+        assert_eq!(fixed_scalar_width(&IrType::U64, Some(8)), Some(8));
+        assert_eq!(fixed_scalar_width(&IrType::U64, None), None);
+        assert_eq!(fixed_scalar_width(&IrType::Hash, None), None);
+        assert_eq!(fixed_byte_width(&IrType::Hash, Some(32)), Some(32));
+        assert_eq!(fixed_byte_width(&IrType::Array(Box::new(IrType::U8), 7), Some(7)), Some(7));
+        assert_eq!(fixed_register_width(&IrType::U128, Some(16)), None);
+    }
+
+    #[test]
+    fn fixed_byte_constants_materialize_little_endian_bytes() {
+        assert_eq!(fixed_byte_const_bytes(&IrConst::U16(0x1234)), Some(vec![0x34, 0x12]));
+        assert_eq!(fixed_byte_const_bytes(&IrConst::Bool(true)), Some(vec![1]));
+        assert_eq!(fixed_byte_const_bytes(&IrConst::Unit), None);
+    }
+
+    #[test]
+    fn aggregate_field_layouts_track_tuple_offsets() {
+        let layout = aggregate_field_layout(&IrType::Tuple(vec![IrType::U8, IrType::U64]), "1")
+            .expect("tuple field layout should be available");
+
+        assert_eq!(layout.index, 1);
+        assert_eq!(layout.offset, 1);
+        assert_eq!(layout.fixed_size, Some(8));
+        assert_eq!(tuple_return_field_type(&IrType::Tuple(vec![IrType::Bool, IrType::Hash]), "1"), Some(IrType::Hash));
     }
 }

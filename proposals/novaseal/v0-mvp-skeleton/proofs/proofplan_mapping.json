@@ -1,0 +1,794 @@
+{
+  "schema": "novaseal-v0-proofplan-mapping-v0.1",
+  "snapshot_date": "2026-05-31",
+  "package": "novaseal 0.0.1-v0-mvp",
+  "generated_artifact": "target/cellscript-audit-bundle/audit-bundle.json",
+  "derived_audit_surface": {
+    "script": "scripts/novaseal_audit_surface.py",
+    "artifact": "target/novaseal-audit-surface.json",
+    "command": "python3 scripts/novaseal_audit_surface.py --pretty",
+    "current_summary": {
+      "actions": 1,
+      "builder_assumptions": 43,
+      "classification": "non_production_audit_surface",
+      "locks": 1,
+      "proof_plan_records": 55,
+      "runtime_gaps": 0,
+      "source_units": 4,
+      "strict_prediction_errors": 0,
+      "field_guards_source_present": [
+        "state_hash",
+        "nonce",
+        "expiry",
+        "policy_hash",
+        "latest_receipt_hash"
+      ],
+      "field_guards_generated_named_obligation": [
+        "state_hash",
+        "nonce",
+        "expiry",
+        "policy_hash",
+        "latest_receipt_hash"
+      ],
+      "guard_equality_records": [
+        "guard-equality:intent.core.old_state_hash==old_cell.state_hash",
+        "guard-equality:hash_blake2b(intent.core.new_state_hash)==state_hash_commitment",
+        "guard-equality:intent.core.policy_hash==old_cell.policy_hash",
+        "guard-equality:intent.core.old_nonce==old_cell.nonce",
+        "guard-equality:intent.core.new_nonce==old_cell.nonce+1",
+        "guard-equality:cell.btc_authority_hash==expected_btc_authority_hash",
+        "guard-equality:cell.policy_hash==intent.core.policy_hash"
+      ],
+      "transaction_measurement_evidence": {
+        "measured": true,
+        "measurement_layer": "combined-transaction-harness",
+        "max_full_transaction_cycles": 7521003,
+        "max_consensus_tx_size_bytes": 1484,
+        "max_output_occupied_capacity_shannons": 70700000000
+      }
+    }
+  },
+  "fixture_harness": {
+    "script": "scripts/novaseal_fixture_harness.py",
+    "artifact": "target/novaseal-fixture-report.json",
+    "command": "python3 scripts/novaseal_fixture_harness.py --pretty",
+    "classification": "model_level_fixture_evidence",
+    "ckb_vm_executed": false,
+    "current_summary": {
+      "child_verifier_ckb_vm_executed": true,
+      "ckb_vm_executed": false,
+      "classification": "model_level_fixture_evidence",
+      "combined_builder_shape_checks_passed": true,
+      "combined_fee_shape_checks_passed": true,
+      "combined_full_transaction_accepted": 1,
+      "combined_full_transaction_executed": true,
+      "combined_full_transaction_matched_expected": true,
+      "combined_full_transaction_max_cycles": 7521003,
+      "combined_full_transaction_rejected": 10,
+      "combined_full_transaction_total_cases": 11,
+      "combined_lock_and_type_script_groups_present": true,
+      "combined_max_consensus_tx_size_bytes": 1484,
+      "combined_max_fee_shannons": 100000,
+      "combined_max_output_occupied_capacity_shannons": 70700000000,
+      "combined_min_fee_shannons": 100000,
+      "combined_shared_witness_abi_aligned": true,
+      "combined_under_capacity_shape_rejects": true,
+      "criteria_seen": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "fixtures": 11,
+      "matched": 11,
+      "mismatched": 0,
+      "parent_child_ckb_vm_matched_expected": true,
+      "parent_lock_abi_preflight_passed": true,
+      "parent_lock_capacity_shape_checks_passed": true,
+      "parent_lock_ckb_vm_executed": true,
+      "parent_lock_consensus_packed_tx_constructed": true,
+      "parent_lock_full_transaction_executed": true,
+      "parent_lock_full_transaction_verifier_matched_expected": true,
+      "parent_lock_full_transaction_verifier_max_cycles": 3702919,
+      "parent_lock_max_consensus_tx_size_bytes": 859,
+      "parent_lock_max_output_occupied_capacity_shannons": 21900000000,
+      "parent_lock_resolved_script_verifier_executed": true,
+      "parent_lock_resolved_script_verifier_matched_expected": true,
+      "parent_lock_resolved_script_verifier_max_cycles": 3702919,
+      "parent_lock_resolved_transaction_constructed": true,
+      "parent_lock_spawn_executed": true,
+      "parent_lock_transaction_shape_constructed": true,
+      "parent_lock_under_capacity_shape_rejects": true,
+      "shared_lock_type_witness_abi": "CSARGv1:NovaSealSignedIntentV0,state_hash_commitment,SignaturePayload",
+      "shared_lock_type_witness_abi_aligned": true,
+      "shared_lock_type_witness_size_bytes": 398,
+      "state_type_action_ckb_vm_executed": true,
+      "state_type_action_matched_expected": true,
+      "state_type_schema_cell_intent_aligned": true,
+      "state_type_schema_cell_intent_mismatch_detected": false,
+      "state_type_source_fixture_matched_by_state_type_only": 9,
+      "state_type_source_fixture_requires_lock_or_external_context": 2
+    },
+    "limits": [
+      "combined lock+type transactions for all eleven fixtures are executed by combined_tx_harness, not by the source-model fixture runner itself",
+      "does not itself submit transactions; live RPC evidence is produced by scripts/novaseal_devnet_stateful_live.py",
+      "BTC signature verification in the eleven transition fixtures is fixture-declared delegate success/failure",
+      "attaches child-verifier CKB VM, parent-lock ABI preflight, parent-lock CKB VM, and state-type CKB VM reports when available, but does not provide public/shared deployment attestation",
+      "records schema/.cell alignment for NovaSealIntentCoreV0.old_cell as OutPoint; fixed-width wallet vectors are generated by the root production gate, not by this harness"
+    ]
+  },
+  "schema_layout": {
+    "script": "scripts/novaseal_schema_layout.py",
+    "artifact": "target/novaseal-schema-layout.json",
+    "command": "python3 scripts/novaseal_schema_layout.py --pretty",
+    "encoding_profile": "packed-fixed-v0-reference",
+    "molecule_status": "not_generated",
+    "current_sizes": {
+      "NovaSealCellV0": 146,
+      "NovaSealCellCommitmentV0": 114,
+      "NovaSealIntentCoreV0": 222,
+      "NovaSealSignedIntentV0": 254,
+      "ProofReceiptCommitmentV0": 310,
+      "ProofReceiptV0": 382
+    },
+    "current_field_counts": {
+      "NovaSealCellV0": 7,
+      "NovaSealCellCommitmentV0": 6,
+      "NovaSealIntentCoreV0": 11,
+      "NovaSealSignedIntentV0": 2,
+      "ProofReceiptCommitmentV0": 13,
+      "ProofReceiptV0": 16
+    },
+    "limits": [
+      "not a Molecule compiler output",
+      "wallet signing vectors are generated separately by scripts/novaseal_wallet_signing_vectors.py",
+      "does not define the future Fiber/xUDT amount offset"
+    ]
+  },
+  "canonical_vectors": {
+    "script": "scripts/novaseal_canonical_vectors.py",
+    "artifact": "target/novaseal-canonical-vectors.json",
+    "command": "python3 scripts/novaseal_canonical_vectors.py --pretty",
+    "classification": "packed_reference_test_vectors",
+    "current_summary": {
+      "accepted_new_cell_vectors": 1,
+      "classification": "packed_reference_test_vectors",
+      "intent_core_vectors": 11,
+      "new_cell_latest_receipt_hash_matches": 11,
+      "old_cell_vectors": 11,
+      "receipt_commitment_vectors": 11,
+      "resolved_receipt_hash_matches_intent": 11,
+      "signed_intent_vectors": 11,
+      "vectors": 11
+    },
+    "receipt_commitment_status": "split_intent_and_explicit_receipt_commitment",
+    "selected_rule": "split intent: latest_receipt_hash = hash_blake2b_packed(ProofReceiptCommitmentV0); signed_intent_hash = hash_blake2b_packed(NovaSealSignedIntentV0)",
+    "limits": [
+      "Not Molecule output.",
+      "Not CKB VM witness encoding.",
+      "Not BTC wallet signing material.",
+      "Placeholder Byte32 values are deterministic test derivations, not protocol constants."
+    ]
+  },
+  "btc_verifier_vectors": {
+    "script": "scripts/novaseal_btc_verifier_vectors.py",
+    "artifact": "target/novaseal-btc-verifier-vectors.json",
+    "command": "python3 scripts/novaseal_btc_verifier_vectors.py --pretty",
+    "scheme": "bip340_schnorr_secp256k1",
+    "classification": "reference_bip340_vectors",
+    "current_summary": {
+      "classification": "reference_bip340_vectors",
+      "negative_self_rejected": 40,
+      "negative_vectors": 40,
+      "positive_self_verified": 32,
+      "positive_vectors": 32
+    },
+    "limits": [
+      "not the RISC-V verifier binary",
+      "not CKB VM transaction evidence by itself; parent-lock and combined transaction harness evidence is recorded separately",
+      "generated lock surface covers Script.args binding, generic BTC BIP340 verifier obligations, spawn/IPC shell wiring, checked IPC envelope, and checked child exit status; cryptographic execution remains external verifier TCB evidence",
+      "does not cover ECDSA or multisig descriptors"
+    ]
+  },
+  "btc_verifier_host_reference": {
+    "crate": "verifier/novaseal_btc_verifier",
+    "commands": [
+      "cargo test --manifest-path verifier/novaseal_btc_verifier/Cargo.toml",
+      "cargo run --manifest-path verifier/novaseal_btc_verifier/Cargo.toml -- verify-vectors --vectors target/novaseal-btc-verifier-vectors.json",
+      "cargo run --manifest-path verifier/novaseal_btc_verifier/Cargo.toml -- verify-ipc-vectors --vectors target/novaseal-btc-verifier-ipc-vectors.json"
+    ],
+    "scheme": "bip340_schnorr_secp256k1",
+    "classification": "host_reference_verifier",
+    "current_summary": {
+      "unit_tests_passed": 5,
+      "vectors_checked": 72,
+      "vectors_matched": 72,
+      "ipc_vectors_checked": 77,
+      "ipc_vectors_matched": 77,
+      "status": "ok"
+    },
+    "limits": [
+      "host reference only; the RISC-V shell shares the verifier core, but this crate is not the staged child ELF",
+      "not CKB VM transaction evidence by itself; parent-lock and combined transaction harness evidence is recorded separately",
+      "generated lock surface covers Script.args binding, generic BTC BIP340 verifier obligations, spawn/IPC shell wiring, checked IPC envelope, and checked child exit status; cryptographic execution remains external verifier TCB evidence",
+      "does not produce cycle, binary size, or tx dry-run evidence"
+    ]
+  },
+  "btc_verifier_no_std_core": {
+    "crate": "verifier/novaseal_btc_verifier_core",
+    "commands": [
+      "cargo check --manifest-path verifier/novaseal_btc_verifier_core/Cargo.toml",
+      "cargo test --manifest-path verifier/novaseal_btc_verifier_core/Cargo.toml",
+      "cargo clippy --manifest-path verifier/novaseal_btc_verifier_core/Cargo.toml --all-targets -- -D warnings",
+      "cargo check --manifest-path verifier/novaseal_btc_verifier_core/Cargo.toml --target riscv64imac-unknown-none-elf"
+    ],
+    "classification": "no_std_ipc_and_bip340_core",
+    "current_summary": {
+      "unit_tests_passed": 4,
+      "riscv64imac_unknown_none_elf_check": "passed",
+      "bip340_verification": "implemented",
+      "status": "ok"
+    },
+    "limits": [
+      "parses and validates the fixed IPC envelope and verifies BIP340 signatures",
+      "not a CKB executable binary",
+      "not CKB VM transaction evidence by itself; parent-lock and combined transaction harness evidence is recorded separately",
+      "generated lock surface covers Script.args binding, generic BTC BIP340 verifier obligations, spawn/IPC shell wiring, checked IPC envelope, and checked child exit status; cryptographic execution remains external verifier TCB evidence"
+    ]
+  },
+  "btc_verifier_riscv_shell": {
+    "crate": "verifier/novaseal_btc_verifier_riscv",
+    "artifact": "verifier/novaseal_btc_verifier_riscv/target/riscv64imac-unknown-none-elf/debug/novaseal_btc_verifier_riscv",
+    "report": "target/novaseal-btc-verifier-shell-report.json",
+    "commands": [
+      "cargo check --manifest-path verifier/novaseal_btc_verifier_riscv/Cargo.toml",
+      "cargo test --manifest-path verifier/novaseal_btc_verifier_riscv/Cargo.toml --lib",
+      "cargo clippy --manifest-path verifier/novaseal_btc_verifier_riscv/Cargo.toml --lib -- -D warnings",
+      "cargo clippy --manifest-path verifier/novaseal_btc_verifier_riscv/Cargo.toml --target riscv64imac-unknown-none-elf --bin novaseal_btc_verifier_riscv -- -D warnings",
+      "cargo build --manifest-path verifier/novaseal_btc_verifier_riscv/Cargo.toml --target riscv64imac-unknown-none-elf --bin novaseal_btc_verifier_riscv",
+      "cargo build --manifest-path verifier/novaseal_btc_verifier_riscv/Cargo.toml --release --target riscv64imac-unknown-none-elf --bin novaseal_btc_verifier_riscv",
+      "python3 scripts/novaseal_btc_verifier_shell_report.py --pretty"
+    ],
+    "classification": "spawn_word_input_bip340_riscv_shell",
+    "current_summary": {
+      "accepted": 32,
+      "all_expected_matched": true,
+      "crypto_rejects": 40,
+      "expected_accept": 32,
+      "expected_reject": 45,
+      "malformed_vectors": 5,
+      "matched_expected": 77,
+      "parse_ok": 72,
+      "parse_rejected": 5,
+      "rejected": 45,
+      "spawn_io_rejects": 1,
+      "spawn_word_representable": 76,
+      "spawn_word_roundtrip": 76,
+      "total_vectors": 77,
+      "well_formed_vectors": 72
+    },
+    "limits": [
+      "reads inherited fd index 0 as 18 little-endian u64 words; this path is executed by the child-verifier CKB VM harness",
+      "implements BIP340 locally, and the parent-lock CKB VM harness now executes parent spawn plus child verification",
+      "wired through nova_btc_authority_lock.cell spawn_with_fd to the RISC-V BIP340 shell",
+      "generated lock surface covers Script.args binding, generic BTC BIP340 verifier obligations, spawn/IPC shell wiring, checked IPC envelope, and checked child exit status; cryptographic execution remains external verifier TCB evidence",
+      "does not produce public/shared deployment attestation by itself"
+    ]
+  },
+  "btc_verifier_riscv_shell_artifact": {
+    "script": "scripts/novaseal_riscv_shell_artifact.py",
+    "artifact": "target/novaseal-riscv-shell-artifact.json",
+    "staged_elf": "target/novaseal-btc-verifier-riscv-shell-release.elf",
+    "command": "python3 scripts/novaseal_riscv_shell_artifact.py --sync --pretty",
+    "classification": "riscv_shell_artifact_preflight",
+    "current_summary": {
+      "preflight_passed": true,
+      "staged_matches_release": true,
+      "staged_release_elf_size_bytes": 190040,
+      "staged_release_elf_sha256": "036aad492412142735deee7821e69ec8752db4fd52de1f87e0b51608bee7ff82",
+      "generated_spawn_visible": true,
+      "strict_surface_clean": true,
+      "lock_wiring_status": "wired_to_bip340_shell",
+      "ready_for_ckb_vm_dry_run": true,
+      "production_ready": false
+    },
+    "limits": [
+      "stages and hashes the RISC-V BIP340 shell artifact",
+      "this artifact preflight does not execute the ELF through CKB VM spawn",
+      "parent-lock-to-child-verifier execution is covered by the separate parent harness, resolved lock-group verifier, and full transaction script verifier",
+      "does not produce public/shared deployment attestation by itself"
+    ]
+  },
+  "btc_verifier_ckb_vm_child_harness": {
+    "crate": "harness/ckb_vm",
+    "artifact": "target/novaseal-ckb-vm-child-verifier-report.json",
+    "command": "cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_ckb_vm_harness -- --pretty",
+    "classification": "child_verifier_ckb_vm_dry_run_evidence",
+    "current_summary": {
+      "child_verifier_ckb_vm_executed": true,
+      "parent_lock_spawn_executed": false,
+      "total_cases": 77,
+      "expected_accept": 32,
+      "expected_reject": 45,
+      "accepted": 32,
+      "rejected": 45,
+      "matched_expected": 77,
+      "mismatched": 0,
+      "malformed_word_streams": 1,
+      "min_cycles": 10863,
+      "max_cycles": 3552601,
+      "total_cycles": 201082269,
+      "inherited_fd_calls": 77,
+      "pipe_read_calls": 1386,
+      "close_calls": 77
+    },
+    "limits": [
+      "executes only the staged child verifier ELF in ckb-vm",
+      "uses harness-provided official VM2 inherited_fd, pipe_read, and close syscalls",
+      "does not execute the parent CellScript lock, VM2 spawn, VM2 wait, ScriptGroup, witnesses, cell_deps, tx size, or capacity checks"
+    ]
+  },
+  "parent_lock_abi_preflight": {
+    "script": "scripts/novaseal_parent_lock_abi_preflight.py",
+    "artifact": "target/novaseal-parent-lock-abi-preflight.json",
+    "command": "python3 scripts/novaseal_parent_lock_abi_preflight.py --pretty",
+    "classification": "parent_lock_elf_abi_preflight",
+    "current_summary": {
+      "preflight_passed": true,
+      "parent_lock_asm_built": true,
+      "parent_lock_elf_built": true,
+      "parent_lock_ckb_vm_executed": false,
+      "parent_spawn_executed": false,
+      "ready_for_parent_child_ckb_vm_harness": true
+    },
+    "checks": [
+      "LOAD_SCRIPT reason=entry_lock_args is visible",
+      "expected_btc_authority_hash consumes exactly 32 Script.args bytes",
+      "Script.args u32 decoding does not clobber its base pointer",
+      "expected_btc_authority_hash is not rebound from Input#N or CellDep#N data",
+      "protected cell remains bound from Input#0 cell data",
+      "VM2 spawn_with_fd, spawn, wait, pipe_write, and close surfaces are visible"
+    ],
+    "limits": [
+      "inspects generated parent lock ASM/ELF artifacts only",
+      "does not execute parent lock CKB VM bytecode",
+      "does not prove parent/child VM2 spawn or transaction acceptance"
+    ]
+  },
+  "parent_lock_ckb_vm_harness": {
+    "crate": "harness/ckb_vm",
+    "artifact": "target/novaseal-parent-lock-ckb-vm-report.json",
+    "command": "cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_parent_lock_harness -- --pretty",
+    "classification": "parent_lock_spawn_child_verifier_ckb_vm_evidence_plus_full_ckb_script_verifier",
+    "current_summary": {
+      "parent_lock_ckb_vm_executed": true,
+      "parent_spawn_executed": true,
+      "child_verifier_ckb_vm_executed": true,
+      "transaction_shape_constructed": true,
+      "consensus_packed_tx_constructed": true,
+      "resolved_transaction_constructed": true,
+      "resolved_script_verifier_executed": true,
+      "resolved_script_verifier_matched_expected": true,
+      "full_transaction_constructed": true,
+      "full_transaction_executed": true,
+      "full_transaction_verifier_matched_expected": true,
+      "total_cases": 4,
+      "expected_accept": 1,
+      "expected_reject": 3,
+      "accepted": 1,
+      "rejected": 3,
+      "matched_expected": 4,
+      "mismatched": 0,
+      "parent_min_cycles": 33425,
+      "parent_max_cycles": 48783,
+      "child_max_cycles": 3487016,
+      "load_script_calls": 4,
+      "load_witness_calls": 4,
+      "load_cell_data_calls": 4,
+      "pipe_calls": 2,
+      "pipe_write_calls": 36,
+      "spawn_calls": 2,
+      "wait_calls": 2,
+      "close_calls": 2,
+      "max_consensus_tx_size_bytes": 859,
+      "max_output_occupied_capacity_shannons": 21900000000,
+      "min_capacity_margin_shannons": 10000000000,
+      "capacity_shape_checks_passed": true,
+      "under_capacity_shape_rejects": true,
+      "cell_dep0_spawn_target_modelled": true,
+      "parent_lock_dep_modelled": true,
+      "resolved_script_verifier_max_cycles": 3702919,
+      "full_transaction_verifier_max_cycles": 3702919
+    },
+    "cases": [
+      "valid parent-computed digest plus BIP340 signature accepts",
+      "signature bitflip rejects after parent spawn plus child verifier reject",
+      "valid BIP340 signature from a non-authority x-only pubkey rejects before spawn",
+      "authority hash mismatch rejects before spawn"
+    ],
+    "limits": [
+      "executes parent and child ELF artifacts in ckb-vm with harnessed syscalls",
+      "constructs a consensus-packed resolved transaction and executes the official ckb-script lock-group verifier plus full transaction script verifier for four parent authority cases",
+      "does not exercise a public/shared deployment attestation flow",
+      "capacity, occupied-capacity, tx-size, and under-capacity rejection are still shape-level measurements",
+      "parent-only harness does not run the eleven transition fixtures, but combined_tx_harness does at full ckb-script verifier level"
+    ]
+  },
+  "state_type_ckb_vm_harness": {
+    "crate": "harness/ckb_vm",
+    "artifact": "target/novaseal-state-type-ckb-vm-report.json",
+    "command": "cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_state_type_harness -- --pretty",
+    "classification": "state_type_action_ckb_vm_fixture_evidence",
+    "current_summary": {
+      "state_type_action_ckb_vm_executed": true,
+      "action_entry": "key_auth_transition",
+      "total_cases": 11,
+      "state_type_expected_accept": 3,
+      "state_type_expected_reject": 8,
+      "accepted": 3,
+      "rejected": 8,
+      "state_type_matched_expected": 11,
+      "state_type_mismatched": 0,
+      "source_fixture_matched_by_state_type_only": 9,
+      "source_fixture_requires_lock_or_external_context": 2,
+      "max_cycles": 154779,
+      "load_witness_calls": 11,
+      "load_cell_data_calls": 33,
+      "load_input_by_field_calls": 22,
+      "load_header_by_field_calls": 11,
+      "spawn_calls": 4,
+      "wait_calls": 4,
+      "wrong_signature_is_lock_scope": true,
+      "schema_cell_intent_mismatch_detected": false,
+      "schema_cell_intent_aligned": true
+    },
+    "limits": [
+      "executes key_auth_transition in ckb-vm at action/type scope only",
+      "does not execute btc_authority or the external BTC verifier",
+      "wrong_signature_reject is expected to pass at this layer because signature rejection is lock scope",
+      "uses canonical 254-byte intent vectors directly because schema old_cell=OutPoint and .cell old_cell=OutPoint now agree"
+    ]
+  },
+  "cellscript_spawn_backend_probe": {
+    "script": "scripts/novaseal_spawn_backend_probe.py",
+    "artifact": "target/novaseal-spawn-backend-probe.json",
+    "command": "python3 scripts/novaseal_spawn_backend_probe.py --cellc /home/arthur/a19q3/CellScript/target/debug/cellc --pretty",
+    "classification": "cellscript_btc_bip340_verifier_surface_ready_for_lock_wiring",
+    "current_summary": {
+      "compile_passed": true,
+      "all_spawn_ipc_calls_lowered": true,
+      "backend_ecall_boundary_closed": true,
+      "fixed_word_envelope_lowered": true,
+      "generic_btc_bip340_helper_lowered": true,
+      "spawn_with_fd_helper_executable": true,
+      "spawn_helper_fail_closed_stub": false,
+      "spawn_with_fd_helper_fail_closed_stub": false,
+      "spawn_with_fd_helper_uses_static_cell_dep0_with_one_inherited_fd": true,
+      "manifest_bound_spawn_target_builder_required": true,
+      "strict_rejects_spawn_target": true,
+      "ready_for_novaseal_lock_spawn_wiring": true,
+      "ready_for_parent_child_ckb_vm_dry_run": false
+    },
+    "limits": [
+      "probes compiler/backend behaviour only",
+      "does not execute a parent lock plus child verifier CKB VM transaction",
+      "confirms that source-level spawn still requires CellDep#0/code manifest binding, transaction cell_deps[0] plus builder evidence identifying the first CellDep name, dep_type, and any manifest-pinned out-point/hash fields"
+    ]
+  },
+  "btc_verifier_ipc_vectors": {
+    "script": "scripts/novaseal_btc_verifier_ipc_vectors.py",
+    "artifact": "target/novaseal-btc-verifier-ipc-vectors.json",
+    "command": "python3 scripts/novaseal_btc_verifier_ipc_vectors.py --pretty",
+    "classification": "fixed_ipc_envelope_vectors",
+    "current_summary": {
+      "classification": "fixed_ipc_envelope_vectors",
+      "expected_accept": 32,
+      "expected_reject": 45,
+      "ipc_vectors": 72,
+      "malformed_vectors": 5,
+      "source_negative": 40,
+      "source_positive": 32,
+      "total_vectors": 77
+    },
+    "contract": {
+      "magic_ascii": "NSBV0IPC",
+      "version": 0,
+      "scheme_bip340": 1,
+      "flags": 0,
+      "blob_len": 144
+    },
+    "limits": [
+      "not CKB spawn execution",
+      "constructed by nova_btc_authority_lock.cell and covered by parent-lock plus combined transaction CKB VM harnesses",
+      "not the RISC-V verifier binary",
+      "generated lock surface covers Script.args binding, generic BTC BIP340 verifier obligations, spawn/IPC shell wiring, checked IPC envelope, and checked child exit status; cryptographic execution remains external verifier TCB evidence"
+    ]
+  },
+  "generated_by": "cellc audit-bundle --target-profile ckb (real compiler output, not hand-authored)",
+  "strict_acceptance_criteria_count": 9,
+  "mapping_method": "Direct comparison of each criterion against generated evidence: (a) proof_plan records, (b) codegen_coverage_status values, (c) locks[] array, (d) builder_assumptions, (e) source_units visibility, and (f) entry ABI/runtime access records. Source-level require/assert statements are recorded separately as source_guard_evidence and do not by themselves qualify a criterion as covered_by_generated_audit.",
+  "notes": "This file is intentionally brutal. 'covered_by_generated_audit' is only used when the compiler's ProofPlan + coverage explicitly demonstrates the obligation for the active entry. Source guards are valuable but are not the same as generated ProofPlan obligations. The BTC authority lock is visible in the generated locks[] surface for Script.args binding and spawn/IPC wiring; the staged RISC-V shell has local, child-verifier, parent-lock, combined transaction, live local devnet evidence, wallet signing vectors, and a local TCB review bundle. Public/shared deployment attestation and external verifier review remain outside generated ProofPlan coverage.",
+  "criteria": [
+    {
+      "id": 1,
+      "short": "old NovaSealCell consumed exactly once",
+      "status": "generated_strict_and_runtime_covered",
+      "evidence_from_generated": [
+        "action:key_auth_transition has explicit 'consume old_cell: NovaSealCellV0'",
+        "proof_plan record: 'consume-input:NovaSealCellV0:old_cell' with codegen_coverage_status='covered'",
+        "runtime_accesses shows consume from Input#0 bound to old_cell"
+      ],
+      "gaps": [],
+      "notes": "The consume side exists in source, passes strict generated ProofPlan, and passes state-type/combined/live evidence."
+    },
+    {
+      "id": 2,
+      "short": "new NovaSealCell created exactly once",
+      "status": "generated_strict_and_runtime_covered",
+      "evidence_from_generated": [
+        "action:key_auth_transition returns and creates 'new_cell: NovaSealCellV0'",
+        "proof_plan record: 'create-output:NovaSealCellV0:new_cell' with codegen_coverage_status='covered'",
+        "runtime_accesses shows output:Output#0 bound to new_cell"
+      ],
+      "gaps": [],
+      "notes": "The new cell is materialized in harness/live evidence, and generated ProofPlan output coverage is strict-clean."
+    },
+    {
+      "id": 3,
+      "short": "state_hash changes ONLY via correctly formatted signed intent",
+      "status": "source_harness_live_and_generated_strict_covered",
+      "evidence_from_generated": [
+        "proof_plan record: 'create-output:NovaSealCellV0:new_cell' with codegen_coverage_status='covered'",
+        "proof_plan record: 'resource-conservation:NovaSealCellV0' with status='checked-runtime', codegen_coverage_status='covered', on_chain_checked=true",
+        "input_output_relation_checks includes 'resource-field:state_hash=guarded'",
+        "proof_plan record: 'guard-equality:intent.old_state_hash==old_cell.state_hash' with codegen_coverage_status='covered'",
+        "proof_plan record: 'guard-equality:hash_blake2b(intent.new_state_hash)==state_hash_commitment' with codegen_coverage_status='covered'",
+        "entry action key_auth_transition is the active generated audit surface"
+      ],
+      "source_guard_evidence": [
+        "require intent.old_state_hash == old_cell.state_hash (in entry action source)",
+        "let actual_state_hash_commitment = hash_blake2b(intent.new_state_hash) (in entry action source)",
+        "require actual_state_hash_commitment == state_hash_commitment (in entry action source)",
+        "new_cell.state_hash is set from intent.new_state_hash (in entry action source)",
+        "require intent.policy_hash == old_cell.policy_hash (in entry action source)"
+      ],
+      "gaps": [
+        "the actual BTC signature decision remains external verifier TCB"
+      ],
+      "notes": "State hash transition is covered by source, generated strict ProofPlan, state-type CKB VM, combined transaction harness, and live devnet."
+    },
+    {
+      "id": 4,
+      "short": "nonce strictly increments",
+      "status": "source_harness_live_and_generated_strict_covered",
+      "evidence_from_generated": [
+        "proof_plan record: 'create-output:NovaSealCellV0:new_cell' with codegen_coverage_status='covered'",
+        "input_output_relation_checks includes 'resource-field:nonce=guarded'",
+        "proof_plan record: 'guard-equality:intent.nonce==old_cell.nonce+1' with codegen_coverage_status='covered'"
+      ],
+      "source_guard_evidence": [
+        "require intent.nonce == old_cell.nonce + 1 (in entry action source)",
+        "new_cell.nonce is set from intent.nonce (in entry action source)"
+      ],
+      "gaps": [],
+      "notes": "Nonce increment is enforced by source, generated strict ProofPlan, and harness/live evidence."
+    },
+    {
+      "id": 5,
+      "short": "expired intent is rejected",
+      "status": "source_harness_and_generated_strict_covered",
+      "evidence_from_generated": [
+        "proof_plan record for 'load-header-timepoint' (ckb-runtime, builder assumption present)",
+        "input_output_relation_checks includes 'resource-field:expiry=guarded'"
+      ],
+      "source_guard_evidence": [
+        "require now <= intent.expiry (in entry action source)"
+      ],
+      "gaps": [],
+      "notes": "Expiry is enforced by source, generated strict ProofPlan resource-field coverage, and harness evidence."
+    },
+    {
+      "id": 6,
+      "short": "BTC signature and authority failures are rejected",
+      "status": "live_devnet_and_harness_covered_external_tcb",
+      "subcriteria": [
+        {
+          "id": "6a",
+          "claim": "invalid BTC signature rejects",
+          "fixture": "wrong_signature_reject.json",
+          "coverage": "runtime-verifier-covered"
+        },
+        {
+          "id": "6b",
+          "claim": "valid BTC signature from non-authority pubkey rejects",
+          "fixture": "wrong_pubkey_valid_signature_reject.json",
+          "coverage": "authority-binding: runtime-checked"
+        }
+      ],
+      "evidence_from_generated": [
+        "audit-bundle locks[] contains btc_authority",
+        "lock:btc_authority exposes ckb-lock-args and lock-args:ScriptArgs#0 ProofPlan records",
+        "lock runtime_accesses show expected_btc_authority_hash loaded from ScriptArgs#0",
+        "nova_btc_authority_lock.cell still exists and compiles individually",
+        "The lock calls verifier::btc::bip340::require_signature(...), and the compiler lowers it to the fixed 18-word IPC envelope through pipe_write",
+        "The lock delegates through spawn_with_fd to the manifest-bound cellscript_btc_bip340_verifier_riscv CellDep",
+        "The lock waits for the child verifier and accepts only exit status 0"
+      ],
+      "host_reference_evidence": [
+        "scripts/novaseal_btc_verifier_vectors.py generates 32 positive and 40 negative BIP340 vectors",
+        "verifier/novaseal_btc_verifier accepts/rejects all 72 generated vectors correctly",
+        "scripts/novaseal_btc_verifier_ipc_vectors.py generates 72 fixed IPC request blobs plus 5 malformed envelope cases",
+        "verifier/novaseal_btc_verifier accepts/rejects all 77 IPC vectors correctly",
+        "verifier/novaseal_btc_verifier_core provides a no_std IPC parser and BIP340 verifier shared by the host verifier and RISC-V shell",
+        "verifier/novaseal_btc_verifier_core checks for riscv64imac-unknown-none-elf",
+        "verifier/novaseal_btc_verifier_riscv builds a RISC-V ELF shell with inherited-fd input plumbing, accepts 32 valid shell report cases, and rejects 45 invalid/malformed cases",
+        "scripts/novaseal_riscv_shell_artifact.py pins the staged BIP340 release ELF and confirms generated_spawn_visible=true",
+        "harness/ckb_vm executes the staged child verifier ELF in ckb-vm with official VM2 buffer/length syscalls, accepts 32 valid IPC cases, rejects 45 invalid/malformed cases, and records max_cycles=3552601",
+        "scripts/novaseal_spawn_backend_probe.py confirms executable VM2 spawn/IPC helpers, strict rejection for unmanifested spawn-target:CellDep#0@0x..., builder-required audit records for first-CellDep code manifest-bound spawn targets, a one-fd inherited-fd contract, and lowering of the generic BTC BIP340 helper to the fixed 18-word envelope shape; transaction cell_deps[0] and builder evidence must identify CellDep#0, the manifest name, dep_type, and any manifest-pinned out-point/hash fields",
+        "scripts/novaseal_parent_lock_abi_preflight.py confirms the parent lock ASM/ELF builds, Script.args lock_args binding is pointer-safe, expected_btc_authority_hash is not rebound from input cell data, protected cell remains Input#0-bound, and VM2 spawn/pipe/wait surfaces are present",
+        "harness/ckb_vm --bin novaseal_parent_lock_harness executes the parent lock ELF in ckb-vm, observes VM2 spawn/wait, runs the staged child verifier ELF in nested ckb-vm, accepts the valid parent-computed digest/signature case, rejects a signature bitflip, rejects a valid signature by a non-authority x-only pubkey before spawn, and rejects authority-hash mismatch before spawn",
+        "the parent-lock harness constructs a ckb-types consensus-packed ResolvedTransaction with cell_deps[0] as the child verifier code dep, a parent lock code dep, one lock ScriptGroup input, max_consensus_tx_size_bytes=859, max_output_occupied_capacity_shannons=21900000000, under_capacity_shape_rejects=true, resolved_script_verifier_matched_expected=true, resolved_script_verifier_max_cycles=3702919, full_transaction_verifier_matched_expected=true, and full_transaction_verifier_max_cycles=3702919",
+        "cargo test for verifier/novaseal_btc_verifier passes 5 unit tests"
+      ],
+      "gaps": [
+        "the verifier binary remains external TCB",
+        "public/shared deployment attestation is still missing"
+      ],
+      "notes": "Criterion 6 is split for audit semantics: 6a covers cryptographic invalid-signature rejection, while 6b covers identity binding when a signature is valid under the wrong x-only pubkey. The evidence stack includes host-reference verifier evidence, RISC-V shell evidence, child-verifier CKB VM evidence, parent-lock CKB VM evidence, resolved/full transaction verifier evidence, combined eleven-fixture local contextual verifier evidence, live devnet wrong-signature dry-run evidence, wrong-pubkey-valid-signature authority-binding evidence, authority mapping mismatch evidence, implicit authority-rotation rejection evidence, and a local TCB review bundle. It is still not production evidence without public/shared deployment attestation and external verifier review.",
+      "evidence": [
+        "combined_tx_harness: all eleven fixtures run through ckb-script full transaction verifier with lock and type/action ScriptGroups present; accepted=1 rejected=10 matched_expected=11 max_cycles=7521003 max_tx_size_bytes=1484 max_occupied_capacity_shannons=70700000000",
+        "combined_tx_harness builder-shape: fee_shape_checks_passed=true builder_shape_checks_passed=true under_capacity_shape_rejects=true min_fee_shannons=100000 max_fee_shannons=100000"
+      ],
+      "covered_by_generated_audit": "external_harness_evidence_not_generated_audit"
+    },
+    {
+      "id": 7,
+      "short": "policy_hash mismatch is rejected",
+      "status": "source_harness_and_generated_strict_covered",
+      "evidence_from_generated": [
+        "proof_plan record: 'create-output:NovaSealCellV0:new_cell' with codegen_coverage_status='covered'",
+        "input_output_relation_checks includes 'resource-field:policy_hash=preserved'",
+        "proof_plan record: 'guard-equality:intent.policy_hash==old_cell.policy_hash' with codegen_coverage_status='covered'",
+        "lock proof_plan record: 'guard-equality:cell.policy_hash==intent.policy_hash' with codegen_coverage_status='covered'"
+      ],
+      "source_guard_evidence": [
+        "require intent.policy_hash == old_cell.policy_hash (in entry action source)",
+        "new_cell.policy_hash always inherits old_cell.policy_hash (in entry action source)",
+        "Top-level comments and hand-authored invariant reference policy preservation"
+      ],
+      "gaps": [],
+      "notes": "Policy mismatch is covered by source, generated strict ProofPlan, and harness evidence."
+    },
+    {
+      "id": 8,
+      "short": "receipt_hash mismatch is rejected",
+      "status": "source_harness_live_and_generated_strict_covered",
+      "evidence_from_generated": [
+        "proof_plan record: 'create-output:ProofReceiptV0:receipt' with status='checked-runtime', codegen_coverage_status='covered', on_chain_checked=true",
+        "proof_plan record: 'resource-conservation:NovaSealCellV0' includes 'resource-field:latest_receipt_hash=guarded'"
+      ],
+      "source_guard_evidence": [
+        "require intent.expected_receipt_hash == materialized_receipt_hash",
+        "new_cell.latest_receipt_hash is assigned to materialized_receipt_hash",
+        "ProofReceiptV0 carries intent_core_hash and signed_intent_hash"
+      ],
+      "gaps": [],
+      "notes": "The explicit receipt commitment and output are exercised by canonical vectors, generated strict ProofPlan, combined tx harness, and live devnet evidence."
+    },
+    {
+      "id": 9,
+      "short": "audit-bundle / ProofPlan shows the obligations as checked or builder-required",
+      "status": "covered_non_production",
+      "evidence_from_generated": [
+        "proof_plan_soundness.status = 'passed' (55 proof_plan records, 0 issues)",
+        "Multiple builder_assumptions for capacity, cardinality, timepoint, input/output",
+        "Explicit covered records for the consume/create of the resource",
+        "resource-conservation:NovaSealCellV0 is checked-runtime, covered, and on_chain_checked=true",
+        "seven guard-equality records are checked-runtime and covered across the action and lock",
+        "source_units lists all three .cell files with hashes"
+      ],
+      "gaps": [
+        "public/shared deployment attestation is missing",
+        "external BIP340 TCB review attestation is missing"
+      ],
+      "notes": "The generated audit surface is strict-clean for the current core package. Harness and live devnet evidence must still be read alongside it for transaction realism and runtime verifier TCB boundaries.",
+      "evidence": [
+        "combined_tx_harness attached as external audit evidence; generated audit bundle itself remains narrower",
+        "combined_tx_harness builder-shape: fee_shape_checks_passed=true builder_shape_checks_passed=true under_capacity_shape_rejects=true min_fee_shannons=100000 max_fee_shannons=100000"
+      ]
+    }
+  ],
+  "overall_assessment": "NovaSeal core now has split-intent receipt commitments, strict-clean generated ProofPlan coverage, eleven-fixture state/type and combined transaction evidence including wrong-pubkey-valid-signature rejection, authority mapping mismatch rejection, and implicit authority-rotation rejection, live local devnet RPC evidence for bootstrap -> key-auth transition plus wrong-signature rejection, fixed-width wallet signing vectors, local devnet verifier CellDep pinning, and a local BIP340 TCB review bundle. It is still non-production: public/shared deployment attestation and external BIP340 TCB review attestation are missing.",
+  "multi_script_reality": {
+    "package_entry": "src/nova_state_type.cell",
+    "source_units_count": 4,
+    "generated_locks_array": [
+      "btc_authority"
+    ],
+    "generated_actions": [
+      "key_auth_transition"
+    ],
+    "implication": "The default generated ProofPlan exposes btc_authority, generic BTC BIP340 verifier wiring, checked IPC envelope/status records, spawn target obligations, strict-clean output records, and checked NovaSealCellV0 resource conservation. The state action has CKB VM fixture evidence for all eleven fixtures, combined transaction evidence for all eleven fixtures, live local devnet stateful evidence for the core lifecycle, and fixed-width wallet signing vectors from the root production gate. Remaining production gaps are public/shared CellDep attestation and external review of the verifier TCB."
+  },
+  "shared_witness_abi": {
+    "status": "lock_and_type_entries_parse_same_payload",
+    "payload_order": [
+      "CSARGv1 magic",
+      "u32 intent_len",
+      "NovaSealSignedIntentV0",
+      "state_hash_commitment",
+      "u32 signature_payload_len",
+      "SignaturePayload"
+    ],
+    "witness_size_bytes": 398,
+    "intent_size_bytes": 254,
+    "signature_payload_size_bytes": 96,
+    "evidence": [
+      "fixture_harness shared_lock_type_witness_abi_aligned=true",
+      "parent_lock_ckb_vm_harness witness_size_bytes=398",
+      "state_type_ckb_vm_harness witness_size_bytes=398",
+      "combined_tx_harness shared_witness_size_bytes=398"
+    ],
+    "limits": [
+      "shared witness ABI is exercised by state-type, parent-lock, and combined lock+type harnesses; it still does not prove public/shared deployment attestation"
+    ]
+  },
+  "combined_tx_harness": {
+    "crate": "harness/ckb_vm",
+    "artifact": "target/novaseal-combined-tx-report.json",
+    "command": "cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_combined_tx_harness -- --pretty",
+    "classification": "eleven_fixture_combined_lock_type_full_ckb_script_verifier_evidence",
+    "current_summary": {
+      "combined_full_transaction_executed": true,
+      "ckb_node_verification_stack_executed": true,
+      "total_cases": 11,
+      "expected_accept": 1,
+      "expected_reject": 10,
+      "accepted": 1,
+      "rejected": 10,
+      "node_stack_accepted": 1,
+      "node_stack_rejected": 10,
+      "matched_expected": 11,
+      "node_stack_matched_expected": 11,
+      "mismatched": 0,
+      "node_stack_mismatched": 0,
+      "failure_scope_matched": 11,
+      "node_stack_failure_scope_matched": 11,
+      "failure_scope_mismatched": 0,
+      "node_stack_failure_scope_mismatched": 0,
+      "lock_and_type_script_groups_present": true,
+      "child_spawn_target_cell_dep0_modelled": true,
+      "shared_witness_abi_aligned": true,
+      "shared_witness_size_bytes": 398,
+      "builder_shape_checks_passed": true,
+      "fee_shape_checks_passed": true,
+      "under_capacity_shape_rejects": true,
+      "non_contextual_checks_passed": true,
+      "contextual_checks_match_expected": true,
+      "min_fee_shannons": 100000,
+      "max_fee_shannons": 100000,
+      "min_node_stack_fee_shannons": 100000,
+      "max_node_stack_fee_shannons": 100000,
+      "max_full_transaction_cycles": 7521003,
+      "max_node_stack_cycles": 7521003,
+      "max_consensus_tx_size_bytes": 1484,
+      "max_output_occupied_capacity_shannons": 70700000000,
+      "min_capacity_margin_shannons": 10000000000
+    },
+    "builder_shape": null,
+    "limits": [
+      "Runs ckb-script TransactionScriptsVerifier::verify over eleven constructed transactions containing the parent lock script, state type/action script, and staged child verifier cell_dep.",
+      "Uses the shared CSARGv1 witness payload for both lock and type/action execution.",
+      "The transactions are in-memory harness ResolvedTransaction values, not public/shared deployment-pinned transactions.",
+      "Builder-shape checks derive fee, occupied-capacity floor, under-capacity negative shape, and expected code dep roles from the constructed transaction and resolved deps, but still do not prove live dep liveness or mempool propagation.",
+      "Resolved code deps and input cells are deterministic harness cells, not live chain cells.",
+      "Negative fixture matching is outcome plus lock/type script-scope matching; it is not yet a full semantic error-code proof for every failure mode.",
+      "Receipt output data is materialised as Output#1 and checked by the state type/action script; public/shared deployment attestation remains out of scope."
+    ]
+  }
+}

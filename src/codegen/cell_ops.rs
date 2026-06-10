@@ -1231,7 +1231,7 @@ impl CodeGenerator {
         }
         pattern.fields.iter().all(|(field, value)| {
             self.type_layouts.get(&pattern.ty).and_then(|layouts| layouts.get(field)).is_some_and(|layout| {
-                if let Some(width) = layout_fixed_byte_width(layout) {
+                if let Some(width) = self.layout_fixed_byte_like_width(layout) {
                     self.is_prelude_available_fixed_value(value, width)
                 } else {
                     self.can_verify_dynamic_create_output_field_value(value, layout)
@@ -1282,7 +1282,7 @@ impl CodeGenerator {
                 self.emit_fail(CellScriptRuntimeError::AssertionFailed);
                 continue;
             };
-            if layout_fixed_byte_width(&layout).is_some() {
+            if self.layout_fixed_byte_like_width(&layout).is_some() {
                 if is_fixed_type {
                     self.emit_loaded_field_bytes_equals_expected(
                         size_offset,
@@ -1344,7 +1344,7 @@ impl CodeGenerator {
         field_count: usize,
         expected: &IrOperand,
     ) -> bool {
-        let Some(width) = layout_fixed_byte_width(layout) else {
+        let Some(width) = self.layout_fixed_byte_like_width(layout) else {
             return false;
         };
         let Some(output_start_offset) = self.runtime_expr_temp_offset_or_record(0) else {
@@ -2365,6 +2365,7 @@ impl CodeGenerator {
             return Ok(());
         }
         if let Some(output_index) = self.operation_output_indices.get(&dest.id).copied() {
+            // AUDIT-FINDING: transfer/claim/settle emitters materialise an output handle even when the relation is explicitly marked unverified, letting later generated code treat an index as a semantic output value — severity: HIGH — fail closed or carry a distinct unverified-handle type that cannot feed verified field/codegen paths
             self.emit(format!("# cellscript abi: transfer output handle Output#{} (unverified)", output_index));
             self.emit(format!("li t0, {}", output_index));
             self.emit_stack_store("t0", dest.id * 8);
@@ -2443,5 +2444,43 @@ impl CodeGenerator {
         self.emit("# cellscript abi: fail closed because destroy operand is not a variable");
         self.emit_fail(CellScriptRuntimeError::ConsumeInvalidOperand);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn named_var(id: usize, name: &str, ty: &str) -> IrVar {
+        IrVar { id, name: name.to_string(), ty: IrType::Named(ty.to_string()) }
+    }
+
+    #[test]
+    fn identity_and_destruction_policy_labels_are_stable() {
+        assert_eq!(identity_policy_label(&IrIdentityPolicy::CkbTypeId), "ckb_type_id");
+        assert_eq!(identity_policy_label(&IrIdentityPolicy::Field("owner".to_string())), "field(owner)");
+        assert_eq!(destruction_policy_label(&IrDestructionPolicy::Unique { identity: "type_id".to_string() }), "unique(type_id)");
+    }
+
+    #[test]
+    fn destroy_absence_scan_is_limited_to_singleton_and_type_id_unique_policies() {
+        assert!(destroy_policy_uses_output_absence_scan(&IrDestructionPolicy::Default));
+        assert!(destroy_policy_uses_output_absence_scan(&IrDestructionPolicy::SingletonType));
+        assert!(destroy_policy_uses_output_absence_scan(&IrDestructionPolicy::Unique { identity: "ckb_type_id".to_string() }));
+        assert!(!destroy_policy_uses_output_absence_scan(&IrDestructionPolicy::Unique { identity: "owner".to_string() }));
+        assert!(!destroy_policy_uses_output_absence_scan(&IrDestructionPolicy::BurnAmount { field: "amount".to_string() }));
+    }
+
+    #[test]
+    fn consumed_operand_var_accepts_named_cell_operands_only() {
+        let token = named_var(7, "token", "Token");
+        let scalar = IrVar { id: 8, name: "amount".to_string(), ty: IrType::U64 };
+
+        assert_eq!(
+            consumed_operand_var(&IrInstruction::Consume { operand: IrOperand::Var(token.clone()) }).map(|var| var.id),
+            Some(7)
+        );
+        assert!(consumed_operand_var(&IrInstruction::Consume { operand: IrOperand::Var(scalar) }).is_none());
+        assert!(consumed_operand_var(&IrInstruction::LoadConst { dest: token, value: IrConst::U64(1) }).is_none());
     }
 }

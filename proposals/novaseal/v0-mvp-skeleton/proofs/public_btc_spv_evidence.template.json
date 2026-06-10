@@ -1,0 +1,87 @@
+{
+  "schema": "novaseal-public-btc-spv-evidence-v0.1",
+  "status": "template",
+  "network": "testnet-or-mainnet",
+  "generated_at": "YYYY-MM-DDTHH:MM:SSZ",
+  "evidence_provider": "REPLACE_WITH_EXTERNAL_SPV_OPERATOR_OR_SERVICE",
+  "request_handoff": {
+    "bundle": "target/novaseal-external-evidence-handoff-bundle.json",
+    "bundle_hash": "0xREPLACE_WITH_64_HEX_HANDOFF_BUNDLE_HASH",
+    "bundle_hash_algorithm": "blake2b-256(person=NovaExtHandoff)",
+    "group": "public_btc_spv_evidence"
+  },
+  "required_profiles": [
+    "btc-transaction-commitment-profile-v0",
+    "btc-utxo-seal-profile-v0",
+    "dual-seal-profile-v0"
+  ],
+  "cases": [
+    {
+      "profile": "btc-transaction-commitment-profile-v0",
+      "scenario": "btc-transaction-commitment-transition",
+      "btc_txid": "0xREPLACE_WITH_64_HEX_BTC_TXID",
+      "btc_block_hash": "0xREPLACE_WITH_64_HEX_BTC_BLOCK_HASH",
+      "minimum_confirmations": 6,
+      "confirmations": 6,
+      "spv_proof_hash": "0xREPLACE_WITH_64_HEX_SPV_PROOF_HASH",
+      "spv_client_cell_dep": {
+        "out_point": "0xREPLACE_WITH_64_HEX_TX_HASH:0",
+        "dep_type": "code",
+        "hash_type": "type",
+        "data_hash": "0xREPLACE_WITH_64_HEX_DATA_HASH"
+      },
+      "source_service": {
+        "name": "REPLACE_WITH_BTC_SPV_SERVICE_NAME",
+        "commit": "REPLACE_WITH_SERVICE_COMMIT",
+        "report_hash": "0xREPLACE_WITH_64_HEX_SERVICE_REPORT_HASH"
+      }
+    },
+    {
+      "profile": "btc-utxo-seal-profile-v0",
+      "scenario": "btc-utxo-seal-closure",
+      "btc_txid": "0xREPLACE_WITH_64_HEX_BTC_SPEND_TXID",
+      "btc_block_hash": "0xREPLACE_WITH_64_HEX_BTC_BLOCK_HASH",
+      "minimum_confirmations": 6,
+      "confirmations": 6,
+      "spv_proof_hash": "0xREPLACE_WITH_64_HEX_SPV_PROOF_HASH",
+      "spv_client_cell_dep": {
+        "out_point": "0xREPLACE_WITH_64_HEX_TX_HASH:0",
+        "dep_type": "code",
+        "hash_type": "type",
+        "data_hash": "0xREPLACE_WITH_64_HEX_DATA_HASH"
+      },
+      "source_service": {
+        "name": "REPLACE_WITH_BTC_SPV_SERVICE_NAME",
+        "commit": "REPLACE_WITH_SERVICE_COMMIT",
+        "report_hash": "0xREPLACE_WITH_64_HEX_SERVICE_REPORT_HASH"
+      }
+    },
+    {
+      "profile": "dual-seal-profile-v0",
+      "scenario": "dual-seal-finality",
+      "btc_txid": "0xREPLACE_WITH_64_HEX_BTC_CLOSURE_TXID",
+      "btc_block_hash": "0xREPLACE_WITH_64_HEX_BTC_BLOCK_HASH",
+      "minimum_confirmations": 6,
+      "confirmations": 6,
+      "spv_proof_hash": "0xREPLACE_WITH_64_HEX_SPV_PROOF_HASH",
+      "spv_client_cell_dep": {
+        "out_point": "0xREPLACE_WITH_64_HEX_TX_HASH:0",
+        "dep_type": "code",
+        "hash_type": "type",
+        "data_hash": "0xREPLACE_WITH_64_HEX_DATA_HASH"
+      },
+      "source_service": {
+        "name": "REPLACE_WITH_BTC_SPV_SERVICE_NAME",
+        "commit": "REPLACE_WITH_SERVICE_COMMIT",
+        "report_hash": "0xREPLACE_WITH_64_HEX_SERVICE_REPORT_HASH"
+      }
+    }
+  ],
+  "notes": [
+    "This file is a template, not production evidence.",
+    "A real report must be saved as public_btc_spv_evidence.json and must not use local-devnet or placeholder fields.",
+    "The request contract generated at target/novaseal-btc-spv-evidence-adapter.json lists the exact BTC-facing profile/scenario cases and service-builder hashes this public report must satisfy.",
+    "The request_handoff block must reference the current target/novaseal-external-evidence-handoff-bundle.json hash, blake2b-256(person=NovaExtHandoff) hash algorithm, and public_btc_spv_evidence group.",
+    "The production gate requires all three BTC-facing profiles to have public BTC SPV cases with at least six confirmations."
+  ]
+}

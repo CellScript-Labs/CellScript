@@ -1516,7 +1516,7 @@ pub(crate) fn encode_li_sequence(out: &mut Vec<u8>, rd: u8, imm: i128) -> Result
     if let Some(signed) = li_signed_i64(imm) {
         if li_fits_lui_addi_rv64(signed) {
             let (hi, lo) = split_hi_lo(signed)?;
-            out.extend_from_slice(&encode_u_type(0x37, rd, hi).to_le_bytes());
+            out.extend_from_slice(&encode_u_type(0x37, rd, hi)?.to_le_bytes());
             out.extend_from_slice(&encode_i_type(0x13, rd, 0b000, rd, lo)?.to_le_bytes());
             return Ok(());
         }
@@ -1551,7 +1551,7 @@ fn li_bits(imm: i128) -> Result<u64> {
 
 fn encode_address_sequence(out: &mut Vec<u8>, rd: u8, pc: u64, target: u64) -> Result<()> {
     let (hi, lo) = split_hi_lo(relative_offset(pc, target)?)?;
-    out.extend_from_slice(&encode_u_type(0x17, rd, hi).to_le_bytes());
+    out.extend_from_slice(&encode_u_type(0x17, rd, hi)?.to_le_bytes());
     out.extend_from_slice(&encode_i_type(0x13, rd, 0b000, rd, lo)?.to_le_bytes());
     Ok(())
 }
@@ -1560,7 +1560,7 @@ fn encode_call_sequence(out: &mut Vec<u8>, pc: u64, target: u64) -> Result<()> {
     let offset = relative_offset(pc, target)?;
     ensure_uncompressed_instruction_alignment(offset, "call target")?;
     let (hi, lo) = split_hi_lo(offset)?;
-    out.extend_from_slice(&encode_u_type(0x17, 1, hi).to_le_bytes());
+    out.extend_from_slice(&encode_u_type(0x17, 1, hi)?.to_le_bytes());
     out.extend_from_slice(&encode_i_type(0x67, 1, 0b000, 1, lo)?.to_le_bytes());
     Ok(())
 }
@@ -1572,7 +1572,7 @@ fn encode_long_jump_sequence(out: &mut Vec<u8>, pc: u64, target: u64) -> Result<
     let offset = relative_offset(pc, target)?;
     ensure_uncompressed_instruction_alignment(offset, "jump target")?;
     let (hi, lo) = split_hi_lo(offset)?;
-    out.extend_from_slice(&encode_u_type(0x17, scratch, hi).to_le_bytes());
+    out.extend_from_slice(&encode_u_type(0x17, scratch, hi)?.to_le_bytes());
     out.extend_from_slice(&encode_i_type(0x67, 0, 0b000, scratch, lo)?.to_le_bytes());
     Ok(())
 }
@@ -1758,6 +1758,7 @@ pub(crate) fn scratch_register_avoiding(registers: &[&str]) -> &'static str {
             return candidate;
         }
     }
+    // AUDIT-FINDING: scratch register selection falls back to t6 even when every scratch register is excluded, so large-immediate rewriting can silently clobber a live register instead of reporting an impossible allocation — severity: HIGH — return Result<Option<register>> and make emitters fail closed when no scratch register is available
     "t6"
 }
 
@@ -1882,8 +1883,14 @@ fn encode_b_type(opcode: u32, funct3: u32, rs1: u8, rs2: u8, imm: i64) -> Result
         | opcode)
 }
 
-fn encode_u_type(opcode: u32, rd: u8, imm: i64) -> u32 {
-    (((imm as i32 as u32) & 0x000f_ffff) << 12) | ((rd as u32) << 7) | opcode
+fn encode_u_type(opcode: u32, rd: u8, imm: i64) -> Result<u32> {
+    if !signed_bits_fit(imm, 20) {
+        return Err(CompileError::new(
+            format!("immediate '{}' does not fit 20-bit signed U-type field", imm),
+            crate::error::Span::default(),
+        ));
+    }
+    Ok((((imm as u64 as u32) & 0x000f_ffff) << 12) | ((rd as u32) << 7) | opcode)
 }
 
 fn encode_j_type(opcode: u32, rd: u8, imm: i64) -> Result<u32> {
@@ -2069,6 +2076,11 @@ mod tests {
         assert!(encode_j_type(0x6f, 0, 1_048_576).is_err());
         assert!(encode_j_type(0x6f, 0, 2).is_err());
         assert!(encode_j_type(0x6f, 0, 3).is_err());
+
+        assert!(encode_u_type(0x37, 0, -524_288).is_ok());
+        assert!(encode_u_type(0x37, 0, 524_287).is_ok());
+        assert!(encode_u_type(0x37, 0, -524_289).is_err());
+        assert!(encode_u_type(0x37, 0, 524_288).is_err());
 
         assert_eq!(encode_signed_bits(-1, 32).unwrap(), u32::MAX);
         assert!(encode_signed_bits(0, 33).is_err());

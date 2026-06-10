@@ -260,7 +260,7 @@ impl CodeGenerator {
                 body.read_refs.iter().enumerate().map(|(index, pattern)| (pattern.binding.as_str(), index)).collect::<HashMap<_, _>>();
             let mut read_ref_param_index = 0usize;
             for param in params {
-                if param.source == ParamSource::Output {
+                if matches!(param.source, ParamSource::Output | ParamSource::LockArgs) {
                     continue;
                 }
                 if !self.param_is_runtime_bound(param) {
@@ -776,5 +776,39 @@ impl CodeGenerator {
             self.emit(format!("li t0, {}", byte));
             self.emit_stack_store_byte("t0", offset + index);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::codegen::{CodeGenerator, CodegenOptions};
+
+    #[test]
+    fn large_addi_uses_single_addi_for_small_immediates() {
+        let mut codegen = CodeGenerator::new(CodegenOptions::default());
+
+        codegen.emit_large_addi("t0", "sp", 128);
+
+        assert_eq!(codegen.assembly, vec!["    addi t0, sp, 128"]);
+    }
+
+    #[test]
+    fn large_addi_materializes_out_of_range_immediates() {
+        let mut codegen = CodeGenerator::new(CodegenOptions::default());
+
+        codegen.emit_large_addi("t0", "t1", 4096);
+
+        assert_eq!(codegen.assembly, vec!["    li t6, 4096", "    add t0, t1, t6"]);
+    }
+
+    #[test]
+    fn stack_access_helpers_emit_sp_relative_instructions() {
+        let mut codegen = CodeGenerator::new(CodegenOptions::default());
+
+        codegen.emit_stack_load("t0", 16);
+        codegen.emit_stack_store("t1", 24);
+        codegen.emit_stack_store_byte("t2", 31);
+
+        assert_eq!(codegen.assembly, vec!["    ld t0, 16(sp)", "    sd t1, 24(sp)", "    sb t2, 31(sp)"]);
     }
 }

@@ -26,6 +26,7 @@ pub mod stdlib;
 pub(crate) mod syscalls;
 pub(crate) mod type_graph;
 pub mod types;
+pub mod verifier_registry;
 pub mod wasm;
 
 pub use assumptions::{BuilderAssumptionMetadata, TxValidationReport, TxValidationViolation};
@@ -592,6 +593,12 @@ pub struct CkbDepGroupManifestMetadata {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CkbCellDepMetadata {
     pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verifier_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ipc_abi: Option<String>,
     pub artifact_hash: Option<String>,
     pub tx_hash: Option<String>,
     pub index: Option<u32>,
@@ -1409,7 +1416,7 @@ fn collect_ckb_entry_script_references(
     }
     for access in accesses {
         match access.operation.as_str() {
-            "spawn" => refs.push(CkbScriptReferenceMetadata {
+            "spawn" | "spawn-with-fd" => refs.push(CkbScriptReferenceMetadata {
                 scope: scope.clone(),
                 purpose: "spawn-target".to_string(),
                 name: access.binding.clone(),
@@ -1466,6 +1473,9 @@ fn apply_manifest_deploy_metadata(metadata: &mut CompileMetadata, manifest: &Cel
             .unwrap_or((None, None));
         declared_cell_deps.push(CkbCellDepMetadata {
             name: "primary".to_string(),
+            role: None,
+            verifier_id: None,
+            ipc_abi: None,
             artifact_hash: ckb_manifest.artifact_hash.clone(),
             tx_hash,
             index,
@@ -1482,9 +1492,18 @@ fn apply_manifest_deploy_metadata(metadata: &mut CompileMetadata, manifest: &Cel
             validate_ckb_hash_type(hash_type)?;
         }
         let (tx_hash, dep_index) = parse_ckb_cell_dep_location(dep)?;
+        if dep.role.as_deref() == Some("runtime_verifier") {
+            validate_runtime_verifier_cell_dep_binding(index, dep, dep_type)?;
+            if manifest.policy.production {
+                validate_production_runtime_verifier_cell_dep(index, dep, tx_hash.as_deref(), dep_index)?;
+            }
+        }
         declared_cell_deps.push(CkbCellDepMetadata {
             name: dep.name.clone().unwrap_or_else(|| format!("cell_dep_{}", index)),
-            artifact_hash: None,
+            role: dep.role.clone(),
+            verifier_id: dep.verifier_id.clone(),
+            ipc_abi: dep.ipc_abi.clone(),
+            artifact_hash: dep.artifact_hash.clone(),
             tx_hash,
             index: dep_index,
             dep_type: dep_type.to_string(),
@@ -1680,6 +1699,97 @@ fn parse_ckb_cell_dep_location(dep: &CellCkbCellDepConfig) -> Result<(Option<Str
         return Err(CompileError::without_span("CKB cell_dep split location must provide both tx_hash and index, or neither"));
     }
     Ok((dep.tx_hash.clone(), dep.index))
+}
+
+fn validate_production_runtime_verifier_cell_dep(
+    index: usize,
+    dep: &CellCkbCellDepConfig,
+    tx_hash: Option<&str>,
+    dep_index: Option<u32>,
+) -> Result<()> {
+    let missing = [
+        ("name", dep.name.is_none()),
+        ("out_point", tx_hash.is_none() || dep_index.is_none()),
+        ("dep_type", dep.dep_type.is_none()),
+        ("hash_type", dep.hash_type.is_none()),
+        ("data_hash", dep.data_hash.is_none()),
+        ("artifact_hash", dep.artifact_hash.is_none()),
+        ("verifier_id", dep.verifier_id.is_none()),
+        ("ipc_abi", dep.ipc_abi.is_none()),
+    ]
+    .into_iter()
+    .filter_map(|(field, missing)| missing.then_some(field))
+    .collect::<Vec<_>>();
+    if !missing.is_empty() {
+        return Err(CompileError::without_span(format!(
+            "production runtime_verifier cell_dep[{}] must pin {}; strict release templates may omit production=true until real CellDeps exist",
+            index,
+            missing.join(", ")
+        )));
+    }
+    if let Some(tx_hash) = tx_hash {
+        reject_placeholder_hash(index, "out_point tx_hash", tx_hash)?;
+    }
+    if let Some(artifact_hash) = dep.artifact_hash.as_deref() {
+        reject_placeholder_hash(index, "artifact_hash", artifact_hash)?;
+    }
+    if let Some(data_hash) = dep.data_hash.as_deref() {
+        reject_placeholder_hash(index, "data_hash", data_hash)?;
+    }
+    Ok(())
+}
+
+fn validate_runtime_verifier_cell_dep_binding(index: usize, dep: &CellCkbCellDepConfig, dep_type: &str) -> Result<()> {
+    if index != 0 {
+        return Err(CompileError::without_span(format!(
+            "runtime_verifier cell_dep[{}] must be deploy.ckb.cell_deps[0]; current VM2 spawn lowering resolves only the first code CellDep",
+            index
+        )));
+    }
+    if dep_type != "code" {
+        return Err(CompileError::without_span(format!(
+            "runtime_verifier cell_dep[{}] must use dep_type='code'; current VM2 spawn lowering does not resolve verifier dep_groups",
+            index
+        )));
+    }
+    let name = dep.name.as_deref().ok_or_else(|| {
+        CompileError::without_span(format!(
+            "runtime_verifier cell_dep[{}] must name a registered spawn target, such as '{}'",
+            index,
+            verifier_registry::btc::BIP340_RISCV_TARGET
+        ))
+    })?;
+    let capability =
+        verifier_registry::capabilities().into_iter().find(|capability| capability.spawn_target == name).ok_or_else(|| {
+            CompileError::without_span(format!("runtime_verifier cell_dep[{}] has unknown spawn target '{}'", index, name))
+        })?;
+    if dep.verifier_id.as_deref().is_some_and(|actual| actual != capability.verifier_id) {
+        return Err(CompileError::without_span(format!(
+            "runtime_verifier cell_dep[{}] verifier_id must be '{}' for spawn target '{}'",
+            index, capability.verifier_id, capability.spawn_target
+        )));
+    }
+    if dep.ipc_abi.as_deref().is_some_and(|actual| actual != capability.ipc_abi) {
+        return Err(CompileError::without_span(format!(
+            "runtime_verifier cell_dep[{}] ipc_abi must be '{}' for spawn target '{}'",
+            index, capability.ipc_abi, capability.spawn_target
+        )));
+    }
+    Ok(())
+}
+
+fn reject_placeholder_hash(index: usize, field: &str, value: &str) -> Result<()> {
+    let hex = value.strip_prefix("0x").unwrap_or(value);
+    let lower = hex.to_ascii_lowercase();
+    let placeholder = lower.contains("placeholder") || lower.chars().next().is_some_and(|first| lower.chars().all(|ch| ch == first));
+    if placeholder {
+        Err(CompileError::without_span(format!(
+            "production runtime_verifier cell_dep[{}] uses a placeholder {} '{}'",
+            index, field, value
+        )))
+    } else {
+        Ok(())
+    }
 }
 
 fn parse_ckb_out_point(out_point: &str) -> Result<(String, u32)> {
@@ -2431,6 +2541,8 @@ fn is_known_ckb_runtime_source(source: &str) -> bool {
             | "ScriptArgs"
             | "Process"
             | "Profile"
+            | "InputSource"
+            | "CellSource"
     )
 }
 
@@ -2463,8 +2575,9 @@ fn is_known_ckb_runtime_syscall(syscall: &str) -> bool {
 fn ckb_runtime_syscall_allows_source(syscall: &str, source: &str) -> bool {
     match syscall {
         "LOAD_CELL" => matches!(source, "Input" | "Output" | "CellDep" | "GroupInput" | "GroupOutput"),
-        "LOAD_CELL_BY_FIELD" => matches!(source, "Input" | "Output" | "GroupInput" | "GroupOutput"),
-        "LOAD_INPUT_BY_FIELD" | "CKB_SIGHASH_ALL" => source == "GroupInput",
+        "LOAD_CELL_BY_FIELD" => matches!(source, "Input" | "Output" | "GroupInput" | "GroupOutput" | "CellSource"),
+        "LOAD_INPUT_BY_FIELD" => matches!(source, "GroupInput" | "InputSource"),
+        "CKB_SIGHASH_ALL" => source == "GroupInput",
         "LOAD_SCRIPT_ARGS" => source == "ScriptArgs",
         "SOURCE_VIEW" => matches!(source, "Input" | "Output" | "CellDep" | "HeaderDep" | "GroupInput" | "GroupOutput"),
         "LOAD_WITNESS" => source == "Witness",
@@ -4569,6 +4682,8 @@ struct CellManifest {
     #[serde(default)]
     build: CellBuildConfig,
     #[serde(default)]
+    policy: CellPolicyConfig,
+    #[serde(default)]
     deploy: CellDeployConfig,
 }
 
@@ -4588,6 +4703,12 @@ struct CellBuildConfig {
     target_profile: Option<String>,
     #[serde(default)]
     out_dir: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct CellPolicyConfig {
+    #[serde(default)]
+    production: bool,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -4618,6 +4739,14 @@ struct CellCkbDeployConfig {
 struct CellCkbCellDepConfig {
     #[serde(default)]
     name: Option<String>,
+    #[serde(default)]
+    role: Option<String>,
+    #[serde(default)]
+    verifier_id: Option<String>,
+    #[serde(default)]
+    ipc_abi: Option<String>,
+    #[serde(default)]
+    artifact_hash: Option<String>,
     #[serde(default)]
     out_point: Option<String>,
     #[serde(default)]
@@ -6478,7 +6607,7 @@ fn body_verifier_obligations(
             "ckb-runtime",
             &format!("{} {} from {}#{} bound to {}", access.syscall, access.operation, access.source, access.index, access.binding),
         );
-        if access.operation == "spawn" {
+        if matches!(access.operation.as_str(), "spawn" | "spawn-with-fd") {
             let target_suffix = access
                 .binding
                 .strip_prefix("spawn-target-tag:")
@@ -6495,6 +6624,38 @@ fn body_verifier_obligations(
                     "Spawn target {} must resolve to a transaction CellDep or DepGroup script reference; DSL spawn syntax does not inline or authenticate the child script",
                     access.binding
                 ),
+            );
+        }
+        if access.operation == "runtime-verifier-btc-bip340" {
+            push_verifier_obligation(
+                &mut obligations,
+                &mut seen,
+                &scope,
+                "runtime-verifier",
+                "verifier:btc-bip340:signature",
+                "builder-required",
+                &format!(
+                    "BIP340 signature verification is delegated to verifier artifact {}; builder and deployment evidence must bind the reviewed artifact source, hash, and CellDep",
+                    access.binding
+                ),
+            );
+            push_verifier_obligation(
+                &mut obligations,
+                &mut seen,
+                &scope,
+                "runtime-verifier",
+                "verifier:btc-bip340:ipc-envelope",
+                "checked-runtime",
+                "Compiler emits the fixed 18-word BTC BIP340 verifier IPC envelope; ipc-envelope=checked-runtime",
+            );
+            push_verifier_obligation(
+                &mut obligations,
+                &mut seen,
+                &scope,
+                "runtime-verifier",
+                "verifier:btc-bip340:exit-status",
+                "checked-runtime",
+                "Compiler fail-closes unless the spawned BTC BIP340 verifier exits with status 0; exit-status=checked-runtime",
             );
         }
     }
@@ -6898,11 +7059,12 @@ fn metadata_guard_operand_labels(body: &ir::IrBody, params: &[ir::IrParam]) -> H
                     labels.insert(dest.id, format!("{left_label}{operator}{right_label}"));
                 }
                 ir::IrInstruction::Call { dest: Some(dest), func, args }
-                    if matches!(func.as_str(), "__ckb_hash_blake2b" | "__ckb_hash_chain") =>
+                    if matches!(func.as_str(), "__ckb_hash_blake2b" | "__ckb_hash_chain" | "__ckb_hash_blake2b_packed") =>
                 {
                     let helper = match func.as_str() {
                         "__ckb_hash_blake2b" => "hash_blake2b",
                         "__ckb_hash_chain" => "hash_chain",
+                        "__ckb_hash_blake2b_packed" => "hash_blake2b_packed",
                         _ => unreachable!("matched hash helper"),
                     };
                     let arg_labels = args.iter().map(|arg| metadata_guard_operand_label(arg, &labels)).collect::<Option<Vec<_>>>();
@@ -7462,6 +7624,7 @@ fn resource_conservation_guarded_transition_classification(
     let u64_sources = metadata_u64_sources(body);
     let derived_alias_sources = metadata_derived_alias_sources(body, &aliases, &u64_sources);
     let guarded_aliases = metadata_asserted_guarded_aliases(body, &aliases, &u64_sources, &derived_alias_sources);
+    let guarded_value_vars = metadata_asserted_guarded_value_vars(body, &aliases, &u64_sources, &derived_alias_sources);
     let mut classification = ResourceTransitionFieldClassification::default();
 
     for (field, operand) in &created.fields {
@@ -7473,7 +7636,14 @@ fn resource_conservation_guarded_transition_classification(
             classification.allowed_fresh.push(field.clone());
             continue;
         }
-        if resource_transition_operand_is_guarded(operand, &aliases, &guarded_aliases, &u64_sources, &derived_alias_sources) {
+        if resource_transition_operand_is_guarded(
+            operand,
+            &aliases,
+            &guarded_aliases,
+            &guarded_value_vars,
+            &u64_sources,
+            &derived_alias_sources,
+        ) {
             classification.guarded.push(field.clone());
             continue;
         }
@@ -7506,9 +7676,15 @@ fn resource_transition_operand_is_guarded(
     operand: &ir::IrOperand,
     aliases: &HashMap<usize, MetadataFieldAlias>,
     guarded_aliases: &BTreeSet<(usize, String)>,
+    guarded_value_vars: &BTreeSet<usize>,
     u64_sources: &HashMap<usize, MetadataU64Source>,
     derived_alias_sources: &HashMap<usize, BTreeSet<(usize, String)>>,
 ) -> bool {
+    if let ir::IrOperand::Var(var) = operand {
+        if guarded_value_vars.contains(&var.id) {
+            return true;
+        }
+    }
     let mut operand_aliases = BTreeSet::new();
     metadata_collect_alias_keys_from_operand(operand, aliases, u64_sources, derived_alias_sources, &mut operand_aliases);
     !operand_aliases.is_empty() && operand_aliases.iter().all(|alias| guarded_aliases.contains(alias))
@@ -7787,6 +7963,76 @@ fn metadata_asserted_guarded_aliases(
     asserted
 }
 
+fn metadata_asserted_guarded_value_vars(
+    body: &ir::IrBody,
+    aliases: &HashMap<usize, MetadataFieldAlias>,
+    u64_sources: &HashMap<usize, MetadataU64Source>,
+    derived_alias_sources: &HashMap<usize, BTreeSet<(usize, String)>>,
+) -> BTreeSet<usize> {
+    let mut guarded_by_var: HashMap<usize, BTreeSet<usize>> = HashMap::new();
+    for block in &body.blocks {
+        for instruction in &block.instructions {
+            match instruction {
+                ir::IrInstruction::Binary { dest, op: ast::BinaryOp::Eq, left, right } => {
+                    if left == right {
+                        continue;
+                    }
+                    let mut left_aliases = BTreeSet::new();
+                    let mut right_aliases = BTreeSet::new();
+                    metadata_collect_alias_keys_from_operand(left, aliases, u64_sources, derived_alias_sources, &mut left_aliases);
+                    metadata_collect_alias_keys_from_operand(right, aliases, u64_sources, derived_alias_sources, &mut right_aliases);
+                    if left_aliases.is_empty() && right_aliases.is_empty() {
+                        continue;
+                    }
+                    let mut vars = BTreeSet::new();
+                    if !right_aliases.is_empty() {
+                        metadata_collect_unaliased_direct_var_ids(left, aliases, &mut vars);
+                    }
+                    if !left_aliases.is_empty() {
+                        metadata_collect_unaliased_direct_var_ids(right, aliases, &mut vars);
+                    }
+                    if !vars.is_empty() {
+                        guarded_by_var.insert(dest.id, vars);
+                    }
+                }
+                ir::IrInstruction::Move { dest, src: ir::IrOperand::Var(src) }
+                | ir::IrInstruction::Cast { dest, src: ir::IrOperand::Var(src) } => {
+                    if let Some(vars) = guarded_by_var.get(&src.id).cloned() {
+                        guarded_by_var.insert(dest.id, vars);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    let mut asserted = BTreeSet::new();
+    for block in &body.blocks {
+        let ir::IrTerminator::Branch { cond: ir::IrOperand::Var(cond), else_block, .. } = &block.terminator else {
+            continue;
+        };
+        if !block_returns_error(body, *else_block) {
+            continue;
+        }
+        if let Some(vars) = guarded_by_var.get(&cond.id) {
+            asserted.extend(vars.iter().copied());
+        }
+    }
+    asserted
+}
+
+fn metadata_collect_unaliased_direct_var_ids(
+    operand: &ir::IrOperand,
+    aliases: &HashMap<usize, MetadataFieldAlias>,
+    output: &mut BTreeSet<usize>,
+) {
+    if let ir::IrOperand::Var(var) = operand {
+        if !aliases.contains_key(&var.id) {
+            output.insert(var.id);
+        }
+    }
+}
+
 fn metadata_const_vars(body: &ir::IrBody) -> BTreeSet<usize> {
     let mut const_vars = BTreeSet::new();
     for block in &body.blocks {
@@ -7828,7 +8074,7 @@ fn metadata_derived_alias_sources(
                     }
                 }
                 ir::IrInstruction::Call { dest: Some(dest), func, args }
-                    if matches!(func.as_str(), "__ckb_hash_chain" | "__ckb_hash_blake2b") =>
+                    if matches!(func.as_str(), "__ckb_hash_chain" | "__ckb_hash_blake2b" | "__ckb_hash_blake2b_packed") =>
                 {
                     let mut sources = BTreeSet::new();
                     for arg in args {
@@ -7918,7 +8164,14 @@ fn metadata_field_aliases(body: &ir::IrBody) -> HashMap<usize, MetadataFieldAlia
         for instruction in &block.instructions {
             match instruction {
                 ir::IrInstruction::FieldAccess { dest, obj: ir::IrOperand::Var(obj), field } => {
-                    aliases.insert(dest.id, MetadataFieldAlias { root_id: obj.id, field: field.clone() });
+                    let alias = aliases.get(&obj.id).cloned().map_or_else(
+                        || MetadataFieldAlias { root_id: obj.id, field: field.clone() },
+                        |parent: MetadataFieldAlias| MetadataFieldAlias {
+                            root_id: parent.root_id,
+                            field: format!("{}.{}", parent.field, field),
+                        },
+                    );
+                    aliases.insert(dest.id, alias);
                 }
                 ir::IrInstruction::Move { dest, src: ir::IrOperand::Var(src) } => {
                     if let Some(alias) = aliases.get(&src.id).cloned() {
@@ -7934,11 +8187,14 @@ fn metadata_field_aliases(body: &ir::IrBody) -> HashMap<usize, MetadataFieldAlia
 
 fn metadata_u64_sources(body: &ir::IrBody) -> HashMap<usize, MetadataU64Source> {
     let mut sources = HashMap::new();
+    let aliases = metadata_field_aliases(body);
     for block in &body.blocks {
         for instruction in &block.instructions {
             match instruction {
                 ir::IrInstruction::FieldAccess { dest, obj: ir::IrOperand::Var(obj), field } if dest.ty == ir::IrType::U64 => {
-                    sources.insert(dest.id, MetadataU64Source::Field(MetadataFieldAlias { root_id: obj.id, field: field.clone() }));
+                    let alias =
+                        aliases.get(&dest.id).cloned().unwrap_or_else(|| MetadataFieldAlias { root_id: obj.id, field: field.clone() });
+                    sources.insert(dest.id, MetadataU64Source::Field(alias));
                 }
                 ir::IrInstruction::Binary { dest, op: ast::BinaryOp::Add, left, right } if dest.ty == ir::IrType::U64 => {
                     if let (Some(left), Some(right)) =
@@ -11153,7 +11409,7 @@ fn body_fail_closed_runtime_features(
         for instruction in &block.instructions {
             match instruction {
                 ir::IrInstruction::FieldAccess { obj, field, .. } => {
-                    if !is_executable_schema_field_access(obj, field, param_schema_vars, type_layouts)
+                    if !is_executable_schema_field_access(obj, field, &prelude_availability.schema_pointer_vars, type_layouts)
                         && !is_executable_aggregate_field_access(obj, field, &prelude_availability, type_layouts)
                         && !is_executable_tuple_call_return_field_access(obj, field, &prelude_availability)
                     {
@@ -11501,6 +11757,7 @@ fn metadata_prelude_availability(
     let schema_param_ids =
         params.iter().filter(|param| named_type_name(&param.ty).is_some()).map(|param| param.binding.id).collect::<HashSet<_>>();
     availability.schema_pointer_vars.extend(schema_param_ids.iter().copied());
+    availability.schema_pointer_vars.extend(param_schema_vars.iter().copied());
 
     for param in params {
         if metadata_fixed_scalar_size(&param.ty).is_some() {
@@ -11591,6 +11848,16 @@ fn metadata_prelude_availability(
                 ir::IrInstruction::Call { dest: Some(dest), .. } if matches!(dest.ty, ir::IrType::Tuple(_)) => {
                     availability.tuple_call_return_vars.insert(dest.id, dest.ty.clone());
                 }
+                ir::IrInstruction::Tuple { dest, fields } => {
+                    let fixed_width = metadata_ir_type_fixed_width(&dest.ty, type_layouts)
+                        .or_else(|| metadata_fixed_byte_width(&dest.ty, type_static_length(&dest.ty)));
+                    if fixed_width.is_some()
+                        && fields.iter().all(|field| metadata_fixed_value_available_for_packed(field, &availability, type_layouts))
+                    {
+                        availability.fixed_value_vars.insert(dest.id);
+                        availability.aggregate_pointer_vars.insert(dest.id, MetadataAggregatePointerSource { ty: dest.ty.clone() });
+                    }
+                }
                 ir::IrInstruction::Call { dest: Some(dest), func, .. } if pure_const_returns.contains_key(func) => {
                     let value = pure_const_returns.get(func).expect("guarded pure const return");
                     if metadata_fixed_scalar_const_value(value).is_some() {
@@ -11610,6 +11877,15 @@ fn metadata_prelude_availability(
                     if matches!(func.as_str(), "__ckb_hash_chain" | "__ckb_hash_blake2b")
                         && dest.ty == ir::IrType::Hash
                         && args.first().is_some_and(|arg| metadata_fixed_value_available_with_width(arg, &availability, 32)) =>
+                {
+                    availability.fixed_value_vars.insert(dest.id);
+                }
+                ir::IrInstruction::Call { dest: Some(dest), func, args }
+                    if func == "__ckb_hash_blake2b_packed"
+                        && dest.ty == ir::IrType::Hash
+                        && args
+                            .first()
+                            .is_some_and(|arg| metadata_fixed_value_available_for_packed(arg, &availability, type_layouts)) =>
                 {
                     availability.fixed_value_vars.insert(dest.id);
                 }
@@ -11674,8 +11950,13 @@ fn metadata_prelude_availability(
                         };
                         layout
                     };
-                    if metadata_layout_fixed_byte_width(&layout).is_some() && layout.ty == dest.ty {
+                    if metadata_layout_verifiable_fixed_byte_width(&layout, type_layouts).is_some() && layout.ty == dest.ty {
                         availability.fixed_value_vars.insert(dest.id);
+                        if matches!(layout.ty, ir::IrType::Named(_) | ir::IrType::Tuple(_) | ir::IrType::Array(_, _)) {
+                            availability
+                                .aggregate_pointer_vars
+                                .insert(dest.id, MetadataAggregatePointerSource { ty: layout.ty.clone() });
+                        }
                     }
                     if metadata_layout_fixed_scalar_width(&layout).is_some() && layout.ty == dest.ty {
                         availability.scalar_vars.insert(dest.id);
@@ -11684,7 +11965,7 @@ fn metadata_prelude_availability(
                             availability.u64_operand_vars.insert(dest.id);
                         }
                     }
-                    if metadata_layout_fixed_byte_width(&layout).is_none()
+                    if metadata_layout_verifiable_fixed_byte_width(&layout, type_layouts).is_none()
                         && metadata_molecule_vector_element_fixed_width(&layout.ty, type_layouts).is_some()
                         && layout.ty == dest.ty
                     {
@@ -12015,8 +12296,8 @@ fn metadata_can_verify_create_output_fields(
     }
     pattern.fields.iter().all(|(field, value)| {
         layouts.get(field).is_some_and(|layout| {
-            if let Some(width) = metadata_layout_fixed_byte_width(layout) {
-                metadata_fixed_value_available_with_width(value, availability, width)
+            if let Some(width) = metadata_layout_verifiable_fixed_byte_width(layout, type_layouts) {
+                metadata_fixed_value_available_with_layout_width(value, availability, width, type_layouts)
             } else {
                 metadata_dynamic_create_output_value_available(value, layout, availability, type_layouts)
             }
@@ -12170,6 +12451,24 @@ fn metadata_fixed_value_available(operand: &ir::IrOperand, availability: &Metada
             availability.fixed_value_vars.contains(&var.id)
         }
         _ => false,
+    }
+}
+
+fn metadata_fixed_value_available_for_packed(
+    operand: &ir::IrOperand,
+    availability: &MetadataPreludeAvailability,
+    type_layouts: &MetadataTypeLayouts,
+) -> bool {
+    if metadata_fixed_value_available(operand, availability) {
+        return true;
+    }
+    match operand {
+        ir::IrOperand::Const(value) => {
+            metadata_fixed_byte_const_len(value).is_some() || metadata_fixed_scalar_const_value(value).is_some()
+        }
+        ir::IrOperand::Var(var) => {
+            availability.fixed_value_vars.contains(&var.id) && metadata_ir_type_fixed_width(&var.ty, type_layouts).is_some()
+        }
     }
 }
 
@@ -12476,6 +12775,10 @@ fn metadata_layout_fixed_byte_width(layout: &MetadataFieldLayout) -> Option<usiz
     metadata_fixed_byte_width(&layout.ty, layout.fixed_size).or(layout.fixed_enum_size)
 }
 
+fn metadata_layout_verifiable_fixed_byte_width(layout: &MetadataFieldLayout, type_layouts: &MetadataTypeLayouts) -> Option<usize> {
+    metadata_layout_fixed_byte_width(layout).or_else(|| metadata_ir_type_fixed_width(&layout.ty, type_layouts))
+}
+
 fn metadata_fixed_aggregate_pointer_size(ty: &ir::IrType) -> Option<usize> {
     match ty {
         ir::IrType::Array(_, _) | ir::IrType::Tuple(_) => type_static_length(ty).filter(|width| *width > 8),
@@ -12515,9 +12818,9 @@ fn metadata_inline_type_fixed_width(ty: &str, type_layouts: &MetadataTypeLayouts
         "u128" => Some(16),
         "Address" | "Hash" => Some(32),
         other => type_layouts.get(other).and_then(|fields| {
-            fields
-                .values()
-                .try_fold(0usize, |acc, layout| metadata_layout_fixed_byte_width(layout).and_then(|width| acc.checked_add(width)))
+            fields.values().try_fold(0usize, |acc, layout| {
+                metadata_layout_verifiable_fixed_byte_width(layout, type_layouts).and_then(|width| acc.checked_add(width))
+            })
         }),
     }
 }
@@ -12665,8 +12968,26 @@ fn body_ckb_runtime_features(
                 ir::IrInstruction::Call { func, .. } if func == "__ckb_input_since" => {
                     features.insert("ckb-input-since".to_string());
                 }
-                ir::IrInstruction::Call { func, .. } if func.starts_with("__ckb_spawn") => {
+                ir::IrInstruction::Call { func, .. } if func == "__ckb_input_previous_tx_hash" => {
+                    features.insert("ckb-input-previous-output".to_string());
+                }
+                ir::IrInstruction::Call { func, .. } if func == "__ckb_input_previous_index" => {
+                    features.insert("ckb-input-previous-output".to_string());
+                }
+                ir::IrInstruction::Call { func, .. } if func == "__ckb_cell_capacity" => {
+                    features.insert("ckb-cell-capacity".to_string());
+                }
+                ir::IrInstruction::Call { func, .. } if func == "__ckb_cell_data_hash" => {
+                    features.insert("ckb-cell-data-hash".to_string());
+                }
+                ir::IrInstruction::Call { func, .. } if func == "__ckb_cell_lock_args32" => {
+                    features.insert("ckb-cell-lock-args32".to_string());
+                }
+                ir::IrInstruction::Call { func, args, .. } if func.starts_with("__ckb_spawn") => {
                     features.insert("ckb-spawn-ipc".to_string());
+                    if is_btc_bip340_spawn_call(func, args) {
+                        features.insert("runtime-verifier:btc-bip340:signature".to_string());
+                    }
                 }
                 ir::IrInstruction::Call { func, .. }
                     if matches!(
@@ -12702,6 +13023,9 @@ fn body_ckb_runtime_features(
                 }
                 ir::IrInstruction::Call { func, .. } if func == "__ckb_hash_blake2b" => {
                     features.insert("ckb-blake2b".to_string());
+                }
+                ir::IrInstruction::Call { func, .. } if func == "__ckb_hash_blake2b_packed" => {
+                    features.insert("ckb-packed-blake2b".to_string());
                 }
                 _ => {}
             }
@@ -12748,13 +13072,13 @@ fn merge_ckb_runtime_accesses(
 fn is_executable_schema_field_access(
     obj: &ir::IrOperand,
     field: &str,
-    param_schema_vars: &BTreeSet<usize>,
+    schema_pointer_vars: &HashSet<usize>,
     type_layouts: &MetadataTypeLayouts,
 ) -> bool {
     let ir::IrOperand::Var(var) = obj else {
         return false;
     };
-    if !param_schema_vars.contains(&var.id) {
+    if !schema_pointer_vars.contains(&var.id) {
         return false;
     }
     let Some(type_name) = named_type_name(&var.ty) else {
@@ -12763,7 +13087,7 @@ fn is_executable_schema_field_access(
     let Some(layout) = type_layouts.get(type_name).and_then(|fields| fields.get(field)) else {
         return false;
     };
-    metadata_layout_fixed_byte_width(layout).is_some()
+    metadata_layout_verifiable_fixed_byte_width(layout, type_layouts).is_some()
         || metadata_molecule_vector_element_fixed_width(&layout.ty, type_layouts).is_some()
 }
 
@@ -12782,7 +13106,7 @@ fn is_executable_aggregate_field_access(
     let Some(layout) = metadata_aggregate_or_named_field_layout(&source.ty, field, type_layouts) else {
         return false;
     };
-    metadata_layout_fixed_byte_width(&layout).is_some()
+    metadata_layout_verifiable_fixed_byte_width(&layout, type_layouts).is_some()
 }
 
 fn is_executable_tuple_call_return_field_access(obj: &ir::IrOperand, field: &str, availability: &MetadataPreludeAvailability) -> bool {
@@ -12900,14 +13224,28 @@ fn body_ckb_runtime_accesses(
                 });
             }
             if let ir::IrInstruction::Call { func, args, .. } = instruction {
-                if func == "__ckb_spawn" {
+                if matches!(func.as_str(), "__ckb_spawn" | "__ckb_spawn_with_fd1") {
                     accesses.push(CkbRuntimeAccessMetadata {
-                        operation: "spawn".to_string(),
+                        operation: if func == "__ckb_spawn_with_fd1" { "spawn-with-fd" } else { "spawn" }.to_string(),
                         syscall: "SPAWN".to_string(),
                         source: "CellDep".to_string(),
                         index: 0,
                         binding: ckb_spawn_target_binding(args),
                     });
+                    if is_btc_bip340_spawn_call(func, args) {
+                        accesses.push(CkbRuntimeAccessMetadata {
+                            operation: "runtime-verifier-btc-bip340".to_string(),
+                            syscall: "SPAWN".to_string(),
+                            source: "CellDep".to_string(),
+                            index: 0,
+                            binding: format!(
+                                "{}:{}:{}",
+                                verifier_registry::btc::BIP340_VERIFIER_ID,
+                                verifier_registry::btc::BIP340_IPC_ABI,
+                                verifier_registry::btc::BIP340_RISCV_TARGET
+                            ),
+                        });
+                    }
                     continue;
                 }
                 if let Some((operation, syscall, source, binding)) = ckb_v014_runtime_access(func) {
@@ -13038,6 +13376,15 @@ fn ckb_v014_runtime_access(func: &str) -> Option<(&'static str, &'static str, &'
             Some(("witness-output-type", "LOAD_WITNESS_ARGS_OUTPUT_TYPE", "GroupOutput", "witness::output_type"))
         }
         "__ckb_sighash_all" => Some(("sighash-all", "CKB_SIGHASH_ALL", "GroupInput", "env::sighash_all")),
+        "__ckb_input_previous_tx_hash" => {
+            Some(("input-previous-tx-hash", "LOAD_INPUT_BY_FIELD", "InputSource", "ckb::input_previous_tx_hash"))
+        }
+        "__ckb_input_previous_index" => {
+            Some(("input-previous-index", "LOAD_INPUT_BY_FIELD", "InputSource", "ckb::input_previous_index"))
+        }
+        "__ckb_cell_capacity" => Some(("cell-capacity", "LOAD_CELL_BY_FIELD", "CellSource", "ckb::cell_capacity")),
+        "__ckb_cell_data_hash" => Some(("cell-data-hash", "LOAD_CELL_BY_FIELD", "CellSource", "ckb::cell_data_hash")),
+        "__ckb_cell_lock_args32" => Some(("cell-lock-args32", "LOAD_CELL_BY_FIELD", "CellSource", "ckb::cell_lock_args32")),
         "__ckb_require_maturity" => Some(("require-maturity", "LOAD_INPUT_BY_FIELD", "GroupInput", "require_maturity")),
         "__ckb_require_time" => Some(("require-time", "LOAD_INPUT_BY_FIELD", "GroupInput", "require_time")),
         "__ckb_require_epoch_after" => Some(("require-epoch-after", "LOAD_INPUT_BY_FIELD", "GroupInput", "require_epoch_after")),
@@ -13047,6 +13394,8 @@ fn ckb_v014_runtime_access(func: &str) -> Option<(&'static str, &'static str, &'
         "__ckb_occupied_capacity" => Some(("occupied-capacity", "CAPACITY_POLICY", "Output", "occupied_capacity")),
         "__ckb_hash_chain" => Some(("hash-chain", "CKB_BLAKE2B", "Profile", "hash_chain")),
         "__ckb_hash_blake2b" => Some(("hash-blake2b", "CKB_BLAKE2B", "Profile", "hash_blake2b")),
+        "__ckb_hash_data_packed" => Some(("hash-data-packed", "CKB_BLAKE2B", "Profile", "ckb::hash_data_packed")),
+        "__ckb_hash_blake2b_packed" => Some(("hash-blake2b-packed", "CKB_BLAKE2B", "Profile", "hash_blake2b_packed")),
         _ => None,
     }
 }
@@ -13056,6 +13405,14 @@ fn ckb_spawn_target_binding(args: &[ir::IrOperand]) -> String {
         Some(ir::IrOperand::Const(ir::IrConst::U64(tag))) => format!("spawn-target-tag:0x{tag:016x}"),
         _ => "spawn-target:dynamic".to_string(),
     }
+}
+
+fn is_btc_bip340_spawn_call(func: &str, args: &[ir::IrOperand]) -> bool {
+    matches!(func, "__ckb_spawn" | "__ckb_spawn_with_fd1") && is_spawn_target(args, verifier_registry::btc::BIP340_RISCV_TARGET)
+}
+
+fn is_spawn_target(args: &[ir::IrOperand], target: &str) -> bool {
+    matches!(args.first(), Some(ir::IrOperand::Const(ir::IrConst::U64(tag))) if *tag == ir::stable_u64_tag(target))
 }
 
 fn scheduler_accesses_from_metadata(accesses: &[CkbRuntimeAccessMetadata]) -> Vec<crate::stdlib::SchedulerAccess> {
@@ -19018,9 +19375,23 @@ where
             "lock_args Address should consume exactly 32 script arg bytes:\n{}",
             asm
         );
+        let script_args_decode = asm
+            .split("# cellscript entry abi: lock_args param owner consumes 32 script arg byte(s)")
+            .next()
+            .expect("Script.args decode block");
+        assert!(
+            !script_args_decode.contains("lbu t0, 1(t0)"),
+            "Script.args u32 decoder must not clobber its base pointer while reading the args byte length:\n{}",
+            script_args_decode
+        );
         assert!(
             !asm.contains("# cellscript abi: LOAD_WITNESS reason=entry_args"),
             "lock_args-only wrapper should not require a witness payload:\n{}",
+            asm
+        );
+        assert!(
+            !asm.contains("bind read-only param owner to Input#"),
+            "lock_args parameters must remain bound to Script.args and must not be rebound from transaction input data:\n{}",
             asm
         );
 
@@ -19031,6 +19402,49 @@ where
         let ckb_constraints = result.metadata.constraints.ckb.as_ref().expect("ckb constraints");
         assert_eq!(ckb_constraints.min_witness_bytes, 0);
         assert_eq!(ckb_constraints.max_entry_witness_bytes, 0);
+    }
+
+    #[test]
+    fn compile_preserves_dynamic_witness_cursor_after_lock_args() {
+        let result = compile(
+            r#"
+module test
+
+resource Token has store, create, consume, replace, burn, relock, read_ref {
+    owner: Address,
+}
+
+struct Intent {
+    owner: Address,
+}
+
+lock guarded(protected token: Token, lock_args owner: Address, witness intent: Intent) -> bool {
+    require owner == token.owner
+    require intent.owner == token.owner
+}
+"#,
+            CompileOptions::default(),
+        )
+        .unwrap();
+        let asm = String::from_utf8(result.artifact_bytes).unwrap();
+        assert!(
+            asm.contains("# cellscript entry abi: witness payload contains schema-backed dynamic segments"),
+            "expected dynamic witness wrapper:\n{}",
+            asm
+        );
+        let dynamic_payload_block = asm
+            .split("# cellscript entry abi: witness payload contains schema-backed dynamic segments")
+            .nth(1)
+            .expect("dynamic witness payload block should be present");
+        let before_intent = dynamic_payload_block
+            .split("# cellscript entry abi: schema param intent")
+            .next()
+            .expect("schema param should follow lock_args");
+        assert!(
+            before_intent.contains("li t5, 2088") && before_intent.contains("sd t6, 0(t5)") && before_intent.contains("ld t6, 0(t5)"),
+            "dynamic witness cursor must be saved across Script.args lock_args decoding:\n{}",
+            before_intent
+        );
     }
 
     #[test]
@@ -26321,6 +26735,63 @@ lock not_expired(protected proposal: Proposal, witness now: u64) -> bool {
         let schema = proposal.molecule_schema.as_ref().expect("Proposal schema should be generated in scoped CKB compile");
         assert!(schema.schema.contains("struct Signature"), "Vec<Signature> dependency was not retained:\n{}", schema.schema);
         assert!(scoped.metadata.types.iter().any(|ty| ty.name == "Signature"));
+    }
+
+    #[test]
+    fn optimized_entry_lock_keeps_inlined_schema_pointer_field_access_checked() {
+        let source = r#"
+module optimized_lock_schema_pointer
+
+struct OutPoint {
+    tx_hash: Hash,
+    index: u32,
+}
+
+struct Intent {
+    domain: Hash,
+    old_cell: OutPoint,
+    policy_hash: Hash,
+}
+
+resource ProtectedCell has store, create, consume {
+    policy_hash: Hash,
+}
+
+lock owner(protected cell: ProtectedCell, witness intent: Intent) -> bool {
+    let digest = intent_digest(&intent)
+    fixed_u64_le(digest, 0) == fixed_u64_le(cell.policy_hash, 0)
+}
+
+fn intent_digest(intent: &Intent) -> Hash {
+    hash_blake2b(intent.domain)
+}
+"#;
+        let temp = tempdir().unwrap();
+        let entry = Utf8Path::from_path(temp.path()).unwrap().join("optimized_lock_schema_pointer.cell");
+        std::fs::write(&entry, source).unwrap();
+
+        let scoped = compile_file_with_entry_lock(
+            &entry,
+            CompileOptions {
+                opt_level: 1,
+                target_profile: Some("ckb".to_string()),
+                target: Some("riscv64-asm".to_string()),
+                ..CompileOptions::default()
+            },
+            "owner",
+        )
+        .unwrap();
+        let lock = scoped.metadata.locks.iter().find(|lock| lock.name == "owner").expect("owner lock metadata");
+        assert!(
+            !lock.fail_closed_runtime_features.contains(&"field-access".to_string()),
+            "inlined &Intent field access should stay schema-backed:\n{:?}",
+            lock.fail_closed_runtime_features
+        );
+        assert!(
+            !scoped.metadata.runtime.fail_closed_runtime_features.contains(&"field-access".to_string()),
+            "optimized entry-lock metadata should not report field-access fail-closed debt:\n{:?}",
+            scoped.metadata.runtime.fail_closed_runtime_features
+        );
     }
 
     #[test]

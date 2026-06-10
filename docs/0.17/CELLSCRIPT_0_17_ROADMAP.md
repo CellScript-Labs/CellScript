@@ -219,7 +219,7 @@ Add executable aggregate lowering for:
 
 - transaction/group input scans;
 - transaction/group output scans;
-- typed cell classification;
+- schema-backed CKB Cell classification;
 - computed per-cell terms;
 - exact equality, `<=`, `>=`;
 - fail-closed overflow;

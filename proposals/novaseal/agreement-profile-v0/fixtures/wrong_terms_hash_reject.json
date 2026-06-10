@@ -1,0 +1,9 @@
+{
+  "schema": "novaseal-agreement-fixture-v0.1",
+  "fixture": "wrong_terms_hash_reject",
+  "action": "originate_agreement / terminal paths",
+  "expected": "rejected",
+  "coverage": "resolved-transaction-covered",
+  "reject_guard": "created agreement, payout, and receipt outputs must bind the witness terms_hash",
+  "description": "Origination with a witness terms_hash that does not match the materialized agreement, payout, and receipt outputs must reject."
+}

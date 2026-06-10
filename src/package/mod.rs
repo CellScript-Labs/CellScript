@@ -150,6 +150,14 @@ pub struct CkbCellDepConfig {
     #[serde(default)]
     pub name: Option<String>,
     #[serde(default)]
+    pub role: Option<String>,
+    #[serde(default)]
+    pub verifier_id: Option<String>,
+    #[serde(default)]
+    pub ipc_abi: Option<String>,
+    #[serde(default)]
+    pub artifact_hash: Option<String>,
+    #[serde(default)]
     pub out_point: Option<String>,
     #[serde(default)]
     pub tx_hash: Option<String>,
@@ -196,6 +204,7 @@ pub enum VersionReq {
 
 impl PackageManager {
     pub fn new(root: impl AsRef<Path>) -> Self {
+        // AUDIT-FINDING: package manager stores the caller-provided root without canonicalizing it, while later manifest reads, dependency resolution, and lockfile checks mix this raw root with canonical dependency paths — severity: MEDIUM — canonicalize the root at construction or store explicit raw/canonical roots and compare only canonical identities
         let root = root.as_ref().to_path_buf();
 
         Self { root, resolved: HashMap::new() }
@@ -373,6 +382,7 @@ dist/
         let content = std::fs::read_to_string(&manifest_path)?;
         let manifest: PackageManifest = toml::from_str(&content)?;
 
+        // AUDIT-FINDING: resolved local package source records the raw dependency string for root dependencies even after canonical containment checks, so lockfile/registry identity can differ for equivalent paths like symlinked or normalized inputs — severity: LOW — persist a canonical package-relative source identity derived from package_path
         let source_path = if base_root == self.root {
             PathBuf::from(path)
         } else {

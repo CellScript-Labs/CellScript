@@ -2,7 +2,7 @@
 
 Status: freeze-complete branch draft for `nightly-0.16`.
 
-Updated: 2026-05-29.
+Updated: 2026-06-01.
 
 CellScript 0.16 turns the v0.15 ProofPlan audit surface into a metadata
 assurance toolchain. The release adds operational semantics, ProofPlan
@@ -15,9 +15,11 @@ comparative audit: IR poison rejection after recorded lowering errors,
 instruction-level IR provenance, reserved-register contract verification,
 checked syscall ABI baselines, and line-exact diagnostic regression tests.
 
-Production-completeness items such as executable CKB VM fixture execution,
-full transaction solving, source-to-assembly maps, and protocol stdlib
-implementations are deliberately deferred to 0.17.
+General production-completeness items such as executable CKB VM fixture
+execution, full transaction solving, source-to-assembly maps, and protocol
+stdlib implementations are deliberately deferred to 0.17. This does not negate
+proposal-local evidence such as NovaSeal's local CKB VM and full transaction
+harness runs.
 
 ## Highlights
 
@@ -49,6 +51,10 @@ The checker rejects:
 - local action/function/lock ProofPlan records that diverge from
   `runtime.proof_plan`;
 - metadata-only/runtime-required gaps in `--primitive-strict=0.16` mode.
+
+Nested packed receipt/resource guards now satisfy strict generated ProofPlan for
+the NovaSeal proposal-local bundle. PP0201 is scoped to executing
+`Script.args` fields only, so it no longer reports output lock args.
 
 **Note**: This is a metadata consistency checker, not a formal proof.
 

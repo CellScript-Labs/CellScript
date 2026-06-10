@@ -3382,7 +3382,7 @@ fn cellc_explain_proof_summary_reports_fail_closed_diagnostics() {
 }
 
 #[test]
-fn cellc_check_denies_metadata_only_declared_invariant() {
+fn cellc_check_production_denies_metadata_only_declared_invariant() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
     std::fs::create_dir_all(root.join("src")).unwrap();
@@ -3419,8 +3419,7 @@ where
     )
     .unwrap();
 
-    let output =
-        Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("check").arg("--deny-runtime-obligations").output().unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("check").arg("--production").output().unwrap();
     assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
 
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -4161,6 +4160,109 @@ fn cellc_ckb_hash_emits_default_blake2b_vector() {
     let text = Command::new(env!("CARGO_BIN_EXE_cellc")).arg("ckb-hash").arg("--hex").arg("00").output().unwrap();
     assert!(text.status.success(), "stderr: {}", String::from_utf8_lossy(&text.stderr));
     assert_eq!(String::from_utf8_lossy(&text.stdout).trim().len(), 64);
+}
+
+fn write_novaseal_certification_report(path: &std::path::Path) {
+    let report = serde_json::json!({
+        "schema": "novaseal-production-gates-v0.3",
+        "status": "local_production_prep_ready_external_attestation_required",
+        "production_ready": false,
+        "local_production_prep_ready": true,
+        "profile_certification": {
+            "schema": "novaseal-profile-certification-v0.1",
+            "profile": "agreement-profile-v0",
+            "conforms_to": "NovaSealCanonicalV0",
+            "status": "passed",
+            "certification_level": "public_ecosystem_profile_certification_local_ready",
+            "production_statement_eligible": false,
+            "production_statement_blockers": [
+                "public_shared_cell_dep_attested",
+                "external_bip340_tcb_review_attested",
+                "public_btc_spv_evidence_attested",
+                "rwa_legal_registry_review_attested"
+            ]
+        },
+        "failed_dimensions": [
+            "public_shared_cell_dep_attestation",
+            "external_bip340_tcb_review_attestation",
+            "public_btc_spv_evidence",
+            "rwa_legal_registry_review_evidence"
+        ],
+        "external_blockers": [
+            "public_shared_cell_dep_attested",
+            "external_bip340_tcb_review_attested",
+            "public_btc_spv_evidence_attested",
+            "rwa_legal_registry_review_attested"
+        ],
+        "gates": [
+            {
+                "name": "agreement_profile_public_ecosystem_certification_v0",
+                "status": "passed"
+            }
+        ]
+    });
+    std::fs::write(path, serde_json::to_vec_pretty(&report).unwrap()).unwrap();
+}
+
+#[test]
+fn cellc_certify_accepts_novaseal_local_ready_report() {
+    let temp = tempfile::tempdir().unwrap();
+    let report = temp.path().join("novaseal-production-gates.json");
+    let output_report = temp.path().join("cellscript-certification.json");
+    write_novaseal_certification_report(&report);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc"))
+        .arg("certify")
+        .arg("--plugin")
+        .arg("novaseal-profile-v0")
+        .arg("--repo-root")
+        .arg(temp.path())
+        .arg("--report")
+        .arg(&report)
+        .arg("--output")
+        .arg(&output_report)
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+
+    let stdout: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(stdout["schema"], "cellscript-certification-report-v0.1");
+    assert_eq!(stdout["status"], "passed");
+    assert_eq!(stdout["plugin"]["id"], "novaseal-profile-v0");
+    assert_eq!(stdout["plugin"]["kind"], "compiler-builtin-rust");
+    assert_eq!(stdout["plugin"]["report_generated"], false);
+    assert_eq!(stdout["checks"]["public_ecosystem_gate_passed"], true);
+    assert!(output_report.exists());
+}
+
+#[test]
+fn cellc_certify_require_production_rejects_local_only_report() {
+    let temp = tempfile::tempdir().unwrap();
+    let report = temp.path().join("novaseal-production-gates.json");
+    write_novaseal_certification_report(&report);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc"))
+        .arg("certify")
+        .arg("--plugin")
+        .arg("novaseal-profile-v0")
+        .arg("--repo-root")
+        .arg(temp.path())
+        .arg("--report")
+        .arg(&report)
+        .arg("--require-production")
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert!(!output.status.success(), "stdout: {}", String::from_utf8_lossy(&output.stdout));
+
+    let stdout: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(stdout["status"], "failed");
+    assert_eq!(stdout["checks"]["production_ready"], false);
+    assert_eq!(stdout["checks"]["production_statement_eligible"], false);
+    assert!(stdout["failure_reason"]["message"].as_str().expect("failure reason").contains("external attestations"));
+    assert_eq!(stdout["failure_reason"]["external_blockers"][3], "rwa_legal_registry_review_attested");
+    assert_eq!(stdout["failure_reason"]["failed_dimensions"][3], "rwa_legal_registry_review_evidence");
 }
 
 #[test]

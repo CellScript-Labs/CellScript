@@ -195,6 +195,21 @@
       "detail": "spawn bounded verifier child"
     },
     {
+      "dsl_name": "spawn_with_fd",
+      "symbol": "__ckb_spawn_with_fd1",
+      "number": 2601,
+      "kind": "value",
+      "raw_status_reg": "a0",
+      "semantic_status_reg": "a1",
+      "return_regs": ["a0"],
+      "arg_regs": ["a0", "a1"],
+      "clobbers": ["a0", "a1"],
+      "arg_comment": "spawn bounded verifier child with one inherited fd",
+      "size_check": "caller_checked",
+      "fail_behavior": "fail_closed",
+      "detail": "spawn bounded verifier child with one inherited fd"
+    },
+    {
       "dsl_name": "wait",
       "symbol": "__ckb_wait",
       "number": 2602,

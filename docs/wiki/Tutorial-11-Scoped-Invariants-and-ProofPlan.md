@@ -221,6 +221,86 @@ In 0.15, many declared aggregate invariants intentionally emit
 But it is not the same as an on-chain proof. Do not claim a metadata-only
 invariant is enforced by CKB-VM.
 
+## Why Invariants Have No Generated Code
+
+Declared invariants do not produce RISC-V instructions. The compiler records
+their trigger, scope, reads, and aggregate relations into ProofPlan metadata,
+but the code-generation stage treats invariants as a no-op. Every
+action, function, and lock has an IR body that the code generator walks to emit
+assembly; an invariant has no body, no verifier obligations, and no ABI slot,
+so there is nothing for the code generator to lower.
+
+This is not a temporary shortcut — it reflects a deliberate split between two
+audit layers:
+
+1. **Action-level checks** are executable. When an action calls `consume`,
+   `create`, `require`, or performs a mutation, the compiler emits concrete
+   on-chain verification instructions (field equality, type-hash presence,
+   identity preservation, and so on). These become `on_chain_checked: true`
+   ProofPlan records backed by `executable_evidence`.
+
+2. **Invariant-level declarations** are auditable claims about what the
+   protocol *should* guarantee. They live in metadata so that reviewers, CI
+   pipelines, and future tooling can verify the claim is satisfied — by the
+   action-level checks above, by builder policy, or by a future executable
+   invariant lowering pass.
+
+When an invariant's aggregate matches a checked action obligation, ProofPlan
+records the link under `invariant_coverage:matched-action-obligation:*`. When
+no action provides evidence, the invariant stays `runtime-required` with the
+builder assumption `declared(no_checked_action_obligation_matches:...)`.
+
+## How Soundness Audits Invariants
+
+ProofPlan soundness runs two independent checks:
+
+**Completeness — every verifier obligation has a ProofPlan record.** The
+compiler collects verifier obligations from actions, functions, and locks, then
+verifies that each one appears in the global ProofPlan set. This catches
+missing audit trails.
+
+**Consistency — local and runtime ProofPlan records agree.** For every action,
+function, and lock, the compiler builds ProofPlan records from the local IR
+body and also stores the same records at the global `runtime.proof_plan` level.
+Soundness checks that both copies are identical (same trigger, scope, reads,
+coverage, assumptions, detail). A mismatch signals a compiler bug.
+
+Invariants are **exempt** from the consistency check. The reason is structural:
+an invariant does not belong to any callable body, so there is no "local" copy
+to compare against. Its ProofPlan records are generated directly from the
+declaration and exist only at the runtime level. Applying the local-to-runtime
+reconciliation to invariants would always report a false "missing from local"
+error.
+
+Instead, invariant soundness is guaranteed by a separate mechanism: the action
+coverage link described above, plus the strict-mode gate described next.
+
+## Strict Mode and Gradual Enforcement
+
+CellScript uses a **progressive guarantee** model for invariant enforcement:
+
+| Stage | What happens to invariants |
+|---|---|
+| Development (default) | Invariants emit `gap:metadata-only` and `runtime-required`. Compilation succeeds. Warnings and builder assumptions are recorded for review. |
+| Pre-production (`--primitive-compat 0.16`) | Strict soundness rejects any ProofPlan record that is still `metadata-only` or `runtime-required` (PP0150). Every declared invariant must have matching action evidence or compilation fails. |
+| CI gate (`--deny-runtime-obligations`) | Additionally rejects unmatched invariant action coverage, runtime-required transaction invariants, and partial ProofPlan gaps. |
+
+Under strict mode, the compiler enforces the following invariant-specific
+rules:
+
+- **PP0150**: a `metadata-only` or `runtime-required` ProofPlan record is a
+  compile error. The invariant must be closed by action evidence, lock/type
+  verifier code, or executable lowering.
+- **PP0101**: a ProofPlan record cannot simultaneously claim `on_chain_checked`
+  and `runtime-required`.
+- **PP0104**: a `gap:*` coverage status is incompatible with `on_chain_checked`.
+- **PP0301**: an `on_chain_checked` record must not carry `runtime-required` or
+  `metadata-only` builder assumptions.
+
+These rules mean that in strict mode, an invariant is not just a declaration —
+it is a contract that the rest of the module must fulfill with executable
+evidence.
+
 ## Action Coverage Records
 
 ProofPlan also compares invariant claims with action evidence when possible. If
@@ -279,7 +359,7 @@ review tools.
 
 ## Production Review Checklist
 
-Before treating a 0.15 invariant as production evidence, check:
+Before treating an invariant as production evidence, check:
 
 1. Does every invariant have the intended `trigger`?
 2. Is the `scope` narrow enough for the actual verifier boundary?
@@ -288,20 +368,34 @@ Before treating a 0.15 invariant as production evidence, check:
 5. If there is a gap, who closes it: action checks, lock/type verifier code,
    builder policy, or future executable invariant lowering?
 6. Are warnings about transaction-wide or lock-group coverage understood?
-7. Does the package pass the appropriate production gate?
+7. Does every aggregate invariant have at least one matching action obligation
+   (see *Action Coverage Records* above)?
+8. Does the package pass the appropriate production gate?
 
 For package-level strict gates, run the check from a directory that contains
 `Cell.toml`:
 
 ```bash
 cd path/to/your-cellscript-package
-cellc check --all-targets --target-profile ckb --production --primitive-strict 0.16
+cellc check --all-targets --target-profile ckb --production --primitive-compat 0.16
 ```
 
-If this fails with runtime-required ProofPlan gaps, the compiler is telling you
-that metadata has exposed a real review obligation. The top-level CellScript
-repository is not itself a package root for this command unless you create a
-`Cell.toml` there.
+Under `--primitive-compat 0.16`, strict soundness rejects invariants that
+remain `metadata-only` or `runtime-required` (PP0150). This means every
+declared invariant must have corresponding action evidence or the build fails.
+See *Strict Mode and Gradual Enforcement* for the full rule set.
+
+For CI pipelines that must reject any outstanding runtime obligation:
+
+```bash
+cellc check --all-targets --target-profile ckb --deny-runtime-obligations
+```
+
+This additionally flags unmatched invariant action coverage, runtime-required
+transaction invariants, and partial ProofPlan gaps.
+
+The top-level CellScript repository is not itself a package root for these
+commands unless you create a `Cell.toml` there.
 
 ## Where To Go Next
 

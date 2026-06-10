@@ -123,7 +123,12 @@ impl<'a> Lexer<'a> {
                     (Some(_), _) => {
                         self.advance()?;
                     }
-                    (None, _) => break,
+                    (None, _) => {
+                        return Err(CompileError::new(
+                            "unterminated block comment",
+                            Span::new(start, self.position, start_line, start_col),
+                        ));
+                    }
                 }
                 self.ensure_limit(start, MAX_COMMENT_BYTES, "block comment", start_line, start_col)?;
             }
@@ -239,6 +244,7 @@ impl<'a> Lexer<'a> {
                     Some(c) => {
                         return Err(CompileError::new(
                             format!("unknown escape sequence: \\{}", c),
+                            // AUDIT-FINDING: escape diagnostics add one byte to self.position for the offending character, which truncates spans for non-ASCII escaped characters and can produce invalid byte ranges — severity: LOW — advance by c.len_utf8() or capture the current character span before building the diagnostic
                             Span::new(self.position, self.position + 1, self.line, self.column),
                         ));
                     }
@@ -652,6 +658,13 @@ mod tests {
         let error = lex("b\"unterminated").unwrap_err();
 
         assert!(error.message.contains("unterminated byte string literal"), "{}", error.message);
+    }
+
+    #[test]
+    fn test_unterminated_block_comment_errors() {
+        let error = lex("foo /* unterminated").unwrap_err();
+
+        assert!(error.message.contains("unterminated block comment"), "{}", error.message);
     }
 
     #[test]

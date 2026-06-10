@@ -1,0 +1,8 @@
+{
+  "schema": "novaseal-agreement-fixture-v0.1",
+  "fixture": "repay_before_expiry_valid",
+  "action": "repay_before_expiry",
+  "expected": "accepted",
+  "coverage": "source-guard-present + local-transaction-shape-covered + resolved-transaction-covered",
+  "description": "Borrower actor closes an Active agreement before expiry, producing Repaid status and a materialized receipt output."
+}

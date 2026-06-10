@@ -8,6 +8,10 @@ use crate::syscalls::{
 use crate::types::lifecycle_effect_keys;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
+const MAX_IR_EXPR_RECURSION_DEPTH: u32 = 4096;
+const IR_STACK_RED_ZONE: usize = 64 * 1024;
+const IR_STACK_GROWTH: usize = 8 * 1024 * 1024;
+
 #[derive(Debug, Clone)]
 pub struct IrModule {
     pub name: String,
@@ -503,6 +507,7 @@ pub struct IrGenerator {
     flow_states: HashMap<String, Vec<String>>,
     flow_state_fields: HashMap<String, String>,
     flow_rules: HashMap<String, Vec<IrFlowRule>>,
+    type_field_order: HashMap<String, Vec<String>>,
     enum_variants: HashMap<String, HashMap<String, u64>>,
     constants: HashMap<String, (Type, Expr)>,
     function_effects: HashMap<String, EffectClass>,
@@ -510,6 +515,7 @@ pub struct IrGenerator {
     function_return_types: HashMap<String, Option<IrType>>,
     external_function_return_types: HashMap<String, Option<IrType>>,
     errors: Vec<CompileError>,
+    expr_recursion_depth: u32,
 }
 
 struct LoweredExpr {
@@ -543,6 +549,7 @@ impl IrGenerator {
             flow_states: HashMap::new(),
             flow_state_fields: HashMap::new(),
             flow_rules: HashMap::new(),
+            type_field_order: HashMap::new(),
             enum_variants: HashMap::new(),
             constants: HashMap::new(),
             function_effects: HashMap::new(),
@@ -550,6 +557,7 @@ impl IrGenerator {
             function_return_types: HashMap::new(),
             external_function_return_types: HashMap::new(),
             errors: Vec::new(),
+            expr_recursion_depth: 0,
         }
     }
 
@@ -559,12 +567,14 @@ impl IrGenerator {
         generator
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn with_import_context(
         module_name: String,
         type_fields: HashMap<String, HashMap<String, IrType>>,
         type_kinds: HashMap<String, IrTypeKind>,
         receipt_claim_outputs: HashMap<String, Option<IrType>>,
         flow_states: HashMap<String, Vec<String>>,
+        type_field_order: HashMap<String, Vec<String>>,
         external_function_effects: HashMap<String, EffectClass>,
         external_function_return_types: HashMap<String, Option<IrType>>,
     ) -> Self {
@@ -572,6 +582,7 @@ impl IrGenerator {
         generator.type_kinds.extend(type_kinds);
         generator.receipt_claim_outputs.extend(receipt_claim_outputs);
         generator.flow_states.extend(flow_states);
+        generator.type_field_order.extend(type_field_order);
         generator.external_function_effects = external_function_effects;
         generator.external_function_return_types = external_function_return_types;
         generator
@@ -585,6 +596,7 @@ impl IrGenerator {
             match item {
                 Item::Resource(r) => {
                     self.type_kinds.insert(r.name.clone(), IrTypeKind::Resource);
+                    self.type_field_order.insert(r.name.clone(), r.fields.iter().map(|field| field.name.clone()).collect());
                     self.type_fields.insert(
                         r.name.clone(),
                         r.fields.iter().map(|field| (field.name.clone(), Self::convert_type(&field.ty))).collect(),
@@ -592,6 +604,7 @@ impl IrGenerator {
                 }
                 Item::Shared(s) => {
                     self.type_kinds.insert(s.name.clone(), IrTypeKind::Shared);
+                    self.type_field_order.insert(s.name.clone(), s.fields.iter().map(|field| field.name.clone()).collect());
                     self.type_fields.insert(
                         s.name.clone(),
                         s.fields.iter().map(|field| (field.name.clone(), Self::convert_type(&field.ty))).collect(),
@@ -600,6 +613,7 @@ impl IrGenerator {
                 Item::Receipt(r) => {
                     self.type_kinds.insert(r.name.clone(), IrTypeKind::Receipt);
                     self.receipt_claim_outputs.insert(r.name.clone(), r.claim_output.as_ref().map(Self::convert_type));
+                    self.type_field_order.insert(r.name.clone(), r.fields.iter().map(|field| field.name.clone()).collect());
                     self.type_fields.insert(
                         r.name.clone(),
                         r.fields.iter().map(|field| (field.name.clone(), Self::convert_type(&field.ty))).collect(),
@@ -607,6 +621,7 @@ impl IrGenerator {
                 }
                 Item::Struct(s) => {
                     self.type_kinds.insert(s.name.clone(), IrTypeKind::Struct);
+                    self.type_field_order.insert(s.name.clone(), s.fields.iter().map(|field| field.name.clone()).collect());
                     self.type_fields.insert(
                         s.name.clone(),
                         s.fields.iter().map(|field| (field.name.clone(), Self::convert_type(&field.ty))).collect(),
@@ -2044,6 +2059,30 @@ impl IrGenerator {
         blocks: &mut Vec<IrBlock>,
         vars: &mut HashMap<String, IrVar>,
     ) -> LoweredExpr {
+        if self.expr_recursion_depth >= MAX_IR_EXPR_RECURSION_DEPTH {
+            self.record_error(
+                format!(
+                    "IR expression recursion limit exceeded while lowering nested expression (limit {})",
+                    MAX_IR_EXPR_RECURSION_DEPTH
+                ),
+                expr.span(),
+            );
+            return Self::poisoned_expr(Some(current));
+        }
+
+        self.expr_recursion_depth += 1;
+        let lowered = stacker::maybe_grow(IR_STACK_RED_ZONE, IR_STACK_GROWTH, || self.lower_expr_inner(expr, current, blocks, vars));
+        self.expr_recursion_depth -= 1;
+        lowered
+    }
+
+    fn lower_expr_inner(
+        &mut self,
+        expr: &Expr,
+        current: BlockId,
+        blocks: &mut Vec<IrBlock>,
+        vars: &mut HashMap<String, IrVar>,
+    ) -> LoweredExpr {
         match expr {
             Expr::Integer(value, _) => LoweredExpr { operand: IrOperand::Const(IrConst::U64(*value)), current: Some(current) },
             Expr::Bool(value, _) => LoweredExpr { operand: IrOperand::Const(IrConst::Bool(*value)), current: Some(current) },
@@ -2380,6 +2419,9 @@ impl IrGenerator {
         if left_ty == right_ty {
             return (left, right);
         }
+        if matches!(op, BinaryOp::Eq | BinaryOp::Ne) && Self::ir_hash_byte32_types_compatible(&left_ty, &right_ty) {
+            return (left, right);
+        }
         if matches!(op, BinaryOp::Add | BinaryOp::Sub) && left_ty == IrType::U128 && right_ty == IrType::U64 {
             return (left, right);
         }
@@ -2480,6 +2522,13 @@ impl IrGenerator {
                 }
             }
         }
+    }
+
+    fn ir_hash_byte32_types_compatible(left: &IrType, right: &IrType) -> bool {
+        matches!(
+            (left, right),
+            (IrType::Hash, IrType::Array(inner, 32)) | (IrType::Array(inner, 32), IrType::Hash) if **inner == IrType::U8
+        )
     }
 
     fn binary_result_type(&self, op: BinaryOp, left: &IrOperand, right: &IrOperand) -> IrType {
@@ -4307,7 +4356,8 @@ impl IrGenerator {
     ) -> LoweredExpr {
         let aggregate = self.new_var("struct_tmp", IrType::Named(init.ty.clone()));
         let mut field_map = HashMap::new();
-        let mut tuple_operands = Vec::new();
+        let mut tuple_operands_by_name = HashMap::new();
+        let mut fallback_tuple_operands = Vec::new();
         let mut active = current;
 
         for (field_name, field_expr) in &init.fields {
@@ -4327,11 +4377,21 @@ impl IrGenerator {
                 IrOperand::Const(value) => Self::const_type(value),
             };
             let field_var = self.new_var(format!("{}_{}", init.ty, field_name), field_ty);
-            tuple_operands.push(lowered.operand.clone());
+            let source_operand = lowered.operand.clone();
             self.block_mut(blocks, active).instructions.push(IrInstruction::Move { dest: field_var.clone(), src: lowered.operand });
+            self.copy_aggregate_metadata(&source_operand, field_var.id);
+            tuple_operands_by_name.insert(field_name.clone(), source_operand.clone());
+            fallback_tuple_operands.push(source_operand);
             field_map.insert(field_name.clone(), field_var);
         }
 
+        let tuple_operands = self
+            .type_field_order
+            .get(&init.ty)
+            .and_then(|order| {
+                order.iter().map(|field_name| tuple_operands_by_name.get(field_name).cloned()).collect::<Option<Vec<_>>>()
+            })
+            .unwrap_or(fallback_tuple_operands);
         self.block_mut(blocks, active).instructions.push(IrInstruction::Tuple { dest: aggregate.clone(), fields: tuple_operands });
         self.aggregate_fields.insert(aggregate.id, field_map);
         LoweredExpr { operand: IrOperand::Var(aggregate), current: Some(active) }
@@ -4866,6 +4926,51 @@ impl IrGenerator {
                     });
                     Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(current) })
                 }
+                "ckb::input_previous_tx_hash" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__ckb_input_previous_tx_hash",
+                    "ckb_input_previous_tx_hash",
+                    IrType::Hash,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "ckb::input_previous_index" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__ckb_input_previous_index",
+                    "ckb_input_previous_index",
+                    IrType::U32,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "ckb::cell_capacity" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__ckb_cell_capacity",
+                    "ckb_cell_capacity",
+                    IrType::U64,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "ckb::cell_data_hash" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__ckb_cell_data_hash",
+                    "ckb_cell_data_hash",
+                    IrType::Hash,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "ckb::cell_lock_args32" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__ckb_cell_lock_args32",
+                    "ckb_cell_lock_args32",
+                    IrType::Hash,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
                 "source::input" if call.args.len() == 1 => self.lower_simple_runtime_call(
                     "__ckb_source_input",
                     "source_input",
@@ -4950,40 +5055,34 @@ impl IrGenerator {
                     blocks,
                     vars,
                 ),
+                "verifier::btc::bip340::require_signature" if call.args.len() == 3 => {
+                    self.lower_btc_bip340_require_signature_call(call, current, blocks, vars)
+                }
+                "fixed_u64_le" if call.args.len() == 2 => self.lower_fixed_u64_le_call(call, current, blocks, vars),
                 "spawn" if call.args.len() == 1 => {
                     let dest = self.new_var("spawn_result", IrType::U64);
-                    let target = match &call.args[0] {
-                        Expr::String(value, _) => IrOperand::Const(IrConst::U64(stable_u64_tag(value))),
-                        Expr::Identifier(name, _) => match self.constants.get(name) {
-                            Some((_, Expr::String(value, _))) => IrOperand::Const(IrConst::U64(stable_u64_tag(value))),
-                            _ => {
-                                let lowered = self.lower_expr(&call.args[0], current, blocks, vars);
-                                let active = lowered.current?;
-                                self.block_mut(blocks, active).instructions.push(IrInstruction::Call {
-                                    dest: Some(dest.clone()),
-                                    func: "__ckb_spawn".to_string(),
-                                    args: vec![lowered.operand],
-                                });
-                                return Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) });
-                            }
-                        },
-                        other => {
-                            let lowered = self.lower_expr(other, current, blocks, vars);
-                            let active = lowered.current?;
-                            self.block_mut(blocks, active).instructions.push(IrInstruction::Call {
-                                dest: Some(dest.clone()),
-                                func: "__ckb_spawn".to_string(),
-                                args: vec![lowered.operand],
-                            });
-                            return Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) });
-                        }
-                    };
-                    self.block_mut(blocks, current).instructions.push(IrInstruction::Call {
+                    let (target, active) = self.lower_static_spawn_target_operand(&call.args[0], current, blocks, vars)?;
+                    self.block_mut(blocks, active).instructions.push(IrInstruction::Call {
                         dest: Some(dest.clone()),
                         func: "__ckb_spawn".to_string(),
                         args: vec![target],
                     });
-                    Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(current) })
+                    Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) })
+                }
+                "spawn_with_fd" if call.args.len() == 2 => {
+                    let (target, active) = self.lower_static_spawn_target_operand(&call.args[0], current, blocks, vars)?;
+                    let lowered_fd = self.lower_expr(&call.args[1], active, blocks, vars);
+                    let active = lowered_fd.current?;
+                    if Self::is_poisoned_operand(&lowered_fd.operand) {
+                        return Some(Self::poisoned_expr(Some(active)));
+                    }
+                    let dest = self.new_var("spawn_result", IrType::U64);
+                    self.block_mut(blocks, active).instructions.push(IrInstruction::Call {
+                        dest: Some(dest.clone()),
+                        func: "__ckb_spawn_with_fd1".to_string(),
+                        args: vec![target, lowered_fd.operand],
+                    });
+                    Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) })
                 }
                 "pipe" if call.args.is_empty() => {
                     let dest = self.new_var("pipe_pair", IrType::Tuple(vec![IrType::U64, IrType::U64]));
@@ -5053,6 +5152,24 @@ impl IrGenerator {
                 "hash_blake2b" if call.args.len() == 1 => self.lower_simple_runtime_call(
                     "__ckb_hash_blake2b",
                     "hash_blake2b",
+                    IrType::Hash,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "hash_blake2b_packed" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__ckb_hash_blake2b_packed",
+                    "hash_blake2b_packed",
+                    IrType::Hash,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "ckb::hash_data_packed" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__ckb_hash_data_packed",
+                    "ckb_hash_data_packed",
                     IrType::Hash,
                     &call.args,
                     current,
@@ -5392,6 +5509,171 @@ impl IrGenerator {
                 _ => None,
             },
             _ => None,
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn lower_btc_bip340_require_signature_call(
+        &mut self,
+        call: &CallExpr,
+        current: BlockId,
+        blocks: &mut Vec<IrBlock>,
+        vars: &mut HashMap<String, IrVar>,
+    ) -> Option<LoweredExpr> {
+        let lowered_message = self.lower_expr(&call.args[0], current, blocks, vars);
+        let mut active = lowered_message.current?;
+        if Self::is_poisoned_operand(&lowered_message.operand) {
+            return Some(Self::poisoned_expr(Some(active)));
+        }
+        let lowered_pubkey = self.lower_expr(&call.args[1], active, blocks, vars);
+        active = lowered_pubkey.current?;
+        if Self::is_poisoned_operand(&lowered_pubkey.operand) {
+            return Some(Self::poisoned_expr(Some(active)));
+        }
+        let lowered_signature = self.lower_expr(&call.args[2], active, blocks, vars);
+        active = lowered_signature.current?;
+        if Self::is_poisoned_operand(&lowered_signature.operand) {
+            return Some(Self::poisoned_expr(Some(active)));
+        }
+
+        let pipe_pair = self.new_var("btc_bip340_pipe_pair", IrType::Tuple(vec![IrType::U64, IrType::U64]));
+        self.block_mut(blocks, active).instructions.push(IrInstruction::Call {
+            dest: Some(pipe_pair.clone()),
+            func: "__ckb_pipe".to_string(),
+            args: Vec::new(),
+        });
+        let read_fd = self.new_var("btc_bip340_read_fd", IrType::U64);
+        let write_fd = self.new_var("btc_bip340_write_fd", IrType::U64);
+        let block = self.block_mut(blocks, active);
+        block.instructions.push(IrInstruction::FieldAccess {
+            dest: read_fd.clone(),
+            obj: IrOperand::Var(pipe_pair.clone()),
+            field: "0".to_string(),
+        });
+        block.instructions.push(IrInstruction::FieldAccess {
+            dest: write_fd.clone(),
+            obj: IrOperand::Var(pipe_pair),
+            field: "1".to_string(),
+        });
+
+        let pid = self.new_var("btc_bip340_pid", IrType::U64);
+        let target = IrOperand::Const(IrConst::U64(stable_u64_tag(crate::verifier_registry::btc::BIP340_RISCV_TARGET)));
+        self.block_mut(blocks, active).instructions.push(IrInstruction::Call {
+            dest: Some(pid.clone()),
+            func: "__ckb_spawn_with_fd1".to_string(),
+            args: vec![target, IrOperand::Var(read_fd)],
+        });
+
+        self.push_pipe_write_u64(blocks, active, &write_fd, IrOperand::Const(IrConst::U64(0x4350_4930_5642_534e)));
+        self.push_pipe_write_u64(blocks, active, &write_fd, IrOperand::Const(IrConst::U64(65_536)));
+        self.push_fixed_word_pipe_writes(blocks, active, &write_fd, lowered_message.operand, 4);
+        self.push_fixed_word_pipe_writes(blocks, active, &write_fd, lowered_pubkey.operand, 4);
+        self.push_fixed_word_pipe_writes(blocks, active, &write_fd, lowered_signature.operand, 8);
+        self.block_mut(blocks, active).instructions.push(IrInstruction::Call {
+            dest: None,
+            func: "__ckb_close".to_string(),
+            args: vec![IrOperand::Var(write_fd)],
+        });
+
+        let status = self.new_var("btc_bip340_exit_status", IrType::U64);
+        self.block_mut(blocks, active).instructions.push(IrInstruction::Call {
+            dest: Some(status.clone()),
+            func: "__ckb_wait".to_string(),
+            args: vec![IrOperand::Var(pid)],
+        });
+        let ok = self.new_var("btc_bip340_status_ok", IrType::Bool);
+        self.block_mut(blocks, active).instructions.push(IrInstruction::Binary {
+            dest: ok.clone(),
+            op: BinaryOp::Eq,
+            left: IrOperand::Var(status),
+            right: IrOperand::Const(IrConst::U64(0)),
+        });
+        let ok_block = self.push_block(blocks);
+        let fail_block = self.push_block(blocks);
+        self.block_mut(blocks, active).terminator =
+            IrTerminator::Branch { cond: IrOperand::Var(ok), then_block: ok_block, else_block: fail_block };
+        self.block_mut(blocks, fail_block).terminator = self.fail_closed_terminator();
+
+        Some(LoweredExpr { operand: IrOperand::Const(IrConst::Unit), current: Some(ok_block) })
+    }
+
+    fn push_fixed_word_pipe_writes(
+        &mut self,
+        blocks: &mut [IrBlock],
+        active: BlockId,
+        write_fd: &IrVar,
+        bytes: IrOperand,
+        word_count: u64,
+    ) {
+        for word_index in 0..word_count {
+            let word = self.new_var("btc_bip340_word", IrType::U64);
+            self.block_mut(blocks, active).instructions.push(IrInstruction::Call {
+                dest: Some(word.clone()),
+                func: "__cellscript_fixed_u64_le".to_string(),
+                args: vec![bytes.clone(), IrOperand::Const(IrConst::U64(word_index))],
+            });
+            self.push_pipe_write_u64(blocks, active, write_fd, IrOperand::Var(word));
+        }
+    }
+
+    fn push_pipe_write_u64(&mut self, blocks: &mut [IrBlock], active: BlockId, write_fd: &IrVar, value: IrOperand) {
+        self.block_mut(blocks, active).instructions.push(IrInstruction::Call {
+            dest: None,
+            func: "__ckb_pipe_write".to_string(),
+            args: vec![IrOperand::Var(write_fd.clone()), value],
+        });
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn lower_fixed_u64_le_call(
+        &mut self,
+        call: &CallExpr,
+        current: BlockId,
+        blocks: &mut Vec<IrBlock>,
+        vars: &mut HashMap<String, IrVar>,
+    ) -> Option<LoweredExpr> {
+        let lowered_bytes = self.lower_expr(&call.args[0], current, blocks, vars);
+        let active = lowered_bytes.current?;
+        if Self::is_poisoned_operand(&lowered_bytes.operand) {
+            return Some(Self::poisoned_expr(Some(active)));
+        }
+        let lowered_index = self.lower_expr(&call.args[1], active, blocks, vars);
+        let active = lowered_index.current?;
+        if Self::is_poisoned_operand(&lowered_index.operand) {
+            return Some(Self::poisoned_expr(Some(active)));
+        }
+        let dest = self.new_var("fixed_u64_le", IrType::U64);
+        self.block_mut(blocks, active).instructions.push(IrInstruction::Call {
+            dest: Some(dest.clone()),
+            func: "__cellscript_fixed_u64_le".to_string(),
+            args: vec![lowered_bytes.operand, lowered_index.operand],
+        });
+        Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn lower_static_spawn_target_operand(
+        &mut self,
+        target: &Expr,
+        current: BlockId,
+        blocks: &mut Vec<IrBlock>,
+        vars: &mut HashMap<String, IrVar>,
+    ) -> Option<(IrOperand, BlockId)> {
+        match target {
+            Expr::String(value, _) => Some((IrOperand::Const(IrConst::U64(stable_u64_tag(value))), current)),
+            Expr::Identifier(name, _) => match self.constants.get(name) {
+                Some((_, Expr::String(value, _))) => Some((IrOperand::Const(IrConst::U64(stable_u64_tag(value))), current)),
+                _ => {
+                    let lowered = self.lower_expr(target, current, blocks, vars);
+                    let active = lowered.current?;
+                    Some((lowered.operand, active))
+                }
+            },
+            other => {
+                let lowered = self.lower_expr(other, current, blocks, vars);
+                let active = lowered.current?;
+                Some((lowered.operand, active))
+            }
         }
     }
 
@@ -7034,6 +7316,7 @@ fn generate_with_resolver_inner(
     let mut type_kinds = HashMap::new();
     let mut receipt_claim_outputs = HashMap::new();
     let mut flow_states = HashMap::new();
+    let mut type_field_order = HashMap::new();
     let mut external_type_defs = Vec::new();
     let mut external_type_names = HashSet::new();
     let mut external_callable_abis = Vec::new();
@@ -7060,6 +7343,9 @@ fn generate_with_resolver_inner(
                 }
                 if let Some(fields) = resolver_type_fields_to_ir(&type_def) {
                     type_fields.insert(local_name.clone(), fields);
+                }
+                if let Some(order) = resolver_type_field_order(&type_def) {
+                    type_field_order.insert(local_name.clone(), order);
                 }
                 if external_type_names.insert(local_name.clone()) {
                     if let Some(ir_type_def) = resolver_type_def_to_ir(&local_name, &type_def) {
@@ -7088,6 +7374,7 @@ fn generate_with_resolver_inner(
         type_kinds,
         receipt_claim_outputs,
         flow_states,
+        type_field_order,
         external_function_effects,
         external_function_return_types,
     );
@@ -7659,6 +7946,18 @@ fn resolver_type_fields_to_ir(type_def: &TypeDef) -> Option<HashMap<String, IrTy
     Some(fields.iter().map(|field| (field.name.clone(), ast_type_to_ir_type(&field.ty))).collect())
 }
 
+fn resolver_type_field_order(type_def: &TypeDef) -> Option<Vec<String>> {
+    let fields = match type_def {
+        TypeDef::Resource(resource) => &resource.fields,
+        TypeDef::Shared(shared) => &shared.fields,
+        TypeDef::Receipt(receipt) => &receipt.fields,
+        TypeDef::Struct(struct_def) => &struct_def.fields,
+        TypeDef::Enum(_) => return None,
+    };
+
+    Some(fields.iter().map(|field| field.name.clone()).collect())
+}
+
 fn resolver_type_def_to_ir(local_name: &str, type_def: &TypeDef) -> Option<IrTypeDef> {
     match type_def {
         TypeDef::Resource(resource) => Some(IrTypeDef {
@@ -8118,6 +8417,14 @@ mod tests {
         generate(&ast)
     }
 
+    fn left_deep_add_expr(depth: usize, span: Span) -> Expr {
+        let mut expr = Expr::Integer(1, span);
+        for _ in 0..depth {
+            expr = Expr::Binary(BinaryExpr { op: BinaryOp::Add, left: Box::new(expr), right: Box::new(Expr::Integer(1, span)), span });
+        }
+        expr
+    }
+
     fn first_action_body_mut(ir: &mut IrModule) -> &mut IrBody {
         ir.items
             .iter_mut()
@@ -8347,6 +8654,25 @@ where\n\
             blocks[0].instructions.iter().all(|instruction| !matches!(instruction, IrInstruction::Binary { .. })),
             "poisoned operands must not be folded into a real binary instruction: {:#?}",
             blocks[0].instructions
+        );
+    }
+
+    #[test]
+    fn ir_lowering_rejects_deep_expression_before_stack_overflow() {
+        let span = Span::new(1, 28, 1, 1);
+        let expr = left_deep_add_expr(MAX_IR_EXPR_RECURSION_DEPTH as usize + 1, span);
+        let mut generator = IrGenerator::new("ir::deep".to_string());
+        let mut blocks = vec![IrBlock::synthetic(BlockId(0), Vec::new(), IrTerminator::Return(None))];
+        let mut vars = HashMap::new();
+
+        let lowered = generator.lower_expr(&expr, BlockId(0), &mut blocks, &mut vars);
+
+        assert_eq!(lowered.current, Some(BlockId(0)));
+        assert!(IrGenerator::is_poisoned_operand(&lowered.operand), "unexpected operand: {:?}", lowered.operand);
+        assert!(
+            generator.errors.iter().any(|error| error.message.contains("IR expression recursion limit exceeded")),
+            "expected IR recursion diagnostic, got: {:#?}",
+            generator.errors
         );
     }
 

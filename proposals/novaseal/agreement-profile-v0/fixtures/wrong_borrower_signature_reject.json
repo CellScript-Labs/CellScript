@@ -1,0 +1,9 @@
+{
+  "schema": "novaseal-agreement-fixture-v0.1",
+  "fixture": "wrong_borrower_signature_reject",
+  "action": "repay_before_expiry",
+  "expected": "rejected",
+  "coverage": "source-guard-present + resolved-transaction-covered",
+  "reject_guard": "verifier::btc::bip340::require_signature(signed_intent_hash, borrower_sig.pubkey, borrower_sig.signature)",
+  "description": "Repayment requires the borrower BIP340 signature over the canonical signed intent hash."
+}

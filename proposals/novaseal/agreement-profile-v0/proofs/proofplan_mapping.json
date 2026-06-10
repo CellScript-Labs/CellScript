@@ -1,0 +1,110 @@
+{
+  "schema": "novaseal-agreement-proofplan-mapping-v0.1",
+  "generated_artifact": "target/cellscript-audit-bundle/audit-bundle.json",
+  "local_shape_artifact": "target/nova-agreement-tx-shape-report.json",
+  "action_vm_artifact": "target/nova-agreement-ckb-vm-action-report.json",
+  "resolved_tx_artifact": "target/nova-agreement-ckb-tx-report.json",
+  "status": "generated-audit-local-shape-resolved-tx-and-live-devnet-refreshed",
+  "last_verified": {
+    "check": "passed",
+    "audit_bundle": "passed",
+    "explain_assumptions": "passed",
+    "primitive_strict_0_16": "passed",
+    "actions": 3,
+    "locks": 0,
+    "source_units": 3,
+    "proof_plan_records": 170,
+    "builder_assumptions": 78,
+    "runtime_gaps": 0,
+    "tx_shape_harness": "passed",
+    "tx_shape_cases": 12,
+    "tx_shape_matched_expected": 12,
+    "action_vm_harness": "superseded_legacy_abi_not_release_gate",
+    "action_vm_cases": null,
+    "action_vm_matched_expected": null,
+    "action_vm_max_cycles": null,
+    "resolved_tx_harness": "passed",
+    "resolved_tx_cases": 20,
+    "resolved_tx_script_matched_expected": 20,
+    "resolved_tx_node_matched_expected": 20,
+    "resolved_tx_fixture_partition_matches_expected": true,
+    "resolved_tx_max_script_cycles": 7601060,
+    "resolved_tx_max_node_cycles": 7601060,
+    "resolved_tx_max_tx_size_bytes": 2050,
+    "wallet_signing_vectors": "passed",
+    "wallet_signing_vector_count": 3,
+    "production_gate": "local_production_prep_ready_external_attestation_required"
+  },
+  "claims": [
+    {
+      "claim": "Three Agreement Profile actions compile under the CKB target profile.",
+      "classification": "non_strict_check_covered",
+      "evidence": "cellc check --target-profile ckb"
+    },
+    {
+      "claim": "Agreement Profile is separate from NovaSeal core.",
+      "classification": "source-guard-present",
+      "evidence": "package path proposals/novaseal/agreement-profile-v0"
+    },
+    {
+      "claim": "Receipts are materialized as outputs by implemented actions.",
+      "classification": "resolved-transaction-covered + live-devnet-covered",
+      "evidence": "resolved transaction harness and live devnet lifecycle runner materialize receipt outputs; primitive-strict generated ProofPlan is clean"
+    },
+    {
+      "claim": "Terminal AgreementCell resource transitions are strict-mode sound.",
+      "classification": "source_generated_strict_resolved_tx_and_live_devnet_covered",
+      "evidence": "non-strict check, primitive-strict 0.16, resolved transaction harness, and live devnet lifecycle pass"
+    },
+    {
+      "claim": "Fixture semantics are executable.",
+      "classification": "local-transaction-shape-covered + resolved-transaction-covered + live-devnet-covered",
+      "evidence": "python3 scripts/nova_agreement_tx_shape_harness.py --pretty matched 12/12 shape and arithmetic-boundary expectations; cargo run --manifest-path harness/ckb_vm/Cargo.toml --bin novaseal_agreement_tx_harness -- --pretty matched 20/20 script-layer and node-verifier expectations; scripts/novaseal_agreement_devnet_stateful_live.py passed originate -> repay, originate -> claim, and live negative dry-runs"
+    },
+    {
+      "claim": "Native CKB funding/settlement shapes are locally verified.",
+      "classification": "local-transaction-shape-covered",
+      "evidence": "target/nova-agreement-tx-shape-report.json covers occupied-capacity floors, principal payout, repayment, collateral return, default claim, time reject, party reject, under-capacity reject, and wrong-settlement reject"
+    },
+    {
+      "claim": "Compiled Agreement Profile actions execute in CKB VM for positive and negative terminal-path cases.",
+      "classification": "legacy-action-harness-superseded",
+      "evidence": "the older per-action CKB VM harness is superseded by the signed-intent lifecycle type-script runner and resolved transaction harness"
+    },
+    {
+      "claim": "Resolved Agreement Profile transactions execute through ckb-script and ckb-verification.",
+      "classification": "resolved-transaction-covered",
+      "evidence": "target/nova-agreement-ckb-tx-report.json covers deterministic resolved transactions with action code CellDeps, a local harness lock CellDep, lock/type script groups, non-contextual checks, contextual checks, matched expectations, and zero not-executed fixture files"
+    },
+    {
+      "claim": "Native CKB transaction validity and occupied-capacity rejection are verified by resolved transaction execution.",
+      "classification": "resolved-transaction-covered",
+      "evidence": "target/nova-agreement-ckb-tx-report.json verifies accepted originate/repay/claim transactions and rejects under_capacity_reject at the node contextual verifier layer"
+    },
+    {
+      "claim": "Payout output settlement amounts are enforced by Agreement Profile scripts.",
+      "classification": "resolved-transaction-covered + live-devnet-covered",
+      "evidence": "wrong_settlement_amount_reject mutates the typed NativeCkbPayoutV0 lender repayment output and is rejected by the resolved transaction harness; the live devnet runner also dry-runs a wrong payout amount rejection"
+    },
+    {
+      "claim": "Agreement terminal intents have fixed-width wallet signing vectors.",
+      "classification": "production-gate-covered",
+      "evidence": "/home/arthur/a19q3/CellScript/target/novaseal-wallet-signing-vectors.json includes originate_valid, repay_before_expiry_valid, and claim_after_expiry_valid"
+    },
+    {
+      "claim": "authority-binding",
+      "classification": "runtime-checked",
+      "evidence": "borrower/lender signature pubkeys are checked against Agreement authority fields; payout lock args are checked through typed NativeCkbPayoutV0 recipient evidence and live negative dry-runs"
+    },
+    {
+      "claim": "u64-overflow-prevention",
+      "classification": "runtime-checked",
+      "evidence": "source guards cover principal+fixed_fee, nonce+1, and payout capacity additions; arithmetic boundary fixtures repay_principal_max_fee_1_overflow_reject, repay_principal_max_fee_0_accept, nonce_max_increment_reject, and nonce_max_minus_1_increment_accept pass the local shape harness"
+    }
+  ],
+  "current_status": {
+    "primitive_strict_0_16": "passed",
+    "runtime_gaps": 0,
+    "production_gate": "local_production_prep_ready_external_attestation_required"
+  }
+}

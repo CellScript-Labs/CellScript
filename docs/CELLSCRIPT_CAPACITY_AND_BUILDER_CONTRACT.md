@@ -20,7 +20,7 @@ with_capacity_floor(6100000000)
 ```
 
 `with_capacity_floor(...)` records a minimum output capacity in shannons for
-that typed cell. The compiler carries it into `TypeMetadata` and
+that schema-backed CKB Cell view. The compiler carries it into `TypeMetadata` and
 `constraints.ckb.declared_capacity_floors`.
 
 This is not full capacity proof. It gives builders and auditors a declared

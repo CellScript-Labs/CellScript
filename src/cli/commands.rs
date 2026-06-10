@@ -7,7 +7,7 @@ use crate::{
     compile_path, compile_path_with_entry_action, compile_path_with_entry_lock, default_metadata_path_for_artifact,
     default_output_path_for_input, load_modules_for_input, resolve_input_path, validate_artifact_metadata,
     validate_source_units_on_disk_under, validate_source_units_primitive_mode_under, ArtifactFormat, CompileMetadata, CompileOptions,
-    EntryWitnessArg, ParamMetadata, ProofPlanMetadata, TargetProfile, ENTRY_WITNESS_ABI,
+    EntryWitnessArg, ParamMetadata, ProofPlanMetadata, ProofPlanSoundnessReport, TargetProfile, ENTRY_WITNESS_ABI,
 };
 use camino::{Utf8Path, Utf8PathBuf};
 #[cfg(feature = "vm-runner")]
@@ -23,6 +23,14 @@ use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 const CKB_HASH_FILE_SIZE_LIMIT_BYTES: u64 = 1024 * 1024;
+const NOVASEAL_CERTIFICATION_PLUGIN: &str = "novaseal-profile-v0";
+const NOVASEAL_CERTIFICATION_REPORT_SCHEMA: &str = "cellscript-certification-report-v0.1";
+const NOVASEAL_PLUGIN_REPORT_SCHEMA: &str = "novaseal-production-gates-v0.3";
+const NOVASEAL_PROFILE_CERTIFICATION_SCHEMA: &str = "novaseal-profile-certification-v0.1";
+const NOVASEAL_AGREEMENT_PROFILE: &str = "agreement-profile-v0";
+const NOVASEAL_CANONICAL_SCHEMA: &str = "NovaSealCanonicalV0";
+const NOVASEAL_PROFILE_CERTIFICATION_GATE: &str = "agreement_profile_public_ecosystem_certification_v0";
+const STRICT_V0_16_PRIMITIVE_COMPAT: &str = "0.16";
 
 #[derive(Debug)]
 pub enum Command {
@@ -52,6 +60,7 @@ pub enum Command {
     Profile(ProfileArgs),
     TraceTx(TraceTxArgs),
     AuditBundle(AuditBundleArgs),
+    Certify(CertifyArgs),
     ValidateTx(ValidateTxArgs),
     SolveTx(SolveTxArgs),
     DeployPlan(DeployPlanArgs),
@@ -247,6 +256,7 @@ pub struct ExplainAssumptionsArgs {
     pub input: Option<PathBuf>,
     pub target: Option<String>,
     pub target_profile: Option<String>,
+    pub primitive_compat: Option<String>,
     pub json: bool,
 }
 
@@ -279,6 +289,7 @@ pub struct ProfileArgs {
     pub entry: Option<String>,
     pub target: Option<String>,
     pub target_profile: Option<String>,
+    pub primitive_compat: Option<String>,
     pub json: bool,
 }
 
@@ -286,6 +297,7 @@ pub struct ProfileArgs {
 pub struct TraceTxArgs {
     pub against: PathBuf,
     pub tx: PathBuf,
+    pub primitive_compat: Option<String>,
     pub json: bool,
 }
 
@@ -295,13 +307,25 @@ pub struct AuditBundleArgs {
     pub output: Option<PathBuf>,
     pub target: Option<String>,
     pub target_profile: Option<String>,
+    pub primitive_compat: Option<String>,
     pub json: bool,
+}
+
+#[derive(Debug, Default)]
+pub struct CertifyArgs {
+    pub plugin: String,
+    pub repo_root: Option<PathBuf>,
+    pub report: Option<PathBuf>,
+    pub output: Option<PathBuf>,
+    pub json: bool,
+    pub require_production: bool,
 }
 
 #[derive(Debug, Default)]
 pub struct ValidateTxArgs {
     pub against: PathBuf,
     pub tx: PathBuf,
+    pub primitive_compat: Option<String>,
     pub json: bool,
 }
 
@@ -311,6 +335,7 @@ pub struct SolveTxArgs {
     pub output: Option<PathBuf>,
     pub target: Option<String>,
     pub target_profile: Option<String>,
+    pub primitive_compat: Option<String>,
     pub json: bool,
 }
 
@@ -447,6 +472,7 @@ impl CommandExecutor {
             Command::Profile(args) => Self::profile(args),
             Command::TraceTx(args) => Self::trace_tx(args),
             Command::AuditBundle(args) => Self::audit_bundle(args),
+            Command::Certify(args) => Self::certify(args),
             Command::ValidateTx(args) => Self::validate_tx(args),
             Command::SolveTx(args) => Self::solve_tx(args),
             Command::DeployPlan(args) => Self::deploy_plan(args),
@@ -1544,17 +1570,8 @@ impl CommandExecutor {
     }
 
     fn explain_assumptions(args: ExplainAssumptionsArgs) -> Result<()> {
-        let result = compile_cli_input(
-            args.input.as_ref(),
-            CompileOptions {
-                opt_level: 0,
-                output: None,
-                debug: false,
-                target: args.target,
-                target_profile: args.target_profile,
-                primitive_compat: None,
-            },
-        )?;
+        let compile_options = metadata_workflow_compile_options(args.target, args.target_profile, args.primitive_compat);
+        let result = compile_cli_input(args.input.as_ref(), compile_options)?;
         let assumptions = result.metadata.runtime.builder_assumptions.clone();
         let summary = serde_json::json!({
             "status": "ok",
@@ -1578,8 +1595,25 @@ impl CommandExecutor {
     }
 
     fn validate_tx(args: ValidateTxArgs) -> Result<()> {
+        validate_metadata_workflow_primitive_compat(args.primitive_compat.as_deref())?;
         let metadata = read_metadata_json(&args.against)?;
         let tx = read_json_value(&args.tx)?;
+        if let Some(soundness) = strict_v0_16_soundness_report_for_mode(&metadata, args.primitive_compat.as_deref()) {
+            let error_message = strict_v0_16_soundness_error_message(&soundness);
+            let summary = serde_json::json!({
+                "status": "failed",
+                "metadata": args.against.display().to_string(),
+                "tx": args.tx.display().to_string(),
+                "proof_plan_soundness": soundness,
+            });
+            if args.json {
+                print_json(&summary)?;
+            } else {
+                println!("Transaction validation: failed");
+                println!("  Strict v0.16 ProofPlan soundness: failed");
+            }
+            return Err(crate::error::CompileError::without_span(error_message));
+        }
         let report = crate::assumptions::validate_transaction_against_metadata(&metadata, &tx);
         let summary = serde_json::json!({
             "status": report.status,
@@ -1599,17 +1633,8 @@ impl CommandExecutor {
     }
 
     fn solve_tx(args: SolveTxArgs) -> Result<()> {
-        let result = compile_cli_input(
-            args.input.as_ref(),
-            CompileOptions {
-                opt_level: 0,
-                output: None,
-                debug: false,
-                target: args.target,
-                target_profile: args.target_profile,
-                primitive_compat: None,
-            },
-        )?;
+        let compile_options = metadata_workflow_compile_options(args.target, args.target_profile, args.primitive_compat);
+        let result = compile_cli_input(args.input.as_ref(), compile_options)?;
         let template = transaction_solver_template(&result.metadata);
         write_or_print_json(args.output.as_ref(), &template, args.json, "Transaction solver template generated")?;
         Ok(())
@@ -1685,25 +1710,34 @@ impl CommandExecutor {
     }
 
     fn profile(args: ProfileArgs) -> Result<()> {
-        let result = compile_cli_input(
-            args.input.as_ref(),
-            CompileOptions {
-                opt_level: 0,
-                output: None,
-                debug: false,
-                target: args.target,
-                target_profile: args.target_profile,
-                primitive_compat: None,
-            },
-        )?;
+        let compile_options = metadata_workflow_compile_options(args.target, args.target_profile, args.primitive_compat);
+        let result = compile_cli_input(args.input.as_ref(), compile_options)?;
         let report = profile_report_json(&result.metadata, args.entry.as_deref());
         print_or_text_json(args.json, &report, "Profile")?;
         Ok(())
     }
 
     fn trace_tx(args: TraceTxArgs) -> Result<()> {
+        validate_metadata_workflow_primitive_compat(args.primitive_compat.as_deref())?;
         let metadata = read_metadata_json(&args.against)?;
         let tx = read_json_value(&args.tx)?;
+        if let Some(soundness) = strict_v0_16_soundness_report_for_mode(&metadata, args.primitive_compat.as_deref()) {
+            let error_message = strict_v0_16_soundness_error_message(&soundness);
+            let trace = serde_json::json!({
+                "status": "failed",
+                "schema": "cellscript-tx-trace-v0.16",
+                "module": metadata.module,
+                "proof_plan_soundness": soundness,
+                "steps": [],
+            });
+            if args.json {
+                print_json(&trace)?;
+            } else {
+                println!("Transaction trace: failed");
+                println!("  Strict v0.16 ProofPlan soundness: failed");
+            }
+            return Err(crate::error::CompileError::without_span(error_message));
+        }
         let validation = crate::assumptions::validate_transaction_against_metadata(&metadata, &tx);
         let trace = trace_tx_report_json(&metadata, &validation);
         if args.json {
@@ -1718,17 +1752,8 @@ impl CommandExecutor {
     }
 
     fn audit_bundle(args: AuditBundleArgs) -> Result<()> {
-        let result = compile_cli_input(
-            args.input.as_ref(),
-            CompileOptions {
-                opt_level: 0,
-                output: None,
-                debug: false,
-                target: args.target,
-                target_profile: args.target_profile,
-                primitive_compat: None,
-            },
-        )?;
+        let compile_options = metadata_workflow_compile_options(args.target, args.target_profile, args.primitive_compat);
+        let result = compile_cli_input(args.input.as_ref(), compile_options)?;
         let output = args.output.unwrap_or_else(|| PathBuf::from("target/cellscript-audit-bundle"));
         std::fs::create_dir_all(&output)?;
         let bundle = audit_bundle_json(&result.metadata);
@@ -1754,6 +1779,75 @@ impl CommandExecutor {
             println!("  HTML: {}", html_path.display());
         }
         Ok(())
+    }
+
+    fn certify(args: CertifyArgs) -> Result<()> {
+        if args.plugin != NOVASEAL_CERTIFICATION_PLUGIN {
+            return Err(crate::error::CompileError::without_span(format!(
+                "unknown certification plugin '{}'; available plugins: novaseal-profile-v0",
+                args.plugin
+            )));
+        }
+
+        let repo_root = args.repo_root.unwrap_or(std::env::current_dir()?);
+        let report_provided = args.report.is_some();
+        let plugin_report_path = args.report.clone().unwrap_or_else(|| repo_root.join("target/novaseal-production-gates.json"));
+        let report_generated = !report_provided;
+
+        let plugin_report = if report_provided {
+            read_json_value(&plugin_report_path)?
+        } else {
+            let report = super::novaseal_certification::build_report(&repo_root)?;
+            if let Some(parent) = plugin_report_path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::write(
+                &plugin_report_path,
+                serde_json::to_string_pretty(&report).map_err(|error| {
+                    crate::error::CompileError::without_span(format!("failed to serialize NovaSeal production-gate report: {}", error))
+                })?,
+            )?;
+            report
+        };
+
+        let implementation_path = repo_root.join("src/cli/novaseal_certification.rs");
+        let summary = novaseal_certification_summary(
+            &plugin_report,
+            &repo_root,
+            &plugin_report_path,
+            &implementation_path,
+            report_generated,
+            args.require_production,
+        )?;
+        let output_path = args.output.unwrap_or_else(|| repo_root.join("target/cellscript-certification/novaseal-profile-v0.json"));
+        if let Some(parent) = output_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(
+            &output_path,
+            serde_json::to_string_pretty(&summary).map_err(|error| {
+                crate::error::CompileError::without_span(format!("failed to serialize certification report: {}", error))
+            })?,
+        )?;
+
+        if args.json {
+            print_json(&summary)?;
+        } else {
+            println!("Certification report generated");
+            println!("  Plugin: {}", args.plugin);
+            println!("  Status: {}", summary["status"].as_str().unwrap_or("unknown"));
+            println!("  Level: {}", summary["certification_level"].as_str().unwrap_or("unknown"));
+            println!("  Output: {}", output_path.display());
+            println!("  Plugin report: {}", plugin_report_path.display());
+        }
+
+        if summary["status"].as_str() == Some("passed") {
+            Ok(())
+        } else {
+            Err(crate::error::CompileError::without_span(
+                summary["failure_reason"].as_str().unwrap_or("certification failed").to_string(),
+            ))
+        }
     }
 
     fn explain_generics(args: ExplainGenericsArgs) -> Result<()> {
@@ -2681,6 +2775,158 @@ fn read_json_value(path: &Path) -> Result<serde_json::Value> {
         .map_err(|error| crate::error::CompileError::without_span(format!("failed to parse JSON '{}': {}", path.display(), error)))
 }
 
+fn ckb_blake2b_file_hash(path: &Path) -> Result<Option<String>> {
+    if !path.is_file() {
+        return Ok(None);
+    }
+    let bytes = std::fs::read(path)
+        .map_err(|error| crate::error::CompileError::without_span(format!("failed to read '{}': {}", path.display(), error)))?;
+    Ok(Some(crate::hex_encode(&crate::ckb_blake2b256(&bytes))))
+}
+
+fn json_pointer_str<'a>(value: &'a serde_json::Value, pointer: &str) -> Option<&'a str> {
+    value.pointer(pointer).and_then(serde_json::Value::as_str)
+}
+
+fn json_pointer_bool(value: &serde_json::Value, pointer: &str) -> bool {
+    value.pointer(pointer).and_then(serde_json::Value::as_bool).unwrap_or(false)
+}
+
+fn novaseal_gate_status<'a>(report: &'a serde_json::Value, gate_name: &str) -> Option<&'a str> {
+    report.get("gates")?.as_array()?.iter().find_map(|gate| {
+        let name = gate.get("name").and_then(serde_json::Value::as_str)?;
+        if name == gate_name {
+            gate.get("status").and_then(serde_json::Value::as_str)
+        } else {
+            None
+        }
+    })
+}
+
+fn novaseal_certification_summary(
+    plugin_report: &serde_json::Value,
+    repo_root: &Path,
+    plugin_report_path: &Path,
+    implementation_path: &Path,
+    report_generated: bool,
+    require_production: bool,
+) -> Result<serde_json::Value> {
+    let plugin_report_hash = ckb_blake2b_file_hash(plugin_report_path)?.ok_or_else(|| {
+        crate::error::CompileError::without_span(format!(
+            "NovaSeal plugin report '{}' is not a regular file",
+            plugin_report_path.display()
+        ))
+    })?;
+    let implementation_hash = ckb_blake2b_file_hash(implementation_path)?;
+    let profile_certification = plugin_report.get("profile_certification").unwrap_or(&serde_json::Value::Null);
+    let v1_readiness = plugin_report.get("v1_readiness").unwrap_or(&serde_json::Value::Null);
+
+    let mut checks = vec![
+        ("plugin_report_schema", json_pointer_str(plugin_report, "/schema") == Some(NOVASEAL_PLUGIN_REPORT_SCHEMA)),
+        (
+            "profile_certification_schema",
+            json_pointer_str(profile_certification, "/schema") == Some(NOVASEAL_PROFILE_CERTIFICATION_SCHEMA),
+        ),
+        ("profile_id", json_pointer_str(profile_certification, "/profile") == Some(NOVASEAL_AGREEMENT_PROFILE)),
+        ("canonical_target", json_pointer_str(profile_certification, "/conforms_to") == Some(NOVASEAL_CANONICAL_SCHEMA)),
+        ("profile_certification_passed", json_pointer_str(profile_certification, "/status") == Some("passed")),
+        ("public_ecosystem_gate_passed", novaseal_gate_status(plugin_report, NOVASEAL_PROFILE_CERTIFICATION_GATE) == Some("passed")),
+        ("local_production_prep_ready", json_pointer_bool(plugin_report, "/local_production_prep_ready")),
+    ];
+    if !v1_readiness.is_null() {
+        checks.push(("v1_readiness_local_ready", json_pointer_bool(v1_readiness, "/local_v1_ready")));
+    }
+
+    let production_statement_eligible = plugin_report
+        .pointer("/production_statement_eligible")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or_else(|| json_pointer_bool(profile_certification, "/production_statement_eligible"));
+
+    if require_production {
+        checks.push(("production_ready", json_pointer_bool(plugin_report, "/production_ready")));
+        checks.push(("production_statement_eligible", production_statement_eligible));
+    }
+
+    let checks_json =
+        checks.iter().map(|(name, passed)| ((*name).to_string(), serde_json::Value::Bool(*passed))).collect::<serde_json::Map<_, _>>();
+    let failed_checks = checks
+        .iter()
+        .filter(|(_, passed)| !*passed)
+        .map(|(name, _)| serde_json::Value::String((*name).to_string()))
+        .collect::<Vec<_>>();
+    let passed = failed_checks.is_empty();
+    let external_blockers = plugin_report
+        .get("external_blockers")
+        .cloned()
+        .or_else(|| v1_readiness.get("external_blockers").cloned())
+        .or_else(|| profile_certification.get("production_statement_blockers").cloned())
+        .unwrap_or_else(|| serde_json::Value::Array(Vec::new()));
+    let failed_dimensions = plugin_report
+        .get("failed_dimensions")
+        .cloned()
+        .or_else(|| v1_readiness.get("failed_dimensions").cloned())
+        .unwrap_or_else(|| serde_json::Value::Array(Vec::new()));
+    let certification_level = json_pointer_str(profile_certification, "/certification_level").unwrap_or("unknown");
+    let failure_reason = if passed {
+        serde_json::Value::Null
+    } else if !v1_readiness.is_null() && !json_pointer_bool(v1_readiness, "/local_v1_ready") {
+        serde_json::json!({
+            "message": "NovaSeal V1 readiness requires remaining planned profiles and business scenarios",
+            "v1_status": json_pointer_str(v1_readiness, "/status"),
+            "missing": v1_readiness.pointer("/planned_profile_matrix/missing").cloned().unwrap_or(serde_json::Value::Null),
+            "failed_checks": failed_checks,
+        })
+    } else if require_production && json_pointer_bool(plugin_report, "/local_production_prep_ready") {
+        serde_json::json!({
+            "message": "NovaSeal production certification requires remaining external attestations",
+            "external_blockers": external_blockers.clone(),
+            "failed_dimensions": failed_dimensions.clone(),
+            "failed_checks": failed_checks,
+        })
+    } else {
+        serde_json::json!({
+            "message": "NovaSeal profile certification failed deterministic compiler checks",
+            "failed_checks": failed_checks,
+        })
+    };
+
+    Ok(serde_json::json!({
+        "schema": NOVASEAL_CERTIFICATION_REPORT_SCHEMA,
+        "status": if passed { "passed" } else { "failed" },
+        "plugin": {
+            "id": NOVASEAL_CERTIFICATION_PLUGIN,
+            "kind": "compiler-builtin-rust",
+            "implementation": super::novaseal_certification::IMPLEMENTATION_ID,
+            "implementation_path": implementation_path.display().to_string(),
+            "implementation_hash_algorithm": "ckb_blake2b_256",
+            "implementation_hash": implementation_hash,
+            "report_generated": report_generated,
+        },
+        "plugin_report": {
+            "path": plugin_report_path.display().to_string(),
+            "schema": json_pointer_str(plugin_report, "/schema"),
+            "hash_algorithm": "ckb_blake2b_256",
+            "hash": plugin_report_hash,
+            "status": json_pointer_str(plugin_report, "/status"),
+            "production_ready": json_pointer_bool(plugin_report, "/production_ready"),
+            "production_gates_passed": json_pointer_bool(plugin_report, "/production_gates_passed"),
+            "local_production_prep_ready": json_pointer_bool(plugin_report, "/local_production_prep_ready"),
+            "v1_status": json_pointer_str(v1_readiness, "/status"),
+            "local_v1_ready": json_pointer_bool(v1_readiness, "/local_v1_ready"),
+        },
+        "profile": NOVASEAL_AGREEMENT_PROFILE,
+        "conforms_to": NOVASEAL_CANONICAL_SCHEMA,
+        "certification_level": certification_level,
+        "production_statement_eligible": production_statement_eligible,
+        "failed_dimensions": failed_dimensions,
+        "external_blockers": external_blockers,
+        "require_production": require_production,
+        "repo_root": repo_root.display().to_string(),
+        "checks": checks_json,
+        "failure_reason": failure_reason,
+    }))
+}
+
 fn print_json(value: &serde_json::Value) -> Result<()> {
     let json = serde_json::to_string_pretty(value)
         .map_err(|error| crate::error::CompileError::without_span(format!("failed to serialize JSON: {}", error)))?;
@@ -2721,6 +2967,49 @@ fn print_or_text_json(json: bool, value: &serde_json::Value, label: &str) -> Res
     } else {
         println!("{}: {}", label, value["status"].as_str().unwrap_or("ok"));
         Ok(())
+    }
+}
+
+fn metadata_workflow_compile_options(
+    target: Option<String>,
+    target_profile: Option<String>,
+    primitive_compat: Option<String>,
+) -> CompileOptions {
+    CompileOptions { opt_level: 0, output: None, debug: false, target, target_profile, primitive_compat }
+}
+
+fn validate_metadata_workflow_primitive_compat(primitive_compat: Option<&str>) -> Result<()> {
+    if primitive_compat.is_some_and(|mode| !matches!(mode, "0.14" | "0.15" | "0.16")) {
+        return Err(crate::error::CompileError::without_span(format!(
+            "unsupported primitive compatibility mode '{}'; supported values: 0.14, 0.15, 0.16",
+            primitive_compat.unwrap_or_default()
+        )));
+    }
+    Ok(())
+}
+
+fn strict_v0_16_soundness_report_for_mode(
+    metadata: &CompileMetadata,
+    primitive_compat: Option<&str>,
+) -> Option<ProofPlanSoundnessReport> {
+    if primitive_compat != Some(STRICT_V0_16_PRIMITIVE_COMPAT) {
+        return None;
+    }
+    let soundness = crate::proof_plan::soundness::check_metadata(metadata, true);
+    (soundness.status != "passed").then_some(soundness)
+}
+
+fn strict_v0_16_soundness_error_message(report: &ProofPlanSoundnessReport) -> String {
+    let messages = report
+        .issues
+        .iter()
+        .filter(|issue| issue.severity == "error")
+        .map(|issue| format!("{} {}:{} - {}", issue.code, issue.origin, issue.feature, issue.message))
+        .collect::<Vec<_>>();
+    if messages.is_empty() {
+        "metadata fails strict v0.16 ProofPlan soundness".to_string()
+    } else {
+        format!("metadata fails strict v0.16 ProofPlan soundness:\n  - {}", messages.join("\n  - "))
     }
 }
 
@@ -3898,7 +4187,7 @@ fn validate_check_policy(metadata: &crate::CompileMetadata, args: &CheckArgs) ->
         }
     }
 
-    if args.deny_runtime_obligations {
+    if args.production || args.deny_runtime_obligations {
         let runtime_required_obligations = metadata
             .runtime
             .verifier_obligations
@@ -5255,6 +5544,20 @@ impl CliParser {
                     .arg(Arg::new("input").value_name("INPUT").help("Input .cell file, package directory, or Cell.toml"))
                     .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
                     .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
+                    .arg(
+                        Arg::new("primitive-compat")
+                            .long("primitive-compat")
+                            .value_name("VERSION")
+                            .conflicts_with("primitive-strict")
+                            .help("Accept primitive syntax from a previous version (e.g. 0.14) with migration hints"),
+                    )
+                    .arg(
+                        Arg::new("primitive-strict")
+                            .long("primitive-strict")
+                            .value_name("VERSION")
+                            .conflicts_with("primitive-compat")
+                            .help("Require primitive syntax from a specific version (e.g. 0.15 or 0.16), reject legacy forms"),
+                    )
                     .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
             )
             .subcommand(
@@ -5293,6 +5596,20 @@ impl CliParser {
                     .arg(Arg::new("entry").long("entry").value_name("NAME").help("Limit profile to one action or lock"))
                     .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
                     .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
+                    .arg(
+                        Arg::new("primitive-compat")
+                            .long("primitive-compat")
+                            .value_name("VERSION")
+                            .conflicts_with("primitive-strict")
+                            .help("Accept primitive syntax from a previous version (e.g. 0.14) with migration hints"),
+                    )
+                    .arg(
+                        Arg::new("primitive-strict")
+                            .long("primitive-strict")
+                            .value_name("VERSION")
+                            .conflicts_with("primitive-compat")
+                            .help("Require primitive syntax from a specific version (e.g. 0.15 or 0.16), reject legacy forms"),
+                    )
                     .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
             )
             .subcommand(
@@ -5300,6 +5617,20 @@ impl CliParser {
                     .about("Trace a transaction JSON against v0.16 builder assumptions")
                     .arg(Arg::new("against").long("against").value_name("METADATA").required(true).help("Metadata JSON"))
                     .arg(Arg::new("tx").value_name("TX_JSON").required(true).help("Transaction JSON"))
+                    .arg(
+                        Arg::new("primitive-compat")
+                            .long("primitive-compat")
+                            .value_name("VERSION")
+                            .conflicts_with("primitive-strict")
+                            .help("Accept primitive metadata compatibility mode"),
+                    )
+                    .arg(
+                        Arg::new("primitive-strict")
+                            .long("primitive-strict")
+                            .value_name("VERSION")
+                            .conflicts_with("primitive-compat")
+                            .help("Require strict metadata assurance mode, e.g. 0.16"),
+                    )
                     .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
             )
             .subcommand(
@@ -5309,6 +5640,57 @@ impl CliParser {
                     .arg(Arg::new("output").long("output").short('o').value_name("DIR").help("Output directory"))
                     .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
                     .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
+                    .arg(
+                        Arg::new("primitive-compat")
+                            .long("primitive-compat")
+                            .value_name("VERSION")
+                            .conflicts_with("primitive-strict")
+                            .help("Accept primitive syntax from a previous version (e.g. 0.14) with migration hints"),
+                    )
+                    .arg(
+                        Arg::new("primitive-strict")
+                            .long("primitive-strict")
+                            .value_name("VERSION")
+                            .conflicts_with("primitive-compat")
+                            .help("Require primitive syntax from a specific version (e.g. 0.15 or 0.16), reject legacy forms"),
+                    )
+                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
+            )
+            .subcommand(
+                ClapCommand::new("certify")
+                    .about("Run a deterministic compiler-hosted certification plugin")
+                    .arg(
+                        Arg::new("plugin")
+                            .long("plugin")
+                            .value_name("PLUGIN")
+                            .required(true)
+                            .help("Certification plugin id, e.g. novaseal-profile-v0"),
+                    )
+                    .arg(
+                        Arg::new("repo-root")
+                            .long("repo-root")
+                            .value_name("DIR")
+                            .help("Repository root for Rust certification evidence"),
+                    )
+                    .arg(
+                        Arg::new("report")
+                            .long("report")
+                            .value_name("JSON")
+                            .help("Verify an existing plugin report instead of regenerating it"),
+                    )
+                    .arg(
+                        Arg::new("output")
+                            .long("output")
+                            .short('o')
+                            .value_name("FILE")
+                            .help("Write compiler certification report JSON"),
+                    )
+                    .arg(
+                        Arg::new("require-production")
+                            .long("require-production")
+                            .action(ArgAction::SetTrue)
+                            .help("Require external production attestations, not only local profile certification"),
+                    )
                     .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
             )
             .subcommand(
@@ -5316,6 +5698,20 @@ impl CliParser {
                     .about("Validate a transaction JSON against v0.16 builder assumptions before signing")
                     .arg(Arg::new("against").long("against").value_name("METADATA").required(true).help("Metadata JSON"))
                     .arg(Arg::new("tx").value_name("TX_JSON").required(true).help("Transaction JSON"))
+                    .arg(
+                        Arg::new("primitive-compat")
+                            .long("primitive-compat")
+                            .value_name("VERSION")
+                            .conflicts_with("primitive-strict")
+                            .help("Accept primitive metadata compatibility mode"),
+                    )
+                    .arg(
+                        Arg::new("primitive-strict")
+                            .long("primitive-strict")
+                            .value_name("VERSION")
+                            .conflicts_with("primitive-compat")
+                            .help("Require strict metadata assurance mode, e.g. 0.16"),
+                    )
                     .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
             )
             .subcommand(
@@ -5325,6 +5721,20 @@ impl CliParser {
                     .arg(Arg::new("output").long("output").short('o').value_name("FILE").help("Write JSON solver template"))
                     .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
                     .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
+                    .arg(
+                        Arg::new("primitive-compat")
+                            .long("primitive-compat")
+                            .value_name("VERSION")
+                            .conflicts_with("primitive-strict")
+                            .help("Accept primitive syntax from a previous version (e.g. 0.14) with migration hints"),
+                    )
+                    .arg(
+                        Arg::new("primitive-strict")
+                            .long("primitive-strict")
+                            .value_name("VERSION")
+                            .conflicts_with("primitive-compat")
+                            .help("Require primitive syntax from a specific version (e.g. 0.15 or 0.16), reject legacy forms"),
+                    )
                     .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
             )
             .subcommand(
@@ -5663,6 +6073,10 @@ impl CliParser {
                 input: m.get_one::<String>("input").map(PathBuf::from),
                 target: m.get_one::<String>("target").cloned(),
                 target_profile: m.get_one::<String>("target-profile").cloned(),
+                primitive_compat: resolve_metadata_workflow_primitive_compat(
+                    m.get_one::<String>("primitive-compat").cloned(),
+                    m.get_one::<String>("primitive-strict").cloned(),
+                ),
                 json: m.get_flag("json"),
             }),
             Some(("explain-generics", m)) => Command::ExplainGenerics(ExplainGenericsArgs {
@@ -5687,11 +6101,19 @@ impl CliParser {
                 entry: m.get_one::<String>("entry").cloned(),
                 target: m.get_one::<String>("target").cloned(),
                 target_profile: m.get_one::<String>("target-profile").cloned(),
+                primitive_compat: resolve_metadata_workflow_primitive_compat(
+                    m.get_one::<String>("primitive-compat").cloned(),
+                    m.get_one::<String>("primitive-strict").cloned(),
+                ),
                 json: m.get_flag("json"),
             }),
             Some(("trace-tx", m)) => Command::TraceTx(TraceTxArgs {
                 against: m.get_one::<String>("against").map(PathBuf::from).expect("required metadata"),
                 tx: m.get_one::<String>("tx").map(PathBuf::from).expect("required transaction JSON"),
+                primitive_compat: resolve_metadata_workflow_primitive_compat(
+                    m.get_one::<String>("primitive-compat").cloned(),
+                    m.get_one::<String>("primitive-strict").cloned(),
+                ),
                 json: m.get_flag("json"),
             }),
             Some(("audit-bundle", m)) => Command::AuditBundle(AuditBundleArgs {
@@ -5699,11 +6121,27 @@ impl CliParser {
                 output: m.get_one::<String>("output").map(PathBuf::from),
                 target: m.get_one::<String>("target").cloned(),
                 target_profile: m.get_one::<String>("target-profile").cloned(),
+                primitive_compat: resolve_metadata_workflow_primitive_compat(
+                    m.get_one::<String>("primitive-compat").cloned(),
+                    m.get_one::<String>("primitive-strict").cloned(),
+                ),
                 json: m.get_flag("json"),
+            }),
+            Some(("certify", m)) => Command::Certify(CertifyArgs {
+                plugin: m.get_one::<String>("plugin").cloned().expect("required certification plugin"),
+                repo_root: m.get_one::<String>("repo-root").map(PathBuf::from),
+                report: m.get_one::<String>("report").map(PathBuf::from),
+                output: m.get_one::<String>("output").map(PathBuf::from),
+                json: m.get_flag("json"),
+                require_production: m.get_flag("require-production"),
             }),
             Some(("validate-tx", m)) => Command::ValidateTx(ValidateTxArgs {
                 against: m.get_one::<String>("against").map(PathBuf::from).expect("required metadata"),
                 tx: m.get_one::<String>("tx").map(PathBuf::from).expect("required transaction JSON"),
+                primitive_compat: resolve_metadata_workflow_primitive_compat(
+                    m.get_one::<String>("primitive-compat").cloned(),
+                    m.get_one::<String>("primitive-strict").cloned(),
+                ),
                 json: m.get_flag("json"),
             }),
             Some(("solve-tx", m)) => Command::SolveTx(SolveTxArgs {
@@ -5711,6 +6149,10 @@ impl CliParser {
                 output: m.get_one::<String>("output").map(PathBuf::from),
                 target: m.get_one::<String>("target").cloned(),
                 target_profile: m.get_one::<String>("target-profile").cloned(),
+                primitive_compat: resolve_metadata_workflow_primitive_compat(
+                    m.get_one::<String>("primitive-compat").cloned(),
+                    m.get_one::<String>("primitive-strict").cloned(),
+                ),
                 json: m.get_flag("json"),
             }),
             Some(("deploy-plan", m)) => Command::DeployPlan(DeployPlanArgs {
@@ -5810,6 +6252,10 @@ fn resolve_primitive_compat(compat: Option<String>, strict: Option<String>) -> O
     }
 }
 
+fn resolve_metadata_workflow_primitive_compat(compat: Option<String>, strict: Option<String>) -> Option<String> {
+    resolve_primitive_compat(compat, strict).or_else(|| Some(STRICT_V0_16_PRIMITIVE_COMPAT.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -5874,6 +6320,125 @@ mod tests {
         let err = validate_expected_metadata_hash("artifact_hash", Some(&actual), Some(&expected)).unwrap_err();
 
         assert!(err.message.contains("does not match expected"), "unexpected error: {}", err.message);
+    }
+
+    fn novaseal_test_plugin_report(production_ready: bool, production_statement_eligible: bool) -> serde_json::Value {
+        serde_json::json!({
+            "schema": NOVASEAL_PLUGIN_REPORT_SCHEMA,
+            "status": if production_ready { "production_ready" } else { "local_production_prep_ready_external_attestation_required" },
+            "production_ready": production_ready,
+            "production_gates_passed": production_ready,
+            "local_production_prep_ready": true,
+            "production_statement_eligible": production_statement_eligible,
+            "failed_dimensions": [
+                "public_shared_cell_dep_attestation",
+                "external_bip340_tcb_review_attestation",
+                "public_btc_spv_evidence",
+                "rwa_legal_registry_review_evidence",
+            ],
+            "external_blockers": [
+                "public_shared_cell_dep_attested",
+                "external_bip340_tcb_review_attested",
+                "public_btc_spv_evidence_attested",
+                "rwa_legal_registry_review_attested",
+            ],
+            "profile_certification": {
+                "schema": NOVASEAL_PROFILE_CERTIFICATION_SCHEMA,
+                "profile": NOVASEAL_AGREEMENT_PROFILE,
+                "conforms_to": NOVASEAL_CANONICAL_SCHEMA,
+                "status": "passed",
+                "certification_level": "public_ecosystem_profile_certification_local_ready",
+                "production_statement_eligible": production_statement_eligible,
+                "production_statement_blockers": [
+                    "public_shared_cell_dep_attested",
+                    "external_bip340_tcb_review_attested",
+                    "public_btc_spv_evidence_attested",
+                    "rwa_legal_registry_review_attested"
+                ]
+            },
+            "gates": [
+                {
+                    "name": NOVASEAL_PROFILE_CERTIFICATION_GATE,
+                    "status": "passed"
+                }
+            ]
+        })
+    }
+
+    #[test]
+    fn novaseal_certification_summary_accepts_local_ready_profile_report() {
+        let temp = tempfile::tempdir().unwrap();
+        let report_path = temp.path().join("novaseal-production-gates.json");
+        let implementation_path = temp.path().join("novaseal_certification.rs");
+        let report = novaseal_test_plugin_report(false, false);
+        std::fs::write(&report_path, serde_json::to_vec_pretty(&report).unwrap()).unwrap();
+        std::fs::write(&implementation_path, b"pub(crate) fn build_report() {}\n").unwrap();
+
+        let summary = novaseal_certification_summary(&report, temp.path(), &report_path, &implementation_path, false, false)
+            .expect("certification summary");
+
+        assert_eq!(summary["schema"], NOVASEAL_CERTIFICATION_REPORT_SCHEMA);
+        assert_eq!(summary["status"], "passed");
+        assert_eq!(summary["plugin"]["id"], NOVASEAL_CERTIFICATION_PLUGIN);
+        assert_eq!(summary["plugin"]["kind"], "compiler-builtin-rust");
+        assert_eq!(summary["plugin_report"]["schema"], NOVASEAL_PLUGIN_REPORT_SCHEMA);
+        assert_eq!(summary["checks"]["local_production_prep_ready"], true);
+        assert_eq!(summary["plugin_report"]["production_gates_passed"], false);
+        assert_eq!(summary["failed_dimensions"][0], "public_shared_cell_dep_attestation");
+        assert_eq!(summary["external_blockers"][0], "public_shared_cell_dep_attested");
+        assert_eq!(summary["external_blockers"][3], "rwa_legal_registry_review_attested");
+    }
+
+    #[test]
+    fn novaseal_certification_summary_requires_v1_local_ready_when_present() {
+        let temp = tempfile::tempdir().unwrap();
+        let report_path = temp.path().join("novaseal-production-gates.json");
+        let implementation_path = temp.path().join("novaseal_certification.rs");
+        let mut report = novaseal_test_plugin_report(false, false);
+        report["v1_readiness"] = serde_json::json!({
+            "status": "planned_profiles_incomplete",
+            "local_v1_ready": false,
+            "planned_profile_matrix": {
+                "missing": ["fungible_xudt_value_flow"]
+            }
+        });
+        std::fs::write(&report_path, serde_json::to_vec_pretty(&report).unwrap()).unwrap();
+        std::fs::write(&implementation_path, b"pub(crate) fn build_report() {}\n").unwrap();
+
+        let summary = novaseal_certification_summary(&report, temp.path(), &report_path, &implementation_path, false, false)
+            .expect("certification summary");
+
+        assert_eq!(summary["status"], "failed");
+        assert_eq!(summary["checks"]["v1_readiness_local_ready"], false);
+        assert_eq!(
+            summary["failure_reason"]["message"],
+            "NovaSeal V1 readiness requires remaining planned profiles and business scenarios"
+        );
+    }
+
+    #[test]
+    fn novaseal_certification_summary_requires_external_attestations_in_production_mode() {
+        let temp = tempfile::tempdir().unwrap();
+        let report_path = temp.path().join("novaseal-production-gates.json");
+        let implementation_path = temp.path().join("novaseal_certification.rs");
+        let mut report = novaseal_test_plugin_report(false, false);
+        report["production_gates_passed"] = serde_json::json!(true);
+        std::fs::write(&report_path, serde_json::to_vec_pretty(&report).unwrap()).unwrap();
+        std::fs::write(&implementation_path, b"pub(crate) fn build_report() {}\n").unwrap();
+
+        let summary = novaseal_certification_summary(&report, temp.path(), &report_path, &implementation_path, false, true)
+            .expect("certification summary");
+        let failed_checks = summary["failure_reason"]["failed_checks"].as_array().expect("failed checks");
+
+        assert_eq!(summary["status"], "failed");
+        assert_eq!(summary["plugin_report"]["production_ready"], false);
+        assert_eq!(summary["plugin_report"]["production_gates_passed"], true);
+        assert!(failed_checks.iter().any(|check| check == "production_ready"));
+        assert!(failed_checks.iter().any(|check| check == "production_statement_eligible"));
+        assert_eq!(summary["failure_reason"]["failed_dimensions"][0], "public_shared_cell_dep_attestation");
+        assert_eq!(summary["failure_reason"]["external_blockers"][0], "public_shared_cell_dep_attested");
+        assert_eq!(summary["failure_reason"]["external_blockers"][3], "rwa_legal_registry_review_attested");
+        assert_eq!(summary["failure_reason"]["failed_dimensions"][3], "rwa_legal_registry_review_evidence");
     }
 
     #[test]

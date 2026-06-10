@@ -1,0 +1,42 @@
+module novaseal::receipt_type::v0_mvp;
+
+// Arthur Zhang, 2026.
+//
+// =============================================================================
+// NovaSeal v0 MVP - ProofReceipt Type Script
+// =============================================================================
+//
+// In v0 the state transition creates a materialised ProofReceiptV0 output and
+// also checks the receipt_hash obligation inside nova_state_type.
+//
+// AUDIT PLACEHOLDER:
+// This file is a standalone receipt-shape module for readers and tooling. The
+// executable transition surface is the package default entry in
+// nova_state_type.cell / nova_state_lifecycle_type.cell. Keeping this file
+// separate makes the receipt shape easy to inspect without implying that this
+// file alone enforces receipt creation.
+// =============================================================================
+
+struct OutPoint {
+    tx_hash: Hash,
+    index: u32,
+}
+
+receipt ProofReceiptV0 has store, create, consume {
+    protocol_id: Hash,
+    package_hash: Hash,
+    policy_hash: Hash,
+    action: u8,
+    terminal_path: u8,
+    old_cell: OutPoint,
+    new_cell_commitment: Hash,
+    old_state_hash: Hash,
+    new_state_hash: Hash,
+    old_nonce: u64,
+    new_nonce: u64,
+    intent_core_hash: Hash,
+    signed_intent_hash: Hash,
+    payout_commitment_hash: Hash,
+    signer_authority_hash: Hash,
+    expiry: u64,
+}

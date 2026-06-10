@@ -1834,10 +1834,10 @@ pub struct TextDocumentContentChangeEvent {
 ///
 /// Replaces the text in `range` with `new_text`.
 fn apply_incremental_change(content: &str, range: Range, new_text: &str) -> String {
-    let Some(start_offset) = position_to_offset(content, range.start) else {
+    let Some(start_offset) = position_to_offset_strict(content, range.start) else {
         return content.to_string();
     };
-    let Some(end_offset) = position_to_offset(content, range.end) else {
+    let Some(end_offset) = position_to_offset_strict(content, range.end) else {
         return content.to_string();
     };
     if start_offset > end_offset {
@@ -1851,6 +1851,7 @@ fn apply_incremental_change(content: &str, range: Range, new_text: &str) -> Stri
 }
 
 fn span_to_range(source: &str, span: Span) -> Range {
+    // AUDIT-FINDING: LSP range conversion clamps raw byte spans but does not reject default, reversed, or non-character-boundary spans, so diagnostics/navigation can collapse to misleading positions when upstream parsers synthesize bad spans — severity: MEDIUM — validate span invariants here and fall back to span.line/span.column or a known safe range when byte offsets are unusable
     let start = offset_to_position(source, span.start.min(source.len()));
     let end = offset_to_position(source, span.end.min(source.len()));
     Range { start, end }
@@ -1980,6 +1981,7 @@ fn item_span(item: &Item) -> Span {
 fn stmt_span(stmt: &Stmt) -> Span {
     match stmt {
         Stmt::Let(s) => s.span,
+        // AUDIT-FINDING: statements without stored spans are mapped to Span::default, causing LSP local-scope, selection, and highlight ranges to treat returns/expr statements as line 0 rather than their source location — severity: MEDIUM — carry spans on all statement variants and remove default span fallbacks
         Stmt::Return(_) => Span::default(),
         Stmt::If(s) => s.span,
         Stmt::For(s) => s.span,
@@ -2130,6 +2132,20 @@ fn action_metadata_hover(name: &str, metadata: Option<&crate::CompileMetadata>) 
 }
 
 fn position_to_offset(source: &str, position: Position) -> Option<usize> {
+    position_to_offset_with_boundary(source, position, Utf16BoundaryMode::SnapForward)
+}
+
+fn position_to_offset_strict(source: &str, position: Position) -> Option<usize> {
+    position_to_offset_with_boundary(source, position, Utf16BoundaryMode::Strict)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Utf16BoundaryMode {
+    Strict,
+    SnapForward,
+}
+
+fn position_to_offset_with_boundary(source: &str, position: Position, boundary_mode: Utf16BoundaryMode) -> Option<usize> {
     let mut line = 0u32;
     let mut col = 0u32;
     let mut iter = source.char_indices().peekable();
@@ -2152,7 +2168,10 @@ fn position_to_offset(source: &str, position: Position) -> Option<usize> {
                 return Some(idx + ch.len_utf8());
             }
             if line == position.line && col > position.character {
-                return None;
+                return match boundary_mode {
+                    Utf16BoundaryMode::Strict => None,
+                    Utf16BoundaryMode::SnapForward => Some(idx + ch.len_utf8()),
+                };
             }
         }
     }
@@ -2207,6 +2226,7 @@ fn is_ident_char(ch: char) -> bool {
 }
 
 fn word_at_offset(source: &str, offset: usize) -> Option<String> {
+    // AUDIT-FINDING: word extraction slices at caller-provided byte offsets without first checking UTF-8 character boundaries, so any future non-LSP caller passing a raw byte index can panic on multibyte source — severity: MEDIUM — reject non-boundary offsets with source.is_char_boundary before slicing
     if source.is_empty() || offset > source.len() {
         return None;
     }
@@ -2503,6 +2523,7 @@ fn file_uri_to_utf8_path(uri: &str) -> Option<Utf8PathBuf> {
     let path = uri.strip_prefix("file://")?;
     let decoded = percent_decode(path)?;
     let candidate = Utf8PathBuf::from(decoded);
+    // AUDIT-FINDING: file URI decoding falls back to the raw, non-canonical candidate when canonicalization fails, so later package-root discovery can observe unresolved user input instead of a stable filesystem identity — severity: MEDIUM — require canonicalization for existing workspace files and represent missing files separately
     std::fs::canonicalize(&candidate).ok().and_then(|path| Utf8PathBuf::from_path_buf(path).ok()).or(Some(candidate))
 }
 
@@ -2558,7 +2579,8 @@ mod tests {
 
         assert_eq!(offset_to_position(source, b_offset), Position { line: 0, character: 3 });
         assert_eq!(position_to_offset(source, Position { line: 0, character: 3 }), Some(b_offset));
-        assert_eq!(position_to_offset(source, Position { line: 0, character: 2 }), None);
+        assert_eq!(position_to_offset(source, Position { line: 0, character: 2 }), Some(b_offset));
+        assert_eq!(position_to_offset_strict(source, Position { line: 0, character: 2 }), None);
         assert_eq!(offset_to_position(source, beta_offset), Position { line: 1, character: 0 });
         assert_eq!(position_to_offset(source, Position { line: 1, character: 1 }), Some(beta_offset + 'β'.len_utf8()));
     }

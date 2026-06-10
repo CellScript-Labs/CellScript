@@ -2183,7 +2183,9 @@ fi
 python3 - "$RPC_URL" "$REPORT_JSON" "$CKB_REPO" "$CKB_BIN" "$CKB_LOG" "$REPO_ROOT" "$RUN_STATEFUL_SCENARIOS" <<'PY'
 import hashlib
 import json
+import os
 import pathlib
+import re
 import shutil
 import sys
 import time
@@ -2855,6 +2857,12 @@ def ensure_ckb_tx_measure_bin():
     tx_measure_bin = tx_measure_target / "debug" / "cellscript-ckb-tx-measure"
     if tx_measure_bin.exists():
         return tx_measure_bin
+    cargo_env = os.environ.copy()
+    toolchain_file = ckb_repo / "rust-toolchain.toml"
+    if toolchain_file.exists() and "RUSTUP_TOOLCHAIN" not in cargo_env:
+        match = re.search(r'channel\s*=\s*"([^"]+)"', toolchain_file.read_text(encoding="utf-8"))
+        if match:
+            cargo_env["RUSTUP_TOOLCHAIN"] = match.group(1)
     helper_root.mkdir(parents=True, exist_ok=True)
     source_bin = repo_root / "src" / "bin" / "ckb_tx_measure.rs"
     lock_src = repo_root / "tools" / "ckb-tx-measure" / "Cargo.lock"
@@ -2884,6 +2892,17 @@ serde_json = "1.0"
     subprocess.run(
         [
             "cargo",
+            "generate-lockfile",
+            "--manifest-path",
+            str(tx_measure_manifest),
+        ],
+        check=True,
+        cwd=helper_root,
+        env=cargo_env,
+    )
+    subprocess.run(
+        [
+            "cargo",
             "build",
             "--locked",
             "--manifest-path",
@@ -2893,6 +2912,7 @@ serde_json = "1.0"
         ],
         check=True,
         cwd=helper_root,
+        env=cargo_env,
     )
     if not tx_measure_bin.exists():
         raise RuntimeError(f"ckb tx measure helper was not built at {tx_measure_bin}")

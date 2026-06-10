@@ -69,6 +69,11 @@ Registry publishing and registry dependency resolution are intentionally
 experimental/fail-closed until a trusted registry path is ready. Local path
 dependencies are the supported workflow for repeatable local development.
 
+When registry resolution is enabled, `cellc add` must remain a dependency
+resolver, not a code-snippet finder. Anything reachable by `cellc add` must be
+safe to participate in the package, build, deployment, or declared TCB identity
+chain. Template-only material belongs behind copy/scaffold commands instead.
+
 ## Build
 
 Run the package build:
@@ -208,6 +213,70 @@ cellc remove my_lib
 
 `install`, `update`, and normal dependency removal refresh the lockfile so
 direct and transitive local path dependencies stay consistent.
+
+## Registry Resolver Boundaries
+
+CellScript's registry design follows the same split as the package identity
+model:
+
+- package identity answers which source was referenced;
+- build identity answers which artifact and metadata were produced;
+- deployment identity answers which CKB Cell, CellDep, or runtime artifact is
+  being used.
+
+Registry discovery can be broad. It may index CellScript source packages,
+runtime verifiers, deployed CKB artifacts, reproducible artifacts, and even
+external CKB tooling artifacts such as bootstrapper outputs. Resolver profiles
+must stay narrower: an object can be discovered without being installable by
+`cellc add`.
+
+That means registry resolution is stricter than discovery. The future resolver
+path should accept only objects that can be checked fail-closed:
+
+| Kind | `cellc add` | Boundary |
+| --- | --- | --- |
+| `source_package` / library | yes | Source and API identity must be pinned and reproducible. |
+| `runtime_verifier` / `spawn-verifier` | yes | TCB object; requires verifier ID, ABI, artifact identity, build profile, security status, and production deployment pins when used in production. |
+| `deployable_contract` | yes | Must expose build/audit/deployment identity, not just source text. |
+| `deployed_artifact_record` | yes | Must bind network, OutPoint, dep type, code/data hash, and status. |
+| `reproducible_artifact` | yes, if artifact-safe | Must bind source hash, build profile hash, artifact hash, and compatibility profile. |
+| `protocol_profile_library` | yes, if resolver-safe | Must be a real package with checkable source/schema/API semantics. |
+| `template`, `cookbook`, `protocol_skeleton`, scaffold | no | Copy-only starting material; after copying, it becomes local project code. |
+
+The rule is intentionally blunt:
+
+```text
+Discovery can be broad; dependency resolution is narrow.
+
+Anything reachable by cellc add must be dependency-safe, artifact-safe,
+deployment-fact-safe, or declared-TCB-safe.
+
+Anything scaffold-only must be copied, not resolved.
+```
+
+For example, a BIP340 verifier package can have no business parameters and
+still be resolver-safe because it is a runtime verifier artifact. Its manifest
+or registry record must identify the verifier capability, IPC ABI, artifact
+hashes, build profile, TCB/security status, and any production CellDep pins.
+
+A NovaSeal starter project, by contrast, is not dependency-safe merely because
+it contains useful `.cell` code. If users are expected to copy it and edit terms,
+authorities, manifests, or deployment pins, it belongs in a cookbook or template
+flow such as:
+
+```bash
+cellc new my_agreement --template novaseal/mvb-starter
+cellc cookbook copy novaseal/agreement-profile ./my-agreement
+```
+
+It should not be installed with:
+
+```bash
+cellc add novaseal/mvb-starter
+```
+
+This keeps the registry as a verifiable dependency and artifact discovery layer,
+not a general examples marketplace.
 
 ## Package Information
 

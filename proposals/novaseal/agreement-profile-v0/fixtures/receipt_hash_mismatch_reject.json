@@ -1,0 +1,9 @@
+{
+  "schema": "novaseal-agreement-fixture-v0.1",
+  "fixture": "receipt_hash_mismatch_reject",
+  "action": "originate_agreement / terminal paths",
+  "expected": "rejected",
+  "coverage": "resolved-transaction-covered",
+  "reject_guard": "materialized NovaAgreementReceiptV0.new_latest_receipt_hash must equal the witness receipt_hash",
+  "description": "A terminal transaction whose materialized receipt output carries a different new_latest_receipt_hash than the witness receipt_hash must reject."
+}
