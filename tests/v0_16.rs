@@ -117,6 +117,56 @@ fn cellc_command() -> Command {
     Command::new(env!("CARGO_BIN_EXE_cellc"))
 }
 
+fn write_manifest_bound_spawn_package(root: &Utf8Path) {
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("Cell.toml"),
+        r#"
+[package]
+name = "spawn_bound"
+version = "0.1.0"
+entry = "src/main.cell"
+
+[build]
+target_profile = "ckb"
+
+[[deploy.ckb.cell_deps]]
+name = "secp256k1_verifier"
+out_point = "0x3333333333333333333333333333333333333333333333333333333333333333:1"
+dep_type = "code"
+hash_type = "data1"
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("src/main.cell"),
+        r#"
+module spawn_bound::main
+
+action delegate() -> u64
+where
+    return spawn("secp256k1_verifier")
+"#,
+    )
+    .unwrap();
+}
+
+fn manifest_bound_spawn_tx(evidence: Vec<serde_json::Value>) -> serde_json::Value {
+    json!({
+        "inputs": [],
+        "outputs": [],
+        "cell_deps": [{
+            "name": "secp256k1_verifier",
+            "dep_type": "code",
+            "tx_hash": "0x3333333333333333333333333333333333333333333333333333333333333333",
+            "index": 1,
+            "hash_type": "data1"
+        }],
+        "witnesses": [],
+        "builder_assumption_evidence": evidence
+    })
+}
+
 fn run_success_json(mut command: Command) -> serde_json::Value {
     let output = command.output().unwrap();
     assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
@@ -127,6 +177,12 @@ fn run_failure_json(mut command: Command) -> serde_json::Value {
     let output = command.output().unwrap();
     assert!(!output.status.success(), "command must fail");
     serde_json::from_slice(&output.stdout).unwrap()
+}
+
+fn run_failure(mut command: Command) -> std::process::Output {
+    let output = command.output().unwrap();
+    assert!(!output.status.success(), "command must fail");
+    output
 }
 
 #[test]
@@ -158,6 +214,65 @@ fn strict_0_16_rejects_metadata_only_proof_plan_gaps() {
 
     assert!(err.message.contains("ProofPlan soundness check failed"), "unexpected error: {}", err.message);
     assert!(err.message.contains("PP0150"), "unexpected error: {}", err.message);
+}
+
+#[test]
+fn cli_v0_16_compile_workflows_reject_metadata_only_proof_plan_gaps() {
+    let temp = tempdir().unwrap();
+    let source = temp.path().join("metadata_only.cell");
+    let bundle_dir = temp.path().join("audit-bundle");
+    std::fs::write(&source, METADATA_ONLY_INVARIANT).unwrap();
+
+    for command_name in ["explain-assumptions", "solve-tx", "profile"] {
+        let mut command = cellc_command();
+        command.arg(command_name).arg(&source).arg("--target-profile").arg("ckb").arg("--json");
+        let output = run_failure(command);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("PP0150"), "unexpected {command_name} stderr: {stderr}");
+    }
+
+    let mut audit_bundle = cellc_command();
+    audit_bundle.arg("audit-bundle").arg(&source).arg("--target-profile").arg("ckb").arg("--output").arg(&bundle_dir).arg("--json");
+    let output = run_failure(audit_bundle);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("PP0150"), "unexpected audit-bundle stderr: {stderr}");
+}
+
+#[test]
+fn cli_validate_and_trace_reject_non_strict_metadata_only_proof_plan_gaps() {
+    let temp = tempdir().unwrap();
+    let metadata_path = temp.path().join("metadata-only.meta.json");
+    let tx_path = temp.path().join("tx.json");
+    let result =
+        compile(METADATA_ONLY_INVARIANT, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() })
+            .expect("non-strict compile keeps metadata-only invariant as audit metadata");
+    std::fs::write(&metadata_path, serde_json::to_vec_pretty(&result.metadata).unwrap()).unwrap();
+    std::fs::write(&tx_path, serde_json::to_vec_pretty(&json!({"inputs": [], "outputs": []})).unwrap()).unwrap();
+
+    let mut validate = cellc_command();
+    validate.arg("validate-tx").arg("--against").arg(&metadata_path).arg(&tx_path).arg("--json");
+    let validate_json = run_failure_json(validate);
+    assert_eq!(validate_json["status"], "failed");
+    assert_eq!(validate_json["proof_plan_soundness"]["status"], "failed");
+    assert!(
+        validate_json["proof_plan_soundness"]["issues"]
+            .as_array()
+            .is_some_and(|issues| issues.iter().any(|issue| issue["code"] == "PP0150")),
+        "{validate_json:#?}"
+    );
+
+    let mut trace = cellc_command();
+    trace.arg("trace-tx").arg("--against").arg(&metadata_path).arg(&tx_path).arg("--json");
+    let trace_json = run_failure_json(trace);
+    assert_eq!(trace_json["status"], "failed");
+    assert_eq!(trace_json["schema"], "cellscript-tx-trace-v0.16");
+    assert_eq!(trace_json["proof_plan_soundness"]["status"], "failed");
+    assert!(
+        trace_json["proof_plan_soundness"]["issues"]
+            .as_array()
+            .is_some_and(|issues| issues.iter().any(|issue| issue["code"] == "PP0150")),
+        "{trace_json:#?}"
+    );
 }
 
 #[test]
@@ -304,37 +419,7 @@ where
 fn strict_0_16_accepts_manifest_bound_spawn_target_cell_dep() {
     let dir = tempdir().unwrap();
     let root = Utf8Path::from_path(dir.path()).unwrap();
-    std::fs::create_dir_all(root.join("src")).unwrap();
-    std::fs::write(
-        root.join("Cell.toml"),
-        r#"
-[package]
-name = "spawn_bound"
-version = "0.1.0"
-entry = "src/main.cell"
-
-[build]
-target_profile = "ckb"
-
-[[deploy.ckb.cell_deps]]
-name = "secp256k1_verifier"
-out_point = "0x3333333333333333333333333333333333333333333333333333333333333333:1"
-dep_type = "code"
-hash_type = "data1"
-"#,
-    )
-    .unwrap();
-    std::fs::write(
-        root.join("src/main.cell"),
-        r#"
-module spawn_bound::main
-
-action delegate() -> u64
-where
-    return spawn("secp256k1_verifier")
-"#,
-    )
-    .unwrap();
+    write_manifest_bound_spawn_package(root);
 
     let result = cellscript::compile_path(
         root,
@@ -668,32 +753,29 @@ where
 #[test]
 fn cli_explain_assumptions_and_validate_tx_are_machine_readable() {
     let temp = tempdir().unwrap();
-    let source = temp.path().join("identity.cell");
-    std::fs::write(&source, IDENTITY_CREATE_UNIQUE).unwrap();
+    let root = Utf8Path::from_path(temp.path()).unwrap();
+    write_manifest_bound_spawn_package(root);
 
     let mut explain = cellc_command();
-    explain.arg("explain-assumptions").arg(&source).arg("--json");
+    explain.arg("explain-assumptions").arg(root.as_std_path()).arg("--json");
     let explain_json = run_success_json(explain);
     assert_eq!(explain_json["status"], "ok");
     assert!(explain_json["assumption_count"].as_u64().unwrap() > 0);
 
-    let result =
-        compile(IDENTITY_CREATE_UNIQUE, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() })
-            .unwrap();
-    let evidence = result.metadata.runtime.builder_assumptions.iter().map(evidence_for).collect::<Vec<_>>();
-    let metadata = temp.path().join("identity.meta.json");
-    let tx = temp.path().join("tx.json");
-    std::fs::write(&metadata, serde_json::to_vec_pretty(&result.metadata).unwrap()).unwrap();
-    std::fs::write(
-        &tx,
-        serde_json::to_vec_pretty(&json!({
-            "inputs": [{}],
-            "outputs": [{}],
-            "builder_assumption_evidence": evidence
-        }))
-        .unwrap(),
+    let result = cellscript::compile_path(
+        root,
+        CompileOptions {
+            target_profile: Some("ckb".to_string()),
+            primitive_compat: Some("0.16".to_string()),
+            ..CompileOptions::default()
+        },
     )
     .unwrap();
+    let evidence = result.metadata.runtime.builder_assumptions.iter().map(evidence_for).collect::<Vec<_>>();
+    let metadata = temp.path().join("spawn.meta.json");
+    let tx = temp.path().join("tx.json");
+    std::fs::write(&metadata, serde_json::to_vec_pretty(&result.metadata).unwrap()).unwrap();
+    std::fs::write(&tx, serde_json::to_vec_pretty(&manifest_bound_spawn_tx(evidence)).unwrap()).unwrap();
 
     let mut validate = cellc_command();
     validate.arg("validate-tx").arg("--against").arg(&metadata).arg(&tx).arg("--json");
@@ -741,38 +823,35 @@ fn cli_verify_deploy_rejects_tampered_plan_integrity() {
 #[test]
 fn cli_v0_16_tooling_outputs_are_machine_readable_and_schema_bound() {
     let temp = tempdir().unwrap();
-    let source = temp.path().join("identity.cell");
-    let metadata_path = temp.path().join("identity.meta.json");
+    let root = Utf8Path::from_path(temp.path()).unwrap();
+    write_manifest_bound_spawn_package(root);
+    let metadata_path = temp.path().join("spawn.meta.json");
     let old_metadata_path = temp.path().join("old.meta.json");
     let new_metadata_path = temp.path().join("new.meta.json");
     let tx_path = temp.path().join("tx.json");
     let old_deploy_path = temp.path().join("old.deploy.json");
     let new_deploy_path = temp.path().join("new.deploy.json");
     let bundle_dir = temp.path().join("audit-bundle");
-    std::fs::write(&source, IDENTITY_CREATE_UNIQUE).unwrap();
 
-    let result =
-        compile(IDENTITY_CREATE_UNIQUE, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() })
-            .unwrap();
+    let result = cellscript::compile_path(
+        root,
+        CompileOptions {
+            target_profile: Some("ckb".to_string()),
+            primitive_compat: Some("0.16".to_string()),
+            ..CompileOptions::default()
+        },
+    )
+    .unwrap();
     let evidence = result.metadata.runtime.builder_assumptions.iter().map(evidence_for).collect::<Vec<_>>();
     std::fs::write(&metadata_path, serde_json::to_vec_pretty(&result.metadata).unwrap()).unwrap();
     std::fs::write(&old_metadata_path, serde_json::to_vec_pretty(&result.metadata).unwrap()).unwrap();
     let mut changed_metadata = result.metadata.clone();
     changed_metadata.runtime.proof_plan[0].coverage.push("unit-test-extra-coverage".to_string());
     std::fs::write(&new_metadata_path, serde_json::to_vec_pretty(&changed_metadata).unwrap()).unwrap();
-    std::fs::write(
-        &tx_path,
-        serde_json::to_vec_pretty(&json!({
-            "inputs": [{}],
-            "outputs": [{}],
-            "builder_assumption_evidence": evidence
-        }))
-        .unwrap(),
-    )
-    .unwrap();
+    std::fs::write(&tx_path, serde_json::to_vec_pretty(&manifest_bound_spawn_tx(evidence)).unwrap()).unwrap();
 
     let mut solve = cellc_command();
-    solve.arg("solve-tx").arg(&source).arg("--target-profile").arg("ckb").arg("--json");
+    solve.arg("solve-tx").arg(root.as_std_path()).arg("--target-profile").arg("ckb").arg("--json");
     let solve_json = run_success_json(solve);
     assert_eq!(solve_json["status"], "template");
     assert!(solve_json["transaction_plan"]["builder_assumption_evidence_requirements"]
@@ -781,7 +860,7 @@ fn cli_v0_16_tooling_outputs_are_machine_readable_and_schema_bound() {
     assert!(solve_json["limitations"].as_array().is_some_and(|limitations| !limitations.is_empty()));
 
     let mut profile = cellc_command();
-    profile.arg("profile").arg(&source).arg("--target-profile").arg("ckb").arg("--json");
+    profile.arg("profile").arg(root.as_std_path()).arg("--target-profile").arg("ckb").arg("--json");
     let profile_json = run_success_json(profile);
     assert_eq!(profile_json["schema"], "cellscript-profile-v0.16");
     let proof_records = profile_json["proof_plan_records"].as_array().expect("profile proof_plan_records");
@@ -789,7 +868,7 @@ fn cli_v0_16_tooling_outputs_are_machine_readable_and_schema_bound() {
     assert!(proof_records.iter().all(|record| record["feature"].as_str().is_some()), "{profile_json:#?}");
 
     let mut lock_deps = cellc_command();
-    lock_deps.arg("lock-deps").arg(&source).arg("--target-profile").arg("ckb").arg("--json");
+    lock_deps.arg("lock-deps").arg(root.as_std_path()).arg("--target-profile").arg("ckb").arg("--json");
     let lock_deps_json = run_success_json(lock_deps);
     assert_eq!(lock_deps_json["schema"], "cellscript-dependency-lock-v0.16");
 
@@ -814,7 +893,14 @@ fn cli_v0_16_tooling_outputs_are_machine_readable_and_schema_bound() {
     assert!(trace_json["steps"].as_array().is_some_and(|steps| !steps.is_empty()), "{trace_json:#?}");
 
     let mut audit_bundle = cellc_command();
-    audit_bundle.arg("audit-bundle").arg(&source).arg("--target-profile").arg("ckb").arg("--output").arg(&bundle_dir).arg("--json");
+    audit_bundle
+        .arg("audit-bundle")
+        .arg(root.as_std_path())
+        .arg("--target-profile")
+        .arg("ckb")
+        .arg("--output")
+        .arg(&bundle_dir)
+        .arg("--json");
     let audit_bundle_json = run_success_json(audit_bundle);
     assert_eq!(audit_bundle_json["status"], "ok");
     assert!(bundle_dir.join("audit-bundle.json").exists());
@@ -823,7 +909,7 @@ fn cli_v0_16_tooling_outputs_are_machine_readable_and_schema_bound() {
     let mut deploy_old = cellc_command();
     let deploy_old = deploy_old
         .arg("deploy-plan")
-        .arg(&source)
+        .arg(root.as_std_path())
         .arg("--target-profile")
         .arg("ckb")
         .arg("--output")

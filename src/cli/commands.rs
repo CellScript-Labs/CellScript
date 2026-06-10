@@ -7,7 +7,7 @@ use crate::{
     compile_path, compile_path_with_entry_action, compile_path_with_entry_lock, default_metadata_path_for_artifact,
     default_output_path_for_input, load_modules_for_input, resolve_input_path, validate_artifact_metadata,
     validate_source_units_on_disk_under, validate_source_units_primitive_mode_under, ArtifactFormat, CompileMetadata, CompileOptions,
-    EntryWitnessArg, ParamMetadata, ProofPlanMetadata, TargetProfile, ENTRY_WITNESS_ABI,
+    EntryWitnessArg, ParamMetadata, ProofPlanMetadata, ProofPlanSoundnessReport, TargetProfile, ENTRY_WITNESS_ABI,
 };
 use camino::{Utf8Path, Utf8PathBuf};
 #[cfg(feature = "vm-runner")]
@@ -30,6 +30,7 @@ const NOVASEAL_PROFILE_CERTIFICATION_SCHEMA: &str = "novaseal-profile-certificat
 const NOVASEAL_AGREEMENT_PROFILE: &str = "agreement-profile-v0";
 const NOVASEAL_CANONICAL_SCHEMA: &str = "NovaSealCanonicalV0";
 const NOVASEAL_PROFILE_CERTIFICATION_GATE: &str = "agreement_profile_public_ecosystem_certification_v0";
+const STRICT_V0_16_PRIMITIVE_COMPAT: &str = "0.16";
 
 #[derive(Debug)]
 pub enum Command {
@@ -255,6 +256,7 @@ pub struct ExplainAssumptionsArgs {
     pub input: Option<PathBuf>,
     pub target: Option<String>,
     pub target_profile: Option<String>,
+    pub primitive_compat: Option<String>,
     pub json: bool,
 }
 
@@ -287,6 +289,7 @@ pub struct ProfileArgs {
     pub entry: Option<String>,
     pub target: Option<String>,
     pub target_profile: Option<String>,
+    pub primitive_compat: Option<String>,
     pub json: bool,
 }
 
@@ -294,6 +297,7 @@ pub struct ProfileArgs {
 pub struct TraceTxArgs {
     pub against: PathBuf,
     pub tx: PathBuf,
+    pub primitive_compat: Option<String>,
     pub json: bool,
 }
 
@@ -303,6 +307,7 @@ pub struct AuditBundleArgs {
     pub output: Option<PathBuf>,
     pub target: Option<String>,
     pub target_profile: Option<String>,
+    pub primitive_compat: Option<String>,
     pub json: bool,
 }
 
@@ -320,6 +325,7 @@ pub struct CertifyArgs {
 pub struct ValidateTxArgs {
     pub against: PathBuf,
     pub tx: PathBuf,
+    pub primitive_compat: Option<String>,
     pub json: bool,
 }
 
@@ -329,6 +335,7 @@ pub struct SolveTxArgs {
     pub output: Option<PathBuf>,
     pub target: Option<String>,
     pub target_profile: Option<String>,
+    pub primitive_compat: Option<String>,
     pub json: bool,
 }
 
@@ -1563,17 +1570,8 @@ impl CommandExecutor {
     }
 
     fn explain_assumptions(args: ExplainAssumptionsArgs) -> Result<()> {
-        let result = compile_cli_input(
-            args.input.as_ref(),
-            CompileOptions {
-                opt_level: 0,
-                output: None,
-                debug: false,
-                target: args.target,
-                target_profile: args.target_profile,
-                primitive_compat: None,
-            },
-        )?;
+        let compile_options = metadata_workflow_compile_options(args.target, args.target_profile, args.primitive_compat);
+        let result = compile_cli_input(args.input.as_ref(), compile_options)?;
         let assumptions = result.metadata.runtime.builder_assumptions.clone();
         let summary = serde_json::json!({
             "status": "ok",
@@ -1597,8 +1595,25 @@ impl CommandExecutor {
     }
 
     fn validate_tx(args: ValidateTxArgs) -> Result<()> {
+        validate_metadata_workflow_primitive_compat(args.primitive_compat.as_deref())?;
         let metadata = read_metadata_json(&args.against)?;
         let tx = read_json_value(&args.tx)?;
+        if let Some(soundness) = strict_v0_16_soundness_report_for_mode(&metadata, args.primitive_compat.as_deref()) {
+            let error_message = strict_v0_16_soundness_error_message(&soundness);
+            let summary = serde_json::json!({
+                "status": "failed",
+                "metadata": args.against.display().to_string(),
+                "tx": args.tx.display().to_string(),
+                "proof_plan_soundness": soundness,
+            });
+            if args.json {
+                print_json(&summary)?;
+            } else {
+                println!("Transaction validation: failed");
+                println!("  Strict v0.16 ProofPlan soundness: failed");
+            }
+            return Err(crate::error::CompileError::without_span(error_message));
+        }
         let report = crate::assumptions::validate_transaction_against_metadata(&metadata, &tx);
         let summary = serde_json::json!({
             "status": report.status,
@@ -1618,17 +1633,8 @@ impl CommandExecutor {
     }
 
     fn solve_tx(args: SolveTxArgs) -> Result<()> {
-        let result = compile_cli_input(
-            args.input.as_ref(),
-            CompileOptions {
-                opt_level: 0,
-                output: None,
-                debug: false,
-                target: args.target,
-                target_profile: args.target_profile,
-                primitive_compat: None,
-            },
-        )?;
+        let compile_options = metadata_workflow_compile_options(args.target, args.target_profile, args.primitive_compat);
+        let result = compile_cli_input(args.input.as_ref(), compile_options)?;
         let template = transaction_solver_template(&result.metadata);
         write_or_print_json(args.output.as_ref(), &template, args.json, "Transaction solver template generated")?;
         Ok(())
@@ -1704,25 +1710,34 @@ impl CommandExecutor {
     }
 
     fn profile(args: ProfileArgs) -> Result<()> {
-        let result = compile_cli_input(
-            args.input.as_ref(),
-            CompileOptions {
-                opt_level: 0,
-                output: None,
-                debug: false,
-                target: args.target,
-                target_profile: args.target_profile,
-                primitive_compat: None,
-            },
-        )?;
+        let compile_options = metadata_workflow_compile_options(args.target, args.target_profile, args.primitive_compat);
+        let result = compile_cli_input(args.input.as_ref(), compile_options)?;
         let report = profile_report_json(&result.metadata, args.entry.as_deref());
         print_or_text_json(args.json, &report, "Profile")?;
         Ok(())
     }
 
     fn trace_tx(args: TraceTxArgs) -> Result<()> {
+        validate_metadata_workflow_primitive_compat(args.primitive_compat.as_deref())?;
         let metadata = read_metadata_json(&args.against)?;
         let tx = read_json_value(&args.tx)?;
+        if let Some(soundness) = strict_v0_16_soundness_report_for_mode(&metadata, args.primitive_compat.as_deref()) {
+            let error_message = strict_v0_16_soundness_error_message(&soundness);
+            let trace = serde_json::json!({
+                "status": "failed",
+                "schema": "cellscript-tx-trace-v0.16",
+                "module": metadata.module,
+                "proof_plan_soundness": soundness,
+                "steps": [],
+            });
+            if args.json {
+                print_json(&trace)?;
+            } else {
+                println!("Transaction trace: failed");
+                println!("  Strict v0.16 ProofPlan soundness: failed");
+            }
+            return Err(crate::error::CompileError::without_span(error_message));
+        }
         let validation = crate::assumptions::validate_transaction_against_metadata(&metadata, &tx);
         let trace = trace_tx_report_json(&metadata, &validation);
         if args.json {
@@ -1737,17 +1752,8 @@ impl CommandExecutor {
     }
 
     fn audit_bundle(args: AuditBundleArgs) -> Result<()> {
-        let result = compile_cli_input(
-            args.input.as_ref(),
-            CompileOptions {
-                opt_level: 0,
-                output: None,
-                debug: false,
-                target: args.target,
-                target_profile: args.target_profile,
-                primitive_compat: None,
-            },
-        )?;
+        let compile_options = metadata_workflow_compile_options(args.target, args.target_profile, args.primitive_compat);
+        let result = compile_cli_input(args.input.as_ref(), compile_options)?;
         let output = args.output.unwrap_or_else(|| PathBuf::from("target/cellscript-audit-bundle"));
         std::fs::create_dir_all(&output)?;
         let bundle = audit_bundle_json(&result.metadata);
@@ -2961,6 +2967,49 @@ fn print_or_text_json(json: bool, value: &serde_json::Value, label: &str) -> Res
     } else {
         println!("{}: {}", label, value["status"].as_str().unwrap_or("ok"));
         Ok(())
+    }
+}
+
+fn metadata_workflow_compile_options(
+    target: Option<String>,
+    target_profile: Option<String>,
+    primitive_compat: Option<String>,
+) -> CompileOptions {
+    CompileOptions { opt_level: 0, output: None, debug: false, target, target_profile, primitive_compat }
+}
+
+fn validate_metadata_workflow_primitive_compat(primitive_compat: Option<&str>) -> Result<()> {
+    if primitive_compat.is_some_and(|mode| !matches!(mode, "0.14" | "0.15" | "0.16")) {
+        return Err(crate::error::CompileError::without_span(format!(
+            "unsupported primitive compatibility mode '{}'; supported values: 0.14, 0.15, 0.16",
+            primitive_compat.unwrap_or_default()
+        )));
+    }
+    Ok(())
+}
+
+fn strict_v0_16_soundness_report_for_mode(
+    metadata: &CompileMetadata,
+    primitive_compat: Option<&str>,
+) -> Option<ProofPlanSoundnessReport> {
+    if primitive_compat != Some(STRICT_V0_16_PRIMITIVE_COMPAT) {
+        return None;
+    }
+    let soundness = crate::proof_plan::soundness::check_metadata(metadata, true);
+    (soundness.status != "passed").then_some(soundness)
+}
+
+fn strict_v0_16_soundness_error_message(report: &ProofPlanSoundnessReport) -> String {
+    let messages = report
+        .issues
+        .iter()
+        .filter(|issue| issue.severity == "error")
+        .map(|issue| format!("{} {}:{} - {}", issue.code, issue.origin, issue.feature, issue.message))
+        .collect::<Vec<_>>();
+    if messages.is_empty() {
+        "metadata fails strict v0.16 ProofPlan soundness".to_string()
+    } else {
+        format!("metadata fails strict v0.16 ProofPlan soundness:\n  - {}", messages.join("\n  - "))
     }
 }
 
@@ -5495,6 +5544,20 @@ impl CliParser {
                     .arg(Arg::new("input").value_name("INPUT").help("Input .cell file, package directory, or Cell.toml"))
                     .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
                     .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
+                    .arg(
+                        Arg::new("primitive-compat")
+                            .long("primitive-compat")
+                            .value_name("VERSION")
+                            .conflicts_with("primitive-strict")
+                            .help("Accept primitive syntax from a previous version (e.g. 0.14) with migration hints"),
+                    )
+                    .arg(
+                        Arg::new("primitive-strict")
+                            .long("primitive-strict")
+                            .value_name("VERSION")
+                            .conflicts_with("primitive-compat")
+                            .help("Require primitive syntax from a specific version (e.g. 0.15 or 0.16), reject legacy forms"),
+                    )
                     .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
             )
             .subcommand(
@@ -5533,6 +5596,20 @@ impl CliParser {
                     .arg(Arg::new("entry").long("entry").value_name("NAME").help("Limit profile to one action or lock"))
                     .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
                     .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
+                    .arg(
+                        Arg::new("primitive-compat")
+                            .long("primitive-compat")
+                            .value_name("VERSION")
+                            .conflicts_with("primitive-strict")
+                            .help("Accept primitive syntax from a previous version (e.g. 0.14) with migration hints"),
+                    )
+                    .arg(
+                        Arg::new("primitive-strict")
+                            .long("primitive-strict")
+                            .value_name("VERSION")
+                            .conflicts_with("primitive-compat")
+                            .help("Require primitive syntax from a specific version (e.g. 0.15 or 0.16), reject legacy forms"),
+                    )
                     .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
             )
             .subcommand(
@@ -5540,6 +5617,20 @@ impl CliParser {
                     .about("Trace a transaction JSON against v0.16 builder assumptions")
                     .arg(Arg::new("against").long("against").value_name("METADATA").required(true).help("Metadata JSON"))
                     .arg(Arg::new("tx").value_name("TX_JSON").required(true).help("Transaction JSON"))
+                    .arg(
+                        Arg::new("primitive-compat")
+                            .long("primitive-compat")
+                            .value_name("VERSION")
+                            .conflicts_with("primitive-strict")
+                            .help("Accept primitive metadata compatibility mode"),
+                    )
+                    .arg(
+                        Arg::new("primitive-strict")
+                            .long("primitive-strict")
+                            .value_name("VERSION")
+                            .conflicts_with("primitive-compat")
+                            .help("Require strict metadata assurance mode, e.g. 0.16"),
+                    )
                     .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
             )
             .subcommand(
@@ -5549,6 +5640,20 @@ impl CliParser {
                     .arg(Arg::new("output").long("output").short('o').value_name("DIR").help("Output directory"))
                     .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
                     .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
+                    .arg(
+                        Arg::new("primitive-compat")
+                            .long("primitive-compat")
+                            .value_name("VERSION")
+                            .conflicts_with("primitive-strict")
+                            .help("Accept primitive syntax from a previous version (e.g. 0.14) with migration hints"),
+                    )
+                    .arg(
+                        Arg::new("primitive-strict")
+                            .long("primitive-strict")
+                            .value_name("VERSION")
+                            .conflicts_with("primitive-compat")
+                            .help("Require primitive syntax from a specific version (e.g. 0.15 or 0.16), reject legacy forms"),
+                    )
                     .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
             )
             .subcommand(
@@ -5593,6 +5698,20 @@ impl CliParser {
                     .about("Validate a transaction JSON against v0.16 builder assumptions before signing")
                     .arg(Arg::new("against").long("against").value_name("METADATA").required(true).help("Metadata JSON"))
                     .arg(Arg::new("tx").value_name("TX_JSON").required(true).help("Transaction JSON"))
+                    .arg(
+                        Arg::new("primitive-compat")
+                            .long("primitive-compat")
+                            .value_name("VERSION")
+                            .conflicts_with("primitive-strict")
+                            .help("Accept primitive metadata compatibility mode"),
+                    )
+                    .arg(
+                        Arg::new("primitive-strict")
+                            .long("primitive-strict")
+                            .value_name("VERSION")
+                            .conflicts_with("primitive-compat")
+                            .help("Require strict metadata assurance mode, e.g. 0.16"),
+                    )
                     .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
             )
             .subcommand(
@@ -5602,6 +5721,20 @@ impl CliParser {
                     .arg(Arg::new("output").long("output").short('o').value_name("FILE").help("Write JSON solver template"))
                     .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
                     .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
+                    .arg(
+                        Arg::new("primitive-compat")
+                            .long("primitive-compat")
+                            .value_name("VERSION")
+                            .conflicts_with("primitive-strict")
+                            .help("Accept primitive syntax from a previous version (e.g. 0.14) with migration hints"),
+                    )
+                    .arg(
+                        Arg::new("primitive-strict")
+                            .long("primitive-strict")
+                            .value_name("VERSION")
+                            .conflicts_with("primitive-compat")
+                            .help("Require primitive syntax from a specific version (e.g. 0.15 or 0.16), reject legacy forms"),
+                    )
                     .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
             )
             .subcommand(
@@ -5940,6 +6073,10 @@ impl CliParser {
                 input: m.get_one::<String>("input").map(PathBuf::from),
                 target: m.get_one::<String>("target").cloned(),
                 target_profile: m.get_one::<String>("target-profile").cloned(),
+                primitive_compat: resolve_metadata_workflow_primitive_compat(
+                    m.get_one::<String>("primitive-compat").cloned(),
+                    m.get_one::<String>("primitive-strict").cloned(),
+                ),
                 json: m.get_flag("json"),
             }),
             Some(("explain-generics", m)) => Command::ExplainGenerics(ExplainGenericsArgs {
@@ -5964,11 +6101,19 @@ impl CliParser {
                 entry: m.get_one::<String>("entry").cloned(),
                 target: m.get_one::<String>("target").cloned(),
                 target_profile: m.get_one::<String>("target-profile").cloned(),
+                primitive_compat: resolve_metadata_workflow_primitive_compat(
+                    m.get_one::<String>("primitive-compat").cloned(),
+                    m.get_one::<String>("primitive-strict").cloned(),
+                ),
                 json: m.get_flag("json"),
             }),
             Some(("trace-tx", m)) => Command::TraceTx(TraceTxArgs {
                 against: m.get_one::<String>("against").map(PathBuf::from).expect("required metadata"),
                 tx: m.get_one::<String>("tx").map(PathBuf::from).expect("required transaction JSON"),
+                primitive_compat: resolve_metadata_workflow_primitive_compat(
+                    m.get_one::<String>("primitive-compat").cloned(),
+                    m.get_one::<String>("primitive-strict").cloned(),
+                ),
                 json: m.get_flag("json"),
             }),
             Some(("audit-bundle", m)) => Command::AuditBundle(AuditBundleArgs {
@@ -5976,6 +6121,10 @@ impl CliParser {
                 output: m.get_one::<String>("output").map(PathBuf::from),
                 target: m.get_one::<String>("target").cloned(),
                 target_profile: m.get_one::<String>("target-profile").cloned(),
+                primitive_compat: resolve_metadata_workflow_primitive_compat(
+                    m.get_one::<String>("primitive-compat").cloned(),
+                    m.get_one::<String>("primitive-strict").cloned(),
+                ),
                 json: m.get_flag("json"),
             }),
             Some(("certify", m)) => Command::Certify(CertifyArgs {
@@ -5989,6 +6138,10 @@ impl CliParser {
             Some(("validate-tx", m)) => Command::ValidateTx(ValidateTxArgs {
                 against: m.get_one::<String>("against").map(PathBuf::from).expect("required metadata"),
                 tx: m.get_one::<String>("tx").map(PathBuf::from).expect("required transaction JSON"),
+                primitive_compat: resolve_metadata_workflow_primitive_compat(
+                    m.get_one::<String>("primitive-compat").cloned(),
+                    m.get_one::<String>("primitive-strict").cloned(),
+                ),
                 json: m.get_flag("json"),
             }),
             Some(("solve-tx", m)) => Command::SolveTx(SolveTxArgs {
@@ -5996,6 +6149,10 @@ impl CliParser {
                 output: m.get_one::<String>("output").map(PathBuf::from),
                 target: m.get_one::<String>("target").cloned(),
                 target_profile: m.get_one::<String>("target-profile").cloned(),
+                primitive_compat: resolve_metadata_workflow_primitive_compat(
+                    m.get_one::<String>("primitive-compat").cloned(),
+                    m.get_one::<String>("primitive-strict").cloned(),
+                ),
                 json: m.get_flag("json"),
             }),
             Some(("deploy-plan", m)) => Command::DeployPlan(DeployPlanArgs {
@@ -6093,6 +6250,10 @@ fn resolve_primitive_compat(compat: Option<String>, strict: Option<String>) -> O
     } else {
         compat
     }
+}
+
+fn resolve_metadata_workflow_primitive_compat(compat: Option<String>, strict: Option<String>) -> Option<String> {
+    resolve_primitive_compat(compat, strict).or_else(|| Some(STRICT_V0_16_PRIMITIVE_COMPAT.to_string()))
 }
 
 #[cfg(test)]

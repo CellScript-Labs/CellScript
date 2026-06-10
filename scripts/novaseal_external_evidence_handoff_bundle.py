@@ -23,6 +23,8 @@ DEFAULT_EXTERNAL_ATTESTATION_ADAPTER = ROOT / "target/novaseal-external-attestat
 DEFAULT_OUTPUT = ROOT / "target/novaseal-external-evidence-handoff-bundle.json"
 
 REPORT_PERSON = b"NovaExtHandoff"
+HANDOFF_HASH_ALGORITHM = "blake2b-256(person=NovaExtHandoff)"
+HANDOFF_SELF_HASH_FIELDS = ("bundle_hash", "bundle_hash_algorithm")
 
 PUBLIC_BTC_SPV_EVIDENCE = "proposals/novaseal/v0-mvp-skeleton/proofs/public_btc_spv_evidence.json"
 PUBLIC_CELLDEP_ATTESTATION = "proposals/novaseal/v0-mvp-skeleton/proofs/public_shared_cell_dep_attestation.json"
@@ -129,6 +131,11 @@ def report_hash(label: str, value: Any) -> str:
     h.update(b"\x00")
     h.update(canonical_json(value))
     return hex0x(h.digest())
+
+
+def handoff_reference_hash(value: dict[str, Any]) -> str:
+    payload = {key: item for key, item in value.items() if key not in HANDOFF_SELF_HASH_FIELDS}
+    return report_hash("external_evidence_handoff_bundle", payload)
 
 
 def source_tree_hash(paths: list[str]) -> str:
@@ -339,7 +346,7 @@ def build_report(btc_spv_adapter: dict[str, Any], external_attestation_adapter: 
     ]
     production_outputs = [case["production_output"] for case in cases]
     status = "passed" if all(case["status"] == "passed" for case in cases) else "failed"
-    return {
+    report = {
         "schema": "novaseal-external-evidence-handoff-bundle-v0.1",
         "status": status,
         "handoff_status": "request_bundle_ready_external_evidence_required",
@@ -358,6 +365,9 @@ def build_report(btc_spv_adapter: dict[str, Any], external_attestation_adapter: 
         },
         "cases": cases,
     }
+    report["bundle_hash_algorithm"] = HANDOFF_HASH_ALGORITHM
+    report["bundle_hash"] = handoff_reference_hash(report)
+    return report
 
 
 def main() -> int:

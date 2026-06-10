@@ -1268,7 +1268,7 @@ impl<'a> TypeChecker<'a> {
         }
 
         if read.contains('<') {
-            let Some((type_name, field_name)) = invariant_read_schema_type_and_field(read) else {
+            let Some((type_name, field_path)) = invariant_read_schema_type_and_path(read) else {
                 return Err(CompileError::new(
                     format!(
                         "invariant '{}' schema-qualified read source '{}' must name a concrete field like group_inputs<Token>.amount",
@@ -1277,34 +1277,95 @@ impl<'a> TypeChecker<'a> {
                     invariant.span,
                 ));
             };
-            self.validate_invariant_read_schema_field(invariant, read, type_name, field_name)?;
+            self.validate_invariant_read_schema_field_path(invariant, read, type_name, &field_path)?;
         }
 
         Ok(())
     }
 
-    fn validate_invariant_read_schema_field(
+    fn validate_invariant_read_schema_field_path(
         &self,
         invariant: &InvariantDef,
         read: &str,
         type_name: &str,
-        field_name: &str,
+        field_path: &[&str],
     ) -> Result<()> {
-        let Some(fields) = self.type_fields.get(type_name) else {
+        if field_path.is_empty() || field_path.iter().any(|field| field.is_empty()) {
+            return Err(CompileError::new(
+                format!(
+                    "invariant '{}' schema-qualified read source '{}' must name a concrete field like group_inputs<Token>.amount",
+                    invariant.name, read
+                ),
+                invariant.span,
+            ));
+        }
+
+        let Some(_) = self.resolve_named_type_fields(type_name) else {
             return Err(CompileError::new(
                 format!("invariant '{}' read source '{}' references unknown type '{}'", invariant.name, read, type_name),
                 invariant.span,
             ));
         };
-        if !fields.contains_key(field_name) {
-            return Err(CompileError::new(
-                format!(
-                    "invariant '{}' read source '{}' references unknown field '{}.{}'",
-                    invariant.name, read, type_name, field_name
-                ),
-                invariant.span,
-            ));
+
+        let full_path = field_path.join(".");
+        let mut current_type_name = type_name.to_string();
+        let mut traversed = Vec::new();
+        for (index, field_name) in field_path.iter().enumerate() {
+            let Some(fields) = self.resolve_named_type_fields(&current_type_name) else {
+                return Err(CompileError::new(
+                    format!("invariant '{}' read source '{}' references unknown type '{}'", invariant.name, read, current_type_name),
+                    invariant.span,
+                ));
+            };
+            let Some(field_ty) = fields.get(*field_name) else {
+                return Err(CompileError::new(
+                    format!(
+                        "invariant '{}' read source '{}' references unknown field '{}.{}'",
+                        invariant.name, read, current_type_name, field_name
+                    ),
+                    invariant.span,
+                ));
+            };
+
+            traversed.push(*field_name);
+            if index + 1 == field_path.len() {
+                return Ok(());
+            }
+
+            let traversed_path = traversed.join(".");
+            let Some(next_type_name) = Self::base_type_name(field_ty).map(ToOwned::to_owned) else {
+                return Err(CompileError::new(
+                    format!(
+                        "invariant '{}' read source '{}' field path '{}.{}' cannot descend through non-schema field '{}.{}' of type '{}'",
+                        invariant.name,
+                        read,
+                        type_name,
+                        full_path,
+                        type_name,
+                        traversed_path,
+                        type_repr(field_ty)
+                    ),
+                    invariant.span,
+                ));
+            };
+            if self.resolve_named_type_fields(&next_type_name).is_none() {
+                return Err(CompileError::new(
+                    format!(
+                        "invariant '{}' read source '{}' field path '{}.{}' cannot descend through non-schema field '{}.{}' of type '{}'",
+                        invariant.name,
+                        read,
+                        type_name,
+                        full_path,
+                        type_name,
+                        traversed_path,
+                        type_repr(field_ty)
+                    ),
+                    invariant.span,
+                ));
+            }
+            current_type_name = next_type_name;
         }
+
         Ok(())
     }
 
@@ -7192,18 +7253,18 @@ fn aggregate_target_type_and_field(target: &str) -> Option<(&str, &str)> {
     None
 }
 
-fn invariant_read_schema_type_and_field(read: &str) -> Option<(&str, &str)> {
+fn invariant_read_schema_type_and_path(read: &str) -> Option<(&str, Vec<&str>)> {
     let (source_and_type, field_path) = read.split_once('.')?;
     if field_path.is_empty() {
         return None;
     }
     let (_, type_name) = source_and_type.split_once('<')?;
     let type_name = type_name.strip_suffix('>')?;
-    let field_name = field_path.split('.').next()?;
-    if type_name.is_empty() || field_name.is_empty() {
+    let field_path = field_path.split('.').collect::<Vec<_>>();
+    if type_name.is_empty() || field_path.is_empty() || field_path.iter().any(|field| field.is_empty()) {
         None
     } else {
-        Some((type_name, field_name))
+        Some((type_name, field_path))
     }
 }
 
@@ -9014,6 +9075,85 @@ resource Token {
 "#,
         ))
         .expect("witness field reads should remain runtime-bound metadata");
+    }
+
+    #[test]
+    fn invariant_reads_allow_nested_schema_field() {
+        check(&source_module(
+            r#"
+module types::invariant_nested_read
+
+invariant token_conservation {
+    trigger: type_group
+    scope: group
+    reads: group_inputs<Token>.details.amount
+    assert_invariant(true, "token amount is conserved")
+}
+
+struct TokenDetails {
+    amount: u64
+}
+
+resource Token {
+    details: TokenDetails
+}
+"#,
+        ))
+        .expect("nested schema field reads should be accepted when every segment is declared");
+    }
+
+    #[test]
+    fn invariant_reads_reject_nested_unknown_schema_field() {
+        let err = check(&source_module(
+            r#"
+module types::invariant_nested_bad_field
+
+invariant token_conservation {
+    trigger: type_group
+    scope: group
+    reads: group_inputs<Token>.details.missing
+    assert_invariant(true, "token amount is conserved")
+}
+
+struct TokenDetails {
+    amount: u64
+}
+
+resource Token {
+    details: TokenDetails
+}
+"#,
+        ))
+        .unwrap_err();
+
+        assert!(err.message.contains("references unknown field 'TokenDetails.missing'"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn invariant_reads_reject_nested_path_through_scalar_field() {
+        let err = check(&source_module(
+            r#"
+module types::invariant_nested_scalar
+
+invariant token_conservation {
+    trigger: type_group
+    scope: group
+    reads: group_inputs<Token>.amount.bogus
+    assert_invariant(true, "token amount is conserved")
+}
+
+resource Token {
+    amount: u64
+}
+"#,
+        ))
+        .unwrap_err();
+
+        assert!(
+            err.message.contains("cannot descend through non-schema field 'Token.amount' of type 'u64'"),
+            "unexpected error: {}",
+            err.message
+        );
     }
 
     #[test]

@@ -652,6 +652,7 @@ const REQUIRED_RWA_RECEIPT_SOURCE_PATTERNS: &[(&str, &str)] = &[
     ("lifecycle_output_check", "source::group_output(0)"),
     ("canonical_runtime_check", "intent.canonical_envelope_hash == canonical_envelope_hash"),
     ("expected_receipt_hash", "intent.expected_receipt_hash == materialized_receipt_hash"),
+    ("expected_event_data_hash", "intent.expected_event_data_hash == ckb::hash_data_packed(event)"),
     ("authority_signature", "verifier::btc::bip340::require_signature"),
     ("checked_u64_max", "const U64_MAX: u64 = 18446744073709551615"),
     ("checked_nonce_increment", "old_cell.nonce < U64_MAX"),
@@ -918,7 +919,7 @@ pub(crate) fn build_report(repo_root: &Path) -> Result<Value> {
         &repo_root.join(AGREEMENT_MANIFEST),
         &repo_root.join(AGREEMENT_ROOT),
     )?;
-    let stateful_acceptance = build_stateful_acceptance_report(repo_root, &agreement_conformance)?;
+    let stateful_acceptance = build_stateful_acceptance_report(repo_root, &agreement_conformance, &btc_spv_evidence)?;
     write_json_report(&repo_root.join(STATEFUL_ACCEPTANCE), &stateful_acceptance)?;
     let profile_certification = validate_profile_certification(ProfileCertificationInputs {
         repo_root,
@@ -938,6 +939,14 @@ pub(crate) fn build_report(repo_root: &Path) -> Result<Value> {
         btc_spv_evidence: &btc_spv_evidence,
         rwa_legal_registry_review: &rwa_legal_registry_review,
     })?;
+    let profile_production_completeness = build_profile_production_completeness(
+        &profile_certification,
+        &stateful_acceptance,
+        &public_attestation,
+        &external_review,
+        &btc_spv_evidence,
+        &rwa_legal_registry_review,
+    );
 
     let gates = vec![
         gate(
@@ -1053,6 +1062,26 @@ pub(crate) fn build_report(repo_root: &Path) -> Result<Value> {
             }),
         ),
         gate(
+            "external_btc_fiber_endpoint_acceptance",
+            match json_pointer_str(&stateful_acceptance, "/external_endpoint_coverage/status") {
+                Some("passed") => "passed",
+                Some("external_required") => "external_required",
+                _ => "failed",
+            },
+            "target/novaseal-devnet-stateful-acceptance.json#/external_endpoint_coverage + target/novaseal-fiber-node-experiments.json + proposals/novaseal/v0-mvp-skeleton/proofs/public_btc_spv_evidence.json",
+            stateful_acceptance.get("external_endpoint_coverage").cloned().unwrap_or(Value::Null),
+        ),
+        gate(
+            "all_profiles_production_completeness",
+            match json_pointer_str(&profile_production_completeness, "/status") {
+                Some("passed") => "passed",
+                Some("external_required") => "external_required",
+                _ => "failed",
+            },
+            "target/novaseal-production-gates.json#/profile_production_completeness",
+            profile_production_completeness.clone(),
+        ),
+        gate(
             "public_shared_cell_dep_pinning_attestation",
             json_pointer_str(&public_attestation, "/status").unwrap_or("failed"),
             PUBLIC_CELLDEP_ATTESTATION,
@@ -1108,6 +1137,7 @@ pub(crate) fn build_report(repo_root: &Path) -> Result<Value> {
             "status": json_pointer_str(&agreement_conformance, "/status"),
         },
         "profile_certification": profile_certification,
+        "profile_production_completeness": profile_production_completeness,
         "v1_readiness": v1_readiness,
         "gates": gates,
         "policy": {
@@ -1231,6 +1261,18 @@ fn build_v1_readiness(
             "local V1 release readiness",
         ),
         readiness_dimension(
+            "external_btc_fiber_endpoint_acceptance",
+            gate_status("external_btc_fiber_endpoint_acceptance") == "passed",
+            "target/novaseal-devnet-stateful-acceptance.json#/external_endpoint_coverage",
+            "complete BTC SPV and Fiber external endpoint acceptance",
+        ),
+        readiness_dimension(
+            "all_profiles_production_completeness",
+            gate_status("all_profiles_production_completeness") == "passed",
+            "target/novaseal-production-gates.json#/profile_production_completeness",
+            "every NovaSeal profile has local lifecycle evidence plus required external production evidence",
+        ),
+        readiness_dimension(
             "public_shared_cell_dep_attestation",
             gate_status("public_shared_cell_dep_pinning_attestation") == "passed",
             PUBLIC_CELLDEP_ATTESTATION,
@@ -1310,6 +1352,8 @@ fn build_v1_readiness(
         "acceptance_boundary": {
             "local_ready_means": "architecture, audit, wallet, planned-profile operator fixtures, service-builder fixtures, BTC SPV evidence adapter request, external attestation adapter request, external evidence handoff bundle, TCB, multi-profile devnet, multi-business scenarios, and full stateful acceptance are machine checked locally",
             "production_ready_requires": [
+                "all NovaSeal profiles pass the profile production-completeness matrix",
+                "complete external BTC SPV and Fiber endpoint acceptance",
                 "public/shared CellDep pinning attestation",
                 "public BTC SPV evidence for BTC-facing profiles",
                 "RWA legal/registry review evidence for RWA receipt production claims",
@@ -1549,7 +1593,7 @@ fn readiness_dimension(name: &str, passed: bool, evidence: &str, required_for: &
     })
 }
 
-fn build_stateful_acceptance_report(repo_root: &Path, agreement_conformance: &Value) -> Result<Value> {
+fn build_stateful_acceptance_report(repo_root: &Path, agreement_conformance: &Value, btc_spv_evidence: &Value) -> Result<Value> {
     let core_source = read_cell_sources(&repo_root.join(CORE_ROOT).join("src"))?;
     let agreement_source = read_cell_sources(&repo_root.join(AGREEMENT_ROOT).join("src"))?;
     let core_actions = find_actions(&core_source);
@@ -1733,6 +1777,14 @@ fn build_stateful_acceptance_report(repo_root: &Path, agreement_conformance: &Va
         ],
     )?;
     let fiber_node_experiments = fiber_node_execution_summary(repo_root, fiber_node_experiments_report.as_ref());
+    let external_endpoint_coverage = external_endpoint_coverage_summary(
+        btc_spv_evidence,
+        &fiber_node_experiments,
+        &live_btc_tx_commitment,
+        &live_btc_utxo_seal,
+        &live_dual_seal,
+        &live_fiber_candidate,
+    );
 
     let core_live_passed = core_live_summary_passed(&live_core);
     let agreement_live_passed = agreement_live_summary_passed(&live_agreement, agreement_conformance);
@@ -2085,6 +2137,7 @@ fn build_stateful_acceptance_report(repo_root: &Path, agreement_conformance: &Va
             "fiber_node_execution": fiber_node_experiments,
             "boundary": "External Fiber-node workflow coverage is separate from NovaSeal's own CKB stateful profile acceptance. It must pass before claiming Fiber production execution coverage.",
         },
+        "external_endpoint_coverage": external_endpoint_coverage,
         "scenarios": scenarios,
         "blocker_count": all_blockers.len(),
         "blockers": all_blockers,
@@ -2389,6 +2442,242 @@ fn fiber_node_execution_summary(repo_root: &Path, report: Option<&Value>) -> Val
     })
 }
 
+fn external_endpoint_coverage_summary(
+    btc_spv_evidence: &Value,
+    fiber_node_experiments: &Value,
+    live_btc_tx_commitment: &Value,
+    live_btc_utxo_seal: &Value,
+    live_dual_seal: &Value,
+    live_fiber_candidate: &Value,
+) -> Value {
+    let btc_ckb_lifecycle_passed = json_pointer_bool(live_btc_tx_commitment, "/required_live_checks_passed")
+        && json_pointer_bool(live_btc_utxo_seal, "/required_live_checks_passed")
+        && json_pointer_bool(live_dual_seal, "/required_live_checks_passed");
+    let public_btc_spv_status = json_pointer_str(btc_spv_evidence, "/status").unwrap_or("missing");
+    let public_btc_spv_passed = public_btc_spv_status == "passed";
+    let public_btc_spv_external_required = public_btc_spv_status == "external_required";
+    let fiber_ckb_lifecycle_passed = json_pointer_bool(live_fiber_candidate, "/required_live_checks_passed");
+    let fiber_node_workflows_passed = json_pointer_bool(fiber_node_experiments, "/all_required_workflows_executed_passed");
+
+    let btc_status = if btc_ckb_lifecycle_passed && public_btc_spv_passed {
+        "passed"
+    } else if public_btc_spv_external_required {
+        "external_required"
+    } else {
+        "failed"
+    };
+    let fiber_status = if fiber_ckb_lifecycle_passed && fiber_node_workflows_passed { "passed" } else { "failed" };
+    let status = if btc_status == "passed" && fiber_status == "passed" {
+        "passed"
+    } else if btc_status == "external_required" && fiber_status == "passed" {
+        "external_required"
+    } else {
+        "failed"
+    };
+
+    json!({
+        "schema": "novaseal-external-endpoint-coverage-v0.1",
+        "status": status,
+        "btc": {
+            "status": btc_status,
+            "ckb_profile_lifecycle_passed": btc_ckb_lifecycle_passed,
+            "public_spv_evidence_passed": public_btc_spv_passed,
+            "public_spv_evidence_status": public_btc_spv_status,
+            "required_profiles": EXPECTED_BTC_SPV_EVIDENCE_PROFILES,
+            "evidence": {
+                "status": public_btc_spv_status,
+                "required_report": json_pointer_str(btc_spv_evidence, "/required_report"),
+                "reason": json_pointer_str(btc_spv_evidence, "/reason"),
+                "template": json_pointer_str(btc_spv_evidence, "/template"),
+            },
+            "boundary": "CKB live lifecycle evidence only proves the NovaSeal BTC-facing profile transitions and BIP340 intent verification. Production requires public BTC SPV evidence for inclusion, spend validity, and confirmation depth.",
+        },
+        "fiber": {
+            "status": fiber_status,
+            "ckb_profile_lifecycle_passed": fiber_ckb_lifecycle_passed,
+            "all_required_workflows_executed_passed": fiber_node_workflows_passed,
+            "workflow_coverage": fiber_node_experiments.get("workflow_coverage").cloned().unwrap_or(Value::Null),
+            "fiber_repo": fiber_node_experiments.get("fiber_repo").cloned().unwrap_or(Value::Null),
+            "boundary": "Fiber coverage requires the NovaSeal CKB candidate lifecycle and the separate Nervos Fiber devnet Bruno workflow suite to pass.",
+        },
+        "checks": {
+            "btc_ckb_lifecycle_passed": btc_ckb_lifecycle_passed,
+            "public_btc_spv_evidence_passed": public_btc_spv_passed,
+            "fiber_ckb_lifecycle_passed": fiber_ckb_lifecycle_passed,
+            "fiber_node_workflows_passed": fiber_node_workflows_passed,
+        },
+        "production_complete": status == "passed",
+        "boundary": "This is stricter than local stateful CKB acceptance: BTC and Fiber external endpoint evidence is reported explicitly and production fails closed while public BTC SPV evidence is missing.",
+    })
+}
+
+fn build_profile_production_completeness(
+    profile_certification: &Value,
+    stateful_acceptance: &Value,
+    public_attestation: &Value,
+    external_review: &Value,
+    btc_spv_evidence: &Value,
+    rwa_legal_registry_review: &Value,
+) -> Value {
+    let public_cell_dep_passed = json_pointer_str(public_attestation, "/status") == Some("passed");
+    let external_tcb_passed = json_pointer_str(external_review, "/status") == Some("passed");
+    let public_btc_spv_passed = json_pointer_str(btc_spv_evidence, "/status") == Some("passed");
+    let rwa_legal_passed = json_pointer_str(rwa_legal_registry_review, "/status") == Some("passed");
+    let fiber_endpoint_passed = json_pointer_str(stateful_acceptance, "/external_endpoint_coverage/fiber/status") == Some("passed");
+
+    let common_external = [
+        ("public_shared_cell_dep_attestation", public_cell_dep_passed),
+        ("external_bip340_tcb_review_attestation", external_tcb_passed),
+    ];
+    let btc_external = [
+        ("public_shared_cell_dep_attestation", public_cell_dep_passed),
+        ("external_bip340_tcb_review_attestation", external_tcb_passed),
+        ("public_btc_spv_evidence", public_btc_spv_passed),
+    ];
+    let rwa_external = [
+        ("public_shared_cell_dep_attestation", public_cell_dep_passed),
+        ("external_bip340_tcb_review_attestation", external_tcb_passed),
+        ("rwa_legal_registry_review_evidence", rwa_legal_passed),
+    ];
+    let fiber_external = [
+        ("public_shared_cell_dep_attestation", public_cell_dep_passed),
+        ("external_bip340_tcb_review_attestation", external_tcb_passed),
+        ("fiber_node_workflow_execution", fiber_endpoint_passed),
+    ];
+
+    let rows = vec![
+        profile_production_row(
+            "novaseal-core-v0",
+            "core",
+            json_pointer_bool(stateful_acceptance, "/profile_coverage/checks/core_profile_live_stateful"),
+            &common_external,
+            "target/novaseal-devnet-stateful-acceptance.json#/profile_coverage/checks/core_profile_live_stateful",
+        ),
+        profile_production_row(
+            "agreement-profile-v0",
+            "object",
+            json_pointer_bool(stateful_acceptance, "/profile_coverage/checks/agreement_profile_live_stateful")
+                && json_pointer_bool(profile_certification, "/local_checks/conformance_gate_passed"),
+            &common_external,
+            "target/novaseal-devnet-stateful-acceptance.json#/profile_coverage/checks/agreement_profile_live_stateful",
+        ),
+        profile_production_row(
+            "fungible-xudt-profile-v0",
+            "object",
+            json_pointer_str(profile_certification, "/planned_profile_packages/fungible_xudt/status") == Some("passed")
+                && json_pointer_bool(stateful_acceptance, "/business_scenario_coverage/checks/fungible_xudt_value_flow_live"),
+            &common_external,
+            "target/novaseal-fungible-xudt-devnet-stateful-live.json",
+        ),
+        profile_production_row(
+            "rwa-receipt-profile-v0",
+            "object",
+            json_pointer_str(profile_certification, "/planned_profile_packages/rwa_receipt/status") == Some("passed")
+                && json_pointer_bool(stateful_acceptance, "/business_scenario_coverage/checks/rwa_receipt_lifecycle_live"),
+            &rwa_external,
+            "target/novaseal-rwa-receipt-devnet-stateful-live.json + proposals/novaseal/rwa-receipt-profile-v0/proofs/legal_registry_review_evidence.json",
+        ),
+        profile_production_row(
+            "btc-transaction-commitment-profile-v0",
+            "seal",
+            json_pointer_str(profile_certification, "/planned_profile_packages/btc_tx_commitment/status") == Some("passed")
+                && json_pointer_bool(stateful_acceptance, "/business_scenario_coverage/checks/btc_transaction_commitment_transition_live"),
+            &btc_external,
+            "target/novaseal-btc-transaction-commitment-devnet-stateful-live.json + proposals/novaseal/v0-mvp-skeleton/proofs/public_btc_spv_evidence.json",
+        ),
+        profile_production_row(
+            "btc-utxo-seal-profile-v0",
+            "seal",
+            json_pointer_str(profile_certification, "/planned_profile_packages/btc_utxo_seal/status") == Some("passed")
+                && json_pointer_bool(stateful_acceptance, "/business_scenario_coverage/checks/btc_utxo_seal_closure_live"),
+            &btc_external,
+            "target/novaseal-btc-utxo-seal-devnet-stateful-live.json + proposals/novaseal/v0-mvp-skeleton/proofs/public_btc_spv_evidence.json",
+        ),
+        profile_production_row(
+            "dual-seal-profile-v0",
+            "seal",
+            json_pointer_str(profile_certification, "/planned_profile_packages/dual_seal/status") == Some("passed")
+                && json_pointer_bool(stateful_acceptance, "/business_scenario_coverage/checks/dual_seal_finality_live"),
+            &btc_external,
+            "target/novaseal-dual-seal-devnet-stateful-live.json + proposals/novaseal/v0-mvp-skeleton/proofs/public_btc_spv_evidence.json",
+        ),
+        profile_production_row(
+            "fiber-candidate-profile-v0",
+            "application",
+            json_pointer_str(profile_certification, "/planned_profile_packages/fiber_candidate/status") == Some("passed")
+                && json_pointer_bool(stateful_acceptance, "/business_scenario_coverage/checks/fiber_candidate_path_live"),
+            &fiber_external,
+            "target/novaseal-fiber-candidate-devnet-stateful-live.json + target/novaseal-fiber-node-experiments.json",
+        ),
+    ];
+
+    let local_complete = rows.iter().all(|row| json_pointer_str(row, "/local_status") == Some("passed"));
+    let production_complete = rows.iter().all(|row| json_pointer_str(row, "/status") == Some("passed"));
+    let external_required = rows.iter().any(|row| json_pointer_str(row, "/status") == Some("external_required"));
+    let status = if production_complete {
+        "passed"
+    } else if local_complete && external_required {
+        "external_required"
+    } else {
+        "failed"
+    };
+    let missing_external_evidence = rows
+        .iter()
+        .flat_map(|row| json_array_strings(row, "/missing_external_evidence"))
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let failed_profiles = rows
+        .iter()
+        .filter(|row| json_pointer_str(row, "/status") != Some("passed"))
+        .filter_map(|row| json_pointer_str(row, "/profile").map(str::to_string))
+        .collect::<Vec<_>>();
+
+    json!({
+        "schema": "novaseal-all-profiles-production-completeness-v0.1",
+        "status": status,
+        "local_complete": local_complete,
+        "production_complete": production_complete,
+        "missing_external_evidence": missing_external_evidence,
+        "failed_profiles": failed_profiles,
+        "profiles": rows,
+        "boundary": "Each NovaSeal profile must have local package/lifecycle evidence and every profile-specific external production proof before production_ready can be true.",
+    })
+}
+
+fn profile_production_row(
+    profile: &str,
+    category: &str,
+    local_passed: bool,
+    external_requirements: &[(&str, bool)],
+    evidence: &str,
+) -> Value {
+    let missing_external_evidence = external_requirements
+        .iter()
+        .filter(|(_, passed)| !*passed)
+        .map(|(name, _)| Value::String((*name).to_string()))
+        .collect::<Vec<_>>();
+    let external_requirements =
+        external_requirements.iter().map(|(name, passed)| json!({"name": name, "passed": passed})).collect::<Vec<_>>();
+    let status = if !local_passed {
+        "failed"
+    } else if missing_external_evidence.is_empty() {
+        "passed"
+    } else {
+        "external_required"
+    };
+
+    json!({
+        "profile": profile,
+        "category": category,
+        "status": status,
+        "local_status": if local_passed { "passed" } else { "failed" },
+        "external_requirements": external_requirements,
+        "missing_external_evidence": missing_external_evidence,
+        "evidence": evidence,
+    })
+}
+
 fn live_core_summary(repo_root: &Path, report: Option<&Value>) -> Result<Value> {
     let Some(report) = report else {
         return Ok(json!({"present": false}));
@@ -2578,12 +2867,13 @@ fn provenance_summary(report: &Value, repo_root: &Path, source_paths: &[&str]) -
         json_pointer_bool(row, "/present") && json_pointer_bool(row, "/exists") && json_pointer_bool(row, "/sha256_matches")
     });
     let current_commit = git_commit(repo_root);
+    let repo_commit_matches = json_pointer_str(&provenance, "/repo_commit") == current_commit.as_deref();
     Ok(json!({
         "present": provenance.is_object(),
-        "freshness_matched": source_hash_matches && artifact_hashes_match,
+        "freshness_matched": source_hash_matches && artifact_hashes_match && repo_commit_matches,
         "repo_commit": json_pointer_str(&provenance, "/repo_commit"),
         "current_repo_commit": current_commit,
-        "repo_commit_matches": json_pointer_str(&provenance, "/repo_commit") == current_commit.as_deref(),
+        "repo_commit_matches": repo_commit_matches,
         "source_hash_matches": source_hash_matches,
         "recorded_source_hash": json_pointer_str(&recorded_source, "/sha256"),
         "current_source_hash": json_pointer_str(&current_source, "/sha256"),
@@ -3441,6 +3731,7 @@ fn validate_external_evidence_handoff_detail(
     let expected_btc_spv_adapter_hash = novaseal_handoff_report_hash("btc_spv_adapter", btc_spv_adapter);
     let expected_external_attestation_adapter_hash =
         novaseal_handoff_report_hash("external_attestation_adapter", external_attestation_adapter);
+    let expected_handoff_bundle_hash = external_evidence_handoff_reference_hash(report);
     let expected_btc_spv_scenarios = btc_spv_adapter_expected_scenarios(btc_spv_adapter);
     let expected_public_manifest_commit = adapter_case_request_str(
         external_attestation_adapter,
@@ -3600,6 +3891,9 @@ fn validate_external_evidence_handoff_detail(
             == Some(expected_btc_spv_adapter_hash.as_str()),
         "source_external_attestation_adapter_hash_matches_current": json_pointer_str(report, "/source_external_attestation_adapter_hash")
             == Some(expected_external_attestation_adapter_hash.as_str()),
+        "bundle_hash_matches_reference": normalize_hex(json_pointer_str(report, "/bundle_hash")).as_deref()
+            == Some(expected_handoff_bundle_hash.as_str()),
+        "bundle_hash_algorithm": json_pointer_str(report, "/bundle_hash_algorithm") == Some(NOVASEAL_HANDOFF_HASH_ALGORITHM),
         "summary_counts_match": json_pointer_i64(report, "/summary/total") == Some(expected_groups.len() as i64)
             && json_pointer_i64(report, "/summary/matched") == json_pointer_i64(report, "/summary/total"),
         "exact_groups": actual_groups == expected_groups,
@@ -4490,7 +4784,7 @@ fn validate_btc_spv_evidence(repo_root: &Path, rel_path: &str, external_evidence
         }));
     }
     let payload = json_load(repo_root, rel_path)?;
-    let handoff_hash = novaseal_handoff_report_hash("external_evidence_handoff_bundle", external_evidence_handoff);
+    let handoff_hash = external_evidence_handoff_reference_hash(external_evidence_handoff);
     let handoff_case = handoff_case(external_evidence_handoff, "public_btc_spv_evidence").unwrap_or(&Value::Null);
     let handoff_required_profiles = json_array_strings(handoff_case, "/required_profiles");
     let handoff_expected_scenarios = json_object_string_map(handoff_case.get("expected_scenarios").unwrap_or(&Value::Null));
@@ -4614,7 +4908,7 @@ fn validate_public_attestation(
         }));
     }
     let payload = json_load_path(repo_root, &path)?;
-    let handoff_hash = novaseal_handoff_report_hash("external_evidence_handoff_bundle", external_evidence_handoff);
+    let handoff_hash = external_evidence_handoff_reference_hash(external_evidence_handoff);
     let verifier = payload.get("runtime_verifier").cloned().unwrap_or(Value::Null);
     let release = payload.get("release").cloned().unwrap_or(Value::Null);
     let handoff_expected_values =
@@ -4696,7 +4990,7 @@ fn validate_external_review(
         }));
     }
     let payload = json_load_path(repo_root, &path)?;
-    let handoff_hash = novaseal_handoff_report_hash("external_evidence_handoff_bundle", external_evidence_handoff);
+    let handoff_hash = external_evidence_handoff_reference_hash(external_evidence_handoff);
     let handoff_expected_values =
         handoff_case_expected_values(external_evidence_handoff, "external_bip340_tcb_review_attestation").unwrap_or(&Value::Null);
     let checks = json!({
@@ -4759,7 +5053,7 @@ fn validate_rwa_legal_registry_review(repo_root: &Path, rel_path: &str, external
     }
     let payload = json_load_path(repo_root, &path)?;
     let registry = payload.get("registry").cloned().unwrap_or(Value::Null);
-    let handoff_hash = novaseal_handoff_report_hash("external_evidence_handoff_bundle", external_evidence_handoff);
+    let handoff_hash = external_evidence_handoff_reference_hash(external_evidence_handoff);
     let handoff_expected_values =
         handoff_case_expected_values(external_evidence_handoff, "rwa_legal_registry_review_evidence").unwrap_or(&Value::Null);
     let checks = json!({
@@ -5289,6 +5583,15 @@ fn novaseal_handoff_report_hash(label: &str, value: &Value) -> String {
     state.update(b"\x00");
     state.update(canonical_json_for_report_hash(value).as_bytes());
     format!("0x{}", hex::encode(state.finalize().as_bytes()))
+}
+
+fn external_evidence_handoff_reference_hash(value: &Value) -> String {
+    let mut payload = value.clone();
+    if let Some(object) = payload.as_object_mut() {
+        object.remove("bundle_hash");
+        object.remove("bundle_hash_algorithm");
+    }
+    novaseal_handoff_report_hash("external_evidence_handoff_bundle", &payload)
 }
 
 fn novaseal_profile_operator_report_hash(label: &str, value: &Value) -> String {
@@ -6002,6 +6305,51 @@ mod tests {
     }
 
     #[test]
+    fn provenance_freshness_requires_repo_commit_match() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let source_paths = ["src/cli/novaseal_certification.rs"];
+        let current_source = source_tree_hash(repo_root, &source_paths).unwrap();
+        let artifact_path = repo_root.join(source_paths[0]);
+        let artifact_sha = sha256_file_hex(&artifact_path).unwrap();
+        let report = json!({
+            "provenance": {
+                "repo_commit": "0000000000000000000000000000000000000000",
+                "source_tree": current_source,
+                "artifacts": {
+                    "verifier": {
+                        "path": artifact_path.display().to_string(),
+                        "sha256": artifact_sha,
+                    },
+                    "lifecycle": {
+                        "path": artifact_path.display().to_string(),
+                        "sha256": artifact_sha,
+                    },
+                },
+            },
+        });
+
+        let summary = provenance_summary(&report, repo_root, &source_paths).unwrap();
+
+        assert!(json_pointer_bool(&summary, "/source_hash_matches"));
+        assert!(json_pointer_bool(&summary, "/artifact_hashes_match"));
+        assert!(!json_pointer_bool(&summary, "/repo_commit_matches"));
+        assert!(!json_pointer_bool(&summary, "/freshness_matched"));
+    }
+
+    #[test]
+    fn rwa_lifecycle_event_data_hash_binding_is_required_and_present() {
+        let (_, pattern) = REQUIRED_RWA_RECEIPT_SOURCE_PATTERNS
+            .iter()
+            .find(|(name, _)| *name == "expected_event_data_hash")
+            .expect("RWA certification must require event data hash binding");
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let source = read_cell_sources(&repo_root.join("proposals/novaseal/rwa-receipt-profile-v0/src")).unwrap();
+
+        assert_eq!(*pattern, "intent.expected_event_data_hash == ckb::hash_data_packed(event)");
+        assert!(source.contains(pattern), "RWA lifecycle source must bind event output hash to derived event");
+    }
+
+    #[test]
     fn profile_operator_fixtures_bind_current_live_reports() {
         let temp = tempfile::tempdir().unwrap();
         write_expected_live_fixture_reports(temp.path());
@@ -6113,7 +6461,7 @@ mod tests {
         });
         let btc_hash = novaseal_handoff_report_hash("btc_spv_adapter", &btc_spv_adapter);
         let attestation_hash = novaseal_handoff_report_hash("external_attestation_adapter", &external_attestation_adapter);
-        let report = json!({
+        let mut report = json!({
             "schema": "novaseal-external-evidence-handoff-bundle-v0.1",
             "status": "passed",
             "handoff_status": "request_bundle_ready_external_evidence_required",
@@ -6196,14 +6544,29 @@ mod tests {
                 },
             ],
         });
+        report["bundle_hash_algorithm"] = json!(NOVASEAL_HANDOFF_HASH_ALGORITHM);
+        report["bundle_hash"] = json!(external_evidence_handoff_reference_hash(&report));
 
         let valid =
             validate_external_evidence_handoff_detail(Path::new("."), &report, &btc_spv_adapter, &external_attestation_adapter);
         assert_eq!(json_pointer_str(&valid, "/status"), Some("passed"));
+        assert!(json_pointer_bool(&valid, "/checks/bundle_hash_matches_reference"));
+        assert!(json_pointer_bool(&valid, "/checks/bundle_hash_algorithm"));
         assert!(json_pointer_bool(&valid, "/cases/public_btc_spv_evidence/expected_scenarios_match_source_adapter"));
         assert!(json_pointer_bool(&valid, "/cases/public_shared_cell_dep_attestation/expected_values_match_source_adapter"));
         assert!(json_pointer_bool(&valid, "/cases/external_bip340_tcb_review_attestation/expected_values_match_source_adapter"));
         assert!(json_pointer_bool(&valid, "/cases/rwa_legal_registry_review_evidence/expected_values_match_source_adapter"));
+
+        let mut stale_bundle_hash = report.clone();
+        stale_bundle_hash["bundle_hash"] = json!(format!("0x{}", "22".repeat(32)));
+        let stale_bundle = validate_external_evidence_handoff_detail(
+            Path::new("."),
+            &stale_bundle_hash,
+            &btc_spv_adapter,
+            &external_attestation_adapter,
+        );
+        assert_eq!(json_pointer_str(&stale_bundle, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&stale_bundle, "/checks/bundle_hash_matches_reference"));
 
         let mut stale_hash = report.clone();
         stale_hash["source_btc_spv_adapter_hash"] = json!(format!("0x{}", "11".repeat(32)));
@@ -8338,6 +8701,106 @@ mod tests {
     }
 
     #[test]
+    fn external_endpoint_coverage_requires_public_btc_spv_evidence() {
+        let ckb_live = json!({"required_live_checks_passed": true});
+        let fiber = json!({
+            "all_required_workflows_executed_passed": true,
+            "workflow_coverage": {
+                "all_required_workflows_executed": true,
+                "all_required_workflows_executed_passed": true,
+            },
+            "fiber_repo": {
+                "origin": EXPECTED_FIBER_REPO_ORIGIN,
+                "commit": "0123456789abcdef0123456789abcdef01234567",
+                "dirty": false,
+            },
+        });
+        let btc_missing = json!({
+            "status": "external_required",
+            "reason": "missing public BTC SPV evidence",
+            "required_report": PUBLIC_BTC_SPV_EVIDENCE,
+            "template": PUBLIC_BTC_SPV_EVIDENCE_TEMPLATE,
+        });
+
+        let coverage = external_endpoint_coverage_summary(&btc_missing, &fiber, &ckb_live, &ckb_live, &ckb_live, &ckb_live);
+
+        assert_eq!(json_pointer_str(&coverage, "/status"), Some("external_required"));
+        assert_eq!(json_pointer_str(&coverage, "/btc/status"), Some("external_required"));
+        assert_eq!(json_pointer_str(&coverage, "/fiber/status"), Some("passed"));
+        assert!(!json_pointer_bool(&coverage, "/production_complete"));
+        assert!(json_pointer_bool(&coverage, "/checks/btc_ckb_lifecycle_passed"));
+        assert!(!json_pointer_bool(&coverage, "/checks/public_btc_spv_evidence_passed"));
+        assert!(json_pointer_bool(&coverage, "/checks/fiber_node_workflows_passed"));
+    }
+
+    #[test]
+    fn all_profile_production_matrix_keeps_btc_and_fiber_evidence_separate() {
+        let profile_certification = json!({
+            "local_checks": {
+                "conformance_gate_passed": true,
+            },
+            "planned_profile_packages": {
+                "btc_tx_commitment": { "status": "passed" },
+                "btc_utxo_seal": { "status": "passed" },
+                "dual_seal": { "status": "passed" },
+                "fiber_candidate": { "status": "passed" },
+                "fungible_xudt": { "status": "passed" },
+                "rwa_receipt": { "status": "passed" }
+            },
+        });
+        let stateful_acceptance = json!({
+            "profile_coverage": {
+                "checks": {
+                    "core_profile_live_stateful": true,
+                    "agreement_profile_live_stateful": true,
+                }
+            },
+            "business_scenario_coverage": {
+                "checks": {
+                    "btc_transaction_commitment_transition_live": true,
+                    "btc_utxo_seal_closure_live": true,
+                    "dual_seal_finality_live": true,
+                    "fiber_candidate_path_live": true,
+                    "fungible_xudt_value_flow_live": true,
+                    "rwa_receipt_lifecycle_live": true,
+                }
+            },
+            "external_endpoint_coverage": {
+                "fiber": { "status": "passed" }
+            },
+        });
+        let passed = json!({"status": "passed"});
+        let btc_missing = json!({"status": "external_required"});
+
+        let matrix = build_profile_production_completeness(
+            &profile_certification,
+            &stateful_acceptance,
+            &passed,
+            &passed,
+            &btc_missing,
+            &passed,
+        );
+        let profile_status = |profile: &str| {
+            matrix
+                .get("profiles")
+                .and_then(Value::as_array)
+                .and_then(|profiles| profiles.iter().find(|row| json_pointer_str(row, "/profile") == Some(profile)))
+                .and_then(|row| json_pointer_str(row, "/status"))
+                .unwrap_or("missing")
+        };
+
+        assert_eq!(json_pointer_str(&matrix, "/status"), Some("external_required"));
+        assert!(json_pointer_bool(&matrix, "/local_complete"));
+        assert!(!json_pointer_bool(&matrix, "/production_complete"));
+        assert_eq!(profile_status("fiber-candidate-profile-v0"), "passed");
+        assert_eq!(profile_status("btc-transaction-commitment-profile-v0"), "external_required");
+        assert_eq!(profile_status("btc-utxo-seal-profile-v0"), "external_required");
+        assert_eq!(profile_status("dual-seal-profile-v0"), "external_required");
+        assert_eq!(profile_status("rwa-receipt-profile-v0"), "passed");
+        assert!(json_array_strings(&matrix, "/missing_external_evidence").iter().any(|item| item == "public_btc_spv_evidence"));
+    }
+
+    #[test]
     fn security_audit_coverage_requires_docs_tcb_and_live_negative_evidence() {
         let temp = tempfile::tempdir().unwrap();
         let agreement_docs = temp.path().join(AGREEMENT_ROOT).join("docs");
@@ -8519,8 +8982,24 @@ mod tests {
                     "fiber_candidate_path_live": true
                 }
             },
+            "external_endpoint_coverage": {
+                "status": "passed",
+                "production_complete": true
+            },
         });
         let gates = vec![
+            gate(
+                "external_btc_fiber_endpoint_acceptance",
+                "passed",
+                "target/novaseal-devnet-stateful-acceptance.json#/external_endpoint_coverage",
+                Value::Null,
+            ),
+            gate(
+                "all_profiles_production_completeness",
+                "passed",
+                "target/novaseal-production-gates.json#/profile_production_completeness",
+                Value::Null,
+            ),
             gate("public_shared_cell_dep_pinning_attestation", "passed", PUBLIC_CELLDEP_ATTESTATION, Value::Null),
             gate("external_bip340_runtime_verifier_tcb_review_attestation", "passed", EXTERNAL_TCB_ATTESTATION, Value::Null),
             gate("public_btc_spv_evidence", "passed", PUBLIC_BTC_SPV_EVIDENCE, Value::Null),
