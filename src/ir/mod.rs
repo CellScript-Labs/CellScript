@@ -4764,12 +4764,9 @@ impl IrGenerator {
                     break;
                 };
                 if Self::is_poisoned_operand(&lowered_value.operand) {
-                    if join.is_none() {
-                        join = Some(self.push_block(blocks));
-                    }
-                    let join = join.expect("match join block should exist after creation");
-                    self.block_mut(blocks, arm_exit).terminator = IrTerminator::Jump(join);
-                    return Self::poisoned_expr(Some(join));
+                    let join_block = *join.get_or_insert_with(|| self.push_block(blocks));
+                    self.block_mut(blocks, arm_exit).terminator = IrTerminator::Jump(join_block);
+                    return Self::poisoned_expr(Some(join_block));
                 }
                 if result_dest.is_none() {
                     let ty = self.operand_type(&lowered_value.operand);
@@ -4778,13 +4775,10 @@ impl IrGenerator {
                 let Some(dest) = result_dest.as_ref() else {
                     return LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: None };
                 };
-                if join.is_none() {
-                    join = Some(self.push_block(blocks));
-                }
-                let join = join.expect("match join block should exist after creation");
+                let join_block = *join.get_or_insert_with(|| self.push_block(blocks));
                 self.ensure_join_aggregate_slots(dest, &[&lowered_value.operand]);
                 self.lower_join_value_into_dest(dest, lowered_value.operand, arm_exit, blocks);
-                self.block_mut(blocks, arm_exit).terminator = IrTerminator::Jump(join);
+                self.block_mut(blocks, arm_exit).terminator = IrTerminator::Jump(join_block);
                 break;
             } else {
                 let Some(pattern_operand) = self.lower_match_pattern_operand(&arm.pattern, arm.span) else {
@@ -4823,11 +4817,8 @@ impl IrGenerator {
                 continue;
             };
             if Self::is_poisoned_operand(&lowered_value.operand) {
-                if join.is_none() {
-                    join = Some(self.push_block(blocks));
-                }
-                let join = join.expect("match join block should exist after creation");
-                self.block_mut(blocks, arm_exit).terminator = IrTerminator::Jump(join);
+                let join_block = *join.get_or_insert_with(|| self.push_block(blocks));
+                self.block_mut(blocks, arm_exit).terminator = IrTerminator::Jump(join_block);
                 continue;
             }
 
@@ -4838,13 +4829,10 @@ impl IrGenerator {
             let Some(dest) = result_dest.as_ref() else {
                 return LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: None };
             };
-            if join.is_none() {
-                join = Some(self.push_block(blocks));
-            }
-            let join = join.expect("match join block should exist after creation");
+            let join_block = *join.get_or_insert_with(|| self.push_block(blocks));
             self.ensure_join_aggregate_slots(dest, &[&lowered_value.operand]);
             self.lower_join_value_into_dest(dest, lowered_value.operand, arm_exit, blocks);
-            self.block_mut(blocks, arm_exit).terminator = IrTerminator::Jump(join);
+            self.block_mut(blocks, arm_exit).terminator = IrTerminator::Jump(join_block);
         }
 
         let Some(dest) = result_dest else {

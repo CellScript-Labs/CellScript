@@ -5934,6 +5934,21 @@ impl CliParser {
             )
             .get_matches();
 
+        macro_rules! required_string {
+            ($matches:expr, $id:literal, $label:literal) => {
+                match $matches.get_one::<String>($id).cloned() {
+                    Some(value) => value,
+                    None => return Command::Invalid(format!("internal CLI parser missing required argument '{}'", $label)),
+                }
+            };
+        }
+
+        macro_rules! required_path {
+            ($matches:expr, $id:literal, $label:literal) => {
+                PathBuf::from(required_string!($matches, $id, $label))
+            };
+        }
+
         match matches.subcommand() {
             Some(("build", m)) => Command::Build(BuildArgs {
                 release: m.get_flag("release"),
@@ -5984,7 +5999,7 @@ impl CliParser {
                 json: m.get_flag("json"),
             }),
             Some(("new", m)) => Command::New(NewArgs {
-                name: m.get_one::<String>("name").cloned().expect("required package name"),
+                name: required_string!(m, "name", "package name"),
                 path: m.get_one::<String>("path").map(PathBuf::from),
                 lib: m.get_flag("lib"),
                 vcs: m.get_one::<String>("vcs").cloned().unwrap_or_else(|| "git".to_string()),
@@ -6055,12 +6070,11 @@ impl CliParser {
                 file: m.get_one::<String>("file").map(PathBuf::from),
                 json: m.get_flag("json"),
             }),
-            Some(("explain", m)) => Command::Explain(ExplainArgs {
-                code: m.get_one::<String>("code").cloned().expect("required runtime error code"),
-                json: m.get_flag("json"),
-            }),
+            Some(("explain", m)) => {
+                Command::Explain(ExplainArgs { code: required_string!(m, "code", "runtime error code"), json: m.get_flag("json") })
+            }
             Some(("explain-profile", m)) => Command::ExplainProfile(ExplainProfileArgs {
-                profile: m.get_one::<String>("profile").cloned().expect("required target profile"),
+                profile: required_string!(m, "profile", "target profile"),
                 json: m.get_flag("json"),
             }),
             Some(("explain-proof", m)) => Command::ExplainProof(ExplainProofArgs {
@@ -6092,8 +6106,8 @@ impl CliParser {
                 target_profile: m.get_one::<String>("target-profile").cloned(),
             }),
             Some(("proof-diff", m)) => Command::ProofDiff(ProofDiffArgs {
-                old: m.get_one::<String>("old").map(PathBuf::from).expect("required old metadata"),
-                new: m.get_one::<String>("new").map(PathBuf::from).expect("required new metadata"),
+                old: required_path!(m, "old", "old metadata"),
+                new: required_path!(m, "new", "new metadata"),
                 json: m.get_flag("json"),
             }),
             Some(("profile", m)) => Command::Profile(ProfileArgs {
@@ -6108,8 +6122,8 @@ impl CliParser {
                 json: m.get_flag("json"),
             }),
             Some(("trace-tx", m)) => Command::TraceTx(TraceTxArgs {
-                against: m.get_one::<String>("against").map(PathBuf::from).expect("required metadata"),
-                tx: m.get_one::<String>("tx").map(PathBuf::from).expect("required transaction JSON"),
+                against: required_path!(m, "against", "metadata"),
+                tx: required_path!(m, "tx", "transaction JSON"),
                 primitive_compat: resolve_metadata_workflow_primitive_compat(
                     m.get_one::<String>("primitive-compat").cloned(),
                     m.get_one::<String>("primitive-strict").cloned(),
@@ -6128,7 +6142,7 @@ impl CliParser {
                 json: m.get_flag("json"),
             }),
             Some(("certify", m)) => Command::Certify(CertifyArgs {
-                plugin: m.get_one::<String>("plugin").cloned().expect("required certification plugin"),
+                plugin: required_string!(m, "plugin", "certification plugin"),
                 repo_root: m.get_one::<String>("repo-root").map(PathBuf::from),
                 report: m.get_one::<String>("report").map(PathBuf::from),
                 output: m.get_one::<String>("output").map(PathBuf::from),
@@ -6136,8 +6150,8 @@ impl CliParser {
                 require_production: m.get_flag("require-production"),
             }),
             Some(("validate-tx", m)) => Command::ValidateTx(ValidateTxArgs {
-                against: m.get_one::<String>("against").map(PathBuf::from).expect("required metadata"),
-                tx: m.get_one::<String>("tx").map(PathBuf::from).expect("required transaction JSON"),
+                against: required_path!(m, "against", "metadata"),
+                tx: required_path!(m, "tx", "transaction JSON"),
                 primitive_compat: resolve_metadata_workflow_primitive_compat(
                     m.get_one::<String>("primitive-compat").cloned(),
                     m.get_one::<String>("primitive-strict").cloned(),
@@ -6162,13 +6176,12 @@ impl CliParser {
                 target_profile: m.get_one::<String>("target-profile").cloned(),
                 json: m.get_flag("json"),
             }),
-            Some(("verify-deploy", m)) => Command::VerifyDeploy(VerifyDeployArgs {
-                plan: m.get_one::<String>("plan").map(PathBuf::from).expect("required deploy plan"),
-                json: m.get_flag("json"),
-            }),
+            Some(("verify-deploy", m)) => {
+                Command::VerifyDeploy(VerifyDeployArgs { plan: required_path!(m, "plan", "deploy plan"), json: m.get_flag("json") })
+            }
             Some(("diff-deploy", m)) => Command::DiffDeploy(DiffDeployArgs {
-                old: m.get_one::<String>("old").map(PathBuf::from).expect("required old deploy plan"),
-                new: m.get_one::<String>("new").map(PathBuf::from).expect("required new deploy plan"),
+                old: required_path!(m, "old", "old deploy plan"),
+                new: required_path!(m, "new", "new deploy plan"),
                 json: m.get_flag("json"),
             }),
             Some(("lock-deps", m)) => Command::LockDeps(LockDepsArgs {
@@ -6200,7 +6213,7 @@ impl CliParser {
                 json: m.get_flag("json"),
             }),
             Some(("verify-artifact", m)) => Command::VerifyArtifact(VerifyArtifactArgs {
-                artifact: m.get_one::<String>("artifact").map(PathBuf::from).expect("required artifact"),
+                artifact: required_path!(m, "artifact", "artifact"),
                 metadata: m.get_one::<String>("metadata").map(PathBuf::from),
                 verify_sources: m.get_flag("verify-sources"),
                 json: m.get_flag("json"),

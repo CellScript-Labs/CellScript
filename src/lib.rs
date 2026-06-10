@@ -11859,7 +11859,9 @@ fn metadata_prelude_availability(
                     }
                 }
                 ir::IrInstruction::Call { dest: Some(dest), func, .. } if pure_const_returns.contains_key(func) => {
-                    let value = pure_const_returns.get(func).expect("guarded pure const return");
+                    let Some(value) = pure_const_returns.get(func) else {
+                        continue;
+                    };
                     if metadata_fixed_scalar_const_value(value).is_some() {
                         availability.scalar_vars.insert(dest.id);
                         availability.fixed_value_vars.insert(dest.id);

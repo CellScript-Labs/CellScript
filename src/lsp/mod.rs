@@ -2155,7 +2155,7 @@ fn position_to_offset_with_boundary(source: &str, position: Position, boundary_m
             return Some(idx);
         }
         if ch == '\r' && iter.peek().is_some_and(|(_, next)| *next == '\n') {
-            let (_, next) = iter.next().expect("peeked CRLF newline");
+            let (_, next) = iter.next()?;
             debug_assert_eq!(next, '\n');
             line += 1;
             col = 0;
@@ -2192,12 +2192,13 @@ fn offset_to_position(source: &str, offset: usize) -> Position {
             break;
         }
         if ch == '\r' && iter.peek().is_some_and(|(_, next)| *next == '\n') {
-            let (next_idx, next) = iter.next().expect("peeked CRLF newline");
-            debug_assert_eq!(next, '\n');
-            line += 1;
-            col = 0;
-            if next_idx >= offset {
-                break;
+            if let Some((next_idx, next)) = iter.next() {
+                debug_assert_eq!(next, '\n');
+                line += 1;
+                col = 0;
+                if next_idx >= offset {
+                    break;
+                }
             }
         } else if ch == '\n' {
             line += 1;

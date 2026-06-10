@@ -1,6 +1,6 @@
 use crate::error::{CompileError, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ffi::OsString;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
@@ -622,11 +622,11 @@ impl DependencyGraph {
     }
 
     pub fn find_cycle(&self) -> Option<Vec<String>> {
-        let mut visited = HashMap::new();
+        let mut visited = HashSet::new();
         let mut rec_stack = Vec::new();
 
         for node in &self.nodes {
-            if !visited.contains_key(node) {
+            if !visited.contains(node) {
                 if let Some(cycle) = self.dfs_find_cycle(node, &mut visited, &mut rec_stack) {
                     return Some(cycle);
                 }
@@ -636,18 +636,17 @@ impl DependencyGraph {
         None
     }
 
-    fn dfs_find_cycle(&self, node: &str, visited: &mut HashMap<String, bool>, rec_stack: &mut Vec<String>) -> Option<Vec<String>> {
-        visited.insert(node.to_string(), true);
+    fn dfs_find_cycle(&self, node: &str, visited: &mut HashSet<String>, rec_stack: &mut Vec<String>) -> Option<Vec<String>> {
+        visited.insert(node.to_string());
         rec_stack.push(node.to_string());
 
         if let Some(neighbors) = self.edges.get(node) {
             for neighbor in neighbors {
-                if !visited.contains_key(neighbor) {
+                if !visited.contains(neighbor) {
                     if let Some(cycle) = self.dfs_find_cycle(neighbor, visited, rec_stack) {
                         return Some(cycle);
                     }
-                } else if rec_stack.contains(neighbor) {
-                    let idx = rec_stack.iter().position(|n| n == neighbor).unwrap();
+                } else if let Some(idx) = rec_stack.iter().position(|n| n == neighbor) {
                     let mut cycle = rec_stack[idx..].to_vec();
                     cycle.push(neighbor.to_string());
                     return Some(cycle);
@@ -1238,6 +1237,21 @@ mod tests {
 
         graph.add_edge("C".to_string(), "A".to_string());
         assert!(graph.find_cycle().is_some());
+    }
+
+    #[test]
+    fn dependency_graph_ignores_cross_edges_without_cycle() {
+        let mut graph = DependencyGraph::new();
+        graph.add_node("A".to_string());
+        graph.add_node("B".to_string());
+        graph.add_node("C".to_string());
+        graph.add_node("D".to_string());
+        graph.add_edge("A".to_string(), "B".to_string());
+        graph.add_edge("A".to_string(), "C".to_string());
+        graph.add_edge("B".to_string(), "D".to_string());
+        graph.add_edge("C".to_string(), "D".to_string());
+
+        assert!(graph.find_cycle().is_none());
     }
 
     #[test]

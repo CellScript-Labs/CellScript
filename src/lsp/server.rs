@@ -178,7 +178,7 @@ impl LanguageServer for CellScriptBackend {
         let uri_str = params.text_document_position_params.text_document.uri.to_string();
         let position = convert_position_back(params.text_document_position_params.position);
         let location = self.state().goto_definition(&uri_str, position);
-        Ok(location.map(|loc| GotoDefinitionResponse::Scalar(convert_location(loc))))
+        Ok(location.and_then(convert_location).map(GotoDefinitionResponse::Scalar))
     }
 
     async fn references(&self, params: ReferenceParams) -> LspResult<Option<Vec<Location>>> {
@@ -188,7 +188,8 @@ impl LanguageServer for CellScriptBackend {
         if refs.is_empty() {
             Ok(None)
         } else {
-            Ok(Some(refs.into_iter().map(convert_location).collect()))
+            let locations = refs.into_iter().filter_map(convert_location).collect::<Vec<_>>();
+            Ok((!locations.is_empty()).then_some(locations))
         }
     }
 
@@ -208,7 +209,8 @@ impl LanguageServer for CellScriptBackend {
         if symbols.is_empty() {
             Ok(None)
         } else {
-            Ok(Some(DocumentSymbolResponse::Flat(symbols.into_iter().map(convert_symbol_information).collect())))
+            let symbols = symbols.into_iter().filter_map(convert_symbol_information).collect::<Vec<_>>();
+            Ok((!symbols.is_empty()).then_some(DocumentSymbolResponse::Flat(symbols)))
         }
     }
 
@@ -431,17 +433,13 @@ fn url_from_lsp_uri(uri: &str) -> Option<Url> {
     Url::parse(uri).ok().or_else(|| Url::from_file_path(uri).ok())
 }
 
-fn url_from_lsp_uri_lossy(uri: &str) -> Url {
-    url_from_lsp_uri(uri).unwrap_or_else(|| Url::parse("file:///").expect("literal file URL must be valid"))
-}
-
-fn convert_location(loc: lsp::Location) -> Location {
-    let url = url_from_lsp_uri_lossy(&loc.uri);
-    Location { uri: url, range: convert_range(loc.range) }
+fn convert_location(loc: lsp::Location) -> Option<Location> {
+    let url = url_from_lsp_uri(&loc.uri)?;
+    Some(Location { uri: url, range: convert_range(loc.range) })
 }
 
 #[allow(deprecated)]
-fn convert_symbol_information(sym: lsp::SymbolInformation) -> SymbolInformation {
+fn convert_symbol_information(sym: lsp::SymbolInformation) -> Option<SymbolInformation> {
     let kind = match sym.kind {
         lsp::SymbolKind::File => SymbolKind::FILE,
         lsp::SymbolKind::Module => SymbolKind::MODULE,
@@ -470,14 +468,14 @@ fn convert_symbol_information(sym: lsp::SymbolInformation) -> SymbolInformation 
         lsp::SymbolKind::Operator => SymbolKind::OPERATOR,
         lsp::SymbolKind::TypeParameter => SymbolKind::TYPE_PARAMETER,
     };
-    SymbolInformation {
+    Some(SymbolInformation {
         name: sym.name,
         kind,
         tags: None,
         deprecated: None,
-        location: convert_location(sym.location),
+        location: convert_location(sym.location)?,
         container_name: sym.container_name,
-    }
+    })
 }
 
 fn convert_text_edit(edit: lsp::TextEdit) -> TextEdit {
@@ -535,9 +533,12 @@ pub async fn run_lsp_server() {
 
 /// Blocking entry point for use from synchronous `main`.
 pub fn run_lsp_server_blocking() {
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("failed to build tokio runtime for LSP server")
-        .block_on(run_lsp_server());
+    let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            eprintln!("failed to build tokio runtime for LSP server: {}", error);
+            return;
+        }
+    };
+    runtime.block_on(run_lsp_server());
 }

@@ -564,7 +564,7 @@ impl ModuleResolver {
 }
 
 fn terminal_path_symbol(name: &str) -> &str {
-    name.rsplit("::").next().expect("str::rsplit always yields at least one element")
+    name.rsplit("::").next().unwrap_or(name)
 }
 
 fn type_def_name(type_def: &TypeDef) -> &str {

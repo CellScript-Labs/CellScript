@@ -473,7 +473,7 @@ impl Formatter {
             Expr::ByteString(bytes, _) => {
                 let mut body = String::with_capacity(bytes.len() * 4);
                 for byte in bytes {
-                    write!(&mut body, "\\x{:02x}", byte).expect("writing to a String cannot fail");
+                    let _ = write!(&mut body, "\\x{:02x}", byte);
                 }
                 format!("b\"{}\"", body)
             }
