@@ -204,8 +204,8 @@ pub enum VersionReq {
 
 impl PackageManager {
     pub fn new(root: impl AsRef<Path>) -> Self {
-        // AUDIT-FINDING: package manager stores the caller-provided root without canonicalizing it, while later manifest reads, dependency resolution, and lockfile checks mix this raw root with canonical dependency paths — severity: MEDIUM — canonicalize the root at construction or store explicit raw/canonical roots and compare only canonical identities
-        let root = root.as_ref().to_path_buf();
+        let raw_root = root.as_ref();
+        let root = std::fs::canonicalize(raw_root).unwrap_or_else(|_| raw_root.to_path_buf());
 
         Self { root, resolved: HashMap::new() }
     }
@@ -382,12 +382,7 @@ dist/
         let content = std::fs::read_to_string(&manifest_path)?;
         let manifest: PackageManifest = toml::from_str(&content)?;
 
-        // AUDIT-FINDING: resolved local package source records the raw dependency string for root dependencies even after canonical containment checks, so lockfile/registry identity can differ for equivalent paths like symlinked or normalized inputs — severity: LOW — persist a canonical package-relative source identity derived from package_path
-        let source_path = if base_root == self.root {
-            PathBuf::from(path)
-        } else {
-            package_path.strip_prefix(&self.root).unwrap_or(&package_path).to_path_buf()
-        };
+        let source_path = package_path.strip_prefix(&self.root).unwrap_or(&package_path).to_path_buf();
 
         Ok((
             ResolvedPackage {
@@ -909,7 +904,11 @@ impl Lockfile {
                 continue;
             };
             if let Some(dep) = manifest.dependencies.get(name) {
-                issues.extend(lock_dependency_consistency_issues(name, dep, locked));
+                let check_manifest_path_source = match resolved {
+                    Some(resolved) => !resolved.contains_key(name),
+                    None => true,
+                };
+                issues.extend(lock_dependency_consistency_issues(name, dep, locked, check_manifest_path_source));
             }
         }
 
@@ -964,7 +963,12 @@ fn resolved_dependency_consistency_issues(name: &str, package: &ResolvedPackage,
     issues
 }
 
-fn lock_dependency_consistency_issues(name: &str, dep: &Dependency, locked: &LockedDependency) -> Vec<String> {
+fn lock_dependency_consistency_issues(
+    name: &str,
+    dep: &Dependency,
+    locked: &LockedDependency,
+    check_manifest_path_source: bool,
+) -> Vec<String> {
     let mut issues = Vec::new();
 
     match dep {
@@ -981,14 +985,16 @@ fn lock_dependency_consistency_issues(name: &str, dep: &Dependency, locked: &Loc
         },
         Dependency::Detailed(detail) => {
             if let Some(path) = &detail.path {
-                match &locked.source {
-                    LockedSource::Path { path: locked_path } if locked_path == path => {}
-                    source => issues.push(format!(
-                        "dependency '{}' expects path source '{}' but Cell.lock records {}",
-                        name,
-                        path,
-                        locked_source_display(source)
-                    )),
+                if check_manifest_path_source {
+                    match &locked.source {
+                        LockedSource::Path { path: locked_path } if locked_path == path => {}
+                        source => issues.push(format!(
+                            "dependency '{}' expects path source '{}' but Cell.lock records {}",
+                            name,
+                            path,
+                            locked_source_display(source)
+                        )),
+                    }
                 }
                 push_locked_version_issue(name, &detail.version, &locked.version, &mut issues);
             } else if let Some(git) = &detail.git {
@@ -1305,6 +1311,96 @@ version = "0.1.0"
         assert_eq!(math.version, "0.1.0");
         assert!(matches!(math.source, PackageSource::Local(_)));
         assert_eq!(manager.get_source_paths(), vec![std::fs::canonicalize(root.join("deps/math/src")).unwrap()]);
+    }
+
+    #[test]
+    fn package_manager_records_canonical_local_source_paths() {
+        let temp = tempdir().unwrap();
+        let root = temp.path();
+        std::fs::create_dir_all(root.join("deps/math/src")).unwrap();
+        std::fs::write(
+            root.join("Cell.toml"),
+            r#"
+[package]
+name = "app"
+version = "0.1.0"
+
+[dependencies.math]
+version = "0.1.0"
+path = "deps/./math"
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("deps/math/Cell.toml"),
+            r#"
+[package]
+name = "math"
+version = "0.1.0"
+"#,
+        )
+        .unwrap();
+
+        let mut manager = PackageManager::new(root);
+        manager.resolve_dependencies().unwrap();
+
+        let math = manager.get_resolved().get("math").expect("path dependency should resolve");
+        assert!(matches!(&math.source, PackageSource::Local(path) if path == &PathBuf::from("deps/math")));
+
+        let manifest = manager.read_manifest().unwrap();
+        let mut lockfile = Lockfile::new();
+        lockfile.replace_with_resolved(manager.get_resolved());
+        let locked = lockfile.dependencies.get("math").expect("math should be locked");
+        assert!(matches!(&locked.source, LockedSource::Path { path } if path == "deps/math"));
+        assert!(lockfile.consistency_issues_with_resolved(&manifest, manager.get_resolved()).is_empty());
+
+        let unresolved_issues = lockfile.consistency_issues(&manifest);
+        assert!(unresolved_issues.iter().any(|issue| issue.contains("expects path source 'deps/./math'")), "{unresolved_issues:?}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn package_manager_canonicalizes_existing_symlink_roots() {
+        let temp = tempdir().unwrap();
+        let real_root = temp.path().join("real");
+        let link_root = temp.path().join("link");
+        std::fs::create_dir_all(real_root.join("deps/math/src")).unwrap();
+        std::os::unix::fs::symlink(&real_root, &link_root).unwrap();
+        std::fs::write(
+            real_root.join("Cell.toml"),
+            r#"
+[package]
+name = "app"
+version = "0.1.0"
+
+[dependencies.math]
+version = "0.1.0"
+path = "deps/math"
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            real_root.join("deps/math/Cell.toml"),
+            r#"
+[package]
+name = "math"
+version = "0.1.0"
+"#,
+        )
+        .unwrap();
+
+        let mut manager = PackageManager::new(&link_root);
+        manager.resolve_dependencies().unwrap();
+
+        let math = manager.get_resolved().get("math").expect("path dependency should resolve");
+        assert_eq!(math.path, std::fs::canonicalize(real_root.join("deps/math")).unwrap());
+        assert!(matches!(&math.source, PackageSource::Local(path) if path == &PathBuf::from("deps/math")));
+        assert_eq!(manager.get_source_paths(), vec![std::fs::canonicalize(real_root.join("deps/math/src")).unwrap()]);
+
+        let manifest = manager.read_manifest().unwrap();
+        let mut lockfile = Lockfile::new();
+        lockfile.replace_with_resolved(manager.get_resolved());
+        assert!(lockfile.consistency_issues_with_resolved(&manifest, manager.get_resolved()).is_empty());
     }
 
     #[test]
