@@ -2419,9 +2419,6 @@ impl IrGenerator {
         if left_ty == right_ty {
             return (left, right);
         }
-        if matches!(op, BinaryOp::Eq | BinaryOp::Ne) && Self::ir_hash_byte32_types_compatible(&left_ty, &right_ty) {
-            return (left, right);
-        }
         if matches!(op, BinaryOp::Add | BinaryOp::Sub) && left_ty == IrType::U128 && right_ty == IrType::U64 {
             return (left, right);
         }
@@ -2513,7 +2510,13 @@ impl IrGenerator {
                     Err(format!("unsupported ordering operand types {:?} and {:?}", left_ty, right_ty))
                 }
             }
-            BinaryOp::Eq | BinaryOp::Ne => Ok(()),
+            BinaryOp::Eq | BinaryOp::Ne => {
+                if types_match {
+                    Ok(())
+                } else {
+                    Err(format!("unsupported equality operand types {:?} and {:?}", left_ty, right_ty))
+                }
+            }
             BinaryOp::And | BinaryOp::Or => {
                 if left_ty == IrType::Bool && right_ty == IrType::Bool {
                     Ok(())
@@ -2522,13 +2525,6 @@ impl IrGenerator {
                 }
             }
         }
-    }
-
-    fn ir_hash_byte32_types_compatible(left: &IrType, right: &IrType) -> bool {
-        matches!(
-            (left, right),
-            (IrType::Hash, IrType::Array(inner, 32)) | (IrType::Array(inner, 32), IrType::Hash) if **inner == IrType::U8
-        )
     }
 
     fn binary_result_type(&self, op: BinaryOp, left: &IrOperand, right: &IrOperand) -> IrType {

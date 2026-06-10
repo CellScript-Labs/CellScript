@@ -217,8 +217,8 @@ where
 }
 
 #[test]
-fn hash_and_byte32_equality_is_allowed_for_authority_binding() {
-    let result = compile(
+fn hash_and_byte32_equality_requires_explicit_hash_domain() {
+    let err = compile(
         r#"
 module hash_byte32_authority
 
@@ -233,10 +233,29 @@ where
             ..CompileOptions::default()
         },
     )
-    .expect("Hash <-> [u8; 32] equality should compile for BIP340 authority binding");
+    .unwrap_err();
+
+    assert!(err.message.contains("comparison requires matching types"), "unexpected error: {}", err.message);
+
+    let result = compile(
+        r#"
+module hash_byte32_authority
+
+action bind_pubkey_to_authority(witness pubkey: [u8; 32], witness authority_hash: Hash) -> u64
+where
+    require hash_blake2b_packed(pubkey) == authority_hash
+    return 0
+"#,
+        CompileOptions {
+            target_profile: Some("ckb".to_string()),
+            target: Some("riscv64-asm".to_string()),
+            ..CompileOptions::default()
+        },
+    )
+    .expect("explicit packed-hash authority binding should compile");
 
     let assembly = String::from_utf8(result.artifact_bytes).expect("assembly should be utf-8");
-    assert!(assembly.contains("fixed-byte"), "expected fixed byte comparison lowering:\n{assembly}");
+    assert!(assembly.contains("hash_blake2b_packed"), "expected explicit packed-hash lowering:\n{assembly}");
     assert!(!assembly.contains("mixed-width Eq operands"), "{assembly}");
 }
 

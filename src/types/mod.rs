@@ -3911,7 +3911,6 @@ impl<'a> TypeChecker<'a> {
                     }
                     BinaryOp::Eq | BinaryOp::Ne => {
                         let same_or_widenable = self.types_equal(&left_ty, &right_ty)
-                            || Self::hash_byte32_types_compatible(&left_ty, &right_ty)
                             || (Self::widen_to(&left_ty, &right_ty).is_some()
                                 && !matches!(left_ty, Type::U128)
                                 && !matches!(right_ty, Type::U128));
@@ -6329,14 +6328,6 @@ impl<'a> TypeChecker<'a> {
             ));
         }
         Ok(())
-    }
-
-    fn hash_byte32_types_compatible(left: &Type, right: &Type) -> bool {
-        // AUDIT-FINDING: equality permits `Hash` and `[u8; 32]` as compatible solely by width, creating an implicit semantic subtype relation not shared by assignments, calls, or field initializers — severity: MEDIUM — require explicit casts/conversion helpers or model fixed-byte hashes as a distinct newtype relation
-        matches!(
-            (left, right),
-            (Type::Hash, Type::Array(elem, 32)) | (Type::Array(elem, 32), Type::Hash) if **elem == Type::U8
-        )
     }
 
     fn resolve_function(&self, name: &str) -> Option<FunctionDef> {
