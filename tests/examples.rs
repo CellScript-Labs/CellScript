@@ -186,12 +186,15 @@ fn language_example_path(name: &str) -> Utf8PathBuf {
 fn checked_in_example_cell_files() -> Vec<Utf8PathBuf> {
     let examples_root = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples");
     let mut files = Vec::new();
-    for root in [&examples_root, &examples_root.join("language")] {
-        let entries = std::fs::read_dir(root).unwrap_or_else(|err| panic!("failed to read {root}: {err}"));
+    let mut pending = vec![examples_root];
+    while let Some(root) = pending.pop() {
+        let entries = std::fs::read_dir(&root).unwrap_or_else(|err| panic!("failed to read {root}: {err}"));
         for entry in entries {
             let path = Utf8PathBuf::from_path_buf(entry.expect("example directory entry should be readable").path())
                 .expect("example path should be valid UTF-8");
-            if path.is_file() && path.extension() == Some("cell") {
+            if path.is_dir() {
+                pending.push(path);
+            } else if path.is_file() && path.extension() == Some("cell") {
                 files.push(path);
             }
         }
@@ -219,11 +222,7 @@ fn canonical_examples_are_the_single_checked_in_business_source() {
 #[test]
 fn all_checked_in_cell_examples_compile() {
     let files = checked_in_example_cell_files();
-    assert_eq!(
-        files.len(),
-        BUNDLED_EXAMPLES.len() + 1 + 12,
-        "expected bundled examples, top-level registry.cell, and language examples"
-    );
+    assert_eq!(files.len(), 23, "expected bundled, top-level registry, language, and iCKB benchmark examples");
 
     for path in files {
         compile_file(&path, CompileOptions::default()).unwrap_or_else(|err| panic!("{path} should compile: {}", err.message));
