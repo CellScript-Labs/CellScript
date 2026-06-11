@@ -2942,7 +2942,7 @@ def ensure_ckb_tx_measure_bin():
         return tx_measure_bin
     cargo_env = os.environ.copy()
     toolchain_file = ckb_repo / "rust-toolchain.toml"
-    if toolchain_file.exists() and "RUSTUP_TOOLCHAIN" not in cargo_env:
+    if toolchain_file.exists():
         match = re.search(r'channel\s*=\s*"([^"]+)"', toolchain_file.read_text(encoding="utf-8"))
         if match:
             cargo_env["RUSTUP_TOOLCHAIN"] = match.group(1)
