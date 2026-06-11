@@ -1004,9 +1004,14 @@ impl Lockfile {
 
     pub fn read_from_root(root: &Path) -> Result<Option<Self>> {
         let lock_path = root.join("Cell.lock");
-        if !lock_path.exists() {
-            return Ok(None);
-        }
+        let metadata = match std::fs::symlink_metadata(&lock_path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => {
+                return Err(CompileError::without_span(format!("failed to inspect lockfile '{}': {}", lock_path.display(), error)));
+            }
+        };
+        validate_package_manifest_metadata(root, &lock_path, "lockfile", &metadata)?;
         let content = std::fs::read_to_string(&lock_path)
             .map_err(|error| CompileError::without_span(format!("failed to read lockfile '{}': {}", lock_path.display(), error)))?;
         let lockfile = toml::from_str(&content)
@@ -1016,6 +1021,7 @@ impl Lockfile {
 
     pub fn write_to_root(&self, root: &Path) -> Result<()> {
         let lock_path = root.join("Cell.lock");
+        validate_package_manifest_write_target(root, &lock_path, "lockfile")?;
         let content = toml::to_string_pretty(self)?;
         std::fs::write(&lock_path, content)?;
         Ok(())
@@ -2067,6 +2073,44 @@ rev = "0123456789abcdef0123456789abcdef01234567"
         let error = Lockfile::read_from_root(temp.path()).unwrap_err();
 
         assert!(error.message.contains("failed to parse lockfile"), "{}", error.message);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn lockfile_read_from_root_rejects_symlink_escape() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempdir().unwrap();
+        let root = temp.path().join("repo");
+        let outside = temp.path().join("outside");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("Cell.lock"), "version = 1\n").unwrap();
+        symlink(outside.join("Cell.lock"), root.join("Cell.lock")).unwrap();
+
+        let error = Lockfile::read_from_root(&root).unwrap_err();
+
+        assert!(error.message.contains("lockfile") && error.message.contains("symbolic link"), "{}", error.message);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn lockfile_write_to_root_rejects_symlink_escape() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempdir().unwrap();
+        let root = temp.path().join("repo");
+        let outside = temp.path().join("outside");
+        let outside_lock = outside.join("Cell.lock");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(&outside_lock, "version = 1\n").unwrap();
+        symlink(&outside_lock, root.join("Cell.lock")).unwrap();
+
+        let error = Lockfile::new().write_to_root(&root).unwrap_err();
+
+        assert!(error.message.contains("lockfile") && error.message.contains("symbolic link"), "{}", error.message);
+        assert_eq!(std::fs::read_to_string(outside_lock).unwrap(), "version = 1\n");
     }
 
     #[test]
