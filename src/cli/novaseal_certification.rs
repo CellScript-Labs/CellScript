@@ -6017,6 +6017,8 @@ fn validate_attestation_templates(
 
 fn validate_bip340_tcb_source_inventory(repo_root: &Path, tcb: &Value) -> Result<Value> {
     let current_source = source_tree_hash_with_options(repo_root, BIP340_TCB_SOURCE_HASH_PATHS, true)?;
+    let recorded_repo_commit = json_pointer_str(tcb, "/repo_commit");
+    let current_repo_commit = git_commit(repo_root);
     let recorded_files = tcb
         .pointer("/source_inventory/files")
         .and_then(Value::as_array)
@@ -6032,11 +6034,16 @@ fn validate_bip340_tcb_source_inventory(repo_root: &Path, tcb: &Value) -> Result
         "source_tree_file_list_matches_current": recorded_files == current_files,
         "source_tree_has_files": json_pointer_i64(&current_source, "/file_count").is_some_and(|count| count > 0),
         "source_tree_invalid_paths_empty": json_array_strings(&current_source, "/invalid_paths").is_empty(),
+        "repo_commit_present": recorded_repo_commit.is_some_and(is_git_commit_hash),
+        "current_repo_commit_available": current_repo_commit.as_deref().is_some_and(is_git_commit_hash),
+        "repo_commit_matches_current_head": recorded_repo_commit == current_repo_commit.as_deref(),
     });
     Ok(json!({
-        "schema": "novaseal-bip340-tcb-source-inventory-validation-v0.1",
+        "schema": "novaseal-bip340-tcb-source-inventory-validation-v0.2",
         "status": if object_values_all_true(Some(&checks)) { "passed" } else { "failed" },
         "checks": checks,
+        "recorded_repo_commit": recorded_repo_commit,
+        "current_repo_commit": current_repo_commit,
         "recorded_source_tree_sha256": normalize_hex(json_pointer_str(tcb, "/source_inventory/source_tree_sha256")),
         "current_source_tree": current_source,
         "recorded_files": recorded_files,
@@ -11692,6 +11699,20 @@ mod tests {
         String::from_utf8_lossy(&output.stdout).trim().to_string()
     }
 
+    fn ensure_clean_fixture_repo(repo: &Path) -> String {
+        let init = std::process::Command::new("git").arg("init").arg("--initial-branch=main").arg(repo).output().unwrap();
+        if !init.status.success() {
+            let fallback = std::process::Command::new("git").arg("init").arg(repo).output().unwrap();
+            assert!(fallback.status.success(), "git init failed: {}", String::from_utf8_lossy(&fallback.stderr));
+            run_fixture_git(repo, &["checkout", "-B", "main"]);
+        }
+        run_fixture_git(repo, &["add", "."]);
+        run_fixture_git_with_identity(repo, &["commit", "-m", "fixture"]);
+        let status = fixture_git_stdout(repo, &["status", "--porcelain"]);
+        assert!(status.is_empty(), "fixture repo should be clean after commit, got status:\n{status}");
+        fixture_git_stdout(repo, &["rev-parse", "HEAD"])
+    }
+
     fn ensure_clean_fiber_fixture_repo(fiber_repo: &Path) -> String {
         if fiber_repo.join(".git").exists() {
             let status = fixture_git_stdout(fiber_repo, &["status", "--porcelain"]);
@@ -12101,6 +12122,7 @@ mod tests {
             "// SAFETY: test syscall boundary\nunsafe {\n}\n// SAFETY: second syscall boundary\nunsafe {\n}\n",
         )
         .unwrap();
+        let repo_commit = ensure_clean_fixture_repo(temp.path());
         let tcb_source = source_tree_hash_with_options(temp.path(), BIP340_TCB_SOURCE_HASH_PATHS, true).unwrap();
         let tcb_files = json_array_strings(&tcb_source, "/files").into_iter().map(|path| json!({ "path": path })).collect::<Vec<_>>();
 
@@ -12114,6 +12136,7 @@ mod tests {
         });
         let tcb = json!({
             "status": "passed_local_review_external_attestation_required",
+            "repo_commit": repo_commit,
             "source_inventory": {
                 "source_tree_sha256": json_pointer_str(&tcb_source, "/sha256"),
                 "total_files": json_pointer_i64(&tcb_source, "/file_count"),
@@ -12161,9 +12184,11 @@ mod tests {
         let riscv_src = temp.path().join(CORE_ROOT).join("verifier/novaseal_btc_verifier_riscv/src");
         std::fs::create_dir_all(&riscv_src).unwrap();
         std::fs::write(riscv_src.join("main.rs"), "fn main() {}\n").unwrap();
+        let repo_commit = ensure_clean_fixture_repo(temp.path());
         let source = source_tree_hash_with_options(temp.path(), BIP340_TCB_SOURCE_HASH_PATHS, true).unwrap();
         let files = json_array_strings(&source, "/files").into_iter().map(|path| json!({ "path": path })).collect::<Vec<_>>();
         let tcb = json!({
+            "repo_commit": repo_commit,
             "source_inventory": {
                 "source_tree_sha256": json_pointer_str(&source, "/sha256"),
                 "total_files": json_pointer_i64(&source, "/file_count"),
@@ -12179,6 +12204,18 @@ mod tests {
         let failed_hash = validate_bip340_tcb_source_inventory(temp.path(), &stale_hash).unwrap();
         assert_eq!(json_pointer_str(&failed_hash, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&failed_hash, "/checks/source_tree_sha256_matches_current"));
+
+        let mut stale_commit = tcb.clone();
+        stale_commit["repo_commit"] = json!("0000000000000000000000000000000000000000");
+        let failed_commit = validate_bip340_tcb_source_inventory(temp.path(), &stale_commit).unwrap();
+        assert_eq!(json_pointer_str(&failed_commit, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&failed_commit, "/checks/repo_commit_matches_current_head"));
+
+        let mut missing_commit = tcb.clone();
+        missing_commit.as_object_mut().unwrap().remove("repo_commit");
+        let failed_missing_commit = validate_bip340_tcb_source_inventory(temp.path(), &missing_commit).unwrap();
+        assert_eq!(json_pointer_str(&failed_missing_commit, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&failed_missing_commit, "/checks/repo_commit_present"));
 
         let mut missing_file = tcb;
         missing_file["source_inventory"]["files"] = json!([]);
