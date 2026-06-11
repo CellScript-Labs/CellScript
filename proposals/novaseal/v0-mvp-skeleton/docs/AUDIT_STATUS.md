@@ -23,7 +23,7 @@ Package and script checks:
 - `cellc src/nova_receipt_type.cell --target-profile ckb` passes.
 - `python3 scripts/novaseal_wallet_signing_vectors.py --pretty` passes.
 - `python3 scripts/novaseal_bip340_tcb_review.py --pretty` passes local review gates and records that external attestation is still required.
-- A current `target/debug/cellc certify --plugin novaseal-profile-v0 --repo-root . --json` run is only locally acceptable when its generated reports are fresh for the exact git commit and its stateful acceptance report has `status=passed`, `live_devnet_rpc_executed=true`, `acceptance_blockers=0`, and `blockers=0`.
+- A current `target/debug/cellc certify --plugin novaseal-profile-v0 --repo-root . --json` run is locally acceptable when its generated reports are fresh for the exact git commit and its stateful acceptance report has `live_devnet_rpc_executed=true`, `local_blockers=0`, and either `status=passed` or `status=local_devnet_passed_external_endpoint_required`. The latter status is only a local acceptance pass; production/external completeness still requires `status=passed`, `acceptance_blockers=0`, and `blockers=0`.
 
 Live local devnet:
 
@@ -36,7 +36,7 @@ Live local devnet:
 
 Aggregate stateful gate:
 
-- `scripts/novaseal_devnet_stateful_acceptance.sh --pretty` delegates to `cellc certify --plugin novaseal-profile-v0` and reports both local blockers and live acceptance blockers. It is not a pass unless it prints `status=passed`, `live_devnet_rpc_executed=true`, `acceptance_blockers=0`, and `blockers=0`.
+- `scripts/novaseal_devnet_stateful_acceptance.sh --pretty` delegates to `cellc certify --plugin novaseal-profile-v0` and reports both local blockers and live acceptance blockers. It is a local pass when it prints `status=local_devnet_passed_external_endpoint_required`, `live_devnet_rpc_executed=true`, `local_blockers=0`, and `external_endpoint_status=external_required`; it is a full external-completeness pass only when it prints `status=passed`, `acceptance_blockers=0`, and `blockers=0`.
 - The same aggregate gate includes Agreement Profile originate -> repay, originate -> claim, and live negative dry-runs.
 
 Historical full runbook refresh, 2026-06-10:

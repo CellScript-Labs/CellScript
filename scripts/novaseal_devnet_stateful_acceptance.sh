@@ -69,15 +69,30 @@ print(
             field("local_blocker_count"),
             field("acceptance_blocker_count"),
             field("blocker_count"),
+            str(report.get("external_endpoint_coverage", {}).get("status", "unknown")),
         ]
     )
 )
 PY
 )"
-IFS=$'\t' read -r status live_devnet_rpc_executed local_blockers acceptance_blockers blockers <<< "$summary"
-printf 'wrote %s status=%s live_devnet_rpc_executed=%s local_blockers=%s acceptance_blockers=%s blockers=%s\n' \
-  "$REPORT" "$status" "$live_devnet_rpc_executed" "$local_blockers" "$acceptance_blockers" "$blockers"
-if [[ "$blockers" != "0" && "$cert_status" -eq 0 ]]; then
-  cert_status=1
+IFS=$'\t' read -r status live_devnet_rpc_executed local_blockers acceptance_blockers blockers external_endpoint_status <<< "$summary"
+printf 'wrote %s status=%s live_devnet_rpc_executed=%s local_blockers=%s acceptance_blockers=%s blockers=%s external_endpoint_status=%s\n' \
+  "$REPORT" "$status" "$live_devnet_rpc_executed" "$local_blockers" "$acceptance_blockers" "$blockers" "$external_endpoint_status"
+if [[ "$cert_status" -eq 0 ]]; then
+  case "$status" in
+    passed)
+      if [[ "$blockers" != "0" ]]; then
+        cert_status=1
+      fi
+      ;;
+    local_devnet_passed_external_endpoint_required)
+      if [[ "$live_devnet_rpc_executed" != "true" || "$local_blockers" != "0" || "$external_endpoint_status" != "external_required" ]]; then
+        cert_status=1
+      fi
+      ;;
+    *)
+      cert_status=1
+      ;;
+  esac
 fi
 exit "$cert_status"

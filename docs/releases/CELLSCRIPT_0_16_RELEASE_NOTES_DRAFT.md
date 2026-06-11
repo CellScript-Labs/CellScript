@@ -75,11 +75,21 @@ claim local NovaSeal devnet acceptance when the freshly regenerated report
 prints:
 
 ```text
+status=local_devnet_passed_external_endpoint_required
+live_devnet_rpc_executed=true
+local_blockers=0
+external_endpoint_status=external_required
+```
+
+Full external-completeness acceptance is stricter and must print:
+
+```text
 status=passed
 live_devnet_rpc_executed=true
 local_blockers=0
 acceptance_blockers=0
 blockers=0
+external_endpoint_status=passed
 ```
 
 Historical reports from older commits are not current evidence after source or

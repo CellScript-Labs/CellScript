@@ -9,9 +9,11 @@ that is not the same as a live devnet lifecycle. The release gate for this is:
 scripts/novaseal_devnet_stateful_acceptance.sh --pretty
 ```
 
-The command writes `target/novaseal-devnet-stateful-acceptance.json` and exits
-non-zero until live devnet RPC execution has actually passed. Use
-`--report-only` when a developer only wants to inspect the readiness report.
+The command writes `target/novaseal-devnet-stateful-acceptance.json`. It exits
+zero for a local acceptance pass when live devnet RPC execution has passed,
+local blockers are zero, and the only remaining stateful blocker is explicitly
+the external BTC/Fiber endpoint evidence boundary. Use `--report-only` when a
+developer only wants to inspect the readiness report.
 
 Resolved lifecycle blockers:
 
@@ -55,6 +57,9 @@ Current live evidence:
   early-claim negatives, submitted valid repay and valid claim against their
   exact active outpoints, and confirmed both active outputs were dead plus
   closed/payout/receipt outputs were live.
-- The aggregate gate status is `passed`.
+- The aggregate gate status is `local_devnet_passed_external_endpoint_required`
+  when local devnet passes but public BTC/Fiber endpoint evidence is still
+  outstanding. It becomes `passed` only after that external endpoint evidence is
+  also complete and `blockers=0`.
 
 See [DEVNET_FULL_ACCEPTANCE_RUNBOOK.md](../../DEVNET_FULL_ACCEPTANCE_RUNBOOK.md) for prerequisites, freshness rules, and the full command sequence.

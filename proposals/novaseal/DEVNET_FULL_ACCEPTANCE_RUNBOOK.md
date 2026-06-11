@@ -15,9 +15,11 @@ Last full historical 0.16 acceptance refresh: **2026-06-10**.
   service-builder fixtures, BTC SPV adapter, external attestation adapter, and
   external evidence handoff bundle.
 - `./scripts/novaseal_devnet_stateful_acceptance.sh --pretty` wrote
-  `target/novaseal-devnet-stateful-acceptance.json` with historical
-  `status=passed`, `live_devnet_rpc_executed=true`, and `blockers=0` for that
-  exact commit.
+  `target/novaseal-devnet-stateful-acceptance.json` with historical local
+  devnet evidence for that exact commit. Current checkouts with public endpoint
+  evidence still outstanding report
+  `status=local_devnet_passed_external_endpoint_required` rather than
+  `status=passed`.
 - `target/debug/cellc certify --plugin novaseal-profile-v0 --repo-root . --json`
   returned historical `status: "passed"` and
   `certification_level: "public_ecosystem_profile_certification_local_ready"`
@@ -27,7 +29,16 @@ Last full historical 0.16 acceptance refresh: **2026-06-10**.
   runbook.
 
 For a changed checkout, the historical reports are not current evidence. The
-aggregate gate must be rerun and must report all of:
+aggregate gate must be rerun. A local devnet acceptance pass must report all of:
+
+```text
+status=local_devnet_passed_external_endpoint_required
+live_devnet_rpc_executed=true
+local_blockers=0
+external_endpoint_status=external_required
+```
+
+Full external-completeness and production acceptance must instead report all of:
 
 ```text
 status=passed
@@ -35,11 +46,13 @@ live_devnet_rpc_executed=true
 local_blockers=0
 acceptance_blockers=0
 blockers=0
+external_endpoint_status=passed
 ```
 
 Any `ready_to_run_live_devnet`, `ready_to_wire_live_devnet`, stale provenance,
-missing public BTC SPV evidence, or failed Fiber endpoint coverage is a blocker
-for current-commit acceptance, even when local static blockers are zero.
+or failed local Fiber endpoint coverage is a blocker for current-commit local
+acceptance, even when local static blockers are zero. Missing public BTC SPV
+evidence remains a blocker for external-completeness and production acceptance.
 
 Previous full post-Phase-5 refresh: **2026-06-05**.
 

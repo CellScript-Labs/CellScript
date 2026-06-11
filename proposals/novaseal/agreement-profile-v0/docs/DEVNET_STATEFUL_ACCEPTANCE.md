@@ -28,8 +28,10 @@ The Agreement live runner now:
 - verify the valid terminal paths consume active cells and leave the closed
   agreement, payout, and receipt cells live.
 
-The shared gate currently reports `passed`: NovaSeal core has live bootstrap ->
-key-auth transition evidence, and this Agreement Profile has live originate ->
-repay plus originate -> claim evidence.
+The shared gate currently reports `local_devnet_passed_external_endpoint_required`
+when NovaSeal core has live bootstrap -> key-auth transition evidence and this
+Agreement Profile has live originate -> repay plus originate -> claim evidence,
+but public BTC/Fiber endpoint evidence is still outstanding. It reports
+`passed` only after that external endpoint evidence is complete too.
 
 See [DEVNET_FULL_ACCEPTANCE_RUNBOOK.md](../../DEVNET_FULL_ACCEPTANCE_RUNBOOK.md) for prerequisites, freshness rules, and the full command sequence.
