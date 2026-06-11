@@ -3,7 +3,7 @@
 **Status**: reviewable CKB-native agreement skeleton with audited terminal-path
 structure, local transaction-shape evidence, resolved transaction verifier
 evidence, live devnet lifecycle evidence, fixed-width wallet signing vectors,
-and local production-gate checks. Public/shared CellDep attestation, public BTC
+wallet/lock digest alignment, and local production-gate checks. Public/shared CellDep attestation, public BTC
 SPV evidence for BTC-facing profiles, RWA legal/registry review evidence, and
 external BIP340 TCB review are still required before production claims.
 
@@ -47,6 +47,7 @@ Implemented in this slice:
 | Receipt hash output binding | implemented | resolved-transaction-covered |
 | Checked terminal arithmetic | implemented | source-guard-present + local-arithmetic-boundary-covered + production-gate-covered |
 | Fixed-width wallet signing vectors | implemented | production-gate-covered |
+| Wallet/lock digest alignment | implemented | production-gate-covered |
 | BTC UTXO mirror / SPV / OP_RETURN | out of scope | not implemented |
 
 Do not call this "trustless borrowing". Better names:
@@ -162,7 +163,8 @@ terminal input transactions can reach the Agreement Profile type/action script.
 All fixture files are now covered by the resolved transaction harness.
 
 These harnesses remain local verifier evidence, distinct from the live devnet
-runner. Local devnet deployment pinning and wallet vectors are now gate-checked.
+runner. Local devnet deployment pinning, wallet vectors, and wallet/lock digest
+alignment are now gate-checked.
 Public/shared CellDep publication, public BTC SPV evidence for BTC-facing
 profiles, and external BIP340 TCB review remain production attestations or
 external evidence, not local facts.

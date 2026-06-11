@@ -284,8 +284,21 @@ These scripts are pure computation (no external services). Run in order:
 # BIP340 TCB review
 python3 scripts/novaseal_bip340_tcb_review.py --pretty
 
+# Canonical packed-reference vectors
+(
+  cd proposals/novaseal/v0-mvp-skeleton
+  python3 scripts/novaseal_canonical_vectors.py --pretty
+)
+
 # Wallet signing vectors
 python3 scripts/novaseal_wallet_signing_vectors.py --pretty
+
+# Wallet/lock digest alignment
+(
+  cd proposals/novaseal/v0-mvp-skeleton
+  python3 scripts/novaseal_wallet_signing_alignment.py --pretty
+  python3 scripts/novaseal_fixture_harness.py --pretty
+)
 
 # Profile operator fixtures (depends on live reports)
 python3 scripts/novaseal_profile_operator_fixtures.py --pretty
@@ -307,7 +320,11 @@ Expected refreshed statuses:
 
 - `target/novaseal-bip340-tcb-review.json`:
   `passed_local_review_external_attestation_required`
+- `proposals/novaseal/v0-mvp-skeleton/target/novaseal-canonical-vectors.json`:
+  `11/11` canonical packed-reference vectors
 - `target/novaseal-wallet-signing-vectors.json`: `passed`, `14/14` vectors
+- `proposals/novaseal/v0-mvp-skeleton/target/novaseal-wallet-signing-alignment.json`:
+  `wallet_lock_alignment_ready=true`, `11/11` digest matches
 - `target/novaseal-profile-operator-fixtures.json`: `passed`, `10/10` cases
 - `target/novaseal-service-builder-fixtures.json`: `passed`, `10/10` cases
 - `target/novaseal-btc-spv-evidence-adapter.json`: `passed`, `3/3` profiles

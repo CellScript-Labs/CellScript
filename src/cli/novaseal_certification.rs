@@ -38,6 +38,7 @@ const FIBER_CANDIDATE_LIVE: &str = "target/novaseal-fiber-candidate-devnet-state
 const FIBER_NODE_EXPERIMENTS: &str = "target/novaseal-fiber-node-experiments.json";
 const STATEFUL_ACCEPTANCE: &str = "target/novaseal-devnet-stateful-acceptance.json";
 const WALLET_VECTORS: &str = "target/novaseal-wallet-signing-vectors.json";
+const WALLET_LOCK_ALIGNMENT: &str = "proposals/novaseal/v0-mvp-skeleton/target/novaseal-wallet-signing-alignment.json";
 const PROFILE_OPERATOR_FIXTURES: &str = "target/novaseal-profile-operator-fixtures.json";
 const SERVICE_BUILDER_FIXTURES: &str = "target/novaseal-service-builder-fixtures.json";
 const BTC_SPV_EVIDENCE_ADAPTER: &str = "target/novaseal-btc-spv-evidence-adapter.json";
@@ -1005,6 +1006,7 @@ pub(crate) fn build_report(repo_root: &Path) -> Result<Value> {
     let core_live = live_verifier_facts(repo_root, CORE_LIVE)?;
     let agreement_live = live_verifier_facts(repo_root, AGREEMENT_LIVE)?;
     let wallet = json_load(repo_root, WALLET_VECTORS)?;
+    let wallet_alignment = json_load(repo_root, WALLET_LOCK_ALIGNMENT)?;
     let profile_operator_fixtures = json_load(repo_root, PROFILE_OPERATOR_FIXTURES)?;
     let service_builder_fixtures = json_load(repo_root, SERVICE_BUILDER_FIXTURES)?;
     let btc_spv_evidence_adapter = json_load(repo_root, BTC_SPV_EVIDENCE_ADAPTER)?;
@@ -1049,6 +1051,7 @@ pub(crate) fn build_report(repo_root: &Path) -> Result<Value> {
         agreement_manifest: &agreement_manifest,
         core_security: &core_security,
         wallet: &wallet,
+        wallet_alignment: &wallet_alignment,
         profile_operator_fixtures: &profile_operator_fixtures,
         service_builder_fixtures: &service_builder_fixtures,
         btc_spv_evidence_adapter: &btc_spv_evidence_adapter,
@@ -1091,7 +1094,7 @@ pub(crate) fn build_report(repo_root: &Path) -> Result<Value> {
         gate(
             "agreement_profile_public_ecosystem_certification_v0",
             json_pointer_str(&profile_certification, "/status").unwrap_or("failed"),
-            "proposals/novaseal/agreement-profile-v0/Cell.toml + proposals/novaseal/agreement-profile-v0/schemas + proposals/novaseal/agreement-profile-v0/fixtures + target/novaseal-devnet-stateful-acceptance.json + target/novaseal-wallet-signing-vectors.json + target/novaseal-profile-operator-fixtures.json + target/novaseal-service-builder-fixtures.json + target/novaseal-external-evidence-handoff-bundle.json",
+            "proposals/novaseal/agreement-profile-v0/Cell.toml + proposals/novaseal/agreement-profile-v0/schemas + proposals/novaseal/agreement-profile-v0/fixtures + target/novaseal-devnet-stateful-acceptance.json + target/novaseal-wallet-signing-vectors.json + proposals/novaseal/v0-mvp-skeleton/target/novaseal-wallet-signing-alignment.json + target/novaseal-profile-operator-fixtures.json + target/novaseal-service-builder-fixtures.json + target/novaseal-external-evidence-handoff-bundle.json",
             profile_certification.clone(),
         ),
         gate(
@@ -1111,6 +1114,16 @@ pub(crate) fn build_report(repo_root: &Path) -> Result<Value> {
             if wallet_gate_passed(&wallet) { "passed" } else { "failed" },
             WALLET_VECTORS,
             wallet.get("summary").cloned().unwrap_or(Value::Null),
+        ),
+        gate(
+            "wallet_lock_digest_alignment",
+            if wallet_lock_alignment_gate_passed(&wallet_alignment) {
+                "passed"
+            } else {
+                "failed"
+            },
+            WALLET_LOCK_ALIGNMENT,
+            wallet_alignment.get("summary").cloned().unwrap_or(Value::Null),
         ),
         gate(
             "planned_profile_operator_fixtures",
@@ -1232,7 +1245,7 @@ pub(crate) fn build_report(repo_root: &Path) -> Result<Value> {
     let external_blockers = v1_readiness.get("external_blockers").cloned().unwrap_or_else(|| Value::Array(Vec::new()));
 
     Ok(json!({
-        "schema": "novaseal-production-gates-v0.3",
+        "schema": "novaseal-production-gates-v0.4",
         "status": status,
         "production_ready": production_ready,
         "production_gates_passed": production_gates_passed,
@@ -1327,7 +1340,13 @@ fn build_v1_readiness(
             "wallet_signing_vectors",
             json_pointer_bool(profile_certification, "/local_checks/wallet_vector_detail_passed"),
             "target/novaseal-wallet-signing-vectors.json",
-            "wallet-facing signing safety",
+            "wallet-facing signing vector safety",
+        ),
+        readiness_dimension(
+            "wallet_lock_digest_alignment",
+            json_pointer_bool(profile_certification, "/local_checks/wallet_lock_alignment_passed"),
+            "proposals/novaseal/v0-mvp-skeleton/target/novaseal-wallet-signing-alignment.json",
+            "wallet, lock, and verifier message32 alignment",
         ),
         readiness_dimension(
             "profile_operator_fixtures",
@@ -1416,6 +1435,7 @@ fn build_v1_readiness(
         "multi_business_scenario_coverage",
         "full_stateful_acceptance",
         "wallet_signing_vectors",
+        "wallet_lock_digest_alignment",
         "profile_operator_fixtures",
         "service_builder_fixtures",
         "btc_spv_evidence_adapter",
@@ -1461,7 +1481,7 @@ fn build_v1_readiness(
         "failed_dimensions": failed_dimensions,
         "external_blockers": external_blockers,
         "acceptance_boundary": {
-            "local_ready_means": "architecture, audit, wallet, planned-profile operator fixtures, service-builder fixtures, BTC SPV evidence adapter request, external attestation adapter request, external evidence handoff bundle, TCB, multi-profile devnet, multi-business scenarios, and full stateful acceptance are machine checked locally",
+            "local_ready_means": "architecture, audit, wallet signing vectors, wallet/lock digest alignment, planned-profile operator fixtures, service-builder fixtures, BTC SPV evidence adapter request, external attestation adapter request, external evidence handoff bundle, TCB, multi-profile devnet, multi-business scenarios, and full stateful acceptance are machine checked locally",
             "production_ready_requires": [
                 "all NovaSeal profiles pass the profile production-completeness matrix",
                 "complete external BTC SPV and Fiber endpoint acceptance",
@@ -1497,7 +1517,8 @@ fn build_planned_profile_matrix(profile_certification: &Value, stateful_acceptan
     let agreement_passed = json_pointer_str(stateful_acceptance, "/profile_coverage/covered_profiles/1/status") == Some("passed")
         && json_pointer_bool(profile_certification, "/local_checks/conformance_gate_passed");
     let key_signature_passed = json_pointer_bool(profile_certification, "/local_checks/local_bip340_tcb_review_passed")
-        && json_pointer_bool(profile_certification, "/local_checks/wallet_vector_detail_passed");
+        && json_pointer_bool(profile_certification, "/local_checks/wallet_vector_detail_passed")
+        && json_pointer_bool(profile_certification, "/local_checks/wallet_lock_alignment_passed");
     let btc_tx_commitment_package_passed =
         json_pointer_str(profile_certification, "/planned_profile_packages/btc_tx_commitment/status") == Some("passed");
     let btc_utxo_seal_package_passed =
@@ -1536,7 +1557,7 @@ fn build_planned_profile_matrix(profile_certification: &Value, stateful_acceptan
             "Seal profile",
             "BTC key signature authority over a typed CKB transition",
             key_signature_passed,
-            "target/novaseal-bip340-tcb-review.json + target/novaseal-wallet-signing-vectors.json",
+            "target/novaseal-bip340-tcb-review.json + target/novaseal-wallet-signing-vectors.json + proposals/novaseal/v0-mvp-skeleton/target/novaseal-wallet-signing-alignment.json",
         ),
         planned_row(
             "seal_profile_btc_transaction_commitment",
@@ -3382,6 +3403,7 @@ struct ProfileCertificationInputs<'a> {
     agreement_manifest: &'a Value,
     core_security: &'a Value,
     wallet: &'a Value,
+    wallet_alignment: &'a Value,
     profile_operator_fixtures: &'a Value,
     service_builder_fixtures: &'a Value,
     btc_spv_evidence_adapter: &'a Value,
@@ -3402,6 +3424,7 @@ fn validate_profile_certification(input: ProfileCertificationInputs<'_>) -> Resu
         agreement_manifest,
         core_security,
         wallet,
+        wallet_alignment,
         profile_operator_fixtures,
         service_builder_fixtures,
         btc_spv_evidence_adapter,
@@ -3417,6 +3440,7 @@ fn validate_profile_certification(input: ProfileCertificationInputs<'_>) -> Resu
     let schema_files = expected_files(repo_root, &repo_root.join(AGREEMENT_ROOT).join("schemas"), EXPECTED_AGREEMENT_SCHEMA_FILES)?;
     let fixture_files = expected_files(repo_root, &repo_root.join(AGREEMENT_ROOT).join("fixtures"), EXPECTED_AGREEMENT_FIXTURES)?;
     let wallet_detail = validate_wallet_vector_detail(wallet);
+    let wallet_alignment_detail = validate_wallet_lock_alignment_detail(wallet_alignment);
     let profile_operator_fixture_detail = validate_profile_operator_fixture_detail(repo_root, profile_operator_fixtures)?;
     let service_builder_fixture_detail = validate_service_builder_fixture_detail(service_builder_fixtures, profile_operator_fixtures);
     let public_btc_spv_template = json_load_path(repo_root, &repo_root.join(PUBLIC_BTC_SPV_EVIDENCE_TEMPLATE))?;
@@ -3483,6 +3507,7 @@ fn validate_profile_certification(input: ProfileCertificationInputs<'_>) -> Resu
         "profile_schema_set_exact": json_pointer_bool(&schema_files, "/exact"),
         "profile_fixture_set_exact": json_pointer_bool(&fixture_files, "/exact"),
         "wallet_vector_detail_passed": json_pointer_str(&wallet_detail, "/status") == Some("passed"),
+        "wallet_lock_alignment_passed": json_pointer_str(&wallet_alignment_detail, "/status") == Some("passed"),
         "profile_operator_fixture_detail_passed": json_pointer_str(&profile_operator_fixture_detail, "/status") == Some("passed"),
         "service_builder_fixture_detail_passed": json_pointer_str(&service_builder_fixture_detail, "/status") == Some("passed"),
         "btc_spv_evidence_adapter_passed": json_pointer_str(&btc_spv_adapter_detail, "/status") == Some("passed"),
@@ -3533,6 +3558,7 @@ fn validate_profile_certification(input: ProfileCertificationInputs<'_>) -> Resu
         "schema_files": schema_files,
         "fixture_files": fixture_files,
         "wallet_vectors": wallet_detail,
+        "wallet_lock_alignment": wallet_alignment_detail,
         "profile_operator_fixtures": profile_operator_fixture_detail,
         "service_builder_fixtures": service_builder_fixture_detail,
         "btc_spv_evidence_adapter": btc_spv_adapter_detail,
@@ -3624,6 +3650,49 @@ fn validate_wallet_vector_detail(wallet: &Value) -> Value {
         "actions": action_checks,
         "expected_actions": expected_actions.into_iter().collect::<Vec<_>>(),
         "agreement_vector_count": agreement_vectors.len(),
+    })
+}
+
+fn validate_wallet_lock_alignment_detail(alignment: &Value) -> Value {
+    let fixtures = alignment.get("fixtures").and_then(Value::as_array).cloned().unwrap_or_default();
+    let fixture_count = json_pointer_i64(alignment, "/summary/fixtures");
+    let fixture_details_passed = fixtures.iter().all(|fixture| {
+        json_pointer_bool(fixture, "/canonical_vs_current_lock_digest_match")
+            && json_pointer_str(fixture, "/current_lock_message_rule")
+                == Some("hash_blake2b_packed(NovaSealSignedIntentV0 { core, expected_receipt_hash })")
+            && json_pointer_str(fixture, "/canonical_wallet_message_rule") == Some("signed_intent_hash_after_resolved_receipt")
+            && json_pointer_bool(fixture, "/canonical_wallet_positive/self_verified")
+            && json_pointer_bool(fixture, "/current_lock_compat_positive/self_verified")
+            && json_pointer_bool(fixture, "/cross_check/canonical_signature_accepts_current_lock_digest")
+            && json_pointer_bool(fixture, "/cross_check/current_lock_signature_accepts_canonical_digest")
+            && json_pointer_i64(fixture, "/resolved_intent_size_bytes") == Some(254)
+    });
+    let checks = json!({
+        "schema_current": json_pointer_str(alignment, "/schema") == Some("novaseal-wallet-signing-alignment-v0.2"),
+        "classification_current": json_pointer_str(alignment, "/classification")
+            == Some("wallet_signing_vectors_and_lock_digest_alignment_probe"),
+        "exact_fixture_count": fixture_count == Some(11) && fixtures.len() == 11,
+        "source_model_uses_packed_intent": json_pointer_bool(alignment, "/source_digest_model/all_required_snippets_present")
+            && json_pointer_bool(alignment, "/source_digest_model/state_type_uses_packed_signed_intent_hash")
+            && json_pointer_bool(alignment, "/source_digest_model/state_type_verifier_uses_signed_intent_hash")
+            && json_pointer_bool(alignment, "/source_digest_model/package_lock_uses_packed_digest")
+            && json_pointer_bool(alignment, "/source_digest_model/standalone_lock_uses_packed_digest")
+            && !json_pointer_bool(alignment, "/source_digest_model/legacy_domain_hash_visible"),
+        "summary_alignment_ready": json_pointer_bool(alignment, "/summary/wallet_lock_alignment_ready"),
+        "production_wallet_ready": json_pointer_bool(alignment, "/summary/production_wallet_ready"),
+        "summary_digest_counts_match": json_pointer_i64(alignment, "/summary/current_lock_digest_matches_canonical") == fixture_count
+            && json_pointer_i64(alignment, "/summary/current_lock_digest_mismatches") == Some(0),
+        "summary_signature_counts_match": json_pointer_i64(alignment, "/summary/canonical_wallet_vectors_self_verified") == fixture_count
+            && json_pointer_i64(alignment, "/summary/current_lock_compat_vectors_self_verified") == fixture_count
+            && json_pointer_i64(alignment, "/summary/canonical_wallet_signatures_accepted_by_current_lock_digest") == fixture_count
+            && json_pointer_i64(alignment, "/summary/current_lock_signatures_accepted_by_canonical_wallet_digest") == fixture_count,
+        "fixture_details_passed": fixture_details_passed,
+    });
+    json!({
+        "status": if object_values_all_true(Some(&checks)) { "passed" } else { "failed" },
+        "checks": checks,
+        "summary": alignment.get("summary").cloned().unwrap_or(Value::Null),
+        "source_digest_model": alignment.get("source_digest_model").cloned().unwrap_or(Value::Null),
     })
 }
 
@@ -6356,6 +6425,10 @@ fn wallet_gate_passed(wallet: &Value) -> bool {
         && json_pointer_i64(wallet, "/summary/matched") == json_pointer_i64(wallet, "/summary/total")
 }
 
+fn wallet_lock_alignment_gate_passed(alignment: &Value) -> bool {
+    json_pointer_str(&validate_wallet_lock_alignment_detail(alignment), "/status") == Some("passed")
+}
+
 fn novaseal_handoff_report_hash(label: &str, value: &Value) -> String {
     let mut state = blake2b_simd::Params::new().hash_length(32).personal(b"NovaExtHandoff").to_state();
     state.update(label.as_bytes());
@@ -8175,6 +8248,56 @@ mod tests {
         })
     }
 
+    fn wallet_lock_alignment_report(legacy_domain_hash_visible: bool) -> Value {
+        let fixtures = (0..11)
+            .map(|index| {
+                json!({
+                    "fixture": format!("fixture_{index}.json"),
+                    "resolved_intent_size_bytes": 254,
+                    "canonical_wallet_message32": test_hex32(0x30),
+                    "current_lock_message32": test_hex32(0x30),
+                    "current_lock_message_rule": "hash_blake2b_packed(NovaSealSignedIntentV0 { core, expected_receipt_hash })",
+                    "canonical_wallet_message_rule": "signed_intent_hash_after_resolved_receipt",
+                    "canonical_vs_current_lock_digest_match": true,
+                    "canonical_wallet_positive": {
+                        "self_verified": true,
+                    },
+                    "current_lock_compat_positive": {
+                        "self_verified": true,
+                    },
+                    "cross_check": {
+                        "canonical_signature_accepts_current_lock_digest": true,
+                        "current_lock_signature_accepts_canonical_digest": true,
+                    },
+                })
+            })
+            .collect::<Vec<_>>();
+        json!({
+            "schema": "novaseal-wallet-signing-alignment-v0.2",
+            "classification": "wallet_signing_vectors_and_lock_digest_alignment_probe",
+            "source_digest_model": {
+                "all_required_snippets_present": !legacy_domain_hash_visible,
+                "state_type_uses_packed_signed_intent_hash": true,
+                "state_type_verifier_uses_signed_intent_hash": true,
+                "package_lock_uses_packed_digest": true,
+                "standalone_lock_uses_packed_digest": true,
+                "legacy_domain_hash_visible": legacy_domain_hash_visible,
+            },
+            "summary": {
+                "fixtures": 11,
+                "canonical_wallet_vectors_self_verified": 11,
+                "current_lock_compat_vectors_self_verified": 11,
+                "current_lock_digest_matches_canonical": 11,
+                "current_lock_digest_mismatches": 0,
+                "canonical_wallet_signatures_accepted_by_current_lock_digest": 11,
+                "current_lock_signatures_accepted_by_canonical_wallet_digest": 11,
+                "wallet_lock_alignment_ready": true,
+                "production_wallet_ready": true,
+            },
+            "fixtures": fixtures,
+        })
+    }
+
     #[test]
     fn canonical_schema_normalisation_hashes_comment_free_lines() {
         let temp = tempfile::tempdir().unwrap();
@@ -8206,6 +8329,16 @@ mod tests {
             novaseal_handoff_report_hash("test_label", &value),
             "0x91f5e5cc38c16e792d27a3738a7a7c77053fa15f902e2ccb4b210fd7239a476f"
         );
+    }
+
+    #[test]
+    fn wallet_lock_alignment_rejects_legacy_domain_hash_source_model() {
+        let valid = validate_wallet_lock_alignment_detail(&wallet_lock_alignment_report(false));
+        assert_eq!(json_pointer_str(&valid, "/status"), Some("passed"));
+
+        let legacy = validate_wallet_lock_alignment_detail(&wallet_lock_alignment_report(true));
+        assert_eq!(json_pointer_str(&legacy, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&legacy, "/checks/source_model_uses_packed_intent"));
     }
 
     #[test]
@@ -12098,6 +12231,7 @@ mod tests {
             "local_checks": {
                 "conformance_gate_passed": true,
                 "wallet_vector_detail_passed": true,
+                "wallet_lock_alignment_passed": true,
                 "local_bip340_tcb_review_passed": true,
             },
             "security_audit_coverage": { "status": "passed" },
@@ -12148,6 +12282,7 @@ mod tests {
             "local_checks": {
                 "conformance_gate_passed": true,
                 "wallet_vector_detail_passed": true,
+                "wallet_lock_alignment_passed": true,
                 "profile_operator_fixture_detail_passed": true,
                 "service_builder_fixture_detail_passed": true,
                 "btc_spv_evidence_adapter_passed": true,
@@ -12241,6 +12376,7 @@ mod tests {
             "local_checks": {
                 "conformance_gate_passed": true,
                 "wallet_vector_detail_passed": true,
+                "wallet_lock_alignment_passed": true,
                 "profile_operator_fixture_detail_passed": true,
                 "service_builder_fixture_detail_passed": true,
                 "btc_spv_evidence_adapter_passed": true,
@@ -12335,12 +12471,115 @@ mod tests {
     }
 
     #[test]
+    fn v1_readiness_requires_wallet_lock_digest_alignment_for_local_ready() {
+        let profile_certification = json!({
+            "status": "passed",
+            "production_statement_eligible": false,
+            "production_statement_blockers": [
+                "public_shared_cell_dep_attested",
+                "external_bip340_tcb_review_attested",
+                "public_btc_spv_evidence_attested",
+                "rwa_legal_registry_review_attested"
+            ],
+            "local_checks": {
+                "conformance_gate_passed": true,
+                "wallet_vector_detail_passed": true,
+                "wallet_lock_alignment_passed": false,
+                "profile_operator_fixture_detail_passed": true,
+                "service_builder_fixture_detail_passed": true,
+                "btc_spv_evidence_adapter_passed": true,
+                "external_attestation_adapter_passed": true,
+                "external_evidence_handoff_passed": true,
+                "local_bip340_tcb_review_passed": true,
+            },
+            "security_audit_coverage": { "status": "passed" },
+            "planned_profile_packages": {
+                "btc_tx_commitment": { "status": "passed" },
+                "btc_utxo_seal": { "status": "passed" },
+                "dual_seal": { "status": "passed" },
+                "fiber_candidate": { "status": "passed" },
+                "fungible_xudt": { "status": "passed" },
+                "rwa_receipt": { "status": "passed" }
+            },
+        });
+        let stateful_acceptance = json!({
+            "status": "local_devnet_passed_external_endpoint_required",
+            "blocker_count": 1,
+            "local_blocker_count": 0,
+            "acceptance_blocker_count": 1,
+            "live_devnet_rpc_executed": true,
+            "stateful_lifecycle_executed": true,
+            "profile_coverage": {
+                "status": "passed",
+                "covered_profiles": [
+                    { "status": "passed" },
+                    { "status": "passed" }
+                ]
+            },
+            "business_scenario_coverage": {
+                "status": "passed",
+                "checks": {
+                    "agreement_originate_live": true,
+                    "agreement_repay_live": true,
+                    "agreement_claim_live": true,
+                    "agreement_negative_business_cases_preserve_live_state": true,
+                    "btc_transaction_commitment_transition_live": true,
+                    "btc_utxo_seal_closure_live": true,
+                    "dual_seal_finality_live": true,
+                    "fungible_xudt_value_flow_live": true,
+                    "rwa_receipt_lifecycle_live": true,
+                    "fiber_candidate_path_live": true
+                }
+            },
+            "external_endpoint_coverage": {
+                "status": "external_required",
+                "production_complete": false
+            },
+        });
+        let gates = vec![
+            gate(
+                "external_btc_fiber_endpoint_acceptance",
+                "external_required",
+                "target/novaseal-devnet-stateful-acceptance.json#/external_endpoint_coverage",
+                Value::Null,
+            ),
+            gate(
+                "all_profiles_production_completeness",
+                "external_required",
+                "target/novaseal-production-gates.json#/profile_production_completeness",
+                Value::Null,
+            ),
+            gate("public_shared_cell_dep_pinning_attestation", "external_required", PUBLIC_CELLDEP_ATTESTATION, Value::Null),
+            gate(
+                "external_bip340_runtime_verifier_tcb_review_attestation",
+                "external_required",
+                EXTERNAL_TCB_ATTESTATION,
+                Value::Null,
+            ),
+            gate("public_btc_spv_evidence", "external_required", PUBLIC_BTC_SPV_EVIDENCE, Value::Null),
+            gate("rwa_legal_registry_review_evidence", "external_required", RWA_LEGAL_REGISTRY_REVIEW_EVIDENCE, Value::Null),
+        ];
+
+        let readiness = build_v1_readiness(&profile_certification, &stateful_acceptance, &gates, false, false);
+
+        assert_eq!(json_pointer_str(&readiness, "/status"), Some("planned_profiles_incomplete"));
+        assert!(!json_pointer_bool(&readiness, "/local_v1_ready"));
+        assert!(json_array_strings(&readiness, "/failed_dimensions")
+            .iter()
+            .any(|dimension| dimension == "wallet_lock_digest_alignment"));
+        assert!(json_array_strings(&readiness, "/planned_profile_matrix/missing")
+            .iter()
+            .any(|profile| profile == "seal_profile_btc_key_signature"));
+    }
+
+    #[test]
     fn planned_matrix_counts_fungible_package_but_keeps_value_flow_missing() {
         let profile_certification = json!({
             "status": "passed",
             "production_statement_eligible": false,
             "local_checks": {
                 "wallet_vector_detail_passed": true,
+                "wallet_lock_alignment_passed": true,
                 "local_bip340_tcb_review_passed": true,
             },
             "planned_profile_packages": {
@@ -12481,6 +12720,7 @@ mod tests {
             "local_checks": {
                 "conformance_gate_passed": true,
                 "wallet_vector_detail_passed": true,
+                "wallet_lock_alignment_passed": true,
                 "local_bip340_tcb_review_passed": true,
             },
             "planned_profile_packages": {

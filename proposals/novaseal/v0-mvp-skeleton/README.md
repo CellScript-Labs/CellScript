@@ -55,7 +55,7 @@ This skeleton deliberately **excludes**:
 
 ## Strict v0 Acceptance Criteria (This Skeleton Only)
 
-The implemented MVP package + generated artifacts + fixtures MUST satisfy exactly these 9 properties. Nothing more. This skeleton records the target and now has strict 0.16 closure, combined lock+type transaction harness evidence, live local devnet evidence, fixed-width wallet signing vectors, local BIP340 TCB review, and a local production gate. Local production-prep evidence passes. Production claims remain blocked on public/shared CellDep attestation, public BTC SPV evidence for BTC-facing profiles, RWA legal/registry review evidence, and external BIP340 TCB review.
+The implemented MVP package + generated artifacts + fixtures MUST satisfy exactly these 9 properties. Nothing more. This skeleton records the target and now has strict 0.16 closure, combined lock+type transaction harness evidence, live local devnet evidence, fixed-width wallet signing vectors, wallet/lock digest alignment, local BIP340 TCB review, and a local production gate. Local production-prep evidence passes. Production claims remain blocked on public/shared CellDep attestation, public BTC SPV evidence for BTC-facing profiles, RWA legal/registry review evidence, and external BIP340 TCB review.
 
 1. `old NovaSealCell` is consumed exactly once in a valid transition.
 2. `new NovaSealCell` is created exactly once in the same transition.
@@ -174,7 +174,7 @@ For any real implementation the following verifier inputs MUST stay frozen:
 
 The BIP340 verifier profile, IPC envelope, RISC-V shell, and local TCB review now exist. Local evidence is frozen for this slice; public BTC SPV evidence, RWA legal/registry review evidence, and external TCB attestation are still required before production claims.
 
-The `.cell` lock and state action now call `verifier::btc::bip340::require_signature(...)`; the compiler expands that generic verifier capability into the fixed 18-word spawn/IPC envelope and delegates to the `cellscript_btc_bip340_verifier_riscv` spawn verifier. The host verifier, no-std core, RISC-V shell, child-verifier `ckb-vm` harness, parent-lock `ckb-vm` harness, official resolved lock-group verifier, official full transaction script verifier, and local CKB contextual transaction verifier all check the same frozen BIP340 vector contract for the parent authority cases. The lock and state action also parse one shared witness ABI, and the combined harness now runs all eleven fixtures through both verifier layers with lock and type/action groups present, `Output#1` receipt materialisation, authority pubkey binding, authority mapping mismatch rejection, implicit authority-rotation rejection, and fee/capacity/tx-size checks. Core live devnet RPC evidence, fixed-width wallet signing vectors, local devnet verifier CellDep pinning, and a local BIP340 TCB review bundle now exist; the remaining production work is public/shared CellDep attestation, public BTC SPV evidence for BTC-facing profiles, RWA legal/registry review evidence, and external BIP340 TCB review. The actual crypto still lives in the delegated verifier binary, so that binary remains a first-class TCB item.
+The `.cell` lock and state action now call `verifier::btc::bip340::require_signature(...)`; the compiler expands that generic verifier capability into the fixed 18-word spawn/IPC envelope and delegates to the `cellscript_btc_bip340_verifier_riscv` spawn verifier. The host verifier, no-std core, RISC-V shell, child-verifier `ckb-vm` harness, parent-lock `ckb-vm` harness, official resolved lock-group verifier, official full transaction script verifier, and local CKB contextual transaction verifier all check the same frozen BIP340 vector contract for the parent authority cases. The lock and state action also parse one shared witness ABI, and the combined harness now runs all eleven fixtures through both verifier layers with lock and type/action groups present, `Output#1` receipt materialisation, authority pubkey binding, authority mapping mismatch rejection, implicit authority-rotation rejection, and fee/capacity/tx-size checks. Core live devnet RPC evidence, fixed-width wallet signing vectors, wallet/lock digest alignment, local devnet verifier CellDep pinning, and a local BIP340 TCB review bundle now exist; the remaining production work is public/shared CellDep attestation, public BTC SPV evidence for BTC-facing profiles, RWA legal/registry review evidence, and external BIP340 TCB review. The actual crypto still lives in the delegated verifier binary, so that binary remains a first-class TCB item.
 
 ### 3. Schema / Molecule Alignment is a Hard Gate
 The three `.schema` files in this skeleton are the **source of truth** for on-chain layout.
@@ -291,22 +291,26 @@ python3 scripts/novaseal_fixture_harness.py --pretty
 # 18. Generate fixed-width wallet signing vectors from the repository root
 python3 /home/arthur/a19q3/CellScript/scripts/novaseal_wallet_signing_vectors.py --pretty
 
-# 19. Generate planned-profile operator fixtures from the repository root
+# 19. Generate wallet/lock digest alignment from this package
+python3 scripts/novaseal_wallet_signing_alignment.py --pretty
+python3 scripts/novaseal_fixture_harness.py --pretty
+
+# 20. Generate planned-profile operator fixtures from the repository root
 python3 /home/arthur/a19q3/CellScript/scripts/novaseal_profile_operator_fixtures.py --pretty
 
-# 20. Generate planned-profile service-builder fixtures from the repository root
+# 21. Generate planned-profile service-builder fixtures from the repository root
 python3 /home/arthur/a19q3/CellScript/scripts/novaseal_service_builder_fixtures.py --pretty
 
-# 21. Generate the local BIP340 TCB review bundle from the repository root
+# 22. Generate the local BIP340 TCB review bundle from the repository root
 python3 /home/arthur/a19q3/CellScript/scripts/novaseal_bip340_tcb_review.py --pretty
 
-# 22. Generate the BTC SPV external-evidence adapter request from the repository root
+# 23. Generate the BTC SPV external-evidence adapter request from the repository root
 python3 /home/arthur/a19q3/CellScript/scripts/novaseal_btc_spv_evidence_adapter.py --pretty
 
-# 23. Generate public CellDep and external TCB attestation adapter requests from the repository root
+# 24. Generate public CellDep and external TCB attestation adapter requests from the repository root
 python3 /home/arthur/a19q3/CellScript/scripts/novaseal_external_attestation_adapter.py --pretty
 
-# 24. Generate the external evidence handoff bundle from the repository root
+# 25. Generate the external evidence handoff bundle from the repository root
 python3 /home/arthur/a19q3/CellScript/scripts/novaseal_external_evidence_handoff_bundle.py --pretty
 
 # 25. Run the local production-prep/profile certification gate from the repository root

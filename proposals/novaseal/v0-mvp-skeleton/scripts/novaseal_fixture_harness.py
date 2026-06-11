@@ -658,7 +658,7 @@ def build_report(
             "The state-type CKB VM harness uses the canonical 213-byte NovaSealIntentV0 old_cell: OutPoint shape without an intent-shortening adapter.",
             "The parent-lock and state-type CKB VM harnesses now parse the same CSARGv1 witness payload order: intent, receipt_hash, state_hash_commitment, SignaturePayload.",
             "Combined lock+type full transaction script-verifier evidence is attached separately when target/novaseal-combined-tx-report.json exists; it is still an in-memory harness ResolvedTransaction flow, not production builder/full-node acceptance.",
-            "Wallet signing alignment evidence is attached separately when target/novaseal-wallet-signing-alignment.json exists; it currently keeps production_wallet_ready=false when the lock digest is still the domain-hash compatibility rule.",
+            "Wallet signing alignment evidence is attached separately when target/novaseal-wallet-signing-alignment.json exists; it must pass before local wallet/lock digest readiness is claimed.",
             "The generated authority lock surface covers Script.args binding and spawn/IPC shell wiring; parent-lock CKB VM evidence is still harness-level, not generated ProofPlan transaction coverage.",
             "Passing source-model fixtures do not replace builder-backed/full-node acceptance evidence.",
         ],

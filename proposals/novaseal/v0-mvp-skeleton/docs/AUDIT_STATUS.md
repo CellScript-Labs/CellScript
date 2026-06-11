@@ -48,6 +48,7 @@ Historical full runbook refresh, 2026-06-10:
   - BIP340 TCB local review:
     `passed_local_review_external_attestation_required`
   - wallet signing vectors: `14/14`
+  - wallet/lock digest alignment: `11/11`
   - profile operator fixtures: `10/10`
   - service builder fixtures: `10/10`
   - BTC SPV evidence adapter: `3/3`
@@ -223,6 +224,7 @@ Passed local gates:
 - core manifest pins the local devnet verifier CellDep and artifact hash
 - Agreement manifest pins the same local devnet verifier CellDep and artifact hash
 - fixed-width Molecule-equivalent wallet signing vectors exist for core and Agreement
+- wallet/lock digest alignment passes for all eleven canonical fixtures
 - local BIP340 runtime-verifier TCB review bundle passes
 - live local devnet stateful core and Agreement reports pass
 - all six planned profile live devnet reports pass

@@ -25,7 +25,7 @@ use std::path::{Path, PathBuf};
 const CKB_HASH_FILE_SIZE_LIMIT_BYTES: u64 = 1024 * 1024;
 const NOVASEAL_CERTIFICATION_PLUGIN: &str = "novaseal-profile-v0";
 const NOVASEAL_CERTIFICATION_REPORT_SCHEMA: &str = "cellscript-certification-report-v0.1";
-const NOVASEAL_PLUGIN_REPORT_SCHEMA: &str = "novaseal-production-gates-v0.3";
+const NOVASEAL_PLUGIN_REPORT_SCHEMA: &str = "novaseal-production-gates-v0.4";
 const NOVASEAL_PROFILE_CERTIFICATION_SCHEMA: &str = "novaseal-profile-certification-v0.1";
 const NOVASEAL_AGREEMENT_PROFILE: &str = "agreement-profile-v0";
 const NOVASEAL_CANONICAL_SCHEMA: &str = "NovaSealCanonicalV0";

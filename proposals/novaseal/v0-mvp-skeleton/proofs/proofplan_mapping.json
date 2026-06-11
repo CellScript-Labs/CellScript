@@ -703,7 +703,7 @@
       ]
     }
   ],
-  "overall_assessment": "NovaSeal core now has split-intent receipt commitments, strict-clean generated ProofPlan coverage, eleven-fixture state/type and combined transaction evidence including wrong-pubkey-valid-signature rejection, authority mapping mismatch rejection, and implicit authority-rotation rejection, live local devnet RPC evidence for bootstrap -> key-auth transition plus wrong-signature rejection, fixed-width wallet signing vectors, local devnet verifier CellDep pinning, and a local BIP340 TCB review bundle. It is still non-production: public/shared deployment attestation and external BIP340 TCB review attestation are missing.",
+  "overall_assessment": "NovaSeal core now has split-intent receipt commitments, strict-clean generated ProofPlan coverage, eleven-fixture state/type and combined transaction evidence including wrong-pubkey-valid-signature rejection, authority mapping mismatch rejection, and implicit authority-rotation rejection, live local devnet RPC evidence for bootstrap -> key-auth transition plus wrong-signature rejection, fixed-width wallet signing vectors, wallet/lock digest alignment, local devnet verifier CellDep pinning, and a local BIP340 TCB review bundle. It is still non-production: public/shared deployment attestation and external BIP340 TCB review attestation are missing.",
   "multi_script_reality": {
     "package_entry": "src/nova_state_type.cell",
     "source_units_count": 4,
@@ -713,7 +713,7 @@
     "generated_actions": [
       "key_auth_transition"
     ],
-    "implication": "The default generated ProofPlan exposes btc_authority, generic BTC BIP340 verifier wiring, checked IPC envelope/status records, spawn target obligations, strict-clean output records, and checked NovaSealCellV0 resource conservation. The state action has CKB VM fixture evidence for all eleven fixtures, combined transaction evidence for all eleven fixtures, live local devnet stateful evidence for the core lifecycle, and fixed-width wallet signing vectors from the root production gate. Remaining production gaps are public/shared CellDep attestation and external review of the verifier TCB."
+    "implication": "The default generated ProofPlan exposes btc_authority, generic BTC BIP340 verifier wiring, checked IPC envelope/status records, spawn target obligations, strict-clean output records, and checked NovaSealCellV0 resource conservation. The state action has CKB VM fixture evidence for all eleven fixtures, combined transaction evidence for all eleven fixtures, live local devnet stateful evidence for the core lifecycle, fixed-width wallet signing vectors, and wallet/lock digest alignment from the root production gate. Remaining production gaps are public/shared CellDep attestation and external review of the verifier TCB."
   },
   "shared_witness_abi": {
     "status": "lock_and_type_entries_parse_same_payload",
