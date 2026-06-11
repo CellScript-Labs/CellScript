@@ -2278,10 +2278,12 @@ fn stateful_acceptance_status(
 ) -> &'static str {
     if local_blocker_count > 0 {
         "blocked"
-    } else if local_live_acceptance_passed && acceptance_blocker_count == 0 {
-        "passed"
     } else if local_live_acceptance_passed && json_pointer_str(external_endpoint_coverage, "/status") == Some("external_required") {
         "local_devnet_passed_external_endpoint_required"
+    } else if local_live_acceptance_passed && json_pointer_str(external_endpoint_coverage, "/status") != Some("passed") {
+        "local_devnet_passed_acceptance_blockers"
+    } else if local_live_acceptance_passed && acceptance_blocker_count == 0 {
+        "passed"
     } else if local_live_acceptance_passed {
         "local_devnet_passed_acceptance_blockers"
     } else if core_live_passed && !agreement_live_passed {
@@ -3047,7 +3049,13 @@ fn provenance_summary(report: &Value, repo_root: &Path, source_paths: &[&str]) -
     let provenance = report.get("provenance").cloned().unwrap_or(Value::Null);
     let recorded_source = provenance.get("source_tree").cloned().unwrap_or(Value::Null);
     let current_source = source_tree_hash(repo_root, source_paths)?;
-    let source_hash_matches = json_pointer_str(&recorded_source, "/sha256") == json_pointer_str(&current_source, "/sha256");
+    let recorded_source_hash = json_pointer_str(&recorded_source, "/sha256");
+    let current_source_hash = json_pointer_str(&current_source, "/sha256");
+    let recorded_source_valid =
+        recorded_source.get("valid").and_then(Value::as_bool).unwrap_or_else(|| recorded_source_hash.is_some());
+    let current_source_valid = json_pointer_bool(&current_source, "/valid");
+    let source_hash_matches =
+        recorded_source_valid && current_source_valid && recorded_source_hash.is_some() && recorded_source_hash == current_source_hash;
     let mut artifact_checks = Map::new();
     let recorded_artifacts = provenance.get("artifacts").cloned().unwrap_or(Value::Null);
     let canonical_repo_root = repo_root.canonicalize()?;
@@ -3090,10 +3098,13 @@ fn provenance_summary(report: &Value, repo_root: &Path, source_paths: &[&str]) -
         "current_repo_commit": current_commit,
         "repo_commit_matches": repo_commit_matches,
         "source_hash_matches": source_hash_matches,
-        "recorded_source_hash": json_pointer_str(&recorded_source, "/sha256"),
-        "current_source_hash": json_pointer_str(&current_source, "/sha256"),
+        "recorded_source_valid": recorded_source_valid,
+        "current_source_valid": current_source_valid,
+        "recorded_source_hash": recorded_source_hash,
+        "current_source_hash": current_source_hash,
         "recorded_file_count": recorded_source.get("file_count").and_then(Value::as_u64),
         "current_file_count": current_source.get("file_count").and_then(Value::as_u64),
+        "current_source_invalid_paths": current_source.get("invalid_paths").cloned().unwrap_or(Value::Null),
         "artifact_hashes_match": artifact_hashes_match,
         "artifacts": artifact_checks,
     }))
@@ -8122,6 +8133,27 @@ mod tests {
         let invalid_source_paths = json_array_strings(&source, "/invalid_paths");
         assert!(invalid_source_paths.iter().any(|path| path.ends_with("src/linked.cell")));
 
+        let artifact_sha = sha256_file_hex(&src.join("real.cell")).unwrap();
+        let invalid_source_report = json!({
+            "provenance": {
+                "source_tree": source,
+                "artifacts": {
+                    "verifier": {
+                        "path": src.join("real.cell").display().to_string(),
+                        "sha256": artifact_sha,
+                    },
+                    "lifecycle": {
+                        "path": src.join("real.cell").display().to_string(),
+                        "sha256": artifact_sha,
+                    },
+                },
+            },
+        });
+        let invalid_source_summary = provenance_summary(&invalid_source_report, &repo_root, &["src"]).unwrap();
+        assert!(!json_pointer_bool(&invalid_source_summary, "/source_hash_matches"));
+        assert!(!json_pointer_bool(&invalid_source_summary, "/current_source_valid"));
+        assert!(!json_pointer_bool(&invalid_source_summary, "/freshness_matched"));
+
         let expected = expected_files(&repo_root, &schemas, &["expected.schema"]).unwrap();
         assert!(!json_pointer_bool(&expected, "/exact"));
         assert!(json_array_strings(&expected, "/invalid").iter().any(|path| path == "expected.schema"));
@@ -11161,6 +11193,10 @@ mod tests {
         });
 
         let status = stateful_acceptance_status(0, 1, true, true, true, &external_endpoint_coverage);
+
+        assert_eq!(status, "local_devnet_passed_external_endpoint_required");
+
+        let status = stateful_acceptance_status(0, 0, true, true, true, &external_endpoint_coverage);
 
         assert_eq!(status, "local_devnet_passed_external_endpoint_required");
     }

@@ -62,19 +62,26 @@ def git_commit() -> str | None:
         return None
 
 
-def source_files() -> list[Path]:
+def source_files() -> tuple[list[Path], list[str]]:
     files: list[Path] = []
+    invalid_paths: list[str] = []
     for root in VERIFIER_DIRS:
         for path in root.rglob("*"):
-            if not path.is_file() or "target" in path.parts:
+            rel_parts = path.relative_to(root).parts
+            if any(part in {"target", "build", ".git", "__pycache__"} for part in rel_parts):
+                continue
+            if path.is_symlink():
+                invalid_paths.append(path.relative_to(ROOT).as_posix())
+                continue
+            if not path.is_file():
                 continue
             if path.suffix == ".rs" or path.name in {"Cargo.toml", "Cargo.lock", "README.md"}:
                 files.append(path)
-    return sorted(files)
+    return sorted(files), sorted(invalid_paths)
 
 
 def source_inventory() -> dict[str, Any]:
-    files = source_files()
+    files, invalid_paths = source_files()
     file_rows = []
     tree_hash = hashlib.sha256()
     unsafe_hits = []
@@ -100,6 +107,8 @@ def source_inventory() -> dict[str, Any]:
         "files": file_rows,
         "total_files": len(file_rows),
         "total_lines": sum(row["lines"] for row in file_rows),
+        "valid": not invalid_paths,
+        "invalid_paths": invalid_paths,
         "unsafe_hits": unsafe_hits,
         "review_hits": review_hits,
     }
@@ -215,8 +224,8 @@ def build_report() -> dict[str, Any]:
         ),
     ]
 
-    local_passed = all(row["status"] == "passed" for row in gates)
     inventory = source_inventory()
+    local_passed = all(row["status"] == "passed" for row in gates) and inventory["valid"]
     return {
         "schema": "novaseal-bip340-tcb-review-v0.1",
         "status": "passed_local_review_external_attestation_required" if local_passed else "failed",

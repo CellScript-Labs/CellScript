@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -192,10 +193,17 @@ def source_tree_hash(paths: list[str]) -> str:
     allowed_suffixes = {".cell", ".schema", ".toml", ".py", ".json", ".rs"}
     for raw in paths:
         path = ROOT / raw
+        if path.is_symlink():
+            raise ValueError(f"source tree path must not be a symlink: {path.relative_to(ROOT)}")
         if path.is_file():
             files.add(path)
         elif path.is_dir():
             for child in path.rglob("*"):
+                rel_parts = child.relative_to(path).parts
+                if any(part in {"target", "build", ".git", "__pycache__"} for part in rel_parts):
+                    continue
+                if child.is_symlink():
+                    raise ValueError(f"source tree path must not be a symlink: {child.relative_to(ROOT)}")
                 if child.is_file() and (child.name == "Cargo.lock" or child.suffix in allowed_suffixes):
                     files.add(child)
     h = hashlib.sha256()
@@ -562,7 +570,11 @@ def main() -> int:
 
     btc_spv_adapter = json.loads(args.btc_spv_adapter.read_text(encoding="utf-8"))
     external_attestation_adapter = json.loads(args.external_attestation_adapter.read_text(encoding="utf-8"))
-    report = build_report(btc_spv_adapter, external_attestation_adapter)
+    try:
+        report = build_report(btc_spv_adapter, external_attestation_adapter)
+    except ValueError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     if args.pretty:

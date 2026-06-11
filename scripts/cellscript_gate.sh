@@ -188,7 +188,13 @@ def source_tree_hash() -> str:
     files: list[Path] = []
     for verifier_dir in verifier_dirs:
         for path in verifier_dir.rglob("*"):
-            if not path.is_file() or "target" in path.parts:
+            rel_parts = path.relative_to(verifier_dir).parts
+            if any(part in {"target", "build", ".git", "__pycache__"} for part in rel_parts):
+                continue
+            if path.is_symlink():
+                failures.append(f"{path.relative_to(root)} is a symlink inside the NovaSeal verifier TCB source tree")
+                continue
+            if not path.is_file():
                 continue
             if path.suffix == ".rs" or path.name in {"Cargo.toml", "Cargo.lock", "README.md"}:
                 files.append(path)
@@ -208,10 +214,19 @@ def profile_source_tree_hash(paths: list[str]) -> str:
     allowed_suffixes = {".cell", ".schema", ".toml", ".py", ".json", ".rs"}
     for raw in paths:
         path = root / raw
+        if path.is_symlink():
+            failures.append(f"{path.relative_to(root)} is a symlink inside the NovaSeal profile source tree")
+            continue
         if path.is_file():
             files.add(path)
         elif path.is_dir():
             for child in path.rglob("*"):
+                rel_parts = child.relative_to(path).parts
+                if any(part in {"target", "build", ".git", "__pycache__"} for part in rel_parts):
+                    continue
+                if child.is_symlink():
+                    failures.append(f"{child.relative_to(root)} is a symlink inside the NovaSeal profile source tree")
+                    continue
                 if child.is_file() and (child.name == "Cargo.lock" or child.suffix in allowed_suffixes):
                     files.add(child)
     h = hashlib.sha256()
@@ -375,6 +390,12 @@ check_novaseal_acceptance_boundaries() {
         'src/cli/novaseal_certification.rs::local_blocker_count'
         'src/cli/novaseal_certification.rs::external_endpoint_coverage'
         'src/cli/novaseal_certification.rs::real BTC SPV and Fiber endpoint production acceptance'
+        'src/cli/novaseal_certification.rs::current_source_valid'
+        'src/cli/novaseal_certification.rs::source_tree_invalid_paths_empty'
+        'scripts/novaseal_bip340_tcb_review.py::invalid_paths'
+        'scripts/novaseal_devnet_stateful_live.py::invalid_paths'
+        'scripts/novaseal_external_evidence_handoff_bundle.py::source tree path must not be a symlink'
+        'scripts/cellscript_gate.sh::is a symlink inside the NovaSeal'
         'scripts/novaseal_devnet_stateful_acceptance.sh::acceptance_blocker_count'
         'scripts/novaseal_devnet_stateful_acceptance.sh::local_blocker_count'
         'scripts/novaseal_devnet_stateful_acceptance.sh::blocker_count'

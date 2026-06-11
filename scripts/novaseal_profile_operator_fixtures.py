@@ -51,7 +51,7 @@ def json_file_hash(path: Path) -> str:
 def file_set_hash(paths: list[Path]) -> str:
     entries = []
     for path in sorted(paths):
-        if not path.is_file():
+        if path.is_symlink() or not path.is_file():
             continue
         entries.append({"path": str(path.relative_to(ROOT)), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()})
     return report_hash("file_set", entries)

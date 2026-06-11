@@ -119,16 +119,23 @@ def git_commit(repo_root: pathlib.Path) -> str | None:
 
 def source_tree_hash(repo_root: pathlib.Path, paths: list[pathlib.Path]) -> dict[str, Any]:
     files: list[pathlib.Path] = []
+    invalid_paths: list[str] = []
     for raw_path in paths:
         path = raw_path if raw_path.is_absolute() else repo_root / raw_path
+        if path.is_symlink():
+            invalid_paths.append(display_path(path, repo_root))
+            continue
         if path.is_file():
             files.append(path)
             continue
         if path.is_dir():
             for child in path.rglob("*"):
-                if not child.is_file():
-                    continue
                 if any(part in {"target", "build", ".git", "__pycache__"} for part in child.relative_to(path).parts):
+                    continue
+                if child.is_symlink():
+                    invalid_paths.append(display_path(child, repo_root))
+                    continue
+                if not child.is_file():
                     continue
                 if child.suffix in {".cell", ".schema", ".toml", ".py", ".json", ".rs"} or child.name == "Cargo.lock":
                     files.append(child)
@@ -141,7 +148,13 @@ def source_tree_hash(repo_root: pathlib.Path, paths: list[pathlib.Path]) -> dict
         h.update(b"\0")
         h.update(digest)
         rows.append(rel)
-    return {"sha256": "0x" + h.hexdigest(), "files": rows, "file_count": len(rows)}
+    return {
+        "sha256": None if invalid_paths else "0x" + h.hexdigest(),
+        "files": rows,
+        "file_count": len(rows),
+        "valid": not invalid_paths,
+        "invalid_paths": sorted(invalid_paths),
+    }
 
 
 def stateful_provenance(repo_root: pathlib.Path, source_paths: list[pathlib.Path], artifacts: dict[str, pathlib.Path]) -> dict[str, Any]:
