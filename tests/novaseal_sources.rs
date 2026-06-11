@@ -81,6 +81,24 @@ fn tracked_novaseal_manifest_paths() -> Vec<String> {
     files
 }
 
+fn tracked_novaseal_text_paths() -> Vec<String> {
+    let output = Command::new("git")
+        .args(["ls-files", "proposals/novaseal"])
+        .current_dir(repo_root())
+        .output()
+        .expect("git should be available for tracked NovaSeal text audit");
+    assert!(output.status.success(), "git ls-files should succeed: {}", String::from_utf8_lossy(&output.stderr));
+
+    let mut files = String::from_utf8(output.stdout)
+        .expect("git output should be utf-8")
+        .lines()
+        .filter(|path| path.ends_with(".cell") || path.ends_with(".md") || path.ends_with(".toml") || path.ends_with(".json"))
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    files.sort();
+    files
+}
+
 fn declaration_name(line: &str, keyword: &str) -> Option<String> {
     let rest = line.trim_start().strip_prefix(keyword)?.trim_start();
     let name = rest.chars().take_while(|ch| ch.is_ascii_alphanumeric() || *ch == '_').collect::<String>();
@@ -172,6 +190,22 @@ fn tracked_novaseal_cell_sources_are_complete() {
         expected,
         "tracked NovaSeal .cell source set changed; update the executable-source audit deliberately"
     );
+}
+
+#[test]
+fn tracked_novaseal_text_does_not_reintroduce_stale_local_devnet_blockers() {
+    let stale_phrases = ["until stateful devnet evidence exists", "before stateful devnet evidence exists"];
+
+    for path in tracked_novaseal_text_paths() {
+        let text =
+            std::fs::read_to_string(repo_path(&path)).unwrap_or_else(|err| panic!("failed to read NovaSeal text {path}: {err}"));
+        for phrase in stale_phrases {
+            assert!(
+                !text.contains(phrase),
+                "{path} contains stale local-devnet blocker language after live stateful evidence exists: {phrase}"
+            );
+        }
+    }
 }
 
 #[test]
