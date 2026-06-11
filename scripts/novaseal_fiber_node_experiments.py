@@ -25,10 +25,11 @@ from dataclasses import dataclass
 from typing import Any
 
 
-SCHEMA = "novaseal-fiber-node-execution-v0.3"
+SCHEMA = "novaseal-fiber-node-execution-v0.4"
 SUPPORTED_PREVIOUS_SCHEMAS = {
     "novaseal-fiber-node-execution-v0.1",
     "novaseal-fiber-node-execution-v0.2",
+    "novaseal-fiber-node-execution-v0.3",
     SCHEMA,
 }
 
@@ -200,6 +201,22 @@ def git_value(fiber_repo: pathlib.Path, args: list[str]) -> str | None:
     return completed.stdout.strip()
 
 
+def fiber_repo_provenance(fiber_repo: pathlib.Path) -> dict[str, Any]:
+    return {
+        "path": fiber_repo.as_posix(),
+        "origin": git_value(fiber_repo, ["remote", "get-url", "origin"]),
+        "branch": git_value(fiber_repo, ["branch", "--show-current"]),
+        "commit": git_value(fiber_repo, ["rev-parse", "HEAD"]),
+        "dirty": bool(git_value(fiber_repo, ["status", "--short"])),
+    }
+
+
+def same_fiber_repo_provenance(left: dict[str, Any] | None, right: dict[str, Any]) -> bool:
+    if not isinstance(left, dict):
+        return False
+    return all(left.get(key) == right.get(key) for key in ("path", "origin", "branch", "commit", "dirty"))
+
+
 def rel(path: pathlib.Path, root: pathlib.Path) -> str:
     try:
         return path.relative_to(root).as_posix()
@@ -267,14 +284,16 @@ def write_text(path: pathlib.Path, value: str) -> None:
     path.write_text(value, encoding="utf-8")
 
 
-def previous_executions(output: pathlib.Path) -> dict[str, dict[str, Any]]:
+def previous_executions(output: pathlib.Path, current_fiber_repo: dict[str, Any]) -> dict[str, dict[str, Any]]:
     if not output.is_file():
         return {}
     try:
         report = json.loads(output.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return {}
-    if report.get("schema") not in SUPPORTED_PREVIOUS_SCHEMAS:
+    if report.get("schema") not in SUPPORTED_PREVIOUS_SCHEMAS or not same_fiber_repo_provenance(
+        report.get("fiber_repo"), current_fiber_repo
+    ):
         return {}
     executions: dict[str, dict[str, Any]] = {}
     for workflow in report.get("workflows", []):
@@ -282,7 +301,11 @@ def previous_executions(output: pathlib.Path) -> dict[str, dict[str, Any]]:
             continue
         suite = workflow.get("suite")
         execution = workflow.get("execution")
-        if isinstance(suite, str) and isinstance(execution, dict):
+        if (
+            isinstance(suite, str)
+            and isinstance(execution, dict)
+            and same_fiber_repo_provenance(execution.get("fiber_repo"), current_fiber_repo)
+        ):
             executions[suite] = execution
     return executions
 
@@ -416,6 +439,7 @@ def bruno_workspace_for_suite(
 
 def run_workflow(args: argparse.Namespace, workflow: FiberWorkflow) -> dict[str, Any]:
     fiber_repo = args.fiber_repo.resolve()
+    fiber_repo_info = fiber_repo_provenance(fiber_repo)
     suite_arg = f"e2e/{workflow.suite}"
     log_dir = args.output.resolve().parent / "novaseal-fiber-node-experiments" / workflow.suite.replace("/", "__")
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -449,6 +473,7 @@ def run_workflow(args: argparse.Namespace, workflow: FiberWorkflow) -> dict[str,
                     "failure": "fiber node wait failed",
                     "wait_returncode": wait.returncode,
                     "duration_seconds": round(time.time() - started_at, 3),
+                    "fiber_repo": fiber_repo_info,
                 }
         bruno_cwd, bruno_compatibility_patches = bruno_workspace_for_suite(fiber_repo, workflow.suite, log_dir)
         command = ["npm", "exec", "--", "@usebruno/cli", "run", suite_arg, "-r", "--env", "test"]
@@ -464,6 +489,7 @@ def run_workflow(args: argparse.Namespace, workflow: FiberWorkflow) -> dict[str,
             "stdout_log": rel(log_dir / "bruno.stdout", args.repo_root.resolve()),
             "stderr_log": rel(log_dir / "bruno.stderr", args.repo_root.resolve()),
             "duration_seconds": round(time.time() - started_at, 3),
+            "fiber_repo": fiber_repo_info,
         }
         if bruno_compatibility_patches:
             execution["bruno_cwd"] = rel(bruno_cwd, args.repo_root.resolve())
@@ -489,9 +515,10 @@ def run_workflow(args: argparse.Namespace, workflow: FiberWorkflow) -> dict[str,
 def build_report(args: argparse.Namespace) -> dict[str, Any]:
     repo_root = args.repo_root.resolve()
     fiber_repo = args.fiber_repo.resolve()
+    fiber_repo_info = fiber_repo_provenance(fiber_repo)
     run_suites = {workflow.suite for workflow in REQUIRED_WORKFLOWS} if args.run_all else set(args.run_suite or [])
 
-    executions = previous_executions(args.output.resolve())
+    executions = previous_executions(args.output.resolve(), fiber_repo_info)
     for workflow in REQUIRED_WORKFLOWS:
         if workflow.suite in run_suites:
             executions[workflow.suite] = run_workflow(args, workflow)
@@ -534,13 +561,7 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
         "status": status,
         "generated_at_unix": int(time.time()),
         "classification": "fiber_node_execution_v0",
-        "fiber_repo": {
-            "path": fiber_repo.as_posix(),
-            "origin": git_value(fiber_repo, ["remote", "get-url", "origin"]),
-            "branch": git_value(fiber_repo, ["branch", "--show-current"]),
-            "commit": git_value(fiber_repo, ["rev-parse", "HEAD"]),
-            "dirty": bool(git_value(fiber_repo, ["status", "--short"])),
-        },
+        "fiber_repo": fiber_repo_info,
         "devnet_contract": {
             "runnable_devnet_contract_present": runnable_contract_present,
             "start_command": "./tests/nodes/start.sh e2e/<suite>",

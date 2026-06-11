@@ -54,16 +54,16 @@ or failed local Fiber endpoint coverage is a blocker for current-commit local
 acceptance, even when local static blockers are zero. Missing public BTC SPV
 evidence remains a blocker for external-completeness and production acceptance.
 
-Previous full post-Phase-5 refresh: **2026-06-05**.
+Latest full post-Phase-5 refresh: **2026-06-11**.
 
-- Phase 5 was rerun from a detached clean-room worktree:
-  `/Users/arthur/RustroverProjects/CellScript-cleanrooms/novaseal-phase5-20260605-121420`.
-- The clean-room Fiber report was copied back to
+- Phase 5 was rerun from `/Users/arthur/RustroverProjects/CellScript` against
+  `/Users/arthur/RustroverProjects/fiber`.
+- The v0.4 Fiber report is written to
   `target/novaseal-fiber-node-experiments.json` so Phase 6 and Phase 7 consume
-  the latest evidence.
+  per-suite Fiber commit provenance.
 - Phase 5 report status: `passed`, `16/16` suites executed, `16/16` suites
   passed, `317/317` Bruno requests passed, `473/473` Bruno assertions passed.
-- Phase 5 recorded duration: `2319.305s` across all suites.
+- Phase 5 recorded duration: `2206.579s` across all suites.
 - Phase 6 was rerun in full after the Phase 5 refresh; all seven reports were
   regenerated with pass/local-boundary statuses.
 - Phase 7 certification was rerun with:
@@ -83,7 +83,7 @@ external production attestations listed in Section 9.
 |---|---|---|---|
 | CKB node | `develop` branch, built from `nervosnetwork/ckb` | Devnet chain for all CKB profiles | `cargo build --release` in ckb checkout |
 | ckb-cli | `develop` branch, commit `a3450f91` | Fiber dev-chain setup helper | `cargo build --release` in ckb-cli checkout |
-| Fiber node | `develop` branch, commit `27d458b8529e` | 16-suite Fiber e2e | `git clone https://github.com/nervosnetwork/fiber.git` at sibling dir |
+| Fiber node | `develop` branch, commit `3bbf5ea0ed7d` | 16-suite Fiber e2e | `git clone https://github.com/nervosnetwork/fiber.git` at sibling dir |
 | LND | `v0.20.1-beta`, built with `invoicesrpc routerrpc` | Cross-chain hub suites | `go install -tags=\"invoicesrpc routerrpc\"` in lnd checkout |
 | Bruno CLI | `@usebruno/cli` via npm | Fiber e2e runner | `npm install` inside fiber/tests/bruno |
 | Python | 3.10+ | All scripts | System python3 |
@@ -102,14 +102,14 @@ git -C /path/to/fiber rev-parse HEAD
 git -C /path/to/fiber status --short --branch
 ```
 
-For the 2026-06-05 clean-room rerun, the resolved tools were:
+For the 2026-06-11 v0.4 local rerun, the resolved tools were:
 
 - `ckb`: `/Users/arthur/RustroverProjects/ckb/target/debug/ckb`
 - `ckb-cli`: `/Users/arthur/RustroverProjects/ckb-cli/target/debug/ckb-cli`
-- `npm`: `/opt/homebrew/bin/npm`
+- `npm`: `/Users/arthur/.local/state/fnm_multishells/71822_1780451160423/bin/npm`
 - `cargo`: `/Users/arthur/.cargo/bin/cargo`
 - Fiber: `develop`, commit
-  `27d458b8529e3b4ed76a3abd5f8babd2a0120f15`, dirty `false`
+  `3bbf5ea0ed7debd83a707b5f28264bee2fd7371f`, dirty `false`
 
 **Ports:** Scripts auto-pick free ports. No manual configuration needed unless
 you use `--keep-node` for debugging.
@@ -205,8 +205,8 @@ Docs: each `proposals/novaseal/<profile>/docs/DEVNET_STATEFUL_ACCEPTANCE.md`
 **This is the longest phase.** Each suite starts a local CKB dev chain, builds
 or reuses Fiber `fnn`, starts three Fiber nodes, then runs the Bruno e2e
 suite. Keep the `1800s` / `2400s` timeouts because local startup speed varies.
-The 2026-06-05 clean-room rerun completed much faster than the conservative
-budget: `16/16` suites passed in `2319.305s` total.
+The 2026-06-11 v0.4 local rerun completed within the conservative budget:
+`16/16` suites passed in `2206.579s` total.
 
 ```bash
 FIBER_REPO=/path/to/fiber
@@ -245,7 +245,7 @@ Doc: `proposals/novaseal/fiber-candidate-profile-v0/docs/FIBER_NODE_EXPERIMENTS.
 
 Expected report after full execution:
 
-- `schema: "novaseal-fiber-node-execution-v0.3"`
+- `schema: "novaseal-fiber-node-execution-v0.4"`
 - `status: "passed"`
 - `workflow_coverage.present_count: 16`
 - `workflow_coverage.executed_count: 16`
@@ -254,7 +254,9 @@ Expected report after full execution:
 - each workflow has `execution.started_node: true`, exact Bruno command
   `["npm", "exec", "--", "@usebruno/cli", "run", "e2e/<suite>", "-r",
   "--env", "test"]`, `execution.returncode: 0`, positive
-  `execution.duration_seconds`, and persisted `stdout_log` / `stderr_log`
+  `execution.duration_seconds`, `execution.fiber_repo` matching the top-level
+  Fiber path/origin/branch/commit/dirty provenance, and persisted `stdout_log`
+  / `stderr_log`
 
 The script may apply Bruno compatibility patches in copied per-suite worktrees
 under `target/novaseal-fiber-node-experiments/*/bruno-worktree`. These patches

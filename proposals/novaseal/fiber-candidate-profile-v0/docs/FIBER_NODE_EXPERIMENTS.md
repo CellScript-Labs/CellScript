@@ -4,7 +4,7 @@
 
 | Repository | Branch | Commit | Purpose |
 | --- | --- | --- | --- |
-| `https://github.com/nervosnetwork/fiber.git` | `develop` | `27d458b8529e3b4ed76a3abd5f8babd2a0120f15` | Fiber Network Node workflow execution |
+| `https://github.com/nervosnetwork/fiber.git` | `develop` | `3bbf5ea0ed7debd83a707b5f28264bee2fd7371f` | Fiber Network Node workflow execution |
 | `https://github.com/nervosnetwork/ckb-cli.git` | `develop` | `a3450f91aaebf97e98d517c8d9aad872dc21c9db` | Fiber dev-chain setup helper |
 | `https://github.com/lightningnetwork/lnd.git` | `v0.20.1-beta` | `848b72ce9` | LND and lncli binaries for cross-chain hub execution, built with `invoicesrpc routerrpc` tags |
 
@@ -14,21 +14,22 @@
 `target/novaseal-fiber-node-experiments.json` with:
 
 - status: `passed`
-- schema: `novaseal-fiber-node-execution-v0.3`
-- latest clean-room rerun: 2026-06-05
-- clean-room worktree:
-  `/Users/arthur/RustroverProjects/CellScript-cleanrooms/novaseal-phase5-20260605-121420`
+- schema: `novaseal-fiber-node-execution-v0.4`
+- latest local rerun: 2026-06-11
+- execution worktree:
+  `/Users/arthur/RustroverProjects/CellScript`
 - required Fiber workflow suites present: `16/16`
 - executed Fiber workflow suites: `16/16`
 - passed Fiber workflow suites: `16/16`
-- recorded suite duration: `2319.305s`
+- recorded suite duration: `2206.579s`
 - aggregate Bruno result: `317/317` requests passed, `473/473` assertions
   passed
 - runnable devnet contract present: `true`
 - each suite recorded `execution.started_node: true`, the exact Bruno command
   `npm exec -- @usebruno/cli run e2e/<suite> -r --env test`,
-  `execution.returncode: 0`, positive `execution.duration_seconds`, and
-  persisted stdout/stderr log paths under
+  `execution.returncode: 0`, positive `execution.duration_seconds`,
+  `execution.fiber_repo` matching the top-level Fiber
+  path/origin/branch/commit/dirty provenance, and persisted stdout/stderr log paths under
   `target/novaseal-fiber-node-experiments/`
 - executed suites: `invoice-ops`, `open-use-close-a-channel`,
   `3-nodes-transfer`, `router-pay`, `shutdown-force`, `reestablish`,
@@ -69,7 +70,7 @@ for suite in cross-chain-hub cross-chain-hub-separate; do
 done
 ```
 
-The latest clean-room rerun used the loop above with explicit `--fiber-repo`.
+The latest v0.4 local rerun used the loop above with explicit `--fiber-repo`.
 The earlier individual command transcript is retained below for suite-name and
 timeout traceability:
 
@@ -156,9 +157,9 @@ escaping worktree paths are rejected.
 The cross-chain hub suites require LND's `invoicesrpc` service for
 `AddHoldInvoice`. The local `lnd` and `lncli` binaries were rebuilt from LND
 `v0.20.1-beta` with `invoicesrpc routerrpc` build tags after an initial
-diagnostic run showed `unknown service invoicesrpc.Invoices`. The 2026-06-05
-clean-room rerun used the rebuilt binaries from `/Users/arthur/go/bin` and did
-not reproduce the service-missing failure.
+diagnostic run showed `unknown service invoicesrpc.Invoices`. The 2026-06-11
+v0.4 rerun used the rebuilt binaries from `/Users/arthur/go/bin` and did not
+reproduce the service-missing failure.
 
 The cross-chain suites were run from temporary copied Bruno collections under
 `target/novaseal-fiber-node-experiments/cross-chain-hub/bruno-worktree` and

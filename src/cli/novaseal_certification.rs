@@ -587,7 +587,7 @@ const BIP340_TCB_SOURCE_HASH_PATHS: &[&str] = &[
     "proposals/novaseal/v0-mvp-skeleton/verifier/novaseal_btc_verifier",
 ];
 
-const EXPECTED_FIBER_NODE_EXECUTION_SCHEMA: &str = "novaseal-fiber-node-execution-v0.3";
+const EXPECTED_FIBER_NODE_EXECUTION_SCHEMA: &str = "novaseal-fiber-node-execution-v0.4";
 const EXPECTED_FIBER_REPO_ORIGIN: &str = "https://github.com/nervosnetwork/fiber.git";
 const EXPECTED_FIBER_NODE_PROFILES: &[&str] = &[
     EXPECTED_BTC_TX_COMMITMENT_PROFILE,
@@ -2573,6 +2573,16 @@ fn fiber_node_execution_summary(repo_root: &Path, report: Option<&Value>) -> Val
         let execution_returncode_zero = json_pointer_i64(workflow, "/execution/returncode") == Some(0);
         let execution_duration_positive =
             workflow.pointer("/execution/duration_seconds").and_then(Value::as_f64).is_some_and(|duration| duration > 0.0);
+        let execution_fiber_repo_matches_report = json_pointer_str(workflow, "/execution/fiber_repo/path")
+            .is_some_and(|path| json_pointer_str(report, "/fiber_repo/path") == Some(path))
+            && json_pointer_str(workflow, "/execution/fiber_repo/origin")
+                .is_some_and(|origin| json_pointer_str(report, "/fiber_repo/origin") == Some(origin))
+            && json_pointer_str(workflow, "/execution/fiber_repo/branch")
+                .is_some_and(|branch| json_pointer_str(report, "/fiber_repo/branch") == Some(branch))
+            && json_pointer_str(workflow, "/execution/fiber_repo/commit")
+                .is_some_and(|commit| is_git_commit_hash(commit) && json_pointer_str(report, "/fiber_repo/commit") == Some(commit))
+            && json_pointer_bool_opt(workflow, "/execution/fiber_repo/dirty")
+                .is_some_and(|dirty| json_pointer_bool_opt(report, "/fiber_repo/dirty") == Some(dirty));
         let bruno_compatibility_patch_files_exist = bruno_compatibility_patch_contract(
             repo_root,
             json_pointer_str(workflow, "/execution/bruno_cwd"),
@@ -2586,6 +2596,7 @@ fn fiber_node_execution_summary(repo_root: &Path, report: Option<&Value>) -> Val
             "execution_command_exact": execution_command_exact,
             "execution_returncode_zero": execution_returncode_zero,
             "execution_duration_positive": execution_duration_positive,
+            "execution_fiber_repo_matches_report": execution_fiber_repo_matches_report,
             "mapped_profiles_exact": exact_string_set(&mapped_profiles, expected_profiles),
             "expected_terms_present": object_values_all_true(workflow.get("expected_terms")),
             "evidence_files_present": evidence_files_present,
@@ -11734,7 +11745,13 @@ mod tests {
         fixture_git_stdout(fiber_repo, &["rev-parse", "HEAD"])
     }
 
-    fn fiber_workflow_fixture(repo_root: &Path, fiber_repo: &Path, suite: &str, mapped_profiles: &[&str]) -> Value {
+    fn fiber_workflow_fixture(
+        repo_root: &Path,
+        fiber_repo: &Path,
+        suite: &str,
+        mapped_profiles: &[&str],
+        fiber_repo_info: &Value,
+    ) -> Value {
         write_fiber_workflow_fixture_files(repo_root, fiber_repo, suite);
         let mut execution = json!({
             "status": "passed",
@@ -11744,6 +11761,7 @@ mod tests {
             "duration_seconds": 1.0,
             "stdout_log": format!("target/novaseal-fiber-node-experiments/{suite}/bruno.stdout"),
             "stderr_log": format!("target/novaseal-fiber-node-experiments/{suite}/bruno.stderr"),
+            "fiber_repo": fiber_repo_info,
         });
         if suite == "cross-chain-hub" {
             let bruno_cwd = "target/novaseal-fiber-node-experiments/cross-chain-hub/bruno-worktree";
@@ -11770,21 +11788,25 @@ mod tests {
     }
 
     fn complete_fiber_node_execution_report(repo_root: &Path, fiber_repo: &Path) -> Value {
+        for (suite, _) in EXPECTED_FIBER_WORKFLOWS {
+            write_fiber_workflow_fixture_files(repo_root, fiber_repo, suite);
+        }
+        let commit = ensure_clean_fiber_fixture_repo(fiber_repo);
+        let fiber_repo_info = json!({
+            "path": fiber_repo.display().to_string(),
+            "origin": EXPECTED_FIBER_REPO_ORIGIN,
+            "branch": "develop",
+            "commit": commit,
+            "dirty": false,
+        });
         let workflows = EXPECTED_FIBER_WORKFLOWS
             .iter()
-            .map(|(suite, profiles)| fiber_workflow_fixture(repo_root, fiber_repo, suite, profiles))
+            .map(|(suite, profiles)| fiber_workflow_fixture(repo_root, fiber_repo, suite, profiles, &fiber_repo_info))
             .collect::<Vec<_>>();
-        let commit = ensure_clean_fiber_fixture_repo(fiber_repo);
         json!({
             "schema": EXPECTED_FIBER_NODE_EXECUTION_SCHEMA,
             "status": "passed",
-            "fiber_repo": {
-                "path": fiber_repo.display().to_string(),
-                "origin": EXPECTED_FIBER_REPO_ORIGIN,
-                "branch": "develop",
-                "commit": commit,
-                "dirty": false,
-            },
+            "fiber_repo": fiber_repo_info,
             "devnet_contract": {
                 "runnable_devnet_contract_present": true,
             },
@@ -11866,6 +11888,25 @@ mod tests {
         assert!(!json_pointer_bool(&failed_forged_commit, "/all_required_workflows_executed_passed"));
         assert!(!json_pointer_bool(&failed_forged_commit, "/checks/fiber_repo_git_provenance_verified"));
         assert!(!json_pointer_bool(&failed_forged_commit, "/fiber_repo_git_provenance/checks/commit_matches_report"));
+
+        let mut stale_execution_commit = complete_fiber_node_execution_report(&repo_root, &fiber_repo);
+        stale_execution_commit["workflows"][0]["execution"]["fiber_repo"]["commit"] =
+            json!("0123456789abcdef0123456789abcdef01234567");
+        let failed_stale_execution_commit = fiber_node_execution_summary(&repo_root, Some(&stale_execution_commit));
+        assert!(!json_pointer_bool(&failed_stale_execution_commit, "/all_required_workflows_executed_passed"));
+        assert!(!json_pointer_bool(
+            &failed_stale_execution_commit,
+            "/workflow_checks/open-use-close-a-channel/execution_fiber_repo_matches_report"
+        ));
+
+        let mut missing_execution_repo = complete_fiber_node_execution_report(&repo_root, &fiber_repo);
+        missing_execution_repo["workflows"][0]["execution"].as_object_mut().unwrap().remove("fiber_repo");
+        let failed_missing_execution_repo = fiber_node_execution_summary(&repo_root, Some(&missing_execution_repo));
+        assert!(!json_pointer_bool(&failed_missing_execution_repo, "/all_required_workflows_executed_passed"));
+        assert!(!json_pointer_bool(
+            &failed_missing_execution_repo,
+            "/workflow_checks/open-use-close-a-channel/execution_fiber_repo_matches_report"
+        ));
 
         let mut missing_logs = complete_fiber_node_execution_report(&repo_root, &fiber_repo);
         missing_logs["workflows"][0]["execution"]["stdout_log"] = Value::String(String::new());
