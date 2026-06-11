@@ -31,6 +31,7 @@ done
 REPORT="$ROOT_DIR/target/novaseal-devnet-stateful-acceptance.json"
 cert_status=0
 if [[ "$REPORT_ONLY" != true ]]; then
+  rm -f "$REPORT"
   if [[ -z "${CELLC_BIN:-}" ]]; then
     CELLC_BIN="$ROOT_DIR/target/debug/cellc"
     if [[ ! -x "$CELLC_BIN" ]]; then
@@ -76,23 +77,27 @@ print(
 PY
 )"
 IFS=$'\t' read -r status live_devnet_rpc_executed local_blockers acceptance_blockers blockers external_endpoint_status <<< "$summary"
-printf 'wrote %s status=%s live_devnet_rpc_executed=%s local_blockers=%s acceptance_blockers=%s blockers=%s external_endpoint_status=%s\n' \
-  "$REPORT" "$status" "$live_devnet_rpc_executed" "$local_blockers" "$acceptance_blockers" "$blockers" "$external_endpoint_status"
-if [[ "$cert_status" -eq 0 ]]; then
-  case "$status" in
-    passed)
-      if [[ "$blockers" != "0" ]]; then
-        cert_status=1
-      fi
-      ;;
-    local_devnet_passed_external_endpoint_required)
-      if [[ "$live_devnet_rpc_executed" != "true" || "$local_blockers" != "0" || "$external_endpoint_status" != "external_required" ]]; then
-        cert_status=1
-      fi
-      ;;
-    *)
-      cert_status=1
-      ;;
-  esac
+printf 'wrote %s status=%s live_devnet_rpc_executed=%s local_blockers=%s acceptance_blockers=%s blockers=%s external_endpoint_status=%s certifier_status=%s\n' \
+  "$REPORT" "$status" "$live_devnet_rpc_executed" "$local_blockers" "$acceptance_blockers" "$blockers" "$external_endpoint_status" "$cert_status"
+
+report_status=1
+case "$status" in
+  passed)
+    if [[ "$blockers" == "0" ]]; then
+      report_status=0
+    fi
+    ;;
+  local_devnet_passed_external_endpoint_required)
+    if [[ "$live_devnet_rpc_executed" == "true" && "$local_blockers" == "0" && "$external_endpoint_status" == "external_required" ]]; then
+      report_status=0
+    fi
+    ;;
+esac
+
+if [[ "$report_status" -eq 0 ]]; then
+  exit 0
 fi
-exit "$cert_status"
+if [[ "$cert_status" -ne 0 ]]; then
+  exit "$cert_status"
+fi
+exit "$report_status"
