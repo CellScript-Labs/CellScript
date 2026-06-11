@@ -169,6 +169,37 @@ fn wrapper_rejects_external_required_status_with_local_blockers() {
 }
 
 #[test]
+fn wrapper_rejects_external_required_status_with_extra_acceptance_blockers() {
+    let mut report = base_report();
+    report["acceptance_blocker_count"] = json!(2);
+    report["blocker_count"] = json!(2);
+
+    let output = run_wrapper(report);
+
+    assert!(
+        !output.status.success(),
+        "wrapper must reject extra acceptance blockers in the external-endpoint-only state\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn wrapper_rejects_external_required_status_with_total_blocker_mismatch() {
+    let mut report = base_report();
+    report["blocker_count"] = json!(2);
+
+    let output = run_wrapper(report);
+
+    assert!(
+        !output.status.success(),
+        "wrapper must reject mismatched total blocker counts in the external-endpoint-only state\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn wrapper_rejects_passed_status_with_any_remaining_blocker() {
     let mut report = base_report();
     report["status"] = json!("passed");

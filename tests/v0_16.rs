@@ -405,6 +405,42 @@ fn validate_tx_checks_builder_assumption_evidence() {
     assert_eq!(report.status, "failed");
     assert!(report.violations.iter().any(|violation| violation.message.contains("structured evidence")), "{report:#?}");
 
+    let implicit_map_evidence = assumptions
+        .iter()
+        .map(|assumption| {
+            let mut evidence = evidence_for(assumption);
+            evidence.as_object_mut().expect("evidence object").remove("assumption_id");
+            (assumption.assumption_id.clone(), evidence)
+        })
+        .collect::<serde_json::Map<_, _>>();
+    let with_implicit_map_evidence = json!({
+        "inputs": [{}],
+        "outputs": [{}],
+        "cell_deps": [],
+        "witnesses": [],
+        "builder_assumption_evidence": implicit_map_evidence
+    });
+    let report = cellscript::assumptions::validate_transaction_against_metadata(&result.metadata, &with_implicit_map_evidence);
+    assert_eq!(report.status, "failed");
+    assert!(
+        report.violations.iter().any(|violation| violation.message.contains("explicit assumption_id matching its map key")),
+        "{report:#?}"
+    );
+
+    let map_evidence = assumptions
+        .iter()
+        .map(|assumption| (assumption.assumption_id.clone(), evidence_for(assumption)))
+        .collect::<serde_json::Map<_, _>>();
+    let with_map_evidence = json!({
+        "inputs": [{}],
+        "outputs": [{}],
+        "cell_deps": [],
+        "witnesses": [],
+        "builder_assumption_evidence": map_evidence
+    });
+    let report = cellscript::assumptions::validate_transaction_against_metadata(&result.metadata, &with_map_evidence);
+    assert_eq!(report.status, "ok", "{:#?}", report);
+
     let evidence = assumptions.iter().map(evidence_for).collect::<Vec<_>>();
     let with_evidence = json!({
         "inputs": [{}],

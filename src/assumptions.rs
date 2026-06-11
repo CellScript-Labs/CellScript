@@ -440,9 +440,14 @@ fn validate_evidence_object(
     map_key: Option<&str>,
     assumption: &BuilderAssumptionMetadata,
 ) -> EvidenceValidation {
-    let id = object.get("assumption_id").and_then(Value::as_str).or(map_key);
-    let Some(id) = id else {
-        return EvidenceValidation::Missing;
+    let Some(id) = object.get("assumption_id").and_then(Value::as_str) else {
+        return if map_key == Some(assumption.assumption_id.as_str()) {
+            EvidenceValidation::Invalid(
+                "builder_assumption_evidence object must include an explicit assumption_id matching its map key".to_string(),
+            )
+        } else {
+            EvidenceValidation::Missing
+        };
     };
     if id != assumption.assumption_id {
         return if map_key == Some(assumption.assumption_id.as_str()) {

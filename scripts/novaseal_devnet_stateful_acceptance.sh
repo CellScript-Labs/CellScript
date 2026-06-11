@@ -99,7 +99,7 @@ case "$status" in
     fi
     ;;
   local_devnet_passed_external_endpoint_required)
-    if [[ "$live_devnet_rpc_executed" == "true" && "$local_blockers" == "0" && "$external_endpoint_status" == "external_required" ]]; then
+    if [[ "$live_devnet_rpc_executed" == "true" && "$local_blockers" == "0" && "$acceptance_blockers" == "1" && "$blockers" == "1" && "$external_endpoint_status" == "external_required" ]]; then
       report_status=0
     fi
     ;;
