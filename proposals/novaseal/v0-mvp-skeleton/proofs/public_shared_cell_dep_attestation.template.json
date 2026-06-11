@@ -26,7 +26,7 @@
   },
   "notes": [
     "This file is a template, not an attestation.",
-    "A real attestation must describe a public/shared deployment, not a local devnet CellDep.",
+    "A real attestation must describe a public/shared deployment by an independent identity, not a local devnet CellDep or NovaSeal/CellScript self-attestation.",
     "The request contract generated at target/novaseal-external-attestation-adapter.json lists the exact public CellDep fields, reviewed artifact hash, and expected_release_manifest_commit from the reviewed TCB repo_commit this attestation must satisfy.",
     "The request_handoff block must reference the current target/novaseal-external-evidence-handoff-bundle.json hash, blake2b-256(person=NovaExtHandoff) hash algorithm, and public_shared_cell_dep_attestation group.",
     "The production gate rejects missing or placeholder out_point/data_hash/artifact_hash fields."

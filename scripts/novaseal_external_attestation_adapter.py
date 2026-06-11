@@ -76,7 +76,7 @@ def public_celldep_case(template: dict[str, Any], tcb: dict[str, Any]) -> dict[s
         "field_constraints": {
             "network": "explicit public CKB mainnet/testnet name; placeholders and local/devnet/regtest/simnet/private/fake labels are rejected",
             "attested_at": "UTC timestamp in YYYY-MM-DDTHH:MM:SSZ form; future timestamps are rejected",
-            "attestor": "real release signer or deployer identity; placeholder, local/devnet/fake/internal, example, and unknown tokens are rejected",
+            "attestor": "real independent release signer or deployer identity; placeholder, first-party NovaSeal/CellScript, local/devnet/fake/internal, example, and unknown tokens are rejected",
             "release.package": "novaseal",
             "release.version": "exact NovaSeal release version 0.0.1-v0-mvp",
             "release.manifest_commit": "40-character hex source commit matching the reviewed TCB repo_commit",
@@ -151,7 +151,7 @@ def external_tcb_case(template: dict[str, Any], tcb: dict[str, Any]) -> dict[str
             "request_handoff.group",
         ],
         "field_constraints": {
-            "reviewer": "real external reviewer identity; placeholder, local/devnet/fake/internal, example, and unknown tokens are rejected",
+            "reviewer": "real external reviewer identity; placeholder, first-party NovaSeal/CellScript, local/devnet/fake/internal, example, and unknown tokens are rejected",
             "review_date": "UTC date in YYYY-MM-DD form; future dates are rejected",
             "review_scope": "exact BIP340 verifier, RISC-V shell, IPC envelope, and artifact/CellDep pinning scope",
             "verifier_id": "btc.bip340.v0",

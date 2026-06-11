@@ -336,7 +336,7 @@ const EXPECTED_BTC_SPV_FIELD_CONSTRAINTS: &[(&str, &str)] = &[
     ("generated_at", "UTC timestamp in YYYY-MM-DDTHH:MM:SSZ form; future timestamps are rejected"),
     (
         "evidence_provider",
-        "real external provider identity; placeholder, local/devnet/fake/internal, example, and unknown tokens are rejected",
+        "real external provider identity; placeholder, first-party NovaSeal/CellScript, local/devnet/fake/internal, example, and unknown tokens are rejected",
     ),
     ("ckb_live_tx_hash", "0x-prefixed 32-byte CKB live transaction hash matching the current NovaSeal service-builder case"),
     ("live_report_hash", "0x-prefixed 32-byte hash of the current NovaSeal live devnet report for this profile"),
@@ -403,7 +403,7 @@ const EXPECTED_BTC_SPV_FIELD_CONSTRAINTS: &[(&str, &str)] = &[
     ("spv_client_cell_dep.hash_type", "data, data1, or type CKB script hash type"),
     (
         "source_service.name",
-        "real external SPV service identity; placeholder, local/devnet/fake/internal, example, and unknown tokens are rejected",
+        "real external SPV service identity; placeholder, first-party NovaSeal/CellScript, local/devnet/fake/internal, example, and unknown tokens are rejected",
     ),
     ("source_service.commit", "40-character hex service source commit"),
     ("source_service.report_hash", "0x-prefixed 32-byte non-placeholder SPV service report hash"),
@@ -439,7 +439,7 @@ const EXPECTED_PUBLIC_CELLDEP_FIELD_CONSTRAINTS: &[(&str, &str)] = &[
     ("attested_at", "UTC timestamp in YYYY-MM-DDTHH:MM:SSZ form; future timestamps are rejected"),
     (
         "attestor",
-        "real release signer or deployer identity; placeholder, local/devnet/fake/internal, example, and unknown tokens are rejected",
+        "real independent release signer or deployer identity; placeholder, first-party NovaSeal/CellScript, local/devnet/fake/internal, example, and unknown tokens are rejected",
     ),
     ("release.package", "novaseal"),
     ("release.version", "exact NovaSeal release version 0.0.1-v0-mvp"),
@@ -484,7 +484,7 @@ const EXPECTED_EXTERNAL_TCB_REQUIRED_FIELDS: &[&str] = &[
 const EXPECTED_EXTERNAL_TCB_FIELD_CONSTRAINTS: &[(&str, &str)] = &[
     (
         "reviewer",
-        "real external reviewer identity; placeholder, local/devnet/fake/internal, example, and unknown tokens are rejected",
+        "real external reviewer identity; placeholder, first-party NovaSeal/CellScript, local/devnet/fake/internal, example, and unknown tokens are rejected",
     ),
     ("review_date", "UTC date in YYYY-MM-DD form; future dates are rejected"),
     ("review_scope", "exact BIP340 verifier, RISC-V shell, IPC envelope, and artifact/CellDep pinning scope"),
@@ -543,13 +543,13 @@ const EXPECTED_RWA_LEGAL_REVIEW_FIELD_CONSTRAINTS: &[(&str, &str)] = &[
     ("profile", "rwa-receipt-profile-v0"),
     (
         "reviewer",
-        "real external legal or registry reviewer identity; placeholder, local/devnet/fake/internal, example, and unknown tokens are rejected",
+        "real external legal or registry reviewer identity; placeholder, first-party NovaSeal/CellScript, local/devnet/fake/internal, example, and unknown tokens are rejected",
     ),
     ("review_date", "UTC date in YYYY-MM-DD form; future dates are rejected"),
     ("review_scope", "exact RWA receipt legal-title, custody, registry-state, oracle-fact, and enforceability review scope"),
     (
         "registry.authority",
-        "real registry or custodian authority identity; placeholder, local/devnet/fake/internal, example, and unknown tokens are rejected",
+        "real registry or custodian authority identity; placeholder, first-party NovaSeal/CellScript, local/devnet/fake/internal, example, and unknown tokens are rejected",
     ),
     (
         "registry.jurisdiction",
@@ -6983,7 +6983,11 @@ fn value_is_present(value: &Value) -> bool {
 
 fn is_external_identity(value: &str) -> bool {
     let trimmed = value.trim();
-    trimmed == value && trimmed.len() >= 3 && !contains_placeholder_token(trimmed) && !contains_local_only_token(trimmed)
+    trimmed == value
+        && trimmed.len() >= 3
+        && !contains_placeholder_token(trimmed)
+        && !contains_local_only_token(trimmed)
+        && !contains_first_party_attestation_token(trimmed)
 }
 
 fn is_public_network(value: &str) -> bool {
@@ -7028,6 +7032,26 @@ fn contains_placeholder_token(value: &str) -> bool {
 fn contains_local_only_token(value: &str) -> bool {
     let lower = value.to_ascii_lowercase();
     ["local", "devnet", "regtest", "simnet", "fake", "internal", "mock"].iter().any(|token| lower.contains(token))
+}
+
+fn contains_first_party_attestation_token(value: &str) -> bool {
+    let lower = value.to_ascii_lowercase();
+    [
+        "novaseal",
+        "nova seal",
+        "cellscript",
+        "cell script",
+        "first-party",
+        "first_party",
+        "self-attested",
+        "self_attested",
+        "self attested",
+        "self-attestation",
+        "self_attestation",
+        "self attestation",
+    ]
+    .iter()
+    .any(|token| lower.contains(token))
 }
 
 fn is_https_report_uri(value: &str) -> bool {
@@ -10210,6 +10234,22 @@ mod tests {
         assert_eq!(json_pointer_str(&failed_placeholder_reviewer, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&failed_placeholder_reviewer, "/checks/reviewer_identity"));
 
+        let mut first_party_reviewer = evidence.clone();
+        first_party_reviewer["reviewer"] = json!("NovaSeal Legal Review Team");
+        std::fs::write(&evidence_path, serde_json::to_vec_pretty(&first_party_reviewer).unwrap()).unwrap();
+        let failed_first_party_reviewer =
+            validate_rwa_legal_registry_review(temp.path(), RWA_LEGAL_REGISTRY_REVIEW_EVIDENCE, &handoff).unwrap();
+        assert_eq!(json_pointer_str(&failed_first_party_reviewer, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&failed_first_party_reviewer, "/checks/reviewer_identity"));
+
+        let mut first_party_authority = evidence.clone();
+        first_party_authority["registry"]["authority"] = json!("CellScript Custody Registry");
+        std::fs::write(&evidence_path, serde_json::to_vec_pretty(&first_party_authority).unwrap()).unwrap();
+        let failed_first_party_authority =
+            validate_rwa_legal_registry_review(temp.path(), RWA_LEGAL_REGISTRY_REVIEW_EVIDENCE, &handoff).unwrap();
+        assert_eq!(json_pointer_str(&failed_first_party_authority, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&failed_first_party_authority, "/checks/registry_authority_identity"));
+
         let mut local_jurisdiction = evidence.clone();
         local_jurisdiction["registry"]["jurisdiction"] = json!("local-devnet-registry");
         std::fs::write(&evidence_path, serde_json::to_vec_pretty(&local_jurisdiction).unwrap()).unwrap();
@@ -10625,6 +10665,14 @@ mod tests {
         assert_eq!(json_pointer_str(&failed_local_provider, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&failed_local_provider, "/checks/evidence_provider_identity"));
 
+        let mut first_party_provider = spv_report.clone();
+        first_party_provider["evidence_provider"] = json!("NovaSeal BTC SPV Desk");
+        std::fs::write(proofs.join("public_btc_spv_evidence.json"), serde_json::to_vec_pretty(&first_party_provider).unwrap())
+            .unwrap();
+        let failed_first_party_provider = validate_btc_spv_evidence(temp.path(), PUBLIC_BTC_SPV_EVIDENCE, &handoff).unwrap();
+        assert_eq!(json_pointer_str(&failed_first_party_provider, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&failed_first_party_provider, "/checks/evidence_provider_identity"));
+
         let mut placeholder_network = spv_report.clone();
         placeholder_network["network"] = json!("testnet-or-mainnet");
         std::fs::write(proofs.join("public_btc_spv_evidence.json"), serde_json::to_vec_pretty(&placeholder_network).unwrap()).unwrap();
@@ -10715,6 +10763,17 @@ mod tests {
         assert!(!json_pointer_bool(
             &failed_source_service_commit,
             "/case_checks/btc-transaction-commitment-profile-v0/source_service_commit_40_hex"
+        ));
+
+        let mut first_party_source_service = spv_report.clone();
+        first_party_source_service["cases"][0]["source_service"]["name"] = json!("CellScript SPV Service");
+        std::fs::write(proofs.join("public_btc_spv_evidence.json"), serde_json::to_vec_pretty(&first_party_source_service).unwrap())
+            .unwrap();
+        let failed_first_party_source_service = validate_btc_spv_evidence(temp.path(), PUBLIC_BTC_SPV_EVIDENCE, &handoff).unwrap();
+        assert_eq!(json_pointer_str(&failed_first_party_source_service, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(
+            &failed_first_party_source_service,
+            "/case_checks/btc-transaction-commitment-profile-v0/source_service_name_identity"
         ));
 
         let mut source_service_zero_report_hash = spv_report.clone();
@@ -11172,6 +11231,24 @@ mod tests {
         assert_eq!(json_pointer_str(&public_local_attestor_failed, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&public_local_attestor_failed, "/checks/attestor_identity"));
 
+        let mut public_first_party_attestor = public_attestation.clone();
+        public_first_party_attestor["attestor"] = json!("NovaSeal Release Bot");
+        std::fs::write(
+            proofs.join("public_shared_cell_dep_attestation.json"),
+            serde_json::to_vec_pretty(&public_first_party_attestor).unwrap(),
+        )
+        .unwrap();
+        let public_first_party_attestor_failed = validate_public_attestation(
+            temp.path(),
+            PUBLIC_CELLDEP_ATTESTATION,
+            Some(&artifact_hash),
+            Some(tcb_repo_commit),
+            &handoff,
+        )
+        .unwrap();
+        assert_eq!(json_pointer_str(&public_first_party_attestor_failed, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&public_first_party_attestor_failed, "/checks/attestor_identity"));
+
         let mut public_extra = public_attestation.clone();
         public_extra["unexpected_provider_field"] = Value::String("must-fail".to_string());
         std::fs::write(proofs.join("public_shared_cell_dep_attestation.json"), serde_json::to_vec_pretty(&public_extra).unwrap())
@@ -11496,6 +11573,19 @@ mod tests {
                 .unwrap();
         assert_eq!(json_pointer_str(&review_local_reviewer_failed, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&review_local_reviewer_failed, "/checks/reviewer_identity"));
+
+        let mut review_first_party_reviewer = external_review.clone();
+        review_first_party_reviewer["reviewer"] = json!("CellScript TCB Review Team");
+        std::fs::write(
+            proofs.join("bip340_external_tcb_review_attestation.json"),
+            serde_json::to_vec_pretty(&review_first_party_reviewer).unwrap(),
+        )
+        .unwrap();
+        let review_first_party_reviewer_failed =
+            validate_external_review(temp.path(), EXTERNAL_TCB_ATTESTATION, Some(&artifact_hash), Some(&source_tree_hash), &handoff)
+                .unwrap();
+        assert_eq!(json_pointer_str(&review_first_party_reviewer_failed, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&review_first_party_reviewer_failed, "/checks/reviewer_identity"));
 
         let mut review_placeholder_uri = external_review.clone();
         review_placeholder_uri["report_uri"] = json!("REPLACE_WITH_EXTERNAL_REVIEW_REPORT_OR_COMMIT_URI");
@@ -12960,6 +13050,10 @@ mod tests {
         for identity in [
             "REPLACE_WITH_EXTERNAL_REVIEWER",
             "unknown-reviewer",
+            "NovaSeal Release Bot",
+            "CellScript Team",
+            "self-attested-reviewer",
+            "first-party-spv-service",
             "local-reviewer",
             "devnet-provider",
             "regtest-spv-service",

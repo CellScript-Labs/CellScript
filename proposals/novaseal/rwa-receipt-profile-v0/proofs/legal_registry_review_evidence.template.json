@@ -25,7 +25,7 @@
   },
   "notes": [
     "This file is a template, not production evidence.",
-    "A real report must come from an external legal, registry, or custodian reviewer and must not be a local NovaSeal fixture.",
+    "A real report must come from an external legal, registry, or custodian reviewer and must not be a local fixture or NovaSeal/CellScript self-attestation.",
     "NovaSeal does not verify off-chain title, custody, registry state, market price, legal enforceability, or oracle facts in-script.",
     "The request_handoff block must reference the current target/novaseal-external-evidence-handoff-bundle.json hash, blake2b-256(person=NovaExtHandoff) hash algorithm, and rwa_legal_registry_review_evidence group."
   ]

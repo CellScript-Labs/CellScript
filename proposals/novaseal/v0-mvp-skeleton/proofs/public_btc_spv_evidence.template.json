@@ -158,7 +158,7 @@
   ],
   "notes": [
     "This file is a template, not production evidence.",
-    "A real report must be saved as public_btc_spv_evidence.json and must not use local-devnet or placeholder fields.",
+    "A real report must be saved as public_btc_spv_evidence.json and must not use local-devnet, placeholder, or NovaSeal/CellScript self-attestation identity fields.",
     "The request contract generated at target/novaseal-btc-spv-evidence-adapter.json lists the exact BTC-facing profile/scenario cases and service-builder hashes this public report must satisfy.",
     "The request_handoff block must reference the current target/novaseal-external-evidence-handoff-bundle.json hash, blake2b-256(person=NovaExtHandoff) hash algorithm, and public_btc_spv_evidence group.",
     "Each case must also echo the current CKB live tx hash, live report hash, service-builder binding hashes, and CKB-side BTC commitment hash from the handoff bundle; unrelated BTC SPV proofs are rejected.",
