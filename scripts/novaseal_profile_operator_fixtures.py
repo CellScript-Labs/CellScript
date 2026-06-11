@@ -15,6 +15,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from novaseal_btc_anchor_contract import public_btc_anchor_shape_matches_profile
+
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT = ROOT / "target/novaseal-profile-operator-fixtures.json"
@@ -225,6 +227,8 @@ def build_case(profile: dict[str, Any], action: str, fixture_name: str, signers:
         "fiber_execution_passed_when_required": not fiber_report
         or json_pointer(fiber_report, "/workflow_coverage/all_required_workflows_executed_passed") is True,
         "public_btc_anchor_present_when_required": (not public_btc_required) or bool(public_btc_anchor),
+        "public_btc_anchor_shape_matches_profile": (not public_btc_required)
+        or public_btc_anchor_shape_matches_profile(profile["profile"], public_btc_anchor),
     }
     status = "passed" if all(status_checks.values()) else "failed"
     return {

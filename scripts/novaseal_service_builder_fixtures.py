@@ -15,6 +15,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from novaseal_btc_anchor_contract import public_btc_anchor_shape_matches_profile
+
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OPERATOR_FIXTURES = ROOT / "target/novaseal-profile-operator-fixtures.json"
@@ -43,10 +45,10 @@ def is_hex32(value: Any) -> bool:
     if not isinstance(value, str) or not value.startswith("0x") or len(value) != 66:
         return False
     try:
-        bytes.fromhex(value[2:])
+        raw = bytes.fromhex(value[2:])
     except ValueError:
         return False
-    return True
+    return any(byte != 0 for byte in raw)
 
 
 def external_inputs(profile: str) -> list[str]:
@@ -140,6 +142,14 @@ def build_case(operator_case: dict[str, Any]) -> dict[str, Any]:
         "public_btc_anchor_bound_when_required": (
             "public_btc_spv_evidence" not in request["production_external_inputs"]
             or bool(request["required_live_inputs"].get("public_btc_anchor"))
+        ),
+        "public_btc_anchor_shape_matches_profile": (
+            "public_btc_spv_evidence" not in request["production_external_inputs"]
+            or public_btc_anchor_shape_matches_profile(profile, request["required_live_inputs"].get("public_btc_anchor"))
+        ),
+        "tx_skeleton_public_btc_anchor_shape_matches_profile": (
+            "public_btc_spv_evidence" not in request["production_external_inputs"]
+            or public_btc_anchor_shape_matches_profile(profile, tx_skeleton.get("public_btc_anchor"))
         ),
     }
     return {

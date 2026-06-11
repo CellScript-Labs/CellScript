@@ -4076,6 +4076,13 @@ fn validate_external_attestation_adapter_detail_with_sources(
     let expected_names = expected.iter().map(|(name, _, _, _)| (*name).to_string()).collect::<BTreeSet<_>>();
     let actual_names =
         cases.iter().filter_map(|case| json_pointer_str(case, "/name").map(ToString::to_string)).collect::<BTreeSet<_>>();
+    let expected_tcb_artifact_hash =
+        tcb_review.and_then(|tcb| normalize_hex(json_pointer_str(tcb, "/runtime_artifact/artifact_hash")));
+    let expected_tcb_artifact_hash_algorithm =
+        tcb_review.and_then(|tcb| json_pointer_str(tcb, "/runtime_artifact/artifact_hash_algorithm"));
+    let expected_tcb_source_tree_hash =
+        tcb_review.and_then(|tcb| normalize_hex(json_pointer_str(tcb, "/source_inventory/source_tree_sha256")));
+    let expected_tcb_repo_commit = tcb_review.and_then(|tcb| json_pointer_str(tcb, "/repo_commit"));
 
     let mut case_checks = Map::new();
     for (name, production_output, template_schema, required_status) in expected {
@@ -4126,8 +4133,36 @@ fn validate_external_attestation_adapter_detail_with_sources(
                 || json_pointer_str(&case, "/request/expected_hash_type") == Some(EXPECTED_NOVASEAL_CELLDEP_HASH_TYPE),
             "expected_release_manifest_commit_present": name != "public_shared_cell_dep_attestation"
                 || json_pointer_str(&case, "/request/expected_release_manifest_commit").is_some_and(is_git_commit_hash),
+            "expected_release_manifest_commit_matches_current_tcb": name != "public_shared_cell_dep_attestation"
+                || expected_tcb_repo_commit
+                    .is_none_or(|expected| json_pointer_str(&case, "/request/expected_release_manifest_commit") == Some(expected)),
             "expected_review_scope_exact": name != "external_bip340_tcb_review_attestation"
                 || exact_string_set(&json_array_strings(&case, "/request/expected_review_scope"), EXPECTED_EXTERNAL_TCB_REVIEW_SCOPE),
+            "expected_artifact_hash_matches_current_tcb": expected_tcb_artifact_hash
+                .as_deref()
+                .is_none_or(|expected| {
+                    normalize_hex(json_pointer_str(&case, "/request/expected_artifact_hash")).as_deref() == Some(expected)
+                }),
+            "template_artifact_hash_matches_current_tcb": expected_tcb_artifact_hash
+                .as_deref()
+                .is_none_or(|expected| {
+                    normalize_hex(json_pointer_str(&case, "/request/template_artifact_hash")).as_deref() == Some(expected)
+                }),
+            "expected_source_tree_sha256_matches_current_tcb": name != "external_bip340_tcb_review_attestation"
+                || expected_tcb_source_tree_hash
+                    .as_deref()
+                    .is_none_or(|expected| {
+                        normalize_hex(json_pointer_str(&case, "/request/expected_source_tree_sha256")).as_deref() == Some(expected)
+                    }),
+            "template_source_tree_sha256_matches_current_tcb": name != "external_bip340_tcb_review_attestation"
+                || expected_tcb_source_tree_hash
+                    .as_deref()
+                    .is_none_or(|expected| {
+                        normalize_hex(json_pointer_str(&case, "/request/template_source_tree_sha256")).as_deref() == Some(expected)
+                    }),
+            "expected_artifact_hash_algorithm_matches_current_tcb": name == "public_shared_cell_dep_attestation"
+                || expected_tcb_artifact_hash_algorithm
+                    .is_none_or(|expected| json_pointer_str(&case, "/request/expected_artifact_hash_algorithm") == Some(expected)),
             "artifact_hash_algorithm_matches_tcb": name == "public_shared_cell_dep_attestation"
                 || (
                     json_pointer_str(&case, "/request/expected_artifact_hash_algorithm") == Some("sha256")
@@ -8411,6 +8446,20 @@ mod tests {
             &detail,
             "/cases/btc-transaction-commitment-profile-v0:commit_btc_transaction_transition/public_btc_anchor_matches_current_report",
         ));
+
+        let mut stale_dual_anchor = operator_fixture_report(temp.path());
+        let dual_index =
+            EXPECTED_PROFILE_OPERATOR_FIXTURES.iter().position(|fixture| fixture.profile == EXPECTED_DUAL_SEAL_PROFILE).unwrap();
+        stale_dual_anchor["cases"][dual_index]["public_btc_anchor"].as_object_mut().unwrap().remove("sealed_btc_txid");
+        stale_dual_anchor["cases"][dual_index]["wallet_display"]["public_btc_anchor"]
+            .as_object_mut()
+            .unwrap()
+            .remove("sealed_btc_txid");
+        let detail = validate_profile_operator_fixture_detail(temp.path(), &stale_dual_anchor).unwrap();
+        assert_eq!(json_pointer_str(&detail, "/status"), Some("failed"));
+        assert!(
+            !json_pointer_bool(&detail, "/cases/dual-seal-profile-v0:finalize_dual_seal/public_btc_anchor_shape_matches_profile",)
+        );
     }
 
     #[test]
@@ -8465,6 +8514,24 @@ mod tests {
         assert!(!json_pointer_bool(
             &detail,
             "/cases/btc-transaction-commitment-profile-v0:commit_btc_transaction_transition/public_btc_anchor_input_matches_operator_fixture",
+        ));
+
+        let mut stale_dual_anchor = service_builder_report(&operator_report);
+        let dual_index =
+            EXPECTED_PROFILE_OPERATOR_FIXTURES.iter().position(|fixture| fixture.profile == EXPECTED_DUAL_SEAL_PROFILE).unwrap();
+        stale_dual_anchor["cases"][dual_index]["request"]["required_live_inputs"]["public_btc_anchor"]
+            .as_object_mut()
+            .unwrap()
+            .remove("sealed_utxo_commitment_hash");
+        stale_dual_anchor["cases"][dual_index]["tx_skeleton"]["public_btc_anchor"]
+            .as_object_mut()
+            .unwrap()
+            .remove("sealed_utxo_commitment_hash");
+        let detail = validate_service_builder_fixture_detail(&stale_dual_anchor, &operator_report);
+        assert_eq!(json_pointer_str(&detail, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(
+            &detail,
+            "/cases/dual-seal-profile-v0:finalize_dual_seal/public_btc_anchor_input_shape_matches_profile",
         ));
     }
 
@@ -9206,6 +9273,7 @@ mod tests {
         assert!(!json_pointer_bool(&failed_expected_dep_type, "/cases/public_shared_cell_dep_attestation/expected_dep_type_current"));
 
         let tcb_review = json!({
+            "repo_commit": public_manifest_commit,
             "runtime_artifact": {
                 "artifact_hash": format!("0x{}", "11".repeat(32)),
                 "artifact_hash_algorithm": "sha256",
@@ -9232,6 +9300,15 @@ mod tests {
             json!(novaseal_external_attestation_report_hash("public_celldep_template", &public_template));
         source_bound["cases"][1]["request"]["template_hash"] =
             json!(novaseal_external_attestation_report_hash("external_tcb_template", &external_template));
+        source_bound["cases"][0]["request"]["expected_artifact_hash"] = tcb_review["runtime_artifact"]["artifact_hash"].clone();
+        source_bound["cases"][0]["request"]["template_artifact_hash"] = tcb_review["runtime_artifact"]["artifact_hash"].clone();
+        source_bound["cases"][0]["request"]["expected_release_manifest_commit"] = tcb_review["repo_commit"].clone();
+        source_bound["cases"][1]["request"]["expected_artifact_hash"] = tcb_review["runtime_artifact"]["artifact_hash"].clone();
+        source_bound["cases"][1]["request"]["template_artifact_hash"] = tcb_review["runtime_artifact"]["artifact_hash"].clone();
+        source_bound["cases"][1]["request"]["expected_source_tree_sha256"] =
+            tcb_review["source_inventory"]["source_tree_sha256"].clone();
+        source_bound["cases"][1]["request"]["template_source_tree_sha256"] =
+            tcb_review["source_inventory"]["source_tree_sha256"].clone();
         let source_bound_valid = validate_external_attestation_adapter_detail_with_sources(
             &source_bound,
             Some(&tcb_review),
@@ -9240,6 +9317,22 @@ mod tests {
         );
         assert_eq!(json_pointer_str(&source_bound_valid, "/status"), Some("passed"));
         assert!(json_pointer_bool(&source_bound_valid, "/checks/source_tcb_review_hash_matches_current_report"));
+        assert!(json_pointer_bool(
+            &source_bound_valid,
+            "/cases/public_shared_cell_dep_attestation/expected_artifact_hash_matches_current_tcb"
+        ));
+        assert!(json_pointer_bool(
+            &source_bound_valid,
+            "/cases/public_shared_cell_dep_attestation/template_artifact_hash_matches_current_tcb"
+        ));
+        assert!(json_pointer_bool(
+            &source_bound_valid,
+            "/cases/public_shared_cell_dep_attestation/expected_release_manifest_commit_matches_current_tcb"
+        ));
+        assert!(json_pointer_bool(
+            &source_bound_valid,
+            "/cases/external_bip340_tcb_review_attestation/expected_source_tree_sha256_matches_current_tcb"
+        ));
 
         let mut stale_source_hash = source_bound.clone();
         stale_source_hash["source_tcb_review_hash"] = json!(test_hex32(0xf1));
@@ -9264,6 +9357,49 @@ mod tests {
         assert!(!json_pointer_bool(
             &failed_stale_template_hash,
             "/cases/public_shared_cell_dep_attestation/template_hash_matches_current_template"
+        ));
+
+        let mut stale_expected_artifact_hash = source_bound.clone();
+        stale_expected_artifact_hash["cases"][0]["request"]["expected_artifact_hash"] = json!(test_hex32(0xf3));
+        let failed_stale_expected_artifact_hash = validate_external_attestation_adapter_detail_with_sources(
+            &stale_expected_artifact_hash,
+            Some(&tcb_review),
+            Some(&public_template),
+            Some(&external_template),
+        );
+        assert_eq!(json_pointer_str(&failed_stale_expected_artifact_hash, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(
+            &failed_stale_expected_artifact_hash,
+            "/cases/public_shared_cell_dep_attestation/expected_artifact_hash_matches_current_tcb"
+        ));
+
+        let mut stale_manifest_commit = source_bound.clone();
+        stale_manifest_commit["cases"][0]["request"]["expected_release_manifest_commit"] =
+            json!("fedcba9876543210fedcba9876543210fedcba98");
+        let failed_stale_manifest_commit = validate_external_attestation_adapter_detail_with_sources(
+            &stale_manifest_commit,
+            Some(&tcb_review),
+            Some(&public_template),
+            Some(&external_template),
+        );
+        assert_eq!(json_pointer_str(&failed_stale_manifest_commit, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(
+            &failed_stale_manifest_commit,
+            "/cases/public_shared_cell_dep_attestation/expected_release_manifest_commit_matches_current_tcb"
+        ));
+
+        let mut stale_expected_source_tree = source_bound.clone();
+        stale_expected_source_tree["cases"][1]["request"]["expected_source_tree_sha256"] = json!(test_hex32(0xf4));
+        let failed_stale_expected_source_tree = validate_external_attestation_adapter_detail_with_sources(
+            &stale_expected_source_tree,
+            Some(&tcb_review),
+            Some(&public_template),
+            Some(&external_template),
+        );
+        assert_eq!(json_pointer_str(&failed_stale_expected_source_tree, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(
+            &failed_stale_expected_source_tree,
+            "/cases/external_bip340_tcb_review_attestation/expected_source_tree_sha256_matches_current_tcb"
         ));
 
         let mut unexpected_public_field = report;

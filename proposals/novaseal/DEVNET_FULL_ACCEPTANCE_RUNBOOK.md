@@ -393,6 +393,7 @@ Adapter request: `target/novaseal-btc-spv-evidence-adapter.json`
 | `artifact_hashes_match: false` | Rebuilt ELF after generating report | Re-run the affected live devnet script |
 | `source_hash_matches: false` | Changed source tracked by provenance | Re-run the affected live devnet script |
 | `repo_commit_matches: false` | Created a new commit after generating reports | Re-run phases 2-6 on the final commit, then phase 7 |
+| `public_btc_anchor_shape_matches_profile: false` or `expected_dual_sealed_utxo_fields_present: false` | BTC-facing live report is older than the sealed-UTXO handoff contract | Re-run the affected BTC-facing live profile, especially `dual-seal`, then re-run phase 6 |
 | Bruno suite timeout | Fiber node slow start | Increase `--timeout-seconds`; check port availability |
 | `unknown service invoicesrpc.Invoices` | LND built without `invoicesrpc routerrpc` | Rebuild LND with those tags |
 | Bruno QuickJS `BigInt` or stream-runtime mismatch | External Fiber Bruno collection expects Node runtime details that Bruno's runner does not expose identically | Let `scripts/novaseal_fiber_node_experiments.py` patch the copied per-suite worktree; do not patch the external Fiber checkout |
