@@ -399,7 +399,50 @@ check_package_contents() {
     package_files="$(mktemp)"
     printf '\n==> cargo package --list --locked --allow-dirty --offline\n'
     cargo package --list --locked --allow-dirty --offline | tee "$package_files"
-    if grep -E '^(\.github/|docs/|editors/|proposals/|tools/|src/bin/|.*__pycache__/|.*\.py[co]$)' "$package_files"; then
+    if ! python3 - "$package_files" <<'PY'; then
+import sys
+from pathlib import Path
+
+allowed_root_files = {
+    ".cargo_vcs_info.json",
+    "Cargo.lock",
+    "Cargo.toml",
+    "Cargo.toml.orig",
+    "CHANGELOG.md",
+    "CODING_STYLE.md",
+    "LICENSE-MIT",
+    "README.md",
+    "README_CH.md",
+}
+allowed_root_dirs = {
+    "assets",
+    "examples",
+    "roadmap",
+    "scripts",
+    "src",
+    "tests",
+}
+forbidden_suffixes = (".pyc", ".pyo")
+
+unexpected: list[str] = []
+for raw in Path(sys.argv[1]).read_text(encoding="utf-8").splitlines():
+    path = raw.strip()
+    if not path:
+        continue
+    root = path.split("/", 1)[0]
+    if path.endswith(forbidden_suffixes) or "__pycache__/" in path:
+        unexpected.append(path)
+    elif "/" not in path and path not in allowed_root_files:
+        unexpected.append(path)
+    elif "/" in path and root not in allowed_root_dirs:
+        unexpected.append(path)
+
+if unexpected:
+    print("crates.io package includes repository-only files:", file=sys.stderr)
+    for path in unexpected:
+        print(f"  {path}", file=sys.stderr)
+    sys.exit(1)
+PY
         printf 'crates.io package includes repository-only files or unpublished helper binaries\n' >&2
         exit 1
     fi

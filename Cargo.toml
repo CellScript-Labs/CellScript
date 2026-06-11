@@ -9,9 +9,16 @@ description = "CellScript compiler for the Cell model"
 license = "MIT"
 repository = "https://github.com/a19q3/CellScript"
 exclude = [
+    ".audit-report*.md",
+    ".cap/",
     ".gitignore",
+    ".playwright-mcp/",
     ".rustfmt.toml",
     ".github/",
+    "A2_TYPE_RESOLUTION_AUDIT.md",
+    "RUST_COMPARATIVE_AUDIT.md",
+    "SECURITY_AUDIT_SEMANTIC.md",
+    "cellscript-*.png",
     "docs/",
     "docs/wiki/",
     "editors/",
@@ -19,6 +26,7 @@ exclude = [
     "scripts/__pycache__/",
     "src/bin/",
     "tools/",
+    "website/",
 ]
 
 [[bin]]
