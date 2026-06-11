@@ -2889,14 +2889,45 @@ fn novaseal_certification_summary(
         .cloned()
         .or_else(|| v1_readiness.get("failed_dimensions").cloned())
         .unwrap_or_else(|| serde_json::Value::Array(Vec::new()));
+    let planned_missing =
+        v1_readiness.pointer("/planned_profile_matrix/missing").cloned().unwrap_or_else(|| serde_json::Value::Array(Vec::new()));
+    let planned_missing_non_empty = planned_missing.as_array().is_some_and(|items| !items.is_empty());
+    let external_blockers_non_empty = external_blockers.as_array().is_some_and(|items| !items.is_empty());
+    let failed_external_or_endpoint_dimension = failed_dimensions.as_array().is_some_and(|dimensions| {
+        dimensions.iter().filter_map(serde_json::Value::as_str).any(|dimension| {
+            matches!(
+                dimension,
+                "external_btc_fiber_endpoint_acceptance"
+                    | "all_profiles_production_completeness"
+                    | "public_shared_cell_dep_attestation"
+                    | "external_bip340_tcb_review_attestation"
+                    | "public_btc_spv_evidence"
+                    | "rwa_legal_registry_review_evidence"
+            )
+        })
+    });
     let certification_level = json_pointer_str(profile_certification, "/certification_level").unwrap_or("unknown");
     let failure_reason = if passed {
         serde_json::Value::Null
-    } else if !v1_readiness.is_null() && !json_pointer_bool(v1_readiness, "/local_v1_ready") {
+    } else if !v1_readiness.is_null() && !json_pointer_bool(v1_readiness, "/local_v1_ready") && planned_missing_non_empty {
         serde_json::json!({
             "message": "NovaSeal V1 readiness requires remaining planned profiles and business scenarios",
             "v1_status": json_pointer_str(v1_readiness, "/status"),
-            "missing": v1_readiness.pointer("/planned_profile_matrix/missing").cloned().unwrap_or(serde_json::Value::Null),
+            "missing": planned_missing,
+            "failed_dimensions": failed_dimensions.clone(),
+            "external_blockers": external_blockers.clone(),
+            "failed_checks": failed_checks,
+        })
+    } else if !v1_readiness.is_null()
+        && !json_pointer_bool(v1_readiness, "/local_v1_ready")
+        && (external_blockers_non_empty || failed_external_or_endpoint_dimension)
+    {
+        serde_json::json!({
+            "message": "NovaSeal V1 readiness requires external production evidence and endpoint acceptance",
+            "v1_status": json_pointer_str(v1_readiness, "/status"),
+            "missing": planned_missing,
+            "failed_dimensions": failed_dimensions.clone(),
+            "external_blockers": external_blockers.clone(),
             "failed_checks": failed_checks,
         })
     } else if require_production && json_pointer_bool(plugin_report, "/local_production_prep_ready") {
@@ -2909,6 +2940,8 @@ fn novaseal_certification_summary(
     } else {
         serde_json::json!({
             "message": "NovaSeal profile certification failed deterministic compiler checks",
+            "failed_dimensions": failed_dimensions.clone(),
+            "external_blockers": external_blockers.clone(),
             "failed_checks": failed_checks,
         })
     };
@@ -6657,6 +6690,44 @@ mod tests {
             summary["failure_reason"]["message"],
             "NovaSeal V1 readiness requires remaining planned profiles and business scenarios"
         );
+    }
+
+    #[test]
+    fn novaseal_certification_summary_reports_external_v1_blockers_when_planned_matrix_is_complete() {
+        let temp = tempfile::tempdir().unwrap();
+        let report_path = temp.path().join("novaseal-production-gates.json");
+        let implementation_path = temp.path().join("novaseal_certification.rs");
+        let mut report = novaseal_test_plugin_report(false, false);
+        report["v1_readiness"] = serde_json::json!({
+            "status": "failed",
+            "local_v1_ready": false,
+            "planned_profile_matrix": {
+                "status": "passed",
+                "missing": []
+            },
+            "failed_dimensions": [
+                "full_stateful_acceptance",
+                "external_btc_fiber_endpoint_acceptance",
+                "public_btc_spv_evidence"
+            ],
+            "external_blockers": [
+                "public_btc_spv_evidence_attested"
+            ]
+        });
+        std::fs::write(&report_path, serde_json::to_vec_pretty(&report).unwrap()).unwrap();
+        std::fs::write(&implementation_path, b"pub(crate) fn build_report() {}\n").unwrap();
+
+        let summary = novaseal_certification_summary(&report, temp.path(), &report_path, &implementation_path, false, false)
+            .expect("certification summary");
+
+        assert_eq!(summary["status"], "failed");
+        assert_eq!(
+            summary["failure_reason"]["message"],
+            "NovaSeal V1 readiness requires external production evidence and endpoint acceptance"
+        );
+        assert!(summary["failure_reason"]["missing"].as_array().unwrap().is_empty());
+        assert_eq!(summary["failure_reason"]["external_blockers"][0], "public_shared_cell_dep_attested");
+        assert_eq!(summary["failure_reason"]["failed_dimensions"][0], "public_shared_cell_dep_attestation");
     }
 
     #[test]

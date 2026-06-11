@@ -1158,7 +1158,7 @@ pub(crate) fn build_report(repo_root: &Path) -> Result<Value> {
         ),
         gate(
             "live_local_devnet_stateful_core_and_agreement",
-            if stateful_acceptance_passed(&stateful_acceptance) { "passed" } else { "failed" },
+            if stateful_local_acceptance_passed(&stateful_acceptance) { "passed" } else { "failed" },
             "target/novaseal-devnet-stateful-acceptance.json + target/novaseal-devnet-stateful-live.json + target/novaseal-agreement-devnet-stateful-live.json",
             json!({
                 "acceptance": {
@@ -1319,9 +1319,9 @@ fn build_v1_readiness(
         ),
         readiness_dimension(
             "full_stateful_acceptance",
-            stateful_acceptance_passed(stateful_acceptance),
+            stateful_local_acceptance_passed(stateful_acceptance),
             "target/novaseal-devnet-stateful-acceptance.json",
-            "complete stateful acceptance",
+            "complete local stateful acceptance",
         ),
         readiness_dimension(
             "wallet_signing_vectors",
@@ -5293,8 +5293,8 @@ fn agreement_live_evidence(stateful_acceptance: &Value) -> Value {
         "claim_receipt_live",
     ];
     let checks = json!({
-        "acceptance_passed": json_pointer_str(stateful_acceptance, "/status") == Some("passed"),
-        "no_blockers": json_pointer_i64(stateful_acceptance, "/blocker_count") == Some(0),
+        "acceptance_passed": stateful_local_acceptance_passed(stateful_acceptance),
+        "no_blockers": local_stateful_blocker_count(stateful_acceptance) == Some(0),
         "live_devnet_rpc_executed": json_pointer_bool(stateful_acceptance, "/live_devnet_rpc_executed"),
         "stateful_lifecycle_executed": json_pointer_bool(stateful_acceptance, "/stateful_lifecycle_executed"),
         "agreement_scenario_passed": json_pointer_str(&agreement, "/status") == Some("passed"),
@@ -6852,6 +6852,7 @@ fn canonical_json_for_report_hash(value: &Value) -> String {
     }
 }
 
+#[cfg(test)]
 fn stateful_acceptance_passed(stateful_acceptance: &Value) -> bool {
     json_pointer_str(stateful_acceptance, "/status") == Some("passed")
         && json_pointer_i64(stateful_acceptance, "/blocker_count") == Some(0)
@@ -6859,6 +6860,19 @@ fn stateful_acceptance_passed(stateful_acceptance: &Value) -> bool {
         && json_pointer_bool(stateful_acceptance, "/stateful_lifecycle_executed")
         && json_pointer_str(stateful_acceptance, "/profile_coverage/status") == Some("passed")
         && json_pointer_str(stateful_acceptance, "/business_scenario_coverage/status") == Some("passed")
+}
+
+fn stateful_local_acceptance_passed(stateful_acceptance: &Value) -> bool {
+    matches!(json_pointer_str(stateful_acceptance, "/status"), Some("passed" | "local_devnet_passed_external_endpoint_required"))
+        && local_stateful_blocker_count(stateful_acceptance) == Some(0)
+        && json_pointer_bool(stateful_acceptance, "/live_devnet_rpc_executed")
+        && json_pointer_bool(stateful_acceptance, "/stateful_lifecycle_executed")
+        && json_pointer_str(stateful_acceptance, "/profile_coverage/status") == Some("passed")
+        && json_pointer_str(stateful_acceptance, "/business_scenario_coverage/status") == Some("passed")
+}
+
+fn local_stateful_blocker_count(stateful_acceptance: &Value) -> Option<i64> {
+    json_pointer_i64(stateful_acceptance, "/local_blocker_count").or_else(|| json_pointer_i64(stateful_acceptance, "/blocker_count"))
 }
 
 fn object_values_all_true(value: Option<&Value>) -> bool {
@@ -11446,9 +11460,22 @@ mod tests {
         });
 
         assert!(stateful_acceptance_passed(&report));
+        assert!(stateful_local_acceptance_passed(&report));
 
         report["business_scenario_coverage"]["status"] = Value::String("failed".to_string());
         assert!(!stateful_acceptance_passed(&report));
+        assert!(!stateful_local_acceptance_passed(&report));
+
+        report["business_scenario_coverage"]["status"] = Value::String("passed".to_string());
+        report["status"] = Value::String("local_devnet_passed_external_endpoint_required".to_string());
+        report["blocker_count"] = json!(1);
+        report["local_blocker_count"] = json!(0);
+        report["acceptance_blocker_count"] = json!(1);
+        assert!(!stateful_acceptance_passed(&report));
+        assert!(stateful_local_acceptance_passed(&report));
+
+        report["local_blocker_count"] = json!(1);
+        assert!(!stateful_local_acceptance_passed(&report));
     }
 
     #[test]
@@ -12198,6 +12225,113 @@ mod tests {
         assert!(!json_pointer_bool(&readiness, "/production_statement_eligible"));
         assert!(json_array_strings(&readiness, "/failed_dimensions").is_empty());
         assert_eq!(json_array_strings(&readiness, "/external_blockers"), vec!["manual_production_statement_missing".to_string()]);
+    }
+
+    #[test]
+    fn v1_readiness_allows_local_ready_when_only_external_endpoint_evidence_remains() {
+        let profile_certification = json!({
+            "status": "passed",
+            "production_statement_eligible": false,
+            "production_statement_blockers": [
+                "public_shared_cell_dep_attested",
+                "external_bip340_tcb_review_attested",
+                "public_btc_spv_evidence_attested",
+                "rwa_legal_registry_review_attested"
+            ],
+            "local_checks": {
+                "conformance_gate_passed": true,
+                "wallet_vector_detail_passed": true,
+                "profile_operator_fixture_detail_passed": true,
+                "service_builder_fixture_detail_passed": true,
+                "btc_spv_evidence_adapter_passed": true,
+                "external_attestation_adapter_passed": true,
+                "external_evidence_handoff_passed": true,
+                "local_bip340_tcb_review_passed": true,
+            },
+            "security_audit_coverage": { "status": "passed" },
+            "planned_profile_packages": {
+                "btc_tx_commitment": { "status": "passed" },
+                "btc_utxo_seal": { "status": "passed" },
+                "dual_seal": { "status": "passed" },
+                "fiber_candidate": { "status": "passed" },
+                "fungible_xudt": { "status": "passed" },
+                "rwa_receipt": { "status": "passed" }
+            },
+        });
+        let stateful_acceptance = json!({
+            "status": "local_devnet_passed_external_endpoint_required",
+            "blocker_count": 1,
+            "local_blocker_count": 0,
+            "acceptance_blocker_count": 1,
+            "live_devnet_rpc_executed": true,
+            "stateful_lifecycle_executed": true,
+            "profile_coverage": {
+                "status": "passed",
+                "covered_profiles": [
+                    { "status": "passed" },
+                    { "status": "passed" }
+                ]
+            },
+            "business_scenario_coverage": {
+                "status": "passed",
+                "checks": {
+                    "agreement_originate_live": true,
+                    "agreement_repay_live": true,
+                    "agreement_claim_live": true,
+                    "agreement_negative_business_cases_preserve_live_state": true,
+                    "btc_transaction_commitment_transition_live": true,
+                    "btc_utxo_seal_closure_live": true,
+                    "dual_seal_finality_live": true,
+                    "fungible_xudt_value_flow_live": true,
+                    "rwa_receipt_lifecycle_live": true,
+                    "fiber_candidate_path_live": true
+                }
+            },
+            "external_endpoint_coverage": {
+                "status": "external_required",
+                "production_complete": false
+            },
+        });
+        let gates = vec![
+            gate(
+                "external_btc_fiber_endpoint_acceptance",
+                "external_required",
+                "target/novaseal-devnet-stateful-acceptance.json#/external_endpoint_coverage",
+                Value::Null,
+            ),
+            gate(
+                "all_profiles_production_completeness",
+                "external_required",
+                "target/novaseal-production-gates.json#/profile_production_completeness",
+                Value::Null,
+            ),
+            gate("public_shared_cell_dep_pinning_attestation", "external_required", PUBLIC_CELLDEP_ATTESTATION, Value::Null),
+            gate(
+                "external_bip340_runtime_verifier_tcb_review_attestation",
+                "external_required",
+                EXTERNAL_TCB_ATTESTATION,
+                Value::Null,
+            ),
+            gate("public_btc_spv_evidence", "external_required", PUBLIC_BTC_SPV_EVIDENCE, Value::Null),
+            gate("rwa_legal_registry_review_evidence", "external_required", RWA_LEGAL_REGISTRY_REVIEW_EVIDENCE, Value::Null),
+        ];
+
+        let readiness = build_v1_readiness(&profile_certification, &stateful_acceptance, &gates, true, false);
+
+        assert_eq!(json_pointer_str(&readiness, "/status"), Some("local_v1_ready_external_attestation_required"));
+        assert!(json_pointer_bool(&readiness, "/local_v1_ready"));
+        assert!(!json_pointer_bool(&readiness, "/production_ready"));
+        assert_eq!(json_pointer_str(&readiness, "/planned_profile_matrix/status"), Some("passed"));
+        assert!(json_array_strings(&readiness, "/planned_profile_matrix/missing").is_empty());
+        assert_eq!(
+            json_array_strings(&readiness, "/external_blockers"),
+            vec![
+                "public_shared_cell_dep_attested".to_string(),
+                "external_bip340_tcb_review_attested".to_string(),
+                "public_btc_spv_evidence_attested".to_string(),
+                "rwa_legal_registry_review_attested".to_string(),
+            ]
+        );
     }
 
     #[test]
