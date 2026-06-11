@@ -30,6 +30,30 @@ const NOVASEAL_PROFILE_CERTIFICATION_SCHEMA: &str = "novaseal-profile-certificat
 const NOVASEAL_AGREEMENT_PROFILE: &str = "agreement-profile-v0";
 const NOVASEAL_CANONICAL_SCHEMA: &str = "NovaSealCanonicalV0";
 const NOVASEAL_PROFILE_CERTIFICATION_GATE: &str = "agreement_profile_public_ecosystem_certification_v0";
+const NOVASEAL_LOCAL_V1_DIMENSIONS: &[&str] = &[
+    "architecture_and_profile_conformance",
+    "planned_profiles_and_business_scenarios",
+    "security_audit_coverage",
+    "devnet_multi_profile_coverage",
+    "multi_business_scenario_coverage",
+    "full_stateful_acceptance",
+    "wallet_signing_vectors",
+    "profile_operator_fixtures",
+    "service_builder_fixtures",
+    "btc_spv_evidence_adapter",
+    "external_attestation_adapter",
+    "external_evidence_handoff",
+    "local_bip340_tcb_review",
+    "local_v1_gate",
+];
+const NOVASEAL_EXTERNAL_V1_DIMENSIONS: &[&str] = &[
+    "external_btc_fiber_endpoint_acceptance",
+    "all_profiles_production_completeness",
+    "public_shared_cell_dep_attestation",
+    "external_bip340_tcb_review_attestation",
+    "public_btc_spv_evidence",
+    "rwa_legal_registry_review_evidence",
+];
 const STRICT_V0_16_PRIMITIVE_COMPAT: &str = "0.16";
 
 #[derive(Debug)]
@@ -2826,6 +2850,31 @@ fn novaseal_certification_failure_message(summary: &serde_json::Value) -> String
     "certification failed".to_string()
 }
 
+fn novaseal_failed_dimensions(plugin_report: &serde_json::Value, v1_readiness: &serde_json::Value) -> serde_json::Value {
+    let mut seen = BTreeSet::new();
+    let mut dimensions = Vec::new();
+    for source in [plugin_report.get("failed_dimensions"), v1_readiness.get("failed_dimensions")] {
+        let Some(items) = source.and_then(serde_json::Value::as_array) else {
+            continue;
+        };
+        for item in items {
+            let Some(name) = item.as_str() else {
+                continue;
+            };
+            if seen.insert(name.to_string()) {
+                dimensions.push(serde_json::Value::String(name.to_string()));
+            }
+        }
+    }
+    serde_json::Value::Array(dimensions)
+}
+
+fn novaseal_failed_dimension_matches(failed_dimensions: &serde_json::Value, expected: &[&str]) -> bool {
+    failed_dimensions.as_array().is_some_and(|dimensions| {
+        dimensions.iter().filter_map(serde_json::Value::as_str).any(|dimension| expected.contains(&dimension))
+    })
+}
+
 fn novaseal_certification_summary(
     plugin_report: &serde_json::Value,
     repo_root: &Path,
@@ -2884,34 +2933,32 @@ fn novaseal_certification_summary(
         .or_else(|| v1_readiness.get("external_blockers").cloned())
         .or_else(|| profile_certification.get("production_statement_blockers").cloned())
         .unwrap_or_else(|| serde_json::Value::Array(Vec::new()));
-    let failed_dimensions = plugin_report
-        .get("failed_dimensions")
-        .cloned()
-        .or_else(|| v1_readiness.get("failed_dimensions").cloned())
-        .unwrap_or_else(|| serde_json::Value::Array(Vec::new()));
+    let failed_dimensions = novaseal_failed_dimensions(plugin_report, v1_readiness);
     let planned_missing =
         v1_readiness.pointer("/planned_profile_matrix/missing").cloned().unwrap_or_else(|| serde_json::Value::Array(Vec::new()));
     let planned_missing_non_empty = planned_missing.as_array().is_some_and(|items| !items.is_empty());
     let external_blockers_non_empty = external_blockers.as_array().is_some_and(|items| !items.is_empty());
-    let failed_external_or_endpoint_dimension = failed_dimensions.as_array().is_some_and(|dimensions| {
-        dimensions.iter().filter_map(serde_json::Value::as_str).any(|dimension| {
-            matches!(
-                dimension,
-                "external_btc_fiber_endpoint_acceptance"
-                    | "all_profiles_production_completeness"
-                    | "public_shared_cell_dep_attestation"
-                    | "external_bip340_tcb_review_attestation"
-                    | "public_btc_spv_evidence"
-                    | "rwa_legal_registry_review_evidence"
-            )
-        })
-    });
+    let failed_local_v1_dimension = novaseal_failed_dimension_matches(&failed_dimensions, NOVASEAL_LOCAL_V1_DIMENSIONS);
+    let failed_external_or_endpoint_dimension = novaseal_failed_dimension_matches(&failed_dimensions, NOVASEAL_EXTERNAL_V1_DIMENSIONS);
     let certification_level = json_pointer_str(profile_certification, "/certification_level").unwrap_or("unknown");
     let failure_reason = if passed {
         serde_json::Value::Null
     } else if !v1_readiness.is_null() && !json_pointer_bool(v1_readiness, "/local_v1_ready") && planned_missing_non_empty {
         serde_json::json!({
             "message": "NovaSeal V1 readiness requires remaining planned profiles and business scenarios",
+            "v1_status": json_pointer_str(v1_readiness, "/status"),
+            "missing": planned_missing,
+            "failed_dimensions": failed_dimensions.clone(),
+            "external_blockers": external_blockers.clone(),
+            "failed_checks": failed_checks,
+        })
+    } else if !v1_readiness.is_null() && !json_pointer_bool(v1_readiness, "/local_v1_ready") && failed_local_v1_dimension {
+        serde_json::json!({
+            "message": "NovaSeal V1 readiness requires fresh local evidence reports",
+            "remediation": [
+                "rerun live devnet reports for core, Agreement, and planned profiles after source or report changes",
+                "rerun NovaSeal wallet, operator fixture, service-builder, BTC SPV adapter, external attestation adapter, BIP340 TCB review, and handoff bundle generators"
+            ],
             "v1_status": json_pointer_str(v1_readiness, "/status"),
             "missing": planned_missing,
             "failed_dimensions": failed_dimensions.clone(),
@@ -6706,7 +6753,6 @@ mod tests {
                 "missing": []
             },
             "failed_dimensions": [
-                "full_stateful_acceptance",
                 "external_btc_fiber_endpoint_acceptance",
                 "public_btc_spv_evidence"
             ],
@@ -6728,6 +6774,52 @@ mod tests {
         assert!(summary["failure_reason"]["missing"].as_array().unwrap().is_empty());
         assert_eq!(summary["failure_reason"]["external_blockers"][0], "public_shared_cell_dep_attested");
         assert_eq!(summary["failure_reason"]["failed_dimensions"][0], "public_shared_cell_dep_attestation");
+    }
+
+    #[test]
+    fn novaseal_certification_summary_reports_stale_local_v1_evidence_before_external_blockers() {
+        let temp = tempfile::tempdir().unwrap();
+        let report_path = temp.path().join("novaseal-production-gates.json");
+        let implementation_path = temp.path().join("novaseal_certification.rs");
+        let mut report = novaseal_test_plugin_report(false, false);
+        report["failed_dimensions"] = serde_json::json!([
+            "profile_operator_fixtures",
+            "local_bip340_tcb_review",
+            "local_v1_gate",
+            "external_btc_fiber_endpoint_acceptance",
+            "public_btc_spv_evidence"
+        ]);
+        report["v1_readiness"] = serde_json::json!({
+            "status": "failed",
+            "local_v1_ready": false,
+            "planned_profile_matrix": {
+                "status": "passed",
+                "missing": []
+            },
+            "failed_dimensions": [
+                "profile_operator_fixtures",
+                "local_bip340_tcb_review",
+                "local_v1_gate",
+                "external_btc_fiber_endpoint_acceptance",
+                "public_btc_spv_evidence"
+            ],
+            "external_blockers": [
+                "public_btc_spv_evidence_attested"
+            ]
+        });
+        std::fs::write(&report_path, serde_json::to_vec_pretty(&report).unwrap()).unwrap();
+        std::fs::write(&implementation_path, b"pub(crate) fn build_report() {}\n").unwrap();
+
+        let summary = novaseal_certification_summary(&report, temp.path(), &report_path, &implementation_path, false, false)
+            .expect("certification summary");
+
+        assert_eq!(summary["status"], "failed");
+        assert_eq!(summary["failure_reason"]["message"], "NovaSeal V1 readiness requires fresh local evidence reports");
+        assert!(summary["failure_reason"]["missing"].as_array().unwrap().is_empty());
+        assert_eq!(summary["failure_reason"]["failed_dimensions"][0], "profile_operator_fixtures");
+        assert_eq!(summary["failure_reason"]["failed_dimensions"][1], "local_bip340_tcb_review");
+        assert_eq!(summary["failure_reason"]["external_blockers"][0], "public_shared_cell_dep_attested");
+        assert!(summary["failure_reason"]["remediation"][0].as_str().expect("remediation").contains("rerun live devnet reports"));
     }
 
     #[test]
