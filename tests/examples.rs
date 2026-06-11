@@ -203,21 +203,29 @@ fn git_tracked_example_cell_files(examples_root: &Utf8Path) -> Option<Vec<Utf8Pa
     if files.is_empty() {
         return None;
     }
+    for file in &files {
+        assert_example_path_under_root(examples_root, file, ExamplePathKind::File);
+    }
     files.sort();
     Some(files)
 }
 
 fn discover_example_cell_files(examples_root: &Utf8Path) -> Vec<Utf8PathBuf> {
+    assert_example_path_under_root(examples_root, examples_root, ExamplePathKind::Directory);
     let mut files = Vec::new();
     let mut pending = vec![examples_root.to_path_buf()];
     while let Some(root) = pending.pop() {
         let entries = std::fs::read_dir(&root).unwrap_or_else(|err| panic!("failed to read {root}: {err}"));
         for entry in entries {
-            let path = Utf8PathBuf::from_path_buf(entry.expect("example directory entry should be readable").path())
-                .expect("example path should be valid UTF-8");
-            if path.is_dir() && example_source_dir(&path) {
+            let entry = entry.expect("example directory entry should be readable");
+            let path = Utf8PathBuf::from_path_buf(entry.path()).expect("example path should be valid UTF-8");
+            let file_type = entry.file_type().unwrap_or_else(|err| panic!("failed to inspect {path}: {err}"));
+            assert!(!file_type.is_symlink(), "example discovery must not follow symbolic links: {path}");
+            if file_type.is_dir() && example_source_dir(&path) {
+                assert_example_path_under_root(examples_root, &path, ExamplePathKind::Directory);
                 pending.push(path);
-            } else if path.is_file() && path.extension() == Some("cell") {
+            } else if file_type.is_file() && path.extension() == Some("cell") {
+                assert_example_path_under_root(examples_root, &path, ExamplePathKind::File);
                 files.push(path);
             }
         }
@@ -230,10 +238,33 @@ fn example_source_dir(path: &Utf8Path) -> bool {
     !matches!(path.file_name(), Some(".cell" | "target"))
 }
 
+#[derive(Clone, Copy)]
+enum ExamplePathKind {
+    File,
+    Directory,
+}
+
+fn assert_example_path_under_root(examples_root: &Utf8Path, path: &Utf8Path, kind: ExamplePathKind) {
+    let metadata = std::fs::symlink_metadata(path).unwrap_or_else(|err| panic!("failed to inspect example path {path}: {err}"));
+    assert!(!metadata.file_type().is_symlink(), "example audit path must not be a symbolic link: {path}");
+    match kind {
+        ExamplePathKind::File => assert!(metadata.is_file(), "example audit path must be a file: {path}"),
+        ExamplePathKind::Directory => assert!(metadata.is_dir(), "example audit path must be a directory: {path}"),
+    }
+    let canonical_root = std::fs::canonicalize(examples_root)
+        .unwrap_or_else(|err| panic!("failed to canonicalize examples root {examples_root}: {err}"));
+    let canonical_path = std::fs::canonicalize(path).unwrap_or_else(|err| panic!("failed to canonicalize example path {path}: {err}"));
+    assert!(canonical_path.starts_with(&canonical_root), "example audit path {path} resolves outside examples root {examples_root}");
+}
+
 fn checked_in_example_audit_files() -> Vec<Utf8PathBuf> {
     let mut files = checked_in_example_cell_files();
     files.push(example_path("ickb_benchmark/README.md"));
     files.push(example_path("ickb_benchmark/limitations.json"));
+    let examples_root = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples");
+    for file in &files {
+        assert_example_path_under_root(&examples_root, file, ExamplePathKind::File);
+    }
     files.sort();
     files
 }

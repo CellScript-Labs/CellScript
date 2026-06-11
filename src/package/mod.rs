@@ -213,18 +213,26 @@ impl PackageManager {
     pub fn read_manifest(&self) -> Result<PackageManifest> {
         let manifest_path = self.root.join("Cell.toml");
 
-        if !manifest_path.exists() {
-            return Err(CompileError::without_span("Cell.toml not found. Run 'cellc init' to create a new package."));
-        }
+        let metadata = match std::fs::symlink_metadata(&manifest_path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Err(CompileError::without_span("Cell.toml not found. Run 'cellc init' to create a new package."));
+            }
+            Err(error) => {
+                return Err(CompileError::without_span(format!(
+                    "failed to inspect package manifest '{}': {}",
+                    manifest_path.display(),
+                    error
+                )));
+            }
+        };
 
-        let content = std::fs::read_to_string(&manifest_path)?;
-        let manifest: PackageManifest = toml::from_str(&content)?;
-
-        Ok(manifest)
+        read_package_manifest_with_metadata(&self.root, &manifest_path, "package manifest", metadata)
     }
 
     pub fn write_manifest(&self, manifest: &PackageManifest) -> Result<()> {
         let manifest_path = self.root.join("Cell.toml");
+        validate_package_manifest_write_target(&self.root, &manifest_path, "package manifest")?;
         let content = toml::to_string_pretty(manifest)?;
         std::fs::write(&manifest_path, content)?;
         Ok(())
@@ -376,12 +384,22 @@ dist/
         let package_path = canonical_package_child_path(base_root, path, &format!("dependency '{}' path", name))?;
         let manifest_path = package_path.join("Cell.toml");
 
-        if !manifest_path.exists() {
-            return Err(CompileError::without_span(format!("Dependency '{}' not found at path '{}'", name, path)));
-        }
-
-        let content = std::fs::read_to_string(&manifest_path)?;
-        let manifest: PackageManifest = toml::from_str(&content)?;
+        let metadata = match std::fs::symlink_metadata(&manifest_path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Err(CompileError::without_span(format!("Dependency '{}' not found at path '{}'", name, path)));
+            }
+            Err(error) => {
+                return Err(CompileError::without_span(format!(
+                    "failed to inspect dependency '{}' manifest '{}': {}",
+                    name,
+                    manifest_path.display(),
+                    error
+                )));
+            }
+        };
+        let manifest =
+            read_package_manifest_with_metadata(&package_path, &manifest_path, &format!("dependency '{}' manifest", name), metadata)?;
 
         let source_path = package_path.strip_prefix(&self.root).unwrap_or(&package_path).to_path_buf();
 
@@ -441,18 +459,33 @@ dist/
             })?;
         }
 
-        let revision = Self::git_revision(&clone_dir).unwrap_or_else(|_| "unknown".to_string());
+        let revision = Self::git_revision(&clone_dir).map_err(|e| {
+            CompileError::without_span(format!(
+                "git dependency '{}' from '{}' failed to resolve checked-out revision: {}",
+                name, url, e
+            ))
+        })?;
 
         let manifest_path = clone_dir.join("Cell.toml");
-        if !manifest_path.exists() {
-            return Err(CompileError::without_span(format!(
-                "git dependency '{}' from '{}' does not contain Cell.toml at repository root",
-                name, url
-            )));
-        }
-
-        let content = std::fs::read_to_string(&manifest_path)?;
-        let manifest: PackageManifest = toml::from_str(&content)?;
+        let metadata = match std::fs::symlink_metadata(&manifest_path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Err(CompileError::without_span(format!(
+                    "git dependency '{}' from '{}' does not contain Cell.toml at repository root",
+                    name, url
+                )));
+            }
+            Err(error) => {
+                return Err(CompileError::without_span(format!(
+                    "failed to inspect git dependency '{}' manifest '{}': {}",
+                    name,
+                    manifest_path.display(),
+                    error
+                )));
+            }
+        };
+        let manifest =
+            read_package_manifest_with_metadata(&clone_dir, &manifest_path, &format!("git dependency '{}' manifest", name), metadata)?;
 
         Ok((
             ResolvedPackage {
@@ -687,6 +720,78 @@ fn reject_package_path_escape(raw_path: &str, label: &str) -> Result<()> {
     if path.components().any(|component| matches!(component, Component::ParentDir | Component::Prefix(_) | Component::RootDir)) {
         return Err(CompileError::without_span(format!("{} '{}' must stay inside the package root", label, raw_path)));
     }
+    Ok(())
+}
+
+fn read_package_manifest_with_metadata(
+    package_root: &Path,
+    manifest_path: &Path,
+    label: &str,
+    metadata: std::fs::Metadata,
+) -> Result<PackageManifest> {
+    validate_package_manifest_metadata(package_root, manifest_path, label, &metadata)?;
+    let content = std::fs::read_to_string(manifest_path)?;
+    let manifest: PackageManifest = toml::from_str(&content)?;
+    Ok(manifest)
+}
+
+fn validate_package_manifest_write_target(package_root: &Path, manifest_path: &Path, label: &str) -> Result<()> {
+    match std::fs::symlink_metadata(manifest_path) {
+        Ok(metadata) => validate_package_manifest_metadata(package_root, manifest_path, label, &metadata),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let canonical_root = std::fs::canonicalize(package_root).map_err(|e| {
+                CompileError::without_span(format!("failed to canonicalize package root '{}': {}", package_root.display(), e))
+            })?;
+            let parent = manifest_path.parent().ok_or_else(|| {
+                CompileError::without_span(format!("{} '{}' has no parent directory", label, manifest_path.display()))
+            })?;
+            let canonical_parent = std::fs::canonicalize(parent).map_err(|e| {
+                CompileError::without_span(format!("failed to canonicalize {} parent '{}': {}", label, parent.display(), e))
+            })?;
+            if !canonical_parent.starts_with(&canonical_root) {
+                return Err(CompileError::without_span(format!(
+                    "{} '{}' resolves outside package root '{}'",
+                    label,
+                    manifest_path.display(),
+                    canonical_root.display()
+                )));
+            }
+            Ok(())
+        }
+        Err(error) => Err(CompileError::without_span(format!("failed to inspect {} '{}': {}", label, manifest_path.display(), error))),
+    }
+}
+
+fn validate_package_manifest_metadata(
+    package_root: &Path,
+    manifest_path: &Path,
+    label: &str,
+    metadata: &std::fs::Metadata,
+) -> Result<()> {
+    if metadata.file_type().is_symlink() {
+        return Err(CompileError::without_span(format!(
+            "refusing to use {} '{}' because it is a symbolic link",
+            label,
+            manifest_path.display()
+        )));
+    }
+    if !metadata.is_file() {
+        return Err(CompileError::without_span(format!("{} '{}' is not a file", label, manifest_path.display())));
+    }
+
+    let canonical_root = std::fs::canonicalize(package_root)
+        .map_err(|e| CompileError::without_span(format!("failed to canonicalize package root '{}': {}", package_root.display(), e)))?;
+    let canonical_manifest = std::fs::canonicalize(manifest_path)
+        .map_err(|e| CompileError::without_span(format!("failed to canonicalize {} '{}': {}", label, manifest_path.display(), e)))?;
+    if !canonical_manifest.starts_with(&canonical_root) {
+        return Err(CompileError::without_span(format!(
+            "{} '{}' resolves outside package root '{}'",
+            label,
+            manifest_path.display(),
+            canonical_root.display()
+        )));
+    }
+
     Ok(())
 }
 
@@ -1468,6 +1573,81 @@ version = "0.1.0"
         assert!(lockfile.consistency_issues_with_resolved(&manifest, manager.get_resolved()).is_empty());
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn package_manager_rejects_local_dependency_manifest_symlink_escape() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempdir().unwrap();
+        let root = temp.path().join("package");
+        let outside = temp.path().join("outside");
+        std::fs::create_dir_all(root.join("deps/math")).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(
+            root.join("Cell.toml"),
+            r#"
+[package]
+name = "app"
+version = "0.1.0"
+
+[dependencies.math]
+version = "0.1.0"
+path = "deps/math"
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            outside.join("Cell.toml"),
+            r#"
+[package]
+name = "math"
+version = "0.1.0"
+"#,
+        )
+        .unwrap();
+        symlink(outside.join("Cell.toml"), root.join("deps/math/Cell.toml")).unwrap();
+
+        let mut manager = PackageManager::new(&root);
+        let error = manager.resolve_dependencies().unwrap_err();
+
+        assert!(error.message.contains("symbolic link"), "{}", error.message);
+        assert!(manager.get_resolved().is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn package_manager_rejects_manifest_symlink_write_escape() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempdir().unwrap();
+        let root = temp.path().join("package");
+        let outside = temp.path().join("outside");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        let outside_manifest = outside.join("Cell.toml");
+        let outside_before = r#"
+[package]
+name = "outside"
+version = "0.1.0"
+"#;
+        std::fs::write(&outside_manifest, outside_before).unwrap();
+        symlink(&outside_manifest, root.join("Cell.toml")).unwrap();
+
+        let manifest: PackageManifest = toml::from_str(
+            r#"
+[package]
+name = "app"
+version = "0.1.0"
+"#,
+        )
+        .unwrap();
+        let manager = PackageManager::new(&root);
+        let error = manager.write_manifest(&manifest).unwrap_err();
+
+        assert!(error.message.contains("symbolic link"), "{}", error.message);
+        assert_eq!(std::fs::read_to_string(&outside_manifest).unwrap(), outside_before);
+    }
+
     #[test]
     fn package_manager_allows_path_dependency_without_version() {
         let temp = tempdir().unwrap();
@@ -2070,6 +2250,18 @@ git = "https://example.com/remote.git"
             .expect_err("git checkout helper must reject non-commit refs before invoking git");
 
         assert!(err.contains("full 40-character SHA-1"), "unexpected error: {}", err);
+    }
+
+    #[test]
+    fn package_manager_git_revision_fails_closed_outside_git_repo() {
+        if std::process::Command::new("git").arg("--version").output().is_err() {
+            return;
+        }
+
+        let temp = tempdir().unwrap();
+        let error = PackageManager::git_revision(temp.path()).unwrap_err();
+
+        assert!(error.contains("git rev-parse failed"), "unexpected error: {}", error);
     }
 
     #[test]

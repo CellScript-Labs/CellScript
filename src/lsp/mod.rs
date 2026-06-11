@@ -2364,7 +2364,8 @@ fn lsp_workspace_cell_files(path: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
         let mut files = Vec::new();
         let mut seen_files = HashSet::new();
         if let Some(parent) = path.parent() {
-            lsp_collect_cell_files_recursive(parent, &mut files, &mut seen_files)?;
+            let parent = lsp_canonical_utf8_path(parent)?;
+            lsp_collect_cell_files_recursive(&parent, &parent, &mut files, &mut seen_files)?;
         }
         if seen_files.insert(path.clone()) {
             files.push(path);
@@ -2404,7 +2405,7 @@ fn lsp_workspace_cell_files(path: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
     let mut files = Vec::new();
     let mut seen_files = HashSet::new();
     for root in roots {
-        lsp_collect_cell_files_recursive(&root, &mut files, &mut seen_files)?;
+        lsp_collect_cell_files_recursive(&root, &root, &mut files, &mut seen_files)?;
     }
     if seen_files.insert(path.clone()) {
         files.push(path);
@@ -2413,29 +2414,44 @@ fn lsp_workspace_cell_files(path: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
     Ok(files)
 }
 
-fn lsp_collect_cell_files_recursive(root: &Utf8Path, files: &mut Vec<Utf8PathBuf>, seen: &mut HashSet<Utf8PathBuf>) -> Result<()> {
+fn lsp_collect_cell_files_recursive(
+    source_root: &Utf8Path,
+    dir: &Utf8Path,
+    files: &mut Vec<Utf8PathBuf>,
+    seen: &mut HashSet<Utf8PathBuf>,
+) -> Result<()> {
     if files.len() >= LSP_MAX_WORKSPACE_MODULES {
         return Err(CompileError::new(
             format!("LSP workspace module count exceeds {}; narrow Cell.toml package.source_roots", LSP_MAX_WORKSPACE_MODULES),
             Span::default(),
         ));
     }
-    let entries = std::fs::read_dir(root)
-        .map_err(|error| CompileError::new(format!("failed to read module directory '{}': {}", root, error), Span::default()))?;
+    let entries = std::fs::read_dir(dir)
+        .map_err(|error| CompileError::new(format!("failed to read module directory '{}': {}", dir, error), Span::default()))?;
     for entry in entries {
         let entry = entry.map_err(|error| CompileError::new(format!("failed to read directory entry: {}", error), Span::default()))?;
         let Ok(candidate) = Utf8PathBuf::from_path_buf(entry.path()) else {
             continue;
         };
-        if candidate.is_dir() {
+        let file_type = entry.file_type().map_err(|error| {
+            CompileError::new(format!("failed to inspect module path '{}': {}", candidate, error), Span::default())
+        })?;
+        if file_type.is_symlink() {
+            return Err(CompileError::new(
+                format!("refusing to follow symbolic link '{}' while collecting LSP workspace modules", candidate),
+                Span::default(),
+            ));
+        }
+        if file_type.is_dir() {
             if matches!(candidate.file_name(), Some(".git" | ".cell" | "target")) {
                 continue;
             }
-            lsp_collect_cell_files_recursive(&candidate, files, seen)?;
+            let candidate = lsp_canonical_source_child_path(source_root, &candidate, "source directory")?;
+            lsp_collect_cell_files_recursive(source_root, &candidate, files, seen)?;
             continue;
         }
-        if candidate.extension() == Some("cell") {
-            let candidate = lsp_canonical_utf8_path(&candidate)?;
+        if file_type.is_file() && candidate.extension() == Some("cell") {
+            let candidate = lsp_canonical_source_child_path(source_root, &candidate, "source file")?;
             if seen.insert(candidate.clone()) {
                 files.push(candidate);
                 if files.len() > LSP_MAX_WORKSPACE_MODULES {
@@ -2481,7 +2497,26 @@ fn lsp_manifest_primitive_compat(path: &Utf8Path) -> Option<String> {
 }
 
 fn lsp_read_manifest_value(package_root: &Utf8Path) -> Result<toml::Value> {
+    let package_root = lsp_canonical_utf8_path(package_root)?;
     let manifest_path = package_root.join("Cell.toml");
+    let metadata = std::fs::symlink_metadata(&manifest_path)
+        .map_err(|error| CompileError::new(format!("failed to inspect Cell.toml '{}': {}", manifest_path, error), Span::default()))?;
+    if metadata.file_type().is_symlink() {
+        return Err(CompileError::new(
+            format!("refusing to read Cell.toml '{}' because it is a symbolic link", manifest_path),
+            Span::default(),
+        ));
+    }
+    if !metadata.is_file() {
+        return Err(CompileError::new(format!("Cell.toml '{}' is not a file", manifest_path), Span::default()));
+    }
+    let canonical_manifest = lsp_canonical_utf8_path(&manifest_path)?;
+    if !canonical_manifest.starts_with(&package_root) {
+        return Err(CompileError::new(
+            format!("Cell.toml '{}' resolves outside package root '{}'", manifest_path, package_root),
+            Span::default(),
+        ));
+    }
     let source = std::fs::read_to_string(&manifest_path)
         .map_err(|error| CompileError::new(format!("failed to read Cell.toml '{}': {}", manifest_path, error), Span::default()))?;
     toml::from_str(&source)
@@ -2509,6 +2544,17 @@ fn lsp_package_child_path(package_root: &Utf8Path, raw_path: &str) -> Result<Utf
     if !canonical.starts_with(package_root) {
         return Err(CompileError::new(
             format!("Cell.toml path '{}' resolves outside package root '{}'", raw_path, package_root),
+            Span::default(),
+        ));
+    }
+    Ok(canonical)
+}
+
+fn lsp_canonical_source_child_path(source_root: &Utf8Path, candidate: &Utf8Path, label: &str) -> Result<Utf8PathBuf> {
+    let canonical = lsp_canonical_utf8_path(candidate)?;
+    if !canonical.starts_with(source_root) {
+        return Err(CompileError::new(
+            format!("{} '{}' resolves outside source root '{}'", label, candidate, source_root),
             Span::default(),
         ));
     }
@@ -3273,6 +3319,48 @@ where
             "expected imported type_id collision diagnostic, got {:?}",
             diagnostics
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn lsp_workspace_rejects_manifest_symlink_escape() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempdir().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let app = root.join("app");
+        let outside = root.join("outside");
+        std::fs::create_dir_all(app.join("src")).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("Cell.toml"), "[package]\nentry = \"src/main.cell\"\n").unwrap();
+        symlink(outside.join("Cell.toml"), app.join("Cell.toml")).unwrap();
+        let main_path = app.join("src/main.cell");
+        std::fs::write(&main_path, "module demo::main\n\naction ping() -> u64\nwhere\n    1\n").unwrap();
+
+        let error = lsp_workspace_cell_files(&main_path).unwrap_err();
+
+        assert!(error.message.contains("symbolic link"), "unexpected error: {}", error.message);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn lsp_workspace_rejects_symlinked_source_files() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempdir().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let outside = root.join("outside");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(root.join("Cell.toml"), "[package]\nentry = \"src/main.cell\"\n").unwrap();
+        let main_path = root.join("src/main.cell");
+        std::fs::write(&main_path, "module demo::main\n\naction ping() -> u64\nwhere\n    1\n").unwrap();
+        std::fs::write(outside.join("escape.cell"), "module outside::escape\n\naction escape() -> u64\nwhere\n    1\n").unwrap();
+        symlink(outside.join("escape.cell"), root.join("src/escape.cell")).unwrap();
+
+        let error = lsp_workspace_cell_files(&main_path).unwrap_err();
+
+        assert!(error.message.contains("symbolic link"), "unexpected error: {}", error.message);
     }
 
     #[test]

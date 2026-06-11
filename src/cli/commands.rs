@@ -5162,27 +5162,81 @@ fn source_verification_root_for_artifact(artifact_path: &Utf8Path) -> Utf8PathBu
 }
 
 fn collect_cell_files(root: &Path) -> Result<Vec<PathBuf>> {
-    if !root.exists() {
-        return Ok(Vec::new());
+    let root_metadata = match std::fs::symlink_metadata(root) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => {
+            return Err(crate::error::CompileError::without_span(format!(
+                "failed to inspect CellScript test path '{}': {}",
+                root.display(),
+                error
+            )));
+        }
+    };
+    if root_metadata.file_type().is_symlink() {
+        return Err(crate::error::CompileError::without_span(format!(
+            "refusing to follow symbolic link '{}' while collecting CellScript test files",
+            root.display()
+        )));
     }
-    if root.is_file() {
+    if root_metadata.is_file() {
         return Ok(if root.extension().and_then(|ext| ext.to_str()) == Some("cell") { vec![root.to_path_buf()] } else { Vec::new() });
+    }
+    if !root_metadata.is_dir() {
+        return Ok(Vec::new());
     }
 
     let mut files = Vec::new();
+    let canonical_root = root.canonicalize().map_err(|error| {
+        crate::error::CompileError::without_span(format!(
+            "failed to canonicalize CellScript test root '{}': {}",
+            root.display(),
+            error
+        ))
+    })?;
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
         for entry in std::fs::read_dir(&dir)? {
             let entry = entry?;
             let path = entry.path();
-            if path.is_dir() {
+            let file_type = entry.file_type().map_err(|error| {
+                crate::error::CompileError::without_span(format!(
+                    "failed to inspect CellScript test path '{}': {}",
+                    path.display(),
+                    error
+                ))
+            })?;
+            if file_type.is_symlink() {
+                return Err(crate::error::CompileError::without_span(format!(
+                    "refusing to follow symbolic link '{}' while collecting CellScript test files",
+                    path.display()
+                )));
+            }
+            if file_type.is_dir() {
+                ensure_collected_cell_path_stays_in_root(&canonical_root, &path, "test directory")?;
                 stack.push(path);
-            } else if path.extension().and_then(|ext| ext.to_str()) == Some("cell") {
+            } else if file_type.is_file() && path.extension().and_then(|ext| ext.to_str()) == Some("cell") {
+                ensure_collected_cell_path_stays_in_root(&canonical_root, &path, "test file")?;
                 files.push(path);
             }
         }
     }
     Ok(files)
+}
+
+fn ensure_collected_cell_path_stays_in_root(canonical_root: &Path, path: &Path, label: &str) -> Result<()> {
+    let canonical = path.canonicalize().map_err(|error| {
+        crate::error::CompileError::without_span(format!("failed to canonicalize {} '{}': {}", label, path.display(), error))
+    })?;
+    if !canonical.starts_with(canonical_root) {
+        return Err(crate::error::CompileError::without_span(format!(
+            "{} '{}' resolves outside CellScript test root '{}'",
+            label,
+            path.display(),
+            canonical_root.display()
+        )));
+    }
+    Ok(())
 }
 
 #[cfg(feature = "vm-runner")]

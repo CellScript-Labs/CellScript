@@ -15016,8 +15016,34 @@ fn default_package_entry() -> String {
 
 fn load_manifest(package_root: &Utf8Path) -> Result<CellManifest> {
     let manifest_path = package_root.join("Cell.toml");
-    if !manifest_path.exists() {
-        return Err(CompileError::new(format!("Cell.toml not found in '{}'", package_root), error::Span::default()));
+    let metadata = match std::fs::symlink_metadata(&manifest_path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Err(CompileError::new(format!("Cell.toml not found in '{}'", package_root), error::Span::default()));
+        }
+        Err(error) => {
+            return Err(CompileError::new(
+                format!("failed to inspect manifest '{}': {}", manifest_path, error),
+                error::Span::default(),
+            ));
+        }
+    };
+    if metadata.file_type().is_symlink() {
+        return Err(CompileError::new(
+            format!("refusing to read manifest '{}' because it is a symbolic link", manifest_path),
+            error::Span::default(),
+        ));
+    }
+    if !metadata.is_file() {
+        return Err(CompileError::new(format!("manifest '{}' is not a file", manifest_path), error::Span::default()));
+    }
+    let package_root = canonical_utf8_path(package_root)?;
+    let canonical_manifest = canonical_utf8_path(&manifest_path)?;
+    if !canonical_manifest.starts_with(&package_root) {
+        return Err(CompileError::new(
+            format!("manifest '{}' resolves outside package root '{}'", manifest_path, package_root),
+            error::Span::default(),
+        ));
     }
 
     let manifest_source = std::fs::read_to_string(&manifest_path)
@@ -28630,6 +28656,96 @@ where
 
         let err = compile_path(app, CompileOptions::default()).unwrap_err();
         assert!(err.message.contains("must stay inside the package root"), "unexpected error: {}", err.message);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn compile_path_rejects_manifest_symlink_escape() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempdir().unwrap();
+        let root = Utf8Path::from_path(temp.path()).unwrap();
+        let app = root.join("app");
+        let outside = root.join("outside");
+
+        std::fs::create_dir_all(app.join("src")).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(
+            outside.join("Cell.toml"),
+            r#"
+[package]
+name = "outside"
+version = "0.1.0"
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            app.join("src").join("main.cell"),
+            r#"
+module app::main
+
+action ping() -> u64
+where
+    1
+"#,
+        )
+        .unwrap();
+        symlink(outside.join("Cell.toml"), app.join("Cell.toml")).unwrap();
+
+        let err = compile_path(&app, CompileOptions::default()).unwrap_err();
+        assert!(err.message.contains("symbolic link"), "unexpected error: {}", err.message);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn compile_path_rejects_path_dependency_manifest_symlink_escape() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempdir().unwrap();
+        let root = Utf8Path::from_path(temp.path()).unwrap();
+        let app = root.join("app");
+        let dep = app.join("deps/dep");
+        let outside = root.join("outside");
+
+        std::fs::create_dir_all(app.join("src")).unwrap();
+        std::fs::create_dir_all(dep.join("src")).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(
+            app.join("Cell.toml"),
+            r#"
+[package]
+name = "app"
+version = "0.1.0"
+
+[dependencies]
+dep = { path = "deps/dep" }
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            app.join("src").join("main.cell"),
+            r#"
+module app::main
+
+action ping() -> u64
+where
+    1
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            outside.join("Cell.toml"),
+            r#"
+[package]
+name = "outside"
+version = "0.1.0"
+"#,
+        )
+        .unwrap();
+        symlink(outside.join("Cell.toml"), dep.join("Cell.toml")).unwrap();
+
+        let err = compile_path(&app, CompileOptions::default()).unwrap_err();
+        assert!(err.message.contains("symbolic link"), "unexpected error: {}", err.message);
     }
 
     #[test]

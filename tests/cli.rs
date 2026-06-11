@@ -2261,6 +2261,58 @@ where
     assert!(tests[0]["path"].as_str().unwrap().ends_with("tests/math.cell"));
 }
 
+#[cfg(unix)]
+#[test]
+fn cellc_test_subcommand_refuses_symlinked_test_files() {
+    use std::os::unix::fs::symlink;
+
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("package");
+    let outside = temp.path().join("outside");
+
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::create_dir_all(root.join("tests")).unwrap();
+    std::fs::create_dir_all(&outside).unwrap();
+    std::fs::write(
+        root.join("Cell.toml"),
+        r#"
+[package]
+name = "demo"
+version = "0.1.0"
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("src").join("main.cell"),
+        r#"
+module demo::main
+
+action ping() -> u64
+where
+    1
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        outside.join("escape.cell"),
+        r#"
+module outside::escape
+
+action escape() -> u64
+where
+    1
+"#,
+    )
+    .unwrap();
+    symlink(outside.join("escape.cell"), root.join("tests").join("escape.cell")).unwrap();
+
+    let output = cellc_command().current_dir(&root).arg("test").arg("--no-run").output().unwrap();
+
+    assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("symbolic link"), "unexpected stderr: {}", stderr);
+}
+
 #[test]
 fn cellc_test_subcommand_supports_expected_compile_failures() {
     let temp = tempfile::tempdir().unwrap();
