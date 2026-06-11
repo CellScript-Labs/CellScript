@@ -2200,20 +2200,17 @@ fn build_stateful_acceptance_report(repo_root: &Path, agreement_conformance: &Va
         &external_endpoint_coverage,
     );
     let all_blockers = local_blockers.iter().cloned().chain(acceptance_blockers.iter().cloned()).collect::<Vec<_>>();
-    let status = if !local_blockers.is_empty() {
-        "blocked"
-    } else if scenarios.iter().all(|scenario| json_pointer_str(scenario, "/status") == Some("passed"))
+    let local_live_acceptance_passed = scenarios.iter().all(|scenario| json_pointer_str(scenario, "/status") == Some("passed"))
         && profile_coverage_passed
-        && business_scenario_coverage_passed
-    {
-        "passed"
-    } else if core_live_passed && !agreement_live_passed {
-        "core_live_devnet_passed_agreement_pending"
-    } else if agreement_live_passed && !core_live_passed {
-        "agreement_live_devnet_passed_core_pending"
-    } else {
-        "ready_to_run_live_devnet"
-    };
+        && business_scenario_coverage_passed;
+    let status = stateful_acceptance_status(
+        local_blockers.len(),
+        acceptance_blockers.len(),
+        local_live_acceptance_passed,
+        core_live_passed,
+        agreement_live_passed,
+        &external_endpoint_coverage,
+    );
 
     Ok(json!({
         "schema": "novaseal-devnet-stateful-acceptance-v0.1",
@@ -2269,6 +2266,31 @@ fn build_stateful_acceptance_report(repo_root: &Path, agreement_conformance: &Va
             "language": "rust",
         },
     }))
+}
+
+fn stateful_acceptance_status(
+    local_blocker_count: usize,
+    acceptance_blocker_count: usize,
+    local_live_acceptance_passed: bool,
+    core_live_passed: bool,
+    agreement_live_passed: bool,
+    external_endpoint_coverage: &Value,
+) -> &'static str {
+    if local_blocker_count > 0 {
+        "blocked"
+    } else if local_live_acceptance_passed && acceptance_blocker_count == 0 {
+        "passed"
+    } else if local_live_acceptance_passed && json_pointer_str(external_endpoint_coverage, "/status") == Some("external_required") {
+        "local_devnet_passed_external_endpoint_required"
+    } else if local_live_acceptance_passed {
+        "local_devnet_passed_acceptance_blockers"
+    } else if core_live_passed && !agreement_live_passed {
+        "core_live_devnet_passed_agreement_pending"
+    } else if agreement_live_passed && !core_live_passed {
+        "agreement_live_devnet_passed_core_pending"
+    } else {
+        "ready_to_run_live_devnet"
+    }
 }
 
 fn stateful_live_acceptance_blockers(
@@ -11128,6 +11150,19 @@ mod tests {
             blockers.iter().find(|blocker| json_pointer_str(blocker, "/dimension") == Some("external_endpoint_coverage")).unwrap();
         assert_eq!(json_pointer_str(endpoint, "/btc_status"), Some("external_required"));
         assert_eq!(json_pointer_str(endpoint, "/fiber_status"), Some("failed"));
+    }
+
+    #[test]
+    fn stateful_acceptance_status_stays_pending_when_external_endpoint_is_required() {
+        let external_endpoint_coverage = json!({
+            "status": "external_required",
+            "btc": {"status": "external_required"},
+            "fiber": {"status": "passed"},
+        });
+
+        let status = stateful_acceptance_status(0, 1, true, true, true, &external_endpoint_coverage);
+
+        assert_eq!(status, "local_devnet_passed_external_endpoint_required");
     }
 
     fn write_fiber_workflow_fixture_files(repo_root: &Path, fiber_repo: &Path, suite: &str) {

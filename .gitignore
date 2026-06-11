@@ -3,6 +3,7 @@ editors/vscode-cellscript/dist/
 
 .DS_Store
 .vscode/
+.cap/
 __pycache__/
 *.py[cod]
 *.swp
@@ -58,6 +59,13 @@ proposals/novaseal/dual-seal-profile-v0/target/
 proposals/novaseal/dual-seal-profile-v0/src/.cell/
 proposals/novaseal/fiber-candidate-profile-v0/target/
 proposals/novaseal/fiber-candidate-profile-v0/src/.cell/
+proposals/novaseal/**/.DS_Store
+proposals/novaseal/**/.cap/
+proposals/novaseal/**/__pycache__/
+proposals/novaseal/**/*.py[cod]
+proposals/novaseal/**/*.s
+proposals/novaseal/**/*.elf
+proposals/novaseal/**/*.meta.json
 
 # Keep translated prose out of the CellScript repository by default.
 # README_CH.md is the one maintained Chinese document.

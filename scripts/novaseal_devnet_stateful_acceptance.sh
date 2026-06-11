@@ -77,4 +77,7 @@ PY
 IFS=$'\t' read -r status live_devnet_rpc_executed local_blockers acceptance_blockers blockers <<< "$summary"
 printf 'wrote %s status=%s live_devnet_rpc_executed=%s local_blockers=%s acceptance_blockers=%s blockers=%s\n' \
   "$REPORT" "$status" "$live_devnet_rpc_executed" "$local_blockers" "$acceptance_blockers" "$blockers"
+if [[ "$blockers" != "0" && "$cert_status" -eq 0 ]]; then
+  cert_status=1
+fi
 exit "$cert_status"
