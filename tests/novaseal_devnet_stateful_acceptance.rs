@@ -87,6 +87,7 @@ mkdir -p "$repo_root/target"
 cat > "$repo_root/target/novaseal-devnet-stateful-acceptance.json" <<'JSON'
 {}
 JSON
+echo "NovaSeal V1 readiness requires external production evidence and endpoint acceptance" >&2
 exit {}
 "#,
         serde_json::to_string_pretty(report).expect("report should serialize"),
@@ -108,6 +109,10 @@ fn wrapper_allows_external_only_blocker_after_local_devnet_passes() {
         String::from_utf8_lossy(&output.stdout).contains("external_endpoint_status=external_required"),
         "wrapper should print the external endpoint status"
     );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("certifier_status=not_run"),
+        "report-only mode should not imply that certification ran successfully"
+    );
 }
 
 #[cfg(unix)]
@@ -126,6 +131,10 @@ fn wrapper_allows_external_only_report_when_certifier_exits_for_production_bound
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("status=local_devnet_passed_external_endpoint_required"));
     assert!(stdout.contains("certifier_status=1"));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).is_empty(),
+        "certifier stderr should be suppressed when the fresh report proves local acceptance"
+    );
 }
 
 #[cfg(unix)]

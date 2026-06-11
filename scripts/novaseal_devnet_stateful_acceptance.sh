@@ -30,21 +30,34 @@ done
 
 REPORT="$ROOT_DIR/target/novaseal-devnet-stateful-acceptance.json"
 cert_status=0
+certifier_status=not_run
+cert_stderr=""
 if [[ "$REPORT_ONLY" != true ]]; then
   rm -f "$REPORT"
+  cert_stderr="$(mktemp)"
   if [[ -z "${CELLC_BIN:-}" ]]; then
     CELLC_BIN="$ROOT_DIR/target/debug/cellc"
     if [[ ! -x "$CELLC_BIN" ]]; then
       cargo build --manifest-path "$ROOT_DIR/Cargo.toml" --bin cellc >/dev/null
     fi
   elif [[ ! -x "$CELLC_BIN" ]]; then
+    if [[ -n "$cert_stderr" ]]; then
+      rm -f "$cert_stderr"
+    fi
     echo "CELLC_BIN is not executable: $CELLC_BIN" >&2
     exit 2
   fi
-  "$CELLC_BIN" certify --plugin novaseal-profile-v0 --repo-root "$ROOT_DIR" --json >/dev/null || cert_status=$?
+  "$CELLC_BIN" certify --plugin novaseal-profile-v0 --repo-root "$ROOT_DIR" --json >/dev/null 2>"$cert_stderr" || cert_status=$?
+  certifier_status="$cert_status"
 fi
 
 if [[ ! -f "$REPORT" ]]; then
+  if [[ -n "$cert_stderr" && -s "$cert_stderr" ]]; then
+    cat "$cert_stderr" >&2
+  fi
+  if [[ -n "$cert_stderr" ]]; then
+    rm -f "$cert_stderr"
+  fi
   echo "missing $REPORT; run target/debug/cellc certify --plugin novaseal-profile-v0 --repo-root $ROOT_DIR --json first" >&2
   exit 1
 fi
@@ -78,7 +91,7 @@ PY
 )"
 IFS=$'\t' read -r status live_devnet_rpc_executed local_blockers acceptance_blockers blockers external_endpoint_status <<< "$summary"
 printf 'wrote %s status=%s live_devnet_rpc_executed=%s local_blockers=%s acceptance_blockers=%s blockers=%s external_endpoint_status=%s certifier_status=%s\n' \
-  "$REPORT" "$status" "$live_devnet_rpc_executed" "$local_blockers" "$acceptance_blockers" "$blockers" "$external_endpoint_status" "$cert_status"
+  "$REPORT" "$status" "$live_devnet_rpc_executed" "$local_blockers" "$acceptance_blockers" "$blockers" "$external_endpoint_status" "$certifier_status"
 
 report_status=1
 case "$status" in
@@ -95,7 +108,16 @@ case "$status" in
 esac
 
 if [[ "$report_status" -eq 0 ]]; then
+  if [[ -n "$cert_stderr" ]]; then
+    rm -f "$cert_stderr"
+  fi
   exit 0
+fi
+if [[ -n "$cert_stderr" && -s "$cert_stderr" ]]; then
+  cat "$cert_stderr" >&2
+fi
+if [[ -n "$cert_stderr" ]]; then
+  rm -f "$cert_stderr"
 fi
 if [[ "$cert_status" -ne 0 ]]; then
   exit "$cert_status"

@@ -402,6 +402,7 @@ check_novaseal_acceptance_boundaries() {
         'scripts/novaseal_devnet_stateful_acceptance.sh::acceptance_blockers=%s'
         'scripts/novaseal_devnet_stateful_acceptance.sh::external_endpoint_status=%s'
         'scripts/novaseal_devnet_stateful_acceptance.sh::certifier_status=%s'
+        'scripts/novaseal_devnet_stateful_acceptance.sh::certifier_status=not_run'
         'scripts/novaseal_devnet_stateful_acceptance.sh::local_devnet_passed_external_endpoint_required'
         'scripts/novaseal_devnet_stateful_acceptance.sh::cert_status=1'
         'proposals/novaseal/DEVNET_FULL_ACCEPTANCE_RUNBOOK.md::external_endpoint_status=external_required'
