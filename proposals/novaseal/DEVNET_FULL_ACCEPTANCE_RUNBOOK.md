@@ -238,10 +238,17 @@ Expected report after full execution:
 - `workflow_coverage.executed_count: 16`
 - `workflow_coverage.passed_execution_count: 16`
 - `devnet_contract.runnable_devnet_contract_present: true`
+- each workflow has `execution.started_node: true`, exact Bruno command
+  `["npm", "exec", "--", "@usebruno/cli", "run", "e2e/<suite>", "-r",
+  "--env", "test"]`, `execution.returncode: 0`, positive
+  `execution.duration_seconds`, and persisted `stdout_log` / `stderr_log`
 
 The script may apply Bruno compatibility patches in copied per-suite worktrees
 under `target/novaseal-fiber-node-experiments/*/bruno-worktree`. These patches
-do not modify the external Fiber checkout. They are currently required for:
+do not modify the external Fiber checkout. Certification rejects empty patch
+metadata, absolute or escaping worktree paths, and symlinked Bruno worktree
+roots. Compatibility patch evidence must remain inside the generated
+CellScript-side worktree. These patches are currently required for:
 
 - `watchtower/force-close-with-pending-tlcs-and-udt`
 - `cross-chain-hub`

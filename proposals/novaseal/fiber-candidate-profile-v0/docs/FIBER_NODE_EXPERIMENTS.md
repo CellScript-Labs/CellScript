@@ -25,6 +25,11 @@
 - aggregate Bruno result: `317/317` requests passed, `473/473` assertions
   passed
 - runnable devnet contract present: `true`
+- each suite recorded `execution.started_node: true`, the exact Bruno command
+  `npm exec -- @usebruno/cli run e2e/<suite> -r --env test`,
+  `execution.returncode: 0`, positive `execution.duration_seconds`, and
+  persisted stdout/stderr log paths under
+  `target/novaseal-fiber-node-experiments/`
 - executed suites: `invoice-ops`, `open-use-close-a-channel`,
   `3-nodes-transfer`, `router-pay`, `shutdown-force`, `reestablish`,
   `external-funding-open`, `funding-tx-verification`, `udt`,
@@ -144,6 +149,9 @@ The UDT watchtower suite was run from a temporary copied Bruno collection under
 The harness converts four UDT balance variables from JavaScript `BigInt` values
 to strings in that copied collection only, preserving the external Fiber checkout
 while avoiding a Bruno QuickJS assertion-runtime incompatibility.
+Certification requires this copied Bruno worktree to be an ordinary directory
+inside the generated CellScript-side experiment tree; symlinked, absolute, or
+escaping worktree paths are rejected.
 
 The cross-chain hub suites require LND's `invoicesrpc` service for
 `AddHoldInvoice`. The local `lnd` and `lncli` binaries were rebuilt from LND
@@ -158,6 +166,9 @@ The cross-chain suites were run from temporary copied Bruno collections under
 The harness logs the receive-BTC JSON-RPC body and guards
 `resp.data.destroy()` in the copied collection only, preserving the external
 Fiber checkout while avoiding a Bruno QuickJS stream-runtime incompatibility.
+The recorded patch metadata must list non-empty patch files inside the copied
+worktree; certification rejects empty metadata and worktree roots that resolve
+outside the CellScript repository.
 
 Observed Bruno result:
 
