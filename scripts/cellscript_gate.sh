@@ -369,13 +369,17 @@ check_ckb_acceptance_boundaries() {
 check_novaseal_acceptance_boundaries() {
     local required=(
         'src/cli/novaseal_certification.rs::stateful_live_acceptance_blockers'
+        'src/cli/novaseal_certification.rs::stateful_acceptance_status'
+        'src/cli/novaseal_certification.rs::local_devnet_passed_external_endpoint_required'
         'src/cli/novaseal_certification.rs::acceptance_blocker_count'
         'src/cli/novaseal_certification.rs::local_blocker_count'
         'src/cli/novaseal_certification.rs::external_endpoint_coverage'
         'src/cli/novaseal_certification.rs::real BTC SPV and Fiber endpoint production acceptance'
         'scripts/novaseal_devnet_stateful_acceptance.sh::acceptance_blocker_count'
         'scripts/novaseal_devnet_stateful_acceptance.sh::local_blocker_count'
+        'scripts/novaseal_devnet_stateful_acceptance.sh::blocker_count'
         'scripts/novaseal_devnet_stateful_acceptance.sh::acceptance_blockers=%s'
+        'scripts/novaseal_devnet_stateful_acceptance.sh::cert_status=1'
         'proposals/novaseal/DEVNET_FULL_ACCEPTANCE_RUNBOOK.md::acceptance_blockers=0'
         'proposals/novaseal/DEVNET_FULL_ACCEPTANCE_RUNBOOK.md::missing public BTC SPV evidence'
         'docs/releases/CELLSCRIPT_0_16_RELEASE_NOTES_DRAFT.md::acceptance_blockers=0'

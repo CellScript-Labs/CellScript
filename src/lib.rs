@@ -4555,6 +4555,9 @@ fn incremental_cache_store(path: &Utf8Path, _source: &str, options: &CompileOpti
     };
 
     let output_path = parent.join(".cell/build").join(path.file_name().unwrap_or("output"));
+    if !output_path.exists() {
+        return;
+    }
     if let Err(error) = compiler.record_compilation(path.as_std_path(), output_path.as_std_path(), vec![], &inc_options) {
         warn_incremental_cache_error("record compilation", &cache_dir, error);
         return;

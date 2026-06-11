@@ -63,7 +63,9 @@ impl IncrementalCompiler {
         let cache_dir = cache_dir.as_ref().to_path_buf();
         let trusted_root = incremental_trusted_root(&cache_dir);
 
-        fs::create_dir_all(&cache_dir).ok();
+        if let Err(error) = fs::create_dir_all(&cache_dir) {
+            log::warn!("failed to create incremental cache directory '{}': {}", cache_dir.display(), error);
+        }
 
         Self {
             cache_dir,
@@ -136,6 +138,21 @@ impl IncrementalCompiler {
             return true;
         }
 
+        if let Err(error) = self.validate_cache_path(&unit.output_path, "incremental output path") {
+            log::warn!("incremental cache ignored unsafe output '{}': {}", unit.output_path.display(), error);
+            return true;
+        }
+        let output_hash = match compute_file_hash(&unit.output_path) {
+            Ok(hash) => hash,
+            Err(error) => {
+                log::warn!("incremental cache could not hash output '{}': {}", unit.output_path.display(), error);
+                return true;
+            }
+        };
+        if unit.output_hash != output_hash {
+            return true;
+        }
+
         for dep in &unit.dependencies {
             if let Err(error) = self.validate_cache_path(dep, "incremental dependency path") {
                 log::warn!("incremental cache ignored unsafe dependency '{}': {}", dep.display(), error);
@@ -193,7 +210,7 @@ impl IncrementalCompiler {
         }
 
         let source_hash = compute_file_hash(source)?;
-        let output_hash = compute_file_hash(output).unwrap_or(0);
+        let output_hash = compute_file_hash(output)?;
 
         let unit = CompiledUnit {
             source_path: source.to_path_buf(),
@@ -566,6 +583,13 @@ mod tests {
         compiler.record_compilation(&source, &output, vec![], &options).unwrap();
 
         assert!(!compiler.needs_recompile(&source, &options));
+        fs::write(&output, "changed").unwrap();
+        assert!(compiler.needs_recompile(&source, &options));
+        fs::write(&output, "").unwrap();
+        assert!(!compiler.needs_recompile(&source, &options));
+        fs::remove_file(&output).unwrap();
+        assert!(compiler.needs_recompile(&source, &options));
+        fs::write(&output, "").unwrap();
         assert!(compiler.needs_recompile(&source, &CompileOptions { target_profile: "ckb".to_string(), ..options.clone() }));
         assert!(compiler.needs_recompile(&source, &CompileOptions { primitive_compat: "0.15".to_string(), ..options.clone() }));
         assert!(compiler.needs_recompile(
@@ -577,6 +601,23 @@ mod tests {
         ));
 
         fs::write(&source, "module test2;").unwrap();
+        assert!(compiler.needs_recompile(&source, &options));
+    }
+
+    #[test]
+    fn record_compilation_requires_existing_output() {
+        let temp = TempDir::new().unwrap();
+        let cache_dir = temp.path().join("cache");
+        let mut compiler = IncrementalCompiler::new(&cache_dir);
+
+        let source = temp.path().join("test.cell");
+        let output = temp.path().join("missing.o");
+        fs::write(&source, "module test;").unwrap();
+        let options = CompileOptions { opt_level: 0, target: "riscv64".to_string(), debug: false, ..CompileOptions::default() };
+
+        let err = compiler.record_compilation(&source, &output, vec![], &options).unwrap_err();
+
+        assert!(err.message.contains("No such file") || err.message.contains("not found"), "unexpected error: {}", err.message);
         assert!(compiler.needs_recompile(&source, &options));
     }
 
