@@ -6485,9 +6485,15 @@ fn parse_bitcoin_tx(bytes: &[u8]) -> Option<BitcoinTxSummary> {
     let mut cursor = 0usize;
     let version = read_slice(bytes, &mut cursor, 4)?.to_vec();
     let mut segwit = false;
-    if bytes.get(cursor) == Some(&0) && bytes.get(cursor + 1).is_some_and(|flag| *flag != 0) {
-        segwit = true;
-        cursor += 2;
+    if bytes.get(cursor) == Some(&0) {
+        match bytes.get(cursor + 1).copied() {
+            Some(0x01) => {
+                segwit = true;
+                cursor += 2;
+            }
+            Some(flag) if flag != 0 => return None,
+            _ => {}
+        }
     }
     let input_count_start = cursor;
     let input_count = read_varint(bytes, &mut cursor)?;
@@ -6571,10 +6577,17 @@ fn read_varint(bytes: &[u8], cursor: &mut usize) -> Option<u64> {
         0x00..=0xfc => Some(u64::from(first)),
         0xfd => {
             let value: [u8; 2] = read_slice(bytes, cursor, 2)?.try_into().ok()?;
-            Some(u64::from(u16::from_le_bytes(value)))
+            let value = u16::from_le_bytes(value);
+            (value >= 0xfd).then_some(u64::from(value))
         }
-        0xfe => Some(u64::from(read_u32_le(bytes, cursor)?)),
-        0xff => read_u64_le(bytes, cursor),
+        0xfe => {
+            let value = read_u32_le(bytes, cursor)?;
+            (value > u32::from(u16::MAX)).then_some(u64::from(value))
+        }
+        0xff => {
+            let value = read_u64_le(bytes, cursor)?;
+            (value > u64::from(u32::MAX)).then_some(value)
+        }
     }
 }
 
@@ -7544,6 +7557,11 @@ mod tests {
         }
         bytes.extend_from_slice(&0u32.to_le_bytes());
         format!("0x{}", hex::encode(bytes))
+    }
+
+    fn test_bitcoin_tx_bytes(prevouts: &[(String, u32)], outputs: &[(u64, Vec<u8>)]) -> Vec<u8> {
+        let hex = test_bitcoin_tx_hex(prevouts, outputs);
+        hex_bytes(&hex).expect("test transaction hex should decode")
     }
 
     fn test_btc_script(seed: u8) -> Vec<u8> {
@@ -12056,6 +12074,55 @@ mod tests {
         assert!(!is_real_tx_hash(&format!("0x{}", "00".repeat(32))));
         assert!(!is_real_tx_hash("0xdead"));
         assert!(!is_real_tx_hash("not-even-hex"));
+    }
+
+    #[test]
+    fn btc_transaction_parser_rejects_noncanonical_compact_size_encodings() {
+        let prevout = test_hex32(0x42);
+        let mut input_count_noncanonical = test_bitcoin_tx_bytes(&[(prevout.clone(), 0)], &[(10_000, vec![0x51])]);
+        input_count_noncanonical.splice(4..5, [0xfd, 0x01, 0x00]);
+        assert!(
+            parse_bitcoin_tx(&input_count_noncanonical).is_none(),
+            "BTC evidence parser must reject non-minimal input-count CompactSize"
+        );
+
+        let mut script_len_noncanonical = Vec::new();
+        script_len_noncanonical.extend_from_slice(&2u32.to_le_bytes());
+        push_test_compact_size(&mut script_len_noncanonical, 1);
+        script_len_noncanonical.extend_from_slice(&bitcoin_internal_hash_from_display(&prevout).unwrap());
+        script_len_noncanonical.extend_from_slice(&0u32.to_le_bytes());
+        script_len_noncanonical.extend_from_slice(&0xffff_ffffu32.to_le_bytes());
+        push_test_compact_size(&mut script_len_noncanonical, 1);
+        script_len_noncanonical.extend_from_slice(&10_000u64.to_le_bytes());
+        script_len_noncanonical.push(0xfd);
+        script_len_noncanonical.extend_from_slice(&1u16.to_le_bytes());
+        script_len_noncanonical.push(0x51);
+        script_len_noncanonical.extend_from_slice(&0u32.to_le_bytes());
+        assert!(
+            parse_bitcoin_tx(&script_len_noncanonical).is_none(),
+            "BTC evidence parser must reject non-minimal script length CompactSize"
+        );
+    }
+
+    #[test]
+    fn btc_transaction_parser_rejects_unknown_segwit_flags() {
+        let prevout = test_hex32(0x43);
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&2u32.to_le_bytes());
+        bytes.extend_from_slice(&[0x00, 0x02]);
+        push_test_compact_size(&mut bytes, 1);
+        bytes.extend_from_slice(&bitcoin_internal_hash_from_display(&prevout).unwrap());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        push_test_compact_size(&mut bytes, 0);
+        bytes.extend_from_slice(&0xffff_ffffu32.to_le_bytes());
+        push_test_compact_size(&mut bytes, 1);
+        bytes.extend_from_slice(&10_000u64.to_le_bytes());
+        push_test_compact_size(&mut bytes, 1);
+        bytes.push(0x51);
+        push_test_compact_size(&mut bytes, 0);
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+
+        assert!(parse_bitcoin_tx(&bytes).is_none(), "unsupported witness flags must not be accepted as public BTC evidence");
     }
 
     #[test]
