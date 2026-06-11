@@ -336,7 +336,7 @@ const EXPECTED_BTC_SPV_FIELD_CONSTRAINTS: &[(&str, &str)] = &[
     ("generated_at", "UTC timestamp in YYYY-MM-DDTHH:MM:SSZ form; future timestamps are rejected"),
     (
         "evidence_provider",
-        "real external provider identity; placeholder, first-party NovaSeal/CellScript, local/devnet/fake/internal, example, and unknown tokens are rejected",
+        "real external provider identity; placeholder, first-party NovaSeal/CellScript/a19q3, local/devnet/fake/internal, example, and unknown tokens are rejected",
     ),
     ("ckb_live_tx_hash", "0x-prefixed 32-byte CKB live transaction hash matching the current NovaSeal service-builder case"),
     ("live_report_hash", "0x-prefixed 32-byte hash of the current NovaSeal live devnet report for this profile"),
@@ -403,7 +403,7 @@ const EXPECTED_BTC_SPV_FIELD_CONSTRAINTS: &[(&str, &str)] = &[
     ("spv_client_cell_dep.hash_type", "data, data1, or type CKB script hash type"),
     (
         "source_service.name",
-        "real external SPV service identity; placeholder, first-party NovaSeal/CellScript, local/devnet/fake/internal, example, and unknown tokens are rejected",
+        "real external SPV service identity; placeholder, first-party NovaSeal/CellScript/a19q3, local/devnet/fake/internal, example, and unknown tokens are rejected",
     ),
     ("source_service.commit", "40-character hex service source commit"),
     ("source_service.report_hash", "0x-prefixed 32-byte non-placeholder SPV service report hash"),
@@ -439,7 +439,7 @@ const EXPECTED_PUBLIC_CELLDEP_FIELD_CONSTRAINTS: &[(&str, &str)] = &[
     ("attested_at", "UTC timestamp in YYYY-MM-DDTHH:MM:SSZ form; future timestamps are rejected"),
     (
         "attestor",
-        "real independent release signer or deployer identity; placeholder, first-party NovaSeal/CellScript, local/devnet/fake/internal, example, and unknown tokens are rejected",
+        "real independent release signer or deployer identity; placeholder, first-party NovaSeal/CellScript/a19q3, local/devnet/fake/internal, example, and unknown tokens are rejected",
     ),
     ("release.package", "novaseal"),
     ("release.version", "exact NovaSeal release version 0.0.1-v0-mvp"),
@@ -484,7 +484,7 @@ const EXPECTED_EXTERNAL_TCB_REQUIRED_FIELDS: &[&str] = &[
 const EXPECTED_EXTERNAL_TCB_FIELD_CONSTRAINTS: &[(&str, &str)] = &[
     (
         "reviewer",
-        "real external reviewer identity; placeholder, first-party NovaSeal/CellScript, local/devnet/fake/internal, example, and unknown tokens are rejected",
+        "real external reviewer identity; placeholder, first-party NovaSeal/CellScript/a19q3, local/devnet/fake/internal, example, and unknown tokens are rejected",
     ),
     ("review_date", "UTC date in YYYY-MM-DD form; future dates are rejected"),
     ("review_scope", "exact BIP340 verifier, RISC-V shell, IPC envelope, and artifact/CellDep pinning scope"),
@@ -543,13 +543,13 @@ const EXPECTED_RWA_LEGAL_REVIEW_FIELD_CONSTRAINTS: &[(&str, &str)] = &[
     ("profile", "rwa-receipt-profile-v0"),
     (
         "reviewer",
-        "real external legal or registry reviewer identity; placeholder, first-party NovaSeal/CellScript, local/devnet/fake/internal, example, and unknown tokens are rejected",
+        "real external legal or registry reviewer identity; placeholder, first-party NovaSeal/CellScript/a19q3, local/devnet/fake/internal, example, and unknown tokens are rejected",
     ),
     ("review_date", "UTC date in YYYY-MM-DD form; future dates are rejected"),
     ("review_scope", "exact RWA receipt legal-title, custody, registry-state, oracle-fact, and enforceability review scope"),
     (
         "registry.authority",
-        "real registry or custodian authority identity; placeholder, first-party NovaSeal/CellScript, local/devnet/fake/internal, example, and unknown tokens are rejected",
+        "real registry or custodian authority identity; placeholder, first-party NovaSeal/CellScript/a19q3, local/devnet/fake/internal, example, and unknown tokens are rejected",
     ),
     (
         "registry.jurisdiction",
@@ -7041,6 +7041,7 @@ fn contains_first_party_attestation_token(value: &str) -> bool {
         "nova seal",
         "cellscript",
         "cell script",
+        "a19q3",
         "first-party",
         "first_party",
         "self-attested",
@@ -10673,6 +10674,13 @@ mod tests {
         assert_eq!(json_pointer_str(&failed_first_party_provider, "/status"), Some("failed"));
         assert!(!json_pointer_bool(&failed_first_party_provider, "/checks/evidence_provider_identity"));
 
+        let mut owner_provider = spv_report.clone();
+        owner_provider["evidence_provider"] = json!("a19q3 BTC SPV Desk");
+        std::fs::write(proofs.join("public_btc_spv_evidence.json"), serde_json::to_vec_pretty(&owner_provider).unwrap()).unwrap();
+        let failed_owner_provider = validate_btc_spv_evidence(temp.path(), PUBLIC_BTC_SPV_EVIDENCE, &handoff).unwrap();
+        assert_eq!(json_pointer_str(&failed_owner_provider, "/status"), Some("failed"));
+        assert!(!json_pointer_bool(&failed_owner_provider, "/checks/evidence_provider_identity"));
+
         let mut placeholder_network = spv_report.clone();
         placeholder_network["network"] = json!("testnet-or-mainnet");
         std::fs::write(proofs.join("public_btc_spv_evidence.json"), serde_json::to_vec_pretty(&placeholder_network).unwrap()).unwrap();
@@ -13052,6 +13060,8 @@ mod tests {
             "unknown-reviewer",
             "NovaSeal Release Bot",
             "CellScript Team",
+            "a19q3 Release Desk",
+            "A19Q3 External Evidence",
             "self-attested-reviewer",
             "first-party-spv-service",
             "local-reviewer",

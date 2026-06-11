@@ -136,10 +136,10 @@ RWA_LEGAL_REVIEW_SOURCE_HASH_PATHS = [
 
 RWA_LEGAL_REVIEW_FIELD_CONSTRAINTS = {
     "profile": "rwa-receipt-profile-v0",
-    "reviewer": "real external legal or registry reviewer identity; placeholder, first-party NovaSeal/CellScript, local/devnet/fake/internal, example, and unknown tokens are rejected",
+    "reviewer": "real external legal or registry reviewer identity; placeholder, first-party NovaSeal/CellScript/a19q3, local/devnet/fake/internal, example, and unknown tokens are rejected",
     "review_date": "UTC date in YYYY-MM-DD form; future dates are rejected",
     "review_scope": "exact RWA receipt legal-title, custody, registry-state, oracle-fact, and enforceability review scope",
-    "registry.authority": "real registry or custodian authority identity; placeholder, first-party NovaSeal/CellScript, local/devnet/fake/internal, example, and unknown tokens are rejected",
+    "registry.authority": "real registry or custodian authority identity; placeholder, first-party NovaSeal/CellScript/a19q3, local/devnet/fake/internal, example, and unknown tokens are rejected",
     "registry.jurisdiction": "explicit real-world jurisdiction; placeholder, local/devnet/fake/internal, example, and unknown tokens are rejected",
     "registry.registry_report_hash": "0x-prefixed 32-byte non-placeholder hash of the external registry/legal review report",
     "profile_source_tree_sha256": "0x-prefixed 32-byte non-placeholder SHA-256 hash of the RWA profile source tree",
@@ -376,7 +376,7 @@ def btc_spv_handoff_case(adapter: dict[str, Any]) -> dict[str, Any]:
         "field_constraints": {
             "network": "explicit public mainnet/testnet name; placeholders and local/devnet/regtest/simnet/private/fake labels are rejected",
             "generated_at": "UTC timestamp in YYYY-MM-DDTHH:MM:SSZ form; future timestamps are rejected",
-            "evidence_provider": "real external provider identity; placeholder, first-party NovaSeal/CellScript, local/devnet/fake/internal, example, and unknown tokens are rejected",
+            "evidence_provider": "real external provider identity; placeholder, first-party NovaSeal/CellScript/a19q3, local/devnet/fake/internal, example, and unknown tokens are rejected",
             "ckb_live_tx_hash": "0x-prefixed 32-byte CKB live transaction hash matching the current NovaSeal service-builder case",
             "live_report_hash": "0x-prefixed 32-byte hash of the current NovaSeal live devnet report for this profile",
             "service_builder_case_hash": "0x-prefixed 32-byte hash of the current NovaSeal service-builder case for this profile",
@@ -413,7 +413,7 @@ def btc_spv_handoff_case(adapter: dict[str, Any]) -> dict[str, Any]:
             "spv_client_cell_dep.data_hash": "0x-prefixed 32-byte non-placeholder SPV client data hash",
             "spv_client_cell_dep.dep_type": "code",
             "spv_client_cell_dep.hash_type": "data, data1, or type CKB script hash type",
-            "source_service.name": "real external SPV service identity; placeholder, first-party NovaSeal/CellScript, local/devnet/fake/internal, example, and unknown tokens are rejected",
+            "source_service.name": "real external SPV service identity; placeholder, first-party NovaSeal/CellScript/a19q3, local/devnet/fake/internal, example, and unknown tokens are rejected",
             "source_service.commit": "40-character hex service source commit",
             "source_service.report_hash": "0x-prefixed 32-byte non-placeholder SPV service report hash",
             "request_handoff.bundle": "target/novaseal-external-evidence-handoff-bundle.json",
