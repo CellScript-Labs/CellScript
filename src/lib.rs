@@ -3156,6 +3156,20 @@ fn verified_source_unit_disk_path(unit: &SourceUnitMetadata, trusted_root: &Utf8
 
     let trusted_root = canonical_utf8_path(trusted_root)?;
     let candidate = if path.is_absolute() { path.to_path_buf() } else { trusted_root.join(path) };
+    let metadata = std::fs::symlink_metadata(&candidate)
+        .map_err(|error| CompileError::without_span(format!("failed to inspect source unit '{}': {}", unit.path, error)))?;
+    if metadata.file_type().is_symlink() {
+        return Err(CompileError::without_span(format!(
+            "source unit '{}' must be a regular file inside trusted source root; symbolic links are not accepted",
+            unit.path
+        )));
+    }
+    if !metadata.is_file() {
+        return Err(CompileError::without_span(format!(
+            "source unit '{}' must be a regular file inside trusted source root",
+            unit.path
+        )));
+    }
     let canonical = canonical_utf8_path(&candidate)?;
     if !canonical.starts_with(&trusted_root) {
         return Err(CompileError::without_span(format!(
@@ -23695,6 +23709,28 @@ where
         bind_source_metadata(&mut metadata, source_units);
 
         validate_source_units_on_disk_under(&metadata, trusted_root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn source_unit_disk_verification_rejects_symlinked_sources() {
+        use std::os::unix::fs::symlink;
+
+        let trusted = tempdir().unwrap();
+        let trusted_root = Utf8Path::from_path(trusted.path()).unwrap();
+        let real_source_path = trusted_root.join("real.cell");
+        let linked_source_path = trusted_root.join("linked.cell");
+        std::fs::write(&real_source_path, SIMPLE_PROGRAM).unwrap();
+        symlink(&real_source_path, &linked_source_path).unwrap();
+
+        let mut metadata = compile(SIMPLE_PROGRAM, CompileOptions::default()).unwrap().metadata;
+        metadata.source_units = vec![source_unit_from_file(&linked_source_path, "entry").unwrap()];
+        let source_units = metadata.source_units.clone();
+        bind_source_metadata(&mut metadata, source_units);
+
+        let err = validate_source_units_on_disk_under(&metadata, trusted_root).unwrap_err();
+
+        assert!(err.message.contains("symbolic links are not accepted"), "unexpected error: {}", err.message);
     }
 
     #[test]

@@ -2255,12 +2255,8 @@ impl CommandExecutor {
             None => default_metadata_path_for_artifact(artifact_path).into_std_path_buf(),
         };
 
-        let artifact_bytes = std::fs::read(&args.artifact).map_err(|error| {
-            crate::error::CompileError::without_span(format!("failed to read artifact '{}': {}", args.artifact.display(), error))
-        })?;
-        let metadata_bytes = std::fs::read(&metadata_path).map_err(|error| {
-            crate::error::CompileError::without_span(format!("failed to read metadata '{}': {}", metadata_path.display(), error))
-        })?;
+        let artifact_bytes = read_regular_file(&args.artifact, "artifact")?;
+        let metadata_bytes = read_regular_file(&metadata_path, "metadata")?;
         let metadata: CompileMetadata = serde_json::from_slice(&metadata_bytes).map_err(|error| {
             crate::error::CompileError::without_span(format!("failed to parse metadata '{}': {}", metadata_path.display(), error))
         })?;
@@ -2793,10 +2789,30 @@ fn compile_cli_input(input: Option<&PathBuf>, options: CompileOptions) -> Result
     compile_path(input, options)
 }
 
-fn read_metadata_json(path: &Path) -> Result<CompileMetadata> {
-    let bytes = std::fs::read(path).map_err(|error| {
-        crate::error::CompileError::without_span(format!("failed to read metadata '{}': {}", path.display(), error))
+fn read_regular_file(path: &Path, label: &str) -> Result<Vec<u8>> {
+    let metadata = std::fs::symlink_metadata(path).map_err(|error| {
+        crate::error::CompileError::without_span(format!("failed to inspect {} '{}': {}", label, path.display(), error))
     })?;
+    if metadata.file_type().is_symlink() {
+        return Err(crate::error::CompileError::without_span(format!(
+            "refusing to read {} '{}' because it is a symbolic link",
+            label,
+            path.display()
+        )));
+    }
+    if !metadata.is_file() {
+        return Err(crate::error::CompileError::without_span(format!(
+            "refusing to read {} '{}' because it is not a regular file",
+            label,
+            path.display()
+        )));
+    }
+    std::fs::read(path)
+        .map_err(|error| crate::error::CompileError::without_span(format!("failed to read {} '{}': {}", label, path.display(), error)))
+}
+
+fn read_metadata_json(path: &Path) -> Result<CompileMetadata> {
+    let bytes = read_regular_file(path, "metadata")?;
     serde_json::from_slice(&bytes)
         .map_err(|error| crate::error::CompileError::without_span(format!("failed to parse metadata '{}': {}", path.display(), error)))
 }

@@ -271,6 +271,71 @@ where
     assert!(stdout.contains("Sources: verified 1 unit(s)"), "{}", stdout);
 }
 
+#[cfg(unix)]
+#[test]
+fn cellc_verify_artifact_rejects_symlinked_artifact() {
+    use std::os::unix::fs::symlink;
+
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("sample.cell");
+    let output = dir.path().join("sample.s");
+    let linked_output = dir.path().join("linked.s");
+    let source = r#"
+module test
+
+action add(x: u64, y: u64) -> u64
+where
+    x + y
+"#;
+    std::fs::write(&input, source).unwrap();
+
+    let build = cellc_command().arg(&input).arg("-o").arg(&output).status().unwrap();
+    assert!(build.success());
+    symlink(&output, &linked_output).unwrap();
+
+    let verify = cellc_command()
+        .arg("verify-artifact")
+        .arg(&linked_output)
+        .arg("--metadata")
+        .arg(dir.path().join("sample.s.meta.json"))
+        .output()
+        .unwrap();
+
+    assert!(!verify.status.success(), "unexpected success: {}", String::from_utf8_lossy(&verify.stdout));
+    let stderr = String::from_utf8_lossy(&verify.stderr);
+    assert!(stderr.contains("artifact") && stderr.contains("symbolic link"), "{}", stderr);
+}
+
+#[cfg(unix)]
+#[test]
+fn cellc_verify_artifact_rejects_symlinked_metadata() {
+    use std::os::unix::fs::symlink;
+
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("sample.cell");
+    let output = dir.path().join("sample.s");
+    let metadata_path = dir.path().join("sample.s.meta.json");
+    let linked_metadata = dir.path().join("linked.meta.json");
+    let source = r#"
+module test
+
+action add(x: u64, y: u64) -> u64
+where
+    x + y
+"#;
+    std::fs::write(&input, source).unwrap();
+
+    let build = cellc_command().arg(&input).arg("-o").arg(&output).status().unwrap();
+    assert!(build.success());
+    symlink(&metadata_path, &linked_metadata).unwrap();
+
+    let verify = cellc_command().arg("verify-artifact").arg(&output).arg("--metadata").arg(&linked_metadata).output().unwrap();
+
+    assert!(!verify.status.success(), "unexpected success: {}", String::from_utf8_lossy(&verify.stdout));
+    let stderr = String::from_utf8_lossy(&verify.stderr);
+    assert!(stderr.contains("metadata") && stderr.contains("symbolic link"), "{}", stderr);
+}
+
 #[test]
 fn cellc_verify_artifact_verifies_sources_from_dist_output() {
     let dir = tempfile::tempdir().unwrap();
