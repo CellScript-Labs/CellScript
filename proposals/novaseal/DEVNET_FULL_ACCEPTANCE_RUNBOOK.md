@@ -362,14 +362,15 @@ Public BTC SPV evidence is an **external production gate** that requires:
   height, observed tip height, and `spv_proof_hash`;
 - profile-specific transaction binding data: BTC output index/amount for the
   transaction-commitment profile, sealed UTXO fields for the UTXO-seal profile,
-  and closure spend input for the dual-seal profile;
+  and sealed UTXO tuple plus closure spend input for the dual-seal profile;
 - minimum 6 confirmations;
 - an evidence provider with a real identity, not a placeholder.
 
-Certification recomputes or verifies the raw transaction `txid`/`wtxid`, block
-header hash, Merkle-root/header agreement, Merkle branch orientation,
-confirmation count, profile-specific transaction binding, and canonical SPV
-material hash. A hash-only or unrelated SPV assertion is rejected.
+Certification recomputes or verifies the raw transaction `txid`/`wtxid`, sealed
+UTXO tuple commitment, block header hash, Merkle-root/header agreement, Merkle
+branch orientation, confirmation count, profile-specific transaction binding,
+and canonical SPV material hash. A hash-only or unrelated SPV assertion is
+rejected.
 
 Template: `proposals/novaseal/v0-mvp-skeleton/proofs/public_btc_spv_evidence.template.json`
 

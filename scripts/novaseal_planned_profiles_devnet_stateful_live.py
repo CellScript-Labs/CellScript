@@ -2307,12 +2307,31 @@ def dual_seal_entry_witness(
 
 
 def dual_seal_base_state(label: str) -> dict[str, Any]:
+    sealed_btc_txid = ckb_hash(f"NovaSeal dual sealed BTC txid {label}".encode("ascii"))
+    sealed_btc_vout_index = 1
+    sealed_btc_amount_sats = 350_000
+    script_pubkey_hash = ckb_hash(f"NovaSeal dual sealed BTC script pubkey {label}".encode("ascii"))
+    sealed_utxo_commitment_hash = packed_hash(
+        "BtcUtxoCommitmentV0",
+        pack_btc_utxo_commitment(
+            {
+                "btc_txid": sealed_btc_txid,
+                "btc_vout_index": sealed_btc_vout_index,
+                "btc_amount_sats": sealed_btc_amount_sats,
+                "script_pubkey_hash": script_pubkey_hash,
+            }
+        ),
+    )
     return {
         "dual_seal_id": ckb_hash(f"NovaSeal dual seal {label}".encode("ascii")),
         "policy_hash": ckb_hash(f"NovaSeal dual policy {label}".encode("ascii")),
         "btc_owner_authority_hash": xonly_pubkey(TEST_SECRET_KEY),
         "ckb_authority_hash": xonly_pubkey(HOLDER_SECRET_KEY),
-        "sealed_utxo_commitment_hash": ckb_hash(f"NovaSeal dual sealed UTXO {label}".encode("ascii")),
+        "sealed_btc_txid": sealed_btc_txid,
+        "sealed_btc_vout_index": sealed_btc_vout_index,
+        "sealed_btc_amount_sats": sealed_btc_amount_sats,
+        "script_pubkey_hash": script_pubkey_hash,
+        "sealed_utxo_commitment_hash": sealed_utxo_commitment_hash,
         "initial_ckb_state_hash": ckb_hash(f"NovaSeal dual active CKB state {label}".encode("ascii")),
         "final_ckb_state_hash": ckb_hash(f"NovaSeal dual finalized CKB state {label}".encode("ascii")),
         "btc_closure_commitment_hash": ckb_hash(f"NovaSeal dual BTC closure {label}".encode("ascii")),
@@ -2521,6 +2540,10 @@ def build_dual_seal_material(
         "ckb_signature_payload": bytes(ckb_sig_payload),
         "finality_commitment_hash": new_state_commitment,
         "btc_closure_commitment_hash": btc_closure_commitment_hash,
+        "sealed_btc_txid": base["sealed_btc_txid"],
+        "sealed_btc_vout_index": base["sealed_btc_vout_index"],
+        "sealed_btc_amount_sats": base["sealed_btc_amount_sats"],
+        "script_pubkey_hash": base["script_pubkey_hash"],
         "btc_txid": base["btc_txid"],
         "btc_wtxid": base["btc_wtxid"],
         "spend_input_index": base["spend_input_index"],
@@ -4372,10 +4395,15 @@ def run_dual_seal_live(args: argparse.Namespace, contract: ReportContract) -> di
                     "public_btc_anchor": {
                         "kind": "dual_seal_btc_closure",
                         "anchor_source": BTC_ANCHOR_SOURCE_LOCAL,
+                        "sealed_btc_txid": hex0x(finalize_material["sealed_btc_txid"]),
+                        "sealed_btc_vout_index": finalize_material["sealed_btc_vout_index"],
+                        "sealed_btc_amount_sats": finalize_material["sealed_btc_amount_sats"],
+                        "script_pubkey_hash": hex0x(finalize_material["script_pubkey_hash"]),
                         "btc_txid": hex0x(finalize_material["btc_txid"]),
                         "btc_wtxid": hex0x(finalize_material["btc_wtxid"]),
                         "spend_input_index": finalize_material["spend_input_index"],
                         "ckb_btc_commitment_hash": hex0x(finalize_material["btc_closure_commitment_hash"]),
+                        "sealed_utxo_commitment_hash": hex0x(finalize_material["old_cell"]["sealed_utxo_commitment_hash"]),
                     },
                     "signed_intent_hash": hex0x(finalize_material["signed_intent_hash"]),
                     "receipt_hash": hex0x(finalize_material["latest_receipt_hash"]),

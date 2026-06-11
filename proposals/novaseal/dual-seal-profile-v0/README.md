@@ -62,5 +62,5 @@ The public BTC evidence shape is now machine-readable. A real production report
 must follow
 `proposals/novaseal/v0-mvp-skeleton/proofs/public_btc_spv_evidence.template.json`
 and cover this profile with a non-local BTC closure transaction, block hash, SPV
-proof hash, public SPV client CellDep, source-service provenance, and at least
-six BTC confirmations.
+proof hash, sealed UTXO tuple, public SPV client CellDep, source-service
+provenance, and at least six BTC confirmations.

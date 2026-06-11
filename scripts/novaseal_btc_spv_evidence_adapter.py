@@ -112,12 +112,12 @@ FIELD_CONSTRAINTS = {
     "btc_transaction_binding.btc_output_index": "BTC transaction commitment output index; required for btc-transaction-commitment-profile-v0",
     "btc_transaction_binding.btc_amount_sats": "BTC transaction commitment output amount in sats; required for btc-transaction-commitment-profile-v0",
     "btc_transaction_binding.spend_input_index": "Bitcoin spend input index; required for UTXO and dual-seal closure profiles",
-    "btc_transaction_binding.sealed_btc_txid": "sealed Bitcoin transaction id whose output is spent; required for btc-utxo-seal-profile-v0",
-    "btc_transaction_binding.sealed_btc_vout_index": "sealed Bitcoin output index; required for btc-utxo-seal-profile-v0",
-    "btc_transaction_binding.sealed_btc_amount_sats": "sealed Bitcoin output amount in sats; required for btc-utxo-seal-profile-v0",
-    "btc_transaction_binding.script_pubkey_hash": "0x-prefixed CKB Blake2b-256 hash of the sealed output scriptPubKey bytes; required for btc-utxo-seal-profile-v0",
-    "btc_transaction_binding.sealed_btc_tx_hex": "0x-prefixed raw sealed Bitcoin transaction bytes; required for btc-utxo-seal-profile-v0",
-    "btc_transaction_binding.sealed_utxo_commitment_hash": "0x-prefixed 32-byte CKB-side sealed UTXO commitment hash; required for btc-utxo-seal-profile-v0",
+    "btc_transaction_binding.sealed_btc_txid": "sealed Bitcoin transaction id whose output is spent; required for btc-utxo-seal-profile-v0 and dual-seal-profile-v0",
+    "btc_transaction_binding.sealed_btc_vout_index": "sealed Bitcoin output index; required for btc-utxo-seal-profile-v0 and dual-seal-profile-v0",
+    "btc_transaction_binding.sealed_btc_amount_sats": "sealed Bitcoin output amount in sats; required for btc-utxo-seal-profile-v0 and dual-seal-profile-v0",
+    "btc_transaction_binding.script_pubkey_hash": "0x-prefixed CKB Blake2b-256 hash of the sealed output scriptPubKey bytes; required for btc-utxo-seal-profile-v0 and dual-seal-profile-v0",
+    "btc_transaction_binding.sealed_btc_tx_hex": "0x-prefixed raw sealed Bitcoin transaction bytes; required for btc-utxo-seal-profile-v0 and dual-seal-profile-v0",
+    "btc_transaction_binding.sealed_utxo_commitment_hash": "0x-prefixed 32-byte CKB-side sealed UTXO commitment hash; required for btc-utxo-seal-profile-v0 and dual-seal-profile-v0",
     "spv_proof_hash": "0x-prefixed SHA-256 hash of the canonical BTC SPV proof material carried in this case",
     "minimum_confirmations": "integer confirmation floor; at least 6",
     "confirmations": "integer observed confirmations meeting minimum_confirmations",
@@ -245,7 +245,15 @@ def profile_cases(service_builder: dict[str, Any], template: dict[str, Any]) -> 
                 and is_non_negative_int(request["expected_spend_input_index"])
                 and is_hex32(request["expected_sealed_utxo_commitment_hash"])
             ),
-            "expected_dual_spend_input_present": (not dual_profile) or is_non_negative_int(request["expected_spend_input_index"]),
+            "expected_dual_sealed_utxo_fields_present": (not dual_profile)
+            or (
+                is_hex32(request["expected_sealed_btc_txid"])
+                and is_non_negative_int(request["expected_sealed_btc_vout_index"])
+                and is_positive_int(request["expected_sealed_btc_amount_sats"])
+                and is_hex32(request["expected_script_pubkey_hash"])
+                and is_non_negative_int(request["expected_spend_input_index"])
+                and is_hex32(request["expected_sealed_utxo_commitment_hash"])
+            ),
             "required_public_fields_complete": len(request["required_public_fields"]) == len(REQUIRED_PUBLIC_FIELDS),
         }
         cases.append(
