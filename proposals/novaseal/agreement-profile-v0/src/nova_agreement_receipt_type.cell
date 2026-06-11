@@ -2,7 +2,7 @@ module novaseal::agreement_profile::receipt_v0;
 
 // Arthur Zhang, 2026.
 //
-// AUDIT PLACEHOLDER:
+// AUDIT NOTE:
 // Standalone receipt shape for tools that want to inspect the profile without
 // compiling the primary type/action entry. The runtime-enforced receipt output
 // is declared in src/nova_agreement_type.cell and mirrored by

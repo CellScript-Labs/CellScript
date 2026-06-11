@@ -45,7 +45,7 @@ lock btc_authority(protected cell: NovaSealCellV0, lock_args expected_btc_author
 }
 
 
-// AUDIT PLACEHOLDER:
+// AUDIT NOTE:
 // These local type definitions exist only so this lock file can compile on its
 // own during targeted review. The source-of-truth layout lives in the package
 // schemas and in the primary state files. Do not treat this block as a second
