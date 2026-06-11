@@ -98,6 +98,199 @@ check_trailing_whitespace() {
     fi
 }
 
+check_forbidden_tracked_files() {
+    local forbidden=()
+    local path
+    while IFS= read -r path; do
+        forbidden+=("$path")
+    done < <(git ls-files '*DS_Store')
+
+    if ((${#forbidden[@]} > 0)); then
+        printf 'Forbidden macOS metadata files are tracked:\n' >&2
+        printf '  %s\n' "${forbidden[@]}" >&2
+        exit 1
+    fi
+}
+
+check_novaseal_verifier_pinning() {
+    python3 - <<'PY'
+import hashlib
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+try:
+    import tomllib
+except ModuleNotFoundError:
+    print("Python tomllib is required for NovaSeal verifier pinning checks", file=sys.stderr)
+    sys.exit(127)
+
+root = Path.cwd()
+core_root = root / "proposals/novaseal/v0-mvp-skeleton"
+release_elf = (
+    core_root
+    / "verifier/novaseal_btc_verifier_riscv/target/"
+    / "riscv64imac-unknown-none-elf/release/novaseal_btc_verifier_riscv"
+)
+if not release_elf.is_file():
+    print(f"missing NovaSeal RISC-V verifier release ELF: {release_elf}", file=sys.stderr)
+    sys.exit(1)
+
+artifact = release_elf.read_bytes()
+artifact_hash = "0x" + hashlib.sha256(artifact).hexdigest()
+data_hash = "0x" + hashlib.blake2b(artifact, digest_size=32, person=b"ckb-default-hash").hexdigest()
+size_bytes = len(artifact)
+
+failures: list[str] = []
+
+manifest_paths = [
+    root / rel
+    for rel in subprocess.check_output(
+        ["git", "ls-files", "proposals/novaseal/**/Cell.toml"],
+        cwd=root,
+        text=True,
+    ).splitlines()
+]
+if not manifest_paths:
+    failures.append("no tracked NovaSeal Cell.toml manifests found")
+
+for path in manifest_paths:
+    manifest = tomllib.loads(path.read_text(encoding="utf-8"))
+    deps = manifest.get("deploy", {}).get("ckb", {}).get("cell_deps", [])
+    runtime_deps = [
+        dep
+        for dep in deps
+        if dep.get("role") == "runtime_verifier"
+        or dep.get("name") == "cellscript_btc_bip340_verifier_riscv"
+    ]
+    if not runtime_deps:
+        failures.append(f"{path.relative_to(root)} has no NovaSeal runtime verifier CellDep")
+        continue
+    for index, dep in enumerate(runtime_deps):
+        if dep.get("data_hash") != data_hash:
+            failures.append(
+                f"{path.relative_to(root)} runtime verifier #{index} data_hash "
+                f"{dep.get('data_hash')} != {data_hash}"
+            )
+        if dep.get("artifact_hash") != artifact_hash:
+            failures.append(
+                f"{path.relative_to(root)} runtime verifier #{index} artifact_hash "
+                f"{dep.get('artifact_hash')} != {artifact_hash}"
+            )
+
+def source_tree_hash() -> str:
+    verifier_dirs = [
+        core_root / "verifier/novaseal_btc_verifier_core",
+        core_root / "verifier/novaseal_btc_verifier_riscv",
+        core_root / "verifier/novaseal_btc_verifier",
+    ]
+    files: list[Path] = []
+    for verifier_dir in verifier_dirs:
+        for path in verifier_dir.rglob("*"):
+            if not path.is_file() or "target" in path.parts:
+                continue
+            if path.suffix == ".rs" or path.name in {"Cargo.toml", "Cargo.lock", "README.md"}:
+                files.append(path)
+    tree_hash = hashlib.sha256()
+    for path in sorted(files):
+        rel = path.relative_to(root).as_posix()
+        digest = hashlib.sha256(path.read_bytes()).digest()
+        tree_hash.update(rel.encode("utf-8"))
+        tree_hash.update(b"\0")
+        tree_hash.update(digest)
+    return "0x" + tree_hash.hexdigest()
+
+current_source_tree_hash = source_tree_hash()
+
+def profile_source_tree_hash(paths: list[str]) -> str:
+    files: set[Path] = set()
+    allowed_suffixes = {".cell", ".schema", ".toml", ".py", ".json", ".rs"}
+    for raw in paths:
+        path = root / raw
+        if path.is_file():
+            files.add(path)
+        elif path.is_dir():
+            for child in path.rglob("*"):
+                if child.is_file() and (child.name == "Cargo.lock" or child.suffix in allowed_suffixes):
+                    files.add(child)
+    h = hashlib.sha256()
+    for path in sorted(files):
+        rel_path = path.relative_to(root).as_posix()
+        h.update(rel_path.encode("utf-8"))
+        h.update(b"\0")
+        h.update(hashlib.sha256(path.read_bytes()).digest())
+    return "0x" + h.hexdigest()
+
+public_template_path = core_root / "proofs/public_shared_cell_dep_attestation.template.json"
+public_template = json.loads(public_template_path.read_text(encoding="utf-8"))
+public_template_hash = public_template.get("runtime_verifier", {}).get("artifact_hash")
+if public_template_hash != artifact_hash:
+    failures.append(
+        f"{public_template_path.relative_to(root)} runtime_verifier.artifact_hash "
+        f"{public_template_hash} != {artifact_hash}"
+    )
+
+external_template_path = core_root / "proofs/bip340_external_tcb_review_attestation.template.json"
+external_template = json.loads(external_template_path.read_text(encoding="utf-8"))
+if external_template.get("artifact_hash") != artifact_hash:
+    failures.append(
+        f"{external_template_path.relative_to(root)} artifact_hash "
+        f"{external_template.get('artifact_hash')} != {artifact_hash}"
+    )
+if external_template.get("source_tree_sha256") != current_source_tree_hash:
+    failures.append(
+        f"{external_template_path.relative_to(root)} source_tree_sha256 "
+        f"{external_template.get('source_tree_sha256')} != {current_source_tree_hash}"
+    )
+
+rwa_source_tree_hash = profile_source_tree_hash(
+    [
+        "proposals/novaseal/rwa-receipt-profile-v0/Cell.toml",
+        "proposals/novaseal/rwa-receipt-profile-v0/src/nova_rwa_receipt_type.cell",
+        "proposals/novaseal/rwa-receipt-profile-v0/src/nova_rwa_receipt_lifecycle_type.cell",
+        "proposals/novaseal/rwa-receipt-profile-v0/schemas",
+        "proposals/novaseal/rwa-receipt-profile-v0/fixtures",
+        "proposals/novaseal/rwa-receipt-profile-v0/proofs/invariant_matrix.json",
+    ]
+)
+rwa_template_path = root / "proposals/novaseal/rwa-receipt-profile-v0/proofs/legal_registry_review_evidence.template.json"
+rwa_template = json.loads(rwa_template_path.read_text(encoding="utf-8"))
+if rwa_template.get("profile_source_tree_sha256") != rwa_source_tree_hash:
+    failures.append(
+        f"{rwa_template_path.relative_to(root)} profile_source_tree_sha256 "
+        f"{rwa_template.get('profile_source_tree_sha256')} != {rwa_source_tree_hash}"
+    )
+
+mapping_path = core_root / "proofs/proofplan_mapping.json"
+mapping = json.loads(mapping_path.read_text(encoding="utf-8"))
+artifact_summary = mapping.get("btc_verifier_riscv_shell_artifact", {}).get("current_summary", {})
+if artifact_summary.get("staged_release_elf_sha256") != artifact_hash.removeprefix("0x"):
+    failures.append(
+        f"{mapping_path.relative_to(root)} staged_release_elf_sha256 "
+        f"{artifact_summary.get('staged_release_elf_sha256')} != {artifact_hash.removeprefix('0x')}"
+    )
+if artifact_summary.get("staged_release_elf_size_bytes") != size_bytes:
+    failures.append(
+        f"{mapping_path.relative_to(root)} staged_release_elf_size_bytes "
+        f"{artifact_summary.get('staged_release_elf_size_bytes')} != {size_bytes}"
+    )
+
+if failures:
+    print("NovaSeal verifier pinning check failed:", file=sys.stderr)
+    for failure in failures:
+        print(f"  - {failure}", file=sys.stderr)
+    sys.exit(1)
+
+print(
+    "NovaSeal verifier pinning check passed: "
+    f"artifact_hash={artifact_hash} data_hash={data_hash} "
+    f"source_tree_sha256={current_source_tree_hash} "
+    f"rwa_profile_source_tree_sha256={rwa_source_tree_hash} size_bytes={size_bytes}"
+)
+PY
+}
+
 check_release_roadmap_docs() {
     local required=(
         'roadmap/CELLSCRIPT_ROADMAP.md::0.13.2 syntax-governance hardening'
@@ -262,6 +455,7 @@ check_novaseal_rust_tooling() {
     run cargo test --locked --manifest-path proposals/novaseal/v0-mvp-skeleton/verifier/novaseal_btc_verifier_riscv/Cargo.toml --lib
     run cargo check --locked --manifest-path proposals/novaseal/v0-mvp-skeleton/verifier/novaseal_btc_verifier_core/Cargo.toml --target riscv64imac-unknown-none-elf
     run cargo build --locked --manifest-path proposals/novaseal/v0-mvp-skeleton/verifier/novaseal_btc_verifier_riscv/Cargo.toml --target riscv64imac-unknown-none-elf --bin novaseal_btc_verifier_riscv
+    run cargo build --locked --manifest-path proposals/novaseal/v0-mvp-skeleton/verifier/novaseal_btc_verifier_riscv/Cargo.toml --release --target riscv64imac-unknown-none-elf --bin novaseal_btc_verifier_riscv
     run cargo check --locked --manifest-path proposals/novaseal/v0-mvp-skeleton/harness/ckb_vm/Cargo.toml --all-targets
     run cargo check --locked --manifest-path proposals/novaseal/agreement-profile-v0/harness/ckb_vm/Cargo.toml --all-targets
 }
@@ -279,6 +473,7 @@ run_dev_gate() {
     run cargo check --locked -p cellscript --all-targets
     run ./scripts/cellscript_strict_backend_audit.sh quick
     run ./scripts/cellscript_syntax_combo_audit.sh quick
+    check_forbidden_tracked_files
     run git diff --check
 }
 
@@ -300,6 +495,7 @@ run_ci_gate() {
     run cargo package --locked --offline --allow-dirty
     check_script_syntax
     run git diff --check
+    check_forbidden_tracked_files
     check_trailing_whitespace
 }
 
@@ -332,6 +528,7 @@ run_release_auxiliary_checks() {
     check_novaseal_acceptance_boundaries
     check_ckb_tx_measure_tool
     check_novaseal_rust_tooling
+    check_novaseal_verifier_pinning
     run npm --prefix editors/vscode-cellscript run validate
     run npm --prefix editors/vscode-cellscript run publish:dry-run
 }
