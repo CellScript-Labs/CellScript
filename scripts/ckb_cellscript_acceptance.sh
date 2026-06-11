@@ -2810,6 +2810,29 @@ def get_block_by_number(number, attempts=20, delay_seconds=0.05):
         time.sleep(delay_seconds)
     raise RuntimeError(f"block number not found: {number}")
 
+def epoch_number_from_header(header):
+    return int(header["epoch"], 16) & ((1 << 24) - 1)
+
+def wait_header_epoch_at_least(min_epoch, max_blocks=1200):
+    last_header = None
+    for generated in range(max_blocks + 1):
+        last_header = rpc("get_tip_header")
+        epoch_number = epoch_number_from_header(last_header)
+        if epoch_number >= min_epoch:
+            return {
+                "hash": last_header["hash"],
+                "epoch": last_header["epoch"],
+                "epoch_number": epoch_number,
+                "generated_blocks": generated,
+            }
+        if generated < max_blocks:
+            rpc("generate_block")
+            time.sleep(0.01)
+    raise RuntimeError(
+        f"tip epoch did not reach {min_epoch} after {max_blocks} generated blocks; "
+        f"last_header={last_header}"
+    )
+
 RESERVED_SPENDABLE_OUTPOINTS = set()
 
 def spendable_outpoint_key(tx_hash, index):
@@ -4687,6 +4710,8 @@ def run_vesting_action(action_record, always_success_dep):
     valid_tx = vesting_case["valid_tx"]
     malformed_tx = vesting_case["malformed_tx"]
     result["builder_name"] = vesting_case["builder_name"]
+    if vesting_case.get("timepoint_header") is not None:
+        result["timepoint_header"] = vesting_case["timepoint_header"]
     malformed_rejection = expect_dry_run_rejected(
         malformed_tx,
         f"{name} malformed action transaction",
@@ -4714,6 +4739,7 @@ def run_vesting_action(action_record, always_success_dep):
 
 def build_vesting_action_case(action_record, cellscript_lock, admin_lock, config_type, admin, symbol, cliff_period, total_period, revocable, cell_deps):
     action = action_record["action"]
+    timepoint_header = None
 
     if action == "create_vesting_config":
         initial = create_script_locked_cells(
@@ -4791,11 +4817,12 @@ def build_vesting_action_case(action_record, cellscript_lock, admin_lock, config
         token_type = always_success_lock("0x45")
         total_amount = 100
         claimed_amount = 20
+        timepoint_header = wait_header_epoch_at_least(1)
         claimable = total_amount - claimed_amount
         grant_timepoint = 0
         cliff_timepoint = 0
-        end_timepoint = 0
-        header_dep = get_block_by_number(0)["header"]["hash"]
+        end_timepoint = timepoint_header["epoch_number"]
+        header_dep = timepoint_header["hash"]
         initial = create_script_locked_cells(
             "vesting.claim_vested",
             [{"capacity": 500 * 100_000_000, "lock": beneficiary_lock, "type": grant_type, "data": vesting_grant_data(1, beneficiary, total_amount, claimed_amount, grant_timepoint, cliff_timepoint, end_timepoint, symbol)}],
@@ -4837,12 +4864,13 @@ def build_vesting_action_case(action_record, cellscript_lock, admin_lock, config
         token_type = always_success_lock("0x45")
         total_amount = 100
         claimed_amount = 20
-        unclaimed_vested = total_amount - claimed_amount
-        unvested = 0
+        timepoint_header = wait_header_epoch_at_least(1)
         grant_timepoint = 0
         cliff_timepoint = 0
-        end_timepoint = 0
-        header_dep = get_block_by_number(0)["header"]["hash"]
+        end_timepoint = timepoint_header["epoch_number"]
+        header_dep = timepoint_header["hash"]
+        unclaimed_vested = total_amount - claimed_amount
+        unvested = 0
         initial = create_script_locked_cells(
             "vesting.revoke_grant",
             [
@@ -4889,6 +4917,7 @@ def build_vesting_action_case(action_record, cellscript_lock, admin_lock, config
         "input_cells_to_check": input_cells_to_check,
         "valid_tx": valid_tx,
         "malformed_tx": malformed_tx,
+        "timepoint_header": timepoint_header,
     }
 
 def build_timelock_action_case(action_record, cellscript_lock, cellscript_type, owner, cell_deps):
