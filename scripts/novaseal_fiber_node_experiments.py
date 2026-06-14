@@ -310,7 +310,7 @@ def previous_executions(output: pathlib.Path, current_fiber_repo: dict[str, Any]
     return executions
 
 
-def cleanup_fiber_processes(fiber_repo: pathlib.Path) -> None:
+def cleanup_fiber_processes(fiber_repo: pathlib.Path, *, include_all_fiber_devnet: bool = False) -> None:
     patterns = [
         re.compile(r"\.\./\.\./target/[^ ]*/fnn -d (?:[123]|cch)(?:\s|$)"),
         re.compile(rf"ckb run -C {re.escape(str(fiber_repo / 'tests' / 'deploy' / 'node-data'))}"),
@@ -318,6 +318,15 @@ def cleanup_fiber_processes(fiber_repo: pathlib.Path) -> None:
         re.compile(rf"lnd --lnddir={re.escape(str(fiber_repo / 'tests' / 'deploy' / 'lnd-init' / 'lnd-bob'))}"),
         re.compile(rf"lnd --lnddir={re.escape(str(fiber_repo / 'tests' / 'deploy' / 'lnd-init' / 'lnd-ingrid'))}"),
     ]
+    if include_all_fiber_devnet:
+        patterns.extend(
+            [
+                re.compile(r"bash \./tests/nodes/start\.sh e2e/"),
+                re.compile(r"ckb run -C .*/tests/deploy/node-data(?:\s|$)"),
+                re.compile(r"bitcoind -conf=.*/tests/deploy/lnd-init/bitcoind/bitcoin\.conf(?:\s|$)"),
+                re.compile(r"lnd --lnddir=.*/tests/deploy/lnd-init/lnd-(?:bob|ingrid)(?:\s|$)"),
+            ]
+        )
     completed = subprocess.run(["ps", "-axo", "pid=,command="], text=True, capture_output=True, check=False)
     matched_pids: list[int] = []
     for line in completed.stdout.splitlines():
@@ -345,6 +354,73 @@ def cleanup_fiber_processes(fiber_repo: pathlib.Path) -> None:
         except ProcessLookupError:
             continue
         os.kill(pid, signal.SIGKILL)
+
+
+def wait_for_fiber_nodes(
+    fiber_repo: pathlib.Path,
+    node_process: subprocess.Popen[str],
+    log_dir: pathlib.Path,
+    timeout: int,
+    env: dict[str, str],
+) -> dict[str, Any] | None:
+    started_at = time.time()
+    wait_process = subprocess.Popen(
+        ["./tests/nodes/wait.sh"],
+        cwd=fiber_repo,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=env,
+    )
+    while True:
+        wait_returncode = wait_process.poll()
+        if wait_returncode is not None:
+            wait_stdout, wait_stderr = wait_process.communicate()
+            write_text(log_dir / "wait.stdout", wait_stdout)
+            write_text(log_dir / "wait.stderr", wait_stderr)
+            if wait_returncode != 0:
+                return {
+                    "failure": "fiber node wait failed",
+                    "wait_returncode": wait_returncode,
+                }
+            if node_process.poll() is not None:
+                return {
+                    "failure": "fiber node launcher exited after readiness check",
+                    "node_returncode": node_process.returncode,
+                    "wait_returncode": wait_returncode,
+                }
+            return None
+
+        if node_process.poll() is not None:
+            wait_process.terminate()
+            try:
+                wait_stdout, wait_stderr = wait_process.communicate(timeout=10)
+            except subprocess.TimeoutExpired:
+                wait_process.kill()
+                wait_stdout, wait_stderr = wait_process.communicate(timeout=10)
+            write_text(log_dir / "wait.stdout", wait_stdout)
+            write_text(log_dir / "wait.stderr", wait_stderr)
+            return {
+                "failure": "fiber node launcher exited before readiness check completed",
+                "node_returncode": node_process.returncode,
+                "wait_returncode": wait_process.returncode,
+            }
+
+        if time.time() - started_at > timeout:
+            wait_process.terminate()
+            try:
+                wait_stdout, wait_stderr = wait_process.communicate(timeout=10)
+            except subprocess.TimeoutExpired:
+                wait_process.kill()
+                wait_stdout, wait_stderr = wait_process.communicate(timeout=10)
+            write_text(log_dir / "wait.stdout", wait_stdout)
+            write_text(log_dir / "wait.stderr", wait_stderr)
+            return {
+                "failure": "fiber node wait timed out",
+                "wait_timeout_seconds": timeout,
+            }
+
+        time.sleep(1)
 
 
 def fiber_run_env(base_env: dict[str, str], log_dir: pathlib.Path) -> dict[str, str]:
@@ -444,12 +520,14 @@ def run_workflow(args: argparse.Namespace, workflow: FiberWorkflow) -> dict[str,
     log_dir = args.output.resolve().parent / "novaseal-fiber-node-experiments" / workflow.suite.replace("/", "__")
     log_dir.mkdir(parents=True, exist_ok=True)
     env = fiber_run_env(os.environ, log_dir)
+    clean_external_devnet_state = bool(env.get("REMOVE_OLD_STATE") or env.get("NOVASEAL_CLEAN_FIBER_DEVNET_PROCESSES"))
     started_node = False
     node_process: subprocess.Popen[str] | None = None
     node_log_handle = None
     started_at = time.time()
     try:
         if not args.assume_nodes_running:
+            cleanup_fiber_processes(fiber_repo, include_all_fiber_devnet=clean_external_devnet_state)
             node_log = log_dir / "start-node.log"
             node_log_handle = node_log.open("w", encoding="utf-8")
             node_process = subprocess.Popen(
@@ -462,18 +540,15 @@ def run_workflow(args: argparse.Namespace, workflow: FiberWorkflow) -> dict[str,
                 env=env,
             )
             started_node = True
-            wait = run_cmd(["./tests/nodes/wait.sh"], fiber_repo, timeout=args.timeout_seconds, env=env)
-            write_text(log_dir / "wait.stdout", wait.stdout)
-            write_text(log_dir / "wait.stderr", wait.stderr)
-            if wait.returncode != 0:
+            readiness_failure = wait_for_fiber_nodes(fiber_repo, node_process, log_dir, args.timeout_seconds, env)
+            if readiness_failure is not None:
                 return {
                     "status": "failed",
                     "started_node": started_node,
                     "command": ["./tests/nodes/start.sh", suite_arg],
-                    "failure": "fiber node wait failed",
-                    "wait_returncode": wait.returncode,
                     "duration_seconds": round(time.time() - started_at, 3),
                     "fiber_repo": fiber_repo_info,
+                    **readiness_failure,
                 }
         bruno_cwd, bruno_compatibility_patches = bruno_workspace_for_suite(fiber_repo, workflow.suite, log_dir)
         command = ["npm", "exec", "--", "@usebruno/cli", "run", suite_arg, "-r", "--env", "test"]
@@ -507,7 +582,7 @@ def run_workflow(args: argparse.Namespace, workflow: FiberWorkflow) -> dict[str,
                 node_process.kill()
                 node_process.wait(timeout=20)
         if started_node:
-            cleanup_fiber_processes(fiber_repo)
+            cleanup_fiber_processes(fiber_repo, include_all_fiber_devnet=clean_external_devnet_state)
         if node_log_handle is not None:
             node_log_handle.close()
 
