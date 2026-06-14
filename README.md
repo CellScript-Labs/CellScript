@@ -83,7 +83,7 @@ Compile your first contract:
 cellc examples/token.cell
 
 # Emit a RISC-V ELF for CKB
-cellc examples/token.cell --target riscv64-elf --target-profile ckb --primitive-strict 0.16
+cellc examples/nft.cell --target riscv64-elf --target-profile ckb --primitive-strict 0.16
 
 # Emit a RISC-V ELF for CKB, with a specific entry action
 cellc examples/nft.cell --target riscv64-elf --target-profile ckb --primitive-strict 0.16 --entry-action transfer
@@ -101,20 +101,20 @@ cellc build --target riscv64-elf --target-profile ckb
 Run a CKB profile check:
 
 ```bash
-cellc check --target-profile ckb
+cellc examples/nft.cell --target-profile ckb
 ```
 
-Inspect what the compiler can explain about the token example:
+Inspect what the compiler can explain about the NFT example:
 
 ```bash
-cellc metadata examples/token.cell --target-profile ckb --json
-cellc constraints examples/token.cell --target-profile ckb
-cellc scheduler-plan examples/token.cell --target-profile ckb
-cellc explain-assumptions examples/token.cell --target-profile ckb --json
-cellc solve-tx examples/token.cell --target-profile ckb --json
-cellc deploy-plan examples/token.cell --target-profile ckb --json
-cellc profile examples/token.cell --target-profile ckb --json
-cellc audit-bundle examples/token.cell --target-profile ckb --json
+cellc metadata examples/nft.cell --target-profile ckb
+cellc constraints examples/nft.cell --target-profile ckb
+cellc scheduler-plan examples/nft.cell --target-profile ckb
+cellc explain-assumptions examples/nft.cell --target-profile ckb --json
+cellc solve-tx examples/nft.cell --target-profile ckb --json
+cellc deploy-plan examples/nft.cell --target-profile ckb --json
+cellc profile examples/nft.cell --target-profile ckb --json
+cellc audit-bundle examples/nft.cell --target-profile ckb --json
 ```
 
 These commands show what the compiler believes the protocol reads, writes,
@@ -139,8 +139,8 @@ CellScript now supports CKB as its only target profile:
 > normal target-profile policy.
 
 ```bash
-cellc examples/token.cell --target riscv64-elf --target-profile ckb --primitive-strict 0.16
-cellc check --target-profile ckb
+cellc examples/nft.cell --target riscv64-elf --target-profile ckb --primitive-strict 0.16
+cellc examples/nft.cell --target-profile ckb
 ```
 
 The current assurance gate is `--primitive-strict 0.16`. It includes the earlier

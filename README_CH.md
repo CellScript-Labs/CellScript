@@ -80,7 +80,7 @@ cargo install --path .
 cellc examples/token.cell
 
 # 输出 CKB 的 RISC-V ELF
-cellc examples/token.cell --target riscv64-elf --target-profile ckb --primitive-strict 0.16
+cellc examples/nft.cell --target riscv64-elf --target-profile ckb --primitive-strict 0.16
 
 # 输出 CKB 的 RISC-V ELF，指定入口 action
 cellc examples/nft.cell --target riscv64-elf --target-profile ckb --primitive-strict 0.16 --entry-action transfer
@@ -98,20 +98,20 @@ cellc build --target riscv64-elf --target-profile ckb
 运行 CKB profile 检查：
 
 ```bash
-cellc check --target-profile ckb
+cellc examples/nft.cell --target-profile ckb
 ```
 
-检查编译器能解释的 token 示例信息：
+检查编译器能解释的 NFT 示例信息：
 
 ```bash
-cellc metadata examples/token.cell --target-profile ckb --json
-cellc constraints examples/token.cell --target-profile ckb
-cellc scheduler-plan examples/token.cell --target-profile ckb
-cellc explain-assumptions examples/token.cell --target-profile ckb --json
-cellc solve-tx examples/token.cell --target-profile ckb --json
-cellc deploy-plan examples/token.cell --target-profile ckb --json
-cellc profile examples/token.cell --target-profile ckb --json
-cellc audit-bundle examples/token.cell --target-profile ckb --json
+cellc metadata examples/nft.cell --target-profile ckb
+cellc constraints examples/nft.cell --target-profile ckb
+cellc scheduler-plan examples/nft.cell --target-profile ckb
+cellc explain-assumptions examples/nft.cell --target-profile ckb --json
+cellc solve-tx examples/nft.cell --target-profile ckb --json
+cellc deploy-plan examples/nft.cell --target-profile ckb --json
+cellc profile examples/nft.cell --target-profile ckb --json
+cellc audit-bundle examples/nft.cell --target-profile ckb --json
 ```
 
 这些命令展示编译器认为协议会 read、write、create、consume、assume 什么，

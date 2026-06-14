@@ -399,13 +399,25 @@ fn validate_assumption_evidence(tx: &Value, assumption: &BuilderAssumptionMetada
             }
             Value::Object(object) => {
                 if let Some(value) = object.get(&assumption.assumption_id) {
-                    match validate_evidence_item(value, Some(&assumption.assumption_id), assumption) {
-                        EvidenceValidation::Valid => return EvidenceValidation::Valid,
-                        EvidenceValidation::Missing => {}
-                        EvidenceValidation::Invalid(message) => {
-                            invalid.get_or_insert(message);
+                    if value.as_object().is_some_and(|entry| entry.get("assumption_id").and_then(Value::as_str).is_none()) {
+                        invalid.get_or_insert(
+                            "builder_assumption_evidence object must include an explicit assumption_id matching its map key"
+                                .to_string(),
+                        );
+                    } else {
+                        match validate_evidence_item(value, Some(&assumption.assumption_id), assumption) {
+                            EvidenceValidation::Valid => return EvidenceValidation::Valid,
+                            EvidenceValidation::Missing => {
+                                invalid.get_or_insert(
+                                    "builder_assumption_evidence map value must be an evidence object for this assumption".to_string(),
+                                );
+                            }
+                            EvidenceValidation::Invalid(message) => {
+                                invalid.get_or_insert(message);
+                            }
                         }
                     }
+                    continue;
                 }
                 match validate_evidence_item(value, None, assumption) {
                     EvidenceValidation::Valid => return EvidenceValidation::Valid,
