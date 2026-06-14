@@ -1356,7 +1356,6 @@ for action, source in MULTISIG_ACTION_SOURCES.items():
     )
 
 ORIGINAL_SCOPED_ACTIONS = {
-    "token.cell": ["mint", "transfer_token", "burn", "merge"],
     "nft.cell": [
         "mint",
         "transfer",
@@ -1391,8 +1390,8 @@ ORIGINAL_SCOPED_ACTIONS = {
         "cancel_proposal",
     ],
     "vesting.cell": ["create_vesting_config", "grant_vesting", "claim_vested", "revoke_grant"],
-    "amm_pool.cell": ["seed_pool", "swap_a_for_b", "add_liquidity", "remove_liquidity", "isqrt", "min"],
-    "launch.cell": ["launch_token", "simple_launch"],
+    "amm_pool.cell": ["seed_pool", "isqrt", "min"],
+    "launch.cell": ["simple_launch"],
 }
 
 ORIGINAL_SCOPED_LOCKS = {
@@ -1402,7 +1401,11 @@ ORIGINAL_SCOPED_LOCKS = {
     "vesting.cell": ["vesting_admin"],
 }
 
-ORIGINAL_SCOPED_ACTION_FAIL_CLOSED = {}
+ORIGINAL_SCOPED_ACTION_FAIL_CLOSED = {
+    "token.cell": ["mint", "transfer_token", "burn", "merge"],
+    "amm_pool.cell": ["swap_a_for_b", "add_liquidity", "remove_liquidity"],
+    "launch.cell": ["launch_token"],
+}
 
 ORIGINAL_SCOPED_LOCK_FAIL_CLOSED = {}
 
@@ -1693,14 +1696,24 @@ def compile_artifact(name, kind, source, artifact, *, entry_args=None):
 
 validate_source_coverage_matrix()
 
+def strict_policy_fail_closed(stderr):
+    return (
+        "target profile policy failed for 'ckb'" in stderr
+        or (
+            "ProofPlan soundness check failed" in stderr
+            and "PP0150" in stderr
+            and "strict v0.16 ProofPlan mode rejects metadata-only or runtime-required obligations" in stderr
+        )
+    )
+
 def strict_original_compile(name):
     source = production_example_path(name)
     artifact = strict_root / f"{name}.strict.elf"
     result = run(
-        [cellc, source, "--target-profile", "ckb", "--target", "riscv64-elf", "--primitive-strict", "0.15", "-o", artifact],
+        [cellc, source, "--target-profile", "ckb", "--target", "riscv64-elf", "--primitive-strict", "0.16", "-o", artifact],
         env=internal_assembler_env(),
     )
-    policy_fail_closed = result["returncode"] != 0 and "target profile policy failed for 'ckb'" in result["stderr"]
+    policy_fail_closed = result["returncode"] != 0 and strict_policy_fail_closed(result["stderr"])
     unexpected_failure = result["returncode"] != 0 and not policy_fail_closed
     verify = None
     if result["returncode"] == 0:
@@ -1720,10 +1733,10 @@ def strict_original_compile(name):
 def strict_scoped_compile(name, source, entry_flag, entry_name):
     artifact = strict_root / f"{name}.{entry_name}.strict-scoped.elf"
     result = run(
-        [cellc, source, "--target-profile", "ckb", "--target", "riscv64-elf", "--primitive-strict", "0.15", entry_flag, entry_name, "-o", artifact],
+        [cellc, source, "--target-profile", "ckb", "--target", "riscv64-elf", "--primitive-strict", "0.16", entry_flag, entry_name, "-o", artifact],
         env=internal_assembler_env(),
     )
-    policy_fail_closed = result["returncode"] != 0 and "target profile policy failed for 'ckb'" in result["stderr"]
+    policy_fail_closed = result["returncode"] != 0 and strict_policy_fail_closed(result["stderr"])
     unexpected_failure = result["returncode"] != 0 and not policy_fail_closed
     verify = None
     if result["returncode"] == 0:
@@ -1847,12 +1860,22 @@ for example_name, actions in ORIGINAL_SCOPED_ACTIONS.items():
             "original-scoped-action-strict",
             production_example_path(example_name),
             artifact_root / f"original_{example_name.removesuffix('.cell')}_{action}.elf",
-            entry_args=["--primitive-strict", "0.15", "--entry-action", action],
+            entry_args=["--primitive-strict", "0.16", "--entry-action", action],
         )
         record["example"] = example_name
         record["action"] = action
         record["original_source"] = str(production_example_path(example_name))
         original_scoped_action_artifacts.append(record)
+
+def original_scoped_action_or(record, example_name):
+    return next(
+        (
+            original
+            for original in original_scoped_action_artifacts
+            if original["example"] == example_name and original["action"] == record["action"]
+        ),
+        record,
+    )
 
 launch_action_artifacts = [
     record
@@ -1861,20 +1884,12 @@ launch_action_artifacts = [
 ]
 
 token_action_artifacts = [
-    next(
-        original
-        for original in original_scoped_action_artifacts
-        if original["example"] == "token.cell" and original["action"] == record["action"]
-    )
+    original_scoped_action_or(record, "token.cell")
     for record in token_action_artifacts
 ]
 
 nft_action_artifacts = [
-    next(
-        original
-        for original in original_scoped_action_artifacts
-        if original["example"] == "nft.cell" and original["action"] == record["action"]
-    )
+    original_scoped_action_or(record, "nft.cell")
     for record in nft_action_artifacts
 ]
 
@@ -1903,11 +1918,7 @@ timelock_action_artifacts = [
 ]
 
 amm_action_artifacts = [
-    next(
-        original
-        for original in original_scoped_action_artifacts
-        if original["example"] == "amm_pool.cell" and original["action"] == record["action"]
-    )
+    original_scoped_action_or(record, "amm_pool.cell")
     for record in amm_action_artifacts
 ]
 
@@ -1941,7 +1952,7 @@ for example_name, locks in ORIGINAL_SCOPED_LOCKS.items():
             "original-scoped-lock-strict",
             production_example_path(example_name),
             artifact_root / f"original_{example_name.removesuffix('.cell')}_{lock}.elf",
-            entry_args=["--primitive-strict", "0.15", "--entry-lock", lock],
+            entry_args=["--primitive-strict", "0.16", "--entry-lock", lock],
         )
         record["example"] = example_name
         record["lock"] = lock
@@ -2037,7 +2048,7 @@ non_policy_fail_closed = [
 ]
 if non_policy_fail_closed:
     raise RuntimeError(
-        "expected fail-closed original scoped entries were not rejected by CKB target-profile policy: "
+        "expected fail-closed original scoped entries were not rejected by strict CKB/ProofPlan policy: "
         + ", ".join(non_policy_fail_closed)
     )
 
@@ -2113,7 +2124,7 @@ def production_gate_failures(report):
     failures = []
     if report.get("strict_original_ckb_compile_policy_fail_closed"):
         failures.append(
-            "primitive-strict original bundled examples still fail CKB policy: "
+            "primitive-strict original bundled examples still fail strict CKB/ProofPlan policy: "
             + ", ".join(report["strict_original_ckb_compile_policy_fail_closed"])
         )
     if report.get("strict_original_ckb_compile_unexpected_failures"):

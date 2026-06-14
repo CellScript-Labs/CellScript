@@ -250,13 +250,15 @@ mode is the release-facing gate because it first runs compiler and
 backend-contract evidence, then runs builder-backed local CKB transactions and
 stateful scenario/action coverage.
 
-The CKB validator requires primitive-strict original bundled-example coverage,
-scoped action and lock compile coverage, builder-backed action runs,
-source-bound acceptance provenance, builder-backed lock valid-spend and
-invalid-spend matrices, valid transaction dry-runs, committed valid
-transactions, malformed rejection, measured cycles, consensus-serialized
-transaction size, occupied-capacity evidence, no under-capacity outputs,
-bundled example deployment, and a passed final production hardening gate.
+The CKB validator records primitive-strict original bundled-example coverage,
+including strict v0.16 PP0150 fail-closed records, then requires scoped action
+and lock compile coverage, builder-backed action runs, source-bound acceptance
+provenance, builder-backed lock valid-spend and invalid-spend matrices, valid
+transaction dry-runs, committed valid transactions, malformed rejection,
+measured cycles, consensus-serialized transaction size, occupied-capacity
+evidence, no under-capacity outputs, bundled example deployment, and a passed
+final production hardening gate. Fail-closed PP0150 records are evidence of a
+strict boundary, not deployable production acceptance.
 
 The report must explicitly record a passed final production hardening gate and
 source provenance for the repository commit, tracked source file list, tracked
