@@ -16,6 +16,8 @@ exclude = [
     ".rustfmt.toml",
     ".github/",
     "A2_TYPE_RESOLUTION_AUDIT.md",
+    "BRANCHES.md",
+    "README_REVIEW.md",
     "RUST_COMPARATIVE_AUDIT.md",
     "SECURITY_AUDIT_SEMANTIC.md",
     "cellscript-*.png",

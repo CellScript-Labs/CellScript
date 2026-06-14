@@ -2659,7 +2659,7 @@ impl<'a> TypeChecker<'a> {
             Expr::Integer(_) => Ok(Type::U64),
             Expr::Bool(_) => Ok(Type::Bool),
             Expr::String(_) => Ok(Type::Named("String".to_string())),
-            Expr::ByteString(_) => Ok(Type::Array(Box::new(Type::U8), 0)),
+            Expr::ByteString(bytes) => Ok(Type::Array(Box::new(Type::U8), bytes.len())),
             Expr::Identifier(name) => {
                 if let Some(ty) = env.lookup(name).cloned() {
                     Ok(ty)
@@ -3334,8 +3334,14 @@ impl<'a> TypeChecker<'a> {
 
         for arm in &match_expr.arms {
             if arm.pattern == "_" {
+                if has_wildcard {
+                    return Err(CompileError::new("duplicate wildcard match arm", arm.span));
+                }
                 has_wildcard = true;
                 continue;
+            }
+            if has_wildcard {
+                return Err(CompileError::new("wildcard pattern '_' must be the last match arm", arm.span));
             }
             let Some(variant) = match_pattern_variant(enum_name, &arm.pattern) else {
                 return Err(CompileError::new(
@@ -6273,6 +6279,45 @@ where
 
         let err = check(&module).unwrap_err();
         assert!(err.message.contains("require block contains assignment"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn byte_string_literal_infers_exact_fixed_array_length() {
+        let module = source_module(
+            r#"
+module test
+
+action symbol() -> [u8; 4]
+where
+    return b"TEST"
+"#,
+        );
+
+        check(&module).unwrap();
+    }
+
+    #[test]
+    fn match_wildcard_arm_must_be_last() {
+        let module = source_module(
+            r#"
+module test
+
+enum Flag {
+    Off,
+    On,
+}
+
+action bad(flag: Flag) -> u64
+where
+    return match flag {
+        _ => { 1 },
+        Flag::Off => { 2 },
+    }
+"#,
+        );
+
+        let err = check(&module).unwrap_err();
+        assert!(err.message.contains("wildcard pattern '_' must be the last match arm"), "unexpected error: {}", err.message);
     }
 
     #[test]

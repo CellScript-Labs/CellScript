@@ -1961,10 +1961,10 @@ impl IrGenerator {
                 self.record_error("string literals are only supported in metadata positions such as assert messages", Span::default());
                 LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(current) }
             }
-            Expr::ByteString(_) => {
-                self.record_error("byte string literals require an explicit lowered byte-array context", Span::default());
-                LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(current) }
-            }
+            Expr::ByteString(bytes) => LoweredExpr {
+                operand: IrOperand::Const(IrConst::Array(bytes.iter().copied().map(IrConst::U8).collect())),
+                current: Some(current),
+            },
             Expr::Range(_) => {
                 self.record_error("range expressions are only supported as for-loop iterables", Span::default());
                 LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(current) }
@@ -2013,7 +2013,7 @@ impl IrGenerator {
             IrConst::Bool(_) => IrType::Bool,
             IrConst::Address(_) => IrType::Address,
             IrConst::Hash(_) => IrType::Hash,
-            IrConst::Array(_) => IrType::Array(Box::new(IrType::U8), 0),
+            IrConst::Array(items) => IrType::Array(Box::new(IrType::U8), items.len()),
         }
     }
 
@@ -6206,6 +6206,40 @@ where
             branch_count,
             action.body.blocks.len()
         );
+    }
+
+    #[test]
+    fn byte_string_literal_lowers_to_fixed_array_const() {
+        let source = r#"
+module test
+
+action symbol() -> [u8; 4]
+where
+    return b"TEST"
+"#;
+        let ir = parse_and_lower(source);
+        let action = ir
+            .items
+            .iter()
+            .find_map(|item| match item {
+                IrItem::Action(a) if a.name == "symbol" => Some(a),
+                _ => None,
+            })
+            .expect("expected symbol action");
+        let bytes = action.body.blocks.iter().find_map(|block| match &block.terminator {
+            IrTerminator::Return(Some(IrOperand::Const(IrConst::Array(items)))) => Some(items),
+            _ => None,
+        });
+
+        let bytes = bytes.expect("expected byte string return to lower to a fixed array const");
+        let lowered = bytes
+            .iter()
+            .map(|byte| match byte {
+                IrConst::U8(byte) => *byte,
+                other => panic!("expected fixed byte const, got {:?}", other),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(lowered, b"TEST");
     }
 
     #[test]
