@@ -3222,7 +3222,7 @@ fn default_scheduler_witness_abi() -> String {
 /// Decode a hex-encoded scheduler witness from compile metadata.
 pub fn decode_scheduler_witness_hex(hex: &str) -> Result<Vec<u8>> {
     let hex_bytes = hex.as_bytes();
-    if hex_bytes.len() % 2 != 0 {
+    if !hex_bytes.len().is_multiple_of(2) {
         return Err(CompileError::without_span("scheduler witness hex string must contain full bytes"));
     }
     let mut bytes = Vec::with_capacity(hex_bytes.len() / 2);
@@ -13899,7 +13899,10 @@ where
         let total_size = read_u32(&bytes[..4], "total_size") as usize;
         assert_eq!(total_size, bytes.len(), "molecule table total size mismatch");
         let first_offset = read_u32(&bytes[4..8], "first_offset") as usize;
-        assert!(first_offset >= 8 && first_offset <= bytes.len() && first_offset % 4 == 0, "invalid first offset {first_offset}");
+        assert!(
+            first_offset >= 8 && first_offset <= bytes.len() && first_offset.is_multiple_of(4),
+            "invalid first offset {first_offset}"
+        );
         let field_count = first_offset / 4 - 1;
         assert_eq!(field_count, expected_fields, "unexpected molecule table field count");
         let mut offsets = bytes[4..first_offset].chunks_exact(4).map(|chunk| read_u32(chunk, "offset") as usize).collect::<Vec<_>>();

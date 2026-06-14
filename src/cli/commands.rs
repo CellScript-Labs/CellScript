@@ -3017,7 +3017,7 @@ fn ckb_fixture_little_endian_u128(hex_value: &str) -> std::result::Result<u128, 
     if bytes.is_empty() {
         return Ok(0);
     }
-    if bytes.len() % 2 != 0 {
+    if !bytes.len().is_multiple_of(2) {
         return Err(format!("odd-length hex amount {hex_value}"));
     }
     let raw = hex::decode(bytes).map_err(|err| format!("invalid hex amount {hex_value}: {err}"))?;
@@ -5064,7 +5064,7 @@ fn decode_hex_arg(name: &str, value: &str, expected_len: Option<usize>) -> Resul
         .or_else(|| trimmed.strip_prefix("0x"))
         .or_else(|| trimmed.strip_prefix("0X"))
         .unwrap_or(trimmed);
-    if hex.len() % 2 != 0 {
+    if !hex.len().is_multiple_of(2) {
         return Err(crate::error::CompileError::without_span(format!("parameter '{}' hex value must contain full bytes", name)));
     }
     let bytes = hex

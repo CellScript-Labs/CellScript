@@ -178,7 +178,7 @@ fn little_endian_u128(hex_value: &str) -> Result<u128, String> {
     if bytes.is_empty() {
         return Ok(0);
     }
-    if bytes.len() % 2 != 0 {
+    if !bytes.len().is_multiple_of(2) {
         return Err(format!("odd-length hex amount {hex_value}"));
     }
     let raw = hex::decode(bytes).map_err(|err| format!("invalid hex amount {hex_value}: {err}"))?;
