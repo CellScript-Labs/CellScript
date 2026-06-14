@@ -5535,7 +5535,7 @@ fn decode_hex_arg(name: &str, value: &str, expected_len: Option<usize>) -> Resul
         .or_else(|| trimmed.strip_prefix("0x"))
         .or_else(|| trimmed.strip_prefix("0X"))
         .unwrap_or(trimmed);
-    if hex.len() % 2 != 0 {
+    if !hex.len().is_multiple_of(2) {
         return Err(crate::error::CompileError::without_span(format!("parameter '{}' hex value must contain full bytes", name)));
     }
     let bytes = hex

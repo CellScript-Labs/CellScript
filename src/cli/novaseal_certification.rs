@@ -7321,7 +7321,7 @@ fn days_in_month(year: u32, month: u32) -> Option<u32> {
 }
 
 fn leap_year(year: u32) -> bool {
-    year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
+    year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400))
 }
 
 fn json_pointer_str<'a>(value: &'a Value, pointer: &str) -> Option<&'a str> {
@@ -7742,7 +7742,10 @@ fn is_hex32(value: &str) -> bool {
 }
 
 fn is_hex_bytes(value: &str) -> bool {
-    value.len() > 2 && value.len() % 2 == 0 && value.starts_with("0x") && value[2..].bytes().all(|byte| byte.is_ascii_hexdigit())
+    value.len() > 2
+        && value.len().is_multiple_of(2)
+        && value.starts_with("0x")
+        && value[2..].bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 fn is_hex_bytes_len(value: &str, byte_len: usize) -> bool {
