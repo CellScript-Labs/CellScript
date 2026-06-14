@@ -1,27 +1,20 @@
 # Changelog
 
-## nightly-0.16 - 2026-06-10
-
-- Record the 0.16 devnet/local pre-production acceptance boundary: NovaSeal
-  live devnet acceptance passes with `live_devnet_rpc_executed=true` and
-  `blockers=0`, while production remains blocked on external attestations.
-- Tighten the NovaSeal public BTC SPV evidence contract so BTC-facing profile
-  cases must bind current live CKB report hashes, service-builder hashes,
-  CKB-side BTC commitment hashes, raw Bitcoin transaction material, block
-  header and Merkle proof data, confirmation heights, and canonical SPV
-  material hashes.
-- Keep the 0.16 documentation honest about scope: ProofPlan soundness and
-  builder evidence are strict metadata-assurance gates, NovaSeal devnet
-  certification is proposal-local evidence, and full production claims still
-  require external BIP340 TCB, public BTC SPV, public/shared CellDep, and RWA
-  legal/registry attestations.
-
-## 0.16.0 - 2026-05-04
+## 0.16.0 - 2026-06-14
 
 - Add the scoped metadata-assurance release surface: operational semantics,
   ProofPlan soundness checks, builder-assumption metadata, transaction-shape
   validation, solver templates, deployment reports, proof diffs, profiling,
   transaction traces, and audit bundles.
+- Ship NovaSeal as bundled proposal packages with local devnet/profile
+  acceptance tooling, while keeping production claims blocked on external
+  BIP340 TCB, public BTC SPV, public/shared CellDep, and profile-specific
+  attestations.
+- Tighten the NovaSeal public BTC SPV evidence contract so BTC-facing profile
+  cases must bind current live CKB report hashes, service-builder hashes,
+  CKB-side BTC commitment hashes, raw Bitcoin transaction material, block
+  header and Merkle proof data, confirmation heights, and canonical SPV
+  material hashes.
 - Harden the 0.16 compiler-freeze gate with explicit IR poison rejection,
   instruction-level IR provenance, reserved-register contract checks, syscall
   ABI baseline coverage, and line-exact diagnostic regression directives.
@@ -45,6 +38,10 @@
 - Merge the 0.15 strict syntax and example cleanup into the 0.16 assurance
   branch, including canonical `transition`/`where` action syntax, kernel-effect
   capabilities, stdlib lifecycle metadata, and VS Code packaging dry-runs.
+- Keep the 0.16 documentation honest about scope: ProofPlan soundness and
+  builder evidence are strict metadata-assurance gates, NovaSeal devnet
+  certification is proposal-local evidence, and full production claims still
+  require CKB dry-run/commit evidence plus required external attestations.
 
 ## 0.15.0 - 2026-05-26
 

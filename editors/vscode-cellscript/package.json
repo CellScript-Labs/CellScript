@@ -10,7 +10,7 @@
     "type": "git",
     "url": "https://github.com/a19q3/CellScript.git"
   },
-  "homepage": "https://github.com/a19q3/CellScript/tree/nightly-0.16/editors/vscode-cellscript",
+  "homepage": "https://github.com/a19q3/CellScript/tree/v0.16.0/editors/vscode-cellscript",
   "bugs": {
     "url": "https://github.com/a19q3/CellScript/issues"
   },

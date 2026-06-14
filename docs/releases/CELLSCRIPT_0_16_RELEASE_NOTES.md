@@ -1,0 +1,307 @@
+# CellScript 0.16 Release Notes
+
+Status: Released as `v0.16.0`.
+
+Release tag: `v0.16.0`.
+
+Updated: 2026-06-14.
+
+CellScript 0.16 is an assurance and tooling release. For users, the main change
+is that the compiler is no longer just producing an artefact and a metadata
+sidecar. It now gives you a clearer view of what a contract expects from a CKB
+transaction builder, what is checked by generated verifier code, what still
+needs external evidence, and which proof or deployment facts changed between
+builds.
+
+This release is deliberately conservative. It improves the day-to-day workflow
+for building, reviewing, and packaging CKB-facing CellScript contracts, but it
+does not claim full transaction solving, formal verification, or executable CKB
+equivalence for every standard compatibility fixture.
+
+NovaSeal now ships with the 0.16 branch as bundled proposal packages and local
+acceptance tooling. Its detailed project progress will be tracked separately in
+the Nervos Talk thread:
+[NovaSeal: a Bitcoin-authorised Cell framework for CKB](https://talk.nervos.org/t/novaseal-a-bitcoin-authorised-cell-framework-for-ckb/10342).
+
+## What Users Will Notice
+
+### Clearer Pre-Production Feedback
+
+`--primitive-strict=0.16` is now the strict pre-production mode. It catches
+ProofPlan gaps that earlier workflows could leave as audit notes.
+
+In practical terms, this means:
+
+- contracts with metadata-only invariant claims fail earlier;
+- runtime-required obligations are surfaced as blockers instead of being easy
+  to miss in metadata;
+- strict builds make it clearer whether a source file is ready for production
+  evidence or still needs protocol-specific review;
+- fail-closed examples now fail for explicit PP0150 reasons rather than hiding
+  behind older 0.15-era tooling paths.
+
+Some bundled examples intentionally remain strict-fail-closed in 0.16.
+`token.cell`, `amm_pool.cell`, and `launch.cell` still contain selected
+aggregate or Pool ProofPlan gaps. They remain useful examples, but the release
+notes and wiki no longer describe them as strict-clean production artefacts.
+
+### Better Builder Handoff
+
+The compiler now gives transaction builders a much more concrete handoff.
+
+Users can inspect:
+
+- required inputs and outputs;
+- required cell deps and witness fields;
+- capacity, fee, change, and signature policy expectations;
+- which assumptions need evidence before signing;
+- which assumptions are only structural and which require external material.
+
+The user-facing command is:
+
+```bash
+cellc explain-assumptions src/main.cell --json
+```
+
+This is meant for wallet, relayer, SDK, and builder integration work. It does
+not replace CKB dry-run or final transaction validation, but it makes the
+builder contract visible and reviewable.
+
+### Transaction Shape Checks Before Signing
+
+0.16 adds:
+
+```bash
+cellc validate-tx --against metadata.json tx.json --json
+```
+
+This checks whether a transaction JSON shape lines up with the compiler's
+builder assumptions. It is useful before signing or handing a transaction to a
+separate builder pipeline.
+
+It can catch missing or malformed evidence for assumptions such as TYPE_ID
+plans, global uniqueness, lock-group transaction scope, capacity evidence, and
+manifest-bound spawn targets.
+
+This is still not a full semantic CKB verifier. Production claims still require
+dry-run, capacity checks, cycle evidence, commit evidence, and any external
+attestations required by the protocol.
+
+### More Useful Transaction Templates
+
+`cellc solve-tx` now emits a deterministic transaction template rather than
+leaving builders to reconstruct all requirements from scattered metadata.
+
+Users should expect a template that names:
+
+- input and output slots;
+- dep requirements;
+- fee and change expectations;
+- signing manifest structure;
+- per-lock signature request requirements.
+
+It is not a final solver. It does not pick live cells, resolve headers, compute
+final fees, place every witness, or submit the transaction. It gives builders a
+stable starting point.
+
+### More Practical Audit And Deployment Reports
+
+The metadata tooling surface has expanded around common release-review tasks:
+
+```bash
+cellc deploy-plan
+cellc verify-deploy
+cellc diff-deploy
+cellc lock-deps
+cellc proof-diff
+cellc profile
+cellc trace-tx
+cellc audit-bundle
+```
+
+The user-visible benefit is that release reviewers can now answer questions
+without manually comparing raw metadata files:
+
+- what changed between two ProofPlan records;
+- which deployment dependency changed;
+- which lock deps are expected;
+- which source entries contribute to an audit bundle;
+- whether a deployment plan still matches its metadata;
+- what a profile exposes to downstream tooling.
+
+These reports are JSON-first so they can be used in CI, wallets, release
+scripts, and external audit tooling.
+
+### Better Editor Experience
+
+The VS Code extension is aligned with CellScript 0.16.0.
+
+For users, this means the local editor integration now follows the current
+`cellc --lsp` and 0.16 authoring surface. The extension exposes active-file
+commands for the report flows that do not require separate input files:
+
+- builder assumptions;
+- transaction template;
+- deployment plan;
+- profile report;
+- audit bundle.
+
+Commands that compare or validate separate artefacts remain CLI-first:
+`validate-tx`, `trace-tx`, `proof-diff`, `verify-deploy`, `diff-deploy`, and
+`lock-deps`.
+
+## CKB And Compatibility
+
+### Descriptive CKB Compatibility Fixtures
+
+The CKB compatibility suite now documents expected shapes for common Nervos
+contracts and patterns:
+
+- sUDT;
+- xUDT;
+- ACP;
+- Cheque;
+- Omnilock-compatible locks;
+- NervosDAO since/epoch behaviour;
+- Type ID.
+
+The manifest is:
+
+```text
+tests/compat/ckb_standard/manifest.json
+```
+
+These fixtures are useful for review, planning, and compatibility discussion.
+They are not yet executable accepted/rejected CKB VM tests. CKB dry-run remains
+the acceptance mechanism for production claims.
+
+### CKB Standard Library Protocol Stubs
+
+0.16 adds schema-level stdlib protocol descriptors for:
+
+- `std::sudt`;
+- `std::xudt`;
+- `std::type_id`;
+- `std::htlc`;
+- `std::cheque`;
+- `std::acp`.
+
+For users, this is a roadmap signal and a tooling anchor. The descriptors make
+the intended protocol surface visible, but they are not production modules yet:
+there is no CellScript source implementation, assembly generation, or
+production CKB evidence for these stdlib protocols in 0.16.
+
+## NovaSeal Packaging
+
+NovaSeal is included with the 0.16 branch as bundled proposal packages plus
+local devnet/profile acceptance tooling. This means CellScript users can inspect
+NovaSeal examples, profiles, schemas, fixtures, and local evidence generation
+from the same checkout.
+
+The local acceptance boundary remains explicit. A local run can report:
+
+```text
+status=local_devnet_passed_external_endpoint_required
+live_devnet_rpc_executed=true
+local_blockers=0
+external_endpoint_status=external_required
+```
+
+Full external-completeness is stricter and must reach:
+
+```text
+status=passed
+live_devnet_rpc_executed=true
+local_blockers=0
+acceptance_blockers=0
+blockers=0
+external_endpoint_status=passed
+```
+
+NovaSeal is therefore shipping with CellScript as a bundled proposal package,
+not as a blanket mainnet-production claim for every CellScript or NovaSeal
+profile. External BIP340 TCB review, public BTC SPV evidence, shared CellDep
+attestation, and profile-specific external review remain part of the production
+acceptance boundary.
+
+Ongoing NovaSeal progress, discussion, and project-facing updates will be
+tracked in the Nervos Talk thread:
+[NovaSeal: a Bitcoin-authorised Cell framework for CKB](https://talk.nervos.org/t/novaseal-a-bitcoin-authorised-cell-framework-for-ckb/10342).
+
+## Compatibility
+
+Existing v0.15-style sources can still use default compatibility mode while
+migration is in progress.
+
+Use `--primitive-strict=0.16` when you want the stricter pre-production
+assurance gate. Expect it to reject metadata-only or runtime-required ProofPlan
+gaps that were previously visible but not fatal.
+
+The practical migration advice is:
+
+1. Compile without strict mode to inspect current metadata.
+2. Run `cellc explain-assumptions --json` and review builder obligations.
+3. Try `--primitive-strict=0.16`.
+4. Treat PP0150 as a real readiness signal, not as a compiler nuisance.
+5. Use CKB dry-run and acceptance evidence before making production claims.
+
+## Verification
+
+Focused v0.16 gate:
+
+```bash
+cargo test --locked -p cellscript --test v0_16 -- --test-threads=1
+cargo test --locked -p cellscript proof_plan --lib -- --test-threads=1
+cargo check --locked -p cellscript --all-targets
+git diff --check
+```
+
+Full scoped 0.16 gate:
+
+```bash
+cargo fmt --all
+cargo check --locked -p cellscript --all-targets
+cargo test --locked -p cellscript
+cargo clippy --locked -p cellscript --all-targets -- -D warnings
+git diff --check
+```
+
+NovaSeal local acceptance entry point:
+
+```bash
+./scripts/novaseal_devnet_stateful_acceptance.sh --pretty
+target/debug/cellc certify --plugin novaseal-profile-v0 --repo-root . --json
+```
+
+## Deferred To 0.17
+
+The following items remain outside the scoped 0.16 release:
+
+- executable CKB VM accepted/rejected fixture runner;
+- full CKB transaction semantic validation;
+- final transaction solver with live cell selection, dep/header resolution,
+  fee/change calculation, witness placement, signing, and dry-run;
+- on-chain deployment verification;
+- full CellScript-to-RISC-V/assembly source maps;
+- production-ready CKB stdlib protocol implementations;
+- executable aggregate invariant lowering;
+- iCKB differential tests;
+- production formal-verification guarantees;
+- deeper compiler cleanups from the comparative audit.
+
+## Intentional Boundaries
+
+0.16 improves user-facing assurance, but the boundaries remain important:
+
+- ProofPlan soundness is a metadata consistency checker, not a formal proof of
+  invariant soundness;
+- `validate-tx` is structural and evidence-schema validation, not full CKB
+  semantic validation;
+- `solve-tx` emits templates, not final transactions;
+- standard CKB compatibility fixtures are descriptive, not executable
+  equivalence tests;
+- CKB stdlib protocol modules are schema stubs, not production-ready modules;
+- NovaSeal ships with the branch as bundled proposal packages and local
+  evidence tooling, not as a blanket production claim;
+- CKB dry-run, transaction commitment evidence, and required external
+  attestations remain the production acceptance layer.
