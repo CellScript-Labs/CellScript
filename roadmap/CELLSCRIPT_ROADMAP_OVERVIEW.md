@@ -378,9 +378,9 @@ action verify_with_delegate(proof: Proof) {
 
 action multi_step_verify(data: VerifyData) {
     let (read_fd, write_fd) = pipe()
-    spawn("hash_checker", fds: [read_fd])
+    let pid = spawn("hash_checker", fds: [read_fd])
     pipe_write(write_fd, data.payload)
-    let result = wait()
+    let result = wait(pid)
     assert_invariant(result == 0, "hash check failed")
 }
 ```
@@ -835,6 +835,10 @@ fee_policy
 change_policy
 signature_policy
 ```
+
+For manifest-bound spawn targets, `required_cell_deps` carries the concrete
+CellDep slot and manifest identity. `validate-tx` checks both the transaction
+`cell_deps[index]` object and matching `builder_assumption_evidence`.
 
 Tooling:
 

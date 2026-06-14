@@ -1,0 +1,14 @@
+{
+  "name": "wrong_signature_reject",
+  "description": "BTC signature does not validate over the intent (wrong key, wrong message, or verifier rejects). Must be rejected at lock level.",
+  "category": "negative",
+  "acceptance_criteria_covered": [3,6],
+  "inputs": {
+    "btc_signature": "invalid (delegate returns failure or signature does not match digest)"
+  },
+  "expected": {
+    "result": "rejected",
+    "failure_mode": "btc_signature_verification_failed",
+    "notes": "This proves that the authority lock is not a no-op and that the delegate is actually wired."
+  }
+}

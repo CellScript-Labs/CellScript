@@ -147,10 +147,14 @@ Still blocked:
 ProofPlan metadata.
 
 0.16 added metadata assurance, builder assumptions, descriptive compatibility
-fixtures, transaction-shape validation, and deployment/audit tooling.
+fixtures, transaction-shape validation, deployment/audit tooling, and
+Rust-comparative compiler hardening for the freeze-critical subset: IR poison
+semantics, backend register contracts, syscall ABI baselines, IR provenance,
+and line-aware diagnostic tests.
 
 0.17 must convert the important remaining metadata/model claims into executable
-CKB checks and CKB test evidence.
+CKB checks and CKB test evidence, and it owns the non-critical comparative-audit
+cleanup deliberately kept out of the 0.16 freeze.
 
 | Track | 0.15 | 0.16 | 0.17 |
 |---|---|---|---|
@@ -160,11 +164,12 @@ CKB checks and CKB test evidence.
 | Protocol stdlib | Macro provenance | Schema stubs | ABI-compatible DAO/xUDT/script helpers |
 | Evidence | Compiler tests | Metadata/tooling tests | CKB VM and differential tests |
 
-## Deferred From 0.16
+## Production Completeness Deferred From 0.16
 
-0.16 is now scoped to metadata assurance and deterministic local tooling. 0.17
-owns the production-completeness work that would make iCKB-style protocol
-claims meaningful:
+0.16 owns only the P0 plus key P1 compiler-freeze hardening tracked in
+`roadmap/CELLSCRIPT_0_16_ROADMAP.md`. 0.17 owns the CKB
+production-completeness work that would make iCKB-style protocol claims
+meaningful:
 
 - executable CKB VM accepted/rejected fixture runner;
 - iCKB-style differential tests against original Rust scripts and generated
@@ -184,6 +189,28 @@ claims meaningful:
   output deposit/receipt pairing, receipt data/current-type binding, and receipt
   mint-sum recomputation remain benchmark-only model logic until generic
   aggregate lowering can express them without protocol-specific compiler APIs.
+
+## Comparative Audit Cleanup Deferred From 0.16
+
+The following Rust-comparative audit items remain important, but they do not
+block the 0.16 freeze after IR poison, register/syscall gates, IR provenance,
+and error-line tests are in place:
+
+- replace the bridge `IrConst::Poisoned` representation with a deeper
+  `Lowered<T>` / `LoweredOperand::{Value, Poisoned}` lowering result;
+- fix tuple formatter round-trip and `Span::Display` line/column hygiene;
+- extend backend validation to per-function stack balance, call targets,
+  register clobbers, unsupported pseudo-ops, and ABI drift;
+- add exhaustive semantic tests for `instruction_dest`,
+  `instruction_operands`, and related IR helper coverage;
+- introduce lightweight `IrPhase` / `CodegenPhase` legality markers;
+- harden the diagnostic model with warning-level diagnostics and deduplication;
+- split `lib.rs`, `types/mod.rs`, and CLI command ownership after the freeze
+  without changing behaviour;
+- replace ad hoc generic/type-name parsing with structured resolver/type
+  boundary data;
+- add release tidy checks for debug leftovers, runtime error-code coverage,
+  migration diagnostic tests, and lint posture.
 
 ## Non-Goals
 
@@ -353,7 +380,7 @@ Add executable aggregate lowering for:
 
 - transaction/group input scans;
 - transaction/group output scans;
-- typed cell classification;
+- schema-backed CKB Cell classification;
 - computed per-cell terms;
 - local `u128` add/sub/mul/div/compare terms are implemented for DAO-rate
   formulas;
@@ -650,8 +677,8 @@ fields.
    requirement helpers exist; first-class `u256`/`C256` values remain open.
 5. Executable CKB fixture runner.
 6. Partial iCKB differential harness with honest pass/fail/unsupported labels.
-7. Updated iCKB benchmark specs with fewer TODO markers and more runtime-backed
-   tests.
+7. Updated iCKB benchmark specs with fewer unresolved limitation manifest
+   entries and more runtime-backed tests.
 8. Updated final report stating whether CellScript moved from incomplete to
    partially iCKB-grade, or remains blocked.
 9. Production-equivalence gate manifest that prevents `MODEL_LEVEL_ONLY` rows
@@ -745,9 +772,9 @@ cargo run --locked -p cellscript --bin cellc -- verify-ckb-fixtures tests/compat
 
 0.17 is complete only when:
 
-1. iCKB benchmark specs compile without critical TODO markers for HeaderDep,
-   xUDT binding, script role, aggregate accounting, DAO maturity, or Limit
-   Order arithmetic.
+1. iCKB benchmark specs compile without unresolved limitation manifest entries
+   for HeaderDep, xUDT binding, script role, aggregate accounting, DAO maturity,
+   or Limit Order arithmetic.
 2. At least one iCKB Logic positive case executes in CKB VM.
 3. At least five iCKB adversarial cases fail in CKB VM for named invariant
    reasons.

@@ -1,0 +1,8 @@
+{
+  "schema": "novaseal-fungible-xudt-fixture-v0.1",
+  "fixture": "transfer_amount_mismatch_reject",
+  "action": "transfer_xudt",
+  "expected": "rejected",
+  "coverage": "source-guard-present",
+  "description": "Transfer must reject any intent that changes the amount of the balance-bearing object."
+}

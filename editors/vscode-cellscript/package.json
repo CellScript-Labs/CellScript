@@ -10,7 +10,7 @@
     "type": "git",
     "url": "https://github.com/a19q3/CellScript.git"
   },
-  "homepage": "https://github.com/a19q3/CellScript/tree/nightly-0.16/editors/vscode-cellscript",
+  "homepage": "https://github.com/a19q3/CellScript/tree/v0.16.0/editors/vscode-cellscript",
   "bugs": {
     "url": "https://github.com/a19q3/CellScript/issues"
   },
@@ -22,6 +22,11 @@
     "onCommand:cellscript.compileCurrentFile",
     "onCommand:cellscript.showMetadata",
     "onCommand:cellscript.showConstraints",
+    "onCommand:cellscript.showBuilderAssumptions",
+    "onCommand:cellscript.showTxTemplate",
+    "onCommand:cellscript.showDeployPlan",
+    "onCommand:cellscript.showProfile",
+    "onCommand:cellscript.generateAuditBundle",
     "onCommand:cellscript.showProductionReport"
   ],
   "scripts": {
@@ -86,6 +91,26 @@
         "title": "CellScript: Show Constraints"
       },
       {
+        "command": "cellscript.showBuilderAssumptions",
+        "title": "CellScript: Show Builder Assumptions"
+      },
+      {
+        "command": "cellscript.showTxTemplate",
+        "title": "CellScript: Show Transaction Template"
+      },
+      {
+        "command": "cellscript.showDeployPlan",
+        "title": "CellScript: Show Deploy Plan"
+      },
+      {
+        "command": "cellscript.showProfile",
+        "title": "CellScript: Show Profile"
+      },
+      {
+        "command": "cellscript.generateAuditBundle",
+        "title": "CellScript: Generate Audit Bundle"
+      },
+      {
         "command": "cellscript.showProductionReport",
         "title": "CellScript: Show Production Report"
       }
@@ -108,9 +133,34 @@
           "group": "cellscript@3"
         },
         {
-          "command": "cellscript.showProductionReport",
+          "command": "cellscript.showBuilderAssumptions",
           "when": "resourceLangId == cellscript",
           "group": "cellscript@4"
+        },
+        {
+          "command": "cellscript.showTxTemplate",
+          "when": "resourceLangId == cellscript",
+          "group": "cellscript@5"
+        },
+        {
+          "command": "cellscript.showDeployPlan",
+          "when": "resourceLangId == cellscript",
+          "group": "cellscript@6"
+        },
+        {
+          "command": "cellscript.showProfile",
+          "when": "resourceLangId == cellscript",
+          "group": "cellscript@7"
+        },
+        {
+          "command": "cellscript.generateAuditBundle",
+          "when": "resourceLangId == cellscript",
+          "group": "cellscript@8"
+        },
+        {
+          "command": "cellscript.showProductionReport",
+          "when": "resourceLangId == cellscript",
+          "group": "cellscript@9"
         }
       ],
       "commandPalette": [
@@ -124,6 +174,26 @@
         },
         {
           "command": "cellscript.showConstraints",
+          "when": "editorLangId == cellscript"
+        },
+        {
+          "command": "cellscript.showBuilderAssumptions",
+          "when": "editorLangId == cellscript"
+        },
+        {
+          "command": "cellscript.showTxTemplate",
+          "when": "editorLangId == cellscript"
+        },
+        {
+          "command": "cellscript.showDeployPlan",
+          "when": "editorLangId == cellscript"
+        },
+        {
+          "command": "cellscript.showProfile",
+          "when": "editorLangId == cellscript"
+        },
+        {
+          "command": "cellscript.generateAuditBundle",
           "when": "editorLangId == cellscript"
         },
         {
@@ -149,7 +219,7 @@
           "type": "number",
           "default": 15000,
           "minimum": 1000,
-          "description": "Timeout for compiler-backed CLI commands (compile, metadata, constraints)."
+          "description": "Timeout for compiler-backed CLI commands."
         },
         "cellscript.maxOutputBytes": {
           "type": "number",
@@ -164,7 +234,7 @@
             "riscv64-elf"
           ],
           "default": "riscv64-asm",
-          "description": "Compiler target used by compile, metadata, and constraints commands."
+          "description": "Compiler target used by active-file compiler reports."
         }
       }
     }

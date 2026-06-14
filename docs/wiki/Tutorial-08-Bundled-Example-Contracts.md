@@ -59,12 +59,16 @@ From the repository root:
 ```bash
 for f in examples/*.cell; do
   echo "==> $f"
-  cellc "$f" --target riscv64-elf --target-profile ckb --primitive-strict 0.16 -o "/tmp/$(basename "$f" .cell).elf"
+  cellc "$f" --target riscv64-elf --target-profile ckb -o "/tmp/$(basename "$f" .cell).elf"
 done
 ```
 
 This is a compile pass, not a full CKB production claim. It is useful while
 learning because it shows that the examples fit the compiler and CKB profile.
+Use `--primitive-strict 0.16` for pre-production strictness only after checking
+the example's ProofPlan status. `amm_pool.cell`, `launch.cell`, and
+`token.cell` still contain strict v0.16 PP0150 ProofPlan gaps for selected
+aggregate or Pool obligations.
 
 ## Token Walkthrough
 
@@ -165,7 +169,9 @@ script-args data comes from, but it does not turn an `Address` into a signer.
 The CKB profile is strict, and the bundled suite has a defined production
 boundary:
 
-- bundled examples compile under the CKB profile with `--primitive-strict=0.16`;
+- bundled examples compile under the CKB profile;
+- strict v0.16 PP0150 gaps are fail-closed rather than treated as deployable
+  production evidence;
 - bundled business actions have scoped CKB production harnesses;
 - bundled locks have builder-backed valid-spend and invalid-spend matrices;
 - valid CKB transactions are builder-generated and dry-run;
@@ -186,7 +192,7 @@ checks:
 ```bash
 cellc fmt --check
 cellc check --target-profile ckb --production
-cellc build --target riscv64-elf --target-profile ckb --production --primitive-strict 0.16
+cellc build --target riscv64-elf --target-profile ckb --production
 cellc verify-artifact build/main.elf --verify-sources --expect-target-profile ckb --production
 cellc examples/nft.cell --entry-action transfer --target riscv64-elf --target-profile ckb --primitive-strict 0.16 --production
 # --entry-action selects a single action entry point for targeted inspection

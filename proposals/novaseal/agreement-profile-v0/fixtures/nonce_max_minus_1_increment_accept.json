@@ -1,0 +1,9 @@
+{
+  "schema": "novaseal-agreement-fixture-v0.1",
+  "fixture": "nonce_max_minus_1_increment_accept",
+  "action": "repay_arithmetic_boundary",
+  "expected": "accepted",
+  "coverage": "local-arithmetic-boundary-covered + production-gate-covered",
+  "accept_guard": "active.nonce < U64_MAX",
+  "description": "Terminal nonce increment accepts active.nonce = U64_MAX - 1 because the resulting new nonce is exactly U64_MAX."
+}

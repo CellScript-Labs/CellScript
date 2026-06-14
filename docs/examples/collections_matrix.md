@@ -11,8 +11,9 @@ Recommended authoring rule:
 - use schema/ABI vectors such as `Vec<u8>`, `Vec<Address>`, and `Vec<Hash>`
   for Molecule/witness payloads
 - use profile-gated checks for dynamic cell layouts
-- expect unsupported nested dynamic containers and cell-backed collection
-  ownership to fail closed
+- treat nested dynamic containers and cell-backed collection ownership as
+  schema/ABI boundary shapes only unless metadata, constraints, and verifier
+  evidence prove a concrete production helper or ownership model
 
 Current stack-backed local `Vec<T>` support is deliberately bounded compiler
 lowering for verifier-local fixed-width values. It is not a production

@@ -59,7 +59,7 @@ CellScript is currently in a CKB-focused alpha / stabilisation phase.
 It is suitable for:
 - experimenting with CKB Cell-contract authoring;
 - compiling and inspecting the bundled examples;
-- exploring typed Cell effects, metadata, constraints, and CKB target-profile
+- exploring schema-backed CKB Cell effects, metadata, constraints, and CKB target-profile
   checks;
 - trying the local VS Code extension and LSP tooling.
 
@@ -83,7 +83,7 @@ Compile your first contract:
 cellc examples/token.cell
 
 # Emit a RISC-V ELF for CKB
-cellc examples/token.cell --target riscv64-elf --target-profile ckb --primitive-strict 0.16
+cellc examples/nft.cell --target riscv64-elf --target-profile ckb --primitive-strict 0.16
 
 # Emit a RISC-V ELF for CKB, with a specific entry action
 cellc examples/nft.cell --target riscv64-elf --target-profile ckb --primitive-strict 0.16 --entry-action transfer
@@ -101,15 +101,20 @@ cellc build --target riscv64-elf --target-profile ckb
 Run a CKB profile check:
 
 ```bash
-cellc check --target-profile ckb
+cellc examples/nft.cell --target-profile ckb
 ```
 
-Inspect what the compiler can explain about the token example:
+Inspect what the compiler can explain about the NFT example:
 
 ```bash
-cellc metadata examples/token.cell --target-profile ckb --json
-cellc constraints examples/token.cell --target-profile ckb
-cellc scheduler-plan examples/token.cell --target-profile ckb
+cellc metadata examples/nft.cell --target-profile ckb
+cellc constraints examples/nft.cell --target-profile ckb
+cellc scheduler-plan examples/nft.cell --target-profile ckb
+cellc explain-assumptions examples/nft.cell --target-profile ckb --json
+cellc solve-tx examples/nft.cell --target-profile ckb --json
+cellc deploy-plan examples/nft.cell --target-profile ckb --json
+cellc profile examples/nft.cell --target-profile ckb --json
+cellc audit-bundle examples/nft.cell --target-profile ckb --json
 ```
 
 These commands show what the compiler believes the protocol reads, writes,
@@ -134,8 +139,8 @@ CellScript now supports CKB as its only target profile:
 > normal target-profile policy.
 
 ```bash
-cellc examples/token.cell --target riscv64-elf --target-profile ckb --primitive-strict 0.16
-cellc check --target-profile ckb
+cellc examples/nft.cell --target riscv64-elf --target-profile ckb --primitive-strict 0.16
+cellc examples/nft.cell --target-profile ckb
 ```
 
 The current assurance gate is `--primitive-strict 0.16`. It includes the earlier
@@ -357,14 +362,14 @@ TYPE_ID, Spawn/IPC, and dynamic BLAKE2b surfaces as compiler/tooling examples.
 
 ## Comparison
 
-Why CellScript is shaped around typed Cells, linear resources, explicit
+Why CellScript is shaped around schema-backed CKB Cell state, linear resources, explicit
 transaction effects, and ckb-vm artifacts — instead of account storage or a
 chain-specific VM:
 
 | Dimension | CellScript | Solidity | Move | Sway |
 |---|---|---|---|---|
 | Execution target | RISC-V ELF / asm on ckb-vm | EVM bytecode | Move bytecode | FuelVM bytecode |
-| State model | Typed Cells, explicit inputs/deps/outputs | Account storage slots | Resources in global storage | UTXO + native assets |
+| State model | Schema-backed views over CKB Cells, explicit inputs/deps/outputs | Account storage slots | Resources in global storage | UTXO + native assets |
 | Asset model | Native `resource`, state transitions, receipts, shared Cells | Manual token contracts | Native resources | Native assets |
 | Linear ownership | Compiler-enforced | No | Yes (abilities) | No general user-defined |
 | Shared state | Explicit `shared` Cells | Implicit contract storage | Shared objects (some chains) | No shared Cell analogue |
@@ -373,7 +378,7 @@ chain-specific VM:
 | CKB compatibility | Production-gated CKB ckb-vm artifact profile for the bundled Cell suite | Requires different VM | Requires different VM | Requires FuelVM |
 
 Compared with hand-written CKB scripts, CellScript keeps the same
-runtime substrate but replaces raw byte and syscall programming with typed Cell
+runtime substrate but replaces raw byte and syscall programming with schema-backed CKB Cell
 operations, linear checking, schema metadata, and policy-verifiable artifacts.
 
 ---
@@ -383,15 +388,16 @@ operations, linear checking, schema metadata, and policy-verifiable artifacts.
 CellScript includes production-style local language tooling for early users:
 
 - **In-process LSP** — diagnostics, completions, hover, go-to-definition,
-  references, rename, formatting, and metadata-oriented code actions. The
+  references, formatting, and metadata-oriented code actions. The
   compiler crate exposes an `LspServer`; `cellc --lsp` provides a full
   `tower-lsp` JSON-RPC transport over stdio. Completions include flow
   states after `Type::`.
 - **VS Code extension** — syntax highlighting, snippets, on-save diagnostics,
   compiler-backed formatting, scratch compilation, metadata/constraints/production
-  reports, CKB target-profile arguments, and status-bar feedback. It shells out to
-  `cellc` (or a `cargo run` fallback), so behavior stays identical to CLI and
-  CI gates.
+  reports, active-file 0.16 builder assumptions, transaction template, deploy
+  plan, profile, audit-bundle reports, CKB target-profile arguments, and
+  status-bar feedback. It shells out to `cellc` (or a `cargo run` fallback), so
+  behavior stays identical to CLI and CI gates.
 
 - [VS Code extension](https://github.com/tsukifune-kosei/CellScript/tree/main/editors/vscode-cellscript)
 - [Runtime error codes](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_RUNTIME_ERROR_CODES.md)
@@ -649,6 +655,24 @@ registry dependency resolution remain experimental and fail-closed.
 - Git dependencies are explicit remote source fetches; treat them as
   review-required inputs, not the registry production path
 
+**Registry resolver boundary:**
+
+- Registry discovery may grow to include CellScript packages, verifier
+  artifacts, deployed artifact records, reproducible artifacts, and external
+  CKB tooling artifacts. Dependency resolution stays narrower than discovery.
+- Anything reachable by `cellc add` must be safe to participate in the build,
+  verification, deployment, or declared TCB identity chain.
+- Source libraries, runtime verifier packages, deployable script packages, and
+  deployed or reproducible artifact records may become resolver-safe only when
+  their source, build, ABI, artifact, and deployment identities can be checked
+  fail-closed.
+- Templates, cookbook examples, protocol skeletons, and scaffold-only projects
+  are copy-only material for `cellc new --template` or cookbook tooling; they
+  must not be dependency-resolved through `cellc add`.
+- Runtime verifier packages are allowed to have no business parameters, but
+  production use must still pin `verifier_id`, `ipc_abi`, artifact identity,
+  build profile, TCB/security status, and deployment CellDep facts.
+
 ### CLI Commands
 
 | Command | Purpose |
@@ -662,6 +686,12 @@ registry dependency resolution remain experimental and fail-closed.
 | `cellc entry-witness` | Encode `_cellscript_entry` witness bytes |
 | `cellc scheduler-plan` | Consume scheduler hints and report serial/conflict policy |
 | `cellc ckb-hash` | Compute CKB default Blake2b-256 hashes for builders and release evidence |
+| `cellc explain-assumptions` | Emit v0.16 builder-assumption evidence from ProofPlan metadata |
+| `cellc validate-tx` | Validate transaction JSON shape against builder assumptions before signing |
+| `cellc solve-tx` | Emit a deterministic transaction template from metadata |
+| `cellc deploy-plan` | Emit a reproducible deployment plan |
+| `cellc verify-deploy` / `diff-deploy` / `lock-deps` | Verify, compare, and lock deployment metadata |
+| `cellc proof-diff` / `profile` / `trace-tx` / `audit-bundle` | Emit v0.16 audit and debug reports |
 | `cellc opt-report` | Compare O0..O3 artifact size and constraints status |
 | `cellc verify-artifact` | Verify an artifact against its metadata sidecar |
 | `cellc test` | Run compiler and policy tests (no trusted runtime execution) |

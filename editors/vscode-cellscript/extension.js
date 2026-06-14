@@ -45,6 +45,36 @@ function activate(context) {
         await runCompilerReport(document, output, status, "constraints");
       }
     }),
+    vscode.commands.registerCommand("cellscript.showBuilderAssumptions", async () => {
+      const document = activeCellScriptDocument();
+      if (document) {
+        await runCompilerReport(document, output, status, "builder-assumptions");
+      }
+    }),
+    vscode.commands.registerCommand("cellscript.showTxTemplate", async () => {
+      const document = activeCellScriptDocument();
+      if (document) {
+        await runCompilerReport(document, output, status, "tx-template");
+      }
+    }),
+    vscode.commands.registerCommand("cellscript.showDeployPlan", async () => {
+      const document = activeCellScriptDocument();
+      if (document) {
+        await runCompilerReport(document, output, status, "deploy-plan");
+      }
+    }),
+    vscode.commands.registerCommand("cellscript.showProfile", async () => {
+      const document = activeCellScriptDocument();
+      if (document) {
+        await runCompilerReport(document, output, status, "profile");
+      }
+    }),
+    vscode.commands.registerCommand("cellscript.generateAuditBundle", async () => {
+      const document = activeCellScriptDocument();
+      if (document) {
+        await runCompilerReport(document, output, status, "audit-bundle");
+      }
+    }),
     vscode.commands.registerCommand("cellscript.showProductionReport", async () => {
       const document = activeCellScriptDocument();
       if (document) {
@@ -319,6 +349,47 @@ function buildReportPlan(document, kind, cwd) {
     };
   }
 
+  if (kind === "builder-assumptions") {
+    return {
+      args: ["explain-assumptions", document.uri.fsPath, ...targetProfileArgs(document), "--json"],
+      outputPath: null,
+      source: "cellc explain-assumptions"
+    };
+  }
+
+  if (kind === "tx-template") {
+    return {
+      args: ["solve-tx", document.uri.fsPath, ...targetProfileArgs(document), "--json"],
+      outputPath: null,
+      source: "cellc solve-tx"
+    };
+  }
+
+  if (kind === "deploy-plan") {
+    return {
+      args: ["deploy-plan", document.uri.fsPath, ...targetProfileArgs(document), "--json"],
+      outputPath: null,
+      source: "cellc deploy-plan"
+    };
+  }
+
+  if (kind === "profile") {
+    return {
+      args: ["profile", document.uri.fsPath, ...targetProfileArgs(document), "--json"],
+      outputPath: null,
+      source: "cellc profile"
+    };
+  }
+
+  if (kind === "audit-bundle") {
+    const outputPath = getScratchDirectoryPath(document, cwd, "audit-bundle");
+    return {
+      args: ["audit-bundle", document.uri.fsPath, ...targetProfileArgs(document), "--output", outputPath, "--json"],
+      outputPath,
+      source: "cellc audit-bundle"
+    };
+  }
+
   const target = compilerTarget(document);
   const outputPath = getScratchOutputPath(document, cwd, `compile.${targetFileExtension(target)}`);
   return {
@@ -348,6 +419,17 @@ function targetFileExtension(target) {
 }
 
 function getScratchOutputPath(document, cwd, suffix) {
+  const workspaceFolder = vscode.workspace.getWorkspaceFolder(document.uri);
+  const baseDir = workspaceFolder
+    ? path.join(workspaceFolder.uri.fsPath, ".cellscript-vscode")
+    : path.join(cwd || path.dirname(document.uri.fsPath) || os.tmpdir(), ".cellscript-vscode");
+
+  fs.mkdirSync(baseDir, { recursive: true });
+  const stem = path.basename(document.uri.fsPath, path.extname(document.uri.fsPath));
+  return path.join(baseDir, `${stem}.${process.pid}.${Date.now()}.${suffix}`);
+}
+
+function getScratchDirectoryPath(document, cwd, suffix) {
   const workspaceFolder = vscode.workspace.getWorkspaceFolder(document.uri);
   const baseDir = workspaceFolder
     ? path.join(workspaceFolder.uri.fsPath, ".cellscript-vscode")

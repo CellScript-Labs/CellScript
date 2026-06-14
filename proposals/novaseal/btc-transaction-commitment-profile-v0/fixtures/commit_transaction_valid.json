@@ -1,0 +1,8 @@
+{
+  "schema": "novaseal-btc-transaction-commitment-fixture-v0.1",
+  "fixture": "commit_transaction_valid",
+  "action": "commit_btc_transaction_transition",
+  "expected": "accepted",
+  "coverage": "source-guard-present",
+  "description": "Committer binds a CKB transition to a non-zero BTC txid/wtxid/output tuple and materialised receipt."
+}

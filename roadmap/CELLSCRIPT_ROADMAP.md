@@ -1,6 +1,6 @@
 # CellScript Roadmap
 
-**Updated**: 2026-05-26
+**Updated**: 2026-06-10
 
 This roadmap is the high-level planning map for CellScript. It links the
 release-specific trackers and the deeper design notes so the project does not
@@ -115,6 +115,8 @@ assurance surface:
   diffs, profiles, transaction traces, and audit bundles;
 - standard CKB compatibility fixture manifest for sUDT, xUDT, ACP, Cheque,
   Omnilock, NervosDAO since/epoch, and Type ID.
+- proposal-local NovaSeal devnet/profile certification that passes local live
+  CKB RPC acceptance and preserves external production blockers.
 
 The 0.17 branch records closure of the 0.16 review findings in
 `docs/0.17/review_findings_closure.md`: ProofPlan matching is no longer keyed

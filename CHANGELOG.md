@@ -22,6 +22,21 @@
   ProofPlan soundness checks, builder-assumption metadata, transaction-shape
   validation, solver templates, deployment reports, proof diffs, profiling,
   transaction traces, and audit bundles.
+- Ship NovaSeal as bundled proposal packages with local devnet/profile
+  acceptance tooling, while keeping production claims blocked on external
+  BIP340 TCB, public BTC SPV, public/shared CellDep, and profile-specific
+  attestations.
+- Tighten the NovaSeal public BTC SPV evidence contract so BTC-facing profile
+  cases must bind current live CKB report hashes, service-builder hashes,
+  CKB-side BTC commitment hashes, raw Bitcoin transaction material, block
+  header and Merkle proof data, confirmation heights, and canonical SPV
+  material hashes.
+- Harden the 0.16 compiler-freeze gate with explicit IR poison rejection,
+  instruction-level IR provenance, reserved-register contract checks, syscall
+  ABI baseline coverage, and line-exact diagnostic regression directives.
+- Align `cellc --help`, README command tables, and the VS Code active-file
+  command surface with the 0.16 builder, transaction-template, deployment,
+  profile, and audit-bundle tooling.
 - Add `--primitive-strict=0.16`, which includes the 0.15 primitive vocabulary
   rules and rejects metadata-only/runtime-required ProofPlan gaps in strict
   assurance mode.
@@ -39,6 +54,10 @@
 - Merge the 0.15 strict syntax and example cleanup into the 0.16 assurance
   branch, including canonical `transition`/`where` action syntax, kernel-effect
   capabilities, stdlib lifecycle metadata, and VS Code packaging dry-runs.
+- Keep the 0.16 documentation honest about scope: ProofPlan soundness and
+  builder evidence are strict metadata-assurance gates, NovaSeal devnet
+  certification is proposal-local evidence, and full production claims still
+  require CKB dry-run/commit evidence plus required external attestations.
 
 ## 0.15.0 - 2026-05-26
 

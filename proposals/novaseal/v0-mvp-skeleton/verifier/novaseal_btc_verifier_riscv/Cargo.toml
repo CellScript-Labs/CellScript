@@ -1,0 +1,29 @@
+[package]
+name = "novaseal_btc_verifier_riscv"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+publish = false
+
+[[bin]]
+name = "novaseal_btc_verifier_riscv"
+path = "src/main.rs"
+test = false
+doctest = false
+bench = false
+
+[lints.rust]
+unsafe_code = "warn"
+
+[lints.clippy]
+all = "warn"
+pedantic = "warn"
+
+[dependencies]
+novaseal_btc_verifier_core = { path = "../novaseal_btc_verifier_core" }
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"

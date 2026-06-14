@@ -1,0 +1,32 @@
+# NovaDualSealIntentV0 - Source of Truth Schema
+
+DualSealFinalityCommitmentV0:
+sealed_utxo_commitment_hash: Byte32
+btc_closure_commitment_hash: Byte32
+old_ckb_state_hash: Byte32
+new_ckb_state_hash: Byte32
+maturity_timepoint: u64
+payout_commitment_hash: Byte32
+
+NovaDualSealIntentCoreV0:
+action: u8
+dual_seal_id: Byte32
+policy_hash: Byte32
+btc_owner_authority_hash: Byte32
+ckb_authority_hash: Byte32
+sealed_utxo_commitment_hash: Byte32
+btc_closure_commitment_hash: Byte32
+old_ckb_state_hash: Byte32
+new_ckb_state_hash: Byte32
+maturity_timepoint: u64
+old_status: u8
+new_status: u8
+old_nonce: u64
+new_nonce: u64
+expiry: u64
+payout_commitment_hash: Byte32
+
+NovaDualSealSignedIntentV0:
+core: NovaDualSealIntentCoreV0
+canonical_envelope_hash: Byte32
+expected_receipt_hash: Byte32

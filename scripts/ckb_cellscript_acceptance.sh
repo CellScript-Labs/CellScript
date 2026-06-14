@@ -257,6 +257,8 @@ if [[ -z "$CELLC_BIN" || ! -x "$CELLC_BIN" ]]; then
 fi
 
 python3 - "$CELLC_BIN" "$REPO_ROOT" "$RUN_DIR" "$REPORT_JSON" "$ACCEPTANCE_MODE" <<'PY'
+import datetime
+import hashlib
 import json
 import os
 import pathlib
@@ -270,6 +272,18 @@ repo_root = pathlib.Path(sys.argv[2])
 run_dir = pathlib.Path(sys.argv[3])
 report_path = pathlib.Path(sys.argv[4])
 acceptance_mode = sys.argv[5]
+
+SOURCE_PROVENANCE_SCHEMA = "cellscript-ckb-acceptance-source-provenance-v0.1"
+SOURCE_PROVENANCE_PATHS = [
+    "Cargo.lock",
+    "Cargo.toml",
+    "src",
+    "examples",
+    "scripts/cellscript_gate.sh",
+    "scripts/cellscript_ckb_release_gate.sh",
+    "scripts/ckb_cellscript_acceptance.sh",
+    "scripts/validate_ckb_cellscript_production_evidence.py",
+]
 
 EXAMPLES = [
     "amm_pool.cell",
@@ -1342,7 +1356,6 @@ for action, source in MULTISIG_ACTION_SOURCES.items():
     )
 
 ORIGINAL_SCOPED_ACTIONS = {
-    "token.cell": ["mint", "transfer_token", "burn", "merge"],
     "nft.cell": [
         "mint",
         "transfer",
@@ -1377,8 +1390,8 @@ ORIGINAL_SCOPED_ACTIONS = {
         "cancel_proposal",
     ],
     "vesting.cell": ["create_vesting_config", "grant_vesting", "claim_vested", "revoke_grant"],
-    "amm_pool.cell": ["seed_pool", "swap_a_for_b", "add_liquidity", "remove_liquidity", "isqrt", "min"],
-    "launch.cell": ["launch_token", "simple_launch"],
+    "amm_pool.cell": ["seed_pool", "isqrt", "min"],
+    "launch.cell": ["simple_launch"],
 }
 
 ORIGINAL_SCOPED_LOCKS = {
@@ -1388,7 +1401,11 @@ ORIGINAL_SCOPED_LOCKS = {
     "vesting.cell": ["vesting_admin"],
 }
 
-ORIGINAL_SCOPED_ACTION_FAIL_CLOSED = {}
+ORIGINAL_SCOPED_ACTION_FAIL_CLOSED = {
+    "token.cell": ["mint", "transfer_token", "burn", "merge"],
+    "amm_pool.cell": ["swap_a_for_b", "add_liquidity", "remove_liquidity"],
+    "launch.cell": ["launch_token"],
+}
 
 ORIGINAL_SCOPED_LOCK_FAIL_CLOSED = {}
 
@@ -1468,6 +1485,51 @@ def run(args, *, env=None, timeout=180):
 
 def load_json(path):
     return json.loads(path.read_text(encoding="utf-8"))
+
+def git_stdout(args):
+    return subprocess.check_output(["git", *args], cwd=repo_root, text=True).strip()
+
+def tracked_source_files():
+    output = git_stdout(["ls-files", "--", *SOURCE_PROVENANCE_PATHS])
+    return [
+        line
+        for line in output.splitlines()
+        if line and (repo_root / line).is_file()
+    ]
+
+def file_sha256(path):
+    h = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+def tracked_source_sha256(files):
+    h = hashlib.sha256()
+    for rel in files:
+        h.update(rel.encode("utf-8"))
+        h.update(b"\0")
+        h.update(file_sha256(repo_root / rel).encode("ascii"))
+        h.update(b"\n")
+    return "0x" + h.hexdigest()
+
+def source_provenance_report():
+    files = tracked_source_files()
+    return {
+        "schema": SOURCE_PROVENANCE_SCHEMA,
+        "generated_at_utc": datetime.datetime.now(datetime.timezone.utc)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z"),
+        "repo_commit": git_stdout(["rev-parse", "HEAD"]),
+        "git_dirty": bool(git_stdout(["status", "--porcelain", "--untracked-files=no"])),
+        "tracked_source_paths": SOURCE_PROVENANCE_PATHS,
+        "tracked_source_files": files,
+        "tracked_source_file_count": len(files),
+        "tracked_source_sha256": tracked_source_sha256(files),
+        "acceptance_script_sha256": "0x" + file_sha256(repo_root / "scripts/ckb_cellscript_acceptance.sh"),
+        "validator_script_sha256": "0x" + file_sha256(repo_root / "scripts/validate_ckb_cellscript_production_evidence.py"),
+    }
 
 def source_entries(name, keyword):
     text = production_example_path(name).read_text(encoding="utf-8")
@@ -1634,14 +1696,24 @@ def compile_artifact(name, kind, source, artifact, *, entry_args=None):
 
 validate_source_coverage_matrix()
 
+def strict_policy_fail_closed(stderr):
+    return (
+        "target profile policy failed for 'ckb'" in stderr
+        or (
+            "ProofPlan soundness check failed" in stderr
+            and "PP0150" in stderr
+            and "strict v0.16 ProofPlan mode rejects metadata-only or runtime-required obligations" in stderr
+        )
+    )
+
 def strict_original_compile(name):
     source = production_example_path(name)
     artifact = strict_root / f"{name}.strict.elf"
     result = run(
-        [cellc, source, "--target-profile", "ckb", "--target", "riscv64-elf", "--primitive-strict", "0.15", "-o", artifact],
+        [cellc, source, "--target-profile", "ckb", "--target", "riscv64-elf", "--primitive-strict", "0.16", "-o", artifact],
         env=internal_assembler_env(),
     )
-    policy_fail_closed = result["returncode"] != 0 and "target profile policy failed for 'ckb'" in result["stderr"]
+    policy_fail_closed = result["returncode"] != 0 and strict_policy_fail_closed(result["stderr"])
     unexpected_failure = result["returncode"] != 0 and not policy_fail_closed
     verify = None
     if result["returncode"] == 0:
@@ -1661,10 +1733,10 @@ def strict_original_compile(name):
 def strict_scoped_compile(name, source, entry_flag, entry_name):
     artifact = strict_root / f"{name}.{entry_name}.strict-scoped.elf"
     result = run(
-        [cellc, source, "--target-profile", "ckb", "--target", "riscv64-elf", "--primitive-strict", "0.15", entry_flag, entry_name, "-o", artifact],
+        [cellc, source, "--target-profile", "ckb", "--target", "riscv64-elf", "--primitive-strict", "0.16", entry_flag, entry_name, "-o", artifact],
         env=internal_assembler_env(),
     )
-    policy_fail_closed = result["returncode"] != 0 and "target profile policy failed for 'ckb'" in result["stderr"]
+    policy_fail_closed = result["returncode"] != 0 and strict_policy_fail_closed(result["stderr"])
     unexpected_failure = result["returncode"] != 0 and not policy_fail_closed
     verify = None
     if result["returncode"] == 0:
@@ -1788,12 +1860,22 @@ for example_name, actions in ORIGINAL_SCOPED_ACTIONS.items():
             "original-scoped-action-strict",
             production_example_path(example_name),
             artifact_root / f"original_{example_name.removesuffix('.cell')}_{action}.elf",
-            entry_args=["--primitive-strict", "0.15", "--entry-action", action],
+            entry_args=["--primitive-strict", "0.16", "--entry-action", action],
         )
         record["example"] = example_name
         record["action"] = action
         record["original_source"] = str(production_example_path(example_name))
         original_scoped_action_artifacts.append(record)
+
+def original_scoped_action_or(record, example_name):
+    return next(
+        (
+            original
+            for original in original_scoped_action_artifacts
+            if original["example"] == example_name and original["action"] == record["action"]
+        ),
+        record,
+    )
 
 launch_action_artifacts = [
     record
@@ -1802,20 +1884,12 @@ launch_action_artifacts = [
 ]
 
 token_action_artifacts = [
-    next(
-        original
-        for original in original_scoped_action_artifacts
-        if original["example"] == "token.cell" and original["action"] == record["action"]
-    )
+    original_scoped_action_or(record, "token.cell")
     for record in token_action_artifacts
 ]
 
 nft_action_artifacts = [
-    next(
-        original
-        for original in original_scoped_action_artifacts
-        if original["example"] == "nft.cell" and original["action"] == record["action"]
-    )
+    original_scoped_action_or(record, "nft.cell")
     for record in nft_action_artifacts
 ]
 
@@ -1844,11 +1918,7 @@ timelock_action_artifacts = [
 ]
 
 amm_action_artifacts = [
-    next(
-        original
-        for original in original_scoped_action_artifacts
-        if original["example"] == "amm_pool.cell" and original["action"] == record["action"]
-    )
+    original_scoped_action_or(record, "amm_pool.cell")
     for record in amm_action_artifacts
 ]
 
@@ -1882,7 +1952,7 @@ for example_name, locks in ORIGINAL_SCOPED_LOCKS.items():
             "original-scoped-lock-strict",
             production_example_path(example_name),
             artifact_root / f"original_{example_name.removesuffix('.cell')}_{lock}.elf",
-            entry_args=["--primitive-strict", "0.15", "--entry-lock", lock],
+            entry_args=["--primitive-strict", "0.16", "--entry-lock", lock],
         )
         record["example"] = example_name
         record["lock"] = lock
@@ -1978,7 +2048,7 @@ non_policy_fail_closed = [
 ]
 if non_policy_fail_closed:
     raise RuntimeError(
-        "expected fail-closed original scoped entries were not rejected by CKB target-profile policy: "
+        "expected fail-closed original scoped entries were not rejected by strict CKB/ProofPlan policy: "
         + ", ".join(non_policy_fail_closed)
     )
 
@@ -2001,6 +2071,7 @@ report = {
         "expected fail-closed entries, or non-original artifacts. Bounded mode is a development coverage matrix only."
     ),
     "cellc": str(cellc),
+    "source_provenance": source_provenance_report(),
     "bundled_examples_exact_order": EXAMPLES,
     "bundled_examples_count": len(EXAMPLES),
     "non_production_examples": NON_PRODUCTION_EXAMPLES,
@@ -2053,7 +2124,7 @@ def production_gate_failures(report):
     failures = []
     if report.get("strict_original_ckb_compile_policy_fail_closed"):
         failures.append(
-            "primitive-strict original bundled examples still fail CKB policy: "
+            "primitive-strict original bundled examples still fail strict CKB/ProofPlan policy: "
             + ", ".join(report["strict_original_ckb_compile_policy_fail_closed"])
         )
     if report.get("strict_original_ckb_compile_unexpected_failures"):
@@ -2149,7 +2220,7 @@ CKB_PID="$!"
 
 ready=0
 for _ in $(seq 1 120); do
-  if curl -sS \
+  if curl -sS --noproxy '*' \
     -H 'Content-Type: application/json' \
     -d '{"id":1,"jsonrpc":"2.0","method":"get_tip_header","params":[]}' \
     "$RPC_URL" > "$RUN_DIR/rpc-ready.json" 2>/dev/null; then
@@ -2183,7 +2254,9 @@ fi
 python3 - "$RPC_URL" "$REPORT_JSON" "$CKB_REPO" "$CKB_BIN" "$CKB_LOG" "$REPO_ROOT" "$RUN_STATEFUL_SCENARIOS" <<'PY'
 import hashlib
 import json
+import os
 import pathlib
+import re
 import shutil
 import sys
 import time
@@ -2748,6 +2821,29 @@ def get_block_by_number(number, attempts=20, delay_seconds=0.05):
         time.sleep(delay_seconds)
     raise RuntimeError(f"block number not found: {number}")
 
+def epoch_number_from_header(header):
+    return int(header["epoch"], 16) & ((1 << 24) - 1)
+
+def wait_header_epoch_at_least(min_epoch, max_blocks=1200):
+    last_header = None
+    for generated in range(max_blocks + 1):
+        last_header = rpc("get_tip_header")
+        epoch_number = epoch_number_from_header(last_header)
+        if epoch_number >= min_epoch:
+            return {
+                "hash": last_header["hash"],
+                "epoch": last_header["epoch"],
+                "epoch_number": epoch_number,
+                "generated_blocks": generated,
+            }
+        if generated < max_blocks:
+            rpc("generate_block")
+            time.sleep(0.01)
+    raise RuntimeError(
+        f"tip epoch did not reach {min_epoch} after {max_blocks} generated blocks; "
+        f"last_header={last_header}"
+    )
+
 RESERVED_SPENDABLE_OUTPOINTS = set()
 
 def spendable_outpoint_key(tx_hash, index):
@@ -2855,6 +2951,12 @@ def ensure_ckb_tx_measure_bin():
     tx_measure_bin = tx_measure_target / "debug" / "cellscript-ckb-tx-measure"
     if tx_measure_bin.exists():
         return tx_measure_bin
+    cargo_env = os.environ.copy()
+    toolchain_file = ckb_repo / "rust-toolchain.toml"
+    if toolchain_file.exists():
+        match = re.search(r'channel\s*=\s*"([^"]+)"', toolchain_file.read_text(encoding="utf-8"))
+        if match:
+            cargo_env["RUSTUP_TOOLCHAIN"] = match.group(1)
     helper_root.mkdir(parents=True, exist_ok=True)
     source_bin = repo_root / "src" / "bin" / "ckb_tx_measure.rs"
     lock_src = repo_root / "tools" / "ckb-tx-measure" / "Cargo.lock"
@@ -2884,6 +2986,17 @@ serde_json = "1.0"
     subprocess.run(
         [
             "cargo",
+            "generate-lockfile",
+            "--manifest-path",
+            str(tx_measure_manifest),
+        ],
+        check=True,
+        cwd=helper_root,
+        env=cargo_env,
+    )
+    subprocess.run(
+        [
+            "cargo",
             "build",
             "--locked",
             "--manifest-path",
@@ -2893,6 +3006,7 @@ serde_json = "1.0"
         ],
         check=True,
         cwd=helper_root,
+        env=cargo_env,
     )
     if not tx_measure_bin.exists():
         raise RuntimeError(f"ckb tx measure helper was not built at {tx_measure_bin}")
@@ -4607,6 +4721,8 @@ def run_vesting_action(action_record, always_success_dep):
     valid_tx = vesting_case["valid_tx"]
     malformed_tx = vesting_case["malformed_tx"]
     result["builder_name"] = vesting_case["builder_name"]
+    if vesting_case.get("timepoint_header") is not None:
+        result["timepoint_header"] = vesting_case["timepoint_header"]
     malformed_rejection = expect_dry_run_rejected(
         malformed_tx,
         f"{name} malformed action transaction",
@@ -4634,6 +4750,7 @@ def run_vesting_action(action_record, always_success_dep):
 
 def build_vesting_action_case(action_record, cellscript_lock, admin_lock, config_type, admin, symbol, cliff_period, total_period, revocable, cell_deps):
     action = action_record["action"]
+    timepoint_header = None
 
     if action == "create_vesting_config":
         initial = create_script_locked_cells(
@@ -4711,11 +4828,12 @@ def build_vesting_action_case(action_record, cellscript_lock, admin_lock, config
         token_type = always_success_lock("0x45")
         total_amount = 100
         claimed_amount = 20
+        timepoint_header = wait_header_epoch_at_least(1)
         claimable = total_amount - claimed_amount
         grant_timepoint = 0
         cliff_timepoint = 0
-        end_timepoint = 0
-        header_dep = get_block_by_number(0)["header"]["hash"]
+        end_timepoint = timepoint_header["epoch_number"]
+        header_dep = timepoint_header["hash"]
         initial = create_script_locked_cells(
             "vesting.claim_vested",
             [{"capacity": 500 * 100_000_000, "lock": beneficiary_lock, "type": grant_type, "data": vesting_grant_data(1, beneficiary, total_amount, claimed_amount, grant_timepoint, cliff_timepoint, end_timepoint, symbol)}],
@@ -4757,12 +4875,13 @@ def build_vesting_action_case(action_record, cellscript_lock, admin_lock, config
         token_type = always_success_lock("0x45")
         total_amount = 100
         claimed_amount = 20
-        unclaimed_vested = total_amount - claimed_amount
-        unvested = 0
+        timepoint_header = wait_header_epoch_at_least(1)
         grant_timepoint = 0
         cliff_timepoint = 0
-        end_timepoint = 0
-        header_dep = get_block_by_number(0)["header"]["hash"]
+        end_timepoint = timepoint_header["epoch_number"]
+        header_dep = timepoint_header["hash"]
+        unclaimed_vested = total_amount - claimed_amount
+        unvested = 0
         initial = create_script_locked_cells(
             "vesting.revoke_grant",
             [
@@ -4809,6 +4928,7 @@ def build_vesting_action_case(action_record, cellscript_lock, admin_lock, config
         "input_cells_to_check": input_cells_to_check,
         "valid_tx": valid_tx,
         "malformed_tx": malformed_tx,
+        "timepoint_header": timepoint_header,
     }
 
 def build_timelock_action_case(action_record, cellscript_lock, cellscript_type, owner, cell_deps):

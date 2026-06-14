@@ -1,0 +1,476 @@
+module novaseal::rwa_receipt_profile::v0;
+
+// Arthur Zhang, 2026.
+//
+// NovaSeal RWA Receipt Profile v0.
+//
+// This profile models a materialised receipt lifecycle for a real-world-asset
+// claim record. It deliberately uses integer units, immutable receipt events,
+// and explicit issuer/holder authority checks. It does not price assets,
+// evaluate external registries, or make off-chain legal claims.
+//
+// AUDIT BOUNDARY:
+// v0 is a CKB-side receipt lifecycle skeleton. Production readiness requires
+// live devnet lifecycle evidence, wallet signing vectors, external BIP340 TCB
+// review, and domain-specific legal/registry review outside this source file.
+
+const RWA_RECEIPT_VERSION: u16 = 0
+const U64_MAX: u64 = 18446744073709551615
+
+const OP_MATERIALIZE: u8 = 0
+const OP_CLAIM: u8 = 1
+const OP_SETTLE: u8 = 2
+
+const STATUS_MATERIALIZED: u8 = 1
+const STATUS_CLAIMED: u8 = 2
+const STATUS_SETTLED: u8 = 3
+
+struct SignaturePayload {
+    pubkey: [u8; 32],
+    signature: [u8; 64],
+}
+
+struct NovaSealCanonicalEnvelopeV0 {
+    profile_id: Hash,
+    policy_hash: Hash,
+    action: u8,
+    terminal_path: u8,
+    subject_id: Hash,
+    old_state_commitment: Hash,
+    new_state_commitment: Hash,
+    old_nonce: u64,
+    new_nonce: u64,
+    expiry: u64,
+    authority_hash: Hash,
+    profile_body_hash: Hash,
+    payout_commitment_hash: Hash,
+}
+
+struct NovaRwaReceiptIntentCoreV0 {
+    action: u8,
+    receipt_id: Hash,
+    registry_hash: Hash,
+    asset_commitment_hash: Hash,
+    document_hash: Hash,
+    issuer_authority_hash: Hash,
+    holder_authority_hash: Hash,
+    old_status: u8,
+    new_status: u8,
+    old_amount: u64,
+    settlement_amount: u64,
+    old_nonce: u64,
+    new_nonce: u64,
+    expiry: u64,
+    payout_commitment_hash: Hash,
+}
+
+struct NovaRwaReceiptSignedIntentV0 {
+    core: NovaRwaReceiptIntentCoreV0,
+    canonical_envelope_hash: Hash,
+    expected_receipt_hash: Hash,
+}
+
+struct NovaRwaReceiptStateCommitmentV0 {
+    version: u16,
+    receipt_id: Hash,
+    registry_hash: Hash,
+    asset_commitment_hash: Hash,
+    document_hash: Hash,
+    issuer_authority_hash: Hash,
+    holder_authority_hash: Hash,
+    amount: u64,
+    status: u8,
+    nonce: u64,
+    expiry: u64,
+}
+
+struct NovaRwaReceiptEventCommitmentV0 {
+    action: u8,
+    receipt_id: Hash,
+    registry_hash: Hash,
+    asset_commitment_hash: Hash,
+    document_hash: Hash,
+    issuer_authority_hash: Hash,
+    holder_authority_hash: Hash,
+    old_status: u8,
+    new_status: u8,
+    old_amount: u64,
+    settlement_amount: u64,
+    old_nonce: u64,
+    new_nonce: u64,
+    intent_core_hash: Hash,
+    payout_commitment_hash: Hash,
+}
+
+resource NovaRwaReceiptCellV0 has store, create, consume, replace {
+    version: u16,
+    receipt_id: Hash,
+    registry_hash: Hash,
+    asset_commitment_hash: Hash,
+    document_hash: Hash,
+    issuer_authority_hash: Hash,
+    holder_authority_hash: Hash,
+    amount: u64,
+    status: u8,
+    latest_receipt_hash: Hash,
+    nonce: u64,
+    expiry: u64,
+}
+
+receipt NovaRwaReceiptEventV0 has store, create, consume {
+    action: u8,
+    receipt_id: Hash,
+    registry_hash: Hash,
+    asset_commitment_hash: Hash,
+    document_hash: Hash,
+    issuer_authority_hash: Hash,
+    holder_authority_hash: Hash,
+    old_status: u8,
+    new_status: u8,
+    old_amount: u64,
+    settlement_amount: u64,
+    old_nonce: u64,
+    new_nonce: u64,
+    intent_core_hash: Hash,
+    signed_intent_hash: Hash,
+    payout_commitment_hash: Hash,
+    latest_receipt_hash: Hash,
+    signer_authority_hash: Hash,
+    expiry: u64,
+}
+
+action materialize_rwa_receipt(witness intent: NovaRwaReceiptSignedIntentV0, witness issuer_sig: SignaturePayload) -> (receipt_cell: NovaRwaReceiptCellV0, event: NovaRwaReceiptEventV0)
+where
+    let now = env::current_timepoint()
+    let intent_core_hash = hash_blake2b_packed(intent.core)
+    let signed_intent_hash = hash_blake2b_packed(intent)
+    let new_state_commitment = hash_blake2b_packed(NovaRwaReceiptStateCommitmentV0 {
+        version: RWA_RECEIPT_VERSION,
+        receipt_id: intent.core.receipt_id,
+        registry_hash: intent.core.registry_hash,
+        asset_commitment_hash: intent.core.asset_commitment_hash,
+        document_hash: intent.core.document_hash,
+        issuer_authority_hash: intent.core.issuer_authority_hash,
+        holder_authority_hash: intent.core.holder_authority_hash,
+        amount: intent.core.settlement_amount,
+        status: STATUS_MATERIALIZED,
+        nonce: 0,
+        expiry: intent.core.expiry
+    })
+    let event_commitment = NovaRwaReceiptEventCommitmentV0 {
+        action: OP_MATERIALIZE,
+        receipt_id: intent.core.receipt_id,
+        registry_hash: intent.core.registry_hash,
+        asset_commitment_hash: intent.core.asset_commitment_hash,
+        document_hash: intent.core.document_hash,
+        issuer_authority_hash: intent.core.issuer_authority_hash,
+        holder_authority_hash: intent.core.holder_authority_hash,
+        old_status: 0,
+        new_status: STATUS_MATERIALIZED,
+        old_amount: 0,
+        settlement_amount: intent.core.settlement_amount,
+        old_nonce: 0,
+        new_nonce: 0,
+        intent_core_hash: intent_core_hash,
+        payout_commitment_hash: intent.core.payout_commitment_hash
+    }
+    let materialized_receipt_hash = hash_blake2b_packed(event_commitment)
+    let canonical_envelope_hash = hash_blake2b_packed(NovaSealCanonicalEnvelopeV0 {
+        profile_id: intent.core.receipt_id,
+        policy_hash: intent.core.registry_hash,
+        action: OP_MATERIALIZE,
+        terminal_path: OP_MATERIALIZE,
+        subject_id: intent.core.receipt_id,
+        old_state_commitment: Hash::zero(),
+        new_state_commitment: new_state_commitment,
+        old_nonce: 0,
+        new_nonce: 0,
+        expiry: intent.core.expiry,
+        authority_hash: intent.core.issuer_authority_hash,
+        profile_body_hash: intent_core_hash,
+        payout_commitment_hash: intent.core.payout_commitment_hash
+    })
+
+    require intent.core.action == OP_MATERIALIZE
+    require intent.core.receipt_id != Hash::zero()
+    require intent.core.registry_hash != Hash::zero()
+    require intent.core.asset_commitment_hash != Hash::zero()
+    require intent.core.document_hash != Hash::zero()
+    require intent.core.issuer_authority_hash != Hash::zero()
+    require intent.core.holder_authority_hash != Hash::zero()
+    require intent.core.old_status == 0
+    require intent.core.new_status == STATUS_MATERIALIZED
+    require intent.core.old_amount == 0
+    require intent.core.settlement_amount > 0
+    require intent.core.old_nonce == 0
+    require intent.core.new_nonce == 0
+    require now <= intent.core.expiry
+    require intent.canonical_envelope_hash == canonical_envelope_hash
+    require intent.expected_receipt_hash == materialized_receipt_hash
+    require issuer_sig.pubkey == intent.core.issuer_authority_hash.0
+
+    verifier::btc::bip340::require_signature(signed_intent_hash, issuer_sig.pubkey, issuer_sig.signature)
+
+    create receipt_cell = NovaRwaReceiptCellV0 {
+        version: RWA_RECEIPT_VERSION,
+        receipt_id: intent.core.receipt_id,
+        registry_hash: intent.core.registry_hash,
+        asset_commitment_hash: intent.core.asset_commitment_hash,
+        document_hash: intent.core.document_hash,
+        issuer_authority_hash: intent.core.issuer_authority_hash,
+        holder_authority_hash: intent.core.holder_authority_hash,
+        amount: intent.core.settlement_amount,
+        status: STATUS_MATERIALIZED,
+        latest_receipt_hash: materialized_receipt_hash,
+        nonce: 0,
+        expiry: intent.core.expiry
+    }
+    create event = NovaRwaReceiptEventV0 {
+        action: OP_MATERIALIZE,
+        receipt_id: intent.core.receipt_id,
+        registry_hash: intent.core.registry_hash,
+        asset_commitment_hash: intent.core.asset_commitment_hash,
+        document_hash: intent.core.document_hash,
+        issuer_authority_hash: intent.core.issuer_authority_hash,
+        holder_authority_hash: intent.core.holder_authority_hash,
+        old_status: 0,
+        new_status: STATUS_MATERIALIZED,
+        old_amount: 0,
+        settlement_amount: intent.core.settlement_amount,
+        old_nonce: 0,
+        new_nonce: 0,
+        intent_core_hash: intent_core_hash,
+        signed_intent_hash: signed_intent_hash,
+        payout_commitment_hash: intent.core.payout_commitment_hash,
+        latest_receipt_hash: materialized_receipt_hash,
+        signer_authority_hash: intent.core.issuer_authority_hash,
+        expiry: intent.core.expiry
+    }
+
+action claim_rwa_receipt(old_cell: NovaRwaReceiptCellV0, witness intent: NovaRwaReceiptSignedIntentV0, witness holder_sig: SignaturePayload) -> (claimed_cell: NovaRwaReceiptCellV0, event: NovaRwaReceiptEventV0)
+where
+    let now = env::current_timepoint()
+    require old_cell.nonce < U64_MAX
+    let old_state_commitment = hash_blake2b_packed(NovaRwaReceiptStateCommitmentV0 {
+        version: old_cell.version,
+        receipt_id: old_cell.receipt_id,
+        registry_hash: old_cell.registry_hash,
+        asset_commitment_hash: old_cell.asset_commitment_hash,
+        document_hash: old_cell.document_hash,
+        issuer_authority_hash: old_cell.issuer_authority_hash,
+        holder_authority_hash: old_cell.holder_authority_hash,
+        amount: old_cell.amount,
+        status: old_cell.status,
+        nonce: old_cell.nonce,
+        expiry: old_cell.expiry
+    })
+    let new_state_commitment = hash_blake2b_packed(NovaRwaReceiptStateCommitmentV0 {
+        version: old_cell.version,
+        receipt_id: old_cell.receipt_id,
+        registry_hash: old_cell.registry_hash,
+        asset_commitment_hash: old_cell.asset_commitment_hash,
+        document_hash: old_cell.document_hash,
+        issuer_authority_hash: old_cell.issuer_authority_hash,
+        holder_authority_hash: old_cell.holder_authority_hash,
+        amount: old_cell.amount,
+        status: STATUS_CLAIMED,
+        nonce: old_cell.nonce + 1,
+        expiry: old_cell.expiry
+    })
+    let intent_core_hash = hash_blake2b_packed(intent.core)
+    let signed_intent_hash = hash_blake2b_packed(intent)
+    let event_commitment = NovaRwaReceiptEventCommitmentV0 {
+        action: OP_CLAIM,
+        receipt_id: old_cell.receipt_id,
+        registry_hash: old_cell.registry_hash,
+        asset_commitment_hash: old_cell.asset_commitment_hash,
+        document_hash: old_cell.document_hash,
+        issuer_authority_hash: old_cell.issuer_authority_hash,
+        holder_authority_hash: old_cell.holder_authority_hash,
+        old_status: STATUS_MATERIALIZED,
+        new_status: STATUS_CLAIMED,
+        old_amount: old_cell.amount,
+        settlement_amount: old_cell.amount,
+        old_nonce: old_cell.nonce,
+        new_nonce: old_cell.nonce + 1,
+        intent_core_hash: intent_core_hash,
+        payout_commitment_hash: intent.core.payout_commitment_hash
+    }
+    let materialized_receipt_hash = hash_blake2b_packed(event_commitment)
+    let canonical_envelope_hash = hash_blake2b_packed(NovaSealCanonicalEnvelopeV0 {
+        profile_id: old_cell.receipt_id,
+        policy_hash: old_cell.registry_hash,
+        action: OP_CLAIM,
+        terminal_path: OP_CLAIM,
+        subject_id: old_cell.receipt_id,
+        old_state_commitment: old_state_commitment,
+        new_state_commitment: new_state_commitment,
+        old_nonce: old_cell.nonce,
+        new_nonce: old_cell.nonce + 1,
+        expiry: old_cell.expiry,
+        authority_hash: old_cell.holder_authority_hash,
+        profile_body_hash: intent_core_hash,
+        payout_commitment_hash: intent.core.payout_commitment_hash
+    })
+
+    require old_cell.version == RWA_RECEIPT_VERSION
+    require old_cell.status == STATUS_MATERIALIZED
+    require old_cell.amount > 0
+    require now <= old_cell.expiry
+    require intent.core.action == OP_CLAIM
+    require intent.core.receipt_id == old_cell.receipt_id
+    require intent.core.registry_hash == old_cell.registry_hash
+    require intent.core.asset_commitment_hash == old_cell.asset_commitment_hash
+    require intent.core.document_hash == old_cell.document_hash
+    require intent.core.issuer_authority_hash == old_cell.issuer_authority_hash
+    require intent.core.holder_authority_hash == old_cell.holder_authority_hash
+    require intent.core.old_status == STATUS_MATERIALIZED
+    require intent.core.new_status == STATUS_CLAIMED
+    require intent.core.old_amount == old_cell.amount
+    require intent.core.settlement_amount == old_cell.amount
+    require intent.core.old_nonce == old_cell.nonce
+    require intent.core.new_nonce == old_cell.nonce + 1
+    require intent.core.expiry == old_cell.expiry
+    require intent.canonical_envelope_hash == canonical_envelope_hash
+    require intent.expected_receipt_hash == materialized_receipt_hash
+    require holder_sig.pubkey == old_cell.holder_authority_hash.0
+
+    verifier::btc::bip340::require_signature(signed_intent_hash, holder_sig.pubkey, holder_sig.signature)
+
+    create claimed_cell = NovaRwaReceiptCellV0 {
+        version: old_cell.version,
+        receipt_id: old_cell.receipt_id,
+        registry_hash: old_cell.registry_hash,
+        asset_commitment_hash: old_cell.asset_commitment_hash,
+        document_hash: old_cell.document_hash,
+        issuer_authority_hash: old_cell.issuer_authority_hash,
+        holder_authority_hash: old_cell.holder_authority_hash,
+        amount: old_cell.amount,
+        status: STATUS_CLAIMED,
+        latest_receipt_hash: materialized_receipt_hash,
+        nonce: old_cell.nonce + 1,
+        expiry: old_cell.expiry
+    }
+    create event = NovaRwaReceiptEventV0 {
+        action: OP_CLAIM,
+        receipt_id: old_cell.receipt_id,
+        registry_hash: old_cell.registry_hash,
+        asset_commitment_hash: old_cell.asset_commitment_hash,
+        document_hash: old_cell.document_hash,
+        issuer_authority_hash: old_cell.issuer_authority_hash,
+        holder_authority_hash: old_cell.holder_authority_hash,
+        old_status: STATUS_MATERIALIZED,
+        new_status: STATUS_CLAIMED,
+        old_amount: old_cell.amount,
+        settlement_amount: old_cell.amount,
+        old_nonce: old_cell.nonce,
+        new_nonce: old_cell.nonce + 1,
+        intent_core_hash: intent_core_hash,
+        signed_intent_hash: signed_intent_hash,
+        payout_commitment_hash: intent.core.payout_commitment_hash,
+        latest_receipt_hash: materialized_receipt_hash,
+        signer_authority_hash: old_cell.holder_authority_hash,
+        expiry: old_cell.expiry
+    }
+
+action settle_rwa_receipt(old_cell: NovaRwaReceiptCellV0, witness intent: NovaRwaReceiptSignedIntentV0, witness issuer_sig: SignaturePayload, witness holder_sig: SignaturePayload) -> event: NovaRwaReceiptEventV0
+where
+    let now = env::current_timepoint()
+    require old_cell.nonce < U64_MAX
+    let old_state_commitment = hash_blake2b_packed(NovaRwaReceiptStateCommitmentV0 {
+        version: old_cell.version,
+        receipt_id: old_cell.receipt_id,
+        registry_hash: old_cell.registry_hash,
+        asset_commitment_hash: old_cell.asset_commitment_hash,
+        document_hash: old_cell.document_hash,
+        issuer_authority_hash: old_cell.issuer_authority_hash,
+        holder_authority_hash: old_cell.holder_authority_hash,
+        amount: old_cell.amount,
+        status: old_cell.status,
+        nonce: old_cell.nonce,
+        expiry: old_cell.expiry
+    })
+    let intent_core_hash = hash_blake2b_packed(intent.core)
+    let signed_intent_hash = hash_blake2b_packed(intent)
+    let event_commitment = NovaRwaReceiptEventCommitmentV0 {
+        action: OP_SETTLE,
+        receipt_id: old_cell.receipt_id,
+        registry_hash: old_cell.registry_hash,
+        asset_commitment_hash: old_cell.asset_commitment_hash,
+        document_hash: old_cell.document_hash,
+        issuer_authority_hash: old_cell.issuer_authority_hash,
+        holder_authority_hash: old_cell.holder_authority_hash,
+        old_status: STATUS_CLAIMED,
+        new_status: STATUS_SETTLED,
+        old_amount: old_cell.amount,
+        settlement_amount: old_cell.amount,
+        old_nonce: old_cell.nonce,
+        new_nonce: old_cell.nonce + 1,
+        intent_core_hash: intent_core_hash,
+        payout_commitment_hash: intent.core.payout_commitment_hash
+    }
+    let materialized_receipt_hash = hash_blake2b_packed(event_commitment)
+    let canonical_envelope_hash = hash_blake2b_packed(NovaSealCanonicalEnvelopeV0 {
+        profile_id: old_cell.receipt_id,
+        policy_hash: old_cell.registry_hash,
+        action: OP_SETTLE,
+        terminal_path: OP_SETTLE,
+        subject_id: old_cell.receipt_id,
+        old_state_commitment: old_state_commitment,
+        new_state_commitment: Hash::zero(),
+        old_nonce: old_cell.nonce,
+        new_nonce: old_cell.nonce + 1,
+        expiry: old_cell.expiry,
+        authority_hash: old_cell.issuer_authority_hash,
+        profile_body_hash: intent_core_hash,
+        payout_commitment_hash: intent.core.payout_commitment_hash
+    })
+
+    require old_cell.version == RWA_RECEIPT_VERSION
+    require old_cell.status == STATUS_CLAIMED
+    require old_cell.amount > 0
+    require now <= old_cell.expiry
+    require intent.core.action == OP_SETTLE
+    require intent.core.receipt_id == old_cell.receipt_id
+    require intent.core.registry_hash == old_cell.registry_hash
+    require intent.core.asset_commitment_hash == old_cell.asset_commitment_hash
+    require intent.core.document_hash == old_cell.document_hash
+    require intent.core.issuer_authority_hash == old_cell.issuer_authority_hash
+    require intent.core.holder_authority_hash == old_cell.holder_authority_hash
+    require intent.core.old_status == STATUS_CLAIMED
+    require intent.core.new_status == STATUS_SETTLED
+    require intent.core.old_amount == old_cell.amount
+    require intent.core.settlement_amount == old_cell.amount
+    require intent.core.old_nonce == old_cell.nonce
+    require intent.core.new_nonce == old_cell.nonce + 1
+    require intent.core.expiry == old_cell.expiry
+    require intent.canonical_envelope_hash == canonical_envelope_hash
+    require intent.expected_receipt_hash == materialized_receipt_hash
+    require issuer_sig.pubkey == old_cell.issuer_authority_hash.0
+    require holder_sig.pubkey == old_cell.holder_authority_hash.0
+
+    verifier::btc::bip340::require_signature(signed_intent_hash, issuer_sig.pubkey, issuer_sig.signature)
+    verifier::btc::bip340::require_signature(signed_intent_hash, holder_sig.pubkey, holder_sig.signature)
+
+    consume old_cell
+    create event = NovaRwaReceiptEventV0 {
+        action: OP_SETTLE,
+        receipt_id: old_cell.receipt_id,
+        registry_hash: old_cell.registry_hash,
+        asset_commitment_hash: old_cell.asset_commitment_hash,
+        document_hash: old_cell.document_hash,
+        issuer_authority_hash: old_cell.issuer_authority_hash,
+        holder_authority_hash: old_cell.holder_authority_hash,
+        old_status: STATUS_CLAIMED,
+        new_status: STATUS_SETTLED,
+        old_amount: old_cell.amount,
+        settlement_amount: old_cell.amount,
+        old_nonce: old_cell.nonce,
+        new_nonce: old_cell.nonce + 1,
+        intent_core_hash: intent_core_hash,
+        signed_intent_hash: signed_intent_hash,
+        payout_commitment_hash: intent.core.payout_commitment_hash,
+        latest_receipt_hash: materialized_receipt_hash,
+        signer_authority_hash: old_cell.issuer_authority_hash,
+        expiry: old_cell.expiry
+    }

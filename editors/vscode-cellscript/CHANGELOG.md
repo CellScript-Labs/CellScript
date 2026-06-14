@@ -14,6 +14,9 @@
 - Kept the extension aligned with `cellc --lsp` while the compiler adds the
   v0.16 assurance surface: ProofPlan soundness, builder assumptions, transaction
   template reports, deployment reports, and audit bundle metadata.
+- Added active-file commands for `cellc explain-assumptions`, `solve-tx`,
+  `deploy-plan`, `profile`, and `audit-bundle` so the editor command surface
+  matches the 0.16 freeze tooling.
 - Refreshed README wording for the current 0.16 authoring surface.
 - Validated the package against the 0.16 crate version and release manifest.
 
