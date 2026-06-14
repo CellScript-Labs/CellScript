@@ -2543,7 +2543,7 @@ fn fiber_node_execution_summary(repo_root: &Path, report: Option<&Value>) -> Val
     let fiber_repo_path = json_pointer_str(report, "/fiber_repo/path").map(Path::new);
     let fiber_repo_exists = fiber_repo_path.is_some_and(Path::is_dir);
     let fiber_repo_git = fiber_repo_git_provenance(fiber_repo_path, report);
-    let fiber_repo_git_verified = json_pointer_bool(&fiber_repo_git, "/verified");
+    let fiber_repo_current_checkout_matches_report = json_pointer_bool(&fiber_repo_git, "/verified");
 
     let mut workflow_checks = Map::new();
     let mut failed_workflows = Vec::new();
@@ -2619,13 +2619,11 @@ fn fiber_node_execution_summary(repo_root: &Path, report: Option<&Value>) -> Val
     let profiles_covered = json_array_strings(report, "/profiles_covered");
     let schema_ok = json_pointer_str(report, "/schema") == Some(EXPECTED_FIBER_NODE_EXECUTION_SCHEMA);
     let status_passed = json_pointer_str(report, "/status") == Some("passed");
-    let clean_expected_repo = fiber_repo_exists
-        && fiber_repo_git_verified
-        && json_pointer_str(report, "/fiber_repo/origin") == Some(EXPECTED_FIBER_REPO_ORIGIN)
+    let recorded_fiber_repo_provenance_verified = json_pointer_str(report, "/fiber_repo/origin") == Some(EXPECTED_FIBER_REPO_ORIGIN)
         && json_pointer_str(report, "/fiber_repo/branch").is_some_and(|branch| !branch.is_empty())
-        && json_pointer_str(report, "/fiber_repo/commit")
-            .is_some_and(|commit| commit.len() == 40 && commit.chars().all(|char| char.is_ascii_hexdigit()))
+        && json_pointer_str(report, "/fiber_repo/commit").is_some_and(is_git_commit_hash)
         && !json_pointer_bool(report, "/fiber_repo/dirty");
+    let clean_expected_repo = fiber_repo_exists && recorded_fiber_repo_provenance_verified;
     let required_count = json_pointer_i64(report, "/workflow_coverage/required_count");
     let present_count = json_pointer_i64(report, "/workflow_coverage/present_count");
     let executed_count = json_pointer_i64(report, "/workflow_coverage/executed_count");
@@ -2658,7 +2656,8 @@ fn fiber_node_execution_summary(repo_root: &Path, report: Option<&Value>) -> Val
         "status_passed": status_passed,
         "clean_expected_fiber_repo": clean_expected_repo,
         "fiber_repo_exists": fiber_repo_exists,
-        "fiber_repo_git_provenance_verified": fiber_repo_git_verified,
+        "fiber_repo_git_provenance_verified": recorded_fiber_repo_provenance_verified,
+        "fiber_repo_current_checkout_matches_report": fiber_repo_current_checkout_matches_report,
         "runnable_devnet_contract_present": runnable_devnet_contract_present,
         "coverage_counts_exact": count_contract_exact,
         "reported_partial_execution_semantics": reported_partial_execution_semantics,
@@ -2713,7 +2712,7 @@ fn external_endpoint_coverage_summary(
     let public_btc_spv_passed = public_btc_spv_status == "passed";
     let public_btc_spv_external_required = public_btc_spv_status == "external_required";
     let fiber_ckb_lifecycle_passed = json_pointer_bool(live_fiber_candidate, "/required_live_checks_passed");
-    let fiber_git_provenance_verified = json_pointer_bool(fiber_node_experiments, "/fiber_repo_git_provenance/verified");
+    let fiber_git_provenance_verified = json_pointer_bool(fiber_node_experiments, "/checks/fiber_repo_git_provenance_verified");
     let fiber_node_workflows_passed =
         json_pointer_bool(fiber_node_experiments, "/all_required_workflows_executed_passed") && fiber_git_provenance_verified;
 
@@ -11939,6 +11938,7 @@ mod tests {
         assert!(json_pointer_bool(&passed, "/checks/profiles_covered_exact"));
         assert!(json_pointer_bool(&passed, "/checks/fiber_repo_exists"));
         assert!(json_pointer_bool(&passed, "/checks/fiber_repo_git_provenance_verified"));
+        assert!(json_pointer_bool(&passed, "/checks/fiber_repo_current_checkout_matches_report"));
         assert!(json_pointer_bool(&passed, "/fiber_repo_git_provenance/checks/origin_matches_report"));
         assert!(json_pointer_bool(&passed, "/fiber_repo_git_provenance/checks/commit_matches_report"));
         assert!(json_pointer_bool(&passed, "/fiber_repo_git_provenance/checks/clean_tree"));
@@ -11950,6 +11950,19 @@ mod tests {
         assert!(json_pointer_bool(&passed, "/workflow_checks/open-use-close-a-channel/execution_duration_positive"));
         assert!(json_pointer_bool(&passed, "/workflow_checks/cross-chain-hub/bruno_compatibility_patch_files_exist"));
         assert!(json_pointer_bool(&passed, "/checks/reported_partial_execution_semantics"));
+
+        let drift_fiber_repo = temp.path().join("fiber-drift");
+        std::fs::create_dir_all(&drift_fiber_repo).unwrap();
+        let archived_report = complete_fiber_node_execution_report(&repo_root, &drift_fiber_repo);
+        std::fs::write(drift_fiber_repo.join("post-run-change.txt"), "checkout advanced after archived run\n").unwrap();
+        run_fixture_git(&drift_fiber_repo, &["add", "post-run-change.txt"]);
+        run_fixture_git_with_identity(&drift_fiber_repo, &["commit", "-m", "advance checkout after archived run"]);
+        let drifted_checkout = fiber_node_execution_summary(&repo_root, Some(&archived_report));
+        assert!(json_pointer_bool(&drifted_checkout, "/all_required_workflows_executed_passed"));
+        assert!(json_pointer_bool(&drifted_checkout, "/checks/fiber_repo_git_provenance_verified"));
+        assert!(!json_pointer_bool(&drifted_checkout, "/checks/fiber_repo_current_checkout_matches_report"));
+        assert!(!json_pointer_bool(&drifted_checkout, "/fiber_repo_git_provenance/verified"));
+        assert!(!json_pointer_bool(&drifted_checkout, "/fiber_repo_git_provenance/checks/commit_matches_report"));
 
         let mut contradictory_partial = complete_fiber_node_execution_report(&repo_root, &fiber_repo);
         contradictory_partial["workflow_coverage"]["partial_execution_passed"] = json!(true);
@@ -11984,7 +11997,11 @@ mod tests {
         forged_commit["fiber_repo"]["commit"] = json!("0123456789abcdef0123456789abcdef01234567");
         let failed_forged_commit = fiber_node_execution_summary(&repo_root, Some(&forged_commit));
         assert!(!json_pointer_bool(&failed_forged_commit, "/all_required_workflows_executed_passed"));
-        assert!(!json_pointer_bool(&failed_forged_commit, "/checks/fiber_repo_git_provenance_verified"));
+        assert!(json_pointer_bool(&failed_forged_commit, "/checks/fiber_repo_git_provenance_verified"));
+        assert!(!json_pointer_bool(
+            &failed_forged_commit,
+            "/workflow_checks/open-use-close-a-channel/execution_fiber_repo_matches_report"
+        ));
         assert!(!json_pointer_bool(&failed_forged_commit, "/fiber_repo_git_provenance/checks/commit_matches_report"));
 
         let mut stale_execution_commit = complete_fiber_node_execution_report(&repo_root, &fiber_repo);
@@ -12122,6 +12139,9 @@ mod tests {
         let ckb_live = json!({"required_live_checks_passed": true});
         let fiber = json!({
             "all_required_workflows_executed_passed": true,
+            "checks": {
+                "fiber_repo_git_provenance_verified": true,
+            },
             "workflow_coverage": {
                 "all_required_workflows_executed": true,
                 "all_required_workflows_executed_passed": true,
@@ -12161,7 +12181,7 @@ mod tests {
         assert!(!json_pointer_bool(&failed_local_btc, "/production_complete"));
 
         let mut missing_fiber_provenance = fiber;
-        missing_fiber_provenance.as_object_mut().unwrap().remove("fiber_repo_git_provenance");
+        missing_fiber_provenance["checks"]["fiber_repo_git_provenance_verified"] = Value::Bool(false);
         let failed_fiber =
             external_endpoint_coverage_summary(&btc_missing, &missing_fiber_provenance, &ckb_live, &ckb_live, &ckb_live, &ckb_live);
         assert_eq!(json_pointer_str(&failed_fiber, "/fiber/status"), Some("failed"));
