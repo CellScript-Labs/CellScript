@@ -2966,7 +2966,7 @@ def ensure_ckb_tx_measure_bin():
 name = "cellscript-ckb-tx-measure"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.85.0"
+rust-version = "1.92.0"
 publish = false
 
 [workspace]
