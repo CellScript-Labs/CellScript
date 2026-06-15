@@ -230,7 +230,7 @@ Detailed evidence docs:
 
 Detailed docs:
 
-- [GitHub Wiki](https://github.com/tsukifune-kosei/CellScript/wiki)
+- [GitHub Wiki](https://github.com/a19q3/CellScript/wiki)
 - [0.13.2 release notes](CELLSCRIPT_0_13_2_RELEASE_NOTES.md)
 
 ## Explicit Non-Goals
