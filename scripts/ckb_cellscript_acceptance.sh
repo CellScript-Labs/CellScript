@@ -1405,6 +1405,7 @@ where
     assert_invariant(initial_mint <= max_supply, "initial exceeds max")
     assert_invariant(pool_seed_amount > 0, "zero pool seed")
     assert_invariant(pool_paired_token.amount > 0, "zero paired seed")
+    assert_invariant(symbol != pool_paired_token.symbol, "same token")
     assert_invariant(fee_rate_bps <= 10000, "fee too high")
     assert_invariant(pool_seed_amount <= initial_mint, "pool seed exceeds mint")
     assert_invariant(distribution[1].1 <= U64_MAX - distribution[0].1, "distribution overflow")
@@ -3306,7 +3307,7 @@ def submit_code_cell_deploy_with_fresh_funding(
             }
         except RuntimeError as error:
             last_error = error
-            if attempt < max_attempts and is_transient_dead_outpoint_error(error):
+            if is_transient_dead_outpoint_error(error):
                 continue
             raise
     raise RuntimeError(f"{name} {label_suffix} failed after {max_attempts} attempts: {last_error}")
@@ -3493,7 +3494,7 @@ def create_script_locked_cells(label, cells, cell_deps, max_attempts=4):
             break
         except RuntimeError as error:
             last_error = error
-            if attempt < max_attempts and is_transient_dead_outpoint_error(error):
+            if is_transient_dead_outpoint_error(error):
                 continue
             raise
     else:
