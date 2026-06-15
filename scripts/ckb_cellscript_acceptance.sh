@@ -447,8 +447,8 @@ resource MintAuthority has store {
 """
 
 TOKEN_ACTION_SOURCES = {
-    "mint": """
-action mint(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after: MintAuthority, token: Token)
+    "mint_with_authority": """
+action mint_with_authority(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after: MintAuthority, token: Token)
 where
     assert_invariant(auth_before.minted + amount <= auth_before.max_supply, "exceeds max supply")
 
@@ -1432,8 +1432,8 @@ where
     let remaining = initial_mint - dist_total - pool_seed_amount
     create change = Token { amount: remaining, symbol: symbol } with_lock(creator)
 """,
-    "simple_launch": """
-action simple_launch(symbol: [u8; 8], max_supply: u64, initial_mint: u64, creator: Address, recipients: [(Address, u64); 2]) -> (auth: MintAuthority, rec0: Token, rec1: Token, change: Token)
+    "bootstrap_token": """
+action bootstrap_token(symbol: [u8; 8], max_supply: u64, initial_mint: u64, creator: Address, recipients: [(Address, u64); 2]) -> (auth: MintAuthority, rec0: Token, rec1: Token, change: Token)
 where
     assert_invariant(initial_mint <= max_supply, "initial exceeds max")
     assert_invariant(recipients[1].1 <= U64_MAX - recipients[0].1, "distribution overflow")
@@ -1493,8 +1493,9 @@ ORIGINAL_SCOPED_ACTIONS = {
         "cancel_proposal",
     ],
     "vesting.cell": ["create_vesting_config", "grant_vesting", "claim_vested", "revoke_grant"],
-    "amm_pool.cell": ["seed_pool", "isqrt", "min"],
-    "launch.cell": ["simple_launch"],
+    "token.cell": ["mint_with_authority", "transfer_token", "burn", "merge"],
+    "amm_pool.cell": ["seed_pool", "swap_a_for_b", "add_liquidity", "remove_liquidity", "isqrt", "min"],
+    "launch.cell": ["launch_token", "bootstrap_token"],
 }
 
 ORIGINAL_SCOPED_LOCKS = {
@@ -1504,16 +1505,12 @@ ORIGINAL_SCOPED_LOCKS = {
     "vesting.cell": ["vesting_admin"],
 }
 
-ORIGINAL_SCOPED_ACTION_FAIL_CLOSED = {
-    "token.cell": ["mint", "transfer_token", "burn", "merge"],
-    "amm_pool.cell": ["swap_a_for_b", "add_liquidity", "remove_liquidity"],
-    "launch.cell": ["launch_token"],
-}
+ORIGINAL_SCOPED_ACTION_FAIL_CLOSED = {}
 
 ORIGINAL_SCOPED_LOCK_FAIL_CLOSED = {}
 
 EXPECTED_SOURCE_ACTIONS = {
-    "token.cell": ["mint", "transfer_token", "burn", "merge"],
+    "token.cell": ["mint_with_authority", "transfer_token", "burn", "merge"],
     "nft.cell": [
         "mint",
         "transfer",
@@ -1549,7 +1546,7 @@ EXPECTED_SOURCE_ACTIONS = {
     ],
     "vesting.cell": ["create_vesting_config", "grant_vesting", "claim_vested", "revoke_grant"],
     "amm_pool.cell": ["seed_pool", "swap_a_for_b", "add_liquidity", "remove_liquidity", "isqrt", "min"],
-    "launch.cell": ["launch_token", "simple_launch"],
+    "launch.cell": ["launch_token", "bootstrap_token"],
 }
 
 EXPECTED_SOURCE_LOCKS = {
@@ -1569,7 +1566,7 @@ CKB_ONCHAIN_ACTION_HARNESSES = {
     "multisig.cell": list(MULTISIG_ACTION_SOURCES.keys()),
     "vesting.cell": ["create_vesting_config", "grant_vesting", "claim_vested", "revoke_grant"],
     "amm_pool.cell": list(AMM_ACTION_SOURCES.keys()),
-    "launch.cell": ["launch_token", "simple_launch"],
+    "launch.cell": ["launch_token", "bootstrap_token"],
 }
 
 def clipped(text):
@@ -3246,7 +3243,12 @@ def assert_live(tx_hash, index, label):
 
 def is_transient_dead_outpoint_error(error):
     message = str(error)
-    return "Resolve failed Dead(OutPoint" in message or "Dead(OutPoint" in message
+    return (
+        "Resolve failed Dead(OutPoint" in message
+        or "Dead(OutPoint" in message
+        or "Resolve failed Unknown(OutPoint" in message
+        or "Unknown(OutPoint" in message
+    )
 
 def code_cell_deploy_transaction(deploy_input, artifact, always_success_dep):
     return transaction(
@@ -3450,24 +3452,35 @@ def deploy_code_cell(name, artifact_path, always_success_dep):
         "deploy_attempts": deploy["deploy_attempts"],
     }
 
-def create_script_locked_cells(label, cells, cell_deps):
+def create_script_locked_cells(label, cells, cell_deps, max_attempts=4):
     total_capacity = sum(cell["capacity"] for cell in cells)
     create_fee_capacity = 10 * 100_000_000
-    funding = collect_spendable_cellbases(total_capacity + create_fee_capacity)
-    tx = transaction(
-        funding,
-        [
-            {
-                "capacity": hex_u64(cell["capacity"]),
-                "lock": cell["lock"],
-                "type": cell.get("type"),
-            }
-            for cell in cells
-        ],
-        ["0x" + cell.get("data", b"").hex() for cell in cells],
-        cell_deps,
-    )
-    result = submit_and_commit(tx, f"{label} input-cell create")
+    last_error = None
+    for attempt in range(1, max_attempts + 1):
+        funding = collect_spendable_cellbases(total_capacity + create_fee_capacity)
+        tx = transaction(
+            funding,
+            [
+                {
+                    "capacity": hex_u64(cell["capacity"]),
+                    "lock": cell["lock"],
+                    "type": cell.get("type"),
+                }
+                for cell in cells
+            ],
+            ["0x" + cell.get("data", b"").hex() for cell in cells],
+            cell_deps,
+        )
+        try:
+            result = submit_and_commit(tx, f"{label} input-cell create")
+            break
+        except RuntimeError as error:
+            last_error = error
+            if attempt < max_attempts and is_transient_dead_outpoint_error(error):
+                continue
+            raise
+    else:
+        raise RuntimeError(f"{label} input-cell create failed after {max_attempts} attempts: {last_error}")
     live = [assert_live(result["tx_hash"], index, f"{label} input cell {index}").get("status") == "live" for index in range(len(cells))]
     return {
         "create_input": funding,
@@ -3750,7 +3763,7 @@ def build_token_action_case(action, cellscript_lock, cellscript_type, destinatio
             for output in outputs
         ]
 
-    if action == "mint":
+    if action == "mint_with_authority":
         initial_specs = [
             {
                 "capacity": 1000 * 100_000_000,
@@ -4646,7 +4659,7 @@ def build_multisig_action_case(action_record, cellscript_lock, wallet_type, prop
 def run_launch_action(action_record, always_success_dep):
     action = action_record["action"]
     name = action_record["name"]
-    if action != "simple_launch":
+    if action != "bootstrap_token":
         if action != "launch_token":
             raise RuntimeError(f"unsupported launch action harness: {action}")
     code = deploy_code_cell(name, action_record["artifact"], always_success_dep)
@@ -4767,7 +4780,7 @@ def build_launch_action_case(action_record, cellscript_lock, auth_type, token_ty
         malformed_tx = transaction(input_cell, outputs, malformed_outputs_data, cell_deps, [witness])
     else:
         initial = create_script_locked_cells(
-            "launch.simple_launch",
+            "launch.bootstrap_token",
             [{"capacity": 4000 * 100_000_000, "lock": cellscript_lock, "type": None, "data": b""}],
             cell_deps,
         )
@@ -5634,10 +5647,10 @@ def run_stateful_action_branch_coverage(always_success_dep, required_records, al
     return branch_runs
 
 def run_stateful_token_lifecycle(always_success_dep):
-    scenario = "token.mint-transfer-mint-merge-burn"
+    scenario = "token.mint-with-authority-transfer-mint-with-authority-merge-burn"
     actions = {
         name: deploy_stateful_action(action_record_by(token_action_artifacts, name), always_success_dep)
-        for name in ("mint", "transfer_token", "merge", "burn")
+        for name in ("mint_with_authority", "transfer_token", "merge", "burn")
     }
     token_type = always_success_lock("0xa1")
     token_symbol = b"STATE001"
@@ -5647,24 +5660,24 @@ def run_stateful_token_lifecycle(always_success_dep):
         "stateful.token.auth",
         [{
             "capacity": 700 * 100_000_000,
-            "lock": actions["mint"]["lock"],
+            "lock": actions["mint_with_authority"]["lock"],
             "type": token_type,
             "data": mint_authority_data(token_symbol, 1000, 0),
         }],
-        actions["mint"]["cell_deps"],
+        actions["mint_with_authority"]["cell_deps"],
     )
     auth0 = initial["cells"][0]
     tx1 = transaction(
         auth0,
         [
-            {"capacity": hex_u64(600 * 100_000_000), "lock": actions["mint"]["lock"], "type": token_type},
+            {"capacity": hex_u64(600 * 100_000_000), "lock": actions["mint_with_authority"]["lock"], "type": token_type},
             {"capacity": hex_u64(100 * 100_000_000), "lock": actions["transfer_token"]["lock"], "type": token_type},
         ],
         [
             "0x" + mint_authority_data(token_symbol, 1000, 5).hex(),
             "0x" + token_data(5, token_symbol).hex(),
         ],
-        actions["mint"]["cell_deps"],
+        actions["mint_with_authority"]["cell_deps"],
         [entry_witness(actions["transfer_token"]["lock_hash"], 5)],
     )
     step = run_stateful_step(scenario, "mint_first_token_to_transfer", tx1, [auth0])
@@ -5686,14 +5699,14 @@ def run_stateful_token_lifecycle(always_success_dep):
     tx3 = transaction(
         auth1,
         [
-            {"capacity": hex_u64(500 * 100_000_000), "lock": actions["mint"]["lock"], "type": token_type},
+            {"capacity": hex_u64(500 * 100_000_000), "lock": actions["mint_with_authority"]["lock"], "type": token_type},
             {"capacity": hex_u64(100 * 100_000_000), "lock": actions["merge"]["lock"], "type": token_type},
         ],
         [
             "0x" + mint_authority_data(token_symbol, 1000, 12).hex(),
             "0x" + token_data(7, token_symbol).hex(),
         ],
-        actions["mint"]["cell_deps"],
+        actions["mint_with_authority"]["cell_deps"],
         [entry_witness(actions["merge"]["lock_hash"], 7)],
     )
     step = run_stateful_step(scenario, "mint_second_token_to_merge", tx3, [auth1])
@@ -5942,10 +5955,10 @@ def run_stateful_nft_listing_sale(always_success_dep):
     }
 
 def run_stateful_launch_to_token_mint(always_success_dep):
-    scenario = "launch.launch-token-then-mint"
+    scenario = "launch.launch-token-then-mint-with-authority"
     launch = deploy_stateful_action(action_record_by(launch_action_artifacts, "launch_token"), always_success_dep)
-    mint = deploy_stateful_action(action_record_by(token_action_artifacts, "mint"), always_success_dep)
-    actions = {"launch_token": launch, "mint": mint}
+    mint = deploy_stateful_action(action_record_by(token_action_artifacts, "mint_with_authority"), always_success_dep)
+    actions = {"launch_token": launch, "mint_with_authority": mint}
     auth_type = always_success_lock("0x91")
     token_type = always_success_lock("0x92")
     pool_paired_type = always_success_lock("0x93")
@@ -6020,7 +6033,7 @@ def run_stateful_launch_to_token_mint(always_success_dep):
         mint["cell_deps"],
         [entry_witness(to, extra_mint)],
     )
-    step = run_stateful_step(scenario, "mint_again_from_launched_authority", tx2, [auth_for_mint])
+    step = run_stateful_step(scenario, "mint_with_authority_again_from_launched_authority", tx2, [auth_for_mint])
     steps.append(step)
 
     return {
@@ -6538,7 +6551,7 @@ try:
     report["onchain"]["all_token_actions_exercised"] = sorted(report["onchain"]["token_actions_exercised"]) == [
         "burn",
         "merge",
-        "mint",
+        "mint_with_authority",
         "transfer_token",
     ]
     report["onchain"]["nft_actions_exercised"] = [run["action"] for run in report["onchain"]["nft_action_runs"]]
@@ -6596,7 +6609,7 @@ try:
     report["onchain"]["launch_actions_exercised"] = [run["action"] for run in report["onchain"]["launch_action_runs"]]
     report["onchain"]["all_launch_actions_exercised"] = report["onchain"]["launch_actions_exercised"] == [
         "launch_token",
-        "simple_launch",
+        "bootstrap_token",
     ]
     all_action_runs = (
         report["onchain"]["token_action_runs"]

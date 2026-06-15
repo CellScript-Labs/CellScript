@@ -11,12 +11,12 @@ output capacity, CellDeps, script refs, and both valid and invalid lock spends.
 ## Boundary
 
 `examples/token.cell` is the fungible-token state machine. It is not the genesis
-authority contract. Its `mint` action consumes an existing `MintAuthority` input
+authority contract. Its `mint_with_authority` action consumes an existing `MintAuthority` input
 Cell and creates the successor authority plus the minted `Token` output.
 
 The bundled bootstrap companion is `examples/launch.cell`:
 
-- `simple_launch` creates the first `MintAuthority` and token distribution
+- `bootstrap_token` creates the first `MintAuthority` and token distribution
   outputs.
 - `launch_token` creates the first `MintAuthority`, distribution token outputs,
   a pool seed token, a `Pool` output, and an `LPReceipt` output.
@@ -29,9 +29,9 @@ Cell exists.
 The practical bootstrap chain is:
 
 ```text
-launch.simple_launch or launch.launch_token
+launch.bootstrap_token or launch.launch_token
   -> MintAuthority output
-  -> token.mint
+  -> token.mint_with_authority
   -> Token outputs
   -> amm_pool.seed_pool, unless launch_token already materialised the Pool
   -> amm_pool.swap_a_for_b or another pool action
@@ -56,10 +56,10 @@ cellc examples/launch.cell \
   -o build/launch_token.elf
 
 cellc examples/token.cell \
-  --entry-action mint \
+  --entry-action mint_with_authority \
   --target riscv64-elf \
   --target-profile ckb \
-  -o build/token_mint.elf
+  -o build/token_mint_with_authority.elf
 
 cellc examples/amm_pool.cell \
   --entry-action swap_a_for_b \
@@ -82,7 +82,7 @@ Inspect the ABI first:
 
 ```bash
 cellc abi examples/launch.cell --target-profile ckb --action launch_token
-cellc abi examples/token.cell --target-profile ckb --action mint
+cellc abi examples/token.cell --target-profile ckb --action mint_with_authority
 cellc abi examples/amm_pool.cell --target-profile ckb --action seed_pool
 cellc abi examples/amm_pool.cell --target-profile ckb --action swap_a_for_b
 ```
@@ -92,7 +92,7 @@ The current payload parameters are:
 | Action | Payload parameters | Runtime-bound Cells |
 |---|---|---|
 | `launch_token` | `symbol`, `max_supply`, `initial_mint`, `pool_seed_amount`, `fee_rate_bps`, `creator`, `distribution` | `pool_paired_token` |
-| `mint` | `to`, `amount` | `auth_before` |
+| `mint_with_authority` | `to`, `amount` | `auth_before` |
 | `seed_pool` | `fee_rate_bps`, `provider` | `token_a`, `token_b` |
 | `swap_a_for_b` | `min_output`, `to` | `pool_before`, `input` |
 
@@ -112,7 +112,7 @@ cellc entry-witness examples/launch.cell \
 
 cellc entry-witness examples/token.cell \
   --target-profile ckb \
-  --action mint \
+  --action mint_with_authority \
   --arg 0x<32-byte-recipient-address> \
   --arg 25
 
@@ -168,10 +168,10 @@ particular, verify:
   accident;
 - lock scripts have positive and negative spend evidence.
 
-Strict v0.16 ProofPlan checks intentionally reject some aggregate and Pool
-obligations in the current examples. Use the explicit compatibility flag above
-when reproducing the current bundled-example metadata, and do not turn those
-reports into deployable production claims without the matching chain evidence.
+Strict v0.16 ProofPlan checks compile the bundled token, AMM, and launch
+actions as original scoped entries. Keep the chain evidence alongside that
+compile gate: valid and invalid builder-backed spends, measured cycles,
+transaction size, occupied capacity, capacity floors, CellDeps, and script refs.
 
 ## Local Dev Fixture
 
@@ -183,8 +183,8 @@ For repository acceptance, the stateful local-chain path already lives in:
 
 The relevant flows are:
 
-- launch-to-token-mint: a `launch.cell` output `MintAuthority` feeds
-  `token.cell::mint`;
+- launch-to-token-mint-with-authority: a `launch.cell` output `MintAuthority` feeds
+  `token.cell::mint_with_authority`;
 - AMM lifecycle: seed, add liquidity, swap, and remove liquidity operate on
   live `Pool`, `Token`, and `LPReceipt` Cells.
 
@@ -194,6 +194,7 @@ to keep `always_success` locks for pure locking scaffolding, but token Cells,
 Pool Cells, LP receipts, and the MintAuthority hand-off should be real
 CellScript typed Cells when testing this bootstrap sequence.
 
-The production gate is stricter than this local-dev fixture. It must remain
-fail-closed while the current `token.cell`, `amm_pool.cell`, and `launch.cell`
-strict v0.16 ProofPlan gaps and non-original action harnesses are still present.
+The production gate now exercises these flows with original scoped strict
+artifacts for `token.cell`, `amm_pool.cell`, and `launch.cell`; generated
+harnesses remain only as fallback coverage for examples that are not part of
+this bootstrap path.

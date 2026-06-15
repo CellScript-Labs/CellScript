@@ -56,7 +56,7 @@ and same-symbol merge flows.
 
 ```mermaid
 flowchart TD
-    A["MintAuthority input Cell"] --> B["mint"]
+    A["MintAuthority input Cell"] --> B["mint_with_authority"]
     B --> C["Check minted plus amount <= max_supply"]
     C --> D["Constrain MintAuthority output minted field"]
     D --> E["Create Token output Cell for recipient"]
@@ -79,7 +79,7 @@ flowchart TD
 CKB acceptance status: all four actions are builder-backed and run on-chain.
 There are no lock entries in this example.
 
-Bootstrap note: `mint` requires an existing `MintAuthority` input Cell. In the
+Bootstrap note: `mint_with_authority` requires an existing `MintAuthority` input Cell. In the
 bundled bootstrap path, that first authority is created by `launch.cell`;
 `token.cell` itself is not the genesis authority contract.
 
@@ -138,7 +138,7 @@ flowchart TD
     G --> H["Materialise Pool and LPReceipt outputs"]
     H --> I["Create Pool and LPReceipt outputs"]
 
-    J["Simple launch parameters"] --> K["simple_launch"]
+    J["Bootstrap token parameters"] --> K["bootstrap_token"]
     K --> L["Check initial mint and recipient totals"]
     L --> M["Create MintAuthority output Cell"]
     M --> N["Create recipient Token outputs"]

@@ -74,7 +74,7 @@ ACTION_RUN_KEYS = [
 ]
 
 EXPECTED_ACTIONS_BY_RUN_KEY = {
-    "token_action_runs": ["mint", "transfer_token", "burn", "merge"],
+    "token_action_runs": ["mint_with_authority", "transfer_token", "burn", "merge"],
     "nft_action_runs": [
         "mint",
         "transfer",
@@ -110,7 +110,7 @@ EXPECTED_ACTIONS_BY_RUN_KEY = {
     ],
     "vesting_action_runs": ["create_vesting_config", "grant_vesting", "claim_vested", "revoke_grant"],
     "amm_action_runs": ["seed_pool", "swap_a_for_b", "add_liquidity", "remove_liquidity", "isqrt", "min"],
-    "launch_action_runs": ["launch_token", "simple_launch"],
+    "launch_action_runs": ["launch_token", "bootstrap_token"],
 }
 
 

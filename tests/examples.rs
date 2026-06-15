@@ -3,7 +3,7 @@
 use camino::{Utf8Path, Utf8PathBuf};
 use cellscript::{
     codegen::{analyze_backend_shape, BackendShapeMetrics},
-    compile_file, compile_file_with_entry_action, ArtifactFormat, CompileOptions, PoolPrimitiveMetadata, ProofPlanMetadata,
+    compile_file, compile_file_with_entry_action, ArtifactFormat, CompileOptions, ProofPlanMetadata,
 };
 
 const BUNDLED_EXAMPLES: [&str; 7] =
@@ -385,11 +385,11 @@ fn token_amm_bootstrap_docs_cover_builder_friction_boundary() {
     let bootstrap_text = bootstrap.split_whitespace().collect::<Vec<_>>().join(" ");
     for needle in [
         "`examples/token.cell` is the fungible-token state machine. It is not the genesis authority contract",
-        "Its `mint` action consumes an existing `MintAuthority` input Cell",
+        "Its `mint_with_authority` action consumes an existing `MintAuthority` input Cell",
         "launch_token` materialises the Pool and LP receipt topology directly",
         "Do not rely on \"the first action runs on creation\" as a protocol rule",
         "Cell-bound inputs and outputs are transaction Cells, not witness payload args",
-        "Strict v0.16 ProofPlan checks intentionally reject some aggregate and Pool obligations",
+        "Strict v0.16 ProofPlan checks compile the bundled token, AMM, and launch actions as original scoped entries",
     ] {
         assert!(bootstrap_text.contains(needle), "bootstrap guide should contain `{needle}`");
     }
@@ -591,28 +591,6 @@ fn assert_with_regression_margin(example: &str, field: &str, actual: u64, baseli
         actual,
         baseline,
         margin
-    );
-}
-
-fn assert_pool_component(primitive: &PoolPrimitiveMetadata, component: &str, context: &str) {
-    assert!(
-        primitive.checked_components.iter().any(|candidate| candidate == component),
-        "{} should expose checked Pool component '{}': {:?}",
-        context,
-        component,
-        primitive.checked_components
-    );
-}
-
-fn assert_pool_invariant_family(primitive: &PoolPrimitiveMetadata, name: &str, status: &str, source: &str, context: &str) {
-    assert!(
-        primitive.invariant_families.iter().any(|family| family.name == name && family.status == status && family.source == source),
-        "{} should classify Pool invariant '{}' as {} from {}: {:?}",
-        context,
-        name,
-        status,
-        source,
-        primitive.invariant_families
     );
 }
 
@@ -1469,7 +1447,8 @@ fn vesting_phase2_remaining_obligations_are_explicit() {
 fn token_mint_authority_input_output_binding_is_explicit() {
     let result = compile_file(example_path("token.cell"), CompileOptions::default()).expect("token example should compile");
     let asm = String::from_utf8(result.artifact_bytes.clone()).expect("token asm should be utf8");
-    let mint = result.metadata.actions.iter().find(|action| action.name == "mint").expect("mint metadata");
+    let mint =
+        result.metadata.actions.iter().find(|action| action.name == "mint_with_authority").expect("mint_with_authority metadata");
 
     assert_eq!(mint.effect_class, "Mutating");
     assert_input_output_binding(mint, "MintAuthority", "auth_before", "auth_after", "token mint");
@@ -1819,9 +1798,18 @@ fn amm_pool_input_output_params_are_scheduler_visible() {
             action.fail_closed_runtime_features
         );
         assert!(
-            action.verifier_obligations.iter().any(|obligation| obligation.feature.starts_with("resource-conservation:Token")
-                || obligation.feature.starts_with("pool-create:Pool")),
-            "{} should retain AMM-specific runtime obligations separately from input/output binding: {:?}",
+            action.verifier_obligations.iter().all(|obligation| obligation.status != "runtime-required"),
+            "{} should be strict v0.16 clean with no runtime-required Pool or resource blockers: {:?}",
+            action_name,
+            action.verifier_obligations
+        );
+        assert!(
+            action.verifier_obligations.iter().any(|obligation| {
+                obligation.status == "checked-runtime"
+                    && (obligation.feature.starts_with("guard-equality:pool_after.")
+                        || obligation.feature.starts_with("resource-conservation:Token"))
+            }),
+            "{} should retain checked AMM accounting evidence separately from scheduler binding: {:?}",
             action_name,
             action.verifier_obligations
         );
@@ -1886,52 +1874,18 @@ fn launch_seed_pool_composition_is_scheduler_visible() {
         launch_token.fail_closed_runtime_features
     );
     assert!(
-        launch_token.verifier_obligations.iter().any(|obligation| {
-            obligation.category == "pool-pattern"
-                && obligation.feature == "pool-create:Pool"
-                && obligation.status == "runtime-required"
-        }),
-        "launch_token should report direct named Pool output creation obligations accurately: {:?}",
+        launch_token.verifier_obligations.iter().all(|obligation| obligation.status != "runtime-required"),
+        "launch_token should be strict v0.16 clean as an original scoped action: {:?}",
         launch_token.verifier_obligations
     );
-    let launch_pool_primitive = launch_token
-        .pool_primitives
-        .iter()
-        .find(|primitive| primitive.feature == "pool-create:Pool")
-        .expect("launch_token should expose structured Pool creation primitive metadata");
-    assert_eq!(launch_pool_primitive.operation, "create");
-    assert_eq!(launch_pool_primitive.status, "runtime-required");
-    assert_eq!(launch_pool_primitive.callee, None);
-    assert_eq!(launch_pool_primitive.binding.as_deref(), Some("pool"));
-    assert_eq!(launch_pool_primitive.source_invariant_count, 10);
-    assert_pool_component(launch_pool_primitive, "assert-invariant-cfg=10", "launch_token");
-    assert_pool_component(launch_pool_primitive, "source-invariant:source-guard-0=checked-runtime", "launch_token");
-    assert_pool_component(launch_pool_primitive, "source-invariant:source-guard-1=checked-runtime", "launch_token");
-    assert_pool_component(launch_pool_primitive, "source-invariant:source-guard-2=checked-runtime", "launch_token");
-    assert_pool_invariant_family(
-        launch_pool_primitive,
-        "token-pair-identity-admission",
-        "runtime-required",
-        "token-input-type-id-abi",
-        "launch_token",
-    );
-    assert_pool_invariant_family(
-        launch_pool_primitive,
-        "lp-supply-invariant",
-        "runtime-required",
-        "pool-protocol-admission",
-        "launch_token",
-    );
     assert!(
-        launch_pool_primitive.runtime_required_components.iter().any(|component| component == "token-pair-identity-admission")
-            && launch_pool_primitive.runtime_required_components.iter().any(|component| component == "lp-supply-invariant"),
-        "direct launch_token Pool creation should surface unresolved AMM admission components instead of claiming seed_pool equivalence: {:?}",
-        launch_pool_primitive.runtime_required_components
-    );
-    assert!(
-        launch_pool_primitive.runtime_input_requirements.is_empty(),
-        "runtime inputs should be discharged by launch/pool verifier metadata: {:?}",
-        launch_pool_primitive.runtime_input_requirements
+        launch_token.verifier_obligations.iter().any(|obligation| {
+            obligation.feature == "resource-conservation:Token"
+                && obligation.status == "checked-runtime"
+                && obligation.detail.contains("launch verifier checks")
+        }),
+        "launch_token should classify launch issuance and paired-token Pool accounting as checked: {:?}",
+        launch_token.verifier_obligations
     );
     assert!(
         asm.contains("# cellscript abi: verify output bytes field LPReceipt.pool_id offset=0 size=32 against loaded bytes"),
@@ -1944,34 +1898,35 @@ fn launch_seed_pool_composition_is_scheduler_visible() {
         asm
     );
 
-    let simple_launch = result.metadata.actions.iter().find(|action| action.name == "simple_launch").expect("simple_launch metadata");
+    let bootstrap_token =
+        result.metadata.actions.iter().find(|action| action.name == "bootstrap_token").expect("bootstrap_token metadata");
     assert!(
-        simple_launch.touches_shared.is_empty(),
-        "simple_launch does not compose Pool creation and should not inherit launch_token's shared touch"
+        bootstrap_token.touches_shared.is_empty(),
+        "bootstrap_token does not compose Pool creation and should not inherit launch_token's shared touch"
     );
-    let recipients = simple_launch.params.iter().find(|param| param.name == "recipients").expect("recipients param metadata");
+    let recipients = bootstrap_token.params.iter().find(|param| param.name == "recipients").expect("recipients param metadata");
     assert!(recipients.fixed_byte_pointer_abi);
     assert!(recipients.fixed_byte_length_abi);
     assert_eq!(recipients.fixed_byte_len, Some(80));
     assert!(
-        simple_launch.fail_closed_runtime_features.is_empty(),
-        "simple_launch fixed tuple-array distribution and recipient locks should be fully verifier-coverable: {:?}",
-        simple_launch.fail_closed_runtime_features
+        bootstrap_token.fail_closed_runtime_features.is_empty(),
+        "bootstrap_token fixed tuple-array distribution and recipient locks should be fully verifier-coverable: {:?}",
+        bootstrap_token.fail_closed_runtime_features
     );
     assert!(
         !asm.contains("schema field byte source is not addressable"),
-        "simple_launch recipient lock verification must compare fixed tuple-array address fields without fail-closed traps:\n{}",
+        "bootstrap_token recipient lock verification must compare fixed tuple-array address fields without fail-closed traps:\n{}",
         asm
     );
     assert!(
         !asm.contains("expression verifier temp stack is exhausted"),
-        "simple_launch remaining-output verifier must have enough expression temp slots for the fixed recipient sum:\n{}",
+        "bootstrap_token remaining-output verifier must have enough expression temp slots for the fixed recipient sum:\n{}",
         asm
     );
     assert!(
-        simple_launch.verifier_obligations.iter().all(|obligation| obligation.category != "pool-pattern"),
-        "simple_launch does not compose a Pool and should not inherit pool-pattern obligations: {:?}",
-        simple_launch.verifier_obligations
+        bootstrap_token.verifier_obligations.iter().all(|obligation| obligation.category != "pool-pattern"),
+        "bootstrap_token does not compose a Pool and should not inherit pool-pattern obligations: {:?}",
+        bootstrap_token.verifier_obligations
     );
 }
 
@@ -2116,24 +2071,16 @@ fn v0_15_identity_lifecycle_example_compiles_and_produces_proof_plan() {
 }
 
 #[test]
-fn token_cell_invariant_appears_in_proof_plan() {
-    let result =
-        compile_file(example_path("token.cell"), CompileOptions::default()).expect("token.cell with invariant should compile");
+fn token_cell_has_no_metadata_only_declared_invariant_debt() {
+    let result = compile_file(example_path("token.cell"), CompileOptions::default()).expect("token.cell should compile");
 
     let proof_plan = &result.metadata.runtime.proof_plan;
     assert!(!proof_plan.is_empty(), "token.cell must emit ProofPlan records");
 
-    // The declared invariant must appear alongside action obligations
-    let declared_invariant = proof_plan
-        .iter()
-        .find(|plan| plan.category == "declared-invariant")
-        .expect("token.cell must emit declared-invariant ProofPlan record");
-    assert_eq!(declared_invariant.name, "token_amount_non_increase");
-    assert_eq!(declared_invariant.trigger, "type_group");
-    assert_eq!(declared_invariant.scope, "group");
-    assert_eq!(declared_invariant.codegen_coverage_status, "gap:metadata-only");
-    assert_eq!(declared_invariant.status, "runtime-required");
-    assert!(!declared_invariant.on_chain_checked);
+    assert!(
+        proof_plan.iter().all(|plan| plan.category != "declared-invariant" && plan.codegen_coverage_status != "gap:metadata-only"),
+        "token.cell must not carry strict-blocking metadata-only declared invariant debt: {proof_plan:?}"
+    );
 
     // Action obligations must still be present
     let action_obligations =

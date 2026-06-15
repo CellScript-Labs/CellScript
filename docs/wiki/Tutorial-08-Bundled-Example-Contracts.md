@@ -67,10 +67,10 @@ done
 
 This is a compile pass, not a full CKB production claim. It is useful while
 learning because it shows that the examples fit the compiler and CKB profile.
-Use `--primitive-strict 0.16` for pre-production strictness only after checking
-the example's ProofPlan status. `amm_pool.cell`, `launch.cell`, and
-`token.cell` still contain strict v0.16 PP0150 ProofPlan gaps for selected
-aggregate or Pool obligations.
+Use `--primitive-strict 0.16` for the pre-production ProofPlan gate. The token,
+AMM, and launch examples now compile their bundled business actions as original
+scoped entries under that strict gate; keep the matching chain evidence before
+calling the artifacts production-ready.
 
 ## Token Walkthrough
 
@@ -94,12 +94,12 @@ resource MintAuthority has store, create, replace {
 `Token` is the asset. `MintAuthority` is the state that limits how much can be
 minted. The checked-in `examples/token.cell` declares `MintAuthority` with
 `store, create, replace`, because another action has to create the first
-authority Cell before `mint` can consume it.
+authority Cell before `mint_with_authority` can consume it.
 
-`mint` updates authority state and validates a proposed new token output:
+`mint_with_authority` updates authority state and validates a proposed new token output:
 
 ```cellscript
-action mint(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after: MintAuthority, token: Token)
+action mint_with_authority(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after: MintAuthority, token: Token)
 where
     assert(auth_before.minted + amount <= auth_before.max_supply, "exceeds max supply")
 
@@ -117,11 +117,11 @@ Read `auth_before` as the existing authority Cell and `auth_after` as the
 proposed output. The action signature names the input/output topology; the
 `require` guards are the field-level proof.
 
-This is the key bootstrap boundary: `mint` is not a genesis action. A builder
+This is the key bootstrap boundary: `mint_with_authority` is not a genesis action. A builder
 must first create a real `MintAuthority` Cell, normally with
-`examples/launch.cell::simple_launch` or `examples/launch.cell::launch_token`,
+`examples/launch.cell::bootstrap_token` or `examples/launch.cell::launch_token`,
 then pass that Cell as the runtime-bound `auth_before` input to
-`examples/token.cell::mint`.
+`examples/token.cell::mint_with_authority`.
 
 `transfer_token` consumes an input token and validates a proposed output
 under a new lock:
@@ -180,8 +180,8 @@ The CKB profile is strict, and the bundled suite has a defined production
 boundary:
 
 - bundled examples compile under the CKB profile;
-- strict v0.16 PP0150 gaps are fail-closed rather than treated as deployable
-  production evidence;
+- strict v0.16 ProofPlan gate checks pass for the original scoped token, AMM, and
+  launch business actions;
 - bundled business actions have scoped CKB production harnesses;
 - bundled locks have builder-backed valid-spend and invalid-spend matrices;
 - valid CKB transactions are builder-generated and dry-run;

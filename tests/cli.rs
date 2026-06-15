@@ -4200,7 +4200,7 @@ fn cellc_entry_witness_subcommand_encodes_bundled_token_amm_bootstrap_payloads()
         .arg("--target-profile")
         .arg("ckb")
         .arg("--action")
-        .arg("mint")
+        .arg("mint_with_authority")
         .arg("--arg")
         .arg(address)
         .arg("--arg")
@@ -4211,7 +4211,7 @@ fn cellc_entry_witness_subcommand_encodes_bundled_token_amm_bootstrap_payloads()
     assert!(token_output.status.success(), "stderr: {}", String::from_utf8_lossy(&token_output.stderr));
     let token_stdout: serde_json::Value = serde_json::from_slice(&token_output.stdout).unwrap();
     assert_eq!(token_stdout["status"], "ok");
-    assert_eq!(token_stdout["entry"], "mint");
+    assert_eq!(token_stdout["entry"], "mint_with_authority");
     assert_eq!(token_stdout["payload_params"][0], "to");
     assert_eq!(token_stdout["payload_params"][1], "amount");
     assert_eq!(token_stdout["witness_size_bytes"], 48);

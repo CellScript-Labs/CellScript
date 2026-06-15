@@ -170,7 +170,7 @@ Acceptance evidence:
 - Launch consumed paired-token input and created mint authority, pool, LP, and
   recipient token outputs.
 - The launched mint authority became the live input for a later mint.
-- `simple_launch` is covered by a stateful branch transaction.
+- `bootstrap_token` is covered by a stateful branch transaction.
 - Malformed distribution/accounting outputs were rejected by the action matrix.
 
 ## What This Proves
