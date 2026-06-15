@@ -60,8 +60,7 @@ if (pkg.main !== "./dist/extension.js") {
   throw new Error(`unexpected extension entrypoint: ${pkg.main}`);
 }
 
-const commands = new Set((pkg.contributes?.commands || []).map((command) => command.command));
-for (const command of [
+const requiredCommands = [
   "cellscript.compileCurrentFile",
   "cellscript.showMetadata",
   "cellscript.showConstraints",
@@ -71,10 +70,22 @@ for (const command of [
   "cellscript.verifyPackage",
   "cellscript.verifyRegistry",
   "cellscript.verifyLiveRegistry",
+  "cellscript.showBuilderAssumptions",
+  "cellscript.showTxTemplate",
+  "cellscript.showDeployPlan",
+  "cellscript.showProfile",
+  "cellscript.generateAuditBundle",
   "cellscript.showProductionReport"
-]) {
+];
+
+const commands = new Set((pkg.contributes?.commands || []).map((command) => command.command));
+const activationEvents = new Set(pkg.activationEvents || []);
+for (const command of requiredCommands) {
   if (!commands.has(command)) {
     throw new Error(`missing command contribution: ${command}`);
+  }
+  if (!activationEvents.has(`onCommand:${command}`)) {
+    throw new Error(`missing command activation event: ${command}`);
   }
 }
 
@@ -161,16 +172,12 @@ const changelog = fs.readFileSync(path.join(root, "CHANGELOG.md"), "utf8");
 for (const token of [
   "LanguageClient",
   "vscode-languageclient/node",
-  "cellscript.compileCurrentFile",
-  "cellscript.showMetadata",
-  "cellscript.showConstraints",
-  "cellscript.showAbi",
-  "cellscript.showActionBuildPlan",
-  "cellscript.generateTypescriptBuilder",
-  "cellscript.verifyPackage",
-  "cellscript.verifyRegistry",
-  "cellscript.verifyLiveRegistry",
-  "cellscript.showProductionReport",
+  ...requiredCommands,
+  "explain-assumptions",
+  "solve-tx",
+  "deploy-plan",
+  "profile",
+  "audit-bundle",
   "cellc",
   "Cell.toml",
   "action",

@@ -1,0 +1,8 @@
+{
+  "schema": "novaseal-btc-transaction-commitment-fixture-v0.1",
+  "fixture": "wrong_committer_signature_reject",
+  "action": "commit_btc_transaction_transition",
+  "expected": "rejected",
+  "coverage": "source-guard-present",
+  "description": "Commitment must reject a BIP340 signature payload whose pubkey is not the committer authority hash."
+}

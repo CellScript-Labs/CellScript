@@ -1,0 +1,93 @@
+module novaseal::btc_authority_lock::v0_mvp;
+
+// Arthur Zhang, 2026.
+//
+// =============================================================================
+// NovaSeal v0 MVP - BTC Authority Lock
+// =============================================================================
+//
+// This lock proves that a typed intent was authorised by a BTC key. It does NOT
+// perform the crypto itself.
+//
+// CRITICAL: All real signature verification is delegated to the generic
+// runtime verifier capability verifier::btc::bip340. The deployed verifier
+// artifact remains part of the v0 Trusted Computing Base (TCB).
+//
+// The delegated shell now has BIP340 vector coverage and child-verifier CKB VM
+// execution evidence, but this lock remains non-production until a parent-lock
+// CKB VM transaction proves spawn/IPC/exit-status behaviour end to end.
+// =============================================================================
+
+// REVIEW NOTE:
+// This file is the standalone lock module. The package entry file also keeps a
+// copy of the same lock shape so `cellc audit-bundle` can expose the lock
+// together with the primary state transition. Keep the two lock bodies aligned.
+//
+// The lock receives:
+// - protected: the current NovaSealCellV0 view guarded by this lock group
+// - lock_args: the expected BTC authority hash bound to Script.args
+// - witness: the candidate intent + state/receipt commitments + signature
+//   material provided by the spender. The receipt/state witness fields are
+//   parsed here so the lock and type/action entry points can share one CKB
+//   witness payload; this lock only enforces the authority-relevant fields.
+
+lock btc_authority(protected cell: NovaSealCellV0, lock_args expected_btc_authority_hash: Hash, witness intent: NovaSealSignedIntentV0, witness state_hash_commitment: Hash, witness sig: SignaturePayload) -> bool {
+    // Domain separation + binding + delegate-to-verifier hook. The generic
+    // runtime verifier performs the BIP340 decision, but production evidence
+    // still requires builder/full-node acceptance for the deployed child.
+    let digest = hash_blake2b_packed(intent)
+    require expected_btc_authority_hash == cell.btc_authority_hash
+    require intent.core.policy_hash == cell.policy_hash
+    require sig.pubkey == cell.btc_authority_hash.0
+
+    verifier::btc::bip340::require_signature(digest, sig.pubkey, sig.signature)
+    true
+}
+
+
+// AUDIT NOTE:
+// These local type definitions exist only so this lock file can compile on its
+// own during targeted review. The source-of-truth layout lives in the package
+// schemas and in the primary state files. Do not treat this block as a second
+// schema or an independent runtime data model.
+resource NovaSealCellV0 has store, create, consume {
+    version: u16,
+    btc_authority_hash: Hash,
+    state_hash: Hash,
+    policy_hash: Hash,
+    latest_receipt_hash: Hash,
+    nonce: u64,
+    expiry: u64,
+}
+
+struct OutPoint {
+    tx_hash: Hash,
+    index: u32,
+}
+
+struct NovaSealIntentCoreV0 {
+    protocol_id: Hash,
+    package_hash: Hash,
+    policy_hash: Hash,
+    action: u8,
+    terminal_path: u8,
+    old_cell: OutPoint,
+    old_state_hash: Hash,
+    new_state_hash: Hash,
+    old_nonce: u64,
+    new_nonce: u64,
+    expiry: u64,
+}
+
+struct NovaSealSignedIntentV0 {
+    core: NovaSealIntentCoreV0,
+    expected_receipt_hash: Hash,
+}
+
+struct SignaturePayload {
+    // Strict v1 research slice: single-key BIP340 only.
+    // Multisig descriptors remain out of scope until the verifier TCB grows a
+    // reviewed policy language.
+    pubkey: [u8; 32],
+    signature: [u8; 64],
+}

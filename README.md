@@ -6,13 +6,11 @@
 
 [![CellScript CI](https://github.com/a19q3/CellScript/actions/workflows/ci.yml/badge.svg)](https://github.com/a19q3/CellScript/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE-MIT)
-[![Rust 1.85+](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](Cargo.toml)
+[![Rust 1.92+](https://img.shields.io/badge/rust-1.92%2B-orange.svg)](Cargo.toml)
 [![Targets: CKB](https://img.shields.io/badge/targets-CKB-2f6f4e.svg)](#target-profiles)
 [![Package Workflow: Local First](https://img.shields.io/badge/package%20workflow-local%20first-2f6f4e.svg)](#package-workflow)
 [![LSP: Local Tooling](https://img.shields.io/badge/LSP-local%20tooling-2f6f4e.svg)](#editor-support)
 [![Wiki Tutorials](https://img.shields.io/badge/wiki-tutorials-6f42c1.svg)](https://github.com/a19q3/CellScript/wiki)
-
-[English](README.md) | [Chinese](README_CH.md)
 
 **Write Cell contracts the way you think about them — not the way the wire format does.**
 
@@ -59,7 +57,7 @@ CellScript is currently in a CKB-focused alpha / stabilisation phase.
 It is suitable for:
 - experimenting with CKB Cell-contract authoring;
 - compiling and inspecting the bundled examples;
-- exploring typed Cell effects, metadata, constraints, and CKB target-profile
+- exploring schema-backed CKB Cell effects, metadata, constraints, and CKB target-profile
   checks;
 - trying the local VS Code extension and LSP tooling.
 
@@ -83,7 +81,7 @@ Compile your first contract:
 cellc examples/token.cell
 
 # Emit a RISC-V ELF for CKB
-cellc examples/token.cell --target riscv64-elf --target-profile ckb --primitive-strict 0.16
+cellc examples/nft.cell --target riscv64-elf --target-profile ckb --primitive-strict 0.16
 
 # Emit a RISC-V ELF for CKB, with a specific entry action
 cellc examples/nft.cell --target riscv64-elf --target-profile ckb --primitive-strict 0.16 --entry-action transfer
@@ -101,15 +99,20 @@ cellc build --target riscv64-elf --target-profile ckb
 Run a CKB profile check:
 
 ```bash
-cellc check --target-profile ckb
+cellc examples/nft.cell --target-profile ckb
 ```
 
-Inspect what the compiler can explain about the token example:
+Inspect what the compiler can explain about the NFT example:
 
 ```bash
-cellc metadata examples/token.cell --target-profile ckb --json
-cellc constraints examples/token.cell --target-profile ckb
-cellc scheduler-plan examples/token.cell --target-profile ckb
+cellc metadata examples/nft.cell --target-profile ckb
+cellc constraints examples/nft.cell --target-profile ckb
+cellc scheduler-plan examples/nft.cell --target-profile ckb
+cellc explain-assumptions examples/nft.cell --target-profile ckb --json
+cellc solve-tx examples/nft.cell --target-profile ckb --json
+cellc deploy-plan examples/nft.cell --target-profile ckb --json
+cellc profile examples/nft.cell --target-profile ckb --json
+cellc audit-bundle examples/nft.cell --target-profile ckb --json
 ```
 
 These commands show what the compiler believes the protocol reads, writes,
@@ -134,8 +137,8 @@ CellScript now supports CKB as its only target profile:
 > normal target-profile policy.
 
 ```bash
-cellc examples/token.cell --target riscv64-elf --target-profile ckb --primitive-strict 0.16
-cellc check --target-profile ckb
+cellc examples/nft.cell --target riscv64-elf --target-profile ckb --primitive-strict 0.16
+cellc examples/nft.cell --target-profile ckb
 ```
 
 The current assurance gate is `--primitive-strict 0.16`. It includes the earlier
@@ -303,13 +306,13 @@ resource Token has store, create, consume, replace, burn, relock {
     symbol: [u8; 8]
 }
 
-resource MintAuthority has store {
+resource MintAuthority has store, create, replace {
     token_symbol: [u8; 8]
     max_supply: u64
     minted: u64
 }
 
-action mint(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after: MintAuthority, token: Token) {
+action mint_with_authority(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after: MintAuthority, token: Token) {
     transition auth_before -> auth_after
 
     verification
@@ -351,7 +354,7 @@ action burn(token: Token) {
 | `examples/nft.cell` | Unique assets, metadata, ownership transfer |
 | `examples/vesting.cell` | Receipt-style grants and explicit claim state transitions |
 | `examples/amm_pool.cell` | Shared pool state, swap/liquidity effects |
-| `examples/launch.cell` | Launch/pool composition patterns |
+| `examples/launch.cell` | Mint-authority bootstrap and launch/pool composition patterns |
 
 Non-production language examples live under `examples/language/`. They compile
 and exercise compiler/tooling surfaces, but they are not part of the seven-file
@@ -364,14 +367,14 @@ TYPE_ID, Spawn/IPC, and dynamic BLAKE2b surfaces as compiler/tooling examples.
 
 ## Comparison
 
-Why CellScript is shaped around typed Cells, linear resources, explicit
+Why CellScript is shaped around schema-backed CKB Cell state, linear resources, explicit
 transaction effects, and ckb-vm artifacts — instead of account storage or a
 chain-specific VM:
 
 | Dimension | CellScript | Solidity | Move | Sway |
 |---|---|---|---|---|
 | Execution target | RISC-V ELF / asm on ckb-vm | EVM bytecode | Move bytecode | FuelVM bytecode |
-| State model | Typed Cells, explicit inputs/deps/outputs | Account storage slots | Resources in global storage | UTXO + native assets |
+| State model | Schema-backed views over CKB Cells, explicit inputs/deps/outputs | Account storage slots | Resources in global storage | UTXO + native assets |
 | Asset model | Native `resource`, state transitions, receipts, shared Cells | Manual token contracts | Native resources | Native assets |
 | Linear ownership | Compiler-enforced | No | Yes (abilities) | No general user-defined |
 | Shared state | Explicit `shared` Cells | Implicit contract storage | Shared objects (some chains) | No shared Cell analogue |
@@ -380,7 +383,7 @@ chain-specific VM:
 | CKB compatibility | Production-gated CKB ckb-vm artifact profile for the bundled Cell suite | Requires different VM | Requires different VM | Requires FuelVM |
 
 Compared with hand-written CKB scripts, CellScript keeps the same
-runtime substrate but replaces raw byte and syscall programming with typed Cell
+runtime substrate but replaces raw byte and syscall programming with schema-backed CKB Cell
 operations, linear checking, schema metadata, and policy-verifiable artifacts.
 
 ---
@@ -390,14 +393,16 @@ operations, linear checking, schema metadata, and policy-verifiable artifacts.
 CellScript includes production-style local language tooling for early users:
 
 - **In-process LSP** — diagnostics, completions, hover, go-to-definition,
-  references, rename, formatting, and metadata-oriented code actions. The
+  references, formatting, and metadata-oriented code actions. The
   compiler crate exposes an `LspServer`; `cellc --lsp` provides a full
   `tower-lsp` JSON-RPC transport over stdio. Completions include flow
   states after `Type::`.
 - **VS Code extension** — syntax highlighting, snippets, on-save diagnostics,
   compiler-backed formatting, scratch compilation, metadata/constraints/production
   reports, entry-witness ABI selection, action build plans, TypeScript builder
-  generation, package/registry verification, CKB target-profile arguments, and
+  generation, package/registry verification, active-file builder assumptions,
+  transaction template, deploy plan, profile, audit-bundle reports,
+  CKB target-profile arguments, and
   status-bar feedback. It shells out to `cellc` (or a `cargo run` fallback), so
   behavior stays identical to CLI and CI gates.
 
@@ -407,38 +412,41 @@ ABI evidence; the adapter uses `ckb-sdk-rust` to materialize CKB transaction
 shape and local-node acceptance evidence. It is not a wallet UI, frontend kit,
 or CellFabric intent engine.
 
-- [VS Code extension](https://github.com/tsukifune-kosei/CellScript/tree/main/editors/vscode-cellscript)
-- [Runtime error codes](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_RUNTIME_ERROR_CODES.md)
-- [Entry witness ABI](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_ENTRY_WITNESS_ABI.md)
-- [Collections support matrix](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md)
-- [Output bindings](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_OUTPUT_BINDINGS.md)
-- [Historical signature-direction execution plan](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/archive/0.13/CELLSCRIPT_SIGNATURE_DIRECTION_EXECUTION_PLAN.md)
-- [CKB target profile tutorial](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/wiki/Tutorial-05-CKB-Target-Profiles.md)
-- [CKB deployment manifest](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_CKB_DEPLOYMENT_MANIFEST.md)
-- [Capacity and builder contract](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_CAPACITY_AND_BUILDER_CONTRACT.md)
-- [CKB adapter boundary](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_CKB_ADAPTER.md)
-- [CKB ecosystem reuse audit](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_CKB_ECOSYSTEM_REUSE_AUDIT.md)
-- [ckb-std compatibility](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_CKB_STD_COMPAT.md)
-- [Linear ownership](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_LINEAR_OWNERSHIP.md)
-- [Scheduler hints](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_SCHEDULER_HINTS.md)
-- [Metadata verification and production gates](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/wiki/Tutorial-06-Metadata-Verification-and-Production-Gates.md)
-- [Standard library](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/wiki/Tutorial-10-Standard-Library.md)
-- [Operational semantics](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/spec/CELLSCRIPT_OPERATIONAL_SEMANTICS.md)
-- [CKB hashing workflow example](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/examples/ckb_hashing.md)
-- [Collections matrix example](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/examples/collections_matrix.md)
-- [Deployment manifest example](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/examples/deployment_manifest.md)
-- [Output append example](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/examples/output_append.md)
-- [0.20 generated builder roadmap](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_0_20_ROADMAP.md)
-- [Roadmap overview](https://github.com/tsukifune-kosei/CellScript/blob/main/roadmap/CELLSCRIPT_ROADMAP.md)
-- [0.13 release scope](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md)
-- [0.14 roadmap](https://github.com/tsukifune-kosei/CellScript/blob/main/roadmap/CELLSCRIPT_0_14_ROADMAP.md)
-- [0.14 release notes draft](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/releases/CELLSCRIPT_0_14_RELEASE_NOTES_DRAFT.md)
-- [0.15 roadmap](https://github.com/tsukifune-kosei/CellScript/blob/main/roadmap/CELLSCRIPT_0_15_ROADMAP.md)
-- [0.16 roadmap](https://github.com/tsukifune-kosei/CellScript/blob/main/roadmap/CELLSCRIPT_0_16_ROADMAP.md)
-- [0.16 release notes draft](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_0_16_RELEASE_NOTES_DRAFT.md)
-- [0.17 roadmap](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/0.17/CELLSCRIPT_0_17_ROADMAP.md)
-- [0.18 roadmap](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_0_18_ROADMAP.md)
-- [0.19 roadmap](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_0_19_ROADMAP.md)
+- [VS Code extension](editors/vscode-cellscript)
+- [Runtime error codes](docs/CELLSCRIPT_RUNTIME_ERROR_CODES.md)
+- [Entry witness ABI](docs/CELLSCRIPT_ENTRY_WITNESS_ABI.md)
+- [Collections support matrix](docs/CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md)
+- [Output bindings](docs/CELLSCRIPT_OUTPUT_BINDINGS.md)
+- [Historical signature-direction execution plan](docs/archive/0.13/CELLSCRIPT_SIGNATURE_DIRECTION_EXECUTION_PLAN.md)
+- [CKB target profile tutorial](docs/wiki/Tutorial-05-CKB-Target-Profiles.md)
+- [CKB deployment manifest](docs/CELLSCRIPT_CKB_DEPLOYMENT_MANIFEST.md)
+- [Capacity and builder contract](docs/CELLSCRIPT_CAPACITY_AND_BUILDER_CONTRACT.md)
+- [CKB adapter boundary](docs/CELLSCRIPT_CKB_ADAPTER.md)
+- [CKB ecosystem reuse audit](docs/CELLSCRIPT_CKB_ECOSYSTEM_REUSE_AUDIT.md)
+- [ckb-std compatibility](docs/CELLSCRIPT_CKB_STD_COMPAT.md)
+- [Token and AMM bootstrap builder path](docs/examples/token_amm_bootstrap.md)
+- [Linear ownership](docs/CELLSCRIPT_LINEAR_OWNERSHIP.md)
+- [Scheduler hints](docs/CELLSCRIPT_SCHEDULER_HINTS.md)
+- [Metadata verification and production gates](docs/wiki/Tutorial-06-Metadata-Verification-and-Production-Gates.md)
+- [Unified gate policy](docs/CELLSCRIPT_GATE_POLICY.md)
+- [Standard library](docs/wiki/Tutorial-10-Standard-Library.md)
+- [Operational semantics](docs/spec/CELLSCRIPT_OPERATIONAL_SEMANTICS.md)
+- [CKB hashing workflow example](docs/examples/ckb_hashing.md)
+- [Collections matrix example](docs/examples/collections_matrix.md)
+- [Deployment manifest example](docs/examples/deployment_manifest.md)
+- [Output append example](docs/examples/output_append.md)
+- [0.20 generated builder roadmap](docs/CELLSCRIPT_0_20_ROADMAP.md)
+- [Roadmap overview](roadmap/CELLSCRIPT_ROADMAP.md)
+- [0.13 release scope](docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md)
+- [0.14 roadmap](roadmap/CELLSCRIPT_0_14_ROADMAP.md)
+- [0.14 release notes](docs/releases/CELLSCRIPT_0_14_RELEASE_NOTES.md)
+- [0.15 roadmap](roadmap/CELLSCRIPT_0_15_ROADMAP.md)
+- [0.15 release notes](docs/releases/CELLSCRIPT_0_15_RELEASE_NOTES.md)
+- [0.16 roadmap](roadmap/CELLSCRIPT_0_16_ROADMAP.md)
+- [0.16 release notes](docs/releases/CELLSCRIPT_0_16_RELEASE_NOTES.md)
+- [0.17 roadmap](docs/0.17/CELLSCRIPT_0_17_ROADMAP.md)
+- [0.18 roadmap](docs/CELLSCRIPT_0_18_ROADMAP.md)
+- [0.19 roadmap](docs/CELLSCRIPT_0_19_ROADMAP.md)
 
 ---
 
@@ -674,6 +682,24 @@ registry dependency resolution remain experimental and fail-closed.
 - Git dependencies are explicit remote source fetches; treat them as
   review-required inputs, not the registry production path
 
+**Registry resolver boundary:**
+
+- Registry discovery may grow to include CellScript packages, verifier
+  artifacts, deployed artifact records, reproducible artifacts, and external
+  CKB tooling artifacts. Dependency resolution stays narrower than discovery.
+- Anything reachable by `cellc add` must be safe to participate in the build,
+  verification, deployment, or declared TCB identity chain.
+- Source libraries, runtime verifier packages, deployable script packages, and
+  deployed or reproducible artifact records may become resolver-safe only when
+  their source, build, ABI, artifact, and deployment identities can be checked
+  fail-closed.
+- Templates, cookbook examples, protocol skeletons, and scaffold-only projects
+  are copy-only material for `cellc new --template` or cookbook tooling; they
+  must not be dependency-resolved through `cellc add`.
+- Runtime verifier packages are allowed to have no business parameters, but
+  production use must still pin `verifier_id`, `ipc_abi`, artifact identity,
+  build profile, TCB/security status, and deployment CellDep facts.
+
 ### CLI Commands
 
 | Command | Purpose |
@@ -689,6 +715,12 @@ registry dependency resolution remain experimental and fail-closed.
 | `cellc gen-builder --target typescript` | Generate a TypeScript action-builder package from metadata, lockfile, and optional deployment facts |
 | `cellc scheduler-plan` | Consume scheduler hints and report serial/conflict policy |
 | `cellc ckb-hash` | Compute CKB default Blake2b-256 hashes for builders and release evidence |
+| `cellc explain-assumptions` | Emit v0.16 builder-assumption evidence from ProofPlan metadata |
+| `cellc validate-tx` | Validate transaction JSON shape against builder assumptions before signing |
+| `cellc solve-tx` | Emit a deterministic transaction template from metadata |
+| `cellc deploy-plan` | Emit a reproducible deployment plan |
+| `cellc verify-deploy` / `diff-deploy` / `lock-deps` | Verify, compare, and lock deployment metadata |
+| `cellc proof-diff` / `profile` / `trace-tx` / `audit-bundle` | Emit v0.16 audit and debug reports |
 | `cellc opt-report` | Compare O0..O3 artifact size and constraints status |
 | `cellc verify-artifact` | Verify an artifact against its metadata sidecar |
 | `cellc test` | Run compiler and policy tests (no trusted runtime execution) |

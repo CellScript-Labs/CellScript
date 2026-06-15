@@ -1,0 +1,121 @@
+{
+  "schema": "novaseal-agreement-invariant-matrix-v0.1",
+  "package": "novaseal-agreement-profile-v0 0.0.1",
+  "classification": "hand-authored-review-target",
+  "invariants": [
+    {
+      "id": "profile_separation",
+      "claim": "Agreement/MVB semantics live outside NovaSeal core.",
+      "location": "separate package path proposals/novaseal/agreement-profile-v0",
+      "coverage": "source-guard-present"
+    },
+    {
+      "id": "ckb_native_only",
+      "claim": "v0 only accepts CKB/CKB terms.",
+      "location": "originate_agreement asset kind/hash guards",
+      "coverage": "source-guard-present + resolved-transaction-covered + live-devnet-negative-covered"
+    },
+    {
+      "id": "pre_expiry_repay",
+      "claim": "Repay terminal path is only before or at expiry.",
+      "location": "repay_before_expiry now <= expiry guard",
+      "coverage": "source-guard-present + local-transaction-shape-covered + resolved-transaction-covered"
+    },
+    {
+      "id": "post_expiry_claim",
+      "claim": "Claim/default terminal path is only after expiry.",
+      "location": "claim_after_expiry now > expiry guard",
+      "coverage": "source-guard-present + local-transaction-shape-covered + resolved-transaction-covered"
+    },
+    {
+      "id": "party_terminal_rights",
+      "claim": "Borrower closes by repayment; lender claims after expiry.",
+      "location": "actor_authority_hash equality guards",
+      "coverage": "source-guard-present + local-transaction-shape-covered + resolved-transaction-covered + live-devnet-negative-covered"
+    },
+    {
+      "id": "receipt_materialized",
+      "claim": "Each implemented terminal path creates a NovaAgreementReceiptV0 output.",
+      "location": "create receipt statements",
+      "coverage": "resolved-transaction-covered + live-devnet-covered"
+    },
+    {
+      "id": "terms_hash_output_binding",
+      "claim": "Wrong terms_hash output binding is rejected by Agreement Profile scripts.",
+      "location": "originate_agreement output field checks",
+      "coverage": "resolved-transaction-covered"
+    },
+    {
+      "id": "receipt_hash_output_binding",
+      "claim": "Wrong receipt_hash output binding is rejected by Agreement Profile scripts.",
+      "location": "NovaAgreementReceiptV0.new_latest_receipt_hash output field checks",
+      "coverage": "resolved-transaction-covered"
+    },
+    {
+      "id": "native_capacity_settlement",
+      "claim": "Native CKB funding, repayment, and claim output shapes are locally verified.",
+      "location": "scripts/nova_agreement_tx_shape_harness.py",
+      "coverage": "local-transaction-shape-covered"
+    },
+    {
+      "id": "action_vm_terminal_guards",
+      "claim": "Compiled Agreement Profile action ELFs enforce terminal-path guards in CKB VM.",
+      "location": "harness/ckb_vm",
+      "coverage": "resolved-transaction-covered"
+    },
+    {
+      "id": "resolved_transaction_stack",
+      "claim": "Action/type scripts and the local harness lock execute as lock/type groups in resolved CKB transactions.",
+      "location": "harness/ckb_vm/src/bin/novaseal_agreement_tx_harness.rs",
+      "coverage": "resolved-transaction-covered"
+    },
+    {
+      "id": "ckb_vm_capacity_settlement",
+      "claim": "Under-capacity agreement outputs are rejected by the CKB transaction verification stack.",
+      "location": "harness/ckb_vm/src/bin/novaseal_agreement_tx_harness.rs",
+      "coverage": "resolved-transaction-covered"
+    },
+    {
+      "id": "payout_cell_binding",
+      "claim": "Repayment and default payout outputs are bound by typed NativeCkbPayoutV0 output data.",
+      "location": "NativeCkbPayoutV0 create statements",
+      "coverage": "resolved-transaction-covered"
+    },
+    {
+      "id": "canonical_envelope_binding",
+      "claim": "Each signed Agreement intent commits to the NovaSealCanonicalEnvelopeV0 hash and the runtime recomputes the same hash before accepting.",
+      "location": "NovaAgreementSignedIntentV0.canonical_envelope_hash and nova_agreement_lifecycle canonical envelope checks",
+      "coverage": "source-guard-present + wallet-signing-vector-covered + production-gate-covered + live-devnet-covered"
+    },
+    {
+      "id": "checked_financial_arithmetic",
+      "claim": "Value-bearing u64 additions in terminal paths are guarded before principal+fee, nonce+1, and payout capacity floor calculations.",
+      "location": "repay_before_expiry, claim_after_expiry, and nova_agreement_lifecycle arithmetic guards",
+      "coverage": "source-guard-present + local-arithmetic-boundary-covered + production-gate-covered"
+    },
+    {
+      "id": "authority-binding",
+      "claim": "Agreement borrower/lender authority identifiers are bound to signer pubkeys and payout recipient lock args at the profile boundary.",
+      "location": "borrower_sig/lender_sig pubkey equality guards and typed NativeCkbPayoutV0 recipient checks",
+      "coverage": "runtime-checked"
+    },
+    {
+      "id": "u64-overflow-prevention",
+      "claim": "Agreement terminal arithmetic rejects u64 overflow at principal+fee and nonce+1 boundaries, with max/max-1 regression fixtures.",
+      "location": "repay_before_expiry, claim_after_expiry, nova_agreement_lifecycle, and arithmetic boundary fixtures",
+      "coverage": "runtime-checked"
+    },
+    {
+      "id": "wallet_signing_vectors",
+      "claim": "Wallet-facing signing vectors cover originate, repay, and claim with fixed-width signed intent bytes, BIP340 message hashes, signer sets, and displayed canonical envelope hashes.",
+      "location": "target/novaseal-wallet-signing-vectors.json generated by scripts/novaseal_wallet_signing_vectors.py",
+      "coverage": "production-gate-covered"
+    },
+    {
+      "id": "live_devnet_lifecycle",
+      "claim": "Originate -> repay and originate -> claim execute as live devnet lifecycles with fresh provenance and negative dry-run rejection evidence.",
+      "location": "target/novaseal-devnet-stateful-acceptance.json and target/novaseal-agreement-devnet-stateful-live.json",
+      "coverage": "live-devnet-covered + production-gate-covered"
+    }
+  ]
+}

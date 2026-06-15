@@ -60,7 +60,6 @@ def main() -> int:
         ["#[command(version = cellscript::VERSION)]"],
     )
     require_contains("README.md", [f'version = "{crate_version}"'])
-    require_contains("README_CH.md", [f'version = "{crate_version}"'])
     for wiki_path in [
         "docs/wiki/Tutorial-01-Getting-Started.md",
         "docs/wiki/Cookbook-Recipes.md",
@@ -70,6 +69,18 @@ def main() -> int:
     ]:
         require("--primitive-strict 0.15" not in read(wiki_path), f"{wiki_path} must use the current 0.16 assurance gate in command examples")
         require("--primitive-strict=0.15" not in read(wiki_path), f"{wiki_path} must use the current 0.16 assurance gate in command examples")
+
+    ckb_acceptance = read("scripts/ckb_cellscript_acceptance.sh")
+    require('"--primitive-strict", "0.15"' not in ckb_acceptance, "CKB acceptance runner must not use the retired 0.15 assurance gate")
+    require('"--primitive-strict", "0.16"' in ckb_acceptance, "CKB acceptance runner must use the current 0.16 assurance gate")
+    require("ORIGINAL_SCOPED_ACTION_FAIL_CLOSED = {}" in ckb_acceptance, "CKB acceptance runner must keep token/AMM/launch out of strict 0.16 fail-closed coverage")
+    require('"token.cell": ["mint_with_authority", "transfer_token", "burn", "merge"]' in ckb_acceptance, "CKB acceptance runner must compile token actions as original strict scoped actions")
+    require('"amm_pool.cell": ["seed_pool", "swap_a_for_b", "add_liquidity", "remove_liquidity", "isqrt", "min"]' in ckb_acceptance, "CKB acceptance runner must compile AMM actions as original strict scoped actions")
+    require('"launch.cell": ["launch_token", "bootstrap_token"]' in ckb_acceptance, "CKB acceptance runner must compile launch actions as original strict scoped actions")
+
+    tutorial_08 = read("docs/wiki/Tutorial-08-Bundled-Example-Contracts.md")
+    require("strict v0.16 ProofPlan gate" in tutorial_08, "bundled example tutorial must document the strict 0.16 ProofPlan gate")
+    require('for f in examples/*.cell; do\n  echo "==> $f"\n  cellc "$f" --target riscv64-elf --target-profile ckb -o' in tutorial_08, "bundled example compile-all loop must not claim every example passes strict 0.16")
 
     require(package_json["name"] == "cellscript-vscode", "VS Code extension package name changed")
     require(package_json["main"] == "./dist/extension.js", "VS Code extension entrypoint changed")

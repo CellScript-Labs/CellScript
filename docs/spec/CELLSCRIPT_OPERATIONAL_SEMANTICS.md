@@ -182,6 +182,10 @@ failure_mode
 `cellc explain-assumptions` emits this schema. `cellc validate-tx --against
 metadata.json tx.json` checks a concrete transaction shape and requires
 schema-bound evidence objects for non-structural assumptions before signing.
+For manifest-bound spawn targets, validation also checks the referenced
+`cell_deps[index]` object against the declared CellDep identity (`name`,
+`dep_type`, and any manifest-specified `tx_hash`, `out_index`, `hash_type`,
+`data_hash`, or `type_id`) instead of accepting evidence-only claims.
 
 ## Conformance Fixtures
 
@@ -191,5 +195,7 @@ The conformance tests live in `tests/v0_16.rs` and
 - ProofPlan soundness metadata is emitted and passes for checked runtime cases;
 - `--primitive-strict=0.16` rejects metadata-only ProofPlan gaps;
 - schema-bound builder assumption evidence is required by `validate-tx`;
+- manifest-bound spawn-target CellDep identity is checked in both transaction
+  deps and builder evidence;
 - the standard CKB compatibility suite names accepted and rejected fixtures for
   sUDT, xUDT, ACP, Cheque, Omnilock, NervosDAO since/epoch, and Type ID.

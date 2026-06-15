@@ -1,0 +1,16 @@
+{
+  "name": "authority_rotation_without_explicit_action_reject",
+  "description": "A transition attempts to change the output Cell's BTC authority without an explicit authority-rotation action. v0 key-auth transitions must preserve the old Cell authority.",
+  "category": "negative",
+  "acceptance_criteria_covered": [3, 4, 6],
+  "inputs": {
+    "proposed_new_cell": {
+      "btc_authority_hash": "0x1111111111111111111111111111111111111111111111111111111111111111"
+    }
+  },
+  "expected": {
+    "result": "rejected",
+    "failure_mode": "implicit_authority_rotation",
+    "notes": "Future key rotation must be modelled as an explicit action with its own policy and fixtures, not as a side effect of an ordinary state transition."
+  }
+}

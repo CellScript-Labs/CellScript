@@ -1,6 +1,6 @@
 # CellScript Roadmap
 
-**Updated**: 2026-05-09
+**Updated**: 2026-06-10
 
 This roadmap is the high-level planning map for CellScript. It links the
 release-specific trackers and the deeper design notes so the project does not
@@ -22,9 +22,9 @@ The current project direction is simple:
 | Area | Current status | Detailed document |
 |---|---|---|
 | 0.13 release scope | Implementation scope is closed for the `v0.13.2` stable release; the full gate includes stateful business-flow/action coverage. | [0.13 release scope](../docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md), [0.13 release tracker](CELLSCRIPT_0_13_TODOLIST.md), [0.13.2 release notes](../docs/releases/CELLSCRIPT_0_13_2_RELEASE_NOTES.md) |
-| 0.14 release scope | CKB semantic-completeness scope is complete for the current stable line. | [0.14 roadmap](CELLSCRIPT_0_14_ROADMAP.md), [0.14 release notes draft](../docs/releases/CELLSCRIPT_0_14_RELEASE_NOTES_DRAFT.md) |
-| 0.15 release scope | `feat/proofplan-invariants` adds scoped invariants, aggregate invariant primitives, Covenant ProofPlan output, risk diagnostics, macro provenance, and identity-aware lifecycle forms. | [0.15 roadmap](CELLSCRIPT_0_15_ROADMAP.md), [0.15 release notes draft](../docs/CELLSCRIPT_0_15_RELEASE_NOTES_DRAFT.md) |
-| 0.16 release scope | `feat/assurance-tooling` implements the scoped metadata-assurance release: operational semantics, ProofPlan soundness, builder assumptions, transaction validation/solver templates, deployment governance, audit tooling, and standard CKB compatibility fixtures. | [0.16 roadmap](CELLSCRIPT_0_16_ROADMAP.md), [0.16 release notes draft](../docs/CELLSCRIPT_0_16_RELEASE_NOTES_DRAFT.md) |
+| 0.14 release scope | CKB semantic-completeness scope is complete for the current stable line. | [0.14 roadmap](CELLSCRIPT_0_14_ROADMAP.md), [0.14 release notes](../docs/releases/CELLSCRIPT_0_14_RELEASE_NOTES.md) |
+| 0.15 release scope | `v0.15.0` is released from `nightly-0.15` with scoped invariants, aggregate invariant primitives, invariant/action coverage links, Covenant ProofPlan output, risk diagnostics, macro provenance, identity-aware lifecycle forms, and final release-gate evidence. | [0.15 roadmap](CELLSCRIPT_0_15_ROADMAP.md), [0.15 roadmap summary](../docs/archive/0.15/CELLSCRIPT_0_15_ROADMAP_SUMMARY.md), [0.15 release notes](../docs/releases/CELLSCRIPT_0_15_RELEASE_NOTES.md) |
+| 0.16 release scope | `v0.16.1` is released for the scoped metadata-assurance line, including operational semantics, ProofPlan soundness, builder assumptions, transaction validation/solver templates, deployment governance, audit tooling, standard CKB compatibility fixtures, compiler hardening, proposal-local NovaSeal devnet/profile certification, and bundled example bootstrap cleanup. | [0.16 roadmap](CELLSCRIPT_0_16_ROADMAP.md), [0.16.1 release notes](../docs/releases/CELLSCRIPT_0_16_1_RELEASE_NOTES.md) |
 | 0.17 release scope | `research/protocol-equivalence` closes the scoped iCKB protocol-semantics milestone with partial CKB VM differential evidence and an explicit `NOT_PROVEN` production-equivalence gate. | [0.17 roadmap](../docs/0.17/CELLSCRIPT_0_17_ROADMAP.md), [0.17 iCKB final report](../docs/0.17/ickb_final_report.md) |
 | 0.18 planning scope | First-class read-only `ScriptRef` / `ScriptArgs` surface and the remaining iCKB equivalence-closure prerequisites. | [0.18 roadmap](../docs/CELLSCRIPT_0_18_ROADMAP.md) |
 | 0.19 scope | Scope complete for CKB ecosystem reuse, `ckb-std` compatibility, grammar governance, and Phase 1 package/deployment identity registry closure. Generated builders and live-chain registry proof moved to 0.20. | [0.19 roadmap](../docs/CELLSCRIPT_0_19_ROADMAP.md), [0.19 closure notes](../docs/releases/CELLSCRIPT_0_19_CLOSURE_NOTES.md), [CKB ecosystem reuse audit](../docs/CELLSCRIPT_CKB_ECOSYSTEM_REUSE_AUDIT.md), [ckb-std compatibility](../docs/CELLSCRIPT_CKB_STD_COMPAT.md), [Registry Phase 1](../docs/CELLSCRIPT_REGISTRY_PHASE1.md) |
@@ -104,7 +104,7 @@ Detailed status:
 
 ### 0.16: Formal Semantics And Production Tooling
 
-The `nightly-0.16` branch turns v0.15 audit metadata into an
+The 0.16 line turns v0.15 audit metadata into an
 assurance surface:
 
 - operational semantics in `docs/spec/CELLSCRIPT_OPERATIONAL_SEMANTICS.md`;
@@ -116,6 +116,8 @@ assurance surface:
   diffs, profiles, transaction traces, and audit bundles;
 - standard CKB compatibility fixture manifest for sUDT, xUDT, ACP, Cheque,
   Omnilock, NervosDAO since/epoch, and Type ID.
+- proposal-local NovaSeal devnet/profile certification that passes local live
+  CKB RPC acceptance and preserves external production blockers.
 
 The 0.17 branch records closure of the 0.16 review findings in
 `docs/0.17/review_findings_closure.md`: ProofPlan matching is no longer keyed
@@ -126,7 +128,7 @@ stubs are not stable, and `solve-tx` is explicitly `can_submit=false`.
 Detailed status:
 
 - [0.16 roadmap](CELLSCRIPT_0_16_ROADMAP.md)
-- [0.16 release notes draft](../docs/releases/CELLSCRIPT_0_16_RELEASE_NOTES_DRAFT.md)
+- [0.16.1 release notes](../docs/releases/CELLSCRIPT_0_16_1_RELEASE_NOTES.md)
 
 ### 0.17: iCKB-Grade Protocol Semantics
 

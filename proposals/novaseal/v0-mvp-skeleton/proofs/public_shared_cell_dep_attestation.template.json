@@ -1,0 +1,34 @@
+{
+  "schema": "novaseal-public-shared-cell-dep-attestation-v0.1",
+  "status": "attested",
+  "network": "testnet-or-mainnet",
+  "attested_at": "YYYY-MM-DDTHH:MM:SSZ",
+  "attestor": "REPLACE_WITH_DEPLOYER_OR_RELEASE_SIGNER",
+  "request_handoff": {
+    "bundle": "target/novaseal-external-evidence-handoff-bundle.json",
+    "bundle_hash": "0xREPLACE_WITH_64_HEX_HANDOFF_BUNDLE_HASH",
+    "bundle_hash_algorithm": "blake2b-256(person=NovaExtHandoff)",
+    "group": "public_shared_cell_dep_attestation"
+  },
+  "release": {
+    "package": "novaseal",
+    "version": "0.0.1-v0-mvp",
+    "manifest_commit": "REPLACE_WITH_GIT_COMMIT"
+  },
+  "runtime_verifier": {
+    "verifier_id": "btc.bip340.v0",
+    "ipc_abi": "cellscript-btc-bip340-ipc-v0",
+    "out_point": "0xREPLACE_WITH_64_HEX_TX_HASH:0",
+    "dep_type": "code",
+    "hash_type": "data1",
+    "data_hash": "0xREPLACE_WITH_64_HEX_DATA_HASH",
+    "artifact_hash": "0xb8a7e8e53d36979d74f55252b52f8b8cc6f3bc8277250d2f8d2d08abd5237459"
+  },
+  "notes": [
+    "This file is a template, not an attestation.",
+    "A real attestation must describe a public/shared deployment by an independent identity, not a local devnet CellDep or NovaSeal/CellScript self-attestation.",
+    "The request contract generated at target/novaseal-external-attestation-adapter.json lists the exact public CellDep fields, reviewed artifact hash, and expected_release_manifest_commit from the reviewed TCB repo_commit this attestation must satisfy.",
+    "The request_handoff block must reference the current target/novaseal-external-evidence-handoff-bundle.json hash, blake2b-256(person=NovaExtHandoff) hash algorithm, and public_shared_cell_dep_attestation group.",
+    "The production gate rejects missing or placeholder out_point/data_hash/artifact_hash fields."
+  ]
+}

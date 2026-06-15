@@ -1,0 +1,8 @@
+{
+  "schema": "novaseal-fungible-xudt-fixture-v0.1",
+  "fixture": "issue_valid",
+  "action": "issue_xudt",
+  "expected": "accepted",
+  "coverage": "source-guard-present",
+  "description": "Issuer creates one active balance-bearing xUDT object for a non-zero holder with a non-zero amount."
+}

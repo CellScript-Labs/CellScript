@@ -17,10 +17,10 @@ The governing rule is:
 > Action shape, Cell lifecycle declarations, and verification obligations must
 > stay visible at the action site.
 
-Chinese shorthand:
+Short form:
 
-> action 讲“这是什么交易形状”；transition 讲“哪个状态延续”；
-> verification 讲“为什么这笔 Cell 变换可以被接受”。
+> `action` states the transaction shape; `transition` states which state
+> continues; `verification` states why the Cell transformation is acceptable.
 
 ## Canonical Surface
 

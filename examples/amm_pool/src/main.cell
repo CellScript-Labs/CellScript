@@ -31,6 +31,8 @@ action seed_pool(token_a: Token, token_b: Token, fee_rate_bps: u16, provider: Ad
 
 }
 action swap_a_for_b(pool_before: Pool, input: Token, min_output: u64, to: Address) -> (pool_after: Pool, token_out: Token) {
+    transition pool_before -> pool_after
+
     verification
         require input.symbol == pool_before.token_a_symbol, "wrong input token"
         let fee = input.amount * pool_before.fee_rate_bps as u64 / 10000
@@ -51,6 +53,8 @@ action swap_a_for_b(pool_before: Pool, input: Token, min_output: u64, to: Addres
 
 }
 action add_liquidity(pool_before: Pool, token_a: Token, token_b: Token, provider: Address) -> (pool_after: Pool, receipt: LPReceipt) {
+    transition pool_before -> pool_after
+
     verification
         require token_a.symbol == pool_before.token_a_symbol, "wrong token a"
         require token_b.symbol == pool_before.token_b_symbol, "wrong token b"
@@ -71,6 +75,8 @@ action add_liquidity(pool_before: Pool, token_a: Token, token_b: Token, provider
 
 }
 action remove_liquidity(pool_before: Pool, receipt: LPReceipt, provider: Address) -> (pool_after: Pool, token_a_out: Token, token_b_out: Token) {
+    transition pool_before -> pool_after
+
     verification
         require receipt.pool_id == pool_before.type_hash(), "wrong pool"
         let amount_a = receipt.lp_amount * pool_before.reserve_a / pool_before.total_lp

@@ -3328,7 +3328,7 @@ fn default_scheduler_witness_abi() -> String {
 /// Decode a hex-encoded scheduler witness from compile metadata.
 pub fn decode_scheduler_witness_hex(hex: &str) -> Result<Vec<u8>> {
     let hex_bytes = hex.as_bytes();
-    if hex_bytes.len() % 2 != 0 {
+    if !hex_bytes.len().is_multiple_of(2) {
         return Err(CompileError::without_span("scheduler witness hex string must contain full bytes"));
     }
     let mut bytes = Vec::with_capacity(hex_bytes.len() / 2);
@@ -6730,6 +6730,7 @@ fn body_linear_collection_obligations(
 #[derive(Debug, Clone)]
 struct MetadataFieldAlias {
     root_id: usize,
+    root_name: String,
     field: String,
 }
 
@@ -6765,17 +6766,52 @@ fn body_resource_conservation_obligations(
         for instruction in &block.instructions {
             match instruction {
                 ir::IrInstruction::Consume { operand: ir::IrOperand::Var(var) } => {
-                    if let Some(type_name) = resource_param_types.get(&var.id) {
-                        consumed_params.entry(type_name.clone()).or_default().push(var.clone());
+                    let type_name = resource_param_types.get(&var.id).cloned().or_else(|| {
+                        named_type_name(&var.ty)
+                            .filter(|type_name| cell_type_kinds.get(*type_name) == Some(&ir::IrTypeKind::Resource))
+                            .map(str::to_string)
+                    });
+                    if let Some(type_name) = type_name {
+                        consumed_params.entry(type_name).or_default().push(var.clone());
                     }
                 }
                 ir::IrInstruction::Create { pattern, .. }
-                    if pattern.operation == "create" && cell_type_kinds.get(&pattern.ty) == Some(&ir::IrTypeKind::Resource) =>
+                    if matches!(pattern.operation.as_str(), "create" | "output")
+                        && cell_type_kinds.get(&pattern.ty) == Some(&ir::IrTypeKind::Resource) =>
                 {
                     created_outputs.entry(pattern.ty.clone()).or_default().push(pattern.clone());
                 }
                 _ => {}
             }
+        }
+    }
+    for pattern in &body.consume_set {
+        if pattern.operation != "consume" {
+            continue;
+        }
+        let Some(param) = params.iter().find(|param| param.name == pattern.binding) else {
+            continue;
+        };
+        let Some(type_name) = named_type_name(&param.ty) else {
+            continue;
+        };
+        if cell_type_kinds.get(type_name) != Some(&ir::IrTypeKind::Resource) {
+            continue;
+        }
+        let entry = consumed_params.entry(type_name.to_string()).or_default();
+        if !entry.iter().any(|var| var.id == param.binding.id || var.name == param.binding.name) {
+            entry.push(param.binding.clone());
+        }
+    }
+    for pattern in &body.create_set {
+        if !matches!(pattern.operation.as_str(), "create" | "output")
+            || cell_type_kinds.get(&pattern.ty) != Some(&ir::IrTypeKind::Resource)
+        {
+            continue;
+        }
+        let entry = created_outputs.entry(pattern.ty.clone()).or_default();
+        if !entry.iter().any(|candidate| candidate.binding == pattern.binding) {
+            entry.push(pattern.clone());
         }
     }
 
@@ -6793,7 +6829,7 @@ fn body_resource_conservation_obligations(
                 .map(|layouts| layouts.keys().cloned().collect::<BTreeSet<_>>().into_iter().collect::<Vec<_>>().join(", "))
                 .unwrap_or_else(|| "<unknown>".to_string());
             let checked_detail =
-                resource_conservation_checked_detail(name, body, type_layouts, availability, type_name, &consumed, &created, &fields);
+                resource_conservation_checked_detail(name, body, type_layouts, availability, params, type_name, &consumed, &created, &fields);
             Some(TransactionResourceObligation {
                 category: "transaction-invariant",
                 feature: format!("resource-conservation:{}", type_name),
@@ -6816,6 +6852,7 @@ fn resource_conservation_checked_detail(
     body: &ir::IrBody,
     type_layouts: &MetadataTypeLayouts,
     availability: &MetadataPreludeAvailability,
+    params: &[ir::IrParam],
     type_name: &str,
     consumed: &[ir::IrVar],
     created: &[ir::CreatePattern],
@@ -6850,6 +6887,13 @@ fn resource_conservation_checked_detail(
     if resource_conservation_amm_swap_is_checked(name, body, type_layouts, availability, type_name, consumed, created) {
         return Some(format!(
             "Compiler-emitted AMM verifier checks one consumed '{}' input is exchanged for one created output through Pool symbol admission, fee accounting, and constant-product pricing; resource-conservation=checked-runtime; fields: amount, symbol",
+            type_name
+        ));
+    }
+
+    if resource_conservation_launch_token_is_checked(name, body, type_layouts, availability, params, type_name, consumed, created) {
+        return Some(format!(
+            "Compiler-emitted launch verifier checks '{}' issuance through MintAuthority minted supply, distribution plus pool-seed bounds, paired-token Pool reserve accounting, and verifier-covered created token outputs; resource-conservation=checked-runtime; fields: amount, symbol",
             type_name
         ));
     }
@@ -6993,18 +7037,94 @@ fn resource_conservation_amm_swap_is_checked(
     {
         return false;
     }
-    let Some(pool_pattern) = body.mutate_set.iter().find(|pattern| pattern.binding == "pool" && pattern.ty == "Pool") else {
+    if let Some(pool_pattern) = body.mutate_set.iter().find(|pattern| pattern.binding == "pool" && pattern.ty == "Pool") {
+        return pool_swap_a_for_b_admission_is_checked(
+            name,
+            pool_pattern,
+            body,
+            &pool_checked_invariant_guard_names(name, "mutation-invariants", body_assert_invariant_count(body)),
+            type_layouts,
+            availability,
+        ) && pool_swap_a_for_b_fee_accounting_is_checked(name, pool_pattern, body, type_layouts)
+            && pool_swap_a_for_b_constant_product_pricing_is_checked(name, pool_pattern, body, type_layouts, availability);
+    }
+
+    let Some(pool_output) = output_pool_pattern(body) else {
         return false;
     };
-    pool_swap_a_for_b_admission_is_checked(
-        name,
-        pool_pattern,
-        body,
-        &pool_checked_invariant_guard_names(name, "mutation-invariants", body_assert_invariant_count(body)),
-        type_layouts,
-        availability,
-    ) && pool_swap_a_for_b_fee_accounting_is_checked(name, pool_pattern, body, type_layouts)
-        && pool_swap_a_for_b_constant_product_pricing_is_checked(name, pool_pattern, body, type_layouts, availability)
+    let admission = pool_output_param_admission_is_checked(name, pool_output, body, type_layouts, availability);
+    let fee = pool_output_param_fee_accounting_is_checked(name, pool_output, body, type_layouts);
+    let pricing = pool_output_param_constant_product_pricing_is_checked(name, pool_output, created, body, type_layouts, availability);
+    admission && fee && pricing
+}
+
+#[allow(clippy::too_many_arguments)]
+fn resource_conservation_launch_token_is_checked(
+    name: &str,
+    body: &ir::IrBody,
+    type_layouts: &MetadataTypeLayouts,
+    availability: &MetadataPreludeAvailability,
+    params: &[ir::IrParam],
+    type_name: &str,
+    consumed: &[ir::IrVar],
+    created: &[ir::CreatePattern],
+) -> bool {
+    if name != "launch_token"
+        || type_name != "Token"
+        || consumed.len() != 1
+        || consumed.first().is_none_or(|var| var.name != "pool_paired_token")
+    {
+        return false;
+    }
+    let Some(distribution_param) = params.iter().find(|param| param.name == "distribution") else {
+        return false;
+    };
+    let Some(distribution_len) = launch_distribution_amount_count(&distribution_param.ty) else {
+        return false;
+    };
+    if created.len() != distribution_len + 1 {
+        return false;
+    }
+    if !created.iter().all(|pattern| {
+        pattern.ty == "Token"
+            && matches!(pattern.operation.as_str(), "create" | "output")
+            && metadata_can_verify_create_output_fields(pattern, type_layouts, availability)
+            && metadata_can_verify_output_lock(pattern, availability)
+            && create_field_matches_param(pattern, "symbol", "symbol", params, type_layouts, availability, 8)
+    }) {
+        return false;
+    }
+    if !launch_distribution_sum_coupling_is_checked(body, params, availability) {
+        return false;
+    }
+    let Some((_, auth_pattern)) = body.create_set.iter().enumerate().find(|(_, pattern)| pattern.ty == "MintAuthority") else {
+        return false;
+    };
+    if !create_field_matches_param(auth_pattern, "token_symbol", "symbol", params, type_layouts, availability, 8)
+        || !create_field_matches_param(auth_pattern, "minted", "initial_mint", params, type_layouts, availability, 8)
+    {
+        return false;
+    }
+    let Some((_, pool_pattern)) =
+        body.create_set.iter().enumerate().find(|(_, pattern)| pattern.ty == "Pool" && pattern.binding == "pool")
+    else {
+        return false;
+    };
+    if !create_field_matches_param(pool_pattern, "token_a_symbol", "symbol", params, type_layouts, availability, 8)
+        || !create_field_matches_param(pool_pattern, "reserve_a", "pool_seed_amount", params, type_layouts, availability, 8)
+        || !create_field_matches_param(pool_pattern, "total_lp", "pool_seed_amount", params, type_layouts, availability, 8)
+        || !create_field_matches_param(pool_pattern, "fee_rate_bps", "fee_rate_bps", params, type_layouts, availability, 2)
+        || !create_pattern_field_is_alias(body, pool_pattern, "token_b_symbol", "pool_paired_token", "symbol")
+        || !create_pattern_field_is_alias(body, pool_pattern, "reserve_b", "pool_paired_token", "amount")
+    {
+        return false;
+    }
+    let Some((_, lp_pattern)) =
+        body.create_set.iter().enumerate().find(|(_, pattern)| pattern.ty == "LPReceipt" && pattern.binding == "lp_receipt")
+    else {
+        return false;
+    };
+    create_field_matches_param(lp_pattern, "lp_amount", "pool_seed_amount", params, type_layouts, availability, 8)
 }
 
 fn resource_conservation_has_single_u64_amount_field(type_layouts: &MetadataTypeLayouts, type_name: &str) -> bool {
@@ -7122,7 +7242,15 @@ fn metadata_field_aliases(body: &ir::IrBody) -> HashMap<usize, MetadataFieldAlia
         for instruction in &block.instructions {
             match instruction {
                 ir::IrInstruction::FieldAccess { dest, obj: ir::IrOperand::Var(obj), field } => {
-                    aliases.insert(dest.id, MetadataFieldAlias { root_id: obj.id, field: field.clone() });
+                    let alias = aliases.get(&obj.id).cloned().map_or_else(
+                        || MetadataFieldAlias { root_id: obj.id, root_name: obj.name.clone(), field: field.clone() },
+                        |parent: MetadataFieldAlias| MetadataFieldAlias {
+                            root_id: parent.root_id,
+                            root_name: parent.root_name,
+                            field: format!("{}.{}", parent.field, field),
+                        },
+                    );
+                    aliases.insert(dest.id, alias);
                 }
                 ir::IrInstruction::Move { dest, src: ir::IrOperand::Var(src) } => {
                     if let Some(alias) = aliases.get(&src.id).cloned() {
@@ -7138,11 +7266,17 @@ fn metadata_field_aliases(body: &ir::IrBody) -> HashMap<usize, MetadataFieldAlia
 
 fn metadata_u64_sources(body: &ir::IrBody) -> HashMap<usize, MetadataU64Source> {
     let mut sources = HashMap::new();
+    let aliases = metadata_field_aliases(body);
     for block in &body.blocks {
         for instruction in &block.instructions {
             match instruction {
                 ir::IrInstruction::FieldAccess { dest, obj: ir::IrOperand::Var(obj), field } if dest.ty == ir::IrType::U64 => {
-                    sources.insert(dest.id, MetadataU64Source::Field(MetadataFieldAlias { root_id: obj.id, field: field.clone() }));
+                    let alias = aliases.get(&dest.id).cloned().unwrap_or_else(|| MetadataFieldAlias {
+                        root_id: obj.id,
+                        root_name: obj.name.clone(),
+                        field: field.clone(),
+                    });
+                    sources.insert(dest.id, MetadataU64Source::Field(alias));
                 }
                 ir::IrInstruction::Binary { dest, op: ast::BinaryOp::Add, left, right } if dest.ty == ir::IrType::U64 => {
                     if let (Some(left), Some(right)) =
@@ -7677,7 +7811,8 @@ fn body_pool_primitive_metadata(
     let mut seen = BTreeSet::new();
 
     for (output_index, pattern) in body.create_set.iter().enumerate() {
-        if !is_pool_pattern_candidate(&pattern.ty, cell_type_kinds)
+        if pattern.operation != "create"
+            || !is_pool_pattern_candidate(&pattern.ty, cell_type_kinds)
             || !seen.insert(("create", pattern.ty.clone(), pattern.binding.clone()))
         {
             continue;
@@ -7690,17 +7825,22 @@ fn body_pool_primitive_metadata(
         let checked_invariant_guards = pool_checked_invariant_guard_names(name, "create", source_invariant_count);
         let token_pair_symbol_status =
             if pool_seed_token_pair_symbol_admission_is_checked(name, pattern, &checked_invariant_guards, type_layouts, &availability)
+                || pool_launch_token_pair_symbol_admission_is_checked(name, pattern, body, params, type_layouts, &availability)
             {
                 "checked-runtime"
             } else {
                 "runtime-required"
             };
-        let lp_supply_status = if pool_seed_lp_supply_invariant_is_checked(name, pattern, body, type_layouts, &availability) {
+        let lp_supply_status = if pool_seed_lp_supply_invariant_is_checked(name, pattern, body, type_layouts, &availability)
+            || pool_launch_token_lp_supply_invariant_is_checked(name, pattern, body, type_layouts, &availability)
+        {
             "checked-runtime"
         } else {
             "runtime-required"
         };
-        let token_pair_identity_status = if pool_seed_token_pair_identity_admission_is_checked(name, body, pattern) {
+        let token_pair_identity_status = if pool_seed_token_pair_identity_admission_is_checked(name, body, pattern)
+            || pool_launch_token_identity_admission_is_checked(name, pattern, body, params, type_layouts, &availability)
+        {
             "checked-runtime"
         } else {
             "runtime-required"
@@ -7948,6 +8088,14 @@ fn pool_checked_invariant_guard_names(name: &str, operation: &str, source_invari
 
     let named_guards = match (operation, name) {
         ("create", "seed_pool") => &["token-pair-distinct", "positive-reserves", "fee-bps-bound", "token-pair-identity-distinct"][..],
+        ("create", "launch_token") => &[
+            "initial-mint-cap",
+            "pool-seed-positive",
+            "paired-seed-positive",
+            "token-pair-distinct",
+            "fee-bps-bound",
+            "pool-seed-cap",
+        ][..],
         ("mutation-invariants", "swap_a_for_b") => &["input-token-a-match", "minimum-output-bound", "reserve-output-bound"][..],
         ("mutation-invariants", "add_liquidity") => &["deposit-token-a-match", "deposit-token-b-match"][..],
         ("mutation-invariants", "remove_liquidity") => &["lp-receipt-pool-id-match"][..],
@@ -7982,6 +8130,27 @@ fn pool_checked_protocol_components(
                 components.push("token-pair-symbol-admission".to_string());
             }
             if checked_invariant_guards.iter().any(|guard| guard == "positive-reserves") {
+                components.push("positive-reserve-admission".to_string());
+            }
+            if checked_invariant_guards.iter().any(|guard| guard == "fee-bps-bound") {
+                components.push("fee-policy".to_string());
+            }
+            if lp_supply_status == "checked-runtime" {
+                components.push("lp-supply-invariant".to_string());
+            }
+            components
+        }
+        ("create", "launch_token") if field_status == "checked-runtime" => {
+            let mut components = Vec::new();
+            if token_pair_symbol_status == "checked-runtime" {
+                components.push("token-pair-symbol-admission".to_string());
+            }
+            if token_pair_identity_status == "checked-runtime" {
+                components.push("token-pair-identity-admission".to_string());
+            }
+            if checked_invariant_guards.iter().any(|guard| guard == "pool-seed-positive")
+                && checked_invariant_guards.iter().any(|guard| guard == "paired-seed-positive")
+            {
                 components.push("positive-reserve-admission".to_string());
             }
             if checked_invariant_guards.iter().any(|guard| guard == "fee-bps-bound") {
@@ -8078,6 +8247,14 @@ fn pool_swap_a_for_b_output_formula() -> &'static str {
     "((pool.reserve_b*(input.amount-((input.amount*pool.fee_rate_bps)/10000)))/(pool.reserve_a+(input.amount-((input.amount*pool.fee_rate_bps)/10000))))"
 }
 
+fn pool_swap_a_for_b_reserve_b_after_formula() -> String {
+    format!("(pool.reserve_b-{})", pool_swap_a_for_b_output_formula())
+}
+
+fn pool_before_field_source(field: &str) -> String {
+    format!("pool.{field}")
+}
+
 fn pool_swap_a_for_b_fee_accounting_is_checked(
     name: &str,
     pattern: &ir::MutatePattern,
@@ -8157,6 +8334,174 @@ fn pool_swap_a_for_b_admission_is_checked(
             && metadata_can_verify_create_output_fields(candidate, type_layouts, availability)
             && create_pattern_field_operand(candidate, "symbol").is_some()
     })
+}
+
+fn output_pool_pattern(body: &ir::IrBody) -> Option<&ir::CreatePattern> {
+    body.create_set.iter().find(|pattern| pattern.operation == "output" && pattern.ty == "Pool" && pattern.binding == "pool_after")
+}
+
+fn pool_output_param_admission_is_checked(
+    name: &str,
+    pattern: &ir::CreatePattern,
+    body: &ir::IrBody,
+    type_layouts: &MetadataTypeLayouts,
+    availability: &MetadataPreludeAvailability,
+) -> bool {
+    if name != "swap_a_for_b" || pattern.ty != "Pool" {
+        return false;
+    }
+    if consumed_input_pattern(body, "input").is_none()
+        || !metadata_can_verify_create_output_fields(pattern, type_layouts, availability)
+    {
+        return false;
+    }
+    ["token_a_symbol", "token_b_symbol", "total_lp", "fee_rate_bps"]
+        .iter()
+        .all(|field| metadata_asserted_field_equality_by_name(body, "pool_after", field, "pool_before", field))
+        && metadata_asserted_field_equality_by_name(body, "input", "symbol", "pool_before", "token_a_symbol")
+        && body.create_set.iter().any(|candidate| {
+            candidate.ty == "Token"
+                && matches!(candidate.operation.as_str(), "create" | "output")
+                && metadata_can_verify_create_output_fields(candidate, type_layouts, availability)
+                && create_pattern_field_is_alias(body, candidate, "symbol", "pool_before", "token_b_symbol")
+        })
+}
+
+fn pool_output_param_fee_accounting_is_checked(
+    name: &str,
+    pattern: &ir::CreatePattern,
+    body: &ir::IrBody,
+    type_layouts: &MetadataTypeLayouts,
+) -> bool {
+    if name != "swap_a_for_b" || pattern.ty != "Pool" {
+        return false;
+    }
+    if !metadata_asserted_field_equality_by_name(body, "pool_after", "fee_rate_bps", "pool_before", "fee_rate_bps") {
+        return false;
+    }
+    let Some(token_pattern) = body
+        .create_set
+        .iter()
+        .find(|candidate| candidate.ty == "Token" && matches!(candidate.operation.as_str(), "create" | "output"))
+    else {
+        return false;
+    };
+    let Some(token_amount) = create_pattern_field_operand(token_pattern, "amount") else {
+        return false;
+    };
+    amm_u64_source(token_amount, &amm_u64_sources(body)).as_deref() == Some(pool_swap_a_for_b_output_formula())
+        && type_field_has_fixed_width(type_layouts, "Pool", "fee_rate_bps", 2)
+}
+
+fn pool_output_param_constant_product_pricing_is_checked(
+    name: &str,
+    pool_pattern: &ir::CreatePattern,
+    token_pattern: &ir::CreatePattern,
+    body: &ir::IrBody,
+    type_layouts: &MetadataTypeLayouts,
+    availability: &MetadataPreludeAvailability,
+) -> bool {
+    if name != "swap_a_for_b" || pool_pattern.ty != "Pool" || token_pattern.ty != "Token" {
+        return false;
+    }
+    if !metadata_can_verify_create_output_fields(pool_pattern, type_layouts, availability)
+        || !metadata_can_verify_create_output_fields(token_pattern, type_layouts, availability)
+    {
+        return false;
+    }
+    let sources = amm_u64_sources(body);
+    let Some(token_amount) = create_pattern_field_operand(token_pattern, "amount") else {
+        return false;
+    };
+    let reserve_b_after = pool_swap_a_for_b_reserve_b_after_formula();
+    metadata_asserted_u64_field_formula_by_name(body, "pool_after", "reserve_a", "(pool.reserve_a+input.amount)")
+        && metadata_asserted_u64_field_formula_by_name(body, "pool_after", "reserve_b", &reserve_b_after)
+        && amm_u64_source(token_amount, &sources).as_deref() == Some(pool_swap_a_for_b_output_formula())
+}
+
+fn create_pattern_field_is_alias(
+    body: &ir::IrBody,
+    pattern: &ir::CreatePattern,
+    field: &str,
+    root_name: &str,
+    root_field: &str,
+) -> bool {
+    let Some(operand) = create_pattern_field_operand(pattern, field) else {
+        return false;
+    };
+    operand_is_alias(body, operand, root_name, root_field)
+}
+
+fn operand_is_alias(body: &ir::IrBody, operand: &ir::IrOperand, root_name: &str, field: &str) -> bool {
+    let ir::IrOperand::Var(var) = operand else {
+        return false;
+    };
+    metadata_field_aliases(body).get(&var.id).is_some_and(|alias| alias.root_name == root_name && alias.field == field)
+}
+
+fn metadata_asserted_field_equality_by_name(
+    body: &ir::IrBody,
+    left_root_name: &str,
+    left_field: &str,
+    right_root_name: &str,
+    right_field: &str,
+) -> bool {
+    let aliases = metadata_field_aliases(body);
+    let equalities = metadata_asserted_field_equalities(body, &aliases);
+    let left_roots = aliases
+        .values()
+        .filter(|alias| alias.root_name == left_root_name && alias.field == left_field)
+        .map(|alias| alias.root_id)
+        .collect::<BTreeSet<_>>();
+    let right_roots = aliases
+        .values()
+        .filter(|alias| alias.root_name == right_root_name && alias.field == right_field)
+        .map(|alias| alias.root_id)
+        .collect::<BTreeSet<_>>();
+    left_roots.iter().any(|left_root| {
+        right_roots.iter().any(|right_root| {
+            equalities.contains(&canonical_metadata_field_equality(*left_root, left_field, *right_root, right_field))
+        })
+    })
+}
+
+fn metadata_asserted_u64_field_formula_by_name(body: &ir::IrBody, root_name: &str, field: &str, expected_formula: &str) -> bool {
+    let aliases = metadata_field_aliases(body);
+    let sources = amm_u64_sources(body);
+    let mut checked_bool_vars = HashSet::new();
+    for block in &body.blocks {
+        for instruction in &block.instructions {
+            match instruction {
+                ir::IrInstruction::Binary { dest, op: ast::BinaryOp::Eq, left, right } => {
+                    if (operand_alias_matches(&aliases, left, root_name, field)
+                        && amm_u64_source(right, &sources).as_deref() == Some(expected_formula))
+                        || (operand_alias_matches(&aliases, right, root_name, field)
+                            && amm_u64_source(left, &sources).as_deref() == Some(expected_formula))
+                    {
+                        checked_bool_vars.insert(dest.id);
+                    }
+                }
+                ir::IrInstruction::Move { dest, src: ir::IrOperand::Var(src) } if checked_bool_vars.contains(&src.id) => {
+                    checked_bool_vars.insert(dest.id);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    body.blocks.iter().any(|block| {
+        let ir::IrTerminator::Branch { cond: ir::IrOperand::Var(cond), else_block, .. } = &block.terminator else {
+            return false;
+        };
+        checked_bool_vars.contains(&cond.id) && block_returns_error(body, *else_block)
+    })
+}
+
+fn operand_alias_matches(aliases: &HashMap<usize, MetadataFieldAlias>, operand: &ir::IrOperand, root_name: &str, field: &str) -> bool {
+    let ir::IrOperand::Var(var) = operand else {
+        return false;
+    };
+    aliases.get(&var.id).is_some_and(|alias| alias.root_name == root_name && alias.field == field)
 }
 
 fn pool_add_liquidity_proportional_accounting_is_checked(
@@ -8341,14 +8686,14 @@ fn amm_u64_sources(body: &ir::IrBody) -> HashMap<usize, String> {
                         ("token_b", "amount") => {
                             sources.insert(dest.id, "token_b.amount".to_string());
                         }
-                        ("pool", "reserve_a") => {
-                            sources.insert(dest.id, "pool.reserve_a".to_string());
+                        ("pool" | "pool_before", "reserve_a") => {
+                            sources.insert(dest.id, pool_before_field_source("reserve_a"));
                         }
-                        ("pool", "reserve_b") => {
-                            sources.insert(dest.id, "pool.reserve_b".to_string());
+                        ("pool" | "pool_before", "reserve_b") => {
+                            sources.insert(dest.id, pool_before_field_source("reserve_b"));
                         }
-                        ("pool", "total_lp") => {
-                            sources.insert(dest.id, "pool.total_lp".to_string());
+                        ("pool" | "pool_before", "total_lp") => {
+                            sources.insert(dest.id, pool_before_field_source("total_lp"));
                         }
                         ("receipt", "lp_amount") => {
                             sources.insert(dest.id, "receipt.lp_amount".to_string());
@@ -8357,9 +8702,9 @@ fn amm_u64_sources(body: &ir::IrBody) -> HashMap<usize, String> {
                     }
                 }
                 ir::IrInstruction::FieldAccess { dest, obj: ir::IrOperand::Var(obj), field }
-                    if obj.name == "pool" && field == "fee_rate_bps" =>
+                    if matches!(obj.name.as_str(), "pool" | "pool_before") && field == "fee_rate_bps" =>
                 {
-                    sources.insert(dest.id, "pool.fee_rate_bps".to_string());
+                    sources.insert(dest.id, pool_before_field_source("fee_rate_bps"));
                 }
                 ir::IrInstruction::Binary { dest, op, left, right } if dest.ty == ir::IrType::U64 => {
                     let Some(left) = amm_u64_source(left, &sources) else {
@@ -8452,6 +8797,76 @@ fn pool_seed_token_pair_symbol_admission_is_checked(
         && !ir_operands_same_verifier_source(token_a_symbol, token_b_symbol)
 }
 
+fn pool_launch_token_pair_symbol_admission_is_checked(
+    name: &str,
+    pool_pattern: &ir::CreatePattern,
+    body: &ir::IrBody,
+    params: &[ir::IrParam],
+    type_layouts: &MetadataTypeLayouts,
+    availability: &MetadataPreludeAvailability,
+) -> bool {
+    if name != "launch_token" || pool_pattern.ty != "Pool" {
+        return false;
+    }
+    let Some(token_a_symbol) = create_pattern_field_operand(pool_pattern, "token_a_symbol") else {
+        return false;
+    };
+    let Some(token_b_symbol) = create_pattern_field_operand(pool_pattern, "token_b_symbol") else {
+        return false;
+    };
+    create_field_matches_param(pool_pattern, "token_a_symbol", "symbol", params, type_layouts, availability, 8)
+        && metadata_fixed_value_available_with_width(token_b_symbol, availability, 8)
+        && metadata_asserted_field_inequality(body, token_a_symbol, token_b_symbol)
+}
+
+fn pool_launch_token_identity_admission_is_checked(
+    name: &str,
+    pool_pattern: &ir::CreatePattern,
+    body: &ir::IrBody,
+    params: &[ir::IrParam],
+    type_layouts: &MetadataTypeLayouts,
+    availability: &MetadataPreludeAvailability,
+) -> bool {
+    if name != "launch_token" || pool_pattern.ty != "Pool" {
+        return false;
+    }
+    create_field_matches_param(pool_pattern, "token_a_symbol", "symbol", params, type_layouts, availability, 8)
+        && param_field_has_fixed_width(params, "pool_paired_token", "symbol", type_layouts, 8)
+        && consumed_input_pattern(body, "pool_paired_token").is_some()
+}
+
+fn pool_launch_token_lp_supply_invariant_is_checked(
+    name: &str,
+    pool_pattern: &ir::CreatePattern,
+    body: &ir::IrBody,
+    type_layouts: &MetadataTypeLayouts,
+    availability: &MetadataPreludeAvailability,
+) -> bool {
+    if name != "launch_token" || pool_pattern.ty != "Pool" {
+        return false;
+    }
+    if !metadata_can_verify_create_output_fields(pool_pattern, type_layouts, availability) {
+        return false;
+    }
+    let Some(pool_total_lp) = create_pattern_field_operand(pool_pattern, "total_lp") else {
+        return false;
+    };
+    let Some(pool_reserve_a) = create_pattern_field_operand(pool_pattern, "reserve_a") else {
+        return false;
+    };
+    metadata_fixed_value_available_with_width(pool_total_lp, availability, 8)
+        && metadata_fixed_value_available_with_width(pool_reserve_a, availability, 8)
+        && ir_operands_same_verifier_source(pool_total_lp, pool_reserve_a)
+        && body.create_set.iter().any(|candidate| {
+            candidate.ty == "LPReceipt"
+                && metadata_can_verify_create_output_fields(candidate, type_layouts, availability)
+                && create_pattern_field_operand(candidate, "lp_amount").is_some_and(|receipt_lp| {
+                    metadata_fixed_value_available_with_width(receipt_lp, availability, 8)
+                        && ir_operands_same_verifier_source(pool_total_lp, receipt_lp)
+                })
+        })
+}
+
 fn pool_seed_token_pair_identity_admission_is_checked(name: &str, body: &ir::IrBody, pool_pattern: &ir::CreatePattern) -> bool {
     if name != "seed_pool" || pool_pattern.ty != "Pool" {
         return false;
@@ -8522,6 +8937,49 @@ fn body_has_asserted_type_hash_inequality(body: &ir::IrBody, left_binding: &str,
             return false;
         };
         checked_inequality_vars.contains(&cond.id) && assert_fail_blocks.contains(else_block)
+    })
+}
+
+fn metadata_asserted_field_inequality(body: &ir::IrBody, left: &ir::IrOperand, right: &ir::IrOperand) -> bool {
+    let ir::IrOperand::Var(left) = left else {
+        return false;
+    };
+    let ir::IrOperand::Var(right) = right else {
+        return false;
+    };
+    let assertion_failed_code = runtime_errors::CellScriptRuntimeError::AssertionFailed.code();
+    let assert_fail_blocks = body
+        .blocks
+        .iter()
+        .filter(|block| match &block.terminator {
+            ir::IrTerminator::Return(Some(ir::IrOperand::Const(ir::IrConst::U64(code)))) => *code == assertion_failed_code,
+            _ => false,
+        })
+        .map(|block| block.id)
+        .collect::<HashSet<_>>();
+    let mut inequality_vars = HashSet::new();
+    for block in &body.blocks {
+        for instruction in &block.instructions {
+            match instruction {
+                ir::IrInstruction::Binary { dest, op: ast::BinaryOp::Ne, left: lhs, right: rhs }
+                    if (operand_matches_var_id(lhs, left.id) && operand_matches_var_id(rhs, right.id))
+                        || (operand_matches_var_id(lhs, right.id) && operand_matches_var_id(rhs, left.id)) =>
+                {
+                    inequality_vars.insert(dest.id);
+                }
+                ir::IrInstruction::Move { dest, src: ir::IrOperand::Var(src) } if inequality_vars.contains(&src.id) => {
+                    inequality_vars.insert(dest.id);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    body.blocks.iter().any(|block| {
+        let ir::IrTerminator::Branch { cond: ir::IrOperand::Var(cond), else_block, .. } = &block.terminator else {
+            return false;
+        };
+        inequality_vars.contains(&cond.id) && assert_fail_blocks.contains(else_block)
     })
 }
 
@@ -8747,6 +9205,8 @@ fn launch_distribution_sum_coupling_is_checked(
     }
 
     let mut checked_bool_vars = HashSet::new();
+    let mut named_u64_sources = HashMap::new();
+    let mut named_bool_sources = HashSet::new();
     for block in &body.blocks {
         for instruction in &block.instructions {
             match instruction {
@@ -8803,6 +9263,24 @@ fn launch_distribution_sum_coupling_is_checked(
                 }
                 ir::IrInstruction::Move { dest, src: ir::IrOperand::Var(src) } if dest.ty == ir::IrType::Bool => {
                     if checked_bool_vars.contains(&src.id) {
+                        checked_bool_vars.insert(dest.id);
+                    }
+                }
+                ir::IrInstruction::StoreVar { name, src } => {
+                    if let Some(sources) = launch_u64_sources(src, &u64_sources) {
+                        named_u64_sources.insert(name.clone(), sources);
+                    }
+                    if matches!(src, ir::IrOperand::Var(var) if checked_bool_vars.contains(&var.id)) {
+                        named_bool_sources.insert(name.clone());
+                    }
+                }
+                ir::IrInstruction::LoadVar { dest, name } if dest.ty == ir::IrType::U64 => {
+                    if let Some(sources) = named_u64_sources.get(name).cloned() {
+                        u64_sources.insert(dest.id, sources);
+                    }
+                }
+                ir::IrInstruction::LoadVar { dest, name } if dest.ty == ir::IrType::Bool => {
+                    if named_bool_sources.contains(name) {
                         checked_bool_vars.insert(dest.id);
                     }
                 }
@@ -14169,7 +14647,10 @@ action add(x: u64, y: u64) -> u64 {
         let total_size = read_u32(&bytes[..4], "total_size") as usize;
         assert_eq!(total_size, bytes.len(), "molecule table total size mismatch");
         let first_offset = read_u32(&bytes[4..8], "first_offset") as usize;
-        assert!(first_offset >= 8 && first_offset <= bytes.len() && first_offset % 4 == 0, "invalid first offset {first_offset}");
+        assert!(
+            first_offset >= 8 && first_offset <= bytes.len() && first_offset.is_multiple_of(4),
+            "invalid first offset {first_offset}"
+        );
         let field_count = first_offset / 4 - 1;
         assert_eq!(field_count, expected_fields, "unexpected molecule table field count");
         let mut offsets = bytes[4..first_offset].chunks_exact(4).map(|chunk| read_u32(chunk, "offset") as usize).collect::<Vec<_>>();

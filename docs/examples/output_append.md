@@ -11,7 +11,7 @@ resource Log has store, create, consume, replace {
     bytes: Vec<u8>,
 }
 
-action append(log: Log, suffix: Vec<u8>) -> next_log: Log {
+action append(log: Log, suffix: [u8; 16]) -> next_log: Log {
     transition log -> next_log
 
     verification
