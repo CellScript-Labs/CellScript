@@ -2105,7 +2105,7 @@ where
 }
 
 #[test]
-fn cellc_check_reports_checked_pool_invariant_families_without_runtime_blockers() {
+fn cellc_check_reports_amm_pool_without_runtime_blockers() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
     let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -2130,36 +2130,37 @@ version = "0.1.0"
     assert!(json_output.status.success(), "unexpected failure: {}", String::from_utf8_lossy(&json_output.stderr));
     let stdout: serde_json::Value = serde_json::from_slice(&json_output.stdout).unwrap();
     let target = &stdout["checked_targets"][0];
-    assert!(target["checked_pool_invariant_families"].as_u64().unwrap() > 0, "unexpected stdout: {}", stdout);
-    assert!(target["runtime_required_pool_invariant_families"].as_u64().unwrap() > 0, "unexpected stdout: {}", stdout);
-    assert!(target["runtime_required_pool_invariant_blocker_classes"].as_u64().unwrap() > 0, "unexpected stdout: {}", stdout);
+    assert_eq!(target["checked_pool_invariant_families"].as_u64().unwrap(), 0, "unexpected stdout: {}", stdout);
+    assert_eq!(target["runtime_required_pool_invariant_families"].as_u64().unwrap(), 0, "unexpected stdout: {}", stdout);
+    assert_eq!(target["runtime_required_pool_invariant_blocker_classes"].as_u64().unwrap(), 0, "unexpected stdout: {}", stdout);
     let blocker_classes = target["runtime_required_pool_invariant_blocker_class_summaries"]
         .as_array()
         .expect("runtime-required Pool invariant blocker class summaries array");
-    assert!(
-        blocker_classes.iter().any(|value| value.as_str().is_some_and(|summary| summary.contains("pool-create:Pool"))),
-        "AMM pool admission blockers should remain explicit: {}",
-        stdout
-    );
-    assert!(
-        !blocker_classes.iter().any(|value| value
-            .as_str()
-            .is_some_and(|summary| { summary.contains("pool-mutation-invariants:Pool:reserve-conservation") })),
-        "reserve-conservation should be checked-runtime, not in blocker classes: {}",
-        stdout
-    );
+    assert!(blocker_classes.is_empty(), "AMM pool admission should not leave runtime-required blockers: {}", stdout);
     let runtime_inputs = target["pool_runtime_input_requirement_summaries"].as_array().expect("runtime input summaries array");
     assert!(
         !runtime_inputs.iter().any(|value| value.as_str().is_some_and(|summary| { summary.contains("reserve-conservation=") })),
-        "checked reserve-conservation should not appear in runtime input summaries: {}",
+        "AMM reserve-conservation should not appear in Pool runtime input summaries: {}",
+        stdout
+    );
+    assert_eq!(
+        target["runtime_required_transaction_runtime_input_requirements"].as_u64().unwrap(),
+        0,
+        "unexpected stdout: {}",
+        stdout
+    );
+    assert_eq!(
+        target["runtime_required_transaction_runtime_input_blocker_classes"].as_u64().unwrap(),
+        0,
+        "unexpected stdout: {}",
         stdout
     );
 
     let output = cellc_command().current_dir(root).arg("check").arg("--deny-runtime-obligations").output().unwrap();
     assert!(
-        !output.status.success(),
-        "full AMM policy debt should still fail deny-runtime-obligations: {}",
-        String::from_utf8_lossy(&output.stdout)
+        output.status.success(),
+        "full AMM policy should satisfy deny-runtime-obligations: {}",
+        String::from_utf8_lossy(&output.stderr)
     );
 }
 

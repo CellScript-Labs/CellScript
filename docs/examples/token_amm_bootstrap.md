@@ -23,8 +23,7 @@ The bundled bootstrap companion is `examples/launch.cell`:
 
 `examples/amm_pool.cell` is the standalone AMM state machine. Use `seed_pool`
 when you already have two real token Cells. Use `swap_a_for_b`,
-`swap_b_for_a`, `add_liquidity`, and `remove_liquidity` after a live `Pool`
-Cell exists.
+`add_liquidity`, and `remove_liquidity` after a live `Pool` Cell exists.
 
 The practical bootstrap chain is:
 
