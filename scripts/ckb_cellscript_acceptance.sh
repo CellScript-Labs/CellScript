@@ -505,7 +505,7 @@ NFT_TYPES_SOURCE = """resource NFT has store, create, consume, replace, burn, re
     royalty_bps: u16
 }
 
-resource Collection has store, replace {
+resource Collection has store, create, replace {
     creator: Address
     total_supply: u64
     max_supply: u64
@@ -533,6 +533,18 @@ receipt RoyaltyPayment has create {
 """
 
 NFT_ACTION_SOURCES = {
+    "create_collection": """
+action create_collection(creator: Address, max_supply: u64) -> collection: Collection
+where
+    assert_invariant(max_supply > 0, "max supply must be positive")
+    assert_invariant(max_supply <= 10000, "max supply too high")
+
+    create collection = Collection {
+        creator: creator,
+        total_supply: 0,
+        max_supply: max_supply
+    } with_lock(creator)
+""",
     "mint": """
 action mint(collection_before: Collection, to: Address, metadata_hash: Hash) -> (collection_after: Collection, nft: NFT)
 where
@@ -1460,6 +1472,7 @@ for action, source in LAUNCH_ACTION_SOURCES.items():
 
 ORIGINAL_SCOPED_ACTIONS = {
     "nft.cell": [
+        "create_collection",
         "mint",
         "transfer",
         "create_listing",
@@ -1512,6 +1525,7 @@ ORIGINAL_SCOPED_LOCK_FAIL_CLOSED = {}
 EXPECTED_SOURCE_ACTIONS = {
     "token.cell": ["mint_with_authority", "transfer_token", "burn", "merge"],
     "nft.cell": [
+        "create_collection",
         "mint",
         "transfer",
         "create_listing",
@@ -2537,6 +2551,9 @@ def molecule_u32(value):
 
 def molecule_bytes(data):
     return molecule_u32(len(data)) + data
+
+def molecule_string_witness(data):
+    return molecule_bytes(molecule_bytes(data))
 
 def molecule_fixvec(items):
     out = bytearray(molecule_u32(len(items)))
@@ -3920,7 +3937,36 @@ def build_nft_action_case(action_record, cellscript_lock, cellscript_type, desti
     original_scoped = action_record.get("kind") == "original-scoped-action-strict"
     flow_state = 0 if original_scoped else None
 
-    if action == "mint":
+    if action == "create_collection":
+        name = b"Acceptance Collection"
+        symbol = b"ACPT"
+        base_uri = b"ckb://cellscript/nft/"
+        max_supply = 200
+        valid_collection_payload = (
+            collection_molecule_data(current_owner, 0, max_supply, name, symbol, base_uri)
+            if original_scoped
+            else collection_data(current_owner, 0, max_supply)
+        )
+        malformed_collection_payload = (
+            collection_molecule_data(current_owner, 1, max_supply, name, symbol, base_uri)
+            if original_scoped
+            else collection_data(current_owner, 1, max_supply)
+        )
+        witness = (
+            entry_witness(current_owner, max_supply, molecule_string_witness(name), molecule_string_witness(symbol), molecule_string_witness(base_uri))
+            if original_scoped
+            else entry_witness(current_owner, max_supply)
+        )
+        initial = create_script_locked_cells(
+            "nft.create_collection",
+            [{"capacity": 1000 * 100_000_000, "lock": cellscript_lock, "type": None, "data": b""}],
+            cell_deps,
+        )
+        input_cell = initial["cells"][0]
+        outputs = [{"capacity": hex_u64(1000 * 100_000_000), "lock": cellscript_lock, "type": cellscript_type}]
+        valid_tx = transaction(input_cell, outputs, ["0x" + valid_collection_payload.hex()], cell_deps, [witness])
+        malformed_tx = transaction(input_cell, outputs, ["0x" + malformed_collection_payload.hex()], cell_deps, [witness])
+    elif action == "mint":
         input_collection_payload = (
             collection_molecule_data(current_owner, 10, 1000)
             if original_scoped
@@ -5855,7 +5901,7 @@ def run_stateful_nft_listing_sale(always_success_dep):
     scenario = "nft.mint-list-transfer-by-listing"
     actions = {
         name: deploy_stateful_action(action_record_by(nft_action_artifacts, name), always_success_dep)
-        for name in ("mint", "create_listing", "buy_from_listing")
+        for name in ("create_collection", "mint", "create_listing", "buy_from_listing")
     }
     collection_type = always_success_lock("0xc1")
     nft_type = always_success_lock("0xc2")
@@ -5864,7 +5910,12 @@ def run_stateful_nft_listing_sale(always_success_dep):
     seller = bytes([0x11]) * 32
     buyer_lock = always_success_lock("0xc5")
     buyer = decode_hex(script_hash(buyer_lock), 32)
-    royalty_recipient = seller
+    collection_creator = actions["mint"]["lock_hash"]
+    royalty_recipient = collection_creator
+    collection_name = b"Stateful Collection"
+    collection_symbol = b"SNFT"
+    collection_base_uri = b"ckb://cellscript/stateful-nft/"
+    max_supply = 200
     metadata_hash = bytes([0x33]) * 32
     token_id = 1
     price = 10_000
@@ -5874,32 +5925,51 @@ def run_stateful_nft_listing_sale(always_success_dep):
     steps = []
 
     initial = create_script_locked_cells(
-        "stateful.nft.collection",
+        "stateful.nft.collection_seed",
         [{
             "capacity": 900 * 100_000_000,
-            "lock": actions["mint"]["lock"],
-            "type": collection_type,
-            "data": collection_molecule_data(seller, 0, 1000),
+            "lock": actions["create_collection"]["lock"],
+            "type": None,
+            "data": b"",
         }],
-        actions["mint"]["cell_deps"],
+        actions["create_collection"]["cell_deps"],
     )
-    collection0 = initial["cells"][0]
+    collection_seed = initial["cells"][0]
     tx1 = transaction(
+        collection_seed,
+        [{"capacity": hex_u64(800 * 100_000_000), "lock": actions["mint"]["lock"], "type": collection_type}],
+        ["0x" + collection_molecule_data(collection_creator, 0, max_supply, collection_name, collection_symbol, collection_base_uri).hex()],
+        actions["create_collection"]["cell_deps"],
+        [
+            entry_witness(
+                collection_creator,
+                max_supply,
+                molecule_string_witness(collection_name),
+                molecule_string_witness(collection_symbol),
+                molecule_string_witness(collection_base_uri),
+            )
+        ],
+    )
+    step = run_stateful_step(scenario, "create_collection_for_live_mint", tx1, [collection_seed])
+    steps.append(step)
+    collection0 = output_cell_from_tx(step["commit"], tx1, 0)
+
+    tx2 = transaction(
         collection0,
         [
             {"capacity": hex_u64(500 * 100_000_000), "lock": actions["mint"]["lock"], "type": collection_type},
             {"capacity": hex_u64(300 * 100_000_000), "lock": actions["buy_from_listing"]["lock"], "type": nft_type},
         ],
         [
-            "0x" + collection_molecule_data(seller, token_id, 1000).hex(),
+            "0x" + collection_molecule_data(collection_creator, token_id, max_supply, collection_name, collection_symbol, collection_base_uri).hex(),
             "0x" + nft_data(token_id, seller, metadata_hash, royalty_recipient, 250).hex(),
         ],
         actions["mint"]["cell_deps"],
         [entry_witness(seller, metadata_hash)],
     )
-    step = run_stateful_step(scenario, "mint_nft_for_listing_sale", tx1, [collection0])
+    step = run_stateful_step(scenario, "mint_nft_for_listing_sale", tx2, [collection0])
     steps.append(step)
-    nft_for_sale = output_cell_from_tx(step["commit"], tx1, 1)
+    nft_for_sale = output_cell_from_tx(step["commit"], tx2, 1)
     nft_dep = cell_dep_for(nft_for_sale)
 
     listing_initial = create_script_locked_cells(
@@ -5908,7 +5978,7 @@ def run_stateful_nft_listing_sale(always_success_dep):
         actions["create_listing"]["cell_deps"],
     )
     listing_input = listing_initial["cells"][0]
-    tx2 = transaction(
+    tx3 = transaction(
         listing_input,
         [
             {"capacity": hex_u64(300 * 100_000_000), "lock": actions["buy_from_listing"]["lock"], "type": listing_type},
@@ -5921,11 +5991,11 @@ def run_stateful_nft_listing_sale(always_success_dep):
         [nft_dep] + actions["create_listing"]["cell_deps"],
         [entry_witness(price, created_at)],
     )
-    step = run_stateful_step(scenario, "create_listing_from_live_nft_dep", tx2, [listing_input])
+    step = run_stateful_step(scenario, "create_listing_from_live_nft_dep", tx3, [listing_input])
     steps.append(step)
-    listing = output_cell_from_tx(step["commit"], tx2, 0)
+    listing = output_cell_from_tx(step["commit"], tx3, 0)
 
-    tx3 = transaction(
+    tx4 = transaction(
         [nft_for_sale, listing],
         [
             {"capacity": hex_u64(300 * 100_000_000), "lock": buyer_lock, "type": nft_type},
@@ -5940,7 +6010,7 @@ def run_stateful_nft_listing_sale(always_success_dep):
         actions["buy_from_listing"]["cell_deps"],
         [entry_witness(buyer, seller, price), "0x"],
     )
-    step = run_stateful_step(scenario, "buy_listing_from_live_nft_and_listing", tx3, [nft_for_sale, listing])
+    step = run_stateful_step(scenario, "buy_listing_from_live_nft_and_listing", tx4, [nft_for_sale, listing])
     steps.append(step)
 
     return {
@@ -6561,6 +6631,7 @@ try:
         "burn",
         "buy_from_listing",
         "cancel_listing",
+        "create_collection",
         "create_listing",
         "create_offer",
         "mint",

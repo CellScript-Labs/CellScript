@@ -14,7 +14,7 @@ const BUNDLED_EXAMPLE_ELF_SIZE_BUDGETS: [(&str, usize); 7] = [
     ("amm_pool.cell", 48 * 1024),
     ("launch.cell", 30 * 1024),
     ("multisig.cell", 108 * 1024),
-    ("nft.cell", 60 * 1024),
+    ("nft.cell", 62 * 1024),
     ("timelock.cell", 72 * 1024),
     ("token.cell", 16 * 1024),
     ("vesting.cell", 26 * 1024),
@@ -72,17 +72,17 @@ const BUNDLED_EXAMPLE_ASM_SHAPE_BUDGETS: [(&str, AssemblyShapeBudget); 7] = [
     (
         "nft.cell",
         AssemblyShapeBudget {
-            max_lines: 14_500,
-            max_fail_handlers: 72,
+            max_lines: 15_000,
+            max_fail_handlers: 80,
             max_shared_epilogues: 18,
-            max_text_bytes: 54 * 1024,
+            max_text_bytes: 57 * 1024,
             max_relaxed_branches: 4,
             max_cond_branch_abs_distance: 7_500,
             max_machine_blocks: 2_500,
             max_machine_block_bytes: 320,
             max_cfg_edges: 4_100,
             max_call_edges: 560,
-            max_unreachable_machine_blocks: 2_100,
+            max_unreachable_machine_blocks: 2_250,
         },
     ),
     (
@@ -414,6 +414,12 @@ fn token_amm_bootstrap_docs_cover_builder_friction_boundary() {
         flows.contains("Materialise Pool and LPReceipt outputs"),
         "launch flow should describe direct Pool and LPReceipt output materialisation"
     );
+    assert!(flows.contains("all 44 business actions"), "business flow guide should track the full production action count");
+    assert!(
+        flows.contains("Use `create_collection` to materialise the first live `Collection` Cell"),
+        "NFT flow should document the Collection bootstrap action"
+    );
+    assert!(flows.contains("`create_collection -> mint ->"), "NFT flow should describe the stateful Collection-to-mint handoff");
     assert!(!flows.contains("Call seed_pool pattern"), "launch flow must not imply that launch_token calls amm_pool::seed_pool");
 }
 
@@ -1481,6 +1487,26 @@ fn token_mint_authority_input_output_binding_is_explicit() {
 fn nft_core_actions_expose_action_specific_builder_metadata() {
     let result = compile_file(example_path("nft.cell"), CompileOptions::default()).expect("nft example should compile");
     let asm = String::from_utf8(result.artifact_bytes.clone()).expect("nft asm should be utf8");
+
+    let create_collection = action(&result.metadata, "create_collection");
+    assert_eq!(create_collection.effect_class, "Creating");
+    assert!(create_collection.parallelizable);
+    assert!(create_collection.fail_closed_runtime_features.is_empty(), "nft create_collection should not carry fail-closed debt");
+    assert_create(create_collection, "Collection", "nft create_collection");
+    assert_runtime_requirement(
+        create_collection,
+        "create-output:Collection:collection",
+        "checked-runtime",
+        "create-output-fields",
+        "nft create_collection",
+    );
+    assert_runtime_requirement(
+        create_collection,
+        "create-output:Collection:collection",
+        "checked-runtime",
+        "create-output-lock",
+        "nft create_collection",
+    );
 
     let mint = action(&result.metadata, "mint");
     assert_eq!(mint.effect_class, "Mutating");

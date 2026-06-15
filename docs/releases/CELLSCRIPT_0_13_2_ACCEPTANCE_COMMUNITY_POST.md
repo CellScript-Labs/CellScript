@@ -32,10 +32,10 @@ supported as a compatibility wrapper.
 The current release evidence includes:
 
 - 7 production bundled examples.
-- 43/43 production acceptance actions covered.
-- 16 builder-backed lock valid/invalid spend cases.
+- 44/44 production acceptance actions covered.
+- 17 builder-backed lock valid/invalid spend cases.
 - 27 stateful local CKB scenarios.
-- 46 committed stateful steps.
+- 47 committed stateful steps.
 - 7 end-to-end business-flow scenarios.
 - 20 stateful action-branch scenarios.
 

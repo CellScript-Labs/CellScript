@@ -47,7 +47,7 @@ EXPECTED_LANGUAGE_EXAMPLES = [
     "v0_15_identity_lifecycle.cell",
     "v0_15_scoped_invariant.cell",
 ]
-EXPECTED_ACTION_COUNT = 43
+EXPECTED_ACTION_COUNT = 44
 EXPECTED_STATUS = "passed"
 EXPECTED_MODE = "production"
 EXPECTED_LOCK_SPEND_MATRIX = {
@@ -76,6 +76,7 @@ ACTION_RUN_KEYS = [
 EXPECTED_ACTIONS_BY_RUN_KEY = {
     "token_action_runs": ["mint_with_authority", "transfer_token", "burn", "merge"],
     "nft_action_runs": [
+        "create_collection",
         "mint",
         "transfer",
         "create_listing",

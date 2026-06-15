@@ -21,7 +21,7 @@ resource NFT has store, create, consume, replace, burn, relock, read_ref {
     royalty_bps: u16,
 }
 
-resource Collection has store, replace {
+resource Collection has store, create, replace {
     name: String,
     symbol: String,
     creator: Address,
@@ -51,6 +51,12 @@ receipt RoyaltyPayment has create {
     recipient: Address,
     amount: u64,
 }
+
+action create_collection(creator: Address, max_supply: u64, name: String, symbol: String, base_uri: String) -> collection: Collection
+where
+    assert(max_supply > 0, "Max supply must be positive")
+    assert(max_supply <= MAX_SUPPLY, "Max supply too high")
+    create collection = Collection { name, symbol, creator, total_supply: 0, max_supply, base_uri } with_lock(creator)
 
 action mint(collection_before: Collection, to: Address, metadata_hash: Hash) -> (collection_after: Collection, nft: NFT)
 where

@@ -15,7 +15,7 @@ examples on a local CKB chain:
 - `token.cell`
 - `vesting.cell`
 
-For those examples, all 43 business actions are strict-compiled, deployed, dry-
+For those examples, all 44 business actions are strict-compiled, deployed, dry-
 run, committed, and measured with builder-generated CKB transactions. The report
 also records cycles, consensus transaction size, occupied capacity, malformed
 transaction rejection, and output-capacity sufficiency.
@@ -211,6 +211,10 @@ and batch mint flows.
 
 ```mermaid
 flowchart TD
+    AO["Collection parameters"] --> AP["create_collection"]
+    AP --> AQ["Check max_supply bounds"]
+    AQ --> AR["Create Collection output Cell"]
+
     A["Collection input Cell"] --> B["mint"]
     B --> C["Check supply below max"]
     C --> D["Update Collection total_supply"]
@@ -264,9 +268,14 @@ flowchart LR
     I["collection_creator"] --> J["Collection creator predicate"]
 ```
 
-CKB acceptance status: all nine actions are builder-backed and run on-chain. The
+CKB acceptance status: all ten actions are builder-backed and run on-chain. The
 five locks strict-compile and have builder-backed valid-spend and invalid-spend
 cases.
+
+Bootstrap note: `mint` and `batch_mint` require an existing `Collection` input
+Cell. Use `create_collection` to materialise the first live `Collection` Cell;
+the stateful NFT listing scenario now proves `create_collection -> mint ->
+create_listing -> buy_from_listing` from committed devnet Cells.
 
 ## `timelock.cell`
 
