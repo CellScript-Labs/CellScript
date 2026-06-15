@@ -1,6 +1,8 @@
 # CellScript 0.17 Roadmap
 
-**Status**: Partially implemented on `cellscript-0.17`
+**Status**: Partially implemented on the standalone `nightly-0.17` branch;
+carried forward on `nightly-0.18` with the declared executable iCKB equivalence
+claim set closed by the 0.18 protocol-equivalence work.
 **Scope**: iCKB-Grade CKB Protocol Completeness
 **Depends on**: v0.15 scoped invariants, v0.16 metadata assurance/tooling
 
@@ -15,15 +17,23 @@ depends on HeaderDeps, DAO accumulated rates, lock/type role dual-use, xUDT
 script binding, transaction-wide computed accounting, OutPoint relations, and
 CKB VM differential tests.
 
-0.17 is being implemented toward the following statement:
+0.17 is implemented toward the following statement:
 
 > CellScript can express, compile, execute-test, and audit a non-trivial
 > iCKB-style CKB protocol subset without hiding critical invariants in comments,
 > builder-only assumptions, or raw script escape hatches.
 
-It should still not claim full iCKB equivalence until the differential matrix
-executes both the original iCKB Rust scripts and generated CellScript scripts on
-the same CKB transaction fixtures.
+The standalone `nightly-0.17` branch should still not claim full iCKB
+equivalence. It introduced the CKB-native primitive surface, strict 0.17 helper
+lowering, and the first partial executable differential gate. This
+carried-forward 0.18 copy records the later completion: the differential matrix
+now executes both the original iCKB Rust scripts and generated CellScript
+scripts on the same CKB transaction fixtures.
+
+Version carry-forward: keep the 0.17 branch boundary explicit. The larger
+`EXECUTED_CKB_VM_DIFF` / `PROVEN` iCKB claim set is completed on the 0.18 line
+and then inherited by later branches; do not backdate that completion to the
+standalone 0.17 branch.
 
 ## Implementation Status In This Branch
 
