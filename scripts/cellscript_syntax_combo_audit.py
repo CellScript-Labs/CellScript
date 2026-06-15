@@ -967,10 +967,11 @@ def generated_cases() -> list[AuditCase]:
             source=module_source(
                 "if_tuple_projection",
                 """
-                action choose(flag: bool) -> u64
-                where
+                action choose(flag: bool) -> u64 {
+                    verification
                     let pair = if flag { (1, 2) } else { (3, 4) }
                     return pair.0
+                }
                 """,
             ),
             expected=Expected("accept"),
@@ -986,13 +987,14 @@ def generated_cases() -> list[AuditCase]:
                     On,
                 }
 
-                action choose(flag: Flag) -> u64
-                where
+                action choose(flag: Flag) -> u64 {
+                    verification
                     let pair = match flag {
                         Flag::Off => { (1, 2) },
                         _ => { (3, 4) },
                     }
                     return pair.1
+                }
                 """,
             ),
             expected=Expected("accept"),
@@ -1003,9 +1005,10 @@ def generated_cases() -> list[AuditCase]:
             source=module_source(
                 "byte_string_fixed_length",
                 """
-                action symbol() -> [u8; 4]
-                where
+                action symbol() -> [u8; 4] {
+                    verification
                     return b"TEST"
+                }
                 """,
             ),
             expected=Expected("accept"),
@@ -1039,12 +1042,13 @@ def generated_cases() -> list[AuditCase]:
                     On,
                 }
 
-                action bad(flag: Flag) -> u64
-                where
+                action bad(flag: Flag) -> u64 {
+                    verification
                     return match flag {
                         _ => { 1 },
                         Flag::Off => { 2 },
                     }
+                }
                 """,
             ),
             expected=Expected("reject_compile", ("wildcard pattern '_'", "last match arm")),
@@ -1055,9 +1059,10 @@ def generated_cases() -> list[AuditCase]:
             source=module_source(
                 "reject_byte_string_length_mismatch",
                 """
-                action bad() -> [u8; 3]
-                where
+                action bad() -> [u8; 3] {
+                    verification
                     return b"TEST"
+                }
                 """,
             ),
             expected=Expected("reject_compile", ("type mismatch",)),

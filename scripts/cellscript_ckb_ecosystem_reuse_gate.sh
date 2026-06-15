@@ -40,7 +40,7 @@ validate_cli_contract_outputs() {
     local action_json="$GATE_TMP_DIR/action_build.json"
 
     run_capture "$compat_json" cargo run --locked -p cellscript --bin cellc -- ckb-std-compat --json
-    run_capture "$action_json" cargo run --locked -p cellscript --bin cellc -- action build examples/token.cell --action mint --json
+    run_capture "$action_json" cargo run --locked -p cellscript --bin cellc -- action build examples/token.cell --action mint_with_authority --json
 
     run python3 - "$compat_json" "$action_json" <<'PY'
 import json
