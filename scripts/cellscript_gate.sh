@@ -50,7 +50,6 @@ check_trailing_whitespace() {
         "Cargo.toml"
         "CODING_STYLE.md"
         "README.md"
-        "README_CH.md"
         "CHANGELOG.md"
         "docs/README.md"
         "roadmap/CELLSCRIPT_ROADMAP.md"
@@ -59,10 +58,8 @@ check_trailing_whitespace() {
         "docs/releases/CELLSCRIPT_0_13_2_RELEASE_NOTES.md"
         "docs/releases/CELLSCRIPT_0_13_2_ACCEPTANCE_COMMUNITY_POST.md"
         "docs/releases/CELLSCRIPT_0_14_RELEASE_NOTES.md"
-        "docs/releases/CELLSCRIPT_0_14_COMMUNITY_UPDATE.md"
         "docs/archive/0.13/CELLSCRIPT_0_13_1_PLAN.md"
         "docs/archive/0.13/CELLSCRIPT_SIGNATURE_DIRECTION_EXECUTION_PLAN.md"
-        "docs/CELLSCRIPT_0_14_SUPER_AUDIT.md"
         "docs/CELLSCRIPT_CKB_DEPLOYMENT_MANIFEST.md"
         "docs/CELLSCRIPT_CAPACITY_AND_BUILDER_CONTRACT.md"
         "docs/CELLSCRIPT_ENTRY_WITNESS_ABI.md"
@@ -408,8 +405,6 @@ check_novaseal_acceptance_boundaries() {
         'proposals/novaseal/DEVNET_FULL_ACCEPTANCE_RUNBOOK.md::external_endpoint_status=external_required'
         'proposals/novaseal/DEVNET_FULL_ACCEPTANCE_RUNBOOK.md::acceptance_blockers=0'
         'proposals/novaseal/DEVNET_FULL_ACCEPTANCE_RUNBOOK.md::missing public BTC SPV evidence'
-        'docs/releases/CELLSCRIPT_0_16_RELEASE_NOTES_DRAFT.md::external_endpoint_status=external_required'
-        'docs/releases/CELLSCRIPT_0_16_RELEASE_NOTES_DRAFT.md::acceptance_blockers=0'
         'proposals/novaseal/v0-mvp-skeleton/docs/AUDIT_STATUS.md::external_endpoint_status=external_required'
         'proposals/novaseal/v0-mvp-skeleton/docs/AUDIT_STATUS.md::acceptance_blockers=0'
         'tests/novaseal_sources.rs::EXPECTED_TRACKED_NOVASEAL_CELL_SOURCES'
@@ -444,7 +439,6 @@ allowed_root_files = {
     "CODING_STYLE.md",
     "LICENSE-MIT",
     "README.md",
-    "README_CH.md",
 }
 allowed_root_dirs = {
     "assets",

@@ -9,7 +9,7 @@ acceptance from a clean checkout. Every profile doc links back here.
 
 Last full historical 0.16 acceptance refresh: **2026-06-10**.
 
-- The 2026-06-10 `nightly-0.16` run regenerated the core live devnet report,
+- The 2026-06-10 0.16-line run regenerated the core live devnet report,
   Agreement live devnet report, all six planned-profile live reports, wallet
   vectors, local BIP340 TCB review, Fiber report, operator fixtures,
   service-builder fixtures, BTC SPV adapter, external attestation adapter, and

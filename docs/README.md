@@ -25,7 +25,9 @@ drafts. Released versions should use non-draft filenames.
   note and release-evidence summary.
 - `docs/releases/CELLSCRIPT_0_15_RELEASE_NOTES.md` is the final 0.15.0 release
   note and release-evidence summary.
-- `docs/releases/CELLSCRIPT_0_16_RELEASE_NOTES.md` is the final 0.16.0 release
+- `docs/releases/CELLSCRIPT_0_16_RELEASE_NOTES.md` is the initial 0.16.0 release
+  note and release-evidence summary.
+- `docs/releases/CELLSCRIPT_0_16_1_RELEASE_NOTES.md` is the final 0.16.1 release
   note and release-evidence summary.
 
 Release candidates and planning notes should not live here unless they are the
@@ -69,6 +71,10 @@ High-value active references include:
 `docs/examples/` contains focused example notes and matrices that support the
 bundled `.cell` examples. These are not release notes.
 
+- `docs/examples/token_amm_bootstrap.md` records the concrete token authority
+  bootstrap and AMM builder path for the bundled `launch`, `token`, and
+  `amm_pool` examples.
+
 ## Roadmap
 
 `roadmap/` is outside this directory and contains planning state. Roadmap files
@@ -92,7 +98,6 @@ Current archive:
 
 - `docs/archive/0.13/CELLSCRIPT_0_13_1_PLAN.md`
 - `docs/archive/0.13/CELLSCRIPT_SIGNATURE_DIRECTION_EXECUTION_PLAN.md`
-- `docs/archive/0.15/CELLSCRIPT_0_15_PRE_RELEASE_AUDIT_AND_HARDENING.md`
 - `docs/archive/0.15/CELLSCRIPT_0_15_ROADMAP_SUMMARY.md`
 
 When moving a document into the archive, update all public links and add a short

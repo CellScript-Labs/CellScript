@@ -8,6 +8,10 @@
 - Kept the extension validation manifest aligned with the compiler and
   documentation changes inherited from the 0.16 release branch.
 
+## 0.16.1
+
+- Aligned documentation with the CellScript 0.16.1 release.
+
 ## 0.16.0
 
 - Updated extension package metadata for the CellScript 0.16.0 release.

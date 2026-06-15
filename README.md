@@ -12,8 +12,6 @@
 [![LSP: Local Tooling](https://img.shields.io/badge/LSP-local%20tooling-2f6f4e.svg)](#editor-support)
 [![Wiki Tutorials](https://img.shields.io/badge/wiki-tutorials-6f42c1.svg)](https://github.com/a19q3/CellScript/wiki)
 
-[English](README.md) | [Chinese](README_CH.md)
-
 **Write Cell contracts the way you think about them — not the way the wire format does.**
 
 CellScript is a domain-specific language for Cell-based smart contracts on
@@ -305,13 +303,13 @@ resource Token has store, create, consume, replace, burn, relock {
     symbol: [u8; 8]
 }
 
-resource MintAuthority has store {
+resource MintAuthority has store, create, replace {
     token_symbol: [u8; 8]
     max_supply: u64
     minted: u64
 }
 
-action mint(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after: MintAuthority, token: Token)
+action mint_with_authority(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after: MintAuthority, token: Token)
 where
     assert(auth_before.minted + amount <= auth_before.max_supply, "exceeds max supply")
 
@@ -349,7 +347,7 @@ where
 | `examples/nft.cell` | Unique assets, metadata, ownership transfer |
 | `examples/vesting.cell` | Receipt-style grants and explicit claim state transitions |
 | `examples/amm_pool.cell` | Shared pool state, swap/liquidity effects |
-| `examples/launch.cell` | Launch/pool composition patterns |
+| `examples/launch.cell` | Mint-authority bootstrap and launch/pool composition patterns |
 
 Non-production language examples live under `examples/language/`. They compile
 and exercise compiler/tooling surfaces, but they are not part of the seven-file
@@ -399,34 +397,37 @@ CellScript includes production-style local language tooling for early users:
   status-bar feedback. It shells out to `cellc` (or a `cargo run` fallback), so
   behavior stays identical to CLI and CI gates.
 
-- [VS Code extension](https://github.com/tsukifune-kosei/CellScript/tree/main/editors/vscode-cellscript)
-- [Runtime error codes](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_RUNTIME_ERROR_CODES.md)
-- [Entry witness ABI](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_ENTRY_WITNESS_ABI.md)
-- [Collections support matrix](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md)
-- [Output bindings](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_OUTPUT_BINDINGS.md)
-- [Historical signature-direction execution plan](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/archive/0.13/CELLSCRIPT_SIGNATURE_DIRECTION_EXECUTION_PLAN.md)
-- [CKB target profile tutorial](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/wiki/Tutorial-05-CKB-Target-Profiles.md)
-- [CKB deployment manifest](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_CKB_DEPLOYMENT_MANIFEST.md)
-- [Capacity and builder contract](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_CAPACITY_AND_BUILDER_CONTRACT.md)
-- [Linear ownership](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_LINEAR_OWNERSHIP.md)
-- [Scheduler hints](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_SCHEDULER_HINTS.md)
-- [Metadata verification and production gates](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/wiki/Tutorial-06-Metadata-Verification-and-Production-Gates.md)
-- [Standard library](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/wiki/Tutorial-10-Standard-Library.md)
-- [Operational semantics](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/spec/CELLSCRIPT_OPERATIONAL_SEMANTICS.md)
-- [CKB hashing workflow example](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/examples/ckb_hashing.md)
-- [Collections matrix example](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/examples/collections_matrix.md)
-- [Deployment manifest example](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/examples/deployment_manifest.md)
-- [Output append example](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/examples/output_append.md)
-- [Roadmap overview](https://github.com/tsukifune-kosei/CellScript/blob/main/roadmap/CELLSCRIPT_ROADMAP.md)
-- [0.13 release scope](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md)
-- [0.14 roadmap](https://github.com/tsukifune-kosei/CellScript/blob/main/roadmap/CELLSCRIPT_0_14_ROADMAP.md)
-- [0.14 release notes draft](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/releases/CELLSCRIPT_0_14_RELEASE_NOTES_DRAFT.md)
-- [0.15 roadmap](https://github.com/tsukifune-kosei/CellScript/blob/main/roadmap/CELLSCRIPT_0_15_ROADMAP.md)
-- [0.16 roadmap](https://github.com/tsukifune-kosei/CellScript/blob/main/roadmap/CELLSCRIPT_0_16_ROADMAP.md)
-- [0.16 release notes draft](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_0_16_RELEASE_NOTES_DRAFT.md)
-- [0.17 roadmap](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/0.17/CELLSCRIPT_0_17_ROADMAP.md)
-- [0.18 roadmap](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_0_18_ROADMAP.md)
-- [0.19 roadmap](https://github.com/tsukifune-kosei/CellScript/blob/main/docs/CELLSCRIPT_0_19_ROADMAP.md)
+- [VS Code extension](editors/vscode-cellscript)
+- [Runtime error codes](docs/CELLSCRIPT_RUNTIME_ERROR_CODES.md)
+- [Entry witness ABI](docs/CELLSCRIPT_ENTRY_WITNESS_ABI.md)
+- [Collections support matrix](docs/CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md)
+- [Output bindings](docs/CELLSCRIPT_OUTPUT_BINDINGS.md)
+- [Historical signature-direction execution plan](docs/archive/0.13/CELLSCRIPT_SIGNATURE_DIRECTION_EXECUTION_PLAN.md)
+- [CKB target profile tutorial](docs/wiki/Tutorial-05-CKB-Target-Profiles.md)
+- [CKB deployment manifest](docs/CELLSCRIPT_CKB_DEPLOYMENT_MANIFEST.md)
+- [Capacity and builder contract](docs/CELLSCRIPT_CAPACITY_AND_BUILDER_CONTRACT.md)
+- [Token and AMM bootstrap builder path](docs/examples/token_amm_bootstrap.md)
+- [Linear ownership](docs/CELLSCRIPT_LINEAR_OWNERSHIP.md)
+- [Scheduler hints](docs/CELLSCRIPT_SCHEDULER_HINTS.md)
+- [Metadata verification and production gates](docs/wiki/Tutorial-06-Metadata-Verification-and-Production-Gates.md)
+- [Unified gate policy](docs/CELLSCRIPT_GATE_POLICY.md)
+- [Standard library](docs/wiki/Tutorial-10-Standard-Library.md)
+- [Operational semantics](docs/spec/CELLSCRIPT_OPERATIONAL_SEMANTICS.md)
+- [CKB hashing workflow example](docs/examples/ckb_hashing.md)
+- [Collections matrix example](docs/examples/collections_matrix.md)
+- [Deployment manifest example](docs/examples/deployment_manifest.md)
+- [Output append example](docs/examples/output_append.md)
+- [Roadmap overview](roadmap/CELLSCRIPT_ROADMAP.md)
+- [0.13 release scope](docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md)
+- [0.14 roadmap](roadmap/CELLSCRIPT_0_14_ROADMAP.md)
+- [0.14 release notes](docs/releases/CELLSCRIPT_0_14_RELEASE_NOTES.md)
+- [0.15 roadmap](roadmap/CELLSCRIPT_0_15_ROADMAP.md)
+- [0.15 release notes](docs/releases/CELLSCRIPT_0_15_RELEASE_NOTES.md)
+- [0.16 roadmap](roadmap/CELLSCRIPT_0_16_ROADMAP.md)
+- [0.16 release notes](docs/releases/CELLSCRIPT_0_16_RELEASE_NOTES.md)
+- [0.17 roadmap](docs/0.17/CELLSCRIPT_0_17_ROADMAP.md)
+- [0.18 roadmap](docs/CELLSCRIPT_0_18_ROADMAP.md)
+- [0.19 roadmap](docs/CELLSCRIPT_0_19_ROADMAP.md)
 
 ---
 

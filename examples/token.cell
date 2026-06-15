@@ -1,12 +1,6 @@
 module cellscript::fungible_token
 
-invariant token_amount_non_increase {
-    trigger: type_group
-    scope: group
-    reads: group_inputs<Token>.amount, group_outputs<Token>.amount
-
-    assert_sum(group_outputs<Token>.amount) <= assert_sum(group_inputs<Token>.amount)
-}
+const U64_MAX: u64 = 18446744073709551615
 
 resource Token has store, create, consume, replace, burn, relock {
     amount: u64,
@@ -19,8 +13,9 @@ resource MintAuthority has store, create, replace {
     minted: u64,
 }
 
-action mint(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after: MintAuthority, token: Token)
+action mint_with_authority(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after: MintAuthority, token: Token)
 where
+    assert(amount <= U64_MAX - auth_before.minted, "mint overflow")
     assert(auth_before.minted + amount <= auth_before.max_supply, "exceeds max supply")
     require auth_after.token_symbol == auth_before.token_symbol
     require auth_after.max_supply == auth_before.max_supply
@@ -40,6 +35,7 @@ where
 action merge(a: Token, b: Token, to: Address) -> merged: Token
 where
     assert(a.symbol == b.symbol, "symbol mismatch")
+    assert(b.amount <= U64_MAX - a.amount, "amount overflow")
     let total = a.amount + b.amount
     consume a
     consume b

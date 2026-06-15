@@ -15,10 +15,14 @@ examples on a local CKB chain:
 - `token.cell`
 - `vesting.cell`
 
-For those examples, all 43 business actions are strict-compiled, deployed, dry-
+For those examples, all 44 business actions are strict-compiled, deployed, dry-
 run, committed, and measured with builder-generated CKB transactions. The report
 also records cycles, consensus transaction size, occupied capacity, malformed
 transaction rejection, and output-capacity sufficiency.
+
+For the concrete token-to-AMM bootstrap path, witness commands, and builder
+assumption checks, see
+[`docs/examples/token_amm_bootstrap.md`](examples/token_amm_bootstrap.md).
 
 Lock coverage now runs in the same production acceptance flow: all 17 bundled
 locks strict-compile under the CKB profile and are exercised with builder-backed
@@ -52,7 +56,7 @@ and same-symbol merge flows.
 
 ```mermaid
 flowchart TD
-    A["MintAuthority input Cell"] --> B["mint"]
+    A["MintAuthority input Cell"] --> B["mint_with_authority"]
     B --> C["Check minted plus amount <= max_supply"]
     C --> D["Constrain MintAuthority output minted field"]
     D --> E["Create Token output Cell for recipient"]
@@ -74,6 +78,10 @@ flowchart TD
 
 CKB acceptance status: all four actions are builder-backed and run on-chain.
 There are no lock entries in this example.
+
+Bootstrap note: `mint_with_authority` requires an existing `MintAuthority` input Cell. In the
+bundled bootstrap path, that first authority is created by `launch.cell`;
+`token.cell` itself is not the genesis authority contract.
 
 ## `amm_pool.cell`
 
@@ -127,10 +135,10 @@ flowchart TD
     D --> E["Create MintAuthority output Cell"]
     E --> F["Create recipient Token outputs"]
     F --> G["Create pool seed Token"]
-    G --> H["Call seed_pool pattern"]
+    G --> H["Materialise Pool and LPReceipt outputs"]
     H --> I["Create Pool and LPReceipt outputs"]
 
-    J["Simple launch parameters"] --> K["simple_launch"]
+    J["Bootstrap token parameters"] --> K["bootstrap_token"]
     K --> L["Check initial mint and recipient totals"]
     L --> M["Create MintAuthority output Cell"]
     M --> N["Create recipient Token outputs"]
@@ -139,6 +147,10 @@ flowchart TD
 
 CKB acceptance status: both actions are builder-backed and run on-chain. There
 are no lock entries in this example.
+
+Bootstrap note: `launch_token` creates the first `MintAuthority` and may
+materialise a `Pool` plus `LPReceipt` directly. It does not call the
+`amm_pool.seed_pool` entry at runtime.
 
 ## `multisig.cell`
 
@@ -199,6 +211,10 @@ and batch mint flows.
 
 ```mermaid
 flowchart TD
+    AO["Collection parameters"] --> AP["create_collection"]
+    AP --> AQ["Check max_supply bounds"]
+    AQ --> AR["Create Collection output Cell"]
+
     A["Collection input Cell"] --> B["mint"]
     B --> C["Check supply below max"]
     C --> D["Update Collection total_supply"]
@@ -252,9 +268,14 @@ flowchart LR
     I["collection_creator"] --> J["Collection creator predicate"]
 ```
 
-CKB acceptance status: all nine actions are builder-backed and run on-chain. The
+CKB acceptance status: all ten actions are builder-backed and run on-chain. The
 five locks strict-compile and have builder-backed valid-spend and invalid-spend
 cases.
+
+Bootstrap note: `mint` and `batch_mint` require an existing `Collection` input
+Cell. Use `create_collection` to materialise the first live `Collection` Cell;
+the stateful NFT listing scenario now proves `create_collection -> mint ->
+create_listing -> buy_from_listing` from committed devnet Cells.
 
 ## `timelock.cell`
 

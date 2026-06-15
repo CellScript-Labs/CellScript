@@ -4,7 +4,7 @@ and the locks that decide whether a Cell may be spent. The compiler then turns
 that `.cell` source into ckb-vm compatible RISC-V assembly or ELF artifacts, and
 writes metadata that explains what was built.
 
-Last updated: 2026-05-26.
+Last updated: 2026-06-15.
 
 This wiki is a guided path. It starts with one compiled example, then slowly
 builds the mental model: source files, Cell effects, packages, the CKB profile,
@@ -152,13 +152,15 @@ Release-facing CKB evidence comes from the repository root:
 ```
 
 The bundled examples are covered by the current local production evidence suite.
+The 0.16.1 patch line also closes the token/AMM/launch and NFT first-cell
+bootstrap examples used by external builders.
 New external contracts still need their own metadata review, builder evidence,
 security review, and chain acceptance evidence before they should be called
 production-ready.
 
 ## Reference Examples
 
-- [CKB hashing workflow](../examples/ckb_hashing.md)
-- [Collections matrix](../examples/collections_matrix.md)
-- [Deployment manifest](../examples/deployment_manifest.md)
-- [Output append](../examples/output_append.md)
+- [CKB hashing workflow](https://github.com/a19q3/CellScript/blob/main/docs/examples/ckb_hashing.md)
+- [Collections matrix](https://github.com/a19q3/CellScript/blob/main/docs/examples/collections_matrix.md)
+- [Deployment manifest](https://github.com/a19q3/CellScript/blob/main/docs/examples/deployment_manifest.md)
+- [Output append](https://github.com/a19q3/CellScript/blob/main/docs/examples/output_append.md)

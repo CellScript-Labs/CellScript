@@ -8,7 +8,7 @@ This comparison uses the current local checkouts:
 | --- | --- | --- | --- | --- |
 | RGB++ SDK | `https://github.com/ckb-cell/rgbpp-sdk.git` | `develop` | `2d547132ede28616647e87d603aea63daada4841` | transaction builders, BTC embedding, SPV witness plumbing, xUDT flows |
 | RGB++ design | `https://github.com/ckb-cell/RGBPlusPlus-design.git` | `main` | `c0b065c8bb8cc0a1813d27e9352ff694e1975ca3` | light paper, security analysis, lockscript design |
-| NovaSeal | `CellScript` `nightly-0.16` | local branch | current checked-in source plus `target/novaseal-production-gates.json` | package-first profiles, certification gate, devnet evidence |
+| NovaSeal | `CellScript` 0.16 line | local checkout | current checked-in source plus `target/novaseal-production-gates.json` | package-first profiles, certification gate, devnet evidence |
 
 The comparison does not treat RGB++ as a library to vendor. It treats RGB++ as
 a mature neighbouring protocol whose sequencing, lockscript, and SDK surfaces

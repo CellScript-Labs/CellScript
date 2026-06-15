@@ -13,15 +13,15 @@
   },
   {
     "example": "launch.cell",
-    "line_count": 4681,
-    "text_size": 18996,
+    "line_count": 5056,
+    "text_size": 20784,
     "relaxed_branch_count": 1,
-    "max_cond_branch_abs_distance": 8276,
-    "machine_block_count": 547,
+    "max_cond_branch_abs_distance": 7996,
+    "machine_block_count": 601,
     "max_machine_block_size": 772,
-    "machine_cfg_edge_count": 952,
-    "machine_call_edge_count": 172,
-    "unreachable_machine_block_count": 174
+    "machine_cfg_edge_count": 1041,
+    "machine_call_edge_count": 185,
+    "unreachable_machine_block_count": 180
   },
   {
     "example": "multisig.cell",
@@ -37,15 +37,15 @@
   },
   {
     "example": "nft.cell",
-    "line_count": 10954,
-    "text_size": 42412,
+    "line_count": 14851,
+    "text_size": 57812,
     "relaxed_branch_count": 1,
-    "max_cond_branch_abs_distance": 5956,
-    "machine_block_count": 1789,
+    "max_cond_branch_abs_distance": 7276,
+    "machine_block_count": 2398,
     "max_machine_block_size": 276,
-    "machine_cfg_edge_count": 3065,
-    "machine_call_edge_count": 429,
-    "unreachable_machine_block_count": 1507
+    "machine_cfg_edge_count": 4078,
+    "machine_call_edge_count": 557,
+    "unreachable_machine_block_count": 2217
   },
   {
     "example": "timelock.cell",

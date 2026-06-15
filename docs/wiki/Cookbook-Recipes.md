@@ -34,12 +34,12 @@ through an explicit stdlib lifecycle pattern such as
 `std::lifecycle::transfer`, `std::receipt::claim`, or
 `std::lifecycle::settle`.
 
-## Recipe: Mint A New Output Cell
+## Recipe: Mint With Authority
 
 Use `create` when an action materializes new Cell state.
 
 ```cellscript
-action mint(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after: MintAuthority, token: Token)
+action mint_with_authority(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after: MintAuthority, token: Token)
 where
     assert(auth_before.minted + amount <= auth_before.max_supply, "exceeds max supply")
     require auth_after.token_symbol == auth_before.token_symbol

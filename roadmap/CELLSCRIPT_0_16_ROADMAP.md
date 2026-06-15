@@ -1,8 +1,7 @@
 # CellScript v0.16 Roadmap
 
-**Status**: Implemented on `nightly-0.16` for the scoped 0.16 release;
-compiler-freeze hardening and proposal-local NovaSeal devnet acceptance are
-complete for the P0 plus key P1 freeze scope.
+**Status**: Released in the 0.16 line. `v0.16.1` is the current patch release
+for bundled example bootstrap clarity and builder-facing lifecycle coverage.
 **Scope**: Metadata Semantics, Descriptive Standard Compatibility, Production
 Tooling Skeleton, and Rust-comparative compiler hardening.
 **Dependencies**: v0.13, v0.14, and v0.15 complete
@@ -11,15 +10,14 @@ Tooling Skeleton, and Rust-comparative compiler hardening.
 
 ## Implementation Status
 
-The `nightly-0.16` branch implements the scoped metadata-assurance release.
+The 0.16 line implements the scoped metadata-assurance release.
 It does not claim full production transaction solving, standard-suite CKB VM
 compatibility execution, stable protocol stdlib implementations, or formal
 verification.
 
-After the Rust comparative audit (`RUST_COMPARATIVE_AUDIT.md`), 0.16 also owns
-the freeze-critical compiler hardening needed to make the release credible as a
-compiler release rather than only a metadata/tooling release. CKB production
-completeness and the non-critical comparative-audit cleanup remain 0.17 work.
+0.16 also owns the freeze-critical compiler hardening needed to make the
+release credible as a compiler release rather than only a metadata/tooling
+release. CKB production completeness and non-critical cleanup remain 0.17 work.
 
 | Area | 0.16 Status | Artifact | Remaining / next scope |
 |---|---|---|---|
@@ -32,7 +30,7 @@ completeness and the non-critical comparative-audit cleanup remain 0.17 work.
 | Deployment governance | Implemented as local manifest/schema/integrity tooling | `cellc deploy-plan`, `verify-deploy`, `diff-deploy`, and `lock-deps` | On-chain deployment verification |
 | Audit/debug UX | Implemented as metadata/IR reports | `cellc proof-diff`, `profile`, `trace-tx`, and `audit-bundle` | Full CellScript-to-RISC-V source maps |
 | Stdlib release track | Implemented as schema stubs only | `src/stdlib/ckb_protocols/*` descriptors marked `schema-stub` | ABI-compatible protocol stdlib implementations and executable coverage |
-| Compiler-freeze hardening | Implemented for P0 plus key P1 freeze scope | `RUST_COMPARATIVE_AUDIT.md`, IR poison lowering, register contract gate, syscall ABI contract baseline, IR provenance, error-line tests | Remaining comparative-audit cleanup is 0.17 scope |
+| Compiler-freeze hardening | Implemented for P0 plus key P1 freeze scope | IR poison lowering, register contract gate, syscall ABI contract baseline, IR provenance, error-line tests | Remaining compiler-hardening cleanup is 0.17 scope |
 | NovaSeal proposal-local acceptance | Implemented as live devnet plus certification evidence | `scripts/novaseal_devnet_stateful_acceptance.sh`, `cellc certify --plugin novaseal-profile-v0`, live profile reports, Fiber report, adapter and handoff reports | External production attestations: BIP340 TCB, public BTC SPV, public/shared CellDep, RWA legal/registry |
 
 Boundary: v0.16 does not claim full formal verification or production CKB

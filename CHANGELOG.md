@@ -16,7 +16,22 @@
   fixtures, byte-accurate receipt decoding, full DAO redeem accounting,
   generic aggregate lowering, and production manifest closure are complete.
 
-## 0.16.0 - 2026-05-04
+## 0.16.1 - 2026-06-15
+
+- Close the bundled token/AMM/launch bootstrap lifecycle gaps with explicit
+  first-cell actions and strict original scoped CKB coverage.
+- Rename the token authority mint action to `mint_with_authority` and the
+  launch bootstrap action to `bootstrap_token` so builder-facing action names
+  match the required input topology.
+- Add `nft.cell::create_collection` and stateful coverage for the
+  `create_collection -> mint -> create_listing -> buy_from_listing` path.
+- Document and validate the CLI-first builder handoff through
+  `--entry-action`, `cellc abi`, `cellc entry-witness`,
+  `cellc explain-assumptions`, and `cellc validate-tx`.
+- Re-run production local CKB acceptance with strict original scoped artifacts,
+  complete bundled action coverage, and stateful lifecycle scenarios.
+
+## 0.16.0 - 2026-06-14
 
 - Add the scoped metadata-assurance release surface: operational semantics,
   ProofPlan soundness checks, builder-assumption metadata, transaction-shape
@@ -309,10 +324,9 @@
   output lock checks can compare tuple-array address fields without fail-closed
   traps.
 - Increased verifier expression temp slots and added regression coverage for
-  the original `launch.cell::simple_launch` eight-recipient remaining-output
-  sum.
+  the original launch bootstrap eight-recipient remaining-output sum.
 - Switched CKB acceptance launch coverage from a standalone synthetic harness to
-  the original scoped `launch.cell::simple_launch` artifact.
+  the original scoped launch bootstrap artifact.
 - Fixed dynamic Molecule table create-output checks for fixed/scalar fields so
   original `multisig.cell::create_wallet` verifies table fields through
   Molecule offsets instead of fixed-struct offsets.
