@@ -12,8 +12,6 @@
 [![LSP: Local Tooling](https://img.shields.io/badge/LSP-local%20tooling-2f6f4e.svg)](#editor-support)
 [![Wiki Tutorials](https://img.shields.io/badge/wiki-tutorials-6f42c1.svg)](https://github.com/a19q3/CellScript/wiki)
 
-[English](README.md) | [Chinese](README_CH.md)
-
 **Write Cell contracts the way you think about them — not the way the wire format does.**
 
 CellScript is a domain-specific language for Cell-based smart contracts on
@@ -423,7 +421,6 @@ CellScript includes production-style local language tooling for early users:
 - [0.13 release scope](docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md)
 - [0.14 roadmap](roadmap/CELLSCRIPT_0_14_ROADMAP.md)
 - [0.14 release notes](docs/releases/CELLSCRIPT_0_14_RELEASE_NOTES.md)
-- [0.14 community update](docs/releases/CELLSCRIPT_0_14_COMMUNITY_UPDATE.md)
 - [0.15 roadmap](roadmap/CELLSCRIPT_0_15_ROADMAP.md)
 - [0.15 release notes](docs/releases/CELLSCRIPT_0_15_RELEASE_NOTES.md)
 - [0.16 roadmap](roadmap/CELLSCRIPT_0_16_ROADMAP.md)

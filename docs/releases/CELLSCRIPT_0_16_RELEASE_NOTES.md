@@ -40,10 +40,11 @@ In practical terms, this means:
 - fail-closed examples now fail for explicit PP0150 reasons rather than hiding
   behind older 0.15-era tooling paths.
 
-Some bundled examples intentionally remain strict-fail-closed in 0.16.
-`token.cell`, `amm_pool.cell`, and `launch.cell` still contain selected
-aggregate or Pool ProofPlan gaps. They remain useful examples, but the release
-notes and wiki no longer describe them as strict-clean production artefacts.
+The initial 0.16.0 release kept some bundled-example bootstrap paths
+conservative. The current 0.16 patch line closes the token/AMM/launch and NFT
+first-cell lifecycle gaps; see
+`docs/releases/CELLSCRIPT_0_16_1_RELEASE_NOTES.md` for the current production
+example evidence.
 
 ### Better Builder Handoff
 
@@ -127,7 +128,7 @@ scripts, and external audit tooling.
 
 ### Better Editor Experience
 
-The VS Code extension is aligned with CellScript 0.16.0.
+The VS Code extension is aligned with the CellScript 0.16 line.
 
 For users, this means the local editor integration now follows the current
 `cellc --lsp` and 0.16 authoring surface. The extension exposes active-file

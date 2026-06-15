@@ -91,7 +91,6 @@ Current archive:
 
 - `docs/archive/0.13/CELLSCRIPT_0_13_1_PLAN.md`
 - `docs/archive/0.13/CELLSCRIPT_SIGNATURE_DIRECTION_EXECUTION_PLAN.md`
-- `docs/archive/0.15/CELLSCRIPT_0_15_PRE_RELEASE_AUDIT_AND_HARDENING.md`
 - `docs/archive/0.15/CELLSCRIPT_0_15_ROADMAP_SUMMARY.md`
 
 When moving a document into the archive, update all public links and add a short

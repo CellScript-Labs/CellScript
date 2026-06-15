@@ -7,7 +7,7 @@
 
 **0.16 status note (2026-06-10):** Treat the ProofPlan findings below as a
 historical audit baseline, not as the current 0.16 contract. The
-`nightly-0.16` branch now emits `runtime.proof_plan_soundness`, rejects
+0.16 release line now emits `runtime.proof_plan_soundness`, rejects
 local/runtime ProofPlan drift, rejects checked records with coverage gaps, and
 fails `--primitive-strict 0.16` on metadata-only or runtime-required ProofPlan
 gaps. Aggregate invariant executable lowering and cryptographic metadata

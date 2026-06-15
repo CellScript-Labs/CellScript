@@ -2,7 +2,7 @@
   "name": "cellscript-vscode",
   "displayName": "CellScript",
   "description": "Production-grade local VS Code tooling for CellScript (.cell) contracts.",
-  "version": "0.16.0",
+  "version": "0.16.1",
   "publisher": "arthurzhang",
   "license": "MIT",
   "main": "./dist/extension.js",
@@ -10,7 +10,7 @@
     "type": "git",
     "url": "https://github.com/a19q3/CellScript.git"
   },
-  "homepage": "https://github.com/a19q3/CellScript/tree/v0.16.0/editors/vscode-cellscript",
+  "homepage": "https://github.com/a19q3/CellScript/tree/v0.16.1/editors/vscode-cellscript",
   "bugs": {
     "url": "https://github.com/a19q3/CellScript/issues"
   },

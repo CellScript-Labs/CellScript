@@ -2,7 +2,7 @@
 
 ## Evidence Base
 
-- NovaSeal repository: `nightly-0.16`, current tracked source and generated
+- NovaSeal repository: current CellScript 0.16-line source and generated
   local evidence.
 - NovaSeal local gate: `target/novaseal-production-gates.json` reports `local_production_prep_ready_external_attestation_required`.
 - NovaSeal planned-profile operator fixtures: `target/novaseal-profile-operator-fixtures.json` covers the planned profile signing and witness surfaces.

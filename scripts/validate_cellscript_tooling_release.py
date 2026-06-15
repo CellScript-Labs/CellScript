@@ -60,7 +60,6 @@ def main() -> int:
         ["#[command(version = cellscript::VERSION)]"],
     )
     require_contains("README.md", [f'version = "{crate_version}"'])
-    require_contains("README_CH.md", [f'version = "{crate_version}"'])
     for wiki_path in [
         "docs/wiki/Tutorial-01-Getting-Started.md",
         "docs/wiki/Cookbook-Recipes.md",
