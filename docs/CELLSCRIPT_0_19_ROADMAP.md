@@ -6,6 +6,12 @@ governance, and Phase 1 package / deployment identity registry closure
 **Depends on**: v0.17 CKB protocol semantics and v0.18 first-class ScriptRef /
 ScriptArgs work
 
+**Version carry-forward**: 0.19 inherits the 0.18 `EXECUTED_CKB_VM_DIFF` /
+`PROVEN` iCKB evidence state. It may keep the iCKB fixtures compiling while
+syntax and adapter boundaries evolve, but its release claim is registry,
+adapter, `ckb-std`, and grammar-governance closure rather than a new iCKB
+equivalence milestone.
+
 ## Goal
 
 CellScript 0.19 turns compiler artifacts into a reproducible package and

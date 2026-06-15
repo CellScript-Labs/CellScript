@@ -3,6 +3,14 @@
 **Status**: Protocol-equivalence verifier scope complete; deployment,
 registry, and transaction-builder scope remains in 0.19.
 
+**Version carry-forward**: the standalone `nightly-0.17` branch remains a
+partial iCKB-equivalence milestone. 0.18 carries that work forward and closes
+the declared executable iCKB claim set by adding first-class Script matching,
+full OutPoint / MetaPoint verifier helpers, receipt byte decoders, and the
+expanded original-vs-CellScript CKB VM differential matrix. Later branches must
+treat the iCKB `PROVEN` state as inherited from 0.18, not as completed on the
+0.17 branch itself.
+
 ## First-Class Script API
 
 0.18 promotes Script handling from helper fragments into a first-class,
