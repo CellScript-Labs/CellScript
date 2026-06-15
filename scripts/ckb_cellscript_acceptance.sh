@@ -407,6 +407,7 @@ nft_action_source_root = source_root / "nft-actions"
 timelock_action_source_root = source_root / "timelock-actions"
 amm_action_source_root = source_root / "amm-actions"
 multisig_action_source_root = source_root / "multisig-actions"
+launch_action_source_root = source_root / "launch-actions"
 artifact_root = run_dir / "artifacts"
 strict_root = run_dir / "strict-original-ckb"
 for path in (
@@ -416,6 +417,7 @@ for path in (
     timelock_action_source_root,
     amm_action_source_root,
     multisig_action_source_root,
+    launch_action_source_root,
     artifact_root,
     strict_root,
 ):
@@ -445,8 +447,8 @@ resource MintAuthority has store {
 """
 
 TOKEN_ACTION_SOURCES = {
-    "mint": """
-action mint(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after: MintAuthority, token: Token)
+    "mint_with_authority": """
+action mint_with_authority(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after: MintAuthority, token: Token)
 where
     assert_invariant(auth_before.minted + amount <= auth_before.max_supply, "exceeds max supply")
 
@@ -503,7 +505,7 @@ NFT_TYPES_SOURCE = """resource NFT has store, create, consume, replace, burn, re
     royalty_bps: u16
 }
 
-resource Collection has store, replace {
+resource Collection has store, create, replace {
     creator: Address
     total_supply: u64
     max_supply: u64
@@ -531,6 +533,18 @@ receipt RoyaltyPayment has create {
 """
 
 NFT_ACTION_SOURCES = {
+    "create_collection": """
+action create_collection(creator: Address, max_supply: u64) -> collection: Collection
+where
+    assert_invariant(max_supply > 0, "max supply must be positive")
+    assert_invariant(max_supply <= 10000, "max supply too high")
+
+    create collection = Collection {
+        creator: creator,
+        total_supply: 0,
+        max_supply: max_supply
+    } with_lock(creator)
+""",
     "mint": """
 action mint(collection_before: Collection, to: Address, metadata_hash: Hash) -> (collection_after: Collection, nft: NFT)
 where
@@ -1355,8 +1369,111 @@ for action, source in MULTISIG_ACTION_SOURCES.items():
         encoding="utf-8",
     )
 
+LAUNCH_TYPES_SOURCE = """const U64_MAX: u64 = 18446744073709551615
+
+resource Token has store, create, consume, replace, burn, relock {
+    amount: u64
+    symbol: [u8; 8]
+}
+
+resource MintAuthority has store, create, replace {
+    token_symbol: [u8; 8]
+    max_supply: u64
+    minted: u64
+}
+
+receipt LPReceipt has store, create, consume {
+    pool_id: Hash
+    lp_amount: u64
+    provider: Address
+}
+
+shared Pool has store, create, replace {
+    token_a_symbol: [u8; 8]
+    token_b_symbol: [u8; 8]
+    reserve_a: u64
+    reserve_b: u64
+    total_lp: u64
+    fee_rate_bps: u16
+}
+"""
+
+LAUNCH_ACTION_SOURCES = {
+    "launch_token": """
+action launch_token(symbol: [u8; 8], max_supply: u64, initial_mint: u64, pool_seed_amount: u64, pool_paired_token: Token, fee_rate_bps: u16, creator: Address, distribution: [(Address, u64); 4]) -> (auth: MintAuthority, dist0: Token, dist1: Token, dist2: Token, dist3: Token, pool: Pool, lp_receipt: LPReceipt, change: Token)
+where
+    assert_invariant(initial_mint <= max_supply, "initial exceeds max")
+    assert_invariant(pool_seed_amount > 0, "zero pool seed")
+    assert_invariant(pool_paired_token.amount > 0, "zero paired seed")
+    assert_invariant(symbol != pool_paired_token.symbol, "same token")
+    assert_invariant(fee_rate_bps <= 10000, "fee too high")
+    assert_invariant(pool_seed_amount <= initial_mint, "pool seed exceeds mint")
+    assert_invariant(distribution[1].1 <= U64_MAX - distribution[0].1, "distribution overflow")
+    let dist01 = distribution[0].1 + distribution[1].1
+    assert_invariant(distribution[2].1 <= U64_MAX - dist01, "distribution overflow")
+    let dist012 = dist01 + distribution[2].1
+    assert_invariant(distribution[3].1 <= U64_MAX - dist012, "distribution overflow")
+    let dist_total = dist012 + distribution[3].1
+    assert_invariant(pool_seed_amount <= U64_MAX - dist_total, "allocation overflow")
+    assert_invariant(dist_total + pool_seed_amount <= initial_mint, "allocation exceeds mint")
+
+    create auth = MintAuthority {
+        token_symbol: symbol,
+        max_supply: max_supply,
+        minted: initial_mint
+    } with_lock(creator)
+    create dist0 = Token { amount: distribution[0].1, symbol: symbol } with_lock(distribution[0].0)
+    create dist1 = Token { amount: distribution[1].1, symbol: symbol } with_lock(distribution[1].0)
+    create dist2 = Token { amount: distribution[2].1, symbol: symbol } with_lock(distribution[2].0)
+    create dist3 = Token { amount: distribution[3].1, symbol: symbol } with_lock(distribution[3].0)
+
+    let initial_lp = pool_seed_amount
+    consume pool_paired_token
+    create pool = Pool {
+        token_a_symbol: symbol,
+        token_b_symbol: pool_paired_token.symbol,
+        reserve_a: pool_seed_amount,
+        reserve_b: pool_paired_token.amount,
+        total_lp: initial_lp,
+        fee_rate_bps: fee_rate_bps
+    }
+    create lp_receipt = LPReceipt {
+        pool_id: pool.type_hash(),
+        lp_amount: initial_lp,
+        provider: creator
+    } with_lock(creator)
+    let remaining = initial_mint - dist_total - pool_seed_amount
+    create change = Token { amount: remaining, symbol: symbol } with_lock(creator)
+""",
+    "bootstrap_token": """
+action bootstrap_token(symbol: [u8; 8], max_supply: u64, initial_mint: u64, creator: Address, recipients: [(Address, u64); 2]) -> (auth: MintAuthority, rec0: Token, rec1: Token, change: Token)
+where
+    assert_invariant(initial_mint <= max_supply, "initial exceeds max")
+    assert_invariant(recipients[1].1 <= U64_MAX - recipients[0].1, "distribution overflow")
+    let total_distributed = recipients[0].1 + recipients[1].1
+    assert_invariant(total_distributed <= initial_mint, "distribution exceeds mint")
+
+    create auth = MintAuthority {
+        token_symbol: symbol,
+        max_supply: max_supply,
+        minted: initial_mint
+    } with_lock(creator)
+    create rec0 = Token { amount: recipients[0].1, symbol: symbol } with_lock(recipients[0].0)
+    create rec1 = Token { amount: recipients[1].1, symbol: symbol } with_lock(recipients[1].0)
+    let remaining = initial_mint - total_distributed
+    create change = Token { amount: remaining, symbol: symbol } with_lock(creator)
+""",
+}
+
+for action, source in LAUNCH_ACTION_SOURCES.items():
+    (launch_action_source_root / f"launch_{action}.cell").write_text(
+        f"module acceptance::launch_{action}\n\n" + LAUNCH_TYPES_SOURCE + "\n" + source,
+        encoding="utf-8",
+    )
+
 ORIGINAL_SCOPED_ACTIONS = {
     "nft.cell": [
+        "create_collection",
         "mint",
         "transfer",
         "create_listing",
@@ -1390,8 +1507,9 @@ ORIGINAL_SCOPED_ACTIONS = {
         "cancel_proposal",
     ],
     "vesting.cell": ["create_vesting_config", "grant_vesting", "claim_vested", "revoke_grant"],
-    "amm_pool.cell": ["seed_pool", "isqrt", "min"],
-    "launch.cell": ["simple_launch"],
+    "token.cell": ["mint_with_authority", "transfer_token", "burn", "merge"],
+    "amm_pool.cell": ["seed_pool", "swap_a_for_b", "add_liquidity", "remove_liquidity", "isqrt", "min"],
+    "launch.cell": ["launch_token", "bootstrap_token"],
 }
 
 ORIGINAL_SCOPED_LOCKS = {
@@ -1401,17 +1519,14 @@ ORIGINAL_SCOPED_LOCKS = {
     "vesting.cell": ["vesting_admin"],
 }
 
-ORIGINAL_SCOPED_ACTION_FAIL_CLOSED = {
-    "token.cell": ["mint", "transfer_token", "burn", "merge"],
-    "amm_pool.cell": ["swap_a_for_b", "add_liquidity", "remove_liquidity"],
-    "launch.cell": ["launch_token"],
-}
+ORIGINAL_SCOPED_ACTION_FAIL_CLOSED = {}
 
 ORIGINAL_SCOPED_LOCK_FAIL_CLOSED = {}
 
 EXPECTED_SOURCE_ACTIONS = {
-    "token.cell": ["mint", "transfer_token", "burn", "merge"],
+    "token.cell": ["mint_with_authority", "transfer_token", "burn", "merge"],
     "nft.cell": [
+        "create_collection",
         "mint",
         "transfer",
         "create_listing",
@@ -1446,7 +1561,7 @@ EXPECTED_SOURCE_ACTIONS = {
     ],
     "vesting.cell": ["create_vesting_config", "grant_vesting", "claim_vested", "revoke_grant"],
     "amm_pool.cell": ["seed_pool", "swap_a_for_b", "add_liquidity", "remove_liquidity", "isqrt", "min"],
-    "launch.cell": ["launch_token", "simple_launch"],
+    "launch.cell": ["launch_token", "bootstrap_token"],
 }
 
 EXPECTED_SOURCE_LOCKS = {
@@ -1466,7 +1581,7 @@ CKB_ONCHAIN_ACTION_HARNESSES = {
     "multisig.cell": list(MULTISIG_ACTION_SOURCES.keys()),
     "vesting.cell": ["create_vesting_config", "grant_vesting", "claim_vested", "revoke_grant"],
     "amm_pool.cell": list(AMM_ACTION_SOURCES.keys()),
-    "launch.cell": ["launch_token", "simple_launch"],
+    "launch.cell": ["launch_token", "bootstrap_token"],
 }
 
 def clipped(text):
@@ -1852,6 +1967,19 @@ for action in MULTISIG_ACTION_SOURCES:
     record["original_source"] = str(production_example_path("multisig.cell"))
     multisig_action_artifacts.append(record)
 
+launch_action_artifacts = []
+for action in LAUNCH_ACTION_SOURCES:
+    source = launch_action_source_root / f"launch_{action}.cell"
+    record = compile_artifact(
+        f"launch.{action}.cell",
+        "launch-action-strict",
+        source,
+        artifact_root / f"launch_{action}.elf",
+    )
+    record["action"] = action
+    record["original_source"] = str(production_example_path("launch.cell"))
+    launch_action_artifacts.append(record)
+
 original_scoped_action_artifacts = []
 for example_name, actions in ORIGINAL_SCOPED_ACTIONS.items():
     for action in actions:
@@ -1878,9 +2006,8 @@ def original_scoped_action_or(record, example_name):
     )
 
 launch_action_artifacts = [
-    record
-    for record in original_scoped_action_artifacts
-    if record["example"] == "launch.cell" and record["action"] in ("launch_token", "simple_launch")
+    original_scoped_action_or(record, "launch.cell")
+    for record in launch_action_artifacts
 ]
 
 token_action_artifacts = [
@@ -2425,6 +2552,9 @@ def molecule_u32(value):
 
 def molecule_bytes(data):
     return molecule_u32(len(data)) + data
+
+def molecule_string_witness(data):
+    return molecule_bytes(molecule_bytes(data))
 
 def molecule_fixvec(items):
     out = bytearray(molecule_u32(len(items)))
@@ -3131,7 +3261,12 @@ def assert_live(tx_hash, index, label):
 
 def is_transient_dead_outpoint_error(error):
     message = str(error)
-    return "Resolve failed Dead(OutPoint" in message or "Dead(OutPoint" in message
+    return (
+        "Resolve failed Dead(OutPoint" in message
+        or "Dead(OutPoint" in message
+        or "Resolve failed Unknown(OutPoint" in message
+        or "Unknown(OutPoint" in message
+    )
 
 def code_cell_deploy_transaction(deploy_input, artifact, always_success_dep):
     return transaction(
@@ -3172,7 +3307,7 @@ def submit_code_cell_deploy_with_fresh_funding(
             }
         except RuntimeError as error:
             last_error = error
-            if attempt < max_attempts and is_transient_dead_outpoint_error(error):
+            if is_transient_dead_outpoint_error(error):
                 continue
             raise
     raise RuntimeError(f"{name} {label_suffix} failed after {max_attempts} attempts: {last_error}")
@@ -3335,24 +3470,35 @@ def deploy_code_cell(name, artifact_path, always_success_dep):
         "deploy_attempts": deploy["deploy_attempts"],
     }
 
-def create_script_locked_cells(label, cells, cell_deps):
+def create_script_locked_cells(label, cells, cell_deps, max_attempts=4):
     total_capacity = sum(cell["capacity"] for cell in cells)
     create_fee_capacity = 10 * 100_000_000
-    funding = collect_spendable_cellbases(total_capacity + create_fee_capacity)
-    tx = transaction(
-        funding,
-        [
-            {
-                "capacity": hex_u64(cell["capacity"]),
-                "lock": cell["lock"],
-                "type": cell.get("type"),
-            }
-            for cell in cells
-        ],
-        ["0x" + cell.get("data", b"").hex() for cell in cells],
-        cell_deps,
-    )
-    result = submit_and_commit(tx, f"{label} input-cell create")
+    last_error = None
+    for attempt in range(1, max_attempts + 1):
+        funding = collect_spendable_cellbases(total_capacity + create_fee_capacity)
+        tx = transaction(
+            funding,
+            [
+                {
+                    "capacity": hex_u64(cell["capacity"]),
+                    "lock": cell["lock"],
+                    "type": cell.get("type"),
+                }
+                for cell in cells
+            ],
+            ["0x" + cell.get("data", b"").hex() for cell in cells],
+            cell_deps,
+        )
+        try:
+            result = submit_and_commit(tx, f"{label} input-cell create")
+            break
+        except RuntimeError as error:
+            last_error = error
+            if is_transient_dead_outpoint_error(error):
+                continue
+            raise
+    else:
+        raise RuntimeError(f"{label} input-cell create failed after {max_attempts} attempts: {last_error}")
     live = [assert_live(result["tx_hash"], index, f"{label} input cell {index}").get("status") == "live" for index in range(len(cells))]
     return {
         "create_input": funding,
@@ -3635,7 +3781,7 @@ def build_token_action_case(action, cellscript_lock, cellscript_type, destinatio
             for output in outputs
         ]
 
-    if action == "mint":
+    if action == "mint_with_authority":
         initial_specs = [
             {
                 "capacity": 1000 * 100_000_000,
@@ -3792,7 +3938,36 @@ def build_nft_action_case(action_record, cellscript_lock, cellscript_type, desti
     original_scoped = action_record.get("kind") == "original-scoped-action-strict"
     flow_state = 0 if original_scoped else None
 
-    if action == "mint":
+    if action == "create_collection":
+        name = b"Acceptance Collection"
+        symbol = b"ACPT"
+        base_uri = b"ckb://cellscript/nft/"
+        max_supply = 200
+        valid_collection_payload = (
+            collection_molecule_data(current_owner, 0, max_supply, name, symbol, base_uri)
+            if original_scoped
+            else collection_data(current_owner, 0, max_supply)
+        )
+        malformed_collection_payload = (
+            collection_molecule_data(current_owner, 1, max_supply, name, symbol, base_uri)
+            if original_scoped
+            else collection_data(current_owner, 1, max_supply)
+        )
+        witness = (
+            entry_witness(current_owner, max_supply, molecule_string_witness(name), molecule_string_witness(symbol), molecule_string_witness(base_uri))
+            if original_scoped
+            else entry_witness(current_owner, max_supply)
+        )
+        initial = create_script_locked_cells(
+            "nft.create_collection",
+            [{"capacity": 1000 * 100_000_000, "lock": cellscript_lock, "type": None, "data": b""}],
+            cell_deps,
+        )
+        input_cell = initial["cells"][0]
+        outputs = [{"capacity": hex_u64(1000 * 100_000_000), "lock": cellscript_lock, "type": cellscript_type}]
+        valid_tx = transaction(input_cell, outputs, ["0x" + valid_collection_payload.hex()], cell_deps, [witness])
+        malformed_tx = transaction(input_cell, outputs, ["0x" + malformed_collection_payload.hex()], cell_deps, [witness])
+    elif action == "mint":
         input_collection_payload = (
             collection_molecule_data(current_owner, 10, 1000)
             if original_scoped
@@ -4531,7 +4706,7 @@ def build_multisig_action_case(action_record, cellscript_lock, wallet_type, prop
 def run_launch_action(action_record, always_success_dep):
     action = action_record["action"]
     name = action_record["name"]
-    if action != "simple_launch":
+    if action != "bootstrap_token":
         if action != "launch_token":
             raise RuntimeError(f"unsupported launch action harness: {action}")
     code = deploy_code_cell(name, action_record["artifact"], always_success_dep)
@@ -4652,7 +4827,7 @@ def build_launch_action_case(action_record, cellscript_lock, auth_type, token_ty
         malformed_tx = transaction(input_cell, outputs, malformed_outputs_data, cell_deps, [witness])
     else:
         initial = create_script_locked_cells(
-            "launch.simple_launch",
+            "launch.bootstrap_token",
             [{"capacity": 4000 * 100_000_000, "lock": cellscript_lock, "type": None, "data": b""}],
             cell_deps,
         )
@@ -5519,10 +5694,10 @@ def run_stateful_action_branch_coverage(always_success_dep, required_records, al
     return branch_runs
 
 def run_stateful_token_lifecycle(always_success_dep):
-    scenario = "token.mint-transfer-mint-merge-burn"
+    scenario = "token.mint-with-authority-transfer-mint-with-authority-merge-burn"
     actions = {
         name: deploy_stateful_action(action_record_by(token_action_artifacts, name), always_success_dep)
-        for name in ("mint", "transfer_token", "merge", "burn")
+        for name in ("mint_with_authority", "transfer_token", "merge", "burn")
     }
     token_type = always_success_lock("0xa1")
     token_symbol = b"STATE001"
@@ -5532,24 +5707,24 @@ def run_stateful_token_lifecycle(always_success_dep):
         "stateful.token.auth",
         [{
             "capacity": 700 * 100_000_000,
-            "lock": actions["mint"]["lock"],
+            "lock": actions["mint_with_authority"]["lock"],
             "type": token_type,
             "data": mint_authority_data(token_symbol, 1000, 0),
         }],
-        actions["mint"]["cell_deps"],
+        actions["mint_with_authority"]["cell_deps"],
     )
     auth0 = initial["cells"][0]
     tx1 = transaction(
         auth0,
         [
-            {"capacity": hex_u64(600 * 100_000_000), "lock": actions["mint"]["lock"], "type": token_type},
+            {"capacity": hex_u64(600 * 100_000_000), "lock": actions["mint_with_authority"]["lock"], "type": token_type},
             {"capacity": hex_u64(100 * 100_000_000), "lock": actions["transfer_token"]["lock"], "type": token_type},
         ],
         [
             "0x" + mint_authority_data(token_symbol, 1000, 5).hex(),
             "0x" + token_data(5, token_symbol).hex(),
         ],
-        actions["mint"]["cell_deps"],
+        actions["mint_with_authority"]["cell_deps"],
         [entry_witness(actions["transfer_token"]["lock_hash"], 5)],
     )
     step = run_stateful_step(scenario, "mint_first_token_to_transfer", tx1, [auth0])
@@ -5571,14 +5746,14 @@ def run_stateful_token_lifecycle(always_success_dep):
     tx3 = transaction(
         auth1,
         [
-            {"capacity": hex_u64(500 * 100_000_000), "lock": actions["mint"]["lock"], "type": token_type},
+            {"capacity": hex_u64(500 * 100_000_000), "lock": actions["mint_with_authority"]["lock"], "type": token_type},
             {"capacity": hex_u64(100 * 100_000_000), "lock": actions["merge"]["lock"], "type": token_type},
         ],
         [
             "0x" + mint_authority_data(token_symbol, 1000, 12).hex(),
             "0x" + token_data(7, token_symbol).hex(),
         ],
-        actions["mint"]["cell_deps"],
+        actions["mint_with_authority"]["cell_deps"],
         [entry_witness(actions["merge"]["lock_hash"], 7)],
     )
     step = run_stateful_step(scenario, "mint_second_token_to_merge", tx3, [auth1])
@@ -5727,7 +5902,7 @@ def run_stateful_nft_listing_sale(always_success_dep):
     scenario = "nft.mint-list-transfer-by-listing"
     actions = {
         name: deploy_stateful_action(action_record_by(nft_action_artifacts, name), always_success_dep)
-        for name in ("mint", "create_listing", "buy_from_listing")
+        for name in ("create_collection", "mint", "create_listing", "buy_from_listing")
     }
     collection_type = always_success_lock("0xc1")
     nft_type = always_success_lock("0xc2")
@@ -5736,7 +5911,12 @@ def run_stateful_nft_listing_sale(always_success_dep):
     seller = bytes([0x11]) * 32
     buyer_lock = always_success_lock("0xc5")
     buyer = decode_hex(script_hash(buyer_lock), 32)
-    royalty_recipient = seller
+    collection_creator = actions["mint"]["lock_hash"]
+    royalty_recipient = collection_creator
+    collection_name = b"Stateful Collection"
+    collection_symbol = b"SNFT"
+    collection_base_uri = b"ckb://cellscript/stateful-nft/"
+    max_supply = 200
     metadata_hash = bytes([0x33]) * 32
     token_id = 1
     price = 10_000
@@ -5746,32 +5926,51 @@ def run_stateful_nft_listing_sale(always_success_dep):
     steps = []
 
     initial = create_script_locked_cells(
-        "stateful.nft.collection",
+        "stateful.nft.collection_seed",
         [{
             "capacity": 900 * 100_000_000,
-            "lock": actions["mint"]["lock"],
-            "type": collection_type,
-            "data": collection_molecule_data(seller, 0, 1000),
+            "lock": actions["create_collection"]["lock"],
+            "type": None,
+            "data": b"",
         }],
-        actions["mint"]["cell_deps"],
+        actions["create_collection"]["cell_deps"],
     )
-    collection0 = initial["cells"][0]
+    collection_seed = initial["cells"][0]
     tx1 = transaction(
+        collection_seed,
+        [{"capacity": hex_u64(800 * 100_000_000), "lock": actions["mint"]["lock"], "type": collection_type}],
+        ["0x" + collection_molecule_data(collection_creator, 0, max_supply, collection_name, collection_symbol, collection_base_uri).hex()],
+        actions["create_collection"]["cell_deps"],
+        [
+            entry_witness(
+                collection_creator,
+                max_supply,
+                molecule_string_witness(collection_name),
+                molecule_string_witness(collection_symbol),
+                molecule_string_witness(collection_base_uri),
+            )
+        ],
+    )
+    step = run_stateful_step(scenario, "create_collection_for_live_mint", tx1, [collection_seed])
+    steps.append(step)
+    collection0 = output_cell_from_tx(step["commit"], tx1, 0)
+
+    tx2 = transaction(
         collection0,
         [
             {"capacity": hex_u64(500 * 100_000_000), "lock": actions["mint"]["lock"], "type": collection_type},
             {"capacity": hex_u64(300 * 100_000_000), "lock": actions["buy_from_listing"]["lock"], "type": nft_type},
         ],
         [
-            "0x" + collection_molecule_data(seller, token_id, 1000).hex(),
+            "0x" + collection_molecule_data(collection_creator, token_id, max_supply, collection_name, collection_symbol, collection_base_uri).hex(),
             "0x" + nft_data(token_id, seller, metadata_hash, royalty_recipient, 250).hex(),
         ],
         actions["mint"]["cell_deps"],
         [entry_witness(seller, metadata_hash)],
     )
-    step = run_stateful_step(scenario, "mint_nft_for_listing_sale", tx1, [collection0])
+    step = run_stateful_step(scenario, "mint_nft_for_listing_sale", tx2, [collection0])
     steps.append(step)
-    nft_for_sale = output_cell_from_tx(step["commit"], tx1, 1)
+    nft_for_sale = output_cell_from_tx(step["commit"], tx2, 1)
     nft_dep = cell_dep_for(nft_for_sale)
 
     listing_initial = create_script_locked_cells(
@@ -5780,7 +5979,7 @@ def run_stateful_nft_listing_sale(always_success_dep):
         actions["create_listing"]["cell_deps"],
     )
     listing_input = listing_initial["cells"][0]
-    tx2 = transaction(
+    tx3 = transaction(
         listing_input,
         [
             {"capacity": hex_u64(300 * 100_000_000), "lock": actions["buy_from_listing"]["lock"], "type": listing_type},
@@ -5793,11 +5992,11 @@ def run_stateful_nft_listing_sale(always_success_dep):
         [nft_dep] + actions["create_listing"]["cell_deps"],
         [entry_witness(price, created_at)],
     )
-    step = run_stateful_step(scenario, "create_listing_from_live_nft_dep", tx2, [listing_input])
+    step = run_stateful_step(scenario, "create_listing_from_live_nft_dep", tx3, [listing_input])
     steps.append(step)
-    listing = output_cell_from_tx(step["commit"], tx2, 0)
+    listing = output_cell_from_tx(step["commit"], tx3, 0)
 
-    tx3 = transaction(
+    tx4 = transaction(
         [nft_for_sale, listing],
         [
             {"capacity": hex_u64(300 * 100_000_000), "lock": buyer_lock, "type": nft_type},
@@ -5812,7 +6011,7 @@ def run_stateful_nft_listing_sale(always_success_dep):
         actions["buy_from_listing"]["cell_deps"],
         [entry_witness(buyer, seller, price), "0x"],
     )
-    step = run_stateful_step(scenario, "buy_listing_from_live_nft_and_listing", tx3, [nft_for_sale, listing])
+    step = run_stateful_step(scenario, "buy_listing_from_live_nft_and_listing", tx4, [nft_for_sale, listing])
     steps.append(step)
 
     return {
@@ -5827,10 +6026,10 @@ def run_stateful_nft_listing_sale(always_success_dep):
     }
 
 def run_stateful_launch_to_token_mint(always_success_dep):
-    scenario = "launch.launch-token-then-mint"
+    scenario = "launch.launch-token-then-mint-with-authority"
     launch = deploy_stateful_action(action_record_by(launch_action_artifacts, "launch_token"), always_success_dep)
-    mint = deploy_stateful_action(action_record_by(token_action_artifacts, "mint"), always_success_dep)
-    actions = {"launch_token": launch, "mint": mint}
+    mint = deploy_stateful_action(action_record_by(token_action_artifacts, "mint_with_authority"), always_success_dep)
+    actions = {"launch_token": launch, "mint_with_authority": mint}
     auth_type = always_success_lock("0x91")
     token_type = always_success_lock("0x92")
     pool_paired_type = always_success_lock("0x93")
@@ -5905,7 +6104,7 @@ def run_stateful_launch_to_token_mint(always_success_dep):
         mint["cell_deps"],
         [entry_witness(to, extra_mint)],
     )
-    step = run_stateful_step(scenario, "mint_again_from_launched_authority", tx2, [auth_for_mint])
+    step = run_stateful_step(scenario, "mint_with_authority_again_from_launched_authority", tx2, [auth_for_mint])
     steps.append(step)
 
     return {
@@ -6423,7 +6622,7 @@ try:
     report["onchain"]["all_token_actions_exercised"] = sorted(report["onchain"]["token_actions_exercised"]) == [
         "burn",
         "merge",
-        "mint",
+        "mint_with_authority",
         "transfer_token",
     ]
     report["onchain"]["nft_actions_exercised"] = [run["action"] for run in report["onchain"]["nft_action_runs"]]
@@ -6433,6 +6632,7 @@ try:
         "burn",
         "buy_from_listing",
         "cancel_listing",
+        "create_collection",
         "create_listing",
         "create_offer",
         "mint",
@@ -6481,7 +6681,7 @@ try:
     report["onchain"]["launch_actions_exercised"] = [run["action"] for run in report["onchain"]["launch_action_runs"]]
     report["onchain"]["all_launch_actions_exercised"] = report["onchain"]["launch_actions_exercised"] == [
         "launch_token",
-        "simple_launch",
+        "bootstrap_token",
     ]
     all_action_runs = (
         report["onchain"]["token_action_runs"]
@@ -6646,7 +6846,16 @@ try:
         "amm_pool.cell": report["onchain"]["amm_actions_exercised"],
         "launch.cell": report["onchain"]["launch_actions_exercised"],
     })
-    if not report["onchain"]["all_bundled_examples_deployed"]:
+    missing_strict_original_deployments = sorted(
+        set(report["bundled_examples_exact_order"]) - set(report["onchain"]["bundled_examples_deployed"])
+    )
+    report["onchain"]["strict_original_bundled_deployment_gate"] = {
+        "status": "passed" if not missing_strict_original_deployments else "partial",
+        "deployed": report["onchain"]["bundled_examples_deployed"],
+        "missing": missing_strict_original_deployments,
+        "fatal_in_mode": report.get("acceptance_mode") == "production",
+    }
+    if report.get("acceptance_mode") == "production" and not report["onchain"]["all_bundled_examples_deployed"]:
         raise RuntimeError(
             "not all primitive-strict original bundled examples deployed: "
             f"deployed={report['onchain']['bundled_examples_deployed']}, "

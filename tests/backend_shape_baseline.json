@@ -37,15 +37,15 @@
   },
   {
     "example": "nft.cell",
-    "line_count": 13935,
-    "text_size": 54380,
+    "line_count": 14851,
+    "text_size": 57812,
     "relaxed_branch_count": 1,
     "max_cond_branch_abs_distance": 7276,
-    "machine_block_count": 2256,
+    "machine_block_count": 2398,
     "max_machine_block_size": 276,
-    "machine_cfg_edge_count": 3855,
-    "machine_call_edge_count": 538,
-    "unreachable_machine_block_count": 1841
+    "machine_cfg_edge_count": 4078,
+    "machine_call_edge_count": 557,
+    "unreachable_machine_block_count": 2217
   },
   {
     "example": "timelock.cell",

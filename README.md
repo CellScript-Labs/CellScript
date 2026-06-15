@@ -305,13 +305,13 @@ resource Token has store, create, consume, replace, burn, relock {
     symbol: [u8; 8]
 }
 
-resource MintAuthority has store {
+resource MintAuthority has store, create, replace {
     token_symbol: [u8; 8]
     max_supply: u64
     minted: u64
 }
 
-action mint(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after: MintAuthority, token: Token)
+action mint_with_authority(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after: MintAuthority, token: Token)
 where
     assert(auth_before.minted + amount <= auth_before.max_supply, "exceeds max supply")
 
@@ -349,7 +349,7 @@ where
 | `examples/nft.cell` | Unique assets, metadata, ownership transfer |
 | `examples/vesting.cell` | Receipt-style grants and explicit claim state transitions |
 | `examples/amm_pool.cell` | Shared pool state, swap/liquidity effects |
-| `examples/launch.cell` | Launch/pool composition patterns |
+| `examples/launch.cell` | Mint-authority bootstrap and launch/pool composition patterns |
 
 Non-production language examples live under `examples/language/`. They compile
 and exercise compiler/tooling surfaces, but they are not part of the seven-file
@@ -408,6 +408,7 @@ CellScript includes production-style local language tooling for early users:
 - [CKB target profile tutorial](docs/wiki/Tutorial-05-CKB-Target-Profiles.md)
 - [CKB deployment manifest](docs/CELLSCRIPT_CKB_DEPLOYMENT_MANIFEST.md)
 - [Capacity and builder contract](docs/CELLSCRIPT_CAPACITY_AND_BUILDER_CONTRACT.md)
+- [Token and AMM bootstrap builder path](docs/examples/token_amm_bootstrap.md)
 - [Linear ownership](docs/CELLSCRIPT_LINEAR_OWNERSHIP.md)
 - [Scheduler hints](docs/CELLSCRIPT_SCHEDULER_HINTS.md)
 - [Metadata verification and production gates](docs/wiki/Tutorial-06-Metadata-Verification-and-Production-Gates.md)
