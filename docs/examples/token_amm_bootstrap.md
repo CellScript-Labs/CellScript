@@ -139,17 +139,17 @@ transaction requirements:
 ```bash
 cellc explain-assumptions examples/token.cell \
   --target-profile ckb \
-  --primitive-compat 0.14 \
+  --primitive-strict 0.16 \
   --json
 
 cellc explain-assumptions examples/amm_pool.cell \
   --target-profile ckb \
-  --primitive-compat 0.14 \
+  --primitive-strict 0.16 \
   --json
 
 cellc explain-assumptions examples/launch.cell \
   --target-profile ckb \
-  --primitive-compat 0.14 \
+  --primitive-strict 0.16 \
   --json
 ```
 

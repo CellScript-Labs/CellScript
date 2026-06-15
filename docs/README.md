@@ -25,7 +25,9 @@ drafts. Released versions should use non-draft filenames.
   note and release-evidence summary.
 - `docs/releases/CELLSCRIPT_0_15_RELEASE_NOTES.md` is the final 0.15.0 release
   note and release-evidence summary.
-- `docs/releases/CELLSCRIPT_0_16_RELEASE_NOTES.md` is the final 0.16.0 release
+- `docs/releases/CELLSCRIPT_0_16_RELEASE_NOTES.md` is the initial 0.16.0 release
+  note and release-evidence summary.
+- `docs/releases/CELLSCRIPT_0_16_1_RELEASE_NOTES.md` is the final 0.16.1 release
   note and release-evidence summary.
 
 Release candidates and planning notes should not live here unless they are the
