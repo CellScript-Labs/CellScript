@@ -1,0 +1,9 @@
+{
+  "schema": "novaseal-agreement-fixture-v0.1",
+  "fixture": "wrong_settlement_amount_reject",
+  "action": "repay_before_expiry",
+  "expected": "rejected",
+  "coverage": "local-transaction-shape-covered + resolved-transaction-covered",
+  "reject_guard": "typed NativeCkbPayoutV0 lender repayment output must equal principal plus fixed fee",
+  "description": "A repayment transaction that materializes a lender repayment payout below principal plus fixed fee must reject in the resolved transaction harness."
+}

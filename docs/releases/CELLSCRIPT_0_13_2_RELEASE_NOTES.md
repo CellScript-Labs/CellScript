@@ -264,14 +264,14 @@ New at the 0.13.2 release cutoff:
   minting, AMM pool lifecycle, vesting revoke, and multisig execution flows;
 - stateful action-branch scenarios cover every production acceptance action not
   already covered by those end-to-end flows;
-- the stateful report must cover 43/43 production acceptance actions with no
+- the stateful report must cover 44/44 production acceptance actions with no
   missing action IDs or missing action artifacts;
 - every stateful step must have dry-run evidence, committed transaction
   evidence, consumed-input liveness checks, output liveness checks, measured
   cycles, consensus-serialized transaction size, occupied-capacity evidence, and
   no under-capacity outputs.
 
-The current release gate expectation is 27 stateful scenarios, 46 committed
+The current release gate expectation is 27 stateful scenarios, 47 committed
 stateful steps, 7 end-to-end business scenarios, and 20 stateful action-branch
 scenarios. If any new production action is added later, the stateful coverage
 gate must fail until that action is covered.

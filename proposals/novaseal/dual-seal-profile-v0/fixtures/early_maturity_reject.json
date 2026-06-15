@@ -1,0 +1,8 @@
+{
+  "schema": "novaseal-dual-seal-fixture-v0.1",
+  "fixture": "early_maturity_reject",
+  "action": "finalize_dual_seal",
+  "expected": "rejected",
+  "coverage": "source-guard-present",
+  "description": "Finalisation must reject before the CKB maturity timepoint."
+}

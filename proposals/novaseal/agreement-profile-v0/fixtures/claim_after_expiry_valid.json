@@ -1,0 +1,8 @@
+{
+  "schema": "novaseal-agreement-fixture-v0.1",
+  "fixture": "claim_after_expiry_valid",
+  "action": "claim_after_expiry",
+  "expected": "accepted",
+  "coverage": "source-guard-present + local-transaction-shape-covered + resolved-transaction-covered",
+  "description": "Lender actor claims the locked collateral after expiry, producing Defaulted status and a materialized receipt output."
+}

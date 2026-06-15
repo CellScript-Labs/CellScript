@@ -1,0 +1,1125 @@
+== stdout ==
+
+running 776 tests
+test cli::commands::tests::expected_metadata_hash_comparison_is_case_sensitive ... ok
+test cli::commands::tests::invalid_parser_mapping_returns_error_instead_of_panicking ... ok
+test cli::commands::tests::test_command_execution ... ok
+test ckb_hash_tests::ckb_blake2b256_matches_blank_hash_vector ... ok
+test codegen::assembler::tests::strict_audit_internal_assembler_oracle_for_core_instruction_bytes ... ok
+test codegen::assembler::tests::strict_audit_riscv_immediate_boundaries_are_enforced ... ok
+test cli::commands::tests::production_policy_finds_evidence_less_checked_runtime_proof_plan_gap ... ok
+test codegen::assembler::tests::strict_audit_li_split_handles_negative_32_bit_boundaries ... ok
+test cli::commands::tests::production_policy_finds_evidence_less_on_chain_checked_proof_plan_gap ... ok
+test codegen::calls::tests::fixed_u64_le_width_accepts_hashes_and_byte_arrays ... ok
+test codegen::cell_ops::tests::consumed_operand_var_accepts_named_cell_operands_only ... ok
+test codegen::cell_ops::tests::destroy_absence_scan_is_limited_to_singleton_and_type_id_unique_policies ... ok
+test codegen::cell_ops::tests::identity_and_destruction_policy_labels_are_stable ... ok
+test codegen::calls::tests::canonical_type_names_strip_reference_wrappers ... ok
+test codegen::calls::tests::packed_hash_width_uses_codegen_fixed_byte_type_rules ... ok
+test codegen::frame::tests::large_addi_materializes_out_of_range_immediates ... ok
+test codegen::frame::tests::stack_access_helpers_emit_sp_relative_instructions ... ok
+test codegen::frame::tests::large_addi_uses_single_addi_for_small_immediates ... ok
+test codegen::expr::tests::bool_canonical_check_emits_zero_one_guard ... ok
+test codegen::expr::tests::divisor_nonzero_guard_fails_closed_on_zero ... ok
+test cli::commands::tests::ckb_hash_file_rejects_inputs_above_limit ... ok
+test codegen::runtime::tests::ckb_runtime_syscall_abi_matches_declared_constants ... ok
+test codegen::runtime::tests::checked_runtime_status_register_defaults_to_a1_for_unknown_helpers ... ok
+test codegen::runtime::tests::runtime_helper_classification_tracks_checked_and_hash_helpers ... ok
+test codegen::schema::tests::aggregate_field_layouts_track_tuple_offsets ... ok
+test codegen::schema::tests::fixed_byte_constants_materialize_little_endian_bytes ... ok
+test codegen::schema::tests::fixed_width_helpers_classify_scalar_and_byte_storage ... ok
+test codegen::tests::cell_operation_identity_helpers_stay_in_cell_ops ... ok
+test codegen::tests::dynamic_syscall_index_is_copied_before_large_stack_staging ... ok
+test codegen::assembler::tests::strict_audit_elf_header_and_segments_are_internally_consistent ... ok
+test codegen::tests::consumed_schema_params_use_loaded_cell_size_for_field_checks ... ok
+test codegen::tests::explicit_external_toolchain_paths_are_strict ... ok
+test codegen::tests::generated_collection_assembly_is_internal_assembler_clean ... ok
+test codegen::tests::generated_large_offsets_are_normalized_before_assembly ... ok
+test codegen::tests::internal_assembler_encodes_emitted_instruction_surface ... ok
+test codegen::tests::generated_public_assembly_mnemonics_are_declared ... ok
+test codegen::tests::generated_stdlib_assembly_is_internal_assembler_clean ... ok
+test codegen::tests::generated_functions_use_shared_epilogue_tail ... ok
+test codegen::tests::internal_assembler_encodes_full_width_li_literals ... ok
+test codegen::tests::internal_assembler_keeps_near_unconditional_jump_compact ... ok
+test codegen::tests::internal_assembler_rejects_intentionally_unsupported_mnemonics ... ok
+test codegen::tests::internal_assembler_rejects_unresolved_call_targets ... ok
+test codegen::tests::internal_assembler_encodes_register_conditional_branches ... ok
+test codegen::tests::large_addi_avoids_clobbering_source_register ... ok
+test codegen::tests::machine_cfg_tracks_call_edges_to_local_helpers ... ok
+test codegen::tests::machine_layout_order_rejects_missing_duplicate_or_unknown_blocks ... ok
+test codegen::assembler::tests::strict_audit_relaxed_conditional_branch_within_jal_range_preserves_registers ... ok
+test codegen::tests::machine_layout_plan_builds_explicit_machine_blocks ... ok
+test codegen::tests::machine_layout_plan_builds_register_conditional_branch_blocks ... ok
+test codegen::tests::machine_layout_plan_rejects_branch_target_outside_text ... ok
+test codegen::tests::binary_codegen_materializes_narrow_integer_constants ... ok
+test codegen::tests::machine_reachability_uses_entry_label_not_every_global ... ok
+test codegen::tests::division_codegen_guards_zero_divisors ... ok
+test codegen::tests::outgoing_stack_arg_area_is_16_byte_aligned_at_call_boundaries ... ok
+test codegen::tests::read_ref_runtime_fallback_records_cell_buffer_state ... ok
+test codegen::tests::register_contract_allows_only_entry_wrapper_writes_to_direct_registers ... ok
+test codegen::tests::dynamic_molecule_vector_field_access_validates_full_table_offsets ... ok
+test codegen::tests::rv64_li_boundary_values_materialize_correct_bits ... ok
+test codegen::tests::semantic_molecule_field_access_uses_validated_api_gate ... ok
+test codegen::tests::sp_addi_large_offsets_clobber_only_destination_register ... ok
+test codegen::tests::dynamic_molecule_fixed_field_codegen_checks_full_header_and_exact_span ... ok
+test codegen::tests::state_transition_edges_use_explicit_consumed_binding ... ok
+test codegen::tests::strict_audit_outgoing_stack_args_are_staged_inside_current_frame ... ok
+test codegen::tests::type_hash_missing_output_buffer_slots_report_compile_error ... ok
+test codegen::tests::type_hash_missing_param_slots_report_compile_error ... ok
+test codegen::tests::u128_const_without_fixed_storage_reports_compile_error ... ok
+test codegen::tests::machine_layout_plan_reports_branch_relaxation_metrics ... ok
+test codegen::tests::unaligned_scalar_load_large_offsets_preserve_live_accumulator ... ok
+test codegen::tests::unrepresentable_memory_load_offsets_report_compile_error ... ok
+test codegen::tests::runtime_cast_codegen_checks_narrowing_and_bool_canonicality ... ok
+test codegen::tests::unrepresentable_stack_offsets_report_compile_error ... ok
+test codegen::tests::narrow_arithmetic_codegen_truncates_to_declared_width ... ok
+test debug::tests::test_debug_info_generator ... ok
+test debug::tests::test_dwarf_generation ... ok
+test debug::tests::test_type_registration ... ok
+test debug::tests::test_line_table ... ok
+test docgen::tests::docgen_emits_flat_pool_runtime_input_requirements ... ok
+test codegen::tests::schema_ref_call_preserves_schema_abi_length ... ok
+test docgen::tests::docgen_emits_markdown_for_action ... ok
+test docgen::tests::docgen_emits_transaction_invariant_checked_subconditions ... ok
+test docgen::tests::docgen_html_escapes_module_and_item_text ... ok
+test error::tests::caret_padding_starts_at_span_column ... ok
+test error::tests::caret_width_counts_characters_not_bytes ... ok
+test flow::tests::consumed_flow_tracking_follows_expression_aliases ... ok
+test fmt::tests::format_action_transition_block_for_multiple_edges ... ok
+test fmt::tests::format_indents_preserve_fields_inside_expression_block ... ok
+test fmt::tests::format_preserves_type_policy_metadata ... ok
+test fmt::tests::format_preserves_single_element_tuple_expression ... ok
+test fmt::tests::format_round_trips_inline_if_tuple_expression ... ok
+test fmt::tests::format_round_trips_multiline_expression_block ... ok
+test codegen::tests::internal_assembler_relaxes_out_of_range_conditional_branch ... ok
+test fmt::tests::format_round_trips_preserve_block ... ok
+test fmt::tests::format_round_trips_require_block ... ok
+test fmt::tests::format_round_trips_simple_module ... ok
+test fmt::tests::format_round_trips_stdlib_lifecycle_field_block ... ok
+test fmt::tests::format_single_expr_require_block_uses_compact_form ... ok
+test fmt::tests::format_uses_canonical_assert_and_no_const_semicolon ... ok
+test fmt::tests::format_uses_field_shorthand_when_value_matches_name ... ok
+test incremental::tests::clean_cache_rejects_overflowing_max_age ... ok
+test codegen::tests::stack_pointer_offsets_are_emitted_through_helpers ... ok
+test incremental::tests::clean_cache_skips_output_paths_outside_trusted_root ... ok
+test codegen::tests::vm2_syscall_helpers_emit_executable_status_checked_wrappers ... ok
+test incremental::tests::test_change_detector ... ok
+test ir::tests::all_diverging_match_expression_does_not_leave_unreachable_join ... ok
+test incremental::tests::test_dependency_graph ... ok
+test ir::tests::assert_in_pure_function_lowers_failure_to_abort_terminator ... ok
+test incremental::tests::load_cache_drops_units_with_paths_outside_trusted_root ... ok
+test ir::tests::binary_arithmetic_result_type_preserves_left_operand_width ... ok
+test ir::tests::constant_cast_rejects_out_of_range_u128_narrowing ... ok
+test ir::tests::contextual_integer_binary_operands_lower_to_peer_width ... ok
+test ir::tests::ir_generation_aggregates_lowering_errors_with_source_spans ... ok
+test ir::tests::exhaustive_enum_match_unmatched_path_lowers_to_abort_terminator ... ok
+test ir::tests::ir_straight_line_lifecycle_certificate_rejects_duplicate_consume_without_typecheck ... ok
+test ir::tests::ir_straight_line_lifecycle_certificate_rejects_branch_local_create_without_typecheck ... ok
+test ir::tests::ir_type_value_kind_never_derives_status_kinds ... ok
+test ir::tests::poison_lowering_keeps_value_invalid_while_block_stays_live ... ok
+test incremental::tests::test_incremental_compiler ... ok
+test ir::tests::mixed_width_expression_local_widening_lowers_as_explicit_casts ... ok
+test ir::tests::reference_and_deref_unary_result_types_match_ast_types ... ok
+test ir::tests::require_block_lowers_to_atomic_requires ... ok
+test ir::tests::runtime_narrowing_cast_lowers_as_cast_instruction ... ok
+test ir::tests::status_boundary_ir_verifier_allows_domain_u64_return_tuple_and_call_argument ... ok
+test ir::tests::logical_operators_lower_as_short_circuit_control_flow ... ok
+test ir::tests::status_boundary_ir_verifier_rejects_dropped_raw_syscall_status ... ok
+test ir::tests::preserve_sugar_populates_preserved_fields ... ok
+test ir::tests::status_boundary_ir_verifier_allows_unit_runtime_helper_when_status_is_checked_by_codegen_boundary ... ok
+test ir::tests::status_boundary_ir_verifier_rejects_raw_syscall_status_as_domain_call_argument ... ok
+test ir::tests::status_boundary_ir_verifier_rejects_raw_syscall_status_produced_without_checked_consumer ... ok
+test ir::tests::status_boundary_ir_verifier_rejects_raw_syscall_status_in_tuple_field ... ok
+test ir::tests::status_boundary_ir_verifier_rejects_raw_syscall_status_stored_as_dsl_local ... ok
+test ir::tests::status_boundary_ir_verifier_rejects_raw_syscall_status_returned_as_domain_u64 ... ok
+test ir::tests::status_boundary_ir_verifier_rejects_unit_runtime_helper_status_stored_as_domain_u64 ... ok
+test ir::tests::stdlib_claim_lowers_to_consumed_receipt_and_locked_declared_output ... ok
+test ir::tests::strict_audit_ir_verifier_rejects_constant_destination_width_mismatch ... ok
+test ir::tests::strict_audit_ir_lowering_records_instruction_level_provenance ... ok
+test ir::tests::strict_audit_ir_verifier_rejects_empty_body_blocks ... ok
+test ir::tests::stdlib_transfer_lowers_to_single_consumed_input_and_locked_output ... ok
+test ir::tests::stdlib_settle_lowers_to_consumed_input_and_locked_output ... ok
+test ir::tests::strict_audit_ir_verifier_rejects_extra_consume_set_metadata ... ok
+test ir::tests::strict_audit_ir_verifier_rejects_missing_create_set_metadata ... ok
+test ir::tests::strict_audit_ir_verifier_rejects_missing_terminator_target ... ok
+test ir::tests::strict_audit_ir_verifier_rejects_poisoned_lowering_module ... ok
+test ir::tests::strict_audit_ir_verifier_rejects_poisoned_load_const ... ok
+test ir::tests::strict_audit_ir_verifier_rejects_poisoned_lowering_operand ... ok
+test ir::tests::strict_audit_ir_verifier_rejects_use_not_defined_on_all_paths ... ok
+test ir::tests::strict_audit_ir_verifier_rejects_stale_write_intents_metadata ... ok
+test ir::tests::strict_audit_ir_verifier_reports_instruction_provenance ... ok
+test ir::tests::strict_audit_schema_field_accesses_are_rematerialized_per_cfg_path ... ok
+test codegen::tests::u128_delta_arithmetic_codegen_uses_fixed_byte_storage ... ok
+test lexer::tests::test_byte_string ... ok
+test lexer::tests::test_comment ... ok
+test lexer::tests::test_identifiers ... ok
+test lexer::tests::test_keywords ... ok
+test lexer::tests::test_numbers ... ok
+test lexer::tests::rejects_oversized_identifier ... ok
+test lexer::tests::test_operators ... ok
+test lexer::tests::test_punctuation ... ok
+test lexer::tests::test_string ... ok
+test lexer::tests::test_unterminated_byte_string_errors ... ok
+test lexer::tests::test_unterminated_string_errors ... ok
+test lsp::tests::lsp_position_conversion_treats_crlf_as_single_line_ending ... ok
+test docgen::tests::docgen_emits_invariant_coverage_summary ... ok
+test lsp::tests::lsp_position_incremental_change_applies_crlf_ranges ... ok
+test lsp::tests::lsp_primitive_strict_rejects_legacy_capabilities ... ok
+test lsp::tests::goto_definition_prefers_local_scope_over_top_level_symbol ... ok
+test lsp::tests::lsp_rejects_document_count_over_limit ... ok
+test lsp::tests::find_references_for_locals_stays_in_enclosing_callable_scope ... ok
+test lsp::tests::lsp_reads_primitive_strict_from_manifest ... ok
+test lsp::tests::lsp_rejects_oversized_documents ... ok
+test lsp::tests::test_ckb_namespace_completions ... ok
+test lsp::tests::test_flow_namespace_completions ... ok
+test lsp::tests::test_code_actions_for_lowering_diagnostics ... ok
+test lsp::tests::test_goto_definition_and_references ... ok
+test lsp::tests::test_format_document ... ok
+test lsp::tests::test_incremental_change_applies_utf16_ranges_after_non_bmp_text ... ok
+test lsp::tests::test_incremental_change_ignores_invalid_utf16_ranges ... ok
+test lsp::tests::test_keyword_completions ... ok
+test codegen::tests::entry_dynamic_witness_stack_arg_staging_preserves_cursor_register ... ok
+test lsp::tests::test_lsp_position_conversion_uses_utf16_columns ... ok
+test lsp::tests::test_flow_u8_namespace_completions ... ok
+test lsp::tests::test_parse_errors_become_diagnostics ... ok
+test lsp::tests::test_lsp_server ... ok
+test lsp::tests::test_hover ... ok
+test lsp::tests::test_vec_member_completions_match_supported_helpers ... ok
+test lsp::tests::test_action_hover_includes_lowering_metadata ... ok
+test lsp::tests::test_selection_range_orders_child_before_parent ... ok
+test lsp::tests::test_workspace_diagnostics_check_imported_type_id_collisions ... ok
+test lsp::tests::test_workspace_goto_definition_across_modules ... ok
+test lsp::tests::test_workspace_rename_is_disabled_until_symbol_scoped ... ok
+test optimize::tests::does_not_inline_block_bodies_that_can_capture_call_site_names ... ok
+test optimize::tests::folds_boolean_expressions ... ok
+test optimize::tests::folds_integer_arithmetic ... ok
+test optimize::tests::folds_unsigned_high_bit_integer_operations ... ok
+test optimize::tests::folds_literal_if_statements_without_touching_cell_ops ... ok
+test optimize::tests::propagates_constants_inlines_small_functions_and_removes_dead_code ... ok
+test optimize::tests::unused_let_elimination_preserves_calls_and_stdlib_constraints ... ok
+test package::tests::git_cache_child_check_rejects_path_escape ... ok
+test lsp::tests::test_workspace_references_across_modules ... ok
+test package::tests::git_cache_entry_name_is_hash_only ... ok
+test package::tests::lockfile_consistency_allows_resolved_transitive_path_dependencies ... ok
+test package::tests::lockfile_consistency_reports_stale_and_mismatched_path_sources ... ok
+test lsp::tests::test_lowering_diagnostics_warn_for_fail_closed_runtime_actions ... ok
+test package::tests::lockfile_replace_with_resolved_prunes_removed_dependencies ... ok
+test package::tests::lockfile_consistency_requires_exact_git_revision_match ... ok
+test package::tests::package_manager_accepts_allowed_git_url_transports ... ok
+test package::tests::package_manager_git_checkout_revalidates_full_commit_refs ... ok
+test package::tests::package_manager_git_commands_separate_user_controlled_ref_arguments ... ok
+test package::tests::lockfile_read_from_root_rejects_malformed_lockfiles ... ok
+test package::tests::package_manager_allows_path_dependency_without_version ... ok
+test package::tests::package_manager_rejects_branch_or_tag_git_dependency_before_fetch ... ok
+test package::tests::package_manager_rejects_registry_dependencies_fail_closed ... ok
+test package::tests::package_manager_rejects_local_path_dependency_traversal ... ok
+test package::tests::package_manager_rejects_unpinned_git_dependency_before_fetch ... ok
+test package::tests::package_manager_rejects_unsafe_git_url_transports ... ok
+test package::tests::package_manager_rejects_transitive_path_dependency_cycles ... ok
+test package::tests::package_manager_resolves_local_path_dependencies ... ok
+test package::tests::test_dependency_graph ... ok
+test package::tests::package_manager_resolves_transitive_local_path_dependencies ... ok
+test package::tests::test_version_compatibility ... ok
+test package::tests::test_manifest_serialization ... ok
+test parser::tests::action_where_block_keeps_indented_keyword_like_binding_in_body ... ok
+test parser::tests::action_where_block_allows_indented_following_top_level_item ... ok
+test parser::tests::array_size_uses_checked_target_width_conversion ... ok
+test parser::tests::assignment_range_and_cast_spans_cover_full_expression ... ok
+test parser::tests::binary_expr_spans_cover_full_expression ... ok
+test parser::tests::generic_type_arguments_allow_newlines ... ok
+test parser::tests::hex_literal_exprs_parse_as_integers ... ok
+test parser::tests::identity_policy_diagnostic_uses_bad_policy_span ... ok
+test parser::tests::named_arg_diagnostic_uses_bad_name_span ... ok
+test parser::tests::parser_empty_token_slice_returns_controlled_error ... ok
+test parser::tests::parser_rejects_bang_assert_syntax ... ok
+test parser::tests::parser_rejects_deep_if_expression_before_stack_overflow ... ok
+test parser::tests::parser_rejects_deep_unary_expression_before_stack_overflow ... ok
+test parser::tests::postfix_exprs_cover_the_consumed_source_range ... ok
+test parser::tests::postfix_expr_spans_cover_the_full_postfix_chain ... ok
+test parser::tests::primitive_and_container_exprs_keep_source_spans ... ok
+test parser::tests::struct_init_span_covers_type_name_and_body ... ok
+test parser::tests::test_action_where_column_one_flow_identifier_stays_in_body ... ok
+test parser::tests::test_launch_expression_is_reserved_until_lowering_exists ... ok
+test parser::tests::test_parse_action ... ok
+test lexer::tests::rejects_oversized_string_literal ... ok
+test parser::tests::test_parse_aggregate_invariant_primitives ... ok
+test parser::tests::test_parse_action_transition_block ... ok
+test parser::tests::test_parse_create_field_shorthand ... ok
+test parser::tests::test_parse_expression ... ok
+test parser::tests::test_parse_grouped_use_imports ... ok
+test parser::tests::test_parse_flow_and_action_transition_clause ... ok
+test parser::tests::test_parse_invariant ... ok
+test parser::tests::test_parse_invariant_assert_statement ... ok
+test parser::tests::test_parse_merges_attribute_and_inline_capabilities ... ok
+test parser::tests::test_parse_prefix_source_before_keyword_like_name ... ok
+test parser::tests::test_parse_prefix_source_and_create_target ... ok
+test parser::tests::test_parse_preserve_block ... ok
+test parser::tests::test_parse_preserve_single_field ... ok
+test parser::tests::test_parse_require_block ... ok
+test parser::tests::test_parse_resource ... ok
+test parser::tests::test_parse_type_id_attribute ... ok
+test parser::tests::test_postfix_does_not_cross_statement_newline ... ok
+test parser::tests::test_reject_bare_preserve ... ok
+test parser::tests::test_reject_empty_require_block ... ok
+test parser::tests::test_reject_empty_preserve_block ... ok
+test parser::tests::test_reject_preserve_except ... ok
+test parser::tests::test_reject_preserve_wildcard ... ok
+test parser::tests::test_reject_require_block_with_consume ... ok
+test parser::tests::test_reject_require_block_with_control_flow ... ok
+test parser::tests::test_rejects_action_brace_body ... ok
+test parser::tests::test_rejects_generic_resource_definition ... ok
+test parser::tests::test_rejects_empty_transition_block ... ok
+test parser::tests::test_rejects_legacy_move_clause ... ok
+test parser::tests::test_rejects_read_ref_as_type_qualifier ... ok
+test parser::tests::test_rejects_transition_clause_without_state_colons ... ok
+test parser::tests::test_rejects_type_id_on_action ... ok
+test parser::tests::test_rejects_typed_let_without_initializer ... ok
+test parser::tests::test_rejects_use_as_without_alias ... ok
+test parser::tests::test_rejects_unbraced_match_arms ... ok
+test proof_plan::soundness::tests::strict_pp0103_only_applies_to_checked_runtime_records ... ok
+test proof_plan::soundness::tests::strict_pp0201_only_applies_to_executing_script_args ... ok
+test proof_plan::tests::checked_runtime_without_concrete_evidence_is_not_marked_covered ... ok
+test proof_plan::tests::checked_runtime_proof_plan_claims_include_executable_evidence ... ok
+test proof_plan::tests::metadata_only_invariant_proof_plan_has_no_executable_evidence ... ok
+test proof_plan::tests::checked_static_detail_does_not_create_executable_runtime_evidence ... ok
+test parser::tests::test_rejects_output_parameter_source_prefix ... ok
+test proof_plan::tests::replace_unique_features_are_transaction_scoped ... ok
+test proof_plan::tests::unique_lifecycle_features_have_specific_codegen_evidence_ids ... ok
+test repl::tests::repl_read_limited_line_accepts_bounded_input ... ok
+test resolve::tests::rejects_cross_module_type_dependency_cycles ... ok
+test resolve::tests::test_global_type_resolution_rejects_ambiguous_symbol ... ok
+test resolve::tests::test_grouped_use_resolves_multiple_symbols ... ok
+test resolve::tests::test_imported_type_resolution_uses_exact_module_path ... ok
+test resolve::tests::test_module_resolver ... ok
+test resolve::tests::test_path_resolver ... ok
+test resolve::tests::test_register_module_rejects_deferred_missing_import_when_target_arrives ... ok
+test resolve::tests::test_register_module_rejects_missing_imported_symbol_when_target_is_loaded ... ok
+test resolve::tests::test_rejects_duplicate_local_symbols ... ok
+test resolve::tests::test_rejects_import_alias_collisions ... ok
+test runtime_errors::tests::diagnostic_messages_map_to_runtime_error_codes_where_possible ... ok
+test lsp::tests::test_receipt_hover_includes_flow_metadata ... ok
+test runtime_errors::tests::runtime_error_docs_explain_ckb_code_overlap_channels ... ok
+test runtime_errors::tests::runtime_error_registry_roundtrips_and_has_unique_codes ... ok
+test simulate::tests::array_size_simulator_uses_checked_target_width_for_indices ... ok
+test simulate::tests::simulate_cell_operation_traces ... ok
+test runtime_errors::tests::runtime_error_docs_cover_every_registered_code ... ok
+test simulate::tests::simulate_if_branch ... ok
+test simulate::tests::simulate_pure_arithmetic_action ... ok
+test simulate::tests::simulate_read_ref_traces ... ok
+test simulate::tests::simulate_rejects_wrong_action_arity ... ok
+test simulate::tests::simulate_step_limit ... ok
+test simulate::tests::simulate_unsigned_high_bit_integer_operations ... ok
+test stdlib::collections::tests::collection_public_helpers_do_not_dereference_raw_a0_handles ... ok
+test stdlib::collections::tests::collection_assembly_has_no_raw_syscalls_or_unclassified_helpers ... ok
+test stdlib::collections::tests::test_collection_functions ... ok
+test repl::tests::repl_read_limited_line_rejects_oversized_input ... ok
+test stdlib::collections::tests::test_generate_assembly ... ok
+test stdlib::tests::generated_stdlib_has_no_raw_syscall_wrapper_symbols ... ok
+test stdlib::tests::test_generate_assembly ... ok
+test stdlib::tests::generated_stdlib_omits_raw_syscall_wrappers ... ok
+test stdlib::tests::test_get_function ... ok
+test stdlib::tests::test_scheduler_metadata_generate_molecule_uses_table_layout ... ok
+test stdlib::tests::test_std_functions ... ok
+test syscalls::tests::ckb_debug_syscall_is_not_a_production_inventory_surface ... ok
+test stdlib::tests::test_generate_ckb_assembly_uses_checked_env_helpers ... ok
+test syscalls::tests::emitted_manual_runtime_and_stdlib_helpers_are_classified ... ok
+test syscalls::tests::every_low_level_syscall_spec_is_inventoried ... ok
+test syscalls::tests::helper_inventory_has_no_duplicate_symbols ... ok
+test tests::action_scheduler_witness_bytes_rejects_conflicting_molecule_alias ... ok
+test syscalls::tests::ckb_syscall_abi_matches_checked_baseline ... ok
+test tests::ckb_capacity_calculation_saturates_on_extreme_sizes ... ok
+test tests::branch_local_anonymous_creates_are_rejected_until_effects_are_cfg_aware ... ok
+test tests::ckb_deploy_manifest_rejects_conflicting_cell_dep_locations ... ok
+test tests::ckb_constraints_surface_capacity_planning_for_created_outputs ... ok
+test tests::ckb_deploy_manifest_rejects_incomplete_split_cell_dep_location ... ok
+test runtime_errors::tests::codegen_does_not_emit_unregistered_numeric_fail_literals ... ok
+test tests::ckb_deploy_manifest_rejects_invalid_dep_type ... ok
+test package::tests::package_manager_git_dependency_fails_for_invalid_url ... ok
+test tests::ckb_deploy_manifest_rejects_invalid_hash_type ... ok
+test tests::ckb_deploy_manifest_surfaces_hash_type_and_dep_group_policy ... ok
+test lexer::tests::rejects_oversized_block_comment ... ok
+test codegen::tests::emitted_runtime_helper_symbols_are_classified_in_syscall_inventory ... ok
+test package::tests::package_manager_git_update_fails_closed_on_fetch_error ... ok
+test tests::ckb_target_profile_has_no_policy_exception ... ok
+test tests::collection_fail_closed_feature_names_are_stable ... ok
+test lsp::tests::lsp_loads_sibling_modules_for_standalone_example_imports ... ok
+test tests::ckb_lock_false_return_lowers_to_script_failure ... ok
+test tests::compile_accepts_chain_neutral_timepoint_under_ckb_profile ... ok
+test tests::ckb_u64_syscall_helpers_check_return_code_and_size ... ok
+test tests::compile_accepts_action_witness_source_qualifier ... ok
+test tests::compile_accepts_ckb_header_epoch_api_only_for_ckb_profile ... ok
+test tests::ckb_entry_lock_scope_selects_lock_entrypoint ... ok
+test tests::compile_accepts_ckb_target_profile_timepoint ... ok
+test tests::ckb_dynamic_vector_len_can_drive_mutate_transition ... ok
+test tests::compile_accepts_complete_branch_return_paths ... ok
+test tests::compile_accepts_ckb_shared_create_when_verifier_covered ... ok
+test codegen::tests::internal_assembler_relaxes_out_of_range_register_conditional_branch ... ok
+test tests::ckb_entry_scope_keeps_vec_element_schema_dependencies ... ok
+test tests::compile_accepts_empty_vec_literal_with_declared_type ... ok
+test tests::compile_accepts_flow_initial_create_at_any_declared_state ... ok
+test tests::compile_accepts_explicit_flow_action_edges ... ok
+test tests::compile_accepts_core_input_output_state_transition_edges ... ok
+test tests::compile_accepts_flow_state_name_initializers ... ok
+test tests::compile_accepts_create_field_shorthand ... ok
+test tests::compile_accepts_kernel_effect_capabilities_for_destroy ... ok
+test tests::compile_accepts_flow_edge_returning_to_first_state ... ok
+test tests::compile_accepts_flow_on_custom_state_field ... ok
+test tests::compile_accepts_kernel_effect_capabilities_for_transfer ... ok
+test tests::compile_accepts_lock_args_script_args_binding ... ok
+test tests::compile_accepts_non_initial_flow_create_without_consumed_prior_state ... ok
+test tests::compile_accepts_pure_ckb_target_profile ... ok
+test tests::compile_accepts_named_action_output_and_create_binding ... ok
+test tests::ckb_entry_action_scope_excludes_unselected_unsupported_code ... ok
+test tests::compile_accepts_lock_boundary_param_sources_and_require ... ok
+test tests::compile_accepts_prefix_read_params_as_cell_dep_bindings ... ok
+test tests::compile_accepts_qualified_flow_state_names ... ok
+test tests::compile_allows_struct_type_id_under_ckb_profile ... ok
+test tests::compile_accepts_static_flow_update_to_non_initial_state ... ok
+test tests::compile_allows_actions_and_locks_to_call_pure_functions ... ok
+test tests::compile_allows_unit_function_calls_as_statements ... ok
+test tests::compile_allows_flow_update_to_declared_initial_state_at_type_check ... ok
+test tests::compile_accepts_vec_literals_in_create_fields ... ok
+test tests::compile_accepts_symmetric_where_branch_output_constraints ... ok
+test tests::compile_binds_duplicate_read_refs_by_order_not_name ... ok
+test tests::compile_classifies_resource_merge_amount_sum_as_checked_runtime ... ok
+test tests::compile_binds_read_ref_entry_params_to_cell_deps ... ok
+test tests::compile_binds_read_action_schema_params_to_cell_deps ... ok
+test tests::compile_create_unique_field_identity_emits_runtime_anchor ... ok
+test tests::compile_emits_create_output_field_verification_for_fixed_u64_fields ... ok
+test tests::compile_emits_direct_user_function_calls ... ok
+test tests::compile_classifies_resource_split_amount_subtraction_as_checked_runtime ... ok
+test tests::compile_exposes_ckb_type_id_contract_under_ckb_profile ... ok
+test tests::compile_entry_witness_rejects_payloads_larger_than_buffer ... ok
+test tests::compile_emits_ckb_style_load_cell_abi_for_cell_runtime_summary ... ok
+test tests::compile_classifies_protocol_agnostic_guarded_transition_as_checked_runtime ... ok
+test tests::compile_destroy_policies_are_policy_aware ... ok
+test tests::compile_file_explicit_target_overrides_manifest_build_target ... ok
+test tests::compile_emits_protocol_agnostic_guard_equality_proofplan_records ... ok
+test tests::compile_file_uses_manifest_ckb_target_profile ... ok
+test tests::compile_classifies_guarded_identity_field_merge_as_checked_runtime ... ok
+test tests::compile_folds_local_fixed_array_len_to_constant ... ok
+test tests::compile_file_uses_manifest_build_target_by_default ... ok
+test tests::compile_file_loads_local_path_dependencies_from_cell_manifest ... ok
+test tests::compile_identity_none_is_default_and_hidden ... ok
+test tests::compile_identity_ckb_type_id_emits_metadata ... ok
+test tests::compile_infers_and_validates_read_only_effects ... ok
+test tests::compile_lowers_array_of_tuples_static_index_projection ... ok
+test tests::compile_identity_singleton_type_emits_metadata ... ok
+test tests::compile_ignores_trivial_self_equality_guard_records ... ok
+test tests::compile_lowers_assert_invariant_into_fail_closed_cfg ... ok
+test tests::compile_identity_field_emits_path ... ok
+test tests::compile_lowers_block_tail_if_expressions ... ok
+test tests::compile_identity_script_args_emits_metadata ... ok
+test tests::compile_lowers_byte_string_literals_with_expected_array_type ... ok
+test tests::compile_file_source_content_hash_is_path_independent ... ok
+test tests::compile_lowers_bounded_vec_literal_to_stack_collection ... ok
+test tests::bundled_token_example_strict_ckb_compile_is_admitted ... ok
+test tests::compile_lowers_consumed_input_field_access_through_loaded_cell_bytes ... ok
+test tests::compile_lowers_exhaustive_enum_match_without_wildcard ... ok
+test tests::compile_lowers_if_expression_fixed_byte_const_join_move ... ok
+test tests::compile_lowers_for_range_into_counted_loop_cfg ... ok
+test tests::compile_lowers_fixed_byte_schema_field_comparison ... ok
+test tests::compile_lowers_ckb_group_source_large_immediate_to_riscv_elf ... ok
+test tests::compile_lowers_if_statement_into_basic_blocks ... ok
+test tests::compile_lowers_local_fixed_array_static_index_reads_and_writes ... ok
+test tests::compile_keeps_unchecked_transition_field_runtime_required ... ok
+test tests::compile_lowers_local_constants_into_real_operands ... ok
+test tests::compile_lowers_if_expression_with_join_move ... ok
+test tests::compile_lowers_len_method_to_length_instruction ... ok
+test tests::compile_lowers_local_struct_field_reads_and_writes ... ok
+test tests::compile_lowers_local_tuple_destructuring_to_field_slots ... ok
+test tests::compile_lowers_match_expression_into_branch_cfg ... ok
+test tests::compile_lowers_local_tuple_static_field_reads_and_writes ... ok
+test tests::compile_lowers_numeric_cast_without_zero_fallback ... ok
+test tests::compile_lowers_mutable_assignments_in_loop_bodies ... ok
+test tests::compile_lowers_packed_bool_and_u32_schema_fields_without_aligned_loads ... ok
+test tests::compile_lowers_pure_function_assert_failure_to_abort ... ok
+test tests::compile_lowers_read_ref_schema_field_to_ckb_runtime_assembly ... ok
+test tests::compile_lowers_stack_vec_extend_from_fixed_bytes ... ok
+test tests::compile_lowers_stack_vec_clear_and_is_empty ... ok
+test tests::compile_lowers_read_ref_schema_field_to_ckb_runtime_elf ... ok
+test tests::compile_lowers_stack_vec_fixed_byte_capacity ... ok
+test tests::compile_lowers_stack_vec_fixed_byte_pop ... ok
+test tests::compile_lowers_schema_backed_parameter_field_access_to_elf ... ok
+test tests::compile_lowers_stack_vec_fixed_byte_first_last ... ok
+test tests::compile_lowers_stack_vec_fixed_byte_contains ... ok
+test tests::compile_lowers_stack_vec_fixed_byte_set ... ok
+test tests::compile_lowers_stack_vec_fixed_byte_runtime_push_index ... ok
+test tests::compile_lowers_stack_vec_fixed_byte_insert ... ok
+test tests::compile_lowers_stack_vec_fixed_byte_reverse ... ok
+test tests::compile_lowers_stack_vec_fixed_byte_remove ... ok
+test tests::compile_lowers_stack_vec_fixed_byte_truncate ... ok
+test tests::compile_lowers_stack_vec_fixed_byte_swap ... ok
+test tests::compile_lowers_stack_vec_scalar_capacity ... ok
+test tests::compile_lowers_stack_vec_scalar_contains ... ok
+test tests::compile_lowers_stack_vec_scalar_pop ... ok
+test tests::compile_lowers_stack_vec_scalar_first_last ... ok
+test tests::compile_lowers_stack_vec_scalar_insert ... ok
+test tests::compile_lowers_stack_vec_scalar_remove ... ok
+test tests::compile_lowers_stack_vec_scalar_runtime_push_len_index ... ok
+test tests::compile_lowers_stack_vec_scalar_set ... ok
+test tests::compile_lowers_stack_vec_scalar_reverse ... ok
+test tests::compile_lowers_stack_vec_scalar_truncate ... ok
+test tests::compile_lowers_tail_expr_as_action_return ... ok
+test tests::compile_lowers_stack_vec_scalar_swap ... ok
+test tests::compile_lowers_tail_if_as_action_return ... ok
+test tests::compile_lowers_type_hash_without_generic_call ... ok
+test tests::compile_lowers_vec_with_capacity_to_stack_collection_new ... ok
+test tests::compile_lowers_u128_equality_as_fixed_byte_comparison ... ok
+test tests::compile_merges_if_branch_linear_states_conservatively ... ok
+test codegen::tests::codegen_rejects_generated_far_jump_scratch_relaxation ... ok
+test tests::compile_classifies_hash_committed_output_field_as_guarded ... ok
+test tests::compile_lowers_vec_builtins_without_generic_calls ... ok
+test tests::compile_lowers_while_statement_into_loop_cfg ... ok
+test tests::compile_lowers_zero_builtin_without_generic_call ... ok
+test tests::compile_merges_linear_transfers_inside_if_expressions ... ok
+test tests::compile_lowers_u128_mutate_delta_with_carry_arithmetic ... ok
+test tests::compile_marks_cell_backed_vec_runtime_features ... ok
+test tests::compile_metadata_exposes_ckb_type_id_create_output_plan_under_ckb_profile ... ok
+test tests::compile_metadata_exposes_declared_invariant_proof_plan ... ok
+test tests::compile_merges_linear_transfers_inside_block_tail_if_expressions ... ok
+test tests::compile_metadata_exposes_transaction_and_selected_cell_aggregate_invariants ... ok
+test tests::compile_metadata_exposes_lock_group_proof_plan_for_lock_entry ... ok
+test tests::compile_merges_linear_transfers_inside_match_expressions ... ok
+test tests::compile_metadata_with_options_rejects_strict_legacy_capabilities ... ok
+test tests::compile_metadata_exposes_aggregate_invariant_primitives_in_proof_plan ... ok
+test tests::compile_metadata_proof_plan_preserves_lock_args_source ... ok
+test tests::compile_metadata_warns_for_lock_group_transaction_invariant_scope ... ok
+test tests::compile_metadata_reports_parameterless_action_entrypoint_selection ... ok
+test tests::compile_metadata_declares_molecule_vm_abi ... ok
+test tests::compile_normalizes_same_module_qualified_helper_calls ... ok
+test tests::compile_path_rejects_duplicate_modules_across_source_roots ... ok
+test tests::compile_path_rejects_missing_configured_source_root ... ok
+test tests::compile_path_rejects_missing_path_dependency_manifest ... ok
+test tests::compile_path_accepts_package_root ... ok
+test tests::compile_path_ignores_examples_outside_package_source_roots ... ok
+test tests::compile_path_rejects_non_path_dependencies ... ok
+test tests::compile_package_import_alias_emits_matching_external_callable ... ok
+test tests::compile_metadata_exposes_covenant_proof_plan_for_transfer ... ok
+test tests::compile_path_rejects_path_dependency_traversal ... ok
+test tests::compile_path_rejects_path_dependency_cycles ... ok
+test tests::compile_metadata_with_options_uses_ast_optimizer_for_nonzero_levels ... ok
+test tests::compile_path_supports_custom_entry_directory_modules ... ok
+test tests::compile_materializes_local_fixed_byte_constants_into_rodata ... ok
+test tests::compile_prefers_no_arg_main_for_entry_wrapper ... ok
+test tests::compile_path_supports_configured_source_roots_without_src ... ok
+test tests::compile_merges_linear_transfers_inside_block_expressions ... ok
+test tests::compile_preserves_if_tuple_aggregate_slots ... ok
+test tests::compile_preserves_if_array_aggregate_slots ... ok
+test tests::compile_preserves_create_instructions_in_assembly ... ok
+test tests::compile_preserves_index_and_tuple_projection_in_assembly ... ok
+test tests::compile_preserves_match_tuple_aggregate_slots ... ok
+test tests::compile_rejects_aggregate_invariant_non_fixed_field ... ok
+test tests::compile_rejects_assert_delta_argument_from_cell_read ... ok
+test tests::compile_rejects_assert_invariant_as_tail_return_value ... ok
+test tests::compile_preserves_consume_and_destroy_instructions_in_assembly ... ok
+test tests::compile_rejects_assignment_through_read_only_references ... ok
+test tests::compile_rejects_assignment_to_immutable_array_element ... ok
+test tests::compile_rejects_assignment_to_immutable_tuple_field ... ok
+test tests::compile_preserves_dynamic_witness_cursor_after_lock_args ... ok
+test tests::compile_rejects_assignment_to_temporary_field_targets ... ok
+test tests::compile_rejects_bad_flow_state_field_type_on_main_path ... ok
+test tests::compile_rejects_bare_return_from_value_actions ... ok
+test tests::compile_rejects_asymmetric_where_branch_output_constraints ... ok
+test tests::compile_rejects_binding_assert_invariant_results ... ok
+test tests::compile_rejects_builtin_call_argument_mismatches ... ok
+test tests::compile_rejects_bounded_vec_literal_type_mismatch ... ok
+test tests::compile_lowers_ckb_hash_commitment_comparison_without_fixed_byte_fail_closed ... ok
+test tests::compile_rejects_binding_unit_function_results ... ok
+test tests::compile_rejects_cell_metadata_stdlib_on_non_cell_args ... ok
+test tests::compile_rejects_duplicate_flow_for_same_state_field ... ok
+test tests::compile_rejects_destroy_without_destroy_capability ... ok
+test tests::compile_rejects_core_state_transition_edge_not_in_graph ... ok
+test tests::compile_rejects_duplicate_stable_type_ids ... ok
+test tests::compile_rejects_duplicate_top_level_symbols ... ok
+test tests::compile_rejects_dynamic_require_messages ... ok
+test tests::compile_rejects_empty_array_length_mismatch ... ok
+test tests::compile_rejects_dynamic_assert_invariant_messages ... ok
+test tests::compile_rejects_dynamic_initial_flow_create_state ... ok
+test tests::compile_rejects_dynamic_unique_identity_field ... ok
+test tests::compile_rejects_empty_literal_in_non_vec_context ... ok
+test tests::compile_rejects_enum_payload_variants_until_lowering_exists ... ok
+test tests::compile_rejects_flow_payload_enum_state_field ... ok
+test tests::compile_rejects_flow_by_action_when_explicit_move_uses_different_edge ... ok
+test tests::compile_rejects_flow_by_action_without_exact_move_clause ... ok
+test tests::compile_rejects_forbidden_unwrap_helpers ... ok
+test tests::compile_rejects_flow_receipt_without_state_field ... ok
+test tests::compile_rejects_flow_on_plain_struct ... ok
+test tests::compile_rejects_helper_functions_that_indirectly_call_impure_actions ... ok
+test tests::compile_rejects_heterogeneous_array_literals ... ok
+test tests::compile_rejects_if_expression_branch_type_mismatch ... ok
+test tests::compile_rejects_input_source_outside_action_cell_params ... ok
+test tests::compile_rejects_function_call_argument_mismatches ... ok
+test tests::compile_rejects_incomplete_branch_return_paths ... ok
+test tests::compile_rejects_impure_helper_functions ... ok
+test tests::compile_rejects_invalid_create_field_initializers ... ok
+test tests::compile_rejects_invalid_destroy_policy_shapes ... ok
+test tests::compile_rejects_invalid_enum_match_patterns ... ok
+test tests::compile_rejects_invalid_invariant_assert_expression ... ok
+test tests::compile_rejects_invariant_assert_runtime_operation ... ok
+test tests::compile_rejects_invariant_without_explicit_trigger_and_scope ... ok
+test tests::compile_rejects_local_binding_name_reuse ... ok
+test tests::compile_rejects_local_fixed_array_static_oob_read ... ok
+test tests::compile_rejects_linear_state_changes_hidden_inside_loops ... ok
+test tests::compile_rejects_local_fixed_array_static_oob_write ... ok
+test tests::compile_rejects_local_mutable_reference_aliases ... ok
+test tests::compile_rejects_missing_action_return_paths ... ok
+test tests::compile_rejects_missing_flow_state_create_on_main_path ... ok
+test tests::compile_rejects_missing_function_return_paths ... ok
+test tests::compile_produces_non_empty_riscv_assembly ... ok
+test tests::compile_rejects_non_bool_lock_definitions ... ok
+test tests::compile_rejects_non_bool_assert_condition ... ok
+test tests::compile_rejects_noop_flow_transition_on_main_path ... ok
+test tests::compile_rejects_out_of_range_flow_state_create_on_main_path ... ok
+test tests::compile_preserves_schema_backed_parameter_field_access_in_assembly ... ok
+test tests::compile_rejects_owned_linear_field_assignment ... ok
+test tests::compile_rejects_pure_functions_that_call_locks ... ok
+test tests::compile_rejects_local_references_to_linear_roots ... ok
+test tests::compile_rejects_read_ref_for_non_cell_backed_types ... ok
+test tests::compile_rejects_return_values_from_unit_actions ... ok
+test tests::compile_rejects_payload_or_unknown_enum_variant_values ... ok
+test tests::compile_rejects_pure_functions_that_call_env_runtime_builtins ... ok
+test tests::compile_rejects_pure_functions_that_call_ckb_header_runtime_builtins ... ok
+test tests::compile_rejects_pure_functions_that_call_type_hash_runtime_builtin ... ok
+test tests::compile_rejects_returning_unit_function_results ... ok
+test tests::compile_rejects_state_edge_that_does_not_consume_binding ... ok
+test tests::compile_rejects_string_literals_as_runtime_values ... ok
+test tests::compile_rejects_unbound_assert_delta_argument ... ok
+test tests::compile_rejects_stateful_operations_without_named_linear_cell_operands ... ok
+test tests::compile_rejects_reference_escape_boundaries ... ok
+test tests::compile_rejects_undeclared_action_state_edge ... ok
+test tests::compile_rejects_underdeclared_effect_annotations ... ok
+test tests::compile_rejects_underdeclared_effects_through_calls ... ok
+test tests::compile_rejects_unknown_functions ... ok
+test tests::compile_rejects_unknown_struct_fields ... ok
+test tests::compile_rejects_unknown_or_reserved_named_types ... ok
+test tests::compile_rejects_underdeclared_effects_through_qualified_calls ... ok
+test tests::compile_rejects_unknown_target_profile ... ok
+test tests::compile_rejects_unknown_target_during_option_validation ... ok
+test tests::compile_rejects_unreachable_statements_after_complete_branch_return ... ok
+test tests::compile_rejects_unreachable_statements_after_return ... ok
+test tests::compile_rejects_unsupported_optimization_level ... ok
+test tests::compile_rejects_unstable_schema_field_names ... ok
+test tests::compile_rejects_unstable_callable_parameter_names ... ok
+test tests::compile_rejects_unsound_mutable_parameter_forms ... ok
+test tests::compile_rejects_untyped_empty_array_literals ... ok
+test tests::compile_rejects_unsupported_vec_helper_type_combinations ... ok
+test tests::compile_rejects_wrong_qualified_flow_state_field_initializer ... ok
+test tests::compile_preserves_read_ref_instructions_in_assembly ... ok
+test tests::compile_produces_ckb_elf_without_vm_abi_trailer ... ok
+test tests::compile_result_exposes_nested_fixed_molecule_schema_metadata ... ok
+test tests::compile_produces_non_empty_riscv_elf ... ok
+test tests::compile_rejects_state_transitions_inside_locks ... ok
+test tests::compile_result_exposes_schema_layout_metadata ... ok
+test tests::compile_rejects_lock_boundary_sources_outside_supported_scope ... ok
+test tests::compile_result_validation_rejects_assembly_with_vm_abi_trailer ... ok
+test tests::compile_result_validation_rejects_compiler_version_mismatch ... ok
+test tests::compile_replace_unique_field_identity_compares_input_and_output ... ok
+test tests::compile_result_validation_rejects_constraints_artifact_format_mismatch ... ok
+test tests::compile_result_validation_rejects_constraints_artifact_size_mismatch ... ok
+test tests::compile_result_validation_rejects_metadata_artifact_hash_mismatch ... ok
+test tests::compile_result_validation_rejects_metadata_artifact_format_mismatch ... ok
+test tests::compile_result_exposes_scheduler_metadata_sidecar ... ok
+test tests::compile_result_validation_accepts_current_outputs ... ok
+test tests::compile_result_validation_rejects_mismatched_ckb_output_data_binding ... ok
+test tests::compile_reports_equivalent_state_transition_obligation_for_sugar_and_core_forms ... ok
+test tests::compile_result_validation_rejects_mismatched_ckb_type_id_create_output_plan ... ok
+test tests::compile_result_validation_rejects_metadata_schema_downgrade ... ok
+test tests::compile_result_validation_rejects_metadata_artifact_size_mismatch ... ok
+test tests::compile_result_validation_rejects_metadata_source_content_hash_mismatch ... ok
+test tests::compile_result_validation_rejects_metadata_schema_version_mismatch ... ok
+test tests::compile_result_validation_rejects_metadata_source_hash_mismatch ... ok
+test tests::compile_result_validation_rejects_metadata_target_profile_mismatch ... ok
+test tests::compile_result_validation_rejects_metadata_target_profile_v0_14_abi_mismatch ... ok
+test tests::compile_result_validation_rejects_type_id_hash_mismatch ... ok
+test tests::compile_result_validation_rejects_molecule_schema_hash_mismatch ... ok
+test tests::compile_result_validation_rejects_noncanonical_source_unit_hash ... ok
+test tests::compile_result_validation_rejects_missing_metadata_artifact_size ... ok
+test tests::compile_result_writes_artifact_to_disk ... ok
+test tests::compile_result_validation_rejects_tampered_artifact_hash ... ok
+test tests::compile_riscv_elf_accepts_full_width_u64_literals ... ok
+test tests::compile_supports_typed_empty_array_literals ... ok
+test tests::compile_spills_parameters_and_returns_computed_value ... ok
+test tests::compile_tracks_linear_values_returned_from_complete_branches ... ok
+test tests::compile_tracks_linear_values_returned_from_tail_if_branches ... ok
+test tests::compile_unrolls_local_fixed_array_foreach_without_runtime_indexing ... ok
+test tests::compile_unrolls_fixed_param_array_foreach_with_pointer_abi ... ok
+test tests::compile_unrolls_local_array_of_tuples_foreach_destructuring ... ok
+test tests::compile_lowers_stack_vec_fixed_schema_values ... ok
+test tests::compile_surfaces_type_level_hash_type_dsl_metadata ... ok
+test tests::compile_tracks_linear_values_inside_aggregate_bindings ... ok
+test tests::compile_verifies_create_output_against_consumed_input_field_alias ... ok
+test tests::compile_uses_ast_optimizer_for_nonzero_optimization_levels ... ok
+test tests::compiled_riscv_elf_contains_exit_trampoline ... ok
+test tests::default_output_path_for_package_input_uses_build_dir ... ok
+test tests::default_output_path_for_package_input_uses_manifest_out_dir ... ok
+test tests::compile_verifies_create_output_against_computed_scalar_stack_value ... ok
+test tests::compile_verifies_created_scalar_fields_against_consumed_input_aliases ... ok
+test tests::create_output_verifier_accepts_const_lock_hash ... ok
+test tests::compile_verifies_created_output_bool_and_u32_fields ... ok
+test tests::create_output_verifier_accepts_fixed_byte_params_and_consts ... ok
+test tests::compile_verifies_constructed_fixed_width_vec_output ... ok
+test tests::entry_abi_constraints_mark_extreme_slot_counts_unsupported ... ok
+test tests::compile_verifies_large_output_field_requirements_without_partial_fallback ... ok
+test tests::entry_witness_bool_params_are_canonicalized ... ok
+test tests::entry_witness_encoder_matches_u64_wrapper_abi ... ok
+test tests::entry_witness_encoder_includes_schema_backed_params_as_length_prefixed_bytes ... ok
+test tests::entry_witness_encoder_supports_fixed_byte_params ... ok
+test tests::dynamic_mutable_schema_transitions_are_checked_after_table_decoding ... ok
+test tests::dynamic_schema_fixed_field_access_is_table_decoded ... ok
+test tests::compile_unique_script_args_and_singleton_identity_emit_hash_checks ... ok
+test tests::internal_calls_keep_outgoing_stack_area_abi_aligned ... ok
+test tests::fixed_enum_fields_have_molecule_schema_metadata ... ok
+test tests::dynamic_schema_fixed_vec_length_is_table_decoded ... ok
+test tests::ir_carries_flow_rules ... ok
+test tests::ir_lowers_unit_function_calls_without_result_destinations ... ok
+test tests::ir_preserves_function_call_return_types ... ok
+test tests::ir_rejects_unknown_call_return_types_without_u64_fallback ... ok
+test tests::dynamic_schema_fixed_vec_iteration_is_table_decoded ... ok
+test tests::generated_outgoing_stack_reservations_are_psabi_aligned ... ok
+test tests::ir_summary_captures_cell_runtime_accesses ... ok
+test tests::load_modules_for_input_collects_package_source_roots ... ok
+test tests::dynamic_named_output_constraints_are_proven_in_where_block ... ok
+test tests::package_entry_must_stay_inside_package_root ... ok
+test tests::package_out_dir_must_stay_inside_package_root ... ok
+test tests::compile_riscv_elf_accepts_large_schema_field_offsets ... ok
+test tests::package_source_roots_must_stay_inside_package_root ... ok
+test tests::primitive_compat_predicates_match_validator_modes ... ok
+test tests::generic_shared_mutation_does_not_emit_pool_pattern_metadata ... ok
+test tests::loaded_artifact_validation_rejects_metadata_artifact_size_mismatch ... ok
+test tests::fixed_byte_mutable_state_set_transition_is_checked_under_ckb_profile ... ok
+test tests::compile_riscv_elf_accepts_large_stack_offsets ... ok
+test tests::resolve_input_path_accepts_package_root_and_manifest ... ok
+test tests::scheduler_witness_hex_decode_rejects_invalid_metadata_hex ... ok
+test tests::proof_plan_cross_references_matching_action_obligation_for_invariant ... ok
+test tests::entry_witness_wrapper_supports_scalar_stack_args ... ok
+test tests::tuple_return_abi_rejects_more_than_eight_fields ... ok
+test tests::source_unit_disk_verification_accepts_paths_inside_trusted_root ... ok
+test tests::named_action_output_create_binding_reuses_declared_output_index ... ok
+test tests::source_unit_disk_verification_rejects_paths_outside_trusted_root ... ok
+test tests::vm_abi_trailer_detection_requires_complete_zero_reserved_trailer ... ok
+test types::tests::block_expression_merges_existing_vec_refinements ... ok
+test types::tests::branch_local_consume_is_rejected_until_lifecycle_effects_are_cfg_aware ... ok
+test tests::proof_plan_checked_static_excluded_from_on_chain_checked_obligations ... ok
+test types::tests::branch_local_create_is_rejected_until_lifecycle_effects_are_cfg_aware ... ok
+test types::tests::byte_string_literal_type_uses_actual_length ... ok
+test types::tests::call_arguments_do_not_coerce_mut_ref_to_ref ... ok
+test types::tests::check_without_resolver_rejects_imports ... ok
+test types::tests::compound_assign_rejects_implicit_narrowing ... ok
+test types::tests::compound_assign_uses_numeric_binary_rules ... ok
+test types::tests::const_initializers_allow_supported_literals ... ok
+test types::tests::const_initializers_reject_cell_backed_types ... ok
+test types::tests::const_initializers_reject_cell_lifecycle_expressions ... ok
+test types::tests::const_initializers_reject_computed_expressions ... ok
+test types::tests::constant_narrowing_casts_must_fit ... ok
+test types::tests::contextual_integer_literals_fit_declared_widths ... ok
+test types::tests::cyclic_schema_type_dependencies_are_rejected ... ok
+test types::tests::duplicate_lifecycle_binding_is_rejected_until_effects_are_cfg_aware ... ok
+test types::tests::expected_type_does_not_widen_non_literal_abi_arg_boundary ... ok
+test types::tests::expected_type_does_not_widen_non_literal_let_boundary ... ok
+test types::tests::expected_type_does_not_widen_non_literal_field_boundary ... ok
+test tests::v014_runtime_helpers_fail_closed_when_not_executable ... ok
+test tests::parameterized_entrypoint_emits_witness_entry_wrapper ... ok
+test types::tests::expected_type_does_not_widen_non_literal_return_boundary ... ok
+test types::tests::explicit_cast_can_cross_integer_width_boundary ... ok
+test types::tests::expression_branch_unreachable_code_is_rejected_by_typechecker ... ok
+test types::tests::generic_reference_detection_uses_type_structure ... ok
+test tests::strict_audit_codegen_emits_only_aligned_stack_pointer_deltas ... ok
+test tests::proof_plan_marks_invariant_action_evidence_as_non_exhaustive ... ok
+test types::tests::if_statement_merges_matching_vec_refinements ... ok
+test types::tests::if_statement_rejects_divergent_vec_refinements ... ok
+test types::tests::if_statement_rejects_one_sided_vec_refinement ... ok
+test types::tests::imported_and_qualified_names_compare_as_same_type ... ok
+test types::tests::if_expression_preserves_typed_vec_result_with_empty_constructor_branch ... ok
+test types::tests::imported_type_ids_must_not_collide_in_visible_module_scope ... ok
+test types::tests::invalid_schema_field_types_are_not_registered_as_valid_fields ... ok
+test types::tests::imported_token_type_is_treated_as_linear ... ok
+test types::tests::numeric_named_type_equality_is_commutative ... ok
+test types::tests::numeric_type_equality_respects_width ... ok
+test types::tests::lifecycle_capability_gates_reject_undeclared_kernel_effects ... ok
+test types::tests::qualified_identifier_must_resolve_to_value ... ok
+test types::tests::mixed_width_arithmetic_and_ordering_are_rejected ... ok
+test types::tests::preserve_rejects_mismatched_field_types ... ok
+test tests::ordered_named_output_create_constraints_are_checked_in_body_order ... ok
+test types::tests::match_requires_enum_scrutinee ... ok
+test types::tests::non_tail_linear_expression_statements_are_rejected ... ok
+test types::tests::recursive_enum_payloads_are_rejected ... ok
+test types::tests::require_block_rejects_lifecycle_stdlib_call ... ok
+test types::tests::require_rejects_nested_cell_operation ... ok
+test types::tests::imported_linear_argument_is_marked_consumed_after_call ... ok
+test types::tests::require_block_rejects_assignment_expression ... ok
+test types::tests::statically_visible_division_by_zero_is_rejected ... ok
+test types::tests::stdlib_claim_output_requires_complete_field_coverage ... ok
+test types::tests::stdlib_claim_output_requires_declared_claim_output_type ... ok
+test types::tests::stdlib_claim_rejects_declared_output_type_mismatch ... ok
+test types::tests::stdlib_claim_rejects_extra_arguments ... ok
+test types::tests::stdlib_claim_requires_explicit_output_and_lock_arguments ... ok
+test types::tests::stdlib_claim_rejects_non_receipt_input ... ok
+test types::tests::stdlib_settle_requires_explicit_output_and_lock_arguments ... ok
+test types::tests::stdlib_transfer_output_requires_complete_field_coverage ... ok
+test types::tests::stdlib_transfer_rejects_extra_arguments ... ok
+test types::tests::strict_mode_rejects_imported_legacy_capabilities ... ok
+test types::tests::typed_vec_with_capacity_uses_declared_element_type ... ok
+test types::tests::launch_module_type_checks_with_registered_imports ... ok
+test types::tests::u128_ordering_and_arithmetic_still_rejected_on_widening ... ok
+test types::tests::unsigned_integer_negation_is_rejected ... ok
+test wasm::tests::wasm_audit_reports_audit_only_for_type_only_module ... ok
+test wasm::tests::wasm_compiler_rejects_pure_action_modules ... ok
+test wasm::tests::wasm_encoder_emits_magic_version_and_status_custom_section ... ok
+test wasm::tests::wasm_runtime_instantiates_metadata_module_but_refuses_calls ... ok
+test types::tests::vec_type_arguments_are_validated ... ok
+test types::tests::tail_match_expressions_are_valid_return_values ... ok
+test types::tests::unsupported_u128_arithmetic_is_rejected ... ok
+test types::tests::widening_boundary_matrix ... ok
+test tests::u128_mutable_state_transition_with_u64_delta_is_checked ... ok
+test tests::payload_enum_fields_use_dynamic_molecule_schema_metadata ... ok
+test tests::optimized_entry_lock_keeps_inlined_schema_pointer_field_access_checked ... ok
+test codegen::tests::internal_assembler_relaxes_far_conditional_branch_with_long_jump ... ok
+test codegen::tests::internal_assembler_encodes_far_unconditional_jump ... ok
+test codegen::tests::bundled_example_codegen_mnemonics_are_declared ... ok
+
+test result: ok. 776 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.90s
+
+
+running 7 tests
+test adversarial_parser_preserves_operator_precedence_in_ambiguous_sequences ... ok
+test adversarial_parser_rejects_deep_unary_expression_without_panicking ... ok
+test adversarial_parser_binds_else_to_nearest_if ... ok
+test adversarial_0_13_rejects_invalid_hash_type_dsl ... ok
+test adversarial_parser_rejects_deep_nested_control_flow_without_panicking ... ok
+test adversarial_integer_literals_fail_closed_on_lexical_and_contextual_overflow ... ok
+test adversarial_0_13_rejects_unsupported_generic_collection_surfaces ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 11 tests
+test runtime_u64_helpers_fail_closed_before_value_use ... ok
+test snapshot_simple_action_assembly ... ok
+test runtime_void_helpers_fail_closed_before_continuing ... ok
+test snapshot_lock_args_assembly ... ok
+test snapshot_type_id_create_output_assembly ... ok
+test snapshot_spawn_ipc_executable_status_checked_assembly ... ok
+test runtime_witness_helpers_fail_closed_before_pointer_use ... ok
+test snapshot_witness_schema_syscall_assembly ... ok
+test snapshot_collection_lowering_assembly ... ok
+test snapshot_blake2b_helper_assembly ... ok
+test snapshot_assemblies_contain_no_leaked_overflow_diagnostics ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.26s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 86 tests
+test cellc_add_and_remove_subcommands_honor_dev_path_and_json ... ok
+test cellc_add_git_requires_full_rev_and_records_pin ... ok
+Check succeeded
+  Target profile: ckb
+  Checked: package default (RISC-V assembly)
+test cellc_check_denies_metadata_only_declared_invariant ... ok
+test cellc_check_accepts_ckb_profile_timepoint ... ok
+test cellc_check_accepts_pure_ckb_target_profile ... ok
+test cellc_abi_subcommand_explains_entry_witness_layout ... ok
+test cellc_build_uses_manifest_policy_before_writing_artifacts ... ok
+test cellc_action_build_emits_builder_plan_json ... ok
+Build complete
+  Artifact format: RISC-V assembly
+  Target profile: ckb
+  Output: /private/var/folders/kq/dz44fm994nz94zw2dfqnz_g00000gn/T/.tmp1eORVW/build/main.s
+  Metadata: /private/var/folders/kq/dz44fm994nz94zw2dfqnz_g00000gn/T/.tmp1eORVW/build/main.s.meta.json
+test cellc_check_production_rejects_incomplete_output_verification ... ok
+test cellc_check_production_rejects_fail_closed_runtime_paths ... ok
+test cellc_build_accepts_pure_ckb_target_profile_without_vm_abi_trailer ... ok
+test cellc_check_reports_claim_source_predicate_blocker_class ... ok
+test cellc_check_can_reject_runtime_required_obligations ... ok
+test cellc_check_denies_checked_partial_proof_plan_gap ... ok
+test cellc_build_and_check_subcommands_use_package_flow ... ok
+test cellc_clean_subcommand_supports_json_summary ... ok
+test cellc_check_accepts_u128_mutable_state_transition_with_u64_delta ... ok
+test cellc_ckb_hash_emits_default_blake2b_vector ... ok
+test cellc_check_all_targets_checks_asm_and_elf_without_writing_artifacts ... ok
+test cellc_check_reports_linear_collection_ownership_blocker_class ... ok
+success: compiled successfully
+  Artifact format: RISC-V assembly
+  Target profile: ckb
+  Artifact hash: [5d, 8b, d, ed, a5, 24, 99, 9f, c3, fe, 29, 67, 78, 19, 2a, 46, 8f, a3, b5, 44, cb, 36, cf, cc, e2, 10, 50, 24, 59, 4b, 5b, 37]
+  Output: /private/var/folders/kq/dz44fm994nz94zw2dfqnz_g00000gn/T/.tmp3DGMcN/artifacts/main.s
+  Metadata: /private/var/folders/kq/dz44fm994nz94zw2dfqnz_g00000gn/T/.tmp3DGMcN/artifacts/main.s.meta.json
+test cellc_cli_target_overrides_manifest_build_target ... ok
+test cellc_check_reports_settle_finalization_blocker_class ... ok
+test cellc_check_uses_manifest_policy_defaults ... ok
+test cellc_check_reports_resource_conservation_blocker_class ... ok
+test cellc_doc_subcommand_generates_markdown_docs ... ok
+test cellc_constraints_subcommand_surfaces_ckb_deployment_manifest ... ok
+success: compiled successfully
+  Artifact format: RISC-V assembly
+  Target profile: ckb
+  Artifact hash: [9f, aa, 3c, b9, 5, 1b, a7, 19, e4, ea, e4, 1, 79, 7, 11, 89, 7f, 40, ba, 26, 7e, 86, ba, 8c, d5, a3, a, 4d, 3, 45, eb, 54]
+  Output: /private/var/folders/kq/dz44fm994nz94zw2dfqnz_g00000gn/T/.tmpG6FydO/app_pkg/build/main.s
+  Metadata: /private/var/folders/kq/dz44fm994nz94zw2dfqnz_g00000gn/T/.tmpG6FydO/app_pkg/build/main.s.meta.json
+test cellc_check_reports_explicit_output_binding_without_mutable_state_blockers ... ok
+test cellc_compiles_package_with_local_path_dependency ... ok
+test cellc_entry_witness_subcommand_emits_parameterized_witness_json ... ok
+test cellc_explain_profile_reports_ckb_v0_14_contract ... ok
+test cellc_entry_witness_subcommand_encodes_schema_backed_params ... ok
+test cellc_entry_witness_subcommand_rejects_wrong_width_fixed_bytes ... ok
+test cellc_explain_proof_reports_covenant_proof_plan ... ok
+test cellc_explain_proof_reports_declared_invariant ... ok
+test cellc_explain_subcommand_reports_runtime_error ... ok
+test cellc_explain_proof_warns_for_lock_group_transaction_scope ... ok
+Formatting complete
+  Updated 1 file(s)
+test cellc_errors_include_runtime_ecode_when_policy_failure_maps_to_runtime_registry ... ok
+test cellc_info_subcommand_supports_json_summary ... ok
+test cellc_init_subcommand_supports_json_summary ... ok
+test cellc_lsp_flag_rejects_trailing_arguments ... ok
+test cellc_fmt_subcommand_formats_sources ... ok
+test cellc_new_subcommand_supports_json_summary_and_vcs_none ... ok
+test cellc_explain_proof_human_reports_macro_provenance ... ok
+test cellc_rejects_registry_package_dependencies_fail_closed ... ok
+test cellc_explain_proof_reports_invariant_action_coverage_match ... ok
+test cellc_install_path_updates_lockfile_and_remove_prunes_it ... ok
+test cellc_rejects_external_dependency_function_calls_until_linking_exists ... ok
+test cellc_run_subcommand_without_vm_runner_degrades_gracefully ... ok
+test cellc_test_subcommand_rejects_conflicting_expectations ... ok
+test cellc_test_subcommand_rejects_empty_expected_error_line_text ... ok
+test cellc_metadata_subcommand_emits_lowering_runtime_json ... ok
+test cellc_rejects_underdeclared_effects_from_path_dependency_calls ... ok
+test cellc_explain_proof_summary_reports_fail_closed_diagnostics ... ok
+test cellc_test_subcommand_rejects_missing_expected_error_text ... ok
+test cellc_test_subcommand_rejects_unknown_directives ... ok
+test cellc_test_subcommand_rejects_wrong_expected_error_line ... ok
+test cellc_test_subcommand_rejects_missing_entrypoint_metadata ... ok
+test cellc_check_reports_pool_invariant_policy_families ... ok
+test cellc_opt_report_compares_all_optimization_levels ... ok
+test cellc_test_subcommand_supports_expected_compile_failures ... ok
+test cellc_test_subcommand_compiles_test_sources ... ok
+test cellc_test_subcommand_supports_expected_error_line_directive ... ok
+test cellc_test_subcommand_rejects_missing_runtime_metadata ... ok
+test cellc_new_subcommand_initializes_git_by_default ... ok
+test cellc_check_reports_transaction_invariant_checked_subconditions ... ok
+test cellc_scheduler_plan_consumes_shared_touch_hints ... ok
+test cellc_test_subcommand_supports_entrypoint_metadata_directives ... ok
+test cellc_top_level_primitive_strict_rejects_legacy_capabilities ... ok
+success: compiled successfully
+  Artifact format: RISC-V assembly
+  Target profile: ckb
+  Artifact hash: [5d, 8b, d, ed, a5, 24, 99, 9f, c3, fe, 29, 67, 78, 19, 2a, 46, 8f, a3, b5, 44, cb, 36, cf, cc, e2, 10, 50, 24, 59, 4b, 5b, 37]
+  Output: /private/var/folders/kq/dz44fm994nz94zw2dfqnz_g00000gn/T/.tmpZo3tql/artifacts/main.s
+  Metadata: /private/var/folders/kq/dz44fm994nz94zw2dfqnz_g00000gn/T/.tmpZo3tql/artifacts/main.s.meta.json
+test cellc_uses_manifest_build_out_dir_for_package_input ... ok
+test cellc_test_subcommand_supports_runtime_metadata_directives ... ok
+success: compiled successfully
+  Artifact format: RISC-V assembly
+  Target profile: ckb
+  Artifact hash: [47, e2, e6, 55, 6c, 78, 48, d4, 45, 84, a8, 71, 67, a6, 5b, b9, c4, 8d, 69, 85, c0, 5e, 48, c7, e, 11, c0, 24, be, 95, 38, 76]
+  Output: /var/folders/kq/dz44fm994nz94zw2dfqnz_g00000gn/T/.tmpC02XyB/sample.s
+  Metadata: /var/folders/kq/dz44fm994nz94zw2dfqnz_g00000gn/T/.tmpC02XyB/sample.s.meta.json
+test cellc_test_subcommand_supports_target_directive ... ok
+test cellc_test_subcommand_supports_policy_directives ... ok
+test cellc_top_level_accepts_primitive_strict_for_kernel_effect_capabilities ... ok
+success: compiled successfully
+  Artifact format: RISC-V assembly
+  Target profile: ckb
+  Artifact hash: [47, e2, e6, 55, 6c, 78, 48, d4, 45, 84, a8, 71, 67, a6, 5b, b9, c4, 8d, 69, 85, c0, 5e, 48, c7, e, 11, c0, 24, be, 95, 38, 76]
+  Output: /var/folders/kq/dz44fm994nz94zw2dfqnz_g00000gn/T/.tmpYNDiwB/sample.s
+  Metadata: /var/folders/kq/dz44fm994nz94zw2dfqnz_g00000gn/T/.tmpYNDiwB/sample.s.meta.json
+success: compiled successfully
+  Artifact format: RISC-V ELF
+  Target profile: ckb
+  Artifact hash: [cf, 7, cf, ac, d0, a, 43, a3, a8, cc, 8b, 6e, 66, e1, 29, b2, 32, 60, 2f, 76, a3, 55, 4d, 52, d5, 38, 51, 1f, c8, b, 49, 2]
+  Output: /private/var/folders/kq/dz44fm994nz94zw2dfqnz_g00000gn/T/.tmpSgHO62/artifacts/main.elf
+  Metadata: /private/var/folders/kq/dz44fm994nz94zw2dfqnz_g00000gn/T/.tmpSgHO62/artifacts/main.elf.meta.json
+success: compiled successfully
+  Artifact format: RISC-V assembly
+  Target profile: ckb
+  Artifact hash: [47, e2, e6, 55, 6c, 78, 48, d4, 45, 84, a8, 71, 67, a6, 5b, b9, c4, 8d, 69, 85, c0, 5e, 48, c7, e, 11, c0, 24, be, 95, 38, 76]
+  Output: /var/folders/kq/dz44fm994nz94zw2dfqnz_g00000gn/T/.tmp8cifZl/sample.s
+  Metadata: /var/folders/kq/dz44fm994nz94zw2dfqnz_g00000gn/T/.tmp8cifZl/sample.s.meta.json
+test cellc_uses_manifest_build_target_by_default ... ok
+success: compiled successfully
+  Artifact format: RISC-V assembly
+  Target profile: ckb
+  Artifact hash: [47, e2, e6, 55, 6c, 78, 48, d4, 45, 84, a8, 71, 67, a6, 5b, b9, c4, 8d, 69, 85, c0, 5e, 48, c7, e, 11, c0, 24, be, 95, 38, 76]
+  Output: /var/folders/kq/dz44fm994nz94zw2dfqnz_g00000gn/T/.tmpvCyiJF/sample.s
+  Metadata: /var/folders/kq/dz44fm994nz94zw2dfqnz_g00000gn/T/.tmpvCyiJF/sample.s.meta.json
+success: compiled successfully
+  Artifact format: RISC-V assembly
+  Target profile: ckb
+  Artifact hash: [a7, d4, 78, cc, c3, f5, cd, 81, cd, de, 51, 44, ee, 83, 4d, 64, 46, df, bd, 40, 58, 5f, 51, 6c, d1, 56, 6b, b7, 44, 9d, 96, 8d]
+  Output: /var/folders/kq/dz44fm994nz94zw2dfqnz_g00000gn/T/.tmpjONY9q/sample.s
+  Metadata: /var/folders/kq/dz44fm994nz94zw2dfqnz_g00000gn/T/.tmpjONY9q/sample.s.meta.json
+test cellc_verify_artifact_accepts_matching_sidecar ... ok
+test cellc_verify_artifact_rejects_metadata_schema_downgrade ... ok
+test cellc_verify_artifact_rejects_noncanonical_source_unit_hash ... ok
+success: compiled successfully
+  Artifact format: RISC-V assembly
+  Target profile: ckb
+  Artifact hash: [47, e2, e6, 55, 6c, 78, 48, d4, 45, 84, a8, 71, 67, a6, 5b, b9, c4, 8d, 69, 85, c0, 5e, 48, c7, e, 11, c0, 24, be, 95, 38, 76]
+  Output: /var/folders/kq/dz44fm994nz94zw2dfqnz_g00000gn/T/.tmpmBH3ky/sample.s
+  Metadata: /var/folders/kq/dz44fm994nz94zw2dfqnz_g00000gn/T/.tmpmBH3ky/sample.s.meta.json
+success: compiled successfully
+  Artifact format: RISC-V assembly
+  Target profile: ckb
+  Artifact hash: [47, e2, e6, 55, 6c, 78, 48, d4, 45, 84, a8, 71, 67, a6, 5b, b9, c4, 8d, 69, 85, c0, 5e, 48, c7, e, 11, c0, 24, be, 95, 38, 76]
+  Output: /var/folders/kq/dz44fm994nz94zw2dfqnz_g00000gn/T/.tmpHMX3Om/sample.s
+  Metadata: /var/folders/kq/dz44fm994nz94zw2dfqnz_g00000gn/T/.tmpHMX3Om/sample.s.meta.json
+success: compiled successfully
+  Artifact format: RISC-V assembly
+  Target profile: ckb
+  Artifact hash: [47, e2, e6, 55, 6c, 78, 48, d4, 45, 84, a8, 71, 67, a6, 5b, b9, c4, 8d, 69, 85, c0, 5e, 48, c7, e, 11, c0, 24, be, 95, 38, 76]
+  Output: /var/folders/kq/dz44fm994nz94zw2dfqnz_g00000gn/T/.tmp6TxYwf/sample.s
+  Metadata: /var/folders/kq/dz44fm994nz94zw2dfqnz_g00000gn/T/.tmp6TxYwf/sample.s.meta.json
+test cellc_writes_requested_output_file ... ok
+test cellc_verify_artifact_enforces_policy_flags ... ok
+test cellc_verify_artifact_rejects_tampered_source_when_requested ... ok
+test cellc_verify_artifact_rejects_tampered_artifact ... ok
+test cellc_verify_artifact_primitive_strict_rechecks_disk_sources ... ok
+test cellc_verify_artifact_enforces_expected_hashes ... ok
+test cellc_explain_generics_reports_checked_vec_instantiations ... ok
+success: compiled successfully
+  Artifact format: RISC-V assembly
+  Target profile: ckb
+  Artifact hash: [79, a1, 5d, 7e, f7, 1f, 9a, 64, 89, da, 9e, 8b, a8, 90, b6, 15, f0, b5, 61, d1, 80, 6b, 39, 9f, f0, 5a, a4, 4d, 0, 5, 41, 3c]
+  Output: /var/folders/kq/dz44fm994nz94zw2dfqnz_g00000gn/T/.tmpLsLJMI/amm_pool.s
+  Metadata: /var/folders/kq/dz44fm994nz94zw2dfqnz_g00000gn/T/.tmpLsLJMI/amm_pool.s.meta.json
+success: compiled successfully
+  Artifact format: RISC-V assembly
+  Target profile: ckb
+  Artifact hash: [2a, 2, ca, c2, fd, b6, 4a, 53, 9e, 26, cb, a1, 31, 69, ab, f3, 1d, c1, 42, d, 18, d3, fd, 1d, 92, b7, a, 55, c6, d, 87, df]
+  Output: /var/folders/kq/dz44fm994nz94zw2dfqnz_g00000gn/T/.tmpLsLJMI/launch.s
+  Metadata: /var/folders/kq/dz44fm994nz94zw2dfqnz_g00000gn/T/.tmpLsLJMI/launch.s.meta.json
+test cellc_check_reports_checked_pool_invariant_families_without_runtime_blockers ... ok
+success: compiled successfully
+  Artifact format: RISC-V assembly
+  Target profile: ckb
+  Artifact hash: [8b, d7, 59, d4, b6, d1, 6, 8b, 97, 0, fd, e5, df, 72, ec, a6, 99, bf, 20, 34, 90, 55, b2, 17, 6d, 48, 55, 9e, ec, ed, 11, 2b]
+  Output: /var/folders/kq/dz44fm994nz94zw2dfqnz_g00000gn/T/.tmpLsLJMI/multisig.s
+  Metadata: /var/folders/kq/dz44fm994nz94zw2dfqnz_g00000gn/T/.tmpLsLJMI/multisig.s.meta.json
+success: compiled successfully
+  Artifact format: RISC-V assembly
+  Target profile: ckb
+  Artifact hash: [cd, d0, f5, 74, b7, 9d, 8e, 7d, 79, 50, 6a, cf, 3e, 13, b, 53, 5c, b9, 7f, 8c, d1, 1f, 88, bf, 1b, 8a, 3c, 3b, 34, 45, c6, 4e]
+  Output: /var/folders/kq/dz44fm994nz94zw2dfqnz_g00000gn/T/.tmpLsLJMI/nft.s
+  Metadata: /var/folders/kq/dz44fm994nz94zw2dfqnz_g00000gn/T/.tmpLsLJMI/nft.s.meta.json
+success: compiled successfully
+  Artifact format: RISC-V assembly
+  Target profile: ckb
+  Artifact hash: [fd, 14, d8, d9, e, 2c, e8, 71, 98, aa, e2, b6, b4, fc, b8, 93, aa, 84, 66, 2f, 21, 2e, 9d, 26, 5, 63, 5d, 74, 55, fd, 56, 87]
+  Output: /var/folders/kq/dz44fm994nz94zw2dfqnz_g00000gn/T/.tmpLsLJMI/timelock.s
+  Metadata: /var/folders/kq/dz44fm994nz94zw2dfqnz_g00000gn/T/.tmpLsLJMI/timelock.s.meta.json
+success: compiled successfully
+  Artifact format: RISC-V assembly
+  Target profile: ckb
+  Artifact hash: [3c, bd, 90, ed, de, 2c, 8d, 8c, 97, 1, a4, d9, 9, dc, 3d, bd, 22, 6b, 5b, 39, e7, 3e, 59, 9a, 5d, e1, 2c, 13, 61, 4d, 32, 46]
+  Output: /var/folders/kq/dz44fm994nz94zw2dfqnz_g00000gn/T/.tmpLsLJMI/token.s
+  Metadata: /var/folders/kq/dz44fm994nz94zw2dfqnz_g00000gn/T/.tmpLsLJMI/token.s.meta.json
+success: compiled successfully
+  Artifact format: RISC-V assembly
+  Target profile: ckb
+  Artifact hash: [2a, 7, 99, 55, e2, cb, e6, 1b, 39, 63, db, fc, 1, 63, fd, 57, 38, 6, a4, 7, ad, b2, 5d, 5c, f1, de, 41, e5, 2a, 29, 1, e5]
+  Output: /var/folders/kq/dz44fm994nz94zw2dfqnz_g00000gn/T/.tmpLsLJMI/vesting.s
+  Metadata: /var/folders/kq/dz44fm994nz94zw2dfqnz_g00000gn/T/.tmpLsLJMI/vesting.s.meta.json
+test cellc_compiles_bundled_examples_to_requested_outputs ... ok
+
+test result: ok. 86 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.92s
+
+
+running 26 tests
+test ckb_scoped_entry_keeps_called_action_helpers ... ok
+test launch_seed_pool_composition_is_scheduler_visible ... ok
+test registry_example_uses_bounded_local_vec_helpers_without_collection_debt ... ok
+test amm_pool_input_output_params_are_scheduler_visible ... ok
+test release_examples_are_free_of_placeholder_hashes_and_formatter_artifacts ... ok
+test registry_example_with_insert_contains_compiles_to_elf ... ok
+test nft_core_actions_expose_action_specific_builder_metadata ... ok
+test token_cell_invariant_appears_in_proof_plan ... ok
+test order_book_language_example_uses_local_vec_helpers_without_collection_debt ... ok
+test stdlib_language_example_compiles_with_all_patterns ... ok
+test token_mint_authority_input_output_binding_is_explicit ... ok
+test v0_15_scoped_invariant_example_compiles_and_produces_proof_plan ... ok
+test v0_15_identity_lifecycle_example_compiles_and_produces_proof_plan ... ok
+test vesting_phase2_remaining_obligations_are_explicit ... ok
+test vesting_read_ref_params_are_scheduler_visible ... ok
+test multisig_core_actions_expose_threshold_flow_metadata ... ok
+test timelock_core_actions_expose_time_and_release_metadata ... ok
+test canonical_examples_compile_under_primitive_strict_015 ... ok
+test canonical_examples_are_the_single_checked_in_business_source ... ok
+test bundled_examples_emit_molecule_schema_manifest_report ... ok
+test bundled_examples_compile_to_non_empty_assembly ... ok
+test bundled_examples_backend_shape_report_serializes ... ok
+test bundled_examples_stay_within_backend_shape_budgets ... ok
+test bundled_examples_stay_near_backend_shape_release_baseline ... ok
+test all_checked_in_cell_examples_compile ... ok
+test bundled_examples_compile_to_elf ... ok
+
+test result: ok. 26 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.07s
+
+
+running 7 tests
+test fuzzy_oversized_static_widths_are_controlled_errors ... ok
+test fuzzy_unicode_hex_inputs_are_controlled_errors ... ok
+test fuzzy_entry_witness_encoding_never_panics ... ok
+test fuzzy_metadata_tampering_never_panics ... ok
+test fuzzy_mutated_sources_never_panic ... ok
+test fuzzy_lsp_incremental_edits_never_panic ... ok
+test fuzzy_semantic_codegen_mutations_reach_assembly ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.51s
+
+
+running 4 tests
+test ickb_diff_matrix_is_partial_and_consistent_with_model_fixtures ... ok
+test ickb_positive_fixtures_pass_model_verifier ... ok
+test ickb_negative_fixtures_fail_for_expected_invariant ... ok
+test ickb_benchmark_specs_compile_and_expose_expected_entries ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.30s
+
+
+running 1 test
+test syntax_combo_quick_matrix_is_cargo_test_visible ... FAILED
+
+failures:
+
+---- syntax_combo_quick_matrix_is_cargo_test_visible stdout ----
+
+thread 'syntax_combo_quick_matrix_is_cargo_test_visible' (8199859) panicked at tests/syntax_combo.rs:15:5:
+syntax combo quick runner failed
+status: exit status: 1
+stdout:
+
+stderr:
+Traceback (most recent call last):
+  File "/Users/arthur/RustroverProjects/CellScript/scripts/cellscript_syntax_combo_audit.py", line 20, in <module>
+    import tomllib
+ModuleNotFoundError: No module named 'tomllib'
+
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    syntax_combo_quick_matrix_is_cargo_test_visible
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.18s
+
+
+== stderr ==
+    Checking cellscript v0.16.0 (/Users/arthur/RustroverProjects/CellScript)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 10.06s
+   Compiling cellscript v0.16.0 (/Users/arthur/RustroverProjects/CellScript)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.82s
+     Running unittests src/lib.rs (target/debug/deps/cellscript-198f0ba9a296fb91)
+     Running tests/adversarial_0_13.rs (target/debug/deps/adversarial_0_13-87ca0b7751a0cf60)
+     Running tests/assembly_snapshots.rs (target/debug/deps/assembly_snapshots-a1b0ee4291a50be7)
+     Running tests/ckb_acceptance.rs (target/debug/deps/ckb_acceptance-546e6523e51ab114)
+     Running tests/cli.rs (target/debug/deps/cli-cd9b4a3e7ed668b4)
+     Running tests/examples.rs (target/debug/deps/examples-885631b36bce043e)
+     Running tests/fuzzy_debug.rs (target/debug/deps/fuzzy_debug-a3c500396cf14cf4)
+     Running tests/ickb_benchmark.rs (target/debug/deps/ickb_benchmark-d0fd214d43bb34ab)
+     Running tests/syntax_combo.rs (target/debug/deps/syntax_combo-b9abeffd268b17da)
+error: test failed, to rerun pass `-p cellscript --test syntax_combo`

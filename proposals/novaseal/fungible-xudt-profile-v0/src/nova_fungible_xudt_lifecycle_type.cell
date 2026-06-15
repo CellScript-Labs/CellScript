@@ -1,0 +1,428 @@
+module novaseal::fungible_xudt_lifecycle_type::v0;
+
+// NovaSeal Fungible xUDT Profile v0 lifecycle type script.
+//
+// This CKB-facing action keeps issue, transfer, and settlement under one
+// stable type-script identity. The profile-level resource actions remain in
+// nova_fungible_xudt_type.cell; this file is the live stateful acceptance
+// surface that checks actual transaction outputs.
+
+const FUNGIBLE_XUDT_VERSION: u16 = 0
+const U64_MAX: u64 = 18446744073709551615
+
+const OP_ISSUE: u8 = 0
+const OP_TRANSFER: u8 = 1
+const OP_SETTLE: u8 = 2
+
+const STATUS_ACTIVE: u8 = 1
+const STATUS_SETTLED: u8 = 2
+
+struct SignaturePayload {
+    pubkey: [u8; 32],
+    signature: [u8; 64],
+}
+
+struct NovaSealCanonicalEnvelopeV0 {
+    profile_id: Hash,
+    policy_hash: Hash,
+    action: u8,
+    terminal_path: u8,
+    subject_id: Hash,
+    old_state_commitment: Hash,
+    new_state_commitment: Hash,
+    old_nonce: u64,
+    new_nonce: u64,
+    expiry: u64,
+    authority_hash: Hash,
+    profile_body_hash: Hash,
+    payout_commitment_hash: Hash,
+}
+
+struct NovaFungibleXudtIntentCoreV0 {
+    action: u8,
+    asset_id: Hash,
+    xudt_type_hash: Hash,
+    issuer_authority_hash: Hash,
+    old_holder_authority_hash: Hash,
+    new_holder_authority_hash: Hash,
+    old_status: u8,
+    new_status: u8,
+    old_amount: u64,
+    transfer_amount: u64,
+    new_amount: u64,
+    old_nonce: u64,
+    new_nonce: u64,
+    expiry: u64,
+    payout_commitment_hash: Hash,
+}
+
+struct NovaFungibleXudtSignedIntentV0 {
+    core: NovaFungibleXudtIntentCoreV0,
+    canonical_envelope_hash: Hash,
+    expected_receipt_hash: Hash,
+}
+
+struct NovaFungibleXudtStateCommitmentV0 {
+    version: u16,
+    asset_id: Hash,
+    xudt_type_hash: Hash,
+    issuer_authority_hash: Hash,
+    holder_authority_hash: Hash,
+    amount: u64,
+    status: u8,
+    nonce: u64,
+    expiry: u64,
+}
+
+struct NovaFungibleXudtReceiptCommitmentV0 {
+    action: u8,
+    asset_id: Hash,
+    xudt_type_hash: Hash,
+    old_holder_authority_hash: Hash,
+    new_holder_authority_hash: Hash,
+    old_status: u8,
+    new_status: u8,
+    old_amount: u64,
+    transfer_amount: u64,
+    new_amount: u64,
+    old_nonce: u64,
+    new_nonce: u64,
+    intent_core_hash: Hash,
+    payout_commitment_hash: Hash,
+}
+
+struct NovaFungibleXudtCellV0 {
+    version: u16,
+    asset_id: Hash,
+    xudt_type_hash: Hash,
+    issuer_authority_hash: Hash,
+    holder_authority_hash: Hash,
+    amount: u64,
+    status: u8,
+    latest_receipt_hash: Hash,
+    nonce: u64,
+    expiry: u64,
+}
+
+struct NovaFungibleXudtReceiptV0 {
+    action: u8,
+    asset_id: Hash,
+    xudt_type_hash: Hash,
+    old_holder_authority_hash: Hash,
+    new_holder_authority_hash: Hash,
+    old_status: u8,
+    new_status: u8,
+    old_amount: u64,
+    transfer_amount: u64,
+    new_amount: u64,
+    old_nonce: u64,
+    new_nonce: u64,
+    intent_core_hash: Hash,
+    signed_intent_hash: Hash,
+    payout_commitment_hash: Hash,
+    latest_receipt_hash: Hash,
+    signer_authority_hash: Hash,
+    expiry: u64,
+}
+
+action nova_fungible_xudt_lifecycle(witness op: u8, witness old_cell: NovaFungibleXudtCellV0, witness new_cell: NovaFungibleXudtCellV0, witness intent: NovaFungibleXudtSignedIntentV0, witness signer_sig: SignaturePayload) -> u64
+where
+    let now = env::current_timepoint()
+    let intent_core_hash = hash_blake2b_packed(intent.core)
+    let signed_intent_hash = hash_blake2b_packed(intent)
+
+    if (op == OP_ISSUE) {
+        let new_state_commitment = hash_blake2b_packed(NovaFungibleXudtStateCommitmentV0 {
+            version: FUNGIBLE_XUDT_VERSION,
+            asset_id: intent.core.asset_id,
+            xudt_type_hash: intent.core.xudt_type_hash,
+            issuer_authority_hash: intent.core.issuer_authority_hash,
+            holder_authority_hash: intent.core.new_holder_authority_hash,
+            amount: intent.core.new_amount,
+            status: STATUS_ACTIVE,
+            nonce: 0,
+            expiry: intent.core.expiry
+        })
+        let receipt_commitment = NovaFungibleXudtReceiptCommitmentV0 {
+            action: OP_ISSUE,
+            asset_id: intent.core.asset_id,
+            xudt_type_hash: intent.core.xudt_type_hash,
+            old_holder_authority_hash: Hash::zero(),
+            new_holder_authority_hash: intent.core.new_holder_authority_hash,
+            old_status: 0,
+            new_status: STATUS_ACTIVE,
+            old_amount: 0,
+            transfer_amount: intent.core.transfer_amount,
+            new_amount: intent.core.new_amount,
+            old_nonce: 0,
+            new_nonce: 0,
+            intent_core_hash: intent_core_hash,
+            payout_commitment_hash: intent.core.payout_commitment_hash
+        }
+        let materialized_receipt_hash = hash_blake2b_packed(receipt_commitment)
+        let canonical_envelope_hash = hash_blake2b_packed(NovaSealCanonicalEnvelopeV0 {
+            profile_id: intent.core.asset_id,
+            policy_hash: intent.core.xudt_type_hash,
+            action: OP_ISSUE,
+            terminal_path: OP_ISSUE,
+            subject_id: intent.core.asset_id,
+            old_state_commitment: Hash::zero(),
+            new_state_commitment: new_state_commitment,
+            old_nonce: 0,
+            new_nonce: 0,
+            expiry: intent.core.expiry,
+            authority_hash: intent.core.issuer_authority_hash,
+            profile_body_hash: intent_core_hash,
+            payout_commitment_hash: intent.core.payout_commitment_hash
+        })
+        let receipt = NovaFungibleXudtReceiptV0 {
+            action: OP_ISSUE,
+            asset_id: intent.core.asset_id,
+            xudt_type_hash: intent.core.xudt_type_hash,
+            old_holder_authority_hash: Hash::zero(),
+            new_holder_authority_hash: intent.core.new_holder_authority_hash,
+            old_status: 0,
+            new_status: STATUS_ACTIVE,
+            old_amount: 0,
+            transfer_amount: intent.core.transfer_amount,
+            new_amount: intent.core.new_amount,
+            old_nonce: 0,
+            new_nonce: 0,
+            intent_core_hash: intent_core_hash,
+            signed_intent_hash: signed_intent_hash,
+            payout_commitment_hash: intent.core.payout_commitment_hash,
+            latest_receipt_hash: materialized_receipt_hash,
+            signer_authority_hash: intent.core.issuer_authority_hash,
+            expiry: intent.core.expiry
+        }
+
+        assert(intent.core.action == OP_ISSUE, "intent action")
+        assert(intent.core.asset_id != Hash::zero(), "asset id")
+        assert(intent.core.xudt_type_hash != Hash::zero(), "xudt type")
+        assert(intent.core.issuer_authority_hash != Hash::zero(), "issuer")
+        assert(intent.core.old_holder_authority_hash == Hash::zero(), "old holder")
+        assert(intent.core.new_holder_authority_hash != Hash::zero(), "new holder")
+        assert(intent.core.old_status == 0, "old status")
+        assert(intent.core.new_status == STATUS_ACTIVE, "new status")
+        assert(intent.core.old_amount == 0, "old amount")
+        assert(intent.core.transfer_amount > 0, "transfer amount")
+        assert(intent.core.new_amount == intent.core.transfer_amount, "new amount")
+        assert(intent.core.old_nonce == 0, "old nonce")
+        assert(intent.core.new_nonce == 0, "new nonce")
+        assert(now <= intent.core.expiry, "expiry")
+        assert(intent.canonical_envelope_hash == canonical_envelope_hash, "canonical envelope")
+        assert(intent.expected_receipt_hash == materialized_receipt_hash, "expected receipt")
+        assert(new_cell.version == FUNGIBLE_XUDT_VERSION, "cell version")
+        assert(new_cell.asset_id == intent.core.asset_id, "cell asset")
+        assert(new_cell.xudt_type_hash == intent.core.xudt_type_hash, "cell xudt")
+        assert(new_cell.issuer_authority_hash == intent.core.issuer_authority_hash, "cell issuer")
+        assert(new_cell.holder_authority_hash == intent.core.new_holder_authority_hash, "cell holder")
+        assert(new_cell.amount == intent.core.new_amount, "cell amount")
+        assert(new_cell.status == STATUS_ACTIVE, "cell status")
+        assert(new_cell.latest_receipt_hash == materialized_receipt_hash, "cell receipt")
+        assert(new_cell.nonce == 0, "cell nonce")
+        assert(new_cell.expiry == intent.core.expiry, "cell expiry")
+        assert(signer_sig.pubkey == intent.core.issuer_authority_hash.0, "signer")
+        assert(ckb::cell_data_hash(source::group_output(0)) == ckb::hash_data_packed(new_cell), "issued output")
+        assert(ckb::cell_data_hash(source::output(1)) == ckb::hash_data_packed(receipt), "issue receipt")
+
+        verifier::btc::bip340::require_signature(signed_intent_hash, signer_sig.pubkey, signer_sig.signature)
+    } else {
+        assert(old_cell.nonce < U64_MAX, "nonce overflow")
+        let old_state_commitment = hash_blake2b_packed(NovaFungibleXudtStateCommitmentV0 {
+            version: old_cell.version,
+            asset_id: old_cell.asset_id,
+            xudt_type_hash: old_cell.xudt_type_hash,
+            issuer_authority_hash: old_cell.issuer_authority_hash,
+            holder_authority_hash: old_cell.holder_authority_hash,
+            amount: old_cell.amount,
+            status: old_cell.status,
+            nonce: old_cell.nonce,
+            expiry: old_cell.expiry
+        })
+
+        if (op == OP_TRANSFER) {
+            let new_state_commitment = hash_blake2b_packed(NovaFungibleXudtStateCommitmentV0 {
+                version: old_cell.version,
+                asset_id: old_cell.asset_id,
+                xudt_type_hash: old_cell.xudt_type_hash,
+                issuer_authority_hash: old_cell.issuer_authority_hash,
+                holder_authority_hash: intent.core.new_holder_authority_hash,
+                amount: old_cell.amount,
+                status: STATUS_ACTIVE,
+                nonce: old_cell.nonce + 1,
+                expiry: old_cell.expiry
+            })
+            let receipt_commitment = NovaFungibleXudtReceiptCommitmentV0 {
+                action: OP_TRANSFER,
+                asset_id: old_cell.asset_id,
+                xudt_type_hash: old_cell.xudt_type_hash,
+                old_holder_authority_hash: old_cell.holder_authority_hash,
+                new_holder_authority_hash: intent.core.new_holder_authority_hash,
+                old_status: STATUS_ACTIVE,
+                new_status: STATUS_ACTIVE,
+                old_amount: old_cell.amount,
+                transfer_amount: old_cell.amount,
+                new_amount: old_cell.amount,
+                old_nonce: old_cell.nonce,
+                new_nonce: old_cell.nonce + 1,
+                intent_core_hash: intent_core_hash,
+                payout_commitment_hash: intent.core.payout_commitment_hash
+            }
+            let materialized_receipt_hash = hash_blake2b_packed(receipt_commitment)
+            let canonical_envelope_hash = hash_blake2b_packed(NovaSealCanonicalEnvelopeV0 {
+                profile_id: old_cell.asset_id,
+                policy_hash: old_cell.xudt_type_hash,
+                action: OP_TRANSFER,
+                terminal_path: OP_TRANSFER,
+                subject_id: old_cell.asset_id,
+                old_state_commitment: old_state_commitment,
+                new_state_commitment: new_state_commitment,
+                old_nonce: old_cell.nonce,
+                new_nonce: old_cell.nonce + 1,
+                expiry: old_cell.expiry,
+                authority_hash: old_cell.holder_authority_hash,
+                profile_body_hash: intent_core_hash,
+                payout_commitment_hash: intent.core.payout_commitment_hash
+            })
+            let receipt = NovaFungibleXudtReceiptV0 {
+                action: OP_TRANSFER,
+                asset_id: old_cell.asset_id,
+                xudt_type_hash: old_cell.xudt_type_hash,
+                old_holder_authority_hash: old_cell.holder_authority_hash,
+                new_holder_authority_hash: intent.core.new_holder_authority_hash,
+                old_status: STATUS_ACTIVE,
+                new_status: STATUS_ACTIVE,
+                old_amount: old_cell.amount,
+                transfer_amount: old_cell.amount,
+                new_amount: old_cell.amount,
+                old_nonce: old_cell.nonce,
+                new_nonce: old_cell.nonce + 1,
+                intent_core_hash: intent_core_hash,
+                signed_intent_hash: signed_intent_hash,
+                payout_commitment_hash: intent.core.payout_commitment_hash,
+                latest_receipt_hash: materialized_receipt_hash,
+                signer_authority_hash: old_cell.holder_authority_hash,
+                expiry: old_cell.expiry
+            }
+
+            assert(old_cell.version == FUNGIBLE_XUDT_VERSION, "old version")
+            assert(old_cell.status == STATUS_ACTIVE, "old status")
+            assert(old_cell.amount > 0, "old amount")
+            assert(old_cell.holder_authority_hash != intent.core.new_holder_authority_hash, "holder changed")
+            assert(now <= old_cell.expiry, "expiry")
+            assert(intent.core.action == OP_TRANSFER, "intent action")
+            assert(intent.core.asset_id == old_cell.asset_id, "intent asset")
+            assert(intent.core.xudt_type_hash == old_cell.xudt_type_hash, "intent xudt")
+            assert(intent.core.issuer_authority_hash == old_cell.issuer_authority_hash, "intent issuer")
+            assert(intent.core.old_holder_authority_hash == old_cell.holder_authority_hash, "intent old holder")
+            assert(intent.core.new_holder_authority_hash != Hash::zero(), "intent new holder")
+            assert(intent.core.old_status == STATUS_ACTIVE, "intent old status")
+            assert(intent.core.new_status == STATUS_ACTIVE, "intent new status")
+            assert(intent.core.old_amount == old_cell.amount, "intent old amount")
+            assert(intent.core.transfer_amount == old_cell.amount, "intent transfer amount")
+            assert(intent.core.new_amount == old_cell.amount, "intent new amount")
+            assert(intent.core.old_nonce == old_cell.nonce, "intent old nonce")
+            assert(intent.core.new_nonce == old_cell.nonce + 1, "intent new nonce")
+            assert(intent.core.expiry == old_cell.expiry, "intent expiry")
+            assert(intent.canonical_envelope_hash == canonical_envelope_hash, "canonical envelope")
+            assert(intent.expected_receipt_hash == materialized_receipt_hash, "expected receipt")
+            assert(new_cell.version == old_cell.version, "new version")
+            assert(new_cell.asset_id == old_cell.asset_id, "new asset")
+            assert(new_cell.xudt_type_hash == old_cell.xudt_type_hash, "new xudt")
+            assert(new_cell.issuer_authority_hash == old_cell.issuer_authority_hash, "new issuer")
+            assert(new_cell.holder_authority_hash == intent.core.new_holder_authority_hash, "new holder")
+            assert(new_cell.amount == old_cell.amount, "new amount")
+            assert(new_cell.status == STATUS_ACTIVE, "new status")
+            assert(new_cell.latest_receipt_hash == materialized_receipt_hash, "new receipt")
+            assert(new_cell.nonce == old_cell.nonce + 1, "new nonce")
+            assert(new_cell.expiry == old_cell.expiry, "new expiry")
+            assert(signer_sig.pubkey == old_cell.holder_authority_hash.0, "signer")
+            assert(ckb::cell_data_hash(source::group_input(0)) == ckb::hash_data_packed(old_cell), "old input")
+            assert(ckb::cell_data_hash(source::group_output(0)) == ckb::hash_data_packed(new_cell), "new output")
+            assert(ckb::cell_data_hash(source::output(1)) == ckb::hash_data_packed(receipt), "transfer receipt")
+
+            verifier::btc::bip340::require_signature(signed_intent_hash, signer_sig.pubkey, signer_sig.signature)
+        } else {
+            assert(op == OP_SETTLE, "settle op")
+            let receipt_commitment = NovaFungibleXudtReceiptCommitmentV0 {
+                action: OP_SETTLE,
+                asset_id: old_cell.asset_id,
+                xudt_type_hash: old_cell.xudt_type_hash,
+                old_holder_authority_hash: old_cell.holder_authority_hash,
+                new_holder_authority_hash: old_cell.holder_authority_hash,
+                old_status: STATUS_ACTIVE,
+                new_status: STATUS_SETTLED,
+                old_amount: old_cell.amount,
+                transfer_amount: old_cell.amount,
+                new_amount: 0,
+                old_nonce: old_cell.nonce,
+                new_nonce: old_cell.nonce + 1,
+                intent_core_hash: intent_core_hash,
+                payout_commitment_hash: intent.core.payout_commitment_hash
+            }
+            let materialized_receipt_hash = hash_blake2b_packed(receipt_commitment)
+            let canonical_envelope_hash = hash_blake2b_packed(NovaSealCanonicalEnvelopeV0 {
+                profile_id: old_cell.asset_id,
+                policy_hash: old_cell.xudt_type_hash,
+                action: OP_SETTLE,
+                terminal_path: OP_SETTLE,
+                subject_id: old_cell.asset_id,
+                old_state_commitment: old_state_commitment,
+                new_state_commitment: Hash::zero(),
+                old_nonce: old_cell.nonce,
+                new_nonce: old_cell.nonce + 1,
+                expiry: old_cell.expiry,
+                authority_hash: old_cell.holder_authority_hash,
+                profile_body_hash: intent_core_hash,
+                payout_commitment_hash: intent.core.payout_commitment_hash
+            })
+            let receipt = NovaFungibleXudtReceiptV0 {
+                action: OP_SETTLE,
+                asset_id: old_cell.asset_id,
+                xudt_type_hash: old_cell.xudt_type_hash,
+                old_holder_authority_hash: old_cell.holder_authority_hash,
+                new_holder_authority_hash: old_cell.holder_authority_hash,
+                old_status: STATUS_ACTIVE,
+                new_status: STATUS_SETTLED,
+                old_amount: old_cell.amount,
+                transfer_amount: old_cell.amount,
+                new_amount: 0,
+                old_nonce: old_cell.nonce,
+                new_nonce: old_cell.nonce + 1,
+                intent_core_hash: intent_core_hash,
+                signed_intent_hash: signed_intent_hash,
+                payout_commitment_hash: intent.core.payout_commitment_hash,
+                latest_receipt_hash: materialized_receipt_hash,
+                signer_authority_hash: old_cell.holder_authority_hash,
+                expiry: old_cell.expiry
+            }
+
+            assert(old_cell.version == FUNGIBLE_XUDT_VERSION, "old version")
+            assert(old_cell.status == STATUS_ACTIVE, "old status")
+            assert(old_cell.amount > 0, "old amount")
+            assert(now <= old_cell.expiry, "expiry")
+            assert(intent.core.action == OP_SETTLE, "intent action")
+            assert(intent.core.asset_id == old_cell.asset_id, "intent asset")
+            assert(intent.core.xudt_type_hash == old_cell.xudt_type_hash, "intent xudt")
+            assert(intent.core.issuer_authority_hash == old_cell.issuer_authority_hash, "intent issuer")
+            assert(intent.core.old_holder_authority_hash == old_cell.holder_authority_hash, "intent old holder")
+            assert(intent.core.new_holder_authority_hash == old_cell.holder_authority_hash, "intent new holder")
+            assert(intent.core.old_status == STATUS_ACTIVE, "intent old status")
+            assert(intent.core.new_status == STATUS_SETTLED, "intent new status")
+            assert(intent.core.old_amount == old_cell.amount, "intent old amount")
+            assert(intent.core.transfer_amount == old_cell.amount, "intent transfer amount")
+            assert(intent.core.new_amount == 0, "intent new amount")
+            assert(intent.core.old_nonce == old_cell.nonce, "intent old nonce")
+            assert(intent.core.new_nonce == old_cell.nonce + 1, "intent new nonce")
+            assert(intent.core.expiry == old_cell.expiry, "intent expiry")
+            assert(intent.canonical_envelope_hash == canonical_envelope_hash, "canonical envelope")
+            assert(intent.expected_receipt_hash == materialized_receipt_hash, "expected receipt")
+            assert(signer_sig.pubkey == old_cell.holder_authority_hash.0, "signer")
+            assert(ckb::cell_data_hash(source::group_input(0)) == ckb::hash_data_packed(old_cell), "old input")
+            assert(ckb::cell_data_hash(source::output(0)) == ckb::hash_data_packed(receipt), "settlement receipt")
+
+            verifier::btc::bip340::require_signature(signed_intent_hash, signer_sig.pubkey, signer_sig.signature)
+        }
+    }
+    0

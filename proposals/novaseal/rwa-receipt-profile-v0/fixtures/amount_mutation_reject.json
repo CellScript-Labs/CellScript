@@ -1,0 +1,8 @@
+{
+  "schema": "novaseal-rwa-receipt-fixture-v0.1",
+  "fixture": "amount_mutation_reject",
+  "action": "claim_rwa_receipt",
+  "expected": "rejected",
+  "coverage": "source-guard-present",
+  "description": "Claim and settlement must reject intents that mutate the committed integer amount."
+}

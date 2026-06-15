@@ -1,0 +1,9 @@
+{
+  "schema": "novaseal-agreement-fixture-v0.1",
+  "fixture": "non_ckb_asset_kind_reject",
+  "action": "originate_agreement",
+  "expected": "rejected",
+  "coverage": "source-guard-present + resolved-transaction-covered",
+  "reject_guard": "terms.collateral_asset_kind == ASSET_KIND_CKB && terms.principal_asset_kind == ASSET_KIND_CKB",
+  "description": "Agreement Profile v0 rejects non-CKB assets; UDT/xUDT settlement is intentionally out of scope for this slice."
+}

@@ -1,0 +1,39 @@
+{
+  "schema": "novaseal-v0-invariant-matrix-v0.1",
+  "package": "novaseal 0.0.1-v0-mvp",
+  "invariants": [
+    {
+      "name": "policy_preserved",
+      "location": "nova_state_type.cell",
+      "criteria": [7],
+      "status": "declared"
+    },
+    {
+      "name": "nonce_monotonic",
+      "location": "key_auth_transition where clause",
+      "criteria": [4],
+      "status": "declared"
+    },
+    {
+      "name": "receipt_obligation_matched",
+      "location": "key_auth_transition + lock",
+      "criteria": [8],
+      "status": "declared"
+    },
+    {
+      "name": "authority-binding",
+      "claim": "Verified BIP340 x-only pubkey is bound to the Cell-declared authority, not merely cryptographically valid.",
+      "location": "key_auth_transition, btc_authority lock, lifecycle entry",
+      "criteria": ["6b"],
+      "coverage": "runtime-checked"
+    },
+    {
+      "name": "u64-overflow-prevention",
+      "claim": "Nonce increment is guarded before u64 addition in core transition paths.",
+      "location": "key_auth_transition and novaseal_lifecycle nonce guards",
+      "criteria": [4],
+      "coverage": "runtime-checked"
+    }
+  ],
+  "notes": "This matrix will be used by the acceptance harness to prove that every one of the 9 strict criteria has at least one invariant or action-level check that covers it. Gaps here are release blockers for v0."
+}

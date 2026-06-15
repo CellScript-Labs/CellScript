@@ -1,0 +1,8 @@
+# TerminalPathV0
+
+0: OriginateAgreement
+1: RepayBeforeExpiry
+2: ClaimAfterExpiry
+3: CancelBeforeFunding        # reserved, not implemented in this slice
+
+# No oracle path, no margin-call path, no dynamic liquidation path.

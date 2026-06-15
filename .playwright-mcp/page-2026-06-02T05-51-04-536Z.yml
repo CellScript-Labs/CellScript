@@ -1,0 +1,307 @@
+- generic [active] [ref=e1]:
+  - banner [ref=e2]:
+    - navigation "Primary navigation" [ref=e3]:
+      - link "CellScript home" [ref=e4] [cursor=pointer]:
+        - /url: "#top"
+        - generic [ref=e6]: CellScript
+      - generic [ref=e7]:
+        - link "Model" [ref=e8] [cursor=pointer]:
+          - /url: "#core-model"
+        - link "Assurance" [ref=e9] [cursor=pointer]:
+          - /url: "#assurance"
+        - link "Commands" [ref=e10] [cursor=pointer]:
+          - /url: "#tooling"
+        - link "Examples" [ref=e11] [cursor=pointer]:
+          - /url: "#examples"
+        - link "Source" [ref=e12] [cursor=pointer]:
+          - /url: https://github.com/a19q3/CellScript
+        - button "Switch to dark mode" [pressed] [ref=e13] [cursor=pointer]:
+          - generic [ref=e16]: Dark
+  - main [ref=e17]:
+    - region "CellScript" [ref=e18]:
+      - generic [ref=e19]:
+        - heading "CellScript" [level=1] [ref=e20]
+        - paragraph [ref=e21]: Write Cell contracts as typed transitions, not raw wire format.
+        - generic [ref=e22]:
+          - link "Get started" [ref=e23] [cursor=pointer]:
+            - /url: "#getting-started"
+          - link "Core model" [ref=e24] [cursor=pointer]:
+            - /url: "#core-model"
+        - generic "CellScript contract surface" [ref=e25]:
+          - generic [ref=e26]:
+            - term [ref=e27]: target
+            - definition [ref=e28]: ckb-vm RISC-V
+          - generic [ref=e29]:
+            - term [ref=e30]: model
+            - definition [ref=e31]: schema-backed Cells
+          - generic [ref=e32]:
+            - term [ref=e33]: output
+            - definition [ref=e34]: metadata + ProofPlan
+      - generic [ref=e35]:
+        - generic [ref=e37]: token.cell
+        - tablist "CellScript examples" [ref=e39]:
+          - tab "Fungible Token" [selected] [ref=e40] [cursor=pointer]
+          - tab "NFT" [ref=e41] [cursor=pointer]
+          - tab "AMM Pool" [ref=e42] [cursor=pointer]
+          - tab "Vesting" [ref=e43] [cursor=pointer]
+        - tabpanel "Fungible Token" [ref=e45]:
+          - generic [ref=e46]:
+            - generic [ref=e47]: "1"
+            - generic [ref=e48]: module cellscript::fungible_token
+          - generic [ref=e49]:
+            - generic [ref=e50]: "2"
+            - generic [ref=e51]: // ... invariant and MintAuthority omitted
+          - generic [ref=e52]:
+            - generic [ref=e53]: "3"
+            - generic [ref=e54]: "resource Token has store, create, consume, replace, burn, relock {"
+          - generic [ref=e55]:
+            - generic [ref=e56]: "4"
+            - generic [ref=e57]: "amount: u64,"
+          - generic [ref=e58]:
+            - generic [ref=e59]: "5"
+            - generic [ref=e60]: "symbol: [u8; 8],"
+          - generic [ref=e61]:
+            - generic [ref=e62]: "6"
+            - generic [ref=e63]: "}"
+          - generic [ref=e65]: "7"
+          - generic [ref=e66]:
+            - generic [ref=e67]: "8"
+            - generic [ref=e68]: "action transfer_token(token: Token, to: Address) -> next_token: Token"
+          - generic [ref=e69]:
+            - generic [ref=e70]: "9"
+            - generic [ref=e71]: where
+          - generic [ref=e72]:
+            - generic [ref=e73]: "10"
+            - generic [ref=e74]: consume token
+          - generic [ref=e75]:
+            - generic [ref=e76]: "11"
+            - generic [ref=e77]: "create next_token = Token { amount: token.amount, symbol: token.symbol } with_lock(to)"
+          - generic [ref=e79]: "12"
+          - generic [ref=e80]:
+            - generic [ref=e81]: "13"
+            - generic [ref=e82]: "action burn(token: Token)"
+          - generic [ref=e83]:
+            - generic [ref=e84]: "14"
+            - generic [ref=e85]: where
+          - generic [ref=e86]:
+            - generic [ref=e87]: "15"
+            - generic [ref=e88]: assert(token.amount > 0, "cannot burn zero")
+          - generic [ref=e89]:
+            - generic [ref=e90]: "16"
+            - generic [ref=e91]: destroy token
+        - generic [ref=e92]:
+          - generic [ref=e93]: $
+          - generic [ref=e94]: cellc examples/token.cell --target-profile ckb
+    - region "Getting Started" [ref=e95]:
+      - heading "Getting Started" [level=2] [ref=e96]
+      - generic [ref=e97]:
+        - article [ref=e98]:
+          - generic [ref=e99]: "1"
+          - heading "Install" [level=3] [ref=e100]
+          - paragraph [ref=e101]:
+            - code [ref=e102]: cargo install --path .
+        - article [ref=e103]:
+          - generic [ref=e104]: "2"
+          - heading "Compile" [level=3] [ref=e105]
+          - paragraph [ref=e106]:
+            - code [ref=e107]: cellc examples/token.cell --target riscv64-elf --target-profile ckb
+        - article [ref=e108]:
+          - generic [ref=e109]: "3"
+          - heading "Check" [level=3] [ref=e110]
+          - paragraph [ref=e111]:
+            - code [ref=e112]: cellc check --target-profile ckb
+    - region "Compiler Workflow" [ref=e113]:
+      - heading "Compiler Workflow" [level=2] [ref=e114]
+      - generic [ref=e115]:
+        - generic "Compiler workflow from .cell source to CKB artefact" [ref=e116]:
+          - article [ref=e117]:
+            - img [ref=e119]:
+              - generic [ref=e122]: .cell
+            - heading "CellScript source" [level=3] [ref=e123]
+          - img [ref=e125]
+          - article [ref=e127]:
+            - img [ref=e129]
+            - heading "Parse & check" [level=3] [ref=e133]
+            - paragraph [ref=e134]: Syntax, types, effects
+          - img [ref=e136]
+          - article [ref=e138]:
+            - img [ref=e140]
+            - heading "IR + Metadata" [level=3] [ref=e146]
+            - paragraph [ref=e147]: Typed model & assurance info
+          - img [ref=e149]
+          - article [ref=e151]:
+            - img [ref=e153]
+            - heading "Lower to RISC-V" [level=3] [ref=e157]
+            - paragraph [ref=e158]: ckb-vm codegen & optimisations
+          - img [ref=e160]
+          - article [ref=e162]:
+            - img [ref=e164]:
+              - generic [ref=e167]: .elf
+            - heading "ELF / Assembly" [level=3] [ref=e168]
+            - paragraph [ref=e169]: RISC-V artefacts for ckb-vm
+        - complementary "Build for CKB" [ref=e170]:
+          - heading "Build for CKB" [level=3] [ref=e171]
+          - list [ref=e172]:
+            - listitem [ref=e173]:
+              - img [ref=e174]
+              - generic [ref=e176]: ckb-vm compatible
+            - listitem [ref=e177]:
+              - img [ref=e178]
+              - generic [ref=e180]: Deterministic execution
+            - listitem [ref=e181]:
+              - img [ref=e182]
+              - generic [ref=e184]: Minimal syscalls
+            - listitem [ref=e185]:
+              - img [ref=e186]
+              - generic [ref=e188]: Scheduler-aware
+    - region "Core Model" [ref=e189]:
+      - heading "Core Model" [level=2] [ref=e190]
+      - paragraph [ref=e191]: "CellScript keeps the contract model visible: Cell shapes, effects, locks, flows, and review metadata stay in one typed surface."
+      - paragraph [ref=e192]: "Narrow by design: not a general-purpose runtime, not a new VM, not account storage in disguise."
+      - generic [ref=e193]:
+        - tablist "CellScript core primitives" [ref=e194]:
+          - tab "resource" [selected] [ref=e195] [cursor=pointer]:
+            - generic [ref=e196]: resource
+          - tab "shared" [ref=e197] [cursor=pointer]:
+            - generic [ref=e198]: shared
+          - tab "receipt" [ref=e199] [cursor=pointer]:
+            - generic [ref=e200]: receipt
+          - tab "action" [ref=e201] [cursor=pointer]:
+            - generic [ref=e202]: action
+          - tab "lock" [ref=e203] [cursor=pointer]:
+            - generic [ref=e204]: lock
+          - tab "flow" [ref=e205] [cursor=pointer]:
+            - generic [ref=e206]: flow
+          - tab "invariant" [ref=e207] [cursor=pointer]:
+            - generic [ref=e208]: invariant
+          - tab "struct / enum" [ref=e209] [cursor=pointer]:
+            - generic [ref=e210]: struct / enum
+          - tab "identity" [ref=e211] [cursor=pointer]:
+            - generic [ref=e212]: identity
+        - tabpanel "resource" [ref=e214]:
+          - paragraph [ref=e216]: Owned Cell state with explicit lifecycle effects.
+          - generic [ref=e217]:
+            - generic [ref=e218]:
+              - generic [ref=e219]: Example excerpt
+              - generic [ref=e220]: examples/token.cell
+            - generic [ref=e221]: "// examples/token.cell resource Token has store, create, consume, replace, burn, relock { amount: u64, symbol: [u8; 8], }"
+    - region "Assurance Output" [ref=e222]:
+      - generic [ref=e223]:
+        - heading "Assurance Output" [level=2] [ref=e224]
+        - paragraph [ref=e225]: A local build emits review metadata. Treat the sidecar as useful evidence, not an authenticated proof outside the build boundary.
+      - article [ref=e227]:
+        - generic "Assurance output summary" [ref=e228]:
+          - article [ref=e229]:
+            - text: Schema
+            - strong [ref=e230]: v42
+            - paragraph [ref=e231]: current compiler metadata schema
+          - article [ref=e232]:
+            - text: Source
+            - strong [ref=e233]: vesting.cell
+            - paragraph [ref=e234]: shared + receipt + flow
+          - article [ref=e235]:
+            - text: Boundary
+            - strong [ref=e236]: local sidecar
+            - paragraph [ref=e237]: validated; provenance required when shared
+        - group [ref=e238]:
+          - generic "- Metadata excerpt" [ref=e239] [cursor=pointer]
+          - generic [ref=e240]: "# Representative sidecar excerpt from a local build; keep provenance checks separate."
+          - generic [ref=e241]: "{ \"metadata_schema_version\": 42, \"module\": \"cellscript::vesting\", \"target_profile\": \"ckb\", \"types\": { \"VestingConfig\": { \"kind\": \"shared\", \"capabilities\": [\"store\", \"create\", \"read_ref\"] }, \"VestingGrant\": { \"kind\": \"receipt\", \"flow\": \"Granted -> Claimable -> FullyClaimed\" } }, \"actions\": [{ \"name\": \"claim_vested\", \"effect_class\": \"Mutating\", \"consume_set\": [\"grant\"], \"create_set\": [\"tokens\", \"updated_grant\"], \"ckb_runtime_features\": [\"current_timepoint\"] }], \"proof_plan\": { \"status\": \"review evidence\", \"limit\": \"sidecar provenance must be checked outside the compiler\" } }"
+    - region "Tooling Surface" [ref=e242]:
+      - heading "Tooling Surface" [level=2] [ref=e243]
+      - generic [ref=e244]:
+        - tablist "CellScript tooling commands" [ref=e245]:
+          - tab "cellc metadata Read/write surface" [selected] [ref=e246] [cursor=pointer]:
+            - code [ref=e247]: cellc metadata
+            - generic [ref=e248]: Read/write surface
+          - tab "cellc constraints Transaction shape" [ref=e249] [cursor=pointer]:
+            - code [ref=e250]: cellc constraints
+            - generic [ref=e251]: Transaction shape
+          - tab "cellc audit-bundle Reviewer packet" [ref=e252] [cursor=pointer]:
+            - code [ref=e253]: cellc audit-bundle
+            - generic [ref=e254]: Reviewer packet
+          - tab "cellc lsp Editor feedback" [ref=e255] [cursor=pointer]:
+            - code [ref=e256]: cellc lsp
+            - generic [ref=e257]: Editor feedback
+        - tabpanel "cellc metadata Read/write surface" [ref=e259]:
+          - generic [ref=e260]:
+            - generic [ref=e261]: When
+            - paragraph [ref=e262]: Use before review or integration.
+            - generic [ref=e263]: Output
+            - paragraph [ref=e264]: Schema, effects, source hashes, target profile.
+          - generic [ref=e265]:
+            - code [ref=e266]: cellc metadata examples/vesting.cell --target-profile ckb --json
+            - generic [ref=e267]: "# Emit review metadata for a real example."
+    - region "Examples" [ref=e268]:
+      - heading "Examples" [level=2] [ref=e269]
+      - generic [ref=e270]:
+        - link "token.cell Mint, transfer, burn, and typed metadata. resource consume/create burn" [ref=e271] [cursor=pointer]:
+          - /url: https://github.com/a19q3/CellScript/blob/main/examples/token.cell
+          - heading "token.cell" [level=3] [ref=e272]:
+            - code [ref=e273]: token.cell
+          - paragraph [ref=e274]: Mint, transfer, burn, and typed metadata.
+          - generic [ref=e275]:
+            - generic [ref=e276]: resource
+            - generic [ref=e277]: consume/create
+            - generic [ref=e278]: burn
+        - link "nft.cell Ownership transfer with preserve and relock. resource preserve relock" [ref=e279] [cursor=pointer]:
+          - /url: https://github.com/a19q3/CellScript/blob/main/examples/nft.cell
+          - heading "nft.cell" [level=3] [ref=e280]:
+            - code [ref=e281]: nft.cell
+          - paragraph [ref=e282]: Ownership transfer with preserve and relock.
+          - generic [ref=e283]:
+            - generic [ref=e284]: resource
+            - generic [ref=e285]: preserve
+            - generic [ref=e286]: relock
+        - link "amm_pool.cell Shared reserves with slippage checks. shared replace slippage" [ref=e287] [cursor=pointer]:
+          - /url: https://github.com/a19q3/CellScript/blob/main/examples/amm_pool.cell
+          - heading "amm_pool.cell" [level=3] [ref=e288]:
+            - code [ref=e289]: amm_pool.cell
+          - paragraph [ref=e290]: Shared reserves with slippage checks.
+          - generic [ref=e291]:
+            - generic [ref=e292]: shared
+            - generic [ref=e293]: replace
+            - generic [ref=e294]: slippage
+        - link "vesting.cell Grant state flow into claimed output. flow transition receipt" [ref=e295] [cursor=pointer]:
+          - /url: https://github.com/a19q3/CellScript/blob/main/examples/vesting.cell
+          - heading "vesting.cell" [level=3] [ref=e296]:
+            - code [ref=e297]: vesting.cell
+          - paragraph [ref=e298]: Grant state flow into claimed output.
+          - generic [ref=e299]:
+            - generic [ref=e300]: flow
+            - generic [ref=e301]: transition
+            - generic [ref=e302]: receipt
+        - link "multisig.cell Witness checks for threshold-style locks. lock witness threshold" [ref=e303] [cursor=pointer]:
+          - /url: https://github.com/a19q3/CellScript/blob/main/examples/multisig.cell
+          - heading "multisig.cell" [level=3] [ref=e304]:
+            - code [ref=e305]: multisig.cell
+          - paragraph [ref=e306]: Witness checks for threshold-style locks.
+          - generic [ref=e307]:
+            - generic [ref=e308]: lock
+            - generic [ref=e309]: witness
+            - generic [ref=e310]: threshold
+        - link "timelock.cell Time-bound spending from Cell state. lock env timepoint" [ref=e311] [cursor=pointer]:
+          - /url: https://github.com/a19q3/CellScript/blob/main/examples/timelock.cell
+          - heading "timelock.cell" [level=3] [ref=e312]:
+            - code [ref=e313]: timelock.cell
+          - paragraph [ref=e314]: Time-bound spending from Cell state.
+          - generic [ref=e315]:
+            - generic [ref=e316]: lock
+            - generic [ref=e317]: env
+            - generic [ref=e318]: timepoint
+  - contentinfo [ref=e319]:
+    - generic [ref=e320]:
+      - generic [ref=e321]:
+        - link "CellScript" [ref=e322] [cursor=pointer]:
+          - /url: "#top"
+          - generic [ref=e324]: CellScript
+        - paragraph [ref=e325]: A semantic DSL for CKB Cell-based smart contracts, with typed metadata and assurance by design. Docs, spec, examples, and source live with the repository.
+      - generic [ref=e326]:
+        - link "Docs" [ref=e327] [cursor=pointer]:
+          - /url: https://github.com/a19q3/CellScript/wiki
+        - link "Spec" [ref=e328] [cursor=pointer]:
+          - /url: https://github.com/a19q3/CellScript/tree/main/docs
+        - link "Examples" [ref=e329] [cursor=pointer]:
+          - /url: https://github.com/a19q3/CellScript/tree/main/examples
+        - link "Source" [ref=e330] [cursor=pointer]:
+          - /url: https://github.com/a19q3/CellScript

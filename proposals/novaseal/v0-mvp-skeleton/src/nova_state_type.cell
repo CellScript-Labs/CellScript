@@ -1,0 +1,218 @@
+module novaseal::state_type::v0_mvp;
+
+// Arthur Zhang, 2026.
+//
+// =============================================================================
+// NovaSeal v0 MVP - State Transition Type Script
+// =============================================================================
+//
+// This is the primary executable artefact for v0.
+//
+// It covers the strict acceptance criteria using only CellScript 0.16
+// constructs: resource, consume/create, require guards, explicit policy_hash
+// binding, and ProofPlan-visible obligations. Signature verification remains
+// delegated to nova_btc_authority_lock plus its external verifier TCB.
+//
+// Receipt handling in v0 is now materialised as an explicit ProofReceiptV0
+// output cell. The receipt hash remains checked as a fail-closed obligation.
+// =============================================================================
+
+// REVIEW NOTE:
+// Types are inlined here so the transition can compile as one self-contained
+// CellScript entry. The schema files remain the source of truth for field
+// order, width and packed layout.
+//
+// NovaSealCellV0 is a resource because a valid transition consumes one old Cell
+// and creates one successor Cell. That linear movement is the CKB-side safety
+// property this file is trying to make explicit.
+const U64_MAX: u64 = 18446744073709551615
+
+resource NovaSealCellV0 has store, create, consume {
+    version: u16,
+    btc_authority_hash: Hash,
+    state_hash: Hash,
+    policy_hash: Hash,
+    latest_receipt_hash: Hash,
+    nonce: u64,
+    expiry: u64,
+}
+
+struct OutPoint {
+    tx_hash: Hash,
+    index: u32,
+}
+
+struct NovaSealCellCommitmentV0 {
+    version: u16,
+    btc_authority_hash: Hash,
+    state_hash: Hash,
+    policy_hash: Hash,
+    nonce: u64,
+    expiry: u64,
+}
+
+struct NovaSealIntentCoreV0 {
+    protocol_id: Hash,
+    package_hash: Hash,
+    policy_hash: Hash,
+    action: u8,
+    terminal_path: u8,
+    old_cell: OutPoint,
+    old_state_hash: Hash,
+    new_state_hash: Hash,
+    old_nonce: u64,
+    new_nonce: u64,
+    expiry: u64,
+}
+
+struct NovaSealSignedIntentV0 {
+    core: NovaSealIntentCoreV0,
+    expected_receipt_hash: Hash,
+}
+
+struct SignaturePayload {
+    pubkey: [u8; 32],
+    signature: [u8; 64],
+}
+
+struct ProofReceiptCommitmentV0 {
+    protocol_id: Hash,
+    package_hash: Hash,
+    policy_hash: Hash,
+    action: u8,
+    terminal_path: u8,
+    old_cell: OutPoint,
+    new_cell_commitment: Hash,
+    old_state_hash: Hash,
+    new_state_hash: Hash,
+    old_nonce: u64,
+    new_nonce: u64,
+    intent_core_hash: Hash,
+    payout_commitment_hash: Hash,
+}
+
+receipt ProofReceiptV0 has store, create, consume {
+    protocol_id: Hash,
+    package_hash: Hash,
+    policy_hash: Hash,
+    action: u8,
+    terminal_path: u8,
+    old_cell: OutPoint,
+    new_cell_commitment: Hash,
+    old_state_hash: Hash,
+    new_state_hash: Hash,
+    old_nonce: u64,
+    new_nonce: u64,
+    intent_core_hash: Hash,
+    signed_intent_hash: Hash,
+    payout_commitment_hash: Hash,
+    signer_authority_hash: Hash,
+    expiry: u64,
+}
+
+// The core transition action. This is what builders and the acceptance harness
+// target for the v0 evidence. It checks old-cell binding, policy preservation,
+// nonce increment, expiry, receipt commitment, and BIP340 signature validity.
+//
+// AUDIT BOUNDARY:
+// `payout_commitment_hash` is Hash::zero() in core v0 because the base movement
+// profile does not model concrete payouts. Agreement Profile adds typed payout
+// outputs separately.
+action key_auth_transition(old_cell: NovaSealCellV0, witness intent: NovaSealSignedIntentV0, witness state_hash_commitment: Hash, witness sig: SignaturePayload) -> (new_cell: NovaSealCellV0, receipt: ProofReceiptV0)
+where
+    let now = env::current_timepoint()
+    let input_source = source::group_input(0)
+    let actual_old_tx_hash = ckb::input_previous_tx_hash(input_source)
+    let actual_old_index = ckb::input_previous_index(input_source)
+    let actual_state_hash_commitment = hash_blake2b(intent.core.new_state_hash)
+    let intent_core_hash = hash_blake2b_packed(intent.core)
+    let signed_intent_hash = hash_blake2b_packed(intent)
+    let new_cell_commitment = hash_blake2b_packed(NovaSealCellCommitmentV0 {
+        version: old_cell.version,
+        btc_authority_hash: old_cell.btc_authority_hash,
+        state_hash: intent.core.new_state_hash,
+        policy_hash: old_cell.policy_hash,
+        nonce: intent.core.new_nonce,
+        expiry: intent.core.expiry
+    })
+    let receipt_commitment = ProofReceiptCommitmentV0 {
+        protocol_id: intent.core.protocol_id,
+        package_hash: intent.core.package_hash,
+        policy_hash: intent.core.policy_hash,
+        action: intent.core.action,
+        terminal_path: intent.core.terminal_path,
+        old_cell: intent.core.old_cell,
+        new_cell_commitment: new_cell_commitment,
+        old_state_hash: intent.core.old_state_hash,
+        new_state_hash: intent.core.new_state_hash,
+        old_nonce: intent.core.old_nonce,
+        new_nonce: intent.core.new_nonce,
+        intent_core_hash: intent_core_hash,
+        payout_commitment_hash: Hash::zero()
+    }
+    let materialized_receipt_hash = hash_blake2b_packed(receipt_commitment)
+    require intent.core.old_cell.tx_hash == actual_old_tx_hash
+    require intent.core.old_cell.index == actual_old_index
+    require intent.core.old_state_hash == old_cell.state_hash
+    require actual_state_hash_commitment == state_hash_commitment
+    require intent.core.policy_hash == old_cell.policy_hash
+    require intent.core.old_nonce == old_cell.nonce
+    require old_cell.nonce < U64_MAX
+    require intent.core.new_nonce == old_cell.nonce + 1
+    require now <= intent.core.expiry
+    require intent.expected_receipt_hash == materialized_receipt_hash
+    require receipt_commitment.intent_core_hash == intent_core_hash
+    require sig.pubkey == old_cell.btc_authority_hash.0
+
+    verifier::btc::bip340::require_signature(signed_intent_hash, sig.pubkey, sig.signature)
+
+    consume old_cell
+    create new_cell = NovaSealCellV0 {
+        version: old_cell.version,
+        btc_authority_hash: old_cell.btc_authority_hash,
+        state_hash: intent.core.new_state_hash,
+        policy_hash: old_cell.policy_hash,
+        latest_receipt_hash: materialized_receipt_hash,
+        nonce: intent.core.new_nonce,
+        expiry: intent.core.expiry
+    }
+
+    create receipt = ProofReceiptV0 {
+        protocol_id: intent.core.protocol_id,
+        package_hash: intent.core.package_hash,
+        policy_hash: intent.core.policy_hash,
+        action: intent.core.action,
+        terminal_path: intent.core.terminal_path,
+        old_cell: intent.core.old_cell,
+        new_cell_commitment: new_cell_commitment,
+        old_state_hash: intent.core.old_state_hash,
+        new_state_hash: intent.core.new_state_hash,
+        old_nonce: intent.core.old_nonce,
+        new_nonce: intent.core.new_nonce,
+        intent_core_hash: intent_core_hash,
+        signed_intent_hash: signed_intent_hash,
+        payout_commitment_hash: Hash::zero(),
+        signer_authority_hash: old_cell.btc_authority_hash,
+        expiry: intent.core.expiry
+    }
+
+
+// AUDIT BOUNDARY:
+// The type script entry point will normally be a thin dispatcher that selects
+// the action from witness data. For this v0 action file, the single
+// key_auth_transition action remains exposed so targeted compiler and VM
+// harnesses can call it directly.
+
+// Default-entry lock surface. The same lock shape is also kept in
+// nova_btc_authority_lock.cell for targeted standalone compilation, but this
+// copy makes the package audit-bundle expose a real locks[] record for the
+// active NovaSeal resource.
+lock btc_authority(protected cell: NovaSealCellV0, lock_args expected_btc_authority_hash: Hash, witness intent: NovaSealSignedIntentV0, witness state_hash_commitment: Hash, witness sig: SignaturePayload) -> bool {
+    let digest = hash_blake2b_packed(intent)
+    require expected_btc_authority_hash == cell.btc_authority_hash
+    require intent.core.policy_hash == cell.policy_hash
+    require sig.pubkey == cell.btc_authority_hash.0
+
+    verifier::btc::bip340::require_signature(digest, sig.pubkey, sig.signature)
+    true
+}

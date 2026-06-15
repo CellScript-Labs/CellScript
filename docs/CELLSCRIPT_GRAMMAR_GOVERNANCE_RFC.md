@@ -20,9 +20,10 @@ main governance issue that appears once the language grows beyond early 0.13 /
 > should chase the cleanest possible grammar for describing CKB Cell
 > transitions.
 
-In Chinese shorthand:
+In short:
 
-> 不是最优雅的通用语言，而是最清楚的 Cell 转移审计格式。
+> Not the most elegant general-purpose language, but the clearest audit format
+> for Cell transitions.
 
 CellScript's strongest identity is not that it resembles Rust, Move, Solidity,
 or Python. Its strongest identity is that it can become:
@@ -90,17 +91,18 @@ body      = Cell movement and output shape
 where     = validity constraints
 ```
 
-Or, in Chinese:
+Or, more compactly:
 
 ```text
-签名：这是什么动作
-主体：哪些 Cell 被消费/创建/保留
-where：为什么这个动作合法
+signature: what action this is
+body: which Cells are consumed, created, or preserved
+where: why this action is valid
 ```
 
 The compact rule is:
 
-> 状态变化放明处，约束放 where。where 不应该偷偷干活。
+> Put state movement in the open and constraints in `where`. `where` should not
+> do hidden work.
 
 ## 2. Govern `assert`, `require`, And `invariant`
 
@@ -183,9 +185,9 @@ Governance rule:
 > Surface syntax may be mixed when it improves familiarity. Semantic roles must
 > not be mixed.
 
-Chinese shorthand:
+Short form:
 
-> 语法长得混一点可以，语义边界不能混。
+> Syntax may look familiar and mixed; semantic boundaries must not be mixed.
 
 ## 4. Prefer Formatter-Friendly Separator Rules
 
@@ -231,9 +233,9 @@ The compact rule is:
 
 > Blocks use newlines. Expressions use commas. Do not make both optional.
 
-Chinese shorthand:
+Short form:
 
-> block 靠换行，expression 内部靠逗号，不要两边都可选。
+> Blocks use newlines; expressions use commas. Do not make both optional.
 
 This policy helps the parser, formatter, syntax highlighter, snippets, and code
 review diffs. It also makes generated examples more stable.
@@ -334,9 +336,9 @@ conserve
 This vocabulary makes CellScript feel like it writes state-transition receipts,
 not merely contract functions.
 
-Chinese summary:
+Short summary:
 
-> 它不是写合约逻辑，而是在写“状态转移凭证”。
+> This is not merely contract logic; it writes state-transition receipts.
 
 ## Compatibility And Migration Guidance
 

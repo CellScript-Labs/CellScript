@@ -2,16 +2,20 @@
 name = "cellscript"
 version = "0.17.0"
 edition = "2021"
-rust-version = "1.85.0"
+rust-version = "1.92.0"
 autobins = false
 authors = ["CellScript Core Team"]
 description = "CellScript compiler for the Cell model"
 license = "MIT"
 repository = "https://github.com/a19q3/CellScript"
 exclude = [
+    ".audit-report*.md",
+    ".cap/",
     ".gitignore",
+    ".playwright-mcp/",
     ".rustfmt.toml",
     ".github/",
+    "cellscript-*.png",
     "docs/",
     "docs/wiki/",
     "editors/",
@@ -19,6 +23,7 @@ exclude = [
     "scripts/__pycache__/",
     "src/bin/",
     "tools/",
+    "website/",
 ]
 
 [[bin]]

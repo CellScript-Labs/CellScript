@@ -1,0 +1,15 @@
+{
+  "name": "replay_nonce_reject",
+  "description": "Intent re-uses a previously seen nonce (or a nonce that is not exactly old.nonce + 1). Must be rejected.",
+  "category": "negative",
+  "acceptance_criteria_covered": [4],
+  "inputs": {
+    "intent": { "nonce": 42 },
+    "old_cell": { "nonce": 42 }
+  },
+  "expected": {
+    "result": "rejected",
+    "failure_mode": "nonce_must_increment",
+    "notes": "Core replay protection test. Even with a valid signature, old nonce must be rejected."
+  }
+}

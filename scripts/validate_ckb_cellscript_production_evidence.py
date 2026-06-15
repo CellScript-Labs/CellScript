@@ -4,10 +4,24 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
+import subprocess
 from typing import Any
 
+
+SOURCE_PROVENANCE_SCHEMA = "cellscript-ckb-acceptance-source-provenance-v0.1"
+SOURCE_PROVENANCE_PATHS = [
+    "Cargo.lock",
+    "Cargo.toml",
+    "src",
+    "examples",
+    "scripts/cellscript_gate.sh",
+    "scripts/cellscript_ckb_release_gate.sh",
+    "scripts/ckb_cellscript_acceptance.sh",
+    "scripts/validate_ckb_cellscript_production_evidence.py",
+]
 
 EXPECTED_EXAMPLES = [
     "amm_pool.cell",
@@ -33,7 +47,7 @@ EXPECTED_LANGUAGE_EXAMPLES = [
     "v0_15_identity_lifecycle.cell",
     "v0_15_scoped_invariant.cell",
 ]
-EXPECTED_ACTION_COUNT = 43
+EXPECTED_ACTION_COUNT = 44
 EXPECTED_STATUS = "passed"
 EXPECTED_MODE = "production"
 EXPECTED_LOCK_SPEND_MATRIX = {
@@ -60,8 +74,9 @@ ACTION_RUN_KEYS = [
 ]
 
 EXPECTED_ACTIONS_BY_RUN_KEY = {
-    "token_action_runs": ["mint", "transfer_token", "burn", "merge"],
+    "token_action_runs": ["mint_with_authority", "transfer_token", "burn", "merge"],
     "nft_action_runs": [
+        "create_collection",
         "mint",
         "transfer",
         "create_listing",
@@ -96,7 +111,7 @@ EXPECTED_ACTIONS_BY_RUN_KEY = {
     ],
     "vesting_action_runs": ["create_vesting_config", "grant_vesting", "claim_vested", "revoke_grant"],
     "amm_action_runs": ["seed_pool", "swap_a_for_b", "add_liquidity", "remove_liquidity", "isqrt", "min"],
-    "launch_action_runs": ["launch_token", "simple_launch"],
+    "launch_action_runs": ["launch_token", "bootstrap_token"],
 }
 
 
@@ -138,6 +153,75 @@ def require_positive_int(value: Any, context: str) -> int:
 def require_bool(value: Any, context: str) -> bool:
     require(isinstance(value, bool), f"{context} must be a boolean, got {value!r}")
     return value
+
+
+def git_stdout(repo_root: Path, args: list[str]) -> str:
+    try:
+        return subprocess.check_output(["git", *args], cwd=repo_root, text=True).strip()
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise SystemExit(f"failed to query git source provenance in {repo_root}: {exc}") from exc
+
+
+def tracked_source_files(repo_root: Path) -> list[str]:
+    output = git_stdout(repo_root, ["ls-files", "--", *SOURCE_PROVENANCE_PATHS])
+    return [
+        line
+        for line in output.splitlines()
+        if line and (repo_root / line).is_file()
+    ]
+
+
+def file_sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def tracked_source_sha256(repo_root: Path, files: list[str]) -> str:
+    h = hashlib.sha256()
+    for rel in files:
+        h.update(rel.encode("utf-8"))
+        h.update(b"\0")
+        h.update(file_sha256(repo_root / rel).encode("ascii"))
+        h.update(b"\n")
+    return "0x" + h.hexdigest()
+
+
+def current_source_provenance(repo_root: Path) -> dict[str, Any]:
+    files = tracked_source_files(repo_root)
+    return {
+        "repo_commit": git_stdout(repo_root, ["rev-parse", "HEAD"]),
+        "git_dirty": bool(git_stdout(repo_root, ["status", "--porcelain", "--untracked-files=no"])),
+        "tracked_source_paths": SOURCE_PROVENANCE_PATHS,
+        "tracked_source_files": files,
+        "tracked_source_file_count": len(files),
+        "tracked_source_sha256": tracked_source_sha256(repo_root, files),
+        "acceptance_script_sha256": "0x" + file_sha256(repo_root / "scripts/ckb_cellscript_acceptance.sh"),
+        "validator_script_sha256": "0x" + file_sha256(repo_root / "scripts/validate_ckb_cellscript_production_evidence.py"),
+    }
+
+
+def validate_source_provenance(report: dict[str, Any], repo_root: Path) -> None:
+    provenance = report.get("source_provenance")
+    require(isinstance(provenance, dict), "source_provenance must be an object")
+    require_field(provenance, "schema", SOURCE_PROVENANCE_SCHEMA, "source_provenance")
+    require(isinstance(provenance.get("generated_at_utc"), str), "source_provenance.generated_at_utc must be a timestamp string")
+    require_bool(provenance.get("git_dirty"), "source_provenance.git_dirty")
+
+    current = current_source_provenance(repo_root)
+    for key in (
+        "repo_commit",
+        "git_dirty",
+        "tracked_source_paths",
+        "tracked_source_files",
+        "tracked_source_file_count",
+        "tracked_source_sha256",
+        "acceptance_script_sha256",
+        "validator_script_sha256",
+    ):
+        require_field(provenance, key, current[key], "source_provenance")
 
 
 def all_action_runs(report: dict[str, Any]) -> list[dict[str, Any]]:
@@ -486,6 +570,12 @@ def main() -> int:
     )
     parser.add_argument("report", type=Path, help="Path to ckb-cellscript-acceptance-report.json")
     parser.add_argument(
+        "--repo-root",
+        type=Path,
+        default=Path(__file__).resolve().parents[1],
+        help="CellScript checkout used to recompute source provenance. Defaults to this script's repository.",
+    )
+    parser.add_argument(
         "--compile-only",
         action="store_true",
         help="Only validate strict compile and scoped-entry production gates. This is not sufficient for external release.",
@@ -493,7 +583,9 @@ def main() -> int:
     args = parser.parse_args()
 
     report_path = args.report.resolve()
+    repo_root = args.repo_root.resolve()
     report = load_json(report_path)
+    validate_source_provenance(report, repo_root)
     validate_compile_gate(report, compile_only=args.compile_only)
     if not args.compile_only:
         validate_onchain_gate(report)
