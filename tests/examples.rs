@@ -379,6 +379,45 @@ fn docs_examples_cellscript_blocks_match_declared_compile_boundary() {
 }
 
 #[test]
+fn token_amm_bootstrap_docs_cover_builder_friction_boundary() {
+    let bootstrap =
+        std::fs::read_to_string(docs_example_path("token_amm_bootstrap.md")).expect("token/AMM bootstrap guide should be readable");
+    let bootstrap_text = bootstrap.split_whitespace().collect::<Vec<_>>().join(" ");
+    for needle in [
+        "`examples/token.cell` is the fungible-token state machine. It is not the genesis authority contract",
+        "Its `mint` action consumes an existing `MintAuthority` input Cell",
+        "launch_token` materialises the Pool and LP receipt topology directly",
+        "Do not rely on \"the first action runs on creation\" as a protocol rule",
+        "Cell-bound inputs and outputs are transaction Cells, not witness payload args",
+        "Strict v0.16 ProofPlan checks intentionally reject some aggregate and Pool obligations",
+    ] {
+        assert!(bootstrap_text.contains(needle), "bootstrap guide should contain `{needle}`");
+    }
+    for needle in [
+        "cellc entry-witness examples/launch.cell",
+        "cellc entry-witness examples/token.cell",
+        "cellc entry-witness examples/amm_pool.cell",
+        "./scripts/ckb_cellscript_acceptance.sh --bounded --stateful-scenarios",
+    ] {
+        assert!(bootstrap.contains(needle), "bootstrap guide should contain `{needle}`");
+    }
+
+    let flows = std::fs::read_to_string(
+        Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("docs").join("CELLSCRIPT_EXAMPLE_BUSINESS_FLOWS.md"),
+    )
+    .expect("business flow guide should be readable");
+    assert!(
+        flows.contains("[`docs/examples/token_amm_bootstrap.md`](examples/token_amm_bootstrap.md)"),
+        "business flow guide should link the bootstrap guide"
+    );
+    assert!(
+        flows.contains("Materialise Pool and LPReceipt outputs"),
+        "launch flow should describe direct Pool and LPReceipt output materialisation"
+    );
+    assert!(!flows.contains("Call seed_pool pattern"), "launch flow must not imply that launch_token calls amm_pool::seed_pool");
+}
+
+#[test]
 fn release_examples_are_free_of_placeholder_hashes_and_formatter_artifacts() {
     for example in BUNDLED_EXAMPLES {
         let path = example_path(example);

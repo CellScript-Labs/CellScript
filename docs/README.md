@@ -69,6 +69,10 @@ High-value active references include:
 `docs/examples/` contains focused example notes and matrices that support the
 bundled `.cell` examples. These are not release notes.
 
+- `docs/examples/token_amm_bootstrap.md` records the concrete token authority
+  bootstrap and AMM builder path for the bundled `launch`, `token`, and
+  `amm_pool` examples.
+
 ## Roadmap
 
 `roadmap/` is outside this directory and contains planning state. Roadmap files

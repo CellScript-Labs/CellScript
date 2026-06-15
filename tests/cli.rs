@@ -4152,6 +4152,116 @@ where
 }
 
 #[test]
+fn cellc_entry_witness_subcommand_encodes_bundled_token_amm_bootstrap_payloads() {
+    let examples = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples");
+    let launch = examples.join("launch.cell");
+    let token = examples.join("token.cell");
+    let amm_pool = examples.join("amm_pool.cell");
+    let address = "0x1111111111111111111111111111111111111111111111111111111111111111";
+    let distribution = format!("0x{}", "22".repeat(160));
+
+    let launch_output = cellc_command()
+        .arg("entry-witness")
+        .arg(&launch)
+        .arg("--target-profile")
+        .arg("ckb")
+        .arg("--action")
+        .arg("launch_token")
+        .arg("--arg")
+        .arg("0x4c41554e43483031")
+        .arg("--arg")
+        .arg("10000")
+        .arg("--arg")
+        .arg("1000")
+        .arg("--arg")
+        .arg("500")
+        .arg("--arg")
+        .arg("30")
+        .arg("--arg")
+        .arg(address)
+        .arg("--arg")
+        .arg(&distribution)
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert!(launch_output.status.success(), "stderr: {}", String::from_utf8_lossy(&launch_output.stderr));
+    let launch_stdout: serde_json::Value = serde_json::from_slice(&launch_output.stdout).unwrap();
+    assert_eq!(launch_stdout["status"], "ok");
+    assert_eq!(launch_stdout["entry"], "launch_token");
+    assert_eq!(launch_stdout["payload_args"], 7);
+    assert_eq!(launch_stdout["witness_size_bytes"], 234);
+    assert_eq!(launch_stdout["payload_params"][0], "symbol");
+    assert_eq!(launch_stdout["payload_params"][4], "fee_rate_bps");
+    assert_eq!(launch_stdout["payload_params"][6], "distribution");
+
+    let token_output = cellc_command()
+        .arg("entry-witness")
+        .arg(&token)
+        .arg("--target-profile")
+        .arg("ckb")
+        .arg("--action")
+        .arg("mint")
+        .arg("--arg")
+        .arg(address)
+        .arg("--arg")
+        .arg("25")
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert!(token_output.status.success(), "stderr: {}", String::from_utf8_lossy(&token_output.stderr));
+    let token_stdout: serde_json::Value = serde_json::from_slice(&token_output.stdout).unwrap();
+    assert_eq!(token_stdout["status"], "ok");
+    assert_eq!(token_stdout["entry"], "mint");
+    assert_eq!(token_stdout["payload_params"][0], "to");
+    assert_eq!(token_stdout["payload_params"][1], "amount");
+    assert_eq!(token_stdout["witness_size_bytes"], 48);
+
+    let seed_output = cellc_command()
+        .arg("entry-witness")
+        .arg(&amm_pool)
+        .arg("--target-profile")
+        .arg("ckb")
+        .arg("--action")
+        .arg("seed_pool")
+        .arg("--arg")
+        .arg("30")
+        .arg("--arg")
+        .arg(address)
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert!(seed_output.status.success(), "stderr: {}", String::from_utf8_lossy(&seed_output.stderr));
+    let seed_stdout: serde_json::Value = serde_json::from_slice(&seed_output.stdout).unwrap();
+    assert_eq!(seed_stdout["status"], "ok");
+    assert_eq!(seed_stdout["entry"], "seed_pool");
+    assert_eq!(seed_stdout["payload_params"][0], "fee_rate_bps");
+    assert_eq!(seed_stdout["payload_params"][1], "provider");
+    assert_eq!(seed_stdout["witness_size_bytes"], 42);
+
+    let swap_output = cellc_command()
+        .arg("entry-witness")
+        .arg(&amm_pool)
+        .arg("--target-profile")
+        .arg("ckb")
+        .arg("--action")
+        .arg("swap_a_for_b")
+        .arg("--arg")
+        .arg("2")
+        .arg("--arg")
+        .arg(address)
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert!(swap_output.status.success(), "stderr: {}", String::from_utf8_lossy(&swap_output.stderr));
+    let swap_stdout: serde_json::Value = serde_json::from_slice(&swap_output.stdout).unwrap();
+    assert_eq!(swap_stdout["status"], "ok");
+    assert_eq!(swap_stdout["entry"], "swap_a_for_b");
+    assert_eq!(swap_stdout["payload_params"][0], "min_output");
+    assert_eq!(swap_stdout["payload_params"][1], "to");
+    assert_eq!(swap_stdout["witness_size_bytes"], 48);
+}
+
+#[test]
 fn cellc_abi_subcommand_explains_entry_witness_layout() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();

@@ -16,7 +16,7 @@ example.
 | `examples/multisig.cell` | Threshold policy, proposal records, signatures-as-data, and lock-boundary predicates. |
 | `examples/vesting.cell` | Vesting grants, receipts, claim flow, and admin-boundary comments. |
 | `examples/amm_pool.cell` | Shared pool state, swap logic, liquidity receipts, and settlement effects. |
-| `examples/launch.cell` | Launch/pool composition patterns. |
+| `examples/launch.cell` | Mint-authority bootstrap and launch/pool composition patterns. |
 
 The top-level `examples/*.cell` files are the canonical bundled business
 source. They are both the clean reading surface and the source compiled by the
@@ -33,6 +33,8 @@ production action acceptance.
 
 For a visual business-flow map of every bundled example, see
 [`CELLSCRIPT_EXAMPLE_BUSINESS_FLOWS.md`](../CELLSCRIPT_EXAMPLE_BUSINESS_FLOWS.md).
+For a concrete token-to-AMM builder path with entry witness commands, see
+[`token_amm_bootstrap.md`](../examples/token_amm_bootstrap.md).
 For small reusable patterns drawn from the same ideas, see
 [Cookbook Recipes](https://github.com/a19q3/CellScript/wiki/Cookbook-Recipes).
 
@@ -82,7 +84,7 @@ resource Token has store, create, consume, replace, burn, relock {
     symbol: [u8; 8]
 }
 
-resource MintAuthority has store {
+resource MintAuthority has store, create, replace {
     token_symbol: [u8; 8]
     max_supply: u64
     minted: u64
@@ -90,7 +92,9 @@ resource MintAuthority has store {
 ```
 
 `Token` is the asset. `MintAuthority` is the state that limits how much can be
-minted.
+minted. The checked-in `examples/token.cell` declares `MintAuthority` with
+`store, create, replace`, because another action has to create the first
+authority Cell before `mint` can consume it.
 
 `mint` updates authority state and validates a proposed new token output:
 
@@ -112,6 +116,12 @@ where
 Read `auth_before` as the existing authority Cell and `auth_after` as the
 proposed output. The action signature names the input/output topology; the
 `require` guards are the field-level proof.
+
+This is the key bootstrap boundary: `mint` is not a genesis action. A builder
+must first create a real `MintAuthority` Cell, normally with
+`examples/launch.cell::simple_launch` or `examples/launch.cell::launch_token`,
+then pass that Cell as the runtime-bound `auth_before` input to
+`examples/token.cell::mint`.
 
 `transfer_token` consumes an input token and validates a proposed output
 under a new lock:

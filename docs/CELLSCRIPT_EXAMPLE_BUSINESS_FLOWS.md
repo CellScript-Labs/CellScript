@@ -20,6 +20,10 @@ run, committed, and measured with builder-generated CKB transactions. The report
 also records cycles, consensus transaction size, occupied capacity, malformed
 transaction rejection, and output-capacity sufficiency.
 
+For the concrete token-to-AMM bootstrap path, witness commands, and builder
+assumption checks, see
+[`docs/examples/token_amm_bootstrap.md`](examples/token_amm_bootstrap.md).
+
 Lock coverage now runs in the same production acceptance flow: all 17 bundled
 locks strict-compile under the CKB profile and are exercised with builder-backed
 local CKB valid-spend and invalid-spend transactions. The production report keeps
@@ -75,6 +79,10 @@ flowchart TD
 CKB acceptance status: all four actions are builder-backed and run on-chain.
 There are no lock entries in this example.
 
+Bootstrap note: `mint` requires an existing `MintAuthority` input Cell. In the
+bundled bootstrap path, that first authority is created by `launch.cell`;
+`token.cell` itself is not the genesis authority contract.
+
 ## `amm_pool.cell`
 
 Business purpose: a constant-product AMM pool with LP receipts and mutable pool
@@ -127,7 +135,7 @@ flowchart TD
     D --> E["Create MintAuthority output Cell"]
     E --> F["Create recipient Token outputs"]
     F --> G["Create pool seed Token"]
-    G --> H["Call seed_pool pattern"]
+    G --> H["Materialise Pool and LPReceipt outputs"]
     H --> I["Create Pool and LPReceipt outputs"]
 
     J["Simple launch parameters"] --> K["simple_launch"]
@@ -139,6 +147,10 @@ flowchart TD
 
 CKB acceptance status: both actions are builder-backed and run on-chain. There
 are no lock entries in this example.
+
+Bootstrap note: `launch_token` creates the first `MintAuthority` and may
+materialise a `Pool` plus `LPReceipt` directly. It does not call the
+`amm_pool.seed_pool` entry at runtime.
 
 ## `multisig.cell`
 

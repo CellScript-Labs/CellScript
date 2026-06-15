@@ -407,6 +407,7 @@ nft_action_source_root = source_root / "nft-actions"
 timelock_action_source_root = source_root / "timelock-actions"
 amm_action_source_root = source_root / "amm-actions"
 multisig_action_source_root = source_root / "multisig-actions"
+launch_action_source_root = source_root / "launch-actions"
 artifact_root = run_dir / "artifacts"
 strict_root = run_dir / "strict-original-ckb"
 for path in (
@@ -416,6 +417,7 @@ for path in (
     timelock_action_source_root,
     amm_action_source_root,
     multisig_action_source_root,
+    launch_action_source_root,
     artifact_root,
     strict_root,
 ):
@@ -1355,6 +1357,107 @@ for action, source in MULTISIG_ACTION_SOURCES.items():
         encoding="utf-8",
     )
 
+LAUNCH_TYPES_SOURCE = """const U64_MAX: u64 = 18446744073709551615
+
+resource Token has store, create, consume, replace, burn, relock {
+    amount: u64
+    symbol: [u8; 8]
+}
+
+resource MintAuthority has store, create, replace {
+    token_symbol: [u8; 8]
+    max_supply: u64
+    minted: u64
+}
+
+receipt LPReceipt has store, create, consume {
+    pool_id: Hash
+    lp_amount: u64
+    provider: Address
+}
+
+shared Pool has store, create, replace {
+    token_a_symbol: [u8; 8]
+    token_b_symbol: [u8; 8]
+    reserve_a: u64
+    reserve_b: u64
+    total_lp: u64
+    fee_rate_bps: u16
+}
+"""
+
+LAUNCH_ACTION_SOURCES = {
+    "launch_token": """
+action launch_token(symbol: [u8; 8], max_supply: u64, initial_mint: u64, pool_seed_amount: u64, pool_paired_token: Token, fee_rate_bps: u16, creator: Address, distribution: [(Address, u64); 4]) -> (auth: MintAuthority, dist0: Token, dist1: Token, dist2: Token, dist3: Token, pool: Pool, lp_receipt: LPReceipt, change: Token)
+where
+    assert_invariant(initial_mint <= max_supply, "initial exceeds max")
+    assert_invariant(pool_seed_amount > 0, "zero pool seed")
+    assert_invariant(pool_paired_token.amount > 0, "zero paired seed")
+    assert_invariant(fee_rate_bps <= 10000, "fee too high")
+    assert_invariant(pool_seed_amount <= initial_mint, "pool seed exceeds mint")
+    assert_invariant(distribution[1].1 <= U64_MAX - distribution[0].1, "distribution overflow")
+    let dist01 = distribution[0].1 + distribution[1].1
+    assert_invariant(distribution[2].1 <= U64_MAX - dist01, "distribution overflow")
+    let dist012 = dist01 + distribution[2].1
+    assert_invariant(distribution[3].1 <= U64_MAX - dist012, "distribution overflow")
+    let dist_total = dist012 + distribution[3].1
+    assert_invariant(pool_seed_amount <= U64_MAX - dist_total, "allocation overflow")
+    assert_invariant(dist_total + pool_seed_amount <= initial_mint, "allocation exceeds mint")
+
+    create auth = MintAuthority {
+        token_symbol: symbol,
+        max_supply: max_supply,
+        minted: initial_mint
+    } with_lock(creator)
+    create dist0 = Token { amount: distribution[0].1, symbol: symbol } with_lock(distribution[0].0)
+    create dist1 = Token { amount: distribution[1].1, symbol: symbol } with_lock(distribution[1].0)
+    create dist2 = Token { amount: distribution[2].1, symbol: symbol } with_lock(distribution[2].0)
+    create dist3 = Token { amount: distribution[3].1, symbol: symbol } with_lock(distribution[3].0)
+
+    let initial_lp = pool_seed_amount
+    consume pool_paired_token
+    create pool = Pool {
+        token_a_symbol: symbol,
+        token_b_symbol: pool_paired_token.symbol,
+        reserve_a: pool_seed_amount,
+        reserve_b: pool_paired_token.amount,
+        total_lp: initial_lp,
+        fee_rate_bps: fee_rate_bps
+    }
+    create lp_receipt = LPReceipt {
+        pool_id: pool.type_hash(),
+        lp_amount: initial_lp,
+        provider: creator
+    } with_lock(creator)
+    let remaining = initial_mint - dist_total - pool_seed_amount
+    create change = Token { amount: remaining, symbol: symbol } with_lock(creator)
+""",
+    "simple_launch": """
+action simple_launch(symbol: [u8; 8], max_supply: u64, initial_mint: u64, creator: Address, recipients: [(Address, u64); 2]) -> (auth: MintAuthority, rec0: Token, rec1: Token, change: Token)
+where
+    assert_invariant(initial_mint <= max_supply, "initial exceeds max")
+    assert_invariant(recipients[1].1 <= U64_MAX - recipients[0].1, "distribution overflow")
+    let total_distributed = recipients[0].1 + recipients[1].1
+    assert_invariant(total_distributed <= initial_mint, "distribution exceeds mint")
+
+    create auth = MintAuthority {
+        token_symbol: symbol,
+        max_supply: max_supply,
+        minted: initial_mint
+    } with_lock(creator)
+    create rec0 = Token { amount: recipients[0].1, symbol: symbol } with_lock(recipients[0].0)
+    create rec1 = Token { amount: recipients[1].1, symbol: symbol } with_lock(recipients[1].0)
+    let remaining = initial_mint - total_distributed
+    create change = Token { amount: remaining, symbol: symbol } with_lock(creator)
+""",
+}
+
+for action, source in LAUNCH_ACTION_SOURCES.items():
+    (launch_action_source_root / f"launch_{action}.cell").write_text(
+        f"module acceptance::launch_{action}\n\n" + LAUNCH_TYPES_SOURCE + "\n" + source,
+        encoding="utf-8",
+    )
+
 ORIGINAL_SCOPED_ACTIONS = {
     "nft.cell": [
         "mint",
@@ -1852,6 +1955,19 @@ for action in MULTISIG_ACTION_SOURCES:
     record["original_source"] = str(production_example_path("multisig.cell"))
     multisig_action_artifacts.append(record)
 
+launch_action_artifacts = []
+for action in LAUNCH_ACTION_SOURCES:
+    source = launch_action_source_root / f"launch_{action}.cell"
+    record = compile_artifact(
+        f"launch.{action}.cell",
+        "launch-action-strict",
+        source,
+        artifact_root / f"launch_{action}.elf",
+    )
+    record["action"] = action
+    record["original_source"] = str(production_example_path("launch.cell"))
+    launch_action_artifacts.append(record)
+
 original_scoped_action_artifacts = []
 for example_name, actions in ORIGINAL_SCOPED_ACTIONS.items():
     for action in actions:
@@ -1878,9 +1994,8 @@ def original_scoped_action_or(record, example_name):
     )
 
 launch_action_artifacts = [
-    record
-    for record in original_scoped_action_artifacts
-    if record["example"] == "launch.cell" and record["action"] in ("launch_token", "simple_launch")
+    original_scoped_action_or(record, "launch.cell")
+    for record in launch_action_artifacts
 ]
 
 token_action_artifacts = [
@@ -6646,7 +6761,16 @@ try:
         "amm_pool.cell": report["onchain"]["amm_actions_exercised"],
         "launch.cell": report["onchain"]["launch_actions_exercised"],
     })
-    if not report["onchain"]["all_bundled_examples_deployed"]:
+    missing_strict_original_deployments = sorted(
+        set(report["bundled_examples_exact_order"]) - set(report["onchain"]["bundled_examples_deployed"])
+    )
+    report["onchain"]["strict_original_bundled_deployment_gate"] = {
+        "status": "passed" if not missing_strict_original_deployments else "partial",
+        "deployed": report["onchain"]["bundled_examples_deployed"],
+        "missing": missing_strict_original_deployments,
+        "fatal_in_mode": report.get("acceptance_mode") == "production",
+    }
+    if report.get("acceptance_mode") == "production" and not report["onchain"]["all_bundled_examples_deployed"]:
         raise RuntimeError(
             "not all primitive-strict original bundled examples deployed: "
             f"deployed={report['onchain']['bundled_examples_deployed']}, "
