@@ -256,7 +256,7 @@ over-broad same-TypeHash absence claims.
 For one-to-one state updates, make both cells visible:
 
 ```cellscript
-action mint(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after: MintAuthority, token: Token) {
+action mint_with_authority(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after: MintAuthority, token: Token) {
     transition auth_before -> auth_after
 
     verification

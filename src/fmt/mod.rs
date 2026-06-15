@@ -550,26 +550,14 @@ impl Formatter {
                 let fields = preserve.fields.join("\n");
                 format!("preserve {} from {} {{\n{}\n}}", preserve.output_name, preserve.input_name, fields)
             }
-            Expr::Block(stmts) => {
-                let inner = stmts
-                    .iter()
-                    .map(|stmt| {
-                        let mut formatter = Formatter::new(self.config.clone());
-                        formatter.indent_level = 0;
-                        formatter.format_stmt(stmt);
-                        formatter.output.trim().to_string()
-                    })
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                format!("{{ {} }}", inner)
-            }
+            Expr::Block(stmts) => format!("{{ {} }}", self.format_expr_block_body(stmts)),
             Expr::Tuple(items) => format!("({})", items.iter().map(|item| self.format_expr(item)).collect::<Vec<_>>().join(", ")),
             Expr::Array(items) => format!("[{}]", items.iter().map(|item| self.format_expr(item)).collect::<Vec<_>>().join(", ")),
             Expr::If(if_expr) => format!(
                 "if {} {{ {} }} else {{ {} }}",
                 self.format_expr(&if_expr.condition),
-                self.format_expr(&if_expr.then_branch),
-                self.format_expr(&if_expr.else_branch)
+                self.format_branch_expr_body(&if_expr.then_branch),
+                self.format_branch_expr_body(&if_expr.else_branch)
             ),
             Expr::Cast(cast) => format!("{} as {}", self.format_expr(&cast.expr), format_type(&cast.ty)),
             Expr::Range(range) => format!("{}..{}", self.format_expr(&range.start), self.format_expr(&range.end)),
@@ -598,6 +586,26 @@ impl Formatter {
                 }
             }
         }
+    }
+
+    fn format_branch_expr_body(&self, expr: &Expr) -> String {
+        match expr {
+            Expr::Block(stmts) => self.format_expr_block_body(stmts),
+            expr => self.format_expr(expr),
+        }
+    }
+
+    fn format_expr_block_body(&self, stmts: &[Stmt]) -> String {
+        stmts
+            .iter()
+            .map(|stmt| {
+                let mut formatter = Formatter::new(self.config.clone());
+                formatter.indent_level = 0;
+                formatter.format_stmt(stmt);
+                formatter.output.trim().to_string()
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 
     fn format_field_initializer(&self, name: &str, value: &Expr) -> String {
@@ -878,6 +886,29 @@ action mint(amount: u64, symbol: [u8; 8]) -> token: Token {
         let formatted = format_default(&module).unwrap();
 
         assert!(formatted.contains("create token = Token { amount, symbol }"), "unexpected formatted source:\n{}", formatted);
+    }
+
+    #[test]
+    fn format_if_expression_branch_blocks_are_idempotent() {
+        let source = r#"
+module demo
+
+action choose(flag: bool) -> u64 {
+    verification
+        let pair = if flag { (1, 2) } else { (3, 4) }
+        return pair.0
+}
+"#;
+        let tokens = lexer::lex(source).unwrap();
+        let module = parser::parse(&tokens).unwrap();
+        let formatted = format_default(&module).unwrap();
+        let tokens2 = lexer::lex(&formatted).unwrap();
+        let module2 = parser::parse(&tokens2).unwrap();
+        let formatted2 = format_default(&module2).unwrap();
+
+        assert_eq!(formatted, formatted2);
+        assert!(formatted.contains("let pair = if flag { (1, 2) } else { (3, 4) }"), "unexpected formatted source:\n{}", formatted);
+        assert!(!formatted.contains("{{"), "unexpected formatted source:\n{}", formatted);
     }
 
     #[test]

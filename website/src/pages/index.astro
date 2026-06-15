@@ -1,0 +1,690 @@
+---
+import "../styles/global.css";
+import { exampleGroups, heroExamples, links, modelCards, tools, workflowSteps } from "../data/site";
+import { defaultLocale, translations } from "../i18n/translations";
+
+const locale = defaultLocale;
+const t = translations[locale];
+const getExampleItemCopy = (groupId: string, itemId: string) =>
+  (t.examples.groups as Record<string, { items: Record<string, readonly [string, string]> }>)[groupId].items[itemId];
+
+const escapeHtml = (value: string) =>
+  value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+
+const tokenGroups = {
+  keyword: new Set(["module", "use", "has", "action", "lock", "fn", "where", "const", "struct", "enum", "invariant"]),
+  cellKind: new Set(["resource", "shared", "receipt", "flow"]),
+  cellEffect: new Set(["consume", "create", "destroy", "preserve", "create_unique", "destroy_unique", "destroy_singleton_type", "claim", "settle", "launch", "read_ref"]),
+  assertion: new Set(["assert", "assert_invariant", "assert_sum", "assert_delta", "assert_unique", "require"]),
+  control: new Set(["if", "else", "for", "in", "while", "match", "return", "let", "mut", "ref", "transition", "read", "protected", "witness", "lock_args"]),
+  builtin: new Set(["u8", "u16", "u32", "u64", "u128", "bool", "Address", "Hash", "String", "Vec", "env", "witness"]),
+  capability: new Set(["store", "create", "consume", "replace", "burn", "relock", "read_ref", "transfer", "destroy", "retarget_type"]),
+};
+
+const classifyCellToken = (token: string) => {
+  if (token.startsWith("//")) return "comment";
+  if (token.startsWith("\"")) return "string";
+  if (/^\d+$/.test(token)) return "number";
+  if (token === "->" || token === "=>") return "arrow";
+  if (/^[{}()[\];:,.<>+\-*/=&|!]$/.test(token) || ["==", "!=", "<=", ">=", "&&", "||"].includes(token)) return "operator";
+  const base = token.includes("::") ? token.split("::").at(-1) ?? token : token;
+  if (tokenGroups.cellKind.has(base)) return "cell-kind";
+  if (tokenGroups.cellEffect.has(base)) return "cell-effect";
+  if (tokenGroups.assertion.has(base)) return "assert";
+  if (tokenGroups.control.has(base)) return "control";
+  if (tokenGroups.builtin.has(base)) return "builtin-type";
+  if (tokenGroups.capability.has(base)) return "capability";
+  if (tokenGroups.keyword.has(base)) return "keyword";
+  return "";
+};
+
+const renderLine = (line: string) => {
+  const tokenPattern = /\/\/.*$|"(?:[^"\\]|\\.)*"|->|=>|==|!=|<=|>=|&&|\|\||[A-Za-z_][A-Za-z0-9_:]*|\d+|[{}()[\];:,.<>+\-*/=&|!]/g;
+  let rendered = "";
+  let cursor = 0;
+
+  for (const match of line.matchAll(tokenPattern)) {
+    const token = match[0];
+    const index = match.index ?? 0;
+    rendered += escapeHtml(line.slice(cursor, index));
+    const tokenClass = classifyCellToken(token);
+    rendered += tokenClass
+      ? `<span class="token-${tokenClass}">${escapeHtml(token)}</span>`
+      : escapeHtml(token);
+    cursor = index + token.length;
+  }
+
+  return rendered + escapeHtml(line.slice(cursor));
+};
+
+---
+
+<!doctype html>
+<html lang={locale}>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="description" content={t.meta.description} data-i18n-content="meta.description" />
+    <link rel="icon" href={`${import.meta.env.BASE_URL}cellscript-logo.png`} />
+    <title data-i18n="meta.title">{t.meta.title}</title>
+    <script is:inline>
+      (() => {
+        try {
+          const storedTheme = localStorage.getItem("cellscript-theme");
+          const storedLocale = localStorage.getItem("cellscript-locale");
+          document.documentElement.dataset.theme = storedTheme === "light" || storedTheme === "dark" ? storedTheme : "light";
+          document.documentElement.dataset.locale = storedLocale === "zh" ? "zh" : "en";
+          document.documentElement.lang = document.documentElement.dataset.locale;
+        } catch {
+          document.documentElement.dataset.theme = "light";
+          document.documentElement.dataset.locale = "en";
+          document.documentElement.lang = "en";
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <header class="site-header">
+      <nav class="nav" aria-label={t.nav.primary} data-i18n-aria-label="nav.primary">
+        <a class="brand" href="#top" aria-label={t.nav.home} data-i18n-aria-label="nav.home">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <span>CellScript</span>
+        </a>
+        <div class="nav-links">
+          <a class="nav-link" href={links.docs}>
+            <svg viewBox="0 0 20 20" aria-hidden="true">
+              <path d="M5 3.5h8.5L16 6v12H5z" />
+              <path d="M13.5 3.5V6H16M7.5 9h5M7.5 12h5M7.5 15h3" />
+            </svg>
+            <span data-i18n="nav.docs">{t.nav.docs}</span>
+          </a>
+          <a class="nav-link" href={links.source}>
+            <svg viewBox="0 0 20 20" aria-hidden="true">
+              <path d="M7.5 6.5 4 10l3.5 3.5M12.5 6.5 16 10l-3.5 3.5M11 4.5 9 15.5" />
+            </svg>
+            <span data-i18n="nav.source">{t.nav.source}</span>
+          </a>
+          <button class="nav-link nav-link-disabled" type="button" disabled aria-label={t.nav.registryDisabledAria} data-i18n-aria-label="nav.registryDisabledAria">
+            <svg viewBox="0 0 20 20" aria-hidden="true">
+              <path d="M4.5 6.5c0-1.38 2.46-2.5 5.5-2.5s5.5 1.12 5.5 2.5S13.04 9 10 9 4.5 7.88 4.5 6.5Z" />
+              <path d="M4.5 6.5v7c0 1.38 2.46 2.5 5.5 2.5s5.5-1.12 5.5-2.5v-7M4.5 10c0 1.38 2.46 2.5 5.5 2.5s5.5-1.12 5.5-2.5" />
+            </svg>
+            <span data-i18n="nav.registry">{t.nav.registry}</span>
+          </button>
+          <button class="language-toggle" type="button" aria-label={t.language.aria} data-i18n-aria-label="language.aria" data-language-toggle>
+            <span data-language-label data-i18n="language.switchTo">{t.language.switchTo}</span>
+            <span class="language-short" data-i18n="language.shortSwitch">{t.language.shortSwitch}</span>
+          </button>
+          <button class="theme-toggle" type="button" aria-label={t.theme.switchToDark} aria-pressed="false" data-theme-toggle>
+            <span class="theme-toggle-track" aria-hidden="true"><span class="theme-toggle-thumb"></span></span>
+            <span data-theme-label>{t.theme.dark}</span>
+          </button>
+        </div>
+      </nav>
+    </header>
+
+    <main id="top" class="page">
+      <section class="hero" aria-labelledby="hero-title">
+        <div class="hero-aurora" aria-hidden="true">
+          <span></span>
+          <span></span>
+          <span></span>
+        </div>
+        <div class="hero-copy">
+          <h1 id="hero-title" class="shiny-text" aria-label={t.hero.title}>{t.hero.title}</h1>
+          <p data-i18n="hero.subtitle">{t.hero.subtitle}</p>
+          <div class="hero-actions">
+            <a class="button primary" href="#getting-started" data-i18n="hero.getStarted">{t.hero.getStarted}</a>
+            <a class="button" href="#core-model" data-i18n="hero.coreModel">{t.hero.coreModel}</a>
+          </div>
+          <dl class="hero-ledger" aria-label={t.hero.ledgerLabel} data-i18n-aria-label="hero.ledgerLabel">
+            <div><dt data-i18n="hero.ledger.target.0">{t.hero.ledger.target[0]}</dt><dd data-i18n="hero.ledger.target.1">{t.hero.ledger.target[1]}</dd></div>
+            <div><dt data-i18n="hero.ledger.model.0">{t.hero.ledger.model[0]}</dt><dd data-i18n="hero.ledger.model.1">{t.hero.ledger.model[1]}</dd></div>
+            <div><dt data-i18n="hero.ledger.output.0">{t.hero.ledger.output[0]}</dt><dd data-i18n="hero.ledger.output.1">{t.hero.ledger.output[1]}</dd></div>
+          </dl>
+        </div>
+
+        <div class="code-shell spotlight-card" data-code-tabs>
+          <div class="code-head">
+            <span><span class="code-dot"></span><span data-file-label>{heroExamples[0].file}</span></span>
+          </div>
+          <div class="tabbar" role="tablist" aria-label={t.hero.examplesLabel} data-i18n-aria-label="hero.examplesLabel">
+            {heroExamples.map((example, index) => (
+              <button type="button" role="tab" aria-selected={index === 0 ? "true" : "false"} aria-controls={`panel-${example.id}`} id={`tab-${example.id}`} data-tab={example.id}>
+                <span data-i18n={`hero.exampleLabels.${example.id}`}>{t.hero.exampleLabels[example.id]}</span>
+              </button>
+            ))}
+          </div>
+          <select class="mobile-tabs" aria-label={t.hero.chooseExample} data-i18n-aria-label="hero.chooseExample" data-mobile-tabs>
+            {heroExamples.map((example) => <option value={example.id} data-i18n={`hero.exampleLabels.${example.id}`}>{t.hero.exampleLabels[example.id]}</option>)}
+          </select>
+          <div class="code-stage">
+            {heroExamples.map((example, index) => (
+              <pre class:list={["code-panel", index === 0 && "active"]} id={`panel-${example.id}`} role="tabpanel" aria-labelledby={`tab-${example.id}`} data-panel={example.id} data-file={example.file} data-command={example.command}>{example.lines.map((line, lineIndex) => (
+                <span class="line"><span class="ln">{lineIndex + 1}</span><span class="src" set:html={renderLine(line)} /></span>
+              ))}</pre>
+            ))}
+          </div>
+          <div class="shell-line"><span class="prompt">$</span><span data-command-label>{heroExamples[0].command}</span></div>
+        </div>
+      </section>
+
+      <section class="section start-section" id="getting-started" aria-labelledby="start">
+        <h2 class="section-title" id="start" data-i18n="sections.gettingStarted">{t.sections.gettingStarted}</h2>
+        <div class="steps">
+          {t.start.steps.map(([label, command], index) => (
+            <article class="step">
+              <span class="step-num">{index + 1}</span>
+              <h3 data-i18n={`start.steps.${index}.0`}>{label}</h3>
+              <p><code data-i18n={`start.steps.${index}.1`}>{command}</code></p>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section class="section workflow-section" aria-labelledby="workflow">
+        <h2 class="section-title" id="workflow" data-i18n="sections.workflow">{t.sections.workflow}</h2>
+        <div class="workflow-board">
+          <div class="workflow-flow" aria-label={t.workflow.aria} data-i18n-aria-label="workflow.aria">
+            {workflowSteps.map(({ id, icon }, index) => (
+              <>
+                <article class="workflow-step">
+                  <div class:list={["workflow-icon", `workflow-icon-${icon}`]} aria-hidden="true">
+                    {icon === "source" && (
+                      <svg viewBox="0 0 88 88" role="img">
+                        <path d="M9 22h50l19 17v43H9z" />
+                        <path d="M59 22v18h19" />
+                        <text x="22" y="57">.cell</text>
+                      </svg>
+                    )}
+                    {icon === "parse" && (
+                      <svg viewBox="0 0 88 88" role="img">
+                        <rect x="14" y="14" width="60" height="60" rx="8" />
+                        <path d="M44 25 61 35v19L44 64 27 54V35z" />
+                        <path d="M44 25v19l17-9M44 44 27 35M44 44v20" />
+                      </svg>
+                    )}
+                    {icon === "metadata" && (
+                      <svg viewBox="0 0 88 88" role="img">
+                        <rect x="17" y="10" width="54" height="68" rx="7" />
+                        <rect x="29" y="25" width="9" height="9" rx="1.5" />
+                        <path d="M45 29h18M45 44h18M45 59h18" />
+                        <rect x="29" y="40" width="9" height="9" rx="1.5" />
+                        <rect x="29" y="55" width="9" height="9" rx="1.5" />
+                      </svg>
+                    )}
+                    {icon === "riscv" && (
+                      <svg viewBox="0 0 88 88" role="img">
+                        <rect x="27" y="27" width="34" height="34" rx="4" />
+                        <rect x="35" y="35" width="18" height="18" rx="3" />
+                        <path d="M18 32h9M18 44h9M18 56h9M61 32h9M61 44h9M61 56h9M32 18v9M44 18v9M56 18v9M32 61v9M44 61v9M56 61v9" />
+                      </svg>
+                    )}
+                    {icon === "elf" && (
+                      <svg viewBox="0 0 88 88" role="img">
+                        <path d="M9 22h50l19 17v43H9z" />
+                        <path d="M59 22v18h19" />
+                        <text x="29" y="57">.elf</text>
+                      </svg>
+                    )}
+                  </div>
+                  <h3 data-i18n={`workflow.steps.${id}.0`}>{t.workflow.steps[id][0]}</h3>
+                  {t.workflow.steps[id][1] && <p data-i18n={`workflow.steps.${id}.1`}>{t.workflow.steps[id][1]}</p>}
+                </article>
+                {index < workflowSteps.length - 1 && (
+                  <span class="workflow-arrow" aria-hidden="true">
+                    <svg viewBox="0 0 36 16">
+                      <path d="M2 8h29M24 2l7 6-7 6" />
+                    </svg>
+                  </span>
+                )}
+              </>
+            ))}
+          </div>
+          <aside class="workflow-checks" aria-label={t.workflow.buildAria} data-i18n-aria-label="workflow.buildAria">
+            <h3 data-i18n="workflow.buildForCkb">{t.workflow.buildForCkb}</h3>
+            <ul>
+              {t.workflow.checks.map((check, index) => (
+                <li>
+                  <svg viewBox="0 0 18 18" aria-hidden="true"><path d="m3 9.5 4 4L15 4" /></svg>
+                  <span data-i18n={`workflow.checks.${index}`}>{check}</span>
+                </li>
+              ))}
+            </ul>
+          </aside>
+        </div>
+      </section>
+
+      <section class="section model-section" aria-labelledby="core-model">
+        <h2 class="section-title" id="core-model" data-i18n="sections.coreModel">{t.sections.coreModel}</h2>
+        <p class="lead" data-i18n="model.lead">{t.model.lead}</p>
+        <p class="boundary-note" data-i18n="model.boundary">{t.model.boundary}</p>
+        <div class="model-console" data-model-tabs>
+          <div class="model-tabs" role="tablist" aria-label={t.model.tabsAria} data-i18n-aria-label="model.tabsAria">
+            {modelCards.map((card, index) => (
+              <button
+                type="button"
+                role="tab"
+                aria-selected={index === 0 ? "true" : "false"}
+                aria-controls={`model-panel-${index}`}
+                id={`model-tab-${index}`}
+                data-model-tab={String(index)}
+              >
+                <span>{card.name}</span>
+              </button>
+            ))}
+          </div>
+          <div class="model-panels">
+            {modelCards.map((card, index) => (
+              <article
+                class:list={["model-panel", index === 0 && "active"]}
+                role="tabpanel"
+                id={`model-panel-${index}`}
+                aria-labelledby={`model-tab-${index}`}
+                data-model-panel={String(index)}
+              >
+                <div>
+                  <p class="model-summary" data-i18n={`model.cards.${card.id}`}>{t.model.cards[card.id]}</p>
+                </div>
+                <div class="model-code-block">
+                  <div class="model-code-head">
+                    <span data-i18n="model.exampleExcerpt">{t.model.exampleExcerpt}</span>
+                    <span>{card.source}</span>
+                  </div>
+                  <pre class="mini-code">{card.code}</pre>
+                </div>
+              </article>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section class="section assurance-section" aria-labelledby="assurance">
+        <div class="section-copy">
+          <h2 class="section-title" id="assurance" data-i18n="sections.assurance">{t.sections.assurance}</h2>
+          <p class="lead" data-i18n="assurance.lead">{t.assurance.lead}</p>
+        </div>
+        <div class="assurance-grid">
+          <article class="assurance-panel">
+            <div class="assurance-summary" aria-label={t.assurance.summaryAria} data-i18n-aria-label="assurance.summaryAria">
+              {Object.entries(t.assurance.summary).map(([id, [label, value, detail]]) => (
+                <article>
+                  <span data-i18n={`assurance.summary.${id}.0`}>{label}</span>
+                  <strong data-i18n={`assurance.summary.${id}.1`}>{value}</strong>
+                  <p data-i18n={`assurance.summary.${id}.2`}>{detail}</p>
+                </article>
+              ))}
+            </div>
+            <details class="metadata-disclosure" open>
+              <summary data-i18n="assurance.metadataExcerpt">{t.assurance.metadataExcerpt}</summary>
+              <span class="metadata-comment"># <span data-i18n="assurance.metadataComment">{t.assurance.metadataComment}</span></span>
+              <pre class="metadata-panel">{`{
+  "metadata_schema_version": 42,
+  "module": "cellscript::vesting",
+  "target_profile": "ckb",
+  "types": {
+    "VestingConfig": { "kind": "shared", "capabilities": ["store", "create", "read_ref"] },
+    "VestingGrant": { "kind": "receipt", "flow": "Granted -> Claimable -> FullyClaimed" }
+  },
+  "actions": [{
+    "name": "claim_vested",
+    "effect_class": "Mutating",
+    "consume_set": ["grant"],
+    "create_set": ["tokens", "updated_grant"],
+    "ckb_runtime_features": ["current_timepoint"]
+  }],
+  "proof_plan": {
+    "status": "review evidence",
+    "limit": "sidecar provenance must be checked outside the compiler"
+  }
+}`}</pre>
+            </details>
+          </article>
+        </div>
+      </section>
+
+      <section class="section tooling-section" aria-labelledby="tooling">
+        <h2 class="section-title" id="tooling" data-i18n="sections.tooling">{t.sections.tooling}</h2>
+        <div class="tooling-console" data-tool-tabs>
+          <div class="tool-tabs" role="tablist" aria-label={t.tooling.tabsAria} data-i18n-aria-label="tooling.tabsAria">
+            {tools.map((tool, index) => (
+              <button
+                type="button"
+                role="tab"
+                aria-selected={index === 0 ? "true" : "false"}
+                aria-controls={`tool-panel-${index}`}
+                id={`tool-tab-${index}`}
+                data-tool-tab={String(index)}
+              >
+                <code>cellc {tool.name}</code>
+                <span data-i18n={`tooling.tools.${tool.id}.label`}>{t.tooling.tools[tool.id].label}</span>
+              </button>
+            ))}
+          </div>
+          <div class="tool-panels">
+            {tools.map((tool, index) => (
+              <article
+                class:list={["tool-panel", index === 0 && "active"]}
+                role="tabpanel"
+                id={`tool-panel-${index}`}
+                aria-labelledby={`tool-tab-${index}`}
+                data-tool-panel={String(index)}
+              >
+                <div class="tool-copy">
+                  <span data-i18n="tooling.when">{t.tooling.when}</span>
+                  <p data-i18n={`tooling.tools.${tool.id}.when`}>{t.tooling.tools[tool.id].when}</p>
+                  <span data-i18n="tooling.output">{t.tooling.output}</span>
+                  <p data-i18n={`tooling.tools.${tool.id}.output`}>{t.tooling.tools[tool.id].output}</p>
+                </div>
+                <div class="tool-command">
+                  <code>{tool.command}</code>
+                </div>
+              </article>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section class="section" aria-labelledby="examples">
+        <h2 class="section-title" id="examples" data-i18n="sections.examples">{t.sections.examples}</h2>
+        <div class="example-browser" data-example-tabs>
+          <div class="example-tabs" role="tablist" aria-label={t.examples.tabsAria} data-i18n-aria-label="examples.tabsAria">
+            {exampleGroups.map((group, index) => (
+              <button
+                type="button"
+                role="tab"
+                aria-selected={index === 0 ? "true" : "false"}
+                aria-controls={`example-panel-${group.id}`}
+                id={`example-tab-${group.id}`}
+                data-example-tab={group.id}
+              >
+                <span data-i18n={`examples.groups.${group.id}.label`}>{t.examples.groups[group.id].label}</span>
+                <small><span>{group.items.length}</span> <span data-i18n="examples.files">{t.examples.files}</span></small>
+              </button>
+            ))}
+          </div>
+          <div class="example-panels">
+            {exampleGroups.map((group, index) => (
+              <article
+                class:list={["example-panel", index === 0 && "active"]}
+                id={`example-panel-${group.id}`}
+                role="tabpanel"
+                aria-labelledby={`example-tab-${group.id}`}
+                data-example-panel={group.id}
+              >
+                <div class="example-panel-head">
+                  <p data-i18n={`examples.groups.${group.id}.summary`}>{t.examples.groups[group.id].summary}</p>
+                  <a href={links.examples} data-i18n="examples.openDirectory">{t.examples.openDirectory}</a>
+                </div>
+                <div class="examples-grid">
+                  {group.items.map(({ path, id, tags }) => (
+                    <a class="example-card" href={`${links.source}/blob/main/${path}`}>
+                      <h3 data-i18n={`examples.groups.${group.id}.items.${id}.0`}>{getExampleItemCopy(group.id, id)[0]}</h3>
+                      <p data-i18n={`examples.groups.${group.id}.items.${id}.1`}>{getExampleItemCopy(group.id, id)[1]}</p>
+                      <span class="example-tags">
+                        {tags.map((tag) => <span>{tag}</span>)}
+                      </span>
+                    </a>
+                  ))}
+                </div>
+              </article>
+            ))}
+          </div>
+        </div>
+      </section>
+
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        <div class="footer-copy">
+          <a class="brand" href="#top"><span class="brand-mark" aria-hidden="true"></span><span>CellScript</span></a>
+          <p data-i18n="footer.copy">{t.footer.copy}</p>
+        </div>
+        <div class="footer-links">
+          <a href={links.wiki} data-i18n="footer.docs">{t.footer.docs}</a>
+          <a href={links.docs} data-i18n="footer.spec">{t.footer.spec}</a>
+          <a href={links.examples} data-i18n="footer.examples">{t.footer.examples}</a>
+          <a href={links.source} data-i18n="footer.source">{t.footer.source}</a>
+        </div>
+      </div>
+    </footer>
+
+    <script is:inline define:vars={{ i18n: translations, initialLocale: locale }}>
+      window.__CELLSCRIPT_I18N__ = i18n;
+      window.__CELLSCRIPT_DEFAULT_LOCALE__ = initialLocale;
+    </script>
+
+    <script>
+      const i18nMessages = (window as any).__CELLSCRIPT_I18N__;
+      const defaultLocaleName = (window as any).__CELLSCRIPT_DEFAULT_LOCALE__ ?? "en";
+      const languageTransitionMs = 150;
+      const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+      const delay = (duration: number) => new Promise((resolve) => window.setTimeout(resolve, duration));
+
+      const readLocale = () => document.documentElement.dataset.locale === "zh" ? "zh" : defaultLocaleName;
+      const getMessage = (path: string, locale = readLocale()) => {
+        return path.split(".").reduce((value, segment) => value?.[segment], i18nMessages?.[locale]);
+      };
+      const applyLocale = (locale: string) => {
+        const nextLocale = locale === "zh" ? "zh" : "en";
+        document.documentElement.dataset.locale = nextLocale;
+        document.documentElement.lang = nextLocale;
+        document.querySelectorAll<HTMLElement>("[data-i18n]").forEach((element) => {
+          const value = getMessage(element.dataset.i18n ?? "", nextLocale);
+          if (typeof value === "string") element.textContent = value;
+        });
+        document.querySelectorAll<HTMLElement>("[data-i18n-aria-label]").forEach((element) => {
+          const value = getMessage(element.dataset.i18nAriaLabel ?? "", nextLocale);
+          if (typeof value === "string") element.setAttribute("aria-label", value);
+        });
+        document.querySelectorAll<HTMLMetaElement>("[data-i18n-content]").forEach((element) => {
+          const value = getMessage(element.dataset.i18nContent ?? "", nextLocale);
+          if (typeof value === "string") element.setAttribute("content", value);
+        });
+        const languageLabel = document.querySelector<HTMLElement>("[data-language-label]");
+        const languageToggle = document.querySelector<HTMLButtonElement>("[data-language-toggle]");
+        if (languageLabel) languageLabel.textContent = getMessage("language.switchTo", nextLocale) ?? "";
+        if (languageToggle) languageToggle.setAttribute("aria-label", getMessage("language.aria", nextLocale) ?? "");
+        try {
+          localStorage.setItem("cellscript-locale", nextLocale);
+        } catch {
+          // Language switching still works even when storage is unavailable.
+        }
+      };
+
+      let languageTransitioning = false;
+      const switchLocale = async (nextLocale: string) => {
+        if (languageTransitioning) return;
+        if (prefersReducedMotion.matches) {
+          applyLocale(nextLocale);
+          syncThemeToggle();
+          return;
+        }
+
+        languageTransitioning = true;
+        languageToggle?.setAttribute("disabled", "");
+        document.documentElement.classList.add("locale-fade-out");
+        await delay(languageTransitionMs);
+        applyLocale(nextLocale);
+        syncThemeToggle();
+        document.documentElement.classList.remove("locale-fade-out");
+        await delay(languageTransitionMs);
+        languageToggle?.removeAttribute("disabled");
+        languageTransitioning = false;
+      };
+
+      const root = document.querySelector("[data-code-tabs]");
+      if (root) {
+        const tabs = Array.from(root.querySelectorAll("[data-tab]"));
+        const panels = Array.from(root.querySelectorAll("[data-panel]"));
+        const mobile = root.querySelector("[data-mobile-tabs]");
+        const fileLabel = root.querySelector("[data-file-label]");
+        const commandLabel = root.querySelector("[data-command-label]");
+
+        const activate = (id: string) => {
+          tabs.forEach((tab) => {
+            const tabElement = tab as HTMLElement;
+            tabElement.setAttribute("aria-selected", String(tabElement.dataset.tab === id));
+          });
+          panels.forEach((panel) => {
+            const panelElement = panel as HTMLElement;
+            const active = panelElement.dataset.panel === id;
+            panel.classList.toggle("active", active);
+            if (active && fileLabel && commandLabel && mobile instanceof HTMLSelectElement) {
+              fileLabel.textContent = panelElement.dataset.file ?? "";
+              commandLabel.textContent = panelElement.dataset.command ?? "";
+              mobile.value = id;
+            }
+          });
+        };
+
+        tabs.forEach((tab) => tab.addEventListener("click", () => activate((tab as HTMLElement).dataset.tab ?? "")));
+        if (mobile instanceof HTMLSelectElement) {
+          mobile.addEventListener("change", () => activate(mobile.value));
+        }
+      }
+
+      const modelRoot = document.querySelector("[data-model-tabs]");
+      if (modelRoot) {
+        const modelTabs = Array.from(modelRoot.querySelectorAll<HTMLElement>("[data-model-tab]"));
+        const modelPanels = Array.from(modelRoot.querySelectorAll<HTMLElement>("[data-model-panel]"));
+
+        const activateModel = (index: string) => {
+          modelTabs.forEach((tab) => {
+            const active = tab.dataset.modelTab === index;
+            tab.setAttribute("aria-selected", String(active));
+            tab.tabIndex = active ? 0 : -1;
+          });
+          modelPanels.forEach((panel) => {
+            panel.classList.toggle("active", panel.dataset.modelPanel === index);
+          });
+        };
+
+        modelTabs.forEach((tab, index) => {
+          tab.tabIndex = index === 0 ? 0 : -1;
+          tab.addEventListener("click", () => activateModel(tab.dataset.modelTab ?? "0"));
+          tab.addEventListener("keydown", (event) => {
+            if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
+            event.preventDefault();
+            const direction = event.key === "ArrowRight" ? 1 : -1;
+            const nextIndex = (index + direction + modelTabs.length) % modelTabs.length;
+            activateModel(String(nextIndex));
+            modelTabs[nextIndex]?.focus();
+          });
+        });
+      }
+
+      const toolRoot = document.querySelector("[data-tool-tabs]");
+      if (toolRoot) {
+        const toolTabs = Array.from(toolRoot.querySelectorAll<HTMLElement>("[data-tool-tab]"));
+        const toolPanels = Array.from(toolRoot.querySelectorAll<HTMLElement>("[data-tool-panel]"));
+
+        const activateTool = (index: string) => {
+          toolTabs.forEach((tab) => {
+            const active = tab.dataset.toolTab === index;
+            tab.setAttribute("aria-selected", String(active));
+            tab.tabIndex = active ? 0 : -1;
+          });
+          toolPanels.forEach((panel) => {
+            panel.classList.toggle("active", panel.dataset.toolPanel === index);
+          });
+        };
+
+        toolTabs.forEach((tab, index) => {
+          tab.tabIndex = index === 0 ? 0 : -1;
+          tab.addEventListener("click", () => activateTool(tab.dataset.toolTab ?? "0"));
+          tab.addEventListener("keydown", (event) => {
+            if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
+            event.preventDefault();
+            const direction = event.key === "ArrowRight" ? 1 : -1;
+            const nextIndex = (index + direction + toolTabs.length) % toolTabs.length;
+            activateTool(String(nextIndex));
+            toolTabs[nextIndex]?.focus();
+          });
+        });
+      }
+
+      const exampleRoot = document.querySelector("[data-example-tabs]");
+      if (exampleRoot) {
+        const exampleTabs = Array.from(exampleRoot.querySelectorAll<HTMLElement>("[data-example-tab]"));
+        const examplePanels = Array.from(exampleRoot.querySelectorAll<HTMLElement>("[data-example-panel]"));
+
+        const activateExample = (id: string) => {
+          exampleTabs.forEach((tab) => {
+            const active = tab.dataset.exampleTab === id;
+            tab.setAttribute("aria-selected", String(active));
+            tab.tabIndex = active ? 0 : -1;
+          });
+          examplePanels.forEach((panel) => {
+            panel.classList.toggle("active", panel.dataset.examplePanel === id);
+          });
+        };
+
+        exampleTabs.forEach((tab, index) => {
+          tab.tabIndex = index === 0 ? 0 : -1;
+          tab.addEventListener("click", () => activateExample(tab.dataset.exampleTab ?? "protocols"));
+          tab.addEventListener("keydown", (event) => {
+            if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
+            event.preventDefault();
+            const direction = event.key === "ArrowRight" ? 1 : -1;
+            const nextIndex = (index + direction + exampleTabs.length) % exampleTabs.length;
+            activateExample(exampleTabs[nextIndex]?.dataset.exampleTab ?? "protocols");
+            exampleTabs[nextIndex]?.focus();
+          });
+        });
+      }
+
+      const spotlightTargets = document.querySelectorAll<HTMLElement>(
+        ".spotlight-card, .model-console, .tooling-console, .example-browser, .example-card, .step, .workflow-checks",
+      );
+
+      spotlightTargets.forEach((target) => {
+        target.classList.add("spotlight-card");
+        target.addEventListener("pointermove", (event) => {
+          const rect = target.getBoundingClientRect();
+          const x = ((event.clientX - rect.left) / rect.width) * 100;
+          const y = ((event.clientY - rect.top) / rect.height) * 100;
+          target.style.setProperty("--spot-x", `${x}%`);
+          target.style.setProperty("--spot-y", `${y}%`);
+        });
+      });
+
+      const themeToggle = document.querySelector<HTMLButtonElement>("[data-theme-toggle]");
+      const themeLabel = document.querySelector<HTMLElement>("[data-theme-label]");
+      const languageToggle = document.querySelector<HTMLButtonElement>("[data-language-toggle]");
+
+      const readTheme = () => document.documentElement.dataset.theme === "light" ? "light" : "dark";
+      const syncThemeToggle = () => {
+        const nextTheme = readTheme() === "light" ? "dark" : "light";
+        if (themeToggle) {
+          themeToggle.setAttribute("aria-pressed", String(readTheme() === "light"));
+          themeToggle.setAttribute("aria-label", getMessage(nextTheme === "dark" ? "theme.switchToDark" : "theme.switchToLight") ?? "");
+        }
+        if (themeLabel) {
+          themeLabel.textContent = getMessage(nextTheme === "light" ? "theme.light" : "theme.dark") ?? "";
+        }
+      };
+
+      applyLocale(readLocale());
+      syncThemeToggle();
+      languageToggle?.addEventListener("click", () => {
+        void switchLocale(readLocale() === "en" ? "zh" : "en");
+      });
+      themeToggle?.addEventListener("click", () => {
+        const nextTheme = readTheme() === "light" ? "dark" : "light";
+        document.documentElement.dataset.theme = nextTheme;
+        try {
+          localStorage.setItem("cellscript-theme", nextTheme);
+        } catch {
+          // Theme changes still work even when storage is unavailable.
+        }
+        syncThemeToggle();
+      });
+    </script>
+  </body>
+</html>

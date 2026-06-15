@@ -1,0 +1,12 @@
+{
+  "schema": "novaseal-agreement-fixture-v0.1",
+  "fixture": "wrong_party_reject",
+  "action": "repay_before_expiry / claim_after_expiry",
+  "expected": "rejected",
+  "coverage": "source-guard-present + local-transaction-shape-covered + resolved-transaction-covered",
+  "reject_guards": [
+    "actor_authority_hash == active.borrower_authority_hash",
+    "actor_authority_hash == active.lender_authority_hash"
+  ],
+  "description": "Borrower-only repay and lender-only default claim are encoded as explicit actor hash guards. BTC actor signatures are covered by resolved/live evidence and fixed-width wallet vectors; production authority-lock review remains future work."
+}

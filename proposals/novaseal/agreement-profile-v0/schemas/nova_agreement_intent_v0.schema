@@ -1,0 +1,25 @@
+# NovaAgreementIntentV0 - Source of Truth Schema (Agreement Profile v0)
+#
+# Agreement keeps a richer business intent than NovaSealCanonicalEnvelopeV0.
+# The signed object binds both the Agreement body and the canonical envelope
+# hash, so conformance is enforced without making the contract call a separate
+# Core runtime.
+
+NovaAgreementIntentCoreV0:
+action: u8
+agreement_id: Byte32
+terms_hash: Byte32
+borrower_authority_hash: Byte32
+lender_authority_hash: Byte32
+old_status: u8
+new_status: u8
+old_nonce: u64
+new_nonce: u64
+terminal_amount: u64
+payout_commitment_hash: Byte32
+expiry_timepoint: u64
+
+NovaAgreementSignedIntentV0:
+core: NovaAgreementIntentCoreV0
+canonical_envelope_hash: Byte32
+expected_receipt_hash: Byte32

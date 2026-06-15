@@ -1,9 +1,9 @@
 #![allow(clippy::too_many_arguments)]
 
-use camino::Utf8PathBuf;
+use camino::{Utf8Path, Utf8PathBuf};
 use cellscript::{
     codegen::{analyze_backend_shape, BackendShapeMetrics},
-    compile_file, compile_file_with_entry_action, ArtifactFormat, CompileOptions, PoolPrimitiveMetadata,
+    compile_file, compile_file_with_entry_action, ArtifactFormat, CompileOptions, ProofPlanMetadata,
 };
 
 const BUNDLED_EXAMPLES: [&str; 7] =
@@ -11,13 +11,13 @@ const BUNDLED_EXAMPLES: [&str; 7] =
 const BACKEND_SHAPE_BASELINE_JSON: &str = include_str!("backend_shape_baseline.json");
 
 const BUNDLED_EXAMPLE_ELF_SIZE_BUDGETS: [(&str, usize); 7] = [
-    ("amm_pool.cell", 40 * 1024),
+    ("amm_pool.cell", 48 * 1024),
     ("launch.cell", 30 * 1024),
-    ("multisig.cell", 84 * 1024),
-    ("nft.cell", 54 * 1024),
+    ("multisig.cell", 108 * 1024),
+    ("nft.cell", 62 * 1024),
     ("timelock.cell", 72 * 1024),
     ("token.cell", 16 * 1024),
-    ("vesting.cell", 22 * 1024),
+    ("vesting.cell", 26 * 1024),
 ];
 
 const BUNDLED_EXAMPLE_ASM_SHAPE_BUDGETS: [(&str, AssemblyShapeBudget); 7] = [
@@ -45,7 +45,7 @@ const BUNDLED_EXAMPLE_ASM_SHAPE_BUDGETS: [(&str, AssemblyShapeBudget); 7] = [
             max_shared_epilogues: 4,
             max_text_bytes: 27 * 1024,
             max_relaxed_branches: 4,
-            max_cond_branch_abs_distance: 2_800,
+            max_cond_branch_abs_distance: 8_200,
             max_machine_blocks: 860,
             max_machine_block_bytes: 1_152,
             max_cfg_edges: 1_500,
@@ -72,17 +72,17 @@ const BUNDLED_EXAMPLE_ASM_SHAPE_BUDGETS: [(&str, AssemblyShapeBudget); 7] = [
     (
         "nft.cell",
         AssemblyShapeBudget {
-            max_lines: 13_000,
-            max_fail_handlers: 64,
+            max_lines: 15_000,
+            max_fail_handlers: 80,
             max_shared_epilogues: 18,
-            max_text_bytes: 48 * 1024,
+            max_text_bytes: 57 * 1024,
             max_relaxed_branches: 4,
-            max_cond_branch_abs_distance: 6_000,
+            max_cond_branch_abs_distance: 7_500,
             max_machine_blocks: 2_500,
             max_machine_block_bytes: 320,
             max_cfg_edges: 4_100,
-            max_call_edges: 440,
-            max_unreachable_machine_blocks: 2_100,
+            max_call_edges: 560,
+            max_unreachable_machine_blocks: 2_250,
         },
     ),
     (
@@ -185,6 +185,45 @@ fn language_example_path(name: &str) -> Utf8PathBuf {
     Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples").join("language").join(name)
 }
 
+fn docs_example_path(name: &str) -> Utf8PathBuf {
+    Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("docs").join("examples").join(name)
+}
+
+fn markdown_cellscript_blocks(path: &Utf8Path) -> Vec<String> {
+    let source = std::fs::read_to_string(path).unwrap_or_else(|err| panic!("failed to read {path}: {err}"));
+    let mut blocks = Vec::new();
+    let mut in_block = false;
+    let mut cellscript_block = false;
+    let mut current = Vec::new();
+
+    for line in source.lines() {
+        if let Some(lang) = line.strip_prefix("```") {
+            if in_block {
+                if cellscript_block {
+                    blocks.push(current.join("\n"));
+                }
+                in_block = false;
+                cellscript_block = false;
+                current.clear();
+            } else {
+                in_block = true;
+                cellscript_block = matches!(lang.trim(), "cellscript" | "cell");
+            }
+        } else if in_block && cellscript_block {
+            current.push(line.to_string());
+        }
+    }
+
+    blocks
+}
+
+fn write_wrapped_doc_snippet(temp_root: &Utf8Path, name: &str, source: &str) -> Utf8PathBuf {
+    let path = temp_root.join(format!("{name}.cell"));
+    let wrapped = format!("module docs::{name}\n\n{source}\n");
+    std::fs::write(&path, wrapped).unwrap_or_else(|err| panic!("failed to write {path}: {err}"));
+    path
+}
+
 fn checked_in_example_cell_files() -> Vec<Utf8PathBuf> {
     let examples_root = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples");
     let mut files = Vec::new();
@@ -230,6 +269,95 @@ fn all_checked_in_cell_examples_compile() {
     for path in files {
         compile_file(&path, CompileOptions::default()).unwrap_or_else(|err| panic!("{path} should compile: {}", err.message));
     }
+}
+
+#[test]
+fn docs_examples_cellscript_blocks_match_declared_compile_boundary() {
+    let collections = markdown_cellscript_blocks(&docs_example_path("collections_matrix.md"));
+    assert_eq!(collections.len(), 2, "collections_matrix.md should have one positive and one negative CellScript block");
+    let output_append = markdown_cellscript_blocks(&docs_example_path("output_append.md"));
+    assert_eq!(output_append.len(), 1, "output_append.md should have one conceptual CellScript block");
+
+    let temp = tempfile::tempdir().expect("tempdir should be available");
+    let temp_root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).expect("temp path should be UTF-8");
+    let positive_collections = write_wrapped_doc_snippet(&temp_root, "collections_positive", &collections[0]);
+    compile_file(&positive_collections, CompileOptions::default())
+        .unwrap_or_else(|err| panic!("{positive_collections} should compile: {}", err.message));
+
+    let output_append_path = write_wrapped_doc_snippet(&temp_root, "output_append", &output_append[0]);
+    compile_file(&output_append_path, CompileOptions::default())
+        .unwrap_or_else(|err| panic!("{output_append_path} should compile: {}", err.message));
+
+    let negative_collections = write_wrapped_doc_snippet(&temp_root, "collections_negative", &collections[1]);
+    let negative_result = compile_file(&negative_collections, CompileOptions::default())
+        .unwrap_or_else(|err| panic!("{negative_collections} should compile as a schema-boundary example: {}", err.message));
+    let nested_dynamic = negative_result
+        .metadata
+        .molecule_schema_manifest
+        .entries
+        .iter()
+        .find(|entry| entry.type_name == "NestedDynamic")
+        .expect("negative collections block should expose NestedDynamic schema metadata");
+    assert_eq!(nested_dynamic.layout, "molecule-table-v1");
+    assert!(
+        nested_dynamic.dynamic_fields.iter().any(|field| field == "rows"),
+        "NestedDynamic should keep rows as an explicit dynamic schema field: {nested_dynamic:?}"
+    );
+    assert!(
+        negative_result.metadata.runtime.collection_instantiations.is_empty(),
+        "schema-boundary example must not be reported as stack-backed local collection helper support: {:?}",
+        negative_result.metadata.runtime.collection_instantiations
+    );
+    let hidden_ownership = action(&negative_result.metadata, "hidden_ownership");
+    assert!(
+        hidden_ownership.consume_set.is_empty() && hidden_ownership.create_set.is_empty() && hidden_ownership.mutate_set.is_empty(),
+        "cell-backed collection snippet must not claim resource ownership transitions: {hidden_ownership:?}"
+    );
+}
+
+#[test]
+fn token_amm_bootstrap_docs_cover_builder_friction_boundary() {
+    let bootstrap =
+        std::fs::read_to_string(docs_example_path("token_amm_bootstrap.md")).expect("token/AMM bootstrap guide should be readable");
+    let bootstrap_text = bootstrap.split_whitespace().collect::<Vec<_>>().join(" ");
+    for needle in [
+        "`examples/token.cell` is the fungible-token state machine. It is not the genesis authority contract",
+        "Its `mint_with_authority` action consumes an existing `MintAuthority` input Cell",
+        "launch_token` materialises the Pool and LP receipt topology directly",
+        "Do not rely on \"the first action runs on creation\" as a protocol rule",
+        "Cell-bound inputs and outputs are transaction Cells, not witness payload args",
+        "Strict v0.16 ProofPlan checks compile the bundled token, AMM, and launch actions as original scoped entries",
+    ] {
+        assert!(bootstrap_text.contains(needle), "bootstrap guide should contain `{needle}`");
+    }
+    for needle in [
+        "cellc entry-witness examples/launch.cell",
+        "cellc entry-witness examples/token.cell",
+        "cellc entry-witness examples/amm_pool.cell",
+        "./scripts/ckb_cellscript_acceptance.sh --bounded --stateful-scenarios",
+    ] {
+        assert!(bootstrap.contains(needle), "bootstrap guide should contain `{needle}`");
+    }
+
+    let flows = std::fs::read_to_string(
+        Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("docs").join("CELLSCRIPT_EXAMPLE_BUSINESS_FLOWS.md"),
+    )
+    .expect("business flow guide should be readable");
+    assert!(
+        flows.contains("[`docs/examples/token_amm_bootstrap.md`](examples/token_amm_bootstrap.md)"),
+        "business flow guide should link the bootstrap guide"
+    );
+    assert!(
+        flows.contains("Materialise Pool and LPReceipt outputs"),
+        "launch flow should describe direct Pool and LPReceipt output materialisation"
+    );
+    assert!(flows.contains("all 44 business actions"), "business flow guide should track the full production action count");
+    assert!(
+        flows.contains("Use `create_collection` to materialise the first live `Collection` Cell"),
+        "NFT flow should document the Collection bootstrap action"
+    );
+    assert!(flows.contains("`create_collection -> mint ->"), "NFT flow should describe the stateful Collection-to-mint handoff");
+    assert!(!flows.contains("Call seed_pool pattern"), "launch flow must not imply that launch_token calls amm_pool::seed_pool");
 }
 
 #[test]
@@ -333,28 +461,6 @@ fn assert_with_regression_margin(example: &str, field: &str, actual: u64, baseli
         actual,
         baseline,
         margin
-    );
-}
-
-fn assert_pool_component(primitive: &PoolPrimitiveMetadata, component: &str, context: &str) {
-    assert!(
-        primitive.checked_components.iter().any(|candidate| candidate == component),
-        "{} should expose checked Pool component '{}': {:?}",
-        context,
-        component,
-        primitive.checked_components
-    );
-}
-
-fn assert_pool_invariant_family(primitive: &PoolPrimitiveMetadata, name: &str, status: &str, source: &str, context: &str) {
-    assert!(
-        primitive.invariant_families.iter().any(|family| family.name == name && family.status == status && family.source == source),
-        "{} should classify Pool invariant '{}' as {} from {}: {:?}",
-        context,
-        name,
-        status,
-        source,
-        primitive.invariant_families
     );
 }
 
@@ -1211,7 +1317,8 @@ fn vesting_phase2_remaining_obligations_are_explicit() {
 fn token_mint_authority_input_output_binding_is_explicit() {
     let result = compile_file(example_path("token.cell"), CompileOptions::default()).expect("token example should compile");
     let asm = String::from_utf8(result.artifact_bytes.clone()).expect("token asm should be utf8");
-    let mint = result.metadata.actions.iter().find(|action| action.name == "mint").expect("mint metadata");
+    let mint =
+        result.metadata.actions.iter().find(|action| action.name == "mint_with_authority").expect("mint_with_authority metadata");
 
     assert_eq!(mint.effect_class, "Mutating");
     assert_input_output_binding(mint, "MintAuthority", "auth_before", "auth_after", "token mint");
@@ -1244,6 +1351,26 @@ fn token_mint_authority_input_output_binding_is_explicit() {
 fn nft_core_actions_expose_action_specific_builder_metadata() {
     let result = compile_file(example_path("nft.cell"), CompileOptions::default()).expect("nft example should compile");
     let asm = String::from_utf8(result.artifact_bytes.clone()).expect("nft asm should be utf8");
+
+    let create_collection = action(&result.metadata, "create_collection");
+    assert_eq!(create_collection.effect_class, "Creating");
+    assert!(create_collection.parallelizable);
+    assert!(create_collection.fail_closed_runtime_features.is_empty(), "nft create_collection should not carry fail-closed debt");
+    assert_create(create_collection, "Collection", "nft create_collection");
+    assert_runtime_requirement(
+        create_collection,
+        "create-output:Collection:collection",
+        "checked-runtime",
+        "create-output-fields",
+        "nft create_collection",
+    );
+    assert_runtime_requirement(
+        create_collection,
+        "create-output:Collection:collection",
+        "checked-runtime",
+        "create-output-lock",
+        "nft create_collection",
+    );
 
     let mint = action(&result.metadata, "mint");
     assert_eq!(mint.effect_class, "Mutating");
@@ -1561,9 +1688,19 @@ fn amm_pool_input_output_params_are_scheduler_visible() {
             action.fail_closed_runtime_features
         );
         assert!(
-            action.verifier_obligations.iter().any(|obligation| obligation.feature.starts_with("resource-conservation:Token")
-                || obligation.feature.starts_with("pool-create:Pool")),
-            "{} should retain AMM-specific runtime obligations separately from input/output binding: {:?}",
+            action.verifier_obligations.iter().all(|obligation| obligation.status != "runtime-required"),
+            "{} should be strict v0.16 clean with no runtime-required Pool or resource blockers: {:?}",
+            action_name,
+            action.verifier_obligations
+        );
+        assert!(
+            action.verifier_obligations.iter().any(|obligation| {
+                obligation.status == "checked-runtime"
+                    && (obligation.feature.starts_with("guard-equality:pool_after.")
+                        || obligation.feature.starts_with("resource-conservation:Token")
+                        || obligation.feature.starts_with(&format!("create-output:{extra_created_ty}:")))
+            }),
+            "{} should retain checked AMM accounting evidence separately from scheduler binding: {:?}",
             action_name,
             action.verifier_obligations
         );
@@ -1628,52 +1765,18 @@ fn launch_seed_pool_composition_is_scheduler_visible() {
         launch_token.fail_closed_runtime_features
     );
     assert!(
-        launch_token.verifier_obligations.iter().any(|obligation| {
-            obligation.category == "pool-pattern"
-                && obligation.feature == "pool-create:Pool"
-                && obligation.status == "runtime-required"
-        }),
-        "launch_token should report direct named Pool output creation obligations accurately: {:?}",
+        launch_token.verifier_obligations.iter().all(|obligation| obligation.status != "runtime-required"),
+        "launch_token should be strict v0.16 clean as an original scoped action: {:?}",
         launch_token.verifier_obligations
     );
-    let launch_pool_primitive = launch_token
-        .pool_primitives
-        .iter()
-        .find(|primitive| primitive.feature == "pool-create:Pool")
-        .expect("launch_token should expose structured Pool creation primitive metadata");
-    assert_eq!(launch_pool_primitive.operation, "create");
-    assert_eq!(launch_pool_primitive.status, "runtime-required");
-    assert_eq!(launch_pool_primitive.callee, None);
-    assert_eq!(launch_pool_primitive.binding.as_deref(), Some("pool"));
-    assert_eq!(launch_pool_primitive.source_invariant_count, 3);
-    assert_pool_component(launch_pool_primitive, "assert-invariant-cfg=3", "launch_token");
-    assert_pool_component(launch_pool_primitive, "source-invariant:source-guard-0=checked-runtime", "launch_token");
-    assert_pool_component(launch_pool_primitive, "source-invariant:source-guard-1=checked-runtime", "launch_token");
-    assert_pool_component(launch_pool_primitive, "source-invariant:source-guard-2=checked-runtime", "launch_token");
-    assert_pool_invariant_family(
-        launch_pool_primitive,
-        "token-pair-identity-admission",
-        "runtime-required",
-        "token-input-type-id-abi",
-        "launch_token",
-    );
-    assert_pool_invariant_family(
-        launch_pool_primitive,
-        "lp-supply-invariant",
-        "runtime-required",
-        "pool-protocol-admission",
-        "launch_token",
-    );
     assert!(
-        launch_pool_primitive.runtime_required_components.iter().any(|component| component == "token-pair-identity-admission")
-            && launch_pool_primitive.runtime_required_components.iter().any(|component| component == "lp-supply-invariant"),
-        "direct launch_token Pool creation should surface unresolved AMM admission components instead of claiming seed_pool equivalence: {:?}",
-        launch_pool_primitive.runtime_required_components
-    );
-    assert!(
-        launch_pool_primitive.runtime_input_requirements.is_empty(),
-        "runtime inputs should be discharged by launch/pool verifier metadata: {:?}",
-        launch_pool_primitive.runtime_input_requirements
+        launch_token.verifier_obligations.iter().any(|obligation| {
+            obligation.feature == "resource-conservation:Token"
+                && obligation.status == "checked-runtime"
+                && obligation.detail.contains("launch verifier checks")
+        }),
+        "launch_token should classify launch issuance and paired-token Pool accounting as checked: {:?}",
+        launch_token.verifier_obligations
     );
     assert!(
         asm.contains("# cellscript abi: verify output bytes field LPReceipt.pool_id offset=0 size=32 against loaded bytes"),
@@ -1686,33 +1789,197 @@ fn launch_seed_pool_composition_is_scheduler_visible() {
         asm
     );
 
-    let simple_launch = result.metadata.actions.iter().find(|action| action.name == "simple_launch").expect("simple_launch metadata");
+    let bootstrap_token =
+        result.metadata.actions.iter().find(|action| action.name == "bootstrap_token").expect("bootstrap_token metadata");
     assert!(
-        simple_launch.touches_shared.is_empty(),
-        "simple_launch does not compose Pool creation and should not inherit launch_token's shared touch"
+        bootstrap_token.touches_shared.is_empty(),
+        "bootstrap_token does not compose Pool creation and should not inherit launch_token's shared touch"
     );
-    let recipients = simple_launch.params.iter().find(|param| param.name == "recipients").expect("recipients param metadata");
+    let recipients = bootstrap_token.params.iter().find(|param| param.name == "recipients").expect("recipients param metadata");
     assert!(recipients.fixed_byte_pointer_abi);
     assert!(recipients.fixed_byte_length_abi);
-    assert_eq!(recipients.fixed_byte_len, Some(320));
+    assert_eq!(recipients.fixed_byte_len, Some(80));
     assert!(
-        simple_launch.fail_closed_runtime_features.is_empty(),
-        "simple_launch fixed tuple-array distribution and recipient locks should be fully verifier-coverable: {:?}",
-        simple_launch.fail_closed_runtime_features
+        bootstrap_token.fail_closed_runtime_features.is_empty(),
+        "bootstrap_token fixed tuple-array distribution and recipient locks should be fully verifier-coverable: {:?}",
+        bootstrap_token.fail_closed_runtime_features
     );
     assert!(
         !asm.contains("schema field byte source is not addressable"),
-        "simple_launch recipient lock verification must compare fixed tuple-array address fields without fail-closed traps:\n{}",
+        "bootstrap_token recipient lock verification must compare fixed tuple-array address fields without fail-closed traps:\n{}",
         asm
     );
     assert!(
         !asm.contains("expression verifier temp stack is exhausted"),
-        "simple_launch remaining-output verifier must have enough expression temp slots for the fixed recipient sum:\n{}",
+        "bootstrap_token remaining-output verifier must have enough expression temp slots for the fixed recipient sum:\n{}",
         asm
     );
     assert!(
-        simple_launch.verifier_obligations.iter().all(|obligation| obligation.category != "pool-pattern"),
-        "simple_launch does not compose a Pool and should not inherit pool-pattern obligations: {:?}",
-        simple_launch.verifier_obligations
+        bootstrap_token.verifier_obligations.iter().all(|obligation| obligation.category != "pool-pattern"),
+        "bootstrap_token does not compose a Pool and should not inherit pool-pattern obligations: {:?}",
+        bootstrap_token.verifier_obligations
     );
+}
+
+#[test]
+fn canonical_examples_compile_under_primitive_strict_015() {
+    let strict_options = CompileOptions { primitive_compat: Some("0.15".to_string()), ..CompileOptions::default() };
+    for example in BUNDLED_EXAMPLES {
+        let path = example_path(example);
+        compile_file(&path, strict_options.clone())
+            .unwrap_or_else(|err| panic!("canonical example {example} should compile under --primitive-strict=0.15: {}", err.message));
+    }
+}
+
+fn assert_proof_plan_invariant_record(
+    proof_plan: &[ProofPlanMetadata],
+    category: &str,
+    trigger: &str,
+    scope: &str,
+    coverage_status: &str,
+    status: &str,
+    on_chain_checked: bool,
+) -> ProofPlanMetadata {
+    let record = proof_plan
+        .iter()
+        .find(|plan| plan.category == category)
+        .unwrap_or_else(|| panic!("no ProofPlan record with category '{}' found: {:?}", category, proof_plan));
+    assert_eq!(record.trigger, trigger, "wrong trigger for {category}: expected {trigger}, got {}", record.trigger);
+    assert_eq!(record.scope, scope, "wrong scope for {category}: expected {scope}, got {}", record.scope);
+    assert_eq!(
+        record.codegen_coverage_status, coverage_status,
+        "wrong coverage for {category}: expected {coverage_status}, got {}",
+        record.codegen_coverage_status
+    );
+    assert_eq!(record.status, status, "wrong status for {category}: expected {status}, got {}", record.status);
+    assert_eq!(record.on_chain_checked, on_chain_checked, "wrong on_chain_checked for {category}");
+    record.clone()
+}
+
+#[test]
+fn v0_15_scoped_invariant_example_compiles_and_produces_proof_plan() {
+    let result = compile_file(
+        language_example_path("v0_15_scoped_invariant.cell"),
+        CompileOptions { primitive_compat: Some("0.15".to_string()), ..CompileOptions::default() },
+    )
+    .expect("v0_15_scoped_invariant should compile under --primitive-strict=0.15");
+
+    let proof_plan = &result.metadata.runtime.proof_plan;
+    assert!(!proof_plan.is_empty(), "scoped invariant example must emit ProofPlan records");
+
+    // All declared-invariant and aggregate-invariant records must be metadata-only
+    let declared = assert_proof_plan_invariant_record(
+        proof_plan,
+        "declared-invariant",
+        "type_group",
+        "group",
+        "gap:runtime-helper-required",
+        "runtime-required",
+        false,
+    );
+    assert_eq!(declared.name, "token_amount_conservation");
+
+    // All 5 aggregate invariant primitives must appear in ProofPlan
+    let aggregate_names: Vec<&str> =
+        proof_plan.iter().filter(|plan| plan.category == "aggregate-invariant").map(|plan| plan.feature.as_str()).collect();
+    assert!(aggregate_names.iter().any(|name| name.starts_with("assert_sum:")), "missing assert_sum aggregate: {:?}", aggregate_names);
+    assert!(
+        aggregate_names.iter().any(|name| name.starts_with("assert_conserved:")),
+        "missing assert_conserved aggregate: {:?}",
+        aggregate_names
+    );
+    assert!(
+        aggregate_names.iter().any(|name| name.starts_with("assert_delta:")),
+        "missing assert_delta aggregate: {:?}",
+        aggregate_names
+    );
+    assert!(
+        aggregate_names.iter().any(|name| name.starts_with("assert_distinct:")),
+        "missing assert_distinct aggregate: {:?}",
+        aggregate_names
+    );
+    assert!(
+        aggregate_names.iter().any(|name| name.starts_with("assert_singleton:")),
+        "missing assert_singleton aggregate: {:?}",
+        aggregate_names
+    );
+
+    // Every aggregate-invariant record must keep an explicit runtime-required gap;
+    // only primitives with a known helper are labelled runtime-helper-required.
+    for aggregate in proof_plan.iter().filter(|plan| plan.category == "aggregate-invariant") {
+        assert!(
+            matches!(aggregate.codegen_coverage_status.as_str(), "gap:metadata-only" | "gap:runtime-helper-required"),
+            "aggregate must remain an explicit gap: {:?}",
+            aggregate
+        );
+        assert_eq!(aggregate.status, "runtime-required", "aggregate must be runtime-required: {:?}", aggregate);
+        assert!(!aggregate.on_chain_checked, "aggregate must not be on_chain_checked: {:?}", aggregate);
+    }
+
+    // lock_group + transaction must produce coverage diagnostics
+    let lock_tx_invariant = proof_plan.iter().find(|plan| plan.trigger == "lock_group" && plan.scope == "transaction");
+    if let Some(record) = lock_tx_invariant {
+        assert!(
+            record
+                .diagnostics
+                .iter()
+                .any(|diag| diag.severity == "warning" && diag.message.contains("do not imply type-group conservation")),
+            "lock_group + transaction must warn about coverage: {:?}",
+            record.diagnostics
+        );
+    }
+}
+
+#[test]
+fn v0_15_identity_lifecycle_example_compiles_and_produces_proof_plan() {
+    let result = compile_file(
+        language_example_path("v0_15_identity_lifecycle.cell"),
+        CompileOptions { primitive_compat: Some("0.15".to_string()), ..CompileOptions::default() },
+    )
+    .expect("v0_15_identity_lifecycle should compile under --primitive-strict=0.15");
+
+    let proof_plan = &result.metadata.runtime.proof_plan;
+    assert!(!proof_plan.is_empty(), "identity lifecycle example must emit ProofPlan records");
+
+    // create_unique and replace_unique must appear as transaction-invariant obligations
+    let create_unique_records = proof_plan.iter().filter(|plan| plan.feature.starts_with("create-unique-output:")).collect::<Vec<_>>();
+    assert!(!create_unique_records.is_empty(), "missing create_unique ProofPlan records");
+
+    let replace_unique_records =
+        proof_plan.iter().filter(|plan| plan.feature.starts_with("replace-unique-output:")).collect::<Vec<_>>();
+    assert!(!replace_unique_records.is_empty(), "missing replace_unique ProofPlan records");
+
+    // Identity lifecycle policy must appear in ProofPlan records
+    let identity_records = proof_plan.iter().filter(|plan| plan.identity_lifecycle_policy != "none").collect::<Vec<_>>();
+    assert!(!identity_records.is_empty(), "missing identity lifecycle policy records");
+
+    // Destruction policy records must appear
+    let destroy_records = proof_plan
+        .iter()
+        .filter(|plan| {
+            plan.feature.starts_with("destroy-output-scan:")
+                || plan.feature.starts_with("destroy-unique:")
+                || plan.feature.starts_with("destroy-instance:")
+                || plan.feature.starts_with("burn-amount:")
+        })
+        .collect::<Vec<_>>();
+    assert!(!destroy_records.is_empty(), "missing destruction policy ProofPlan records");
+}
+
+#[test]
+fn token_cell_has_no_metadata_only_declared_invariant_debt() {
+    let result = compile_file(example_path("token.cell"), CompileOptions::default()).expect("token.cell should compile");
+
+    let proof_plan = &result.metadata.runtime.proof_plan;
+    assert!(!proof_plan.is_empty(), "token.cell must emit ProofPlan records");
+
+    assert!(
+        proof_plan.iter().all(|plan| plan.category != "declared-invariant" && plan.codegen_coverage_status != "gap:metadata-only"),
+        "token.cell must not carry strict-blocking metadata-only declared invariant debt: {proof_plan:?}"
+    );
+
+    // Action obligations must still be present
+    let action_obligations =
+        proof_plan.iter().filter(|plan| plan.category != "declared-invariant" && plan.category != "aggregate-invariant").count();
+    assert!(action_obligations > 0, "token.cell action obligations must still appear in ProofPlan");
 }

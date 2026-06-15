@@ -5,6 +5,15 @@
 **Auditor:** Kimi Code CLI (automated assisted audit)
 **Review status:** Corrected after local validation. The original draft overstated several flow-analysis findings around uninitialized `let`, tail `match` expressions, and lock terminal `match` expressions. Follow-up fixes now cover IR lowering error aggregation, IR lowering source spans, expression-level unreachable diagnostics, debug expression spans, and assembly parse line context.
 
+**0.16 status note (2026-06-10):** Treat the ProofPlan findings below as a
+historical audit baseline, not as the current 0.16 contract. The
+0.16 release line now emits `runtime.proof_plan_soundness`, rejects
+local/runtime ProofPlan drift, rejects checked records with coverage gaps, and
+fails `--primitive-strict 0.16` on metadata-only or runtime-required ProofPlan
+gaps. Aggregate invariant executable lowering and cryptographic metadata
+binding are still future work, but the old blanket statement that metadata-only
+ProofPlan gaps are acceptable in pre-production is no longer correct.
+
 ---
 
 ## 1. CompileError Span Propagation & Staleness

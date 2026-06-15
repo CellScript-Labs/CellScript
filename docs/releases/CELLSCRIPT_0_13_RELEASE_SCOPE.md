@@ -230,7 +230,7 @@ Detailed evidence docs:
 
 Detailed docs:
 
-- [GitHub Wiki](https://github.com/tsukifune-kosei/CellScript/wiki)
+- [GitHub Wiki](https://github.com/a19q3/CellScript/wiki)
 - [0.13.2 release notes](CELLSCRIPT_0_13_2_RELEASE_NOTES.md)
 
 ## Explicit Non-Goals
@@ -286,5 +286,5 @@ python3 scripts/validate_ckb_cellscript_production_evidence.py \
 
 The stateful section is intentionally stricter than a few happy-path flows:
 the current production scope requires 7 end-to-end business scenarios, 20
-stateful action-branch scenarios, 46 committed stateful steps, and 43/43
+stateful action-branch scenarios, 47 committed stateful steps, and 44/44
 production acceptance actions covered with no missing action IDs.

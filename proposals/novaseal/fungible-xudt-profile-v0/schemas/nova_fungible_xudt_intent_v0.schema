@@ -1,0 +1,23 @@
+# NovaFungibleXudtIntentV0 - Source of Truth Schema (Fungible xUDT Profile v0)
+
+NovaFungibleXudtIntentCoreV0:
+action: u8
+asset_id: Byte32
+xudt_type_hash: Byte32
+issuer_authority_hash: Byte32
+old_holder_authority_hash: Byte32
+new_holder_authority_hash: Byte32
+old_status: u8
+new_status: u8
+old_amount: u64
+transfer_amount: u64
+new_amount: u64
+old_nonce: u64
+new_nonce: u64
+expiry: u64
+payout_commitment_hash: Byte32
+
+NovaFungibleXudtSignedIntentV0:
+core: NovaFungibleXudtIntentCoreV0
+canonical_envelope_hash: Byte32
+expected_receipt_hash: Byte32

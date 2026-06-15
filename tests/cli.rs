@@ -1,3 +1,6 @@
+mod common;
+
+use common::cellc_command;
 use std::process::Command;
 
 fn git_init(repo_dir: &std::path::Path) {
@@ -2363,7 +2366,7 @@ action seed_pool(token_a: Token, token_b: Token, fee_rate_bps: u16, provider: Ad
 }
 
 #[test]
-fn cellc_check_reports_checked_pool_invariant_families_without_runtime_blockers() {
+fn cellc_check_reports_amm_pool_without_runtime_blockers() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
     let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -2387,37 +2390,38 @@ version = "0.1.0"
     assert!(json_output.status.success(), "unexpected failure: {}", String::from_utf8_lossy(&json_output.stderr));
     let stdout: serde_json::Value = serde_json::from_slice(&json_output.stdout).unwrap();
     let target = &stdout["checked_targets"][0];
-    assert!(target["checked_pool_invariant_families"].as_u64().unwrap() > 0, "unexpected stdout: {}", stdout);
-    assert!(target["runtime_required_pool_invariant_families"].as_u64().unwrap() > 0, "unexpected stdout: {}", stdout);
-    assert!(target["runtime_required_pool_invariant_blocker_classes"].as_u64().unwrap() > 0, "unexpected stdout: {}", stdout);
+    assert_eq!(target["checked_pool_invariant_families"].as_u64().unwrap(), 0, "unexpected stdout: {}", stdout);
+    assert_eq!(target["runtime_required_pool_invariant_families"].as_u64().unwrap(), 0, "unexpected stdout: {}", stdout);
+    assert_eq!(target["runtime_required_pool_invariant_blocker_classes"].as_u64().unwrap(), 0, "unexpected stdout: {}", stdout);
     let blocker_classes = target["runtime_required_pool_invariant_blocker_class_summaries"]
         .as_array()
         .expect("runtime-required Pool invariant blocker class summaries array");
-    assert!(
-        blocker_classes.iter().any(|value| value.as_str().is_some_and(|summary| summary.contains("pool-create:Pool"))),
-        "AMM pool admission blockers should remain explicit: {}",
-        stdout
-    );
-    assert!(
-        !blocker_classes.iter().any(|value| value
-            .as_str()
-            .is_some_and(|summary| { summary.contains("pool-mutation-invariants:Pool:reserve-conservation") })),
-        "reserve-conservation should be checked-runtime, not in blocker classes: {}",
-        stdout
-    );
+    assert!(blocker_classes.is_empty(), "AMM pool admission should not leave runtime-required blockers: {}", stdout);
     let runtime_inputs = target["pool_runtime_input_requirement_summaries"].as_array().expect("runtime input summaries array");
     assert!(
         !runtime_inputs.iter().any(|value| value.as_str().is_some_and(|summary| { summary.contains("reserve-conservation=") })),
-        "checked reserve-conservation should not appear in runtime input summaries: {}",
+        "AMM reserve-conservation should not appear in Pool runtime input summaries: {}",
+        stdout
+    );
+    assert_eq!(
+        target["runtime_required_transaction_runtime_input_requirements"].as_u64().unwrap(),
+        0,
+        "unexpected stdout: {}",
+        stdout
+    );
+    assert_eq!(
+        target["runtime_required_transaction_runtime_input_blocker_classes"].as_u64().unwrap(),
+        0,
+        "unexpected stdout: {}",
         stdout
     );
 
     let output =
         Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("check").arg("--deny-runtime-obligations").output().unwrap();
     assert!(
-        !output.status.success(),
-        "full AMM policy debt should still fail deny-runtime-obligations: {}",
-        String::from_utf8_lossy(&output.stdout)
+        output.status.success(),
+        "full AMM policy should satisfy deny-runtime-obligations: {}",
+        String::from_utf8_lossy(&output.stderr)
     );
 }
 
@@ -4092,6 +4096,116 @@ action main(amount: u64) -> u64 {
     let mut expected = b"CSARGv1\0".to_vec();
     expected.extend_from_slice(&77u64.to_le_bytes());
     assert_eq!(std::fs::read(output_path).unwrap(), expected);
+}
+
+#[test]
+fn cellc_entry_witness_subcommand_encodes_bundled_token_amm_bootstrap_payloads() {
+    let examples = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples");
+    let launch = examples.join("launch.cell");
+    let token = examples.join("token.cell");
+    let amm_pool = examples.join("amm_pool.cell");
+    let address = "0x1111111111111111111111111111111111111111111111111111111111111111";
+    let distribution = format!("0x{}", "22".repeat(160));
+
+    let launch_output = cellc_command()
+        .arg("entry-witness")
+        .arg(&launch)
+        .arg("--target-profile")
+        .arg("ckb")
+        .arg("--action")
+        .arg("launch_token")
+        .arg("--arg")
+        .arg("0x4c41554e43483031")
+        .arg("--arg")
+        .arg("10000")
+        .arg("--arg")
+        .arg("1000")
+        .arg("--arg")
+        .arg("500")
+        .arg("--arg")
+        .arg("30")
+        .arg("--arg")
+        .arg(address)
+        .arg("--arg")
+        .arg(&distribution)
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert!(launch_output.status.success(), "stderr: {}", String::from_utf8_lossy(&launch_output.stderr));
+    let launch_stdout: serde_json::Value = serde_json::from_slice(&launch_output.stdout).unwrap();
+    assert_eq!(launch_stdout["status"], "ok");
+    assert_eq!(launch_stdout["entry"], "launch_token");
+    assert_eq!(launch_stdout["payload_args"], 7);
+    assert_eq!(launch_stdout["witness_size_bytes"], 234);
+    assert_eq!(launch_stdout["payload_params"][0], "symbol");
+    assert_eq!(launch_stdout["payload_params"][4], "fee_rate_bps");
+    assert_eq!(launch_stdout["payload_params"][6], "distribution");
+
+    let token_output = cellc_command()
+        .arg("entry-witness")
+        .arg(&token)
+        .arg("--target-profile")
+        .arg("ckb")
+        .arg("--action")
+        .arg("mint_with_authority")
+        .arg("--arg")
+        .arg(address)
+        .arg("--arg")
+        .arg("25")
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert!(token_output.status.success(), "stderr: {}", String::from_utf8_lossy(&token_output.stderr));
+    let token_stdout: serde_json::Value = serde_json::from_slice(&token_output.stdout).unwrap();
+    assert_eq!(token_stdout["status"], "ok");
+    assert_eq!(token_stdout["entry"], "mint_with_authority");
+    assert_eq!(token_stdout["payload_params"][0], "to");
+    assert_eq!(token_stdout["payload_params"][1], "amount");
+    assert_eq!(token_stdout["witness_size_bytes"], 48);
+
+    let seed_output = cellc_command()
+        .arg("entry-witness")
+        .arg(&amm_pool)
+        .arg("--target-profile")
+        .arg("ckb")
+        .arg("--action")
+        .arg("seed_pool")
+        .arg("--arg")
+        .arg("30")
+        .arg("--arg")
+        .arg(address)
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert!(seed_output.status.success(), "stderr: {}", String::from_utf8_lossy(&seed_output.stderr));
+    let seed_stdout: serde_json::Value = serde_json::from_slice(&seed_output.stdout).unwrap();
+    assert_eq!(seed_stdout["status"], "ok");
+    assert_eq!(seed_stdout["entry"], "seed_pool");
+    assert_eq!(seed_stdout["payload_params"][0], "fee_rate_bps");
+    assert_eq!(seed_stdout["payload_params"][1], "provider");
+    assert_eq!(seed_stdout["witness_size_bytes"], 42);
+
+    let swap_output = cellc_command()
+        .arg("entry-witness")
+        .arg(&amm_pool)
+        .arg("--target-profile")
+        .arg("ckb")
+        .arg("--action")
+        .arg("swap_a_for_b")
+        .arg("--arg")
+        .arg("2")
+        .arg("--arg")
+        .arg(address)
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert!(swap_output.status.success(), "stderr: {}", String::from_utf8_lossy(&swap_output.stderr));
+    let swap_stdout: serde_json::Value = serde_json::from_slice(&swap_output.stdout).unwrap();
+    assert_eq!(swap_stdout["status"], "ok");
+    assert_eq!(swap_stdout["entry"], "swap_a_for_b");
+    assert_eq!(swap_stdout["payload_params"][0], "min_output");
+    assert_eq!(swap_stdout["payload_params"][1], "to");
+    assert_eq!(swap_stdout["witness_size_bytes"], 48);
 }
 
 #[test]

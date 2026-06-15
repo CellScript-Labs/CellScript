@@ -1,0 +1,8 @@
+{
+  "schema": "novaseal-fungible-xudt-fixture-v0.1",
+  "fixture": "transfer_wrong_holder_signature_reject",
+  "action": "transfer_xudt",
+  "expected": "rejected",
+  "coverage": "source-guard-present",
+  "description": "Transfer must reject a BIP340 signature payload whose pubkey is not the old holder authority hash."
+}

@@ -1,0 +1,13 @@
+{
+  "schema": "novaseal-agreement-fixture-v0.1",
+  "fixture": "originate_valid",
+  "action": "originate_agreement",
+  "expected": "accepted",
+  "coverage": "source-guard-present + local-transaction-shape-covered + resolved-transaction-covered",
+  "description": "Borrower-originated CKB/CKB agreement with positive collateral/principal, fixed fee policy, and current time within the agreed window.",
+  "notes": [
+    "Covered by scripts/nova_agreement_tx_shape_harness.py.",
+    "Covered by harness/ckb_vm resolved transaction harness.",
+    "Live local devnet evidence and wallet signing vectors exist; public/shared CellDep attestation, external BIP340 TCB review, and production borrower/lender authority lock review remain future work."
+  ]
+}

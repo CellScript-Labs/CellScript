@@ -1,0 +1,15 @@
+{
+  "name": "receipt_hash_mismatch_reject",
+  "description": "The receipt_hash carried in the intent does not match the actual receipt obligation being emitted / checked by the transition script. Must be rejected.",
+  "category": "negative",
+  "acceptance_criteria_covered": [8],
+  "inputs": {
+    "intent": { "receipt_hash": "0xclaimed..." },
+    "actual_receipt_hash": "0xactual..."
+  },
+  "expected": {
+    "result": "rejected",
+    "failure_mode": "receipt_hash_mismatch",
+    "notes": "This is how v0 makes the ProofReceipt a checked obligation without necessarily materialising it as an output cell yet."
+  }
+}

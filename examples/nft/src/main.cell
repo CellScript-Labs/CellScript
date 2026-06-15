@@ -11,7 +11,7 @@ struct Metadata {
     attributes: Vec<(String, String)>,
 }
 
-resource NFT has store, create, consume, replace, burn, relock {
+resource NFT has store, create, consume, replace, burn, relock, read_ref {
     token_id: u64,
     owner: Address,
     metadata_hash: Hash,
@@ -19,7 +19,7 @@ resource NFT has store, create, consume, replace, burn, relock {
     royalty_bps: u16,
 }
 
-resource Collection has store {
+resource Collection has store, create, replace {
     name: String,
     symbol: String,
     creator: Address,
@@ -44,13 +44,22 @@ receipt Offer has create, consume, burn {
     state: u8,
 }
 
-receipt RoyaltyPayment {
+receipt RoyaltyPayment has create {
     token_id: u64,
     recipient: Address,
     amount: u64,
 }
 
+action create_collection(creator: Address, max_supply: u64, name: String, symbol: String, base_uri: String) -> collection: Collection {
+    verification
+        require max_supply > 0, "Max supply must be positive"
+        require max_supply <= MAX_SUPPLY, "Max supply too high"
+        create collection = Collection { name, symbol, creator, total_supply: 0, max_supply, base_uri } with_lock(creator)
+}
+
 action mint(collection_before: Collection, to: Address, metadata_hash: Hash) -> (collection_after: Collection, nft: NFT) {
+    transition collection_before -> collection_after
+
     verification
         require collection_before.total_supply < collection_before.max_supply, "Max supply reached"
         let token_id = collection_before.total_supply + 1
@@ -66,6 +75,8 @@ action mint(collection_before: Collection, to: Address, metadata_hash: Hash) -> 
 
 }
 action transfer(nft_before: NFT, to: Address) -> nft_after: NFT {
+    transition nft_before -> nft_after
+
     verification
         require nft_before.owner != to, "Cannot transfer to self"
         preserve nft_after from nft_before {
@@ -89,6 +100,8 @@ action cancel_listing(listing: Listing) {
 
 }
 action buy_from_listing(nft_before: NFT, listing: Listing, buyer: Address, seller: Address, payment: u64) -> (nft_after: NFT, royalty_payment: RoyaltyPayment, seller_payment: RoyaltyPayment) {
+    transition nft_before -> nft_after
+
     verification
         require payment >= listing.price, "Insufficient payment"
         let royalty_amount = payment * nft_before.royalty_bps as u64 / 10000
@@ -113,6 +126,8 @@ action create_offer(token_id: u64, buyer: Address, price: u64, expires_at: u64) 
 
 }
 action accept_offer(nft_before: NFT, offer: Offer, buyer: Address, seller: Address, price: u64, current_time: u64) -> (nft_after: NFT, royalty_payment: RoyaltyPayment, seller_payment: RoyaltyPayment) {
+    transition nft_before -> nft_after
+
     verification
         require current_time < offer.expires_at, "Offer expired"
         let royalty_amount = price * nft_before.royalty_bps as u64 / 10000
@@ -135,6 +150,8 @@ action burn(nft: NFT) {
 
 }
 action batch_mint(collection_before: Collection, recipients: [Address; 4], metadata_hashes: [Hash; 4]) -> (collection_after: Collection, nft0: NFT, nft1: NFT, nft2: NFT, nft3: NFT) {
+    transition collection_before -> collection_after
+
     verification
         require collection_before.total_supply + 4 <= collection_before.max_supply, "Max supply would be exceeded"
         let first_token_id = collection_before.total_supply + 1
