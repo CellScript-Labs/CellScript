@@ -15,9 +15,9 @@ transaction builder.
 
 ## Highlights
 
-- `token.cell::mint` is now `mint_with_authority`, making the required
-  `MintAuthority` input explicit.
-- `launch.cell::simple_launch` is now `bootstrap_token`.
+- The token authority mint action is now `mint_with_authority`, making the
+  required `MintAuthority` input explicit.
+- The launch bootstrap action is now `bootstrap_token`.
 - `bootstrap_token` and `launch_token` expose the first-token-cell path
   directly.
 - `launch_token` materialises the Pool and LP receipt topology directly; it
