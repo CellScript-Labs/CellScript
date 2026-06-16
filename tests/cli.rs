@@ -5981,3 +5981,380 @@ action compute() -> u64 {
     let summary2: serde_json::Value = serde_json::from_slice(&output2.stdout).unwrap();
     assert_eq!(summary2["cache_hit"], false, "--entry-action should bypass incremental cache");
 }
+
+#[test]
+fn cellc_install_rejects_self_path_dependency() {
+    // `cellc install --path <self_root>` used to write a `[dependencies.""]` row
+    // that turned every subsequent `cellc build` into a circular-dep failure.
+    // The cellc install surface must now refuse the self-reference fail-closed.
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("Cell.toml"),
+        r#"
+[package]
+name = "demo"
+version = "0.1.0"
+
+[dependencies]
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("src").join("main.cell"),
+        r#"
+module demo::main
+
+resource Token has store, replace, relock, consume {
+    amount: u64,
+}
+
+action mint(amount: u64) -> Token {
+    verification
+        create Token { amount: amount }
+}
+"#,
+    )
+    .unwrap();
+
+    let install = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("install").arg("--path").arg(".").output().unwrap();
+
+    assert!(!install.status.success(), "self path install must be rejected");
+    let stderr = String::from_utf8_lossy(&install.stderr);
+    assert!(
+        stderr.contains("refusing to add self-dependency") || stderr.contains("current package root"),
+        "expected self-dep refusal, got: {stderr}"
+    );
+
+    // Cell.toml must not have gained a dependencies row.
+    let manifest_text = std::fs::read_to_string(root.join("Cell.toml")).unwrap();
+    let manifest: toml::Value = manifest_text.parse().unwrap();
+    let deps = manifest.get("dependencies").and_then(|d| d.as_table()).map(|t| t.len()).unwrap_or(0);
+    assert_eq!(deps, 0, "no dependency row should be written for a self path install");
+}
+
+#[test]
+fn cellc_install_rejects_self_name_dependency() {
+    // `cellc install demo --path <somewhere>` where the package's own name is
+    // 'demo' must be rejected: a package cannot list itself as a dependency.
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("Cell.toml"),
+        r#"
+[package]
+name = "demo"
+version = "0.1.0"
+
+[dependencies]
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("src").join("main.cell"),
+        r#"
+module demo::main
+
+resource Token has store, replace, relock, consume {
+    amount: u64,
+}
+
+action mint(amount: u64) -> Token {
+    verification
+        create Token { amount: amount }
+}
+"#,
+    )
+    .unwrap();
+
+    // Even when the path points somewhere else, an explicit self-name dependency
+    // is a logical circular dep and must be rejected.
+    let install = Command::new(env!("CARGO_BIN_EXE_cellc"))
+        .current_dir(root)
+        .arg("install")
+        .arg("demo")
+        .arg("--path")
+        .arg("./src")
+        .output()
+        .unwrap();
+
+    assert!(!install.status.success(), "self name install must be rejected");
+    let stderr = String::from_utf8_lossy(&install.stderr);
+    assert!(
+        stderr.contains("refusing to add self-dependency") && stderr.contains("cannot depend on itself"),
+        "expected self-name refusal, got: {stderr}"
+    );
+}
+
+#[test]
+fn cellc_add_rejects_self_name_dependency() {
+    // `cellc add` (manifest-mutating, distinct from `cellc install`) shares the
+    // same self-dep hazard and must also be fail-closed.
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("Cell.toml"),
+        r#"
+[package]
+name = "demo"
+version = "0.1.0"
+
+[dependencies]
+"#,
+    )
+    .unwrap();
+
+    let add = Command::new(env!("CARGO_BIN_EXE_cellc"))
+        .current_dir(root)
+        .arg("add")
+        .arg("demo")
+        .arg("--path")
+        .arg("./src")
+        .output()
+        .unwrap();
+
+    assert!(!add.status.success(), "self name add must be rejected");
+    let stderr = String::from_utf8_lossy(&add.stderr);
+    assert!(stderr.contains("refusing to add self-dependency"), "expected self-dep refusal, got: {stderr}");
+}
+
+#[test]
+fn cellc_build_writes_lockfile_deployment_ref_from_deployed_toml() {
+    // `cellc build` is the canonical place where Cell.lock gets refreshed.
+    // When a Deployed.toml is present, build must bridge its deployment
+    // records into the lockfile so that `cellc registry verify` does not
+    // always fail with "deployment for network 'X' is missing from Cell.lock".
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("Cell.toml"),
+        r#"
+[package]
+name = "demo"
+version = "0.1.0"
+
+[dependencies]
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("src").join("main.cell"),
+        r#"
+module demo::main
+
+resource Token has store, replace, relock, consume {
+    amount: u64,
+}
+
+action mint(amount: u64) -> Token {
+    verification
+        create Token { amount: amount }
+}
+"#,
+    )
+    .unwrap();
+
+    // First build without Deployed.toml to capture the locked build identity.
+    let build = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("build").output().unwrap();
+    assert!(build.status.success(), "stderr: {}", String::from_utf8_lossy(&build.stderr));
+
+    let lockfile: cellscript::package::Lockfile = toml::from_str(&std::fs::read_to_string(root.join("Cell.lock")).unwrap()).unwrap();
+    assert!(lockfile.package_build.is_some(), "Cell.lock must carry build identity");
+    assert!(lockfile.deployment.is_empty(), "no deployment section when Deployed.toml is absent");
+
+    // Now write a Deployed.toml that matches the locked build identity and
+    // build again. The lockfile should now carry a [deployment.devnet] entry.
+    let artifact_hash = lockfile.package_build.as_ref().unwrap().artifact_hash.as_deref().unwrap();
+    let metadata_hash = lockfile.package_build.as_ref().unwrap().metadata_hash.as_deref().unwrap();
+    let schema_hash = lockfile.package_build.as_ref().unwrap().schema_hash.as_deref().unwrap();
+    let abi_hash = lockfile.package_build.as_ref().unwrap().abi_hash.as_deref().unwrap();
+    let constraints_hash = lockfile.package_build.as_ref().unwrap().constraints_hash.as_deref().unwrap();
+    let source_hash = lockfile.package.source_hash.as_deref().unwrap();
+    let compiler_version = lockfile.package_build.as_ref().unwrap().compiler_version.as_deref().unwrap();
+    let deployed = format!(
+        r#"version = 1
+schema = "cellscript-ckb-deployment-manifest-v0.19"
+
+[package]
+name = "demo"
+version = "0.1.0"
+source_hash = "{source_hash}"
+
+[build]
+compiler_version = "{compiler_version}"
+artifact_hash = "{artifact_hash}"
+metadata_hash = "{metadata_hash}"
+schema_hash = "{schema_hash}"
+abi_hash = "{abi_hash}"
+constraints_hash = "{constraints_hash}"
+
+[[deployments]]
+name = "demo-mock"
+status = "active"
+network = "devnet"
+chain_id = "ckb-devnet"
+tx_hash = "0x0000000000000000000000000000000000000000000000000000000000000001"
+output_index = 0
+code_hash = "{artifact_hash}"
+data_hash = "{artifact_hash}"
+hash_type = "data1"
+dep_type = "code"
+out_point = "0x0000000000000000000000000000000000000000000000000000000000000001:0"
+artifact_hash = "{artifact_hash}"
+metadata_hash = "{metadata_hash}"
+schema_hash = "{schema_hash}"
+abi_hash = "{abi_hash}"
+constraints_hash = "{constraints_hash}"
+compiler_version = "{compiler_version}"
+"#
+    );
+    std::fs::write(root.join("Deployed.toml"), deployed).unwrap();
+
+    let build2 = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("build").output().unwrap();
+    assert!(build2.status.success(), "stderr: {}", String::from_utf8_lossy(&build2.stderr));
+
+    let lockfile2: cellscript::package::Lockfile = toml::from_str(&std::fs::read_to_string(root.join("Cell.lock")).unwrap()).unwrap();
+    let devnet = lockfile2
+        .deployment
+        .get("devnet")
+        .expect("Cell.lock must carry a [deployment.devnet] entry after build bridges Deployed.toml");
+    assert_eq!(devnet.record, "0x0000000000000000000000000000000000000000000000000000000000000001:0");
+    assert_eq!(devnet.code_hash.as_deref(), Some(artifact_hash));
+    assert_eq!(devnet.data_hash.as_deref(), Some(artifact_hash));
+    assert_eq!(devnet.out_point.as_deref(), Some("0x0000000000000000000000000000000000000000000000000000000000000001:0"));
+    assert!(devnet.record_hash.is_some(), "record_hash must be computed for build-identity-matching deployment");
+
+    // Finally, registry verify on this clean fixture must succeed.
+    let verify =
+        Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("registry").arg("verify").arg("--json").output().unwrap();
+    assert!(
+        verify.status.success(),
+        "registry verify must pass after build bridges Deployed.toml: stderr: {}",
+        String::from_utf8_lossy(&verify.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&verify.stdout).unwrap();
+    assert_eq!(report["status"], "ok");
+    assert_eq!(report["violations"].as_array().map(|a| a.len()).unwrap_or(0), 0);
+}
+
+#[test]
+fn cellc_build_omits_lockfile_deployment_when_artifact_hash_mismatches() {
+    // When the Deployed.toml artifact_hash disagrees with the locked build
+    // identity, the deployment ref must be written with hash fields left None
+    // so that `registry verify` reports a deterministic build-identity mismatch
+    // violation rather than silently agreeing.
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("Cell.toml"),
+        r#"
+[package]
+name = "demo"
+version = "0.1.0"
+
+[dependencies]
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("src").join("main.cell"),
+        r#"
+module demo::main
+
+resource Token has store, replace, relock, consume {
+    amount: u64,
+}
+
+action mint(amount: u64) -> Token {
+    verification
+        create Token { amount: amount }
+}
+"#,
+    )
+    .unwrap();
+
+    let build = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("build").output().unwrap();
+    assert!(build.status.success(), "stderr: {}", String::from_utf8_lossy(&build.stderr));
+
+    // Deployed.toml with a wrong artifact_hash. The record field still points
+    // at the out_point, but the code/out_point/data/record_hash fields must
+    // be left None so the verifier can surface the build-identity mismatch.
+    let deployed = r#"version = 1
+schema = "cellscript-ckb-deployment-manifest-v0.19"
+
+[package]
+name = "demo"
+version = "0.1.0"
+source_hash = "fake"
+
+[build]
+compiler_version = "0.17.0"
+artifact_hash = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+metadata_hash = "0x00"
+schema_hash = "0x00"
+abi_hash = "0x00"
+constraints_hash = "0x00"
+
+[[deployments]]
+name = "demo-mock"
+status = "active"
+network = "devnet"
+chain_id = "ckb-devnet"
+tx_hash = "0x0000000000000000000000000000000000000000000000000000000000000001"
+output_index = 0
+code_hash = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+data_hash = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+hash_type = "data1"
+dep_type = "code"
+out_point = "0x0000000000000000000000000000000000000000000000000000000000000001:0"
+artifact_hash = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+"#;
+    std::fs::write(root.join("Deployed.toml"), deployed).unwrap();
+
+    let build2 = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("build").output().unwrap();
+    assert!(build2.status.success(), "stderr: {}", String::from_utf8_lossy(&build2.stderr));
+
+    let lockfile: cellscript::package::Lockfile = toml::from_str(&std::fs::read_to_string(root.join("Cell.lock")).unwrap()).unwrap();
+    let devnet =
+        lockfile.deployment.get("devnet").expect("Cell.lock must still record a deployment ref even when build identity mismatches");
+    assert_eq!(devnet.record, "0x0000000000000000000000000000000000000000000000000000000000000001:0");
+    assert!(devnet.code_hash.is_none());
+    assert!(devnet.out_point.is_none());
+    assert!(devnet.data_hash.is_none());
+    assert!(devnet.record_hash.is_none());
+
+    let verify =
+        Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("registry").arg("verify").arg("--json").output().unwrap();
+    let report: serde_json::Value = serde_json::from_slice(&verify.stdout).unwrap();
+    assert_eq!(report["status"], "failed");
+    let violations = report["violations"].as_array().unwrap();
+    // The ref carries no code_hash/out_point/data_hash/record_hash because
+    // the build identity did not match, so the verifier must surface at least
+    // one of the deterministic "no <field>" violations from the lockfile ref.
+    assert!(
+        violations.iter().any(|v| {
+            let s = v.as_str().unwrap_or("");
+            s.contains("has no code_hash")
+                || s.contains("has no out_point")
+                || s.contains("has no data_hash")
+                || s.contains("has no record_hash")
+        }),
+        "expected a 'has no <hash>' violation from the mismatched ref, got: {violations:?}"
+    );
+    // Additionally, the top-level build-identity comparison must surface the
+    // artifact_hash disagreement.
+    assert!(
+        violations.iter().any(|v| v.as_str().unwrap_or("").contains("artifact_hash mismatch")),
+        "expected artifact_hash mismatch violation, got: {violations:?}"
+    );
+}

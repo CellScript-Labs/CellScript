@@ -1268,6 +1268,7 @@ impl CommandExecutor {
             if !args.json {
                 println!("{} {} to {}", "Adding".cyan(), crate_name, target);
             }
+            validate_not_self_dependency(crate_name, &dependency, &manifest)?;
             dependency_map_mut(&mut manifest, args.dev, args.build).insert(crate_name.clone(), dependency.clone());
             added.push(crate_name.clone());
         }
@@ -3345,6 +3346,9 @@ impl CommandExecutor {
                 default_features: true,
             };
 
+            let manifest_for_check = pm.read_manifest()?;
+            validate_not_self_dependency(&crate_name, &Dependency::Detailed(dep.clone()), &manifest_for_check)?;
+
             pm.resolve_from_path(&crate_name, &path.to_string_lossy())?;
 
             let mut manifest = pm.read_manifest()?;
@@ -3398,6 +3402,7 @@ impl CommandExecutor {
             };
 
             let mut manifest = pm.read_manifest()?;
+            validate_not_self_dependency(&resolved_name, &dep, &manifest)?;
             manifest.dependencies.insert(resolved_name.clone(), dep);
             pm.write_manifest(&manifest)?;
 
@@ -7415,6 +7420,36 @@ fn validate_dependency_target_flags(dev: bool, build: bool) -> Result<()> {
     Ok(())
 }
 
+/// Reject self-dependency writes to the manifest. A package cannot list itself
+/// (or a path pointing at its own root) as a dependency because that turns the
+/// package graph into an immediate cycle. The empty-name edge case observed in
+/// 0.20 ("cellc install --path ." wrote a `[dependencies.""]` row that broke
+/// every subsequent `cellc build`) is the canonical failure this helper
+/// prevents.
+fn validate_not_self_dependency(crate_name: &str, dep: &Dependency, manifest: &crate::package::PackageManifest) -> Result<()> {
+    if !crate_name.trim().is_empty() && crate_name == manifest.package.name {
+        return Err(crate::error::CompileError::without_span(format!(
+            "refusing to add self-dependency: package '{}' cannot depend on itself",
+            manifest.package.name
+        )));
+    }
+    if let Dependency::Detailed(detailed) = dep {
+        if let Some(dep_path) = &detailed.path {
+            let dep_canon = std::path::Path::new(dep_path);
+            let manifest_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+            let dep_abs = dep_canon.canonicalize().unwrap_or_else(|_| manifest_dir.join(dep_canon));
+            let manifest_abs = manifest_dir.canonicalize().unwrap_or_else(|_| manifest_dir.clone());
+            if dep_abs == manifest_abs {
+                return Err(crate::error::CompileError::without_span(format!(
+                    "refusing to add self-dependency: path '{}' resolves to the current package root",
+                    dep_path
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn dependency_target_label(dev: bool, build: bool) -> &'static str {
     if build {
         "build-dependencies"
@@ -7484,8 +7519,53 @@ fn refresh_lockfile_from_build(root: &Path, metadata: &CompileMetadata) -> Resul
     lockfile.package = lockfile_package_info(root, &manifest)?;
     lockfile.replace_with_resolved(manager.get_resolved());
     lockfile.package_build = Some(locked_build_info_from_metadata(metadata)?);
+    refresh_lockfile_deployment_refs(root, &mut lockfile);
     lockfile.write_to_root(root)?;
     Ok(())
+}
+
+/// Bridge Deployed.toml deployment records into Cell.lock. Without this,
+/// `cellc registry verify` would always fail with "deployment for network 'X'
+/// is missing from Cell.lock" because nothing in the production build pipeline
+/// ever wrote a `lockfile.deployment` entry. We only keep a record if its
+/// deployment name + tx_hash + output_index match a real Deployed.toml entry;
+/// stale or duplicate networks are dropped. Records that fail the build-identity
+/// match (artifact_hash / metadata_hash / etc. mismatch with Cell.lock's locked
+/// build) are kept but their hash fields are left None so the registry verifier
+/// can surface the mismatch as a violation instead of pretending the deployment
+/// is consistent with the locked build.
+fn refresh_lockfile_deployment_refs(root: &Path, lockfile: &mut crate::package::Lockfile) {
+    let deployed = match crate::package::DeployedManifest::read_from_root(root) {
+        Ok(Some(manifest)) => manifest,
+        Ok(None) => return,
+        Err(_) => return,
+    };
+    let locked_build = lockfile.package_build.as_ref();
+    let mut next: BTreeMap<String, crate::package::LockfileDeploymentRef> = BTreeMap::new();
+    for record in deployed.deployments {
+        if record.network.trim().is_empty() {
+            continue;
+        }
+        if next.contains_key(&record.network) {
+            // First-write wins; later duplicates from Deployed.toml are dropped
+            // to keep Cell.lock deterministic for the same source tree.
+            continue;
+        }
+        let artifact_match = match (&record.artifact_hash, locked_build.and_then(|b| b.artifact_hash.as_ref())) {
+            (Some(a), Some(b)) => a == b,
+            _ => false,
+        };
+        let record_str = record.out_point.clone();
+        let record_hash = if artifact_match { hash_json_value("deployment record", &record).ok() } else { None };
+        let code_hash = if artifact_match { Some(record.code_hash.clone()) } else { None };
+        let out_point = if artifact_match { Some(record.out_point.clone()) } else { None };
+        let data_hash = if artifact_match { Some(record.data_hash.clone()) } else { None };
+        next.insert(
+            record.network.clone(),
+            crate::package::LockfileDeploymentRef { record: record_str, record_hash, code_hash, out_point, data_hash },
+        );
+    }
+    lockfile.deployment = next;
 }
 
 fn lockfile_package_info(root: &Path, manifest: &crate::package::PackageManifest) -> Result<crate::package::LockfilePackageInfo> {
