@@ -66,6 +66,9 @@ colored = "2.1"
 camino = "1.1"
 ckb-vm = { version = "0.24", features = ["asm", "detect-asm"], optional = true }
 
+# NovaSeal certifier uses sha2 in src/cli/novaseal_certification.rs
+sha2 = "0.10"
+
 # LSP
 tower-lsp = "0.20"
 tokio = { version = "1", features = ["full"] }

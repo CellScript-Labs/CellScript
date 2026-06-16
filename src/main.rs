@@ -122,6 +122,7 @@ fn main() {
                     | "registry-verify"
                     | "package-verify"
                     | "registry-add"
+                    | "certify"
             )
         })
         .unwrap_or(false)
