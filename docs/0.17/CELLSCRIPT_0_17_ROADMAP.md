@@ -624,8 +624,8 @@ The first target subset:
 
 **Acceptance**
 
-- `docs/0.17/ickb_diff_results.md` contains executed results, not only
-  `MODEL_LEVEL_ONLY` rows.
+- `docs/0.17/ickb_production_equivalence_gate.md` contains executed
+  results, not only `MODEL_LEVEL_ONLY` rows.
 - Any non-equivalence is recorded as either a CellScript bug, unsupported
   semantic, or intentional scope difference.
 
