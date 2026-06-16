@@ -276,6 +276,63 @@ check_novaseal_certify_runs() {
     printf 'NovaSeal certifier runtime check passed (certify exit=%d, schema=%s).\n' "$exit_code" "$schema"
 }
 
+# Phase 1 end-to-end invariant. The 0.19 closure shipped the package / lockfile
+# / Deployed.toml data model and the 0.20 close-out had to (1) reject
+# self-dependency writes from cellc install / cellc add, and (2) make
+# cellc build actually bridge Deployed.toml deployment records into
+# Cell.lock.[deployment.<network>] so that cellc registry verify can pass
+# end-to-end without manual patching. Both invariants used to be missing
+# and would silently re-regress on any future refactor. This check
+# text-greps the source tree to catch a regression before it ships.
+check_phase1_end_to_end_invariant() {
+    local missing=0
+
+    # Bug 1: cellc install --path <self_root> used to write a [dependencies.""]
+    # row that broke every subsequent cellc build with a circular-dep error.
+    # Reject any self-dependency write at the cellc install / cellc add
+    # boundary.
+    if ! rg --quiet -n 'fn validate_not_self_dependency' src/cli/commands.rs; then
+        printf 'Phase 1 end-to-end invariant: src/cli/commands.rs does not declare fn validate_not_self_dependency\n' >&2
+        missing=1
+    fi
+    if ! rg --quiet -n 'validate_not_self_dependency' src/cli/commands.rs; then
+        printf 'Phase 1 end-to-end invariant: validate_not_self_dependency is declared but never called from src/cli/commands.rs\n' >&2
+        missing=1
+    fi
+
+    # Bug 2: cellc build must bridge Deployed.toml deployment records into
+    # Cell.lock.[deployment.<network>] so that registry verify can pass.
+    if ! rg --quiet -n 'fn refresh_lockfile_deployment_refs' src/cli/commands.rs; then
+        printf 'Phase 1 end-to-end invariant: src/cli/commands.rs does not declare fn refresh_lockfile_deployment_refs\n' >&2
+        missing=1
+    fi
+    # The call must be inside refresh_lockfile_from_build (not just sitting in
+    # the file as a no-op), so look for the un-commented invocation form.
+    if ! rg --quiet -n '^\s*refresh_lockfile_deployment_refs\(' src/cli/commands.rs; then
+        printf 'Phase 1 end-to-end invariant: refresh_lockfile_deployment_refs is not invoked from refresh_lockfile_from_build\n' >&2
+        missing=1
+    fi
+
+    # Test coverage for both fixes. These tests are the only thing that
+    # will catch a future refactor that breaks either invariant.
+    for test_name in \
+        cellc_install_rejects_self_path_dependency \
+        cellc_install_rejects_self_name_dependency \
+        cellc_add_rejects_self_name_dependency \
+        cellc_build_writes_lockfile_deployment_ref_from_deployed_toml \
+        cellc_build_omits_lockfile_deployment_when_artifact_hash_mismatches; do
+        if ! rg --quiet -n "fn ${test_name}\b" tests/cli.rs; then
+            printf 'Phase 1 end-to-end invariant: tests/cli.rs is missing the %s integration test\n' "$test_name" >&2
+            missing=1
+        fi
+    done
+
+    if [ "$missing" -ne 0 ]; then
+        exit 1
+    fi
+    printf 'Phase 1 end-to-end invariant passed.\n'
+}
+
 check_action_builder_toolchain() {
     local output_dir
     output_dir="${TMPDIR:-/tmp}/cellscript-release-gate-builder-$MODE"
@@ -321,6 +378,7 @@ run_common_gate() {
     check_grammar_governance_regression
     check_novaseal_certify_invariant
     check_novaseal_certify_runs
+    check_phase1_end_to_end_invariant
 }
 
 run_quick_gate() {

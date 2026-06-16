@@ -199,6 +199,7 @@ def main() -> int:
             "generated builder",
             "check_novaseal_certify_invariant",
             "check_novaseal_certify_runs",
+            "check_phase1_end_to_end_invariant",
         ],
     )
     require_contains(
