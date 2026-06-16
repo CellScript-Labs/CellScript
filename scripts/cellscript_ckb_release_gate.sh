@@ -210,6 +210,72 @@ check_grammar_governance_regression() {
     printf 'Grammar governance regression check passed.\n'
 }
 
+# Structural invariant: the NovaSeal certification surface must not be lost
+# again. After the 0.17 merge accidentally dropped src/cli/novaseal_certification.rs
+# and the cellc certify subcommand, every release gate must verify the four
+# pieces that wire it together still exist. This check is deliberately text-grep
+# based so it catches any future merge that drops the file or forgets to
+# re-register the module, dispatcher, or main.rs whitelist entry.
+check_novaseal_certify_invariant() {
+    local missing=0
+    if [ ! -f "src/cli/novaseal_certification.rs" ]; then
+        printf 'NovaSeal certifier invariant: src/cli/novaseal_certification.rs is missing\n' >&2
+        missing=1
+    fi
+    if ! rg --quiet -n '^mod novaseal_certification;' src/cli/mod.rs; then
+        printf 'NovaSeal certifier invariant: src/cli/mod.rs does not declare mod novaseal_certification;\n' >&2
+        missing=1
+    fi
+    if ! rg --quiet -n 'Command::Certify' src/cli/commands.rs; then
+        printf 'NovaSeal certifier invariant: src/cli/commands.rs does not dispatch Command::Certify\n' >&2
+        missing=1
+    fi
+    if ! rg --quiet -n '\|\s*"certify"' src/main.rs; then
+        printf 'NovaSeal certifier invariant: src/main.rs whitelist does not include "certify"\n' >&2
+        missing=1
+    fi
+    if [ "$missing" -ne 0 ]; then
+        exit 1
+    fi
+    printf 'NovaSeal certifier structural invariant passed.\n'
+}
+
+# Runtime invariant: the built cellc binary must actually expose certify and
+# refuse to silently no-op. We do not assert pass/fail of the certification
+# (that depends on fresh live reports). We only assert the binary knows the
+# subcommand, the plugin id is wired, and the produced JSON has the expected
+# schema. This is the gate that catches future drift after the merge.
+check_novaseal_certify_runs() {
+    local cellc_bin="target/debug/cellc"
+    if [ ! -x "$cellc_bin" ]; then
+        run cargo build --locked -p cellscript --bin cellc
+        cellc_bin="target/debug/cellc"
+    fi
+    if ! "$cellc_bin" certify --help >/dev/null 2>&1; then
+        printf 'NovaSeal certifier runtime: cellc certify --help failed\n' >&2
+        exit 1
+    fi
+    local cert_report
+    cert_report="$(mktemp)"
+    local exit_code=0
+    "$cellc_bin" certify --plugin novaseal-profile-v0 --repo-root . --output "$cert_report" >/dev/null 2>&1 || exit_code=$?
+    if [ ! -s "$cert_report" ]; then
+        printf 'NovaSeal certifier runtime: cellc certify did not write a report to %s\n' "$cert_report" >&2
+        rm -f "$cert_report"
+        exit 1
+    fi
+    local schema
+    schema="$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('schema',''))" "$cert_report" 2>/dev/null || true)"
+    rm -f "$cert_report"
+    if [ "$schema" != "cellscript-certification-report-v0.1" ]; then
+        printf 'NovaSeal certifier runtime: unexpected certification schema "%s"\n' "$schema" >&2
+        exit 1
+    fi
+    # exit_code is informational; we do not fail on certification outcome
+    # because the only thing this gate protects is "certify still works".
+    printf 'NovaSeal certifier runtime check passed (certify exit=%d, schema=%s).\n' "$exit_code" "$schema"
+}
+
 check_action_builder_toolchain() {
     local output_dir
     output_dir="${TMPDIR:-/tmp}/cellscript-release-gate-builder-$MODE"
@@ -253,6 +319,8 @@ run_common_gate() {
     check_ckb_release_docs
     check_ckb_acceptance_boundaries
     check_grammar_governance_regression
+    check_novaseal_certify_invariant
+    check_novaseal_certify_runs
 }
 
 run_quick_gate() {

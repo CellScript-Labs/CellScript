@@ -197,6 +197,8 @@ def main() -> int:
             "cellc gen-builder",
             "npm --prefix",
             "generated builder",
+            "check_novaseal_certify_invariant",
+            "check_novaseal_certify_runs",
         ],
     )
     require_contains(
@@ -206,6 +208,25 @@ def main() -> int:
             "cellc gen-builder --target typescript",
             "cellc package verify",
             "cellc registry verify --live",
+        ],
+    )
+    require_contains(
+        "src/main.rs",
+        [
+            '"certify"',
+        ],
+    )
+    require_contains(
+        "src/cli/mod.rs",
+        [
+            "mod novaseal_certification;",
+        ],
+    )
+    require_contains(
+        "src/cli/commands.rs",
+        [
+            "Command::Certify",
+            "novaseal-profile-v0",
         ],
     )
     require_contains(
