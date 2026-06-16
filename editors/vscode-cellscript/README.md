@@ -75,6 +75,8 @@ and audit-bundle reports.
 
 ## Canonical Authoring Surface
 
+This README documents the current 0.17 authoring surface for CellScript.
+
 The extension snippets and grammar follow the signature-direction action
 surface:
 

@@ -732,6 +732,7 @@ registry dependency resolution remain experimental and fail-closed.
 | `cellc info` | Print manifest and package information |
 | `cellc package verify` | Verify package/source/build identity against `Cell.lock` |
 | `cellc registry verify` | Verify deployment identity against `Cell.lock` and `Deployed.toml`; `--live` adds CKB RPC evidence |
+| `cellc certify --plugin novaseal-profile-v0` | Run the deterministic compiler-hosted NovaSeal profile certification (consumes `target/novaseal-*.json` and the local certifier source) |
 | `cellc repl` | Start the interactive REPL |
 | `cellc run` | Run ELF entrypoints via VM runner or simulator |
 | `cellc publish` / registry `install` / registry-backed `update` / `login` | Experimental registry flows, fail-closed |

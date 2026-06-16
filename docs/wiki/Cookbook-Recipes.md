@@ -124,10 +124,10 @@ destroy_instance(badge, identity_field = badge_id)
 burn_amount(token, field = amount)
 ```
 
-In `--primitive-strict=0.15` mode, bare `destroy value` requires the `consume +
-burn` kernel effects instead of the legacy `destroy` attribute. Keep the policy explicit
-when reviewers must distinguish output absence, identity consumption, instance
-consumption, and quantity burn.
+In `--primitive-compat=0.15` legacy compatibility mode, bare `destroy value` requires
+the `consume + burn` kernel effects instead of the legacy `destroy` attribute.
+Keep the policy explicit when reviewers must distinguish output absence,
+identity consumption, instance consumption, and quantity burn.
 
 ## Recipe: Write An Honest Lock Predicate
 
