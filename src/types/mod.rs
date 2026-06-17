@@ -4839,6 +4839,13 @@ impl<'a> TypeChecker<'a> {
                         }
                         return Ok(Type::Hash);
                     }
+                    "hash_pair" => {
+                        self.validate_builtin_arity(name, 2, arg_types, call.span)?;
+                        if arg_types[0] != Type::Hash || arg_types[1] != Type::Hash {
+                            return Err(CompileError::new("hash_pair expects (Hash, Hash)", call.span));
+                        }
+                        return Ok(Type::Hash);
+                    }
                     "hash_blake2b" => {
                         self.validate_builtin_arity(name, 1, arg_types, call.span)?;
                         if arg_types[0] != Type::Hash {
@@ -6418,8 +6425,10 @@ action hidden_mutation(flag: bool) {
 module test
 
 action symbol() -> [u8; 4]
-where
-    return b"TEST"
+{
+    verification
+        return b"TEST"
+}
 "#,
         );
 
@@ -6438,11 +6447,13 @@ enum Flag {
 }
 
 action bad(flag: Flag) -> u64
-where
-    return match flag {
-        _ => { 1 },
-        Flag::Off => { 2 },
-    }
+{
+    verification
+        return match flag {
+            _ => { 1 },
+            Flag::Off => { 2 },
+        }
+}
 "#,
         );
 

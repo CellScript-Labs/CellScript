@@ -4616,6 +4616,9 @@ impl IrGenerator {
                 "hash_chain" if call.args.len() == 1 => {
                     self.lower_simple_runtime_call("__ckb_hash_chain", "hash_chain", IrType::Hash, &call.args, current, blocks, vars)
                 }
+                "hash_pair" if call.args.len() == 2 => {
+                    self.lower_simple_runtime_call("__ckb_hash_pair", "hash_pair", IrType::Hash, &call.args, current, blocks, vars)
+                }
                 "hash_blake2b" if call.args.len() == 1 => self.lower_simple_runtime_call(
                     "__ckb_hash_blake2b",
                     "hash_blake2b",
@@ -6651,8 +6654,10 @@ action check(x: u64, y: u64) -> u64 {
 module test
 
 action symbol() -> [u8; 4]
-where
-    return b"TEST"
+{
+    verification
+        return b"TEST"
+}
 "#;
         let ir = parse_and_lower(source);
         let action = ir

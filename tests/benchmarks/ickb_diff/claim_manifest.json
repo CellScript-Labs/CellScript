@@ -14,7 +14,7 @@
     "header_deps": "DAO and receipt rows include positive and malformed header_dep permutations",
     "outputs_data": "normalized fixtures bind outputs and outputs_data by index and include malformed/trailing data rejects",
     "witnesses": "DAO withdrawal rows include witness input_type placement, empty/short/long, missing, and wrong-index rejects",
-    "capacity_fee_tx_size_cycles": "each active differential row records tx_size_bytes, occupied_capacity_shannons, fee_shannons, original_cycles, and cellscript_cycles",
+    "capacity_fee_tx_size_cycles": "each active differential row records tx_size_bytes, occupied_capacity_shannons, fee_shannons, original_cycles, and cellscript_cycles; pass rows must carry positive cycle counts, while reject rows preserve exit-code/failure-mode evidence and may report zero cycles from ckb-testtool failure accounting",
     "deployment_manifest": "artifact hashes and script-role evidence are checked for the differential rows; registry-backed deployment resolution is 0.19 scope",
     "builder_plan": "not claimed by this manifest; 0.19 owns live-cell resolution and CCC-compatible transaction drafts"
   },

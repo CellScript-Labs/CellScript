@@ -903,6 +903,8 @@ pub struct LockfilePackageInfo {
     pub namespace: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compiler_source_hash: Option<String>,
 }
 
 /// A reference from Cell.lock [deployment.<network>] to a Deployed.toml entry.

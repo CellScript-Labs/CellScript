@@ -1,0 +1,8 @@
+{
+  "schema": "evolving-dob-fixture-v1",
+  "fixture": "replay_generation_reject",
+  "action": "evolve_dob_state",
+  "expected": "rejected",
+  "coverage": "source-guard-present",
+  "description": "A successor generation equal to or below the consumed state generation is rejected."
+}

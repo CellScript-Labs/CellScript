@@ -273,12 +273,13 @@ fn is_v014_runtime_helper(func: &str) -> bool {
             | "__ckb_require_epoch_relative"
             | "__ckb_occupied_capacity"
             | "__ckb_hash_chain"
+            | "__ckb_hash_pair"
             | "__ckb_hash_blake2b"
     )
 }
 
 fn is_ckb_fixed_hash_helper(func: &str) -> bool {
-    matches!(func, "__ckb_hash_chain" | "__ckb_hash_blake2b")
+    matches!(func, "__ckb_hash_chain" | "__ckb_hash_pair" | "__ckb_hash_blake2b")
 }
 
 #[derive(Debug, Clone)]
@@ -9088,13 +9089,48 @@ impl CodeGenerator {
             self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
             return Ok(true);
         };
-        let Some(arg) = args.first() else {
-            self.emit("# cellscript abi: fail closed because hash helper is missing input");
+        let Some(dest_offset) = self.fixed_byte_local_offsets.get(&dest.id).copied() else {
+            self.emit("# cellscript abi: fail closed because hash helper output buffer was not allocated");
             self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
             return Ok(true);
         };
-        let Some(dest_offset) = self.fixed_byte_local_offsets.get(&dest.id).copied() else {
-            self.emit("# cellscript abi: fail closed because hash helper output buffer was not allocated");
+        if func == "__ckb_hash_pair" {
+            if args.len() != 2 {
+                self.emit("# cellscript abi: fail closed because hash_pair needs two inputs");
+                self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+                return Ok(true);
+            }
+            let Some(left) = self.expected_fixed_byte_source(&args[0], 32) else {
+                self.emit("# cellscript abi: fail closed because hash_pair left input is not a 32-byte value");
+                self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+                return Ok(true);
+            };
+            let Some(right) = self.expected_fixed_byte_source(&args[1], 32) else {
+                self.emit("# cellscript abi: fail closed because hash_pair right input is not a 32-byte value");
+                self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+                return Ok(true);
+            };
+            self.emit_prepare_fixed_byte_source(&left, 32, "hash_pair left input");
+            self.emit_prepare_fixed_byte_source(&right, 32, "hash_pair right input");
+            if !self.emit_fixed_byte_source_pointer_or_const_to("a0", &left) {
+                self.emit("# cellscript abi: fail closed because hash_pair left pointer is not materializable");
+                self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+                return Ok(true);
+            }
+            if !self.emit_fixed_byte_source_pointer_or_const_to("a1", &right) {
+                self.emit("# cellscript abi: fail closed because hash_pair right pointer is not materializable");
+                self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+                return Ok(true);
+            }
+            self.emit_sp_addi("a2", dest_offset);
+            self.emit("call __ckb_hash_pair");
+            self.emit_return_on_syscall_error(CellScriptRuntimeError::SyscallFailed);
+            self.emit_sp_addi("t0", dest_offset);
+            self.emit_stack_store("t0", dest.id * 8);
+            return Ok(true);
+        }
+        let Some(arg) = args.first() else {
+            self.emit("# cellscript abi: fail closed because hash helper is missing input");
             self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
             return Ok(true);
         };
@@ -11120,6 +11156,9 @@ impl CodeGenerator {
                 self.emit("j __ckb_hash_blake2b");
             }
         }
+        if referenced_helpers.contains("__ckb_hash_pair") {
+            self.emit_runtime_blake2b_hash_pair(enabled);
+        }
         if referenced_helpers.contains("__ckb_hash_chain") || referenced_helpers.contains("__ckb_hash_blake2b") {
             self.emit_runtime_blake2b_hash32(enabled);
         }
@@ -11220,16 +11259,118 @@ impl CodeGenerator {
         self.emit("ret");
     }
 
+    fn emit_runtime_blake2b_hash_pair(&mut self, enabled: bool) {
+        self.emit_global("__ckb_hash_pair");
+        self.emit_label("__ckb_hash_pair");
+        self.emit("# cellscript abi: hash_pair combines two 32-byte Hash inputs with CKB Blake2b-256; a0=left[32], a1=right[32], a2=output[32]");
+        if !enabled {
+            self.emit_fail(CellScriptRuntimeError::SyscallFailed);
+            return;
+        }
+
+        const IV: [u64; 8] = [
+            0x6a09e667f3bcc908,
+            0xbb67ae8584caa73b,
+            0x3c6ef372fe94f82b,
+            0xa54ff53a5f1d36f1,
+            0x510e527fade682d1,
+            0x9b05688c2b3e6c1f,
+            0x1f83d9abfb41bd6b,
+            0x5be0cd19137e2179,
+        ];
+        const SIGMA: [[usize; 16]; 12] = [
+            [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+            [14, 10, 4, 8, 9, 15, 13, 6, 1, 12, 0, 2, 11, 7, 5, 3],
+            [11, 8, 12, 0, 5, 2, 15, 13, 10, 14, 3, 6, 7, 1, 9, 4],
+            [7, 9, 3, 1, 13, 12, 11, 14, 2, 6, 5, 10, 4, 0, 15, 8],
+            [9, 0, 5, 7, 2, 4, 10, 15, 14, 1, 11, 12, 6, 8, 3, 13],
+            [2, 12, 6, 10, 0, 11, 8, 3, 4, 13, 7, 5, 15, 14, 1, 9],
+            [12, 5, 1, 15, 14, 13, 4, 10, 0, 7, 6, 3, 9, 2, 8, 11],
+            [13, 11, 7, 14, 12, 1, 3, 9, 5, 0, 15, 4, 8, 6, 2, 10],
+            [6, 15, 14, 9, 11, 3, 0, 8, 12, 2, 13, 7, 1, 4, 10, 5],
+            [10, 2, 8, 4, 7, 6, 1, 5, 15, 11, 9, 14, 3, 12, 13, 0],
+            [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+            [14, 10, 4, 8, 9, 15, 13, 6, 1, 12, 0, 2, 11, 7, 5, 3],
+        ];
+
+        const H_BASE: usize = 0;
+        const V_BASE: usize = 64;
+        const M_BASE: usize = 192;
+        const FRAME: usize = 320;
+
+        let personal0 = u64::from_le_bytes(*b"ckb-defa");
+        let personal1 = u64::from_le_bytes(*b"ult-hash");
+        let h = [IV[0] ^ 0x01010020, IV[1], IV[2], IV[3], IV[4], IV[5], IV[6] ^ personal0, IV[7] ^ personal1];
+
+        self.emit_large_addi("sp", "sp", -(FRAME as i64));
+        for (index, value) in h.iter().enumerate() {
+            self.emit_blake2b_store_const(*value, H_BASE + index * 8);
+        }
+        for index in 0..4 {
+            self.emit_blake2b_load_input_word(index, M_BASE + index * 8);
+        }
+        for index in 0..4 {
+            self.emit_blake2b_load_input_word_from("a1", index, M_BASE + (index + 4) * 8);
+        }
+        for index in 8..16 {
+            self.emit_stack_store("zero", M_BASE + index * 8);
+        }
+        for index in 0..8 {
+            self.emit_stack_load("t0", H_BASE + index * 8);
+            self.emit_stack_store("t0", V_BASE + index * 8);
+        }
+        for (index, value) in IV.iter().enumerate() {
+            self.emit_blake2b_store_const(*value, V_BASE + (index + 8) * 8);
+        }
+        self.emit_stack_load("t0", V_BASE + 12 * 8);
+        self.emit("xori t0, t0, 64");
+        self.emit_stack_store("t0", V_BASE + 12 * 8);
+        self.emit_stack_load("t0", V_BASE + 14 * 8);
+        self.emit("xori t0, t0, -1");
+        self.emit_stack_store("t0", V_BASE + 14 * 8);
+
+        for round in SIGMA {
+            self.emit_blake2b_g(V_BASE, M_BASE, 0, 4, 8, 12, round[0], round[1]);
+            self.emit_blake2b_g(V_BASE, M_BASE, 1, 5, 9, 13, round[2], round[3]);
+            self.emit_blake2b_g(V_BASE, M_BASE, 2, 6, 10, 14, round[4], round[5]);
+            self.emit_blake2b_g(V_BASE, M_BASE, 3, 7, 11, 15, round[6], round[7]);
+            self.emit_blake2b_g(V_BASE, M_BASE, 0, 5, 10, 15, round[8], round[9]);
+            self.emit_blake2b_g(V_BASE, M_BASE, 1, 6, 11, 12, round[10], round[11]);
+            self.emit_blake2b_g(V_BASE, M_BASE, 2, 7, 8, 13, round[12], round[13]);
+            self.emit_blake2b_g(V_BASE, M_BASE, 3, 4, 9, 14, round[14], round[15]);
+        }
+
+        for index in 0..8 {
+            self.emit_stack_load("t0", H_BASE + index * 8);
+            self.emit_stack_load("t1", V_BASE + index * 8);
+            self.emit("xor t0, t0, t1");
+            self.emit_stack_load("t1", V_BASE + (index + 8) * 8);
+            self.emit("xor t0, t0, t1");
+            self.emit_stack_store("t0", H_BASE + index * 8);
+        }
+        for index in 0..4 {
+            self.emit_stack_load("t0", H_BASE + index * 8);
+            self.emit(format!("sd t0, {}(a2)", index * 8));
+        }
+        self.emit_large_addi("sp", "sp", FRAME as i64);
+        self.emit("li a0, 0");
+        self.emit("ret");
+    }
+
     fn emit_blake2b_store_const(&mut self, value: u64, stack_offset: usize) {
         self.emit(format!("li t0, 0x{:016x}", value));
         self.emit_stack_store("t0", stack_offset);
     }
 
     fn emit_blake2b_load_input_word(&mut self, word_index: usize, stack_offset: usize) {
+        self.emit_blake2b_load_input_word_from("a0", word_index, stack_offset);
+    }
+
+    fn emit_blake2b_load_input_word_from(&mut self, source_reg: &str, word_index: usize, stack_offset: usize) {
         self.emit("li t0, 0");
         for byte_index in 0..8 {
             let absolute = word_index * 8 + byte_index;
-            self.emit(format!("lbu t1, {}(a0)", absolute));
+            self.emit(format!("lbu t1, {}({})", absolute, source_reg));
             if byte_index > 0 {
                 self.emit(format!("slli t1, t1, {}", byte_index * 8));
             }

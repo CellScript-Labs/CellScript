@@ -36,6 +36,11 @@ proposals/novaseal/*
 !proposals/novaseal/dual-seal-profile-v0/**
 !proposals/novaseal/fiber-candidate-profile-v0/
 !proposals/novaseal/fiber-candidate-profile-v0/**
+!proposals/evolving-dob/
+proposals/evolving-dob/*
+!proposals/evolving-dob/evolving-dob-profile-v1/
+!proposals/evolving-dob/evolving-dob-profile-v1/**
+!proposals/evolving-dob/evolving-dob-profile-v1/Cell.lock
 proposals/novaseal/v0-mvp-skeleton/build/
 proposals/novaseal/v0-mvp-skeleton/target/
 proposals/novaseal/v0-mvp-skeleton/src/.cell/
@@ -66,6 +71,16 @@ proposals/novaseal/**/*.py[cod]
 proposals/novaseal/**/*.s
 proposals/novaseal/**/*.elf
 proposals/novaseal/**/*.meta.json
+proposals/evolving-dob/evolving-dob-profile-v1/build/
+proposals/evolving-dob/evolving-dob-profile-v1/target/
+proposals/evolving-dob/evolving-dob-profile-v1/.cell/
+proposals/evolving-dob/evolving-dob-profile-v1/src/.cell/
+proposals/evolving-dob/evolving-dob-profile-v1/scripts/__pycache__/
+proposals/evolving-dob/evolving-dob-profile-v1/.DS_Store
+proposals/evolving-dob/evolving-dob-profile-v1/**/*.py[cod]
+proposals/evolving-dob/evolving-dob-profile-v1/**/*.s
+proposals/evolving-dob/evolving-dob-profile-v1/**/*.elf
+proposals/evolving-dob/evolving-dob-profile-v1/**/*.meta.json
 
 # Keep translated prose out of the CellScript repository by default.
 # README_CH.md is the one maintained Chinese document.

@@ -1,0 +1,8 @@
+{
+  "schema": "evolving-dob-fixture-v1",
+  "fixture": "evolve_valid",
+  "action": "evolve_dob_state",
+  "expected": "accepted",
+  "coverage": "source-guard-present",
+  "description": "Consumes the active state line and replaces it with generation + 1, preserving Spore identity, Cluster identity, rule hash, decoder hash, owner lock, expiry, and computed event-chain continuity."
+}

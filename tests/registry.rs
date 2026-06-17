@@ -530,6 +530,7 @@ fn lockfile_with_build_and_deployment_round_trip() {
         version: "1.0.0".to_string(),
         namespace: Some("cellscript".to_string()),
         source_hash: Some("blake2b:0xfeed".to_string()),
+        compiler_source_hash: None,
     };
     lockfile.package_build = Some(LockedBuildInfo {
         compiler_version: Some("0.19.0".to_string()),
@@ -1036,6 +1037,7 @@ fn package_verify_detects_missing_source_hash() {
         version: "0.1.0".to_string(),
         namespace: None,
         source_hash: Some("deliberately_wrong_hash".to_string()),
+        compiler_source_hash: None,
     };
     lockfile.write_to_root(temp.path()).unwrap();
 

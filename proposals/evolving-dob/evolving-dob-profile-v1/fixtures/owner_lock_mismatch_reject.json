@@ -1,0 +1,8 @@
+{
+  "schema": "evolving-dob-fixture-v1",
+  "fixture": "owner_lock_mismatch_reject",
+  "action": "evolve_dob_state",
+  "expected": "rejected",
+  "coverage": "source-guard-present",
+  "description": "A successor intent whose owner_lock differs from the consumed state line is rejected."
+}

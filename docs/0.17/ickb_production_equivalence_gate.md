@@ -87,8 +87,8 @@ execution, or has mismatched status/exit-code evidence.
 
 ## Running The Gate
 
-The iCKB-specific gate is executable through Rust integration tests and the
-`verify-ckb-fixtures` CLI:
+The iCKB-specific executable gate is the Rust differential test suite. The
+`verify-ckb-fixtures` CLI is a committed-evidence manifest checker:
 
 ```bash
 cargo test --locked -p cellscript --test ickb_diff
@@ -98,15 +98,19 @@ cargo run --locked -p cellscript --bin cellc -- verify-ckb-fixtures tests/benchm
 
 `verify-ckb-fixtures` validates the standard CKB fixture manifest with the
 deterministic model runner and emits a manifest hash. It still reports
-`ckb_vm_execution = false`. In iCKB claim-manifest mode it reports
-`execution_level = DIFFERENTIAL_CKB_VM` and validates that every in-scope branch
-maps to matrix rows, production evidence, hardening thresholds, or explicit
-retired/out-of-scope notes. `tests/ickb_diff.rs` accepts the current `PROVEN`
-matrix only because every selected row is differential and the top-level
-evidence manifest is present. It still fails if any selected row lacks
-original-side execution, CellScript-side execution, matching pass/fail status,
-per-row execution evidence, or if active non-executable model assumptions
-reappear.
+`ckb_vm_execution = false`. In iCKB claim-manifest mode it still reports
+`ckb_vm_execution = false`, because the command does not run VM. It reports
+`execution_level = DIFFERENTIAL_CKB_VM_MANIFEST`,
+`committed_ckb_vm_evidence = true`, and validates that every in-scope branch maps
+to committed matrix rows, production evidence, hardening thresholds, or explicit
+retired/out-of-scope notes. It also checks the per-row execution evidence shape:
+status/exit-code consistency, canonical hashes, positive pass-row cycles,
+transaction size, occupied capacity, and named reject failure modes.
+`tests/ickb_diff.rs` accepts the current `PROVEN` matrix only because every
+selected row is differential and the top-level evidence manifest is present. It
+still fails if any selected row lacks original-side execution, CellScript-side
+execution, matching pass/fail status, per-row execution evidence, or if active
+non-executable model assumptions reappear.
 
 ## Current Enforcement
 

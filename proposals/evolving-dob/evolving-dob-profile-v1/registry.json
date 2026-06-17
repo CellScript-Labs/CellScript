@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "name": "evolving-dob-profile-v1",
+  "namespace": "dob",
+  "versions": [
+    {
+      "version": "1.0.0",
+      "tag": "v1.0.0",
+      "source_hash": "921e4118653a81eac3cb598a42bb92ac2f52a057085195b988a2ae73a78be239",
+      "cellscript_version": "0.17.0",
+      "dependencies": {},
+      "abi_index": "1110c3e0f455f4a76209e71d0b163bde9abe4d1f62349350070fa90e55e9685b",
+      "schema_hash": "861946f78628f4c2732c4bcc760f77a888daad4e4df5b0e3a57c80f6257d45b3",
+      "license": "MIT",
+      "released_at": "2026-06-16T17:13:40Z",
+      "yanked": false
+    }
+  ]
+}

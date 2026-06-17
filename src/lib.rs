@@ -4201,7 +4201,7 @@ fn incremental_cache_hit(path: &Utf8Path, source: &str, options: &CompileOptions
         hex_decode(hash_hex).unwrap_or([0u8; 32])
     };
 
-    Some(CompileResult {
+    let result = CompileResult {
         artifact_bytes,
         artifact_format: match metadata.artifact_format.as_str() {
             "RISC-V ELF" => ArtifactFormat::RiscvElf,
@@ -4211,7 +4211,9 @@ fn incremental_cache_hit(path: &Utf8Path, source: &str, options: &CompileOptions
         metadata,
         ast: ast::Module { name: String::new(), items: Vec::new(), span: crate::error::Span { start: 0, end: 0, line: 0, column: 0 } },
         cache_hit: true,
-    })
+    };
+    result.validate().ok()?;
+    Some(result)
 }
 
 /// Store compile result to incremental cache after a successful compile.
@@ -4243,10 +4245,15 @@ fn incremental_cache_dir(path: &Utf8Path) -> Option<Utf8PathBuf> {
 
 fn incremental_cache_key(source: &str, options: &CompileOptions) -> String {
     let mut key_input = String::new();
+    key_input.push_str("cellscript-incremental-cache-v2");
+    key_input.push_str(&format!("-compiler-{}", VERSION));
+    key_input.push_str(&format!("-metadata-{}", METADATA_SCHEMA_VERSION));
     key_input.push_str(&hex_encode(&ckb_blake2b256(source.as_bytes())));
     key_input.push_str(&format!("-O{}", options.opt_level));
     key_input.push_str(&format!("-{}", options.target.as_deref().unwrap_or("default")));
     key_input.push_str(&format!("-{}", options.target_profile.as_deref().unwrap_or("default")));
+    key_input.push_str(&format!("-debug{}", options.debug));
+    key_input.push_str(&format!("-primitive-{}", options.primitive_compat.as_deref().unwrap_or("default")));
     hex_encode(&ckb_blake2b256(key_input.as_bytes()))
 }
 
@@ -11174,6 +11181,20 @@ fn metadata_prelude_availability(
                         availability.fixed_value_vars.insert(dest.id);
                     }
                 }
+                ir::IrInstruction::Call { dest: Some(dest), func, args } if dest.ty == ir::IrType::Hash => {
+                    let fixed_hash_result = match func.as_str() {
+                        "__ckb_hash_chain" | "__ckb_hash_blake2b" => {
+                            args.first().is_some_and(|arg| metadata_fixed_value_available_with_width(arg, &availability, 32))
+                        }
+                        "__ckb_hash_pair" => {
+                            args.len() == 2 && args.iter().all(|arg| metadata_fixed_value_available_with_width(arg, &availability, 32))
+                        }
+                        _ => false,
+                    };
+                    if fixed_hash_result {
+                        availability.fixed_value_vars.insert(dest.id);
+                    }
+                }
                 ir::IrInstruction::Create { dest, .. }
                 | ir::IrInstruction::CreateUnique { dest, .. }
                 | ir::IrInstruction::ReplaceUnique { dest, .. } => {
@@ -12455,6 +12476,10 @@ fn body_ckb_runtime_features(
                 ir::IrInstruction::Call { func, .. } if func == "__ckb_hash_chain" => {
                     features.insert("profile-hash-chain".to_string());
                 }
+                ir::IrInstruction::Call { func, .. } if func == "__ckb_hash_pair" => {
+                    features.insert("profile-hash-pair".to_string());
+                    features.insert("ckb-blake2b".to_string());
+                }
                 ir::IrInstruction::Call { func, .. } if func == "__ckb_hash_blake2b" => {
                     features.insert("ckb-blake2b".to_string());
                 }
@@ -13011,6 +13036,7 @@ fn ckb_v014_runtime_access(func: &str) -> Option<(&'static str, &'static str, &'
         }
         "__ckb_occupied_capacity" => Some(("occupied-capacity", "CAPACITY_POLICY", "Output", "occupied_capacity")),
         "__ckb_hash_chain" => Some(("hash-chain", "CKB_BLAKE2B", "Profile", "hash_chain")),
+        "__ckb_hash_pair" => Some(("hash-pair", "CKB_BLAKE2B", "Profile", "hash_pair")),
         "__ckb_hash_blake2b" => Some(("hash-blake2b", "CKB_BLAKE2B", "Profile", "hash_blake2b")),
         _ => None,
     }
@@ -14563,9 +14589,9 @@ pub const NAME: &str = "cellc";
 mod tests {
     use super::{
         compile, compile_file, compile_file_with_entry_action, compile_file_with_entry_lock, compile_path,
-        decode_scheduler_witness_hex, default_output_path_for_input, encode_entry_witness_args_for_params, load_modules_for_input,
-        resolve_input_path, ActionMetadata, ArtifactFormat, CompileOptions, EntryWitnessArg, ENTRY_WITNESS_ABI_MAGIC,
-        SCHEDULER_WITNESS_ABI_MOLECULE,
+        decode_scheduler_witness_hex, default_output_path_for_input, encode_entry_witness_args_for_params, incremental_cache_key,
+        load_modules_for_input, resolve_input_path, ActionMetadata, ArtifactFormat, CompileOptions, EntryWitnessArg,
+        ENTRY_WITNESS_ABI_MAGIC, SCHEDULER_WITNESS_ABI_MOLECULE,
     };
     use crate::{ir, lexer, parser};
     use camino::{Utf8Path, Utf8PathBuf};
@@ -22737,6 +22763,31 @@ action main() -> u64 {
         assert_eq!(
             left_result.metadata.source_content_hash, right_result.metadata.source_content_hash,
             "path-independent source content hash must stay stable across equivalent source locations"
+        );
+    }
+
+    #[test]
+    fn incremental_cache_key_partitions_primitive_and_debug_modes() {
+        let release_elf = CompileOptions {
+            opt_level: 3,
+            target: Some("riscv64-elf".to_string()),
+            target_profile: Some("ckb".to_string()),
+            ..CompileOptions::default()
+        };
+        let strict_release_elf = CompileOptions { primitive_compat: Some("0.16".to_string()), ..release_elf.clone() };
+        let debug_release_elf = CompileOptions { debug: true, ..release_elf.clone() };
+
+        let release_key = incremental_cache_key(SIMPLE_PROGRAM, &release_elf);
+
+        assert_ne!(
+            release_key,
+            incremental_cache_key(SIMPLE_PROGRAM, &strict_release_elf),
+            "primitive strict metadata must not reuse a non-strict cache entry"
+        );
+        assert_ne!(
+            release_key,
+            incremental_cache_key(SIMPLE_PROGRAM, &debug_release_elf),
+            "debug artefacts must not reuse a non-debug cache entry"
         );
     }
 

@@ -335,6 +335,7 @@ fn e2e_publish_install_verify_offline_git() {
         version: "0.1.0".to_string(),
         namespace: Some("cellscript".to_string()),
         source_hash: Some(compute_source_hash(&consumer_dir).unwrap()),
+        compiler_source_hash: None,
     };
     lockfile.dependencies.insert(
         "token".to_string(),
@@ -468,6 +469,7 @@ fn e2e_multi_package_dependency_chain() {
         version: "0.1.0".to_string(),
         namespace: Some("cellscript".to_string()),
         source_hash: None,
+        compiler_source_hash: None,
     };
     lockfile.dependencies.insert(
         "lib-a".to_string(),
@@ -855,6 +857,7 @@ fn e2e_headless_deploy_deployed_toml_three_layer_identity() {
         version: "0.1.0".to_string(),
         namespace: Some("cellscript".to_string()),
         source_hash: Some(source_hash.clone()),
+        compiler_source_hash: None,
     };
     lockfile.package_build = Some(LockedBuildInfo {
         compiler_version: Some("0.19.0".to_string()),
@@ -1037,6 +1040,7 @@ fn e2e_headless_deploy_with_cell_deps_and_multi_network() {
         version: "0.2.0".to_string(),
         namespace: Some("cellscript".to_string()),
         source_hash: Some(source_hash),
+        compiler_source_hash: None,
     };
     lockfile.package_build = Some(LockedBuildInfo {
         compiler_version: Some("0.19.0".to_string()),
@@ -1115,6 +1119,7 @@ fn e2e_fail_closed_three_layer_identity_verification() {
         version: "0.1.0".to_string(),
         namespace: Some("cellscript".to_string()),
         source_hash: Some(source_hash.clone()),
+        compiler_source_hash: None,
     };
     lockfile.package_build = Some(LockedBuildInfo {
         compiler_version: Some("0.19.0".to_string()),
@@ -1880,6 +1885,7 @@ action ping(value: u64) -> u64 {
         version: "0.1.0".to_string(),
         namespace: Some("cellscript".to_string()),
         source_hash: Some(source_hash),
+        compiler_source_hash: None,
     };
     lockfile.package_build = Some(LockedBuildInfo {
         compiler_version: Some(cellscript::VERSION.to_string()),
@@ -2122,6 +2128,7 @@ action verify(amount: u64) -> u64 {
         version: "0.1.0".to_string(),
         namespace: Some("cellscript".to_string()),
         source_hash: Some(hash_app.clone()),
+        compiler_source_hash: None,
     };
     lockfile.package_build = Some(LockedBuildInfo {
         compiler_version: Some(cellscript::VERSION.to_string()),
@@ -2494,6 +2501,7 @@ fn e2e_package_manager_registry_resolution_with_local_git() {
         version: "0.1.0".to_string(),
         namespace: Some("cellscript".to_string()),
         source_hash: None,
+        compiler_source_hash: None,
     };
     lockfile.dependencies.insert(
         "math-lib".to_string(),

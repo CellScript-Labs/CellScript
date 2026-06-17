@@ -549,6 +549,51 @@ action digest(input: Hash, expected: Hash) -> bool {
 }
 
 #[test]
+fn v0_14_compiles_hash_pair_helper() {
+    let source = r#"
+module cellscript::hash_pair
+
+action pair(left: Hash, right: Hash, expected: Hash) -> bool {
+    verification
+        let actual = hash_pair(left, right)
+        return actual == expected
+}
+"#;
+
+    let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
+    let asm = String::from_utf8(result.artifact_bytes.clone()).expect("assembly should be utf8");
+    assert!(asm.contains("__ckb_hash_pair"), "missing hash_pair helper:\n{}", asm);
+    assert!(asm.contains("hash_pair combines two 32-byte Hash inputs"), "helper should not be metadata-only:\n{}", asm);
+    assert!(asm.contains("xori t0, t0, 64"), "hash_pair should commit a 64-byte message length:\n{}", asm);
+    let action = result.metadata.actions.iter().find(|action| action.name == "pair").expect("pair action metadata");
+    assert!(
+        !action.fail_closed_runtime_features.contains(&"fixed-byte-comparison".to_string()),
+        "hash_pair result comparison should be verifier-coverable: {:?}",
+        action.fail_closed_runtime_features
+    );
+    assert!(result.metadata.runtime.ckb_runtime_features.iter().any(|feature| feature == "profile-hash-pair"));
+    assert!(result.metadata.runtime.ckb_runtime_features.iter().any(|feature| feature == "ckb-blake2b"));
+    assert!(result.metadata.runtime.ckb_runtime_accesses.iter().any(|access| {
+        access.operation == "hash-pair"
+            && access.syscall == "CKB_BLAKE2B"
+            && access.source == "Profile"
+            && access.binding == "hash_pair"
+    }));
+    result.validate().unwrap();
+
+    let elf = compile(
+        source,
+        CompileOptions {
+            target: Some("riscv64-elf".to_string()),
+            target_profile: Some("ckb".to_string()),
+            ..CompileOptions::default()
+        },
+    )
+    .unwrap();
+    assert!(!elf.artifact_bytes.is_empty(), "hash_pair helper should assemble to ELF");
+}
+
+#[test]
 fn v0_14_rejects_blake2b_non_hash_input() {
     let err = compile(
         r#"
@@ -564,6 +609,24 @@ action bad(input: u64) -> Hash {
     .unwrap_err();
 
     assert!(err.message.contains("hash_blake2b expects Hash input"), "unexpected error: {}", err.message);
+}
+
+#[test]
+fn v0_14_rejects_hash_pair_non_hash_input() {
+    let err = compile(
+        r#"
+module cellscript::bad_hash_pair
+
+action bad(input: u64) -> Hash {
+    verification
+        return hash_pair(Hash::zero(), input)
+}
+"#,
+        CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() },
+    )
+    .unwrap_err();
+
+    assert!(err.message.contains("hash_pair expects (Hash, Hash)"), "unexpected error: {}", err.message);
 }
 
 #[test]

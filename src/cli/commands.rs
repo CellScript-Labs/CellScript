@@ -2465,7 +2465,8 @@ impl CommandExecutor {
                 "script references keep code_hash, hash_type, and args visible",
                 "TYPE_ID metadata uses the CKB TYPE_ID ABI and does not hide builder obligations",
                 "Spawn/IPC is bounded verifier reuse and does not make type scripts multi-tenant",
-                "hash_blake2b(input: Hash) uses CKB Blake2b-256; wider byte serialization hashing remains out of scope"
+                "hash_blake2b(input: Hash) uses CKB Blake2b-256 for one Hash",
+                "hash_pair(left: Hash, right: Hash) uses CKB Blake2b-256 over two Hash values; wider byte serialization hashing remains out of scope"
             ],
         });
         if args.json {
@@ -4235,12 +4236,13 @@ fn verify_builder_lockfile_identity(
     let expected_build = locked_build_info_from_metadata(metadata)?;
     let mut violations = Vec::new();
 
-    match (&lockfile.package.source_hash, &metadata.source_hash) {
+    let locked_compiler_source_hash = lockfile.package.compiler_source_hash.as_ref().or(lockfile.package.source_hash.as_ref());
+    let locked_source_label = if lockfile.package.compiler_source_hash.is_some() { "compiler_source_hash" } else { "source_hash" };
+    match (locked_compiler_source_hash, &metadata.source_hash) {
         (Some(locked), Some(actual)) if locked == actual => {}
-        (Some(locked), Some(actual)) => {
-            violations.push(format!("source_hash mismatch: Cell.lock has '{}', metadata has '{}'", locked, actual))
-        }
-        (None, _) => violations.push("Cell.lock [package] has no source_hash".to_string()),
+        (Some(locked), Some(actual)) => violations
+            .push(format!("{} mismatch: Cell.lock has '{}', metadata source_hash is '{}'", locked_source_label, locked, actual)),
+        (None, _) => violations.push("Cell.lock [package] has no compiler_source_hash or source_hash".to_string()),
         (_, None) => violations.push("metadata has no source_hash".to_string()),
     }
 
@@ -4280,7 +4282,7 @@ fn verify_builder_lockfile_identity(
         "package": lockfile.package,
         "build": lockfile.package_build,
         "verified_fields": [
-            "source_hash",
+            locked_source_label,
             "compiler_version",
             "target_profile",
             "artifact_hash",
@@ -4304,15 +4306,23 @@ fn verify_builder_deployment_identity(
     let expected_build = locked_build_info_from_metadata(metadata)?;
     let mut violations = Vec::new();
 
-    if let Some(expected_source_hash) = &metadata.source_hash {
-        match &deployed.package.source_hash {
-            Some(source_hash) if source_hash == expected_source_hash => {}
-            Some(source_hash) => violations
-                .push(format!("source_hash mismatch: Deployed.toml has '{}', metadata has '{}'", source_hash, expected_source_hash)),
-            None => violations.push("Deployed.toml [package] has no source_hash".to_string()),
+    match (&lockfile.package.source_hash, &deployed.package.source_hash) {
+        (Some(locked), Some(deployed_hash)) if locked == deployed_hash => {}
+        (Some(locked), Some(deployed_hash)) => {
+            violations.push(format!("source_hash mismatch: Cell.lock has '{}', Deployed.toml has '{}'", locked, deployed_hash))
         }
-    } else {
-        violations.push("metadata has no source_hash".to_string());
+        (None, _) => violations.push("Cell.lock [package] has no source_hash".to_string()),
+        (_, None) => violations.push("Deployed.toml [package] has no source_hash".to_string()),
+    }
+
+    let locked_compiler_source_hash = lockfile.package.compiler_source_hash.as_ref().or(lockfile.package.source_hash.as_ref());
+    match (locked_compiler_source_hash, &metadata.source_hash) {
+        (Some(locked), Some(actual)) if locked == actual => {}
+        (Some(locked), Some(actual)) => {
+            violations.push(format!("compiler_source_hash mismatch: Cell.lock has '{}', metadata source_hash is '{}'", locked, actual))
+        }
+        (None, _) => violations.push("Cell.lock [package] has no compiler_source_hash or source_hash".to_string()),
+        (_, None) => violations.push("metadata has no source_hash".to_string()),
     }
 
     match &deployed.build {
@@ -4454,6 +4464,7 @@ fn verify_builder_deployment_identity(
         "deployments": verified_deployments,
         "verified_fields": [
             "source_hash",
+            "compiler_source_hash",
             "compiler_version",
             "artifact_hash",
             "metadata_hash",
@@ -4862,6 +4873,7 @@ fn typescript_builder_index(
            version?: string;\n\
            namespace?: string | null;\n\
            source_hash?: string | null;\n\
+           compiler_source_hash?: string | null;\n\
          }\n\n\
          export interface CellScriptLockfileBuild {\n\
            compiler_version?: string | null;\n\
@@ -5156,7 +5168,7 @@ fn typescript_builder_index(
            if (!pkg) {\n\
              violations.push(\"Cell.lock has no [package]\");\n\
            } else {\n\
-             compareRequiredIdentity(\"source_hash\", pkg.source_hash, GENERATED_SOURCE_HASH, violations);\n\
+             compareRequiredIdentity(\"compiler_source_hash\", pkg.compiler_source_hash ?? pkg.source_hash, GENERATED_SOURCE_HASH, violations);\n\
            }\n\
            const build = lockfile.package_build;\n\
            if (!build) {\n\
@@ -5661,8 +5673,9 @@ fn typescript_builder_test(actions: &[&crate::ActionMetadata]) -> Result<String>
              () => builder[first.plan](first.params, { deployment: missingStatusDeployment }),\n\
              /no status/,\n\
            );\n\
+           const { publisher_signature: _publisherSignature, audit_report_hash: _auditReportHash, ...unsignedDeployment } = deployment;\n\
            assert.throws(\n\
-             () => builder[first.plan](first.params, { deployment, trustPolicy: { requirePublisherSignature: true } }),\n\
+             () => builder[first.plan](first.params, { deployment: unsignedDeployment, trustPolicy: { requirePublisherSignature: true } }),\n\
              /publisher_signature/,\n\
            );\n\
            const signedDeployment = { ...deployment, publisher_signature: \"sig:fixture\", audit_report_hash: \"0xaaa\" };\n\
@@ -5964,13 +5977,19 @@ fn ckb_fixture_report_json(
     issues: Vec<String>,
 ) -> serde_json::Value {
     let is_ickb_claim = manifest["schema"].as_str() == Some(ICKB_CLAIM_MANIFEST_SCHEMA);
+    let evidence_execution_level = if is_ickb_claim { serde_json::json!(ICKB_DIFF_EVIDENCE_LEVEL) } else { serde_json::Value::Null };
+    let required_executable_gate =
+        if is_ickb_claim { serde_json::json!("cargo test --locked -p cellscript --test ickb_diff") } else { serde_json::Value::Null };
     serde_json::json!({
         "schema": "cellscript-ckb-fixture-verification-v0.17",
         "manifest_schema": manifest["schema"].as_str().unwrap_or("unknown"),
         "manifest_status": manifest["status"].as_str().unwrap_or("unknown"),
         "manifest_hash": manifest_hash,
-        "execution_level": if is_ickb_claim { "DIFFERENTIAL_CKB_VM" } else { "MODEL" },
-        "ckb_vm_execution": is_ickb_claim,
+        "execution_level": if is_ickb_claim { "DIFFERENTIAL_CKB_VM_MANIFEST" } else { "MODEL" },
+        "ckb_vm_execution": false,
+        "committed_ckb_vm_evidence": is_ickb_claim,
+        "evidence_execution_level": evidence_execution_level,
+        "required_executable_gate": required_executable_gate,
         "suite_count": suite_count,
         "fixture_count": rows.len(),
         "status": if issues.is_empty() { "ok" } else { "failed" },
@@ -5978,7 +5997,7 @@ fn ckb_fixture_report_json(
         "issues": issues,
         "fixtures": rows,
         "vm_execution_note": if is_ickb_claim {
-            "This iCKB mode validates a committed claim manifest against existing dual-side CKB VM differential rows and their production evidence envelopes."
+            "This command does not execute CKB VM. It validates the iCKB claim manifest against committed dual-side CKB VM differential rows, production evidence envelopes, and the required executable Rust gate."
         } else {
             "This command validates transaction-shape model fixtures only; it does not execute CKB VM or prove production compatibility."
         },
@@ -6180,6 +6199,113 @@ fn validate_ickb_claim_row(family_id: &str, branch_id: &str, scenario: &str, row
     if !row["execution"]["normalized_fixture"].is_object() {
         issues.push(format!("iCKB claim branch {family_id}/{branch_id} scenario {scenario} missing normalized_fixture"));
     }
+    validate_ickb_claim_execution_object(family_id, branch_id, scenario, row, issues);
+}
+
+fn validate_ickb_claim_execution_object(
+    family_id: &str,
+    branch_id: &str,
+    scenario: &str,
+    row: &serde_json::Value,
+    issues: &mut Vec<String>,
+) {
+    let Some(execution) = row["execution"].as_object() else {
+        issues.push(format!("iCKB claim branch {family_id}/{branch_id} scenario {scenario} missing execution object"));
+        return;
+    };
+    for field in [
+        "fixture_sha256",
+        "normalized_fixture_sha256",
+        "transaction_context_sha256",
+        "original_ickb_binary_sha256",
+        "cellscript_artifact_sha256",
+        "ckb_vm_or_testtool_version",
+        "original_ickb_exit_code",
+        "cellscript_exit_code",
+        "original_ickb_status",
+        "cellscript_status",
+        "statuses_match",
+        "original_cycles",
+        "cellscript_cycles",
+        "tx_size_bytes",
+        "occupied_capacity_shannons",
+        "fee_shannons",
+    ] {
+        if !execution.get(field).is_some_and(ckb_fixture_non_empty_json_value) {
+            issues.push(format!("iCKB claim branch {family_id}/{branch_id} scenario {scenario} execution missing non-empty {field}"));
+        }
+    }
+
+    for field in ["fixture_sha256", "normalized_fixture_sha256", "original_ickb_binary_sha256", "cellscript_artifact_sha256"] {
+        match execution.get(field).and_then(serde_json::Value::as_str) {
+            Some(hash) if ckb_fixture_is_canonical_prefixed_sha256(hash) => {}
+            _ => issues.push(format!(
+                "iCKB claim branch {family_id}/{branch_id} scenario {scenario} execution.{field} must be canonical 0x-prefixed SHA-256"
+            )),
+        }
+    }
+
+    match execution.get("transaction_context_sha256").and_then(serde_json::Value::as_object) {
+        Some(hashes) => {
+            for side in ["original", "cellscript"] {
+                match hashes.get(side).and_then(serde_json::Value::as_str) {
+                    Some(hash) if ckb_fixture_is_canonical_prefixed_sha256(hash) => {}
+                    _ => issues.push(format!(
+                        "iCKB claim branch {family_id}/{branch_id} scenario {scenario} transaction_context_sha256.{side} must be canonical 0x-prefixed SHA-256"
+                    )),
+                }
+            }
+        }
+        None => issues.push(format!(
+            "iCKB claim branch {family_id}/{branch_id} scenario {scenario} execution.transaction_context_sha256 must be an object"
+        )),
+    }
+
+    if execution.get("statuses_match").and_then(serde_json::Value::as_bool) != Some(true) {
+        issues.push(format!("iCKB claim branch {family_id}/{branch_id} scenario {scenario} execution.statuses_match must be true"));
+    }
+
+    for (side, expected_field, status_field, exit_field, cycle_field) in [
+        ("original", "original_ickb_expected", "original_ickb_status", "original_ickb_exit_code", "original_cycles"),
+        ("cellscript", "cellscript_expected", "cellscript_status", "cellscript_exit_code", "cellscript_cycles"),
+    ] {
+        let expected = row[expected_field].as_str();
+        let status = execution.get(status_field).and_then(serde_json::Value::as_str);
+        if expected.is_some() && status != expected {
+            issues.push(format!(
+                "iCKB claim branch {family_id}/{branch_id} scenario {scenario} {side} status {status:?} does not match {expected_field}={expected:?}"
+            ));
+        }
+        if status == Some("pass") {
+            if execution.get(exit_field).and_then(serde_json::Value::as_i64) != Some(0) {
+                issues
+                    .push(format!("iCKB claim branch {family_id}/{branch_id} scenario {scenario} {side} pass must have exit code 0"));
+            }
+            if execution.get(cycle_field).and_then(serde_json::Value::as_u64).unwrap_or(0) == 0 {
+                issues.push(format!("iCKB claim branch {family_id}/{branch_id} scenario {scenario} {side} pass must consume cycles"));
+            }
+        }
+        if status == Some("fail") && execution.get(exit_field).and_then(serde_json::Value::as_i64) == Some(0) {
+            issues.push(format!(
+                "iCKB claim branch {family_id}/{branch_id} scenario {scenario} {side} fail must have a non-zero exit code"
+            ));
+        }
+    }
+
+    for field in ["tx_size_bytes", "occupied_capacity_shannons"] {
+        if execution.get(field).and_then(serde_json::Value::as_u64).unwrap_or(0) == 0 {
+            issues.push(format!("iCKB claim branch {family_id}/{branch_id} scenario {scenario} execution.{field} must be positive"));
+        }
+    }
+
+    if row["original_ickb_expected"] == "fail" || row["cellscript_expected"] == "fail" {
+        match execution.get("failure_mode").and_then(serde_json::Value::as_str) {
+            Some(mode) if !mode.is_empty() => {}
+            _ => issues.push(format!(
+                "iCKB claim branch {family_id}/{branch_id} scenario {scenario} reject case missing execution.failure_mode"
+            )),
+        }
+    }
 }
 
 fn validate_ickb_evidence_object(
@@ -6244,6 +6370,12 @@ fn ckb_fixture_non_empty_json_value(value: &serde_json::Value) -> bool {
         serde_json::Value::Object(values) => !values.is_empty(),
         serde_json::Value::Bool(_) | serde_json::Value::Number(_) => true,
     }
+}
+
+fn ckb_fixture_is_canonical_prefixed_sha256(value: &str) -> bool {
+    value
+        .strip_prefix("0x")
+        .is_some_and(|hex| hex.len() == 64 && hex.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()))
 }
 
 fn validate_ckb_fixture_suite(
@@ -7516,7 +7648,9 @@ fn refresh_lockfile_from_build(root: &Path, metadata: &CompileMetadata) -> Resul
     manager.resolve_dependencies()?;
 
     let mut lockfile = Lockfile::read_from_root(root)?.unwrap_or_default();
-    lockfile.package = lockfile_package_info(root, &manifest)?;
+    let mut package = lockfile_package_info(root, &manifest)?;
+    package.compiler_source_hash = metadata.source_hash.clone();
+    lockfile.package = package;
     lockfile.replace_with_resolved(manager.get_resolved());
     lockfile.package_build = Some(locked_build_info_from_metadata(metadata)?);
     refresh_lockfile_deployment_refs(root, &mut lockfile);
@@ -7574,6 +7708,7 @@ fn lockfile_package_info(root: &Path, manifest: &crate::package::PackageManifest
         version: manifest.package.version.clone(),
         namespace: manifest.package.namespace.clone(),
         source_hash: Some(crate::package::registry::compute_source_hash(root)?),
+        compiler_source_hash: None,
     })
 }
 

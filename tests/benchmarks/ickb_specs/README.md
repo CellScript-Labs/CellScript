@@ -47,8 +47,9 @@ The `.cell` benchmark specs alone do not prove behavioural equivalence with the
 original iCKB scripts. The Rust integration tests under
 `tests/ickb_benchmark.rs` compile these CellScript specs and run deterministic
 model-level positive and negative fixtures, while `tests/ickb_diff.rs` is the
-executable original-vs-CellScript CKB VM differential matrix. `tests/v0_17.rs`
-and `tests/v0_18.rs` additionally check that CKB source primitives, C256
+executable original-vs-CellScript CKB VM differential replay gate and matrix
+consistency check. `tests/v0_17.rs` and `tests/v0_18.rs` additionally check
+that CKB source primitives, C256
 requirement helpers, signed `i32` ABI lowering, first-class Script
 construction, OutPoint reads, and cell-data decoders compile and execute where
 required. Fixtures that do not execute a generated CKB VM binary are not
@@ -72,6 +73,7 @@ cargo test --locked -p cellscript --test v0_17
 cargo test --locked -p cellscript --test ckb_compat_runner
 cargo test --locked -p cellscript --test ickb_diff
 cargo run --locked -p cellscript --bin cellc -- verify-ckb-fixtures tests/compat/ckb_standard/manifest.json --json
+cargo run --locked -p cellscript --bin cellc -- verify-ckb-fixtures tests/benchmarks/ickb_diff/claim_manifest.json --json
 ```
 
 `ckb_compat_runner` is still a model runner, but it derives verdicts from the
@@ -81,6 +83,11 @@ sanity instead of merely reading the expected exit code.
 The iCKB-style positive and negative JSON fixtures are verified only by the
 test suite. No iCKB-specific fixture verifier is exposed from the generic
 `cellc` CLI.
+`cellc verify-ckb-fixtures tests/benchmarks/ickb_diff/claim_manifest.json` is
+an iCKB claim-manifest checker: it validates the committed differential matrix
+shape, production evidence, hardening thresholds, and branch coverage, but it
+does not execute CKB VM itself. Run `cargo test --locked -p cellscript --test
+ickb_diff` when fresh executable replay evidence is required.
 
 For the broader repository gate:
 

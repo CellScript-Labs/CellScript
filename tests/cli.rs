@@ -162,6 +162,7 @@ fn write_live_registry_fixture_with(root: &std::path::Path, data_hash: &str, cod
         version: "1.0.0".to_string(),
         namespace: Some("cellscript".to_string()),
         source_hash: Some("source_hash".to_string()),
+        compiler_source_hash: None,
     };
     lockfile.package_build = Some(cellscript::package::LockedBuildInfo {
         compiler_version: Some("0.20.0".to_string()),
@@ -330,8 +331,16 @@ fn cellc_verify_ckb_fixtures_accepts_ickb_claim_manifest() {
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(report["status"], "ok");
     assert_eq!(report["manifest_schema"], "cellscript-ickb-claim-manifest-v1");
-    assert_eq!(report["execution_level"], "DIFFERENTIAL_CKB_VM");
-    assert_eq!(report["ckb_vm_execution"], true);
+    assert_eq!(report["execution_level"], "DIFFERENTIAL_CKB_VM_MANIFEST");
+    assert_eq!(report["ckb_vm_execution"], false);
+    assert_eq!(report["committed_ckb_vm_evidence"], true);
+    assert_eq!(report["evidence_execution_level"], "DIFFERENTIAL_CKB_VM_EXECUTED");
+    assert_eq!(report["required_executable_gate"], "cargo test --locked -p cellscript --test ickb_diff");
+    assert!(
+        report["vm_execution_note"].as_str().is_some_and(|note| note.contains("does not execute CKB VM")),
+        "{}",
+        report["vm_execution_note"]
+    );
     assert_eq!(report["issue_count"], 0);
     assert!(report["fixture_count"].as_u64().unwrap() >= 8);
 }
@@ -359,6 +368,36 @@ fn cellc_verify_ckb_fixtures_rejects_ickb_claim_without_matrix_row() {
     assert_eq!(report["status"], "failed");
     let issues = report["issues"].as_array().unwrap().iter().filter_map(|issue| issue.as_str()).collect::<Vec<_>>().join("\n");
     assert!(issues.contains("required scenario is missing"), "{issues}");
+}
+
+#[test]
+fn cellc_verify_ckb_fixtures_rejects_tampered_ickb_execution_evidence() {
+    let manifest_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("benchmarks")
+        .join("ickb_diff")
+        .join("claim_manifest.json");
+    let matrix_path = manifest_path.parent().unwrap().join("matrix.json");
+    let manifest: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&manifest_path).unwrap()).unwrap();
+    let mut matrix: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&matrix_path).unwrap()).unwrap();
+
+    let rows = matrix["rows"].as_array_mut().unwrap();
+    let pass_row =
+        rows.iter_mut().find(|row| row["result"].as_str() == Some("differential-agree-pass")).expect("at least one pass row");
+    pass_row["execution"]["cellscript_cycles"] = serde_json::json!(0);
+
+    let dir = tempfile::tempdir().unwrap();
+    let invalid = dir.path().join("claim_manifest.json");
+    std::fs::write(&invalid, serde_json::to_vec_pretty(&manifest).unwrap()).unwrap();
+    std::fs::write(dir.path().join("matrix.json"), serde_json::to_vec_pretty(&matrix).unwrap()).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).arg("verify-ckb-fixtures").arg(&invalid).arg("--json").output().unwrap();
+
+    assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["status"], "failed");
+    let issues = report["issues"].as_array().unwrap().iter().filter_map(|issue| issue.as_str()).collect::<Vec<_>>().join("\n");
+    assert!(issues.contains("cellscript pass must consume cycles"), "{issues}");
 }
 
 #[test]
@@ -1100,6 +1139,7 @@ fn cellc_registry_verify_json_fails_closed_for_missing_deployment_ref() {
         version: "1.0.0".to_string(),
         namespace: Some("cellscript".to_string()),
         source_hash: Some("source_hash".to_string()),
+        compiler_source_hash: None,
     };
     lockfile.package_build = Some(cellscript::package::LockedBuildInfo {
         compiler_version: Some("0.19.0".to_string()),
@@ -4761,13 +4801,15 @@ action mint(amount: u64, owner: Address) -> Token {
     let deployment_network = "aggron4";
     let deployment_code_hash = "0x1111111111111111111111111111111111111111111111111111111111111111";
     let deployment_out_point = "0xaaaa:0";
+    let package_source_hash = "package-registry-source-hash".to_string();
     let mut lockfile = cellscript::package::Lockfile {
         version: 1,
         package: cellscript::package::LockfilePackageInfo {
             name: "demo".to_string(),
             version: "0.1.0".to_string(),
             namespace: None,
-            source_hash: metadata.source_hash.clone(),
+            source_hash: Some(package_source_hash.clone()),
+            compiler_source_hash: metadata.source_hash.clone(),
         },
         dependencies: Default::default(),
         package_build: Some(build_info.clone()),
@@ -4792,7 +4834,7 @@ action mint(amount: u64, owner: Address) -> Token {
         package: cellscript::package::DeployedPackageInfo {
             name: "demo".to_string(),
             version: "0.1.0".to_string(),
-            source_hash: metadata.source_hash.clone(),
+            source_hash: Some(package_source_hash.clone()),
         },
         build: Some(cellscript::package::DeployedBuildInfo {
             compiler_version: build_info.compiler_version.clone(),
@@ -4862,6 +4904,8 @@ action mint(amount: u64, owner: Address) -> Token {
     assert_eq!(manifest["locked_identity"]["schema"], "cellscript-builder-locked-identity-v0.20");
     assert_eq!(manifest["deployment_identity"]["schema"], "cellscript-builder-deployment-identity-v0.20");
     assert_eq!(manifest["deployment_identity"]["deployments"][0]["network"], deployment_network);
+    assert_eq!(manifest["locked_identity"]["package"]["source_hash"], package_source_hash);
+    assert_eq!(manifest["locked_identity"]["package"]["compiler_source_hash"], metadata.source_hash.as_deref().unwrap());
     assert_eq!(manifest["locked_identity"]["build"]["metadata_hash"], build_info.metadata_hash.as_deref().unwrap());
 
     let index_ts = std::fs::read_to_string(output_dir.join("src").join("index.ts")).unwrap();
