@@ -118,16 +118,16 @@ receipt ProofReceiptV0 has store, create, consume {
 // `payout_commitment_hash` is Hash::zero() in core v0 because the base movement
 // profile does not model concrete payouts. Agreement Profile adds typed payout
 // outputs separately.
-action key_auth_transition(old_cell: NovaSealCellV0, witness intent: NovaSealSignedIntentV0, witness state_hash_commitment: Hash, witness sig: SignaturePayload) -> (new_cell: NovaSealCellV0, receipt: ProofReceiptV0)
-where
+action key_auth_transition(old_cell: NovaSealCellV0, witness intent: NovaSealSignedIntentV0, witness state_hash_commitment: Hash, witness sig: SignaturePayload) -> (new_cell: NovaSealCellV0, receipt: ProofReceiptV0) {
+    verification
     let now = env::current_timepoint()
     let input_source = source::group_input(0)
-    let actual_old_tx_hash = ckb::input_previous_tx_hash(input_source)
-    let actual_old_index = ckb::input_previous_index(input_source)
+    let actual_old_tx_hash = ckb::input_out_point_tx_hash(input_source)
+    let actual_old_index = ckb::input_out_point_index(input_source)
     let actual_state_hash_commitment = hash_blake2b(intent.core.new_state_hash)
-    let intent_core_hash = hash_blake2b_packed(intent.core)
-    let signed_intent_hash = hash_blake2b_packed(intent)
-    let new_cell_commitment = hash_blake2b_packed(NovaSealCellCommitmentV0 {
+    let intent_core_hash = ckb::hash_data_packed(intent.core)
+    let signed_intent_hash = ckb::hash_data_packed(intent)
+    let new_cell_commitment = ckb::hash_data_packed(NovaSealCellCommitmentV0 {
         version: old_cell.version,
         btc_authority_hash: old_cell.btc_authority_hash,
         state_hash: intent.core.new_state_hash,
@@ -150,7 +150,7 @@ where
         intent_core_hash: intent_core_hash,
         payout_commitment_hash: Hash::zero()
     }
-    let materialized_receipt_hash = hash_blake2b_packed(receipt_commitment)
+    let materialized_receipt_hash = ckb::hash_data_packed(receipt_commitment)
     require intent.core.old_cell.tx_hash == actual_old_tx_hash
     require intent.core.old_cell.index == actual_old_index
     require intent.core.old_state_hash == old_cell.state_hash
@@ -197,6 +197,7 @@ where
     }
 
 
+}
 // AUDIT BOUNDARY:
 // The type script entry point will normally be a thin dispatcher that selects
 // the action from witness data. For this v0 action file, the single
@@ -208,7 +209,8 @@ where
 // copy makes the package audit-bundle expose a real locks[] record for the
 // active NovaSeal resource.
 lock btc_authority(protected cell: NovaSealCellV0, lock_args expected_btc_authority_hash: Hash, witness intent: NovaSealSignedIntentV0, witness state_hash_commitment: Hash, witness sig: SignaturePayload) -> bool {
-    let digest = hash_blake2b_packed(intent)
+    verification
+    let digest = ckb::hash_data_packed(intent)
     require expected_btc_authority_hash == cell.btc_authority_hash
     require intent.core.policy_hash == cell.policy_hash
     require sig.pubkey == cell.btc_authority_hash.0

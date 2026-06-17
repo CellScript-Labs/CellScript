@@ -17,6 +17,12 @@ const CKB_VM2_CLOSE_SYSCALL_NUMBER: u64 = 2608;
 
 #[panic_handler]
 fn panic(_: &PanicInfo<'_>) -> ! {
+    #[cfg(target_arch = "riscv64")]
+    {
+        exit(EXIT_REJECT_SPAWN_IO);
+    }
+
+    #[cfg(not(target_arch = "riscv64"))]
     loop {
         spin_loop();
     }

@@ -8,5 +8,6 @@ module novaseal::agreement_profile::harness::always_success_lock;
 // modelling borrower/lender locks. It is not part of the Agreement Profile
 // runtime and should not be treated as wallet-authority evidence.
 lock always_success() -> bool {
+    verification
     return true
 }

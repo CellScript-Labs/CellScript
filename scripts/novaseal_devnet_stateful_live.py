@@ -464,6 +464,31 @@ def pack_receipt(
     )
 
 
+def pack_flat_intent_header(
+    *,
+    protocol_id: bytes,
+    package_hash: bytes,
+    policy_hash: bytes,
+    old_cell_tx_hash: bytes,
+    old_state_hash: bytes,
+    new_state_hash: bytes,
+    old_nonce: int,
+    new_nonce: int,
+    expiry: int,
+) -> bytes:
+    return (
+        protocol_id
+        + package_hash
+        + policy_hash
+        + old_cell_tx_hash
+        + old_state_hash
+        + new_state_hash
+        + u64(old_nonce)
+        + u64(new_nonce)
+        + u64(expiry)
+    )
+
+
 def build_transition_material(old_tx_hash: str, old_index: int, old_cell: dict[str, Any], new_state_hash: bytes) -> dict[str, bytes]:
     protocol_id = ckb_hash(b"NovaSeal/core/v0")
     package_hash = ckb_hash(b"NovaSeal/devnet/stateful/live")
@@ -517,7 +542,8 @@ def build_transition_material(old_tx_hash: str, old_index: int, old_cell: dict[s
     materialized_receipt_hash = packed_hash("ProofReceiptCommitmentV0", receipt_commitment)
     signed_intent = core + materialized_receipt_hash
     signed_intent_hash = packed_hash("NovaSealSignedIntentV0", signed_intent)
-    pubkey, signature = schnorr_sign(signed_intent_hash, TEST_SECRET_KEY, TEST_AUX_RAND)
+    state_hash_commitment = ckb_hash(new_state_hash)
+    pubkey, signature = schnorr_sign(state_hash_commitment, TEST_SECRET_KEY, TEST_AUX_RAND)
     if pubkey != authority_hash:
         raise LiveAcceptanceError("derived pubkey does not match old cell authority hash")
     new_cell_data = pack_novaseal_cell(
@@ -548,10 +574,21 @@ def build_transition_material(old_tx_hash: str, old_index: int, old_cell: dict[s
         expiry=expiry,
     )
     return {
+        "flat_header": pack_flat_intent_header(
+            protocol_id=protocol_id,
+            package_hash=package_hash,
+            policy_hash=policy_hash,
+            old_cell_tx_hash=bytes.fromhex(old_tx_hash.removeprefix("0x")),
+            old_state_hash=old_state_hash,
+            new_state_hash=new_state_hash,
+            old_nonce=old_nonce,
+            new_nonce=new_nonce,
+            expiry=expiry,
+        ),
         "core": core,
         "signed_intent": signed_intent,
         "signed_intent_hash": signed_intent_hash,
-        "state_hash_commitment": ckb_hash(new_state_hash),
+        "state_hash_commitment": state_hash_commitment,
         "signature_payload": pubkey + signature,
         "new_cell_data": new_cell_data,
         "receipt_data": receipt_data,
@@ -560,17 +597,30 @@ def build_transition_material(old_tx_hash: str, old_index: int, old_cell: dict[s
     }
 
 
-def entry_witness(op: int, old_cell_data: bytes, signed_intent: bytes, state_hash_commitment: bytes, sig_payload: bytes) -> str:
+def entry_witness(
+    op: int,
+    old_cell_data: bytes,
+    signed_intent: bytes,
+    state_hash_commitment: bytes,
+    sig_payload: bytes,
+    *,
+    flat_header: bytes | None = None,
+) -> str:
+    if len(sig_payload) != 96:
+        raise LiveAcceptanceError("entry witness expects 32-byte pubkey plus 64-byte signature")
+    if flat_header is None:
+        flat_header = bytes(216)
     payload = (
         b"CSARGv1\0"
         + u8(op)
+        + state_hash_commitment
+        + sig_payload
+        + u32(len(flat_header))
+        + flat_header
         + u32(len(old_cell_data))
         + old_cell_data
         + u32(len(signed_intent))
         + signed_intent
-        + state_hash_commitment
-        + u32(len(sig_payload))
-        + sig_payload
     )
     return hex0x(payload)
 
@@ -945,6 +995,7 @@ def build_transition_tx(
         material["signed_intent"],
         material["state_hash_commitment"],
         bytes(sig_payload),
+        flat_header=material["flat_header"],
     )
     change_capacity = funding["total_capacity"] - RECEIPT_CAPACITY
     if change_capacity <= 0:
@@ -1029,6 +1080,7 @@ def run_live(args: argparse.Namespace) -> dict[str, Any]:
         initial_cell_data = pack_novaseal_cell(**initial_state)
         bootstrap_funding = devnet.collect_spendable(STATE_CAPACITY + 100 * SHANNONS)
         bootstrap_tx = build_bootstrap_tx(bootstrap_funding, lifecycle["data_hash"], cell_deps, header_hash, initial_cell_data)
+        (run_dir / "bootstrap-tx.json").write_text(json.dumps(bootstrap_tx, indent=2, sort_keys=True) + "\n")
         bootstrap_dry_run = devnet.rpc("dry_run_transaction", [bootstrap_tx])
         bootstrap_commit = devnet.submit_and_commit(bootstrap_tx, "novaseal bootstrap")
         bootstrap_live = devnet.assert_live_cell(
@@ -1053,6 +1105,7 @@ def run_live(args: argparse.Namespace) -> dict[str, Any]:
             funding=transition_funding,
             new_state_hash=ckb_hash(b"novaseal devnet state after transition"),
         )
+        (run_dir / "transition-tx.json").write_text(json.dumps(transition_tx, indent=2, sort_keys=True) + "\n")
         transition_dry_run = devnet.rpc("dry_run_transaction", [transition_tx])
         transition_commit = devnet.submit_and_commit(transition_tx, "novaseal key-auth transition")
         bootstrap_dead = devnet.wait_dead_cell(bootstrap_commit["tx_hash"], 0)
@@ -1088,12 +1141,13 @@ def run_live(args: argparse.Namespace) -> dict[str, Any]:
             new_state_hash=ckb_hash(b"novaseal devnet rejected state"),
             mutate_signature=True,
         )
+        (run_dir / "wrong-signature-tx.json").write_text(json.dumps(negative_tx, indent=2, sort_keys=True) + "\n")
         wrong_signature_reject = devnet.dry_run_rejects(
             negative_tx,
             "wrong signature transition",
             expected_source="Inputs[0].Type",
             expected_data_hash=lifecycle["data_hash"],
-            expected_error_code=5,
+            expected_error_code=1,
         )
         still_live = devnet.assert_live_cell(
             transition_commit["tx_hash"],

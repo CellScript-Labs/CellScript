@@ -126,6 +126,26 @@ action inspect() -> u64 {
 }
 "#;
 
+const CELL_DATA_U64_BINARY_GUARD_PROGRAM: &str = r#"
+module v018::cell_data_u64_binary_guard
+
+struct Header {
+    old_nonce: u64,
+    new_nonce: u64,
+}
+
+action inspect(witness header: Header) -> u64 {
+    verification
+        let input_nonce = ckb::cell_data_u64_le(source::input(0), 130)
+        let output_nonce = ckb::cell_data_u64_le(source::output(0), 130)
+        require input_nonce == header.old_nonce
+        require output_nonce == header.new_nonce
+        require output_nonce > input_nonce
+        require output_nonce == input_nonce + 1
+        return 0
+}
+"#;
+
 const OUT_POINT_API_PROGRAM: &str = r#"
 module v018::out_point_api
 
@@ -305,6 +325,35 @@ fn v0_18_cell_data_le_decoders_lower_to_fail_closed_ckb_helpers() {
         .collect::<Vec<_>>();
     assert!(accesses.contains(&("cell-data-u32-le", "LOAD_CELL_DATA", "SourceView")), "{accesses:?}");
     assert!(accesses.contains(&("cell-data-u64-le", "LOAD_CELL_DATA", "SourceView")), "{accesses:?}");
+}
+
+#[test]
+fn v0_18_cell_data_u64_binary_guards_preserve_runtime_operands() {
+    let result = compile(
+        CELL_DATA_U64_BINARY_GUARD_PROGRAM,
+        CompileOptions {
+            target: Some("riscv64-asm".to_string()),
+            target_profile: Some("ckb".to_string()),
+            primitive_compat: Some("0.18".to_string()),
+            ..CompileOptions::default()
+        },
+    )
+    .expect("cell data u64 binary guard program should compile");
+
+    let assembly = std::str::from_utf8(&result.artifact_bytes).expect("assembly utf-8");
+    assert!(
+        assembly.contains("# cellscript abi: expected field Header.old_nonce offset=0 size=8")
+            && assembly.contains("# cellscript abi: expected field Header.new_nonce offset=8 size=8"),
+        "schema-sourced u64 fields must be loaded for scalar binary guards:\n{assembly}"
+    );
+    assert!(
+        assembly.contains("add t0, t0, t1"),
+        "runtime-read u64 addition must be generated from loaded scalar operands:\n{assembly}"
+    );
+    assert!(
+        assembly.contains("sltu t0, t1, t0"),
+        "u64 greater-than guards must lower as unsigned comparisons after preserving both operands:\n{assembly}"
+    );
 }
 
 #[test]

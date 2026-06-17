@@ -32,10 +32,11 @@ module novaseal::btc_authority_lock::v0_mvp;
 //   witness payload; this lock only enforces the authority-relevant fields.
 
 lock btc_authority(protected cell: NovaSealCellV0, lock_args expected_btc_authority_hash: Hash, witness intent: NovaSealSignedIntentV0, witness state_hash_commitment: Hash, witness sig: SignaturePayload) -> bool {
+    verification
     // Domain separation + binding + delegate-to-verifier hook. The generic
     // runtime verifier performs the BIP340 decision, but production evidence
     // still requires builder/full-node acceptance for the deployed child.
-    let digest = hash_blake2b_packed(intent)
+    let digest = ckb::hash_data_packed(intent)
     require expected_btc_authority_hash == cell.btc_authority_hash
     require intent.core.policy_hash == cell.policy_hash
     require sig.pubkey == cell.btc_authority_hash.0

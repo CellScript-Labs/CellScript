@@ -167,18 +167,18 @@ receipt NovaBtcTransactionCommitmentReceiptV0 has store, create, consume {
     expiry: u64,
 }
 
-action commit_btc_transaction_transition(old_cell: NovaBtcTransactionCommitmentCellV0, witness intent: NovaBtcTransactionCommitmentSignedIntentV0, witness committer_sig: SignaturePayload) -> (new_cell: NovaBtcTransactionCommitmentCellV0, receipt: NovaBtcTransactionCommitmentReceiptV0)
-where
+action commit_btc_transaction_transition(old_cell: NovaBtcTransactionCommitmentCellV0, witness intent: NovaBtcTransactionCommitmentSignedIntentV0, witness committer_sig: SignaturePayload) -> (new_cell: NovaBtcTransactionCommitmentCellV0, receipt: NovaBtcTransactionCommitmentReceiptV0) {
+    verification
     let now = env::current_timepoint()
     require old_cell.nonce < U64_MAX
-    let btc_tx_commitment_hash = hash_blake2b_packed(BtcTransactionPublicCommitmentV0 {
+    let btc_tx_commitment_hash = ckb::hash_data_packed(BtcTransactionPublicCommitmentV0 {
         btc_txid: intent.core.btc_txid,
         btc_wtxid: intent.core.btc_wtxid,
         btc_output_index: intent.core.btc_output_index,
         btc_amount_sats: intent.core.btc_amount_sats,
         transition_commitment_hash: intent.core.transition_commitment_hash
     })
-    let old_state_commitment = hash_blake2b_packed(NovaBtcTransactionCommitmentStateV0 {
+    let old_state_commitment = ckb::hash_data_packed(NovaBtcTransactionCommitmentStateV0 {
         version: old_cell.version,
         seal_id: old_cell.seal_id,
         policy_hash: old_cell.policy_hash,
@@ -189,7 +189,7 @@ where
         nonce: old_cell.nonce,
         expiry: old_cell.expiry
     })
-    let new_state_commitment = hash_blake2b_packed(NovaBtcTransactionCommitmentStateV0 {
+    let new_state_commitment = ckb::hash_data_packed(NovaBtcTransactionCommitmentStateV0 {
         version: old_cell.version,
         seal_id: old_cell.seal_id,
         policy_hash: old_cell.policy_hash,
@@ -200,8 +200,8 @@ where
         nonce: old_cell.nonce + 1,
         expiry: old_cell.expiry
     })
-    let intent_core_hash = hash_blake2b_packed(intent.core)
-    let signed_intent_hash = hash_blake2b_packed(intent)
+    let intent_core_hash = ckb::hash_data_packed(intent.core)
+    let signed_intent_hash = ckb::hash_data_packed(intent)
     let receipt_commitment = NovaBtcTransactionCommitmentReceiptCommitmentV0 {
         action: OP_COMMIT_TRANSACTION,
         seal_id: old_cell.seal_id,
@@ -217,8 +217,8 @@ where
         intent_core_hash: intent_core_hash,
         payout_commitment_hash: intent.core.payout_commitment_hash
     }
-    let materialized_receipt_hash = hash_blake2b_packed(receipt_commitment)
-    let canonical_envelope_hash = hash_blake2b_packed(NovaSealCanonicalEnvelopeV0 {
+    let materialized_receipt_hash = ckb::hash_data_packed(receipt_commitment)
+    let canonical_envelope_hash = ckb::hash_data_packed(NovaSealCanonicalEnvelopeV0 {
         profile_id: old_cell.seal_id,
         policy_hash: old_cell.policy_hash,
         action: OP_COMMIT_TRANSACTION,
@@ -293,14 +293,15 @@ where
         expiry: old_cell.expiry
     }
 
-action nova_btc_transaction_commitment_lifecycle(witness op: u8, witness old_cell: NovaBtcTransactionCommitmentCellDataV0, witness intent: NovaBtcTransactionCommitmentSignedIntentV0, witness committer_sig: SignaturePayload) -> u64
-where
+}
+action nova_btc_transaction_commitment_lifecycle(witness op: u8, witness old_cell: NovaBtcTransactionCommitmentCellDataV0, witness intent: NovaBtcTransactionCommitmentSignedIntentV0, witness committer_sig: SignaturePayload) -> u64 {
+    verification
     let now = env::current_timepoint()
-    let intent_core_hash = hash_blake2b_packed(intent.core)
-    let signed_intent_hash = hash_blake2b_packed(intent)
+    let intent_core_hash = ckb::hash_data_packed(intent.core)
+    let signed_intent_hash = ckb::hash_data_packed(intent)
 
     if (op == OP_INITIALIZE_ACTIVE_STATE) {
-        let new_state_commitment = hash_blake2b_packed(NovaBtcTransactionCommitmentStateV0 {
+        let new_state_commitment = ckb::hash_data_packed(NovaBtcTransactionCommitmentStateV0 {
             version: BTC_TX_COMMITMENT_VERSION,
             seal_id: intent.core.seal_id,
             policy_hash: intent.core.policy_hash,
@@ -311,7 +312,7 @@ where
             nonce: 0,
             expiry: intent.core.expiry
         })
-        let canonical_envelope_hash = hash_blake2b_packed(NovaSealCanonicalEnvelopeV0 {
+        let canonical_envelope_hash = ckb::hash_data_packed(NovaSealCanonicalEnvelopeV0 {
             profile_id: intent.core.seal_id,
             policy_hash: intent.core.policy_hash,
             action: OP_INITIALIZE_ACTIVE_STATE,
@@ -339,38 +340,38 @@ where
             expiry: intent.core.expiry
         }
 
-        assert(intent.core.action == OP_INITIALIZE_ACTIVE_STATE, "intent action")
-        assert(intent.core.seal_id != Hash::zero(), "seal id")
-        assert(intent.core.policy_hash != Hash::zero(), "policy")
-        assert(intent.core.committer_authority_hash != Hash::zero(), "committer")
-        assert(intent.core.btc_txid == Hash::zero(), "btc txid")
-        assert(intent.core.btc_wtxid == Hash::zero(), "btc wtxid")
-        assert(intent.core.btc_amount_sats == 0, "btc amount")
-        assert(intent.core.old_state_hash == Hash::zero(), "old state")
-        assert(intent.core.new_state_hash != Hash::zero(), "new state")
-        assert(intent.core.transition_commitment_hash == Hash::zero(), "transition commitment")
-        assert(intent.core.old_status == 0, "old status")
-        assert(intent.core.new_status == STATUS_ACTIVE, "new status")
-        assert(intent.core.old_nonce == 0, "old nonce")
-        assert(intent.core.new_nonce == 0, "new nonce")
-        assert(now <= intent.core.expiry, "expiry")
-        assert(intent.canonical_envelope_hash == canonical_envelope_hash, "canonical envelope")
-        assert(intent.expected_receipt_hash == Hash::zero(), "expected receipt")
-        assert(committer_sig.pubkey == intent.core.committer_authority_hash.0, "committer signer")
-        assert(ckb::cell_data_hash(source::group_output(0)) == ckb::hash_data_packed(new_cell), "initial output")
+        require intent.core.action == OP_INITIALIZE_ACTIVE_STATE
+        require intent.core.seal_id != Hash::zero()
+        require intent.core.policy_hash != Hash::zero()
+        require intent.core.committer_authority_hash != Hash::zero()
+        require intent.core.btc_txid == Hash::zero()
+        require intent.core.btc_wtxid == Hash::zero()
+        require intent.core.btc_amount_sats == 0
+        require intent.core.old_state_hash == Hash::zero()
+        require intent.core.new_state_hash != Hash::zero()
+        require intent.core.transition_commitment_hash == Hash::zero()
+        require intent.core.old_status == 0
+        require intent.core.new_status == STATUS_ACTIVE
+        require intent.core.old_nonce == 0
+        require intent.core.new_nonce == 0
+        require now <= intent.core.expiry
+        require intent.canonical_envelope_hash == canonical_envelope_hash
+        require intent.expected_receipt_hash == Hash::zero()
+        require committer_sig.pubkey == intent.core.committer_authority_hash.0
+        require ckb::cell_data_hash(source::group_output(0)) == ckb::hash_data_packed(new_cell)
 
         verifier::btc::bip340::require_signature(signed_intent_hash, committer_sig.pubkey, committer_sig.signature)
     } else {
-        assert(op == OP_COMMIT_TRANSACTION, "operation")
-        assert(old_cell.nonce < U64_MAX, "nonce overflow")
-        let btc_tx_commitment_hash = hash_blake2b_packed(BtcTransactionPublicCommitmentV0 {
+        require op == OP_COMMIT_TRANSACTION
+        require old_cell.nonce < U64_MAX
+        let btc_tx_commitment_hash = ckb::hash_data_packed(BtcTransactionPublicCommitmentV0 {
             btc_txid: intent.core.btc_txid,
             btc_wtxid: intent.core.btc_wtxid,
             btc_output_index: intent.core.btc_output_index,
             btc_amount_sats: intent.core.btc_amount_sats,
             transition_commitment_hash: intent.core.transition_commitment_hash
         })
-        let old_state_commitment = hash_blake2b_packed(NovaBtcTransactionCommitmentStateV0 {
+        let old_state_commitment = ckb::hash_data_packed(NovaBtcTransactionCommitmentStateV0 {
             version: old_cell.version,
             seal_id: old_cell.seal_id,
             policy_hash: old_cell.policy_hash,
@@ -381,7 +382,7 @@ where
             nonce: old_cell.nonce,
             expiry: old_cell.expiry
         })
-        let new_state_commitment = hash_blake2b_packed(NovaBtcTransactionCommitmentStateV0 {
+        let new_state_commitment = ckb::hash_data_packed(NovaBtcTransactionCommitmentStateV0 {
             version: old_cell.version,
             seal_id: old_cell.seal_id,
             policy_hash: old_cell.policy_hash,
@@ -407,8 +408,8 @@ where
             intent_core_hash: intent_core_hash,
             payout_commitment_hash: intent.core.payout_commitment_hash
         }
-        let materialized_receipt_hash = hash_blake2b_packed(receipt_commitment)
-        let canonical_envelope_hash = hash_blake2b_packed(NovaSealCanonicalEnvelopeV0 {
+        let materialized_receipt_hash = ckb::hash_data_packed(receipt_commitment)
+        let canonical_envelope_hash = ckb::hash_data_packed(NovaSealCanonicalEnvelopeV0 {
             profile_id: old_cell.seal_id,
             policy_hash: old_cell.policy_hash,
             action: OP_COMMIT_TRANSACTION,
@@ -455,34 +456,35 @@ where
             expiry: old_cell.expiry
         }
 
-        assert(old_cell.version == BTC_TX_COMMITMENT_VERSION, "old version")
-        assert(old_cell.status == STATUS_ACTIVE, "old status")
-        assert(old_cell.seal_id != Hash::zero(), "seal id")
-        assert(old_cell.policy_hash != Hash::zero(), "policy")
-        assert(old_cell.committer_authority_hash != Hash::zero(), "committer")
-        assert(now <= old_cell.expiry, "expiry")
-        assert(intent.core.action == OP_COMMIT_TRANSACTION, "intent action")
-        assert(intent.core.seal_id == old_cell.seal_id, "intent seal")
-        assert(intent.core.policy_hash == old_cell.policy_hash, "intent policy")
-        assert(intent.core.committer_authority_hash == old_cell.committer_authority_hash, "intent committer")
-        assert(intent.core.btc_txid != Hash::zero(), "btc txid")
-        assert(intent.core.btc_wtxid != Hash::zero(), "btc wtxid")
-        assert(intent.core.btc_amount_sats > 0, "btc amount")
-        assert(intent.core.old_state_hash == old_cell.state_hash, "old state")
-        assert(intent.core.new_state_hash != old_cell.state_hash, "new state")
-        assert(intent.core.transition_commitment_hash == hash_blake2b(intent.core.new_state_hash), "transition commitment")
-        assert(intent.core.old_status == STATUS_ACTIVE, "old status")
-        assert(intent.core.new_status == STATUS_COMMITTED, "new status")
-        assert(intent.core.old_nonce == old_cell.nonce, "old nonce")
-        assert(intent.core.new_nonce == old_cell.nonce + 1, "new nonce")
-        assert(intent.core.expiry == old_cell.expiry, "intent expiry")
-        assert(intent.canonical_envelope_hash == canonical_envelope_hash, "canonical envelope")
-        assert(intent.expected_receipt_hash == materialized_receipt_hash, "expected receipt")
-        assert(committer_sig.pubkey == old_cell.committer_authority_hash.0, "committer signer")
-        assert(ckb::cell_data_hash(source::group_input(0)) == ckb::hash_data_packed(old_cell), "old input")
-        assert(ckb::cell_data_hash(source::group_output(0)) == ckb::hash_data_packed(new_cell), "committed output")
-        assert(ckb::cell_data_hash(source::output(1)) == ckb::hash_data_packed(receipt), "commit receipt")
+        require old_cell.version == BTC_TX_COMMITMENT_VERSION
+        require old_cell.status == STATUS_ACTIVE
+        require old_cell.seal_id != Hash::zero()
+        require old_cell.policy_hash != Hash::zero()
+        require old_cell.committer_authority_hash != Hash::zero()
+        require now <= old_cell.expiry
+        require intent.core.action == OP_COMMIT_TRANSACTION
+        require intent.core.seal_id == old_cell.seal_id
+        require intent.core.policy_hash == old_cell.policy_hash
+        require intent.core.committer_authority_hash == old_cell.committer_authority_hash
+        require intent.core.btc_txid != Hash::zero()
+        require intent.core.btc_wtxid != Hash::zero()
+        require intent.core.btc_amount_sats > 0
+        require intent.core.old_state_hash == old_cell.state_hash
+        require intent.core.new_state_hash != old_cell.state_hash
+        require intent.core.transition_commitment_hash == hash_blake2b(intent.core.new_state_hash)
+        require intent.core.old_status == STATUS_ACTIVE
+        require intent.core.new_status == STATUS_COMMITTED
+        require intent.core.old_nonce == old_cell.nonce
+        require intent.core.new_nonce == old_cell.nonce + 1
+        require intent.core.expiry == old_cell.expiry
+        require intent.canonical_envelope_hash == canonical_envelope_hash
+        require intent.expected_receipt_hash == materialized_receipt_hash
+        require committer_sig.pubkey == old_cell.committer_authority_hash.0
+        require ckb::cell_data_hash(source::group_input(0)) == ckb::hash_data_packed(old_cell)
+        require ckb::cell_data_hash(source::group_output(0)) == ckb::hash_data_packed(new_cell)
+        require ckb::cell_data_hash(source::output(1)) == ckb::hash_data_packed(receipt)
 
         verifier::btc::bip340::require_signature(signed_intent_hash, committer_sig.pubkey, committer_sig.signature)
     }
     0
+}

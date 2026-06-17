@@ -4067,6 +4067,18 @@ impl IrGenerator {
                     blocks,
                     vars,
                 ),
+                "ckb::hash_data_packed" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__ckb_hash_data_packed",
+                    "ckb_hash_data_packed",
+                    IrType::Hash,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "verifier::btc::bip340::require_signature" if call.args.len() == 3 => {
+                    self.lower_void_runtime_call("__novaseal_bip340_require_signature", &call.args, current, blocks, vars)
+                }
                 "ckb::cell_lock_hash_low" if call.args.len() == 1 => self.lower_simple_runtime_call(
                     "__ckb_cell_lock_hash_low",
                     "ckb_cell_lock_hash_low",
@@ -4097,6 +4109,24 @@ impl IrGenerator {
                 "ckb::cell_type_hash" if call.args.len() == 1 => self.lower_simple_runtime_call(
                     "__ckb_cell_type_hash",
                     "ckb_cell_type_hash",
+                    IrType::Hash,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "ckb::cell_data_hash" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__ckb_cell_data_hash",
+                    "ckb_cell_data_hash",
+                    IrType::Hash,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "ckb::cell_data_hash_at" if call.args.len() == 2 => self.lower_simple_runtime_call(
+                    "__ckb_cell_data_hash_at",
+                    "ckb_cell_data_hash_at",
                     IrType::Hash,
                     &call.args,
                     current,

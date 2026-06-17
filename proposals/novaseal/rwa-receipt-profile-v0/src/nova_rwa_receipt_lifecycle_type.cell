@@ -133,14 +133,14 @@ struct NovaRwaReceiptEventV0 {
     expiry: u64,
 }
 
-action nova_rwa_receipt_lifecycle(witness op: u8, witness old_cell: NovaRwaReceiptCellV0, witness intent: NovaRwaReceiptSignedIntentV0, witness signer_sig: SignaturePayload, witness cosigner_sig: SignaturePayload) -> u64
-where
+action nova_rwa_receipt_lifecycle(witness op: u8, witness old_cell: NovaRwaReceiptCellV0, witness intent: NovaRwaReceiptSignedIntentV0, witness signer_sig: SignaturePayload, witness cosigner_sig: SignaturePayload) -> u64 {
+    verification
     let now = env::current_timepoint()
-    let intent_core_hash = hash_blake2b_packed(intent.core)
-    let signed_intent_hash = hash_blake2b_packed(intent)
+    let intent_core_hash = ckb::hash_data_packed(intent.core)
+    let signed_intent_hash = ckb::hash_data_packed(intent)
 
     if (op == OP_MATERIALIZE) {
-        let new_state_commitment = hash_blake2b_packed(NovaRwaReceiptStateCommitmentV0 {
+        let new_state_commitment = ckb::hash_data_packed(NovaRwaReceiptStateCommitmentV0 {
             version: RWA_RECEIPT_VERSION,
             receipt_id: intent.core.receipt_id,
             registry_hash: intent.core.registry_hash,
@@ -170,7 +170,7 @@ where
             intent_core_hash: intent_core_hash,
             payout_commitment_hash: intent.core.payout_commitment_hash
         }
-        let materialized_receipt_hash = hash_blake2b_packed(event_commitment)
+        let materialized_receipt_hash = ckb::hash_data_packed(event_commitment)
         let new_cell = NovaRwaReceiptCellV0 {
             version: RWA_RECEIPT_VERSION,
             receipt_id: intent.core.receipt_id,
@@ -185,7 +185,7 @@ where
             nonce: 0,
             expiry: intent.core.expiry
         }
-        let canonical_envelope_hash = hash_blake2b_packed(NovaSealCanonicalEnvelopeV0 {
+        let canonical_envelope_hash = ckb::hash_data_packed(NovaSealCanonicalEnvelopeV0 {
             profile_id: intent.core.receipt_id,
             policy_hash: intent.core.registry_hash,
             action: OP_MATERIALIZE,
@@ -221,35 +221,35 @@ where
             expiry: intent.core.expiry
         }
 
-        assert(intent.core.action == OP_MATERIALIZE, "intent action")
-        assert(intent.core.receipt_id != Hash::zero(), "receipt id")
-        assert(intent.core.registry_hash != Hash::zero(), "registry")
-        assert(intent.core.asset_commitment_hash != Hash::zero(), "asset")
-        assert(intent.core.document_hash != Hash::zero(), "document")
-        assert(intent.core.issuer_authority_hash != Hash::zero(), "issuer")
-        assert(intent.core.holder_authority_hash != Hash::zero(), "holder")
-        assert(intent.core.old_status == 0, "old status")
-        assert(intent.core.new_status == STATUS_MATERIALIZED, "new status")
-        assert(intent.core.old_amount == 0, "old amount")
-        assert(intent.core.settlement_amount > 0, "settlement amount")
-        assert(intent.core.old_nonce == 0, "old nonce")
-        assert(intent.core.new_nonce == 0, "new nonce")
-        assert(now <= intent.core.expiry, "expiry")
-        assert(intent.canonical_envelope_hash == canonical_envelope_hash, "canonical envelope")
-        assert(intent.expected_receipt_hash == materialized_receipt_hash, "expected receipt")
+        require intent.core.action == OP_MATERIALIZE
+        require intent.core.receipt_id != Hash::zero()
+        require intent.core.registry_hash != Hash::zero()
+        require intent.core.asset_commitment_hash != Hash::zero()
+        require intent.core.document_hash != Hash::zero()
+        require intent.core.issuer_authority_hash != Hash::zero()
+        require intent.core.holder_authority_hash != Hash::zero()
+        require intent.core.old_status == 0
+        require intent.core.new_status == STATUS_MATERIALIZED
+        require intent.core.old_amount == 0
+        require intent.core.settlement_amount > 0
+        require intent.core.old_nonce == 0
+        require intent.core.new_nonce == 0
+        require now <= intent.core.expiry
+        require intent.canonical_envelope_hash == canonical_envelope_hash
+        require intent.expected_receipt_hash == materialized_receipt_hash
         // new_cell is locally derived from the checked intent core; output binding below checks the actual cell bytes.
-        assert(signer_sig.pubkey == intent.core.issuer_authority_hash.0, "issuer signer")
-        assert(intent.expected_cell_data_hash != Hash::zero(), "expected cell data")
-        assert(intent.expected_event_data_hash != Hash::zero(), "expected event data")
-        assert(intent.expected_cell_data_hash == ckb::hash_data_packed(new_cell), "expected output cell")
-        assert(intent.expected_event_data_hash == ckb::hash_data_packed(event), "expected output event")
-        assert(ckb::cell_data_hash(source::group_output(0)) == intent.expected_cell_data_hash, "materialized output")
-        assert(ckb::cell_data_hash(source::output(1)) == intent.expected_event_data_hash, "materialized event")
+        require signer_sig.pubkey == intent.core.issuer_authority_hash.0
+        require intent.expected_cell_data_hash != Hash::zero()
+        require intent.expected_event_data_hash != Hash::zero()
+        require intent.expected_cell_data_hash == ckb::hash_data_packed(new_cell)
+        require intent.expected_event_data_hash == ckb::hash_data_packed(event)
+        require ckb::cell_data_hash(source::group_output(0)) == intent.expected_cell_data_hash
+        require ckb::cell_data_hash(source::output(1)) == intent.expected_event_data_hash
 
         verifier::btc::bip340::require_signature(signed_intent_hash, signer_sig.pubkey, signer_sig.signature)
     } else {
-        assert(old_cell.nonce < U64_MAX, "nonce overflow")
-        let old_state_commitment = hash_blake2b_packed(NovaRwaReceiptStateCommitmentV0 {
+        require old_cell.nonce < U64_MAX
+        let old_state_commitment = ckb::hash_data_packed(NovaRwaReceiptStateCommitmentV0 {
             version: old_cell.version,
             receipt_id: old_cell.receipt_id,
             registry_hash: old_cell.registry_hash,
@@ -264,7 +264,7 @@ where
         })
 
         if (op == OP_CLAIM) {
-            let new_state_commitment = hash_blake2b_packed(NovaRwaReceiptStateCommitmentV0 {
+            let new_state_commitment = ckb::hash_data_packed(NovaRwaReceiptStateCommitmentV0 {
                 version: old_cell.version,
                 receipt_id: old_cell.receipt_id,
                 registry_hash: old_cell.registry_hash,
@@ -294,7 +294,7 @@ where
                 intent_core_hash: intent_core_hash,
                 payout_commitment_hash: intent.core.payout_commitment_hash
             }
-            let materialized_receipt_hash = hash_blake2b_packed(event_commitment)
+            let materialized_receipt_hash = ckb::hash_data_packed(event_commitment)
             let new_cell = NovaRwaReceiptCellV0 {
                 version: old_cell.version,
                 receipt_id: old_cell.receipt_id,
@@ -309,7 +309,7 @@ where
                 nonce: old_cell.nonce + 1,
                 expiry: old_cell.expiry
             }
-            let canonical_envelope_hash = hash_blake2b_packed(NovaSealCanonicalEnvelopeV0 {
+            let canonical_envelope_hash = ckb::hash_data_packed(NovaSealCanonicalEnvelopeV0 {
                 profile_id: old_cell.receipt_id,
                 policy_hash: old_cell.registry_hash,
                 action: OP_CLAIM,
@@ -345,39 +345,39 @@ where
                 expiry: old_cell.expiry
             }
 
-            assert(old_cell.version == RWA_RECEIPT_VERSION, "old version")
-            assert(old_cell.status == STATUS_MATERIALIZED, "old status")
-            assert(old_cell.amount > 0, "old amount")
-            assert(now <= old_cell.expiry, "expiry")
-            assert(intent.core.action == OP_CLAIM, "intent action")
-            assert(intent.core.receipt_id == old_cell.receipt_id, "intent receipt")
-            assert(intent.core.registry_hash == old_cell.registry_hash, "intent registry")
-            assert(intent.core.asset_commitment_hash == old_cell.asset_commitment_hash, "intent asset")
-            assert(intent.core.document_hash == old_cell.document_hash, "intent document")
-            assert(intent.core.issuer_authority_hash == old_cell.issuer_authority_hash, "intent issuer")
-            assert(intent.core.holder_authority_hash == old_cell.holder_authority_hash, "intent holder")
-            assert(intent.core.old_status == STATUS_MATERIALIZED, "intent old status")
-            assert(intent.core.new_status == STATUS_CLAIMED, "intent new status")
-            assert(intent.core.old_amount == old_cell.amount, "intent old amount")
-            assert(intent.core.settlement_amount == old_cell.amount, "intent amount")
-            assert(intent.core.old_nonce == old_cell.nonce, "intent old nonce")
-            assert(intent.core.new_nonce == old_cell.nonce + 1, "intent new nonce")
-            assert(intent.core.expiry == old_cell.expiry, "intent expiry")
-            assert(intent.canonical_envelope_hash == canonical_envelope_hash, "canonical envelope")
-            assert(intent.expected_receipt_hash == materialized_receipt_hash, "expected receipt")
+            require old_cell.version == RWA_RECEIPT_VERSION
+            require old_cell.status == STATUS_MATERIALIZED
+            require old_cell.amount > 0
+            require now <= old_cell.expiry
+            require intent.core.action == OP_CLAIM
+            require intent.core.receipt_id == old_cell.receipt_id
+            require intent.core.registry_hash == old_cell.registry_hash
+            require intent.core.asset_commitment_hash == old_cell.asset_commitment_hash
+            require intent.core.document_hash == old_cell.document_hash
+            require intent.core.issuer_authority_hash == old_cell.issuer_authority_hash
+            require intent.core.holder_authority_hash == old_cell.holder_authority_hash
+            require intent.core.old_status == STATUS_MATERIALIZED
+            require intent.core.new_status == STATUS_CLAIMED
+            require intent.core.old_amount == old_cell.amount
+            require intent.core.settlement_amount == old_cell.amount
+            require intent.core.old_nonce == old_cell.nonce
+            require intent.core.new_nonce == old_cell.nonce + 1
+            require intent.core.expiry == old_cell.expiry
+            require intent.canonical_envelope_hash == canonical_envelope_hash
+            require intent.expected_receipt_hash == materialized_receipt_hash
             // new_cell is locally derived from the checked old cell and intent core; output binding below checks the actual cell bytes.
-            assert(signer_sig.pubkey == old_cell.holder_authority_hash.0, "holder signer")
-            assert(ckb::cell_data_hash(source::group_input(0)) == ckb::hash_data_packed(old_cell), "old input")
-            assert(intent.expected_cell_data_hash != Hash::zero(), "expected cell data")
-            assert(intent.expected_event_data_hash != Hash::zero(), "expected event data")
-            assert(intent.expected_cell_data_hash == ckb::hash_data_packed(new_cell), "expected output cell")
-            assert(intent.expected_event_data_hash == ckb::hash_data_packed(event), "expected output event")
-            assert(ckb::cell_data_hash(source::group_output(0)) == intent.expected_cell_data_hash, "claimed output")
-            assert(ckb::cell_data_hash(source::output(1)) == intent.expected_event_data_hash, "claim event")
+            require signer_sig.pubkey == old_cell.holder_authority_hash.0
+            require ckb::cell_data_hash(source::group_input(0)) == ckb::hash_data_packed(old_cell)
+            require intent.expected_cell_data_hash != Hash::zero()
+            require intent.expected_event_data_hash != Hash::zero()
+            require intent.expected_cell_data_hash == ckb::hash_data_packed(new_cell)
+            require intent.expected_event_data_hash == ckb::hash_data_packed(event)
+            require ckb::cell_data_hash(source::group_output(0)) == intent.expected_cell_data_hash
+            require ckb::cell_data_hash(source::output(1)) == intent.expected_event_data_hash
 
             verifier::btc::bip340::require_signature(signed_intent_hash, signer_sig.pubkey, signer_sig.signature)
         } else {
-            assert(op == OP_SETTLE, "settle op")
+            require op == OP_SETTLE
             let event_commitment = NovaRwaReceiptEventCommitmentV0 {
                 action: OP_SETTLE,
                 receipt_id: old_cell.receipt_id,
@@ -395,8 +395,8 @@ where
                 intent_core_hash: intent_core_hash,
                 payout_commitment_hash: intent.core.payout_commitment_hash
             }
-            let materialized_receipt_hash = hash_blake2b_packed(event_commitment)
-            let canonical_envelope_hash = hash_blake2b_packed(NovaSealCanonicalEnvelopeV0 {
+            let materialized_receipt_hash = ckb::hash_data_packed(event_commitment)
+            let canonical_envelope_hash = ckb::hash_data_packed(NovaSealCanonicalEnvelopeV0 {
                 profile_id: old_cell.receipt_id,
                 policy_hash: old_cell.registry_hash,
                 action: OP_SETTLE,
@@ -432,36 +432,37 @@ where
                 expiry: old_cell.expiry
             }
 
-            assert(old_cell.version == RWA_RECEIPT_VERSION, "old version")
-            assert(old_cell.status == STATUS_CLAIMED, "old status")
-            assert(old_cell.amount > 0, "old amount")
-            assert(now <= old_cell.expiry, "expiry")
-            assert(intent.core.action == OP_SETTLE, "intent action")
-            assert(intent.core.receipt_id == old_cell.receipt_id, "intent receipt")
-            assert(intent.core.registry_hash == old_cell.registry_hash, "intent registry")
-            assert(intent.core.asset_commitment_hash == old_cell.asset_commitment_hash, "intent asset")
-            assert(intent.core.document_hash == old_cell.document_hash, "intent document")
-            assert(intent.core.issuer_authority_hash == old_cell.issuer_authority_hash, "intent issuer")
-            assert(intent.core.holder_authority_hash == old_cell.holder_authority_hash, "intent holder")
-            assert(intent.core.old_status == STATUS_CLAIMED, "intent old status")
-            assert(intent.core.new_status == STATUS_SETTLED, "intent new status")
-            assert(intent.core.old_amount == old_cell.amount, "intent old amount")
-            assert(intent.core.settlement_amount == old_cell.amount, "intent amount")
-            assert(intent.core.old_nonce == old_cell.nonce, "intent old nonce")
-            assert(intent.core.new_nonce == old_cell.nonce + 1, "intent new nonce")
-            assert(intent.core.expiry == old_cell.expiry, "intent expiry")
-            assert(intent.canonical_envelope_hash == canonical_envelope_hash, "canonical envelope")
-            assert(intent.expected_receipt_hash == materialized_receipt_hash, "expected receipt")
-            assert(signer_sig.pubkey == old_cell.issuer_authority_hash.0, "issuer signer")
-            assert(cosigner_sig.pubkey == old_cell.holder_authority_hash.0, "holder signer")
-            assert(ckb::cell_data_hash(source::group_input(0)) == ckb::hash_data_packed(old_cell), "old input")
-            assert(intent.expected_cell_data_hash == Hash::zero(), "expected cell data")
-            assert(intent.expected_event_data_hash != Hash::zero(), "expected event data")
-            assert(intent.expected_event_data_hash == ckb::hash_data_packed(event), "expected output event")
-            assert(ckb::cell_data_hash(source::output(0)) == intent.expected_event_data_hash, "settlement event")
+            require old_cell.version == RWA_RECEIPT_VERSION
+            require old_cell.status == STATUS_CLAIMED
+            require old_cell.amount > 0
+            require now <= old_cell.expiry
+            require intent.core.action == OP_SETTLE
+            require intent.core.receipt_id == old_cell.receipt_id
+            require intent.core.registry_hash == old_cell.registry_hash
+            require intent.core.asset_commitment_hash == old_cell.asset_commitment_hash
+            require intent.core.document_hash == old_cell.document_hash
+            require intent.core.issuer_authority_hash == old_cell.issuer_authority_hash
+            require intent.core.holder_authority_hash == old_cell.holder_authority_hash
+            require intent.core.old_status == STATUS_CLAIMED
+            require intent.core.new_status == STATUS_SETTLED
+            require intent.core.old_amount == old_cell.amount
+            require intent.core.settlement_amount == old_cell.amount
+            require intent.core.old_nonce == old_cell.nonce
+            require intent.core.new_nonce == old_cell.nonce + 1
+            require intent.core.expiry == old_cell.expiry
+            require intent.canonical_envelope_hash == canonical_envelope_hash
+            require intent.expected_receipt_hash == materialized_receipt_hash
+            require signer_sig.pubkey == old_cell.issuer_authority_hash.0
+            require cosigner_sig.pubkey == old_cell.holder_authority_hash.0
+            require ckb::cell_data_hash(source::group_input(0)) == ckb::hash_data_packed(old_cell)
+            require intent.expected_cell_data_hash == Hash::zero()
+            require intent.expected_event_data_hash != Hash::zero()
+            require intent.expected_event_data_hash == ckb::hash_data_packed(event)
+            require ckb::cell_data_hash(source::output(0)) == intent.expected_event_data_hash
 
             verifier::btc::bip340::require_signature(signed_intent_hash, signer_sig.pubkey, signer_sig.signature)
             verifier::btc::bip340::require_signature(signed_intent_hash, cosigner_sig.pubkey, cosigner_sig.signature)
         }
     }
     0
+}
