@@ -640,7 +640,8 @@ execution evidence fails the test suite.
   reject row covers the same cardinality failure on the output side. These still
   do not cover full
   synthetic wrong-owner resource fields or complete first-class MetaPoint map
-  behaviour. First-class Script API work is tracked separately as 0.18 scope.
+  behaviour. First-class Script API work has landed on the carried-forward 0.18
+  line; MetaPoint-map ergonomics remain separate future work.
 - Wrong owner and immature redeem are no longer active model rows. They are
   recorded as non-executable model assumptions with replacement differential
   evidence for the executable Owned-Owner and DAO maturity fixture shapes.
@@ -648,10 +649,10 @@ execution evidence fails the test suite.
   and explicit unresolved external steps; it is not a cell-selection, fee,
   change, witness, dep, or dry-run solver.
 
-Until these blockers are closed, the correct conclusion remains: CellScript is
-partially iCKB-grade for modelling and compiler-surface audit work, and now has
-partial CKB VM differential evidence for deposit, deposit/receipt output
-accounting, mint, selected Limit Order
-paths, and selected Owned-Owner input/output pairing, cardinality,
-script-role, non-withdrawal, related-cell, owner-data, and missing-pair paths,
-but it does not pass a complete production-equivalence iCKB benchmark.
+The current conclusion is therefore narrower than full protocol certification
+but stronger than model-level evidence: CellScript is production-equivalent for
+the selected executed subset declared in
+`tests/benchmarks/ickb_diff/claim_manifest.json`, with 187 dual-side CKB VM
+differential rows and no active `MODEL` rows. It still does not claim full
+mathematical state-space exhaustiveness, external audit, mainnet-value
+certification, or first-class generic MetaPoint-map ergonomics.

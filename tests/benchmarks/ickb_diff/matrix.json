@@ -63,7 +63,8 @@
       "0x2d0ee2005e43adefc216f3036627d763c480cf6169b370b573a01bbf83131af4",
       "0x704d2289f6b994ba30e36d3d25d4f882a78b7ab46e6e4934d911bf50abebe4ea",
       "0x895fb68f8e549c45dbed5555d602396419428d67b394bd45b677c7b4d92cd9b7",
-      "0xbaf689bea596f8206d8c80e914ef36f828c9f95dad72049d2595c824df90da3a"
+      "0xbaf689bea596f8206d8c80e914ef36f828c9f95dad72049d2595c824df90da3a",
+      "0xe9b92e5783f692f6ee99ca20eeda5f3da282e0f4010eb4fbd3db4e3058239349"
     ],
     "pass_fail_status_matches": "all selected rows set execution.statuses_match=true",
     "per_row_execution_objects": "all selected rows include execution objects validated by tests/ickb_diff.rs",

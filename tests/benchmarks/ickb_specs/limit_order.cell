@@ -201,6 +201,6 @@ lock order_owner(order: protected LimitOrder, claimed_owner: witness Address) ->
 // fixed-distance mint paths and an i32-data-offset bridge for the original
 // mint action's master-distance bytes. Match paths can now require lock-only
 // order cells to preserve the same master OutPoint when outputs encode
-// Action::Match with absolute master bytes. It still has no first-class C256
-// value type, native protocol-specific MetaPoint map, or full Script object
-// for "same script as lock in the order cell and as type in the master cell".
+// Action::Match with absolute master bytes. 0.18 adds first-class fixed-byte
+// Script construction/matching for exact expected scripts. Remaining ergonomics
+// are first-class C256 values and native protocol-specific MetaPoint maps.

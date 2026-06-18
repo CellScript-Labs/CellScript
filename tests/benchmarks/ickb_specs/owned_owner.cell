@@ -118,6 +118,6 @@ lock owned_unlock(
 // checks now lower to runtime helpers. Current-script type-only/lock-only
 // MetaPoint pair scans can load the signed i32 distance from owner cell data at
 // offset 0. The generic filtered scan can require every related lock-only cell
-// to match an expected TypeHash and exact 8-byte nonzero data rule; the remaining
-// gap is first-class filtered MetaPoint map syntax and original CKB VM
-// differential evidence.
+// to match an expected TypeHash and exact 8-byte nonzero data rule. Original
+// CKB VM differential rows now cover the selected pairing cases; the remaining
+// gap is first-class filtered MetaPoint map syntax.

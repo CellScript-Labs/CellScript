@@ -2471,6 +2471,7 @@ fn ickb_diff_matrix_structure_and_model_rows_valid() {
     assert_eq!(matrix["production_equivalence_claim"], true);
     assert!(matrix["equivalence_evidence"].is_object());
     assert_required_evidence_list(&matrix);
+    assert_original_binary_evidence_covers_rows(&matrix);
     assert_remaining_model_blockers(&matrix);
     assert_retired_model_assumptions(&matrix);
     assert_supporting_evidence_rows_are_not_claim_rows(&matrix);
@@ -2739,6 +2740,31 @@ fn assert_required_evidence_list(matrix: &Value) {
             evidence.iter().any(|item| item.as_str() == Some(required)),
             "missing required production equivalence evidence marker {required}"
         );
+    }
+}
+
+fn assert_original_binary_evidence_covers_rows(matrix: &Value) {
+    let summarized = matrix["equivalence_evidence"]["original_ickb_script_binary_sha256"]
+        .as_array()
+        .expect("original_ickb_script_binary_sha256")
+        .iter()
+        .filter_map(Value::as_str)
+        .collect::<BTreeSet<_>>();
+    let mut used = BTreeSet::new();
+    for row in matrix["rows"].as_array().expect("rows") {
+        if let Some(execution) = row["execution"].as_object() {
+            for (key, value) in execution {
+                let is_original_or_shared = key.starts_with("original_") || key.starts_with("shared_");
+                if is_original_or_shared && key.ends_with("_binary_sha256") && !key.contains("patched") {
+                    if let Some(hash) = value.as_str() {
+                        used.insert(hash);
+                    }
+                }
+            }
+        }
+    }
+    for hash in used {
+        assert!(summarized.contains(hash), "top-level original binary evidence is missing row-used binary hash {hash}");
     }
 }
 
