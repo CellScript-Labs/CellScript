@@ -299,9 +299,9 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0x17ec93e1c3301410610891ecb4084cbcbf169ec2314ad4fdbe62e7539b18287c",
+        "cellscript_artifact_sha256": "0xb283e8c608f4bf54bdfcbd9e8d38b651edbffc3a16c8221f79870d55545bbc8f",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Outputs[0].Type, cause: ValidationFailure: see error code 38 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/4ea464d6032122a0c494891893f6b89754c6d1e64dfd8ca93ec322cc0fc9805e.html#38 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Outputs[0].Type, cause: ValidationFailure: see error code 38 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/614fe4497f69f055340e05bf20f7bc237df5f650bae5cdcc6ee9b99387c85ec4.html#38 } }",
         "cellscript_exit_code": 38,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
@@ -345,8 +345,8 @@
         "original_ickb_status": "fail",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0xf27b0031aae714cd630c2fb8f15015465827c6de1388807876e8c18fccb52af0",
-          "original": "0x34d6e488da7fbfbb090cdf7c0b46348326bb1e951582cf8450a4d5c3b63fc4c3"
+          "cellscript": "0xa23efc485b8566ed2898a53cb536c162c82a91d29fc29355fbd6720d7da8e2cc",
+          "original": "0xb259edf324a3fd24ac3c7b0d3d74f91dd97422e8d52ba7ddcb8e4bfa2a6dac05"
         },
         "tx_size_bytes": 340,
         "tx_size_bytes_by_side": {
@@ -367,8 +367,8 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0xb7a1f8ae8c480085df015a583af9c69b266015165966447ad2479f4094bf81f6",
-        "cellscript_cycles": 16559,
+        "cellscript_artifact_sha256": "0xfa2c3651905e279057fabe7ca200780b7e404b1e020b5d54d2f7f7626ca5a385",
+        "cellscript_cycles": 16551,
         "cellscript_error": null,
         "cellscript_exit_code": 0,
         "cellscript_status": "pass",
@@ -418,7 +418,7 @@
         },
         "normalized_fixture_sha256": "0xc4d25e558fa5e10a1b90187468f931c19e00090e80d4b60559d34240af4e46a6",
         "occupied_capacity_shannons": 16800000000,
-        "original_cycles": 97057,
+        "original_cycles": 97053,
         "original_error": null,
         "original_ickb_binary_patched": true,
         "original_ickb_binary_sha256": "0x895fb68f8e549c45dbed5555d602396419428d67b394bd45b677c7b4d92cd9b7",
@@ -427,8 +427,8 @@
         "original_ickb_status": "pass",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0x29cbb8074a6354d404a9cc7770924a16a0002d73c7b58303d866b66c22814df3",
-          "original": "0x57d5ecb182045e869bc5ffbe8da3d03f0208704af509e5172ba9b61e3b458de3"
+          "cellscript": "0x8484f7eb9f9c41e77cc078adc7ea4fe5018aedcbbb1f708a29aad890509390b5",
+          "original": "0x479eaccc1c10da1aedb1be749201b1085e37870159df2ec187d8c0792338646e"
         },
         "tx_size_bytes": 535,
         "tx_size_bytes_by_side": {
@@ -449,9 +449,9 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0xb7a1f8ae8c480085df015a583af9c69b266015165966447ad2479f4094bf81f6",
+        "cellscript_artifact_sha256": "0xfa2c3651905e279057fabe7ca200780b7e404b1e020b5d54d2f7f7626ca5a385",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Outputs[1].Type, cause: ValidationFailure: see error code 6 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/923c8ae35423725bccd3140a75c05d8004431b94e5a50caeddcb184fd99d3da0.html#6 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Outputs[1].Type, cause: ValidationFailure: see error code 6 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/e1e6800df8e1330ecf2ab6dbd083a31f350376139d06411bc85ebec9653e7ea1.html#6 } }",
         "cellscript_exit_code": 6,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
@@ -509,8 +509,8 @@
         "original_ickb_status": "fail",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0x3920c829fa07774eb5accff1997e222a118981439da795a66938b335e2a3661b",
-          "original": "0x71541b4041b50d3916a8c08336c1c31307de4402890108020318b33614f62f12"
+          "cellscript": "0xe4ff189ee0b9e46a924ad8e119344ff5f6e9900e0f5d6c05180e573bda15a267",
+          "original": "0x0a275aaa92ba946b0ae2d9b49b6ea34e1349a8751d578702e748bd21046dd767"
         },
         "tx_size_bytes": 535,
         "tx_size_bytes_by_side": {
@@ -531,9 +531,9 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0x6bc6082d3b33b985a9449f937555e93bca175cbe9c6ceea12bcd2bad962b4c61",
+        "cellscript_artifact_sha256": "0xab99a47c848a6f909de774fc47a38c94998f11e90aa88bf4985fe8dfca1abf2a",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Outputs[1].Type, cause: ValidationFailure: see error code 7 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/ed6ec4643a4fb25be7dd1a7e144d4097c3e2c5a869eeec1f2f0f9ac8c3b626c0.html#7 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Outputs[1].Type, cause: ValidationFailure: see error code 7 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/50d5faa28eb5eb23b96acdd732989d1d36d07d1c12b19315ad84feba5ec24f71.html#7 } }",
         "cellscript_exit_code": 7,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
@@ -592,8 +592,8 @@
         "original_ickb_status": "fail",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0xc36db331c5f5473ee745380b5cdb61ddf3989a38949c7235149935796db20eb3",
-          "original": "0xd94290ce6147cd21c5913aa6628a5a880146ef806345a9e98d7125a962baacec"
+          "cellscript": "0xa9cedb73919171e18582972c143f9a8d2492783ff05d6d6bc3d708009a769e9c",
+          "original": "0xd2a27b1fbf9db6e0b361d2f3d499e323bee82788fe93e0aad69818246adbb1c5"
         },
         "tx_size_bytes": 535,
         "tx_size_bytes_by_side": {
@@ -614,9 +614,9 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0x697d86646212f23dac640df3e2a329db01cecbf5ef8e9409ffd2918266731af9",
+        "cellscript_artifact_sha256": "0x6427ed31663c0c7bc20ca62213d97f5e8e1b0d87f3cc982a5bb20be223ad9023",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Outputs[0].Type, cause: ValidationFailure: see error code 10 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/8cc386b5055ebbdf839647cd3aaa556acdc5ad8e26c4b75371944c38a715c3b2.html#10 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Outputs[0].Type, cause: ValidationFailure: see error code 10 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/4ca053d3b7f9d19e98cb3852f2f6e4a9a53b22bdcb6fafa978f53a6b187abef3.html#10 } }",
         "cellscript_exit_code": 10,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
@@ -662,8 +662,8 @@
         "original_ickb_status": "fail",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0x70a8d9dd09819dc11c2fd5b2a57eeeb638e5698909cf032d8a9922b0835380b7",
-          "original": "0x92555ab2ca2a26e03858cf5fa10391c2132b5c7d22f84d0720501beb70bec881"
+          "cellscript": "0x5c60845e6b7b19c2e76349ee7c625be8ce07d0a835498ccb0d8688efcaeb7d08",
+          "original": "0xc2eb1a39fd442422a20afae93908e09216beab98a0fced3200ccbf34f1f3ea45"
         },
         "tx_size_bytes": 348,
         "tx_size_bytes_by_side": {
@@ -684,9 +684,9 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0x527337bd295e215ba9648285a6b91e3a90104a6c6df36ffd2c3612ef440c7c06",
+        "cellscript_artifact_sha256": "0xef764776881fade092c739074781fb2584dc78354cdf3fbe5bef5fb105b2dbdd",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Outputs[1].Type, cause: ValidationFailure: see error code 10 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/a9a8e4767d42f9577d415ec06f6f855360603bdc37d0cff7795d832e01d3788a.html#10 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Outputs[1].Type, cause: ValidationFailure: see error code 10 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/d8897e75790a43f0359487affb1e933589a0bb40171a73fd16e42f16448879b9.html#10 } }",
         "cellscript_exit_code": 10,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
@@ -755,8 +755,8 @@
         "original_ickb_status": "fail",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0xc47cb3ba6ea39bf13a8abf7db5ccff0ae601979d176be22ff4ab15b4841f4baf",
-          "original": "0xb1e372444515d0c52d110104ea7ceec8c46aa116d3a7b0245fc44cf624f237da"
+          "cellscript": "0x754b5422068699e01892e4c6e7b49bf5c13c762f4370ca2f7ab16390aa02d549",
+          "original": "0x1578736b5821620bed7f8e19a300ff38a3f6f719cf8a5efdfda1301fa3740bd9"
         },
         "tx_size_bytes": 689,
         "tx_size_bytes_by_side": {
@@ -777,8 +777,8 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0xbb785a9baddcf0a816a25a8d317ab8b4eb64af2605789d3d1057ff0ca763c4a5",
-        "cellscript_cycles": 26288,
+        "cellscript_artifact_sha256": "0xa5772f1e4fe1e1890e6edefb287865d5a72e14ff5b0c37acd77c1f270f62f854",
+        "cellscript_cycles": 26280,
         "cellscript_error": null,
         "cellscript_exit_code": 0,
         "cellscript_status": "pass",
@@ -860,7 +860,7 @@
         },
         "normalized_fixture_sha256": "0x0fef3253c85b885822c4979c04377f58b844619e86c0440f5e8b81e8c55c2b95",
         "occupied_capacity_shannons": 12600000000,
-        "original_cycles": 96832,
+        "original_cycles": 96828,
         "original_error": null,
         "original_ickb_binary_patched": false,
         "original_ickb_binary_sha256": "0x895fb68f8e549c45dbed5555d602396419428d67b394bd45b677c7b4d92cd9b7",
@@ -870,8 +870,8 @@
         "shared_xudt_binary_sha256": "0xe9b92e5783f692f6ee99ca20eeda5f3da282e0f4010eb4fbd3db4e3058239349",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0x7f20c237e9fada732a81ff2085c47e0e8d45e5bfb5e2a474c74aa1481ee6ca66",
-          "original": "0x2055dda390e77d084ebd524ffff1959686d93970ca1fc4bd560f6d113a7ea18f"
+          "cellscript": "0xe100f34f56f30195bea78456c189e86b4bd2e97489e446f51fade6cc924b57be",
+          "original": "0x8b687e437be4dbee6cba46008eec0e13e80d1e32c01e4bc5d277ede44a8f3602"
         },
         "tx_size_bytes": 509,
         "tx_size_bytes_by_side": {
@@ -892,9 +892,9 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0xbb785a9baddcf0a816a25a8d317ab8b4eb64af2605789d3d1057ff0ca763c4a5",
+        "cellscript_artifact_sha256": "0xa5772f1e4fe1e1890e6edefb287865d5a72e14ff5b0c37acd77c1f270f62f854",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 36 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/d2fc623cbe2ef4a0431e32a89aa2f199e4d0e0ae69ff22ac2ebfccbfc43f73ca.html#36 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 36 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/f8e6018a7b35461594bc875748b1a02f7b19981a0dfad503829d2e0498cb1013.html#36 } }",
         "cellscript_exit_code": 36,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
@@ -985,8 +985,8 @@
         "shared_xudt_binary_sha256": "0xe9b92e5783f692f6ee99ca20eeda5f3da282e0f4010eb4fbd3db4e3058239349",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0xb3b11c4ccca15f5b732ce923bd5599a771797fc33717fe53191d3a978ef2296e",
-          "original": "0xa656d05c4b28e979f08f91ab02eaf7e6d64ff326ffdc4336ab16f73c2b3b6193"
+          "cellscript": "0x85fc8965240807f4c04e443fd120a233baacb2bf9a7d9d31ee1141798aaa566a",
+          "original": "0xeb8f815b35ae0468a929207f47b25dfe46c731173f5313c6b4e7c1d535a3a33f"
         },
         "tx_size_bytes": 509,
         "tx_size_bytes_by_side": {
@@ -1007,9 +1007,9 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0xbb785a9baddcf0a816a25a8d317ab8b4eb64af2605789d3d1057ff0ca763c4a5",
+        "cellscript_artifact_sha256": "0xa5772f1e4fe1e1890e6edefb287865d5a72e14ff5b0c37acd77c1f270f62f854",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 46 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/d2fc623cbe2ef4a0431e32a89aa2f199e4d0e0ae69ff22ac2ebfccbfc43f73ca.html#46 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 46 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/f8e6018a7b35461594bc875748b1a02f7b19981a0dfad503829d2e0498cb1013.html#46 } }",
         "cellscript_exit_code": 46,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
@@ -1091,8 +1091,8 @@
         "shared_xudt_binary_sha256": "0xe9b92e5783f692f6ee99ca20eeda5f3da282e0f4010eb4fbd3db4e3058239349",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0x76dbccdefd4c639ec0b912ff4fdfaae2f0d995bfe24a2ffcb3d26780956d84f7",
-          "original": "0x4ab6f76e54177cfe227ac05ba7fdad27fcc62b104c7f3df7f9e3677ad4dbd103"
+          "cellscript": "0xdb425d063af8221a8e98fc345f264d8a27d57b855bfd515b4fe4a6fb01c28c0c",
+          "original": "0x23c0fc3b7f47538f2ab569b3fc6f02d2015d1bd950e1009cb31ad52cb613f940"
         },
         "tx_size_bytes": 477,
         "tx_size_bytes_by_side": {
@@ -1113,9 +1113,9 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0xbb785a9baddcf0a816a25a8d317ab8b4eb64af2605789d3d1057ff0ca763c4a5",
+        "cellscript_artifact_sha256": "0xa5772f1e4fe1e1890e6edefb287865d5a72e14ff5b0c37acd77c1f270f62f854",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 31 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/d2fc623cbe2ef4a0431e32a89aa2f199e4d0e0ae69ff22ac2ebfccbfc43f73ca.html#31 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 31 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/f8e6018a7b35461594bc875748b1a02f7b19981a0dfad503829d2e0498cb1013.html#31 } }",
         "cellscript_exit_code": 31,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
@@ -1206,8 +1206,8 @@
         "shared_xudt_binary_sha256": "0xe9b92e5783f692f6ee99ca20eeda5f3da282e0f4010eb4fbd3db4e3058239349",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0x93ef71d0b1faa7de5eeef85ad8efc3136a32f5705f5368514a73b2cdfc65a148",
-          "original": "0x2a1452bdad201a7a1186c58c8ea4ee62e09c636017ecf975809c002e4305aacf"
+          "cellscript": "0x2eb356eb23a369c9d91d03cdaa0de3b2d10b081ce72f73270f23d56d5a250951",
+          "original": "0xba145b73dedcdf7625ea6cbb6bf787824a980251bd62de4b6d266786c27c562c"
         },
         "tx_size_bytes": 509,
         "tx_size_bytes_by_side": {
@@ -1228,9 +1228,9 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0xbb785a9baddcf0a816a25a8d317ab8b4eb64af2605789d3d1057ff0ca763c4a5",
+        "cellscript_artifact_sha256": "0xa5772f1e4fe1e1890e6edefb287865d5a72e14ff5b0c37acd77c1f270f62f854",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 48 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/d2fc623cbe2ef4a0431e32a89aa2f199e4d0e0ae69ff22ac2ebfccbfc43f73ca.html#48 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 48 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/f8e6018a7b35461594bc875748b1a02f7b19981a0dfad503829d2e0498cb1013.html#48 } }",
         "cellscript_exit_code": 48,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
@@ -1320,8 +1320,8 @@
         "shared_xudt_binary_sha256": "0xe9b92e5783f692f6ee99ca20eeda5f3da282e0f4010eb4fbd3db4e3058239349",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0x12c9e6374cdd973d41802d8cd274cca36b273a642459b495ed31c55299833a08",
-          "original": "0x9aa6b1184c9774baf6b820fac0668904d46f888d36f8dcd8891437b57c860260"
+          "cellscript": "0x89e5f2bec3463c2bfa61e117811f39a1fb3532f2ff663dbceaab78d59df77018",
+          "original": "0xf0d3b4b0670786cf7b1f2fcf55b9de677fda354556cd7691be05dfb7194957cd"
         },
         "tx_size_bytes": 509,
         "tx_size_bytes_by_side": {
@@ -1342,9 +1342,9 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0xfca31b1f4efebcabd7d6718194ea74fda77a8ad3ad848b49f001b8de9f239c5e",
+        "cellscript_artifact_sha256": "0x2bfe297362b19fae2fcdccfe2fae99139f1362a0fd61fbd2ae70a99fd4e5461a",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 37 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/961842507db50a9b348b533478485e623e794b3708d10666b456494c96cdc2d5.html#37 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 37 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/e069cf5c90f65176b698db642c825b9e7b9fd72146b15845c0017294b55b8eba.html#37 } }",
         "cellscript_exit_code": 37,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
@@ -1435,8 +1435,8 @@
         "shared_xudt_binary_sha256": "0xe9b92e5783f692f6ee99ca20eeda5f3da282e0f4010eb4fbd3db4e3058239349",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0xeece0ce4a5aa3de85560bf97ae5ccc36bf4c45f34600eba45736fc20f811c62f",
-          "original": "0x455b937cd3c37df0500eba32a1fc8a2b2058d147c5509d0c0676762e0943adcc"
+          "cellscript": "0xd39d7e54ae24d401bd5a1f3da8ed161ddabfab92ccc2e829b38a06c2dfb421e2",
+          "original": "0x5ed114a0154010259afa2d839e33960b71b771af9d97e4704b40b4f32d82245b"
         },
         "tx_size_bytes": 509,
         "tx_size_bytes_by_side": {
@@ -1457,9 +1457,9 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0xfca31b1f4efebcabd7d6718194ea74fda77a8ad3ad848b49f001b8de9f239c5e",
+        "cellscript_artifact_sha256": "0x2bfe297362b19fae2fcdccfe2fae99139f1362a0fd61fbd2ae70a99fd4e5461a",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 37 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/961842507db50a9b348b533478485e623e794b3708d10666b456494c96cdc2d5.html#37 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 37 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/e069cf5c90f65176b698db642c825b9e7b9fd72146b15845c0017294b55b8eba.html#37 } }",
         "cellscript_exit_code": 37,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
@@ -1550,8 +1550,8 @@
         "shared_xudt_binary_sha256": "0xe9b92e5783f692f6ee99ca20eeda5f3da282e0f4010eb4fbd3db4e3058239349",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0x00eb389b88ae5c793fab2ae5d742e0c25b58e62b05230a0b0b1a5f40537f6962",
-          "original": "0xe82dad26f6e26f6ffc2823d69ac4a1156146f9d9ee8ba05db81db057ffe186e1"
+          "cellscript": "0x6572cf6599f209f063b4c24cab290917414ff70d6fd180a0b82d46ed1860b409",
+          "original": "0xc572cd53abd649450fb098787184c2aa285fda208ace6eb26f21f4cc295c7692"
         },
         "tx_size_bytes": 509,
         "tx_size_bytes_by_side": {
@@ -1572,9 +1572,9 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0xbb785a9baddcf0a816a25a8d317ab8b4eb64af2605789d3d1057ff0ca763c4a5",
+        "cellscript_artifact_sha256": "0xa5772f1e4fe1e1890e6edefb287865d5a72e14ff5b0c37acd77c1f270f62f854",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 36 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/d2fc623cbe2ef4a0431e32a89aa2f199e4d0e0ae69ff22ac2ebfccbfc43f73ca.html#36 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 36 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/f8e6018a7b35461594bc875748b1a02f7b19981a0dfad503829d2e0498cb1013.html#36 } }",
         "cellscript_exit_code": 36,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
@@ -1665,8 +1665,8 @@
         "shared_xudt_binary_sha256": "0xe9b92e5783f692f6ee99ca20eeda5f3da282e0f4010eb4fbd3db4e3058239349",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0x584080c59de3f6d49cc75423dc8532b3c89fa77cb365ec409507564ff8670007",
-          "original": "0x32e4f5aa3fc02d3bfba3670dc8ba7385917506d97ce7ffabbd660ea0759fd430"
+          "cellscript": "0x37acdf3358563d26eafce918619c47c0228237f90b2eaa59492e1c08cac5c79e",
+          "original": "0x13e1195909346daddaaaf76de999fac2a832f8913181e26a72208135e78cb9ec"
         },
         "tx_size_bytes": 509,
         "tx_size_bytes_by_side": {
@@ -1687,8 +1687,8 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0x3071adf67d8972f794b732c661cb0948d83112e486d9589ae930fab27cac0f62",
-        "cellscript_cycles": 24293,
+        "cellscript_artifact_sha256": "0x872dc797523c689a17d07895ab7cbe4a6635750957272eeaf9f73b172a792f75",
+        "cellscript_cycles": 24285,
         "cellscript_error": null,
         "cellscript_exit_code": 0,
         "cellscript_status": "pass",
@@ -1754,7 +1754,7 @@
         },
         "normalized_fixture_sha256": "0xcf767eb16bc272f52b94d427dd3ec7f3a5933f6e1e551f6b3bac6339355227a8",
         "occupied_capacity_shannons": 12600000000,
-        "original_cycles": 90980,
+        "original_cycles": 90976,
         "original_error": null,
         "original_ickb_binary_patched": false,
         "original_ickb_binary_sha256": "0x895fb68f8e549c45dbed5555d602396419428d67b394bd45b677c7b4d92cd9b7",
@@ -1764,8 +1764,8 @@
         "shared_xudt_binary_sha256": "0xe9b92e5783f692f6ee99ca20eeda5f3da282e0f4010eb4fbd3db4e3058239349",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0xc2e1336ab7ebe2383afccd861de2ded505ecdf017c18e0a2805e82c77814649e",
-          "original": "0x1f7913f3a54fdd4b8b8de69839e6c907f2d20f3fc462d280f6a30ae9ab08c2bc"
+          "cellscript": "0x16b13e032aa808ce45b54daccfb2636eaa0ef99c4405a832c3dc3af615fff737",
+          "original": "0x630d7df93bfc52c9a1f16d4a61e0ae62aa965b557d5cd7b558f4ae7e2e5eac5e"
         },
         "tx_size_bytes": 457,
         "tx_size_bytes_by_side": {
@@ -1786,9 +1786,9 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0xa4b6c3e8d58cb19e0c48cf051287ae61a3839ca20bfe50abb19bf3193b097ce2",
+        "cellscript_artifact_sha256": "0x960ba362ad368071bc70507da5512e573175c8f041fe0c50d784b2e7c2fa7dbb",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 37 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/ee0fed056f7a2a0a58c781c71aa322b340779758dbf686dea07596e7f7d5b047.html#37 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 37 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/223bcc1fdb24054314058920a308d8ab8664863806121fae884d2fdb34fc6dd8.html#37 } }",
         "cellscript_exit_code": 37,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
@@ -1863,8 +1863,8 @@
         "shared_xudt_binary_sha256": "0xe9b92e5783f692f6ee99ca20eeda5f3da282e0f4010eb4fbd3db4e3058239349",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0x070b6124b607b0ccf6de9e74af3c7a9a5a23296b458106e26897d9f09d547a1d",
-          "original": "0xd189bd8f77df6faa419b1c0193d8234564d719af7a1c0e24cd530259ca25c817"
+          "cellscript": "0x98f1b7096d8aeb151280693b2e16864bff4b337cf10d22a6e07a69b8bf33cc6d",
+          "original": "0x7e59451cc9ca4ccf3dee339c2c0835f187c6d4eead0bc9257e379552da271cd7"
         },
         "tx_size_bytes": 457,
         "tx_size_bytes_by_side": {
@@ -1885,9 +1885,9 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0x3071adf67d8972f794b732c661cb0948d83112e486d9589ae930fab27cac0f62",
+        "cellscript_artifact_sha256": "0x872dc797523c689a17d07895ab7cbe4a6635750957272eeaf9f73b172a792f75",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 32 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/9f9d57619e3c0a2d58cb00e3064f372121b83644b11e864cc595fc62be4e4774.html#32 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 32 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/fc902f0db49c521d85a6c4d7f544c24a2222ce12297a98ac3cb0ff00a1dfffe1.html#32 } }",
         "cellscript_exit_code": 32,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
@@ -1962,8 +1962,8 @@
         "shared_xudt_binary_sha256": "0xe9b92e5783f692f6ee99ca20eeda5f3da282e0f4010eb4fbd3db4e3058239349",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0x956affe2f7ff5b7cf1c52f0f468269fe3d29a1db2e261d088b6d399f55a816ff",
-          "original": "0xa3742883233829b3a9156b92740034f0ebc3d94d0b08bc42c643d11947ab85e8"
+          "cellscript": "0x66af830da58e398371005c7f88a4746589e93e8a86dfb276f58ba4371171643f",
+          "original": "0xe2a060b2db669419fdcd1acc0bf1f1b973d6cf513dfe69658cb4b2c77b5c653d"
         },
         "tx_size_bytes": 457,
         "tx_size_bytes_by_side": {
@@ -1984,9 +1984,9 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0x3071adf67d8972f794b732c661cb0948d83112e486d9589ae930fab27cac0f62",
+        "cellscript_artifact_sha256": "0x872dc797523c689a17d07895ab7cbe4a6635750957272eeaf9f73b172a792f75",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 32 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/9f9d57619e3c0a2d58cb00e3064f372121b83644b11e864cc595fc62be4e4774.html#32 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 32 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/fc902f0db49c521d85a6c4d7f544c24a2222ce12297a98ac3cb0ff00a1dfffe1.html#32 } }",
         "cellscript_exit_code": 32,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
@@ -2061,8 +2061,8 @@
         "shared_xudt_binary_sha256": "0xe9b92e5783f692f6ee99ca20eeda5f3da282e0f4010eb4fbd3db4e3058239349",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0xf573b8bd3ce4bf340ca46f8dff1d376afe5ea5ae4e2c4fcc4f5d7c3dc68e9025",
-          "original": "0x54879a9210d67cc2493e28b63f2d4616a6e5581cecaf53a4d3efd18302052fa3"
+          "cellscript": "0x7217f87c2299701221e2f5f325c32868295e2f9c3cc20f80202bd994ba88a1cb",
+          "original": "0xacb071e53ab9f4d1c4157486b60aa6101f06fb7b4ad99fead76f89fc8d3ff428"
         },
         "tx_size_bytes": 457,
         "tx_size_bytes_by_side": {
@@ -2083,9 +2083,9 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0x3071adf67d8972f794b732c661cb0948d83112e486d9589ae930fab27cac0f62",
+        "cellscript_artifact_sha256": "0x872dc797523c689a17d07895ab7cbe4a6635750957272eeaf9f73b172a792f75",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 48 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/9f9d57619e3c0a2d58cb00e3064f372121b83644b11e864cc595fc62be4e4774.html#48 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 48 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/fc902f0db49c521d85a6c4d7f544c24a2222ce12297a98ac3cb0ff00a1dfffe1.html#48 } }",
         "cellscript_exit_code": 48,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
@@ -2159,8 +2159,8 @@
         "shared_xudt_binary_sha256": "0xe9b92e5783f692f6ee99ca20eeda5f3da282e0f4010eb4fbd3db4e3058239349",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0x4d7065e7692b490907bb1faaeaf064cb496d397bd5410e434981819c94b6cac0",
-          "original": "0x6156b0e2b9380cf33d2ccafcf45926814002e386a689cc0162da9a05082f664e"
+          "cellscript": "0x652d607b2c41b2c4f133c65bcc51e2dda14599ed7349f51a06e4cbd87173f4bd",
+          "original": "0x79937060eadb246c716f40406a1d7b9e03e589c64e86155b3fffbaed732ddd85"
         },
         "tx_size_bytes": 457,
         "tx_size_bytes_by_side": {
@@ -2181,9 +2181,9 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0x3071adf67d8972f794b732c661cb0948d83112e486d9589ae930fab27cac0f62",
+        "cellscript_artifact_sha256": "0x872dc797523c689a17d07895ab7cbe4a6635750957272eeaf9f73b172a792f75",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 31 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/9f9d57619e3c0a2d58cb00e3064f372121b83644b11e864cc595fc62be4e4774.html#31 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 31 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/fc902f0db49c521d85a6c4d7f544c24a2222ce12297a98ac3cb0ff00a1dfffe1.html#31 } }",
         "cellscript_exit_code": 31,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
@@ -2258,8 +2258,8 @@
         "shared_xudt_binary_sha256": "0xe9b92e5783f692f6ee99ca20eeda5f3da282e0f4010eb4fbd3db4e3058239349",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0xadbaab7e3e0bd774b38a80356b34b6bbf739f0836b2b103150c3c7759037f3ee",
-          "original": "0x65c172b5f15d7c7d4afbd4cfb02ef699e827a0813a2cdbc2e53da1c9b669b961"
+          "cellscript": "0x75ad8786f1b2f2abb9f5e687123c2e4457048a71d2517c80500198d5d3357606",
+          "original": "0x70a077a2c530c9708cc563e017025a7db2ae428a728c40dd3c7e7ce58950d328"
         },
         "tx_size_bytes": 457,
         "tx_size_bytes_by_side": {
@@ -2280,9 +2280,9 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0x3071adf67d8972f794b732c661cb0948d83112e486d9589ae930fab27cac0f62",
+        "cellscript_artifact_sha256": "0x872dc797523c689a17d07895ab7cbe4a6635750957272eeaf9f73b172a792f75",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 46 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/9f9d57619e3c0a2d58cb00e3064f372121b83644b11e864cc595fc62be4e4774.html#46 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 46 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/fc902f0db49c521d85a6c4d7f544c24a2222ce12297a98ac3cb0ff00a1dfffe1.html#46 } }",
         "cellscript_exit_code": 46,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
@@ -2351,8 +2351,8 @@
         "shared_xudt_binary_sha256": "0xe9b92e5783f692f6ee99ca20eeda5f3da282e0f4010eb4fbd3db4e3058239349",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0x465ff55364cd8d717fb637b965e9d0fd285adca662378ee923493fcb403ed342",
-          "original": "0x9428dbe9f1fd336078540a4a8a0dc8b21c3d980fbb24af91fe49e9c9a87be9d9"
+          "cellscript": "0x2c3bf188990938702b57afd6f9b30ad2bfc3f87c80eae9b7737adc867c144aa3",
+          "original": "0x99914548fbbbbb3840e5b27cf928a401e4765496cfd54b5ed426e2a025b791bf"
         },
         "tx_size_bytes": 425,
         "tx_size_bytes_by_side": {
@@ -2373,8 +2373,8 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0x506d6c445395c887ab60c9e6f82b7c5a2bdc594bcb5f4b8bc8a2c660197ef880",
-        "cellscript_cycles": 7840,
+        "cellscript_artifact_sha256": "0x5b95694fc320a12863d7b247325390bcdf1b39cd8463bf9d8789cff049f931f6",
+        "cellscript_cycles": 7832,
         "cellscript_error": null,
         "cellscript_exit_code": 0,
         "cellscript_status": "pass",
@@ -2452,7 +2452,7 @@
         },
         "normalized_fixture_sha256": "0x4a742f41699a41031fa8ef72ba448d336f52b94c4017090feb905bf968c5678d",
         "occupied_capacity_shannons": 4100000000,
-        "original_cycles": 14301,
+        "original_cycles": 14297,
         "original_dao_binary_sha256": "0x704d2289f6b994ba30e36d3d25d4f882a78b7ab46e6e4934d911bf50abebe4ea",
         "original_error": null,
         "original_ickb_binary_patched": false,
@@ -2461,8 +2461,8 @@
         "original_ickb_status": "pass",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0x45e4a03d402023596e2d5712f28c6a4ba603328861725e7031e0e28e2792f11d",
-          "original": "0xe84e3011c2ac1c592baed08d376513a4c167a65aa2750ae84b9225d735f2bf98"
+          "cellscript": "0xc436267bc78b27f3d4a8b6fa4d9a8f74af9828888c81bb87974e3231a0d67a14",
+          "original": "0x85dcfe6aaea779a786908361f3d2a48d4b3a5a6c3a60fd79bddd65ff77c08078"
         },
         "tx_size_bytes": 375,
         "tx_size_bytes_by_side": {
@@ -2483,8 +2483,8 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0x5a7930ec7a0cfd53471720112d8e6fcb846a7b6847646ef20eb0cd1b63434392",
-        "cellscript_cycles": 15038,
+        "cellscript_artifact_sha256": "0x9b1c7b93470e76b243a9fa42deb215642f6abb85020e7f8c202d596dbe3c7952",
+        "cellscript_cycles": 15030,
         "cellscript_error": null,
         "cellscript_exit_code": 0,
         "cellscript_status": "pass",
@@ -2574,7 +2574,7 @@
         },
         "normalized_fixture_sha256": "0xe96d227b05071da42931c27649c51f7947f7dfdc5bef28175da2f99f07bec28c",
         "occupied_capacity_shannons": 4100000000,
-        "original_cycles": 14301,
+        "original_cycles": 14297,
         "original_dao_binary_sha256": "0x704d2289f6b994ba30e36d3d25d4f882a78b7ab46e6e4934d911bf50abebe4ea",
         "original_error": null,
         "original_ickb_binary_patched": false,
@@ -2583,8 +2583,8 @@
         "original_ickb_status": "pass",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0x79e78e3cda5f06b01612533ddb1788b07eb28b16a4c2a797f21884f3fe52992c",
-          "original": "0xcae731d006c151f954e669d38009c445573e541414da9d6563c64e0d1755fcec"
+          "cellscript": "0x16485a2438069a34ea963b5ab6529d6b12ab949a6150e7aadd18a93cbbf414e6",
+          "original": "0x77a8293bfea5b79801e32968979e269c02e1cbfa36f099a7cd675b1b1122cdfe"
         },
         "tx_size_bytes": 375,
         "tx_size_bytes_by_side": {
@@ -2605,8 +2605,8 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0x5a7930ec7a0cfd53471720112d8e6fcb846a7b6847646ef20eb0cd1b63434392",
-        "cellscript_cycles": 15038,
+        "cellscript_artifact_sha256": "0x9b1c7b93470e76b243a9fa42deb215642f6abb85020e7f8c202d596dbe3c7952",
+        "cellscript_cycles": 15030,
         "cellscript_error": null,
         "cellscript_exit_code": 0,
         "cellscript_status": "pass",
@@ -2696,7 +2696,7 @@
         },
         "normalized_fixture_sha256": "0xa71501049ca412093194cf7721dc9803c4f9b8de849a6f61e92fe3c95e021ab7",
         "occupied_capacity_shannons": 4100000000,
-        "original_cycles": 14301,
+        "original_cycles": 14297,
         "original_dao_binary_sha256": "0x704d2289f6b994ba30e36d3d25d4f882a78b7ab46e6e4934d911bf50abebe4ea",
         "original_error": null,
         "original_ickb_binary_patched": false,
@@ -2705,8 +2705,8 @@
         "original_ickb_status": "pass",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0x13168f2f449ebd41cd772b5a1824970f5b138a33b4ecc2e377e3396cf802ec44",
-          "original": "0xd9e220c21dfa46ede65d551391f7f91ca01038084325f9a5cfece6a94d980e10"
+          "cellscript": "0xbaf7f6bc56e88ab704b0dd5f645356415d4dce3e3be19c43ffc1ef5e068c7fa6",
+          "original": "0xd6517ac7014f5bc763da913dcd61a0ec491e63e3370b419b60de0d28d877c38e"
         },
         "tx_size_bytes": 375,
         "tx_size_bytes_by_side": {
@@ -2727,8 +2727,8 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0x5a7930ec7a0cfd53471720112d8e6fcb846a7b6847646ef20eb0cd1b63434392",
-        "cellscript_cycles": 15038,
+        "cellscript_artifact_sha256": "0x9b1c7b93470e76b243a9fa42deb215642f6abb85020e7f8c202d596dbe3c7952",
+        "cellscript_cycles": 15030,
         "cellscript_error": null,
         "cellscript_exit_code": 0,
         "cellscript_status": "pass",
@@ -2818,7 +2818,7 @@
         },
         "normalized_fixture_sha256": "0xe429115753d68646c41d9cc1996dd54fa0b6a4eea7a66a9fa7c58571ee06edfe",
         "occupied_capacity_shannons": 4100000000,
-        "original_cycles": 14301,
+        "original_cycles": 14297,
         "original_dao_binary_sha256": "0x704d2289f6b994ba30e36d3d25d4f882a78b7ab46e6e4934d911bf50abebe4ea",
         "original_error": null,
         "original_ickb_binary_patched": false,
@@ -2827,8 +2827,8 @@
         "original_ickb_status": "pass",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0x7f33123c6ee75c66204be721d8626ae790d2d295a5f10514bd7698f182693379",
-          "original": "0xa3f590335b9069604d7fe971c46975b433966a341b6a3e01c20d726a6573095a"
+          "cellscript": "0x64908590e03055ba0d9beeb98d4f1d18d71ac328d2e59bad6686475e209d3556",
+          "original": "0xcc9610563253f26d7c47ef31cd219158bbbc6504e14a16e502fd9544269e620f"
         },
         "tx_size_bytes": 375,
         "tx_size_bytes_by_side": {
@@ -2849,9 +2849,9 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0x5a7930ec7a0cfd53471720112d8e6fcb846a7b6847646ef20eb0cd1b63434392",
+        "cellscript_artifact_sha256": "0x9b1c7b93470e76b243a9fa42deb215642f6abb85020e7f8c202d596dbe3c7952",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 48 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/2dd3e774f6aeecf97d0f1aff4651e4b80fe9633240e4260926e6033bb2fb81c9.html#48 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 48 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/0d6028d45f01a3d8020cbd8516bf70deeb52477c60603316ee6463f8f8dbf72e.html#48 } }",
         "cellscript_exit_code": 48,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
@@ -2950,8 +2950,8 @@
         "original_ickb_status": "fail",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0x3b85e3a7f22ff89c7d038fbb99df48485a12d0769813f4163c4c0bfece9d0712",
-          "original": "0xc557df47f390c3b5ea054c63ef9a4c874b07245c2f4bf34f989d0240c2f4f3de"
+          "cellscript": "0xea7db1eae7af7601abfe8984c44e28c2e1736f3c8a334373210eb38f622d53e7",
+          "original": "0xa9fa8b96cceb8b2fe314e97e25393632bec0516ce4c6deac29d1a603fca13d83"
         },
         "tx_size_bytes": 375,
         "tx_size_bytes_by_side": {
@@ -2972,9 +2972,9 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0x5a7930ec7a0cfd53471720112d8e6fcb846a7b6847646ef20eb0cd1b63434392",
+        "cellscript_artifact_sha256": "0x9b1c7b93470e76b243a9fa42deb215642f6abb85020e7f8c202d596dbe3c7952",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 48 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/2dd3e774f6aeecf97d0f1aff4651e4b80fe9633240e4260926e6033bb2fb81c9.html#48 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 48 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/0d6028d45f01a3d8020cbd8516bf70deeb52477c60603316ee6463f8f8dbf72e.html#48 } }",
         "cellscript_exit_code": 48,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
@@ -3073,8 +3073,8 @@
         "original_ickb_status": "fail",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0xa59e0061fe2876fa234dc9b49098f738cbd421fbd15be9851484891c2cf6f9e2",
-          "original": "0xeadb38eee91ad3b53373fcd024cc3d5944fd51410fc1034096766579c44132d1"
+          "cellscript": "0x4475909159832585b77c78b4026ac7796298f4eccefa84f4e75b1956e043ad5e",
+          "original": "0x21eccbc1d68afdc81bb04bc1c4a220098a9103a88fff467de1addf79125035d3"
         },
         "tx_size_bytes": 375,
         "tx_size_bytes_by_side": {
@@ -3095,9 +3095,9 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0x506d6c445395c887ab60c9e6f82b7c5a2bdc594bcb5f4b8bc8a2c660197ef880",
+        "cellscript_artifact_sha256": "0x5b95694fc320a12863d7b247325390bcdf1b39cd8463bf9d8789cff049f931f6",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 36 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/41bef39acf55aad7094e84d4ed5d6f660e9a8089724b180f55630350f336bd9e.html#36 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 36 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/e35ec0f99fa1cb8a14e8430412b4a99fc3a73d9c5735d83e05561b005eec2762.html#36 } }",
         "cellscript_exit_code": 36,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
@@ -3183,8 +3183,8 @@
         "original_ickb_status": "fail",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0x15cee0ae0b11ddee09fe05d14a15d99066cc51cefbf1880d4730f8c8793d50ac",
-          "original": "0x331c331fa6849b3b1e24069515b5f89dd4ffbcfaf95113f0b40743b187726b3e"
+          "cellscript": "0xe8ce9ace0d9172e56afbd214a5db2349c9ed1fa3be1cd384d1d4159069ffd9be",
+          "original": "0xe8b9fc231685dd187829831e9af6d68760bbe3a25828c610977f8b7e3c39d50a"
         },
         "tx_size_bytes": 375,
         "tx_size_bytes_by_side": {
@@ -3205,9 +3205,9 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0x5a7930ec7a0cfd53471720112d8e6fcb846a7b6847646ef20eb0cd1b63434392",
+        "cellscript_artifact_sha256": "0x9b1c7b93470e76b243a9fa42deb215642f6abb85020e7f8c202d596dbe3c7952",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 48 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/2dd3e774f6aeecf97d0f1aff4651e4b80fe9633240e4260926e6033bb2fb81c9.html#48 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 48 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/0d6028d45f01a3d8020cbd8516bf70deeb52477c60603316ee6463f8f8dbf72e.html#48 } }",
         "cellscript_exit_code": 48,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
@@ -3305,8 +3305,8 @@
         "original_ickb_status": "fail",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0x88ee842ad9fd13bf3c056a23d6a9b89215c47cfff0ba0ddb9dc2d0f8257d7608",
-          "original": "0x20f5ef2ec82e3ec17596739fc0088a5b4105c443d9614d0980da479907827ad8"
+          "cellscript": "0x0a19e1cef72d48e675c424dc52c50bac4401d657095182e802da868ee678fc6c",
+          "original": "0x822c5302abf1160b11f02a9d6cea63865a42323e437a60d5c6c37fb15490a09f"
         },
         "tx_size_bytes": 375,
         "tx_size_bytes_by_side": {
@@ -3327,9 +3327,9 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0x5a7930ec7a0cfd53471720112d8e6fcb846a7b6847646ef20eb0cd1b63434392",
+        "cellscript_artifact_sha256": "0x9b1c7b93470e76b243a9fa42deb215642f6abb85020e7f8c202d596dbe3c7952",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 48 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/2dd3e774f6aeecf97d0f1aff4651e4b80fe9633240e4260926e6033bb2fb81c9.html#48 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 48 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/0d6028d45f01a3d8020cbd8516bf70deeb52477c60603316ee6463f8f8dbf72e.html#48 } }",
         "cellscript_exit_code": 48,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
@@ -3427,8 +3427,8 @@
         "original_ickb_status": "fail",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0xc3ada69588084fc8fbc711177d60f6fc866282b8eba54dc6aac44d5a6491cf66",
-          "original": "0xfd46e43ab0f60c5b3396d56bcf3c67ce2e2474459a76a680914a26be1d9218bc"
+          "cellscript": "0x3adae086d86a17365b3ceae414d8955a8ec9cae7f5cfa7096ef33b20474f83ff",
+          "original": "0x7df1f26888e437eec3086e8ce8f655952a81767d54aa70db57b57501ea12f1a3"
         },
         "tx_size_bytes": 375,
         "tx_size_bytes_by_side": {
@@ -3449,9 +3449,9 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0x5a7930ec7a0cfd53471720112d8e6fcb846a7b6847646ef20eb0cd1b63434392",
+        "cellscript_artifact_sha256": "0x9b1c7b93470e76b243a9fa42deb215642f6abb85020e7f8c202d596dbe3c7952",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 48 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/2dd3e774f6aeecf97d0f1aff4651e4b80fe9633240e4260926e6033bb2fb81c9.html#48 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 48 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/0d6028d45f01a3d8020cbd8516bf70deeb52477c60603316ee6463f8f8dbf72e.html#48 } }",
         "cellscript_exit_code": 48,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
@@ -3549,8 +3549,8 @@
         "original_ickb_status": "fail",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0xdfd7c59807b1bde748441e950a7f4b854c7d304c649ff65962669f4b54be383b",
-          "original": "0xfa2c1c9c3e1796c94942042abc6bb224c2742c1c7bf9577a8798dd79a97a5674"
+          "cellscript": "0x99f0a7406a3324a638513d8b8a09d87bbe3691aed7d2d272ee30ec2dade71faa",
+          "original": "0xb8286ff91cb99b2db855a9d75f6dab9553806a90b4ccec761c57a1eeac8fe174"
         },
         "tx_size_bytes": 375,
         "tx_size_bytes_by_side": {
@@ -3571,9 +3571,9 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0x972a337a2939efc735d9586aa3ab13fbdcb4f7e53ee0236b80e807a8da5dcce1",
+        "cellscript_artifact_sha256": "0x83bccb4a801f2851a28e4cd44bbd69dd931a5c460220033cc3463c871d06c0ac",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 46 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/dc722d2a3a73784e419936df5fb521c7eb62a0800b40317597e9f89be47526bc.html#46 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 46 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/bdad8edfe881a97b05753f9b8d6146b29043ba3dd121deb5c5522b91b31ff5b4.html#46 } }",
         "cellscript_exit_code": 46,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
@@ -3648,8 +3648,8 @@
         "original_ickb_status": "fail",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0xa9b601019533e2bebaa03150c9292e3374773bc661b91aa81507562da31d0ce4",
-          "original": "0x436c1dce48768da75bc5d545e7354cd2a107036a2bedd58f0da991c27695ea42"
+          "cellscript": "0xd75d2607089bc906384a7d683e29235fdb91eb2c5259a0214137518b45b14a2e",
+          "original": "0xded3b590706051d2a09c73625d30607ef566b4ba93cdc5b6f2d32b68b5b4479a"
         },
         "tx_size_bytes": 343,
         "tx_size_bytes_by_side": {
@@ -3670,9 +3670,9 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0xe7f5924d408d95ff50017e276766e125b80f94b81db9bf5c1f5d76da514da39f",
+        "cellscript_artifact_sha256": "0x5231075d608b8333f6c1335997a6c647c7f43813feed298de4b42487c1a5df58",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 46 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/aeecdc60412bcc3a2a1f24cbe5b988c918816d45596551b604590f8ddbaecea3.html#46 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 46 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/4462d3513db40590fc3ac11b8dd7fce12f06f9d598d72103a53635d72b889443.html#46 } }",
         "cellscript_exit_code": 46,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
@@ -3747,8 +3747,8 @@
         "original_ickb_status": "fail",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0xcabead1da267fff86dc8b2d5c4f0e15e61dd53dd9132a6efec956fc6815fedb9",
-          "original": "0xe133b33ce7203c6df711e959e969d6a3ba6229262443fa112db8b7e818b7807f"
+          "cellscript": "0xe5d5c34d1b0339c85d9a4d59be6fbfca6176de3b37e45b2b8c6f8b9edad4f4b4",
+          "original": "0x02319ffea6bcadb5ecbdc53c6afea7940093406f54063f2a46801d75b693896c"
         },
         "tx_size_bytes": 343,
         "tx_size_bytes_by_side": {
@@ -3769,9 +3769,9 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0x18ca2124c34bb34ddf1ae9fa7586cac0cee0cf5e6f04993dd495f82f6eb3a99f",
+        "cellscript_artifact_sha256": "0xdcf2392507d1e56198c54b2050075093cdab5a3053b75c840b7533b8f9b674a4",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 46 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/f895703e9c07fa803b5fa85ae8f1080433290e8b4a1d6717c008d951be214d11.html#46 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 46 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/11c9c03fbd12ccedb3d6b2adf828ac5ba2c6cd6ffb4ffa817530c772ca0d46dc.html#46 } }",
         "cellscript_exit_code": 46,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
@@ -3857,8 +3857,8 @@
         "original_ickb_status": "fail",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0x820c730de733e4abecc77f127cea6f18ac5071d73e4261bf7cec2140ded1eebf",
-          "original": "0xfc89d819bbca0be6228260092fba49ff8a17afa2c4573c855a41b0b76cdf88c8"
+          "cellscript": "0xdf7d3a3e0398c8d4452ff1c10f1252d87dbfecb1ccc4558ef102e07589abce40",
+          "original": "0xf178464617e3c5357e5c7a10957602f790f11d5744dcd8346aa90e894c807f57"
         },
         "tx_size_bytes": 375,
         "tx_size_bytes_by_side": {
@@ -3879,9 +3879,9 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0x506d6c445395c887ab60c9e6f82b7c5a2bdc594bcb5f4b8bc8a2c660197ef880",
+        "cellscript_artifact_sha256": "0x5b95694fc320a12863d7b247325390bcdf1b39cd8463bf9d8789cff049f931f6",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 34 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/41bef39acf55aad7094e84d4ed5d6f660e9a8089724b180f55630350f336bd9e.html#34 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 34 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/e35ec0f99fa1cb8a14e8430412b4a99fc3a73d9c5735d83e05561b005eec2762.html#34 } }",
         "cellscript_exit_code": 34,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
@@ -3967,8 +3967,8 @@
         "original_ickb_status": "fail",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0xac6eef35dfc9c8ca91122c0a8ca498919c7848ef1c9e4a5746faeeb02a68f161",
-          "original": "0xfe4e6cdd010b0553a52dce96a73fd2d683e15d2eb8a7efbe73ab7617fa97644b"
+          "cellscript": "0xbba9f1eca88afd400712ecb92ad2cb28787061b86c4f9bac9964cfedcefcb41f",
+          "original": "0x1053041572904e1c27d1cb1c43c52666c7f22d08c869a3142e402dba87c785f1"
         },
         "tx_size_bytes": 375,
         "tx_size_bytes_by_side": {
@@ -3989,9 +3989,9 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0x506d6c445395c887ab60c9e6f82b7c5a2bdc594bcb5f4b8bc8a2c660197ef880",
+        "cellscript_artifact_sha256": "0x5b95694fc320a12863d7b247325390bcdf1b39cd8463bf9d8789cff049f931f6",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 34 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/41bef39acf55aad7094e84d4ed5d6f660e9a8089724b180f55630350f336bd9e.html#34 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 34 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/e35ec0f99fa1cb8a14e8430412b4a99fc3a73d9c5735d83e05561b005eec2762.html#34 } }",
         "cellscript_exit_code": 34,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
@@ -4077,8 +4077,8 @@
         "original_ickb_status": "fail",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0xa0d717b371d44cec6684f93fa777eca04185c2a2fc1afc5e0d41801131ba75e0",
-          "original": "0xaead7a803a0e7358c8e0bce82262ce169ef73a3ba964ee11a19abb42d9bcaee5"
+          "cellscript": "0x2ef4b140eb7203f59d07964cfbc19d81138720daa27159571c81b912930e1260",
+          "original": "0xfb0c3cbefbaf183dc53334351fa887ced9ddebd39bd3d9e49a04a3d26c84c7c6"
         },
         "tx_size_bytes": 375,
         "tx_size_bytes_by_side": {
@@ -4099,9 +4099,9 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0x9f5908dc679d70ed3ac1adc82296072f17694942e3c59fc6d50de48ddbddf64d",
+        "cellscript_artifact_sha256": "0x50d6d00697ae7c8a3cc64f57af9001d4f9ddd3b6e96bce46c97e5b705aed2a0f",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 42 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/b285e26d51752284b706453ca4ae838169fb71e6ee577a1594ae86c1078b59ed.html#42 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 42 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/8e86e1d08cf7c7b67a8a66030acfee9207ff296f402eb57667cf8d9934d17e40.html#42 } }",
         "cellscript_exit_code": 42,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
@@ -4187,8 +4187,8 @@
         "original_ickb_status": "fail",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0x34c397e24cf72c8e974ce78607c820b726e27393fd188180f0a8617d5e01e7fb",
-          "original": "0x63ce31aa438863d82da3d31defba0f68cf6067c87240c2c6ffaa796e36262afd"
+          "cellscript": "0xa104acf000df6ee3d43495995e98cb79f8d1fbcf4be537df607cf8aa311963c3",
+          "original": "0x517fed36ab0ed80aa90104021800c4bed141b34bf0c126519d40d31ea207fec4"
         },
         "tx_size_bytes": 363,
         "tx_size_bytes_by_side": {
@@ -4209,9 +4209,9 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0x9f5908dc679d70ed3ac1adc82296072f17694942e3c59fc6d50de48ddbddf64d",
+        "cellscript_artifact_sha256": "0x50d6d00697ae7c8a3cc64f57af9001d4f9ddd3b6e96bce46c97e5b705aed2a0f",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 42 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/b285e26d51752284b706453ca4ae838169fb71e6ee577a1594ae86c1078b59ed.html#42 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 42 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/8e86e1d08cf7c7b67a8a66030acfee9207ff296f402eb57667cf8d9934d17e40.html#42 } }",
         "cellscript_exit_code": 42,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
@@ -4299,8 +4299,8 @@
         "original_ickb_status": "fail",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0xeaa38a9f8f60c8a0fb1af24395ef2fe13776f41507c42080922ca3879d29bf6f",
-          "original": "0xb47adcf66f26685e8a7350934e5e208e900726cc7df991d54e48731bc39c0bac"
+          "cellscript": "0x2434a266531fe4443c4edbd91a79df614a3bafe8437995f06beb3c0723ec09fc",
+          "original": "0x9cfdfe33da648f98bd827bc861f28037d7c0c483586bdfd5ce96c55ec7d50716"
         },
         "tx_size_bytes": 367,
         "tx_size_bytes_by_side": {
@@ -4321,9 +4321,9 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0xcf65cc30e253b44d6131caab429bfd0a74d25951b1a0bb43bdb0620e38bc1666",
+        "cellscript_artifact_sha256": "0x2206d7038788a8d140cc7c83bf5bbc21697e2217524a6ca31da4ed3559146cb8",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 43 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/f86cd9a70193eb163a772f97e5fd657bd81415be852468e84a9c4b3524f058b7.html#43 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 43 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/d7ce20ffcc589f35d034719b7a38136be24553733c906271d4540ce742e2d9bf.html#43 } }",
         "cellscript_exit_code": 43,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
@@ -4412,8 +4412,8 @@
         "original_ickb_status": "fail",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0x5e7361c30b6da623ad23ade49926437a4737e3842575a3efcc900b0185482907",
-          "original": "0xfd131663e08a79903862c0d84d449f4379e970b3b9004590a22c6501a82107b2"
+          "cellscript": "0xe1f4500e043fd0ea96e5d3d2431aaff269f3305c0d7c8419502b67839477acaa",
+          "original": "0x8db69cce099bd3b49325dd8a3bdf5fb86c29f1e57da899d118028b4e6eb01730"
         },
         "tx_size_bytes": 368,
         "tx_size_bytes_by_side": {
@@ -4434,9 +4434,9 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0xcf65cc30e253b44d6131caab429bfd0a74d25951b1a0bb43bdb0620e38bc1666",
+        "cellscript_artifact_sha256": "0x2206d7038788a8d140cc7c83bf5bbc21697e2217524a6ca31da4ed3559146cb8",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 43 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/f86cd9a70193eb163a772f97e5fd657bd81415be852468e84a9c4b3524f058b7.html#43 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 43 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/d7ce20ffcc589f35d034719b7a38136be24553733c906271d4540ce742e2d9bf.html#43 } }",
         "cellscript_exit_code": 43,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
@@ -4525,8 +4525,8 @@
         "original_ickb_status": "fail",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0xe7d6e764ab38621d9c4e4bea1b37471a90823d25d243877f159305f26e805bc6",
-          "original": "0xbe676c57c025a6ad0158e9b82958a54a1cb00b43629d96b689a614412918b234"
+          "cellscript": "0xb356d911a4af93880d63e5fd749867df47ad5a4c70a3092d594c41c0b4df3b5f",
+          "original": "0xf0495b3ec3c4f26ed9d3775a9f3ee24422a84d4b7a0d64583d8c4a980a2b7342"
         },
         "tx_size_bytes": 376,
         "tx_size_bytes_by_side": {
@@ -4547,9 +4547,9 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0x8e80af25250c6737a161aba45f7303ed4e938456d2b040da289ec285f9c46c7f",
+        "cellscript_artifact_sha256": "0x47382865828a335ef55565e323eda71f7a751a638caf8e347202bfc2561238e5",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 41 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/d907661c6b0fc7c5e11c1faf3bed0d3a24dd0528fe0005cad43ee9a069b3e5e1.html#41 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 41 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/0c99ca7466954438759f8e919b7a40718ee239059dd1d0148435c823e16e819e.html#41 } }",
         "cellscript_exit_code": 41,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
@@ -4635,8 +4635,8 @@
         "original_ickb_status": "fail",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0xec042ba09799ab63ab5d92b99e2a893071154507a3adafd2b1ef1a854c922d7e",
-          "original": "0x87ce12eede009211c2d55559dc69c9fdfb156a73a272701bee49b94a134a836f"
+          "cellscript": "0x2dc1a8d3219633aa55aff72dc13ad0ff73055c22b39480e13ffea20b6350dec5",
+          "original": "0x1e173170f67b2d3c1474dfc194f7bc889daddd8470683ad350ec2ee0ef9c7060"
         },
         "tx_size_bytes": 375,
         "tx_size_bytes_by_side": {
@@ -4657,9 +4657,9 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0x972a337a2939efc735d9586aa3ab13fbdcb4f7e53ee0236b80e807a8da5dcce1",
+        "cellscript_artifact_sha256": "0x83bccb4a801f2851a28e4cd44bbd69dd931a5c460220033cc3463c871d06c0ac",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 40 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/dc722d2a3a73784e419936df5fb521c7eb62a0800b40317597e9f89be47526bc.html#40 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 40 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/bdad8edfe881a97b05753f9b8d6146b29043ba3dd121deb5c5522b91b31ff5b4.html#40 } }",
         "cellscript_exit_code": 40,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
@@ -4745,8 +4745,8 @@
         "original_ickb_status": "fail",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0x39429a9239a8007a85dddb080e2d401f808c3c9d9c81cc42cf33038f8ea05486",
-          "original": "0xc3a351cc6173c44695908bd56c0b73b3803f1bf484671020306a52ef67d371b7"
+          "cellscript": "0xbebad4fb78d1222aa21e1710e5566b99b6482b36d073cbb58774fbe1b849a44e",
+          "original": "0x5493f6bee27af6d805f30630872fa895da853e7166442d935dee07e765956662"
         },
         "tx_size_bytes": 375,
         "tx_size_bytes_by_side": {
@@ -4767,9 +4767,9 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0x9b3d72b96af100de0bcff5f1fad580f4a78b6c7f86827ee95819d44d0eab3d5d",
-        "cellscript_auxiliary_type_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
-        "cellscript_cycles": 11199,
+        "cellscript_artifact_sha256": "0xe8a552a5ff06841b3b135f00b729e0e23f3ac0c48a7188359ffb5ff259e745d3",
+        "cellscript_auxiliary_type_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
+        "cellscript_cycles": 11191,
         "cellscript_error": null,
         "cellscript_exit_code": 0,
         "cellscript_status": "pass",
@@ -4843,8 +4843,8 @@
         },
         "normalized_fixture_sha256": "0x99571efa3135d266e90174b2a59c9cca8b3f72af8bcc5c9908e8bba7a73310db",
         "occupied_capacity_shannons": 16300000000,
-        "original_auxiliary_type_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
-        "original_cycles": 60243,
+        "original_auxiliary_type_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
+        "original_cycles": 60239,
         "original_error": null,
         "original_ickb_binary_patched": false,
         "original_ickb_binary_sha256": "0xbaf689bea596f8206d8c80e914ef36f828c9f95dad72049d2595c824df90da3a",
@@ -4853,8 +4853,8 @@
         "original_limit_order_binary_sha256": "0xbaf689bea596f8206d8c80e914ef36f828c9f95dad72049d2595c824df90da3a",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0x8f49366ba4af95c1641621d6256ba4e6057b0752f3a57a1c02dee91ea66d642a",
-          "original": "0xbdf5f59532b44bd781369c6c5671a41b7d88d37dcc1c3c88f3c116724f877407"
+          "cellscript": "0xd558edf3d64d272f642e0e8eb8fcdcd5b9f683d47154c3373ef498a2680aa7ea",
+          "original": "0x1d0b390cd24977416c8d57d09e5b740da28ffdc290caabe54d3596a320dfa7c0"
         },
         "tx_size_bytes": 425,
         "tx_size_bytes_by_side": {
@@ -4875,9 +4875,9 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0x9b3d72b96af100de0bcff5f1fad580f4a78b6c7f86827ee95819d44d0eab3d5d",
-        "cellscript_auxiliary_type_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
-        "cellscript_cycles": 11199,
+        "cellscript_artifact_sha256": "0xe8a552a5ff06841b3b135f00b729e0e23f3ac0c48a7188359ffb5ff259e745d3",
+        "cellscript_auxiliary_type_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
+        "cellscript_cycles": 11191,
         "cellscript_error": null,
         "cellscript_exit_code": 0,
         "cellscript_status": "pass",
@@ -4951,8 +4951,8 @@
         },
         "normalized_fixture_sha256": "0xa32ae2a94597add85bfb6a3f4a959f9b3c0351cfae882c47c6f65112ed526fa8",
         "occupied_capacity_shannons": 16300000000,
-        "original_auxiliary_type_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
-        "original_cycles": 60247,
+        "original_auxiliary_type_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
+        "original_cycles": 60243,
         "original_error": null,
         "original_ickb_binary_patched": false,
         "original_ickb_binary_sha256": "0xbaf689bea596f8206d8c80e914ef36f828c9f95dad72049d2595c824df90da3a",
@@ -4961,8 +4961,8 @@
         "original_limit_order_binary_sha256": "0xbaf689bea596f8206d8c80e914ef36f828c9f95dad72049d2595c824df90da3a",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0x849edede040fd4eca8f6667f263f1ef2177ccd14394998c1da4a817f700dc5fc",
-          "original": "0x09f6f354ba6ba67b5ae4e181607a12e81fed029b82c54bae730c509fef81d082"
+          "cellscript": "0xf6bc01c2ee62a0e3d07a844f158a12dccf112b061a92018979b9f62da01df760",
+          "original": "0xcde1d44c50080d55fd05d6490aefd0fceb1fb8e79c86f3a45976e95d2bf12b6d"
         },
         "tx_size_bytes": 425,
         "tx_size_bytes_by_side": {
@@ -4983,10 +4983,10 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0x9b3d72b96af100de0bcff5f1fad580f4a78b6c7f86827ee95819d44d0eab3d5d",
-        "cellscript_auxiliary_type_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
+        "cellscript_artifact_sha256": "0xe8a552a5ff06841b3b135f00b729e0e23f3ac0c48a7188359ffb5ff259e745d3",
+        "cellscript_auxiliary_type_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Lock, cause: ValidationFailure: see error code 41 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/0ffe504e8f006fb092e60cfdf9838f70a06e791301d5294ca5f2abbe7ccd2649.html#41 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Lock, cause: ValidationFailure: see error code 41 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/40725310f835b3a125862683b16edd69fc5f57425bf133703132f3f16d10495b.html#41 } }",
         "cellscript_exit_code": 41,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
@@ -5059,7 +5059,7 @@
         },
         "normalized_fixture_sha256": "0x9fcec384d36beb3cdbeadb76b205afc102beae5c5f039e322e071354a33a4cbf",
         "occupied_capacity_shannons": 16300000000,
-        "original_auxiliary_type_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
+        "original_auxiliary_type_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
         "original_cycles": 0,
         "original_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Lock, cause: ValidationFailure: see error code 18 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/2db1be6f77ef33fe2e584b319b62ac67502cae7d8086da1afd617f98de3e6120.html#18 } }",
         "original_ickb_binary_patched": false,
@@ -5069,8 +5069,8 @@
         "original_limit_order_binary_sha256": "0xbaf689bea596f8206d8c80e914ef36f828c9f95dad72049d2595c824df90da3a",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0xb934ffde3acaaa54271f761a92c04473b98cd519f1dc3be0c0daa141811752f5",
-          "original": "0xae846f7aced05badea67df7dff4c3aa4169dd1f554387eaaff3649a2c8127e46"
+          "cellscript": "0x23c4b625f36b7cb0ce6c3139f92249a1b72866e8f584b7a8fc9188295154aa91",
+          "original": "0x2cfbdb24ebf2a4460295d1ef4aec8fcee53c49ab28e168cf0bb3159db905b2ae"
         },
         "tx_size_bytes": 425,
         "tx_size_bytes_by_side": {
@@ -5091,10 +5091,10 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0x9b3d72b96af100de0bcff5f1fad580f4a78b6c7f86827ee95819d44d0eab3d5d",
-        "cellscript_auxiliary_type_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
+        "cellscript_artifact_sha256": "0xe8a552a5ff06841b3b135f00b729e0e23f3ac0c48a7188359ffb5ff259e745d3",
+        "cellscript_auxiliary_type_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Lock, cause: ValidationFailure: see error code 42 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/0ffe504e8f006fb092e60cfdf9838f70a06e791301d5294ca5f2abbe7ccd2649.html#42 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Lock, cause: ValidationFailure: see error code 42 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/40725310f835b3a125862683b16edd69fc5f57425bf133703132f3f16d10495b.html#42 } }",
         "cellscript_exit_code": 42,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
@@ -5167,7 +5167,7 @@
         },
         "normalized_fixture_sha256": "0xffcdbe5c8fb822fd074bb70097ab021b0b7c0a0e337f0e38c037ed2b7a3984ca",
         "occupied_capacity_shannons": 16400000000,
-        "original_auxiliary_type_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
+        "original_auxiliary_type_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
         "original_cycles": 0,
         "original_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Lock, cause: ValidationFailure: see error code 16 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/2db1be6f77ef33fe2e584b319b62ac67502cae7d8086da1afd617f98de3e6120.html#16 } }",
         "original_ickb_binary_patched": false,
@@ -5177,8 +5177,8 @@
         "original_limit_order_binary_sha256": "0xbaf689bea596f8206d8c80e914ef36f828c9f95dad72049d2595c824df90da3a",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0x029c57dd66317f08ac810861606795a4b4821ee74f85ca39ad49befc8f7976db",
-          "original": "0xe4638b9f9293ca960f4a41954743cc2a455dedab751609c1cfd5f9c6095dd53f"
+          "cellscript": "0x8ea785671cafa99a6e4e99f987ffc9d30c1b74834aaacf3e073df1c72c0d3eda",
+          "original": "0x6641b57f68277fff220ef71802e71994921654626852bdc6fa97f25c8b299360"
         },
         "tx_size_bytes": 426,
         "tx_size_bytes_by_side": {
@@ -5199,10 +5199,10 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0x9b3d72b96af100de0bcff5f1fad580f4a78b6c7f86827ee95819d44d0eab3d5d",
-        "cellscript_auxiliary_type_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
+        "cellscript_artifact_sha256": "0xe8a552a5ff06841b3b135f00b729e0e23f3ac0c48a7188359ffb5ff259e745d3",
+        "cellscript_auxiliary_type_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Lock, cause: ValidationFailure: see error code 43 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/0ffe504e8f006fb092e60cfdf9838f70a06e791301d5294ca5f2abbe7ccd2649.html#43 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Lock, cause: ValidationFailure: see error code 43 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/40725310f835b3a125862683b16edd69fc5f57425bf133703132f3f16d10495b.html#43 } }",
         "cellscript_exit_code": 43,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
@@ -5275,7 +5275,7 @@
         },
         "normalized_fixture_sha256": "0xb42d13a47bdf654b6eb3a126f251b198ded0a64588ef93d592e3e6fb6b4388c1",
         "occupied_capacity_shannons": 16300000000,
-        "original_auxiliary_type_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
+        "original_auxiliary_type_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
         "original_cycles": 0,
         "original_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Lock, cause: ValidationFailure: see error code 20 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/2db1be6f77ef33fe2e584b319b62ac67502cae7d8086da1afd617f98de3e6120.html#20 } }",
         "original_ickb_binary_patched": false,
@@ -5285,8 +5285,8 @@
         "original_limit_order_binary_sha256": "0xbaf689bea596f8206d8c80e914ef36f828c9f95dad72049d2595c824df90da3a",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0xd04c747e2b9c35cc45e9b00038dcc3314c9bff3ba0798f1024370df358c34b98",
-          "original": "0xb9c0140d9af556812130495ca9029a35920c8659f8469c586f63dbedf983241e"
+          "cellscript": "0xd17688ca90db2efb78fd9d609fecdfdcac2da8b4da071ef01e604108b6f09845",
+          "original": "0x5902e4dadcf823e775eb302d162e8863dc57db7c9a6115c07f374b81f63f52a0"
         },
         "tx_size_bytes": 425,
         "tx_size_bytes_by_side": {
@@ -5307,10 +5307,10 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0x9b3d72b96af100de0bcff5f1fad580f4a78b6c7f86827ee95819d44d0eab3d5d",
-        "cellscript_auxiliary_type_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
+        "cellscript_artifact_sha256": "0xe8a552a5ff06841b3b135f00b729e0e23f3ac0c48a7188359ffb5ff259e745d3",
+        "cellscript_auxiliary_type_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Lock, cause: ValidationFailure: see error code 44 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/0ffe504e8f006fb092e60cfdf9838f70a06e791301d5294ca5f2abbe7ccd2649.html#44 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Lock, cause: ValidationFailure: see error code 44 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/40725310f835b3a125862683b16edd69fc5f57425bf133703132f3f16d10495b.html#44 } }",
         "cellscript_exit_code": 44,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
@@ -5383,7 +5383,7 @@
         },
         "normalized_fixture_sha256": "0x5ea556fcc984e29a162532353863ea7f7b35c26036a91d903e1bb92024bd39b7",
         "occupied_capacity_shannons": 16300000000,
-        "original_auxiliary_type_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
+        "original_auxiliary_type_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
         "original_cycles": 0,
         "original_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Lock, cause: ValidationFailure: see error code 17 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/2db1be6f77ef33fe2e584b319b62ac67502cae7d8086da1afd617f98de3e6120.html#17 } }",
         "original_ickb_binary_patched": false,
@@ -5393,8 +5393,8 @@
         "original_limit_order_binary_sha256": "0xbaf689bea596f8206d8c80e914ef36f828c9f95dad72049d2595c824df90da3a",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0x6a92d800e8026e9745c421f82b1d597df1d2c6f1a150da449accd84599b83da5",
-          "original": "0x4b6b3443edbee0d506ccb517cca5ca2efb6d1126d7f30d4770f128ef53665d57"
+          "cellscript": "0xca2e11fd3630010874eccbb9af3528fddf3a4888bb33b029965f67a2274dc680",
+          "original": "0xf2877fda70773774ea20c77420486034d6a5924885079876479d80809e01bc48"
         },
         "tx_size_bytes": 425,
         "tx_size_bytes_by_side": {
@@ -5415,10 +5415,10 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0x9b3d72b96af100de0bcff5f1fad580f4a78b6c7f86827ee95819d44d0eab3d5d",
-        "cellscript_auxiliary_type_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
+        "cellscript_artifact_sha256": "0xe8a552a5ff06841b3b135f00b729e0e23f3ac0c48a7188359ffb5ff259e745d3",
+        "cellscript_auxiliary_type_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Lock, cause: ValidationFailure: see error code 45 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/0ffe504e8f006fb092e60cfdf9838f70a06e791301d5294ca5f2abbe7ccd2649.html#45 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Lock, cause: ValidationFailure: see error code 45 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/40725310f835b3a125862683b16edd69fc5f57425bf133703132f3f16d10495b.html#45 } }",
         "cellscript_exit_code": 45,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
@@ -5491,7 +5491,7 @@
         },
         "normalized_fixture_sha256": "0xe9c6cf3ad65bc98b97e3075184ec29986d981d70423298f6611f52baef864a5b",
         "occupied_capacity_shannons": 16300000000,
-        "original_auxiliary_type_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
+        "original_auxiliary_type_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
         "original_cycles": 0,
         "original_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Lock, cause: ValidationFailure: see error code 17 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/2db1be6f77ef33fe2e584b319b62ac67502cae7d8086da1afd617f98de3e6120.html#17 } }",
         "original_ickb_binary_patched": false,
@@ -5501,8 +5501,8 @@
         "original_limit_order_binary_sha256": "0xbaf689bea596f8206d8c80e914ef36f828c9f95dad72049d2595c824df90da3a",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0x2781f9ac1669519fc55036f049161da72467ed626fffc4f6cd20e99cc9cd1336",
-          "original": "0x1d6267a1b0528c90add795c77fe40c5c8d2507a0bf9acfd438db579f1f54dd3a"
+          "cellscript": "0xfe0c2320d0e129e09da07e46ff06c7c525810ab033802f2771651ab45cb2f117",
+          "original": "0xef5328f7d88a794e339d5c6e3a85abc3d9525c64168db4ade1726426ef031b58"
         },
         "tx_size_bytes": 425,
         "tx_size_bytes_by_side": {
@@ -5523,9 +5523,9 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0x05ac8fb2b5186ca01dc166be8e6dac6b00ed0695f39ab8c0e309498af60d5854",
-        "cellscript_auxiliary_type_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
-        "cellscript_cycles": 13505,
+        "cellscript_artifact_sha256": "0x7db3a1c5a0944a3cd2222863118d07612f61d11f1c2a1abe58c05bb129eee9cb",
+        "cellscript_auxiliary_type_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
+        "cellscript_cycles": 13493,
         "cellscript_error": null,
         "cellscript_exit_code": 0,
         "cellscript_status": "pass",
@@ -5608,19 +5608,19 @@
         },
         "normalized_fixture_sha256": "0xd09ec9734b33356871073f3b51cb0d9b3963f1f1354521dab2d48756d7bb66fb",
         "occupied_capacity_shannons": 16300000000,
-        "original_auxiliary_type_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
-        "original_cycles": 64486,
+        "original_auxiliary_type_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
+        "original_cycles": 64478,
         "original_error": null,
         "original_ickb_binary_patched": false,
         "original_ickb_binary_sha256": "0xbaf689bea596f8206d8c80e914ef36f828c9f95dad72049d2595c824df90da3a",
         "original_ickb_exit_code": 0,
         "original_ickb_status": "pass",
         "original_limit_order_binary_sha256": "0xbaf689bea596f8206d8c80e914ef36f828c9f95dad72049d2595c824df90da3a",
-        "shared_funding_lock_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
+        "shared_funding_lock_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0x18ce4b25f7bafcde27f67c193cc6a454a693146a74c616c01e824e5ace468c64",
-          "original": "0xe0e9fe729642ca99e2266fbe293136e67bfd0972bcef5c950d963f1c362e6dc2"
+          "cellscript": "0x9a43bfeb86d90ae567ecc5f25a48447b4333bd08926703808ba80ee5b13922ab",
+          "original": "0x04a2c202bc4c21d76b2ea1cfbbab8d7717aa24a722d7d429a7f001032d44548a"
         },
         "tx_size_bytes": 469,
         "tx_size_bytes_by_side": {
@@ -5641,9 +5641,9 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0x05ac8fb2b5186ca01dc166be8e6dac6b00ed0695f39ab8c0e309498af60d5854",
-        "cellscript_auxiliary_type_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
-        "cellscript_cycles": 13530,
+        "cellscript_artifact_sha256": "0x7db3a1c5a0944a3cd2222863118d07612f61d11f1c2a1abe58c05bb129eee9cb",
+        "cellscript_auxiliary_type_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
+        "cellscript_cycles": 13518,
         "cellscript_error": null,
         "cellscript_exit_code": 0,
         "cellscript_status": "pass",
@@ -5726,19 +5726,19 @@
         },
         "normalized_fixture_sha256": "0x49a770f7d50e7064fc80dcf6ef6f8fdcbc856704de033be321a7bf622efcd706",
         "occupied_capacity_shannons": 16300000000,
-        "original_auxiliary_type_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
-        "original_cycles": 65395,
+        "original_auxiliary_type_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
+        "original_cycles": 65387,
         "original_error": null,
         "original_ickb_binary_patched": false,
         "original_ickb_binary_sha256": "0xbaf689bea596f8206d8c80e914ef36f828c9f95dad72049d2595c824df90da3a",
         "original_ickb_exit_code": 0,
         "original_ickb_status": "pass",
         "original_limit_order_binary_sha256": "0xbaf689bea596f8206d8c80e914ef36f828c9f95dad72049d2595c824df90da3a",
-        "shared_funding_lock_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
+        "shared_funding_lock_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0x9be35ef41aaa212e981e510fb1a97d751a4bd815082f43eef32a8ad5f5d9fee6",
-          "original": "0xb135b7b5fada0af55bb70e07abd5553270e4776306d98902524753d068b6a261"
+          "cellscript": "0x029b763c1fd83713d53b5634d3675fe912e3b64c5a18933027a6bfcf618307bf",
+          "original": "0x41c91ffdaaff5c7ffb0646d5a502f0b7e2cab74f7715aa62121e033ecadf11e2"
         },
         "tx_size_bytes": 469,
         "tx_size_bytes_by_side": {
@@ -5759,10 +5759,10 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0x05ac8fb2b5186ca01dc166be8e6dac6b00ed0695f39ab8c0e309498af60d5854",
-        "cellscript_auxiliary_type_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
+        "cellscript_artifact_sha256": "0x7db3a1c5a0944a3cd2222863118d07612f61d11f1c2a1abe58c05bb129eee9cb",
+        "cellscript_auxiliary_type_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Lock, cause: ValidationFailure: see error code 54 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/12bb9ddffad3b2805542a6917328ae345643925e2b1131e3a63967461c29afd6.html#54 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Lock, cause: ValidationFailure: see error code 54 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/ad55046fc66917f96cf2e0d6893ed8ada29b98381008836ebea24a3df4b940f5.html#54 } }",
         "cellscript_exit_code": 54,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
@@ -5844,7 +5844,7 @@
         },
         "normalized_fixture_sha256": "0xecb94b5fad6032cdc625c48cc94c035a182cb5b9044b72342de0ec64e8c42c4d",
         "occupied_capacity_shannons": 16300000000,
-        "original_auxiliary_type_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
+        "original_auxiliary_type_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
         "original_cycles": 0,
         "original_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Lock, cause: ValidationFailure: see error code 17 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/2db1be6f77ef33fe2e584b319b62ac67502cae7d8086da1afd617f98de3e6120.html#17 } }",
         "original_ickb_binary_patched": false,
@@ -5852,11 +5852,11 @@
         "original_ickb_exit_code": 17,
         "original_ickb_status": "fail",
         "original_limit_order_binary_sha256": "0xbaf689bea596f8206d8c80e914ef36f828c9f95dad72049d2595c824df90da3a",
-        "shared_funding_lock_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
+        "shared_funding_lock_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0x37c51cf20d0168198382c4d9fd7544f8cd089c91ffd4987cde552cb10608eeb1",
-          "original": "0xbdcf8ffd379d3b163296948da93e9fef73dfa4f47f096b22da1cbc7d931a776e"
+          "cellscript": "0xcd1e9b38fe0e32f509d7c6bd389de4b9562ffccf8df0c77cba9f7ac2cf4e8fec",
+          "original": "0x311d85b31e35d164eeb98af88442178480e62a9e1c91fa93f0e9b0d09d46f217"
         },
         "tx_size_bytes": 469,
         "tx_size_bytes_by_side": {
@@ -5877,10 +5877,10 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0x05ac8fb2b5186ca01dc166be8e6dac6b00ed0695f39ab8c0e309498af60d5854",
-        "cellscript_auxiliary_type_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
+        "cellscript_artifact_sha256": "0x7db3a1c5a0944a3cd2222863118d07612f61d11f1c2a1abe58c05bb129eee9cb",
+        "cellscript_auxiliary_type_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Lock, cause: ValidationFailure: see error code 52 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/12bb9ddffad3b2805542a6917328ae345643925e2b1131e3a63967461c29afd6.html#52 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Lock, cause: ValidationFailure: see error code 52 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/ad55046fc66917f96cf2e0d6893ed8ada29b98381008836ebea24a3df4b940f5.html#52 } }",
         "cellscript_exit_code": 52,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
@@ -5962,7 +5962,7 @@
         },
         "normalized_fixture_sha256": "0x4d7e3840dab5ed1444b93b23d2af1fe8fe2e4875a286ba07307808bcf729c2b2",
         "occupied_capacity_shannons": 16400000000,
-        "original_auxiliary_type_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
+        "original_auxiliary_type_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
         "original_cycles": 0,
         "original_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Lock, cause: ValidationFailure: see error code 16 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/2db1be6f77ef33fe2e584b319b62ac67502cae7d8086da1afd617f98de3e6120.html#16 } }",
         "original_ickb_binary_patched": false,
@@ -5970,11 +5970,11 @@
         "original_ickb_exit_code": 16,
         "original_ickb_status": "fail",
         "original_limit_order_binary_sha256": "0xbaf689bea596f8206d8c80e914ef36f828c9f95dad72049d2595c824df90da3a",
-        "shared_funding_lock_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
+        "shared_funding_lock_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0x0b1538d2af0e0d9181c8828d8f08ce162e14addb5997724774d1bf89e8964eae",
-          "original": "0x95a6c6b754a857fe28f64af11eac6328552c9f7a48d2efc57e206f57d2d7c3f1"
+          "cellscript": "0x8f34de9127d0c9a44975cb3095a0fd6601254c58ba5a538f88ed6db5903062c1",
+          "original": "0xeba1a15de541df3e9ffe05e1d8e4ffa8fde580d592c03a93aedc5162dbe70268"
         },
         "tx_size_bytes": 470,
         "tx_size_bytes_by_side": {
@@ -5995,10 +5995,10 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0x05ac8fb2b5186ca01dc166be8e6dac6b00ed0695f39ab8c0e309498af60d5854",
-        "cellscript_auxiliary_type_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
+        "cellscript_artifact_sha256": "0x7db3a1c5a0944a3cd2222863118d07612f61d11f1c2a1abe58c05bb129eee9cb",
+        "cellscript_auxiliary_type_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Lock, cause: ValidationFailure: see error code 53 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/12bb9ddffad3b2805542a6917328ae345643925e2b1131e3a63967461c29afd6.html#53 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Lock, cause: ValidationFailure: see error code 53 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/ad55046fc66917f96cf2e0d6893ed8ada29b98381008836ebea24a3df4b940f5.html#53 } }",
         "cellscript_exit_code": 53,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
@@ -6080,7 +6080,7 @@
         },
         "normalized_fixture_sha256": "0x342d142e32d4414e83298584443ef28491d960a75e52937013e28feb05f72fe9",
         "occupied_capacity_shannons": 16300000000,
-        "original_auxiliary_type_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
+        "original_auxiliary_type_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
         "original_cycles": 0,
         "original_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Lock, cause: ValidationFailure: see error code 20 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/2db1be6f77ef33fe2e584b319b62ac67502cae7d8086da1afd617f98de3e6120.html#20 } }",
         "original_ickb_binary_patched": false,
@@ -6088,11 +6088,11 @@
         "original_ickb_exit_code": 20,
         "original_ickb_status": "fail",
         "original_limit_order_binary_sha256": "0xbaf689bea596f8206d8c80e914ef36f828c9f95dad72049d2595c824df90da3a",
-        "shared_funding_lock_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
+        "shared_funding_lock_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0x1be7984f94bde0ebc1b32eb0d8428e7a2139ab0f527048aab6dce9b342d6a5fd",
-          "original": "0x8989beb3c98ae76c37fda7e09bcd3c6e90032566c4ad10d5755466e6991c485e"
+          "cellscript": "0x719dc5423653c138715d7736a6f7b41831e059a6419a2917636adfda00bae245",
+          "original": "0x68dca19e5e45b9e0b987f64993908b2e0ea8128660adaeaca035be02758ef5e6"
         },
         "tx_size_bytes": 469,
         "tx_size_bytes_by_side": {
@@ -6113,10 +6113,10 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0x05ac8fb2b5186ca01dc166be8e6dac6b00ed0695f39ab8c0e309498af60d5854",
-        "cellscript_auxiliary_type_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
+        "cellscript_artifact_sha256": "0x7db3a1c5a0944a3cd2222863118d07612f61d11f1c2a1abe58c05bb129eee9cb",
+        "cellscript_auxiliary_type_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Lock, cause: ValidationFailure: see error code 51 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/12bb9ddffad3b2805542a6917328ae345643925e2b1131e3a63967461c29afd6.html#51 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Lock, cause: ValidationFailure: see error code 51 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/ad55046fc66917f96cf2e0d6893ed8ada29b98381008836ebea24a3df4b940f5.html#51 } }",
         "cellscript_exit_code": 51,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
@@ -6198,7 +6198,7 @@
         },
         "normalized_fixture_sha256": "0x774e8dfe9ab697e28521b8644f01cb6c1bf6222992f5a0e21574b4185d49c5ca",
         "occupied_capacity_shannons": 16300000000,
-        "original_auxiliary_type_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
+        "original_auxiliary_type_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
         "original_cycles": 0,
         "original_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Lock, cause: ValidationFailure: see error code 18 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/2db1be6f77ef33fe2e584b319b62ac67502cae7d8086da1afd617f98de3e6120.html#18 } }",
         "original_ickb_binary_patched": false,
@@ -6206,11 +6206,11 @@
         "original_ickb_exit_code": 18,
         "original_ickb_status": "fail",
         "original_limit_order_binary_sha256": "0xbaf689bea596f8206d8c80e914ef36f828c9f95dad72049d2595c824df90da3a",
-        "shared_funding_lock_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
+        "shared_funding_lock_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0xa450c1bc761c1725d469c4ed07b081314e85b2dee83dfe588049086156e79ad2",
-          "original": "0x9f3236673ad233afde4ebf394ce7512783ff3f83b3f02c185ce7446ef18e3fc0"
+          "cellscript": "0x82e86c3f1c15a32f3f9d4c4284362d91680688ab7b63a68d54102cb0d2574276",
+          "original": "0xf527651038d08dabfe07443576c2acf46fc81fc232f3461d528c2b4e39c70a7d"
         },
         "tx_size_bytes": 469,
         "tx_size_bytes_by_side": {
@@ -6231,9 +6231,9 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0x61ded1387fe0e7abeabd178860d439c225ea06f32c82459cdd8fca8751bd77f9",
-        "cellscript_auxiliary_type_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
-        "cellscript_cycles": 36168,
+        "cellscript_artifact_sha256": "0x9224a95b9920ad81037ec5fe20b8c8789abf13e0bd2f479dcfa2693c447169f2",
+        "cellscript_auxiliary_type_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
+        "cellscript_cycles": 36152,
         "cellscript_error": null,
         "cellscript_exit_code": 0,
         "cellscript_status": "pass",
@@ -6304,19 +6304,19 @@
         },
         "normalized_fixture_sha256": "0x7dba21b6cbbecbb972ac9b6a72e46f36baa7774d94c32ea10e1c38946e1a7533",
         "occupied_capacity_shannons": 4100000000,
-        "original_auxiliary_type_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
-        "original_cycles": 83458,
+        "original_auxiliary_type_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
+        "original_cycles": 83450,
         "original_error": null,
         "original_ickb_binary_patched": true,
         "original_ickb_binary_sha256": "0x2d0ee2005e43adefc216f3036627d763c480cf6169b370b573a01bbf83131af4",
         "original_ickb_exit_code": 0,
-        "original_ickb_patched_binary_sha256": "0x3f9fb2be5134dbec9f045bbd311dfbfcb7555bd80e01f6b293e8a5f81ff1e417",
+        "original_ickb_patched_binary_sha256": "0xac1be8e7537849ae6c566e2eacf177cceb27d0468641de385f91ec00ee6079ad",
         "original_ickb_status": "pass",
         "original_owned_owner_binary_sha256": "0x2d0ee2005e43adefc216f3036627d763c480cf6169b370b573a01bbf83131af4",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0xcb084f986e5bf340207a5df077f74b999e168e25bc7bfbc0169d4eca96fe85cf",
-          "original": "0x8dd36d494dd6e11ab632db45d5fb08b0833ce20fcace9b0d2d0315823d2a17f2"
+          "cellscript": "0xc890baed91d77f3b67570c25b8a45506229d272372ee62d7074cede68ea7eeb2",
+          "original": "0xf809cdd91b4beeb9aea39eaf184195d340ea9bd903b143adfc78073d6eea6f27"
         },
         "tx_size_bytes": 335,
         "tx_size_bytes_by_side": {
@@ -6337,9 +6337,9 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0xd24bfe1061df3d75973626036584748a2a6ad9bf4106e6fb1cce6a5c751bee65",
-        "cellscript_auxiliary_type_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
-        "cellscript_cycles": 20069,
+        "cellscript_artifact_sha256": "0x4d8ba5fdbcd7ce59ffe488465f2f39d8cd9df41823c00735352da1f628d04fb1",
+        "cellscript_auxiliary_type_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
+        "cellscript_cycles": 20057,
         "cellscript_error": null,
         "cellscript_exit_code": 0,
         "cellscript_status": "pass",
@@ -6406,19 +6406,19 @@
         },
         "normalized_fixture_sha256": "0x2efc98d2370b5d9f4fcb09a85c9d107bec43f7fc0170e8d4fe42420417d27761",
         "occupied_capacity_shannons": 16000000000,
-        "original_auxiliary_type_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
-        "original_cycles": 47359,
+        "original_auxiliary_type_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
+        "original_cycles": 47351,
         "original_error": null,
         "original_ickb_binary_patched": true,
         "original_ickb_binary_sha256": "0x2d0ee2005e43adefc216f3036627d763c480cf6169b370b573a01bbf83131af4",
         "original_ickb_exit_code": 0,
-        "original_ickb_patched_binary_sha256": "0x3f9fb2be5134dbec9f045bbd311dfbfcb7555bd80e01f6b293e8a5f81ff1e417",
+        "original_ickb_patched_binary_sha256": "0xac1be8e7537849ae6c566e2eacf177cceb27d0468641de385f91ec00ee6079ad",
         "original_ickb_status": "pass",
         "original_owned_owner_binary_sha256": "0x2d0ee2005e43adefc216f3036627d763c480cf6169b370b573a01bbf83131af4",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0xa93c0e1a696c177df89515fe9a0c52cb6f85be3f23811ed6dca61c6e03d0ba93",
-          "original": "0xfee8f94a4a6f3c344f51d6372a8728c5784fc6919f63f3f07d1c5eb780e0d42a"
+          "cellscript": "0xb0aec59d98f7e48f707b345941f4a424e77b1b5def2300281cd548ae3a893e6f",
+          "original": "0x547bdcfa9977a4df7f00f1188530db8c80d690aa9c6d654613575683c843668b"
         },
         "tx_size_bytes": 490,
         "tx_size_bytes_by_side": {
@@ -6439,10 +6439,10 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0xd24bfe1061df3d75973626036584748a2a6ad9bf4106e6fb1cce6a5c751bee65",
-        "cellscript_auxiliary_type_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
+        "cellscript_artifact_sha256": "0x4d8ba5fdbcd7ce59ffe488465f2f39d8cd9df41823c00735352da1f628d04fb1",
+        "cellscript_auxiliary_type_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Outputs[1].Type, cause: ValidationFailure: see error code 40 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/61cee2f7ae997761f77e7ce4fa7bce02e8460cf528a7098542e177d4e5908850.html#40 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Outputs[1].Type, cause: ValidationFailure: see error code 40 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/36a23d07310ca4f83d39f8ef42c1fd4a9cea083394d9c56d27f106cc96aea8a1.html#40 } }",
         "cellscript_exit_code": 40,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
@@ -6508,19 +6508,19 @@
         },
         "normalized_fixture_sha256": "0xe0d02b31b9be84e6c0170a1e352c806cd68e3ff28c88893787aa90eb650808de",
         "occupied_capacity_shannons": 16000000000,
-        "original_auxiliary_type_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
+        "original_auxiliary_type_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
         "original_cycles": 0,
-        "original_error": "Error { kind: Script, inner: TransactionScriptError { source: Outputs[1].Type, cause: ValidationFailure: see error code 8 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/38ab3f6935359ca1fe15d9aad8cc62d86ca82dddc769e539f031ecaa183f91b5.html#8 } }",
+        "original_error": "Error { kind: Script, inner: TransactionScriptError { source: Outputs[1].Type, cause: ValidationFailure: see error code 8 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/dfff4390ac5e126cb3b0daece262e5c3b8101bf50f8cbced778f7bebf8270df1.html#8 } }",
         "original_ickb_binary_patched": true,
         "original_ickb_binary_sha256": "0x2d0ee2005e43adefc216f3036627d763c480cf6169b370b573a01bbf83131af4",
         "original_ickb_exit_code": 8,
-        "original_ickb_patched_binary_sha256": "0x3f9fb2be5134dbec9f045bbd311dfbfcb7555bd80e01f6b293e8a5f81ff1e417",
+        "original_ickb_patched_binary_sha256": "0xac1be8e7537849ae6c566e2eacf177cceb27d0468641de385f91ec00ee6079ad",
         "original_ickb_status": "fail",
         "original_owned_owner_binary_sha256": "0x2d0ee2005e43adefc216f3036627d763c480cf6169b370b573a01bbf83131af4",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0x61e5db1035132c4ecb4dc598bca6b67c923214e83c53639164f31a6c2ba4be08",
-          "original": "0xae5654e5d1c4c723ee3e82fb02b4612677cdbbe6ce0548348d402342911681ba"
+          "cellscript": "0x8aac24b9b2d649c9d54236d2f0c169de8332b5b7e4cdcf0474b11ee8180731e6",
+          "original": "0xd856511aed96f42f59d8508ca1601c41d2cf52939bdd2c53d2b780828f87ecf3"
         },
         "tx_size_bytes": 490,
         "tx_size_bytes_by_side": {
@@ -6541,10 +6541,10 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0xd24bfe1061df3d75973626036584748a2a6ad9bf4106e6fb1cce6a5c751bee65",
-        "cellscript_auxiliary_type_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
+        "cellscript_artifact_sha256": "0x4d8ba5fdbcd7ce59ffe488465f2f39d8cd9df41823c00735352da1f628d04fb1",
+        "cellscript_auxiliary_type_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Outputs[1].Type, cause: ValidationFailure: see error code 40 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/61cee2f7ae997761f77e7ce4fa7bce02e8460cf528a7098542e177d4e5908850.html#40 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Outputs[1].Type, cause: ValidationFailure: see error code 40 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/36a23d07310ca4f83d39f8ef42c1fd4a9cea083394d9c56d27f106cc96aea8a1.html#40 } }",
         "cellscript_exit_code": 40,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
@@ -6620,19 +6620,19 @@
         },
         "normalized_fixture_sha256": "0x4a7bd0386d35d7330be426e96419befd177853f3ae413120d3e819633e758f49",
         "occupied_capacity_shannons": 23800000000,
-        "original_auxiliary_type_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
+        "original_auxiliary_type_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
         "original_cycles": 0,
-        "original_error": "Error { kind: Script, inner: TransactionScriptError { source: Outputs[1].Type, cause: ValidationFailure: see error code 8 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/38ab3f6935359ca1fe15d9aad8cc62d86ca82dddc769e539f031ecaa183f91b5.html#8 } }",
+        "original_error": "Error { kind: Script, inner: TransactionScriptError { source: Outputs[1].Type, cause: ValidationFailure: see error code 8 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/dfff4390ac5e126cb3b0daece262e5c3b8101bf50f8cbced778f7bebf8270df1.html#8 } }",
         "original_ickb_binary_patched": true,
         "original_ickb_binary_sha256": "0x2d0ee2005e43adefc216f3036627d763c480cf6169b370b573a01bbf83131af4",
         "original_ickb_exit_code": 8,
-        "original_ickb_patched_binary_sha256": "0x3f9fb2be5134dbec9f045bbd311dfbfcb7555bd80e01f6b293e8a5f81ff1e417",
+        "original_ickb_patched_binary_sha256": "0xac1be8e7537849ae6c566e2eacf177cceb27d0468641de385f91ec00ee6079ad",
         "original_ickb_status": "fail",
         "original_owned_owner_binary_sha256": "0x2d0ee2005e43adefc216f3036627d763c480cf6169b370b573a01bbf83131af4",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0x23c6906c70eae751e4f058f0e697ce973ad8b79ff10d09b0562194b8ad554fdc",
-          "original": "0x16712edc4299da07d94e32082e47ea1ccda1006dfc0956de5294080954de89df"
+          "cellscript": "0xe11a71e28489e58845fdcf6b6aae6a426ee19e8d58d59419a34848fc879f2e5f",
+          "original": "0x6d6e236b20033ef78a1dae8af7569da8e91d853cff60d10d86cef6ecbf299e6b"
         },
         "tx_size_bytes": 636,
         "tx_size_bytes_by_side": {
@@ -6653,10 +6653,10 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0xd24bfe1061df3d75973626036584748a2a6ad9bf4106e6fb1cce6a5c751bee65",
-        "cellscript_auxiliary_type_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
+        "cellscript_artifact_sha256": "0x4d8ba5fdbcd7ce59ffe488465f2f39d8cd9df41823c00735352da1f628d04fb1",
+        "cellscript_auxiliary_type_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Outputs[2].Type, cause: ValidationFailure: see error code 40 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/61cee2f7ae997761f77e7ce4fa7bce02e8460cf528a7098542e177d4e5908850.html#40 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Outputs[2].Type, cause: ValidationFailure: see error code 40 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/36a23d07310ca4f83d39f8ef42c1fd4a9cea083394d9c56d27f106cc96aea8a1.html#40 } }",
         "cellscript_exit_code": 40,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
@@ -6733,19 +6733,19 @@
         },
         "normalized_fixture_sha256": "0x4cd863f7f7eb78031fdd7554bd57011fde05076a899a5fe4e863818729ee4ec5",
         "occupied_capacity_shannons": 24200000000,
-        "original_auxiliary_type_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
+        "original_auxiliary_type_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
         "original_cycles": 0,
-        "original_error": "Error { kind: Script, inner: TransactionScriptError { source: Outputs[2].Type, cause: ValidationFailure: see error code 8 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/38ab3f6935359ca1fe15d9aad8cc62d86ca82dddc769e539f031ecaa183f91b5.html#8 } }",
+        "original_error": "Error { kind: Script, inner: TransactionScriptError { source: Outputs[2].Type, cause: ValidationFailure: see error code 8 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/dfff4390ac5e126cb3b0daece262e5c3b8101bf50f8cbced778f7bebf8270df1.html#8 } }",
         "original_ickb_binary_patched": true,
         "original_ickb_binary_sha256": "0x2d0ee2005e43adefc216f3036627d763c480cf6169b370b573a01bbf83131af4",
         "original_ickb_exit_code": 8,
-        "original_ickb_patched_binary_sha256": "0x3f9fb2be5134dbec9f045bbd311dfbfcb7555bd80e01f6b293e8a5f81ff1e417",
+        "original_ickb_patched_binary_sha256": "0xac1be8e7537849ae6c566e2eacf177cceb27d0468641de385f91ec00ee6079ad",
         "original_ickb_status": "fail",
         "original_owned_owner_binary_sha256": "0x2d0ee2005e43adefc216f3036627d763c480cf6169b370b573a01bbf83131af4",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0xb826173db592d7073f737c51312227ea3cefa441f06bb2e569e28482a9677a97",
-          "original": "0xa33c8fe58c97435422a4210945603547203a0f6c57dddd9ace1fd5afe6eea098"
+          "cellscript": "0xaf355f2f242698790fa4b856f41b2569f6570ef6c92f6f33034b4f452fe946ce",
+          "original": "0x740062d8891fada3e3194396f57ef3187c5d11dbbbdda9e0b7bc4390e21b7241"
         },
         "tx_size_bytes": 640,
         "tx_size_bytes_by_side": {
@@ -6766,9 +6766,9 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0xd24bfe1061df3d75973626036584748a2a6ad9bf4106e6fb1cce6a5c751bee65",
+        "cellscript_artifact_sha256": "0x4d8ba5fdbcd7ce59ffe488465f2f39d8cd9df41823c00735352da1f628d04fb1",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Outputs[0].Type, cause: ValidationFailure: see error code 40 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/61cee2f7ae997761f77e7ce4fa7bce02e8460cf528a7098542e177d4e5908850.html#40 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Outputs[0].Type, cause: ValidationFailure: see error code 40 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/36a23d07310ca4f83d39f8ef42c1fd4a9cea083394d9c56d27f106cc96aea8a1.html#40 } }",
         "cellscript_exit_code": 40,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
@@ -6831,8 +6831,8 @@
         "original_owned_owner_binary_sha256": "0x2d0ee2005e43adefc216f3036627d763c480cf6169b370b573a01bbf83131af4",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0x6a299c4df91c086b24ed770b48c69b8546314e242c299f03ea390a6ccd76c2dd",
-          "original": "0xd4ee4698ddc41b11bffefd22f3667ec47a3e296b12ffc867b54d837acc1bbe22"
+          "cellscript": "0x912f1243debb1b06a7a5b2e22e522456bd3ef8bc87834e2e772f2006609c07ea",
+          "original": "0xed4e769efd0f9c7f49aa156613e7e81edb48742f6ffbba46ee41f327063bd258"
         },
         "tx_size_bytes": 340,
         "tx_size_bytes_by_side": {
@@ -6853,9 +6853,9 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0x7b44e54084e96685ce578b8c1c7055c3347c1461dd3ed8bd2e36596eac61491e",
+        "cellscript_artifact_sha256": "0x74fe274764cdebebaf17ffca87568f1f90249357274da078ccd8a0aa313a4553",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Outputs[0].Type, cause: ValidationFailure: see error code 7 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/07b86e002ba8efa682db258694ebeb7115467acd7fd8705a21d6def0cdf1ed3e.html#7 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Outputs[0].Type, cause: ValidationFailure: see error code 7 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/937d659f9a9c7ecdb1a5f2f0aa96126f28cbba1a8db9b5345159ba4aefff5f9d.html#7 } }",
         "cellscript_exit_code": 7,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
@@ -6918,8 +6918,8 @@
         "original_owned_owner_binary_sha256": "0x2d0ee2005e43adefc216f3036627d763c480cf6169b370b573a01bbf83131af4",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0x8ad5041409ffbf075221a77a7298bcbd6a89659d2d137a0cb129320f6dabefbc",
-          "original": "0x7586ab2d2b331e3dc41d35df0d0c6465c5a0d4e0275a88fbb6b54bc632ba3b16"
+          "cellscript": "0x125b0b35c9a8e98457e1eabd379968ecd1f4b9c2ff2b005ceb52f75101788e24",
+          "original": "0x4ab30822cab2d0c6108fe647c4597183de5019c130eb5907dcfd30ffb34b379d"
         },
         "tx_size_bytes": 336,
         "tx_size_bytes_by_side": {
@@ -6940,9 +6940,9 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0xaf572ed736a80880cc7f365e37ce35a55844988d933afa6b0fa8f177191ae51c",
+        "cellscript_artifact_sha256": "0xe6e3eaa0afc9ea102b3ff73fbad529e81d97e4c26320a7ee031ec5eb0d80069a",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Outputs[1].Type, cause: ValidationFailure: see error code 6 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/7dedf9451919691bf6e9b2b43a61016b97bd1b4c7e8cdf0cd2432b36b135f42a.html#6 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Outputs[1].Type, cause: ValidationFailure: see error code 6 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/4ff6579a3dd73e4c23d27fb10025d08e1e05275255d62ea520d008734e216230.html#6 } }",
         "cellscript_exit_code": 6,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
@@ -7015,8 +7015,8 @@
         "original_owned_owner_binary_sha256": "0x2d0ee2005e43adefc216f3036627d763c480cf6169b370b573a01bbf83131af4",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0x4a69c221be41795ed8422b11ffe11ac83ffef6fde68d3e9e78778ac0a1632a72",
-          "original": "0x688f620edfebba07bfe2c84af290b5712a16b274c90f6d852341bc68c702679f"
+          "cellscript": "0x2fb1cbe8fe9e24c9359002a4f9e32a583c9939d5471d2dbd6fa0c6f5a4ef14bd",
+          "original": "0x29afa2a366f8d0bcb1ee3a846a53000c079879360bbffeb5272a0844d3c86c54"
         },
         "tx_size_bytes": 429,
         "tx_size_bytes_by_side": {
@@ -7037,10 +7037,10 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0xd24bfe1061df3d75973626036584748a2a6ad9bf4106e6fb1cce6a5c751bee65",
-        "cellscript_auxiliary_type_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
+        "cellscript_artifact_sha256": "0x4d8ba5fdbcd7ce59ffe488465f2f39d8cd9df41823c00735352da1f628d04fb1",
+        "cellscript_auxiliary_type_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Outputs[1].Type, cause: ValidationFailure: see error code 34 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/61cee2f7ae997761f77e7ce4fa7bce02e8460cf528a7098542e177d4e5908850.html#34 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Outputs[1].Type, cause: ValidationFailure: see error code 34 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/36a23d07310ca4f83d39f8ef42c1fd4a9cea083394d9c56d27f106cc96aea8a1.html#34 } }",
         "cellscript_exit_code": 34,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
@@ -7106,19 +7106,19 @@
         },
         "normalized_fixture_sha256": "0xc8956eff8cd5025f308065fd7ed8e4286b75e2729cef81b7c2c427653b2cb77e",
         "occupied_capacity_shannons": 15900000000,
-        "original_auxiliary_type_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
+        "original_auxiliary_type_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
         "original_cycles": 0,
-        "original_error": "Error { kind: Script, inner: TransactionScriptError { source: Outputs[1].Type, cause: ValidationFailure: see error code 4 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/38ab3f6935359ca1fe15d9aad8cc62d86ca82dddc769e539f031ecaa183f91b5.html#4 } }",
+        "original_error": "Error { kind: Script, inner: TransactionScriptError { source: Outputs[1].Type, cause: ValidationFailure: see error code 4 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/dfff4390ac5e126cb3b0daece262e5c3b8101bf50f8cbced778f7bebf8270df1.html#4 } }",
         "original_ickb_binary_patched": true,
         "original_ickb_binary_sha256": "0x2d0ee2005e43adefc216f3036627d763c480cf6169b370b573a01bbf83131af4",
         "original_ickb_exit_code": 4,
-        "original_ickb_patched_binary_sha256": "0x3f9fb2be5134dbec9f045bbd311dfbfcb7555bd80e01f6b293e8a5f81ff1e417",
+        "original_ickb_patched_binary_sha256": "0xac1be8e7537849ae6c566e2eacf177cceb27d0468641de385f91ec00ee6079ad",
         "original_ickb_status": "fail",
         "original_owned_owner_binary_sha256": "0x2d0ee2005e43adefc216f3036627d763c480cf6169b370b573a01bbf83131af4",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0xe26adaf25c14d9cc186902d591a4f9f12889319ed304e553e20918483ac0d550",
-          "original": "0x074e652ffde78e32cea2260bd7c8fbfbf591eecf908da8404de82ab91a4f8438"
+          "cellscript": "0x1c7a261d6c596d2bf350085d53e151671dcf2b25b84cb0054ca70b79d6505d2a",
+          "original": "0x6122133a90ad349a10d2a0c0db8b27a7a387f632d0782fff444124260ca8ad6d"
         },
         "tx_size_bytes": 489,
         "tx_size_bytes_by_side": {
@@ -7139,26 +7139,26 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "actual_related_type_hash": "0x2befc213ae6921d453aebb8cc424688a737d53e8ee576715ca4e62a95d03e417",
-        "cellscript_artifact_sha256": "0xe56f857daac188bf80f5170824d4de6542027bb6524d52f0aa58ff850abacfb7",
-        "cellscript_auxiliary_type_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
+        "actual_related_type_hash": "0x75ee6a9511feaf3fc60a698a9f52be1cbd8143d72f70756e1cc75f4d62e283e0",
+        "cellscript_artifact_sha256": "0xcfc8c0823fc776a6a2b339ae072075aba2aa61d92e335350d15e823df2d8e7ae",
+        "cellscript_auxiliary_type_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Outputs[1].Type, cause: ValidationFailure: see error code 46 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/9b672be8cdf2fc514aee6f36e703d08b3dcac592e1a5b32b7f653318785e9f1c.html#46 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Outputs[1].Type, cause: ValidationFailure: see error code 46 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/32ab1ad2486d5c1ab7391a15f35fa152416902c1d52b58dc744b0e7fee10b48b.html#46 } }",
         "cellscript_exit_code": 46,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
-        "expected_related_type_hash": "0x9c3f4fafbfc2bf0d3f5e161510114d4fcaa0dd025a6cf39e3d41a33ad8788f93",
+        "expected_related_type_hash": "0x89a34324867efddd81477e100ca3b9f304e8d0f1ba5c1de58372b6914ac8d3a9",
         "failure_mode": "output_related_type_hash_mismatch",
         "fee_shannons": 0,
-        "fixture_sha256": "0x5e11c58d6d6f9f9432acb62e533020f3b38ec36016f3b2d6b8dc3b730fedba89",
+        "fixture_sha256": "0x90f2b3ddbae39327b43ac62a820b53d974b44a1e71ecfc64377978bcc9c0c94f",
         "normalized_fixture": {
-          "actual_related_type_hash": "0x2befc213ae6921d453aebb8cc424688a737d53e8ee576715ca4e62a95d03e417",
+          "actual_related_type_hash": "0x75ee6a9511feaf3fc60a698a9f52be1cbd8143d72f70756e1cc75f4d62e283e0",
           "cell_deps": [
             "script_under_test",
             "auxiliary_withdrawal_type_code",
             "always_success_lock"
           ],
-          "expected_related_type_hash": "0x9c3f4fafbfc2bf0d3f5e161510114d4fcaa0dd025a6cf39e3d41a33ad8788f93",
+          "expected_related_type_hash": "0x89a34324867efddd81477e100ca3b9f304e8d0f1ba5c1de58372b6914ac8d3a9",
           "expected_status": "fail",
           "failure_mode": "output_related_type_hash_mismatch",
           "header_deps": [],
@@ -7179,10 +7179,10 @@
           ],
           "outputs": [
             {
-              "actual_type_hash": "0x2befc213ae6921d453aebb8cc424688a737d53e8ee576715ca4e62a95d03e417",
+              "actual_type_hash": "0x75ee6a9511feaf3fc60a698a9f52be1cbd8143d72f70756e1cc75f4d62e283e0",
               "capacity_shannons": 100000000000,
               "data": "0x0100000000000000",
-              "expected_type_hash": "0x9c3f4fafbfc2bf0d3f5e161510114d4fcaa0dd025a6cf39e3d41a33ad8788f93",
+              "expected_type_hash": "0x89a34324867efddd81477e100ca3b9f304e8d0f1ba5c1de58372b6914ac8d3a9",
               "index": 0,
               "lock": "script_under_test",
               "related_type_hash_matches": false,
@@ -7212,21 +7212,21 @@
             "0x"
           ]
         },
-        "normalized_fixture_sha256": "0x5e11c58d6d6f9f9432acb62e533020f3b38ec36016f3b2d6b8dc3b730fedba89",
+        "normalized_fixture_sha256": "0x90f2b3ddbae39327b43ac62a820b53d974b44a1e71ecfc64377978bcc9c0c94f",
         "occupied_capacity_shannons": 16100000000,
-        "original_auxiliary_type_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
+        "original_auxiliary_type_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
         "original_cycles": 0,
-        "original_error": "Error { kind: Script, inner: TransactionScriptError { source: Outputs[1].Type, cause: ValidationFailure: see error code 6 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/38ab3f6935359ca1fe15d9aad8cc62d86ca82dddc769e539f031ecaa183f91b5.html#6 } }",
+        "original_error": "Error { kind: Script, inner: TransactionScriptError { source: Outputs[1].Type, cause: ValidationFailure: see error code 6 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/dfff4390ac5e126cb3b0daece262e5c3b8101bf50f8cbced778f7bebf8270df1.html#6 } }",
         "original_ickb_binary_patched": true,
         "original_ickb_binary_sha256": "0x2d0ee2005e43adefc216f3036627d763c480cf6169b370b573a01bbf83131af4",
         "original_ickb_exit_code": 6,
-        "original_ickb_patched_binary_sha256": "0x3f9fb2be5134dbec9f045bbd311dfbfcb7555bd80e01f6b293e8a5f81ff1e417",
+        "original_ickb_patched_binary_sha256": "0xac1be8e7537849ae6c566e2eacf177cceb27d0468641de385f91ec00ee6079ad",
         "original_ickb_status": "fail",
         "original_owned_owner_binary_sha256": "0x2d0ee2005e43adefc216f3036627d763c480cf6169b370b573a01bbf83131af4",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0x0a57c0a5ea3aff7fe32e0228af106eec812c4b0c40c8ae5e27f5adf0c99b59fa",
-          "original": "0xdf7a03fc85ca093cb889c003f186291c6fcf1272de3abc365db28ae9452da3ae"
+          "cellscript": "0x530799f9ba720decfb54c517b2db77181c9be2035498e9a7b72045159f38b0ed",
+          "original": "0x3e6480f652560ede820b5fa99f97961fbecf1408b4e6f9f10e7b00026977c42b"
         },
         "tx_size_bytes": 491,
         "tx_size_bytes_by_side": {
@@ -7247,24 +7247,24 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0xba23f55a296fe2ed49435693616f211981692e197ce319015fb54e3320507766",
-        "cellscript_auxiliary_type_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
+        "cellscript_artifact_sha256": "0x9a60e5a73ca3b7b67f035602e3c5632347f271f2c8ad5bbb5a3adf6a4a174d5f",
+        "cellscript_auxiliary_type_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Outputs[1].Type, cause: ValidationFailure: see error code 47 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/023a1bcb9337334c57aca56907d25aa89a13fbf8620b3a7b4c763697c2299b54.html#47 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Outputs[1].Type, cause: ValidationFailure: see error code 47 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/2a8aacd99a53d66e302367e062466d135428bdcaedf10d07d7eca216de3c7040.html#47 } }",
         "cellscript_exit_code": 47,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
-        "expected_related_type_hash": "0x9c3f4fafbfc2bf0d3f5e161510114d4fcaa0dd025a6cf39e3d41a33ad8788f93",
+        "expected_related_type_hash": "0x89a34324867efddd81477e100ca3b9f304e8d0f1ba5c1de58372b6914ac8d3a9",
         "failure_mode": "output_related_data_rule_mismatch",
         "fee_shannons": 0,
-        "fixture_sha256": "0x20fc1d1a95039656e973159023ea5c856d3ba9c148c6cb49038f8e31d8dc2147",
+        "fixture_sha256": "0x577f9afba320445bffcb80669490cc9a82b47c71ad4083774897171155065d6b",
         "normalized_fixture": {
           "cell_deps": [
             "script_under_test",
             "auxiliary_withdrawal_type",
             "always_success_lock"
           ],
-          "expected_related_type_hash": "0x9c3f4fafbfc2bf0d3f5e161510114d4fcaa0dd025a6cf39e3d41a33ad8788f93",
+          "expected_related_type_hash": "0x89a34324867efddd81477e100ca3b9f304e8d0f1ba5c1de58372b6914ac8d3a9",
           "expected_status": "fail",
           "failure_mode": "output_related_data_rule_mismatch",
           "header_deps": [],
@@ -7285,10 +7285,10 @@
           ],
           "outputs": [
             {
-              "actual_type_hash": "0x9c3f4fafbfc2bf0d3f5e161510114d4fcaa0dd025a6cf39e3d41a33ad8788f93",
+              "actual_type_hash": "0x89a34324867efddd81477e100ca3b9f304e8d0f1ba5c1de58372b6914ac8d3a9",
               "capacity_shannons": 100000000000,
               "data": "0x0000000000000000",
-              "expected_type_hash": "0x9c3f4fafbfc2bf0d3f5e161510114d4fcaa0dd025a6cf39e3d41a33ad8788f93",
+              "expected_type_hash": "0x89a34324867efddd81477e100ca3b9f304e8d0f1ba5c1de58372b6914ac8d3a9",
               "index": 0,
               "lock": "script_under_test",
               "related_data_rule_matches": false,
@@ -7319,21 +7319,21 @@
             "0x"
           ]
         },
-        "normalized_fixture_sha256": "0x20fc1d1a95039656e973159023ea5c856d3ba9c148c6cb49038f8e31d8dc2147",
+        "normalized_fixture_sha256": "0x577f9afba320445bffcb80669490cc9a82b47c71ad4083774897171155065d6b",
         "occupied_capacity_shannons": 16000000000,
-        "original_auxiliary_type_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
+        "original_auxiliary_type_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
         "original_cycles": 0,
-        "original_error": "Error { kind: Script, inner: TransactionScriptError { source: Outputs[1].Type, cause: ValidationFailure: see error code 6 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/38ab3f6935359ca1fe15d9aad8cc62d86ca82dddc769e539f031ecaa183f91b5.html#6 } }",
+        "original_error": "Error { kind: Script, inner: TransactionScriptError { source: Outputs[1].Type, cause: ValidationFailure: see error code 6 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/dfff4390ac5e126cb3b0daece262e5c3b8101bf50f8cbced778f7bebf8270df1.html#6 } }",
         "original_ickb_binary_patched": true,
         "original_ickb_binary_sha256": "0x2d0ee2005e43adefc216f3036627d763c480cf6169b370b573a01bbf83131af4",
         "original_ickb_exit_code": 6,
-        "original_ickb_patched_binary_sha256": "0x3f9fb2be5134dbec9f045bbd311dfbfcb7555bd80e01f6b293e8a5f81ff1e417",
+        "original_ickb_patched_binary_sha256": "0xac1be8e7537849ae6c566e2eacf177cceb27d0468641de385f91ec00ee6079ad",
         "original_ickb_status": "fail",
         "original_owned_owner_binary_sha256": "0x2d0ee2005e43adefc216f3036627d763c480cf6169b370b573a01bbf83131af4",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0xea0d85667da7555a8a29503e75825d4ab27e6862483c610d3fbd560bcb9ff126",
-          "original": "0x5b841863c32441987c68cf31d131051381305b9cad3a57a1ee74b973f2dec6d0"
+          "cellscript": "0x8e26f961940662f20fa7f3d5063745f2407e6d0185ef7e3b8032256e943fef25",
+          "original": "0xec0f67b0966f7c8f49bbd5dd7f82c63ead5b76b8233f862568c39a039fda88bb"
         },
         "tx_size_bytes": 490,
         "tx_size_bytes_by_side": {
@@ -7354,36 +7354,36 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "actual_related_type_hash": "0x2befc213ae6921d453aebb8cc424688a737d53e8ee576715ca4e62a95d03e417",
-        "cellscript_artifact_sha256": "0x9b9cebfc326c2efa7e87e5a940437168eee80def58e3426329e90020630c64c2",
-        "cellscript_auxiliary_type_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
+        "actual_related_type_hash": "0x75ee6a9511feaf3fc60a698a9f52be1cbd8143d72f70756e1cc75f4d62e283e0",
+        "cellscript_artifact_sha256": "0xa01d7642bc47a771bcb6f7026bc0f8f5efe23278649c8d436b223bc57598aa88",
+        "cellscript_auxiliary_type_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Lock, cause: ValidationFailure: see error code 46 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/5eca5c3f77e8253d20f2a57ea302b4d31e85716a529b01790387ca1df867d528.html#46 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Lock, cause: ValidationFailure: see error code 46 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/d5264dca7cf304819338386ea9ff75f18e7d28ac1a1c2ca31a93860cb8fb29e5.html#46 } }",
         "cellscript_exit_code": 46,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
-        "expected_related_type_hash": "0x9c3f4fafbfc2bf0d3f5e161510114d4fcaa0dd025a6cf39e3d41a33ad8788f93",
+        "expected_related_type_hash": "0x89a34324867efddd81477e100ca3b9f304e8d0f1ba5c1de58372b6914ac8d3a9",
         "failure_mode": "related_type_hash_mismatch",
         "fee_shannons": 0,
-        "fixture_sha256": "0x5bb95489eec1f2cd5b59e850e12046153e2a27640bbcd8d607f331737e1165ae",
+        "fixture_sha256": "0x7195d4c9978b9e8cb945b58d3c6bb5503868c55d9df38fabd65f4b3410f78bc9",
         "normalized_fixture": {
-          "actual_related_type_hash": "0x2befc213ae6921d453aebb8cc424688a737d53e8ee576715ca4e62a95d03e417",
+          "actual_related_type_hash": "0x75ee6a9511feaf3fc60a698a9f52be1cbd8143d72f70756e1cc75f4d62e283e0",
           "cell_deps": [
             "script_under_test",
             "auxiliary_withdrawal_type_code",
             "always_success_lock"
           ],
-          "expected_related_type_hash": "0x9c3f4fafbfc2bf0d3f5e161510114d4fcaa0dd025a6cf39e3d41a33ad8788f93",
+          "expected_related_type_hash": "0x89a34324867efddd81477e100ca3b9f304e8d0f1ba5c1de58372b6914ac8d3a9",
           "expected_status": "fail",
           "failure_mode": "related_type_hash_mismatch",
           "header_deps": [],
           "input_capacity_shannons": 200000000000,
           "inputs": [
             {
-              "actual_type_hash": "0x2befc213ae6921d453aebb8cc424688a737d53e8ee576715ca4e62a95d03e417",
+              "actual_type_hash": "0x75ee6a9511feaf3fc60a698a9f52be1cbd8143d72f70756e1cc75f4d62e283e0",
               "capacity_shannons": 100000000000,
               "data": "0x0100000000000000",
-              "expected_type_hash": "0x9c3f4fafbfc2bf0d3f5e161510114d4fcaa0dd025a6cf39e3d41a33ad8788f93",
+              "expected_type_hash": "0x89a34324867efddd81477e100ca3b9f304e8d0f1ba5c1de58372b6914ac8d3a9",
               "index": 0,
               "lock": "script_under_test",
               "out_point": {
@@ -7431,21 +7431,21 @@
             "0x"
           ]
         },
-        "normalized_fixture_sha256": "0x5bb95489eec1f2cd5b59e850e12046153e2a27640bbcd8d607f331737e1165ae",
+        "normalized_fixture_sha256": "0x7195d4c9978b9e8cb945b58d3c6bb5503868c55d9df38fabd65f4b3410f78bc9",
         "occupied_capacity_shannons": 4100000000,
-        "original_auxiliary_type_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
+        "original_auxiliary_type_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
         "original_cycles": 0,
-        "original_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Lock, cause: ValidationFailure: see error code 6 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/38ab3f6935359ca1fe15d9aad8cc62d86ca82dddc769e539f031ecaa183f91b5.html#6 } }",
+        "original_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Lock, cause: ValidationFailure: see error code 6 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/dfff4390ac5e126cb3b0daece262e5c3b8101bf50f8cbced778f7bebf8270df1.html#6 } }",
         "original_ickb_binary_patched": true,
         "original_ickb_binary_sha256": "0x2d0ee2005e43adefc216f3036627d763c480cf6169b370b573a01bbf83131af4",
         "original_ickb_exit_code": 6,
-        "original_ickb_patched_binary_sha256": "0x3f9fb2be5134dbec9f045bbd311dfbfcb7555bd80e01f6b293e8a5f81ff1e417",
+        "original_ickb_patched_binary_sha256": "0xac1be8e7537849ae6c566e2eacf177cceb27d0468641de385f91ec00ee6079ad",
         "original_ickb_status": "fail",
         "original_owned_owner_binary_sha256": "0x2d0ee2005e43adefc216f3036627d763c480cf6169b370b573a01bbf83131af4",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0xc310de3700e66de2e98820911f466c3fdcb687d076af77420481a211888b8794",
-          "original": "0x5096aaed7dfc3f0b56a7c75f5f83336f38f2b196cf3c5c88f07244066335124f"
+          "cellscript": "0xa65734a8b861299f61220de480ec556bcd716fb38bf4598753c7f84276be8ccf",
+          "original": "0xc707b6b33ba7d18dfe8003fc11503286e8428c88d28be3254f3a58a531e1ca16"
         },
         "tx_size_bytes": 335,
         "tx_size_bytes_by_side": {
@@ -7466,34 +7466,34 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0x813ba720a481f5c3324df27a3b789235975bd48aa9d9e79ecf9ce1358cadba0a",
-        "cellscript_auxiliary_type_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
+        "cellscript_artifact_sha256": "0xde03833101c029945050390b75e0241ba5f14633bf9610e03e08b761da5c8d28",
+        "cellscript_auxiliary_type_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Lock, cause: ValidationFailure: see error code 47 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/67708d67f3b3534eed158abd8c6358dc1ea5593f4b7b6d63c3ad607a1b449ebd.html#47 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Lock, cause: ValidationFailure: see error code 47 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/3d6fe287f5dea9b1134f34c03357ac0a21af27d5e6fb53b829919737127c2a98.html#47 } }",
         "cellscript_exit_code": 47,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
-        "expected_related_type_hash": "0x9c3f4fafbfc2bf0d3f5e161510114d4fcaa0dd025a6cf39e3d41a33ad8788f93",
+        "expected_related_type_hash": "0x89a34324867efddd81477e100ca3b9f304e8d0f1ba5c1de58372b6914ac8d3a9",
         "failure_mode": "related_data_rule_mismatch",
         "fee_shannons": 0,
-        "fixture_sha256": "0xfcd2be36841f5a2ea534e8be76ac462cefc2ad1745aaadef362dcf12f376eb86",
+        "fixture_sha256": "0xc746ff82c3027a995544c9adbb74daa63f741018fdf10cd55947d1dbcb090854",
         "normalized_fixture": {
           "cell_deps": [
             "script_under_test",
             "auxiliary_withdrawal_type",
             "always_success_lock"
           ],
-          "expected_related_type_hash": "0x9c3f4fafbfc2bf0d3f5e161510114d4fcaa0dd025a6cf39e3d41a33ad8788f93",
+          "expected_related_type_hash": "0x89a34324867efddd81477e100ca3b9f304e8d0f1ba5c1de58372b6914ac8d3a9",
           "expected_status": "fail",
           "failure_mode": "related_data_rule_mismatch",
           "header_deps": [],
           "input_capacity_shannons": 200000000000,
           "inputs": [
             {
-              "actual_type_hash": "0x9c3f4fafbfc2bf0d3f5e161510114d4fcaa0dd025a6cf39e3d41a33ad8788f93",
+              "actual_type_hash": "0x89a34324867efddd81477e100ca3b9f304e8d0f1ba5c1de58372b6914ac8d3a9",
               "capacity_shannons": 100000000000,
               "data": "0x0000000000000000",
-              "expected_type_hash": "0x9c3f4fafbfc2bf0d3f5e161510114d4fcaa0dd025a6cf39e3d41a33ad8788f93",
+              "expected_type_hash": "0x89a34324867efddd81477e100ca3b9f304e8d0f1ba5c1de58372b6914ac8d3a9",
               "index": 0,
               "lock": "script_under_test",
               "out_point": {
@@ -7542,21 +7542,21 @@
             "0x"
           ]
         },
-        "normalized_fixture_sha256": "0xfcd2be36841f5a2ea534e8be76ac462cefc2ad1745aaadef362dcf12f376eb86",
+        "normalized_fixture_sha256": "0xc746ff82c3027a995544c9adbb74daa63f741018fdf10cd55947d1dbcb090854",
         "occupied_capacity_shannons": 4100000000,
-        "original_auxiliary_type_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
+        "original_auxiliary_type_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
         "original_cycles": 0,
-        "original_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Lock, cause: ValidationFailure: see error code 6 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/38ab3f6935359ca1fe15d9aad8cc62d86ca82dddc769e539f031ecaa183f91b5.html#6 } }",
+        "original_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Lock, cause: ValidationFailure: see error code 6 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/dfff4390ac5e126cb3b0daece262e5c3b8101bf50f8cbced778f7bebf8270df1.html#6 } }",
         "original_ickb_binary_patched": true,
         "original_ickb_binary_sha256": "0x2d0ee2005e43adefc216f3036627d763c480cf6169b370b573a01bbf83131af4",
         "original_ickb_exit_code": 6,
-        "original_ickb_patched_binary_sha256": "0x3f9fb2be5134dbec9f045bbd311dfbfcb7555bd80e01f6b293e8a5f81ff1e417",
+        "original_ickb_patched_binary_sha256": "0xac1be8e7537849ae6c566e2eacf177cceb27d0468641de385f91ec00ee6079ad",
         "original_ickb_status": "fail",
         "original_owned_owner_binary_sha256": "0x2d0ee2005e43adefc216f3036627d763c480cf6169b370b573a01bbf83131af4",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0x5f5b1f4aa381724a5ea6c36fd627914fec44dd87ddfcd776e3dfdbaf3c672c86",
-          "original": "0xe9c09191c66e2b2349985edaecdaaa07179f4382238f8bf8a1048a1746473d03"
+          "cellscript": "0x5ac82641c08131f5e19925812d7b1429a19394a12bf1347b442111d46d853c35",
+          "original": "0xd637d8cdde204ef2359345eaf9fdd8183fced401f67bad250579c690ab1a9fdb"
         },
         "tx_size_bytes": 335,
         "tx_size_bytes_by_side": {
@@ -7577,10 +7577,10 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0x61ded1387fe0e7abeabd178860d439c225ea06f32c82459cdd8fca8751bd77f9",
-        "cellscript_auxiliary_type_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
+        "cellscript_artifact_sha256": "0x9224a95b9920ad81037ec5fe20b8c8789abf13e0bd2f479dcfa2693c447169f2",
+        "cellscript_auxiliary_type_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Lock, cause: ValidationFailure: see error code 34 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/c76ed3d1e83dbac93e837cbc47ff0dee0f8f2ca56fba107f3c5966e6e82004fc.html#34 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Lock, cause: ValidationFailure: see error code 34 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/f45c5ffaa656a11f27d4fbb12f66d4ad7812082f7edc3f9e857a18b0feff8078.html#34 } }",
         "cellscript_exit_code": 34,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
@@ -7651,19 +7651,19 @@
         },
         "normalized_fixture_sha256": "0xcbf131e0eae41d7382a234c8d7a3d9603f73bc320b6e576e9944d291a647319d",
         "occupied_capacity_shannons": 4100000000,
-        "original_auxiliary_type_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
+        "original_auxiliary_type_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
         "original_cycles": 0,
-        "original_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Lock, cause: ValidationFailure: see error code 4 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/38ab3f6935359ca1fe15d9aad8cc62d86ca82dddc769e539f031ecaa183f91b5.html#4 } }",
+        "original_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Lock, cause: ValidationFailure: see error code 4 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/dfff4390ac5e126cb3b0daece262e5c3b8101bf50f8cbced778f7bebf8270df1.html#4 } }",
         "original_ickb_binary_patched": true,
         "original_ickb_binary_sha256": "0x2d0ee2005e43adefc216f3036627d763c480cf6169b370b573a01bbf83131af4",
         "original_ickb_exit_code": 4,
-        "original_ickb_patched_binary_sha256": "0x3f9fb2be5134dbec9f045bbd311dfbfcb7555bd80e01f6b293e8a5f81ff1e417",
+        "original_ickb_patched_binary_sha256": "0xac1be8e7537849ae6c566e2eacf177cceb27d0468641de385f91ec00ee6079ad",
         "original_ickb_status": "fail",
         "original_owned_owner_binary_sha256": "0x2d0ee2005e43adefc216f3036627d763c480cf6169b370b573a01bbf83131af4",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0x89e7e17e1ab6b21c4464c5405d4babfec491634b81ada9823369f8489530317a",
-          "original": "0x024680464bfdc951b9cc97085c96a008650e81088ed68691fd01e0276cd9bf79"
+          "cellscript": "0x29aa22d35744730f3a324b67405a9c7d06b617d76e2f0cd5364b524634a9701e",
+          "original": "0x4de3b9f244bf93a32232e52632a696c12c4a24a43de5418f35b390122de1bc3c"
         },
         "tx_size_bytes": 335,
         "tx_size_bytes_by_side": {
@@ -7684,10 +7684,10 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0x61ded1387fe0e7abeabd178860d439c225ea06f32c82459cdd8fca8751bd77f9",
-        "cellscript_auxiliary_type_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
+        "cellscript_artifact_sha256": "0x9224a95b9920ad81037ec5fe20b8c8789abf13e0bd2f479dcfa2693c447169f2",
+        "cellscript_auxiliary_type_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Lock, cause: ValidationFailure: see error code 40 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/c76ed3d1e83dbac93e837cbc47ff0dee0f8f2ca56fba107f3c5966e6e82004fc.html#40 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Lock, cause: ValidationFailure: see error code 40 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/f45c5ffaa656a11f27d4fbb12f66d4ad7812082f7edc3f9e857a18b0feff8078.html#40 } }",
         "cellscript_exit_code": 40,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
@@ -7757,19 +7757,19 @@
         },
         "normalized_fixture_sha256": "0x6650f04b43738499c7a1907d7e53799d4fe0b604cb26a2dbe8443effcc6c02ae",
         "occupied_capacity_shannons": 4100000000,
-        "original_auxiliary_type_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
+        "original_auxiliary_type_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
         "original_cycles": 0,
-        "original_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Lock, cause: ValidationFailure: see error code 8 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/38ab3f6935359ca1fe15d9aad8cc62d86ca82dddc769e539f031ecaa183f91b5.html#8 } }",
+        "original_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Lock, cause: ValidationFailure: see error code 8 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/dfff4390ac5e126cb3b0daece262e5c3b8101bf50f8cbced778f7bebf8270df1.html#8 } }",
         "original_ickb_binary_patched": true,
         "original_ickb_binary_sha256": "0x2d0ee2005e43adefc216f3036627d763c480cf6169b370b573a01bbf83131af4",
         "original_ickb_exit_code": 8,
-        "original_ickb_patched_binary_sha256": "0x3f9fb2be5134dbec9f045bbd311dfbfcb7555bd80e01f6b293e8a5f81ff1e417",
+        "original_ickb_patched_binary_sha256": "0xac1be8e7537849ae6c566e2eacf177cceb27d0468641de385f91ec00ee6079ad",
         "original_ickb_status": "fail",
         "original_owned_owner_binary_sha256": "0x2d0ee2005e43adefc216f3036627d763c480cf6169b370b573a01bbf83131af4",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0xcb084f986e5bf340207a5df077f74b999e168e25bc7bfbc0169d4eca96fe85cf",
-          "original": "0x8dd36d494dd6e11ab632db45d5fb08b0833ce20fcace9b0d2d0315823d2a17f2"
+          "cellscript": "0xc890baed91d77f3b67570c25b8a45506229d272372ee62d7074cede68ea7eeb2",
+          "original": "0xf809cdd91b4beeb9aea39eaf184195d340ea9bd903b143adfc78073d6eea6f27"
         },
         "tx_size_bytes": 335,
         "tx_size_bytes_by_side": {
@@ -7790,9 +7790,9 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0x64dc133e4e8e50c53ce6c4988ba4c551cc0795672bfd7a52ca6d18e41d7c34ec",
+        "cellscript_artifact_sha256": "0x2b6841c16060c134e81bfcd79554dd603709e187e646bc12ef53acb2f79f72b3",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Lock, cause: ValidationFailure: see error code 7 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/d46d8b30392beb62fdc1d55cd36be2140c33ceee4ca6c974b93cfb0df9dca7eb.html#7 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Lock, cause: ValidationFailure: see error code 7 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/26691b305e4b7b96e90a804fe908a43bc61b12966c3ccfa7b401f0dd324f3338.html#7 } }",
         "cellscript_exit_code": 7,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
@@ -7855,8 +7855,8 @@
         "original_owned_owner_binary_sha256": "0x2d0ee2005e43adefc216f3036627d763c480cf6169b370b573a01bbf83131af4",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0x6ffed006a3a569786fd1c114f6b1de1f539758dc99290f6f5bea13d10e7484da",
-          "original": "0xde1a9970a8709ac7de8ac83db16dafa794ee0ee85f4be71a43736a2dc6438c66"
+          "cellscript": "0xc4efcd8ed36f32ac3951671ceff4f5602450e200b0af6fb09e58556a4e341f7f",
+          "original": "0x8df05698b2f734f1ed457413314d1bcffdd6394ea63a81eaea76ffb52a46f08c"
         },
         "tx_size_bytes": 246,
         "tx_size_bytes_by_side": {
@@ -7877,9 +7877,9 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0x477734ff62cb73762b2b484d93764d8bbb66264038ef2997aab1542e85337ab2",
+        "cellscript_artifact_sha256": "0xd30df21f1a10fc577ba4db882c280baf754fbbf08b9769489d3dd5f8ed70e128",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Lock, cause: ValidationFailure: see error code 6 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/c99bc3d4ad4bce326fccc4a692418825307723a9bc5bc829781650470c6acad0.html#6 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Lock, cause: ValidationFailure: see error code 6 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/f2e05f2405b19b557f23052d855cf4a7204bd564fcb65440f9ac6bb2db4f9624.html#6 } }",
         "cellscript_exit_code": 6,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
@@ -7941,8 +7941,8 @@
         "original_owned_owner_binary_sha256": "0x2d0ee2005e43adefc216f3036627d763c480cf6169b370b573a01bbf83131af4",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0xbb1f35c44c2bd099149f4a96c7f77dd24eb4aa966572f38039878ac654757281",
-          "original": "0x3a6b08ca4495bff05673100e3f77b88a20a7b9b4d7385453a5ce8800ce02714e"
+          "cellscript": "0xfcac1a13e3497cae86b8f38b0e4bb1471c3a22c406ed57156b690c469dd2c9b6",
+          "original": "0xa723a0950aade0aca9158b150b98ca3f98eb213b5362398473b73dfe3ce3b55d"
         },
         "tx_size_bytes": 246,
         "tx_size_bytes_by_side": {
@@ -7963,10 +7963,10 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0x61ded1387fe0e7abeabd178860d439c225ea06f32c82459cdd8fca8751bd77f9",
-        "cellscript_auxiliary_type_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
+        "cellscript_artifact_sha256": "0x9224a95b9920ad81037ec5fe20b8c8789abf13e0bd2f479dcfa2693c447169f2",
+        "cellscript_auxiliary_type_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Lock, cause: ValidationFailure: see error code 40 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/c76ed3d1e83dbac93e837cbc47ff0dee0f8f2ca56fba107f3c5966e6e82004fc.html#40 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Lock, cause: ValidationFailure: see error code 40 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/f45c5ffaa656a11f27d4fbb12f66d4ad7812082f7edc3f9e857a18b0feff8078.html#40 } }",
         "cellscript_exit_code": 40,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
@@ -8021,19 +8021,19 @@
         },
         "normalized_fixture_sha256": "0x78c5fb84be01d7e1633f2a38f73a09ca95ab0b314b4986d0da2ec57ada7dac2e",
         "occupied_capacity_shannons": 4100000000,
-        "original_auxiliary_type_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
+        "original_auxiliary_type_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
         "original_cycles": 0,
-        "original_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Lock, cause: ValidationFailure: see error code 8 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/38ab3f6935359ca1fe15d9aad8cc62d86ca82dddc769e539f031ecaa183f91b5.html#8 } }",
+        "original_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Lock, cause: ValidationFailure: see error code 8 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/dfff4390ac5e126cb3b0daece262e5c3b8101bf50f8cbced778f7bebf8270df1.html#8 } }",
         "original_ickb_binary_patched": true,
         "original_ickb_binary_sha256": "0x2d0ee2005e43adefc216f3036627d763c480cf6169b370b573a01bbf83131af4",
         "original_ickb_exit_code": 8,
-        "original_ickb_patched_binary_sha256": "0x3f9fb2be5134dbec9f045bbd311dfbfcb7555bd80e01f6b293e8a5f81ff1e417",
+        "original_ickb_patched_binary_sha256": "0xac1be8e7537849ae6c566e2eacf177cceb27d0468641de385f91ec00ee6079ad",
         "original_ickb_status": "fail",
         "original_owned_owner_binary_sha256": "0x2d0ee2005e43adefc216f3036627d763c480cf6169b370b573a01bbf83131af4",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0x47658f6ddff49e82c87a3cec32d5d8d745823ffacb825f187b5711739040cf63",
-          "original": "0x7f2a13bf40a4b4feb1a6c624662f8d0ce0e9144939e005b84cf129be821b32c1"
+          "cellscript": "0x23659135c38a8ff9a9081a6c7484e714e93244667ca003a241cebe8c2b636315",
+          "original": "0x5641e64d3c7ca3d5519f2c8693da13974bd4bf93f17b466eb0e2567a8abb28e2"
         },
         "tx_size_bytes": 283,
         "tx_size_bytes_by_side": {
@@ -8054,9 +8054,9 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0x61ded1387fe0e7abeabd178860d439c225ea06f32c82459cdd8fca8751bd77f9",
+        "cellscript_artifact_sha256": "0x9224a95b9920ad81037ec5fe20b8c8789abf13e0bd2f479dcfa2693c447169f2",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 40 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/c76ed3d1e83dbac93e837cbc47ff0dee0f8f2ca56fba107f3c5966e6e82004fc.html#40 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Type, cause: ValidationFailure: see error code 40 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/f45c5ffaa656a11f27d4fbb12f66d4ad7812082f7edc3f9e857a18b0feff8078.html#40 } }",
         "cellscript_exit_code": 40,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
@@ -8119,8 +8119,8 @@
         "original_owned_owner_binary_sha256": "0x2d0ee2005e43adefc216f3036627d763c480cf6169b370b573a01bbf83131af4",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0x1bf178bd15bd90f2770403bec15b1d654927788b89dc5680b9bd47af58bf5fbe",
-          "original": "0x98c42cf98bce7e118449ccf2123b8362aa17e0d8794ef6443dbe07a74329793a"
+          "cellscript": "0x019ad01871dec29130f02d1adeab6d4d1cbd1fdd52564a2325db6c339dc72c93",
+          "original": "0x26c7cffe76fed3204b66296b5b5117273834f04167e78679e7b05623f75becd7"
         },
         "tx_size_bytes": 283,
         "tx_size_bytes_by_side": {
@@ -8141,10 +8141,10 @@
       "ckb_vm_execution": true,
       "evidence_level": "DIFFERENTIAL_CKB_VM_EXECUTED",
       "execution": {
-        "cellscript_artifact_sha256": "0x61ded1387fe0e7abeabd178860d439c225ea06f32c82459cdd8fca8751bd77f9",
-        "cellscript_auxiliary_type_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
+        "cellscript_artifact_sha256": "0x9224a95b9920ad81037ec5fe20b8c8789abf13e0bd2f479dcfa2693c447169f2",
+        "cellscript_auxiliary_type_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
         "cellscript_cycles": 0,
-        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Lock, cause: ValidationFailure: see error code 40 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/c76ed3d1e83dbac93e837cbc47ff0dee0f8f2ca56fba107f3c5966e6e82004fc.html#40 } }",
+        "cellscript_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Lock, cause: ValidationFailure: see error code 40 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/f45c5ffaa656a11f27d4fbb12f66d4ad7812082f7edc3f9e857a18b0feff8078.html#40 } }",
         "cellscript_exit_code": 40,
         "cellscript_status": "fail",
         "ckb_vm_or_testtool_version": "ckb-testtool 1.1",
@@ -8230,19 +8230,19 @@
         },
         "normalized_fixture_sha256": "0x5914b544f58b9d88a43e5e4975d78fef698846beb6dff69e82053a9d943f7d31",
         "occupied_capacity_shannons": 4100000000,
-        "original_auxiliary_type_artifact_sha256": "0xac0d467b12bd1c11310b9343e0b9a46d63b47e01fb5b003e67fe136457c9556d",
+        "original_auxiliary_type_artifact_sha256": "0x7da88a5544ac08f4e26fb6f96e43380012d14569e5b84e2194ed682577a9bfb6",
         "original_cycles": 0,
-        "original_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Lock, cause: ValidationFailure: see error code 8 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/38ab3f6935359ca1fe15d9aad8cc62d86ca82dddc769e539f031ecaa183f91b5.html#8 } }",
+        "original_error": "Error { kind: Script, inner: TransactionScriptError { source: Inputs[0].Lock, cause: ValidationFailure: see error code 8 on page https://nervosnetwork.github.io/ckb-script-error-codes/by-type-hash/dfff4390ac5e126cb3b0daece262e5c3b8101bf50f8cbced778f7bebf8270df1.html#8 } }",
         "original_ickb_binary_patched": true,
         "original_ickb_binary_sha256": "0x2d0ee2005e43adefc216f3036627d763c480cf6169b370b573a01bbf83131af4",
         "original_ickb_exit_code": 8,
-        "original_ickb_patched_binary_sha256": "0x3f9fb2be5134dbec9f045bbd311dfbfcb7555bd80e01f6b293e8a5f81ff1e417",
+        "original_ickb_patched_binary_sha256": "0xac1be8e7537849ae6c566e2eacf177cceb27d0468641de385f91ec00ee6079ad",
         "original_ickb_status": "fail",
         "original_owned_owner_binary_sha256": "0x2d0ee2005e43adefc216f3036627d763c480cf6169b370b573a01bbf83131af4",
         "statuses_match": true,
         "transaction_context_sha256": {
-          "cellscript": "0xbcc7a6dbbd8ff09e9e1bd398f01a208281623d49cf010bfefdaae522d7909f05",
-          "original": "0x8629600a59124a5bf0652307907dfa46067a066140b194acf23c61d65aff3e97"
+          "cellscript": "0x8fc95d7e52650b371443c24fc7b5185bbac1b56a26db7eee083a5c5d8e258ee2",
+          "original": "0x140989251740ee7cef850e36d24d963c71a5d07101c4b723b5c33f6aab0ab313"
         },
         "tx_size_bytes": 387,
         "tx_size_bytes_by_side": {

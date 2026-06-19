@@ -14430,14 +14430,51 @@ where
         u16::from_le_bytes(bytes.try_into().expect("u16 width"))
     }
 
+    fn read_u16_at(bytes: &[u8], offset: usize, field: &str) -> u16 {
+        read_u16(&bytes[offset..offset + 2], field)
+    }
+
     fn read_u32(bytes: &[u8], field: &str) -> u32 {
         assert_eq!(bytes.len(), 4, "{field} should be a molecule u32");
         u32::from_le_bytes(bytes.try_into().expect("u32 width"))
     }
 
+    fn read_u32_at(bytes: &[u8], offset: usize, field: &str) -> u32 {
+        read_u32(&bytes[offset..offset + 4], field)
+    }
+
     fn read_u64(bytes: &[u8], field: &str) -> u64 {
         assert_eq!(bytes.len(), 8, "{field} should be a molecule u64");
         u64::from_le_bytes(bytes.try_into().expect("u64 width"))
+    }
+
+    fn read_u64_at(bytes: &[u8], offset: usize, field: &str) -> u64 {
+        read_u64(&bytes[offset..offset + 8], field)
+    }
+
+    fn executable_elf_entry_segment_for_test(elf: &[u8]) -> (u32, u64, u64, usize) {
+        assert!(elf.starts_with(b"\x7fELF"), "expected ELF magic");
+        let entry = read_u64_at(elf, 24, "e_entry");
+        let phoff = usize::try_from(read_u64_at(elf, 32, "e_phoff")).expect("program header offset should fit usize");
+        let phentsize = usize::from(read_u16_at(elf, 54, "e_phentsize"));
+        let phnum = usize::from(read_u16_at(elf, 56, "e_phnum"));
+
+        for index in 0..phnum {
+            let offset = phoff + index * phentsize;
+            let p_type = read_u32_at(elf, offset, "p_type");
+            let flags = read_u32_at(elf, offset + 4, "p_flags");
+            if p_type != 1 || flags & 1 == 0 {
+                continue;
+            }
+            let p_offset = read_u64_at(elf, offset + 8, "p_offset");
+            let p_vaddr = read_u64_at(elf, offset + 16, "p_vaddr");
+            let file_size = read_u64_at(elf, offset + 32, "p_filesz");
+            let memory_size = read_u64_at(elf, offset + 40, "p_memsz");
+            let entry_file_offset = p_offset + entry.checked_sub(p_vaddr).expect("entrypoint should be inside executable segment");
+            return (flags, file_size, memory_size, usize::try_from(entry_file_offset).expect("entry file offset should fit usize"));
+        }
+
+        panic!("expected an executable PT_LOAD segment");
     }
 
     const OPTIMIZER_PROGRAM: &str = r#"
@@ -25655,13 +25692,22 @@ where
 
         let result =
             compile(program, CompileOptions { target: Some("riscv64-elf".to_string()), ..CompileOptions::default() }).unwrap();
+        let artifact = crate::strip_vm_abi_trailer(&result.artifact_bytes);
+        let (flags, file_size, memory_size, text_offset) = executable_elf_entry_segment_for_test(artifact);
+        assert_eq!(flags & 0x2, 0, "CKB executable segment must not be writable");
+        assert_eq!(file_size, memory_size, "CKB ELF must not fake stack memory through PT_LOAD");
+
+        let first_instruction = read_u32_at(artifact, text_offset, "entry trampoline first instruction");
+        assert_eq!(first_instruction & 0x7f, 0x17, "ELF trampoline should call the entrypoint, not initialise sp");
+        assert_eq!((first_instruction >> 7) & 0x1f, 1, "ELF trampoline call should write ra");
+
         let exit_syscall_addi_a7 = [0x93, 0x88, 0xd8, 0x05];
         let ecall = [0x73, 0x00, 0x00, 0x00];
         assert!(
-            result.artifact_bytes.windows(exit_syscall_addi_a7.len()).any(|window| window == exit_syscall_addi_a7),
+            artifact.windows(exit_syscall_addi_a7.len()).any(|window| window == exit_syscall_addi_a7),
             "expected exit syscall load in ELF trampoline"
         );
-        assert!(result.artifact_bytes.windows(ecall.len()).any(|window| window == ecall), "expected ecall in ELF trampoline");
+        assert!(artifact.windows(ecall.len()).any(|window| window == ecall), "expected ecall in ELF trampoline");
     }
 
     #[test]
