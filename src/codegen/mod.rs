@@ -16868,9 +16868,12 @@ fn consumed_operand_var(instruction: &IrInstruction) -> Option<&IrVar> {
 const ELF_HEADER_SIZE: usize = 64;
 const ELF_PROGRAM_HEADER_SIZE: usize = 56;
 const ELF_SEGMENT_ALIGN: usize = 0x1000;
+const ELF_PF_X: u32 = 1;
+#[cfg(test)]
+const ELF_PF_W: u32 = 2;
+const ELF_PF_R: u32 = 4;
 const ELF_BASE_ADDR: u64 = 0x10000;
-const START_TRAMPOLINE_SIZE: usize = 28;
-const CKB_SCRIPT_STACK_TOP: i64 = 0x3f0000;
+const START_TRAMPOLINE_SIZE: usize = 20;
 const EXIT_SYSCALL_NUMBER: i64 = 93;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -17101,15 +17104,15 @@ fn assemble_elf_internal(lines: &[String]) -> Result<Vec<u8>> {
     let rodata_size = plan.metrics.rodata_size;
     let rodata_offset = layout.rodata_offset()?;
     let mut text_bytes = Vec::with_capacity(START_TRAMPOLINE_SIZE + text_user_size);
-    encode_li_sequence(&mut text_bytes, 2, i128::from(CKB_SCRIPT_STACK_TOP))?;
     if entry_requires_explicit_parameter_abi(lines, entry_label) {
         encode_li_sequence(&mut text_bytes, 10, 25)?;
     } else {
         let entry_addr = parsed.symbol_address(entry_label, &layout)?;
-        encode_call_sequence(&mut text_bytes, layout.text_base + 8, entry_addr)?;
+        encode_call_sequence(&mut text_bytes, layout.text_base, entry_addr)?;
     }
     encode_li_sequence(&mut text_bytes, 17, i128::from(EXIT_SYSCALL_NUMBER))?;
     text_bytes.extend_from_slice(&encode_ecall().to_le_bytes());
+    debug_assert_eq!(text_bytes.len(), START_TRAMPOLINE_SIZE);
     parsed.encode_section(SectionKind::Text, &mut text_bytes, &layout, START_TRAMPOLINE_SIZE)?;
 
     let mut rodata_bytes = Vec::with_capacity(rodata_size);
@@ -17126,7 +17129,7 @@ fn assemble_elf_internal(lines: &[String]) -> Result<Vec<u8>> {
     write_elf_header(&mut elf[..ELF_HEADER_SIZE], layout.text_base, 1)?;
     write_program_header(
         &mut elf[ELF_HEADER_SIZE..ELF_HEADER_SIZE + ELF_PROGRAM_HEADER_SIZE],
-        5,
+        ELF_PF_R | ELF_PF_X,
         load_segment_offset,
         load_segment_vaddr,
         load_segment_file_size as u64,
@@ -17231,7 +17234,6 @@ impl Drop for TempDirCleanup {
 fn render_external_assembly(lines: &[String], entry_label: &str) -> String {
     let mut rendered =
         vec![".section .text".to_string(), ".global _start".to_string(), ".type _start, @function".to_string(), "_start:".to_string()];
-    rendered.push(format!("    li sp, {}", CKB_SCRIPT_STACK_TOP));
     if entry_requires_explicit_parameter_abi(lines, entry_label) {
         let error = CellScriptRuntimeError::EntryWitnessAbiInvalid;
         rendered.push(format!("    # cellscript runtime error {} {}", error.code(), error.name()));
@@ -18895,6 +18897,97 @@ mod tests {
         ("subw", "subw a0, a0, a1"),
         ("tail", "tail target"),
     ];
+
+    #[derive(Debug)]
+    struct TestProgramHeader {
+        p_type: u32,
+        flags: u32,
+        offset: u64,
+        vaddr: u64,
+        file_size: u64,
+        memory_size: u64,
+    }
+
+    fn read_u16_le(bytes: &[u8], offset: usize) -> u16 {
+        let mut raw = [0u8; 2];
+        raw.copy_from_slice(&bytes[offset..offset + 2]);
+        u16::from_le_bytes(raw)
+    }
+
+    fn read_u32_le(bytes: &[u8], offset: usize) -> u32 {
+        let mut raw = [0u8; 4];
+        raw.copy_from_slice(&bytes[offset..offset + 4]);
+        u32::from_le_bytes(raw)
+    }
+
+    fn read_u64_le(bytes: &[u8], offset: usize) -> u64 {
+        let mut raw = [0u8; 8];
+        raw.copy_from_slice(&bytes[offset..offset + 8]);
+        u64::from_le_bytes(raw)
+    }
+
+    fn elf_program_headers(elf: &[u8]) -> Vec<TestProgramHeader> {
+        assert!(elf.starts_with(b"\x7fELF"), "expected ELF magic");
+        let phoff = usize::try_from(read_u64_le(elf, 32)).expect("program header offset should fit usize");
+        let phentsize = usize::from(read_u16_le(elf, 54));
+        let phnum = usize::from(read_u16_le(elf, 56));
+        assert_eq!(phentsize, ELF_PROGRAM_HEADER_SIZE);
+
+        (0..phnum)
+            .map(|index| {
+                let offset = phoff + index * phentsize;
+                TestProgramHeader {
+                    p_type: read_u32_le(elf, offset),
+                    flags: read_u32_le(elf, offset + 4),
+                    offset: read_u64_le(elf, offset + 8),
+                    vaddr: read_u64_le(elf, offset + 16),
+                    file_size: read_u64_le(elf, offset + 32),
+                    memory_size: read_u64_le(elf, offset + 40),
+                }
+            })
+            .collect()
+    }
+
+    fn elf_text_file_offset(elf: &[u8]) -> usize {
+        let header = elf_program_headers(elf)
+            .into_iter()
+            .find(|header| header.p_type == 1 && header.flags & ELF_PF_X != 0)
+            .expect("ELF should contain an executable load segment");
+        let offset_into_segment = ELF_BASE_ADDR.checked_sub(header.vaddr).expect("text base should be inside load segment");
+        usize::try_from(header.offset + offset_into_segment).expect("text file offset should fit usize")
+    }
+
+    #[test]
+    fn strict_audit_internal_elf_entry_preserves_ckb_stack_pointer() {
+        let lines = vec![".section .text".to_string(), ".global entry".to_string(), "entry:".to_string(), "ret".to_string()];
+
+        let elf = assemble_elf_internal(&lines).expect("internal assembler should emit a CKB-loadable ELF");
+        let headers = elf_program_headers(&elf);
+        assert_eq!(headers.len(), 1, "internal CKB ELF should expose one load segment");
+        assert_eq!(headers[0].flags, ELF_PF_R | ELF_PF_X, "code segment should be readable and executable only");
+        assert_eq!(headers[0].flags & ELF_PF_W, 0, "code segment must not be writable");
+        assert_eq!(headers[0].file_size, headers[0].memory_size, "code segment should not fake stack memory in PT_LOAD");
+
+        let text_offset = elf_text_file_offset(&elf);
+        let first_instruction = read_u32_le(&elf, text_offset);
+        assert_eq!(first_instruction & 0x7f, 0x17, "trampoline should call the entrypoint, not load sp");
+        assert_eq!((first_instruction >> 7) & 0x1f, 1, "trampoline call should target ra");
+
+        let entry_instruction = read_u32_le(&elf, text_offset + START_TRAMPOLINE_SIZE);
+        assert_eq!(entry_instruction, 0x0000_8067, "entry body should start after the 20-byte trampoline");
+    }
+
+    #[test]
+    fn strict_audit_external_assembly_entry_preserves_ckb_stack_pointer() {
+        let lines = vec![".section .text".to_string(), ".global entry".to_string(), "entry:".to_string(), "ret".to_string()];
+
+        let rendered = render_external_assembly(&lines, "entry");
+        assert!(
+            !rendered.lines().any(|line| line.trim_start().starts_with("li sp,")),
+            "external assembly trampoline must not overwrite the CKB VM stack pointer:\n{rendered}"
+        );
+        assert!(rendered.contains("\n    call entry\n"), "external assembly should call the entrypoint:\n{rendered}");
+    }
 
     #[test]
     fn internal_assembler_relaxes_out_of_range_conditional_branch() {

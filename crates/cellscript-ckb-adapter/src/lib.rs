@@ -961,7 +961,7 @@ impl ManifestCellDepResolver {
                 "data" => 0u8,
                 "type" => 1u8,
                 "data1" => 2u8,
-                "data2" => 3u8,
+                "data2" => 4u8,
                 other => bail!("unknown hash_type '{}' for {}", other, deployment.name),
             };
             // Parse out_point "0x<tx_hash>:<index>".
@@ -1190,12 +1190,15 @@ pub fn signing_boundary_type() -> &'static str {
 /// # Quick start
 ///
 /// ```no_run
+/// # fn main() -> anyhow::Result<()> {
+/// use ckb_types::packed::Script;
 /// use cellscript_ckb_adapter::CellScriptAdapter;
 ///
 /// // Connect to a CKB node
 /// let adapter = CellScriptAdapter::connect("http://127.0.0.1:8114")?;
 ///
 /// // Deploy an artifact
+/// let deployer_lock_script = Script::default();
 /// let (manifest, evidence) = adapter.deploy_artifact(
 ///     "my-token",
 ///     std::fs::read("artifact.bin")?.into(),
@@ -1206,6 +1209,8 @@ pub fn signing_boundary_type() -> &'static str {
 /// // Load an action plan and build a transaction
 /// let plan = adapter.load_action_plan("action.json")?;
 /// let resolved = adapter.resolve_action(&plan)?;
+/// # Ok(())
+/// # }
 /// ```
 pub struct CellScriptAdapter {
     client: CkbRpcClient,
@@ -1973,6 +1978,8 @@ mod tests {
     fn manifest_resolver_supports_data_and_type_hash_types() {
         let code_hash_data = blake2b_256([0x11u8; 32]);
         let code_hash_type = blake2b_256([0x22u8; 32]);
+        let code_hash_data1 = blake2b_256([0x33u8; 32]);
+        let code_hash_data2 = blake2b_256([0x44u8; 32]);
         let tx_hash = [0xeeu8; 32];
         let manifest = DeploymentManifest {
             schema: DEPLOYMENT_MANIFEST_SCHEMA.to_string(),
@@ -1994,11 +2001,27 @@ mod tests {
                     dep_type: "dep_group".to_string(),
                     out_point: format!("0x{}:1", hex::encode(tx_hash)),
                 },
+                DeploymentRef {
+                    name: "data1-dep".to_string(),
+                    code_hash: format!("0x{}", hex::encode(code_hash_data1)),
+                    hash_type: "data1".to_string(),
+                    args: "0x".to_string(),
+                    dep_type: "code".to_string(),
+                    out_point: format!("0x{}:2", hex::encode(tx_hash)),
+                },
+                DeploymentRef {
+                    name: "data2-dep".to_string(),
+                    code_hash: format!("0x{}", hex::encode(code_hash_data2)),
+                    hash_type: "data2".to_string(),
+                    args: "0x".to_string(),
+                    dep_type: "dep_group".to_string(),
+                    out_point: format!("0x{}:3", hex::encode(tx_hash)),
+                },
             ],
         };
 
         let resolver = ManifestCellDepResolver::from_manifest(&manifest).unwrap();
-        assert_eq!(resolver.len(), 2);
+        assert_eq!(resolver.len(), 4);
 
         let data_script =
             Script::new_builder().code_hash(code_hash_data.pack()).hash_type(ScriptHashType::Data).args(Bytes::new().pack()).build();
@@ -2008,6 +2031,16 @@ mod tests {
         let type_script =
             Script::new_builder().code_hash(code_hash_type.pack()).hash_type(ScriptHashType::Type).args(Bytes::new().pack()).build();
         let dep = resolver.resolve_for_script(&type_script).expect("type dep");
+        assert_eq!(dep.dep_type(), DepType::DepGroup.into());
+
+        let data1_script =
+            Script::new_builder().code_hash(code_hash_data1.pack()).hash_type(ScriptHashType::Data1).args(Bytes::new().pack()).build();
+        let dep = resolver.resolve_for_script(&data1_script).expect("data1 dep");
+        assert_eq!(dep.dep_type(), DepType::Code.into());
+
+        let data2_script =
+            Script::new_builder().code_hash(code_hash_data2.pack()).hash_type(ScriptHashType::Data2).args(Bytes::new().pack()).build();
+        let dep = resolver.resolve_for_script(&data2_script).expect("data2 dep");
         assert_eq!(dep.dep_type(), DepType::DepGroup.into());
     }
 
