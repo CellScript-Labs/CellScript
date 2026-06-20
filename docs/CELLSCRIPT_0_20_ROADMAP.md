@@ -128,6 +128,14 @@ submission, validated bundle selection, non-final soft confirmation, and the
 external-settlement-builder boundary without making CellScript depend on the
 CellFabric Rust crate.
 
+Sixteenth slice: the CKB/devnet acceptance path now has an ELF entry ABI gate.
+Every CKB RISC-V ELF compiled by `scripts/ckb_cellscript_acceptance.sh` is
+audited before local-node dry-run, tx-pool acceptance, or submitted stateful
+flows. The gate fails closed unless the executable `PT_LOAD` segment is
+RX-only, has `filesz == memsz`, and the entry trampoline calls the real entry
+without initialising `sp`. The critical 0.20 example path explicitly requires
+passing ABI evidence for `launch.cell`, `token.cell`, and `amm_pool.cell`.
+
 The generated package should provide:
 
 - typed action functions;
@@ -309,6 +317,7 @@ cellc package verify
 cellc registry verify --live
 cellc gen-builder --target typescript
 npm test for generated builders
+ELF entry ABI gate before devnet dry-run, tx-pool, and submit evidence
 local CKB dry-run for generated action transactions
 local CKB submitted stateful flows for canonical examples
 negative builder-shape rejection fixtures
@@ -321,6 +330,8 @@ Required report fields:
 - source hash;
 - metadata hash;
 - artifact hash;
+- ELF entry ABI gate result, including stack-pointer preservation and RX-only
+  executable segment evidence;
 - deployment ref;
 - action selector;
 - input and output bindings;

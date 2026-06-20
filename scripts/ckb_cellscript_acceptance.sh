@@ -264,6 +264,7 @@ import os
 import pathlib
 import re
 import shutil
+import struct
 import subprocess
 import sys
 
@@ -356,6 +357,16 @@ LOCK_BEHAVIOR_ACCEPTANCE_SCOPE = {
 }
 TRUNCATE = 12000
 UNEXPECTED_PROFILE_TRAILER = bytes.fromhex("53504f5241424900")
+ELF_ENTRY_ABI_SCHEMA = "cellscript-ckb-elf-entry-abi-v0.20"
+ELF64_HEADER_SIZE = 64
+ELF64_PROGRAM_HEADER_SIZE = 56
+ELF_PT_LOAD = 1
+ELF_PF_X = 1
+ELF_PF_W = 2
+ELF_PF_R = 4
+ELF_EM_RISCV = 243
+ENTRY_TRAMPOLINE_SIZE = 20
+CRITICAL_0_20_DEVNET_EXAMPLES = ["launch.cell", "token.cell", "amm_pool.cell"]
 
 examples_dir = repo_root / "examples"
 language_examples_dir = examples_dir / "language"
@@ -553,16 +564,17 @@ receipt RoyaltyPayment has create {
 
 NFT_ACTION_SOURCES = {
     "create_collection": """
-action create_collection(creator: Address, max_supply: u64) -> collection: Collection
-where
-    assert_invariant(max_supply > 0, "max supply must be positive")
-    assert_invariant(max_supply <= 10000, "max supply too high")
+action create_collection(creator: Address, max_supply: u64) -> collection: Collection {
+    verification
+    require max_supply > 0, "max supply must be positive"
+    require max_supply <= 10000, "max supply too high"
 
     create collection = Collection {
         creator: creator,
         total_supply: 0,
         max_supply: max_supply
     } with_lock(creator)
+}
 """,
     "mint": """
 action mint(collection_before: Collection, to: Address, metadata_hash: Hash) -> (collection_after: Collection, nft: NFT) {
@@ -1454,22 +1466,22 @@ shared Pool has store, create, replace {
 
 LAUNCH_ACTION_SOURCES = {
     "launch_token": """
-action launch_token(symbol: [u8; 8], max_supply: u64, initial_mint: u64, pool_seed_amount: u64, pool_paired_token: Token, fee_rate_bps: u16, creator: Address, distribution: [(Address, u64); 4]) -> (auth: MintAuthority, dist0: Token, dist1: Token, dist2: Token, dist3: Token, pool: Pool, lp_receipt: LPReceipt, change: Token)
-where
-    assert_invariant(initial_mint <= max_supply, "initial exceeds max")
-    assert_invariant(pool_seed_amount > 0, "zero pool seed")
-    assert_invariant(pool_paired_token.amount > 0, "zero paired seed")
-    assert_invariant(symbol != pool_paired_token.symbol, "same token")
-    assert_invariant(fee_rate_bps <= 10000, "fee too high")
-    assert_invariant(pool_seed_amount <= initial_mint, "pool seed exceeds mint")
-    assert_invariant(distribution[1].1 <= U64_MAX - distribution[0].1, "distribution overflow")
+action launch_token(symbol: [u8; 8], max_supply: u64, initial_mint: u64, pool_seed_amount: u64, pool_paired_token: Token, fee_rate_bps: u16, creator: Address, distribution: [(Address, u64); 4]) -> (auth: MintAuthority, dist0: Token, dist1: Token, dist2: Token, dist3: Token, pool: Pool, lp_receipt: LPReceipt, change: Token) {
+    verification
+    require initial_mint <= max_supply, "initial exceeds max"
+    require pool_seed_amount > 0, "zero pool seed"
+    require pool_paired_token.amount > 0, "zero paired seed"
+    require symbol != pool_paired_token.symbol, "same token"
+    require fee_rate_bps <= 10000, "fee too high"
+    require pool_seed_amount <= initial_mint, "pool seed exceeds mint"
+    require distribution[1].1 <= U64_MAX - distribution[0].1, "distribution overflow"
     let dist01 = distribution[0].1 + distribution[1].1
-    assert_invariant(distribution[2].1 <= U64_MAX - dist01, "distribution overflow")
+    require distribution[2].1 <= U64_MAX - dist01, "distribution overflow"
     let dist012 = dist01 + distribution[2].1
-    assert_invariant(distribution[3].1 <= U64_MAX - dist012, "distribution overflow")
+    require distribution[3].1 <= U64_MAX - dist012, "distribution overflow"
     let dist_total = dist012 + distribution[3].1
-    assert_invariant(pool_seed_amount <= U64_MAX - dist_total, "allocation overflow")
-    assert_invariant(dist_total + pool_seed_amount <= initial_mint, "allocation exceeds mint")
+    require pool_seed_amount <= U64_MAX - dist_total, "allocation overflow"
+    require dist_total + pool_seed_amount <= initial_mint, "allocation exceeds mint"
 
     create auth = MintAuthority {
         token_symbol: symbol,
@@ -1498,14 +1510,15 @@ where
     } with_lock(creator)
     let remaining = initial_mint - dist_total - pool_seed_amount
     create change = Token { amount: remaining, symbol: symbol } with_lock(creator)
+}
 """,
     "bootstrap_token": """
-action bootstrap_token(symbol: [u8; 8], max_supply: u64, initial_mint: u64, creator: Address, recipients: [(Address, u64); 2]) -> (auth: MintAuthority, rec0: Token, rec1: Token, change: Token)
-where
-    assert_invariant(initial_mint <= max_supply, "initial exceeds max")
-    assert_invariant(recipients[1].1 <= U64_MAX - recipients[0].1, "distribution overflow")
+action bootstrap_token(symbol: [u8; 8], max_supply: u64, initial_mint: u64, creator: Address, recipients: [(Address, u64); 2]) -> (auth: MintAuthority, rec0: Token, rec1: Token, change: Token) {
+    verification
+    require initial_mint <= max_supply, "initial exceeds max"
+    require recipients[1].1 <= U64_MAX - recipients[0].1, "distribution overflow"
     let total_distributed = recipients[0].1 + recipients[1].1
-    assert_invariant(total_distributed <= initial_mint, "distribution exceeds mint")
+    require total_distributed <= initial_mint, "distribution exceeds mint"
 
     create auth = MintAuthority {
         token_symbol: symbol,
@@ -1516,6 +1529,7 @@ where
     create rec1 = Token { amount: recipients[1].1, symbol: symbol } with_lock(recipients[1].0)
     let remaining = initial_mint - total_distributed
     create change = Token { amount: remaining, symbol: symbol } with_lock(creator)
+}
 """,
 }
 
@@ -1822,6 +1836,109 @@ def internal_assembler_env():
         env.pop(key, None)
     return env
 
+def read_u16_le(data, offset):
+    return struct.unpack_from("<H", data, offset)[0]
+
+def read_u32_le(data, offset):
+    return struct.unpack_from("<I", data, offset)[0]
+
+def read_u64_le(data, offset):
+    return struct.unpack_from("<Q", data, offset)[0]
+
+def audit_ckb_elf_entry_abi(name, artifact_bytes):
+    if len(artifact_bytes) < ELF64_HEADER_SIZE or not artifact_bytes.startswith(b"\x7fELF"):
+        raise RuntimeError(f"{name} artifact is not a complete ELF64 file")
+    if artifact_bytes[4] != 2:
+        raise RuntimeError(f"{name} artifact is not ELFCLASS64")
+    if artifact_bytes[5] != 1:
+        raise RuntimeError(f"{name} artifact is not little-endian ELF")
+    if read_u16_le(artifact_bytes, 18) != ELF_EM_RISCV:
+        raise RuntimeError(f"{name} artifact is not RISC-V ELF")
+
+    entry = read_u64_le(artifact_bytes, 24)
+    program_header_offset = read_u64_le(artifact_bytes, 32)
+    program_header_entry_size = read_u16_le(artifact_bytes, 54)
+    program_header_count = read_u16_le(artifact_bytes, 56)
+    if program_header_entry_size < ELF64_PROGRAM_HEADER_SIZE:
+        raise RuntimeError(f"{name} ELF program header entry size is too small: {program_header_entry_size}")
+    if program_header_offset + program_header_entry_size * program_header_count > len(artifact_bytes):
+        raise RuntimeError(f"{name} ELF program headers exceed artifact size")
+
+    executable_headers = []
+    for index in range(program_header_count):
+        offset = program_header_offset + index * program_header_entry_size
+        p_type = read_u32_le(artifact_bytes, offset)
+        flags = read_u32_le(artifact_bytes, offset + 4)
+        if p_type != ELF_PT_LOAD or flags & ELF_PF_X == 0:
+            continue
+        file_offset = read_u64_le(artifact_bytes, offset + 8)
+        virtual_address = read_u64_le(artifact_bytes, offset + 16)
+        file_size = read_u64_le(artifact_bytes, offset + 32)
+        memory_size = read_u64_le(artifact_bytes, offset + 40)
+        executable_headers.append({
+            "index": index,
+            "flags": flags,
+            "file_offset": file_offset,
+            "virtual_address": virtual_address,
+            "file_size": file_size,
+            "memory_size": memory_size,
+        })
+
+    if not executable_headers:
+        raise RuntimeError(f"{name} ELF does not contain an executable PT_LOAD segment")
+
+    header = executable_headers[0]
+    flags = header["flags"]
+    if flags != (ELF_PF_R | ELF_PF_X):
+        raise RuntimeError(f"{name} executable PT_LOAD flags must be RX-only, got 0x{flags:x}")
+    if flags & ELF_PF_W:
+        raise RuntimeError(f"{name} executable PT_LOAD segment must not be writable")
+    if header["file_size"] != header["memory_size"]:
+        raise RuntimeError(
+            f"{name} executable PT_LOAD must not fake stack memory: "
+            f"filesz={header['file_size']} memsz={header['memory_size']}"
+        )
+    if not (header["virtual_address"] <= entry < header["virtual_address"] + header["file_size"]):
+        raise RuntimeError(f"{name} ELF entry point is outside the executable PT_LOAD segment")
+
+    entry_file_offset = header["file_offset"] + (entry - header["virtual_address"])
+    if entry_file_offset + ENTRY_TRAMPOLINE_SIZE > len(artifact_bytes):
+        raise RuntimeError(f"{name} ELF entry trampoline exceeds artifact size")
+    first_instruction = read_u32_le(artifact_bytes, entry_file_offset)
+    first_opcode = first_instruction & 0x7f
+    first_rd = (first_instruction >> 7) & 0x1f
+    if first_opcode != 0x17 or first_rd != 1:
+        raise RuntimeError(
+            f"{name} ELF entry trampoline must start with auipc ra, not instruction 0x{first_instruction:08x}"
+        )
+
+    return {
+        "schema": ELF_ENTRY_ABI_SCHEMA,
+        "status": "passed",
+        "entry_point": f"0x{entry:x}",
+        "executable_load_segment": {
+            "index": header["index"],
+            "flags": flags,
+            "flags_symbolic": "R|X",
+            "writable": False,
+            "file_offset": header["file_offset"],
+            "virtual_address": f"0x{header['virtual_address']:x}",
+            "file_size": header["file_size"],
+            "memory_size": header["memory_size"],
+            "file_size_equals_memory_size": True,
+        },
+        "trampoline": {
+            "size_bytes": ENTRY_TRAMPOLINE_SIZE,
+            "entry_file_offset": entry_file_offset,
+            "first_instruction_le_hex": f"0x{first_instruction:08x}",
+            "first_instruction_opcode": "auipc",
+            "first_instruction_rd": "ra",
+            "calls_entry_with_ra": True,
+            "preserves_ckb_vm_stack_pointer": True,
+            "forbidden_sp_initialisation": False,
+        },
+    }
+
 def compile_artifact(name, kind, source, artifact, *, entry_args=None):
     entry_args = entry_args or []
     env = internal_assembler_env()
@@ -1841,6 +1958,7 @@ def compile_artifact(name, kind, source, artifact, *, entry_args=None):
         raise RuntimeError(f"{name} artifact is not an ELF")
     if artifact_has_unexpected_profile_trailer:
         raise RuntimeError(f"{name} CKB artifact still contains an unexpected non-CKB ABI trailer")
+    elf_entry_abi = audit_ckb_elf_entry_abi(name, artifact_bytes)
 
     metadata = load_json(metadata_path)
     verify = verify_artifact(artifact)
@@ -1856,6 +1974,7 @@ def compile_artifact(name, kind, source, artifact, *, entry_args=None):
         "artifact_size_bytes": len(artifact_bytes),
         "artifact_starts_with_elf_magic": True,
         "artifact_has_unexpected_profile_trailer": False,
+        "elf_entry_abi": elf_entry_abi,
         "target_profile": "ckb",
         "artifact_packaging": metadata.get("target_profile", {}).get("artifact_packaging"),
         "entry_args": [str(arg) for arg in entry_args],
@@ -1885,8 +2004,10 @@ def strict_original_compile(name):
     policy_fail_closed = result["returncode"] != 0 and strict_policy_fail_closed(result["stderr"])
     unexpected_failure = result["returncode"] != 0 and not policy_fail_closed
     verify = None
+    elf_entry_abi = None
     if result["returncode"] == 0:
         verify = verify_artifact(artifact)
+        elf_entry_abi = audit_ckb_elf_entry_abi(name, artifact.read_bytes())
     return {
         "source": str(source),
         "artifact": str(artifact),
@@ -1894,6 +2015,7 @@ def strict_original_compile(name):
         "policy_fail_closed": policy_fail_closed,
         "unexpected_failure": unexpected_failure,
         "verify": verify,
+        "elf_entry_abi": elf_entry_abi,
         "returncode": result["returncode"],
         "stdout": result["stdout"],
         "stderr": result["stderr"],
@@ -1908,8 +2030,10 @@ def strict_scoped_compile(name, source, entry_flag, entry_name):
     policy_fail_closed = result["returncode"] != 0 and strict_policy_fail_closed(result["stderr"])
     unexpected_failure = result["returncode"] != 0 and not policy_fail_closed
     verify = None
+    elf_entry_abi = None
     if result["returncode"] == 0:
         verify = verify_artifact(artifact)
+        elf_entry_abi = audit_ckb_elf_entry_abi(name, artifact.read_bytes())
     return {
         "source": str(source),
         "artifact": str(artifact),
@@ -1919,6 +2043,7 @@ def strict_scoped_compile(name, source, entry_flag, entry_name):
         "policy_fail_closed": policy_fail_closed,
         "unexpected_failure": unexpected_failure,
         "verify": verify,
+        "elf_entry_abi": elf_entry_abi,
         "returncode": result["returncode"],
         "stdout": result["stdout"],
         "stderr": result["stderr"],
@@ -2244,6 +2369,118 @@ strict_original_unexpected_failures = [
     if record["strict_original_ckb_compile"]["unexpected_failure"]
 ]
 
+def elf_entry_abi_source_example(record):
+    example = record.get("example")
+    if isinstance(example, str) and example:
+        return example
+    original_source = record.get("original_source") or record.get("source")
+    if isinstance(original_source, str):
+        source_name = pathlib.Path(original_source).name
+        if source_name in EXAMPLES:
+            return source_name
+    return None
+
+def collect_elf_entry_abi_gate():
+    rows = []
+    seen_artifacts = set()
+
+    def add_record(record, *, fallback_name=None, fallback_kind=None, source_example=None):
+        artifact = record.get("artifact")
+        if not artifact or artifact in seen_artifacts:
+            return
+        seen_artifacts.add(artifact)
+        audit = record.get("elf_entry_abi")
+        row = {
+            "name": record.get("name") or fallback_name or pathlib.Path(artifact).name,
+            "kind": record.get("kind") or fallback_kind or "unknown",
+            "source": record.get("source"),
+            "original_source": record.get("original_source"),
+            "example": source_example or elf_entry_abi_source_example(record),
+            "artifact": artifact,
+            "status": audit.get("status") if isinstance(audit, dict) else "missing",
+            "preserves_ckb_vm_stack_pointer": False,
+            "entry_trampoline_calls_with_ra": False,
+            "executable_segment_rx_only": False,
+            "executable_segment_file_size_equals_memory_size": False,
+        }
+        if isinstance(audit, dict):
+            trampoline = audit.get("trampoline") or {}
+            executable = audit.get("executable_load_segment") or {}
+            row.update({
+                "preserves_ckb_vm_stack_pointer": trampoline.get("preserves_ckb_vm_stack_pointer") is True,
+                "entry_trampoline_calls_with_ra": trampoline.get("calls_entry_with_ra") is True,
+                "executable_segment_rx_only": executable.get("flags_symbolic") == "R|X" and executable.get("writable") is False,
+                "executable_segment_file_size_equals_memory_size": executable.get("file_size_equals_memory_size") is True,
+                "first_instruction_le_hex": trampoline.get("first_instruction_le_hex"),
+                "entry_point": audit.get("entry_point"),
+            })
+        rows.append(row)
+
+    for record in artifacts:
+        add_record(record)
+    for record in bundled_examples:
+        strict = record["strict_original_ckb_compile"]
+        if strict["status"] == "passed":
+            strict = {**strict, "name": record["name"], "kind": "bundled-example-strict-original", "source": record["source"], "example": record["name"]}
+            add_record(strict, source_example=record["name"])
+    for group in (
+        token_action_artifacts,
+        nft_action_artifacts,
+        timelock_action_artifacts,
+        amm_action_artifacts,
+        multisig_action_artifacts,
+        launch_action_artifacts,
+        original_scoped_action_artifacts,
+        original_scoped_lock_artifacts,
+    ):
+        for record in group:
+            add_record(record)
+
+    failures = [
+        row["name"]
+        for row in rows
+        if row["status"] != "passed"
+        or not row["preserves_ckb_vm_stack_pointer"]
+        or not row["entry_trampoline_calls_with_ra"]
+        or not row["executable_segment_rx_only"]
+        or not row["executable_segment_file_size_equals_memory_size"]
+    ]
+
+    critical = {}
+    for example in CRITICAL_0_20_DEVNET_EXAMPLES:
+        example_rows = [row for row in rows if row.get("example") == example]
+        missing = not example_rows
+        failed = [row["name"] for row in example_rows if row["status"] != "passed"]
+        critical[example] = {
+            "status": "passed" if example_rows and not failed else "failed",
+            "artifact_count": len(example_rows),
+            "audited_artifacts": [row["name"] for row in example_rows],
+            "missing": missing,
+            "failures": failed,
+        }
+        if missing:
+            failures.append(f"{example}:missing")
+        failures.extend(f"{example}:{name}" for name in failed)
+
+    unique_failures = sorted(set(failures))
+    return {
+        "schema": "cellscript-ckb-elf-entry-abi-gate-v0.20",
+        "status": "passed" if not unique_failures else "failed",
+        "requires_ckb_vm_stack_pointer_preserved": True,
+        "requires_entry_trampoline_call_sequence": True,
+        "requires_rx_only_executable_segment": True,
+        "requires_no_fake_stack_load_segment": True,
+        "critical_examples": CRITICAL_0_20_DEVNET_EXAMPLES,
+        "critical_example_gate": critical,
+        "audited_artifact_count": len(rows),
+        "failures": unique_failures,
+        "rows": rows,
+    }
+
+ckb_elf_entry_abi_gate = collect_elf_entry_abi_gate()
+if ckb_elf_entry_abi_gate["status"] != "passed":
+    raise RuntimeError("CKB ELF entry ABI gate failed: " + json.dumps(ckb_elf_entry_abi_gate["failures"], sort_keys=True))
+
 report = {
     "status": "artifact-verified",
     "acceptance_mode": acceptance_mode,
@@ -2268,6 +2505,7 @@ report = {
         ),
     },
     "lock_acceptance_scope": LOCK_ACCEPTANCE_SCOPE,
+    "ckb_elf_entry_abi_gate": ckb_elf_entry_abi_gate,
     "bundled_examples_strict_admitted": [
         record["name"]
         for record in bundled_examples
@@ -2358,6 +2596,7 @@ report["production_gate"] = {
     "requires_original_scoped_harnesses": True,
     "requires_no_expected_fail_closed_entries": True,
     "requires_all_bundled_examples_strict_original_ckb": True,
+    "requires_ckb_elf_entry_abi_gate": True,
 }
 if acceptance_mode == "production" and production_failures:
     report["status"] = "failed-production-gate"

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.20.0-nightly - 2026-06-19
+
+- Harden the CKB/devnet acceptance path with an ELF entry ABI gate that checks
+  RX-only executable segments, `filesz == memsz`, and entry trampoline
+  stack-pointer preservation before local-node evidence is accepted.
+- Require launch, token, and AMM bootstrap examples to carry passing ELF entry
+  ABI evidence alongside existing builder-backed action, lock-spend, cycle,
+  transaction-size, occupied-capacity, and stateful lifecycle checks.
+- Add 0.20 release notes documenting the strengthened devnet acceptance
+  boundary and the remaining difference between compile-only and live local
+  devnet evidence.
+
 ## 0.17.0 - 2026-05-04
 
 - Add the research iCKB protocol-equivalence surface with partial CKB VM

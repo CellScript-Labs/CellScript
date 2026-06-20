@@ -1,8 +1,8 @@
 import { defineConfig } from "astro/config";
 
 export default defineConfig({
-  site: "https://a19q3.github.io",
-  base: "/CellScript/",
+  site: "http://cellscript.dev",
+  base: "/",
   output: "static",
   devToolbar: {
     enabled: false,

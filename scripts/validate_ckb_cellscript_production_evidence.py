@@ -62,6 +62,7 @@ EXPECTED_LOCK_NAMES = [
     for example, locks in EXPECTED_LOCK_SPEND_MATRIX.items()
     for lock in locks
 ]
+EXPECTED_CRITICAL_ELF_ABI_EXAMPLES = ["launch.cell", "token.cell", "amm_pool.cell"]
 
 ACTION_RUN_KEYS = [
     "token_action_runs",
@@ -153,6 +154,43 @@ def require_positive_int(value: Any, context: str) -> int:
 def require_bool(value: Any, context: str) -> bool:
     require(isinstance(value, bool), f"{context} must be a boolean, got {value!r}")
     return value
+
+
+def validate_elf_entry_abi_gate(report: dict[str, Any]) -> None:
+    gate = report.get("ckb_elf_entry_abi_gate")
+    require(isinstance(gate, dict), "ckb_elf_entry_abi_gate must be an object")
+    require_field(gate, "schema", "cellscript-ckb-elf-entry-abi-gate-v0.20", "ckb_elf_entry_abi_gate")
+    require_field(gate, "status", EXPECTED_STATUS, "ckb_elf_entry_abi_gate")
+    require_field(gate, "requires_ckb_vm_stack_pointer_preserved", True, "ckb_elf_entry_abi_gate")
+    require_field(gate, "requires_entry_trampoline_call_sequence", True, "ckb_elf_entry_abi_gate")
+    require_field(gate, "requires_rx_only_executable_segment", True, "ckb_elf_entry_abi_gate")
+    require_field(gate, "requires_no_fake_stack_load_segment", True, "ckb_elf_entry_abi_gate")
+    require_field(gate, "critical_examples", EXPECTED_CRITICAL_ELF_ABI_EXAMPLES, "ckb_elf_entry_abi_gate")
+    require_empty(gate, "failures", "ckb_elf_entry_abi_gate")
+    require_positive_int(gate.get("audited_artifact_count"), "ckb_elf_entry_abi_gate.audited_artifact_count")
+
+    critical = gate.get("critical_example_gate")
+    require(isinstance(critical, dict), "ckb_elf_entry_abi_gate.critical_example_gate must be an object")
+    for example in EXPECTED_CRITICAL_ELF_ABI_EXAMPLES:
+        row = critical.get(example)
+        require(isinstance(row, dict), f"ckb_elf_entry_abi_gate.critical_example_gate.{example} must be an object")
+        require_field(row, "status", EXPECTED_STATUS, f"ckb_elf_entry_abi_gate.critical_example_gate.{example}")
+        require_field(row, "missing", False, f"ckb_elf_entry_abi_gate.critical_example_gate.{example}")
+        require_empty(row, "failures", f"ckb_elf_entry_abi_gate.critical_example_gate.{example}")
+        require_positive_int(row.get("artifact_count"), f"ckb_elf_entry_abi_gate.critical_example_gate.{example}.artifact_count")
+
+    rows = gate.get("rows")
+    require(isinstance(rows, list) and rows, "ckb_elf_entry_abi_gate.rows must be a non-empty list")
+    for index, row in enumerate(rows):
+        require(isinstance(row, dict), f"ckb_elf_entry_abi_gate.rows[{index}] must be an object")
+        context = f"ckb_elf_entry_abi_gate.rows[{index}]"
+        require_field(row, "status", EXPECTED_STATUS, context)
+        require_field(row, "preserves_ckb_vm_stack_pointer", True, context)
+        require_field(row, "entry_trampoline_calls_with_ra", True, context)
+        require_field(row, "executable_segment_rx_only", True, context)
+        require_field(row, "executable_segment_file_size_equals_memory_size", True, context)
+        require(isinstance(row.get("artifact"), str) and row["artifact"], f"{context}.artifact must be a non-empty string")
+        require(isinstance(row.get("first_instruction_le_hex"), str), f"{context}.first_instruction_le_hex must be present")
 
 
 def git_stdout(repo_root: Path, args: list[str]) -> str:
@@ -275,6 +313,8 @@ def validate_compile_gate(report: dict[str, Any], *, compile_only: bool = False)
     require_field(gate, "requires_original_scoped_harnesses", True, "production_gate")
     require_field(gate, "requires_no_expected_fail_closed_entries", True, "production_gate")
     require_field(gate, "requires_all_bundled_examples_strict_original_ckb", True, "production_gate")
+    require_field(gate, "requires_ckb_elf_entry_abi_gate", True, "production_gate")
+    validate_elf_entry_abi_gate(report)
 
     coverage = report.get("ckb_business_coverage")
     require(isinstance(coverage, dict), "ckb_business_coverage must be an object")

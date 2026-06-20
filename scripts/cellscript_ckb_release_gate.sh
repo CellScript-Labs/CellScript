@@ -39,6 +39,7 @@ check_trailing_whitespace() {
         "roadmap/CELLSCRIPT_0_13_TODOLIST.md"
         "docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md"
         "docs/releases/CELLSCRIPT_0_13_2_RELEASE_NOTES.md"
+        "docs/releases/CELLSCRIPT_0_20_RELEASE_NOTES.md"
         "docs/releases/CELLSCRIPT_0_13_2_ACCEPTANCE_COMMUNITY_POST.md"
         "docs/archive/0.13/CELLSCRIPT_0_13_1_PLAN.md"
         "docs/archive/0.13/CELLSCRIPT_SIGNATURE_DIRECTION_EXECUTION_PLAN.md"
@@ -97,6 +98,9 @@ check_release_roadmap_docs() {
         'docs/CELLSCRIPT_0_20_ROADMAP.md::VS Code extension'
         'docs/CELLSCRIPT_0_20_ROADMAP.md::CellFabric is frozen'
         'docs/CELLSCRIPT_0_20_ROADMAP.md::cellc action build --fabric-intent'
+        'docs/CELLSCRIPT_0_20_ROADMAP.md::ELF entry ABI gate'
+        'docs/releases/CELLSCRIPT_0_20_RELEASE_NOTES.md::ELF entry ABI gate'
+        'docs/releases/CELLSCRIPT_0_20_RELEASE_NOTES.md::launch.cell, token.cell, and amm_pool.cell'
         'docs/CELLSCRIPT_CELLFABRIC_BRIDGE.md::cellscript-cellfabric-intent-envelope-v0.20'
         'docs/wiki/Tutorial-07-LSP-and-Tooling.md::CellScript: Generate TypeScript Action Builder'
         'docs/wiki/Tutorial-07-LSP-and-Tooling.md::cellscript.builderOutputDir'
@@ -150,8 +154,13 @@ check_ckb_acceptance_boundaries() {
         'scripts/ckb_cellscript_acceptance.sh::stateful_action_coverage'
         'scripts/ckb_cellscript_acceptance.sh::consensus_serialized_tx_size_bytes'
         'scripts/ckb_cellscript_acceptance.sh::occupied_capacity_shannons'
+        'scripts/ckb_cellscript_acceptance.sh::ckb_elf_entry_abi_gate'
+        'scripts/ckb_cellscript_acceptance.sh::preserves_ckb_vm_stack_pointer'
+        'scripts/ckb_cellscript_acceptance.sh::CRITICAL_0_20_DEVNET_EXAMPLES'
         'scripts/cellscript_ckb_release_gate.sh::--production --stateful-scenarios'
         'scripts/cellscript_ckb_stateful_scenarios.sh::--production --stateful-scenarios'
+        'scripts/validate_ckb_cellscript_production_evidence.py::validate_elf_entry_abi_gate'
+        'scripts/validate_ckb_cellscript_production_evidence.py::EXPECTED_CRITICAL_ELF_ABI_EXAMPLES'
         'scripts/validate_ckb_cellscript_production_evidence.py::valid CKB CellScript'
         'scripts/validate_cellscript_tooling_release.py::valid CellScript tooling release boundary'
     )
