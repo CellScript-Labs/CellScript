@@ -49,7 +49,7 @@ git diff --check
 
 These fixes are necessary for iCKB-grade auditability but are not sufficient for
 production equivalence. A production iCKB claim still requires the evidence gate
-in `docs/0.17/ickb_production_equivalence_gate.md`: original iCKB binary hashes,
+in `docs/archive/0.17/CELLSCRIPT_0_17_ICKB_PRODUCTION_EQUIVALENCE_GATE.md`: original iCKB binary hashes,
 generated CellScript artifact hashes, identical CKB transaction fixtures,
 original and generated script exit codes, named reject modes, CKB VM/testtool
 version, cycle counts, transaction size, and fixture manifest hashes.

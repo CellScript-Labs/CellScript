@@ -15,7 +15,7 @@ import sys
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-REPO_ROOT = ROOT.parents[2]
+REPO_ROOT = ROOT.parents[2]  # proposals/evolving-dob/evolving-dob-profile-v1 -> CellScript repo root
 
 
 def cellc() -> list[str]:
@@ -25,7 +25,7 @@ def cellc() -> list[str]:
     binary = REPO_ROOT / "target" / "debug" / "cellc"
     if binary.exists():
         return [str(binary)]
-    return ["cargo", "run", "--locked", "-p", "cellscript", "--manifest-path", str(REPO_ROOT / "Cargo.toml"), "--"]
+    return ["cargo", "run", "--locked", "-p", "cellscript", "--bin", "cellc", "--manifest-path", str(REPO_ROOT / "Cargo.toml"), "--"]
 
 
 def run(*args: str) -> subprocess.CompletedProcess[str]:

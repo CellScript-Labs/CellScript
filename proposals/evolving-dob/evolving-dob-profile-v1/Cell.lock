@@ -5,22 +5,22 @@ name = "evolving-dob-profile-v1"
 version = "1.0.0"
 namespace = "dob"
 source_hash = "921e4118653a81eac3cb598a42bb92ac2f52a057085195b988a2ae73a78be239"
-compiler_source_hash = "4ea33593344a4a0a60149ca428ae7478c390d57d7b6e073f077833e69fef74e8"
+compiler_source_hash = "24155c9bd67d7d2bcaba3a9b7b0f24ae988b2b63cf54e29f10080efced7ea8b5"
 
 [dependencies]
 
 [package_build]
 compiler_version = "0.17.0"
 target_profile = "ckb"
-artifact_hash = "d7fd320a523375c417de0a83fb8b83da39af065626c34c10f7a7ab1c9ce78ac0"
-metadata_hash = "eba1b230d111dd213d735364b89066914f0f5f1def8894273f1759cd79b6d415"
+artifact_hash = "e61add13e5012937a5430d82a1cebe2292e128e3af8bef1fa8adf81f73553c8a"
+metadata_hash = "a47fa847a409a13dd9756ff3021d6306b982dff40bdec451ed82c3516ff77665"
 schema_hash = "861946f78628f4c2732c4bcc760f77a888daad4e4df5b0e3a57c80f6257d45b3"
 abi_hash = "58ac62692535f3d4046e57923343ff45080a9e941a313bf59ab981ca4d61ce48"
-constraints_hash = "e843f20bdce8d9a49a5c14db5f9e3d40959eca6bb416516498568524f3bb5357"
+constraints_hash = "88345e9f52d6a313b5b745f56448125c79c72163080e43bccbf163117f6bd283"
 
 [deployment.devnet]
-record = "0x31ecb5244498a0521daef7a803b95bad57c11bb228eb70ff3d579a02f04fa189:0"
-record_hash = "fe963c39fc085bd0e310b41a3a01ee15c9de54ede3706b96344cea2f2b5125e9"
-code_hash = "0xd7fd320a523375c417de0a83fb8b83da39af065626c34c10f7a7ab1c9ce78ac0"
-out_point = "0x31ecb5244498a0521daef7a803b95bad57c11bb228eb70ff3d579a02f04fa189:0"
-data_hash = "0xd7fd320a523375c417de0a83fb8b83da39af065626c34c10f7a7ab1c9ce78ac0"
+record = "0x97537c0d1422735fbe4d1f495ca05ab90fa6e2330e286269e2f7f0c6d5257185:0"
+record_hash = "aed2f1db8e06ca1412a7dee50b548c2a77e25700f9cd440d3fc2f4c6a56c0d5a"
+code_hash = "0xe61add13e5012937a5430d82a1cebe2292e128e3af8bef1fa8adf81f73553c8a"
+out_point = "0x97537c0d1422735fbe4d1f495ca05ab90fa6e2330e286269e2f7f0c6d5257185:0"
+data_hash = "0xe61add13e5012937a5430d82a1cebe2292e128e3af8bef1fa8adf81f73553c8a"

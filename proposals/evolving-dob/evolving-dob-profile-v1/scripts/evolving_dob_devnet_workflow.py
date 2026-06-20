@@ -27,7 +27,7 @@ from typing import Any
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-REPO_ROOT = ROOT.parents[2]
+REPO_ROOT = ROOT.parents[2]  # proposals/evolving-dob/evolving-dob-profile-v1 -> CellScript repo root
 CKB_BLAKE2B_PERSONAL = b"ckb-default-hash"
 ALWAYS_SUCCESS_CODE_HASH = "0x28e83a1277d48add8e72fadaa9248559e1b632bab2bd60b27955ebc4c03800a5"
 ALWAYS_SUCCESS_INDEX = 5

@@ -168,7 +168,7 @@ cellc audit-bundle src/main.cell --output target/audit
 ```
 
 For the review-finding closure matrix, see
-`docs/0.17/review_findings_closure.md`.
+`docs/archive/0.17/CELLSCRIPT_0_17_REVIEW_FINDINGS_CLOSURE.md`.
 
 ## Suggested Compiler CI Gate
 

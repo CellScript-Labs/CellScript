@@ -14,8 +14,7 @@ overstating production equivalence.
 
 - `BRANCHES.md`
 - `docs/CELLSCRIPT_0_18_ROADMAP.md`
-- `docs/0.17/ickb_diff_results.md`
-- `docs/0.17/ickb_production_equivalence_gate.md`
+- `docs/archive/0.17/CELLSCRIPT_0_17_ICKB_PRODUCTION_EQUIVALENCE_GATE.md`
 - `tests/benchmarks/ickb_diff/matrix.json`
 
 ## Current Evidence Boundary

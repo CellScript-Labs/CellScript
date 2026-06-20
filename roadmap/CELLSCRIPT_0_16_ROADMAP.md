@@ -322,7 +322,7 @@ The principle is:
 ### 4C. Comparative-Audit Work Moved To 0.17
 
 The remaining audit recommendations are valuable, but they are no longer 0.16
-freeze items. They are tracked in `docs/0.17/CELLSCRIPT_0_17_ROADMAP.md`:
+freeze items. They are tracked in `docs/archive/0.17/CELLSCRIPT_0_17_ROADMAP.md`:
 
 - deeper `Lowered<T>` / `LoweredOperand::{Value, Poisoned}` representation;
 - tuple formatter and `Span::Display` hygiene;
@@ -569,7 +569,7 @@ Explore one or more backends:
 ### 11. 0.17 Production-Completeness Tracks
 
 The following are CKB production-completeness tracks, not compiler-freeze
-hardening. They remain in `docs/0.17/CELLSCRIPT_0_17_ROADMAP.md` and should not
+hardening. They remain in `docs/archive/0.17/CELLSCRIPT_0_17_ROADMAP.md` and should not
 be confused with the freeze-critical Rust-comparative hardening items kept in
 0.16:
 

@@ -68,8 +68,9 @@ High-value active references include:
 
 - `docs/spec/` contains normative or semi-normative specifications. The 0.16
   operational semantics live there.
-- `docs/0.17/` contains next-release planning and iCKB investigation material.
-  It is not part of the 0.16 release contract.
+- `docs/0.20/` contains branch-local audit and investigation material for the
+  current `nightly-0.20` line. It is not part of any prior release contract.
+  Current contents: `CELLSCRIPT_0_20_DOB_EVO_SWARM_AUDIT.md`.
 
 ## Examples
 
@@ -89,10 +90,10 @@ duplicate full release notes.
 Active later-stage roadmap notes that live under `docs/` because they are tied
 to branch-specific evidence or forward design:
 
-- `0.17/CELLSCRIPT_0_17_ROADMAP.md`
+- `archive/0.17/CELLSCRIPT_0_17_ROADMAP.md`
 - `CELLSCRIPT_0_18_ROADMAP.md`
 - `CELLSCRIPT_0_19_ROADMAP.md`
-- `releases/CELLSCRIPT_0_19_CLOSURE_NOTES.md`
+- `releases/CELLSCRIPT_0_19_RELEASE_NOTES.md`
 - `CELLSCRIPT_0_20_ROADMAP.md`
 - `CELLSCRIPT_CKB_ECOSYSTEM_REUSE_AUDIT.md` for 0.19 CKB ecosystem reuse scope
 - `CELLSCRIPT_CKB_STD_COMPAT.md` for 0.19 ckb-std compatibility scope
@@ -116,6 +117,10 @@ Current archive:
 - `docs/archive/0.13/CELLSCRIPT_0_13_1_PLAN.md`
 - `docs/archive/0.13/CELLSCRIPT_SIGNATURE_DIRECTION_EXECUTION_PLAN.md`
 - `docs/archive/0.15/CELLSCRIPT_0_15_ROADMAP_SUMMARY.md`
+- `docs/archive/0.17/CELLSCRIPT_0_17_ROADMAP.md`
+- `docs/archive/0.17/CELLSCRIPT_0_17_ICKB_FINAL_REPORT.md`
+- `docs/archive/0.17/CELLSCRIPT_0_17_ICKB_PRODUCTION_EQUIVALENCE_GATE.md`
+- `docs/archive/0.17/CELLSCRIPT_0_17_REVIEW_FINDINGS_CLOSURE.md`
 
 When moving a document into the archive, update all public links and add a short
 status note if the file could otherwise be mistaken for active guidance.

@@ -444,7 +444,7 @@ or CellFabric intent engine.
 - [0.15 release notes](docs/releases/CELLSCRIPT_0_15_RELEASE_NOTES.md)
 - [0.16 roadmap](roadmap/CELLSCRIPT_0_16_ROADMAP.md)
 - [0.16 release notes](docs/releases/CELLSCRIPT_0_16_RELEASE_NOTES.md)
-- [0.17 roadmap](docs/0.17/CELLSCRIPT_0_17_ROADMAP.md)
+- [0.17 roadmap](docs/archive/0.17/CELLSCRIPT_0_17_ROADMAP.md)
 - [0.18 roadmap](docs/CELLSCRIPT_0_18_ROADMAP.md)
 - [0.19 roadmap](docs/CELLSCRIPT_0_19_ROADMAP.md)
 

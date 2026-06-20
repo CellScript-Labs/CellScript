@@ -139,7 +139,7 @@ Implemented:
   transaction-shape and transaction-content cross-checks, non-stable protocol
   descriptor labels, and non-executable template-only `solve-tx` output with
   machine-readable evidence schema requirements. The closure matrix is tracked
-  in `docs/0.17/review_findings_closure.md`.
+  in `docs/archive/0.17/CELLSCRIPT_0_17_REVIEW_FINDINGS_CLOSURE.md`.
 - stable 0.17 runtime error families.
 - `tests/v0_17.rs`, `tests/ckb_compat_runner.rs`, and `tests/ickb_diff.rs`.
 
@@ -624,7 +624,7 @@ The first target subset:
 
 **Acceptance**
 
-- `docs/0.17/ickb_production_equivalence_gate.md` contains executed
+- `docs/archive/0.17/CELLSCRIPT_0_17_ICKB_PRODUCTION_EQUIVALENCE_GATE.md` contains executed
   results, not only `MODEL_LEVEL_ONLY` rows.
 - Any non-equivalence is recorded as either a CellScript bug, unsupported
   semantic, or intentional scope difference.
@@ -670,7 +670,7 @@ Extend the production gate so iCKB-grade claims require:
   pass/fail status match, exit-code/status consistency, cycles, transaction
   size, occupied capacity, and fee.
 
-`docs/0.17/ickb_production_equivalence_gate.md` defines the current evidence
+`docs/archive/0.17/CELLSCRIPT_0_17_ICKB_PRODUCTION_EQUIVALENCE_GATE.md` defines the current evidence
 schema. `tests/ickb_diff.rs` must reject any `PROVEN` claim that lacks these
 fields.
 
@@ -743,7 +743,7 @@ Exit criteria: positive and negative benchmark fixtures execute in CKB VM.
 Exit criteria: no equivalence claim is made without executed evidence.
 The diff matrix may only move from `MODEL_LEVEL_ONLY` to partial executed modes
 when every executed row carries the evidence required by
-`docs/0.17/ickb_production_equivalence_gate.md`; it may only move to production
+`docs/archive/0.17/CELLSCRIPT_0_17_ICKB_PRODUCTION_EQUIVALENCE_GATE.md`; it may only move to production
 mode `EXECUTED_CKB_VM_DIFF` / `PROVEN` when every selected row satisfies that
 gate.
 
@@ -791,7 +791,7 @@ cargo run --locked -p cellscript --bin cellc -- verify-ckb-fixtures tests/compat
    reasons.
 4. The differential matrix has executed results for the selected subset, or
    every remaining row is explicitly labelled unsupported with a tracked blocker.
-5. `docs/0.17/ickb_final_report.md` is updated with the new evidence.
+5. `docs/archive/0.17/CELLSCRIPT_0_17_ICKB_FINAL_REPORT.md` is updated with the new evidence.
 6. No unsupported feature is represented as supported.
 7. `tests/ickb_diff.rs` accepts the matrix as executed evidence rather than
    model-only evidence; otherwise 0.17 remains partial/not-proven.

@@ -226,8 +226,8 @@ evidence, production evidence envelopes, and hardening thresholds.
 - `tests/benchmarks/ickb_negative/*.json`
 - `tests/benchmarks/ickb_diff/matrix.json`
 - `tests/benchmarks/ickb_diff/claim_manifest.json`
-- `docs/0.17/ickb_production_equivalence_gate.md`
-- `docs/0.17/*.md`
+- `docs/archive/0.17/CELLSCRIPT_0_17_ICKB_PRODUCTION_EQUIVALENCE_GATE.md`
+- `docs/archive/0.17/*.md`
 
 All iCKB-specific executable/model assets are scoped to `tests/benchmarks`,
 `tests/support`, and the 0.17 audit documents. The generic compiler, stdlib,
@@ -274,7 +274,7 @@ The branch also hardens the earlier 0.16 assurance review items:
   validation.
 
 The exact finding-by-finding closure matrix is maintained in
-`docs/0.17/review_findings_closure.md`.
+`docs/archive/0.17/CELLSCRIPT_0_17_REVIEW_FINDINGS_CLOSURE.md`.
 
 ## Coverage Table
 

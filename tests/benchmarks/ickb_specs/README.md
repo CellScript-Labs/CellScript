@@ -54,7 +54,7 @@ requirement helpers, signed `i32` ABI lowering, first-class Script
 construction, OutPoint reads, and cell-data decoders compile and execute where
 required. Fixtures that do not execute a generated CKB VM binary are not
 counted as equivalence rows. The stricter production-equivalence claim gate is
-documented in `docs/0.17/ickb_production_equivalence_gate.md`.
+documented in `docs/archive/0.17/CELLSCRIPT_0_17_ICKB_PRODUCTION_EQUIVALENCE_GATE.md`.
 
 ## Original Semantics Mapped
 
