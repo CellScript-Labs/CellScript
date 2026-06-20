@@ -3,6 +3,12 @@
 This directory is organized by document role. Keep new docs in the smallest
 stable category that matches how readers should use them.
 
+## Language
+
+Keep the docs tree in English so release references, wiki imports, and package
+links have one canonical target. README files are the only exception for
+localized orientation notes.
+
 ## Stable Tutorials
 
 `docs/wiki/` contains the GitHub Wiki source. These pages are version-neutral,
@@ -65,6 +71,8 @@ High-value active references include:
   operational semantics live there.
 - `docs/0.17/` contains next-release planning and iCKB investigation material.
   It is not part of the 0.16 release contract.
+- `docs/0.20/` contains 0.20 compiler audit evidence. Keep the English audit
+  as the canonical copy.
 
 ## Examples
 
