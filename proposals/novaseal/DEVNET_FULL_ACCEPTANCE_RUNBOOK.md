@@ -51,8 +51,8 @@ external_endpoint_status=passed
 
 Any `ready_to_run_live_devnet`, `ready_to_wire_live_devnet`, stale provenance,
 or failed local Fiber endpoint coverage is a blocker for current-commit local
-acceptance, even when local static blockers are zero. Missing public BTC SPV
-evidence remains a blocker for external-completeness and production acceptance.
+acceptance, even when local static blockers are zero. Missing public BTC SPV evidence
+remains a blocker for external-completeness and production acceptance.
 
 Latest full post-Phase-5 refresh: **2026-06-11**.
 

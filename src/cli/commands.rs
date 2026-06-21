@@ -3597,6 +3597,12 @@ impl CommandExecutor {
             compare_optional_build_field("artifact_hash", &build.artifact_hash, &deployed_build.artifact_hash, &mut violations);
             compare_optional_build_field("metadata_hash", &build.metadata_hash, &deployed_build.metadata_hash, &mut violations);
             compare_optional_build_field("schema_hash", &build.schema_hash, &deployed_build.schema_hash, &mut violations);
+            compare_optional_build_field(
+                "cell_data_codec_manifest_hash",
+                &build.cell_data_codec_manifest_hash,
+                &deployed_build.cell_data_codec_manifest_hash,
+                &mut violations,
+            );
             compare_optional_build_field("abi_hash", &build.abi_hash, &deployed_build.abi_hash, &mut violations);
             compare_optional_build_field(
                 "constraints_hash",
@@ -4259,6 +4265,12 @@ fn verify_builder_lockfile_identity(
             compare_builder_identity_field("artifact_hash", &build.artifact_hash, &expected_build.artifact_hash, &mut violations);
             compare_builder_identity_field("metadata_hash", &build.metadata_hash, &Some(metadata_hash.to_string()), &mut violations);
             compare_builder_identity_field("schema_hash", &build.schema_hash, &expected_build.schema_hash, &mut violations);
+            compare_builder_identity_field(
+                "cell_data_codec_manifest_hash",
+                &build.cell_data_codec_manifest_hash,
+                &expected_build.cell_data_codec_manifest_hash,
+                &mut violations,
+            );
             compare_builder_identity_field("abi_hash", &build.abi_hash, &expected_build.abi_hash, &mut violations);
             compare_builder_identity_field(
                 "constraints_hash",
@@ -4288,6 +4300,7 @@ fn verify_builder_lockfile_identity(
             "artifact_hash",
             "metadata_hash",
             "schema_hash",
+            "cell_data_codec_manifest_hash",
             "abi_hash",
             "constraints_hash"
         ]
@@ -4337,6 +4350,12 @@ fn verify_builder_deployment_identity(
             compare_builder_deployed_field("artifact_hash", &build.artifact_hash, &expected_build.artifact_hash, &mut violations);
             compare_builder_deployed_field("metadata_hash", &build.metadata_hash, &Some(metadata_hash.to_string()), &mut violations);
             compare_builder_deployed_field("schema_hash", &build.schema_hash, &expected_build.schema_hash, &mut violations);
+            compare_builder_deployed_field(
+                "cell_data_codec_manifest_hash",
+                &build.cell_data_codec_manifest_hash,
+                &expected_build.cell_data_codec_manifest_hash,
+                &mut violations,
+            );
             compare_builder_deployed_field("abi_hash", &build.abi_hash, &expected_build.abi_hash, &mut violations);
             compare_builder_deployed_field(
                 "constraints_hash",
@@ -4372,6 +4391,13 @@ fn verify_builder_deployment_identity(
             "schema_hash",
             &deployment.schema_hash,
             &expected_build.schema_hash,
+            &deployment.network,
+            &mut violations,
+        );
+        compare_builder_deployment_record_field(
+            "cell_data_codec_manifest_hash",
+            &deployment.cell_data_codec_manifest_hash,
+            &expected_build.cell_data_codec_manifest_hash,
             &deployment.network,
             &mut violations,
         );
@@ -4469,6 +4495,7 @@ fn verify_builder_deployment_identity(
             "artifact_hash",
             "metadata_hash",
             "schema_hash",
+            "cell_data_codec_manifest_hash",
             "abi_hash",
             "constraints_hash",
             "code_hash",
@@ -4670,6 +4697,8 @@ fn write_typescript_builder_package(
         "package_name": package_name,
         "metadata_hash": metadata_hash,
         "artifact_hash": metadata.artifact_hash,
+        "cell_data_codec_abi": metadata.cell_data_codec_manifest.abi,
+        "raw_cell_data_required": metadata.cell_data_codec_manifest.raw_bytes_required,
         "lockfile_verified": locked_identity.is_some(),
         "deployment_verified": deployment_identity.is_some(),
         "lockfile": lockfile_path.map(|path| path.display().to_string()),
@@ -4687,6 +4716,7 @@ fn write_typescript_builder_package(
         "non_claims": [
             "generated package does not prove live-cell availability",
             "generated package does not sign or submit transactions by itself",
+            "generated package does not materialize raw cell-data codecs by itself",
             "generated package requires a runtime adapter for CCC or ckb-sdk-rust"
         ]
     }))
@@ -4762,6 +4792,8 @@ fn typescript_builder_manifest(
         "artifact_hash": metadata.artifact_hash,
         "source_hash": metadata.source_hash,
         "target_profile": metadata.target_profile.name,
+        "molecule_schema_manifest": metadata.molecule_schema_manifest,
+        "cell_data_codec_manifest": metadata.cell_data_codec_manifest,
         "locked_identity": locked_identity,
         "deployment_identity": deployment_identity,
         "actions": actions
@@ -4783,6 +4815,9 @@ fn typescript_builder_manifest(
             "requires_deployment_resolution": true,
             "requires_capacity_and_fee_policy": true,
             "requires_witness_materialization": true,
+            "requires_cell_data_codec_materialization": true,
+            "requires_external_cell_data_codec_adapter": metadata.cell_data_codec_manifest.raw_bytes_required,
+            "cell_data_codec_abi": metadata.cell_data_codec_manifest.abi,
             "requires_dry_run_before_submit": true,
             "must_not_infer_protocol_semantics_from_action_name": true,
         }
@@ -4861,6 +4896,7 @@ fn typescript_builder_index(
     ts.push_str("export const CELLSCRIPT_BUILDER_SCHEMA = \"cellscript-generated-action-builder-v0.20\" as const;\n");
     ts.push_str(&format!("export const builderManifest = {manifest_json} as const;\n"));
     ts.push_str(&format!("export const metadata = {metadata_json} as const;\n"));
+    ts.push_str("export const cellDataCodecManifest = metadata.cell_data_codec_manifest;\n");
     ts.push_str(&format!("export const actionSpecs = {action_specs_json} as const;\n\n"));
     ts.push_str(&format!("export const actionErrorContexts = {action_error_contexts_json} as const;\n"));
     ts.push_str(&format!("export const runtimeErrorCatalog = {runtime_error_catalog_json} as const;\n\n"));
@@ -4881,6 +4917,7 @@ fn typescript_builder_index(
            artifact_hash?: string | null;\n\
            metadata_hash?: string | null;\n\
            schema_hash?: string | null;\n\
+           cell_data_codec_manifest_hash?: string | null;\n\
            abi_hash?: string | null;\n\
            constraints_hash?: string | null;\n\
          }\n\n\
@@ -4909,6 +4946,7 @@ fn typescript_builder_index(
            artifact_hash?: string | null;\n\
            metadata_hash?: string | null;\n\
            schema_hash?: string | null;\n\
+           cell_data_codec_manifest_hash?: string | null;\n\
            abi_hash?: string | null;\n\
            constraints_hash?: string | null;\n\
            compiler_version?: string | null;\n\
@@ -4957,6 +4995,7 @@ fn typescript_builder_index(
            canSubmit: false;\n\
            requiresLiveCellResolution: true;\n\
            requiresDeploymentResolution: true;\n\
+           cellDataCodecManifest: typeof cellDataCodecManifest;\n\
            notProvenByGeneratedBuilder: readonly string[];\n\
          }\n\n\
          export type ActionBuilderMode = \"build\" | \"dry-run\" | \"submit\";\n\n\
@@ -5035,6 +5074,10 @@ fn typescript_builder_index(
          const GENERATED_SOURCE_HASH: string | null = {};\n\
          const GENERATED_COMPILER_VERSION = {};\n\
          const GENERATED_TARGET_PROFILE = {};\n\
+         const GENERATED_SCHEMA_HASH = {};\n\
+         const GENERATED_CELL_DATA_CODEC_MANIFEST_HASH = {};\n\
+         const GENERATED_ABI_HASH = {};\n\
+         const GENERATED_CONSTRAINTS_HASH = {};\n\
          const BUILDER_MANIFEST_RUNTIME = builderManifest as unknown as {{\n\
            deployment_identity?: {{ deployments?: readonly CellScriptDeploymentRecord[] }} | null;\n\
          }};\n\n",
@@ -5043,6 +5086,10 @@ fn typescript_builder_index(
         metadata.source_hash.as_deref().map(typescript_string_literal).unwrap_or_else(|| "null".to_string()),
         typescript_string_literal(&metadata.compiler_version),
         typescript_string_literal(&metadata.target_profile.name),
+        typescript_string_literal(&metadata.molecule_schema_manifest.manifest_hash),
+        typescript_string_literal(&metadata.cell_data_codec_manifest.manifest_hash),
+        typescript_string_literal(&metadata_abi_hash(metadata)?),
+        typescript_string_literal(&hash_json_value("constraints", &metadata.constraints)?),
     ));
     ts.push_str(
         "export function runtimeErrorInfoByCode(code: number | string | bigint): CellScriptRuntimeErrorInfo | null {\n\
@@ -5178,6 +5225,10 @@ fn typescript_builder_index(
              compareRequiredIdentity(\"target_profile\", build.target_profile, GENERATED_TARGET_PROFILE, violations);\n\
              compareRequiredIdentity(\"artifact_hash\", build.artifact_hash, GENERATED_ARTIFACT_HASH, violations);\n\
              compareRequiredIdentity(\"metadata_hash\", build.metadata_hash, GENERATED_METADATA_HASH, violations);\n\
+             compareRequiredIdentity(\"schema_hash\", build.schema_hash, GENERATED_SCHEMA_HASH, violations);\n\
+             compareRequiredIdentity(\"cell_data_codec_manifest_hash\", build.cell_data_codec_manifest_hash, GENERATED_CELL_DATA_CODEC_MANIFEST_HASH, violations);\n\
+             compareRequiredIdentity(\"abi_hash\", build.abi_hash, GENERATED_ABI_HASH, violations);\n\
+             compareRequiredIdentity(\"constraints_hash\", build.constraints_hash, GENERATED_CONSTRAINTS_HASH, violations);\n\
            }\n\
            return violations;\n\
          }\n\n\
@@ -5210,6 +5261,10 @@ fn typescript_builder_index(
            compareDeploymentIdentity(\"compiler_version\", deployment.compiler_version, GENERATED_COMPILER_VERSION, violations);\n\
            compareDeploymentIdentity(\"artifact_hash\", deployment.artifact_hash, GENERATED_ARTIFACT_HASH, violations);\n\
            compareDeploymentIdentity(\"metadata_hash\", deployment.metadata_hash, GENERATED_METADATA_HASH, violations);\n\
+           compareDeploymentIdentity(\"schema_hash\", deployment.schema_hash, GENERATED_SCHEMA_HASH, violations);\n\
+           compareDeploymentIdentity(\"cell_data_codec_manifest_hash\", deployment.cell_data_codec_manifest_hash, GENERATED_CELL_DATA_CODEC_MANIFEST_HASH, violations);\n\
+           compareDeploymentIdentity(\"abi_hash\", deployment.abi_hash, GENERATED_ABI_HASH, violations);\n\
+           compareDeploymentIdentity(\"constraints_hash\", deployment.constraints_hash, GENERATED_CONSTRAINTS_HASH, violations);\n\
 \n\
            const lockDeployment = lockfile?.deployment?.[deployment.network];\n\
            if (lockfile && !lockDeployment) {\n\
@@ -5398,7 +5453,7 @@ fn typescript_builder_index(
          assertCellScriptDeployment(options.lockfile, options.deployment, options.liveDeploymentEvidence, options.trustPolicy);\n  }\n",
     );
     ts.push_str(&format!(
-        "  return {{\n    schema: CELLSCRIPT_BUILDER_SCHEMA,\n    state: \"GeneratedActionPlan\",\n    status: \"requires-runtime-resolution\",\n    action,\n    params,\n    options,\n    metadataHash: {},\n    artifactHash: {},\n    targetProfile: {},\n    canSubmit: false,\n    requiresLiveCellResolution: true,\n    requiresDeploymentResolution: true,\n    notProvenByGeneratedBuilder: [\n      \"live_cell_availability\",\n      \"deployment_live_chain_match\",\n      \"capacity_fee_balance\",\n      \"signature_authority\",\n      \"ckb_vm_execution\",\n      \"tx_pool_acceptance\",\n      \"submission\"\n    ] as const,\n  }};\n}}\n\n",
+        "  return {{\n    schema: CELLSCRIPT_BUILDER_SCHEMA,\n    state: \"GeneratedActionPlan\",\n    status: \"requires-runtime-resolution\",\n    action,\n    params,\n    options,\n    metadataHash: {},\n    artifactHash: {},\n    targetProfile: {},\n    canSubmit: false,\n    requiresLiveCellResolution: true,\n    requiresDeploymentResolution: true,\n    cellDataCodecManifest,\n    notProvenByGeneratedBuilder: [\n      \"live_cell_availability\",\n      \"deployment_live_chain_match\",\n      \"capacity_fee_balance\",\n      \"signature_authority\",\n      \"ckb_vm_execution\",\n      \"cell_data_codec_materialization\",\n      \"tx_pool_acceptance\",\n      \"submission\"\n    ] as const,\n  }};\n}}\n\n",
         typescript_string_literal(metadata_hash),
         metadata.artifact_hash.as_deref().map(typescript_string_literal).unwrap_or_else(|| "null".to_string()),
         typescript_string_literal(&metadata.target_profile.name)
@@ -7719,6 +7774,7 @@ fn locked_build_info_from_metadata(metadata: &CompileMetadata) -> Result<crate::
         artifact_hash: metadata.artifact_hash.clone(),
         metadata_hash: Some(hash_json_value("metadata", metadata)?),
         schema_hash: Some(metadata.molecule_schema_manifest.manifest_hash.clone()),
+        cell_data_codec_manifest_hash: Some(metadata.cell_data_codec_manifest.manifest_hash.clone()),
         abi_hash: Some(metadata_abi_hash(metadata)?),
         constraints_hash: Some(hash_json_value("constraints", &metadata.constraints)?),
     })
@@ -7733,6 +7789,7 @@ fn metadata_abi_hash(metadata: &CompileMetadata) -> Result<String> {
         "functions": &metadata.functions,
         "locks": &metadata.locks,
         "molecule_schema_manifest": &metadata.molecule_schema_manifest,
+        "cell_data_codec_manifest": &metadata.cell_data_codec_manifest,
     });
     hash_json_value("abi", &abi)
 }
@@ -7919,6 +7976,9 @@ fn push_missing_locked_build_identity(label: &str, build: &crate::package::Locke
     if build.schema_hash.is_none() {
         violations.push(format!("{} has no schema_hash", label));
     }
+    if build.cell_data_codec_manifest_hash.is_none() {
+        violations.push(format!("{} has no cell_data_codec_manifest_hash", label));
+    }
     if build.abi_hash.is_none() {
         violations.push(format!("{} has no abi_hash", label));
     }
@@ -7939,6 +7999,9 @@ fn push_missing_deployed_build_identity(label: &str, build: &crate::package::Dep
     }
     if build.schema_hash.is_none() {
         violations.push(format!("{} has no schema_hash", label));
+    }
+    if build.cell_data_codec_manifest_hash.is_none() {
+        violations.push(format!("{} has no cell_data_codec_manifest_hash", label));
     }
     if build.abi_hash.is_none() {
         violations.push(format!("{} has no abi_hash", label));

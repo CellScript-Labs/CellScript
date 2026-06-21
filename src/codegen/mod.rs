@@ -629,6 +629,14 @@ fn entry_abi_arg_count(params: &[IrParam], abi: Option<&CallableAbi>) -> usize {
         .sum()
 }
 
+fn align_stack_arg_bytes(bytes: usize) -> usize {
+    if bytes == 0 {
+        0
+    } else {
+        bytes.next_multiple_of(16)
+    }
+}
+
 fn call_param_abi_arg_count(param: &IrParam, needs_type_hash: bool) -> usize {
     if named_type_name(&param.ty).is_some() {
         return 2 + usize::from(needs_type_hash) * 2;
@@ -1106,7 +1114,7 @@ impl CodeGenerator {
         let callable_abi = self.callable_abis.get(target).cloned();
         let type_hash_param_indices = callable_abi.as_ref().map(|abi| abi.type_hash_param_indices.clone()).unwrap_or_default();
         let runtime_bound_param_indices = callable_abi.as_ref().map(|abi| abi.runtime_bound_param_indices.clone()).unwrap_or_default();
-        let outgoing_stack_arg_bytes = entry_abi_arg_count(params, callable_abi.as_ref()).saturating_sub(8) * 8;
+        let outgoing_stack_arg_bytes = align_stack_arg_bytes(entry_abi_arg_count(params, callable_abi.as_ref()).saturating_sub(8) * 8);
         let payload = entry_witness_payload_layout(params, &runtime_bound_param_indices);
         let payload_len = payload.iter().map(|arg| arg.width).sum::<usize>();
         let has_witness_payload = payload.iter().any(|arg| arg.width > 0 || arg.unsupported);
@@ -2608,7 +2616,9 @@ impl CodeGenerator {
             .iter()
             .flat_map(|block| block.instructions.iter())
             .filter_map(|instruction| match instruction {
-                IrInstruction::Create { pattern, .. } => Some(pattern.binding.as_str()),
+                IrInstruction::Create { pattern, .. }
+                | IrInstruction::CreateUnique { pattern, .. }
+                | IrInstruction::ReplaceUnique { pattern, .. } => Some(pattern.binding.as_str()),
                 _ => None,
             })
             .collect::<BTreeSet<_>>();
@@ -2799,6 +2809,11 @@ impl CodeGenerator {
                     return Ok(());
                 }
                 if let Some(lock) = &pattern.lock {
+                    if defer_all_output_fields {
+                        self.emit("# cellscript abi: output lock verification deferred to ordered create constraint");
+                        self.next_virtual_output = self.next_virtual_output.max(index + 1);
+                        return Ok(());
+                    }
                     if !(self.can_verify_output_lock(pattern) && self.emit_output_lock_hash_check(index, lock)) {
                         self.emit("# cellscript abi: output lock verification incomplete for this named output");
                         self.emit("# cellscript abi: fail closed because the output lock is not fully verified");
@@ -3105,7 +3120,7 @@ impl CodeGenerator {
     }
 
     fn emit_fail(&mut self, error: CellScriptRuntimeError) {
-        if let Some(function) = &self.current_function {
+        if let Some(function) = self.current_function.clone() {
             self.fail_handler_codes.insert(error);
             self.emit(format!("j .L{}_fail_{}", function, error.code()));
             return;
@@ -9375,7 +9390,7 @@ impl CodeGenerator {
         }
 
         let abi = self.callable_abis.get(func).cloned();
-        let outgoing_stack_arg_bytes = call_abi_arg_count(abi.as_ref(), args).saturating_sub(8) * 8;
+        let outgoing_stack_arg_bytes = align_stack_arg_bytes(call_abi_arg_count(abi.as_ref(), args).saturating_sub(8) * 8);
         let mut abi_index = 0usize;
         for (arg_index, arg) in args.iter().enumerate() {
             if let Some(abi) = &abi {

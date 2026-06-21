@@ -238,8 +238,8 @@ fn strict_capability_name(capability: ast::Capability) -> &'static str {
 
 const DEFAULT_TARGET: &str = "riscv64-asm";
 const DEFAULT_TARGET_PROFILE: &str = "ckb";
-const ARTIFACT_CACHE_VERSION: &str = "backend-elf-entry-sp-preserve-v1";
-pub const METADATA_SCHEMA_VERSION: u32 = 41;
+const ARTIFACT_CACHE_VERSION: &str = "cell-data-codec-manifest-v1";
+pub const METADATA_SCHEMA_VERSION: u32 = 42;
 const STACK_COLLECTION_BACKING_BYTES: usize = 256;
 pub const ENTRY_WITNESS_ABI: &str = "cellscript-entry-witness-v1";
 pub(crate) const ENTRY_WITNESS_ABI_MAGIC: &[u8; 8] = b"CSARGv1\0";
@@ -425,6 +425,8 @@ pub struct CompileMetadata {
     pub constraints: ConstraintsMetadata,
     #[serde(default)]
     pub molecule_schema_manifest: MoleculeSchemaManifestMetadata,
+    #[serde(default)]
+    pub cell_data_codec_manifest: CellDataCodecManifestMetadata,
     pub types: Vec<TypeMetadata>,
     pub actions: Vec<ActionMetadata>,
     pub functions: Vec<FunctionMetadata>,
@@ -470,6 +472,43 @@ pub struct MoleculeSchemaManifestFieldMetadata {
     pub offset: usize,
     pub encoded_size: Option<usize>,
     pub fixed_width: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CellDataCodecManifestMetadata {
+    pub schema: String,
+    pub version: u32,
+    pub target_profile: String,
+    pub abi: String,
+    pub default_codec: String,
+    pub molecule_schema_manifest_hash: String,
+    pub raw_bytes_required: bool,
+    pub raw_runtime_access_count: usize,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub raw_runtime_accesses: Vec<CellDataCodecRuntimeAccessMetadata>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub external_codec_adapters: Vec<ExternalCodecAdapterMetadata>,
+    pub manifest_hash: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CellDataCodecRuntimeAccessMetadata {
+    pub operation: String,
+    pub syscall: String,
+    pub source: String,
+    pub index: usize,
+    pub binding: String,
+    pub codec: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExternalCodecAdapterMetadata {
+    pub name: String,
+    pub version: String,
+    pub package: String,
+    pub content_hash: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub test_vector_hashes: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -910,6 +949,7 @@ pub fn validate_compile_metadata(metadata: &CompileMetadata, artifact_format: Ar
     validate_ckb_script_reference_metadata(metadata)?;
     validate_molecule_schema_metadata(metadata)?;
     validate_molecule_schema_manifest_metadata(metadata)?;
+    validate_cell_data_codec_manifest_metadata(metadata)?;
     validate_source_metadata(metadata)?;
     crate::proof_plan::soundness::validate_metadata(metadata, false)?;
 
@@ -2907,6 +2947,108 @@ fn validate_molecule_schema_manifest_metadata(metadata: &CompileMetadata) -> Res
     Ok(())
 }
 
+fn validate_cell_data_codec_manifest_metadata(metadata: &CompileMetadata) -> Result<()> {
+    let manifest = &metadata.cell_data_codec_manifest;
+    if manifest.schema != "cellscript-cell-data-codec-manifest-v1" {
+        return Err(CompileError::without_span(format!(
+            "metadata cell_data_codec_manifest.schema '{}' is unsupported",
+            manifest.schema
+        )));
+    }
+    if manifest.version != 1 {
+        return Err(CompileError::without_span(format!(
+            "metadata cell_data_codec_manifest.version {} is unsupported",
+            manifest.version
+        )));
+    }
+    if manifest.target_profile != metadata.target_profile.name {
+        return Err(CompileError::without_span(format!(
+            "metadata cell_data_codec_manifest.target_profile '{}' does not match target profile '{}'",
+            manifest.target_profile, metadata.target_profile.name
+        )));
+    }
+    if manifest.default_codec != "molecule" {
+        return Err(CompileError::without_span(format!(
+            "metadata cell_data_codec_manifest.default_codec must be 'molecule', got '{}'",
+            manifest.default_codec
+        )));
+    }
+    if manifest.molecule_schema_manifest_hash != metadata.molecule_schema_manifest.manifest_hash {
+        return Err(CompileError::without_span(
+            "metadata cell_data_codec_manifest.molecule_schema_manifest_hash does not match molecule_schema_manifest.manifest_hash",
+        ));
+    }
+
+    let expected_raw_accesses = raw_cell_data_codec_accesses(&metadata.runtime.ckb_runtime_accesses);
+    let raw_required = !expected_raw_accesses.is_empty();
+    let expected_abi = if raw_required { "molecule+raw-bytes-v1" } else { "molecule" };
+    if manifest.abi != expected_abi {
+        return Err(CompileError::without_span(format!(
+            "metadata cell_data_codec_manifest.abi must be '{}' for runtime cell-data accesses, got '{}'",
+            expected_abi, manifest.abi
+        )));
+    }
+    if manifest.raw_bytes_required != raw_required {
+        return Err(CompileError::without_span(format!(
+            "metadata cell_data_codec_manifest.raw_bytes_required must be {}, got {}",
+            raw_required, manifest.raw_bytes_required
+        )));
+    }
+    if manifest.raw_runtime_access_count != expected_raw_accesses.len() {
+        return Err(CompileError::without_span(format!(
+            "metadata cell_data_codec_manifest.raw_runtime_access_count {} does not match runtime access count {}",
+            manifest.raw_runtime_access_count,
+            expected_raw_accesses.len()
+        )));
+    }
+    if manifest.raw_runtime_accesses != expected_raw_accesses {
+        return Err(CompileError::without_span(
+            "metadata cell_data_codec_manifest.raw_runtime_accesses do not match runtime.ckb_runtime_accesses",
+        ));
+    }
+    for (index, adapter) in manifest.external_codec_adapters.iter().enumerate() {
+        let prefix = format!("metadata cell_data_codec_manifest.external_codec_adapters[{index}]");
+        if adapter.name.trim().is_empty() {
+            return Err(CompileError::without_span(format!("{prefix}.name must be non-empty")));
+        }
+        if adapter.version.trim().is_empty() {
+            return Err(CompileError::without_span(format!("{prefix}.version must be non-empty")));
+        }
+        if adapter.package.trim().is_empty() {
+            return Err(CompileError::without_span(format!("{prefix}.package must be non-empty")));
+        }
+        if !is_canonical_hash_hex(adapter.content_hash.strip_prefix("0x").unwrap_or(adapter.content_hash.as_str())) {
+            return Err(CompileError::without_span(format!(
+                "{prefix}.content_hash '{}' must be a canonical 32-byte hex hash",
+                adapter.content_hash
+            )));
+        }
+        for (vector_index, hash) in adapter.test_vector_hashes.iter().enumerate() {
+            if !is_canonical_hash_hex(hash.strip_prefix("0x").unwrap_or(hash.as_str())) {
+                return Err(CompileError::without_span(format!(
+                    "{prefix}.test_vector_hashes[{vector_index}] '{}' must be a canonical 32-byte hex hash",
+                    hash
+                )));
+            }
+        }
+    }
+    if !is_canonical_hash_hex(&manifest.manifest_hash) {
+        return Err(CompileError::without_span(format!(
+            "metadata cell_data_codec_manifest.manifest_hash '{}' is invalid",
+            manifest.manifest_hash
+        )));
+    }
+    let expected_hash = cell_data_codec_manifest_hash(manifest);
+    if manifest.manifest_hash != expected_hash {
+        return Err(CompileError::without_span(format!(
+            "metadata cell_data_codec_manifest.manifest_hash '{}' does not match manifest entries",
+            manifest.manifest_hash
+        )));
+    }
+
+    Ok(())
+}
+
 pub fn validate_source_units_on_disk(metadata: &CompileMetadata) -> Result<()> {
     validate_source_metadata(metadata)?;
     if metadata.source_units.is_empty() {
@@ -4644,6 +4786,7 @@ fn compile_metadata_from_ir(ir: &ir::IrModule, artifact_format: ArtifactFormat, 
         _ => None,
     }));
     let molecule_schema_manifest = molecule_schema_manifest_metadata(&types, target_profile);
+    let cell_data_codec_manifest = cell_data_codec_manifest_metadata(&ckb_runtime_accesses, &molecule_schema_manifest, target_profile);
     let mut metadata = CompileMetadata {
         metadata_schema_version: METADATA_SCHEMA_VERSION,
         compiler_version: VERSION.to_string(),
@@ -4700,6 +4843,7 @@ fn compile_metadata_from_ir(ir: &ir::IrModule, artifact_format: ArtifactFormat, 
         },
         constraints: ConstraintsMetadata::default(),
         molecule_schema_manifest,
+        cell_data_codec_manifest,
         types,
         actions: ir
             .items
@@ -12342,6 +12486,8 @@ fn body_ckb_runtime_features(
                             | "__ckb_require_cell_type_args_suffix_hash"
                             | "__ckb_require_cell_lock_script_hash_type"
                             | "__ckb_require_cell_type_script_hash_type"
+                            | "__ckb_cell_data_hash"
+                            | "__ckb_cell_data_hash_at"
                             | "__ckb_cell_data_size"
                             | "__ckb_cell_data_u32_le"
                             | "__ckb_cell_data_u64_le"
@@ -12386,7 +12532,10 @@ fn body_ckb_runtime_features(
                     ) {
                         features.insert("ckb-script-ref-read".to_string());
                     }
-                    if matches!(func.as_str(), "__ckb_cell_data_u32_le" | "__ckb_cell_data_u64_le") {
+                    if matches!(
+                        func.as_str(),
+                        "__ckb_cell_data_hash" | "__ckb_cell_data_hash_at" | "__ckb_cell_data_u32_le" | "__ckb_cell_data_u64_le"
+                    ) {
                         features.insert("ckb-cell-data-decode".to_string());
                     }
                     if matches!(func.as_str(), "__ckb_require_cell_lock_script_hash_type" | "__ckb_require_cell_type_script_hash_type")
@@ -12964,6 +13113,8 @@ fn ckb_v014_runtime_access(func: &str) -> Option<(&'static str, &'static str, &'
             "ckb::require_current_script_args_empty",
         )),
         "__ckb_current_script_hash" => Some(("current-script-hash", "LOAD_SCRIPT_HASH", "CurrentScript", "ckb::current_script_hash")),
+        "__ckb_cell_data_hash" => Some(("cell-data-hash", "LOAD_CELL_DATA", "SourceView", "ckb::cell_data_hash")),
+        "__ckb_cell_data_hash_at" => Some(("cell-data-hash-at", "LOAD_CELL_DATA", "SourceView", "ckb::cell_data_hash_at")),
         "__ckb_cell_data_size" => Some(("cell-data-size", "LOAD_CELL_DATA", "SourceView", "ckb::cell_data_size")),
         "__ckb_cell_data_u32_le" => Some(("cell-data-u32-le", "LOAD_CELL_DATA", "SourceView", "ckb::cell_data_u32_le")),
         "__ckb_cell_data_u64_le" => Some(("cell-data-u64-le", "LOAD_CELL_DATA", "SourceView", "ckb::cell_data_u64_le")),
@@ -13429,6 +13580,107 @@ fn molecule_schema_manifest_metadata(types: &[TypeMetadata], target_profile: Tar
         manifest_hash: hex_encode(&ckb_blake2b256(canonical.as_bytes())),
         entries,
     }
+}
+
+fn cell_data_codec_manifest_metadata(
+    accesses: &[CkbRuntimeAccessMetadata],
+    molecule_schema_manifest: &MoleculeSchemaManifestMetadata,
+    target_profile: TargetProfile,
+) -> CellDataCodecManifestMetadata {
+    let raw_runtime_accesses = raw_cell_data_codec_accesses(accesses);
+    let raw_bytes_required = !raw_runtime_accesses.is_empty();
+    let external_codec_adapters = Vec::new();
+    let mut manifest = CellDataCodecManifestMetadata {
+        schema: "cellscript-cell-data-codec-manifest-v1".to_string(),
+        version: 1,
+        target_profile: target_profile.name().to_string(),
+        abi: if raw_bytes_required { "molecule+raw-bytes-v1" } else { "molecule" }.to_string(),
+        default_codec: "molecule".to_string(),
+        molecule_schema_manifest_hash: molecule_schema_manifest.manifest_hash.clone(),
+        raw_bytes_required,
+        raw_runtime_access_count: raw_runtime_accesses.len(),
+        raw_runtime_accesses,
+        external_codec_adapters,
+        manifest_hash: String::new(),
+    };
+    manifest.manifest_hash = cell_data_codec_manifest_hash(&manifest);
+    manifest
+}
+
+fn raw_cell_data_codec_accesses(accesses: &[CkbRuntimeAccessMetadata]) -> Vec<CellDataCodecRuntimeAccessMetadata> {
+    let mut raw = accesses
+        .iter()
+        .filter(|access| runtime_access_uses_raw_cell_data(access))
+        .map(|access| CellDataCodecRuntimeAccessMetadata {
+            operation: access.operation.clone(),
+            syscall: access.syscall.clone(),
+            source: access.source.clone(),
+            index: access.index,
+            binding: access.binding.clone(),
+            codec: "raw-bytes-v1".to_string(),
+        })
+        .collect::<Vec<_>>();
+    raw.sort_by(|left, right| {
+        (left.operation.as_str(), left.syscall.as_str(), left.source.as_str(), left.index, left.binding.as_str()).cmp(&(
+            right.operation.as_str(),
+            right.syscall.as_str(),
+            right.source.as_str(),
+            right.index,
+            right.binding.as_str(),
+        ))
+    });
+    raw
+}
+
+fn runtime_access_uses_raw_cell_data(access: &CkbRuntimeAccessMetadata) -> bool {
+    access.syscall.split('+').any(|part| part == "LOAD_CELL_DATA") || access.syscall.split('/').any(|part| part == "LOAD_CELL_DATA")
+}
+
+fn cell_data_codec_manifest_hash(manifest: &CellDataCodecManifestMetadata) -> String {
+    let mut canonical = String::new();
+    canonical.push_str(&manifest.schema);
+    canonical.push('|');
+    canonical.push_str(&manifest.version.to_string());
+    canonical.push('|');
+    canonical.push_str(&manifest.target_profile);
+    canonical.push('|');
+    canonical.push_str(&manifest.abi);
+    canonical.push('|');
+    canonical.push_str(&manifest.default_codec);
+    canonical.push('|');
+    canonical.push_str(&manifest.molecule_schema_manifest_hash);
+    canonical.push('|');
+    canonical.push_str(if manifest.raw_bytes_required { "raw-required" } else { "raw-not-required" });
+    canonical.push('|');
+    canonical.push_str(&manifest.raw_runtime_access_count.to_string());
+    canonical.push('\n');
+    for access in &manifest.raw_runtime_accesses {
+        canonical.push_str(&access.operation);
+        canonical.push('|');
+        canonical.push_str(&access.syscall);
+        canonical.push('|');
+        canonical.push_str(&access.source);
+        canonical.push('|');
+        canonical.push_str(&access.index.to_string());
+        canonical.push('|');
+        canonical.push_str(&access.binding);
+        canonical.push('|');
+        canonical.push_str(&access.codec);
+        canonical.push('\n');
+    }
+    for adapter in &manifest.external_codec_adapters {
+        canonical.push_str(&adapter.name);
+        canonical.push('|');
+        canonical.push_str(&adapter.version);
+        canonical.push('|');
+        canonical.push_str(&adapter.package);
+        canonical.push('|');
+        canonical.push_str(&adapter.content_hash);
+        canonical.push('|');
+        canonical.push_str(&adapter.test_vector_hashes.join(","));
+        canonical.push('\n');
+    }
+    hex_encode(&ckb_blake2b256(canonical.as_bytes()))
 }
 
 fn molecule_dynamic_fields(type_def: &ir::IrTypeDef, type_defs: &BTreeMap<String, &ir::IrTypeDef>) -> Vec<String> {
@@ -22124,6 +22376,87 @@ action get_marker(snapshot: Big) -> [u8; 1] {
         assert_eq!(result.metadata.source_units.len(), 1);
         assert_eq!(result.metadata.source_units[0].path, "<memory>");
         assert_eq!(result.metadata.source_units[0].role, "memory");
+        assert_eq!(result.metadata.cell_data_codec_manifest.schema, "cellscript-cell-data-codec-manifest-v1");
+        assert_eq!(result.metadata.cell_data_codec_manifest.abi, "molecule");
+        assert_eq!(result.metadata.cell_data_codec_manifest.default_codec, "molecule");
+        assert!(!result.metadata.cell_data_codec_manifest.raw_bytes_required);
+        assert_eq!(result.metadata.cell_data_codec_manifest.raw_runtime_access_count, 0);
+        assert!(result.metadata.cell_data_codec_manifest.raw_runtime_accesses.is_empty());
+        assert_eq!(
+            result.metadata.cell_data_codec_manifest.molecule_schema_manifest_hash,
+            result.metadata.molecule_schema_manifest.manifest_hash
+        );
+        assert_eq!(
+            result.metadata.cell_data_codec_manifest.manifest_hash,
+            crate::cell_data_codec_manifest_hash(&result.metadata.cell_data_codec_manifest)
+        );
+    }
+
+    #[test]
+    fn compile_metadata_declares_raw_bytes_codec_for_cell_data_primitives() {
+        let program = r#"
+module test::raw_codec
+
+action inspect() -> u64 {
+    verification
+        let input = source::group_input(0)
+        let quantity = ckb::cell_data_u32_le(input, 0)
+        let amount = ckb::cell_data_u64_le(input, 4)
+        if quantity != 7 {
+            return 90
+        }
+        if amount != 123456789 {
+            return 91
+        }
+        return 0
+}
+"#;
+        let result =
+            compile(program, CompileOptions { target: Some("riscv64-elf".to_string()), ..CompileOptions::default() }).unwrap();
+        let manifest = &result.metadata.cell_data_codec_manifest;
+
+        assert_eq!(manifest.schema, "cellscript-cell-data-codec-manifest-v1");
+        assert_eq!(manifest.abi, "molecule+raw-bytes-v1");
+        assert_eq!(manifest.default_codec, "molecule");
+        assert!(manifest.raw_bytes_required);
+        assert_eq!(manifest.raw_runtime_access_count, manifest.raw_runtime_accesses.len());
+        assert!(manifest.raw_runtime_accesses.iter().any(|access| {
+            access.operation == "cell-data-u32-le" && access.binding == "ckb::cell_data_u32_le" && access.codec == "raw-bytes-v1"
+        }));
+        assert!(manifest.raw_runtime_accesses.iter().any(|access| {
+            access.operation == "cell-data-u64-le" && access.binding == "ckb::cell_data_u64_le" && access.codec == "raw-bytes-v1"
+        }));
+        assert_eq!(manifest.molecule_schema_manifest_hash, result.metadata.molecule_schema_manifest.manifest_hash);
+        assert_eq!(manifest.manifest_hash, crate::cell_data_codec_manifest_hash(manifest));
+        result.validate().unwrap();
+    }
+
+    #[test]
+    fn compile_result_validation_rejects_hidden_raw_cell_data_codec() {
+        let program = r#"
+module test::raw_codec_tamper
+
+action inspect() -> u64 {
+    verification
+        let input = source::group_input(0)
+        let amount = ckb::cell_data_u64_le(input, 4)
+        if amount != 123456789 {
+            return 91
+        }
+        return 0
+}
+"#;
+        let mut result =
+            compile(program, CompileOptions { target: Some("riscv64-elf".to_string()), ..CompileOptions::default() }).unwrap();
+        result.metadata.cell_data_codec_manifest.abi = "molecule".to_string();
+        result.metadata.cell_data_codec_manifest.raw_bytes_required = false;
+        result.metadata.cell_data_codec_manifest.raw_runtime_access_count = 0;
+        result.metadata.cell_data_codec_manifest.raw_runtime_accesses.clear();
+        result.metadata.cell_data_codec_manifest.manifest_hash =
+            crate::cell_data_codec_manifest_hash(&result.metadata.cell_data_codec_manifest);
+
+        let err = result.validate().unwrap_err();
+        assert!(err.message.contains("cell_data_codec_manifest.abi"), "unexpected error: {}", err.message);
     }
 
     #[test]
@@ -26522,12 +26855,12 @@ action stack_arg(a: A, b: B, c: C, owner: Address, required: u64) -> u64 {
             asm
         );
         assert!(
-            asm.contains("# cellscript entry abi: stage stack arg8 at pre-call sp-8")
-                && asm.contains("# cellscript entry abi: reserve 8 bytes for outgoing stack call arguments"),
+            asm.contains("# cellscript entry abi: stage stack arg8 at pre-call sp-16")
+                && asm.contains("# cellscript entry abi: reserve 16 bytes for outgoing stack call arguments"),
             "entry wrapper did not stage the stack scalar argument below the witness frame before calling the action:\n{}",
             asm
         );
-        assert!(asm.contains("sd t3, -8(sp)"), "entry wrapper did not emit the staged stack argument store:\n{}", asm);
+        assert!(asm.contains("sd t3, -16(sp)"), "entry wrapper did not emit the staged stack argument store:\n{}", asm);
 
         let action = result.metadata.actions.iter().find(|action| action.name == "stack_arg").unwrap();
         let owner = [7u8; 32];

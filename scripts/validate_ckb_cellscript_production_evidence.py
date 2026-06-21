@@ -12,6 +12,7 @@ from typing import Any
 
 
 SOURCE_PROVENANCE_SCHEMA = "cellscript-ckb-acceptance-source-provenance-v0.1"
+BUILD_REPORT_SCHEMA = "cellscript-ckb-build-report-v0.20"
 SOURCE_PROVENANCE_PATHS = [
     "Cargo.lock",
     "Cargo.toml",
@@ -155,6 +156,16 @@ def require_bool(value: Any, context: str) -> bool:
     require(isinstance(value, bool), f"{context} must be a boolean, got {value!r}")
     return value
 
+def require_hex_hash(value: Any, context: str) -> str:
+    require(
+        isinstance(value, str)
+        and value.startswith("0x")
+        and len(value) == 66
+        and all(ch in "0123456789abcdefABCDEF" for ch in value[2:]),
+        f"{context} must be a 32-byte 0x-prefixed hex hash, got {value!r}",
+    )
+    return value
+
 
 def validate_elf_entry_abi_gate(report: dict[str, Any]) -> None:
     gate = report.get("ckb_elf_entry_abi_gate")
@@ -216,6 +227,9 @@ def file_sha256(path: Path) -> str:
             h.update(chunk)
     return h.hexdigest()
 
+def ckb_data_hash_hex(data: bytes) -> str:
+    return "0x" + hashlib.blake2b(data, digest_size=32, person=b"ckb-default-hash").hexdigest()
+
 
 def tracked_source_sha256(repo_root: Path, files: list[str]) -> str:
     h = hashlib.sha256()
@@ -260,6 +274,90 @@ def validate_source_provenance(report: dict[str, Any], repo_root: Path) -> None:
         "validator_script_sha256",
     ):
         require_field(provenance, key, current[key], "source_provenance")
+
+def validate_build_reports(report: dict[str, Any], *, compile_only: bool) -> None:
+    build_index = report.get("cellscript_build_reports")
+    require(isinstance(build_index, dict), "cellscript_build_reports must be an object")
+    require_field(build_index, "schema", "cellscript-ckb-build-report-index-v0.20", "cellscript_build_reports")
+    require_field(build_index, "target_profile", "ckb", "cellscript_build_reports")
+    require_field(build_index, "vm_profile", "ckb-vm", "cellscript_build_reports")
+    require_field(build_index, "artifact_format", "riscv64-elf", "cellscript_build_reports")
+    require_field(build_index, "artifact_hash_algorithm", "ckb-blake2b256", "cellscript_build_reports")
+    require_field(build_index, "requires_exact_artifact_hash", True, "cellscript_build_reports")
+    require_field(build_index, "requires_elf_entry_abi_gate", True, "cellscript_build_reports")
+    require_field(build_index, "requires_live_code_cell_data_hash_match", True, "cellscript_build_reports")
+    require_field(build_index, "status", EXPECTED_STATUS, "cellscript_build_reports")
+
+    rows = build_index.get("reports")
+    require(isinstance(rows, list) and rows, "cellscript_build_reports.reports must be a non-empty list")
+    require_field(build_index, "artifact_count", len(rows), "cellscript_build_reports")
+
+    elf_gate = report.get("ckb_elf_entry_abi_gate") or {}
+    require_field(build_index, "artifact_count", elf_gate.get("audited_artifact_count"), "cellscript_build_reports")
+
+    seen_artifacts: set[str] = set()
+    for index, row in enumerate(rows):
+        require(isinstance(row, dict), f"cellscript_build_reports.reports[{index}] must be an object")
+        context = f"cellscript_build_reports.reports[{index}]"
+        require_field(row, "schema", BUILD_REPORT_SCHEMA, context)
+        require_field(row, "target_profile", "ckb", context)
+        require_field(row, "vm_profile", "ckb-vm", context)
+        require_field(row, "artifact_format", "riscv64-elf", context)
+        require_field(row, "artifact_hash_algorithm", "ckb-blake2b256", context)
+        require_field(row, "deployment_hash_type_used_by_gate", "data1", context)
+        require_field(row, "verify_artifact_status", "passed", context)
+        require_field(row, "verify_target_profile", "ckb", context)
+        require_field(row, "elf_entry_abi_status", "passed", context)
+        require_field(row, "abi_trailer_stripped", True, context)
+        require_positive_int(row.get("artifact_size_bytes"), f"{context}.artifact_size_bytes")
+        require_hex_hash(row.get("deployable_elf_hash"), f"{context}.deployable_elf_hash")
+        require_hex_hash(row.get("artifact_sha256"), f"{context}.artifact_sha256")
+        artifact_path = row.get("artifact_path")
+        require(isinstance(artifact_path, str) and artifact_path, f"{context}.artifact_path must be present")
+        require(artifact_path not in seen_artifacts, f"duplicate build report artifact_path: {artifact_path}")
+        seen_artifacts.add(artifact_path)
+        artifact = Path(artifact_path)
+        require(artifact.exists(), f"{context}.artifact_path does not exist: {artifact}")
+        artifact_bytes = artifact.read_bytes()
+        require(len(artifact_bytes) == row["artifact_size_bytes"], f"{context}.artifact_size_bytes does not match artifact")
+        require(ckb_data_hash_hex(artifact_bytes) == row["deployable_elf_hash"], f"{context}.deployable_elf_hash does not match artifact")
+        require("0x" + hashlib.sha256(artifact_bytes).hexdigest() == row["artifact_sha256"], f"{context}.artifact_sha256 does not match artifact")
+        onchain_deployments = row.get("onchain_deployments")
+        require(isinstance(onchain_deployments, list), f"{context}.onchain_deployments must be a list")
+        if compile_only:
+            require(onchain_deployments == [], f"{context}.onchain_deployments must be empty for compile-only reports")
+        else:
+            require(onchain_deployments, f"{context}.onchain_deployments must contain live deployment evidence")
+            for deployment_index, deployment in enumerate(onchain_deployments):
+                deployment_context = f"{context}.onchain_deployments[{deployment_index}]"
+                require(isinstance(deployment, dict), f"{deployment_context} must be an object")
+                require_field(deployment, "code_cell_live", True, deployment_context)
+                require_field(deployment, "live_code_cell_data_hash_matches_artifact", True, deployment_context)
+                require_field(
+                    deployment,
+                    "artifact_ckb_data_hash_blake2b",
+                    row["deployable_elf_hash"],
+                    deployment_context,
+                )
+                require_field(
+                    deployment,
+                    "live_code_cell_data_hash",
+                    row["deployable_elf_hash"],
+                    deployment_context,
+                )
+                out_point = deployment.get("out_point")
+                require(isinstance(out_point, dict), f"{deployment_context}.out_point must be an object")
+                require(isinstance(out_point.get("tx_hash"), str) and out_point["tx_hash"].startswith("0x"), f"{deployment_context}.out_point.tx_hash must be hex")
+                require(isinstance(out_point.get("index"), str) and out_point["index"].startswith("0x"), f"{deployment_context}.out_point.index must be hex")
+
+    if compile_only:
+        require(build_index.get("onchain_deployed_artifact_count") in (None, 0), "compile-only build reports must not record onchain deployments")
+    else:
+        require_field(build_index, "onchain_deployed_artifact_count", len(rows), "cellscript_build_reports")
+        require_field(build_index, "live_code_cell_data_hash_match_count", len(rows), "cellscript_build_reports")
+        require_empty(build_index, "missing_onchain_deployments", "cellscript_build_reports")
+        require_empty(build_index, "live_code_cell_data_hash_mismatches", "cellscript_build_reports")
+        require_empty(build_index, "unexpected_onchain_artifacts", "cellscript_build_reports")
 
 
 def all_action_runs(report: dict[str, Any]) -> list[dict[str, Any]]:
@@ -314,7 +412,9 @@ def validate_compile_gate(report: dict[str, Any], *, compile_only: bool = False)
     require_field(gate, "requires_no_expected_fail_closed_entries", True, "production_gate")
     require_field(gate, "requires_all_bundled_examples_strict_original_ckb", True, "production_gate")
     require_field(gate, "requires_ckb_elf_entry_abi_gate", True, "production_gate")
+    require_field(gate, "requires_cellscript_build_reports", True, "production_gate")
     validate_elf_entry_abi_gate(report)
+    validate_build_reports(report, compile_only=compile_only)
 
     coverage = report.get("ckb_business_coverage")
     require(isinstance(coverage, dict), "ckb_business_coverage must be an object")
@@ -434,6 +534,9 @@ def validate_onchain_gate(report: dict[str, Any]) -> None:
         require_field(run, "kind", "bundled-example-strict-original", name)
         require_bool(run.get("code_cell_live"), f"{name}.code_cell_live")
         require_positive_int(run.get("artifact_size_bytes"), f"{name}.artifact_size_bytes")
+        require_field(run, "live_code_cell_data_hash_matches_artifact", True, name)
+        require_hex_hash(run.get("artifact_ckb_data_hash_blake2b"), f"{name}.artifact_ckb_data_hash_blake2b")
+        require_field(run, "live_code_cell_data_hash", run["artifact_ckb_data_hash_blake2b"], name)
         valid_deploy_dry_run = run.get("valid_deploy_dry_run")
         require(isinstance(valid_deploy_dry_run, dict), f"{name} missing valid_deploy_dry_run")
         require(
@@ -449,6 +552,7 @@ def validate_onchain_gate(report: dict[str, Any]) -> None:
     require_field(final_gate, "requires_measured_cycles", True, "final_production_hardening_gate")
     require_field(final_gate, "requires_consensus_serialized_tx_size", True, "final_production_hardening_gate")
     require_field(final_gate, "requires_exact_occupied_capacity", True, "final_production_hardening_gate")
+    require_field(final_gate, "requires_build_report_live_artifact_linkage", True, "final_production_hardening_gate")
     require_empty(final_gate, "failures", "final_production_hardening_gate")
 
     runs = all_action_runs(report)
@@ -471,6 +575,9 @@ def validate_onchain_gate(report: dict[str, Any]) -> None:
         require(isinstance(code, dict), f"{name} missing code section")
         require_bool(code.get("code_cell_live"), f"{name}.code.code_cell_live")
         require_positive_int(code.get("artifact_size_bytes"), f"{name}.code.artifact_size_bytes")
+        require_field(code, "live_code_cell_data_hash_matches_artifact", True, f"{name}.code")
+        require_hex_hash(code.get("artifact_ckb_data_hash_blake2b"), f"{name}.code.artifact_ckb_data_hash_blake2b")
+        require_field(code, "live_code_cell_data_hash", code["artifact_ckb_data_hash_blake2b"], f"{name}.code")
 
         valid_dry_run = run.get("valid_dry_run")
         require(isinstance(valid_dry_run, dict), f"{name} missing valid_dry_run")
@@ -545,6 +652,9 @@ def validate_onchain_gate(report: dict[str, Any]) -> None:
         require(isinstance(code, dict), f"{name} missing code section")
         require_bool(code.get("code_cell_live"), f"{name}.code.code_cell_live")
         require_positive_int(code.get("artifact_size_bytes"), f"{name}.code.artifact_size_bytes")
+        require_field(code, "live_code_cell_data_hash_matches_artifact", True, f"{name}.code")
+        require_hex_hash(code.get("artifact_ckb_data_hash_blake2b"), f"{name}.code.artifact_ckb_data_hash_blake2b")
+        require_field(code, "live_code_cell_data_hash", code["artifact_ckb_data_hash_blake2b"], f"{name}.code")
 
         valid_spend = run.get("valid_spend")
         require(isinstance(valid_spend, dict), f"{name} missing valid_spend evidence")

@@ -30,6 +30,8 @@ exclude = [
     ".playwright-mcp/",
     ".rustfmt.toml",
     ".github/",
+    "BRANCHES.md",
+    "README_REVIEW.md",
     "cellscript-*.png",
     "docs/",
     "docs/wiki/",

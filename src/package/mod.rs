@@ -1204,6 +1204,8 @@ pub struct LockedBuildInfo {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub schema_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cell_data_codec_manifest_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub abi_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub constraints_hash: Option<String>,
@@ -1401,6 +1403,8 @@ pub struct DeployedBuildInfo {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub schema_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cell_data_codec_manifest_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub abi_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub constraints_hash: Option<String>,
@@ -1448,6 +1452,8 @@ pub struct DeploymentRecord {
     pub metadata_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub schema_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cell_data_codec_manifest_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub abi_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1957,6 +1963,7 @@ rev = "abc123"
                 artifact_hash: Some("blake2b:0x1234".to_string()),
                 metadata_hash: None,
                 schema_hash: None,
+                cell_data_codec_manifest_hash: None,
                 abi_hash: None,
                 constraints_hash: None,
             }),
@@ -1973,6 +1980,7 @@ rev = "abc123"
                 artifact_hash: None,
                 metadata_hash: None,
                 schema_hash: None,
+                cell_data_codec_manifest_hash: None,
                 abi_hash: None,
                 constraints_hash: None,
                 compiler_version: None,

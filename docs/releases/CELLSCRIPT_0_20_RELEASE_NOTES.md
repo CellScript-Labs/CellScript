@@ -9,6 +9,9 @@ The important post-audit change is that CKB-facing acceptance now checks the
 ELF loader/ABI boundary before treating a local devnet result as release
 evidence.
 
+The post-audit scope is CellScript only. External repositories and unrelated
+VM findings are intentionally out of scope for this release note.
+
 ## ELF Entry ABI Gate
 
 The CKB/devnet acceptance script now emits and validates a
@@ -25,6 +28,40 @@ The gate fails closed unless:
 
 This gate is required before local-node dry-run, tx-pool acceptance, submitted
 stateful flows, and production evidence validation.
+
+## Exact Artifact Build Reports
+
+The CKB acceptance report now includes a `cellscript_build_reports` index. Each
+row binds one CKB-deployable RISC-V ELF to:
+
+- the CKB blake2b deployable ELF hash;
+- the SHA-256 host-file hash;
+- `cellc verify-artifact` status and target profile;
+- ELF entry ABI gate status;
+- ABI-trailer stripped status;
+- live code-cell data hash when a devnet deployment is executed.
+
+Production evidence validation fails closed when a live code-cell data hash does
+not match the compiled deployable ELF hash. This closes the previous
+auditability gap where compile evidence, verifier evidence, and live deployment
+evidence could be reported without a single exact-artifact identity row.
+
+## Cell Data Codec Manifest
+
+Compile metadata now includes a `cell_data_codec_manifest`. Molecule-native
+contracts continue to declare `abi = "molecule"`. Contracts that use raw
+`LOAD_CELL_DATA` runtime accesses declare `abi = "molecule+raw-bytes-v1"` and
+list the raw cell-data accesses that require external codec materialisation.
+
+`cellc gen-builder --target typescript` now exports this manifest in both the
+builder manifest and generated TypeScript action plans. Generated builders still
+delegate transaction materialisation to runtime adapters; they do not claim to
+implement raw cell-data encoders by themselves.
+
+`Cell.lock`, `Deployed.toml`, deployment records, and generated builder identity
+checks now carry `cell_data_codec_manifest_hash` as a first-class build identity
+field. A mismatched or missing codec manifest hash fails registry and builder
+verification instead of being treated as an opaque metadata difference.
 
 ## Critical Example Coverage
 

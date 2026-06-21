@@ -326,8 +326,9 @@ v0.13 should be considered closed only when:
 - optimizer passes do not rewrite resource effects unsafely;
 - CLI changes are covered by tests;
 - top-level `examples/*.cell` remain the single checked-in bundled business
-  source, while `examples/language/*.cell` and `examples/ickb_benchmark/*.cell`
-  cover compiler/tooling and benchmark surfaces;
+  source, while `examples/language/*.cell` covers compiler/tooling examples and
+  `tests/benchmarks/ickb_specs/*.cell` covers the iCKB-inspired benchmark
+  surface;
 - release notes distinguish v0.12 foundations from genuine v0.13 work.
 
 ---

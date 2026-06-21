@@ -339,8 +339,8 @@ Future work:
 - keep release notes in `docs/releases/` and roadmap files in `roadmap/`,
   separate from tutorial pages;
 - keep top-level `examples/*.cell` as the single checked-in bundled business
-  source, with `examples/language/*.cell` and `examples/ickb_benchmark/*.cell`
-  for compiler/tooling and benchmark coverage.
+  source, with `examples/language/*.cell` for compiler/tooling coverage and
+  `tests/benchmarks/ickb_specs/*.cell` for the iCKB-inspired benchmark surface.
 
 Source documents:
 

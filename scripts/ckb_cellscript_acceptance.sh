@@ -275,6 +275,7 @@ report_path = pathlib.Path(sys.argv[4])
 acceptance_mode = sys.argv[5]
 
 SOURCE_PROVENANCE_SCHEMA = "cellscript-ckb-acceptance-source-provenance-v0.1"
+BUILD_REPORT_SCHEMA = "cellscript-ckb-build-report-v0.20"
 SOURCE_PROVENANCE_PATHS = [
     "Cargo.lock",
     "Cargo.toml",
@@ -1687,6 +1688,12 @@ def file_sha256(path):
             h.update(chunk)
     return h.hexdigest()
 
+def sha256_hex(data):
+    return "0x" + hashlib.sha256(data).hexdigest()
+
+def ckb_data_hash_hex(data):
+    return "0x" + hashlib.blake2b(data, digest_size=32, person=b"ckb-default-hash").hexdigest()
+
 def tracked_source_sha256(files):
     h = hashlib.sha256()
     for rel in files:
@@ -2477,9 +2484,92 @@ def collect_elf_entry_abi_gate():
         "rows": rows,
     }
 
+def collect_build_reports():
+    rows = []
+    seen_artifacts = set()
+
+    def add_record(record, *, fallback_name=None, fallback_kind=None, source_example=None):
+        artifact = record.get("artifact")
+        if not artifact or artifact in seen_artifacts:
+            return
+        seen_artifacts.add(artifact)
+        artifact_path = pathlib.Path(artifact)
+        artifact_bytes = artifact_path.read_bytes()
+        verify = record.get("verify") or {}
+        elf_entry_abi = record.get("elf_entry_abi") or {}
+        metadata_sidecar = record.get("metadata")
+        row = {
+            "schema": BUILD_REPORT_SCHEMA,
+            "name": record.get("name") or fallback_name or artifact_path.name,
+            "kind": record.get("kind") or fallback_kind or "unknown",
+            "source": record.get("source"),
+            "original_source": record.get("original_source"),
+            "example": source_example or elf_entry_abi_source_example(record),
+            "entry_flag": record.get("entry_flag"),
+            "entry": record.get("entry"),
+            "target_profile": "ckb",
+            "vm_profile": "ckb-vm",
+            "artifact_format": "riscv64-elf",
+            "artifact_path": str(artifact_path),
+            "metadata_sidecar": metadata_sidecar,
+            "artifact_packaging": record.get("artifact_packaging"),
+            "artifact_size_bytes": len(artifact_bytes),
+            "artifact_hash_algorithm": "ckb-blake2b256",
+            "deployable_elf_hash": ckb_data_hash_hex(artifact_bytes),
+            "artifact_sha256": sha256_hex(artifact_bytes),
+            "deployment_hash_type_used_by_gate": "data1",
+            "verify_artifact_status": "passed" if isinstance(verify, dict) else "missing",
+            "verify_target_profile": verify.get("target_profile") if isinstance(verify, dict) else None,
+            "elf_entry_abi_status": elf_entry_abi.get("status") if isinstance(elf_entry_abi, dict) else "missing",
+            "abi_trailer_stripped": UNEXPECTED_PROFILE_TRAILER not in artifact_bytes[-64:],
+            "onchain_deployments": [],
+        }
+        rows.append(row)
+
+    for record in artifacts:
+        add_record(record)
+    for record in bundled_examples:
+        strict = record["strict_original_ckb_compile"]
+        if strict["status"] == "passed":
+            strict = {
+                **strict,
+                "name": record["name"],
+                "kind": "bundled-example-strict-original",
+                "source": record["source"],
+                "example": record["name"],
+            }
+            add_record(strict, source_example=record["name"])
+    for group in (
+        token_action_artifacts,
+        nft_action_artifacts,
+        timelock_action_artifacts,
+        amm_action_artifacts,
+        multisig_action_artifacts,
+        launch_action_artifacts,
+        original_scoped_action_artifacts,
+        original_scoped_lock_artifacts,
+    ):
+        for record in group:
+            add_record(record)
+
+    return {
+        "schema": "cellscript-ckb-build-report-index-v0.20",
+        "status": "passed",
+        "artifact_count": len(rows),
+        "artifact_hash_algorithm": "ckb-blake2b256",
+        "artifact_format": "riscv64-elf",
+        "target_profile": "ckb",
+        "vm_profile": "ckb-vm",
+        "requires_exact_artifact_hash": True,
+        "requires_elf_entry_abi_gate": True,
+        "requires_live_code_cell_data_hash_match": True,
+        "reports": rows,
+    }
+
 ckb_elf_entry_abi_gate = collect_elf_entry_abi_gate()
 if ckb_elf_entry_abi_gate["status"] != "passed":
     raise RuntimeError("CKB ELF entry ABI gate failed: " + json.dumps(ckb_elf_entry_abi_gate["failures"], sort_keys=True))
+build_reports = collect_build_reports()
 
 report = {
     "status": "artifact-verified",
@@ -2506,6 +2596,7 @@ report = {
     },
     "lock_acceptance_scope": LOCK_ACCEPTANCE_SCOPE,
     "ckb_elf_entry_abi_gate": ckb_elf_entry_abi_gate,
+    "cellscript_build_reports": build_reports,
     "bundled_examples_strict_admitted": [
         record["name"]
         for record in bundled_examples
@@ -2597,6 +2688,7 @@ report["production_gate"] = {
     "requires_no_expected_fail_closed_entries": True,
     "requires_all_bundled_examples_strict_original_ckb": True,
     "requires_ckb_elf_entry_abi_gate": True,
+    "requires_cellscript_build_reports": True,
 }
 if acceptance_mode == "production" and production_failures:
     report["status"] = "failed-production-gate"
@@ -2752,6 +2844,98 @@ report.update({
     },
 })
 
+def refresh_build_report_deployments():
+    build_index = report.get("cellscript_build_reports") or {}
+    reports = build_index.get("reports") or []
+    by_artifact = {
+        row.get("artifact_path"): row
+        for row in reports
+        if isinstance(row, dict) and isinstance(row.get("artifact_path"), str)
+    }
+    for row in reports:
+        if isinstance(row, dict):
+            row["onchain_deployments"] = []
+
+    unexpected_artifacts = []
+
+    def add_deployment(run, *, name=None, kind=None, code=None):
+        code = code or run
+        artifact = code.get("artifact")
+        row = by_artifact.get(artifact)
+        if row is None:
+            unexpected_artifacts.append(artifact)
+            return
+        deploy = code.get("code_cell_deploy") or {}
+        code_dep = code.get("code_cell_dep") or {}
+        out_point_value = code_dep.get("out_point")
+        artifact_hash = code.get("artifact_ckb_data_hash_blake2b")
+        live_hash = code.get("live_code_cell_data_hash")
+        row["onchain_deployments"].append({
+            "run_name": name or run.get("name") or row.get("name"),
+            "run_kind": kind or run.get("kind") or row.get("kind"),
+            "out_point": out_point_value,
+            "tx_hash": deploy.get("tx_hash"),
+            "output_index": "0x0",
+            "artifact_ckb_data_hash_blake2b": artifact_hash,
+            "live_code_cell_data_hash": live_hash,
+            "live_code_cell_data_hash_matches_artifact": live_hash == artifact_hash,
+            "code_cell_live": code.get("code_cell_live") is True,
+        })
+
+    for run in report["onchain"].get("artifact_runs", []):
+        add_deployment(run, kind="artifact-spend")
+    for run in report["onchain"].get("bundled_example_deployment_runs", []):
+        add_deployment(run, kind="bundled-example-deployment")
+    for key in (
+        "token_action_runs",
+        "nft_action_runs",
+        "timelock_action_runs",
+        "multisig_action_runs",
+        "vesting_action_runs",
+        "amm_action_runs",
+        "launch_action_runs",
+        "lock_spend_matrix_runs",
+    ):
+        for run in report["onchain"].get(key, []):
+            code = run.get("code")
+            if isinstance(code, dict):
+                add_deployment(run, kind=key.removesuffix("_runs"), code=code)
+
+    missing = [
+        row.get("name")
+        for row in reports
+        if isinstance(row, dict) and not row.get("onchain_deployments")
+    ]
+    mismatches = [
+        f"{row.get('name')}:{deployment.get('run_name')}"
+        for row in reports
+        if isinstance(row, dict)
+        for deployment in row.get("onchain_deployments", [])
+        if deployment.get("live_code_cell_data_hash_matches_artifact") is not True
+        or deployment.get("code_cell_live") is not True
+    ]
+    build_index.update({
+        "onchain_deployed_artifact_count": sum(
+            1 for row in reports if isinstance(row, dict) and row.get("onchain_deployments")
+        ),
+        "live_code_cell_data_hash_match_count": sum(
+            1
+            for row in reports
+            if isinstance(row, dict)
+            and row.get("onchain_deployments")
+            and all(
+                deployment.get("live_code_cell_data_hash_matches_artifact") is True
+                and deployment.get("code_cell_live") is True
+                for deployment in row.get("onchain_deployments", [])
+            )
+        ),
+        "missing_onchain_deployments": missing,
+        "live_code_cell_data_hash_mismatches": mismatches,
+        "unexpected_onchain_artifacts": [value for value in unexpected_artifacts if value],
+        "status": "passed" if not missing and not mismatches and not unexpected_artifacts else "failed",
+    })
+    return build_index
+
 def write_report():
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
@@ -2836,6 +3020,20 @@ def always_success_lock(args="0x"):
 
 def data_hash(data):
     return "0x" + hashlib.blake2b(data, digest_size=32, person=b"ckb-default-hash").hexdigest()
+
+def live_cell_data_hash(live_cell):
+    cell = (live_cell or {}).get("cell") or {}
+    data = cell.get("data") or {}
+    if isinstance(data, dict):
+        reported_hash = data.get("hash")
+        if isinstance(reported_hash, str) and reported_hash.startswith("0x"):
+            return reported_hash
+        content = data.get("content")
+    else:
+        content = data
+    if isinstance(content, str) and content.startswith("0x"):
+        return data_hash(bytes.fromhex(content[2:]))
+    raise RuntimeError(f"live cell does not expose code data hash/content: {live_cell}")
 
 def ckb_hash(data):
     return hashlib.blake2b(data, digest_size=32, person=b"ckb-default-hash").digest()
@@ -3628,14 +3826,22 @@ def run_artifact(artifact_record, always_success_dep):
     deploy_input = deploy["deploy_input"]
     deploy_result = deploy["code_cell_deploy"]
     deploy_live = assert_live(deploy_result["tx_hash"], 0, f"{name} code cell")
+    live_data_hash = live_cell_data_hash(deploy_live)
     code_dep = {"out_point": out_point(deploy_result["tx_hash"], 0), "dep_type": "code"}
     result.update({
         "deploy_input": deploy_input,
         "code_cell_deploy": deploy_result,
         "code_cell_live": deploy_live.get("status") == "live",
+        "live_code_cell_data_hash": live_data_hash,
+        "live_code_cell_data_hash_matches_artifact": live_data_hash == artifact_ckb_data_hash,
         "code_cell_dep": code_dep,
         "deploy_attempts": deploy["deploy_attempts"],
     })
+    if not result["live_code_cell_data_hash_matches_artifact"]:
+        raise RuntimeError(
+            f"{name} live code cell data hash mismatch: "
+            f"live={live_data_hash} artifact={artifact_ckb_data_hash}"
+        )
 
     create_input = collect_spendable_cellbases(100 * 100_000_000, max_cells=1)
     cellscript_lock = {"code_hash": artifact_ckb_data_hash, "hash_type": "data1", "args": "0x"}
@@ -3734,16 +3940,24 @@ def run_bundled_example_deployment(artifact_record, always_success_dep):
     )
     deploy_result = deploy["code_cell_deploy"]
     deploy_live = assert_live(deploy_result["tx_hash"], 0, f"{name} bundled-example code cell")
+    live_data_hash = live_cell_data_hash(deploy_live)
     result.update({
         "deploy_input": deploy["deploy_input"],
         "valid_deploy_dry_run": deploy["valid_deploy_dry_run"],
         "measured_constraints": measure_release_constraints(deploy["deploy_tx"], deploy["valid_deploy_dry_run"]),
         "code_cell_deploy": deploy_result,
         "code_cell_live": deploy_live.get("status") == "live",
+        "live_code_cell_data_hash": live_data_hash,
+        "live_code_cell_data_hash_matches_artifact": live_data_hash == artifact_ckb_data_hash,
         "code_cell_dep": {"out_point": out_point(deploy_result["tx_hash"], 0), "dep_type": "code"},
         "deploy_attempts": deploy["deploy_attempts"],
         "status": "passed",
     })
+    if not result["live_code_cell_data_hash_matches_artifact"]:
+        raise RuntimeError(
+            f"{name} live bundled-example code cell data hash mismatch: "
+            f"live={live_data_hash} artifact={artifact_ckb_data_hash}"
+        )
     return result
 
 def deploy_code_cell(name, artifact_path, always_success_dep):
@@ -3752,16 +3966,25 @@ def deploy_code_cell(name, artifact_path, always_success_dep):
     deploy = submit_code_cell_deploy_with_fresh_funding(name, artifact, always_success_dep, "action code-cell deploy")
     deploy_result = deploy["code_cell_deploy"]
     deploy_live = assert_live(deploy_result["tx_hash"], 0, f"{name} action code cell")
-    return {
+    live_data_hash = live_cell_data_hash(deploy_live)
+    result = {
         "artifact": str(artifact_path),
         "artifact_size_bytes": len(artifact),
         "artifact_ckb_data_hash_blake2b": artifact_ckb_data_hash,
         "deploy_input": deploy["deploy_input"],
         "code_cell_deploy": deploy_result,
         "code_cell_live": deploy_live.get("status") == "live",
+        "live_code_cell_data_hash": live_data_hash,
+        "live_code_cell_data_hash_matches_artifact": live_data_hash == artifact_ckb_data_hash,
         "code_cell_dep": {"out_point": out_point(deploy_result["tx_hash"], 0), "dep_type": "code"},
         "deploy_attempts": deploy["deploy_attempts"],
     }
+    if not result["live_code_cell_data_hash_matches_artifact"]:
+        raise RuntimeError(
+            f"{name} live action code cell data hash mismatch: "
+            f"live={live_data_hash} artifact={artifact_ckb_data_hash}"
+        )
+    return result
 
 def create_script_locked_cells(label, cells, cell_deps, max_attempts=4):
     total_capacity = sum(cell["capacity"] for cell in cells)
@@ -7120,6 +7343,19 @@ try:
         final_hardening_failures.append(
             "builder-generated lock spend transactions contain under-capacity outputs: " + ", ".join(under_capacity_locks)
         )
+    build_report_gate = refresh_build_report_deployments()
+    if build_report_gate.get("status") != "passed":
+        final_hardening_failures.append(
+            "build report live artifact linkage failed: "
+            + json.dumps(
+                {
+                    "missing_onchain_deployments": build_report_gate.get("missing_onchain_deployments"),
+                    "live_code_cell_data_hash_mismatches": build_report_gate.get("live_code_cell_data_hash_mismatches"),
+                    "unexpected_onchain_artifacts": build_report_gate.get("unexpected_onchain_artifacts"),
+                },
+                sort_keys=True,
+            )
+        )
     report["final_production_hardening_gate"] = {
         "status": "passed" if not final_hardening_failures else "blocked",
         "ready": not final_hardening_failures,
@@ -7128,6 +7364,7 @@ try:
         "requires_consensus_serialized_tx_size": True,
         "requires_exact_occupied_capacity": True,
         "requires_stateful_action_coverage": run_stateful_scenarios,
+        "requires_build_report_live_artifact_linkage": True,
         "failures": final_hardening_failures,
     }
     update_ckb_business_coverage({

@@ -85,7 +85,6 @@ check_trailing_whitespace() {
         "scripts/validate_cellscript_tooling_release.py"
         "scripts/validate_ckb_cellscript_production_evidence.py"
         "tests/syntax_combo/matrix.toml"
-        "tests/syntax_combo/seeds/legacy-transfer-capability.cell"
         "tests/syntax_combo/seeds/require-block-lifecycle.cell"
         "${tracked_rust_files[@]}"
     )
@@ -338,6 +337,7 @@ check_ckb_release_docs() {
         "primitive-strict original bundled-example coverage"
         "builder-backed action runs"
         "source-bound acceptance provenance"
+        "exact-artifact build reports"
         "occupied-capacity evidence"
         "passed final production hardening gate"
     )
@@ -359,10 +359,14 @@ check_ckb_acceptance_boundaries() {
         'scripts/ckb_cellscript_acceptance.sh::strict_original_ckb_compile_policy_fail_closed'
         'scripts/ckb_cellscript_acceptance.sh::strict_original_ckb_compile_unexpected_failures'
         'scripts/ckb_cellscript_acceptance.sh::SOURCE_PROVENANCE_SCHEMA'
+        'scripts/ckb_cellscript_acceptance.sh::BUILD_REPORT_SCHEMA'
         'scripts/ckb_cellscript_acceptance.sh::tracked_source_sha256'
+        'scripts/ckb_cellscript_acceptance.sh::cellscript_build_reports'
+        'scripts/ckb_cellscript_acceptance.sh::live_code_cell_data_hash_matches_artifact'
         'scripts/ckb_cellscript_acceptance.sh::builder_backed_action_count'
         'scripts/ckb_cellscript_acceptance.sh::final_production_hardening_gate'
         'scripts/validate_ckb_cellscript_production_evidence.py::validate_source_provenance'
+        'scripts/validate_ckb_cellscript_production_evidence.py::validate_build_reports'
         'scripts/validate_ckb_cellscript_production_evidence.py::tracked_source_sha256'
         'scripts/validate_ckb_cellscript_production_evidence.py::valid CKB CellScript'
         'scripts/validate_cellscript_tooling_release.py::valid CellScript tooling release boundary'
@@ -401,14 +405,14 @@ check_novaseal_acceptance_boundaries() {
         'scripts/novaseal_devnet_stateful_acceptance.sh::certifier_status=%s'
         'scripts/novaseal_devnet_stateful_acceptance.sh::certifier_status=not_run'
         'scripts/novaseal_devnet_stateful_acceptance.sh::local_devnet_passed_external_endpoint_required'
-        'scripts/novaseal_devnet_stateful_acceptance.sh::cert_status=1'
+        'scripts/novaseal_devnet_stateful_acceptance.sh::cert_status=$?'
         'proposals/novaseal/DEVNET_FULL_ACCEPTANCE_RUNBOOK.md::external_endpoint_status=external_required'
         'proposals/novaseal/DEVNET_FULL_ACCEPTANCE_RUNBOOK.md::acceptance_blockers=0'
-        'proposals/novaseal/DEVNET_FULL_ACCEPTANCE_RUNBOOK.md::missing public BTC SPV evidence'
+        'proposals/novaseal/DEVNET_FULL_ACCEPTANCE_RUNBOOK.md::Missing public BTC SPV evidence'
         'proposals/novaseal/v0-mvp-skeleton/docs/AUDIT_STATUS.md::external_endpoint_status=external_required'
         'proposals/novaseal/v0-mvp-skeleton/docs/AUDIT_STATUS.md::acceptance_blockers=0'
-        'tests/novaseal_sources.rs::EXPECTED_TRACKED_NOVASEAL_CELL_SOURCES'
-        'tests/novaseal_sources.rs::all_novaseal_executable_entries_compile_for_ckb_profile'
+        'src/cli/novaseal_certification.rs::source_tree_expected_files_and_provenance_reject_symlink_escape'
+        'src/cli/novaseal_certification.rs::source_tree_invalid_paths_empty'
     )
     local item file pattern
     for item in "${required[@]}"; do

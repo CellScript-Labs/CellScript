@@ -85,6 +85,7 @@ fn locked_build_from_metadata_for_test(metadata: &cellscript::CompileMetadata) -
         "functions": &metadata.functions,
         "locks": &metadata.locks,
         "molecule_schema_manifest": &metadata.molecule_schema_manifest,
+        "cell_data_codec_manifest": &metadata.cell_data_codec_manifest,
     });
     cellscript::package::LockedBuildInfo {
         compiler_version: Some(metadata.compiler_version.clone()),
@@ -92,6 +93,7 @@ fn locked_build_from_metadata_for_test(metadata: &cellscript::CompileMetadata) -
         artifact_hash: metadata.artifact_hash.clone(),
         metadata_hash: Some(hash_json_for_test(metadata)),
         schema_hash: Some(metadata.molecule_schema_manifest.manifest_hash.clone()),
+        cell_data_codec_manifest_hash: Some(metadata.cell_data_codec_manifest.manifest_hash.clone()),
         abi_hash: Some(hash_json_for_test(&abi)),
         constraints_hash: Some(hash_json_for_test(&metadata.constraints)),
     }
@@ -170,6 +172,7 @@ fn write_live_registry_fixture_with(root: &std::path::Path, data_hash: &str, cod
         artifact_hash: Some("artifact_hash".to_string()),
         metadata_hash: Some("metadata_hash".to_string()),
         schema_hash: Some("schema_hash".to_string()),
+        cell_data_codec_manifest_hash: Some("codec_manifest_hash".to_string()),
         abi_hash: Some("abi_hash".to_string()),
         constraints_hash: Some("constraints_hash".to_string()),
     });
@@ -198,6 +201,7 @@ fn write_live_registry_fixture_with(root: &std::path::Path, data_hash: &str, cod
             artifact_hash: Some("artifact_hash".to_string()),
             metadata_hash: Some("metadata_hash".to_string()),
             schema_hash: Some("schema_hash".to_string()),
+            cell_data_codec_manifest_hash: Some("codec_manifest_hash".to_string()),
             abi_hash: Some("abi_hash".to_string()),
             constraints_hash: Some("constraints_hash".to_string()),
         }),
@@ -214,6 +218,7 @@ fn write_live_registry_fixture_with(root: &std::path::Path, data_hash: &str, cod
             artifact_hash: Some("artifact_hash".to_string()),
             metadata_hash: Some("metadata_hash".to_string()),
             schema_hash: Some("schema_hash".to_string()),
+            cell_data_codec_manifest_hash: Some("codec_manifest_hash".to_string()),
             abi_hash: Some("abi_hash".to_string()),
             constraints_hash: Some("constraints_hash".to_string()),
             compiler_version: Some("0.20.0".to_string()),
@@ -1147,6 +1152,7 @@ fn cellc_registry_verify_json_fails_closed_for_missing_deployment_ref() {
         artifact_hash: Some("artifact_hash".to_string()),
         metadata_hash: Some("metadata_hash".to_string()),
         schema_hash: Some("schema_hash".to_string()),
+        cell_data_codec_manifest_hash: Some("codec_manifest_hash".to_string()),
         abi_hash: Some("abi_hash".to_string()),
         constraints_hash: Some("constraints_hash".to_string()),
     });
@@ -1165,6 +1171,7 @@ fn cellc_registry_verify_json_fails_closed_for_missing_deployment_ref() {
             artifact_hash: Some("artifact_hash".to_string()),
             metadata_hash: Some("metadata_hash".to_string()),
             schema_hash: Some("schema_hash".to_string()),
+            cell_data_codec_manifest_hash: Some("codec_manifest_hash".to_string()),
             abi_hash: Some("abi_hash".to_string()),
             constraints_hash: Some("constraints_hash".to_string()),
         }),
@@ -1181,6 +1188,7 @@ fn cellc_registry_verify_json_fails_closed_for_missing_deployment_ref() {
             artifact_hash: None,
             metadata_hash: None,
             schema_hash: None,
+            cell_data_codec_manifest_hash: None,
             abi_hash: None,
             constraints_hash: None,
             compiler_version: None,
@@ -4694,6 +4702,8 @@ action mint(amount: u64, owner: Address) -> Token {
     assert_eq!(summary["action_count"], 1);
     assert_eq!(summary["actions"][0], "mint");
     assert!(summary["metadata_hash"].as_str().is_some_and(|hash| hash.len() == 64));
+    assert_eq!(summary["cell_data_codec_abi"], "molecule");
+    assert_eq!(summary["raw_cell_data_required"], false);
 
     let package_json: serde_json::Value = serde_json::from_slice(&std::fs::read(output_dir.join("package.json")).unwrap()).unwrap();
     assert_eq!(package_json["name"], "@demo/token-builder");
@@ -4706,8 +4716,18 @@ action mint(amount: u64, owner: Address) -> Token {
     assert_eq!(manifest["schema"], "cellscript-generated-action-builder-v0.20");
     assert_eq!(manifest["target"], "typescript");
     assert_eq!(manifest["actions"][0]["name"], "mint");
+    assert_eq!(manifest["cell_data_codec_manifest"]["schema"], "cellscript-cell-data-codec-manifest-v1");
+    assert_eq!(manifest["cell_data_codec_manifest"]["abi"], "molecule");
+    assert_eq!(manifest["cell_data_codec_manifest"]["raw_bytes_required"], false);
+    assert_eq!(
+        manifest["cell_data_codec_manifest"]["molecule_schema_manifest_hash"],
+        manifest["molecule_schema_manifest"]["manifest_hash"]
+    );
     assert_eq!(manifest["runtime_contract"]["requires_live_cell_resolution"], true);
     assert_eq!(manifest["runtime_contract"]["requires_dry_run_before_submit"], true);
+    assert_eq!(manifest["runtime_contract"]["requires_cell_data_codec_materialization"], true);
+    assert_eq!(manifest["runtime_contract"]["requires_external_cell_data_codec_adapter"], false);
+    assert_eq!(manifest["runtime_contract"]["cell_data_codec_abi"], "molecule");
     assert_eq!(manifest["runtime_contract"]["must_not_infer_protocol_semantics_from_action_name"], true);
     assert!(manifest["runtime_error_catalog"]
         .as_array()
@@ -4732,6 +4752,9 @@ action mint(amount: u64, owner: Address) -> Token {
     assert!(index_ts.contains("live deployment evidence deployment_status"), "{index_ts}");
     assert!(index_ts.contains("canSubmit: false"), "{index_ts}");
     assert!(index_ts.contains("live_cell_availability"), "{index_ts}");
+    assert!(index_ts.contains("export const cellDataCodecManifest"), "{index_ts}");
+    assert!(index_ts.contains("cellDataCodecManifest,"), "{index_ts}");
+    assert!(index_ts.contains("cell_data_codec_materialization"), "{index_ts}");
     assert!(index_ts.contains("export const metadata = {"), "{index_ts}");
     assert!(!index_ts.contains("import metadataJson"), "{index_ts}");
 
@@ -4749,6 +4772,90 @@ action mint(amount: u64, owner: Address) -> Token {
     let generated_metadata: serde_json::Value =
         serde_json::from_slice(&std::fs::read(output_dir.join("src").join("metadata.json")).unwrap()).unwrap();
     assert_eq!(generated_metadata["actions"][0]["name"], "mint");
+    assert_eq!(generated_metadata["cell_data_codec_manifest"], manifest["cell_data_codec_manifest"]);
+}
+
+#[test]
+fn cellc_gen_builder_typescript_declares_raw_cell_data_codec_manifest() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("Cell.toml"),
+        r#"
+[package]
+name = "raw-codec-demo"
+version = "0.1.0"
+
+[build]
+target_profile = "ckb"
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("src").join("main.cell"),
+        r#"
+module raw_codec_demo::main
+
+action inspect() -> u64 {
+    verification
+        let input = source::group_input(0)
+        let quantity = ckb::cell_data_u32_le(input, 0)
+        let amount = ckb::cell_data_u64_le(input, 4)
+        if quantity != 7 {
+            return 90
+        }
+        return amount
+}
+"#,
+    )
+    .unwrap();
+
+    let metadata_path = root.join("inspect.meta.json");
+    let metadata = Command::new(env!("CARGO_BIN_EXE_cellc"))
+        .current_dir(root)
+        .arg("metadata")
+        .arg("--output")
+        .arg(&metadata_path)
+        .output()
+        .unwrap();
+    assert!(metadata.status.success(), "stderr: {}", String::from_utf8_lossy(&metadata.stderr));
+
+    let output_dir = root.join("generated-builder");
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc"))
+        .current_dir(root)
+        .arg("gen-builder")
+        .arg("--target")
+        .arg("typescript")
+        .arg("--metadata")
+        .arg(&metadata_path)
+        .arg("--output")
+        .arg(&output_dir)
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+
+    let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(summary["cell_data_codec_abi"], "molecule+raw-bytes-v1");
+    assert_eq!(summary["raw_cell_data_required"], true);
+
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(output_dir.join("cellscript-builder-manifest.json")).unwrap()).unwrap();
+    assert_eq!(manifest["cell_data_codec_manifest"]["abi"], "molecule+raw-bytes-v1");
+    assert_eq!(manifest["cell_data_codec_manifest"]["raw_bytes_required"], true);
+    assert!(manifest["cell_data_codec_manifest"]["raw_runtime_accesses"]
+        .as_array()
+        .is_some_and(|accesses| accesses.iter().any(|access| access["binding"] == "ckb::cell_data_u32_le")
+            && accesses.iter().any(|access| access["binding"] == "ckb::cell_data_u64_le")));
+    assert_eq!(manifest["runtime_contract"]["requires_external_cell_data_codec_adapter"], true);
+    assert_eq!(manifest["runtime_contract"]["cell_data_codec_abi"], "molecule+raw-bytes-v1");
+
+    let index_ts = std::fs::read_to_string(output_dir.join("src").join("index.ts")).unwrap();
+    assert!(index_ts.contains("export const cellDataCodecManifest"), "{index_ts}");
+    assert!(index_ts.contains("molecule+raw-bytes-v1"), "{index_ts}");
+    assert!(index_ts.contains("cell_data_codec_materialization"), "{index_ts}");
 }
 
 #[test]
@@ -4841,6 +4948,7 @@ action mint(amount: u64, owner: Address) -> Token {
             artifact_hash: build_info.artifact_hash.clone(),
             metadata_hash: build_info.metadata_hash.clone(),
             schema_hash: build_info.schema_hash.clone(),
+            cell_data_codec_manifest_hash: build_info.cell_data_codec_manifest_hash.clone(),
             abi_hash: build_info.abi_hash.clone(),
             constraints_hash: build_info.constraints_hash.clone(),
         }),
@@ -4857,6 +4965,7 @@ action mint(amount: u64, owner: Address) -> Token {
             artifact_hash: build_info.artifact_hash.clone(),
             metadata_hash: build_info.metadata_hash.clone(),
             schema_hash: build_info.schema_hash.clone(),
+            cell_data_codec_manifest_hash: build_info.cell_data_codec_manifest_hash.clone(),
             abi_hash: build_info.abi_hash.clone(),
             constraints_hash: build_info.constraints_hash.clone(),
             compiler_version: build_info.compiler_version.clone(),
@@ -4943,6 +5052,31 @@ action mint(amount: u64, owner: Address) -> Token {
     let stderr = String::from_utf8_lossy(&rejected.stderr);
     assert!(stderr.contains("generated builder identity verification failed"), "{stderr}");
     assert!(stderr.contains("metadata_hash mismatch"), "{stderr}");
+
+    let mut bad_codec_lockfile = bad_lockfile;
+    bad_codec_lockfile.package_build.as_mut().unwrap().metadata_hash = build_info.metadata_hash.clone();
+    bad_codec_lockfile.package_build.as_mut().unwrap().cell_data_codec_manifest_hash = Some("bad_codec_manifest_hash".to_string());
+    let bad_codec_lockfile_path = root.join("BadCodec.lock");
+    std::fs::write(&bad_codec_lockfile_path, toml::to_string_pretty(&bad_codec_lockfile).unwrap()).unwrap();
+
+    let codec_rejected = Command::new(env!("CARGO_BIN_EXE_cellc"))
+        .current_dir(root)
+        .arg("gen-builder")
+        .arg("--target")
+        .arg("typescript")
+        .arg("--metadata")
+        .arg(&metadata_path)
+        .arg("--lockfile")
+        .arg(&bad_codec_lockfile_path)
+        .arg("--action")
+        .arg("mint")
+        .arg("--output")
+        .arg(root.join("bad-codec-builder"))
+        .output()
+        .unwrap();
+    assert!(!codec_rejected.status.success());
+    let codec_stderr = String::from_utf8_lossy(&codec_rejected.stderr);
+    assert!(codec_stderr.contains("cell_data_codec_manifest_hash mismatch"), "{codec_stderr}");
 
     let mut bad_deployed = deployed.clone();
     bad_deployed.deployments[0].code_hash = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_string();
@@ -6219,6 +6353,7 @@ action mint(amount: u64) -> Token {
     let artifact_hash = lockfile.package_build.as_ref().unwrap().artifact_hash.as_deref().unwrap();
     let metadata_hash = lockfile.package_build.as_ref().unwrap().metadata_hash.as_deref().unwrap();
     let schema_hash = lockfile.package_build.as_ref().unwrap().schema_hash.as_deref().unwrap();
+    let cell_data_codec_manifest_hash = lockfile.package_build.as_ref().unwrap().cell_data_codec_manifest_hash.as_deref().unwrap();
     let abi_hash = lockfile.package_build.as_ref().unwrap().abi_hash.as_deref().unwrap();
     let constraints_hash = lockfile.package_build.as_ref().unwrap().constraints_hash.as_deref().unwrap();
     let source_hash = lockfile.package.source_hash.as_deref().unwrap();
@@ -6237,6 +6372,7 @@ compiler_version = "{compiler_version}"
 artifact_hash = "{artifact_hash}"
 metadata_hash = "{metadata_hash}"
 schema_hash = "{schema_hash}"
+cell_data_codec_manifest_hash = "{cell_data_codec_manifest_hash}"
 abi_hash = "{abi_hash}"
 constraints_hash = "{constraints_hash}"
 
@@ -6255,6 +6391,7 @@ out_point = "0x0000000000000000000000000000000000000000000000000000000000000001:
 artifact_hash = "{artifact_hash}"
 metadata_hash = "{metadata_hash}"
 schema_hash = "{schema_hash}"
+cell_data_codec_manifest_hash = "{cell_data_codec_manifest_hash}"
 abi_hash = "{abi_hash}"
 constraints_hash = "{constraints_hash}"
 compiler_version = "{compiler_version}"

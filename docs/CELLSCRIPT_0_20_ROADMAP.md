@@ -136,6 +136,22 @@ RX-only, has `filesz == memsz`, and the entry trampoline calls the real entry
 without initialising `sp`. The critical 0.20 example path explicitly requires
 passing ABI evidence for `launch.cell`, `token.cell`, and `amm_pool.cell`.
 
+Seventeenth slice: production acceptance now emits exact-artifact
+`CellScriptBuildReport` rows. Each row binds a CKB-deployable ELF to its CKB
+blake2b deployable hash, host SHA-256 hash, `cellc verify-artifact` status, ELF
+entry ABI gate status, ABI-trailer stripped state, and live code-cell data hash
+when devnet deployment evidence is available. The production evidence validator
+fails closed when a live deployment's code-cell data hash does not match the
+compiled artifact hash.
+
+Eighteenth slice: compile metadata now separates the CKB runtime VM ABI from
+cell-data codec truth. Molecule-native contracts still declare
+`cell_data_codec_manifest.abi = "molecule"`, while contracts that use raw
+`LOAD_CELL_DATA` accesses declare `abi = "molecule+raw-bytes-v1"` and enumerate
+the raw accesses. Generated TypeScript builders export this manifest in the
+builder manifest and action plans, but still delegate raw cell-data
+materialisation to runtime adapters.
+
 The generated package should provide:
 
 - typed action functions;

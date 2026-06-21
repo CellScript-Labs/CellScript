@@ -126,6 +126,7 @@ check_ckb_release_docs() {
         "./scripts/cellscript_ckb_release_gate.sh full"
         "primitive-strict original bundled-example coverage"
         "builder-backed action runs"
+        "exact-artifact build reports"
         "occupied-capacity evidence"
         "passed final production hardening gate"
     )
@@ -155,11 +156,15 @@ check_ckb_acceptance_boundaries() {
         'scripts/ckb_cellscript_acceptance.sh::consensus_serialized_tx_size_bytes'
         'scripts/ckb_cellscript_acceptance.sh::occupied_capacity_shannons'
         'scripts/ckb_cellscript_acceptance.sh::ckb_elf_entry_abi_gate'
+        'scripts/ckb_cellscript_acceptance.sh::BUILD_REPORT_SCHEMA'
+        'scripts/ckb_cellscript_acceptance.sh::cellscript_build_reports'
+        'scripts/ckb_cellscript_acceptance.sh::live_code_cell_data_hash_matches_artifact'
         'scripts/ckb_cellscript_acceptance.sh::preserves_ckb_vm_stack_pointer'
         'scripts/ckb_cellscript_acceptance.sh::CRITICAL_0_20_DEVNET_EXAMPLES'
         'scripts/cellscript_ckb_release_gate.sh::--production --stateful-scenarios'
         'scripts/cellscript_ckb_stateful_scenarios.sh::--production --stateful-scenarios'
         'scripts/validate_ckb_cellscript_production_evidence.py::validate_elf_entry_abi_gate'
+        'scripts/validate_ckb_cellscript_production_evidence.py::validate_build_reports'
         'scripts/validate_ckb_cellscript_production_evidence.py::EXPECTED_CRITICAL_ELF_ABI_EXAMPLES'
         'scripts/validate_ckb_cellscript_production_evidence.py::valid CKB CellScript'
         'scripts/validate_cellscript_tooling_release.py::valid CellScript tooling release boundary'
@@ -408,10 +413,10 @@ run_production_gate() {
 
 case "$MODE" in
     quick)
-        exec "$ROOT_DIR/scripts/cellscript_gate.sh" release-quick "$@"
+        exec "$ROOT_DIR/scripts/cellscript_gate.sh" release-quick
         ;;
     production|full)
-        exec "$ROOT_DIR/scripts/cellscript_gate.sh" release "$@"
+        exec "$ROOT_DIR/scripts/cellscript_gate.sh" release
         ;;
     *)
         printf 'usage: %s [quick|production|full]\n' "$0" >&2
