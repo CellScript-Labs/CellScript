@@ -159,12 +159,21 @@ For `launch_token`, the `distribution` payload is exactly four
 ## One-Line Builder Contract Bundle
 
 After building the scoped artifact and producing a candidate transaction JSON,
-run the compiler-facing contract checks as one shell bundle. Replace `META` and
-`TX` with the generated `.meta.json` sidecar and transaction file:
+run the compiler-facing contract checks as one shell bundle. The preferred
+builder-facing path emits one scoped manifest, then validates the candidate
+transaction against it:
 
 ```bash
-INPUT=examples/amm_pool.cell ACTION=swap_a_for_b META=build/amm_swap_a_for_b.elf.meta.json TX=build/swap.tx.json RID=build/resource-identities.json MIN_OUT=49000 TO=0x1111111111111111111111111111111111111111111111111111111111111111; cellc resource-identity "$INPUT" --target-profile ckb --identity Token=token-default --identity Token:token_out=token-b --identity Pool=pool-main --identity LPReceipt=pool-main --plan-output "$RID" --json && cellc abi "$INPUT" --target-profile ckb --action "$ACTION" && cellc constraints "$INPUT" --target-profile ckb --entry-action "$ACTION" && cellc solve-tx "$INPUT" --target-profile ckb --entry-action "$ACTION" --primitive-strict 0.16 --json && cellc entry-witness "$INPUT" --target-profile ckb --action "$ACTION" --arg "$MIN_OUT" --arg "$TO" --json && cellc explain-assumptions "$INPUT" --target-profile ckb --entry-action "$ACTION" --primitive-strict 0.16 --json && cellc validate-tx --against "$META" --resource-identities "$RID" "$TX" --production --primitive-strict 0.16 --json
+INPUT=examples/amm_pool.cell ACTION=swap_a_for_b TX=build/swap.tx.json RID=build/resource-identities.json MANIFEST=build/swap.builder.json MIN_OUT=49000 TO=0x1111111111111111111111111111111111111111111111111111111111111111; cellc resource-identity "$INPUT" --target-profile ckb --identity Token=token-default --identity Token:token_out=token-b --identity Pool=pool-main --identity LPReceipt=pool-main --plan-output "$RID" --json && cellc builder-manifest "$INPUT" --target-profile ckb --entry-action "$ACTION" --resource-identities "$RID" --output "$MANIFEST" --primitive-strict 0.16 --json && cellc entry-witness "$INPUT" --target-profile ckb --action "$ACTION" --arg "$MIN_OUT" --arg "$TO" --json && cellc builder-check --manifest "$MANIFEST" --tx "$TX" --production --primitive-strict 0.16 --json
 ```
+
+Use `cellc abi`, `cellc constraints`, `cellc explain-assumptions`, and
+`cellc solve-tx` directly when debugging one layer of the manifest.
+The manifest also carries
+`transaction_template.transaction_plan.builder_assumption_evidence_template`,
+which is the fillable skeleton a Rust builder can attach to the candidate
+transaction after replacing placeholders with concrete cell, capacity, and
+dry-run facts.
 
 `cellc entry-witness` emits the raw `_cellscript_entry` payload. Do not wrap it
 in `WitnessArgs.input_type` unless the CellScript source explicitly reads that

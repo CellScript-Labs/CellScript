@@ -1116,6 +1116,10 @@ fn cli_explain_assumptions_and_solve_tx_can_scope_entry_action() {
     solve.arg("solve-tx").arg(&source).arg("--target-profile").arg("ckb").arg("--entry-action").arg("swap_a_for_b").arg("--json");
     let solve_json = run_success_json(solve);
     assert_eq!(solve_json["status"], "template", "{solve_json:#?}");
+    assert_eq!(solve_json["submit_ready"], false, "{solve_json:#?}");
+    assert!(solve_json["missing_builder_steps"]
+        .as_array()
+        .is_some_and(|steps| steps.iter().any(|step| step.as_str() == Some("ckb_dry_run"))));
     let requirements =
         solve_json["transaction_plan"]["builder_assumption_evidence_requirements"].as_array().expect("builder evidence requirements");
     assert!(
@@ -1128,6 +1132,30 @@ fn cli_explain_assumptions_and_solve_tx_can_scope_entry_action() {
         }),
         "{solve_json:#?}"
     );
+}
+
+#[test]
+fn cli_entry_witness_json_exposes_script_group_placement() {
+    let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/amm_pool.cell");
+    let mut entry_witness = cellc_command();
+    entry_witness
+        .arg("entry-witness")
+        .arg(&source)
+        .arg("--target-profile")
+        .arg("ckb")
+        .arg("--action")
+        .arg("swap_a_for_b")
+        .arg("--arg")
+        .arg("49000")
+        .arg("--arg")
+        .arg("0x0101010101010101010101010101010101010101010101010101010101010101")
+        .arg("--json");
+    let witness_json = run_success_json(entry_witness);
+    assert_eq!(witness_json["status"], "ok", "{witness_json:#?}");
+    assert_eq!(witness_json["placement"]["kind"], "raw_script_group_witness", "{witness_json:#?}");
+    assert_eq!(witness_json["placement"]["source"], "GroupInput", "{witness_json:#?}");
+    assert_eq!(witness_json["placement"]["group_index"], 0, "{witness_json:#?}");
+    assert_eq!(witness_json["placement"]["fallback_source"], "GroupOutput", "{witness_json:#?}");
 }
 
 #[test]
@@ -1224,6 +1252,104 @@ fn cli_resource_identity_generates_plan_and_validate_tx_checks_it() {
             violation["kind"] == "resource_identity" && violation["message"].as_str().is_some_and(|m| m.contains("args"))
         })
     }));
+}
+
+#[test]
+fn cli_builder_manifest_and_builder_check_validate_resource_identity_flow() {
+    let temp = tempdir().unwrap();
+    let source = temp.path().join("identity.cell");
+    let artifact = temp.path().join("resource-identity.elf");
+    let plan_path = temp.path().join("resource-identities.json");
+    let manifest_path = temp.path().join("mint.builder.json");
+    let tx_path = temp.path().join("mint.tx.json");
+    std::fs::write(&source, SIMPLE_RESOURCE_CREATE).unwrap();
+
+    let mut resource_identity = cellc_command();
+    resource_identity
+        .arg("resource-identity")
+        .arg(&source)
+        .arg("--target-profile")
+        .arg("ckb")
+        .arg("--output")
+        .arg(&artifact)
+        .arg("--plan-output")
+        .arg(&plan_path)
+        .arg("--identity")
+        .arg("Token:output=test-token")
+        .arg("--json");
+    let plan_json = run_success_json(resource_identity);
+    let output_script = plan_json["resource_identities"]
+        .as_array()
+        .expect("resource identities")
+        .iter()
+        .find(|entry| entry["type_name"] == "Token")
+        .and_then(|entry| entry["create_scripts"].as_array())
+        .and_then(|scripts| scripts.iter().find(|script| script["binding"] == "output"))
+        .and_then(|script| script.get("script"))
+        .cloned()
+        .expect("output script");
+
+    let mut manifest = cellc_command();
+    manifest
+        .arg("builder-manifest")
+        .arg(&source)
+        .arg("--target-profile")
+        .arg("ckb")
+        .arg("--entry-action")
+        .arg("mint")
+        .arg("--resource-identities")
+        .arg(&plan_path)
+        .arg("--output")
+        .arg(&manifest_path)
+        .arg("--json");
+    let manifest_json = run_success_json(manifest);
+    assert_eq!(manifest_json["status"], "ok", "{manifest_json:#?}");
+    let manifest_value: serde_json::Value = serde_json::from_slice(&std::fs::read(&manifest_path).unwrap()).unwrap();
+    assert_eq!(manifest_value["schema"], "cellscript-builder-manifest-v0.16.2", "{manifest_value:#?}");
+    assert_eq!(manifest_value["submit_ready"], false, "{manifest_value:#?}");
+    assert_eq!(manifest_value["entry_witness"]["placement"]["source"], "GroupInput", "{manifest_value:#?}");
+    assert_eq!(manifest_value["transaction_template"]["submit_ready"], false, "{manifest_value:#?}");
+    assert!(
+        !manifest_value["transaction_template"]["transaction_plan"]["builder_assumption_evidence_template"]
+            .as_object()
+            .unwrap()
+            .is_empty(),
+        "{manifest_value:#?}"
+    );
+
+    let metadata: cellscript::CompileMetadata = serde_json::from_value(manifest_value["metadata"].clone()).unwrap();
+    let evidence = metadata.runtime.builder_assumptions.iter().map(evidence_for).collect::<Vec<_>>();
+    let tx = json!({
+        "inputs": [],
+        "outputs": [{
+            "lock": {},
+            "type": output_script
+        }],
+        "cell_deps": [],
+        "witnesses": [],
+        "builder_assumption_evidence": evidence
+    });
+    std::fs::write(&tx_path, serde_json::to_vec_pretty(&tx).unwrap()).unwrap();
+
+    let mut builder_check = cellc_command();
+    builder_check
+        .arg("builder-check")
+        .arg("--manifest")
+        .arg(&manifest_path)
+        .arg("--tx")
+        .arg(&tx_path)
+        .arg("--production")
+        .arg("--json");
+    let check_json = run_success_json(builder_check);
+    assert_eq!(check_json["schema"], "cellscript-builder-check-v0.16.2", "{check_json:#?}");
+    assert_eq!(check_json["status"], "ok", "{check_json:#?}");
+    assert_eq!(check_json["pre_sign_ready"], true, "{check_json:#?}");
+    assert_eq!(check_json["submit_ready"], false, "{check_json:#?}");
+    assert!(check_json["builder_assumption_evidence_template"].is_null(), "{check_json:#?}");
+    assert!(
+        !check_json["missing_submit_steps"].as_array().unwrap().iter().any(|step| step == "builder_assumption_evidence"),
+        "{check_json:#?}"
+    );
 }
 
 #[test]

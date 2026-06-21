@@ -56,6 +56,8 @@ const NOVASEAL_EXTERNAL_V1_DIMENSIONS: &[&str] = &[
     "rwa_legal_registry_review_evidence",
 ];
 const STRICT_V0_16_PRIMITIVE_COMPAT: &str = "0.16";
+const BUILDER_MANIFEST_SCHEMA: &str = "cellscript-builder-manifest-v0.16.2";
+const BUILDER_CHECK_SCHEMA: &str = "cellscript-builder-check-v0.16.2";
 const RESOURCE_IDENTITY_PLAN_SCHEMA: &str = "cellscript-resource-identity-plan-v1";
 const RESOURCE_IDENTITY_MATERIAL_SCHEMA: &str = "cellscript-resource-identity-material-v1";
 const RESOURCE_IDENTITY_LOCK_NAME: &str = "resource_identity";
@@ -113,6 +115,8 @@ pub enum Command {
     AuditBundle(AuditBundleArgs),
     Certify(CertifyArgs),
     ValidateTx(ValidateTxArgs),
+    BuilderManifest(BuilderManifestArgs),
+    BuilderCheck(BuilderCheckArgs),
     SolveTx(SolveTxArgs),
     ResourceIdentity(ResourceIdentityArgs),
     DeployPlan(DeployPlanArgs),
@@ -386,6 +390,30 @@ pub struct ValidateTxArgs {
 }
 
 #[derive(Debug, Default)]
+pub struct BuilderManifestArgs {
+    pub input: Option<PathBuf>,
+    pub output: Option<PathBuf>,
+    pub target: Option<String>,
+    pub target_profile: Option<String>,
+    pub entry_action: Option<String>,
+    pub entry_lock: Option<String>,
+    pub resource_identities: Option<PathBuf>,
+    pub primitive_compat: Option<String>,
+    pub json: bool,
+}
+
+#[derive(Debug, Default)]
+pub struct BuilderCheckArgs {
+    pub manifest: PathBuf,
+    pub tx: PathBuf,
+    pub metadata: Option<PathBuf>,
+    pub resource_identities: Option<PathBuf>,
+    pub production: bool,
+    pub primitive_compat: Option<String>,
+    pub json: bool,
+}
+
+#[derive(Debug, Default)]
 pub struct SolveTxArgs {
     pub input: Option<PathBuf>,
     pub output: Option<PathBuf>,
@@ -547,6 +575,8 @@ impl CommandExecutor {
             Command::AuditBundle(args) => Self::audit_bundle(args),
             Command::Certify(args) => Self::certify(args),
             Command::ValidateTx(args) => Self::validate_tx(args),
+            Command::BuilderManifest(args) => Self::builder_manifest(args),
+            Command::BuilderCheck(args) => Self::builder_check(args),
             Command::SolveTx(args) => Self::solve_tx(args),
             Command::ResourceIdentity(args) => Self::resource_identity(args),
             Command::DeployPlan(args) => Self::deploy_plan(args),
@@ -1363,74 +1393,7 @@ impl CommandExecutor {
             },
         )?;
         let selected = select_entry_witness_metadata(&result.metadata, args.action.as_deref(), args.lock.as_deref())?;
-        let entry_constraints = result
-            .metadata
-            .constraints
-            .entry_abi
-            .iter()
-            .find(|entry| entry.entry_kind == selected.kind && entry.entry_name == selected.name)
-            .ok_or_else(|| {
-                crate::error::CompileError::without_span(format!(
-                    "entry ABI constraints for {} '{}' were not found in metadata",
-                    selected.kind, selected.name
-                ))
-            })?;
-
-        let params = selected
-            .params
-            .iter()
-            .map(|param| {
-                let runtime_bound = selected.runtime_bound_param_names.contains(&param.name) || param.lock_args_data_source;
-                let payload_bound =
-                    !param.lock_args_data_source && !param.cell_bound_abi && !param.ty.starts_with('&') && !runtime_bound;
-                let layout = entry_constraints.params.iter().find(|candidate| candidate.name == param.name);
-                serde_json::json!({
-                    "name": param.name,
-                    "type": param.ty,
-                    "payload_bound": payload_bound,
-                    "runtime_bound": runtime_bound,
-                    "cell_bound": param.cell_bound_abi,
-                    "schema_pointer_abi": param.schema_pointer_abi,
-                    "fixed_byte_len": param.fixed_byte_len,
-                    "abi_kind": layout.map(|layout| layout.abi_kind.as_str()),
-                    "abi_slots": layout.map(|layout| layout.abi_slots),
-                    "slot_start": layout.map(|layout| layout.slot_start),
-                    "slot_end": layout.map(|layout| layout.slot_end),
-                    "witness_bytes": layout.map(|layout| layout.witness_bytes),
-                    "stack_spill_bytes": layout.map(|layout| layout.stack_spill_bytes),
-                    "supported": layout.map(|layout| layout.supported).unwrap_or(false),
-                    "unsupported_reason": layout.and_then(|layout| layout.unsupported_reason.as_deref()),
-                })
-            })
-            .collect::<Vec<_>>();
-        let payload_params = selected
-            .params
-            .iter()
-            .filter(|param| {
-                !param.lock_args_data_source
-                    && !param.cell_bound_abi
-                    && !param.ty.starts_with('&')
-                    && !selected.runtime_bound_param_names.contains(&param.name)
-            })
-            .map(|param| param.name.as_str())
-            .collect::<Vec<_>>();
-        let runtime_bound_params = selected
-            .runtime_bound_param_names
-            .iter()
-            .map(|name| name.as_str())
-            .chain(selected.params.iter().filter(|param| param.lock_args_data_source).map(|param| param.name.as_str()))
-            .collect::<Vec<_>>();
-        let summary = serde_json::json!({
-            "status": if entry_constraints.unsupported { "fail" } else { "ok" },
-            "abi": ENTRY_WITNESS_ABI,
-            "target_profile": result.metadata.target_profile.name,
-            "entry_kind": selected.kind,
-            "entry": selected.name,
-            "payload_params": payload_params,
-            "runtime_bound_params": runtime_bound_params,
-            "layout": entry_constraints,
-            "params": params,
-        });
+        let summary = entry_abi_report_json(&result.metadata, &selected)?;
         let json = serde_json::to_string_pretty(&summary)
             .map_err(|error| crate::error::CompileError::without_span(format!("failed to serialize ABI report: {}", error)))?;
 
@@ -1731,6 +1694,119 @@ impl CommandExecutor {
         }
         if summary["status"] == "failed" {
             return Err(crate::error::CompileError::without_span("transaction violates builder assumptions"));
+        }
+        Ok(())
+    }
+
+    fn builder_manifest(args: BuilderManifestArgs) -> Result<()> {
+        if args.entry_action.is_none() && args.entry_lock.is_none() {
+            return Err(crate::error::CompileError::without_span(
+                "builder-manifest requires --entry-action or --entry-lock so the manifest is scoped to one builder contract",
+            ));
+        }
+        let compile_options = metadata_workflow_compile_options(args.target, args.target_profile, args.primitive_compat);
+        let result = compile_cli_input_with_entry(
+            args.input.as_ref(),
+            compile_options,
+            args.entry_action.as_deref(),
+            args.entry_lock.as_deref(),
+        )?;
+        let selected = select_entry_witness_metadata(&result.metadata, args.entry_action.as_deref(), args.entry_lock.as_deref())?;
+        let resource_identity_plan_path = args.resource_identities.as_ref().map(|path| path.display().to_string());
+        let resource_identity_plan =
+            args.resource_identities.as_ref().map(|path| read_json_value(path)).transpose()?.unwrap_or(serde_json::Value::Null);
+        let solver_template = transaction_solver_template(&result.metadata);
+        let manifest = serde_json::json!({
+            "schema": BUILDER_MANIFEST_SCHEMA,
+            "status": "ok",
+            "submit_ready": false,
+            "pre_sign_artifact": true,
+            "module": result.metadata.module,
+            "target_profile": result.metadata.target_profile.name,
+            "compiler_version": result.metadata.compiler_version,
+            "metadata_schema_version": result.metadata.metadata_schema_version,
+            "selected_entrypoint": result.metadata.selected_entrypoint,
+            "input": args.input.as_ref().map(|path| path.display().to_string()),
+            "metadata": &result.metadata,
+            "abi": entry_abi_report_json(&result.metadata, &selected)?,
+            "constraints": &result.metadata.constraints,
+            "entry_witness": entry_witness_contract_json(&selected),
+            "resource_identity_plan_path": resource_identity_plan_path,
+            "resource_identity_plan": resource_identity_plan,
+            "transaction_template": solver_template,
+            "missing_builder_steps": builder_missing_steps_json(),
+            "commands": {
+                "entry_witness": format_entry_command(args.input.as_ref(), selected.kind, selected.name),
+                "resource_identity": "cellc resource-identity <input> --target-profile ckb --plan-output <resource-identities.json>",
+                "builder_check": "cellc builder-check --manifest <builder-manifest.json> --tx <tx.json> --production --json"
+            }
+        });
+        write_or_print_json(args.output.as_ref(), &manifest, args.json, "Builder manifest generated")?;
+        Ok(())
+    }
+
+    fn builder_check(args: BuilderCheckArgs) -> Result<()> {
+        validate_metadata_workflow_primitive_compat(args.primitive_compat.as_deref())?;
+        let manifest = read_json_value(&args.manifest)?;
+        let tx = read_json_value(&args.tx)?;
+        let mut manifest_violations = validate_builder_manifest_shape(&manifest);
+        let metadata = if let Some(metadata_path) = args.metadata.as_ref() {
+            read_metadata_json(metadata_path)?
+        } else {
+            builder_manifest_metadata(&manifest)?
+        };
+
+        validate_builder_manifest_matches_metadata(&manifest, &metadata, &mut manifest_violations);
+        if let Some(soundness) = strict_v0_16_soundness_report_for_mode(&metadata, args.primitive_compat.as_deref()) {
+            manifest_violations.push(strict_v0_16_soundness_error_message(&soundness));
+        }
+
+        let mut report = crate::assumptions::validate_transaction_against_metadata(&metadata, &tx);
+        let resource_identity_plan_path = args.resource_identities.as_ref().map(|path| path.display().to_string());
+        let resource_identity_plan = args
+            .resource_identities
+            .as_ref()
+            .map(|path| read_json_value(path))
+            .transpose()?
+            .or_else(|| manifest.get("resource_identity_plan").filter(|value| !value.is_null()).cloned());
+        if let Some(plan) = resource_identity_plan.as_ref() {
+            validate_tx_resource_identity_plan(&metadata, &tx, plan, &mut report.violations);
+        } else if args.production && metadata_requires_resource_identity_plan(&metadata) {
+            manifest_violations.push(
+                "production builder-check requires --resource-identities or an embedded resource_identity_plan for created resource outputs"
+                    .to_string(),
+            );
+        }
+        if args.production {
+            validate_tx_fixture_resource_identities(&metadata, &tx, &mut report.violations);
+        }
+        report.status = if report.violations.is_empty() { "ok".to_string() } else { "failed".to_string() };
+
+        let status = if manifest_violations.is_empty() && report.status == "ok" { "ok" } else { "failed" };
+        let summary = serde_json::json!({
+            "schema": BUILDER_CHECK_SCHEMA,
+            "status": status,
+            "submit_ready": false,
+            "pre_sign_ready": status == "ok",
+            "manifest": args.manifest.display().to_string(),
+            "tx": args.tx.display().to_string(),
+            "metadata": args.metadata.as_ref().map(|path| path.display().to_string()),
+            "resource_identity_plan": resource_identity_plan_path.or_else(|| {
+                manifest.get("resource_identity_plan_path").and_then(serde_json::Value::as_str).map(str::to_string)
+            }),
+            "production": args.production,
+            "manifest_violations": manifest_violations,
+            "validation": report,
+            "builder_assumption_evidence_template": builder_check_evidence_template_json(&manifest, &report),
+            "missing_submit_steps": builder_check_missing_steps_json(&report),
+        });
+        if args.json {
+            print_json(&summary)?;
+        } else {
+            println!("Builder check: {}", summary["status"].as_str().unwrap_or("unknown"));
+        }
+        if status == "failed" {
+            return Err(crate::error::CompileError::without_span("builder check failed"));
         }
         Ok(())
     }
@@ -2360,6 +2436,7 @@ impl CommandExecutor {
                 "witness_size_bytes": witness.len(),
                 "payload_args": witness_args.len(),
                 "payload_params": payload_param_names,
+                "placement": entry_witness_placement_json(selected.kind),
                 "output": args.output.as_ref().map(|path| path.display().to_string()),
             });
             let json = serde_json::to_string_pretty(&summary).map_err(|error| {
@@ -3888,6 +3965,96 @@ fn push_resource_identity_violation(violations: &mut Vec<crate::assumptions::TxV
     });
 }
 
+fn validate_builder_manifest_shape(manifest: &serde_json::Value) -> Vec<String> {
+    let mut violations = Vec::new();
+    if manifest.get("schema").and_then(serde_json::Value::as_str) != Some(BUILDER_MANIFEST_SCHEMA) {
+        violations.push(format!("manifest schema must be {BUILDER_MANIFEST_SCHEMA}"));
+    }
+    if manifest.get("metadata").and_then(serde_json::Value::as_object).is_none() {
+        violations.push("manifest must embed compiler metadata at metadata".to_string());
+    }
+    if manifest.get("transaction_template").and_then(serde_json::Value::as_object).is_none() {
+        violations.push("manifest must contain transaction_template".to_string());
+    }
+    if manifest.get("entry_witness").and_then(serde_json::Value::as_object).is_none() {
+        violations.push("manifest must contain entry_witness contract".to_string());
+    }
+    violations
+}
+
+fn builder_manifest_metadata(manifest: &serde_json::Value) -> Result<CompileMetadata> {
+    let metadata = manifest
+        .get("metadata")
+        .cloned()
+        .ok_or_else(|| crate::error::CompileError::without_span("builder manifest is missing embedded metadata"))?;
+    serde_json::from_value(metadata)
+        .map_err(|error| crate::error::CompileError::without_span(format!("failed to decode builder manifest metadata: {}", error)))
+}
+
+fn validate_builder_manifest_matches_metadata(manifest: &serde_json::Value, metadata: &CompileMetadata, violations: &mut Vec<String>) {
+    if let Some(module) = manifest.get("module").and_then(serde_json::Value::as_str) {
+        if module != metadata.module {
+            violations.push(format!("manifest module '{module}' does not match metadata module '{}'", metadata.module));
+        }
+    }
+    if let Some(version) = manifest.get("metadata_schema_version").and_then(serde_json::Value::as_u64) {
+        if version != u64::from(metadata.metadata_schema_version) {
+            violations.push(format!(
+                "manifest metadata_schema_version {version} does not match metadata {}",
+                metadata.metadata_schema_version
+            ));
+        }
+    }
+    let manifest_entry = manifest.get("selected_entrypoint");
+    let metadata_entry = serde_json::to_value(&metadata.selected_entrypoint).unwrap_or(serde_json::Value::Null);
+    if manifest_entry.is_some() && manifest_entry != Some(&metadata_entry) {
+        violations.push("manifest selected_entrypoint does not match metadata selected_entrypoint".to_string());
+    }
+}
+
+fn metadata_requires_resource_identity_plan(metadata: &CompileMetadata) -> bool {
+    selected_create_patterns(metadata)
+        .into_iter()
+        .any(|(_, pattern)| pattern.ckb_type_id.is_none() && !resource_identity_is_type_id_managed(metadata, &pattern.ty))
+}
+
+fn builder_missing_steps_json() -> serde_json::Value {
+    serde_json::json!([
+        "live_cell_selection",
+        "fee_change",
+        "capacity_measurement",
+        "builder_assumption_evidence",
+        "signatures",
+        "ckb_dry_run"
+    ])
+}
+
+fn builder_check_missing_steps_json(report: &crate::assumptions::TxValidationReport) -> serde_json::Value {
+    let mut steps = vec!["live_cell_selection", "fee_change", "capacity_measurement"];
+    if builder_check_evidence_incomplete(report) {
+        steps.push("builder_assumption_evidence");
+    }
+    steps.extend(["signatures", "ckb_dry_run"]);
+    serde_json::json!(steps)
+}
+
+fn builder_check_evidence_incomplete(report: &crate::assumptions::TxValidationReport) -> bool {
+    report.violations.iter().any(|violation| matches!(violation.kind.as_str(), "builder_evidence" | "capacity_policy"))
+}
+
+fn builder_check_evidence_template_json(
+    manifest: &serde_json::Value,
+    report: &crate::assumptions::TxValidationReport,
+) -> serde_json::Value {
+    if !builder_check_evidence_incomplete(report) {
+        return serde_json::Value::Null;
+    }
+    manifest
+        .pointer("/transaction_template/transaction_plan/builder_assumption_evidence_template")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null)
+}
+
 fn transaction_solver_template(metadata: &CompileMetadata) -> serde_json::Value {
     let assumptions = &metadata.runtime.builder_assumptions;
     let ckb = metadata.constraints.ckb.as_ref();
@@ -4047,6 +4214,7 @@ fn transaction_solver_template(metadata: &CompileMetadata) -> serde_json::Value 
             })
         })
         .collect::<Vec<_>>();
+    let evidence_template = builder_evidence_template_json(&evidence);
 
     // Fee/change planning from CKB constraints
     let fee_planning = ckb
@@ -4077,6 +4245,7 @@ fn transaction_solver_template(metadata: &CompileMetadata) -> serde_json::Value 
 
     serde_json::json!({
         "status": "template",
+        "submit_ready": false,
         "solver": "cellscript-v0.16-transaction-template-emitter",
         "module": metadata.module,
         "target_profile": metadata.target_profile.name,
@@ -4094,6 +4263,7 @@ fn transaction_solver_template(metadata: &CompileMetadata) -> serde_json::Value 
             "witnesses": witness_slots,
             "header_deps": ckb.map(|c| if c.uses_header_epoch { vec!["epoch-header"] } else { vec![] }).unwrap_or_default(),
             "builder_assumption_evidence_requirements": evidence,
+            "builder_assumption_evidence_template": evidence_template,
         },
         "fee_change_plan": fee_planning,
         "signing_manifest": {
@@ -4101,6 +4271,7 @@ fn transaction_solver_template(metadata: &CompileMetadata) -> serde_json::Value 
             "signature_requests": signature_requests,
         },
         "builder_assumptions": assumptions,
+        "missing_builder_steps": builder_missing_steps_json(),
         "limitations": [
             "template only: does not perform live cell selection",
             "template only: does not resolve concrete deps/header deps",
@@ -4121,6 +4292,55 @@ fn assumption_requires_structural_binding_evidence(assumption: &crate::assumptio
 
 fn is_wildcard_requirement(required: &String) -> bool {
     required.ends_with(":*")
+}
+
+fn builder_evidence_template_json(requirements: &[serde_json::Value]) -> serde_json::Value {
+    let mut template = serde_json::Map::new();
+    for requirement in requirements {
+        let Some(assumption_id) = requirement.get("assumption_id").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        let kind = requirement.get("kind").and_then(serde_json::Value::as_str).unwrap_or("");
+        let evidence_schema = requirement.get("evidence_schema").unwrap_or(&serde_json::Value::Null);
+        let mut payload = serde_json::Map::new();
+        payload.insert("source".to_string(), serde_json::json!("builder"));
+        payload.insert("checked".to_string(), serde_json::json!(false));
+        payload.insert(
+            "note".to_string(),
+            serde_json::json!("replace template placeholders with concrete builder evidence before builder-check"),
+        );
+        for field in ["required_inputs", "required_outputs", "required_cell_deps"] {
+            if let Some(value) = evidence_schema.get(field) {
+                payload.insert(field.to_string(), value.clone());
+            }
+        }
+        if kind == "capacity_policy" {
+            payload.insert("input_capacity_shannons".to_string(), serde_json::Value::Null);
+            payload.insert("output_capacity_shannons".to_string(), serde_json::json!([]));
+            payload.insert("outputs_total_capacity_shannons".to_string(), serde_json::Value::Null);
+            payload.insert("fee_paid_shannons".to_string(), serde_json::Value::Null);
+            payload.insert("capacity_is_sufficient".to_string(), serde_json::json!(false));
+            payload.insert("under_capacity_output_indexes".to_string(), serde_json::json!([]));
+        }
+        if kind == "spawn_target_cell_dep_binding" {
+            payload.insert("dep_source".to_string(), serde_json::Value::Null);
+            payload.insert("cell_dep_index".to_string(), serde_json::Value::Null);
+            payload.insert("cell_dep_name".to_string(), serde_json::Value::Null);
+            payload.insert("dep_type".to_string(), serde_json::Value::Null);
+        }
+        template.insert(
+            assumption_id.to_string(),
+            serde_json::json!({
+                "assumption_id": assumption_id,
+                "kind": kind,
+                "origin": requirement.get("origin").and_then(serde_json::Value::as_str).unwrap_or(""),
+                "feature": requirement.get("feature").and_then(serde_json::Value::as_str).unwrap_or(""),
+                "proof_plan_status": requirement.get("proof_plan_status").and_then(serde_json::Value::as_str).unwrap_or(""),
+                "evidence": payload,
+            }),
+        );
+    }
+    serde_json::Value::Object(template)
 }
 
 fn deployment_plan_json(metadata: &CompileMetadata) -> serde_json::Value {
@@ -6150,6 +6370,129 @@ struct SelectedEntryWitnessMetadata<'a> {
     runtime_bound_param_names: std::collections::BTreeSet<String>,
 }
 
+fn entry_abi_report_json(metadata: &CompileMetadata, selected: &SelectedEntryWitnessMetadata<'_>) -> Result<serde_json::Value> {
+    let entry_constraints = metadata
+        .constraints
+        .entry_abi
+        .iter()
+        .find(|entry| entry.entry_kind == selected.kind && entry.entry_name == selected.name)
+        .ok_or_else(|| {
+            crate::error::CompileError::without_span(format!(
+                "entry ABI constraints for {} '{}' were not found in metadata",
+                selected.kind, selected.name
+            ))
+        })?;
+
+    let params = selected
+        .params
+        .iter()
+        .map(|param| {
+            let runtime_bound = selected.runtime_bound_param_names.contains(&param.name) || param.lock_args_data_source;
+            let payload_bound = !param.lock_args_data_source && !param.cell_bound_abi && !param.ty.starts_with('&') && !runtime_bound;
+            let layout = entry_constraints.params.iter().find(|candidate| candidate.name == param.name);
+            serde_json::json!({
+                "name": param.name,
+                "type": param.ty,
+                "payload_bound": payload_bound,
+                "runtime_bound": runtime_bound,
+                "cell_bound": param.cell_bound_abi,
+                "schema_pointer_abi": param.schema_pointer_abi,
+                "fixed_byte_len": param.fixed_byte_len,
+                "abi_kind": layout.map(|layout| layout.abi_kind.as_str()),
+                "abi_slots": layout.map(|layout| layout.abi_slots),
+                "slot_start": layout.map(|layout| layout.slot_start),
+                "slot_end": layout.map(|layout| layout.slot_end),
+                "witness_bytes": layout.map(|layout| layout.witness_bytes),
+                "stack_spill_bytes": layout.map(|layout| layout.stack_spill_bytes),
+                "supported": layout.map(|layout| layout.supported).unwrap_or(false),
+                "unsupported_reason": layout.and_then(|layout| layout.unsupported_reason.as_deref()),
+            })
+        })
+        .collect::<Vec<_>>();
+    let payload_params = selected
+        .params
+        .iter()
+        .filter(|param| {
+            !param.lock_args_data_source
+                && !param.cell_bound_abi
+                && !param.ty.starts_with('&')
+                && !selected.runtime_bound_param_names.contains(&param.name)
+        })
+        .map(|param| param.name.as_str())
+        .collect::<Vec<_>>();
+    let runtime_bound_params = selected
+        .runtime_bound_param_names
+        .iter()
+        .map(|name| name.as_str())
+        .chain(selected.params.iter().filter(|param| param.lock_args_data_source).map(|param| param.name.as_str()))
+        .collect::<Vec<_>>();
+    Ok(serde_json::json!({
+        "status": if entry_constraints.unsupported { "fail" } else { "ok" },
+        "abi": ENTRY_WITNESS_ABI,
+        "target_profile": metadata.target_profile.name,
+        "entry_kind": selected.kind,
+        "entry": selected.name,
+        "payload_params": payload_params,
+        "runtime_bound_params": runtime_bound_params,
+        "layout": entry_constraints,
+        "params": params,
+    }))
+}
+
+fn entry_witness_contract_json(selected: &SelectedEntryWitnessMetadata<'_>) -> serde_json::Value {
+    let payload_params = selected
+        .params
+        .iter()
+        .filter(|param| {
+            !param.lock_args_data_source
+                && !param.cell_bound_abi
+                && !param.ty.starts_with('&')
+                && !selected.runtime_bound_param_names.contains(&param.name)
+        })
+        .map(|param| {
+            serde_json::json!({
+                "name": param.name,
+                "type": param.ty,
+                "fixed_byte_len": param.fixed_byte_len,
+                "schema_pointer_abi": param.schema_pointer_abi,
+            })
+        })
+        .collect::<Vec<_>>();
+    serde_json::json!({
+        "abi": ENTRY_WITNESS_ABI,
+        "entry_kind": selected.kind,
+        "entry": selected.name,
+        "payload_params": payload_params,
+        "placement": entry_witness_placement_json(selected.kind),
+        "note": "cellc entry-witness emits the raw bytes consumed by the generated _cellscript_entry wrapper; do not wrap them in WitnessArgs.input_type by default"
+    })
+}
+
+fn entry_witness_placement_json(entry_kind: &str) -> serde_json::Value {
+    serde_json::json!({
+        "kind": "raw_script_group_witness",
+        "source": "GroupInput",
+        "group_index": 0,
+        "fallback_source": if entry_kind == "action" { serde_json::Value::String("GroupOutput".to_string()) } else { serde_json::Value::Null },
+        "fallback_group_index": if entry_kind == "action" { serde_json::Value::from(0) } else { serde_json::Value::Null },
+        "fallback_applies_to": if entry_kind == "action" {
+            serde_json::Value::String("output-only type-script action execution".to_string())
+        } else {
+            serde_json::Value::Null
+        },
+        "witness_args_policy": {
+            "input_type": "explicit only when CellScript source calls witness::input_type(...)",
+            "output_type": "explicit only when CellScript source calls witness::output_type(...)"
+        }
+    })
+}
+
+fn format_entry_command(input: Option<&PathBuf>, kind: &str, name: &str) -> String {
+    let input = input.map(|path| path.display().to_string()).unwrap_or_else(|| ".".to_string());
+    let selector = if kind == "lock" { "--lock" } else { "--action" };
+    format!("cellc entry-witness {input} --target-profile ckb {selector} {name} --arg <value> --json")
+}
+
 fn select_entry_witness_metadata<'a>(
     metadata: &'a CompileMetadata,
     action: Option<&str>,
@@ -6854,6 +7197,85 @@ impl CliParser {
                     .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
             )
             .subcommand(
+                ClapCommand::new("builder-manifest")
+                    .about("Emit one builder-facing JSON contract for a scoped action or lock")
+                    .arg(Arg::new("input").value_name("INPUT").help("Input .cell file, package directory, or Cell.toml"))
+                    .arg(Arg::new("output").long("output").short('o').value_name("FILE").help("Write builder manifest JSON"))
+                    .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
+                    .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
+                    .arg(
+                        Arg::new("entry-action")
+                            .long("entry-action")
+                            .value_name("ACTION")
+                            .conflicts_with("entry-lock")
+                            .help("Scope the manifest to one generated action entrypoint"),
+                    )
+                    .arg(
+                        Arg::new("entry-lock")
+                            .long("entry-lock")
+                            .value_name("LOCK")
+                            .conflicts_with("entry-action")
+                            .help("Scope the manifest to one generated lock entrypoint"),
+                    )
+                    .arg(
+                        Arg::new("resource-identities")
+                            .long("resource-identities")
+                            .value_name("PLAN_JSON")
+                            .help("Embed a resource identity plan emitted by cellc resource-identity"),
+                    )
+                    .arg(
+                        Arg::new("primitive-compat")
+                            .long("primitive-compat")
+                            .value_name("VERSION")
+                            .conflicts_with("primitive-strict")
+                            .help("Accept primitive syntax from a previous version with migration hints"),
+                    )
+                    .arg(
+                        Arg::new("primitive-strict")
+                            .long("primitive-strict")
+                            .value_name("VERSION")
+                            .conflicts_with("primitive-compat")
+                            .help("Require primitive syntax from a specific version"),
+                    )
+                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
+            )
+            .subcommand(
+                ClapCommand::new("builder-check")
+                    .about("Validate a candidate transaction against a builder manifest before signing")
+                    .arg(
+                        Arg::new("manifest").long("manifest").value_name("MANIFEST_JSON").required(true).help("Builder manifest JSON"),
+                    )
+                    .arg(Arg::new("tx").long("tx").value_name("TX_JSON").required(true).help("Candidate transaction JSON"))
+                    .arg(Arg::new("metadata").long("metadata").value_name("METADATA_JSON").help("Override embedded manifest metadata"))
+                    .arg(
+                        Arg::new("resource-identities")
+                            .long("resource-identities")
+                            .value_name("PLAN_JSON")
+                            .help("Resource identity plan emitted by cellc resource-identity"),
+                    )
+                    .arg(
+                        Arg::new("production")
+                            .long("production")
+                            .action(ArgAction::SetTrue)
+                            .help("Require production-facing resource identity guardrails"),
+                    )
+                    .arg(
+                        Arg::new("primitive-compat")
+                            .long("primitive-compat")
+                            .value_name("VERSION")
+                            .conflicts_with("primitive-strict")
+                            .help("Accept primitive metadata compatibility mode"),
+                    )
+                    .arg(
+                        Arg::new("primitive-strict")
+                            .long("primitive-strict")
+                            .value_name("VERSION")
+                            .conflicts_with("primitive-compat")
+                            .help("Require strict metadata assurance mode, e.g. 0.16"),
+                    )
+                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
+            )
+            .subcommand(
                 ClapCommand::new("resource-identity")
                     .about("Generate a passive resource type-script identity artifact and builder plan")
                     .arg(Arg::new("input").value_name("INPUT").help("Input .cell file, package directory, or Cell.toml"))
@@ -7364,6 +7786,32 @@ impl CliParser {
             Some(("validate-tx", m)) => Command::ValidateTx(ValidateTxArgs {
                 against: required_path!(m, "against", "metadata"),
                 tx: required_path!(m, "tx", "transaction JSON"),
+                resource_identities: m.get_one::<String>("resource-identities").map(PathBuf::from),
+                production: m.get_flag("production"),
+                primitive_compat: resolve_metadata_workflow_primitive_compat(
+                    m.get_one::<String>("primitive-compat").cloned(),
+                    m.get_one::<String>("primitive-strict").cloned(),
+                ),
+                json: m.get_flag("json"),
+            }),
+            Some(("builder-manifest", m)) => Command::BuilderManifest(BuilderManifestArgs {
+                input: m.get_one::<String>("input").map(PathBuf::from),
+                output: m.get_one::<String>("output").map(PathBuf::from),
+                target: m.get_one::<String>("target").cloned(),
+                target_profile: m.get_one::<String>("target-profile").cloned(),
+                entry_action: m.get_one::<String>("entry-action").cloned(),
+                entry_lock: m.get_one::<String>("entry-lock").cloned(),
+                resource_identities: m.get_one::<String>("resource-identities").map(PathBuf::from),
+                primitive_compat: resolve_metadata_workflow_primitive_compat(
+                    m.get_one::<String>("primitive-compat").cloned(),
+                    m.get_one::<String>("primitive-strict").cloned(),
+                ),
+                json: m.get_flag("json"),
+            }),
+            Some(("builder-check", m)) => Command::BuilderCheck(BuilderCheckArgs {
+                manifest: required_path!(m, "manifest", "builder manifest"),
+                tx: required_path!(m, "tx", "transaction JSON"),
+                metadata: m.get_one::<String>("metadata").map(PathBuf::from),
                 resource_identities: m.get_one::<String>("resource-identities").map(PathBuf::from),
                 production: m.get_flag("production"),
                 primitive_compat: resolve_metadata_workflow_primitive_compat(

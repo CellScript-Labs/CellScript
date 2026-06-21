@@ -131,6 +131,31 @@ cellc validate-tx --against build/action.elf.meta.json \
   build/tx.json --json
 ```
 
+For builder-facing integrations, prefer the manifest/check layer over manually
+stitching the lower-level reports together:
+
+```bash
+cellc builder-manifest examples/amm_pool.cell \
+  --entry-action swap_a_for_b \
+  --target-profile ckb \
+  --resource-identities build/resource-identities.json \
+  --output build/swap.builder.json \
+  --json
+
+cellc builder-check \
+  --manifest build/swap.builder.json \
+  --tx build/swap.tx.json \
+  --production \
+  --json
+```
+
+`builder-manifest` embeds
+`transaction_template.transaction_plan.builder_assumption_evidence_template` as
+a fillable JSON skeleton. Copy it into the candidate transaction as
+`builder_assumption_evidence`, then replace the placeholders with concrete
+builder facts such as selected live cells, output indexes, measured occupied
+capacity, fee/change accounting, and dry-run evidence.
+
 Fixture scripts such as `always_success` can still be useful in local shape
 tests, but they are not production resource identities. Treat them as
 `always_success_fixture_only`: acceptable in fixture, harness, or negative-test

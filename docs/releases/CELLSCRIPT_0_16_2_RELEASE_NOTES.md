@@ -24,8 +24,13 @@ transaction builders less dependent on copied harness conventions.
 - `cellc explain-assumptions` and `cellc solve-tx` can be scoped with
   `--entry-action` or `--entry-lock`, so external builders can consume the
   selected entrypoint contract instead of whole-module noise.
-- `cellc solve-tx --json` now exposes structural builder-evidence requirements
-  and a fixture identity policy.
+- `cellc entry-witness --json` now exposes raw script-group witness placement.
+- `cellc solve-tx --json` now exposes `submit_ready: false`, missing builder
+  steps, structural builder-evidence requirements, a fillable evidence
+  template, and a fixture identity policy.
+- `cellc builder-manifest` and `cellc builder-check` provide a two-step
+  builder-facing workflow over the lower-level ABI, constraints, witness,
+  assumption, resource identity, and validation commands.
 - Builder docs clarify that scoped action artifacts are active verifiers and
   must not be used as passive `MintAuthority`, `Token`, `Pool`, or `LPReceipt`
   resource identities.
@@ -39,5 +44,14 @@ cargo test --test v0_16 -- --nocapture
 ```
 
 The suite covers resource identity plan generation and validation, scoped
-assumption/solver output, wildcard structural evidence requirements, active
-artifact misuse rejection, and production fixture-identity rejection.
+assumption/solver output, wildcard structural evidence requirements, entry
+witness placement, builder manifest/check flow, active artifact misuse
+rejection, and production fixture-identity rejection.
+
+The builder UX was also smoke-tested against
+`WuodOdhis/cellscript-swap-builder` `main` at
+`479feb004338524d367b6656c6fb356ca7918f28`: the external Rust builder accepted
+compiler-generated entry witness bytes and passive `Token:token_out` resource
+identity, `cellc builder-check --production --primitive-strict 0.16` passed the
+positive transaction shape, and negative checks rejected both scoped action
+artifact and `always_success` fixture identities for the created token output.

@@ -686,6 +686,8 @@ registry dependency resolution remain experimental and fail-closed.
 | `cellc ckb-hash` | Compute CKB default Blake2b-256 hashes for builders and release evidence |
 | `cellc explain-assumptions` | Emit v0.16 builder-assumption evidence from ProofPlan metadata |
 | `cellc validate-tx` | Validate transaction JSON shape against builder assumptions before signing; add `--production` to reject fixture-only resource identities |
+| `cellc builder-manifest` | Emit one scoped builder contract JSON that packages ABI, witness placement, constraints, assumptions, and resource identity policy |
+| `cellc builder-check` | Validate a candidate transaction against a builder manifest before signing |
 | `cellc resource-identity` | Generate passive resource identity artifact and plan JSON for output type scripts |
 | `cellc solve-tx` | Emit a deterministic transaction template plus resource identity contract from metadata |
 | `cellc deploy-plan` | Emit a reproducible deployment plan |
