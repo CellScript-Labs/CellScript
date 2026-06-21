@@ -24,8 +24,13 @@ transaction builders less dependent on copied harness conventions.
 - `cellc explain-assumptions` and `cellc solve-tx` can be scoped with
   `--entry-action` or `--entry-lock`, so external builders can consume the
   selected entrypoint contract instead of whole-module noise.
-- `cellc entry-witness --json` now exposes raw script-group witness placement.
-- `cellc solve-tx --json` now exposes `submit_ready: false`, missing builder
+- Builder-facing contract commands now emit JSON by default; `--json` remains
+  accepted for compatibility, and `--human` prints a short terminal summary.
+- `cellc builder manifest` and `cellc builder check` are canonical namespace
+  forms; `builder-manifest` and `builder-check` remain aliases.
+- `cellc entry-witness` now exposes raw script-group witness placement in its
+  default JSON output.
+- `cellc solve-tx` now exposes `submit_ready: false`, missing builder
   steps, structural builder-evidence requirements, a fillable evidence
   template, and a fixture identity policy.
 - `cellc builder-manifest` and `cellc builder-check` provide a two-step

@@ -316,6 +316,7 @@ pub struct ExplainAssumptionsArgs {
     pub entry_lock: Option<String>,
     pub primitive_compat: Option<String>,
     pub json: bool,
+    pub human: bool,
 }
 
 #[derive(Debug, Default)]
@@ -387,6 +388,7 @@ pub struct ValidateTxArgs {
     pub production: bool,
     pub primitive_compat: Option<String>,
     pub json: bool,
+    pub human: bool,
 }
 
 #[derive(Debug, Default)]
@@ -400,6 +402,7 @@ pub struct BuilderManifestArgs {
     pub resource_identities: Option<PathBuf>,
     pub primitive_compat: Option<String>,
     pub json: bool,
+    pub human: bool,
 }
 
 #[derive(Debug, Default)]
@@ -411,6 +414,7 @@ pub struct BuilderCheckArgs {
     pub production: bool,
     pub primitive_compat: Option<String>,
     pub json: bool,
+    pub human: bool,
 }
 
 #[derive(Debug, Default)]
@@ -423,6 +427,7 @@ pub struct SolveTxArgs {
     pub entry_lock: Option<String>,
     pub primitive_compat: Option<String>,
     pub json: bool,
+    pub human: bool,
 }
 
 #[derive(Debug, Default)]
@@ -438,6 +443,7 @@ pub struct ResourceIdentityArgs {
     pub identities: Vec<String>,
     pub instance: Option<String>,
     pub json: bool,
+    pub human: bool,
 }
 
 #[derive(Debug, Default)]
@@ -492,6 +498,7 @@ pub struct EntryWitnessArgs {
     pub target: Option<String>,
     pub target_profile: Option<String>,
     pub json: bool,
+    pub human: bool,
 }
 
 #[derive(Debug, Default)]
@@ -1635,15 +1642,10 @@ impl CommandExecutor {
             "proof_plan_soundness": result.metadata.runtime.proof_plan_soundness,
             "builder_assumptions": assumptions,
         });
-        if args.json {
-            print_json(&summary)?;
+        if args.human {
+            print_explain_assumptions_human(&summary);
         } else {
-            println!("Builder assumptions for module `{}`", result.metadata.module);
-            println!("  Assumptions: {}", summary["assumption_count"]);
-            println!("  ProofPlan soundness: {}", summary["proof_plan_soundness"]["status"].as_str().unwrap_or("unknown"));
-            for assumption in result.metadata.runtime.builder_assumptions {
-                println!("  - {} [{}] {}", assumption.assumption_id, assumption.kind, assumption.feature);
-            }
+            print_json(&summary)?;
         }
         Ok(())
     }
@@ -1660,11 +1662,10 @@ impl CommandExecutor {
                 "tx": args.tx.display().to_string(),
                 "proof_plan_soundness": soundness,
             });
-            if args.json {
-                print_json(&summary)?;
+            if args.human {
+                print_validate_tx_human(&summary);
             } else {
-                println!("Transaction validation: failed");
-                println!("  Strict v0.16 ProofPlan soundness: failed");
+                print_json(&summary)?;
             }
             return Err(crate::error::CompileError::without_span(error_message));
         }
@@ -1687,10 +1688,10 @@ impl CommandExecutor {
             "resource_identity_plan": resource_identity_plan_path,
             "validation": report,
         });
-        if args.json {
-            print_json(&summary)?;
+        if args.human {
+            print_validate_tx_human(&summary);
         } else {
-            println!("Transaction validation: {}", summary["status"].as_str().unwrap_or("unknown"));
+            print_json(&summary)?;
         }
         if summary["status"] == "failed" {
             return Err(crate::error::CompileError::without_span("transaction violates builder assumptions"));
@@ -1738,10 +1739,19 @@ impl CommandExecutor {
             "commands": {
                 "entry_witness": format_entry_command(args.input.as_ref(), selected.kind, selected.name),
                 "resource_identity": "cellc resource-identity <input> --target-profile ckb --plan-output <resource-identities.json>",
-                "builder_check": "cellc builder-check --manifest <builder-manifest.json> --tx <tx.json> --production --json"
+                "builder_check": "cellc builder check --manifest <builder-manifest.json> --tx <tx.json> --production"
             }
         });
-        write_or_print_json(args.output.as_ref(), &manifest, args.json, "Builder manifest generated")?;
+        if args.human {
+            write_contract_json_with_human_summary(
+                args.output.as_ref(),
+                &manifest,
+                "Builder manifest generated",
+                print_builder_manifest_human,
+            )?;
+        } else {
+            write_or_print_json(args.output.as_ref(), &manifest, true, "Builder manifest generated")?;
+        }
         Ok(())
     }
 
@@ -1800,10 +1810,10 @@ impl CommandExecutor {
             "builder_assumption_evidence_template": builder_check_evidence_template_json(&manifest, &report),
             "missing_submit_steps": builder_check_missing_steps_json(&report),
         });
-        if args.json {
-            print_json(&summary)?;
+        if args.human {
+            print_builder_check_human(&summary);
         } else {
-            println!("Builder check: {}", summary["status"].as_str().unwrap_or("unknown"));
+            print_json(&summary)?;
         }
         if status == "failed" {
             return Err(crate::error::CompileError::without_span("builder check failed"));
@@ -1820,7 +1830,16 @@ impl CommandExecutor {
             args.entry_lock.as_deref(),
         )?;
         let template = transaction_solver_template(&result.metadata);
-        write_or_print_json(args.output.as_ref(), &template, args.json, "Transaction solver template generated")?;
+        if args.human {
+            write_contract_json_with_human_summary(
+                args.output.as_ref(),
+                &template,
+                "Transaction solver template generated",
+                print_solve_tx_human,
+            )?;
+        } else {
+            write_or_print_json(args.output.as_ref(), &template, true, "Transaction solver template generated")?;
+        }
         Ok(())
     }
 
@@ -1875,13 +1894,10 @@ impl CommandExecutor {
         })?;
         std::fs::write(&plan_output, plan_json)?;
 
-        if args.json {
-            print_json(&plan)?;
+        if args.human {
+            print_resource_identity_human(&plan, &output_path, &metadata_path, &plan_output);
         } else {
-            println!("{}", "Resource identity artifact generated".green());
-            println!("  Artifact: {}", output_path.display());
-            println!("  Metadata: {}", metadata_path);
-            println!("  Plan: {}", plan_output.display());
+            print_json(&plan)?;
         }
         Ok(())
     }
@@ -2425,24 +2441,21 @@ impl CommandExecutor {
             std::fs::write(output_path, &witness)?;
         }
 
-        if args.json {
-            let payload_param_names = payload_params.iter().map(|param| param.name.as_str()).collect::<Vec<_>>();
-            let summary = serde_json::json!({
-                "status": "ok",
-                "abi": ENTRY_WITNESS_ABI,
-                "entry_kind": selected.kind,
-                "entry": selected.name,
-                "witness_hex": witness_hex,
-                "witness_size_bytes": witness.len(),
-                "payload_args": witness_args.len(),
-                "payload_params": payload_param_names,
-                "placement": entry_witness_placement_json(selected.kind),
-                "output": args.output.as_ref().map(|path| path.display().to_string()),
-            });
-            let json = serde_json::to_string_pretty(&summary).map_err(|error| {
-                crate::error::CompileError::without_span(format!("failed to serialize entry witness summary: {}", error))
-            })?;
-            println!("{}", json);
+        let payload_param_names = payload_params.iter().map(|param| param.name.as_str()).collect::<Vec<_>>();
+        let summary = serde_json::json!({
+            "status": "ok",
+            "abi": ENTRY_WITNESS_ABI,
+            "entry_kind": selected.kind,
+            "entry": selected.name,
+            "witness_hex": witness_hex,
+            "witness_size_bytes": witness.len(),
+            "payload_args": witness_args.len(),
+            "payload_params": payload_param_names,
+            "placement": entry_witness_placement_json(selected.kind),
+            "output": args.output.as_ref().map(|path| path.display().to_string()),
+        });
+        if !args.human {
+            print_json(&summary)?;
             return Ok(());
         }
 
@@ -3307,6 +3320,174 @@ fn write_or_print_json(output: Option<&PathBuf>, value: &serde_json::Value, json
         println!("{}", json);
     }
     Ok(())
+}
+
+fn write_contract_json_with_human_summary(
+    output: Option<&PathBuf>,
+    value: &serde_json::Value,
+    label: &str,
+    print_summary: fn(&serde_json::Value),
+) -> Result<()> {
+    if let Some(output_path) = output {
+        let json = serde_json::to_string_pretty(value)
+            .map_err(|error| crate::error::CompileError::without_span(format!("failed to serialize JSON: {}", error)))?;
+        if let Some(parent) = output_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(output_path, json)?;
+        println!("{}", label.green());
+        println!("  Output: {}", output_path.display());
+    }
+    print_summary(value);
+    Ok(())
+}
+
+fn print_explain_assumptions_human(summary: &serde_json::Value) {
+    println!("Builder assumptions: {}", json_str(summary, "status"));
+    println!("  Module: {}", json_str(summary, "module"));
+    print_selected_entrypoint(summary.get("selected_entrypoint"));
+    println!("  Assumptions: {}", summary.get("assumption_count").and_then(serde_json::Value::as_u64).unwrap_or(0));
+    println!("  ProofPlan soundness: {}", json_pointer_str_or_unknown(summary, "/proof_plan_soundness/status"));
+    print_top_assumptions(summary.pointer("/builder_assumptions").and_then(serde_json::Value::as_array));
+}
+
+fn print_validate_tx_human(summary: &serde_json::Value) {
+    println!("Transaction validation: {}", json_str(summary, "status"));
+    println!("  Metadata: {}", json_str(summary, "metadata"));
+    println!("  Tx: {}", json_str(summary, "tx"));
+    if summary.get("production").and_then(serde_json::Value::as_bool).unwrap_or(false) {
+        println!("  Production guards: enabled");
+    }
+    if let Some(soundness_status) = summary.pointer("/proof_plan_soundness/status").and_then(serde_json::Value::as_str) {
+        println!("  ProofPlan soundness: {}", soundness_status);
+    }
+    print_validation_report(summary.get("validation"));
+}
+
+fn print_builder_manifest_human(manifest: &serde_json::Value) {
+    println!("  Schema: {}", json_str(manifest, "schema"));
+    println!("  Module: {}", json_str(manifest, "module"));
+    print_selected_entrypoint(manifest.get("selected_entrypoint"));
+    println!("  Submit ready: {}", json_bool(manifest, "submit_ready"));
+    println!(
+        "  Evidence template entries: {}",
+        json_pointer_object_len(manifest, "/transaction_template/transaction_plan/builder_assumption_evidence_template")
+    );
+    println!("  Resource identities: {}", json_pointer_array_len(manifest, "/resource_identity_plan/resource_identities"));
+    print_string_array("  Missing builder steps", manifest.get("missing_builder_steps"));
+}
+
+fn print_builder_check_human(summary: &serde_json::Value) {
+    println!("Builder check: {}", json_str(summary, "status"));
+    println!("  Manifest: {}", json_str(summary, "manifest"));
+    println!("  Tx: {}", json_str(summary, "tx"));
+    println!("  Pre-sign ready: {}", json_bool(summary, "pre_sign_ready"));
+    println!("  Submit ready: {}", json_bool(summary, "submit_ready"));
+    if summary.get("production").and_then(serde_json::Value::as_bool).unwrap_or(false) {
+        println!("  Production guards: enabled");
+    }
+    let manifest_violations = summary.get("manifest_violations").and_then(serde_json::Value::as_array).map_or(0, Vec::len);
+    if manifest_violations > 0 {
+        println!("  Manifest violations: {}", manifest_violations);
+    }
+    print_validation_report(summary.get("validation"));
+    print_string_array("  Missing submit steps", summary.get("missing_submit_steps"));
+}
+
+fn print_solve_tx_human(template: &serde_json::Value) {
+    println!("Transaction template: {}", json_str(template, "status"));
+    println!("  Module: {}", json_str(template, "module"));
+    println!("  Submit ready: {}", json_bool(template, "submit_ready"));
+    println!(
+        "  Evidence requirements: {}",
+        json_pointer_array_len(template, "/transaction_plan/builder_assumption_evidence_requirements")
+    );
+    println!("  Resource identity contracts: {}", json_pointer_array_len(template, "/transaction_plan/resource_identities"));
+    print_string_array("  Missing builder steps", template.get("missing_builder_steps"));
+}
+
+fn print_resource_identity_human(plan: &serde_json::Value, artifact: &Path, metadata: &Utf8Path, plan_output: &Path) {
+    println!("{}", "Resource identity artifact generated".green());
+    println!("  Artifact: {}", artifact.display());
+    println!("  Metadata: {}", metadata);
+    println!("  Plan: {}", plan_output.display());
+    println!("  Schema: {}", json_str(plan, "schema"));
+    println!("  Module: {}", json_str(plan, "module"));
+    println!("  Resource identities: {}", plan.get("resource_identities").and_then(serde_json::Value::as_array).map_or(0, Vec::len));
+}
+
+fn print_selected_entrypoint(value: Option<&serde_json::Value>) {
+    if let Some(entrypoint) = value {
+        let kind = entrypoint.get("kind").and_then(serde_json::Value::as_str).unwrap_or("unknown");
+        let name = entrypoint.get("name").and_then(serde_json::Value::as_str).unwrap_or("unknown");
+        println!("  Entrypoint: {} {}", kind, name);
+    }
+}
+
+fn print_top_assumptions(assumptions: Option<&Vec<serde_json::Value>>) {
+    let Some(assumptions) = assumptions else { return };
+    for assumption in assumptions.iter().take(5) {
+        println!(
+            "  - {} [{}] {}",
+            json_str(assumption, "assumption_id"),
+            json_str(assumption, "kind"),
+            json_str(assumption, "feature")
+        );
+    }
+    if assumptions.len() > 5 {
+        println!("  ... {} more", assumptions.len() - 5);
+    }
+}
+
+fn print_validation_report(report: Option<&serde_json::Value>) {
+    let Some(report) = report else { return };
+    println!("  Validation: {}", json_str(report, "status"));
+    println!(
+        "  Inputs/outputs/cell_deps/witnesses: {}/{}/{}/{}",
+        report.get("input_count").and_then(serde_json::Value::as_u64).unwrap_or(0),
+        report.get("output_count").and_then(serde_json::Value::as_u64).unwrap_or(0),
+        report.get("cell_dep_count").and_then(serde_json::Value::as_u64).unwrap_or(0),
+        report.get("witness_count").and_then(serde_json::Value::as_u64).unwrap_or(0),
+    );
+    let Some(violations) = report.get("violations").and_then(serde_json::Value::as_array) else { return };
+    if violations.is_empty() {
+        return;
+    }
+    println!("  Violations: {}", violations.len());
+    for violation in violations.iter().take(5) {
+        println!("  - {}: {}", json_str(violation, "kind"), json_str(violation, "message"));
+    }
+    if violations.len() > 5 {
+        println!("  ... {} more", violations.len() - 5);
+    }
+}
+
+fn print_string_array(label: &str, value: Option<&serde_json::Value>) {
+    let Some(items) = value.and_then(serde_json::Value::as_array) else { return };
+    if items.is_empty() {
+        return;
+    }
+    println!("{}: {}", label, items.iter().filter_map(serde_json::Value::as_str).collect::<Vec<_>>().join(", "));
+}
+
+fn json_str<'a>(value: &'a serde_json::Value, key: &str) -> &'a str {
+    value.get(key).and_then(serde_json::Value::as_str).unwrap_or("unknown")
+}
+
+fn json_pointer_str_or_unknown<'a>(value: &'a serde_json::Value, pointer: &str) -> &'a str {
+    value.pointer(pointer).and_then(serde_json::Value::as_str).unwrap_or("unknown")
+}
+
+fn json_bool(value: &serde_json::Value, key: &str) -> bool {
+    value.get(key).and_then(serde_json::Value::as_bool).unwrap_or(false)
+}
+
+fn json_pointer_array_len(value: &serde_json::Value, pointer: &str) -> usize {
+    value.pointer(pointer).and_then(serde_json::Value::as_array).map_or(0, Vec::len)
+}
+
+fn json_pointer_object_len(value: &serde_json::Value, pointer: &str) -> usize {
+    value.pointer(pointer).and_then(serde_json::Value::as_object).map_or(0, serde_json::Map::len)
 }
 
 fn print_or_text_json(json: bool, value: &serde_json::Value, label: &str) -> Result<()> {
@@ -6710,6 +6891,139 @@ fn hex_nibble(byte: u8) -> Option<u8> {
 
 pub struct CliParser;
 
+fn contract_json_arg() -> clap::Arg {
+    clap::Arg::new("json")
+        .long("json")
+        .conflicts_with("human")
+        .action(clap::ArgAction::SetTrue)
+        .help("Compatibility no-op: contract commands emit JSON by default")
+}
+
+fn contract_human_arg() -> clap::Arg {
+    clap::Arg::new("human")
+        .long("human")
+        .conflicts_with("json")
+        .action(clap::ArgAction::SetTrue)
+        .help("Emit a concise human-readable summary instead of the default JSON contract")
+}
+
+fn builder_manifest_clap_command(name: &'static str) -> clap::Command {
+    use clap::Arg;
+    clap::Command::new(name)
+        .about("Emit one builder-facing JSON contract for a scoped action or lock")
+        .arg(Arg::new("input").value_name("INPUT").help("Input .cell file, package directory, or Cell.toml"))
+        .arg(Arg::new("output").long("output").short('o').value_name("FILE").help("Write builder manifest JSON"))
+        .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
+        .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
+        .arg(
+            Arg::new("entry-action")
+                .long("entry-action")
+                .value_name("ACTION")
+                .conflicts_with("entry-lock")
+                .help("Scope the manifest to one generated action entrypoint"),
+        )
+        .arg(
+            Arg::new("entry-lock")
+                .long("entry-lock")
+                .value_name("LOCK")
+                .conflicts_with("entry-action")
+                .help("Scope the manifest to one generated lock entrypoint"),
+        )
+        .arg(
+            Arg::new("resource-identities")
+                .long("resource-identities")
+                .value_name("PLAN_JSON")
+                .help("Embed a resource identity plan emitted by cellc resource-identity"),
+        )
+        .arg(
+            Arg::new("primitive-compat")
+                .long("primitive-compat")
+                .value_name("VERSION")
+                .conflicts_with("primitive-strict")
+                .help("Accept primitive syntax from a previous version with migration hints"),
+        )
+        .arg(
+            Arg::new("primitive-strict")
+                .long("primitive-strict")
+                .value_name("VERSION")
+                .conflicts_with("primitive-compat")
+                .help("Require primitive syntax from a specific version"),
+        )
+        .arg(contract_json_arg())
+        .arg(contract_human_arg())
+}
+
+fn builder_check_clap_command(name: &'static str) -> clap::Command {
+    use clap::Arg;
+    clap::Command::new(name)
+        .about("Validate a candidate transaction against a builder manifest before signing")
+        .arg(Arg::new("manifest").long("manifest").value_name("MANIFEST_JSON").required(true).help("Builder manifest JSON"))
+        .arg(Arg::new("tx").long("tx").value_name("TX_JSON").required(true).help("Candidate transaction JSON"))
+        .arg(Arg::new("metadata").long("metadata").value_name("METADATA_JSON").help("Override embedded manifest metadata"))
+        .arg(
+            Arg::new("resource-identities")
+                .long("resource-identities")
+                .value_name("PLAN_JSON")
+                .help("Resource identity plan emitted by cellc resource-identity"),
+        )
+        .arg(
+            Arg::new("production")
+                .long("production")
+                .action(clap::ArgAction::SetTrue)
+                .help("Require production-facing resource identity guardrails"),
+        )
+        .arg(
+            Arg::new("primitive-compat")
+                .long("primitive-compat")
+                .value_name("VERSION")
+                .conflicts_with("primitive-strict")
+                .help("Accept primitive metadata compatibility mode"),
+        )
+        .arg(
+            Arg::new("primitive-strict")
+                .long("primitive-strict")
+                .value_name("VERSION")
+                .conflicts_with("primitive-compat")
+                .help("Require strict metadata assurance mode, e.g. 0.16"),
+        )
+        .arg(contract_json_arg())
+        .arg(contract_human_arg())
+}
+
+fn builder_manifest_args_from_matches(m: &clap::ArgMatches) -> BuilderManifestArgs {
+    BuilderManifestArgs {
+        input: m.get_one::<String>("input").map(PathBuf::from),
+        output: m.get_one::<String>("output").map(PathBuf::from),
+        target: m.get_one::<String>("target").cloned(),
+        target_profile: m.get_one::<String>("target-profile").cloned(),
+        entry_action: m.get_one::<String>("entry-action").cloned(),
+        entry_lock: m.get_one::<String>("entry-lock").cloned(),
+        resource_identities: m.get_one::<String>("resource-identities").map(PathBuf::from),
+        primitive_compat: resolve_metadata_workflow_primitive_compat(
+            m.get_one::<String>("primitive-compat").cloned(),
+            m.get_one::<String>("primitive-strict").cloned(),
+        ),
+        json: m.get_flag("json"),
+        human: m.get_flag("human"),
+    }
+}
+
+fn builder_check_args_from_matches(m: &clap::ArgMatches) -> BuilderCheckArgs {
+    BuilderCheckArgs {
+        manifest: m.get_one::<String>("manifest").map(PathBuf::from).unwrap_or_default(),
+        tx: m.get_one::<String>("tx").map(PathBuf::from).unwrap_or_default(),
+        metadata: m.get_one::<String>("metadata").map(PathBuf::from),
+        resource_identities: m.get_one::<String>("resource-identities").map(PathBuf::from),
+        production: m.get_flag("production"),
+        primitive_compat: resolve_metadata_workflow_primitive_compat(
+            m.get_one::<String>("primitive-compat").cloned(),
+            m.get_one::<String>("primitive-strict").cloned(),
+        ),
+        json: m.get_flag("json"),
+        human: m.get_flag("human"),
+    }
+}
+
 impl CliParser {
     pub fn parse() -> Command {
         use clap::{Arg, ArgAction, Command as ClapCommand};
@@ -7028,7 +7342,8 @@ impl CliParser {
                             .conflicts_with("primitive-compat")
                             .help("Require primitive syntax from a specific version (e.g. 0.15 or 0.16), reject legacy forms"),
                     )
-                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
+                    .arg(contract_json_arg())
+                    .arg(contract_human_arg()),
             )
             .subcommand(
                 ClapCommand::new("explain-generics")
@@ -7057,7 +7372,8 @@ impl CliParser {
                     .about("Diff ProofPlan semantics between two metadata files")
                     .arg(Arg::new("old").value_name("OLD_METADATA").required(true))
                     .arg(Arg::new("new").value_name("NEW_METADATA").required(true))
-                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
+                    .arg(contract_json_arg())
+                    .arg(contract_human_arg()),
             )
             .subcommand(
                 ClapCommand::new("profile")
@@ -7080,7 +7396,8 @@ impl CliParser {
                             .conflicts_with("primitive-compat")
                             .help("Require primitive syntax from a specific version (e.g. 0.15 or 0.16), reject legacy forms"),
                     )
-                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
+                    .arg(contract_json_arg())
+                    .arg(contract_human_arg()),
             )
             .subcommand(
                 ClapCommand::new("trace-tx")
@@ -7194,86 +7511,18 @@ impl CliParser {
                             .conflicts_with("primitive-compat")
                             .help("Require strict metadata assurance mode, e.g. 0.16"),
                     )
-                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
+                    .arg(contract_json_arg())
+                    .arg(contract_human_arg()),
             )
+            .subcommand(builder_manifest_clap_command("builder-manifest"))
+            .subcommand(builder_check_clap_command("builder-check"))
             .subcommand(
-                ClapCommand::new("builder-manifest")
-                    .about("Emit one builder-facing JSON contract for a scoped action or lock")
-                    .arg(Arg::new("input").value_name("INPUT").help("Input .cell file, package directory, or Cell.toml"))
-                    .arg(Arg::new("output").long("output").short('o').value_name("FILE").help("Write builder manifest JSON"))
-                    .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
-                    .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
-                    .arg(
-                        Arg::new("entry-action")
-                            .long("entry-action")
-                            .value_name("ACTION")
-                            .conflicts_with("entry-lock")
-                            .help("Scope the manifest to one generated action entrypoint"),
-                    )
-                    .arg(
-                        Arg::new("entry-lock")
-                            .long("entry-lock")
-                            .value_name("LOCK")
-                            .conflicts_with("entry-action")
-                            .help("Scope the manifest to one generated lock entrypoint"),
-                    )
-                    .arg(
-                        Arg::new("resource-identities")
-                            .long("resource-identities")
-                            .value_name("PLAN_JSON")
-                            .help("Embed a resource identity plan emitted by cellc resource-identity"),
-                    )
-                    .arg(
-                        Arg::new("primitive-compat")
-                            .long("primitive-compat")
-                            .value_name("VERSION")
-                            .conflicts_with("primitive-strict")
-                            .help("Accept primitive syntax from a previous version with migration hints"),
-                    )
-                    .arg(
-                        Arg::new("primitive-strict")
-                            .long("primitive-strict")
-                            .value_name("VERSION")
-                            .conflicts_with("primitive-compat")
-                            .help("Require primitive syntax from a specific version"),
-                    )
-                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
-            )
-            .subcommand(
-                ClapCommand::new("builder-check")
-                    .about("Validate a candidate transaction against a builder manifest before signing")
-                    .arg(
-                        Arg::new("manifest").long("manifest").value_name("MANIFEST_JSON").required(true).help("Builder manifest JSON"),
-                    )
-                    .arg(Arg::new("tx").long("tx").value_name("TX_JSON").required(true).help("Candidate transaction JSON"))
-                    .arg(Arg::new("metadata").long("metadata").value_name("METADATA_JSON").help("Override embedded manifest metadata"))
-                    .arg(
-                        Arg::new("resource-identities")
-                            .long("resource-identities")
-                            .value_name("PLAN_JSON")
-                            .help("Resource identity plan emitted by cellc resource-identity"),
-                    )
-                    .arg(
-                        Arg::new("production")
-                            .long("production")
-                            .action(ArgAction::SetTrue)
-                            .help("Require production-facing resource identity guardrails"),
-                    )
-                    .arg(
-                        Arg::new("primitive-compat")
-                            .long("primitive-compat")
-                            .value_name("VERSION")
-                            .conflicts_with("primitive-strict")
-                            .help("Accept primitive metadata compatibility mode"),
-                    )
-                    .arg(
-                        Arg::new("primitive-strict")
-                            .long("primitive-strict")
-                            .value_name("VERSION")
-                            .conflicts_with("primitive-compat")
-                            .help("Require strict metadata assurance mode, e.g. 0.16"),
-                    )
-                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
+                ClapCommand::new("builder")
+                    .about("Builder-facing manifest and transaction checks")
+                    .subcommand_required(true)
+                    .arg_required_else_help(true)
+                    .subcommand(builder_manifest_clap_command("manifest"))
+                    .subcommand(builder_check_clap_command("check")),
             )
             .subcommand(
                 ClapCommand::new("resource-identity")
@@ -7330,7 +7579,8 @@ impl CliParser {
                             .conflicts_with("primitive-compat")
                             .help("Require primitive syntax from a specific version"),
                     )
-                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
+                    .arg(contract_json_arg())
+                    .arg(contract_human_arg()),
             )
             .subcommand(
                 ClapCommand::new("solve-tx")
@@ -7367,7 +7617,8 @@ impl CliParser {
                             .conflicts_with("primitive-compat")
                             .help("Require primitive syntax from a specific version (e.g. 0.15 or 0.16), reject legacy forms"),
                     )
-                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
+                    .arg(contract_json_arg())
+                    .arg(contract_human_arg()),
             )
             .subcommand(
                 ClapCommand::new("deploy-plan")
@@ -7431,7 +7682,8 @@ impl CliParser {
                     .arg(Arg::new("output").long("output").short('o').value_name("FILE").help("Write raw witness bytes to a file"))
                     .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
                     .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
-                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON summary")),
+                    .arg(contract_json_arg())
+                    .arg(contract_human_arg()),
             )
             .subcommand(
                 ClapCommand::new("verify-artifact")
@@ -7726,6 +7978,7 @@ impl CliParser {
                     m.get_one::<String>("primitive-strict").cloned(),
                 ),
                 json: m.get_flag("json"),
+                human: m.get_flag("human"),
             }),
             Some(("explain-generics", m)) => Command::ExplainGenerics(ExplainGenericsArgs {
                 input: m.get_one::<String>("input").map(PathBuf::from),
@@ -7793,33 +8046,15 @@ impl CliParser {
                     m.get_one::<String>("primitive-strict").cloned(),
                 ),
                 json: m.get_flag("json"),
+                human: m.get_flag("human"),
             }),
-            Some(("builder-manifest", m)) => Command::BuilderManifest(BuilderManifestArgs {
-                input: m.get_one::<String>("input").map(PathBuf::from),
-                output: m.get_one::<String>("output").map(PathBuf::from),
-                target: m.get_one::<String>("target").cloned(),
-                target_profile: m.get_one::<String>("target-profile").cloned(),
-                entry_action: m.get_one::<String>("entry-action").cloned(),
-                entry_lock: m.get_one::<String>("entry-lock").cloned(),
-                resource_identities: m.get_one::<String>("resource-identities").map(PathBuf::from),
-                primitive_compat: resolve_metadata_workflow_primitive_compat(
-                    m.get_one::<String>("primitive-compat").cloned(),
-                    m.get_one::<String>("primitive-strict").cloned(),
-                ),
-                json: m.get_flag("json"),
-            }),
-            Some(("builder-check", m)) => Command::BuilderCheck(BuilderCheckArgs {
-                manifest: required_path!(m, "manifest", "builder manifest"),
-                tx: required_path!(m, "tx", "transaction JSON"),
-                metadata: m.get_one::<String>("metadata").map(PathBuf::from),
-                resource_identities: m.get_one::<String>("resource-identities").map(PathBuf::from),
-                production: m.get_flag("production"),
-                primitive_compat: resolve_metadata_workflow_primitive_compat(
-                    m.get_one::<String>("primitive-compat").cloned(),
-                    m.get_one::<String>("primitive-strict").cloned(),
-                ),
-                json: m.get_flag("json"),
-            }),
+            Some(("builder-manifest", m)) => Command::BuilderManifest(builder_manifest_args_from_matches(m)),
+            Some(("builder-check", m)) => Command::BuilderCheck(builder_check_args_from_matches(m)),
+            Some(("builder", m)) => match m.subcommand() {
+                Some(("manifest", manifest)) => Command::BuilderManifest(builder_manifest_args_from_matches(manifest)),
+                Some(("check", check)) => Command::BuilderCheck(builder_check_args_from_matches(check)),
+                _ => Command::BuilderManifest(BuilderManifestArgs::default()),
+            },
             Some(("resource-identity", m)) => Command::ResourceIdentity(ResourceIdentityArgs {
                 input: m.get_one::<String>("input").map(PathBuf::from),
                 output: m.get_one::<String>("output").map(PathBuf::from),
@@ -7835,6 +8070,7 @@ impl CliParser {
                 identities: m.get_many::<String>("identity").map(|values| values.cloned().collect()).unwrap_or_default(),
                 instance: m.get_one::<String>("instance").cloned(),
                 json: m.get_flag("json"),
+                human: m.get_flag("human"),
             }),
             Some(("solve-tx", m)) => Command::SolveTx(SolveTxArgs {
                 input: m.get_one::<String>("input").map(PathBuf::from),
@@ -7848,6 +8084,7 @@ impl CliParser {
                     m.get_one::<String>("primitive-strict").cloned(),
                 ),
                 json: m.get_flag("json"),
+                human: m.get_flag("human"),
             }),
             Some(("deploy-plan", m)) => Command::DeployPlan(DeployPlanArgs {
                 input: m.get_one::<String>("input").map(PathBuf::from),
@@ -7891,6 +8128,7 @@ impl CliParser {
                 target: m.get_one::<String>("target").cloned(),
                 target_profile: m.get_one::<String>("target-profile").cloned(),
                 json: m.get_flag("json"),
+                human: m.get_flag("human"),
             }),
             Some(("verify-artifact", m)) => Command::VerifyArtifact(VerifyArtifactArgs {
                 artifact: required_path!(m, "artifact", "artifact"),

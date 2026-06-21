@@ -128,26 +128,27 @@ builders should pass the plan back into validation:
 ```bash
 cellc validate-tx --against build/action.elf.meta.json \
   --resource-identities build/resource-identities.json \
-  build/tx.json --json
+  build/tx.json
 ```
 
 For builder-facing integrations, prefer the manifest/check layer over manually
 stitching the lower-level reports together:
 
 ```bash
-cellc builder-manifest examples/amm_pool.cell \
+cellc builder manifest examples/amm_pool.cell \
   --entry-action swap_a_for_b \
   --target-profile ckb \
   --resource-identities build/resource-identities.json \
-  --output build/swap.builder.json \
-  --json
+  --output build/swap.builder.json
 
-cellc builder-check \
+cellc builder check \
   --manifest build/swap.builder.json \
   --tx build/swap.tx.json \
-  --production \
-  --json
+  --production
 ```
+
+These builder-facing commands emit JSON by default. Add `--human` when you want
+a short terminal summary instead of the contract JSON.
 
 `builder-manifest` embeds
 `transaction_template.transaction_plan.builder_assumption_evidence_template` as
@@ -168,7 +169,7 @@ For production-facing validation, pass `--production`:
 cellc validate-tx --against build/action.elf.meta.json \
   --resource-identities build/resource-identities.json \
   --production \
-  build/tx.json --json
+  build/tx.json
 ```
 
 In production mode, `validate-tx` rejects known fixture-only resource type

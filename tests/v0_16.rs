@@ -1180,8 +1180,7 @@ fn cli_resource_identity_generates_plan_and_validate_tx_checks_it() {
         .arg("--plan-output")
         .arg(&plan_path)
         .arg("--identity")
-        .arg("Token:output=test-token")
-        .arg("--json");
+        .arg("Token:output=test-token");
     let plan_json = run_success_json(resource_identity);
     assert_eq!(plan_json["status"], "ok", "{plan_json:#?}");
     assert!(artifact.exists());
@@ -1291,7 +1290,8 @@ fn cli_builder_manifest_and_builder_check_validate_resource_identity_flow() {
 
     let mut manifest = cellc_command();
     manifest
-        .arg("builder-manifest")
+        .arg("builder")
+        .arg("manifest")
         .arg(&source)
         .arg("--target-profile")
         .arg("ckb")
@@ -1300,8 +1300,7 @@ fn cli_builder_manifest_and_builder_check_validate_resource_identity_flow() {
         .arg("--resource-identities")
         .arg(&plan_path)
         .arg("--output")
-        .arg(&manifest_path)
-        .arg("--json");
+        .arg(&manifest_path);
     let manifest_json = run_success_json(manifest);
     assert_eq!(manifest_json["status"], "ok", "{manifest_json:#?}");
     let manifest_value: serde_json::Value = serde_json::from_slice(&std::fs::read(&manifest_path).unwrap()).unwrap();
@@ -1332,14 +1331,7 @@ fn cli_builder_manifest_and_builder_check_validate_resource_identity_flow() {
     std::fs::write(&tx_path, serde_json::to_vec_pretty(&tx).unwrap()).unwrap();
 
     let mut builder_check = cellc_command();
-    builder_check
-        .arg("builder-check")
-        .arg("--manifest")
-        .arg(&manifest_path)
-        .arg("--tx")
-        .arg(&tx_path)
-        .arg("--production")
-        .arg("--json");
+    builder_check.arg("builder").arg("check").arg("--manifest").arg(&manifest_path).arg("--tx").arg(&tx_path).arg("--production");
     let check_json = run_success_json(builder_check);
     assert_eq!(check_json["schema"], "cellscript-builder-check-v0.16.2", "{check_json:#?}");
     assert_eq!(check_json["status"], "ok", "{check_json:#?}");
@@ -1350,6 +1342,23 @@ fn cli_builder_manifest_and_builder_check_validate_resource_identity_flow() {
         !check_json["missing_submit_steps"].as_array().unwrap().iter().any(|step| step == "builder_assumption_evidence"),
         "{check_json:#?}"
     );
+
+    let mut builder_check_human = cellc_command();
+    let human_output = builder_check_human
+        .arg("builder")
+        .arg("check")
+        .arg("--manifest")
+        .arg(&manifest_path)
+        .arg("--tx")
+        .arg(&tx_path)
+        .arg("--production")
+        .arg("--human")
+        .output()
+        .unwrap();
+    assert!(human_output.status.success(), "stderr: {}", String::from_utf8_lossy(&human_output.stderr));
+    let human_stdout = String::from_utf8_lossy(&human_output.stdout);
+    assert!(human_stdout.contains("Builder check: ok"), "{human_stdout}");
+    assert!(serde_json::from_slice::<serde_json::Value>(&human_output.stdout).is_err(), "{human_stdout}");
 }
 
 #[test]

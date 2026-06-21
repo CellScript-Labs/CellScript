@@ -14,7 +14,7 @@ use cellscript::{
 #[command(about = "CellScript compiler for CKB blockchain")]
 #[command(version = cellscript::VERSION)]
 #[command(
-    after_help = "Commands: build, test, doc, fmt, init, new, add, remove, clean, repl, check, metadata, constraints, abi, scheduler-plan, ckb-hash, explain, explain-profile, explain-proof, explain-assumptions, explain-generics, opt-report, proof-diff, profile, trace-tx, audit-bundle, certify, validate-tx, builder-manifest, builder-check, resource-identity, solve-tx, deploy-plan, verify-deploy, diff-deploy, lock-deps, action build, entry-witness, verify-artifact, run, publish, install, update, info, login"
+    after_help = "Commands: build, test, doc, fmt, init, new, add, remove, clean, repl, check, metadata, constraints, abi, scheduler-plan, ckb-hash, explain, explain-profile, explain-proof, explain-assumptions, explain-generics, opt-report, proof-diff, profile, trace-tx, audit-bundle, certify, validate-tx, builder manifest, builder check, builder-manifest, builder-check, resource-identity, solve-tx, deploy-plan, verify-deploy, diff-deploy, lock-deps, action build, entry-witness, verify-artifact, run, publish, install, update, info, login"
 )]
 struct Cli {
     #[arg(value_name = "INPUT")]
@@ -105,6 +105,7 @@ fn main() {
                     | "audit-bundle"
                     | "certify"
                     | "validate-tx"
+                    | "builder"
                     | "builder-manifest"
                     | "builder-check"
                     | "resource-identity"

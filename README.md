@@ -108,8 +108,8 @@ Inspect what the compiler can explain about the NFT example:
 cellc metadata examples/nft.cell --target-profile ckb
 cellc constraints examples/nft.cell --target-profile ckb
 cellc scheduler-plan examples/nft.cell --target-profile ckb
-cellc explain-assumptions examples/nft.cell --target-profile ckb --json
-cellc solve-tx examples/nft.cell --target-profile ckb --json
+cellc explain-assumptions examples/nft.cell --target-profile ckb
+cellc solve-tx examples/nft.cell --target-profile ckb
 cellc deploy-plan examples/nft.cell --target-profile ckb --json
 cellc profile examples/nft.cell --target-profile ckb --json
 cellc audit-bundle examples/nft.cell --target-profile ckb --json
@@ -686,8 +686,8 @@ registry dependency resolution remain experimental and fail-closed.
 | `cellc ckb-hash` | Compute CKB default Blake2b-256 hashes for builders and release evidence |
 | `cellc explain-assumptions` | Emit v0.16 builder-assumption evidence from ProofPlan metadata |
 | `cellc validate-tx` | Validate transaction JSON shape against builder assumptions before signing; add `--production` to reject fixture-only resource identities |
-| `cellc builder-manifest` | Emit one scoped builder contract JSON that packages ABI, witness placement, constraints, assumptions, and resource identity policy |
-| `cellc builder-check` | Validate a candidate transaction against a builder manifest before signing |
+| `cellc builder manifest` / `builder-manifest` | Emit one scoped builder contract JSON that packages ABI, witness placement, constraints, assumptions, and resource identity policy |
+| `cellc builder check` / `builder-check` | Validate a candidate transaction against a builder manifest before signing |
 | `cellc resource-identity` | Generate passive resource identity artifact and plan JSON for output type scripts |
 | `cellc solve-tx` | Emit a deterministic transaction template plus resource identity contract from metadata |
 | `cellc deploy-plan` | Emit a reproducible deployment plan |
@@ -716,6 +716,7 @@ registry dependency resolution remain experimental and fail-closed.
 | `--entry-action <ACTION>` | Compile a single action as the artifact entrypoint |
 | `--entry-lock <LOCK>` | Compile a single lock as the artifact entrypoint |
 | `--json` | Emit machine-readable summaries where supported |
+| `--human` | For builder-facing contract commands, print a concise summary instead of the default JSON |
 | `--production` | Apply production-oriented metadata policy checks |
 | `--deny-fail-closed` | Reject fail-closed runtime features or obligations |
 | `--deny-ckb-runtime` | Reject CKB transaction/syscall runtime requirements |
