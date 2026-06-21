@@ -27,7 +27,6 @@ pub(crate) const ELF_HEADER_SIZE: usize = 64;
 pub(crate) const ELF_PROGRAM_HEADER_SIZE: usize = 56;
 pub(crate) const ELF_SEGMENT_ALIGN: usize = 0x1000;
 pub(crate) const ELF_BASE_ADDR: u64 = 0x10000;
-pub(crate) const CKB_SCRIPT_STACK_TOP: i64 = 0x3f0000;
 pub(crate) const EXIT_SYSCALL_NUMBER: i64 = 93;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -262,7 +261,6 @@ pub(crate) fn assemble_elf_internal(lines: &[String]) -> Result<Vec<u8>> {
     let rodata_offset = layout.rodata_offset()?;
     let trampoline_size = start_trampoline_size();
     let mut text_bytes = Vec::with_capacity(trampoline_size + text_user_size);
-    encode_li_sequence(&mut text_bytes, 2, i128::from(CKB_SCRIPT_STACK_TOP))?;
     if entry_requires_explicit_parameter_abi(lines, entry_label) {
         encode_li_sequence(&mut text_bytes, 10, 25)?;
     } else {
@@ -403,7 +401,6 @@ impl Drop for TempDirCleanup {
 fn render_external_assembly(lines: &[String], entry_label: &str) -> String {
     let mut rendered =
         vec![".section .text".to_string(), ".global _start".to_string(), ".type _start, @function".to_string(), "_start:".to_string()];
-    rendered.push(format!("    li sp, {}", CKB_SCRIPT_STACK_TOP));
     if entry_requires_explicit_parameter_abi(lines, entry_label) {
         let error = CellScriptRuntimeError::EntryWitnessAbiInvalid;
         rendered.push(format!("    # cellscript runtime error {} {}", error.code(), error.name()));
@@ -1619,7 +1616,7 @@ fn li_sequence_size(imm: i128) -> usize {
 }
 
 fn start_trampoline_size() -> usize {
-    li_sequence_size(i128::from(CKB_SCRIPT_STACK_TOP)) + 8 + li_sequence_size(i128::from(EXIT_SYSCALL_NUMBER)) + 4
+    8 + li_sequence_size(i128::from(EXIT_SYSCALL_NUMBER)) + 4
 }
 
 fn write_elf_header(out: &mut [u8], entry: u64, program_header_count: u16) -> Result<()> {
@@ -2164,5 +2161,31 @@ mod tests {
         let rodata_start = segment_file_offset + plan.layout.rodata_offset().unwrap();
         assert!(rodata_start < elf.len(), "rodata should be inside the load segment");
         assert_eq!(elf[rodata_start], 1);
+    }
+
+    #[test]
+    fn strict_audit_internal_elf_trampoline_preserves_ckb_vm_stack_pointer() {
+        let lines = vec![".section .text".to_string(), ".global entry".to_string(), "entry:".to_string(), "ret".to_string()];
+
+        let elf = assemble_elf_internal(&lines).expect("minimal ELF should assemble");
+        let segment_file_offset = align_up(ELF_HEADER_SIZE + ELF_PROGRAM_HEADER_SIZE, ELF_SEGMENT_ALIGN);
+        let first_instruction = u32_le(&elf, segment_file_offset);
+
+        assert_eq!(first_instruction & 0x7f, 0x17, "trampoline should call the entrypoint, not load sp");
+        assert_eq!((first_instruction >> 7) & 0x1f, 1, "trampoline call should target ra");
+        assert_eq!(u32_le(&elf, segment_file_offset + start_trampoline_size()), 0x0000_8067, "entry body should follow trampoline");
+    }
+
+    #[test]
+    fn strict_audit_external_elf_trampoline_preserves_ckb_vm_stack_pointer() {
+        let lines = vec![".section .text".to_string(), ".global entry".to_string(), "entry:".to_string(), "ret".to_string()];
+
+        let rendered = render_external_assembly(&lines, "entry");
+
+        assert!(
+            !rendered.lines().any(|line| line.trim_start().starts_with("li sp,")),
+            "external assembly trampoline must not overwrite the CKB VM stack pointer:\n{rendered}"
+        );
+        assert!(rendered.contains("\n    call entry\n"), "external assembly should call the entrypoint:\n{rendered}");
     }
 }

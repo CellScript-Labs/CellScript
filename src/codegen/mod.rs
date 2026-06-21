@@ -2580,8 +2580,7 @@ pub(crate) use assembler::{
     small_signed_immediate, strip_comment, unreachable_machine_block_count, validate_explicit_toolchain_path,
     validate_machine_layout_order, AsmOp, BackendLayoutMetrics, BranchSizeMode, Instruction, MachineBlock, MachineBlockCoverage,
     MachineCfg, MachineCfgEdge, MachineCfgEdgeKind, MachineLayoutOrder, MachineLayoutPlan, MachinePlacedBlock, MachineTerminator,
-    ParsedAssembly, SectionKind, SectionLayout, SymbolDef, TextOpLayout, CKB_SCRIPT_STACK_TOP, ELF_HEADER_SIZE,
-    ELF_PROGRAM_HEADER_SIZE,
+    ParsedAssembly, SectionKind, SectionLayout, SymbolDef, TextOpLayout, ELF_HEADER_SIZE, ELF_PROGRAM_HEADER_SIZE,
 };
 #[allow(unused_imports)]
 pub(crate) use schema::{
