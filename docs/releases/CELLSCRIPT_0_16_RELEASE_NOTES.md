@@ -43,7 +43,7 @@ In practical terms, this means:
 The initial 0.16.0 release kept some bundled-example bootstrap paths
 conservative. The current 0.16 patch line closes the token/AMM/launch and NFT
 first-cell lifecycle gaps; see
-`docs/releases/CELLSCRIPT_0_16_1_RELEASE_NOTES.md` for the current production
+`docs/releases/CELLSCRIPT_0_16_2_RELEASE_NOTES.md` for the current production
 example evidence.
 
 ### Better Builder Handoff

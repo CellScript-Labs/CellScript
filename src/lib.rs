@@ -497,6 +497,8 @@ pub struct CkbConstraintsMetadata {
     pub dep_group_manifest: CkbDepGroupManifestMetadata,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub script_references: Vec<CkbScriptReferenceMetadata>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub resource_identities: Vec<CkbResourceIdentityMetadata>,
     pub max_tx_verify_cycles: u64,
     pub max_block_cycles: u64,
     pub max_block_bytes: u64,
@@ -552,6 +554,26 @@ pub struct CkbScriptReferenceMetadata {
     pub dep_source: String,
     pub profile: String,
     pub status: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CkbResourceIdentityMetadata {
+    pub type_name: String,
+    pub kind: String,
+    pub identity_policy: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schema_hash: Option<String>,
+    pub status: String,
+    pub passive_type_script_status: String,
+    pub action_artifact_policy: String,
+    pub builder_contract: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub created_by: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mutated_by: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub consumed_by: Vec<String>,
+    pub note: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -1300,6 +1322,7 @@ fn ckb_constraints(
             warnings: Vec::new(),
         },
         script_references: ckb_script_reference_metadata(metadata),
+        resource_identities: ckb_resource_identity_metadata(metadata),
         max_tx_verify_cycles,
         max_block_cycles,
         max_block_bytes,
@@ -1389,6 +1412,97 @@ fn ckb_script_reference_metadata(metadata: &CompileMetadata) -> Vec<CkbScriptRef
         collect_ckb_entry_script_references("lock", &lock.name, &lock.create_set, &lock.ckb_runtime_accesses, &mut refs);
     }
     refs
+}
+
+fn ckb_resource_identity_metadata(metadata: &CompileMetadata) -> Vec<CkbResourceIdentityMetadata> {
+    let mut created_by: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    let mut mutated_by: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+
+    for action in &metadata.actions {
+        collect_created_resource_entries("action", &action.name, &action.create_set, &mut created_by);
+        collect_mutated_resource_entries("action", &action.name, &action.mutate_set, &mut mutated_by);
+    }
+    for lock in &metadata.locks {
+        collect_created_resource_entries("lock", &lock.name, &lock.create_set, &mut created_by);
+        collect_mutated_resource_entries("lock", &lock.name, &lock.mutate_set, &mut mutated_by);
+    }
+
+    metadata
+        .types
+        .iter()
+        .filter(|ty| is_ckb_resource_identity_candidate(ty, &created_by, &mutated_by))
+        .map(|ty| {
+            let identity_policy = ty.identity_policy.clone().unwrap_or_else(|| "none".to_string());
+            let has_type_id = ty.ckb_type_id.is_some() || identity_policy == "ckb_type_id";
+            let (status, passive_type_script_status, builder_contract, note) = if has_type_id {
+                (
+                    "ckb-type-id-builder-managed",
+                    "builder-must-install-declared-type-id-script",
+                    "use the compiler-emitted CKB TYPE_ID metadata; do not substitute the scoped action artifact as the resource type script",
+                    "CKB TYPE_ID supplies uniqueness, while action artifacts still verify explicit lifecycle transitions.",
+                )
+            } else {
+                (
+                    "compiler-passive-identity-available",
+                    "generate-with-cellc-resource-identity",
+                    "run cellc resource-identity and use the emitted script exactly; scoped action artifacts remain forbidden as passive resource type identities",
+                    "The compiler can emit a passive Script.args identity badge for this resource. The scoped action artifact still verifies explicit lifecycle transitions only.",
+                )
+            };
+
+            CkbResourceIdentityMetadata {
+                type_name: ty.name.clone(),
+                kind: ty.kind.clone(),
+                identity_policy,
+                schema_hash: ty.molecule_schema.as_ref().map(|schema| schema.schema_hash.clone()),
+                status: status.to_string(),
+                passive_type_script_status: passive_type_script_status.to_string(),
+                action_artifact_policy: "forbidden-as-passive-type-identity; scoped action artifacts are active verifiers".to_string(),
+                builder_contract: builder_contract.to_string(),
+                created_by: sorted_set_values(created_by.get(&ty.name)),
+                mutated_by: sorted_set_values(mutated_by.get(&ty.name)),
+                consumed_by: Vec::new(),
+                note: note.to_string(),
+            }
+        })
+        .collect()
+}
+
+fn collect_created_resource_entries(
+    entry_kind: &str,
+    entry_name: &str,
+    create_set: &[CreatePatternMetadata],
+    created_by: &mut BTreeMap<String, BTreeSet<String>>,
+) {
+    for pattern in create_set {
+        created_by.entry(pattern.ty.clone()).or_default().insert(format!("{entry_kind}:{entry_name}:{}", pattern.binding));
+    }
+}
+
+fn collect_mutated_resource_entries(
+    entry_kind: &str,
+    entry_name: &str,
+    mutate_set: &[MutatePatternMetadata],
+    mutated_by: &mut BTreeMap<String, BTreeSet<String>>,
+) {
+    for pattern in mutate_set {
+        mutated_by.entry(pattern.ty.clone()).or_default().insert(format!("{entry_kind}:{entry_name}:{}", pattern.binding));
+    }
+}
+
+fn sorted_set_values(values: Option<&BTreeSet<String>>) -> Vec<String> {
+    values.map(|set| set.iter().cloned().collect()).unwrap_or_default()
+}
+
+fn is_ckb_resource_identity_candidate(
+    ty: &TypeMetadata,
+    created_by: &BTreeMap<String, BTreeSet<String>>,
+    mutated_by: &BTreeMap<String, BTreeSet<String>>,
+) -> bool {
+    matches!(ty.kind.as_str(), "resource" | "receipt")
+        || ty.capabilities.iter().any(|capability| matches!(capability.as_str(), "store" | "create" | "replace" | "consume"))
+        || created_by.contains_key(&ty.name)
+        || mutated_by.contains_key(&ty.name)
 }
 
 fn collect_ckb_entry_script_references(
@@ -2200,6 +2314,17 @@ fn validate_ckb_constraints_summary_metadata(metadata: &CompileMetadata) -> Resu
         )));
     }
 
+    let mut expected_resource_identities = ckb_resource_identity_fingerprints(ckb_resource_identity_metadata(metadata).iter());
+    let mut actual_resource_identities = ckb_resource_identity_fingerprints(ckb_constraints.resource_identities.iter());
+    expected_resource_identities.sort();
+    actual_resource_identities.sort();
+    if actual_resource_identities != expected_resource_identities {
+        return Err(CompileError::without_span(format!(
+            "metadata constraints.ckb.resource_identities do not match the compiled resource identity contract; actual={:?}; expected={:?}",
+            actual_resource_identities, expected_resource_identities
+        )));
+    }
+
     Ok(())
 }
 
@@ -2221,6 +2346,32 @@ fn validate_ckb_summary_bool(field: &str, actual: bool, expected: bool) -> Resul
         )));
     }
     Ok(())
+}
+
+type CkbResourceIdentityFingerprint =
+    (String, String, String, Option<String>, String, String, String, String, Vec<String>, Vec<String>, Vec<String>, String);
+
+fn ckb_resource_identity_fingerprints<'a>(
+    identities: impl Iterator<Item = &'a CkbResourceIdentityMetadata>,
+) -> Vec<CkbResourceIdentityFingerprint> {
+    identities
+        .map(|identity| {
+            (
+                identity.type_name.clone(),
+                identity.kind.clone(),
+                identity.identity_policy.clone(),
+                identity.schema_hash.clone(),
+                identity.status.clone(),
+                identity.passive_type_script_status.clone(),
+                identity.action_artifact_policy.clone(),
+                identity.builder_contract.clone(),
+                identity.created_by.clone(),
+                identity.mutated_by.clone(),
+                identity.consumed_by.clone(),
+                identity.note.clone(),
+            )
+        })
+        .collect()
 }
 
 fn validate_ckb_type_id_metadata(metadata: &CompileMetadata, ty: &TypeMetadata, ckb_type_id: &CkbTypeIdMetadata) -> Result<()> {
@@ -4196,6 +4347,17 @@ pub fn compile(source: &str, options: CompileOptions) -> Result<CompileResult> {
     let ast = parser::parse(&tokens)?;
 
     let mut result = compile_ast(&ast, &options, None)?;
+    bind_source_metadata(&mut result.metadata, vec![source_unit_from_bytes("<memory>", "memory", source.as_bytes())]);
+    result.validate()?;
+    Ok(result)
+}
+
+/// Compile CellScript source code with a selected lock entrypoint.
+pub fn compile_source_with_entry_lock(source: &str, options: CompileOptions, lock: impl Into<String>) -> Result<CompileResult> {
+    let tokens = lexer::lex(source)?;
+    let ast = parser::parse(&tokens)?;
+    let entry_scope = CompileEntryScope::Lock(lock.into());
+    let mut result = compile_ast_with_build(&ast, &options, None, None, Some(&entry_scope), None)?;
     bind_source_metadata(&mut result.metadata, vec![source_unit_from_bytes("<memory>", "memory", source.as_bytes())]);
     result.validate()?;
     Ok(result)

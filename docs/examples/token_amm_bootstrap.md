@@ -39,6 +39,31 @@ launch.bootstrap_token or launch.launch_token
 `launch_token` materialises the Pool and LP receipt topology directly. It does
 not link or call the `amm_pool.seed_pool` entry at runtime.
 
+## Resource Identity Boundary
+
+There are three separate script roles in this flow:
+
+- scoped action artifacts are active verifiers for one selected CellScript
+  action;
+- resource type scripts are passive or lifecycle-stable identity badges for
+  `MintAuthority`, `Token`, `Pool`, and `LPReceipt` Cells;
+- fixture badges such as `always_success_fixture_only` are local test
+  scaffolding only.
+
+Do not use an action artifact such as `token_mint_with_authority.elf` as the
+passive type script for a newly-created resource Cell. CKB executes output type
+scripts during creation, so the generated `_cellscript_entry` wrapper will look
+for action witness bytes and can fail with `entry-witness-abi-invalid`.
+
+Current compiler metadata exposes this boundary through
+`constraints.ckb.resource_identities` and `cellc solve-tx` under
+`transaction_plan.resource_identities`. Entries marked
+`compiler-passive-identity-available` should be materialized with
+`cellc resource-identity`, which emits the passive artifact plus the exact
+`{ code_hash, hash_type, args }` scripts to place on resource outputs. A
+production builder must not replace that passive identity with the scoped
+action artifact.
+
 ## Entry Action Selection
 
 Do not rely on "the first action runs on creation" as a protocol rule. Cell
@@ -131,6 +156,20 @@ cellc entry-witness examples/amm_pool.cell \
 For `launch_token`, the `distribution` payload is exactly four
 `(Address, u64)` entries, so it is 160 bytes: `4 * (32 + 8)`.
 
+## One-Line Builder Contract Bundle
+
+After building the scoped artifact and producing a candidate transaction JSON,
+run the compiler-facing contract checks as one shell bundle. Replace `META` and
+`TX` with the generated `.meta.json` sidecar and transaction file:
+
+```bash
+INPUT=examples/amm_pool.cell ACTION=swap_a_for_b META=build/amm_swap_a_for_b.elf.meta.json TX=build/swap.tx.json RID=build/resource-identities.json MIN_OUT=49000 TO=0x1111111111111111111111111111111111111111111111111111111111111111; cellc resource-identity "$INPUT" --target-profile ckb --identity Token=token-default --identity Token:token_out=token-b --identity Pool=pool-main --identity LPReceipt=pool-main --plan-output "$RID" --json && cellc abi "$INPUT" --target-profile ckb --action "$ACTION" && cellc constraints "$INPUT" --target-profile ckb --entry-action "$ACTION" && cellc solve-tx "$INPUT" --target-profile ckb --entry-action "$ACTION" --primitive-strict 0.16 --json && cellc entry-witness "$INPUT" --target-profile ckb --action "$ACTION" --arg "$MIN_OUT" --arg "$TO" --json && cellc explain-assumptions "$INPUT" --target-profile ckb --entry-action "$ACTION" --primitive-strict 0.16 --json && cellc validate-tx --against "$META" --resource-identities "$RID" "$TX" --production --primitive-strict 0.16 --json
+```
+
+`cellc entry-witness` emits the raw `_cellscript_entry` payload. Do not wrap it
+in `WitnessArgs.input_type` unless the CellScript source explicitly reads that
+separate CKB witness surface.
+
 ## ProofPlan And Builder Assumptions
 
 Before signing, builders should inspect both the proof plan and the concrete
@@ -158,7 +197,8 @@ particular, verify:
 
 - each cell-bound parameter resolves to the expected input or output Cell;
 - output data matches the generated Molecule schema;
-- output type scripts use the intended artifact and script args;
+- resource output type scripts follow `constraints.ckb.resource_identities`;
+- scoped action artifacts are not used as passive resource type identities;
 - CellDeps or script refs resolve to the intended code cells;
 - capacity floors and occupied capacity are both satisfied;
 - the transaction size and cycle budget are measured from the final
@@ -187,13 +227,16 @@ The relevant flows are:
 - AMM lifecycle: seed, add liquidity, swap, and remove liquidity operate on
   live `Pool`, `Token`, and `LPReceipt` Cells.
 
-External builder repos should mirror those flows instead of using
-`always_success` token stand-ins for the token and pool state path. It is fine
-to keep `always_success` locks for pure locking scaffolding, but token Cells,
-Pool Cells, LP receipts, and the MintAuthority hand-off should be real
-CellScript typed Cells when testing this bootstrap sequence.
+External builder repos should mirror those flows, but should treat
+`always_success` resource type scripts as `always_success_fixture_only` badges.
+They prove the transaction shape is plausible; they do not prove the production
+resource identity story. The compiler now exposes passive resource identity
+contracts in metadata and emits resource identity plans so builders can fail
+early instead of discovering identity mistakes through an opaque action-witness
+error. Use `cellc validate-tx --production` to reject known fixture identities
+before signing.
 
 The production gate now exercises these flows with original scoped strict
 artifacts for `token.cell`, `amm_pool.cell`, and `launch.cell`; generated
-harnesses remain only as fallback coverage for examples that are not part of
-this bootstrap path.
+harnesses and passive fixture badges remain coverage scaffolding, not the
+external-builder production identity contract.

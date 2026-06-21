@@ -1,6 +1,7 @@
 use camino::Utf8Path;
-use cellscript::{compile, BuilderAssumptionMetadata, CompileOptions};
+use cellscript::{compile, compile_path_with_entry_action, validate_compile_metadata, BuilderAssumptionMetadata, CompileOptions};
 use serde_json::json;
+use std::path::PathBuf;
 use std::process::Command;
 use tempfile::tempdir;
 
@@ -49,6 +50,18 @@ where
         badge_id,
         owner
     } with_lock(owner)
+"#;
+
+const SIMPLE_RESOURCE_CREATE: &str = r#"
+module v016::simple_resource_identity
+
+resource Token has store, create, consume, replace {
+    amount: u64
+}
+
+action mint(amount: u64) -> output: Token
+where
+    create output = Token { amount }
 "#;
 
 const METADATA_ONLY_INVARIANT: &str = r#"
@@ -454,6 +467,174 @@ fn validate_tx_checks_builder_assumption_evidence() {
 }
 
 #[test]
+fn validate_tx_rejects_scoped_action_artifact_as_resource_type_identity() {
+    let result =
+        compile(IDENTITY_CREATE_UNIQUE, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() })
+            .unwrap();
+    let artifact_hash = result.metadata.artifact_hash.as_deref().expect("artifact hash");
+    let resource_identities = &result.metadata.constraints.ckb.as_ref().expect("ckb constraints").resource_identities;
+    assert!(
+        resource_identities
+            .iter()
+            .any(|identity| identity.type_name == "Badge" && identity.status == "compiler-passive-identity-available"),
+        "{resource_identities:#?}"
+    );
+
+    let evidence = result.metadata.runtime.builder_assumptions.iter().map(evidence_for).collect::<Vec<_>>();
+    let tx = json!({
+        "inputs": [{}],
+        "outputs": [{
+            "lock": {},
+            "type": {
+                "code_hash": format!("0x{artifact_hash}"),
+                "hash_type": "data1",
+                "args": "0x"
+            }
+        }],
+        "cell_deps": [],
+        "witnesses": [],
+        "builder_assumption_evidence": evidence
+    });
+    let report = cellscript::assumptions::validate_transaction_against_metadata(&result.metadata, &tx);
+    assert_eq!(report.status, "failed");
+    assert!(
+        report
+            .violations
+            .iter()
+            .any(|violation| { violation.kind == "resource_identity" && violation.message.contains("active verifiers") }),
+        "{report:#?}"
+    );
+}
+
+#[test]
+fn validate_tx_allows_scoped_action_artifact_on_mutated_output_type() {
+    let result = compile_path_with_entry_action(
+        Utf8Path::new("examples/amm_pool.cell"),
+        CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() },
+        "swap_a_for_b",
+    )
+    .unwrap();
+    let artifact_hash = result.metadata.artifact_hash.as_deref().expect("artifact hash");
+    let evidence = result.metadata.runtime.builder_assumptions.iter().map(evidence_for).collect::<Vec<_>>();
+    let tx = json!({
+        "inputs": [{}, {}],
+        "outputs": [
+            {
+                "lock": {},
+                "type": {
+                    "code_hash": format!("0x{artifact_hash}"),
+                    "hash_type": "data1",
+                    "args": "0x"
+                }
+            },
+            {
+                "lock": {},
+                "type": {
+                    "code_hash": "0x1111111111111111111111111111111111111111111111111111111111111111",
+                    "hash_type": "data1",
+                    "args": "0x"
+                }
+            }
+        ],
+        "cell_deps": [],
+        "witnesses": ["0x"],
+        "builder_assumption_evidence": evidence
+    });
+    let report = cellscript::assumptions::validate_transaction_against_metadata(&result.metadata, &tx);
+    assert!(!report.violations.iter().any(|violation| violation.assumption_id == "resource-identity-active-artifact"), "{report:#?}");
+}
+
+#[test]
+fn validate_tx_rejects_scoped_action_artifact_on_created_output_type() {
+    let result = compile_path_with_entry_action(
+        Utf8Path::new("examples/amm_pool.cell"),
+        CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() },
+        "swap_a_for_b",
+    )
+    .unwrap();
+    let artifact_hash = result.metadata.artifact_hash.as_deref().expect("artifact hash");
+    let evidence = result.metadata.runtime.builder_assumptions.iter().map(evidence_for).collect::<Vec<_>>();
+    let tx = json!({
+        "inputs": [{}, {}],
+        "outputs": [
+            {
+                "lock": {},
+                "type": {
+                    "code_hash": "0x1111111111111111111111111111111111111111111111111111111111111111",
+                    "hash_type": "data1",
+                    "args": "0x"
+                }
+            },
+            {
+                "lock": {},
+                "type": {
+                    "code_hash": format!("0x{artifact_hash}"),
+                    "hash_type": "data1",
+                    "args": "0x"
+                }
+            }
+        ],
+        "cell_deps": [],
+        "witnesses": ["0x"],
+        "builder_assumption_evidence": evidence
+    });
+    let report = cellscript::assumptions::validate_transaction_against_metadata(&result.metadata, &tx);
+    assert!(report.violations.iter().any(|violation| violation.assumption_id == "resource-identity-active-artifact"), "{report:#?}");
+}
+
+#[test]
+fn compile_metadata_rejects_tampered_resource_identity_contract() {
+    let result =
+        compile(SIMPLE_RESOURCE_CREATE, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() })
+            .unwrap();
+    let mut metadata = result.metadata.clone();
+    metadata.constraints.ckb.as_mut().expect("ckb constraints").resource_identities.clear();
+    let err = validate_compile_metadata(&metadata, result.artifact_format).unwrap_err();
+    assert!(err.message.contains("resource_identities"), "unexpected error: {}", err.message);
+}
+
+#[test]
+fn validate_tx_requires_evidence_for_wildcard_structural_reads() {
+    let assumption = BuilderAssumptionMetadata {
+        assumption_id: "ba-structural-wildcard".to_string(),
+        kind: "builder_evidence".to_string(),
+        origin: "action:test".to_string(),
+        feature: "input:Input#0".to_string(),
+        proof_plan_status: "ckb-runtime".to_string(),
+        required_inputs: vec!["input:*".to_string()],
+        required_outputs: Vec::new(),
+        required_cell_deps: Vec::new(),
+        required_witness_fields: Vec::new(),
+        capacity_policy: "none".to_string(),
+        fee_policy: "builder-balances-fee-before-signing".to_string(),
+        change_policy: "change-outputs-must-not-violate-proof-plan-shape".to_string(),
+        signature_policy: "none".to_string(),
+        failure_mode: "reject-before-signing".to_string(),
+        detail: "unit-test structural wildcard".to_string(),
+    };
+
+    let shape_only = json!({
+        "inputs": [{}],
+        "outputs": [],
+        "cell_deps": [],
+        "witnesses": []
+    });
+    let report = cellscript::assumptions::validate_transaction_against_assumptions(&[assumption.clone()], &shape_only);
+    assert_eq!(report.status, "failed");
+    assert!(report.violations.iter().any(|violation| violation.message.contains("wildcard structural read bindings")), "{report:#?}");
+
+    let with_evidence = json!({
+        "inputs": [{}],
+        "outputs": [],
+        "cell_deps": [],
+        "witnesses": [],
+        "builder_assumption_evidence": [evidence_for(&assumption)]
+    });
+    let report = cellscript::assumptions::validate_transaction_against_assumptions(&[assumption], &with_evidence);
+    assert_eq!(report.status, "ok", "{report:#?}");
+}
+
+#[test]
 fn strict_0_16_rejects_unbound_spawn_target_cell_dep() {
     let err = compile(
         r#"
@@ -811,6 +992,42 @@ where
 }
 
 #[test]
+fn strict_0_16_rejects_checked_partial_proof_plan_gaps() {
+    let err = compile(
+        r#"
+module v016::partial_state_gap
+
+resource Ticket has store, create, consume, replace, burn, relock, read_ref {
+    state: u8
+    note: String
+}
+
+flow Ticket.state {
+    Created -> Active;
+}
+
+action activate(ticket: Ticket, note: String) -> output: Ticket
+    transition ticket.state: Created -> output.state: Active
+where
+    consume ticket
+    create output = Ticket {
+        state: Ticket::Active,
+        note: note
+    }
+"#,
+        CompileOptions {
+            target_profile: Some("ckb".to_string()),
+            primitive_compat: Some("0.16".to_string()),
+            ..CompileOptions::default()
+        },
+    )
+    .expect_err("strict v0.16 must reject checked-partial ProofPlan gaps");
+
+    assert!(err.message.contains("PP0151"), "unexpected error: {}", err.message);
+    assert!(err.message.contains("partial verifier coverage gaps"), "unexpected error: {}", err.message);
+}
+
+#[test]
 fn cli_explain_assumptions_and_validate_tx_are_machine_readable() {
     let temp = tempdir().unwrap();
     let root = Utf8Path::from_path(temp.path()).unwrap();
@@ -841,6 +1058,299 @@ fn cli_explain_assumptions_and_validate_tx_are_machine_readable() {
     validate.arg("validate-tx").arg("--against").arg(&metadata).arg(&tx).arg("--json");
     let validate_json = run_success_json(validate);
     assert_eq!(validate_json["status"], "ok");
+}
+
+#[test]
+fn cli_solve_tx_exposes_resource_identity_contracts() {
+    let temp = tempdir().unwrap();
+    let source = temp.path().join("identity.cell");
+    std::fs::write(&source, SIMPLE_RESOURCE_CREATE).unwrap();
+
+    let mut solve = cellc_command();
+    solve.arg("solve-tx").arg(&source).arg("--target-profile").arg("ckb").arg("--json");
+    let solve_json = run_success_json(solve);
+    let resource_identities = solve_json["transaction_plan"]["resource_identities"].as_array().expect("resource identity contracts");
+    assert_eq!(
+        solve_json["transaction_plan"]["fixture_identity_policy"]["always_success"],
+        "fixture-only; may be used in harness and negative tests, never as a production resource identity",
+        "{solve_json:#?}"
+    );
+    assert!(
+        resource_identities.iter().any(|identity| {
+            identity["type_name"] == "Token"
+                && identity["status"] == "compiler-passive-identity-available"
+                && identity["action_artifact_policy"]
+                    .as_str()
+                    .is_some_and(|policy| policy.contains("forbidden-as-passive-type-identity"))
+        }),
+        "{solve_json:#?}"
+    );
+}
+
+#[test]
+fn cli_explain_assumptions_and_solve_tx_can_scope_entry_action() {
+    let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/amm_pool.cell");
+
+    let mut unscoped = cellc_command();
+    unscoped.arg("explain-assumptions").arg(&source).arg("--target-profile").arg("ckb").arg("--json");
+    let unscoped_json = run_success_json(unscoped);
+    let unscoped_count = unscoped_json["assumption_count"].as_u64().expect("unscoped assumption count");
+
+    let mut explain = cellc_command();
+    explain
+        .arg("explain-assumptions")
+        .arg(&source)
+        .arg("--target-profile")
+        .arg("ckb")
+        .arg("--entry-action")
+        .arg("swap_a_for_b")
+        .arg("--json");
+    let explain_json = run_success_json(explain);
+    assert_eq!(explain_json["status"], "ok", "{explain_json:#?}");
+    assert_eq!(explain_json["selected_entrypoint"]["kind"], "action", "{explain_json:#?}");
+    assert_eq!(explain_json["selected_entrypoint"]["name"], "swap_a_for_b", "{explain_json:#?}");
+    let scoped_count = explain_json["assumption_count"].as_u64().expect("scoped assumption count");
+    assert!(scoped_count > 0 && scoped_count < unscoped_count, "{explain_json:#?}");
+
+    let mut solve = cellc_command();
+    solve.arg("solve-tx").arg(&source).arg("--target-profile").arg("ckb").arg("--entry-action").arg("swap_a_for_b").arg("--json");
+    let solve_json = run_success_json(solve);
+    assert_eq!(solve_json["status"], "template", "{solve_json:#?}");
+    let requirements =
+        solve_json["transaction_plan"]["builder_assumption_evidence_requirements"].as_array().expect("builder evidence requirements");
+    assert!(
+        requirements.iter().any(|requirement| {
+            requirement["kind"] == "builder_evidence"
+                && requirement["feature"] == "input:Input#0"
+                && requirement["evidence_schema"]["required_inputs"]
+                    .as_array()
+                    .is_some_and(|inputs| inputs.iter().any(|input| input.as_str() == Some("input:*")))
+        }),
+        "{solve_json:#?}"
+    );
+}
+
+#[test]
+fn cli_resource_identity_generates_plan_and_validate_tx_checks_it() {
+    let temp = tempdir().unwrap();
+    let source = temp.path().join("identity.cell");
+    let artifact = temp.path().join("resource-identity.elf");
+    let plan_path = temp.path().join("resource-identities.json");
+    let metadata_path = temp.path().join("mint.meta.json");
+    let tx_path = temp.path().join("mint.tx.json");
+    let bad_tx_path = temp.path().join("bad-mint.tx.json");
+    std::fs::write(&source, SIMPLE_RESOURCE_CREATE).unwrap();
+
+    let mut resource_identity = cellc_command();
+    resource_identity
+        .arg("resource-identity")
+        .arg(&source)
+        .arg("--target-profile")
+        .arg("ckb")
+        .arg("--output")
+        .arg(&artifact)
+        .arg("--plan-output")
+        .arg(&plan_path)
+        .arg("--identity")
+        .arg("Token:output=test-token")
+        .arg("--json");
+    let plan_json = run_success_json(resource_identity);
+    assert_eq!(plan_json["status"], "ok", "{plan_json:#?}");
+    assert!(artifact.exists());
+    assert!(plan_path.exists());
+    let token = plan_json["resource_identities"]
+        .as_array()
+        .expect("resource identities")
+        .iter()
+        .find(|entry| entry["type_name"] == "Token")
+        .expect("Token identity");
+    assert_eq!(token["script"]["hash_type"], "data1");
+    assert!(token["script"]["code_hash"].as_str().is_some_and(|hash| hash.starts_with("0x") && hash.len() == 66));
+    assert!(token["script"]["args"].as_str().is_some_and(|args| args.starts_with("0x") && args.len() == 66));
+    assert!(token["script_hash"].as_str().is_some_and(|hash| hash.starts_with("0x") && hash.len() == 66));
+    let output_script = token["create_scripts"]
+        .as_array()
+        .expect("create scripts")
+        .iter()
+        .find(|entry| entry["binding"] == "output")
+        .expect("output binding script")["script"]
+        .clone();
+
+    let result =
+        compile(SIMPLE_RESOURCE_CREATE, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() })
+            .unwrap();
+    let evidence = result.metadata.runtime.builder_assumptions.iter().map(evidence_for).collect::<Vec<_>>();
+    let tx = json!({
+        "inputs": [],
+        "outputs": [{
+            "lock": {},
+            "type": output_script
+        }],
+        "cell_deps": [],
+        "witnesses": [],
+        "builder_assumption_evidence": evidence
+    });
+    std::fs::write(&metadata_path, serde_json::to_vec_pretty(&result.metadata).unwrap()).unwrap();
+    std::fs::write(&tx_path, serde_json::to_vec_pretty(&tx).unwrap()).unwrap();
+
+    let mut validate = cellc_command();
+    validate
+        .arg("validate-tx")
+        .arg("--against")
+        .arg(&metadata_path)
+        .arg("--resource-identities")
+        .arg(&plan_path)
+        .arg(&tx_path)
+        .arg("--json");
+    let validate_json = run_success_json(validate);
+    assert_eq!(validate_json["status"], "ok", "{validate_json:#?}");
+
+    let mut bad_tx = tx;
+    bad_tx["outputs"][0]["type"]["args"] = json!("0x0000000000000000000000000000000000000000000000000000000000000000");
+    std::fs::write(&bad_tx_path, serde_json::to_vec_pretty(&bad_tx).unwrap()).unwrap();
+    let mut validate_bad = cellc_command();
+    validate_bad
+        .arg("validate-tx")
+        .arg("--against")
+        .arg(&metadata_path)
+        .arg("--resource-identities")
+        .arg(&plan_path)
+        .arg(&bad_tx_path)
+        .arg("--json");
+    let validate_bad_json = run_failure_json(validate_bad);
+    assert_eq!(validate_bad_json["status"], "failed", "{validate_bad_json:#?}");
+    assert!(validate_bad_json["validation"]["violations"].as_array().is_some_and(|violations| {
+        violations.iter().any(|violation| {
+            violation["kind"] == "resource_identity" && violation["message"].as_str().is_some_and(|m| m.contains("args"))
+        })
+    }));
+}
+
+#[test]
+fn cli_validate_tx_production_rejects_fixture_resource_identity() {
+    let temp = tempdir().unwrap();
+    let source = temp.path().join("identity.cell");
+    let metadata_path = temp.path().join("mint.meta.json");
+    let tx_path = temp.path().join("mint.fixture.tx.json");
+    std::fs::write(&source, SIMPLE_RESOURCE_CREATE).unwrap();
+
+    let result =
+        compile(SIMPLE_RESOURCE_CREATE, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() })
+            .unwrap();
+    let evidence = result.metadata.runtime.builder_assumptions.iter().map(evidence_for).collect::<Vec<_>>();
+    let tx = json!({
+        "inputs": [],
+        "outputs": [{
+            "lock": {},
+            "type": {
+                "code_hash": "0x28e83a1277d48add8e72fadaa9248559e1b632bab2bd60b27955ebc4c03800a5",
+                "hash_type": "data",
+                "args": "0x"
+            }
+        }],
+        "cell_deps": [],
+        "witnesses": [],
+        "builder_assumption_evidence": evidence
+    });
+    std::fs::write(&metadata_path, serde_json::to_vec_pretty(&result.metadata).unwrap()).unwrap();
+    std::fs::write(&tx_path, serde_json::to_vec_pretty(&tx).unwrap()).unwrap();
+
+    let mut validate_fixture = cellc_command();
+    validate_fixture.arg("validate-tx").arg("--against").arg(&metadata_path).arg(&tx_path).arg("--json");
+    let validate_fixture_json = run_success_json(validate_fixture);
+    assert_eq!(validate_fixture_json["status"], "ok", "{validate_fixture_json:#?}");
+
+    let mut validate_production = cellc_command();
+    validate_production.arg("validate-tx").arg("--against").arg(&metadata_path).arg(&tx_path).arg("--production").arg("--json");
+    let validate_production_json = run_failure_json(validate_production);
+    assert_eq!(validate_production_json["status"], "failed", "{validate_production_json:#?}");
+    assert_eq!(validate_production_json["production"], true, "{validate_production_json:#?}");
+    assert!(validate_production_json["validation"]["violations"].as_array().is_some_and(|violations| {
+        violations.iter().any(|violation| {
+            violation["kind"] == "resource_identity"
+                && violation["message"].as_str().is_some_and(|message| message.contains("always_success_fixture_only"))
+        })
+    }));
+}
+
+#[test]
+fn cli_validate_tx_resource_identity_plan_allows_mutated_scoped_action_output() {
+    let temp = tempdir().unwrap();
+    let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/amm_pool.cell");
+    let artifact = temp.path().join("resource-identity.elf");
+    let plan_path = temp.path().join("resource-identities.json");
+    let metadata_path = temp.path().join("swap.meta.json");
+    let tx_path = temp.path().join("swap.tx.json");
+
+    let mut resource_identity = cellc_command();
+    resource_identity
+        .arg("resource-identity")
+        .arg(&source)
+        .arg("--target-profile")
+        .arg("ckb")
+        .arg("--type")
+        .arg("Token")
+        .arg("--output")
+        .arg(&artifact)
+        .arg("--plan-output")
+        .arg(&plan_path)
+        .arg("--identity")
+        .arg("Token:token_out=test-token-out")
+        .arg("--json");
+    let plan_json = run_success_json(resource_identity);
+    let token_out_script = plan_json["resource_identities"]
+        .as_array()
+        .expect("resource identities")
+        .iter()
+        .find(|entry| entry["type_name"] == "Token")
+        .and_then(|entry| entry["create_scripts"].as_array())
+        .and_then(|scripts| scripts.iter().find(|script| script["binding"] == "token_out"))
+        .and_then(|script| script.get("script"))
+        .cloned()
+        .expect("Token token_out script");
+
+    let result = compile_path_with_entry_action(
+        Utf8Path::from_path(&source).expect("utf8 source path"),
+        CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() },
+        "swap_a_for_b",
+    )
+    .unwrap();
+    let artifact_hash = result.metadata.artifact_hash.as_deref().expect("artifact hash");
+    let evidence = result.metadata.runtime.builder_assumptions.iter().map(evidence_for).collect::<Vec<_>>();
+    let tx = json!({
+        "inputs": [{}, {}],
+        "outputs": [
+            {
+                "lock": {},
+                "type": {
+                    "code_hash": format!("0x{artifact_hash}"),
+                    "hash_type": "data1",
+                    "args": "0x"
+                }
+            },
+            {
+                "lock": {},
+                "type": token_out_script
+            }
+        ],
+        "cell_deps": [],
+        "witnesses": ["0x"],
+        "builder_assumption_evidence": evidence
+    });
+    std::fs::write(&metadata_path, serde_json::to_vec_pretty(&result.metadata).unwrap()).unwrap();
+    std::fs::write(&tx_path, serde_json::to_vec_pretty(&tx).unwrap()).unwrap();
+
+    let mut validate = cellc_command();
+    validate
+        .arg("validate-tx")
+        .arg("--against")
+        .arg(&metadata_path)
+        .arg("--resource-identities")
+        .arg(&plan_path)
+        .arg(&tx_path)
+        .arg("--json");
+    let validate_json = run_success_json(validate);
+    assert_eq!(validate_json["status"], "ok", "{validate_json:#?}");
 }
 
 #[test]

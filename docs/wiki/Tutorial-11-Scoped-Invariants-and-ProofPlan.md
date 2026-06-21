@@ -405,5 +405,5 @@ commands unless you create a `Cell.toml` there.
   contracts.
 - Read `docs/releases/CELLSCRIPT_0_15_RELEASE_NOTES.md` for the release boundary.
 - Read `roadmap/CELLSCRIPT_0_16_ROADMAP.md` and
-  `docs/releases/CELLSCRIPT_0_16_1_RELEASE_NOTES.md` for the implemented
+  `docs/releases/CELLSCRIPT_0_16_2_RELEASE_NOTES.md` for the implemented
   0.16 ProofPlan soundness and metadata-assurance boundary.

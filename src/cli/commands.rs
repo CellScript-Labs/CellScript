@@ -4,10 +4,11 @@ use crate::fmt::format_default;
 use crate::package::{validate_git_revision, Dependency, DetailedDependency, Lockfile, PackageManager, PolicyConfig};
 use crate::runtime_errors::{runtime_error_info, runtime_error_info_by_code, CellScriptRuntimeErrorInfo, ALL_RUNTIME_ERRORS};
 use crate::{
-    compile_path, compile_path_with_entry_action, compile_path_with_entry_lock, default_metadata_path_for_artifact,
-    default_output_path_for_input, load_modules_for_input, resolve_input_path, validate_artifact_metadata,
-    validate_source_units_on_disk_under, validate_source_units_primitive_mode_under, ArtifactFormat, CompileMetadata, CompileOptions,
-    EntryWitnessArg, ParamMetadata, ProofPlanMetadata, ProofPlanSoundnessReport, TargetProfile, ENTRY_WITNESS_ABI,
+    compile_path, compile_path_with_entry_action, compile_path_with_entry_lock, compile_source_with_entry_lock,
+    default_metadata_path_for_artifact, default_output_path_for_input, load_modules_for_input, resolve_input_path,
+    validate_artifact_metadata, validate_source_units_on_disk_under, validate_source_units_primitive_mode_under, ArtifactFormat,
+    CkbResourceIdentityMetadata, CompileMetadata, CompileOptions, CreatePatternMetadata, EntryWitnessArg, ParamMetadata,
+    ProofPlanMetadata, ProofPlanSoundnessReport, TargetProfile, ENTRY_WITNESS_ABI,
 };
 use camino::{Utf8Path, Utf8PathBuf};
 #[cfg(feature = "vm-runner")]
@@ -55,6 +56,32 @@ const NOVASEAL_EXTERNAL_V1_DIMENSIONS: &[&str] = &[
     "rwa_legal_registry_review_evidence",
 ];
 const STRICT_V0_16_PRIMITIVE_COMPAT: &str = "0.16";
+const RESOURCE_IDENTITY_PLAN_SCHEMA: &str = "cellscript-resource-identity-plan-v1";
+const RESOURCE_IDENTITY_MATERIAL_SCHEMA: &str = "cellscript-resource-identity-material-v1";
+const RESOURCE_IDENTITY_LOCK_NAME: &str = "resource_identity";
+const RESOURCE_IDENTITY_HASH_TYPE: &str = "data1";
+const CKB_DEVNET_ALWAYS_SUCCESS_CODE_HASH: &str = "0x28e83a1277d48add8e72fadaa9248559e1b632bab2bd60b27955ebc4c03800a5";
+const ZERO_PLACEHOLDER_CODE_HASH: &str = "0x0000000000000000000000000000000000000000000000000000000000000000";
+const RESOURCE_IDENTITY_SOURCE: &str = r#"module cellscript::generated::resource_identity_v1
+
+lock resource_identity(lock_args identity_hash: Hash) -> bool {
+    true
+}
+"#;
+
+#[derive(Debug, Default)]
+struct ResourceIdentityInputMap {
+    type_material: BTreeMap<String, String>,
+    binding_material: BTreeMap<(String, String), String>,
+}
+
+#[derive(Debug)]
+struct ResourceIdentityScriptPlan {
+    identity_hash: String,
+    identity_material: serde_json::Value,
+    script: serde_json::Value,
+    script_hash: String,
+}
 
 #[derive(Debug)]
 pub enum Command {
@@ -87,6 +114,7 @@ pub enum Command {
     Certify(CertifyArgs),
     ValidateTx(ValidateTxArgs),
     SolveTx(SolveTxArgs),
+    ResourceIdentity(ResourceIdentityArgs),
     DeployPlan(DeployPlanArgs),
     VerifyDeploy(VerifyDeployArgs),
     DiffDeploy(DiffDeployArgs),
@@ -280,6 +308,8 @@ pub struct ExplainAssumptionsArgs {
     pub input: Option<PathBuf>,
     pub target: Option<String>,
     pub target_profile: Option<String>,
+    pub entry_action: Option<String>,
+    pub entry_lock: Option<String>,
     pub primitive_compat: Option<String>,
     pub json: bool,
 }
@@ -349,6 +379,8 @@ pub struct CertifyArgs {
 pub struct ValidateTxArgs {
     pub against: PathBuf,
     pub tx: PathBuf,
+    pub resource_identities: Option<PathBuf>,
+    pub production: bool,
     pub primitive_compat: Option<String>,
     pub json: bool,
 }
@@ -359,7 +391,24 @@ pub struct SolveTxArgs {
     pub output: Option<PathBuf>,
     pub target: Option<String>,
     pub target_profile: Option<String>,
+    pub entry_action: Option<String>,
+    pub entry_lock: Option<String>,
     pub primitive_compat: Option<String>,
+    pub json: bool,
+}
+
+#[derive(Debug, Default)]
+pub struct ResourceIdentityArgs {
+    pub input: Option<PathBuf>,
+    pub output: Option<PathBuf>,
+    pub plan_output: Option<PathBuf>,
+    pub source_output: Option<PathBuf>,
+    pub target: Option<String>,
+    pub target_profile: Option<String>,
+    pub primitive_compat: Option<String>,
+    pub types: Vec<String>,
+    pub identities: Vec<String>,
+    pub instance: Option<String>,
     pub json: bool,
 }
 
@@ -499,6 +548,7 @@ impl CommandExecutor {
             Command::Certify(args) => Self::certify(args),
             Command::ValidateTx(args) => Self::validate_tx(args),
             Command::SolveTx(args) => Self::solve_tx(args),
+            Command::ResourceIdentity(args) => Self::resource_identity(args),
             Command::DeployPlan(args) => Self::deploy_plan(args),
             Command::VerifyDeploy(args) => Self::verify_deploy(args),
             Command::DiffDeploy(args) => Self::diff_deploy(args),
@@ -1606,12 +1656,18 @@ impl CommandExecutor {
 
     fn explain_assumptions(args: ExplainAssumptionsArgs) -> Result<()> {
         let compile_options = metadata_workflow_compile_options(args.target, args.target_profile, args.primitive_compat);
-        let result = compile_cli_input(args.input.as_ref(), compile_options)?;
+        let result = compile_cli_input_with_entry(
+            args.input.as_ref(),
+            compile_options,
+            args.entry_action.as_deref(),
+            args.entry_lock.as_deref(),
+        )?;
         let assumptions = result.metadata.runtime.builder_assumptions.clone();
         let summary = serde_json::json!({
             "status": "ok",
             "module": result.metadata.module,
             "target_profile": result.metadata.target_profile.name,
+            "selected_entrypoint": result.metadata.selected_entrypoint,
             "assumption_count": assumptions.len(),
             "proof_plan_soundness": result.metadata.runtime.proof_plan_soundness,
             "builder_assumptions": assumptions,
@@ -1649,11 +1705,23 @@ impl CommandExecutor {
             }
             return Err(crate::error::CompileError::without_span(error_message));
         }
-        let report = crate::assumptions::validate_transaction_against_metadata(&metadata, &tx);
+        let mut report = crate::assumptions::validate_transaction_against_metadata(&metadata, &tx);
+        let resource_identity_plan_path = args.resource_identities.as_ref().map(|path| path.display().to_string());
+        if let Some(plan_path) = args.resource_identities.as_ref() {
+            let plan = read_json_value(plan_path)?;
+            validate_tx_resource_identity_plan(&metadata, &tx, &plan, &mut report.violations);
+            report.status = if report.violations.is_empty() { "ok".to_string() } else { "failed".to_string() };
+        }
+        if args.production {
+            validate_tx_fixture_resource_identities(&metadata, &tx, &mut report.violations);
+            report.status = if report.violations.is_empty() { "ok".to_string() } else { "failed".to_string() };
+        }
         let summary = serde_json::json!({
             "status": report.status,
             "metadata": args.against.display().to_string(),
             "tx": args.tx.display().to_string(),
+            "production": args.production,
+            "resource_identity_plan": resource_identity_plan_path,
             "validation": report,
         });
         if args.json {
@@ -1669,9 +1737,76 @@ impl CommandExecutor {
 
     fn solve_tx(args: SolveTxArgs) -> Result<()> {
         let compile_options = metadata_workflow_compile_options(args.target, args.target_profile, args.primitive_compat);
-        let result = compile_cli_input(args.input.as_ref(), compile_options)?;
+        let result = compile_cli_input_with_entry(
+            args.input.as_ref(),
+            compile_options,
+            args.entry_action.as_deref(),
+            args.entry_lock.as_deref(),
+        )?;
         let template = transaction_solver_template(&result.metadata);
         write_or_print_json(args.output.as_ref(), &template, args.json, "Transaction solver template generated")?;
+        Ok(())
+    }
+
+    fn resource_identity(args: ResourceIdentityArgs) -> Result<()> {
+        let metadata_options =
+            metadata_workflow_compile_options(args.target.clone(), args.target_profile.clone(), args.primitive_compat.clone());
+        let source_result = compile_cli_input(args.input.as_ref(), metadata_options)?;
+        let resource_identities = selected_passive_resource_identities(&source_result.metadata, &args.types)?;
+        let output_path = default_resource_identity_artifact_path(args.output.as_ref(), args.input.as_ref())?;
+        let output_utf8 = pathbuf_to_utf8(&output_path, "resource identity artifact output")?;
+        let artifact_target = args.target.clone().unwrap_or_else(|| "riscv64-elf".to_string());
+        let artifact_profile = args.target_profile.clone().unwrap_or_else(|| "ckb".to_string());
+        let identity_artifact = compile_source_with_entry_lock(
+            RESOURCE_IDENTITY_SOURCE,
+            CompileOptions {
+                opt_level: 1,
+                output: None,
+                debug: false,
+                target: Some(artifact_target),
+                target_profile: Some(artifact_profile),
+                primitive_compat: args.primitive_compat.clone(),
+            },
+            RESOURCE_IDENTITY_LOCK_NAME,
+        )?;
+        identity_artifact.write_to_path(output_utf8)?;
+        let metadata_path = default_metadata_path_for_artifact(output_utf8);
+        identity_artifact.write_metadata_to_path(&metadata_path)?;
+        if let Some(source_output) = args.source_output.as_ref() {
+            if let Some(parent) = source_output.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::write(source_output, RESOURCE_IDENTITY_SOURCE)?;
+        }
+
+        let identity_inputs = parse_resource_identity_inputs(&args.identities)?;
+        let plan = resource_identity_plan_json(
+            &source_result.metadata,
+            &resource_identities,
+            &identity_artifact.metadata,
+            &output_path,
+            &metadata_path,
+            args.source_output.as_ref(),
+            &identity_inputs,
+            args.instance.as_deref(),
+        )?;
+        let plan_output = default_resource_identity_plan_path(args.plan_output.as_ref(), &output_path);
+        if let Some(parent) = plan_output.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let plan_json = serde_json::to_vec_pretty(&plan).map_err(|error| {
+            crate::error::CompileError::without_span(format!("failed to serialize resource identity plan: {}", error))
+        })?;
+        std::fs::write(&plan_output, plan_json)?;
+
+        if args.json {
+            print_json(&plan)?;
+        } else {
+            println!("{}", "Resource identity artifact generated".green());
+            println!("  Artifact: {}", output_path.display());
+            println!("  Metadata: {}", metadata_path);
+            println!("  Plan: {}", plan_output.display());
+        }
         Ok(())
     }
 
@@ -2783,10 +2918,27 @@ struct RegistryCredential {
 }
 
 fn compile_cli_input(input: Option<&PathBuf>, options: CompileOptions) -> Result<crate::CompileResult> {
+    compile_cli_input_with_entry(input, options, None, None)
+}
+
+fn compile_cli_input_with_entry(
+    input: Option<&PathBuf>,
+    options: CompileOptions,
+    entry_action: Option<&str>,
+    entry_lock: Option<&str>,
+) -> Result<crate::CompileResult> {
+    if entry_action.is_some() && entry_lock.is_some() {
+        return Err(crate::error::CompileError::without_span("--entry-action and --entry-lock are mutually exclusive"));
+    }
     let input_path = input.cloned().unwrap_or_else(|| PathBuf::from("."));
     let input = Utf8Path::from_path(&input_path)
         .ok_or_else(|| crate::error::CompileError::without_span(format!("path '{}' is not valid UTF-8", input_path.display())))?;
-    compile_path(input, options)
+    match (entry_action, entry_lock) {
+        (Some(action), None) => compile_path_with_entry_action(input, options, action),
+        (None, Some(lock)) => compile_path_with_entry_lock(input, options, lock),
+        (None, None) => compile_path(input, options),
+        (Some(_), Some(_)) => unreachable!("entry exclusivity checked above"),
+    }
 }
 
 fn read_regular_file(path: &Path, label: &str) -> Result<Vec<u8>> {
@@ -3132,9 +3284,616 @@ fn strict_v0_16_soundness_error_message(report: &ProofPlanSoundnessReport) -> St
     }
 }
 
+fn pathbuf_to_utf8<'a>(path: &'a PathBuf, label: &str) -> Result<&'a Utf8Path> {
+    Utf8Path::from_path(path)
+        .ok_or_else(|| crate::error::CompileError::without_span(format!("{label} path '{}' is not valid UTF-8", path.display())))
+}
+
+fn default_resource_identity_artifact_path(output: Option<&PathBuf>, input: Option<&PathBuf>) -> Result<PathBuf> {
+    if let Some(output) = output {
+        return Ok(output.clone());
+    }
+    let Some(input) = input else {
+        return Ok(PathBuf::from("cellscript-resource-identity.elf"));
+    };
+    let stem = input.file_stem().and_then(|stem| stem.to_str()).unwrap_or("cellscript-resource-identity");
+    let parent = input.parent().unwrap_or_else(|| Path::new("."));
+    Ok(parent.join(format!("{stem}.resource-identity.elf")))
+}
+
+fn default_resource_identity_plan_path(plan_output: Option<&PathBuf>, artifact_output: &Path) -> PathBuf {
+    if let Some(plan_output) = plan_output {
+        return plan_output.clone();
+    }
+    let stem = artifact_output.file_stem().and_then(|stem| stem.to_str()).unwrap_or("cellscript-resource-identity");
+    artifact_output.parent().unwrap_or_else(|| Path::new(".")).join(format!("{stem}.resource-identities.json"))
+}
+
+fn selected_passive_resource_identities(
+    metadata: &CompileMetadata,
+    requested_types: &[String],
+) -> Result<Vec<CkbResourceIdentityMetadata>> {
+    let Some(ckb) = metadata.constraints.ckb.as_ref() else {
+        return Err(crate::error::CompileError::without_span(
+            "resource-identity requires CKB metadata; compile with --target-profile ckb",
+        ));
+    };
+    let requested = requested_types.iter().cloned().collect::<BTreeSet<_>>();
+    let known = ckb.resource_identities.iter().map(|identity| identity.type_name.clone()).collect::<BTreeSet<_>>();
+    let missing = requested.difference(&known).cloned().collect::<Vec<_>>();
+    if !missing.is_empty() {
+        return Err(crate::error::CompileError::without_span(format!(
+            "resource-identity requested unknown resource type(s): {}",
+            missing.join(", ")
+        )));
+    }
+
+    let identities = ckb
+        .resource_identities
+        .iter()
+        .filter(|identity| requested.is_empty() || requested.contains(&identity.type_name))
+        .filter(|identity| identity.status != "ckb-type-id-builder-managed")
+        .cloned()
+        .collect::<Vec<_>>();
+    if identities.is_empty() {
+        let type_id_hint = if ckb.resource_identities.iter().any(|identity| identity.status == "ckb-type-id-builder-managed") {
+            "; selected TYPE_ID resources are builder-managed by their declared TYPE_ID script"
+        } else {
+            ""
+        };
+        return Err(crate::error::CompileError::without_span(format!(
+            "no passive resource identities are available in this module{type_id_hint}"
+        )));
+    }
+    Ok(identities)
+}
+
+fn parse_resource_identity_inputs(values: &[String]) -> Result<ResourceIdentityInputMap> {
+    let mut inputs = ResourceIdentityInputMap::default();
+    for value in values {
+        let Some((selector, material)) = value.split_once('=') else {
+            return Err(crate::error::CompileError::without_span(format!(
+                "invalid --identity '{}'; expected TYPE=INSTANCE or TYPE:BINDING=INSTANCE",
+                value
+            )));
+        };
+        let selector = selector.trim();
+        if selector.is_empty() || material.is_empty() {
+            return Err(crate::error::CompileError::without_span(format!(
+                "invalid --identity '{}'; selector and INSTANCE must be non-empty",
+                value
+            )));
+        }
+        if let Some((type_name, binding)) = selector.split_once(':') {
+            let type_name = type_name.trim();
+            let binding = binding.trim();
+            if type_name.is_empty() || binding.is_empty() {
+                return Err(crate::error::CompileError::without_span(format!(
+                    "invalid --identity '{}'; TYPE and BINDING must be non-empty",
+                    value
+                )));
+            }
+            if inputs.binding_material.insert((type_name.to_string(), binding.to_string()), material.to_string()).is_some() {
+                return Err(crate::error::CompileError::without_span(format!(
+                    "duplicate --identity material for resource binding '{}:{}'",
+                    type_name, binding
+                )));
+            }
+        } else if inputs.type_material.insert(selector.to_string(), material.to_string()).is_some() {
+            return Err(crate::error::CompileError::without_span(format!(
+                "duplicate --identity material for resource type '{}'",
+                selector
+            )));
+        }
+    }
+    Ok(inputs)
+}
+
+fn resource_identity_plan_json(
+    metadata: &CompileMetadata,
+    identities: &[CkbResourceIdentityMetadata],
+    artifact_metadata: &CompileMetadata,
+    artifact_path: &Path,
+    metadata_path: &Utf8Path,
+    source_output: Option<&PathBuf>,
+    identity_inputs: &ResourceIdentityInputMap,
+    default_instance: Option<&str>,
+) -> Result<serde_json::Value> {
+    let Some(artifact_hash) = artifact_metadata.artifact_hash.as_deref() else {
+        return Err(crate::error::CompileError::without_span("resource identity artifact metadata is missing artifact_hash"));
+    };
+    let code_hash = format!("0x{artifact_hash}");
+    let mut entries = Vec::new();
+    for identity in identities {
+        let type_script = resource_identity_script_plan(metadata, identity, None, identity_inputs, default_instance, &code_hash)?;
+        let create_scripts = resource_identity_created_bindings(identity)
+            .into_iter()
+            .map(|(origin, binding)| {
+                let script_plan = resource_identity_script_plan(
+                    metadata,
+                    identity,
+                    Some(binding.as_str()),
+                    identity_inputs,
+                    default_instance,
+                    &code_hash,
+                )?;
+                Ok(serde_json::json!({
+                    "origin": origin,
+                    "binding": binding,
+                    "identity_hash": script_plan.identity_hash,
+                    "identity_material": script_plan.identity_material,
+                    "script": script_plan.script,
+                    "script_hash": script_plan.script_hash,
+                }))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        entries.push(serde_json::json!({
+            "type_name": identity.type_name.as_str(),
+            "kind": identity.kind.as_str(),
+            "identity_policy": identity.identity_policy.as_str(),
+            "schema_hash": identity.schema_hash.as_deref(),
+            "status": "ready",
+            "passive_type_script_status": "compiler-generated-passive-script-args-identity",
+            "identity_hash": type_script.identity_hash,
+            "identity_material": type_script.identity_material,
+            "script": type_script.script,
+            "script_hash": type_script.script_hash,
+            "create_scripts": create_scripts,
+            "created_by": identity.created_by.clone(),
+            "mutated_by": identity.mutated_by.clone(),
+            "consumed_by": identity.consumed_by.clone(),
+            "builder_contract": "use this script exactly as the passive resource type identity; do not substitute scoped action artifacts",
+        }));
+    }
+
+    Ok(serde_json::json!({
+        "status": "ok",
+        "schema": RESOURCE_IDENTITY_PLAN_SCHEMA,
+        "module": metadata.module.as_str(),
+        "compiler_version": metadata.compiler_version.as_str(),
+        "metadata_schema_version": metadata.metadata_schema_version,
+        "target_profile": metadata.target_profile.name.as_str(),
+        "artifact": {
+            "path": artifact_path.display().to_string(),
+            "metadata": metadata_path.to_string(),
+            "source": source_output.map(|path| path.display().to_string()),
+            "entry_lock": RESOURCE_IDENTITY_LOCK_NAME,
+            "format": artifact_metadata.artifact_format.as_str(),
+            "hash": artifact_hash,
+            "code_hash": code_hash.as_str(),
+            "hash_type": RESOURCE_IDENTITY_HASH_TYPE,
+            "source_kind": "compiler-generated-passive-resource-identity",
+        },
+        "resource_identities": entries,
+        "builder_contract": {
+            "validate_tx_flag": "--resource-identities <plan.json>",
+            "witness": "none; this passive badge only decodes Script.args",
+            "script_args": "identity_hash: Hash (32 bytes)",
+            "binding_override": "--identity TYPE:BINDING=INSTANCE overrides one create binding; --identity TYPE=INSTANCE sets the type default",
+            "action_artifact_policy": "forbidden-as-passive-type-identity",
+        },
+    }))
+}
+
+fn resource_identity_script_plan(
+    metadata: &CompileMetadata,
+    identity: &CkbResourceIdentityMetadata,
+    binding: Option<&str>,
+    identity_inputs: &ResourceIdentityInputMap,
+    default_instance: Option<&str>,
+    code_hash: &str,
+) -> Result<ResourceIdentityScriptPlan> {
+    let (instance_bytes, instance_json) =
+        resource_identity_instance_material(&identity.type_name, binding, identity_inputs, default_instance)?;
+    let instance_hash = crate::hex_encode(&crate::ckb_blake2b256(&instance_bytes));
+    let identity_material = resource_identity_hash_material(metadata, identity, binding, &instance_hash);
+    let identity_hash = format!("0x{}", crate::hex_encode(&crate::ckb_blake2b256(identity_material.as_bytes())));
+    let script_hash = ckb_packed_script_hash_hex(code_hash, RESOURCE_IDENTITY_HASH_TYPE, &identity_hash)?;
+    Ok(ResourceIdentityScriptPlan {
+        identity_hash: identity_hash.clone(),
+        identity_material: serde_json::json!({
+            "schema": RESOURCE_IDENTITY_MATERIAL_SCHEMA,
+            "binding": binding,
+            "instance": instance_json,
+            "instance_hash": format!("0x{instance_hash}"),
+            "hash_algorithm": "ckb_blake2b_256",
+            "material": identity_material,
+        }),
+        script: serde_json::json!({
+            "code_hash": code_hash,
+            "hash_type": RESOURCE_IDENTITY_HASH_TYPE,
+            "args": identity_hash,
+        }),
+        script_hash,
+    })
+}
+
+fn resource_identity_created_bindings(identity: &CkbResourceIdentityMetadata) -> Vec<(String, String)> {
+    identity
+        .created_by
+        .iter()
+        .filter_map(|created_by| created_by.rsplit_once(':').map(|(origin, binding)| (origin.to_string(), binding.to_string())))
+        .collect()
+}
+
+fn resource_identity_instance_material(
+    type_name: &str,
+    binding: Option<&str>,
+    identity_inputs: &ResourceIdentityInputMap,
+    default_instance: Option<&str>,
+) -> Result<(Vec<u8>, serde_json::Value)> {
+    let binding_key = binding.map(|binding| (type_name.to_string(), binding.to_string()));
+    let (source, value) = if let Some(value) = binding_key.as_ref().and_then(|key| identity_inputs.binding_material.get(key)) {
+        ("binding", Some(value.as_str()))
+    } else if let Some(value) = identity_inputs.type_material.get(type_name) {
+        ("type", Some(value.as_str()))
+    } else if let Some(value) = default_instance {
+        ("instance", Some(value))
+    } else {
+        ("empty", None)
+    };
+    let (encoding, normalized_value, bytes) = match value {
+        Some(raw) => decode_resource_identity_material(type_name, raw)?,
+        None => ("empty".to_string(), "0x".to_string(), Vec::new()),
+    };
+    let json = serde_json::json!({
+        "source": source,
+        "encoding": encoding,
+        "value": normalized_value,
+        "byte_len": bytes.len(),
+    });
+    Ok((bytes, json))
+}
+
+fn decode_resource_identity_material(type_name: &str, value: &str) -> Result<(String, String, Vec<u8>)> {
+    let trimmed = value.trim();
+    if trimmed.starts_with("0x") || trimmed.starts_with("0X") || trimmed.starts_with("hex:") {
+        let bytes = decode_hex_arg(&format!("resource identity {type_name}"), trimmed, None)?;
+        return Ok(("hex".to_string(), format!("0x{}", crate::hex_encode(&bytes)), bytes));
+    }
+    Ok(("utf8".to_string(), trimmed.to_string(), trimmed.as_bytes().to_vec()))
+}
+
+fn resource_identity_hash_material(
+    metadata: &CompileMetadata,
+    identity: &CkbResourceIdentityMetadata,
+    binding: Option<&str>,
+    instance_hash: &str,
+) -> String {
+    format!(
+        "schema={}\nmodule={}\nmetadata_schema_version={}\ntype_name={}\nbinding={}\nkind={}\nidentity_policy={}\nschema_hash={}\ncreated_by={}\nmutated_by={}\nconsumed_by={}\ninstance_hash=0x{}\n",
+        RESOURCE_IDENTITY_MATERIAL_SCHEMA,
+        metadata.module,
+        metadata.metadata_schema_version,
+        identity.type_name,
+        binding.unwrap_or(""),
+        identity.kind,
+        identity.identity_policy,
+        identity.schema_hash.as_deref().unwrap_or(""),
+        identity.created_by.join(","),
+        identity.mutated_by.join(","),
+        identity.consumed_by.join(","),
+        instance_hash
+    )
+}
+
+fn ckb_packed_script_hash_hex(code_hash: &str, hash_type: &str, args: &str) -> Result<String> {
+    let code_hash = decode_hex_arg("script.code_hash", code_hash, Some(32))?;
+    let hash_type = ckb_hash_type_byte(hash_type)?;
+    let args = decode_hex_arg("script.args", args, None)?;
+    let script = molecule_table(&[code_hash, vec![hash_type], molecule_bytes(&args)]);
+    Ok(format!("0x{}", crate::hex_encode(&crate::ckb_blake2b256(&script))))
+}
+
+fn ckb_hash_type_byte(hash_type: &str) -> Result<u8> {
+    match hash_type {
+        "data" => Ok(0),
+        "type" => Ok(1),
+        "data1" => Ok(2),
+        "data2" => Ok(4),
+        other => Err(crate::error::CompileError::without_span(format!(
+            "unsupported CKB script hash_type '{}'; expected data, type, data1, or data2",
+            other
+        ))),
+    }
+}
+
+fn molecule_bytes(bytes: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(4 + bytes.len());
+    out.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+    out.extend_from_slice(bytes);
+    out
+}
+
+fn molecule_table(fields: &[Vec<u8>]) -> Vec<u8> {
+    let header_size = 4 + fields.len() * 4;
+    let total_size = header_size + fields.iter().map(Vec::len).sum::<usize>();
+    let mut out = Vec::with_capacity(total_size);
+    out.extend_from_slice(&(total_size as u32).to_le_bytes());
+    let mut offset = header_size as u32;
+    for field in fields {
+        out.extend_from_slice(&offset.to_le_bytes());
+        offset += field.len() as u32;
+    }
+    for field in fields {
+        out.extend_from_slice(field);
+    }
+    out
+}
+
+fn validate_tx_resource_identity_plan(
+    metadata: &CompileMetadata,
+    tx: &serde_json::Value,
+    plan: &serde_json::Value,
+    violations: &mut Vec<crate::assumptions::TxValidationViolation>,
+) {
+    if plan.get("schema").and_then(serde_json::Value::as_str) != Some(RESOURCE_IDENTITY_PLAN_SCHEMA) {
+        push_resource_identity_violation(violations, "resource identity plan schema must be cellscript-resource-identity-plan-v1");
+        return;
+    }
+    if plan.get("module").and_then(serde_json::Value::as_str) != Some(metadata.module.as_str()) {
+        push_resource_identity_violation(
+            violations,
+            &format!("resource identity plan module does not match metadata module '{}'", metadata.module),
+        );
+    }
+    let Some(plan_entries) = plan.get("resource_identities").and_then(serde_json::Value::as_array) else {
+        push_resource_identity_violation(violations, "resource identity plan must contain resource_identities array");
+        return;
+    };
+    let expected_entries = resource_identity_plan_entries(plan_entries, violations);
+    let outputs = tx.get("outputs").and_then(serde_json::Value::as_array);
+    for (ordinal, (origin, pattern)) in selected_create_patterns(metadata).into_iter().enumerate() {
+        if pattern.ckb_type_id.is_some() || resource_identity_is_type_id_managed(metadata, &pattern.ty) {
+            continue;
+        }
+        let Some(expected_entry) = expected_entries.get(&pattern.ty) else {
+            push_resource_identity_violation(
+                violations,
+                &format!("{origin} creates resource '{}' but the resource identity plan has no script for that type", pattern.ty),
+            );
+            continue;
+        };
+        let Some(expected_script) = resource_identity_expected_script(expected_entry, &origin, &pattern.binding) else {
+            push_resource_identity_violation(
+                violations,
+                &format!(
+                    "resource identity plan entry for '{}' has no type-level script and no create script for {origin}:{}",
+                    pattern.ty, pattern.binding
+                ),
+            );
+            continue;
+        };
+        let output_index = pattern.ckb_output_data.as_ref().map(|binding| binding.output_index).unwrap_or(ordinal);
+        let Some(output) = outputs.and_then(|outputs| outputs.get(output_index)) else {
+            push_resource_identity_violation(
+                violations,
+                &format!("{origin} creates resource '{}' at outputs[{output_index}], but that output is missing", pattern.ty),
+            );
+            continue;
+        };
+        let Some(actual_script) = output.get("type").or_else(|| output.get("type_")).and_then(serde_json::Value::as_object) else {
+            push_resource_identity_violation(
+                violations,
+                &format!("{origin} creates resource '{}' at outputs[{output_index}], but that output has no type script", pattern.ty),
+            );
+            continue;
+        };
+        validate_resource_type_script_matches_plan(output_index, &pattern.ty, actual_script, expected_script, violations);
+    }
+}
+
+fn validate_tx_fixture_resource_identities(
+    metadata: &CompileMetadata,
+    tx: &serde_json::Value,
+    violations: &mut Vec<crate::assumptions::TxValidationViolation>,
+) {
+    let outputs = tx.get("outputs").and_then(serde_json::Value::as_array);
+    for (ordinal, (origin, pattern)) in selected_create_patterns(metadata).into_iter().enumerate() {
+        let output_index = pattern.ckb_output_data.as_ref().map(|binding| binding.output_index).unwrap_or(ordinal);
+        let Some(output) = outputs.and_then(|outputs| outputs.get(output_index)) else {
+            continue;
+        };
+        let Some(actual_script) = output.get("type").or_else(|| output.get("type_")).and_then(serde_json::Value::as_object) else {
+            continue;
+        };
+        let Some(code_hash) = actual_script.get("code_hash").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        let Some(fixture) = known_fixture_identity_name(code_hash) else {
+            continue;
+        };
+        push_resource_identity_violation(
+            violations,
+            &format!(
+                "production validation forbids fixture identity '{fixture}' as outputs[{output_index}].type for resource '{}' created by {origin}:{}; use cellc resource-identity or a lifecycle-stable production identity instead",
+                pattern.ty, pattern.binding
+            ),
+        );
+    }
+}
+
+fn known_fixture_identity_name(code_hash: &str) -> Option<&'static str> {
+    let normalized = normalize_hex_text(code_hash);
+    if normalized == normalize_hex_text(CKB_DEVNET_ALWAYS_SUCCESS_CODE_HASH) {
+        Some("always_success_fixture_only")
+    } else if normalized == normalize_hex_text(ZERO_PLACEHOLDER_CODE_HASH) {
+        Some("zero_placeholder_fixture_only")
+    } else {
+        None
+    }
+}
+
+fn resource_identity_plan_entries<'a>(
+    entries: &'a [serde_json::Value],
+    violations: &mut Vec<crate::assumptions::TxValidationViolation>,
+) -> BTreeMap<String, &'a serde_json::Value> {
+    let mut plan_entries = BTreeMap::new();
+    for (index, entry) in entries.iter().enumerate() {
+        let Some(type_name) = entry.get("type_name").and_then(serde_json::Value::as_str) else {
+            push_resource_identity_violation(violations, &format!("resource_identities[{index}].type_name is required"));
+            continue;
+        };
+        if entry.get("script").is_none() && entry.get("create_scripts").and_then(serde_json::Value::as_array).is_none() {
+            push_resource_identity_violation(
+                violations,
+                &format!("resource_identities[{index}] must contain script or create_scripts"),
+            );
+        }
+        if plan_entries.insert(type_name.to_string(), entry).is_some() {
+            push_resource_identity_violation(
+                violations,
+                &format!("resource identity plan contains duplicate script for type '{}'", type_name),
+            );
+        }
+    }
+    plan_entries
+}
+
+fn resource_identity_expected_script<'a>(entry: &'a serde_json::Value, origin: &str, binding: &str) -> Option<&'a serde_json::Value> {
+    entry
+        .get("create_scripts")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|scripts| {
+            scripts.iter().find_map(|candidate| {
+                let origin_matches = candidate.get("origin").and_then(serde_json::Value::as_str) == Some(origin);
+                let binding_matches = candidate.get("binding").and_then(serde_json::Value::as_str) == Some(binding);
+                if origin_matches && binding_matches {
+                    candidate.get("script")
+                } else {
+                    None
+                }
+            })
+        })
+        .or_else(|| entry.get("script"))
+}
+
+fn selected_create_patterns<'a>(metadata: &'a CompileMetadata) -> Vec<(String, &'a CreatePatternMetadata)> {
+    if let Some(entrypoint) = metadata.selected_entrypoint.as_ref() {
+        match entrypoint.kind.as_str() {
+            "action" => {
+                return metadata
+                    .actions
+                    .iter()
+                    .find(|action| action.name == entrypoint.name)
+                    .map(|action| {
+                        selected_create_patterns_for(format!("action:{}", action.name), &action.create_set, &action.proof_plan)
+                    })
+                    .unwrap_or_default();
+            }
+            "lock" => {
+                return metadata
+                    .locks
+                    .iter()
+                    .find(|lock| lock.name == entrypoint.name)
+                    .map(|lock| selected_create_patterns_for(format!("lock:{}", lock.name), &lock.create_set, &lock.proof_plan))
+                    .unwrap_or_default();
+            }
+            _ => {}
+        }
+    }
+    metadata
+        .actions
+        .iter()
+        .flat_map(|action| selected_create_patterns_for(format!("action:{}", action.name), &action.create_set, &action.proof_plan))
+        .chain(
+            metadata
+                .locks
+                .iter()
+                .flat_map(|lock| selected_create_patterns_for(format!("lock:{}", lock.name), &lock.create_set, &lock.proof_plan)),
+        )
+        .collect()
+}
+
+fn selected_create_patterns_for<'a>(
+    origin: String,
+    patterns: &'a [CreatePatternMetadata],
+    proof_plan: &[ProofPlanMetadata],
+) -> Vec<(String, &'a CreatePatternMetadata)> {
+    let created_bindings = proof_plan_created_output_bindings(proof_plan);
+    patterns
+        .iter()
+        .filter(|pattern| created_bindings.is_empty() || created_bindings.contains(&pattern.binding))
+        .map(|pattern| (origin.clone(), pattern))
+        .collect()
+}
+
+fn proof_plan_created_output_bindings(proof_plan: &[ProofPlanMetadata]) -> BTreeSet<String> {
+    proof_plan
+        .iter()
+        .filter_map(|plan| {
+            plan.feature
+                .strip_prefix("create-output:")
+                .or_else(|| plan.feature.strip_prefix("create-unique-output:"))
+                .and_then(|rest| rest.rsplit_once(':').map(|(_, binding)| binding.to_string()))
+        })
+        .collect()
+}
+
+fn resource_identity_is_type_id_managed(metadata: &CompileMetadata, type_name: &str) -> bool {
+    metadata.constraints.ckb.as_ref().is_some_and(|ckb| {
+        ckb.resource_identities
+            .iter()
+            .any(|identity| identity.type_name == type_name && identity.status == "ckb-type-id-builder-managed")
+    })
+}
+
+fn validate_resource_type_script_matches_plan(
+    output_index: usize,
+    type_name: &str,
+    actual: &serde_json::Map<String, serde_json::Value>,
+    expected: &serde_json::Value,
+    violations: &mut Vec<crate::assumptions::TxValidationViolation>,
+) {
+    for field in ["code_hash", "hash_type", "args"] {
+        let expected_value = expected.get(field).and_then(serde_json::Value::as_str);
+        let actual_value = actual.get(field).and_then(serde_json::Value::as_str);
+        match (actual_value, expected_value) {
+            (Some(actual), Some(expected)) if resource_script_field_matches(field, actual, expected) => {}
+            (Some(actual), Some(expected)) => push_resource_identity_violation(
+                violations,
+                &format!("outputs[{output_index}].type.{field} for resource '{}' is '{}', expected '{}'", type_name, actual, expected),
+            ),
+            (None, Some(expected)) => push_resource_identity_violation(
+                violations,
+                &format!("outputs[{output_index}].type.{field} for resource '{}' is missing, expected '{}'", type_name, expected),
+            ),
+            _ => push_resource_identity_violation(
+                violations,
+                &format!("resource identity plan script for '{}' is missing field '{}'", type_name, field),
+            ),
+        }
+    }
+}
+
+fn resource_script_field_matches(field: &str, actual: &str, expected: &str) -> bool {
+    match field {
+        "code_hash" | "args" => normalize_hex_text(actual) == normalize_hex_text(expected),
+        "hash_type" => actual.eq_ignore_ascii_case(expected),
+        _ => actual == expected,
+    }
+}
+
+fn normalize_hex_text(value: &str) -> String {
+    let trimmed = value.trim();
+    let stripped = trimmed.strip_prefix("0x").or_else(|| trimmed.strip_prefix("0X")).unwrap_or(trimmed);
+    format!("0x{}", stripped.to_ascii_lowercase())
+}
+
+fn push_resource_identity_violation(violations: &mut Vec<crate::assumptions::TxValidationViolation>, message: &str) {
+    violations.push(crate::assumptions::TxValidationViolation {
+        assumption_id: "resource-identity-plan".to_string(),
+        kind: "resource_identity".to_string(),
+        message: message.to_string(),
+    });
+}
+
 fn transaction_solver_template(metadata: &CompileMetadata) -> serde_json::Value {
     let assumptions = &metadata.runtime.builder_assumptions;
     let ckb = metadata.constraints.ckb.as_ref();
+    let resource_identities = ckb
+        .map(|c| serde_json::to_value(&c.resource_identities).unwrap_or(serde_json::Value::Null))
+        .unwrap_or_else(|| serde_json::json!([]));
 
     // Cell selection: derive input requirements from actions and ProofPlan
     let mut input_slots = Vec::new();
@@ -3249,7 +4008,7 @@ fn transaction_solver_template(metadata: &CompileMetadata) -> serde_json::Value 
                     | "spawn_target_cell_dep_binding"
                     | "lock_group_transaction_scope"
                     | "capacity_policy"
-            )
+            ) || assumption_requires_structural_binding_evidence(assumption)
         })
         .map(|assumption| {
             let evidence_schema = if assumption.kind == "spawn_target_cell_dep_binding" {
@@ -3260,6 +4019,15 @@ fn transaction_solver_template(metadata: &CompileMetadata) -> serde_json::Value 
                     "optional_manifest_identity_fields": ["tx_hash", "out_index", "hash_type", "data_hash", "type_id"],
                     "required_cell_deps": assumption.required_cell_deps,
                     "note": "builder must provide the same manifest-bound CellDep identity in transaction_plan.cell_deps and builder_assumption_evidence before validate-tx can pass"
+                })
+            } else if assumption_requires_structural_binding_evidence(assumption) {
+                serde_json::json!({
+                    "required_fields": ["assumption_id", "kind", "origin", "feature", "proof_plan_status", "evidence"],
+                    "evidence_payload": "non-empty object or array; scalar booleans, numbers, and strings are rejected",
+                    "required_inputs": assumption.required_inputs,
+                    "required_outputs": assumption.required_outputs,
+                    "required_cell_deps": assumption.required_cell_deps,
+                    "note": "builder must provide concrete structural binding evidence for each wildcard requirement before validate-tx can pass"
                 })
             } else {
                 serde_json::json!({
@@ -3317,6 +4085,12 @@ fn transaction_solver_template(metadata: &CompileMetadata) -> serde_json::Value 
             "inputs": input_slots,
             "outputs": output_slots,
             "cell_deps": dep_slots,
+            "resource_identities": resource_identities,
+            "fixture_identity_policy": {
+                "always_success": "fixture-only; may be used in harness and negative tests, never as a production resource identity",
+                "zero_placeholder": "fixture-only; never as a production resource identity",
+                "production_validation": "cellc validate-tx --production rejects known fixture-only resource output type identities"
+            },
             "witnesses": witness_slots,
             "header_deps": ckb.map(|c| if c.uses_header_epoch { vec!["epoch-header"] } else { vec![] }).unwrap_or_default(),
             "builder_assumption_evidence_requirements": evidence,
@@ -3330,11 +4104,23 @@ fn transaction_solver_template(metadata: &CompileMetadata) -> serde_json::Value 
         "limitations": [
             "template only: does not perform live cell selection",
             "template only: does not resolve concrete deps/header deps",
+            "template only: passive resource identities require a cellc resource-identity plan before production signing",
+            "template only: run validate-tx --production before signing to reject fixture-only resource identities",
             "template only: does not calculate fee/change or occupied capacity",
             "template only: does not place final witnesses or signatures",
             "CKB dry-run required for production acceptance"
         ],
     })
+}
+
+fn assumption_requires_structural_binding_evidence(assumption: &crate::assumptions::BuilderAssumptionMetadata) -> bool {
+    assumption.required_inputs.iter().any(is_wildcard_requirement)
+        || assumption.required_outputs.iter().any(is_wildcard_requirement)
+        || assumption.required_cell_deps.iter().any(is_wildcard_requirement)
+}
+
+fn is_wildcard_requirement(required: &String) -> bool {
+    required.ends_with(":*")
 }
 
 fn deployment_plan_json(metadata: &CompileMetadata) -> serde_json::Value {
@@ -3357,6 +4143,7 @@ fn deployment_plan_json(metadata: &CompileMetadata) -> serde_json::Value {
         },
         "dep_group_manifest": ckb.map(|c| serde_json::to_value(&c.dep_group_manifest).unwrap_or(serde_json::Value::Null)),
         "script_references": ckb.map(|c| serde_json::to_value(&c.script_references).unwrap_or(serde_json::Value::Null)),
+        "resource_identities": ckb.map(|c| serde_json::to_value(&c.resource_identities).unwrap_or(serde_json::Value::Null)),
         "proof_plan_soundness": metadata.runtime.proof_plan_soundness,
         "builder_assumptions": metadata.runtime.builder_assumptions,
     })
@@ -5871,6 +6658,20 @@ impl CliParser {
                     .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
                     .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
                     .arg(
+                        Arg::new("entry-action")
+                            .long("entry-action")
+                            .value_name("ACTION")
+                            .conflicts_with("entry-lock")
+                            .help("Scope assumptions to one generated action entrypoint"),
+                    )
+                    .arg(
+                        Arg::new("entry-lock")
+                            .long("entry-lock")
+                            .value_name("LOCK")
+                            .conflicts_with("entry-action")
+                            .help("Scope assumptions to one generated lock entrypoint"),
+                    )
+                    .arg(
                         Arg::new("primitive-compat")
                             .long("primitive-compat")
                             .value_name("VERSION")
@@ -6025,6 +6826,18 @@ impl CliParser {
                     .arg(Arg::new("against").long("against").value_name("METADATA").required(true).help("Metadata JSON"))
                     .arg(Arg::new("tx").value_name("TX_JSON").required(true).help("Transaction JSON"))
                     .arg(
+                        Arg::new("resource-identities")
+                            .long("resource-identities")
+                            .value_name("PLAN_JSON")
+                            .help("Resource identity plan emitted by cellc resource-identity"),
+                    )
+                    .arg(
+                        Arg::new("production")
+                            .long("production")
+                            .action(ArgAction::SetTrue)
+                            .help("Reject known fixture-only resource identities before production signing"),
+                    )
+                    .arg(
                         Arg::new("primitive-compat")
                             .long("primitive-compat")
                             .value_name("VERSION")
@@ -6041,12 +6854,83 @@ impl CliParser {
                     .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
             )
             .subcommand(
+                ClapCommand::new("resource-identity")
+                    .about("Generate a passive resource type-script identity artifact and builder plan")
+                    .arg(Arg::new("input").value_name("INPUT").help("Input .cell file, package directory, or Cell.toml"))
+                    .arg(Arg::new("output").long("output").short('o').value_name("ELF").help("Write passive identity artifact"))
+                    .arg(
+                        Arg::new("plan-output")
+                            .long("plan-output")
+                            .value_name("JSON")
+                            .help("Write resource identity builder plan JSON"),
+                    )
+                    .arg(
+                        Arg::new("source-output")
+                            .long("source-output")
+                            .value_name("CELL")
+                            .help("Write the compiler-generated passive identity CellScript source for review"),
+                    )
+                    .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
+                    .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
+                    .arg(
+                        Arg::new("type")
+                            .long("type")
+                            .value_name("TYPE")
+                            .num_args(1)
+                            .action(ArgAction::Append)
+                            .help("Limit plan generation to a resource type; repeat for multiple types"),
+                    )
+                    .arg(
+                        Arg::new("identity")
+                            .long("identity")
+                            .value_name("TYPE=INSTANCE")
+                            .num_args(1)
+                            .action(ArgAction::Append)
+                            .help("Per-resource identity material, e.g. Token=0x... or Pool=pool:v1"),
+                    )
+                    .arg(
+                        Arg::new("instance")
+                            .long("instance")
+                            .value_name("INSTANCE")
+                            .help("Default identity material for resource types without --identity"),
+                    )
+                    .arg(
+                        Arg::new("primitive-compat")
+                            .long("primitive-compat")
+                            .value_name("VERSION")
+                            .conflicts_with("primitive-strict")
+                            .help("Accept primitive syntax from a previous version with migration hints"),
+                    )
+                    .arg(
+                        Arg::new("primitive-strict")
+                            .long("primitive-strict")
+                            .value_name("VERSION")
+                            .conflicts_with("primitive-compat")
+                            .help("Require primitive syntax from a specific version"),
+                    )
+                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
+            )
+            .subcommand(
                 ClapCommand::new("solve-tx")
                     .about("Emit a deterministic v0.16 transaction template from metadata and builder assumptions")
                     .arg(Arg::new("input").value_name("INPUT").help("Input .cell file, package directory, or Cell.toml"))
                     .arg(Arg::new("output").long("output").short('o').value_name("FILE").help("Write JSON solver template"))
                     .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
                     .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
+                    .arg(
+                        Arg::new("entry-action")
+                            .long("entry-action")
+                            .value_name("ACTION")
+                            .conflicts_with("entry-lock")
+                            .help("Scope the transaction template to one generated action entrypoint"),
+                    )
+                    .arg(
+                        Arg::new("entry-lock")
+                            .long("entry-lock")
+                            .value_name("LOCK")
+                            .conflicts_with("entry-action")
+                            .help("Scope the transaction template to one generated lock entrypoint"),
+                    )
                     .arg(
                         Arg::new("primitive-compat")
                             .long("primitive-compat")
@@ -6413,6 +7297,8 @@ impl CliParser {
                 input: m.get_one::<String>("input").map(PathBuf::from),
                 target: m.get_one::<String>("target").cloned(),
                 target_profile: m.get_one::<String>("target-profile").cloned(),
+                entry_action: m.get_one::<String>("entry-action").cloned(),
+                entry_lock: m.get_one::<String>("entry-lock").cloned(),
                 primitive_compat: resolve_metadata_workflow_primitive_compat(
                     m.get_one::<String>("primitive-compat").cloned(),
                     m.get_one::<String>("primitive-strict").cloned(),
@@ -6478,10 +7364,28 @@ impl CliParser {
             Some(("validate-tx", m)) => Command::ValidateTx(ValidateTxArgs {
                 against: required_path!(m, "against", "metadata"),
                 tx: required_path!(m, "tx", "transaction JSON"),
+                resource_identities: m.get_one::<String>("resource-identities").map(PathBuf::from),
+                production: m.get_flag("production"),
                 primitive_compat: resolve_metadata_workflow_primitive_compat(
                     m.get_one::<String>("primitive-compat").cloned(),
                     m.get_one::<String>("primitive-strict").cloned(),
                 ),
+                json: m.get_flag("json"),
+            }),
+            Some(("resource-identity", m)) => Command::ResourceIdentity(ResourceIdentityArgs {
+                input: m.get_one::<String>("input").map(PathBuf::from),
+                output: m.get_one::<String>("output").map(PathBuf::from),
+                plan_output: m.get_one::<String>("plan-output").map(PathBuf::from),
+                source_output: m.get_one::<String>("source-output").map(PathBuf::from),
+                target: m.get_one::<String>("target").cloned(),
+                target_profile: m.get_one::<String>("target-profile").cloned(),
+                primitive_compat: resolve_metadata_workflow_primitive_compat(
+                    m.get_one::<String>("primitive-compat").cloned(),
+                    m.get_one::<String>("primitive-strict").cloned(),
+                ),
+                types: m.get_many::<String>("type").map(|values| values.cloned().collect()).unwrap_or_default(),
+                identities: m.get_many::<String>("identity").map(|values| values.cloned().collect()).unwrap_or_default(),
+                instance: m.get_one::<String>("instance").cloned(),
                 json: m.get_flag("json"),
             }),
             Some(("solve-tx", m)) => Command::SolveTx(SolveTxArgs {
@@ -6489,6 +7393,8 @@ impl CliParser {
                 output: m.get_one::<String>("output").map(PathBuf::from),
                 target: m.get_one::<String>("target").cloned(),
                 target_profile: m.get_one::<String>("target-profile").cloned(),
+                entry_action: m.get_one::<String>("entry-action").cloned(),
+                entry_lock: m.get_one::<String>("entry-lock").cloned(),
                 primitive_compat: resolve_metadata_workflow_primitive_compat(
                     m.get_one::<String>("primitive-compat").cloned(),
                     m.get_one::<String>("primitive-strict").cloned(),

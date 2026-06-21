@@ -152,8 +152,8 @@ Release-facing CKB evidence comes from the repository root:
 ```
 
 The bundled examples are covered by the current local production evidence suite.
-The 0.16.1 patch line also closes the token/AMM/launch and NFT first-cell
-bootstrap examples used by external builders.
+The 0.16.2 patch line also closes the token/AMM/launch and NFT first-cell
+bootstrap builder handoff, including passive resource identity checks.
 New external contracts still need their own metadata review, builder evidence,
 security review, and chain acceptance evidence before they should be called
 production-ready.

@@ -89,6 +89,68 @@ A production builder must:
 The compiler can give lower bounds and requirements. The builder supplies the
 transaction-specific proof.
 
+## Resource Identity Contract
+
+For CKB targets, `constraints.ckb.resource_identities` records the compiler's
+current resource identity contract for schema-backed CellScript resources and
+receipts.
+
+Statuses have builder meaning:
+
+- `ckb-type-id-builder-managed` means the builder must install the declared CKB
+  TYPE_ID script and preserve the compiler metadata for that identity.
+- `compiler-passive-identity-available` means `cellc resource-identity` can
+  emit a passive resource identity artifact and JSON plan for that resource.
+
+Scoped action artifacts are active verifiers. They must not be used as passive
+type-script identities for newly-created resource Cells. `cellc validate-tx`
+rejects transactions whose output type script uses the current scoped action
+artifact hash as a resource identity, because CKB would execute that artifact
+during output creation and the entry wrapper may expect action witness bytes.
+
+Use `cellc resource-identity` to generate the compiler-owned passive badge:
+
+```bash
+cellc resource-identity examples/amm_pool.cell \
+  --target-profile ckb \
+  --identity Token=token-a \
+  --identity Token:token_b_out=token-b \
+  --identity Pool=pool-main \
+  --plan-output build/resource-identities.json
+```
+
+The plan contains the exact `{ code_hash, hash_type, args }` type script each
+created resource Cell should wear. `--identity TYPE=INSTANCE` sets a type-level
+default; `--identity TYPE:BINDING=INSTANCE` overrides one create binding when
+the same resource type needs more than one passive identity. Production
+builders should pass the plan back into validation:
+
+```bash
+cellc validate-tx --against build/action.elf.meta.json \
+  --resource-identities build/resource-identities.json \
+  build/tx.json --json
+```
+
+Fixture scripts such as `always_success` can still be useful in local shape
+tests, but they are not production resource identities. Treat them as
+`always_success_fixture_only`: acceptable in fixture, harness, or negative-test
+contexts; forbidden as the type script for real `MintAuthority`, `Token`,
+`Pool`, or `LPReceipt` resource outputs.
+
+For production-facing validation, pass `--production`:
+
+```bash
+cellc validate-tx --against build/action.elf.meta.json \
+  --resource-identities build/resource-identities.json \
+  --production \
+  build/tx.json --json
+```
+
+In production mode, `validate-tx` rejects known fixture-only resource type
+identities such as the devnet `always_success` code hash and all-zero
+placeholder hashes. This keeps fixture plumbing useful without allowing it to
+become a resource identity scheme.
+
 ## Mass Constraints
 
 For CKB, `constraints.ckb` exposes compiler-estimated compute, storage,

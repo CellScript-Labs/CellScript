@@ -147,7 +147,10 @@ pub fn validate_transaction_against_metadata(metadata: &CompileMetadata, tx: &Va
         metadata.runtime.builder_assumptions.clone()
     };
     enrich_manifest_bound_spawn_target_assumptions(&mut assumptions, metadata);
-    validate_transaction_against_assumptions(&assumptions, tx)
+    let mut report = validate_transaction_against_assumptions(&assumptions, tx);
+    validate_scoped_action_artifact_not_used_as_output_type_identity(metadata, tx, &mut report.violations);
+    report.status = if report.violations.is_empty() { "ok".to_string() } else { "failed".to_string() };
+    report
 }
 
 pub fn validate_transaction_against_assumptions(assumptions: &[BuilderAssumptionMetadata], tx: &Value) -> TxValidationReport {
@@ -184,15 +187,17 @@ pub fn validate_transaction_against_assumptions(assumptions: &[BuilderAssumption
         if !assumption.required_witness_fields.is_empty() && witness_count == 0 {
             push_violation(&mut violations, assumption, "transaction has no witnesses required by this assumption");
         }
-        if requires_explicit_evidence(&assumption.kind) {
+        let structural_binding_evidence_required = requires_structural_binding_evidence(assumption);
+        if requires_explicit_evidence(&assumption.kind) || structural_binding_evidence_required {
             match validate_assumption_evidence(tx, assumption) {
                 EvidenceValidation::Valid => {}
                 EvidenceValidation::Missing => {
-                    push_violation(
-                        &mut violations,
-                        assumption,
-                        "missing builder_assumption_evidence entry for this non-structural assumption",
-                    );
+                    let message = if structural_binding_evidence_required {
+                        "missing builder_assumption_evidence entry for this assumption's wildcard structural read bindings"
+                    } else {
+                        "missing builder_assumption_evidence entry for this non-structural assumption"
+                    };
+                    push_violation(&mut violations, assumption, message);
                 }
                 EvidenceValidation::Invalid(message) => push_violation(&mut violations, assumption, &message),
             }
@@ -717,6 +722,143 @@ fn requires_explicit_evidence(kind: &str) -> bool {
             | "lock_group_transaction_scope"
             | "capacity_policy"
     )
+}
+
+fn requires_structural_binding_evidence(assumption: &BuilderAssumptionMetadata) -> bool {
+    assumption.required_inputs.iter().any(|required| is_wildcard_read(required))
+        || assumption.required_outputs.iter().any(|required| is_wildcard_read(required))
+        || assumption.required_cell_deps.iter().any(|required| is_wildcard_read(required))
+}
+
+fn is_wildcard_read(required: &str) -> bool {
+    required.ends_with(":*")
+}
+
+fn validate_scoped_action_artifact_not_used_as_output_type_identity(
+    metadata: &CompileMetadata,
+    tx: &Value,
+    violations: &mut Vec<TxValidationViolation>,
+) {
+    if !metadata_is_action_artifact(metadata) {
+        return;
+    }
+    let Some(artifact_hash) = metadata.artifact_hash.as_deref().and_then(normalized_hex) else {
+        return;
+    };
+    let Some(outputs) = tx.get("outputs").and_then(Value::as_array) else {
+        return;
+    };
+    let created_output_indexes = selected_created_output_indexes(metadata);
+    if created_output_indexes.is_empty() {
+        return;
+    }
+    let passive_resources = metadata
+        .constraints
+        .ckb
+        .as_ref()
+        .map(|ckb| {
+            ckb.resource_identities
+                .iter()
+                .filter(|identity| identity.status != "ckb-type-id-builder-managed")
+                .map(|identity| identity.type_name.clone())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let resource_hint = if passive_resources.is_empty() {
+        "resource cell".to_string()
+    } else {
+        format!("resource cell ({})", passive_resources.join(", "))
+    };
+
+    for (index, output) in outputs.iter().enumerate() {
+        if !created_output_indexes.contains(&index) {
+            continue;
+        }
+        let Some(type_script) = output.get("type").or_else(|| output.get("type_")).and_then(Value::as_object) else {
+            continue;
+        };
+        let Some(code_hash) = type_script.get("code_hash").and_then(Value::as_str).and_then(normalized_hex) else {
+            continue;
+        };
+        if code_hash == artifact_hash {
+            violations.push(TxValidationViolation {
+                assumption_id: "resource-identity-active-artifact".to_string(),
+                kind: "resource_identity".to_string(),
+                message: format!(
+                    "outputs[{index}].type uses this scoped action artifact as a passive {resource_hint} type identity; action artifacts are active verifiers and may fail during output creation with entry-witness-abi-invalid; use a compiler-supported resource identity or lifecycle-stable dispatcher artifact instead"
+                ),
+            });
+        }
+    }
+}
+
+fn selected_created_output_indexes(metadata: &CompileMetadata) -> BTreeSet<usize> {
+    let mut indexes = BTreeSet::new();
+    if let Some(entrypoint) = metadata.selected_entrypoint.as_ref() {
+        match entrypoint.kind.as_str() {
+            "action" => {
+                if let Some(action) = metadata.actions.iter().find(|action| action.name == entrypoint.name) {
+                    extend_create_output_indexes(&action.create_set, &action.proof_plan, &mut indexes);
+                }
+                return indexes;
+            }
+            "lock" => {
+                if let Some(lock) = metadata.locks.iter().find(|lock| lock.name == entrypoint.name) {
+                    extend_create_output_indexes(&lock.create_set, &lock.proof_plan, &mut indexes);
+                }
+                return indexes;
+            }
+            _ => return indexes,
+        }
+    }
+    for action in &metadata.actions {
+        extend_create_output_indexes(&action.create_set, &action.proof_plan, &mut indexes);
+    }
+    for lock in &metadata.locks {
+        extend_create_output_indexes(&lock.create_set, &lock.proof_plan, &mut indexes);
+    }
+    indexes
+}
+
+fn extend_create_output_indexes(
+    patterns: &[crate::CreatePatternMetadata],
+    proof_plan: &[ProofPlanMetadata],
+    indexes: &mut BTreeSet<usize>,
+) {
+    let proof_create_bindings = proof_plan_created_output_bindings(proof_plan);
+    for (ordinal, pattern) in patterns.iter().enumerate() {
+        if !proof_create_bindings.is_empty() && !proof_create_bindings.contains(&pattern.binding) {
+            continue;
+        }
+        indexes.insert(pattern.ckb_output_data.as_ref().map(|binding| binding.output_index).unwrap_or(ordinal));
+    }
+}
+
+fn proof_plan_created_output_bindings(proof_plan: &[ProofPlanMetadata]) -> BTreeSet<String> {
+    proof_plan
+        .iter()
+        .filter_map(|plan| {
+            plan.feature
+                .strip_prefix("create-output:")
+                .or_else(|| plan.feature.strip_prefix("create-unique-output:"))
+                .and_then(|rest| rest.rsplit_once(':').map(|(_, binding)| binding.to_string()))
+        })
+        .collect()
+}
+
+fn metadata_is_action_artifact(metadata: &CompileMetadata) -> bool {
+    metadata.selected_entrypoint.as_ref().is_some_and(|entrypoint| entrypoint.kind == "action")
+        || (metadata.selected_entrypoint.is_none() && !metadata.actions.is_empty())
+}
+
+fn normalized_hex(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    let stripped = trimmed.strip_prefix("0x").unwrap_or(trimmed);
+    if stripped.len() == 64 && stripped.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        Some(stripped.to_ascii_lowercase())
+    } else {
+        None
+    }
 }
 
 fn push_violation(violations: &mut Vec<TxValidationViolation>, assumption: &BuilderAssumptionMetadata, message: &str) {

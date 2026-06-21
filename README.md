@@ -606,7 +606,7 @@ policy defaults:
 ```toml
 [package]
 name = "token"
-version = "0.16.1"
+version = "0.16.2"
 entry = "src/main.cell"
 source_roots = ["src"]
 
@@ -685,8 +685,9 @@ registry dependency resolution remain experimental and fail-closed.
 | `cellc scheduler-plan` | Consume scheduler hints and report serial/conflict policy |
 | `cellc ckb-hash` | Compute CKB default Blake2b-256 hashes for builders and release evidence |
 | `cellc explain-assumptions` | Emit v0.16 builder-assumption evidence from ProofPlan metadata |
-| `cellc validate-tx` | Validate transaction JSON shape against builder assumptions before signing |
-| `cellc solve-tx` | Emit a deterministic transaction template from metadata |
+| `cellc validate-tx` | Validate transaction JSON shape against builder assumptions before signing; add `--production` to reject fixture-only resource identities |
+| `cellc resource-identity` | Generate passive resource identity artifact and plan JSON for output type scripts |
+| `cellc solve-tx` | Emit a deterministic transaction template plus resource identity contract from metadata |
 | `cellc deploy-plan` | Emit a reproducible deployment plan |
 | `cellc verify-deploy` / `diff-deploy` / `lock-deps` | Verify, compare, and lock deployment metadata |
 | `cellc proof-diff` / `profile` / `trace-tx` / `audit-bundle` | Emit v0.16 audit and debug reports |

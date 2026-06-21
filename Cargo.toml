@@ -1,6 +1,6 @@
 [package]
 name = "cellscript"
-version = "0.16.1"
+version = "0.16.2"
 edition = "2021"
 rust-version = "1.92.0"
 autobins = false
