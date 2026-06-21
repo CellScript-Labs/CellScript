@@ -150,7 +150,7 @@ cellc builder check \
 These builder-facing commands emit JSON by default. Add `--human` when you want
 a short terminal summary instead of the contract JSON.
 
-`builder-manifest` embeds
+`builder manifest` embeds
 `transaction_template.transaction_plan.builder_assumption_evidence_template` as
 a fillable JSON skeleton. Copy it into the candidate transaction as
 `builder_assumption_evidence`, then replace the placeholders with concrete

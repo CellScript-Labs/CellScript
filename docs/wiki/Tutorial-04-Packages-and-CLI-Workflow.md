@@ -158,10 +158,15 @@ For CKB-specific builder and deployment review:
 ```bash
 cellc constraints . --target riscv64-elf --target-profile ckb --json
 cellc abi . --target-profile ckb --action transfer
-cellc entry-witness . --target-profile ckb --action transfer --json
+cellc entry-witness . --target-profile ckb --action transfer
 cellc ckb-hash --file build/main.elf
 cellc verify-artifact build/main.elf --expect-target-profile ckb --verify-sources --production
 ```
+
+Builder-facing contract commands such as `entry-witness`, `solve-tx`,
+`explain-assumptions`, `validate-tx`, `resource-identity`, and
+`builder manifest/check` emit JSON by default. Add `--human` when you want a
+short terminal summary instead of the contract JSON.
 
 These reports are not busywork. They answer questions reviewers will ask:
 

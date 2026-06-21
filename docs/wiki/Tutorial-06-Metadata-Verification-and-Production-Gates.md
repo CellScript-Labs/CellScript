@@ -138,8 +138,8 @@ CellScript 0.16 adds a checked assurance layer over ProofPlan metadata:
 
 ```bash
 cellc explain-proof src/main.cell --json
-cellc explain-assumptions src/main.cell --json
-cellc validate-tx --against build/main.elf.meta.json tx.json --json
+cellc explain-assumptions src/main.cell
+cellc validate-tx --against build/main.elf.meta.json tx.json
 ```
 
 `runtime.proof_plan_soundness` tells you whether verifier obligations and
@@ -152,10 +152,31 @@ and requires schema-bound evidence objects for non-structural assumptions
 before signing. This is still pre-chain evidence: dry-run, capacity, cycles, and
 commit checks remain required for production claims.
 
+For builder integrations, prefer the scoped manifest/check layer. It packages
+ABI, witness placement, assumptions, resource identity policy, and evidence
+templates into one contract:
+
+```bash
+cellc builder manifest src/main.cell \
+  --entry-action transfer \
+  --target-profile ckb \
+  --resource-identities build/resource-identities.json \
+  --output build/transfer.builder.json
+
+cellc builder check \
+  --manifest build/transfer.builder.json \
+  --tx tx.json \
+  --production
+```
+
+Builder-facing contract commands emit JSON by default. Add `--human` for a
+short terminal summary; keep the default JSON for scripts, CI, and external
+transaction builders.
+
 Additional 0.16 reports are available for audit and deployment workflows:
 
 ```bash
-cellc solve-tx src/main.cell --json   # emits a template, not a final transaction
+cellc solve-tx src/main.cell          # emits a template, not a final transaction
 cellc deploy-plan src/main.cell --json
 cellc proof-diff old.meta.json new.meta.json --json
 cellc audit-bundle src/main.cell --output target/audit

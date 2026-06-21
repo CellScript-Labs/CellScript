@@ -204,7 +204,7 @@ Use ABI and entry-witness reports before building transaction code.
 
 ```bash
 cellc abi . --target-profile ckb --action transfer
-cellc entry-witness . --target-profile ckb --action transfer --json
+cellc entry-witness . --target-profile ckb --action transfer
 ```
 
 These reports tell builders and reviewers what data the entry expects. They do
