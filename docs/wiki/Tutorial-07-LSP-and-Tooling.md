@@ -7,6 +7,12 @@ The useful thing to remember is that editor feedback is not a separate language
 implementation. It is tied to the same parser, type checker, state-transition checks,
 and lowering metadata used by `cellc`.
 
+Compiler diagnostics now carry typed severity. Current hard failures still
+surface as `error`; future review notes can be reported as `warning` without
+making `ErrorReporter::has_errors()` true. Release gates and production
+commands remain error-gated, so a warning is a review signal rather than a
+deployment certificate.
+
 ## What You Will Learn
 
 - what the LSP server supports;
@@ -20,7 +26,8 @@ and lowering metadata used by `cellc`.
 The LSP implementation supports the editor features you expect while writing a
 contract:
 
-- diagnostics for parse, type, flow, and lowering errors;
+- diagnostics for parse, type, flow, and lowering errors, with compiler-backed
+  severity;
 - hover information for actions, receipts, fields, local variables, flow
   states, and lowering metadata;
 - keyword, type, symbol, field, local, enum variant, and qualified flow

@@ -639,7 +639,7 @@ case "$MODE" in
         run_release_quick_gate "$@"
         ;;
     *)
-        printf 'usage: %s [dev|ci|backend|release]\n' "$0" >&2
+        printf 'usage: %s [dev|ci|backend|release|release-quick]\n' "$0" >&2
         exit 2
         ;;
 esac

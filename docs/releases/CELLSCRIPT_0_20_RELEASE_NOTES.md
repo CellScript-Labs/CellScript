@@ -2,7 +2,7 @@
 
 **Status**: In progress for the 0.20 nightly line.
 
-**Updated**: 2026-06-19.
+**Updated**: 2026-06-22.
 
 CellScript 0.20 hardens the generated-builder and live/devnet acceptance path.
 The important post-audit change is that CKB-facing acceptance now checks the
@@ -62,6 +62,21 @@ implement raw cell-data encoders by themselves.
 checks now carry `cell_data_codec_manifest_hash` as a first-class build identity
 field. A mismatched or missing codec manifest hash fails registry and builder
 verification instead of being treated as an opaque metadata difference.
+
+## Metadata Schema Partitioning
+
+Compile metadata now keeps the top-level `metadata_schema_version` as the
+envelope compatibility wall and adds component versions for source/package
+identity, artifact-binding facts, and CKB constraint summaries:
+
+- `source_metadata_schema_version`
+- `artifact_metadata_schema_version`
+- `constraints_metadata_schema_version`
+
+`verify-artifact` rejects mismatches in any component. CLI JSON reports,
+deploy plans, dependency locks, audit bundles, and generated-builder ABI hashes
+also expose the split schema object so downstream tools can tell which metadata
+surface changed.
 
 ## Critical Example Coverage
 

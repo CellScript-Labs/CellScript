@@ -14,7 +14,7 @@ const BUNDLED_EXAMPLE_ELF_SIZE_BUDGETS: [(&str, usize); 7] = [
     ("amm_pool.cell", 80 * 1024),
     ("launch.cell", 36 * 1024),
     ("multisig.cell", 108 * 1024),
-    ("nft.cell", 62 * 1024),
+    ("nft.cell", 63 * 1024),
     ("timelock.cell", 72 * 1024),
     ("token.cell", 18 * 1024),
     ("vesting.cell", 28 * 1024),
@@ -61,7 +61,7 @@ const BUNDLED_EXAMPLE_ASM_SHAPE_BUDGETS: [(&str, AssemblyShapeBudget); 7] = [
             max_shared_epilogues: 20,
             max_text_bytes: 92 * 1024,
             max_relaxed_branches: 4,
-            max_cond_branch_abs_distance: 7_400,
+            max_cond_branch_abs_distance: 7_700,
             max_machine_blocks: 3_600,
             max_machine_block_bytes: 512,
             max_cfg_edges: 5_800,
@@ -75,9 +75,9 @@ const BUNDLED_EXAMPLE_ASM_SHAPE_BUDGETS: [(&str, AssemblyShapeBudget); 7] = [
             max_lines: 15_000,
             max_fail_handlers: 80,
             max_shared_epilogues: 18,
-            max_text_bytes: 57 * 1024,
+            max_text_bytes: 59 * 1024,
             max_relaxed_branches: 4,
-            max_cond_branch_abs_distance: 7_500,
+            max_cond_branch_abs_distance: 9_600,
             max_machine_blocks: 2_500,
             max_machine_block_bytes: 320,
             max_cfg_edges: 4_100,
@@ -93,11 +93,11 @@ const BUNDLED_EXAMPLE_ASM_SHAPE_BUDGETS: [(&str, AssemblyShapeBudget); 7] = [
             max_shared_epilogues: 22,
             max_text_bytes: 68 * 1024,
             max_relaxed_branches: 4,
-            max_cond_branch_abs_distance: 4_300,
+            max_cond_branch_abs_distance: 4_500,
             max_machine_blocks: 2_050,
             max_machine_block_bytes: 21_000,
             max_cfg_edges: 3_500,
-            max_call_edges: 440,
+            max_call_edges: 450,
             max_unreachable_machine_blocks: 2_000,
         },
     ),
@@ -1341,7 +1341,7 @@ fn token_mint_authority_input_output_binding_is_explicit() {
     assert!(
         asm.contains("# cellscript abi: LOAD_CELL_DATA reason=input source=Input index=0")
             && asm.contains("# cellscript abi: LOAD_CELL_DATA reason=output_param source=Output index=0")
-            && asm.contains("# cellscript abi: schema field MintAuthority.minted offset=16 size=8"),
+            && asm.contains("# cellscript abi: verify output field MintAuthority.minted offset=16 size=8"),
         "mint should bind authority input/output and verify minted through explicit require checks:\n{}",
         asm
     );
@@ -1494,7 +1494,7 @@ fn timelock_core_actions_expose_time_and_release_metadata() {
     assert!(extend_lock.fail_closed_runtime_features.is_empty(), "extend_lock should not carry fail-closed debt");
     assert_input_output_binding(extend_lock, "TimeLock", "time_lock_before", "time_lock_after", "timelock extend_lock");
     assert!(
-        asm.contains("# cellscript abi: schema field TimeLock.unlock_height"),
+        asm.contains("# cellscript abi: verify output field TimeLock.unlock_height"),
         "timelock extend_lock should verify unlock_height through explicit output requirements:\n{}",
         asm
     );

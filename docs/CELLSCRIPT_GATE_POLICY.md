@@ -3,7 +3,7 @@
 CellScript uses one top-level gate entry point:
 
 ```bash
-./scripts/cellscript_gate.sh <dev|ci|backend|release>
+./scripts/cellscript_gate.sh <dev|ci|backend|release|release-quick>
 ```
 
 The lower-level audit scripts remain available for focused debugging, but they
@@ -18,10 +18,10 @@ deciding whether a change is ready.
 | `ci` | Pull requests, pushes, and routine merge readiness | Full Rust tests, clippy, strict backend CI audit, syntax-combination CI audit through the strict backend runner, package verification, script syntax checks |
 | `backend` | Changes touching IR, codegen, assembler, ABI, ELF, or RISC-V behavior | Full Rust tests, clippy, and strict backend full audit, including stateful CKB scenarios |
 | `release` | Nightly/stable release candidates and any production CKB claim | `ci` plus tooling/docs boundary checks, VS Code validation, builder-backed CKB production acceptance, and stateful scenario/action coverage |
+| `release-quick` | Wrapper compatibility and local compile-only preflight | `ci` plus compile-only production acceptance; not external live/devnet evidence |
 
-`release-quick` is an internal compatibility mode used by
-`scripts/cellscript_ckb_release_gate.sh quick`; it runs the unified CI gate plus
-compile-only production acceptance.
+`release-quick` is kept for `scripts/cellscript_ckb_release_gate.sh quick`.
+Use `release` for any production or external live/devnet claim.
 
 ## Command Cheatsheet
 
@@ -37,6 +37,9 @@ compile-only production acceptance.
 
 # Release-facing CKB production gate
 ./scripts/cellscript_gate.sh release
+
+# Compile-only release preflight; not external live/devnet evidence
+./scripts/cellscript_gate.sh release-quick
 ```
 
 The old release wrapper remains supported:

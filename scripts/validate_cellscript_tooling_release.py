@@ -252,7 +252,9 @@ def main() -> int:
     require_contains(
         "src/package/mod.rs",
         [
-            "registry dependency '{}' with version '{}' is not supported yet; use a local path dependency",
+            "failed to resolve registry dependency '{}/{}@{}' via discovery index '{}': {}",
+            "registry package '{}/{}@{}' has no source_hash in registry.json",
+            "source_hash mismatch for '{}/{}@{}': expected '{}', got '{}'",
             "Git { url: String, revision: String }",
             "pub fn consistency_issues(&self, manifest: &PackageManifest) -> Vec<String>",
             "pub fn replace_with_resolved(&mut self, resolved: &HashMap<String, ResolvedPackage>)",
@@ -261,12 +263,21 @@ def main() -> int:
     require_contains(
         "tests/cli.rs",
         [
-            "cellc_rejects_registry_package_dependencies_fail_closed",
+            "cellc_rejects_registry_dependency_without_namespace",
+            "cellc_build_resolves_registry_dependency_and_writes_phase1_lockfile",
             "cellc_install_path_updates_lockfile_and_remove_prunes_it",
             "cellc_fmt_subcommand_formats_sources",
             "cellc_run_subcommand_executes_pure_elf_package",
             "cellc_gen_builder_typescript_emits_package_scaffold",
             "cellc_gen_builder_lockfile_identity_fails_closed",
+        ],
+    )
+    require_contains(
+        "tests/registry.rs",
+        [
+            "package_manager_resolves_registry_dependency_with_source_hash_from_local_git_fixture",
+            "package_manager_rejects_registry_source_hash_mismatch",
+            "lockfile_consistency_accepts_matching_registry_source",
         ],
     )
 

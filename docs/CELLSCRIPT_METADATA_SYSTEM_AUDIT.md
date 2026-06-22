@@ -2,24 +2,32 @@
 
 **Scope:** `src/lib.rs`, `src/cli/commands.rs`, `tests/cli.rs`
 **Date:** 2026-05-22
-**Review status:** Corrected after local validation and hardening. The disk-loaded artifact path now validates artifact byte length and `constraints.artifact` format/size in addition to the artifact hash.
+**Last updated:** 2026-06-22
+**Review status:** Corrected after local validation and hardening. The disk-loaded artifact path now validates artifact byte length and `constraints.artifact` format/size in addition to the artifact hash. The metadata envelope now also carries split source/package, artifact, and constraints component schema versions.
 
 ---
 
 ## 1. Metadata Schema Version
 
-**Finding: strict exact-match enforcement.**
+**Finding: strict exact-match enforcement with component versions.**
 
-`METADATA_SCHEMA_VERSION` is a hardcoded `u32` and `validate_compile_metadata()` rejects any metadata whose `metadata_schema_version` differs from the current compiler constant.
+`METADATA_SCHEMA_VERSION` remains the top-level envelope version, and `validate_compile_metadata()` rejects any metadata whose `metadata_schema_version` differs from the current compiler constant. The metadata record also carries:
+
+- `source_metadata_schema_version`
+- `artifact_metadata_schema_version`
+- `constraints_metadata_schema_version`
+
+Each component version is checked against its own compiler constant. This lets future schema work distinguish source/package identity changes from artifact-binding changes and CKB constraint-summary changes without pretending they all have the same compatibility risk.
 
 This is a compatibility wall:
 
 - newer metadata is rejected;
 - older metadata is rejected;
+- metadata with a mismatched source, artifact, or constraints component version is rejected;
 - the compiler version is also checked for exact equality;
 - there is no declared `min_schema_version`, `max_schema_version`, semver range, or downgrade loader.
 
-One important nuance: JSON decoding is not shape-strict. The metadata structs do not use `#[serde(deny_unknown_fields)]`, so unknown JSON fields are ignored by Serde by default. Several fields also use `#[serde(default)]`, which allows omitted fields to decode with defaults. The exact schema-version wall still prevents cross-version loading when the version changes, but same-version metadata is not a byte-for-byte or field-exhaustive schema check.
+One important nuance: JSON decoding is not shape-strict. The metadata structs do not use `#[serde(deny_unknown_fields)]`, so unknown JSON fields are ignored by Serde by default. Several fields also use `#[serde(default)]`, which allows omitted fields to decode with defaults. The component schema fields default to `0` when omitted so older files can be parsed far enough to produce an explicit version rejection. The exact schema-version wall still prevents cross-version loading when the version changes, but same-version metadata is not a byte-for-byte or field-exhaustive schema check.
 
 **Verdict:** Pass for incompatible-version rejection. Do not describe the loader as rejecting every unknown field.
 
@@ -142,7 +150,7 @@ This means:
 
 | Question | Verdict |
 | --- | --- |
-| `metadata_schema_version` enforcement | Pass: strict exact match, plus compiler-version exact match. |
+| `metadata_schema_version` enforcement | Pass: strict envelope exact match, strict component exact matches, plus compiler-version exact match. |
 | Unknown JSON fields | Nuance: ignored by default unless `deny_unknown_fields` is added. |
 | Artifact hash and size binding | Pass: hash and size are validated on compile-result and disk-loaded paths. |
 | VM ABI trailer handling | Pass: hash covers stored bytes; runtime strips only before VM loading. |

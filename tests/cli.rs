@@ -79,6 +79,12 @@ fn ckb_script_hash_for_test(code_hash: &str, hash_type: &str, args: &str) -> Str
 fn locked_build_from_metadata_for_test(metadata: &cellscript::CompileMetadata) -> cellscript::package::LockedBuildInfo {
     let abi = serde_json::json!({
         "metadata_schema_version": metadata.metadata_schema_version,
+        "metadata_schema_versions": {
+            "metadata": metadata.metadata_schema_version,
+            "source": metadata.source_metadata_schema_version,
+            "artifact": metadata.artifact_metadata_schema_version,
+            "constraints": metadata.constraints_metadata_schema_version,
+        },
         "target_profile": metadata.target_profile.name.as_str(),
         "types": &metadata.types,
         "actions": &metadata.actions,
@@ -302,6 +308,9 @@ action add(x: u64, y: u64) -> u64 {
     assert!(metadata.contains("\"entry_abi\""));
     assert!(metadata.contains("\"artifact\""));
     assert!(metadata.contains("\"runtime_errors\""));
+    assert!(metadata.contains("\"source_metadata_schema_version\""));
+    assert!(metadata.contains("\"artifact_metadata_schema_version\""));
+    assert!(metadata.contains("\"constraints_metadata_schema_version\""));
 }
 
 #[test]
@@ -949,7 +958,7 @@ action pass_through(token: Token) -> Token {
 }
 
 #[test]
-fn cellc_rejects_registry_package_dependencies_fail_closed() {
+fn cellc_rejects_registry_dependency_without_namespace() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
 

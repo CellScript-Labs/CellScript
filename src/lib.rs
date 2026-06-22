@@ -239,7 +239,10 @@ fn strict_capability_name(capability: ast::Capability) -> &'static str {
 const DEFAULT_TARGET: &str = "riscv64-asm";
 const DEFAULT_TARGET_PROFILE: &str = "ckb";
 const ARTIFACT_CACHE_VERSION: &str = "cell-data-codec-manifest-v1";
-pub const METADATA_SCHEMA_VERSION: u32 = 42;
+pub const METADATA_SCHEMA_VERSION: u32 = 43;
+pub const SOURCE_METADATA_SCHEMA_VERSION: u32 = 1;
+pub const ARTIFACT_METADATA_SCHEMA_VERSION: u32 = 1;
+pub const CONSTRAINTS_METADATA_SCHEMA_VERSION: u32 = 1;
 const STACK_COLLECTION_BACKING_BYTES: usize = 256;
 pub const ENTRY_WITNESS_ABI: &str = "cellscript-entry-witness-v1";
 pub(crate) const ENTRY_WITNESS_ABI_MAGIC: &[u8; 8] = b"CSARGv1\0";
@@ -405,6 +408,12 @@ pub struct ValidatedArtifact {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompileMetadata {
     pub metadata_schema_version: u32,
+    #[serde(default = "missing_metadata_component_schema_version")]
+    pub source_metadata_schema_version: u32,
+    #[serde(default = "missing_metadata_component_schema_version")]
+    pub artifact_metadata_schema_version: u32,
+    #[serde(default = "missing_metadata_component_schema_version")]
+    pub constraints_metadata_schema_version: u32,
     pub compiler_version: String,
     pub module: String,
     pub artifact_format: String,
@@ -434,6 +443,10 @@ pub struct CompileMetadata {
     /// Embedded DWARF debug section names (non-empty when debug mode is enabled for ELF artifacts)
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub debug_info_sections: Vec<String>,
+}
+
+fn missing_metadata_component_schema_version() -> u32 {
+    0
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -901,6 +914,21 @@ pub fn validate_compile_metadata(metadata: &CompileMetadata, artifact_format: Ar
             metadata.metadata_schema_version, METADATA_SCHEMA_VERSION
         )));
     }
+    validate_metadata_component_schema_version(
+        "source_metadata_schema_version",
+        metadata.source_metadata_schema_version,
+        SOURCE_METADATA_SCHEMA_VERSION,
+    )?;
+    validate_metadata_component_schema_version(
+        "artifact_metadata_schema_version",
+        metadata.artifact_metadata_schema_version,
+        ARTIFACT_METADATA_SCHEMA_VERSION,
+    )?;
+    validate_metadata_component_schema_version(
+        "constraints_metadata_schema_version",
+        metadata.constraints_metadata_schema_version,
+        CONSTRAINTS_METADATA_SCHEMA_VERSION,
+    )?;
     if metadata.compiler_version != VERSION {
         return Err(CompileError::without_span(format!(
             "metadata compiler_version '{}' does not match current compiler '{}'",
@@ -960,6 +988,13 @@ pub fn validate_compile_metadata(metadata: &CompileMetadata, artifact_format: Ar
     validate_source_metadata(metadata)?;
     crate::proof_plan::soundness::validate_metadata(metadata, false)?;
 
+    Ok(())
+}
+
+fn validate_metadata_component_schema_version(field: &str, actual: u32, expected: u32) -> Result<()> {
+    if actual != expected {
+        return Err(CompileError::without_span(format!("unsupported {field} {actual}; expected {expected}")));
+    }
     Ok(())
 }
 
@@ -4405,6 +4440,10 @@ fn incremental_cache_key(source: &str, options: &CompileOptions) -> String {
     key_input.push_str("cellscript-incremental-cache-v2");
     key_input.push_str(&format!("-compiler-{}", VERSION));
     key_input.push_str(&format!("-metadata-{}", METADATA_SCHEMA_VERSION));
+    key_input.push_str(&format!(
+        "-metadata-components-{}-{}-{}",
+        SOURCE_METADATA_SCHEMA_VERSION, ARTIFACT_METADATA_SCHEMA_VERSION, CONSTRAINTS_METADATA_SCHEMA_VERSION
+    ));
     key_input.push_str(&format!("-artifact-cache-{}", ARTIFACT_CACHE_VERSION));
     key_input.push_str(&hex_encode(&ckb_blake2b256(source.as_bytes())));
     key_input.push_str(&format!("-O{}", options.opt_level));
@@ -4803,6 +4842,9 @@ fn compile_metadata_from_ir(ir: &ir::IrModule, artifact_format: ArtifactFormat, 
     let cell_data_codec_manifest = cell_data_codec_manifest_metadata(&ckb_runtime_accesses, &molecule_schema_manifest, target_profile);
     let mut metadata = CompileMetadata {
         metadata_schema_version: METADATA_SCHEMA_VERSION,
+        source_metadata_schema_version: SOURCE_METADATA_SCHEMA_VERSION,
+        artifact_metadata_schema_version: ARTIFACT_METADATA_SCHEMA_VERSION,
+        constraints_metadata_schema_version: CONSTRAINTS_METADATA_SCHEMA_VERSION,
         compiler_version: VERSION.to_string(),
         module: ir.name.clone(),
         artifact_format: artifact_format.display_name().to_string(),
@@ -22434,6 +22476,9 @@ action get_marker(snapshot: Big) -> [u8; 1] {
             compile(SIMPLE_PROGRAM, CompileOptions { target: Some("riscv64-elf".to_string()), ..CompileOptions::default() }).unwrap();
 
         assert_eq!(result.metadata.metadata_schema_version, crate::METADATA_SCHEMA_VERSION);
+        assert_eq!(result.metadata.source_metadata_schema_version, crate::SOURCE_METADATA_SCHEMA_VERSION);
+        assert_eq!(result.metadata.artifact_metadata_schema_version, crate::ARTIFACT_METADATA_SCHEMA_VERSION);
+        assert_eq!(result.metadata.constraints_metadata_schema_version, crate::CONSTRAINTS_METADATA_SCHEMA_VERSION);
         assert_eq!(result.metadata.compiler_version, crate::VERSION);
         assert_eq!(result.metadata.runtime.vm_abi.format, "molecule");
         assert_eq!(result.metadata.runtime.vm_abi.version, 0x8001);
@@ -23261,6 +23306,16 @@ action main() -> u64 {
         let err = result.validate().unwrap_err();
 
         assert!(err.message.contains("unsupported metadata_schema_version"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn compile_result_validation_rejects_metadata_component_schema_mismatch() {
+        let mut result = compile(SIMPLE_PROGRAM, CompileOptions::default()).unwrap();
+        result.metadata.source_metadata_schema_version = crate::SOURCE_METADATA_SCHEMA_VERSION + 1;
+
+        let err = result.validate().unwrap_err();
+
+        assert!(err.message.contains("unsupported source_metadata_schema_version"), "unexpected error: {}", err.message);
     }
 
     #[test]

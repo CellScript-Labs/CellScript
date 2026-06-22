@@ -34,6 +34,9 @@ pub struct ItemDoc {
 #[derive(Debug, Clone, Serialize)]
 pub struct AuditDoc {
     pub metadata_schema_version: u32,
+    pub source_metadata_schema_version: u32,
+    pub artifact_metadata_schema_version: u32,
+    pub constraints_metadata_schema_version: u32,
     pub compiler_version: String,
     pub module: String,
     pub artifact_format: String,
@@ -139,6 +142,9 @@ impl DocGenerator {
     pub fn set_compile_metadata(&mut self, metadata: &CompileMetadata) {
         self.audit = Some(AuditDoc {
             metadata_schema_version: metadata.metadata_schema_version,
+            source_metadata_schema_version: metadata.source_metadata_schema_version,
+            artifact_metadata_schema_version: metadata.artifact_metadata_schema_version,
+            constraints_metadata_schema_version: metadata.constraints_metadata_schema_version,
             compiler_version: metadata.compiler_version.clone(),
             module: metadata.module.clone(),
             artifact_format: metadata.artifact_format.clone(),
@@ -296,6 +302,9 @@ impl AuditDoc {
         let mut out = String::new();
         out.push_str("## Lowering Audit Report\n\n");
         out.push_str(&format!("- Metadata schema version: `{}`\n", self.metadata_schema_version));
+        out.push_str(&format!("- Source metadata schema version: `{}`\n", self.source_metadata_schema_version));
+        out.push_str(&format!("- Artifact metadata schema version: `{}`\n", self.artifact_metadata_schema_version));
+        out.push_str(&format!("- Constraints metadata schema version: `{}`\n", self.constraints_metadata_schema_version));
         out.push_str(&format!("- Compiler version: `{}`\n", self.compiler_version));
         out.push_str(&format!("- Module: `{}`\n", self.module));
         out.push_str(&format!("- Artifact format: `{}`\n", self.artifact_format));
@@ -487,6 +496,12 @@ impl AuditDoc {
         out.push_str("<section><h2>Lowering Audit Report</h2>");
         out.push_str("<ul>");
         out.push_str(&format!("<li>Metadata schema version: <code>{}</code></li>", self.metadata_schema_version));
+        out.push_str(&format!("<li>Source metadata schema version: <code>{}</code></li>", self.source_metadata_schema_version));
+        out.push_str(&format!("<li>Artifact metadata schema version: <code>{}</code></li>", self.artifact_metadata_schema_version));
+        out.push_str(&format!(
+            "<li>Constraints metadata schema version: <code>{}</code></li>",
+            self.constraints_metadata_schema_version
+        ));
         out.push_str(&format!("<li>Compiler version: <code>{}</code></li>", escape_html(&self.compiler_version)));
         out.push_str(&format!("<li>Module: <code>{}</code></li>", escape_html(&self.module)));
         out.push_str(&format!("<li>Artifact format: <code>{}</code></li>", escape_html(&self.artifact_format)));
@@ -1149,6 +1164,9 @@ action add(x: u64, y: u64) -> u64 {
         let mut generator = DocGenerator::new(OutputFormat::Markdown);
         generator.audit = Some(AuditDoc {
             metadata_schema_version: crate::METADATA_SCHEMA_VERSION,
+            source_metadata_schema_version: crate::SOURCE_METADATA_SCHEMA_VERSION,
+            artifact_metadata_schema_version: crate::ARTIFACT_METADATA_SCHEMA_VERSION,
+            constraints_metadata_schema_version: crate::CONSTRAINTS_METADATA_SCHEMA_VERSION,
             compiler_version: "test".to_string(),
             module: "demo".to_string(),
             artifact_format: "RISC-V assembly".to_string(),
@@ -1202,6 +1220,9 @@ action add(x: u64, y: u64) -> u64 {
         let mut generator = DocGenerator::new(OutputFormat::Markdown);
         generator.audit = Some(AuditDoc {
             metadata_schema_version: crate::METADATA_SCHEMA_VERSION,
+            source_metadata_schema_version: crate::SOURCE_METADATA_SCHEMA_VERSION,
+            artifact_metadata_schema_version: crate::ARTIFACT_METADATA_SCHEMA_VERSION,
+            constraints_metadata_schema_version: crate::CONSTRAINTS_METADATA_SCHEMA_VERSION,
             compiler_version: "test".to_string(),
             module: "demo".to_string(),
             artifact_format: "RISC-V assembly".to_string(),

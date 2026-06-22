@@ -7,6 +7,10 @@
   package verification, registry verification, and live registry verification.
 - Added extension settings for generated builder output, CKB RPC URL,
   deployment network filtering, and registry trust metadata gates.
+- Aligned editor diagnostics with compiler severity so future warning-level
+  diagnostics can be surfaced without being treated as hard compiler errors.
+- Reflected split metadata schema versions in compiler-backed reports and
+  generated-builder ABI identity.
 - Clarified the extension registry boundary: editor commands verify package,
   deployment, live-cell, and trust-metadata evidence, while registry
   publish/install and cryptographic publisher-signature verification remain

@@ -555,7 +555,7 @@ CKB cycle/capacity estimates.
 
 | Module | What it does |
 |---|---|
-| **Package workflow** (`package/`) | `Cell.toml` parsing, local path dependency resolution, transitive `Cell.lock` reproducibility, `cellc init`/`add`/`remove`/`install --path`/`update`/`info`. Registry publishing and registry dependency resolution are shaped but fail-closed. |
+| **Package workflow** (`package/`) | `Cell.toml` parsing, path/git/registry source-package dependency resolution, transitive `Cell.lock` reproducibility, `cellc init`/`add`/`remove`/`install --path`/`install namespace/pkg@version`/`update`/`info`. Registry source packages are resolved through discovery, tag-pinned Git provenance, `registry.json`, and verified `source_hash`; non-CellScript registry artifact profiles remain fail-closed. |
 | **Incremental compiler** (`incremental/`) | Dependency-graph-aware build cache — skips recompilation when inputs are unchanged. |
 | **Build integration** (`lib.rs`) | Resolves `Cell.toml` → `CellBuildConfig`, merges CLI + manifest options, selects entry scope, runs policy gates, writes artifacts + metadata. |
 

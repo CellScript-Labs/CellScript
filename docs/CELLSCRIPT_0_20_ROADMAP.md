@@ -153,12 +153,12 @@ builder manifest and action plans, but still delegate raw cell-data
 materialisation to runtime adapters.
 
 Nineteenth slice: the release gate policy is now explicit. The supported entry
-point is `./scripts/cellscript_gate.sh <dev|ci|backend|release>`, with the old
-`scripts/cellscript_ckb_release_gate.sh` wrapper delegating to it. `release`
-means CI, tooling/docs validation, VS Code validation, builder-backed CKB
-production acceptance, and stateful scenario/action coverage. `release-quick`
-is compile-only preflight evidence and must not be reported as external live
-devnet acceptance.
+point is `./scripts/cellscript_gate.sh <dev|ci|backend|release|release-quick>`,
+with the old `scripts/cellscript_ckb_release_gate.sh` wrapper delegating to it.
+`release` means CI, tooling/docs validation, VS Code validation,
+builder-backed CKB production acceptance, and stateful scenario/action coverage.
+`release-quick` is compile-only preflight evidence and must not be reported as
+external live devnet acceptance.
 
 Twentieth slice: the Molecule / IFRN design-space audit has been collapsed into
 an English improvement report. The current local source-package conclusion is
@@ -185,6 +185,17 @@ assignments, calls, arrays, and braced `if` branches, IR lowering preserves thos
 widths, backend terminator emission removes fall-through jumps, `opt-report`
 serialises backend shape and estimated-cycle deltas, and the incremental
 parallel compiler uses a real dependency topological sort.
+
+Twenty-third slice: the parent-synthesis follow-up is now reflected in compiler
+contracts rather than only prose. Compile diagnostics carry typed severity
+(`error` or `warning`), with `ErrorReporter::has_errors()` only treating error
+severity as release-blocking. Metadata schema versioning is split into
+source/package, artifact, and constraints component versions while preserving
+the top-level envelope version; validation, incremental-cache partitioning, CLI
+JSON reports, generated-builder ABI hashes, deploy plans, dependency locks, and
+audit bundles all surface the split contract. Enum `match` exhaustiveness was
+already enforced by type checking; the remaining pattern item is a larger AST
+cleanup to replace raw `MatchArm.pattern: String` with structured pattern nodes.
 
 The generated package should provide:
 

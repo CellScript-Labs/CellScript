@@ -106,6 +106,9 @@ You do not need to memorize the whole sidecar. Start with these fields:
 - `source_content_hash`
 - `source_units`
 - `metadata_schema_version`
+- `source_metadata_schema_version`
+- `artifact_metadata_schema_version`
+- `constraints_metadata_schema_version`
 - `actions`
 - `locks`
 - `schema`
@@ -131,6 +134,12 @@ When reviewing a contract, ask simple questions first:
 - which Cells are consumed or created;
 - which runtime obligations remain;
 - which CKB profile assumptions are recorded.
+
+The top-level `metadata_schema_version` is the envelope version. The component
+schema fields split review risk by surface: source/package identity,
+artifact-binding facts, and CKB constraint summaries can now move independently
+in future schema revisions. `verify-artifact` still rejects a mismatch in any of
+these versions.
 
 ## v0.16 Assurance Checks
 

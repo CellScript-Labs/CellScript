@@ -658,6 +658,7 @@ impl CommandExecutor {
                 "source_hash": result.metadata.source_hash,
                 "source_content_hash": result.metadata.source_content_hash,
                 "metadata_schema_version": result.metadata.metadata_schema_version,
+                "metadata_schema_versions": metadata_schema_versions_json(&result.metadata),
                 "compiler_version": result.metadata.compiler_version,
                 "standalone_runner_compatible": result.metadata.runtime.standalone_runner_compatible,
                 "ckb_runtime_required": result.metadata.runtime.ckb_runtime_required,
@@ -1431,6 +1432,7 @@ impl CommandExecutor {
                 "compiled_target_profile": result.metadata.target_profile.name.as_str(),
                 "target_profile_policy_violations": target_profile_policy_violations,
                 "metadata_schema_version": result.metadata.metadata_schema_version,
+                "metadata_schema_versions": metadata_schema_versions_json(&result.metadata),
                 "compiler_version": result.metadata.compiler_version,
                 "standalone_runner_compatible": result.metadata.runtime.standalone_runner_compatible,
                 "ckb_runtime_required": result.metadata.runtime.ckb_runtime_required,
@@ -2999,6 +3001,7 @@ impl CommandExecutor {
                 "artifact": args.artifact.display().to_string(),
                 "metadata": metadata_path.display().to_string(),
                 "metadata_schema_version": result.metadata.metadata_schema_version,
+                "metadata_schema_versions": metadata_schema_versions_json(&result.metadata),
                 "compiler_version": result.metadata.compiler_version,
                 "artifact_format": result.artifact_format.display_name(),
                 "target_profile": result.metadata.target_profile.name.as_str(),
@@ -3046,6 +3049,12 @@ impl CommandExecutor {
         println!("  Artifact: {}", args.artifact.display());
         println!("  Metadata: {}", metadata_path.display());
         println!("  Metadata schema: {}", result.metadata.metadata_schema_version);
+        println!(
+            "  Metadata schema components: source={}, artifact={}, constraints={}",
+            result.metadata.source_metadata_schema_version,
+            result.metadata.artifact_metadata_schema_version,
+            result.metadata.constraints_metadata_schema_version
+        );
         println!("  Compiler: {}", result.metadata.compiler_version);
         println!("  Format: {}", result.artifact_format.display_name());
         println!("  Target profile: {}", result.metadata.target_profile.name);
@@ -4828,6 +4837,7 @@ fn typescript_builder_manifest(
         "module": metadata.module,
         "compiler_version": metadata.compiler_version,
         "metadata_schema_version": metadata.metadata_schema_version,
+        "metadata_schema_versions": metadata_schema_versions_json(metadata),
         "metadata_hash": metadata_hash,
         "artifact_hash": metadata.artifact_hash,
         "source_hash": metadata.source_hash,
@@ -7069,6 +7079,7 @@ fn deployment_plan_json(metadata: &CompileMetadata) -> serde_json::Value {
         "module": metadata.module,
         "compiler_version": metadata.compiler_version,
         "metadata_schema_version": metadata.metadata_schema_version,
+        "metadata_schema_versions": metadata_schema_versions_json(metadata),
         "artifact": {
             "format": metadata.artifact_format,
             "hash": metadata.artifact_hash,
@@ -7109,6 +7120,13 @@ fn verify_deploy_plan_json(plan: &serde_json::Value) -> Vec<String> {
         Some(_) => violations.push("metadata_schema_version must be greater than zero".to_string()),
         None => violations.push("metadata_schema_version is required".to_string()),
     }
+    for field in ["metadata", "source", "artifact", "constraints"] {
+        match plan.pointer(&format!("/metadata_schema_versions/{field}")).and_then(serde_json::Value::as_u64) {
+            Some(version) if version > 0 => {}
+            Some(_) => violations.push(format!("metadata_schema_versions.{field} must be greater than zero")),
+            None => violations.push(format!("metadata_schema_versions.{field} is required")),
+        }
+    }
     if plan.get("target_profile").is_none() {
         violations.push("target_profile is required".to_string());
     }
@@ -7129,6 +7147,8 @@ fn dependency_lock_json(metadata: &CompileMetadata) -> serde_json::Value {
         "status": "ok",
         "schema": "cellscript-dependency-lock-v0.16",
         "module": metadata.module,
+        "metadata_schema_version": metadata.metadata_schema_version,
+        "metadata_schema_versions": metadata_schema_versions_json(metadata),
         "artifact_hash": metadata.artifact_hash,
         "cell_deps": ckb.map(|c| serde_json::to_value(&c.dep_group_manifest.declared_cell_deps).unwrap_or(serde_json::Value::Null)),
         "script_references": ckb.map(|c| serde_json::to_value(&c.script_references).unwrap_or(serde_json::Value::Null)),
@@ -7174,18 +7194,27 @@ fn proof_plan_map(plans: &[ProofPlanMetadata]) -> BTreeMap<String, serde_json::V
 }
 
 fn json_diff_report(kind: &str, old: &serde_json::Value, new: &serde_json::Value) -> serde_json::Value {
-    let changed =
-        ["/artifact/hash", "/artifact/size_bytes", "/target_profile/name", "/proof_plan_soundness/status", "/metadata_schema_version"]
-            .iter()
-            .filter(|pointer| old.pointer(pointer) != new.pointer(pointer))
-            .map(|pointer| {
-                serde_json::json!({
-                    "path": pointer,
-                    "old": old.pointer(pointer).cloned().unwrap_or(serde_json::Value::Null),
-                    "new": new.pointer(pointer).cloned().unwrap_or(serde_json::Value::Null),
-                })
-            })
-            .collect::<Vec<_>>();
+    let changed = [
+        "/artifact/hash",
+        "/artifact/size_bytes",
+        "/target_profile/name",
+        "/proof_plan_soundness/status",
+        "/metadata_schema_version",
+        "/metadata_schema_versions/metadata",
+        "/metadata_schema_versions/source",
+        "/metadata_schema_versions/artifact",
+        "/metadata_schema_versions/constraints",
+    ]
+    .iter()
+    .filter(|pointer| old.pointer(pointer) != new.pointer(pointer))
+    .map(|pointer| {
+        serde_json::json!({
+            "path": pointer,
+            "old": old.pointer(pointer).cloned().unwrap_or(serde_json::Value::Null),
+            "new": new.pointer(pointer).cloned().unwrap_or(serde_json::Value::Null),
+        })
+    })
+    .collect::<Vec<_>>();
     serde_json::json!({
         "status": "ok",
         "schema": format!("cellscript-{}-diff-v0.16", kind),
@@ -7388,6 +7417,7 @@ fn audit_bundle_json(metadata: &CompileMetadata) -> serde_json::Value {
         "module": metadata.module,
         "compiler_version": metadata.compiler_version,
         "metadata_schema_version": metadata.metadata_schema_version,
+        "metadata_schema_versions": metadata_schema_versions_json(metadata),
         "target_profile": metadata.target_profile,
         "source_to_codegen": source_to_codegen,
         "proof_plan": metadata.runtime.proof_plan,
@@ -7820,9 +7850,19 @@ fn locked_build_info_from_metadata(metadata: &CompileMetadata) -> Result<crate::
     })
 }
 
+fn metadata_schema_versions_json(metadata: &CompileMetadata) -> serde_json::Value {
+    serde_json::json!({
+        "metadata": metadata.metadata_schema_version,
+        "source": metadata.source_metadata_schema_version,
+        "artifact": metadata.artifact_metadata_schema_version,
+        "constraints": metadata.constraints_metadata_schema_version,
+    })
+}
+
 fn metadata_abi_hash(metadata: &CompileMetadata) -> Result<String> {
     let abi = serde_json::json!({
         "metadata_schema_version": metadata.metadata_schema_version,
+        "metadata_schema_versions": metadata_schema_versions_json(metadata),
         "target_profile": metadata.target_profile.name.as_str(),
         "types": &metadata.types,
         "actions": &metadata.actions,

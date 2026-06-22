@@ -1141,8 +1141,10 @@ This matches the existing pattern in `src/cli/commands.rs` where
 
 **Known limitation**: Cross-compiler-version `constraints_hash` comparison is
 not supported and should not be attempted. The `metadata_schema_version` field
-in `CompileMetadata` serves as the version gate — if schema versions differ,
-verification must reject the comparison, not attempt hash matching.
+in `CompileMetadata` serves as the envelope version gate, and
+`constraints_metadata_schema_version` gates the constraints surface specifically
+-- if schema versions differ, verification must reject the comparison, not
+attempt hash matching.
 
 **Phase 2 enhancement**: For stronger cross-build determinism (e.g.,
 verifying that two independent builds of the same source produce the same
@@ -1313,8 +1315,9 @@ produce different `constraints_hash` for the same source.
   expected to be identical for the same source + same compile options.
 - Different major.minor → `constraints_hash` may differ; verification
   must not attempt cross-version hash comparison.
-- The `metadata_schema_version` field in `CompileMetadata` serves as
-  the version gate.
+- The `metadata_schema_version` field in `CompileMetadata` serves as the
+  envelope version gate, and `constraints_metadata_schema_version` gates the
+  constraints surface specifically.
 
 This is already partially documented in the `constraints_hash Generation`
 section, but the rule should be stated more explicitly as a version
