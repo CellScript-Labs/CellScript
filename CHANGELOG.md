@@ -2,6 +2,20 @@
 
 ## 0.20.0-nightly - 2026-06-19
 
+- Fix numeric-width soundness by requiring exact non-literal numeric type
+  equality while preserving declared integer literal widths through type
+  checking and IR lowering.
+- Reduce generated branch cost by skipping unconditional jumps to the physical
+  fall-through block and by selecting `beqz`/`bnez` branch forms that keep the
+  fall-through path implicit.
+- Extend `cellc opt-report` and constraint artifact metadata with backend
+  shape counters and estimated-cycle deltas across optimisation levels.
+- Replace the incremental parallel compiler's identity ordering with a real
+  dependency topological sort and cycle-safe fallback ordering.
+- Close the registry source-package plan in docs and tooling: registry install,
+  build, and update use the two-tier Git resolver with yanked-version skipping
+  and `source_hash` verification, while `registry add` now prints next steps
+  for the actual cloned discovery worktree.
 - Harden the CKB/devnet acceptance path with an ELF entry ABI gate that checks
   RX-only executable segments, `filesz == memsz`, and entry trampoline
   stack-pointer preservation before local-node evidence is accepted.

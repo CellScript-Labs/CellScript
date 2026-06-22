@@ -1060,7 +1060,7 @@ impl<'a> TypeChecker<'a> {
 
     fn check_const(&mut self, const_def: &ConstDef) -> Result<()> {
         let mut env = self.env.clone();
-        let value_ty = self.infer_expr(&mut env, &const_def.value)?;
+        let value_ty = self.infer_expr_with_expected_type(&mut env, &const_def.value, &const_def.ty, const_def.span)?;
         if !self.types_equal(&value_ty, &const_def.ty) {
             return Err(CompileError::new(
                 format!("const '{}' has type mismatch: expected {:?}, found {:?}", const_def.name, const_def.ty, value_ty),
@@ -2563,9 +2563,7 @@ impl<'a> TypeChecker<'a> {
 
     fn infer_let_value_type(&mut self, env: &mut TypeEnv, let_stmt: &LetStmt) -> Result<Type> {
         if let Some(declared_ty) = &let_stmt.ty {
-            if matches!(let_stmt.value, Expr::Array(_)) {
-                return self.infer_expr_with_expected_type(env, &let_stmt.value, declared_ty, let_stmt.span);
-            }
+            return self.infer_expr_with_expected_type(env, &let_stmt.value, declared_ty, let_stmt.span);
         }
         if let Expr::Array(elems) = &let_stmt.value {
             if elems.is_empty() {
@@ -2585,7 +2583,46 @@ impl<'a> TypeChecker<'a> {
 
     fn infer_expr_with_expected_type(&mut self, env: &mut TypeEnv, expr: &Expr, expected_ty: &Type, span: Span) -> Result<Type> {
         match expr {
+            Expr::Integer(value) => {
+                if let Some(ty) = Self::integer_literal_type_for_expected(*value, expected_ty, span)? {
+                    Ok(ty)
+                } else {
+                    self.infer_expr(env, expr)
+                }
+            }
             Expr::Array(elems) => self.infer_array_literal_with_expected_type(env, elems, expected_ty, span),
+            Expr::Block(stmts) => self.infer_tail_block_value_with_expected_type(env, stmts, expected_ty, span),
+            Expr::If(if_expr) => {
+                let cond_ty = self.infer_expr(env, &if_expr.condition)?;
+                if !self.is_bool_type(&cond_ty) {
+                    return Err(CompileError::new("if expression condition must be boolean", if_expr.span));
+                }
+                let mut then_env = env.child();
+                let then_ty = self.infer_expr_with_expected_type(
+                    &mut then_env,
+                    &if_expr.then_branch,
+                    expected_ty,
+                    expr_span(&if_expr.then_branch),
+                )?;
+                then_env.check_linear_complete()?;
+                let mut else_env = env.child();
+                let else_ty = self.infer_expr_with_expected_type(
+                    &mut else_env,
+                    &if_expr.else_branch,
+                    expected_ty,
+                    expr_span(&if_expr.else_branch),
+                )?;
+                else_env.check_linear_complete()?;
+                if self.types_equal(&then_ty, &else_ty) && self.initializer_types_equal(&then_ty, expected_ty) {
+                    env.merge_branch_linear_states(&then_env, false, Some(&else_env), false, if_expr.span)?;
+                    Ok(expected_ty.clone())
+                } else {
+                    Err(CompileError::new(
+                        format!("if expression branches must have matching types, got {:?} and {:?}", then_ty, else_ty),
+                        if_expr.span,
+                    ))
+                }
+            }
             _ => self.infer_expr(env, expr),
         }
     }
@@ -2600,7 +2637,7 @@ impl<'a> TypeChecker<'a> {
         if let Type::Named(name) = expected_ty {
             if let Some(item_ty) = self.parse_named_collection_item_type(name) {
                 for elem in elems {
-                    let actual_ty = self.infer_expr(env, elem)?;
+                    let actual_ty = self.infer_expr_with_expected_type(env, elem, &item_ty, expr_span(elem))?;
                     if self.type_contains_reference(&actual_ty) {
                         return Err(CompileError::new(
                             format!(
@@ -2635,7 +2672,7 @@ impl<'a> TypeChecker<'a> {
                 ));
             }
             for elem in elems {
-                let actual_ty = self.infer_expr(env, elem)?;
+                let actual_ty = self.infer_expr_with_expected_type(env, elem, item_ty, expr_span(elem))?;
                 if !self.types_equal(&actual_ty, item_ty) {
                     return Err(CompileError::new(
                         format!("array literal type mismatch: expected {:?}, found {:?}", item_ty, actual_ty),
@@ -2681,10 +2718,10 @@ impl<'a> TypeChecker<'a> {
                         if !self.is_numeric_type(&left_ty) || !self.is_numeric_type(&right_ty) {
                             return Err(CompileError::new("arithmetic operations require numeric types", bin.span));
                         }
-                        Ok(left_ty)
+                        self.numeric_binary_result_type(&bin.left, &left_ty, &bin.right, &right_ty, bin.span)
                     }
                     BinaryOp::Eq | BinaryOp::Ne => {
-                        if !self.types_equal(&left_ty, &right_ty) {
+                        if !self.binary_operand_types_compatible(&bin.left, &left_ty, &bin.right, &right_ty, bin.span)? {
                             return Err(CompileError::new("comparison requires matching types", bin.span));
                         }
                         Ok(Type::Bool)
@@ -2692,6 +2729,12 @@ impl<'a> TypeChecker<'a> {
                     BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge => {
                         if !self.is_numeric_type(&left_ty) || !self.is_numeric_type(&right_ty) {
                             return Err(CompileError::new("ordering comparison requires numeric types", bin.span));
+                        }
+                        if let Err(err) = self.numeric_binary_result_type(&bin.left, &left_ty, &bin.right, &right_ty, bin.span) {
+                            if err.message.starts_with("integer literal") {
+                                return Err(err);
+                            }
+                            return Err(CompileError::new("ordering comparison requires matching numeric types", bin.span));
                         }
                         Ok(Type::Bool)
                     }
@@ -3299,6 +3342,43 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
+    fn infer_tail_block_value_with_expected_type(
+        &mut self,
+        env: &mut TypeEnv,
+        stmts: &[Stmt],
+        expected_ty: &Type,
+        span: Span,
+    ) -> Result<Type> {
+        let Some((last, prefix)) = stmts.split_last() else {
+            return Ok(Type::Unit);
+        };
+        for stmt in prefix {
+            self.check_stmt(env, stmt)?;
+        }
+        match last {
+            Stmt::Expr(expr) => {
+                let ty = self.infer_expr_with_expected_type(env, expr, expected_ty, expr_span(expr))?;
+                if !self.initializer_types_equal(&ty, expected_ty) {
+                    return Err(CompileError::new(
+                        format!("block expression type mismatch: expected {:?}, found {:?}", expected_ty, ty),
+                        span,
+                    ));
+                }
+                if self.is_linear_type(&ty) {
+                    self.mark_expr_as_moved(env, expr)?;
+                }
+                Ok(expected_ty.clone())
+            }
+            Stmt::If(if_stmt) if if_stmt.else_branch.is_some() => {
+                self.infer_tail_if_stmt_value_with_expected_type(env, if_stmt, expected_ty)
+            }
+            stmt => {
+                self.check_stmt(env, stmt)?;
+                Ok(Type::Unit)
+            }
+        }
+    }
+
     fn infer_tail_if_stmt_value(&mut self, env: &mut TypeEnv, if_stmt: &IfStmt) -> Result<Type> {
         let cond_ty = self.infer_expr(env, &if_stmt.condition)?;
         if !self.is_bool_type(&cond_ty) {
@@ -3325,6 +3405,40 @@ impl<'a> TypeChecker<'a> {
 
         env.merge_branch_linear_states(&then_env, false, Some(&else_env), false, if_stmt.span)?;
         Ok(then_ty)
+    }
+
+    fn infer_tail_if_stmt_value_with_expected_type(
+        &mut self,
+        env: &mut TypeEnv,
+        if_stmt: &IfStmt,
+        expected_ty: &Type,
+    ) -> Result<Type> {
+        let cond_ty = self.infer_expr(env, &if_stmt.condition)?;
+        if !self.is_bool_type(&cond_ty) {
+            return Err(CompileError::new("if condition must be boolean", if_stmt.span));
+        }
+        let Some(else_branch) = &if_stmt.else_branch else {
+            return Ok(Type::Unit);
+        };
+
+        let mut then_env = env.child();
+        let then_ty =
+            self.infer_tail_block_value_with_expected_type(&mut then_env, &if_stmt.then_branch, expected_ty, if_stmt.span)?;
+        then_env.check_linear_complete()?;
+
+        let mut else_env = env.child();
+        let else_ty = self.infer_tail_block_value_with_expected_type(&mut else_env, else_branch, expected_ty, if_stmt.span)?;
+        else_env.check_linear_complete()?;
+
+        if !self.initializer_types_equal(&then_ty, expected_ty) || !self.initializer_types_equal(&else_ty, expected_ty) {
+            return Err(CompileError::new(
+                format!("if expression branches must have matching types, got {:?} and {:?}", then_ty, else_ty),
+                if_stmt.span,
+            ));
+        }
+
+        env.merge_branch_linear_states(&then_env, false, Some(&else_env), false, if_stmt.span)?;
+        Ok(expected_ty.clone())
     }
 
     fn check_match_patterns(&self, scrutinee_ty: &Type, match_expr: &MatchExpr) -> Result<()> {
@@ -3513,9 +3627,14 @@ impl<'a> TypeChecker<'a> {
             if let Some(spec) = self.flows.get(type_name).and_then(|spec| spec.field_enum_type.as_ref()) {
                 return Ok(Some(Type::Named(spec.clone())));
             }
-            return Ok(Some(Type::U64));
+            return Ok(Some(self.flow_state_field_type(type_name).unwrap_or(Type::U64)));
         }
         Err(CompileError::new(format!("unknown flow state '{}::{}'", type_name, state_name), span))
+    }
+
+    fn flow_state_field_type(&self, type_name: &str) -> Option<Type> {
+        let field_name = self.flow_state_fields.get(type_name)?;
+        self.resolve_named_type_fields(type_name)?.get(field_name).cloned()
     }
 
     fn flow_state_index(&self, type_name: &str, name: &str) -> Option<usize> {
@@ -3716,6 +3835,115 @@ impl<'a> TypeChecker<'a> {
             || matches!((actual, expected), (Type::Named(actual), Type::Named(expected)) if actual == "Vec" && expected.starts_with("Vec<"))
     }
 
+    fn integer_literal_type_for_expected(value: u64, expected_ty: &Type, span: Span) -> Result<Option<Type>> {
+        if !Self::is_integer_literal_target_type(expected_ty) {
+            return Ok(None);
+        }
+        if Self::integer_literal_fits_expected_type(value, expected_ty) {
+            Ok(Some(expected_ty.clone()))
+        } else {
+            Err(CompileError::new(format!("integer literal {} does not fit expected type {}", value, type_repr(expected_ty)), span))
+        }
+    }
+
+    fn is_integer_literal_target_type(ty: &Type) -> bool {
+        match ty {
+            Type::U8 | Type::U16 | Type::U32 | Type::I32 | Type::U64 | Type::U128 => true,
+            Type::Named(name) => name == "usize" || name == "isize",
+            _ => false,
+        }
+    }
+
+    fn integer_literal_fits_expected_type(value: u64, expected_ty: &Type) -> bool {
+        match expected_ty {
+            Type::U8 => value <= u8::MAX as u64,
+            Type::U16 => value <= u16::MAX as u64,
+            Type::U32 => value <= u32::MAX as u64,
+            Type::I32 => value <= i32::MAX as u64,
+            Type::U64 | Type::U128 => true,
+            Type::Named(name) if name == "usize" => true,
+            Type::Named(name) if name == "isize" => value <= i64::MAX as u64,
+            _ => false,
+        }
+    }
+
+    fn unsigned_widening_rank(ty: &Type) -> Option<u8> {
+        match ty {
+            Type::U8 => Some(0),
+            Type::U16 => Some(1),
+            Type::U32 => Some(2),
+            Type::U64 => Some(3),
+            Type::U128 => Some(4),
+            Type::Named(name) if name == "usize" => Some(3),
+            _ => None,
+        }
+    }
+
+    fn unsigned_type_for_rank(rank: u8) -> Type {
+        match rank {
+            0 => Type::U8,
+            1 => Type::U16,
+            2 => Type::U32,
+            3 => Type::U64,
+            _ => Type::U128,
+        }
+    }
+
+    fn unsigned_widening_result_type(left_ty: &Type, right_ty: &Type) -> Option<Type> {
+        let left_rank = Self::unsigned_widening_rank(left_ty)?;
+        let right_rank = Self::unsigned_widening_rank(right_ty)?;
+        Some(Self::unsigned_type_for_rank(left_rank.max(right_rank)))
+    }
+
+    fn expr_type_compatible_with_expected(&self, expr: &Expr, actual_ty: &Type, expected_ty: &Type, span: Span) -> Result<bool> {
+        if self.types_equal(actual_ty, expected_ty) {
+            return Ok(true);
+        }
+        if let Expr::Integer(value) = expr {
+            return Self::integer_literal_type_for_expected(*value, expected_ty, span).map(|ty| ty.is_some());
+        }
+        Ok(false)
+    }
+
+    fn binary_operand_types_compatible(&self, left: &Expr, left_ty: &Type, right: &Expr, right_ty: &Type, span: Span) -> Result<bool> {
+        if self.types_equal(left_ty, right_ty) {
+            return Ok(true);
+        }
+        if let Expr::Integer(value) = left {
+            if Self::is_integer_literal_target_type(right_ty) {
+                return Self::integer_literal_type_for_expected(*value, right_ty, span).map(|ty| ty.is_some());
+            }
+        }
+        if let Expr::Integer(value) = right {
+            if Self::is_integer_literal_target_type(left_ty) {
+                return Self::integer_literal_type_for_expected(*value, left_ty, span).map(|ty| ty.is_some());
+            }
+        }
+        Ok(false)
+    }
+
+    fn numeric_binary_result_type(&self, left: &Expr, left_ty: &Type, right: &Expr, right_ty: &Type, span: Span) -> Result<Type> {
+        if self.types_equal(left_ty, right_ty) {
+            return Ok(left_ty.clone());
+        }
+        if let Expr::Integer(value) = left {
+            if Self::is_integer_literal_target_type(right_ty) {
+                Self::integer_literal_type_for_expected(*value, right_ty, span)?;
+                return Ok(right_ty.clone());
+            }
+        }
+        if let Expr::Integer(value) = right {
+            if Self::is_integer_literal_target_type(left_ty) {
+                Self::integer_literal_type_for_expected(*value, left_ty, span)?;
+                return Ok(left_ty.clone());
+            }
+        }
+        if let Some(ty) = Self::unsigned_widening_result_type(left_ty, right_ty) {
+            return Ok(ty);
+        }
+        Err(CompileError::new("arithmetic operations require matching numeric types", span))
+    }
+
     fn bind_pattern(&self, env: &mut TypeEnv, pattern: &BindingPattern, ty: &Type, is_mut: bool, span: Span) -> Result<()> {
         match pattern {
             BindingPattern::Name(name) => {
@@ -3834,8 +4062,8 @@ impl<'a> TypeChecker<'a> {
         }
 
         if let Stmt::Expr(expr) = last {
-            let tail_ty = self.infer_expr(&mut tail_env, expr)?;
-            if self.types_equal(&tail_ty, return_type) {
+            let tail_ty = self.infer_expr_with_expected_type(&mut tail_env, expr, return_type, expr_span(expr))?;
+            if self.initializer_types_equal(&tail_ty, return_type) {
                 return Ok(true);
             }
             return Err(CompileError::new(
@@ -4036,15 +4264,14 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn infer_assign_expr(&mut self, env: &mut TypeEnv, assign: &AssignExpr) -> Result<Type> {
-        let value_ty = self.infer_expr(env, &assign.value)?;
-        self.reject_assignment_reference_to_linear_root(env, &assign.value, assign.span)?;
-        self.reject_assignment_mutable_reference_alias(&value_ty, assign.span)?;
-
         match assign.target.as_ref() {
             Expr::Identifier(name) => {
                 let Some(target_ty) = env.lookup(name).cloned() else {
                     return Err(CompileError::new(format!("undefined variable '{}'", name), assign.span));
                 };
+                let value_ty = self.infer_expr_with_expected_type(env, &assign.value, &target_ty, expr_span(&assign.value))?;
+                self.reject_assignment_reference_to_linear_root(env, &assign.value, assign.span)?;
+                self.reject_assignment_mutable_reference_alias(&value_ty, assign.span)?;
                 if self.is_linear_type(&target_ty) {
                     return Err(CompileError::new("assignment to linear/resource variables is not supported yet", assign.span));
                 }
@@ -4053,13 +4280,16 @@ impl<'a> TypeChecker<'a> {
                 }
                 match assign.op {
                     AssignOp::Assign => {
-                        if !self.types_equal(&target_ty, &value_ty) {
+                        if !self.expr_type_compatible_with_expected(&assign.value, &value_ty, &target_ty, assign.span)? {
                             return Err(CompileError::new("assignment requires matching types", assign.span));
                         }
                     }
                     AssignOp::AddAssign => {
                         if !self.is_numeric_type(&target_ty) || !self.is_numeric_type(&value_ty) {
                             return Err(CompileError::new("'+=' requires numeric types", assign.span));
+                        }
+                        if !self.expr_type_compatible_with_expected(&assign.value, &value_ty, &target_ty, assign.span)? {
+                            return Err(CompileError::new("'+=' requires matching numeric types", assign.span));
                         }
                     }
                 }
@@ -4092,15 +4322,21 @@ impl<'a> TypeChecker<'a> {
                     return Err(CompileError::new(format!("assignment target rooted at '{}' is not mutable", root), assign.span));
                 }
                 let target_ty = self.infer_expr(env, &assign.target)?;
+                let value_ty = self.infer_expr_with_expected_type(env, &assign.value, &target_ty, expr_span(&assign.value))?;
+                self.reject_assignment_reference_to_linear_root(env, &assign.value, assign.span)?;
+                self.reject_assignment_mutable_reference_alias(&value_ty, assign.span)?;
                 match assign.op {
                     AssignOp::Assign => {
-                        if !self.types_equal(&target_ty, &value_ty) {
+                        if !self.expr_type_compatible_with_expected(&assign.value, &value_ty, &target_ty, assign.span)? {
                             return Err(CompileError::new("assignment requires matching types", assign.span));
                         }
                     }
                     AssignOp::AddAssign => {
                         if !self.is_numeric_type(&target_ty) || !self.is_numeric_type(&value_ty) {
                             return Err(CompileError::new("'+=' requires numeric types", assign.span));
+                        }
+                        if !self.expr_type_compatible_with_expected(&assign.value, &value_ty, &target_ty, assign.span)? {
+                            return Err(CompileError::new("'+=' requires matching numeric types", assign.span));
                         }
                     }
                 }
@@ -4968,7 +5204,7 @@ impl<'a> TypeChecker<'a> {
                                 return Ok(Type::Unit);
                             }
                             if let Some(item_ty) = self.parse_named_collection_item_type(name) {
-                                if !self.types_equal(&item_ty, arg_ty) {
+                                if !self.expr_type_compatible_with_expected(&call.args[0], arg_ty, &item_ty, call.span)? {
                                     return Err(CompileError::new(
                                         format!("Vec.push type mismatch: expected {:?}, found {:?}", item_ty, arg_ty),
                                         call.span,
@@ -5035,7 +5271,7 @@ impl<'a> TypeChecker<'a> {
                                 let Some(item_ty) = self.parse_named_collection_item_type(name) else {
                                     return Err(CompileError::new("contains is only supported on Vec values", call.span));
                                 };
-                                if !self.types_equal(&item_ty, arg_ty) {
+                                if !self.expr_type_compatible_with_expected(&call.args[0], arg_ty, &item_ty, call.span)? {
                                     return Err(CompileError::new(
                                         format!("Vec.contains type mismatch: expected {:?}, found {:?}", item_ty, arg_ty),
                                         call.span,
@@ -5105,7 +5341,7 @@ impl<'a> TypeChecker<'a> {
                                 let Some(item_ty) = self.parse_named_collection_item_type(name) else {
                                     return Err(CompileError::new("insert is only supported on Vec values", call.span));
                                 };
-                                if !self.types_equal(&item_ty, arg_ty) {
+                                if !self.expr_type_compatible_with_expected(&call.args[1], arg_ty, &item_ty, call.span)? {
                                     return Err(CompileError::new(
                                         format!("Vec.insert type mismatch: expected {:?}, found {:?}", item_ty, arg_ty),
                                         call.span,
@@ -5142,7 +5378,7 @@ impl<'a> TypeChecker<'a> {
                                 let Some(item_ty) = self.parse_named_collection_item_type(name) else {
                                     return Err(CompileError::new("set is only supported on Vec values", call.span));
                                 };
-                                if !self.types_equal(&item_ty, arg_ty) {
+                                if !self.expr_type_compatible_with_expected(&call.args[1], arg_ty, &item_ty, call.span)? {
                                     return Err(CompileError::new(
                                         format!("Vec.set type mismatch: expected {:?}, found {:?}", item_ty, arg_ty),
                                         call.span,
@@ -5221,8 +5457,10 @@ impl<'a> TypeChecker<'a> {
             ));
         }
 
-        for (index, (expected_ty, actual_ty)) in expected.iter().zip(actual.iter()).enumerate() {
-            if !self.call_argument_type_compatible(expected_ty, actual_ty) {
+        for (index, ((expected_ty, actual_ty), arg)) in expected.iter().zip(actual.iter()).zip(args.iter()).enumerate() {
+            if !self.call_argument_type_compatible(expected_ty, actual_ty)
+                && !self.expr_type_compatible_with_expected(arg, actual_ty, expected_ty, span)?
+            {
                 return Err(CompileError::new(
                     format!(
                         "function '{}' argument {} type mismatch: expected {}, found {}",
@@ -5434,9 +5672,6 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn types_equal(&self, a: &Type, b: &Type) -> bool {
-        if self.is_numeric_type(a) && self.is_numeric_type(b) {
-            return true;
-        }
         match (a, b) {
             (Type::U8, Type::U8) => true,
             (Type::U16, Type::U16) => true,
@@ -6455,6 +6690,62 @@ action hidden_mutation(flag: bool) {
 
         let err = check(&module).unwrap_err();
         assert!(err.message.contains("require block contains assignment"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn numeric_equality_requires_exact_non_literal_types() {
+        let module = source_module(
+            r#"
+module test
+
+action compare(left: u8, right: u128) -> bool {
+    verification
+        return left == right
+}
+"#,
+        );
+
+        let err = check(&module).unwrap_err();
+        assert!(err.message.contains("comparison requires matching types"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn typed_integer_literals_keep_declared_numeric_widths() {
+        let module = source_module(
+            r#"
+module test
+
+const SMALL: u8 = 2
+
+action literal_widths(flag: bool) -> u8 {
+    verification
+        let left: u8 = 1
+        let right: u8 = if flag { SMALL } else { 3 }
+        return left + right
+}
+"#,
+        );
+
+        check(&module).unwrap();
+    }
+
+    #[test]
+    fn typed_integer_literals_must_fit_expected_numeric_type() {
+        let module = source_module(
+            r#"
+module test
+
+const TOO_BIG: u8 = 256
+
+action bad() -> u8 {
+    verification
+        return TOO_BIG
+}
+"#,
+        );
+
+        let err = check(&module).unwrap_err();
+        assert!(err.message.contains("integer literal 256 does not fit expected type u8"), "unexpected error: {}", err.message);
     }
 
     #[test]

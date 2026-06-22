@@ -109,7 +109,7 @@ impl DiscoveryIndex {
 
     /// Add a new package entry to the discovery index.
     /// Creates the `{namespace}/{name}.json` file in the local clone.
-    pub fn add_entry(&self, namespace: &str, name: &str, source_url: &str) -> Result<()> {
+    pub fn add_entry(&self, namespace: &str, name: &str, source_url: &str) -> Result<PathBuf> {
         let clone_dir = self.clone_or_update()?;
         let namespace_dir = clone_dir.join(namespace);
         std::fs::create_dir_all(&namespace_dir)?;
@@ -121,7 +121,7 @@ impl DiscoveryIndex {
             .map_err(|e| CompileError::without_span(format!("failed to serialize discovery entry: {}", e)))?;
 
         std::fs::write(&entry_path, content)?;
-        Ok(())
+        Ok(entry_path)
     }
 
     fn clone_dir(&self) -> PathBuf {

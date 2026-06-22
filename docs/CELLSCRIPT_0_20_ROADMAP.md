@@ -167,6 +167,25 @@ that raw cell-data access is expressible and must be declared honestly through
 need external codec adapters, roundtrip vectors, builder/indexer support,
 multi-ABI registry support, and parity matrices.
 
+Twenty-first slice: the registry source-package plan is now closed against the
+implementation boundary. `cellc install namespace/pkg@version`, package builds,
+and `cellc update` resolve registry CellScript source packages through the
+two-tier Git path, verify `registry.json`, skip yanked versions, check
+`source_hash`, and write `Cell.lock` identity. `cellc publish` updates local
+`registry.json`; `cellc registry add` writes into the actual cloned discovery
+worktree and prints correct Git next steps. Remaining registry work is explicitly
+outside the source-package resolver: proxy caching, non-CellScript artifact
+profiles, cryptographic publisher-signature verification, and auditor key
+management.
+
+Twenty-second slice: the language abstraction-cost audit is now wired into
+compiler work. Numeric equality no longer treats all numeric widths as equal,
+declared integer literal widths propagate through constants, returns,
+assignments, calls, arrays, and braced `if` branches, IR lowering preserves those
+widths, backend terminator emission removes fall-through jumps, `opt-report`
+serialises backend shape and estimated-cycle deltas, and the incremental
+parallel compiler uses a real dependency topological sort.
+
 The generated package should provide:
 
 - typed action functions;

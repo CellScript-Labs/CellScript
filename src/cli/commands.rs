@@ -2390,11 +2390,34 @@ impl CommandExecutor {
                     primitive_compat: None,
                 },
             )?;
+            let artifact = &result.metadata.constraints.artifact;
+            let estimated_cycles_total = result.metadata.actions.iter().map(|action| action.estimated_cycles).sum::<u64>();
+            let estimated_cycles_max_action =
+                result.metadata.actions.iter().map(|action| action.estimated_cycles).max().unwrap_or_default();
             rows.push(serde_json::json!({
                 "opt_level": opt_level,
                 "artifact_format": result.metadata.artifact_format,
                 "target_profile": result.metadata.target_profile.name,
                 "artifact_size_bytes": result.artifact_bytes.len(),
+                "estimated_cycles_total": estimated_cycles_total,
+                "estimated_cycles_max_action": estimated_cycles_max_action,
+                "backend_shape": {
+                    "text_bytes": artifact.text_bytes,
+                    "rodata_bytes": artifact.rodata_bytes,
+                    "executable_text_op_count": artifact.executable_text_op_count,
+                    "covered_text_op_count": artifact.covered_text_op_count,
+                    "relaxed_branch_count": artifact.relaxed_branch_count,
+                    "max_cond_branch_abs_distance": artifact.max_cond_branch_abs_distance,
+                    "machine_block_count": artifact.machine_block_count,
+                    "max_machine_block_size": artifact.max_machine_block_size,
+                    "conditional_branch_block_count": artifact.conditional_branch_block_count,
+                    "labeled_machine_block_count": artifact.labeled_machine_block_count,
+                    "machine_cfg_edge_count": artifact.machine_cfg_edge_count,
+                    "machine_call_edge_count": artifact.machine_call_edge_count,
+                    "unreachable_machine_block_count": artifact.unreachable_machine_block_count,
+                    "layout_order_block_count": artifact.layout_order_block_count,
+                    "layout_order_text_size": artifact.layout_order_text_size,
+                },
                 "constraints_status": result.metadata.constraints.status,
                 "constraints_warnings": result.metadata.constraints.warnings.len(),
                 "constraints_failures": result.metadata.constraints.failures.len(),
@@ -2402,11 +2425,26 @@ impl CommandExecutor {
             }));
         }
         let baseline_size = rows.first().and_then(|row| row["artifact_size_bytes"].as_u64()).unwrap_or_default();
+        let baseline_text_bytes = rows.first().and_then(|row| row["backend_shape"]["text_bytes"].as_u64());
+        let baseline_executable_text_ops = rows.first().and_then(|row| row["backend_shape"]["executable_text_op_count"].as_u64());
+        let baseline_estimated_cycles_total = rows.first().and_then(|row| row["estimated_cycles_total"].as_u64()).unwrap_or_default();
         let summary_rows = rows
             .into_iter()
             .map(|mut row| {
                 let size = row["artifact_size_bytes"].as_u64().unwrap_or_default();
                 row["artifact_size_delta_from_o0"] = serde_json::json!(size as i64 - baseline_size as i64);
+                row["text_bytes_delta_from_o0"] = match (row["backend_shape"]["text_bytes"].as_u64(), baseline_text_bytes) {
+                    (Some(value), Some(baseline)) => serde_json::json!(value as i64 - baseline as i64),
+                    _ => serde_json::Value::Null,
+                };
+                row["executable_text_op_count_delta_from_o0"] =
+                    match (row["backend_shape"]["executable_text_op_count"].as_u64(), baseline_executable_text_ops) {
+                        (Some(value), Some(baseline)) => serde_json::json!(value as i64 - baseline as i64),
+                        _ => serde_json::Value::Null,
+                    };
+                let estimated_cycles_total = row["estimated_cycles_total"].as_u64().unwrap_or_default();
+                row["estimated_cycles_total_delta_from_o0"] =
+                    serde_json::json!(estimated_cycles_total as i64 - baseline_estimated_cycles_total as i64);
                 row
             })
             .collect::<Vec<_>>();
@@ -3806,7 +3844,9 @@ impl CommandExecutor {
         let registry_url = crate::package::registry::default_registry_url();
         let discovery = crate::package::registry::DiscoveryIndex::new(&registry_url, &cache_dir);
 
-        discovery.add_entry(&args.namespace, &args.name, &args.source)?;
+        let entry_path = discovery.add_entry(&args.namespace, &args.name, &args.source)?;
+        let discovery_clone = entry_path.parent().and_then(|path| path.parent()).unwrap_or(cache_dir.as_path());
+        let entry_rel = entry_path.strip_prefix(discovery_clone).unwrap_or(entry_path.as_path());
 
         println!("{}", "Registry entry added".green());
         println!("  Namespace: {}", args.namespace);
@@ -3814,7 +3854,7 @@ impl CommandExecutor {
         println!("  Source: {}", args.source);
         println!();
         println!("  Next steps:");
-        println!("    cd {} && git add {}/{}.json", cache_dir.display(), args.namespace, args.name);
+        println!("    cd {} && git add {}", discovery_clone.display(), entry_rel.display());
         println!("    git commit -m \"add {}/{}\"", args.namespace, args.name);
         println!("    Open a PR to the cellscript-registry repository");
 

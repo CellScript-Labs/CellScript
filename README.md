@@ -649,9 +649,12 @@ Command-line flags can tighten policy checks for a build or CI job.
 ### Package Workflow
 
 CellScript ships a local-first package workflow in `cellc`. Local packages,
-source roots, path dependencies, lockfile refresh, and package
-build/check/doc/fmt flows are production-style. Registry publishing and
-registry dependency resolution remain experimental and fail-closed.
+source roots, path/git/registry source-package dependencies, lockfile refresh,
+and package build/check/doc/fmt flows are production-style. Registry resolution
+is deliberately narrow: `cellc install`, `cellc build`, and `cellc update`
+accept CellScript source packages with `Cell.toml`, `registry.json`, tag-pinned
+Git provenance, and verified `source_hash`; non-CellScript artifact profiles
+still fail closed.
 
 **Supported today:**
 
@@ -662,6 +665,9 @@ registry dependency resolution remain experimental and fail-closed.
 - `cellc add --path` — records local path dependencies in `Cell.toml`
 - `cellc install --path` and `cellc update` — resolve local path dependency
   graphs and refresh `Cell.lock`
+- `cellc install cellscript/pkg@1.2.0` — resolve a registry source-package
+  dependency through discovery, tag checkout, `registry.json`, and
+  `source_hash` verification
 - Local path dependencies are resolved recursively and included in module
   loading, source hashing, and metadata
 - `Cell.lock` — captures direct and transitive resolved dependency identity
@@ -673,12 +679,16 @@ registry dependency resolution remain experimental and fail-closed.
   `Cell.lock` and `Deployed.toml`
 - `cellc registry verify --live --rpc-url ... --json` — adds CKB RPC live-cell
   checks for deployment records when RPC evidence is available
+- `cellc publish` — compute the package source hash and update local
+  `registry.json` for the current source package
+- `cellc registry add` — write a discovery-index entry into the local cloned
+  discovery repository
 
 **Experimental / fail-closed:**
 
-- Registry `publish`, registry package installation/resolution, and `login`
-  are command-shaped but fail-closed until the registry backend and trust model
-  are finalized
+- `cellc login`, registry proxy use, cryptographic publisher-signature
+  verification, and non-CellScript registry artifact profiles are future
+  trust-model work
 - Git dependencies are explicit remote source fetches; treat them as
   review-required inputs, not the registry production path
 
@@ -728,14 +738,15 @@ registry dependency resolution remain experimental and fail-closed.
 | `cellc fmt` | Format `.cell` sources or check formatting |
 | `cellc init` | Create a package skeleton |
 | `cellc add` / `remove` | Mutate local package dependencies |
-| `cellc install --path` / `update` | Resolve local path dependencies and refresh `Cell.lock` |
+| `cellc install --path` / `install namespace/pkg@version` / `update` | Resolve local, git, or registry CellScript source-package dependencies and refresh `Cell.lock` |
 | `cellc info` | Print manifest and package information |
 | `cellc package verify` | Verify package/source/build identity against `Cell.lock` |
 | `cellc registry verify` | Verify deployment identity against `Cell.lock` and `Deployed.toml`; `--live` adds CKB RPC evidence |
 | `cellc certify --plugin novaseal-profile-v0` | Run the deterministic compiler-hosted NovaSeal profile certification (consumes `target/novaseal-*.json` and the local certifier source) |
 | `cellc repl` | Start the interactive REPL |
 | `cellc run` | Run ELF entrypoints via VM runner or simulator |
-| `cellc publish` / registry `install` / registry-backed `update` / `login` | Experimental registry flows, fail-closed |
+| `cellc publish` / `cellc registry add` | Update local `registry.json` or a local discovery-index clone; commit/push remains a Git workflow |
+| `cellc login` / registry proxy / non-CellScript artifact install | Future registry trust-model work, fail-closed |
 
 ### CLI Options
 

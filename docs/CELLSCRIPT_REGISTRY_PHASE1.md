@@ -359,9 +359,16 @@ Phase 1 is deliberately minimal. We're shipping the two-tier Git registry, the t
 
 **Registry proxy** (0.20+): A caching layer like `proxy.golang.org` for faster installs and guaranteed availability. The Git-based path always remains the primary resolution mechanism. The proxy is a transparent cache, not a replacement.
 
-**Audit signatures and publisher identity** (0.20 trust hardening): Packages can currently carry optional audit report hashes and acceptance gate status. Requiring cryptographic signatures from auditors before marking a deployment as production-ready is a natural extension, but it needs a key management story first.
+**Audit signatures and publisher identity**: 0.20 adds opt-in metadata-presence
+gates through `cellc registry verify --require-publisher-signature
+--require-audit-report` and the VS Code registry verification settings. Those
+gates deliberately check that trust metadata exists; cryptographic signature
+verification and auditor key management remain future trust-model work.
 
-**Yanking and supersession**: The `yanked` flag is already in the `registry.json` schema. Phase 1 records it; 0.20 can enforce it at the resolver level.
+**Yanking and supersession**: The resolver skips `registry.json` versions marked
+`yanked` when satisfying a version requirement. Future work is policy and UX:
+who may yank, how supersession notices are displayed, and how caches retain
+already-locked versions for reproducible builds.
 
 The important thing is that none of these future additions require changing the fundamental architecture. Adding a proxy doesn't change the discovery index schema. Adding on-chain indexing doesn't change how `Deployed.toml` is generated. The two-tier Git model is the permanent canonical path, and everything else layers on top of it.
 

@@ -63,13 +63,16 @@ Read the manifest as a build promise:
 - `target` chooses assembly or ELF-style output;
 - `target_profile` chooses the runtime assumptions;
 - `out_dir` chooses where artifacts are written;
-- path dependencies keep local packages explicit.
+- path, git, and registry source-package dependencies keep package inputs
+  explicit and lockable.
 
-Registry publishing and registry dependency resolution are intentionally
-experimental/fail-closed until a trusted registry path is ready. Local path
-dependencies are the supported workflow for repeatable local development.
+Registry source-package resolution is implemented for packages that provide
+`Cell.toml`, `registry.json`, tag-pinned Git provenance, and a verified
+`source_hash`. Local path dependencies remain the fastest repeatable
+development workflow, and non-CellScript registry artifact profiles still fail
+closed until they have their own resolver contracts.
 
-When registry resolution is enabled, `cellc add` must remain a dependency
+For registry resolution, `cellc add` must remain a dependency
 resolver, not a code-snippet finder. Anything reachable by `cellc add` must be
 safe to participate in the package, build, deployment, or declared TCB identity
 chain. Template-only material belongs behind copy/scaffold commands instead.
@@ -299,9 +302,13 @@ debugging dependency resolution.
 
 ## Experimental Commands
 
-Registry publishing, registry package installation, `login`, `run`, and `repl`
-remain experimental/future-facing. Local `install --path` and `update` are
-supported as lockfile helpers for local path dependency workflows.
+Registry source-package installation and registry-backed `update` are supported
+for the CellScript source-package profile. `cellc publish` updates local
+`registry.json`; `cellc registry add` updates the local cloned discovery index,
+and the final publication step is still normal Git commit/tag/push/PR work.
+`login`, `run`, `repl`, registry proxy use, cryptographic publisher-signature
+verification, and non-CellScript artifact profiles remain future-facing or
+fail-closed.
 
 ## Next
 

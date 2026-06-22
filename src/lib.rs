@@ -579,12 +579,19 @@ pub struct ArtifactConstraintsMetadata {
     pub artifact_size_bytes: usize,
     pub text_bytes: Option<usize>,
     pub rodata_bytes: Option<usize>,
+    pub executable_text_op_count: Option<usize>,
+    pub covered_text_op_count: Option<usize>,
     pub relaxed_branch_count: Option<usize>,
     pub max_cond_branch_abs_distance: Option<u64>,
     pub machine_block_count: Option<usize>,
+    pub max_machine_block_size: Option<usize>,
+    pub conditional_branch_block_count: Option<usize>,
+    pub labeled_machine_block_count: Option<usize>,
     pub machine_cfg_edge_count: Option<usize>,
     pub machine_call_edge_count: Option<usize>,
     pub unreachable_machine_block_count: Option<usize>,
+    pub layout_order_block_count: Option<usize>,
+    pub layout_order_text_size: Option<usize>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -1211,12 +1218,19 @@ fn constraints_metadata(
         artifact_size_bytes,
         text_bytes: backend_shape.map(|shape| shape.text_size),
         rodata_bytes: backend_shape.map(|shape| shape.rodata_size),
+        executable_text_op_count: backend_shape.map(|shape| shape.executable_text_op_count),
+        covered_text_op_count: backend_shape.map(|shape| shape.covered_text_op_count),
         relaxed_branch_count: backend_shape.map(|shape| shape.relaxed_branch_count),
         max_cond_branch_abs_distance: backend_shape.map(|shape| shape.max_cond_branch_abs_distance),
         machine_block_count: backend_shape.map(|shape| shape.machine_block_count),
+        max_machine_block_size: backend_shape.map(|shape| shape.max_machine_block_size),
+        conditional_branch_block_count: backend_shape.map(|shape| shape.conditional_branch_block_count),
+        labeled_machine_block_count: backend_shape.map(|shape| shape.labeled_machine_block_count),
         machine_cfg_edge_count: backend_shape.map(|shape| shape.machine_cfg_edge_count),
         machine_call_edge_count: backend_shape.map(|shape| shape.machine_call_edge_count),
         unreachable_machine_block_count: backend_shape.map(|shape| shape.unreachable_machine_block_count),
+        layout_order_block_count: backend_shape.map(|shape| shape.layout_order_block_count),
+        layout_order_text_size: backend_shape.map(|shape| shape.layout_order_text_size),
     };
     if backend_shape.is_none() {
         warnings.push("backend shape metrics were not available for this artifact".to_string());
@@ -15896,6 +15910,22 @@ action widen(x: u16) -> u64 {
 }
 "#;
 
+    const U64_DIVISION_PROGRAM: &str = r#"
+module test
+
+const U64_MAX: u64 = 18446744073709551615
+
+struct Token {
+    amount: u64,
+}
+
+action checked(token_a: Token, token_b: Token) -> u64 {
+    verification
+        require token_a.amount <= U64_MAX / token_b.amount
+        return token_a.amount / token_b.amount
+}
+"#;
+
     const ASSERT_PROGRAM: &str = r#"
 module test
 
@@ -18809,6 +18839,11 @@ action activate(ticket: Ticket) -> Ticket {
         let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
 
         assert!(asm.contains("beqz t0, .Lincrement_if_block_2"), "missing conditional branch to else block:\n{}", asm);
+        assert!(
+            !asm.contains("j .Lincrement_if_block_1"),
+            "then block is already the physical fall-through and should not need an unconditional jump:\n{}",
+            asm
+        );
         assert!(asm.contains(".Lincrement_if_block_1:"), "missing then block label:\n{}", asm);
         assert!(asm.contains(".Lincrement_if_block_2:"), "missing else block label:\n{}", asm);
         assert!(asm.contains(".Lincrement_if_block_3:"), "missing join block label:\n{}", asm);
@@ -18832,6 +18867,11 @@ action activate(ticket: Ticket) -> Ticket {
         let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
 
         assert!(asm.contains("beqz t0, .Lchoose_block_2"), "missing conditional branch for if expression:\n{}", asm);
+        assert!(
+            !asm.contains("j .Lchoose_block_1"),
+            "then block is already the physical fall-through and should not need an unconditional jump:\n{}",
+            asm
+        );
         assert!(asm.contains(".Lchoose_block_3:"), "missing join block for if expression:\n{}", asm);
         assert!(asm.contains("sd t0, 24(sp)") || asm.contains("sd t0, 32(sp)"), "missing branch value move into join slot:\n{}", asm);
     }
@@ -18857,6 +18897,11 @@ action activate(ticket: Ticket) -> Ticket {
         assert!(asm.contains(".Lspin_block_2:"), "missing while body block:\n{}", asm);
         assert!(asm.contains(".Lspin_block_3:"), "missing while exit block:\n{}", asm);
         assert!(asm.contains("beqz t0, .Lspin_block_3"), "missing while false-branch jump:\n{}", asm);
+        assert!(
+            !asm.contains("j .Lspin_block_2"),
+            "loop body is already the physical fall-through and should not need an unconditional jump:\n{}",
+            asm
+        );
         assert!(asm.contains("j .Lspin_block_1"), "missing while back edge:\n{}", asm);
     }
 
@@ -19224,6 +19269,17 @@ action activate(ticket: Ticket) -> Ticket {
 
         assert!(!asm.contains("li t0, 0"), "cast lowering regressed to zero fallback:\n{}", asm);
         assert!(asm.contains(".global widen"), "missing widened function symbol:\n{}", asm);
+    }
+
+    #[test]
+    fn compile_lowers_u64_division_as_unsigned_riscv() {
+        let result = compile(U64_DIVISION_PROGRAM, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+
+        assert!(asm.contains("divu t0, t0, t1"), "u64 return division should lower to unsigned divu:\n{}", asm);
+        assert!(asm.contains("divu t1, t3, t1"), "u64 assertion expression should lower to unsigned divu:\n{}", asm);
+        assert!(!asm.contains("div t0, t0, t1"), "u64 return division regressed to signed div:\n{}", asm);
+        assert!(!asm.contains("div t1, t3, t1"), "u64 assertion expression regressed to signed div:\n{}", asm);
     }
 
     #[test]

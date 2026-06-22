@@ -7,6 +7,10 @@
   package verification, registry verification, and live registry verification.
 - Added extension settings for generated builder output, CKB RPC URL,
   deployment network filtering, and registry trust metadata gates.
+- Clarified the extension registry boundary: editor commands verify package,
+  deployment, live-cell, and trust-metadata evidence, while registry
+  publish/install and cryptographic publisher-signature verification remain
+  compiler/Git workflow responsibilities.
 
 ## 0.17.0
 

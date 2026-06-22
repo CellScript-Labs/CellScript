@@ -1,15 +1,15 @@
 [
   {
     "example": "amm_pool.cell",
-    "line_count": 13697,
-    "text_size": 55152,
+    "line_count": 17730,
+    "text_size": 73492,
     "relaxed_branch_count": 1,
-    "max_cond_branch_abs_distance": 6040,
-    "machine_block_count": 1664,
-    "max_machine_block_size": 220,
-    "machine_cfg_edge_count": 3129,
-    "machine_call_edge_count": 695,
-    "unreachable_machine_block_count": 1445
+    "max_cond_branch_abs_distance": 4392,
+    "machine_block_count": 1987,
+    "max_machine_block_size": 272,
+    "machine_cfg_edge_count": 3738,
+    "machine_call_edge_count": 829,
+    "unreachable_machine_block_count": 1742
   },
   {
     "example": "launch.cell",

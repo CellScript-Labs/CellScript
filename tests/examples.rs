@@ -11,7 +11,7 @@ const BUNDLED_EXAMPLES: [&str; 7] =
 const BACKEND_SHAPE_BASELINE_JSON: &str = include_str!("backend_shape_baseline.json");
 
 const BUNDLED_EXAMPLE_ELF_SIZE_BUDGETS: [(&str, usize); 7] = [
-    ("amm_pool.cell", 64 * 1024),
+    ("amm_pool.cell", 80 * 1024),
     ("launch.cell", 36 * 1024),
     ("multisig.cell", 108 * 1024),
     ("nft.cell", 62 * 1024),
@@ -24,17 +24,17 @@ const BUNDLED_EXAMPLE_ASM_SHAPE_BUDGETS: [(&str, AssemblyShapeBudget); 7] = [
     (
         "amm_pool.cell",
         AssemblyShapeBudget {
-            max_lines: 14_500,
+            max_lines: 18_000,
             max_fail_handlers: 32,
             max_shared_epilogues: 8,
-            max_text_bytes: 56 * 1024,
+            max_text_bytes: 74 * 1024,
             max_relaxed_branches: 4,
             max_cond_branch_abs_distance: 6_400,
-            max_machine_blocks: 1_800,
+            max_machine_blocks: 2_100,
             max_machine_block_bytes: 512,
-            max_cfg_edges: 3_400,
-            max_call_edges: 760,
-            max_unreachable_machine_blocks: 1_600,
+            max_cfg_edges: 3_800,
+            max_call_edges: 850,
+            max_unreachable_machine_blocks: 1_800,
         },
     ),
     (

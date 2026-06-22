@@ -501,6 +501,14 @@ fn fixed_scalar_operand_width(operand: &IrOperand) -> Option<usize> {
     }
 }
 
+fn operand_is_signed_i32(operand: &IrOperand) -> bool {
+    matches!(operand, IrOperand::Var(var) if var.ty == IrType::I32)
+}
+
+fn binary_operands_signed_i32(left: &IrOperand, right: &IrOperand) -> bool {
+    operand_is_signed_i32(left) || operand_is_signed_i32(right)
+}
+
 fn collect_pure_const_returns(ir: &IrModule) -> HashMap<String, IrConst> {
     ir.items
         .iter()
@@ -1037,6 +1045,16 @@ impl CodeGenerator {
 
     fn emit_label(&mut self, name: &str) {
         self.assembly.push(format!("{}:", name));
+    }
+
+    fn block_label(&self, block_id: BlockId) -> String {
+        format!(".L{}_block_{}", self.current_function.as_deref().unwrap_or("fn"), block_id.0)
+    }
+
+    fn emit_jump_to_block(&mut self, block_id: BlockId, fallthrough: Option<BlockId>) {
+        if Some(block_id) != fallthrough {
+            self.emit(format!("j {}", self.block_label(block_id)));
+        }
     }
 
     fn emit(&mut self, instruction: impl Into<String>) {
@@ -2720,8 +2738,9 @@ impl CodeGenerator {
             self.generate_mutate_replacement(pattern)?;
         }
 
-        for block in &body.blocks {
-            self.generate_block(block)?;
+        for (index, block) in body.blocks.iter().enumerate() {
+            let fallthrough = body.blocks.get(index + 1).map(|next| next.id);
+            self.generate_block(block, fallthrough)?;
         }
 
         Ok(())
@@ -2995,14 +3014,14 @@ impl CodeGenerator {
         self.emit_stack_store("t0", var_id * 8);
     }
 
-    fn generate_block(&mut self, block: &IrBlock) -> Result<()> {
-        self.emit_label(&format!(".L{}_block_{}", self.current_function.as_deref().unwrap_or("fn"), block.id.0));
+    fn generate_block(&mut self, block: &IrBlock, fallthrough: Option<BlockId>) -> Result<()> {
+        self.emit_label(&self.block_label(block.id));
 
         for instruction in &block.instructions {
             self.generate_instruction(instruction)?;
         }
 
-        self.generate_terminator(&block.terminator)?;
+        self.generate_terminator(&block.terminator, fallthrough)?;
 
         Ok(())
     }
@@ -3118,7 +3137,7 @@ impl CodeGenerator {
         Ok(())
     }
 
-    fn generate_terminator(&mut self, terminator: &IrTerminator) -> Result<()> {
+    fn generate_terminator(&mut self, terminator: &IrTerminator, fallthrough: Option<BlockId>) -> Result<()> {
         match terminator {
             IrTerminator::Return(None) => {
                 self.emit("li a0, 0");
@@ -3161,30 +3180,31 @@ impl CodeGenerator {
                 self.emit_epilogue();
             }
             IrTerminator::Jump(block_id) => {
-                self.emit(format!("j .L{}_block_{}", self.current_function.as_deref().unwrap_or("fn"), block_id.0));
+                self.emit_jump_to_block(*block_id, fallthrough);
             }
             IrTerminator::Branch { cond, then_block, else_block } => match cond {
                 IrOperand::Const(IrConst::Bool(b)) => {
-                    if *b {
-                        self.emit(format!("j .L{}_block_{}", self.current_function.as_deref().unwrap_or("fn"), then_block.0));
-                    } else {
-                        self.emit(format!("j .L{}_block_{}", self.current_function.as_deref().unwrap_or("fn"), else_block.0));
-                    }
+                    self.emit_jump_to_block(if *b { *then_block } else { *else_block }, fallthrough);
                 }
                 IrOperand::Const(IrConst::U64(n)) => {
-                    if *n != 0 {
-                        self.emit(format!("j .L{}_block_{}", self.current_function.as_deref().unwrap_or("fn"), then_block.0));
-                    } else {
-                        self.emit(format!("j .L{}_block_{}", self.current_function.as_deref().unwrap_or("fn"), else_block.0));
-                    }
+                    self.emit_jump_to_block(if *n != 0 { *then_block } else { *else_block }, fallthrough);
+                }
+                IrOperand::Var(_) if then_block == else_block => {
+                    self.emit_jump_to_block(*then_block, fallthrough);
                 }
                 IrOperand::Var(v) => {
                     self.emit_stack_load("t0", v.id * 8);
-                    self.emit(format!("beqz t0, .L{}_block_{}", self.current_function.as_deref().unwrap_or("fn"), else_block.0));
-                    self.emit(format!("j .L{}_block_{}", self.current_function.as_deref().unwrap_or("fn"), then_block.0));
+                    if Some(*then_block) == fallthrough {
+                        self.emit(format!("beqz t0, {}", self.block_label(*else_block)));
+                    } else if Some(*else_block) == fallthrough {
+                        self.emit(format!("bnez t0, {}", self.block_label(*then_block)));
+                    } else {
+                        self.emit(format!("beqz t0, {}", self.block_label(*else_block)));
+                        self.emit_jump_to_block(*then_block, fallthrough);
+                    }
                 }
                 _ => {
-                    self.emit(format!("j .L{}_block_{}", self.current_function.as_deref().unwrap_or("fn"), else_block.0));
+                    self.emit_jump_to_block(*else_block, fallthrough);
                 }
             },
         }
@@ -6076,7 +6096,7 @@ impl CodeGenerator {
                     BinaryOp::Add => self.emit("add t1, t3, t1"),
                     BinaryOp::Sub => self.emit("sub t1, t3, t1"),
                     BinaryOp::Mul => self.emit("mul t1, t3, t1"),
-                    BinaryOp::Div => self.emit("div t1, t3, t1"),
+                    BinaryOp::Div => self.emit("divu t1, t3, t1"),
                     _ => unreachable!("prelude u64 binary source only supports add/sub/mul/div"),
                 }
             }
@@ -7336,8 +7356,10 @@ impl CodeGenerator {
             BinaryOp::Add => self.emit("add t0, t0, t1"),
             BinaryOp::Sub => self.emit("sub t0, t0, t1"),
             BinaryOp::Mul => self.emit("mul t0, t0, t1"),
-            BinaryOp::Div => self.emit("div t0, t0, t1"),
-            BinaryOp::Mod => self.emit("rem t0, t0, t1"),
+            BinaryOp::Div if binary_operands_signed_i32(left, right) => self.emit("div t0, t0, t1"),
+            BinaryOp::Div => self.emit("divu t0, t0, t1"),
+            BinaryOp::Mod if binary_operands_signed_i32(left, right) => self.emit("rem t0, t0, t1"),
+            BinaryOp::Mod => self.emit("remu t0, t0, t1"),
             BinaryOp::Eq => {
                 self.emit("sub t0, t0, t1");
                 self.emit("seqz t0, t0");
@@ -7346,12 +7368,22 @@ impl CodeGenerator {
                 self.emit("sub t0, t0, t1");
                 self.emit("snez t0, t0");
             }
+            BinaryOp::Lt if binary_operands_signed_i32(left, right) => self.emit("slt t0, t0, t1"),
             BinaryOp::Lt => self.emit("sltu t0, t0, t1"),
+            BinaryOp::Le if binary_operands_signed_i32(left, right) => {
+                self.emit("slt t0, t1, t0");
+                self.emit("xori t0, t0, 1");
+            }
             BinaryOp::Le => {
                 self.emit("sltu t0, t1, t0");
                 self.emit("xori t0, t0, 1");
             }
+            BinaryOp::Gt if binary_operands_signed_i32(left, right) => self.emit("slt t0, t1, t0"),
             BinaryOp::Gt => self.emit("sltu t0, t1, t0"),
+            BinaryOp::Ge if binary_operands_signed_i32(left, right) => {
+                self.emit("slt t0, t0, t1");
+                self.emit("xori t0, t0, 1");
+            }
             BinaryOp::Ge => {
                 self.emit("sltu t0, t0, t1");
                 self.emit("xori t0, t0, 1");
@@ -17626,7 +17658,9 @@ enum Instruction {
     Mul { rd: u8, rs1: u8, rs2: u8 },
     Mulhu { rd: u8, rs1: u8, rs2: u8 },
     Div { rd: u8, rs1: u8, rs2: u8 },
+    Divu { rd: u8, rs1: u8, rs2: u8 },
     Rem { rd: u8, rs1: u8, rs2: u8 },
+    Remu { rd: u8, rs1: u8, rs2: u8 },
     Slt { rd: u8, rs1: u8, rs2: u8 },
     Sltu { rd: u8, rs1: u8, rs2: u8 },
     Sgt { rd: u8, rs1: u8, rs2: u8 },
@@ -18636,7 +18670,17 @@ fn parse_instruction(line: &str) -> Result<Instruction> {
             rs1: parse_register(arg(&args, 1)?)?,
             rs2: parse_register(arg(&args, 2)?)?,
         }),
+        "divu" => Ok(Instruction::Divu {
+            rd: parse_register(arg(&args, 0)?)?,
+            rs1: parse_register(arg(&args, 1)?)?,
+            rs2: parse_register(arg(&args, 2)?)?,
+        }),
         "rem" => Ok(Instruction::Rem {
+            rd: parse_register(arg(&args, 0)?)?,
+            rs1: parse_register(arg(&args, 1)?)?,
+            rs2: parse_register(arg(&args, 2)?)?,
+        }),
+        "remu" => Ok(Instruction::Remu {
             rd: parse_register(arg(&args, 0)?)?,
             rs1: parse_register(arg(&args, 1)?)?,
             rs2: parse_register(arg(&args, 2)?)?,
@@ -18819,8 +18863,14 @@ fn encode_instruction(
         Instruction::Div { rd, rs1, rs2 } => {
             out.extend_from_slice(&encode_r_type(0x33, *rd, 0b100, *rs1, *rs2, 0b0000001).to_le_bytes())
         }
+        Instruction::Divu { rd, rs1, rs2 } => {
+            out.extend_from_slice(&encode_r_type(0x33, *rd, 0b101, *rs1, *rs2, 0b0000001).to_le_bytes())
+        }
         Instruction::Rem { rd, rs1, rs2 } => {
             out.extend_from_slice(&encode_r_type(0x33, *rd, 0b110, *rs1, *rs2, 0b0000001).to_le_bytes())
+        }
+        Instruction::Remu { rd, rs1, rs2 } => {
+            out.extend_from_slice(&encode_r_type(0x33, *rd, 0b111, *rs1, *rs2, 0b0000001).to_le_bytes())
         }
         Instruction::Slt { rd, rs1, rs2 } => {
             out.extend_from_slice(&encode_r_type(0x33, *rd, 0b010, *rs1, *rs2, 0b0000000).to_le_bytes())
@@ -19457,6 +19507,7 @@ mod tests {
         ("beqz", "beqz a0, branch_target"),
         ("call", "call helper"),
         ("div", "div t5, a0, a1"),
+        ("divu", "divu t5, a0, a1"),
         ("ecall", "ecall"),
         ("j", "j done"),
         ("la", "la t3, data_label"),
@@ -19468,6 +19519,7 @@ mod tests {
         ("neg", "neg s6, a0"),
         ("or", "or t3, a0, a1"),
         ("rem", "rem t6, a0, a1"),
+        ("remu", "remu t6, a0, a1"),
         ("ret", "ret"),
         ("sb", "sb t1, 8(sp)"),
         ("sd", "sd t0, 0(sp)"),

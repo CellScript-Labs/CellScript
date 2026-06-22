@@ -401,7 +401,9 @@ fn discovery_index_add_entry() {
     let discovery = DiscoveryIndex::new(&registry_dir.to_string_lossy(), &cache_dir);
     discovery.clone_or_update().unwrap();
 
-    discovery.add_entry("myns", "mypkg", "https://github.com/myns/mypkg").unwrap();
+    let entry_path = discovery.add_entry("myns", "mypkg", "https://github.com/myns/mypkg").unwrap();
+    assert!(entry_path.ends_with("myns/mypkg.json"), "unexpected entry path: {}", entry_path.display());
+    assert!(entry_path.exists(), "registry add should write the entry file");
 
     let found = discovery.lookup("myns", "mypkg").unwrap();
     assert_eq!(found.name, "mypkg");

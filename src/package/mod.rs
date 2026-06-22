@@ -462,10 +462,10 @@ dist/
         let cache_dir = self.registry_cache_dir();
         let registry_url = registry::default_registry_url();
         let discovery = registry::DiscoveryIndex::new(&registry_url, &cache_dir);
-        let entry = discovery.lookup(&resolved_namespace, name).map_err(|_e| {
+        let entry = discovery.lookup(&resolved_namespace, name).map_err(|e| {
             CompileError::without_span(format!(
-                "registry dependency '{}' with version '{}' is not supported yet; use a local path dependency",
-                name, version
+                "failed to resolve registry dependency '{}/{}@{}' via discovery index '{}': {}",
+                resolved_namespace, name, version, registry_url, e
             ))
         })?;
 

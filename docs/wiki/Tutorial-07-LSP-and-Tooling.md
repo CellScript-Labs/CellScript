@@ -209,10 +209,13 @@ The package manager supports:
 Use the top-level `cellc path/to/file.cell` form for one-off file compilation.
 Use `cellc build` for package builds.
 
-Local `cellc install --path` and `cellc update` are supported as lockfile helpers
-for local path dependency workflows. Treat registry package installation,
-registry publishing, `login`, and `run` flows as experimental unless your
-current build explicitly reports them as completed and supported.
+Local `cellc install --path`, registry source-package `cellc install`, and
+`cellc update` are supported lockfile workflows for packages that can be
+resolved and source-hash verified. `cellc publish` and `cellc registry add`
+prepare local Git-backed registry records; commit/push/PR remains outside the
+editor. Treat `login`, `run`, registry proxy use, cryptographic publisher
+signature verification, and non-CellScript artifact profiles as future-facing or
+fail-closed.
 
 ## Next
 

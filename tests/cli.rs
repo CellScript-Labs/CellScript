@@ -5537,6 +5537,15 @@ action main(value: u64) -> u64 {
         assert_eq!(row["constraints_status"], "warn");
         assert!(row["artifact_size_bytes"].as_u64().unwrap() > 0);
         assert!(row["artifact_size_delta_from_o0"].is_i64());
+        assert!(row["estimated_cycles_total"].as_u64().unwrap() > 0);
+        assert!(row["estimated_cycles_total_delta_from_o0"].is_i64());
+        assert!(row["backend_shape"]["text_bytes"].as_u64().unwrap() > 0);
+        assert!(row["backend_shape"]["executable_text_op_count"].as_u64().unwrap() > 0);
+        assert!(row["backend_shape"]["covered_text_op_count"].as_u64().unwrap() > 0);
+        assert!(row["backend_shape"]["machine_block_count"].as_u64().unwrap() > 0);
+        assert!(row["backend_shape"]["layout_order_text_size"].as_u64().unwrap() > 0);
+        assert!(row["text_bytes_delta_from_o0"].is_i64());
+        assert!(row["executable_text_op_count_delta_from_o0"].is_i64());
     }
 }
 

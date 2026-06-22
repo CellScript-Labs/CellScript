@@ -992,7 +992,7 @@ Internally:
 
 ```bash
 # Register a new package in the discovery index (one-time)
-cellc registry add --source https://github.com/cellscript/amm
+cellc registry add --namespace cellscript --name amm --source https://github.com/cellscript/amm
 
 # Publish a new version (updates registry.json in the source repo)
 cellc publish
@@ -1007,11 +1007,12 @@ cellc package verify
 cellc registry verify
 ```
 
-The `resolve_from_registry` method in `src/package/mod.rs` currently returns
-an error stating "registry dependency is not supported yet; use a local path
-dependency." The registry implementation replaces this stub with the
-two-tier resolution logic: discovery index lookup → source repo clone →
-`registry.json` verification → `Cell.toml` parsing.
+The `resolve_from_registry` path in `src/package/mod.rs` now implements the
+two-tier source-package resolver: discovery index lookup, source repo clone,
+tag checkout, `registry.json` identity and schema checks, `source_hash`
+verification, `Cell.toml` parsing, and transitive dependency resolution. A
+discovery failure reports the namespace, package, requested version, and
+registry URL instead of falling through to a local-path placeholder.
 
 ## Deployment Registry (Chain-Indexed)
 
@@ -1106,7 +1107,7 @@ transaction.
 | `LockedSource::Registry` | `{ name, version }` only | Extend to `{ namespace, name, version, url, revision }`. The `url` and `revision` fields carry git provenance from the discovery index. |
 | `DeploymentManifest` | In `crates/cellscript-ckb-adapter/src/lib.rs` | Extend to `Deployed.toml` schema: add `network`, `chain_id`, `script_role`, `data_hash`, `status`, `[build]` section. |
 | `DeploymentRef` | In adapter crate | Add `network`, `chain_id`, `script_role`, `data_hash`, `status` fields as `Option<String>`. |
-| `PackageManager::resolve_from_registry` | Returns "not supported yet" stub | Replace with two-tier resolution: discovery index lookup → source repo clone → `registry.json` verification → `Cell.toml` parsing. |
+| `PackageManager::resolve_from_registry` | Implemented two-tier source-package resolver: discovery lookup → source repo clone → tag checkout → `registry.json` verification → source hash check → `Cell.toml` parsing. | Keep non-CellScript artifact profiles fail-closed until profile-specific resolver contracts exist. |
 | `build_deployment_manifest_from_evidence` | In adapter crate | Extend to populate new fields. |
 | `ManifestCellDepResolver` | In adapter crate | Unchanged. Still resolves CellDeps from manifest. |
 

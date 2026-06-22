@@ -306,7 +306,53 @@ impl ParallelCompiler {
     }
 
     fn topological_sort(&self, files: &[PathBuf]) -> Vec<PathBuf> {
-        files.to_vec()
+        let selected = files.iter().cloned().collect::<HashSet<_>>();
+        let original_index = files.iter().enumerate().map(|(index, file)| (file.clone(), index)).collect::<HashMap<_, _>>();
+        let mut indegree = files.iter().cloned().map(|file| (file, 0usize)).collect::<HashMap<_, _>>();
+        let mut dependents = HashMap::<PathBuf, Vec<PathBuf>>::new();
+
+        for file in files {
+            let Some(dependencies) = self.compiler.dep_graph.dependencies.get(file) else {
+                continue;
+            };
+            for dependency in dependencies {
+                if selected.contains(dependency) {
+                    *indegree.entry(file.clone()).or_default() += 1;
+                    dependents.entry(dependency.clone()).or_default().push(file.clone());
+                }
+            }
+        }
+
+        let mut ready = files.iter().filter(|file| indegree.get(*file).copied().unwrap_or_default() == 0).cloned().collect::<Vec<_>>();
+        ready.sort_by_key(|file| original_index.get(file).copied().unwrap_or(usize::MAX));
+        ready.reverse();
+
+        let mut sorted = Vec::with_capacity(files.len());
+        while let Some(file) = ready.pop() {
+            sorted.push(file.clone());
+            let Some(children) = dependents.get(&file) else {
+                continue;
+            };
+            for dependent in children {
+                let Some(count) = indegree.get_mut(dependent) else {
+                    continue;
+                };
+                *count = count.saturating_sub(1);
+                if *count == 0 {
+                    ready.push(dependent.clone());
+                }
+            }
+            ready.sort_by_key(|file| original_index.get(file).copied().unwrap_or(usize::MAX));
+            ready.reverse();
+        }
+
+        if sorted.len() == files.len() {
+            return sorted;
+        }
+
+        let emitted = sorted.iter().cloned().collect::<HashSet<_>>();
+        sorted.extend(files.iter().filter(|file| !emitted.contains(*file)).cloned());
+        sorted
     }
 }
 
@@ -422,6 +468,40 @@ mod tests {
 
         assert!(affected.contains(&PathBuf::from("b.cell")));
         assert!(affected.contains(&PathBuf::from("c.cell")));
+    }
+
+    #[test]
+    fn parallel_compiler_orders_dependencies_before_dependents() {
+        let mut compiler = ParallelCompiler::new("/tmp/cellscript-incremental-topo", 4);
+        let token = PathBuf::from("token.cell");
+        let registry = PathBuf::from("registry.cell");
+        let app = PathBuf::from("app.cell");
+        let standalone = PathBuf::from("standalone.cell");
+
+        compiler.compiler.dep_graph.dependencies.insert(app.clone(), HashSet::from([registry.clone()]));
+        compiler.compiler.dep_graph.dependencies.insert(registry.clone(), HashSet::from([token.clone()]));
+
+        let sorted = compiler.topological_sort(&[app.clone(), registry.clone(), token.clone(), standalone]);
+        let token_index = sorted.iter().position(|file| file == &token).expect("token present");
+        let registry_index = sorted.iter().position(|file| file == &registry).expect("registry present");
+        let app_index = sorted.iter().position(|file| file == &app).expect("app present");
+
+        assert!(token_index < registry_index, "dependency must precede dependent: {sorted:?}");
+        assert!(registry_index < app_index, "dependency must precede dependent: {sorted:?}");
+    }
+
+    #[test]
+    fn parallel_compiler_keeps_cycle_members_in_input_order_after_acyclic_prefix() {
+        let mut compiler = ParallelCompiler::new("/tmp/cellscript-incremental-cycle", 4);
+        let a = PathBuf::from("a.cell");
+        let b = PathBuf::from("b.cell");
+        let root = PathBuf::from("root.cell");
+
+        compiler.compiler.dep_graph.dependencies.insert(a.clone(), HashSet::from([b.clone()]));
+        compiler.compiler.dep_graph.dependencies.insert(b.clone(), HashSet::from([a.clone()]));
+
+        let sorted = compiler.topological_sort(&[a.clone(), root.clone(), b.clone()]);
+        assert_eq!(sorted, vec![root, a, b]);
     }
 
     #[test]
