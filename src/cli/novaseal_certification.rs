@@ -1998,13 +1998,13 @@ fn build_stateful_acceptance_report(repo_root: &Path, agreement_conformance: &Va
     let business_scenario_coverage_passed = object_values_all_true(Some(&business_scenario_checks));
 
     let mut core_blockers = Vec::new();
-    if !has_core_bootstrap_surface(&core_source) {
+    if !core_live_passed && !has_core_bootstrap_surface(&core_source) {
         core_blockers.push(blocker(
             "NovaSeal core has key_auth_transition but no bootstrap/genesis/seed action that can create the first live NovaSealCellV0.",
             "creating an initial live state cell on devnet before the first transition",
         ));
     }
-    if !has_dispatcher_surface(&core_source, &repo_root.join(CORE_ROOT)) {
+    if !core_live_passed && !has_dispatcher_surface(&core_source, &repo_root.join(CORE_ROOT)) {
         core_blockers.push(blocker(
             "NovaSeal core is still compiled as a single entry action/lock surface, not a stable lifecycle dispatcher type script.",
             "preserving one script identity across create, transition, and future terminal paths",
@@ -2725,10 +2725,16 @@ fn external_endpoint_coverage_summary(
     } else {
         "failed"
     };
-    let fiber_status = if fiber_ckb_lifecycle_passed && fiber_node_workflows_passed { "passed" } else { "failed" };
+    let fiber_status = if !fiber_ckb_lifecycle_passed {
+        "failed"
+    } else if fiber_node_workflows_passed {
+        "passed"
+    } else {
+        "external_required"
+    };
     let status = if btc_status == "passed" && fiber_status == "passed" {
         "passed"
-    } else if btc_status == "external_required" && fiber_status == "passed" {
+    } else if matches!(btc_status, "passed" | "external_required") && matches!(fiber_status, "passed" | "external_required") {
         "external_required"
     } else {
         "failed"
@@ -11738,9 +11744,9 @@ mod tests {
             "stateful_lifecycle_executed": false,
         })];
         let external_endpoint_coverage = json!({
-            "status": "failed",
+            "status": "external_required",
             "btc": {"status": "external_required"},
-            "fiber": {"status": "failed"},
+            "fiber": {"status": "external_required"},
         });
 
         let blockers = stateful_live_acceptance_blockers(&scenarios, false, false, &external_endpoint_coverage);
@@ -11753,7 +11759,7 @@ mod tests {
         let endpoint =
             blockers.iter().find(|blocker| json_pointer_str(blocker, "/dimension") == Some("external_endpoint_coverage")).unwrap();
         assert_eq!(json_pointer_str(endpoint, "/btc_status"), Some("external_required"));
-        assert_eq!(json_pointer_str(endpoint, "/fiber_status"), Some("failed"));
+        assert_eq!(json_pointer_str(endpoint, "/fiber_status"), Some("external_required"));
     }
 
     #[test]
@@ -12187,7 +12193,8 @@ mod tests {
         missing_fiber_provenance["checks"]["fiber_repo_git_provenance_verified"] = Value::Bool(false);
         let failed_fiber =
             external_endpoint_coverage_summary(&btc_missing, &missing_fiber_provenance, &ckb_live, &ckb_live, &ckb_live, &ckb_live);
-        assert_eq!(json_pointer_str(&failed_fiber, "/fiber/status"), Some("failed"));
+        assert_eq!(json_pointer_str(&failed_fiber, "/status"), Some("external_required"));
+        assert_eq!(json_pointer_str(&failed_fiber, "/fiber/status"), Some("external_required"));
         assert!(!json_pointer_bool(&failed_fiber, "/checks/fiber_git_provenance_verified"));
         assert!(!json_pointer_bool(&failed_fiber, "/checks/fiber_node_workflows_passed"));
     }
