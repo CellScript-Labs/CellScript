@@ -21,7 +21,7 @@ old_render_commitment_hash: Byte32
 new_render_commitment_hash: Byte32
 rule_hash: Byte32
 decoder_hash: Byte32
-owner_lock: Address
+owner_lock: Byte32              # Expected CKB lock hash for genesis input and successor outputs.
 previous_event_hash: Byte32
 new_event_hash: Byte32
 expiry: u64

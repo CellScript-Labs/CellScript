@@ -4442,6 +4442,8 @@ impl<'a> TypeChecker<'a> {
                             | "cell_data_hash"
                             | "cell_lock_code_hash"
                             | "cell_type_code_hash"
+                            | "cell_lock_args32"
+                            | "cell_type_args32"
                             | "cell_lock_args_hash"
                             | "cell_type_args_hash",
                         ) => {
@@ -4880,6 +4882,13 @@ impl<'a> TypeChecker<'a> {
                         self.validate_builtin_arity(name, 1, arg_types, call.span)?;
                         if arg_types[0] != Type::Hash {
                             return Err(CompileError::new("hash_blake2b expects Hash input", call.span));
+                        }
+                        return Ok(Type::Hash);
+                    }
+                    "hash_blake2b_packed" => {
+                        self.validate_builtin_arity(name, 1, arg_types, call.span)?;
+                        if matches!(arg_types[0], Type::Unit) {
+                            return Err(CompileError::new("hash_blake2b_packed expects packed data", call.span));
                         }
                         return Ok(Type::Hash);
                     }

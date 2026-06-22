@@ -1147,7 +1147,7 @@ def run_live(args: argparse.Namespace) -> dict[str, Any]:
             "wrong signature transition",
             expected_source="Inputs[0].Type",
             expected_data_hash=lifecycle["data_hash"],
-            expected_error_code=1,
+            expected_error_code=56,
         )
         still_live = devnet.assert_live_cell(
             transition_commit["tx_hash"],

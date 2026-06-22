@@ -57,7 +57,6 @@ const CKB_ROLE_UNKNOWN: u64 = 0;
 const CKB_CELL_FIELD_CAPACITY: u64 = ckb_abi::cell_field::CAPACITY;
 const CKB_CELL_FIELD_LOCK: u64 = ckb_abi::cell_field::LOCK;
 const CKB_CELL_FIELD_TYPE: u64 = ckb_abi::cell_field::TYPE;
-const CKB_CELL_FIELD_DATA_HASH: u64 = ckb_abi::cell_field::DATA_HASH;
 const CKB_CELL_FIELD_LOCK_HASH: u64 = ckb_abi::cell_field::LOCK_HASH;
 const CKB_CELL_FIELD_TYPE_HASH: u64 = ckb_abi::cell_field::TYPE_HASH;
 const CKB_CELL_FIELD_OCCUPIED_CAPACITY: u64 = ckb_abi::cell_field::OCCUPIED_CAPACITY;
@@ -77,14 +76,14 @@ const RUNTIME_COLLECTION_BUFFER_SIZE: usize = 256;
 const ENTRY_WITNESS_LABEL: &str = "_cellscript_entry";
 const ENTRY_WITNESS_MAGIC: &[u8; 8] = ENTRY_WITNESS_ABI_MAGIC;
 const ENTRY_WITNESS_HEADER_SIZE: usize = 8;
-const ENTRY_WITNESS_BUFFER_SIZE: usize = 1024;
+const ENTRY_WITNESS_BUFFER_SIZE: usize = 4096;
 const ENTRY_SCRIPT_SIZE_OFFSET: usize = ENTRY_WITNESS_BUFFER_OFFSET + ENTRY_WITNESS_BUFFER_SIZE;
 const ENTRY_SCRIPT_ARGS_START_OFFSET: usize = ENTRY_SCRIPT_SIZE_OFFSET + 8;
 const ENTRY_SCRIPT_ARGS_LEN_OFFSET: usize = ENTRY_SCRIPT_ARGS_START_OFFSET + 8;
 const ENTRY_SCRIPT_ARGS_CURSOR_OFFSET: usize = ENTRY_SCRIPT_ARGS_LEN_OFFSET + 8;
 const ENTRY_SCRIPT_BUFFER_OFFSET: usize = ENTRY_SCRIPT_ARGS_CURSOR_OFFSET + 8;
 const ENTRY_SCRIPT_BUFFER_SIZE: usize = 1024;
-const ENTRY_WITNESS_FRAME_SIZE: usize = 2304;
+const ENTRY_WITNESS_FRAME_SIZE: usize = 5376;
 const ENTRY_WITNESS_SIZE_OFFSET: usize = 0;
 const ENTRY_WITNESS_BUFFER_OFFSET: usize = 8;
 const ENTRY_WITNESS_RA_OFFSET: usize = ENTRY_WITNESS_FRAME_SIZE - 8;
@@ -286,13 +285,23 @@ fn is_v014_runtime_helper(func: &str) -> bool {
             | "__ckb_hash_chain"
             | "__ckb_hash_pair"
             | "__ckb_hash_blake2b"
+            | "__ckb_hash_blake2b_var"
+            | "__ckb_hash_blake2b_packed"
             | "__ckb_hash_data_packed"
             | "__novaseal_bip340_require_signature"
     )
 }
 
 fn is_ckb_fixed_hash_helper(func: &str) -> bool {
-    matches!(func, "__ckb_hash_chain" | "__ckb_hash_pair" | "__ckb_hash_blake2b" | "__ckb_hash_data_packed")
+    matches!(
+        func,
+        "__ckb_hash_chain"
+            | "__ckb_hash_pair"
+            | "__ckb_hash_blake2b"
+            | "__ckb_hash_blake2b_var"
+            | "__ckb_hash_blake2b_packed"
+            | "__ckb_hash_data_packed"
+    )
 }
 
 #[derive(Debug, Clone)]
@@ -361,6 +370,10 @@ fn fixed_scalar_width(ty: &IrType, fixed_size: Option<usize>) -> Option<usize> {
         (IrType::U64, Some(8)) => Some(8),
         _ => None,
     }
+}
+
+fn is_fixed_scalar_ir_type(ty: &IrType) -> bool {
+    matches!(ty, IrType::Bool | IrType::U8 | IrType::U16 | IrType::U32 | IrType::I32 | IrType::U64)
 }
 
 fn identity_policy_label(identity: &IrIdentityPolicy) -> String {
@@ -2165,6 +2178,17 @@ impl CodeGenerator {
                                 field: field.clone(),
                                 layout,
                             })
+                        } else if let Some(parent) = self.schema_field_value_sources.get(&obj.id) {
+                            aggregate_field_layout(&obj.ty, field).map(|nested| {
+                                let mut layout = nested;
+                                layout.offset += parent.layout.offset;
+                                SchemaFieldValueSource {
+                                    obj_var_id: parent.obj_var_id,
+                                    type_name: parent.type_name.clone(),
+                                    field: format!("{}.{}", parent.field, field),
+                                    layout,
+                                }
+                            })
                         } else {
                             self.aggregate_pointer_sources.get(&obj.id).and_then(|source| {
                                 aggregate_field_layout(&source.ty, field).map(|layout| SchemaFieldValueSource {
@@ -2179,9 +2203,15 @@ impl CodeGenerator {
                             continue;
                         };
                         let layout = source.layout.clone();
-                        if layout_fixed_byte_width(&layout).is_some() && layout.ty == dest.ty {
+                        let scalar_width = layout_fixed_scalar_width(&layout);
+                        let field_width = layout_fixed_byte_width(&layout).or_else(|| self.fixed_named_type_width(&layout.ty));
+                        if field_width.is_some()
+                            && (layout.ty == dest.ty
+                                || (scalar_width.is_some() && is_fixed_scalar_ir_type(&dest.ty))
+                                || field_width == self.fixed_byte_like_width(&dest.ty))
+                        {
                             self.schema_field_value_sources.insert(dest.id, source.clone());
-                            if layout_fixed_scalar_width(&layout).is_some() {
+                            if scalar_width.is_some() {
                                 self.prelude_u64_value_sources.insert(dest.id, PreludeU64ValueSource::Field(source));
                             }
                         }
@@ -2304,6 +2334,63 @@ impl CodeGenerator {
                     }
                     _ => {}
                 }
+            }
+        }
+        let max_provenance_iterations = body.blocks.iter().map(|block| block.instructions.len()).sum::<usize>() + 1;
+        for _ in 0..max_provenance_iterations {
+            let mut changed = false;
+            for block in &body.blocks {
+                for instruction in &block.instructions {
+                    match instruction {
+                        IrInstruction::Move { dest, src: IrOperand::Var(src) }
+                        | IrInstruction::Unary { dest, op: UnaryOp::Ref | UnaryOp::Deref, operand: IrOperand::Var(src) } => {
+                            if !self.schema_field_value_sources.contains_key(&dest.id) {
+                                if let Some(source) = self.schema_field_value_sources.get(&src.id).cloned() {
+                                    self.schema_field_value_sources.insert(dest.id, source);
+                                    changed = true;
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                    let IrInstruction::FieldAccess { dest, obj: IrOperand::Var(obj), field } = instruction else {
+                        continue;
+                    };
+                    if self.schema_field_value_sources.contains_key(&dest.id) {
+                        continue;
+                    }
+                    let Some(parent) = self.schema_field_value_sources.get(&obj.id).cloned() else {
+                        continue;
+                    };
+                    let Some(nested) = aggregate_field_layout(&obj.ty, field) else {
+                        continue;
+                    };
+                    let mut layout = nested;
+                    layout.offset += parent.layout.offset;
+                    let scalar_width = layout_fixed_scalar_width(&layout);
+                    let field_width = layout_fixed_byte_width(&layout).or_else(|| self.fixed_named_type_width(&layout.ty));
+                    if field_width.is_none()
+                        || !(layout.ty == dest.ty
+                            || (scalar_width.is_some() && is_fixed_scalar_ir_type(&dest.ty))
+                            || field_width == self.fixed_byte_like_width(&dest.ty))
+                    {
+                        continue;
+                    }
+                    let source = SchemaFieldValueSource {
+                        obj_var_id: parent.obj_var_id,
+                        type_name: parent.type_name,
+                        field: format!("{}.{}", parent.field, field),
+                        layout,
+                    };
+                    self.schema_field_value_sources.insert(dest.id, source.clone());
+                    if scalar_width.is_some() {
+                        self.prelude_u64_value_sources.insert(dest.id, PreludeU64ValueSource::Field(source));
+                    }
+                    changed = true;
+                }
+            }
+            if !changed {
+                return;
             }
         }
     }
@@ -5541,22 +5628,11 @@ impl CodeGenerator {
         }
     }
 
-    fn emit_fixed_byte_source_word_to(&mut self, dest_reg: &str, base_reg: &str, source: &ExpectedFixedByteSource, word_index: usize) {
-        self.emit(format!("li {}, 0", dest_reg));
-        for byte_index in 0..8 {
-            let absolute = word_index * 8 + byte_index;
-            self.emit_fixed_byte_source_byte_to("t1", base_reg, source, absolute);
-            if byte_index > 0 {
-                self.emit(format!("slli t1, t1, {}", byte_index * 8));
-            }
-            self.emit(format!("or {}, {}, t1", dest_reg, dest_reg));
-        }
-    }
-
     fn emit_fixed_byte_source_pointer_to(&mut self, dest_reg: &str, source: &ExpectedFixedByteSource) -> bool {
         match source {
             ExpectedFixedByteSource::SchemaField(source) => {
-                let Some(width) = layout_fixed_byte_width(&source.layout) else {
+                let Some(width) = layout_fixed_byte_width(&source.layout).or_else(|| self.fixed_named_type_width(&source.layout.ty))
+                else {
                     return false;
                 };
                 self.emit_schema_field_source_pointer_to(dest_reg, source, width)
@@ -5683,13 +5759,17 @@ impl CodeGenerator {
     fn expected_fixed_byte_source(&self, operand: &IrOperand, expected_width: usize) -> Option<ExpectedFixedByteSource> {
         match operand {
             IrOperand::Const(value) => {
-                let bytes = fixed_byte_const_bytes(value)?;
+                let bytes = fixed_byte_const_bytes(value).or_else(|| {
+                    fixed_scalar_const_value(value)
+                        .and_then(|value| (expected_width <= 8).then(|| value.to_le_bytes()[..expected_width].to_vec()))
+                })?;
                 (bytes.len() == expected_width).then_some(ExpectedFixedByteSource::Const(bytes))
             }
-            IrOperand::Var(var) if self.fixed_byte_like_width(&var.ty).is_some() => {
-                let var_width = self.fixed_byte_like_width(&var.ty)?;
+            IrOperand::Var(var) if self.fixed_byte_like_width(&var.ty).or_else(|| self.fixed_named_type_width(&var.ty)).is_some() => {
+                let var_width = self.fixed_byte_like_width(&var.ty).or_else(|| self.fixed_named_type_width(&var.ty))?;
                 if let Some(source) = self.schema_field_value_sources.get(&var.id).cloned() {
-                    let source_width = layout_fixed_byte_width(&source.layout)?;
+                    let source_width =
+                        layout_fixed_byte_width(&source.layout).or_else(|| self.fixed_named_type_width(&source.layout.ty))?;
                     if source_width == expected_width {
                         return Some(ExpectedFixedByteSource::SchemaField(source));
                     }
@@ -6904,6 +6984,12 @@ impl CodeGenerator {
             if var.ty == IrType::U128 {
                 offsets.insert(var.id, 16);
             }
+            if let Some(width) = fixed_byte_width(&var.ty, type_static_length(&var.ty)).filter(|width| *width > 8) {
+                offsets.insert(var.id, width);
+            }
+            if let Some(width) = self.fixed_named_type_width(&var.ty) {
+                offsets.insert(var.id, width);
+            }
         };
 
         match instruction {
@@ -7230,7 +7316,7 @@ impl CodeGenerator {
             // Final fallback: emit a fail-closed trap with specific error code
             self.emit(format!("# binary {:?} over fixed-byte operands (unresolved)", op));
             self.emit("# cellscript abi: fail closed because fixed-byte operand sources are not available");
-            self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+            self.emit_fail(CellScriptRuntimeError::FixedByteComparisonMaterializationUnresolved);
             return Ok(());
         }
 
@@ -7612,6 +7698,9 @@ impl CodeGenerator {
     }
 
     fn emit_field_access(&mut self, dest: &IrVar, obj: &IrOperand, field: &str) -> Result<()> {
+        if self.emit_fixed_byte_field_access(dest, obj, field) {
+            return Ok(());
+        }
         if self.emit_schema_field_access(dest, obj, field) {
             return Ok(());
         }
@@ -7629,6 +7718,94 @@ impl CodeGenerator {
         self.emit("# cellscript abi: fail closed because field offset is not computable from available type layout");
         self.emit_fail(CellScriptRuntimeError::DynamicFieldBoundsInvalid);
         Ok(())
+    }
+
+    fn emit_fixed_byte_field_access(&mut self, dest: &IrVar, obj: &IrOperand, field: &str) -> bool {
+        let IrOperand::Var(var) = obj else {
+            return false;
+        };
+        let layout = aggregate_field_layout(&var.ty, field).or_else(|| {
+            named_type_name(&var.ty)
+                .and_then(|type_name| self.type_layouts.get(type_name).and_then(|fields| fields.get(field)).cloned())
+        });
+        let Some(layout) = layout else {
+            return false;
+        };
+        let Some(parent_width) = self.fixed_byte_like_width(&var.ty) else {
+            return false;
+        };
+        let Some(source) = self.expected_fixed_byte_source(obj, parent_width) else {
+            return false;
+        };
+        if is_fixed_scalar_ir_type(&dest.ty) {
+            let Some(width) = layout_fixed_scalar_width(&layout) else {
+                return false;
+            };
+            self.emit(format!(
+                "# cellscript abi: fixed-byte scalar field {}.{} offset={} size={}",
+                aggregate_type_label(&var.ty),
+                field,
+                layout.offset,
+                width
+            ));
+            self.emit_prepare_fixed_byte_source(&source, parent_width, "fixed-byte scalar field access");
+            if !self.emit_fixed_byte_source_pointer_or_const_to("t4", &source) {
+                return false;
+            }
+            self.emit_unaligned_scalar_load("t4", "t0", "t2", layout.offset, width);
+            self.emit_stack_store("t0", dest.id * 8);
+            if let ExpectedFixedByteSource::SchemaField(parent) = &source {
+                let mut nested_layout = layout.clone();
+                nested_layout.offset += parent.layout.offset;
+                let nested_source = SchemaFieldValueSource {
+                    obj_var_id: parent.obj_var_id,
+                    type_name: parent.type_name.clone(),
+                    field: format!("{}.{}", parent.field, field),
+                    layout: nested_layout,
+                };
+                self.schema_field_value_sources.insert(dest.id, nested_source.clone());
+                if dest.ty == IrType::U64 {
+                    self.prelude_u64_value_sources.insert(dest.id, PreludeU64ValueSource::Field(nested_source));
+                }
+            }
+            return true;
+        }
+        let Some(width) = layout_fixed_byte_width(&layout).or_else(|| self.fixed_named_type_width(&layout.ty)) else {
+            return false;
+        };
+        let Some(dest_offset) = self.fixed_byte_local_offsets.get(&dest.id).copied() else {
+            return false;
+        };
+
+        self.emit(format!(
+            "# cellscript abi: fixed-byte field {}.{} offset={} size={}",
+            aggregate_type_label(&var.ty),
+            field,
+            layout.offset,
+            width
+        ));
+        self.emit_prepare_fixed_byte_source(&source, parent_width, "fixed-byte field access");
+        if !self.emit_fixed_byte_source_pointer_or_const_to("a0", &source) {
+            return false;
+        }
+        self.emit(format!("addi a0, a0, {}", layout.offset));
+        self.emit_sp_addi("a1", dest_offset);
+        self.emit(format!("li a2, {}", width));
+        self.emit("call __cellscript_memcpy_fixed");
+        self.emit_sp_addi("t0", dest_offset);
+        self.emit_stack_store("t0", dest.id * 8);
+        if let ExpectedFixedByteSource::SchemaField(parent) = &source {
+            let mut nested_layout = layout.clone();
+            nested_layout.offset += parent.layout.offset;
+            let nested_source = SchemaFieldValueSource {
+                obj_var_id: parent.obj_var_id,
+                type_name: parent.type_name.clone(),
+                field: format!("{}.{}", parent.field, field),
+                layout: nested_layout,
+            };
+            self.schema_field_value_sources.insert(dest.id, nested_source);
+        }
+        true
     }
 
     fn emit_schema_field_access(&mut self, dest: &IrVar, obj: &IrOperand, field: &str) -> bool {
@@ -9191,10 +9368,66 @@ impl CodeGenerator {
             self.emit_stack_store("t0", dest.id * 8);
             return Ok(true);
         }
+        if func == "__ckb_hash_blake2b_packed" {
+            let Some(arg) = args.first() else {
+                self.emit("# cellscript abi: fail closed because hash_blake2b_packed is missing input");
+                self.emit_fail(CellScriptRuntimeError::PackedHashPreimageMaterializationUnresolved);
+                return Ok(true);
+            };
+            let Some(width) = operand_fixed_byte_width(arg).or_else(|| match arg {
+                IrOperand::Var(var) => self.fixed_byte_like_width(&var.ty),
+                _ => None,
+            }) else {
+                self.emit("# cellscript abi: fail closed because hash_blake2b_packed input has no static packed width");
+                self.emit_fail(CellScriptRuntimeError::PackedHashPreimageMaterializationUnresolved);
+                return Ok(true);
+            };
+            let Some(source) = self.expected_fixed_byte_source(arg, width) else {
+                self.emit("# cellscript abi: fail closed because hash_blake2b_packed input is not materializable");
+                self.emit_fail(CellScriptRuntimeError::PackedHashPreimageMaterializationUnresolved);
+                return Ok(true);
+            };
+            let type_name = match arg {
+                IrOperand::Var(var) => named_type_name(&var.ty).map(str::to_string).unwrap_or_else(|| aggregate_type_label(&var.ty)),
+                IrOperand::Const(_) => "const".to_string(),
+            };
+            let mut header = b"CellScriptPackedHashV0\0".to_vec();
+            header.extend_from_slice(type_name.as_bytes());
+            header.push(0);
+            header.extend_from_slice(&(width as u32).to_le_bytes());
+            let total_width = header.len() + width;
+            if total_width > RUNTIME_SCRATCH_BUFFER_SIZE {
+                self.emit("# cellscript abi: fail closed because hash_blake2b_packed preimage exceeds scratch buffer");
+                self.emit_fail(CellScriptRuntimeError::PackedHashPreimageMaterializationUnresolved);
+                return Ok(true);
+            }
+            let buffer_offset = self.runtime_scratch_buffer_offset();
+            for (index, byte) in header.iter().enumerate() {
+                self.emit(format!("li t0, {}", byte));
+                self.emit_stack_store_byte("t0", buffer_offset + index);
+            }
+            self.emit_prepare_fixed_byte_source(&source, width, "hash_blake2b_packed input");
+            if !self.emit_fixed_byte_source_pointer_or_const_to("a0", &source) {
+                self.emit("# cellscript abi: fail closed because hash_blake2b_packed input pointer is not materializable");
+                self.emit_fail(CellScriptRuntimeError::PackedHashPreimageMaterializationUnresolved);
+                return Ok(true);
+            }
+            self.emit_sp_addi("a1", buffer_offset + header.len());
+            self.emit(format!("li a2, {}", width));
+            self.emit("call __cellscript_memcpy_fixed");
+            self.emit_sp_addi("a0", buffer_offset);
+            self.emit(format!("li a1, {}", total_width));
+            self.emit_sp_addi("a2", dest_offset);
+            self.emit("call __ckb_hash_blake2b_var");
+            self.emit_return_on_syscall_error(CellScriptRuntimeError::SyscallFailed);
+            self.emit_sp_addi("t0", dest_offset);
+            self.emit_stack_store("t0", dest.id * 8);
+            return Ok(true);
+        }
         if func == "__ckb_hash_data_packed" {
             let Some(arg) = args.first() else {
                 self.emit("# cellscript abi: fail closed because hash_data_packed is missing input");
-                self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+                self.emit_fail(CellScriptRuntimeError::PackedHashPreimageMaterializationUnresolved);
                 return Ok(true);
             };
             let Some(width) = operand_fixed_byte_width(arg).or_else(|| match arg {
@@ -9202,27 +9435,23 @@ impl CodeGenerator {
                 _ => None,
             }) else {
                 self.emit("# cellscript abi: fail closed because hash_data_packed input has no static packed width");
-                self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+                self.emit_fail(CellScriptRuntimeError::PackedHashPreimageMaterializationUnresolved);
                 return Ok(true);
             };
             let Some(source) = self.expected_fixed_byte_source(arg, width) else {
                 self.emit("# cellscript abi: fail closed because hash_data_packed input is not materializable");
-                self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+                self.emit_fail(CellScriptRuntimeError::PackedHashPreimageMaterializationUnresolved);
                 return Ok(true);
             };
-            if width != 32 {
-                self.emit("# cellscript abi: fail closed because hash_data_packed currently reuses the 32-byte Blake2b helper");
-                self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
-                return Ok(true);
-            }
             self.emit_prepare_fixed_byte_source(&source, width, "hash_data_packed input");
             if !self.emit_fixed_byte_source_pointer_or_const_to("a0", &source) {
                 self.emit("# cellscript abi: fail closed because hash_data_packed input pointer is not materializable");
-                self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+                self.emit_fail(CellScriptRuntimeError::PackedHashPreimageMaterializationUnresolved);
                 return Ok(true);
             }
-            self.emit_sp_addi("a1", dest_offset);
-            self.emit("call __ckb_hash_blake2b");
+            self.emit(format!("li a1, {}", width));
+            self.emit_sp_addi("a2", dest_offset);
+            self.emit("call __ckb_hash_blake2b_var");
             self.emit_return_on_syscall_error(CellScriptRuntimeError::SyscallFailed);
             self.emit_sp_addi("t0", dest_offset);
             self.emit_stack_store("t0", dest.id * 8);
@@ -9260,78 +9489,111 @@ impl CodeGenerator {
             self.emit(format!("# call {} args={}", func, args.len()));
             if args.len() != 3 {
                 self.emit("# cellscript abi: fail closed because BIP340 verifier requires message, pubkey, signature");
-                self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+                self.emit_fail(CellScriptRuntimeError::Bip340MessageMaterializationUnresolved);
                 return Ok(());
             }
             let Some(message) = self.expected_fixed_byte_source(&args[0], 32) else {
                 self.emit("# cellscript abi: fail closed because BIP340 message is not a 32-byte value");
-                self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+                self.emit_fail(CellScriptRuntimeError::Bip340MessageMaterializationUnresolved);
                 return Ok(());
             };
             let Some(pubkey) = self.expected_fixed_byte_source(&args[1], 32) else {
                 self.emit("# cellscript abi: fail closed because BIP340 pubkey is not a 32-byte value");
-                self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+                self.emit_fail(CellScriptRuntimeError::Bip340PubkeyMaterializationUnresolved);
                 return Ok(());
             };
             let Some(signature) = self.expected_fixed_byte_source(&args[2], 64) else {
                 self.emit("# cellscript abi: fail closed because BIP340 signature is not a 64-byte value");
-                self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+                self.emit_fail(CellScriptRuntimeError::Bip340SignatureMaterializationUnresolved);
                 return Ok(());
             };
             self.emit_prepare_fixed_byte_source(&message, 32, "novaseal bip340 message");
             self.emit_prepare_fixed_byte_source(&pubkey, 32, "novaseal bip340 pubkey");
             self.emit_prepare_fixed_byte_source(&signature, 64, "novaseal bip340 signature");
+            let Some(read_fd_offset) = self.runtime_expr_temp_offset(0) else {
+                self.emit_fail(CellScriptRuntimeError::Bip340MessageMaterializationUnresolved);
+                return Ok(());
+            };
+            let Some(write_fd_offset) = self.runtime_expr_temp_offset(1) else {
+                self.emit_fail(CellScriptRuntimeError::Bip340MessageMaterializationUnresolved);
+                return Ok(());
+            };
+            let Some(child_pid_offset) = self.runtime_expr_temp_offset(2) else {
+                self.emit_fail(CellScriptRuntimeError::Bip340MessageMaterializationUnresolved);
+                return Ok(());
+            };
+            let ipc_buffer_offset = self.runtime_scratch_buffer_offset();
+            let ipc_size_offset = self.runtime_scratch_size_offset();
             self.emit("# cellscript abi: NovaSeal BIP340 verifier IPC envelope via VM2 pipe/spawn/wait");
             let pipe_ok = self.fresh_label("novaseal_bip340_pipe_ok");
             self.emit("call __ckb_pipe");
             self.emit(format!("beqz a0, {}", pipe_ok));
-            self.emit_fail(CellScriptRuntimeError::SyscallFailed);
+            self.emit_fail(CellScriptRuntimeError::Bip340PipeCreateFailed);
             self.emit_label(&pipe_ok);
-            self.emit("addi s10, a1, 0");
-            self.emit("addi s11, a2, 0");
-            self.emit("# cellscript abi: spawn manifest-bound CellDep#0 verifier with read fd inherited");
+            self.emit_stack_store("a1", read_fd_offset);
+            self.emit_stack_store("a2", write_fd_offset);
+            self.emit("# cellscript abi: materialize cellscript-btc-bip340-ipc-v0 envelope in scratch");
+            for (index, byte) in b"NSBV0IPC".iter().enumerate() {
+                self.emit(format!("li t0, {}", byte));
+                self.emit_stack_store_byte("t0", ipc_buffer_offset + index);
+            }
+            for (index, byte) in [0u8, 0, 1, 0, 0, 0, 0, 0].iter().enumerate() {
+                self.emit(format!("li t0, {}", byte));
+                self.emit_stack_store_byte("t0", ipc_buffer_offset + 8 + index);
+            }
+            if !self.emit_fixed_byte_source_pointer_or_const_to("a0", &message) {
+                self.emit_fail(CellScriptRuntimeError::Bip340MessageMaterializationUnresolved);
+                return Ok(());
+            }
+            self.emit_sp_addi("a1", ipc_buffer_offset + 16);
+            self.emit("li a2, 32");
+            self.emit("call __cellscript_memcpy_fixed");
+            if !self.emit_fixed_byte_source_pointer_or_const_to("a0", &pubkey) {
+                self.emit_fail(CellScriptRuntimeError::Bip340PubkeyMaterializationUnresolved);
+                return Ok(());
+            }
+            self.emit_sp_addi("a1", ipc_buffer_offset + 48);
+            self.emit("li a2, 32");
+            self.emit("call __cellscript_memcpy_fixed");
+            if !self.emit_fixed_byte_source_pointer_or_const_to("a0", &signature) {
+                self.emit_fail(CellScriptRuntimeError::Bip340SignatureMaterializationUnresolved);
+                return Ok(());
+            }
+            self.emit_sp_addi("a1", ipc_buffer_offset + 80);
+            self.emit("li a2, 64");
+            self.emit("call __cellscript_memcpy_fixed");
+            self.emit("# cellscript abi: spawn manifest-bound CellDep#0 verifier with prepared read fd inherited");
             self.emit("li a0, 0");
-            self.emit("addi a1, s10, 0");
+            self.emit_stack_load("a1", read_fd_offset);
             self.emit("call __ckb_spawn_with_fd1");
             let spawn_ok = self.fresh_label("novaseal_bip340_spawn_ok");
             self.emit(format!("beqz a0, {}", spawn_ok));
-            self.emit_fail(CellScriptRuntimeError::SyscallFailed);
+            self.emit_fail(CellScriptRuntimeError::Bip340SpawnFailed);
             self.emit_label(&spawn_ok);
-            self.emit("addi s9, a1, 0");
-            self.emit("# cellscript abi: write 18 u64 words for cellscript-btc-bip340-ipc-v0 envelope");
-            for word in 0..18 {
-                self.emit(format!("# cellscript abi: novaseal bip340 ipc word {}", word));
-                self.emit("addi a0, s11, 0");
-                match word {
-                    0 => {
-                        let magic = u64::from_le_bytes(*b"NSBV0IPC");
-                        self.emit(format!("li a1, {}", magic));
-                    }
-                    1 => {
-                        self.emit("li a1, 65536");
-                    }
-                    2..=5 => self.emit_fixed_byte_source_word_to("a1", "t6", &message, word - 2),
-                    6..=9 => self.emit_fixed_byte_source_word_to("a1", "t6", &pubkey, word - 6),
-                    10..=17 => self.emit_fixed_byte_source_word_to("a1", "t6", &signature, word - 10),
-                    _ => unreachable!(),
-                }
-                self.emit("call __ckb_pipe_write");
-                let write_ok = self.fresh_label("novaseal_bip340_write_ok");
-                self.emit(format!("beqz a0, {}", write_ok));
-                self.emit_fail(CellScriptRuntimeError::SyscallFailed);
-                self.emit_label(&write_ok);
-            }
-            self.emit("addi a0, s11, 0");
+            self.emit_stack_store("a1", child_pid_offset);
+            self.emit("# cellscript abi: BIP340 IPC write canonical 144-byte envelope");
+            self.emit("li t0, 144");
+            self.emit_stack_store("t0", ipc_size_offset);
+            self.emit_stack_load("a0", write_fd_offset);
+            self.emit_sp_addi("a1", ipc_buffer_offset);
+            self.emit_sp_addi("a2", ipc_size_offset);
+            self.emit(format!("li a7, {}", ckb_abi::syscall::WRITE));
+            self.emit("ecall");
+            let write_ok = self.fresh_label("novaseal_bip340_write_ok");
+            self.emit(format!("beqz a0, {}", write_ok));
+            self.emit_fail(CellScriptRuntimeError::Bip340MessageWriteFailed);
+            self.emit_label(&write_ok);
+            self.emit_stack_load("a0", write_fd_offset);
             self.emit("call __ckb_close");
             let close_ok = self.fresh_label("novaseal_bip340_close_ok");
             self.emit(format!("beqz a0, {}", close_ok));
-            self.emit_fail(CellScriptRuntimeError::SyscallFailed);
+            self.emit_fail(CellScriptRuntimeError::Bip340VerifierReadFailed);
             self.emit_label(&close_ok);
-            self.emit("addi a0, s9, 0");
+            self.emit_stack_load("a0", child_pid_offset);
             self.emit("call __ckb_wait");
             let wait_ok = self.fresh_label("novaseal_bip340_wait_ok");
             self.emit(format!("beqz a0, {}", wait_ok));
-            self.emit_fail(CellScriptRuntimeError::SyscallFailed);
+            self.emit_fail(CellScriptRuntimeError::Bip340ChildRejected);
             self.emit_label(&wait_ok);
             return Ok(());
         }
@@ -9537,6 +9799,7 @@ impl CodeGenerator {
             func,
             "__ckb_cell_lock_hash"
                 | "__ckb_cell_type_hash"
+                | "__ckb_cell_data_hash"
                 | "__ckb_cell_lock_code_hash"
                 | "__ckb_cell_type_code_hash"
                 | "__ckb_cell_lock_args_hash"
@@ -10373,15 +10636,91 @@ impl CodeGenerator {
             self.emit_materialize_u128_operand_to_var(dest, src);
             return Ok(());
         }
+        if let Some(width) = self.fixed_byte_like_width(&dest.ty).filter(|width| *width > 8) {
+            if self.emit_materialize_fixed_byte_operand_to_var(dest, src, width) {
+                return Ok(());
+            }
+        }
         self.emit_operand_to_register("t0", src);
         self.emit_stack_store("t0", dest.id * 8);
         Ok(())
     }
 
+    fn emit_materialize_fixed_byte_operand_to_var(&mut self, dest: &IrVar, src: &IrOperand, width: usize) -> bool {
+        let Some(dest_offset) = self.fixed_byte_local_offsets.get(&dest.id).copied() else {
+            return false;
+        };
+        let Some(source) = self.expected_fixed_byte_source(src, width) else {
+            self.emit("# cellscript abi: fail closed because fixed-byte move source is unavailable");
+            self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+            return true;
+        };
+        self.emit(format!("# cellscript abi: materialize fixed-byte move var{} size={}", dest.id, width));
+        self.emit_prepare_fixed_byte_source(&source, width, "fixed-byte move");
+        if !self.emit_fixed_byte_source_pointer_or_const_to("a0", &source) {
+            self.emit("# cellscript abi: fail closed because fixed-byte move pointer is unavailable");
+            self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+            return true;
+        }
+        self.emit_sp_addi("a1", dest_offset);
+        self.emit(format!("li a2, {}", width));
+        self.emit("call __cellscript_memcpy_fixed");
+        self.emit_sp_addi("t0", dest_offset);
+        self.emit_stack_store("t0", dest.id * 8);
+        true
+    }
+
     fn emit_tuple(&mut self, dest: &IrVar, fields: &[IrOperand]) -> Result<()> {
         self.emit(format!("# cellscript abi: construct tuple aggregate var{} fields={}", dest.id, fields.len()));
+        if self.emit_fixed_named_tuple(dest, fields) {
+            return Ok(());
+        }
         self.emit_stack_store("zero", dest.id * 8);
         Ok(())
+    }
+
+    fn emit_fixed_named_tuple(&mut self, dest: &IrVar, fields: &[IrOperand]) -> bool {
+        let IrType::Named(type_name) = &dest.ty else {
+            return false;
+        };
+        let Some(width) = self.type_fixed_sizes.get(type_name).copied() else {
+            return false;
+        };
+        let Some(dest_offset) = self.fixed_byte_local_offsets.get(&dest.id).copied() else {
+            return false;
+        };
+        let Some(layouts) = self.type_layouts.get(type_name) else {
+            return false;
+        };
+        let mut ordered = layouts.values().cloned().collect::<Vec<_>>();
+        ordered.sort_by_key(|layout| layout.offset);
+        if ordered.len() != fields.len() {
+            return false;
+        }
+
+        self.emit(format!("# cellscript abi: materialize fixed aggregate {} var{} size={}", type_name, dest.id, width));
+        for (field, layout) in fields.iter().zip(ordered.iter()) {
+            let Some(field_width) = layout_fixed_byte_width(layout).or_else(|| self.fixed_named_type_width(&layout.ty)) else {
+                return false;
+            };
+            let Some(source) = self.expected_fixed_byte_source(field, field_width) else {
+                self.emit("# cellscript abi: fail closed because fixed aggregate field source is unavailable");
+                self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+                return true;
+            };
+            self.emit_prepare_fixed_byte_source(&source, field_width, &format!("{} aggregate field", type_name));
+            if !self.emit_fixed_byte_source_pointer_or_const_to("a0", &source) {
+                self.emit("# cellscript abi: fail closed because fixed aggregate field pointer is unavailable");
+                self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+                return true;
+            }
+            self.emit_sp_addi("a1", dest_offset + layout.offset);
+            self.emit(format!("li a2, {}", field_width));
+            self.emit("call __cellscript_memcpy_fixed");
+        }
+        self.emit_sp_addi("t0", dest_offset);
+        self.emit_stack_store("t0", dest.id * 8);
+        true
     }
 
     fn emit_operand_to_register(&mut self, register: &str, operand: &IrOperand) {
@@ -10921,6 +11260,7 @@ impl CodeGenerator {
         self.emit_section(".text");
         self.emit_runtime_memcmp_fixed();
         self.emit_runtime_memzero_fixed();
+        self.emit_runtime_memcpy_fixed();
         self.emit_runtime_size_guards();
         // CKB exposes epoch-number based timepoints here, not Unix timestamps.
         self.emit_runtime_header_field_u64(
@@ -11316,7 +11656,7 @@ impl CodeGenerator {
                     self.emit_runtime_cell_hash_field_helper(name, detail, CKB_CELL_FIELD_TYPE_HASH, enabled);
                 }
                 "__ckb_cell_data_hash" => {
-                    self.emit_runtime_cell_hash_field_helper(name, detail, CKB_CELL_FIELD_DATA_HASH, enabled);
+                    self.emit_runtime_cell_data_hash_helper(name, detail, enabled);
                 }
                 "__ckb_cell_data_hash_at" => {
                     self.emit_runtime_cell_data_hash_at_helper(name, detail, enabled);
@@ -11509,6 +11849,187 @@ impl CodeGenerator {
         {
             self.emit_runtime_blake2b_hash32(enabled);
         }
+        if referenced_helpers.contains("__ckb_hash_blake2b_var")
+            || referenced_helpers.contains("__ckb_hash_data_packed")
+            || referenced_helpers.contains("__ckb_hash_blake2b_packed")
+            || referenced_helpers.contains("__ckb_cell_data_hash")
+        {
+            self.emit_runtime_blake2b_hash_var(enabled);
+        }
+    }
+
+    fn emit_runtime_blake2b_hash_var(&mut self, enabled: bool) {
+        self.emit_global("__ckb_hash_blake2b_var");
+        self.emit_label("__ckb_hash_blake2b_var");
+        self.emit("# cellscript abi: CKB Blake2b-256 variable helper; a0=input, a1=len, a2=output[32], returns a0=0");
+        if !enabled {
+            self.emit_fail(CellScriptRuntimeError::SyscallFailed);
+            return;
+        }
+
+        const IV: [u64; 8] = [
+            0x6a09e667f3bcc908,
+            0xbb67ae8584caa73b,
+            0x3c6ef372fe94f82b,
+            0xa54ff53a5f1d36f1,
+            0x510e527fade682d1,
+            0x9b05688c2b3e6c1f,
+            0x1f83d9abfb41bd6b,
+            0x5be0cd19137e2179,
+        ];
+        const SIGMA: [[usize; 16]; 12] = [
+            [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+            [14, 10, 4, 8, 9, 15, 13, 6, 1, 12, 0, 2, 11, 7, 5, 3],
+            [11, 8, 12, 0, 5, 2, 15, 13, 10, 14, 3, 6, 7, 1, 9, 4],
+            [7, 9, 3, 1, 13, 12, 11, 14, 2, 6, 5, 10, 4, 0, 15, 8],
+            [9, 0, 5, 7, 2, 4, 10, 15, 14, 1, 11, 12, 6, 8, 3, 13],
+            [2, 12, 6, 10, 0, 11, 8, 3, 4, 13, 7, 5, 15, 14, 1, 9],
+            [12, 5, 1, 15, 14, 13, 4, 10, 0, 7, 6, 3, 9, 2, 8, 11],
+            [13, 11, 7, 14, 12, 1, 3, 9, 5, 0, 15, 4, 8, 6, 2, 10],
+            [6, 15, 14, 9, 11, 3, 0, 8, 12, 2, 13, 7, 1, 4, 10, 5],
+            [10, 2, 8, 4, 7, 6, 1, 5, 15, 11, 9, 14, 3, 12, 13, 0],
+            [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+            [14, 10, 4, 8, 9, 15, 13, 6, 1, 12, 0, 2, 11, 7, 5, 3],
+        ];
+
+        const H_BASE: usize = 0;
+        const V_BASE: usize = 64;
+        const M_BASE: usize = 192;
+        const PTR: usize = 320;
+        const LEN: usize = 328;
+        const OUT: usize = 336;
+        const POS: usize = 344;
+        const CHUNK: usize = 352;
+        const FRAME: usize = 384;
+
+        let personal0 = u64::from_le_bytes(*b"ckb-defa");
+        let personal1 = u64::from_le_bytes(*b"ult-hash");
+        let h = [IV[0] ^ 0x01010020, IV[1], IV[2], IV[3], IV[4], IV[5], IV[6] ^ personal0, IV[7] ^ personal1];
+
+        self.emit_large_addi("sp", "sp", -(FRAME as i64));
+        self.emit_stack_store("a0", PTR);
+        self.emit_stack_store("a1", LEN);
+        self.emit_stack_store("a2", OUT);
+        self.emit_stack_store("zero", POS);
+        for (index, value) in h.iter().enumerate() {
+            self.emit_blake2b_store_const(*value, H_BASE + index * 8);
+        }
+
+        let block_label = self.fresh_label("blake2b_var_block");
+        let done_label = self.fresh_label("blake2b_var_done");
+        self.emit_label(&block_label);
+        self.emit_stack_load("t0", POS);
+        self.emit_stack_load("t1", LEN);
+        self.emit("sub t2, t1, t0");
+        let empty_first_block_label = self.fresh_label("blake2b_var_empty_first_block");
+        self.emit(format!("bnez t2, {}", empty_first_block_label));
+        self.emit(format!("beqz t0, {}", empty_first_block_label));
+        self.emit(format!("j {}", done_label));
+        self.emit_label(&empty_first_block_label);
+        self.emit("li t3, 128");
+        self.emit("sltu t4, t3, t2");
+        let chunk_rem_label = self.fresh_label("blake2b_var_chunk_rem");
+        let chunk_set_label = self.fresh_label("blake2b_var_chunk_set");
+        self.emit(format!("beqz t4, {}", chunk_rem_label));
+        self.emit("li t2, 128");
+        self.emit(format!("j {}", chunk_set_label));
+        self.emit_label(&chunk_rem_label);
+        self.emit("# chunk already in t2");
+        self.emit_label(&chunk_set_label);
+        self.emit_stack_store("t2", CHUNK);
+        let zero_loop = self.fresh_label("blake2b_var_zero_loop");
+        let zero_done = self.fresh_label("blake2b_var_zero_done");
+        self.emit("li t0, 0");
+        self.emit_label(&zero_loop);
+        self.emit("li t1, 128");
+        self.emit("sltu t2, t0, t1");
+        self.emit(format!("beqz t2, {}", zero_done));
+        self.emit(format!("li t3, {}", M_BASE));
+        self.emit("add t3, sp, t3");
+        self.emit("add t3, t3, t0");
+        self.emit("sb zero, 0(t3)");
+        self.emit("addi t0, t0, 1");
+        self.emit(format!("j {}", zero_loop));
+        self.emit_label(&zero_done);
+
+        let copy_loop = self.fresh_label("blake2b_var_copy_loop");
+        let copy_done = self.fresh_label("blake2b_var_copy_done");
+        self.emit("li t0, 0");
+        self.emit_label(&copy_loop);
+        self.emit_stack_load("t1", CHUNK);
+        self.emit("sltu t2, t0, t1");
+        self.emit(format!("beqz t2, {}", copy_done));
+        self.emit_stack_load("t3", PTR);
+        self.emit_stack_load("t4", POS);
+        self.emit("add t3, t3, t4");
+        self.emit("add t3, t3, t0");
+        self.emit("lbu t5, 0(t3)");
+        self.emit(format!("li t6, {}", M_BASE));
+        self.emit("add t6, sp, t6");
+        self.emit("add t6, t6, t0");
+        self.emit("sb t5, 0(t6)");
+        self.emit("addi t0, t0, 1");
+        self.emit(format!("j {}", copy_loop));
+        self.emit_label(&copy_done);
+
+        for index in 0..8 {
+            self.emit_stack_load("t0", H_BASE + index * 8);
+            self.emit_stack_store("t0", V_BASE + index * 8);
+        }
+        for (index, value) in IV.iter().enumerate() {
+            self.emit_blake2b_store_const(*value, V_BASE + (index + 8) * 8);
+        }
+        self.emit_stack_load("t0", POS);
+        self.emit_stack_load("t1", CHUNK);
+        self.emit("add t0, t0, t1");
+        self.emit_stack_load("t2", V_BASE + 12 * 8);
+        self.emit("xor t2, t2, t0");
+        self.emit_stack_store("t2", V_BASE + 12 * 8);
+        self.emit_stack_load("t2", V_BASE + 13 * 8);
+        self.emit_stack_store("t2", V_BASE + 13 * 8);
+        let not_final_label = self.fresh_label("blake2b_var_not_final");
+        self.emit_stack_load("t3", LEN);
+        self.emit("sub t4, t3, t0");
+        self.emit(format!("bnez t4, {}", not_final_label));
+        self.emit_stack_load("t5", V_BASE + 14 * 8);
+        self.emit("xori t5, t5, -1");
+        self.emit_stack_store("t5", V_BASE + 14 * 8);
+        self.emit_label(&not_final_label);
+
+        for round in SIGMA {
+            self.emit_blake2b_g(V_BASE, M_BASE, 0, 4, 8, 12, round[0], round[1]);
+            self.emit_blake2b_g(V_BASE, M_BASE, 1, 5, 9, 13, round[2], round[3]);
+            self.emit_blake2b_g(V_BASE, M_BASE, 2, 6, 10, 14, round[4], round[5]);
+            self.emit_blake2b_g(V_BASE, M_BASE, 3, 7, 11, 15, round[6], round[7]);
+            self.emit_blake2b_g(V_BASE, M_BASE, 0, 5, 10, 15, round[8], round[9]);
+            self.emit_blake2b_g(V_BASE, M_BASE, 1, 6, 11, 12, round[10], round[11]);
+            self.emit_blake2b_g(V_BASE, M_BASE, 2, 7, 8, 13, round[12], round[13]);
+            self.emit_blake2b_g(V_BASE, M_BASE, 3, 4, 9, 14, round[14], round[15]);
+        }
+        for index in 0..8 {
+            self.emit_stack_load("t0", H_BASE + index * 8);
+            self.emit_stack_load("t1", V_BASE + index * 8);
+            self.emit("xor t0, t0, t1");
+            self.emit_stack_load("t1", V_BASE + (index + 8) * 8);
+            self.emit("xor t0, t0, t1");
+            self.emit_stack_store("t0", H_BASE + index * 8);
+        }
+        self.emit_stack_load("t0", POS);
+        self.emit_stack_load("t1", CHUNK);
+        self.emit("add t0, t0, t1");
+        self.emit_stack_store("t0", POS);
+        self.emit(format!("beqz t1, {}", done_label));
+        self.emit(format!("j {}", block_label));
+
+        self.emit_label(&done_label);
+        self.emit_stack_load("t6", OUT);
+        for index in 0..4 {
+            self.emit_stack_load("t0", H_BASE + index * 8);
+            self.emit(format!("sd t0, {}(t6)", index * 8));
+        }
+        self.emit_large_addi("sp", "sp", FRAME as i64);
+        self.emit("li a0, 0");
+        self.emit("ret");
     }
 
     fn emit_runtime_blake2b_hash32(&mut self, enabled: bool) {
@@ -15458,6 +15979,73 @@ impl CodeGenerator {
         self.emit("ret");
     }
 
+    fn emit_runtime_cell_data_hash_helper(&mut self, symbol: &str, detail: &str, enabled: bool) {
+        self.emit_global(symbol);
+        self.emit_label(symbol);
+        self.emit(format!("# cellscript abi: CKB SourceView LOAD_CELL_DATA and Blake2b ({})", detail));
+        self.emit("# cellscript abi: args a0=SourceView, a1=out32_ptr, a2=size_ptr; returns a0=status");
+        if !enabled {
+            self.emit(format!("li a0, {}", CellScriptRuntimeError::SyscallFailed.code()));
+            self.emit("ret");
+            return;
+        }
+
+        const SIZE_OFFSET: usize = 8;
+        const BUFFER_OFFSET: usize = 16;
+        const OUT_PTR_OFFSET: usize = BUFFER_OFFSET + RUNTIME_CELL_BUFFER_SIZE;
+        const SIZE_PTR_OFFSET: usize = OUT_PTR_OFFSET + 8;
+        const RA_OFFSET: usize = SIZE_PTR_OFFSET + 8;
+        const FRAME_SIZE: usize = RA_OFFSET + 8;
+
+        let invalid = self.fresh_label("cell_data_hash_source_invalid");
+        let bad_output = self.fresh_label("cell_data_hash_output_invalid");
+        let failed = self.fresh_label("cell_data_hash_load_failed");
+        let done = self.fresh_label("cell_data_hash_done");
+        let abi = self.runtime_abi();
+
+        self.emit(format!("addi sp, sp, -{}", FRAME_SIZE));
+        self.emit(format!("sd ra, {}(sp)", RA_OFFSET));
+        self.emit(format!("sd a1, {}(sp)", OUT_PTR_OFFSET));
+        self.emit(format!("sd a2, {}(sp)", SIZE_PTR_OFFSET));
+        self.emit(format!("beqz a1, {}", bad_output));
+        self.emit(format!("beqz a2, {}", bad_output));
+
+        self.emit_decode_source_view_to_t1_t2(&invalid);
+        self.emit(format!("li t0, {}", RUNTIME_CELL_BUFFER_SIZE));
+        self.emit(format!("sd t0, {}(sp)", SIZE_OFFSET));
+        self.emit(format!("addi a0, sp, {}", BUFFER_OFFSET));
+        self.emit(format!("addi a1, sp, {}", SIZE_OFFSET));
+        self.emit("li a2, 0");
+        self.emit("addi a3, t1, 0");
+        self.emit("addi a4, t2, 0");
+        self.emit(format!("li a7, {}", abi.load_cell_data));
+        self.emit("ecall");
+        self.emit(format!("bnez a0, {}", failed));
+        self.emit(format!("addi a0, sp, {}", BUFFER_OFFSET));
+        self.emit(format!("ld a1, {}(sp)", SIZE_OFFSET));
+        self.emit(format!("ld a2, {}(sp)", OUT_PTR_OFFSET));
+        self.emit("call __ckb_hash_blake2b_var");
+        self.emit(format!("bnez a0, {}", failed));
+        self.emit(format!("ld t6, {}(sp)", SIZE_PTR_OFFSET));
+        self.emit("li t0, 32");
+        self.emit("sd t0, 0(t6)");
+        self.emit("li a0, 0");
+        self.emit(format!("j {}", done));
+
+        self.emit_label(&invalid);
+        self.emit(format!("li a0, {}", CellScriptRuntimeError::CkbSourceViewInvalid.code()));
+        self.emit(format!("j {}", done));
+        self.emit_label(&bad_output);
+        self.emit(format!("li a0, {}", CellScriptRuntimeError::FixedByteComparisonUnresolved.code()));
+        self.emit(format!("j {}", done));
+        self.emit_label(&failed);
+        self.emit(format!("li a0, {}", CellScriptRuntimeError::CellLoadFailed.code()));
+        self.emit_label(&done);
+        self.emit(format!("ld ra, {}(sp)", RA_OFFSET));
+        self.emit(format!("addi sp, sp, {}", FRAME_SIZE));
+        self.emit("ret");
+    }
+
     fn emit_runtime_cell_data_hash_at_helper(&mut self, symbol: &str, detail: &str, enabled: bool) {
         self.emit_global(symbol);
         self.emit_label(symbol);
@@ -16683,6 +17271,25 @@ impl CodeGenerator {
         self.emit("ret");
         self.emit_label(mismatch_label);
         self.emit("li a0, 1");
+        self.emit("ret");
+    }
+
+    fn emit_runtime_memcpy_fixed(&mut self) {
+        self.emit_global("__cellscript_memcpy_fixed");
+        self.emit_label("__cellscript_memcpy_fixed");
+        self.emit("# cellscript abi: fixed-byte helper copies a0 to a1 for a2 bytes; returns a0=0");
+        let loop_label = ".L__cellscript_memcpy_fixed_loop";
+        let done_label = ".L__cellscript_memcpy_fixed_done";
+        self.emit(format!("beqz a2, {}", done_label));
+        self.emit_label(loop_label);
+        self.emit("lbu t0, 0(a0)");
+        self.emit("sb t0, 0(a1)");
+        self.emit("addi a0, a0, 1");
+        self.emit("addi a1, a1, 1");
+        self.emit("addi a2, a2, -1");
+        self.emit(format!("bnez a2, {}", loop_label));
+        self.emit_label(done_label);
+        self.emit("li a0, 0");
         self.emit("ret");
     }
 

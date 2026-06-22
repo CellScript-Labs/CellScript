@@ -26,13 +26,18 @@ The devnet workflow deploys the compiled ELF into a local CKB integration node,
 records the live outpoint in `Deployed.toml`, rebuilds `Cell.lock`, runs:
 
 ```bash
-cellc registry verify --json --require-publisher-signature --require-audit-report
+cellc registry verify --json --require-audit-report
 cellc registry verify --live --rpc-url "$LOCAL_CKB_RPC" --network devnet --json \
-  --require-publisher-signature --require-audit-report
+  --require-audit-report
 cellc gen-builder --target typescript --lockfile Cell.lock --deployed Deployed.toml \
   --deployment-network devnet
 npm --prefix target/devnet-workflow/.../generated-builder test
 ```
+
+The local integration-node workflow deliberately does not require a publisher
+signature. It proves source/build/deployment/audit identity against a live local
+CKB node; a cryptographic publisher signature is a public-registry promotion
+requirement and must not be faked with a local content id.
 
 For public devnet or mainnet promotion, replace the local integration-node
 facts with a `Deployed.toml` generated from the actual chain deployment and run

@@ -1,9 +1,29 @@
-# CellScript Molecule / IFRN 设计空间审计报告
+# CellScript Molecule / IFRN 设计空间改进闭环报告
 
 日期：2026-06-21  
 分支：`nightly-0.20`  
 范围：当前 CellScript 仓库、NovaSeal / DOB / iCKB 相关样例与测试资产，以及本轮 Infern / IFRN 讨论中暴露的问题。  
-说明：本报告没有重新审计外部 Infern 仓库源码；关于 Infern 六个合约的结论基于用户提供的模式描述，并以当前 CellScript 能力边界作技术对账。
+说明：本报告由原设计空间审计报告改写为改进闭环报告。它不重新审计外部 Infern 仓库源码；关于 Infern 六个合约的结论仍基于用户提供的模式描述，并以当前 CellScript 能力边界作技术对账。
+
+## 闭环状态
+
+截至 2026-06-22，本报告中属于 CellScript 仓库内可修复的 P0/P1 设计空间压缩项已完成闭环：raw cell-data codec honesty、CKB deployable artifact identity、DOB devnet/registry pressure、NovaSeal Agreement BIP340 verifier IPC、variable-length packed hash、wide/nested fixed packed struct hashing，以及 iCKB committed evidence matrix 均已通过对应 gate。
+
+本轮没有修改 Agreement 语义；修正集中在 compiler/backend、runtime diagnostic、packed preimage materialisation、BIP340 verifier syscall/IPC wiring 和 evidence refresh。剩余条目不再作为当前 blocker，而是产品化路线项：external codec adapter、raw-layout DSL、多 ABI builder codec backend、registry/indexer 多 ABI 支持、声明式 continuity/timepoint policy，以及 Infern 六合约真实 port parity matrix。
+
+### 已通过门禁
+
+| Gate | 状态 | 说明 |
+|---|---|---|
+| NovaSeal Agreement live devnet stateful | passed | valid originate/repay/claim 路径通过；签名负例以 BIP340 child verifier rejection 语义失败，不再落入 code 1 / code 18。 |
+| NovaSeal core live devnet stateful | passed | wrong-signature transition 以 verifier rejection 失败。 |
+| DOB evolving devnet workflow | passed | proposal-local workflow 脚本通过。 |
+| DOB registry pressure | passed | registry pressure gate 通过。 |
+| packed hash regressions | passed | wide fixed-width、multi-block、nested fixed-width、agreement-sized nested parameter、signature payload field hashing 均通过 CKB VM hash 对比；有效路径不再可达 code 18。 |
+| iCKB differential matrix | passed | refreshed committed dual-side CKB VM evidence 后，218 个 `ickb_diff` tests 正常通过。 |
+| iCKB benchmark | passed | 5 个 benchmark/fixture model tests 通过。 |
+| iCKB claim manifest verifier | passed | `cellc verify-ckb-fixtures` 等价命令通过，manifest status 为 `complete-executable-claim-set`。 |
+| Rust format/check | passed | `cargo fmt --all --check` 与 `cargo check --locked -p cellscript --all-targets` 通过。 |
 
 ## 执行摘要
 

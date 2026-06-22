@@ -12,8 +12,9 @@ read by indexers and renderers but is not rewritten by this profile.
 - `Final` is terminal.
 - `new_event_hash` is computed on-chain from a `hash_pair` commitment tree and
   rejected if the witness supplies any other value.
-- Authorisation is delegated to the CKB lock that spends the live state line;
-  the type script preserves `owner_lock` and uses it for receipt outputs.
+- Genesis requires input 0 to be locked by `intent.owner_lock`. Later
+  transitions are authorised by spending the live state line; the type script
+  preserves `owner_lock` and uses it for receipt outputs.
 - Registry publication must bind source identity; build must bind artifact,
   metadata, schema, ABI, and constraints identity.
 

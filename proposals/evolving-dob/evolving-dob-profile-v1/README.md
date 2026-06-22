@@ -50,7 +50,9 @@ This starts a local integration node, deploys `build/evolving_dob_type.elf` as
 a live code cell, writes `Deployed.toml`, bridges the deployment into
 `Cell.lock`, runs strict registry verification including `--live`, emits all
 three action build plans, generates the TypeScript builder with deployment
-identity, and runs the generated builder's `npm test` suite.
+identity, and runs the generated builder's `npm test` suite. The local workflow
+does not claim a cryptographic publisher signature; that is reserved for public
+registry promotion.
 
 This is real local-node workflow evidence. It is not a claim that the package
 has been deployed to public Aggron/mainnet infrastructure.

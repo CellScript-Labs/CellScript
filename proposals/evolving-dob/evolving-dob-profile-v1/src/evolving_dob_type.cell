@@ -28,14 +28,14 @@ struct DobEvolutionIntentV1 {
     new_render_commitment_hash: Hash,
     rule_hash: Hash,
     decoder_hash: Hash,
-    owner_lock: Address,
+    owner_lock: Hash,
     previous_event_hash: Hash,
     new_event_hash: Hash,
     expiry: u64,
 }
 
 #[type_id("dob::evolving::v1::DobEvolutionStateV1")]
-resource DobEvolutionStateV1 has store, create, consume, replace, burn, relock
+resource DobEvolutionStateV1 has store, create, consume, replace
     identity(ckb_type_id)
 {
     version: u16,
@@ -48,7 +48,7 @@ resource DobEvolutionStateV1 has store, create, consume, replace, burn, relock
     render_commitment_hash: Hash,
     rule_hash: Hash,
     decoder_hash: Hash,
-    owner_lock: Address,
+    owner_lock: Hash,
     latest_event_hash: Hash,
     expiry: u64,
 }
@@ -102,6 +102,7 @@ action initialise_dob_state(witness intent: DobEvolutionIntentV1) -> (DobEvoluti
         require intent.previous_event_hash == Hash::zero()
         require intent.new_event_hash != Hash::zero()
         require intent.expiry > now
+        ckb::require_cell_lock_hash(source::input(0), intent.owner_lock)
 
         let event_identity_hash = hash_pair(intent.spore_id, intent.cluster_id)
         let event_action_hash = hash_pair(Hash::from_bytes(b"DOB-EVO/1:init:event-hash:000000"), event_identity_hash)
@@ -159,6 +160,8 @@ action evolve_dob_state(old_state: DobEvolutionStateV1, witness intent: DobEvolu
         let now = env::current_timepoint()
 
         require old_state.version == EVOLVING_DOB_VERSION
+        require old_state.spore_id != Hash::zero()
+        require old_state.cluster_id != Hash::zero()
         require old_state.phase == PHASE_ACTIVE
         require old_state.generation < U64_MAX
         require old_state.expiry > now
@@ -240,6 +243,8 @@ action finalise_dob_state(old_state: DobEvolutionStateV1, witness intent: DobEvo
         let now = env::current_timepoint()
 
         require old_state.version == EVOLVING_DOB_VERSION
+        require old_state.spore_id != Hash::zero()
+        require old_state.cluster_id != Hash::zero()
         require old_state.phase == PHASE_ACTIVE
         require old_state.generation < U64_MAX
         require old_state.expiry > now

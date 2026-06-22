@@ -13,6 +13,6 @@ traits_hash: Byte32             # Decoder-ready trait commitment.
 render_commitment_hash: Byte32  # Renderer input/output commitment.
 rule_hash: Byte32               # Frozen evolution rule set.
 decoder_hash: Byte32            # Frozen decoder identity.
-owner_lock: Address             # CKB lock authorised to spend the state line.
+owner_lock: Byte32              # CKB lock hash authorised to spend the state line.
 latest_event_hash: Byte32       # Latest DobEvolutionEventV1 commitment.
 expiry: u64                     # Absolute timepoint bound for active evolution.

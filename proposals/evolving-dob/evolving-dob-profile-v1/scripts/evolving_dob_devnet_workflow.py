@@ -245,6 +245,7 @@ compiler_version = "{build["compiler_version"]}"
 artifact_hash = "{build["artifact_hash"]}"
 metadata_hash = "{build["metadata_hash"]}"
 schema_hash = "{build["schema_hash"]}"
+cell_data_codec_manifest_hash = "{build["cell_data_codec_manifest_hash"]}"
 abi_hash = "{build["abi_hash"]}"
 constraints_hash = "{build["constraints_hash"]}"
 
@@ -263,11 +264,11 @@ out_point = "{out_point_text}"
 artifact_hash = "{build["artifact_hash"]}"
 metadata_hash = "{build["metadata_hash"]}"
 schema_hash = "{build["schema_hash"]}"
+cell_data_codec_manifest_hash = "{build["cell_data_codec_manifest_hash"]}"
 abi_hash = "{build["abi_hash"]}"
 constraints_hash = "{build["constraints_hash"]}"
 compiler_version = "{build["compiler_version"]}"
 audit_report_hash = "{audit_report_hash}"
-publisher_signature = "local-devnet-workflow:{tx_hash}"
 '''
     (ROOT / "Deployed.toml").write_text(text, encoding="utf-8")
 
@@ -347,8 +348,13 @@ def main() -> int:
         rpc_url = f"http://127.0.0.1:{rpc_port}"
         prepare_ckb_node(ckb_repo, ckb_dir, rpc_port, p2p_port)
         log_path = run_dir / "ckb.log"
-        with log_path.open("w", encoding="utf-8") as log:
-            ckb_pid = subprocess.Popen([str(ckb_bin), "-C", str(ckb_dir), "run", "--ba-advanced"], stdout=log, stderr=log, text=True)
+        with log_path.open("wb", buffering=0) as log:
+            ckb_pid = subprocess.Popen(
+                [str(ckb_bin), "-C", str(ckb_dir), "run", "--ba-advanced"],
+                stdout=log,
+                stderr=log,
+                start_new_session=True,
+            )
         wait_rpc_ready(rpc_url)
 
         chain_info = rpc(rpc_url, "get_blockchain_info")
@@ -405,9 +411,7 @@ def main() -> int:
         shutil.copy2(ROOT / "Deployed.toml", deployed_copy)
         run_checked(strict_build)
 
-        offline_verify = run_checked(
-            cellc() + ["registry", "verify", "--json", "--require-publisher-signature", "--require-audit-report"]
-        )
+        offline_verify = run_checked(cellc() + ["registry", "verify", "--json", "--require-audit-report"])
         live_verify = run_checked(
             cellc()
             + [
@@ -419,7 +423,6 @@ def main() -> int:
                 rpc_url,
                 "--network",
                 args.network,
-                "--require-publisher-signature",
                 "--require-audit-report",
             ]
         )

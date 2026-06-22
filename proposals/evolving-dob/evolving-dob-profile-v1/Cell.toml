@@ -10,7 +10,7 @@ homepage = "https://github.com/a19q3/CellScript"
 documentation = "docs/PROFILE.md"
 keywords = ["ckb", "dob", "spore", "state", "registry"]
 categories = ["protocol", "asset", "audit"]
-cellscript_version = "0.20"
+cellscript_version = "0.17.0"
 entry = "src/evolving_dob_type.cell"
 
 source_roots = ["src"]

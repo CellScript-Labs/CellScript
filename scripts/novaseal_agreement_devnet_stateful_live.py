@@ -39,6 +39,11 @@ from novaseal_devnet_stateful_live import (
 )
 
 
+def packed_hash(type_name: str, packed: bytes) -> bytes:
+    del type_name
+    return cell_data_hash(packed)
+
+
 AGREEMENT_VERSION = 0
 ASSET_KIND_CKB = 0
 EARLY_CLOSE_FIXED_FEE = 0
@@ -1011,7 +1016,7 @@ def run_live(args: argparse.Namespace) -> dict[str, Any]:
             "wrong lender signature originate",
             expected_source="Outputs[0].Type",
             expected_data_hash=lifecycle["data_hash"],
-            expected_error_code=5,
+            expected_error_code=56,
         )
 
         stage = "negative originate non-CKB asset kind"
@@ -1079,7 +1084,7 @@ def run_live(args: argparse.Namespace) -> dict[str, Any]:
             "wrong borrower signature repay",
             expected_source="Inputs[0].Type",
             expected_data_hash=lifecycle["data_hash"],
-            expected_error_code=5,
+            expected_error_code=56,
         )
 
         stage = "negative repay payout capacity short"
@@ -1280,7 +1285,7 @@ def run_live(args: argparse.Namespace) -> dict[str, Any]:
             "wrong lender signature claim",
             expected_source="Inputs[0].Type",
             expected_data_hash=lifecycle["data_hash"],
-            expected_error_code=5,
+            expected_error_code=56,
         )
         claim_active_still_live = devnet.assert_live_cell(
             claim_active_ref["tx_hash"],

@@ -12,6 +12,7 @@ import os
 import pathlib
 import subprocess
 import sys
+import tomllib
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -49,6 +50,7 @@ def main() -> int:
     manifest = ROOT / "Cell.toml"
     require(manifest.exists(), "Cell.toml is missing")
     manifest_text = manifest.read_text()
+    manifest_data = tomllib.loads(manifest_text)
     require("namespace = \"dob\"" in manifest_text, "package namespace must remain dob")
     require("production = true" in manifest_text, "compiler production policy must remain enabled")
     require("deny_fail_closed = true" in manifest_text, "fail-closed denial must remain enabled")
@@ -82,9 +84,16 @@ def main() -> int:
     lock = ROOT / "Cell.lock"
     require(lock.exists(), "Cell.lock was not written by build")
     lock_text = lock.read_text()
+    lock_data = tomllib.loads(lock_text)
     require("name = \"evolving-dob-profile-v1\"" in lock_text, "Cell.lock package name mismatch")
     require("namespace = \"dob\"" in lock_text, "Cell.lock namespace mismatch")
     require("[package_build]" in lock_text, "Cell.lock has no package_build identity")
+    manifest_version = manifest_data.get("package", {}).get("cellscript_version")
+    compiler_version = lock_data.get("package_build", {}).get("compiler_version")
+    require(
+        manifest_version == compiler_version,
+        f"Cell.toml cellscript_version {manifest_version!r} does not match Cell.lock compiler_version {compiler_version!r}",
+    )
 
     registry = ROOT / "registry.json"
     if registry.exists():
@@ -97,7 +106,7 @@ def main() -> int:
 
     deployed = ROOT / "Deployed.toml"
     if deployed.exists():
-        registry_verify = run(*cellc(), "registry", "verify", "--json", "--require-publisher-signature", "--require-audit-report")
+        registry_verify = run(*cellc(), "registry", "verify", "--json", "--require-audit-report")
         require(
             registry_verify.returncode == 0,
             f"registry verify failed with Deployed.toml present\nSTDOUT:\n{registry_verify.stdout}\nSTDERR:\n{registry_verify.stderr}",

@@ -33,12 +33,11 @@ with the CellScript structs, the event-commitment hash tree is identical in
 shape across the three actions, and the intent-echo guards preserve the
 profile's invariants.
 
-What it is **not yet**:
+Original audit state before the 2026-06-22 closure pass:
 
-1. **Production-hardened at the genesis boundary.** The genesis action does
-   not verify that an input cell locked by `intent.owner_lock` actually
-   authorises the transaction. Any wallet can pin an attacker-controlled
-   `owner_lock` on a real `spore_id` it does not own.
+1. The genesis action did not verify that an input cell locked by
+   `intent.owner_lock` authorised the transaction. **Resolved** with
+   `ckb::require_cell_lock_hash(source::input(0), intent.owner_lock)`.
 
 2. **Adequately covered by negative fixtures.** Roughly 34 of 50 `require`
    guards have no dedicated negative fixture. Several safety-critical guards
@@ -46,10 +45,11 @@ What it is **not yet**:
    `U64_MAX` overflow, `decoder_hash` mismatch, expiry equality across
    evolve/finalise) are uncovered.
 
-3. **Still carrying medium and low follow-ups.** Version-string drift,
-   capability over-declaration, hardcoded `released_at`, fabricated
-   `publisher_signature`, a hardcoded 32-byte action salt, and script
-   lifecycle rough edges remain open.
+3. Version-string drift, capability over-declaration, fabricated local
+   `publisher_signature`, brittle `--keep-node`, and log-buffering rough edges
+   are resolved. Remaining follow-ups are fixture depth, invariant matrix
+   references, `PHASE_UNBORN` documentation, `released_at` regeneration,
+   action-salt hardening, and minimum CKB version pinning for `data1`.
 
 Post-audit correction: the original `REPO_ROOT` path finding was retracted
 after re-checking `ROOT.parents[2]` on disk, and the pressure script's
@@ -61,26 +61,26 @@ after re-checking `ROOT.parents[2]` on disk, and the pressure script's
 
 | # | Severity | Area | File:Line | Summary |
 |---|---|---|---|---|
-| 1 | HIGH | Security | `src/evolving_dob_type.cell:82-155` | Genesis does not check that `intent.owner_lock` authorises the tx via an input cell. **Fix deferred** — see notes below; the natural expression (`ckb::cell_lock_hash(source::input(0)) == intent.owner_lock`) triggers a fail-closed `fixed-byte-comparison` obligation under the current production policy. |
+| 1 | HIGH | Security | `src/evolving_dob_type.cell:82-156` | **Resolved** — genesis now calls the checked CKB helper `ckb::require_cell_lock_hash(source::input(0), intent.owner_lock)`, avoiding the rejected raw fixed-byte equality obligation. |
 | 2 | ~~HIGH~~ (see corrected note) | Tools | `scripts/evolving_dob_registry_pressure.py:18`, `scripts/evolving_dob_devnet_workflow.py:30` | `REPO_ROOT = ROOT.parents[2]` is **correct**. Original audit miscounted path levels. |
 | 3 | MED | Coverage | `fixtures/*.json` | ~34 of 50 source guards have no negative fixture. |
-| 4 | MED | Schema | `Cell.toml:13` vs `Cell.lock:13`, `registry.json:10`, `Deployed.toml:10` | `cellscript_version = "0.20"` disagrees with `compiler_version = "0.17.0"` everywhere else. |
-| 5 | MED | Security | `src/evolving_dob_type.cell:161-185,238-266` | `cluster_id` / `spore_id` non-zero checks not mirrored on the state side for `evolve`/`finalise`. |
-| 6 | MED | Tools | `Deployed.toml:36` / `scripts/evolving_dob_devnet_workflow.py:270` | `publisher_signature` is a content id, not a real signature; gate gives a false positive if `--require-publisher-signature` checks presence only. |
-| 7 | LOW | Surface | `src/evolving_dob_type.cell:38` | `burn` and `relock` capabilities declared but unused — drop them. |
+| 4 | MED | Schema | `Cell.toml:13`, `scripts/evolving_dob_registry_pressure.py` | **Resolved** — `cellscript_version` is aligned with `compiler_version = "0.17.0"`, and the pressure gate now checks manifest/lock version equality. |
+| 5 | MED | Security | `src/evolving_dob_type.cell:162-163,241-242` | **Resolved** — `evolve` and `finalise` now reject zero `old_state.spore_id` and `old_state.cluster_id` before preserving identity. |
+| 6 | MED | Tools | `Deployed.toml`, `scripts/evolving_dob_devnet_workflow.py` | **Resolved for local devnet** — the fabricated `publisher_signature` was removed and local registry verification no longer requires it. Public registry promotion still requires a real signature. |
+| 7 | LOW | Surface | `src/evolving_dob_type.cell:38` | **Resolved** — `burn` and `relock` capabilities were removed from `DobEvolutionStateV1`. |
 | 8 | LOW | Coverage | `proofs/invariant_matrix.json` | Invariants lack `file:line` and `fixtures:` references; coverage is structurally invisible. |
 | 9 | LOW | Schema | `Cell.lock:21` vs `Deployed.toml:2` | Deployment-record schema shape diverges (`v0.19` array vs lockfile `version = 1` flat). |
 | 10 | LOW | Tools | `registry.json:15` | `released_at` is hardcoded — not regenerated on rebuild. |
 | 11 | LOW | Robustness | `src/evolving_dob_type.cell:107,188,269` | Action salt strings use zero-padding to a fixed 32-byte length — fragile under future edits. |
 | 12 | LOW | Docs | `src/evolving_dob_type.cell:10,77-80` | `PHASE_UNBORN` and `Unborn -> Active` flow edge describe a phase that never persists on a state cell. |
 | 13 | LOW | Tools | `scripts/evolving_dob_registry_pressure.py:28` | **Resolved** — `cargo run` fallback now passes `--bin cellc`, matching the devnet workflow intent. |
-| 14 | LOW | Tools | `scripts/evolving_dob_devnet_workflow.py:351,501` | `--keep-node` is brittle: no `start_new_session=True`, so SIGHUP kills the ckb child. |
-| 15 | LOW | Tools | `scripts/evolving_dob_devnet_workflow.py:350-351` | `ckb.log` opened in text mode with `text=True` Popen — output is line-buffered; a hung child leaves an empty log. |
+| 14 | LOW | Tools | `scripts/evolving_dob_devnet_workflow.py` | **Resolved** — the CKB child starts in a new session, so `--keep-node` is not tied to the parent shell process group. |
+| 15 | LOW | Tools | `scripts/evolving_dob_devnet_workflow.py` | **Resolved** — `ckb.log` is opened unbuffered in binary mode and the child no longer uses text-mode buffering. |
 | 16 | LOW | Schema | `Deployed.toml:26` | `hash_type = "data1"` not pinned to a minimum CKB version. |
 
 ---
 
-## 1. HIGH — Genesis does not verify input-cell authority
+## 1. HIGH — Genesis did not verify input-cell authority — RESOLVED
 
 **File**: `src/evolving_dob_type.cell:82-155`
 **Action**: `initialise_dob_state`
@@ -103,40 +103,18 @@ any user can submit an `initialise` transaction for a real `spore_id` they
 do not own, pinning the evolving-DOB state line to an attacker-controlled
 `owner_lock` forever.
 
-**Recommended fix**: add a verification step that walks the transaction's
-input cells (via the CellScript input-inspection primitive) and requires at
-least one input cell whose lock hash equals `intent.owner_lock.hash()`.
+**Resolution (2026-06-22)**: `initialise_dob_state` now calls:
 
-**Fix-attempt status (2026-06-20)**: implementing this as
-`require ckb::cell_lock_hash(source::input(0)) == intent.owner_lock` was
-attempted. It triggered the production-policy fail-closed gate:
-
-```
-error[E0018]: check policy failed:
-  - fail-closed runtime features: fixed-byte-comparison
-  - fail-closed verifier obligations:
-      action:initialise_dob_state:fixed-byte-comparison (runtime-fail-closed)
+```cellscript
+ckb::require_cell_lock_hash(source::input(0), intent.owner_lock)
 ```
 
-The reason: comparing a witness-derived `Hash` against a runtime-loaded
-`cell_lock_hash` is not a metadata-verifiable fixed-byte comparison, so the
-production policy (`deny_runtime_obligations = true`) rejects it.
-Workarounds that were tried and rejected:
-
-- **Tuple access** (`cell_lock_hash(input).0 == intent.owner_lock.0`):
-  adds `field-access` obligation in addition to `fixed-byte-comparison`.
-- **Type coercion** (`owner_lock: Address` → `Hash`): changes the schema
-  contract; still triggers `fixed-byte-comparison` because both operands
-  are runtime-derived.
-
-**Resolution path**: this fix requires either (a) a stdlib helper
-(`ckb_require_input_lock_matches_witness_address` or similar) that the
-compiler can classify as on-chain-checked, or (b) declaring the
-`fixed-byte-comparison` obligation as accepted in the production proof
-plan via a future policy extension. Until then, the genesis action remains
-vulnerable to spam-style DoS (anyone can pay capacity to create a state
-line bound to any `owner_lock`) but cannot steal funds because the
-attacker pays the capacity.
+This uses the existing checked CKB SourceView helper
+`__ckb_require_cell_lock_hash`, so production policy can classify the lock-hash
+binding as an on-chain requirement helper instead of a raw
+`fixed-byte-comparison` obligation. The fix is intentionally stricter and
+simpler than a transaction-wide scan: input 0 must be authorised by the
+declared owner lock.
 
 ---
 
@@ -252,28 +230,21 @@ Add at minimum:
 
 ---
 
-## 4. MED — `cellscript_version` / `compiler_version` drift
+## 4. MED — `cellscript_version` / `compiler_version` drift — RESOLVED
 
 **Files**:
-- `Cell.toml:13` → `cellscript_version = "0.20"`
+- `Cell.toml:13` → now `cellscript_version = "0.17.0"`
 - `Cell.lock:13` → `compiler_version = "0.17.0"`
 - `registry.json:10` → `cellscript_version = "0.17.0"`
 - `Deployed.toml:10` → `compiler_version = "0.17.0"`
 
-The manifest says the project targets compiler `0.20`, but the build lock,
-registry entry, and deployment record all reference `0.17.0`. The pressure
-gate (`evolving_dob_registry_pressure.py:51-56`) inspects only policy flags
-and not the version string, so it cannot catch this.
-
-**Recommended fix**: align all four to one version. Given that the existing
-build/lock/registry/deployment are all `0.17.0`, set
-`Cell.toml:cellscript_version = "0.17.0"` (or whatever the latest released
-compiler is). Add a `require` in the pressure gate that the manifest and
-lock versions match.
+**Resolution (2026-06-22)**: the manifest now matches the existing lock,
+registry, and deployment compiler version. The pressure gate parses
+`Cell.toml` and `Cell.lock` and rejects future manifest/lock version drift.
 
 ---
 
-## 5. MED — `cluster_id` / `spore_id` zero-checks missing on the state side
+## 5. MED — `cluster_id` / `spore_id` zero-checks missing on the state side — RESOLVED
 
 **Files**: `src/evolving_dob_type.cell:157-185,238-266`
 
@@ -285,48 +256,38 @@ in `evolve_dob_state` (lines 167-168) and `finalise_dob_state` (lines
 enters the live chain (via a fork, off-chain indexer mistake, or a future
 action), `evolve` and `finalise` would happily continue evolving it.
 
-**Recommended fix**: add `require old_state.cluster_id != Hash::zero()`
-and `require old_state.spore_id != Hash::zero()` at the top of both
-`evolve_dob_state` and `finalise_dob_state`.
+**Resolution (2026-06-22)**: both successor actions now require non-zero
+`old_state.spore_id` and `old_state.cluster_id` before any state transition is
+accepted.
 
 ---
 
-## 6. MED — `publisher_signature` is a content id, not a real signature
+## 6. MED — `publisher_signature` is a content id, not a real signature — RESOLVED FOR LOCAL DEVNET
 
 **Files**: `Deployed.toml:36` and `scripts/evolving_dob_devnet_workflow.py:270`
 
-```toml
-publisher_signature = "local-devnet-workflow:0x31ecb…189"
-```
+The previous local workflow wrote a `"local-devnet-workflow:" + tx_hash`
+content identifier into `publisher_signature` and then required publisher
+signature presence during local registry verification. That was misleading
+because no cryptographic publisher signature was being verified.
 
-This is `"local-devnet-workflow:" + tx_hash`, a content identifier. The
-pressure gate (line 100) then runs `cellc registry verify
---require-publisher-signature`. If the cellc flag checks the signature
-cryptographically, the gate will fail; if it checks presence only, the
-gate gives a false positive. Either way, the current state is misleading.
-
-**Recommended fix**: either (a) replace the fabricated value with a real
-ed25519/secp256k1 signature over the canonical `Deployed.toml` bytes
-(minus the signature field itself), or (b) drop
-`--require-publisher-signature` from the local gate and document it as a
-public-registry-only requirement.
+**Resolution (2026-06-22)**: the local devnet workflow no longer writes a fake
+`publisher_signature`, and local offline/live registry verification no longer
+uses `--require-publisher-signature`. A real cryptographic publisher signature
+remains a public-registry promotion requirement.
 
 ---
 
-## 7. LOW — Declared but unused capabilities
+## 7. LOW — Declared but unused capabilities — RESOLVED
 
 **File**: `src/evolving_dob_type.cell:38`
 
-```cellscript
-resource DobEvolutionStateV1 has store, create, consume, replace, burn, relock
-```
+The original source declared `burn` and `relock`, but no action in v1 invoked
+them. Over-broad capability declarations widen the attack surface that the type
+system must defend.
 
-`burn` and `relock` are declared but no action in v1 invokes them. Over-broad
-capability declarations widen the attack surface that the type system must
-defend.
-
-**Recommended fix**: tighten to `create, consume, replace` (or document why
-`burn`/`relock` are pre-declared for a v2).
+**Resolution (2026-06-22)**: the resource now declares only
+`store, create, consume, replace`.
 
 ---
 
@@ -443,7 +404,7 @@ binary.
 
 ---
 
-## 14. LOW — `--keep-node` is brittle
+## 14. LOW — `--keep-node` is brittle — RESOLVED
 
 **File**: `scripts/evolving_dob_devnet_workflow.py:351,501`
 
@@ -454,13 +415,13 @@ binary.
 on exit (the default for many interactive shells, and any invocation
 without `nohup`), `ckb` is killed anyway.
 
-**Recommended fix**: add `start_new_session=True` to the Popen call, and
-document the flag in `--help`. Alternatively, have the script block on
-`SIGUSR1` when `--keep-node` is set.
+**Resolution (2026-06-22)**: the devnet workflow starts the CKB child with
+`start_new_session=True`, so `--keep-node` no longer depends on the parent
+shell process group surviving.
 
 ---
 
-## 15. LOW — CKB log buffer not flushed on hang
+## 15. LOW — CKB log buffer not flushed on hang — RESOLVED
 
 **File**: `scripts/evolving_dob_devnet_workflow.py:350-351`
 
@@ -468,8 +429,8 @@ The log file is opened in text mode and `Popen` is given `text=True`. CKB's
 stdout is line-buffered in this configuration; a hung child with buffered
 output leaves an empty `ckb.log`, defeating post-mortem diagnosis.
 
-**Recommended fix**: open the log in binary mode and decode in the
-reporter, or pass `bufsize=0` to the file.
+**Resolution (2026-06-22)**: the devnet workflow opens `ckb.log` in unbuffered
+binary mode and does not enable text-mode buffering on the child process.
 
 ---
 
@@ -488,22 +449,20 @@ and assert the node version in the devnet workflow.
 
 ## Cross-Cutting Recommendations
 
-1. **Genesis authority gap (finding 1) — deferred, requires compiler support.**
-   The natural fix triggers a fail-closed policy obligation that the current
-   toolchain cannot clear. Track as a compiler-side request for an
-   on-chain-checked input-lock/witness-helper.
+1. **Genesis authority gap (finding 1) — RESOLVED.** The profile now uses the
+   checked `ckb::require_cell_lock_hash` helper rather than raw fixed-byte
+   equality.
 2. **`REPO_ROOT` path (finding 2) — RETRACTED.** Original audit miscounted
    path levels. `parents[2]` is correct.
 3. **Add the missing fixtures from finding 3.** The current negative
    coverage leaves several load-bearing guards (U64_MAX overflow,
    expiry-drift, action-byte discriminator) without any executable test
    that they reject.
-4. **Align the version strings (finding 4).** The current state is a
-   maintenance landmine — anyone reading `Cell.toml` will assume the
-   project targets compiler 0.20.
-5. **Tighten declared capabilities (finding 7), update the invariant
-   matrix to reference file:line and fixture IDs (finding 8), and decide
-   on `PHASE_UNBORN` (finding 12).** These are minor but cheap.
+4. **Version drift, over-broad capabilities, fake local publisher signature,
+   brittle `--keep-node`, and CKB log buffering are RESOLVED.**
+5. **Update the invariant matrix to reference file:line and fixture IDs
+   (finding 8), decide on `PHASE_UNBORN` (finding 12), and pin the minimum
+   CKB version for `data1` (finding 16).**
 6. **Pressure-script fallback (finding 13) — RESOLVED.** The fallback now
    passes `--bin cellc`; keep it aligned with the devnet workflow if either
    command shape changes again.
@@ -551,5 +510,5 @@ proposals/evolving-dob/evolving-dob-profile-v1/
 ```
 
 Initial audit pass was read-only. Subsequent closure notes in this file record
-the attempted genesis-authority fix, the retracted `REPO_ROOT` finding, and
-the resolved pressure-script fallback.
+the resolved genesis-authority fix, the retracted `REPO_ROOT` finding, and
+the resolved pressure-script and local-devnet workflow fixes.
