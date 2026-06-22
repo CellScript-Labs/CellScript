@@ -88,6 +88,7 @@ const renderLine = (line: string) => {
     </script>
   </head>
   <body>
+    <a class="skip-link" href="#top" data-i18n="a11y.skipToContent">{t.a11y.skipToContent}</a>
     <header class="site-header">
       <nav class="nav" aria-label={t.nav.primary} data-i18n-aria-label="nav.primary">
         <a class="brand" href="#top" aria-label={t.nav.home} data-i18n-aria-label="nav.home">
@@ -515,6 +516,7 @@ const renderLine = (line: string) => {
         document.documentElement.classList.remove("locale-fade-out");
         await delay(languageTransitionMs);
         languageToggle?.removeAttribute("disabled");
+        languageToggle?.focus();
         languageTransitioning = false;
       };
 
@@ -529,7 +531,9 @@ const renderLine = (line: string) => {
         const activate = (id: string) => {
           tabs.forEach((tab) => {
             const tabElement = tab as HTMLElement;
-            tabElement.setAttribute("aria-selected", String(tabElement.dataset.tab === id));
+            const active = tabElement.dataset.tab === id;
+            tabElement.setAttribute("aria-selected", String(active));
+            tabElement.tabIndex = active ? 0 : -1;
           });
           panels.forEach((panel) => {
             const panelElement = panel as HTMLElement;
@@ -543,7 +547,20 @@ const renderLine = (line: string) => {
           });
         };
 
-        tabs.forEach((tab) => tab.addEventListener("click", () => activate((tab as HTMLElement).dataset.tab ?? "")));
+        tabs.forEach((tab, index) => {
+          const tabEl = tab as HTMLButtonElement;
+          tabEl.tabIndex = index === 0 ? 0 : -1;
+          tabEl.addEventListener("click", () => activate(tabEl.dataset.tab ?? ""));
+          tabEl.addEventListener("keydown", (event) => {
+            if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
+            event.preventDefault();
+            const direction = event.key === "ArrowRight" ? 1 : -1;
+            const nextIndex = (index + direction + tabs.length) % tabs.length;
+            const nextTab = tabs[nextIndex] as HTMLButtonElement;
+            activate(nextTab?.dataset.tab ?? "");
+            nextTab?.focus();
+          });
+        });
         if (mobile instanceof HTMLSelectElement) {
           mobile.addEventListener("change", () => activate(mobile.value));
         }

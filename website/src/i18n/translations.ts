@@ -29,6 +29,9 @@ export const translations = {
       switchToDark: "Switch to dark mode",
       switchToLight: "Switch to light mode",
     },
+    a11y: {
+      skipToContent: "Skip to content",
+    },
     hero: {
       title: "CellScript",
       subtitle: "Write Cell contracts as typed transitions, not raw wire format.",
@@ -207,6 +210,9 @@ export const translations = {
       light: "浅色",
       switchToDark: "切换到深色模式",
       switchToLight: "切换到浅色模式",
+    },
+    a11y: {
+      skipToContent: "跳到正文",
     },
     hero: {
       title: "CellScript",
