@@ -14,15 +14,15 @@
   --bg: oklch(0.105 0.006 180);
   --page-grid-y: oklch(0.25 0 0 / 0.17);
   --page-grid-x: oklch(0.25 0 0 / 0.14);
-  --page-glow: oklch(0.28 0 0 / 0.24);
+  --page-glow: oklch(0.28 0.004 180 / 0.24);
   --noise-dot: oklch(1 0 0 / 0.16);
   --noise-opacity: 0.16;
   --noise-blend: overlay;
-  --panel: oklch(0.145 0 0);
-  --panel-2: oklch(0.18 0 0 / 0.72);
-  --panel-strong: oklch(0.12 0 0 / 0.86);
-  --panel-soft: oklch(0.15 0 0 / 0.68);
-  --panel-chip: oklch(0.12 0 0 / 0.72);
+  --panel: oklch(0.145 0.004 180);
+  --panel-2: oklch(0.18 0.004 180 / 0.72);
+  --panel-strong: oklch(0.12 0.004 180 / 0.86);
+  --panel-soft: oklch(0.15 0.004 180 / 0.68);
+  --panel-chip: oklch(0.12 0.004 180 / 0.72);
   --surface-header: oklch(0.105 0 0 / 0.82);
   --surface-footer: oklch(0.08 0 0);
   --surface-hover: oklch(0.18 0 0 / 0.5);
@@ -153,7 +153,7 @@
   --muted: oklch(0.47 0.014 180);
   --dim: oklch(0.42 0.014 180);
   --line-number: oklch(0.5 0.012 180);
-  --accent: oklch(0.57 0.12 158);
+  --accent: oklch(0.52 0.12 158);
   --accent-strong: oklch(0.36 0.1 158);
   --accent-quiet: oklch(0.45 0.1 158);
   --accent-line: oklch(0.54 0.1 158 / 0.36);
@@ -515,7 +515,7 @@ select:focus-visible {
   overflow-x: clip;
   min-height: clamp(620px, 76svh, 760px);
   display: grid;
-  grid-template-columns: minmax(0, 0.95fr) minmax(520px, 1.05fr);
+  grid-template-columns: minmax(0, 1fr) minmax(460px, 1fr);
   align-items: start;
   gap: 48px;
   padding: 58px 0 68px;
@@ -599,7 +599,7 @@ select:focus-visible {
 .hero h1 {
   margin: 0;
   font-size: 6.2rem;
-  line-height: 0.88;
+  line-height: 1.05;
   letter-spacing: 0;
   font-weight: 800;
   text-shadow:
@@ -642,7 +642,7 @@ select:focus-visible {
   color: var(--muted);
   font-size: 1.42rem;
   line-height: 1.28;
-  font-weight: 300;
+  font-weight: 400;
 }
 
 .hero-actions {
@@ -958,7 +958,7 @@ select:focus-visible {
 .token-arrow { color: var(--token-arrow); }
 
 .section {
-  padding: 92px 0 98px;
+  padding: clamp(64px, 8vw, 96px) 0;
   border-top: 0;
 }
 
@@ -1018,10 +1018,6 @@ select:focus-visible {
 
 .section-copy .lead {
   margin-top: 0;
-}
-
-.workflow-section {
-  padding-top: 76px;
 }
 
 .workflow-board {
@@ -2293,10 +2289,6 @@ tr:last-child td {
 
   .workflow-step {
     grid-template-columns: 62px minmax(0, 1fr);
-  }
-
-  .section {
-    padding: 64px 0;
   }
 
   .footer-links {
