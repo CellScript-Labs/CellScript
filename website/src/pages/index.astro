@@ -198,25 +198,6 @@ const renderLine = (line: string) => {
         </div>
       </section>
 
-      <section class="section start-section" id="getting-started" aria-labelledby="start">
-        <h2 class="section-title" id="start" data-i18n="sections.gettingStarted">{t.sections.gettingStarted}</h2>
-        <div class="steps">
-          {t.start.steps.map(([label, command], index) => (
-            <article class="step">
-              <span class="step-num">{index + 1}</span>
-              <h3 data-i18n={`start.steps.${index}.0`}>{label}</h3>
-              <p>
-                <code data-i18n={`start.steps.${index}.1`}>{command}</code>
-                <button class="copy-btn" type="button" data-copy-text={command} data-i18n-aria-label="a11y.copyAria" aria-label={t.a11y.copyAria} aria-live="polite">
-                  <svg class="copy-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M6 4h8v10H6z" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M4 6v10h8" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
-                  <svg class="check-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10.5l4 4 8-9" fill="none" stroke="currentColor" stroke-width="2"/></svg>
-                </button>
-              </p>
-            </article>
-          ))}
-        </div>
-      </section>
-
       <section class="section workflow-section" aria-labelledby="workflow">
         <h2 class="section-title" id="workflow" data-i18n="sections.workflow">{t.sections.workflow}</h2>
         <div class="workflow-board">
@@ -350,7 +331,7 @@ const renderLine = (line: string) => {
                 </article>
               ))}
             </div>
-            <details class="metadata-disclosure" open>
+            <details class="metadata-disclosure">
               <summary data-i18n="assurance.metadataExcerpt">{t.assurance.metadataExcerpt}</summary>
               <div class="metadata-block">
                 <span class="metadata-comment"># <span data-i18n="assurance.metadataComment">{t.assurance.metadataComment}</span></span>
@@ -452,6 +433,25 @@ const renderLine = (line: string) => {
               </article>
             ))}
           </div>
+        </div>
+      </section>
+
+      <section class="section start-section" id="getting-started" aria-labelledby="start">
+        <h2 class="section-title" id="start" data-i18n="sections.gettingStarted">{t.sections.gettingStarted}</h2>
+        <div class="steps">
+          {t.start.steps.map(([label, command], index) => (
+            <article class="step">
+              <span class="step-num">{index + 1}</span>
+              <h3 data-i18n={`start.steps.${index}.0`}>{label}</h3>
+              <p>
+                <code data-i18n={`start.steps.${index}.1`}>{command}</code>
+                <button class="copy-btn" type="button" data-copy-text={command} data-i18n-aria-label="a11y.copyAria" aria-label={t.a11y.copyAria} aria-live="polite">
+                  <svg class="copy-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M6 4h8v10H6z" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M4 6v10h8" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
+                  <svg class="check-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10.5l4 4 8-9" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+                </button>
+              </p>
+            </article>
+          ))}
         </div>
       </section>
 
