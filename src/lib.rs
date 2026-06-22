@@ -6,21 +6,31 @@
 pub mod assumptions;
 pub mod ast;
 pub mod ckb_abi;
+// CLI, LSP, REPL, incremental, and debug tooling are gated out of the
+// wasm build: they depend on tokio/tower-lsp/clap/colored/env_logger,
+// which pull native I/O (mio/std::net) that wasm32 cannot link. The
+// pure compiler core (lexer/parser/types/flow/ir/codegen/proof_plan)
+// stays ungated and is what the browser playground calls.
+#[cfg(not(feature = "wasm"))]
 pub mod cli;
 pub mod codegen;
+#[cfg(not(feature = "wasm"))]
 pub mod debug;
 pub mod docgen;
 pub mod error;
 pub mod flow;
 pub mod fmt;
+#[cfg(not(feature = "wasm"))]
 pub mod incremental;
 pub mod ir;
 pub mod lexer;
+#[cfg(not(feature = "wasm"))]
 pub mod lsp;
 pub mod optimize;
 pub mod package;
 pub mod parser;
 pub mod proof_plan;
+#[cfg(not(feature = "wasm"))]
 pub mod repl;
 pub mod resolve;
 pub mod runtime_errors;
@@ -1803,6 +1813,7 @@ fn ckb_limits_source() -> String {
 }
 
 /// Extract the span from an AST statement, for debug info line table generation.
+#[cfg_attr(feature = "wasm", allow(dead_code))]
 fn stmt_span(stmt: &ast::Stmt) -> error::Span {
     match stmt {
         ast::Stmt::Let(let_stmt) => let_stmt.span,
@@ -1816,6 +1827,7 @@ fn stmt_span(stmt: &ast::Stmt) -> error::Span {
 }
 
 /// Extract span from an expression.
+#[cfg_attr(feature = "wasm", allow(dead_code))]
 fn expr_span(expr: &ast::Expr) -> error::Span {
     // AST expressions don't carry their own Span in the current definition,
     // so we fall back to a default span.
@@ -4235,7 +4247,10 @@ fn compile_ast_with_build(
         return Err(CompileError::new("backend produced an empty artifact", error::Span::default()));
     }
 
-    // 5b. Debug info generation (embed DWARF section when debug option enabled and artifact is ELF)
+    // 5b. Debug info generation (embed DWARF section when debug option enabled and artifact is ELF).
+    // Gated out of the wasm build: the debug module pulls native tooling
+    // and DWARF embedding is not needed in the browser playground.
+    #[cfg(not(feature = "wasm"))]
     if options.debug && artifact_format == ArtifactFormat::RiscvElf {
         let mut debug_gen =
             debug::DebugInfoGenerator::new(lowering_ast.name.clone(), std::path::PathBuf::from(lowering_ast.name.clone()));

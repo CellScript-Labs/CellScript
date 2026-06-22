@@ -12,6 +12,10 @@ __pycache__/
 *.s
 *.elf
 *.wasm
+# The prebuilt WASM bundle for the website playground is a committed
+# build artifact (rebuilt via website/scripts/build-wasm.sh), so it
+# must be tracked despite the global *.wasm ignore above.
+!website/public/wasm/*.wasm
 *.meta.json
 
 .cell/

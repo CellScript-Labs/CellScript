@@ -359,6 +359,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "cellscript-wasm"
+version = "0.17.0"
+dependencies = [
+ "cellscript",
+ "serde",
+ "serde_json",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "cfg-if"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
