@@ -1,0 +1,446 @@
+---
+/**
+ * Playground page — the real CellScript IDE.
+ *
+ * Loads the prebuilt WASM compiler bundle and live-compiles the user's
+ * source to typed-transition metadata. Three-column layout:
+ *   - Left: editable source (textarea + highlight overlay)
+ *   - Middle: compile output (Metadata / Actions / Types / Errors tabs)
+ *   - Right: provenance rail (live module/actions/types summary)
+ *
+ * The hero pseudo-console links here with ?example=<id> to preload an
+ * example. Users can edit freely; compile fires 300ms after the last
+ * keystroke (debounced).
+ *
+ * Design constraints (RFC): no Monaco/CodeMirror dependency (textarea
+ * + overlay only), WASM <= 600KB gzip, no new keyframe animations.
+ */
+import "../styles/global.css";
+import { heroExamples, links, exampleFullSources } from "../data/site";
+import { defaultLocale, translations } from "../i18n/translations";
+
+const locale = defaultLocale;
+const t = translations[locale];
+const initialExample = heroExamples[0];
+const initialSource = exampleFullSources[initialExample.id] ?? initialExample.lines.join("\n");
+---
+
+<!DOCTYPE html>
+<html lang={locale} data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CellScript Playground</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <script is:inline>
+      (function () {
+        try {
+          var stored = localStorage.getItem("cellscript-theme");
+          var theme = stored || (window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+          document.documentElement.dataset.theme = theme;
+        } catch (e) {}
+      })();
+    </script>
+  </head>
+  <body class="playground-body">
+    <header class="pg-header">
+      <a class="pg-back" href="/" data-i18n="playground.back">{t.playground.back}</a>
+      <span class="pg-title">{t.playground.title}</span>
+      <div class="pg-actions">
+        <label class="pg-example-select">
+          <span data-i18n="playground.exampleLabel">{t.playground.exampleLabel}</span>
+          <select data-example-select>
+            {heroExamples.map((ex) => <option value={ex.id}>{t.hero.exampleLabels[ex.id]}</option>)}
+          </select>
+        </label>
+        <button class="pg-action-btn" type="button" data-share data-i18n="playground.share">{t.playground.share}</button>
+      </div>
+    </header>
+
+    <main class="pg-main">
+      <!-- Left: source editor -->
+      <section class="pg-col pg-source" aria-label={t.playground.source}>
+        <div class="pg-col-head">
+          <span data-i18n="playground.source">{t.playground.source}</span>
+        </div>
+        <div class="pg-editor" data-editor>
+          <pre class="pg-highlight" aria-hidden="true" data-highlight></pre>
+          <textarea
+            class="pg-textarea"
+            data-textarea
+            spellcheck="false"
+            autocapitalize="off"
+            autocomplete="off"
+            autocorrect="off"
+            aria-label={t.playground.source}
+          >{initialSource}</textarea>
+        </div>
+      </section>
+
+      <!-- Middle: compile output -->
+      <section class="pg-col pg-output" aria-label={t.playground.output}>
+        <div class="pg-col-head pg-tabs" role="tablist">
+          <button class="pg-tab active" role="tab" aria-selected="true" data-output-tab="metadata">
+            <span data-i18n="playground.tabMetadata">{t.playground.tabMetadata}</span>
+          </button>
+          <button class="pg-tab" role="tab" aria-selected="false" data-output-tab="actions">
+            <span data-i18n="playground.tabActions">{t.playground.tabActions}</span>
+          </button>
+          <button class="pg-tab" role="tab" aria-selected="false" data-output-tab="types">
+            <span data-i18n="playground.tabTypes">{t.playground.tabTypes}</span>
+          </button>
+          <button class="pg-tab" role="tab" aria-selected="false" data-output-tab="errors">
+            <span data-i18n="playground.tabErrors">{t.playground.tabErrors}</span>
+          </button>
+        </div>
+        <div class="pg-output-body">
+          <div class="pg-output-panel active" data-output-panel="metadata" role="tabpanel"></div>
+          <div class="pg-output-panel" data-output-panel="actions" role="tabpanel" hidden></div>
+          <div class="pg-output-panel" data-output-panel="types" role="tabpanel" hidden></div>
+          <div class="pg-output-panel" data-output-panel="errors" role="tabpanel" hidden></div>
+          <div class="pg-loading" data-loading>
+            <span class="pg-loading-dot"></span>
+            <span data-i18n="playground.loading">{t.playground.loading}</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Right: provenance rail -->
+      <aside class="pg-col pg-rail" aria-label={t.playground.provenance}>
+        <div class="pg-col-head">
+          <span data-i18n="playground.provenance">{t.playground.provenance}</span>
+        </div>
+        <div class="pg-rail-body" data-rail-body>
+          <div class="pg-rail-section" data-rail-view="loading">
+            <span class="pg-loading-dot"></span>
+            <span data-i18n="playground.loading">{t.playground.loading}</span>
+          </div>
+          <div class="pg-rail-section" data-rail-view="ready" hidden>
+            <dl class="pg-rail-facts">
+              <div class="pg-rail-fact">
+                <dt data-i18n="playground.module">{t.playground.module}</dt>
+                <dd class="substrate-value" data-rail-module></dd>
+              </div>
+              <div class="pg-rail-fact">
+                <dt data-i18n="playground.target">{t.playground.target}</dt>
+                <dd data-rail-target></dd>
+              </div>
+              <div class="pg-rail-fact">
+                <dt data-i18n="playground.size">{t.playground.size}</dt>
+                <dd class="substrate-value" data-rail-size></dd>
+              </div>
+            </dl>
+            <div class="pg-rail-group">
+              <span class="pg-rail-group-label" data-i18n="playground.actions">{t.playground.actions}</span>
+              <ul class="pg-rail-actions" data-rail-actions></ul>
+            </div>
+            <div class="pg-rail-group">
+              <span class="pg-rail-group-label" data-i18n="playground.types">{t.playground.types}</span>
+              <ul class="pg-rail-types" data-rail-types></ul>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </main>
+
+    <footer class="pg-statusbar">
+      <span class="pg-status" data-status>{t.playground.loading}</span>
+      <span class="pg-version" data-version></span>
+    </footer>
+
+    <script is:inline type="application/json" data-example-sources set:html={JSON.stringify(exampleFullSources)} />
+
+    <script is:inline type="application/json" data-i18n-strings set:html={JSON.stringify({
+      noErrors: t.playground.noErrors,
+      ready: t.playground.ready,
+      copied: t.playground.copied,
+      share: t.playground.share,
+    })} />
+
+    <script>
+      import { renderSource } from "../lib/highlight";
+
+      // Dynamic import of the WASM bundle. The module lives in public/wasm/
+      // (served as a static asset), so we use a runtime URL import rather
+      // than a static import that Rollup would try to bundle.
+      const wasmUrl = new URL("/wasm/cellscript_wasm.js", import.meta.url);
+      let compileMetadataJson: (source: string, target: string | null) => string;
+      let wasmVersion: () => string;
+      let wasmInit: () => Promise<unknown>;
+
+      // ---- Example sources (inline so no extra fetch needed) ----
+      const exampleSources: Record<string, string> = JSON.parse(
+        document.querySelector<HTMLScriptElement>("[data-example-sources]")?.textContent ?? "{}",
+      );
+      const i18n: { noErrors: string; ready: string; copied: string; share: string } = JSON.parse(
+        document.querySelector<HTMLScriptElement>("[data-i18n-strings]")?.textContent ?? "{}",
+      );
+
+      // ---- Elements ----
+      const textarea = document.querySelector<HTMLTextAreaElement>("[data-textarea]");
+      const highlight = document.querySelector<HTMLElement>("[data-highlight]");
+      const loading = document.querySelector<HTMLElement>("[data-loading]");
+      const status = document.querySelector<HTMLElement>("[data-status]");
+      const versionEl = document.querySelector<HTMLElement>("[data-version]");
+      const exampleSelect = document.querySelector<HTMLSelectElement>("[data-example-select]");
+      const shareBtn = document.querySelector<HTMLButtonElement>("[data-share]");
+      const railBody = document.querySelector<HTMLElement>("[data-rail-body]");
+      const railLoading = railBody?.querySelector<HTMLElement>('[data-rail-view="loading"]');
+      const railReady = railBody?.querySelector<HTMLElement>('[data-rail-view="ready"]');
+      const railModule = railBody?.querySelector<HTMLElement>("[data-rail-module]");
+      const railTarget = railBody?.querySelector<HTMLElement>("[data-rail-target]");
+      const railSize = railBody?.querySelector<HTMLElement>("[data-rail-size]");
+      const railActions = railBody?.querySelector<HTMLElement>("[data-rail-actions]");
+      const railTypes = railBody?.querySelector<HTMLElement>("[data-rail-types]");
+
+      const outputPanels = new Map(
+        Array.from(document.querySelectorAll<HTMLElement>("[data-output-panel]")).map((p) => [
+          p.dataset.outputPanel ?? "",
+          p,
+        ]),
+      );
+      const outputTabs = Array.from(document.querySelectorAll<HTMLButtonElement>("[data-output-tab]"));
+
+      // ---- Highlight overlay sync ----
+      const updateHighlight = () => {
+        if (!textarea || !highlight) return;
+        // Pad so the last line's highlight extends to the textarea height.
+        highlight.innerHTML = renderSource(textarea.value) + "\n";
+      };
+
+      const syncScroll = () => {
+        if (!textarea || !highlight) return;
+        highlight.scrollTop = textarea.scrollTop;
+        highlight.scrollLeft = textarea.scrollLeft;
+      };
+
+      // ---- Compile (debounced) ----
+      let compileTimer: number | undefined;
+      let wasmReady = false;
+
+      const formatBytes = (bytes: number): string => {
+        if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+        return `${bytes} B`;
+      };
+
+      const escapeHtml = (s: string): string =>
+        s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+      const renderMetadata = (data: any) => {
+        const panel = outputPanels.get("metadata");
+        if (!panel) return;
+        const json = JSON.stringify(data, null, 2);
+        panel.innerHTML = `<pre class="pg-json">${escapeHtml(json)}</pre>`;
+      };
+
+      const renderActions = (data: any) => {
+        const panel = outputPanels.get("actions");
+        if (!panel) return;
+        const actions = data.actions || [];
+        if (!actions.length) {
+          panel.innerHTML = '<p class="pg-empty">No actions.</p>';
+          return;
+        }
+        panel.innerHTML = `<ul class="pg-action-list">${actions.map((a: any) => {
+          const consume = (a.consume_set || []).map((c: any) => `<span class="pg-set-entry">${escapeHtml(c.operation)} ${escapeHtml(c.binding || "")}</span>`).join("");
+          const create = (a.create_set || []).map((c: any) => `<span class="pg-set-entry">${escapeHtml(c.operation)} ${escapeHtml(c.ty || c.binding || "")}</span>`).join("");
+          return `<li class="pg-action-item">
+            <div class="pg-action-head">
+              <code class="pg-action-name">${escapeHtml(a.name)}</code>
+              <span class="pg-action-effect pg-effect-${String(a.effect_class).toLowerCase()}">${escapeHtml(a.effect_class)}</span>
+            </div>
+            <div class="pg-action-sets">
+              <div class="pg-set"><span class="pg-set-label">consume</span><div class="pg-set-items">${consume || "<span class=\"pg-set-empty\">—</span>"}</div></div>
+              <div class="pg-set"><span class="pg-set-label">create</span><div class="pg-set-items">${create || "<span class=\"pg-set-empty\">—</span>"}</div></div>
+            </div>
+            ${a.estimated_cycles != null ? `<div class="pg-action-cycles">${a.estimated_cycles.toLocaleString()} cycles</div>` : ""}
+          </li>`;
+        }).join("")}</ul>`;
+      };
+
+      const renderTypes = (data: any) => {
+        const panel = outputPanels.get("types");
+        if (!panel) return;
+        const types = data.types || [];
+        if (!types.length) {
+          panel.innerHTML = '<p class="pg-empty">No types.</p>';
+          return;
+        }
+        panel.innerHTML = `<ul class="pg-type-list">${types.map((ty: any) => {
+          const caps = (ty.capabilities || []).map((c: string) => `<span class="pg-cap">${escapeHtml(c)}</span>`).join("");
+          return `<li class="pg-type-item">
+            <div class="pg-type-head">
+              <code class="pg-type-name">${escapeHtml(ty.name)}</code>
+              <span class="pg-type-kind">${escapeHtml(ty.kind)}</span>
+            </div>
+            <div class="pg-type-caps">${caps}</div>
+            ${ty.encoded_size != null ? `<div class="pg-type-size">${ty.encoded_size} bytes</div>` : ""}
+          </li>`;
+        }).join("")}</ul>`;
+      };
+
+      const renderErrors = (error: string | null) => {
+        const panel = outputPanels.get("errors");
+        if (!panel) return;
+        if (!error) {
+          panel.innerHTML = `<p class="pg-no-errors">${escapeHtml(i18n.noErrors)}</p>`;
+          return;
+        }
+        panel.innerHTML = `<div class="pg-error"><pre>${escapeHtml(error)}</pre></div>`;
+      };
+
+      const renderRail = (data: any) => {
+        if (!railReady || !railLoading) return;
+        railLoading.hidden = true;
+        railReady.hidden = false;
+        if (railModule) railModule.textContent = data.module || "—";
+        if (railTarget) railTarget.textContent = data.target_profile?.name || "ckb";
+        if (railSize) railSize.textContent = data.artifact_size_bytes ? formatBytes(data.artifact_size_bytes) : "—";
+        if (railActions) {
+          railActions.innerHTML = (data.actions || []).map((a: any) =>
+            `<li class="pg-rail-action">
+              <div class="pg-rail-action-head">
+                <code>${escapeHtml(a.name)}</code>
+                <span class="pg-action-effect pg-effect-${String(a.effect_class).toLowerCase()}">${escapeHtml(a.effect_class)}</span>
+              </div>
+            </li>`
+          ).join("") || '<li class="pg-rail-empty">—</li>';
+        }
+        if (railTypes) {
+          railTypes.innerHTML = (data.types || []).map((ty: any) =>
+            `<li class="pg-rail-type"><code>${escapeHtml(ty.name)}</code> <span class="pg-rail-type-kind">${escapeHtml(ty.kind)}</span></li>`
+          ).join("") || '<li class="pg-rail-empty">—</li>';
+        }
+      };
+
+      const doCompile = () => {
+        if (!wasmReady || !textarea || !compileMetadataJson) return;
+        const t0 = performance.now();
+        // compile_metadata takes an artifact target (riscv64-asm,
+        // riscv64-elf), not a profile name (ckb). null = default.
+        const result = compileMetadataJson(textarea.value, null);
+        const elapsed = Math.round(performance.now() - t0);
+        let data: any;
+        try {
+          data = JSON.parse(result);
+        } catch {
+          data = { error: "Invalid compiler output" };
+        }
+        if (data.error) {
+          renderErrors(data.error);
+          if (status) status.textContent = data.error.slice(0, 80);
+          // Clear rail on error
+          if (railReady && railLoading) {
+            railReady.hidden = true;
+            railLoading.hidden = false;
+            railLoading.innerHTML = `<span class="pg-error-inline">${escapeHtml(data.error)}</span>`;
+          }
+          return;
+        }
+        renderMetadata(data);
+        renderActions(data);
+        renderTypes(data);
+        renderErrors(null);
+        renderRail(data);
+        if (status) status.textContent = i18n.ready.replace("{ms}", String(elapsed));
+      };
+
+      const scheduleCompile = () => {
+        window.clearTimeout(compileTimer);
+        compileTimer = window.setTimeout(doCompile, 300);
+      };
+
+      // ---- Tab switching ----
+      outputTabs.forEach((tab) => {
+        tab.addEventListener("click", () => {
+          const target = tab.dataset.outputTab;
+          outputTabs.forEach((t2) => {
+            const active = t2 === tab;
+            t2.classList.toggle("active", active);
+            t2.setAttribute("aria-selected", String(active));
+          });
+          outputPanels.forEach((panel, key) => {
+            panel.hidden = key !== target;
+            panel.classList.toggle("active", key === target);
+          });
+        });
+      });
+
+      // ---- Editor events ----
+      if (textarea) {
+        textarea.addEventListener("input", () => {
+          updateHighlight();
+          scheduleCompile();
+        });
+        textarea.addEventListener("scroll", syncScroll);
+        // Tab key inserts two spaces (don't steal focus).
+        textarea.addEventListener("keydown", (e) => {
+          if (e.key === "Tab") {
+            e.preventDefault();
+            const start = textarea.selectionStart;
+            const end = textarea.selectionEnd;
+            textarea.value = textarea.value.slice(0, start) + "  " + textarea.value.slice(end);
+            textarea.selectionStart = textarea.selectionEnd = start + 2;
+            updateHighlight();
+            scheduleCompile();
+          }
+        });
+      }
+
+      // ---- Example switcher ----
+      if (exampleSelect) {
+        exampleSelect.addEventListener("change", () => {
+          const id = exampleSelect.value;
+          const src = exampleSources[id];
+          if (src !== undefined && textarea) {
+            textarea.value = src;
+            updateHighlight();
+            scheduleCompile();
+          }
+        });
+      }
+
+      // ---- URL ?example= param + share ----
+      const params = new URLSearchParams(window.location.search);
+      const paramExample = params.get("example");
+      if (paramExample && exampleSources[paramExample] !== undefined && textarea) {
+        textarea.value = exampleSources[paramExample];
+        if (exampleSelect) exampleSelect.value = paramExample;
+      }
+
+      shareBtn?.addEventListener("click", async () => {
+        const url = new URL(window.location.href);
+        url.searchParams.set("example", exampleSelect?.value ?? "token");
+        try {
+          await navigator.clipboard.writeText(url.toString());
+          shareBtn.textContent = i18n.copied;
+          window.setTimeout(() => {
+            shareBtn.textContent = i18n.share;
+          }, 1600);
+        } catch {
+          // Clipboard unavailable; ignore.
+        }
+      });
+
+      // ---- Init WASM ----
+      // Dynamic import so Rollup doesn't try to bundle the static asset.
+      // The `/* @vite-ignore */` comment prevents Vite from warning.
+      import(/* @vite-ignore */ wasmUrl.href).then((mod: any) => {
+        wasmInit = mod.default;
+        compileMetadataJson = mod.compile_metadata_json;
+        wasmVersion = mod.version;
+        return wasmInit();
+      }).then(() => {
+        wasmReady = true;
+        if (versionEl) versionEl.textContent = `cellc v${wasmVersion()}`;
+        if (loading) loading.hidden = true;
+        updateHighlight();
+        doCompile();
+      }).catch((e: unknown) => {
+        if (status) status.textContent = `Failed to load compiler: ${e}`;
+      });
+
+      updateHighlight();
+    </script>
+  </body>
+</html>

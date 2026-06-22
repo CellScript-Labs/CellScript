@@ -1,8 +1,30 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
+
+// site.ts lives at website/src/data/site.ts. We need to reach the
+// repo root (../../..) to read the examples/ directory.
+const here = dirname(fileURLToPath(import.meta.url));
+const repoRoot = resolve(here, "..", "..", "..");
+
 export const links = {
   docs: "https://github.com/a19q3/CellScript/tree/main/docs",
   examples: "https://github.com/a19q3/CellScript/tree/main/examples",
   source: "https://github.com/a19q3/CellScript",
   wiki: "https://github.com/a19q3/CellScript/wiki",
+};
+
+/**
+ * Full compilable source for each hero example, read from examples/ at
+ * build time. The heroExamples array above uses truncated display
+ * snippets ("// ... omitted") for the landing page; the playground
+ * needs the real file so the WASM compiler can actually compile it.
+ */
+export const exampleFullSources: Record<string, string> = {
+  token: readFileSync(resolve(repoRoot, "examples", "token.cell"), "utf-8"),
+  nft: readFileSync(resolve(repoRoot, "examples", "nft.cell"), "utf-8"),
+  amm: readFileSync(resolve(repoRoot, "examples", "amm_pool.cell"), "utf-8"),
+  vesting: readFileSync(resolve(repoRoot, "examples", "vesting.cell"), "utf-8"),
 };
 
 export const heroExamples = [
