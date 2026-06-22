@@ -5,6 +5,26 @@ import { defaultLocale, translations } from "../i18n/translations";
 
 const locale = defaultLocale;
 const t = translations[locale];
+const metadataJson = `{
+  "metadata_schema_version": 42,
+  "module": "cellscript::vesting",
+  "target_profile": "ckb",
+  "types": {
+    "VestingConfig": { "kind": "shared", "capabilities": ["store", "create", "read_ref"] },
+    "VestingGrant": { "kind": "receipt", "flow": "Granted -> Claimable -> FullyClaimed" }
+  },
+  "actions": [{
+    "name": "claim_vested",
+    "effect_class": "Mutating",
+    "consume_set": ["grant"],
+    "create_set": ["tokens", "updated_grant"],
+    "ckb_runtime_features": ["current_timepoint"]
+  }],
+  "proof_plan": {
+    "status": "review evidence",
+    "limit": "sidecar provenance must be checked outside the compiler"
+  }
+}`;
 const getExampleItemCopy = (groupId: string, itemId: string) =>
   (t.examples.groups as Record<string, { items: Record<string, readonly [string, string]> }>)[groupId].items[itemId];
 
@@ -152,6 +172,10 @@ const renderLine = (line: string) => {
         <div class="code-shell spotlight-card" data-code-tabs>
           <div class="code-head">
             <span><span class="code-dot"></span><span data-file-label>{heroExamples[0].file}</span></span>
+            <button class="copy-btn code-copy" type="button" data-copy-source data-i18n-aria-label="a11y.copyAria" aria-label={t.a11y.copyAria} aria-live="polite">
+              <svg class="copy-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M6 4h8v10H6z" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M4 6v10h8" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
+              <svg class="check-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10.5l4 4 8-9" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+            </button>
           </div>
           <div class="tabbar" role="tablist" aria-label={t.hero.examplesLabel} data-i18n-aria-label="hero.examplesLabel">
             {heroExamples.map((example, index) => (
@@ -181,7 +205,13 @@ const renderLine = (line: string) => {
             <article class="step">
               <span class="step-num">{index + 1}</span>
               <h3 data-i18n={`start.steps.${index}.0`}>{label}</h3>
-              <p><code data-i18n={`start.steps.${index}.1`}>{command}</code></p>
+              <p>
+                <code data-i18n={`start.steps.${index}.1`}>{command}</code>
+                <button class="copy-btn" type="button" data-copy-text={command} data-i18n-aria-label="a11y.copyAria" aria-label={t.a11y.copyAria} aria-live="polite">
+                  <svg class="copy-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M6 4h8v10H6z" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M4 6v10h8" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
+                  <svg class="check-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10.5l4 4 8-9" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+                </button>
+              </p>
             </article>
           ))}
         </div>
@@ -322,27 +352,14 @@ const renderLine = (line: string) => {
             </div>
             <details class="metadata-disclosure" open>
               <summary data-i18n="assurance.metadataExcerpt">{t.assurance.metadataExcerpt}</summary>
-              <span class="metadata-comment"># <span data-i18n="assurance.metadataComment">{t.assurance.metadataComment}</span></span>
-              <pre class="metadata-panel">{`{
-  "metadata_schema_version": 42,
-  "module": "cellscript::vesting",
-  "target_profile": "ckb",
-  "types": {
-    "VestingConfig": { "kind": "shared", "capabilities": ["store", "create", "read_ref"] },
-    "VestingGrant": { "kind": "receipt", "flow": "Granted -> Claimable -> FullyClaimed" }
-  },
-  "actions": [{
-    "name": "claim_vested",
-    "effect_class": "Mutating",
-    "consume_set": ["grant"],
-    "create_set": ["tokens", "updated_grant"],
-    "ckb_runtime_features": ["current_timepoint"]
-  }],
-  "proof_plan": {
-    "status": "review evidence",
-    "limit": "sidecar provenance must be checked outside the compiler"
-  }
-}`}</pre>
+              <div class="metadata-block">
+                <span class="metadata-comment"># <span data-i18n="assurance.metadataComment">{t.assurance.metadataComment}</span></span>
+                <pre class="metadata-panel">{metadataJson}</pre>
+                <button class="copy-btn metadata-copy" type="button" data-copy-text={metadataJson} data-i18n-aria-label="a11y.copyAria" aria-label={t.a11y.copyAria} aria-live="polite">
+                  <svg class="copy-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M6 4h8v10H6z" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M4 6v10h8" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
+                  <svg class="check-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10.5l4 4 8-9" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+                </button>
+              </div>
             </details>
           </article>
         </div>
@@ -720,6 +737,42 @@ const renderLine = (line: string) => {
           // Theme changes still work even when storage is unavailable.
         }
         syncThemeToggle();
+      });
+
+      // Copy-to-clipboard for commands, hero source, and metadata.
+      // data-copy-text buttons carry their own payload; data-copy-source buttons
+      // resolve their payload at click time from the active hero code panel.
+      const flashCopied = (btn: HTMLButtonElement) => {
+        btn.classList.add("is-copied");
+        btn.setAttribute("aria-label", getMessage("a11y.copiedAria") ?? "Copied to clipboard");
+        window.setTimeout(() => {
+          btn.classList.remove("is-copied");
+          btn.setAttribute("aria-label", getMessage("a11y.copyAria") ?? "Copy to clipboard");
+        }, 1600);
+      };
+
+      const writeClipboard = async (text: string) => {
+        try {
+          await navigator.clipboard.writeText(text);
+          return true;
+        } catch {
+          return false;
+        }
+      };
+
+      const copyButtons = Array.from(document.querySelectorAll<HTMLButtonElement>(".copy-btn"));
+      const heroCodeTabs = document.querySelector("[data-code-tabs]");
+      copyButtons.forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          let text = btn.dataset.copyText ?? "";
+          if (btn.hasAttribute("data-copy-source") && heroCodeTabs) {
+            const activePanel = heroCodeTabs.querySelector<HTMLElement>(".code-panel.active");
+            text = activePanel?.textContent?.replace(/\n/g, "\n").trim() ?? "";
+          }
+          if (!text) return;
+          const ok = await writeClipboard(text);
+          if (ok) flashCopied(btn);
+        });
       });
     </script>
   </body>

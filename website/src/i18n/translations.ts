@@ -31,6 +31,10 @@ export const translations = {
     },
     a11y: {
       skipToContent: "Skip to content",
+      copy: "Copy",
+      copied: "Copied",
+      copyAria: "Copy to clipboard",
+      copiedAria: "Copied to clipboard",
     },
     hero: {
       title: "CellScript",
@@ -213,6 +217,10 @@ export const translations = {
     },
     a11y: {
       skipToContent: "跳到正文",
+      copy: "复制",
+      copied: "已复制",
+      copyAria: "复制到剪贴板",
+      copiedAria: "已复制到剪贴板",
     },
     hero: {
       title: "CellScript",

@@ -772,6 +772,69 @@ select:focus-visible {
   box-shadow: 0 0 0 3px var(--accent-line);
 }
 
+.copy-btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  background: var(--surface-button);
+  color: var(--muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    background-color var(--duration-fast) var(--ease-standard);
+}
+
+.copy-btn:hover {
+  color: var(--text);
+  border-color: var(--line);
+  background: var(--surface-hover);
+}
+
+.copy-btn .check-icon {
+  display: none;
+}
+
+.copy-btn.is-copied {
+  color: var(--accent);
+  border-color: var(--accent-line);
+}
+
+.copy-btn.is-copied .copy-icon {
+  display: none;
+}
+
+.copy-btn.is-copied .check-icon {
+  display: block;
+}
+
+.copy-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+.code-copy {
+  margin-left: auto;
+}
+
+.metadata-block {
+  position: relative;
+}
+
+.metadata-copy {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: var(--panel);
+}
+
 .tabbar {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1495,9 +1558,17 @@ tr:last-child td {
 
 .example-card p,
 .step p {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin: 10px 0 0;
   color: var(--muted);
   line-height: 1.55;
+}
+
+.step p code {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .steps {
