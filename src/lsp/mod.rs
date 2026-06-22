@@ -1,5 +1,5 @@
 use crate::ast::*;
-use crate::error::{CompileError, Span};
+use crate::error::{CompileError, DiagnosticSeverity as CompilerDiagnosticSeverity, Span};
 use crate::lexer::token::{keyword_or_identifier, TokenKind};
 use camino::Utf8PathBuf;
 use serde::{Deserialize, Serialize};
@@ -1949,7 +1949,10 @@ fn span_to_range(source: &str, span: Span) -> Range {
 fn diagnostic_from_error(source: &str, error: &CompileError) -> Diagnostic {
     Diagnostic {
         range: span_to_range(source, error.span),
-        severity: DiagnosticSeverity::Error,
+        severity: match error.severity {
+            CompilerDiagnosticSeverity::Error => DiagnosticSeverity::Error,
+            CompilerDiagnosticSeverity::Warning => DiagnosticSeverity::Warning,
+        },
         message: error.message.clone(),
         source: "cellscript".to_string(),
     }
@@ -2699,6 +2702,13 @@ action accept(input: Offer) -> output: Offer {
         let diagnostics = server.get_diagnostics(&uri);
         assert!(!diagnostics.is_empty());
         assert_eq!(diagnostics[0].severity, DiagnosticSeverity::Error);
+    }
+
+    #[test]
+    fn compiler_warning_diagnostics_keep_warning_severity() {
+        let error = CompileError::warning("compatibility note", Span::new(0, 4, 1, 1));
+        let diagnostic = diagnostic_from_error("note", &error);
+        assert_eq!(diagnostic.severity, DiagnosticSeverity::Warning);
     }
 
     #[test]

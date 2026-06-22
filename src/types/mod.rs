@@ -2462,9 +2462,12 @@ impl<'a> TypeChecker<'a> {
                 Ok(())
             }
             Stmt::Return(Some(expr)) => {
-                let ty = self.infer_expr(env, expr)?;
+                let ty = match self.current_return_type.clone() {
+                    Some(Some(expected)) => self.infer_expr_with_expected_type(env, expr, &expected, expr_span(expr))?,
+                    _ => self.infer_expr(env, expr)?,
+                };
                 match &self.current_return_type {
-                    Some(Some(expected)) if !self.types_equal(expected, &ty) => {
+                    Some(Some(expected)) if !self.expr_type_compatible_with_expected(expr, &ty, expected, expr_span(expr))? => {
                         return Err(CompileError::new(
                             format!("return type mismatch: expected {:?}, found {:?}", expected, ty),
                             expr_span(expr),
@@ -6722,6 +6725,151 @@ action literal_widths(flag: bool) -> u8 {
         let left: u8 = 1
         let right: u8 = if flag { SMALL } else { 3 }
         return left + right
+}
+"#,
+        );
+
+        check(&module).unwrap();
+    }
+
+    #[test]
+    fn explicit_return_integer_literals_use_declared_return_widths() {
+        let module = source_module(
+            r#"
+module test
+
+fn as_u8() -> u8 {
+    return 5
+}
+
+fn as_u32() -> u32 {
+    return 5
+}
+
+fn as_i32() -> i32 {
+    return 5
+}
+
+fn as_u128() -> u128 {
+    return 5
+}
+"#,
+        );
+
+        check(&module).unwrap();
+    }
+
+    #[test]
+    fn i32_arithmetic_accepts_matching_i32_values() {
+        let module = source_module(
+            r#"
+module test
+
+fn add(left: i32, right: i32) -> i32 {
+    return left + right
+}
+"#,
+        );
+
+        check(&module).unwrap();
+    }
+
+    #[test]
+    fn mixed_i32_u32_arithmetic_is_rejected() {
+        let module = source_module(
+            r#"
+module test
+
+fn add(left: i32, right: u32) -> i32 {
+    return left + right
+}
+"#,
+        );
+
+        let err = check(&module).unwrap_err();
+        assert!(err.message.contains("arithmetic operations require matching numeric types"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn unsigned_arithmetic_widens_to_declared_result_type() {
+        let module = source_module(
+            r#"
+module test
+
+fn add(left: u8, right: u16) -> u16 {
+    return left + right
+}
+"#,
+        );
+
+        check(&module).unwrap();
+    }
+
+    #[test]
+    fn vec_push_integer_literal_uses_item_width() {
+        let module = source_module(
+            r#"
+module test
+
+action collect() -> u8 {
+    verification
+        let mut values: Vec<u8> = []
+        values.push(5)
+        return values.first()
+}
+"#,
+        );
+
+        check(&module).unwrap();
+    }
+
+    #[test]
+    fn struct_field_integer_literal_uses_field_width() {
+        let module = source_module(
+            r#"
+module test
+
+struct Narrow {
+    amount: u8,
+}
+
+action make() -> Narrow {
+    verification
+        return Narrow { amount: 5 }
+}
+"#,
+        );
+
+        check(&module).unwrap();
+    }
+
+    #[test]
+    fn unsigned_ordering_comparison_accepts_widening() {
+        let module = source_module(
+            r#"
+module test
+
+action compare(left: u8, right: u16) -> bool {
+    verification
+        return left < right
+}
+"#,
+        );
+
+        check(&module).unwrap();
+    }
+
+    #[test]
+    fn add_assign_integer_literal_uses_target_width() {
+        let module = source_module(
+            r#"
+module test
+
+action increment() -> u8 {
+    verification
+        let mut value: u8 = 1
+        value += 2
+        return value
 }
 "#,
         );

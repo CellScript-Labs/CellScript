@@ -65,6 +65,13 @@ merge can have no state continuation.
 | Global protocol law | `invariant`, aggregate primitives, ProofPlan records | Must state trigger, scope, reads, and executable/metadata coverage. |
 | Deferred / rejected syntax | Non-canonical action-body sugar or protocol-name semantics | Must not be accepted as partial syntax. |
 
+`preserve ... except` is intentionally outside the accepted local-sugar
+surface. Preservation is an audit boundary, so the source must name every field
+whose equality is required. A blacklist form can silently change meaning when a
+schema gains a field, either preserving a new field without review or leaving it
+outside the visible audit trail. The parser therefore rejects `except` and `*`
+inside `preserve` blocks and asks authors to write an explicit whitelist.
+
 ## 0.19 Release Status Matrix
 
 | Track | Status | Implementation / evidence | Release gate |

@@ -213,6 +213,14 @@ impl MigrationDiagnostic {
     pub fn full_message(self) -> String {
         format!("{}: {}\n  hint: {}", self.code(), self.message(), self.hint())
     }
+
+    pub fn warning(self, span: Span) -> CompileError {
+        CompileError::warning(self.full_message(), span).with_code(self.code())
+    }
+
+    pub fn error(self, span: Span) -> CompileError {
+        CompileError::new(self.full_message(), span).with_code(self.code())
+    }
 }
 
 pub struct ErrorReporter {
@@ -283,5 +291,13 @@ mod tests {
         reporter.report("hard failure", Span::new(4, 5, 1, 5));
         assert!(reporter.has_errors());
         assert_eq!(reporter.errors()[1].severity, DiagnosticSeverity::Error);
+    }
+
+    #[test]
+    fn migration_diagnostic_can_build_typed_warning() {
+        let warning = MigrationDiagnostic::Cs0151.warning(Span::new(0, 3, 1, 1));
+        assert_eq!(warning.severity, DiagnosticSeverity::Warning);
+        assert_eq!(warning.code.as_deref(), Some("CS0151"));
+        assert!(warning.message.contains("legacy destroy capability"));
     }
 }
