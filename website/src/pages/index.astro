@@ -567,7 +567,10 @@ const renderLine = (line: string) => {
 
         modelTabs.forEach((tab, index) => {
           tab.tabIndex = index === 0 ? 0 : -1;
-          tab.addEventListener("click", () => activateModel(tab.dataset.modelTab ?? "0"));
+          tab.addEventListener("click", () => {
+            activateModel(tab.dataset.modelTab ?? "0");
+            tab.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
+          });
           tab.addEventListener("keydown", (event) => {
             if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
             event.preventDefault();
@@ -575,8 +578,24 @@ const renderLine = (line: string) => {
             const nextIndex = (index + direction + modelTabs.length) % modelTabs.length;
             activateModel(String(nextIndex));
             modelTabs[nextIndex]?.focus();
+            modelTabs[nextIndex]?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
           });
         });
+
+        // Horizontal-scroll affordance for the 9-tab row on narrow viewports:
+        // toggle edge-fade classes so users see there is more content to scroll.
+        const modelTabsRow = modelRoot.querySelector<HTMLElement>(".model-tabs");
+        if (modelTabsRow && modelTabsRow.scrollWidth > modelTabsRow.clientWidth) {
+          const updateScrollState = () => {
+            const atStart = modelTabsRow.scrollLeft <= 2;
+            const atEnd = modelTabsRow.scrollLeft + modelTabsRow.clientWidth >= modelTabsRow.scrollWidth - 2;
+            modelTabsRow.classList.toggle("is-scrolled-start", !atStart);
+            modelTabsRow.classList.toggle("is-scrolled-end", !atEnd);
+          };
+          updateScrollState();
+          modelTabsRow.addEventListener("scroll", updateScrollState, { passive: true });
+          window.addEventListener("resize", updateScrollState);
+        }
       }
 
       const toolRoot = document.querySelector("[data-tool-tabs]");
