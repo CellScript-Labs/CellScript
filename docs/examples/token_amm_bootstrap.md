@@ -24,6 +24,12 @@ The bundled bootstrap companion is `examples/launch.cell`:
 `examples/amm_pool.cell` is the standalone AMM state machine. Use `seed_pool`
 when you already have two real token Cells. Use `swap_a_for_b`,
 `add_liquidity`, and `remove_liquidity` after a live `Pool` Cell exists.
+The bundled AMM is a bounded constant-product example: it checks token
+identity, nonzero reserves, a capped fee rate, slippage, LP ownership on
+withdrawal, and arithmetic bounds around the reserve and LP-supply updates. It
+is still intentionally narrower than a full exchange: it has one explicit swap
+direction, no oracle/TWAP, no protocol-fee withdrawal, no routing, and no
+concentrated-liquidity model.
 
 The practical bootstrap chain is:
 

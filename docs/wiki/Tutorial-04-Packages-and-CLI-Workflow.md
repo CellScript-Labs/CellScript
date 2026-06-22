@@ -230,17 +230,19 @@ external CKB tooling artifacts such as bootstrapper outputs. Resolver profiles
 must stay narrower: an object can be discovered without being installable by
 `cellc add`.
 
-That means registry resolution is stricter than discovery. The future resolver
-path should accept only objects that can be checked fail-closed:
+That means registry resolution is stricter than discovery. Current `cellc`
+registry dependencies are CellScript source-package dependencies. Future
+profile-aware resolver paths should accept only objects that can be checked
+fail-closed:
 
-| Kind | `cellc add` | Boundary |
+| Kind | Current `cellc add` | Future profile boundary |
 | --- | --- | --- |
 | `source_package` / library | yes | Source and API identity must be pinned and reproducible. |
-| `runtime_verifier` / `spawn-verifier` | yes | TCB object; requires verifier ID, ABI, artifact identity, build profile, security status, and production deployment pins when used in production. |
-| `deployable_contract` | yes | Must expose build/audit/deployment identity, not just source text. |
-| `deployed_artifact_record` | yes | Must bind network, OutPoint, dep type, code/data hash, and status. |
-| `reproducible_artifact` | yes, if artifact-safe | Must bind source hash, build profile hash, artifact hash, and compatibility profile. |
-| `protocol_profile_library` | yes, if resolver-safe | Must be a real package with checkable source/schema/API semantics. |
+| `runtime_verifier` / `spawn-verifier` | no, unless wrapped as a CellScript package today | TCB object; requires verifier ID, ABI, artifact identity, build profile, security status, and production deployment pins when used in production. |
+| `deployable_contract` | no, unless it is a CellScript source package today | Must expose build/audit/deployment identity, not just source text. |
+| `deployed_artifact_record` | no | Must bind network, OutPoint, dep type, code/data hash, and status. |
+| `reproducible_artifact` | no | Must bind source hash, build profile hash, artifact hash, and compatibility profile. |
+| `protocol_profile_library` | only if it is a real CellScript package today | Must be a real package with checkable source/schema/API semantics. |
 | `template`, `cookbook`, `protocol_skeleton`, scaffold | no | Copy-only starting material; after copying, it becomes local project code. |
 
 The rule is intentionally blunt:
@@ -277,6 +279,13 @@ cellc add novaseal/mvb-starter
 
 This keeps the registry as a verifiable dependency and artifact discovery layer,
 not a general examples marketplace.
+
+For mixed projects, keep the records separate. A CellScript app may depend on a
+CellScript library, reference a deployed verifier as TCB evidence, use a
+reproducible bootstrapper artifact during its build process, and copy a cookbook
+starter into local source. Those are four different profile boundaries. They
+may share one registry service and one `namespace/name` style, but they must not
+share one unchecked dependency path.
 
 ## Package Information
 

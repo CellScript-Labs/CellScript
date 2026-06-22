@@ -41,6 +41,42 @@ The off-chain registry optimizes for source distribution and developer
 experience. CKB records only compact, verifiable deployment truth where it is
 actually useful. The lockfile binds the two.
 
+## Profile Compatibility Boundary
+
+`namespace/name/version` is a stable naming layer, not proof that every named
+object is a CellScript source package. The current Phase 1 implementation uses
+one concrete profile:
+
+```text
+cellscript_source_package_v1
+  carrier: Cell.toml + registry.json + Cell.lock + Deployed.toml
+  resolver: cellc package/dependency resolver
+  source hash: Cell.toml plus .cell source roots and explicit entry parent
+  deployment identity: CKB script cell facts when the package is deployed
+```
+
+Future registry services may discover other CKB ecosystem artifacts under the
+same naming convention, such as verifier binaries, deployed script records,
+profile libraries, or reproducible build outputs like `ckb-bootstrapper`.
+Those objects must use explicit artifact profiles. They must not be silently
+accepted by the CellScript package resolver merely because they have a
+`namespace/name` and a Git URL.
+
+The compatibility rule is:
+
+```text
+Discovery can be broad.
+Resolution is profile-specific.
+No resolver may coerce one profile into another.
+```
+
+For backward compatibility, a registry record without an explicit future
+profile is interpreted by current `cellc` commands as a CellScript source
+package candidate and must still satisfy the existing `Cell.toml`,
+`registry.json`, source-hash, build-identity, and deployment-identity checks.
+A future registry proxy or discovery index may expose multiple profiles for the
+same `namespace/name`, but the lockfile must record which profile was selected.
+
 ## Three-Layer Identity Model
 
 CellScript packages exist in three identity layers, each with a distinct
@@ -104,6 +140,26 @@ amm@1.2.0
   │   └─ mainnet:  status=candidate
   └─ (same source version, multiple deployment bindings)
 ```
+
+### Mixed Profile Cases
+
+The following cases are intentionally different, even when they share a
+namespace:
+
+| Case | Correct modelling | Must not be modelled as |
+|---|---|---|
+| A CellScript package imports a CellScript library | `[dependencies]` entry resolved by the CellScript source-package profile | A generic artifact record |
+| A CellScript package needs a deployed verifier CellDep | Deployment or verifier artifact profile with code/data hash, OutPoint, status, and ABI/IPC identity | A source library dependency merely because it lives in Git |
+| A CellScript build uses an external reproducible tool output | Build-input or reproducible-artifact profile that records recipe hash, toolchain/input lock, and output hashes | A `.cell` source dependency |
+| `ckb-bootstrapper` proves a CKB binary | Reproducible-binary profile with source, build recipe, pinned inputs, output binary hashes, and optional CKB commitment/index facts | `cellscript_source_package_v1` |
+| A cookbook/template is copied and edited | Copy/scaffold flow; after copying, the files become local project source | A registry dependency that can affect the verified dependency graph |
+| A generic artifact references a CellScript deployment | Artifact profile may cite CellScript package/deployment identity as evidence | Automatic cross-profile dependency resolution |
+
+This keeps Janx's `ckb-bootstrapper` use case compatible with the architecture:
+it can reuse the registry service, naming convention, proxy/cache layer, and
+hash-bound identity chain, but it needs its own profile contract. That profile
+would answer "which reproducible binary did this recipe produce?" rather than
+"which `.cell` source package did `cellc` import?".
 
 ## Why Not Pure On-Chain Packages?
 

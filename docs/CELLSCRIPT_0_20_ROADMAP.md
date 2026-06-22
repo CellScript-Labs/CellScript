@@ -152,6 +152,21 @@ the raw accesses. Generated TypeScript builders export this manifest in the
 builder manifest and action plans, but still delegate raw cell-data
 materialisation to runtime adapters.
 
+Nineteenth slice: the release gate policy is now explicit. The supported entry
+point is `./scripts/cellscript_gate.sh <dev|ci|backend|release>`, with the old
+`scripts/cellscript_ckb_release_gate.sh` wrapper delegating to it. `release`
+means CI, tooling/docs validation, VS Code validation, builder-backed CKB
+production acceptance, and stateful scenario/action coverage. `release-quick`
+is compile-only preflight evidence and must not be reported as external live
+devnet acceptance.
+
+Twentieth slice: the Molecule / IFRN design-space audit has been collapsed into
+an English improvement report. The current local source-package conclusion is
+that raw cell-data access is expressible and must be declared honestly through
+`cell_data_codec_manifest`, while public raw-layout production claims still
+need external codec adapters, roundtrip vectors, builder/indexer support,
+multi-ABI registry support, and parity matrices.
+
 The generated package should provide:
 
 - typed action functions;
@@ -209,6 +224,21 @@ Current status:
 - `README.md` lists `cellc action build`, `cellc gen-builder --target
   typescript`, `cellc package verify`, and `cellc registry verify --live` as
   first-class tooling surfaces.
+- `docs/CELLSCRIPT_GATE_POLICY.md`, `CHANGELOG.md`, and
+  `docs/releases/CELLSCRIPT_0_20_RELEASE_NOTES.md` define the current release
+  evidence boundary, including compile-only versus local-devnet evidence,
+  exact-artifact build reports, ELF entry ABI checks, and codec-manifest
+  identity.
+- The public Astro website is part of the release communication surface. Recent
+  hardening moved the narrative order to explain the core model before install
+  steps, collapsed noisy metadata JSON by default, added copy-to-clipboard for
+  commands and metadata, fixed keyboard focus/anchor behaviour, made the
+  nine-tab model row scroll on mobile, and raised code/link contrast for WCAG
+  AA readability.
+- Phase 1 registry tutorial entry points are now visible from the wiki sidebar,
+  while stale dependency-cache, codegen-refactor, iCKB investigation, and
+  error-flow audit documents have been removed or archived so old audit notes do
+  not look like current 0.20 status.
 
 Acceptance:
 
@@ -218,6 +248,10 @@ Acceptance:
 - docs describe the exact evidence boundary: generated builders delegate
   live-cell resolution, signing, dry-run, submit, and final CKB acceptance to
   runtime adapters and node-backed gates.
+- website changes carry their own build, interaction, accessibility, or
+  Playwright smoke evidence; website polish is not protocol evidence.
+- the documentation map and wiki navigation point to current 0.20 status
+  documents instead of stale audit files.
 
 ## P0: Live-Chain Deployment Verification
 
@@ -275,6 +309,79 @@ Representative flows should include:
 - Vesting: grant -> claim/revoke -> early claim and invalid revoke rejected;
 - Registry: package resolve -> deployment resolve -> stale deployment rejected.
 
+## P1: Proposal-Local Profiles And Design-Space Evidence
+
+Recent 0.20 work also closed several proposal and design-space gates. These are
+important release-adjacent evidence, but they must remain labelled as
+proposal-local or design-space evidence unless a later milestone promotes them
+into general CellScript guarantees.
+
+### NovaSeal
+
+NovaSeal profile certification is now tracked as a compiler-hosted proposal
+gate through `cellc certify --plugin novaseal-profile-v0`. The current surface
+includes the core v0 skeleton, Agreement, fungible xUDT, RWA receipt,
+BTC transaction commitment, BTC UTXO seal, dual seal, and Fiber candidate
+profiles.
+
+The local/devnet evidence chain covers:
+
+- live local devnet stateful reports for core and Agreement flows;
+- planned-profile live devnet reports for the BTC, dual-seal, Fiber,
+  fungible-xUDT, and RWA surfaces;
+- BIP340 verifier IPC/vector/shell evidence and CKB VM parent/child harnesses;
+- wallet signing vectors and wallet-lock alignment;
+- profile-operator, service-builder, BTC SPV adapter, external-attestation
+  adapter, and external-evidence handoff reports;
+- public/shared CellDep, external TCB, public BTC SPV, and RWA legal/registry
+  templates for later public evidence.
+
+The current claim is local source-package and local/devnet readiness for the
+proposal gates that pass. Public testnet/mainnet or ecosystem production claims
+still require independent public CellDep, external BIP340 TCB, public BTC SPV,
+and RWA legal/registry attestations where those profiles rely on them.
+
+### Evolving DOB
+
+The `proposals/evolving-dob/evolving-dob-profile-v1` package is now part of the
+0.20 proposal evidence surface. It carries `Cell.toml`, `Cell.lock`,
+`Deployed.toml`, registry metadata, schemas, fixtures, ProofPlan/invariant
+records, a devnet workflow script, and a registry-pressure script.
+
+The DOB-EVO audit records the profile as structurally coherent for its
+state-transition specification after the genesis owner-lock check and tooling
+fixes, while keeping unresolved fixture-depth and public-promotion items visible:
+missing negative coverage for many guards, invariant matrix references,
+`released_at` regeneration, action-salt hardening, and minimum CKB version
+policy for `data1`.
+
+### Molecule, IFRN, Raw Layout, And iCKB
+
+The 0.20 design-space closure keeps CellScript's first-class public path as
+Molecule-native typed cells, metadata, audit evidence, provenance, and builder
+identity. Raw cell-data layouts and IFRN-style contracts are possible through
+`ckb::cell_data_*`, `ckb::input_out_point_*`, packed-hash helpers, and
+`lock_args`, but production use requires explicit codec manifests and external
+adapter evidence.
+
+iCKB remains a benchmark and differential-evidence surface under
+`tests/benchmarks`, not a public bundled example or production-equivalence
+claim. The refreshed committed matrix is evidence for the benchmark surface; it
+does not promote iCKB compatibility to the 0.20 release boundary.
+
+Acceptance:
+
+- proposal-local gates must declare their scope, report schema, profile id, and
+  live/devnet/public evidence boundary;
+- NovaSeal public-production status remains blocked until required external
+  attestations are real and current;
+- DOB-EVO public-promotion status remains blocked until fixture depth and
+  deployment-policy follow-ups are closed;
+- raw-layout users must carry codec manifest identity and roundtrip/adapter
+  evidence before builders or registries claim byte-for-byte materialisation;
+- iCKB reports must remain labelled as benchmark/differential evidence unless a
+  later roadmap explicitly promotes production-equivalence closure.
+
 ## P1: Registry Trust Hardening
 
 0.20 should decide which trust features are part of the transaction-builder
@@ -287,13 +394,23 @@ Candidates:
 - signed mutable channels such as `latest` and `stable`;
 - revocation and deprecation policy;
 - audit-report and acceptance-evidence pointers;
-- optional on-chain registry, index, or proxy design.
+- optional on-chain registry, index, or proxy design;
+- profile compatibility rules for future non-CellScript artifacts, including
+  reproducible CKB binaries, verifier artifacts, deployment records, and
+  scaffold-only templates.
 
 Acceptance should remain fail-closed: missing or unsupported trust metadata must
 not silently downgrade into name-only package or deployment resolution.
 For 0.20 this is a metadata-presence gate only: publisher signature
 cryptographic verification and trust-anchor management remain a later security
 milestone.
+
+Profile compatibility is a documentation and schema-reservation concern for
+0.20. Current `cellc` package resolution remains scoped to CellScript source
+packages. Future generic artifact profiles may share the registry service and
+`namespace/name` naming style, but they must carry explicit profile identity in
+lockfiles and must not be installable through the CellScript dependency resolver
+until profile-specific fail-closed checks exist.
 
 ## P2: CellFabric Exploration (Frozen Except Bridge)
 
@@ -317,6 +434,14 @@ stateful flow runner, and bridge envelope have real service-side consumers.
 - Do not make generated builders infer protocol semantics from names such as
   `claim`, `swap`, or `mint`.
 - Do not treat package registry resolution as deployment verification.
+- Do not treat future generic artifact discovery as current CellScript package
+  dependency support.
+- Do not treat NovaSeal or DOB proposal-local devnet/profile evidence as a
+  generic CellScript mainnet certification claim.
+- Do not treat raw-layout expressibility as builder/indexer codec support
+  without adapter identity, roundtrip vectors, and manifest hashes.
+- Do not treat public website polish or documentation navigation as protocol,
+  compiler, or CKB VM evidence.
 - Do not mark a deployment mainnet-certified without external audit and chain
   evidence.
 - Do not make builder success a substitute for CKB VM / tx-pool acceptance.
@@ -329,6 +454,7 @@ stateful flow runner, and bridge envelope have real service-side consumers.
 The full 0.20 gate should include:
 
 ```text
+./scripts/cellscript_gate.sh release
 cellc package verify
 cellc registry verify --live
 cellc gen-builder --target typescript
@@ -338,14 +464,19 @@ local CKB dry-run for generated action transactions
 local CKB submitted stateful flows for canonical examples
 negative builder-shape rejection fixtures
 deployment registry mismatch rejection fixtures
+cellc certify --plugin novaseal-profile-v0 when NovaSeal proposal evidence is claimed
+Evolving DOB devnet workflow and registry-pressure checks when DOB proposal evidence is claimed
+website build and interaction/a11y smoke checks when website files change
 ```
 
 Required report fields:
 
+- gate mode and report schema;
 - package namespace / name / version;
 - source hash;
 - metadata hash;
 - artifact hash;
+- cell_data_codec_manifest_hash when cell-data codec identity is present;
 - ELF entry ABI gate result, including stack-pointer preservation and RX-only
   executable segment evidence;
 - deployment ref;
@@ -360,4 +491,7 @@ Required report fields:
 - dry-run exit code;
 - submitted tx hash when run in submit mode;
 - old output -> new output lineage;
+- proposal profile id and proposal-local evidence boundary when proposal
+  reports are included;
+- website build/smoke evidence when public website changes are included;
 - known limitations.

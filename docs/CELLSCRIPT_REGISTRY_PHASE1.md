@@ -24,6 +24,16 @@ The key insight is the **Go-style convention**: if no explicit discovery entry e
 
 This is exactly how Go modules work. `go get github.com/cellscript/amm` doesn't need any index — it just clones that URL. The discovery index is our equivalent of `GONOSUMCHECK` or a `GOPRIVATE` override: a way to handle exceptions, not a mandatory gate.
 
+Compatibility note: Phase 1 is the **CellScript source-package profile** of a
+broader registry architecture. The naming convention `namespace/name/version`
+can later be reused for other CKB artifacts, but `cellc install` and
+`Cell.toml [dependencies]` currently mean "resolve a CellScript package that
+has `Cell.toml`, `.cell` source, `registry.json`, and CellScript build
+identity". A CKB binary, verifier artifact, deployment record, or
+`ckb-bootstrapper` reproducible build output must use a future artifact profile
+with its own hash and build-recipe contract. Discovery may become broad;
+dependency resolution stays profile-specific and fail-closed.
+
 ```mermaid
 graph TB
     subgraph "Resolution: Convention First"
@@ -180,6 +190,32 @@ type_id = "0xdddd..."
 ```
 
 The separation matters. `Cell.toml` says "I want hash_type = data1." `Deployed.toml` says "the cell at 0xaaaa...:0 actually has hash_type = data1, and here's the on-chain proof." One is intent, the other is fact. Confusing the two leads to exactly the kind of supply-chain vulnerabilities that smart contract systems should avoid.
+
+## Compatibility With Non-CellScript Artifacts
+
+The registry service is deliberately shaped so it can grow beyond CellScript
+packages without changing the core trust model. The safe extension point is an
+explicit profile, not a looser interpretation of the current package format.
+
+| Object | Current Phase 1 handling | Future-compatible handling |
+|---|---|---|
+| CellScript library package | Resolved through `Cell.toml [dependencies]` | Remains `cellscript_source_package_v1` |
+| Deployed CellScript contract | Verified through `Cell.lock` + `Deployed.toml` | May also be indexed by a deployment artifact profile |
+| Runtime verifier or helper script Cell | Not a source dependency unless packaged as CellScript source | Verifier/deployable artifact profile with ABI, CellDep, status, and artifact hashes |
+| Reproducible CKB binary or `ckb-bootstrapper` output | Not accepted by `cellc install` as a package | Reproducible-binary profile with source hash, build recipe hash, pinned inputs, and output binary hashes |
+| Template, skeleton, cookbook example | Copy by hand or through a scaffold command | Still copy/scaffold only; not dependency-safe by default |
+
+Mixed-use rules:
+
+- a `namespace/name` may have more than one profile, but a lockfile must record
+  the selected profile;
+- a registry proxy may cache multiple profiles, but it must not rewrite
+  profile identity or turn one profile into another;
+- a CellScript package may reference a generic artifact as deployment evidence
+  or a declared TCB input only after that artifact profile defines the fields
+  needed for fail-closed verification;
+- current `cellc` commands must keep rejecting non-CellScript package shapes
+  until profile-specific resolver support exists.
 
 ## Tutorial: End to End
 

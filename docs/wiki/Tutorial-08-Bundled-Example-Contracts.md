@@ -15,7 +15,7 @@ example.
 | `examples/timelock.cell` | Time-gated release checks, release requests, and approval flow. |
 | `examples/multisig.cell` | Threshold policy, proposal records, signatures-as-data, and lock-boundary predicates. |
 | `examples/vesting.cell` | Vesting grants, receipts, claim flow, and admin-boundary comments. |
-| `examples/amm_pool.cell` | Shared pool state, swap logic, liquidity receipts, and settlement effects. |
+| `examples/amm_pool.cell` | Shared pool state, bounded swap logic, liquidity receipts, LP ownership checks, and settlement effects. |
 | `examples/launch.cell` | Mint-authority bootstrap and launch/pool composition patterns. |
 
 The top-level `examples/*.cell` files are the canonical bundled business

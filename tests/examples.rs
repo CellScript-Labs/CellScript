@@ -1712,13 +1712,15 @@ fn amm_pool_input_output_params_are_scheduler_visible() {
         "AMM input/output bindings should bind Pool input/output parameters through transaction cells:\n{}",
         asm
     );
-    assert!(
-        asm.contains("# cellscript abi: schema field Pool.reserve_a")
-            && asm.contains("# cellscript abi: schema field Pool.reserve_b")
-            && asm.contains("# cellscript abi: schema field Pool.total_lp"),
-        "AMM input/output bindings should verify Pool reserve and LP fields through explicit require checks:\n{}",
-        asm
-    );
+    for field in ["reserve_a", "reserve_b", "total_lp"] {
+        assert!(
+            asm.contains(&format!("# cellscript abi: schema field Pool.{field}"))
+                || asm.contains(&format!("# cellscript abi: verify output field Pool.{field}"))
+                || asm.contains(&format!("# cellscript abi: expected field Pool.{field}")),
+            "AMM input/output bindings should verify Pool {field} through explicit require checks:\n{}",
+            asm
+        );
+    }
     assert!(
         asm.contains("# cellscript abi: verify output bytes field LPReceipt.pool_id offset=0 size=32 against loaded bytes"),
         "LPReceipt.pool_id should be checked against loaded Pool TypeHash bytes:\n{}",

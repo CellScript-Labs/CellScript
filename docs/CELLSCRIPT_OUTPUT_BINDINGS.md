@@ -70,6 +70,8 @@ runtime error code.
 - `swap_a_for_b` updates pool reserves through explicit add/sub requirements
 - `add_liquidity` updates reserves and LP supply through proportional updates
 - `remove_liquidity` updates reserves and LP supply through subtraction
+- the example also exposes explicit guard metadata for fee caps, nonzero pool
+  state, arithmetic bounds, LP mint/burn amounts, and LP provider ownership
 
 The generated metadata exposes input/output bindings, runtime requirements, CKB
 runtime accesses, and scheduler shared-state domains.

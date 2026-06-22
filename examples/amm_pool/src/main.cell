@@ -2,13 +2,16 @@ module cellscript::amm_pool
 
 use cellscript::fungible_token::Token
 
-receipt LPReceipt has store {
+const U64_MAX: u64 = 18446744073709551615
+const MAX_FEE_RATE_BPS: u16 = 1000
+
+receipt LPReceipt has store, create, consume {
     pool_id: Hash,
     lp_amount: u64,
     provider: Address,
 }
 
-shared Pool has store {
+shared Pool has store, create, replace {
     token_a_symbol: [u8; 8],
     token_b_symbol: [u8; 8],
     reserve_a: u64,
@@ -21,9 +24,12 @@ action seed_pool(token_a: Token, token_b: Token, fee_rate_bps: u16, provider: Ad
     verification
         require token_a.symbol != token_b.symbol, "same token"
         require token_a.amount > 0 && token_b.amount > 0, "zero liquidity"
-        require fee_rate_bps <= 10000, "fee too high"
+        require fee_rate_bps <= MAX_FEE_RATE_BPS, "fee too high"
         require token_a.type_hash() != token_b.type_hash(), "same token type"
+        require token_a.amount <= U64_MAX / token_b.amount, "liquidity overflow"
+        require token_a.amount * token_b.amount < U64_MAX, "liquidity root overflow"
         let initial_lp = isqrt(token_a.amount * token_b.amount)
+        require initial_lp > 0, "zero lp supply"
         consume token_a
         consume token_b
         create pool = Pool { token_a_symbol: token_a.symbol, token_b_symbol: token_b.symbol, reserve_a: token_a.amount, reserve_b: token_b.amount, total_lp: initial_lp, fee_rate_bps }
@@ -35,11 +41,20 @@ action swap_a_for_b(pool_before: Pool, input: Token, min_output: u64, to: Addres
 
     verification
         require input.symbol == pool_before.token_a_symbol, "wrong input token"
+        require input.amount > 0, "zero input"
+        require pool_before.reserve_a > 0 && pool_before.reserve_b > 0, "empty pool"
+        require pool_before.total_lp > 0, "zero lp supply"
+        require pool_before.fee_rate_bps <= MAX_FEE_RATE_BPS, "fee too high"
+        require input.amount <= U64_MAX / 10000, "fee overflow"
+        require input.amount <= U64_MAX - pool_before.reserve_a, "reserve overflow"
         let fee = input.amount * pool_before.fee_rate_bps as u64 / 10000
         let net_input = input.amount - fee
+        require net_input > 0, "zero net input"
+        require pool_before.reserve_b <= U64_MAX / net_input, "pricing overflow"
         let amount_out = pool_before.reserve_b * net_input / (pool_before.reserve_a + net_input)
         require amount_out >= min_output, "slippage exceeded"
         require amount_out < pool_before.reserve_b, "insufficient reserves"
+        require amount_out > 0, "zero output"
         preserve pool_after from pool_before {
             token_a_symbol
             token_b_symbol
@@ -58,9 +73,17 @@ action add_liquidity(pool_before: Pool, token_a: Token, token_b: Token, provider
     verification
         require token_a.symbol == pool_before.token_a_symbol, "wrong token a"
         require token_b.symbol == pool_before.token_b_symbol, "wrong token b"
+        require token_a.amount > 0 && token_b.amount > 0, "zero deposit"
+        require pool_before.reserve_a > 0 && pool_before.reserve_b > 0 && pool_before.total_lp > 0, "empty pool"
+        require token_a.amount <= U64_MAX - pool_before.reserve_a, "reserve a overflow"
+        require token_b.amount <= U64_MAX - pool_before.reserve_b, "reserve b overflow"
+        require token_a.amount <= U64_MAX / pool_before.total_lp, "lp a overflow"
+        require token_b.amount <= U64_MAX / pool_before.total_lp, "lp b overflow"
         let lp_from_a = token_a.amount * pool_before.total_lp / pool_before.reserve_a
         let lp_from_b = token_b.amount * pool_before.total_lp / pool_before.reserve_b
         let lp_amount = min(lp_from_a, lp_from_b)
+        require lp_amount > 0, "zero lp minted"
+        require lp_amount <= U64_MAX - pool_before.total_lp, "lp supply overflow"
         preserve pool_after from pool_before {
             token_a_symbol
             token_b_symbol
@@ -79,8 +102,15 @@ action remove_liquidity(pool_before: Pool, receipt: LPReceipt, provider: Address
 
     verification
         require receipt.pool_id == pool_before.type_hash(), "wrong pool"
+        require receipt.provider == provider, "wrong provider"
+        require receipt.lp_amount > 0, "zero lp burn"
+        require pool_before.reserve_a > 0 && pool_before.reserve_b > 0 && pool_before.total_lp > 0, "empty pool"
+        require receipt.lp_amount <= pool_before.total_lp, "lp burn exceeds supply"
+        require receipt.lp_amount <= U64_MAX / pool_before.reserve_a, "amount a overflow"
+        require receipt.lp_amount <= U64_MAX / pool_before.reserve_b, "amount b overflow"
         let amount_a = receipt.lp_amount * pool_before.reserve_a / pool_before.total_lp
         let amount_b = receipt.lp_amount * pool_before.reserve_b / pool_before.total_lp
+        require amount_a > 0 && amount_b > 0, "zero withdrawal"
         preserve pool_after from pool_before {
             token_a_symbol
             token_b_symbol

@@ -26,8 +26,8 @@ registering with a central service.
 
 ## What Phase 1 is and is not
 
-Phase 1 is a deliberately minimal registry layer. It answers three
-questions and refuses to answer a fourth:
+Phase 1 is a deliberately minimal registry layer for CellScript source
+packages. It answers three questions and refuses to answer a fourth:
 
 | Question | How Phase 1 answers it |
 |---|---|
@@ -43,6 +43,15 @@ Phase 1 also refuses to be a substitute for chain acceptance. A
 deployment record that names the right cell hash is not the same as
 a cell that the CKB VM will accept today. Use Phase 1 to bind
 identity; use the chain to verify behavior.
+
+The `namespace/name/version` naming convention is intentionally more general
+than the current CellScript resolver. That does not mean every named object is a
+valid `Cell.toml` dependency. A future registry service may also discover CKB
+binary artifacts, verifier outputs, deployed script records, or
+`ckb-bootstrapper` reproducible builds. Those objects need explicit artifact
+profiles. Current Phase 1 `cellc` commands treat a registry dependency as a
+CellScript source package and fail closed when the repository is not shaped like
+one.
 
 ## The three files
 
@@ -135,6 +144,27 @@ Phase 1's verification is **fail-closed at every layer**. A missing
 hash, an empty record, or a cross-layer disagreement is a verification
 failure. There is no "best effort" mode that lets a partial match
 through.
+
+## Mixed Registry Use
+
+Users may reasonably combine CellScript packages with non-CellScript CKB
+artifacts in one project. The safe rule is to keep each object in the resolver
+profile that matches its verification contract:
+
+| User action | Correct boundary |
+|---|---|
+| Import a CellScript library into source | Add it as a `Cell.toml` dependency; it must satisfy the CellScript source-package profile. |
+| Use a deployed verifier or helper script as a CellDep | Record it as deployment/verifier evidence with code hash, data hash, OutPoint, status, and ABI/IPC identity. |
+| Depend on a reproducible CKB binary such as a bootstrapper output | Use a future reproducible-binary profile that pins source, build recipe, inputs, and output hashes. |
+| Start from a protocol skeleton or cookbook | Copy/scaffold it into local source; after copying, verify it as your own package. |
+| Cache artifacts through a registry proxy | Treat the proxy as transport only; the client still verifies the selected profile's hashes. |
+
+Do not mix these by convenience. A verifier binary is not a source package just
+because it has a Git repository. A cookbook is not dependency-safe merely
+because it contains useful `.cell` files. A `ckb-bootstrapper` build recipe is
+valuable registry material, but it answers a different question from
+`cellc install`: it proves a reproducible binary, not an imported CellScript
+module.
 
 ## Why Phase 1 has no server
 
