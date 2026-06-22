@@ -1,0 +1,423 @@
+---
+/**
+ * ProvenanceRail — a persistent right-side rail that shows the
+ * "provenance" of whatever the user is currently looking at.
+ *
+ * On the landing page (static), the rail reads precompiled metadata
+ * from src/data/provenance.json and updates as the user scrolls:
+ *  - hero: version + target + example count
+ *  - core-model: the active model tab's type metadata
+ *  - assurance: the current example's effect/consume/create/proof
+ *  - examples: the hovered example's metadata summary
+ *
+ * Layout:
+ *  - Desktop (>=1100px): fixed 240px right rail beside main content.
+ *  - Mobile (<1100px): hidden by default; a toggle button reveals it
+ *    as a slide-over drawer.
+ *
+ * The rail never auto-scrolls or flashes — it updates values in place
+ * so the eye doesn't have to chase movement (ergonomics §10.5).
+ */
+import { translations, defaultLocale } from "../i18n/translations";
+import { provenanceByExample } from "../lib/provenance";
+
+const t = translations[defaultLocale];
+const examples = Object.entries(provenanceByExample);
+const version = examples[0]?.[1].compilerVersion ?? "—";
+---
+
+<aside class="provenance-rail" data-provenance-rail aria-label={t.provenance.label}>
+  <div class="rail-header">
+    <span class="rail-label" data-i18n="provenance.label">{t.provenance.label}</span>
+    <button class="rail-close" type="button" data-rail-close aria-label="Close provenance" hidden>
+      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
+    </button>
+  </div>
+
+  <div class="rail-body" data-rail-body>
+    <!-- Default state: shown on load and for the hero section -->
+    <div class="rail-section rail-default" data-rail-view="default">
+      <dl class="rail-facts">
+        <div class="rail-fact">
+          <dt data-i18n="provenance.version">{t.provenance.version}</dt>
+          <dd class="substrate-value">v{version}</dd>
+        </div>
+        <div class="rail-fact">
+          <dt data-i18n="provenance.target">{t.provenance.target}</dt>
+          <dd class="substrate-value">ckb</dd>
+        </div>
+        <div class="rail-fact">
+          <dt data-i18n="provenance.examples">{t.provenance.examples}</dt>
+          <dd class="substrate-value">{examples.length}</dd>
+        </div>
+      </dl>
+    </div>
+
+    <!-- Example state: shown for core-model / assurance / examples sections -->
+    <div class="rail-section rail-example" data-rail-view="example" hidden>
+      <div class="rail-module" data-rail-module></div>
+      <div class="rail-substrate">
+        <span class="substrate-line" data-rail-artifact></span>
+      </div>
+      <div class="rail-group">
+        <span class="rail-group-label" data-i18n="provenance.actions">{t.provenance.actions}</span>
+        <ul class="rail-actions" data-rail-actions></ul>
+      </div>
+    </div>
+  </div>
+</aside>
+
+<button class="rail-toggle" type="button" data-rail-toggle aria-label={t.provenance.label} aria-expanded="false">
+  <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 6h12M4 10h12M4 14h12" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
+</button>
+
+<style>
+  .provenance-rail {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 248px;
+    z-index: 80;
+    display: none;
+    flex-direction: column;
+    border-left: 1px solid var(--substrate-rule);
+    background: var(--substrate-bg);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+  }
+
+  /* Desktop: persistent rail */
+  @media (min-width: 1100px) {
+    .provenance-rail {
+      display: flex;
+    }
+
+    .rail-toggle {
+      display: none;
+    }
+  }
+
+  .rail-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 80px 18px 12px;
+    border-bottom: 1px solid var(--substrate-rule);
+  }
+
+  .rail-label {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--substrate-dim);
+  }
+
+  .rail-close {
+    appearance: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--substrate-dim);
+    cursor: pointer;
+  }
+
+  .rail-close svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  .rail-body {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    padding: 14px 18px 24px;
+  }
+
+  .rail-facts {
+    margin: 0;
+  }
+
+  .rail-fact {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 7px 0;
+  }
+
+  .rail-fact dt {
+    font-family: var(--font-sans);
+    font-size: 0.72rem;
+    color: var(--substrate-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  .rail-fact dd {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 0.76rem;
+    color: var(--substrate-text);
+  }
+
+  .substrate-value {
+    color: var(--substrate-accent);
+    font-weight: 600;
+  }
+
+  .rail-section[hidden] {
+    display: none;
+  }
+
+  .rail-module {
+    margin-bottom: 8px;
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    color: var(--substrate-text);
+    word-break: break-all;
+  }
+
+  .rail-substrate {
+    padding: 8px 0 14px;
+    border-bottom: 1px solid var(--substrate-rule);
+    margin-bottom: 14px;
+  }
+
+  .substrate-line {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    color: var(--substrate-dim);
+    word-break: break-all;
+  }
+
+  .rail-group {
+    margin-bottom: 16px;
+  }
+
+  .rail-group-label {
+    display: block;
+    margin-bottom: 8px;
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--substrate-dim);
+  }
+
+  .rail-actions {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .rail-actions :global(.rail-action) {
+    padding: 8px 10px;
+    border: 1px solid var(--substrate-rule);
+    border-radius: 6px;
+    background: var(--panel-soft);
+    cursor: default;
+  }
+
+  .rail-actions :global(.rail-action-head) {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .rail-actions :global(.rail-action-name) {
+    font-family: var(--font-mono);
+    font-size: 0.74rem;
+    color: var(--substrate-text);
+    font-weight: 600;
+  }
+
+  .rail-actions :global(.rail-action-effect) {
+    flex-shrink: 0;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    letter-spacing: 0.04em;
+  }
+
+  .rail-actions :global(.rail-action-effect\.ispure) {
+    color: var(--accent);
+    background: var(--accent-surface);
+  }
+
+  .rail-actions :global(.rail-action-effect\.ismutating),
+  .rail-actions :global(.rail-action-effect\.isdestroying),
+  .rail-actions :global(.rail-action-effect\.iscreating) {
+    color: var(--substrate-accent);
+    background: var(--panel-chip);
+  }
+
+  .rail-actions :global(.rail-action-detail) {
+    margin-top: 5px;
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+    color: var(--substrate-dim);
+    line-height: 1.5;
+  }
+
+  /* Mobile: slide-over drawer toggle */
+  .rail-toggle {
+    position: fixed;
+    right: 16px;
+    bottom: 72px;
+    z-index: 81;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    border: 1px solid var(--line-soft);
+    border-radius: 50%;
+    background: var(--surface-button);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    color: var(--text);
+    cursor: pointer;
+    box-shadow: var(--shadow-soft);
+  }
+
+  .rail-toggle[aria-expanded="true"] {
+    display: none;
+  }
+
+  .rail-toggle svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  @media (max-width: 1099px) {
+    .provenance-rail {
+      transform: translateX(100%);
+      transition: transform 0.3s var(--ease-standard);
+    }
+
+    .provenance-rail[data-open] {
+      transform: translateX(0);
+    }
+
+    .rail-close[hidden] {
+      display: inline-flex !important;
+    }
+  }
+</style>
+
+<script>
+  import { provenanceForExample, formatBytes } from "../lib/provenance";
+
+  const rail = document.querySelector<HTMLElement>("[data-provenance-rail]");
+  const railBody = document.querySelector<HTMLElement>("[data-rail-body]");
+  const toggle = document.querySelector<HTMLButtonElement>("[data-rail-toggle]");
+  const closeBtn = document.querySelector<HTMLButtonElement>("[data-rail-close]");
+
+  const defaultView = railBody?.querySelector<HTMLElement>('[data-rail-view="default"]');
+  const exampleView = railBody?.querySelector<HTMLElement>('[data-rail-view="example"]');
+  const moduleEl = railBody?.querySelector<HTMLElement>("[data-rail-module]");
+  const artifactEl = railBody?.querySelector<HTMLElement>("[data-rail-artifact]");
+  const actionsEl = railBody?.querySelector<HTMLElement>("[data-rail-actions]");
+
+  /** Render a given example id's provenance into the rail. */
+  const showExample = (exampleId: string) => {
+    const view = provenanceForExample(exampleId);
+    if (!view || !exampleView || !defaultView) return;
+    defaultView.hidden = true;
+    exampleView.hidden = false;
+    if (moduleEl) moduleEl.textContent = view.module;
+    if (artifactEl) {
+      artifactEl.textContent = `0x${view.artifactHash}… · ${formatBytes(view.artifactSizeBytes)}`;
+    }
+    if (actionsEl) {
+      const effectClass = (effect: string) => effect.toLowerCase();
+      actionsEl.innerHTML = view.actions
+        .map((action) => {
+          const consume = action.consume.length
+            ? action.consume.map((c) => c.binding).join(", ")
+            : "—";
+          const create = action.create.length
+            ? action.create.map((c) => c.binding).join(", ")
+            : "—";
+          return `<li class="rail-action">
+            <div class="rail-action-head">
+              <span class="rail-action-name">${action.name}</span>
+              <span class="rail-action-effect is${effectClass(action.effectClass)}">${action.effectClass}</span>
+            </div>
+            <div class="rail-action-detail">consume: ${consume} → create: ${create}</div>
+          </li>`;
+        })
+        .join("");
+    }
+  };
+
+  const showDefault = () => {
+    if (!defaultView || !exampleView) return;
+    exampleView.hidden = true;
+    defaultView.hidden = false;
+  };
+
+  // Open/close on mobile
+  const setOpen = (open: boolean) => {
+    if (!rail || !toggle) return;
+    if (open) {
+      rail.setAttribute("data-open", "");
+      toggle.setAttribute("aria-expanded", "true");
+    } else {
+      rail.removeAttribute("data-open");
+      toggle.setAttribute("aria-expanded", "false");
+    }
+  };
+
+  toggle?.addEventListener("click", () => setOpen(true));
+  closeBtn?.addEventListener("click", () => setOpen(false));
+
+  // Update rail content as the user scrolls between sections. Each
+  // section carries a data-rail-example attr (the example to show) or
+  // data-rail-default (show the version summary).
+  const railTargets = Array.from(document.querySelectorAll<HTMLElement>("[data-rail-example], [data-rail-default]"));
+  if (railTargets.length) {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        // Pick the most-visible section.
+        let best: { target: HTMLElement; ratio: number } | null = null;
+        for (const entry of entries) {
+          if (entry.isIntersecting && (!best || entry.intersectionRatio > best.ratio)) {
+            best = { target: entry.target as HTMLElement, ratio: entry.intersectionRatio };
+          }
+        }
+        if (!best) return;
+        const target = best.target;
+        const exampleId = target.getAttribute("data-rail-example");
+        if (exampleId) showExample(exampleId);
+        else if (target.hasAttribute("data-rail-default")) showDefault();
+      },
+      { threshold: [0.3, 0.5, 0.7] },
+    );
+    railTargets.forEach((el) => observer.observe(el));
+  }
+
+  // Hover on example cards updates the rail (desktop only — the cards
+  // carry data-rail-example via the existing data-id attribute).
+  const exampleCards = Array.from(document.querySelectorAll<HTMLElement>(".example-card[data-id]"));
+  exampleCards.forEach((card) => {
+    card.addEventListener("mouseenter", () => {
+      const id = card.getAttribute("data-id");
+      if (id) showExample(id);
+    });
+  });
+</script>

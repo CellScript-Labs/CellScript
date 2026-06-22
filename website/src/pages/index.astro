@@ -2,6 +2,9 @@
 import "../styles/global.css";
 import { exampleGroups, heroExamples, links, modelCards, tools, workflowSteps } from "../data/site";
 import { defaultLocale, translations } from "../i18n/translations";
+import { provenanceForExample, effectsSummary, formatBytes, shortHash } from "../lib/provenance";
+import TransitionOverlay from "../components/TransitionOverlay.astro";
+import ProvenanceRail from "../components/ProvenanceRail.astro";
 
 const locale = defaultLocale;
 const t = translations[locale];
@@ -43,6 +46,15 @@ const tokenGroups = {
   builtin: new Set(["u8", "u16", "u32", "u64", "u128", "bool", "Address", "Hash", "String", "Vec", "env", "witness"]),
   capability: new Set(["store", "create", "consume", "replace", "burn", "relock", "read_ref", "transfer", "destroy", "retarget_type"]),
 };
+
+// Pre-resolve provenance for each hero example so the static compile-
+// output indicator and the playground link can reference real numbers
+// without a runtime lookup. Falls back to null when an example has no
+// precompiled metadata (none of the current four, but defensive).
+const heroProvenance = heroExamples.map((example) => ({
+  id: example.id,
+  view: provenanceForExample(example.id),
+}));
 
 const classifyCellToken = (token: string) => {
   if (token.startsWith("//")) return "comment";
@@ -149,7 +161,7 @@ const renderLine = (line: string) => {
     </header>
 
     <main id="top" class="page">
-      <section class="hero" aria-labelledby="hero-title">
+      <section class="hero" aria-labelledby="hero-title" data-rail-default data-transition={JSON.stringify({ action: "init", consume: "[]", create: "landing", effect: "Pure" })}>
         <div class="hero-aurora" aria-hidden="true">
           <span></span>
           <span></span>
@@ -170,8 +182,24 @@ const renderLine = (line: string) => {
         </div>
 
         <div class="code-shell spotlight-card" data-code-tabs>
+          <script is:inline type="application/json" data-hero-provenance set:html={JSON.stringify(
+            Object.fromEntries(
+              heroProvenance
+                .filter(({ view }) => view)
+                .map(({ id, view }) => [id, {
+                  meta: `${view!.types.length} types · ${view!.actions.length} actions · ${effectsSummary(view!)}`,
+                  readout: `artifact: 0x${shortHash(view!.artifactHash)}… · ${formatBytes(view!.artifactSizeBytes)}`,
+                }]),
+            ),
+          )} />
           <div class="code-head">
             <span><span class="code-dot"></span><span data-file-label>{heroExamples[0].file}</span></span>
+            <span class="compile-meta" data-compile-meta aria-hidden="true">
+              {(() => {
+                const v = heroProvenance[0].view;
+                return v ? `${v.types.length} types · ${v.actions.length} actions · ${effectsSummary(v)}` : "";
+              })()}
+            </span>
             <button class="copy-btn code-copy" type="button" data-copy-source data-i18n-aria-label="a11y.copyAria" aria-label={t.a11y.copyAria} aria-live="polite">
               <svg class="copy-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M6 4h8v10H6z" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M4 6v10h8" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
               <svg class="check-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10.5l4 4 8-9" fill="none" stroke="currentColor" stroke-width="2"/></svg>
@@ -195,10 +223,24 @@ const renderLine = (line: string) => {
             ))}
           </div>
           <div class="shell-line"><span class="prompt">$</span><span data-command-label>{heroExamples[0].command}</span></div>
+          <div class="console-footer">
+            <span class="substrate-readout" data-substrate-readout>
+              {(() => {
+                const v = heroProvenance[0].view;
+                return v
+                  ? `artifact: 0x${shortHash(v.artifactHash)}… · ${formatBytes(v.artifactSizeBytes)}`
+                  : "";
+              })()}
+            </span>
+            <a class="playground-link" href={`/playground?example=${heroExamples[0].id}`} data-playground-link>
+              <span data-i18n="hero.playground.editLive">{t.hero.playground.editLive}</span>
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 10h10M11 6l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
+            </a>
+          </div>
         </div>
       </section>
 
-      <section class="section workflow-section" aria-labelledby="workflow">
+      <section class="section workflow-section" aria-labelledby="workflow" data-rail-default data-transition={JSON.stringify({ action: "view_workflow", consume: "landing", create: "workflow", effect: "Pure" })}>
         <h2 class="section-title" id="workflow" data-i18n="sections.workflow">{t.sections.workflow}</h2>
         <div class="workflow-board">
           <div class="workflow-flow" aria-label={t.workflow.aria} data-i18n-aria-label="workflow.aria">
@@ -271,7 +313,7 @@ const renderLine = (line: string) => {
         </div>
       </section>
 
-      <section class="section model-section" aria-labelledby="core-model">
+      <section class="section model-section" aria-labelledby="core-model" data-rail-example="token" data-transition={JSON.stringify({ action: "view_model", consume: "workflow", create: "model", effect: "Pure" })}>
         <h2 class="section-title" id="core-model" data-i18n="sections.coreModel">{t.sections.coreModel}</h2>
         <p class="lead" data-i18n="model.lead">{t.model.lead}</p>
         <p class="boundary-note" data-i18n="model.boundary">{t.model.boundary}</p>
@@ -315,7 +357,7 @@ const renderLine = (line: string) => {
         </div>
       </section>
 
-      <section class="section assurance-section" aria-labelledby="assurance">
+      <section class="section assurance-section" aria-labelledby="assurance" data-rail-example="vesting" data-transition={JSON.stringify({ action: "view_assurance", consume: "model", create: "assurance", effect: "Pure" })}>
         <div class="section-copy">
           <h2 class="section-title" id="assurance" data-i18n="sections.assurance">{t.sections.assurance}</h2>
           <p class="lead" data-i18n="assurance.lead">{t.assurance.lead}</p>
@@ -346,7 +388,7 @@ const renderLine = (line: string) => {
         </div>
       </section>
 
-      <section class="section tooling-section" aria-labelledby="tooling">
+      <section class="section tooling-section" aria-labelledby="tooling" data-rail-default data-transition={JSON.stringify({ action: "view_tooling", consume: "assurance", create: "tooling", effect: "Pure" })}>
         <h2 class="section-title" id="tooling" data-i18n="sections.tooling">{t.sections.tooling}</h2>
         <div class="tooling-console" data-tool-tabs>
           <div class="tool-tabs" role="tablist" aria-label={t.tooling.tabsAria} data-i18n-aria-label="tooling.tabsAria">
@@ -388,7 +430,7 @@ const renderLine = (line: string) => {
         </div>
       </section>
 
-      <section class="section" aria-labelledby="examples">
+      <section class="section" aria-labelledby="examples" data-rail-example="nft" data-transition={JSON.stringify({ action: "view_examples", consume: "tooling", create: "examples", effect: "Pure" })}>
         <h2 class="section-title" id="examples" data-i18n="sections.examples">{t.sections.examples}</h2>
         <div class="example-browser" data-example-tabs>
           <div class="example-tabs" role="tablist" aria-label={t.examples.tabsAria} data-i18n-aria-label="examples.tabsAria">
@@ -421,7 +463,7 @@ const renderLine = (line: string) => {
                 </div>
                 <div class="examples-grid">
                   {group.items.map(({ path, id, tags }) => (
-                    <a class="example-card" href={`${links.source}/blob/main/${path}`} target="_blank" rel="noopener noreferrer">
+                    <a class="example-card" href={`${links.source}/blob/main/${path}`} target="_blank" rel="noopener noreferrer" data-id={id}>
                       <h3 data-i18n={`examples.groups.${group.id}.items.${id}.0`}>{getExampleItemCopy(group.id, id)[0]}</h3>
                       <p data-i18n={`examples.groups.${group.id}.items.${id}.1`}>{getExampleItemCopy(group.id, id)[1]}</p>
                       <span class="example-tags">
@@ -436,7 +478,7 @@ const renderLine = (line: string) => {
         </div>
       </section>
 
-      <section class="section start-section" id="getting-started" aria-labelledby="start">
+      <section class="section start-section" id="getting-started" aria-labelledby="start" data-rail-default data-transition={JSON.stringify({ action: "start", consume: "examples", create: "playground", effect: "Mutating" })}>
         <h2 class="section-title" id="start" data-i18n="sections.gettingStarted">{t.sections.gettingStarted}</h2>
         <div class="steps">
           {t.start.steps.map(([label, command], index) => (
@@ -544,6 +586,14 @@ const renderLine = (line: string) => {
         const mobile = root.querySelector("[data-mobile-tabs]");
         const fileLabel = root.querySelector("[data-file-label]");
         const commandLabel = root.querySelector("[data-command-label]");
+        const compileMeta = root.querySelector("[data-compile-meta]");
+        const substrateReadout = root.querySelector("[data-substrate-readout]");
+        const playgroundLink = root.querySelector<HTMLAnchorElement>("[data-playground-link]");
+        let provenanceMap: Record<string, { meta: string; readout: string }> = {};
+        const provenanceScript = root.querySelector<HTMLScriptElement>("[data-hero-provenance]");
+        if (provenanceScript?.textContent) {
+          try { provenanceMap = JSON.parse(provenanceScript.textContent); } catch { /* malformed; leave empty */ }
+        }
 
         const activate = (id: string) => {
           tabs.forEach((tab) => {
@@ -562,6 +612,25 @@ const renderLine = (line: string) => {
               mobile.value = id;
             }
           });
+          // Sync the on-chain compile-output indicator and playground link
+          // with the newly active example. Falls back silently when an
+          // example has no precompiled provenance.
+          const summary = provenanceMap[id];
+          if (summary) {
+            if (compileMeta) {
+              compileMeta.textContent = summary.meta;
+              compileMeta.removeAttribute("aria-hidden");
+            }
+            if (substrateReadout) substrateReadout.textContent = summary.readout;
+          } else if (compileMeta) {
+            compileMeta.textContent = "";
+            compileMeta.setAttribute("aria-hidden", "true");
+          }
+          if (playgroundLink) {
+            const url = new URL(playgroundLink.href);
+            url.searchParams.set("example", id);
+            playgroundLink.href = url.pathname + url.search;
+          }
         };
 
         tabs.forEach((tab, index) => {
@@ -775,5 +844,7 @@ const renderLine = (line: string) => {
         });
       });
     </script>
+    <ProvenanceRail />
+    <TransitionOverlay />
   </body>
 </html>
