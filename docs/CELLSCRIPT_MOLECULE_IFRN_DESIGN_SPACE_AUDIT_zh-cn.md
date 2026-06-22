@@ -44,8 +44,8 @@
 
 | Claim | 当前锚点 |
 |---|---|
-| CKB profile / metadata Molecule hard constraint | `src/lib.rs:306`, `src/lib.rs:874`, `src/lib.rs:2739`, `src/lib.rs:2817` |
-| public scheduler policy witness Molecule-only | `src/lib.rs:3253-3275` |
+| CKB profile / metadata Molecule hard constraint | `src/lib.rs:306`, `src/lib.rs:913-915`, `src/lib.rs:2779-2781`, `src/lib.rs:2857-2858` |
+| public scheduler policy witness Molecule-only | `src/lib.rs:3411-3416` |
 | `lock_args` 是 fixed-width `Script.args` escape hatch | `docs/CELLSCRIPT_ENTRY_WITNESS_ABI.md:40-43` |
 | schema-backed dynamic witness payload 是 Molecule data | `docs/CELLSCRIPT_ENTRY_WITNESS_ABI.md:70-80` |
 | raw cell data / OutPoint helpers 存在 | `docs/CELLSCRIPT_0_18_ROADMAP.md:93-110` |
@@ -55,7 +55,7 @@
 | iCKB specs 位置与旧 roadmap public examples claim 不一致 | `tests/benchmarks/ickb_specs/README.md:3-9`, `tests/benchmarks/ickb_diff/claim_manifest.json:5-9`, `roadmap/CELLSCRIPT_ROADMAP.md`, `roadmap/CELLSCRIPT_ROADMAP_OVERVIEW.md` |
 | 0.20 已有 ELF entry ABI gate，且本轮新增 build report linkage | `docs/releases/CELLSCRIPT_0_20_RELEASE_NOTES.md`, `scripts/ckb_cellscript_acceptance.sh`, `scripts/validate_ckb_cellscript_production_evidence.py`, `docs/CELLSCRIPT_GATE_POLICY.md` |
 | `cell_data_codec_manifest` 与 generated builder 暴露 | `src/lib.rs`, `src/cli/commands.rs`, `tests/cli.rs`, `docs/releases/CELLSCRIPT_0_20_RELEASE_NOTES.md` |
-| DOB-EVO 主要是 lock-hash / production policy 问题，不是 Molecule-only 问题 | `docs/0.20/CELLSCRIPT_0_20_DOB_EVO_SWARM_AUDIT.md:64`, `docs/0.20/CELLSCRIPT_0_20_DOB_EVO_SWARM_AUDIT.md:121-136` |
+| DOB-EVO 主要是 lock-hash / production policy 问题，不是 Molecule-only 问题 | `docs/0.20/CELLSCRIPT_0_20_DOB_EVO_SWARM_AUDIT.md:64`, `docs/0.20/CELLSCRIPT_0_20_DOB_EVO_SWARM_AUDIT.md:69` |
 
 ### 需要决策的问题
 
@@ -563,10 +563,10 @@ metadata 中应暴露这些 policy，供 ProofPlan、builder、audit report 和 
 ### 立刻可做
 
 1. 已完成：保持单一 active report 文件路径，避免 `_ZH` / `_zh-cn` stale duplicate。
-2. 已完成：把 `tests/benchmarks/ickb_specs/*.cell` 固定为清晰 benchmark surface，并修正 `examples/ickb_benchmark/*.cell` stale claim。
+2. 已完成：把 `tests/benchmarks/ickb_specs/*.cell` 固定为清晰 benchmark surface，并修正 `examples/ickb_benchmark/*.cell` stale claim。实际改动在 `roadmap/CELLSCRIPT_ROADMAP.md:343` 和 `roadmap/CELLSCRIPT_ROADMAP_OVERVIEW.md:330`；源代码位置不变，没有新增 public example 目录。
 3. 已完成：把 `CellScriptBuildReport` schema 写进 `docs/CELLSCRIPT_GATE_POLICY.md`，并明确它整合现有 acceptance report / production gate / ELF ABI gate，而不是替代它们。
 4. 已完成：新增 `cell_data_codec_manifest`，让 raw `LOAD_CELL_DATA` 访问声明为 `molecule+raw-bytes-v1`，并让 TypeScript builder manifest / action plan 暴露该 manifest。
-5. 仍需继续：为现有 Molecule / scheduler witness / 0.18 helper / DOB-EVO audit 结论补齐 citation anchors 到稳定行号或 release-tagged 文档。
+5. 已完成：为现有 Molecule / scheduler witness / 0.18 helper / DOB-EVO audit 结论补齐 citation anchors 到当前代码行或 release-tagged 文档。
 
 ### 决策门禁
 
