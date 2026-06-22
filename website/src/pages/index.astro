@@ -95,14 +95,14 @@ const renderLine = (line: string) => {
           <span>CellScript</span>
         </a>
         <div class="nav-links">
-          <a class="nav-link" href={links.docs}>
+          <a class="nav-link" href={links.docs} target="_blank" rel="noopener noreferrer">
             <svg viewBox="0 0 20 20" aria-hidden="true">
               <path d="M5 3.5h8.5L16 6v12H5z" />
               <path d="M13.5 3.5V6H16M7.5 9h5M7.5 12h5M7.5 15h3" />
             </svg>
             <span data-i18n="nav.docs">{t.nav.docs}</span>
           </a>
-          <a class="nav-link" href={links.source}>
+          <a class="nav-link" href={links.source} target="_blank" rel="noopener noreferrer">
             <svg viewBox="0 0 20 20" aria-hidden="true">
               <path d="M7.5 6.5 4 10l3.5 3.5M12.5 6.5 16 10l-3.5 3.5M11 4.5 9 15.5" />
             </svg>
@@ -418,11 +418,11 @@ const renderLine = (line: string) => {
               >
                 <div class="example-panel-head">
                   <p data-i18n={`examples.groups.${group.id}.summary`}>{t.examples.groups[group.id].summary}</p>
-                  <a href={links.examples} data-i18n="examples.openDirectory">{t.examples.openDirectory}</a>
+                  <a href={links.examples} target="_blank" rel="noopener noreferrer" data-i18n="examples.openDirectory">{t.examples.openDirectory}</a>
                 </div>
                 <div class="examples-grid">
                   {group.items.map(({ path, id, tags }) => (
-                    <a class="example-card" href={`${links.source}/blob/main/${path}`}>
+                    <a class="example-card" href={`${links.source}/blob/main/${path}`} target="_blank" rel="noopener noreferrer">
                       <h3 data-i18n={`examples.groups.${group.id}.items.${id}.0`}>{getExampleItemCopy(group.id, id)[0]}</h3>
                       <p data-i18n={`examples.groups.${group.id}.items.${id}.1`}>{getExampleItemCopy(group.id, id)[1]}</p>
                       <span class="example-tags">
@@ -446,10 +446,10 @@ const renderLine = (line: string) => {
           <p data-i18n="footer.copy">{t.footer.copy}</p>
         </div>
         <div class="footer-links">
-          <a href={links.wiki} data-i18n="footer.docs">{t.footer.docs}</a>
-          <a href={links.docs} data-i18n="footer.spec">{t.footer.spec}</a>
-          <a href={links.examples} data-i18n="footer.examples">{t.footer.examples}</a>
-          <a href={links.source} data-i18n="footer.source">{t.footer.source}</a>
+          <a href={links.wiki} target="_blank" rel="noopener noreferrer" data-i18n="footer.docs">{t.footer.docs}</a>
+          <a href={links.docs} target="_blank" rel="noopener noreferrer" data-i18n="footer.spec">{t.footer.spec}</a>
+          <a href={links.examples} target="_blank" rel="noopener noreferrer" data-i18n="footer.examples">{t.footer.examples}</a>
+          <a href={links.source} target="_blank" rel="noopener noreferrer" data-i18n="footer.source">{t.footer.source}</a>
         </div>
       </div>
     </footer>
