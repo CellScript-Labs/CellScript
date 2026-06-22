@@ -274,6 +274,14 @@ devnet code-cell deployment whose data hash equals that compiled artifact hash.
 Compile-only reports keep the live deployment list empty and are not external
 release evidence.
 
+For the current NovaSeal profile set, production-ready source-package evidence
+means the live local devnet runners pass for core, Agreement, and the six
+planned profiles: BTC transaction commitment, BTC UTXO seal, dual seal, Fiber
+candidate, Fungible xUDT, and RWA receipt. Public/mainnet deployment evidence is
+separate: profile docs must still name any required CellDep attestation,
+external BIP340 TCB review, public BTC SPV/indexer report, or RWA legal/registry
+review.
+
 The production gate compiles the seven checked-in top-level
 `examples/*.cell` bundled examples directly. Those files are the single
 canonical business source and the cleaner reading surface; there are no

@@ -5779,6 +5779,17 @@ impl CodeGenerator {
                         return Some(ExpectedFixedByteSource::Const(bytes));
                     }
                 }
+                if self.schema_pointer_vars.contains(&var.id) && var_width == expected_width {
+                    if let Some(size_offset) = self.schema_pointer_size_offsets.get(&var.id).copied() {
+                        return Some(ExpectedFixedByteSource::LoadedBytes { var_id: var.id, size_offset, width: expected_width });
+                    }
+                    return Some(ExpectedFixedByteSource::PointerBytes { var_id: var.id, width: expected_width });
+                }
+                if let Some(size_offset) = self.cell_buffer_size_offsets.get(&var.id).copied() {
+                    if var_width == expected_width {
+                        return Some(ExpectedFixedByteSource::LoadedBytes { var_id: var.id, size_offset, width: expected_width });
+                    }
+                }
                 if self.fixed_byte_local_offsets.contains_key(&var.id) && var_width == expected_width {
                     return Some(ExpectedFixedByteSource::PointerBytes { var_id: var.id, width: expected_width });
                 }
@@ -5798,20 +5809,9 @@ impl CodeGenerator {
                 if self.aggregate_pointer_sources.contains_key(&var.id) && var_width == expected_width {
                     return Some(ExpectedFixedByteSource::PointerBytes { var_id: var.id, width: expected_width });
                 }
-                if self.schema_pointer_vars.contains(&var.id) && var_width == expected_width {
-                    if let Some(size_offset) = self.schema_pointer_size_offsets.get(&var.id).copied() {
-                        return Some(ExpectedFixedByteSource::LoadedBytes { var_id: var.id, size_offset, width: expected_width });
-                    }
-                    return Some(ExpectedFixedByteSource::PointerBytes { var_id: var.id, width: expected_width });
-                }
                 if self.param_vars.contains(&var.id) && var_width == expected_width {
                     if let Some(size_offset) = self.fixed_byte_param_size_offsets.get(&var.id).copied() {
                         return Some(ExpectedFixedByteSource::ParamBytes { var_id: var.id, size_offset, width: expected_width });
-                    }
-                }
-                if let Some(size_offset) = self.cell_buffer_size_offsets.get(&var.id).copied() {
-                    if var_width == expected_width {
-                        return Some(ExpectedFixedByteSource::LoadedBytes { var_id: var.id, size_offset, width: expected_width });
                     }
                 }
                 if let Some(param_id) = self.param_type_hash_sources.get(&var.id).copied() {
@@ -7753,6 +7753,9 @@ impl CodeGenerator {
                 return false;
             }
             self.emit_unaligned_scalar_load("t4", "t0", "t2", layout.offset, width);
+            if layout.ty == IrType::I32 {
+                self.emit_sign_extend_i32("t0");
+            }
             self.emit_stack_store("t0", dest.id * 8);
             if let ExpectedFixedByteSource::SchemaField(parent) = &source {
                 let mut nested_layout = layout.clone();

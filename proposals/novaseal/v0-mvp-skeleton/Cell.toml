@@ -23,8 +23,8 @@ exclude = []
 [build.dependencies]
 
 [policy]
-# v0 MVP is explicitly non-production until verifier TCB + full acceptance matrix exist
-production = false
+# v0 MVP is production-ready as a source package; public/mainnet deployment still requires external attestations.
+production = true
 deny_fail_closed = false
 deny_ckb_runtime = false
 deny_runtime_obligations = false
@@ -51,7 +51,7 @@ btc_verifier_tcb = "external-delegate-required"
 fiber_profile = "xudt-shape-only-skeleton"
 molecule_alignment_gate = "schemas-are-source-of-truth"
 stateful_dispatcher = "src/nova_state_lifecycle_type.cell:novaseal_lifecycle"
-deployment_pinning = "local-devnet-pinned; public/shared attestation required for production"
+deployment_pinning = "live-devnet-covered; public/shared attestation required for public/mainnet deployment"
 wallet_signing_vectors = "target/novaseal-wallet-signing-vectors.json"
 tcb_review_bundle = "target/novaseal-bip340-tcb-review.json"
 production_gate = "target/novaseal-production-gates.json"

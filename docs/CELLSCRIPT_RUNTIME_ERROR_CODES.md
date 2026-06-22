@@ -80,10 +80,23 @@ interpret raw syscall status registers or VM trap diagnostics with this table.
 | 47 | `script-role-mismatch` | The script was used in a lock/type role that violates the declared invariant. | Check whether the script is deployed and invoked as the expected lock or type script. |
 | 48 | `xudt-binding-mismatch` | An xUDT type args, owner-mode, or amount binding check failed. | Check xUDT type args, owner-mode flags, input type hash, and token data layout. |
 | 49 | `aggregate-amount-mismatch` | A lowered aggregate/C256 accounting equality or inequality check failed. | Compare generated aggregate inputs/outputs and inspect overflow or exact-equality assumptions. |
+| 50 | `bip340-pipe-create-failed` | The BIP340 runtime verifier path failed while creating the IPC pipe. | Check CKB VM v2 pipe syscall availability and parent script VM version. |
+| 51 | `bip340-spawn-failed` | The BIP340 runtime verifier path failed while resolving or spawning the verifier CellDep. | Check verifier CellDep ordering, out_point, hash_type, and spawn source/place wiring. |
+| 52 | `bip340-message-write-failed` | The BIP340 runtime verifier path failed while writing the 32-byte message hash. | Compare the generated 32-byte message hash words with the verifier CLI input. |
+| 53 | `bip340-pubkey-write-failed` | The BIP340 runtime verifier path failed while writing the 32-byte x-only pubkey. | Compare the generated 32-byte x-only pubkey words with the verifier CLI input. |
+| 54 | `bip340-signature-write-failed` | The BIP340 runtime verifier path failed while writing the 64-byte signature. | Compare the generated 64-byte signature words with the verifier CLI input. |
+| 55 | `bip340-verifier-read-failed` | The BIP340 runtime verifier path failed while closing or reading verifier IPC status. | Check IPC fd close/read/wait wiring between parent and child verifier. |
+| 56 | `bip340-child-rejected` | The spawned BIP340 child verifier returned a non-zero verification status. | Run the exact message, pubkey, and signature tuple through the local verifier CLI. |
+| 57 | `fixed-u64-le-input-unresolved` | The backend could not materialize a fixed-byte input for a u64 little-endian load. | Inspect schema field provenance for the fixed-byte scalar source. |
+| 58 | `fixed-byte-comparison-materialization-unresolved` | The backend could not materialize one side of a fixed-byte comparison. | Inspect fixed-byte provenance for schema fields, aliases, nested projections, and local aggregates. |
+| 59 | `bip340-message-materialization-unresolved` | The backend could not materialize the 32-byte BIP340 message hash for verifier IPC. | Compare signed_intent_hash provenance with the local verifier tuple. |
+| 60 | `bip340-pubkey-materialization-unresolved` | The backend could not materialize the 32-byte BIP340 x-only pubkey for verifier IPC. | Inspect the nested witness pubkey field source and copied ABI bytes. |
+| 61 | `bip340-signature-materialization-unresolved` | The backend could not materialize the 64-byte BIP340 signature for verifier IPC. | Inspect the nested witness signature field source and copied ABI bytes. |
+| 62 | `packed-hash-preimage-materialization-unresolved` | The backend could not materialize canonical packed bytes for a packed hash preimage. | Inspect packed-hash lowering and schema-backed fixed aggregate materialization. |
 
 ## Stability
 
 - Existing numeric codes must not be reused for a different condition.
 - New generated fail-closed paths must add a registry entry before they can
   emit a new non-zero code.
-- Codes `6`, `19`, `27` through `31`, and values above `49` are currently reserved.
+- Codes `6`, `19`, `27` through `31`, and values above `62` are currently reserved.

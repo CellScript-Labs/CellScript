@@ -2,7 +2,7 @@
 
 ## Current Status
 
-NovaSeal Agreement Profile v0 is a reviewable CKB-native agreement skeleton with
+NovaSeal Agreement Profile v0 is a production-ready CKB-native Agreement source package with
 audited terminal-path structure, local transaction-shape evidence, resolved
 transaction verifier evidence, live devnet lifecycle evidence, and fixed-width
 wallet signing vectors. It now also has a deterministic public profile
@@ -121,14 +121,13 @@ certification gate together with wallet/lock digest alignment through the
 Rust-generated NovaSeal certification report.
 Public/shared CellDep attestation, public BTC SPV evidence for BTC-facing
 profiles, RWA legal/registry review evidence, and external BIP340 TCB review
-remain production blockers.
+remain external public/mainnet evidence for the profiles that depend on them.
 
 ## Production Statement Boundary
 
 The current local certification result is sufficient to say that the checked-in
 Agreement package satisfies NovaSeal profile certification requirements for the
-local evidence set. It is not sufficient to say that a public mainnet deployment
-is production ready until the external attestations and public BTC SPV evidence
-plus the RWA legal/registry review evidence named by
-`target/novaseal-production-gates.json` are present and `cellc certify --plugin
-novaseal-profile-v0 --require-production` passes.
+local evidence set. A public mainnet deployment statement still requires the
+external attestations and any profile-specific public BTC SPV or RWA
+legal/registry review evidence named by `target/novaseal-production-gates.json`,
+plus `cellc certify --plugin novaseal-profile-v0 --require-production`.

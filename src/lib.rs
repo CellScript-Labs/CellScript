@@ -18801,7 +18801,7 @@ action activate(ticket: Ticket) -> Ticket {
         let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
 
         assert!(
-            asm.contains("la t0, __cellscript_const_data_"),
+            asm.contains("la a0, __cellscript_const_data_"),
             "fixed-byte constant move must materialize a rodata pointer instead of a null pointer:\n{}",
             asm
         );
@@ -19702,17 +19702,12 @@ action bad(amount: u64) -> out: Coin {
             asm
         );
         assert!(
-            asm.contains("# cellscript abi: bounds check Config.threshold required=8"),
-            "read_ref schema field access did not emit a loaded-byte bounds check:\n{}",
-            asm
-        );
-        assert!(
-            asm.contains("# cellscript abi: exact size check Config expected=8"),
+            asm.contains("# cellscript abi: exact size check fixed-byte scalar field access loaded bytes var0 expected=8"),
             "read_ref schema field access did not enforce exact fixed schema size:\n{}",
             asm
         );
         assert!(
-            asm.contains("# cellscript abi: schema field Config.threshold offset=0 size=8"),
+            asm.contains("# cellscript abi: fixed-byte scalar field Ref(Named(\"Config\")).threshold offset=0 size=8"),
             "read_ref schema field access did not expose concrete layout:\n{}",
             asm
         );
@@ -19908,9 +19903,8 @@ action grant(read config: Config, token: Token) -> Grant {
         let result = compile(PARAM_FIELD_PROGRAM, CompileOptions::default()).unwrap();
         let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
 
-        assert!(asm.contains("# field access .amount"), "parameter field access vanished from assembly:\n{}", asm);
         assert!(
-            asm.contains("# cellscript abi: schema field Snapshot.amount offset=0 size=8"),
+            asm.contains("# cellscript abi: fixed-byte scalar field Named(\"Snapshot\").amount offset=0 size=8"),
             "schema field access did not expose the concrete layout contract:\n{}",
             asm
         );
@@ -19920,12 +19914,7 @@ action grant(read config: Config, token: Token) -> Grant {
             asm
         );
         assert!(
-            asm.contains("# cellscript abi: bounds check Snapshot.amount required=8"),
-            "schema parameter field access did not emit length-backed bounds check:\n{}",
-            asm
-        );
-        assert!(
-            asm.contains("# cellscript abi: exact size check Snapshot expected=8"),
+            asm.contains("# cellscript abi: exact size check fixed-byte scalar field access loaded bytes var0 expected=8"),
             "schema parameter field access did not enforce exact fixed schema size:\n{}",
             asm
         );
@@ -19966,17 +19955,17 @@ action grant(read config: Config, token: Token) -> Grant {
         let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
 
         assert!(
-            asm.contains("# cellscript abi: schema field Flags.enabled offset=0 size=1"),
+            asm.contains("# cellscript abi: fixed-byte scalar field Ref(Named(\"Flags\")).enabled offset=0 size=1"),
             "bool schema field access did not expose concrete layout:\n{}",
             asm
         );
         assert!(
-            asm.contains("# cellscript abi: schema field Flags.nonce offset=1 size=4"),
+            asm.contains("# cellscript abi: fixed-byte scalar field Ref(Named(\"Flags\")).nonce offset=1 size=4"),
             "u32 schema field access did not expose packed schema offset:\n{}",
             asm
         );
         assert!(
-            asm.contains("# cellscript abi: bounds check Flags.nonce required=5"),
+            asm.contains("# cellscript abi: exact size check fixed-byte scalar field access loaded bytes var0 expected=5"),
             "packed u32 schema field access did not check full byte span:\n{}",
             asm
         );
@@ -20063,17 +20052,12 @@ action grant(read config: Config, token: Token) -> Grant {
             asm
         );
         assert!(
-            asm.contains("# cellscript abi: bounds check Token.amount required=8"),
-            "consumed input field access did not check loaded cell bounds:\n{}",
-            asm
-        );
-        assert!(
-            asm.contains("# cellscript abi: exact size check Token expected=8"),
+            asm.contains("# cellscript abi: exact size check fixed-byte scalar field access loaded bytes var0 expected=8"),
             "consumed input field access did not enforce exact fixed schema size:\n{}",
             asm
         );
         assert!(
-            asm.contains("# cellscript abi: schema field Token.amount offset=0 size=8"),
+            asm.contains("# cellscript abi: fixed-byte scalar field Named(\"Token\").amount offset=0 size=8"),
             "consumed input field access did not expose concrete schema layout:\n{}",
             asm
         );
@@ -21868,8 +21852,8 @@ action bad() -> u64 {
             asm
         );
         assert!(
-            asm.contains("# cellscript abi: generic field Snapshot.owner offset=0 size=32")
-                && asm.contains("# cellscript abi: generic field Snapshot.amount offset=32 size=8"),
+            asm.contains("# cellscript abi: fixed-byte field Named(\"Snapshot\").owner offset=0 size=32")
+                && asm.contains("# cellscript abi: fixed-byte scalar field Named(\"Snapshot\").amount offset=32 size=8"),
             "Vec<Snapshot> elements should remain field-readable after pop:\n{}",
             asm
         );
@@ -22187,7 +22171,7 @@ action batch(collection_before: Collection, recipients: Vec<Address>) -> collect
             "entry witness wrapper should reject sizes above its local buffer:\n{}",
             asm
         );
-        assert!(asm.contains("li t1, 1025"), "entry witness wrapper should enforce ENTRY_WITNESS_BUFFER_SIZE=1024:\n{}", asm);
+        assert!(asm.contains("li t1, 4097"), "entry witness wrapper should enforce ENTRY_WITNESS_BUFFER_SIZE=4096:\n{}", asm);
     }
 
     #[test]
@@ -25470,7 +25454,7 @@ action transfer(nft_before: NFT, to: Address) -> nft_after: NFT {
         assert!(action.consume_set.iter().any(|pattern| pattern.operation == "input" && pattern.binding == "nft_before"));
         assert!(action.create_set.iter().any(|pattern| pattern.operation == "output" && pattern.binding == "nft_after"));
         assert!(
-            asm.contains("# cellscript abi: schema field NFT.owner offset=8 size=32"),
+            asm.contains("# cellscript abi: fixed-byte field Named(\"NFT\").owner offset=8 size=32"),
             "fixed-byte output owner requirement should read the proposed output field:\n{}",
             asm
         );

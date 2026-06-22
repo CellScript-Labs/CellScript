@@ -1,15 +1,15 @@
 # CellScript Molecule / IFRN 设计空间改进闭环报告
 
-日期：2026-06-21  
-分支：`nightly-0.20`  
-范围：当前 CellScript 仓库、NovaSeal / DOB / iCKB 相关样例与测试资产，以及本轮 Infern / IFRN 讨论中暴露的问题。  
+日期：2026-06-22
+分支：`nightly-0.20`
+范围：当前 CellScript 仓库、NovaSeal / DOB / iCKB 相关样例与测试资产，以及本轮 Infern / IFRN 讨论中暴露的问题。
 说明：本报告由原设计空间审计报告改写为改进闭环报告。它不重新审计外部 Infern 仓库源码；关于 Infern 六个合约的结论仍基于用户提供的模式描述，并以当前 CellScript 能力边界作技术对账。
 
 ## 闭环状态
 
 截至 2026-06-22，本报告中属于 CellScript 仓库内可修复的 P0/P1 设计空间压缩项已完成闭环：raw cell-data codec honesty、CKB deployable artifact identity、DOB devnet/registry pressure、NovaSeal Agreement BIP340 verifier IPC、variable-length packed hash、wide/nested fixed packed struct hashing，以及 iCKB committed evidence matrix 均已通过对应 gate。
 
-本轮没有修改 Agreement 语义；修正集中在 compiler/backend、runtime diagnostic、packed preimage materialisation、BIP340 verifier syscall/IPC wiring 和 evidence refresh。剩余条目不再作为当前 blocker，而是产品化路线项：external codec adapter、raw-layout DSL、多 ABI builder codec backend、registry/indexer 多 ABI 支持、声明式 continuity/timepoint policy，以及 Infern 六合约真实 port parity matrix。
+本轮没有修改 Agreement 语义；修正集中在 compiler/backend、runtime diagnostic、packed preimage materialisation、BIP340 verifier syscall/IPC wiring、planned-profile fixture hash 语义对齐和 evidence refresh。NovaSeal / DOB / bundled examples 的本地 source-package production 层已闭环；剩余条目不再作为当前 blocker，而是 public/mainnet release 或产品化路线项：external codec adapter、raw-layout DSL、多 ABI builder codec backend、registry/indexer 多 ABI 支持、声明式 continuity/timepoint policy，以及 Infern 六合约真实 port parity matrix。
 
 ### 已通过门禁
 
@@ -17,6 +17,7 @@
 |---|---|---|
 | NovaSeal Agreement live devnet stateful | passed | valid originate/repay/claim 路径通过；签名负例以 BIP340 child verifier rejection 语义失败，不再落入 code 1 / code 18。 |
 | NovaSeal core live devnet stateful | passed | wrong-signature transition 以 verifier rejection 失败。 |
+| NovaSeal planned profiles live devnet stateful | passed | btc-transaction-commitment、btc-utxo-seal、dual-seal、fiber-candidate、fungible-xudt、rwa-receipt 六个 profile 的 valid path 和语义负例均通过 live devnet runner。 |
 | DOB evolving devnet workflow | passed | proposal-local workflow 脚本通过。 |
 | DOB registry pressure | passed | registry pressure gate 通过。 |
 | packed hash regressions | passed | wide fixed-width、multi-block、nested fixed-width、agreement-sized nested parameter、signature payload field hashing 均通过 CKB VM hash 对比；有效路径不再可达 code 18。 |
@@ -588,6 +589,6 @@ metadata 中应暴露这些 policy，供 ProofPlan、builder、audit report 和 
 
 CellScript 当前最诚实的定位应是：
 
-> CellScript 是一个 CKB compiler，同时也是一个强 typed-cell / metadata / audit / provenance 工具链。当前最稳的产品 claim 是 Molecule-native typed-cell + audit/provenance + builder identity；CKB backend 正在通过真实 devnet workload 走向 production hardening。对 raw-layout / IFRN 类合约，链上 source-level expressibility 已有基础，但 off-chain codec、builder、registry/indexer metadata 和 parity evidence 仍需补齐。
+> CellScript 是一个 CKB compiler，同时也是一个强 typed-cell / metadata / audit / provenance 工具链。当前已闭环的产品 claim 是本仓库内 Molecule-native typed-cell、NovaSeal/DOB source-package production readiness、audit/provenance 和 builder identity；CKB backend 已通过当前真实 devnet workload。对 raw-layout / IFRN 类合约，链上 source-level expressibility 已有基础，但 public/mainnet release、off-chain codec、builder、registry/indexer metadata 和真实项目 parity evidence 仍应按独立证据链推进。
 
-这不是否定 CellScript 的价值。相反，这次审计把问题从泛泛的「能不能生产」压缩成了几个可以落地的工程项。本轮已补上最小 exact-artifact BuildReport、live backend data-hash linkage、`cell_data_codec_manifest` 和 builder manifest 暴露；剩余关键项是 builder codec adapter、raw-layout roundtrip vectors、cycle/size matrix，以及把 Cell.lock / Deployed.toml / carrier evidence 接进同一 identity chain。把这些继续补上，CellScript 才能从强 audit/provenance system 稳定推进到可信的 production CKB compiler。
+这不是否定 CellScript 的价值。相反，这次改进闭环把问题从泛泛的「能不能生产」压缩成了几个可以落地的工程项。本轮已补上最小 exact-artifact BuildReport、live backend data-hash linkage、`cell_data_codec_manifest`、builder manifest 暴露、variable-length packed hash、BIP340 IPC diagnostic 和 planned-profile live devnet evidence；剩余关键项是 public/mainnet external attestations、builder codec adapter、raw-layout roundtrip vectors、cycle/size matrix，以及把 Cell.lock / Deployed.toml / carrier evidence 接进同一 identity chain。把这些继续补上，CellScript 的 production CKB compiler claim 就能从当前 source-package readiness 继续扩展到公开部署和外部生态证据。

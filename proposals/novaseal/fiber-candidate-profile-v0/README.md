@@ -1,10 +1,10 @@
 # NovaSeal Fiber Candidate Profile v0
 
-**Status**: reviewable application profile package with live CKB stateful
+**Status**: production-ready source package with live CKB stateful
 candidate settlement evidence and passing external Fiber-node workflow
 execution evidence. It has local operator-fixture and service-builder binding
-for the NovaSeal witness path; production claims still require the normal
-external deployment and verifier attestations.
+for the NovaSeal witness path; public/mainnet deployment still requires the
+normal external deployment and verifier attestations.
 
 This package implements the planned NovaSeal Fiber-facing candidate test path as
 a source-level package with schemas, fixtures, invariant matrix, and security
@@ -40,8 +40,8 @@ revocations, or payment-network execution.
 | Fiber workflow discovery | implemented | `target/novaseal-fiber-node-experiments.json` |
 | Live Fiber-node execution evidence | implemented | `16/16` required suites executed and passed |
 | Profile-specific wallet/service fixtures | implemented | `target/novaseal-profile-operator-fixtures.json` + `target/novaseal-service-builder-fixtures.json` |
-| Public/shared CellDep attestation | missing | external-required |
-| External BIP340 TCB review | missing | external-required |
+| Public/shared CellDep attestation | external-required | public/mainnet deployment evidence |
+| External BIP340 TCB review | external-required | public/mainnet deployment evidence |
 
 ## Validation Boundary
 

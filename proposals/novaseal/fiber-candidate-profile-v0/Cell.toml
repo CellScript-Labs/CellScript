@@ -23,7 +23,7 @@ exclude = []
 [build.dependencies]
 
 [policy]
-production = false
+production = true
 deny_fail_closed = false
 deny_ckb_runtime = false
 deny_runtime_obligations = false
@@ -47,14 +47,14 @@ canonical_schema_hash = "0xe9a157d0211d63586f2e9334878f8354f87d4786f94aa9e5ea163
 conformance_gate = "cellc certify --plugin novaseal-profile-v0"
 certification_plugin = "novaseal-profile-v0"
 certification_report = "target/cellscript-certification/novaseal-profile-v0.json"
-status = "reviewable-fiber-candidate-profile-package"
+status = "production-ready-source-package"
 application_profile = "fiber-candidate"
 business_scenario = "fiber-candidate-path"
 receipt_mode = "materialized-output-cell"
 source_actions = "src/nova_fiber_candidate_type.cell:settle_fiber_candidate;src/nova_fiber_candidate_type.cell:nova_fiber_candidate_lifecycle"
 stateful_dispatcher = "src/nova_fiber_candidate_type.cell:nova_fiber_candidate_lifecycle"
 fiber_execution = "target/novaseal-fiber-node-experiments.json"
-deployment_pinning = "local-devnet-pinning-required-before-v1"
+deployment_pinning = "live-devnet-covered; public/shared attestation required for public/mainnet deployment"
 wallet_signing_vectors = "target/novaseal-wallet-signing-vectors.json"
 tcb_review_bundle = "target/novaseal-bip340-tcb-review.json"
 production_gate = "target/novaseal-production-gates.json"

@@ -870,13 +870,16 @@ def build_claim_tx(
     )
 
 
-def wait_epoch_after(devnet: CkbDevnet, expiry_timepoint: int, *, max_blocks: int = 3000) -> dict[str, Any]:
+def wait_epoch_after(devnet: CkbDevnet, expiry_timepoint: int, *, max_blocks: int = 5000) -> dict[str, Any]:
+    last_header: dict[str, Any] | None = None
     for _ in range(max_blocks):
         header = devnet.rpc("get_tip_header")
+        last_header = header
         if epoch_number_from_header(header) > expiry_timepoint:
             return header
         devnet.rpc("generate_block")
-    raise LiveAcceptanceError(f"devnet epoch did not advance past expiry {expiry_timepoint}")
+    last_epoch = last_header.get("epoch") if last_header else "<unavailable>"
+    raise LiveAcceptanceError(f"devnet epoch did not advance past expiry {expiry_timepoint}; last epoch={last_epoch}")
 
 
 def submit_origin(

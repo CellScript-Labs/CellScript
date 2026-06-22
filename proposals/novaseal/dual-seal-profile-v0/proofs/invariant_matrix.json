@@ -55,7 +55,7 @@
       "id": "btc_public_verification",
       "claim": "Public BTC closure verification remains external to this package.",
       "location": "docs/SECURITY.md",
-      "coverage": "missing-spv-or-indexer-evidence"
+      "coverage": "external-public-mainnet-spv-or-indexer-evidence-required"
     },
     {
       "id": "ckb_finality_verification",

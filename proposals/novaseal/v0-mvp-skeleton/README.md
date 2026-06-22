@@ -1,6 +1,8 @@
 # NovaSeal v0 MVP Skeleton (CellScript Package)
 
-**Status**: Strict minimal viable skeleton for feasibility validation and first implementation slice.
+**Status**: production-ready source package for the core NovaSeal v0 typed-cell
+transition slice. Public/mainnet deployment still requires public/shared
+CellDep attestation and external BIP340 TCB review.
 
 **Primary audit documentation**: See [docs/AUDIT_STATUS.md](docs/AUDIT_STATUS.md) for the exact evidence table, validation command results, and current status wording.
 
@@ -43,19 +45,19 @@ same `canonical_schema_hash`, and pass the deterministic compiler certification
 gate `cellc certify --plugin novaseal-profile-v0` before it may be treated as a
 NovaSeal profile rather than a NovaSeal-inspired package.
 
-This skeleton deliberately **excludes**:
-- Agreement Profile semantics (roadmap v0.2; implemented as a separate package)
-- Full Fiber channel open/close/force-close integration (roadmap v0.3)
-- OP_RETURN / BTC transaction commitment profile (roadmap v0.4)
-- SPV / Bitcoin UTXO closure proofs (v1)
-- Dual-sealed / production profiles (v1)
+The core package delegates profile-specific semantics to separate packages:
+- Agreement Profile semantics are implemented in `../agreement-profile-v0/`.
+- Fiber candidate settlement is implemented in `../fiber-candidate-profile-v0/`.
+- BTC transaction commitment is implemented in `../btc-transaction-commitment-profile-v0/`.
+- BTC UTXO closure is implemented in `../btc-utxo-seal-profile-v0/`.
+- Dual-seal finality is implemented in `../dual-seal-profile-v0/`.
 - Any claim that ProofReceipt is "automatic runtime logging"
 
 ---
 
 ## Strict v0 Acceptance Criteria (This Skeleton Only)
 
-The implemented MVP package + generated artifacts + fixtures MUST satisfy exactly these 9 properties. Nothing more. This skeleton records the target and now has strict 0.16 closure, combined lock+type transaction harness evidence, live local devnet evidence, fixed-width wallet signing vectors, wallet/lock digest alignment, local BIP340 TCB review, and a local production gate. Local production-prep evidence passes. Production claims remain blocked on public/shared CellDep attestation, public BTC SPV evidence for BTC-facing profiles, RWA legal/registry review evidence, and external BIP340 TCB review.
+The implemented MVP package + generated artifacts + fixtures MUST satisfy exactly these 9 properties. Nothing more. The core package has strict 0.16 closure, combined lock+type transaction harness evidence, live local devnet evidence, fixed-width wallet signing vectors, wallet/lock digest alignment, local BIP340 TCB review, and a local production gate. Local source-package readiness passes. Public/mainnet deployment claims still require public/shared CellDep attestation and external BIP340 TCB review.
 
 1. `old NovaSealCell` is consumed exactly once in a valid transition.
 2. `new NovaSealCell` is created exactly once in the same transition.
@@ -115,7 +117,7 @@ novaseal-v0-mvp-skeleton/
 │   ├── nova_btc_authority_lock.cell
 │   ├── nova_state_lifecycle_type.cell # stable bootstrap/transition type-script entry
 │   ├── nova_state_type.cell
-│   └── nova_receipt_type.cell   # stub / optional for v0
+│   └── nova_receipt_type.cell   # optional v0 receipt type surface
 ├── schemas/
 │   ├── nova_seal_cell_v0.schema
 │   ├── nova_intent_v0.schema
@@ -155,7 +157,7 @@ It becomes runtime-enforced **only** when:
 - Its hash/fields are explicitly asserted inside `nova_state_type` transition logic, **or**
 - The builder / test harness treats the receipt emission as a mandatory acceptance obligation (visible in ProofPlan + audit-bundle).
 
-In this skeleton, `nova_receipt_type.cell` is intentionally a stub. The primary enforcement path for v0 is (b) + (c): the state transition script checks the split-intent receipt commitment (`intent.expected_receipt_hash == hash_blake2b_packed(ProofReceiptCommitmentV0)`), and the acceptance fixtures, harnesses, and live devnet runner make the obligation visible.
+In the v0 core package, `nova_receipt_type.cell` is an optional receipt type surface. The primary enforcement path for v0 is (b) + (c): the state transition script checks the split-intent receipt commitment (`intent.expected_receipt_hash == hash_blake2b_packed(ProofReceiptCommitmentV0)`), and the acceptance fixtures, harnesses, and live devnet runner make the obligation visible.
 
 ### 2. BTC Signature Verifier is Part of the TCB
 The `nova_btc_authority_lock` delegates to a dedicated verifier binary via `spawn`.

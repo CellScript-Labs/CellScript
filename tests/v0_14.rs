@@ -68,7 +68,7 @@ lock owner_lock(wallet: protected Wallet, owner: lock_args Address, claimed_owne
 lock output_witness_lock(wallet: protected Wallet, claimed_owner: witness Address) -> bool {
     verification
         let input = source::input(0)
-        let output = source::output(0)
+        let output = source::group_output(0)
         let input_type = witness::input_type(input)
         let output_type = witness::output_type(output)
         require input_type == output_type
@@ -1139,6 +1139,70 @@ action digest(payload: SignaturePayload, expected_pubkey: Hash, expected_signatu
 
     let execution = ckb_script_runner::execute_cellscript_script(&elf, &fixture);
     assert_eq!(execution.exit_code, 0, "signature payload fields should materialise canonically in CKB VM: {:?}", execution);
+}
+
+#[test]
+fn v0_14_bip340_nested_witness_signature_fields_have_no_code18_materialisation_path() {
+    let source = r#"
+module cellscript::bip340_nested_witness_materialisation
+
+struct SignaturePayload {
+    pubkey: [u8; 32],
+    signature: [u8; 64],
+}
+
+struct SignatureEnvelope {
+    signed_intent_hash: Hash,
+    valid_sig: SignaturePayload,
+    wrong_sig: SignaturePayload,
+}
+
+action verify(witness envelope: SignatureEnvelope, witness use_wrong_signature: u8) -> u64 {
+    verification
+        if use_wrong_signature == 0 {
+            verifier::btc::bip340::require_signature(envelope.signed_intent_hash, envelope.valid_sig.pubkey, envelope.valid_sig.signature)
+        } else {
+            let wrong_sig = envelope.wrong_sig
+            verifier::btc::bip340::require_signature(envelope.signed_intent_hash, wrong_sig.pubkey, wrong_sig.signature)
+        }
+        return 0
+}
+"#;
+
+    let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
+    let asm = String::from_utf8(result.artifact_bytes.clone()).expect("assembly should be utf8");
+    assert!(asm.contains("__novaseal_bip340_require_signature"), "missing BIP340 runtime helper:\n{}", asm);
+    assert!(
+        asm.contains("bounds check SignatureEnvelope.signed_intent_hash required=32"),
+        "message hash was not materialised for BIP340:\n{}",
+        asm
+    );
+    assert!(
+        asm.contains("bounds check SignatureEnvelope.valid_sig.pubkey required=64"),
+        "valid pubkey was not materialised for BIP340:\n{}",
+        asm
+    );
+    assert!(
+        asm.contains("bounds check SignatureEnvelope.valid_sig.signature required=128"),
+        "valid signature was not materialised for BIP340:\n{}",
+        asm
+    );
+    assert!(
+        asm.contains("bounds check SignatureEnvelope.wrong_sig.pubkey required=160"),
+        "wrong-signature pubkey was not materialised for BIP340:\n{}",
+        asm
+    );
+    assert!(
+        asm.contains("bounds check SignatureEnvelope.wrong_sig.signature required=224"),
+        "wrong-signature bytes were not materialised for BIP340:\n{}",
+        asm
+    );
+    assert!(!asm.contains("fail closed because BIP340"), "BIP340 materialisation fail-closed path remains:\n{}", asm);
+    assert!(!asm.contains("li a0, 18"), "reachable code-18 trap remains in BIP340 nested witness materialisation:\n{}", asm);
+    assert!(!asm.contains("li a0, 59"), "BIP340 message materialisation trap remains:\n{}", asm);
+    assert!(!asm.contains("li a0, 60"), "BIP340 pubkey materialisation trap remains:\n{}", asm);
+    assert!(!asm.contains("li a0, 61"), "BIP340 signature materialisation trap remains:\n{}", asm);
+    result.validate().unwrap();
 }
 
 #[test]

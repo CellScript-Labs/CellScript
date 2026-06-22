@@ -64,7 +64,7 @@ expiry=guarded
 
 - The BTC signature decision remains delegated to the runtime verifier TCB.
 - Public/shared CellDep attestation and external verifier review remain
-  production blockers.
+  public/mainnet evidence requirements.
 - Fixed-width wallet signing vectors now exist; dynamic Molecule table/vector
   profiles remain future extensions.
 

@@ -14,7 +14,7 @@ The acceptance target is:
    the terminal receipt is live.
 3. Dry-run wrong-owner, mismatched UTXO commitment, zero spend txid/wtxid, stale
    nonce, and expired closure negatives and prove they do not consume state.
-4. Attach public BTC spend SPV evidence before any production claim. The report
+4. Attach public BTC spend SPV evidence before any public/mainnet BTC spend claim. The report
    must satisfy the current external evidence handoff bundle, echo the live CKB
    and service-builder binding hashes, carry the CKB-side sealed UTXO
    commitment hash, and include raw spend/sealed transaction, block-header,
@@ -22,7 +22,7 @@ The acceptance target is:
    certification can recompute.
 
 The `btc_utxo_seal_closure` scenario is now covered in the V1 readiness matrix.
-Production remains blocked until handoff-bound public BTC spend SPV evidence
-and shared external attestations are supplied.
+Public/mainnet BTC spend claims still require handoff-bound public BTC spend
+SPV evidence and shared external attestations.
 
 See [DEVNET_FULL_ACCEPTANCE_RUNBOOK.md](../../DEVNET_FULL_ACCEPTANCE_RUNBOOK.md) for prerequisites, freshness rules, and the full command sequence.

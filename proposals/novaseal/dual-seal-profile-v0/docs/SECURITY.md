@@ -23,5 +23,5 @@
 ## Risk Posture
 
 This package has source-level and live CKB stateful dual-seal evidence, not
-production BTC finality evidence. Production readiness remains blocked until
-public BTC closure-verification evidence and external attestations exist.
+public BTC finality evidence. Public/mainnet BTC-finality claims still require
+public BTC closure-verification evidence and external attestations.

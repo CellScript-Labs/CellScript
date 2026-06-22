@@ -22,6 +22,6 @@
 This package has source-level application-profile evidence, live CKB stateful
 candidate evidence, and external Fiber workflow execution evidence is present.
 It does not verify Fiber HTLCs, routes, liquidity, fees, or revocations inside
-the CellScript profile. General NovaSeal production readiness remains blocked
-until the public/shared CellDep attestation, public BTC SPV evidence, RWA
-legal/registry review evidence, and external BIP340 TCB review are accepted.
+the CellScript profile. Public/mainnet deployment claims still require the
+public/shared CellDep attestation, profile-specific external evidence, and
+external BIP340 TCB review.

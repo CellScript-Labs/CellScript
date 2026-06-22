@@ -946,8 +946,15 @@ fn signed_i32_lowers_to_fixed_width_signed_abi_values() {
         assembly.contains("# cellscript abi: sign-extend i32"),
         "i32 values loaded from witness/aggregate bytes must be sign-extended before signed comparisons:\n{assembly}"
     );
+    assert!(
+        assembly.contains("# cellscript abi: sign-extend i32 in t0"),
+        "i32 aggregate field bytes must be sign-extended after unaligned field loading:\n{assembly}"
+    );
     assert!(assembly.contains("srai"), "i32 sign extension should lower to an arithmetic shift:\n{assembly}");
-    assert!(assembly.contains("field access .relative_index"), "i32 aggregate field access should compile:\n{assembly}");
+    assert!(
+        assembly.contains("# cellscript abi: fixed-byte scalar field Named(\"MetaPoint\").relative_index offset=8 size=4"),
+        "i32 aggregate field access should compile:\n{assembly}"
+    );
 
     let action =
         result.metadata.actions.iter().find(|action| action.name == "signed_relative_order").expect("signed_relative_order metadata");

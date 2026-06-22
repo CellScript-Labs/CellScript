@@ -116,7 +116,7 @@ parent_lock_max_output_occupied_capacity_shannons=21900000000
 
 ## Evidence Level
 
-This harness is useful because it makes the fixture set executable and repeatable. It is not production evidence.
+This harness is useful because it makes the fixture set executable and repeatable. It is local source-package evidence, not public/mainnet deployment evidence.
 
 It does **not** prove:
 
