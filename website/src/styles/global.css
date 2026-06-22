@@ -3082,3 +3082,98 @@ tr:last-child td {
     min-height: 280px;
   }
 }
+
+/* =========================================================================
+   Pipeline trace (Workflow section): scroll-driven progress + real
+   artifact fragments. No keyframe animation — the progress fill is a
+   CSS transform: scaleY updated by a passive scroll listener.
+   ========================================================================= */
+
+.pipeline-trace {
+  position: relative;
+  display: flex;
+  gap: 0;
+  margin-top: 48px;
+  padding-left: 24px;
+}
+
+.pipeline-progress-track {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--bar-track);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.pipeline-progress-fill {
+  position: absolute;
+  inset: 0;
+  background: var(--bar-fill);
+  border-radius: 2px;
+  transform: scaleY(0);
+  transform-origin: top;
+  transition: transform 0.1s linear;
+}
+
+.pipeline-stages {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+
+.pipeline-stage {
+  scroll-margin-top: 100px;
+}
+
+.pipeline-stage-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.pipeline-stage-num {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: 0.04em;
+}
+
+.pipeline-stage-label {
+  font-family: var(--font-sans);
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.pipeline-fragment {
+  margin: 0;
+  padding: 14px 16px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--surface-code-start);
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  line-height: 1.5;
+  color: var(--text-soft);
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-x: auto;
+}
+
+.pipeline-fragment-meta {
+  color: var(--substrate-text);
+}
+
+.pipeline-fragment-riscv,
+.pipeline-fragment-elf {
+  color: var(--substrate-dim);
+}

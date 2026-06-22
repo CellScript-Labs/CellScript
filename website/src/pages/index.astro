@@ -1,10 +1,11 @@
 ---
 import "../styles/global.css";
-import { exampleGroups, heroExamples, links, modelCards, tools, workflowSteps } from "../data/site";
+import { exampleFullSources, exampleGroups, heroExamples, links, modelCards, tools, workflowSteps } from "../data/site";
 import { defaultLocale, translations } from "../i18n/translations";
 import { provenanceForExample, effectsSummary, formatBytes, shortHash } from "../lib/provenance";
 import TransitionOverlay from "../components/TransitionOverlay.astro";
 import ProvenanceRail from "../components/ProvenanceRail.astro";
+import pipelineFragments from "../data/pipeline-fragments.json";
 
 const locale = defaultLocale;
 const t = translations[locale];
@@ -310,6 +311,60 @@ const renderLine = (line: string) => {
               ))}
             </ul>
           </aside>
+        </div>
+
+        <!-- Scroll-driven pipeline trace: each stage shows a real
+             artifact fragment from the token example, and a thin
+             progress bar on the left tracks how far down the pipeline
+             the user has scrolled. No keyframe animation — the bar is
+             a CSS transform: scaleY driven by scroll position. -->
+        <div class="pipeline-trace" data-pipeline-trace>
+          <div class="pipeline-progress-track" aria-hidden="true">
+            <div class="pipeline-progress-fill" data-pipeline-fill></div>
+          </div>
+          <ol class="pipeline-stages">
+            <li class="pipeline-stage" data-pipeline-stage="0">
+              <div class="pipeline-stage-head">
+                <span class="pipeline-stage-num">01</span>
+                <span class="pipeline-stage-label" data-i18n="workflow.steps.source.0">{t.workflow.steps.source[0]}</span>
+              </div>
+              <pre class="pipeline-fragment pipeline-fragment-source">{pipelineFragments.source}</pre>
+            </li>
+            <li class="pipeline-stage" data-pipeline-stage="1">
+              <div class="pipeline-stage-head">
+                <span class="pipeline-stage-num">02</span>
+                <span class="pipeline-stage-label" data-i18n="workflow.steps.parse.0">{t.workflow.steps.parse[0]}</span>
+              </div>
+              <pre class="pipeline-fragment pipeline-fragment-ast"><span class="token-keyword">module</span> cellscript::fungible_token
+  <span class="token-keyword">resource</span> Token
+    amount: u64
+    symbol: [u8; 8]
+  <span class="token-keyword">action</span> transfer_token
+    <span class="token-cell-effect">consume</span> token
+    <span class="token-cell-effect">create</span> next_token</pre>
+            </li>
+            <li class="pipeline-stage" data-pipeline-stage="2">
+              <div class="pipeline-stage-head">
+                <span class="pipeline-stage-num">03</span>
+                <span class="pipeline-stage-label" data-i18n="workflow.steps.metadata.0">{t.workflow.steps.metadata[0]}</span>
+              </div>
+              <pre class="pipeline-fragment pipeline-fragment-meta">{pipelineFragments.metadata}</pre>
+            </li>
+            <li class="pipeline-stage" data-pipeline-stage="3">
+              <div class="pipeline-stage-head">
+                <span class="pipeline-stage-num">04</span>
+                <span class="pipeline-stage-label">RISC-V Codegen</span>
+              </div>
+              <pre class="pipeline-fragment pipeline-fragment-riscv">{pipelineFragments.riscv}</pre>
+            </li>
+            <li class="pipeline-stage" data-pipeline-stage="4">
+              <div class="pipeline-stage-head">
+                <span class="pipeline-stage-num">05</span>
+                <span class="pipeline-stage-label" data-i18n="workflow.steps.elf.0">{t.workflow.steps.elf[0]}</span>
+              </div>
+              <pre class="pipeline-fragment pipeline-fragment-elf">{pipelineFragments.elf}</pre>
+            </li>
+          </ol>
         </div>
       </section>
 
@@ -843,6 +898,28 @@ const renderLine = (line: string) => {
           if (ok) flashCopied(btn);
         });
       });
+
+      // ---- Pipeline trace: scroll-driven progress bar ----
+      // The progress fill is a CSS transform: scaleY driven by how far
+      // the user has scrolled through the 5 pipeline stages. No
+      // keyframe animation — just a passive scroll listener.
+      const pipelineTrace = document.querySelector<HTMLElement>("[data-pipeline-trace]");
+      const pipelineFill = document.querySelector<HTMLElement>("[data-pipeline-fill]");
+      if (pipelineTrace && pipelineFill) {
+        const updatePipelineProgress = () => {
+          const rect = pipelineTrace.getBoundingClientRect();
+          const viewportH = window.innerHeight;
+          // Progress = how much of the trace has scrolled past the
+          // viewport midline, clamped to [0, 1].
+          const start = rect.top - viewportH * 0.5;
+          const travel = rect.height;
+          const progress = Math.max(0, Math.min(1, -start / travel));
+          pipelineFill.style.transform = `scaleY(${progress.toFixed(3)})`;
+        };
+        updatePipelineProgress();
+        window.addEventListener("scroll", updatePipelineProgress, { passive: true });
+        window.addEventListener("resize", updatePipelineProgress);
+      }
     </script>
     <ProvenanceRail />
     <TransitionOverlay />
