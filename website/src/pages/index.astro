@@ -6,29 +6,12 @@ import { provenanceForExample, effectsSummary, formatBytes, shortHash } from "..
 import TransitionOverlay from "../components/TransitionOverlay.astro";
 import ProvenanceRail from "../components/ProvenanceRail.astro";
 import pipelineFragments from "../data/pipeline-fragments.json";
+import assuranceMetadata from "../data/assurance-metadata.json";
+
+const metadataJson = JSON.stringify(assuranceMetadata, null, 2);
 
 const locale = defaultLocale;
 const t = translations[locale];
-const metadataJson = `{
-  "metadata_schema_version": 42,
-  "module": "cellscript::vesting",
-  "target_profile": "ckb",
-  "types": {
-    "VestingConfig": { "kind": "shared", "capabilities": ["store", "create", "read_ref"] },
-    "VestingGrant": { "kind": "receipt", "flow": "Granted -> Claimable -> FullyClaimed" }
-  },
-  "actions": [{
-    "name": "claim_vested",
-    "effect_class": "Mutating",
-    "consume_set": ["grant"],
-    "create_set": ["tokens", "updated_grant"],
-    "ckb_runtime_features": ["current_timepoint"]
-  }],
-  "proof_plan": {
-    "status": "review evidence",
-    "limit": "sidecar provenance must be checked outside the compiler"
-  }
-}`;
 const getExampleItemCopy = (groupId: string, itemId: string) =>
   (t.examples.groups as Record<string, { items: Record<string, readonly [string, string]> }>)[groupId].items[itemId];
 
@@ -362,7 +345,7 @@ const renderLine = (line: string) => {
         </div>
       </section>
 
-      <section class="section model-section" aria-labelledby="core-model" data-rail-example="token" data-transition={JSON.stringify({ action: "view_model", consume: "workflow", create: "model", effect: "Pure" })}>
+      <section class="section model-section" aria-labelledby="core-model" data-rail-default data-transition={JSON.stringify({ action: "view_model", consume: "workflow", create: "model", effect: "Pure" })}>
         <h2 class="section-title" id="core-model" data-i18n="sections.coreModel">{t.sections.coreModel}</h2>
         <p class="lead" data-i18n="model.lead">{t.model.lead}</p>
         <p class="boundary-note" data-i18n="model.boundary">{t.model.boundary}</p>
@@ -479,7 +462,7 @@ const renderLine = (line: string) => {
         </div>
       </section>
 
-      <section class="section" aria-labelledby="examples" data-rail-example="nft" data-transition={JSON.stringify({ action: "view_examples", consume: "tooling", create: "examples", effect: "Pure" })}>
+      <section class="section" aria-labelledby="examples" data-rail-default data-transition={JSON.stringify({ action: "view_examples", consume: "tooling", create: "examples", effect: "Pure" })}>
         <h2 class="section-title" id="examples" data-i18n="sections.examples">{t.sections.examples}</h2>
         <div class="example-browser" data-example-tabs>
           <div class="example-tabs" role="tablist" aria-label={t.examples.tabsAria} data-i18n-aria-label="examples.tabsAria">

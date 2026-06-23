@@ -57,8 +57,11 @@ export const provenanceByExample = provenance as ProvenanceData;
  */
 export function provenanceForExample(exampleId: string): ProvenanceView | null {
   if (provenanceByExample[exampleId]) return provenanceByExample[exampleId];
+  // Try matching by prefix: example id "ammPool" -> provenance key
+  // "amm_pool" (split on camelCase boundaries and underscores).
+  const normalized = exampleId.replace(/([a-z])([A-Z])/g, "$1_$2").toLowerCase();
   const prefixMatch = Object.keys(provenanceByExample).find(
-    (key) => exampleId === key.split("_")[0],
+    (key) => normalized === key || normalized === key.split("_")[0],
   );
   return prefixMatch ? provenanceByExample[prefixMatch] : null;
 }

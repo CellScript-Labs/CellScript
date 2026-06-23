@@ -28,6 +28,7 @@ EXAMPLES = REPO / "examples"
 DATA_DIR = REPO / "website" / "src" / "data"
 PROVENANCE_OUT = DATA_DIR / "provenance.json"
 FRAGMENTS_OUT = DATA_DIR / "pipeline-fragments.json"
+ASSURANCE_OUT = DATA_DIR / "assurance-metadata.json"
 
 HERO_EXAMPLES = {
     "token": "token.cell",
@@ -265,6 +266,53 @@ def generate_pipeline_fragments() -> dict:
     return fragments
 
 
+def generate_assurance_excerpt() -> dict:
+    """Generate a real metadata excerpt for the Assurance section.
+
+    The Assurance section shows a representative metadata sidecar so
+    visitors see the shape of compiler output. This must be real
+    cellc output, not hand-written — the earlier version was a fake
+    that didn't match the actual schema (wrong version number, wrong
+    action names, object instead of array for types).
+    """
+    metadata = run_metadata(HERO_EXAMPLES["vesting"])
+
+    excerpt = {
+        "metadata_schema_version": metadata.get("metadata_schema_version"),
+        "module": metadata.get("module"),
+        "target_profile": (metadata.get("target_profile") or {}).get("name", "ckb"),
+        "types": [
+            {
+                "name": t.get("name"),
+                "kind": t.get("kind"),
+                "capabilities": t.get("capabilities") or [],
+            }
+            for t in (metadata.get("types") or [])[:4]
+        ],
+        "actions": [
+            {
+                "name": a.get("name"),
+                "effect_class": a.get("effect_class"),
+                "consume_set": [
+                    c.get("binding", "?") for c in (a.get("consume_set") or [])
+                ],
+                "create_set": [
+                    c.get("binding", "?") for c in (a.get("create_set") or [])
+                ],
+                "estimated_cycles": a.get("estimated_cycles"),
+            }
+            for a in (metadata.get("actions") or [])[:3]
+        ],
+        "artifact_format": metadata.get("artifact_format"),
+    }
+
+    ASSURANCE_OUT.write_text(json.dumps(excerpt, indent=2) + "\n")
+    print(f"\nwrote {ASSURANCE_OUT.relative_to(REPO)} ({ASSURANCE_OUT.stat().st_size} bytes)")
+    print(f"  module: {excerpt['module']}")
+    print(f"  types: {len(excerpt['types'])}, actions: {len(excerpt['actions'])}")
+    return excerpt
+
+
 def main() -> int:
     if not CELLC.exists():
         print(
@@ -280,6 +328,9 @@ def main() -> int:
 
     print("\n=== Generating pipeline-fragments.json ===")
     generate_pipeline_fragments()
+
+    print("\n=== Generating assurance-metadata.json ===")
+    generate_assurance_excerpt()
 
     print("\nDone. All website data regenerated from live cellc output.")
     return 0
