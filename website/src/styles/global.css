@@ -530,7 +530,7 @@ select:focus-visible {
    so centred content stays visually balanced. */
 @media (min-width: 1100px) {
   body {
-    padding-right: 320px;
+    padding-left: 320px;
   }
 }
 

@@ -194,13 +194,13 @@ const commits = (githubActivity as { commits: any[] }).commits;
   .nav-rail {
     position: fixed;
     top: 0;
-    right: 0;
+    left: 0;
     bottom: 0;
     width: 320px;
     z-index: 80;
     display: none;
     flex-direction: column;
-    border-left: 1px solid var(--line-soft);
+    border-right: 1px solid var(--line-soft);
     background: var(--panel-strong);
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
@@ -517,7 +517,7 @@ const commits = (githubActivity as { commits: any[] }).commits;
   /* ---- Mobile ---- */
   .rail-toggle {
     position: fixed;
-    right: 16px;
+    left: 16px;
     bottom: 72px;
     z-index: 81;
     display: inline-flex;
@@ -541,9 +541,9 @@ const commits = (githubActivity as { commits: any[] }).commits;
     .nav-rail {
       display: flex;
       width: min(320px, calc(100vw - 24px));
-      transform: translateX(100%);
+      transform: translateX(-100%);
       transition: transform 0.3s var(--ease-standard);
-      box-shadow: -18px 0 48px var(--shadow-strong);
+      box-shadow: 18px 0 48px var(--shadow-strong);
     }
     .nav-rail[data-open] { transform: translateX(0); }
     .rail-close-btn[hidden] { display: inline-flex !important; }
