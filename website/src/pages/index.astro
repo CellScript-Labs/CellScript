@@ -152,7 +152,7 @@ const renderLine = (line: string) => {
     </header>
 
     <main id="top" class="page">
-      <section class="hero" aria-labelledby="hero-title" data-rail-default data-transition={JSON.stringify({ action: "init", consume: "[]", create: "landing", effect: "Pure" })}>
+      <section class="hero" aria-labelledby="hero-title" data-transition={JSON.stringify({ action: "init", consume: "[]", create: "landing", effect: "Pure" })}>
         <div class="hero-aurora" aria-hidden="true">
           <span></span>
           <span></span>
@@ -231,7 +231,7 @@ const renderLine = (line: string) => {
         </div>
       </section>
 
-      <section class="section workflow-section" aria-labelledby="workflow" data-rail-default data-transition={JSON.stringify({ action: "view_workflow", consume: "landing", create: "workflow", effect: "Pure" })}>
+      <section class="section workflow-section" aria-labelledby="workflow" data-transition={JSON.stringify({ action: "view_workflow", consume: "landing", create: "workflow", effect: "Pure" })}>
         <h2 class="section-title" id="workflow" data-i18n="sections.workflow">{t.sections.workflow}</h2>
         <div class="workflow-board">
           <div class="workflow-flow" aria-label={t.workflow.aria} data-i18n-aria-label="workflow.aria">
@@ -352,7 +352,7 @@ const renderLine = (line: string) => {
         </div>
       </section>
 
-      <section class="section model-section" aria-labelledby="core-model" data-rail-default data-transition={JSON.stringify({ action: "view_model", consume: "workflow", create: "model", effect: "Pure" })}>
+      <section class="section model-section" aria-labelledby="core-model" data-transition={JSON.stringify({ action: "view_model", consume: "workflow", create: "model", effect: "Pure" })}>
         <h2 class="section-title" id="core-model" data-i18n="sections.coreModel">{t.sections.coreModel}</h2>
         <p class="lead" data-i18n="model.lead">{t.model.lead}</p>
         <p class="boundary-note" data-i18n="model.boundary">{t.model.boundary}</p>
@@ -396,7 +396,7 @@ const renderLine = (line: string) => {
         </div>
       </section>
 
-      <section class="section assurance-section" aria-labelledby="assurance" data-rail-example="vesting" data-transition={JSON.stringify({ action: "view_assurance", consume: "model", create: "assurance", effect: "Pure" })}>
+      <section class="section assurance-section" aria-labelledby="assurance" data-transition={JSON.stringify({ action: "view_assurance", consume: "model", create: "assurance", effect: "Pure" })}>
         <div class="section-copy">
           <h2 class="section-title" id="assurance" data-i18n="sections.assurance">{t.sections.assurance}</h2>
           <p class="lead" data-i18n="assurance.lead">{t.assurance.lead}</p>
@@ -427,7 +427,7 @@ const renderLine = (line: string) => {
         </div>
       </section>
 
-      <section class="section tooling-section" aria-labelledby="tooling" data-rail-default data-transition={JSON.stringify({ action: "view_tooling", consume: "assurance", create: "tooling", effect: "Pure" })}>
+      <section class="section tooling-section" aria-labelledby="tooling" data-transition={JSON.stringify({ action: "view_tooling", consume: "assurance", create: "tooling", effect: "Pure" })}>
         <h2 class="section-title" id="tooling" data-i18n="sections.tooling">{t.sections.tooling}</h2>
         <div class="tooling-console" data-tool-tabs>
           <div class="tool-tabs" role="tablist" aria-label={t.tooling.tabsAria} data-i18n-aria-label="tooling.tabsAria">
@@ -469,7 +469,7 @@ const renderLine = (line: string) => {
         </div>
       </section>
 
-      <section class="section" aria-labelledby="examples" data-rail-default data-transition={JSON.stringify({ action: "view_examples", consume: "tooling", create: "examples", effect: "Pure" })}>
+      <section class="section" aria-labelledby="examples" data-transition={JSON.stringify({ action: "view_examples", consume: "tooling", create: "examples", effect: "Pure" })}>
         <h2 class="section-title" id="examples" data-i18n="sections.examples">{t.sections.examples}</h2>
         <div class="example-browser" data-example-tabs>
           <div class="example-tabs" role="tablist" aria-label={t.examples.tabsAria} data-i18n-aria-label="examples.tabsAria">
@@ -517,7 +517,7 @@ const renderLine = (line: string) => {
         </div>
       </section>
 
-      <section class="section start-section" id="getting-started" aria-labelledby="start" data-rail-default data-transition={JSON.stringify({ action: "start", consume: "examples", create: "playground", effect: "Mutating" })}>
+      <section class="section start-section" id="getting-started" aria-labelledby="start" data-transition={JSON.stringify({ action: "start", consume: "examples", create: "playground", effect: "Mutating" })}>
         <h2 class="section-title" id="start" data-i18n="sections.gettingStarted">{t.sections.gettingStarted}</h2>
         <div class="steps">
           {t.start.steps.map(([label, command], index) => (

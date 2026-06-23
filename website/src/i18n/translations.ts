@@ -121,6 +121,8 @@ export const translations = {
       flowStates: "flow",
       expandAction: "Expand action",
       collapseAction: "Collapse action",
+      ctaText: "These are build-time facts. For live typed-transition compilation, open the playground.",
+      ctaLink: "Open Playground",
     },
     sections: {
       gettingStarted: "Getting Started",
@@ -373,6 +375,8 @@ export const translations = {
       flowStates: "flow",
       expandAction: "展开 action",
       collapseAction: "收起 action",
+      ctaText: "以上为构建时数据。如需实时编译 typed-transition，请打开 Playground。",
+      ctaLink: "打开 Playground",
     },
     sections: {
       gettingStarted: "开始使用",

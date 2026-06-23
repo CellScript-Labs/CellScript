@@ -1,22 +1,17 @@
 ---
 /**
- * ProvenanceRail — a persistent right-side rail that shows the
- * "provenance" of whatever the user is currently looking at.
+ * ProvenanceRail — an honest static sidebar on the landing page.
  *
- * On the landing page (static), the rail reads precompiled metadata
- * from src/data/provenance.json and updates as the user scrolls:
- *  - hero: version + target + example count
- *  - core-model: the active model tab's type metadata
- *  - assurance: the current example's effect/consume/create/proof
- *  - examples: the hovered example's metadata summary
+ * This is NOT a live analysis tool. It shows static, build-time facts
+ * about the compiler and website (version, target, example count).
+ * The live typed-transition provenance demo lives in /playground,
+ * where the WASM compiler actually runs.
  *
- * Layout:
- *  - Desktop (>=1100px): fixed 240px right rail beside main content.
- *  - Mobile (<1100px): hidden by default; a toggle button reveals it
- *    as a slide-over drawer.
- *
- * The rail never auto-scrolls or flashes — it updates values in place
- * so the eye doesn't have to chase movement (ergonomics §10.5).
+ * Previously this component had an "example view" that showed
+ * precompiled actions/types/consume-create sets with effect-class
+ * labels (Mutating/Creating/etc). That was theatre: the data was
+ * static JSON from build time, but the presentation implied the page
+ * was analyzing code in real time. Removed.
  */
 import { translations, defaultLocale } from "../i18n/translations";
 import { provenanceByExample } from "../lib/provenance";
@@ -24,45 +19,36 @@ import { provenanceByExample } from "../lib/provenance";
 const t = translations[defaultLocale];
 const examples = Object.entries(provenanceByExample);
 const version = examples[0]?.[1].compilerVersion ?? "—";
+const target = examples[0]?.[1].target ?? "ckb";
 ---
 
 <aside class="provenance-rail" data-provenance-rail aria-label={t.provenance.label}>
   <div class="rail-header">
     <span class="rail-label" data-i18n="provenance.label">{t.provenance.label}</span>
-    <button class="rail-close" type="button" data-rail-close aria-label="Close provenance" hidden>
+    <button class="rail-close" type="button" data-rail-close aria-label="Close" hidden>
       <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
     </button>
   </div>
 
-  <div class="rail-body" data-rail-body>
-    <!-- Default state: shown on load and for the hero section -->
-    <div class="rail-section rail-default" data-rail-view="default">
-      <dl class="rail-facts">
-        <div class="rail-fact">
-          <dt data-i18n="provenance.version">{t.provenance.version}</dt>
-          <dd class="substrate-value">v{version}</dd>
-        </div>
-        <div class="rail-fact">
-          <dt data-i18n="provenance.target">{t.provenance.target}</dt>
-          <dd class="substrate-value">ckb</dd>
-        </div>
-        <div class="rail-fact">
-          <dt data-i18n="provenance.examples">{t.provenance.examples}</dt>
-          <dd class="substrate-value">{examples.length}</dd>
-        </div>
-      </dl>
-    </div>
+  <div class="rail-body">
+    <dl class="rail-facts">
+      <div class="rail-fact">
+        <dt data-i18n="provenance.version">{t.provenance.version}</dt>
+        <dd class="substrate-value">v{version}</dd>
+      </div>
+      <div class="rail-fact">
+        <dt data-i18n="provenance.target">{t.provenance.target}</dt>
+        <dd>{target}</dd>
+      </div>
+      <div class="rail-fact">
+        <dt data-i18n="provenance.examples">{t.provenance.examples}</dt>
+        <dd class="substrate-value">{examples.length}</dd>
+      </div>
+    </dl>
 
-    <!-- Example state: shown for core-model / assurance / examples sections -->
-    <div class="rail-section rail-example" data-rail-view="example" hidden>
-      <div class="rail-module" data-rail-module></div>
-      <div class="rail-substrate">
-        <span class="substrate-line" data-rail-artifact></span>
-      </div>
-      <div class="rail-group">
-        <span class="rail-group-label" data-i18n="provenance.actions">{t.provenance.actions}</span>
-        <ul class="rail-actions" data-rail-actions></ul>
-      </div>
+    <div class="rail-cta">
+      <p class="rail-cta-text" data-i18n="provenance.ctaText">{t.provenance.ctaText}</p>
+      <a class="rail-cta-link" href="/playground" data-i18n="provenance.ctaLink">{t.provenance.ctaLink}</a>
     </div>
   </div>
 </aside>
@@ -138,10 +124,12 @@ const version = examples[0]?.[1].compilerVersion ?? "—";
     flex: 1 1 auto;
     overflow-y: auto;
     padding: 14px 18px 24px;
+    display: flex;
+    flex-direction: column;
   }
 
   .rail-facts {
-    margin: 0;
+    margin: 0 0 24px;
   }
 
   .rail-fact {
@@ -172,105 +160,37 @@ const version = examples[0]?.[1].compilerVersion ?? "—";
     font-weight: 600;
   }
 
-  .rail-section[hidden] {
-    display: none;
-  }
-
-  .rail-module {
-    margin-bottom: 8px;
-    font-family: var(--font-mono);
-    font-size: 0.78rem;
-    color: var(--substrate-text);
-    word-break: break-all;
-  }
-
-  .rail-substrate {
-    padding: 8px 0 14px;
-    border-bottom: 1px solid var(--substrate-rule);
-    margin-bottom: 14px;
-  }
-
-  .substrate-line {
-    display: block;
-    font-family: var(--font-mono);
-    font-size: 0.68rem;
-    color: var(--substrate-dim);
-    word-break: break-all;
-  }
-
-  .rail-group {
-    margin-bottom: 16px;
-  }
-
-  .rail-group-label {
-    display: block;
-    margin-bottom: 8px;
-    font-family: var(--font-mono);
-    font-size: 0.66rem;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--substrate-dim);
-  }
-
-  .rail-actions {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-
-  .rail-actions :global(.rail-action) {
-    padding: 8px 10px;
+  .rail-cta {
+    margin-top: auto;
+    padding: 16px;
     border: 1px solid var(--substrate-rule);
-    border-radius: 6px;
+    border-radius: 8px;
     background: var(--panel-soft);
-    cursor: default;
   }
 
-  .rail-actions :global(.rail-action-head) {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-  }
-
-  .rail-actions :global(.rail-action-name) {
-    font-family: var(--font-mono);
+  .rail-cta-text {
+    margin: 0 0 10px;
     font-size: 0.74rem;
-    color: var(--substrate-text);
-    font-weight: 600;
-  }
-
-  .rail-actions :global(.rail-action-effect) {
-    flex-shrink: 0;
-    padding: 1px 6px;
-    border-radius: 3px;
-    font-family: var(--font-mono);
-    font-size: 0.62rem;
-    letter-spacing: 0.04em;
-  }
-
-  .rail-actions :global(.rail-action-effect\.ispure) {
-    color: var(--accent);
-    background: var(--accent-surface);
-  }
-
-  .rail-actions :global(.rail-action-effect\.ismutating),
-  .rail-actions :global(.rail-action-effect\.isdestroying),
-  .rail-actions :global(.rail-action-effect\.iscreating) {
-    color: var(--substrate-accent);
-    background: var(--panel-chip);
-  }
-
-  .rail-actions :global(.rail-action-detail) {
-    margin-top: 5px;
-    font-family: var(--font-mono);
-    font-size: 0.66rem;
-    color: var(--substrate-dim);
     line-height: 1.5;
+    color: var(--substrate-dim);
+  }
+
+  .rail-cta-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--accent);
+    font-size: 0.78rem;
+    font-weight: 600;
+    text-decoration: none;
+  }
+
+  .rail-cta-link::after {
+    content: "→";
+  }
+
+  .rail-cta-link:hover {
+    text-decoration: underline;
   }
 
   /* Mobile: slide-over drawer toggle */
@@ -320,58 +240,10 @@ const version = examples[0]?.[1].compilerVersion ?? "—";
 </style>
 
 <script>
-  import { provenanceForExample, formatBytes } from "../lib/provenance";
-
   const rail = document.querySelector<HTMLElement>("[data-provenance-rail]");
-  const railBody = document.querySelector<HTMLElement>("[data-rail-body]");
   const toggle = document.querySelector<HTMLButtonElement>("[data-rail-toggle]");
   const closeBtn = document.querySelector<HTMLButtonElement>("[data-rail-close]");
 
-  const defaultView = railBody?.querySelector<HTMLElement>('[data-rail-view="default"]');
-  const exampleView = railBody?.querySelector<HTMLElement>('[data-rail-view="example"]');
-  const moduleEl = railBody?.querySelector<HTMLElement>("[data-rail-module]");
-  const artifactEl = railBody?.querySelector<HTMLElement>("[data-rail-artifact]");
-  const actionsEl = railBody?.querySelector<HTMLElement>("[data-rail-actions]");
-
-  /** Render a given example id's provenance into the rail. */
-  const showExample = (exampleId: string) => {
-    const view = provenanceForExample(exampleId);
-    if (!view || !exampleView || !defaultView) return;
-    defaultView.hidden = true;
-    exampleView.hidden = false;
-    if (moduleEl) moduleEl.textContent = view.module;
-    if (artifactEl) {
-      artifactEl.textContent = `0x${view.artifactHash}… · ${formatBytes(view.artifactSizeBytes)}`;
-    }
-    if (actionsEl) {
-      const effectClass = (effect: string) => effect.toLowerCase();
-      actionsEl.innerHTML = view.actions
-        .map((action) => {
-          const consume = action.consume.length
-            ? action.consume.map((c) => c.binding).join(", ")
-            : "—";
-          const create = action.create.length
-            ? action.create.map((c) => c.binding).join(", ")
-            : "—";
-          return `<li class="rail-action">
-            <div class="rail-action-head">
-              <span class="rail-action-name">${action.name}</span>
-              <span class="rail-action-effect is${effectClass(action.effectClass)}">${action.effectClass}</span>
-            </div>
-            <div class="rail-action-detail">consume: ${consume} → create: ${create}</div>
-          </li>`;
-        })
-        .join("");
-    }
-  };
-
-  const showDefault = () => {
-    if (!defaultView || !exampleView) return;
-    exampleView.hidden = true;
-    defaultView.hidden = false;
-  };
-
-  // Open/close on mobile
   const setOpen = (open: boolean) => {
     if (!rail || !toggle) return;
     if (open) {
@@ -385,39 +257,4 @@ const version = examples[0]?.[1].compilerVersion ?? "—";
 
   toggle?.addEventListener("click", () => setOpen(true));
   closeBtn?.addEventListener("click", () => setOpen(false));
-
-  // Update rail content as the user scrolls between sections. Each
-  // section carries a data-rail-example attr (the example to show) or
-  // data-rail-default (show the version summary).
-  const railTargets = Array.from(document.querySelectorAll<HTMLElement>("[data-rail-example], [data-rail-default]"));
-  if (railTargets.length) {
-    const observer = new IntersectionObserver(
-      (entries) => {
-        // Pick the most-visible section.
-        let best: { target: HTMLElement; ratio: number } | null = null;
-        for (const entry of entries) {
-          if (entry.isIntersecting && (!best || entry.intersectionRatio > best.ratio)) {
-            best = { target: entry.target as HTMLElement, ratio: entry.intersectionRatio };
-          }
-        }
-        if (!best) return;
-        const target = best.target;
-        const exampleId = target.getAttribute("data-rail-example");
-        if (exampleId) showExample(exampleId);
-        else if (target.hasAttribute("data-rail-default")) showDefault();
-      },
-      { threshold: [0.3, 0.5, 0.7] },
-    );
-    railTargets.forEach((el) => observer.observe(el));
-  }
-
-  // Hover on example cards updates the rail (desktop only — the cards
-  // carry data-rail-example via the existing data-id attribute).
-  const exampleCards = Array.from(document.querySelectorAll<HTMLElement>(".example-card[data-id]"));
-  exampleCards.forEach((card) => {
-    card.addEventListener("mouseenter", () => {
-      const id = card.getAttribute("data-id");
-      if (id) showExample(id);
-    });
-  });
 </script>
