@@ -530,7 +530,7 @@ select:focus-visible {
    so centred content stays visually balanced. */
 @media (min-width: 1100px) {
   body {
-    padding-right: 248px;
+    padding-right: 320px;
   }
 }
 
@@ -2460,42 +2460,30 @@ tr:last-child td {
    ========================================================================= */
 
 .playground-body {
-  padding-right: 0;
   height: 100vh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
 
-.pg-header {
+.pg-toolbar {
   flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 16px;
-  height: 56px;
-  padding: 0 20px;
+  height: 52px;
+  padding: 0 24px;
   border-bottom: 1px solid var(--line-soft);
   background: var(--surface-header);
   backdrop-filter: blur(18px);
 }
 
-.pg-back {
-  color: var(--accent);
-  font-size: 0.82rem;
-  text-decoration: none;
-  white-space: nowrap;
-}
-
-.pg-back:hover {
-  text-decoration: underline;
-}
-
-.pg-title {
+.pg-toolbar-title {
   font-family: var(--font-mono);
-  font-size: 0.82rem;
+  font-size: 0.78rem;
   font-weight: 600;
   letter-spacing: 0.04em;
-  color: var(--text);
+  color: var(--dim);
 }
 
 .pg-actions {
@@ -3180,4 +3168,37 @@ tr:last-child td {
 .pipeline-fragment-riscv,
 .pipeline-fragment-elf {
   color: var(--substrate-dim);
+}
+
+/* =========================================================================
+   View transitions: the NavRail is persistent (no morph), the main
+   content cross-fades. This makes switching between / and /playground
+   feel seamless — the sidebar stays rock-steady while only the body
+   content transitions.
+   ========================================================================= */
+
+/* The NavRail and its toggle are the same on every page, so opt them
+   out of the default cross-fade. They'll stay put visually. */
+.nav-rail,
+.rail-toggle {
+  view-transition-name: nav-rail;
+}
+
+@keyframes nav-rail-none {
+  from { opacity: 1; }
+  to { opacity: 1; }
+}
+
+::view-transition-old(nav-rail),
+::view-transition-new(nav-rail) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+/* Respect reduced motion: instant page switch. */
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none;
+  }
 }

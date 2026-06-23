@@ -18,6 +18,8 @@
 import "../styles/global.css";
 import { heroExamples, exampleFullSources } from "../data/site";
 import { defaultLocale, translations } from "../i18n/translations";
+import NavRail from "../components/NavRail.astro";
+import { ClientRouter } from "astro:transitions";
 
 const locale = defaultLocale;
 const t = translations[locale];
@@ -41,12 +43,12 @@ const initialSource = exampleFullSources[initialExample.id] ?? initialExample.li
         } catch (e) {}
       })();
     </script>
+    <ClientRouter />
   </head>
   <body class="playground-body">
-    <header class="pg-header">
-      <a class="pg-back" href="/" data-i18n="playground.back">{t.playground.back}</a>
-      <span class="pg-title">{t.playground.title}</span>
-      <div class="pg-actions">
+    <div class="pg-toolbar">
+      <span class="pg-toolbar-title">{t.playground.title}</span>
+      <div class="pg-toolbar-actions">
         <label class="pg-example-select">
           <span data-i18n="playground.exampleLabel">{t.playground.exampleLabel}</span>
           <select data-example-select>
@@ -55,7 +57,7 @@ const initialSource = exampleFullSources[initialExample.id] ?? initialExample.li
         </label>
         <button class="pg-action-btn" type="button" data-share data-i18n="playground.share">{t.playground.share}</button>
       </div>
-    </header>
+    </div>
 
     <main class="pg-main">
       <!-- Left: source editor -->
@@ -483,5 +485,6 @@ const initialSource = exampleFullSources[initialExample.id] ?? initialExample.li
 
       updateHighlight();
     </script>
+    <NavRail page="playground" />
   </body>
 </html>

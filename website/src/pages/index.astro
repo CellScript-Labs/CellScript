@@ -5,6 +5,7 @@ import { defaultLocale, translations } from "../i18n/translations";
 import { provenanceForExample, effectsSummary, formatBytes, shortHash } from "../lib/provenance";
 import TransitionOverlay from "../components/TransitionOverlay.astro";
 import NavRail from "../components/NavRail.astro";
+import { ClientRouter } from "astro:transitions";
 import pipelineFragments from "../data/pipeline-fragments.json";
 import assuranceMetadata from "../data/assurance-metadata.json";
 
@@ -102,54 +103,10 @@ const renderLine = (line: string) => {
         }
       })();
     </script>
+    <ClientRouter />
   </head>
   <body>
     <a class="skip-link" href="#top" data-i18n="a11y.skipToContent">{t.a11y.skipToContent}</a>
-    <header class="site-header">
-      <nav class="nav" aria-label={t.nav.primary} data-i18n-aria-label="nav.primary">
-        <a class="brand" href="#top" aria-label={t.nav.home} data-i18n-aria-label="nav.home">
-          <span class="brand-mark" aria-hidden="true"></span>
-          <span>CellScript</span>
-        </a>
-        <div class="nav-links">
-          <a class="nav-link" href={links.docs} target="_blank" rel="noopener noreferrer">
-            <svg viewBox="0 0 20 20" aria-hidden="true">
-              <path d="M5 3.5h8.5L16 6v12H5z" />
-              <path d="M13.5 3.5V6H16M7.5 9h5M7.5 12h5M7.5 15h3" />
-            </svg>
-            <span data-i18n="nav.docs">{t.nav.docs}</span>
-          </a>
-          <a class="nav-link" href="/playground">
-            <svg viewBox="0 0 20 20" aria-hidden="true">
-              <path d="M3 5.5h14v9H3z" fill="none" stroke="currentColor" stroke-width="1.4"/>
-              <path d="M7 8.5l-2 1.5 2 1.5M13 8.5l2 1.5-2 1.5" fill="none" stroke="currentColor" stroke-width="1.4"/>
-            </svg>
-            <span data-i18n="nav.playground">{t.nav.playground}</span>
-          </a>
-          <a class="nav-link" href={links.source} target="_blank" rel="noopener noreferrer">
-            <svg viewBox="0 0 20 20" aria-hidden="true">
-              <path d="M7.5 6.5 4 10l3.5 3.5M12.5 6.5 16 10l-3.5 3.5M11 4.5 9 15.5" />
-            </svg>
-            <span data-i18n="nav.source">{t.nav.source}</span>
-          </a>
-          <button class="nav-link nav-link-disabled" type="button" disabled aria-label={t.nav.registryDisabledAria} data-i18n-aria-label="nav.registryDisabledAria">
-            <svg viewBox="0 0 20 20" aria-hidden="true">
-              <path d="M4.5 6.5c0-1.38 2.46-2.5 5.5-2.5s5.5 1.12 5.5 2.5S13.04 9 10 9 4.5 7.88 4.5 6.5Z" />
-              <path d="M4.5 6.5v7c0 1.38 2.46 2.5 5.5 2.5s5.5-1.12 5.5-2.5v-7M4.5 10c0 1.38 2.46 2.5 5.5 2.5s5.5-1.12 5.5-2.5" />
-            </svg>
-            <span data-i18n="nav.registry">{t.nav.registry}</span>
-          </button>
-          <button class="language-toggle" type="button" aria-label={t.language.aria} data-i18n-aria-label="language.aria" data-language-toggle>
-            <span data-language-label data-i18n="language.switchTo">{t.language.switchTo}</span>
-            <span class="language-short" data-i18n="language.shortSwitch">{t.language.shortSwitch}</span>
-          </button>
-          <button class="theme-toggle" type="button" aria-label={t.theme.switchToDark} aria-pressed="false" data-theme-toggle>
-            <span class="theme-toggle-track" aria-hidden="true"><span class="theme-toggle-thumb"></span></span>
-            <span data-theme-label>{t.theme.dark}</span>
-          </button>
-        </div>
-      </nav>
-    </header>
 
     <main id="top" class="page">
       <section class="hero" aria-labelledby="hero-title" data-transition={JSON.stringify({ action: "init", consume: "[]", create: "landing", effect: "Pure" })}>
@@ -596,28 +553,6 @@ const renderLine = (line: string) => {
         }
       };
 
-      let languageTransitioning = false;
-      const switchLocale = async (nextLocale: string) => {
-        if (languageTransitioning) return;
-        if (prefersReducedMotion.matches) {
-          applyLocale(nextLocale);
-          syncThemeToggle();
-          return;
-        }
-
-        languageTransitioning = true;
-        languageToggle?.setAttribute("disabled", "");
-        document.documentElement.classList.add("locale-fade-out");
-        await delay(languageTransitionMs);
-        applyLocale(nextLocale);
-        syncThemeToggle();
-        document.documentElement.classList.remove("locale-fade-out");
-        await delay(languageTransitionMs);
-        languageToggle?.removeAttribute("disabled");
-        languageToggle?.focus();
-        languageTransitioning = false;
-      };
-
       const root = document.querySelector("[data-code-tabs]");
       if (root) {
         const tabs = Array.from(root.querySelectorAll("[data-tab]"));
@@ -815,37 +750,11 @@ const renderLine = (line: string) => {
         });
       });
 
-      const themeToggle = document.querySelector<HTMLButtonElement>("[data-theme-toggle]");
-      const themeLabel = document.querySelector<HTMLElement>("[data-theme-label]");
-      const languageToggle = document.querySelector<HTMLButtonElement>("[data-language-toggle]");
-
-      const readTheme = () => document.documentElement.dataset.theme === "light" ? "light" : "dark";
-      const syncThemeToggle = () => {
-        const nextTheme = readTheme() === "light" ? "dark" : "light";
-        if (themeToggle) {
-          themeToggle.setAttribute("aria-pressed", String(readTheme() === "light"));
-          themeToggle.setAttribute("aria-label", getMessage(nextTheme === "dark" ? "theme.switchToDark" : "theme.switchToLight") ?? "");
-        }
-        if (themeLabel) {
-          themeLabel.textContent = getMessage(nextTheme === "light" ? "theme.light" : "theme.dark") ?? "";
-        }
-      };
-
+      // Theme and language toggles are now handled by the NavRail
+      // component. We keep the i18n applyLocale for the initial render
+      // and for the locale-fade transition; the NavRail's own script
+      // owns the click handlers.
       applyLocale(readLocale());
-      syncThemeToggle();
-      languageToggle?.addEventListener("click", () => {
-        void switchLocale(readLocale() === "en" ? "zh" : "en");
-      });
-      themeToggle?.addEventListener("click", () => {
-        const nextTheme = readTheme() === "light" ? "dark" : "light";
-        document.documentElement.dataset.theme = nextTheme;
-        try {
-          localStorage.setItem("cellscript-theme", nextTheme);
-        } catch {
-          // Theme changes still work even when storage is unavailable.
-        }
-        syncThemeToggle();
-      });
 
       // Copy-to-clipboard for commands, hero source, and metadata.
       // data-copy-text buttons carry their own payload; data-copy-source buttons
@@ -905,7 +814,7 @@ const renderLine = (line: string) => {
         window.addEventListener("resize", updatePipelineProgress);
       }
     </script>
-    <NavRail />
+    <NavRail page="home" />
     <TransitionOverlay />
   </body>
 </html>
