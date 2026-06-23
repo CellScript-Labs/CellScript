@@ -18,6 +18,7 @@ export const translations = {
     nav: {
       primary: "Primary navigation",
       docs: "Docs",
+      playground: "Playground",
       source: "Source",
       registry: "Registry",
       registryDisabledAria: "Registry is not live yet",
@@ -269,6 +270,7 @@ export const translations = {
     nav: {
       primary: "主导航",
       docs: "文档",
+      playground: "Playground",
       source: "源码",
       registry: "Registry",
       registryDisabledAria: "Registry 尚未上线",

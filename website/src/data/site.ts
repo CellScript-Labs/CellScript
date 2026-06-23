@@ -15,16 +15,42 @@ export const links = {
 };
 
 /**
+ * The Token type definition from fungible_token.cell, used as an inline
+ * replacement for cross-file `use cellscript::fungible_token::Token`
+ * imports. The playground compiles a single source string in the
+ * browser (no package resolver), so examples that import Token must
+ * have the type inlined to compile standalone.
+ */
+const TOKEN_TYPE_INLINE = `resource Token has store, create, consume, replace, burn, relock {
+    amount: u64,
+    symbol: [u8; 8],
+}`;
+
+/**
+ * Make a hero example source self-contained for single-file playground
+ * compilation. Replaces `use cellscript::fungible_token::Token` with
+ * the inline Token type definition. Other `use` imports (none currently
+ * exist in the hero examples) are left as-is and will error in the
+ * playground — which is honest behaviour (the user sees the limitation).
+ */
+const makeStandalone = (source: string): string =>
+  source.replace(
+    /^use cellscript::fungible_token::Token\s*$/m,
+    TOKEN_TYPE_INLINE,
+  );
+
+/**
  * Full compilable source for each hero example, read from examples/ at
  * build time. The heroExamples array above uses truncated display
  * snippets ("// ... omitted") for the landing page; the playground
  * needs the real file so the WASM compiler can actually compile it.
+ * Cross-file `use` imports are inlined so each source is self-contained.
  */
 export const exampleFullSources: Record<string, string> = {
-  token: readFileSync(resolve(repoRoot, "examples", "token.cell"), "utf-8"),
-  nft: readFileSync(resolve(repoRoot, "examples", "nft.cell"), "utf-8"),
-  amm: readFileSync(resolve(repoRoot, "examples", "amm_pool.cell"), "utf-8"),
-  vesting: readFileSync(resolve(repoRoot, "examples", "vesting.cell"), "utf-8"),
+  token: makeStandalone(readFileSync(resolve(repoRoot, "examples", "token.cell"), "utf-8")),
+  nft: makeStandalone(readFileSync(resolve(repoRoot, "examples", "nft.cell"), "utf-8")),
+  amm: makeStandalone(readFileSync(resolve(repoRoot, "examples", "amm_pool.cell"), "utf-8")),
+  vesting: makeStandalone(readFileSync(resolve(repoRoot, "examples", "vesting.cell"), "utf-8")),
 };
 
 export const heroExamples = [
