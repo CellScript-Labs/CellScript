@@ -302,24 +302,8 @@ const commits = (githubActivity as { commits: any[] }).commits;
   .rail-body {
     flex: 1 1 auto;
     overflow-y: auto;
-    /* Hide the scrollbar to avoid a double-scrollbar with the page's
-       own scrollbar on the right edge. The rail still scrolls via
-       wheel/touch/drag — the scrollbar gutter is just not visible. */
-    scrollbar-width: thin;
-    scrollbar-color: var(--line-soft) transparent;
-  }
-
-  .rail-body::-webkit-scrollbar {
-    width: 4px;
-  }
-
-  .rail-body::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  .rail-body::-webkit-scrollbar-thumb {
-    background: var(--line-soft);
-    border-radius: 2px;
+    /* Scrollbars are hidden globally (see global.css *::-webkit-scrollbar).
+       The rail still scrolls via wheel/touch/drag. */
   }
 
   .rail-section {
