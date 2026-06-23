@@ -243,9 +243,45 @@ const initialSource = exampleFullSources[initialExample.id] ?? initialExample.li
           panel.innerHTML = `<p class="pg-empty">${escapeHtml(i18n.noActions)}</p>`;
           return;
         }
+
+        // Build a type-hash -> name map so consume entries (which carry
+        // only a hash) can be resolved to a human-readable type name.
+        // create entries already carry a friendly ty field.
+        const types = data.types || [];
+        const hashToName = new Map<string, string>();
+        for (const ty of types) {
+          // Prefer the full hash; fall back to hash_type_source.
+          for (const key of ["hash", "hash_type_source"]) {
+            const h = ty[key];
+            if (h && h !== "target-default") hashToName.set(h, ty.name);
+          }
+        }
+        // The well-known fungible Token hash (used cross-module).
+        hashToName.set("a2fb2f9b3990cd9b473352ff466d94a720c6a8c56ce9e014536872ea71c808d1", "Token");
+
         panel.innerHTML = `<ul class="pg-action-list">${actions.map((a: any) => {
-          const consume = (a.consume_set || []).map((c: any) => `<span class="pg-set-entry">${escapeHtml(c.operation)} ${escapeHtml(c.binding || "")}</span>`).join("");
-          const create = (a.create_set || []).map((c: any) => `<span class="pg-set-entry">${escapeHtml(c.operation)} ${escapeHtml(c.ty || c.binding || "")}</span>`).join("");
+          // Build a binding -> type name map from the action's own
+          // params, which carry the declared type name for every
+          // binding (both consume inputs and create outputs).
+          const paramsByBinding = new Map<string, string>();
+          for (const p of a.params || []) {
+            if (p.name && p.ty) paramsByBinding.set(p.name, p.ty);
+          }
+
+          const formatEntry = (entry: any): string => {
+            const binding = escapeHtml(entry.binding || "?");
+            const ty = escapeHtml(
+              entry.ty ||
+              paramsByBinding.get(entry.binding) ||
+              hashToName.get(entry.type_hash) ||
+              "Cell",
+            );
+            return `<span class="pg-set-entry">${binding}: <span class="pg-set-type">${ty}</span></span>`;
+          };
+
+          const consume = (a.consume_set || []).map(formatEntry).join("");
+          const create = (a.create_set || []).map(formatEntry).join("");
+          const mutate = (a.mutate_set || []).map(formatEntry).join("");
           return `<li class="pg-action-item">
             <div class="pg-action-head">
               <code class="pg-action-name">${escapeHtml(a.name)}</code>
@@ -254,6 +290,7 @@ const initialSource = exampleFullSources[initialExample.id] ?? initialExample.li
             <div class="pg-action-sets">
               <div class="pg-set"><span class="pg-set-label">consume</span><div class="pg-set-items">${consume || "<span class=\"pg-set-empty\">—</span>"}</div></div>
               <div class="pg-set"><span class="pg-set-label">create</span><div class="pg-set-items">${create || "<span class=\"pg-set-empty\">—</span>"}</div></div>
+              ${mutate ? `<div class="pg-set"><span class="pg-set-label">mutate</span><div class="pg-set-items">${mutate}</div></div>` : ""}
             </div>
             ${a.estimated_cycles != null ? `<div class="pg-action-cycles">${a.estimated_cycles.toLocaleString()} cycles</div>` : ""}
           </li>`;

@@ -2795,6 +2795,10 @@ tr:last-child td {
   color: var(--text-soft);
 }
 
+.pg-set-type {
+  color: var(--accent);
+}
+
 .pg-set-empty {
   color: var(--dim);
   font-size: 0.68rem;
