@@ -16,7 +16,7 @@
  * + overlay only), WASM <= 600KB gzip, no new keyframe animations.
  */
 import "../styles/global.css";
-import { heroExamples, links, exampleFullSources } from "../data/site";
+import { heroExamples, exampleFullSources } from "../data/site";
 import { defaultLocale, translations } from "../i18n/translations";
 
 const locale = defaultLocale;
@@ -152,6 +152,8 @@ const initialSource = exampleFullSources[initialExample.id] ?? initialExample.li
 
     <script is:inline type="application/json" data-i18n-strings set:html={JSON.stringify({
       noErrors: t.playground.noErrors,
+      noActions: t.playground.noActions,
+      noTypes: t.playground.noTypes,
       ready: t.playground.ready,
       copied: t.playground.copied,
       share: t.playground.share,
@@ -172,7 +174,7 @@ const initialSource = exampleFullSources[initialExample.id] ?? initialExample.li
       const exampleSources: Record<string, string> = JSON.parse(
         document.querySelector<HTMLScriptElement>("[data-example-sources]")?.textContent ?? "{}",
       );
-      const i18n: { noErrors: string; ready: string; copied: string; share: string } = JSON.parse(
+      const i18n: { noErrors: string; noActions: string; noTypes: string; ready: string; copied: string; share: string } = JSON.parse(
         document.querySelector<HTMLScriptElement>("[data-i18n-strings]")?.textContent ?? "{}",
       );
 
@@ -238,7 +240,7 @@ const initialSource = exampleFullSources[initialExample.id] ?? initialExample.li
         if (!panel) return;
         const actions = data.actions || [];
         if (!actions.length) {
-          panel.innerHTML = '<p class="pg-empty">No actions.</p>';
+          panel.innerHTML = `<p class="pg-empty">${escapeHtml(i18n.noActions)}</p>`;
           return;
         }
         panel.innerHTML = `<ul class="pg-action-list">${actions.map((a: any) => {
@@ -263,7 +265,7 @@ const initialSource = exampleFullSources[initialExample.id] ?? initialExample.li
         if (!panel) return;
         const types = data.types || [];
         if (!types.length) {
-          panel.innerHTML = '<p class="pg-empty">No types.</p>';
+          panel.innerHTML = `<p class="pg-empty">${escapeHtml(i18n.noTypes)}</p>`;
           return;
         }
         panel.innerHTML = `<ul class="pg-type-list">${types.map((ty: any) => {
@@ -295,7 +297,9 @@ const initialSource = exampleFullSources[initialExample.id] ?? initialExample.li
         railReady.hidden = false;
         if (railModule) railModule.textContent = data.module || "—";
         if (railTarget) railTarget.textContent = data.target_profile?.name || "ckb";
-        if (railSize) railSize.textContent = data.artifact_size_bytes ? formatBytes(data.artifact_size_bytes) : "—";
+        if (railSize) railSize.textContent = data.artifact_size_bytes
+          ? formatBytes(data.artifact_size_bytes)
+          : (data.artifact_format || "—");
         if (railActions) {
           railActions.innerHTML = (data.actions || []).map((a: any) =>
             `<li class="pg-rail-action">

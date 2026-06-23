@@ -421,7 +421,7 @@
       }
     ]
   },
-  "amm_pool": {
+  "amm": {
     "module": "cellscript::amm_pool",
     "target": "ckb",
     "artifactSizeBytes": 441366,

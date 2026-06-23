@@ -1,6 +1,6 @@
 ---
 import "../styles/global.css";
-import { exampleFullSources, exampleGroups, heroExamples, links, modelCards, tools, workflowSteps } from "../data/site";
+import { exampleGroups, heroExamples, links, modelCards, tools, workflowSteps } from "../data/site";
 import { defaultLocale, translations } from "../i18n/translations";
 import { provenanceForExample, effectsSummary, formatBytes, shortHash } from "../lib/provenance";
 import TransitionOverlay from "../components/TransitionOverlay.astro";
@@ -335,13 +335,7 @@ const renderLine = (line: string) => {
                 <span class="pipeline-stage-num">02</span>
                 <span class="pipeline-stage-label" data-i18n="workflow.steps.parse.0">{t.workflow.steps.parse[0]}</span>
               </div>
-              <pre class="pipeline-fragment pipeline-fragment-ast"><span class="token-keyword">module</span> cellscript::fungible_token
-  <span class="token-keyword">resource</span> Token
-    amount: u64
-    symbol: [u8; 8]
-  <span class="token-keyword">action</span> transfer_token
-    <span class="token-cell-effect">consume</span> token
-    <span class="token-cell-effect">create</span> next_token</pre>
+              <pre class="pipeline-fragment pipeline-fragment-ast">{pipelineFragments.ast}</pre>
             </li>
             <li class="pipeline-stage" data-pipeline-stage="2">
               <div class="pipeline-stage-head">
@@ -353,7 +347,7 @@ const renderLine = (line: string) => {
             <li class="pipeline-stage" data-pipeline-stage="3">
               <div class="pipeline-stage-head">
                 <span class="pipeline-stage-num">04</span>
-                <span class="pipeline-stage-label">RISC-V Codegen</span>
+                <span class="pipeline-stage-label" data-i18n="workflow.steps.riscv.0">{t.workflow.steps.riscv[0]}</span>
               </div>
               <pre class="pipeline-fragment pipeline-fragment-riscv">{pipelineFragments.riscv}</pre>
             </li>
