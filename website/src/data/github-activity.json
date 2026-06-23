@@ -5,58 +5,58 @@
       "name": "CellScript 0.16.2",
       "date": "2026-06-21",
       "body": "CellScript 0.16.2 is a builder-ergonomics patch for CKB resource identity\r\nhandoff. It keeps the 0.16 compiler/runtime scope, while making\u2026",
-      "url": "https://github.com/a19q3/CellScript/releases/tag/v0.16.2"
+      "url": "https://github.com/CellScript-Labs/CellScript/releases/tag/v0.16.2"
     },
     {
       "tag": "v0.16.1",
       "name": "CellScript 0.16.1",
       "date": "2026-06-15",
       "body": "CellScript 0.16.1 is a patch release for bundled example lifecycle clarity and\r\nbuilder handoff. It keeps the 0.16 assurance/tooling scope,\u2026",
-      "url": "https://github.com/a19q3/CellScript/releases/tag/v0.16.1"
+      "url": "https://github.com/CellScript-Labs/CellScript/releases/tag/v0.16.1"
     },
     {
       "tag": "v0.16.0",
       "name": "CellScript 0.16.0",
       "date": "2026-06-14",
       "body": "CellScript 0.16 is an assurance and tooling release. For users, the main change\r\nis that the compiler is no longer just producing an artefa\u2026",
-      "url": "https://github.com/a19q3/CellScript/releases/tag/v0.16.0"
+      "url": "https://github.com/CellScript-Labs/CellScript/releases/tag/v0.16.0"
     }
   ],
   "commits": [
     {
-      "sha": "42693f1",
-      "message": "fix: preserve CKB VM stack in ELF entry",
+      "sha": "236a6d8",
+      "message": "merge: release CellScript public registry",
       "author": "Tawan",
-      "date": "2026-06-21",
-      "url": "https://github.com/a19q3/CellScript/commit/42693f13a5da32df885138a8b0e376aa3f75fc52"
+      "date": "2026-06-23",
+      "url": "https://github.com/CellScript-Labs/CellScript/commit/236a6d89e35c3fc3c02938299a22ed1d0f00fe93"
     },
     {
-      "sha": "6fdc458",
-      "message": "Audit wiki for builder CLI UX",
-      "author": "Arthur",
-      "date": "2026-06-21",
-      "url": "https://github.com/a19q3/CellScript/commit/6fdc458ebb70021b4c1ba3a25d66b1e0f7b1382f"
+      "sha": "293c2db",
+      "message": "feat: prepare CellScript public registry release",
+      "author": "Tawan",
+      "date": "2026-06-23",
+      "url": "https://github.com/CellScript-Labs/CellScript/commit/293c2dbea7b3822ab25b82555ae9d01a76a3ede1"
     },
     {
-      "sha": "8c9303c",
-      "message": "Improve builder CLI output UX",
-      "author": "Arthur",
-      "date": "2026-06-21",
-      "url": "https://github.com/a19q3/CellScript/commit/8c9303cc6d4bfd5357b00ffb9104922a13e0faf5"
+      "sha": "49a1ba1",
+      "message": "ci: auto-refresh website GitHub activity 3x daily",
+      "author": "Tawan",
+      "date": "2026-06-23",
+      "url": "https://github.com/CellScript-Labs/CellScript/commit/49a1ba134d737c157672cebb2c6e21e9a85c4afb"
     },
     {
-      "sha": "96503c4",
-      "message": "Finalize CellScript 0.16.2 builder workflow",
-      "author": "Arthur",
-      "date": "2026-06-21",
-      "url": "https://github.com/a19q3/CellScript/commit/96503c43f24e6a0da5a4abc29d5e39ab7a06236b"
+      "sha": "6a1f030",
+      "message": "fix(website): hide all scrollbars globally, keep scroll functionality",
+      "author": "Tawan",
+      "date": "2026-06-23",
+      "url": "https://github.com/CellScript-Labs/CellScript/commit/6a1f030ed64b029e3e5efbb9962799193d4544c2"
     },
     {
-      "sha": "54ce199",
-      "message": "Release CellScript 0.16.2",
-      "author": "Arthur",
-      "date": "2026-06-21",
-      "url": "https://github.com/a19q3/CellScript/commit/54ce1990e92173f515839af54fb42b65fadabf28"
+      "sha": "1d021b5",
+      "message": "feat(website): move NavRail from right to left side",
+      "author": "Tawan",
+      "date": "2026-06-23",
+      "url": "https://github.com/CellScript-Labs/CellScript/commit/1d021b59a981e1b29a09e02e95f2cdfc273b534f"
     }
   ]
 }

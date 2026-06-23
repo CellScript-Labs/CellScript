@@ -16,7 +16,7 @@
  * + overlay only), WASM <= 600KB gzip, no new keyframe animations.
  */
 import "../styles/global.css";
-import { playgroundExamples, exampleFullSources } from "../data/site";
+import { playgroundExamples, exampleFullSources, exampleGroups } from "../data/site";
 import { translations } from "../i18n/translations";
 import NavRail from "../components/NavRail.astro";
 import { ClientRouter } from "astro:transitions";
@@ -32,6 +32,21 @@ const initialSource = exampleFullSources[initialExample.id] ?? "";
 const getPlaygroundExampleCopy = (id: string) =>
   (t.playground.examples as Record<string, { title: string; summary: string }>)[id];
 const playgroundExampleMeta = playgroundExamples.map(({ id, label, file }) => ({ id, label, file }));
+type PlaygroundExample = (typeof playgroundExamples)[number];
+const playgroundExampleById = new Map<string, PlaygroundExample>(playgroundExamples.map((example) => [example.id, example]));
+const normaliseGroupExampleId = (id: string) => id === "ammPool" ? "amm" : id;
+const groupedPlaygroundExampleIds = new Set<string>();
+const playgroundSelectGroups: Array<{ id: string; items: PlaygroundExample[] }> = exampleGroups.map((group) => {
+  const items = group.items
+    .map((item) => playgroundExampleById.get(normaliseGroupExampleId(item.id)))
+    .filter(Boolean) as PlaygroundExample[];
+  items.forEach((item) => groupedPlaygroundExampleIds.add(item.id));
+  return { id: group.id, items };
+}).filter((group) => group.items.length > 0);
+const ungroupedPlaygroundExamples = playgroundExamples.filter((example) => !groupedPlaygroundExampleIds.has(example.id));
+if (ungroupedPlaygroundExamples.length > 0) {
+  playgroundSelectGroups.push({ id: "advanced", items: ungroupedPlaygroundExamples });
+}
 ---
 
 <!DOCTYPE html>
@@ -61,17 +76,30 @@ const playgroundExampleMeta = playgroundExamples.map(({ id, label, file }) => ({
     <ClientRouter />
   </head>
   <body class="playground-body">
+    <a class="skip-link" href="#playground-editor" data-i18n="playground.skipToEditor">{t.playground.skipToEditor}</a>
     <div class="pg-toolbar">
-      <span class="pg-toolbar-title">{t.playground.title}</span>
+      <h1 class="pg-toolbar-title">{t.playground.title}</h1>
       <div class="pg-toolbar-actions">
         <label class="pg-example-select">
           <span data-i18n="playground.exampleLabel">{t.playground.exampleLabel}</span>
           <select data-example-select>
-            {playgroundExamples.map((ex) => (
-              <option value={ex.id} data-i18n={`playground.examples.${ex.id}.title`}>
-                {getPlaygroundExampleCopy(ex.id)?.title ?? ex.label}
-              </option>
+            {playgroundSelectGroups.map((group) => (
+              <optgroup label={(t.playground.exampleGroups as Record<string, string>)[group.id] ?? group.id} data-i18n-label={`playground.exampleGroups.${group.id}`}>
+                {group.items.map((ex) => (
+                  <option value={ex.id} data-i18n={`playground.examples.${ex.id}.title`}>
+                    {getPlaygroundExampleCopy(ex.id)?.title ?? ex.label}
+                  </option>
+                ))}
+              </optgroup>
             ))}
+          </select>
+        </label>
+        <label class="pg-format-select">
+          <span data-i18n="playground.format">{t.playground.format}</span>
+          <select data-target-select>
+            <option value="" data-i18n="playground.formatDefault">{t.playground.formatDefault}</option>
+            <option value="riscv64-asm" data-i18n="playground.formatAsm">{t.playground.formatAsm}</option>
+            <option value="riscv64-elf" data-i18n="playground.formatElf">{t.playground.formatElf}</option>
           </select>
         </label>
         <button class="pg-action-btn pg-compile-btn" type="button" data-compile data-i18n-aria-label="playground.compileAria" aria-label={t.playground.compileAria}>
@@ -80,6 +108,7 @@ const playgroundExampleMeta = playgroundExamples.map(({ id, label, file }) => ({
         </button>
         <button class="pg-action-btn" type="button" data-export-cell data-i18n="playground.exportCell" data-i18n-aria-label="playground.exportAria" aria-label={t.playground.exportAria}>{t.playground.exportCell}</button>
         <button class="pg-action-btn" type="button" data-share data-i18n="playground.share" data-i18n-aria-label="a11y.copyAria" aria-label={t.a11y.copyAria}>{t.playground.share}</button>
+        <span class="pg-shortcut-hint" data-i18n="playground.shortcutHint">{t.playground.shortcutHint}</span>
       </div>
     </div>
 
@@ -98,9 +127,15 @@ const playgroundExampleMeta = playgroundExamples.map(({ id, label, file }) => ({
       </p>
     </aside>
 
-    <main class="pg-main">
+    <nav class="pg-mobile-switch" aria-label={t.playground.mobileSwitchAria}>
+      <button class="active" type="button" data-mobile-view-btn="source" aria-pressed="true" data-i18n="playground.source">{t.playground.source}</button>
+      <button type="button" data-mobile-view-btn="output" aria-pressed="false" data-i18n="playground.output">{t.playground.output}</button>
+      <button type="button" data-mobile-view-btn="rail" aria-pressed="false" data-i18n="playground.provenance">{t.playground.provenance}</button>
+    </nav>
+
+    <main class="pg-main" data-pg-main data-mobile-view="source">
       <!-- Left: source editor -->
-      <section class="pg-col pg-source" aria-label={t.playground.source} data-i18n-aria-label="playground.source">
+      <section class="pg-col pg-source" id="playground-editor" aria-label={t.playground.source} data-i18n-aria-label="playground.source" tabindex="-1">
         <div class="pg-col-head">
           <span data-i18n="playground.source">{t.playground.source}</span>
         </div>
@@ -123,16 +158,16 @@ const playgroundExampleMeta = playgroundExamples.map(({ id, label, file }) => ({
       <!-- Middle: compile output -->
       <section class="pg-col pg-output" aria-label={t.playground.output} data-i18n-aria-label="playground.output">
         <div class="pg-col-head pg-tabs" role="tablist">
-          <button class="pg-tab active" role="tab" id="pg-tab-metadata" aria-selected="true" aria-controls="pg-panel-metadata" data-output-tab="metadata">
+          <button class="pg-tab active" role="tab" id="pg-tab-metadata" aria-selected="true" aria-controls="pg-panel-metadata" data-output-tab="metadata" tabindex="0">
             <span data-i18n="playground.tabMetadata">{t.playground.tabMetadata}</span>
           </button>
-          <button class="pg-tab" role="tab" id="pg-tab-actions" aria-selected="false" aria-controls="pg-panel-actions" data-output-tab="actions">
+          <button class="pg-tab" role="tab" id="pg-tab-actions" aria-selected="false" aria-controls="pg-panel-actions" data-output-tab="actions" tabindex="-1">
             <span data-i18n="playground.tabActions">{t.playground.tabActions}</span>
           </button>
-          <button class="pg-tab" role="tab" id="pg-tab-types" aria-selected="false" aria-controls="pg-panel-types" data-output-tab="types">
+          <button class="pg-tab" role="tab" id="pg-tab-types" aria-selected="false" aria-controls="pg-panel-types" data-output-tab="types" tabindex="-1">
             <span data-i18n="playground.tabTypes">{t.playground.tabTypes}</span>
           </button>
-          <button class="pg-tab" role="tab" id="pg-tab-errors" aria-selected="false" aria-controls="pg-panel-errors" data-output-tab="errors">
+          <button class="pg-tab" role="tab" id="pg-tab-errors" aria-selected="false" aria-controls="pg-panel-errors" data-output-tab="errors" tabindex="-1">
             <span data-i18n="playground.tabErrors">{t.playground.tabErrors}</span>
             <span class="pg-tab-badge" data-error-badge aria-label={t.playground.noErrorsBadge} hidden>0</span>
           </button>
@@ -173,13 +208,17 @@ const playgroundExampleMeta = playgroundExamples.map(({ id, label, file }) => ({
                 <dt data-rail-size-label data-i18n="playground.size">{t.playground.size}</dt>
                 <dd class="substrate-value" data-rail-size></dd>
               </div>
+              <div class="pg-rail-fact" data-rail-mode-fact hidden>
+                <dt data-i18n="playground.buildMode">{t.playground.buildMode}</dt>
+                <dd class="substrate-value" data-rail-mode></dd>
+              </div>
             </dl>
             <div class="pg-rail-group">
-              <span class="pg-rail-group-label" data-i18n="playground.actions">{t.playground.actions}</span>
+              <h2 class="pg-rail-group-label" data-i18n="playground.actions">{t.playground.actions}</h2>
               <ul class="pg-rail-actions" data-rail-actions></ul>
             </div>
             <div class="pg-rail-group">
-              <span class="pg-rail-group-label" data-i18n="playground.types">{t.playground.types}</span>
+              <h2 class="pg-rail-group-label" data-i18n="playground.types">{t.playground.types}</h2>
               <ul class="pg-rail-types" data-rail-types></ul>
             </div>
           </div>
@@ -188,7 +227,7 @@ const playgroundExampleMeta = playgroundExamples.map(({ id, label, file }) => ({
     </main>
 
     <footer class="pg-statusbar">
-      <span class="pg-status" data-status>{t.playground.loading}</span>
+      <span class="pg-status" data-status role="status" aria-live="polite">{t.playground.loading}</span>
       <span class="pg-version" data-version></span>
     </footer>
 
@@ -250,6 +289,9 @@ const playgroundExampleMeta = playgroundExamples.map(({ id, label, file }) => ({
       const exampleSelect = document.querySelector<HTMLSelectElement>("[data-example-select]");
       const exampleTitle = document.querySelector<HTMLElement>("[data-example-title]");
       const exampleSummary = document.querySelector<HTMLElement>("[data-example-summary]");
+      const pgMain = document.querySelector<HTMLElement>("[data-pg-main]");
+      const mobileViewBtns = Array.from(document.querySelectorAll<HTMLButtonElement>("[data-mobile-view-btn]"));
+      const targetSelect = document.querySelector<HTMLSelectElement>("[data-target-select]");
       const shareBtn = document.querySelector<HTMLButtonElement>("[data-share]");
       const exportBtn = document.querySelector<HTMLButtonElement>("[data-export-cell]");
       const compileBtn = document.querySelector<HTMLButtonElement>("[data-compile]");
@@ -263,6 +305,8 @@ const playgroundExampleMeta = playgroundExamples.map(({ id, label, file }) => ({
       const railTarget = railBody?.querySelector<HTMLElement>("[data-rail-target]");
       const railSize = railBody?.querySelector<HTMLElement>("[data-rail-size]");
       const railSizeLabel = railBody?.querySelector<HTMLElement>("[data-rail-size-label]");
+      const railModeFact = railBody?.querySelector<HTMLElement>("[data-rail-mode-fact]");
+      const railMode = railBody?.querySelector<HTMLElement>("[data-rail-mode]");
       const railActions = railBody?.querySelector<HTMLElement>("[data-rail-actions]");
       const railTypes = railBody?.querySelector<HTMLElement>("[data-rail-types]");
       const errorBadge = document.querySelector<HTMLElement>("[data-error-badge]");
@@ -335,6 +379,39 @@ const playgroundExampleMeta = playgroundExamples.map(({ id, label, file }) => ({
       const formatUnknownError = (e: unknown): string =>
         e instanceof Error && e.message ? e.message : String(e);
 
+      const renderJson = (json: string): string =>
+        escapeHtml(json).replace(
+          /("(?:\\.|[^"\\])*")(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/g,
+          (match, stringToken: string | undefined, colon: string | undefined) => {
+            if (stringToken) {
+              const cls = colon ? "pg-json-key" : "pg-json-string";
+              return `<span class="${cls}">${stringToken}</span>${colon ?? ""}`;
+            }
+            const cls = /^-?\d/.test(match) ? "pg-json-number" : "pg-json-literal";
+            return `<span class="${cls}">${match}</span>`;
+          },
+        );
+
+      const summariseError = (message: string): string =>
+        message.length > 80 ? `${message.slice(0, 77)}...` : message;
+
+      const sourceMatchesExample = (id: string | null | undefined, src = textarea?.value ?? ""): boolean =>
+        !!id && exampleSources[id] !== undefined && exampleSources[id] === src;
+
+      const selectMobileView = (target: string) => {
+        if (!pgMain || !["source", "output", "rail"].includes(target)) return;
+        pgMain.dataset.mobileView = target;
+        mobileViewBtns.forEach((btn) => {
+          const active = btn.dataset.mobileViewBtn === target;
+          btn.classList.toggle("active", active);
+          btn.setAttribute("aria-pressed", String(active));
+        });
+      };
+
+      mobileViewBtns.forEach((btn) => {
+        btn.addEventListener("click", () => selectMobileView(btn.dataset.mobileViewBtn ?? "source"));
+      });
+
       // Effect class -> localized label. Falls back to the raw class
       // name lowercased if it isn't one of the known classes.
       const effectLabel = (effectClass: unknown): string => {
@@ -342,6 +419,51 @@ const playgroundExampleMeta = playgroundExamples.map(({ id, label, file }) => ({
         const localized = getMessage(`playground.effects.${key}`, readLocale());
         if (typeof localized === "string" && localized) return localized;
         return key.toLowerCase();
+      };
+
+      const buildHashToName = (types: any[] = []) => {
+        const hashToName = new Map<string, string>();
+        for (const ty of types) {
+          for (const key of ["hash", "hash_type_source"]) {
+            const h = ty[key];
+            if (h && h !== "target-default") hashToName.set(h, ty.name);
+          }
+        }
+        hashToName.set("a2fb2f9b3990cd9b473352ff466d94a720c6a8c56ce9e014536872ea71c808d1", "Token");
+        return hashToName;
+      };
+
+      const actionRuntimeFeatures = (action: any): string[] => {
+        const raw =
+          action.ckb_runtime_features ||
+          action.runtime_features ||
+          action.target_features ||
+          action.runtime?.features ||
+          [];
+        if (Array.isArray(raw)) return raw.map(String).filter(Boolean);
+        if (raw && typeof raw === "object") return Object.keys(raw).filter((key) => Boolean(raw[key]));
+        if (typeof raw === "string" && raw.trim()) return [raw.trim()];
+        return [];
+      };
+
+      const formatSetEntries = (entries: any[] = [], paramsByBinding = new Map<string, string>(), hashToName = new Map<string, string>()) =>
+        entries.map((entry: any) => {
+          const binding = escapeHtml(entry.binding || "?");
+          const ty = escapeHtml(
+            entry.ty ||
+            paramsByBinding.get(entry.binding) ||
+            hashToName.get(entry.type_hash) ||
+            "Cell",
+          );
+          return `<span class="pg-set-entry">${binding}: <span class="pg-set-type">${ty}</span></span>`;
+        }).join("");
+
+      const actionParamsByBinding = (action: any) => {
+        const paramsByBinding = new Map<string, string>();
+        for (const p of action.params || []) {
+          if (p.name && p.ty) paramsByBinding.set(p.name, p.ty);
+        }
+        return paramsByBinding;
       };
 
       // ---- Share-link source encoding (UTF-8 safe base64) ----
@@ -395,15 +517,16 @@ const playgroundExampleMeta = playgroundExamples.map(({ id, label, file }) => ({
         const json = JSON.stringify(data, null, 2);
         // Wrap in .metadata-block so the existing .copy-btn.metadata-copy
         // absolute positioning (global.css) pins the button to the
-        // top-right corner. data-copy-text is read at click-time by the
-        // delegated copy handler registered below.
+        // top-right corner. The delegated copy handler reads the adjacent
+        // <pre> text at click-time so JSON quotes cannot corrupt an HTML
+        // attribute.
         const copyAria = getMessage("a11y.copyAria", readLocale()) ?? "Copy";
         panel.innerHTML = `<div class="metadata-block pg-metadata-block">
-          <button class="copy-btn metadata-copy" type="button" data-copy-text="${escapeHtml(json)}" aria-label="${escapeHtml(copyAria)}" aria-live="polite">
+          <button class="copy-btn metadata-copy" type="button" aria-label="${escapeHtml(copyAria)}" aria-live="polite">
             <svg class="copy-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M6 4h8v10H6z" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M4 6v10h8" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
             <svg class="check-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10.5l4 4 8-9" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </button>
-          <pre class="pg-json">${escapeHtml(json)}</pre>
+          <pre class="pg-json">${renderJson(json)}</pre>
         </div>`;
       };
 
@@ -419,43 +542,22 @@ const playgroundExampleMeta = playgroundExamples.map(({ id, label, file }) => ({
         // Build a type-hash -> name map so consume entries (which carry
         // only a hash) can be resolved to a human-readable type name.
         // create entries already carry a friendly ty field.
-        const types = data.types || [];
-        const hashToName = new Map<string, string>();
-        for (const ty of types) {
-          // Prefer the full hash; fall back to hash_type_source.
-          for (const key of ["hash", "hash_type_source"]) {
-            const h = ty[key];
-            if (h && h !== "target-default") hashToName.set(h, ty.name);
-          }
-        }
-        // The well-known fungible Token hash (used cross-module).
-        hashToName.set("a2fb2f9b3990cd9b473352ff466d94a720c6a8c56ce9e014536872ea71c808d1", "Token");
+        const hashToName = buildHashToName(data.types || []);
 
         panel.innerHTML = `<ul class="pg-action-list">${actions.map((a: any) => {
           // Build a binding -> type name map from the action's own
           // params, which carry the declared type name for every
           // binding (both consume inputs and create outputs).
-          const paramsByBinding = new Map<string, string>();
-          for (const p of a.params || []) {
-            if (p.name && p.ty) paramsByBinding.set(p.name, p.ty);
-          }
-
-          const formatEntry = (entry: any): string => {
-            const binding = escapeHtml(entry.binding || "?");
-            const ty = escapeHtml(
-              entry.ty ||
-              paramsByBinding.get(entry.binding) ||
-              hashToName.get(entry.type_hash) ||
-              "Cell",
-            );
-            return `<span class="pg-set-entry">${binding}: <span class="pg-set-type">${ty}</span></span>`;
-          };
-
-          const consume = (a.consume_set || []).map(formatEntry).join("");
-          const create = (a.create_set || []).map(formatEntry).join("");
-          const mutate = (a.mutate_set || []).map(formatEntry).join("");
+          const paramsByBinding = actionParamsByBinding(a);
+          const consume = formatSetEntries(a.consume_set || [], paramsByBinding, hashToName);
+          const create = formatSetEntries(a.create_set || [], paramsByBinding, hashToName);
+          const mutate = formatSetEntries(a.mutate_set || [], paramsByBinding, hashToName);
+          const runtimeFeatures = actionRuntimeFeatures(a);
           const cyclesLabel = a.estimated_cycles != null
             ? `<div class="pg-action-cycles">${a.estimated_cycles.toLocaleString()} ${escapeHtml(pg("cycles"))}</div>`
+            : "";
+          const runtimeLabel = runtimeFeatures.length
+            ? `<div class="pg-action-features"><span>${escapeHtml(pg("runtimeFeatures"))}</span><div>${runtimeFeatures.map((feature) => `<code>${escapeHtml(feature)}</code>`).join("")}</div></div>`
             : "";
           return `<li class="pg-action-item">
             <div class="pg-action-head">
@@ -468,6 +570,7 @@ const playgroundExampleMeta = playgroundExamples.map(({ id, label, file }) => ({
               ${mutate ? `<div class="pg-set"><span class="pg-set-label">${escapeHtml(pg("effect"))}</span><div class="pg-set-items">${mutate}</div></div>` : ""}
             </div>
             ${cyclesLabel}
+            ${runtimeLabel}
           </li>`;
         }).join("")}</ul>`;
       };
@@ -526,6 +629,7 @@ const playgroundExampleMeta = playgroundExamples.map(({ id, label, file }) => ({
       const renderRail = (data: any) => {
         if (!railReady || !railLoading) return;
         railLoading.hidden = true;
+        railLoading.innerHTML = `<span class="pg-loading-dot"></span><span>${escapeHtml(pg("loading"))}</span>`;
         railReady.hidden = false;
         if (railModule) railModule.textContent = data.module || "—";
         if (railTarget) railTarget.textContent = data.target_profile?.name || "ckb";
@@ -543,21 +647,62 @@ const playgroundExampleMeta = playgroundExamples.map(({ id, label, file }) => ({
           railSizeLabel.dataset.i18n = labelKey;
           railSizeLabel.textContent = getMessage(labelKey, readLocale()) ?? "";
         }
+        if (railModeFact) railModeFact.hidden = hasSize;
+        if (railMode) railMode.textContent = hasSize ? "" : pg("metadataOnly");
         if (railActions) {
-          railActions.innerHTML = (data.actions || []).map((a: any) =>
-            `<li class="pg-rail-action">
-              <div class="pg-rail-action-head">
-                <code>${escapeHtml(a.name)}</code>
-                <span class="pg-action-effect pg-effect-${String(a.effect_class).toLowerCase()}">${escapeHtml(effectLabel(a.effect_class))}</span>
-              </div>
-            </li>`
-          ).join("") || '<li class="pg-rail-empty">—</li>';
+          const hashToName = buildHashToName(data.types || []);
+          railActions.innerHTML = (data.actions || []).map((a: any) => {
+            const paramsByBinding = actionParamsByBinding(a);
+            const consume = formatSetEntries(a.consume_set || [], paramsByBinding, hashToName);
+            const create = formatSetEntries(a.create_set || [], paramsByBinding, hashToName);
+            const mutate = formatSetEntries(a.mutate_set || [], paramsByBinding, hashToName);
+            const runtimeFeatures = actionRuntimeFeatures(a);
+            const cyclesLabel = a.estimated_cycles != null
+              ? `<div class="pg-rail-detail-row"><span>${escapeHtml(pg("cycles"))}</span><code>${escapeHtml(a.estimated_cycles.toLocaleString())}</code></div>`
+              : "";
+            const runtimeLabel = runtimeFeatures.length
+              ? `<div class="pg-rail-feature-row"><span>${escapeHtml(pg("runtimeFeatures"))}</span><div>${runtimeFeatures.map((feature) => `<code>${escapeHtml(feature)}</code>`).join("")}</div></div>`
+              : "";
+            return `<li class="pg-rail-action">
+              <details>
+                <summary>
+                  <code>${escapeHtml(a.name)}</code>
+                  <span class="pg-action-effect pg-effect-${String(a.effect_class).toLowerCase()}">${escapeHtml(effectLabel(a.effect_class))}</span>
+                </summary>
+                <div class="pg-rail-action-detail">
+                  <div class="pg-rail-detail-row"><span>${escapeHtml(pg("consume"))}</span><div>${consume || "<span class=\"pg-set-empty\">—</span>"}</div></div>
+                  <div class="pg-rail-detail-row"><span>${escapeHtml(pg("create"))}</span><div>${create || "<span class=\"pg-set-empty\">—</span>"}</div></div>
+                  ${mutate ? `<div class="pg-rail-detail-row"><span>${escapeHtml(pg("effect"))}</span><div>${mutate}</div></div>` : ""}
+                  ${cyclesLabel}
+                  ${runtimeLabel}
+                </div>
+              </details>
+            </li>`;
+          }).join("") || `<li class="pg-rail-empty">${escapeHtml(pg("noActions"))}</li>`;
         }
         if (railTypes) {
           railTypes.innerHTML = (data.types || []).map((ty: any) =>
             `<li class="pg-rail-type"><code>${escapeHtml(ty.name)}</code> <span class="pg-rail-type-kind">${escapeHtml(ty.kind)}</span></li>`
-          ).join("") || '<li class="pg-rail-empty">—</li>';
+          ).join("") || `<li class="pg-rail-empty">${escapeHtml(pg("noTypes"))}</li>`;
         }
+      };
+
+      const clearRailReady = () => {
+        if (railModule) railModule.textContent = "";
+        if (railTarget) railTarget.textContent = "";
+        if (railSize) railSize.textContent = "";
+        if (railMode) railMode.textContent = "";
+        if (railModeFact) railModeFact.hidden = true;
+        if (railActions) railActions.replaceChildren();
+        if (railTypes) railTypes.replaceChildren();
+      };
+
+      const renderRailError = (message: string) => {
+        if (!railReady || !railLoading) return;
+        clearRailReady();
+        railReady.hidden = true;
+        railLoading.hidden = false;
+        railLoading.innerHTML = `<span class="pg-error-inline">${escapeHtml(message)}</span>`;
       };
 
       const doCompile = () => {
@@ -570,7 +715,7 @@ const playgroundExampleMeta = playgroundExamples.map(({ id, label, file }) => ({
           const t0 = performance.now();
           // compile_metadata takes an artifact target (riscv64-asm,
           // riscv64-elf), not a profile name (ckb). null = default.
-          const result = compileMetadataJson(textarea.value, null);
+          const result = compileMetadataJson(textarea.value, targetSelect?.value || null);
           lastElapsed = Math.round(performance.now() - t0);
           let data: any;
           try {
@@ -587,14 +732,13 @@ const playgroundExampleMeta = playgroundExamples.map(({ id, label, file }) => ({
             renderActions({ actions: [] });
             renderTypes({ types: [] });
             selectTab("errors");
-            if (status) status.textContent = data.error.slice(0, 80);
-            setCompileState("error");
-            // Clear rail on error
-            if (railReady && railLoading) {
-              railReady.hidden = true;
-              railLoading.hidden = false;
-              railLoading.innerHTML = `<span class="pg-error-inline">${escapeHtml(data.error)}</span>`;
+            selectMobileView("output");
+            if (status) {
+              status.textContent = summariseError(data.error);
+              status.title = data.error;
             }
+            setCompileState("error");
+            renderRailError(data.error);
             return;
           }
           renderMetadata(data);
@@ -602,8 +746,13 @@ const playgroundExampleMeta = playgroundExamples.map(({ id, label, file }) => ({
           renderTypes(data);
           renderErrors(null);
           renderRail(data);
-          if (status) status.textContent = fmt(pg("ready"), { ms: String(lastElapsed) });
+          if (status) {
+            status.textContent = fmt(pg("ready"), { ms: String(lastElapsed) });
+            status.removeAttribute("title");
+          }
           setCompileState("ready");
+          const activeTab = outputTabs.find((tab) => tab.getAttribute("aria-selected") === "true")?.dataset.outputTab;
+          if (activeTab === "errors") selectTab("metadata");
         });
       };
 
@@ -623,6 +772,7 @@ const playgroundExampleMeta = playgroundExamples.map(({ id, label, file }) => ({
           const active = tab.dataset.outputTab === target;
           tab.classList.toggle("active", active);
           tab.setAttribute("aria-selected", String(active));
+          tab.tabIndex = active ? 0 : -1;
         });
         outputPanels.forEach((panel, key) => {
           panel.hidden = key !== target;
@@ -632,6 +782,20 @@ const playgroundExampleMeta = playgroundExamples.map(({ id, label, file }) => ({
 
       outputTabs.forEach((tab) => {
         tab.addEventListener("click", () => selectTab(tab.dataset.outputTab ?? ""));
+        tab.addEventListener("keydown", (e) => {
+          const current = outputTabs.indexOf(tab);
+          if (current < 0) return;
+          let next = current;
+          if (e.key === "ArrowRight" || e.key === "ArrowDown") next = (current + 1) % outputTabs.length;
+          else if (e.key === "ArrowLeft" || e.key === "ArrowUp") next = (current - 1 + outputTabs.length) % outputTabs.length;
+          else if (e.key === "Home") next = 0;
+          else if (e.key === "End") next = outputTabs.length - 1;
+          else return;
+          e.preventDefault();
+          const nextTab = outputTabs[next];
+          nextTab.focus();
+          selectTab(nextTab.dataset.outputTab ?? "");
+        });
       });
 
       // ---- Source persistence (localStorage) ----
@@ -667,18 +831,56 @@ const playgroundExampleMeta = playgroundExamples.map(({ id, label, file }) => ({
       if (textarea) {
         textarea.addEventListener("input", () => {
           updateHighlight();
+          updateExampleLesson(sourceMatchesExample(exampleSelect?.value) ? (exampleSelect?.value ?? null) : null);
           scheduleCompile();
           saveSource();
         });
         textarea.addEventListener("scroll", syncScroll);
-        // Tab key inserts two spaces (don't steal focus).
+        // Tab indents with two spaces; Shift+Tab outdents the current line or
+        // selected block.
         textarea.addEventListener("keydown", (e) => {
-          if (e.key === "Tab") {
+          if (e.key === "Enter") {
             e.preventDefault();
             const start = textarea.selectionStart;
             const end = textarea.selectionEnd;
-            textarea.value = textarea.value.slice(0, start) + "  " + textarea.value.slice(end);
-            textarea.selectionStart = textarea.selectionEnd = start + 2;
+            const value = textarea.value;
+            const lineStart = value.lastIndexOf("\n", start - 1) + 1;
+            const beforeCursor = value.slice(lineStart, start);
+            const indent = beforeCursor.match(/^\s*/)?.[0] ?? "";
+            const extraIndent = beforeCursor.trimEnd().endsWith("{") ? "  " : "";
+            const insert = `\n${indent}${extraIndent}`;
+            textarea.value = value.slice(0, start) + insert + value.slice(end);
+            textarea.selectionStart = textarea.selectionEnd = start + insert.length;
+            updateHighlight();
+            scheduleCompile();
+            saveSource();
+          } else if (e.key === "Tab") {
+            e.preventDefault();
+            const start = textarea.selectionStart;
+            const end = textarea.selectionEnd;
+            if (e.shiftKey) {
+              const value = textarea.value;
+              const lineStart = value.lastIndexOf("\n", start - 1) + 1;
+              const lineEnd = end > start ? value.indexOf("\n", Math.max(start, end - 1)) : -1;
+              const selectionEnd = lineEnd === -1 ? value.length : lineEnd;
+              const block = value.slice(lineStart, selectionEnd);
+              let offset = lineStart;
+              let removedBeforeStart = 0;
+              let removedTotal = 0;
+              const outdented = block.split("\n").map((line) => {
+                const remove = line.startsWith("  ") ? 2 : line.startsWith(" ") ? 1 : 0;
+                if (remove && offset < start) removedBeforeStart += remove;
+                removedTotal += remove;
+                offset += line.length + 1;
+                return line.slice(remove);
+              }).join("\n");
+              textarea.value = value.slice(0, lineStart) + outdented + value.slice(selectionEnd);
+              textarea.selectionStart = Math.max(lineStart, start - removedBeforeStart);
+              textarea.selectionEnd = Math.max(textarea.selectionStart, end - removedTotal);
+            } else {
+              textarea.value = textarea.value.slice(0, start) + "  " + textarea.value.slice(end);
+              textarea.selectionStart = textarea.selectionEnd = start + 2;
+            }
             updateHighlight();
             scheduleCompile();
             saveSource();
@@ -708,7 +910,7 @@ const playgroundExampleMeta = playgroundExamples.map(({ id, label, file }) => ({
       // ---- Export current source as .cell ----
       const exportFileName = (): string => {
         const selectedFile = exampleSelect ? exampleFiles.get(exampleSelect.value) : undefined;
-        const fallback = selectedFile?.split("/").pop();
+        const fallback = sourceMatchesExample(exampleSelect?.value) ? selectedFile?.split("/").pop() : undefined;
         if (fallback) return fallback;
         const moduleName = textarea?.value.match(/^module\s+([A-Za-z0-9_:]+)/m)?.[1];
         const slug = moduleName?.split("::").filter(Boolean).pop()?.replace(/[^A-Za-z0-9_-]+/g, "-").toLowerCase();
@@ -764,7 +966,7 @@ const playgroundExampleMeta = playgroundExamples.map(({ id, label, file }) => ({
       document.addEventListener("click", (e: MouseEvent) => {
         const btn = (e.target as HTMLElement)?.closest<HTMLButtonElement>(".copy-btn");
         if (!btn) return;
-        const text = btn.dataset.copyText ?? "";
+        const text = btn.dataset.copyText ?? btn.closest(".metadata-block")?.querySelector<HTMLElement>(".pg-json")?.textContent ?? "";
         if (text) flashCopyBtn(btn, text);
       });
 
@@ -782,6 +984,10 @@ const playgroundExampleMeta = playgroundExamples.map(({ id, label, file }) => ({
           }
         });
       }
+
+      targetSelect?.addEventListener("change", () => {
+        scheduleCompile();
+      });
 
       // ---- URL deep-link params + share ----
       // Precedence for the initial source: a shared source fragment
@@ -842,16 +1048,19 @@ const playgroundExampleMeta = playgroundExamples.map(({ id, label, file }) => ({
         // plain example link and tell the user honestly.
         const encoded = encodeSource(src);
         url.hash = `src=${encoded}`;
-        url.searchParams.set("example", exampleId);
+        if (sourceMatchesExample(exampleId, src)) {
+          url.searchParams.set("example", exampleId);
+        } else {
+          url.searchParams.delete("example");
+        }
+        const tooLong = url.toString().length > 8000;
+        if (tooLong) {
+          url.hash = "";
+          if (exampleIds.has(exampleId)) url.searchParams.set("example", exampleId);
+        }
         try {
           await navigator.clipboard.writeText(url.toString());
-          if (url.toString().length > 8000) {
-            url.hash = "";
-            await navigator.clipboard.writeText(url.toString());
-            flashShareBtn(pg("shareTooLong"));
-          } else {
-            flashShareBtn(pg("copied"));
-          }
+          flashShareBtn(tooLong ? pg("shareTooLong") : pg("copied"));
         } catch {
           // Clipboard unavailable; ignore.
         }
@@ -870,6 +1079,10 @@ const playgroundExampleMeta = playgroundExamples.map(({ id, label, file }) => ({
         document.querySelectorAll<HTMLElement>("[data-i18n-aria-label]").forEach((el) => {
           const v = getMessage(el.dataset.i18nAriaLabel ?? "", readLocale());
           if (typeof v === "string") el.setAttribute("aria-label", v);
+        });
+        document.querySelectorAll<HTMLElement>("[data-i18n-label]").forEach((el) => {
+          const v = getMessage(el.dataset.i18nLabel ?? "", readLocale());
+          if (typeof v === "string") el.setAttribute("label", v);
         });
         const pageTitle = pg("pageTitle");
         if (pageTitle) document.title = pageTitle;
@@ -905,11 +1118,7 @@ const playgroundExampleMeta = playgroundExamples.map(({ id, label, file }) => ({
           loading.hidden = false;
           loading.innerHTML = `<span class="pg-error-inline">${escapeHtml(message)}</span>`;
         }
-        if (railReady && railLoading) {
-          railReady.hidden = true;
-          railLoading.hidden = false;
-          railLoading.innerHTML = `<span class="pg-error-inline">${escapeHtml(message)}</span>`;
-        }
+        renderRailError(message);
         renderErrors(message);
       });
 
