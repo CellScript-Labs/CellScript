@@ -78,7 +78,7 @@ const commits = (githubActivity as { commits: any[] }).commits;
         <li>
           <a href="/" class:list={["rail-page-item", page === "home" && "active"]}>
             <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 10l7-6 7 6v7H3z" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 17v-5h4v5" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>
-            <span>{defaultLocale === "en" ? "Overview" : "总览"}</span>
+            <span data-i18n="nav.overview">{t.nav.overview}</span>
           </a>
         </li>
         <li>
@@ -200,8 +200,8 @@ const commits = (githubActivity as { commits: any[] }).commits;
     z-index: 80;
     display: none;
     flex-direction: column;
-    border-left: 1px solid var(--substrate-rule);
-    background: var(--substrate-bg);
+    border-left: 1px solid var(--line-soft);
+    background: var(--panel-strong);
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
   }
@@ -217,8 +217,8 @@ const commits = (githubActivity as { commits: any[] }).commits;
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    padding: 20px 20px 16px;
-    border-bottom: 1px solid var(--substrate-rule);
+    padding: 22px 22px 18px;
+    border-bottom: 1px solid var(--line-soft);
   }
 
   .rail-brand {
@@ -236,7 +236,7 @@ const commits = (githubActivity as { commits: any[] }).commits;
     width: 22px;
     height: 22px;
     border: 1px solid var(--accent);
-    border-radius: 6px;
+    border-radius: var(--radius);
     position: relative;
     background: var(--brand-mark-bg);
     flex-shrink: 0;
@@ -247,7 +247,7 @@ const commits = (githubActivity as { commits: any[] }).commits;
     position: absolute;
     inset: 5px;
     border: 1px solid var(--brand-mark-inner);
-    border-radius: 4px;
+    border-radius: calc(var(--radius) - 4px);
   }
   .rail-brand :global(.brand-mark)::after {
     inset: 8px;
@@ -267,13 +267,13 @@ const commits = (githubActivity as { commits: any[] }).commits;
     justify-content: center;
     min-width: 36px;
     min-height: 36px;
-    padding: 0 8px;
+    padding: 0 10px;
     border: 1px solid transparent;
-    border-radius: 7px;
+    border-radius: calc(var(--radius) - 1px);
     background: transparent;
     color: var(--muted);
     font-family: var(--font-sans);
-    font-size: 0.76rem;
+    font-size: 0.8rem;
     font-weight: 500;
     cursor: pointer;
     transition:
@@ -302,11 +302,29 @@ const commits = (githubActivity as { commits: any[] }).commits;
   .rail-body {
     flex: 1 1 auto;
     overflow-y: auto;
+    /* Hide the scrollbar to avoid a double-scrollbar with the page's
+       own scrollbar on the right edge. The rail still scrolls via
+       wheel/touch/drag — the scrollbar gutter is just not visible. */
+    scrollbar-width: thin;
+    scrollbar-color: var(--line-soft) transparent;
+  }
+
+  .rail-body::-webkit-scrollbar {
+    width: 4px;
+  }
+
+  .rail-body::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .rail-body::-webkit-scrollbar-thumb {
+    background: var(--line-soft);
+    border-radius: 2px;
   }
 
   .rail-section {
-    padding: 16px 20px;
-    border-bottom: 1px solid var(--substrate-rule);
+    padding: 18px 22px;
+    border-bottom: 1px solid var(--line-soft);
   }
   .rail-section:last-child { border-bottom: none; }
 
@@ -315,24 +333,24 @@ const commits = (githubActivity as { commits: any[] }).commits;
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    margin-bottom: 10px;
+    margin-bottom: 12px;
   }
 
   .rail-section-label {
     display: block;
-    margin-bottom: 10px;
+    margin-bottom: 12px;
     font-family: var(--font-mono);
-    font-size: 0.66rem;
+    font-size: 0.72rem;
     font-weight: 600;
-    letter-spacing: 0.1em;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
-    color: var(--substrate-dim);
+    color: var(--dim);
   }
   .rail-section-head .rail-section-label { margin-bottom: 0; }
 
   .rail-view-all {
     font-family: var(--font-mono);
-    font-size: 0.64rem;
+    font-size: 0.72rem;
     color: var(--accent);
     text-decoration: none;
   }
@@ -353,9 +371,9 @@ const commits = (githubActivity as { commits: any[] }).commits;
     align-items: center;
     gap: 10px;
     padding: 10px 12px;
-    border-radius: 8px;
+    border-radius: var(--radius);
     font-family: var(--font-sans);
-    font-size: 0.86rem;
+    font-size: 0.9rem;
     font-weight: 600;
     color: var(--muted);
     text-decoration: none;
@@ -390,9 +408,9 @@ const commits = (githubActivity as { commits: any[] }).commits;
   .rail-link-item {
     display: flex;
     flex-direction: column;
-    gap: 1px;
+    gap: 2px;
     padding: 8px 12px;
-    border-radius: 7px;
+    border-radius: calc(var(--radius) - 1px);
     text-decoration: none;
     transition: background-color var(--duration-fast) var(--ease-standard);
   }
@@ -400,15 +418,15 @@ const commits = (githubActivity as { commits: any[] }).commits;
 
   .rail-link-name {
     font-family: var(--font-sans);
-    font-size: 0.82rem;
+    font-size: 0.9rem;
     font-weight: 600;
     color: var(--text);
   }
   .rail-link-desc {
     font-family: var(--font-sans);
-    font-size: 0.7rem;
+    font-size: 0.78rem;
     line-height: 1.4;
-    color: var(--substrate-dim);
+    color: var(--dim);
   }
 
   /* ---- Activity ---- */
@@ -423,9 +441,9 @@ const commits = (githubActivity as { commits: any[] }).commits;
 
   .rail-activity-item {
     display: block;
-    padding: 10px 12px;
-    border: 1px solid var(--substrate-rule);
-    border-radius: 8px;
+    padding: 12px 14px;
+    border: 1px solid var(--line-soft);
+    border-radius: var(--radius);
     background: var(--panel-soft);
     text-decoration: none;
     transition:
@@ -442,28 +460,28 @@ const commits = (githubActivity as { commits: any[] }).commits;
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    margin-bottom: 4px;
+    margin-bottom: 5px;
   }
 
   .rail-activity-tag {
     font-family: var(--font-mono);
-    font-size: 0.74rem;
+    font-size: 0.78rem;
     font-weight: 700;
     color: var(--accent);
   }
 
   .rail-activity-date {
     font-family: var(--font-mono);
-    font-size: 0.64rem;
-    color: var(--substrate-dim);
+    font-size: 0.72rem;
+    color: var(--dim);
   }
 
   .rail-activity-body {
     margin: 0;
     font-family: var(--font-sans);
-    font-size: 0.7rem;
-    line-height: 1.45;
-    color: var(--substrate-text);
+    font-size: 0.78rem;
+    line-height: 1.5;
+    color: var(--muted);
   }
 
   /* ---- Commits ---- */
@@ -472,10 +490,10 @@ const commits = (githubActivity as { commits: any[] }).commits;
   .rail-commit-item {
     display: grid;
     grid-template-columns: auto 1fr auto;
-    gap: 6px;
+    gap: 8px;
     align-items: baseline;
-    padding: 5px 12px;
-    border-radius: 6px;
+    padding: 6px 12px;
+    border-radius: calc(var(--radius) - 2px);
     text-decoration: none;
     transition: background-color var(--duration-fast) var(--ease-standard);
   }
@@ -483,14 +501,14 @@ const commits = (githubActivity as { commits: any[] }).commits;
 
   .rail-commit-sha {
     font-family: var(--font-mono);
-    font-size: 0.66rem;
+    font-size: 0.72rem;
     color: var(--accent);
   }
 
   .rail-commit-msg {
     font-family: var(--font-sans);
-    font-size: 0.7rem;
-    color: var(--substrate-text);
+    font-size: 0.78rem;
+    color: var(--muted);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -521,8 +539,11 @@ const commits = (githubActivity as { commits: any[] }).commits;
 
   @media (max-width: 1099px) {
     .nav-rail {
+      display: flex;
+      width: min(320px, calc(100vw - 24px));
       transform: translateX(100%);
       transition: transform 0.3s var(--ease-standard);
+      box-shadow: -18px 0 48px var(--shadow-strong);
     }
     .nav-rail[data-open] { transform: translateX(0); }
     .rail-close-btn[hidden] { display: inline-flex !important; }
