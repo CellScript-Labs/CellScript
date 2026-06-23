@@ -117,6 +117,7 @@ fn main() {
                     | "update"
                     | "info"
                     | "login"
+                    | "auth"
                     | "package"
                     | "registry"
                     | "registry-verify"

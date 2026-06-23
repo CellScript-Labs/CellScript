@@ -1,7 +1,7 @@
 # CellScript
 
 <p align="center">
-  <img src="assets/cellscript-logo.png" alt="CellScript" width="560">
+  <img src="assets/readme-logo.png" alt="CellScript" width="560">
 </p>
 
 [![CellScript CI](https://github.com/a19q3/CellScript/actions/workflows/ci.yml/badge.svg)](https://github.com/a19q3/CellScript/actions/workflows/ci.yml)
@@ -679,16 +679,48 @@ still fail closed.
   `Cell.lock` and `Deployed.toml`
 - `cellc registry verify --live --rpc-url ... --json` — adds CKB RPC live-cell
   checks for deployment records when RPC evidence is available
-- `cellc publish` — compute the package source hash and update local
-  `registry.json` for the current source package
-- `cellc registry add` — write a discovery-index entry into the local cloned
-  discovery repository
+- `cellc publish` — public registry publish path; `cellc publish --offline`
+  computes the package source hash and mirrors the version entry into
+  `registry.json` for local fixtures, audit, and offline fallback
+- `cellc registry add` — write a discovery-index entry into the local/offline
+  cloned discovery repository
+- `cellc registry edit --yank <version>` — mark an existing package version as
+  yanked, with optional reason and replacement metadata
 
-**Experimental / fail-closed:**
+**Public registry boundary / fail-closed:**
 
-- `cellc login`, registry proxy use, cryptographic publisher-signature
-  verification, and non-CellScript registry artifact profiles are future
-  trust-model work
+- Public registry publishing is designed around JoyID-rooted publisher
+  identity: CCC is the connection layer, JoyID is the accepted publisher root,
+  and delegated publisher credentials are stored in the OS keychain for daily
+  `cellc publish`; see
+  [`docs/CELLSCRIPT_REGISTRY_PRODUCTION_BOUNDARY_ADR.md`](docs/CELLSCRIPT_REGISTRY_PRODUCTION_BOUNDARY_ADR.md)
+- `cellc auth capability create --principal-id <principal_id> --scope
+  publish:<namespace>/<package> --expires 90d --json >
+  capability-payload.json` creates the local P-256 capability key when
+  `--capability-pubkey` is not supplied, stores the private key in the OS
+  keychain, and prints the JoyID-bound authorisation payload. The
+  `principal_id` is the normalized JoyID/CKB identity binding derived by the
+  CCC-backed JoyID submit flow, not the display address.
+  After the same payload is signed through JoyID/CCC, `cellc auth capability
+  submit --payload capability-payload.json --joyid-signature
+  joyid-signature.json` registers the delegated key with the write API. Bare
+  `cellc publish` then signs the concrete publish payload and submits the
+  source snapshot to the public registry.
+- `cellc auth capability revoke --principal-id <principal_id>
+  --capability-key-id <capability_key_id> --json > revoke-payload.json`
+  generates a JoyID-bound revocation challenge; after signing that challenge,
+  `cellc auth capability revoke --payload revoke-payload.json
+  --joyid-signature joyid-signature.json` revokes the delegated key without
+  creating a separate registry account.
+- CI can avoid interactive keychain access by using
+  `cellc publish --print-payload --json`, signing the `canonical_payload`
+  externally, then submitting with `--payload <file> --capability-signature
+  <signature>`, or by setting `CELLSCRIPT_CAPABILITY_PRIVATE_KEY_PKCS8_B64`.
+- The first write API implementation lives under
+  [`services/registry-api`](services/registry-api/README.md): Cloudflare
+  Workers, R2 source snapshots, Neon Postgres through Hyperdrive, JoyID
+  capability authorisation, namespace ACL checks, quota hooks, and audit events.
+- Non-CellScript registry artifact profiles remain future-facing or fail-closed
 - Git dependencies are explicit remote source fetches; treat them as
   review-required inputs, not the registry production path
 
@@ -745,8 +777,8 @@ still fail closed.
 | `cellc certify --plugin novaseal-profile-v0` | Run the deterministic compiler-hosted NovaSeal profile certification (consumes `target/novaseal-*.json` and the local certifier source) |
 | `cellc repl` | Start the interactive REPL |
 | `cellc run` | Run ELF entrypoints via VM runner or simulator |
-| `cellc publish` / `cellc registry add` | Update local `registry.json` or a local discovery-index clone; commit/push remains a Git workflow |
-| `cellc login` / registry proxy / non-CellScript artifact install | Future registry trust-model work, fail-closed |
+| `cellc publish` / `cellc publish --offline` / `cellc registry add` / `cellc registry edit --yank` | Public publish plus explicit local/offline registry metadata flow; public registry policy makes bare `cellc publish` an authenticated registry write, with Git/static metadata retained for audit and fallback |
+| `cellc auth capability create/submit/revoke` / public registry write API / non-CellScript artifact install | JoyID-rooted publication policy and future-facing artifact profiles; fail-closed where unsupported |
 
 ### CLI Options
 

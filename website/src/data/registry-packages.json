@@ -1,0 +1,121 @@
+{
+  "packages": [
+    {
+      "categories": [
+        "protocol",
+        "asset",
+        "audit"
+      ],
+      "coordinate": "dob/evolving-dob-profile-v1",
+      "deployment": {
+        "active": [
+          {
+            "abi_hash": "a5657e8da9ff50f2bb0dd15b1f59bff0d1ae5b93b872d5e86c85f6d24193282d",
+            "artifact_hash": "57f1fac0b03ee4b142462ab39b44259040b3537a0de3385a9df3984e2e9f2944",
+            "audit_report_hash": "0x54c6cfaed564c2f5b6d9868384617470e98983c09018a0b209b5d0cdae9122c0",
+            "cell_data_codec_manifest_hash": "3a0d8795c09edc7759b1ba399d8540214bdd3f2522519f8d935e4bf9fb5235d2",
+            "chain_id": "ckb_integration_test",
+            "code_hash": "0x57f1fac0b03ee4b142462ab39b44259040b3537a0de3385a9df3984e2e9f2944",
+            "compiler_version": "0.17.0",
+            "constraints_hash": "20093053e93f88173d6f6f2c4ca66faeb883db6b5fdb44b3ff3a943e4d87dcef",
+            "data_hash": "0x57f1fac0b03ee4b142462ab39b44259040b3537a0de3385a9df3984e2e9f2944",
+            "dep_type": "code",
+            "hash_type": "data1",
+            "metadata_hash": "ec151e7849be893d113c7c250cee229b2d01c705d6d4c7b40be9207e27f0b4c7",
+            "name": "evolving-dob-profile-v1-local-devnet",
+            "network": "devnet",
+            "out_point": "0x9ab94283a5109f7a6b5c94c82a75479d5425e5af36a17371164941f8fba15593:0",
+            "output_index": 0,
+            "schema_hash": "5b52a99e494a2f25b4c443be123c986e4df571b7a6013450586cbdb7a721adbf",
+            "status": "active",
+            "tx_hash": "0x9ab94283a5109f7a6b5c94c82a75479d5425e5af36a17371164941f8fba15593"
+          }
+        ],
+        "active_count": 1,
+        "count": 1,
+        "networks": [
+          "devnet"
+        ]
+      },
+      "description": "DOB-EVO/1 production profile for CKB-backed evolving DOB state",
+      "documentation": "docs/PROFILE.md",
+      "edit_command": "cd proposals/evolving-dob/evolving-dob-profile-v1 && cellc registry edit",
+      "homepage": "https://github.com/a19q3/CellScript",
+      "install_command": "cellc install dob/evolving-dob-profile-v1@1.0.0",
+      "keywords": [
+        "ckb",
+        "dob",
+        "spore",
+        "state",
+        "registry"
+      ],
+      "latest": {
+        "abi_index": "a5657e8da9ff50f2bb0dd15b1f59bff0d1ae5b93b872d5e86c85f6d24193282d",
+        "cellscript_version": "0.17.0",
+        "dependencies": {},
+        "license": "MIT",
+        "released_at": "2026-06-22T00:00:00Z",
+        "schema_hash": "5b52a99e494a2f25b4c443be123c986e4df571b7a6013450586cbdb7a721adbf",
+        "source_hash": "51b82c042f7d55d9efc6e33a47e80a67cc231c75bb26bcb2f5579f33b6956f1b",
+        "status": "source_published",
+        "tag": "v1.0.0",
+        "version": "1.0.0",
+        "yanked": false
+      },
+      "latest_version": "1.0.0",
+      "license": "MIT",
+      "metadata": {
+        "base_protocol": "Spore DOB DNA+Pattern+Decoder",
+        "compatibility_policy": "no-backward-support",
+        "conforms_to": "DOB-EVO/1",
+        "fixture_matrix": "fixtures",
+        "identity_policy": "ckb_type_id state line plus preserved spore_id and owner_lock",
+        "invariant_matrix": "proofs/invariant_matrix.json",
+        "legacy_version_support": false,
+        "minimum_supported_version": "1",
+        "production_gate": "docs/PRODUCTION_READINESS.md",
+        "profile": "evolving-dob-profile-v1",
+        "protocol_family": "DOB-EVO",
+        "registry_pressure_gate": "scripts/evolving_dob_registry_pressure.py",
+        "source_actions": "src/evolving_dob_type.cell:initialise_dob_state;src/evolving_dob_type.cell:evolve_dob_state;src/evolving_dob_type.cell:finalise_dob_state",
+        "state_model": "immutable-base-dob-plus-typed-successor-state-cell",
+        "status": "production-ready-source-package"
+      },
+      "name": "evolving-dob-profile-v1",
+      "namespace": "dob",
+      "package_command_prefix": "cd proposals/evolving-dob/evolving-dob-profile-v1",
+      "path": "proposals/evolving-dob/evolving-dob-profile-v1",
+      "policy": {
+        "deny_ckb_runtime": false,
+        "deny_fail_closed": true,
+        "deny_runtime_obligations": true,
+        "production": true
+      },
+      "production": true,
+      "publish_command": "cd proposals/evolving-dob/evolving-dob-profile-v1 && cellc publish",
+      "publish_dry_run_command": "cd proposals/evolving-dob/evolving-dob-profile-v1 && cellc publish --dry-run",
+      "registry_path": "proposals/evolving-dob/evolving-dob-profile-v1/registry.json",
+      "repository": "https://github.com/a19q3/CellScript",
+      "source_revision": "cec900669073e004dab174eb9cb6b6efee2b7364",
+      "status": "active",
+      "verify_command": "cd proposals/evolving-dob/evolving-dob-profile-v1 && cellc registry verify --live --json",
+      "versions": [
+        {
+          "abi_index": "a5657e8da9ff50f2bb0dd15b1f59bff0d1ae5b93b872d5e86c85f6d24193282d",
+          "cellscript_version": "0.17.0",
+          "dependencies": {},
+          "license": "MIT",
+          "released_at": "2026-06-22T00:00:00Z",
+          "schema_hash": "5b52a99e494a2f25b4c443be123c986e4df571b7a6013450586cbdb7a721adbf",
+          "source_hash": "51b82c042f7d55d9efc6e33a47e80a67cc231c75bb26bcb2f5579f33b6956f1b",
+          "status": "source_published",
+          "tag": "v1.0.0",
+          "version": "1.0.0",
+          "yanked": false
+        }
+      ]
+    }
+  ],
+  "schema_version": 1,
+  "source": "repo registry.json + Cell.toml + Deployed.toml scan"
+}

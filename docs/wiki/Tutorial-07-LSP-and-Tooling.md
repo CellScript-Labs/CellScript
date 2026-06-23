@@ -218,11 +218,11 @@ Use `cellc build` for package builds.
 
 Local `cellc install --path`, registry source-package `cellc install`, and
 `cellc update` are supported lockfile workflows for packages that can be
-resolved and source-hash verified. `cellc publish` and `cellc registry add`
-prepare local Git-backed registry records; commit/push/PR remains outside the
-editor. Treat `login`, `run`, registry proxy use, cryptographic publisher
-signature verification, and non-CellScript artifact profiles as future-facing or
-fail-closed.
+resolved and source-hash verified. Public `cellc publish` is an authenticated
+registry write authorised by a JoyID-rooted capability; `cellc registry add`
+remains the local/offline discovery metadata path. Treat `run`, registry proxy
+use, cryptographic publisher signature verification, and non-CellScript artifact
+profiles as future-facing or fail-closed.
 
 ## Next
 

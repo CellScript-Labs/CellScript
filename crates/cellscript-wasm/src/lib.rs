@@ -26,8 +26,7 @@ use wasm_bindgen::prelude::*;
 #[wasm_bindgen]
 pub fn compile_metadata_json(source: &str, target: Option<String>) -> String {
     match cellscript::compile_metadata(source, target) {
-        Ok(metadata) => serde_json::to_string(&metadata)
-            .unwrap_or_else(|e| error_json(&format!("failed to serialize metadata: {e}"))),
+        Ok(metadata) => serde_json::to_string(&metadata).unwrap_or_else(|e| error_json(&format!("failed to serialize metadata: {e}"))),
         Err(e) => error_json(&e.to_string()),
     }
 }

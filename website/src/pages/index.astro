@@ -2,9 +2,10 @@
 import "../styles/global.css";
 import { exampleGroups, heroExamples, links, modelCards, tools, workflowSteps } from "../data/site";
 import { defaultLocale, translations } from "../i18n/translations";
+import { renderLine } from "../lib/highlight";
 import { provenanceForExample, effectsSummary, formatBytes, shortHash } from "../lib/provenance";
-import TransitionOverlay from "../components/TransitionOverlay.astro";
 import NavRail from "../components/NavRail.astro";
+import BrandMark from "../components/BrandMark.astro";
 import { ClientRouter } from "astro:transitions";
 import pipelineFragments from "../data/pipeline-fragments.json";
 import assuranceMetadata from "../data/assurance-metadata.json";
@@ -16,22 +17,6 @@ const t = translations[locale];
 const getExampleItemCopy = (groupId: string, itemId: string) =>
   (t.examples.groups as Record<string, { items: Record<string, readonly [string, string]> }>)[groupId].items[itemId];
 
-const escapeHtml = (value: string) =>
-  value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-
-const tokenGroups = {
-  keyword: new Set(["module", "use", "has", "action", "lock", "fn", "where", "const", "struct", "enum", "invariant"]),
-  cellKind: new Set(["resource", "shared", "receipt", "flow"]),
-  cellEffect: new Set(["consume", "create", "destroy", "preserve", "create_unique", "destroy_unique", "destroy_singleton_type", "claim", "settle", "launch", "read_ref"]),
-  assertion: new Set(["assert", "assert_invariant", "assert_sum", "assert_delta", "assert_unique", "require"]),
-  control: new Set(["if", "else", "for", "in", "while", "match", "return", "let", "mut", "ref", "transition", "read", "protected", "witness", "lock_args"]),
-  builtin: new Set(["u8", "u16", "u32", "u64", "u128", "bool", "Address", "Hash", "String", "Vec", "env", "witness"]),
-  capability: new Set(["store", "create", "consume", "replace", "burn", "relock", "read_ref", "transfer", "destroy", "retarget_type"]),
-};
-
 // Pre-resolve provenance for each hero example so the static compile-
 // output indicator and the playground link can reference real numbers
 // without a runtime lookup. Falls back to null when an example has no
@@ -41,41 +26,13 @@ const heroProvenance = heroExamples.map((example) => ({
   view: provenanceForExample(example.id),
 }));
 
-const classifyCellToken = (token: string) => {
-  if (token.startsWith("//")) return "comment";
-  if (token.startsWith("\"")) return "string";
-  if (/^\d+$/.test(token)) return "number";
-  if (token === "->" || token === "=>") return "arrow";
-  if (/^[{}()[\];:,.<>+\-*/=&|!]$/.test(token) || ["==", "!=", "<=", ">=", "&&", "||"].includes(token)) return "operator";
-  const base = token.includes("::") ? token.split("::").at(-1) ?? token : token;
-  if (tokenGroups.cellKind.has(base)) return "cell-kind";
-  if (tokenGroups.cellEffect.has(base)) return "cell-effect";
-  if (tokenGroups.assertion.has(base)) return "assert";
-  if (tokenGroups.control.has(base)) return "control";
-  if (tokenGroups.builtin.has(base)) return "builtin-type";
-  if (tokenGroups.capability.has(base)) return "capability";
-  if (tokenGroups.keyword.has(base)) return "keyword";
-  return "";
-};
-
-const renderLine = (line: string) => {
-  const tokenPattern = /\/\/.*$|"(?:[^"\\]|\\.)*"|->|=>|==|!=|<=|>=|&&|\|\||[A-Za-z_][A-Za-z0-9_:]*|\d+|[{}()[\];:,.<>+\-*/=&|!]/g;
-  let rendered = "";
-  let cursor = 0;
-
-  for (const match of line.matchAll(tokenPattern)) {
-    const token = match[0];
-    const index = match.index ?? 0;
-    rendered += escapeHtml(line.slice(cursor, index));
-    const tokenClass = classifyCellToken(token);
-    rendered += tokenClass
-      ? `<span class="token-${tokenClass}">${escapeHtml(token)}</span>`
-      : escapeHtml(token);
-    cursor = index + token.length;
-  }
-
-  return rendered + escapeHtml(line.slice(cursor));
-};
+const renderCodeLines = (source: string): string =>
+  source
+    .split("\n")
+    .map((line, index) => (
+      `<span class="line"><span class="ln">${index + 1}</span><span class="src">${renderLine(line)}</span></span>`
+    ))
+    .join("");
 
 ---
 
@@ -85,9 +42,13 @@ const renderLine = (line: string) => {
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light dark" />
-    <meta name="description" content={t.meta.description} data-i18n-content="meta.description" />
-    <link rel="icon" href={`${import.meta.env.BASE_URL}cellscript-logo.png`} />
-    <title data-i18n="meta.title">{t.meta.title}</title>
+    <meta name="description" content={t.meta.description} data-i18n-meta="meta.description" />
+    <meta property="og:title" content={t.meta.title} />
+    <meta property="og:description" content={t.meta.ogDescription} data-i18n-meta="meta.ogDescription" data-i18n-meta-attr="content" />
+    <link rel="icon" type="image/png" href={`${import.meta.env.BASE_URL}cellscript-logo.png`} />
+    <link rel="icon" type="image/png" media="(prefers-color-scheme: light)" href={`${import.meta.env.BASE_URL}cellscript-logo-light.png`} />
+    <link rel="icon" type="image/png" media="(prefers-color-scheme: dark)" href={`${import.meta.env.BASE_URL}cellscript-logo-dark.png`} />
+    <title data-i18n-meta="meta.titleLong">{t.meta.titleLong}</title>
     <script is:inline>
       (() => {
         try {
@@ -96,6 +57,9 @@ const renderLine = (line: string) => {
           document.documentElement.dataset.theme = storedTheme === "light" || storedTheme === "dark" ? storedTheme : "light";
           document.documentElement.dataset.locale = storedLocale === "zh" ? "zh" : "en";
           document.documentElement.lang = document.documentElement.dataset.locale;
+          if (localStorage.getItem("cellscript-rail-collapsed") === "true") {
+            document.documentElement.dataset.railCollapsed = "true";
+          }
         } catch {
           document.documentElement.dataset.theme = "light";
           document.documentElement.dataset.locale = "en";
@@ -109,24 +73,34 @@ const renderLine = (line: string) => {
     <a class="skip-link" href="#top" data-i18n="a11y.skipToContent">{t.a11y.skipToContent}</a>
 
     <main id="top" class="page">
-      <section class="hero" aria-labelledby="hero-title" data-transition={JSON.stringify({ action: "init", consume: "[]", create: "landing", effect: "Pure" })}>
+      <section class="hero" aria-labelledby="hero-title">
         <div class="hero-aurora" aria-hidden="true">
           <span></span>
           <span></span>
           <span></span>
         </div>
+        <div class="hero-field" aria-hidden="true">
+          <span></span>
+          <span></span>
+          <span></span>
+          <span></span>
+          <span></span>
+        </div>
         <div class="hero-copy">
+          <div class="hero-brand-lockup">
+            <span class="hero-orbit" aria-hidden="true">
+              <i></i>
+              <i></i>
+              <i></i>
+            </span>
+            <BrandMark />
+          </div>
           <h1 id="hero-title" class="shiny-text" aria-label={t.hero.title}>{t.hero.title}</h1>
           <p data-i18n="hero.subtitle">{t.hero.subtitle}</p>
           <div class="hero-actions">
             <a class="button primary" href="#getting-started" data-i18n="hero.getStarted">{t.hero.getStarted}</a>
             <a class="button" href="#core-model" data-i18n="hero.coreModel">{t.hero.coreModel}</a>
           </div>
-          <dl class="hero-ledger" aria-label={t.hero.ledgerLabel} data-i18n-aria-label="hero.ledgerLabel">
-            <div><dt data-i18n="hero.ledger.target.0">{t.hero.ledger.target[0]}</dt><dd data-i18n="hero.ledger.target.1">{t.hero.ledger.target[1]}</dd></div>
-            <div><dt data-i18n="hero.ledger.model.0">{t.hero.ledger.model[0]}</dt><dd data-i18n="hero.ledger.model.1">{t.hero.ledger.model[1]}</dd></div>
-            <div><dt data-i18n="hero.ledger.output.0">{t.hero.ledger.output[0]}</dt><dd data-i18n="hero.ledger.output.1">{t.hero.ledger.output[1]}</dd></div>
-          </dl>
         </div>
 
         <div class="code-shell spotlight-card" data-code-tabs>
@@ -188,7 +162,7 @@ const renderLine = (line: string) => {
         </div>
       </section>
 
-      <section class="section workflow-section" aria-labelledby="workflow" data-transition={JSON.stringify({ action: "view_workflow", consume: "landing", create: "workflow", effect: "Pure" })}>
+      <section class="section workflow-section" aria-labelledby="workflow">
         <h2 class="section-title" id="workflow" data-i18n="sections.workflow">{t.sections.workflow}</h2>
         <div class="workflow-board">
           <div class="workflow-flow" aria-label={t.workflow.aria} data-i18n-aria-label="workflow.aria">
@@ -275,7 +249,7 @@ const renderLine = (line: string) => {
                 <span class="pipeline-stage-num">01</span>
                 <span class="pipeline-stage-label" data-i18n="workflow.steps.source.0">{t.workflow.steps.source[0]}</span>
               </div>
-              <pre class="pipeline-fragment pipeline-fragment-source">{pipelineFragments.source}</pre>
+              <pre class="pipeline-fragment pipeline-fragment-source code-snippet" set:html={renderCodeLines(pipelineFragments.source)}></pre>
             </li>
             <li class="pipeline-stage" data-pipeline-stage="1">
               <div class="pipeline-stage-head">
@@ -309,7 +283,7 @@ const renderLine = (line: string) => {
         </div>
       </section>
 
-      <section class="section model-section" aria-labelledby="core-model" data-transition={JSON.stringify({ action: "view_model", consume: "workflow", create: "model", effect: "Pure" })}>
+      <section class="section model-section" aria-labelledby="core-model">
         <h2 class="section-title" id="core-model" data-i18n="sections.coreModel">{t.sections.coreModel}</h2>
         <p class="lead" data-i18n="model.lead">{t.model.lead}</p>
         <p class="boundary-note" data-i18n="model.boundary">{t.model.boundary}</p>
@@ -345,7 +319,7 @@ const renderLine = (line: string) => {
                     <span data-i18n="model.exampleExcerpt">{t.model.exampleExcerpt}</span>
                     <span>{card.source}</span>
                   </div>
-                  <pre class="mini-code">{card.code}</pre>
+                  <pre class="mini-code code-snippet" set:html={renderCodeLines(card.code)}></pre>
                 </div>
               </article>
             ))}
@@ -353,7 +327,7 @@ const renderLine = (line: string) => {
         </div>
       </section>
 
-      <section class="section assurance-section" aria-labelledby="assurance" data-transition={JSON.stringify({ action: "view_assurance", consume: "model", create: "assurance", effect: "Pure" })}>
+      <section class="section assurance-section" aria-labelledby="assurance">
         <div class="section-copy">
           <h2 class="section-title" id="assurance" data-i18n="sections.assurance">{t.sections.assurance}</h2>
           <p class="lead" data-i18n="assurance.lead">{t.assurance.lead}</p>
@@ -384,7 +358,7 @@ const renderLine = (line: string) => {
         </div>
       </section>
 
-      <section class="section tooling-section" aria-labelledby="tooling" data-transition={JSON.stringify({ action: "view_tooling", consume: "assurance", create: "tooling", effect: "Pure" })}>
+      <section class="section tooling-section" aria-labelledby="tooling">
         <h2 class="section-title" id="tooling" data-i18n="sections.tooling">{t.sections.tooling}</h2>
         <div class="tooling-console" data-tool-tabs>
           <div class="tool-tabs" role="tablist" aria-label={t.tooling.tabsAria} data-i18n-aria-label="tooling.tabsAria">
@@ -426,7 +400,7 @@ const renderLine = (line: string) => {
         </div>
       </section>
 
-      <section class="section" aria-labelledby="examples" data-transition={JSON.stringify({ action: "view_examples", consume: "tooling", create: "examples", effect: "Pure" })}>
+      <section class="section" aria-labelledby="examples">
         <h2 class="section-title" id="examples" data-i18n="sections.examples">{t.sections.examples}</h2>
         <div class="example-browser" data-example-tabs>
           <div class="example-tabs" role="tablist" aria-label={t.examples.tabsAria} data-i18n-aria-label="examples.tabsAria">
@@ -474,8 +448,8 @@ const renderLine = (line: string) => {
         </div>
       </section>
 
-      <section class="section start-section" id="getting-started" aria-labelledby="start" data-transition={JSON.stringify({ action: "start", consume: "examples", create: "playground", effect: "Mutating" })}>
-        <h2 class="section-title" id="start" data-i18n="sections.gettingStarted">{t.sections.gettingStarted}</h2>
+      <section class="section start-section" aria-labelledby="getting-started">
+        <h2 class="section-title" id="getting-started" data-i18n="sections.gettingStarted">{t.sections.gettingStarted}</h2>
         <div class="steps">
           {t.start.steps.map(([label, command], index) => (
             <article class="step">
@@ -498,7 +472,7 @@ const renderLine = (line: string) => {
     <footer class="footer">
       <div class="footer-inner">
         <div class="footer-copy">
-          <a class="brand" href="#top"><span class="brand-mark" aria-hidden="true"></span><span>CellScript</span></a>
+          <a class="brand" href="#top"><BrandMark /><span>CellScript</span></a>
           <p data-i18n="footer.copy">{t.footer.copy}</p>
         </div>
         <div class="footer-links">
@@ -518,9 +492,6 @@ const renderLine = (line: string) => {
     <script>
       const i18nMessages = (window as any).__CELLSCRIPT_I18N__;
       const defaultLocaleName = (window as any).__CELLSCRIPT_DEFAULT_LOCALE__ ?? "en";
-      const languageTransitionMs = 150;
-      const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
-      const delay = (duration: number) => new Promise((resolve) => window.setTimeout(resolve, duration));
 
       const readLocale = () => document.documentElement.dataset.locale === "zh" ? "zh" : defaultLocaleName;
       const getMessage = (path: string, locale = readLocale()) => {
@@ -541,6 +512,13 @@ const renderLine = (line: string) => {
         document.querySelectorAll<HTMLMetaElement>("[data-i18n-content]").forEach((element) => {
           const value = getMessage(element.dataset.i18nContent ?? "", nextLocale);
           if (typeof value === "string") element.setAttribute("content", value);
+        });
+        // Localize <title> and meta tags marked with data-i18n-meta.
+        document.querySelectorAll<HTMLElement>("[data-i18n-meta]").forEach((element) => {
+          const value = getMessage(element.dataset.i18nMeta ?? "", nextLocale);
+          if (typeof value !== "string") return;
+          if (element.tagName === "TITLE") document.title = value;
+          else element.setAttribute(element.dataset.i18nMetaAttr ?? "content", value);
         });
         const languageLabel = document.querySelector<HTMLElement>("[data-language-label]");
         const languageToggle = document.querySelector<HTMLButtonElement>("[data-language-toggle]");
@@ -579,7 +557,7 @@ const renderLine = (line: string) => {
           panels.forEach((panel) => {
             const panelElement = panel as HTMLElement;
             const active = panelElement.dataset.panel === id;
-            panel.classList.toggle("active", active);
+            panelElement.classList.toggle("active", active);
             if (active && fileLabel && commandLabel && mobile instanceof HTMLSelectElement) {
               fileLabel.textContent = panelElement.dataset.file ?? "";
               commandLabel.textContent = panelElement.dataset.command ?? "";
@@ -815,6 +793,5 @@ const renderLine = (line: string) => {
       }
     </script>
     <NavRail page="home" />
-    <TransitionOverlay />
   </body>
 </html>

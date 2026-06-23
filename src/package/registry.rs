@@ -18,6 +18,12 @@ use std::path::{Path, PathBuf};
 /// Default discovery index repository URL.
 pub const DEFAULT_REGISTRY_URL: &str = "https://github.com/cellscript/cellscript-registry";
 pub const REGISTRY_URL_ENV: &str = "CELLSCRIPT_REGISTRY_URL";
+pub const DEFAULT_PUBLIC_REGISTRY_ORIGIN: &str = "https://api.registry.cellscript.dev";
+pub const REGISTRY_AUTH_PROTOCOL: &str = "cellscript-registry-auth-v1";
+pub const AUTHORIZE_CAPABILITY_ACTION: &str = "authorize_capability";
+pub const REVOKE_CAPABILITY_ACTION: &str = "revoke_capability";
+pub const REGISTRY_PUBLISH_PROTOCOL: &str = "cellscript-registry-publish-v1";
+pub const PUBLISH_ACTION: &str = "publish";
 
 /// Effective discovery index URL.
 ///
@@ -44,6 +50,133 @@ pub struct DiscoveryEntry {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiscoverySchema {
     pub schema_version: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CapabilityAuthorisationPayload {
+    pub protocol: String,
+    pub action: String,
+    pub registry_origin: String,
+    pub principal_type: String,
+    pub principal_id: String,
+    pub capability_pubkey: String,
+    pub requested_scopes: Vec<String>,
+    pub capability_expires_at: String,
+    pub nonce: String,
+    pub issued_at: String,
+    pub expires_at: String,
+    pub cli_version: String,
+}
+
+impl CapabilityAuthorisationPayload {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        registry_origin: String,
+        principal_type: String,
+        principal_id: String,
+        capability_pubkey: String,
+        requested_scopes: Vec<String>,
+        capability_expires_at: String,
+        nonce: String,
+        issued_at: String,
+        expires_at: String,
+        cli_version: String,
+    ) -> Self {
+        Self {
+            protocol: REGISTRY_AUTH_PROTOCOL.to_string(),
+            action: AUTHORIZE_CAPABILITY_ACTION.to_string(),
+            registry_origin,
+            principal_type,
+            principal_id,
+            capability_pubkey,
+            requested_scopes,
+            capability_expires_at,
+            nonce,
+            issued_at,
+            expires_at,
+            cli_version,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CapabilityRevocationPayload {
+    pub protocol: String,
+    pub action: String,
+    pub registry_origin: String,
+    pub principal_type: String,
+    pub principal_id: String,
+    pub capability_key_id: String,
+    pub nonce: String,
+    pub issued_at: String,
+    pub expires_at: String,
+    pub cli_version: String,
+}
+
+impl CapabilityRevocationPayload {
+    pub fn new(
+        registry_origin: String,
+        principal_type: String,
+        principal_id: String,
+        capability_key_id: String,
+        nonce: String,
+        issued_at: String,
+        expires_at: String,
+        cli_version: String,
+    ) -> Self {
+        Self {
+            protocol: REGISTRY_AUTH_PROTOCOL.to_string(),
+            action: REVOKE_CAPABILITY_ACTION.to_string(),
+            registry_origin,
+            principal_type,
+            principal_id,
+            capability_key_id,
+            nonce,
+            issued_at,
+            expires_at,
+            cli_version,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegistryPublishPayload {
+    pub protocol: String,
+    pub action: String,
+    pub registry_origin: String,
+    pub namespace: String,
+    pub name: String,
+    pub version: String,
+    pub source_hash: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub manifest_hash: Option<String>,
+    pub capability_key_id: String,
+    pub nonce: String,
+    pub issued_at: String,
+    pub expires_at: String,
+    pub cli_version: String,
+    pub registry_entry: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegistryCapabilitySignature {
+    pub algorithm: String,
+    pub signature: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegistrySourceSnapshot {
+    pub content_base64: String,
+    pub content_type: String,
+    pub size_bytes: u64,
+    pub source_hash: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegistryPublishRequest {
+    pub payload: RegistryPublishPayload,
+    pub capability_signature: RegistryCapabilitySignature,
+    pub source_snapshot: RegistrySourceSnapshot,
 }
 
 /// Manages the local clone/cache of the discovery index Git repository.
@@ -143,6 +276,56 @@ pub struct RegistryIndex {
     pub versions: Vec<RegistryVersion>,
 }
 
+/// Public registry visibility and resolver eligibility state.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RegistryEntryStatus {
+    SourcePublished,
+    IndexedPending,
+    VerifiedBuild,
+    Deployed,
+    OnChainAttested,
+    Deprecated,
+    Yanked,
+    Quarantined,
+}
+
+impl RegistryEntryStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::SourcePublished => "source_published",
+            Self::IndexedPending => "indexed_pending",
+            Self::VerifiedBuild => "verified_build",
+            Self::Deployed => "deployed",
+            Self::OnChainAttested => "on_chain_attested",
+            Self::Deprecated => "deprecated",
+            Self::Yanked => "yanked",
+            Self::Quarantined => "quarantined",
+        }
+    }
+
+    pub fn is_baseline_verified(&self) -> bool {
+        matches!(self, Self::VerifiedBuild | Self::Deployed | Self::OnChainAttested)
+    }
+
+    pub fn is_unverified_direct_install(&self) -> bool {
+        matches!(self, Self::SourcePublished | Self::IndexedPending)
+    }
+}
+
+/// Missing status in legacy registry mirrors is treated as unverified. Public
+/// registry writes must emit an explicit status, and old mirrors must opt in
+/// with `--allow-unverified` instead of being trusted as verified by default.
+fn default_registry_entry_status() -> RegistryEntryStatus {
+    RegistryEntryStatus::SourcePublished
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RegistryResolutionPolicy {
+    pub allow_unverified: bool,
+    pub allow_quarantined: bool,
+}
+
 /// A single version entry in the per-package version index.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegistryVersion {
@@ -160,10 +343,49 @@ pub struct RegistryVersion {
     pub license: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub released_at: Option<String>,
+    #[serde(default = "default_registry_entry_status")]
+    pub status: RegistryEntryStatus,
     #[serde(default)]
     pub yanked: bool,
+    /// When the version was yanked (ISO 8601 UTC). Present only when `yanked` is true.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub yanked_at: Option<String>,
+    /// Human-readable reason the version was yanked (e.g. a security advisory id).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub yanked_reason: Option<String>,
+    /// Suggested replacement version, if any, after a yank.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replaced_by: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub audit: Option<RegistryAuditInfo>,
+}
+
+impl RegistryVersion {
+    pub fn effective_status(&self) -> RegistryEntryStatus {
+        if self.yanked {
+            RegistryEntryStatus::Yanked
+        } else {
+            self.status.clone()
+        }
+    }
+
+    pub fn resolver_block_reason(&self, policy: RegistryResolutionPolicy, allow_suppressed_exact_pin: bool) -> Option<&'static str> {
+        if self.yanked {
+            return (!allow_suppressed_exact_pin).then_some("yanked");
+        }
+
+        match self.status {
+            RegistryEntryStatus::VerifiedBuild | RegistryEntryStatus::Deployed | RegistryEntryStatus::OnChainAttested => None,
+            RegistryEntryStatus::SourcePublished | RegistryEntryStatus::IndexedPending if policy.allow_unverified => None,
+            RegistryEntryStatus::SourcePublished | RegistryEntryStatus::IndexedPending => Some("unverified"),
+            RegistryEntryStatus::Quarantined if policy.allow_quarantined => None,
+            RegistryEntryStatus::Quarantined => Some("quarantined"),
+            RegistryEntryStatus::Deprecated if allow_suppressed_exact_pin => None,
+            RegistryEntryStatus::Deprecated => Some("deprecated"),
+            RegistryEntryStatus::Yanked if allow_suppressed_exact_pin => None,
+            RegistryEntryStatus::Yanked => Some("yanked"),
+        }
+    }
 }
 
 /// A dependency reference within a registry version entry.
@@ -227,16 +449,60 @@ impl RegistryIndex {
         index.write_to_repo(repo_dir)
     }
 
-    /// Find the latest version matching a version requirement.
+    /// Find the latest non-yanked version matching a version requirement.
     pub fn find_matching_version(&self, version_req: &str) -> Option<&RegistryVersion> {
         let req = crate::package::version::parse_version_req(version_req).ok()?;
 
-        self.versions.iter().filter(|v| !v.yanked).filter(|v| crate::package::version::satisfies(&v.version, &req)).max_by(|a, b| {
-            // Compare versions numerically
-            let a_parts = parse_version_parts(&a.version);
-            let b_parts = parse_version_parts(&b.version);
-            compare_version_parts(&a_parts, &b_parts)
-        })
+        self.find_matching_version_with_req(&req, false)
+    }
+
+    /// Find a matching version for resolver use.
+    ///
+    /// Range and compatible requirements always skip yanked versions. An exact
+    /// `=x.y.z` pin may select a yanked version so the caller can honour an
+    /// explicit pin while emitting a warning with the yank metadata.
+    pub fn find_matching_version_allowing_yanked_pin(&self, version_req: &str) -> Option<&RegistryVersion> {
+        let req = crate::package::version::parse_version_req(version_req).ok()?;
+        let allow_yanked = matches!(req, crate::package::VersionReq::Exact(_));
+
+        self.find_matching_version_with_req(&req, allow_yanked)
+    }
+
+    pub fn find_matching_version_for_resolution(
+        &self,
+        version_req: &str,
+        policy: RegistryResolutionPolicy,
+    ) -> Option<&RegistryVersion> {
+        let req = crate::package::version::parse_version_req(version_req).ok()?;
+        let allow_suppressed_exact_pin = matches!(req, crate::package::VersionReq::Exact(_));
+
+        self.find_matching_version_with_req_and_policy(&req, allow_suppressed_exact_pin, policy)
+    }
+
+    fn find_matching_version_with_req(&self, req: &crate::package::VersionReq, allow_yanked: bool) -> Option<&RegistryVersion> {
+        self.find_matching_version_with_req_and_policy(
+            req,
+            allow_yanked,
+            RegistryResolutionPolicy { allow_unverified: true, allow_quarantined: true },
+        )
+    }
+
+    fn find_matching_version_with_req_and_policy(
+        &self,
+        req: &crate::package::VersionReq,
+        allow_suppressed_exact_pin: bool,
+        policy: RegistryResolutionPolicy,
+    ) -> Option<&RegistryVersion> {
+        self.versions
+            .iter()
+            .filter(|v| v.resolver_block_reason(policy, allow_suppressed_exact_pin).is_none())
+            .filter(|v| crate::package::version::satisfies(&v.version, req))
+            .max_by(|a, b| {
+                // Compare versions numerically
+                let a_parts = parse_version_parts(&a.version);
+                let b_parts = parse_version_parts(&b.version);
+                compare_version_parts(&a_parts, &b_parts)
+            })
     }
 }
 
@@ -550,7 +816,11 @@ mod tests {
                     schema_hash: None,
                     license: None,
                     released_at: None,
+                    status: RegistryEntryStatus::VerifiedBuild,
                     yanked: false,
+                    yanked_at: None,
+                    yanked_reason: None,
+                    replaced_by: None,
                     audit: None,
                 },
                 RegistryVersion {
@@ -563,7 +833,11 @@ mod tests {
                     schema_hash: None,
                     license: None,
                     released_at: None,
+                    status: RegistryEntryStatus::VerifiedBuild,
                     yanked: false,
+                    yanked_at: None,
+                    yanked_reason: None,
+                    replaced_by: None,
                     audit: None,
                 },
                 RegistryVersion {
@@ -576,7 +850,11 @@ mod tests {
                     schema_hash: None,
                     license: None,
                     released_at: None,
+                    status: RegistryEntryStatus::VerifiedBuild,
                     yanked: false,
+                    yanked_at: None,
+                    yanked_reason: None,
+                    replaced_by: None,
                     audit: None,
                 },
             ],
@@ -611,12 +889,163 @@ mod tests {
                 schema_hash: None,
                 license: None,
                 released_at: None,
+                status: RegistryEntryStatus::VerifiedBuild,
                 yanked: true,
+                yanked_at: None,
+                yanked_reason: None,
+                replaced_by: None,
                 audit: None,
             }],
         };
 
         assert!(index.find_matching_version("1.0.0").is_none());
+        assert!(index.find_matching_version_allowing_yanked_pin("1.0.0").is_none());
+        let exact = index.find_matching_version_allowing_yanked_pin("=1.0.0").unwrap();
+        assert_eq!(exact.version, "1.0.0");
+        assert!(exact.yanked);
+    }
+
+    #[test]
+    fn registry_version_yank_metadata_round_trip() {
+        // A yanked version with full Phase 2 metadata must survive JSON
+        // serialization and also omit cleanly when the fields are absent.
+        let yanked = RegistryVersion {
+            version: "1.2.0".to_string(),
+            tag: "v1.2.0".to_string(),
+            source_hash: "h".to_string(),
+            cellscript_version: "0.19.0".to_string(),
+            dependencies: BTreeMap::new(),
+            abi_index: None,
+            schema_hash: None,
+            license: None,
+            released_at: None,
+            status: RegistryEntryStatus::VerifiedBuild,
+            yanked: true,
+            yanked_at: Some("2026-06-01T00:00:00Z".to_string()),
+            yanked_reason: Some("security advisory".to_string()),
+            replaced_by: Some("1.2.1".to_string()),
+            audit: None,
+        };
+
+        let json = serde_json::to_string_pretty(&yanked).unwrap();
+        let parsed: RegistryVersion = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.yanked_at.as_deref(), Some("2026-06-01T00:00:00Z"));
+        assert_eq!(parsed.yanked_reason.as_deref(), Some("security advisory"));
+        assert_eq!(parsed.replaced_by.as_deref(), Some("1.2.1"));
+
+        // The optional yank fields are omitted from JSON when absent, so older
+        // registry.json files without them still parse (backward compatible).
+        let clean = RegistryVersion { yanked_at: None, yanked_reason: None, replaced_by: None, ..yanked };
+        let clean_json = serde_json::to_string(&clean).unwrap();
+        assert!(!clean_json.contains("yanked_at"));
+        assert!(!clean_json.contains("yanked_reason"));
+        assert!(!clean_json.contains("replaced_by"));
+    }
+
+    #[test]
+    fn registry_resolution_policy_gates_unverified_and_quarantined_entries() {
+        let index = RegistryIndex {
+            schema_version: RegistryIndex::CURRENT_SCHEMA_VERSION,
+            name: "amm".to_string(),
+            namespace: "cellscript".to_string(),
+            versions: vec![
+                RegistryVersion {
+                    version: "0.1.0".to_string(),
+                    tag: "v0.1.0".to_string(),
+                    source_hash: "hash-v010".to_string(),
+                    cellscript_version: "0.20.0".to_string(),
+                    dependencies: BTreeMap::new(),
+                    abi_index: None,
+                    schema_hash: None,
+                    license: None,
+                    released_at: None,
+                    status: RegistryEntryStatus::VerifiedBuild,
+                    yanked: false,
+                    yanked_at: None,
+                    yanked_reason: None,
+                    replaced_by: None,
+                    audit: None,
+                },
+                RegistryVersion {
+                    version: "0.2.0".to_string(),
+                    tag: "v0.2.0".to_string(),
+                    source_hash: "hash-v020".to_string(),
+                    cellscript_version: "0.20.0".to_string(),
+                    dependencies: BTreeMap::new(),
+                    abi_index: None,
+                    schema_hash: None,
+                    license: None,
+                    released_at: None,
+                    status: RegistryEntryStatus::SourcePublished,
+                    yanked: false,
+                    yanked_at: None,
+                    yanked_reason: None,
+                    replaced_by: None,
+                    audit: None,
+                },
+                RegistryVersion {
+                    version: "0.3.0".to_string(),
+                    tag: "v0.3.0".to_string(),
+                    source_hash: "hash-v030".to_string(),
+                    cellscript_version: "0.20.0".to_string(),
+                    dependencies: BTreeMap::new(),
+                    abi_index: None,
+                    schema_hash: None,
+                    license: None,
+                    released_at: None,
+                    status: RegistryEntryStatus::Quarantined,
+                    yanked: false,
+                    yanked_at: None,
+                    yanked_reason: None,
+                    replaced_by: None,
+                    audit: None,
+                },
+            ],
+        };
+
+        let default_selected = index
+            .find_matching_version_for_resolution("*", RegistryResolutionPolicy::default())
+            .expect("verified baseline should resolve");
+        assert_eq!(default_selected.version, "0.1.0");
+
+        let unverified_selected = index
+            .find_matching_version_for_resolution("*", RegistryResolutionPolicy { allow_unverified: true, allow_quarantined: false })
+            .expect("unverified direct install should resolve with explicit policy");
+        assert_eq!(unverified_selected.version, "0.2.0");
+
+        let quarantined_selected = index
+            .find_matching_version_for_resolution("*", RegistryResolutionPolicy { allow_unverified: true, allow_quarantined: true })
+            .expect("quarantined direct install should require explicit policy");
+        assert_eq!(quarantined_selected.version, "0.3.0");
+    }
+
+    #[test]
+    fn missing_registry_status_is_unverified_by_default() {
+        let json = r#"{
+          "schema_version": 1,
+          "name": "amm",
+          "namespace": "cellscript",
+          "versions": [
+            {
+              "version": "1.0.0",
+              "tag": "v1.0.0",
+              "source_hash": "hash-v100",
+              "cellscript_version": "0.20.0",
+              "dependencies": {},
+              "yanked": false
+            }
+          ]
+        }"#;
+        let index: RegistryIndex = serde_json::from_str(json).unwrap();
+        assert_eq!(index.versions[0].status, RegistryEntryStatus::SourcePublished);
+        assert!(
+            index.find_matching_version_for_resolution("*", RegistryResolutionPolicy::default()).is_none(),
+            "entries missing status must not be selected by the default resolver",
+        );
+        let selected = index
+            .find_matching_version_for_resolution("*", RegistryResolutionPolicy { allow_unverified: true, allow_quarantined: false })
+            .expect("explicit unverified install may select a legacy mirror");
+        assert_eq!(selected.version, "1.0.0");
     }
 
     #[test]
@@ -653,7 +1082,11 @@ mod tests {
                 schema_hash: Some("blake2b:0x9abc".to_string()),
                 license: Some("MIT".to_string()),
                 released_at: Some("2026-05-06T00:00:00Z".to_string()),
+                status: RegistryEntryStatus::VerifiedBuild,
                 yanked: false,
+                yanked_at: None,
+                yanked_reason: None,
+                replaced_by: None,
                 audit: Some(RegistryAuditInfo {
                     report_hash: Some("blake2b:0x5555".to_string()),
                     acceptance_gate: Some("passed".to_string()),

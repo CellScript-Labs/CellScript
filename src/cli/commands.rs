@@ -1,7 +1,7 @@
 use crate::docgen::{DocGenerator, OutputFormat};
 use crate::error::Result;
 use crate::fmt::format_default;
-use crate::package::{Dependency, DetailedDependency, Lockfile, PackageManager, PolicyConfig};
+use crate::package::{Dependency, DetailedDependency, Lockfile, PackageManager, PackageManifest, PolicyConfig};
 use crate::runtime_errors::{runtime_error_info, runtime_error_info_by_code, CellScriptRuntimeErrorInfo, ALL_RUNTIME_ERRORS};
 use crate::{
     compile_path, compile_path_with_entry_action, compile_path_with_entry_lock, default_metadata_path_for_artifact,
@@ -9,6 +9,7 @@ use crate::{
     validate_source_units_on_disk, ArtifactFormat, CompileMetadata, CompileOptions, EntryWitnessArg, ParamMetadata, ProofPlanMetadata,
     TargetProfile, ENTRY_WITNESS_ABI,
 };
+use base64::Engine;
 use camino::Utf8Path;
 #[cfg(feature = "vm-runner")]
 use ckb_vm::{
@@ -16,6 +17,7 @@ use ckb_vm::{
     SparseMemory, SupportMachine, TraceMachine, WXorXMemory, ISA_B, ISA_IMC, ISA_MOP,
 };
 use colored::Colorize;
+use ring::signature::KeyPair;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::{Read, Write};
 use std::net::TcpStream;
@@ -119,10 +121,15 @@ pub enum Command {
     RegistryVerify(RegistryVerifyArgs),
     PackageVerify(PackageVerifyArgs),
     RegistryAdd(RegistryAddArgs),
+    RegistryEdit(RegistryEditArgs),
     Certify(CertifyArgs),
     Update,
     Info(InfoArgs),
     Login(LoginArgs),
+    AuthLogin(AuthCapabilityArgs),
+    AuthCapabilityCreate(AuthCapabilityArgs),
+    AuthCapabilitySubmit(AuthCapabilitySubmitArgs),
+    AuthCapabilityRevoke(AuthCapabilityRevokeArgs),
 }
 
 #[derive(Debug, Default)]
@@ -486,7 +493,16 @@ pub struct RunArgs {
 #[derive(Debug, Default)]
 pub struct PublishArgs {
     pub dry_run: bool,
+    pub offline: bool,
     pub allow_dirty: bool,
+    pub api_url: Option<String>,
+    pub capability_key_id: Option<String>,
+    pub capability_signature: Option<String>,
+    pub idempotency_key: Option<String>,
+    pub payload: Option<PathBuf>,
+    pub source_snapshot: Option<PathBuf>,
+    pub print_payload: bool,
+    pub json: bool,
 }
 
 #[derive(Debug, Default)]
@@ -496,11 +512,46 @@ pub struct InstallArgs {
     pub namespace: Option<String>,
     pub git: Option<String>,
     pub path: Option<PathBuf>,
+    pub allow_unverified: bool,
+    pub allow_quarantined: bool,
 }
 
 #[derive(Debug, Default)]
 pub struct LoginArgs {
     pub registry: Option<String>,
+}
+
+#[derive(Debug, Default)]
+pub struct AuthCapabilityArgs {
+    pub registry_origin: Option<String>,
+    pub principal_type: Option<String>,
+    pub principal_id: Option<String>,
+    pub capability_pubkey: Option<String>,
+    pub scopes: Vec<String>,
+    pub expires: Option<String>,
+    pub capability_expires_at: Option<String>,
+    pub json: bool,
+}
+
+#[derive(Debug, Default)]
+pub struct AuthCapabilitySubmitArgs {
+    pub api_url: Option<String>,
+    pub payload: PathBuf,
+    pub joyid_signature: PathBuf,
+    pub json: bool,
+}
+
+#[derive(Debug, Default)]
+pub struct AuthCapabilityRevokeArgs {
+    pub api_url: Option<String>,
+    pub registry_origin: Option<String>,
+    pub principal_type: Option<String>,
+    pub principal_id: Option<String>,
+    pub capability_key_id: Option<String>,
+    pub payload: Option<PathBuf>,
+    pub joyid_signature: Option<PathBuf>,
+    pub reason: Option<String>,
+    pub json: bool,
 }
 
 #[derive(Debug, Default)]
@@ -523,6 +574,14 @@ pub struct RegistryAddArgs {
     pub namespace: String,
     pub name: String,
     pub source: String,
+}
+
+#[derive(Debug, Default)]
+pub struct RegistryEditArgs {
+    pub yank: Option<String>,
+    pub reason: Option<String>,
+    pub replaced_by: Option<String>,
+    pub yanked_at: Option<String>,
 }
 
 #[derive(Debug, Default)]
@@ -588,9 +647,13 @@ impl CommandExecutor {
             Command::Update => Self::update(),
             Command::Info(args) => Self::info(args),
             Command::Login(args) => Self::login(args),
+            Command::AuthLogin(args) | Command::AuthCapabilityCreate(args) => Self::auth_capability(args),
+            Command::AuthCapabilitySubmit(args) => Self::auth_capability_submit(args),
+            Command::AuthCapabilityRevoke(args) => Self::auth_capability_revoke(args),
             Command::RegistryVerify(args) => Self::registry_verify(args),
             Command::PackageVerify(args) => Self::package_verify(args),
             Command::RegistryAdd(args) => Self::registry_add(args),
+            Command::RegistryEdit(args) => Self::registry_edit(args),
             Command::Certify(args) => Self::certify(args),
         }
     }
@@ -3263,7 +3326,6 @@ impl CommandExecutor {
 
             Ok(())
         } else {
-            // Real publish: compute source_hash, update registry.json
             let namespace = manifest.package.namespace.clone().ok_or_else(|| {
                 crate::error::CompileError::without_span(
                     "package namespace is required for publishing; add namespace = \"<your-namespace>\" to [package] in Cell.toml",
@@ -3284,63 +3346,114 @@ impl CommandExecutor {
             let result = compile_path(".", CompileOptions::default())?;
 
             // Build registry version entry
-            let version_entry = crate::package::registry::RegistryVersion {
-                version: manifest.package.version.clone(),
-                tag: format!("v{}", manifest.package.version),
-                source_hash: source_hash.clone(),
-                cellscript_version: result.metadata.compiler_version.clone(),
-                dependencies: {
-                    let mut deps = std::collections::BTreeMap::new();
-                    for (dep_name, dep) in &manifest.dependencies {
-                        let (ns, ver) = match dep {
-                            crate::package::Dependency::Simple(v) => {
-                                (manifest.package.namespace.clone().unwrap_or_default(), v.clone())
-                            }
-                            crate::package::Dependency::Detailed(d) => {
-                                let ns = d.namespace.clone().unwrap_or_else(|| manifest.package.namespace.clone().unwrap_or_default());
-                                (ns, d.version.clone())
-                            }
-                        };
-                        deps.insert(dep_name.clone(), crate::package::registry::RegistryDependencyRef { namespace: ns, version: ver });
-                    }
-                    deps
-                },
-                abi_index: Some(metadata_abi_hash(&result.metadata)?),
-                schema_hash: Some(result.metadata.molecule_schema_manifest.manifest_hash.clone()),
-                license: if manifest.package.license.is_empty() { None } else { Some(manifest.package.license.clone()) },
-                released_at: Some({
-                    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
-                    // Lightweight ISO 8601 formatting without chrono dependency
-                    let days_since_epoch = secs / 86400;
-                    let time_of_day = secs % 86400;
-                    let (year, month, day) = civil_date_from_days(days_since_epoch as i32);
-                    let hour = (time_of_day / 3600) as u8;
-                    let minute = ((time_of_day % 3600) / 60) as u8;
-                    let second = (time_of_day % 60) as u8;
-                    format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", year, month, day, hour, minute, second)
-                }),
-                yanked: false,
-                audit: None,
+            let version_entry = build_publish_registry_version(&manifest, &result, &source_hash)?;
+
+            if args.offline {
+                // Offline fixture publish: update registry.json without touching the public write API.
+                crate::package::registry::RegistryIndex::append_version(
+                    std::path::Path::new("."),
+                    &manifest.package.name,
+                    &namespace,
+                    version_entry,
+                )?;
+
+                println!("{}", "Published offline registry fixture".green());
+                println!("  Package: {}/{} v{}", namespace, manifest.package.name, manifest.package.version);
+                println!("  Source hash: {}", source_hash);
+                println!();
+                println!("  Audit/offline mirror next steps:");
+                println!("    git add registry.json");
+                println!("    git commit -m \"publish v{}\"", manifest.package.version);
+                println!("    git tag v{}", manifest.package.version);
+                println!("    git push --tags");
+                return Ok(());
+            }
+
+            let api_base = resolve_registry_api_base(args.api_url)?;
+            let registry_origin = registry_origin_from_api_base(&api_base)?;
+            let endpoint = registry_publish_endpoint(&api_base, &namespace, &manifest.package.name);
+            let registry_entry = build_publish_registry_entry(&manifest, &namespace, version_entry)?;
+            let payload = if let Some(payload_path) = args.payload.as_deref() {
+                read_registry_publish_payload(payload_path)?
+            } else {
+                let capability_key_id = args
+                    .capability_key_id
+                    .or_else(|| std::env::var("CELLSCRIPT_CAPABILITY_KEY_ID").ok())
+                    .ok_or_else(|| {
+                        crate::error::CompileError::without_span(format!(
+                            "capability key id is required for public publish; connect JoyID through the registry submit page to derive <principal_id>, run `cellc auth capability create --principal-id <principal_id> --scope publish:{}/{} --expires 90d --json > capability-payload.json`, sign that payload with JoyID through CCC, then run `cellc auth capability submit --payload capability-payload.json --joyid-signature joyid-signature.json`; after registration, pass --capability-key-id or set CELLSCRIPT_CAPABILITY_KEY_ID",
+                            namespace, manifest.package.name
+                        ))
+                    })?;
+                let issued_at = current_utc_timestamp();
+                let expires_at = utc_timestamp_after_seconds(10 * 60);
+                let nonce = registry_publish_nonce(
+                    &registry_origin,
+                    &namespace,
+                    &manifest.package.name,
+                    &manifest.package.version,
+                    &source_hash,
+                    &capability_key_id,
+                    &issued_at,
+                );
+                crate::package::registry::RegistryPublishPayload {
+                    protocol: crate::package::registry::REGISTRY_PUBLISH_PROTOCOL.to_string(),
+                    action: crate::package::registry::PUBLISH_ACTION.to_string(),
+                    registry_origin: registry_origin.clone(),
+                    namespace: namespace.clone(),
+                    name: manifest.package.name.clone(),
+                    version: manifest.package.version.clone(),
+                    source_hash: source_hash.clone(),
+                    manifest_hash: Some(hash_json_value("package manifest", &manifest)?),
+                    capability_key_id,
+                    nonce,
+                    issued_at,
+                    expires_at,
+                    cli_version: crate::VERSION.to_string(),
+                    registry_entry,
+                }
             };
+            validate_publish_payload_matches_local_package(&payload, &registry_origin, &namespace, &manifest, &source_hash)?;
+            let canonical_payload = registry_publish_canonical_payload(&payload)?;
 
-            // Write to registry.json
-            crate::package::registry::RegistryIndex::append_version(
-                std::path::Path::new("."),
-                &manifest.package.name,
-                &namespace,
-                version_entry,
-            )?;
+            if args.print_payload {
+                let preview = serde_json::json!({
+                    "endpoint": endpoint,
+                    "payload": payload,
+                    "canonical_payload": canonical_payload,
+                });
+                if args.json {
+                    print_json(&preview)?;
+                } else {
+                    println!("{}", "Registry publish payload".green());
+                    println!("  Endpoint: {}", endpoint);
+                    println!("  Package: {}/{} v{}", namespace, manifest.package.name, manifest.package.version);
+                    println!("  Source hash: {}", source_hash);
+                    println!();
+                    println!("Canonical payload to sign:");
+                    println!("{}", preview["canonical_payload"].as_str().unwrap_or_default());
+                }
+                return Ok(());
+            }
 
-            println!("{}", "Published".green());
-            println!("  Package: {}/{} v{}", namespace, manifest.package.name, manifest.package.version);
-            println!("  Source hash: {}", source_hash);
-            println!();
-            println!("  Next steps:");
-            println!("    git add registry.json");
-            println!("    git commit -m \"publish v{}\"", manifest.package.version);
-            println!("    git tag v{}", manifest.package.version);
-            println!("    git push --tags");
-            Ok(())
+            let capability_signature =
+                if let Some(signature) = args.capability_signature.or_else(|| std::env::var("CELLSCRIPT_CAPABILITY_SIGNATURE").ok()) {
+                    signature
+                } else {
+                    sign_registry_publish_payload(&payload.capability_key_id, &canonical_payload)?
+                };
+            let source_snapshot =
+                build_registry_source_snapshot(args.source_snapshot.as_deref(), std::path::Path::new("."), &manifest, &source_hash)?;
+            let request = crate::package::registry::RegistryPublishRequest {
+                payload,
+                capability_signature: crate::package::registry::RegistryCapabilitySignature {
+                    algorithm: "p256-sha256".to_string(),
+                    signature: capability_signature,
+                },
+                source_snapshot,
+            };
+            let idempotency_key = resolve_registry_publish_idempotency_key(args.idempotency_key.as_deref(), &request)?;
+            submit_registry_publish_request(&endpoint, &request, &idempotency_key, args.json)
         }
     }
 
@@ -3430,7 +3543,15 @@ impl CommandExecutor {
 
             let version = resolved_version.unwrap_or_else(|| "*".to_string());
 
-            let _resolved = pm.resolve_from_registry_with_namespace(&resolved_name, &version, resolved_namespace.as_deref())?;
+            let _resolved = pm.resolve_from_registry_with_namespace_and_policy(
+                &resolved_name,
+                &version,
+                resolved_namespace.as_deref(),
+                crate::package::registry::RegistryResolutionPolicy {
+                    allow_unverified: args.allow_unverified,
+                    allow_quarantined: args.allow_quarantined,
+                },
+            )?;
 
             let dep = if resolved_namespace.is_some() {
                 Dependency::Detailed(DetailedDependency {
@@ -3550,45 +3671,192 @@ impl CommandExecutor {
     }
 
     fn login(args: LoginArgs) -> Result<()> {
-        let registry = args.registry.unwrap_or_else(|| "https://cellscript.io".to_string());
+        Self::auth_capability(AuthCapabilityArgs { registry_origin: args.registry, ..Default::default() })
+    }
 
-        let config_dir = dirs_config_dir();
-        std::fs::create_dir_all(&config_dir).map_err(|e| {
-            crate::error::CompileError::without_span(format!("failed to create config directory '{}': {}", config_dir.display(), e))
+    fn auth_capability(args: AuthCapabilityArgs) -> Result<()> {
+        let registry_origin = args
+            .registry_origin
+            .or_else(|| std::env::var("CELLSCRIPT_REGISTRY_ORIGIN").ok())
+            .unwrap_or_else(|| crate::package::registry::DEFAULT_PUBLIC_REGISTRY_ORIGIN.to_string());
+        let principal_type =
+            args.principal_type.or_else(|| std::env::var("CELLSCRIPT_PRINCIPAL_TYPE").ok()).unwrap_or_else(|| "joyid_ckb".to_string());
+        let principal_id = args.principal_id.or_else(|| std::env::var("CELLSCRIPT_PRINCIPAL_ID").ok()).ok_or_else(|| {
+            crate::error::CompileError::without_span(
+                "principal id is required; pass --principal-id or set CELLSCRIPT_PRINCIPAL_ID to the normalized JoyID/CKB identity binding",
+            )
         })?;
-
-        let credentials_path = config_dir.join("credentials.toml");
-
-        let mut credentials: HashMap<String, RegistryCredential> = if credentials_path.exists() {
-            let content = std::fs::read_to_string(&credentials_path).unwrap_or_default();
-            toml::from_str(&content).unwrap_or_default()
-        } else {
-            HashMap::new()
+        let explicit_capability_pubkey = args.capability_pubkey.or_else(|| std::env::var("CELLSCRIPT_CAPABILITY_PUBKEY").ok());
+        let (capability_pubkey, generated_key_id) = match explicit_capability_pubkey {
+            Some(capability_pubkey) => (capability_pubkey, None),
+            None => {
+                let generated = generate_and_store_registry_capability_key()?;
+                (generated.capability_pubkey, Some(generated.key_id))
+            }
         };
+        let capability_key_id = registry_capability_key_id(&capability_pubkey);
+        let requested_scopes = resolve_requested_scopes(args.scopes)?;
+        let issued_at = current_utc_timestamp();
+        let expires_at = utc_timestamp_after_seconds(10 * 60);
+        let capability_expires_at = resolve_capability_expires_at(args.capability_expires_at, args.expires)?;
+        let nonce =
+            registry_auth_nonce(&registry_origin, &principal_type, &principal_id, &capability_pubkey, &requested_scopes, &issued_at);
+        let payload = crate::package::registry::CapabilityAuthorisationPayload::new(
+            registry_origin,
+            principal_type,
+            principal_id,
+            capability_pubkey,
+            requested_scopes,
+            capability_expires_at,
+            nonce,
+            issued_at,
+            expires_at,
+            crate::VERSION.to_string(),
+        );
 
-        eprintln!("Logging in to {}", registry);
-        eprintln!("Enter your authentication token (or press Enter to use environment variable CELLSCRIPT_TOKEN):");
-
-        let mut token = String::new();
-        if std::io::stdin().read_line(&mut token).is_err() || token.trim().is_empty() {
-            token = std::env::var("CELLSCRIPT_TOKEN").unwrap_or_default();
+        if args.json {
+            print_json(&serde_json::to_value(&payload)?)?;
+        } else {
+            println!("{}", "Capability authorisation payload".green());
+            println!("  Protocol: {}", payload.protocol);
+            println!("  Action: {}", payload.action);
+            println!("  Registry: {}", payload.registry_origin);
+            println!("  Principal: {}:{}", payload.principal_type, payload.principal_id);
+            println!("  Capability pubkey: {}", payload.capability_pubkey);
+            println!("  Capability key id: {}", capability_key_id);
+            if generated_key_id.is_some() {
+                println!("  Capability private key: stored in the OS keychain");
+            }
+            println!("  Scopes: {}", payload.requested_scopes.join(", "));
+            println!("  Capability expires: {}", payload.capability_expires_at);
+            println!();
+            println!("Sign this payload with JoyID, then submit the signed authorisation to the registry write API:");
+            println!("{}", serde_json::to_string_pretty(&payload)?);
         }
 
-        if token.trim().is_empty() {
+        Ok(())
+    }
+
+    fn auth_capability_submit(args: AuthCapabilitySubmitArgs) -> Result<()> {
+        let api_base = resolve_registry_api_base(args.api_url)?;
+        let registry_origin = registry_origin_from_api_base(&api_base)?;
+        let payload = read_capability_authorisation_payload(&args.payload)?;
+        if payload.registry_origin != registry_origin {
+            return Err(crate::error::CompileError::without_span(format!(
+                "capability payload registry_origin '{}' does not match API origin '{}'",
+                payload.registry_origin, registry_origin
+            )));
+        }
+        let joyid_signature = read_json_value(&args.joyid_signature)?;
+        let body = serde_json::json!({
+            "payload": payload,
+            "joyid_signature": joyid_signature,
+        });
+        let endpoint = format!("{}/v1/capabilities", api_base.trim_end_matches('/'));
+        let response = submit_registry_json_request(&endpoint, &body, "Submitted capability authorisation", args.json)?;
+        if !args.json {
+            if let Some(key_id) = response.get("key_id").and_then(serde_json::Value::as_str) {
+                println!("  Capability key id: {}", key_id);
+            }
+            if let Some(status) = response.get("status").and_then(serde_json::Value::as_str) {
+                println!("  Status: {}", status);
+            }
+        }
+        Ok(())
+    }
+
+    fn auth_capability_revoke(args: AuthCapabilityRevokeArgs) -> Result<()> {
+        if args.payload.is_none() && args.joyid_signature.is_some() {
             return Err(crate::error::CompileError::without_span(
-                "no authentication token provided; set CELLSCRIPT_TOKEN environment variable or enter token interactively",
+                "capability revocation with --joyid-signature must use --payload from a previously generated revoke challenge",
             ));
         }
 
-        let token = token.trim().to_string();
+        let payload = if let Some(payload_path) = args.payload.as_deref() {
+            read_capability_revocation_payload(payload_path)?
+        } else {
+            let registry_origin = args
+                .registry_origin
+                .or_else(|| std::env::var("CELLSCRIPT_REGISTRY_ORIGIN").ok())
+                .unwrap_or_else(|| crate::package::registry::DEFAULT_PUBLIC_REGISTRY_ORIGIN.to_string());
+            let principal_type = args
+                .principal_type
+                .or_else(|| std::env::var("CELLSCRIPT_PRINCIPAL_TYPE").ok())
+                .unwrap_or_else(|| "joyid_ckb".to_string());
+            let principal_id = args.principal_id.or_else(|| std::env::var("CELLSCRIPT_PRINCIPAL_ID").ok()).ok_or_else(|| {
+                crate::error::CompileError::without_span(
+                    "principal id is required for capability revoke; pass --principal-id or set CELLSCRIPT_PRINCIPAL_ID to the normalized JoyID/CKB identity binding",
+                )
+            })?;
+            let capability_key_id =
+                args.capability_key_id.or_else(|| std::env::var("CELLSCRIPT_CAPABILITY_KEY_ID").ok()).ok_or_else(|| {
+                    crate::error::CompileError::without_span(
+                        "capability key id is required for capability revoke; pass --capability-key-id or set CELLSCRIPT_CAPABILITY_KEY_ID",
+                    )
+                })?;
+            let issued_at = current_utc_timestamp();
+            let expires_at = utc_timestamp_after_seconds(10 * 60);
+            let nonce = registry_revoke_nonce(&registry_origin, &principal_type, &principal_id, &capability_key_id, &issued_at);
+            crate::package::registry::CapabilityRevocationPayload::new(
+                registry_origin,
+                principal_type,
+                principal_id,
+                capability_key_id,
+                nonce,
+                issued_at,
+                expires_at,
+                crate::VERSION.to_string(),
+            )
+        };
 
-        credentials.insert(registry.clone(), RegistryCredential { registry: registry.clone(), token });
+        let Some(signature_path) = args.joyid_signature.as_deref() else {
+            if args.json {
+                print_json(&serde_json::to_value(&payload)?)?;
+            } else {
+                println!("{}", "Capability revocation payload".green());
+                println!("  Protocol: {}", payload.protocol);
+                println!("  Action: {}", payload.action);
+                println!("  Registry: {}", payload.registry_origin);
+                println!("  Principal: {}:{}", payload.principal_type, payload.principal_id);
+                println!("  Capability key id: {}", payload.capability_key_id);
+                println!();
+                println!("Sign this payload with JoyID, then submit it with:");
+                println!("  cellc auth capability revoke --payload <payload.json> --joyid-signature <joyid-signature.json>");
+                println!("{}", serde_json::to_string_pretty(&payload)?);
+            }
+            return Ok(());
+        };
 
-        let content = toml::to_string_pretty(&credentials)?;
-        std::fs::write(&credentials_path, content)?;
-
-        println!("{}", format!("Login credentials saved for {}", registry).green());
-        println!("  Config directory: {}", config_dir.display());
+        let api_base = resolve_registry_api_base(args.api_url)?;
+        let registry_origin = registry_origin_from_api_base(&api_base)?;
+        if payload.registry_origin != registry_origin {
+            return Err(crate::error::CompileError::without_span(format!(
+                "capability revocation registry_origin '{}' does not match API origin '{}'",
+                payload.registry_origin, registry_origin
+            )));
+        }
+        let joyid_signature = read_json_value(signature_path)?;
+        let mut body = serde_json::json!({
+            "payload": payload,
+            "joyid_signature": joyid_signature,
+        });
+        if let Some(reason) = args.reason.filter(|reason| !reason.trim().is_empty()) {
+            body["reason"] = serde_json::Value::String(reason);
+        }
+        let endpoint = format!(
+            "{}/v1/capabilities/{}/revoke",
+            api_base.trim_end_matches('/'),
+            body["payload"]["capability_key_id"].as_str().unwrap_or_default()
+        );
+        let response = submit_registry_json_request(&endpoint, &body, "Revoked capability", args.json)?;
+        if !args.json {
+            if let Some(key_id) = response.get("key_id").and_then(serde_json::Value::as_str) {
+                println!("  Capability key id: {}", key_id);
+            }
+            if let Some(revoked_at) = response.get("revoked_at").and_then(serde_json::Value::as_str) {
+                println!("  Revoked at: {}", revoked_at);
+            }
+        }
         Ok(())
     }
 
@@ -3716,6 +3984,27 @@ impl CommandExecutor {
                     violations.push(format!(
                         "record_hash mismatch for network '{}': Cell.lock has '{}', computed '{}'",
                         deployment.network, record_hash, computed
+                    ));
+                }
+            }
+
+            // TYPE_ID upgrade lineage (Phase 2, off-chain consistency): when a
+            // deployment declares `upgrade_lineage`, it must not point at itself
+            // and must not be empty. We do not require it to match a record kept
+            // in Deployed.toml, because historical deployments are often pruned;
+            // on-chain TYPE_ID upgrade-chain verification remains a live-RPC
+            // concern. This off-chain check catches the common copy-paste error
+            // where a lineage field accidentally names the current deployment.
+            if let Some(lineage) = &deployment.upgrade_lineage {
+                if lineage.trim().is_empty() {
+                    violations.push(format!(
+                        "upgrade_lineage for network '{}' is empty; remove the field or point it at a prior out_point",
+                        deployment.network
+                    ));
+                } else if lineage.trim() == deployment.out_point {
+                    violations.push(format!(
+                        "upgrade_lineage for network '{}' points at the deployment's own out_point '{}'; lineage must reference a prior deployment",
+                        deployment.network, deployment.out_point
                     ));
                 }
             }
@@ -3870,6 +4159,44 @@ impl CommandExecutor {
         Ok(())
     }
 
+    fn registry_edit(args: RegistryEditArgs) -> Result<()> {
+        let version =
+            args.yank.ok_or_else(|| crate::error::CompileError::without_span("registry edit currently requires --yank <VERSION>"))?;
+        let root = std::path::Path::new(".");
+        let mut index = crate::package::registry::RegistryIndex::read_from_repo(root)?;
+        let Some(entry) = index.versions.iter_mut().find(|entry| entry.version == version) else {
+            return Err(crate::error::CompileError::without_span(format!(
+                "registry.json has no version '{}' for {}/{}",
+                version, index.namespace, index.name
+            )));
+        };
+
+        entry.yanked = true;
+        entry.yanked_at = Some(args.yanked_at.unwrap_or_else(current_utc_timestamp));
+        entry.yanked_reason = args.reason;
+        entry.replaced_by = args.replaced_by;
+        let reason = entry.yanked_reason.clone();
+        let replaced_by = entry.replaced_by.clone();
+        index.write_to_repo(root)?;
+
+        println!("{}", "Registry version yanked".green());
+        println!("  Package: {}/{}", index.namespace, index.name);
+        println!("  Version: {}", version);
+        if let Some(reason) = reason.as_deref() {
+            println!("  Reason: {}", reason);
+        }
+        if let Some(replacement) = replaced_by.as_deref() {
+            println!("  Replaced by: {}", replacement);
+        }
+        println!();
+        println!("  Next steps:");
+        println!("    git add registry.json");
+        println!("    git commit -m \"yank {}/{}@{}\"", index.namespace, index.name, version);
+        println!("    Open a PR with the advisory or replacement evidence");
+
+        Ok(())
+    }
+
     fn certify(args: CertifyArgs) -> Result<()> {
         if args.plugin != NOVASEAL_CERTIFICATION_PLUGIN {
             return Err(crate::error::CompileError::without_span(format!(
@@ -3941,12 +4268,6 @@ impl CommandExecutor {
 #[cfg(feature = "vm-runner")]
 type CliVmMachine = TraceMachine<DefaultCoreMachine<u64, WXorXMemory<SparseMemory<u64>>>>;
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-struct RegistryCredential {
-    registry: String,
-    token: String,
-}
-
 /// Convert days since Unix epoch (1970-01-01) to (year, month, day).
 /// Implements the civil date algorithm from Howard Hinnant.
 fn civil_date_from_days(z: i32) -> (i32, u32, u32) {
@@ -3961,6 +4282,742 @@ fn civil_date_from_days(z: i32) -> (i32, u32, u32) {
     let m = mp + if mp < 10 { 3 } else { -9 };
     let y = y + if m <= 2 { 1 } else { 0 };
     (y, m as u32, d as u32)
+}
+
+fn current_utc_timestamp() -> String {
+    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
+    utc_timestamp_from_unix_secs(secs)
+}
+
+fn utc_timestamp_after_seconds(delta_secs: u64) -> String {
+    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
+    utc_timestamp_from_unix_secs(secs.saturating_add(delta_secs))
+}
+
+fn utc_timestamp_from_unix_secs(secs: u64) -> String {
+    let days_since_epoch = secs / 86400;
+    let time_of_day = secs % 86400;
+    let (year, month, day) = civil_date_from_days(days_since_epoch as i32);
+    let hour = (time_of_day / 3600) as u8;
+    let minute = ((time_of_day % 3600) / 60) as u8;
+    let second = (time_of_day % 60) as u8;
+    format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", year, month, day, hour, minute, second)
+}
+
+fn resolve_requested_scopes(mut scopes: Vec<String>) -> Result<Vec<String>> {
+    scopes.retain(|scope| !scope.trim().is_empty());
+    if !scopes.is_empty() {
+        return Ok(scopes);
+    }
+
+    let manifest = PackageManager::new(".").read_manifest().map_err(|_| {
+        crate::error::CompileError::without_span(
+            "at least one capability scope is required; pass --scope publish:<namespace>/<package> outside a package directory",
+        )
+    })?;
+    let namespace = manifest.package.namespace.ok_or_else(|| {
+        crate::error::CompileError::without_span(
+            "cannot infer capability scope because [package].namespace is missing; pass --scope publish:<namespace>/<package>",
+        )
+    })?;
+    if manifest.package.name.is_empty() {
+        return Err(crate::error::CompileError::without_span(
+            "cannot infer capability scope because [package].name is empty; pass --scope publish:<namespace>/<package>",
+        ));
+    }
+
+    Ok(vec![format!("publish:{}/{}", namespace, manifest.package.name)])
+}
+
+fn resolve_capability_expires_at(explicit_timestamp: Option<String>, relative: Option<String>) -> Result<String> {
+    if let Some(timestamp) = explicit_timestamp {
+        return Ok(timestamp);
+    }
+
+    let Some(relative) = relative else {
+        return Ok(utc_timestamp_after_seconds(90 * 24 * 60 * 60));
+    };
+    let trimmed = relative.trim();
+    if let Some(days) = trimmed.strip_suffix('d') {
+        let days: u64 = days.parse().map_err(|_| {
+            crate::error::CompileError::without_span(format!("invalid --expires value '{}'; expected a duration like 90d", relative))
+        })?;
+        return Ok(utc_timestamp_after_seconds(days.saturating_mul(24 * 60 * 60)));
+    }
+    if let Some(hours) = trimmed.strip_suffix('h') {
+        let hours: u64 = hours.parse().map_err(|_| {
+            crate::error::CompileError::without_span(format!(
+                "invalid --expires value '{}'; expected a duration like 90d or 24h",
+                relative
+            ))
+        })?;
+        return Ok(utc_timestamp_after_seconds(hours.saturating_mul(60 * 60)));
+    }
+    if trimmed.contains('T') && trimmed.ends_with('Z') {
+        return Ok(trimmed.to_string());
+    }
+
+    Err(crate::error::CompileError::without_span(format!(
+        "invalid --expires value '{}'; expected a duration like 90d/24h or an absolute UTC timestamp",
+        relative
+    )))
+}
+
+fn registry_auth_nonce(
+    registry_origin: &str,
+    principal_type: &str,
+    principal_id: &str,
+    capability_pubkey: &str,
+    requested_scopes: &[String],
+    issued_at: &str,
+) -> String {
+    let material = format!(
+        "{}\n{}\n{}\n{}\n{}\n{}\n{}",
+        crate::package::registry::REGISTRY_AUTH_PROTOCOL,
+        registry_origin,
+        principal_type,
+        principal_id,
+        capability_pubkey,
+        requested_scopes.join(","),
+        issued_at
+    );
+    format!("0x{}", hex::encode(crate::ckb_blake2b256(material.as_bytes())))
+}
+
+fn registry_revoke_nonce(
+    registry_origin: &str,
+    principal_type: &str,
+    principal_id: &str,
+    capability_key_id: &str,
+    issued_at: &str,
+) -> String {
+    let material = format!(
+        "{}\n{}\n{}\n{}\n{}\n{}",
+        crate::package::registry::REVOKE_CAPABILITY_ACTION,
+        registry_origin,
+        principal_type,
+        principal_id,
+        capability_key_id,
+        issued_at
+    );
+    format!("0x{}", hex::encode(crate::ckb_blake2b256(material.as_bytes())))
+}
+
+struct GeneratedRegistryCapabilityKey {
+    key_id: String,
+    capability_pubkey: String,
+}
+
+fn generate_and_store_registry_capability_key() -> Result<GeneratedRegistryCapabilityKey> {
+    let rng = ring::rand::SystemRandom::new();
+    let pkcs8 = ring::signature::EcdsaKeyPair::generate_pkcs8(&ring::signature::ECDSA_P256_SHA256_FIXED_SIGNING, &rng)
+        .map_err(|error| crate::error::CompileError::without_span(format!("failed to generate capability key: {:?}", error)))?;
+    let key_pair = ring::signature::EcdsaKeyPair::from_pkcs8(&ring::signature::ECDSA_P256_SHA256_FIXED_SIGNING, pkcs8.as_ref(), &rng)
+        .map_err(|error| crate::error::CompileError::without_span(format!("failed to load generated capability key: {:?}", error)))?;
+    let spki = p256_spki_der_from_uncompressed_public_key(key_pair.public_key().as_ref())?;
+    let capability_pubkey = format!("p256-spki:{}", base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(spki));
+    let key_id = registry_capability_key_id(&capability_pubkey);
+    store_registry_capability_private_key(&key_id, pkcs8.as_ref())?;
+    Ok(GeneratedRegistryCapabilityKey { key_id, capability_pubkey })
+}
+
+fn registry_capability_key_id(capability_pubkey: &str) -> String {
+    use sha2::Digest as _;
+    let digest = sha2::Sha256::digest(capability_pubkey.as_bytes());
+    format!("cap_{}", &hex::encode(digest)[..32])
+}
+
+fn p256_spki_der_from_uncompressed_public_key(public_key: &[u8]) -> Result<Vec<u8>> {
+    const P256_SPKI_PREFIX: &[u8] = &[
+        0x30, 0x59, 0x30, 0x13, 0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01, 0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03,
+        0x01, 0x07, 0x03, 0x42, 0x00,
+    ];
+    if public_key.len() != 65 || public_key.first() != Some(&0x04) {
+        return Err(crate::error::CompileError::without_span(format!(
+            "generated capability public key must be an uncompressed 65-byte P-256 point, got {} bytes",
+            public_key.len()
+        )));
+    }
+    let mut spki = Vec::with_capacity(P256_SPKI_PREFIX.len() + public_key.len());
+    spki.extend_from_slice(P256_SPKI_PREFIX);
+    spki.extend_from_slice(public_key);
+    Ok(spki)
+}
+
+fn store_registry_capability_private_key(key_id: &str, pkcs8: &[u8]) -> Result<()> {
+    let secret = base64::engine::general_purpose::STANDARD.encode(pkcs8);
+    let entry = keyring::Entry::new("cellscript-registry", key_id)
+        .map_err(|error| crate::error::CompileError::without_span(format!("failed to open OS keychain: {}", error)))?;
+    entry.set_password(&secret).map_err(|error| {
+        crate::error::CompileError::without_span(format!(
+            "failed to store capability private key '{}' in OS keychain: {}",
+            key_id, error
+        ))
+    })
+}
+
+fn sign_registry_publish_payload(key_id: &str, canonical_payload: &str) -> Result<String> {
+    let Some(pkcs8) = load_registry_capability_private_key(key_id)? else {
+        return Err(crate::error::CompileError::without_span(format!(
+            "capability signature is required for public publish and no private key was found for '{}' in the OS keychain; pass --capability-signature, set CELLSCRIPT_CAPABILITY_SIGNATURE, or set CELLSCRIPT_CAPABILITY_PRIVATE_KEY_PKCS8_B64 for CI",
+            key_id
+        )));
+    };
+    sign_registry_publish_payload_with_pkcs8(&pkcs8, canonical_payload)
+}
+
+fn load_registry_capability_private_key(key_id: &str) -> Result<Option<Vec<u8>>> {
+    if let Ok(value) = std::env::var("CELLSCRIPT_CAPABILITY_PRIVATE_KEY_PKCS8_B64") {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            let decoded = base64::engine::general_purpose::STANDARD.decode(trimmed).map_err(|error| {
+                crate::error::CompileError::without_span(format!(
+                    "failed to decode CELLSCRIPT_CAPABILITY_PRIVATE_KEY_PKCS8_B64: {}",
+                    error
+                ))
+            })?;
+            return Ok(Some(decoded));
+        }
+    }
+
+    let entry = keyring::Entry::new("cellscript-registry", key_id)
+        .map_err(|error| crate::error::CompileError::without_span(format!("failed to open OS keychain: {}", error)))?;
+    match entry.get_password() {
+        Ok(secret) => {
+            let decoded = base64::engine::general_purpose::STANDARD.decode(secret.trim()).map_err(|error| {
+                crate::error::CompileError::without_span(format!(
+                    "failed to decode capability private key '{}' from OS keychain: {}",
+                    key_id, error
+                ))
+            })?;
+            Ok(Some(decoded))
+        }
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(error) => Err(crate::error::CompileError::without_span(format!(
+            "failed to read capability private key '{}' from OS keychain: {}",
+            key_id, error
+        ))),
+    }
+}
+
+fn sign_registry_publish_payload_with_pkcs8(pkcs8: &[u8], canonical_payload: &str) -> Result<String> {
+    let rng = ring::rand::SystemRandom::new();
+    let key_pair = ring::signature::EcdsaKeyPair::from_pkcs8(&ring::signature::ECDSA_P256_SHA256_FIXED_SIGNING, pkcs8, &rng)
+        .map_err(|error| crate::error::CompileError::without_span(format!("failed to load capability private key: {:?}", error)))?;
+    let signature = key_pair
+        .sign(&rng, canonical_payload.as_bytes())
+        .map_err(|error| crate::error::CompileError::without_span(format!("failed to sign publish payload: {:?}", error)))?;
+    Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(signature.as_ref()))
+}
+
+fn registry_publish_nonce(
+    registry_origin: &str,
+    namespace: &str,
+    name: &str,
+    version: &str,
+    source_hash: &str,
+    capability_key_id: &str,
+    issued_at: &str,
+) -> String {
+    let material = format!(
+        "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
+        crate::package::registry::REGISTRY_PUBLISH_PROTOCOL,
+        registry_origin,
+        namespace,
+        name,
+        version,
+        source_hash,
+        capability_key_id,
+        issued_at
+    );
+    format!("0x{}", hex::encode(crate::ckb_blake2b256(material.as_bytes())))
+}
+
+fn build_publish_registry_version(
+    manifest: &PackageManifest,
+    result: &crate::CompileResult,
+    source_hash: &str,
+) -> Result<crate::package::registry::RegistryVersion> {
+    let mut deps = BTreeMap::new();
+    for (dep_name, dep) in &manifest.dependencies {
+        let (namespace, version) = match dep {
+            crate::package::Dependency::Simple(version) => (manifest.package.namespace.clone().unwrap_or_default(), version.clone()),
+            crate::package::Dependency::Detailed(detail) => {
+                let namespace = detail.namespace.clone().unwrap_or_else(|| manifest.package.namespace.clone().unwrap_or_default());
+                (namespace, detail.version.clone())
+            }
+        };
+        deps.insert(dep_name.clone(), crate::package::registry::RegistryDependencyRef { namespace, version });
+    }
+
+    Ok(crate::package::registry::RegistryVersion {
+        version: manifest.package.version.clone(),
+        tag: format!("v{}", manifest.package.version),
+        source_hash: source_hash.to_string(),
+        cellscript_version: result.metadata.compiler_version.clone(),
+        dependencies: deps,
+        abi_index: Some(metadata_abi_hash(&result.metadata)?),
+        schema_hash: Some(result.metadata.molecule_schema_manifest.manifest_hash.clone()),
+        license: if manifest.package.license.is_empty() { None } else { Some(manifest.package.license.clone()) },
+        released_at: Some(current_utc_timestamp()),
+        status: crate::package::registry::RegistryEntryStatus::SourcePublished,
+        yanked: false,
+        yanked_at: None,
+        yanked_reason: None,
+        replaced_by: None,
+        audit: None,
+    })
+}
+
+fn build_publish_registry_entry(
+    manifest: &PackageManifest,
+    namespace: &str,
+    version_entry: crate::package::registry::RegistryVersion,
+) -> Result<serde_json::Value> {
+    let index = crate::package::registry::RegistryIndex {
+        schema_version: crate::package::registry::RegistryIndex::CURRENT_SCHEMA_VERSION,
+        name: manifest.package.name.clone(),
+        namespace: namespace.to_string(),
+        versions: vec![version_entry],
+    };
+    let mut value = serde_json::to_value(index).map_err(|error| {
+        crate::error::CompileError::without_span(format!("failed to serialize registry entry for publish: {}", error))
+    })?;
+    let Some(object) = value.as_object_mut() else {
+        return Err(crate::error::CompileError::without_span("registry entry did not serialize as a JSON object"));
+    };
+    if !manifest.package.repository.is_empty() {
+        object.insert("repository".to_string(), serde_json::Value::String(manifest.package.repository.clone()));
+    }
+    if !manifest.package.description.is_empty() {
+        object.insert("description".to_string(), serde_json::Value::String(manifest.package.description.clone()));
+    }
+    if !manifest.package.homepage.is_empty() {
+        object.insert("homepage".to_string(), serde_json::Value::String(manifest.package.homepage.clone()));
+    }
+    if !manifest.package.documentation.is_empty() {
+        object.insert("documentation".to_string(), serde_json::Value::String(manifest.package.documentation.clone()));
+    }
+    if !manifest.package.keywords.is_empty() {
+        object.insert(
+            "keywords".to_string(),
+            serde_json::to_value(&manifest.package.keywords).map_err(|error| {
+                crate::error::CompileError::without_span(format!("failed to serialize package keywords for publish: {}", error))
+            })?,
+        );
+    }
+    if !manifest.package.categories.is_empty() {
+        object.insert(
+            "categories".to_string(),
+            serde_json::to_value(&manifest.package.categories).map_err(|error| {
+                crate::error::CompileError::without_span(format!("failed to serialize package categories for publish: {}", error))
+            })?,
+        );
+    }
+    Ok(value)
+}
+
+fn resolve_registry_api_base(api_url: Option<String>) -> Result<String> {
+    let value = api_url
+        .or_else(|| std::env::var("CELLSCRIPT_REGISTRY_API_URL").ok())
+        .or_else(|| std::env::var("CELLSCRIPT_REGISTRY_ORIGIN").ok())
+        .unwrap_or_else(|| crate::package::registry::DEFAULT_PUBLIC_REGISTRY_ORIGIN.to_string());
+    let trimmed = value.trim().trim_end_matches('/');
+    if trimmed.is_empty() {
+        return Err(crate::error::CompileError::without_span("registry API URL is empty"));
+    }
+    let _ = registry_origin_from_api_base(trimmed)?;
+    Ok(trimmed.to_string())
+}
+
+fn registry_origin_from_api_base(api_base: &str) -> Result<String> {
+    let Some(scheme_end) = api_base.find("://") else {
+        return Err(crate::error::CompileError::without_span(format!(
+            "registry API URL '{}' must include http:// or https://",
+            api_base
+        )));
+    };
+    let scheme = &api_base[..scheme_end];
+    if scheme != "https" && scheme != "http" {
+        return Err(crate::error::CompileError::without_span(format!(
+            "registry API URL '{}' uses unsupported scheme '{}'",
+            api_base, scheme
+        )));
+    }
+    let rest = &api_base[scheme_end + 3..];
+    let host_end = rest.find('/').unwrap_or(rest.len());
+    if host_end == 0 {
+        return Err(crate::error::CompileError::without_span(format!("registry API URL '{}' has no host", api_base)));
+    }
+    Ok(format!("{}://{}", scheme, &rest[..host_end]))
+}
+
+fn registry_publish_endpoint(api_base: &str, namespace: &str, name: &str) -> String {
+    format!("{}/v1/packages/{}/{}/versions", api_base.trim_end_matches('/'), namespace, name)
+}
+
+fn resolve_registry_publish_idempotency_key(
+    cli_value: Option<&str>,
+    request: &crate::package::registry::RegistryPublishRequest,
+) -> Result<String> {
+    let value = if let Some(value) = cli_value {
+        value.to_string()
+    } else if let Ok(value) = std::env::var("CELLSCRIPT_REGISTRY_IDEMPOTENCY_KEY") {
+        value
+    } else {
+        let digest = hash_json_value("registry publish request", request)?;
+        format!("cellc-publish-{}", digest)
+    };
+    let trimmed = value.trim();
+    if trimmed.len() < 16 || trimmed.len() > 160 || !trimmed.bytes().all(is_idempotency_key_byte) {
+        return Err(crate::error::CompileError::without_span(
+            "publish Idempotency-Key must be 16..160 ASCII token characters: letters, digits, '.', '_', ':', or '-'",
+        ));
+    }
+    Ok(trimmed.to_string())
+}
+
+fn is_idempotency_key_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b':' | b'-')
+}
+
+fn read_registry_publish_payload(path: &Path) -> Result<crate::package::registry::RegistryPublishPayload> {
+    let value = read_json_value(path)?;
+    let payload_value = value.get("payload").cloned().unwrap_or(value);
+    serde_json::from_value(payload_value).map_err(|error| {
+        crate::error::CompileError::without_span(format!("failed to parse registry publish payload '{}': {}", path.display(), error))
+    })
+}
+
+fn read_capability_authorisation_payload(path: &Path) -> Result<crate::package::registry::CapabilityAuthorisationPayload> {
+    let value = read_json_value(path)?;
+    let payload_value = value.get("payload").cloned().unwrap_or(value);
+    serde_json::from_value(payload_value).map_err(|error| {
+        crate::error::CompileError::without_span(format!(
+            "failed to parse capability authorisation payload '{}': {}",
+            path.display(),
+            error
+        ))
+    })
+}
+
+fn read_capability_revocation_payload(path: &Path) -> Result<crate::package::registry::CapabilityRevocationPayload> {
+    let value = read_json_value(path)?;
+    let payload_value = value.get("payload").cloned().unwrap_or(value);
+    serde_json::from_value(payload_value).map_err(|error| {
+        crate::error::CompileError::without_span(format!(
+            "failed to parse capability revocation payload '{}': {}",
+            path.display(),
+            error
+        ))
+    })
+}
+
+fn validate_publish_payload_matches_local_package(
+    payload: &crate::package::registry::RegistryPublishPayload,
+    registry_origin: &str,
+    namespace: &str,
+    manifest: &PackageManifest,
+    source_hash: &str,
+) -> Result<()> {
+    if payload.protocol != crate::package::registry::REGISTRY_PUBLISH_PROTOCOL
+        || payload.action != crate::package::registry::PUBLISH_ACTION
+    {
+        return Err(crate::error::CompileError::without_span("publish payload has the wrong protocol or action"));
+    }
+    if payload.registry_origin != registry_origin {
+        return Err(crate::error::CompileError::without_span(format!(
+            "publish payload registry_origin '{}' does not match API origin '{}'",
+            payload.registry_origin, registry_origin
+        )));
+    }
+    if payload.namespace != namespace || payload.name != manifest.package.name || payload.version != manifest.package.version {
+        return Err(crate::error::CompileError::without_span(format!(
+            "publish payload targets {}/{} v{}, but local package is {}/{} v{}",
+            payload.namespace, payload.name, payload.version, namespace, manifest.package.name, manifest.package.version
+        )));
+    }
+    if payload.source_hash != source_hash {
+        return Err(crate::error::CompileError::without_span(format!(
+            "publish payload source_hash '{}' does not match local source_hash '{}'",
+            payload.source_hash, source_hash
+        )));
+    }
+    Ok(())
+}
+
+fn registry_publish_canonical_payload(payload: &crate::package::registry::RegistryPublishPayload) -> Result<String> {
+    let value = serde_json::to_value(payload)
+        .map_err(|error| crate::error::CompileError::without_span(format!("failed to serialize publish payload: {}", error)))?;
+    canonical_json_string(&value)
+}
+
+fn canonical_json_string(value: &serde_json::Value) -> Result<String> {
+    serde_json::to_string(&sort_json_for_canonical(value))
+        .map_err(|error| crate::error::CompileError::without_span(format!("failed to serialize canonical JSON: {}", error)))
+}
+
+fn sort_json_for_canonical(value: &serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::Array(items) => serde_json::Value::Array(items.iter().map(sort_json_for_canonical).collect()),
+        serde_json::Value::Object(object) => {
+            let mut sorted = serde_json::Map::new();
+            let mut keys: Vec<_> = object.keys().collect();
+            keys.sort();
+            for key in keys {
+                if let Some(item) = object.get(key) {
+                    sorted.insert(key.clone(), sort_json_for_canonical(item));
+                }
+            }
+            serde_json::Value::Object(sorted)
+        }
+        other => other.clone(),
+    }
+}
+
+fn build_registry_source_snapshot(
+    source_snapshot: Option<&Path>,
+    root: &Path,
+    manifest: &PackageManifest,
+    source_hash: &str,
+) -> Result<crate::package::registry::RegistrySourceSnapshot> {
+    let (bytes, content_type) = if let Some(path) = source_snapshot {
+        let bytes = std::fs::read(path).map_err(|error| {
+            crate::error::CompileError::without_span(format!("failed to read source snapshot '{}': {}", path.display(), error))
+        })?;
+        (bytes, source_snapshot_content_type(path).to_string())
+    } else {
+        (build_generated_source_snapshot_bytes(root, manifest)?, "application/vnd.cellscript.source-snapshot+json".to_string())
+    };
+    if bytes.is_empty() {
+        return Err(crate::error::CompileError::without_span("source snapshot is empty"));
+    }
+    Ok(crate::package::registry::RegistrySourceSnapshot {
+        content_base64: base64::engine::general_purpose::STANDARD.encode(&bytes),
+        content_type,
+        size_bytes: bytes.len() as u64,
+        source_hash: source_hash.to_string(),
+    })
+}
+
+fn source_snapshot_content_type(path: &Path) -> &'static str {
+    match path.extension().and_then(|ext| ext.to_str()).unwrap_or_default() {
+        "json" => "application/vnd.cellscript.source-snapshot+json",
+        "tar" => "application/x-tar",
+        "tgz" | "gz" => "application/gzip",
+        _ => "application/octet-stream",
+    }
+}
+
+fn build_generated_source_snapshot_bytes(root: &Path, manifest: &PackageManifest) -> Result<Vec<u8>> {
+    let files = collect_publish_snapshot_files(root, manifest)?;
+    let mut entries = Vec::new();
+    for path in files {
+        let bytes = std::fs::read(&path)
+            .map_err(|error| crate::error::CompileError::without_span(format!("failed to read '{}': {}", path.display(), error)))?;
+        entries.push(serde_json::json!({
+            "path": normalized_relative_path(root, &path),
+            "blake2b256": crate::hex_encode(&crate::ckb_blake2b256(&bytes)),
+            "content_base64": base64::engine::general_purpose::STANDARD.encode(&bytes),
+        }));
+    }
+    let snapshot = serde_json::json!({
+        "schema": "cellscript-source-snapshot-v1",
+        "generated_by": crate::VERSION,
+        "package": {
+            "namespace": manifest.package.namespace.as_deref(),
+            "name": &manifest.package.name,
+            "version": &manifest.package.version,
+        },
+        "files": entries,
+    });
+    serde_json::to_vec(&snapshot)
+        .map_err(|error| crate::error::CompileError::without_span(format!("failed to serialize generated source snapshot: {}", error)))
+}
+
+fn collect_publish_snapshot_files(root: &Path, manifest: &PackageManifest) -> Result<Vec<PathBuf>> {
+    let mut files = BTreeSet::new();
+    let manifest_path = root.join("Cell.toml");
+    if manifest_path.is_file() {
+        files.insert(manifest_path);
+    }
+    let lockfile_path = root.join("Cell.lock");
+    if lockfile_path.is_file() {
+        files.insert(lockfile_path);
+    }
+
+    if manifest.package.source_roots.is_empty() {
+        let src = root.join("src");
+        if src.is_dir() {
+            collect_publish_snapshot_cell_files(&src, &mut files)?;
+        }
+    } else {
+        for source_root in &manifest.package.source_roots {
+            let path = root.join(source_root);
+            if !path.exists() {
+                return Err(crate::error::CompileError::without_span(format!(
+                    "configured source root '{}' does not exist",
+                    path.display()
+                )));
+            }
+            if path.is_dir() {
+                collect_publish_snapshot_cell_files(&path, &mut files)?;
+            } else if path.extension().is_some_and(|ext| ext == "cell") {
+                files.insert(path);
+            }
+        }
+    }
+
+    let entry_path = root.join(&manifest.package.entry);
+    if entry_path.is_file() {
+        files.insert(entry_path);
+    }
+    Ok(files.into_iter().collect())
+}
+
+fn collect_publish_snapshot_cell_files(dir: &Path, files: &mut BTreeSet<PathBuf>) -> Result<()> {
+    let entries = std::fs::read_dir(dir).map_err(|error| {
+        crate::error::CompileError::without_span(format!("failed to read directory '{}': {}", dir.display(), error))
+    })?;
+    for entry in entries {
+        let entry =
+            entry.map_err(|error| crate::error::CompileError::without_span(format!("failed to read directory entry: {}", error)))?;
+        let path = entry.path();
+        if path.is_dir() {
+            collect_publish_snapshot_cell_files(&path, files)?;
+        } else if path.extension().is_some_and(|ext| ext == "cell") {
+            files.insert(path);
+        }
+    }
+    Ok(())
+}
+
+fn normalized_relative_path(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root).unwrap_or(path).to_string_lossy().replace('\\', "/")
+}
+
+fn submit_registry_publish_request(
+    endpoint: &str,
+    request: &crate::package::registry::RegistryPublishRequest,
+    idempotency_key: &str,
+    json_output: bool,
+) -> Result<()> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|error| crate::error::CompileError::without_span(format!("failed to build registry HTTP client: {}", error)))?;
+    let response = submit_registry_publish_request_with_retry(&client, endpoint, request, idempotency_key)?;
+    let status = response.status();
+    let body = response.text().map_err(|error| {
+        crate::error::CompileError::without_span(format!("failed to read registry publish response from '{}': {}", endpoint, error))
+    })?;
+    if !status.is_success() {
+        return Err(crate::error::CompileError::without_span(format!(
+            "registry publish request failed with HTTP {}: {}",
+            status,
+            body.trim()
+        )));
+    }
+
+    let parsed = serde_json::from_str::<serde_json::Value>(&body).unwrap_or_else(|_| serde_json::json!({ "response": body }));
+    if json_output {
+        print_json(&parsed)?;
+    } else {
+        println!("{}", "Published to registry write API".green());
+        if let Some(status) = parsed.get("status").and_then(serde_json::Value::as_str) {
+            println!("  Status: {}", status);
+        }
+        if let Some(direct_url) = parsed.get("direct_url").and_then(serde_json::Value::as_str) {
+            println!("  Direct URL: {}", direct_url);
+        }
+        if let Some(request_id) = parsed.get("request_id").and_then(serde_json::Value::as_str) {
+            println!("  Request id: {}", request_id);
+        }
+    }
+    Ok(())
+}
+
+fn submit_registry_publish_request_with_retry(
+    client: &reqwest::blocking::Client,
+    endpoint: &str,
+    request: &crate::package::registry::RegistryPublishRequest,
+    idempotency_key: &str,
+) -> Result<reqwest::blocking::Response> {
+    let mut transport_error = None;
+    for attempt in 0..2 {
+        let response = client.post(endpoint).header("Idempotency-Key", idempotency_key).json(request).send();
+        match response {
+            Ok(response) => {
+                if attempt == 0 && is_retryable_registry_status(response.status()) {
+                    std::thread::sleep(Duration::from_millis(500));
+                    continue;
+                }
+                return Ok(response);
+            }
+            Err(error) if attempt == 0 => {
+                transport_error = Some(error);
+                std::thread::sleep(Duration::from_millis(500));
+            }
+            Err(error) => {
+                return Err(crate::error::CompileError::without_span(format!(
+                    "failed to submit registry publish request to '{}': {}",
+                    endpoint, error
+                )));
+            }
+        }
+    }
+    let message = transport_error
+        .map(|error| error.to_string())
+        .unwrap_or_else(|| "registry publish request did not produce a response".to_string());
+    Err(crate::error::CompileError::without_span(format!("failed to submit registry publish request to '{}': {}", endpoint, message)))
+}
+
+fn is_retryable_registry_status(status: reqwest::StatusCode) -> bool {
+    matches!(
+        status,
+        reqwest::StatusCode::REQUEST_TIMEOUT
+            | reqwest::StatusCode::BAD_GATEWAY
+            | reqwest::StatusCode::SERVICE_UNAVAILABLE
+            | reqwest::StatusCode::GATEWAY_TIMEOUT
+            | reqwest::StatusCode::INTERNAL_SERVER_ERROR
+    )
+}
+
+fn submit_registry_json_request(
+    endpoint: &str,
+    body: &serde_json::Value,
+    success_label: &str,
+    json_output: bool,
+) -> Result<serde_json::Value> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|error| crate::error::CompileError::without_span(format!("failed to build registry HTTP client: {}", error)))?;
+    let response = client.post(endpoint).json(body).send().map_err(|error| {
+        crate::error::CompileError::without_span(format!("failed to submit registry request to '{}': {}", endpoint, error))
+    })?;
+    let status = response.status();
+    let response_body = response.text().map_err(|error| {
+        crate::error::CompileError::without_span(format!("failed to read registry response from '{}': {}", endpoint, error))
+    })?;
+    if !status.is_success() {
+        return Err(crate::error::CompileError::without_span(format!(
+            "registry request failed with HTTP {}: {}",
+            status,
+            response_body.trim()
+        )));
+    }
+    let parsed =
+        serde_json::from_str::<serde_json::Value>(&response_body).unwrap_or_else(|_| serde_json::json!({ "response": response_body }));
+    if json_output {
+        print_json(&parsed)?;
+    } else {
+        println!("{}", success_label.green());
+        if let Some(request_id) = parsed.get("request_id").and_then(serde_json::Value::as_str) {
+            println!("  Request id: {}", request_id);
+        }
+    }
+    Ok(parsed)
 }
 
 fn compile_cli_input(input: Option<&PathBuf>, options: CompileOptions) -> Result<crate::CompileResult> {
@@ -7569,17 +8626,6 @@ fn proof_plan_read_label(read: &str) -> String {
     }
 }
 
-fn dirs_config_dir() -> PathBuf {
-    if let Ok(config) = std::env::var("CELLSCRIPT_CONFIG") {
-        return PathBuf::from(config);
-    }
-    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
-        return PathBuf::from(xdg).join("cellscript");
-    }
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(home).join(".config").join("cellscript")
-}
-
 fn effective_check_args(mut args: CheckArgs) -> Result<CheckArgs> {
     // In a workspace root (virtual manifest without [package]), fall back to default policy.
     let policy = PackageManager::new(".").read_manifest().map(|m| m.policy).unwrap_or_default();
@@ -7754,6 +8800,42 @@ fn dependency_from_add_args(args: &AddArgs) -> Dependency {
             default_features: true,
         }),
         _ => Dependency::Simple("*".to_string()),
+    }
+}
+
+fn auth_capability_args_from_matches(m: &clap::ArgMatches) -> AuthCapabilityArgs {
+    AuthCapabilityArgs {
+        registry_origin: m.get_one::<String>("registry-origin").cloned(),
+        principal_type: m.get_one::<String>("principal-type").cloned(),
+        principal_id: m.get_one::<String>("principal-id").cloned(),
+        capability_pubkey: m.get_one::<String>("capability-pubkey").cloned(),
+        scopes: m.get_many::<String>("scope").map(|values| values.cloned().collect()).unwrap_or_default(),
+        expires: m.get_one::<String>("expires").cloned(),
+        capability_expires_at: m.get_one::<String>("capability-expires-at").cloned(),
+        json: m.get_flag("json"),
+    }
+}
+
+fn auth_capability_submit_args_from_matches(m: &clap::ArgMatches) -> AuthCapabilitySubmitArgs {
+    AuthCapabilitySubmitArgs {
+        api_url: m.get_one::<String>("api-url").cloned(),
+        payload: m.get_one::<String>("payload").map(PathBuf::from).expect("required payload"),
+        joyid_signature: m.get_one::<String>("joyid-signature").map(PathBuf::from).expect("required joyid-signature"),
+        json: m.get_flag("json"),
+    }
+}
+
+fn auth_capability_revoke_args_from_matches(m: &clap::ArgMatches) -> AuthCapabilityRevokeArgs {
+    AuthCapabilityRevokeArgs {
+        api_url: m.get_one::<String>("api-url").cloned(),
+        registry_origin: m.get_one::<String>("registry-origin").cloned(),
+        principal_type: m.get_one::<String>("principal-type").cloned(),
+        principal_id: m.get_one::<String>("principal-id").cloned(),
+        capability_key_id: m.get_one::<String>("capability-key-id").cloned(),
+        payload: m.get_one::<String>("payload").map(PathBuf::from),
+        joyid_signature: m.get_one::<String>("joyid-signature").map(PathBuf::from),
+        reason: m.get_one::<String>("reason").cloned(),
+        json: m.get_flag("json"),
     }
 }
 
@@ -10106,9 +11188,58 @@ impl CliParser {
             )
             .subcommand(
                 ClapCommand::new("publish")
-                    .about("Experimental: publish a package")
+                    .about("Publish a package to the public registry, or write an offline fixture with --offline")
                     .arg(Arg::new("dry-run").long("dry-run").action(ArgAction::SetTrue))
-                    .arg(Arg::new("allow-dirty").long("allow-dirty").action(ArgAction::SetTrue)),
+                    .arg(
+                        Arg::new("offline")
+                            .long("offline")
+                            .action(ArgAction::SetTrue)
+                            .help("Write local registry.json fixture metadata instead of using the public write API"),
+                    )
+                    .arg(Arg::new("allow-dirty").long("allow-dirty").action(ArgAction::SetTrue))
+                    .arg(
+                        Arg::new("api-url")
+                            .long("api-url")
+                            .value_name("URL")
+                            .help("Registry write API base URL; defaults to CELLSCRIPT_REGISTRY_API_URL or api.registry.cellscript.dev"),
+                    )
+                    .arg(
+                        Arg::new("capability-key-id")
+                            .long("capability-key-id")
+                            .value_name("KEY_ID")
+                            .help("Registry capability key id authorised by JoyID"),
+                    )
+                    .arg(
+                        Arg::new("capability-signature")
+                            .long("capability-signature")
+                            .value_name("SIGNATURE")
+                            .help("P-256 signature over the canonical publish payload"),
+                    )
+                    .arg(
+                        Arg::new("idempotency-key")
+                            .long("idempotency-key")
+                            .value_name("KEY")
+                            .help("Publish retry key; defaults to CELLSCRIPT_REGISTRY_IDEMPOTENCY_KEY or a request hash"),
+                    )
+                    .arg(
+                        Arg::new("payload")
+                            .long("payload")
+                            .value_name("FILE")
+                            .help("Previously generated publish payload JSON to submit with a capability signature"),
+                    )
+                    .arg(
+                        Arg::new("source-snapshot")
+                            .long("source-snapshot")
+                            .value_name("FILE")
+                            .help("Immutable source snapshot bytes to upload; defaults to a generated CellScript source snapshot"),
+                    )
+                    .arg(
+                        Arg::new("print-payload")
+                            .long("print-payload")
+                            .action(ArgAction::SetTrue)
+                            .help("Print the publish payload and canonical signing bytes without submitting"),
+                    )
+                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable publish output")),
             )
             .subcommand(
                 ClapCommand::new("install")
@@ -10117,7 +11248,19 @@ impl CliParser {
                     .arg(Arg::new("version").long("version").value_name("VERSION"))
                     .arg(Arg::new("namespace").long("namespace").value_name("NAMESPACE").help("Package namespace for registry install"))
                     .arg(Arg::new("git").long("git").value_name("URL"))
-                    .arg(Arg::new("path").long("path").value_name("PATH")),
+                    .arg(Arg::new("path").long("path").value_name("PATH"))
+                    .arg(
+                        Arg::new("allow-unverified")
+                            .long("allow-unverified")
+                            .action(ArgAction::SetTrue)
+                            .help("Allow direct install of source_published or indexed_pending registry entries"),
+                    )
+                    .arg(
+                        Arg::new("allow-quarantined")
+                            .long("allow-quarantined")
+                            .action(ArgAction::SetTrue)
+                            .help("Allow explicit incident-review install of quarantined registry entries"),
+                    ),
             )
             .subcommand(ClapCommand::new("update").about("Experimental: update dependencies"))
             .subcommand(
@@ -10129,6 +11272,134 @@ impl CliParser {
                 ClapCommand::new("login")
                     .about("Experimental: authenticate against a registry")
                     .arg(Arg::new("registry").long("registry").value_name("URL")),
+            )
+            .subcommand(
+                ClapCommand::new("auth")
+                    .about("Manage JoyID-rooted registry capability authorisation")
+                    .subcommand_required(true)
+                    .arg_required_else_help(true)
+                    .subcommand(
+                        ClapCommand::new("login")
+                            .about("Create a JoyID capability authorisation payload")
+                            .arg(Arg::new("registry-origin").long("registry-origin").value_name("URL"))
+                            .arg(Arg::new("principal-type").long("principal-type").value_name("TYPE"))
+                            .arg(
+                                Arg::new("principal-id")
+                                    .long("principal-id")
+                                    .value_name("ID")
+                                    .help("Normalized JoyID/CKB principal binding derived from the CCC JoyID signer"),
+                            )
+                            .arg(Arg::new("capability-pubkey").long("capability-pubkey").value_name("PUBKEY"))
+                            .arg(
+                                Arg::new("scope")
+                                    .long("scope")
+                                    .value_name("SCOPE")
+                                    .action(ArgAction::Append)
+                                    .help("Capability scope, e.g. publish:namespace/package"),
+                            )
+                            .arg(
+                                Arg::new("expires")
+                                    .long("expires")
+                                    .value_name("DURATION")
+                                    .conflicts_with("capability-expires-at")
+                                    .help("Capability lifetime, e.g. 90d or 24h"),
+                            )
+                            .arg(Arg::new("capability-expires-at").long("capability-expires-at").value_name("TIMESTAMP"))
+                            .arg(Arg::new("json").long("json").action(ArgAction::SetTrue)),
+                    )
+                    .subcommand(
+                        ClapCommand::new("capability")
+                            .about("Manage scoped publisher capabilities")
+                            .subcommand_required(true)
+                            .arg_required_else_help(true)
+                            .subcommand(
+                                ClapCommand::new("create")
+                                    .about("Create a JoyID capability authorisation payload for CI or local publishing")
+                                    .arg(Arg::new("registry-origin").long("registry-origin").value_name("URL"))
+                                    .arg(Arg::new("principal-type").long("principal-type").value_name("TYPE"))
+                                    .arg(
+                                        Arg::new("principal-id")
+                                            .long("principal-id")
+                                            .value_name("ID")
+                                            .help("Normalized JoyID/CKB principal binding derived from the CCC JoyID signer"),
+                                    )
+                                    .arg(Arg::new("capability-pubkey").long("capability-pubkey").value_name("PUBKEY"))
+                                    .arg(
+                                        Arg::new("scope")
+                                            .long("scope")
+                                            .value_name("SCOPE")
+                                            .action(ArgAction::Append)
+                                            .help("Capability scope, e.g. publish:namespace/package"),
+                                    )
+                                    .arg(
+                                        Arg::new("expires")
+                                            .long("expires")
+                                            .value_name("DURATION")
+                                            .conflicts_with("capability-expires-at")
+                                            .help("Capability lifetime, e.g. 90d or 24h"),
+                                    )
+                                    .arg(Arg::new("capability-expires-at").long("capability-expires-at").value_name("TIMESTAMP"))
+                                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue)),
+                            )
+                            .subcommand(
+                                ClapCommand::new("submit")
+                                    .about("Submit a JoyID-signed capability authorisation payload to the registry")
+                                    .arg(
+                                        Arg::new("api-url")
+                                            .long("api-url")
+                                            .value_name("URL")
+                                            .help("Registry write API base URL; defaults to CELLSCRIPT_REGISTRY_API_URL"),
+                                    )
+                                    .arg(
+                                        Arg::new("payload")
+                                            .long("payload")
+                                            .value_name("FILE")
+                                            .required(true)
+                                            .help("Capability authorisation payload JSON created by auth capability create"),
+                                    )
+                                    .arg(
+                                        Arg::new("joyid-signature")
+                                            .long("joyid-signature")
+                                            .value_name("FILE")
+                                            .required(true)
+                                            .help("JoyID signature JSON whose challenge is the canonical payload"),
+                                    )
+                                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue)),
+                            )
+                            .subcommand(
+                                ClapCommand::new("revoke")
+                                    .about("Create or submit a JoyID-signed capability revocation payload")
+                                    .arg(
+                                        Arg::new("api-url")
+                                            .long("api-url")
+                                            .value_name("URL")
+                                            .help("Registry write API base URL; defaults to CELLSCRIPT_REGISTRY_API_URL"),
+                                    )
+                                    .arg(Arg::new("registry-origin").long("registry-origin").value_name("URL"))
+                                    .arg(Arg::new("principal-type").long("principal-type").value_name("TYPE"))
+                                    .arg(
+                                        Arg::new("principal-id")
+                                            .long("principal-id")
+                                            .value_name("ID")
+                                            .help("Normalized JoyID/CKB principal binding derived from the CCC JoyID signer"),
+                                    )
+                                    .arg(Arg::new("capability-key-id").long("capability-key-id").value_name("KEY_ID"))
+                                    .arg(
+                                        Arg::new("payload")
+                                            .long("payload")
+                                            .value_name("FILE")
+                                            .help("Previously generated capability revocation payload JSON"),
+                                    )
+                                    .arg(
+                                        Arg::new("joyid-signature")
+                                            .long("joyid-signature")
+                                            .value_name("FILE")
+                                            .help("JoyID signature JSON whose challenge is the canonical revoke payload"),
+                                    )
+                                    .arg(Arg::new("reason").long("reason").value_name("TEXT"))
+                                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue)),
+                            ),
+                    ),
             )
             .subcommand(
                 ClapCommand::new("certify")
@@ -10204,6 +11475,14 @@ impl CliParser {
                             .arg(Arg::new("namespace").long("namespace").required(true).value_name("NAMESPACE").help("Package namespace"))
                             .arg(Arg::new("name").long("name").required(true).value_name("NAME").help("Package name"))
                             .arg(Arg::new("source").long("source").required(true).value_name("URL").help("Source repository URL")),
+                    )
+                    .subcommand(
+                        ClapCommand::new("edit")
+                            .about("Edit the package registry.json in the current package")
+                            .arg(Arg::new("yank").long("yank").value_name("VERSION").help("Mark an existing version as yanked"))
+                            .arg(Arg::new("reason").long("reason").value_name("TEXT").help("Reason recorded with --yank"))
+                            .arg(Arg::new("replaced-by").long("replaced-by").value_name("VERSION").help("Suggested replacement version recorded with --yank"))
+                            .arg(Arg::new("yanked-at").long("yanked-at").value_name("ISO8601").help("Override yank timestamp; defaults to current UTC")),
                     ),
             )
             .subcommand(
@@ -10519,19 +11798,41 @@ impl CliParser {
                 release: m.get_flag("release"),
                 simulate: m.get_flag("simulate"),
             }),
-            Some(("publish", m)) => {
-                Command::Publish(PublishArgs { dry_run: m.get_flag("dry-run"), allow_dirty: m.get_flag("allow-dirty") })
-            }
+            Some(("publish", m)) => Command::Publish(PublishArgs {
+                dry_run: m.get_flag("dry-run"),
+                offline: m.get_flag("offline"),
+                allow_dirty: m.get_flag("allow-dirty"),
+                api_url: m.get_one::<String>("api-url").cloned(),
+                capability_key_id: m.get_one::<String>("capability-key-id").cloned(),
+                capability_signature: m.get_one::<String>("capability-signature").cloned(),
+                idempotency_key: m.get_one::<String>("idempotency-key").cloned(),
+                payload: m.get_one::<String>("payload").map(PathBuf::from),
+                source_snapshot: m.get_one::<String>("source-snapshot").map(PathBuf::from),
+                print_payload: m.get_flag("print-payload"),
+                json: m.get_flag("json"),
+            }),
             Some(("install", m)) => Command::Install(InstallArgs {
                 crate_name: m.get_one::<String>("crate").cloned(),
                 version: m.get_one::<String>("version").cloned(),
                 namespace: m.get_one::<String>("namespace").cloned(),
                 git: m.get_one::<String>("git").cloned(),
                 path: m.get_one::<String>("path").map(PathBuf::from),
+                allow_unverified: m.get_flag("allow-unverified"),
+                allow_quarantined: m.get_flag("allow-quarantined"),
             }),
             Some(("update", _)) => Command::Update,
             Some(("info", m)) => Command::Info(InfoArgs { json: m.get_flag("json") }),
             Some(("login", m)) => Command::Login(LoginArgs { registry: m.get_one::<String>("registry").cloned() }),
+            Some(("auth", m)) => match m.subcommand() {
+                Some(("login", login)) => Command::AuthLogin(auth_capability_args_from_matches(login)),
+                Some(("capability", capability)) => match capability.subcommand() {
+                    Some(("create", create)) => Command::AuthCapabilityCreate(auth_capability_args_from_matches(create)),
+                    Some(("submit", submit)) => Command::AuthCapabilitySubmit(auth_capability_submit_args_from_matches(submit)),
+                    Some(("revoke", revoke)) => Command::AuthCapabilityRevoke(auth_capability_revoke_args_from_matches(revoke)),
+                    _ => unreachable!(),
+                },
+                _ => unreachable!(),
+            },
             Some(("certify", m)) => Command::Certify(CertifyArgs {
                 plugin: m.get_one::<String>("plugin").cloned().unwrap_or_else(|| NOVASEAL_CERTIFICATION_PLUGIN.to_string()),
                 repo_root: m.get_one::<String>("repo-root").map(PathBuf::from),
@@ -10557,6 +11858,12 @@ impl CliParser {
                     namespace: add.get_one::<String>("namespace").cloned().unwrap_or_default(),
                     name: add.get_one::<String>("name").cloned().unwrap_or_default(),
                     source: add.get_one::<String>("source").cloned().unwrap_or_default(),
+                }),
+                Some(("edit", edit)) => Command::RegistryEdit(RegistryEditArgs {
+                    yank: edit.get_one::<String>("yank").cloned(),
+                    reason: edit.get_one::<String>("reason").cloned(),
+                    replaced_by: edit.get_one::<String>("replaced-by").cloned(),
+                    yanked_at: edit.get_one::<String>("yanked-at").cloned(),
                 }),
                 _ => unreachable!(),
             },

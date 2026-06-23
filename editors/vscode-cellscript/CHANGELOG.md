@@ -15,6 +15,8 @@
   deployment, live-cell, and trust-metadata evidence, while registry
   publish/install and cryptographic publisher-signature verification remain
   compiler/Git workflow responsibilities.
+- Refreshed package metadata and README/validation coverage for the active LSP
+  capability set, including workspace rename.
 
 ## 0.17.0
 

@@ -28,7 +28,7 @@ use cellscript::package::registry::{
 };
 use cellscript::package::{
     DeployedBuildInfo, DeployedManifest, DeployedPackageInfo, DeploymentCellDep, DeploymentRecord, DeploymentStatus, LockedBuildInfo,
-    LockedDependency, LockedSource, Lockfile, LockfileDeploymentRef, LockfilePackageInfo, PackageManifest, ScriptRole,
+    LockedDependency, LockedSource, Lockfile, LockfileDeploymentRef, LockfilePackageInfo, PackageManager, PackageManifest, ScriptRole,
     DEPLOYED_MANIFEST_SCHEMA,
 };
 use ckb_testtool::ckb_hash::blake2b_256;
@@ -41,6 +41,41 @@ use ckb_testtool::ckb_types::{
 use ckb_testtool::context::Context;
 use std::collections::BTreeMap;
 use std::path::Path;
+
+// ---------------------------------------------------------------------------
+// Registry env guard (serialises CELLSCRIPT_REGISTRY_URL across tests in this binary)
+// ---------------------------------------------------------------------------
+
+use std::ffi::OsString;
+use std::sync::{Mutex, MutexGuard};
+
+static REGISTRY_ENV_LOCK: Mutex<()> = Mutex::new(());
+
+struct RegistryEnvGuard {
+    previous: Option<OsString>,
+    _guard: MutexGuard<'static, ()>,
+}
+
+impl RegistryEnvGuard {
+    fn new(url: &Path) -> Self {
+        // Recover from a poisoned mutex so one test panicking while holding the
+        // lock does not cascade into every later test in this binary.
+        let guard = REGISTRY_ENV_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let previous = std::env::var_os(cellscript::package::registry::REGISTRY_URL_ENV);
+        std::env::set_var(cellscript::package::registry::REGISTRY_URL_ENV, url);
+        Self { previous, _guard: guard }
+    }
+}
+
+impl Drop for RegistryEnvGuard {
+    fn drop(&mut self) {
+        if let Some(previous) = &self.previous {
+            std::env::set_var(cellscript::package::registry::REGISTRY_URL_ENV, previous);
+        } else {
+            std::env::remove_var(cellscript::package::registry::REGISTRY_URL_ENV);
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Git fixture helpers
@@ -151,7 +186,11 @@ fn init_source_repo(repo_dir: &Path, name: &str, version: &str, namespace: &str)
         schema_hash: None,
         license: Some("MIT".to_string()),
         released_at: None,
+        status: cellscript::package::registry::RegistryEntryStatus::VerifiedBuild,
         yanked: false,
+        yanked_at: None,
+        yanked_reason: None,
+        replaced_by: None,
         audit: None,
     };
     RegistryIndex::append_version(repo_dir, name, namespace, version_entry).unwrap();
@@ -400,7 +439,11 @@ fn e2e_multi_package_dependency_chain() {
         schema_hash: None,
         license: Some("MIT".to_string()),
         released_at: None,
+        status: cellscript::package::registry::RegistryEntryStatus::VerifiedBuild,
         yanked: false,
+        yanked_at: None,
+        yanked_reason: None,
+        replaced_by: None,
         audit: None,
     };
     RegistryIndex::append_version(&lib_b_repo, "lib-b", "cellscript", version_entry_b).unwrap();
@@ -512,8 +555,217 @@ fn e2e_multi_package_dependency_chain() {
 }
 
 // ===========================================================================
-// SCENARIO 3: Namespace-scoped Go-style install syntax
+// SCENARIO 2b: Diamond dependency — unified (single-version) resolution
 // ===========================================================================
+//
+// Two consumers of a shared package must agree on a single version. The
+// resolver picks one version per package; if the diamond's two version
+// requirements cannot both be satisfied by that one version, resolution
+// fails closed instead of silently keeping whichever was resolved first.
+
+/// Rewrite the `version = "..."` line in a package's Cell.toml in place.
+fn bump_manifest_version(repo_dir: &Path, new_version: &str) {
+    let manifest_path = repo_dir.join("Cell.toml");
+    let content = std::fs::read_to_string(&manifest_path).unwrap();
+    let updated = content
+        .lines()
+        .map(|line| {
+            if line.trim_start().starts_with("version") && line.contains('=') {
+                format!("version = \"{}\"", new_version)
+            } else {
+                line.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(&manifest_path, updated).unwrap();
+}
+
+/// Publish a package version into a source repo, tagging it in git.
+/// Unlike `init_source_repo`, this can append additional versions and
+/// declare transitive registry dependencies.
+fn publish_version_with_deps(
+    repo_dir: &Path,
+    name: &str,
+    namespace: &str,
+    version: &str,
+    source_hash: &str,
+    deps: &[(String, String, String)], // (dep_name, dep_namespace, dep_version)
+) {
+    let version_entry = RegistryVersion {
+        version: version.to_string(),
+        tag: format!("v{}", version),
+        source_hash: source_hash.to_string(),
+        cellscript_version: "0.19.0".to_string(),
+        dependencies: deps
+            .iter()
+            .map(|(n, ns, v)| (n.clone(), RegistryDependencyRef { namespace: ns.clone(), version: v.clone() }))
+            .collect(),
+        abi_index: None,
+        schema_hash: None,
+        license: Some("MIT".to_string()),
+        released_at: None,
+        status: cellscript::package::registry::RegistryEntryStatus::VerifiedBuild,
+        yanked: false,
+        yanked_at: None,
+        yanked_reason: None,
+        replaced_by: None,
+        audit: None,
+    };
+    RegistryIndex::append_version(repo_dir, name, namespace, version_entry).unwrap();
+    // Initialise git on first publish (init_source_repo already does this for
+    // repos that started there, so only init when no repo exists yet).
+    if !repo_dir.join(".git").exists() {
+        git_init(repo_dir);
+        git_config_user(repo_dir);
+    }
+    git_add_all(repo_dir);
+    git_commit(repo_dir, &format!("v{}", version));
+    git_tag(repo_dir, &format!("v{}", version));
+}
+
+#[test]
+fn e2e_diamond_dependency_compatible_versions_unify() {
+    let temp = tempfile::tempdir().unwrap();
+
+    // ── 1. Shared package "token" with two compatible versions ──
+    let token_repo = temp.path().join("source-repos/cellscript-token");
+    let _hash_030 = init_source_repo(&token_repo, "token", "0.3.0", "cellscript");
+    // Bump Cell.toml version to 0.3.2 and change source so the hashes differ.
+    bump_manifest_version(&token_repo, "0.3.2");
+    std::fs::write(token_repo.join("src/main.cell"), "module token;\n// v0.3.2\n").unwrap();
+    let hash_032 = compute_source_hash(&token_repo).unwrap();
+    publish_version_with_deps(&token_repo, "token", "cellscript", "0.3.2", &hash_032, &[]);
+
+    // ── 2. amm depends on token ^0.3.0, vesting depends on token ^0.3.0 ──
+    // Both requirements are satisfiable by a single version (0.3.2 is the
+    // latest in the 0.3.x line), so the diamond must resolve cleanly.
+    // The dependency is declared both in Cell.toml (so the resolver picks it up
+    // transitively) and in registry.json (so the published record agrees).
+    let amm_repo = temp.path().join("source-repos/cellscript-amm");
+    create_package_with_dep(&amm_repo, "amm", "0.1.0", Some("cellscript"), "token", "0.3.0", Some("cellscript"));
+    let amm_hash = compute_source_hash(&amm_repo).unwrap();
+    publish_version_with_deps(
+        &amm_repo,
+        "amm",
+        "cellscript",
+        "0.1.0",
+        &amm_hash,
+        &[("token".into(), "cellscript".into(), "0.3.0".into())],
+    );
+
+    let vesting_repo = temp.path().join("source-repos/cellscript-vesting");
+    create_package_with_dep(&vesting_repo, "vesting", "0.1.0", Some("cellscript"), "token", "0.3.0", Some("cellscript"));
+    let vesting_hash = compute_source_hash(&vesting_repo).unwrap();
+    publish_version_with_deps(
+        &vesting_repo,
+        "vesting",
+        "cellscript",
+        "0.1.0",
+        &vesting_hash,
+        &[("token".into(), "cellscript".into(), "0.3.0".into())],
+    );
+
+    // ── 3. Discovery index with all three packages ──
+    let discovery_repo = temp.path().join("discovery-index");
+    init_discovery_repo(
+        &discovery_repo,
+        &[
+            ("cellscript", "token", &token_repo.to_string_lossy()),
+            ("cellscript", "amm", &amm_repo.to_string_lossy()),
+            ("cellscript", "vesting", &vesting_repo.to_string_lossy()),
+        ],
+    );
+
+    // ── 4. Consumer "app" depends on both amm and vesting (the diamond) ──
+    let app_dir = temp.path().join("consumer-app");
+    std::fs::create_dir_all(app_dir.join("src")).unwrap();
+    let mut toml = String::from("[package]\nname = \"app\"\nversion = \"0.1.0\"\nnamespace = \"cellscript\"\n");
+    toml.push_str("\n[dependencies.amm]\nversion = \"0.1.0\"\nnamespace = \"cellscript\"\n");
+    toml.push_str("\n[dependencies.vesting]\nversion = \"0.1.0\"\nnamespace = \"cellscript\"\n");
+    std::fs::write(app_dir.join("Cell.toml"), toml).unwrap();
+    std::fs::write(app_dir.join("src/main.cell"), "module app;\n").unwrap();
+
+    // Point the resolver at our local discovery index (serialised across tests).
+    let _env = RegistryEnvGuard::new(&discovery_repo);
+
+    let mut pm = PackageManager::new(&app_dir);
+    // Resolution should succeed: both amm and vesting require token ^0.3.0,
+    // and token 0.3.2 (the latest non-yanked 0.3.x) satisfies both.
+    pm.resolve_dependencies().expect("compatible diamond must resolve to a single token version");
+
+    let resolved = pm.get_resolved();
+    let token = resolved.get("token").expect("token must be resolved transitively");
+    // The resolver picks the latest satisfying version, which is 0.3.2.
+    assert_eq!(token.version, "0.3.2", "unified resolution should select the latest satisfying version");
+}
+
+#[test]
+fn e2e_diamond_dependency_conflicting_versions_fails_closed() {
+    let temp = tempfile::tempdir().unwrap();
+
+    // ── 1. Shared package "token" with 0.3.x and 0.4.x lines ──
+    let token_repo = temp.path().join("source-repos/cellscript-token");
+    let _hash_030 = init_source_repo(&token_repo, "token", "0.3.0", "cellscript");
+    bump_manifest_version(&token_repo, "0.4.0");
+    std::fs::write(token_repo.join("src/main.cell"), "module token;\n// v0.4.0\n").unwrap();
+    let hash_040 = compute_source_hash(&token_repo).unwrap();
+    publish_version_with_deps(&token_repo, "token", "cellscript", "0.4.0", &hash_040, &[]);
+
+    // ── 2. amm pins token to ^0.3.0, vesting pins token to ^0.4.0 ──
+    // No single token version can satisfy both "^0.3.0" and "^0.4.0", so the
+    // dependency graph is unsatisfiable and resolution must fail closed.
+    let amm_repo = temp.path().join("source-repos/cellscript-amm");
+    create_package_with_dep(&amm_repo, "amm", "0.1.0", Some("cellscript"), "token", "0.3.0", Some("cellscript"));
+    let amm_hash = compute_source_hash(&amm_repo).unwrap();
+    publish_version_with_deps(
+        &amm_repo,
+        "amm",
+        "cellscript",
+        "0.1.0",
+        &amm_hash,
+        &[("token".into(), "cellscript".into(), "0.3.0".into())],
+    );
+
+    let vesting_repo = temp.path().join("source-repos/cellscript-vesting");
+    create_package_with_dep(&vesting_repo, "vesting", "0.1.0", Some("cellscript"), "token", "0.4.0", Some("cellscript"));
+    let vesting_hash = compute_source_hash(&vesting_repo).unwrap();
+    publish_version_with_deps(
+        &vesting_repo,
+        "vesting",
+        "cellscript",
+        "0.1.0",
+        &vesting_hash,
+        &[("token".into(), "cellscript".into(), "0.4.0".into())],
+    );
+
+    // ── 3. Discovery index ──
+    let discovery_repo = temp.path().join("discovery-index");
+    init_discovery_repo(
+        &discovery_repo,
+        &[
+            ("cellscript", "token", &token_repo.to_string_lossy()),
+            ("cellscript", "amm", &amm_repo.to_string_lossy()),
+            ("cellscript", "vesting", &vesting_repo.to_string_lossy()),
+        ],
+    );
+
+    // ── 4. Consumer "app" forms the conflicting diamond ──
+    let app_dir = temp.path().join("consumer-app");
+    std::fs::create_dir_all(app_dir.join("src")).unwrap();
+    let mut toml = String::from("[package]\nname = \"app\"\nversion = \"0.1.0\"\nnamespace = \"cellscript\"\n");
+    toml.push_str("\n[dependencies.amm]\nversion = \"0.1.0\"\nnamespace = \"cellscript\"\n");
+    toml.push_str("\n[dependencies.vesting]\nversion = \"0.1.0\"\nnamespace = \"cellscript\"\n");
+    std::fs::write(app_dir.join("Cell.toml"), toml).unwrap();
+    std::fs::write(app_dir.join("src/main.cell"), "module app;\n").unwrap();
+
+    let _env = RegistryEnvGuard::new(&discovery_repo);
+
+    let mut pm = PackageManager::new(&app_dir);
+    let err = pm.resolve_dependencies().expect_err("conflicting diamond must fail closed");
+    let msg = err.to_string();
+    assert!(msg.contains("version conflict") && msg.contains("token"), "expected a token version-conflict error, got: {msg}");
+}
 
 #[test]
 fn e2e_namespace_isolation_go_style_install() {
@@ -618,7 +870,11 @@ fn e2e_version_upgrade_yank_semver() {
         schema_hash: None,
         license: Some("MIT".to_string()),
         released_at: Some("2026-01-15T00:00:00Z".to_string()),
+        status: cellscript::package::registry::RegistryEntryStatus::VerifiedBuild,
         yanked: false,
+        yanked_at: None,
+        yanked_reason: None,
+        replaced_by: None,
         audit: None,
     };
     RegistryIndex::append_version(&repo, "amm", "cellscript", v010).unwrap();
@@ -644,7 +900,11 @@ fn e2e_version_upgrade_yank_semver() {
         schema_hash: None,
         license: Some("MIT".to_string()),
         released_at: Some("2026-02-20T00:00:00Z".to_string()),
+        status: cellscript::package::registry::RegistryEntryStatus::VerifiedBuild,
         yanked: false,
+        yanked_at: None,
+        yanked_reason: None,
+        replaced_by: None,
         audit: None,
     };
     RegistryIndex::append_version(&repo, "amm", "cellscript", v020).unwrap();
@@ -668,7 +928,11 @@ fn e2e_version_upgrade_yank_semver() {
         schema_hash: None,
         license: Some("MIT".to_string()),
         released_at: Some("2026-03-10T00:00:00Z".to_string()),
+        status: cellscript::package::registry::RegistryEntryStatus::VerifiedBuild,
         yanked: false,
+        yanked_at: None,
+        yanked_reason: None,
+        replaced_by: None,
         audit: None,
     };
     RegistryIndex::append_version(&repo, "amm", "cellscript", v030).unwrap();
@@ -701,7 +965,11 @@ fn e2e_version_upgrade_yank_semver() {
         schema_hash: None,
         license: Some("MIT".to_string()),
         released_at: Some("2026-02-20T00:00:00Z".to_string()),
+        status: cellscript::package::registry::RegistryEntryStatus::VerifiedBuild,
         yanked: true,
+        yanked_at: Some("2026-06-01T00:00:00Z".to_string()),
+        yanked_reason: Some("security: reentrancy in swap()".to_string()),
+        replaced_by: Some("0.3.0".to_string()),
         audit: Some(RegistryAuditInfo {
             report_hash: Some("0xsecurity_advisory_hash".to_string()),
             acceptance_gate: Some("failed".to_string()),
@@ -716,9 +984,15 @@ fn e2e_version_upgrade_yank_semver() {
     let yanked_entry = index.versions.iter().find(|v| v.version == "0.2.0").unwrap();
     assert!(yanked_entry.yanked, "v0.2.0 should be yanked");
     assert!(yanked_entry.audit.is_some());
+    // Phase 2 yank metadata round-trips through registry.json.
+    assert_eq!(yanked_entry.yanked_at.as_deref(), Some("2026-06-01T00:00:00Z"));
+    assert_eq!(yanked_entry.yanked_reason.as_deref(), Some("security: reentrancy in swap()"));
+    assert_eq!(yanked_entry.replaced_by.as_deref(), Some("0.3.0"));
 
     // find_matching_version should skip yanked
     assert!(index.find_matching_version("0.2.0").is_none(), "yanked version should not be returned");
+    let exact_yanked = index.find_matching_version_allowing_yanked_pin("=0.2.0").unwrap();
+    assert_eq!(exact_yanked.version, "0.2.0", "exact pins may reach yanked versions so the resolver can warn");
 
     // ── 8. Verify git tag history ──
     let tags = git_list_tags(&repo).unwrap();
@@ -1999,7 +2273,11 @@ action verify(amount: u64) -> u64 {
         schema_hash: None,
         license: Some("Apache-2.0".to_string()),
         released_at: None,
+        status: cellscript::package::registry::RegistryEntryStatus::VerifiedBuild,
         yanked: false,
+        yanked_at: None,
+        yanked_reason: None,
+        replaced_by: None,
         audit: None,
     };
     RegistryIndex::append_version(&app_repo, "app-contract", "cellscript", version_entry_app).unwrap();
@@ -2395,7 +2673,11 @@ fn e2e_registry_json_append_update_idempotency() {
         schema_hash: None,
         license: Some("MIT".to_string()),
         released_at: Some("2026-01-01T00:00:00Z".to_string()),
+        status: cellscript::package::registry::RegistryEntryStatus::VerifiedBuild,
         yanked: false,
+        yanked_at: None,
+        yanked_reason: None,
+        replaced_by: None,
         audit: None,
     };
     RegistryIndex::append_version(&repo, "pkg", "ns", v1).unwrap();
@@ -2415,7 +2697,11 @@ fn e2e_registry_json_append_update_idempotency() {
         schema_hash: None,
         license: Some("MIT".to_string()),
         released_at: Some("2026-02-01T00:00:00Z".to_string()),
+        status: cellscript::package::registry::RegistryEntryStatus::VerifiedBuild,
         yanked: false,
+        yanked_at: None,
+        yanked_reason: None,
+        replaced_by: None,
         audit: None,
     };
     RegistryIndex::append_version(&repo, "pkg", "ns", v2).unwrap();
@@ -2434,7 +2720,11 @@ fn e2e_registry_json_append_update_idempotency() {
         schema_hash: None,
         license: Some("Apache-2.0".to_string()),
         released_at: Some("2026-01-01T00:00:00Z".to_string()),
+        status: cellscript::package::registry::RegistryEntryStatus::VerifiedBuild,
         yanked: true,
+        yanked_at: None,
+        yanked_reason: None,
+        replaced_by: None,
         audit: Some(RegistryAuditInfo { report_hash: Some("0xaudit_hash".to_string()), acceptance_gate: Some("failed".to_string()) }),
     };
     RegistryIndex::append_version(&repo, "pkg", "ns", v1_updated).unwrap();

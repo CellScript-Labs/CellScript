@@ -7,4 +7,17 @@ export default defineConfig({
   devToolbar: {
     enabled: false,
   },
+  vite: {
+    resolve: {
+      alias: {
+        buffer: "buffer/",
+      },
+    },
+    define: {
+      global: "globalThis",
+    },
+    optimizeDeps: {
+      include: ["buffer"],
+    },
+  },
 });

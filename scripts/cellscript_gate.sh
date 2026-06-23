@@ -45,8 +45,19 @@ check_trailing_whitespace() {
         tracked_rust_files+=("$tracked_rust_file")
     done < <(git ls-files '*.rs')
 
+    local tracked_website_files=()
+    local tracked_website_file
+    while IFS= read -r tracked_website_file; do
+        case "$tracked_website_file" in
+            website/*.json|website/*.mjs|website/**/*.astro|website/**/*.css|website/**/*.js|website/**/*.json|website/**/*.py|website/**/*.ts)
+                tracked_website_files+=("$tracked_website_file")
+                ;;
+        esac
+    done < <(git ls-files website)
+
     local files=(
         ".github/workflows/ci.yml"
+        ".github/workflows/website-build.yml"
         "Cargo.toml"
         "CODING_STYLE.md"
         "README.md"
@@ -87,6 +98,7 @@ check_trailing_whitespace() {
         "tests/syntax_combo/matrix.toml"
         "tests/syntax_combo/seeds/require-block-lifecycle.cell"
         "${tracked_rust_files[@]}"
+        "${tracked_website_files[@]}"
     )
     if ((${#files[@]} > 0)) && rg -n '[ \t]+$' "${files[@]}"; then
         printf '\nTrailing whitespace found in tracked CellScript files.\n' >&2
@@ -499,6 +511,26 @@ check_script_syntax() {
     fi
 }
 
+run_website_build_check() {
+    require_cmd npm
+    require_cmd python3
+
+    if [[ ! -d website/node_modules ]]; then
+        run npm --prefix website ci
+    fi
+    run npm --prefix website run prepare:registry
+
+    local registry_status
+    registry_status="$(git status --porcelain -- website/src/data/registry-packages.json)"
+    if [[ -n "$registry_status" ]]; then
+        printf '\nwebsite registry data is stale. Run `npm --prefix website run prepare:registry` and commit the generated data.\n' >&2
+        printf '%s\n' "$registry_status" >&2
+        exit 1
+    fi
+
+    run npm --prefix website run build
+}
+
 check_ckb_tx_measure_tool() {
     local ckb_repo="$ROOT_DIR/../ckb"
     local toolchain=""
@@ -558,6 +590,7 @@ run_ci_gate() {
     require_cmd cargo
     require_cmd python3
     require_cmd rg
+    require_cmd npm
 
     printf '{"status":"not-generated","reason":"test suite did not reach backend shape report generation"}\n' >"$CELLSCRIPT_BACKEND_SHAPE_REPORT"
     run cargo fmt --all --check
@@ -566,6 +599,7 @@ run_ci_gate() {
     run ./scripts/cellscript_strict_backend_audit.sh ci
     check_package_contents
     run cargo package --locked --offline --allow-dirty
+    run_website_build_check
     check_script_syntax
     run git diff --check
     check_forbidden_tracked_files

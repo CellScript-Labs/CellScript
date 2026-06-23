@@ -2,16 +2,17 @@
 
 This tutorial walks a package author through the full Phase 1 identity
 loop — authoring, packaging, publishing, dependency resolution,
-build, deployment, and verification — without requiring a running
-chain or a private server.
+build, deployment, and verification. Authors do not need to run their own
+registry server, and ordinary source publication does not require a chain
+transaction.
 
 By the end of this tutorial you will understand:
 
 - the three-file identity model that powers Phase 1;
 - how source identity is bound to a built artifact and then to an
   on-chain deployment record;
-- why Phase 1 does not need a registry server, and what it actually
-  relies on;
+- how the public registry write path differs from the static/cacheable read
+  path;
 - how a verifier downstream of you can confirm that what they
   imported, compiled, and deployed is the same thing you published.
 
@@ -21,8 +22,9 @@ You are writing or porting a contract for CKB. You have a working
 toolchain that compiles your language source into a RISC-V binary
 targeting the CKB VM. You want to publish the contract so other
 people can pull it as a dependency, lock its build identity, and
-verify it against on-chain deployment records — all without
-registering with a central service.
+verify it against on-chain deployment records — all without creating a separate
+registry account. Your JoyID-rooted publisher identity authorises a local
+publisher credential, and that credential signs daily publish requests.
 
 ## What Phase 1 is and is not
 
@@ -166,32 +168,30 @@ valuable registry material, but it answers a different question from
 `cellc install`: it proves a reproducible binary, not an imported CellScript
 module.
 
-## Why Phase 1 has no server
+## Why Authors Do Not Run a Registry Server
 
-Most package registries need a server because they need to mediate
-between publishers and consumers. Phase 1 does not need that
-mediation:
+The public CellScript Registry does have a small authenticated write service:
+`cellc publish` must mean "publish to the registry". What Phase 1 avoids is
+making every package author or consumer run private infrastructure, or making
+the registry service a trust oracle.
 
-- The source already lives somewhere with content addressing
-  (Git, with commit hashes).
-- The build hash is computed locally from the source and the
-  toolchain.
-- The deployment record is a small text file with chain facts that
-  the verifier can re-derive from the chain itself.
+The architecture splits the paths:
 
-This means there is no canonical index you must register with. You
-push the source to any Git host. Consumers clone from the same host,
-recompute the source hash, and proceed. There is no "yank"
-equivalent — once a version is out, the only way to replace it is
-to publish a new version that downstream users opt into.
+| Path | Responsibility |
+|---|---|
+| Write API | Authentication, namespace/package ACL, quota, schema checks, hash sanity, yanking, quarantine, and queue admission. |
+| Static read path | CDN/cacheable package indexes, source mirrors, direct package URLs, and website browsing. |
+| Verifier | Source/build/deployment hash checks, optional live-chain checks, and fail-closed policy. |
 
-The one piece of optional state is a tiny **discovery index**: a
-small JSON file per package that maps a `(namespace, name)` pair to a
-Git URL. The index exists only to support packages whose source
-location does not follow the default convention. The default
-convention is: a package named `cellscript/foo` lives at
-`github.com/cellscript/foo`. If you follow the convention, you never
-touch the discovery index.
+The source still lives somewhere content-addressed, usually Git. The build hash
+is computed locally from the source and toolchain. The deployment record is a
+small text file with chain facts that a verifier can re-check. The registry
+service admits and indexes metadata, but consumers still verify the selected
+package.
+
+The discovery index maps a `(namespace, name)` pair to a Git URL and ownership
+metadata. It changes when a package is claimed, transferred, or moved. It does
+not need to change for every version publish.
 
 ## Authoring a package from scratch
 
@@ -241,24 +241,43 @@ because the recorded hash no longer matches the source on disk.
 
 ### Step 4 — Publish a version
 
-Run the toolchain's `publish` command. It does three things:
+Authorise a local publisher credential the first time you publish, or whenever
+the credential expires or is revoked:
+
+```bash
+cellc auth capability create --principal-id <principal_id> --scope publish:cellscript/amm_pool --expires 90d --json > capability-payload.json
+cellc auth capability submit --payload capability-payload.json --joyid-signature joyid-signature.json
+```
+
+This generates a local capability key, stores the private key in the OS
+keychain, and prints a capability authorisation payload. The registry submit
+page derives `<principal_id>` from the connected JoyID signer, and the
+browser/CCC/JoyID flow signs that exact payload, binding the local capability
+public key, requested scopes, expiry, and principal id. It does not create a
+separate registry account.
+
+Then run the toolchain's `publish` command. It does five things:
 
 1. Recomputes the source hash from the current working tree and the
    current manifest, so the published hash matches the source you
    actually pushed.
 2. Recomputes the build hash from the current built artifact, so the
    published build identity matches the binary you actually built.
-3. Appends a version entry to a small metadata file inside the
-   source repo, then writes nothing else.
+3. Signs the publish payload with the local publisher credential.
+4. Uploads an immutable source snapshot.
+5. Submits the version entry to the registry write API.
+6. Receives a canonical registry URL and an initial visibility state such as
+   `source_published` or `indexed_pending`.
 
-After publish, commit the metadata file, tag the commit, and push
-both. The metadata file travels with the source: every clone of your
-repo at that tag will reproduce the same source hash and the same
-build hash.
+You should still commit the mirrored metadata file, tag the commit, and push
+both. That mirror travels with the source: every clone of your repo at that tag
+can reproduce the same source hash and build hash. The mirror is audit and
+fallback material; the public registry entry is created by `cellc publish`.
 
 You can publish as many versions as you want. Each version is a new
-metadata entry plus a new tag. There is no global namespace server
-that has to approve the version.
+registry entry plus a new tag. Your credential must have permission for the
+namespace/package. A new entry can be directly addressable before it enters
+default search or trusted/package recommendation views.
 
 ## Consuming a package as a dependency
 
@@ -376,13 +395,16 @@ mistakes cannot reach a verifier without being noticed.
 Knowing what is out of scope is as important as knowing what is in
 scope.
 
-- **No on-chain registry.** The chain stores cells, not package
+- **No on-chain source registry.** The chain stores cells, not package
   indexes. Any on-chain registry or proxy is a separate, optional
   layer.
-- **No publisher signatures in the registry record.** Phase 1 binds
-  hashes, not identities. Signature-based trust belongs to a later
-  trust-hardening layer and composes with Phase 1 rather than
-  replacing it.
+- **No separate registry account.** Publisher identity is JoyID-rooted.
+  JoyID authorises scoped local publisher credentials; daily publish requests
+  are signed by those credentials.
+- **No claim that a publisher signature means a contract is safe.** Publisher
+  signatures identify who published or attested. Trust still comes from source
+  hash, build hash, deployment facts, verifier output, audit evidence, and
+  optional live-chain checks.
 - **No mutable channels (`latest`, `stable`).** Versions are
   pinned by tag and by source hash. There is no shortcut that
   silently upgrades a dependency.
@@ -405,10 +427,11 @@ For air-gapped environments, declare dependencies as `path` or as
 resolved source hash, so subsequent builds need no network at all
 as long as the local cache still contains the pinned commit.
 
-For private registries inside an organization, run a local
-discovery index as a flat directory of JSON files. No daemon, no
-database, no authentication server. The resolver reads it like
-any other static file.
+For private registries inside an organization, either run the same write/read
+split privately or use the offline Git fixture mode: a local discovery index as
+a flat directory of JSON files plus mirrored `registry.json` metadata in source
+repositories. The resolver can read it like any other static file, but that is a
+private/offline operating mode, not the public registry's write authority.
 
 ## How this fits with the rest of the system
 

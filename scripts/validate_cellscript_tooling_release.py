@@ -212,6 +212,38 @@ def main() -> int:
         ],
     )
     require_contains(
+        "website/package.json",
+        [
+            '"prepare:registry": "python3 scripts/generate-registry-data.py"',
+            '"build": "npm run prepare:registry && astro check && astro build"',
+        ],
+    )
+    require_contains(
+        "website/src/pages/index.astro",
+        [
+            "CellScript Registry",
+            "data-home-search",
+            "/registry/submit",
+            "/learn",
+        ],
+    )
+    require_contains(
+        "scripts/cellscript_gate.sh",
+        [
+            "run_website_build_check",
+            "website registry data is stale",
+            "npm --prefix website run build",
+        ],
+    )
+    require_contains(
+        ".github/workflows/website-build.yml",
+        [
+            "Generate registry website data",
+            "Check generated registry data is committed",
+            "Upload website dist",
+        ],
+    )
+    require_contains(
         "src/main.rs",
         [
             '"certify"',

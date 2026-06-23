@@ -4,6 +4,7 @@ use common::cellc_command;
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::process::Command;
+use std::time::Duration;
 
 fn git_init(repo_dir: &std::path::Path) {
     let status = Command::new("git").args(["init"]).current_dir(repo_dir).status().expect("git init");
@@ -76,6 +77,461 @@ fn ckb_script_hash_for_test(code_hash: &str, hash_type: &str, args: &str) -> Str
     format!("0x{}", hex_lower(&cellscript::ckb_blake2b256(&serialized)))
 }
 
+#[test]
+fn cellc_auth_login_outputs_capability_authorisation_payload() {
+    let output = cellc_command()
+        .arg("auth")
+        .arg("capability")
+        .arg("create")
+        .arg("--principal-id")
+        .arg("0xjoyidprincipal")
+        .arg("--capability-pubkey")
+        .arg("0xcapabilitypubkey")
+        .arg("--scope")
+        .arg("publish:cellscript/amm")
+        .arg("--expires")
+        .arg("90d")
+        .arg("--json")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    let payload: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(payload["protocol"], "cellscript-registry-auth-v1");
+    assert_eq!(payload["action"], "authorize_capability");
+    assert_eq!(payload["registry_origin"], "https://api.registry.cellscript.dev");
+    assert_eq!(payload["principal_type"], "joyid_ckb");
+    assert_eq!(payload["principal_id"], "0xjoyidprincipal");
+    assert_eq!(payload["capability_pubkey"], "0xcapabilitypubkey");
+    assert_eq!(payload["requested_scopes"], serde_json::json!(["publish:cellscript/amm"]));
+    assert!(payload["capability_expires_at"].as_str().is_some_and(|value| value.ends_with('Z')));
+    assert!(payload["nonce"].as_str().is_some_and(|value| value.starts_with("0x")));
+    assert!(payload["issued_at"].as_str().is_some());
+    assert!(payload["expires_at"].as_str().is_some());
+    assert!(payload["cli_version"].as_str().is_some());
+}
+
+#[test]
+fn cellc_auth_capability_create_requires_principal_id() {
+    let output = cellc_command()
+        .arg("auth")
+        .arg("capability")
+        .arg("create")
+        .arg("--capability-pubkey")
+        .arg("0xcapabilitypubkey")
+        .arg("--scope")
+        .arg("publish:cellscript/amm")
+        .arg("--json")
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("principal id is required"), "unexpected stderr: {stderr}");
+    assert!(stderr.contains("--principal-id"), "unexpected stderr: {stderr}");
+}
+
+fn write_publish_fixture_package(root: &std::path::Path) {
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("Cell.toml"),
+        r#"
+[package]
+name = "demo"
+version = "1.2.3"
+namespace = "cellscript"
+description = "Demo package"
+license = "MIT"
+repository = "https://example.com/cellscript/demo"
+entry = "src/main.cell"
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("src/main.cell"),
+        r#"
+module demo::main
+
+action identity(value: u64) -> u64 {
+    verification
+        value
+}
+"#,
+    )
+    .unwrap();
+}
+
+#[test]
+fn cellc_publish_default_requires_capability_inputs_without_writing_registry_json() {
+    let temp = tempfile::tempdir().unwrap();
+    write_publish_fixture_package(temp.path());
+
+    let output = cellc_command().arg("publish").current_dir(temp.path()).output().unwrap();
+
+    assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("capability key id is required for public publish"), "unexpected stderr: {stderr}");
+    assert!(stderr.contains("cellc auth capability create --principal-id <principal_id>"), "unexpected stderr: {stderr}");
+    assert!(!temp.path().join("registry.json").exists(), "default public publish must not silently write offline registry.json");
+}
+
+#[test]
+fn cellc_publish_print_payload_outputs_signable_registry_publish_payload() {
+    let temp = tempfile::tempdir().unwrap();
+    write_publish_fixture_package(temp.path());
+
+    let output = cellc_command()
+        .arg("publish")
+        .arg("--capability-key-id")
+        .arg("cap_test")
+        .arg("--print-payload")
+        .arg("--json")
+        .current_dir(temp.path())
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    let envelope: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(envelope["endpoint"], "https://api.registry.cellscript.dev/v1/packages/cellscript/demo/versions");
+    assert_eq!(envelope["payload"]["protocol"], "cellscript-registry-publish-v1");
+    assert_eq!(envelope["payload"]["action"], "publish");
+    assert_eq!(envelope["payload"]["registry_origin"], "https://api.registry.cellscript.dev");
+    assert_eq!(envelope["payload"]["namespace"], "cellscript");
+    assert_eq!(envelope["payload"]["name"], "demo");
+    assert_eq!(envelope["payload"]["version"], "1.2.3");
+    assert_eq!(envelope["payload"]["capability_key_id"], "cap_test");
+    assert_eq!(envelope["payload"]["registry_entry"]["versions"][0]["status"], "source_published");
+    let canonical_payload = envelope["canonical_payload"].as_str().expect("canonical payload");
+    let canonical_json: serde_json::Value = serde_json::from_str(canonical_payload).unwrap();
+    assert_eq!(canonical_json, envelope["payload"]);
+    assert!(!temp.path().join("registry.json").exists(), "payload preview must not write offline registry.json");
+}
+
+#[test]
+fn cellc_publish_posts_signed_request_to_registry_api() {
+    let temp = tempfile::tempdir().unwrap();
+    write_publish_fixture_package(temp.path());
+
+    let (api_url, request_rx) = start_mock_registry_api_capture_request(serde_json::json!({
+        "request_id": "req_test",
+        "status": "source_published",
+        "direct_url": "https://registry.cellscript.dev/packages/cellscript/demo/versions/1.2.3.json",
+        "snapshot_hash": "sha256:test",
+        "verification": "queued"
+    }));
+
+    let preview = cellc_command()
+        .arg("publish")
+        .arg("--api-url")
+        .arg(&api_url)
+        .arg("--capability-key-id")
+        .arg("cap_test")
+        .arg("--print-payload")
+        .arg("--json")
+        .current_dir(temp.path())
+        .output()
+        .unwrap();
+    assert!(preview.status.success(), "stderr: {}", String::from_utf8_lossy(&preview.stderr));
+    let envelope: serde_json::Value = serde_json::from_slice(&preview.stdout).unwrap();
+    let payload_path = temp.path().join("publish-payload.json");
+    std::fs::write(&payload_path, serde_json::to_vec_pretty(&envelope).unwrap()).unwrap();
+
+    let output = cellc_command()
+        .arg("publish")
+        .arg("--api-url")
+        .arg(&api_url)
+        .arg("--payload")
+        .arg(&payload_path)
+        .arg("--capability-signature")
+        .arg("0x1234")
+        .arg("--json")
+        .current_dir(temp.path())
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    let response: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(response["status"], "source_published");
+    let request = request_rx.recv_timeout(Duration::from_secs(5)).expect("registry API request");
+    assert_eq!(request.path, "/v1/packages/cellscript/demo/versions");
+    assert!(
+        request
+            .header("idempotency-key")
+            .is_some_and(|value| value.starts_with("cellc-publish-") && value.len() > "cellc-publish-".len()),
+        "missing or malformed Idempotency-Key header: {:?}",
+        request.headers
+    );
+    let request = request.body;
+    assert_eq!(request["payload"], envelope["payload"]);
+    assert_eq!(request["capability_signature"]["algorithm"], "p256-sha256");
+    assert_eq!(request["capability_signature"]["signature"], "0x1234");
+    assert_eq!(request["source_snapshot"]["content_type"], "application/vnd.cellscript.source-snapshot+json");
+    assert_eq!(request["source_snapshot"]["source_hash"], envelope["payload"]["source_hash"]);
+    assert!(request["source_snapshot"]["content_base64"].as_str().is_some_and(|value| !value.is_empty()));
+    assert!(request["source_snapshot"]["size_bytes"].as_u64().is_some_and(|value| value > 0));
+    assert!(!temp.path().join("registry.json").exists(), "public publish must not write offline registry.json");
+}
+
+#[test]
+fn cellc_publish_honors_explicit_idempotency_key() {
+    let temp = tempfile::tempdir().unwrap();
+    write_publish_fixture_package(temp.path());
+
+    let (api_url, request_rx) = start_mock_registry_api_capture_request(serde_json::json!({
+        "request_id": "req_test",
+        "status": "source_published",
+        "direct_url": "https://registry.cellscript.dev/packages/cellscript/demo/versions/1.2.3.json",
+        "snapshot_hash": "sha256:test",
+        "verification": "queued"
+    }));
+
+    let preview = cellc_command()
+        .arg("publish")
+        .arg("--api-url")
+        .arg(&api_url)
+        .arg("--capability-key-id")
+        .arg("cap_test")
+        .arg("--print-payload")
+        .arg("--json")
+        .current_dir(temp.path())
+        .output()
+        .unwrap();
+    assert!(preview.status.success(), "stderr: {}", String::from_utf8_lossy(&preview.stderr));
+    let envelope: serde_json::Value = serde_json::from_slice(&preview.stdout).unwrap();
+    let payload_path = temp.path().join("publish-payload.json");
+    std::fs::write(&payload_path, serde_json::to_vec_pretty(&envelope).unwrap()).unwrap();
+
+    let output = cellc_command()
+        .arg("publish")
+        .arg("--api-url")
+        .arg(&api_url)
+        .arg("--payload")
+        .arg(&payload_path)
+        .arg("--capability-signature")
+        .arg("0x1234")
+        .arg("--idempotency-key")
+        .arg("ci-release-cellscript-demo-1.2.3")
+        .current_dir(temp.path())
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    let request = request_rx.recv_timeout(Duration::from_secs(5)).expect("registry API request");
+    assert_eq!(request.header("idempotency-key"), Some("ci-release-cellscript-demo-1.2.3"));
+}
+
+#[test]
+fn cellc_publish_retries_transient_registry_error_with_same_idempotency_key() {
+    let temp = tempfile::tempdir().unwrap();
+    write_publish_fixture_package(temp.path());
+
+    let (api_url, request_rx) = start_mock_registry_api_retry_then_success(serde_json::json!({
+        "request_id": "req_retry",
+        "status": "source_published",
+        "direct_url": "https://registry.cellscript.dev/packages/cellscript/demo/versions/1.2.3.json",
+        "snapshot_hash": "sha256:test",
+        "verification": "queued"
+    }));
+
+    let preview = cellc_command()
+        .arg("publish")
+        .arg("--api-url")
+        .arg(&api_url)
+        .arg("--capability-key-id")
+        .arg("cap_test")
+        .arg("--print-payload")
+        .arg("--json")
+        .current_dir(temp.path())
+        .output()
+        .unwrap();
+    assert!(preview.status.success(), "stderr: {}", String::from_utf8_lossy(&preview.stderr));
+    let envelope: serde_json::Value = serde_json::from_slice(&preview.stdout).unwrap();
+    let payload_path = temp.path().join("publish-payload.json");
+    std::fs::write(&payload_path, serde_json::to_vec_pretty(&envelope).unwrap()).unwrap();
+
+    let output = cellc_command()
+        .arg("publish")
+        .arg("--api-url")
+        .arg(&api_url)
+        .arg("--payload")
+        .arg(&payload_path)
+        .arg("--capability-signature")
+        .arg("0x1234")
+        .arg("--idempotency-key")
+        .arg("retry-cellscript-demo-1.2.3")
+        .arg("--json")
+        .current_dir(temp.path())
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    let response: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(response["request_id"], "req_retry");
+    let first = request_rx.recv_timeout(Duration::from_secs(5)).expect("first registry API request");
+    let second = request_rx.recv_timeout(Duration::from_secs(5)).expect("second registry API request");
+    assert_eq!(first.header("idempotency-key"), Some("retry-cellscript-demo-1.2.3"));
+    assert_eq!(second.header("idempotency-key"), Some("retry-cellscript-demo-1.2.3"));
+    assert_eq!(first.body, second.body);
+}
+
+#[test]
+fn cellc_auth_capability_submit_posts_joyid_signature_to_registry_api() {
+    let temp = tempfile::tempdir().unwrap();
+    let (api_url, request_rx) = start_mock_registry_api_expect_path(
+        "/v1/capabilities",
+        serde_json::json!({
+            "request_id": "req_cap",
+            "key_id": "cap_test",
+            "status": "active"
+        }),
+    );
+    let create = cellc_command()
+        .arg("auth")
+        .arg("capability")
+        .arg("create")
+        .arg("--registry-origin")
+        .arg(&api_url)
+        .arg("--principal-id")
+        .arg("0x1111111111111111111111111111111111111111")
+        .arg("--capability-pubkey")
+        .arg("p256-spki:test")
+        .arg("--scope")
+        .arg("publish:cellscript/demo")
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert!(create.status.success(), "stderr: {}", String::from_utf8_lossy(&create.stderr));
+    let payload: serde_json::Value = serde_json::from_slice(&create.stdout).unwrap();
+    let payload_path = temp.path().join("capability-payload.json");
+    let signature_path = temp.path().join("joyid-signature.json");
+    std::fs::write(&payload_path, serde_json::to_vec_pretty(&payload).unwrap()).unwrap();
+    std::fs::write(
+        &signature_path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "challenge": serde_json::to_string(&payload).unwrap(),
+            "signature": "sig",
+            "message": "message",
+            "pubkey": "pubkey",
+            "keyType": "main_key",
+            "alg": -7
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let output = cellc_command()
+        .arg("auth")
+        .arg("capability")
+        .arg("submit")
+        .arg("--api-url")
+        .arg(&api_url)
+        .arg("--payload")
+        .arg(&payload_path)
+        .arg("--joyid-signature")
+        .arg(&signature_path)
+        .arg("--json")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    let response: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(response["status"], "active");
+    let request = request_rx.recv_timeout(Duration::from_secs(5)).expect("capability request");
+    assert_eq!(request["payload"], payload);
+    assert_eq!(request["joyid_signature"]["signature"], "sig");
+}
+
+#[test]
+fn cellc_auth_capability_revoke_generates_payload_and_posts_revocation() {
+    let temp = tempfile::tempdir().unwrap();
+    let key_id = format!("cap_{}", "a".repeat(32));
+    let expected_path = format!("/v1/capabilities/{}/revoke", key_id);
+    let (api_url, request_rx) = start_mock_registry_api_expect_path(
+        &expected_path,
+        serde_json::json!({
+            "request_id": "req_revoke",
+            "key_id": key_id,
+            "status": "revoked",
+            "revoked_at": "2026-06-23T12:00:00Z"
+        }),
+    );
+    let create = cellc_command()
+        .arg("auth")
+        .arg("capability")
+        .arg("revoke")
+        .arg("--registry-origin")
+        .arg(&api_url)
+        .arg("--principal-id")
+        .arg("0x1111111111111111111111111111111111111111")
+        .arg("--capability-key-id")
+        .arg(&key_id)
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert!(create.status.success(), "stderr: {}", String::from_utf8_lossy(&create.stderr));
+    let payload: serde_json::Value = serde_json::from_slice(&create.stdout).unwrap();
+    assert_eq!(payload["action"], "revoke_capability");
+    assert_eq!(payload["capability_key_id"], key_id);
+
+    let payload_path = temp.path().join("revoke-payload.json");
+    let signature_path = temp.path().join("joyid-revoke-signature.json");
+    std::fs::write(&payload_path, serde_json::to_vec_pretty(&payload).unwrap()).unwrap();
+    std::fs::write(
+        &signature_path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "challenge": serde_json::to_string(&payload).unwrap(),
+            "signature": "sig",
+            "message": "message",
+            "pubkey": "pubkey",
+            "keyType": "main_key",
+            "alg": -7
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let output = cellc_command()
+        .arg("auth")
+        .arg("capability")
+        .arg("revoke")
+        .arg("--api-url")
+        .arg(&api_url)
+        .arg("--payload")
+        .arg(&payload_path)
+        .arg("--joyid-signature")
+        .arg(&signature_path)
+        .arg("--reason")
+        .arg("rotated")
+        .arg("--json")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    let response: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(response["status"], "revoked");
+    let request = request_rx.recv_timeout(Duration::from_secs(5)).expect("revoke request");
+    assert_eq!(request["payload"], payload);
+    assert_eq!(request["reason"], "rotated");
+}
+
+#[test]
+fn cellc_publish_offline_writes_source_published_registry_fixture() {
+    let temp = tempfile::tempdir().unwrap();
+    write_publish_fixture_package(temp.path());
+
+    let output = cellc_command().arg("publish").arg("--offline").current_dir(temp.path()).output().unwrap();
+
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Published offline registry fixture"), "unexpected stdout: {stdout}");
+
+    let index = cellscript::package::registry::RegistryIndex::read_from_repo(temp.path()).unwrap();
+    assert_eq!(index.namespace, "cellscript");
+    assert_eq!(index.name, "demo");
+    let version = index.versions.iter().find(|version| version.version == "1.2.3").expect("published version");
+    assert_eq!(version.status, cellscript::package::registry::RegistryEntryStatus::SourcePublished);
+}
+
 fn locked_build_from_metadata_for_test(metadata: &cellscript::CompileMetadata) -> cellscript::package::LockedBuildInfo {
     let abi = serde_json::json!({
         "metadata_schema_version": metadata.metadata_schema_version,
@@ -131,7 +587,105 @@ fn start_mock_ckb_rpc(responses: Vec<(&'static str, serde_json::Value)>) -> Stri
     format!("http://{}", addr)
 }
 
+#[derive(Debug)]
+struct MockRegistryRequest {
+    path: String,
+    headers: Vec<(String, String)>,
+    body: serde_json::Value,
+}
+
+impl MockRegistryRequest {
+    fn header(&self, name: &str) -> Option<&str> {
+        self.headers.iter().find_map(|(header_name, value)| header_name.eq_ignore_ascii_case(name).then_some(value.as_str()))
+    }
+}
+
+fn start_mock_registry_api_capture_request(
+    response_body: serde_json::Value,
+) -> (String, std::sync::mpsc::Receiver<MockRegistryRequest>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let (path, headers, request) = read_http_request_path_headers_and_body(&mut stream);
+        let request_json: serde_json::Value = serde_json::from_slice(&request).unwrap();
+        tx.send(MockRegistryRequest { path, headers, body: request_json }).unwrap();
+        let response_body = response_body.to_string();
+        let response = format!(
+            "HTTP/1.1 202 Accepted\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            response_body.len(),
+            response_body
+        );
+        stream.write_all(response.as_bytes()).unwrap();
+    });
+    (format!("http://{}", addr), rx)
+}
+
+fn start_mock_registry_api_retry_then_success(
+    response_body: serde_json::Value,
+) -> (String, std::sync::mpsc::Receiver<MockRegistryRequest>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        for status in ["503 Service Unavailable", "202 Accepted"] {
+            let (mut stream, _) = listener.accept().unwrap();
+            let (path, headers, request) = read_http_request_path_headers_and_body(&mut stream);
+            let request_json: serde_json::Value = serde_json::from_slice(&request).unwrap();
+            tx.send(MockRegistryRequest { path, headers, body: request_json }).unwrap();
+            let response_body = if status.starts_with("202") {
+                response_body.to_string()
+            } else {
+                serde_json::json!({"error": {"code": "temporary_unavailable"}}).to_string()
+            };
+            let response = format!(
+                "HTTP/1.1 {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                status,
+                response_body.len(),
+                response_body
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+        }
+    });
+    (format!("http://{}", addr), rx)
+}
+
+fn start_mock_registry_api_expect_path(
+    expected_path: &str,
+    response_body: serde_json::Value,
+) -> (String, std::sync::mpsc::Receiver<serde_json::Value>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let expected_path = expected_path.to_string();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let (path, request) = read_http_request_path_and_body(&mut stream);
+        assert_eq!(path, expected_path);
+        let request_json: serde_json::Value = serde_json::from_slice(&request).unwrap();
+        tx.send(request_json).unwrap();
+        let response_body = response_body.to_string();
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            response_body.len(),
+            response_body
+        );
+        stream.write_all(response.as_bytes()).unwrap();
+    });
+    (format!("http://{}", addr), rx)
+}
+
 fn read_http_request_body(stream: &mut std::net::TcpStream) -> Vec<u8> {
+    read_http_request_path_and_body(stream).1
+}
+
+fn read_http_request_path_and_body(stream: &mut std::net::TcpStream) -> (String, Vec<u8>) {
+    let (path, _headers, body) = read_http_request_path_headers_and_body(stream);
+    (path, body)
+}
+
+fn read_http_request_path_headers_and_body(stream: &mut std::net::TcpStream) -> (String, Vec<(String, String)>, Vec<u8>) {
     let mut request = Vec::new();
     let mut buffer = [0u8; 1024];
     loop {
@@ -140,6 +694,15 @@ fn read_http_request_body(stream: &mut std::net::TcpStream) -> Vec<u8> {
         request.extend_from_slice(&buffer[..read]);
         if let Some(header_end) = request.windows(4).position(|window| window == b"\r\n\r\n") {
             let headers = String::from_utf8_lossy(&request[..header_end]);
+            let path = headers.lines().next().and_then(|line| line.split_whitespace().nth(1)).unwrap_or("/").to_string();
+            let parsed_headers = headers
+                .lines()
+                .skip(1)
+                .filter_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    Some((name.trim().to_string(), value.trim().to_string()))
+                })
+                .collect();
             let content_length = headers
                 .lines()
                 .find_map(|line| {
@@ -153,7 +716,7 @@ fn read_http_request_body(stream: &mut std::net::TcpStream) -> Vec<u8> {
                 assert_ne!(read, 0, "mock RPC request ended before body");
                 request.extend_from_slice(&buffer[..read]);
             }
-            return request[body_start..body_start + content_length].to_vec();
+            return (path, parsed_headers, request[body_start..body_start + content_length].to_vec());
         }
     }
 }
@@ -1042,7 +1605,11 @@ resource Token has store, replace, relock, consume, burn {
             schema_hash: None,
             license: None,
             released_at: None,
+            status: cellscript::package::registry::RegistryEntryStatus::VerifiedBuild,
             yanked: false,
+            yanked_at: None,
+            yanked_reason: None,
+            replaced_by: None,
             audit: None,
         },
     )
@@ -1123,6 +1690,57 @@ action pass_through(token: Token) -> Token {
         .output()
         .unwrap();
     assert!(verify.status.success(), "stderr: {}", String::from_utf8_lossy(&verify.stderr));
+}
+
+#[test]
+fn cellc_registry_edit_yanks_existing_version() {
+    let temp = tempfile::tempdir().unwrap();
+    cellscript::package::registry::RegistryIndex::append_version(
+        temp.path(),
+        "token",
+        "cellscript",
+        cellscript::package::registry::RegistryVersion {
+            version: "1.0.0".to_string(),
+            tag: "v1.0.0".to_string(),
+            source_hash: "abc123".to_string(),
+            cellscript_version: "0.20.0".to_string(),
+            dependencies: Default::default(),
+            abi_index: None,
+            schema_hash: None,
+            license: Some("MIT".to_string()),
+            released_at: None,
+            status: cellscript::package::registry::RegistryEntryStatus::VerifiedBuild,
+            yanked: false,
+            yanked_at: None,
+            yanked_reason: None,
+            replaced_by: None,
+            audit: None,
+        },
+    )
+    .unwrap();
+
+    let output = cellc_command()
+        .arg("registry")
+        .arg("edit")
+        .arg("--yank")
+        .arg("1.0.0")
+        .arg("--reason")
+        .arg("security advisory")
+        .arg("--replaced-by")
+        .arg("1.0.1")
+        .arg("--yanked-at")
+        .arg("2026-06-23T00:00:00Z")
+        .current_dir(temp.path())
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    let index = cellscript::package::registry::RegistryIndex::read_from_repo(temp.path()).unwrap();
+    let version = index.versions.iter().find(|version| version.version == "1.0.0").unwrap();
+    assert!(version.yanked);
+    assert_eq!(version.yanked_at.as_deref(), Some("2026-06-23T00:00:00Z"));
+    assert_eq!(version.yanked_reason.as_deref(), Some("security advisory"));
+    assert_eq!(version.replaced_by.as_deref(), Some("1.0.1"));
 }
 
 #[test]
@@ -1223,6 +1841,127 @@ fn cellc_registry_verify_json_fails_closed_for_missing_deployment_ref() {
         .unwrap()
         .iter()
         .any(|violation| violation.as_str().unwrap_or_default().contains("missing from Cell.lock")));
+}
+
+/// Build a fully-valid offline registry-verify fixture whose single deployment
+/// optionally declares an `upgrade_lineage`. Used by the lineage tests.
+fn write_offline_fixture_with_lineage(root: &std::path::Path, lineage: Option<&str>) {
+    let out_point = "0xbbbb:0".to_string();
+    let mut lockfile = cellscript::package::Lockfile::new();
+    lockfile.package = cellscript::package::LockfilePackageInfo {
+        name: "token".to_string(),
+        version: "1.0.0".to_string(),
+        namespace: Some("cellscript".to_string()),
+        source_hash: Some("source_hash".to_string()),
+        compiler_source_hash: None,
+    };
+    lockfile.package_build = Some(cellscript::package::LockedBuildInfo {
+        compiler_version: Some("0.20.0".to_string()),
+        target_profile: Some("ckb".to_string()),
+        artifact_hash: Some("artifact_hash".to_string()),
+        metadata_hash: Some("metadata_hash".to_string()),
+        schema_hash: Some("schema_hash".to_string()),
+        cell_data_codec_manifest_hash: Some("codec_manifest_hash".to_string()),
+        abi_hash: Some("abi_hash".to_string()),
+        constraints_hash: Some("constraints_hash".to_string()),
+    });
+    lockfile.deployment.insert(
+        "aggron4".to_string(),
+        cellscript::package::LockfileDeploymentRef {
+            record: out_point.clone(),
+            record_hash: None,
+            code_hash: Some("0xbbbb".to_string()),
+            out_point: Some(out_point.clone()),
+            data_hash: Some("0xcccc".to_string()),
+        },
+    );
+    lockfile.write_to_root(root).unwrap();
+
+    let deployed = cellscript::package::DeployedManifest {
+        version: 1,
+        schema: None,
+        package: cellscript::package::DeployedPackageInfo {
+            name: "token".to_string(),
+            version: "1.0.0".to_string(),
+            source_hash: Some("source_hash".to_string()),
+        },
+        build: Some(cellscript::package::DeployedBuildInfo {
+            compiler_version: Some("0.20.0".to_string()),
+            artifact_hash: Some("artifact_hash".to_string()),
+            metadata_hash: Some("metadata_hash".to_string()),
+            schema_hash: Some("schema_hash".to_string()),
+            cell_data_codec_manifest_hash: Some("codec_manifest_hash".to_string()),
+            abi_hash: Some("abi_hash".to_string()),
+            constraints_hash: Some("constraints_hash".to_string()),
+        }),
+        deployments: vec![cellscript::package::DeploymentRecord {
+            network: "aggron4".to_string(),
+            chain_id: "ckb-testnet".to_string(),
+            tx_hash: "0xbbbb".to_string(),
+            output_index: 0,
+            code_hash: "0xbbbb".to_string(),
+            hash_type: "data1".to_string(),
+            dep_type: "code".to_string(),
+            data_hash: "0xcccc".to_string(),
+            out_point,
+            artifact_hash: Some("artifact_hash".to_string()),
+            metadata_hash: Some("metadata_hash".to_string()),
+            schema_hash: Some("schema_hash".to_string()),
+            cell_data_codec_manifest_hash: Some("codec_manifest_hash".to_string()),
+            abi_hash: Some("abi_hash".to_string()),
+            constraints_hash: Some("constraints_hash".to_string()),
+            compiler_version: Some("0.20.0".to_string()),
+            type_id: None,
+            script_role: Some(cellscript::package::ScriptRole::Type),
+            status: Some(cellscript::package::DeploymentStatus::Active),
+            upgrade_lineage: lineage.map(str::to_string),
+            audit_report_hash: None,
+            publisher_signature: None,
+            cell_deps: vec![],
+        }],
+    };
+    deployed.write_to_root(root).unwrap();
+}
+
+#[test]
+fn cellc_registry_verify_accepts_upgrade_lineage_pointing_elsewhere() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    // Lineage points at a pruned prior deployment's out_point (not self, not empty).
+    write_offline_fixture_with_lineage(root, Some("0xaaaa:0"));
+
+    let output =
+        Command::new(env!("CARGO_BIN_EXE_cellc")).arg("registry").arg("verify").arg("--json").current_dir(root).output().unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}\nstdout: {}",
+        String::from_utf8_lossy(&output.stderr),
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["status"], "ok", "violations: {:?}", report["violations"]);
+    assert!(report["violations"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn cellc_registry_verify_rejects_upgrade_lineage_pointing_at_itself() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    // Current deployment's lineage points at its own out_point.
+    write_offline_fixture_with_lineage(root, Some("0xbbbb:0"));
+
+    let output =
+        Command::new(env!("CARGO_BIN_EXE_cellc")).arg("registry").arg("verify").arg("--json").current_dir(root).output().unwrap();
+
+    assert!(!output.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["status"], "failed");
+    assert!(
+        report["violations"].as_array().unwrap().iter().any(|v| v.as_str().unwrap_or_default().contains("own out_point")),
+        "violations: {:?}",
+        report["violations"]
+    );
 }
 
 #[test]

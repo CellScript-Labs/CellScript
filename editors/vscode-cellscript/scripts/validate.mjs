@@ -52,6 +52,11 @@ for (const field of [pkg.homepage, pkg.bugs?.url]) {
   }
 }
 
+const homepageVersion = pkg.homepage?.match(/\/tree\/v([0-9]+\.[0-9]+\.[0-9]+)\//)?.[1];
+if (homepageVersion && homepageVersion !== pkg.version) {
+  throw new Error(`extension homepage points at v${homepageVersion}, but package version is ${pkg.version}`);
+}
+
 if (!Array.isArray(pkg.contributes?.languages) || pkg.contributes.languages.length === 0) {
   throw new Error("package.json must contribute at least one language");
 }
@@ -218,8 +223,16 @@ if (/\bbeta\b|\bthin\b|placeholder|metadata-only/i.test(readme)) {
 if (readme.includes("cellc lsp --stdio")) {
   throw new Error("extension README must document the supported LSP entrypoint as `cellc --lsp`");
 }
-if (/\brename\b/i.test(readme)) {
-  throw new Error("extension README must not claim rename support while the LSP rename provider is disabled");
+for (const token of [
+  "workspace rename",
+  "selection ranges",
+  "document symbols",
+  "document highlights",
+  `current ${pkg.version.split(".").slice(0, 2).join(".")} authoring surface`
+]) {
+  if (!readme.includes(token)) {
+    throw new Error(`extension README is missing current LSP/package coverage: ${token}`);
+  }
 }
 if (!changelog.includes(`## ${pkg.version}`)) {
   throw new Error(`extension changelog is missing current package version entry: ${pkg.version}`);

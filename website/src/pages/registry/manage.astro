@@ -1,0 +1,180 @@
+---
+import RegistryLayout from "../../layouts/RegistryLayout.astro";
+import { registryPackages, shortHash } from "../../lib/registry";
+import { defaultLocale, translations } from "../../i18n/translations";
+
+const t = translations[defaultLocale];
+const description = t.registry.manage.description;
+const first = registryPackages[0];
+---
+
+<RegistryLayout title="CellScript Registry: Manage" description={description} headingKey="registry.manage.title" descriptionKey="registry.manage.description" active="manage">
+  {registryPackages.length > 0 ? (
+    <section class="registry-manage" aria-label={t.registry.manage.manageAria} data-i18n-aria-label="registry.manage.manageAria" data-manage-app>
+      <aside class="registry-manage-list" aria-label={t.registry.manage.packagesAria} data-i18n-aria-label="registry.manage.packagesAria">
+        <span class="registry-manage-list-label" data-i18n="registry.manage.packagesLabel">{t.registry.manage.packagesLabel}</span>
+        <ul>
+          {registryPackages.map((pkg, index) => (
+            <li>
+              <button
+                type="button"
+                class:list={["registry-manage-item", index === 0 && "active"]}
+                data-manage-item={pkg.coordinate}
+              >
+                <span class="registry-manage-item-name">{pkg.coordinate}</span>
+                <span class="registry-manage-item-meta">v{pkg.latest_version || "—"}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      </aside>
+
+      <div class="registry-manage-detail">
+        <header class="registry-manage-head">
+          <div>
+            <span class="registry-label" data-i18n="registry.manage.workspaceLabel">{t.registry.manage.workspaceLabel}</span>
+            <h2 data-manage-title>{first.coordinate}</h2>
+            <p class="registry-manage-sub" data-manage-sub>
+              {t.registry.manage.version} {first.latest_version || t.registry.manage.notRecorded} · {first.deployment.networks.join(", ") || t.registry.package.sourceOnly} · {shortHash(first.latest?.source_hash)}
+            </p>
+          </div>
+        </header>
+
+        <div class="registry-manage-body">
+          <form class="registry-manage-form" data-manage-form>
+            <label class="registry-builder-field">
+              <span data-i18n="registry.manage.actionLabel">{t.registry.manage.actionLabel}</span>
+              <select class="registry-select" name="action">
+                <option value="add-version" data-i18n="registry.manage.actionAddVersion">{t.registry.manage.actionAddVersion}</option>
+                <option value="yank" data-i18n="registry.manage.actionYankVersion">{t.registry.manage.actionYankVersion}</option>
+                <option value="metadata" data-i18n="registry.manage.actionUpdateMetadata">{t.registry.manage.actionUpdateMetadata}</option>
+                <option value="deployment" data-i18n="registry.manage.actionReviewDeployment">{t.registry.manage.actionReviewDeployment}</option>
+              </select>
+            </label>
+            <label class="registry-builder-field">
+              <span data-i18n="registry.manage.versionLabel">{t.registry.manage.versionLabel}</span>
+              <input class="registry-input" name="version" value="" placeholder="1.0.0" autocomplete="off" />
+            </label>
+            <label class="registry-builder-field">
+              <span data-i18n="registry.manage.reasonLabel">{t.registry.manage.reasonLabel}</span>
+              <input class="registry-input" name="note" value="" placeholder={t.registry.manage.reasonPlaceholder} data-i18n-placeholder="registry.manage.reasonPlaceholder" autocomplete="off" />
+            </label>
+            <label class="registry-builder-field">
+              <span data-i18n="registry.manage.replacementLabel">{t.registry.manage.replacementLabel}</span>
+              <input class="registry-input" name="replacement" value="" placeholder="1.0.1" autocomplete="off" />
+            </label>
+          </form>
+
+          <div class="registry-manage-output">
+            <span class="registry-label" data-i18n="registry.manage.commandLabel">{t.registry.manage.commandLabel}</span>
+            <p class="registry-manage-help" data-manage-help>{t.registry.manage.helpDefault}</p>
+            <div class="registry-command-line">
+              <code data-manage-command>cellc registry edit</code>
+              <button class="registry-copy" type="button" data-manage-copy data-copy-text="" data-revert-label={t.registry.copy} data-i18n="registry.copy">{t.registry.copy}</button>
+            </div>
+            <dl class="registry-meta">
+              <div><dt data-i18n="registry.manage.latest">{t.registry.manage.latest}</dt><dd data-manage-latest></dd></div>
+              <div><dt data-i18n="registry.manage.status">{t.registry.manage.status}</dt><dd data-manage-status></dd></div>
+              <div><dt data-i18n="registry.manage.deployments">{t.registry.manage.deployments}</dt><dd data-manage-deployments></dd></div>
+            </dl>
+            <p class="registry-manage-note" data-i18n="registry.manage.noteBody">{t.registry.manage.noteBody}</p>
+          </div>
+        </div>
+      </div>
+    </section>
+  ) : (
+    <div class="registry-empty registry-manage-empty">
+      <h2 data-i18n="registry.manage.emptyTitle">{t.registry.manage.emptyTitle}</h2>
+      <p data-i18n="registry.manage.emptyBody">{t.registry.manage.emptyBody}</p>
+    </div>
+  )}
+
+  <script is:inline define:vars={{ packages: registryPackages }}>
+    const app = document.querySelector("[data-manage-app]");
+    const items = Array.from(app?.querySelectorAll("[data-manage-item]") ?? []);
+    const form = document.querySelector("[data-manage-form]");
+    const title = document.querySelector("[data-manage-title]");
+    const sub = document.querySelector("[data-manage-sub]");
+    const command = document.querySelector("[data-manage-command]");
+    const help = document.querySelector("[data-manage-help]");
+    const copy = document.querySelector("[data-manage-copy]");
+    const latest = document.querySelector("[data-manage-latest]");
+    const status = document.querySelector("[data-manage-status]");
+    const deployments = document.querySelector("[data-manage-deployments]");
+
+    // i18n helpers mirror RegistryLayout's runtime layer so the
+    // dynamically-composed sub line and nextHelp can localize.
+    const i18n = window.__CELLSCRIPT_I18N__;
+    const readLocale = () => document.documentElement.dataset.locale === "zh" ? "zh" : "en";
+    const getMessage = (path, locale = readLocale()) =>
+      path.split(".").reduce((v, k) => (v == null ? v : v[k]), i18n == null ? i18n : i18n[locale]);
+    const g = (key) => getMessage(key) ?? "";
+
+    let activeCoordinate = packages[0]?.coordinate;
+
+    const field = (name) => {
+      const input = form?.elements.namedItem(name);
+      return input instanceof HTMLInputElement || input instanceof HTMLSelectElement ? input.value.trim() : "";
+    };
+
+    const selectedPackage = () => packages.find((pkg) => pkg.coordinate === activeCoordinate) ?? packages[0];
+
+    // Localized "Version X · networks · shortHash" sub line.
+    const renderSub = (pkg) => {
+      const versionLabel = g("registry.manage.version");
+      const notRecorded = g("registry.manage.notRecorded");
+      const sourceOnly = g("registry.package.sourceOnly");
+      const hash = (pkg.latest?.source_hash || "").slice(0, 12) || "—";
+      return `${versionLabel} ${pkg.latest_version || notRecorded} · ${pkg.deployment.networks.join(", ") || sourceOnly} · ${hash}`;
+    };
+
+    const update = () => {
+      const pkg = selectedPackage();
+      if (!pkg) return;
+      if (title) title.textContent = pkg.coordinate;
+      if (sub) sub.textContent = renderSub(pkg);
+
+      const action = field("action");
+      const version = field("version") || pkg.latest_version || "<version>";
+      const note = field("note");
+      const replacement = field("replacement");
+      let next = pkg.edit_command;
+      let nextHelp = g("registry.manage.helpDefault");
+
+      if (action === "add-version") {
+        next = pkg.publish_command;
+        nextHelp = g("registry.manage.helpAddVersion");
+      } else if (action === "yank") {
+        next = `${pkg.edit_command} --yank ${version}${note ? ` --reason '${note.replace(/'/g, "'\\''")}'` : ""}${replacement ? ` --replaced-by ${replacement}` : ""}`;
+        nextHelp = g("registry.manage.helpYankVersion");
+      } else if (action === "metadata") {
+        next = `${pkg.package_command_prefix} && cellc package verify --json`;
+        nextHelp = g("registry.manage.helpUpdateMetadata");
+      } else if (action === "deployment") {
+        next = pkg.verify_command;
+        nextHelp = g("registry.manage.helpReviewDeployment");
+      }
+
+      if (command) command.textContent = next;
+      if (help) help.textContent = nextHelp;
+      copy?.setAttribute("data-copy-text", next);
+      if (latest) latest.textContent = pkg.latest_version || g("registry.manage.notRecorded");
+      if (status) status.textContent = pkg.status;
+      if (deployments) deployments.textContent = String(pkg.deployment.active_count);
+    };
+
+    items.forEach((item) => {
+      item.addEventListener("click", () => {
+        activeCoordinate = item.getAttribute("data-manage-item");
+        items.forEach((i) => i.classList.toggle("active", i === item));
+        update();
+      });
+    });
+
+    form?.addEventListener("input", update);
+    update();
+
+    // Re-render dynamic strings when the locale changes.
+    window.addEventListener("cellscript:locale-change", update);
+  </script>
+</RegistryLayout>

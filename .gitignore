@@ -1,9 +1,13 @@
 /target/
+node_modules/
+dist/
+services/registry-api/dist/
 editors/vscode-cellscript/dist/
 
 .DS_Store
 .vscode/
 .cap/
+.wrangler/
 __pycache__/
 *.py[cod]
 *.swp
@@ -46,6 +50,7 @@ proposals/evolving-dob/*
 !proposals/evolving-dob/evolving-dob-profile-v1/**
 !proposals/evolving-dob/evolving-dob-profile-v1/Cell.lock
 proposals/novaseal/v0-mvp-skeleton/build/
+proposals/novaseal/**/.cell/
 proposals/novaseal/v0-mvp-skeleton/target/
 proposals/novaseal/v0-mvp-skeleton/src/.cell/
 proposals/novaseal/v0-mvp-skeleton/scripts/__pycache__/

@@ -5,9 +5,10 @@ CellScript Language Server (`cellc --lsp` over stdio).
 
 The extension connects to a `cellc` binary running as a JSON-RPC language
 server over stdio. This provides real-time diagnostics, completion, hover,
-go-to-definition, find-references, signature help, document highlighting,
-folding, formatting, code actions, and document symbols — all backed by the
-CellScript compiler's parser, type-checker, and lowering pipeline.
+go-to-definition, find-references, workspace rename, signature help, document
+highlighting, folding, selection ranges, formatting, code actions, and document
+symbols — all backed by the CellScript compiler's parser, type-checker, and
+lowering pipeline.
 
 CLI-backed commands (compile, metadata, constraints, ABI, action build plans,
 builder generation, package verification, registry verification, and production
@@ -25,6 +26,7 @@ and audit-bundle reports.
 - hover information (types, lowering metadata, lifecycle states)
 - go-to-definition (top-level symbols, fields, local variables, cross-module)
 - find-references (lexer-accurate, skips comments and strings)
+- workspace rename (identifier-boundary checked, grouped by workspace file)
 - signature help (action, function, lock parameters)
 - document highlight
 - folding ranges
@@ -172,9 +174,10 @@ Set `cellscript.useCargoRunFallback` to `false` to disable that fallback.
 | `CellScript: Generate Audit Bundle` | Run `cellc audit-bundle --json` for the active file and write the bundle under `.cellscript-vscode`. |
 | `CellScript: Show Production Report` | Show compiler version, artifact metadata, constraints, and release audit boundaries for the active file. |
 
-Diagnostics, completion, hover, go-to-definition, references, formatting,
-signature help, folding, and code actions are provided automatically by the
-language server — no explicit commands needed.
+Diagnostics, completion, hover, go-to-definition, references, workspace rename,
+document symbols, document highlights, signature help, folding, selection
+ranges, formatting, and code actions are provided automatically by the language
+server — no explicit commands needed.
 
 ## Settings
 

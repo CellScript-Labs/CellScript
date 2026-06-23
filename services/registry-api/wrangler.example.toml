@@ -1,0 +1,29 @@
+name = "cellscript-registry-api"
+main = "src/index.ts"
+compatibility_date = "2026-06-23"
+compatibility_flags = ["nodejs_compat"]
+
+routes = [
+  { pattern = "api.registry.cellscript.dev/*", zone_name = "cellscript.dev" },
+  { pattern = "registry.cellscript.dev/packages/*", zone_name = "cellscript.dev" }
+]
+
+[triggers]
+crons = ["*/15 * * * *"]
+
+[vars]
+ENVIRONMENT = "production"
+REGISTRY_ORIGIN = "https://api.registry.cellscript.dev"
+STATIC_REGISTRY_ORIGIN = "https://registry.cellscript.dev"
+JOYID_SERVER_URL = "https://api.joy.id/api/v1"
+MAX_JSON_BODY_BYTES = "6291456"
+CLEANUP_QUOTA_EVENT_RETENTION_HOURS = "48"
+NAMESPACE_CLAIM_COOLDOWN_SECONDS = "3600"
+
+[[r2_buckets]]
+binding = "REGISTRY_OBJECTS"
+bucket_name = "cellscript-registry-objects"
+
+[[hyperdrive]]
+binding = "HYPERDRIVE"
+id = "REPLACE_WITH_CLOUDFLARE_HYPERDRIVE_ID"

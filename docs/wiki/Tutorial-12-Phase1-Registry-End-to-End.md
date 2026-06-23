@@ -24,8 +24,9 @@ inaccessible, the tutorial covers:
   manifest);
 - the three-layer trust model (source identity, build identity,
   deployment identity) and its fail-closed semantics at each layer;
-- why Phase 1 does not need a central registry server and how to
-  operate fully without GitHub;
+- how the registry separates authenticated publish writes from static,
+  cacheable reads, and how private/offline mirrors can still operate without
+  GitHub;
 - a worked end-to-end example that walks authoring, publishing,
   dependency resolution, building, deployment, and verification.
 

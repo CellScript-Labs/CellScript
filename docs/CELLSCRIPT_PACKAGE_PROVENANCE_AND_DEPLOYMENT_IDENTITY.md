@@ -10,6 +10,9 @@ v0.18 first-class ScriptRef / ScriptArgs work
 
 **Forum thread**: <https://talk.nervos.org/t/cellscript-package-and-deployment-registry-early-design-discussion/10210>
 
+**Production boundary ADR**:
+[`CELLSCRIPT_REGISTRY_PRODUCTION_BOUNDARY_ADR.md`](CELLSCRIPT_REGISTRY_PRODUCTION_BOUNDARY_ADR.md)
+
 ## Motivation
 
 For ordinary development, a package registry can look like crates.io or npm:
@@ -77,6 +80,105 @@ package candidate and must still satisfy the existing `Cell.toml`,
 A future registry proxy or discovery index may expose multiple profiles for the
 same `namespace/name`, but the lockfile must record which profile was selected.
 
+## Publisher Identity Model
+
+CellScript Registry uses a **JoyID-rooted publisher identity** without a
+separate registry account system. The current accepted publisher principal type
+is `joyid_ckb`; ordinary publish operations use a delegated local credential:
+
+```text
+principal_type = joyid_ckb
+principal_id = <normalized JoyID-CKB identity binding>
+
+JoyID identity
+  -> root publisher principal
+  -> authorises local publisher credential
+  -> credential signs scoped registry requests
+```
+
+The data model stays principal-typed instead of hard-coding product policy into
+every record. The current registry policy accepts only `joyid_ckb`, while the
+record shape still names the principal type and concrete principal id.
+
+The preferred `principal_id` is derived from the JoyID signer key as a
+normalized JoyID-CKB identity binding. The registry verifies that the JoyID
+signature's key type and public key match the `principal_id` in capability and
+revocation payloads; display addresses are presentation data only.
+
+The intended interactive flow is:
+
+```text
+cellc auth capability create --principal-id <principal_id> --scope publish:namespace/package --expires 90d --json > capability-payload.json
+  -> CLI creates a registry signing key and stores it in the OS keychain
+  -> CLI prints an authorize_capability payload with capability_pubkey and requested scopes
+  -> browser/CCC/JoyID signs that exact payload
+cellc auth capability submit --payload capability-payload.json --joyid-signature joyid-signature.json
+  -> signed payload is submitted to the registry write API
+  -> registry records principal_type, principal_id, scopes, expiry, and revocation status
+```
+
+Daily publishing then avoids JoyID signing prompts and never exposes root
+publisher authority to CI:
+
+```text
+cellc publish
+  -> signs the concrete publish payload with the local publisher credential
+  -> registry verifies signature, nonce, expiry, origin, and ACL scope
+  -> registry accepts the entry and returns its canonical URL
+```
+
+The JoyID authorisation payload must bind the local capability key:
+
+```text
+protocol: cellscript-registry-auth-v1
+action: authorize_capability
+registry_origin: https://api.registry.cellscript.dev
+principal_type: joyid_ckb
+principal_id: <normalized JoyID-CKB identity binding>
+capability_pubkey: ...
+requested_scopes: [publish:cellscript/amm_pool]
+capability_expires_at: ...
+nonce: ...
+issued_at: ...
+expires_at: ...
+cli_version: ...
+```
+
+The daily publish payload must bind the action and package identity:
+
+```text
+action: publish
+namespace: cellscript
+package: amm_pool
+version: 1.2.0
+source_hash: ...
+manifest_hash: ...
+registry_origin: https://api.registry.cellscript.dev
+nonce: ...
+expires_at: ...
+```
+
+The central ACL model is namespace/package ownership:
+
+```text
+namespace -> owner principals
+package   -> maintainer principals
+credential -> scoped permissions
+```
+
+Example scopes:
+
+```text
+publish:cellscript/amm_pool
+yank:cellscript/amm_pool
+attest:cellscript/amm_pool
+manage-maintainers:cellscript/*
+```
+
+This keeps the user-facing identity simple — "my JoyID is my CellScript
+publisher identity" — while the engineering surface remains revocable, scoped,
+CI-safe, and auditable.
+
 ## Three-Layer Identity Model
 
 CellScript packages exist in three identity layers, each with a distinct
@@ -106,9 +208,14 @@ verification scope:
 Each layer is independently meaningful but cryptographically bound to the
 layers above and below through the lockfile.
 
-### Package States
+### Package States and Visibility
 
-A CellScript package can exist in at least two operational states:
+A CellScript package can exist in several operational states:
+
+**Source-published / indexed-pending package.** `cellc publish` has admitted a
+new version into the registry. The entry is addressable by direct URL and
+visible to the author, but it may be excluded from default search until basic
+schema, hash, quota, and abuse checks pass.
 
 **Source-only / undeployed package.** A normal development package containing
 `.cell` source files, interfaces, schemas, docs, tests, examples, and
@@ -124,6 +231,16 @@ compiler version, and possibly type-id lineage.
 
 A deployment-bound package is what wallets and production builders should rely
 on when constructing real transactions.
+
+**On-chain-attested package.** A deployment claim has an explicit JoyID-rooted
+attestation or chain-indexed record. This is a stronger statement about who made
+the deployment claim, but it still does not replace source, build, deployment,
+and live-chain verification.
+
+**Deprecated, yanked, or quarantined package.** Historical entries remain
+addressable for reproducibility, but default search and recommendation surfaces
+may suppress them. Quarantine is for abuse or high-risk packages; yanking is a
+maintainer action that preserves exact-pin warning metadata.
 
 The same source package version may have zero, one, or many deployment
 bindings. For example, `amm@1.2.0` may start as a source-only package, later
@@ -239,8 +356,8 @@ the `[package]` section must have `namespace = "cellscript"`.
 
 This field serves three purposes:
 
-1. **Publishing**: `cellc publish` uses `namespace` to determine where to
-   register the package in the discovery index.
+1. **Publishing**: `cellc publish` uses `namespace` to select the registry ACL
+   scope and canonical `namespace/name` coordinate.
 2. **Verification**: The resolver checks that the declared namespace matches
    the `module` declaration in source files.
 3. **Ambiguity resolution**: When a `Simple` dependency (version-only string)
@@ -612,17 +729,42 @@ source commit without re-querying the discovery index.
 The developer publishes a new version:
 
 ```bash
+cellc auth capability create --principal-id <principal_id> --scope publish:cellscript/amm_pool --expires 90d --json > capability-payload.json
+cellc auth capability submit --payload capability-payload.json --joyid-signature joyid-signature.json
 cellc publish
 ```
 
 This automatically:
 
-1. Reads `Cell.toml` → gets `name`, `namespace`, `version`.
-2. Computes `source_hash` from the current source tree.
-3. Reads build artifacts for `artifact_hash`, `abi_hash`, `schema_hash`, etc.
-4. Appends a new version entry to `registry.json` (creates it if absent).
+1. Registers a JoyID-authorised delegated capability key with the write API.
+2. Reads `Cell.toml` -> gets `name`, `namespace`, `version`.
+3. Computes `source_hash` from the current source tree.
+4. Reads build artifacts for `artifact_hash`, `abi_hash`, `schema_hash`, etc.
+5. Signs a concrete publish payload with the local capability key from the OS
+   keychain, or with an externally supplied CI signature.
+6. Uploads an immutable source snapshot.
+7. Submits the entry to the registry write API for ACL, schema, hash, size,
+   idempotency, quota, and duplicate checks.
+8. Creates a canonical registry entry in `source_published` or
+   `indexed_pending` state.
 
-Generated `registry.json` (in the source repo root):
+Capability revocation is also JoyID-bound:
+
+```bash
+cellc auth capability revoke --principal-id <principal_id> --capability-key-id <capability_key_id> --json > revoke-payload.json
+cellc auth capability revoke --payload revoke-payload.json --joyid-signature joyid-signature.json --reason "rotate delegated key"
+```
+
+The explicit signing flow is:
+
+```bash
+cellc publish --print-payload --json > publish-payload.json
+# sign the canonical_payload field with the authorised capability key
+cellc publish --payload publish-payload.json --capability-signature <signature>
+```
+
+The same version entry can be mirrored into `registry.json` in the source repo
+for audit, offline fixtures, and direct-Git fallback:
 
 ```json
 {
@@ -647,17 +789,22 @@ Generated `registry.json` (in the source repo root):
 }
 ```
 
-Then the developer commits and tags:
+Then the developer may commit and tag the mirrored metadata:
 
 ```bash
+cellc publish --offline
 git add registry.json
 git commit -m "publish v1.2.0"
 git tag v1.2.0
 git push --tags
 ```
 
-No PR to the `cellscript-registry` discovery index is needed — the version
-metadata lives in the source repository, not in the discovery index.
+No separate registry account is needed. The JoyID-rooted publisher identity
+authorises the local credential, and the registry ACL decides whether that
+credential may publish to the namespace/package. No PR to the
+`cellscript-registry` discovery index is needed for ordinary version updates;
+discovery changes are for package claims, source-location changes, and
+ownership metadata.
 
 ### Stage 4: Deploying
 
@@ -775,7 +922,7 @@ source → build → deployment, all bound by cryptographic hashes in
      (cellscript-registry)      (github.com/cellscript/amm_pool)
      ┌─────────────────┐       ┌──────────────────────────────────┐
      │ cellscript/     │       │ Cell.toml                        │
-     │   amm_pool.json │──────►│ registry.json   ← cellc publish  │
+     │   amm_pool.json │──────►│ registry.json   ← cellc publish --offline mirror │
      │   token.json    │       │ src/                             │
      └─────────────────┘       │ Cell.lock       ← cellc build    │
                                │ Deployed.toml   ← cellc deploy   │
@@ -785,8 +932,10 @@ source → build → deployment, all bound by cryptographic hashes in
 The discovery index maps `namespace/name` → source repository URL.
 The source repository contains everything else: source code, version index
 (`registry.json`), build identity (`Cell.lock`), and deployment facts
-(`Deployed.toml`). This two-tier model ensures that publishing a new version
-requires only a git push to the source repository — no external index update.
+(`Deployed.toml`). The public registry service is the write authority for
+`cellc publish`; the source repository and `registry.json` mirror are the
+audit/offline path. This preserves the Go-style source layout without making
+Git push permissions the registry's public write authority.
 
 ## Deployment Record Field Classification
 
@@ -855,29 +1004,32 @@ against a deployment, but production transaction construction should require
 
 ## Source Package Registry (Off-Chain)
 
-### Design Choice: Two-Tier Git Registry
+### Design Choice: Registry Write Service, Static Read Surface
 
-The registry uses a two-tier model inspired by Go's approach (source lives in
-its own repo, metadata travels with the source), but with a central discovery
-index for namespace resolution:
+The public registry uses an authenticated write service and a static,
+cache-friendly read surface. The data model remains inspired by Go's approach
+(source lives in its own repo, metadata can travel with the source), but the
+public write authority is the registry service, not Git push access.
 
-1. **Discovery index** — a lightweight Git repository that maps
-   `namespace/name` to the source repository URL. Updated only when a new
-   package is registered (one-time operation per package).
-2. **Per-package version index** — a `registry.json` file that lives inside
-   each source repository, alongside `Cell.toml`. Updated by `cellc publish`
-   every time a new version is released.
+1. **Discovery index** — a lightweight map from `namespace/name` to the source
+   repository URL and ownership metadata. Updated when a package is claimed,
+   transferred, or its source location changes.
+2. **Per-package version index** — a canonical registry entry mirrored as
+   `registry.json` for audit, offline fixtures, and direct-Git fallback. The
+   public entry is updated by authenticated `cellc publish`; the local mirror is
+   written explicitly with `cellc publish --offline`.
 
 Rationale:
 
 - Does not block the v0.12 stable release.
-- Zero infrastructure cost: only GitHub repositories, no API servers.
-- Publishing is a single command (`cellc publish`) followed by a git tag
-  push — no PR to an external index repository required for version updates.
-- The discovery index rarely changes; version metadata travels with the
-  source, like Go's `go.mod` / `go.sum`.
-- The CKB ecosystem is currently small enough that a full registry service
-  would be over-engineering.
+- `cellc publish` has the expected package-registry semantics: after successful
+  authentication and queue admission, the registry has a new addressable entry.
+- The read path can remain CDN/static and independently verifiable.
+- Git/source mirrors remain valuable for audit, local fixtures, and fallback.
+- Namespace ownership, maintainer ACLs, yanking, quarantine, quotas, and abuse
+  controls need one authoritative write boundary.
+- The CKB ecosystem can start with a small write service because expensive
+  verification work is asynchronous and bounded.
 
 ### Discovery Index Repository
 
@@ -905,15 +1057,15 @@ URL — no version details:
 }
 ```
 
-This file is created once when a new package is registered. Subsequent
-version releases do not require updating this file — the version index
-lives in the source repository itself.
+This file is created or updated when a package is claimed, transferred, or
+moved. Subsequent version releases do not require a discovery update unless
+the source location or ownership metadata changes.
 
 ### Per-Package Version Index (registry.json)
 
-Each source repository contains a `registry.json` file at its root,
-alongside `Cell.toml`. This file is automatically generated and updated
-by `cellc publish`:
+The registry service stores the canonical per-package version entry. The same
+shape can be mirrored to a `registry.json` file at the source repository root,
+alongside `Cell.toml`, for audit and offline use:
 
 ```json
 {
@@ -950,27 +1102,57 @@ a separate archive storage layer.
 ### Publishing Flow
 
 ```bash
-# Publish a new version (automatic)
+# First use, or after credential expiry/revocation
+cellc auth capability create --principal-id <principal_id> --scope publish:cellscript/amm_pool --expires 90d --json > capability-payload.json
+cellc auth capability submit --payload capability-payload.json --joyid-signature joyid-signature.json
+
+# Publish a new version to the registry
 cellc publish
 # → reads Cell.toml
 # → computes source_hash from current source tree
 # → reads build artifacts for abi_hash, schema_hash, etc.
-# → appends new version entry to registry.json
-# → creates registry.json if it does not exist
+# → signs publish payload with the local publisher credential
+# → submits to the registry write API
+# → returns canonical registry URL and an initial entry state
 
-# Commit and tag (manual or scripted)
+# Optional audit/offline mirror
+cellc publish --offline
 git add registry.json
 git commit -m "publish v1.2.0"
 git tag v1.2.0
 git push --tags
 ```
 
-No PR to an external registry repository is required for version updates.
-The version metadata lives in the source repository and is retrieved
-when `cellc install` clones the tagged version.
+No PR to an external registry repository is required for ordinary version
+updates. The registry entry is authoritative for public discovery, while the
+source repository mirror helps consumers audit and reproduce the same metadata
+when `cellc install` clones a tagged version.
 
-The discovery index repository only needs a one-time PR when registering
-a brand-new package (adding its `namespace/name.json` with the source URL).
+The discovery index only changes when claiming a brand-new package, changing
+source location, or changing ownership metadata.
+
+Initial entry visibility is staged:
+
+```text
+source_published  -> direct URL and author dashboard visible
+indexed_pending   -> waiting for asynchronous verifier/indexer workers
+verified_build    -> build evidence accepted
+deployed          -> deployment facts attached and verified locally
+on_chain_attested -> feature-gated JoyID/chain-backed deployment attestation
+deprecated/yanked -> historical entry retained, default resolution suppressed
+quarantined       -> direct URL retained, default search suppressed
+```
+
+The default resolver must not automatically select `source_published`,
+`indexed_pending`, or `quarantined` entries. Direct installs may target those
+entries only with an explicit risk flag such as `--allow-unverified`; quarantine
+requires a stronger explicit flag such as `--allow-quarantined`. Default search,
+recommendations, and production-visible package lists only include entries that
+passed the required baseline checks.
+
+A mirrored `registry.json` version entry with no `status` is treated as
+`source_published`, not as verified. Public registry writes must emit an
+explicit status; legacy mirrors need explicit risk flags before direct install.
 
 ### Installation Flow
 
@@ -988,14 +1170,69 @@ Internally:
 5. Verify `source_hash` matches the current source tree.
 6. Parse `Cell.toml` and resolve transitive dependencies.
 
+### Write Path DDoS and Spam Boundary
+
+Once `cellc publish` writes to the public registry, the write API is part of
+the security boundary. The read and write paths must stay separate:
+
+```text
+registry.cellscript.dev
+  -> static website
+  -> cached JSON indexes
+  -> immutable mirrored metadata / artifact URLs
+
+api.registry.cellscript.dev
+  -> WAF / edge limits
+  -> schema fail-fast
+  -> auth and ACL checks
+  -> quota and deduplication
+  -> object storage
+  -> bounded verification queues
+```
+
+Synchronous publish checks must remain cheap:
+
+- signature, nonce, expiry, origin, and credential revocation;
+- namespace/package ownership and scoped permission checks;
+- request body size, metadata field length, tarball/artifact size caps;
+- manifest/schema validation;
+- `source_hash` / `manifest_hash` sanity and duplicate-hash rejection;
+- idempotency keys for retry-safe publishes;
+- per IP, ASN, JoyID principal, credential, namespace, and package quotas.
+
+Expensive work is asynchronous:
+
+- source mirror fetches;
+- full build reproduction;
+- artifact, ABI, schema, and constraint verification;
+- deployment-fact verification;
+- chain RPC reads;
+- search indexing and ranking.
+
+JoyID signatures are identity evidence, not an anti-spam mechanism by
+themselves. New namespace claims, high-volume publishing, typosquatting-risk
+names, and on-chain deployment attestations may require cooldown, review, or
+community challenge. The first production source-package write path does not
+require an on-chain fee or bond, but the schema and policy hooks must allow
+later fee, refundable-deposit, or challengeable-record rules for higher-risk
+actions. Suspicious packages move to quarantine rather than being silently
+deleted, so exact pins and incident reviews remain reproducible.
+
 ### CLI Integration
 
 ```bash
-# Register a new package in the discovery index (one-time)
+# Authorise a local publisher credential with JoyID-rooted identity
+cellc auth capability create --principal-id <principal_id> --scope publish:cellscript/amm --expires 90d --json > capability-payload.json
+cellc auth capability submit --payload capability-payload.json --joyid-signature joyid-signature.json
+
+# Publish a new version to the registry
+cellc publish
+
+# Optional local/offline discovery mirror
 cellc registry add --namespace cellscript --name amm --source https://github.com/cellscript/amm
 
-# Publish a new version (updates registry.json in the source repo)
-cellc publish
+# Yank an existing version while preserving exact-pin warning metadata
+cellc registry edit --yank 1.2.0 --reason "security advisory" --replaced-by 1.2.1
 
 # Install from the source registry
 cellc install cellscript/amm@1.2.0
@@ -1249,7 +1486,7 @@ this. No code change needed; the document should reference this convention.
 #### 2. Cell.lock Version — Dual Version Identifier
 
 **Gap**: `version = 1` and `lock_schema = "cellscript-lock-v1"` are redundant.
-No migration path is defined for v1 → v2.
+No migration path is defined between lockfile schema generations.
 
 **Resolution**: Remove `lock_schema`. The `version` field is sufficient —
 it is an integer that increments on breaking schema changes. Migration
@@ -1367,25 +1604,38 @@ matches the `version` field.
 }
 ```
 
-Phase 1 keeps `yanked` as a simple boolean. `cellc install` warns when
-resolving a yanked version and suggests the latest non-yanked version.
-Existing `Cell.lock` entries referencing yanked versions are not
-automatically broken — the lockfile is the source of truth.
+The resolver keeps `yanked` as a boolean for normal selection (yanked versions
+are filtered out by `find_matching_version`), and additionally carries the
+Phase 2 metadata fields `yanked_at`, `yanked_reason`, and `replaced_by`. When a
+yanked version is reached through an exact `=x.y.z` pin, the resolver emits a
+warning to stderr that names the reason and suggests the `replaced_by` version
+(or the latest non-yanked version when no `replaced_by` is declared). Existing
+`Cell.lock` entries referencing yanked versions are not automatically broken —
+the lockfile is the source of truth.
 
 #### 10. Dependency Version Conflict Resolution
 
 **Gap**: No defined strategy when two dependencies require different
 versions of the same package.
 
-**Resolution**: Phase 1 uses Cargo's strategy — unified resolution:
+**Resolution**: The resolver uses a conservative single-version strategy:
 
 - A single version of each package exists in the dependency graph.
 - If `amm` requires `token ^0.3.0` and `vesting` requires `token ^0.3.1`,
-  the resolver picks `token 0.3.2` (latest satisfying both constraints).
-- If no version satisfies all constraints, `cellc build` fails with a
-  version conflict error.
-- Phase 2 may support multiple versions (like Go's `MVS` + `replace`),
-  but Phase 1 keeps it simple: one version per package per graph.
+  the resolver picks `token 0.3.2` when that version is the latest version
+  satisfying the first resolved constraint and also satisfies the later
+  constraint.
+- If a transitive request names a version requirement that the already-selected
+  version does not satisfy, resolution **fails closed** with a
+  `version conflict for '<pkg>': already resolved to '<v>', which does not
+  satisfy requirement '<req>'` error, instead of silently keeping whichever
+  version was resolved first.
+- The current implementation does not backtrack or re-solve the whole graph
+  when a later constraint would require a different still-compatible version;
+  that remains future resolver work.
+- Future work may support multiple versions (like Go's `MVS` + `replace`),
+  but the current resolver keeps it simple: one version per package per graph,
+  with fail-closed conflict detection.
 
 #### 11. Discovery Index Format Version
 
@@ -1443,6 +1693,22 @@ For Phase 1, only `ckb` platform is supported.
 
 ## Phased Implementation
 
+### Public Registry Publication Policy
+
+`cellc publish` is the public registry write path: it authenticates the
+publisher, checks ACL/scope/quota, admits a package entry, and returns a
+canonical registry URL. Git commits, Git tags, and `registry.json` remain audit,
+mirror, local-fixture, and offline-fallback surfaces; they are not the public
+registry admission authority.
+
+| Policy | Evidence |
+|---|---|
+| JoyID-rooted publisher identity | `cellc auth capability create --principal-id <principal_id> --scope publish:ns/pkg --expires 90d --json > capability-payload.json` plus `cellc auth capability submit --payload capability-payload.json --joyid-signature joyid-signature.json` uses the CCC-backed JoyID flow, records `principal_type = joyid_ckb`, binds `principal_id` to a local publisher credential, and stores that credential in the OS keychain |
+| Scoped publisher credentials | Capability-style signing key with namespace/package/action scopes, expiry, revocation, nonce/origin checks, and CI-safe delegation |
+| Namespace/package ACL | Namespace owners, package maintainers, yanking authority, attestation authority, maintainer rotation, and source-location update permissions |
+| Abuse controls | Separate static read path from write API; WAF/rate limits/body caps/hash dedup/bounded queues/quarantine/cooldown; fee/bond rules remain later policy hooks |
+| Entry visibility state machine | `source_published` -> `indexed_pending` -> `verified_build` -> `deployed` -> `on_chain_attested`; `deprecated`/`yanked`/`quarantined` suppress default search without deleting history |
+
 ### Phase 0 — No Block on v0.12
 
 The v0.12 release ships without registry support. The existing
@@ -1460,7 +1726,7 @@ implications from the audit above.
 | 1 | Add `namespace` to `PackageInfo` and `DetailedDependency` | `Cell.toml` with `namespace` parses correctly; `cellc init --namespace` sets it | — |
 | 2 | Extend `LockedSource::Registry` with `namespace`, `url`, `revision` | `Cell.lock` writes registry deps with git provenance; re-verification works without discovery index | #2 |
 | 3 | Remove `lock_schema` from Cell.lock; keep `version = 1` | Single version identifier; no dual version confusion | #2 |
-| 4 | Add `schema_version: 1` to `registry.json` format | `cellc publish` writes `schema_version`; `cellc install` rejects unknown versions | #5 |
+| 4 | Add `schema_version: 1` to `registry.json` format | `cellc publish --offline` writes `schema_version`; `cellc install` rejects unknown versions | #5 |
 | 5 | Fix `registry.json` dependencies to include namespace | `dependencies: { "token": { "namespace": "cellscript", "version": "0.3.0" } }` | #4 |
 | 6 | Remove `schema` string from Deployed.toml; keep `version = 1` | Single version identifier; parser accepts both old manifest and new Deployed.toml | #3 |
 | 7 | Define canonical network table (mainnet/aggron4/devnet) | `cellc deploy --network aggron4` writes correct `network` + `chain_id` | #12 |
@@ -1480,26 +1746,26 @@ implications from the audit above.
 
 | Work | Evidence |
 |---|---|
-| Deployment status lifecycle | candidate → active → deprecated → revoked state machine |
-| TYPE_ID upgrade lineage tracking | Deployed.toml records type-id lineage and verifies upgrade chain |
-| Publisher signature binding | Deployed.toml optionally includes publisher identity and signature metadata |
+| Deployment status lifecycle | `DeploymentStatus` enum (candidate/active/deprecated/revoked); `cellc registry verify` and generated builders fail closed unless status is `active` |
+| TYPE_ID upgrade lineage tracking | `Deployed.toml` carries `upgrade_lineage`; `cellc registry verify` rejects self-referential and empty lineage (off-chain consistency; on-chain TYPE_ID upgrade-chain proof remains a live-RPC concern) |
+| Publisher signature binding | `Deployed.toml` optionally carries `publisher_signature`; `cellc registry verify --require-publisher-signature` enforces presence (metadata-presence only; cryptographic verification is a later security milestone) |
+| Yanking metadata | `registry.json` version entries carry `yanked_at`, `yanked_reason`, `replaced_by`; resolver warns and suggests the replacement when a yanked version is reached |
 | `cellc deploy-plan` / `cellc verify-deploy` / `cellc lock-deps` | CLI commands emit or verify deployment registry records |
 | Stale-deployment rejection | Builder refuses to build when deployment record does not match package metadata |
 | Registry mismatch fixtures | Wrong network, wrong code hash, stale metadata hash, missing CellDep, deprecated deployment rejection paths |
-| On-chain type script index (if needed) | Optional chain-indexed deployment lookup driven by ecosystem demand |
+| On-chain type script index (if needed) | Deferred — optional chain-indexed deployment lookup driven by ecosystem demand |
 
-### Phase 3 — Optional Cache Proxy (Ecosystem-Driven)
+### Phase 3 — Read-Path Scaling and Cross-Profile Registry
 
-The Git-based registry is the **permanent canonical path**, not a temporary
-placeholder. Phase 3 adds an optional caching layer (like `proxy.golang.org`)
-if ecosystem scale demands it. The Git path always remains the primary
-resolution mechanism; the proxy is a transparent cache, not a replacement.
+The registry write service is the public admission authority. The read path is
+static, cacheable, and mirrorable; Git/source mirrors remain an audit and
+fallback mechanism, not the public write authority.
 
 | Work | Evidence |
 |---|---|
-| Optional registry proxy | `proxy.cellscript.org` caches discovery index and source repos; `cellc install` falls back to direct Git if proxy unavailable |
+| Static registry proxy | `registry.cellscript.dev` / `proxy.cellscript.dev` serves cached indexes, source mirrors, and immutable metadata; `cellc install` falls back to direct Git if cache entries are unavailable |
 | Yanking and supersession | Index supports `yanked` flag and supersession metadata |
-| Maintainer rotation | Namespace owner key management and rotation |
+| Maintainer rotation | Namespace owner principal and publisher credential rotation |
 | Cross-protocol CellFabric registry discovery | Registry-backed protocol discovery for multi-protocol intent composition |
 | Reproducible build proofs | Optional build attestation and verification beyond hash matching |
 | Audit signature requirement | Packages require audit signatures before being marked production-ready |
@@ -1508,14 +1774,14 @@ resolution mechanism; the proxy is a transparent cache, not a replacement.
 
 ### Should CellScript eventually have its own source registry, or reuse/adapt an existing registry protocol?
 
-CellScript uses a two-tier Git-based registry as its permanent canonical
-mechanism, not a temporary placeholder. The discovery index (a lightweight
-Git repo) maps `namespace/name` to source repository URLs. The per-package
-`registry.json` (in the source repo) carries version metadata. This model
-is inspired by Go's approach: source lives in its own repo, metadata travels
-with the source. An optional proxy cache (like `proxy.golang.org`) can be
-added later if ecosystem scale demands it, but the Git path always remains
-the primary resolution mechanism.
+CellScript should have its own small registry write service because
+`cellc publish` must create a public registry entry, enforce namespace/package
+ownership, and handle yanking, quarantine, and abuse controls. The read path
+should remain Go-like and cacheable: discovery maps `namespace/name` to source
+URLs, per-package metadata can be mirrored as `registry.json`, and clients
+verify hashes rather than trusting transport. Git/source mirrors are permanent
+audit and fallback surfaces, but public write authority belongs to the registry
+service.
 
 ### What is the minimal useful CKB deployment record without wasting capacity?
 
@@ -1555,10 +1821,13 @@ Any failure in this chain causes fail-closed rejection.
 
 ### Who should own namespaces and maintainer keys?
 
-Phase 1 does not enforce namespace governance. Phase 2 introduces namespace
-owner keys with rotation support. The specific governance model (centralized,
-decentralized, or foundation-managed) is an ecosystem-level decision that
-should not be hard-coded into the initial implementation.
+Namespace ownership is the core registry ACL. A namespace has owner principals;
+packages have maintainer principals; publisher credentials are scoped to
+actions such as `publish`, `yank`, `attest`, and `manage-maintainers`. The root
+publisher principal is `joyid_ckb`, while daily operations use delegated
+publisher credentials that can expire and be revoked. The exact bootstrap
+policy for first namespace claim (review, cooldown, reserved namespaces, or
+later fee/bond hooks) is an ecosystem decision.
 
 ### Should reproducible build proofs or audit signatures be required before a package is considered production-ready?
 
@@ -1570,19 +1839,36 @@ support the mechanism; the policy should be set by the community.
 
 ### How should yanking, supersession, and maintainer rotation work?
 
-Phase 2 adds a `yanked` flag to the index and `deprecated`/`revoked` status
-to deployment records. Supersession metadata links a deprecated record to its
-replacement. Maintainer rotation uses namespace owner keys. The specific
-governance process is deferred to ecosystem discussion.
+Yanking is a scoped maintainer action over a package version. The index keeps
+`yanked`, `yanked_at`, `yanked_reason`, and `replaced_by` metadata so exact pins
+can warn without destroying history. Supersession metadata links a deprecated
+or yanked record to its replacement. Maintainer rotation is performed by
+namespace owners by adding/revoking scoped publisher credentials and package
+maintainer principals. Quarantine is separate from yanking: it is an abuse or
+risk-control state that suppresses default search while preserving direct URL
+and audit history.
+
+Package versions are not hard-deleted from registry history. If legal, security,
+or clearly malicious content must be hidden, public access to the artifact or
+source snapshot may be disabled, but the registry must retain a tombstone,
+package history, audit record, actor identity, reason, and timestamps.
 
 ## Non-Goals
 
 - Do not replace CCC. The Action Builder consumes deployment records; it does
   not become a wallet, indexer, or chain submission layer.
+- Do not introduce a separate registry account system alongside JoyID-rooted
+  publisher identity.
+- Do not require an interactive JoyID signature for every `cellc publish`;
+  JoyID authorises scoped publisher credentials, and credentials sign daily
+  publish payloads.
 - Do not introduce hidden signer authority or hidden sighash defaults.
 - Do not infer transaction semantics from protocol/action names.
 - Do not treat package registry resolution as deployment verification. These
   are separate layers with separate verification obligations.
+- Do not make the public website or registry read path call CKB RPC for ordinary
+  browsing/search. Chain checks belong in asynchronous workers or explicit
+  verifier commands.
 - Do not mark a deployment mainnet-certified without external audit and chain
   evidence.
 - Do not make builder success a substitute for CKB VM acceptance.

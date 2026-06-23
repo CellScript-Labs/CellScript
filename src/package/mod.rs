@@ -251,6 +251,89 @@ pub struct ResolvedPackage {
     pub source_hash: Option<String>,
 }
 
+/// Emit yank-related notices to stderr during registry resolution.
+///
+/// The registry resolver never silently picks a yanked version for a range
+/// request (yanked entries are filtered out by `find_matching_version`). A
+/// yanked version can only be reached when the caller pins it explicitly (for
+/// example via an `=x.y.z` exact requirement or a lockfile that names it). In
+/// that case we warn and suggest the latest non-yanked version, honouring the
+/// Phase 1 contract that resolving a yanked version is surfaced to the user
+/// rather than failing or passing silently.
+fn emit_yank_notices(namespace: &str, name: &str, requested: &str, selected: &str, index: &registry::RegistryIndex) {
+    let Some(entry) = index.versions.iter().find(|v| v.version == selected) else {
+        return;
+    };
+    if !entry.yanked {
+        return;
+    }
+    // Prefer the publisher-declared replacement (`replaced_by`) when present;
+    // otherwise fall back to the latest non-yanked version.
+    let suggestion = entry.replaced_by.clone().or_else(|| {
+        index.versions.iter().filter(|v| !v.yanked && v.version != selected).map(|v| v.version.clone()).max_by(|a, b| {
+            let a_parts = parse_numeric_version(a);
+            let b_parts = parse_numeric_version(b);
+            compare_version_tuples(&a_parts, &b_parts)
+        })
+    });
+    let reason = entry.yanked_reason.as_deref().map(|r| format!(" (reason: {})", r)).unwrap_or_default();
+    match suggestion {
+        Some(v) => eprintln!(
+            "warning: {}/{}@{} resolves to yanked version {}{}; consider upgrading to {}",
+            namespace, name, requested, selected, reason, v
+        ),
+        None => eprintln!(
+            "warning: {}/{}@{} resolves to yanked version {}{} with no non-yanked alternative published",
+            namespace, name, requested, selected, reason
+        ),
+    }
+}
+
+fn registry_resolution_blocked_error(
+    namespace: &str,
+    name: &str,
+    requested: &str,
+    version: &registry::RegistryVersion,
+    policy: registry::RegistryResolutionPolicy,
+) -> CompileError {
+    let reason = version
+        .resolver_block_reason(policy, matches!(crate::package::version::parse_version_req(requested), Ok(VersionReq::Exact(_))));
+    let status = version.effective_status();
+    let hint = match reason {
+        Some("unverified") => "use --allow-unverified for an explicit direct install, or wait until the entry reaches verified_build",
+        Some("quarantined") => "use --allow-quarantined only for an explicit incident-review install",
+        Some("deprecated") => "pin the version exactly or select a non-deprecated replacement",
+        Some("yanked") => "pin the version exactly or select a non-yanked replacement",
+        _ => "select a version that is eligible for default registry resolution",
+    };
+
+    CompileError::without_span(format!(
+        "registry package '{}/{}@{}' matched version '{}' but status '{}' is not eligible for default resolution; {}",
+        namespace,
+        name,
+        requested,
+        version.version,
+        status.as_str(),
+        hint
+    ))
+}
+
+fn parse_numeric_version(version: &str) -> Vec<u32> {
+    let core = version.split_once('-').map(|(c, _)| c).unwrap_or(version);
+    core.split('.').filter_map(|p| p.parse().ok()).collect()
+}
+
+fn compare_version_tuples(a: &[u32], b: &[u32]) -> std::cmp::Ordering {
+    let max_len = a.len().max(b.len());
+    for i in 0..max_len {
+        match a.get(i).cmp(&b.get(i)) {
+            std::cmp::Ordering::Equal => continue,
+            other => return other,
+        }
+    }
+    std::cmp::Ordering::Equal
+}
+
 #[derive(Debug, Clone)]
 pub enum PackageSource {
     Local(PathBuf),
@@ -385,6 +468,27 @@ dist/
         Ok(())
     }
 
+    /// Extract the version-requirement string carried by a dependency, if any.
+    ///
+    /// Path and git dependencies without a meaningful version return `None`,
+    /// which the unified resolver treats as "no constraint to check". Only
+    /// registry dependencies (Simple or Detailed with a version) contribute a
+    /// constraint that must be reconciled across the graph.
+    fn version_requirement_of(&self, dep: &Dependency) -> Option<String> {
+        match dep {
+            Dependency::Simple(version) => Some(version.clone()),
+            Dependency::Detailed(detailed) => {
+                // Path/git sources and wildcard versions carry no constraint
+                // for the unified resolver to reconcile across the graph.
+                if detailed.path.is_some() || detailed.git.is_some() || detailed.version.is_empty() || detailed.version == "*" {
+                    None
+                } else {
+                    Some(detailed.version.clone())
+                }
+            }
+        }
+    }
+
     fn resolve_dependency_from_root(&mut self, name: &str, dep: &Dependency, base_root: &Path, stack: &mut Vec<String>) -> Result<()> {
         if stack.iter().any(|item| item == name) {
             let mut cycle = stack.clone();
@@ -392,7 +496,21 @@ dist/
             return Err(CompileError::without_span(format!("Circular dependency detected: {}", cycle.join(" -> "))));
         }
 
-        if self.resolved.contains_key(name) {
+        // Unified (single-version-per-package) resolution: if this package was
+        // already resolved elsewhere in the graph, the new version requirement
+        // must be satisfied by the already-selected version. If it is not, the
+        // dependency graph is unsatisfiable and we fail closed instead of
+        // silently keeping whichever version was resolved first.
+        if let Some(existing) = self.resolved.get(name) {
+            if let Some(req_str) = self.version_requirement_of(dep) {
+                let req = version::parse_version_req(&req_str)?;
+                if !version::satisfies(&existing.version, &req) {
+                    return Err(CompileError::without_span(format!(
+                        "version conflict for '{}': already resolved to '{}', which does not satisfy requirement '{}'",
+                        name, existing.version, req_str
+                    )));
+                }
+            }
             return Ok(());
         }
 
@@ -400,7 +518,8 @@ dist/
 
         let (resolved, child_dependencies) = match dep {
             Dependency::Simple(version) => {
-                let (resolved, manifest) = self.resolve_from_registry_with_manifest(name, version, None)?;
+                let (resolved, manifest) =
+                    self.resolve_from_registry_with_manifest(name, version, None, registry::RegistryResolutionPolicy::default())?;
                 (resolved, manifest.dependencies)
             }
             Dependency::Detailed(detailed) => {
@@ -412,7 +531,12 @@ dist/
                     (resolved, manifest.dependencies)
                 } else {
                     let ns = detailed.namespace.as_deref();
-                    let (resolved, manifest) = self.resolve_from_registry_with_manifest(name, &detailed.version, ns)?;
+                    let (resolved, manifest) = self.resolve_from_registry_with_manifest(
+                        name,
+                        &detailed.version,
+                        ns,
+                        registry::RegistryResolutionPolicy::default(),
+                    )?;
                     (resolved, manifest.dependencies)
                 }
             }
@@ -434,7 +558,19 @@ dist/
     }
 
     pub fn resolve_from_registry_with_namespace(&self, name: &str, version: &str, namespace: Option<&str>) -> Result<ResolvedPackage> {
-        let (resolved, _) = self.resolve_from_registry_with_manifest(name, version, namespace)?;
+        let (resolved, _) =
+            self.resolve_from_registry_with_manifest(name, version, namespace, registry::RegistryResolutionPolicy::default())?;
+        Ok(resolved)
+    }
+
+    pub fn resolve_from_registry_with_namespace_and_policy(
+        &self,
+        name: &str,
+        version: &str,
+        namespace: Option<&str>,
+        policy: registry::RegistryResolutionPolicy,
+    ) -> Result<ResolvedPackage> {
+        let (resolved, _) = self.resolve_from_registry_with_manifest(name, version, namespace, policy)?;
         Ok(resolved)
     }
 
@@ -443,6 +579,7 @@ dist/
         name: &str,
         version: &str,
         namespace: Option<&str>,
+        policy: registry::RegistryResolutionPolicy,
     ) -> Result<(ResolvedPackage, PackageManifest)> {
         // 1. Determine namespace: explicit > consuming package namespace > error
         let resolved_namespace = namespace
@@ -503,9 +640,13 @@ dist/
                 resolved_namespace, name, reg_index.namespace, reg_index.name
             )));
         }
-        let selected_version = reg_index.find_matching_version(version).cloned().ok_or_else(|| {
+        let selected_version = reg_index.find_matching_version_for_resolution(version, policy).cloned().ok_or_else(|| {
+            if let Some(blocked) = reg_index.find_matching_version_allowing_yanked_pin(version) {
+                return registry_resolution_blocked_error(&resolved_namespace, name, version, blocked, policy);
+            }
             CompileError::without_span(format!("no matching version found for '{}/{}@{}'", resolved_namespace, name, version))
         })?;
+        emit_yank_notices(&resolved_namespace, name, version, &selected_version.version, &reg_index);
         if selected_version.source_hash.is_empty() {
             return Err(CompileError::without_span(format!(
                 "registry package '{}/{}@{}' has no source_hash in registry.json",
@@ -545,6 +686,12 @@ dist/
                 "registry package '{}/{}@{}' has no source_hash in registry.json",
                 resolved_namespace, name, tagged_version.version
             )));
+        }
+        if tagged_version
+            .resolver_block_reason(policy, matches!(crate::package::version::parse_version_req(version), Ok(VersionReq::Exact(_))))
+            .is_some()
+        {
+            return Err(registry_resolution_blocked_error(&resolved_namespace, name, version, tagged_version, policy));
         }
         let computed_source_hash = registry::compute_source_hash(&clone_dir)?;
         if computed_source_hash != tagged_version.source_hash {

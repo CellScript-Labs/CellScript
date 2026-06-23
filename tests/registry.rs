@@ -10,7 +10,8 @@
 //! - Fail-closed verification on hash mismatch
 
 use cellscript::package::registry::{
-    compute_source_hash, DiscoveryEntry, DiscoveryIndex, RegistryAuditInfo, RegistryDependencyRef, RegistryIndex, RegistryVersion,
+    compute_source_hash, DiscoveryEntry, DiscoveryIndex, RegistryAuditInfo, RegistryDependencyRef, RegistryEntryStatus, RegistryIndex,
+    RegistryResolutionPolicy, RegistryVersion,
 };
 use cellscript::package::{
     DeployedBuildInfo, DeployedManifest, DeployedPackageInfo, DeploymentCellDep, DeploymentRecord, DeploymentStatus, LockedBuildInfo,
@@ -189,7 +190,11 @@ fn registry_index_write_read_round_trip() {
             schema_hash: None,
             license: Some("MIT".to_string()),
             released_at: None,
+            status: cellscript::package::registry::RegistryEntryStatus::VerifiedBuild,
             yanked: false,
+            yanked_at: None,
+            yanked_reason: None,
+            replaced_by: None,
             audit: None,
         }],
     };
@@ -220,7 +225,11 @@ fn registry_index_append_version_creates_new_file() {
         schema_hash: None,
         license: None,
         released_at: None,
+        status: cellscript::package::registry::RegistryEntryStatus::VerifiedBuild,
         yanked: false,
+        yanked_at: None,
+        yanked_reason: None,
+        replaced_by: None,
         audit: None,
     };
 
@@ -247,7 +256,11 @@ fn registry_index_append_version_updates_existing() {
         schema_hash: None,
         license: None,
         released_at: None,
+        status: cellscript::package::registry::RegistryEntryStatus::VerifiedBuild,
         yanked: false,
+        yanked_at: None,
+        yanked_reason: None,
+        replaced_by: None,
         audit: None,
     };
     RegistryIndex::append_version(temp.path(), "pkg", "ns", v1).unwrap();
@@ -262,7 +275,11 @@ fn registry_index_append_version_updates_existing() {
         schema_hash: None,
         license: None,
         released_at: None,
+        status: cellscript::package::registry::RegistryEntryStatus::VerifiedBuild,
         yanked: false,
+        yanked_at: None,
+        yanked_reason: None,
+        replaced_by: None,
         audit: None,
     };
     RegistryIndex::append_version(temp.path(), "pkg", "ns", v2).unwrap();
@@ -281,7 +298,11 @@ fn registry_index_append_version_updates_existing() {
         schema_hash: None,
         license: None,
         released_at: None,
+        status: cellscript::package::registry::RegistryEntryStatus::VerifiedBuild,
         yanked: true,
+        yanked_at: None,
+        yanked_reason: None,
+        replaced_by: None,
         audit: None,
     };
     RegistryIndex::append_version(temp.path(), "pkg", "ns", v1_updated).unwrap();
@@ -312,7 +333,11 @@ fn registry_index_with_dependencies_and_audit() {
         schema_hash: Some("0xdef".to_string()),
         license: Some("Apache-2.0".to_string()),
         released_at: Some("2026-05-07T00:00:00Z".to_string()),
+        status: cellscript::package::registry::RegistryEntryStatus::VerifiedBuild,
         yanked: false,
+        yanked_at: None,
+        yanked_reason: None,
+        replaced_by: None,
         audit: Some(RegistryAuditInfo { report_hash: Some("0x5555".to_string()), acceptance_gate: Some("passed".to_string()) }),
     };
 
@@ -659,7 +684,11 @@ fn publish_flow_computes_source_hash_and_writes_registry_json() {
         schema_hash: None,
         license: None,
         released_at: None,
+        status: cellscript::package::registry::RegistryEntryStatus::VerifiedBuild,
         yanked: false,
+        yanked_at: None,
+        yanked_reason: None,
+        replaced_by: None,
         audit: None,
     };
 
@@ -700,7 +729,11 @@ fn full_publish_install_verify_flow_with_local_git() {
         schema_hash: None,
         license: Some("MIT".to_string()),
         released_at: None,
+        status: cellscript::package::registry::RegistryEntryStatus::VerifiedBuild,
         yanked: false,
+        yanked_at: None,
+        yanked_reason: None,
+        replaced_by: None,
         audit: None,
     };
     RegistryIndex::append_version(&source_repo, "token", "cellscript", version).unwrap();
@@ -765,7 +798,11 @@ fn package_manager_resolves_registry_dependency_with_source_hash_from_local_git_
             schema_hash: None,
             license: None,
             released_at: None,
+            status: cellscript::package::registry::RegistryEntryStatus::VerifiedBuild,
             yanked: false,
+            yanked_at: None,
+            yanked_reason: None,
+            replaced_by: None,
             audit: None,
         },
     )
@@ -821,6 +858,154 @@ namespace = "cellscript"
 }
 
 #[test]
+fn package_manager_rejects_unverified_registry_entry_by_default() {
+    let temp = tempfile::tempdir().unwrap();
+
+    let source_repo = temp.path().join("source-repo");
+    std::fs::create_dir_all(&source_repo).unwrap();
+    create_minimal_package(&source_repo, "token", "0.3.0", Some("cellscript"));
+    let source_hash = compute_source_hash(&source_repo).unwrap();
+    RegistryIndex::append_version(
+        &source_repo,
+        "token",
+        "cellscript",
+        RegistryVersion {
+            version: "0.3.0".to_string(),
+            tag: "v0.3.0".to_string(),
+            source_hash,
+            cellscript_version: "0.20.0".to_string(),
+            dependencies: BTreeMap::new(),
+            abi_index: None,
+            schema_hash: None,
+            license: None,
+            released_at: None,
+            status: RegistryEntryStatus::SourcePublished,
+            yanked: false,
+            yanked_at: None,
+            yanked_reason: None,
+            replaced_by: None,
+            audit: None,
+        },
+    )
+    .unwrap();
+    git_init(&source_repo);
+    git_add_all(&source_repo);
+    git_commit(&source_repo, "publish token");
+    git_tag(&source_repo, "v0.3.0");
+
+    let registry_repo = temp.path().join("registry-repo");
+    std::fs::create_dir_all(registry_repo.join("cellscript")).unwrap();
+    git_init(&registry_repo);
+    let entry = DiscoveryEntry {
+        name: "token".to_string(),
+        namespace: "cellscript".to_string(),
+        source: source_repo.to_string_lossy().to_string(),
+    };
+    std::fs::write(registry_repo.join("cellscript/token.json"), serde_json::to_string_pretty(&entry).unwrap()).unwrap();
+    git_add_all(&registry_repo);
+    git_commit(&registry_repo, "add token");
+
+    let consumer = temp.path().join("consumer");
+    std::fs::create_dir_all(consumer.join("src")).unwrap();
+    std::fs::write(
+        consumer.join("Cell.toml"),
+        r#"
+[package]
+name = "consumer"
+version = "0.1.0"
+namespace = "app"
+
+[dependencies.token]
+version = "0.3.0"
+namespace = "cellscript"
+"#,
+    )
+    .unwrap();
+    std::fs::write(consumer.join("src/main.cell"), "module consumer;\n").unwrap();
+
+    let _env = RegistryEnvGuard::new(&registry_repo);
+    let mut manager = PackageManager::new(&consumer);
+    let err = manager.resolve_dependencies().unwrap_err();
+    assert!(err.message.contains("status 'source_published'"), "unexpected error: {}", err.message);
+    assert!(err.message.contains("--allow-unverified"), "unexpected error: {}", err.message);
+}
+
+#[test]
+fn package_manager_allows_unverified_registry_entry_with_explicit_policy() {
+    let temp = tempfile::tempdir().unwrap();
+
+    let source_repo = temp.path().join("source-repo");
+    std::fs::create_dir_all(&source_repo).unwrap();
+    create_minimal_package(&source_repo, "token", "0.3.0", Some("cellscript"));
+    let source_hash = compute_source_hash(&source_repo).unwrap();
+    RegistryIndex::append_version(
+        &source_repo,
+        "token",
+        "cellscript",
+        RegistryVersion {
+            version: "0.3.0".to_string(),
+            tag: "v0.3.0".to_string(),
+            source_hash: source_hash.clone(),
+            cellscript_version: "0.20.0".to_string(),
+            dependencies: BTreeMap::new(),
+            abi_index: None,
+            schema_hash: None,
+            license: None,
+            released_at: None,
+            status: RegistryEntryStatus::SourcePublished,
+            yanked: false,
+            yanked_at: None,
+            yanked_reason: None,
+            replaced_by: None,
+            audit: None,
+        },
+    )
+    .unwrap();
+    git_init(&source_repo);
+    git_add_all(&source_repo);
+    git_commit(&source_repo, "publish token");
+    git_tag(&source_repo, "v0.3.0");
+
+    let registry_repo = temp.path().join("registry-repo");
+    std::fs::create_dir_all(registry_repo.join("cellscript")).unwrap();
+    git_init(&registry_repo);
+    let entry = DiscoveryEntry {
+        name: "token".to_string(),
+        namespace: "cellscript".to_string(),
+        source: source_repo.to_string_lossy().to_string(),
+    };
+    std::fs::write(registry_repo.join("cellscript/token.json"), serde_json::to_string_pretty(&entry).unwrap()).unwrap();
+    git_add_all(&registry_repo);
+    git_commit(&registry_repo, "add token");
+
+    let consumer = temp.path().join("consumer");
+    std::fs::create_dir_all(consumer.join("src")).unwrap();
+    std::fs::write(
+        consumer.join("Cell.toml"),
+        r#"
+[package]
+name = "consumer"
+version = "0.1.0"
+namespace = "app"
+"#,
+    )
+    .unwrap();
+    std::fs::write(consumer.join("src/main.cell"), "module consumer;\n").unwrap();
+
+    let _env = RegistryEnvGuard::new(&registry_repo);
+    let manager = PackageManager::new(&consumer);
+    let resolved = manager
+        .resolve_from_registry_with_namespace_and_policy(
+            "token",
+            "0.3.0",
+            Some("cellscript"),
+            RegistryResolutionPolicy { allow_unverified: true, allow_quarantined: false },
+        )
+        .unwrap();
+    assert_eq!(resolved.source_hash.as_deref(), Some(source_hash.as_str()));
+}
+
+#[test]
 fn package_manager_rejects_registry_source_hash_mismatch() {
     let temp = tempfile::tempdir().unwrap();
 
@@ -841,7 +1026,11 @@ fn package_manager_rejects_registry_source_hash_mismatch() {
             schema_hash: None,
             license: None,
             released_at: None,
+            status: cellscript::package::registry::RegistryEntryStatus::VerifiedBuild,
             yanked: false,
+            yanked_at: None,
+            yanked_reason: None,
+            replaced_by: None,
             audit: None,
         },
     )

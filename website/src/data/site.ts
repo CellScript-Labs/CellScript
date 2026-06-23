@@ -15,43 +15,176 @@ export const links = {
 };
 
 /**
- * The Token type definition from fungible_token.cell, used as an inline
- * replacement for cross-file `use cellscript::fungible_token::Token`
- * imports. The playground compiles a single source string in the
- * browser (no package resolver), so examples that import Token must
- * have the type inlined to compile standalone.
+ * Minimal type definitions used as inline replacements for cross-file
+ * imports. The browser playground compiles one source string, so package
+ * imports from examples/ need to become local declarations there.
  */
 const TOKEN_TYPE_INLINE = `resource Token has store, create, consume, replace, burn, relock {
     amount: u64,
     symbol: [u8; 8],
 }`;
 
-/**
- * Make a hero example source self-contained for single-file playground
- * compilation. Replaces `use cellscript::fungible_token::Token` with
- * the inline Token type definition. Other `use` imports (none currently
- * exist in the hero examples) are left as-is and will error in the
- * playground — which is honest behaviour (the user sees the limitation).
- */
-const makeStandalone = (source: string): string =>
-  source.replace(
-    /^use cellscript::fungible_token::Token\s*$/m,
-    TOKEN_TYPE_INLINE,
-  );
+const FUNGIBLE_TOKEN_TYPES_INLINE = `${TOKEN_TYPE_INLINE}
+
+resource MintAuthority has store, create, replace {
+    token_symbol: [u8; 8],
+    max_supply: u64,
+    minted: u64,
+}`;
+
+const AMM_POOL_TYPES_INLINE = `receipt LPReceipt has store, create, consume {
+    pool_id: Hash,
+    lp_amount: u64,
+    provider: Address,
+}
+
+shared Pool has store, create, replace {
+    token_a_symbol: [u8; 8],
+    token_b_symbol: [u8; 8],
+    reserve_a: u64,
+    reserve_b: u64,
+    total_lp: u64,
+    fee_rate_bps: u16,
+}`;
 
 /**
- * Full compilable source for each hero example, read from examples/ at
- * build time. The heroExamples array above uses truncated display
- * snippets ("// ... omitted") for the landing page; the playground
- * needs the real file so the WASM compiler can actually compile it.
- * Cross-file `use` imports are inlined so each source is self-contained.
+ * Make an example source self-contained for single-file playground
+ * compilation. The source files themselves remain unchanged; this is
+ * only the browser presentation copy.
  */
-export const exampleFullSources: Record<string, string> = {
-  token: makeStandalone(readFileSync(resolve(repoRoot, "examples", "token.cell"), "utf-8")),
-  nft: makeStandalone(readFileSync(resolve(repoRoot, "examples", "nft.cell"), "utf-8")),
-  amm: makeStandalone(readFileSync(resolve(repoRoot, "examples", "amm_pool.cell"), "utf-8")),
-  vesting: makeStandalone(readFileSync(resolve(repoRoot, "examples", "vesting.cell"), "utf-8")),
+const makeStandalone = (source: string): string =>
+  source
+    .replace(
+      /^use cellscript::fungible_token::Token\s*$/m,
+      TOKEN_TYPE_INLINE,
+    )
+    .replace(
+      /^use cellscript::fungible_token::\{\s*Token,\s*MintAuthority\s*\}\s*$/m,
+      FUNGIBLE_TOKEN_TYPES_INLINE,
+    )
+    .replace(
+      /^use cellscript::amm_pool::\{\s*Pool,\s*LPReceipt\s*\}\s*$/m,
+      AMM_POOL_TYPES_INLINE,
+    );
+
+export const playgroundExamples = [
+  { id: "token", label: "Fungible token", file: "examples/token.cell" },
+  { id: "nft", label: "NFT collection", file: "examples/nft.cell" },
+  { id: "amm", label: "AMM pool", file: "examples/amm_pool.cell" },
+  { id: "vesting", label: "Vesting flow", file: "examples/vesting.cell" },
+  { id: "launch", label: "Token launch", file: "examples/launch.cell" },
+  { id: "multisig", label: "Multisig wallet", file: "examples/multisig.cell" },
+  { id: "timelock", label: "Timelock escrow", file: "examples/timelock.cell" },
+  { id: "canonicalStyle", label: "Canonical style", file: "examples/language/canonical_style.cell" },
+  { id: "orderBook", label: "Order book", file: "examples/language/order_book.cell" },
+  { id: "languageRegistry", label: "Language registry", file: "examples/language/registry.cell" },
+  { id: "stdlib", label: "Stdlib constraints", file: "examples/language/stdlib.cell" },
+  { id: "ckbTypeIdCreate", label: "CKB TYPE_ID create", file: "examples/language/v0_14_ckb_type_id_create.cell" },
+  { id: "delegateVerify", label: "Delegate verify", file: "examples/language/v0_14_delegate_verify.cell" },
+  { id: "blake2bHash", label: "Blake2b hash lock", file: "examples/language/v0_14_hash_blake2b.cell" },
+  { id: "multiStepPipeline", label: "Spawn pipeline", file: "examples/language/v0_14_multi_step_pipeline.cell" },
+  { id: "witnessSource", label: "Witness source", file: "examples/language/v0_14_witness_source.cell" },
+  { id: "identityLifecycle", label: "Identity lifecycle", file: "examples/language/v0_15_identity_lifecycle.cell" },
+  { id: "scopedInvariant", label: "Scoped invariants", file: "examples/language/v0_15_scoped_invariant.cell" },
+] as const;
+
+const playgroundSourceNotes: Record<string, readonly string[]> = {
+  token: [
+    "Start here: this example shows the Cell lifecycle for a simple token.",
+    "Follow the consume/create/destroy lines; they are the core of CellScript.",
+  ],
+  nft: [
+    "Shows a larger asset model: collection state, NFT ownership, sale receipts, and royalties.",
+    "Use it after the token example; there are more moving parts.",
+  ],
+  amm: [
+    "Shows shared pool state and receipts for liquidity providers.",
+    "The important checks are reserve updates, fee bounds, and slippage protection.",
+  ],
+  vesting: [
+    "Shows time-based state: grants move through a small flow before tokens can be claimed.",
+    "Look for env::current_timepoint and the transition line.",
+  ],
+  launch: [
+    "Shows a launch transaction that creates several outputs at once.",
+    "The checks keep allocation totals, pool seed amount, and change output consistent.",
+  ],
+  multisig: [
+    "Shows receipt-style workflow around proposals, signatures, and execution records.",
+    "This is a larger example; focus first on create_wallet and propose_transfer.",
+  ],
+  timelock: [
+    "Shows absolute and relative lock timing.",
+    "The useful idea is that unlock conditions are explicit checks, not hidden wallet logic.",
+  ],
+  canonicalStyle: [
+    "Shows the recommended shape for source reads, witness data, and lock args.",
+    "The comments in the lock explain what is real authority and what is only decoded data.",
+  ],
+  orderBook: [
+    "Small local-data exercise for Vec operations and order matching.",
+    "It is not a full exchange; it teaches list operations inside verifier code.",
+  ],
+  languageRegistry: [
+    "Small local registry exercise for Vec insert, remove, set, truncate, and reverse.",
+    "Useful for learning collection operations without a full protocol around them.",
+  ],
+  stdlib: [
+    "Shows compiler-recognised std:: helpers that expand to ordinary verifier checks.",
+    "Use this when you want to see how preserve, transfer, claim, and settle are written.",
+  ],
+  ckbTypeIdCreate: [
+    "Shows TYPE_ID-style identity at the boundary between source, metadata, and builder evidence.",
+    "The source declares intent; deployment still needs builder-side evidence.",
+  ],
+  delegateVerify: [
+    "Advanced: shows bounded verifier reuse through spawn/wait.",
+    "Read it as a CKB runtime boundary example, not as a beginner contract.",
+  ],
+  blake2bHash: [
+    "Small lock example for hashing witness data and comparing the result.",
+    "Good for seeing how a lock returns true only after explicit checks pass.",
+  ],
+  multiStepPipeline: [
+    "Advanced: shows pipe descriptors and delegated verifier communication.",
+    "The teaching point is resource cleanup: every descriptor is closed before exit.",
+  ],
+  witnessSource: [
+    "Shows how protected Cells, lock args, witness data, and sighash relate.",
+    "Names like claimed_owner are not authority by themselves; the checks make them meaningful.",
+  ],
+  identityLifecycle: [
+    "Shows unique Cell identity policies such as TYPE_ID, field identity, and script args.",
+    "Use it to learn create_unique, replace_unique, and policy-specific destruction.",
+  ],
+  scopedInvariant: [
+    "Shows aggregate invariants such as sum conservation and uniqueness.",
+    "These are review obligations: inspect the metadata before relying on them.",
+  ],
 };
+
+const annotateForPlayground = (id: string, source: string): string => {
+  const notes = playgroundSourceNotes[id];
+  if (!notes?.length) return source;
+  return [
+    "// Playground teaching note:",
+    ...notes.map((note) => `// ${note}`),
+    "",
+    source,
+  ].join("\n");
+};
+
+const readExampleSource = (id: string, file: string): string =>
+  annotateForPlayground(id, makeStandalone(readFileSync(resolve(repoRoot, file), "utf-8")));
+
+/**
+ * Full compilable source for each playground example, read from examples/
+ * at build time. The heroExamples array below still uses short display
+ * snippets for the landing page.
+ */
+export const exampleFullSources = Object.fromEntries(
+  playgroundExamples.map((example) => [example.id, readExampleSource(example.id, example.file)]),
+) as Record<string, string>;
 
 export const heroExamples = [
   {

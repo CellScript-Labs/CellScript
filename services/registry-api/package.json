@@ -1,0 +1,24 @@
+{
+  "name": "@cellscript/registry-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "vitest run",
+    "build": "wrangler deploy --dry-run --config wrangler.example.toml --outdir dist",
+    "migrate": "node scripts/migrate.mjs",
+    "deploy": "wrangler deploy --config wrangler.toml"
+  },
+  "dependencies": {
+    "@joyid/ckb": "^1.1.4",
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250617.0",
+    "@types/pg": "^8.11.10",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4",
+    "wrangler": "^4.20.5"
+  }
+}

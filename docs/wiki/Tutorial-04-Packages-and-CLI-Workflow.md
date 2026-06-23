@@ -303,10 +303,15 @@ debugging dependency resolution.
 ## Experimental Commands
 
 Registry source-package installation and registry-backed `update` are supported
-for the CellScript source-package profile. `cellc publish` updates local
-`registry.json`; `cellc registry add` updates the local cloned discovery index,
-and the final publication step is still normal Git commit/tag/push/PR work.
-`login`, `run`, `repl`, registry proxy use, cryptographic publisher-signature
+for the CellScript source-package profile. The public registry policy is:
+`cellc auth capability create --principal-id <principal_id> --scope
+publish:namespace/package --expires 90d` authorises a JoyID-rooted publisher
+capability, then `cellc publish` writes a real registry entry. The
+`principal_id` is derived from the connected JoyID signer, not from a display
+address. The same metadata can still be
+mirrored with `cellc publish --offline` to `registry.json` and Git tags for
+audit, local fixtures, and offline fallback. `cellc registry add` manages discovery/claim metadata rather than
+ordinary version publication. `run`, `repl`, cryptographic audit-signature
 verification, and non-CellScript artifact profiles remain future-facing or
 fail-closed.
 

@@ -55,6 +55,10 @@ High-value active references include:
 - `CELLSCRIPT_CKB_ADAPTER.md`
 - `CELLSCRIPT_CELLFABRIC_BRIDGE.md`
 - `CELLSCRIPT_PACKAGE_PROVENANCE_AND_DEPLOYMENT_IDENTITY.md`
+- `CELLSCRIPT_REGISTRY_PRODUCTION_BOUNDARY_ADR.md` for the accepted production
+  boundary of the JoyID-rooted public registry write/read architecture
+- `../services/registry-api/README.md` for the Cloudflare Workers + R2 + Neon
+  write API implementation and deployment checklist
 - `CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md`
 - `CELLSCRIPT_ENTRY_WITNESS_ABI.md`
 - `CELLSCRIPT_EXAMPLE_BUSINESS_FLOWS.md`
