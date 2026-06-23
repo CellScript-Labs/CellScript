@@ -4,7 +4,7 @@ import { exampleGroups, heroExamples, links, modelCards, tools, workflowSteps } 
 import { defaultLocale, translations } from "../i18n/translations";
 import { provenanceForExample, effectsSummary, formatBytes, shortHash } from "../lib/provenance";
 import TransitionOverlay from "../components/TransitionOverlay.astro";
-import ProvenanceRail from "../components/ProvenanceRail.astro";
+import NavRail from "../components/NavRail.astro";
 import pipelineFragments from "../data/pipeline-fragments.json";
 import assuranceMetadata from "../data/assurance-metadata.json";
 
@@ -905,7 +905,7 @@ const renderLine = (line: string) => {
         window.addEventListener("resize", updatePipelineProgress);
       }
     </script>
-    <ProvenanceRail />
+    <NavRail />
     <TransitionOverlay />
   </body>
 </html>

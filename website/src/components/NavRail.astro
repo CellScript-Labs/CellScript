@@ -1,0 +1,409 @@
+---
+/**
+ * NavRail — the persistent right-side navigation sidebar.
+ *
+ * Replaces the old "ProvenanceRail" (which was theatre). This rail is
+ * honest: it shows real navigation links and real build-time GitHub
+ * activity (releases + commits), fetched by scripts/fetch-github-data.py.
+ *
+ * Structure (top to bottom):
+ *  1. Quick links: Playground, Docs, Wiki, Source
+ *  2. Community: discussion thread, website feedback thread
+ *  3. GitHub Activity: recent releases (tag + date + excerpt)
+ *  4. GitHub Activity: recent commits (sha + message + date)
+ *
+ * Desktop (>=1100px): fixed 248px right rail.
+ * Mobile (<1100px): slide-over drawer toggled by a floating button.
+ */
+import { translations, defaultLocale } from "../i18n/translations";
+import githubActivity from "../data/github-activity.json";
+
+const t = translations[defaultLocale];
+const links = {
+  wiki: "https://github.com/a19q3/CellScript/wiki",
+  community: "https://talk.nervos.org/t/cellscript-a-dsl-for-cell-based-contracts/10193/9",
+  websiteFeedback: "https://talk.nervos.org/t/cellscript-website-v0-is-live/10403/2",
+  source: "https://github.com/a19q3/CellScript",
+  docs: "https://github.com/a19q3/CellScript/tree/main/docs",
+  releases: "https://github.com/a19q3/CellScript/releases",
+  commits: "https://github.com/a19q3/CellScript/commits/main",
+};
+
+const releases = (githubActivity as { releases: any[] }).releases;
+const commits = (githubActivity as { commits: any[] }).commits;
+---
+
+<aside class="nav-rail" data-nav-rail aria-label={t.navRail.title}>
+  <div class="rail-header">
+    <span class="rail-label" data-i18n="navRail.title">{t.navRail.title}</span>
+    <button class="rail-close" type="button" data-rail-close aria-label="Close" hidden>
+      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
+    </button>
+  </div>
+
+  <div class="rail-body">
+    <!-- Quick links -->
+    <nav class="rail-section" aria-label={t.navRail.links}>
+      <ul class="rail-links">
+        <li>
+          <a href="/playground" class="rail-link-item">
+            <span class="rail-link-name" data-i18n="navRail.playground">{t.navRail.playground}</span>
+            <span class="rail-link-desc" data-i18n="navRail.playgroundDesc">{t.navRail.playgroundDesc}</span>
+          </a>
+        </li>
+        <li>
+          <a href={links.docs} target="_blank" rel="noopener noreferrer" class="rail-link-item">
+            <span class="rail-link-name" data-i18n="navRail.docs">{t.navRail.docs}</span>
+            <span class="rail-link-desc" data-i18n="navRail.docsDesc">{t.navRail.docsDesc}</span>
+          </a>
+        </li>
+        <li>
+          <a href={links.wiki} target="_blank" rel="noopener noreferrer" class="rail-link-item">
+            <span class="rail-link-name" data-i18n="navRail.wiki">{t.navRail.wiki}</span>
+            <span class="rail-link-desc" data-i18n="navRail.wikiDesc">{t.navRail.wikiDesc}</span>
+          </a>
+        </li>
+        <li>
+          <a href={links.source} target="_blank" rel="noopener noreferrer" class="rail-link-item">
+            <span class="rail-link-name" data-i18n="navRail.source">{t.navRail.source}</span>
+            <span class="rail-link-desc" data-i18n="navRail.sourceDesc">{t.navRail.sourceDesc}</span>
+          </a>
+        </li>
+      </ul>
+    </nav>
+
+    <!-- Community -->
+    <div class="rail-section">
+      <span class="rail-section-label" data-i18n="navRail.community">{t.navRail.community}</span>
+      <ul class="rail-links">
+        <li>
+          <a href={links.community} target="_blank" rel="noopener noreferrer" class="rail-link-item">
+            <span class="rail-link-name" data-i18n="navRail.community">{t.navRail.community}</span>
+            <span class="rail-link-desc" data-i18n="navRail.communityDesc">{t.navRail.communityDesc}</span>
+          </a>
+        </li>
+        <li>
+          <a href={links.websiteFeedback} target="_blank" rel="noopener noreferrer" class="rail-link-item">
+            <span class="rail-link-name" data-i18n="navRail.websiteFeedback">{t.navRail.websiteFeedback}</span>
+            <span class="rail-link-desc" data-i18n="navRail.websiteFeedbackDesc">{t.navRail.websiteFeedbackDesc}</span>
+          </a>
+        </li>
+      </ul>
+    </div>
+
+    <!-- GitHub Activity: Releases -->
+    {releases.length > 0 && (
+      <div class="rail-section">
+        <div class="rail-section-head">
+          <span class="rail-section-label" data-i18n="navRail.releases">{t.navRail.releases}</span>
+          <a href={links.releases} target="_blank" rel="noopener noreferrer" class="rail-view-all" data-i18n="navRail.viewAll">{t.navRail.viewAll}</a>
+        </div>
+        <ul class="rail-activity">
+          {releases.map((r) => (
+            <li>
+              <a href={r.url} target="_blank" rel="noopener noreferrer" class="rail-activity-item">
+                <div class="rail-activity-head">
+                  <code class="rail-activity-tag">{r.tag}</code>
+                  <time class="rail-activity-date">{r.date}</time>
+                </div>
+                <p class="rail-activity-body">{r.body}</p>
+              </a>
+            </li>
+          ))}
+        </ul>
+      </div>
+    )}
+
+    <!-- GitHub Activity: Commits -->
+    {commits.length > 0 && (
+      <div class="rail-section">
+        <div class="rail-section-head">
+          <span class="rail-section-label" data-i18n="navRail.commits">{t.navRail.commits}</span>
+          <a href={links.commits} target="_blank" rel="noopener noreferrer" class="rail-view-all" data-i18n="navRail.viewAll">{t.navRail.viewAll}</a>
+        </div>
+        <ul class="rail-activity rail-commits">
+          {commits.map((c) => (
+            <li>
+              <a href={c.url} target="_blank" rel="noopener noreferrer" class="rail-commit-item">
+                <code class="rail-commit-sha">{c.sha}</code>
+                <span class="rail-commit-msg">{c.message}</span>
+                <time class="rail-activity-date">{c.date}</time>
+              </a>
+            </li>
+          ))}
+        </ul>
+      </div>
+    )}
+  </div>
+</aside>
+
+<button class="rail-toggle" type="button" data-rail-toggle aria-label={t.navRail.title} aria-expanded="false">
+  <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 6h12M4 10h12M4 14h12" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
+</button>
+
+<style>
+  .nav-rail {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 268px;
+    z-index: 80;
+    display: none;
+    flex-direction: column;
+    border-left: 1px solid var(--substrate-rule);
+    background: var(--substrate-bg);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
+
+  @media (min-width: 1100px) {
+    .nav-rail { display: flex; }
+    .rail-toggle { display: none; }
+  }
+
+  .rail-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 80px 18px 14px;
+    border-bottom: 1px solid var(--substrate-rule);
+    position: sticky;
+    top: 0;
+    background: var(--substrate-bg);
+    z-index: 2;
+  }
+
+  .rail-label {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--substrate-dim);
+  }
+
+  .rail-close {
+    appearance: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--substrate-dim);
+    cursor: pointer;
+  }
+  .rail-close svg { width: 16px; height: 16px; }
+
+  .rail-body {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    padding: 0;
+  }
+
+  /* ---- Sections ---- */
+  .rail-section {
+    padding: 16px 18px;
+    border-bottom: 1px solid var(--substrate-rule);
+  }
+  .rail-section:last-child { border-bottom: none; }
+
+  .rail-section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+
+  .rail-section-label {
+    display: block;
+    margin-bottom: 10px;
+    font-family: var(--font-mono);
+    font-size: 0.64rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--substrate-dim);
+  }
+  .rail-section-head .rail-section-label { margin-bottom: 0; }
+
+  .rail-view-all {
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    color: var(--accent);
+    text-decoration: none;
+  }
+  .rail-view-all:hover { text-decoration: underline; }
+
+  /* ---- Links ---- */
+  .rail-links {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .rail-link-item {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    text-decoration: none;
+    transition: background-color var(--duration-fast) var(--ease-standard);
+  }
+  .rail-link-item:hover { background: var(--surface-hover); }
+
+  .rail-link-name {
+    font-family: var(--font-sans);
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .rail-link-desc {
+    font-size: 0.68rem;
+    line-height: 1.4;
+    color: var(--substrate-dim);
+  }
+
+  /* ---- Activity (releases + commits) ---- */
+  .rail-activity {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .rail-activity-item {
+    display: block;
+    padding: 10px 12px;
+    border: 1px solid var(--substrate-rule);
+    border-radius: 8px;
+    background: var(--panel-soft);
+    text-decoration: none;
+    transition:
+      border-color var(--duration-fast) var(--ease-standard),
+      background-color var(--duration-fast) var(--ease-standard);
+  }
+  .rail-activity-item:hover {
+    border-color: var(--accent-line);
+    background: var(--surface-hover);
+  }
+
+  .rail-activity-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 4px;
+  }
+
+  .rail-activity-tag {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: var(--accent);
+  }
+
+  .rail-activity-date {
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    color: var(--substrate-dim);
+  }
+
+  .rail-activity-body {
+    margin: 0;
+    font-size: 0.68rem;
+    line-height: 1.45;
+    color: var(--substrate-text);
+  }
+
+  /* ---- Commits (compact) ---- */
+  .rail-commits { gap: 4px; }
+
+  .rail-commit-item {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 6px;
+    align-items: baseline;
+    padding: 5px 10px;
+    border-radius: 5px;
+    text-decoration: none;
+    transition: background-color var(--duration-fast) var(--ease-standard);
+  }
+  .rail-commit-item:hover { background: var(--surface-hover); }
+
+  .rail-commit-sha {
+    font-family: var(--font-mono);
+    font-size: 0.64rem;
+    color: var(--accent);
+  }
+
+  .rail-commit-msg {
+    font-size: 0.68rem;
+    color: var(--substrate-text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* ---- Mobile toggle ---- */
+  .rail-toggle {
+    position: fixed;
+    right: 16px;
+    bottom: 72px;
+    z-index: 81;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    border: 1px solid var(--line-soft);
+    border-radius: 50%;
+    background: var(--surface-button);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    color: var(--text);
+    cursor: pointer;
+    box-shadow: var(--shadow-soft);
+  }
+  .rail-toggle[aria-expanded="true"] { display: none; }
+  .rail-toggle svg { width: 20px; height: 20px; }
+
+  @media (max-width: 1099px) {
+    .nav-rail {
+      transform: translateX(100%);
+      transition: transform 0.3s var(--ease-standard);
+    }
+    .nav-rail[data-open] { transform: translateX(0); }
+    .rail-close[hidden] { display: inline-flex !important; }
+  }
+</style>
+
+<script>
+  const rail = document.querySelector<HTMLElement>("[data-nav-rail]");
+  const toggle = document.querySelector<HTMLButtonElement>("[data-rail-toggle]");
+  const closeBtn = document.querySelector<HTMLButtonElement>("[data-rail-close]");
+
+  const setOpen = (open: boolean) => {
+    if (!rail || !toggle) return;
+    if (open) {
+      rail.setAttribute("data-open", "");
+      toggle.setAttribute("aria-expanded", "true");
+    } else {
+      rail.removeAttribute("data-open");
+      toggle.setAttribute("aria-expanded", "false");
+    }
+  };
+
+  toggle?.addEventListener("click", () => setOpen(true));
+  closeBtn?.addEventListener("click", () => setOpen(false));
+</script>

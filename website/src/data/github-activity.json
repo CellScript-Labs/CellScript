@@ -1,0 +1,62 @@
+{
+  "releases": [
+    {
+      "tag": "v0.16.2",
+      "name": "CellScript 0.16.2",
+      "date": "2026-06-21",
+      "body": "CellScript 0.16.2 is a builder-ergonomics patch for CKB resource identity\r\nhandoff. It keeps the 0.16 compiler/runtime scope, while making\u2026",
+      "url": "https://github.com/a19q3/CellScript/releases/tag/v0.16.2"
+    },
+    {
+      "tag": "v0.16.1",
+      "name": "CellScript 0.16.1",
+      "date": "2026-06-15",
+      "body": "CellScript 0.16.1 is a patch release for bundled example lifecycle clarity and\r\nbuilder handoff. It keeps the 0.16 assurance/tooling scope,\u2026",
+      "url": "https://github.com/a19q3/CellScript/releases/tag/v0.16.1"
+    },
+    {
+      "tag": "v0.16.0",
+      "name": "CellScript 0.16.0",
+      "date": "2026-06-14",
+      "body": "CellScript 0.16 is an assurance and tooling release. For users, the main change\r\nis that the compiler is no longer just producing an artefa\u2026",
+      "url": "https://github.com/a19q3/CellScript/releases/tag/v0.16.0"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "42693f1",
+      "message": "fix: preserve CKB VM stack in ELF entry",
+      "author": "Tawan",
+      "date": "2026-06-21",
+      "url": "https://github.com/a19q3/CellScript/commit/42693f13a5da32df885138a8b0e376aa3f75fc52"
+    },
+    {
+      "sha": "6fdc458",
+      "message": "Audit wiki for builder CLI UX",
+      "author": "Arthur",
+      "date": "2026-06-21",
+      "url": "https://github.com/a19q3/CellScript/commit/6fdc458ebb70021b4c1ba3a25d66b1e0f7b1382f"
+    },
+    {
+      "sha": "8c9303c",
+      "message": "Improve builder CLI output UX",
+      "author": "Arthur",
+      "date": "2026-06-21",
+      "url": "https://github.com/a19q3/CellScript/commit/8c9303cc6d4bfd5357b00ffb9104922a13e0faf5"
+    },
+    {
+      "sha": "96503c4",
+      "message": "Finalize CellScript 0.16.2 builder workflow",
+      "author": "Arthur",
+      "date": "2026-06-21",
+      "url": "https://github.com/a19q3/CellScript/commit/96503c43f24e6a0da5a4abc29d5e39ab7a06236b"
+    },
+    {
+      "sha": "54ce199",
+      "message": "Release CellScript 0.16.2",
+      "author": "Arthur",
+      "date": "2026-06-21",
+      "url": "https://github.com/a19q3/CellScript/commit/54ce1990e92173f515839af54fb42b65fadabf28"
+    }
+  ]
+}
