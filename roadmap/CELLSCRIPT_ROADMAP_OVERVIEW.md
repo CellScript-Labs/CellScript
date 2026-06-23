@@ -1,7 +1,7 @@
-# CellScript Roadmap: v0.12 -> v0.16
-> From Production Foundation to Formal Assurance
+# CellScript Roadmap: v0.12 -> v0.20
+> From Production Foundation to Protocol Builders
 
-**Updated**: 2026-06-10
+**Updated**: 2026-05-09
 **Status**: Living Document
 **Audience**: CKB Smart Contract Developers
 **Canonical folder**: `roadmap/`
@@ -43,8 +43,20 @@ Each release answers a specific question:
   ProofPlan output without hiding lock/type semantics.
 - **v0.16** — *Can we audit the assumptions before production evidence?* Add
   metadata semantics, ProofPlan soundness checks, descriptive standard CKB
-  compatibility suites, transaction templates, deployment governance, audit
-  tooling, and proposal-local NovaSeal devnet/profile certification.
+  compatibility suites, transaction templates, deployment governance, and
+  audit tooling.
+- **v0.17** — *Can iCKB-grade CKB protocol semantics execute?* Close the
+  scoped protocol-semantics milestone with partial CKB VM differential evidence
+  and a fail-closed equivalence gate.
+- **v0.18** — *Can protocol equivalence be closed honestly?* Add the
+  first-class read-only ScriptRef / ScriptArgs surface and remaining iCKB
+  equivalence prerequisites.
+- **v0.19** — *Can compiler artifacts be resolved and verified reproducibly?*
+  Close CKB ecosystem reuse, `ckb-std` compatibility, grammar governance, and
+  Phase 1 package/deployment identity registry support.
+- **v0.20** — *Can verified artifacts build real transactions?* Ship generated
+  Action Builder support, live-chain deployment verification, stateful flows,
+  and registry trust hardening.
 
 ---
 
@@ -57,6 +69,10 @@ Each release answers a specific question:
 | v0.14 release scope | CKB semantic-completeness scope is complete for the current stable line. | [v0.14 roadmap](CELLSCRIPT_0_14_ROADMAP.md), [v0.14 release notes](../docs/releases/CELLSCRIPT_0_14_RELEASE_NOTES.md) |
 | v0.15 release scope | `v0.15.0` is released from `nightly-0.15` with scoped invariants, aggregate invariant primitives, Covenant ProofPlan output, risk diagnostics, macro provenance, identity-aware lifecycle forms, and final release-gate evidence. | [v0.15 roadmap](CELLSCRIPT_0_15_ROADMAP.md), [v0.15 release notes](../docs/releases/CELLSCRIPT_0_15_RELEASE_NOTES.md) |
 | v0.16 release scope | Released as `v0.16.1` for the scoped metadata/tooling line. Adds operational semantics, ProofPlan soundness, builder assumptions, schema-bound transaction validation, solver templates, deployment governance, audit tooling, descriptive standard CKB compatibility fixtures, compiler hardening, proposal-local NovaSeal devnet/profile certification, and bundled example bootstrap cleanup. | [v0.16 roadmap](CELLSCRIPT_0_16_ROADMAP.md), [v0.16.1 release notes](../docs/releases/CELLSCRIPT_0_16_1_RELEASE_NOTES.md) |
+| v0.17/0.18 iCKB equivalence state | The standalone v0.17 branch is a partial protocol-equivalence milestone; the carried-forward v0.18 work closes the manifest-declared executable iCKB claim set as `EXECUTED_CKB_VM_DIFF` / `PROVEN`. | [v0.17 roadmap](../docs/archive/0.17/CELLSCRIPT_0_17_ROADMAP.md), [iCKB final report](../docs/archive/0.17/CELLSCRIPT_0_17_ICKB_FINAL_REPORT.md) |
+| v0.18 planning scope | First-class read-only ScriptRef / ScriptArgs API and iCKB equivalence-closure prerequisites. | [v0.18 roadmap](../docs/CELLSCRIPT_0_18_ROADMAP.md) |
+| v0.19 scope | Scope complete for CKB ecosystem reuse, `ckb-std` compatibility, grammar governance, and Phase 1 package/deployment identity registry closure. | [v0.19 roadmap](../docs/CELLSCRIPT_0_19_ROADMAP.md), [v0.19 release notes](../docs/releases/CELLSCRIPT_0_19_RELEASE_NOTES.md) |
+| v0.20 planned scope | Generated Action Builder, live-chain deployment verification, stateful transaction flows, and registry trust hardening. | [v0.20 roadmap](../docs/CELLSCRIPT_0_20_ROADMAP.md) |
 | CKB language fit | CKB-first design is confirmed; remaining hardening areas are signer binding, continuity policy, capacity policy, and declarative time policy. | [CKB language audit](../docs/CELLSCRIPT_CKB_LANGUAGE_AUDIT.md) |
 | Surface syntax | Low-risk syntax pass is implemented; authority-sensitive syntax remains staged. | [Surface elegance RFC](../docs/CELLSCRIPT_SURFACE_ELEGANCE_RFC.md) |
 | Collections | Stack-backed fixed-width `Vec<T>` helper surface is implemented; cell-backed and generic map ownership remain fail-closed. | [Collections support matrix](../docs/CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md), [v0.13 release scope](../docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md) |
@@ -74,6 +90,10 @@ Each release answers a specific question:
 | v0.14 | CKB Semantic Completeness | "Expose CKB surface and bounded verifier reuse." | Complete for the stable line |
 | v0.15 | Scoped Invariants and Covenant ProofPlan | "Show when constraints run, what they read, and who they protect." | Released from `nightly-0.15` |
 | v0.16 | Metadata Assurance and Production Tooling Skeleton | "Make assumptions explicit and auditable." | Released as `v0.16.1` |
+| v0.17 | iCKB-Grade Protocol Semantics | "Turn protocol-equivalence gaps into executable evidence gates." | Standalone milestone partial; selected claim set proven on the carried-forward 0.18+ line |
+| v0.18 | First-Class Script API and Equivalence Closure | "Make ScriptRef/ScriptArgs and remaining iCKB proof prerequisites first-class." | Planning |
+| v0.19 | Package Registry Phase 1 and Adapter Boundary | "Resolve and verify package/build/deployment identity before builders consume it." | Scope complete |
+| v0.20 | Generated Builder and Live Registry Proof | "Turn verified artifacts into valid transactions through registry-bound builders." | In progress: generated TypeScript builders, live registry verification, VS Code commands, and generated-builder tooling-gate checks are active. |
 
 The roadmap is intentionally cumulative. Later releases should not re-open an
 earlier feature boundary unless the prior boundary was proven unsafe or
@@ -111,7 +131,7 @@ Compile-time safety guarantees:
 ```cellscript
 consume token                                       // consume Cell input
 create Token { amount: 100 } with_lock(recipient)   // create Cell output
-transfer token to recipient                         // consume + create
+std::lifecycle::transfer(token, next_token, recipient) { amount } // consume + create
 destroy token                                       // destroy when capability allows it
 read_ref OracleData                                 // read CellDep without consuming it
 mutate pool { reserve_a: pool.reserve_a + delta }   // replacement-style update
@@ -306,8 +326,9 @@ v0.13 should be considered closed only when:
 - optimizer passes do not rewrite resource effects unsafely;
 - CLI changes are covered by tests;
 - top-level `examples/*.cell` remain the single checked-in bundled business
-  source, while `examples/language/*.cell` and `examples/ickb_benchmark/*.cell`
-  cover compiler/tooling and benchmark surfaces;
+  source, while `examples/language/*.cell` covers compiler/tooling examples and
+  `tests/benchmarks/ickb_specs/*.cell` covers the iCKB-inspired benchmark
+  surface;
 - release notes distinguish v0.12 foundations from genuine v0.13 work.
 
 ---
@@ -692,7 +713,7 @@ v0.15 migration keeps old code buildable while making new semantics explicit:
 
 - `--primitive-compat=0.14`;
 - `--primitive-strict=0.15`;
-- CS0150-CS0160 migration diagnostics;
+- CS0151-CS0160 migration diagnostics;
 - ProofPlan diagnostics for metadata-only obligations;
 - source and metadata renames for `ckb_type_script_hash` and
   `ckb_lock_script_hash`;

@@ -63,10 +63,40 @@ interpret raw syscall status registers or VM trap diagnostics with this table.
 | 25 | `entry-witness-abi-invalid` | Entry witness payload layout, width, or parameter ABI placement was invalid. | Inspect `cellc constraints` or `cellc abi` output for parameter slots and witness byte layout. |
 | 26 | `capacity-preservation-mismatch` | A proposed output did not preserve the consumed input capacity. | Check the proposed output capacity and builder output ordering. |
 | 32 | `dynamic-field-value-mismatch` | A dynamic Molecule field value did not match the expected verifier source. | Check dynamic Molecule field encoding and the value source used by the verifier. |
+| 33 | `out-point-mismatch` | A loaded input OutPoint field did not match the expected transaction lineage. | Check the input OutPoint tx hash/index and the expected lineage binding. |
+| 34 | `script-field-malformed` | A loaded CKB Script field did not match the expected Molecule Script layout. | Check the lock/type Script Molecule encoding, args length, and whether the cell actually has that script field. |
+| 35 | `dao-header-lineage-mismatch` | The DAO field loaded from an input's committed block header did not match the supplied HeaderDep. | Bind the HeaderDep to the exact input/deposit header used for DAO accumulated-rate accounting. |
+| 36 | `dao-maturity-violation` | The DAO input since value was below the required maturity lower bound. | Check the withdrawal request since value and ensure the consumed DAO input has reached the required maturity. |
+| 37 | `ckb-since-malformed` | A CKB since value or requested since constructor argument was malformed. | Check since flags, metric type, epoch number/index/length bounds, and index < length. |
+| 38 | `script-args-mismatch` | A loaded CKB Script args field did not match the expected args policy. | Check lock/type script args and whether this protocol path requires empty script args. |
+| 39 | `metapoint-mismatch` | A loaded CKB MetaPoint relation did not match the expected input/output index and relative distance. | Check the paired input OutPoints or output indexes and the signed relative-distance field. |
+| 40 | `metapoint-cardinality-mismatch` | A current-script lock/type MetaPoint pair scan found a duplicate, missing, or unbalanced relation. | Check current-script lock-only/type-only cell counts and ensure every MetaPoint has exactly one paired cell. |
+| 41 | `script-identity-mismatch` | A loaded CKB Script code_hash or hash_type did not match the expected identity. | Check Script code_hash, hash_type, deployed dep, and whether lock/type role is correct. |
+| 42 | `witness-malformed` | Loaded witness bytes did not match the expected Molecule WitnessArgs layout or ABI magic. | Verify witness encoding follows the expected Molecule format with correct total_size, field_count and field offsets. |
+| 43 | `witness-field-truncated` | A WitnessArgs field offset or length exceeded the loaded witness byte range. | Check that each witness field offset and data length fall within the loaded witness byte range. |
+| 44 | `ckb-source-view-invalid` | A CKB SourceView value was malformed or used with an incompatible source-specific helper. | Pass a SourceView produced by the matching `source::*` helper and keep indexes in range. |
+| 45 | `header-dep-missing` | A required HeaderDep source view was absent or could not be bound to the requested header. | Add the required header dep and bind it to the input/deposit whose DAO data is read. |
+| 46 | `dao-field-malformed` | A loaded DAO header or cell field did not match the expected encoded layout. | Check DAO header bytes, accumulated-rate width, and deposit/withdrawal cell data layout. |
+| 47 | `script-role-mismatch` | The script was used in a lock/type role that violates the declared invariant. | Check whether the script is deployed and invoked as the expected lock or type script. |
+| 48 | `xudt-binding-mismatch` | An xUDT type args, owner-mode, or amount binding check failed. | Check xUDT type args, owner-mode flags, input type hash, and token data layout. |
+| 49 | `aggregate-amount-mismatch` | A lowered aggregate/C256 accounting equality or inequality check failed. | Compare generated aggregate inputs/outputs and inspect overflow or exact-equality assumptions. |
+| 50 | `bip340-pipe-create-failed` | The BIP340 runtime verifier path failed while creating the IPC pipe. | Check CKB VM v2 pipe syscall availability and parent script VM version. |
+| 51 | `bip340-spawn-failed` | The BIP340 runtime verifier path failed while resolving or spawning the verifier CellDep. | Check verifier CellDep ordering, out_point, hash_type, and spawn source/place wiring. |
+| 52 | `bip340-message-write-failed` | The BIP340 runtime verifier path failed while writing the 32-byte message hash. | Compare the generated 32-byte message hash words with the verifier CLI input. |
+| 53 | `bip340-pubkey-write-failed` | The BIP340 runtime verifier path failed while writing the 32-byte x-only pubkey. | Compare the generated 32-byte x-only pubkey words with the verifier CLI input. |
+| 54 | `bip340-signature-write-failed` | The BIP340 runtime verifier path failed while writing the 64-byte signature. | Compare the generated 64-byte signature words with the verifier CLI input. |
+| 55 | `bip340-verifier-read-failed` | The BIP340 runtime verifier path failed while closing or reading verifier IPC status. | Check IPC fd close/read/wait wiring between parent and child verifier. |
+| 56 | `bip340-child-rejected` | The spawned BIP340 child verifier returned a non-zero verification status. | Run the exact message, pubkey, and signature tuple through the local verifier CLI. |
+| 57 | `fixed-u64-le-input-unresolved` | The backend could not materialize a fixed-byte input for a u64 little-endian load. | Inspect schema field provenance for the fixed-byte scalar source. |
+| 58 | `fixed-byte-comparison-materialization-unresolved` | The backend could not materialize one side of a fixed-byte comparison. | Inspect fixed-byte provenance for schema fields, aliases, nested projections, and local aggregates. |
+| 59 | `bip340-message-materialization-unresolved` | The backend could not materialize the 32-byte BIP340 message hash for verifier IPC. | Compare signed_intent_hash provenance with the local verifier tuple. |
+| 60 | `bip340-pubkey-materialization-unresolved` | The backend could not materialize the 32-byte BIP340 x-only pubkey for verifier IPC. | Inspect the nested witness pubkey field source and copied ABI bytes. |
+| 61 | `bip340-signature-materialization-unresolved` | The backend could not materialize the 64-byte BIP340 signature for verifier IPC. | Inspect the nested witness signature field source and copied ABI bytes. |
+| 62 | `packed-hash-preimage-materialization-unresolved` | The backend could not materialize canonical packed bytes for a packed hash preimage. | Inspect packed-hash lowering and schema-backed fixed aggregate materialization. |
 
 ## Stability
 
 - Existing numeric codes must not be reused for a different condition.
 - New generated fail-closed paths must add a registry entry before they can
   emit a new non-zero code.
-- Codes `6`, `19`, `27` through `31`, and values above `32` are currently reserved.
+- Codes `6`, `19`, `27` through `31`, and values above `62` are currently reserved.

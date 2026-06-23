@@ -139,12 +139,12 @@ receipt NovaRwaReceiptEventV0 has store, create, consume {
     expiry: u64,
 }
 
-action materialize_rwa_receipt(witness intent: NovaRwaReceiptSignedIntentV0, witness issuer_sig: SignaturePayload) -> (receipt_cell: NovaRwaReceiptCellV0, event: NovaRwaReceiptEventV0)
-where
+action materialize_rwa_receipt(witness intent: NovaRwaReceiptSignedIntentV0, witness issuer_sig: SignaturePayload) -> (receipt_cell: NovaRwaReceiptCellV0, event: NovaRwaReceiptEventV0) {
+    verification
     let now = env::current_timepoint()
-    let intent_core_hash = hash_blake2b_packed(intent.core)
-    let signed_intent_hash = hash_blake2b_packed(intent)
-    let new_state_commitment = hash_blake2b_packed(NovaRwaReceiptStateCommitmentV0 {
+    let intent_core_hash = ckb::hash_data_packed(intent.core)
+    let signed_intent_hash = ckb::hash_data_packed(intent)
+    let new_state_commitment = ckb::hash_data_packed(NovaRwaReceiptStateCommitmentV0 {
         version: RWA_RECEIPT_VERSION,
         receipt_id: intent.core.receipt_id,
         registry_hash: intent.core.registry_hash,
@@ -174,8 +174,8 @@ where
         intent_core_hash: intent_core_hash,
         payout_commitment_hash: intent.core.payout_commitment_hash
     }
-    let materialized_receipt_hash = hash_blake2b_packed(event_commitment)
-    let canonical_envelope_hash = hash_blake2b_packed(NovaSealCanonicalEnvelopeV0 {
+    let materialized_receipt_hash = ckb::hash_data_packed(event_commitment)
+    let canonical_envelope_hash = ckb::hash_data_packed(NovaSealCanonicalEnvelopeV0 {
         profile_id: intent.core.receipt_id,
         policy_hash: intent.core.registry_hash,
         action: OP_MATERIALIZE,
@@ -247,11 +247,12 @@ where
         expiry: intent.core.expiry
     }
 
-action claim_rwa_receipt(old_cell: NovaRwaReceiptCellV0, witness intent: NovaRwaReceiptSignedIntentV0, witness holder_sig: SignaturePayload) -> (claimed_cell: NovaRwaReceiptCellV0, event: NovaRwaReceiptEventV0)
-where
+}
+action claim_rwa_receipt(old_cell: NovaRwaReceiptCellV0, witness intent: NovaRwaReceiptSignedIntentV0, witness holder_sig: SignaturePayload) -> (claimed_cell: NovaRwaReceiptCellV0, event: NovaRwaReceiptEventV0) {
+    verification
     let now = env::current_timepoint()
     require old_cell.nonce < U64_MAX
-    let old_state_commitment = hash_blake2b_packed(NovaRwaReceiptStateCommitmentV0 {
+    let old_state_commitment = ckb::hash_data_packed(NovaRwaReceiptStateCommitmentV0 {
         version: old_cell.version,
         receipt_id: old_cell.receipt_id,
         registry_hash: old_cell.registry_hash,
@@ -264,7 +265,7 @@ where
         nonce: old_cell.nonce,
         expiry: old_cell.expiry
     })
-    let new_state_commitment = hash_blake2b_packed(NovaRwaReceiptStateCommitmentV0 {
+    let new_state_commitment = ckb::hash_data_packed(NovaRwaReceiptStateCommitmentV0 {
         version: old_cell.version,
         receipt_id: old_cell.receipt_id,
         registry_hash: old_cell.registry_hash,
@@ -277,8 +278,8 @@ where
         nonce: old_cell.nonce + 1,
         expiry: old_cell.expiry
     })
-    let intent_core_hash = hash_blake2b_packed(intent.core)
-    let signed_intent_hash = hash_blake2b_packed(intent)
+    let intent_core_hash = ckb::hash_data_packed(intent.core)
+    let signed_intent_hash = ckb::hash_data_packed(intent)
     let event_commitment = NovaRwaReceiptEventCommitmentV0 {
         action: OP_CLAIM,
         receipt_id: old_cell.receipt_id,
@@ -296,8 +297,8 @@ where
         intent_core_hash: intent_core_hash,
         payout_commitment_hash: intent.core.payout_commitment_hash
     }
-    let materialized_receipt_hash = hash_blake2b_packed(event_commitment)
-    let canonical_envelope_hash = hash_blake2b_packed(NovaSealCanonicalEnvelopeV0 {
+    let materialized_receipt_hash = ckb::hash_data_packed(event_commitment)
+    let canonical_envelope_hash = ckb::hash_data_packed(NovaSealCanonicalEnvelopeV0 {
         profile_id: old_cell.receipt_id,
         policy_hash: old_cell.registry_hash,
         action: OP_CLAIM,
@@ -373,11 +374,12 @@ where
         expiry: old_cell.expiry
     }
 
-action settle_rwa_receipt(old_cell: NovaRwaReceiptCellV0, witness intent: NovaRwaReceiptSignedIntentV0, witness issuer_sig: SignaturePayload, witness holder_sig: SignaturePayload) -> event: NovaRwaReceiptEventV0
-where
+}
+action settle_rwa_receipt(old_cell: NovaRwaReceiptCellV0, witness intent: NovaRwaReceiptSignedIntentV0, witness issuer_sig: SignaturePayload, witness holder_sig: SignaturePayload) -> event: NovaRwaReceiptEventV0 {
+    verification
     let now = env::current_timepoint()
     require old_cell.nonce < U64_MAX
-    let old_state_commitment = hash_blake2b_packed(NovaRwaReceiptStateCommitmentV0 {
+    let old_state_commitment = ckb::hash_data_packed(NovaRwaReceiptStateCommitmentV0 {
         version: old_cell.version,
         receipt_id: old_cell.receipt_id,
         registry_hash: old_cell.registry_hash,
@@ -390,8 +392,8 @@ where
         nonce: old_cell.nonce,
         expiry: old_cell.expiry
     })
-    let intent_core_hash = hash_blake2b_packed(intent.core)
-    let signed_intent_hash = hash_blake2b_packed(intent)
+    let intent_core_hash = ckb::hash_data_packed(intent.core)
+    let signed_intent_hash = ckb::hash_data_packed(intent)
     let event_commitment = NovaRwaReceiptEventCommitmentV0 {
         action: OP_SETTLE,
         receipt_id: old_cell.receipt_id,
@@ -409,8 +411,8 @@ where
         intent_core_hash: intent_core_hash,
         payout_commitment_hash: intent.core.payout_commitment_hash
     }
-    let materialized_receipt_hash = hash_blake2b_packed(event_commitment)
-    let canonical_envelope_hash = hash_blake2b_packed(NovaSealCanonicalEnvelopeV0 {
+    let materialized_receipt_hash = ckb::hash_data_packed(event_commitment)
+    let canonical_envelope_hash = ckb::hash_data_packed(NovaSealCanonicalEnvelopeV0 {
         profile_id: old_cell.receipt_id,
         policy_hash: old_cell.registry_hash,
         action: OP_SETTLE,
@@ -474,3 +476,4 @@ where
         signer_authority_hash: old_cell.issuer_authority_hash,
         expiry: old_cell.expiry
     }
+}

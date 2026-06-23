@@ -6,6 +6,8 @@
   "data": {
     "owned_index": 2,
     "owner_cell_owned_index": 2,
+    "owner_relative_distance": -1,
+    "owner_cell_relative_distance": -1,
     "owner": "owner-a",
     "claimed_owner": "owner-a",
     "withdrawal_request": true,

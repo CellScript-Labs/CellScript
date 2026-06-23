@@ -15,7 +15,7 @@ example.
 | `examples/timelock.cell` | Time-gated release checks, release requests, and approval flow. |
 | `examples/multisig.cell` | Threshold policy, proposal records, signatures-as-data, and lock-boundary predicates. |
 | `examples/vesting.cell` | Vesting grants, receipts, claim flow, and admin-boundary comments. |
-| `examples/amm_pool.cell` | Shared pool state, swap logic, liquidity receipts, and settlement effects. |
+| `examples/amm_pool.cell` | Shared pool state, bounded swap logic, liquidity receipts, LP ownership checks, and settlement effects. |
 | `examples/launch.cell` | Mint-authority bootstrap and launch/pool composition patterns. |
 
 The top-level `examples/*.cell` files are the canonical bundled business
@@ -99,18 +99,20 @@ authority Cell before `mint_with_authority` can consume it.
 `mint_with_authority` updates authority state and validates a proposed new token output:
 
 ```cellscript
-action mint_with_authority(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after: MintAuthority, token: Token)
-where
-    assert(auth_before.minted + amount <= auth_before.max_supply, "exceeds max supply")
+action mint_with_authority(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after: MintAuthority, token: Token) {
+    transition auth_before -> auth_after
 
-    require auth_after.token_symbol == auth_before.token_symbol
-    require auth_after.max_supply == auth_before.max_supply
-    require auth_after.minted == auth_before.minted + amount
+    verification
+        require auth_before.minted + amount <= auth_before.max_supply, "exceeds max supply"
+        require auth_after.token_symbol == auth_before.token_symbol
+        require auth_after.max_supply == auth_before.max_supply
+        require auth_after.minted == auth_before.minted + amount
 
-    create token = Token {
-        amount,
-        symbol: auth_before.token_symbol
-    } with_lock(to)
+        create token = Token {
+            amount,
+            symbol: auth_before.token_symbol
+        } with_lock(to)
+}
 ```
 
 Read `auth_before` as the existing authority Cell and `auth_after` as the
@@ -127,23 +129,25 @@ then pass that Cell as the runtime-bound `auth_before` input to
 under a new lock:
 
 ```cellscript
-action transfer_token(token: Token, to: Address) -> next_token: Token
-where
-    consume token
+action transfer_token(token: Token, to: Address) -> next_token: Token {
+    verification
+        consume token
 
-    create next_token = Token {
-        amount: token.amount,
-        symbol: token.symbol
-    } with_lock(to)
+        create next_token = Token {
+            amount: token.amount,
+            symbol: token.symbol
+        } with_lock(to)
+}
 ```
 
 `burn` consumes the token and destroys it:
 
 ```cellscript
-action burn(token: Token)
-where
-    assert(token.amount > 0, "cannot burn zero")
-    destroy token
+action burn(token: Token) {
+    verification
+        require token.amount > 0, "cannot burn zero"
+        destroy token
+}
 ```
 
 These three actions show the basic resource effect flow: propose an output,
@@ -159,7 +163,8 @@ When you see a lock like this:
 
 ```cellscript
 lock owner_only(protected asset: NFT, witness claimed_owner: Address) -> bool {
-    require asset.owner == claimed_owner
+    verification
+        require asset.owner == claimed_owner
 }
 ```
 

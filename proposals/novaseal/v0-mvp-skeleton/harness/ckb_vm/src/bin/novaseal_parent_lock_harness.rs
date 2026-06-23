@@ -61,6 +61,7 @@ const CKB_VM2_PIPE_WRITE_SYSCALL_NUMBER: u64 = 2605;
 const CKB_VM2_PIPE_READ_SYSCALL_NUMBER: u64 = 2606;
 const CKB_VM2_INHERITED_FD_SYSCALL_NUMBER: u64 = 2607;
 const CKB_VM2_CLOSE_SYSCALL_NUMBER: u64 = 2608;
+const CKB_PLACE_CELL: u64 = 0;
 
 const CHILD_INPUT_FD: u64 = 100;
 const PARENT_READ_FD: u64 = 200;
@@ -598,8 +599,10 @@ impl ParentSyscalls {
 
         let index = machine.registers()[A0];
         let source = machine.registers()[A1];
+        let place = machine.registers()[A2];
+        let bounds = machine.registers()[A3];
         let spawn_args = machine.registers()[A4];
-        if index != 0 || source != CKB_SOURCE_CELL_DEP || self.child_spawned {
+        if index != 0 || source != CKB_SOURCE_CELL_DEP || place != CKB_PLACE_CELL || bounds != 0 || self.child_spawned {
             self.trace.lock().expect("trace mutex poisoned").spawn_failures += 1;
             machine.set_register(A0, 1);
             return Ok(());

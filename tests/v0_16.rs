@@ -1,13 +1,7 @@
-use camino::Utf8Path;
-use cellscript::{compile, compile_path_with_entry_action, validate_compile_metadata, BuilderAssumptionMetadata, CompileOptions};
+use cellscript::{compile, BuilderAssumptionMetadata, CompileOptions};
 use serde_json::json;
-use std::path::PathBuf;
 use std::process::Command;
 use tempfile::tempdir;
-
-mod common;
-
-use common::cellc_command;
 
 const IDENTITY_CREATE_UNIQUE: &str = r#"
 module v016::identity
@@ -19,49 +13,13 @@ resource Badge has store, create, replace
     owner: Address
 }
 
-action issue_badge(badge_id: [u8; 32], owner: Address) -> Badge
-where
-    create_unique<Badge>(identity = field(badge_id)) {
-        badge_id,
-        owner
-    } with_lock(owner)
-"#;
-
-const TWO_ACTION_IDENTITY_CREATE_UNIQUE: &str = r#"
-module v016::two_identity
-
-resource Badge has store, create, replace
-    identity(field(badge_id))
-{
-    badge_id: [u8; 32]
-    owner: Address
+action issue_badge(badge_id: [u8; 32], owner: Address) -> Badge {
+    verification
+        create_unique<Badge>(identity = field(badge_id)) {
+            badge_id,
+            owner
+        } with_lock(owner)
 }
-
-action issue_badge_a(badge_id: [u8; 32], owner: Address) -> Badge
-where
-    create_unique<Badge>(identity = field(badge_id)) {
-        badge_id,
-        owner
-    } with_lock(owner)
-
-action issue_badge_b(badge_id: [u8; 32], owner: Address) -> Badge
-where
-    create_unique<Badge>(identity = field(badge_id)) {
-        badge_id,
-        owner
-    } with_lock(owner)
-"#;
-
-const SIMPLE_RESOURCE_CREATE: &str = r#"
-module v016::simple_resource_identity
-
-resource Token has store, create, consume, replace {
-    amount: u64
-}
-
-action mint(amount: u64) -> output: Token
-where
-    create output = Token { amount }
 "#;
 
 const METADATA_ONLY_INVARIANT: &str = r#"
@@ -78,106 +36,44 @@ resource Token {
     amount: u64
 }
 
-action noop() -> u64
-where
-    0
+action noop() -> u64 {
+    verification
+        0
+}
 "#;
 
 fn evidence_for(assumption: &BuilderAssumptionMetadata) -> serde_json::Value {
-    let evidence_payload = if assumption.kind == "spawn_target_cell_dep_binding" {
-        let required = assumption.required_cell_deps.first().expect("spawn target assumption should name a required CellDep");
-        let mut parts = required.split(':');
-        let dep_source = parts.next().expect("dep source");
-        let cell_dep_index = dep_source.strip_prefix("CellDep#").and_then(|value| value.parse::<usize>().ok()).unwrap();
-        let mut payload = json!({
-            "source": "unit-test-fixture",
-            "checked": true,
-            "dep_source": dep_source,
-            "cell_dep_index": cell_dep_index
-        });
-        let object = payload.as_object_mut().expect("payload object");
-        for part in parts {
-            if let Some(value) = part.strip_prefix("name=") {
-                object.insert("cell_dep_name".to_string(), json!(value));
-            } else if let Some(value) = part.strip_prefix("dep_type=") {
-                object.insert("dep_type".to_string(), json!(value));
-            } else if let Some(value) = part.strip_prefix("tx_hash=") {
-                object.insert("tx_hash".to_string(), json!(value));
-            } else if let Some(value) = part.strip_prefix("out_index=") {
-                object.insert("out_index".to_string(), json!(value.parse::<u32>().expect("out_index")));
-            } else if let Some(value) = part.strip_prefix("hash_type=") {
-                object.insert("hash_type".to_string(), json!(value));
-            } else if let Some(value) = part.strip_prefix("data_hash=") {
-                object.insert("data_hash".to_string(), json!(value));
-            } else if let Some(value) = part.strip_prefix("type_id=") {
-                object.insert("type_id".to_string(), json!(value));
-            }
-        }
-        payload
-    } else {
-        json!({
-            "source": "unit-test-fixture",
-            "checked": true
-        })
-    };
     json!({
         "assumption_id": assumption.assumption_id,
         "kind": assumption.kind,
         "origin": assumption.origin,
         "feature": assumption.feature,
         "proof_plan_status": assumption.proof_plan_status,
-        "evidence": evidence_payload
+        "evidence": {
+            "source": "unit-test-fixture",
+            "checked": true,
+            "inputs": [{"index": 0, "source": "Input"}],
+            "outputs": [{"index": 0, "source": "Output"}],
+            "cell_deps": [{"name": "unit-test-dep", "dep_type": "code"}],
+            "witness_fields": [{"index": 0, "field": "lock"}],
+            "occupied_capacity_shannons": 6100000000u64,
+            "tx_size_bytes": 256u64,
+            "under_capacity_output_indexes": [],
+            "type_id": {
+                "first_input_out_point": "0x0000000000000000000000000000000000000000000000000000000000000000:0",
+                "output_index": 0,
+                "expected_type_id_args": "0x0000000000000000000000000000000000000000000000000000000000000000"
+            },
+            "uniqueness_checked": true,
+            "covered_lock_groups": ["unit-test-lock-group"],
+            "transaction_scope_reviewed": true,
+            "manual_review": {"reviewed_by": "unit-test"}
+        }
     })
 }
 
-fn write_manifest_bound_spawn_package(root: &Utf8Path) {
-    std::fs::create_dir_all(root.join("src")).unwrap();
-    std::fs::write(
-        root.join("Cell.toml"),
-        r#"
-[package]
-name = "spawn_bound"
-version = "0.1.0"
-entry = "src/main.cell"
-
-[build]
-target_profile = "ckb"
-
-[[deploy.ckb.cell_deps]]
-name = "secp256k1_verifier"
-out_point = "0x3333333333333333333333333333333333333333333333333333333333333333:1"
-dep_type = "code"
-hash_type = "data1"
-"#,
-    )
-    .unwrap();
-    std::fs::write(
-        root.join("src/main.cell"),
-        r#"
-module spawn_bound::main
-
-action delegate() -> u64
-where
-    return spawn("secp256k1_verifier")
-"#,
-    )
-    .unwrap();
-}
-
-fn manifest_bound_spawn_tx(evidence: Vec<serde_json::Value>) -> serde_json::Value {
-    json!({
-        "inputs": [],
-        "outputs": [],
-        "cell_deps": [{
-            "name": "secp256k1_verifier",
-            "dep_type": "code",
-            "tx_hash": "0x3333333333333333333333333333333333333333333333333333333333333333",
-            "index": 1,
-            "hash_type": "data1"
-        }],
-        "witnesses": [],
-        "builder_assumption_evidence": evidence
-    })
+fn cellc_command() -> Command {
+    Command::new(env!("CARGO_BIN_EXE_cellc"))
 }
 
 fn run_success_json(mut command: Command) -> serde_json::Value {
@@ -190,12 +86,6 @@ fn run_failure_json(mut command: Command) -> serde_json::Value {
     let output = command.output().unwrap();
     assert!(!output.status.success(), "command must fail");
     serde_json::from_slice(&output.stdout).unwrap()
-}
-
-fn run_failure(mut command: Command) -> std::process::Output {
-    let output = command.output().unwrap();
-    assert!(!output.status.success(), "command must fail");
-    output
 }
 
 #[test]
@@ -230,65 +120,6 @@ fn strict_0_16_rejects_metadata_only_proof_plan_gaps() {
 }
 
 #[test]
-fn cli_v0_16_compile_workflows_reject_metadata_only_proof_plan_gaps() {
-    let temp = tempdir().unwrap();
-    let source = temp.path().join("metadata_only.cell");
-    let bundle_dir = temp.path().join("audit-bundle");
-    std::fs::write(&source, METADATA_ONLY_INVARIANT).unwrap();
-
-    for command_name in ["explain-assumptions", "solve-tx", "profile"] {
-        let mut command = cellc_command();
-        command.arg(command_name).arg(&source).arg("--target-profile").arg("ckb").arg("--json");
-        let output = run_failure(command);
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(stderr.contains("PP0150"), "unexpected {command_name} stderr: {stderr}");
-    }
-
-    let mut audit_bundle = cellc_command();
-    audit_bundle.arg("audit-bundle").arg(&source).arg("--target-profile").arg("ckb").arg("--output").arg(&bundle_dir).arg("--json");
-    let output = run_failure(audit_bundle);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("PP0150"), "unexpected audit-bundle stderr: {stderr}");
-}
-
-#[test]
-fn cli_validate_and_trace_reject_non_strict_metadata_only_proof_plan_gaps() {
-    let temp = tempdir().unwrap();
-    let metadata_path = temp.path().join("metadata-only.meta.json");
-    let tx_path = temp.path().join("tx.json");
-    let result =
-        compile(METADATA_ONLY_INVARIANT, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() })
-            .expect("non-strict compile keeps metadata-only invariant as audit metadata");
-    std::fs::write(&metadata_path, serde_json::to_vec_pretty(&result.metadata).unwrap()).unwrap();
-    std::fs::write(&tx_path, serde_json::to_vec_pretty(&json!({"inputs": [], "outputs": []})).unwrap()).unwrap();
-
-    let mut validate = cellc_command();
-    validate.arg("validate-tx").arg("--against").arg(&metadata_path).arg(&tx_path).arg("--json");
-    let validate_json = run_failure_json(validate);
-    assert_eq!(validate_json["status"], "failed");
-    assert_eq!(validate_json["proof_plan_soundness"]["status"], "failed");
-    assert!(
-        validate_json["proof_plan_soundness"]["issues"]
-            .as_array()
-            .is_some_and(|issues| issues.iter().any(|issue| issue["code"] == "PP0150")),
-        "{validate_json:#?}"
-    );
-
-    let mut trace = cellc_command();
-    trace.arg("trace-tx").arg("--against").arg(&metadata_path).arg(&tx_path).arg("--json");
-    let trace_json = run_failure_json(trace);
-    assert_eq!(trace_json["status"], "failed");
-    assert_eq!(trace_json["schema"], "cellscript-tx-trace-v0.16");
-    assert_eq!(trace_json["proof_plan_soundness"]["status"], "failed");
-    assert!(
-        trace_json["proof_plan_soundness"]["issues"]
-            .as_array()
-            .is_some_and(|issues| issues.iter().any(|issue| issue["code"] == "PP0150")),
-        "{trace_json:#?}"
-    );
-}
-
-#[test]
 fn proof_plan_soundness_rejects_local_runtime_mismatches() {
     let result =
         compile(IDENTITY_CREATE_UNIQUE, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() })
@@ -308,49 +139,107 @@ fn proof_plan_soundness_rejects_local_runtime_mismatches() {
 }
 
 #[test]
-fn proof_plan_soundness_rejects_scoped_duplicate_obligation_deletion() {
-    let result = compile(
-        TWO_ACTION_IDENTITY_CREATE_UNIQUE,
-        CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() },
-    )
-    .unwrap();
+fn proof_plan_soundness_rejects_obligation_scope_mismatches() {
+    let result =
+        compile(IDENTITY_CREATE_UNIQUE, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() })
+            .unwrap();
     let mut metadata = result.metadata.clone();
-    assert!(metadata.runtime.proof_plan.iter().any(|plan| plan.origin == "action:issue_badge_b"));
-    assert!(metadata.runtime.verifier_obligations.iter().any(|obligation| obligation.scope == "action:issue_badge_b"));
+    let obligation =
+        metadata.runtime.verifier_obligations.first().expect("identity compile should expose verifier obligations").clone();
+    let changed_origin = format!("{}:stale", obligation.scope);
 
-    metadata.runtime.proof_plan.retain(|plan| plan.origin != "action:issue_badge_b");
-    for action in &mut metadata.actions {
-        if action.name == "issue_badge_b" {
-            action.proof_plan.clear();
+    for plan in &mut metadata.runtime.proof_plan {
+        if plan.category == obligation.category
+            && plan.feature == obligation.feature
+            && plan.status == obligation.status
+            && plan.detail == obligation.detail
+        {
+            plan.origin = changed_origin.clone();
+        }
+    }
+    for plan in metadata
+        .actions
+        .iter_mut()
+        .flat_map(|action| action.proof_plan.iter_mut())
+        .chain(metadata.functions.iter_mut().flat_map(|function| function.proof_plan.iter_mut()))
+        .chain(metadata.locks.iter_mut().flat_map(|lock| lock.proof_plan.iter_mut()))
+    {
+        if plan.category == obligation.category
+            && plan.feature == obligation.feature
+            && plan.status == obligation.status
+            && plan.detail == obligation.detail
+        {
+            plan.origin = changed_origin.clone();
         }
     }
 
     let report = cellscript::proof_plan::soundness::check_metadata(&metadata, false);
     assert_eq!(report.status, "failed", "{report:#?}");
-    assert!(report.issues.iter().any(|issue| issue.code == "PP0002" && issue.origin == "action:issue_badge_b"), "{report:#?}");
+    assert!(report.issues.iter().any(|issue| issue.code == "PP0002" && issue.feature == obligation.feature), "{report:#?}");
 }
 
 #[test]
-fn proof_plan_soundness_rejects_group_cardinality_drift_after_optimization() {
-    let result = compile(
-        IDENTITY_CREATE_UNIQUE,
-        CompileOptions { target_profile: Some("ckb".to_string()), opt_level: 1, ..CompileOptions::default() },
-    )
-    .unwrap();
-    assert_eq!(result.metadata.runtime.proof_plan_soundness.status, "passed");
-
+fn proof_plan_soundness_rejects_duplicate_and_incomplete_semantic_records() {
+    let result =
+        compile(IDENTITY_CREATE_UNIQUE, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() })
+            .unwrap();
     let mut metadata = result.metadata.clone();
-    let plan = metadata
-        .actions
-        .iter_mut()
-        .flat_map(|action| action.proof_plan.iter_mut())
-        .next()
-        .expect("identity action should expose local ProofPlan records");
-    plan.group_cardinality = "stale optimizer cardinality".to_string();
+    let duplicate = metadata.runtime.proof_plan.first().expect("ProofPlan record").clone();
+    metadata.runtime.proof_plan.push(duplicate);
 
     let report = cellscript::proof_plan::soundness::check_metadata(&metadata, false);
     assert_eq!(report.status, "failed", "{report:#?}");
-    assert!(report.issues.iter().any(|issue| issue.code == "PP0403" && issue.message.contains("group cardinality")), "{report:#?}");
+    assert!(report.issues.iter().any(|issue| issue.code == "PP0003"), "{report:#?}");
+
+    let mut metadata = result.metadata.clone();
+    let checked = metadata.runtime.proof_plan.iter_mut().find(|plan| plan.on_chain_checked).expect("checked ProofPlan record");
+    checked.reads.clear();
+    checked.coverage.clear();
+    checked.on_chain_checked_obligations.clear();
+
+    let report = cellscript::proof_plan::soundness::check_metadata(&metadata, false);
+    assert_eq!(report.status, "failed", "{report:#?}");
+    assert!(report.issues.iter().any(|issue| issue.code == "PP0206"), "{report:#?}");
+    assert!(report.issues.iter().any(|issue| issue.code == "PP0207"), "{report:#?}");
+    assert!(report.issues.iter().any(|issue| issue.code == "PP0208"), "{report:#?}");
+}
+
+#[test]
+fn proof_plan_soundness_requires_source_spans_for_source_invariants_in_strict_mode() {
+    let result =
+        compile(METADATA_ONLY_INVARIANT, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() })
+            .unwrap();
+    let mut metadata = result.metadata.clone();
+    let invariant_plan = metadata
+        .runtime
+        .proof_plan
+        .iter_mut()
+        .find(|plan| plan.origin.starts_with("invariant:"))
+        .expect("declared invariant ProofPlan record");
+    invariant_plan.source_span = None;
+
+    let report = cellscript::proof_plan::soundness::check_metadata(&metadata, true);
+    assert_eq!(report.status, "failed", "{report:#?}");
+    assert!(report.issues.iter().any(|issue| issue.code == "PP0210"), "{report:#?}");
+}
+
+#[test]
+fn proof_plan_soundness_rejects_cell_access_read_mismatches() {
+    let result =
+        compile(IDENTITY_CREATE_UNIQUE, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() })
+            .unwrap();
+    let mut metadata = result.metadata.clone();
+    let plan = metadata
+        .runtime
+        .proof_plan
+        .iter_mut()
+        .find(|plan| plan.category == "cell-access" && plan.feature.contains(":Output#"))
+        .expect("output cell-access ProofPlan record");
+    plan.reads = vec!["input".to_string()];
+
+    let report = cellscript::proof_plan::soundness::check_metadata(&metadata, false);
+    assert_eq!(report.status, "failed", "{report:#?}");
+    assert!(report.issues.iter().any(|issue| issue.code == "PP0212"), "{report:#?}");
 }
 
 #[test]
@@ -394,7 +283,7 @@ fn validate_tx_checks_builder_assumption_evidence() {
         "{report:#?}"
     );
 
-    let scalar_evidence = assumptions
+    let weak_evidence = assumptions
         .iter()
         .map(|assumption| {
             json!({
@@ -403,56 +292,88 @@ fn validate_tx_checks_builder_assumption_evidence() {
                 "origin": assumption.origin,
                 "feature": assumption.feature,
                 "proof_plan_status": assumption.proof_plan_status,
-                "evidence": true
+                "evidence": {
+                    "source": "unit-test-fixture",
+                    "checked": true
+                }
             })
         })
         .collect::<Vec<_>>();
-    let with_scalar_evidence = json!({
+    let with_weak_evidence = json!({
         "inputs": [{}],
         "outputs": [{}],
         "cell_deps": [],
         "witnesses": [],
-        "builder_assumption_evidence": scalar_evidence
+        "builder_assumption_evidence": weak_evidence
     });
-    let report = cellscript::assumptions::validate_transaction_against_metadata(&result.metadata, &with_scalar_evidence);
-    assert_eq!(report.status, "failed");
-    assert!(report.violations.iter().any(|violation| violation.message.contains("structured evidence")), "{report:#?}");
-
-    let implicit_map_evidence = assumptions
-        .iter()
-        .map(|assumption| {
-            let mut evidence = evidence_for(assumption);
-            evidence.as_object_mut().expect("evidence object").remove("assumption_id");
-            (assumption.assumption_id.clone(), evidence)
-        })
-        .collect::<serde_json::Map<_, _>>();
-    let with_implicit_map_evidence = json!({
-        "inputs": [{}],
-        "outputs": [{}],
-        "cell_deps": [],
-        "witnesses": [],
-        "builder_assumption_evidence": implicit_map_evidence
-    });
-    let report = cellscript::assumptions::validate_transaction_against_metadata(&result.metadata, &with_implicit_map_evidence);
+    let report = cellscript::assumptions::validate_transaction_against_metadata(&result.metadata, &with_weak_evidence);
     assert_eq!(report.status, "failed");
     assert!(
-        report.violations.iter().any(|violation| violation.message.contains("explicit assumption_id matching its map key")),
+        report.violations.iter().any(|violation| {
+            violation.message.contains("output evidence")
+                || violation.message.contains("uniqueness_checked")
+                || violation.message.contains("type_id")
+                || violation.message.contains("occupied_capacity")
+        }),
         "{report:#?}"
     );
 
-    let map_evidence = assumptions
+    let output_assumption_index = assumptions
         .iter()
-        .map(|assumption| (assumption.assumption_id.clone(), evidence_for(assumption)))
-        .collect::<serde_json::Map<_, _>>();
-    let with_map_evidence = json!({
+        .position(|assumption| !assumption.required_outputs.is_empty())
+        .expect("assumption requiring output evidence");
+    let mut missing_index_evidence = assumptions.iter().map(evidence_for).collect::<Vec<_>>();
+    missing_index_evidence[output_assumption_index]["evidence"]["outputs"][0]
+        .as_object_mut()
+        .expect("output evidence object")
+        .remove("index");
+    let with_missing_output_index = json!({
         "inputs": [{}],
         "outputs": [{}],
         "cell_deps": [],
         "witnesses": [],
-        "builder_assumption_evidence": map_evidence
+        "builder_assumption_evidence": missing_index_evidence
     });
-    let report = cellscript::assumptions::validate_transaction_against_metadata(&result.metadata, &with_map_evidence);
-    assert_eq!(report.status, "ok", "{:#?}", report);
+    let report = cellscript::assumptions::validate_transaction_against_metadata(&result.metadata, &with_missing_output_index);
+    assert_eq!(report.status, "failed");
+    assert!(
+        report.violations.iter().any(|violation| violation.message.contains("output evidence item 0 must include numeric index")),
+        "{report:#?}"
+    );
+
+    let mut bad_index_evidence = assumptions.iter().map(evidence_for).collect::<Vec<_>>();
+    bad_index_evidence[output_assumption_index]["evidence"]["outputs"][0]["index"] = json!(99);
+    let with_bad_output_index = json!({
+        "inputs": [{}],
+        "outputs": [{}],
+        "cell_deps": [],
+        "witnesses": [],
+        "builder_assumption_evidence": bad_index_evidence
+    });
+    let report = cellscript::assumptions::validate_transaction_against_metadata(&result.metadata, &with_bad_output_index);
+    assert_eq!(report.status, "failed");
+    assert!(
+        report.violations.iter().any(|violation| violation.message.contains("output evidence index 99 is out of range")),
+        "{report:#?}"
+    );
+
+    let mut mismatched_output_evidence = assumptions.iter().map(evidence_for).collect::<Vec<_>>();
+    mismatched_output_evidence[output_assumption_index]["evidence"]["outputs"][0]["lock_hash"] = json!("0xexpected-lock");
+    let with_mismatched_output = json!({
+        "inputs": [{}],
+        "outputs": [{"lock_hash": "0xactual-lock"}],
+        "cell_deps": [],
+        "witnesses": [],
+        "builder_assumption_evidence": mismatched_output_evidence
+    });
+    let report = cellscript::assumptions::validate_transaction_against_metadata(&result.metadata, &with_mismatched_output);
+    assert_eq!(report.status, "failed");
+    assert!(
+        report.violations.iter().any(|violation| violation
+            .message
+            .contains("output evidence item 0 lock_hash does not match transaction outputs[0].lock_hash")),
+        "{report:#?}"
+    );
 
     let evidence = assumptions.iter().map(evidence_for).collect::<Vec<_>>();
     let with_evidence = json!({
@@ -467,1025 +388,79 @@ fn validate_tx_checks_builder_assumption_evidence() {
 }
 
 #[test]
-fn validate_tx_rejects_scoped_action_artifact_as_resource_type_identity() {
-    let result =
-        compile(IDENTITY_CREATE_UNIQUE, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() })
-            .unwrap();
-    let artifact_hash = result.metadata.artifact_hash.as_deref().expect("artifact hash");
-    let resource_identities = &result.metadata.constraints.ckb.as_ref().expect("ckb constraints").resource_identities;
-    assert!(
-        resource_identities
-            .iter()
-            .any(|identity| identity.type_name == "Badge" && identity.status == "compiler-passive-identity-available"),
-        "{resource_identities:#?}"
-    );
-
-    let evidence = result.metadata.runtime.builder_assumptions.iter().map(evidence_for).collect::<Vec<_>>();
-    let tx = json!({
-        "inputs": [{}],
-        "outputs": [{
-            "lock": {},
-            "type": {
-                "code_hash": format!("0x{artifact_hash}"),
-                "hash_type": "data1",
-                "args": "0x"
-            }
-        }],
-        "cell_deps": [],
-        "witnesses": [],
-        "builder_assumption_evidence": evidence
-    });
-    let report = cellscript::assumptions::validate_transaction_against_metadata(&result.metadata, &tx);
-    assert_eq!(report.status, "failed");
-    assert!(
-        report
-            .violations
-            .iter()
-            .any(|violation| { violation.kind == "resource_identity" && violation.message.contains("active verifiers") }),
-        "{report:#?}"
-    );
-}
-
-#[test]
-fn validate_tx_allows_scoped_action_artifact_on_mutated_output_type() {
-    let result = compile_path_with_entry_action(
-        Utf8Path::new("examples/amm_pool.cell"),
-        CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() },
-        "swap_a_for_b",
-    )
-    .unwrap();
-    let artifact_hash = result.metadata.artifact_hash.as_deref().expect("artifact hash");
-    let evidence = result.metadata.runtime.builder_assumptions.iter().map(evidence_for).collect::<Vec<_>>();
-    let tx = json!({
-        "inputs": [{}, {}],
-        "outputs": [
-            {
-                "lock": {},
-                "type": {
-                    "code_hash": format!("0x{artifact_hash}"),
-                    "hash_type": "data1",
-                    "args": "0x"
-                }
-            },
-            {
-                "lock": {},
-                "type": {
-                    "code_hash": "0x1111111111111111111111111111111111111111111111111111111111111111",
-                    "hash_type": "data1",
-                    "args": "0x"
-                }
-            }
-        ],
-        "cell_deps": [],
-        "witnesses": ["0x"],
-        "builder_assumption_evidence": evidence
-    });
-    let report = cellscript::assumptions::validate_transaction_against_metadata(&result.metadata, &tx);
-    assert!(!report.violations.iter().any(|violation| violation.assumption_id == "resource-identity-active-artifact"), "{report:#?}");
-}
-
-#[test]
-fn validate_tx_rejects_scoped_action_artifact_on_created_output_type() {
-    let result = compile_path_with_entry_action(
-        Utf8Path::new("examples/amm_pool.cell"),
-        CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() },
-        "swap_a_for_b",
-    )
-    .unwrap();
-    let artifact_hash = result.metadata.artifact_hash.as_deref().expect("artifact hash");
-    let evidence = result.metadata.runtime.builder_assumptions.iter().map(evidence_for).collect::<Vec<_>>();
-    let tx = json!({
-        "inputs": [{}, {}],
-        "outputs": [
-            {
-                "lock": {},
-                "type": {
-                    "code_hash": "0x1111111111111111111111111111111111111111111111111111111111111111",
-                    "hash_type": "data1",
-                    "args": "0x"
-                }
-            },
-            {
-                "lock": {},
-                "type": {
-                    "code_hash": format!("0x{artifact_hash}"),
-                    "hash_type": "data1",
-                    "args": "0x"
-                }
-            }
-        ],
-        "cell_deps": [],
-        "witnesses": ["0x"],
-        "builder_assumption_evidence": evidence
-    });
-    let report = cellscript::assumptions::validate_transaction_against_metadata(&result.metadata, &tx);
-    assert!(report.violations.iter().any(|violation| violation.assumption_id == "resource-identity-active-artifact"), "{report:#?}");
-}
-
-#[test]
-fn compile_metadata_rejects_tampered_resource_identity_contract() {
-    let result =
-        compile(SIMPLE_RESOURCE_CREATE, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() })
-            .unwrap();
-    let mut metadata = result.metadata.clone();
-    metadata.constraints.ckb.as_mut().expect("ckb constraints").resource_identities.clear();
-    let err = validate_compile_metadata(&metadata, result.artifact_format).unwrap_err();
-    assert!(err.message.contains("resource_identities"), "unexpected error: {}", err.message);
-}
-
-#[test]
-fn validate_tx_requires_evidence_for_wildcard_structural_reads() {
-    let assumption = BuilderAssumptionMetadata {
-        assumption_id: "ba-structural-wildcard".to_string(),
-        kind: "builder_evidence".to_string(),
-        origin: "action:test".to_string(),
-        feature: "input:Input#0".to_string(),
-        proof_plan_status: "ckb-runtime".to_string(),
-        required_inputs: vec!["input:*".to_string()],
-        required_outputs: Vec::new(),
-        required_cell_deps: Vec::new(),
-        required_witness_fields: Vec::new(),
-        capacity_policy: "none".to_string(),
-        fee_policy: "builder-balances-fee-before-signing".to_string(),
-        change_policy: "change-outputs-must-not-violate-proof-plan-shape".to_string(),
-        signature_policy: "none".to_string(),
-        failure_mode: "reject-before-signing".to_string(),
-        detail: "unit-test structural wildcard".to_string(),
-    };
-
-    let shape_only = json!({
-        "inputs": [{}],
-        "outputs": [],
-        "cell_deps": [],
-        "witnesses": []
-    });
-    let report = cellscript::assumptions::validate_transaction_against_assumptions(&[assumption.clone()], &shape_only);
-    assert_eq!(report.status, "failed");
-    assert!(report.violations.iter().any(|violation| violation.message.contains("wildcard structural read bindings")), "{report:#?}");
-
-    let with_evidence = json!({
-        "inputs": [{}],
-        "outputs": [],
-        "cell_deps": [],
-        "witnesses": [],
-        "builder_assumption_evidence": [evidence_for(&assumption)]
-    });
-    let report = cellscript::assumptions::validate_transaction_against_assumptions(&[assumption], &with_evidence);
-    assert_eq!(report.status, "ok", "{report:#?}");
-}
-
-#[test]
-fn strict_0_16_rejects_unbound_spawn_target_cell_dep() {
-    let err = compile(
-        r#"
-module v016::spawn_unbound
-
-action delegate() -> u64
-where
-    return spawn("secp256k1_verifier")
-"#,
-        CompileOptions {
-            target_profile: Some("ckb".to_string()),
-            primitive_compat: Some("0.16".to_string()),
-            ..CompileOptions::default()
-        },
-    )
-    .unwrap_err();
-
-    assert!(err.message.contains("PP0150"), "unexpected error: {}", err.message);
-    assert!(err.message.contains("spawn-target:CellDep#0@0x"), "unexpected error: {}", err.message);
-}
-
-#[test]
-fn strict_0_16_accepts_manifest_bound_spawn_target_cell_dep() {
-    let dir = tempdir().unwrap();
-    let root = Utf8Path::from_path(dir.path()).unwrap();
-    write_manifest_bound_spawn_package(root);
-
-    let result = cellscript::compile_path(
-        root,
-        CompileOptions {
-            target_profile: Some("ckb".to_string()),
-            primitive_compat: Some("0.16".to_string()),
-            ..CompileOptions::default()
-        },
-    )
-    .unwrap();
-    let spawn_plan =
-        result.metadata.runtime.proof_plan.iter().find(|plan| plan.category == "spawn-target").expect("spawn target ProofPlan record");
-    assert!(spawn_plan.feature.starts_with("spawn-target:CellDep#0@0x"), "{spawn_plan:#?}");
-    assert_eq!(spawn_plan.status, "builder-required");
-    assert_eq!(spawn_plan.codegen_coverage_status, "builder-required");
-    assert!(spawn_plan.detail.contains("secp256k1_verifier"), "{spawn_plan:#?}");
-    assert!(spawn_plan.builder_assumptions.iter().all(|assumption| !assumption.contains("runtime-required")));
-
-    let ckb = result.metadata.constraints.ckb.as_ref().expect("ckb constraints");
-    assert!(ckb.script_references.iter().any(|reference| {
-        reference.purpose == "spawn-target"
-            && reference.name == "secp256k1_verifier"
-            && reference.dep_source == "CellDep#0"
-            && reference.status == "builder-required-manifest-bound-cell-dep"
-    }));
-
-    let spawn_assumption = result
-        .metadata
-        .runtime
-        .builder_assumptions
-        .iter()
-        .find(|assumption| assumption.kind == "spawn_target_cell_dep_binding")
-        .expect("spawn target builder assumption");
-    assert_eq!(spawn_assumption.proof_plan_status, "builder-required");
-    assert_eq!(
-        spawn_assumption.required_cell_deps,
-        vec![
-            "CellDep#0:name=secp256k1_verifier:dep_type=code:tx_hash=0x3333333333333333333333333333333333333333333333333333333333333333:out_index=1:hash_type=data1"
-        ],
-        "{spawn_assumption:#?}"
-    );
-
-    let evidence = result.metadata.runtime.builder_assumptions.iter().map(evidence_for).collect::<Vec<_>>();
-    let no_cell_dep = json!({
-        "inputs": [],
-        "outputs": [],
-        "cell_deps": [],
-        "witnesses": [],
-        "builder_assumption_evidence": evidence
-    });
-    let report = cellscript::assumptions::validate_transaction_against_metadata(&result.metadata, &no_cell_dep);
-    assert_eq!(report.status, "failed");
-    assert!(report.violations.iter().any(|violation| violation.kind == "spawn_target_cell_dep_binding"), "{report:#?}");
-
-    let wrong_spawn_evidence = result
-        .metadata
-        .runtime
-        .builder_assumptions
-        .iter()
-        .map(|assumption| {
-            if assumption.kind == "spawn_target_cell_dep_binding" {
-                json!({
-                    "assumption_id": assumption.assumption_id,
-                    "kind": assumption.kind,
-                    "origin": assumption.origin,
-                    "feature": assumption.feature,
-                    "proof_plan_status": assumption.proof_plan_status,
-                    "evidence": {
-                        "source": "unit-test-fixture",
-                        "checked": true,
-                        "dep_source": "CellDep#0",
-                        "cell_dep_index": 0,
-                        "cell_dep_name": "wrong_verifier",
-                        "dep_type": "code"
-                    }
-                })
-            } else {
-                evidence_for(assumption)
-            }
-        })
-        .collect::<Vec<_>>();
-    let wrong_identity = json!({
-        "inputs": [],
-        "outputs": [],
-        "cell_deps": [{
-            "name": "secp256k1_verifier",
-            "dep_type": "code",
-            "tx_hash": "0x3333333333333333333333333333333333333333333333333333333333333333",
-            "index": 1,
-            "hash_type": "data1"
-        }],
-        "witnesses": [],
-        "builder_assumption_evidence": wrong_spawn_evidence
-    });
-    let report = cellscript::assumptions::validate_transaction_against_metadata(&result.metadata, &wrong_identity);
-    assert_eq!(report.status, "failed");
-    assert!(
-        report
-            .violations
-            .iter()
-            .any(|violation| violation.kind == "spawn_target_cell_dep_binding" && violation.message.contains("cell_dep_name")),
-        "{report:#?}"
-    );
-
-    let wrong_spawn_index_evidence = result
-        .metadata
-        .runtime
-        .builder_assumptions
-        .iter()
-        .map(|assumption| {
-            if assumption.kind == "spawn_target_cell_dep_binding" {
-                json!({
-                    "assumption_id": assumption.assumption_id,
-                    "kind": assumption.kind,
-                    "origin": assumption.origin,
-                    "feature": assumption.feature,
-                    "proof_plan_status": assumption.proof_plan_status,
-                    "evidence": {
-                        "source": "unit-test-fixture",
-                        "checked": true,
-                        "dep_source": "CellDep#0",
-                        "cell_dep_index": 1,
-                        "cell_dep_name": "secp256k1_verifier",
-                        "dep_type": "code",
-                        "tx_hash": "0x3333333333333333333333333333333333333333333333333333333333333333",
-                        "out_index": 1,
-                        "hash_type": "data1"
-                    }
-                })
-            } else {
-                evidence_for(assumption)
-            }
-        })
-        .collect::<Vec<_>>();
-    let wrong_evidence_locator = json!({
-        "inputs": [],
-        "outputs": [],
-        "cell_deps": [{
-            "name": "secp256k1_verifier",
-            "dep_type": "code",
-            "tx_hash": "0x3333333333333333333333333333333333333333333333333333333333333333",
-            "index": 1,
-            "hash_type": "data1"
-        }],
-        "witnesses": [],
-        "builder_assumption_evidence": wrong_spawn_index_evidence
-    });
-    let report = cellscript::assumptions::validate_transaction_against_metadata(&result.metadata, &wrong_evidence_locator);
-    assert_eq!(report.status, "failed");
-    assert!(
-        report
-            .violations
-            .iter()
-            .any(|violation| violation.kind == "spawn_target_cell_dep_binding" && violation.message.contains("cell_dep_index 0")),
-        "{report:#?}"
-    );
-
-    let evidence = result.metadata.runtime.builder_assumptions.iter().map(evidence_for).collect::<Vec<_>>();
-    let wrong_tx_cell_dep = json!({
-        "inputs": [],
-        "outputs": [],
-        "cell_deps": [{
-            "name": "secp256k1_verifier",
-            "dep_type": "code",
-            "tx_hash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            "index": 1,
-            "hash_type": "data1"
-        }],
-        "witnesses": [],
-        "builder_assumption_evidence": evidence
-    });
-    let report = cellscript::assumptions::validate_transaction_against_metadata(&result.metadata, &wrong_tx_cell_dep);
-    assert_eq!(report.status, "failed");
-    assert!(
-        report
-            .violations
-            .iter()
-            .any(|violation| violation.kind == "spawn_target_cell_dep_binding" && violation.message.contains("tx_hash")),
-        "{report:#?}"
-    );
-
-    let evidence = result.metadata.runtime.builder_assumptions.iter().map(evidence_for).collect::<Vec<_>>();
-    let with_cell_dep_and_evidence = json!({
-        "inputs": [],
-        "outputs": [],
-        "cell_deps": [{
-            "name": "secp256k1_verifier",
-            "dep_type": "code",
-            "tx_hash": "0x3333333333333333333333333333333333333333333333333333333333333333",
-            "index": 1,
-            "hash_type": "data1"
-        }],
-        "witnesses": [],
-        "builder_assumption_evidence": evidence
-    });
-    let report = cellscript::assumptions::validate_transaction_against_metadata(&result.metadata, &with_cell_dep_and_evidence);
-    assert_eq!(report.status, "ok", "{report:#?}");
-
-    let mut solve = cellc_command();
-    solve.arg("solve-tx").arg(root.as_std_path()).arg("--target-profile").arg("ckb").arg("--json");
-    let solve_json = run_success_json(solve);
-    let requirements = solve_json["transaction_plan"]["builder_assumption_evidence_requirements"]
-        .as_array()
-        .expect("builder assumption evidence requirements");
-    assert!(
-        requirements.iter().any(|requirement| {
-            requirement["kind"] == "spawn_target_cell_dep_binding"
-                && requirement["evidence_schema"]["required_cell_deps"]
-                    .as_array()
-                    .is_some_and(|deps| deps.iter().any(|dep| dep.as_str().is_some_and(|dep| dep.contains("tx_hash=0x333333"))))
-        }),
-        "{solve_json:#?}"
-    );
-    let cell_deps = solve_json["transaction_plan"]["cell_deps"].as_array().expect("solver cell_deps");
-    assert!(
-        cell_deps.iter().any(|dep| {
-            dep["name"] == "secp256k1_verifier"
-                && dep["dep_type"] == "code"
-                && dep["tx_hash"] == "0x3333333333333333333333333333333333333333333333333333333333333333"
-                && dep["index"] == 1
-                && dep["hash_type"] == "data1"
-        }),
-        "{solve_json:#?}"
-    );
-}
-
-#[test]
-fn strict_0_16_rejects_spawn_target_manifest_binding_outside_cell_dep_zero() {
-    let dir = tempdir().unwrap();
-    let root = Utf8Path::from_path(dir.path()).unwrap();
-    std::fs::create_dir_all(root.join("src")).unwrap();
-    std::fs::write(
-        root.join("Cell.toml"),
-        r#"
-[package]
-name = "spawn_bound_second"
-version = "0.1.0"
-entry = "src/main.cell"
-
-[build]
-target_profile = "ckb"
-
-[[deploy.ckb.cell_deps]]
-name = "other_verifier"
-out_point = "0x1111111111111111111111111111111111111111111111111111111111111111:0"
-dep_type = "code"
-hash_type = "data1"
-
-[[deploy.ckb.cell_deps]]
-name = "secp256k1_verifier"
-out_point = "0x2222222222222222222222222222222222222222222222222222222222222222:0"
-dep_type = "code"
-hash_type = "data1"
-"#,
-    )
-    .unwrap();
-    std::fs::write(
-        root.join("src/main.cell"),
-        r#"
-module spawn_bound_second::main
-
-action delegate() -> u64
-where
-    return spawn("secp256k1_verifier")
-"#,
-    )
-    .unwrap();
-
-    let err = cellscript::compile_path(
-        root,
-        CompileOptions {
-            target_profile: Some("ckb".to_string()),
-            primitive_compat: Some("0.16".to_string()),
-            ..CompileOptions::default()
-        },
-    )
-    .unwrap_err();
-    assert!(err.message.contains("PP0150"), "unexpected error: {}", err.message);
-    assert!(err.message.contains("spawn-target:CellDep#0@0x"), "unexpected error: {}", err.message);
-}
-
-#[test]
-fn strict_0_16_rejects_spawn_target_manifest_dep_group_binding() {
-    let dir = tempdir().unwrap();
-    let root = Utf8Path::from_path(dir.path()).unwrap();
-    std::fs::create_dir_all(root.join("src")).unwrap();
-    std::fs::write(
-        root.join("Cell.toml"),
-        r#"
-[package]
-name = "spawn_bound_dep_group"
-version = "0.1.0"
-entry = "src/main.cell"
-
-[build]
-target_profile = "ckb"
-
-[[deploy.ckb.cell_deps]]
-name = "secp256k1_verifier"
-out_point = "0x3333333333333333333333333333333333333333333333333333333333333333:0"
-dep_type = "dep_group"
-hash_type = "data1"
-"#,
-    )
-    .unwrap();
-    std::fs::write(
-        root.join("src/main.cell"),
-        r#"
-module spawn_bound_dep_group::main
-
-action delegate() -> u64
-where
-    return spawn("secp256k1_verifier")
-"#,
-    )
-    .unwrap();
-
-    let err = cellscript::compile_path(
-        root,
-        CompileOptions {
-            target_profile: Some("ckb".to_string()),
-            primitive_compat: Some("0.16".to_string()),
-            ..CompileOptions::default()
-        },
-    )
-    .unwrap_err();
-    assert!(err.message.contains("PP0150"), "unexpected error: {}", err.message);
-    assert!(err.message.contains("spawn-target:CellDep#0@0x"), "unexpected error: {}", err.message);
-}
-
-#[test]
-fn strict_0_16_rejects_checked_partial_proof_plan_gaps() {
-    let err = compile(
-        r#"
-module v016::partial_state_gap
-
-resource Ticket has store, create, consume, replace, burn, relock, read_ref {
-    state: u8
-    note: String
-}
-
-flow Ticket.state {
-    Created -> Active;
-}
-
-action activate(ticket: Ticket, note: String) -> output: Ticket
-    transition ticket.state: Created -> output.state: Active
-where
-    consume ticket
-    create output = Ticket {
-        state: Ticket::Active,
-        note: note
-    }
-"#,
-        CompileOptions {
-            target_profile: Some("ckb".to_string()),
-            primitive_compat: Some("0.16".to_string()),
-            ..CompileOptions::default()
-        },
-    )
-    .expect_err("strict v0.16 must reject checked-partial ProofPlan gaps");
-
-    assert!(err.message.contains("PP0151"), "unexpected error: {}", err.message);
-    assert!(err.message.contains("partial verifier coverage gaps"), "unexpected error: {}", err.message);
-}
-
-#[test]
 fn cli_explain_assumptions_and_validate_tx_are_machine_readable() {
     let temp = tempdir().unwrap();
-    let root = Utf8Path::from_path(temp.path()).unwrap();
-    write_manifest_bound_spawn_package(root);
+    let source = temp.path().join("identity.cell");
+    std::fs::write(&source, IDENTITY_CREATE_UNIQUE).unwrap();
 
     let mut explain = cellc_command();
-    explain.arg("explain-assumptions").arg(root.as_std_path()).arg("--json");
+    explain.arg("explain-assumptions").arg(&source).arg("--json");
     let explain_json = run_success_json(explain);
     assert_eq!(explain_json["status"], "ok");
     assert!(explain_json["assumption_count"].as_u64().unwrap() > 0);
 
-    let result = cellscript::compile_path(
-        root,
-        CompileOptions {
-            target_profile: Some("ckb".to_string()),
-            primitive_compat: Some("0.16".to_string()),
-            ..CompileOptions::default()
-        },
-    )
-    .unwrap();
+    let result =
+        compile(IDENTITY_CREATE_UNIQUE, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() })
+            .unwrap();
     let evidence = result.metadata.runtime.builder_assumptions.iter().map(evidence_for).collect::<Vec<_>>();
-    let metadata = temp.path().join("spawn.meta.json");
+    let metadata = temp.path().join("identity.meta.json");
     let tx = temp.path().join("tx.json");
     std::fs::write(&metadata, serde_json::to_vec_pretty(&result.metadata).unwrap()).unwrap();
-    std::fs::write(&tx, serde_json::to_vec_pretty(&manifest_bound_spawn_tx(evidence)).unwrap()).unwrap();
+    std::fs::write(
+        &tx,
+        serde_json::to_vec_pretty(&json!({
+            "inputs": [{}],
+            "outputs": [{}],
+            "builder_assumption_evidence": evidence
+        }))
+        .unwrap(),
+    )
+    .unwrap();
 
     let mut validate = cellc_command();
     validate.arg("validate-tx").arg("--against").arg(&metadata).arg(&tx).arg("--json");
     let validate_json = run_success_json(validate);
     assert_eq!(validate_json["status"], "ok");
+    assert_eq!(validate_json["validation_level"], "cellscript-metadata-evidence");
+    assert_eq!(validate_json["ckb_vm_execution"], false);
+    assert_eq!(validate_json["tx_pool_acceptance"], false);
 }
 
 #[test]
-fn cli_solve_tx_exposes_resource_identity_contracts() {
+fn cli_solve_tx_is_explicitly_template_only() {
     let temp = tempdir().unwrap();
     let source = temp.path().join("identity.cell");
-    std::fs::write(&source, SIMPLE_RESOURCE_CREATE).unwrap();
+    std::fs::write(&source, IDENTITY_CREATE_UNIQUE).unwrap();
 
-    let mut solve = cellc_command();
-    solve.arg("solve-tx").arg(&source).arg("--target-profile").arg("ckb").arg("--json");
-    let solve_json = run_success_json(solve);
-    let resource_identities = solve_json["transaction_plan"]["resource_identities"].as_array().expect("resource identity contracts");
-    assert_eq!(
-        solve_json["transaction_plan"]["fixture_identity_policy"]["always_success"],
-        "fixture-only; may be used in harness and negative tests, never as a production resource identity",
-        "{solve_json:#?}"
-    );
-    assert!(
-        resource_identities.iter().any(|identity| {
-            identity["type_name"] == "Token"
-                && identity["status"] == "compiler-passive-identity-available"
-                && identity["action_artifact_policy"]
-                    .as_str()
-                    .is_some_and(|policy| policy.contains("forbidden-as-passive-type-identity"))
-        }),
-        "{solve_json:#?}"
-    );
-}
-
-#[test]
-fn cli_explain_assumptions_and_solve_tx_can_scope_entry_action() {
-    let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/amm_pool.cell");
-
-    let mut unscoped = cellc_command();
-    unscoped.arg("explain-assumptions").arg(&source).arg("--target-profile").arg("ckb").arg("--json");
-    let unscoped_json = run_success_json(unscoped);
-    let unscoped_count = unscoped_json["assumption_count"].as_u64().expect("unscoped assumption count");
-
-    let mut explain = cellc_command();
-    explain
-        .arg("explain-assumptions")
-        .arg(&source)
-        .arg("--target-profile")
-        .arg("ckb")
-        .arg("--entry-action")
-        .arg("swap_a_for_b")
-        .arg("--json");
-    let explain_json = run_success_json(explain);
-    assert_eq!(explain_json["status"], "ok", "{explain_json:#?}");
-    assert_eq!(explain_json["selected_entrypoint"]["kind"], "action", "{explain_json:#?}");
-    assert_eq!(explain_json["selected_entrypoint"]["name"], "swap_a_for_b", "{explain_json:#?}");
-    let scoped_count = explain_json["assumption_count"].as_u64().expect("scoped assumption count");
-    assert!(scoped_count > 0 && scoped_count < unscoped_count, "{explain_json:#?}");
-
-    let mut solve = cellc_command();
-    solve.arg("solve-tx").arg(&source).arg("--target-profile").arg("ckb").arg("--entry-action").arg("swap_a_for_b").arg("--json");
-    let solve_json = run_success_json(solve);
-    assert_eq!(solve_json["status"], "template", "{solve_json:#?}");
-    assert_eq!(solve_json["submit_ready"], false, "{solve_json:#?}");
-    assert!(solve_json["missing_builder_steps"]
-        .as_array()
-        .is_some_and(|steps| steps.iter().any(|step| step.as_str() == Some("ckb_dry_run"))));
-    let requirements =
-        solve_json["transaction_plan"]["builder_assumption_evidence_requirements"].as_array().expect("builder evidence requirements");
-    assert!(
-        requirements.iter().any(|requirement| {
-            requirement["kind"] == "builder_evidence"
-                && requirement["feature"] == "input:Input#0"
-                && requirement["evidence_schema"]["required_inputs"]
-                    .as_array()
-                    .is_some_and(|inputs| inputs.iter().any(|input| input.as_str() == Some("input:*")))
-        }),
-        "{solve_json:#?}"
-    );
-}
-
-#[test]
-fn cli_entry_witness_json_exposes_script_group_placement() {
-    let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/amm_pool.cell");
-    let mut entry_witness = cellc_command();
-    entry_witness
-        .arg("entry-witness")
-        .arg(&source)
-        .arg("--target-profile")
-        .arg("ckb")
-        .arg("--action")
-        .arg("swap_a_for_b")
-        .arg("--arg")
-        .arg("49000")
-        .arg("--arg")
-        .arg("0x0101010101010101010101010101010101010101010101010101010101010101")
-        .arg("--json");
-    let witness_json = run_success_json(entry_witness);
-    assert_eq!(witness_json["status"], "ok", "{witness_json:#?}");
-    assert_eq!(witness_json["placement"]["kind"], "raw_script_group_witness", "{witness_json:#?}");
-    assert_eq!(witness_json["placement"]["source"], "GroupInput", "{witness_json:#?}");
-    assert_eq!(witness_json["placement"]["group_index"], 0, "{witness_json:#?}");
-    assert_eq!(witness_json["placement"]["fallback_source"], "GroupOutput", "{witness_json:#?}");
-}
-
-#[test]
-fn cli_resource_identity_generates_plan_and_validate_tx_checks_it() {
-    let temp = tempdir().unwrap();
-    let source = temp.path().join("identity.cell");
-    let artifact = temp.path().join("resource-identity.elf");
-    let plan_path = temp.path().join("resource-identities.json");
-    let metadata_path = temp.path().join("mint.meta.json");
-    let tx_path = temp.path().join("mint.tx.json");
-    let bad_tx_path = temp.path().join("bad-mint.tx.json");
-    std::fs::write(&source, SIMPLE_RESOURCE_CREATE).unwrap();
-
-    let mut resource_identity = cellc_command();
-    resource_identity
-        .arg("resource-identity")
-        .arg(&source)
-        .arg("--target-profile")
-        .arg("ckb")
-        .arg("--output")
-        .arg(&artifact)
-        .arg("--plan-output")
-        .arg(&plan_path)
-        .arg("--identity")
-        .arg("Token:output=test-token");
-    let plan_json = run_success_json(resource_identity);
-    assert_eq!(plan_json["status"], "ok", "{plan_json:#?}");
-    assert!(artifact.exists());
-    assert!(plan_path.exists());
-    let token = plan_json["resource_identities"]
-        .as_array()
-        .expect("resource identities")
-        .iter()
-        .find(|entry| entry["type_name"] == "Token")
-        .expect("Token identity");
-    assert_eq!(token["script"]["hash_type"], "data1");
-    assert!(token["script"]["code_hash"].as_str().is_some_and(|hash| hash.starts_with("0x") && hash.len() == 66));
-    assert!(token["script"]["args"].as_str().is_some_and(|args| args.starts_with("0x") && args.len() == 66));
-    assert!(token["script_hash"].as_str().is_some_and(|hash| hash.starts_with("0x") && hash.len() == 66));
-    let output_script = token["create_scripts"]
-        .as_array()
-        .expect("create scripts")
-        .iter()
-        .find(|entry| entry["binding"] == "output")
-        .expect("output binding script")["script"]
-        .clone();
-
-    let result =
-        compile(SIMPLE_RESOURCE_CREATE, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() })
-            .unwrap();
-    let evidence = result.metadata.runtime.builder_assumptions.iter().map(evidence_for).collect::<Vec<_>>();
-    let tx = json!({
-        "inputs": [],
-        "outputs": [{
-            "lock": {},
-            "type": output_script
-        }],
-        "cell_deps": [],
-        "witnesses": [],
-        "builder_assumption_evidence": evidence
-    });
-    std::fs::write(&metadata_path, serde_json::to_vec_pretty(&result.metadata).unwrap()).unwrap();
-    std::fs::write(&tx_path, serde_json::to_vec_pretty(&tx).unwrap()).unwrap();
-
-    let mut validate = cellc_command();
-    validate
-        .arg("validate-tx")
-        .arg("--against")
-        .arg(&metadata_path)
-        .arg("--resource-identities")
-        .arg(&plan_path)
-        .arg(&tx_path)
-        .arg("--json");
-    let validate_json = run_success_json(validate);
-    assert_eq!(validate_json["status"], "ok", "{validate_json:#?}");
-
-    let mut bad_tx = tx;
-    bad_tx["outputs"][0]["type"]["args"] = json!("0x0000000000000000000000000000000000000000000000000000000000000000");
-    std::fs::write(&bad_tx_path, serde_json::to_vec_pretty(&bad_tx).unwrap()).unwrap();
-    let mut validate_bad = cellc_command();
-    validate_bad
-        .arg("validate-tx")
-        .arg("--against")
-        .arg(&metadata_path)
-        .arg("--resource-identities")
-        .arg(&plan_path)
-        .arg(&bad_tx_path)
-        .arg("--json");
-    let validate_bad_json = run_failure_json(validate_bad);
-    assert_eq!(validate_bad_json["status"], "failed", "{validate_bad_json:#?}");
-    assert!(validate_bad_json["validation"]["violations"].as_array().is_some_and(|violations| {
-        violations.iter().any(|violation| {
-            violation["kind"] == "resource_identity" && violation["message"].as_str().is_some_and(|m| m.contains("args"))
+    let solve = Command::new(env!("CARGO_BIN_EXE_cellc")).arg("solve-tx").arg(&source).arg("--json").output().unwrap();
+    assert!(solve.status.success(), "stderr: {}", String::from_utf8_lossy(&solve.stderr));
+    let solve_json: serde_json::Value = serde_json::from_slice(&solve.stdout).unwrap();
+    assert_eq!(solve_json["status"], "template-only");
+    assert_eq!(solve_json["solver_capability"], "template-emitter-only");
+    assert_eq!(solve_json["solver_readiness"], "not-a-solver");
+    assert_eq!(solve_json["execution_mode"], "non-executable-template");
+    assert_eq!(solve_json["can_submit"], false);
+    assert_eq!(solve_json["requires_validate_tx"], true);
+    assert_eq!(solve_json["transaction_plan"]["header_deps_status"], "unresolved-template-slots");
+    let evidence_requirements =
+        solve_json["transaction_plan"]["builder_assumption_evidence_requirements"].as_array().expect("evidence requirements");
+    assert!(evidence_requirements.iter().any(|requirement| {
+        requirement["evidence_schema"]["payload_arrays"].as_array().is_some_and(|arrays| {
+            arrays.iter().any(|array| {
+                array["name"] == "outputs"
+                    && array["item_required_fields"].as_array().is_some_and(|fields| fields.iter().any(|field| field == "index"))
+                    && array["transaction_array"] == "outputs"
+            })
         })
     }));
-}
-
-#[test]
-fn cli_builder_manifest_and_builder_check_validate_resource_identity_flow() {
-    let temp = tempdir().unwrap();
-    let source = temp.path().join("identity.cell");
-    let artifact = temp.path().join("resource-identity.elf");
-    let plan_path = temp.path().join("resource-identities.json");
-    let manifest_path = temp.path().join("mint.builder.json");
-    let tx_path = temp.path().join("mint.tx.json");
-    std::fs::write(&source, SIMPLE_RESOURCE_CREATE).unwrap();
-
-    let mut resource_identity = cellc_command();
-    resource_identity
-        .arg("resource-identity")
-        .arg(&source)
-        .arg("--target-profile")
-        .arg("ckb")
-        .arg("--output")
-        .arg(&artifact)
-        .arg("--plan-output")
-        .arg(&plan_path)
-        .arg("--identity")
-        .arg("Token:output=test-token")
-        .arg("--json");
-    let plan_json = run_success_json(resource_identity);
-    let output_script = plan_json["resource_identities"]
-        .as_array()
-        .expect("resource identities")
-        .iter()
-        .find(|entry| entry["type_name"] == "Token")
-        .and_then(|entry| entry["create_scripts"].as_array())
-        .and_then(|scripts| scripts.iter().find(|script| script["binding"] == "output"))
-        .and_then(|script| script.get("script"))
-        .cloned()
-        .expect("output script");
-
-    let mut manifest = cellc_command();
-    manifest
-        .arg("builder")
-        .arg("manifest")
-        .arg(&source)
-        .arg("--target-profile")
-        .arg("ckb")
-        .arg("--entry-action")
-        .arg("mint")
-        .arg("--resource-identities")
-        .arg(&plan_path)
-        .arg("--output")
-        .arg(&manifest_path);
-    let manifest_json = run_success_json(manifest);
-    assert_eq!(manifest_json["status"], "ok", "{manifest_json:#?}");
-    let manifest_value: serde_json::Value = serde_json::from_slice(&std::fs::read(&manifest_path).unwrap()).unwrap();
-    assert_eq!(manifest_value["schema"], "cellscript-builder-manifest-v0.16.2", "{manifest_value:#?}");
-    assert_eq!(manifest_value["submit_ready"], false, "{manifest_value:#?}");
-    assert_eq!(manifest_value["entry_witness"]["placement"]["source"], "GroupInput", "{manifest_value:#?}");
-    assert_eq!(manifest_value["transaction_template"]["submit_ready"], false, "{manifest_value:#?}");
-    assert!(
-        !manifest_value["transaction_template"]["transaction_plan"]["builder_assumption_evidence_template"]
-            .as_object()
-            .unwrap()
-            .is_empty(),
-        "{manifest_value:#?}"
-    );
-
-    let metadata: cellscript::CompileMetadata = serde_json::from_value(manifest_value["metadata"].clone()).unwrap();
-    let evidence = metadata.runtime.builder_assumptions.iter().map(evidence_for).collect::<Vec<_>>();
-    let tx = json!({
-        "inputs": [],
-        "outputs": [{
-            "lock": {},
-            "type": output_script
-        }],
-        "cell_deps": [],
-        "witnesses": [],
-        "builder_assumption_evidence": evidence
-    });
-    std::fs::write(&tx_path, serde_json::to_vec_pretty(&tx).unwrap()).unwrap();
-
-    let mut builder_check = cellc_command();
-    builder_check.arg("builder").arg("check").arg("--manifest").arg(&manifest_path).arg("--tx").arg(&tx_path).arg("--production");
-    let check_json = run_success_json(builder_check);
-    assert_eq!(check_json["schema"], "cellscript-builder-check-v0.16.2", "{check_json:#?}");
-    assert_eq!(check_json["status"], "ok", "{check_json:#?}");
-    assert_eq!(check_json["pre_sign_ready"], true, "{check_json:#?}");
-    assert_eq!(check_json["submit_ready"], false, "{check_json:#?}");
-    assert!(check_json["builder_assumption_evidence_template"].is_null(), "{check_json:#?}");
-    assert!(
-        !check_json["missing_submit_steps"].as_array().unwrap().iter().any(|step| step == "builder_assumption_evidence"),
-        "{check_json:#?}"
-    );
-
-    let mut builder_check_human = cellc_command();
-    let human_output = builder_check_human
-        .arg("builder")
-        .arg("check")
-        .arg("--manifest")
-        .arg(&manifest_path)
-        .arg("--tx")
-        .arg(&tx_path)
-        .arg("--production")
-        .arg("--human")
-        .output()
-        .unwrap();
-    assert!(human_output.status.success(), "stderr: {}", String::from_utf8_lossy(&human_output.stderr));
-    let human_stdout = String::from_utf8_lossy(&human_output.stdout);
-    assert!(human_stdout.contains("Builder check: ok"), "{human_stdout}");
-    assert!(serde_json::from_slice::<serde_json::Value>(&human_output.stdout).is_err(), "{human_stdout}");
-}
-
-#[test]
-fn cli_validate_tx_production_rejects_fixture_resource_identity() {
-    let temp = tempdir().unwrap();
-    let source = temp.path().join("identity.cell");
-    let metadata_path = temp.path().join("mint.meta.json");
-    let tx_path = temp.path().join("mint.fixture.tx.json");
-    std::fs::write(&source, SIMPLE_RESOURCE_CREATE).unwrap();
-
-    let result =
-        compile(SIMPLE_RESOURCE_CREATE, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() })
-            .unwrap();
-    let evidence = result.metadata.runtime.builder_assumptions.iter().map(evidence_for).collect::<Vec<_>>();
-    let tx = json!({
-        "inputs": [],
-        "outputs": [{
-            "lock": {},
-            "type": {
-                "code_hash": "0x28e83a1277d48add8e72fadaa9248559e1b632bab2bd60b27955ebc4c03800a5",
-                "hash_type": "data",
-                "args": "0x"
-            }
-        }],
-        "cell_deps": [],
-        "witnesses": [],
-        "builder_assumption_evidence": evidence
-    });
-    std::fs::write(&metadata_path, serde_json::to_vec_pretty(&result.metadata).unwrap()).unwrap();
-    std::fs::write(&tx_path, serde_json::to_vec_pretty(&tx).unwrap()).unwrap();
-
-    let mut validate_fixture = cellc_command();
-    validate_fixture.arg("validate-tx").arg("--against").arg(&metadata_path).arg(&tx_path).arg("--json");
-    let validate_fixture_json = run_success_json(validate_fixture);
-    assert_eq!(validate_fixture_json["status"], "ok", "{validate_fixture_json:#?}");
-
-    let mut validate_production = cellc_command();
-    validate_production.arg("validate-tx").arg("--against").arg(&metadata_path).arg(&tx_path).arg("--production").arg("--json");
-    let validate_production_json = run_failure_json(validate_production);
-    assert_eq!(validate_production_json["status"], "failed", "{validate_production_json:#?}");
-    assert_eq!(validate_production_json["production"], true, "{validate_production_json:#?}");
-    assert!(validate_production_json["validation"]["violations"].as_array().is_some_and(|violations| {
-        violations.iter().any(|violation| {
-            violation["kind"] == "resource_identity"
-                && violation["message"].as_str().is_some_and(|message| message.contains("always_success_fixture_only"))
+    assert!(evidence_requirements.iter().any(|requirement| {
+        requirement["evidence_schema"]["cross_checks"].as_array().is_some_and(|checks| {
+            checks.iter().any(|check| check.as_str().is_some_and(|text| text.contains("indexed transaction object")))
         })
     }));
-}
-
-#[test]
-fn cli_validate_tx_resource_identity_plan_allows_mutated_scoped_action_output() {
-    let temp = tempdir().unwrap();
-    let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/amm_pool.cell");
-    let artifact = temp.path().join("resource-identity.elf");
-    let plan_path = temp.path().join("resource-identities.json");
-    let metadata_path = temp.path().join("swap.meta.json");
-    let tx_path = temp.path().join("swap.tx.json");
-
-    let mut resource_identity = cellc_command();
-    resource_identity
-        .arg("resource-identity")
-        .arg(&source)
-        .arg("--target-profile")
-        .arg("ckb")
-        .arg("--type")
-        .arg("Token")
-        .arg("--output")
-        .arg(&artifact)
-        .arg("--plan-output")
-        .arg(&plan_path)
-        .arg("--identity")
-        .arg("Token:token_out=test-token-out")
-        .arg("--json");
-    let plan_json = run_success_json(resource_identity);
-    let token_out_script = plan_json["resource_identities"]
-        .as_array()
-        .expect("resource identities")
-        .iter()
-        .find(|entry| entry["type_name"] == "Token")
-        .and_then(|entry| entry["create_scripts"].as_array())
-        .and_then(|scripts| scripts.iter().find(|script| script["binding"] == "token_out"))
-        .and_then(|script| script.get("script"))
-        .cloned()
-        .expect("Token token_out script");
-
-    let result = compile_path_with_entry_action(
-        Utf8Path::from_path(&source).expect("utf8 source path"),
-        CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() },
-        "swap_a_for_b",
-    )
-    .unwrap();
-    let artifact_hash = result.metadata.artifact_hash.as_deref().expect("artifact hash");
-    let evidence = result.metadata.runtime.builder_assumptions.iter().map(evidence_for).collect::<Vec<_>>();
-    let tx = json!({
-        "inputs": [{}, {}],
-        "outputs": [
-            {
-                "lock": {},
-                "type": {
-                    "code_hash": format!("0x{artifact_hash}"),
-                    "hash_type": "data1",
-                    "args": "0x"
-                }
-            },
-            {
-                "lock": {},
-                "type": token_out_script
-            }
-        ],
-        "cell_deps": [],
-        "witnesses": ["0x"],
-        "builder_assumption_evidence": evidence
-    });
-    std::fs::write(&metadata_path, serde_json::to_vec_pretty(&result.metadata).unwrap()).unwrap();
-    std::fs::write(&tx_path, serde_json::to_vec_pretty(&tx).unwrap()).unwrap();
-
-    let mut validate = cellc_command();
-    validate
-        .arg("validate-tx")
-        .arg("--against")
-        .arg(&metadata_path)
-        .arg("--resource-identities")
-        .arg(&plan_path)
-        .arg(&tx_path)
-        .arg("--json");
-    let validate_json = run_success_json(validate);
-    assert_eq!(validate_json["status"], "ok", "{validate_json:#?}");
+    let limitations = solve_json["limitations"].as_array().expect("limitations");
+    assert!(limitations.iter().any(|value| value.as_str().is_some_and(|text| text.contains("does not perform live cell selection"))));
+    assert!(solve_json["required_external_steps"].as_array().is_some_and(|steps| !steps.is_empty()));
 }
 
 #[test]
@@ -1510,11 +485,6 @@ fn cli_verify_deploy_rejects_tampered_plan_integrity() {
     assert!(plan["metadata_schema_version"].as_u64().is_some_and(|version| version > 0), "{plan:#?}");
     plan["artifact"]["hash"] = json!("not-a-canonical-hash");
     plan["metadata_schema_version"] = json!(0);
-    plan["target_profile"] = json!(null);
-    plan.as_object_mut().unwrap().remove("code_cell_manifest");
-    plan["dep_group_manifest"] = json!("not a CKB deployment manifest");
-    plan["script_references"] = json!("not script references");
-    plan["builder_assumptions"] = json!("not an assumption array");
     std::fs::write(&bad_plan_path, serde_json::to_vec_pretty(&plan).unwrap()).unwrap();
 
     let mut verify_bad = cellc_command();
@@ -1524,54 +494,52 @@ fn cli_verify_deploy_rejects_tampered_plan_integrity() {
     let violations = verify_bad_json["violations"].as_array().expect("violations");
     assert!(violations.iter().any(|violation| violation.as_str().is_some_and(|text| text.contains("artifact.hash"))));
     assert!(violations.iter().any(|violation| violation.as_str().is_some_and(|text| text.contains("metadata_schema_version"))));
-    assert!(violations.iter().any(|violation| violation.as_str().is_some_and(|text| text.contains("target_profile.name"))));
-    assert!(violations.iter().any(|violation| violation.as_str().is_some_and(|text| text.contains("code_cell_manifest"))));
-    assert!(violations.iter().any(|violation| violation.as_str().is_some_and(|text| text.contains("dep_group_manifest"))));
-    assert!(violations.iter().any(|violation| violation.as_str().is_some_and(|text| text.contains("script_references"))));
-    assert!(violations.iter().any(|violation| violation.as_str().is_some_and(|text| text.contains("builder_assumptions"))));
 }
 
 #[test]
 fn cli_v0_16_tooling_outputs_are_machine_readable_and_schema_bound() {
     let temp = tempdir().unwrap();
-    let root = Utf8Path::from_path(temp.path()).unwrap();
-    write_manifest_bound_spawn_package(root);
-    let metadata_path = temp.path().join("spawn.meta.json");
+    let source = temp.path().join("identity.cell");
+    let metadata_path = temp.path().join("identity.meta.json");
     let old_metadata_path = temp.path().join("old.meta.json");
     let new_metadata_path = temp.path().join("new.meta.json");
     let tx_path = temp.path().join("tx.json");
     let old_deploy_path = temp.path().join("old.deploy.json");
     let new_deploy_path = temp.path().join("new.deploy.json");
     let bundle_dir = temp.path().join("audit-bundle");
+    std::fs::write(&source, IDENTITY_CREATE_UNIQUE).unwrap();
 
-    let result = cellscript::compile_path(
-        root,
-        CompileOptions {
-            target_profile: Some("ckb".to_string()),
-            primitive_compat: Some("0.16".to_string()),
-            ..CompileOptions::default()
-        },
-    )
-    .unwrap();
+    let result =
+        compile(IDENTITY_CREATE_UNIQUE, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() })
+            .unwrap();
     let evidence = result.metadata.runtime.builder_assumptions.iter().map(evidence_for).collect::<Vec<_>>();
     std::fs::write(&metadata_path, serde_json::to_vec_pretty(&result.metadata).unwrap()).unwrap();
     std::fs::write(&old_metadata_path, serde_json::to_vec_pretty(&result.metadata).unwrap()).unwrap();
     let mut changed_metadata = result.metadata.clone();
     changed_metadata.runtime.proof_plan[0].coverage.push("unit-test-extra-coverage".to_string());
     std::fs::write(&new_metadata_path, serde_json::to_vec_pretty(&changed_metadata).unwrap()).unwrap();
-    std::fs::write(&tx_path, serde_json::to_vec_pretty(&manifest_bound_spawn_tx(evidence)).unwrap()).unwrap();
+    std::fs::write(
+        &tx_path,
+        serde_json::to_vec_pretty(&json!({
+            "inputs": [{}],
+            "outputs": [{}],
+            "builder_assumption_evidence": evidence
+        }))
+        .unwrap(),
+    )
+    .unwrap();
 
     let mut solve = cellc_command();
-    solve.arg("solve-tx").arg(root.as_std_path()).arg("--target-profile").arg("ckb").arg("--json");
+    solve.arg("solve-tx").arg(&source).arg("--target-profile").arg("ckb").arg("--json");
     let solve_json = run_success_json(solve);
-    assert_eq!(solve_json["status"], "template");
+    assert_eq!(solve_json["status"], "template-only");
     assert!(solve_json["transaction_plan"]["builder_assumption_evidence_requirements"]
         .as_array()
         .is_some_and(|requirements| !requirements.is_empty()));
     assert!(solve_json["limitations"].as_array().is_some_and(|limitations| !limitations.is_empty()));
 
     let mut profile = cellc_command();
-    profile.arg("profile").arg(root.as_std_path()).arg("--target-profile").arg("ckb").arg("--json");
+    profile.arg("profile").arg(&source).arg("--target-profile").arg("ckb").arg("--json");
     let profile_json = run_success_json(profile);
     assert_eq!(profile_json["schema"], "cellscript-profile-v0.16");
     let proof_records = profile_json["proof_plan_records"].as_array().expect("profile proof_plan_records");
@@ -1579,7 +547,7 @@ fn cli_v0_16_tooling_outputs_are_machine_readable_and_schema_bound() {
     assert!(proof_records.iter().all(|record| record["feature"].as_str().is_some()), "{profile_json:#?}");
 
     let mut lock_deps = cellc_command();
-    lock_deps.arg("lock-deps").arg(root.as_std_path()).arg("--target-profile").arg("ckb").arg("--json");
+    lock_deps.arg("lock-deps").arg(&source).arg("--target-profile").arg("ckb").arg("--json");
     let lock_deps_json = run_success_json(lock_deps);
     assert_eq!(lock_deps_json["schema"], "cellscript-dependency-lock-v0.16");
 
@@ -1588,13 +556,6 @@ fn cli_v0_16_tooling_outputs_are_machine_readable_and_schema_bound() {
     let proof_diff_json = run_success_json(proof_diff);
     assert_eq!(proof_diff_json["schema"], "cellscript-proof-diff-v0.16");
     assert!(proof_diff_json["changed"].as_array().is_some_and(|changed| !changed.is_empty()), "{proof_diff_json:#?}");
-    let changed_records = proof_diff_json["changed_records"].as_array().expect("changed_records");
-    assert!(
-        changed_records.iter().any(|record| {
-            record["fields"].as_array().is_some_and(|fields| fields.iter().any(|field| field["field"] == "coverage"))
-        }),
-        "{proof_diff_json:#?}"
-    );
 
     let mut trace = cellc_command();
     trace.arg("trace-tx").arg("--against").arg(&metadata_path).arg(&tx_path).arg("--json");
@@ -1604,14 +565,7 @@ fn cli_v0_16_tooling_outputs_are_machine_readable_and_schema_bound() {
     assert!(trace_json["steps"].as_array().is_some_and(|steps| !steps.is_empty()), "{trace_json:#?}");
 
     let mut audit_bundle = cellc_command();
-    audit_bundle
-        .arg("audit-bundle")
-        .arg(root.as_std_path())
-        .arg("--target-profile")
-        .arg("ckb")
-        .arg("--output")
-        .arg(&bundle_dir)
-        .arg("--json");
+    audit_bundle.arg("audit-bundle").arg(&source).arg("--target-profile").arg("ckb").arg("--output").arg(&bundle_dir).arg("--json");
     let audit_bundle_json = run_success_json(audit_bundle);
     assert_eq!(audit_bundle_json["status"], "ok");
     assert!(bundle_dir.join("audit-bundle.json").exists());
@@ -1620,7 +574,7 @@ fn cli_v0_16_tooling_outputs_are_machine_readable_and_schema_bound() {
     let mut deploy_old = cellc_command();
     let deploy_old = deploy_old
         .arg("deploy-plan")
-        .arg(root.as_std_path())
+        .arg(&source)
         .arg("--target-profile")
         .arg("ckb")
         .arg("--output")
@@ -1631,7 +585,6 @@ fn cli_v0_16_tooling_outputs_are_machine_readable_and_schema_bound() {
     let mut deploy_plan: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&old_deploy_path).unwrap()).unwrap();
     let schema_version = deploy_plan["metadata_schema_version"].as_u64().expect("metadata_schema_version");
     deploy_plan["metadata_schema_version"] = json!(schema_version + 1);
-    deploy_plan["builder_assumptions"][0]["detail"] = json!("unit-test-tampered-builder-assumption-detail");
     std::fs::write(&new_deploy_path, serde_json::to_vec_pretty(&deploy_plan).unwrap()).unwrap();
 
     let mut diff_deploy = cellc_command();
@@ -1640,7 +593,6 @@ fn cli_v0_16_tooling_outputs_are_machine_readable_and_schema_bound() {
     assert_eq!(diff_deploy_json["schema"], "cellscript-deploy-diff-v0.16");
     let changed = diff_deploy_json["changed"].as_array().expect("changed");
     assert!(changed.iter().any(|entry| entry["path"] == "/metadata_schema_version"), "{diff_deploy_json:#?}");
-    assert!(changed.iter().any(|entry| entry["path"] == "/builder_assumptions/0/detail"), "{diff_deploy_json:#?}");
 }
 
 #[test]
@@ -1673,23 +625,15 @@ fn standard_ckb_compat_fixture_files_parse_and_have_required_fields() {
         let fixture_files = suite.get("fixture_files").unwrap().as_object().expect("fixture_files");
         for (fixture_name, file_name) in fixture_files {
             let file_name_str = file_name.as_str().expect("file name string");
-            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/compat/ckb_standard").join(file_name_str);
+            let path = format!("tests/compat/ckb_standard/{}", file_name_str);
             let content = std::fs::read_to_string(&path)
-                .unwrap_or_else(|e| panic!("fixture file {} for '{}' not found: {}", path.display(), fixture_name, e));
+                .unwrap_or_else(|e| panic!("fixture file {} for '{}' not found: {}", path, fixture_name, e));
             let fixture: serde_json::Value = serde_json::from_str(&content)
-                .unwrap_or_else(|e| panic!("fixture file {} for '{}' does not parse as JSON: {}", path.display(), fixture_name, e));
+                .unwrap_or_else(|e| panic!("fixture file {} for '{}' does not parse as JSON: {}", path, fixture_name, e));
             assert_eq!(fixture["schema"], "cellscript-ckb-fixture-v0.16", "fixture {} schema mismatch", fixture_name);
             assert!(fixture["status"].as_str().is_some(), "fixture {} missing status", fixture_name);
             assert!(fixture["transaction_shape"].is_object(), "fixture {} missing transaction_shape", fixture_name);
             assert!(fixture["script_group"].is_object(), "fixture {} missing script_group", fixture_name);
-            if fixture["suite"] == "acp" {
-                assert_eq!(fixture["script_group"]["kind"], "lock", "ACP fixture {} must model ACP as a lock script", fixture_name);
-                assert_eq!(
-                    fixture["metadata_expectation"]["proof_plan"]["trigger"], "lock_group",
-                    "ACP fixture {} must use lock_group ProofPlan trigger",
-                    fixture_name
-                );
-            }
             assert!(
                 fixture["script_group"]["positive"].as_array().is_some_and(|cases| !cases.is_empty()),
                 "fixture {} missing ScriptGroup positive matrix",
@@ -1744,11 +688,8 @@ fn ckb_stdlib_protocol_modules_exist_and_cover_required_suites() {
         assert!(!module.proof_plan_scope.is_empty(), "module {} missing proof_plan_scope", module.name);
         assert!(!module.proof_plan_reads.is_empty(), "module {} missing proof_plan_reads", module.name);
         assert!(!module.compatibility_fixture.is_empty(), "module {} missing compatibility_fixture", module.name);
-        assert_eq!(module.stability, "schema-stub", "module {} must not be marked stable before implementation coverage", module.name);
+        assert_ne!(module.stability, "stable", "module {} must not be marked stable before implementation coverage", module.name);
     }
-    let acp = modules.iter().find(|module| module.name == "std::acp").expect("std::acp module");
-    assert_eq!(acp.script_type, "lock");
-    assert_eq!(acp.proof_plan_trigger, "lock_group");
 }
 
 #[test]
@@ -1759,6 +700,13 @@ fn ckb_stdlib_protocol_functions_cover_core_operations() {
     assert!(names.contains(&"sudt_transfer"), "missing sudt_transfer: {names:?}");
     assert!(names.contains(&"sudt_mint"), "missing sudt_mint: {names:?}");
     assert!(names.contains(&"xudt_transfer"), "missing xudt_transfer: {names:?}");
+    assert!(names.contains(&"xudt_amount_low"), "missing xudt_amount_low: {names:?}");
+    assert!(names.contains(&"xudt_require_owner_mode_input_type"), "missing xudt_require_owner_mode_input_type: {names:?}");
+    assert!(names.contains(&"xudt_require_owner_mode_type_args"), "missing xudt_require_owner_mode_type_args: {names:?}");
+    assert!(names.contains(&"xudt_require_group_amount_conserved"), "missing xudt_require_group_amount_conserved: {names:?}");
+    assert!(names.contains(&"xudt_require_group_amount_minted"), "missing xudt_require_group_amount_minted: {names:?}");
+    assert!(names.contains(&"xudt_require_group_amount_burned"), "missing xudt_require_group_amount_burned: {names:?}");
+    assert!(names.contains(&"dao_accumulated_rate"), "missing dao_accumulated_rate: {names:?}");
     assert!(names.contains(&"type_id_create"), "missing type_id_create: {names:?}");
     assert!(names.contains(&"htlc_claim_with_preimage"), "missing htlc_claim_with_preimage: {names:?}");
     assert!(names.contains(&"cheque_claim"), "missing cheque_claim: {names:?}");

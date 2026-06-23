@@ -4,8 +4,6 @@ const MIN_LOCK_PERIOD: u64 = 10
 
 const MAX_LOCK_PERIOD: u64 = 2628000
 
-const U64_MAX: u64 = 18446744073709551615
-
 enum LockType {
     Absolute,
     Relative,
@@ -53,104 +51,109 @@ receipt EmergencyRelease has create, consume, replace, burn {
     state: u8,
 }
 
-action create_absolute_lock(lock_id: Hash, owner: Address, unlock_height: u64, current_height: u64) -> created_lock: TimeLock
-where
-    assert(current_height <= U64_MAX - MAX_LOCK_PERIOD, "height overflow")
-    assert(unlock_height > current_height + MIN_LOCK_PERIOD, "Unlock height too close")
-    assert(unlock_height <= current_height + MAX_LOCK_PERIOD, "Unlock height too far")
-    create created_lock = TimeLock { lock_id, owner, lock_type: LockType::Absolute, unlock_height, created_at: current_height }
+action create_absolute_lock(lock_id: Hash, owner: Address, unlock_height: u64, current_height: u64) -> created_lock: TimeLock {
+    verification
+        require unlock_height > current_height + MIN_LOCK_PERIOD, "Unlock height too close"
+        require unlock_height <= current_height + MAX_LOCK_PERIOD, "Unlock height too far"
+        create created_lock = TimeLock { lock_id, owner, lock_type: LockType::Absolute, unlock_height, created_at: current_height }
 
-action create_relative_lock(lock_id: Hash, owner: Address, lock_period: u64, current_height: u64) -> created_lock: TimeLock
-where
-    assert(lock_period >= MIN_LOCK_PERIOD, "Lock period too short")
-    assert(lock_period <= MAX_LOCK_PERIOD, "Lock period too long")
-    assert(lock_period <= U64_MAX - current_height, "height overflow")
-    create created_lock = TimeLock { lock_id, owner, lock_type: LockType::Relative, unlock_height: current_height + lock_period, created_at: current_height }
+}
+action create_relative_lock(lock_id: Hash, owner: Address, lock_period: u64, current_height: u64) -> created_lock: TimeLock {
+    verification
+        require lock_period >= MIN_LOCK_PERIOD, "Lock period too short"
+        require lock_period <= MAX_LOCK_PERIOD, "Lock period too long"
+        create created_lock = TimeLock { lock_id, owner, lock_type: LockType::Relative, unlock_height: current_height + lock_period, created_at: current_height }
 
-action lock_asset(read time_lock: TimeLock, asset_type: AssetType, amount: u64) -> locked: LockedAsset
-where
-    assert(amount > 0, "Amount must be positive")
-    create locked = LockedAsset { asset_type, amount, lock_id: time_lock.lock_id }
+}
+action lock_asset(read time_lock: TimeLock, asset_type: AssetType, amount: u64) -> locked: LockedAsset {
+    verification
+        require amount > 0, "Amount must be positive"
+        create locked = LockedAsset { asset_type, amount, lock_id: time_lock.lock_id }
 
-action request_release(read time_lock: TimeLock, requester: Address, current_height: u64) -> request: ReleaseRequest
-where
-    assert(can_unlock(time_lock, current_height), "Cannot unlock yet")
-    create request = ReleaseRequest { lock_id: time_lock.lock_id, requester, requested_at: current_height, state: 0 }
+}
+action request_release(read time_lock: TimeLock, requester: Address, current_height: u64) -> request: ReleaseRequest {
+    verification
+        require can_unlock(time_lock, current_height), "Cannot unlock yet"
+        create request = ReleaseRequest { lock_id: time_lock.lock_id, requester, requested_at: current_height, state: 0 }
 
-action execute_release(time_lock: TimeLock, locked_asset: LockedAsset, request: ReleaseRequest, executor: Address, current_height: u64) -> record: ReleaseRecord
-where
-    assert(time_lock.owner == executor, "Not the owner")
-    assert(can_unlock(&time_lock, current_height), "Cannot unlock yet")
-    assert(locked_asset.lock_id == time_lock.lock_id, "Asset does not match lock")
-    assert(request.lock_id == time_lock.lock_id, "Request does not match lock")
-    destroy time_lock
-    destroy locked_asset
-    destroy request
-    create record = ReleaseRecord { lock_id: request.lock_id, released_at: current_height, released_by: executor }
+}
+action execute_release(time_lock: TimeLock, locked_asset: LockedAsset, request: ReleaseRequest, executor: Address, current_height: u64) -> record: ReleaseRecord {
+    verification
+        require time_lock.owner == executor, "Not the owner"
+        require can_unlock(&time_lock, current_height), "Cannot unlock yet"
+        require locked_asset.lock_id == time_lock.lock_id, "Asset does not match lock"
+        require request.lock_id == time_lock.lock_id, "Request does not match lock"
+        destroy time_lock
+        destroy locked_asset
+        destroy request
+        create record = ReleaseRecord { lock_id: request.lock_id, released_at: current_height, released_by: executor }
 
-action request_emergency_release(read time_lock: TimeLock, requester: Address, reason: String, current_height: u64) -> emergency: EmergencyRelease
-where
-    assert(time_lock.owner == requester, "Not the owner")
-    assert(!can_unlock(time_lock, current_height), "Already unlockable")
-    create emergency = EmergencyRelease { lock_id: time_lock.lock_id, requester, reason, requested_at: current_height, approvers: [], state: 0 }
+}
+action request_emergency_release(read time_lock: TimeLock, requester: Address, reason: String, current_height: u64) -> emergency: EmergencyRelease {
+    verification
+        require time_lock.owner == requester, "Not the owner"
+        require !can_unlock(time_lock, current_height), "Already unlockable"
+        create emergency = EmergencyRelease { lock_id: time_lock.lock_id, requester, reason, requested_at: current_height, approvers: [], state: 0 }
 
-action approve_emergency_release(emergency_before: EmergencyRelease, approver: Address, required_approvals: u8) -> emergency_after: EmergencyRelease
-where
-    for existing in &emergency_before.approvers {
-        assert(*existing != approver, "Already approved")
-    }
-    preserve emergency_after from emergency_before {
-        lock_id
-        requester
-        reason
-        requested_at
-        state
-    }
-    require emergency_after.approvers.len() == emergency_before.approvers.len() + 1
+}
+action approve_emergency_release(emergency_before: EmergencyRelease, approver: Address, required_approvals: u8) -> emergency_after: EmergencyRelease {
+    verification
+        for existing in &emergency_before.approvers {
+            require *existing != approver, "Already approved"
+        }
+        preserve emergency_after from emergency_before {
+            lock_id
+            requester
+            reason
+            requested_at
+            state
+        }
+        require emergency_after.approvers.len() == emergency_before.approvers.len() + 1
 
-action execute_emergency_release(time_lock: TimeLock, locked_asset: LockedAsset, emergency: EmergencyRelease, executor: Address, required_approvals: u8, current_height: u64) -> record: ReleaseRecord
-where
-    assert(time_lock.owner == executor, "Not the owner")
-    assert(emergency.approvers.len() >= required_approvals as usize, "Not enough approvals")
-    assert(emergency.lock_id == time_lock.lock_id, "Emergency request does not match")
-    assert(locked_asset.lock_id == time_lock.lock_id, "Asset does not match")
-    destroy time_lock
-    destroy locked_asset
-    destroy emergency
-    create record = ReleaseRecord { lock_id: time_lock.lock_id, released_at: current_height, released_by: executor }
+}
+action execute_emergency_release(time_lock: TimeLock, locked_asset: LockedAsset, emergency: EmergencyRelease, executor: Address, required_approvals: u8, current_height: u64) -> record: ReleaseRecord {
+    verification
+        require time_lock.owner == executor, "Not the owner"
+        require emergency.approvers.len() >= required_approvals as usize, "Not enough approvals"
+        require emergency.lock_id == time_lock.lock_id, "Emergency request does not match"
+        require locked_asset.lock_id == time_lock.lock_id, "Asset does not match"
+        destroy time_lock
+        destroy locked_asset
+        destroy emergency
+        create record = ReleaseRecord { lock_id: time_lock.lock_id, released_at: current_height, released_by: executor }
 
-action extend_lock(time_lock_before: TimeLock, additional_period: u64, owner: Address, current_height: u64) -> time_lock_after: TimeLock
-where
-    assert(time_lock_before.owner == owner, "Not the owner")
-    assert(!can_unlock(&time_lock_before, current_height), "Already unlocked")
-    assert(current_height <= U64_MAX - MAX_LOCK_PERIOD, "height overflow")
-    assert(additional_period <= U64_MAX - time_lock_before.unlock_height, "unlock height overflow")
-    let new_unlock_height = time_lock_before.unlock_height + additional_period
-    assert(new_unlock_height <= current_height + MAX_LOCK_PERIOD, "New unlock height too far")
-    preserve time_lock_after from time_lock_before {
-        lock_id
-        owner
-        lock_type
-        created_at
-    }
-    require time_lock_after.unlock_height == new_unlock_height
+}
+action extend_lock(time_lock_before: TimeLock, additional_period: u64, owner: Address, current_height: u64) -> time_lock_after: TimeLock {
+    verification
+        require time_lock_before.owner == owner, "Not the owner"
+        require !can_unlock(&time_lock_before, current_height), "Already unlocked"
+        let new_unlock_height = time_lock_before.unlock_height + additional_period
+        require new_unlock_height <= current_height + MAX_LOCK_PERIOD, "New unlock height too far"
+        preserve time_lock_after from time_lock_before {
+            lock_id
+            owner
+            lock_type
+            created_at
+        }
+        require time_lock_after.unlock_height == new_unlock_height
 
-action batch_create_locks(lock_ids: [Hash; 4], owners: [Address; 4], unlock_heights: [u64; 4], current_height: u64) -> (lock0: TimeLock, lock1: TimeLock, lock2: TimeLock, lock3: TimeLock)
-where
-    assert(current_height <= U64_MAX - MAX_LOCK_PERIOD, "height overflow")
-    assert(unlock_heights[0] > current_height + MIN_LOCK_PERIOD, "Unlock height too close")
-    assert(unlock_heights[1] > current_height + MIN_LOCK_PERIOD, "Unlock height too close")
-    assert(unlock_heights[2] > current_height + MIN_LOCK_PERIOD, "Unlock height too close")
-    assert(unlock_heights[3] > current_height + MIN_LOCK_PERIOD, "Unlock height too close")
-    assert(unlock_heights[0] <= current_height + MAX_LOCK_PERIOD, "Unlock height too far")
-    assert(unlock_heights[1] <= current_height + MAX_LOCK_PERIOD, "Unlock height too far")
-    assert(unlock_heights[2] <= current_height + MAX_LOCK_PERIOD, "Unlock height too far")
-    assert(unlock_heights[3] <= current_height + MAX_LOCK_PERIOD, "Unlock height too far")
-    create lock0 = TimeLock { lock_id: lock_ids[0], owner: owners[0], lock_type: LockType::Absolute, unlock_height: unlock_heights[0], created_at: current_height }
-    create lock1 = TimeLock { lock_id: lock_ids[1], owner: owners[1], lock_type: LockType::Absolute, unlock_height: unlock_heights[1], created_at: current_height }
-    create lock2 = TimeLock { lock_id: lock_ids[2], owner: owners[2], lock_type: LockType::Absolute, unlock_height: unlock_heights[2], created_at: current_height }
-    create lock3 = TimeLock { lock_id: lock_ids[3], owner: owners[3], lock_type: LockType::Absolute, unlock_height: unlock_heights[3], created_at: current_height }
+}
+action batch_create_locks(lock_ids: [Hash; 4], owners: [Address; 4], unlock_heights: [u64; 4], current_height: u64) -> (lock0: TimeLock, lock1: TimeLock, lock2: TimeLock, lock3: TimeLock) {
+    verification
+        require unlock_heights[0] > current_height + MIN_LOCK_PERIOD, "Unlock height too close"
+        require unlock_heights[1] > current_height + MIN_LOCK_PERIOD, "Unlock height too close"
+        require unlock_heights[2] > current_height + MIN_LOCK_PERIOD, "Unlock height too close"
+        require unlock_heights[3] > current_height + MIN_LOCK_PERIOD, "Unlock height too close"
+        require unlock_heights[0] <= current_height + MAX_LOCK_PERIOD, "Unlock height too far"
+        require unlock_heights[1] <= current_height + MAX_LOCK_PERIOD, "Unlock height too far"
+        require unlock_heights[2] <= current_height + MAX_LOCK_PERIOD, "Unlock height too far"
+        require unlock_heights[3] <= current_height + MAX_LOCK_PERIOD, "Unlock height too far"
+        create lock0 = TimeLock { lock_id: lock_ids[0], owner: owners[0], lock_type: LockType::Absolute, unlock_height: unlock_heights[0], created_at: current_height }
+        create lock1 = TimeLock { lock_id: lock_ids[1], owner: owners[1], lock_type: LockType::Absolute, unlock_height: unlock_heights[1], created_at: current_height }
+        create lock2 = TimeLock { lock_id: lock_ids[2], owner: owners[2], lock_type: LockType::Absolute, unlock_height: unlock_heights[2], created_at: current_height }
+        create lock3 = TimeLock { lock_id: lock_ids[3], owner: owners[3], lock_type: LockType::Absolute, unlock_height: unlock_heights[3], created_at: current_height }
 
+}
 fn can_unlock(time_lock: &TimeLock, current_height: u64) -> bool {
     current_height >= time_lock.unlock_height
 }
@@ -166,8 +169,6 @@ fn remaining_blocks(time_lock: &TimeLock, current_height: u64) -> u64 {
 fn lock_progress(time_lock: &TimeLock, current_height: u64) -> u8 {
     if current_height >= time_lock.unlock_height {
         100
-    } else if current_height <= time_lock.created_at {
-        0
     } else {
         let elapsed = current_height - time_lock.created_at
         let total = time_lock.unlock_height - time_lock.created_at
@@ -185,26 +186,32 @@ fn lock_progress(time_lock: &TimeLock, current_height: u64) -> u8 {
 }
 
 lock can_unlock_lock(protected time_lock: TimeLock, witness current_height: u64) -> bool {
-    require can_unlock(time_lock, current_height)
-}
+    verification
+        require can_unlock(time_lock, current_height)
 
+}
 lock is_owner(protected time_lock: TimeLock, witness addr: Address) -> bool {
-    require time_lock.owner == addr
-}
+    verification
+        require time_lock.owner == addr
 
+}
 lock lock_id_commitment(protected time_lock: TimeLock, witness lock_seed: Hash) -> bool {
-    let expected_lock_id = hash_blake2b(lock_seed)
-    require time_lock.lock_id == expected_lock_id
-}
+    verification
+        let expected_lock_id = hash_blake2b(lock_seed)
+        require time_lock.lock_id == expected_lock_id
 
+}
 lock asset_matches(protected locked_asset: LockedAsset, read time_lock: TimeLock) -> bool {
-    require locked_asset.lock_id == time_lock.lock_id
-}
+    verification
+        require locked_asset.lock_id == time_lock.lock_id
 
+}
 lock emergency_approved(protected emergency: EmergencyRelease, witness required: u8) -> bool {
-    require emergency.approvers.len() >= required as usize
-}
+    verification
+        require emergency.approvers.len() >= required as usize
 
+}
 lock not_expired(protected time_lock: TimeLock, witness current_height: u64) -> bool {
-    require current_height < time_lock.unlock_height
+    verification
+        require current_height < time_lock.unlock_height
 }

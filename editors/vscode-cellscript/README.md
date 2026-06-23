@@ -1,17 +1,21 @@
 # CellScript VS Code Extension
 
 Production-grade VS Code tooling for `.cell` contracts, powered by a
-CellScript Language Server (`cellc --lsp`).
+CellScript Language Server (`cellc --lsp` over stdio).
 
 The extension connects to a `cellc` binary running as a JSON-RPC language
 server over stdio. This provides real-time diagnostics, completion, hover,
-go-to-definition, find-references, signature help, document highlighting,
-folding, formatting, code actions, and document symbols — all backed by the
-CellScript compiler's parser, type-checker, and lowering pipeline.
+go-to-definition, find-references, workspace rename, signature help, document
+highlighting, folding, selection ranges, formatting, code actions, and document
+symbols — all backed by the CellScript compiler's parser, type-checker, and
+lowering pipeline.
 
-CLI-backed commands continue to spawn `cellc` directly for one-shot operations
-that are outside the LSP scope, including the active-file 0.16 builder,
-transaction-template, deployment, profile, and audit-bundle reports.
+CLI-backed commands (compile, metadata, constraints, ABI, action build plans,
+builder generation, package verification, registry verification, and production
+report) continue to spawn `cellc` directly for one-shot operations that are
+outside the LSP scope.
+They also expose builder-assumption, transaction-template, deployment, profile,
+and audit-bundle reports.
 
 ## Features
 
@@ -22,6 +26,7 @@ transaction-template, deployment, profile, and audit-bundle reports.
 - hover information (types, lowering metadata, lifecycle states)
 - go-to-definition (top-level symbols, fields, local variables, cross-module)
 - find-references (lexer-accurate, skips comments and strings)
+- workspace rename (identifier-boundary checked, grouped by workspace file)
 - signature help (action, function, lock parameters)
 - document highlight
 - folding ranges
@@ -35,6 +40,12 @@ transaction-template, deployment, profile, and audit-bundle reports.
 - compile to a scratch artifact for the configured RISC-V target
 - `cellc metadata` JSON report
 - `cellc constraints` JSON report
+- `cellc abi` entry witness ABI report
+- `cellc action build --json` action transaction-builder contract
+- `cellc gen-builder --target typescript` generated action-builder package
+- `cellc package verify --json` package/source/lockfile integrity report
+- `cellc registry verify --json` deployment identity report
+- `cellc registry verify --live --json` optional CKB RPC live-cell proof
 - `cellc explain-assumptions --json` builder-assumption report
 - `cellc solve-tx --json` deterministic transaction-template report
 - `cellc deploy-plan --json` deployment-plan report
@@ -46,10 +57,11 @@ transaction-template, deployment, profile, and audit-bundle reports.
 ### Editor basics
 
 - `.cell` file association
-- TextMate syntax highlighting for the current 0.16 authoring surface (`where`
-  proof blocks, `transition input.state: A -> output.state: B`, `flow`, named
-  output `create out = T { ... }`, and source qualifiers such as `read`,
-  `protected`, `witness`, and `lock_args`)
+- TextMate syntax highlighting for the current canonical action model
+  (`verification` sections, action-level `transition input -> output` /
+  `transition input.state: A -> output.state: B`, `flow`, named output
+  `create out = T { ... }`, and source qualifiers such as `read`, `protected`,
+  `witness`, and `lock_args`)
 - comment, bracket, auto-close, and folding configuration
 - snippets for resources, shared state, receipts, flows, action proof blocks,
   field-to-field state transitions, locks, source-qualified parameters, effects,
@@ -63,32 +75,37 @@ transaction-template, deployment, profile, and audit-bundle reports.
   `assert_singleton`
 - status bar state indicator
 
-## Authoring Surface
+## Canonical Authoring Surface
+
+This README documents the current 0.17 authoring surface for CellScript.
 
 The extension snippets and grammar follow the signature-direction action
 surface:
 
 ```cellscript
-action fill_offer(input: Offer) -> output: Offer
+action fill_offer(input: Offer) -> output: Offer {
     transition input.state: Live -> output.state: Filled
-where
-    require output.price == input.price
-    require output.seller == input.seller
+
+    verification
+        require output.price == input.price
+        require output.seller == input.seller
+}
 ```
 
-Use where proof blocks for action proof logic; do not use the old brace-body
-action form.
+Use `verification` sections for action and lock proof logic.
 
 At action and lock boundaries, source qualifiers are written before the
 parameter name:
 
 ```cellscript
-action grant(read config: Config, tokens: Token) -> grant: Grant
-where
-    create grant = Grant { admin: config.admin }
+action grant(read config: Config, tokens: Token) -> grant: Grant {
+    verification
+        create grant = Grant { admin: config.admin }
+}
 
 lock owner_only(protected cell: Wallet, witness owner: Address) -> bool {
-    require owner == cell.owner
+    verification
+        require owner == cell.owner
 }
 ```
 
@@ -144,6 +161,12 @@ Set `cellscript.useCargoRunFallback` to `false` to disable that fallback.
 | `CellScript: Compile Current File` | Compile the active file to a scratch RISC-V assembly artifact and print compiler output. |
 | `CellScript: Show Metadata` | Run `cellc metadata` for the active file and show JSON in the CellScript output channel. |
 | `CellScript: Show Constraints` | Run `cellc constraints` for the active file and show JSON in the CellScript output channel. |
+| `CellScript: Show Entry Witness ABI` | Select an action or lock, then run `cellc abi` for the active file or package and show the `_cellscript_entry` witness ABI. |
+| `CellScript: Show Action Build Plan` | Select an action, then run `cellc action build --json` for the active file or package and show the builder contract. |
+| `CellScript: Generate TypeScript Action Builder` | Run `cellc gen-builder --target typescript` and write the generated package to `cellscript.builderOutputDir`. |
+| `CellScript: Verify Package` | Run `cellc package verify --json` from the nearest `Cell.toml` package root. |
+| `CellScript: Verify Registry` | Run `cellc registry verify --json` from the nearest `Cell.toml` package root, adding trust metadata flags when configured. |
+| `CellScript: Verify Live Registry` | Run `cellc registry verify --live --json`, passing `cellscript.ckbRpcUrl`, `cellscript.deploymentNetwork`, and trust metadata flags when configured. |
 | `CellScript: Show Builder Assumptions` | Run `cellc explain-assumptions --json` for the active file. |
 | `CellScript: Show Transaction Template` | Run `cellc solve-tx --json` for the active file. |
 | `CellScript: Show Deploy Plan` | Run `cellc deploy-plan --json` for the active file. |
@@ -151,9 +174,10 @@ Set `cellscript.useCargoRunFallback` to `false` to disable that fallback.
 | `CellScript: Generate Audit Bundle` | Run `cellc audit-bundle --json` for the active file and write the bundle under `.cellscript-vscode`. |
 | `CellScript: Show Production Report` | Show compiler version, artifact metadata, constraints, and release audit boundaries for the active file. |
 
-Diagnostics, completion, hover, go-to-definition, references, formatting,
-signature help, folding, and code actions are provided automatically by the
-language server — no explicit commands needed.
+Diagnostics, completion, hover, go-to-definition, references, workspace rename,
+document symbols, document highlights, signature help, folding, selection
+ranges, formatting, and code actions are provided automatically by the language
+server — no explicit commands needed.
 
 ## Settings
 
@@ -163,7 +187,12 @@ language server — no explicit commands needed.
 | `cellscript.useCargoRunFallback` | `true` | Use workspace `cargo run -q -p cellscript --` if `cellc` is unavailable and the workspace is trusted. |
 | `cellscript.commandTimeoutMs` | `15000` | Timeout for compiler-backed CLI commands. |
 | `cellscript.maxOutputBytes` | `4194304` | Captured stdout/stderr limit. |
-| `cellscript.target` | `riscv64-asm` | Compiler target for active-file compiler reports. |
+| `cellscript.target` | `riscv64-asm` | Compiler target for compile/metadata/constraints commands. |
+| `cellscript.builderOutputDir` | `target/cellscript-builder/typescript` | Generated TypeScript action-builder package directory. Relative paths resolve from the nearest `Cell.toml` package root. |
+| `cellscript.ckbRpcUrl` | empty | CKB RPC URL for live registry verification. When empty, `cellc` may use `CELLSCRIPT_CKB_RPC_URL` from the environment. |
+| `cellscript.deploymentNetwork` | empty | Optional deployment network filter for live registry verification and generated builder deployment identity binding. |
+| `cellscript.registryRequirePublisherSignature` | `false` | Add `--require-publisher-signature` to registry verification commands. This is a metadata-presence gate, not cryptographic signature verification. |
+| `cellscript.registryRequireAuditReport` | `false` | Add `--require-audit-report` to registry verification commands. |
 
 ## Local Validation
 
@@ -200,11 +229,16 @@ check the JSON/prose output for:
 - build provenance and source hash fields;
 - builder assumptions, transaction template, deploy plan, profile report, and audit bundle paths when those active-file commands are used;
 - target profile and entry-action/entry-lock scope;
+- package and deployment identity verification through `Cell.lock` and
+  `Deployed.toml`;
+- generated action-builder package identity, including optional lockfile and
+  deployment binding;
 - CKB capacity/cycle limits;
 - external audit signatures attached by the release process.
 
 The extension displays compiler evidence. It does not create audit signatures,
-publish packages, deploy code cells, or replace CKB acceptance gates.
+publish packages, deploy code cells, sign transactions, submit transactions, or
+replace CKB acceptance gates.
 Commands that require extra files, such as `validate-tx`, `trace-tx`,
 `proof-diff`, `verify-deploy`, `diff-deploy`, and `lock-deps`, remain CLI-first
 tools.

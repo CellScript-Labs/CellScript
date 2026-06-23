@@ -287,7 +287,7 @@ Protocol macros must lower through scoped invariants and ProofPlan, not protocol
 
 **Acceptance**
 
-- strict mode rejects protocol-verb capability declarations such as `has transfer` and `has destroy`
+- strict mode rejects protocol-verb capability declarations such as `has destroy`
 - 0.15 kernel-effect capabilities are accepted by direct lifecycle checks where applicable
 - stdlib and source lifecycle forms emit inspectable ProofPlan obligations and macro provenance
 - fully macro-only lowering for `transfer`, `claim`, `settle`, and `shared` remains deferred
@@ -570,7 +570,7 @@ ckb_type_id_args
 
 **Problem**
 
-`has transfer` and `has destroy` keep protocol verbs inside the resource type system. After protocol verbs move to stdlib macros, capabilities must describe kernel effects, not business actions.
+`has destroy` keeps protocol verbs inside the resource type system. After protocol verbs move to stdlib macros, capabilities must describe kernel effects, not business actions.
 
 **Change**
 
@@ -600,7 +600,7 @@ destroy
 - New capabilities are context-sensitive identifiers in `has ...` clauses (not global lexer keywords), preserving backward compatibility with code using these words as identifiers
 - `Capability::is_protocol_verb()` and `Capability::kernel_effects()` classify capabilities for migration
 - `format_capability()` and `capability_name()` updated in fmt, docgen, and types modules
-- Strict mode (`--primitive-strict=0.15`) rejects `has transfer` (CS0150) and `has destroy` (CS0151) with precise diagnostics
+- Strict mode (`--primitive-strict=0.15`) rejects `has destroy` (CS0151) with precise diagnostics
 - Compatibility mode (`--primitive-compat=0.14`) accepts legacy vocabulary
 
 **Code Areas**
@@ -613,7 +613,7 @@ destroy
 
 **Acceptance**
 
-- strict mode rejects `has transfer` and `has destroy`
+- strict mode rejects `has destroy`
 - protocol macros state their required kernel capabilities explicitly
 - metadata exports effect capabilities, not protocol verbs
 
@@ -811,7 +811,6 @@ Keep one canonical primitive surface:
 Add diagnostics:
 
 ```text
-CS0150 legacy transfer capability must use replace + relock kernel effects
 CS0151 legacy destroy capability must use consume + burn kernel effects
 CS0152 Address cannot be used as LockHash
 CS0153 CKB entry role must be explicit
@@ -827,8 +826,8 @@ CS0160 builder assumption is not on-chain checked
 **Implementation**
 
 - `--primitive-compat=0.14` and `--primitive-strict=0.15` CLI flags added to `CompileOptions`
-- `check_primitive_strict_015()` gate in `src/lib.rs` rejects protocol verbs (`has transfer`, `has destroy`) in strict mode
-- CS0150 (legacy transfer capability) and CS0151 (legacy destroy capability) diagnostics emitted; CS0156 remains reserved for broader protocol-capability diagnostics
+- `check_primitive_strict_015()` gate in `src/lib.rs` rejects protocol verbs (`has destroy`) in strict mode
+- CS0151 (legacy destroy capability) diagnostic emitted; CS0156 remains reserved for broader protocol-capability diagnostics
 - Remaining CS0152–CS0160 codes reserved for future P1/P2 items
 
 **Acceptance**

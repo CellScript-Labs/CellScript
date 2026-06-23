@@ -21,8 +21,8 @@ The acceptance target is:
    proof, confirmation, and spend-input binding material that certification can
    recompute.
 
-The local CKB finality path is no longer a V1 blocker. Production remains
-blocked until handoff-bound public BTC closure SPV evidence and the shared
-external attestations are supplied.
+The local CKB finality path is no longer a V1 blocker. Public/mainnet
+BTC-finality claims still require handoff-bound public BTC closure SPV evidence
+and the shared external attestations.
 
 See [DEVNET_FULL_ACCEPTANCE_RUNBOOK.md](../../DEVNET_FULL_ACCEPTANCE_RUNBOOK.md) for prerequisites, freshness rules, and the full command sequence.

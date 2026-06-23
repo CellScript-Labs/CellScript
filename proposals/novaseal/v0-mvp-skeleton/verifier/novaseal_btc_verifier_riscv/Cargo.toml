@@ -5,6 +5,8 @@ edition = "2024"
 rust-version = "1.85"
 publish = false
 
+[workspace]
+
 [[bin]]
 name = "novaseal_btc_verifier_riscv"
 path = "src/main.rs"

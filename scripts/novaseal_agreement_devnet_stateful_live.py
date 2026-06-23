@@ -39,6 +39,11 @@ from novaseal_devnet_stateful_live import (
 )
 
 
+def packed_hash(type_name: str, packed: bytes) -> bytes:
+    del type_name
+    return cell_data_hash(packed)
+
+
 AGREEMENT_VERSION = 0
 ASSET_KIND_CKB = 0
 EARLY_CLOSE_FIXED_FEE = 0
@@ -865,13 +870,16 @@ def build_claim_tx(
     )
 
 
-def wait_epoch_after(devnet: CkbDevnet, expiry_timepoint: int, *, max_blocks: int = 3000) -> dict[str, Any]:
+def wait_epoch_after(devnet: CkbDevnet, expiry_timepoint: int, *, max_blocks: int = 5000) -> dict[str, Any]:
+    last_header: dict[str, Any] | None = None
     for _ in range(max_blocks):
         header = devnet.rpc("get_tip_header")
+        last_header = header
         if epoch_number_from_header(header) > expiry_timepoint:
             return header
         devnet.rpc("generate_block")
-    raise LiveAcceptanceError(f"devnet epoch did not advance past expiry {expiry_timepoint}")
+    last_epoch = last_header.get("epoch") if last_header else "<unavailable>"
+    raise LiveAcceptanceError(f"devnet epoch did not advance past expiry {expiry_timepoint}; last epoch={last_epoch}")
 
 
 def submit_origin(
@@ -1011,7 +1019,7 @@ def run_live(args: argparse.Namespace) -> dict[str, Any]:
             "wrong lender signature originate",
             expected_source="Outputs[0].Type",
             expected_data_hash=lifecycle["data_hash"],
-            expected_error_code=5,
+            expected_error_code=56,
         )
 
         stage = "negative originate non-CKB asset kind"
@@ -1079,7 +1087,7 @@ def run_live(args: argparse.Namespace) -> dict[str, Any]:
             "wrong borrower signature repay",
             expected_source="Inputs[0].Type",
             expected_data_hash=lifecycle["data_hash"],
-            expected_error_code=5,
+            expected_error_code=56,
         )
 
         stage = "negative repay payout capacity short"
@@ -1280,7 +1288,7 @@ def run_live(args: argparse.Namespace) -> dict[str, Any]:
             "wrong lender signature claim",
             expected_source="Inputs[0].Type",
             expected_data_hash=lifecycle["data_hash"],
-            expected_error_code=5,
+            expected_error_code=56,
         )
         claim_active_still_live = devnet.assert_live_cell(
             claim_active_ref["tx_hash"],

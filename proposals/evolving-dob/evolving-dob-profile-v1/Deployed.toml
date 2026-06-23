@@ -1,0 +1,37 @@
+version = 1
+schema = "cellscript-deployed-v0.19"
+
+[package]
+name = "evolving-dob-profile-v1"
+version = "1.0.0"
+source_hash = "51b82c042f7d55d9efc6e33a47e80a67cc231c75bb26bcb2f5579f33b6956f1b"
+
+[build]
+compiler_version = "0.17.0"
+artifact_hash = "57f1fac0b03ee4b142462ab39b44259040b3537a0de3385a9df3984e2e9f2944"
+metadata_hash = "ec151e7849be893d113c7c250cee229b2d01c705d6d4c7b40be9207e27f0b4c7"
+schema_hash = "5b52a99e494a2f25b4c443be123c986e4df571b7a6013450586cbdb7a721adbf"
+cell_data_codec_manifest_hash = "3a0d8795c09edc7759b1ba399d8540214bdd3f2522519f8d935e4bf9fb5235d2"
+abi_hash = "a5657e8da9ff50f2bb0dd15b1f59bff0d1ae5b93b872d5e86c85f6d24193282d"
+constraints_hash = "20093053e93f88173d6f6f2c4ca66faeb883db6b5fdb44b3ff3a943e4d87dcef"
+
+[[deployments]]
+name = "evolving-dob-profile-v1-local-devnet"
+status = "active"
+network = "devnet"
+chain_id = "ckb_integration_test"
+tx_hash = "0x9ab94283a5109f7a6b5c94c82a75479d5425e5af36a17371164941f8fba15593"
+output_index = 0
+code_hash = "0x57f1fac0b03ee4b142462ab39b44259040b3537a0de3385a9df3984e2e9f2944"
+data_hash = "0x57f1fac0b03ee4b142462ab39b44259040b3537a0de3385a9df3984e2e9f2944"
+hash_type = "data1"
+dep_type = "code"
+out_point = "0x9ab94283a5109f7a6b5c94c82a75479d5425e5af36a17371164941f8fba15593:0"
+artifact_hash = "57f1fac0b03ee4b142462ab39b44259040b3537a0de3385a9df3984e2e9f2944"
+metadata_hash = "ec151e7849be893d113c7c250cee229b2d01c705d6d4c7b40be9207e27f0b4c7"
+schema_hash = "5b52a99e494a2f25b4c443be123c986e4df571b7a6013450586cbdb7a721adbf"
+cell_data_codec_manifest_hash = "3a0d8795c09edc7759b1ba399d8540214bdd3f2522519f8d935e4bf9fb5235d2"
+abi_hash = "a5657e8da9ff50f2bb0dd15b1f59bff0d1ae5b93b872d5e86c85f6d24193282d"
+constraints_hash = "20093053e93f88173d6f6f2c4ca66faeb883db6b5fdb44b3ff3a943e4d87dcef"
+compiler_version = "0.17.0"
+audit_report_hash = "0x54c6cfaed564c2f5b6d9868384617470e98983c09018a0b209b5d0cdae9122c0"

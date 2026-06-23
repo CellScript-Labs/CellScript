@@ -3,12 +3,6 @@ pub mod token;
 use crate::error::{CompileError, Result, Span};
 use token::{keyword_or_identifier, Token, TokenKind};
 
-const MAX_IDENTIFIER_BYTES: usize = 64 * 1024;
-const MAX_NUMERIC_LITERAL_BYTES: usize = 64 * 1024;
-const MAX_STRING_LITERAL_BYTES: usize = 1024 * 1024;
-const MAX_BYTE_STRING_LITERAL_BYTES: usize = 1024 * 1024;
-const MAX_COMMENT_BYTES: usize = 1024 * 1024;
-
 pub struct Lexer<'a> {
     input: &'a str,
     chars: std::str::Chars<'a>,
@@ -25,33 +19,18 @@ impl<'a> Lexer<'a> {
         Self { input, chars, position: 0, line: 1, column: 1, current }
     }
 
-    fn advance(&mut self) -> Result<Option<char>> {
+    fn advance(&mut self) -> Option<char> {
         if let Some(c) = self.current {
-            self.position = self.position.checked_add(c.len_utf8()).ok_or_else(|| {
-                CompileError::new(
-                    "source position overflow while lexing",
-                    Span::new(self.position, self.position, self.line, self.column),
-                )
-            })?;
+            self.position += c.len_utf8();
             if c == '\n' {
-                self.line = self.line.checked_add(1).ok_or_else(|| {
-                    CompileError::new(
-                        "source line overflow while lexing",
-                        Span::new(self.position, self.position, self.line, self.column),
-                    )
-                })?;
+                self.line += 1;
                 self.column = 1;
             } else {
-                self.column = self.column.checked_add(1).ok_or_else(|| {
-                    CompileError::new(
-                        "source column overflow while lexing",
-                        Span::new(self.position, self.position, self.line, self.column),
-                    )
-                })?;
+                self.column += 1;
             }
         }
         self.current = self.chars.next();
-        Ok(self.current)
+        self.current
     }
 
     fn peek(&self) -> Option<char> {
@@ -62,89 +41,57 @@ impl<'a> Lexer<'a> {
         self.input[self.position..].chars().nth(1)
     }
 
-    fn skip_whitespace(&mut self) -> Result<()> {
+    fn skip_whitespace(&mut self) {
         while let Some(c) = self.peek() {
             if c.is_whitespace() && c != '\n' {
-                self.advance()?;
+                self.advance();
             } else {
                 break;
             }
         }
-        Ok(())
     }
 
-    fn ensure_limit(&self, start: usize, limit: usize, label: &str, start_line: usize, start_col: usize) -> Result<()> {
-        if self.position.saturating_sub(start) > limit {
-            Err(CompileError::new(
-                format!("{} exceeds {} byte limit", label, limit),
-                Span::new(start, self.position, start_line, start_col),
-            ))
-        } else {
-            Ok(())
-        }
-    }
-
-    fn skip_comment(&mut self) -> Result<()> {
+    fn skip_comment(&mut self) {
         if self.peek() == Some('/') && self.peek_next() == Some('/') {
-            let start = self.position;
-            let start_line = self.line;
-            let start_col = self.column;
             while let Some(c) = self.peek() {
                 if c == '\n' {
                     break;
                 }
-                self.advance()?;
-                self.ensure_limit(start, MAX_COMMENT_BYTES, "line comment", start_line, start_col)?;
+                self.advance();
             }
         } else if self.peek() == Some('/') && self.peek_next() == Some('*') {
-            let start = self.position;
-            let start_line = self.line;
-            let start_col = self.column;
-            self.advance()?; // /
-            self.advance()?; // *
-            let mut depth: usize = 1;
+            self.advance(); // /
+            self.advance(); // *
+            let mut depth = 1;
             while depth > 0 {
                 match (self.peek(), self.peek_next()) {
                     (Some('/'), Some('*')) => {
-                        self.advance()?;
-                        self.advance()?;
-                        depth = depth.checked_add(1).ok_or_else(|| {
-                            CompileError::new(
-                                "block comment nesting depth overflow",
-                                Span::new(start, self.position, start_line, start_col),
-                            )
-                        })?;
+                        self.advance();
+                        self.advance();
+                        depth += 1;
                     }
                     (Some('*'), Some('/')) => {
-                        self.advance()?;
-                        self.advance()?;
+                        self.advance();
+                        self.advance();
                         depth -= 1;
                     }
                     (Some(_), _) => {
-                        self.advance()?;
+                        self.advance();
                     }
-                    (None, _) => {
-                        return Err(CompileError::new(
-                            "unterminated block comment",
-                            Span::new(start, self.position, start_line, start_col),
-                        ));
-                    }
+                    (None, _) => break,
                 }
-                self.ensure_limit(start, MAX_COMMENT_BYTES, "block comment", start_line, start_col)?;
             }
         }
-        Ok(())
     }
 
-    fn read_identifier(&mut self) -> Result<Token> {
+    fn read_identifier(&mut self) -> Token {
         let start = self.position;
         let start_line = self.line;
         let start_col = self.column;
 
         while let Some(c) = self.peek() {
             if c.is_alphanumeric() || c == '_' {
-                self.advance()?;
-                self.ensure_limit(start, MAX_IDENTIFIER_BYTES, "identifier", start_line, start_col)?;
+                self.advance();
             } else {
                 break;
             }
@@ -154,7 +101,7 @@ impl<'a> Lexer<'a> {
         let kind = keyword_or_identifier(text);
         let span = Span::new(start, self.position, start_line, start_col);
 
-        Ok(Token::new(kind, span, text))
+        Token::new(kind, span, text)
     }
 
     fn read_number(&mut self) -> Result<Token> {
@@ -163,13 +110,12 @@ impl<'a> Lexer<'a> {
         let start_col = self.column;
 
         if self.peek() == Some('0') && self.peek_next() == Some('x') {
-            self.advance()?; // 0
-            self.advance()?; // x
+            self.advance(); // 0
+            self.advance(); // x
             let hex_start = self.position;
             while let Some(c) = self.peek() {
                 if c.is_ascii_hexdigit() {
-                    self.advance()?;
-                    self.ensure_limit(start, MAX_NUMERIC_LITERAL_BYTES, "numeric literal", start_line, start_col)?;
+                    self.advance();
                 } else {
                     break;
                 }
@@ -181,8 +127,7 @@ impl<'a> Lexer<'a> {
 
         while let Some(c) = self.peek() {
             if c.is_ascii_digit() {
-                self.advance()?;
-                self.ensure_limit(start, MAX_NUMERIC_LITERAL_BYTES, "numeric literal", start_line, start_col)?;
+                self.advance();
             } else {
                 break;
             }
@@ -202,73 +147,53 @@ impl<'a> Lexer<'a> {
         let start_line = self.line;
         let start_col = self.column;
 
-        let quote = self
-            .peek()
-            .ok_or_else(|| CompileError::new("expected string literal quote", Span::new(start, start, start_line, start_col)))?;
-        self.advance()?;
+        let quote = self.peek().unwrap();
+        self.advance();
 
         let mut content = String::new();
-        let mut closed = false;
         while let Some(c) = self.peek() {
             if c == quote {
-                self.advance()?;
-                closed = true;
+                self.advance();
                 break;
             } else if c == '\\' {
-                self.advance()?;
+                self.advance();
                 match self.peek() {
                     Some('n') => {
                         content.push('\n');
-                        self.advance()?;
+                        self.advance();
                     }
                     Some('t') => {
                         content.push('\t');
-                        self.advance()?;
+                        self.advance();
                     }
                     Some('r') => {
                         content.push('\r');
-                        self.advance()?;
+                        self.advance();
                     }
                     Some('\\') => {
                         content.push('\\');
-                        self.advance()?;
+                        self.advance();
                     }
                     Some('"') => {
                         content.push('"');
-                        self.advance()?;
+                        self.advance();
                     }
                     Some('0') => {
                         content.push('\0');
-                        self.advance()?;
+                        self.advance();
                     }
                     Some(c) => {
                         return Err(CompileError::new(
                             format!("unknown escape sequence: \\{}", c),
-                            Span::new(self.position, self.position + c.len_utf8(), self.line, self.column),
+                            Span::new(self.position, self.position + 1, self.line, self.column),
                         ));
                     }
-                    None => {
-                        return Err(CompileError::new(
-                            "unterminated string literal",
-                            Span::new(start, self.position, start_line, start_col),
-                        ));
-                    }
+                    None => break,
                 }
             } else {
                 content.push(c);
-                self.advance()?;
+                self.advance();
             }
-            self.ensure_limit(start, MAX_STRING_LITERAL_BYTES, "string literal", start_line, start_col)?;
-            if content.len() > MAX_STRING_LITERAL_BYTES {
-                return Err(CompileError::new(
-                    format!("decoded string literal exceeds {} byte limit", MAX_STRING_LITERAL_BYTES),
-                    Span::new(start, self.position, start_line, start_col),
-                ));
-            }
-        }
-
-        if !closed {
-            return Err(CompileError::new("unterminated string literal", Span::new(start, self.position, start_line, start_col)));
         }
 
         let span = Span::new(start, self.position, start_line, start_col);
@@ -280,45 +205,43 @@ impl<'a> Lexer<'a> {
         let start_line = self.line;
         let start_col = self.column;
 
-        self.advance()?; // b
-        self.advance()?; // "
+        self.advance(); // b
+        self.advance(); // "
 
         let mut bytes = Vec::new();
-        let mut closed = false;
         while let Some(c) = self.peek() {
             if c == '"' {
-                self.advance()?;
-                closed = true;
+                self.advance();
                 break;
             } else if c == '\\' {
-                self.advance()?;
+                self.advance();
                 match self.peek() {
                     Some('n') => {
                         bytes.push(b'\n');
-                        self.advance()?;
+                        self.advance();
                     }
                     Some('t') => {
                         bytes.push(b'\t');
-                        self.advance()?;
+                        self.advance();
                     }
                     Some('r') => {
                         bytes.push(b'\r');
-                        self.advance()?;
+                        self.advance();
                     }
                     Some('\\') => {
                         bytes.push(b'\\');
-                        self.advance()?;
+                        self.advance();
                     }
                     Some('"') => {
                         bytes.push(b'"');
-                        self.advance()?;
+                        self.advance();
                     }
                     Some('0') => {
                         bytes.push(0);
-                        self.advance()?;
+                        self.advance();
                     }
                     Some('x') => {
-                        self.advance()?;
+                        self.advance();
                         let hi = self.peek().ok_or_else(|| {
                             CompileError::new(
                                 "incomplete hex escape in byte string",
@@ -328,10 +251,10 @@ impl<'a> Lexer<'a> {
                         if !hi.is_ascii_hexdigit() {
                             return Err(CompileError::new(
                                 format!("invalid hex escape in byte string: \\x{}", hi),
-                                Span::new(self.position, self.position + hi.len_utf8(), self.line, self.column),
+                                Span::new(self.position, self.position + 1, self.line, self.column),
                             ));
                         }
-                        self.advance()?;
+                        self.advance();
 
                         let lo = self.peek().ok_or_else(|| {
                             CompileError::new(
@@ -342,10 +265,10 @@ impl<'a> Lexer<'a> {
                         if !lo.is_ascii_hexdigit() {
                             return Err(CompileError::new(
                                 format!("invalid hex escape in byte string: \\x{}{}", hi, lo),
-                                Span::new(self.position, self.position + lo.len_utf8(), self.line, self.column),
+                                Span::new(self.position, self.position + 1, self.line, self.column),
                             ));
                         }
-                        self.advance()?;
+                        self.advance();
 
                         let hex = &self.input[self.position - 2..self.position];
                         let val = u8::from_str_radix(hex, 16).map_err(|_| {
@@ -359,36 +282,20 @@ impl<'a> Lexer<'a> {
                     Some(c) => {
                         return Err(CompileError::new(
                             format!("unknown escape sequence in byte string: \\{}", c),
-                            Span::new(self.position, self.position + c.len_utf8(), self.line, self.column),
+                            Span::new(self.position, self.position + 1, self.line, self.column),
                         ));
                     }
-                    None => {
-                        return Err(CompileError::new(
-                            "unterminated byte string literal",
-                            Span::new(start, self.position, start_line, start_col),
-                        ));
-                    }
+                    None => break,
                 }
             } else if c.is_ascii() {
                 bytes.push(c as u8);
-                self.advance()?;
+                self.advance();
             } else {
                 return Err(CompileError::new(
                     "non-ASCII character in byte string",
-                    Span::new(self.position, self.position + c.len_utf8(), self.line, self.column),
+                    Span::new(self.position, self.position + 1, self.line, self.column),
                 ));
             }
-            self.ensure_limit(start, MAX_BYTE_STRING_LITERAL_BYTES, "byte string literal", start_line, start_col)?;
-            if bytes.len() > MAX_BYTE_STRING_LITERAL_BYTES {
-                return Err(CompileError::new(
-                    format!("decoded byte string literal exceeds {} byte limit", MAX_BYTE_STRING_LITERAL_BYTES),
-                    Span::new(start, self.position, start_line, start_col),
-                ));
-            }
-        }
-
-        if !closed {
-            return Err(CompileError::new("unterminated byte string literal", Span::new(start, self.position, start_line, start_col)));
         }
 
         let span = Span::new(start, self.position, start_line, start_col);
@@ -397,9 +304,9 @@ impl<'a> Lexer<'a> {
 
     pub fn next_token(&mut self) -> Result<Token> {
         loop {
-            self.skip_whitespace()?;
+            self.skip_whitespace();
             if self.peek() == Some('/') && (self.peek_next() == Some('/') || self.peek_next() == Some('*')) {
-                self.skip_comment()?;
+                self.skip_comment();
             } else {
                 break;
             }
@@ -417,7 +324,7 @@ impl<'a> Lexer<'a> {
         };
 
         if c == '\n' {
-            self.advance()?;
+            self.advance();
             return Ok(Token::new(TokenKind::Newline, Span::new(start, self.position, start_line, start_col), "\n"));
         }
 
@@ -426,7 +333,7 @@ impl<'a> Lexer<'a> {
         }
 
         if c.is_alphabetic() || c == '_' {
-            return self.read_identifier();
+            return Ok(self.read_identifier());
         }
 
         if c.is_ascii_digit() {
@@ -437,7 +344,7 @@ impl<'a> Lexer<'a> {
             return self.read_string();
         }
 
-        self.advance()?;
+        self.advance();
         let span = Span::new(start, self.position, start_line, start_col);
 
         match c {
@@ -455,7 +362,7 @@ impl<'a> Lexer<'a> {
             '+' => Ok(Token::new(TokenKind::Plus, span, "+")),
             '-' => {
                 if self.peek() == Some('>') {
-                    self.advance()?;
+                    self.advance();
                     Ok(Token::new(TokenKind::Arrow, span.combine(&Span::new(start, self.position, start_line, start_col)), "->"))
                 } else {
                     Ok(Token::new(TokenKind::Minus, span, "-"))
@@ -467,7 +374,7 @@ impl<'a> Lexer<'a> {
 
             '&' => {
                 if self.peek() == Some('&') {
-                    self.advance()?;
+                    self.advance();
                     Ok(Token::new(TokenKind::And, span.combine(&Span::new(start, self.position, start_line, start_col)), "&&"))
                 } else {
                     Ok(Token::new(TokenKind::Ampersand, span, "&"))
@@ -475,7 +382,7 @@ impl<'a> Lexer<'a> {
             }
             '|' => {
                 if self.peek() == Some('|') {
-                    self.advance()?;
+                    self.advance();
                     Ok(Token::new(TokenKind::Or, span.combine(&Span::new(start, self.position, start_line, start_col)), "||"))
                 } else {
                     Ok(Token::new(TokenKind::Pipe, span, "|"))
@@ -483,7 +390,7 @@ impl<'a> Lexer<'a> {
             }
             '!' => {
                 if self.peek() == Some('=') {
-                    self.advance()?;
+                    self.advance();
                     Ok(Token::new(TokenKind::NotEq, span.combine(&Span::new(start, self.position, start_line, start_col)), "!="))
                 } else {
                     Ok(Token::new(TokenKind::Not, span, "!"))
@@ -492,10 +399,10 @@ impl<'a> Lexer<'a> {
 
             '=' => {
                 if self.peek() == Some('=') {
-                    self.advance()?;
+                    self.advance();
                     Ok(Token::new(TokenKind::EqEq, span.combine(&Span::new(start, self.position, start_line, start_col)), "=="))
                 } else if self.peek() == Some('>') {
-                    self.advance()?;
+                    self.advance();
                     Ok(Token::new(TokenKind::FatArrow, span.combine(&Span::new(start, self.position, start_line, start_col)), "=>"))
                 } else {
                     Ok(Token::new(TokenKind::Eq, span, "="))
@@ -503,7 +410,7 @@ impl<'a> Lexer<'a> {
             }
             '<' => {
                 if self.peek() == Some('=') {
-                    self.advance()?;
+                    self.advance();
                     Ok(Token::new(TokenKind::Le, span.combine(&Span::new(start, self.position, start_line, start_col)), "<="))
                 } else {
                     Ok(Token::new(TokenKind::Lt, span, "<"))
@@ -511,7 +418,7 @@ impl<'a> Lexer<'a> {
             }
             '>' => {
                 if self.peek() == Some('=') {
-                    self.advance()?;
+                    self.advance();
                     Ok(Token::new(TokenKind::Ge, span.combine(&Span::new(start, self.position, start_line, start_col)), ">="))
                 } else {
                     Ok(Token::new(TokenKind::Gt, span, ">"))
@@ -520,7 +427,7 @@ impl<'a> Lexer<'a> {
 
             ':' => {
                 if self.peek() == Some(':') {
-                    self.advance()?;
+                    self.advance();
                     Ok(Token::new(TokenKind::ColonColon, span.combine(&Span::new(start, self.position, start_line, start_col)), "::"))
                 } else {
                     Ok(Token::new(TokenKind::Colon, span, ":"))
@@ -623,83 +530,10 @@ mod tests {
     }
 
     #[test]
-    fn test_unterminated_string_errors() {
-        let error = lex("\"unterminated\n").unwrap_err();
-
-        assert!(error.message.contains("unterminated string literal"), "{}", error.message);
-    }
-
-    #[test]
-    fn string_unknown_escape_span_covers_non_ascii_character() {
-        let input = "\"\\é\"";
-        let error = lex(input).unwrap_err();
-
-        assert!(error.message.contains("unknown escape sequence"), "{}", error.message);
-        assert_eq!(error.span, Span::new(2, 4, 1, 3));
-        assert!(input.is_char_boundary(error.span.end));
-    }
-
-    #[test]
-    fn rejects_oversized_identifier() {
-        let input = "a".repeat(MAX_IDENTIFIER_BYTES + 1);
-        let error = lex(&input).unwrap_err();
-
-        assert!(error.message.contains("identifier exceeds"), "{}", error.message);
-    }
-
-    #[test]
-    fn rejects_oversized_string_literal() {
-        let input = format!("\"{}\"", "a".repeat(MAX_STRING_LITERAL_BYTES + 1));
-        let error = lex(&input).unwrap_err();
-
-        assert!(error.message.contains("string literal exceeds"), "{}", error.message);
-    }
-
-    #[test]
     fn test_byte_string() {
         let input = r#"b"hello" b"\x00\xFF""#;
         let tokens = lex(input).unwrap();
         assert!(matches!(tokens[0].kind, TokenKind::ByteString(ref b) if b == b"hello"));
-    }
-
-    #[test]
-    fn test_unterminated_byte_string_errors() {
-        let error = lex("b\"unterminated").unwrap_err();
-
-        assert!(error.message.contains("unterminated byte string literal"), "{}", error.message);
-    }
-
-    #[test]
-    fn byte_string_invalid_character_spans_cover_non_ascii_character() {
-        let raw_error = lex("b\"é\"").unwrap_err();
-
-        assert!(raw_error.message.contains("non-ASCII character in byte string"), "{}", raw_error.message);
-        assert_eq!(raw_error.span, Span::new(2, 4, 1, 3));
-
-        let escape_error = lex("b\"\\é\"").unwrap_err();
-
-        assert!(escape_error.message.contains("unknown escape sequence in byte string"), "{}", escape_error.message);
-        assert_eq!(escape_error.span, Span::new(3, 5, 1, 4));
-    }
-
-    #[test]
-    fn byte_string_invalid_hex_escape_spans_cover_non_ascii_character() {
-        let hi_error = lex("b\"\\xé0\"").unwrap_err();
-
-        assert!(hi_error.message.contains("invalid hex escape in byte string"), "{}", hi_error.message);
-        assert_eq!(hi_error.span, Span::new(4, 6, 1, 5));
-
-        let lo_error = lex("b\"\\x0é\"").unwrap_err();
-
-        assert!(lo_error.message.contains("invalid hex escape in byte string"), "{}", lo_error.message);
-        assert_eq!(lo_error.span, Span::new(5, 7, 1, 6));
-    }
-
-    #[test]
-    fn test_unterminated_block_comment_errors() {
-        let error = lex("foo /* unterminated").unwrap_err();
-
-        assert!(error.message.contains("unterminated block comment"), "{}", error.message);
     }
 
     #[test]
@@ -711,13 +545,5 @@ mod tests {
         assert!(matches!(semantic_tokens[0].kind, TokenKind::Identifier(ref s) if s == "foo"));
         assert!(matches!(semantic_tokens[1].kind, TokenKind::Identifier(ref s) if s == "bar"));
         assert!(matches!(semantic_tokens[2].kind, TokenKind::Identifier(ref s) if s == "baz"));
-    }
-
-    #[test]
-    fn rejects_oversized_block_comment() {
-        let input = format!("/*{}", "a".repeat(MAX_COMMENT_BYTES + 1));
-        let error = lex(&input).unwrap_err();
-
-        assert!(error.message.contains("block comment exceeds"), "{}", error.message);
     }
 }

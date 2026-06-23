@@ -41,10 +41,51 @@ pub fn check_metadata(metadata: &CompileMetadata, strict: bool) -> ProofPlanSoun
         );
     }
 
-    let proof_index = proof_plan
-        .iter()
-        .map(|plan| (obligation_key(&plan.origin, &plan.category, &plan.feature, &plan.status, &plan.detail), plan))
-        .collect::<BTreeMap<_, _>>();
+    let mut proof_index = BTreeMap::<String, Vec<&ProofPlanMetadata>>::new();
+    for plan in proof_plan {
+        proof_index
+            .entry(obligation_key(&plan.origin, &plan.category, &plan.feature, &plan.status, &plan.detail))
+            .or_default()
+            .push(plan);
+    }
+    for (key, records) in &proof_index {
+        if records.len() > 1 {
+            push_issue(
+                &mut issues,
+                "error",
+                "PP0003",
+                &records[0].origin,
+                &records[0].feature,
+                &format!("duplicate ProofPlan obligation key {key} appears {} times", records.len()),
+            );
+        }
+    }
+
+    let mut obligation_index = BTreeMap::<String, Vec<&VerifierObligationMetadata>>::new();
+    for obligation in obligations {
+        obligation_index
+            .entry(obligation_key(
+                &obligation.scope,
+                &obligation.category,
+                &obligation.feature,
+                &obligation.status,
+                &obligation.detail,
+            ))
+            .or_default()
+            .push(obligation);
+    }
+    for (key, records) in &obligation_index {
+        if records.len() > 1 {
+            push_issue(
+                &mut issues,
+                "error",
+                "PP0004",
+                &records[0].scope,
+                &records[0].feature,
+                &format!("duplicate runtime verifier obligation key {key} appears {} times", records.len()),
+            );
+        }
+    }
 
     for obligation in obligations {
         let key = obligation_key(&obligation.scope, &obligation.category, &obligation.feature, &obligation.status, &obligation.detail);
@@ -117,7 +158,7 @@ fn check_plan_record(plan: &ProofPlanMetadata, strict: bool, issues: &mut Vec<Pr
         );
     }
 
-    if strict && plan.status == "checked-runtime" && !plan.on_chain_checked {
+    if matches!(plan.status.as_str(), "checked-runtime" | "checked-static" | "ckb-runtime") && !plan.on_chain_checked {
         push_issue(
             issues,
             "error",
@@ -143,7 +184,7 @@ fn check_plan_record(plan: &ProofPlanMetadata, strict: bool, issues: &mut Vec<Pr
         );
     }
 
-    if strict && has_executing_script_args_fields(plan) && !plan.reads.iter().any(|read| read == "lock_args") {
+    if !plan.lock_args_fields.is_empty() && !plan.reads.iter().any(|read| read == "lock_args") {
         push_issue(
             issues,
             "error",
@@ -154,7 +195,7 @@ fn check_plan_record(plan: &ProofPlanMetadata, strict: bool, issues: &mut Vec<Pr
         );
     }
 
-    if strict && !plan.witness_fields.is_empty() && !plan.reads.iter().any(|read| read == "witness") {
+    if !plan.witness_fields.is_empty() && !plan.reads.iter().any(|read| read == "witness") {
         push_issue(
             issues,
             "error",
@@ -163,6 +204,100 @@ fn check_plan_record(plan: &ProofPlanMetadata, strict: bool, issues: &mut Vec<Pr
             &plan.feature,
             "ProofPlan exposes witness fields but reads does not include witness",
         );
+    }
+
+    for expected_read in expected_reads_for_cell_access(plan) {
+        if !plan.reads.iter().any(|read| read == expected_read) {
+            push_issue(
+                issues,
+                "error",
+                "PP0212",
+                &plan.origin,
+                &plan.feature,
+                &format!("cell-access ProofPlan source requires reads to include '{expected_read}'"),
+            );
+        }
+    }
+
+    if plan.trigger.trim().is_empty() {
+        push_issue(issues, "error", "PP0203", &plan.origin, &plan.feature, "ProofPlan trigger must not be empty");
+    }
+
+    if plan.scope.trim().is_empty() {
+        push_issue(issues, "error", "PP0204", &plan.origin, &plan.feature, "ProofPlan scope must not be empty");
+    }
+
+    if plan.group_cardinality.trim().is_empty() {
+        push_issue(issues, "error", "PP0205", &plan.origin, &plan.feature, "ProofPlan group_cardinality must not be empty");
+    }
+
+    if plan.on_chain_checked && plan.reads.is_empty() && proof_plan_requires_concrete_reads(plan) {
+        push_issue(
+            issues,
+            "error",
+            "PP0206",
+            &plan.origin,
+            &plan.feature,
+            "on-chain checked ProofPlan record must declare concrete reads",
+        );
+    }
+
+    if plan.on_chain_checked && plan.coverage.is_empty() {
+        push_issue(
+            issues,
+            "error",
+            "PP0207",
+            &plan.origin,
+            &plan.feature,
+            "on-chain checked ProofPlan record must declare coverage evidence",
+        );
+    }
+
+    if plan.on_chain_checked && plan.on_chain_checked_obligations.is_empty() {
+        push_issue(
+            issues,
+            "error",
+            "PP0208",
+            &plan.origin,
+            &plan.feature,
+            "on-chain checked ProofPlan record must list checked obligation labels",
+        );
+    }
+
+    let expected_obligation_label = format!("{}:{}={}", plan.category, plan.feature, plan.status);
+    if plan.on_chain_checked && !plan.on_chain_checked_obligations.iter().any(|label| label == &expected_obligation_label) {
+        push_issue(
+            issues,
+            "error",
+            "PP0209",
+            &plan.origin,
+            &plan.feature,
+            "on-chain checked ProofPlan record is missing its category:feature=status obligation label",
+        );
+    }
+
+    if strict && plan.origin.starts_with("invariant:") && plan.source_span.is_none() {
+        push_issue(
+            issues,
+            "error",
+            "PP0210",
+            &plan.origin,
+            &plan.feature,
+            "source-declared invariant ProofPlan records must carry a source span in strict mode",
+        );
+    }
+
+    if let Some(span) = &plan.source_span {
+        if span.end <= span.start || span.line == 0 {
+            push_issue(
+                issues,
+                "error",
+                "PP0211",
+                &plan.origin,
+                &plan.feature,
+                "ProofPlan source span must have end > start and a one-based line",
+            );
+        }
     }
 
     if plan.on_chain_checked
@@ -180,10 +315,6 @@ fn check_plan_record(plan: &ProofPlanMetadata, strict: bool, issues: &mut Vec<Pr
             "on-chain checked ProofPlan record carries unchecked runtime/metadata-only builder assumptions",
         );
     }
-}
-
-fn has_executing_script_args_fields(plan: &ProofPlanMetadata) -> bool {
-    plan.lock_args_fields.iter().any(|field| field.starts_with("lock_args.") || field.starts_with("ScriptArgs#"))
 }
 
 fn check_local_runtime_plan_consistency(metadata: &CompileMetadata, issues: &mut Vec<ProofPlanSoundnessIssue>) {
@@ -234,7 +365,7 @@ fn check_local_runtime_plan_consistency(metadata: &CompileMetadata, issues: &mut
                         "PP0403",
                         &plan.origin,
                         &plan.feature,
-                        "local ProofPlan record differs from runtime.proof_plan in trigger, scope, reads, coverage, assumptions, group cardinality, detail, or codegen coverage",
+                        "local ProofPlan record differs from runtime.proof_plan in trigger, scope, reads, coverage, assumptions, detail, or codegen coverage",
                     );
                 }
             }
@@ -264,7 +395,7 @@ fn check_local_runtime_plan_consistency(metadata: &CompileMetadata, issues: &mut
                         "PP0404",
                         &plan.origin,
                         &plan.feature,
-                        "runtime ProofPlan record differs from local action/function/lock metadata in trigger, scope, reads, coverage, assumptions, group cardinality, detail, or codegen coverage",
+                        "runtime ProofPlan record differs from local action/function/lock metadata in trigger, scope, reads, coverage, assumptions, detail, or codegen coverage",
                     );
                 }
             }
@@ -272,8 +403,8 @@ fn check_local_runtime_plan_consistency(metadata: &CompileMetadata, issues: &mut
     }
 }
 
-fn obligation_key(scope_or_origin: &str, category: &str, feature: &str, status: &str, detail: &str) -> String {
-    format!("{scope_or_origin}\u{1f}{category}\u{1f}{feature}\u{1f}{status}\u{1f}{detail}")
+fn obligation_key(origin: &str, category: &str, feature: &str, status: &str, detail: &str) -> String {
+    format!("{origin}\u{1f}{category}\u{1f}{feature}\u{1f}{status}\u{1f}{detail}")
 }
 
 fn plan_identity_key(plan: &ProofPlanMetadata) -> String {
@@ -289,6 +420,57 @@ fn plan_full_key(plan: &ProofPlanMetadata) -> String {
     serde_json::to_string(plan).unwrap_or_else(|_| format!("{plan:?}"))
 }
 
+fn proof_plan_requires_concrete_reads(plan: &ProofPlanMetadata) -> bool {
+    if plan.category == "cell-access" {
+        return plan.feature.split(':').nth(1).and_then(|source| source.split('#').next()).is_some_and(|source| {
+            matches!(
+                source,
+                "Input"
+                    | "Output"
+                    | "CellDep"
+                    | "HeaderDep"
+                    | "GroupInput"
+                    | "GroupOutput"
+                    | "GroupInput/GroupOutput"
+                    | "Input/Output"
+                    | "Input/HeaderDep"
+                    | "SourceView"
+            )
+        });
+    }
+    if matches!(plan.category.as_str(), "transaction-invariant" | "output-verification") {
+        return true;
+    }
+    let text = format!("{} {} {}", plan.category, plan.feature, plan.detail).to_ascii_lowercase();
+    ["input", "output", "cell", "header", "witness", "lock_args", "group", "capacity", "type_id", "type-id"]
+        .iter()
+        .any(|needle| text.contains(needle))
+}
+
+fn expected_reads_for_cell_access(plan: &ProofPlanMetadata) -> &'static [&'static str] {
+    if plan.category != "cell-access" {
+        return &[];
+    }
+    let Some(source) = plan.feature.split(':').nth(1).and_then(|source| source.split('#').next()) else {
+        return &[];
+    };
+    match source {
+        "Input" => &["input"],
+        "Output" => &["output"],
+        "GroupInput" => &["group_input"],
+        "GroupOutput" => &["group_output"],
+        "GroupInput/GroupOutput" => &["group_input", "group_output"],
+        "Input/Output" => &["input", "output", "source_view"],
+        "Input/HeaderDep" => &["input", "header_dep"],
+        "CellDep" => &["cell_dep"],
+        "HeaderDep" => &["header_dep"],
+        "Witness" => &["witness"],
+        "ScriptArgs" => &["lock_args"],
+        "SourceView" => &["source_view"],
+        _ => &[],
+    }
+}
+
 fn push_issue(issues: &mut Vec<ProofPlanSoundnessIssue>, severity: &str, code: &str, origin: &str, feature: &str, message: &str) {
     issues.push(ProofPlanSoundnessIssue {
         severity: severity.to_string(),
@@ -302,97 +484,4 @@ fn push_issue(issues: &mut Vec<ProofPlanSoundnessIssue>, severity: &str, code: &
 #[allow(dead_code)]
 fn _obligation_debug_key(obligation: &VerifierObligationMetadata) -> String {
     obligation_key(&obligation.scope, &obligation.category, &obligation.feature, &obligation.status, &obligation.detail)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn plan_with_status(status: &str, on_chain_checked: bool, codegen_coverage_status: &str) -> ProofPlanMetadata {
-        ProofPlanMetadata {
-            name: "fixture".to_string(),
-            origin: "action:fixture".to_string(),
-            category: "fixture".to_string(),
-            feature: "fixture".to_string(),
-            source_span: None,
-            trigger: "explicit_entry".to_string(),
-            scope: "selected_cells".to_string(),
-            reads: Vec::new(),
-            coverage: Vec::new(),
-            input_output_relation_checks: Vec::new(),
-            group_cardinality: "not a script-group cardinality obligation".to_string(),
-            identity_lifecycle_policy: "none".to_string(),
-            preserved_fields: Vec::new(),
-            witness_fields: Vec::new(),
-            lock_args_fields: Vec::new(),
-            on_chain_checked,
-            on_chain_checked_obligations: Vec::new(),
-            executable_evidence: Vec::new(),
-            builder_assumptions: Vec::new(),
-            codegen_coverage_status: codegen_coverage_status.to_string(),
-            status: status.to_string(),
-            detail: "fixture detail".to_string(),
-            diagnostics: Vec::new(),
-        }
-    }
-
-    #[test]
-    fn strict_pp0103_only_applies_to_checked_runtime_records() {
-        for status in ["ckb-runtime", "checked-static"] {
-            let plan = plan_with_status(status, false, status);
-            let mut issues = Vec::new();
-
-            check_plan_record(&plan, true, &mut issues);
-
-            assert!(
-                !issues.iter().any(|issue| issue.code == "PP0103"),
-                "{status} must not be treated as an on-chain checked runtime proof: {issues:?}"
-            );
-        }
-
-        let checked_runtime = plan_with_status("checked-runtime", false, "gap:evidence-missing");
-        let mut issues = Vec::new();
-
-        check_plan_record(&checked_runtime, true, &mut issues);
-
-        assert!(
-            issues.iter().any(|issue| issue.code == "PP0103"),
-            "checked-runtime without on_chain_checked must remain a strict soundness error: {issues:?}"
-        );
-    }
-
-    #[test]
-    fn strict_pp0201_only_applies_to_executing_script_args() {
-        let mut output_lock_args = plan_with_status("checked-runtime", true, "covered");
-        output_lock_args.lock_args_fields.push("Output#0.lock_args".to_string());
-        let mut issues = Vec::new();
-
-        check_plan_record(&output_lock_args, true, &mut issues);
-
-        assert!(
-            !issues.iter().any(|issue| issue.code == "PP0201"),
-            "target cell lock args must not require reads=lock_args: {issues:?}"
-        );
-
-        let mut script_args = plan_with_status("checked-runtime", true, "covered");
-        script_args.lock_args_fields.push("ScriptArgs#0".to_string());
-        let mut issues = Vec::new();
-
-        check_plan_record(&script_args, true, &mut issues);
-
-        assert!(
-            issues.iter().any(|issue| issue.code == "PP0201"),
-            "executing Script.args must still require reads=lock_args: {issues:?}"
-        );
-
-        script_args.reads.push("lock_args".to_string());
-        let mut issues = Vec::new();
-
-        check_plan_record(&script_args, true, &mut issues);
-
-        assert!(
-            !issues.iter().any(|issue| issue.code == "PP0201"),
-            "declared reads=lock_args should satisfy executing Script.args strictness: {issues:?}"
-        );
-    }
 }

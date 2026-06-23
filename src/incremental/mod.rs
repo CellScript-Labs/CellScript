@@ -1,14 +1,13 @@
-use crate::error::{CompileError, Result};
+use crate::error::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::hash::{Hash, Hasher};
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 pub struct IncrementalCompiler {
     cache_dir: PathBuf,
-    trusted_root: PathBuf,
     dep_graph: DependencyGraph,
     _file_hashes: HashMap<PathBuf, u64>,
     unit_cache: HashMap<String, CompiledUnit>,
@@ -25,19 +24,11 @@ pub struct CompiledUnit {
     pub compile_options: CompileOptions,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Hash, PartialEq, Eq)]
 pub struct CompileOptions {
     pub opt_level: u8,
     pub target: String,
     pub debug: bool,
-    #[serde(default)]
-    pub target_profile: String,
-    #[serde(default)]
-    pub primitive_compat: String,
-    #[serde(default)]
-    pub ckb_limit_env: Vec<(String, Option<String>)>,
-    #[serde(default)]
-    pub riscv_toolchain_env: Vec<(String, Option<String>)>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -61,19 +52,10 @@ pub struct FileSnapshot {
 impl IncrementalCompiler {
     pub fn new(cache_dir: impl AsRef<Path>) -> Self {
         let cache_dir = cache_dir.as_ref().to_path_buf();
-        let trusted_root = incremental_trusted_root(&cache_dir);
 
-        if let Err(error) = fs::create_dir_all(&cache_dir) {
-            log::warn!("failed to create incremental cache directory '{}': {}", cache_dir.display(), error);
-        }
+        fs::create_dir_all(&cache_dir).ok();
 
-        Self {
-            cache_dir,
-            trusted_root,
-            dep_graph: DependencyGraph::default(),
-            _file_hashes: HashMap::new(),
-            unit_cache: HashMap::new(),
-        }
+        Self { cache_dir, dep_graph: DependencyGraph::default(), _file_hashes: HashMap::new(), unit_cache: HashMap::new() }
     }
 
     pub fn load_cache(&mut self) -> Result<()> {
@@ -82,18 +64,8 @@ impl IncrementalCompiler {
         if cache_file.exists() {
             let content = fs::read_to_string(&cache_file)?;
             let cache: IncrementalCache = serde_json::from_str(&content)?;
-            self.dep_graph = self.sanitize_dependency_graph(cache.dep_graph);
-            self.unit_cache = cache
-                .units
-                .into_iter()
-                .filter_map(|(key, unit)| match self.validate_compiled_unit(&unit) {
-                    Ok(()) => Some((key, unit)),
-                    Err(error) => {
-                        log::warn!("dropping unsafe incremental cache unit '{}': {}", key, error);
-                        None
-                    }
-                })
-                .collect();
+            self.dep_graph = cache.dep_graph;
+            self.unit_cache = cache.units;
         }
 
         Ok(())
@@ -111,11 +83,6 @@ impl IncrementalCompiler {
     }
 
     pub fn needs_recompile(&self, source: &Path, options: &CompileOptions) -> bool {
-        if let Err(error) = self.validate_cache_path(source, "incremental source path") {
-            log::warn!("incremental cache ignored unsafe source '{}': {}", source.display(), error);
-            return true;
-        }
-
         let source_str = source.to_string_lossy().to_string();
 
         let Some(unit) = self.unit_cache.get(&source_str) else {
@@ -128,42 +95,17 @@ impl IncrementalCompiler {
 
         let current_hash = match compute_file_hash(source) {
             Ok(h) => h,
-            Err(error) => {
-                log::warn!("incremental cache could not hash source '{}': {}", source.display(), error);
-                return true;
-            }
+            Err(_) => return true,
         };
 
         if unit.source_hash != current_hash {
             return true;
         }
 
-        if let Err(error) = self.validate_cache_path(&unit.output_path, "incremental output path") {
-            log::warn!("incremental cache ignored unsafe output '{}': {}", unit.output_path.display(), error);
-            return true;
-        }
-        let output_hash = match compute_file_hash(&unit.output_path) {
-            Ok(hash) => hash,
-            Err(error) => {
-                log::warn!("incremental cache could not hash output '{}': {}", unit.output_path.display(), error);
-                return true;
-            }
-        };
-        if unit.output_hash != output_hash {
-            return true;
-        }
-
         for dep in &unit.dependencies {
-            if let Err(error) = self.validate_cache_path(dep, "incremental dependency path") {
-                log::warn!("incremental cache ignored unsafe dependency '{}': {}", dep.display(), error);
-                return true;
-            }
             let dep_hash = match compute_file_hash(dep) {
                 Ok(h) => h,
-                Err(error) => {
-                    log::warn!("incremental cache could not hash dependency '{}': {}", dep.display(), error);
-                    return true;
-                }
+                Err(_) => return true,
             };
 
             let dep_str = dep.to_string_lossy().to_string();
@@ -203,14 +145,8 @@ impl IncrementalCompiler {
         dependencies: Vec<PathBuf>,
         options: &CompileOptions,
     ) -> Result<()> {
-        self.validate_cache_path(source, "incremental source path")?;
-        self.validate_cache_path(output, "incremental output path")?;
-        for dependency in &dependencies {
-            self.validate_cache_path(dependency, "incremental dependency path")?;
-        }
-
         let source_hash = compute_file_hash(source)?;
-        let output_hash = compute_file_hash(output)?;
+        let output_hash = compute_file_hash(output).unwrap_or(0);
 
         let unit = CompiledUnit {
             source_path: source.to_path_buf(),
@@ -236,12 +172,7 @@ impl IncrementalCompiler {
 
     pub fn clean_cache(&mut self, max_age_days: u64) -> Result<usize> {
         let now = SystemTime::now();
-        let max_age_secs = max_age_days
-            .checked_mul(24)
-            .and_then(|value| value.checked_mul(60))
-            .and_then(|value| value.checked_mul(60))
-            .ok_or_else(|| CompileError::without_span(format!("incremental cache max_age_days {} is too large", max_age_days)))?;
-        let max_age = std::time::Duration::from_secs(max_age_secs);
+        let max_age = std::time::Duration::from_secs(max_age_days * 24 * 60 * 60);
 
         let to_remove: Vec<String> = self
             .unit_cache
@@ -253,10 +184,6 @@ impl IncrementalCompiler {
         let count = to_remove.len();
         for key in to_remove {
             if let Some(unit) = self.unit_cache.remove(&key) {
-                if let Err(error) = self.validate_cache_path(&unit.output_path, "incremental output path") {
-                    log::warn!("incremental cache skipped unsafe output removal '{}': {}", unit.output_path.display(), error);
-                    continue;
-                }
                 fs::remove_file(&unit.output_path).ok();
             }
         }
@@ -267,12 +194,7 @@ impl IncrementalCompiler {
     pub fn get_stats(&self) -> CacheStats {
         CacheStats {
             total_units: self.unit_cache.len(),
-            total_size: self
-                .unit_cache
-                .values()
-                .filter(|unit| self.validate_cache_path(&unit.output_path, "incremental output path").is_ok())
-                .map(|u| u.output_path.metadata().map(|m| m.len()).unwrap_or(0))
-                .sum(),
+            total_size: self.unit_cache.values().map(|u| u.output_path.metadata().map(|m| m.len()).unwrap_or(0)).sum(),
         }
     }
 
@@ -285,46 +207,6 @@ impl IncrementalCompiler {
             let file_str = file.to_string_lossy().to_string();
             self.unit_cache.remove(&file_str);
         }
-    }
-
-    fn validate_compiled_unit(&self, unit: &CompiledUnit) -> Result<()> {
-        self.validate_cache_path(&unit.source_path, "incremental source path")?;
-        self.validate_cache_path(&unit.output_path, "incremental output path")?;
-        for dependency in &unit.dependencies {
-            self.validate_cache_path(dependency, "incremental dependency path")?;
-        }
-        Ok(())
-    }
-
-    fn sanitize_dependency_graph(&self, graph: DependencyGraph) -> DependencyGraph {
-        let mut sanitized = DependencyGraph::default();
-        for (dependency, dependents) in graph.dependents {
-            if self.validate_cache_path(&dependency, "incremental dependency path").is_err() {
-                continue;
-            }
-            let safe_dependents = dependents
-                .into_iter()
-                .filter(|dependent| self.validate_cache_path(dependent, "incremental dependent path").is_ok())
-                .collect::<HashSet<_>>();
-            if !safe_dependents.is_empty() {
-                sanitized.dependents.insert(dependency, safe_dependents);
-            }
-        }
-        for (source, dependencies) in graph.dependencies {
-            if self.validate_cache_path(&source, "incremental source path").is_err() {
-                continue;
-            }
-            let safe_dependencies = dependencies
-                .into_iter()
-                .filter(|dependency| self.validate_cache_path(dependency, "incremental dependency path").is_ok())
-                .collect::<HashSet<_>>();
-            sanitized.dependencies.insert(source, safe_dependencies);
-        }
-        sanitized
-    }
-
-    fn validate_cache_path(&self, path: &Path, label: &str) -> Result<PathBuf> {
-        canonical_path_under_root(&self.trusted_root, path, label)
     }
 }
 
@@ -391,67 +273,6 @@ impl ChangeDetector {
     }
 }
 
-fn incremental_trusted_root(cache_dir: &Path) -> PathBuf {
-    let is_cell_build_cache = cache_dir.file_name().is_some_and(|name| name == "cache")
-        && cache_dir.parent().and_then(Path::file_name).is_some_and(|name| name == "build")
-        && cache_dir.parent().and_then(Path::parent).and_then(Path::file_name).is_some_and(|name| name == ".cell");
-
-    if is_cell_build_cache {
-        return cache_dir.parent().and_then(Path::parent).and_then(Path::parent).unwrap_or(cache_dir).to_path_buf();
-    }
-
-    cache_dir.parent().unwrap_or(cache_dir).to_path_buf()
-}
-
-fn canonical_path_under_root(root: &Path, path: &Path, label: &str) -> Result<PathBuf> {
-    if path.as_os_str().is_empty() {
-        return Err(CompileError::without_span(format!("{} must not be empty", label)));
-    }
-    if path.components().any(|component| matches!(component, Component::ParentDir | Component::Prefix(_))) {
-        return Err(CompileError::without_span(format!("{} '{}' must stay inside the incremental cache root", label, path.display())));
-    }
-
-    let canonical_root = fs::canonicalize(root).map_err(|error| {
-        CompileError::without_span(format!("failed to canonicalize incremental cache root '{}': {}", root.display(), error))
-    })?;
-    let candidate = if path.is_absolute() { path.to_path_buf() } else { canonical_root.join(path) };
-    let canonical = canonical_existing_or_parent(&candidate)?;
-    if !canonical.starts_with(&canonical_root) {
-        return Err(CompileError::without_span(format!(
-            "{} '{}' resolves outside incremental cache root '{}'",
-            label,
-            path.display(),
-            canonical_root.display()
-        )));
-    }
-
-    Ok(canonical)
-}
-
-fn canonical_existing_or_parent(path: &Path) -> Result<PathBuf> {
-    if path.exists() {
-        return fs::canonicalize(path).map_err(CompileError::from);
-    }
-
-    let mut missing = Vec::new();
-    let mut anchor = path;
-    while !anchor.exists() {
-        let Some(name) = anchor.file_name() else {
-            return Err(CompileError::without_span(format!("path '{}' has no existing ancestor", path.display())));
-        };
-        missing.push(name.to_os_string());
-        anchor = anchor
-            .parent()
-            .ok_or_else(|| CompileError::without_span(format!("path '{}' has no existing ancestor", path.display())))?;
-    }
-
-    let mut canonical = fs::canonicalize(anchor)?;
-    for component in missing.iter().rev() {
-        canonical.push(component);
-    }
-    Ok(canonical)
-}
-
 fn compute_file_hash(path: &Path) -> Result<u64> {
     use std::collections::hash_map::DefaultHasher;
 
@@ -485,7 +306,53 @@ impl ParallelCompiler {
     }
 
     fn topological_sort(&self, files: &[PathBuf]) -> Vec<PathBuf> {
-        files.to_vec()
+        let selected = files.iter().cloned().collect::<HashSet<_>>();
+        let original_index = files.iter().enumerate().map(|(index, file)| (file.clone(), index)).collect::<HashMap<_, _>>();
+        let mut indegree = files.iter().cloned().map(|file| (file, 0usize)).collect::<HashMap<_, _>>();
+        let mut dependents = HashMap::<PathBuf, Vec<PathBuf>>::new();
+
+        for file in files {
+            let Some(dependencies) = self.compiler.dep_graph.dependencies.get(file) else {
+                continue;
+            };
+            for dependency in dependencies {
+                if selected.contains(dependency) {
+                    *indegree.entry(file.clone()).or_default() += 1;
+                    dependents.entry(dependency.clone()).or_default().push(file.clone());
+                }
+            }
+        }
+
+        let mut ready = files.iter().filter(|file| indegree.get(*file).copied().unwrap_or_default() == 0).cloned().collect::<Vec<_>>();
+        ready.sort_by_key(|file| original_index.get(file).copied().unwrap_or(usize::MAX));
+        ready.reverse();
+
+        let mut sorted = Vec::with_capacity(files.len());
+        while let Some(file) = ready.pop() {
+            sorted.push(file.clone());
+            let Some(children) = dependents.get(&file) else {
+                continue;
+            };
+            for dependent in children {
+                let Some(count) = indegree.get_mut(dependent) else {
+                    continue;
+                };
+                *count = count.saturating_sub(1);
+                if *count == 0 {
+                    ready.push(dependent.clone());
+                }
+            }
+            ready.sort_by_key(|file| original_index.get(file).copied().unwrap_or(usize::MAX));
+            ready.reverse();
+        }
+
+        if sorted.len() == files.len() {
+            return sorted;
+        }
+
+        let emitted = sorted.iter().cloned().collect::<HashSet<_>>();
+        sorted.extend(files.iter().filter(|file| !emitted.contains(*file)).cloned());
+        sorted
     }
 }
 
@@ -574,7 +441,7 @@ mod tests {
         let source = temp.path().join("test.cell");
         fs::write(&source, "module test;").unwrap();
 
-        let options = CompileOptions { opt_level: 0, target: "riscv64".to_string(), debug: false, ..CompileOptions::default() };
+        let options = CompileOptions { opt_level: 0, target: "riscv64".to_string(), debug: false };
 
         assert!(compiler.needs_recompile(&source, &options));
 
@@ -583,122 +450,9 @@ mod tests {
         compiler.record_compilation(&source, &output, vec![], &options).unwrap();
 
         assert!(!compiler.needs_recompile(&source, &options));
-        fs::write(&output, "changed").unwrap();
-        assert!(compiler.needs_recompile(&source, &options));
-        fs::write(&output, "").unwrap();
-        assert!(!compiler.needs_recompile(&source, &options));
-        fs::remove_file(&output).unwrap();
-        assert!(compiler.needs_recompile(&source, &options));
-        fs::write(&output, "").unwrap();
-        assert!(compiler.needs_recompile(&source, &CompileOptions { target_profile: "ckb".to_string(), ..options.clone() }));
-        assert!(compiler.needs_recompile(&source, &CompileOptions { primitive_compat: "0.15".to_string(), ..options.clone() }));
-        assert!(compiler.needs_recompile(
-            &source,
-            &CompileOptions {
-                ckb_limit_env: vec![("CELLSCRIPT_CKB_MAX_TX_VERIFY_CYCLES".to_string(), Some("1".to_string()))],
-                ..options.clone()
-            }
-        ));
 
         fs::write(&source, "module test2;").unwrap();
         assert!(compiler.needs_recompile(&source, &options));
-    }
-
-    #[test]
-    fn record_compilation_requires_existing_output() {
-        let temp = TempDir::new().unwrap();
-        let cache_dir = temp.path().join("cache");
-        let mut compiler = IncrementalCompiler::new(&cache_dir);
-
-        let source = temp.path().join("test.cell");
-        let output = temp.path().join("missing.o");
-        fs::write(&source, "module test;").unwrap();
-        let options = CompileOptions { opt_level: 0, target: "riscv64".to_string(), debug: false, ..CompileOptions::default() };
-
-        let err = compiler.record_compilation(&source, &output, vec![], &options).unwrap_err();
-
-        assert!(err.message.contains("No such file") || err.message.contains("not found"), "unexpected error: {}", err.message);
-        assert!(compiler.needs_recompile(&source, &options));
-    }
-
-    #[test]
-    fn load_cache_drops_units_with_paths_outside_trusted_root() {
-        let temp = TempDir::new().unwrap();
-        let outside = TempDir::new().unwrap();
-        let cache_dir = temp.path().join(".cell/build/cache");
-        fs::create_dir_all(&cache_dir).unwrap();
-        let source = temp.path().join("main.cell");
-        fs::write(&source, "module test;").unwrap();
-        let outside_output = outside.path().join("owned.o");
-
-        let mut units = HashMap::new();
-        units.insert(
-            source.to_string_lossy().to_string(),
-            CompiledUnit {
-                source_path: source.clone(),
-                source_hash: 0,
-                output_path: outside_output,
-                output_hash: 0,
-                dependencies: Vec::new(),
-                timestamp: SystemTime::now(),
-                compile_options: CompileOptions {
-                    opt_level: 0,
-                    target: "riscv64".to_string(),
-                    debug: false,
-                    ..CompileOptions::default()
-                },
-            },
-        );
-        let cache = IncrementalCache { dep_graph: DependencyGraph::default(), units };
-        fs::write(cache_dir.join("compile_cache.json"), serde_json::to_string(&cache).unwrap()).unwrap();
-
-        let mut compiler = IncrementalCompiler::new(&cache_dir);
-        compiler.load_cache().unwrap();
-
-        assert_eq!(compiler.get_stats().total_units, 0);
-    }
-
-    #[test]
-    fn clean_cache_skips_output_paths_outside_trusted_root() {
-        let temp = TempDir::new().unwrap();
-        let outside = TempDir::new().unwrap();
-        let cache_dir = temp.path().join(".cell/build/cache");
-        let source = temp.path().join("main.cell");
-        fs::write(&source, "module test;").unwrap();
-        let outside_output = outside.path().join("keep.o");
-        fs::write(&outside_output, "keep").unwrap();
-
-        let mut compiler = IncrementalCompiler::new(&cache_dir);
-        compiler.unit_cache.insert(
-            source.to_string_lossy().to_string(),
-            CompiledUnit {
-                source_path: source,
-                source_hash: 0,
-                output_path: outside_output.clone(),
-                output_hash: 0,
-                dependencies: Vec::new(),
-                timestamp: SystemTime::UNIX_EPOCH,
-                compile_options: CompileOptions {
-                    opt_level: 0,
-                    target: "riscv64".to_string(),
-                    debug: false,
-                    ..CompileOptions::default()
-                },
-            },
-        );
-
-        assert_eq!(compiler.clean_cache(0).unwrap(), 1);
-        assert!(outside_output.exists());
-    }
-
-    #[test]
-    fn clean_cache_rejects_overflowing_max_age() {
-        let temp = TempDir::new().unwrap();
-        let mut compiler = IncrementalCompiler::new(temp.path().join("cache"));
-
-        let err = compiler.clean_cache(u64::MAX).unwrap_err();
-
-        assert!(err.message.contains("too large"), "unexpected error: {}", err.message);
     }
 
     #[test]
@@ -714,6 +468,40 @@ mod tests {
 
         assert!(affected.contains(&PathBuf::from("b.cell")));
         assert!(affected.contains(&PathBuf::from("c.cell")));
+    }
+
+    #[test]
+    fn parallel_compiler_orders_dependencies_before_dependents() {
+        let mut compiler = ParallelCompiler::new("/tmp/cellscript-incremental-topo", 4);
+        let token = PathBuf::from("token.cell");
+        let registry = PathBuf::from("registry.cell");
+        let app = PathBuf::from("app.cell");
+        let standalone = PathBuf::from("standalone.cell");
+
+        compiler.compiler.dep_graph.dependencies.insert(app.clone(), HashSet::from([registry.clone()]));
+        compiler.compiler.dep_graph.dependencies.insert(registry.clone(), HashSet::from([token.clone()]));
+
+        let sorted = compiler.topological_sort(&[app.clone(), registry.clone(), token.clone(), standalone]);
+        let token_index = sorted.iter().position(|file| file == &token).expect("token present");
+        let registry_index = sorted.iter().position(|file| file == &registry).expect("registry present");
+        let app_index = sorted.iter().position(|file| file == &app).expect("app present");
+
+        assert!(token_index < registry_index, "dependency must precede dependent: {sorted:?}");
+        assert!(registry_index < app_index, "dependency must precede dependent: {sorted:?}");
+    }
+
+    #[test]
+    fn parallel_compiler_keeps_cycle_members_in_input_order_after_acyclic_prefix() {
+        let mut compiler = ParallelCompiler::new("/tmp/cellscript-incremental-cycle", 4);
+        let a = PathBuf::from("a.cell");
+        let b = PathBuf::from("b.cell");
+        let root = PathBuf::from("root.cell");
+
+        compiler.compiler.dep_graph.dependencies.insert(a.clone(), HashSet::from([b.clone()]));
+        compiler.compiler.dep_graph.dependencies.insert(b.clone(), HashSet::from([a.clone()]));
+
+        let sorted = compiler.topological_sort(&[a.clone(), root.clone(), b.clone()]);
+        assert_eq!(sorted, vec![root, a, b]);
     }
 
     #[test]

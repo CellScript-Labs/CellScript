@@ -144,10 +144,12 @@ registry_package = "cellscript-labs/btc-bip340"
 stability = "runtime-backed-experimental"
 tcb = "spawned-riscv-verifier"
 artifact_role = "spawn-verifier"
-production = false
+source_package_ready = true
+public_mainnet_deployment_ready = false
 ```
 
-This keeps the capability reusable without pretending it is already stable.
+This keeps the capability reusable while separating local source-package
+readiness from public/mainnet deployment attestation.
 
 ### UX Rule: Manifest-Scoped Alias First
 

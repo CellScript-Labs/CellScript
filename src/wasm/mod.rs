@@ -195,7 +195,9 @@ pub fn audit_module(ir: &IrModule) -> WasmCompileReport {
 
 pub fn ir_type_to_wasm(ty: &IrType) -> WasmValType {
     match ty {
-        IrType::U8 | IrType::U16 | IrType::U32 | IrType::Bool | IrType::Unit | IrType::Address | IrType::Hash => WasmValType::I32,
+        IrType::U8 | IrType::U16 | IrType::U32 | IrType::I32 | IrType::Bool | IrType::Unit | IrType::Address | IrType::Hash => {
+            WasmValType::I32
+        }
         IrType::U64 | IrType::U128 => WasmValType::I64,
         IrType::Array(_, _) | IrType::Tuple(_) | IrType::Named(_) | IrType::Ref(_) | IrType::MutRef(_) => WasmValType::I64,
     }
@@ -381,7 +383,6 @@ mod tests {
             external_type_defs: Vec::new(),
             external_callable_abis: Vec::new(),
             enum_fixed_sizes: Default::default(),
-            has_lowering_errors: false,
         };
         let report = audit_module(&ir);
         assert_eq!(report.status, WasmSupportStatus::AuditOnly);
@@ -395,7 +396,6 @@ mod tests {
             external_type_defs: Vec::new(),
             external_callable_abis: Vec::new(),
             enum_fixed_sizes: Default::default(),
-            has_lowering_errors: false,
             items: vec![IrItem::Action(IrAction {
                 name: "main".to_string(),
                 params: Vec::new(),

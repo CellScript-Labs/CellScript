@@ -1,9 +1,13 @@
 /target/
+node_modules/
+dist/
+services/registry-api/dist/
 editors/vscode-cellscript/dist/
 
 .DS_Store
 .vscode/
 .cap/
+.wrangler/
 __pycache__/
 *.py[cod]
 *.swp
@@ -12,6 +16,10 @@ __pycache__/
 *.s
 *.elf
 *.wasm
+# The prebuilt WASM bundle for the website playground is a committed
+# build artifact (rebuilt via website/scripts/build-wasm.sh), so it
+# must be tracked despite the global *.wasm ignore above.
+!website/public/wasm/*.wasm
 *.meta.json
 
 .cell/
@@ -36,7 +44,13 @@ proposals/novaseal/*
 !proposals/novaseal/dual-seal-profile-v0/**
 !proposals/novaseal/fiber-candidate-profile-v0/
 !proposals/novaseal/fiber-candidate-profile-v0/**
+!proposals/evolving-dob/
+proposals/evolving-dob/*
+!proposals/evolving-dob/evolving-dob-profile-v1/
+!proposals/evolving-dob/evolving-dob-profile-v1/**
+!proposals/evolving-dob/evolving-dob-profile-v1/Cell.lock
 proposals/novaseal/v0-mvp-skeleton/build/
+proposals/novaseal/**/.cell/
 proposals/novaseal/v0-mvp-skeleton/target/
 proposals/novaseal/v0-mvp-skeleton/src/.cell/
 proposals/novaseal/v0-mvp-skeleton/scripts/__pycache__/
@@ -66,6 +80,16 @@ proposals/novaseal/**/*.py[cod]
 proposals/novaseal/**/*.s
 proposals/novaseal/**/*.elf
 proposals/novaseal/**/*.meta.json
+proposals/evolving-dob/evolving-dob-profile-v1/build/
+proposals/evolving-dob/evolving-dob-profile-v1/target/
+proposals/evolving-dob/evolving-dob-profile-v1/.cell/
+proposals/evolving-dob/evolving-dob-profile-v1/src/.cell/
+proposals/evolving-dob/evolving-dob-profile-v1/scripts/__pycache__/
+proposals/evolving-dob/evolving-dob-profile-v1/.DS_Store
+proposals/evolving-dob/evolving-dob-profile-v1/**/*.py[cod]
+proposals/evolving-dob/evolving-dob-profile-v1/**/*.s
+proposals/evolving-dob/evolving-dob-profile-v1/**/*.elf
+proposals/evolving-dob/evolving-dob-profile-v1/**/*.meta.json
 
 # Keep translated prose out of the CellScript repository by default.
 # README_CH.md is the one maintained Chinese document.

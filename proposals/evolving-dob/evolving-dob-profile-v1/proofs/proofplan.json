@@ -1,0 +1,35 @@
+{
+  "schema": "evolving-dob-proofplan-v1",
+  "profile": "DOB-EVO/1",
+  "package": "dob/evolving-dob-profile-v1",
+  "production_policy": {
+    "backward_compatibility": "none",
+    "required_version": 1,
+    "deployment_identity": "Cell.lock plus Deployed.toml plus registry verify",
+    "authority": "state-line CKB owner_lock"
+  },
+  "actions": [
+    {
+      "name": "initialise_dob_state",
+      "proves": ["non_zero_base_identity", "owner_lock_binding", "type_id_creation", "computed_event_chain_start"]
+    },
+    {
+      "name": "evolve_dob_state",
+      "proves": ["generation_plus_one", "state_echo", "rule_decoder_preservation", "owner_lock_preservation", "computed_event_chain_step"]
+    },
+    {
+      "name": "finalise_dob_state",
+      "proves": ["generation_plus_one", "terminal_phase", "owner_lock_preservation", "computed_event_chain_step"]
+    }
+  ],
+  "negative_fixtures": [
+    "legacy_version_reject",
+    "replay_generation_reject",
+    "stale_state_reject",
+    "owner_lock_mismatch_reject",
+    "dna_zero_reject",
+    "event_hash_mismatch_reject",
+    "phase_regression_reject",
+    "rule_hash_mismatch_reject"
+  ]
+}

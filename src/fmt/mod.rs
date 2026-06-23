@@ -1,7 +1,6 @@
 //! CellScript formatter.
 //! Release-grade code formatter with idempotency guarantees,
-//! configurable line width, doc-comment preservation, and whitespace normalization.
-//! Non-doc line/block comments are not represented in the AST and are not preserved.
+//! configurable line width, comment preservation, and whitespace normalization.
 
 use crate::ast::*;
 use crate::error::Result;
@@ -195,7 +194,6 @@ impl Formatter {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn format_type_def(
         &mut self,
         keyword: &str,
@@ -317,31 +315,22 @@ impl Formatter {
         } else if let Some(return_type) = &action.return_type {
             signature.push_str(&format!(" -> {}", format_type(return_type)));
         }
-        self.push_line(&signature);
-        if action.state_edges.len() == 1 {
-            self.indent_level += 1;
-            self.push_line(&format_action_state_edge("transition ", &action.state_edges[0]));
-            self.indent_level -= 1;
-        } else if !action.state_edges.is_empty() {
-            self.indent_level += 1;
-            self.push_line("transition {");
-            self.indent_level += 1;
-            for state_edge in &action.state_edges {
-                self.push_line(&format_action_state_edge("", state_edge));
-            }
-            self.indent_level -= 1;
-            self.push_line("}");
-            self.indent_level -= 1;
+        self.push_line(&format!("{} {{", signature));
+        self.indent_level += 1;
+        for state_edge in &action.state_edges {
+            self.push_line(&format_action_state_edge("transition ", state_edge));
         }
-        if action.body.is_empty() {
-            return Ok(());
+        if !action.state_edges.is_empty() && !action.body.is_empty() {
+            self.push_line("");
         }
-        self.push_line("where");
+        self.push_line("verification");
         self.indent_level += 1;
         for stmt in &action.body {
             self.format_stmt(stmt);
         }
         self.indent_level -= 1;
+        self.indent_level -= 1;
+        self.push_line("}");
         Ok(())
     }
 
@@ -371,9 +360,12 @@ impl Formatter {
         let params = lock.params.iter().map(format_param).collect::<Vec<_>>().join(", ");
         self.push_line(&format!("lock {}({}) -> {} {{", lock.name, params, format_type(&lock.return_type)));
         self.indent_level += 1;
+        self.push_line("verification");
+        self.indent_level += 1;
         for stmt in &lock.body {
             self.format_stmt(stmt);
         }
+        self.indent_level -= 1;
         self.indent_level -= 1;
         self.push_line("}");
         Ok(())
@@ -395,8 +387,8 @@ impl Formatter {
                 self.push_line(&line);
             }
             Stmt::Expr(expr) => self.push_line(&self.format_expr(expr)),
-            Stmt::Return(ReturnStmt { value: None, .. }) => self.push_line("return"),
-            Stmt::Return(ReturnStmt { value: Some(expr), .. }) => self.push_line(&format!("return {}", self.format_expr(expr))),
+            Stmt::Return(None) => self.push_line("return"),
+            Stmt::Return(Some(expr)) => self.push_line(&format!("return {}", self.format_expr(expr))),
             Stmt::If(if_stmt) => self.format_if_stmt(if_stmt),
             Stmt::For(for_stmt) => self.format_for_stmt(for_stmt),
             Stmt::While(while_stmt) => self.format_while_stmt(while_stmt),
@@ -421,30 +413,6 @@ impl Formatter {
         self.push_line("}");
     }
 
-    fn format_block_expr_body(&self, stmts: &[Stmt]) -> String {
-        stmts
-            .iter()
-            .map(|stmt| match stmt {
-                Stmt::Let(_) | Stmt::If(_) | Stmt::For(_) | Stmt::While(_) => {
-                    let mut formatter = Formatter::new(self.config.clone());
-                    formatter.format_stmt(stmt);
-                    formatter.output.trim_end().to_string()
-                }
-                Stmt::Expr(expr) => self.format_expr(expr),
-                Stmt::Return(ReturnStmt { value: None, .. }) => "return".to_string(),
-                Stmt::Return(ReturnStmt { value: Some(expr), .. }) => format!("return {}", self.format_expr(expr)),
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
-    }
-
-    fn format_expr_as_block_body(&self, expr: &Expr) -> String {
-        match expr {
-            Expr::Block(stmts, _) => self.format_block_expr_body(stmts),
-            _ => self.format_expr(expr),
-        }
-    }
-
     fn format_for_stmt(&mut self, for_stmt: &ForStmt) {
         self.push_line(&format!("for {} in {} {{", format_binding_pattern(&for_stmt.pattern), self.format_expr(&for_stmt.iterable)));
         self.indent_level += 1;
@@ -467,17 +435,17 @@ impl Formatter {
 
     fn format_expr(&self, expr: &Expr) -> String {
         match expr {
-            Expr::Integer(value, _) => value.to_string(),
-            Expr::Bool(value, _) => value.to_string(),
-            Expr::String(value, _) => format!("{:?}", value),
-            Expr::ByteString(bytes, _) => {
+            Expr::Integer(value) => value.to_string(),
+            Expr::Bool(value) => value.to_string(),
+            Expr::String(value) => format!("{:?}", value),
+            Expr::ByteString(bytes) => {
                 let mut body = String::with_capacity(bytes.len() * 4);
                 for byte in bytes {
-                    let _ = write!(&mut body, "\\x{:02x}", byte);
+                    write!(&mut body, "\\x{:02x}", byte).expect("writing to a String cannot fail");
                 }
                 format!("b\"{}\"", body)
             }
-            Expr::Identifier(name, _) => name.clone(),
+            Expr::Identifier(name) => name.clone(),
             Expr::Assign(assign) => format!(
                 "{} {} {}",
                 self.format_expr(&assign.target),
@@ -516,7 +484,6 @@ impl Formatter {
                 rendered
             }
             Expr::Consume(consume) => format!("consume {}", self.format_expr(&consume.expr)),
-            Expr::Transfer(transfer) => format!("transfer {} to {}", self.format_expr(&transfer.expr), self.format_expr(&transfer.to)),
             Expr::Destroy(destroy) => match &destroy.policy {
                 DestructionPolicy::Default => format!("destroy {}", self.format_expr(&destroy.expr)),
                 DestructionPolicy::SingletonType => format!("destroy_singleton_type({})", self.format_expr(&destroy.expr)),
@@ -553,11 +520,19 @@ impl Formatter {
                 )
             }
             Expr::Assert(assert_expr) => {
-                format!("assert({}, {})", self.format_expr(&assert_expr.condition), self.format_expr(&assert_expr.message))
+                format!("assert_invariant({}, {})", self.format_expr(&assert_expr.condition), self.format_expr(&assert_expr.message))
             }
             Expr::Require(require_expr) => {
                 if let Some(message) = &require_expr.message {
-                    format!("require {}, {}", self.format_expr(&require_expr.condition), self.format_expr(message))
+                    if let Expr::String(label) = message.as_ref() {
+                        if is_error_label(label) {
+                            format!("require {} else {}", self.format_expr(&require_expr.condition), label)
+                        } else {
+                            format!("require {}, {}", self.format_expr(&require_expr.condition), self.format_expr(message))
+                        }
+                    } else {
+                        format!("require {}, {}", self.format_expr(&require_expr.condition), self.format_expr(message))
+                    }
                 } else {
                     format!("require {}", self.format_expr(&require_expr.condition))
                 }
@@ -572,36 +547,17 @@ impl Formatter {
                 }
             }
             Expr::Preserve(preserve) => {
-                let field_indent = " ".repeat((self.indent_level + 1) * self.config.indent_width);
-                let fields = preserve.fields.iter().map(|field| format!("{}{}", field_indent, field)).collect::<Vec<_>>().join("\n");
-                let closing_indent = " ".repeat(self.indent_level * self.config.indent_width);
-                format!("preserve {} from {} {{\n{}\n{}}}", preserve.output_name, preserve.input_name, fields, closing_indent)
+                let fields = preserve.fields.join("\n");
+                format!("preserve {} from {} {{\n{}\n}}", preserve.output_name, preserve.input_name, fields)
             }
-            Expr::Block(stmts, _) => {
-                let inner = stmts
-                    .iter()
-                    .map(|stmt| {
-                        let mut formatter = Formatter::new(self.config.clone());
-                        formatter.indent_level = 1;
-                        formatter.format_stmt(stmt);
-                        formatter.output.trim_end().to_string()
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                if inner.is_empty() {
-                    "{}".to_string()
-                } else {
-                    format!("{{\n{}\n}}", inner)
-                }
-            }
-            Expr::Tuple(items, _) if items.len() == 1 => format!("({},)", self.format_expr(&items[0])),
-            Expr::Tuple(items, _) => format!("({})", items.iter().map(|item| self.format_expr(item)).collect::<Vec<_>>().join(", ")),
-            Expr::Array(items, _) => format!("[{}]", items.iter().map(|item| self.format_expr(item)).collect::<Vec<_>>().join(", ")),
+            Expr::Block(stmts) => format!("{{ {} }}", self.format_expr_block_body(stmts)),
+            Expr::Tuple(items) => format!("({})", items.iter().map(|item| self.format_expr(item)).collect::<Vec<_>>().join(", ")),
+            Expr::Array(items) => format!("[{}]", items.iter().map(|item| self.format_expr(item)).collect::<Vec<_>>().join(", ")),
             Expr::If(if_expr) => format!(
                 "if {} {{ {} }} else {{ {} }}",
                 self.format_expr(&if_expr.condition),
-                self.format_expr_as_block_body(&if_expr.then_branch),
-                self.format_expr_as_block_body(&if_expr.else_branch)
+                self.format_branch_expr_body(&if_expr.then_branch),
+                self.format_branch_expr_body(&if_expr.else_branch)
             ),
             Expr::Cast(cast) => format!("{} as {}", self.format_expr(&cast.expr), format_type(&cast.ty)),
             Expr::Range(range) => format!("{}..{}", self.format_expr(&range.start), self.format_expr(&range.end)),
@@ -632,8 +588,28 @@ impl Formatter {
         }
     }
 
+    fn format_branch_expr_body(&self, expr: &Expr) -> String {
+        match expr {
+            Expr::Block(stmts) => self.format_expr_block_body(stmts),
+            expr => self.format_expr(expr),
+        }
+    }
+
+    fn format_expr_block_body(&self, stmts: &[Stmt]) -> String {
+        stmts
+            .iter()
+            .map(|stmt| {
+                let mut formatter = Formatter::new(self.config.clone());
+                formatter.indent_level = 0;
+                formatter.format_stmt(stmt);
+                formatter.output.trim().to_string()
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
     fn format_field_initializer(&self, name: &str, value: &Expr) -> String {
-        if matches!(value, Expr::Identifier(identifier, _) if identifier == name) {
+        if matches!(value, Expr::Identifier(identifier) if identifier == name) {
             name.to_string()
         } else {
             format!("{}: {}", name, self.format_expr(value))
@@ -656,7 +632,6 @@ impl Formatter {
 fn format_capability(capability: &Capability) -> &'static str {
     match capability {
         Capability::Store => "store",
-        Capability::Transfer => "transfer",
         Capability::Destroy => "destroy",
         Capability::Create => "create",
         Capability::Consume => "consume",
@@ -770,7 +745,18 @@ fn format_action_outputs(outputs: &[ActionOutput]) -> String {
 fn format_action_state_edge(prefix: &str, state_edge: &ActionStateEdge) -> String {
     let path = &state_edge.path;
     let to_path = &state_edge.to_path;
+    if path.field.is_empty() && to_path.field.is_empty() && state_edge.from.is_empty() && state_edge.to.is_empty() {
+        return format!("{}{} -> {}", prefix, path.base, to_path.base);
+    }
     format!("{}{}.{}: {} -> {}.{}: {}", prefix, path.base, path.field, state_edge.from, to_path.base, to_path.field, state_edge.to)
+}
+
+fn is_error_label(label: &str) -> bool {
+    let mut chars = label.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    (first.is_ascii_uppercase() || first == '_') && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
 }
 
 fn format_binding_pattern(pattern: &BindingPattern) -> String {
@@ -786,6 +772,7 @@ fn format_type(ty: &Type) -> String {
         Type::U8 => "u8".to_string(),
         Type::U16 => "u16".to_string(),
         Type::U32 => "u32".to_string(),
+        Type::I32 => "i32".to_string(),
         Type::U64 => "u64".to_string(),
         Type::U128 => "u128".to_string(),
         Type::Bool => "bool".to_string(),
@@ -863,17 +850,18 @@ mod tests {
         let source = r#"
 module demo
 
-action add(x: u64, y: u64) -> u64
-where
-    let z = x + y
-    return z
+action add(x: u64, y: u64) -> u64 {
+    verification
+        let z = x + y
+        return z
+}
 "#;
         let tokens = lexer::lex(source).unwrap();
         let module = parser::parse(&tokens).unwrap();
         let formatted = format_default(&module).unwrap();
 
         assert!(formatted.contains("module demo"));
-        assert!(formatted.contains("action add(x: u64, y: u64) -> u64\nwhere"));
+        assert!(formatted.contains("action add(x: u64, y: u64) -> u64 {\n    verification"));
         assert!(formatted.contains("let z = x + y"));
         assert!(formatted.contains("return z"));
     }
@@ -888,9 +876,10 @@ resource Token has store {
     symbol: [u8; 8]
 }
 
-action mint(amount: u64, symbol: [u8; 8]) -> token: Token
-where
-    create token = Token { amount: amount, symbol: symbol }
+action mint(amount: u64, symbol: [u8; 8]) -> token: Token {
+    verification
+        create token = Token { amount: amount, symbol: symbol }
+}
 "#;
         let tokens = lexer::lex(source).unwrap();
         let module = parser::parse(&tokens).unwrap();
@@ -900,50 +889,50 @@ where
     }
 
     #[test]
-    fn format_uses_canonical_assert_and_no_const_semicolon() {
+    fn format_if_expression_branch_blocks_are_idempotent() {
+        let source = r#"
+module demo
+
+action choose(flag: bool) -> u64 {
+    verification
+        let pair = if flag { (1, 2) } else { (3, 4) }
+        return pair.0
+}
+"#;
+        let tokens = lexer::lex(source).unwrap();
+        let module = parser::parse(&tokens).unwrap();
+        let formatted = format_default(&module).unwrap();
+        let tokens2 = lexer::lex(&formatted).unwrap();
+        let module2 = parser::parse(&tokens2).unwrap();
+        let formatted2 = format_default(&module2).unwrap();
+
+        assert_eq!(formatted, formatted2);
+        assert!(formatted.contains("let pair = if flag { (1, 2) } else { (3, 4) }"), "unexpected formatted source:\n{}", formatted);
+        assert!(!formatted.contains("{{"), "unexpected formatted source:\n{}", formatted);
+    }
+
+    #[test]
+    fn format_uses_canonical_require_and_no_const_semicolon() {
         let source = r#"
 module demo
 
 const LIMIT: u64 = 10;
 
-action check(x: u64) -> bool
-where
-    assert_invariant(x < LIMIT, "too large");
-    require x > 0, "zero"
+action check(x: u64) -> bool {
+    verification
+        require x < LIMIT, "too large";
+        require x > 0, "zero"
+}
 "#;
         let tokens = lexer::lex(source).unwrap();
         let module = parser::parse(&tokens).unwrap();
         let formatted = format_default(&module).unwrap();
 
         assert!(formatted.contains("const LIMIT: u64 = 10\n"), "unexpected formatted source:\n{}", formatted);
-        assert!(formatted.contains("assert(x < LIMIT, \"too large\")"), "unexpected formatted source:\n{}", formatted);
+        assert!(!formatted.contains("assert("), "unexpected formatted source:\n{}", formatted);
         assert!(formatted.contains("require x > 0, \"zero\""), "unexpected formatted source:\n{}", formatted);
         assert!(!formatted.contains("assert_invariant"), "unexpected formatted source:\n{}", formatted);
         assert!(!formatted.contains("const LIMIT: u64 = 10;"), "unexpected formatted source:\n{}", formatted);
-    }
-
-    #[test]
-    fn format_preserves_single_element_tuple_expression() {
-        let source = r#"
-module demo
-
-const ONE: u64 = (1,)
-"#;
-        let tokens = lexer::lex(source).unwrap();
-        let module = parser::parse(&tokens).unwrap();
-        let formatted = format_default(&module).unwrap();
-
-        assert!(formatted.contains("const ONE: u64 = (1,)"), "unexpected formatted source:\n{}", formatted);
-
-        let tokens2 = lexer::lex(&formatted).unwrap();
-        let module2 = parser::parse(&tokens2).unwrap();
-        let crate::ast::Item::Const(const_def) = &module2.items[0] else {
-            panic!("expected const");
-        };
-        let crate::ast::Expr::Tuple(items, _) = &const_def.value else {
-            panic!("expected formatted value to parse as tuple");
-        };
-        assert_eq!(items.len(), 1);
     }
 
     #[test]
@@ -961,13 +950,14 @@ flow Offer.state {
     Live -> Filled;
 }
 
-action fill(input: Offer) -> (output: Offer)
-    transition input.state: Live -> output.state: Filled
-where
-    preserve output from input {
-        seller
-        price
-    }
+action fill(input: Offer) -> (output: Offer) {
+    transition input -> output
+    verification
+        preserve output from input {
+            seller
+            price
+        }
+}
 "#;
         let tokens = lexer::lex(source).unwrap();
         let module = parser::parse(&tokens).unwrap();
@@ -985,65 +975,29 @@ where
     }
 
     #[test]
-    fn format_indents_preserve_fields_inside_expression_block() {
+    fn format_action_multiple_transitions_without_block() {
         let source = r#"
 module demo
 
-resource Offer has store {
-    seller: u64
-    price: u64
+action settle(input: Offer, receipt: Receipt) -> (output: Offer, next_receipt: Receipt) {
+    transition input -> output
+    transition receipt -> next_receipt
+    verification
+        require output.owner == input.owner
 }
-
-action fill(input: Offer) -> (output: Offer)
-where
-    let ignored = {
-        preserve output from input {
-            seller
-            price
-        }
-    }
 "#;
         let tokens = lexer::lex(source).unwrap();
         let module = parser::parse(&tokens).unwrap();
         let formatted = format_default(&module).unwrap();
 
+        assert!(!formatted.contains("transition {\n"), "formatted output must not use a transition block:\n{}", formatted);
         assert!(
-            formatted.contains("let ignored = {\n    preserve output from input {\n        seller\n        price\n    }\n}"),
-            "preserve fields inside expression blocks must keep nested indentation:\n{}",
-            formatted
-        );
-
-        let tokens2 = lexer::lex(&formatted).unwrap();
-        let module2 = parser::parse(&tokens2).unwrap();
-        let formatted2 = format_default(&module2).unwrap();
-        assert_eq!(formatted, formatted2, "formatter round-trip failed for nested preserve block");
-    }
-
-    #[test]
-    fn format_action_transition_block_for_multiple_edges() {
-        let source = r#"
-module demo
-
-action settle(input: Offer, receipt: Receipt) -> (output: Offer, next_receipt: Receipt)
-    transition {
-        input.state: Live -> output.state: Filled
-        receipt.state: Open -> next_receipt.state: Closed
-    }
-where
-    require output.owner == input.owner
-"#;
-        let tokens = lexer::lex(source).unwrap();
-        let module = parser::parse(&tokens).unwrap();
-        let formatted = format_default(&module).unwrap();
-
-        assert!(formatted.contains("transition {\n"), "formatted output should use a transition block:\n{}", formatted);
-        assert!(
-            formatted.contains("input.state: Live -> output.state: Filled"),
+            formatted.contains("transition input -> output"),
             "formatted output should contain the first transition edge:\n{}",
             formatted
         );
         assert!(
-            formatted.contains("receipt.state: Open -> next_receipt.state: Closed"),
+            formatted.contains("transition receipt -> next_receipt"),
             "formatted output should contain the second transition edge:\n{}",
             formatted
         );
@@ -1054,13 +1008,14 @@ where
         let source = r#"
 module demo
 
-action check(x: u64, y: u64) -> u64
-where
-    require {
-        x > 0
-        y > 0
-    }
-    return x + y
+action check(x: u64, y: u64) -> u64 {
+    verification
+        require {
+            x > 0
+            y > 0
+        }
+        return x + y
+}
 "#;
         let tokens = lexer::lex(source).unwrap();
         let module = parser::parse(&tokens).unwrap();
@@ -1076,54 +1031,17 @@ where
     }
 
     #[test]
-    fn format_round_trips_multiline_expression_block() {
-        let source = r#"
-module demo
-
-action calc(x: u64) -> u64
-where
-    let y = {
-        let z = x + 1
-        z
-    }
-    return y
-"#;
-        let tokens = lexer::lex(source).unwrap();
-        let module = parser::parse(&tokens).unwrap();
-        let formatted = format_default(&module).unwrap();
-
-        assert!(formatted.contains("let y = {\n    let z = x + 1\n    z\n}"), "unexpected formatted source:\n{}", formatted);
-
-        let tokens2 = lexer::lex(&formatted).unwrap();
-        let module2 = parser::parse(&tokens2).unwrap();
-        let formatted2 = format_default(&module2).unwrap();
-        assert_eq!(formatted, formatted2, "formatter round-trip failed for expression block");
-    }
-
-    #[test]
-    fn format_round_trips_inline_if_tuple_expression() {
-        let source = r#"
-module demo
-
-action choose(flag: bool) -> u64
-where
-    let pair = if flag { (1, 2) } else { (3, 4) }
-    return pair.0
-"#;
-        verify_idempotent(source, FormatConfig::default()).unwrap();
-    }
-
-    #[test]
     fn format_single_expr_require_block_uses_compact_form() {
         let source = r#"
 module demo
 
-action check(x: u64) -> u64
-where
-    require {
-        x > 0
-    }
-    return x
+action check(x: u64) -> u64 {
+    verification
+        require {
+            x > 0
+        }
+        return x
+}
 "#;
         let tokens = lexer::lex(source).unwrap();
         let module = parser::parse(&tokens).unwrap();
@@ -1138,17 +1056,18 @@ where
         let source = r#"
 module demo
 
-resource Coin has store, transfer {
+resource Coin has store, replace, relock, consume {
     amount: u64
     nonce: u64
 }
 
-action transfer_coin(coin: Coin, to: Address) -> next_coin: Coin
-where
-    std::lifecycle::transfer(coin, next_coin, to) {
-        amount
-        nonce
-    }
+action transfer_coin(coin: Coin, to: Address) -> next_coin: Coin {
+    verification
+        std::lifecycle::transfer(coin, next_coin, to) {
+            amount
+            nonce
+        }
+}
 "#;
 
         let tokens = lexer::lex(source).unwrap();

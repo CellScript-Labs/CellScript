@@ -45,6 +45,42 @@ function activate(context) {
         await runCompilerReport(document, output, status, "constraints");
       }
     }),
+    vscode.commands.registerCommand("cellscript.showAbi", async () => {
+      const document = activeCellScriptDocument();
+      if (document) {
+        await runAbiReport(document, output, status);
+      }
+    }),
+    vscode.commands.registerCommand("cellscript.showActionBuildPlan", async () => {
+      const document = activeCellScriptDocument();
+      if (document) {
+        await runActionBuildPlan(document, output, status);
+      }
+    }),
+    vscode.commands.registerCommand("cellscript.generateTypescriptBuilder", async () => {
+      const document = activeCellScriptDocument();
+      if (document) {
+        await runGenerateTypescriptBuilder(document, output, status);
+      }
+    }),
+    vscode.commands.registerCommand("cellscript.verifyPackage", async () => {
+      const document = activeCellScriptDocument();
+      if (document) {
+        await runPackageVerify(document, output, status);
+      }
+    }),
+    vscode.commands.registerCommand("cellscript.verifyRegistry", async () => {
+      const document = activeCellScriptDocument();
+      if (document) {
+        await runRegistryVerify(document, output, status, false);
+      }
+    }),
+    vscode.commands.registerCommand("cellscript.verifyLiveRegistry", async () => {
+      const document = activeCellScriptDocument();
+      if (document) {
+        await runRegistryVerify(document, output, status, true);
+      }
+    }),
     vscode.commands.registerCommand("cellscript.showBuilderAssumptions", async () => {
       const document = activeCellScriptDocument();
       if (document) {
@@ -162,9 +198,11 @@ function resolveServerPath(config, output) {
       const cwd = workspaceFolder.uri.fsPath;
       const cargoToml = findCargoWorkspace(cwd);
       if (cargoToml) {
+        const manifestPath = path.join(cargoToml, "Cargo.toml");
+        const args = ["run", "-q", "--manifest-path", manifestPath, "-p", "cellscript", "--"];
         try {
-          cp.execFileSync("cargo", ["run", "-q", "-p", "cellscript", "--", "--version"], { cwd: cargoToml, timeout: 15000 });
-          return { command: "cargo", args: ["run", "-q", "-p", "cellscript", "--"], cwd: cargoToml };
+          cp.execFileSync("cargo", [...args, "--version"], { cwd: cargoToml, timeout: 15000 });
+          return { command: "cargo", args, cwd: cargoToml };
         } catch {
           // Fall through.
         }
@@ -213,8 +251,12 @@ async function resolveCompilerCommand(document) {
   const workspaceFolder = vscode.workspace.getWorkspaceFolder(document.uri);
   const cwd = workspaceFolder ? workspaceFolder.uri.fsPath : path.dirname(document.uri.fsPath);
   const cargoToml = findCargoWorkspace(cwd);
-  if (cargoToml && (await canExecute("cargo", ["run", "-q", "-p", "cellscript", "--", "--version"], cargoToml, options))) {
-    return { command: "cargo", args: ["run", "-q", "-p", "cellscript", "--"], cwd: cargoToml, options };
+  if (cargoToml) {
+    const manifestPath = path.join(cargoToml, "Cargo.toml");
+    const args = ["run", "-q", "--manifest-path", manifestPath, "-p", "cellscript", "--"];
+    if (await canExecute("cargo", [...args, "--version"], cargoToml, options)) {
+      return { command: "cargo", args, cwd: cargoToml, options };
+    }
   }
 
   return null;
@@ -251,6 +293,49 @@ function runCommand(command, args, cwd, options) {
   });
 }
 
+async function runSingleCellcCommand(document, output, status, plan) {
+  const command = await resolveCompilerCommand(document);
+  if (!command) {
+    vscode.window.showErrorMessage("CellScript compiler not found. Configure cellscript.compilerPath or install cellc.");
+    return;
+  }
+
+  const cwd = plan.cwd || command.cwd;
+  updateStatus(status, "running", plan.source);
+  const result = await runCommand(command.command, [...command.args, ...plan.args], cwd, command.options);
+
+  output.clear();
+  output.appendLine(`[cellscript] ${plan.source}`);
+  output.appendLine(`$ ${command.command} ${[...command.args, ...plan.args].join(" ")}`);
+  if (cwd) {
+    output.appendLine(`cwd: ${cwd}`);
+  }
+  if (plan.input) {
+    output.appendLine(`input: ${plan.input}`);
+  }
+  if (plan.outputPath) {
+    output.appendLine(`output: ${plan.outputPath}`);
+  }
+  output.appendLine("");
+  if (result.stdout.trim()) {
+    output.appendLine(result.stdout.trimEnd());
+  }
+  if (result.stderr.trim()) {
+    output.appendLine(result.stderr.trimEnd());
+  }
+  output.show(true);
+
+  if (result.code === 0) {
+    updateStatus(status, "ok", plan.source);
+    if (plan.successMessage) {
+      vscode.window.showInformationMessage(plan.successMessage);
+    }
+  } else {
+    updateStatus(status, "error", plan.source);
+    vscode.window.showErrorMessage(`${plan.errorMessage || plan.source} failed. See the CellScript output channel.`);
+  }
+}
+
 async function runCompilerReport(document, output, status, kind) {
   const command = await resolveCompilerCommand(document);
   if (!command) {
@@ -279,6 +364,219 @@ async function runCompilerReport(document, output, status, kind) {
   } else {
     updateStatus(status, "error", plan.source);
     vscode.window.showErrorMessage(`CellScript ${kind} failed. See the CellScript output channel.`);
+  }
+}
+
+async function runAbiReport(document, output, status) {
+  const input = packageInputOrDocument(document);
+  const entry = await selectMetadataEntry(document, output, status, input, {
+    source: "cellc metadata for ABI entry selection",
+    includeLocks: true,
+    placeHolder: "Select the action or lock entry for the witness ABI"
+  });
+  if (!entry) {
+    return;
+  }
+
+  const entryArgs = entry.kind === "lock" ? ["--lock", entry.name] : ["--action", entry.name];
+  await runSingleCellcCommand(document, output, status, {
+    source: "cellc abi",
+    args: ["abi", input, ...targetProfileArgs(document), ...entryArgs],
+    input,
+    errorMessage: "CellScript ABI report"
+  });
+}
+
+async function runActionBuildPlan(document, output, status) {
+  const input = packageInputOrDocument(document);
+  const entry = await selectMetadataEntry(document, output, status, input, {
+    source: "cellc metadata for action build selection",
+    includeLocks: false,
+    placeHolder: "Select the action for the build plan"
+  });
+  if (!entry) {
+    return;
+  }
+
+  await runSingleCellcCommand(document, output, status, {
+    source: "cellc action build",
+    args: ["action", "build", input, ...targetProfileArgs(document), "--action", entry.name, "--json"],
+    input,
+    errorMessage: "CellScript action build plan"
+  });
+}
+
+async function runGenerateTypescriptBuilder(document, output, status) {
+  const packageRoot = findPackageRootForDocument(document);
+  const cwd = packageRoot || undefined;
+  const input = packageRoot ? "." : document.uri.fsPath;
+  const outputPath = builderOutputDir(document, packageRoot);
+  const args = [
+    "gen-builder",
+    input,
+    "--target",
+    "typescript",
+    "--output",
+    outputPath,
+    "--target-profile",
+    "ckb",
+    "--json"
+  ];
+
+  if (packageRoot) {
+    const lockfilePath = path.join(packageRoot, "Cell.lock");
+    const deployedPath = path.join(packageRoot, "Deployed.toml");
+    if (fs.existsSync(lockfilePath)) {
+      args.push("--lockfile", lockfilePath);
+      if (fs.existsSync(deployedPath)) {
+        args.push("--deployed", deployedPath);
+        const network = deploymentNetwork(document);
+        if (network) {
+          args.push("--deployment-network", network);
+        }
+      }
+    }
+  }
+
+  await runSingleCellcCommand(document, output, status, {
+    source: "cellc gen-builder",
+    args,
+    cwd,
+    input: packageRoot || document.uri.fsPath,
+    outputPath,
+    successMessage: `CellScript TypeScript builder generated at ${outputPath}`,
+    errorMessage: "CellScript TypeScript builder generation"
+  });
+}
+
+async function runPackageVerify(document, output, status) {
+  const packageRoot = requirePackageRoot(document);
+  if (!packageRoot) {
+    return;
+  }
+  await runSingleCellcCommand(document, output, status, {
+    source: "cellc package verify",
+    args: ["package", "verify", "--json"],
+    cwd: packageRoot,
+    input: packageRoot,
+    errorMessage: "CellScript package verification"
+  });
+}
+
+async function runRegistryVerify(document, output, status, live) {
+  const packageRoot = requirePackageRoot(document);
+  if (!packageRoot) {
+    return;
+  }
+  const args = ["registry", "verify", "--json"];
+  if (live) {
+    args.push("--live");
+    const rpcUrl = ckbRpcUrl(document);
+    if (rpcUrl) {
+      args.push("--rpc-url", rpcUrl);
+    }
+    const network = deploymentNetwork(document);
+    if (network) {
+      args.push("--network", network);
+    }
+  }
+  if (registryRequirePublisherSignature(document)) {
+    args.push("--require-publisher-signature");
+  }
+  if (registryRequireAuditReport(document)) {
+    args.push("--require-audit-report");
+  }
+
+  await runSingleCellcCommand(document, output, status, {
+    source: live ? "cellc registry verify --live" : "cellc registry verify",
+    args,
+    cwd: packageRoot,
+    input: packageRoot,
+    errorMessage: live ? "CellScript live registry verification" : "CellScript registry verification"
+  });
+}
+
+async function selectMetadataEntry(document, output, status, input, options) {
+  const metadata = await loadMetadataForSelection(document, output, status, input, options.source);
+  if (!metadata) {
+    return null;
+  }
+
+  const entries = [];
+  for (const action of metadata.actions || []) {
+    entries.push({
+      label: `action: ${action.name}`,
+      description: `${(action.params || []).length} params`,
+      kind: "action",
+      name: action.name
+    });
+  }
+
+  if (options.includeLocks) {
+    for (const lock of metadata.locks || []) {
+      entries.push({
+        label: `lock: ${lock.name}`,
+        description: `${(lock.params || []).length} params`,
+        kind: "lock",
+        name: lock.name
+      });
+    }
+  }
+
+  if (entries.length === 0) {
+    vscode.window.showErrorMessage(options.includeLocks ? "No CellScript action or lock entries found." : "No CellScript actions found.");
+    return null;
+  }
+
+  if (entries.length === 1) {
+    return entries[0];
+  }
+
+  return vscode.window.showQuickPick(entries, {
+    placeHolder: options.placeHolder,
+    matchOnDescription: true
+  });
+}
+
+async function loadMetadataForSelection(document, output, status, input, source) {
+  const command = await resolveCompilerCommand(document);
+  if (!command) {
+    vscode.window.showErrorMessage("CellScript compiler not found. Configure cellscript.compilerPath or install cellc.");
+    return null;
+  }
+
+  const args = ["metadata", input, ...targetProfileArgs(document)];
+  updateStatus(status, "running", source);
+  const result = await runCommand(command.command, [...command.args, ...args], command.cwd, command.options);
+  if (result.code !== 0) {
+    output.clear();
+    output.appendLine(`[cellscript] ${source}`);
+    output.appendLine(`$ ${command.command} ${[...command.args, ...args].join(" ")}`);
+    output.appendLine("");
+    if (result.stdout.trim()) {
+      output.appendLine(result.stdout.trimEnd());
+    }
+    if (result.stderr.trim()) {
+      output.appendLine(result.stderr.trimEnd());
+    }
+    output.show(true);
+    updateStatus(status, "error", source);
+    vscode.window.showErrorMessage("CellScript metadata entry selection failed. See the CellScript output channel.");
+    return null;
+  }
+
+  try {
+    updateStatus(status, "ok", source);
+    return JSON.parse(result.stdout);
+  } catch (error) {
+    output.clear();
+    output.appendLine(`[cellscript] ${source}`);
+    output.appendLine("Failed to parse metadata JSON.");
+    output.appendLine(String(error));
+    output.show(true);
+    updateStatus(status, "error", source);
+    vscode.window.showErrorMessage("CellScript metadata JSON could not be parsed. See the CellScript output channel.");
+    return null;
   }
 }
 
@@ -397,6 +695,79 @@ function buildReportPlan(document, kind, cwd) {
     outputPath,
     source: "cellc compile"
   };
+}
+
+function packageInputOrDocument(document) {
+  return findPackageRootForDocument(document) || document.uri.fsPath;
+}
+
+function findPackageRootForDocument(document) {
+  return findPackageRoot(path.dirname(document.uri.fsPath));
+}
+
+function requirePackageRoot(document) {
+  const packageRoot = findPackageRootForDocument(document);
+  if (!packageRoot) {
+    vscode.window.showErrorMessage("CellScript package root not found. Open a .cell file inside a package whose Cell.toml has [package].");
+    return null;
+  }
+  return packageRoot;
+}
+
+function findPackageRoot(startDir) {
+  let current = startDir;
+  while (current && current !== path.dirname(current)) {
+    const manifestPath = path.join(current, "Cell.toml");
+    if (fs.existsSync(manifestPath) && isPackageManifest(manifestPath)) {
+      return current;
+    }
+    current = path.dirname(current);
+  }
+  return null;
+}
+
+function isPackageManifest(manifestPath) {
+  try {
+    const manifest = fs.readFileSync(manifestPath, "utf8");
+    return /^\s*\[package\]\s*$/m.test(manifest) && /^\s*name\s*=/m.test(manifest);
+  } catch {
+    return false;
+  }
+}
+
+function builderOutputDir(document, packageRoot) {
+  const config = vscode.workspace.getConfiguration("cellscript", document.uri);
+  const configured = config.get("builderOutputDir", "target/cellscript-builder/typescript");
+  const outputDir = configured && configured.trim() ? configured.trim() : "target/cellscript-builder/typescript";
+  if (path.isAbsolute(outputDir)) {
+    return outputDir;
+  }
+
+  const workspaceFolder = vscode.workspace.getWorkspaceFolder(document.uri);
+  const baseDir = packageRoot || workspaceFolder?.uri.fsPath || path.dirname(document.uri.fsPath);
+  return path.join(baseDir, outputDir);
+}
+
+function ckbRpcUrl(document) {
+  const config = vscode.workspace.getConfiguration("cellscript", document.uri);
+  const value = config.get("ckbRpcUrl", "");
+  return value && value.trim() ? value.trim() : "";
+}
+
+function deploymentNetwork(document) {
+  const config = vscode.workspace.getConfiguration("cellscript", document.uri);
+  const value = config.get("deploymentNetwork", "");
+  return value && value.trim() ? value.trim() : "";
+}
+
+function registryRequirePublisherSignature(document) {
+  const config = vscode.workspace.getConfiguration("cellscript", document.uri);
+  return config.get("registryRequirePublisherSignature", false) === true;
+}
+
+function registryRequireAuditReport(document) {
+  const config = vscode.workspace.getConfiguration("cellscript", document.uri);
+  return config.get("registryRequireAuditReport", false) === true;
 }
 
 function compilerTarget(document) {

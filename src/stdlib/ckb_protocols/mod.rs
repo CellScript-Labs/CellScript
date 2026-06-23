@@ -5,6 +5,7 @@
 
 pub mod acp;
 pub mod cheque;
+pub mod dao;
 pub mod htlc;
 pub mod sudt;
 pub mod type_id;
@@ -41,7 +42,7 @@ pub struct ProtocolFunction {
 
 /// All CKB stdlib protocol modules.
 pub fn ckb_stdlib_modules() -> Vec<CkbStdlibModule> {
-    vec![sudt::module(), xudt::module(), type_id::module(), htlc::module(), cheque::module(), acp::module()]
+    vec![sudt::module(), xudt::module(), dao::module(), type_id::module(), htlc::module(), cheque::module(), acp::module()]
 }
 
 /// All CKB stdlib protocol functions.
@@ -49,6 +50,7 @@ pub fn ckb_stdlib_functions() -> Vec<ProtocolFunction> {
     let mut functions = Vec::new();
     functions.extend(sudt::functions());
     functions.extend(xudt::functions());
+    functions.extend(dao::functions());
     functions.extend(type_id::functions());
     functions.extend(htlc::functions());
     functions.extend(cheque::functions());

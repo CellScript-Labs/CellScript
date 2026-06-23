@@ -309,7 +309,7 @@ novaseal/
   adapters/
 ```
 
-The exact directory tree is flexible; the requirement is that a developer can locate the typed intent, receipt meaning, fixture set, proof plan, audit bundle and remaining assumptions. If a wallet is expected to show a signing preimage, that preimage should be clear. If a builder is expected to preserve a payout mapping, that assumption should be named. If a profile is not production ready, the package should say so plainly.
+The exact directory tree is flexible; the requirement is that a developer can locate the typed intent, receipt meaning, fixture set, proof plan, audit bundle and remaining assumptions. If a wallet is expected to show a signing preimage, that preimage should be clear. If a builder is expected to preserve a payout mapping, that assumption should be named. If a profile is only source-package ready and still needs public/mainnet evidence, the package should say so plainly.
 
 CellScript fits this project because the package is not just a pile of scripts. It can carry schemas, fixtures, receipts and audit evidence beside the contract logic, which makes the work more reviewable.
 

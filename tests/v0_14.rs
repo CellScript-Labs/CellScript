@@ -1,15 +1,22 @@
-use cellscript::{compile, validate_compile_metadata, ArtifactFormat, CompileOptions};
+#[allow(dead_code)]
+#[path = "support/ckb_script_runner.rs"]
+mod ckb_script_runner;
+
+use cellscript::{
+    ckb_blake2b256, compile, strip_vm_abi_trailer, validate_compile_metadata, ArtifactFormat, CompileOptions, EntryWitnessArg,
+};
+use ckb_testtool::ckb_types::bytes::Bytes;
 
 #[test]
 fn v0_14_exposes_spawn_ipc_source_witness_time_capacity_metadata() {
     let source = r#"
 module cellscript::v0_14_surface
 
-resource Token has store, create, consume, replace, burn, relock, read_ref {
+resource Token has store {
     amount: u64,
 }
 
-resource Wallet has store, create, consume, replace, burn, relock, read_ref {
+resource Wallet has store {
     owner: Address,
 }
 
@@ -18,48 +25,53 @@ struct Proof {
     signature: Hash,
 }
 
-action delegate_verify(proof: Proof) -> u64
-where
-    let pid = spawn("secp256k1_verifier")
-    let status = wait(pid)
-    assert_invariant(status == 0, "delegate failed")
-    return pid
+action delegate_verify(proof: Proof) -> u64 {
+    verification
+        let pid = spawn("secp256k1_verifier")
+        let status = wait()
+        require status == 0, "delegate failed"
+        return pid
 
-action pipe_pipeline(value: u64) -> u64
-where
-    let fds = pipe()
-    let read_fd = fds.0
-    let write_fd = fds.1
-    pipe_write(write_fd, value)
-    let echoed = pipe_read(read_fd)
-    close(read_fd)
-    close(write_fd)
-    return echoed
+}
+action pipe_pipeline(value: u64) -> u64 {
+    verification
+        let fds = pipe()
+        let read_fd = fds.0
+        let write_fd = fds.1
+        pipe_write(write_fd, value)
+        let echoed = pipe_read(read_fd)
+        close(read_fd)
+        close(write_fd)
+        return echoed
 
-action capacity_and_time(amount: u64) -> output: Token
-where
-    require_maturity(100)
-    require_time(1714000000)
-    require_epoch_after(10, 0, 1)
-    require_epoch_relative(10, 0, 1)
-    let floor = occupied_capacity("Token")
-    assert_invariant(floor >= 0, "capacity floor visible")
-    create output = Token { amount }
+}
+action capacity_and_time(amount: u64) -> output: Token {
+    verification
+        require_maturity(100)
+        require_time(1714000000)
+        require_epoch_after(10, 0, 1)
+        require_epoch_relative(10, 0, 1)
+        let floor = occupied_capacity("Token")
+        require floor >= 0, "capacity floor visible"
+        create output = Token { amount }
 
+}
 lock owner_lock(wallet: protected Wallet, owner: lock_args Address, claimed_owner: witness Address) -> bool {
-    let view = source::group_input(0)
-    let sig = witness::lock(view)
-    let digest = env::sighash_all(view)
-    require owner == wallet.owner
-    require sig == digest
+    verification
+        let view = source::group_input(0)
+        let sig = witness::lock(view)
+        let digest = env::sighash_all(view)
+        require owner == wallet.owner
+        require sig == digest
 }
 
 lock output_witness_lock(wallet: protected Wallet, claimed_owner: witness Address) -> bool {
-    let input = source::input(0)
-    let output = source::group_output(0)
-    let input_type = witness::input_type(input)
-    let output_type = witness::output_type(output)
-    require input_type == output_type
+    verification
+        let input = source::input(0)
+        let output = source::group_output(0)
+        let input_type = witness::input_type(input)
+        let output_type = witness::output_type(output)
+        require input_type == output_type
 }
 "#;
 
@@ -124,16 +136,16 @@ lock output_witness_lock(wallet: protected Wallet, claimed_owner: witness Addres
     assert!(delegate_group.cell_dep_sources.contains(&"CellDep".to_string()));
     assert!(delegate_verify.verifier_obligations.iter().any(|obligation| {
         obligation.category == "spawn-target"
-            && obligation.feature.starts_with("spawn-target:CellDep#0@0x")
+            && obligation.feature == "spawn-target:CellDep#0"
             && obligation.status == "runtime-required"
             && obligation.detail.contains("CellDep or DepGroup")
     }));
     assert!(delegate_verify.transaction_runtime_input_requirements.iter().any(|requirement| {
-        requirement.feature.starts_with("spawn-target:CellDep#0@0x")
+        requirement.feature == "spawn-target:CellDep#0"
             && requirement.component == "spawn-target-cell-dep"
             && requirement.status == "runtime-required"
             && requirement.source == "CellDep"
-            && requirement.binding.starts_with("spawn-target-tag:0x")
+            && requirement.binding == "spawn-target"
             && requirement.field.as_deref() == Some("script")
             && requirement.abi == "ckb-spawn-cell-dep-script-reference"
             && requirement.blocker_class.as_deref() == Some("spawn-target-cell-dep-gap")
@@ -185,15 +197,16 @@ fn v0_14_exposes_declarative_capacity_floor_metadata() {
     let source = r#"
 module cellscript::v0_14_capacity_floor
 
-resource Token has store, create, consume, replace, burn, relock, read_ref
+resource Token has store
 with_capacity_floor(6100000000)
 {
     amount: u64,
 }
 
-action mint(amount: u64) -> output: Token
-where
-    create output = Token { amount }
+action mint(amount: u64) -> output: Token {
+    verification
+        create output = Token { amount }
+}
 "#;
 
     let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
@@ -251,7 +264,7 @@ where
         r#"
 module cellscript::bad_capacity_floor
 
-resource Token has store, create, consume, replace, burn, relock, read_ref
+resource Token has store
 with_capacity_floor(0)
 {
     amount: u64,
@@ -269,15 +282,16 @@ fn v0_14_exposes_type_id_create_output_plan_and_output_data_boundary() {
 module cellscript::v0_14_type_id
 
 #[type_id("cellscript::v0_14_type_id::Token:v1")]
-resource Token has store, create, consume, replace, burn, relock, read_ref
+resource Token has store
 with_default_hash_type(Type)
 {
     amount: u64,
 }
 
-action mint(amount: u64) -> output: Token
-where
-    create output = Token { amount }
+action mint(amount: u64) -> output: Token {
+    verification
+        create output = Token { amount }
+}
 "#;
 
     let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
@@ -335,15 +349,16 @@ fn v0_14_rejects_tampered_type_id_output_data_and_script_reference_metadata() {
 module cellscript::v0_14_type_id_tamper
 
 #[type_id("cellscript::v0_14_type_id_tamper::Token:v1")]
-resource Token has store, create, consume, replace, burn, relock, read_ref
+resource Token has store
 with_default_hash_type(Type)
 {
     amount: u64,
 }
 
-action mint(amount: u64) -> output: Token
-where
-    create output = Token { amount }
+action mint(amount: u64) -> output: Token {
+    verification
+        create output = Token { amount }
+}
 "#;
 
     let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
@@ -415,10 +430,11 @@ fn v0_14_rejects_tampered_spawn_script_reference_metadata() {
     let source = r#"
 module cellscript::v0_14_spawn_reference_tamper
 
-action delegate_verify() -> u64
-where
-    let pid = spawn("secp256k1_verifier")
-    return pid
+action delegate_verify() -> u64 {
+    verification
+        let pid = spawn("secp256k1_verifier")
+        return pid
+}
 "#;
 
     let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
@@ -462,13 +478,14 @@ fn v0_14_rejects_tampered_runtime_access_and_script_group_metadata() {
     let source = r#"
 module cellscript::v0_14_script_group_tamper
 
-resource Token has store, create, consume, replace, burn, relock, read_ref {
+resource Token has store {
     amount: u64,
 }
 
-action mint(amount: u64) -> output: Token
-where
-    create output = Token { amount }
+action mint(amount: u64) -> output: Token {
+    verification
+        create output = Token { amount }
+}
 "#;
 
     let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
@@ -505,10 +522,11 @@ fn v0_14_compiles_dynamic_blake2b_hash_helper() {
     let source = r#"
 module cellscript::blake2b
 
-action digest(input: Hash, expected: Hash) -> bool
-where
-    let actual = hash_blake2b(input)
-    return actual == expected
+action digest(input: Hash, expected: Hash) -> bool {
+    verification
+        let actual = hash_blake2b(input)
+        return actual == expected
+}
 "#;
 
     let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
@@ -538,14 +556,710 @@ where
 }
 
 #[test]
+fn v0_14_hash_data_packed_wide_fixed_struct_uses_variable_blake2b_without_code18() {
+    let source = r#"
+module cellscript::wide_packed_hash
+
+struct WideFixed {
+    left: Hash,
+    right: Hash,
+    nonce: u64,
+}
+
+action digest(value: WideFixed, expected: Hash) -> bool {
+    verification
+        let actual = ckb::hash_data_packed(value)
+        return actual == expected
+}
+"#;
+
+    let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
+    let asm = String::from_utf8(result.artifact_bytes.clone()).expect("assembly should be utf8");
+    assert!(asm.contains("__ckb_hash_blake2b_var"), "wide packed hash should use variable Blake2b helper:\n{}", asm);
+    assert!(!asm.contains("hash_data_packed currently reuses the 32-byte Blake2b helper"), "stale 32-byte trap remains:\n{}", asm);
+    assert!(!asm.contains("fixed-byte-comparison-unresolved"), "code-18 fail path remains:\n{}", asm);
+    assert!(!asm.contains("fail closed because hash_data_packed"), "hash_data_packed fail-closed path remains:\n{}", asm);
+    result.validate().unwrap();
+}
+
+#[test]
+fn v0_14_hash_data_packed_wide_fixed_struct_matches_ckb_vm_hash() {
+    let source = r#"
+module cellscript::wide_packed_hash_vm
+
+struct WideFixed {
+    left: Hash,
+    right: Hash,
+    nonce: u64,
+}
+
+action digest(value: WideFixed, expected: Hash) -> u64 {
+    verification
+        let actual = ckb::hash_data_packed(value)
+        require actual == expected
+        return 0
+}
+"#;
+    let left = [0x11u8; 32];
+    let right = [0x22u8; 32];
+    let nonce = 0x0102_0304_0506_0708u64;
+    let mut packed = Vec::new();
+    packed.extend_from_slice(&left);
+    packed.extend_from_slice(&right);
+    packed.extend_from_slice(&nonce.to_le_bytes());
+    let expected = ckb_blake2b256(&packed);
+
+    let result = compile(
+        source,
+        CompileOptions {
+            target: Some("riscv64-elf".to_string()),
+            target_profile: Some("ckb".to_string()),
+            ..CompileOptions::default()
+        },
+    )
+    .unwrap();
+    let action = result.metadata.actions.iter().find(|action| action.name == "digest").expect("digest action metadata");
+    let witness = action
+        .entry_witness_args(&[EntryWitnessArg::Bytes(packed), EntryWitnessArg::Hash(expected)])
+        .expect("entry witness should encode");
+    let elf = strip_vm_abi_trailer(&result.artifact_bytes).to_vec();
+    let mut fixture = ckb_script_runner::build_simple_fixture(Bytes::default(), 1, 1, true, None);
+    fixture.witnesses = vec![Bytes::from(witness)];
+
+    let execution = ckb_script_runner::execute_cellscript_script(&elf, &fixture);
+    assert_eq!(execution.exit_code, 0, "wide packed hash should match in CKB VM: {:?}", execution);
+}
+
+#[test]
+fn v0_14_hash_data_packed_multi_block_fixed_struct_matches_ckb_vm_hash() {
+    let source = r#"
+module cellscript::multi_block_packed_hash_vm
+
+struct MultiBlockFixed {
+    h0: Hash,
+    h1: Hash,
+    h2: Hash,
+    h3: Hash,
+    h4: Hash,
+    nonce: u64,
+}
+
+action digest(value: MultiBlockFixed, expected: Hash) -> u64 {
+    verification
+        let actual = ckb::hash_data_packed(value)
+        require actual == expected
+        return 0
+}
+"#;
+    let mut packed = Vec::new();
+    for byte in [0x10u8, 0x20, 0x30, 0x40, 0x50] {
+        packed.extend_from_slice(&[byte; 32]);
+    }
+    packed.extend_from_slice(&0x1112_1314_1516_1718u64.to_le_bytes());
+    let expected = ckb_blake2b256(&packed);
+
+    let result = compile(
+        source,
+        CompileOptions {
+            target: Some("riscv64-elf".to_string()),
+            target_profile: Some("ckb".to_string()),
+            ..CompileOptions::default()
+        },
+    )
+    .unwrap();
+    let action = result.metadata.actions.iter().find(|action| action.name == "digest").expect("digest action metadata");
+    let witness = action
+        .entry_witness_args(&[EntryWitnessArg::Bytes(packed), EntryWitnessArg::Hash(expected)])
+        .expect("entry witness should encode");
+    let elf = strip_vm_abi_trailer(&result.artifact_bytes).to_vec();
+    let mut fixture = ckb_script_runner::build_simple_fixture(Bytes::default(), 1, 1, true, None);
+    fixture.witnesses = vec![Bytes::from(witness)];
+
+    let execution = ckb_script_runner::execute_cellscript_script(&elf, &fixture);
+    assert_eq!(execution.exit_code, 0, "multi-block packed hash should match in CKB VM: {:?}", execution);
+}
+
+#[test]
+fn v0_14_hash_data_packed_three_block_fixed_struct_matches_ckb_vm_hash() {
+    let source = r#"
+module cellscript::three_block_packed_hash_vm
+
+struct ThreeBlockFixed {
+    h0: Hash,
+    h1: Hash,
+    h2: Hash,
+    h3: Hash,
+    h4: Hash,
+    h5: Hash,
+    h6: Hash,
+    h7: Hash,
+    nonce: u64,
+}
+
+action digest(value: ThreeBlockFixed, expected: Hash) -> u64 {
+    verification
+        let actual = ckb::hash_data_packed(value)
+        require actual == expected
+        return 0
+}
+"#;
+    let mut packed = Vec::new();
+    for byte in [0x10u8, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80] {
+        packed.extend_from_slice(&[byte; 32]);
+    }
+    packed.extend_from_slice(&0x2122_2324_2526_2728u64.to_le_bytes());
+    let expected = ckb_blake2b256(&packed);
+
+    let result = compile(
+        source,
+        CompileOptions {
+            target: Some("riscv64-elf".to_string()),
+            target_profile: Some("ckb".to_string()),
+            ..CompileOptions::default()
+        },
+    )
+    .unwrap();
+    let action = result.metadata.actions.iter().find(|action| action.name == "digest").expect("digest action metadata");
+    let witness = action
+        .entry_witness_args(&[EntryWitnessArg::Bytes(packed), EntryWitnessArg::Hash(expected)])
+        .expect("entry witness should encode");
+    let elf = strip_vm_abi_trailer(&result.artifact_bytes).to_vec();
+    let mut fixture = ckb_script_runner::build_simple_fixture(Bytes::default(), 1, 1, true, None);
+    fixture.witnesses = vec![Bytes::from(witness)];
+
+    let execution = ckb_script_runner::execute_cellscript_script(&elf, &fixture);
+    assert_eq!(execution.exit_code, 0, "three-block packed hash should match in CKB VM: {:?}", execution);
+}
+
+#[test]
+fn v0_14_hash_data_packed_matches_group_output_cell_data_hash_in_ckb_vm() {
+    let source = r#"
+module cellscript::packed_hash_output_binding_vm
+
+struct MultiBlockFixed {
+    h0: Hash,
+    h1: Hash,
+    h2: Hash,
+    h3: Hash,
+    h4: Hash,
+    nonce: u64,
+}
+
+action digest(value: MultiBlockFixed) -> u64 {
+    verification
+        let output = source::group_output(0)
+        require ckb::cell_data_hash(output) == ckb::hash_data_packed(value)
+        return 0
+}
+"#;
+    let mut packed = Vec::new();
+    for byte in [0x10u8, 0x20, 0x30, 0x40, 0x50] {
+        packed.extend_from_slice(&[byte; 32]);
+    }
+    packed.extend_from_slice(&0x1112_1314_1516_1718u64.to_le_bytes());
+
+    let result = compile(
+        source,
+        CompileOptions {
+            target: Some("riscv64-elf".to_string()),
+            target_profile: Some("ckb".to_string()),
+            ..CompileOptions::default()
+        },
+    )
+    .unwrap();
+    let action = result.metadata.actions.iter().find(|action| action.name == "digest").expect("digest action metadata");
+    let witness = action.entry_witness_args(&[EntryWitnessArg::Bytes(packed.clone())]).expect("entry witness should encode");
+    let elf = strip_vm_abi_trailer(&result.artifact_bytes).to_vec();
+    let mut fixture = ckb_script_runner::build_simple_fixture(Bytes::default(), 1, 1, true, None);
+    fixture.outputs[0].data = Bytes::from(packed);
+    fixture.witnesses = vec![Bytes::from(witness)];
+
+    let execution = ckb_script_runner::execute_cellscript_script(&elf, &fixture);
+    assert_eq!(execution.exit_code, 0, "packed hash should match group output data hash in CKB VM: {:?}", execution);
+}
+
+#[test]
+fn v0_14_hash_data_packed_nested_fixed_struct_uses_variable_blake2b_without_code18() {
+    let source = r#"
+module cellscript::nested_packed_hash
+
+struct InnerFixed {
+    left: Hash,
+    right: Hash,
+}
+
+struct OuterFixed {
+    tag: u8,
+    inner: InnerFixed,
+    nonce: u64,
+}
+
+action digest(inner: InnerFixed, expected: Hash) -> bool {
+    verification
+        let value = OuterFixed { tag: 7, inner: inner, nonce: 42 }
+        let actual = ckb::hash_data_packed(value)
+        return actual == expected
+}
+"#;
+
+    let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
+    let asm = String::from_utf8(result.artifact_bytes.clone()).expect("assembly should be utf8");
+    assert!(asm.contains("__ckb_hash_blake2b_var"), "nested packed hash should use variable Blake2b helper:\n{}", asm);
+    assert!(asm.contains("__cellscript_memcpy_fixed"), "nested fixed aggregate should use compact byte materialisation:\n{}", asm);
+    assert!(!asm.contains("field access .inner (unresolved)"), "nested field provenance was lost:\n{}", asm);
+    assert!(!asm.contains("fixed-byte-comparison-unresolved"), "code-18 fail path remains:\n{}", asm);
+    assert!(!asm.contains("fail closed because hash_data_packed"), "hash_data_packed fail-closed path remains:\n{}", asm);
+    result.validate().unwrap();
+}
+
+#[test]
+fn v0_14_hash_data_packed_nested_fixed_struct_matches_ckb_vm_hash() {
+    let source = r#"
+module cellscript::nested_packed_hash_vm
+
+struct InnerFixed {
+    left: Hash,
+    right: Hash,
+}
+
+struct OuterFixed {
+    tag: u8,
+    inner: InnerFixed,
+    nonce: u64,
+}
+
+action digest(inner: InnerFixed, expected: Hash) -> u64 {
+    verification
+        let value = OuterFixed { tag: 7, inner: inner, nonce: 42 }
+        let actual = ckb::hash_data_packed(value)
+        require actual == expected
+        return 0
+}
+"#;
+    let left = [0x33u8; 32];
+    let right = [0x44u8; 32];
+    let mut inner = Vec::new();
+    inner.extend_from_slice(&left);
+    inner.extend_from_slice(&right);
+    let mut packed = Vec::new();
+    packed.push(7);
+    packed.extend_from_slice(&inner);
+    packed.extend_from_slice(&42u64.to_le_bytes());
+    let expected = ckb_blake2b256(&packed);
+
+    let result = compile(
+        source,
+        CompileOptions {
+            target: Some("riscv64-elf".to_string()),
+            target_profile: Some("ckb".to_string()),
+            ..CompileOptions::default()
+        },
+    )
+    .unwrap();
+    let action = result.metadata.actions.iter().find(|action| action.name == "digest").expect("digest action metadata");
+    let witness = action
+        .entry_witness_args(&[EntryWitnessArg::Bytes(inner), EntryWitnessArg::Hash(expected)])
+        .expect("entry witness should encode");
+    let elf = strip_vm_abi_trailer(&result.artifact_bytes).to_vec();
+    let mut fixture = ckb_script_runner::build_simple_fixture(Bytes::default(), 1, 1, true, None);
+    fixture.witnesses = vec![Bytes::from(witness)];
+
+    let execution = ckb_script_runner::execute_cellscript_script(&elf, &fixture);
+    assert_eq!(execution.exit_code, 0, "nested packed hash should match in CKB VM: {:?}", execution);
+}
+
+#[test]
+fn v0_14_hash_data_packed_nested_parameter_struct_matches_ckb_vm_hash() {
+    let source = r#"
+module cellscript::nested_parameter_packed_hash_vm
+
+struct IntentCore {
+    action: u8,
+    subject: Hash,
+    old_nonce: u64,
+    new_nonce: u64,
+    payout_hash: Hash,
+}
+
+struct SignedIntent {
+    core: IntentCore,
+    canonical_hash: Hash,
+    expected_receipt_hash: Hash,
+}
+
+action digest(intent: SignedIntent, expected: Hash) -> u64 {
+    verification
+        let actual = ckb::hash_data_packed(intent)
+        require actual == expected
+        return 0
+}
+"#;
+    let subject = [0x55u8; 32];
+    let payout_hash = [0x66u8; 32];
+    let canonical_hash = [0x77u8; 32];
+    let expected_receipt_hash = [0x88u8; 32];
+    let mut packed = Vec::new();
+    packed.push(2);
+    packed.extend_from_slice(&subject);
+    packed.extend_from_slice(&10u64.to_le_bytes());
+    packed.extend_from_slice(&11u64.to_le_bytes());
+    packed.extend_from_slice(&payout_hash);
+    packed.extend_from_slice(&canonical_hash);
+    packed.extend_from_slice(&expected_receipt_hash);
+    let expected = ckb_blake2b256(&packed);
+
+    let result = compile(
+        source,
+        CompileOptions {
+            target: Some("riscv64-elf".to_string()),
+            target_profile: Some("ckb".to_string()),
+            ..CompileOptions::default()
+        },
+    )
+    .unwrap();
+    let action = result.metadata.actions.iter().find(|action| action.name == "digest").expect("digest action metadata");
+    let witness = action
+        .entry_witness_args(&[EntryWitnessArg::Bytes(packed), EntryWitnessArg::Hash(expected)])
+        .expect("entry witness should encode");
+    let elf = strip_vm_abi_trailer(&result.artifact_bytes).to_vec();
+    let mut fixture = ckb_script_runner::build_simple_fixture(Bytes::default(), 1, 1, true, None);
+    fixture.witnesses = vec![Bytes::from(witness)];
+
+    let execution = ckb_script_runner::execute_cellscript_script(&elf, &fixture);
+    assert_eq!(execution.exit_code, 0, "nested parameter packed hash should match in CKB VM: {:?}", execution);
+}
+
+#[test]
+fn v0_14_hash_data_packed_agreement_sized_nested_parameter_matches_ckb_vm_hash() {
+    let source = r#"
+module cellscript::agreement_sized_nested_packed_hash_vm
+
+struct AgreementIntentCore {
+    action: u8,
+    agreement_id: Hash,
+    terms_hash: Hash,
+    borrower_authority_hash: Hash,
+    lender_authority_hash: Hash,
+    old_status: u8,
+    new_status: u8,
+    old_nonce: u64,
+    new_nonce: u64,
+    terminal_amount: u64,
+    payout_commitment_hash: Hash,
+    expiry_timepoint: u64,
+}
+
+struct AgreementSignedIntent {
+    core: AgreementIntentCore,
+    canonical_envelope_hash: Hash,
+    expected_receipt_hash: Hash,
+}
+
+action digest(intent: AgreementSignedIntent, expected: Hash) -> u64 {
+    verification
+        let actual = ckb::hash_data_packed(intent)
+        require actual == expected
+        return 0
+}
+"#;
+    let mut packed = Vec::new();
+    packed.push(0);
+    for byte in [0x11u8, 0x22, 0x33, 0x44] {
+        packed.extend_from_slice(&[byte; 32]);
+    }
+    packed.push(0);
+    packed.push(1);
+    packed.extend_from_slice(&0u64.to_le_bytes());
+    packed.extend_from_slice(&1u64.to_le_bytes());
+    packed.extend_from_slice(&0x0102_0304_0506_0708u64.to_le_bytes());
+    packed.extend_from_slice(&[0x55; 32]);
+    packed.extend_from_slice(&0x1112_1314_1516_1718u64.to_le_bytes());
+    packed.extend_from_slice(&[0x66; 32]);
+    packed.extend_from_slice(&[0x77; 32]);
+    assert_eq!(packed.len(), 259);
+    let expected = ckb_blake2b256(&packed);
+
+    let result = compile(
+        source,
+        CompileOptions {
+            target: Some("riscv64-elf".to_string()),
+            target_profile: Some("ckb".to_string()),
+            ..CompileOptions::default()
+        },
+    )
+    .unwrap();
+    let action = result.metadata.actions.iter().find(|action| action.name == "digest").expect("digest action metadata");
+    let witness = action
+        .entry_witness_args(&[EntryWitnessArg::Bytes(packed), EntryWitnessArg::Hash(expected)])
+        .expect("entry witness should encode");
+    let elf = strip_vm_abi_trailer(&result.artifact_bytes).to_vec();
+    let mut fixture = ckb_script_runner::build_simple_fixture(Bytes::default(), 1, 1, true, None);
+    fixture.witnesses = vec![Bytes::from(witness)];
+
+    let execution = ckb_script_runner::execute_cellscript_script(&elf, &fixture);
+    assert_eq!(execution.exit_code, 0, "agreement-sized nested parameter packed hash should match in CKB VM: {:?}", execution);
+}
+
+#[test]
+fn v0_14_hash_data_packed_result_survives_later_source_hash_calls() {
+    let source = r#"
+module cellscript::packed_hash_lifetime_vm
+
+struct AgreementIntentCore {
+    action: u8,
+    agreement_id: Hash,
+    terms_hash: Hash,
+    borrower_authority_hash: Hash,
+    lender_authority_hash: Hash,
+    old_status: u8,
+    new_status: u8,
+    old_nonce: u64,
+    new_nonce: u64,
+    terminal_amount: u64,
+    payout_commitment_hash: Hash,
+    expiry_timepoint: u64,
+}
+
+struct AgreementSignedIntent {
+    core: AgreementIntentCore,
+    canonical_envelope_hash: Hash,
+    expected_receipt_hash: Hash,
+}
+
+struct LaterValue {
+    left: Hash,
+    right: Hash,
+    nonce: u64,
+}
+
+action digest(intent: AgreementSignedIntent, later: LaterValue, expected: Hash, output_expected: Hash) -> u64 {
+    verification
+        let actual = ckb::hash_data_packed(intent)
+        let later_hash = ckb::hash_data_packed(later)
+        require later_hash == output_expected
+        require ckb::cell_data_hash(source::group_output(0)) == output_expected
+        require actual == expected
+        return 0
+}
+"#;
+    let mut intent = Vec::new();
+    intent.push(0);
+    for byte in [0x11u8, 0x22, 0x33, 0x44] {
+        intent.extend_from_slice(&[byte; 32]);
+    }
+    intent.push(0);
+    intent.push(1);
+    intent.extend_from_slice(&0u64.to_le_bytes());
+    intent.extend_from_slice(&1u64.to_le_bytes());
+    intent.extend_from_slice(&0x0102_0304_0506_0708u64.to_le_bytes());
+    intent.extend_from_slice(&[0x55; 32]);
+    intent.extend_from_slice(&0x1112_1314_1516_1718u64.to_le_bytes());
+    intent.extend_from_slice(&[0x66; 32]);
+    intent.extend_from_slice(&[0x77; 32]);
+    assert_eq!(intent.len(), 259);
+    let expected = ckb_blake2b256(&intent);
+    let mut later = Vec::new();
+    later.extend_from_slice(&[0x88; 32]);
+    later.extend_from_slice(&[0x99; 32]);
+    later.extend_from_slice(&0x2122_2324_2526_2728u64.to_le_bytes());
+    let output_expected = ckb_blake2b256(&later);
+
+    let result = compile(
+        source,
+        CompileOptions {
+            target: Some("riscv64-elf".to_string()),
+            target_profile: Some("ckb".to_string()),
+            ..CompileOptions::default()
+        },
+    )
+    .unwrap();
+    let action = result.metadata.actions.iter().find(|action| action.name == "digest").expect("digest action metadata");
+    let witness = action
+        .entry_witness_args(&[
+            EntryWitnessArg::Bytes(intent),
+            EntryWitnessArg::Bytes(later.clone()),
+            EntryWitnessArg::Hash(expected),
+            EntryWitnessArg::Hash(output_expected),
+        ])
+        .expect("entry witness should encode");
+    let elf = strip_vm_abi_trailer(&result.artifact_bytes).to_vec();
+    let mut fixture = ckb_script_runner::build_simple_fixture(Bytes::default(), 1, 1, true, None);
+    fixture.outputs[0].data = Bytes::from(later);
+    fixture.witnesses = vec![Bytes::from(witness)];
+
+    let execution = ckb_script_runner::execute_cellscript_script(&elf, &fixture);
+    assert_eq!(execution.exit_code, 0, "packed hash result should survive later SourceView hash calls: {:?}", execution);
+}
+
+#[test]
+fn v0_14_hash_data_packed_signature_payload_fields_match_ckb_vm_hash() {
+    let source = r#"
+module cellscript::signature_payload_field_hash_vm
+
+struct SignaturePayload {
+    pubkey: [u8; 32],
+    signature: [u8; 64],
+}
+
+action digest(payload: SignaturePayload, expected_pubkey: Hash, expected_signature: Hash) -> u64 {
+    verification
+        require ckb::hash_data_packed(payload.pubkey) == expected_pubkey
+        require ckb::hash_data_packed(payload.signature) == expected_signature
+        return 0
+}
+"#;
+    let pubkey = [0x31u8; 32];
+    let signature = [0x62u8; 64];
+    let mut payload = Vec::new();
+    payload.extend_from_slice(&pubkey);
+    payload.extend_from_slice(&signature);
+    let expected_pubkey = ckb_blake2b256(&pubkey);
+    let expected_signature = ckb_blake2b256(&signature);
+
+    let result = compile(
+        source,
+        CompileOptions {
+            target: Some("riscv64-elf".to_string()),
+            target_profile: Some("ckb".to_string()),
+            ..CompileOptions::default()
+        },
+    )
+    .unwrap();
+    let action = result.metadata.actions.iter().find(|action| action.name == "digest").expect("digest action metadata");
+    let witness = action
+        .entry_witness_args(&[
+            EntryWitnessArg::Bytes(payload),
+            EntryWitnessArg::Hash(expected_pubkey),
+            EntryWitnessArg::Hash(expected_signature),
+        ])
+        .expect("entry witness should encode");
+    let elf = strip_vm_abi_trailer(&result.artifact_bytes).to_vec();
+    let mut fixture = ckb_script_runner::build_simple_fixture(Bytes::default(), 1, 1, true, None);
+    fixture.witnesses = vec![Bytes::from(witness)];
+
+    let execution = ckb_script_runner::execute_cellscript_script(&elf, &fixture);
+    assert_eq!(execution.exit_code, 0, "signature payload fields should materialise canonically in CKB VM: {:?}", execution);
+}
+
+#[test]
+fn v0_14_bip340_nested_witness_signature_fields_have_no_code18_materialisation_path() {
+    let source = r#"
+module cellscript::bip340_nested_witness_materialisation
+
+struct SignaturePayload {
+    pubkey: [u8; 32],
+    signature: [u8; 64],
+}
+
+struct SignatureEnvelope {
+    signed_intent_hash: Hash,
+    valid_sig: SignaturePayload,
+    wrong_sig: SignaturePayload,
+}
+
+action verify(witness envelope: SignatureEnvelope, witness use_wrong_signature: u8) -> u64 {
+    verification
+        if use_wrong_signature == 0 {
+            verifier::btc::bip340::require_signature(envelope.signed_intent_hash, envelope.valid_sig.pubkey, envelope.valid_sig.signature)
+        } else {
+            let wrong_sig = envelope.wrong_sig
+            verifier::btc::bip340::require_signature(envelope.signed_intent_hash, wrong_sig.pubkey, wrong_sig.signature)
+        }
+        return 0
+}
+"#;
+
+    let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
+    let asm = String::from_utf8(result.artifact_bytes.clone()).expect("assembly should be utf8");
+    assert!(asm.contains("__novaseal_bip340_require_signature"), "missing BIP340 runtime helper:\n{}", asm);
+    assert!(
+        asm.contains("bounds check SignatureEnvelope.signed_intent_hash required=32"),
+        "message hash was not materialised for BIP340:\n{}",
+        asm
+    );
+    assert!(
+        asm.contains("bounds check SignatureEnvelope.valid_sig.pubkey required=64"),
+        "valid pubkey was not materialised for BIP340:\n{}",
+        asm
+    );
+    assert!(
+        asm.contains("bounds check SignatureEnvelope.valid_sig.signature required=128"),
+        "valid signature was not materialised for BIP340:\n{}",
+        asm
+    );
+    assert!(
+        asm.contains("bounds check SignatureEnvelope.wrong_sig.pubkey required=160"),
+        "wrong-signature pubkey was not materialised for BIP340:\n{}",
+        asm
+    );
+    assert!(
+        asm.contains("bounds check SignatureEnvelope.wrong_sig.signature required=224"),
+        "wrong-signature bytes were not materialised for BIP340:\n{}",
+        asm
+    );
+    assert!(!asm.contains("fail closed because BIP340"), "BIP340 materialisation fail-closed path remains:\n{}", asm);
+    assert!(!asm.contains("li a0, 18"), "reachable code-18 trap remains in BIP340 nested witness materialisation:\n{}", asm);
+    assert!(!asm.contains("li a0, 59"), "BIP340 message materialisation trap remains:\n{}", asm);
+    assert!(!asm.contains("li a0, 60"), "BIP340 pubkey materialisation trap remains:\n{}", asm);
+    assert!(!asm.contains("li a0, 61"), "BIP340 signature materialisation trap remains:\n{}", asm);
+    result.validate().unwrap();
+}
+
+#[test]
+fn v0_14_compiles_hash_pair_helper() {
+    let source = r#"
+module cellscript::hash_pair
+
+action pair(left: Hash, right: Hash, expected: Hash) -> bool {
+    verification
+        let actual = hash_pair(left, right)
+        return actual == expected
+}
+"#;
+
+    let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
+    let asm = String::from_utf8(result.artifact_bytes.clone()).expect("assembly should be utf8");
+    assert!(asm.contains("__ckb_hash_pair"), "missing hash_pair helper:\n{}", asm);
+    assert!(asm.contains("hash_pair combines two 32-byte Hash inputs"), "helper should not be metadata-only:\n{}", asm);
+    assert!(asm.contains("xori t0, t0, 64"), "hash_pair should commit a 64-byte message length:\n{}", asm);
+    let action = result.metadata.actions.iter().find(|action| action.name == "pair").expect("pair action metadata");
+    assert!(
+        !action.fail_closed_runtime_features.contains(&"fixed-byte-comparison".to_string()),
+        "hash_pair result comparison should be verifier-coverable: {:?}",
+        action.fail_closed_runtime_features
+    );
+    assert!(result.metadata.runtime.ckb_runtime_features.iter().any(|feature| feature == "profile-hash-pair"));
+    assert!(result.metadata.runtime.ckb_runtime_features.iter().any(|feature| feature == "ckb-blake2b"));
+    assert!(result.metadata.runtime.ckb_runtime_accesses.iter().any(|access| {
+        access.operation == "hash-pair"
+            && access.syscall == "CKB_BLAKE2B"
+            && access.source == "Profile"
+            && access.binding == "hash_pair"
+    }));
+    result.validate().unwrap();
+
+    let elf = compile(
+        source,
+        CompileOptions {
+            target: Some("riscv64-elf".to_string()),
+            target_profile: Some("ckb".to_string()),
+            ..CompileOptions::default()
+        },
+    )
+    .unwrap();
+    assert!(!elf.artifact_bytes.is_empty(), "hash_pair helper should assemble to ELF");
+}
+
+#[test]
 fn v0_14_rejects_blake2b_non_hash_input() {
     let err = compile(
         r#"
 module cellscript::bad_blake2b
 
-action bad(input: u64) -> Hash
-where
-    return hash_blake2b(input)
+action bad(input: u64) -> Hash {
+    verification
+        return hash_blake2b(input)
+}
 "#,
         CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() },
     )
@@ -555,16 +1269,35 @@ where
 }
 
 #[test]
+fn v0_14_rejects_hash_pair_non_hash_input() {
+    let err = compile(
+        r#"
+module cellscript::bad_hash_pair
+
+action bad(input: u64) -> Hash {
+    verification
+        return hash_pair(Hash::zero(), input)
+}
+"#,
+        CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() },
+    )
+    .unwrap_err();
+
+    assert!(err.message.contains("hash_pair expects (Hash, Hash)"), "unexpected error: {}", err.message);
+}
+
+#[test]
 fn v0_14_rejects_spawn_ipc_fd_use_after_close() {
     let err = compile(
         r#"
 module cellscript::bad_fd
 
-action bad(value: u64) -> u64
-where
-    let (read_fd, write_fd) = pipe()
-    close(read_fd)
-    pipe_read(read_fd)
+action bad(value: u64) -> u64 {
+    verification
+        let (read_fd, write_fd) = pipe()
+        close(read_fd)
+        pipe_read(read_fd)
+}
 "#,
         CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() },
     )
@@ -579,12 +1312,13 @@ fn v0_14_rejects_spawn_ipc_fd_double_close() {
         r#"
 module cellscript::bad_fd
 
-action bad() -> u64
-where
-    let fds = pipe()
-    let read_fd = fds.0
-    close(read_fd)
-    close(read_fd)
+action bad() -> u64 {
+    verification
+        let fds = pipe()
+        let read_fd = fds.0
+        close(read_fd)
+        close(read_fd)
+}
 "#,
         CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() },
     )
@@ -599,13 +1333,14 @@ fn v0_14_rejects_spawn_ipc_fd_leak() {
         r#"
 module cellscript::bad_fd
 
-action bad(value: u64) -> u64
-where
-    let fds = pipe()
-    let read_fd = fds.0
-    let write_fd = fds.1
-    pipe_write(write_fd, value)
-    return pipe_read(read_fd)
+action bad(value: u64) -> u64 {
+    verification
+        let fds = pipe()
+        let read_fd = fds.0
+        let write_fd = fds.1
+        pipe_write(write_fd, value)
+        return pipe_read(read_fd)
+}
 "#,
         CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() },
     )
@@ -622,9 +1357,10 @@ module cellscript::static_spawn
 
 const VERIFY_TARGET: String = "secp256k1_verifier";
 
-action delegate() -> u64
-where
-    return spawn(VERIFY_TARGET)
+action delegate() -> u64 {
+    verification
+        return spawn(VERIFY_TARGET)
+}
 "#,
         CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() },
     )
@@ -635,33 +1371,16 @@ where
         r#"
 module cellscript::dynamic_spawn
 
-action delegate(target: String) -> u64
-where
-    return spawn(target)
+action delegate(target: String) -> u64 {
+    verification
+        return spawn(target)
+}
 "#,
         CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() },
     )
     .unwrap_err();
 
     assert!(err.message.contains("spawn target must be a static script reference"), "unexpected error: {}", err.message);
-}
-
-#[test]
-fn v0_14_wait_requires_child_pid() {
-    let err = compile(
-        r#"
-module cellscript::wait_pid
-
-action delegate() -> u64
-where
-    let pid = spawn("secp256k1_verifier")
-    return wait()
-"#,
-        CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() },
-    )
-    .unwrap_err();
-
-    assert!(err.message.contains("wait expects 1 argument"), "unexpected error: {}", err.message);
 }
 
 #[test]

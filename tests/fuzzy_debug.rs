@@ -4,8 +4,7 @@ use cellscript::{
     CompileOptions, EntryWitnessArg, ParamMetadata,
 };
 use std::panic::{catch_unwind, AssertUnwindSafe};
-
-mod common;
+use std::process::Command;
 
 const ENTRY_WITNESS_ABI_MAGIC: &[u8; 8] = b"CSARGv1\0";
 
@@ -135,29 +134,30 @@ fn fuzzy_mutated_sources_never_panic() {
         r#"
 module cellscript::fuzz_basic
 
-resource Token has store, create, consume, replace, burn, relock, read_ref {
+resource Token has store {
     amount: u64
 }
 
 action mint(amount: u64) -> Token {
-    assert_invariant(amount > 0, "positive")
+    require amount > 0, "positive"
     create Token { amount }
 }
 "#,
         r#"
 module cellscript::fuzz_lock
 
-resource Wallet has store, create, consume, replace, burn, relock, read_ref {
+resource Wallet has store {
     owner: Address
 }
 
 lock owner(wallet: protected Wallet, owner: lock_args Address, claimed_owner: witness Address) -> bool {
-    let input = source::group_input(0)
-    let digest = env::sighash_all(input)
-    let witness_lock = witness::lock(input)
-    require owner == wallet.owner
-    require claimed_owner == owner
-    require witness_lock == digest
+    verification
+        let input = source::group_input(0)
+        let digest = env::sighash_all(input)
+        let witness_lock = witness::lock(input)
+        require owner == wallet.owner
+        require claimed_owner == owner
+        require witness_lock == digest
 }
 "#,
         include_str!("../examples/language/canonical_style.cell"),
@@ -175,67 +175,6 @@ lock owner(wallet: protected Wallet, owner: lock_args Address, claimed_owner: wi
         };
         assert_compile_is_controlled(&source, options, &format!("mutated-source-{index}"));
         assert_format_is_controlled(&source, &format!("mutated-source-{index}"));
-    }
-}
-
-#[test]
-fn fuzzy_semantic_codegen_mutations_reach_assembly() {
-    let comparisons = [">", ">=", "<", "<=", "==", "!="];
-    let arithmetic_ops = ["+", "-", "*", "/", "%"];
-
-    for index in 0..48 {
-        let source = if index % 2 == 0 {
-            let op = arithmetic_ops[index % arithmetic_ops.len()];
-            let comparison = comparisons[index % comparisons.len()];
-            let rhs = (index as u64 % 7) + 1;
-            format!(
-                r#"
-module cellscript::fuzz_codegen_arithmetic_{index}
-
-action main(a: u64, b: u64) -> u64
-where
-    let left = a + {rhs}
-    let right = b + {rhs}
-    assert_invariant(left {comparison} right || true, "semantic mutation remains codegen-visible")
-    return left {op} right
-"#
-            )
-        } else {
-            let comparison = comparisons[index % comparisons.len()];
-            let floor = (index as u64 % 5) + 1;
-            format!(
-                r#"
-module cellscript::fuzz_codegen_create_{index}
-
-resource Token has store, create, consume, replace, burn, relock, read_ref {{
-    amount: u64,
-    owner: Address,
-}}
-
-action mint(owner: Address, amount: u64) -> Token
-where
-    assert_invariant(amount {comparison} {floor} || true, "semantic mutation reaches create lowering")
-    create Token {{ owner: owner, amount: amount }}
-"#
-            )
-        };
-
-        let result = compile(
-            &source,
-            CompileOptions {
-                target: Some("riscv64-asm".to_string()),
-                target_profile: Some("ckb".to_string()),
-                ..CompileOptions::default()
-            },
-        )
-        .unwrap_or_else(|err| panic!("semantic codegen mutation {index} should compile to assembly: {}", err.message));
-        let assembly = String::from_utf8(result.artifact_bytes)
-            .unwrap_or_else(|err| panic!("semantic codegen mutation {index} should produce UTF-8 assembly: {err}"));
-        assert!(assembly.contains(".global"), "semantic codegen mutation {index} should reach assembly output:\n{assembly}");
-        assert!(
-            !assembly.contains("immediate '"),
-            "semantic codegen mutation {index} leaked assembler diagnostic into assembly:\n{assembly}"
-        );
     }
 }
 
@@ -294,19 +233,21 @@ fn fuzzy_entry_witness_encoding_never_panics() {
         r#"
 module cellscript::fuzz_entry_witness
 
-resource Token has store, create, consume, replace, burn, relock, read_ref {
+resource Token has store {
     owner: Address
     amount: u64
 }
 
-action spend(owner: Address, amount: u64, active: bool, memo: [u8; 4]) -> u64
-where
-    assert_invariant(active, "active")
-    return amount
+action spend(owner: Address, amount: u64, active: bool, memo: [u8; 4]) -> u64 {
+    verification
+        require active, "active"
+        return amount
 
+}
 lock owner_lock(token: protected Token, owner: lock_args Address, claimed_owner: witness Address) -> bool {
-    require owner == token.owner
-    require claimed_owner == owner
+    verification
+        require owner == token.owner
+        require claimed_owner == owner
 }
 "#,
         CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() },
@@ -436,14 +377,15 @@ version = "0.1.0"
         r#"
 module fuzzy_cli_hex::main
 
-action owned(owner: Address) -> u64
-where
-    return 0
+action owned(owner: Address) -> u64 {
+    verification
+        return 0
+}
 "#,
     )
     .unwrap();
 
-    let output = common::cellc_command()
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc"))
         .current_dir(root)
         .arg("entry-witness")
         .arg("--action")

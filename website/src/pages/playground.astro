@@ -1,0 +1,920 @@
+---
+/**
+ * Playground page — the real CellScript IDE.
+ *
+ * Loads the prebuilt WASM compiler bundle and live-compiles the user's
+ * source to typed-transition metadata. Three-column layout:
+ *   - Left: editable source (textarea + highlight overlay)
+ *   - Middle: compile output (Metadata / Actions / Types / Errors tabs)
+ *   - Right: provenance rail (live module/actions/types summary)
+ *
+ * The hero pseudo-console links here with ?example=<id> to preload an
+ * example. Users can edit freely; compile fires 300ms after the last
+ * keystroke (debounced).
+ *
+ * Design constraints (RFC): no Monaco/CodeMirror dependency (textarea
+ * + overlay only), WASM <= 600KB gzip, no new keyframe animations.
+ */
+import "../styles/global.css";
+import { playgroundExamples, exampleFullSources } from "../data/site";
+import { translations } from "../i18n/translations";
+import NavRail from "../components/NavRail.astro";
+import { ClientRouter } from "astro:transitions";
+
+// The locale is resolved client-side from localStorage (see the inline
+// init script below), so the server renders the English fallback and
+// the client swaps strings at runtime via [data-i18n]. We render `en`
+// here only to satisfy Astro's SSR pass; the runtime i18n layer picks
+// up the stored/initial locale on load.
+const t = translations.en;
+const initialExample = playgroundExamples[0];
+const initialSource = exampleFullSources[initialExample.id] ?? "";
+const getPlaygroundExampleCopy = (id: string) =>
+  (t.playground.examples as Record<string, { title: string; summary: string }>)[id];
+const playgroundExampleMeta = playgroundExamples.map(({ id, label, file }) => ({ id, label, file }));
+---
+
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{t.playground.pageTitle}</title>
+    <link rel="icon" type="image/png" href={`${import.meta.env.BASE_URL}cellscript-logo.png`} />
+    <link rel="icon" type="image/png" media="(prefers-color-scheme: light)" href={`${import.meta.env.BASE_URL}cellscript-logo-light.png`} />
+    <link rel="icon" type="image/png" media="(prefers-color-scheme: dark)" href={`${import.meta.env.BASE_URL}cellscript-logo-dark.png`} />
+    <script is:inline>
+      (function () {
+        try {
+          var stored = localStorage.getItem("cellscript-theme");
+          var theme = stored || (window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+          document.documentElement.dataset.theme = theme;
+          var storedLocale = localStorage.getItem("cellscript-locale");
+          document.documentElement.dataset.locale = storedLocale === "zh" ? "zh" : "en";
+          document.documentElement.lang = document.documentElement.dataset.locale;
+          if (localStorage.getItem("cellscript-rail-collapsed") === "true") {
+            document.documentElement.dataset.railCollapsed = "true";
+          }
+        } catch (e) {}
+      })();
+    </script>
+    <ClientRouter />
+  </head>
+  <body class="playground-body">
+    <div class="pg-toolbar">
+      <span class="pg-toolbar-title">{t.playground.title}</span>
+      <div class="pg-toolbar-actions">
+        <label class="pg-example-select">
+          <span data-i18n="playground.exampleLabel">{t.playground.exampleLabel}</span>
+          <select data-example-select>
+            {playgroundExamples.map((ex) => (
+              <option value={ex.id} data-i18n={`playground.examples.${ex.id}.title`}>
+                {getPlaygroundExampleCopy(ex.id)?.title ?? ex.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button class="pg-action-btn pg-compile-btn" type="button" data-compile data-i18n-aria-label="playground.compileAria" aria-label={t.playground.compileAria}>
+          <span class="pg-compile-icon" aria-hidden="true">▶</span>
+          <span class="pg-compile-label" data-compile-label data-i18n="playground.compile">{t.playground.compile}</span>
+        </button>
+        <button class="pg-action-btn" type="button" data-export-cell data-i18n="playground.exportCell" data-i18n-aria-label="playground.exportAria" aria-label={t.playground.exportAria}>{t.playground.exportCell}</button>
+        <button class="pg-action-btn" type="button" data-share data-i18n="playground.share" data-i18n-aria-label="a11y.copyAria" aria-label={t.a11y.copyAria}>{t.playground.share}</button>
+      </div>
+    </div>
+
+    <div class="pg-notice" data-restored-notice hidden>
+      <span data-i18n="playground.restoredNotice">{t.playground.restoredNotice}</span>
+      <button class="pg-notice-dismiss" type="button" data-restored-dismiss data-i18n="playground.restoredDismiss">{t.playground.restoredDismiss}</button>
+    </div>
+
+    <aside class="pg-example-lesson" data-example-lesson aria-live="polite">
+      <span data-i18n="playground.lessonLabel">{t.playground.lessonLabel}</span>
+      <strong data-example-title data-i18n={`playground.examples.${initialExample.id}.title`}>
+        {getPlaygroundExampleCopy(initialExample.id)?.title ?? initialExample.label}
+      </strong>
+      <p data-example-summary data-i18n={`playground.examples.${initialExample.id}.summary`}>
+        {getPlaygroundExampleCopy(initialExample.id)?.summary}
+      </p>
+    </aside>
+
+    <main class="pg-main">
+      <!-- Left: source editor -->
+      <section class="pg-col pg-source" aria-label={t.playground.source} data-i18n-aria-label="playground.source">
+        <div class="pg-col-head">
+          <span data-i18n="playground.source">{t.playground.source}</span>
+        </div>
+        <div class="pg-editor" data-editor>
+          <div class="pg-gutter" aria-hidden="true" data-gutter></div>
+          <pre class="pg-highlight" aria-hidden="true" data-highlight></pre>
+          <textarea
+            class="pg-textarea"
+            data-textarea
+            spellcheck="false"
+            autocapitalize="off"
+            autocomplete="off"
+            autocorrect="off"
+            aria-label={t.playground.source}
+            data-i18n-aria-label="playground.source"
+          >{initialSource}</textarea>
+        </div>
+      </section>
+
+      <!-- Middle: compile output -->
+      <section class="pg-col pg-output" aria-label={t.playground.output} data-i18n-aria-label="playground.output">
+        <div class="pg-col-head pg-tabs" role="tablist">
+          <button class="pg-tab active" role="tab" id="pg-tab-metadata" aria-selected="true" aria-controls="pg-panel-metadata" data-output-tab="metadata">
+            <span data-i18n="playground.tabMetadata">{t.playground.tabMetadata}</span>
+          </button>
+          <button class="pg-tab" role="tab" id="pg-tab-actions" aria-selected="false" aria-controls="pg-panel-actions" data-output-tab="actions">
+            <span data-i18n="playground.tabActions">{t.playground.tabActions}</span>
+          </button>
+          <button class="pg-tab" role="tab" id="pg-tab-types" aria-selected="false" aria-controls="pg-panel-types" data-output-tab="types">
+            <span data-i18n="playground.tabTypes">{t.playground.tabTypes}</span>
+          </button>
+          <button class="pg-tab" role="tab" id="pg-tab-errors" aria-selected="false" aria-controls="pg-panel-errors" data-output-tab="errors">
+            <span data-i18n="playground.tabErrors">{t.playground.tabErrors}</span>
+            <span class="pg-tab-badge" data-error-badge aria-label={t.playground.noErrorsBadge} hidden>0</span>
+          </button>
+        </div>
+        <div class="pg-output-body">
+          <div class="pg-output-panel active" id="pg-panel-metadata" role="tabpanel" aria-labelledby="pg-tab-metadata" data-output-panel="metadata"></div>
+          <div class="pg-output-panel" id="pg-panel-actions" role="tabpanel" aria-labelledby="pg-tab-actions" data-output-panel="actions" hidden></div>
+          <div class="pg-output-panel" id="pg-panel-types" role="tabpanel" aria-labelledby="pg-tab-types" data-output-panel="types" hidden></div>
+          <div class="pg-output-panel" id="pg-panel-errors" role="tabpanel" aria-labelledby="pg-tab-errors" data-output-panel="errors" hidden></div>
+          <div class="pg-loading" data-loading>
+            <span class="pg-loading-dot"></span>
+            <span data-i18n="playground.loading">{t.playground.loading}</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Right: provenance rail -->
+      <aside class="pg-col pg-rail" aria-label={t.playground.provenance} data-i18n-aria-label="playground.provenance">
+        <div class="pg-col-head">
+          <span data-i18n="playground.provenance">{t.playground.provenance}</span>
+        </div>
+        <div class="pg-rail-body" data-rail-body>
+          <div class="pg-rail-section" data-rail-view="loading">
+            <span class="pg-loading-dot"></span>
+            <span data-i18n="playground.loading">{t.playground.loading}</span>
+          </div>
+          <div class="pg-rail-section" data-rail-view="ready" hidden>
+            <dl class="pg-rail-facts">
+              <div class="pg-rail-fact">
+                <dt data-i18n="playground.module">{t.playground.module}</dt>
+                <dd class="substrate-value" data-rail-module></dd>
+              </div>
+              <div class="pg-rail-fact">
+                <dt data-i18n="playground.target">{t.playground.target}</dt>
+                <dd data-rail-target></dd>
+              </div>
+              <div class="pg-rail-fact">
+                <dt data-rail-size-label data-i18n="playground.size">{t.playground.size}</dt>
+                <dd class="substrate-value" data-rail-size></dd>
+              </div>
+            </dl>
+            <div class="pg-rail-group">
+              <span class="pg-rail-group-label" data-i18n="playground.actions">{t.playground.actions}</span>
+              <ul class="pg-rail-actions" data-rail-actions></ul>
+            </div>
+            <div class="pg-rail-group">
+              <span class="pg-rail-group-label" data-i18n="playground.types">{t.playground.types}</span>
+              <ul class="pg-rail-types" data-rail-types></ul>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </main>
+
+    <footer class="pg-statusbar">
+      <span class="pg-status" data-status>{t.playground.loading}</span>
+      <span class="pg-version" data-version></span>
+    </footer>
+
+    <script is:inline type="application/json" data-example-sources set:html={JSON.stringify(exampleFullSources)} />
+    <script is:inline type="application/json" data-example-meta set:html={JSON.stringify(playgroundExampleMeta)} />
+
+    <!-- Full i18n message table, embedded so the language toggle can
+         swap every playground string at runtime without a reload. The
+         NavRail's language toggle reads window.__CELLSCRIPT_I18N__. -->
+    <script is:inline define:vars={{ i18n: translations }}>
+      window.__CELLSCRIPT_I18N__ = i18n;
+      window.__CELLSCRIPT_DEFAULT_LOCALE__ = "en";
+    </script>
+
+    <script>
+      import { renderSource } from "../lib/highlight";
+
+      // Dynamic import of the WASM bundle. The module lives in public/wasm/
+      // (served as a static asset), so we use a runtime URL import rather
+      // than a static import that Rollup would try to bundle.
+      const wasmUrl = new URL("/wasm/cellscript_wasm.js", import.meta.url);
+      let compileMetadataJson: (source: string, target: string | null) => string;
+      let wasmVersion: () => string;
+      let wasmInit: () => Promise<unknown>;
+
+      // ---- Example sources (inline so no extra fetch needed) ----
+      const exampleSources: Record<string, string> = JSON.parse(
+        document.querySelector<HTMLScriptElement>("[data-example-sources]")?.textContent ?? "{}",
+      );
+      const exampleMeta: Array<{ id: string; label: string; file: string }> = JSON.parse(
+        document.querySelector<HTMLScriptElement>("[data-example-meta]")?.textContent ?? "[]",
+      );
+      const exampleFiles = new Map(exampleMeta.map((example) => [example.id, example.file]));
+      const exampleIds = new Set(exampleMeta.map((example) => example.id));
+      const i18nTable = (window as any).__CELLSCRIPT_I18N__ as any;
+      const defaultLocaleName = (window as any).__CELLSCRIPT_DEFAULT_LOCALE__ ?? "en";
+
+      // ---- i18n runtime layer (mirrors index.astro so the NavRail's
+      //      language toggle works live instead of forcing a reload) ----
+      const readLocale = () =>
+        document.documentElement.dataset.locale === "zh" ? "zh" : defaultLocaleName;
+
+      const getMessage = (path: string, locale = readLocale()) => {
+        return path.split(".").reduce((value: any, segment: string) => value?.[segment], i18nTable?.[locale]);
+      };
+
+      // Look up a playground.* string in the current locale.
+      const pg = (key: string): string => getMessage(`playground.${key}`, readLocale()) ?? "";
+      const fmt = (template: string, vars: Record<string, string>) =>
+        template.replace(/\{(\w+)\}/g, (_m, k: string) => vars[k] ?? "");
+
+      // ---- Elements ----
+      const textarea = document.querySelector<HTMLTextAreaElement>("[data-textarea]");
+      const highlight = document.querySelector<HTMLElement>("[data-highlight]");
+      const gutter = document.querySelector<HTMLElement>("[data-gutter]");
+      const loading = document.querySelector<HTMLElement>("[data-loading]");
+      const status = document.querySelector<HTMLElement>("[data-status]");
+      const versionEl = document.querySelector<HTMLElement>("[data-version]");
+      const exampleSelect = document.querySelector<HTMLSelectElement>("[data-example-select]");
+      const exampleTitle = document.querySelector<HTMLElement>("[data-example-title]");
+      const exampleSummary = document.querySelector<HTMLElement>("[data-example-summary]");
+      const shareBtn = document.querySelector<HTMLButtonElement>("[data-share]");
+      const exportBtn = document.querySelector<HTMLButtonElement>("[data-export-cell]");
+      const compileBtn = document.querySelector<HTMLButtonElement>("[data-compile]");
+      const compileLabel = document.querySelector<HTMLElement>("[data-compile-label]");
+      const restoredNotice = document.querySelector<HTMLElement>("[data-restored-notice]");
+      const restoredDismiss = document.querySelector<HTMLButtonElement>("[data-restored-dismiss]");
+      const railBody = document.querySelector<HTMLElement>("[data-rail-body]");
+      const railLoading = railBody?.querySelector<HTMLElement>('[data-rail-view="loading"]');
+      const railReady = railBody?.querySelector<HTMLElement>('[data-rail-view="ready"]');
+      const railModule = railBody?.querySelector<HTMLElement>("[data-rail-module]");
+      const railTarget = railBody?.querySelector<HTMLElement>("[data-rail-target]");
+      const railSize = railBody?.querySelector<HTMLElement>("[data-rail-size]");
+      const railSizeLabel = railBody?.querySelector<HTMLElement>("[data-rail-size-label]");
+      const railActions = railBody?.querySelector<HTMLElement>("[data-rail-actions]");
+      const railTypes = railBody?.querySelector<HTMLElement>("[data-rail-types]");
+      const errorBadge = document.querySelector<HTMLElement>("[data-error-badge]");
+      let currentExampleId: string | null = exampleSelect?.value ?? null;
+
+      const outputPanels = new Map(
+        Array.from(document.querySelectorAll<HTMLElement>("[data-output-panel]")).map((p) => [
+          p.dataset.outputPanel ?? "",
+          p,
+        ]),
+      );
+      const outputTabs = Array.from(document.querySelectorAll<HTMLButtonElement>("[data-output-tab]"));
+
+      const updateExampleLesson = (id: string | null) => {
+        currentExampleId = id && exampleIds.has(id) ? id : null;
+        const titleKey = currentExampleId
+          ? `playground.examples.${currentExampleId}.title`
+          : "playground.customExampleTitle";
+        const summaryKey = currentExampleId
+          ? `playground.examples.${currentExampleId}.summary`
+          : "playground.customExampleSummary";
+        if (exampleTitle) {
+          exampleTitle.dataset.i18n = titleKey;
+          exampleTitle.textContent = getMessage(titleKey, readLocale()) ?? "";
+        }
+        if (exampleSummary) {
+          exampleSummary.dataset.i18n = summaryKey;
+          exampleSummary.textContent = getMessage(summaryKey, readLocale()) ?? "";
+        }
+      };
+
+      // ---- Highlight overlay + line-number gutter sync ----
+      const updateHighlight = () => {
+        if (!textarea) return;
+        // Pad so the last line's highlight extends to the textarea height.
+        if (highlight) highlight.innerHTML = renderSource(textarea.value) + "\n";
+        if (gutter) {
+          const lineCount = textarea.value.split("\n").length;
+          // Rebuild only when the line count changes; cheap and avoids
+          // resetting the gutter's scroll every keystroke.
+          if (gutter.childElementCount !== lineCount) {
+            let nums = "";
+            for (let i = 1; i <= lineCount; i++) nums += `<span>${i}</span>`;
+            gutter.innerHTML = nums;
+          }
+        }
+      };
+
+      const syncScroll = () => {
+        if (!textarea) return;
+        if (highlight) {
+          highlight.scrollTop = textarea.scrollTop;
+          highlight.scrollLeft = textarea.scrollLeft;
+        }
+        if (gutter) gutter.scrollTop = textarea.scrollTop;
+      };
+
+      // ---- Compile (debounced auto + manual) ----
+      let compileTimer: number | undefined;
+      let wasmReady = false;
+
+      const formatBytes = (bytes: number): string => {
+        if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+        return `${bytes} B`;
+      };
+
+      const escapeHtml = (s: string): string =>
+        s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+      const formatUnknownError = (e: unknown): string =>
+        e instanceof Error && e.message ? e.message : String(e);
+
+      // Effect class -> localized label. Falls back to the raw class
+      // name lowercased if it isn't one of the known classes.
+      const effectLabel = (effectClass: unknown): string => {
+        const key = String(effectClass);
+        const localized = getMessage(`playground.effects.${key}`, readLocale());
+        if (typeof localized === "string" && localized) return localized;
+        return key.toLowerCase();
+      };
+
+      // ---- Share-link source encoding (UTF-8 safe base64) ----
+      // The URL fragment must be ASCII-safe and survive any transport,
+      // so we encode the UTF-8 bytes of the source via TextEncoder and
+      // then base64. Decoding is guarded because a tampered #src= must
+      // never crash the page.
+      const encodeSource = (src: string): string => {
+        const bytes = new TextEncoder().encode(src);
+        let binary = "";
+        for (const b of bytes) binary += String.fromCharCode(b);
+        return btoa(binary);
+      };
+      const decodeSource = (b64: string): string => {
+        try {
+          const binary = atob(b64);
+          const bytes = new Uint8Array(binary.length);
+          for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+          return new TextDecoder().decode(bytes);
+        } catch {
+          return "";
+        }
+      };
+
+      // Counts non-empty lines of a compiler diagnostic message as a
+      // rough "how many things are wrong" signal for the Errors badge.
+      const countErrorLines = (message: string): number =>
+        message.split("\n").filter((l) => l.trim().length > 0).length;
+
+      // ---- Compile button state ----
+      type CompileState = "idle" | "compiling" | "ready" | "error";
+      let lastElapsed = 0;
+      const setCompileState = (state: CompileState) => {
+        if (!compileBtn || !compileLabel) return;
+        compileBtn.dataset.state = state;
+        if (state === "idle") compileLabel.textContent = pg("compile");
+        else if (state === "compiling") compileLabel.textContent = pg("compiling");
+        else if (state === "ready") compileLabel.textContent = fmt(pg("compiledIn"), { ms: String(lastElapsed) });
+        else if (state === "error") compileLabel.textContent = pg("failed");
+      };
+
+      const renderMetadata = (data: any) => {
+        const panel = outputPanels.get("metadata");
+        if (!panel) return;
+        // A compile failure invalidates the previous metadata; render a
+        // muted empty-state rather than stale or fake JSON.
+        if (!data || data.__empty) {
+          panel.innerHTML = `<p class="pg-empty">${escapeHtml(pg("noMetadata"))}</p>`;
+          return;
+        }
+        const json = JSON.stringify(data, null, 2);
+        // Wrap in .metadata-block so the existing .copy-btn.metadata-copy
+        // absolute positioning (global.css) pins the button to the
+        // top-right corner. data-copy-text is read at click-time by the
+        // delegated copy handler registered below.
+        const copyAria = getMessage("a11y.copyAria", readLocale()) ?? "Copy";
+        panel.innerHTML = `<div class="metadata-block pg-metadata-block">
+          <button class="copy-btn metadata-copy" type="button" data-copy-text="${escapeHtml(json)}" aria-label="${escapeHtml(copyAria)}" aria-live="polite">
+            <svg class="copy-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M6 4h8v10H6z" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M4 6v10h8" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
+            <svg class="check-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10.5l4 4 8-9" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <pre class="pg-json">${escapeHtml(json)}</pre>
+        </div>`;
+      };
+
+      const renderActions = (data: any) => {
+        const panel = outputPanels.get("actions");
+        if (!panel) return;
+        const actions = data.actions || [];
+        if (!actions.length) {
+          panel.innerHTML = `<p class="pg-empty">${escapeHtml(pg("noActions"))}</p>`;
+          return;
+        }
+
+        // Build a type-hash -> name map so consume entries (which carry
+        // only a hash) can be resolved to a human-readable type name.
+        // create entries already carry a friendly ty field.
+        const types = data.types || [];
+        const hashToName = new Map<string, string>();
+        for (const ty of types) {
+          // Prefer the full hash; fall back to hash_type_source.
+          for (const key of ["hash", "hash_type_source"]) {
+            const h = ty[key];
+            if (h && h !== "target-default") hashToName.set(h, ty.name);
+          }
+        }
+        // The well-known fungible Token hash (used cross-module).
+        hashToName.set("a2fb2f9b3990cd9b473352ff466d94a720c6a8c56ce9e014536872ea71c808d1", "Token");
+
+        panel.innerHTML = `<ul class="pg-action-list">${actions.map((a: any) => {
+          // Build a binding -> type name map from the action's own
+          // params, which carry the declared type name for every
+          // binding (both consume inputs and create outputs).
+          const paramsByBinding = new Map<string, string>();
+          for (const p of a.params || []) {
+            if (p.name && p.ty) paramsByBinding.set(p.name, p.ty);
+          }
+
+          const formatEntry = (entry: any): string => {
+            const binding = escapeHtml(entry.binding || "?");
+            const ty = escapeHtml(
+              entry.ty ||
+              paramsByBinding.get(entry.binding) ||
+              hashToName.get(entry.type_hash) ||
+              "Cell",
+            );
+            return `<span class="pg-set-entry">${binding}: <span class="pg-set-type">${ty}</span></span>`;
+          };
+
+          const consume = (a.consume_set || []).map(formatEntry).join("");
+          const create = (a.create_set || []).map(formatEntry).join("");
+          const mutate = (a.mutate_set || []).map(formatEntry).join("");
+          const cyclesLabel = a.estimated_cycles != null
+            ? `<div class="pg-action-cycles">${a.estimated_cycles.toLocaleString()} ${escapeHtml(pg("cycles"))}</div>`
+            : "";
+          return `<li class="pg-action-item">
+            <div class="pg-action-head">
+              <code class="pg-action-name">${escapeHtml(a.name)}</code>
+              <span class="pg-action-effect pg-effect-${String(a.effect_class).toLowerCase()}">${escapeHtml(effectLabel(a.effect_class))}</span>
+            </div>
+            <div class="pg-action-sets">
+              <div class="pg-set"><span class="pg-set-label">${escapeHtml(pg("consume"))}</span><div class="pg-set-items">${consume || "<span class=\"pg-set-empty\">—</span>"}</div></div>
+              <div class="pg-set"><span class="pg-set-label">${escapeHtml(pg("create"))}</span><div class="pg-set-items">${create || "<span class=\"pg-set-empty\">—</span>"}</div></div>
+              ${mutate ? `<div class="pg-set"><span class="pg-set-label">${escapeHtml(pg("effect"))}</span><div class="pg-set-items">${mutate}</div></div>` : ""}
+            </div>
+            ${cyclesLabel}
+          </li>`;
+        }).join("")}</ul>`;
+      };
+
+      const renderTypes = (data: any) => {
+        const panel = outputPanels.get("types");
+        if (!panel) return;
+        const types = data.types || [];
+        if (!types.length) {
+          panel.innerHTML = `<p class="pg-empty">${escapeHtml(pg("noTypes"))}</p>`;
+          return;
+        }
+        panel.innerHTML = `<ul class="pg-type-list">${types.map((ty: any) => {
+          const caps = (ty.capabilities || []).map((c: string) => `<span class="pg-cap">${escapeHtml(c)}</span>`).join("");
+          return `<li class="pg-type-item">
+            <div class="pg-type-head">
+              <code class="pg-type-name">${escapeHtml(ty.name)}</code>
+              <span class="pg-type-kind">${escapeHtml(ty.kind)}</span>
+            </div>
+            <div class="pg-type-caps">${caps}</div>
+            ${ty.encoded_size != null ? `<div class="pg-type-size">${ty.encoded_size} bytes</div>` : ""}
+          </li>`;
+        }).join("")}</ul>`;
+      };
+
+      // Keep the Errors-tab badge in sync with the latest result.
+      // null/empty error hides it; otherwise it shows the non-empty line
+      // count of the diagnostic as a rough "how many things are wrong".
+      const updateErrorBadge = (error: string | null) => {
+        if (!errorBadge) return;
+        if (!error) {
+          errorBadge.hidden = true;
+          errorBadge.classList.remove("is-visible");
+          errorBadge.textContent = "0";
+          errorBadge.setAttribute("aria-label", pg("noErrorsBadge"));
+          return;
+        }
+        const count = countErrorLines(error);
+        errorBadge.textContent = String(count);
+        errorBadge.setAttribute("aria-label", fmt(pg("errorsBadge"), { n: String(count) }));
+        errorBadge.hidden = false;
+        errorBadge.classList.add("is-visible");
+      };
+
+      const renderErrors = (error: string | null) => {
+        const panel = outputPanels.get("errors");
+        if (!panel) return;
+        updateErrorBadge(error);
+        if (!error) {
+          panel.innerHTML = `<p class="pg-no-errors">${escapeHtml(pg("noErrors"))}</p>`;
+          return;
+        }
+        panel.innerHTML = `<div class="pg-error"><pre>${escapeHtml(error)}</pre></div>`;
+      };
+
+      const renderRail = (data: any) => {
+        if (!railReady || !railLoading) return;
+        railLoading.hidden = true;
+        railReady.hidden = false;
+        if (railModule) railModule.textContent = data.module || "—";
+        if (railTarget) railTarget.textContent = data.target_profile?.name || "ckb";
+        // Third fact: show byte size when we have it, else fall back to
+        // the artifact format string. The label must follow the value
+        // (size vs format) so the two never contradict.
+        const hasSize = data.artifact_size_bytes != null;
+        if (railSize) {
+          railSize.textContent = hasSize
+            ? formatBytes(data.artifact_size_bytes)
+            : (data.artifact_format || "—");
+        }
+        if (railSizeLabel) {
+          const labelKey = hasSize ? "playground.size" : "playground.format";
+          railSizeLabel.dataset.i18n = labelKey;
+          railSizeLabel.textContent = getMessage(labelKey, readLocale()) ?? "";
+        }
+        if (railActions) {
+          railActions.innerHTML = (data.actions || []).map((a: any) =>
+            `<li class="pg-rail-action">
+              <div class="pg-rail-action-head">
+                <code>${escapeHtml(a.name)}</code>
+                <span class="pg-action-effect pg-effect-${String(a.effect_class).toLowerCase()}">${escapeHtml(effectLabel(a.effect_class))}</span>
+              </div>
+            </li>`
+          ).join("") || '<li class="pg-rail-empty">—</li>';
+        }
+        if (railTypes) {
+          railTypes.innerHTML = (data.types || []).map((ty: any) =>
+            `<li class="pg-rail-type"><code>${escapeHtml(ty.name)}</code> <span class="pg-rail-type-kind">${escapeHtml(ty.kind)}</span></li>`
+          ).join("") || '<li class="pg-rail-empty">—</li>';
+        }
+      };
+
+      const doCompile = () => {
+        if (!wasmReady || !textarea || !compileMetadataJson) return;
+        setCompileState("compiling");
+        // Synchronous compile: we set "compiling" for one frame so the
+        // user sees the state flip even on tiny files. Use rAF instead
+        // of a fixed timeout so it never delays the actual result.
+        requestAnimationFrame(() => {
+          const t0 = performance.now();
+          // compile_metadata takes an artifact target (riscv64-asm,
+          // riscv64-elf), not a profile name (ckb). null = default.
+          const result = compileMetadataJson(textarea.value, null);
+          lastElapsed = Math.round(performance.now() - t0);
+          let data: any;
+          try {
+            data = JSON.parse(result);
+          } catch {
+            data = { error: pg("invalidOutput") };
+          }
+          if (data.error) {
+            // Surface errors immediately: switch to the Errors tab so the
+            // diagnostic is never hidden behind stale successful output,
+            // and clear the now-invalid metadata/actions/types panels.
+            renderErrors(data.error);
+            renderMetadata({ __empty: true });
+            renderActions({ actions: [] });
+            renderTypes({ types: [] });
+            selectTab("errors");
+            if (status) status.textContent = data.error.slice(0, 80);
+            setCompileState("error");
+            // Clear rail on error
+            if (railReady && railLoading) {
+              railReady.hidden = true;
+              railLoading.hidden = false;
+              railLoading.innerHTML = `<span class="pg-error-inline">${escapeHtml(data.error)}</span>`;
+            }
+            return;
+          }
+          renderMetadata(data);
+          renderActions(data);
+          renderTypes(data);
+          renderErrors(null);
+          renderRail(data);
+          if (status) status.textContent = fmt(pg("ready"), { ms: String(lastElapsed) });
+          setCompileState("ready");
+        });
+      };
+
+      const scheduleCompile = () => {
+        setCompileState("idle");
+        window.clearTimeout(compileTimer);
+        compileTimer = window.setTimeout(doCompile, 300);
+      };
+
+      // ---- Tab switching ----
+      // Extracted so doCompile can surface the Errors tab automatically
+      // when a compile fails, instead of leaving stale successful
+      // output on screen.
+      const selectTab = (target: string) => {
+        if (!target) return;
+        outputTabs.forEach((tab) => {
+          const active = tab.dataset.outputTab === target;
+          tab.classList.toggle("active", active);
+          tab.setAttribute("aria-selected", String(active));
+        });
+        outputPanels.forEach((panel, key) => {
+          panel.hidden = key !== target;
+          panel.classList.toggle("active", key === target);
+        });
+      };
+
+      outputTabs.forEach((tab) => {
+        tab.addEventListener("click", () => selectTab(tab.dataset.outputTab ?? ""));
+      });
+
+      // ---- Source persistence (localStorage) ----
+      // The last edited source is auto-saved so a refresh doesn't lose
+      // work. We DO NOT clobber a deep link (#src= / ?example=): if the
+      // URL carries one, we honour it and skip restore (see below).
+      const STORAGE_KEY = "cellscript-playground-source";
+
+      const saveSource = () => {
+        if (!textarea) return;
+        try {
+          localStorage.setItem(STORAGE_KEY, textarea.value);
+        } catch {
+          // Storage unavailable (private mode / quota); auto-save is best-effort.
+        }
+      };
+
+      const restoreSource = (): boolean => {
+        if (!textarea) return false;
+        try {
+          const saved = localStorage.getItem(STORAGE_KEY);
+          if (saved !== null && saved !== "") {
+            textarea.value = saved;
+            return true;
+          }
+        } catch {
+          // Storage unavailable; skip restore.
+        }
+        return false;
+      };
+
+      // ---- Editor events ----
+      if (textarea) {
+        textarea.addEventListener("input", () => {
+          updateHighlight();
+          scheduleCompile();
+          saveSource();
+        });
+        textarea.addEventListener("scroll", syncScroll);
+        // Tab key inserts two spaces (don't steal focus).
+        textarea.addEventListener("keydown", (e) => {
+          if (e.key === "Tab") {
+            e.preventDefault();
+            const start = textarea.selectionStart;
+            const end = textarea.selectionEnd;
+            textarea.value = textarea.value.slice(0, start) + "  " + textarea.value.slice(end);
+            textarea.selectionStart = textarea.selectionEnd = start + 2;
+            updateHighlight();
+            scheduleCompile();
+            saveSource();
+          }
+        });
+      }
+
+      // ---- Compile button: manual trigger + keyboard shortcut ----
+      compileBtn?.addEventListener("click", () => {
+        window.clearTimeout(compileTimer);
+        doCompile();
+      });
+
+      // Ctrl/Cmd+Enter forces a compile from anywhere on the page.
+      window.addEventListener("keydown", (e) => {
+        if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+          e.preventDefault();
+          window.clearTimeout(compileTimer);
+          doCompile();
+        }
+      });
+
+      restoredDismiss?.addEventListener("click", () => {
+        if (restoredNotice) restoredNotice.hidden = true;
+      });
+
+      // ---- Export current source as .cell ----
+      const exportFileName = (): string => {
+        const selectedFile = exampleSelect ? exampleFiles.get(exampleSelect.value) : undefined;
+        const fallback = selectedFile?.split("/").pop();
+        if (fallback) return fallback;
+        const moduleName = textarea?.value.match(/^module\s+([A-Za-z0-9_:]+)/m)?.[1];
+        const slug = moduleName?.split("::").filter(Boolean).pop()?.replace(/[^A-Za-z0-9_-]+/g, "-").toLowerCase();
+        return `${slug || "cellscript-playground"}.cell`;
+      };
+
+      const flashExportBtn = (message: string) => {
+        if (!exportBtn) return;
+        exportBtn.textContent = message;
+        window.setTimeout(() => {
+          if (exportBtn) exportBtn.textContent = pg("exportCell");
+        }, 1600);
+      };
+
+      exportBtn?.addEventListener("click", () => {
+        const src = textarea?.value ?? "";
+        const blob = new Blob([src.endsWith("\n") ? src : `${src}\n`], { type: "text/plain;charset=utf-8" });
+        const href = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = href;
+        a.download = exportFileName();
+        a.rel = "noopener";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.setTimeout(() => URL.revokeObjectURL(href), 0);
+        flashExportBtn(pg("exported"));
+      });
+
+      // ---- Copy buttons (.copy-btn) ----
+      // Delegated so it covers the metadata panel's copy button even
+      // though that DOM is rebuilt on every successful compile. Mirrors
+      // the landing page's flashCopied: write to clipboard, toggle the
+      // is-copied class for the ✓ glyph, then revert after 1.6s.
+      const flashCopyBtn = (btn: HTMLButtonElement, text: string) => {
+        navigator.clipboard.writeText(text).then(
+          () => {
+            btn.classList.add("is-copied");
+            const copiedAria = getMessage("a11y.copiedAria", readLocale()) ?? "Copied";
+            btn.setAttribute("aria-label", copiedAria);
+            window.setTimeout(() => {
+              btn.classList.remove("is-copied");
+              const copyAria = getMessage("a11y.copyAria", readLocale()) ?? "Copy";
+              btn.setAttribute("aria-label", copyAria);
+            }, 1600);
+          },
+          () => {
+            // Clipboard unavailable (permissions / non-secure context); ignore.
+          },
+        );
+      };
+
+      document.addEventListener("click", (e: MouseEvent) => {
+        const btn = (e.target as HTMLElement)?.closest<HTMLButtonElement>(".copy-btn");
+        if (!btn) return;
+        const text = btn.dataset.copyText ?? "";
+        if (text) flashCopyBtn(btn, text);
+      });
+
+      // ---- Example switcher ----
+      if (exampleSelect) {
+        exampleSelect.addEventListener("change", () => {
+          const id = exampleSelect.value;
+          const src = exampleSources[id];
+          if (src !== undefined && textarea) {
+            textarea.value = src;
+            updateExampleLesson(id);
+            updateHighlight();
+            scheduleCompile();
+            saveSource();
+          }
+        });
+      }
+
+      // ---- URL deep-link params + share ----
+      // Precedence for the initial source: a shared source fragment
+      // (#src=<base64>) wins, then an explicit example (?example=<id>),
+      // then the auto-saved edit in localStorage. A deep link of either
+      // kind suppresses the localStorage-restore banner.
+      const params = new URLSearchParams(window.location.search);
+      const paramExample = params.get("example");
+      const sharedSource = (() => {
+        const hash = window.location.hash;
+        const match = /(?:^|#)src=([A-Za-z0-9+/=]+)/.exec(hash);
+        return match ? decodeSource(match[1]) : "";
+      })();
+      let deepLinked = false;
+
+      if (sharedSource && textarea) {
+        textarea.value = sharedSource;
+        if (paramExample && exampleSources[paramExample] !== undefined && exampleSelect) exampleSelect.value = paramExample;
+        updateExampleLesson(paramExample && exampleSources[paramExample] !== undefined ? paramExample : null);
+        deepLinked = true;
+      } else if (paramExample && exampleSources[paramExample] !== undefined && textarea) {
+        textarea.value = exampleSources[paramExample];
+        if (exampleSelect) exampleSelect.value = paramExample;
+        updateExampleLesson(paramExample);
+        deepLinked = true;
+      }
+
+      // Restore the previously edited source unless a deep link was
+      // opened. Show a small dismissable notice when we do.
+      if (!deepLinked) {
+        const restored = restoreSource();
+        if (restored && restoredNotice) {
+          updateExampleLesson(null);
+          restoredNotice.hidden = false;
+          window.setTimeout(() => {
+            if (restoredNotice && !restoredNotice.hidden) restoredNotice.hidden = true;
+          }, 6000);
+        }
+      }
+
+      const flashShareBtn = (message: string) => {
+        if (!shareBtn) return;
+        shareBtn.textContent = message;
+        window.setTimeout(() => {
+          if (shareBtn) shareBtn.textContent = pg("share");
+        }, 1600);
+      };
+
+      shareBtn?.addEventListener("click", async () => {
+        const url = new URL(window.location.href);
+        const src = textarea?.value ?? "";
+        const exampleId = exampleSelect?.value ?? "token";
+        // Encode the actual edited source into the URL fragment so the
+        // recipient opens exactly what was on screen, not the stock
+        // example. We also keep ?example= as a fallback hint and for
+        // the selector highlight. Guard against absurd URLs: if the
+        // encoded source would blow past a sane length, fall back to a
+        // plain example link and tell the user honestly.
+        const encoded = encodeSource(src);
+        url.hash = `src=${encoded}`;
+        url.searchParams.set("example", exampleId);
+        try {
+          await navigator.clipboard.writeText(url.toString());
+          if (url.toString().length > 8000) {
+            url.hash = "";
+            await navigator.clipboard.writeText(url.toString());
+            flashShareBtn(pg("shareTooLong"));
+          } else {
+            flashShareBtn(pg("copied"));
+          }
+        } catch {
+          // Clipboard unavailable; ignore.
+        }
+      });
+
+      // ---- Runtime i18n: re-apply localized strings when the locale
+      //      changes (the NavRail toggle updates <html data-locale>
+      //      then dispatches this event). Re-render the parts of the
+      //      output that embed localized labels (effect/cycle text). ----
+      const applyLocaleStrings = () => {
+        // Static [data-i18n] elements.
+        document.querySelectorAll<HTMLElement>("[data-i18n]").forEach((el) => {
+          const v = getMessage(el.dataset.i18n ?? "", readLocale());
+          if (typeof v === "string") el.textContent = v;
+        });
+        document.querySelectorAll<HTMLElement>("[data-i18n-aria-label]").forEach((el) => {
+          const v = getMessage(el.dataset.i18nAriaLabel ?? "", readLocale());
+          if (typeof v === "string") el.setAttribute("aria-label", v);
+        });
+        const pageTitle = pg("pageTitle");
+        if (pageTitle) document.title = pageTitle;
+        updateExampleLesson(currentExampleId);
+        // Refresh compile-button label for the current state, and the
+        // status bar text (re-render the last result if any).
+        const state = (compileBtn?.dataset.state ?? "idle") as CompileState;
+        if (state === "ready") compileLabel && (compileLabel.textContent = fmt(pg("compiledIn"), { ms: String(lastElapsed) }));
+        else setCompileState(state);
+        if (wasmReady) doCompile();
+      };
+      window.addEventListener("cellscript:locale-change", applyLocaleStrings);
+      applyLocaleStrings();
+
+      // ---- Init WASM ----
+      // Dynamic import so Rollup doesn't try to bundle the static asset.
+      // The `/* @vite-ignore */` comment prevents Vite from warning.
+      import(/* @vite-ignore */ wasmUrl.href).then((mod: any) => {
+        wasmInit = mod.default;
+        compileMetadataJson = mod.compile_metadata_json;
+        wasmVersion = mod.version;
+        return wasmInit();
+      }).then(() => {
+        wasmReady = true;
+        if (versionEl) versionEl.textContent = `cellc v${wasmVersion()}`;
+        if (loading) loading.hidden = true;
+        updateHighlight();
+        doCompile();
+      }).catch((e: unknown) => {
+        const message = fmt(pg("loadFailed"), { error: formatUnknownError(e) });
+        if (status) status.textContent = message;
+        if (loading) {
+          loading.hidden = false;
+          loading.innerHTML = `<span class="pg-error-inline">${escapeHtml(message)}</span>`;
+        }
+        if (railReady && railLoading) {
+          railReady.hidden = true;
+          railLoading.hidden = false;
+          railLoading.innerHTML = `<span class="pg-error-inline">${escapeHtml(message)}</span>`;
+        }
+        renderErrors(message);
+      });
+
+      updateHighlight();
+    </script>
+    <NavRail page="playground" />
+  </body>
+</html>

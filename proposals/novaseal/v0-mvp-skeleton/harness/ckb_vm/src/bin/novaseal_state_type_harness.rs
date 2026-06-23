@@ -48,6 +48,7 @@ const CKB_VM2_WAIT_SYSCALL_NUMBER: u64 = 2602;
 const CKB_VM2_PIPE_SYSCALL_NUMBER: u64 = 2604;
 const CKB_VM2_PIPE_WRITE_SYSCALL_NUMBER: u64 = 2605;
 const CKB_VM2_CLOSE_SYSCALL_NUMBER: u64 = 2608;
+const CKB_PLACE_CELL: u64 = 0;
 
 const HEADER_FIELD_EPOCH_NUMBER: u64 = 0;
 const INPUT_FIELD_PREVIOUS_OUTPUT: u64 = 0;
@@ -416,11 +417,13 @@ impl StateTypeSyscalls {
     fn spawn<Mac: SupportMachine<REG = u64>>(&mut self, machine: &mut Mac) -> Result<(), ckb_vm::Error> {
         let index = machine.registers()[A0];
         let source = machine.registers()[A1];
+        let place = machine.registers()[A2];
+        let bounds = machine.registers()[A3];
         let spawn_args = machine.registers()[A4];
         {
             let mut trace = self.trace.lock().expect("trace mutex poisoned");
             trace.spawn_calls += 1;
-            if index != 0 || source != CKB_SOURCE_CELL_DEP || self.child_spawned {
+            if index != 0 || source != CKB_SOURCE_CELL_DEP || place != CKB_PLACE_CELL || bounds != 0 || self.child_spawned {
                 trace.spawn_failures += 1;
                 machine.set_register(A0, 1);
                 return Ok(());

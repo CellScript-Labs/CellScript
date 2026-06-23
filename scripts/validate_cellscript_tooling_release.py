@@ -96,6 +96,38 @@ def main() -> int:
         in package_json["scripts"]["publish:dry-run"],
         "VS Code publish dry-run must package a local VSIX instead of using an unsupported publish --dry-run flag",
     )
+    commands = {command.get("command") for command in package_json.get("contributes", {}).get("commands", [])}
+    for command in [
+        "cellscript.compileCurrentFile",
+        "cellscript.showMetadata",
+        "cellscript.showConstraints",
+        "cellscript.showAbi",
+        "cellscript.showActionBuildPlan",
+        "cellscript.generateTypescriptBuilder",
+        "cellscript.verifyPackage",
+        "cellscript.verifyRegistry",
+        "cellscript.verifyLiveRegistry",
+        "cellscript.showProductionReport",
+    ]:
+        require(command in commands, f"VS Code extension must contribute {command}")
+        require(
+            f"onCommand:{command}" in package_json.get("activationEvents", []),
+            f"VS Code extension must activate for {command}",
+        )
+    settings = package_json.get("contributes", {}).get("configuration", {}).get("properties", {})
+    for setting in [
+        "cellscript.compilerPath",
+        "cellscript.useCargoRunFallback",
+        "cellscript.commandTimeoutMs",
+        "cellscript.maxOutputBytes",
+        "cellscript.target",
+        "cellscript.builderOutputDir",
+        "cellscript.ckbRpcUrl",
+        "cellscript.deploymentNetwork",
+        "cellscript.registryRequirePublisherSignature",
+        "cellscript.registryRequireAuditReport",
+    ]:
+        require(setting in settings, f"VS Code extension must expose {setting}")
 
     require_contains(
         "src/main.rs",
@@ -126,8 +158,25 @@ def main() -> int:
             "LanguageClient",
             "TransportKind.stdio",
             "--lsp",
+            "selectMetadataEntry",
+            "findPackageRootForDocument",
             "cellscript.showConstraints",
+            "cellscript.showAbi",
+            "cellscript.showActionBuildPlan",
+            "cellscript.generateTypescriptBuilder",
+            "cellscript.verifyPackage",
+            "cellscript.verifyRegistry",
+            "cellscript.verifyLiveRegistry",
             "cellscript.showProductionReport",
+            "gen-builder",
+            "package",
+            "verify",
+            "registry",
+            "ckbRpcUrl",
+            "registryRequirePublisherSignature",
+            "registryRequireAuditReport",
+            "--require-publisher-signature",
+            "--require-audit-report",
         ],
     )
     require_contains(
@@ -135,13 +184,109 @@ def main() -> int:
         [
             "LanguageClient",
             "TransportKind.stdio",
+            "cellscript.generateTypescriptBuilder",
+            "cellscript.verifyLiveRegistry",
+            "cellscript.builderOutputDir",
             "extension README must describe the production local tooling surface",
+        ],
+    )
+    require_contains(
+        "scripts/cellscript_ckb_release_gate.sh",
+        [
+            "check_action_builder_toolchain",
+            "cellc gen-builder",
+            "npm --prefix",
+            "generated builder",
+            "check_novaseal_certify_invariant",
+            "check_novaseal_certify_runs",
+            "check_phase1_end_to_end_invariant",
+        ],
+    )
+    require_contains(
+        "README.md",
+        [
+            "cellc action build",
+            "cellc gen-builder --target typescript",
+            "cellc package verify",
+            "cellc registry verify --live",
+        ],
+    )
+    require_contains(
+        "website/package.json",
+        [
+            '"prepare:registry": "python3 scripts/generate-registry-data.py"',
+            '"build": "npm run prepare:registry && astro check && astro build"',
+        ],
+    )
+    require_contains(
+        "website/src/pages/index.astro",
+        [
+            "CellScript Registry",
+            "data-home-search",
+            "/registry/submit",
+            "/learn",
+        ],
+    )
+    require_contains(
+        "scripts/cellscript_gate.sh",
+        [
+            "run_website_build_check",
+            "website registry data is stale",
+            "npm --prefix website run build",
+        ],
+    )
+    require_contains(
+        ".github/workflows/website-build.yml",
+        [
+            "Generate registry website data",
+            "Check generated registry data is committed",
+            "Upload website dist",
+        ],
+    )
+    require_contains(
+        "src/main.rs",
+        [
+            '"certify"',
+        ],
+    )
+    require_contains(
+        "src/cli/mod.rs",
+        [
+            "mod novaseal_certification;",
+        ],
+    )
+    require_contains(
+        "src/cli/commands.rs",
+        [
+            "Command::Certify",
+            "novaseal-profile-v0",
+        ],
+    )
+    require_contains(
+        "docs/wiki/Tutorial-07-LSP-and-Tooling.md",
+        [
+            "CellScript: Generate TypeScript Action Builder",
+            "cellscript.builderOutputDir",
+            "cellc registry verify --live",
+            "cellscript.registryRequirePublisherSignature",
+            "cellscript.registryRequireAuditReport",
+            "npm test",
+        ],
+    )
+    require_contains(
+        "docs/CELLSCRIPT_0_20_ROADMAP.md",
+        [
+            "VS Code extension",
+            "check_action_builder_toolchain",
+            "CellFabric is frozen",
         ],
     )
     require_contains(
         "src/package/mod.rs",
         [
-            "registry dependency '{}' with version '{}' is not supported yet; use a local path dependency",
+            "failed to resolve registry dependency '{}/{}@{}' via discovery index '{}': {}",
+            "registry package '{}/{}@{}' has no source_hash in registry.json",
+            "source_hash mismatch for '{}/{}@{}': expected '{}', got '{}'",
             "Git { url: String, revision: String }",
             "pub fn consistency_issues(&self, manifest: &PackageManifest) -> Vec<String>",
             "pub fn replace_with_resolved(&mut self, resolved: &HashMap<String, ResolvedPackage>)",
@@ -150,10 +295,21 @@ def main() -> int:
     require_contains(
         "tests/cli.rs",
         [
-            "cellc_rejects_registry_package_dependencies_fail_closed",
+            "cellc_rejects_registry_dependency_without_namespace",
+            "cellc_build_resolves_registry_dependency_and_writes_phase1_lockfile",
             "cellc_install_path_updates_lockfile_and_remove_prunes_it",
             "cellc_fmt_subcommand_formats_sources",
             "cellc_run_subcommand_executes_pure_elf_package",
+            "cellc_gen_builder_typescript_emits_package_scaffold",
+            "cellc_gen_builder_lockfile_identity_fails_closed",
+        ],
+    )
+    require_contains(
+        "tests/registry.rs",
+        [
+            "package_manager_resolves_registry_dependency_with_source_hash_from_local_git_fixture",
+            "package_manager_rejects_registry_source_hash_mismatch",
+            "lockfile_consistency_accepts_matching_registry_source",
         ],
     )
 

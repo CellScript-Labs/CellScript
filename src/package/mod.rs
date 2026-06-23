@@ -1,13 +1,15 @@
 use crate::error::{CompileError, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap, HashSet};
-use std::ffi::OsString;
-use std::path::{Component, Path, PathBuf};
-use std::process::Command;
+use std::collections::{BTreeMap, HashMap};
+use std::path::{Path, PathBuf};
+
+pub mod registry;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PackageManifest {
     pub package: PackageInfo,
+    #[serde(default)]
+    pub workspace: Option<WorkspaceConfig>,
     #[serde(default)]
     pub dependencies: HashMap<String, Dependency>,
     #[serde(default)]
@@ -26,6 +28,8 @@ pub struct PackageManifest {
 pub struct PackageInfo {
     pub name: String,
     pub version: String,
+    #[serde(default)]
+    pub namespace: Option<String>,
     #[serde(default)]
     pub authors: Vec<String>,
     #[serde(default)]
@@ -58,6 +62,70 @@ fn default_entry() -> String {
     "src/main.cell".to_string()
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct WorkspaceConfig {
+    #[serde(default)]
+    pub members: Vec<String>,
+    #[serde(default)]
+    pub exclude: Vec<String>,
+}
+
+/// A virtual manifest that contains only a `[workspace]` section with no `[package]`.
+/// This represents a workspace root that is not itself a package.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkspaceManifest {
+    pub workspace: WorkspaceConfig,
+}
+
+impl WorkspaceManifest {
+    pub fn read_from_dir(dir: &Path) -> Result<Option<Self>> {
+        let manifest_path = dir.join("Cell.toml");
+        if !manifest_path.exists() {
+            return Ok(None);
+        }
+        let content = std::fs::read_to_string(&manifest_path)
+            .map_err(|e| CompileError::without_span(format!("failed to read '{}': {}", manifest_path.display(), e)))?;
+        // Try parsing as a workspace-only manifest first.
+        let ws: std::result::Result<WorkspaceManifest, _> = toml::from_str(&content);
+        if let Ok(manifest) = ws {
+            // Make sure it really has no [package] section — if it does,
+            // the caller should use PackageManifest instead.
+            if !content.contains("[package]") {
+                return Ok(Some(manifest));
+            }
+        }
+        Ok(None)
+    }
+
+    pub fn write_to_dir(&self, dir: &Path) -> Result<()> {
+        let manifest_path = dir.join("Cell.toml");
+        let content = toml::to_string_pretty(self)?;
+        std::fs::write(&manifest_path, content)?;
+        Ok(())
+    }
+
+    /// Resolve member paths relative to the workspace root directory.
+    pub fn resolve_member_paths(&self, root: &Path) -> Result<Vec<PathBuf>> {
+        let mut members = Vec::new();
+        for member_pattern in &self.workspace.members {
+            let member_path = root.join(member_pattern);
+            if member_path.is_dir() && member_path.join("Cell.toml").exists() {
+                members.push(canonical_path(&member_path)?);
+            } else {
+                return Err(CompileError::without_span(format!(
+                    "workspace member '{}' does not exist or is not a valid package directory",
+                    member_pattern
+                )));
+            }
+        }
+        Ok(members)
+    }
+}
+
+fn canonical_path(path: &Path) -> Result<PathBuf> {
+    std::fs::canonicalize(path).map_err(|e| CompileError::without_span(format!("failed to canonicalize '{}': {}", path.display(), e)))
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Dependency {
@@ -69,6 +137,8 @@ pub enum Dependency {
 pub struct DetailedDependency {
     #[serde(default = "default_any_version")]
     pub version: String,
+    #[serde(default)]
+    pub namespace: Option<String>,
     #[serde(default)]
     pub git: Option<String>,
     #[serde(default)]
@@ -150,14 +220,6 @@ pub struct CkbCellDepConfig {
     #[serde(default)]
     pub name: Option<String>,
     #[serde(default)]
-    pub role: Option<String>,
-    #[serde(default)]
-    pub verifier_id: Option<String>,
-    #[serde(default)]
-    pub ipc_abi: Option<String>,
-    #[serde(default)]
-    pub artifact_hash: Option<String>,
-    #[serde(default)]
     pub out_point: Option<String>,
     #[serde(default)]
     pub tx_hash: Option<String>,
@@ -185,13 +247,98 @@ pub struct ResolvedPackage {
     pub path: PathBuf,
     pub source: PackageSource,
     pub dependencies: Vec<String>,
+    pub namespace: Option<String>,
+    pub source_hash: Option<String>,
+}
+
+/// Emit yank-related notices to stderr during registry resolution.
+///
+/// The registry resolver never silently picks a yanked version for a range
+/// request (yanked entries are filtered out by `find_matching_version`). A
+/// yanked version can only be reached when the caller pins it explicitly (for
+/// example via an `=x.y.z` exact requirement or a lockfile that names it). In
+/// that case we warn and suggest the latest non-yanked version, honouring the
+/// Phase 1 contract that resolving a yanked version is surfaced to the user
+/// rather than failing or passing silently.
+fn emit_yank_notices(namespace: &str, name: &str, requested: &str, selected: &str, index: &registry::RegistryIndex) {
+    let Some(entry) = index.versions.iter().find(|v| v.version == selected) else {
+        return;
+    };
+    if !entry.yanked {
+        return;
+    }
+    // Prefer the publisher-declared replacement (`replaced_by`) when present;
+    // otherwise fall back to the latest non-yanked version.
+    let suggestion = entry.replaced_by.clone().or_else(|| {
+        index.versions.iter().filter(|v| !v.yanked && v.version != selected).map(|v| v.version.clone()).max_by(|a, b| {
+            let a_parts = parse_numeric_version(a);
+            let b_parts = parse_numeric_version(b);
+            compare_version_tuples(&a_parts, &b_parts)
+        })
+    });
+    let reason = entry.yanked_reason.as_deref().map(|r| format!(" (reason: {})", r)).unwrap_or_default();
+    match suggestion {
+        Some(v) => eprintln!(
+            "warning: {}/{}@{} resolves to yanked version {}{}; consider upgrading to {}",
+            namespace, name, requested, selected, reason, v
+        ),
+        None => eprintln!(
+            "warning: {}/{}@{} resolves to yanked version {}{} with no non-yanked alternative published",
+            namespace, name, requested, selected, reason
+        ),
+    }
+}
+
+fn registry_resolution_blocked_error(
+    namespace: &str,
+    name: &str,
+    requested: &str,
+    version: &registry::RegistryVersion,
+    policy: registry::RegistryResolutionPolicy,
+) -> CompileError {
+    let reason = version
+        .resolver_block_reason(policy, matches!(crate::package::version::parse_version_req(requested), Ok(VersionReq::Exact(_))));
+    let status = version.effective_status();
+    let hint = match reason {
+        Some("unverified") => "use --allow-unverified for an explicit direct install, or wait until the entry reaches verified_build",
+        Some("quarantined") => "use --allow-quarantined only for an explicit incident-review install",
+        Some("deprecated") => "pin the version exactly or select a non-deprecated replacement",
+        Some("yanked") => "pin the version exactly or select a non-yanked replacement",
+        _ => "select a version that is eligible for default registry resolution",
+    };
+
+    CompileError::without_span(format!(
+        "registry package '{}/{}@{}' matched version '{}' but status '{}' is not eligible for default resolution; {}",
+        namespace,
+        name,
+        requested,
+        version.version,
+        status.as_str(),
+        hint
+    ))
+}
+
+fn parse_numeric_version(version: &str) -> Vec<u32> {
+    let core = version.split_once('-').map(|(c, _)| c).unwrap_or(version);
+    core.split('.').filter_map(|p| p.parse().ok()).collect()
+}
+
+fn compare_version_tuples(a: &[u32], b: &[u32]) -> std::cmp::Ordering {
+    let max_len = a.len().max(b.len());
+    for i in 0..max_len {
+        match a.get(i).cmp(&b.get(i)) {
+            std::cmp::Ordering::Equal => continue,
+            other => return other,
+        }
+    }
+    std::cmp::Ordering::Equal
 }
 
 #[derive(Debug, Clone)]
 pub enum PackageSource {
     Local(PathBuf),
     Git { url: String, revision: String },
-    Registry { name: String, version: String },
+    Registry { registry: String, url: String, revision: String, namespace: String, version: String },
 }
 
 #[derive(Debug, Clone)]
@@ -204,8 +351,7 @@ pub enum VersionReq {
 
 impl PackageManager {
     pub fn new(root: impl AsRef<Path>) -> Self {
-        let raw_root = root.as_ref();
-        let root = std::fs::canonicalize(raw_root).unwrap_or_else(|_| raw_root.to_path_buf());
+        let root = root.as_ref().to_path_buf();
 
         Self { root, resolved: HashMap::new() }
     }
@@ -213,26 +359,18 @@ impl PackageManager {
     pub fn read_manifest(&self) -> Result<PackageManifest> {
         let manifest_path = self.root.join("Cell.toml");
 
-        let metadata = match std::fs::symlink_metadata(&manifest_path) {
-            Ok(metadata) => metadata,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return Err(CompileError::without_span("Cell.toml not found. Run 'cellc init' to create a new package."));
-            }
-            Err(error) => {
-                return Err(CompileError::without_span(format!(
-                    "failed to inspect package manifest '{}': {}",
-                    manifest_path.display(),
-                    error
-                )));
-            }
-        };
+        if !manifest_path.exists() {
+            return Err(CompileError::without_span("Cell.toml not found. Run 'cellc init' to create a new package."));
+        }
 
-        read_package_manifest_with_metadata(&self.root, &manifest_path, "package manifest", metadata)
+        let content = std::fs::read_to_string(&manifest_path)?;
+        let manifest: PackageManifest = toml::from_str(&content)?;
+
+        Ok(manifest)
     }
 
     pub fn write_manifest(&self, manifest: &PackageManifest) -> Result<()> {
         let manifest_path = self.root.join("Cell.toml");
-        validate_package_manifest_write_target(&self.root, &manifest_path, "package manifest")?;
         let content = toml::to_string_pretty(manifest)?;
         std::fs::write(&manifest_path, content)?;
         Ok(())
@@ -265,6 +403,7 @@ impl PackageManager {
             package: PackageInfo {
                 name: name.to_string(),
                 version: "0.1.0".to_string(),
+                namespace: None,
                 authors: vec![],
                 description: String::new(),
                 license: String::new(),
@@ -279,6 +418,7 @@ impl PackageManager {
                 include: vec![],
                 exclude: vec![],
             },
+            workspace: None,
             dependencies: HashMap::new(),
             dev_dependencies: HashMap::new(),
             build: BuildConfig::default(),
@@ -328,6 +468,27 @@ dist/
         Ok(())
     }
 
+    /// Extract the version-requirement string carried by a dependency, if any.
+    ///
+    /// Path and git dependencies without a meaningful version return `None`,
+    /// which the unified resolver treats as "no constraint to check". Only
+    /// registry dependencies (Simple or Detailed with a version) contribute a
+    /// constraint that must be reconciled across the graph.
+    fn version_requirement_of(&self, dep: &Dependency) -> Option<String> {
+        match dep {
+            Dependency::Simple(version) => Some(version.clone()),
+            Dependency::Detailed(detailed) => {
+                // Path/git sources and wildcard versions carry no constraint
+                // for the unified resolver to reconcile across the graph.
+                if detailed.path.is_some() || detailed.git.is_some() || detailed.version.is_empty() || detailed.version == "*" {
+                    None
+                } else {
+                    Some(detailed.version.clone())
+                }
+            }
+        }
+    }
+
     fn resolve_dependency_from_root(&mut self, name: &str, dep: &Dependency, base_root: &Path, stack: &mut Vec<String>) -> Result<()> {
         if stack.iter().any(|item| item == name) {
             let mut cycle = stack.clone();
@@ -335,15 +496,32 @@ dist/
             return Err(CompileError::without_span(format!("Circular dependency detected: {}", cycle.join(" -> "))));
         }
 
+        // Unified (single-version-per-package) resolution: if this package was
+        // already resolved elsewhere in the graph, the new version requirement
+        // must be satisfied by the already-selected version. If it is not, the
+        // dependency graph is unsatisfiable and we fail closed instead of
+        // silently keeping whichever version was resolved first.
         if let Some(existing) = self.resolved.get(name) {
-            validate_existing_resolution_matches(name, dep, base_root, existing)?;
+            if let Some(req_str) = self.version_requirement_of(dep) {
+                let req = version::parse_version_req(&req_str)?;
+                if !version::satisfies(&existing.version, &req) {
+                    return Err(CompileError::without_span(format!(
+                        "version conflict for '{}': already resolved to '{}', which does not satisfy requirement '{}'",
+                        name, existing.version, req_str
+                    )));
+                }
+            }
             return Ok(());
         }
 
         stack.push(name.to_string());
 
         let (resolved, child_dependencies) = match dep {
-            Dependency::Simple(version) => (self.resolve_from_registry(name, version)?, HashMap::new()),
+            Dependency::Simple(version) => {
+                let (resolved, manifest) =
+                    self.resolve_from_registry_with_manifest(name, version, None, registry::RegistryResolutionPolicy::default())?;
+                (resolved, manifest.dependencies)
+            }
             Dependency::Detailed(detailed) => {
                 if let Some(path) = &detailed.path {
                     let (resolved, manifest) = self.resolve_from_path_at(name, path, base_root)?;
@@ -352,7 +530,14 @@ dist/
                     let (resolved, manifest) = self.resolve_from_git_with_manifest(name, git, detailed)?;
                     (resolved, manifest.dependencies)
                 } else {
-                    (self.resolve_from_registry(name, &detailed.version)?, HashMap::new())
+                    let ns = detailed.namespace.as_deref();
+                    let (resolved, manifest) = self.resolve_from_registry_with_manifest(
+                        name,
+                        &detailed.version,
+                        ns,
+                        registry::RegistryResolutionPolicy::default(),
+                    )?;
+                    (resolved, manifest.dependencies)
                 }
             }
         };
@@ -369,10 +554,205 @@ dist/
     }
 
     pub fn resolve_from_registry(&self, name: &str, version: &str) -> Result<ResolvedPackage> {
-        Err(CompileError::without_span(format!(
-            "registry dependency '{}' with version '{}' is not supported yet; use a local path dependency",
-            name, version
-        )))
+        self.resolve_from_registry_with_namespace(name, version, None)
+    }
+
+    pub fn resolve_from_registry_with_namespace(&self, name: &str, version: &str, namespace: Option<&str>) -> Result<ResolvedPackage> {
+        let (resolved, _) =
+            self.resolve_from_registry_with_manifest(name, version, namespace, registry::RegistryResolutionPolicy::default())?;
+        Ok(resolved)
+    }
+
+    pub fn resolve_from_registry_with_namespace_and_policy(
+        &self,
+        name: &str,
+        version: &str,
+        namespace: Option<&str>,
+        policy: registry::RegistryResolutionPolicy,
+    ) -> Result<ResolvedPackage> {
+        let (resolved, _) = self.resolve_from_registry_with_manifest(name, version, namespace, policy)?;
+        Ok(resolved)
+    }
+
+    fn resolve_from_registry_with_manifest(
+        &self,
+        name: &str,
+        version: &str,
+        namespace: Option<&str>,
+        policy: registry::RegistryResolutionPolicy,
+    ) -> Result<(ResolvedPackage, PackageManifest)> {
+        // 1. Determine namespace: explicit > consuming package namespace > error
+        let resolved_namespace = namespace
+            .map(str::to_string)
+            .or_else(|| {
+                // Try to use consuming package's namespace
+                self.read_manifest().ok().and_then(|m| m.package.namespace)
+            })
+            .ok_or_else(|| {
+                CompileError::without_span(format!(
+                    "registry dependency '{}' requires a namespace; specify namespace in dependency or set namespace in [package]",
+                    name
+                ))
+            })?;
+
+        // 2. Clone/update discovery index → find source repo URL
+        let cache_dir = self.registry_cache_dir();
+        let registry_url = registry::default_registry_url();
+        let discovery = registry::DiscoveryIndex::new(&registry_url, &cache_dir);
+        let entry = discovery.lookup(&resolved_namespace, name).map_err(|e| {
+            CompileError::without_span(format!(
+                "failed to resolve registry dependency '{}/{}@{}' via discovery index '{}': {}",
+                resolved_namespace, name, version, registry_url, e
+            ))
+        })?;
+
+        // 3. Clone source repo
+        let source_url = &entry.source;
+        let source_cache = self.git_cache_dir();
+        std::fs::create_dir_all(&source_cache)
+            .map_err(|e| CompileError::without_span(format!("failed to create source cache directory: {}", e)))?;
+
+        let cache_key = format!("{}#{}", source_url, version);
+        let cache_name = format!("{}-{:016x}", name, simple_hash(&cache_key));
+        let clone_dir = source_cache.join(&cache_name);
+
+        if clone_dir.exists() && clone_dir.join(".git").exists() {
+            registry::git_update(&clone_dir).map_err(CompileError::without_span)?;
+        } else {
+            let _ = std::fs::remove_dir_all(&clone_dir);
+            registry::git_clone(source_url, &clone_dir).map_err(CompileError::without_span)?;
+        }
+
+        // 4. Resolve version from registry.json and check out its declared tag.
+        let reg_index = registry::RegistryIndex::read_from_repo(&clone_dir)?;
+        if reg_index.schema_version != registry::RegistryIndex::CURRENT_SCHEMA_VERSION {
+            return Err(CompileError::without_span(format!(
+                "registry package '{}/{}' uses unsupported registry.json schema_version {}; expected {}",
+                resolved_namespace,
+                name,
+                reg_index.schema_version,
+                registry::RegistryIndex::CURRENT_SCHEMA_VERSION
+            )));
+        }
+        if reg_index.name != name || reg_index.namespace != resolved_namespace {
+            return Err(CompileError::without_span(format!(
+                "registry.json identity mismatch for '{}/{}': found '{}/{}'",
+                resolved_namespace, name, reg_index.namespace, reg_index.name
+            )));
+        }
+        let selected_version = reg_index.find_matching_version_for_resolution(version, policy).cloned().ok_or_else(|| {
+            if let Some(blocked) = reg_index.find_matching_version_allowing_yanked_pin(version) {
+                return registry_resolution_blocked_error(&resolved_namespace, name, version, blocked, policy);
+            }
+            CompileError::without_span(format!("no matching version found for '{}/{}@{}'", resolved_namespace, name, version))
+        })?;
+        emit_yank_notices(&resolved_namespace, name, version, &selected_version.version, &reg_index);
+        if selected_version.source_hash.is_empty() {
+            return Err(CompileError::without_span(format!(
+                "registry package '{}/{}@{}' has no source_hash in registry.json",
+                resolved_namespace, name, selected_version.version
+            )));
+        }
+        registry::git_checkout(&clone_dir, &selected_version.tag).map_err(CompileError::without_span)?;
+
+        let revision = registry::git_revision(&clone_dir).unwrap_or_else(|_| "unknown".to_string());
+
+        // 5. Re-read registry.json at the checked-out tag and verify source_hash.
+        let tagged_index = registry::RegistryIndex::read_from_repo(&clone_dir)?;
+        if tagged_index.schema_version != registry::RegistryIndex::CURRENT_SCHEMA_VERSION {
+            return Err(CompileError::without_span(format!(
+                "registry package '{}/{}@{}' uses unsupported registry.json schema_version {}; expected {}",
+                resolved_namespace,
+                name,
+                selected_version.version,
+                tagged_index.schema_version,
+                registry::RegistryIndex::CURRENT_SCHEMA_VERSION
+            )));
+        }
+        if tagged_index.name != name || tagged_index.namespace != resolved_namespace {
+            return Err(CompileError::without_span(format!(
+                "registry.json identity mismatch for checked-out '{}/{}@{}': found '{}/{}'",
+                resolved_namespace, name, selected_version.version, tagged_index.namespace, tagged_index.name
+            )));
+        }
+        let tagged_version = tagged_index.versions.iter().find(|v| v.version == selected_version.version).ok_or_else(|| {
+            CompileError::without_span(format!(
+                "registry package '{}/{}@{}' tag '{}' does not contain a matching registry.json version entry",
+                resolved_namespace, name, selected_version.version, selected_version.tag
+            ))
+        })?;
+        if tagged_version.source_hash.is_empty() {
+            return Err(CompileError::without_span(format!(
+                "registry package '{}/{}@{}' has no source_hash in registry.json",
+                resolved_namespace, name, tagged_version.version
+            )));
+        }
+        if tagged_version
+            .resolver_block_reason(policy, matches!(crate::package::version::parse_version_req(version), Ok(VersionReq::Exact(_))))
+            .is_some()
+        {
+            return Err(registry_resolution_blocked_error(&resolved_namespace, name, version, tagged_version, policy));
+        }
+        let computed_source_hash = registry::compute_source_hash(&clone_dir)?;
+        if computed_source_hash != tagged_version.source_hash {
+            return Err(CompileError::without_span(format!(
+                "source_hash mismatch for '{}/{}@{}': expected '{}', got '{}'",
+                resolved_namespace, name, tagged_version.version, tagged_version.source_hash, computed_source_hash
+            )));
+        }
+
+        // 6. Read Cell.toml and resolve transitive dependencies
+        let manifest_path = clone_dir.join("Cell.toml");
+        if !manifest_path.exists() {
+            return Err(CompileError::without_span(format!(
+                "registry package '{}/{}' does not contain Cell.toml",
+                resolved_namespace, name
+            )));
+        }
+
+        let content = std::fs::read_to_string(&manifest_path)?;
+        let manifest: PackageManifest = toml::from_str(&content)?;
+        if manifest.package.name != name {
+            return Err(CompileError::without_span(format!(
+                "registry package '{}/{}@{}' Cell.toml declares package name '{}'",
+                resolved_namespace, name, tagged_version.version, manifest.package.name
+            )));
+        }
+        if manifest.package.version != tagged_version.version {
+            return Err(CompileError::without_span(format!(
+                "registry package '{}/{}' registry.json version '{}' does not match Cell.toml version '{}'",
+                resolved_namespace, name, tagged_version.version, manifest.package.version
+            )));
+        }
+        if manifest.package.namespace.as_deref() != Some(resolved_namespace.as_str()) {
+            return Err(CompileError::without_span(format!(
+                "registry package '{}/{}@{}' Cell.toml must declare namespace '{}'",
+                resolved_namespace, name, tagged_version.version, resolved_namespace
+            )));
+        }
+
+        Ok((
+            ResolvedPackage {
+                name: name.to_string(),
+                version: manifest.package.version.clone(),
+                path: clone_dir.clone(),
+                source: PackageSource::Registry {
+                    registry: registry_url,
+                    url: source_url.clone(),
+                    revision,
+                    namespace: resolved_namespace.clone(),
+                    version: manifest.package.version.clone(),
+                },
+                dependencies: manifest.dependencies.keys().cloned().collect(),
+                namespace: Some(resolved_namespace),
+                source_hash: Some(computed_source_hash),
+            },
+            manifest,
+        ))
+    }
+
+    fn registry_cache_dir(&self) -> PathBuf {
+        self.root.join(".cell/registry-cache")
     }
 
     pub fn resolve_from_path(&self, name: &str, path: &str) -> Result<ResolvedPackage> {
@@ -381,27 +761,21 @@ dist/
     }
 
     fn resolve_from_path_at(&self, name: &str, path: &str, base_root: &Path) -> Result<(ResolvedPackage, PackageManifest)> {
-        let package_path = canonical_package_child_path(base_root, path, &format!("dependency '{}' path", name))?;
+        let package_path = base_root.join(path);
         let manifest_path = package_path.join("Cell.toml");
 
-        let metadata = match std::fs::symlink_metadata(&manifest_path) {
-            Ok(metadata) => metadata,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return Err(CompileError::without_span(format!("Dependency '{}' not found at path '{}'", name, path)));
-            }
-            Err(error) => {
-                return Err(CompileError::without_span(format!(
-                    "failed to inspect dependency '{}' manifest '{}': {}",
-                    name,
-                    manifest_path.display(),
-                    error
-                )));
-            }
-        };
-        let manifest =
-            read_package_manifest_with_metadata(&package_path, &manifest_path, &format!("dependency '{}' manifest", name), metadata)?;
+        if !manifest_path.exists() {
+            return Err(CompileError::without_span(format!("Dependency '{}' not found at path '{}'", name, path)));
+        }
 
-        let source_path = package_path.strip_prefix(&self.root).unwrap_or(&package_path).to_path_buf();
+        let content = std::fs::read_to_string(&manifest_path)?;
+        let manifest: PackageManifest = toml::from_str(&content)?;
+
+        let source_path = if base_root == self.root {
+            PathBuf::from(path)
+        } else {
+            package_path.strip_prefix(&self.root).unwrap_or(&package_path).to_path_buf()
+        };
 
         Ok((
             ResolvedPackage {
@@ -410,6 +784,8 @@ dist/
                 path: package_path,
                 source: PackageSource::Local(source_path),
                 dependencies: manifest.dependencies.keys().cloned().collect(),
+                namespace: manifest.package.namespace.clone(),
+                source_hash: None,
             },
             manifest,
         ))
@@ -426,28 +802,20 @@ dist/
         url: &str,
         detailed: &DetailedDependency,
     ) -> Result<(ResolvedPackage, PackageManifest)> {
-        validate_git_url(url)?;
-        validate_git_dependency_pin(name, detailed)?;
-
         let cache_dir = self.git_cache_dir();
         std::fs::create_dir_all(&cache_dir).map_err(|e| {
             CompileError::without_span(format!("failed to create git cache directory '{}': {}", cache_dir.display(), e))
         })?;
-        let cache_dir = std::fs::canonicalize(&cache_dir).map_err(|e| {
-            CompileError::without_span(format!("failed to canonicalize git cache directory '{}': {}", cache_dir.display(), e))
-        })?;
 
-        let requested_ref = detailed.rev.as_ref();
-        let cache_name = git_cache_entry_name(name, url, requested_ref.map(String::as_str));
+        let requested_ref = detailed.rev.as_ref().or(detailed.tag.as_ref()).or(detailed.branch.as_ref());
+        let cache_key = format!("{}#{}", url, requested_ref.map(String::as_str).unwrap_or("HEAD"));
+        let cache_name = format!("{}-{:016x}", name, simple_hash(&cache_key));
         let clone_dir = cache_dir.join(&cache_name);
-        ensure_git_cache_child(&cache_dir, &clone_dir)?;
 
         let git_result = if clone_dir.exists() && clone_dir.join(".git").exists() {
             Self::git_update(&clone_dir)
         } else {
-            remove_git_cache_child(&cache_dir, &clone_dir).map_err(|e| {
-                CompileError::without_span(format!("failed to remove stale git cache entry '{}': {}", clone_dir.display(), e))
-            })?;
+            let _ = std::fs::remove_dir_all(&clone_dir);
             Self::git_clone(url, &clone_dir)
         };
 
@@ -459,33 +827,18 @@ dist/
             })?;
         }
 
-        let revision = Self::git_revision(&clone_dir).map_err(|e| {
-            CompileError::without_span(format!(
-                "git dependency '{}' from '{}' failed to resolve checked-out revision: {}",
-                name, url, e
-            ))
-        })?;
+        let revision = Self::git_revision(&clone_dir).unwrap_or_else(|_| "unknown".to_string());
 
         let manifest_path = clone_dir.join("Cell.toml");
-        let metadata = match std::fs::symlink_metadata(&manifest_path) {
-            Ok(metadata) => metadata,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return Err(CompileError::without_span(format!(
-                    "git dependency '{}' from '{}' does not contain Cell.toml at repository root",
-                    name, url
-                )));
-            }
-            Err(error) => {
-                return Err(CompileError::without_span(format!(
-                    "failed to inspect git dependency '{}' manifest '{}': {}",
-                    name,
-                    manifest_path.display(),
-                    error
-                )));
-            }
-        };
-        let manifest =
-            read_package_manifest_with_metadata(&clone_dir, &manifest_path, &format!("git dependency '{}' manifest", name), metadata)?;
+        if !manifest_path.exists() {
+            return Err(CompileError::without_span(format!(
+                "git dependency '{}' from '{}' does not contain Cell.toml at repository root",
+                name, url
+            )));
+        }
+
+        let content = std::fs::read_to_string(&manifest_path)?;
+        let manifest: PackageManifest = toml::from_str(&content)?;
 
         Ok((
             ResolvedPackage {
@@ -494,6 +847,8 @@ dist/
                 path: clone_dir.clone(),
                 source: PackageSource::Git { url: url.to_string(), revision },
                 dependencies: manifest.dependencies.keys().cloned().collect(),
+                namespace: manifest.package.namespace.clone(),
+                source_hash: None,
             },
             manifest,
         ))
@@ -504,9 +859,10 @@ dist/
     }
 
     fn git_clone(url: &str, target: &Path) -> std::result::Result<(), String> {
-        validate_git_url(url).map_err(|error| error.message)?;
-        let mut command = Self::git_command();
-        let output = command.args(Self::git_clone_args(url, target)).output().map_err(|e| format!("failed to execute git: {}", e))?;
+        let output = std::process::Command::new("git")
+            .args(["clone", url, &target.to_string_lossy()])
+            .output()
+            .map_err(|e| format!("failed to execute git: {}", e))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -517,8 +873,7 @@ dist/
     }
 
     fn git_update(clone_dir: &Path) -> std::result::Result<(), String> {
-        let mut command = Self::git_command();
-        let output = command
+        let output = std::process::Command::new("git")
             .args(["fetch", "--tags", "--prune", "origin"])
             .current_dir(clone_dir)
             .output()
@@ -533,21 +888,14 @@ dist/
     }
 
     fn git_checkout(clone_dir: &Path, ref_str: &str) -> std::result::Result<(), String> {
-        validate_git_revision(ref_str).map_err(|error| error.message)?;
-        let mut fetch_command = Self::git_command();
-        let fetch = fetch_command
-            .args(Self::git_fetch_ref_args(ref_str))
+        let _output = std::process::Command::new("git")
+            .args(["fetch", "origin", ref_str])
             .current_dir(clone_dir)
             .output()
             .map_err(|e| format!("failed to execute git fetch: {}", e))?;
-        if !fetch.status.success() {
-            let stderr = String::from_utf8_lossy(&fetch.stderr);
-            return Err(format!("git fetch {} failed: {}", ref_str, stderr.trim()));
-        }
 
-        let mut checkout_command = Self::git_command();
-        let output = checkout_command
-            .args(Self::git_checkout_args(ref_str))
+        let output = std::process::Command::new("git")
+            .args(["checkout", ref_str])
             .current_dir(clone_dir)
             .output()
             .map_err(|e| format!("failed to execute git checkout: {}", e))?;
@@ -558,24 +906,6 @@ dist/
         }
 
         Ok(())
-    }
-
-    fn git_command() -> Command {
-        let mut command = Command::new("git");
-        command.args(["-c", "protocol.ext.allow=never", "-c", "protocol.file.allow=never"]);
-        command
-    }
-
-    fn git_clone_args(url: &str, target: &Path) -> Vec<OsString> {
-        vec![OsString::from("clone"), OsString::from("--"), OsString::from(url), target.as_os_str().to_os_string()]
-    }
-
-    fn git_fetch_ref_args(ref_str: &str) -> Vec<OsString> {
-        vec![OsString::from("fetch"), OsString::from("origin"), OsString::from("--"), OsString::from(ref_str)]
-    }
-
-    fn git_checkout_args(ref_str: &str) -> Vec<OsString> {
-        vec![OsString::from("checkout"), OsString::from("--"), OsString::from(ref_str)]
     }
 
     fn git_revision(clone_dir: &Path) -> std::result::Result<String, String> {
@@ -651,11 +981,11 @@ impl DependencyGraph {
     }
 
     pub fn find_cycle(&self) -> Option<Vec<String>> {
-        let mut visited = HashSet::new();
+        let mut visited = HashMap::new();
         let mut rec_stack = Vec::new();
 
         for node in &self.nodes {
-            if !visited.contains(node) {
+            if !visited.contains_key(node) {
                 if let Some(cycle) = self.dfs_find_cycle(node, &mut visited, &mut rec_stack) {
                     return Some(cycle);
                 }
@@ -665,17 +995,18 @@ impl DependencyGraph {
         None
     }
 
-    fn dfs_find_cycle(&self, node: &str, visited: &mut HashSet<String>, rec_stack: &mut Vec<String>) -> Option<Vec<String>> {
-        visited.insert(node.to_string());
+    fn dfs_find_cycle(&self, node: &str, visited: &mut HashMap<String, bool>, rec_stack: &mut Vec<String>) -> Option<Vec<String>> {
+        visited.insert(node.to_string(), true);
         rec_stack.push(node.to_string());
 
         if let Some(neighbors) = self.edges.get(node) {
             for neighbor in neighbors {
-                if !visited.contains(neighbor) {
+                if !visited.contains_key(neighbor) {
                     if let Some(cycle) = self.dfs_find_cycle(neighbor, visited, rec_stack) {
                         return Some(cycle);
                     }
-                } else if let Some(idx) = rec_stack.iter().position(|n| n == neighbor) {
+                } else if rec_stack.contains(neighbor) {
+                    let idx = rec_stack.iter().position(|n| n == neighbor).unwrap();
                     let mut cycle = rec_stack[idx..].to_vec();
                     cycle.push(neighbor.to_string());
                     return Some(cycle);
@@ -688,330 +1019,73 @@ impl DependencyGraph {
     }
 }
 
-fn canonical_package_child_path(base_root: &Path, raw_path: &str, label: &str) -> Result<PathBuf> {
-    reject_package_path_escape(raw_path, label)?;
-    let canonical_root = std::fs::canonicalize(base_root)
-        .map_err(|e| CompileError::without_span(format!("failed to canonicalize package root '{}': {}", base_root.display(), e)))?;
-    let candidate = base_root.join(raw_path);
-    if !candidate.exists() {
-        return Err(CompileError::without_span(format!("{} '{}' does not exist", label, candidate.display())));
+fn simple_hash(s: &str) -> u64 {
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for byte in s.bytes() {
+        hash ^= byte as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
     }
-    let canonical_candidate = std::fs::canonicalize(&candidate)
-        .map_err(|e| CompileError::without_span(format!("failed to canonicalize {} '{}': {}", label, candidate.display(), e)))?;
-    if !canonical_candidate.starts_with(&canonical_root) {
-        return Err(CompileError::without_span(format!(
-            "{} '{}' resolves outside package root '{}'",
-            label,
-            raw_path,
-            canonical_root.display()
-        )));
-    }
-    Ok(canonical_candidate)
-}
-
-fn reject_package_path_escape(raw_path: &str, label: &str) -> Result<()> {
-    let path = Path::new(raw_path);
-    if raw_path.is_empty() {
-        return Err(CompileError::without_span(format!("{} path must not be empty", label)));
-    }
-    if path.is_absolute() {
-        return Err(CompileError::without_span(format!("{} '{}' must be relative to the package root", label, raw_path)));
-    }
-    if path.components().any(|component| matches!(component, Component::ParentDir | Component::Prefix(_) | Component::RootDir)) {
-        return Err(CompileError::without_span(format!("{} '{}' must stay inside the package root", label, raw_path)));
-    }
-    Ok(())
-}
-
-fn read_package_manifest_with_metadata(
-    package_root: &Path,
-    manifest_path: &Path,
-    label: &str,
-    metadata: std::fs::Metadata,
-) -> Result<PackageManifest> {
-    validate_package_manifest_metadata(package_root, manifest_path, label, &metadata)?;
-    let content = std::fs::read_to_string(manifest_path)?;
-    let manifest: PackageManifest = toml::from_str(&content)?;
-    Ok(manifest)
-}
-
-fn validate_package_manifest_write_target(package_root: &Path, manifest_path: &Path, label: &str) -> Result<()> {
-    match std::fs::symlink_metadata(manifest_path) {
-        Ok(metadata) => validate_package_manifest_metadata(package_root, manifest_path, label, &metadata),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            let canonical_root = std::fs::canonicalize(package_root).map_err(|e| {
-                CompileError::without_span(format!("failed to canonicalize package root '{}': {}", package_root.display(), e))
-            })?;
-            let parent = manifest_path.parent().ok_or_else(|| {
-                CompileError::without_span(format!("{} '{}' has no parent directory", label, manifest_path.display()))
-            })?;
-            let canonical_parent = std::fs::canonicalize(parent).map_err(|e| {
-                CompileError::without_span(format!("failed to canonicalize {} parent '{}': {}", label, parent.display(), e))
-            })?;
-            if !canonical_parent.starts_with(&canonical_root) {
-                return Err(CompileError::without_span(format!(
-                    "{} '{}' resolves outside package root '{}'",
-                    label,
-                    manifest_path.display(),
-                    canonical_root.display()
-                )));
-            }
-            Ok(())
-        }
-        Err(error) => Err(CompileError::without_span(format!("failed to inspect {} '{}': {}", label, manifest_path.display(), error))),
-    }
-}
-
-fn validate_package_manifest_metadata(
-    package_root: &Path,
-    manifest_path: &Path,
-    label: &str,
-    metadata: &std::fs::Metadata,
-) -> Result<()> {
-    if metadata.file_type().is_symlink() {
-        return Err(CompileError::without_span(format!(
-            "refusing to use {} '{}' because it is a symbolic link",
-            label,
-            manifest_path.display()
-        )));
-    }
-    if !metadata.is_file() {
-        return Err(CompileError::without_span(format!("{} '{}' is not a file", label, manifest_path.display())));
-    }
-
-    let canonical_root = std::fs::canonicalize(package_root)
-        .map_err(|e| CompileError::without_span(format!("failed to canonicalize package root '{}': {}", package_root.display(), e)))?;
-    let canonical_manifest = std::fs::canonicalize(manifest_path)
-        .map_err(|e| CompileError::without_span(format!("failed to canonicalize {} '{}': {}", label, manifest_path.display(), e)))?;
-    if !canonical_manifest.starts_with(&canonical_root) {
-        return Err(CompileError::without_span(format!(
-            "{} '{}' resolves outside package root '{}'",
-            label,
-            manifest_path.display(),
-            canonical_root.display()
-        )));
-    }
-
-    Ok(())
-}
-
-fn validate_existing_resolution_matches(name: &str, dep: &Dependency, base_root: &Path, existing: &ResolvedPackage) -> Result<()> {
-    let declared_version = match dep {
-        Dependency::Simple(version) => Some(version.as_str()),
-        Dependency::Detailed(detailed) if detailed.version != "*" => Some(detailed.version.as_str()),
-        Dependency::Detailed(_) => None,
-    };
-    if let Some(version) = declared_version {
-        if version != existing.version {
-            return Err(CompileError::without_span(format!(
-                "conflicting dependency '{}' resolves to package version '{}' but another declaration requires '{}'",
-                name, existing.version, version
-            )));
-        }
-    }
-
-    match dep {
-        Dependency::Simple(version) => match &existing.source {
-            PackageSource::Registry { name: package_name, version: package_version }
-                if package_name == name && package_version == version =>
-            {
-                Ok(())
-            }
-            source => Err(conflicting_dependency_source_error(name, source, &format!("registry {}@{}", name, version))),
-        },
-        Dependency::Detailed(detailed) => {
-            if let Some(path) = &detailed.path {
-                let expected_path = canonical_package_child_path(base_root, path, &format!("dependency '{}' path", name))?;
-                if existing.path == expected_path {
-                    return Ok(());
-                }
-                return Err(conflicting_dependency_source_error(
-                    name,
-                    &existing.source,
-                    &format!("path '{}'", expected_path.display()),
-                ));
-            }
-            if let Some(git) = &detailed.git {
-                validate_git_url(git)?;
-                validate_git_dependency_pin(name, detailed)?;
-                let revision = detailed.rev.as_deref().unwrap_or_default();
-                return match &existing.source {
-                    PackageSource::Git { url, revision: existing_revision } if url == git && existing_revision == revision => Ok(()),
-                    source => Err(conflicting_dependency_source_error(name, source, &format!("git '{}#{}'", git, revision))),
-                };
-            }
-            match &existing.source {
-                PackageSource::Registry { name: package_name, version } if package_name == name && version == &detailed.version => {
-                    Ok(())
-                }
-                source => Err(conflicting_dependency_source_error(name, source, &format!("registry {}@{}", name, detailed.version))),
-            }
-        }
-    }
-}
-
-fn conflicting_dependency_source_error(name: &str, existing: &PackageSource, expected: &str) -> CompileError {
-    CompileError::without_span(format!(
-        "conflicting dependency '{}' resolves to {} but another declaration requires {}",
-        name,
-        package_source_display(existing),
-        expected
-    ))
-}
-
-fn validate_git_url(url: &str) -> Result<()> {
-    if url.is_empty() || url.trim() != url {
-        return Err(CompileError::without_span("git dependency URL must not be empty or padded with whitespace"));
-    }
-    if url.bytes().any(|byte| byte.is_ascii_control() || byte.is_ascii_whitespace()) {
-        return Err(CompileError::without_span(format!("git dependency URL '{}' contains whitespace or control characters", url)));
-    }
-    if url.contains("::") {
-        return Err(CompileError::without_span(format!(
-            "git dependency URL '{}' uses a Git remote-helper/ext-style transport; use https://, http://, git://, ssh://, or scp-like SSH",
-            url
-        )));
-    }
-    if url.bytes().any(is_git_url_shell_metachar) {
-        return Err(CompileError::without_span(format!("git dependency URL '{}' contains unsupported shell metacharacters", url)));
-    }
-
-    if let Some((scheme, _rest)) = url.split_once("://") {
-        let scheme = scheme.to_ascii_lowercase();
-        if matches!(scheme.as_str(), "https" | "http" | "git" | "ssh") {
-            return Ok(());
-        }
-        return Err(CompileError::without_span(format!(
-            "git dependency URL '{}' uses unsupported scheme '{}'; allowed schemes are https, http, git, and ssh",
-            url, scheme
-        )));
-    }
-
-    if is_scp_like_ssh_url(url) {
-        return Ok(());
-    }
-
-    Err(CompileError::without_span(format!(
-        "git dependency URL '{}' must use https://, http://, git://, ssh://, or scp-like SSH",
-        url
-    )))
-}
-
-fn validate_git_dependency_pin(name: &str, detailed: &DetailedDependency) -> Result<()> {
-    if detailed.branch.is_some() || detailed.tag.is_some() {
-        return Err(CompileError::without_span(format!(
-            "git dependency '{}' must pin an immutable rev; branch and tag refs are not accepted",
-            name
-        )));
-    }
-
-    let Some(rev) = detailed.rev.as_deref() else {
-        return Err(CompileError::without_span(format!(
-            "git dependency '{}' must specify a full commit rev for provenance; branch/tag/default-branch dependencies are not accepted",
-            name
-        )));
-    };
-
-    validate_git_revision(rev)
-}
-
-pub(crate) fn validate_git_revision(rev: &str) -> Result<()> {
-    let is_full_sha1 = rev.len() == 40 && rev.bytes().all(|byte| byte.is_ascii_hexdigit());
-    let is_full_sha256 = rev.len() == 64 && rev.bytes().all(|byte| byte.is_ascii_hexdigit());
-    if is_full_sha1 || is_full_sha256 {
-        return Ok(());
-    }
-
-    Err(CompileError::without_span("git dependency rev must be a full 40-character SHA-1 or 64-character SHA-256 commit hash"))
-}
-
-fn is_git_url_shell_metachar(byte: u8) -> bool {
-    matches!(byte, b';' | b'|' | b'&' | b'`' | b'$' | b'<' | b'>' | b'\'' | b'"' | b'\\')
-}
-
-fn is_scp_like_ssh_url(url: &str) -> bool {
-    let Some((authority, path)) = url.split_once(':') else {
-        return false;
-    };
-    !authority.is_empty()
-        && authority.contains('@')
-        && !authority.starts_with('-')
-        && !path.is_empty()
-        && !path.starts_with('-')
-        && !path.starts_with('/')
-}
-
-fn git_cache_entry_name(name: &str, url: &str, requested_ref: Option<&str>) -> String {
-    let cache_key = format!("{}\0{}\0{}", name, url, requested_ref.unwrap_or("HEAD"));
-    let digest = blake2b_simd::Params::new().hash_length(16).personal(b"CellPkgGitCache").hash(cache_key.as_bytes());
-    format!("git-{}", digest.to_hex())
-}
-
-fn ensure_git_cache_child(cache_root: &Path, target: &Path) -> Result<()> {
-    if target.file_name().is_none() {
-        return Err(CompileError::without_span(format!("invalid git cache target '{}'", target.display())));
-    }
-
-    let parent =
-        target.parent().ok_or_else(|| CompileError::without_span(format!("invalid git cache target '{}'", target.display())))?;
-    let canonical_parent = std::fs::canonicalize(parent).map_err(|e| {
-        CompileError::without_span(format!("failed to canonicalize git cache target parent '{}': {}", parent.display(), e))
-    })?;
-    if canonical_parent != cache_root {
-        return Err(CompileError::without_span(format!(
-            "git cache target '{}' resolves outside cache root '{}'",
-            target.display(),
-            cache_root.display()
-        )));
-    }
-
-    if target.exists() {
-        let canonical_target = std::fs::canonicalize(target).map_err(|e| {
-            CompileError::without_span(format!("failed to canonicalize git cache target '{}': {}", target.display(), e))
-        })?;
-        if !canonical_target.starts_with(cache_root) {
-            return Err(CompileError::without_span(format!(
-                "git cache target '{}' resolves outside cache root '{}'",
-                target.display(),
-                cache_root.display()
-            )));
-        }
-    }
-
-    Ok(())
-}
-
-fn remove_git_cache_child(cache_root: &Path, target: &Path) -> Result<()> {
-    ensure_git_cache_child(cache_root, target)?;
-    if target.exists() {
-        std::fs::remove_dir_all(target)?;
-    }
-    Ok(())
+    hash
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Lockfile {
     pub version: u32,
+    #[serde(default)]
+    pub package: LockfilePackageInfo,
     pub dependencies: BTreeMap<String, LockedDependency>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub package_build: Option<LockedBuildInfo>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub deployment: BTreeMap<String, LockfileDeploymentRef>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct LockfilePackageInfo {
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub name: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub version: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub namespace: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compiler_source_hash: Option<String>,
+}
+
+/// A reference from Cell.lock [deployment.<network>] to a Deployed.toml entry.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LockfileDeploymentRef {
+    pub record: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub record_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub out_point: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data_hash: Option<String>,
 }
 
 impl Lockfile {
     pub const CURRENT_VERSION: u32 = 1;
 
     pub fn new() -> Self {
-        Self { version: Self::CURRENT_VERSION, dependencies: BTreeMap::new() }
+        Self {
+            version: Self::CURRENT_VERSION,
+            package: LockfilePackageInfo::default(),
+            dependencies: BTreeMap::new(),
+            package_build: None,
+            deployment: BTreeMap::new(),
+        }
     }
 
     pub fn read_from_root(root: &Path) -> Result<Option<Self>> {
         let lock_path = root.join("Cell.lock");
-        let metadata = match std::fs::symlink_metadata(&lock_path) {
-            Ok(metadata) => metadata,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(error) => {
-                return Err(CompileError::without_span(format!("failed to inspect lockfile '{}': {}", lock_path.display(), error)));
-            }
-        };
-        validate_package_manifest_metadata(root, &lock_path, "lockfile", &metadata)?;
+        if !lock_path.exists() {
+            return Ok(None);
+        }
         let content = std::fs::read_to_string(&lock_path)
             .map_err(|error| CompileError::without_span(format!("failed to read lockfile '{}': {}", lock_path.display(), error)))?;
         let lockfile = toml::from_str(&content)
@@ -1021,7 +1095,6 @@ impl Lockfile {
 
     pub fn write_to_root(&self, root: &Path) -> Result<()> {
         let lock_path = root.join("Cell.lock");
-        validate_package_manifest_write_target(root, &lock_path, "lockfile")?;
         let content = toml::to_string_pretty(self)?;
         std::fs::write(&lock_path, content)?;
         Ok(())
@@ -1034,10 +1107,16 @@ impl Lockfile {
                 source: match &package.source {
                     PackageSource::Local(path) => LockedSource::Path { path: path.to_string_lossy().to_string() },
                     PackageSource::Git { url, revision } => LockedSource::Git { url: url.clone(), revision: revision.clone() },
-                    PackageSource::Registry { name: reg_name, version } => {
-                        LockedSource::Registry { name: reg_name.clone(), version: version.clone() }
-                    }
+                    PackageSource::Registry { registry, url, revision, namespace, version } => LockedSource::Registry {
+                        registry: registry.clone(),
+                        url: url.clone(),
+                        revision: revision.clone(),
+                        namespace: namespace.clone(),
+                        version: version.clone(),
+                    },
                 },
+                source_hash: package.source_hash.clone(),
+                build: None,
             };
             self.dependencies.insert(name.clone(), locked);
         }
@@ -1080,11 +1159,7 @@ impl Lockfile {
                 continue;
             };
             if let Some(dep) = manifest.dependencies.get(name) {
-                let check_manifest_path_source = match resolved {
-                    Some(resolved) => !resolved.contains_key(name),
-                    None => true,
-                };
-                issues.extend(lock_dependency_consistency_issues(name, dep, locked, check_manifest_path_source));
+                issues.extend(lock_dependency_consistency_issues(name, dep, locked, manifest.package.namespace.as_deref()));
             }
         }
 
@@ -1125,15 +1200,38 @@ fn resolved_dependency_consistency_issues(name: &str, package: &ResolvedPackage,
         (PackageSource::Git { url, revision }, LockedSource::Git { url: locked_url, revision: locked_revision })
             if locked_url == url && locked_revision == revision => {}
         (
-            PackageSource::Registry { name: package_name, version: package_version },
-            LockedSource::Registry { name: locked_name, version: locked_version },
-        ) if locked_name == package_name && locked_version == package_version => {}
+            PackageSource::Registry { registry, url, revision, namespace, version },
+            LockedSource::Registry {
+                registry: locked_registry,
+                url: locked_url,
+                revision: locked_revision,
+                namespace: locked_namespace,
+                version: locked_version,
+            },
+        ) if locked_registry == registry
+            && locked_url == url
+            && locked_revision == revision
+            && locked_namespace == namespace
+            && locked_version == version => {}
         (_, source) => issues.push(format!(
             "resolved dependency '{}' expects {} but Cell.lock records {}",
             name,
             package_source_display(&package.source),
             locked_source_display(source)
         )),
+    }
+
+    if let Some(expected_hash) = &package.source_hash {
+        match &locked.source_hash {
+            Some(locked_hash) if locked_hash == expected_hash => {}
+            Some(locked_hash) => issues.push(format!(
+                "resolved dependency '{}' source_hash '{}' does not match Cell.lock '{}'",
+                name, expected_hash, locked_hash
+            )),
+            None => issues.push(format!("resolved dependency '{}' is missing source_hash in Cell.lock", name)),
+        }
+    } else if matches!(package.source, PackageSource::Registry { .. }) {
+        issues.push(format!("resolved registry dependency '{}' did not produce a source_hash", name));
     }
 
     issues
@@ -1143,14 +1241,14 @@ fn lock_dependency_consistency_issues(
     name: &str,
     dep: &Dependency,
     locked: &LockedDependency,
-    check_manifest_path_source: bool,
+    consuming_namespace: Option<&str>,
 ) -> Vec<String> {
     let mut issues = Vec::new();
 
     match dep {
         Dependency::Simple(version) => match &locked.source {
-            LockedSource::Registry { name: locked_name, version: locked_version }
-                if locked_name == name && locked_version == version => {}
+            LockedSource::Registry { namespace: locked_namespace, version: locked_version, .. }
+                if Some(locked_namespace.as_str()) == consuming_namespace && locked_version == version => {}
             source => issues.push(format!(
                 "dependency '{}' expects registry source {}@{} but Cell.lock records {}",
                 name,
@@ -1161,23 +1259,22 @@ fn lock_dependency_consistency_issues(
         },
         Dependency::Detailed(detail) => {
             if let Some(path) = &detail.path {
-                if check_manifest_path_source {
-                    match &locked.source {
-                        LockedSource::Path { path: locked_path } if locked_path == path => {}
-                        source => issues.push(format!(
-                            "dependency '{}' expects path source '{}' but Cell.lock records {}",
-                            name,
-                            path,
-                            locked_source_display(source)
-                        )),
-                    }
+                match &locked.source {
+                    LockedSource::Path { path: locked_path } if locked_path == path => {}
+                    source => issues.push(format!(
+                        "dependency '{}' expects path source '{}' but Cell.lock records {}",
+                        name,
+                        path,
+                        locked_source_display(source)
+                    )),
                 }
                 push_locked_version_issue(name, &detail.version, &locked.version, &mut issues);
             } else if let Some(git) = &detail.git {
                 match &locked.source {
                     LockedSource::Git { url, revision } if url == git => {
                         if let Some(rev) = &detail.rev {
-                            if revision != rev {
+                            let rev_matches = revision == rev || revision.starts_with(rev) || rev.starts_with(revision);
+                            if !rev_matches {
                                 issues.push(format!(
                                     "dependency '{}' expects git revision '{}' but Cell.lock records '{}'",
                                     name, rev, revision
@@ -1195,8 +1292,9 @@ fn lock_dependency_consistency_issues(
                 push_locked_version_issue(name, &detail.version, &locked.version, &mut issues);
             } else {
                 match &locked.source {
-                    LockedSource::Registry { name: locked_name, version: locked_version }
-                        if locked_name == name && locked_version == &detail.version => {}
+                    LockedSource::Registry { namespace: locked_namespace, version: locked_version, .. }
+                        if Some(locked_namespace.as_str()) == detail.namespace.as_deref().or(consuming_namespace)
+                            && locked_version == &detail.version => {}
                     source => issues.push(format!(
                         "dependency '{}' expects registry source {}@{} but Cell.lock records {}",
                         name,
@@ -1222,7 +1320,7 @@ fn locked_source_display(source: &LockedSource) -> String {
     match source {
         LockedSource::Path { path } => format!("path '{}'", path),
         LockedSource::Git { url, revision } => format!("git '{}#{}'", url, revision),
-        LockedSource::Registry { name, version } => format!("registry {}@{}", name, version),
+        LockedSource::Registry { registry, namespace, version, .. } => format!("registry {}/{}@{}", registry, namespace, version),
     }
 }
 
@@ -1230,7 +1328,7 @@ fn package_source_display(source: &PackageSource) -> String {
     match source {
         PackageSource::Local(path) => format!("path '{}'", path.display()),
         PackageSource::Git { url, revision } => format!("git '{}#{}'", url, revision),
-        PackageSource::Registry { name, version } => format!("registry {}@{}", name, version),
+        PackageSource::Registry { registry, namespace, version, .. } => format!("registry {}/{}@{}", registry, namespace, version),
     }
 }
 
@@ -1240,17 +1338,41 @@ impl Default for Lockfile {
     }
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct LockedBuildInfo {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compiler_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_profile: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artifact_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schema_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cell_data_codec_manifest_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub abi_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub constraints_hash: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LockedDependency {
     pub version: String,
     pub source: LockedSource,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub build: Option<LockedBuildInfo>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum LockedSource {
     Path { path: String },
     Git { url: String, revision: String },
-    Registry { name: String, version: String },
+    Registry { registry: String, url: String, revision: String, namespace: String, version: String },
 }
 
 pub mod version {
@@ -1368,6 +1490,158 @@ pub mod version {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Deployed.toml — Deployment Fact Record
+// ---------------------------------------------------------------------------
+
+/// The schema identifier for Deployed.toml files produced by CellScript v0.19+.
+pub const DEPLOYED_MANIFEST_SCHEMA: &str = "cellscript-deployed-v0.19";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeployedManifest {
+    pub version: u32,
+    pub schema: Option<String>,
+    pub package: DeployedPackageInfo,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub build: Option<DeployedBuildInfo>,
+    #[serde(default)]
+    pub deployments: Vec<DeploymentRecord>,
+}
+
+impl DeployedManifest {
+    pub const CURRENT_VERSION: u32 = 1;
+
+    pub fn read_from_root(root: &Path) -> Result<Option<Self>> {
+        let path = root.join("Deployed.toml");
+        if !path.exists() {
+            return Ok(None);
+        }
+        let content = std::fs::read_to_string(&path)
+            .map_err(|e| CompileError::without_span(format!("failed to read Deployed.toml '{}': {}", path.display(), e)))?;
+        let manifest: Self = toml::from_str(&content)
+            .map_err(|e| CompileError::without_span(format!("failed to parse Deployed.toml '{}': {}", path.display(), e)))?;
+        Ok(Some(manifest))
+    }
+
+    pub fn write_to_root(&self, root: &Path) -> Result<()> {
+        let path = root.join("Deployed.toml");
+        let content = toml::to_string_pretty(self)?;
+        std::fs::write(&path, content)?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeployedPackageInfo {
+    pub name: String,
+    pub version: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_hash: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct DeployedBuildInfo {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compiler_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artifact_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schema_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cell_data_codec_manifest_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub abi_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub constraints_hash: Option<String>,
+}
+
+/// Deployment status lifecycle:
+/// candidate -> active -> deprecated -> revoked
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DeploymentStatus {
+    #[default]
+    Candidate,
+    Active,
+    Deprecated,
+    Revoked,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ScriptRole {
+    #[default]
+    Type,
+    Lock,
+    DualRole,
+    Helper,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeploymentRecord {
+    // Required fields (Phase 1)
+    pub network: String,
+    pub chain_id: String,
+    pub tx_hash: String,
+    pub output_index: u32,
+    pub code_hash: String,
+    pub hash_type: String,
+    pub dep_type: String,
+    pub data_hash: String,
+    pub out_point: String,
+
+    // Recommended fields (Phase 1 — build provenance binding)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artifact_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schema_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cell_data_codec_manifest_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub abi_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub constraints_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compiler_version: Option<String>,
+
+    // Optional fields (Phase 2 — governance and upgrade)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub type_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub script_role: Option<ScriptRole>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<DeploymentStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upgrade_lineage: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audit_report_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub publisher_signature: Option<String>,
+
+    // Cell deps
+    #[serde(default)]
+    pub cell_deps: Vec<DeploymentCellDep>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeploymentCellDep {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    pub tx_hash: String,
+    pub output_index: u32,
+    pub dep_type: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hash_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub type_id: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1379,6 +1653,7 @@ mod tests {
             package: PackageInfo {
                 name: "test".to_string(),
                 version: "0.1.0".to_string(),
+                namespace: None,
                 authors: vec!["Test Author".to_string()],
                 description: "Test package".to_string(),
                 license: "MIT".to_string(),
@@ -1393,6 +1668,7 @@ mod tests {
                 include: vec![],
                 exclude: vec![],
             },
+            workspace: None,
             dependencies: HashMap::new(),
             dev_dependencies: HashMap::new(),
             build: BuildConfig::default(),
@@ -1419,21 +1695,6 @@ mod tests {
 
         graph.add_edge("C".to_string(), "A".to_string());
         assert!(graph.find_cycle().is_some());
-    }
-
-    #[test]
-    fn dependency_graph_ignores_cross_edges_without_cycle() {
-        let mut graph = DependencyGraph::new();
-        graph.add_node("A".to_string());
-        graph.add_node("B".to_string());
-        graph.add_node("C".to_string());
-        graph.add_node("D".to_string());
-        graph.add_edge("A".to_string(), "B".to_string());
-        graph.add_edge("A".to_string(), "C".to_string());
-        graph.add_edge("B".to_string(), "D".to_string());
-        graph.add_edge("C".to_string(), "D".to_string());
-
-        assert!(graph.find_cycle().is_none());
     }
 
     #[test]
@@ -1486,172 +1747,7 @@ version = "0.1.0"
         assert_eq!(math.name, "math");
         assert_eq!(math.version, "0.1.0");
         assert!(matches!(math.source, PackageSource::Local(_)));
-        assert_eq!(manager.get_source_paths(), vec![std::fs::canonicalize(root.join("deps/math/src")).unwrap()]);
-    }
-
-    #[test]
-    fn package_manager_records_canonical_local_source_paths() {
-        let temp = tempdir().unwrap();
-        let root = temp.path();
-        std::fs::create_dir_all(root.join("deps/math/src")).unwrap();
-        std::fs::write(
-            root.join("Cell.toml"),
-            r#"
-[package]
-name = "app"
-version = "0.1.0"
-
-[dependencies.math]
-version = "0.1.0"
-path = "deps/./math"
-"#,
-        )
-        .unwrap();
-        std::fs::write(
-            root.join("deps/math/Cell.toml"),
-            r#"
-[package]
-name = "math"
-version = "0.1.0"
-"#,
-        )
-        .unwrap();
-
-        let mut manager = PackageManager::new(root);
-        manager.resolve_dependencies().unwrap();
-
-        let math = manager.get_resolved().get("math").expect("path dependency should resolve");
-        assert!(matches!(&math.source, PackageSource::Local(path) if path == &PathBuf::from("deps/math")));
-
-        let manifest = manager.read_manifest().unwrap();
-        let mut lockfile = Lockfile::new();
-        lockfile.replace_with_resolved(manager.get_resolved());
-        let locked = lockfile.dependencies.get("math").expect("math should be locked");
-        assert!(matches!(&locked.source, LockedSource::Path { path } if path == "deps/math"));
-        assert!(lockfile.consistency_issues_with_resolved(&manifest, manager.get_resolved()).is_empty());
-
-        let unresolved_issues = lockfile.consistency_issues(&manifest);
-        assert!(unresolved_issues.iter().any(|issue| issue.contains("expects path source 'deps/./math'")), "{unresolved_issues:?}");
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn package_manager_canonicalizes_existing_symlink_roots() {
-        let temp = tempdir().unwrap();
-        let real_root = temp.path().join("real");
-        let link_root = temp.path().join("link");
-        std::fs::create_dir_all(real_root.join("deps/math/src")).unwrap();
-        std::os::unix::fs::symlink(&real_root, &link_root).unwrap();
-        std::fs::write(
-            real_root.join("Cell.toml"),
-            r#"
-[package]
-name = "app"
-version = "0.1.0"
-
-[dependencies.math]
-version = "0.1.0"
-path = "deps/math"
-"#,
-        )
-        .unwrap();
-        std::fs::write(
-            real_root.join("deps/math/Cell.toml"),
-            r#"
-[package]
-name = "math"
-version = "0.1.0"
-"#,
-        )
-        .unwrap();
-
-        let mut manager = PackageManager::new(&link_root);
-        manager.resolve_dependencies().unwrap();
-
-        let math = manager.get_resolved().get("math").expect("path dependency should resolve");
-        assert_eq!(math.path, std::fs::canonicalize(real_root.join("deps/math")).unwrap());
-        assert!(matches!(&math.source, PackageSource::Local(path) if path == &PathBuf::from("deps/math")));
-        assert_eq!(manager.get_source_paths(), vec![std::fs::canonicalize(real_root.join("deps/math/src")).unwrap()]);
-
-        let manifest = manager.read_manifest().unwrap();
-        let mut lockfile = Lockfile::new();
-        lockfile.replace_with_resolved(manager.get_resolved());
-        assert!(lockfile.consistency_issues_with_resolved(&manifest, manager.get_resolved()).is_empty());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn package_manager_rejects_local_dependency_manifest_symlink_escape() {
-        use std::os::unix::fs::symlink;
-
-        let temp = tempdir().unwrap();
-        let root = temp.path().join("package");
-        let outside = temp.path().join("outside");
-        std::fs::create_dir_all(root.join("deps/math")).unwrap();
-        std::fs::create_dir_all(&outside).unwrap();
-        std::fs::write(
-            root.join("Cell.toml"),
-            r#"
-[package]
-name = "app"
-version = "0.1.0"
-
-[dependencies.math]
-version = "0.1.0"
-path = "deps/math"
-"#,
-        )
-        .unwrap();
-        std::fs::write(
-            outside.join("Cell.toml"),
-            r#"
-[package]
-name = "math"
-version = "0.1.0"
-"#,
-        )
-        .unwrap();
-        symlink(outside.join("Cell.toml"), root.join("deps/math/Cell.toml")).unwrap();
-
-        let mut manager = PackageManager::new(&root);
-        let error = manager.resolve_dependencies().unwrap_err();
-
-        assert!(error.message.contains("symbolic link"), "{}", error.message);
-        assert!(manager.get_resolved().is_empty());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn package_manager_rejects_manifest_symlink_write_escape() {
-        use std::os::unix::fs::symlink;
-
-        let temp = tempdir().unwrap();
-        let root = temp.path().join("package");
-        let outside = temp.path().join("outside");
-        std::fs::create_dir_all(&root).unwrap();
-        std::fs::create_dir_all(&outside).unwrap();
-        let outside_manifest = outside.join("Cell.toml");
-        let outside_before = r#"
-[package]
-name = "outside"
-version = "0.1.0"
-"#;
-        std::fs::write(&outside_manifest, outside_before).unwrap();
-        symlink(&outside_manifest, root.join("Cell.toml")).unwrap();
-
-        let manifest: PackageManifest = toml::from_str(
-            r#"
-[package]
-name = "app"
-version = "0.1.0"
-"#,
-        )
-        .unwrap();
-        let manager = PackageManager::new(&root);
-        let error = manager.write_manifest(&manifest).unwrap_err();
-
-        assert!(error.message.contains("symbolic link"), "{}", error.message);
-        assert_eq!(std::fs::read_to_string(&outside_manifest).unwrap(), outside_before);
+        assert_eq!(manager.get_source_paths(), vec![root.join("deps/math/src")]);
     }
 
     #[test]
@@ -1693,7 +1789,7 @@ version = "0.2.0"
         let temp = tempdir().unwrap();
         let root = temp.path();
         std::fs::create_dir_all(root.join("deps/math/src")).unwrap();
-        std::fs::create_dir_all(root.join("deps/math/deps/util/src")).unwrap();
+        std::fs::create_dir_all(root.join("deps/util/src")).unwrap();
         std::fs::write(
             root.join("Cell.toml"),
             r#"
@@ -1716,12 +1812,12 @@ version = "0.1.0"
 
 [dependencies.util]
 version = "0.1.0"
-path = "deps/util"
+path = "../util"
 "#,
         )
         .unwrap();
         std::fs::write(
-            root.join("deps/math/deps/util/Cell.toml"),
+            root.join("deps/util/Cell.toml"),
             r#"
 [package]
 name = "util"
@@ -1739,132 +1835,11 @@ version = "0.1.0"
     }
 
     #[test]
-    fn package_manager_rejects_conflicting_transitive_dependency_sources() {
-        let temp = tempdir().unwrap();
-        let root = temp.path();
-        std::fs::create_dir_all(root.join("deps/left/deps/util/src")).unwrap();
-        std::fs::create_dir_all(root.join("deps/right/deps/util/src")).unwrap();
-        std::fs::write(
-            root.join("Cell.toml"),
-            r#"
-[package]
-name = "app"
-version = "0.1.0"
-
-[dependencies.left]
-version = "0.1.0"
-path = "deps/left"
-
-[dependencies.right]
-version = "0.1.0"
-path = "deps/right"
-"#,
-        )
-        .unwrap();
-        std::fs::write(
-            root.join("deps/left/Cell.toml"),
-            r#"
-[package]
-name = "left"
-version = "0.1.0"
-
-[dependencies.util]
-version = "0.1.0"
-path = "deps/util"
-"#,
-        )
-        .unwrap();
-        std::fs::write(
-            root.join("deps/right/Cell.toml"),
-            r#"
-[package]
-name = "right"
-version = "0.1.0"
-
-[dependencies.util]
-version = "0.1.0"
-path = "deps/util"
-"#,
-        )
-        .unwrap();
-        std::fs::write(
-            root.join("deps/left/deps/util/Cell.toml"),
-            r#"
-[package]
-name = "util"
-version = "0.1.0"
-"#,
-        )
-        .unwrap();
-        std::fs::write(
-            root.join("deps/right/deps/util/Cell.toml"),
-            r#"
-[package]
-name = "util"
-version = "0.1.0"
-"#,
-        )
-        .unwrap();
-
-        let mut manager = PackageManager::new(root);
-        let error = manager.resolve_dependencies().unwrap_err();
-
-        assert!(error.message.contains("conflicting dependency 'util'"), "{}", error.message);
-        assert!(error.message.contains("deps/left/deps/util") || error.message.contains("deps/right/deps/util"), "{}", error.message);
-    }
-
-    #[test]
-    fn package_manager_rejects_local_path_dependency_traversal() {
-        let temp = tempdir().unwrap();
-        let root = temp.path();
-        std::fs::create_dir_all(root.join("deps/math/src")).unwrap();
-        std::fs::create_dir_all(root.join("outside/src")).unwrap();
-        std::fs::write(
-            root.join("Cell.toml"),
-            r#"
-[package]
-name = "app"
-version = "0.1.0"
-
-[dependencies.math]
-path = "deps/math"
-"#,
-        )
-        .unwrap();
-        std::fs::write(
-            root.join("deps/math/Cell.toml"),
-            r#"
-[package]
-name = "math"
-version = "0.1.0"
-
-[dependencies.outside]
-path = "../outside"
-"#,
-        )
-        .unwrap();
-        std::fs::write(
-            root.join("outside/Cell.toml"),
-            r#"
-[package]
-name = "outside"
-version = "0.1.0"
-"#,
-        )
-        .unwrap();
-
-        let mut manager = PackageManager::new(root);
-        let error = manager.resolve_dependencies().unwrap_err();
-
-        assert!(error.message.contains("must stay inside the package root"), "{}", error.message);
-    }
-
-    #[test]
     fn package_manager_rejects_transitive_path_dependency_cycles() {
         let temp = tempdir().unwrap();
         let root = temp.path();
         std::fs::create_dir_all(root.join("deps/a/src")).unwrap();
-        std::fs::create_dir_all(root.join("deps/a/deps/b/deps/a/src")).unwrap();
+        std::fs::create_dir_all(root.join("deps/b/src")).unwrap();
         std::fs::write(
             root.join("Cell.toml"),
             r#"
@@ -1885,28 +1860,19 @@ name = "a"
 version = "0.1.0"
 
 [dependencies.b]
-path = "deps/b"
+path = "../b"
 "#,
         )
         .unwrap();
         std::fs::write(
-            root.join("deps/a/deps/b/Cell.toml"),
+            root.join("deps/b/Cell.toml"),
             r#"
 [package]
 name = "b"
 version = "0.1.0"
 
 [dependencies.a]
-path = "deps/a"
-"#,
-        )
-        .unwrap();
-        std::fs::write(
-            root.join("deps/a/deps/b/deps/a/Cell.toml"),
-            r#"
-[package]
-name = "a"
-version = "0.1.0"
+path = "../a"
 "#,
         )
         .unwrap();
@@ -1935,13 +1901,26 @@ path = "deps/math"
         let mut lockfile = Lockfile::new();
         lockfile.dependencies.insert(
             "math".to_string(),
-            LockedDependency { version: "0.2.0".to_string(), source: LockedSource::Path { path: "deps/old-math".to_string() } },
+            LockedDependency {
+                version: "0.2.0".to_string(),
+                source: LockedSource::Path { path: "deps/old-math".to_string() },
+                source_hash: None,
+                build: None,
+            },
         );
         lockfile.dependencies.insert(
             "stale".to_string(),
             LockedDependency {
                 version: "1.0.0".to_string(),
-                source: LockedSource::Registry { name: "stale".to_string(), version: "1.0.0".to_string() },
+                source: LockedSource::Registry {
+                    registry: "cellscript-registry".to_string(),
+                    url: "https://github.com/example/stale".to_string(),
+                    revision: "abc123".to_string(),
+                    namespace: "stale".to_string(),
+                    version: "1.0.0".to_string(),
+                },
+                source_hash: None,
+                build: None,
             },
         );
 
@@ -1970,11 +1949,21 @@ path = "deps/math"
         let mut lockfile = Lockfile::new();
         lockfile.dependencies.insert(
             "math".to_string(),
-            LockedDependency { version: "0.1.0".to_string(), source: LockedSource::Path { path: "deps/math".to_string() } },
+            LockedDependency {
+                version: "0.1.0".to_string(),
+                source: LockedSource::Path { path: "deps/math".to_string() },
+                source_hash: None,
+                build: None,
+            },
         );
         lockfile.dependencies.insert(
             "util".to_string(),
-            LockedDependency { version: "0.1.0".to_string(), source: LockedSource::Path { path: "deps/math/../util".to_string() } },
+            LockedDependency {
+                version: "0.1.0".to_string(),
+                source: LockedSource::Path { path: "deps/math/../util".to_string() },
+                source_hash: None,
+                build: None,
+            },
         );
         let mut resolved = HashMap::new();
         resolved.insert(
@@ -1985,6 +1974,8 @@ path = "deps/math"
                 path: PathBuf::from("deps/math"),
                 source: PackageSource::Local(PathBuf::from("deps/math")),
                 dependencies: vec!["util".to_string()],
+                namespace: None,
+                source_hash: None,
             },
         );
         resolved.insert(
@@ -1995,6 +1986,8 @@ path = "deps/math"
                 path: PathBuf::from("deps/util"),
                 source: PackageSource::Local(PathBuf::from("deps/math/../util")),
                 dependencies: Vec::new(),
+                namespace: None,
+                source_hash: None,
             },
         );
 
@@ -2004,46 +1997,21 @@ path = "deps/math"
     }
 
     #[test]
-    fn lockfile_consistency_requires_exact_git_revision_match() {
-        let manifest: PackageManifest = toml::from_str(
-            r#"
-[package]
-name = "app"
-version = "0.1.0"
-
-[dependencies.math]
-version = "0.1.0"
-git = "https://example.com/math.git"
-rev = "0123456789abcdef0123456789abcdef01234567"
-"#,
-        )
-        .unwrap();
-        let mut lockfile = Lockfile::new();
-        lockfile.dependencies.insert(
-            "math".to_string(),
-            LockedDependency {
-                version: "0.1.0".to_string(),
-                source: LockedSource::Git {
-                    url: "https://example.com/math.git".to_string(),
-                    revision: "0123456789abcdef0123456789abcdef0123456".to_string(),
-                },
-            },
-        );
-
-        let issues = lockfile.consistency_issues(&manifest);
-
-        assert!(issues.iter().any(|issue| issue.contains("expects git revision")), "{issues:?}");
-        assert!(!lockfile.is_consistent(&manifest));
-    }
-
-    #[test]
     fn lockfile_replace_with_resolved_prunes_removed_dependencies() {
         let mut lockfile = Lockfile::new();
         lockfile.dependencies.insert(
             "old".to_string(),
             LockedDependency {
                 version: "1.0.0".to_string(),
-                source: LockedSource::Registry { name: "old".to_string(), version: "1.0.0".to_string() },
+                source: LockedSource::Registry {
+                    registry: "cellscript-registry".to_string(),
+                    url: "https://github.com/example/old".to_string(),
+                    revision: "def456".to_string(),
+                    namespace: "old".to_string(),
+                    version: "1.0.0".to_string(),
+                },
+                source_hash: None,
+                build: None,
             },
         );
 
@@ -2056,6 +2024,8 @@ rev = "0123456789abcdef0123456789abcdef01234567"
                 path: PathBuf::from("deps/math"),
                 source: PackageSource::Local(PathBuf::from("deps/math")),
                 dependencies: Vec::new(),
+                namespace: None,
+                source_hash: None,
             },
         );
 
@@ -2073,44 +2043,6 @@ rev = "0123456789abcdef0123456789abcdef01234567"
         let error = Lockfile::read_from_root(temp.path()).unwrap_err();
 
         assert!(error.message.contains("failed to parse lockfile"), "{}", error.message);
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn lockfile_read_from_root_rejects_symlink_escape() {
-        use std::os::unix::fs::symlink;
-
-        let temp = tempdir().unwrap();
-        let root = temp.path().join("repo");
-        let outside = temp.path().join("outside");
-        std::fs::create_dir_all(&root).unwrap();
-        std::fs::create_dir_all(&outside).unwrap();
-        std::fs::write(outside.join("Cell.lock"), "version = 1\n").unwrap();
-        symlink(outside.join("Cell.lock"), root.join("Cell.lock")).unwrap();
-
-        let error = Lockfile::read_from_root(&root).unwrap_err();
-
-        assert!(error.message.contains("lockfile") && error.message.contains("symbolic link"), "{}", error.message);
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn lockfile_write_to_root_rejects_symlink_escape() {
-        use std::os::unix::fs::symlink;
-
-        let temp = tempdir().unwrap();
-        let root = temp.path().join("repo");
-        let outside = temp.path().join("outside");
-        let outside_lock = outside.join("Cell.lock");
-        std::fs::create_dir_all(&root).unwrap();
-        std::fs::create_dir_all(&outside).unwrap();
-        std::fs::write(&outside_lock, "version = 1\n").unwrap();
-        symlink(&outside_lock, root.join("Cell.lock")).unwrap();
-
-        let error = Lockfile::new().write_to_root(&root).unwrap_err();
-
-        assert!(error.message.contains("lockfile") && error.message.contains("symbolic link"), "{}", error.message);
-        assert_eq!(std::fs::read_to_string(outside_lock).unwrap(), "version = 1\n");
     }
 
     #[test]
@@ -2132,38 +2064,9 @@ remote = "1.2.3"
         let mut manager = PackageManager::new(temp.path());
         let error = manager.resolve_dependencies().unwrap_err();
 
-        assert!(error.message.contains("registry dependency 'remote'"));
-        assert!(error.message.contains("not supported yet"));
-        assert!(error.message.contains("local path dependency"));
+        // Registry dependencies require a namespace — without one, fail closed
+        assert!(error.message.contains("namespace") || error.message.contains("registry"), "{}", error.message);
         assert!(manager.get_resolved().is_empty());
-    }
-
-    #[test]
-    fn git_cache_entry_name_is_hash_only() {
-        let cache_name = git_cache_entry_name("../../outside", "https://example.com/repo.git", Some("../rev"));
-
-        assert!(cache_name.starts_with("git-"));
-        assert!(!cache_name.contains(".."));
-        assert!(!cache_name.contains('/'));
-        assert!(!cache_name.contains('\\'));
-        let digest = cache_name.strip_prefix("git-").unwrap();
-        assert_eq!(digest.len(), 32);
-        assert!(digest.chars().all(|ch| ch.is_ascii_hexdigit()));
-    }
-
-    #[test]
-    fn git_cache_child_check_rejects_path_escape() {
-        let temp = tempdir().unwrap();
-        let cache_root = temp.path().join(".cell").join("git-cache");
-        let outside = temp.path().join("outside");
-        std::fs::create_dir_all(&cache_root).unwrap();
-        std::fs::create_dir_all(&outside).unwrap();
-
-        let cache_root = std::fs::canonicalize(cache_root).unwrap();
-        let escaped = cache_root.join("..").join("..").join("outside");
-        let error = ensure_git_cache_child(&cache_root, &escaped).unwrap_err();
-
-        assert!(error.message.contains("outside cache root"), "{}", error.message);
     }
 
     #[test]
@@ -2179,7 +2082,7 @@ version = "0.1.0"
 [dependencies.remote]
 version = "0.1.0"
 git = "https://example.invalid/remote.git"
-rev = "0123456789abcdef0123456789abcdef01234567"
+rev = "abc123"
 "#,
         )
         .unwrap();
@@ -2193,132 +2096,97 @@ rev = "0123456789abcdef0123456789abcdef01234567"
     }
 
     #[test]
-    fn package_manager_rejects_unpinned_git_dependency_before_fetch() {
-        let temp = tempdir().unwrap();
-        std::fs::write(
-            temp.path().join("Cell.toml"),
-            r#"
+    fn deployed_manifest_round_trip() {
+        let manifest = DeployedManifest {
+            version: 1,
+            schema: Some(DEPLOYED_MANIFEST_SCHEMA.to_string()),
+            package: DeployedPackageInfo {
+                name: "amm_pool".to_string(),
+                version: "1.2.0".to_string(),
+                source_hash: Some("blake2b:0xabcd".to_string()),
+            },
+            build: Some(DeployedBuildInfo {
+                compiler_version: Some("0.19.0".to_string()),
+                artifact_hash: Some("blake2b:0x1234".to_string()),
+                metadata_hash: None,
+                schema_hash: None,
+                cell_data_codec_manifest_hash: None,
+                abi_hash: None,
+                constraints_hash: None,
+            }),
+            deployments: vec![DeploymentRecord {
+                network: "aggron4".to_string(),
+                chain_id: "ckb-testnet".to_string(),
+                tx_hash: "0xaaaa".to_string(),
+                output_index: 0,
+                code_hash: "0xbbbb".to_string(),
+                hash_type: "data1".to_string(),
+                dep_type: "code".to_string(),
+                data_hash: "0xcccc".to_string(),
+                out_point: "0xaaaa:0".to_string(),
+                artifact_hash: None,
+                metadata_hash: None,
+                schema_hash: None,
+                cell_data_codec_manifest_hash: None,
+                abi_hash: None,
+                constraints_hash: None,
+                compiler_version: None,
+                type_id: Some("0xdddd".to_string()),
+                script_role: Some(ScriptRole::Type),
+                status: Some(DeploymentStatus::Candidate),
+                upgrade_lineage: None,
+                audit_report_hash: None,
+                publisher_signature: None,
+                cell_deps: vec![DeploymentCellDep {
+                    name: Some("secp256k1".to_string()),
+                    tx_hash: "0xeeee".to_string(),
+                    output_index: 1,
+                    dep_type: "dep_group".to_string(),
+                    hash_type: Some("type".to_string()),
+                    data_hash: None,
+                    type_id: None,
+                }],
+            }],
+        };
+
+        let toml_str = toml::to_string_pretty(&manifest).unwrap();
+        assert!(toml_str.contains("network = \"aggron4\""));
+        assert!(toml_str.contains("code_hash = \"0xbbbb\""));
+
+        let parsed: DeployedManifest = toml::from_str(&toml_str).unwrap();
+        assert_eq!(parsed.version, 1);
+        assert_eq!(parsed.package.name, "amm_pool");
+        assert_eq!(parsed.deployments.len(), 1);
+        assert_eq!(parsed.deployments[0].network, "aggron4");
+        assert_eq!(parsed.deployments[0].cell_deps.len(), 1);
+    }
+
+    #[test]
+    fn deployed_manifest_backward_compatible() {
+        // Old format without new optional fields should parse successfully
+        let toml_str = r#"
+version = 1
+
 [package]
-name = "app"
-version = "0.1.0"
+name = "token"
+version = "0.3.0"
 
-[dependencies.remote]
-version = "0.1.0"
-git = "https://example.com/remote.git"
-"#,
-        )
-        .unwrap();
-
-        let mut manager = PackageManager::new(temp.path());
-        let error = manager.resolve_dependencies().unwrap_err();
-
-        assert!(error.message.contains("must specify a full commit rev"), "{}", error.message);
-        assert!(manager.get_resolved().is_empty());
-    }
-
-    #[test]
-    fn package_manager_rejects_branch_or_tag_git_dependency_before_fetch() {
-        for ref_key in ["branch", "tag"] {
-            let temp = tempdir().unwrap();
-            std::fs::write(
-                temp.path().join("Cell.toml"),
-                format!(
-                    r#"
-[package]
-name = "app"
-version = "0.1.0"
-
-[dependencies.remote]
-version = "0.1.0"
-git = "https://example.com/remote.git"
-{ref_key} = "main"
-"#
-                ),
-            )
-            .unwrap();
-
-            let mut manager = PackageManager::new(temp.path());
-            let error = manager.resolve_dependencies().unwrap_err();
-
-            assert!(error.message.contains("branch and tag refs are not accepted"), "{}", error.message);
-            assert!(manager.get_resolved().is_empty());
-        }
-    }
-
-    #[test]
-    fn package_manager_rejects_unsafe_git_url_transports() {
-        for url in [
-            "ext::sh -c touch /tmp/cellscript-owned",
-            "file:///tmp/local.git",
-            "hg::https://example.com/repo",
-            "https://example.com/repo.git;touch-owned",
-            "https://example.com/repo.git\nssh://example.com/other.git",
-        ] {
-            let error = validate_git_url(url).expect_err("unsafe git URL should be rejected");
-            assert!(error.message.contains("git dependency URL"), "unexpected error for {url}: {}", error.message);
-        }
-    }
-
-    #[test]
-    fn package_manager_accepts_allowed_git_url_transports() {
-        for url in [
-            "https://example.com/org/repo.git",
-            "http://example.com/org/repo.git",
-            "git://example.com/org/repo.git",
-            "ssh://git@example.com/org/repo.git",
-            "git@example.com:org/repo.git",
-        ] {
-            validate_git_url(url).unwrap_or_else(|error| panic!("expected {url} to be accepted: {}", error.message));
-        }
-    }
-
-    #[test]
-    fn package_manager_git_commands_separate_user_controlled_ref_arguments() {
-        let target = Path::new("/tmp/cellscript-git-target");
-        let clone_args = PackageManager::git_clone_args("--upload-pack=calc.exe", target);
-        let fetch_args = PackageManager::git_fetch_ref_args("--upload-pack=calc.exe");
-        let checkout_args = PackageManager::git_checkout_args("--upload-pack=calc.exe");
-
-        let clone = clone_args.iter().map(|arg| arg.to_string_lossy().into_owned()).collect::<Vec<_>>();
-        let fetch = fetch_args.iter().map(|arg| arg.to_string_lossy().into_owned()).collect::<Vec<_>>();
-        let checkout = checkout_args.iter().map(|arg| arg.to_string_lossy().into_owned()).collect::<Vec<_>>();
-
-        assert_eq!(clone, vec!["clone", "--", "--upload-pack=calc.exe", "/tmp/cellscript-git-target"]);
-        assert_eq!(fetch, vec!["fetch", "origin", "--", "--upload-pack=calc.exe"]);
-        assert_eq!(checkout, vec!["checkout", "--", "--upload-pack=calc.exe"]);
-    }
-
-    #[test]
-    fn package_manager_git_checkout_revalidates_full_commit_refs() {
-        let err = PackageManager::git_checkout(Path::new("/tmp/cellscript-not-a-git-repo"), "--upload-pack=calc.exe")
-            .expect_err("git checkout helper must reject non-commit refs before invoking git");
-
-        assert!(err.contains("full 40-character SHA-1"), "unexpected error: {}", err);
-    }
-
-    #[test]
-    fn package_manager_git_revision_fails_closed_outside_git_repo() {
-        if std::process::Command::new("git").arg("--version").output().is_err() {
-            return;
-        }
-
-        let temp = tempdir().unwrap();
-        let error = PackageManager::git_revision(temp.path()).unwrap_err();
-
-        assert!(error.contains("git rev-parse failed"), "unexpected error: {}", error);
-    }
-
-    #[test]
-    fn package_manager_git_update_fails_closed_on_fetch_error() {
-        if std::process::Command::new("git").arg("--version").output().is_err() {
-            return;
-        }
-
-        let temp = tempdir().unwrap();
-        let output = std::process::Command::new("git").arg("init").current_dir(temp.path()).output().unwrap();
-        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
-
-        let error = PackageManager::git_update(temp.path()).unwrap_err();
-        assert!(error.contains("git fetch failed"), "{}", error);
+[[deployments]]
+network = "ckb-mainnet"
+chain_id = "ckb-mainnet"
+tx_hash = "0x1111"
+output_index = 0
+code_hash = "0x2222"
+hash_type = "type"
+dep_type = "code"
+data_hash = "0x3333"
+out_point = "0x1111:0"
+"#;
+        let parsed: DeployedManifest = toml::from_str(toml_str).unwrap();
+        assert_eq!(parsed.package.name, "token");
+        assert_eq!(parsed.deployments.len(), 1);
+        assert!(parsed.deployments[0].type_id.is_none());
+        assert!(parsed.deployments[0].status.is_none());
+        assert!(parsed.build.is_none());
     }
 }

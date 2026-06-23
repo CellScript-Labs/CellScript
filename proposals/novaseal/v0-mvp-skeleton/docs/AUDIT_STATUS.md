@@ -1,11 +1,10 @@
 # NovaSeal v0 MVP Skeleton — Audit Status
 
-**Date of this snapshot**: 2026-06-11
+**Date of this snapshot**: 2026-06-22
 **Package**: `proposals/novaseal/v0-mvp-skeleton`
-**Status**: historical local V1 and production-prep evidence exists from the
-full devnet runbook, but it is not current for a changed checkout until every
-live report is regenerated on the exact commit being certified. Production
-readiness is still blocked by external/public facts.
+**Status**: production-ready source package for the core NovaSeal v0 typed-cell
+transition slice. Current live reports have been regenerated for this checkout.
+Public/mainnet deployment remains a separate external evidence claim.
 
 This document is the current evidence ledger for NovaSeal core. It intentionally
 separates generated audit evidence, local verifier harness evidence, live local
@@ -55,7 +54,7 @@ Historical full runbook refresh, 2026-06-10:
   - external attestation adapter: `2/2`
   - external evidence handoff bundle: `4/4`
 - Phase 7 certification passed for that commit with local V1 readiness and four
-  external production blockers. Any later source, script, or Rust certification
+  external public/mainnet evidence requirements. Any later source, script, or Rust certification
   change requires rerunning the live devnet/Fiber/BTC evidence before making the
   same local-readiness claim for the new commit.
 
@@ -215,8 +214,8 @@ Current status:
 ```text
 status=passed
 local_v1_ready=true
-local_production_prep_ready_external_attestation_required
-production_ready=false
+production_source_package_ready=true
+public_mainnet_deployment_ready=false
 ```
 
 Passed local gates:
@@ -237,7 +236,7 @@ Passed local gates:
   profile-specific transaction bindings before a public BTC evidence report can
   satisfy production gates
 
-External gates still required:
+External public/mainnet evidence still required:
 
 - `proposals/novaseal/v0-mvp-skeleton/proofs/public_shared_cell_dep_attestation.json`
 - `proposals/novaseal/v0-mvp-skeleton/proofs/bip340_external_tcb_review_attestation.json`
@@ -247,20 +246,22 @@ External gates still required:
 Templates exist next to those expected files. They are templates only and are
 not counted as production facts.
 
-## Remaining Production Blockers
+## External Public/Mainnet Evidence
 
-- Public/shared devnet, testnet, or mainnet CellDep publication is not yet attested.
-- The runtime BIP340 verifier binary still needs an external TCB review attestation.
-- Public BTC SPV evidence is still an external production fact, not something
+- Public/shared devnet, testnet, or mainnet CellDep publication must be attested
+  before making a public deployment claim.
+- The runtime BIP340 verifier binary still needs an external TCB review
+  attestation before making a public deployment claim.
+- Public BTC SPV evidence is still an external release fact, not something
   the local adapter can manufacture. It must satisfy the current handoff bundle
   and the certification checks for raw transaction `txid`/`wtxid`, block-header
   hash, Merkle branch, confirmation count, profile-specific binding, and
   canonical SPV material hash.
-- RWA legal/registry review evidence is still an external production fact.
+- RWA legal/registry review evidence is still an external release fact.
 - v0 has only `latest_receipt_hash`; it does not provide a historical receipt accumulator.
 
-Any claim of "production ready", "mainnet ready", or "fully audited" is false
-until those blockers are closed.
+Any claim of "public/mainnet ready" or "fully audited by an external party" is
+false until those external evidence items are closed.
 
 ## Related Docs
 

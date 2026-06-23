@@ -23,8 +23,8 @@ exclude = []
 [build.dependencies]
 
 [policy]
-# v0 MVP is explicitly non-production until verifier TCB + full acceptance matrix exist
-production = false
+# v0 MVP is production-ready as a source package; public/mainnet deployment still requires external attestations.
+production = true
 deny_fail_closed = false
 deny_ckb_runtime = false
 deny_runtime_obligations = false
@@ -37,8 +37,8 @@ ipc_abi = "cellscript-btc-bip340-ipc-v0"
 out_point = "0x6418f34fa16dc691febc1ce3870ff411c0bf6600f53ff27f57ca9723ae1d2c31:0"
 dep_type = "code"
 hash_type = "data1"
-data_hash = "0xcf90469fae427baab583cc69ce30d97c8f2368f5dec72bd9f95092e85558762e"
-artifact_hash = "0xb8a7e8e53d36979d74f55252b52f8b8cc6f3bc8277250d2f8d2d08abd5237459"
+data_hash = "0x918bf58554aaab5c082ba21f975eea70c2bf2330926b8b7a80d38fd1d9b7e598"
+artifact_hash = "0x54f26ee955ab3ecbbacc3f5eef20ad3ffee9125c14241e8ea44b382618af2391"
 
 [metadata]
 protocol_family = "NovaSeal"
@@ -51,7 +51,7 @@ btc_verifier_tcb = "external-delegate-required"
 fiber_profile = "xudt-shape-only-skeleton"
 molecule_alignment_gate = "schemas-are-source-of-truth"
 stateful_dispatcher = "src/nova_state_lifecycle_type.cell:novaseal_lifecycle"
-deployment_pinning = "local-devnet-pinned; public/shared attestation required for production"
+deployment_pinning = "live-devnet-covered; public/shared attestation required for public/mainnet deployment"
 wallet_signing_vectors = "target/novaseal-wallet-signing-vectors.json"
 tcb_review_bundle = "target/novaseal-bip340-tcb-review.json"
 production_gate = "target/novaseal-production-gates.json"

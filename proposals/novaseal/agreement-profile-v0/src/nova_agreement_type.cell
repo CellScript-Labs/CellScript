@@ -185,8 +185,8 @@ receipt NativeCkbPayoutV0 has store, create, consume {
 // - output 0: active NovaAgreementCellV0,
 // - output 1: typed principal payout to the borrower,
 // - output 2: typed receipt.
-action originate_agreement(witness terms: NovaAgreementTermsV0, witness intent: NovaAgreementSignedIntentV0, witness borrower_sig: AgreementSignaturePayload, witness lender_sig: AgreementSignaturePayload) -> (agreement: NovaAgreementCellV0, principal_payout: NativeCkbPayoutV0, receipt: NovaAgreementReceiptV0)
-where
+action originate_agreement(witness terms: NovaAgreementTermsV0, witness intent: NovaAgreementSignedIntentV0, witness borrower_sig: AgreementSignaturePayload, witness lender_sig: AgreementSignaturePayload) -> (agreement: NovaAgreementCellV0, principal_payout: NativeCkbPayoutV0, receipt: NovaAgreementReceiptV0) {
+    verification
     let now = env::current_timepoint()
     let payout = NativeCkbPayoutV0 {
         action: PATH_ORIGINATE,
@@ -199,9 +199,9 @@ where
         terms_hash: terms.terms_hash,
         nonce: 0
     }
-    let payout_commitment_hash = hash_blake2b_packed(payout)
-    let intent_core_hash = hash_blake2b_packed(intent.core)
-    let signed_intent_hash = hash_blake2b_packed(intent)
+    let payout_commitment_hash = ckb::hash_data_packed(payout)
+    let intent_core_hash = ckb::hash_data_packed(intent.core)
+    let signed_intent_hash = ckb::hash_data_packed(intent)
     let receipt_commitment = NovaAgreementReceiptCommitmentV0 {
         action: PATH_ORIGINATE,
         agreement_id: terms.agreement_id,
@@ -216,8 +216,8 @@ where
         intent_core_hash: intent_core_hash,
         payout_commitment_hash: payout_commitment_hash
     }
-    let materialized_receipt_hash = hash_blake2b_packed(receipt_commitment)
-    let canonical_envelope_hash = hash_blake2b_packed(NovaSealCanonicalEnvelopeV0 {
+    let materialized_receipt_hash = ckb::hash_data_packed(receipt_commitment)
+    let canonical_envelope_hash = ckb::hash_data_packed(NovaSealCanonicalEnvelopeV0 {
         profile_id: terms.agreement_id,
         policy_hash: terms.terms_hash,
         action: PATH_ORIGINATE,
@@ -324,6 +324,7 @@ where
         timepoint: now
     }
 
+}
 // Borrower closes the agreement before expiry.
 //
 // Output convention for the current harness:
@@ -331,8 +332,8 @@ where
 // - output 1: principal + fixed fee to the lender,
 // - output 2: collateral return to the borrower,
 // - output 3: typed receipt.
-action repay_before_expiry(active: NovaAgreementCellV0, witness intent: NovaAgreementSignedIntentV0, witness borrower_sig: AgreementSignaturePayload) -> (closed: NovaAgreementCellV0, lender_repayment: NativeCkbPayoutV0, borrower_collateral_return: NativeCkbPayoutV0, receipt: NovaAgreementReceiptV0)
-where
+action repay_before_expiry(active: NovaAgreementCellV0, witness intent: NovaAgreementSignedIntentV0, witness borrower_sig: AgreementSignaturePayload) -> (closed: NovaAgreementCellV0, lender_repayment: NativeCkbPayoutV0, borrower_collateral_return: NativeCkbPayoutV0, receipt: NovaAgreementReceiptV0) {
+    verification
     let now = env::current_timepoint()
     require active.nonce < U64_MAX
     require active.fixed_fee_amount <= U64_MAX - active.principal_amount
@@ -361,12 +362,12 @@ where
         terms_hash: active.terms_hash,
         nonce: active.nonce + 1
     }
-    let payout_commitment_hash = hash_blake2b_packed(RepayPayoutCommitmentV0 {
-        lender_repayment_hash: hash_blake2b_packed(lender_payout),
-        borrower_collateral_return_hash: hash_blake2b_packed(borrower_payout)
+    let payout_commitment_hash = ckb::hash_data_packed(RepayPayoutCommitmentV0 {
+        lender_repayment_hash: ckb::hash_data_packed(lender_payout),
+        borrower_collateral_return_hash: ckb::hash_data_packed(borrower_payout)
     })
-    let intent_core_hash = hash_blake2b_packed(intent.core)
-    let signed_intent_hash = hash_blake2b_packed(intent)
+    let intent_core_hash = ckb::hash_data_packed(intent.core)
+    let signed_intent_hash = ckb::hash_data_packed(intent)
     let receipt_commitment = NovaAgreementReceiptCommitmentV0 {
         action: PATH_REPAY_BEFORE_EXPIRY,
         agreement_id: active.agreement_id,
@@ -381,8 +382,8 @@ where
         intent_core_hash: intent_core_hash,
         payout_commitment_hash: payout_commitment_hash
     }
-    let materialized_receipt_hash = hash_blake2b_packed(receipt_commitment)
-    let canonical_envelope_hash = hash_blake2b_packed(NovaSealCanonicalEnvelopeV0 {
+    let materialized_receipt_hash = ckb::hash_data_packed(receipt_commitment)
+    let canonical_envelope_hash = ckb::hash_data_packed(NovaSealCanonicalEnvelopeV0 {
         profile_id: active.agreement_id,
         policy_hash: active.terms_hash,
         action: PATH_REPAY_BEFORE_EXPIRY,
@@ -491,6 +492,7 @@ where
         timepoint: now
     }
 
+}
 // Lender closes the agreement after expiry.
 //
 // The default path claims only the locked collateral. It does not add the fixed
@@ -501,8 +503,8 @@ where
 // - output 0: terminal Defaulted agreement,
 // - output 1: collateral claim to the lender,
 // - output 2: typed receipt.
-action claim_after_expiry(active: NovaAgreementCellV0, witness intent: NovaAgreementSignedIntentV0, witness lender_sig: AgreementSignaturePayload) -> (closed: NovaAgreementCellV0, lender_default_claim: NativeCkbPayoutV0, receipt: NovaAgreementReceiptV0)
-where
+action claim_after_expiry(active: NovaAgreementCellV0, witness intent: NovaAgreementSignedIntentV0, witness lender_sig: AgreementSignaturePayload) -> (closed: NovaAgreementCellV0, lender_default_claim: NativeCkbPayoutV0, receipt: NovaAgreementReceiptV0) {
+    verification
     let now = env::current_timepoint()
     require active.nonce < U64_MAX
     let claim_amount = active.collateral_amount
@@ -518,9 +520,9 @@ where
         terms_hash: active.terms_hash,
         nonce: active.nonce + 1
     }
-    let payout_commitment_hash = hash_blake2b_packed(claim_payout)
-    let intent_core_hash = hash_blake2b_packed(intent.core)
-    let signed_intent_hash = hash_blake2b_packed(intent)
+    let payout_commitment_hash = ckb::hash_data_packed(claim_payout)
+    let intent_core_hash = ckb::hash_data_packed(intent.core)
+    let signed_intent_hash = ckb::hash_data_packed(intent)
     let receipt_commitment = NovaAgreementReceiptCommitmentV0 {
         action: PATH_CLAIM_AFTER_EXPIRY,
         agreement_id: active.agreement_id,
@@ -535,8 +537,8 @@ where
         intent_core_hash: intent_core_hash,
         payout_commitment_hash: payout_commitment_hash
     }
-    let materialized_receipt_hash = hash_blake2b_packed(receipt_commitment)
-    let canonical_envelope_hash = hash_blake2b_packed(NovaSealCanonicalEnvelopeV0 {
+    let materialized_receipt_hash = ckb::hash_data_packed(receipt_commitment)
+    let canonical_envelope_hash = ckb::hash_data_packed(NovaSealCanonicalEnvelopeV0 {
         profile_id: active.agreement_id,
         policy_hash: active.terms_hash,
         action: PATH_CLAIM_AFTER_EXPIRY,
@@ -628,3 +630,4 @@ where
         nonce: active.nonce + 1,
         timepoint: now
     }
+}

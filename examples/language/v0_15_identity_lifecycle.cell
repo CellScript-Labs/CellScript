@@ -26,37 +26,55 @@ resource InstanceItem has store, create, consume, replace, burn, relock
 }
 
 action mint_typed_token(recipient: Address, amount: u64) -> TypedToken
-where
-    create_unique<TypedToken>(identity = ckb_type_id) { amount } with_lock(recipient)
+{
+    verification
+        create_unique<TypedToken>(identity = ckb_type_id) { amount } with_lock(recipient)
+}
 
 action transfer_typed_token(token: TypedToken, to: Address) -> TypedToken
-where
-    replace_unique<TypedToken>(identity = ckb_type_id) token { amount: token.amount }
+{
+    verification
+        replace_unique<TypedToken>(identity = ckb_type_id) token { amount: token.amount }
+}
 
 action burn_typed_token(token: TypedToken)
-where
-    destroy_singleton_type(token)
+{
+    verification
+        destroy_singleton_type(token)
+}
 
 action mint_unique_nft(recipient: Address, tid: u64) -> UniqueNFT
-where
-    create_unique<UniqueNFT>(identity = field(token_id)) { token_id: tid, owner: recipient } with_lock(recipient)
+{
+    verification
+        create_unique<UniqueNFT>(identity = field(token_id)) { token_id: tid, owner: recipient } with_lock(recipient)
+}
 
 action transfer_unique_nft(nft: UniqueNFT, to: Address) -> UniqueNFT
-where
-    replace_unique<UniqueNFT>(identity = field(token_id)) nft { token_id: nft.token_id, owner: to }
+{
+    verification
+        replace_unique<UniqueNFT>(identity = field(token_id)) nft { token_id: nft.token_id, owner: to }
+}
 
 action destroy_unique_nft(nft: UniqueNFT)
-where
-    destroy_unique(nft, identity = type_id)
+{
+    verification
+        destroy_unique(nft, identity = type_id)
+}
 
 action update_instance(item: InstanceItem, new_data: Hash) -> InstanceItem
-where
-    replace_unique<InstanceItem>(identity = script_args) item { item_id: item.item_id, data: new_data }
+{
+    verification
+        replace_unique<InstanceItem>(identity = script_args) item { item_id: item.item_id, data: new_data }
+}
 
 action destroy_instance_item(item: InstanceItem)
-where
-    destroy_instance(item, identity_field = item_id)
+{
+    verification
+        destroy_instance(item, identity_field = item_id)
+}
 
 action burn_item_quantity(item: InstanceItem)
-where
-    burn_amount(item, field = item_id)
+{
+    verification
+        burn_amount(item, field = item_id)
+}

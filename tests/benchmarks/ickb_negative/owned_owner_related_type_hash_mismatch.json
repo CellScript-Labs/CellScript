@@ -1,0 +1,19 @@
+{
+  "name": "owned_owner_related_type_hash_mismatch",
+  "scenario": "owned_owner",
+  "expected": "fail",
+  "expected_reason": "related_type_hash_mismatch",
+  "model_level_only": true,
+  "data": {
+    "owned_index": 2,
+    "owner_cell_owned_index": 2,
+    "owner_relative_distance": -1,
+    "owner_cell_relative_distance": -1,
+    "owner": "owner-a",
+    "claimed_owner": "owner-a",
+    "withdrawal_request": true,
+    "related_type_hash_matches": false,
+    "related_data_rule_matches": true,
+    "empty_args": true
+  }
+}

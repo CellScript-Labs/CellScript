@@ -49,10 +49,11 @@ Resources are linear. In plain terms: if an action receives a resource, the
 action must say where it goes.
 
 ```cellscript
-action burn(token: Token)
-where
-    assert(token.amount > 0, "cannot burn zero")
-    burn_amount(token, field = amount)
+action burn(token: Token) {
+    verification
+        require token.amount > 0, "cannot burn zero"
+        burn_amount(token, field = amount)
+}
 ```
 
 The `Token` cannot simply disappear. It must be consumed, returned, destroyed,
@@ -96,12 +97,14 @@ views, the right side names proposed output Cell bindings, and `transition`
 names both state fields explicitly.
 
 ```cellscript
-action unlock_grant(input: VestingGrant) -> output: VestingGrant
+action unlock_grant(input: VestingGrant) -> output: VestingGrant {
     transition input.state: Granted -> output.state: Claimable
-where
-    require input.beneficiary == output.beneficiary
-    require input.total_amount == output.total_amount
-    require input.claimed_amount == output.claimed_amount
+
+    verification
+        require input.beneficiary == output.beneficiary
+        require input.total_amount == output.total_amount
+        require input.claimed_amount == output.claimed_amount
+}
 ```
 
 `flow Type.field { ... }` is the compact form when the flow does not
@@ -117,28 +120,30 @@ outputs in signature order, starting at `Output#0`. A field-to-field transition 
 directly. Existing `consume input` plus `create output = T { ... }` remains
 accepted as front-end sugar for the same verifier shape.
 
-Action proof logic is scoped by `where`. Put `transition` clauses before `where` and
-keep proof obligations below it:
+Action proof logic is scoped by `verification`. Put `transition` declarations
+before `verification` and keep proof obligations below it:
 
 ```cellscript
-action fill_offer(input: Offer) -> output: Offer
+action fill_offer(input: Offer) -> output: Offer {
     transition input.state: Live -> output.state: Filled
-where
-    require output.price == input.price
-    require output.seller == input.seller
+
+    verification
+        require output.price == input.price
+        require output.seller == input.seller
+}
 ```
 
-Inside `where`, conditional proof branches must constrain output fields
+Inside `verification`, conditional proof branches must constrain output fields
 symmetrically. If one branch requires `output.claimable`, sibling branches must
 also constrain `output.claimable` unless it was already constrained in the
 surrounding proof scope.
 
-Bare `destroy token` remains available. In `--primitive-strict=0.16` mode, it
-keeps the 0.15 rule: the operation must be authorized by the `consume + burn`
-kernel effects instead of legacy `has destroy`. Choose a policy-specific
-destruction form when reviewers need to see whether the contract proves
-singleton absence, TYPE_ID consumption, field-identified instance consumption,
-or amount burn.
+Bare `destroy token` remains available. In `--primitive-compat=0.15` legacy
+compatibility mode, it must be authorized by the `consume + burn` kernel effects
+instead of the legacy `destroy` attribute. Choose a policy-specific destruction
+form when reviewers need to see whether the contract proves singleton absence,
+TYPE_ID consumption,
+field-identified instance consumption, or amount burn.
 
 ## Creating Output Cells
 
@@ -175,14 +180,15 @@ For example, a transfer consumes one token and validates a proposed token
 under a different lock:
 
 ```cellscript
-action transfer_token(token: Token, to: Address) -> next_token: Token
-where
-    consume token
+action transfer_token(token: Token, to: Address) -> next_token: Token {
+    verification
+        consume token
 
-    create next_token = Token {
-        amount: token.amount,
-        symbol: token.symbol
-    } with_lock(to)
+        create next_token = Token {
+            amount: token.amount,
+            symbol: token.symbol
+        } with_lock(to)
+}
 ```
 
 This is closer to CKB than an account-style assignment. The old Cell is spent;
@@ -201,19 +207,21 @@ resource NFT has store, create, replace
     owner: Address
 }
 
-action mint_nft(token_id: [u8; 32], owner: Address) -> NFT
-where
-    create_unique<NFT>(identity = field(token_id)) {
-        token_id,
-        owner
-    } with_lock(owner)
+action mint_nft(token_id: [u8; 32], owner: Address) -> NFT {
+    verification
+        create_unique<NFT>(identity = field(token_id)) {
+            token_id,
+            owner
+        } with_lock(owner)
+}
 
-action move_nft(nft_before: NFT, new_owner: Address) -> NFT
-where
-    replace_unique<NFT>(identity = field(token_id)) nft_before {
-        token_id: nft_before.token_id,
-        owner: new_owner
-    }
+action transfer_nft(nft_before: NFT, new_owner: Address) -> NFT {
+    verification
+        replace_unique<NFT>(identity = field(token_id)) nft_before {
+            token_id: nft_before.token_id,
+            owner: new_owner
+        }
+}
 ```
 
 `replace_unique<T>(identity = policy) input { ... }` always names the consumed
@@ -249,18 +257,20 @@ over-broad same-TypeHash absence claims.
 For one-to-one state updates, make both cells visible:
 
 ```cellscript
-action mint_with_authority(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after: MintAuthority, token: Token)
-where
-    assert(auth_before.minted + amount <= auth_before.max_supply, "exceeds max supply")
+action mint_with_authority(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after: MintAuthority, token: Token) {
+    transition auth_before -> auth_after
 
-    require auth_after.token_symbol == auth_before.token_symbol
-    require auth_after.max_supply == auth_before.max_supply
-    require auth_after.minted == auth_before.minted + amount
+    verification
+        require auth_before.minted + amount <= auth_before.max_supply, "exceeds max supply"
+        require auth_after.token_symbol == auth_before.token_symbol
+        require auth_after.max_supply == auth_before.max_supply
+        require auth_after.minted == auth_before.minted + amount
 
-    create token = Token {
-        amount,
-        symbol: auth_before.token_symbol
-    } with_lock(to)
+        create token = Token {
+            amount,
+            symbol: auth_before.token_symbol
+        } with_lock(to)
+}
 ```
 
 This is intentionally explicit: `auth_before` is the existing state Cell,

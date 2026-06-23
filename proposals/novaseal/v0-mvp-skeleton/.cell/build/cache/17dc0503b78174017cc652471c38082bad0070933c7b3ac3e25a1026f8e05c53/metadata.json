@@ -1,0 +1,2427 @@
+{
+  "metadata_schema_version": 41,
+  "compiler_version": "0.17.0",
+  "module": "novaseal::state_lifecycle_type::v0_mvp",
+  "artifact_format": "RISC-V ELF",
+  "target_profile": {
+    "name": "ckb",
+    "target_chain": "ckb",
+    "vm_abi": "ckb-molecule",
+    "hash_domain": "ckb-packed-molecule-blake2b",
+    "syscall_set": "ckb-mainnet-syscalls",
+    "artifact_packaging": "ckb-elf",
+    "header_abi": "ckb-header",
+    "scheduler_abi": "none",
+    "witness_abi": "ckb-molecule-witness-args+cellscript-entry-witness-v1",
+    "lock_args_abi": "ckb-script-args-typed-fixed-bytes",
+    "source_encoding": "ckb-source-group-high-bit",
+    "spawn_ipc_abi": "ckb-vm-v2-spawn-ipc-syscalls-2601-2608",
+    "since_abi": "ckb-since-block-timestamp-epoch-number-with-fraction",
+    "cell_dep_abi": "ckb-cell-dep-outpoint-and-dep-group",
+    "script_ref_abi": "ckb-script-code-hash-hash-type-args",
+    "output_data_abi": "ckb-outputs-and-outputs-data-index-aligned",
+    "capacity_floor_abi": "ckb-output-capacity-floor-shannons",
+    "type_id_abi": "ckb-type-id-v1",
+    "tx_version": 0
+  },
+  "artifact_hash": "1ad68d9661fcbe9ad809bce111c72e7e64d57781a463dee57958c61180a86db5",
+  "artifact_size_bytes": 34828,
+  "source_hash": "48fd97f6222b11f014beddd145299eb94e320aac0ba4276825cd8983f6be080e",
+  "source_content_hash": "a669c71b77509a525d65c0477b9957638de174b48702631d6eb4b6b71ae94695",
+  "source_units": [
+    {
+      "path": "/Users/arthur/RustroverProjects/CellScript/proposals/novaseal/v0-mvp-skeleton/src/nova_btc_authority_lock.cell",
+      "role": "package",
+      "hash": "2e13d1fde5313cbebfa99a32ebac98627d0eaaea2b3976b8c4e897baf48ef4ec",
+      "size_bytes": 3614
+    },
+    {
+      "path": "/Users/arthur/RustroverProjects/CellScript/proposals/novaseal/v0-mvp-skeleton/src/nova_receipt_type.cell",
+      "role": "package",
+      "hash": "3b9fc3c63c73936e6faa9859d0668d843afa87f70f53e9112efb36381896ebd6",
+      "size_bytes": 1371
+    },
+    {
+      "path": "/Users/arthur/RustroverProjects/CellScript/proposals/novaseal/v0-mvp-skeleton/src/nova_state_lifecycle_type.cell",
+      "role": "entry",
+      "hash": "6bf0b22700f01532a04db615a528365513971dc322a615741db753d7bf0c51e3",
+      "size_bytes": 6833
+    },
+    {
+      "path": "/Users/arthur/RustroverProjects/CellScript/proposals/novaseal/v0-mvp-skeleton/src/nova_state_type.cell",
+      "role": "package",
+      "hash": "263f74413368e630eafcc68129ee8bf8de5c87bfd59bf3107d770cf560b07dad",
+      "size_bytes": 8220
+    }
+  ],
+  "lowering": {
+    "protocol_semantics": "CellScript IR records consume/read_ref/create summaries before RISC-V codegen",
+    "assembly_path": "riscv64-asm emits executable CKB-style syscall paths plus metadata for verifier obligations",
+    "elf_path": "riscv64-elf is always enabled; all operations have real RISC-V lowerings or fail-closed traps with specific error codes",
+    "semantics_preserving_claim": "Pure computation lowering is executable; stateful protocol lowering is represented in metadata and asm but is not yet a proved schema decoder/verifier"
+  },
+  "runtime": {
+    "vm_target": "CKB-VM compatible RISC-V 64 IMC+B+MOP",
+    "vm_version": "VERSION2",
+    "syscall_abi": "CKB store_data ABI: A0=buffer, A1=size pointer, A2=offset, A3=index, A4=source",
+    "vm_abi": {
+      "format": "molecule",
+      "version": 32769,
+      "default": true,
+      "embedded_in_artifact": false,
+      "scope": "CKB-style full object load syscalls: LOAD_SCRIPT, LOAD_INPUT, LOAD_CELL, LOAD_HEADER",
+      "selection": "CKB-target ELF artifacts do not embed VM ABI trailer bytes; the profile selects CKB Molecule ABI out of band"
+    },
+    "pure_elf_runner": "cellc run --features vm-runner executes no-argument pure ELF with ckb-vm 0.24",
+    "ckb_runtime_required": true,
+    "ckb_runtime_features": [
+      "ckb-cell-data-decode",
+      "ckb-source-cell-fields",
+      "ckb-source-view"
+    ],
+    "standalone_runner_compatible": false,
+    "fail_closed_runtime_features": [
+      "field-access",
+      "fixed-byte-comparison"
+    ],
+    "ckb_runtime_accesses": [
+      {
+        "operation": "source-group-output",
+        "syscall": "SOURCE_VIEW",
+        "source": "GroupOutput",
+        "index": 0,
+        "binding": "source::group_output"
+      },
+      {
+        "operation": "cell-data-size",
+        "syscall": "LOAD_CELL_DATA",
+        "source": "SourceView",
+        "index": 0,
+        "binding": "ckb::cell_data_size"
+      },
+      {
+        "operation": "source-group-output",
+        "syscall": "SOURCE_VIEW",
+        "source": "GroupOutput",
+        "index": 0,
+        "binding": "source::group_output"
+      },
+      {
+        "operation": "source-group-output",
+        "syscall": "SOURCE_VIEW",
+        "source": "GroupOutput",
+        "index": 0,
+        "binding": "source::group_output"
+      },
+      {
+        "operation": "source-group-output",
+        "syscall": "SOURCE_VIEW",
+        "source": "GroupOutput",
+        "index": 0,
+        "binding": "source::group_output"
+      },
+      {
+        "operation": "source-group-output",
+        "syscall": "SOURCE_VIEW",
+        "source": "GroupOutput",
+        "index": 0,
+        "binding": "source::group_output"
+      },
+      {
+        "operation": "source-group-output",
+        "syscall": "SOURCE_VIEW",
+        "source": "GroupOutput",
+        "index": 0,
+        "binding": "source::group_output"
+      },
+      {
+        "operation": "cell-data-u64-le",
+        "syscall": "LOAD_CELL_DATA",
+        "source": "SourceView",
+        "index": 0,
+        "binding": "ckb::cell_data_u64_le"
+      },
+      {
+        "operation": "source-group-output",
+        "syscall": "SOURCE_VIEW",
+        "source": "GroupOutput",
+        "index": 0,
+        "binding": "source::group_output"
+      },
+      {
+        "operation": "cell-data-u64-le",
+        "syscall": "LOAD_CELL_DATA",
+        "source": "SourceView",
+        "index": 0,
+        "binding": "ckb::cell_data_u64_le"
+      },
+      {
+        "operation": "source-group-input",
+        "syscall": "SOURCE_VIEW",
+        "source": "GroupInput",
+        "index": 0,
+        "binding": "source::group_input"
+      },
+      {
+        "operation": "cell-data-size",
+        "syscall": "LOAD_CELL_DATA",
+        "source": "SourceView",
+        "index": 0,
+        "binding": "ckb::cell_data_size"
+      },
+      {
+        "operation": "source-group-input",
+        "syscall": "SOURCE_VIEW",
+        "source": "GroupInput",
+        "index": 0,
+        "binding": "source::group_input"
+      },
+      {
+        "operation": "source-group-input",
+        "syscall": "SOURCE_VIEW",
+        "source": "GroupInput",
+        "index": 0,
+        "binding": "source::group_input"
+      },
+      {
+        "operation": "source-group-input",
+        "syscall": "SOURCE_VIEW",
+        "source": "GroupInput",
+        "index": 0,
+        "binding": "source::group_input"
+      },
+      {
+        "operation": "source-group-input",
+        "syscall": "SOURCE_VIEW",
+        "source": "GroupInput",
+        "index": 0,
+        "binding": "source::group_input"
+      },
+      {
+        "operation": "source-group-input",
+        "syscall": "SOURCE_VIEW",
+        "source": "GroupInput",
+        "index": 0,
+        "binding": "source::group_input"
+      },
+      {
+        "operation": "cell-data-u64-le",
+        "syscall": "LOAD_CELL_DATA",
+        "source": "SourceView",
+        "index": 0,
+        "binding": "ckb::cell_data_u64_le"
+      },
+      {
+        "operation": "source-group-input",
+        "syscall": "SOURCE_VIEW",
+        "source": "GroupInput",
+        "index": 0,
+        "binding": "source::group_input"
+      },
+      {
+        "operation": "cell-data-u64-le",
+        "syscall": "LOAD_CELL_DATA",
+        "source": "SourceView",
+        "index": 0,
+        "binding": "ckb::cell_data_u64_le"
+      },
+      {
+        "operation": "source-group-output",
+        "syscall": "SOURCE_VIEW",
+        "source": "GroupOutput",
+        "index": 0,
+        "binding": "source::group_output"
+      },
+      {
+        "operation": "cell-data-size",
+        "syscall": "LOAD_CELL_DATA",
+        "source": "SourceView",
+        "index": 0,
+        "binding": "ckb::cell_data_size"
+      },
+      {
+        "operation": "source-group-output",
+        "syscall": "SOURCE_VIEW",
+        "source": "GroupOutput",
+        "index": 0,
+        "binding": "source::group_output"
+      },
+      {
+        "operation": "source-group-output",
+        "syscall": "SOURCE_VIEW",
+        "source": "GroupOutput",
+        "index": 0,
+        "binding": "source::group_output"
+      },
+      {
+        "operation": "source-group-output",
+        "syscall": "SOURCE_VIEW",
+        "source": "GroupOutput",
+        "index": 0,
+        "binding": "source::group_output"
+      },
+      {
+        "operation": "source-group-output",
+        "syscall": "SOURCE_VIEW",
+        "source": "GroupOutput",
+        "index": 0,
+        "binding": "source::group_output"
+      },
+      {
+        "operation": "cell-data-u64-le",
+        "syscall": "LOAD_CELL_DATA",
+        "source": "SourceView",
+        "index": 0,
+        "binding": "ckb::cell_data_u64_le"
+      },
+      {
+        "operation": "source-group-output",
+        "syscall": "SOURCE_VIEW",
+        "source": "GroupOutput",
+        "index": 0,
+        "binding": "source::group_output"
+      },
+      {
+        "operation": "cell-data-u64-le",
+        "syscall": "LOAD_CELL_DATA",
+        "source": "SourceView",
+        "index": 0,
+        "binding": "ckb::cell_data_u64_le"
+      }
+    ],
+    "verifier_obligations": [
+      {
+        "scope": "action:novaseal_lifecycle",
+        "category": "ckb-runtime",
+        "feature": "ckb-cell-data-decode",
+        "status": "ckb-runtime",
+        "detail": "Requires the CKB-style transaction context and syscall ABI during verification"
+      },
+      {
+        "scope": "action:novaseal_lifecycle",
+        "category": "ckb-runtime",
+        "feature": "ckb-source-cell-fields",
+        "status": "ckb-runtime",
+        "detail": "Requires the CKB-style transaction context and syscall ABI during verification"
+      },
+      {
+        "scope": "action:novaseal_lifecycle",
+        "category": "ckb-runtime",
+        "feature": "ckb-source-view",
+        "status": "ckb-runtime",
+        "detail": "Requires the CKB-style transaction context and syscall ABI during verification"
+      },
+      {
+        "scope": "action:novaseal_lifecycle",
+        "category": "cell-access",
+        "feature": "source-group-output:GroupOutput#0",
+        "status": "ckb-runtime",
+        "detail": "SOURCE_VIEW source-group-output from GroupOutput#0 bound to source::group_output"
+      },
+      {
+        "scope": "action:novaseal_lifecycle",
+        "category": "cell-access",
+        "feature": "cell-data-size:SourceView#0",
+        "status": "ckb-runtime",
+        "detail": "LOAD_CELL_DATA cell-data-size from SourceView#0 bound to ckb::cell_data_size"
+      },
+      {
+        "scope": "action:novaseal_lifecycle",
+        "category": "cell-access",
+        "feature": "cell-data-u64-le:SourceView#0",
+        "status": "ckb-runtime",
+        "detail": "LOAD_CELL_DATA cell-data-u64-le from SourceView#0 bound to ckb::cell_data_u64_le"
+      },
+      {
+        "scope": "action:novaseal_lifecycle",
+        "category": "cell-access",
+        "feature": "source-group-input:GroupInput#0",
+        "status": "ckb-runtime",
+        "detail": "SOURCE_VIEW source-group-input from GroupInput#0 bound to source::group_input"
+      },
+      {
+        "scope": "action:novaseal_lifecycle",
+        "category": "runtime-fail-closed",
+        "feature": "field-access",
+        "status": "fail-closed",
+        "detail": "Generated code rejects this path instead of accepting an unimplemented runtime operation"
+      },
+      {
+        "scope": "action:novaseal_lifecycle",
+        "category": "runtime-fail-closed",
+        "feature": "fixed-byte-comparison",
+        "status": "fail-closed",
+        "detail": "Generated code rejects this path instead of accepting an unimplemented runtime operation"
+      }
+    ],
+    "proof_plan": [
+      {
+        "name": "ckb-cell-data-decode",
+        "origin": "action:novaseal_lifecycle",
+        "category": "ckb-runtime",
+        "feature": "ckb-cell-data-decode",
+        "trigger": "explicit_entry",
+        "scope": "group",
+        "reads": [
+          "group_input",
+          "group_output",
+          "source_view",
+          "witness"
+        ],
+        "coverage": [
+          "entry:action:novaseal_lifecycle"
+        ],
+        "group_cardinality": "not a script-group cardinality obligation",
+        "identity_lifecycle_policy": "none",
+        "witness_fields": [
+          "witness.op",
+          "witness.old_cell",
+          "witness.intent",
+          "witness.state_hash_commitment",
+          "witness.sig"
+        ],
+        "on_chain_checked": true,
+        "on_chain_checked_obligations": [
+          "ckb-runtime:ckb-cell-data-decode=ckb-runtime"
+        ],
+        "codegen_coverage_status": "covered",
+        "status": "ckb-runtime",
+        "detail": "Requires the CKB-style transaction context and syscall ABI during verification"
+      },
+      {
+        "name": "ckb-source-cell-fields",
+        "origin": "action:novaseal_lifecycle",
+        "category": "ckb-runtime",
+        "feature": "ckb-source-cell-fields",
+        "trigger": "explicit_entry",
+        "scope": "group",
+        "reads": [
+          "group_input",
+          "group_output",
+          "source_view",
+          "witness"
+        ],
+        "coverage": [
+          "entry:action:novaseal_lifecycle"
+        ],
+        "group_cardinality": "not a script-group cardinality obligation",
+        "identity_lifecycle_policy": "none",
+        "witness_fields": [
+          "witness.op",
+          "witness.old_cell",
+          "witness.intent",
+          "witness.state_hash_commitment",
+          "witness.sig"
+        ],
+        "on_chain_checked": true,
+        "on_chain_checked_obligations": [
+          "ckb-runtime:ckb-source-cell-fields=ckb-runtime"
+        ],
+        "codegen_coverage_status": "covered",
+        "status": "ckb-runtime",
+        "detail": "Requires the CKB-style transaction context and syscall ABI during verification"
+      },
+      {
+        "name": "ckb-source-view",
+        "origin": "action:novaseal_lifecycle",
+        "category": "ckb-runtime",
+        "feature": "ckb-source-view",
+        "trigger": "explicit_entry",
+        "scope": "group",
+        "reads": [
+          "group_input",
+          "group_output",
+          "source_view",
+          "witness"
+        ],
+        "coverage": [
+          "entry:action:novaseal_lifecycle"
+        ],
+        "group_cardinality": "not a script-group cardinality obligation",
+        "identity_lifecycle_policy": "none",
+        "witness_fields": [
+          "witness.op",
+          "witness.old_cell",
+          "witness.intent",
+          "witness.state_hash_commitment",
+          "witness.sig"
+        ],
+        "on_chain_checked": true,
+        "on_chain_checked_obligations": [
+          "ckb-runtime:ckb-source-view=ckb-runtime"
+        ],
+        "codegen_coverage_status": "covered",
+        "status": "ckb-runtime",
+        "detail": "Requires the CKB-style transaction context and syscall ABI during verification"
+      },
+      {
+        "name": "source-group-output:GroupOutput#0",
+        "origin": "action:novaseal_lifecycle",
+        "category": "cell-access",
+        "feature": "source-group-output:GroupOutput#0",
+        "trigger": "explicit_entry",
+        "scope": "group",
+        "reads": [
+          "group_input",
+          "group_output",
+          "source_view",
+          "witness"
+        ],
+        "coverage": [
+          "entry:action:novaseal_lifecycle"
+        ],
+        "group_cardinality": "ckb ScriptGroup cardinality",
+        "identity_lifecycle_policy": "none",
+        "witness_fields": [
+          "witness.op",
+          "witness.old_cell",
+          "witness.intent",
+          "witness.state_hash_commitment",
+          "witness.sig"
+        ],
+        "on_chain_checked": true,
+        "on_chain_checked_obligations": [
+          "cell-access:source-group-output:GroupOutput#0=ckb-runtime"
+        ],
+        "codegen_coverage_status": "covered",
+        "status": "ckb-runtime",
+        "detail": "SOURCE_VIEW source-group-output from GroupOutput#0 bound to source::group_output"
+      },
+      {
+        "name": "cell-data-size:SourceView#0",
+        "origin": "action:novaseal_lifecycle",
+        "category": "cell-access",
+        "feature": "cell-data-size:SourceView#0",
+        "trigger": "explicit_entry",
+        "scope": "group",
+        "reads": [
+          "group_input",
+          "group_output",
+          "source_view",
+          "witness"
+        ],
+        "coverage": [
+          "entry:action:novaseal_lifecycle"
+        ],
+        "group_cardinality": "not a script-group cardinality obligation",
+        "identity_lifecycle_policy": "none",
+        "witness_fields": [
+          "witness.op",
+          "witness.old_cell",
+          "witness.intent",
+          "witness.state_hash_commitment",
+          "witness.sig"
+        ],
+        "on_chain_checked": true,
+        "on_chain_checked_obligations": [
+          "cell-access:cell-data-size:SourceView#0=ckb-runtime"
+        ],
+        "codegen_coverage_status": "covered",
+        "status": "ckb-runtime",
+        "detail": "LOAD_CELL_DATA cell-data-size from SourceView#0 bound to ckb::cell_data_size"
+      },
+      {
+        "name": "cell-data-u64-le:SourceView#0",
+        "origin": "action:novaseal_lifecycle",
+        "category": "cell-access",
+        "feature": "cell-data-u64-le:SourceView#0",
+        "trigger": "explicit_entry",
+        "scope": "group",
+        "reads": [
+          "group_input",
+          "group_output",
+          "source_view",
+          "witness"
+        ],
+        "coverage": [
+          "entry:action:novaseal_lifecycle"
+        ],
+        "group_cardinality": "not a script-group cardinality obligation",
+        "identity_lifecycle_policy": "none",
+        "witness_fields": [
+          "witness.op",
+          "witness.old_cell",
+          "witness.intent",
+          "witness.state_hash_commitment",
+          "witness.sig"
+        ],
+        "on_chain_checked": true,
+        "on_chain_checked_obligations": [
+          "cell-access:cell-data-u64-le:SourceView#0=ckb-runtime"
+        ],
+        "codegen_coverage_status": "covered",
+        "status": "ckb-runtime",
+        "detail": "LOAD_CELL_DATA cell-data-u64-le from SourceView#0 bound to ckb::cell_data_u64_le"
+      },
+      {
+        "name": "source-group-input:GroupInput#0",
+        "origin": "action:novaseal_lifecycle",
+        "category": "cell-access",
+        "feature": "source-group-input:GroupInput#0",
+        "trigger": "explicit_entry",
+        "scope": "group",
+        "reads": [
+          "group_input",
+          "group_output",
+          "source_view",
+          "witness"
+        ],
+        "coverage": [
+          "entry:action:novaseal_lifecycle"
+        ],
+        "group_cardinality": "ckb ScriptGroup cardinality",
+        "identity_lifecycle_policy": "none",
+        "witness_fields": [
+          "witness.op",
+          "witness.old_cell",
+          "witness.intent",
+          "witness.state_hash_commitment",
+          "witness.sig"
+        ],
+        "on_chain_checked": true,
+        "on_chain_checked_obligations": [
+          "cell-access:source-group-input:GroupInput#0=ckb-runtime"
+        ],
+        "codegen_coverage_status": "covered",
+        "status": "ckb-runtime",
+        "detail": "SOURCE_VIEW source-group-input from GroupInput#0 bound to source::group_input"
+      },
+      {
+        "name": "field-access",
+        "origin": "action:novaseal_lifecycle",
+        "category": "runtime-fail-closed",
+        "feature": "field-access",
+        "trigger": "explicit_entry",
+        "scope": "group",
+        "reads": [
+          "group_input",
+          "group_output",
+          "source_view",
+          "witness"
+        ],
+        "coverage": [
+          "entry:action:novaseal_lifecycle"
+        ],
+        "group_cardinality": "not a script-group cardinality obligation",
+        "identity_lifecycle_policy": "none",
+        "witness_fields": [
+          "witness.op",
+          "witness.old_cell",
+          "witness.intent",
+          "witness.state_hash_commitment",
+          "witness.sig"
+        ],
+        "on_chain_checked": false,
+        "builder_assumptions": [
+          "declared(fail-closed: Generated code rejects this path instead of accepting an unimplemented runtime operation)"
+        ],
+        "codegen_coverage_status": "fail-closed",
+        "status": "fail-closed",
+        "detail": "Generated code rejects this path instead of accepting an unimplemented runtime operation",
+        "diagnostics": [
+          {
+            "severity": "error",
+            "message": "generated code fail-closes this obligation instead of accepting a metadata-only proof"
+          }
+        ]
+      },
+      {
+        "name": "fixed-byte-comparison",
+        "origin": "action:novaseal_lifecycle",
+        "category": "runtime-fail-closed",
+        "feature": "fixed-byte-comparison",
+        "trigger": "explicit_entry",
+        "scope": "group",
+        "reads": [
+          "group_input",
+          "group_output",
+          "source_view",
+          "witness"
+        ],
+        "coverage": [
+          "entry:action:novaseal_lifecycle"
+        ],
+        "group_cardinality": "not a script-group cardinality obligation",
+        "identity_lifecycle_policy": "none",
+        "witness_fields": [
+          "witness.op",
+          "witness.old_cell",
+          "witness.intent",
+          "witness.state_hash_commitment",
+          "witness.sig"
+        ],
+        "on_chain_checked": false,
+        "builder_assumptions": [
+          "declared(fail-closed: Generated code rejects this path instead of accepting an unimplemented runtime operation)"
+        ],
+        "codegen_coverage_status": "fail-closed",
+        "status": "fail-closed",
+        "detail": "Generated code rejects this path instead of accepting an unimplemented runtime operation",
+        "diagnostics": [
+          {
+            "severity": "error",
+            "message": "generated code fail-closes this obligation instead of accepting a metadata-only proof"
+          }
+        ]
+      }
+    ],
+    "proof_plan_soundness": {
+      "status": "passed",
+      "strict": false,
+      "checked_records": 9,
+      "checked_obligations": 9,
+      "issue_count": 0
+    },
+    "builder_assumptions": [
+      {
+        "assumption_id": "ba-7c52731a62883fd8",
+        "kind": "builder_evidence",
+        "origin": "action:novaseal_lifecycle",
+        "feature": "field-access",
+        "proof_plan_status": "fail-closed",
+        "required_inputs": [
+          "group_input:*"
+        ],
+        "required_outputs": [
+          "group_output:*"
+        ],
+        "required_cell_deps": [],
+        "required_witness_fields": [
+          "witness.op",
+          "witness.old_cell",
+          "witness.intent",
+          "witness.state_hash_commitment",
+          "witness.sig"
+        ],
+        "capacity_policy": "occupied-capacity-and-tx-size-evidence-required",
+        "fee_policy": "builder-balances-fee-before-signing",
+        "change_policy": "change-outputs-must-not-violate-proof-plan-shape",
+        "signature_policy": "signature-material-explicit-no-implicit-signer-authority",
+        "failure_mode": "reject-before-signing",
+        "detail": "declared(fail-closed: Generated code rejects this path instead of accepting an unimplemented runtime operation)"
+      },
+      {
+        "assumption_id": "ba-3281f527876ce74b",
+        "kind": "builder_evidence",
+        "origin": "action:novaseal_lifecycle",
+        "feature": "fixed-byte-comparison",
+        "proof_plan_status": "fail-closed",
+        "required_inputs": [
+          "group_input:*"
+        ],
+        "required_outputs": [
+          "group_output:*"
+        ],
+        "required_cell_deps": [],
+        "required_witness_fields": [
+          "witness.op",
+          "witness.old_cell",
+          "witness.intent",
+          "witness.state_hash_commitment",
+          "witness.sig"
+        ],
+        "capacity_policy": "occupied-capacity-and-tx-size-evidence-required",
+        "fee_policy": "builder-balances-fee-before-signing",
+        "change_policy": "change-outputs-must-not-violate-proof-plan-shape",
+        "signature_policy": "signature-material-explicit-no-implicit-signer-authority",
+        "failure_mode": "reject-before-signing",
+        "detail": "declared(fail-closed: Generated code rejects this path instead of accepting an unimplemented runtime operation)"
+      }
+    ]
+  },
+  "constraints": {
+    "target_profile": "ckb",
+    "status": "warn",
+    "entry_abi": [
+      {
+        "entry_kind": "action",
+        "entry_name": "novaseal_lifecycle",
+        "param_count": 5,
+        "abi_slots_used": 9,
+        "register_slots_used": 8,
+        "stack_spill_slots": 1,
+        "stack_spill_bytes": 8,
+        "witness_payload_bytes": 45,
+        "min_witness_bytes": 53,
+        "unsupported": false,
+        "params": [
+          {
+            "name": "op",
+            "ty": "u8",
+            "abi_kind": "scalar",
+            "abi_slots": 1,
+            "slot_start": 0,
+            "slot_end": 0,
+            "register_slots": 1,
+            "stack_spill_slots": 0,
+            "stack_spill_bytes": 0,
+            "witness_bytes": 1,
+            "pointer_length_pair": false,
+            "pointer_pair_crosses_register_boundary": false,
+            "supported": true
+          },
+          {
+            "name": "old_cell",
+            "ty": "NovaSealCellV0",
+            "abi_kind": "schema-pointer",
+            "abi_slots": 2,
+            "slot_start": 1,
+            "slot_end": 2,
+            "register_slots": 2,
+            "stack_spill_slots": 0,
+            "stack_spill_bytes": 0,
+            "witness_bytes": 4,
+            "pointer_length_pair": true,
+            "pointer_pair_crosses_register_boundary": false,
+            "supported": true
+          },
+          {
+            "name": "intent",
+            "ty": "NovaSealSignedIntentV0",
+            "abi_kind": "schema-pointer",
+            "abi_slots": 2,
+            "slot_start": 3,
+            "slot_end": 4,
+            "register_slots": 2,
+            "stack_spill_slots": 0,
+            "stack_spill_bytes": 0,
+            "witness_bytes": 4,
+            "pointer_length_pair": true,
+            "pointer_pair_crosses_register_boundary": false,
+            "supported": true
+          },
+          {
+            "name": "state_hash_commitment",
+            "ty": "Hash",
+            "abi_kind": "fixed-byte-pointer",
+            "abi_slots": 2,
+            "slot_start": 5,
+            "slot_end": 6,
+            "register_slots": 2,
+            "stack_spill_slots": 0,
+            "stack_spill_bytes": 0,
+            "witness_bytes": 32,
+            "pointer_length_pair": true,
+            "pointer_pair_crosses_register_boundary": false,
+            "supported": true
+          },
+          {
+            "name": "sig",
+            "ty": "SignaturePayload",
+            "abi_kind": "schema-pointer",
+            "abi_slots": 2,
+            "slot_start": 7,
+            "slot_end": 8,
+            "register_slots": 1,
+            "stack_spill_slots": 1,
+            "stack_spill_bytes": 8,
+            "witness_bytes": 4,
+            "pointer_length_pair": true,
+            "pointer_pair_crosses_register_boundary": true,
+            "supported": true
+          }
+        ]
+      }
+    ],
+    "artifact": {
+      "format": "RISC-V ELF",
+      "artifact_size_bytes": 34828,
+      "text_bytes": 30240,
+      "rodata_bytes": 460,
+      "relaxed_branch_count": 0,
+      "max_cond_branch_abs_distance": 2428,
+      "machine_block_count": 453,
+      "machine_cfg_edge_count": 769,
+      "machine_call_edge_count": 119,
+      "unreachable_machine_block_count": 92
+    },
+    "runtime_errors": [
+      {
+        "code": 1,
+        "name": "syscall-failed",
+        "description": "A target VM syscall returned a non-zero status while loading transaction context.",
+        "hint": "Check transaction input/output/cell_dep indexes, source flags, and target-profile syscall compatibility."
+      },
+      {
+        "code": 2,
+        "name": "bounds-check-failed",
+        "description": "Loaded bytes were smaller than the verifier-required minimum.",
+        "hint": "Check witness or cell data length against the schema manifest and entry ABI report."
+      },
+      {
+        "code": 3,
+        "name": "cell-load-failed",
+        "description": "Cell data or field loading failed or returned an unusable result.",
+        "hint": "Check that the expected input, output, or dep cell exists and is reachable by the generated script."
+      },
+      {
+        "code": 4,
+        "name": "exact-size-mismatch",
+        "description": "Loaded bytes did not match the exact fixed-size schema requirement.",
+        "hint": "Check fixed-width schema fields and ensure the builder encodes the exact Molecule byte length."
+      },
+      {
+        "code": 5,
+        "name": "assertion-failed",
+        "description": "A source-level assert or invariant check evaluated to false.",
+        "hint": "Inspect the action invariant or assert expression and the transaction values that feed it."
+      },
+      {
+        "code": 7,
+        "name": "flow-transition-mismatch",
+        "description": "A flow transition did not match the declared transition rule.",
+        "hint": "Compare consumed and produced state fields with the declared flow transitions."
+      },
+      {
+        "code": 8,
+        "name": "flow-new-state-invalid",
+        "description": "A created or proposed output state value was outside the declared state range.",
+        "hint": "Check created output state values and declared flow states."
+      },
+      {
+        "code": 9,
+        "name": "flow-old-state-invalid",
+        "description": "A consumed state value was outside the declared state range.",
+        "hint": "Check consumed input state values and declared flow states."
+      },
+      {
+        "code": 10,
+        "name": "entry-witness-magic-mismatch",
+        "description": "Entry witness bytes did not start with the CellScript witness ABI magic.",
+        "hint": "Encode entry witnesses with cellc entry-witness or the documented CSARGv1 wire format."
+      },
+      {
+        "code": 11,
+        "name": "type-hash-preservation-mismatch",
+        "description": "A proposed output did not preserve the consumed input type hash.",
+        "hint": "Check the proposed output type script and builder output ordering."
+      },
+      {
+        "code": 12,
+        "name": "lock-hash-preservation-mismatch",
+        "description": "A proposed output did not preserve the consumed input lock hash.",
+        "hint": "Check the proposed output lock script and builder output ordering."
+      },
+      {
+        "code": 13,
+        "name": "field-preservation-mismatch",
+        "description": "An output field required to be preserved differs from its input field.",
+        "hint": "Check proposed output fields that should preserve lock/type/data identity."
+      },
+      {
+        "code": 14,
+        "name": "mutate-transition-mismatch",
+        "description": "A proposed output failed its declared field transition check.",
+        "hint": "Check the mutable field delta against the documented transition formula."
+      },
+      {
+        "code": 15,
+        "name": "data-preservation-mismatch",
+        "description": "Proposed output data outside transition ranges differs from the input data.",
+        "hint": "Check that non-transition output data bytes are copied from the consumed input."
+      },
+      {
+        "code": 16,
+        "name": "dynamic-field-bounds-invalid",
+        "description": "A Molecule dynamic field offset or length failed bounds validation.",
+        "hint": "Validate Molecule table offsets, field count, and dynamic field lengths."
+      },
+      {
+        "code": 17,
+        "name": "type-hash-mismatch",
+        "description": "A loaded cell type hash did not match the expected CellScript type identity.",
+        "hint": "Check type script hash/hash_type/args and the expected CellScript type identity."
+      },
+      {
+        "code": 18,
+        "name": "fixed-byte-comparison-unresolved",
+        "description": "A fixed-byte verifier comparison could not resolve its trusted source bytes.",
+        "hint": "Use schema-backed parameters or fixed-byte values that the verifier can address."
+      },
+      {
+        "code": 20,
+        "name": "numeric-or-discriminant-invalid",
+        "description": "A numeric verifier check, enum discriminant, or arithmetic guard failed.",
+        "hint": "Check enum tags, arithmetic bounds, and generated collection length arithmetic."
+      },
+      {
+        "code": 21,
+        "name": "collection-bounds-invalid",
+        "description": "A runtime collection index, length, or capacity check failed.",
+        "hint": "Check collection length, index, and capacity values in witness or cell data."
+      },
+      {
+        "code": 22,
+        "name": "consume-invalid-operand",
+        "description": "A consume operation reached codegen with an invalid or unsupported operand.",
+        "hint": "This indicates an unsupported lowering path; inspect compiler metadata blockers."
+      },
+      {
+        "code": 23,
+        "name": "destroy-invalid-operand",
+        "description": "A destroy operation reached codegen with an invalid or unsupported operand.",
+        "hint": "This indicates an unsupported lowering path; inspect compiler metadata blockers."
+      },
+      {
+        "code": 24,
+        "name": "collection-runtime-unsupported",
+        "description": "A runtime collection helper shape is not supported by the current backend.",
+        "hint": "Avoid advertising this collection helper as production-ready until support is implemented."
+      },
+      {
+        "code": 25,
+        "name": "entry-witness-abi-invalid",
+        "description": "Entry witness payload layout, width, or parameter ABI placement was invalid.",
+        "hint": "Inspect cellc constraints or cellc abi output for parameter slots and witness byte layout."
+      },
+      {
+        "code": 26,
+        "name": "capacity-preservation-mismatch",
+        "description": "A proposed output did not preserve the consumed input capacity.",
+        "hint": "Check the proposed output capacity and builder output ordering."
+      },
+      {
+        "code": 32,
+        "name": "dynamic-field-value-mismatch",
+        "description": "A dynamic Molecule field value did not match the expected verifier source.",
+        "hint": "Check dynamic Molecule field encoding and the value source used by the verifier."
+      },
+      {
+        "code": 33,
+        "name": "out-point-mismatch",
+        "description": "A loaded input OutPoint field did not match the expected transaction lineage.",
+        "hint": "Check the input OutPoint tx hash/index and the expected lineage binding."
+      },
+      {
+        "code": 34,
+        "name": "script-field-malformed",
+        "description": "A loaded CKB Script field did not match the expected Molecule Script layout.",
+        "hint": "Check the lock/type Script Molecule encoding, args length, and whether the cell actually has that script field."
+      },
+      {
+        "code": 35,
+        "name": "dao-header-lineage-mismatch",
+        "description": "The DAO field loaded from an input's committed block header did not match the supplied HeaderDep.",
+        "hint": "Bind the HeaderDep to the exact input/deposit header used for DAO accumulated-rate accounting."
+      },
+      {
+        "code": 36,
+        "name": "dao-maturity-violation",
+        "description": "The DAO input since value was below the required maturity lower bound.",
+        "hint": "Check the withdrawal request since value and ensure the consumed DAO input has reached the required maturity."
+      },
+      {
+        "code": 37,
+        "name": "ckb-since-malformed",
+        "description": "A CKB since value or requested since constructor argument was malformed.",
+        "hint": "Check since flags, metric type, epoch number/index/length bounds, and index < length."
+      },
+      {
+        "code": 38,
+        "name": "script-args-mismatch",
+        "description": "A loaded CKB Script args field did not match the expected args policy.",
+        "hint": "Check lock/type script args and whether this protocol path requires empty script args."
+      },
+      {
+        "code": 39,
+        "name": "metapoint-mismatch",
+        "description": "A loaded CKB MetaPoint relation did not match the expected input/output index and relative distance.",
+        "hint": "Check the paired input OutPoints or output indexes and the signed relative-distance field."
+      },
+      {
+        "code": 40,
+        "name": "metapoint-cardinality-mismatch",
+        "description": "A current-script lock/type MetaPoint pair scan found a duplicate, missing, or unbalanced relation.",
+        "hint": "Check current-script lock-only/type-only cell counts and ensure every MetaPoint has exactly one paired cell."
+      },
+      {
+        "code": 41,
+        "name": "script-identity-mismatch",
+        "description": "A loaded CKB Script code_hash or hash_type did not match the expected identity.",
+        "hint": "Check Script code_hash, hash_type, deployed dep, and whether lock/type role is correct."
+      },
+      {
+        "code": 42,
+        "name": "witness-malformed",
+        "description": "Loaded witness bytes did not match the expected Molecule WitnessArgs layout or ABI magic.",
+        "hint": "Check witness byte layout, WitnessArgs table header, and entry ABI magic bytes."
+      },
+      {
+        "code": 43,
+        "name": "witness-field-truncated",
+        "description": "A WitnessArgs field offset or length exceeded the loaded witness byte range.",
+        "hint": "Check that expected WitnessArgs field offsets plus field lengths stay within loaded witness size."
+      },
+      {
+        "code": 44,
+        "name": "ckb-source-view-invalid",
+        "description": "A CKB SourceView value was malformed or used with an incompatible source-specific helper.",
+        "hint": "Pass a SourceView produced by the matching source::* helper and keep indexes in range."
+      },
+      {
+        "code": 45,
+        "name": "header-dep-missing",
+        "description": "A required HeaderDep source view was absent or could not be bound to the requested header.",
+        "hint": "Add the required header dep and bind it to the input/deposit whose DAO data is read."
+      },
+      {
+        "code": 46,
+        "name": "dao-field-malformed",
+        "description": "A loaded DAO header or cell field did not match the expected encoded layout.",
+        "hint": "Check DAO header bytes, accumulated-rate width, and deposit/withdrawal cell data layout."
+      },
+      {
+        "code": 47,
+        "name": "script-role-mismatch",
+        "description": "The script was used in a lock/type role that violates the declared invariant.",
+        "hint": "Check whether the script is deployed and invoked as the expected lock or type script."
+      },
+      {
+        "code": 48,
+        "name": "xudt-binding-mismatch",
+        "description": "An xUDT type args, owner-mode, or amount binding check failed.",
+        "hint": "Check xUDT type args, owner-mode flags, input type hash, and token data layout."
+      },
+      {
+        "code": 49,
+        "name": "aggregate-amount-mismatch",
+        "description": "A lowered aggregate/C256 accounting equality or inequality check failed.",
+        "hint": "Compare generated aggregate inputs/outputs and inspect overflow or exact-equality assumptions."
+      }
+    ],
+    "ckb": {
+      "limits_source": "builtin-ckb-defaults",
+      "profile_abi_contract": {
+        "witness_abi": "ckb-molecule-witness-args+cellscript-entry-witness-v1",
+        "lock_args_abi": "ckb-script-args-typed-fixed-bytes",
+        "source_encoding": "ckb-source-group-high-bit",
+        "spawn_ipc_abi": "ckb-vm-v2-spawn-ipc-syscalls-2601-2608",
+        "since_abi": "ckb-since-block-timestamp-epoch-number-with-fraction",
+        "cell_dep_abi": "ckb-cell-dep-outpoint-and-dep-group",
+        "script_ref_abi": "ckb-script-code-hash-hash-type-args",
+        "output_data_abi": "ckb-outputs-and-outputs-data-index-aligned",
+        "capacity_floor_abi": "ckb-output-capacity-floor-shannons",
+        "type_id_abi": "ckb-type-id-v1",
+        "tx_version": 0
+      },
+      "hash_domain": "ckb-packed-molecule-blake2b",
+      "script_hash_algorithm": "blake2b-256(personal=ckb-default-hash) over packed Script",
+      "transaction_hash_algorithm": "blake2b-256(personal=ckb-default-hash) over packed RawTransaction",
+      "sighash_algorithm": "ckb witness-sighash blake2b-256",
+      "supported_script_hash_types": [
+        "data",
+        "type",
+        "data1",
+        "data2"
+      ],
+      "declared_type_id_hash_type": "type",
+      "hash_type_policy_surface": "compiler-declared-type-id-hash-type; builder must preserve script hash_type in deployed cells",
+      "hash_type_policy": {
+        "source": "compiler-default",
+        "default_script_hash_type": "data1",
+        "declared_hash_type": null,
+        "type_id_hash_type": "type",
+        "supported_hash_types": [
+          "data",
+          "type",
+          "data1",
+          "data2"
+        ],
+        "status": "builder-must-preserve-script-hash-type"
+      },
+      "dep_group_manifest": {
+        "source": "Cell.toml deploy.ckb",
+        "dep_group_supported": true,
+        "production_manifest_required": true,
+        "declared_cell_deps": [
+          {
+            "name": "cellscript_btc_bip340_verifier_riscv",
+            "artifact_hash": null,
+            "tx_hash": "0x6418f34fa16dc691febc1ce3870ff411c0bf6600f53ff27f57ca9723ae1d2c31",
+            "index": 0,
+            "dep_type": "code",
+            "data_hash": "0xcf90469fae427baab583cc69ce30d97c8f2368f5dec72bd9f95092e85558762e",
+            "hash_type": "data1",
+            "type_id": null
+          }
+        ],
+        "status": "manifest-declares-code-cell-deps"
+      },
+      "max_tx_verify_cycles": 70000000,
+      "max_block_cycles": 10000000000,
+      "max_block_bytes": 597000,
+      "estimated_cycles": 768,
+      "measured_cycles": null,
+      "cycles_status": "not-measured-by-compiler",
+      "min_code_cell_data_capacity_shannons": 3483600000000,
+      "recommended_code_cell_capacity_shannons": 3582800000000,
+      "min_witness_bytes": 8,
+      "max_entry_witness_bytes": 53,
+      "dry_run_required_for_production": true,
+      "tx_size_bytes": null,
+      "tx_size_measurement_required": true,
+      "tx_size_status": "builder-required",
+      "occupied_capacity_measurement_required": false,
+      "capacity_status": "code-cell-data-lower-bound",
+      "ckb_runtime_features": [
+        "ckb-cell-data-decode",
+        "ckb-source-cell-fields",
+        "ckb-source-view"
+      ],
+      "uses_input_since": false,
+      "uses_header_epoch": false,
+      "transaction_runtime_input_requirement_count": 0,
+      "timelock_policy_surface": "not-applicable",
+      "timelock_policy": {
+        "uses_input_since": false,
+        "uses_header_epoch": false,
+        "policy_kind": "not-applicable",
+        "runtime_features": [],
+        "status": "not-applicable"
+      },
+      "created_output_count": 0,
+      "mutated_output_count": 0,
+      "capacity_planning_required": false,
+      "capacity_policy_surface": "not-applicable",
+      "capacity_evidence_contract": {
+        "required": true,
+        "code_cell_lower_bound_shannons": 3483600000000,
+        "recommended_code_cell_capacity_shannons": 3582800000000,
+        "occupied_capacity_measurement_required": false,
+        "tx_size_measurement_required": true,
+        "measured_occupied_capacity_shannons": null,
+        "measured_tx_size_bytes": null,
+        "status": "builder-must-attach-tx-size-evidence-code-cell-lower-bound-available"
+      }
+    },
+    "warnings": [
+      "action 'novaseal_lifecycle' parameter 'sig' pointer/length ABI pair crosses a0-a7 boundary at slots 7..8",
+      "CKB cycles and transaction size are not measured by the compiler; require builder dry-run for production"
+    ]
+  },
+  "molecule_schema_manifest": {
+    "schema": "cellscript-molecule-schema-manifest-v1",
+    "version": 1,
+    "abi": "molecule",
+    "target_profile": "ckb",
+    "type_count": 5,
+    "fixed_type_count": 5,
+    "dynamic_type_count": 0,
+    "entries": [
+      {
+        "type_name": "NovaSealCellV0",
+        "kind": "Struct",
+        "layout": "fixed-struct-v1",
+        "fixed_size": 146,
+        "encoded_size": 146,
+        "schema_hash": "8b706413febab5a9ee4462fef3a21c62a89264764b56376884be69e11de1d89a",
+        "field_offsets": [
+          {
+            "name": "version",
+            "ty": "u16",
+            "offset": 0,
+            "encoded_size": 2,
+            "fixed_width": true
+          },
+          {
+            "name": "btc_authority_hash",
+            "ty": "Hash",
+            "offset": 2,
+            "encoded_size": 32,
+            "fixed_width": true
+          },
+          {
+            "name": "state_hash",
+            "ty": "Hash",
+            "offset": 34,
+            "encoded_size": 32,
+            "fixed_width": true
+          },
+          {
+            "name": "policy_hash",
+            "ty": "Hash",
+            "offset": 66,
+            "encoded_size": 32,
+            "fixed_width": true
+          },
+          {
+            "name": "latest_receipt_hash",
+            "ty": "Hash",
+            "offset": 98,
+            "encoded_size": 32,
+            "fixed_width": true
+          },
+          {
+            "name": "nonce",
+            "ty": "u64",
+            "offset": 130,
+            "encoded_size": 8,
+            "fixed_width": true
+          },
+          {
+            "name": "expiry",
+            "ty": "u64",
+            "offset": 138,
+            "encoded_size": 8,
+            "fixed_width": true
+          }
+        ],
+        "target_profile_compatible": true
+      },
+      {
+        "type_name": "NovaSealIntentCoreV0",
+        "kind": "Struct",
+        "layout": "fixed-struct-v1",
+        "fixed_size": 222,
+        "encoded_size": 222,
+        "schema_hash": "2a927893c04d120777d138af8bb3eb71763c8ad6e8a4c8b56f1f9b2362d3445c",
+        "field_offsets": [
+          {
+            "name": "protocol_id",
+            "ty": "Hash",
+            "offset": 0,
+            "encoded_size": 32,
+            "fixed_width": true
+          },
+          {
+            "name": "package_hash",
+            "ty": "Hash",
+            "offset": 32,
+            "encoded_size": 32,
+            "fixed_width": true
+          },
+          {
+            "name": "policy_hash",
+            "ty": "Hash",
+            "offset": 64,
+            "encoded_size": 32,
+            "fixed_width": true
+          },
+          {
+            "name": "action",
+            "ty": "u8",
+            "offset": 96,
+            "encoded_size": 1,
+            "fixed_width": true
+          },
+          {
+            "name": "terminal_path",
+            "ty": "u8",
+            "offset": 97,
+            "encoded_size": 1,
+            "fixed_width": true
+          },
+          {
+            "name": "old_cell",
+            "ty": "OutPoint",
+            "offset": 98,
+            "encoded_size": 36,
+            "fixed_width": true
+          },
+          {
+            "name": "old_state_hash",
+            "ty": "Hash",
+            "offset": 134,
+            "encoded_size": 32,
+            "fixed_width": true
+          },
+          {
+            "name": "new_state_hash",
+            "ty": "Hash",
+            "offset": 166,
+            "encoded_size": 32,
+            "fixed_width": true
+          },
+          {
+            "name": "old_nonce",
+            "ty": "u64",
+            "offset": 198,
+            "encoded_size": 8,
+            "fixed_width": true
+          },
+          {
+            "name": "new_nonce",
+            "ty": "u64",
+            "offset": 206,
+            "encoded_size": 8,
+            "fixed_width": true
+          },
+          {
+            "name": "expiry",
+            "ty": "u64",
+            "offset": 214,
+            "encoded_size": 8,
+            "fixed_width": true
+          }
+        ],
+        "target_profile_compatible": true
+      },
+      {
+        "type_name": "NovaSealSignedIntentV0",
+        "kind": "Struct",
+        "layout": "fixed-struct-v1",
+        "fixed_size": 254,
+        "encoded_size": 254,
+        "schema_hash": "907820b1b9289f91e336d1e6928281d1f42ae3eae988882bdb3ab63ab7083ecc",
+        "field_offsets": [
+          {
+            "name": "core",
+            "ty": "NovaSealIntentCoreV0",
+            "offset": 0,
+            "encoded_size": 222,
+            "fixed_width": true
+          },
+          {
+            "name": "expected_receipt_hash",
+            "ty": "Hash",
+            "offset": 222,
+            "encoded_size": 32,
+            "fixed_width": true
+          }
+        ],
+        "target_profile_compatible": true
+      },
+      {
+        "type_name": "OutPoint",
+        "kind": "Struct",
+        "layout": "fixed-struct-v1",
+        "fixed_size": 36,
+        "encoded_size": 36,
+        "schema_hash": "19a5782f694cd2a3b15836b3ef54f4f215d0e72fd3637beee58cc95cd9baf74d",
+        "field_offsets": [
+          {
+            "name": "tx_hash",
+            "ty": "Hash",
+            "offset": 0,
+            "encoded_size": 32,
+            "fixed_width": true
+          },
+          {
+            "name": "index",
+            "ty": "u32",
+            "offset": 32,
+            "encoded_size": 4,
+            "fixed_width": true
+          }
+        ],
+        "target_profile_compatible": true
+      },
+      {
+        "type_name": "SignaturePayload",
+        "kind": "Struct",
+        "layout": "fixed-struct-v1",
+        "fixed_size": 96,
+        "encoded_size": 96,
+        "schema_hash": "f5f3d1b37d43c1791560a732c62f8fb328c4f309f26a609a27d6e025ae11e461",
+        "field_offsets": [
+          {
+            "name": "pubkey",
+            "ty": "[u8; 32]",
+            "offset": 0,
+            "encoded_size": 32,
+            "fixed_width": true
+          },
+          {
+            "name": "signature",
+            "ty": "[u8; 64]",
+            "offset": 32,
+            "encoded_size": 64,
+            "fixed_width": true
+          }
+        ],
+        "target_profile_compatible": true
+      }
+    ],
+    "manifest_hash": "b942a8baa8ef322fc0c92b98dc3dbaab245fee32566a1399fe242615e6e62660"
+  },
+  "types": [
+    {
+      "name": "NovaSealCellV0",
+      "hash_type_source": "target-default",
+      "kind": "Struct",
+      "capabilities": [],
+      "claim_output": null,
+      "flow_states": [],
+      "flow_transitions": [],
+      "encoded_size": 146,
+      "fields": [
+        {
+          "name": "version",
+          "ty": "u16",
+          "offset": 0,
+          "encoded_size": 2,
+          "fixed_width": true
+        },
+        {
+          "name": "btc_authority_hash",
+          "ty": "Hash",
+          "offset": 2,
+          "encoded_size": 32,
+          "fixed_width": true
+        },
+        {
+          "name": "state_hash",
+          "ty": "Hash",
+          "offset": 34,
+          "encoded_size": 32,
+          "fixed_width": true
+        },
+        {
+          "name": "policy_hash",
+          "ty": "Hash",
+          "offset": 66,
+          "encoded_size": 32,
+          "fixed_width": true
+        },
+        {
+          "name": "latest_receipt_hash",
+          "ty": "Hash",
+          "offset": 98,
+          "encoded_size": 32,
+          "fixed_width": true
+        },
+        {
+          "name": "nonce",
+          "ty": "u64",
+          "offset": 130,
+          "encoded_size": 8,
+          "fixed_width": true
+        },
+        {
+          "name": "expiry",
+          "ty": "u64",
+          "offset": 138,
+          "encoded_size": 8,
+          "fixed_width": true
+        }
+      ],
+      "molecule_schema": {
+        "abi": "molecule",
+        "layout": "fixed-struct-v1",
+        "name": "NovaSealCellV0",
+        "fixed_size": 146,
+        "schema_hash": "8b706413febab5a9ee4462fef3a21c62a89264764b56376884be69e11de1d89a",
+        "schema": "array CellScriptUint16 [byte; 2];\narray CellScriptUint64 [byte; 8];\narray CellScriptHash [byte; 32];\n\nstruct NovaSealCellV0 {\n    version: CellScriptUint16,\n    btc_authority_hash: CellScriptHash,\n    state_hash: CellScriptHash,\n    policy_hash: CellScriptHash,\n    latest_receipt_hash: CellScriptHash,\n    nonce: CellScriptUint64,\n    expiry: CellScriptUint64,\n}\n\n"
+      }
+    },
+    {
+      "name": "OutPoint",
+      "hash_type_source": "target-default",
+      "kind": "Struct",
+      "capabilities": [],
+      "claim_output": null,
+      "flow_states": [],
+      "flow_transitions": [],
+      "encoded_size": 36,
+      "fields": [
+        {
+          "name": "tx_hash",
+          "ty": "Hash",
+          "offset": 0,
+          "encoded_size": 32,
+          "fixed_width": true
+        },
+        {
+          "name": "index",
+          "ty": "u32",
+          "offset": 32,
+          "encoded_size": 4,
+          "fixed_width": true
+        }
+      ],
+      "molecule_schema": {
+        "abi": "molecule",
+        "layout": "fixed-struct-v1",
+        "name": "OutPoint",
+        "fixed_size": 36,
+        "schema_hash": "19a5782f694cd2a3b15836b3ef54f4f215d0e72fd3637beee58cc95cd9baf74d",
+        "schema": "array CellScriptUint32 [byte; 4];\narray CellScriptHash [byte; 32];\n\nstruct OutPoint {\n    tx_hash: CellScriptHash,\n    index: CellScriptUint32,\n}\n\n"
+      }
+    },
+    {
+      "name": "NovaSealIntentCoreV0",
+      "hash_type_source": "target-default",
+      "kind": "Struct",
+      "capabilities": [],
+      "claim_output": null,
+      "flow_states": [],
+      "flow_transitions": [],
+      "encoded_size": 222,
+      "fields": [
+        {
+          "name": "protocol_id",
+          "ty": "Hash",
+          "offset": 0,
+          "encoded_size": 32,
+          "fixed_width": true
+        },
+        {
+          "name": "package_hash",
+          "ty": "Hash",
+          "offset": 32,
+          "encoded_size": 32,
+          "fixed_width": true
+        },
+        {
+          "name": "policy_hash",
+          "ty": "Hash",
+          "offset": 64,
+          "encoded_size": 32,
+          "fixed_width": true
+        },
+        {
+          "name": "action",
+          "ty": "u8",
+          "offset": 96,
+          "encoded_size": 1,
+          "fixed_width": true
+        },
+        {
+          "name": "terminal_path",
+          "ty": "u8",
+          "offset": 97,
+          "encoded_size": 1,
+          "fixed_width": true
+        },
+        {
+          "name": "old_cell",
+          "ty": "OutPoint",
+          "offset": 98,
+          "encoded_size": 36,
+          "fixed_width": true
+        },
+        {
+          "name": "old_state_hash",
+          "ty": "Hash",
+          "offset": 134,
+          "encoded_size": 32,
+          "fixed_width": true
+        },
+        {
+          "name": "new_state_hash",
+          "ty": "Hash",
+          "offset": 166,
+          "encoded_size": 32,
+          "fixed_width": true
+        },
+        {
+          "name": "old_nonce",
+          "ty": "u64",
+          "offset": 198,
+          "encoded_size": 8,
+          "fixed_width": true
+        },
+        {
+          "name": "new_nonce",
+          "ty": "u64",
+          "offset": 206,
+          "encoded_size": 8,
+          "fixed_width": true
+        },
+        {
+          "name": "expiry",
+          "ty": "u64",
+          "offset": 214,
+          "encoded_size": 8,
+          "fixed_width": true
+        }
+      ],
+      "molecule_schema": {
+        "abi": "molecule",
+        "layout": "fixed-struct-v1",
+        "name": "NovaSealIntentCoreV0",
+        "fixed_size": 222,
+        "schema_hash": "2a927893c04d120777d138af8bb3eb71763c8ad6e8a4c8b56f1f9b2362d3445c",
+        "schema": "array CellScriptUint32 [byte; 4];\narray CellScriptUint64 [byte; 8];\narray CellScriptHash [byte; 32];\n\nstruct OutPoint {\n    tx_hash: CellScriptHash,\n    index: CellScriptUint32,\n}\n\nstruct NovaSealIntentCoreV0 {\n    protocol_id: CellScriptHash,\n    package_hash: CellScriptHash,\n    policy_hash: CellScriptHash,\n    action: byte,\n    terminal_path: byte,\n    old_cell: OutPoint,\n    old_state_hash: CellScriptHash,\n    new_state_hash: CellScriptHash,\n    old_nonce: CellScriptUint64,\n    new_nonce: CellScriptUint64,\n    expiry: CellScriptUint64,\n}\n\n"
+      }
+    },
+    {
+      "name": "NovaSealSignedIntentV0",
+      "hash_type_source": "target-default",
+      "kind": "Struct",
+      "capabilities": [],
+      "claim_output": null,
+      "flow_states": [],
+      "flow_transitions": [],
+      "encoded_size": 254,
+      "fields": [
+        {
+          "name": "core",
+          "ty": "NovaSealIntentCoreV0",
+          "offset": 0,
+          "encoded_size": 222,
+          "fixed_width": true
+        },
+        {
+          "name": "expected_receipt_hash",
+          "ty": "Hash",
+          "offset": 222,
+          "encoded_size": 32,
+          "fixed_width": true
+        }
+      ],
+      "molecule_schema": {
+        "abi": "molecule",
+        "layout": "fixed-struct-v1",
+        "name": "NovaSealSignedIntentV0",
+        "fixed_size": 254,
+        "schema_hash": "907820b1b9289f91e336d1e6928281d1f42ae3eae988882bdb3ab63ab7083ecc",
+        "schema": "array CellScriptUint32 [byte; 4];\narray CellScriptUint64 [byte; 8];\narray CellScriptHash [byte; 32];\n\nstruct OutPoint {\n    tx_hash: CellScriptHash,\n    index: CellScriptUint32,\n}\n\nstruct NovaSealIntentCoreV0 {\n    protocol_id: CellScriptHash,\n    package_hash: CellScriptHash,\n    policy_hash: CellScriptHash,\n    action: byte,\n    terminal_path: byte,\n    old_cell: OutPoint,\n    old_state_hash: CellScriptHash,\n    new_state_hash: CellScriptHash,\n    old_nonce: CellScriptUint64,\n    new_nonce: CellScriptUint64,\n    expiry: CellScriptUint64,\n}\n\nstruct NovaSealSignedIntentV0 {\n    core: NovaSealIntentCoreV0,\n    expected_receipt_hash: CellScriptHash,\n}\n\n"
+      }
+    },
+    {
+      "name": "SignaturePayload",
+      "hash_type_source": "target-default",
+      "kind": "Struct",
+      "capabilities": [],
+      "claim_output": null,
+      "flow_states": [],
+      "flow_transitions": [],
+      "encoded_size": 96,
+      "fields": [
+        {
+          "name": "pubkey",
+          "ty": "[u8; 32]",
+          "offset": 0,
+          "encoded_size": 32,
+          "fixed_width": true
+        },
+        {
+          "name": "signature",
+          "ty": "[u8; 64]",
+          "offset": 32,
+          "encoded_size": 64,
+          "fixed_width": true
+        }
+      ],
+      "molecule_schema": {
+        "abi": "molecule",
+        "layout": "fixed-struct-v1",
+        "name": "SignaturePayload",
+        "fixed_size": 96,
+        "schema_hash": "f5f3d1b37d43c1791560a732c62f8fb328c4f309f26a609a27d6e025ae11e461",
+        "schema": "array SignaturePayloadPubkeyArray32 [byte; 32];\narray SignaturePayloadSignatureArray64 [byte; 64];\n\nstruct SignaturePayload {\n    pubkey: SignaturePayloadPubkeyArray32,\n    signature: SignaturePayloadSignatureArray64,\n}\n\n"
+      }
+    }
+  ],
+  "actions": [
+    {
+      "name": "novaseal_lifecycle",
+      "params": [
+        {
+          "name": "op",
+          "ty": "u8",
+          "is_mut": false,
+          "is_ref": false,
+          "source": "witness",
+          "witness_data_source": true,
+          "cell_bound_abi": false,
+          "schema_pointer_abi": false,
+          "schema_length_abi": false,
+          "fixed_byte_pointer_abi": false,
+          "fixed_byte_length_abi": false,
+          "fixed_byte_len": null,
+          "type_hash_pointer_abi": false,
+          "type_hash_length_abi": false,
+          "type_hash_len": null
+        },
+        {
+          "name": "old_cell",
+          "ty": "NovaSealCellV0",
+          "is_mut": false,
+          "is_ref": false,
+          "source": "witness",
+          "witness_data_source": true,
+          "cell_bound_abi": false,
+          "schema_pointer_abi": true,
+          "schema_length_abi": true,
+          "fixed_byte_pointer_abi": false,
+          "fixed_byte_length_abi": false,
+          "fixed_byte_len": null,
+          "type_hash_pointer_abi": false,
+          "type_hash_length_abi": false,
+          "type_hash_len": null
+        },
+        {
+          "name": "intent",
+          "ty": "NovaSealSignedIntentV0",
+          "is_mut": false,
+          "is_ref": false,
+          "source": "witness",
+          "witness_data_source": true,
+          "cell_bound_abi": false,
+          "schema_pointer_abi": true,
+          "schema_length_abi": true,
+          "fixed_byte_pointer_abi": false,
+          "fixed_byte_length_abi": false,
+          "fixed_byte_len": null,
+          "type_hash_pointer_abi": false,
+          "type_hash_length_abi": false,
+          "type_hash_len": null
+        },
+        {
+          "name": "state_hash_commitment",
+          "ty": "Hash",
+          "is_mut": false,
+          "is_ref": false,
+          "source": "witness",
+          "witness_data_source": true,
+          "cell_bound_abi": false,
+          "schema_pointer_abi": false,
+          "schema_length_abi": false,
+          "fixed_byte_pointer_abi": true,
+          "fixed_byte_length_abi": true,
+          "fixed_byte_len": 32,
+          "type_hash_pointer_abi": false,
+          "type_hash_length_abi": false,
+          "type_hash_len": null
+        },
+        {
+          "name": "sig",
+          "ty": "SignaturePayload",
+          "is_mut": false,
+          "is_ref": false,
+          "source": "witness",
+          "witness_data_source": true,
+          "cell_bound_abi": false,
+          "schema_pointer_abi": true,
+          "schema_length_abi": true,
+          "fixed_byte_pointer_abi": false,
+          "fixed_byte_length_abi": false,
+          "fixed_byte_len": null,
+          "type_hash_pointer_abi": false,
+          "type_hash_length_abi": false,
+          "type_hash_len": null
+        }
+      ],
+      "effect_class": "Pure",
+      "parallelizable": true,
+      "touches_shared": [],
+      "estimated_cycles": 768,
+      "scheduler_witness_abi": "molecule",
+      "scheduler_witness_hex": "45000000280000002a0000002b0000002c0000002d00000031000000350000003d0000004100000011ce010001000000000000000000030000000000000000000000000000",
+      "consume_set": [],
+      "read_refs": [],
+      "create_set": [],
+      "mutate_set": [],
+      "ckb_runtime_accesses": [
+        {
+          "operation": "source-group-output",
+          "syscall": "SOURCE_VIEW",
+          "source": "GroupOutput",
+          "index": 0,
+          "binding": "source::group_output"
+        },
+        {
+          "operation": "cell-data-size",
+          "syscall": "LOAD_CELL_DATA",
+          "source": "SourceView",
+          "index": 0,
+          "binding": "ckb::cell_data_size"
+        },
+        {
+          "operation": "source-group-output",
+          "syscall": "SOURCE_VIEW",
+          "source": "GroupOutput",
+          "index": 0,
+          "binding": "source::group_output"
+        },
+        {
+          "operation": "source-group-output",
+          "syscall": "SOURCE_VIEW",
+          "source": "GroupOutput",
+          "index": 0,
+          "binding": "source::group_output"
+        },
+        {
+          "operation": "source-group-output",
+          "syscall": "SOURCE_VIEW",
+          "source": "GroupOutput",
+          "index": 0,
+          "binding": "source::group_output"
+        },
+        {
+          "operation": "source-group-output",
+          "syscall": "SOURCE_VIEW",
+          "source": "GroupOutput",
+          "index": 0,
+          "binding": "source::group_output"
+        },
+        {
+          "operation": "source-group-output",
+          "syscall": "SOURCE_VIEW",
+          "source": "GroupOutput",
+          "index": 0,
+          "binding": "source::group_output"
+        },
+        {
+          "operation": "cell-data-u64-le",
+          "syscall": "LOAD_CELL_DATA",
+          "source": "SourceView",
+          "index": 0,
+          "binding": "ckb::cell_data_u64_le"
+        },
+        {
+          "operation": "source-group-output",
+          "syscall": "SOURCE_VIEW",
+          "source": "GroupOutput",
+          "index": 0,
+          "binding": "source::group_output"
+        },
+        {
+          "operation": "cell-data-u64-le",
+          "syscall": "LOAD_CELL_DATA",
+          "source": "SourceView",
+          "index": 0,
+          "binding": "ckb::cell_data_u64_le"
+        },
+        {
+          "operation": "source-group-input",
+          "syscall": "SOURCE_VIEW",
+          "source": "GroupInput",
+          "index": 0,
+          "binding": "source::group_input"
+        },
+        {
+          "operation": "cell-data-size",
+          "syscall": "LOAD_CELL_DATA",
+          "source": "SourceView",
+          "index": 0,
+          "binding": "ckb::cell_data_size"
+        },
+        {
+          "operation": "source-group-input",
+          "syscall": "SOURCE_VIEW",
+          "source": "GroupInput",
+          "index": 0,
+          "binding": "source::group_input"
+        },
+        {
+          "operation": "source-group-input",
+          "syscall": "SOURCE_VIEW",
+          "source": "GroupInput",
+          "index": 0,
+          "binding": "source::group_input"
+        },
+        {
+          "operation": "source-group-input",
+          "syscall": "SOURCE_VIEW",
+          "source": "GroupInput",
+          "index": 0,
+          "binding": "source::group_input"
+        },
+        {
+          "operation": "source-group-input",
+          "syscall": "SOURCE_VIEW",
+          "source": "GroupInput",
+          "index": 0,
+          "binding": "source::group_input"
+        },
+        {
+          "operation": "source-group-input",
+          "syscall": "SOURCE_VIEW",
+          "source": "GroupInput",
+          "index": 0,
+          "binding": "source::group_input"
+        },
+        {
+          "operation": "cell-data-u64-le",
+          "syscall": "LOAD_CELL_DATA",
+          "source": "SourceView",
+          "index": 0,
+          "binding": "ckb::cell_data_u64_le"
+        },
+        {
+          "operation": "source-group-input",
+          "syscall": "SOURCE_VIEW",
+          "source": "GroupInput",
+          "index": 0,
+          "binding": "source::group_input"
+        },
+        {
+          "operation": "cell-data-u64-le",
+          "syscall": "LOAD_CELL_DATA",
+          "source": "SourceView",
+          "index": 0,
+          "binding": "ckb::cell_data_u64_le"
+        },
+        {
+          "operation": "source-group-output",
+          "syscall": "SOURCE_VIEW",
+          "source": "GroupOutput",
+          "index": 0,
+          "binding": "source::group_output"
+        },
+        {
+          "operation": "cell-data-size",
+          "syscall": "LOAD_CELL_DATA",
+          "source": "SourceView",
+          "index": 0,
+          "binding": "ckb::cell_data_size"
+        },
+        {
+          "operation": "source-group-output",
+          "syscall": "SOURCE_VIEW",
+          "source": "GroupOutput",
+          "index": 0,
+          "binding": "source::group_output"
+        },
+        {
+          "operation": "source-group-output",
+          "syscall": "SOURCE_VIEW",
+          "source": "GroupOutput",
+          "index": 0,
+          "binding": "source::group_output"
+        },
+        {
+          "operation": "source-group-output",
+          "syscall": "SOURCE_VIEW",
+          "source": "GroupOutput",
+          "index": 0,
+          "binding": "source::group_output"
+        },
+        {
+          "operation": "source-group-output",
+          "syscall": "SOURCE_VIEW",
+          "source": "GroupOutput",
+          "index": 0,
+          "binding": "source::group_output"
+        },
+        {
+          "operation": "cell-data-u64-le",
+          "syscall": "LOAD_CELL_DATA",
+          "source": "SourceView",
+          "index": 0,
+          "binding": "ckb::cell_data_u64_le"
+        },
+        {
+          "operation": "source-group-output",
+          "syscall": "SOURCE_VIEW",
+          "source": "GroupOutput",
+          "index": 0,
+          "binding": "source::group_output"
+        },
+        {
+          "operation": "cell-data-u64-le",
+          "syscall": "LOAD_CELL_DATA",
+          "source": "SourceView",
+          "index": 0,
+          "binding": "ckb::cell_data_u64_le"
+        }
+      ],
+      "ckb_script_group": {
+        "entry_kind": "action",
+        "group_kind": "type",
+        "active_script_group": "type-group",
+        "source_encoding": "ckb-source-group-high-bit",
+        "selected_sources": [
+          "GroupInput",
+          "GroupOutput",
+          "SourceView"
+        ],
+        "input_sources": [
+          "GroupInput"
+        ],
+        "output_sources": [
+          "GroupOutput"
+        ],
+        "cell_dep_sources": [],
+        "header_dep_sources": [],
+        "group_scoped_sources": [
+          "GroupInput",
+          "GroupOutput"
+        ]
+      },
+      "ckb_runtime_features": [
+        "ckb-cell-data-decode",
+        "ckb-source-cell-fields",
+        "ckb-source-view"
+      ],
+      "fail_closed_runtime_features": [
+        "field-access",
+        "fixed-byte-comparison"
+      ],
+      "verifier_obligations": [
+        {
+          "scope": "action:novaseal_lifecycle",
+          "category": "ckb-runtime",
+          "feature": "ckb-cell-data-decode",
+          "status": "ckb-runtime",
+          "detail": "Requires the CKB-style transaction context and syscall ABI during verification"
+        },
+        {
+          "scope": "action:novaseal_lifecycle",
+          "category": "ckb-runtime",
+          "feature": "ckb-source-cell-fields",
+          "status": "ckb-runtime",
+          "detail": "Requires the CKB-style transaction context and syscall ABI during verification"
+        },
+        {
+          "scope": "action:novaseal_lifecycle",
+          "category": "ckb-runtime",
+          "feature": "ckb-source-view",
+          "status": "ckb-runtime",
+          "detail": "Requires the CKB-style transaction context and syscall ABI during verification"
+        },
+        {
+          "scope": "action:novaseal_lifecycle",
+          "category": "cell-access",
+          "feature": "source-group-output:GroupOutput#0",
+          "status": "ckb-runtime",
+          "detail": "SOURCE_VIEW source-group-output from GroupOutput#0 bound to source::group_output"
+        },
+        {
+          "scope": "action:novaseal_lifecycle",
+          "category": "cell-access",
+          "feature": "cell-data-size:SourceView#0",
+          "status": "ckb-runtime",
+          "detail": "LOAD_CELL_DATA cell-data-size from SourceView#0 bound to ckb::cell_data_size"
+        },
+        {
+          "scope": "action:novaseal_lifecycle",
+          "category": "cell-access",
+          "feature": "cell-data-u64-le:SourceView#0",
+          "status": "ckb-runtime",
+          "detail": "LOAD_CELL_DATA cell-data-u64-le from SourceView#0 bound to ckb::cell_data_u64_le"
+        },
+        {
+          "scope": "action:novaseal_lifecycle",
+          "category": "cell-access",
+          "feature": "source-group-input:GroupInput#0",
+          "status": "ckb-runtime",
+          "detail": "SOURCE_VIEW source-group-input from GroupInput#0 bound to source::group_input"
+        },
+        {
+          "scope": "action:novaseal_lifecycle",
+          "category": "runtime-fail-closed",
+          "feature": "field-access",
+          "status": "fail-closed",
+          "detail": "Generated code rejects this path instead of accepting an unimplemented runtime operation"
+        },
+        {
+          "scope": "action:novaseal_lifecycle",
+          "category": "runtime-fail-closed",
+          "feature": "fixed-byte-comparison",
+          "status": "fail-closed",
+          "detail": "Generated code rejects this path instead of accepting an unimplemented runtime operation"
+        }
+      ],
+      "proof_plan": [
+        {
+          "name": "ckb-cell-data-decode",
+          "origin": "action:novaseal_lifecycle",
+          "category": "ckb-runtime",
+          "feature": "ckb-cell-data-decode",
+          "trigger": "explicit_entry",
+          "scope": "group",
+          "reads": [
+            "group_input",
+            "group_output",
+            "source_view",
+            "witness"
+          ],
+          "coverage": [
+            "entry:action:novaseal_lifecycle"
+          ],
+          "group_cardinality": "not a script-group cardinality obligation",
+          "identity_lifecycle_policy": "none",
+          "witness_fields": [
+            "witness.op",
+            "witness.old_cell",
+            "witness.intent",
+            "witness.state_hash_commitment",
+            "witness.sig"
+          ],
+          "on_chain_checked": true,
+          "on_chain_checked_obligations": [
+            "ckb-runtime:ckb-cell-data-decode=ckb-runtime"
+          ],
+          "codegen_coverage_status": "covered",
+          "status": "ckb-runtime",
+          "detail": "Requires the CKB-style transaction context and syscall ABI during verification"
+        },
+        {
+          "name": "ckb-source-cell-fields",
+          "origin": "action:novaseal_lifecycle",
+          "category": "ckb-runtime",
+          "feature": "ckb-source-cell-fields",
+          "trigger": "explicit_entry",
+          "scope": "group",
+          "reads": [
+            "group_input",
+            "group_output",
+            "source_view",
+            "witness"
+          ],
+          "coverage": [
+            "entry:action:novaseal_lifecycle"
+          ],
+          "group_cardinality": "not a script-group cardinality obligation",
+          "identity_lifecycle_policy": "none",
+          "witness_fields": [
+            "witness.op",
+            "witness.old_cell",
+            "witness.intent",
+            "witness.state_hash_commitment",
+            "witness.sig"
+          ],
+          "on_chain_checked": true,
+          "on_chain_checked_obligations": [
+            "ckb-runtime:ckb-source-cell-fields=ckb-runtime"
+          ],
+          "codegen_coverage_status": "covered",
+          "status": "ckb-runtime",
+          "detail": "Requires the CKB-style transaction context and syscall ABI during verification"
+        },
+        {
+          "name": "ckb-source-view",
+          "origin": "action:novaseal_lifecycle",
+          "category": "ckb-runtime",
+          "feature": "ckb-source-view",
+          "trigger": "explicit_entry",
+          "scope": "group",
+          "reads": [
+            "group_input",
+            "group_output",
+            "source_view",
+            "witness"
+          ],
+          "coverage": [
+            "entry:action:novaseal_lifecycle"
+          ],
+          "group_cardinality": "not a script-group cardinality obligation",
+          "identity_lifecycle_policy": "none",
+          "witness_fields": [
+            "witness.op",
+            "witness.old_cell",
+            "witness.intent",
+            "witness.state_hash_commitment",
+            "witness.sig"
+          ],
+          "on_chain_checked": true,
+          "on_chain_checked_obligations": [
+            "ckb-runtime:ckb-source-view=ckb-runtime"
+          ],
+          "codegen_coverage_status": "covered",
+          "status": "ckb-runtime",
+          "detail": "Requires the CKB-style transaction context and syscall ABI during verification"
+        },
+        {
+          "name": "source-group-output:GroupOutput#0",
+          "origin": "action:novaseal_lifecycle",
+          "category": "cell-access",
+          "feature": "source-group-output:GroupOutput#0",
+          "trigger": "explicit_entry",
+          "scope": "group",
+          "reads": [
+            "group_input",
+            "group_output",
+            "source_view",
+            "witness"
+          ],
+          "coverage": [
+            "entry:action:novaseal_lifecycle"
+          ],
+          "group_cardinality": "ckb ScriptGroup cardinality",
+          "identity_lifecycle_policy": "none",
+          "witness_fields": [
+            "witness.op",
+            "witness.old_cell",
+            "witness.intent",
+            "witness.state_hash_commitment",
+            "witness.sig"
+          ],
+          "on_chain_checked": true,
+          "on_chain_checked_obligations": [
+            "cell-access:source-group-output:GroupOutput#0=ckb-runtime"
+          ],
+          "codegen_coverage_status": "covered",
+          "status": "ckb-runtime",
+          "detail": "SOURCE_VIEW source-group-output from GroupOutput#0 bound to source::group_output"
+        },
+        {
+          "name": "cell-data-size:SourceView#0",
+          "origin": "action:novaseal_lifecycle",
+          "category": "cell-access",
+          "feature": "cell-data-size:SourceView#0",
+          "trigger": "explicit_entry",
+          "scope": "group",
+          "reads": [
+            "group_input",
+            "group_output",
+            "source_view",
+            "witness"
+          ],
+          "coverage": [
+            "entry:action:novaseal_lifecycle"
+          ],
+          "group_cardinality": "not a script-group cardinality obligation",
+          "identity_lifecycle_policy": "none",
+          "witness_fields": [
+            "witness.op",
+            "witness.old_cell",
+            "witness.intent",
+            "witness.state_hash_commitment",
+            "witness.sig"
+          ],
+          "on_chain_checked": true,
+          "on_chain_checked_obligations": [
+            "cell-access:cell-data-size:SourceView#0=ckb-runtime"
+          ],
+          "codegen_coverage_status": "covered",
+          "status": "ckb-runtime",
+          "detail": "LOAD_CELL_DATA cell-data-size from SourceView#0 bound to ckb::cell_data_size"
+        },
+        {
+          "name": "cell-data-u64-le:SourceView#0",
+          "origin": "action:novaseal_lifecycle",
+          "category": "cell-access",
+          "feature": "cell-data-u64-le:SourceView#0",
+          "trigger": "explicit_entry",
+          "scope": "group",
+          "reads": [
+            "group_input",
+            "group_output",
+            "source_view",
+            "witness"
+          ],
+          "coverage": [
+            "entry:action:novaseal_lifecycle"
+          ],
+          "group_cardinality": "not a script-group cardinality obligation",
+          "identity_lifecycle_policy": "none",
+          "witness_fields": [
+            "witness.op",
+            "witness.old_cell",
+            "witness.intent",
+            "witness.state_hash_commitment",
+            "witness.sig"
+          ],
+          "on_chain_checked": true,
+          "on_chain_checked_obligations": [
+            "cell-access:cell-data-u64-le:SourceView#0=ckb-runtime"
+          ],
+          "codegen_coverage_status": "covered",
+          "status": "ckb-runtime",
+          "detail": "LOAD_CELL_DATA cell-data-u64-le from SourceView#0 bound to ckb::cell_data_u64_le"
+        },
+        {
+          "name": "source-group-input:GroupInput#0",
+          "origin": "action:novaseal_lifecycle",
+          "category": "cell-access",
+          "feature": "source-group-input:GroupInput#0",
+          "trigger": "explicit_entry",
+          "scope": "group",
+          "reads": [
+            "group_input",
+            "group_output",
+            "source_view",
+            "witness"
+          ],
+          "coverage": [
+            "entry:action:novaseal_lifecycle"
+          ],
+          "group_cardinality": "ckb ScriptGroup cardinality",
+          "identity_lifecycle_policy": "none",
+          "witness_fields": [
+            "witness.op",
+            "witness.old_cell",
+            "witness.intent",
+            "witness.state_hash_commitment",
+            "witness.sig"
+          ],
+          "on_chain_checked": true,
+          "on_chain_checked_obligations": [
+            "cell-access:source-group-input:GroupInput#0=ckb-runtime"
+          ],
+          "codegen_coverage_status": "covered",
+          "status": "ckb-runtime",
+          "detail": "SOURCE_VIEW source-group-input from GroupInput#0 bound to source::group_input"
+        },
+        {
+          "name": "field-access",
+          "origin": "action:novaseal_lifecycle",
+          "category": "runtime-fail-closed",
+          "feature": "field-access",
+          "trigger": "explicit_entry",
+          "scope": "group",
+          "reads": [
+            "group_input",
+            "group_output",
+            "source_view",
+            "witness"
+          ],
+          "coverage": [
+            "entry:action:novaseal_lifecycle"
+          ],
+          "group_cardinality": "not a script-group cardinality obligation",
+          "identity_lifecycle_policy": "none",
+          "witness_fields": [
+            "witness.op",
+            "witness.old_cell",
+            "witness.intent",
+            "witness.state_hash_commitment",
+            "witness.sig"
+          ],
+          "on_chain_checked": false,
+          "builder_assumptions": [
+            "declared(fail-closed: Generated code rejects this path instead of accepting an unimplemented runtime operation)"
+          ],
+          "codegen_coverage_status": "fail-closed",
+          "status": "fail-closed",
+          "detail": "Generated code rejects this path instead of accepting an unimplemented runtime operation",
+          "diagnostics": [
+            {
+              "severity": "error",
+              "message": "generated code fail-closes this obligation instead of accepting a metadata-only proof"
+            }
+          ]
+        },
+        {
+          "name": "fixed-byte-comparison",
+          "origin": "action:novaseal_lifecycle",
+          "category": "runtime-fail-closed",
+          "feature": "fixed-byte-comparison",
+          "trigger": "explicit_entry",
+          "scope": "group",
+          "reads": [
+            "group_input",
+            "group_output",
+            "source_view",
+            "witness"
+          ],
+          "coverage": [
+            "entry:action:novaseal_lifecycle"
+          ],
+          "group_cardinality": "not a script-group cardinality obligation",
+          "identity_lifecycle_policy": "none",
+          "witness_fields": [
+            "witness.op",
+            "witness.old_cell",
+            "witness.intent",
+            "witness.state_hash_commitment",
+            "witness.sig"
+          ],
+          "on_chain_checked": false,
+          "builder_assumptions": [
+            "declared(fail-closed: Generated code rejects this path instead of accepting an unimplemented runtime operation)"
+          ],
+          "codegen_coverage_status": "fail-closed",
+          "status": "fail-closed",
+          "detail": "Generated code rejects this path instead of accepting an unimplemented runtime operation",
+          "diagnostics": [
+            {
+              "severity": "error",
+              "message": "generated code fail-closes this obligation instead of accepting a metadata-only proof"
+            }
+          ]
+        }
+      ],
+      "elf_compatible": true,
+      "standalone_runner_compatible": false,
+      "block_count": 50
+    }
+  ],
+  "functions": [],
+  "locks": []
+}

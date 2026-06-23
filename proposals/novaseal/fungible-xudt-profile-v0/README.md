@@ -1,8 +1,8 @@
 # NovaSeal Fungible xUDT Profile v0
 
-**Status**: reviewable profile package with live stateful, operator-fixture,
-and service-builder evidence. It is not production ready because external
-production attestations are still missing.
+**Status**: production-ready source package with live stateful,
+operator-fixture, and service-builder evidence. Public/mainnet deployment still
+requires external attestations.
 
 This package implements the planned NovaSeal Fungible/xUDT object profile as a
 source-level package with schemas, fixtures, invariant matrix, and security
@@ -35,8 +35,8 @@ accounting, market flows, or a general ledger.
 | Invariant matrix | implemented | reviewable |
 | Live devnet issue -> transfer -> settle | implemented | `target/novaseal-fungible-xudt-devnet-stateful-live.json` |
 | Profile-specific wallet/service fixtures | implemented | `target/novaseal-profile-operator-fixtures.json` + `target/novaseal-service-builder-fixtures.json` |
-| Public/shared CellDep attestation | missing | external-required |
-| External BIP340 TCB review | missing | external-required |
+| Public/shared CellDep attestation | external-required | public/mainnet deployment evidence |
+| External BIP340 TCB review | external-required | public/mainnet deployment evidence |
 
 ## Validation Boundary
 

@@ -1,0 +1,7728 @@
+# CellScript Generated Assembly
+# opt_level=0, debug=false
+.option arch, +rv64imac
+
+.section .rodata
+__type_desc_NovaSealCellV0:
+    .word 7
+    .byte 7
+    .ascii "version"
+    .align 3
+    .word 2
+    .byte 18
+    .ascii "btc_authority_hash"
+    .align 3
+    .word 8
+    .byte 10
+    .ascii "state_hash"
+    .align 3
+    .word 8
+    .byte 11
+    .ascii "policy_hash"
+    .align 3
+    .word 8
+    .byte 19
+    .ascii "latest_receipt_hash"
+    .align 3
+    .word 8
+    .byte 5
+    .ascii "nonce"
+    .align 3
+    .word 4
+    .byte 6
+    .ascii "expiry"
+    .align 3
+    .word 4
+.section .rodata
+__type_desc_OutPoint:
+    .word 2
+    .byte 7
+    .ascii "tx_hash"
+    .align 3
+    .word 8
+    .byte 5
+    .ascii "index"
+    .align 3
+    .word 3
+.section .rodata
+__type_desc_NovaSealCellCommitmentV0:
+    .word 6
+    .byte 7
+    .ascii "version"
+    .align 3
+    .word 2
+    .byte 18
+    .ascii "btc_authority_hash"
+    .align 3
+    .word 8
+    .byte 10
+    .ascii "state_hash"
+    .align 3
+    .word 8
+    .byte 11
+    .ascii "policy_hash"
+    .align 3
+    .word 8
+    .byte 5
+    .ascii "nonce"
+    .align 3
+    .word 4
+    .byte 6
+    .ascii "expiry"
+    .align 3
+    .word 4
+.section .rodata
+__type_desc_NovaSealIntentCoreV0:
+    .word 11
+    .byte 11
+    .ascii "protocol_id"
+    .align 3
+    .word 8
+    .byte 12
+    .ascii "package_hash"
+    .align 3
+    .word 8
+    .byte 11
+    .ascii "policy_hash"
+    .align 3
+    .word 8
+    .byte 6
+    .ascii "action"
+    .align 3
+    .word 1
+    .byte 13
+    .ascii "terminal_path"
+    .align 3
+    .word 1
+    .byte 8
+    .ascii "old_cell"
+    .align 3
+    .word 11
+    .byte 14
+    .ascii "old_state_hash"
+    .align 3
+    .word 8
+    .byte 14
+    .ascii "new_state_hash"
+    .align 3
+    .word 8
+    .byte 9
+    .ascii "old_nonce"
+    .align 3
+    .word 4
+    .byte 9
+    .ascii "new_nonce"
+    .align 3
+    .word 4
+    .byte 6
+    .ascii "expiry"
+    .align 3
+    .word 4
+.section .rodata
+__type_desc_NovaSealSignedIntentV0:
+    .word 2
+    .byte 4
+    .ascii "core"
+    .align 3
+    .word 11
+    .byte 21
+    .ascii "expected_receipt_hash"
+    .align 3
+    .word 8
+.section .rodata
+__type_desc_SignaturePayload:
+    .word 2
+    .byte 6
+    .ascii "pubkey"
+    .align 3
+    .word 9
+    .byte 9
+    .ascii "signature"
+    .align 3
+    .word 9
+.section .rodata
+__type_desc_ProofReceiptCommitmentV0:
+    .word 13
+    .byte 11
+    .ascii "protocol_id"
+    .align 3
+    .word 8
+    .byte 12
+    .ascii "package_hash"
+    .align 3
+    .word 8
+    .byte 11
+    .ascii "policy_hash"
+    .align 3
+    .word 8
+    .byte 6
+    .ascii "action"
+    .align 3
+    .word 1
+    .byte 13
+    .ascii "terminal_path"
+    .align 3
+    .word 1
+    .byte 8
+    .ascii "old_cell"
+    .align 3
+    .word 11
+    .byte 19
+    .ascii "new_cell_commitment"
+    .align 3
+    .word 8
+    .byte 14
+    .ascii "old_state_hash"
+    .align 3
+    .word 8
+    .byte 14
+    .ascii "new_state_hash"
+    .align 3
+    .word 8
+    .byte 9
+    .ascii "old_nonce"
+    .align 3
+    .word 4
+    .byte 9
+    .ascii "new_nonce"
+    .align 3
+    .word 4
+    .byte 16
+    .ascii "intent_core_hash"
+    .align 3
+    .word 8
+    .byte 22
+    .ascii "payout_commitment_hash"
+    .align 3
+    .word 8
+.section .rodata
+__type_desc_ProofReceiptV0:
+    .word 16
+    .byte 11
+    .ascii "protocol_id"
+    .align 3
+    .word 8
+    .byte 12
+    .ascii "package_hash"
+    .align 3
+    .word 8
+    .byte 11
+    .ascii "policy_hash"
+    .align 3
+    .word 8
+    .byte 6
+    .ascii "action"
+    .align 3
+    .word 1
+    .byte 13
+    .ascii "terminal_path"
+    .align 3
+    .word 1
+    .byte 8
+    .ascii "old_cell"
+    .align 3
+    .word 11
+    .byte 19
+    .ascii "new_cell_commitment"
+    .align 3
+    .word 8
+    .byte 14
+    .ascii "old_state_hash"
+    .align 3
+    .word 8
+    .byte 14
+    .ascii "new_state_hash"
+    .align 3
+    .word 8
+    .byte 9
+    .ascii "old_nonce"
+    .align 3
+    .word 4
+    .byte 9
+    .ascii "new_nonce"
+    .align 3
+    .word 4
+    .byte 16
+    .ascii "intent_core_hash"
+    .align 3
+    .word 8
+    .byte 18
+    .ascii "signed_intent_hash"
+    .align 3
+    .word 8
+    .byte 22
+    .ascii "payout_commitment_hash"
+    .align 3
+    .word 8
+    .byte 21
+    .ascii "signer_authority_hash"
+    .align 3
+    .word 8
+    .byte 6
+    .ascii "expiry"
+    .align 3
+    .word 4
+.section .text
+.global _cellscript_entry
+.type _cellscript_entry, @function
+_cellscript_entry:
+    # cellscript entry abi: _cellscript_entry loads GroupInput witness args for key_auth_transition
+    # cellscript entry abi: witness magic CSARGv1 followed by positional fixed/scalar payload
+    li t6, -2304
+    add sp, sp, t6
+    li t6, 2296
+    add t6, sp, t6
+    sd ra, 0(t6)
+    # cellscript abi: LOAD_WITNESS reason=entry_args source=GroupInput index=0
+    li t0, 1024
+    sd t0, 0(sp)
+    addi a0, sp, 8
+    addi a1, sp, 0
+    li a2, 0
+    li a3, 0
+    li a4, 72057594037927937
+    li a7, 2074
+    ecall
+    # a0 = CKB syscall return code
+    beqz a0, .Lentry_witness_loaded_0
+    j .Lentry_witness_fail_3
+.Lentry_witness_loaded_0:
+    ld t0, 0(sp)
+    # cellscript entry abi: reject witnesses larger than the local entry buffer
+    li t1, 1025
+    sltu t2, t0, t1
+    bnez t2, .Lentry_witness_buffer_ok_1
+    j .Lentry_witness_fail_3
+.Lentry_witness_buffer_ok_1:
+    li t1, 48
+    sltu t2, t0, t1
+    beqz t2, .Lentry_witness_size_ok_2
+    j .Lentry_witness_fail_3
+.Lentry_witness_size_ok_2:
+    lbu t0, 8(sp)
+    li t1, 67
+    sub t2, t0, t1
+    bnez t2, .Lentry_witness_fail_3
+    lbu t0, 9(sp)
+    li t1, 83
+    sub t2, t0, t1
+    bnez t2, .Lentry_witness_fail_3
+    lbu t0, 10(sp)
+    li t1, 65
+    sub t2, t0, t1
+    bnez t2, .Lentry_witness_fail_3
+    lbu t0, 11(sp)
+    li t1, 82
+    sub t2, t0, t1
+    bnez t2, .Lentry_witness_fail_3
+    lbu t0, 12(sp)
+    li t1, 71
+    sub t2, t0, t1
+    bnez t2, .Lentry_witness_fail_3
+    lbu t0, 13(sp)
+    li t1, 118
+    sub t2, t0, t1
+    bnez t2, .Lentry_witness_fail_3
+    lbu t0, 14(sp)
+    li t1, 49
+    sub t2, t0, t1
+    bnez t2, .Lentry_witness_fail_3
+    lbu t0, 15(sp)
+    li t1, 0
+    sub t2, t0, t1
+    bnez t2, .Lentry_witness_fail_3
+    # cellscript entry abi: witness payload contains schema-backed dynamic segments
+    ld t5, 0(sp)
+    li t6, 8
+    # cellscript entry abi: runtime-bound param old_cell is loaded from transaction cells
+    li a0, 0
+    li a1, 0
+    # cellscript entry abi: schema param intent -> a2=ptr a3=len (length-prefixed witness bytes)
+    addi t1, t6, 4
+    sltu t2, t5, t1
+    beqz t2, .Lentry_witness_schema_len_ok_5
+    j .Lentry_witness_fail_3
+.Lentry_witness_schema_len_ok_5:
+    add t0, sp, t6
+    addi t0, t0, 8
+    li t4, 0
+    lbu t1, 0(t0)
+    or t4, t4, t1
+    lbu t1, 1(t0)
+    slli t1, t1, 8
+    or t4, t4, t1
+    lbu t1, 2(t0)
+    slli t1, t1, 16
+    or t4, t4, t1
+    lbu t1, 3(t0)
+    slli t1, t1, 24
+    or t4, t4, t1
+    addi t1, t6, 4
+    add t1, t1, t4
+    sltu t2, t5, t1
+    beqz t2, .Lentry_witness_schema_bytes_ok_6
+    j .Lentry_witness_fail_3
+.Lentry_witness_schema_bytes_ok_6:
+    add t0, sp, t6
+    addi t0, t0, 12
+    addi a2, t0, 0
+    addi a3, t4, 0
+    addi t6, t6, 4
+    add t6, t6, t4
+    # cellscript entry abi: fixed-byte param state_hash_commitment pointer=a4 length=a5 size=32
+    addi t1, t6, 32
+    sltu t2, t5, t1
+    beqz t2, .Lentry_witness_fixed_bytes_ok_7
+    j .Lentry_witness_fail_3
+.Lentry_witness_fixed_bytes_ok_7:
+    add t0, sp, t6
+    addi t0, t0, 8
+    addi a4, t0, 0
+    li a5, 32
+    addi t6, t6, 32
+    # cellscript entry abi: schema param sig -> a6=ptr a7=len (length-prefixed witness bytes)
+    addi t1, t6, 4
+    sltu t2, t5, t1
+    beqz t2, .Lentry_witness_schema_len_ok_8
+    j .Lentry_witness_fail_3
+.Lentry_witness_schema_len_ok_8:
+    add t0, sp, t6
+    addi t0, t0, 8
+    li t4, 0
+    lbu t1, 0(t0)
+    or t4, t4, t1
+    lbu t1, 1(t0)
+    slli t1, t1, 8
+    or t4, t4, t1
+    lbu t1, 2(t0)
+    slli t1, t1, 16
+    or t4, t4, t1
+    lbu t1, 3(t0)
+    slli t1, t1, 24
+    or t4, t4, t1
+    addi t1, t6, 4
+    add t1, t1, t4
+    sltu t2, t5, t1
+    beqz t2, .Lentry_witness_schema_bytes_ok_9
+    j .Lentry_witness_fail_3
+.Lentry_witness_schema_bytes_ok_9:
+    add t0, sp, t6
+    addi t0, t0, 12
+    addi a6, t0, 0
+    addi a7, t4, 0
+    addi t6, t6, 4
+    add t6, t6, t4
+    # cellscript entry abi: runtime-bound param new_cell is loaded from transaction cells
+    # cellscript entry abi: stack arg8 <- 0
+    li t0, 0
+    # cellscript entry abi: stage stack arg8 at pre-call sp-32
+    sd t0, -32(sp)
+    # cellscript entry abi: stack arg9 <- 0
+    li t0, 0
+    # cellscript entry abi: stage stack arg9 at pre-call sp-24
+    sd t0, -24(sp)
+    # cellscript entry abi: runtime-bound param receipt is loaded from transaction cells
+    # cellscript entry abi: stack arg10 <- 0
+    li t0, 0
+    # cellscript entry abi: stage stack arg10 at pre-call sp-16
+    sd t0, -16(sp)
+    # cellscript entry abi: stack arg11 <- 0
+    li t0, 0
+    # cellscript entry abi: stage stack arg11 at pre-call sp-8
+    sd t0, -8(sp)
+    # cellscript entry abi: reject trailing witness payload bytes
+    ld t5, 0(sp)
+    sub t2, t5, t6
+    beqz t2, .Lentry_witness_exact_size_ok_10
+    j .Lentry_witness_fail_3
+.Lentry_witness_exact_size_ok_10:
+    # cellscript entry abi: reserve 32 bytes for outgoing stack call arguments
+    addi sp, sp, -32
+    call key_auth_transition
+    addi sp, sp, 32
+    j .Lentry_witness_done_4
+.Lentry_witness_fail_3:
+    # cellscript runtime error 25 entry-witness-abi-invalid
+    li a0, 25
+.Lentry_witness_done_4:
+    li t6, 2296
+    add t6, sp, t6
+    ld ra, 0(t6)
+    li t6, 2304
+    add sp, sp, t6
+    ret
+# cellscript entry abi: key_auth_transition requires-explicit-parameter-abi
+.global key_auth_transition
+.type key_auth_transition, @function
+key_auth_transition:
+    li t6, -4224
+    add sp, sp, t6
+    li t6, 4216
+    add t6, sp, t6
+    sd ra, 0(t6)
+    li t6, 4208
+    add t6, sp, t6
+    sd fp, 0(t6)
+    li fp, 4224
+    add fp, sp, fp
+    # cellscript abi: schema param old_cell pointer=a0 length=a1
+    sd a0, 0(sp)
+    sd a1, 1992(sp)
+    # cellscript abi: schema param intent pointer=a2 length=a3
+    sd a2, 8(sp)
+    sd a3, 928(sp)
+    # cellscript abi: fixed-byte param state_hash_commitment pointer=a4 length=a5 size=32
+    sd a4, 16(sp)
+    sd a5, 936(sp)
+    # cellscript abi: schema param sig pointer=a6 length=a7
+    sd a6, 24(sp)
+    sd a7, 944(sp)
+    # cellscript abi: schema param new_cell pointer=stack+0 length=stack+8
+    # cellscript abi: arg8 loaded from caller stack +0
+    ld t0, 0(fp)
+    sd t0, 32(sp)
+    # cellscript abi: arg9 loaded from caller stack +8
+    ld t0, 8(fp)
+    sd t0, 952(sp)
+    # cellscript abi: schema param receipt pointer=stack+16 length=stack+24
+    # cellscript abi: arg10 loaded from caller stack +16
+    ld t0, 16(fp)
+    sd t0, 40(sp)
+    # cellscript abi: arg11 loaded from caller stack +24
+    ld t0, 24(fp)
+    sd t0, 1472(sp)
+    # consume input old_cell
+    # cellscript abi: LOAD_CELL_DATA reason=consume source=Input index=0
+    li t0, 512
+    sd t0, 1992(sp)
+    addi a0, sp, 2000
+    addi a1, sp, 1992
+    li a2, 0
+    li a3, 0
+    li a4, 1
+    li a7, 2092
+    ecall
+    # a0 = CKB syscall return code
+    beqz a0, .Lckb_syscall_ok_11
+    j .Lkey_auth_transition_fail_1
+.Lckb_syscall_ok_11:
+    addi t0, sp, 2000
+    sd t0, 0(sp)
+    # output output NovaSealCellV0
+    # cellscript abi: LOAD_CELL_DATA reason=output_param source=Output index=0
+    li t0, 512
+    sd t0, 952(sp)
+    addi a0, sp, 960
+    addi a1, sp, 952
+    li a2, 0
+    li a3, 0
+    li a4, 2
+    li a7, 2092
+    ecall
+    # a0 = CKB syscall return code
+    beqz a0, .Lckb_syscall_ok_12
+    j .Lkey_auth_transition_fail_1
+.Lckb_syscall_ok_12:
+    addi t0, sp, 960
+    sd t0, 32(sp)
+    # cellscript abi: output field verification deferred to ordered create constraint
+    # output output ProofReceiptV0
+    # cellscript abi: LOAD_CELL_DATA reason=output_param source=Output index=1
+    li t0, 512
+    sd t0, 1472(sp)
+    addi a0, sp, 1480
+    addi a1, sp, 1472
+    li a2, 0
+    li a3, 1
+    li a4, 2
+    li a7, 2092
+    ecall
+    # a0 = CKB syscall return code
+    beqz a0, .Lckb_syscall_ok_13
+    j .Lkey_auth_transition_fail_1
+.Lckb_syscall_ok_13:
+    addi t0, sp, 1480
+    sd t0, 40(sp)
+    # cellscript abi: output field verification deferred to ordered create constraint
+.Lkey_auth_transition_block_0:
+    # call __env_current_timepoint
+    call __env_current_timepoint
+    sd a0, 48(sp)
+    # call __ckb_source_group_input
+    # cellscript abi: call __ckb_source_group_input scalar arg0 -> a0
+    li a0, 0
+    call __ckb_source_group_input
+    # cellscript abi: scalar runtime helper status check (a1 == 0)
+    beqz a1, .Lruntime_scalar_ok_14
+    addi a0, a1, 0
+    j .Lkey_auth_transition_epilogue
+.Lruntime_scalar_ok_14:
+    sd a0, 56(sp)
+    # call __ckb_input_out_point_tx_hash
+    # cellscript abi: load SourceView input OutPoint tx hash into addressable Hash
+    li t0, 32
+    li t6, 2512
+    add t6, sp, t6
+    sd t0, 0(t6)
+    ld a0, 56(sp)
+    li a1, 2520
+    add a1, sp, a1
+    li a2, 2512
+    add a2, sp, a2
+    call __ckb_input_out_point_tx_hash
+    beqz a0, .Linput_out_point_tx_hash_ok_15
+    j .Lkey_auth_transition_epilogue
+.Linput_out_point_tx_hash_ok_15:
+    li t0, 2520
+    add t0, sp, t0
+    sd t0, 64(sp)
+    # call __ckb_input_out_point_index
+    # cellscript abi: call __ckb_input_out_point_index scalar arg0 -> a0
+    ld a0, 56(sp)
+    call __ckb_input_out_point_index
+    sd a0, 72(sp)
+    # field access .core (unresolved)
+    # cellscript abi: fail closed because field offset is not computable from available type layout
+    j .Lkey_auth_transition_fail_16
+    # field access .new_state_hash
+    # cellscript abi: generic field NovaSealIntentCoreV0.new_state_hash offset=166 size=32
+    ld t4, 80(sp)
+    addi t0, t4, 166
+    sd t0, 88(sp)
+    # call __ckb_hash_blake2b
+    # cellscript abi: fail closed because hash helper input is not a 32-byte value
+    j .Lkey_auth_transition_fail_18
+    # call __ckb_hash_data_packed
+    # cellscript abi: fail closed because hash_data_packed input is not materializable
+    j .Lkey_auth_transition_fail_18
+    # call __ckb_hash_data_packed
+    # cellscript abi: fail closed because hash_data_packed currently reuses the 32-byte Blake2b helper
+    j .Lkey_auth_transition_fail_18
+    # field access .version
+    # cellscript abi: schema field NovaSealCellV0.version offset=0 size=2
+    ld t4, 0(sp)
+    # cellscript abi: exact size check NovaSealCellV0 expected=146
+    ld a0, 1992(sp)
+    li a1, 146
+    call __cellscript_require_exact_size
+    beqz a0, .Lschema_size_ok_16
+    j .Lkey_auth_transition_fail_4
+.Lschema_size_ok_16:
+    # cellscript abi: bounds check NovaSealCellV0.version required=2
+    ld a0, 1992(sp)
+    li a1, 2
+    call __cellscript_require_min_size
+    beqz a0, .Lschema_bounds_ok_17
+    j .Lkey_auth_transition_fail_2
+.Lschema_bounds_ok_17:
+    li t0, 0
+    lbu t2, 0(t4)
+    or t0, t0, t2
+    lbu t2, 1(t4)
+    slli t2, t2, 8
+    or t0, t0, t2
+    sd t0, 128(sp)
+    ld t0, 128(sp)
+    sd t0, 136(sp)
+    # field access .btc_authority_hash
+    # cellscript abi: schema field NovaSealCellV0.btc_authority_hash offset=2 size=32
+    ld t4, 0(sp)
+    # cellscript abi: exact size check NovaSealCellV0 expected=146
+    ld a0, 1992(sp)
+    li a1, 146
+    call __cellscript_require_exact_size
+    beqz a0, .Lschema_size_ok_18
+    j .Lkey_auth_transition_fail_4
+.Lschema_size_ok_18:
+    # cellscript abi: bounds check NovaSealCellV0.btc_authority_hash required=34
+    ld a0, 1992(sp)
+    li a1, 34
+    call __cellscript_require_min_size
+    beqz a0, .Lschema_bounds_ok_19
+    j .Lkey_auth_transition_fail_2
+.Lschema_bounds_ok_19:
+    addi t0, t4, 2
+    sd t0, 144(sp)
+    ld t0, 144(sp)
+    sd t0, 152(sp)
+    ld t0, 88(sp)
+    sd t0, 160(sp)
+    # field access .policy_hash
+    # cellscript abi: schema field NovaSealCellV0.policy_hash offset=66 size=32
+    ld t4, 0(sp)
+    # cellscript abi: exact size check NovaSealCellV0 expected=146
+    ld a0, 1992(sp)
+    li a1, 146
+    call __cellscript_require_exact_size
+    beqz a0, .Lschema_size_ok_20
+    j .Lkey_auth_transition_fail_4
+.Lschema_size_ok_20:
+    # cellscript abi: bounds check NovaSealCellV0.policy_hash required=98
+    ld a0, 1992(sp)
+    li a1, 98
+    call __cellscript_require_min_size
+    beqz a0, .Lschema_bounds_ok_21
+    j .Lkey_auth_transition_fail_2
+.Lschema_bounds_ok_21:
+    addi t0, t4, 66
+    sd t0, 168(sp)
+    ld t0, 168(sp)
+    sd t0, 176(sp)
+    # field access .new_nonce
+    # cellscript abi: generic field NovaSealIntentCoreV0.new_nonce offset=206 size=8
+    ld t4, 80(sp)
+    li t0, 0
+    lbu t2, 206(t4)
+    or t0, t0, t2
+    lbu t2, 207(t4)
+    slli t2, t2, 8
+    or t0, t0, t2
+    lbu t2, 208(t4)
+    slli t2, t2, 16
+    or t0, t0, t2
+    lbu t2, 209(t4)
+    slli t2, t2, 24
+    or t0, t0, t2
+    lbu t2, 210(t4)
+    slli t2, t2, 32
+    or t0, t0, t2
+    lbu t2, 211(t4)
+    slli t2, t2, 40
+    or t0, t0, t2
+    lbu t2, 212(t4)
+    slli t2, t2, 48
+    or t0, t0, t2
+    lbu t2, 213(t4)
+    slli t2, t2, 56
+    or t0, t0, t2
+    sd t0, 184(sp)
+    ld t0, 184(sp)
+    sd t0, 192(sp)
+    # field access .expiry
+    # cellscript abi: generic field NovaSealIntentCoreV0.expiry offset=214 size=8
+    ld t4, 80(sp)
+    li t0, 0
+    lbu t2, 214(t4)
+    or t0, t0, t2
+    lbu t2, 215(t4)
+    slli t2, t2, 8
+    or t0, t0, t2
+    lbu t2, 216(t4)
+    slli t2, t2, 16
+    or t0, t0, t2
+    lbu t2, 217(t4)
+    slli t2, t2, 24
+    or t0, t0, t2
+    lbu t2, 218(t4)
+    slli t2, t2, 32
+    or t0, t0, t2
+    lbu t2, 219(t4)
+    slli t2, t2, 40
+    or t0, t0, t2
+    lbu t2, 220(t4)
+    slli t2, t2, 48
+    or t0, t0, t2
+    lbu t2, 221(t4)
+    slli t2, t2, 56
+    or t0, t0, t2
+    sd t0, 200(sp)
+    ld t0, 200(sp)
+    sd t0, 208(sp)
+    # cellscript abi: construct tuple aggregate var15 fields=6
+    sd zero, 120(sp)
+    # call __ckb_hash_data_packed
+    # cellscript abi: fail closed because hash_data_packed input is not materializable
+    j .Lkey_auth_transition_fail_18
+    # field access .protocol_id
+    # cellscript abi: generic field NovaSealIntentCoreV0.protocol_id offset=0 size=32
+    ld t4, 80(sp)
+    addi t0, t4, 0
+    sd t0, 232(sp)
+    ld t0, 232(sp)
+    sd t0, 240(sp)
+    # field access .package_hash
+    # cellscript abi: generic field NovaSealIntentCoreV0.package_hash offset=32 size=32
+    ld t4, 80(sp)
+    addi t0, t4, 32
+    sd t0, 248(sp)
+    ld t0, 248(sp)
+    sd t0, 256(sp)
+    # field access .policy_hash
+    # cellscript abi: generic field NovaSealIntentCoreV0.policy_hash offset=64 size=32
+    ld t4, 80(sp)
+    addi t0, t4, 64
+    sd t0, 264(sp)
+    ld t0, 264(sp)
+    sd t0, 272(sp)
+    # field access .action
+    # cellscript abi: generic field NovaSealIntentCoreV0.action offset=96 size=1
+    ld t4, 80(sp)
+    li t0, 0
+    lbu t2, 96(t4)
+    or t0, t0, t2
+    sd t0, 280(sp)
+    ld t0, 280(sp)
+    sd t0, 288(sp)
+    # field access .terminal_path
+    # cellscript abi: generic field NovaSealIntentCoreV0.terminal_path offset=97 size=1
+    ld t4, 80(sp)
+    li t0, 0
+    lbu t2, 97(t4)
+    or t0, t0, t2
+    sd t0, 296(sp)
+    ld t0, 296(sp)
+    sd t0, 304(sp)
+    # field access .old_cell (unresolved)
+    # cellscript abi: fail closed because field offset is not computable from available type layout
+    j .Lkey_auth_transition_fail_16
+    ld t0, 312(sp)
+    sd t0, 320(sp)
+    ld t0, 216(sp)
+    sd t0, 328(sp)
+    # field access .old_state_hash
+    # cellscript abi: generic field NovaSealIntentCoreV0.old_state_hash offset=134 size=32
+    ld t4, 80(sp)
+    addi t0, t4, 134
+    sd t0, 336(sp)
+    ld t0, 336(sp)
+    sd t0, 344(sp)
+    ld t0, 88(sp)
+    sd t0, 352(sp)
+    # field access .old_nonce
+    # cellscript abi: generic field NovaSealIntentCoreV0.old_nonce offset=198 size=8
+    ld t4, 80(sp)
+    li t0, 0
+    lbu t2, 198(t4)
+    or t0, t0, t2
+    lbu t2, 199(t4)
+    slli t2, t2, 8
+    or t0, t0, t2
+    lbu t2, 200(t4)
+    slli t2, t2, 16
+    or t0, t0, t2
+    lbu t2, 201(t4)
+    slli t2, t2, 24
+    or t0, t0, t2
+    lbu t2, 202(t4)
+    slli t2, t2, 32
+    or t0, t0, t2
+    lbu t2, 203(t4)
+    slli t2, t2, 40
+    or t0, t0, t2
+    lbu t2, 204(t4)
+    slli t2, t2, 48
+    or t0, t0, t2
+    lbu t2, 205(t4)
+    slli t2, t2, 56
+    or t0, t0, t2
+    sd t0, 360(sp)
+    ld t0, 360(sp)
+    sd t0, 368(sp)
+    ld t0, 184(sp)
+    sd t0, 376(sp)
+    ld t0, 104(sp)
+    sd t0, 384(sp)
+    la t0, __cellscript_const_data_0
+    sd t0, 392(sp)
+    # cellscript abi: construct tuple aggregate var28 fields=13
+    sd zero, 224(sp)
+    # call __ckb_hash_data_packed
+    # cellscript abi: fail closed because hash_data_packed input is not materializable
+    j .Lkey_auth_transition_fail_18
+    # field access .tx_hash
+    # cellscript abi: generic field OutPoint.tx_hash offset=0 size=32
+    ld t4, 312(sp)
+    addi t0, t4, 0
+    sd t0, 408(sp)
+    # cellscript abi: generic fixed-byte Eq comparison size=32
+    ld t4, 408(sp)
+    ld t5, 64(sp)
+    lbu t0, 0(t4)
+    lbu t1, 0(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_22
+    lbu t0, 1(t4)
+    lbu t1, 1(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_22
+    lbu t0, 2(t4)
+    lbu t1, 2(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_22
+    lbu t0, 3(t4)
+    lbu t1, 3(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_22
+    lbu t0, 4(t4)
+    lbu t1, 4(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_22
+    lbu t0, 5(t4)
+    lbu t1, 5(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_22
+    lbu t0, 6(t4)
+    lbu t1, 6(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_22
+    lbu t0, 7(t4)
+    lbu t1, 7(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_22
+    lbu t0, 8(t4)
+    lbu t1, 8(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_22
+    lbu t0, 9(t4)
+    lbu t1, 9(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_22
+    lbu t0, 10(t4)
+    lbu t1, 10(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_22
+    lbu t0, 11(t4)
+    lbu t1, 11(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_22
+    lbu t0, 12(t4)
+    lbu t1, 12(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_22
+    lbu t0, 13(t4)
+    lbu t1, 13(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_22
+    lbu t0, 14(t4)
+    lbu t1, 14(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_22
+    lbu t0, 15(t4)
+    lbu t1, 15(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_22
+    lbu t0, 16(t4)
+    lbu t1, 16(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_22
+    lbu t0, 17(t4)
+    lbu t1, 17(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_22
+    lbu t0, 18(t4)
+    lbu t1, 18(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_22
+    lbu t0, 19(t4)
+    lbu t1, 19(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_22
+    lbu t0, 20(t4)
+    lbu t1, 20(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_22
+    lbu t0, 21(t4)
+    lbu t1, 21(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_22
+    lbu t0, 22(t4)
+    lbu t1, 22(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_22
+    lbu t0, 23(t4)
+    lbu t1, 23(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_22
+    lbu t0, 24(t4)
+    lbu t1, 24(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_22
+    lbu t0, 25(t4)
+    lbu t1, 25(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_22
+    lbu t0, 26(t4)
+    lbu t1, 26(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_22
+    lbu t0, 27(t4)
+    lbu t1, 27(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_22
+    lbu t0, 28(t4)
+    lbu t1, 28(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_22
+    lbu t0, 29(t4)
+    lbu t1, 29(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_22
+    lbu t0, 30(t4)
+    lbu t1, 30(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_22
+    lbu t0, 31(t4)
+    lbu t1, 31(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_22
+    li t3, 1
+    j .Lgen_fb_done_23
+.Lgen_fb_mismatch_22:
+    li t3, 0
+.Lgen_fb_done_23:
+    sd t3, 416(sp)
+    ld t0, 416(sp)
+    beqz t0, .Lkey_auth_transition_block_2
+    j .Lkey_auth_transition_block_1
+.Lkey_auth_transition_block_1:
+    # field access .index
+    # cellscript abi: generic field OutPoint.index offset=32 size=4
+    ld t4, 312(sp)
+    li t0, 0
+    lbu t2, 32(t4)
+    or t0, t0, t2
+    lbu t2, 33(t4)
+    slli t2, t2, 8
+    or t0, t0, t2
+    lbu t2, 34(t4)
+    slli t2, t2, 16
+    or t0, t0, t2
+    lbu t2, 35(t4)
+    slli t2, t2, 24
+    or t0, t0, t2
+    sd t0, 424(sp)
+    ld t0, 424(sp)
+    ld t1, 72(sp)
+    sub t0, t0, t1
+    seqz t0, t0
+    sd t0, 432(sp)
+    ld t0, 432(sp)
+    beqz t0, .Lkey_auth_transition_block_4
+    j .Lkey_auth_transition_block_3
+.Lkey_auth_transition_block_2:
+    li a0, 5
+    j .Lkey_auth_transition_epilogue
+.Lkey_auth_transition_block_3:
+    # field access .state_hash
+    # cellscript abi: schema field NovaSealCellV0.state_hash offset=34 size=32
+    ld t4, 0(sp)
+    # cellscript abi: exact size check NovaSealCellV0 expected=146
+    ld a0, 1992(sp)
+    li a1, 146
+    call __cellscript_require_exact_size
+    beqz a0, .Lschema_size_ok_24
+    j .Lkey_auth_transition_fail_4
+.Lschema_size_ok_24:
+    # cellscript abi: bounds check NovaSealCellV0.state_hash required=66
+    ld a0, 1992(sp)
+    li a1, 66
+    call __cellscript_require_min_size
+    beqz a0, .Lschema_bounds_ok_25
+    j .Lkey_auth_transition_fail_2
+.Lschema_bounds_ok_25:
+    addi t0, t4, 34
+    sd t0, 440(sp)
+    # cellscript abi: generic fixed-byte Eq comparison size=32
+    ld t4, 336(sp)
+    ld t5, 440(sp)
+    lbu t0, 0(t4)
+    lbu t1, 0(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_26
+    lbu t0, 1(t4)
+    lbu t1, 1(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_26
+    lbu t0, 2(t4)
+    lbu t1, 2(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_26
+    lbu t0, 3(t4)
+    lbu t1, 3(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_26
+    lbu t0, 4(t4)
+    lbu t1, 4(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_26
+    lbu t0, 5(t4)
+    lbu t1, 5(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_26
+    lbu t0, 6(t4)
+    lbu t1, 6(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_26
+    lbu t0, 7(t4)
+    lbu t1, 7(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_26
+    lbu t0, 8(t4)
+    lbu t1, 8(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_26
+    lbu t0, 9(t4)
+    lbu t1, 9(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_26
+    lbu t0, 10(t4)
+    lbu t1, 10(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_26
+    lbu t0, 11(t4)
+    lbu t1, 11(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_26
+    lbu t0, 12(t4)
+    lbu t1, 12(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_26
+    lbu t0, 13(t4)
+    lbu t1, 13(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_26
+    lbu t0, 14(t4)
+    lbu t1, 14(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_26
+    lbu t0, 15(t4)
+    lbu t1, 15(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_26
+    lbu t0, 16(t4)
+    lbu t1, 16(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_26
+    lbu t0, 17(t4)
+    lbu t1, 17(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_26
+    lbu t0, 18(t4)
+    lbu t1, 18(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_26
+    lbu t0, 19(t4)
+    lbu t1, 19(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_26
+    lbu t0, 20(t4)
+    lbu t1, 20(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_26
+    lbu t0, 21(t4)
+    lbu t1, 21(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_26
+    lbu t0, 22(t4)
+    lbu t1, 22(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_26
+    lbu t0, 23(t4)
+    lbu t1, 23(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_26
+    lbu t0, 24(t4)
+    lbu t1, 24(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_26
+    lbu t0, 25(t4)
+    lbu t1, 25(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_26
+    lbu t0, 26(t4)
+    lbu t1, 26(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_26
+    lbu t0, 27(t4)
+    lbu t1, 27(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_26
+    lbu t0, 28(t4)
+    lbu t1, 28(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_26
+    lbu t0, 29(t4)
+    lbu t1, 29(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_26
+    lbu t0, 30(t4)
+    lbu t1, 30(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_26
+    lbu t0, 31(t4)
+    lbu t1, 31(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_26
+    li t3, 1
+    j .Lgen_fb_done_27
+.Lgen_fb_mismatch_26:
+    li t3, 0
+.Lgen_fb_done_27:
+    sd t3, 448(sp)
+    ld t0, 448(sp)
+    beqz t0, .Lkey_auth_transition_block_6
+    j .Lkey_auth_transition_block_5
+.Lkey_auth_transition_block_4:
+    li a0, 5
+    j .Lkey_auth_transition_epilogue
+.Lkey_auth_transition_block_5:
+    # cellscript abi: fixed-byte Eq comparison size=32
+    ld a0, 96(sp)
+    li t6, 3040
+    add t6, sp, t6
+    sd a0, 0(t6)
+    ld a1, 16(sp)
+    li t6, 3040
+    add t6, sp, t6
+    ld a0, 0(t6)
+    li a2, 32
+    call __cellscript_memcmp_fixed
+    seqz t3, a0
+    sd t3, 456(sp)
+    ld t0, 456(sp)
+    beqz t0, .Lkey_auth_transition_block_8
+    j .Lkey_auth_transition_block_7
+.Lkey_auth_transition_block_6:
+    li a0, 5
+    j .Lkey_auth_transition_epilogue
+.Lkey_auth_transition_block_7:
+    # cellscript abi: generic fixed-byte Eq comparison size=32
+    ld t4, 264(sp)
+    ld t5, 168(sp)
+    lbu t0, 0(t4)
+    lbu t1, 0(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_28
+    lbu t0, 1(t4)
+    lbu t1, 1(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_28
+    lbu t0, 2(t4)
+    lbu t1, 2(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_28
+    lbu t0, 3(t4)
+    lbu t1, 3(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_28
+    lbu t0, 4(t4)
+    lbu t1, 4(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_28
+    lbu t0, 5(t4)
+    lbu t1, 5(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_28
+    lbu t0, 6(t4)
+    lbu t1, 6(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_28
+    lbu t0, 7(t4)
+    lbu t1, 7(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_28
+    lbu t0, 8(t4)
+    lbu t1, 8(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_28
+    lbu t0, 9(t4)
+    lbu t1, 9(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_28
+    lbu t0, 10(t4)
+    lbu t1, 10(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_28
+    lbu t0, 11(t4)
+    lbu t1, 11(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_28
+    lbu t0, 12(t4)
+    lbu t1, 12(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_28
+    lbu t0, 13(t4)
+    lbu t1, 13(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_28
+    lbu t0, 14(t4)
+    lbu t1, 14(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_28
+    lbu t0, 15(t4)
+    lbu t1, 15(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_28
+    lbu t0, 16(t4)
+    lbu t1, 16(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_28
+    lbu t0, 17(t4)
+    lbu t1, 17(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_28
+    lbu t0, 18(t4)
+    lbu t1, 18(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_28
+    lbu t0, 19(t4)
+    lbu t1, 19(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_28
+    lbu t0, 20(t4)
+    lbu t1, 20(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_28
+    lbu t0, 21(t4)
+    lbu t1, 21(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_28
+    lbu t0, 22(t4)
+    lbu t1, 22(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_28
+    lbu t0, 23(t4)
+    lbu t1, 23(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_28
+    lbu t0, 24(t4)
+    lbu t1, 24(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_28
+    lbu t0, 25(t4)
+    lbu t1, 25(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_28
+    lbu t0, 26(t4)
+    lbu t1, 26(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_28
+    lbu t0, 27(t4)
+    lbu t1, 27(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_28
+    lbu t0, 28(t4)
+    lbu t1, 28(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_28
+    lbu t0, 29(t4)
+    lbu t1, 29(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_28
+    lbu t0, 30(t4)
+    lbu t1, 30(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_28
+    lbu t0, 31(t4)
+    lbu t1, 31(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_28
+    li t3, 1
+    j .Lgen_fb_done_29
+.Lgen_fb_mismatch_28:
+    li t3, 0
+.Lgen_fb_done_29:
+    sd t3, 464(sp)
+    ld t0, 464(sp)
+    beqz t0, .Lkey_auth_transition_block_10
+    j .Lkey_auth_transition_block_9
+.Lkey_auth_transition_block_8:
+    li a0, 5
+    j .Lkey_auth_transition_epilogue
+.Lkey_auth_transition_block_9:
+    # field access .nonce
+    # cellscript abi: schema field NovaSealCellV0.nonce offset=130 size=8
+    ld t4, 0(sp)
+    # cellscript abi: exact size check NovaSealCellV0 expected=146
+    ld a0, 1992(sp)
+    li a1, 146
+    call __cellscript_require_exact_size
+    beqz a0, .Lschema_size_ok_30
+    j .Lkey_auth_transition_fail_4
+.Lschema_size_ok_30:
+    # cellscript abi: bounds check NovaSealCellV0.nonce required=138
+    ld a0, 1992(sp)
+    li a1, 138
+    call __cellscript_require_min_size
+    beqz a0, .Lschema_bounds_ok_31
+    j .Lkey_auth_transition_fail_2
+.Lschema_bounds_ok_31:
+    li t0, 0
+    lbu t2, 130(t4)
+    or t0, t0, t2
+    lbu t2, 131(t4)
+    slli t2, t2, 8
+    or t0, t0, t2
+    lbu t2, 132(t4)
+    slli t2, t2, 16
+    or t0, t0, t2
+    lbu t2, 133(t4)
+    slli t2, t2, 24
+    or t0, t0, t2
+    lbu t2, 134(t4)
+    slli t2, t2, 32
+    or t0, t0, t2
+    lbu t2, 135(t4)
+    slli t2, t2, 40
+    or t0, t0, t2
+    lbu t2, 136(t4)
+    slli t2, t2, 48
+    or t0, t0, t2
+    lbu t2, 137(t4)
+    slli t2, t2, 56
+    or t0, t0, t2
+    sd t0, 472(sp)
+    ld t0, 360(sp)
+    ld t1, 472(sp)
+    sub t0, t0, t1
+    seqz t0, t0
+    sd t0, 480(sp)
+    ld t0, 480(sp)
+    beqz t0, .Lkey_auth_transition_block_12
+    j .Lkey_auth_transition_block_11
+.Lkey_auth_transition_block_10:
+    li a0, 5
+    j .Lkey_auth_transition_epilogue
+.Lkey_auth_transition_block_11:
+    ld t0, 472(sp)
+    li t1, 18446744073709551615
+    slt t0, t0, t1
+    sd t0, 488(sp)
+    ld t0, 488(sp)
+    beqz t0, .Lkey_auth_transition_block_14
+    j .Lkey_auth_transition_block_13
+.Lkey_auth_transition_block_12:
+    li a0, 5
+    j .Lkey_auth_transition_epilogue
+.Lkey_auth_transition_block_13:
+    ld t0, 472(sp)
+    li t1, 1
+    add t0, t0, t1
+    sd t0, 496(sp)
+    ld t0, 184(sp)
+    ld t1, 496(sp)
+    sub t0, t0, t1
+    seqz t0, t0
+    sd t0, 504(sp)
+    ld t0, 504(sp)
+    beqz t0, .Lkey_auth_transition_block_16
+    j .Lkey_auth_transition_block_15
+.Lkey_auth_transition_block_14:
+    li a0, 5
+    j .Lkey_auth_transition_epilogue
+.Lkey_auth_transition_block_15:
+    ld t0, 48(sp)
+    ld t1, 200(sp)
+    sgt t0, t0, t1
+    xori t0, t0, 1
+    sd t0, 512(sp)
+    ld t0, 512(sp)
+    beqz t0, .Lkey_auth_transition_block_18
+    j .Lkey_auth_transition_block_17
+.Lkey_auth_transition_block_16:
+    li a0, 5
+    j .Lkey_auth_transition_epilogue
+.Lkey_auth_transition_block_17:
+    # field access .expected_receipt_hash
+    # cellscript abi: schema field NovaSealSignedIntentV0.expected_receipt_hash offset=222 size=32
+    ld t4, 8(sp)
+    # cellscript abi: exact size check NovaSealSignedIntentV0 expected=254
+    ld a0, 928(sp)
+    li a1, 254
+    call __cellscript_require_exact_size
+    beqz a0, .Lschema_size_ok_32
+    j .Lkey_auth_transition_fail_4
+.Lschema_size_ok_32:
+    # cellscript abi: bounds check NovaSealSignedIntentV0.expected_receipt_hash required=254
+    ld a0, 928(sp)
+    li a1, 254
+    call __cellscript_require_min_size
+    beqz a0, .Lschema_bounds_ok_33
+    j .Lkey_auth_transition_fail_2
+.Lschema_bounds_ok_33:
+    addi t0, t4, 222
+    sd t0, 520(sp)
+    # cellscript abi: fixed-byte Eq comparison size=32
+    # cellscript abi: exact size check NovaSealSignedIntentV0 expected=254
+    ld a0, 928(sp)
+    li a1, 254
+    call __cellscript_require_exact_size
+    beqz a0, .Lschema_size_ok_34
+    j .Lkey_auth_transition_fail_4
+.Lschema_size_ok_34:
+    # cellscript abi: bounds check NovaSealSignedIntentV0.expected_receipt_hash required=254
+    ld a0, 928(sp)
+    li a1, 254
+    call __cellscript_require_min_size
+    beqz a0, .Lschema_bounds_ok_35
+    j .Lkey_auth_transition_fail_2
+.Lschema_bounds_ok_35:
+    # cellscript abi: exact size check NovaSealSignedIntentV0 expected=254
+    ld a0, 928(sp)
+    li a1, 254
+    call __cellscript_require_exact_size
+    beqz a0, .Lschema_size_ok_36
+    j .Lkey_auth_transition_fail_4
+.Lschema_size_ok_36:
+    # cellscript abi: bounds check NovaSealSignedIntentV0.expected_receipt_hash required=254
+    ld a0, 928(sp)
+    li a1, 254
+    call __cellscript_require_min_size
+    beqz a0, .Lschema_bounds_ok_37
+    j .Lkey_auth_transition_fail_2
+.Lschema_bounds_ok_37:
+    ld a0, 8(sp)
+    addi a0, a0, 222
+    li t6, 3040
+    add t6, sp, t6
+    sd a0, 0(t6)
+    ld a1, 400(sp)
+    li t6, 3040
+    add t6, sp, t6
+    ld a0, 0(t6)
+    li a2, 32
+    call __cellscript_memcmp_fixed
+    seqz t3, a0
+    sd t3, 528(sp)
+    ld t0, 528(sp)
+    beqz t0, .Lkey_auth_transition_block_20
+    j .Lkey_auth_transition_block_19
+.Lkey_auth_transition_block_18:
+    li a0, 5
+    j .Lkey_auth_transition_epilogue
+.Lkey_auth_transition_block_19:
+    # cellscript abi: generic fixed-byte Eq comparison size=32
+    ld t4, 384(sp)
+    ld t5, 104(sp)
+    lbu t0, 0(t4)
+    lbu t1, 0(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_38
+    lbu t0, 1(t4)
+    lbu t1, 1(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_38
+    lbu t0, 2(t4)
+    lbu t1, 2(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_38
+    lbu t0, 3(t4)
+    lbu t1, 3(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_38
+    lbu t0, 4(t4)
+    lbu t1, 4(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_38
+    lbu t0, 5(t4)
+    lbu t1, 5(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_38
+    lbu t0, 6(t4)
+    lbu t1, 6(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_38
+    lbu t0, 7(t4)
+    lbu t1, 7(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_38
+    lbu t0, 8(t4)
+    lbu t1, 8(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_38
+    lbu t0, 9(t4)
+    lbu t1, 9(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_38
+    lbu t0, 10(t4)
+    lbu t1, 10(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_38
+    lbu t0, 11(t4)
+    lbu t1, 11(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_38
+    lbu t0, 12(t4)
+    lbu t1, 12(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_38
+    lbu t0, 13(t4)
+    lbu t1, 13(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_38
+    lbu t0, 14(t4)
+    lbu t1, 14(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_38
+    lbu t0, 15(t4)
+    lbu t1, 15(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_38
+    lbu t0, 16(t4)
+    lbu t1, 16(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_38
+    lbu t0, 17(t4)
+    lbu t1, 17(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_38
+    lbu t0, 18(t4)
+    lbu t1, 18(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_38
+    lbu t0, 19(t4)
+    lbu t1, 19(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_38
+    lbu t0, 20(t4)
+    lbu t1, 20(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_38
+    lbu t0, 21(t4)
+    lbu t1, 21(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_38
+    lbu t0, 22(t4)
+    lbu t1, 22(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_38
+    lbu t0, 23(t4)
+    lbu t1, 23(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_38
+    lbu t0, 24(t4)
+    lbu t1, 24(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_38
+    lbu t0, 25(t4)
+    lbu t1, 25(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_38
+    lbu t0, 26(t4)
+    lbu t1, 26(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_38
+    lbu t0, 27(t4)
+    lbu t1, 27(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_38
+    lbu t0, 28(t4)
+    lbu t1, 28(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_38
+    lbu t0, 29(t4)
+    lbu t1, 29(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_38
+    lbu t0, 30(t4)
+    lbu t1, 30(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_38
+    lbu t0, 31(t4)
+    lbu t1, 31(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_38
+    li t3, 1
+    j .Lgen_fb_done_39
+.Lgen_fb_mismatch_38:
+    li t3, 0
+.Lgen_fb_done_39:
+    sd t3, 536(sp)
+    ld t0, 536(sp)
+    beqz t0, .Lkey_auth_transition_block_22
+    j .Lkey_auth_transition_block_21
+.Lkey_auth_transition_block_20:
+    li a0, 5
+    j .Lkey_auth_transition_epilogue
+.Lkey_auth_transition_block_21:
+    # field access .pubkey
+    # cellscript abi: schema field SignaturePayload.pubkey offset=0 size=32
+    ld t4, 24(sp)
+    # cellscript abi: exact size check SignaturePayload expected=96
+    ld a0, 944(sp)
+    li a1, 96
+    call __cellscript_require_exact_size
+    beqz a0, .Lschema_size_ok_40
+    j .Lkey_auth_transition_fail_4
+.Lschema_size_ok_40:
+    # cellscript abi: bounds check SignaturePayload.pubkey required=32
+    ld a0, 944(sp)
+    li a1, 32
+    call __cellscript_require_min_size
+    beqz a0, .Lschema_bounds_ok_41
+    j .Lkey_auth_transition_fail_2
+.Lschema_bounds_ok_41:
+    addi t0, t4, 0
+    sd t0, 544(sp)
+    # field access .0 (unresolved)
+    # cellscript abi: fail closed because field offset is not computable from available type layout
+    j .Lkey_auth_transition_fail_16
+    # cellscript abi: generic fixed-byte Eq comparison size=32
+    ld t4, 544(sp)
+    ld t5, 552(sp)
+    lbu t0, 0(t4)
+    lbu t1, 0(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_42
+    lbu t0, 1(t4)
+    lbu t1, 1(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_42
+    lbu t0, 2(t4)
+    lbu t1, 2(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_42
+    lbu t0, 3(t4)
+    lbu t1, 3(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_42
+    lbu t0, 4(t4)
+    lbu t1, 4(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_42
+    lbu t0, 5(t4)
+    lbu t1, 5(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_42
+    lbu t0, 6(t4)
+    lbu t1, 6(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_42
+    lbu t0, 7(t4)
+    lbu t1, 7(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_42
+    lbu t0, 8(t4)
+    lbu t1, 8(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_42
+    lbu t0, 9(t4)
+    lbu t1, 9(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_42
+    lbu t0, 10(t4)
+    lbu t1, 10(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_42
+    lbu t0, 11(t4)
+    lbu t1, 11(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_42
+    lbu t0, 12(t4)
+    lbu t1, 12(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_42
+    lbu t0, 13(t4)
+    lbu t1, 13(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_42
+    lbu t0, 14(t4)
+    lbu t1, 14(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_42
+    lbu t0, 15(t4)
+    lbu t1, 15(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_42
+    lbu t0, 16(t4)
+    lbu t1, 16(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_42
+    lbu t0, 17(t4)
+    lbu t1, 17(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_42
+    lbu t0, 18(t4)
+    lbu t1, 18(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_42
+    lbu t0, 19(t4)
+    lbu t1, 19(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_42
+    lbu t0, 20(t4)
+    lbu t1, 20(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_42
+    lbu t0, 21(t4)
+    lbu t1, 21(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_42
+    lbu t0, 22(t4)
+    lbu t1, 22(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_42
+    lbu t0, 23(t4)
+    lbu t1, 23(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_42
+    lbu t0, 24(t4)
+    lbu t1, 24(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_42
+    lbu t0, 25(t4)
+    lbu t1, 25(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_42
+    lbu t0, 26(t4)
+    lbu t1, 26(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_42
+    lbu t0, 27(t4)
+    lbu t1, 27(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_42
+    lbu t0, 28(t4)
+    lbu t1, 28(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_42
+    lbu t0, 29(t4)
+    lbu t1, 29(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_42
+    lbu t0, 30(t4)
+    lbu t1, 30(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_42
+    lbu t0, 31(t4)
+    lbu t1, 31(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_42
+    li t3, 1
+    j .Lgen_fb_done_43
+.Lgen_fb_mismatch_42:
+    li t3, 0
+.Lgen_fb_done_43:
+    sd t3, 560(sp)
+    ld t0, 560(sp)
+    beqz t0, .Lkey_auth_transition_block_24
+    j .Lkey_auth_transition_block_23
+.Lkey_auth_transition_block_22:
+    li a0, 5
+    j .Lkey_auth_transition_epilogue
+.Lkey_auth_transition_block_23:
+    # field access .signature
+    # cellscript abi: schema field SignaturePayload.signature offset=32 size=64
+    ld t4, 24(sp)
+    # cellscript abi: exact size check SignaturePayload expected=96
+    ld a0, 944(sp)
+    li a1, 96
+    call __cellscript_require_exact_size
+    beqz a0, .Lschema_size_ok_44
+    j .Lkey_auth_transition_fail_4
+.Lschema_size_ok_44:
+    # cellscript abi: bounds check SignaturePayload.signature required=96
+    ld a0, 944(sp)
+    li a1, 96
+    call __cellscript_require_min_size
+    beqz a0, .Lschema_bounds_ok_45
+    j .Lkey_auth_transition_fail_2
+.Lschema_bounds_ok_45:
+    addi t0, t4, 32
+    sd t0, 568(sp)
+    # call __novaseal_bip340_require_signature args=3
+    # cellscript abi: fail closed until NovaSeal BIP340 verifier spawn IPC is linked
+    j .Lkey_auth_transition_fail_1
+    # consume
+    # cellscript abi: consumed input pointer retained for verifier field checks
+    ld t0, 128(sp)
+    sd t0, 576(sp)
+    ld t0, 144(sp)
+    sd t0, 584(sp)
+    ld t0, 88(sp)
+    sd t0, 592(sp)
+    ld t0, 168(sp)
+    sd t0, 600(sp)
+    ld t0, 400(sp)
+    sd t0, 608(sp)
+    ld t0, 184(sp)
+    sd t0, 616(sp)
+    ld t0, 200(sp)
+    sd t0, 624(sp)
+    # constrain named output NovaSealCellV0
+    #   field version <- old_cell_version
+    #   field btc_authority_hash <- old_cell_btc_authority_hash
+    #   field state_hash <- intent_core_new_state_hash
+    #   field policy_hash <- old_cell_policy_hash
+    #   field latest_receipt_hash <- ckb_hash_data_packed
+    #   field nonce <- intent_core_new_nonce
+    #   field expiry <- intent_core_expiry
+    # cellscript abi: ordered named output field verification incomplete
+    # cellscript abi: fail closed because the output state is not fully verified
+    j .Lkey_auth_transition_fail_5
+    ld t0, 232(sp)
+    sd t0, 632(sp)
+    ld t0, 248(sp)
+    sd t0, 640(sp)
+    ld t0, 264(sp)
+    sd t0, 648(sp)
+    ld t0, 280(sp)
+    sd t0, 656(sp)
+    ld t0, 296(sp)
+    sd t0, 664(sp)
+    ld t0, 312(sp)
+    sd t0, 672(sp)
+    ld t0, 216(sp)
+    sd t0, 680(sp)
+    ld t0, 336(sp)
+    sd t0, 688(sp)
+    ld t0, 88(sp)
+    sd t0, 696(sp)
+    ld t0, 360(sp)
+    sd t0, 704(sp)
+    ld t0, 184(sp)
+    sd t0, 712(sp)
+    ld t0, 104(sp)
+    sd t0, 720(sp)
+    ld t0, 112(sp)
+    sd t0, 728(sp)
+    la t0, __cellscript_const_data_0
+    sd t0, 736(sp)
+    ld t0, 144(sp)
+    sd t0, 744(sp)
+    ld t0, 200(sp)
+    sd t0, 752(sp)
+    # constrain named output ProofReceiptV0
+    #   field protocol_id <- intent_core_protocol_id
+    #   field package_hash <- intent_core_package_hash
+    #   field policy_hash <- intent_core_policy_hash
+    #   field action <- intent_core_action
+    #   field terminal_path <- intent_core_terminal_path
+    #   field old_cell <- intent_core_old_cell
+    #   field new_cell_commitment <- ckb_hash_data_packed
+    #   field old_state_hash <- intent_core_old_state_hash
+    #   field new_state_hash <- intent_core_new_state_hash
+    #   field old_nonce <- intent_core_old_nonce
+    #   field new_nonce <- intent_core_new_nonce
+    #   field intent_core_hash <- ckb_hash_data_packed
+    #   field signed_intent_hash <- ckb_hash_data_packed
+    #   field payout_commitment_hash <- <value>
+    #   field signer_authority_hash <- old_cell_btc_authority_hash
+    #   field expiry <- intent_core_expiry
+    # cellscript abi: ordered named output field verification incomplete
+    # cellscript abi: fail closed because the output state is not fully verified
+    j .Lkey_auth_transition_fail_5
+    li a0, 0
+    j .Lkey_auth_transition_epilogue
+.Lkey_auth_transition_block_24:
+    li a0, 5
+    j .Lkey_auth_transition_epilogue
+.Lkey_auth_transition_fail_1:
+    # cellscript runtime error 1 syscall-failed
+    li a0, 1
+    j .Lkey_auth_transition_epilogue
+.Lkey_auth_transition_fail_2:
+    # cellscript runtime error 2 bounds-check-failed
+    li a0, 2
+    j .Lkey_auth_transition_epilogue
+.Lkey_auth_transition_fail_4:
+    # cellscript runtime error 4 exact-size-mismatch
+    li a0, 4
+    j .Lkey_auth_transition_epilogue
+.Lkey_auth_transition_fail_5:
+    # cellscript runtime error 5 assertion-failed
+    li a0, 5
+    j .Lkey_auth_transition_epilogue
+.Lkey_auth_transition_fail_16:
+    # cellscript runtime error 16 dynamic-field-bounds-invalid
+    li a0, 16
+    j .Lkey_auth_transition_epilogue
+.Lkey_auth_transition_fail_18:
+    # cellscript runtime error 18 fixed-byte-comparison-unresolved
+    li a0, 18
+    j .Lkey_auth_transition_epilogue
+.Lkey_auth_transition_epilogue:
+    li t6, 4216
+    add t6, sp, t6
+    ld ra, 0(t6)
+    li t6, 4208
+    add t6, sp, t6
+    ld fp, 0(t6)
+    li t6, 4224
+    add sp, sp, t6
+    ret
+# cellscript entry abi: btc_authority requires-explicit-parameter-abi
+.global btc_authority
+.type btc_authority, @function
+btc_authority:
+    li t6, -2432
+    add sp, sp, t6
+    li t6, 2424
+    add t6, sp, t6
+    sd ra, 0(t6)
+    li t6, 2416
+    add t6, sp, t6
+    sd fp, 0(t6)
+    li fp, 2432
+    add fp, sp, fp
+    # cellscript abi: schema param cell pointer=a0 length=a1
+    sd a0, 0(sp)
+    sd a1, 200(sp)
+    # cellscript abi: fixed-byte param expected_btc_authority_hash pointer=a2 length=a3 size=32
+    sd a2, 8(sp)
+    sd a3, 168(sp)
+    # cellscript abi: schema param intent pointer=a4 length=a5
+    sd a4, 16(sp)
+    sd a5, 176(sp)
+    # cellscript abi: fixed-byte param state_hash_commitment pointer=a6 length=a7 size=32
+    sd a6, 24(sp)
+    sd a7, 184(sp)
+    # cellscript abi: schema param sig pointer=stack+0 length=stack+8
+    # cellscript abi: arg8 loaded from caller stack +0
+    ld t0, 0(fp)
+    sd t0, 32(sp)
+    # cellscript abi: arg9 loaded from caller stack +8
+    ld t0, 8(fp)
+    sd t0, 192(sp)
+    # cellscript abi: bind read-only param cell to Input#0 cell data
+    # cellscript abi: LOAD_CELL_DATA reason=read_ref_param_input source=Input index=0
+    li t0, 512
+    sd t0, 200(sp)
+    addi a0, sp, 208
+    addi a1, sp, 200
+    li a2, 0
+    li a3, 0
+    li a4, 1
+    li a7, 2092
+    ecall
+    # a0 = CKB syscall return code
+    beqz a0, .Lckb_syscall_ok_46
+    j .Lbtc_authority_fail_1
+.Lckb_syscall_ok_46:
+    addi t0, sp, 208
+    sd t0, 0(sp)
+    # cellscript abi: bind read-only param expected_btc_authority_hash to Input#1 cell data
+    # cellscript abi: LOAD_CELL_DATA reason=read_ref_param_input source=Input index=1
+    li t0, 512
+    sd t0, 720(sp)
+    addi a0, sp, 728
+    addi a1, sp, 720
+    li a2, 0
+    li a3, 1
+    li a4, 1
+    li a7, 2092
+    ecall
+    # a0 = CKB syscall return code
+    beqz a0, .Lckb_syscall_ok_47
+    j .Lbtc_authority_fail_1
+.Lckb_syscall_ok_47:
+    addi t0, sp, 728
+    sd t0, 8(sp)
+.Lbtc_authority_block_0:
+    # call __ckb_hash_data_packed
+    # cellscript abi: fail closed because hash_data_packed currently reuses the 32-byte Blake2b helper
+    j .Lbtc_authority_fail_18
+    # field access .btc_authority_hash
+    # cellscript abi: schema field NovaSealCellV0.btc_authority_hash offset=2 size=32
+    ld t4, 0(sp)
+    # cellscript abi: exact size check NovaSealCellV0 expected=146
+    ld a0, 200(sp)
+    li a1, 146
+    call __cellscript_require_exact_size
+    beqz a0, .Lschema_size_ok_48
+    j .Lbtc_authority_fail_4
+.Lschema_size_ok_48:
+    # cellscript abi: bounds check NovaSealCellV0.btc_authority_hash required=34
+    ld a0, 200(sp)
+    li a1, 34
+    call __cellscript_require_min_size
+    beqz a0, .Lschema_bounds_ok_49
+    j .Lbtc_authority_fail_2
+.Lschema_bounds_ok_49:
+    addi t0, t4, 2
+    sd t0, 48(sp)
+    # cellscript abi: fixed-byte Eq comparison size=32
+    # cellscript abi: exact size check NovaSealCellV0 expected=146
+    ld a0, 200(sp)
+    li a1, 146
+    call __cellscript_require_exact_size
+    beqz a0, .Lschema_size_ok_50
+    j .Lbtc_authority_fail_4
+.Lschema_size_ok_50:
+    # cellscript abi: bounds check NovaSealCellV0.btc_authority_hash required=34
+    ld a0, 200(sp)
+    li a1, 34
+    call __cellscript_require_min_size
+    beqz a0, .Lschema_bounds_ok_51
+    j .Lbtc_authority_fail_2
+.Lschema_bounds_ok_51:
+    ld a0, 8(sp)
+    sd a0, 1248(sp)
+    # cellscript abi: exact size check NovaSealCellV0 expected=146
+    ld a0, 200(sp)
+    li a1, 146
+    call __cellscript_require_exact_size
+    beqz a0, .Lschema_size_ok_52
+    j .Lbtc_authority_fail_4
+.Lschema_size_ok_52:
+    # cellscript abi: bounds check NovaSealCellV0.btc_authority_hash required=34
+    ld a0, 200(sp)
+    li a1, 34
+    call __cellscript_require_min_size
+    beqz a0, .Lschema_bounds_ok_53
+    j .Lbtc_authority_fail_2
+.Lschema_bounds_ok_53:
+    ld a1, 0(sp)
+    addi a1, a1, 2
+    ld a0, 1248(sp)
+    li a2, 32
+    call __cellscript_memcmp_fixed
+    seqz t3, a0
+    sd t3, 56(sp)
+    ld t0, 56(sp)
+    beqz t0, .Lbtc_authority_block_2
+    j .Lbtc_authority_block_1
+.Lbtc_authority_block_1:
+    # field access .core (unresolved)
+    # cellscript abi: fail closed because field offset is not computable from available type layout
+    j .Lbtc_authority_fail_16
+    # field access .policy_hash
+    # cellscript abi: generic field NovaSealIntentCoreV0.policy_hash offset=64 size=32
+    ld t4, 64(sp)
+    addi t0, t4, 64
+    sd t0, 72(sp)
+    # field access .policy_hash
+    # cellscript abi: schema field NovaSealCellV0.policy_hash offset=66 size=32
+    ld t4, 0(sp)
+    # cellscript abi: exact size check NovaSealCellV0 expected=146
+    ld a0, 200(sp)
+    li a1, 146
+    call __cellscript_require_exact_size
+    beqz a0, .Lschema_size_ok_54
+    j .Lbtc_authority_fail_4
+.Lschema_size_ok_54:
+    # cellscript abi: bounds check NovaSealCellV0.policy_hash required=98
+    ld a0, 200(sp)
+    li a1, 98
+    call __cellscript_require_min_size
+    beqz a0, .Lschema_bounds_ok_55
+    j .Lbtc_authority_fail_2
+.Lschema_bounds_ok_55:
+    addi t0, t4, 66
+    sd t0, 80(sp)
+    # cellscript abi: generic fixed-byte Eq comparison size=32
+    ld t4, 72(sp)
+    ld t5, 80(sp)
+    lbu t0, 0(t4)
+    lbu t1, 0(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_56
+    lbu t0, 1(t4)
+    lbu t1, 1(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_56
+    lbu t0, 2(t4)
+    lbu t1, 2(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_56
+    lbu t0, 3(t4)
+    lbu t1, 3(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_56
+    lbu t0, 4(t4)
+    lbu t1, 4(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_56
+    lbu t0, 5(t4)
+    lbu t1, 5(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_56
+    lbu t0, 6(t4)
+    lbu t1, 6(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_56
+    lbu t0, 7(t4)
+    lbu t1, 7(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_56
+    lbu t0, 8(t4)
+    lbu t1, 8(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_56
+    lbu t0, 9(t4)
+    lbu t1, 9(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_56
+    lbu t0, 10(t4)
+    lbu t1, 10(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_56
+    lbu t0, 11(t4)
+    lbu t1, 11(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_56
+    lbu t0, 12(t4)
+    lbu t1, 12(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_56
+    lbu t0, 13(t4)
+    lbu t1, 13(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_56
+    lbu t0, 14(t4)
+    lbu t1, 14(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_56
+    lbu t0, 15(t4)
+    lbu t1, 15(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_56
+    lbu t0, 16(t4)
+    lbu t1, 16(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_56
+    lbu t0, 17(t4)
+    lbu t1, 17(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_56
+    lbu t0, 18(t4)
+    lbu t1, 18(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_56
+    lbu t0, 19(t4)
+    lbu t1, 19(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_56
+    lbu t0, 20(t4)
+    lbu t1, 20(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_56
+    lbu t0, 21(t4)
+    lbu t1, 21(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_56
+    lbu t0, 22(t4)
+    lbu t1, 22(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_56
+    lbu t0, 23(t4)
+    lbu t1, 23(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_56
+    lbu t0, 24(t4)
+    lbu t1, 24(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_56
+    lbu t0, 25(t4)
+    lbu t1, 25(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_56
+    lbu t0, 26(t4)
+    lbu t1, 26(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_56
+    lbu t0, 27(t4)
+    lbu t1, 27(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_56
+    lbu t0, 28(t4)
+    lbu t1, 28(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_56
+    lbu t0, 29(t4)
+    lbu t1, 29(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_56
+    lbu t0, 30(t4)
+    lbu t1, 30(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_56
+    lbu t0, 31(t4)
+    lbu t1, 31(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_56
+    li t3, 1
+    j .Lgen_fb_done_57
+.Lgen_fb_mismatch_56:
+    li t3, 0
+.Lgen_fb_done_57:
+    sd t3, 88(sp)
+    ld t0, 88(sp)
+    beqz t0, .Lbtc_authority_block_4
+    j .Lbtc_authority_block_3
+.Lbtc_authority_block_2:
+    li a0, 0
+    bnez a0, .Llock_predicate_true_58
+    # cellscript runtime error 5 assertion-failed
+    li a0, 5
+    j .Lbtc_authority_epilogue
+.Llock_predicate_true_58:
+    li a0, 0
+    j .Lbtc_authority_epilogue
+.Lbtc_authority_block_3:
+    # field access .pubkey
+    # cellscript abi: schema field SignaturePayload.pubkey offset=0 size=32
+    ld t4, 32(sp)
+    # cellscript abi: exact size check SignaturePayload expected=96
+    ld a0, 192(sp)
+    li a1, 96
+    call __cellscript_require_exact_size
+    beqz a0, .Lschema_size_ok_59
+    j .Lbtc_authority_fail_4
+.Lschema_size_ok_59:
+    # cellscript abi: bounds check SignaturePayload.pubkey required=32
+    ld a0, 192(sp)
+    li a1, 32
+    call __cellscript_require_min_size
+    beqz a0, .Lschema_bounds_ok_60
+    j .Lbtc_authority_fail_2
+.Lschema_bounds_ok_60:
+    addi t0, t4, 0
+    sd t0, 96(sp)
+    # field access .0 (unresolved)
+    # cellscript abi: fail closed because field offset is not computable from available type layout
+    j .Lbtc_authority_fail_16
+    # cellscript abi: generic fixed-byte Eq comparison size=32
+    ld t4, 96(sp)
+    ld t5, 104(sp)
+    lbu t0, 0(t4)
+    lbu t1, 0(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_61
+    lbu t0, 1(t4)
+    lbu t1, 1(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_61
+    lbu t0, 2(t4)
+    lbu t1, 2(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_61
+    lbu t0, 3(t4)
+    lbu t1, 3(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_61
+    lbu t0, 4(t4)
+    lbu t1, 4(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_61
+    lbu t0, 5(t4)
+    lbu t1, 5(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_61
+    lbu t0, 6(t4)
+    lbu t1, 6(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_61
+    lbu t0, 7(t4)
+    lbu t1, 7(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_61
+    lbu t0, 8(t4)
+    lbu t1, 8(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_61
+    lbu t0, 9(t4)
+    lbu t1, 9(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_61
+    lbu t0, 10(t4)
+    lbu t1, 10(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_61
+    lbu t0, 11(t4)
+    lbu t1, 11(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_61
+    lbu t0, 12(t4)
+    lbu t1, 12(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_61
+    lbu t0, 13(t4)
+    lbu t1, 13(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_61
+    lbu t0, 14(t4)
+    lbu t1, 14(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_61
+    lbu t0, 15(t4)
+    lbu t1, 15(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_61
+    lbu t0, 16(t4)
+    lbu t1, 16(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_61
+    lbu t0, 17(t4)
+    lbu t1, 17(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_61
+    lbu t0, 18(t4)
+    lbu t1, 18(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_61
+    lbu t0, 19(t4)
+    lbu t1, 19(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_61
+    lbu t0, 20(t4)
+    lbu t1, 20(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_61
+    lbu t0, 21(t4)
+    lbu t1, 21(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_61
+    lbu t0, 22(t4)
+    lbu t1, 22(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_61
+    lbu t0, 23(t4)
+    lbu t1, 23(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_61
+    lbu t0, 24(t4)
+    lbu t1, 24(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_61
+    lbu t0, 25(t4)
+    lbu t1, 25(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_61
+    lbu t0, 26(t4)
+    lbu t1, 26(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_61
+    lbu t0, 27(t4)
+    lbu t1, 27(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_61
+    lbu t0, 28(t4)
+    lbu t1, 28(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_61
+    lbu t0, 29(t4)
+    lbu t1, 29(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_61
+    lbu t0, 30(t4)
+    lbu t1, 30(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_61
+    lbu t0, 31(t4)
+    lbu t1, 31(t5)
+    sub t2, t0, t1
+    bnez t2, .Lgen_fb_mismatch_61
+    li t3, 1
+    j .Lgen_fb_done_62
+.Lgen_fb_mismatch_61:
+    li t3, 0
+.Lgen_fb_done_62:
+    sd t3, 112(sp)
+    ld t0, 112(sp)
+    beqz t0, .Lbtc_authority_block_6
+    j .Lbtc_authority_block_5
+.Lbtc_authority_block_4:
+    li a0, 0
+    bnez a0, .Llock_predicate_true_63
+    # cellscript runtime error 5 assertion-failed
+    li a0, 5
+    j .Lbtc_authority_epilogue
+.Llock_predicate_true_63:
+    li a0, 0
+    j .Lbtc_authority_epilogue
+.Lbtc_authority_block_5:
+    # field access .signature
+    # cellscript abi: schema field SignaturePayload.signature offset=32 size=64
+    ld t4, 32(sp)
+    # cellscript abi: exact size check SignaturePayload expected=96
+    ld a0, 192(sp)
+    li a1, 96
+    call __cellscript_require_exact_size
+    beqz a0, .Lschema_size_ok_64
+    j .Lbtc_authority_fail_4
+.Lschema_size_ok_64:
+    # cellscript abi: bounds check SignaturePayload.signature required=96
+    ld a0, 192(sp)
+    li a1, 96
+    call __cellscript_require_min_size
+    beqz a0, .Lschema_bounds_ok_65
+    j .Lbtc_authority_fail_2
+.Lschema_bounds_ok_65:
+    addi t0, t4, 32
+    sd t0, 120(sp)
+    # call __novaseal_bip340_require_signature args=3
+    # cellscript abi: fail closed until NovaSeal BIP340 verifier spawn IPC is linked
+    j .Lbtc_authority_fail_1
+    li a0, 1
+    bnez a0, .Llock_predicate_true_66
+    # cellscript runtime error 5 assertion-failed
+    li a0, 5
+    j .Lbtc_authority_epilogue
+.Llock_predicate_true_66:
+    li a0, 0
+    j .Lbtc_authority_epilogue
+.Lbtc_authority_block_6:
+    li a0, 0
+    bnez a0, .Llock_predicate_true_67
+    # cellscript runtime error 5 assertion-failed
+    li a0, 5
+    j .Lbtc_authority_epilogue
+.Llock_predicate_true_67:
+    li a0, 0
+    j .Lbtc_authority_epilogue
+.Lbtc_authority_fail_1:
+    # cellscript runtime error 1 syscall-failed
+    li a0, 1
+    j .Lbtc_authority_epilogue
+.Lbtc_authority_fail_2:
+    # cellscript runtime error 2 bounds-check-failed
+    li a0, 2
+    j .Lbtc_authority_epilogue
+.Lbtc_authority_fail_4:
+    # cellscript runtime error 4 exact-size-mismatch
+    li a0, 4
+    j .Lbtc_authority_epilogue
+.Lbtc_authority_fail_16:
+    # cellscript runtime error 16 dynamic-field-bounds-invalid
+    li a0, 16
+    j .Lbtc_authority_epilogue
+.Lbtc_authority_fail_18:
+    # cellscript runtime error 18 fixed-byte-comparison-unresolved
+    li a0, 18
+    j .Lbtc_authority_epilogue
+.Lbtc_authority_epilogue:
+    li t6, 2424
+    add t6, sp, t6
+    ld ra, 0(t6)
+    li t6, 2416
+    add t6, sp, t6
+    ld fp, 0(t6)
+    li t6, 2432
+    add sp, sp, t6
+    ret
+.section .text
+.global __cellscript_memcmp_fixed
+.type __cellscript_memcmp_fixed, @function
+__cellscript_memcmp_fixed:
+    # cellscript abi: fixed-byte helper compares a0/a1 for a2 bytes; returns a0=0 when equal
+    beqz a2, .L__cellscript_memcmp_fixed_equal
+.L__cellscript_memcmp_fixed_loop:
+    lbu t0, 0(a0)
+    lbu t1, 0(a1)
+    sub t2, t0, t1
+    bnez t2, .L__cellscript_memcmp_fixed_mismatch
+    addi a0, a0, 1
+    addi a1, a1, 1
+    addi a2, a2, -1
+    bnez a2, .L__cellscript_memcmp_fixed_loop
+.L__cellscript_memcmp_fixed_equal:
+    li a0, 0
+    ret
+.L__cellscript_memcmp_fixed_mismatch:
+    li a0, 1
+    ret
+.global __cellscript_memzero_fixed
+.type __cellscript_memzero_fixed, @function
+__cellscript_memzero_fixed:
+    # cellscript abi: fixed-byte helper checks a0 for a1 zero bytes; returns a0=0 when all zero
+    beqz a1, .L__cellscript_memzero_fixed_equal
+.L__cellscript_memzero_fixed_loop:
+    lbu t0, 0(a0)
+    bnez t0, .L__cellscript_memzero_fixed_mismatch
+    addi a0, a0, 1
+    addi a1, a1, -1
+    bnez a1, .L__cellscript_memzero_fixed_loop
+.L__cellscript_memzero_fixed_equal:
+    li a0, 0
+    ret
+.L__cellscript_memzero_fixed_mismatch:
+    li a0, 1
+    ret
+.global __cellscript_require_min_size
+.type __cellscript_require_min_size, @function
+__cellscript_require_min_size:
+    # cellscript abi: returns a0=0 when actual size a0 is at least required size a1
+    slt a0, a0, a1
+    ret
+.global __cellscript_require_exact_size
+.type __cellscript_require_exact_size, @function
+__cellscript_require_exact_size:
+    # cellscript abi: returns a0=0 when actual size a0 equals expected size a1
+    sub a0, a0, a1
+    ret
+.global __env_current_timepoint
+.type __env_current_timepoint, @function
+__env_current_timepoint:
+    addi sp, sp, -32
+    sd ra, 24(sp)
+    # cellscript abi: LOAD_HEADER_BY_FIELD field=ckb_epoch_number source=HeaderDep index=0
+    li t0, 8
+    sd t0, 8(sp)
+    addi a0, sp, 16
+    addi a1, sp, 8
+    li a2, 0
+    li a3, 0
+    li a4, 4
+    li a5, 0
+    li a7, 2082
+    ecall
+    ld a0, 16(sp)
+    ld ra, 24(sp)
+    addi sp, sp, 32
+    ret
+.global __ckb_header_epoch_number
+.type __ckb_header_epoch_number, @function
+__ckb_header_epoch_number:
+    addi sp, sp, -32
+    sd ra, 24(sp)
+    # cellscript abi: LOAD_HEADER_BY_FIELD field=ckb_epoch_number source=HeaderDep index=0
+    li t0, 8
+    sd t0, 8(sp)
+    addi a0, sp, 16
+    addi a1, sp, 8
+    li a2, 0
+    li a3, 0
+    li a4, 4
+    li a5, 0
+    li a7, 2082
+    ecall
+    ld a0, 16(sp)
+    ld ra, 24(sp)
+    addi sp, sp, 32
+    ret
+.global __ckb_header_epoch_start_block_number
+.type __ckb_header_epoch_start_block_number, @function
+__ckb_header_epoch_start_block_number:
+    addi sp, sp, -32
+    sd ra, 24(sp)
+    # cellscript abi: LOAD_HEADER_BY_FIELD field=ckb_epoch_start_block_number source=HeaderDep index=0
+    li t0, 8
+    sd t0, 8(sp)
+    addi a0, sp, 16
+    addi a1, sp, 8
+    li a2, 0
+    li a3, 0
+    li a4, 4
+    li a5, 1
+    li a7, 2082
+    ecall
+    ld a0, 16(sp)
+    ld ra, 24(sp)
+    addi sp, sp, 32
+    ret
+.global __ckb_header_epoch_length
+.type __ckb_header_epoch_length, @function
+__ckb_header_epoch_length:
+    addi sp, sp, -32
+    sd ra, 24(sp)
+    # cellscript abi: LOAD_HEADER_BY_FIELD field=ckb_epoch_length source=HeaderDep index=0
+    li t0, 8
+    sd t0, 8(sp)
+    addi a0, sp, 16
+    addi a1, sp, 8
+    li a2, 0
+    li a3, 0
+    li a4, 4
+    li a5, 2
+    li a7, 2082
+    ecall
+    ld a0, 16(sp)
+    ld ra, 24(sp)
+    addi sp, sp, 32
+    ret
+.global __ckb_input_since
+.type __ckb_input_since, @function
+__ckb_input_since:
+    addi sp, sp, -32
+    sd ra, 24(sp)
+    # cellscript abi: LOAD_INPUT_BY_FIELD field=ckb_input_since source=GroupInput index=0
+    li t0, 8
+    sd t0, 8(sp)
+    addi a0, sp, 16
+    addi a1, sp, 8
+    li a2, 0
+    li a3, 0
+    li a4, 72057594037927937
+    li a5, 1
+    li a7, 2083
+    ecall
+    ld a0, 16(sp)
+    ld ra, 24(sp)
+    addi sp, sp, 32
+    ret
+.global __ckb_source_group_input
+.type __ckb_source_group_input, @function
+__ckb_source_group_input:
+    # cellscript abi: CKB SourceView helper (Source::GroupInput)
+    li t0, 5
+    li t1, 4294967296
+    mul t0, t0, t1
+    add a0, a0, t0
+    li a1, 0
+    ret
+.global __ckb_input_out_point_index
+.type __ckb_input_out_point_index, @function
+__ckb_input_out_point_index:
+    # cellscript abi: CKB SourceView LOAD_INPUT_BY_FIELD OutPoint (SourceView input OutPoint index)
+    addi sp, sp, -80
+    sd ra, 72(sp)
+    li t6, 4294967296
+    div t0, a0, t6
+    rem t1, a0, t6
+    li t5, 1
+    sub t4, t0, t5
+    bnez t4, .Lsource_view_next_73
+    li t2, 1
+    j .Lsource_view_decoded_72
+.Lsource_view_next_73:
+    li t5, 2
+    sub t4, t0, t5
+    bnez t4, .Lsource_view_next_74
+    li t2, 2
+    j .Lsource_view_decoded_72
+.Lsource_view_next_74:
+    li t5, 3
+    sub t4, t0, t5
+    bnez t4, .Lsource_view_next_75
+    li t2, 3
+    j .Lsource_view_decoded_72
+.Lsource_view_next_75:
+    li t5, 4
+    sub t4, t0, t5
+    bnez t4, .Lsource_view_next_76
+    li t2, 4
+    j .Lsource_view_decoded_72
+.Lsource_view_next_76:
+    li t5, 5
+    sub t4, t0, t5
+    bnez t4, .Lsource_view_next_77
+    li t2, 72057594037927937
+    j .Lsource_view_decoded_72
+.Lsource_view_next_77:
+    li t5, 6
+    sub t4, t0, t5
+    bnez t4, .Lsource_view_next_78
+    li t2, 72057594037927938
+    j .Lsource_view_decoded_72
+.Lsource_view_next_78:
+    j .Linput_out_point_source_invalid_68
+.Lsource_view_decoded_72:
+    li t0, 1
+    sub t3, t2, t0
+    beqz t3, .Linput_source_view_decoded_71
+    li t0, 72057594037927937
+    sub t3, t2, t0
+    beqz t3, .Linput_source_view_decoded_71
+    j .Linput_out_point_source_invalid_68
+.Linput_source_view_decoded_71:
+    li t0, 36
+    sd t0, 8(sp)
+    addi a0, sp, 16
+    addi a1, sp, 8
+    li a2, 0
+    addi a3, t1, 0
+    addi a4, t2, 0
+    li a5, 0
+    li a7, 2083
+    ecall
+    bnez a0, .Linput_out_point_load_failed_69
+    ld t0, 8(sp)
+    li t1, 36
+    sub t2, t0, t1
+    bnez t2, .Linput_out_point_load_failed_69
+    addi t4, sp, 16
+    li a0, 0
+    lbu t3, 32(t4)
+    or a0, a0, t3
+    lbu t3, 33(t4)
+    slli t3, t3, 8
+    or a0, a0, t3
+    lbu t3, 34(t4)
+    slli t3, t3, 16
+    or a0, a0, t3
+    lbu t3, 35(t4)
+    slli t3, t3, 24
+    or a0, a0, t3
+    li a1, 0
+    j .Linput_out_point_done_70
+.Linput_out_point_source_invalid_68:
+    li a0, 44
+    addi a1, a0, 0
+    j .Linput_out_point_done_70
+.Linput_out_point_load_failed_69:
+    li a0, 44
+    addi a1, a0, 0
+.Linput_out_point_done_70:
+    ld ra, 72(sp)
+    addi sp, sp, 80
+    ret
+.global __ckb_input_out_point_tx_hash
+.type __ckb_input_out_point_tx_hash, @function
+__ckb_input_out_point_tx_hash:
+    # cellscript abi: CKB SourceView LOAD_INPUT_BY_FIELD OutPoint full tx-hash read
+    # cellscript abi: args a0=input SourceView, a1=out32_ptr, a2=size_ptr; returns a0=status
+    addi sp, sp, -80
+    sd ra, 72(sp)
+    sd a1, 8(sp)
+    sd a2, 16(sp)
+    beqz a1, .Linput_out_point_hash_output_invalid_80
+    beqz a2, .Linput_out_point_hash_output_invalid_80
+    li t6, 4294967296
+    div t0, a0, t6
+    rem t1, a0, t6
+    li t5, 1
+    sub t4, t0, t5
+    bnez t4, .Lsource_view_next_87
+    li t2, 1
+    j .Lsource_view_decoded_86
+.Lsource_view_next_87:
+    li t5, 2
+    sub t4, t0, t5
+    bnez t4, .Lsource_view_next_88
+    li t2, 2
+    j .Lsource_view_decoded_86
+.Lsource_view_next_88:
+    li t5, 3
+    sub t4, t0, t5
+    bnez t4, .Lsource_view_next_89
+    li t2, 3
+    j .Lsource_view_decoded_86
+.Lsource_view_next_89:
+    li t5, 4
+    sub t4, t0, t5
+    bnez t4, .Lsource_view_next_90
+    li t2, 4
+    j .Lsource_view_decoded_86
+.Lsource_view_next_90:
+    li t5, 5
+    sub t4, t0, t5
+    bnez t4, .Lsource_view_next_91
+    li t2, 72057594037927937
+    j .Lsource_view_decoded_86
+.Lsource_view_next_91:
+    li t5, 6
+    sub t4, t0, t5
+    bnez t4, .Lsource_view_next_92
+    li t2, 72057594037927938
+    j .Lsource_view_decoded_86
+.Lsource_view_next_92:
+    j .Linput_out_point_hash_source_invalid_79
+.Lsource_view_decoded_86:
+    li t0, 1
+    sub t3, t2, t0
+    beqz t3, .Linput_source_view_decoded_85
+    li t0, 72057594037927937
+    sub t3, t2, t0
+    beqz t3, .Linput_source_view_decoded_85
+    j .Linput_out_point_hash_source_invalid_79
+.Linput_source_view_decoded_85:
+    li t0, 36
+    sd t0, 24(sp)
+    addi a0, sp, 32
+    addi a1, sp, 24
+    li a2, 0
+    addi a3, t1, 0
+    addi a4, t2, 0
+    li a5, 0
+    li a7, 2083
+    ecall
+    bnez a0, .Linput_out_point_hash_load_failed_81
+    ld t0, 24(sp)
+    li t1, 36
+    sub t2, t0, t1
+    bnez t2, .Linput_out_point_hash_load_failed_81
+    li t0, 0
+.Linput_out_point_hash_copy_82:
+    li t1, 32
+    sltu t2, t0, t1
+    beqz t2, .Linput_out_point_hash_copy_done_83
+    addi t3, sp, 32
+    add t3, t3, t0
+    lbu t4, 0(t3)
+    ld t5, 8(sp)
+    add t5, t5, t0
+    sb t4, 0(t5)
+    addi t0, t0, 1
+    j .Linput_out_point_hash_copy_82
+.Linput_out_point_hash_copy_done_83:
+    ld t0, 16(sp)
+    li t1, 32
+    sd t1, 0(t0)
+    li a0, 0
+    j .Linput_out_point_hash_done_84
+.Linput_out_point_hash_source_invalid_79:
+    li a0, 44
+    j .Linput_out_point_hash_done_84
+.Linput_out_point_hash_output_invalid_80:
+    li a0, 18
+    j .Linput_out_point_hash_done_84
+.Linput_out_point_hash_load_failed_81:
+    li a0, 33
+.Linput_out_point_hash_done_84:
+    ld ra, 72(sp)
+    addi sp, sp, 80
+    ret
+.global __ckb_hash_blake2b
+.type __ckb_hash_blake2b, @function
+__ckb_hash_blake2b:
+    # cellscript abi: CKB Blake2b-256 helper; a0=input[32], a1=output[32], returns a0=0
+    addi sp, sp, -320
+    li t0, 0x6a09e667f2bdc928
+    sd t0, 0(sp)
+    li t0, 0xbb67ae8584caa73b
+    sd t0, 8(sp)
+    li t0, 0x3c6ef372fe94f82b
+    sd t0, 16(sp)
+    li t0, 0xa54ff53a5f1d36f1
+    sd t0, 24(sp)
+    li t0, 0x510e527fade682d1
+    sd t0, 32(sp)
+    li t0, 0x9b05688c2b3e6c1f
+    sd t0, 40(sp)
+    li t0, 0x7ee5bccfd623d608
+    sd t0, 48(sp)
+    li t0, 0x3393ac713e0a4d0c
+    sd t0, 56(sp)
+    li t0, 0
+    lbu t1, 0(a0)
+    or t0, t0, t1
+    lbu t1, 1(a0)
+    slli t1, t1, 8
+    or t0, t0, t1
+    lbu t1, 2(a0)
+    slli t1, t1, 16
+    or t0, t0, t1
+    lbu t1, 3(a0)
+    slli t1, t1, 24
+    or t0, t0, t1
+    lbu t1, 4(a0)
+    slli t1, t1, 32
+    or t0, t0, t1
+    lbu t1, 5(a0)
+    slli t1, t1, 40
+    or t0, t0, t1
+    lbu t1, 6(a0)
+    slli t1, t1, 48
+    or t0, t0, t1
+    lbu t1, 7(a0)
+    slli t1, t1, 56
+    or t0, t0, t1
+    sd t0, 192(sp)
+    li t0, 0
+    lbu t1, 8(a0)
+    or t0, t0, t1
+    lbu t1, 9(a0)
+    slli t1, t1, 8
+    or t0, t0, t1
+    lbu t1, 10(a0)
+    slli t1, t1, 16
+    or t0, t0, t1
+    lbu t1, 11(a0)
+    slli t1, t1, 24
+    or t0, t0, t1
+    lbu t1, 12(a0)
+    slli t1, t1, 32
+    or t0, t0, t1
+    lbu t1, 13(a0)
+    slli t1, t1, 40
+    or t0, t0, t1
+    lbu t1, 14(a0)
+    slli t1, t1, 48
+    or t0, t0, t1
+    lbu t1, 15(a0)
+    slli t1, t1, 56
+    or t0, t0, t1
+    sd t0, 200(sp)
+    li t0, 0
+    lbu t1, 16(a0)
+    or t0, t0, t1
+    lbu t1, 17(a0)
+    slli t1, t1, 8
+    or t0, t0, t1
+    lbu t1, 18(a0)
+    slli t1, t1, 16
+    or t0, t0, t1
+    lbu t1, 19(a0)
+    slli t1, t1, 24
+    or t0, t0, t1
+    lbu t1, 20(a0)
+    slli t1, t1, 32
+    or t0, t0, t1
+    lbu t1, 21(a0)
+    slli t1, t1, 40
+    or t0, t0, t1
+    lbu t1, 22(a0)
+    slli t1, t1, 48
+    or t0, t0, t1
+    lbu t1, 23(a0)
+    slli t1, t1, 56
+    or t0, t0, t1
+    sd t0, 208(sp)
+    li t0, 0
+    lbu t1, 24(a0)
+    or t0, t0, t1
+    lbu t1, 25(a0)
+    slli t1, t1, 8
+    or t0, t0, t1
+    lbu t1, 26(a0)
+    slli t1, t1, 16
+    or t0, t0, t1
+    lbu t1, 27(a0)
+    slli t1, t1, 24
+    or t0, t0, t1
+    lbu t1, 28(a0)
+    slli t1, t1, 32
+    or t0, t0, t1
+    lbu t1, 29(a0)
+    slli t1, t1, 40
+    or t0, t0, t1
+    lbu t1, 30(a0)
+    slli t1, t1, 48
+    or t0, t0, t1
+    lbu t1, 31(a0)
+    slli t1, t1, 56
+    or t0, t0, t1
+    sd t0, 216(sp)
+    sd zero, 224(sp)
+    sd zero, 232(sp)
+    sd zero, 240(sp)
+    sd zero, 248(sp)
+    sd zero, 256(sp)
+    sd zero, 264(sp)
+    sd zero, 272(sp)
+    sd zero, 280(sp)
+    sd zero, 288(sp)
+    sd zero, 296(sp)
+    sd zero, 304(sp)
+    sd zero, 312(sp)
+    ld t0, 0(sp)
+    sd t0, 64(sp)
+    ld t0, 8(sp)
+    sd t0, 72(sp)
+    ld t0, 16(sp)
+    sd t0, 80(sp)
+    ld t0, 24(sp)
+    sd t0, 88(sp)
+    ld t0, 32(sp)
+    sd t0, 96(sp)
+    ld t0, 40(sp)
+    sd t0, 104(sp)
+    ld t0, 48(sp)
+    sd t0, 112(sp)
+    ld t0, 56(sp)
+    sd t0, 120(sp)
+    li t0, 0x6a09e667f3bcc908
+    sd t0, 128(sp)
+    li t0, 0xbb67ae8584caa73b
+    sd t0, 136(sp)
+    li t0, 0x3c6ef372fe94f82b
+    sd t0, 144(sp)
+    li t0, 0xa54ff53a5f1d36f1
+    sd t0, 152(sp)
+    li t0, 0x510e527fade682d1
+    sd t0, 160(sp)
+    li t0, 0x9b05688c2b3e6c1f
+    sd t0, 168(sp)
+    li t0, 0x1f83d9abfb41bd6b
+    sd t0, 176(sp)
+    li t0, 0x5be0cd19137e2179
+    sd t0, 184(sp)
+    ld t0, 160(sp)
+    xori t0, t0, 32
+    sd t0, 160(sp)
+    ld t0, 176(sp)
+    xori t0, t0, -1
+    sd t0, 176(sp)
+    ld t0, 64(sp)
+    ld t1, 96(sp)
+    add t0, t0, t1
+    ld t1, 192(sp)
+    add t0, t0, t1
+    sd t0, 64(sp)
+    ld t0, 160(sp)
+    ld t1, 64(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 160(sp)
+    ld t0, 128(sp)
+    ld t1, 160(sp)
+    add t0, t0, t1
+    sd t0, 128(sp)
+    ld t0, 96(sp)
+    ld t1, 128(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 96(sp)
+    ld t0, 64(sp)
+    ld t1, 96(sp)
+    add t0, t0, t1
+    ld t1, 200(sp)
+    add t0, t0, t1
+    sd t0, 64(sp)
+    ld t0, 160(sp)
+    ld t1, 64(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 160(sp)
+    ld t0, 128(sp)
+    ld t1, 160(sp)
+    add t0, t0, t1
+    sd t0, 128(sp)
+    ld t0, 96(sp)
+    ld t1, 128(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 96(sp)
+    ld t0, 72(sp)
+    ld t1, 104(sp)
+    add t0, t0, t1
+    ld t1, 208(sp)
+    add t0, t0, t1
+    sd t0, 72(sp)
+    ld t0, 168(sp)
+    ld t1, 72(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 168(sp)
+    ld t0, 136(sp)
+    ld t1, 168(sp)
+    add t0, t0, t1
+    sd t0, 136(sp)
+    ld t0, 104(sp)
+    ld t1, 136(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 104(sp)
+    ld t0, 72(sp)
+    ld t1, 104(sp)
+    add t0, t0, t1
+    ld t1, 216(sp)
+    add t0, t0, t1
+    sd t0, 72(sp)
+    ld t0, 168(sp)
+    ld t1, 72(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 168(sp)
+    ld t0, 136(sp)
+    ld t1, 168(sp)
+    add t0, t0, t1
+    sd t0, 136(sp)
+    ld t0, 104(sp)
+    ld t1, 136(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 104(sp)
+    ld t0, 80(sp)
+    ld t1, 112(sp)
+    add t0, t0, t1
+    ld t1, 224(sp)
+    add t0, t0, t1
+    sd t0, 80(sp)
+    ld t0, 176(sp)
+    ld t1, 80(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 176(sp)
+    ld t0, 144(sp)
+    ld t1, 176(sp)
+    add t0, t0, t1
+    sd t0, 144(sp)
+    ld t0, 112(sp)
+    ld t1, 144(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 112(sp)
+    ld t0, 80(sp)
+    ld t1, 112(sp)
+    add t0, t0, t1
+    ld t1, 232(sp)
+    add t0, t0, t1
+    sd t0, 80(sp)
+    ld t0, 176(sp)
+    ld t1, 80(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 176(sp)
+    ld t0, 144(sp)
+    ld t1, 176(sp)
+    add t0, t0, t1
+    sd t0, 144(sp)
+    ld t0, 112(sp)
+    ld t1, 144(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 112(sp)
+    ld t0, 88(sp)
+    ld t1, 120(sp)
+    add t0, t0, t1
+    ld t1, 240(sp)
+    add t0, t0, t1
+    sd t0, 88(sp)
+    ld t0, 184(sp)
+    ld t1, 88(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 184(sp)
+    ld t0, 152(sp)
+    ld t1, 184(sp)
+    add t0, t0, t1
+    sd t0, 152(sp)
+    ld t0, 120(sp)
+    ld t1, 152(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 120(sp)
+    ld t0, 88(sp)
+    ld t1, 120(sp)
+    add t0, t0, t1
+    ld t1, 248(sp)
+    add t0, t0, t1
+    sd t0, 88(sp)
+    ld t0, 184(sp)
+    ld t1, 88(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 184(sp)
+    ld t0, 152(sp)
+    ld t1, 184(sp)
+    add t0, t0, t1
+    sd t0, 152(sp)
+    ld t0, 120(sp)
+    ld t1, 152(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 120(sp)
+    ld t0, 64(sp)
+    ld t1, 104(sp)
+    add t0, t0, t1
+    ld t1, 256(sp)
+    add t0, t0, t1
+    sd t0, 64(sp)
+    ld t0, 184(sp)
+    ld t1, 64(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 184(sp)
+    ld t0, 144(sp)
+    ld t1, 184(sp)
+    add t0, t0, t1
+    sd t0, 144(sp)
+    ld t0, 104(sp)
+    ld t1, 144(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 104(sp)
+    ld t0, 64(sp)
+    ld t1, 104(sp)
+    add t0, t0, t1
+    ld t1, 264(sp)
+    add t0, t0, t1
+    sd t0, 64(sp)
+    ld t0, 184(sp)
+    ld t1, 64(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 184(sp)
+    ld t0, 144(sp)
+    ld t1, 184(sp)
+    add t0, t0, t1
+    sd t0, 144(sp)
+    ld t0, 104(sp)
+    ld t1, 144(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 104(sp)
+    ld t0, 72(sp)
+    ld t1, 112(sp)
+    add t0, t0, t1
+    ld t1, 272(sp)
+    add t0, t0, t1
+    sd t0, 72(sp)
+    ld t0, 160(sp)
+    ld t1, 72(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 160(sp)
+    ld t0, 152(sp)
+    ld t1, 160(sp)
+    add t0, t0, t1
+    sd t0, 152(sp)
+    ld t0, 112(sp)
+    ld t1, 152(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 112(sp)
+    ld t0, 72(sp)
+    ld t1, 112(sp)
+    add t0, t0, t1
+    ld t1, 280(sp)
+    add t0, t0, t1
+    sd t0, 72(sp)
+    ld t0, 160(sp)
+    ld t1, 72(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 160(sp)
+    ld t0, 152(sp)
+    ld t1, 160(sp)
+    add t0, t0, t1
+    sd t0, 152(sp)
+    ld t0, 112(sp)
+    ld t1, 152(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 112(sp)
+    ld t0, 80(sp)
+    ld t1, 120(sp)
+    add t0, t0, t1
+    ld t1, 288(sp)
+    add t0, t0, t1
+    sd t0, 80(sp)
+    ld t0, 168(sp)
+    ld t1, 80(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 168(sp)
+    ld t0, 128(sp)
+    ld t1, 168(sp)
+    add t0, t0, t1
+    sd t0, 128(sp)
+    ld t0, 120(sp)
+    ld t1, 128(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 120(sp)
+    ld t0, 80(sp)
+    ld t1, 120(sp)
+    add t0, t0, t1
+    ld t1, 296(sp)
+    add t0, t0, t1
+    sd t0, 80(sp)
+    ld t0, 168(sp)
+    ld t1, 80(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 168(sp)
+    ld t0, 128(sp)
+    ld t1, 168(sp)
+    add t0, t0, t1
+    sd t0, 128(sp)
+    ld t0, 120(sp)
+    ld t1, 128(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 120(sp)
+    ld t0, 88(sp)
+    ld t1, 96(sp)
+    add t0, t0, t1
+    ld t1, 304(sp)
+    add t0, t0, t1
+    sd t0, 88(sp)
+    ld t0, 176(sp)
+    ld t1, 88(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 176(sp)
+    ld t0, 136(sp)
+    ld t1, 176(sp)
+    add t0, t0, t1
+    sd t0, 136(sp)
+    ld t0, 96(sp)
+    ld t1, 136(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 96(sp)
+    ld t0, 88(sp)
+    ld t1, 96(sp)
+    add t0, t0, t1
+    ld t1, 312(sp)
+    add t0, t0, t1
+    sd t0, 88(sp)
+    ld t0, 176(sp)
+    ld t1, 88(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 176(sp)
+    ld t0, 136(sp)
+    ld t1, 176(sp)
+    add t0, t0, t1
+    sd t0, 136(sp)
+    ld t0, 96(sp)
+    ld t1, 136(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 96(sp)
+    ld t0, 64(sp)
+    ld t1, 96(sp)
+    add t0, t0, t1
+    ld t1, 304(sp)
+    add t0, t0, t1
+    sd t0, 64(sp)
+    ld t0, 160(sp)
+    ld t1, 64(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 160(sp)
+    ld t0, 128(sp)
+    ld t1, 160(sp)
+    add t0, t0, t1
+    sd t0, 128(sp)
+    ld t0, 96(sp)
+    ld t1, 128(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 96(sp)
+    ld t0, 64(sp)
+    ld t1, 96(sp)
+    add t0, t0, t1
+    ld t1, 272(sp)
+    add t0, t0, t1
+    sd t0, 64(sp)
+    ld t0, 160(sp)
+    ld t1, 64(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 160(sp)
+    ld t0, 128(sp)
+    ld t1, 160(sp)
+    add t0, t0, t1
+    sd t0, 128(sp)
+    ld t0, 96(sp)
+    ld t1, 128(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 96(sp)
+    ld t0, 72(sp)
+    ld t1, 104(sp)
+    add t0, t0, t1
+    ld t1, 224(sp)
+    add t0, t0, t1
+    sd t0, 72(sp)
+    ld t0, 168(sp)
+    ld t1, 72(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 168(sp)
+    ld t0, 136(sp)
+    ld t1, 168(sp)
+    add t0, t0, t1
+    sd t0, 136(sp)
+    ld t0, 104(sp)
+    ld t1, 136(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 104(sp)
+    ld t0, 72(sp)
+    ld t1, 104(sp)
+    add t0, t0, t1
+    ld t1, 256(sp)
+    add t0, t0, t1
+    sd t0, 72(sp)
+    ld t0, 168(sp)
+    ld t1, 72(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 168(sp)
+    ld t0, 136(sp)
+    ld t1, 168(sp)
+    add t0, t0, t1
+    sd t0, 136(sp)
+    ld t0, 104(sp)
+    ld t1, 136(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 104(sp)
+    ld t0, 80(sp)
+    ld t1, 112(sp)
+    add t0, t0, t1
+    ld t1, 264(sp)
+    add t0, t0, t1
+    sd t0, 80(sp)
+    ld t0, 176(sp)
+    ld t1, 80(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 176(sp)
+    ld t0, 144(sp)
+    ld t1, 176(sp)
+    add t0, t0, t1
+    sd t0, 144(sp)
+    ld t0, 112(sp)
+    ld t1, 144(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 112(sp)
+    ld t0, 80(sp)
+    ld t1, 112(sp)
+    add t0, t0, t1
+    ld t1, 312(sp)
+    add t0, t0, t1
+    sd t0, 80(sp)
+    ld t0, 176(sp)
+    ld t1, 80(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 176(sp)
+    ld t0, 144(sp)
+    ld t1, 176(sp)
+    add t0, t0, t1
+    sd t0, 144(sp)
+    ld t0, 112(sp)
+    ld t1, 144(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 112(sp)
+    ld t0, 88(sp)
+    ld t1, 120(sp)
+    add t0, t0, t1
+    ld t1, 296(sp)
+    add t0, t0, t1
+    sd t0, 88(sp)
+    ld t0, 184(sp)
+    ld t1, 88(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 184(sp)
+    ld t0, 152(sp)
+    ld t1, 184(sp)
+    add t0, t0, t1
+    sd t0, 152(sp)
+    ld t0, 120(sp)
+    ld t1, 152(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 120(sp)
+    ld t0, 88(sp)
+    ld t1, 120(sp)
+    add t0, t0, t1
+    ld t1, 240(sp)
+    add t0, t0, t1
+    sd t0, 88(sp)
+    ld t0, 184(sp)
+    ld t1, 88(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 184(sp)
+    ld t0, 152(sp)
+    ld t1, 184(sp)
+    add t0, t0, t1
+    sd t0, 152(sp)
+    ld t0, 120(sp)
+    ld t1, 152(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 120(sp)
+    ld t0, 64(sp)
+    ld t1, 104(sp)
+    add t0, t0, t1
+    ld t1, 200(sp)
+    add t0, t0, t1
+    sd t0, 64(sp)
+    ld t0, 184(sp)
+    ld t1, 64(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 184(sp)
+    ld t0, 144(sp)
+    ld t1, 184(sp)
+    add t0, t0, t1
+    sd t0, 144(sp)
+    ld t0, 104(sp)
+    ld t1, 144(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 104(sp)
+    ld t0, 64(sp)
+    ld t1, 104(sp)
+    add t0, t0, t1
+    ld t1, 288(sp)
+    add t0, t0, t1
+    sd t0, 64(sp)
+    ld t0, 184(sp)
+    ld t1, 64(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 184(sp)
+    ld t0, 144(sp)
+    ld t1, 184(sp)
+    add t0, t0, t1
+    sd t0, 144(sp)
+    ld t0, 104(sp)
+    ld t1, 144(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 104(sp)
+    ld t0, 72(sp)
+    ld t1, 112(sp)
+    add t0, t0, t1
+    ld t1, 192(sp)
+    add t0, t0, t1
+    sd t0, 72(sp)
+    ld t0, 160(sp)
+    ld t1, 72(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 160(sp)
+    ld t0, 152(sp)
+    ld t1, 160(sp)
+    add t0, t0, t1
+    sd t0, 152(sp)
+    ld t0, 112(sp)
+    ld t1, 152(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 112(sp)
+    ld t0, 72(sp)
+    ld t1, 112(sp)
+    add t0, t0, t1
+    ld t1, 208(sp)
+    add t0, t0, t1
+    sd t0, 72(sp)
+    ld t0, 160(sp)
+    ld t1, 72(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 160(sp)
+    ld t0, 152(sp)
+    ld t1, 160(sp)
+    add t0, t0, t1
+    sd t0, 152(sp)
+    ld t0, 112(sp)
+    ld t1, 152(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 112(sp)
+    ld t0, 80(sp)
+    ld t1, 120(sp)
+    add t0, t0, t1
+    ld t1, 280(sp)
+    add t0, t0, t1
+    sd t0, 80(sp)
+    ld t0, 168(sp)
+    ld t1, 80(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 168(sp)
+    ld t0, 128(sp)
+    ld t1, 168(sp)
+    add t0, t0, t1
+    sd t0, 128(sp)
+    ld t0, 120(sp)
+    ld t1, 128(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 120(sp)
+    ld t0, 80(sp)
+    ld t1, 120(sp)
+    add t0, t0, t1
+    ld t1, 248(sp)
+    add t0, t0, t1
+    sd t0, 80(sp)
+    ld t0, 168(sp)
+    ld t1, 80(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 168(sp)
+    ld t0, 128(sp)
+    ld t1, 168(sp)
+    add t0, t0, t1
+    sd t0, 128(sp)
+    ld t0, 120(sp)
+    ld t1, 128(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 120(sp)
+    ld t0, 88(sp)
+    ld t1, 96(sp)
+    add t0, t0, t1
+    ld t1, 232(sp)
+    add t0, t0, t1
+    sd t0, 88(sp)
+    ld t0, 176(sp)
+    ld t1, 88(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 176(sp)
+    ld t0, 136(sp)
+    ld t1, 176(sp)
+    add t0, t0, t1
+    sd t0, 136(sp)
+    ld t0, 96(sp)
+    ld t1, 136(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 96(sp)
+    ld t0, 88(sp)
+    ld t1, 96(sp)
+    add t0, t0, t1
+    ld t1, 216(sp)
+    add t0, t0, t1
+    sd t0, 88(sp)
+    ld t0, 176(sp)
+    ld t1, 88(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 176(sp)
+    ld t0, 136(sp)
+    ld t1, 176(sp)
+    add t0, t0, t1
+    sd t0, 136(sp)
+    ld t0, 96(sp)
+    ld t1, 136(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 96(sp)
+    ld t0, 64(sp)
+    ld t1, 96(sp)
+    add t0, t0, t1
+    ld t1, 280(sp)
+    add t0, t0, t1
+    sd t0, 64(sp)
+    ld t0, 160(sp)
+    ld t1, 64(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 160(sp)
+    ld t0, 128(sp)
+    ld t1, 160(sp)
+    add t0, t0, t1
+    sd t0, 128(sp)
+    ld t0, 96(sp)
+    ld t1, 128(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 96(sp)
+    ld t0, 64(sp)
+    ld t1, 96(sp)
+    add t0, t0, t1
+    ld t1, 256(sp)
+    add t0, t0, t1
+    sd t0, 64(sp)
+    ld t0, 160(sp)
+    ld t1, 64(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 160(sp)
+    ld t0, 128(sp)
+    ld t1, 160(sp)
+    add t0, t0, t1
+    sd t0, 128(sp)
+    ld t0, 96(sp)
+    ld t1, 128(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 96(sp)
+    ld t0, 72(sp)
+    ld t1, 104(sp)
+    add t0, t0, t1
+    ld t1, 288(sp)
+    add t0, t0, t1
+    sd t0, 72(sp)
+    ld t0, 168(sp)
+    ld t1, 72(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 168(sp)
+    ld t0, 136(sp)
+    ld t1, 168(sp)
+    add t0, t0, t1
+    sd t0, 136(sp)
+    ld t0, 104(sp)
+    ld t1, 136(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 104(sp)
+    ld t0, 72(sp)
+    ld t1, 104(sp)
+    add t0, t0, t1
+    ld t1, 192(sp)
+    add t0, t0, t1
+    sd t0, 72(sp)
+    ld t0, 168(sp)
+    ld t1, 72(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 168(sp)
+    ld t0, 136(sp)
+    ld t1, 168(sp)
+    add t0, t0, t1
+    sd t0, 136(sp)
+    ld t0, 104(sp)
+    ld t1, 136(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 104(sp)
+    ld t0, 80(sp)
+    ld t1, 112(sp)
+    add t0, t0, t1
+    ld t1, 232(sp)
+    add t0, t0, t1
+    sd t0, 80(sp)
+    ld t0, 176(sp)
+    ld t1, 80(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 176(sp)
+    ld t0, 144(sp)
+    ld t1, 176(sp)
+    add t0, t0, t1
+    sd t0, 144(sp)
+    ld t0, 112(sp)
+    ld t1, 144(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 112(sp)
+    ld t0, 80(sp)
+    ld t1, 112(sp)
+    add t0, t0, t1
+    ld t1, 208(sp)
+    add t0, t0, t1
+    sd t0, 80(sp)
+    ld t0, 176(sp)
+    ld t1, 80(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 176(sp)
+    ld t0, 144(sp)
+    ld t1, 176(sp)
+    add t0, t0, t1
+    sd t0, 144(sp)
+    ld t0, 112(sp)
+    ld t1, 144(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 112(sp)
+    ld t0, 88(sp)
+    ld t1, 120(sp)
+    add t0, t0, t1
+    ld t1, 312(sp)
+    add t0, t0, t1
+    sd t0, 88(sp)
+    ld t0, 184(sp)
+    ld t1, 88(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 184(sp)
+    ld t0, 152(sp)
+    ld t1, 184(sp)
+    add t0, t0, t1
+    sd t0, 152(sp)
+    ld t0, 120(sp)
+    ld t1, 152(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 120(sp)
+    ld t0, 88(sp)
+    ld t1, 120(sp)
+    add t0, t0, t1
+    ld t1, 296(sp)
+    add t0, t0, t1
+    sd t0, 88(sp)
+    ld t0, 184(sp)
+    ld t1, 88(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 184(sp)
+    ld t0, 152(sp)
+    ld t1, 184(sp)
+    add t0, t0, t1
+    sd t0, 152(sp)
+    ld t0, 120(sp)
+    ld t1, 152(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 120(sp)
+    ld t0, 64(sp)
+    ld t1, 104(sp)
+    add t0, t0, t1
+    ld t1, 272(sp)
+    add t0, t0, t1
+    sd t0, 64(sp)
+    ld t0, 184(sp)
+    ld t1, 64(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 184(sp)
+    ld t0, 144(sp)
+    ld t1, 184(sp)
+    add t0, t0, t1
+    sd t0, 144(sp)
+    ld t0, 104(sp)
+    ld t1, 144(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 104(sp)
+    ld t0, 64(sp)
+    ld t1, 104(sp)
+    add t0, t0, t1
+    ld t1, 304(sp)
+    add t0, t0, t1
+    sd t0, 64(sp)
+    ld t0, 184(sp)
+    ld t1, 64(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 184(sp)
+    ld t0, 144(sp)
+    ld t1, 184(sp)
+    add t0, t0, t1
+    sd t0, 144(sp)
+    ld t0, 104(sp)
+    ld t1, 144(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 104(sp)
+    ld t0, 72(sp)
+    ld t1, 112(sp)
+    add t0, t0, t1
+    ld t1, 216(sp)
+    add t0, t0, t1
+    sd t0, 72(sp)
+    ld t0, 160(sp)
+    ld t1, 72(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 160(sp)
+    ld t0, 152(sp)
+    ld t1, 160(sp)
+    add t0, t0, t1
+    sd t0, 152(sp)
+    ld t0, 112(sp)
+    ld t1, 152(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 112(sp)
+    ld t0, 72(sp)
+    ld t1, 112(sp)
+    add t0, t0, t1
+    ld t1, 240(sp)
+    add t0, t0, t1
+    sd t0, 72(sp)
+    ld t0, 160(sp)
+    ld t1, 72(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 160(sp)
+    ld t0, 152(sp)
+    ld t1, 160(sp)
+    add t0, t0, t1
+    sd t0, 152(sp)
+    ld t0, 112(sp)
+    ld t1, 152(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 112(sp)
+    ld t0, 80(sp)
+    ld t1, 120(sp)
+    add t0, t0, t1
+    ld t1, 248(sp)
+    add t0, t0, t1
+    sd t0, 80(sp)
+    ld t0, 168(sp)
+    ld t1, 80(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 168(sp)
+    ld t0, 128(sp)
+    ld t1, 168(sp)
+    add t0, t0, t1
+    sd t0, 128(sp)
+    ld t0, 120(sp)
+    ld t1, 128(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 120(sp)
+    ld t0, 80(sp)
+    ld t1, 120(sp)
+    add t0, t0, t1
+    ld t1, 200(sp)
+    add t0, t0, t1
+    sd t0, 80(sp)
+    ld t0, 168(sp)
+    ld t1, 80(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 168(sp)
+    ld t0, 128(sp)
+    ld t1, 168(sp)
+    add t0, t0, t1
+    sd t0, 128(sp)
+    ld t0, 120(sp)
+    ld t1, 128(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 120(sp)
+    ld t0, 88(sp)
+    ld t1, 96(sp)
+    add t0, t0, t1
+    ld t1, 264(sp)
+    add t0, t0, t1
+    sd t0, 88(sp)
+    ld t0, 176(sp)
+    ld t1, 88(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 176(sp)
+    ld t0, 136(sp)
+    ld t1, 176(sp)
+    add t0, t0, t1
+    sd t0, 136(sp)
+    ld t0, 96(sp)
+    ld t1, 136(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 96(sp)
+    ld t0, 88(sp)
+    ld t1, 96(sp)
+    add t0, t0, t1
+    ld t1, 224(sp)
+    add t0, t0, t1
+    sd t0, 88(sp)
+    ld t0, 176(sp)
+    ld t1, 88(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 176(sp)
+    ld t0, 136(sp)
+    ld t1, 176(sp)
+    add t0, t0, t1
+    sd t0, 136(sp)
+    ld t0, 96(sp)
+    ld t1, 136(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 96(sp)
+    ld t0, 64(sp)
+    ld t1, 96(sp)
+    add t0, t0, t1
+    ld t1, 248(sp)
+    add t0, t0, t1
+    sd t0, 64(sp)
+    ld t0, 160(sp)
+    ld t1, 64(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 160(sp)
+    ld t0, 128(sp)
+    ld t1, 160(sp)
+    add t0, t0, t1
+    sd t0, 128(sp)
+    ld t0, 96(sp)
+    ld t1, 128(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 96(sp)
+    ld t0, 64(sp)
+    ld t1, 96(sp)
+    add t0, t0, t1
+    ld t1, 264(sp)
+    add t0, t0, t1
+    sd t0, 64(sp)
+    ld t0, 160(sp)
+    ld t1, 64(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 160(sp)
+    ld t0, 128(sp)
+    ld t1, 160(sp)
+    add t0, t0, t1
+    sd t0, 128(sp)
+    ld t0, 96(sp)
+    ld t1, 128(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 96(sp)
+    ld t0, 72(sp)
+    ld t1, 104(sp)
+    add t0, t0, t1
+    ld t1, 216(sp)
+    add t0, t0, t1
+    sd t0, 72(sp)
+    ld t0, 168(sp)
+    ld t1, 72(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 168(sp)
+    ld t0, 136(sp)
+    ld t1, 168(sp)
+    add t0, t0, t1
+    sd t0, 136(sp)
+    ld t0, 104(sp)
+    ld t1, 136(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 104(sp)
+    ld t0, 72(sp)
+    ld t1, 104(sp)
+    add t0, t0, t1
+    ld t1, 200(sp)
+    add t0, t0, t1
+    sd t0, 72(sp)
+    ld t0, 168(sp)
+    ld t1, 72(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 168(sp)
+    ld t0, 136(sp)
+    ld t1, 168(sp)
+    add t0, t0, t1
+    sd t0, 136(sp)
+    ld t0, 104(sp)
+    ld t1, 136(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 104(sp)
+    ld t0, 80(sp)
+    ld t1, 112(sp)
+    add t0, t0, t1
+    ld t1, 296(sp)
+    add t0, t0, t1
+    sd t0, 80(sp)
+    ld t0, 176(sp)
+    ld t1, 80(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 176(sp)
+    ld t0, 144(sp)
+    ld t1, 176(sp)
+    add t0, t0, t1
+    sd t0, 144(sp)
+    ld t0, 112(sp)
+    ld t1, 144(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 112(sp)
+    ld t0, 80(sp)
+    ld t1, 112(sp)
+    add t0, t0, t1
+    ld t1, 288(sp)
+    add t0, t0, t1
+    sd t0, 80(sp)
+    ld t0, 176(sp)
+    ld t1, 80(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 176(sp)
+    ld t0, 144(sp)
+    ld t1, 176(sp)
+    add t0, t0, t1
+    sd t0, 144(sp)
+    ld t0, 112(sp)
+    ld t1, 144(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 112(sp)
+    ld t0, 88(sp)
+    ld t1, 120(sp)
+    add t0, t0, t1
+    ld t1, 280(sp)
+    add t0, t0, t1
+    sd t0, 88(sp)
+    ld t0, 184(sp)
+    ld t1, 88(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 184(sp)
+    ld t0, 152(sp)
+    ld t1, 184(sp)
+    add t0, t0, t1
+    sd t0, 152(sp)
+    ld t0, 120(sp)
+    ld t1, 152(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 120(sp)
+    ld t0, 88(sp)
+    ld t1, 120(sp)
+    add t0, t0, t1
+    ld t1, 304(sp)
+    add t0, t0, t1
+    sd t0, 88(sp)
+    ld t0, 184(sp)
+    ld t1, 88(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 184(sp)
+    ld t0, 152(sp)
+    ld t1, 184(sp)
+    add t0, t0, t1
+    sd t0, 152(sp)
+    ld t0, 120(sp)
+    ld t1, 152(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 120(sp)
+    ld t0, 64(sp)
+    ld t1, 104(sp)
+    add t0, t0, t1
+    ld t1, 208(sp)
+    add t0, t0, t1
+    sd t0, 64(sp)
+    ld t0, 184(sp)
+    ld t1, 64(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 184(sp)
+    ld t0, 144(sp)
+    ld t1, 184(sp)
+    add t0, t0, t1
+    sd t0, 144(sp)
+    ld t0, 104(sp)
+    ld t1, 144(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 104(sp)
+    ld t0, 64(sp)
+    ld t1, 104(sp)
+    add t0, t0, t1
+    ld t1, 240(sp)
+    add t0, t0, t1
+    sd t0, 64(sp)
+    ld t0, 184(sp)
+    ld t1, 64(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 184(sp)
+    ld t0, 144(sp)
+    ld t1, 184(sp)
+    add t0, t0, t1
+    sd t0, 144(sp)
+    ld t0, 104(sp)
+    ld t1, 144(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 104(sp)
+    ld t0, 72(sp)
+    ld t1, 112(sp)
+    add t0, t0, t1
+    ld t1, 232(sp)
+    add t0, t0, t1
+    sd t0, 72(sp)
+    ld t0, 160(sp)
+    ld t1, 72(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 160(sp)
+    ld t0, 152(sp)
+    ld t1, 160(sp)
+    add t0, t0, t1
+    sd t0, 152(sp)
+    ld t0, 112(sp)
+    ld t1, 152(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 112(sp)
+    ld t0, 72(sp)
+    ld t1, 112(sp)
+    add t0, t0, t1
+    ld t1, 272(sp)
+    add t0, t0, t1
+    sd t0, 72(sp)
+    ld t0, 160(sp)
+    ld t1, 72(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 160(sp)
+    ld t0, 152(sp)
+    ld t1, 160(sp)
+    add t0, t0, t1
+    sd t0, 152(sp)
+    ld t0, 112(sp)
+    ld t1, 152(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 112(sp)
+    ld t0, 80(sp)
+    ld t1, 120(sp)
+    add t0, t0, t1
+    ld t1, 224(sp)
+    add t0, t0, t1
+    sd t0, 80(sp)
+    ld t0, 168(sp)
+    ld t1, 80(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 168(sp)
+    ld t0, 128(sp)
+    ld t1, 168(sp)
+    add t0, t0, t1
+    sd t0, 128(sp)
+    ld t0, 120(sp)
+    ld t1, 128(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 120(sp)
+    ld t0, 80(sp)
+    ld t1, 120(sp)
+    add t0, t0, t1
+    ld t1, 192(sp)
+    add t0, t0, t1
+    sd t0, 80(sp)
+    ld t0, 168(sp)
+    ld t1, 80(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 168(sp)
+    ld t0, 128(sp)
+    ld t1, 168(sp)
+    add t0, t0, t1
+    sd t0, 128(sp)
+    ld t0, 120(sp)
+    ld t1, 128(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 120(sp)
+    ld t0, 88(sp)
+    ld t1, 96(sp)
+    add t0, t0, t1
+    ld t1, 312(sp)
+    add t0, t0, t1
+    sd t0, 88(sp)
+    ld t0, 176(sp)
+    ld t1, 88(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 176(sp)
+    ld t0, 136(sp)
+    ld t1, 176(sp)
+    add t0, t0, t1
+    sd t0, 136(sp)
+    ld t0, 96(sp)
+    ld t1, 136(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 96(sp)
+    ld t0, 88(sp)
+    ld t1, 96(sp)
+    add t0, t0, t1
+    ld t1, 256(sp)
+    add t0, t0, t1
+    sd t0, 88(sp)
+    ld t0, 176(sp)
+    ld t1, 88(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 176(sp)
+    ld t0, 136(sp)
+    ld t1, 176(sp)
+    add t0, t0, t1
+    sd t0, 136(sp)
+    ld t0, 96(sp)
+    ld t1, 136(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 96(sp)
+    ld t0, 64(sp)
+    ld t1, 96(sp)
+    add t0, t0, t1
+    ld t1, 264(sp)
+    add t0, t0, t1
+    sd t0, 64(sp)
+    ld t0, 160(sp)
+    ld t1, 64(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 160(sp)
+    ld t0, 128(sp)
+    ld t1, 160(sp)
+    add t0, t0, t1
+    sd t0, 128(sp)
+    ld t0, 96(sp)
+    ld t1, 128(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 96(sp)
+    ld t0, 64(sp)
+    ld t1, 96(sp)
+    add t0, t0, t1
+    ld t1, 192(sp)
+    add t0, t0, t1
+    sd t0, 64(sp)
+    ld t0, 160(sp)
+    ld t1, 64(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 160(sp)
+    ld t0, 128(sp)
+    ld t1, 160(sp)
+    add t0, t0, t1
+    sd t0, 128(sp)
+    ld t0, 96(sp)
+    ld t1, 128(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 96(sp)
+    ld t0, 72(sp)
+    ld t1, 104(sp)
+    add t0, t0, t1
+    ld t1, 232(sp)
+    add t0, t0, t1
+    sd t0, 72(sp)
+    ld t0, 168(sp)
+    ld t1, 72(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 168(sp)
+    ld t0, 136(sp)
+    ld t1, 168(sp)
+    add t0, t0, t1
+    sd t0, 136(sp)
+    ld t0, 104(sp)
+    ld t1, 136(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 104(sp)
+    ld t0, 72(sp)
+    ld t1, 104(sp)
+    add t0, t0, t1
+    ld t1, 248(sp)
+    add t0, t0, t1
+    sd t0, 72(sp)
+    ld t0, 168(sp)
+    ld t1, 72(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 168(sp)
+    ld t0, 136(sp)
+    ld t1, 168(sp)
+    add t0, t0, t1
+    sd t0, 136(sp)
+    ld t0, 104(sp)
+    ld t1, 136(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 104(sp)
+    ld t0, 80(sp)
+    ld t1, 112(sp)
+    add t0, t0, t1
+    ld t1, 208(sp)
+    add t0, t0, t1
+    sd t0, 80(sp)
+    ld t0, 176(sp)
+    ld t1, 80(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 176(sp)
+    ld t0, 144(sp)
+    ld t1, 176(sp)
+    add t0, t0, t1
+    sd t0, 144(sp)
+    ld t0, 112(sp)
+    ld t1, 144(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 112(sp)
+    ld t0, 80(sp)
+    ld t1, 112(sp)
+    add t0, t0, t1
+    ld t1, 224(sp)
+    add t0, t0, t1
+    sd t0, 80(sp)
+    ld t0, 176(sp)
+    ld t1, 80(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 176(sp)
+    ld t0, 144(sp)
+    ld t1, 176(sp)
+    add t0, t0, t1
+    sd t0, 144(sp)
+    ld t0, 112(sp)
+    ld t1, 144(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 112(sp)
+    ld t0, 88(sp)
+    ld t1, 120(sp)
+    add t0, t0, t1
+    ld t1, 272(sp)
+    add t0, t0, t1
+    sd t0, 88(sp)
+    ld t0, 184(sp)
+    ld t1, 88(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 184(sp)
+    ld t0, 152(sp)
+    ld t1, 184(sp)
+    add t0, t0, t1
+    sd t0, 152(sp)
+    ld t0, 120(sp)
+    ld t1, 152(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 120(sp)
+    ld t0, 88(sp)
+    ld t1, 120(sp)
+    add t0, t0, t1
+    ld t1, 312(sp)
+    add t0, t0, t1
+    sd t0, 88(sp)
+    ld t0, 184(sp)
+    ld t1, 88(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 184(sp)
+    ld t0, 152(sp)
+    ld t1, 184(sp)
+    add t0, t0, t1
+    sd t0, 152(sp)
+    ld t0, 120(sp)
+    ld t1, 152(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 120(sp)
+    ld t0, 64(sp)
+    ld t1, 104(sp)
+    add t0, t0, t1
+    ld t1, 304(sp)
+    add t0, t0, t1
+    sd t0, 64(sp)
+    ld t0, 184(sp)
+    ld t1, 64(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 184(sp)
+    ld t0, 144(sp)
+    ld t1, 184(sp)
+    add t0, t0, t1
+    sd t0, 144(sp)
+    ld t0, 104(sp)
+    ld t1, 144(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 104(sp)
+    ld t0, 64(sp)
+    ld t1, 104(sp)
+    add t0, t0, t1
+    ld t1, 200(sp)
+    add t0, t0, t1
+    sd t0, 64(sp)
+    ld t0, 184(sp)
+    ld t1, 64(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 184(sp)
+    ld t0, 144(sp)
+    ld t1, 184(sp)
+    add t0, t0, t1
+    sd t0, 144(sp)
+    ld t0, 104(sp)
+    ld t1, 144(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 104(sp)
+    ld t0, 72(sp)
+    ld t1, 112(sp)
+    add t0, t0, t1
+    ld t1, 280(sp)
+    add t0, t0, t1
+    sd t0, 72(sp)
+    ld t0, 160(sp)
+    ld t1, 72(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 160(sp)
+    ld t0, 152(sp)
+    ld t1, 160(sp)
+    add t0, t0, t1
+    sd t0, 152(sp)
+    ld t0, 112(sp)
+    ld t1, 152(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 112(sp)
+    ld t0, 72(sp)
+    ld t1, 112(sp)
+    add t0, t0, t1
+    ld t1, 288(sp)
+    add t0, t0, t1
+    sd t0, 72(sp)
+    ld t0, 160(sp)
+    ld t1, 72(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 160(sp)
+    ld t0, 152(sp)
+    ld t1, 160(sp)
+    add t0, t0, t1
+    sd t0, 152(sp)
+    ld t0, 112(sp)
+    ld t1, 152(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 112(sp)
+    ld t0, 80(sp)
+    ld t1, 120(sp)
+    add t0, t0, t1
+    ld t1, 240(sp)
+    add t0, t0, t1
+    sd t0, 80(sp)
+    ld t0, 168(sp)
+    ld t1, 80(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 168(sp)
+    ld t0, 128(sp)
+    ld t1, 168(sp)
+    add t0, t0, t1
+    sd t0, 128(sp)
+    ld t0, 120(sp)
+    ld t1, 128(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 120(sp)
+    ld t0, 80(sp)
+    ld t1, 120(sp)
+    add t0, t0, t1
+    ld t1, 256(sp)
+    add t0, t0, t1
+    sd t0, 80(sp)
+    ld t0, 168(sp)
+    ld t1, 80(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 168(sp)
+    ld t0, 128(sp)
+    ld t1, 168(sp)
+    add t0, t0, t1
+    sd t0, 128(sp)
+    ld t0, 120(sp)
+    ld t1, 128(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 120(sp)
+    ld t0, 88(sp)
+    ld t1, 96(sp)
+    add t0, t0, t1
+    ld t1, 216(sp)
+    add t0, t0, t1
+    sd t0, 88(sp)
+    ld t0, 176(sp)
+    ld t1, 88(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 176(sp)
+    ld t0, 136(sp)
+    ld t1, 176(sp)
+    add t0, t0, t1
+    sd t0, 136(sp)
+    ld t0, 96(sp)
+    ld t1, 136(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 96(sp)
+    ld t0, 88(sp)
+    ld t1, 96(sp)
+    add t0, t0, t1
+    ld t1, 296(sp)
+    add t0, t0, t1
+    sd t0, 88(sp)
+    ld t0, 176(sp)
+    ld t1, 88(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 176(sp)
+    ld t0, 136(sp)
+    ld t1, 176(sp)
+    add t0, t0, t1
+    sd t0, 136(sp)
+    ld t0, 96(sp)
+    ld t1, 136(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 96(sp)
+    ld t0, 64(sp)
+    ld t1, 96(sp)
+    add t0, t0, t1
+    ld t1, 208(sp)
+    add t0, t0, t1
+    sd t0, 64(sp)
+    ld t0, 160(sp)
+    ld t1, 64(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 160(sp)
+    ld t0, 128(sp)
+    ld t1, 160(sp)
+    add t0, t0, t1
+    sd t0, 128(sp)
+    ld t0, 96(sp)
+    ld t1, 128(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 96(sp)
+    ld t0, 64(sp)
+    ld t1, 96(sp)
+    add t0, t0, t1
+    ld t1, 288(sp)
+    add t0, t0, t1
+    sd t0, 64(sp)
+    ld t0, 160(sp)
+    ld t1, 64(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 160(sp)
+    ld t0, 128(sp)
+    ld t1, 160(sp)
+    add t0, t0, t1
+    sd t0, 128(sp)
+    ld t0, 96(sp)
+    ld t1, 128(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 96(sp)
+    ld t0, 72(sp)
+    ld t1, 104(sp)
+    add t0, t0, t1
+    ld t1, 240(sp)
+    add t0, t0, t1
+    sd t0, 72(sp)
+    ld t0, 168(sp)
+    ld t1, 72(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 168(sp)
+    ld t0, 136(sp)
+    ld t1, 168(sp)
+    add t0, t0, t1
+    sd t0, 136(sp)
+    ld t0, 104(sp)
+    ld t1, 136(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 104(sp)
+    ld t0, 72(sp)
+    ld t1, 104(sp)
+    add t0, t0, t1
+    ld t1, 272(sp)
+    add t0, t0, t1
+    sd t0, 72(sp)
+    ld t0, 168(sp)
+    ld t1, 72(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 168(sp)
+    ld t0, 136(sp)
+    ld t1, 168(sp)
+    add t0, t0, t1
+    sd t0, 136(sp)
+    ld t0, 104(sp)
+    ld t1, 136(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 104(sp)
+    ld t0, 80(sp)
+    ld t1, 112(sp)
+    add t0, t0, t1
+    ld t1, 192(sp)
+    add t0, t0, t1
+    sd t0, 80(sp)
+    ld t0, 176(sp)
+    ld t1, 80(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 176(sp)
+    ld t0, 144(sp)
+    ld t1, 176(sp)
+    add t0, t0, t1
+    sd t0, 144(sp)
+    ld t0, 112(sp)
+    ld t1, 144(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 112(sp)
+    ld t0, 80(sp)
+    ld t1, 112(sp)
+    add t0, t0, t1
+    ld t1, 280(sp)
+    add t0, t0, t1
+    sd t0, 80(sp)
+    ld t0, 176(sp)
+    ld t1, 80(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 176(sp)
+    ld t0, 144(sp)
+    ld t1, 176(sp)
+    add t0, t0, t1
+    sd t0, 144(sp)
+    ld t0, 112(sp)
+    ld t1, 144(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 112(sp)
+    ld t0, 88(sp)
+    ld t1, 120(sp)
+    add t0, t0, t1
+    ld t1, 256(sp)
+    add t0, t0, t1
+    sd t0, 88(sp)
+    ld t0, 184(sp)
+    ld t1, 88(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 184(sp)
+    ld t0, 152(sp)
+    ld t1, 184(sp)
+    add t0, t0, t1
+    sd t0, 152(sp)
+    ld t0, 120(sp)
+    ld t1, 152(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 120(sp)
+    ld t0, 88(sp)
+    ld t1, 120(sp)
+    add t0, t0, t1
+    ld t1, 216(sp)
+    add t0, t0, t1
+    sd t0, 88(sp)
+    ld t0, 184(sp)
+    ld t1, 88(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 184(sp)
+    ld t0, 152(sp)
+    ld t1, 184(sp)
+    add t0, t0, t1
+    sd t0, 152(sp)
+    ld t0, 120(sp)
+    ld t1, 152(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 120(sp)
+    ld t0, 64(sp)
+    ld t1, 104(sp)
+    add t0, t0, t1
+    ld t1, 224(sp)
+    add t0, t0, t1
+    sd t0, 64(sp)
+    ld t0, 184(sp)
+    ld t1, 64(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 184(sp)
+    ld t0, 144(sp)
+    ld t1, 184(sp)
+    add t0, t0, t1
+    sd t0, 144(sp)
+    ld t0, 104(sp)
+    ld t1, 144(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 104(sp)
+    ld t0, 64(sp)
+    ld t1, 104(sp)
+    add t0, t0, t1
+    ld t1, 296(sp)
+    add t0, t0, t1
+    sd t0, 64(sp)
+    ld t0, 184(sp)
+    ld t1, 64(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 184(sp)
+    ld t0, 144(sp)
+    ld t1, 184(sp)
+    add t0, t0, t1
+    sd t0, 144(sp)
+    ld t0, 104(sp)
+    ld t1, 144(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 104(sp)
+    ld t0, 72(sp)
+    ld t1, 112(sp)
+    add t0, t0, t1
+    ld t1, 248(sp)
+    add t0, t0, t1
+    sd t0, 72(sp)
+    ld t0, 160(sp)
+    ld t1, 72(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 160(sp)
+    ld t0, 152(sp)
+    ld t1, 160(sp)
+    add t0, t0, t1
+    sd t0, 152(sp)
+    ld t0, 112(sp)
+    ld t1, 152(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 112(sp)
+    ld t0, 72(sp)
+    ld t1, 112(sp)
+    add t0, t0, t1
+    ld t1, 232(sp)
+    add t0, t0, t1
+    sd t0, 72(sp)
+    ld t0, 160(sp)
+    ld t1, 72(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 160(sp)
+    ld t0, 152(sp)
+    ld t1, 160(sp)
+    add t0, t0, t1
+    sd t0, 152(sp)
+    ld t0, 112(sp)
+    ld t1, 152(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 112(sp)
+    ld t0, 80(sp)
+    ld t1, 120(sp)
+    add t0, t0, t1
+    ld t1, 312(sp)
+    add t0, t0, t1
+    sd t0, 80(sp)
+    ld t0, 168(sp)
+    ld t1, 80(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 168(sp)
+    ld t0, 128(sp)
+    ld t1, 168(sp)
+    add t0, t0, t1
+    sd t0, 128(sp)
+    ld t0, 120(sp)
+    ld t1, 128(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 120(sp)
+    ld t0, 80(sp)
+    ld t1, 120(sp)
+    add t0, t0, t1
+    ld t1, 304(sp)
+    add t0, t0, t1
+    sd t0, 80(sp)
+    ld t0, 168(sp)
+    ld t1, 80(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 168(sp)
+    ld t0, 128(sp)
+    ld t1, 168(sp)
+    add t0, t0, t1
+    sd t0, 128(sp)
+    ld t0, 120(sp)
+    ld t1, 128(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 120(sp)
+    ld t0, 88(sp)
+    ld t1, 96(sp)
+    add t0, t0, t1
+    ld t1, 200(sp)
+    add t0, t0, t1
+    sd t0, 88(sp)
+    ld t0, 176(sp)
+    ld t1, 88(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 176(sp)
+    ld t0, 136(sp)
+    ld t1, 176(sp)
+    add t0, t0, t1
+    sd t0, 136(sp)
+    ld t0, 96(sp)
+    ld t1, 136(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 96(sp)
+    ld t0, 88(sp)
+    ld t1, 96(sp)
+    add t0, t0, t1
+    ld t1, 264(sp)
+    add t0, t0, t1
+    sd t0, 88(sp)
+    ld t0, 176(sp)
+    ld t1, 88(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 176(sp)
+    ld t0, 136(sp)
+    ld t1, 176(sp)
+    add t0, t0, t1
+    sd t0, 136(sp)
+    ld t0, 96(sp)
+    ld t1, 136(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 96(sp)
+    ld t0, 64(sp)
+    ld t1, 96(sp)
+    add t0, t0, t1
+    ld t1, 288(sp)
+    add t0, t0, t1
+    sd t0, 64(sp)
+    ld t0, 160(sp)
+    ld t1, 64(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 160(sp)
+    ld t0, 128(sp)
+    ld t1, 160(sp)
+    add t0, t0, t1
+    sd t0, 128(sp)
+    ld t0, 96(sp)
+    ld t1, 128(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 96(sp)
+    ld t0, 64(sp)
+    ld t1, 96(sp)
+    add t0, t0, t1
+    ld t1, 232(sp)
+    add t0, t0, t1
+    sd t0, 64(sp)
+    ld t0, 160(sp)
+    ld t1, 64(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 160(sp)
+    ld t0, 128(sp)
+    ld t1, 160(sp)
+    add t0, t0, t1
+    sd t0, 128(sp)
+    ld t0, 96(sp)
+    ld t1, 128(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 96(sp)
+    ld t0, 72(sp)
+    ld t1, 104(sp)
+    add t0, t0, t1
+    ld t1, 200(sp)
+    add t0, t0, t1
+    sd t0, 72(sp)
+    ld t0, 168(sp)
+    ld t1, 72(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 168(sp)
+    ld t0, 136(sp)
+    ld t1, 168(sp)
+    add t0, t0, t1
+    sd t0, 136(sp)
+    ld t0, 104(sp)
+    ld t1, 136(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 104(sp)
+    ld t0, 72(sp)
+    ld t1, 104(sp)
+    add t0, t0, t1
+    ld t1, 312(sp)
+    add t0, t0, t1
+    sd t0, 72(sp)
+    ld t0, 168(sp)
+    ld t1, 72(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 168(sp)
+    ld t0, 136(sp)
+    ld t1, 168(sp)
+    add t0, t0, t1
+    sd t0, 136(sp)
+    ld t0, 104(sp)
+    ld t1, 136(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 104(sp)
+    ld t0, 80(sp)
+    ld t1, 112(sp)
+    add t0, t0, t1
+    ld t1, 304(sp)
+    add t0, t0, t1
+    sd t0, 80(sp)
+    ld t0, 176(sp)
+    ld t1, 80(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 176(sp)
+    ld t0, 144(sp)
+    ld t1, 176(sp)
+    add t0, t0, t1
+    sd t0, 144(sp)
+    ld t0, 112(sp)
+    ld t1, 144(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 112(sp)
+    ld t0, 80(sp)
+    ld t1, 112(sp)
+    add t0, t0, t1
+    ld t1, 296(sp)
+    add t0, t0, t1
+    sd t0, 80(sp)
+    ld t0, 176(sp)
+    ld t1, 80(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 176(sp)
+    ld t0, 144(sp)
+    ld t1, 176(sp)
+    add t0, t0, t1
+    sd t0, 144(sp)
+    ld t0, 112(sp)
+    ld t1, 144(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 112(sp)
+    ld t0, 88(sp)
+    ld t1, 120(sp)
+    add t0, t0, t1
+    ld t1, 224(sp)
+    add t0, t0, t1
+    sd t0, 88(sp)
+    ld t0, 184(sp)
+    ld t1, 88(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 184(sp)
+    ld t0, 152(sp)
+    ld t1, 184(sp)
+    add t0, t0, t1
+    sd t0, 152(sp)
+    ld t0, 120(sp)
+    ld t1, 152(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 120(sp)
+    ld t0, 88(sp)
+    ld t1, 120(sp)
+    add t0, t0, t1
+    ld t1, 272(sp)
+    add t0, t0, t1
+    sd t0, 88(sp)
+    ld t0, 184(sp)
+    ld t1, 88(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 184(sp)
+    ld t0, 152(sp)
+    ld t1, 184(sp)
+    add t0, t0, t1
+    sd t0, 152(sp)
+    ld t0, 120(sp)
+    ld t1, 152(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 120(sp)
+    ld t0, 64(sp)
+    ld t1, 104(sp)
+    add t0, t0, t1
+    ld t1, 192(sp)
+    add t0, t0, t1
+    sd t0, 64(sp)
+    ld t0, 184(sp)
+    ld t1, 64(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 184(sp)
+    ld t0, 144(sp)
+    ld t1, 184(sp)
+    add t0, t0, t1
+    sd t0, 144(sp)
+    ld t0, 104(sp)
+    ld t1, 144(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 104(sp)
+    ld t0, 64(sp)
+    ld t1, 104(sp)
+    add t0, t0, t1
+    ld t1, 248(sp)
+    add t0, t0, t1
+    sd t0, 64(sp)
+    ld t0, 184(sp)
+    ld t1, 64(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 184(sp)
+    ld t0, 144(sp)
+    ld t1, 184(sp)
+    add t0, t0, t1
+    sd t0, 144(sp)
+    ld t0, 104(sp)
+    ld t1, 144(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 104(sp)
+    ld t0, 72(sp)
+    ld t1, 112(sp)
+    add t0, t0, t1
+    ld t1, 240(sp)
+    add t0, t0, t1
+    sd t0, 72(sp)
+    ld t0, 160(sp)
+    ld t1, 72(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 160(sp)
+    ld t0, 152(sp)
+    ld t1, 160(sp)
+    add t0, t0, t1
+    sd t0, 152(sp)
+    ld t0, 112(sp)
+    ld t1, 152(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 112(sp)
+    ld t0, 72(sp)
+    ld t1, 112(sp)
+    add t0, t0, t1
+    ld t1, 216(sp)
+    add t0, t0, t1
+    sd t0, 72(sp)
+    ld t0, 160(sp)
+    ld t1, 72(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 160(sp)
+    ld t0, 152(sp)
+    ld t1, 160(sp)
+    add t0, t0, t1
+    sd t0, 152(sp)
+    ld t0, 112(sp)
+    ld t1, 152(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 112(sp)
+    ld t0, 80(sp)
+    ld t1, 120(sp)
+    add t0, t0, t1
+    ld t1, 264(sp)
+    add t0, t0, t1
+    sd t0, 80(sp)
+    ld t0, 168(sp)
+    ld t1, 80(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 168(sp)
+    ld t0, 128(sp)
+    ld t1, 168(sp)
+    add t0, t0, t1
+    sd t0, 128(sp)
+    ld t0, 120(sp)
+    ld t1, 128(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 120(sp)
+    ld t0, 80(sp)
+    ld t1, 120(sp)
+    add t0, t0, t1
+    ld t1, 208(sp)
+    add t0, t0, t1
+    sd t0, 80(sp)
+    ld t0, 168(sp)
+    ld t1, 80(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 168(sp)
+    ld t0, 128(sp)
+    ld t1, 168(sp)
+    add t0, t0, t1
+    sd t0, 128(sp)
+    ld t0, 120(sp)
+    ld t1, 128(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 120(sp)
+    ld t0, 88(sp)
+    ld t1, 96(sp)
+    add t0, t0, t1
+    ld t1, 256(sp)
+    add t0, t0, t1
+    sd t0, 88(sp)
+    ld t0, 176(sp)
+    ld t1, 88(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 176(sp)
+    ld t0, 136(sp)
+    ld t1, 176(sp)
+    add t0, t0, t1
+    sd t0, 136(sp)
+    ld t0, 96(sp)
+    ld t1, 136(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 96(sp)
+    ld t0, 88(sp)
+    ld t1, 96(sp)
+    add t0, t0, t1
+    ld t1, 280(sp)
+    add t0, t0, t1
+    sd t0, 88(sp)
+    ld t0, 176(sp)
+    ld t1, 88(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 176(sp)
+    ld t0, 136(sp)
+    ld t1, 176(sp)
+    add t0, t0, t1
+    sd t0, 136(sp)
+    ld t0, 96(sp)
+    ld t1, 136(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 96(sp)
+    ld t0, 64(sp)
+    ld t1, 96(sp)
+    add t0, t0, t1
+    ld t1, 296(sp)
+    add t0, t0, t1
+    sd t0, 64(sp)
+    ld t0, 160(sp)
+    ld t1, 64(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 160(sp)
+    ld t0, 128(sp)
+    ld t1, 160(sp)
+    add t0, t0, t1
+    sd t0, 128(sp)
+    ld t0, 96(sp)
+    ld t1, 128(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 96(sp)
+    ld t0, 64(sp)
+    ld t1, 96(sp)
+    add t0, t0, t1
+    ld t1, 280(sp)
+    add t0, t0, t1
+    sd t0, 64(sp)
+    ld t0, 160(sp)
+    ld t1, 64(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 160(sp)
+    ld t0, 128(sp)
+    ld t1, 160(sp)
+    add t0, t0, t1
+    sd t0, 128(sp)
+    ld t0, 96(sp)
+    ld t1, 128(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 96(sp)
+    ld t0, 72(sp)
+    ld t1, 104(sp)
+    add t0, t0, t1
+    ld t1, 248(sp)
+    add t0, t0, t1
+    sd t0, 72(sp)
+    ld t0, 168(sp)
+    ld t1, 72(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 168(sp)
+    ld t0, 136(sp)
+    ld t1, 168(sp)
+    add t0, t0, t1
+    sd t0, 136(sp)
+    ld t0, 104(sp)
+    ld t1, 136(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 104(sp)
+    ld t0, 72(sp)
+    ld t1, 104(sp)
+    add t0, t0, t1
+    ld t1, 304(sp)
+    add t0, t0, t1
+    sd t0, 72(sp)
+    ld t0, 168(sp)
+    ld t1, 72(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 168(sp)
+    ld t0, 136(sp)
+    ld t1, 168(sp)
+    add t0, t0, t1
+    sd t0, 136(sp)
+    ld t0, 104(sp)
+    ld t1, 136(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 104(sp)
+    ld t0, 80(sp)
+    ld t1, 112(sp)
+    add t0, t0, t1
+    ld t1, 288(sp)
+    add t0, t0, t1
+    sd t0, 80(sp)
+    ld t0, 176(sp)
+    ld t1, 80(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 176(sp)
+    ld t0, 144(sp)
+    ld t1, 176(sp)
+    add t0, t0, t1
+    sd t0, 144(sp)
+    ld t0, 112(sp)
+    ld t1, 144(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 112(sp)
+    ld t0, 80(sp)
+    ld t1, 112(sp)
+    add t0, t0, t1
+    ld t1, 200(sp)
+    add t0, t0, t1
+    sd t0, 80(sp)
+    ld t0, 176(sp)
+    ld t1, 80(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 176(sp)
+    ld t0, 144(sp)
+    ld t1, 176(sp)
+    add t0, t0, t1
+    sd t0, 144(sp)
+    ld t0, 112(sp)
+    ld t1, 144(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 112(sp)
+    ld t0, 88(sp)
+    ld t1, 120(sp)
+    add t0, t0, t1
+    ld t1, 216(sp)
+    add t0, t0, t1
+    sd t0, 88(sp)
+    ld t0, 184(sp)
+    ld t1, 88(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 184(sp)
+    ld t0, 152(sp)
+    ld t1, 184(sp)
+    add t0, t0, t1
+    sd t0, 152(sp)
+    ld t0, 120(sp)
+    ld t1, 152(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 120(sp)
+    ld t0, 88(sp)
+    ld t1, 120(sp)
+    add t0, t0, t1
+    ld t1, 264(sp)
+    add t0, t0, t1
+    sd t0, 88(sp)
+    ld t0, 184(sp)
+    ld t1, 88(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 184(sp)
+    ld t0, 152(sp)
+    ld t1, 184(sp)
+    add t0, t0, t1
+    sd t0, 152(sp)
+    ld t0, 120(sp)
+    ld t1, 152(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 120(sp)
+    ld t0, 64(sp)
+    ld t1, 104(sp)
+    add t0, t0, t1
+    ld t1, 232(sp)
+    add t0, t0, t1
+    sd t0, 64(sp)
+    ld t0, 184(sp)
+    ld t1, 64(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 184(sp)
+    ld t0, 144(sp)
+    ld t1, 184(sp)
+    add t0, t0, t1
+    sd t0, 144(sp)
+    ld t0, 104(sp)
+    ld t1, 144(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 104(sp)
+    ld t0, 64(sp)
+    ld t1, 104(sp)
+    add t0, t0, t1
+    ld t1, 192(sp)
+    add t0, t0, t1
+    sd t0, 64(sp)
+    ld t0, 184(sp)
+    ld t1, 64(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 184(sp)
+    ld t0, 144(sp)
+    ld t1, 184(sp)
+    add t0, t0, t1
+    sd t0, 144(sp)
+    ld t0, 104(sp)
+    ld t1, 144(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 104(sp)
+    ld t0, 72(sp)
+    ld t1, 112(sp)
+    add t0, t0, t1
+    ld t1, 312(sp)
+    add t0, t0, t1
+    sd t0, 72(sp)
+    ld t0, 160(sp)
+    ld t1, 72(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 160(sp)
+    ld t0, 152(sp)
+    ld t1, 160(sp)
+    add t0, t0, t1
+    sd t0, 152(sp)
+    ld t0, 112(sp)
+    ld t1, 152(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 112(sp)
+    ld t0, 72(sp)
+    ld t1, 112(sp)
+    add t0, t0, t1
+    ld t1, 224(sp)
+    add t0, t0, t1
+    sd t0, 72(sp)
+    ld t0, 160(sp)
+    ld t1, 72(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 160(sp)
+    ld t0, 152(sp)
+    ld t1, 160(sp)
+    add t0, t0, t1
+    sd t0, 152(sp)
+    ld t0, 112(sp)
+    ld t1, 152(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 112(sp)
+    ld t0, 80(sp)
+    ld t1, 120(sp)
+    add t0, t0, t1
+    ld t1, 256(sp)
+    add t0, t0, t1
+    sd t0, 80(sp)
+    ld t0, 168(sp)
+    ld t1, 80(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 168(sp)
+    ld t0, 128(sp)
+    ld t1, 168(sp)
+    add t0, t0, t1
+    sd t0, 128(sp)
+    ld t0, 120(sp)
+    ld t1, 128(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 120(sp)
+    ld t0, 80(sp)
+    ld t1, 120(sp)
+    add t0, t0, t1
+    ld t1, 240(sp)
+    add t0, t0, t1
+    sd t0, 80(sp)
+    ld t0, 168(sp)
+    ld t1, 80(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 168(sp)
+    ld t0, 128(sp)
+    ld t1, 168(sp)
+    add t0, t0, t1
+    sd t0, 128(sp)
+    ld t0, 120(sp)
+    ld t1, 128(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 120(sp)
+    ld t0, 88(sp)
+    ld t1, 96(sp)
+    add t0, t0, t1
+    ld t1, 208(sp)
+    add t0, t0, t1
+    sd t0, 88(sp)
+    ld t0, 176(sp)
+    ld t1, 88(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 176(sp)
+    ld t0, 136(sp)
+    ld t1, 176(sp)
+    add t0, t0, t1
+    sd t0, 136(sp)
+    ld t0, 96(sp)
+    ld t1, 136(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 96(sp)
+    ld t0, 88(sp)
+    ld t1, 96(sp)
+    add t0, t0, t1
+    ld t1, 272(sp)
+    add t0, t0, t1
+    sd t0, 88(sp)
+    ld t0, 176(sp)
+    ld t1, 88(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 176(sp)
+    ld t0, 136(sp)
+    ld t1, 176(sp)
+    add t0, t0, t1
+    sd t0, 136(sp)
+    ld t0, 96(sp)
+    ld t1, 136(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 96(sp)
+    ld t0, 64(sp)
+    ld t1, 96(sp)
+    add t0, t0, t1
+    ld t1, 240(sp)
+    add t0, t0, t1
+    sd t0, 64(sp)
+    ld t0, 160(sp)
+    ld t1, 64(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 160(sp)
+    ld t0, 128(sp)
+    ld t1, 160(sp)
+    add t0, t0, t1
+    sd t0, 128(sp)
+    ld t0, 96(sp)
+    ld t1, 128(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 96(sp)
+    ld t0, 64(sp)
+    ld t1, 96(sp)
+    add t0, t0, t1
+    ld t1, 312(sp)
+    add t0, t0, t1
+    sd t0, 64(sp)
+    ld t0, 160(sp)
+    ld t1, 64(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 160(sp)
+    ld t0, 128(sp)
+    ld t1, 160(sp)
+    add t0, t0, t1
+    sd t0, 128(sp)
+    ld t0, 96(sp)
+    ld t1, 128(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 96(sp)
+    ld t0, 72(sp)
+    ld t1, 104(sp)
+    add t0, t0, t1
+    ld t1, 304(sp)
+    add t0, t0, t1
+    sd t0, 72(sp)
+    ld t0, 168(sp)
+    ld t1, 72(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 168(sp)
+    ld t0, 136(sp)
+    ld t1, 168(sp)
+    add t0, t0, t1
+    sd t0, 136(sp)
+    ld t0, 104(sp)
+    ld t1, 136(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 104(sp)
+    ld t0, 72(sp)
+    ld t1, 104(sp)
+    add t0, t0, t1
+    ld t1, 264(sp)
+    add t0, t0, t1
+    sd t0, 72(sp)
+    ld t0, 168(sp)
+    ld t1, 72(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 168(sp)
+    ld t0, 136(sp)
+    ld t1, 168(sp)
+    add t0, t0, t1
+    sd t0, 136(sp)
+    ld t0, 104(sp)
+    ld t1, 136(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 104(sp)
+    ld t0, 80(sp)
+    ld t1, 112(sp)
+    add t0, t0, t1
+    ld t1, 280(sp)
+    add t0, t0, t1
+    sd t0, 80(sp)
+    ld t0, 176(sp)
+    ld t1, 80(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 176(sp)
+    ld t0, 144(sp)
+    ld t1, 176(sp)
+    add t0, t0, t1
+    sd t0, 144(sp)
+    ld t0, 112(sp)
+    ld t1, 144(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 112(sp)
+    ld t0, 80(sp)
+    ld t1, 112(sp)
+    add t0, t0, t1
+    ld t1, 216(sp)
+    add t0, t0, t1
+    sd t0, 80(sp)
+    ld t0, 176(sp)
+    ld t1, 80(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 176(sp)
+    ld t0, 144(sp)
+    ld t1, 176(sp)
+    add t0, t0, t1
+    sd t0, 144(sp)
+    ld t0, 112(sp)
+    ld t1, 144(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 112(sp)
+    ld t0, 88(sp)
+    ld t1, 120(sp)
+    add t0, t0, t1
+    ld t1, 192(sp)
+    add t0, t0, t1
+    sd t0, 88(sp)
+    ld t0, 184(sp)
+    ld t1, 88(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 184(sp)
+    ld t0, 152(sp)
+    ld t1, 184(sp)
+    add t0, t0, t1
+    sd t0, 152(sp)
+    ld t0, 120(sp)
+    ld t1, 152(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 120(sp)
+    ld t0, 88(sp)
+    ld t1, 120(sp)
+    add t0, t0, t1
+    ld t1, 256(sp)
+    add t0, t0, t1
+    sd t0, 88(sp)
+    ld t0, 184(sp)
+    ld t1, 88(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 184(sp)
+    ld t0, 152(sp)
+    ld t1, 184(sp)
+    add t0, t0, t1
+    sd t0, 152(sp)
+    ld t0, 120(sp)
+    ld t1, 152(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 120(sp)
+    ld t0, 64(sp)
+    ld t1, 104(sp)
+    add t0, t0, t1
+    ld t1, 288(sp)
+    add t0, t0, t1
+    sd t0, 64(sp)
+    ld t0, 184(sp)
+    ld t1, 64(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 184(sp)
+    ld t0, 144(sp)
+    ld t1, 184(sp)
+    add t0, t0, t1
+    sd t0, 144(sp)
+    ld t0, 104(sp)
+    ld t1, 144(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 104(sp)
+    ld t0, 64(sp)
+    ld t1, 104(sp)
+    add t0, t0, t1
+    ld t1, 208(sp)
+    add t0, t0, t1
+    sd t0, 64(sp)
+    ld t0, 184(sp)
+    ld t1, 64(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 184(sp)
+    ld t0, 144(sp)
+    ld t1, 184(sp)
+    add t0, t0, t1
+    sd t0, 144(sp)
+    ld t0, 104(sp)
+    ld t1, 144(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 104(sp)
+    ld t0, 72(sp)
+    ld t1, 112(sp)
+    add t0, t0, t1
+    ld t1, 296(sp)
+    add t0, t0, t1
+    sd t0, 72(sp)
+    ld t0, 160(sp)
+    ld t1, 72(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 160(sp)
+    ld t0, 152(sp)
+    ld t1, 160(sp)
+    add t0, t0, t1
+    sd t0, 152(sp)
+    ld t0, 112(sp)
+    ld t1, 152(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 112(sp)
+    ld t0, 72(sp)
+    ld t1, 112(sp)
+    add t0, t0, t1
+    ld t1, 248(sp)
+    add t0, t0, t1
+    sd t0, 72(sp)
+    ld t0, 160(sp)
+    ld t1, 72(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 160(sp)
+    ld t0, 152(sp)
+    ld t1, 160(sp)
+    add t0, t0, t1
+    sd t0, 152(sp)
+    ld t0, 112(sp)
+    ld t1, 152(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 112(sp)
+    ld t0, 80(sp)
+    ld t1, 120(sp)
+    add t0, t0, t1
+    ld t1, 200(sp)
+    add t0, t0, t1
+    sd t0, 80(sp)
+    ld t0, 168(sp)
+    ld t1, 80(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 168(sp)
+    ld t0, 128(sp)
+    ld t1, 168(sp)
+    add t0, t0, t1
+    sd t0, 128(sp)
+    ld t0, 120(sp)
+    ld t1, 128(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 120(sp)
+    ld t0, 80(sp)
+    ld t1, 120(sp)
+    add t0, t0, t1
+    ld t1, 224(sp)
+    add t0, t0, t1
+    sd t0, 80(sp)
+    ld t0, 168(sp)
+    ld t1, 80(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 168(sp)
+    ld t0, 128(sp)
+    ld t1, 168(sp)
+    add t0, t0, t1
+    sd t0, 128(sp)
+    ld t0, 120(sp)
+    ld t1, 128(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 120(sp)
+    ld t0, 88(sp)
+    ld t1, 96(sp)
+    add t0, t0, t1
+    ld t1, 272(sp)
+    add t0, t0, t1
+    sd t0, 88(sp)
+    ld t0, 176(sp)
+    ld t1, 88(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 176(sp)
+    ld t0, 136(sp)
+    ld t1, 176(sp)
+    add t0, t0, t1
+    sd t0, 136(sp)
+    ld t0, 96(sp)
+    ld t1, 136(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 96(sp)
+    ld t0, 88(sp)
+    ld t1, 96(sp)
+    add t0, t0, t1
+    ld t1, 232(sp)
+    add t0, t0, t1
+    sd t0, 88(sp)
+    ld t0, 176(sp)
+    ld t1, 88(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 176(sp)
+    ld t0, 136(sp)
+    ld t1, 176(sp)
+    add t0, t0, t1
+    sd t0, 136(sp)
+    ld t0, 96(sp)
+    ld t1, 136(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 96(sp)
+    ld t0, 64(sp)
+    ld t1, 96(sp)
+    add t0, t0, t1
+    ld t1, 272(sp)
+    add t0, t0, t1
+    sd t0, 64(sp)
+    ld t0, 160(sp)
+    ld t1, 64(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 160(sp)
+    ld t0, 128(sp)
+    ld t1, 160(sp)
+    add t0, t0, t1
+    sd t0, 128(sp)
+    ld t0, 96(sp)
+    ld t1, 128(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 96(sp)
+    ld t0, 64(sp)
+    ld t1, 96(sp)
+    add t0, t0, t1
+    ld t1, 208(sp)
+    add t0, t0, t1
+    sd t0, 64(sp)
+    ld t0, 160(sp)
+    ld t1, 64(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 160(sp)
+    ld t0, 128(sp)
+    ld t1, 160(sp)
+    add t0, t0, t1
+    sd t0, 128(sp)
+    ld t0, 96(sp)
+    ld t1, 128(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 96(sp)
+    ld t0, 72(sp)
+    ld t1, 104(sp)
+    add t0, t0, t1
+    ld t1, 256(sp)
+    add t0, t0, t1
+    sd t0, 72(sp)
+    ld t0, 168(sp)
+    ld t1, 72(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 168(sp)
+    ld t0, 136(sp)
+    ld t1, 168(sp)
+    add t0, t0, t1
+    sd t0, 136(sp)
+    ld t0, 104(sp)
+    ld t1, 136(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 104(sp)
+    ld t0, 72(sp)
+    ld t1, 104(sp)
+    add t0, t0, t1
+    ld t1, 224(sp)
+    add t0, t0, t1
+    sd t0, 72(sp)
+    ld t0, 168(sp)
+    ld t1, 72(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 168(sp)
+    ld t0, 136(sp)
+    ld t1, 168(sp)
+    add t0, t0, t1
+    sd t0, 136(sp)
+    ld t0, 104(sp)
+    ld t1, 136(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 104(sp)
+    ld t0, 80(sp)
+    ld t1, 112(sp)
+    add t0, t0, t1
+    ld t1, 248(sp)
+    add t0, t0, t1
+    sd t0, 80(sp)
+    ld t0, 176(sp)
+    ld t1, 80(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 176(sp)
+    ld t0, 144(sp)
+    ld t1, 176(sp)
+    add t0, t0, t1
+    sd t0, 144(sp)
+    ld t0, 112(sp)
+    ld t1, 144(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 112(sp)
+    ld t0, 80(sp)
+    ld t1, 112(sp)
+    add t0, t0, t1
+    ld t1, 240(sp)
+    add t0, t0, t1
+    sd t0, 80(sp)
+    ld t0, 176(sp)
+    ld t1, 80(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 176(sp)
+    ld t0, 144(sp)
+    ld t1, 176(sp)
+    add t0, t0, t1
+    sd t0, 144(sp)
+    ld t0, 112(sp)
+    ld t1, 144(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 112(sp)
+    ld t0, 88(sp)
+    ld t1, 120(sp)
+    add t0, t0, t1
+    ld t1, 200(sp)
+    add t0, t0, t1
+    sd t0, 88(sp)
+    ld t0, 184(sp)
+    ld t1, 88(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 184(sp)
+    ld t0, 152(sp)
+    ld t1, 184(sp)
+    add t0, t0, t1
+    sd t0, 152(sp)
+    ld t0, 120(sp)
+    ld t1, 152(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 120(sp)
+    ld t0, 88(sp)
+    ld t1, 120(sp)
+    add t0, t0, t1
+    ld t1, 232(sp)
+    add t0, t0, t1
+    sd t0, 88(sp)
+    ld t0, 184(sp)
+    ld t1, 88(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 184(sp)
+    ld t0, 152(sp)
+    ld t1, 184(sp)
+    add t0, t0, t1
+    sd t0, 152(sp)
+    ld t0, 120(sp)
+    ld t1, 152(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 120(sp)
+    ld t0, 64(sp)
+    ld t1, 104(sp)
+    add t0, t0, t1
+    ld t1, 312(sp)
+    add t0, t0, t1
+    sd t0, 64(sp)
+    ld t0, 184(sp)
+    ld t1, 64(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 184(sp)
+    ld t0, 144(sp)
+    ld t1, 184(sp)
+    add t0, t0, t1
+    sd t0, 144(sp)
+    ld t0, 104(sp)
+    ld t1, 144(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 104(sp)
+    ld t0, 64(sp)
+    ld t1, 104(sp)
+    add t0, t0, t1
+    ld t1, 280(sp)
+    add t0, t0, t1
+    sd t0, 64(sp)
+    ld t0, 184(sp)
+    ld t1, 64(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 184(sp)
+    ld t0, 144(sp)
+    ld t1, 184(sp)
+    add t0, t0, t1
+    sd t0, 144(sp)
+    ld t0, 104(sp)
+    ld t1, 144(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 104(sp)
+    ld t0, 72(sp)
+    ld t1, 112(sp)
+    add t0, t0, t1
+    ld t1, 264(sp)
+    add t0, t0, t1
+    sd t0, 72(sp)
+    ld t0, 160(sp)
+    ld t1, 72(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 160(sp)
+    ld t0, 152(sp)
+    ld t1, 160(sp)
+    add t0, t0, t1
+    sd t0, 152(sp)
+    ld t0, 112(sp)
+    ld t1, 152(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 112(sp)
+    ld t0, 72(sp)
+    ld t1, 112(sp)
+    add t0, t0, t1
+    ld t1, 304(sp)
+    add t0, t0, t1
+    sd t0, 72(sp)
+    ld t0, 160(sp)
+    ld t1, 72(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 160(sp)
+    ld t0, 152(sp)
+    ld t1, 160(sp)
+    add t0, t0, t1
+    sd t0, 152(sp)
+    ld t0, 112(sp)
+    ld t1, 152(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 112(sp)
+    ld t0, 80(sp)
+    ld t1, 120(sp)
+    add t0, t0, t1
+    ld t1, 216(sp)
+    add t0, t0, t1
+    sd t0, 80(sp)
+    ld t0, 168(sp)
+    ld t1, 80(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 168(sp)
+    ld t0, 128(sp)
+    ld t1, 168(sp)
+    add t0, t0, t1
+    sd t0, 128(sp)
+    ld t0, 120(sp)
+    ld t1, 128(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 120(sp)
+    ld t0, 80(sp)
+    ld t1, 120(sp)
+    add t0, t0, t1
+    ld t1, 288(sp)
+    add t0, t0, t1
+    sd t0, 80(sp)
+    ld t0, 168(sp)
+    ld t1, 80(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 168(sp)
+    ld t0, 128(sp)
+    ld t1, 168(sp)
+    add t0, t0, t1
+    sd t0, 128(sp)
+    ld t0, 120(sp)
+    ld t1, 128(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 120(sp)
+    ld t0, 88(sp)
+    ld t1, 96(sp)
+    add t0, t0, t1
+    ld t1, 296(sp)
+    add t0, t0, t1
+    sd t0, 88(sp)
+    ld t0, 176(sp)
+    ld t1, 88(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 176(sp)
+    ld t0, 136(sp)
+    ld t1, 176(sp)
+    add t0, t0, t1
+    sd t0, 136(sp)
+    ld t0, 96(sp)
+    ld t1, 136(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 96(sp)
+    ld t0, 88(sp)
+    ld t1, 96(sp)
+    add t0, t0, t1
+    ld t1, 192(sp)
+    add t0, t0, t1
+    sd t0, 88(sp)
+    ld t0, 176(sp)
+    ld t1, 88(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 176(sp)
+    ld t0, 136(sp)
+    ld t1, 176(sp)
+    add t0, t0, t1
+    sd t0, 136(sp)
+    ld t0, 96(sp)
+    ld t1, 136(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 96(sp)
+    ld t0, 64(sp)
+    ld t1, 96(sp)
+    add t0, t0, t1
+    ld t1, 192(sp)
+    add t0, t0, t1
+    sd t0, 64(sp)
+    ld t0, 160(sp)
+    ld t1, 64(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 160(sp)
+    ld t0, 128(sp)
+    ld t1, 160(sp)
+    add t0, t0, t1
+    sd t0, 128(sp)
+    ld t0, 96(sp)
+    ld t1, 128(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 96(sp)
+    ld t0, 64(sp)
+    ld t1, 96(sp)
+    add t0, t0, t1
+    ld t1, 200(sp)
+    add t0, t0, t1
+    sd t0, 64(sp)
+    ld t0, 160(sp)
+    ld t1, 64(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 160(sp)
+    ld t0, 128(sp)
+    ld t1, 160(sp)
+    add t0, t0, t1
+    sd t0, 128(sp)
+    ld t0, 96(sp)
+    ld t1, 128(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 96(sp)
+    ld t0, 72(sp)
+    ld t1, 104(sp)
+    add t0, t0, t1
+    ld t1, 208(sp)
+    add t0, t0, t1
+    sd t0, 72(sp)
+    ld t0, 168(sp)
+    ld t1, 72(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 168(sp)
+    ld t0, 136(sp)
+    ld t1, 168(sp)
+    add t0, t0, t1
+    sd t0, 136(sp)
+    ld t0, 104(sp)
+    ld t1, 136(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 104(sp)
+    ld t0, 72(sp)
+    ld t1, 104(sp)
+    add t0, t0, t1
+    ld t1, 216(sp)
+    add t0, t0, t1
+    sd t0, 72(sp)
+    ld t0, 168(sp)
+    ld t1, 72(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 168(sp)
+    ld t0, 136(sp)
+    ld t1, 168(sp)
+    add t0, t0, t1
+    sd t0, 136(sp)
+    ld t0, 104(sp)
+    ld t1, 136(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 104(sp)
+    ld t0, 80(sp)
+    ld t1, 112(sp)
+    add t0, t0, t1
+    ld t1, 224(sp)
+    add t0, t0, t1
+    sd t0, 80(sp)
+    ld t0, 176(sp)
+    ld t1, 80(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 176(sp)
+    ld t0, 144(sp)
+    ld t1, 176(sp)
+    add t0, t0, t1
+    sd t0, 144(sp)
+    ld t0, 112(sp)
+    ld t1, 144(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 112(sp)
+    ld t0, 80(sp)
+    ld t1, 112(sp)
+    add t0, t0, t1
+    ld t1, 232(sp)
+    add t0, t0, t1
+    sd t0, 80(sp)
+    ld t0, 176(sp)
+    ld t1, 80(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 176(sp)
+    ld t0, 144(sp)
+    ld t1, 176(sp)
+    add t0, t0, t1
+    sd t0, 144(sp)
+    ld t0, 112(sp)
+    ld t1, 144(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 112(sp)
+    ld t0, 88(sp)
+    ld t1, 120(sp)
+    add t0, t0, t1
+    ld t1, 240(sp)
+    add t0, t0, t1
+    sd t0, 88(sp)
+    ld t0, 184(sp)
+    ld t1, 88(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 184(sp)
+    ld t0, 152(sp)
+    ld t1, 184(sp)
+    add t0, t0, t1
+    sd t0, 152(sp)
+    ld t0, 120(sp)
+    ld t1, 152(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 120(sp)
+    ld t0, 88(sp)
+    ld t1, 120(sp)
+    add t0, t0, t1
+    ld t1, 248(sp)
+    add t0, t0, t1
+    sd t0, 88(sp)
+    ld t0, 184(sp)
+    ld t1, 88(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 184(sp)
+    ld t0, 152(sp)
+    ld t1, 184(sp)
+    add t0, t0, t1
+    sd t0, 152(sp)
+    ld t0, 120(sp)
+    ld t1, 152(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 120(sp)
+    ld t0, 64(sp)
+    ld t1, 104(sp)
+    add t0, t0, t1
+    ld t1, 256(sp)
+    add t0, t0, t1
+    sd t0, 64(sp)
+    ld t0, 184(sp)
+    ld t1, 64(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 184(sp)
+    ld t0, 144(sp)
+    ld t1, 184(sp)
+    add t0, t0, t1
+    sd t0, 144(sp)
+    ld t0, 104(sp)
+    ld t1, 144(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 104(sp)
+    ld t0, 64(sp)
+    ld t1, 104(sp)
+    add t0, t0, t1
+    ld t1, 264(sp)
+    add t0, t0, t1
+    sd t0, 64(sp)
+    ld t0, 184(sp)
+    ld t1, 64(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 184(sp)
+    ld t0, 144(sp)
+    ld t1, 184(sp)
+    add t0, t0, t1
+    sd t0, 144(sp)
+    ld t0, 104(sp)
+    ld t1, 144(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 104(sp)
+    ld t0, 72(sp)
+    ld t1, 112(sp)
+    add t0, t0, t1
+    ld t1, 272(sp)
+    add t0, t0, t1
+    sd t0, 72(sp)
+    ld t0, 160(sp)
+    ld t1, 72(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 160(sp)
+    ld t0, 152(sp)
+    ld t1, 160(sp)
+    add t0, t0, t1
+    sd t0, 152(sp)
+    ld t0, 112(sp)
+    ld t1, 152(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 112(sp)
+    ld t0, 72(sp)
+    ld t1, 112(sp)
+    add t0, t0, t1
+    ld t1, 280(sp)
+    add t0, t0, t1
+    sd t0, 72(sp)
+    ld t0, 160(sp)
+    ld t1, 72(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 160(sp)
+    ld t0, 152(sp)
+    ld t1, 160(sp)
+    add t0, t0, t1
+    sd t0, 152(sp)
+    ld t0, 112(sp)
+    ld t1, 152(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 112(sp)
+    ld t0, 80(sp)
+    ld t1, 120(sp)
+    add t0, t0, t1
+    ld t1, 288(sp)
+    add t0, t0, t1
+    sd t0, 80(sp)
+    ld t0, 168(sp)
+    ld t1, 80(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 168(sp)
+    ld t0, 128(sp)
+    ld t1, 168(sp)
+    add t0, t0, t1
+    sd t0, 128(sp)
+    ld t0, 120(sp)
+    ld t1, 128(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 120(sp)
+    ld t0, 80(sp)
+    ld t1, 120(sp)
+    add t0, t0, t1
+    ld t1, 296(sp)
+    add t0, t0, t1
+    sd t0, 80(sp)
+    ld t0, 168(sp)
+    ld t1, 80(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 168(sp)
+    ld t0, 128(sp)
+    ld t1, 168(sp)
+    add t0, t0, t1
+    sd t0, 128(sp)
+    ld t0, 120(sp)
+    ld t1, 128(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 120(sp)
+    ld t0, 88(sp)
+    ld t1, 96(sp)
+    add t0, t0, t1
+    ld t1, 304(sp)
+    add t0, t0, t1
+    sd t0, 88(sp)
+    ld t0, 176(sp)
+    ld t1, 88(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 176(sp)
+    ld t0, 136(sp)
+    ld t1, 176(sp)
+    add t0, t0, t1
+    sd t0, 136(sp)
+    ld t0, 96(sp)
+    ld t1, 136(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 96(sp)
+    ld t0, 88(sp)
+    ld t1, 96(sp)
+    add t0, t0, t1
+    ld t1, 312(sp)
+    add t0, t0, t1
+    sd t0, 88(sp)
+    ld t0, 176(sp)
+    ld t1, 88(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 176(sp)
+    ld t0, 136(sp)
+    ld t1, 176(sp)
+    add t0, t0, t1
+    sd t0, 136(sp)
+    ld t0, 96(sp)
+    ld t1, 136(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 96(sp)
+    ld t0, 64(sp)
+    ld t1, 96(sp)
+    add t0, t0, t1
+    ld t1, 304(sp)
+    add t0, t0, t1
+    sd t0, 64(sp)
+    ld t0, 160(sp)
+    ld t1, 64(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 160(sp)
+    ld t0, 128(sp)
+    ld t1, 160(sp)
+    add t0, t0, t1
+    sd t0, 128(sp)
+    ld t0, 96(sp)
+    ld t1, 128(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 96(sp)
+    ld t0, 64(sp)
+    ld t1, 96(sp)
+    add t0, t0, t1
+    ld t1, 272(sp)
+    add t0, t0, t1
+    sd t0, 64(sp)
+    ld t0, 160(sp)
+    ld t1, 64(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 160(sp)
+    ld t0, 128(sp)
+    ld t1, 160(sp)
+    add t0, t0, t1
+    sd t0, 128(sp)
+    ld t0, 96(sp)
+    ld t1, 128(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 96(sp)
+    ld t0, 72(sp)
+    ld t1, 104(sp)
+    add t0, t0, t1
+    ld t1, 224(sp)
+    add t0, t0, t1
+    sd t0, 72(sp)
+    ld t0, 168(sp)
+    ld t1, 72(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 168(sp)
+    ld t0, 136(sp)
+    ld t1, 168(sp)
+    add t0, t0, t1
+    sd t0, 136(sp)
+    ld t0, 104(sp)
+    ld t1, 136(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 104(sp)
+    ld t0, 72(sp)
+    ld t1, 104(sp)
+    add t0, t0, t1
+    ld t1, 256(sp)
+    add t0, t0, t1
+    sd t0, 72(sp)
+    ld t0, 168(sp)
+    ld t1, 72(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 168(sp)
+    ld t0, 136(sp)
+    ld t1, 168(sp)
+    add t0, t0, t1
+    sd t0, 136(sp)
+    ld t0, 104(sp)
+    ld t1, 136(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 104(sp)
+    ld t0, 80(sp)
+    ld t1, 112(sp)
+    add t0, t0, t1
+    ld t1, 264(sp)
+    add t0, t0, t1
+    sd t0, 80(sp)
+    ld t0, 176(sp)
+    ld t1, 80(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 176(sp)
+    ld t0, 144(sp)
+    ld t1, 176(sp)
+    add t0, t0, t1
+    sd t0, 144(sp)
+    ld t0, 112(sp)
+    ld t1, 144(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 112(sp)
+    ld t0, 80(sp)
+    ld t1, 112(sp)
+    add t0, t0, t1
+    ld t1, 312(sp)
+    add t0, t0, t1
+    sd t0, 80(sp)
+    ld t0, 176(sp)
+    ld t1, 80(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 176(sp)
+    ld t0, 144(sp)
+    ld t1, 176(sp)
+    add t0, t0, t1
+    sd t0, 144(sp)
+    ld t0, 112(sp)
+    ld t1, 144(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 112(sp)
+    ld t0, 88(sp)
+    ld t1, 120(sp)
+    add t0, t0, t1
+    ld t1, 296(sp)
+    add t0, t0, t1
+    sd t0, 88(sp)
+    ld t0, 184(sp)
+    ld t1, 88(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 184(sp)
+    ld t0, 152(sp)
+    ld t1, 184(sp)
+    add t0, t0, t1
+    sd t0, 152(sp)
+    ld t0, 120(sp)
+    ld t1, 152(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 120(sp)
+    ld t0, 88(sp)
+    ld t1, 120(sp)
+    add t0, t0, t1
+    ld t1, 240(sp)
+    add t0, t0, t1
+    sd t0, 88(sp)
+    ld t0, 184(sp)
+    ld t1, 88(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 184(sp)
+    ld t0, 152(sp)
+    ld t1, 184(sp)
+    add t0, t0, t1
+    sd t0, 152(sp)
+    ld t0, 120(sp)
+    ld t1, 152(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 120(sp)
+    ld t0, 64(sp)
+    ld t1, 104(sp)
+    add t0, t0, t1
+    ld t1, 200(sp)
+    add t0, t0, t1
+    sd t0, 64(sp)
+    ld t0, 184(sp)
+    ld t1, 64(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 184(sp)
+    ld t0, 144(sp)
+    ld t1, 184(sp)
+    add t0, t0, t1
+    sd t0, 144(sp)
+    ld t0, 104(sp)
+    ld t1, 144(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 104(sp)
+    ld t0, 64(sp)
+    ld t1, 104(sp)
+    add t0, t0, t1
+    ld t1, 288(sp)
+    add t0, t0, t1
+    sd t0, 64(sp)
+    ld t0, 184(sp)
+    ld t1, 64(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 184(sp)
+    ld t0, 144(sp)
+    ld t1, 184(sp)
+    add t0, t0, t1
+    sd t0, 144(sp)
+    ld t0, 104(sp)
+    ld t1, 144(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 104(sp)
+    ld t0, 72(sp)
+    ld t1, 112(sp)
+    add t0, t0, t1
+    ld t1, 192(sp)
+    add t0, t0, t1
+    sd t0, 72(sp)
+    ld t0, 160(sp)
+    ld t1, 72(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 160(sp)
+    ld t0, 152(sp)
+    ld t1, 160(sp)
+    add t0, t0, t1
+    sd t0, 152(sp)
+    ld t0, 112(sp)
+    ld t1, 152(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 112(sp)
+    ld t0, 72(sp)
+    ld t1, 112(sp)
+    add t0, t0, t1
+    ld t1, 208(sp)
+    add t0, t0, t1
+    sd t0, 72(sp)
+    ld t0, 160(sp)
+    ld t1, 72(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 160(sp)
+    ld t0, 152(sp)
+    ld t1, 160(sp)
+    add t0, t0, t1
+    sd t0, 152(sp)
+    ld t0, 112(sp)
+    ld t1, 152(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 112(sp)
+    ld t0, 80(sp)
+    ld t1, 120(sp)
+    add t0, t0, t1
+    ld t1, 280(sp)
+    add t0, t0, t1
+    sd t0, 80(sp)
+    ld t0, 168(sp)
+    ld t1, 80(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 168(sp)
+    ld t0, 128(sp)
+    ld t1, 168(sp)
+    add t0, t0, t1
+    sd t0, 128(sp)
+    ld t0, 120(sp)
+    ld t1, 128(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 120(sp)
+    ld t0, 80(sp)
+    ld t1, 120(sp)
+    add t0, t0, t1
+    ld t1, 248(sp)
+    add t0, t0, t1
+    sd t0, 80(sp)
+    ld t0, 168(sp)
+    ld t1, 80(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 168(sp)
+    ld t0, 128(sp)
+    ld t1, 168(sp)
+    add t0, t0, t1
+    sd t0, 128(sp)
+    ld t0, 120(sp)
+    ld t1, 128(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 120(sp)
+    ld t0, 88(sp)
+    ld t1, 96(sp)
+    add t0, t0, t1
+    ld t1, 232(sp)
+    add t0, t0, t1
+    sd t0, 88(sp)
+    ld t0, 176(sp)
+    ld t1, 88(sp)
+    xor t0, t0, t1
+    srli t1, t0, 32
+    slli t0, t0, 32
+    or t0, t0, t1
+    sd t0, 176(sp)
+    ld t0, 136(sp)
+    ld t1, 176(sp)
+    add t0, t0, t1
+    sd t0, 136(sp)
+    ld t0, 96(sp)
+    ld t1, 136(sp)
+    xor t0, t0, t1
+    srli t1, t0, 24
+    slli t0, t0, 40
+    or t0, t0, t1
+    sd t0, 96(sp)
+    ld t0, 88(sp)
+    ld t1, 96(sp)
+    add t0, t0, t1
+    ld t1, 216(sp)
+    add t0, t0, t1
+    sd t0, 88(sp)
+    ld t0, 176(sp)
+    ld t1, 88(sp)
+    xor t0, t0, t1
+    srli t1, t0, 16
+    slli t0, t0, 48
+    or t0, t0, t1
+    sd t0, 176(sp)
+    ld t0, 136(sp)
+    ld t1, 176(sp)
+    add t0, t0, t1
+    sd t0, 136(sp)
+    ld t0, 96(sp)
+    ld t1, 136(sp)
+    xor t0, t0, t1
+    srli t1, t0, 63
+    slli t0, t0, 1
+    or t0, t0, t1
+    sd t0, 96(sp)
+    ld t0, 0(sp)
+    ld t1, 64(sp)
+    xor t0, t0, t1
+    ld t1, 128(sp)
+    xor t0, t0, t1
+    sd t0, 0(sp)
+    ld t0, 8(sp)
+    ld t1, 72(sp)
+    xor t0, t0, t1
+    ld t1, 136(sp)
+    xor t0, t0, t1
+    sd t0, 8(sp)
+    ld t0, 16(sp)
+    ld t1, 80(sp)
+    xor t0, t0, t1
+    ld t1, 144(sp)
+    xor t0, t0, t1
+    sd t0, 16(sp)
+    ld t0, 24(sp)
+    ld t1, 88(sp)
+    xor t0, t0, t1
+    ld t1, 152(sp)
+    xor t0, t0, t1
+    sd t0, 24(sp)
+    ld t0, 32(sp)
+    ld t1, 96(sp)
+    xor t0, t0, t1
+    ld t1, 160(sp)
+    xor t0, t0, t1
+    sd t0, 32(sp)
+    ld t0, 40(sp)
+    ld t1, 104(sp)
+    xor t0, t0, t1
+    ld t1, 168(sp)
+    xor t0, t0, t1
+    sd t0, 40(sp)
+    ld t0, 48(sp)
+    ld t1, 112(sp)
+    xor t0, t0, t1
+    ld t1, 176(sp)
+    xor t0, t0, t1
+    sd t0, 48(sp)
+    ld t0, 56(sp)
+    ld t1, 120(sp)
+    xor t0, t0, t1
+    ld t1, 184(sp)
+    xor t0, t0, t1
+    sd t0, 56(sp)
+    ld t0, 0(sp)
+    sd t0, 0(a1)
+    ld t0, 8(sp)
+    sd t0, 8(a1)
+    ld t0, 16(sp)
+    sd t0, 16(a1)
+    ld t0, 24(sp)
+    sd t0, 24(a1)
+    addi sp, sp, 320
+    li a0, 0
+    ret
+.section .rodata
+__cellscript_const_data_0:
+    .byte 0
+    .byte 0
+    .byte 0
+    .byte 0
+    .byte 0
+    .byte 0
+    .byte 0
+    .byte 0
+    .byte 0
+    .byte 0
+    .byte 0
+    .byte 0
+    .byte 0
+    .byte 0
+    .byte 0
+    .byte 0
+    .byte 0
+    .byte 0
+    .byte 0
+    .byte 0
+    .byte 0
+    .byte 0
+    .byte 0
+    .byte 0
+    .byte 0
+    .byte 0
+    .byte 0
+    .byte 0
+    .byte 0
+    .byte 0
+    .byte 0
+    .byte 0
+    .align 3

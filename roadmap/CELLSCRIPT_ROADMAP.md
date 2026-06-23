@@ -25,6 +25,10 @@ The current project direction is simple:
 | 0.14 release scope | CKB semantic-completeness scope is complete for the current stable line. | [0.14 roadmap](CELLSCRIPT_0_14_ROADMAP.md), [0.14 release notes](../docs/releases/CELLSCRIPT_0_14_RELEASE_NOTES.md) |
 | 0.15 release scope | `v0.15.0` is released from `nightly-0.15` with scoped invariants, aggregate invariant primitives, invariant/action coverage links, Covenant ProofPlan output, risk diagnostics, macro provenance, identity-aware lifecycle forms, and final release-gate evidence. | [0.15 roadmap](CELLSCRIPT_0_15_ROADMAP.md), [0.15 roadmap summary](../docs/archive/0.15/CELLSCRIPT_0_15_ROADMAP_SUMMARY.md), [0.15 release notes](../docs/releases/CELLSCRIPT_0_15_RELEASE_NOTES.md) |
 | 0.16 release scope | `v0.16.1` is released for the scoped metadata-assurance line, including operational semantics, ProofPlan soundness, builder assumptions, transaction validation/solver templates, deployment governance, audit tooling, standard CKB compatibility fixtures, compiler hardening, proposal-local NovaSeal devnet/profile certification, and bundled example bootstrap cleanup. | [0.16 roadmap](CELLSCRIPT_0_16_ROADMAP.md), [0.16.1 release notes](../docs/releases/CELLSCRIPT_0_16_1_RELEASE_NOTES.md) |
+| 0.17/0.18 iCKB equivalence state | The standalone 0.17 line introduced the protocol-semantics surface and partial CKB VM differential evidence; the carried-forward 0.18 work closes the manifest-declared executable iCKB claim set as `EXECUTED_CKB_VM_DIFF` / `PROVEN`. | [0.17 roadmap](../docs/archive/0.17/CELLSCRIPT_0_17_ROADMAP.md), [0.17 iCKB final report](../docs/archive/0.17/CELLSCRIPT_0_17_ICKB_FINAL_REPORT.md) |
+| 0.18 planning scope | First-class read-only `ScriptRef` / `ScriptArgs` surface and the remaining iCKB equivalence-closure prerequisites. | [0.18 roadmap](../docs/CELLSCRIPT_0_18_ROADMAP.md) |
+| 0.19 scope | Scope complete for CKB ecosystem reuse, `ckb-std` compatibility, grammar governance, and Phase 1 package/deployment identity registry closure. Generated builders and live-chain registry proof moved to 0.20. | [0.19 roadmap](../docs/CELLSCRIPT_0_19_ROADMAP.md), [0.19 release notes](../docs/releases/CELLSCRIPT_0_19_RELEASE_NOTES.md), [CKB ecosystem reuse audit](../docs/CELLSCRIPT_CKB_ECOSYSTEM_REUSE_AUDIT.md), [ckb-std compatibility](../docs/CELLSCRIPT_CKB_STD_COMPAT.md), [Registry Phase 1](../docs/CELLSCRIPT_REGISTRY_PHASE1.md) |
+| 0.20 planned scope | Generated Action Builder, live-chain deployment verification, stateful transaction flows, and registry trust hardening. | [0.20 roadmap](../docs/CELLSCRIPT_0_20_ROADMAP.md) |
 | CKB language fit | CKB-first design is confirmed; remaining gaps are signer binding, continuity policy, capacity policy, and declarative time policy. | [CKB language audit](../docs/CELLSCRIPT_CKB_LANGUAGE_AUDIT.md) |
 | Surface syntax | Low-risk syntax pass and 0.13.2 syntax-governance hardening are implemented; authority-sensitive syntax remains staged. | [Surface elegance RFC](../docs/CELLSCRIPT_SURFACE_ELEGANCE_RFC.md), [Syntax-combination audit](../docs/CELLSCRIPT_SYNTAX_COMBO_AUDIT_METHODOLOGY.md) |
 | Collections | Stack-backed fixed-width `Vec<T>` helper surface is implemented; cell-backed and generic map ownership remain fail-closed. | [Collections support matrix](../docs/CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md), [0.13 release scope](../docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md) |
@@ -108,20 +112,123 @@ assurance surface:
   enforcement;
 - `runtime.builder_assumptions`, `cellc explain-assumptions`, and
   `cellc validate-tx`;
-- transaction solver templates, deployment plans, dependency locks, field-level
-  proof diffs, profiles, transaction traces, and audit bundles;
-- compiler-freeze hardening for IR poison, instruction-level provenance,
-  reserved-register contracts, syscall ABI baselines, and line-exact
-  diagnostic regression tests;
+- template-only transaction plans, deployment plans, dependency locks, proof
+  diffs, profiles, transaction traces, and audit bundles;
 - standard CKB compatibility fixture manifest for sUDT, xUDT, ACP, Cheque,
   Omnilock, NervosDAO since/epoch, and Type ID.
 - proposal-local NovaSeal devnet/profile certification that passes local live
   CKB RPC acceptance and preserves external production blockers.
 
+The 0.17 branch records closure of the 0.16 review findings in
+`docs/archive/0.17/CELLSCRIPT_0_17_REVIEW_FINDINGS_CLOSURE.md`: ProofPlan matching is no longer keyed
+only by coarse category/feature/status, `validate-tx` rejects bare evidence
+tokens and cross-checks indexed payload fields, protocol stdlib descriptor
+stubs are not stable, and `solve-tx` is explicitly `can_submit=false`.
+
 Detailed status:
 
 - [0.16 roadmap](CELLSCRIPT_0_16_ROADMAP.md)
 - [0.16.1 release notes](../docs/releases/CELLSCRIPT_0_16_1_RELEASE_NOTES.md)
+
+### 0.17: iCKB-Grade Protocol Semantics
+
+0.17 moves the protocol-equivalence track from design/model evidence into
+executable CKB-facing semantics:
+
+- `--primitive-strict=0.17`;
+- HeaderDep SourceViews and DAO accumulated-rate/maturity checks;
+- xUDT group amount conserved/minted/burned helpers;
+- current script hash, script args/hash guards, OutPoint and MetaPoint bridge
+  helpers;
+- C256 helper lowering and executable local `u128` materialization;
+- iCKB benchmark specs and the first partial CKB VM differential evidence;
+- fail-closed production-equivalence gate semantics that remain `NOT_PROVEN`
+  until every selected row has dual-side VM evidence.
+
+The standalone 0.17 milestone does not claim full iCKB production equivalence.
+It closes the major semantic gaps and records the remaining proof closure work
+for 0.18. On the carried-forward 0.20 branch, that 0.18 work has moved the
+manifest-declared executable iCKB claim set to `EXECUTED_CKB_VM_DIFF` /
+`PROVEN`; broader state-space, external-audit, and mainnet-certification claims
+remain out of scope.
+
+Detailed status:
+
+- [0.17 roadmap](../docs/archive/0.17/CELLSCRIPT_0_17_ROADMAP.md)
+- [iCKB final report](../docs/archive/0.17/CELLSCRIPT_0_17_ICKB_FINAL_REPORT.md)
+
+### 0.18: First-Class Script API And Equivalence Closure
+
+0.18 should start by replacing helper fragmentation with typed read-only
+ScriptRef / ScriptArgs access:
+
+- `cell.lock.code_hash`, `cell.lock.hash_type`, and args checks;
+- optional type script code/hash/args checks;
+- exact, prefix, suffix, and hash-based script args comparisons;
+- remaining iCKB equivalence prerequisites such as byte-accurate receipt
+  decoding, owner-auth witness fixtures, generic aggregate lowering, and
+  production evidence-manifest closure.
+
+The goal is to make iCKB-style equivalence verification possible without adding
+script construction or deployment solving to the compiler.
+
+Detailed status:
+
+- [0.18 roadmap](../docs/CELLSCRIPT_0_18_ROADMAP.md)
+
+### 0.19: Package Registry Phase 1 And Adapter Boundary
+
+0.19 scope is complete. It turns the CKB ecosystem reuse boundary and Phase 1
+package/deployment identity registry into executable evidence:
+
+- centralized inline CKB ABI constants in `src/ckb_abi.rs`;
+- parity tests against `ckb-std` / `ckb-types` for constants, SourceView,
+  WitnessArgs layout, TYPE_ID, since/epoch, and occupied-capacity field use;
+- `cellc action build --json` adapter contracts and packed-materialization
+  requirements;
+- `cellc ckb-std-compat --json` compatibility reports;
+- an offline `examples/ckb-sdk-builder` adapter-shape crate using
+  `ckb-sdk-rust` packed types and adapter-owned evidence boundaries;
+- namespace-aware package manifests and `cellc init --namespace`;
+- Git-backed source registry records with tag-pinned source hash verification;
+- path, git, and registry dependency resolution in the compile pipeline;
+- `Cell.lock` build identity for compiler version, target profile, artifact,
+  metadata, schema, ABI, and constraints hashes;
+- `cellc package verify` and `cellc registry verify` fail-closed text and JSON
+  verification.
+
+Generated TypeScript builders, live-chain deployment proof, stateful flow
+runner evidence, publisher signatures, and on-chain registry/index/proxy design
+are moved to 0.20.
+
+Detailed status:
+
+- [0.19 roadmap](../docs/CELLSCRIPT_0_19_ROADMAP.md)
+- [0.19 closure notes](../docs/releases/CELLSCRIPT_0_19_RELEASE_NOTES.md)
+- [Registry Phase 1](../docs/CELLSCRIPT_REGISTRY_PHASE1.md)
+
+### 0.20: Generated Builder And Live Registry Proof
+
+0.20 should consume the 0.19 package/build/deployment identity from generated
+builders and live-chain verification:
+
+- `cellc gen-builder --target typescript` with typed action APIs and CCC
+  integration;
+- generated-builder package tests, dry-run/submit modes, and negative
+  builder-shape rejection;
+- `cellc registry verify --live` / equivalent live-cell verification for
+  network-specific deployment facts;
+- VS Code and tooling-gate coverage for generated builder creation, package
+  verification, registry verification, and generated `npm test`;
+- stale/wrong-network/wrong-code-hash/missing-CellDep/deprecated deployment
+  rejection fixtures;
+- stateful flow runner evidence for canonical examples;
+- registry trust hardening for publisher signatures, trust anchors, mutable
+  channels, revocation, and possible on-chain registry/index/proxy design.
+
+Detailed status:
+
+- [0.20 roadmap](../docs/CELLSCRIPT_0_20_ROADMAP.md)
 
 ### Next Authorization Hardening Track
 
@@ -232,8 +339,8 @@ Future work:
 - keep release notes in `docs/releases/` and roadmap files in `roadmap/`,
   separate from tutorial pages;
 - keep top-level `examples/*.cell` as the single checked-in bundled business
-  source, with `examples/language/*.cell` and `examples/ickb_benchmark/*.cell`
-  for compiler/tooling and benchmark coverage.
+  source, with `examples/language/*.cell` for compiler/tooling coverage and
+  `tests/benchmarks/ickb_specs/*.cell` for the iCKB-inspired benchmark surface.
 
 Source documents:
 

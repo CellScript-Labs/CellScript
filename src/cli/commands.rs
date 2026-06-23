@@ -1,29 +1,47 @@
 use crate::docgen::{DocGenerator, OutputFormat};
 use crate::error::Result;
 use crate::fmt::format_default;
-use crate::package::{validate_git_revision, Dependency, DetailedDependency, Lockfile, PackageManager, PolicyConfig};
+use crate::package::{Dependency, DetailedDependency, Lockfile, PackageManager, PackageManifest, PolicyConfig};
 use crate::runtime_errors::{runtime_error_info, runtime_error_info_by_code, CellScriptRuntimeErrorInfo, ALL_RUNTIME_ERRORS};
 use crate::{
-    compile_path, compile_path_with_entry_action, compile_path_with_entry_lock, compile_source_with_entry_lock,
-    default_metadata_path_for_artifact, default_output_path_for_input, load_modules_for_input, resolve_input_path,
-    validate_artifact_metadata, validate_source_units_on_disk_under, validate_source_units_primitive_mode_under, ArtifactFormat,
-    CkbResourceIdentityMetadata, CompileMetadata, CompileOptions, CreatePatternMetadata, EntryWitnessArg, ParamMetadata,
-    ProofPlanMetadata, ProofPlanSoundnessReport, TargetProfile, ENTRY_WITNESS_ABI,
+    compile_path, compile_path_with_entry_action, compile_path_with_entry_lock, default_metadata_path_for_artifact,
+    default_output_path_for_input, load_modules_for_input, resolve_input_path, validate_artifact_metadata,
+    validate_source_units_on_disk, ArtifactFormat, CompileMetadata, CompileOptions, EntryWitnessArg, ParamMetadata, ProofPlanMetadata,
+    TargetProfile, ENTRY_WITNESS_ABI,
 };
-use camino::{Utf8Path, Utf8PathBuf};
+use base64::Engine;
+use camino::Utf8Path;
 #[cfg(feature = "vm-runner")]
 use ckb_vm::{
     cost_model::estimate_cycles, machine::VERSION2, Bytes, DefaultCoreMachine, DefaultMachineBuilder, DefaultMachineRunner,
     SparseMemory, SupportMachine, TraceMachine, WXorXMemory, ISA_B, ISA_IMC, ISA_MOP,
 };
 use colored::Colorize;
+use ring::signature::KeyPair;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::io::Read;
-#[cfg(unix)]
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::io::{Read, Write};
+use std::net::TcpStream;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
-const CKB_HASH_FILE_SIZE_LIMIT_BYTES: u64 = 1024 * 1024;
+const CKB_STANDARD_COMPAT_MANIFEST_SCHEMA: &str = "cellscript-ckb-standard-compat-v0.16";
+const CKB_STANDARD_FIXTURE_SCHEMA: &str = "cellscript-ckb-fixture-v0.16";
+const ICKB_CLAIM_MANIFEST_SCHEMA: &str = "cellscript-ickb-claim-manifest-v1";
+const ICKB_DIFF_MATRIX_SCHEMA: &str = "cellscript-ickb-diff-matrix-v1";
+const ICKB_DIFF_EVIDENCE_LEVEL: &str = "DIFFERENTIAL_CKB_VM_EXECUTED";
+const ICKB_REQUIRED_PRODUCTION_EVIDENCE: [&str; 8] = [
+    "script_group",
+    "cell_deps",
+    "header_deps",
+    "outputs_data",
+    "witnesses",
+    "capacity_fee_tx_size_cycles",
+    "deployment_manifest",
+    "builder_plan",
+];
+const ICKB_REQUIRED_HARDENING_EVIDENCE: [&str; 5] =
+    ["mutation_coverage", "deterministic_fuzz_seed", "normalized_fixture_generator", "max_cellscript_cycles", "max_tx_size_bytes"];
+const CELLSCRIPT_CKB_RPC_URL_ENV: &str = "CELLSCRIPT_CKB_RPC_URL";
 const NOVASEAL_CERTIFICATION_PLUGIN: &str = "novaseal-profile-v0";
 const NOVASEAL_CERTIFICATION_REPORT_SCHEMA: &str = "cellscript-certification-report-v0.1";
 const NOVASEAL_PLUGIN_REPORT_SCHEMA: &str = "novaseal-production-gates-v0.4";
@@ -55,35 +73,6 @@ const NOVASEAL_EXTERNAL_V1_DIMENSIONS: &[&str] = &[
     "public_btc_spv_evidence",
     "rwa_legal_registry_review_evidence",
 ];
-const STRICT_V0_16_PRIMITIVE_COMPAT: &str = "0.16";
-const BUILDER_MANIFEST_SCHEMA: &str = "cellscript-builder-manifest-v0.16.2";
-const BUILDER_CHECK_SCHEMA: &str = "cellscript-builder-check-v0.16.2";
-const RESOURCE_IDENTITY_PLAN_SCHEMA: &str = "cellscript-resource-identity-plan-v1";
-const RESOURCE_IDENTITY_MATERIAL_SCHEMA: &str = "cellscript-resource-identity-material-v1";
-const RESOURCE_IDENTITY_LOCK_NAME: &str = "resource_identity";
-const RESOURCE_IDENTITY_HASH_TYPE: &str = "data1";
-const CKB_DEVNET_ALWAYS_SUCCESS_CODE_HASH: &str = "0x28e83a1277d48add8e72fadaa9248559e1b632bab2bd60b27955ebc4c03800a5";
-const ZERO_PLACEHOLDER_CODE_HASH: &str = "0x0000000000000000000000000000000000000000000000000000000000000000";
-const RESOURCE_IDENTITY_SOURCE: &str = r#"module cellscript::generated::resource_identity_v1
-
-lock resource_identity(lock_args identity_hash: Hash) -> bool {
-    true
-}
-"#;
-
-#[derive(Debug, Default)]
-struct ResourceIdentityInputMap {
-    type_material: BTreeMap<String, String>,
-    binding_material: BTreeMap<(String, String), String>,
-}
-
-#[derive(Debug)]
-struct ResourceIdentityScriptPlan {
-    identity_hash: String,
-    identity_material: serde_json::Value,
-    script: serde_json::Value,
-    script_hash: String,
-}
 
 #[derive(Debug)]
 pub enum Command {
@@ -103,6 +92,7 @@ pub enum Command {
     Abi(AbiArgs),
     SchedulerPlan(SchedulerPlanArgs),
     CkbHash(CkbHashArgs),
+    CkbStdCompat(CkbStdCompatArgs),
     Explain(ExplainArgs),
     ExplainProfile(ExplainProfileArgs),
     ExplainProof(ExplainProofArgs),
@@ -113,27 +103,33 @@ pub enum Command {
     Profile(ProfileArgs),
     TraceTx(TraceTxArgs),
     AuditBundle(AuditBundleArgs),
-    Certify(CertifyArgs),
     ValidateTx(ValidateTxArgs),
-    BuilderManifest(BuilderManifestArgs),
-    BuilderCheck(BuilderCheckArgs),
     SolveTx(SolveTxArgs),
-    ResourceIdentity(ResourceIdentityArgs),
+    VerifyCkbFixtures(VerifyCkbFixturesArgs),
     DeployPlan(DeployPlanArgs),
     VerifyDeploy(VerifyDeployArgs),
     DiffDeploy(DiffDeployArgs),
     LockDeps(LockDepsArgs),
     ActionBuild(ActionBuildArgs),
+    GenBuilder(GenBuilderArgs),
     /// Encode generated entry wrapper witness bytes
     EntryWitness(EntryWitnessArgs),
     VerifyArtifact(VerifyArtifactArgs),
     Run(RunArgs),
     Publish(PublishArgs),
     Install(InstallArgs),
+    RegistryVerify(RegistryVerifyArgs),
+    PackageVerify(PackageVerifyArgs),
+    RegistryAdd(RegistryAddArgs),
+    RegistryEdit(RegistryEditArgs),
+    Certify(CertifyArgs),
     Update,
     Info(InfoArgs),
     Login(LoginArgs),
-    Invalid(String),
+    AuthLogin(AuthCapabilityArgs),
+    AuthCapabilityCreate(AuthCapabilityArgs),
+    AuthCapabilitySubmit(AuthCapabilitySubmitArgs),
+    AuthCapabilityRevoke(AuthCapabilityRevokeArgs),
 }
 
 #[derive(Debug, Default)]
@@ -154,6 +150,10 @@ pub struct BuildArgs {
     pub deny_ckb_runtime: bool,
     pub deny_runtime_obligations: bool,
     pub primitive_compat: Option<String>,
+    /// Build a specific workspace member by package name.
+    pub package: Option<String>,
+    /// Build all workspace members.
+    pub workspace: bool,
 }
 
 #[derive(Debug, Default)]
@@ -189,6 +189,7 @@ pub struct InitArgs {
     pub name: Option<String>,
     pub path: Option<PathBuf>,
     pub lib: bool,
+    pub namespace: Option<String>,
     pub json: bool,
 }
 
@@ -207,7 +208,6 @@ pub struct AddArgs {
     pub dev: bool,
     pub build: bool,
     pub git: Option<String>,
-    pub rev: Option<String>,
     pub path: Option<PathBuf>,
     pub json: bool,
 }
@@ -223,6 +223,8 @@ pub struct RemoveArgs {
 #[derive(Debug, Default)]
 pub struct CleanArgs {
     pub json: bool,
+    /// Also clean incremental compilation cache (.cell/build/cache)
+    pub cache: bool,
 }
 
 #[derive(Debug, Default)]
@@ -241,6 +243,10 @@ pub struct CheckArgs {
     pub deny_ckb_runtime: bool,
     pub deny_runtime_obligations: bool,
     pub primitive_compat: Option<String>,
+    /// Check a specific workspace member by package name.
+    pub package: Option<String>,
+    /// Check all workspace members.
+    pub workspace: bool,
 }
 
 #[derive(Debug, Default)]
@@ -288,6 +294,11 @@ pub struct CkbHashArgs {
 }
 
 #[derive(Debug, Default)]
+pub struct CkbStdCompatArgs {
+    pub json: bool,
+}
+
+#[derive(Debug, Default)]
 pub struct ExplainArgs {
     pub code: String,
     pub json: bool,
@@ -312,11 +323,7 @@ pub struct ExplainAssumptionsArgs {
     pub input: Option<PathBuf>,
     pub target: Option<String>,
     pub target_profile: Option<String>,
-    pub entry_action: Option<String>,
-    pub entry_lock: Option<String>,
-    pub primitive_compat: Option<String>,
     pub json: bool,
-    pub human: bool,
 }
 
 #[derive(Debug, Default)]
@@ -348,7 +355,6 @@ pub struct ProfileArgs {
     pub entry: Option<String>,
     pub target: Option<String>,
     pub target_profile: Option<String>,
-    pub primitive_compat: Option<String>,
     pub json: bool,
 }
 
@@ -356,7 +362,6 @@ pub struct ProfileArgs {
 pub struct TraceTxArgs {
     pub against: PathBuf,
     pub tx: PathBuf,
-    pub primitive_compat: Option<String>,
     pub json: bool,
 }
 
@@ -366,55 +371,14 @@ pub struct AuditBundleArgs {
     pub output: Option<PathBuf>,
     pub target: Option<String>,
     pub target_profile: Option<String>,
-    pub primitive_compat: Option<String>,
     pub json: bool,
-}
-
-#[derive(Debug, Default)]
-pub struct CertifyArgs {
-    pub plugin: String,
-    pub repo_root: Option<PathBuf>,
-    pub report: Option<PathBuf>,
-    pub output: Option<PathBuf>,
-    pub json: bool,
-    pub require_production: bool,
 }
 
 #[derive(Debug, Default)]
 pub struct ValidateTxArgs {
     pub against: PathBuf,
     pub tx: PathBuf,
-    pub resource_identities: Option<PathBuf>,
-    pub production: bool,
-    pub primitive_compat: Option<String>,
     pub json: bool,
-    pub human: bool,
-}
-
-#[derive(Debug, Default)]
-pub struct BuilderManifestArgs {
-    pub input: Option<PathBuf>,
-    pub output: Option<PathBuf>,
-    pub target: Option<String>,
-    pub target_profile: Option<String>,
-    pub entry_action: Option<String>,
-    pub entry_lock: Option<String>,
-    pub resource_identities: Option<PathBuf>,
-    pub primitive_compat: Option<String>,
-    pub json: bool,
-    pub human: bool,
-}
-
-#[derive(Debug, Default)]
-pub struct BuilderCheckArgs {
-    pub manifest: PathBuf,
-    pub tx: PathBuf,
-    pub metadata: Option<PathBuf>,
-    pub resource_identities: Option<PathBuf>,
-    pub production: bool,
-    pub primitive_compat: Option<String>,
-    pub json: bool,
-    pub human: bool,
 }
 
 #[derive(Debug, Default)]
@@ -423,27 +387,13 @@ pub struct SolveTxArgs {
     pub output: Option<PathBuf>,
     pub target: Option<String>,
     pub target_profile: Option<String>,
-    pub entry_action: Option<String>,
-    pub entry_lock: Option<String>,
-    pub primitive_compat: Option<String>,
     pub json: bool,
-    pub human: bool,
 }
 
 #[derive(Debug, Default)]
-pub struct ResourceIdentityArgs {
-    pub input: Option<PathBuf>,
-    pub output: Option<PathBuf>,
-    pub plan_output: Option<PathBuf>,
-    pub source_output: Option<PathBuf>,
-    pub target: Option<String>,
-    pub target_profile: Option<String>,
-    pub primitive_compat: Option<String>,
-    pub types: Vec<String>,
-    pub identities: Vec<String>,
-    pub instance: Option<String>,
+pub struct VerifyCkbFixturesArgs {
+    pub manifest: PathBuf,
     pub json: bool,
-    pub human: bool,
 }
 
 #[derive(Debug, Default)]
@@ -484,6 +434,22 @@ pub struct ActionBuildArgs {
     pub output: Option<PathBuf>,
     pub target: Option<String>,
     pub target_profile: Option<String>,
+    pub fabric_intent: bool,
+    pub json: bool,
+}
+
+#[derive(Debug, Default)]
+pub struct GenBuilderArgs {
+    pub input: Option<PathBuf>,
+    pub metadata: Option<PathBuf>,
+    pub lockfile: Option<PathBuf>,
+    pub deployed: Option<PathBuf>,
+    pub deployment_network: Option<String>,
+    pub action: Option<String>,
+    pub output: Option<PathBuf>,
+    pub target: String,
+    pub target_profile: Option<String>,
+    pub package_name: Option<String>,
     pub json: bool,
 }
 
@@ -498,7 +464,6 @@ pub struct EntryWitnessArgs {
     pub target: Option<String>,
     pub target_profile: Option<String>,
     pub json: bool,
-    pub human: bool,
 }
 
 #[derive(Debug, Default)]
@@ -528,21 +493,105 @@ pub struct RunArgs {
 #[derive(Debug, Default)]
 pub struct PublishArgs {
     pub dry_run: bool,
+    pub offline: bool,
     pub allow_dirty: bool,
+    pub api_url: Option<String>,
+    pub capability_key_id: Option<String>,
+    pub capability_signature: Option<String>,
+    pub idempotency_key: Option<String>,
+    pub payload: Option<PathBuf>,
+    pub source_snapshot: Option<PathBuf>,
+    pub print_payload: bool,
+    pub json: bool,
 }
 
 #[derive(Debug, Default)]
 pub struct InstallArgs {
     pub crate_name: Option<String>,
     pub version: Option<String>,
+    pub namespace: Option<String>,
     pub git: Option<String>,
-    pub rev: Option<String>,
     pub path: Option<PathBuf>,
+    pub allow_unverified: bool,
+    pub allow_quarantined: bool,
 }
 
 #[derive(Debug, Default)]
 pub struct LoginArgs {
     pub registry: Option<String>,
+}
+
+#[derive(Debug, Default)]
+pub struct AuthCapabilityArgs {
+    pub registry_origin: Option<String>,
+    pub principal_type: Option<String>,
+    pub principal_id: Option<String>,
+    pub capability_pubkey: Option<String>,
+    pub scopes: Vec<String>,
+    pub expires: Option<String>,
+    pub capability_expires_at: Option<String>,
+    pub json: bool,
+}
+
+#[derive(Debug, Default)]
+pub struct AuthCapabilitySubmitArgs {
+    pub api_url: Option<String>,
+    pub payload: PathBuf,
+    pub joyid_signature: PathBuf,
+    pub json: bool,
+}
+
+#[derive(Debug, Default)]
+pub struct AuthCapabilityRevokeArgs {
+    pub api_url: Option<String>,
+    pub registry_origin: Option<String>,
+    pub principal_type: Option<String>,
+    pub principal_id: Option<String>,
+    pub capability_key_id: Option<String>,
+    pub payload: Option<PathBuf>,
+    pub joyid_signature: Option<PathBuf>,
+    pub reason: Option<String>,
+    pub json: bool,
+}
+
+#[derive(Debug, Default)]
+pub struct RegistryVerifyArgs {
+    pub json: bool,
+    pub live: bool,
+    pub rpc_url: Option<String>,
+    pub network: Option<String>,
+    pub require_publisher_signature: bool,
+    pub require_audit_report: bool,
+}
+
+#[derive(Debug, Default)]
+pub struct PackageVerifyArgs {
+    pub json: bool,
+}
+
+#[derive(Debug, Default)]
+pub struct RegistryAddArgs {
+    pub namespace: String,
+    pub name: String,
+    pub source: String,
+}
+
+#[derive(Debug, Default)]
+pub struct RegistryEditArgs {
+    pub yank: Option<String>,
+    pub reason: Option<String>,
+    pub replaced_by: Option<String>,
+    pub yanked_at: Option<String>,
+}
+
+#[derive(Debug, Default)]
+pub struct CertifyArgs {
+    pub plugin: String,
+    pub repo_root: Option<PathBuf>,
+    pub report: Option<PathBuf>,
+    pub output: Option<PathBuf>,
+    pub json: bool,
+    pub require_production: bool,
 }
 
 pub struct CommandExecutor;
@@ -570,6 +619,7 @@ impl CommandExecutor {
             Command::Abi(args) => Self::abi(args),
             Command::SchedulerPlan(args) => Self::scheduler_plan(args),
             Command::CkbHash(args) => Self::ckb_hash(args),
+            Command::CkbStdCompat(args) => Self::ckb_std_compat(args),
             Command::Explain(args) => Self::explain(args),
             Command::ExplainProfile(args) => Self::explain_profile(args),
             Command::ExplainProof(args) => Self::explain_proof(args),
@@ -580,17 +630,15 @@ impl CommandExecutor {
             Command::Profile(args) => Self::profile(args),
             Command::TraceTx(args) => Self::trace_tx(args),
             Command::AuditBundle(args) => Self::audit_bundle(args),
-            Command::Certify(args) => Self::certify(args),
             Command::ValidateTx(args) => Self::validate_tx(args),
-            Command::BuilderManifest(args) => Self::builder_manifest(args),
-            Command::BuilderCheck(args) => Self::builder_check(args),
             Command::SolveTx(args) => Self::solve_tx(args),
-            Command::ResourceIdentity(args) => Self::resource_identity(args),
+            Command::VerifyCkbFixtures(args) => Self::verify_ckb_fixtures(args),
             Command::DeployPlan(args) => Self::deploy_plan(args),
             Command::VerifyDeploy(args) => Self::verify_deploy(args),
             Command::DiffDeploy(args) => Self::diff_deploy(args),
             Command::LockDeps(args) => Self::lock_deps(args),
             Command::ActionBuild(args) => Self::action_build(args),
+            Command::GenBuilder(args) => Self::gen_builder(args),
             Command::EntryWitness(args) => Self::entry_witness(args),
             Command::VerifyArtifact(args) => Self::verify_artifact(args),
             Command::Run(args) => Self::run(args),
@@ -599,21 +647,34 @@ impl CommandExecutor {
             Command::Update => Self::update(),
             Command::Info(args) => Self::info(args),
             Command::Login(args) => Self::login(args),
-            Command::Invalid(message) => Err(crate::error::CompileError::without_span(message)),
+            Command::AuthLogin(args) | Command::AuthCapabilityCreate(args) => Self::auth_capability(args),
+            Command::AuthCapabilitySubmit(args) => Self::auth_capability_submit(args),
+            Command::AuthCapabilityRevoke(args) => Self::auth_capability_revoke(args),
+            Command::RegistryVerify(args) => Self::registry_verify(args),
+            Command::PackageVerify(args) => Self::package_verify(args),
+            Command::RegistryAdd(args) => Self::registry_add(args),
+            Command::RegistryEdit(args) => Self::registry_edit(args),
+            Command::Certify(args) => Self::certify(args),
         }
     }
 
     fn build(args: BuildArgs) -> Result<()> {
-        if let Some(jobs) = args.jobs {
-            if jobs == 0 {
-                return Err(crate::error::CompileError::without_span("cellc build --jobs must be at least 1"));
-            }
-            if jobs != 1 {
-                return Err(crate::error::CompileError::without_span(
-                    "cellc build --jobs is reserved for future parallel package builds; current builds compile one package entry, so omit --jobs or use --jobs 1",
-                ));
+        // Workspace mode: build all members or a specific member.
+        if args.workspace || args.package.is_some() {
+            return Self::build_workspace(args);
+        }
+        // Also check if the current directory is a workspace root without explicit flags.
+        let ws_root = crate::find_workspace_root(Utf8Path::new("."))?;
+        if let Some(ws_root) = ws_root {
+            let members = crate::resolve_workspace_members(&ws_root)?;
+            if !members.is_empty() {
+                // Current dir is a workspace root; build all members.
+                let mut ws_args = args;
+                ws_args.workspace = true;
+                return Self::build_workspace(ws_args);
             }
         }
+
         let opt_level = if args.release { 3 } else { 1 };
         let input = Utf8Path::new(".");
         let options = CompileOptions {
@@ -631,9 +692,7 @@ impl CommandExecutor {
             (Some(action), None) => compile_path_with_entry_action(input, options, action),
             (None, Some(lock)) => compile_path_with_entry_lock(input, options, lock),
             (None, None) => compile_path(input, options),
-            (Some(_), Some(_)) => {
-                Err(crate::error::CompileError::without_span("--entry-action and --entry-lock are mutually exclusive"))
-            }
+            (Some(_), Some(_)) => unreachable!("validated above"),
         }?;
         let policy_args = effective_build_check_args(&args)?;
         validate_check_policy(&result.metadata, &policy_args)?;
@@ -642,6 +701,8 @@ impl CommandExecutor {
         result.write_to_path(&output_path)?;
         let metadata_path = default_metadata_path_for_artifact(&output_path);
         result.write_metadata_to_path(&metadata_path)?;
+
+        refresh_lockfile_from_build(std::path::Path::new("."), &result.metadata)?;
 
         let policy_verified = policy_args.production
             || policy_args.deny_fail_closed
@@ -660,6 +721,7 @@ impl CommandExecutor {
                 "source_hash": result.metadata.source_hash,
                 "source_content_hash": result.metadata.source_content_hash,
                 "metadata_schema_version": result.metadata.metadata_schema_version,
+                "metadata_schema_versions": metadata_schema_versions_json(&result.metadata),
                 "compiler_version": result.metadata.compiler_version,
                 "standalone_runner_compatible": result.metadata.runtime.standalone_runner_compatible,
                 "ckb_runtime_required": result.metadata.runtime.ckb_runtime_required,
@@ -686,6 +748,7 @@ impl CommandExecutor {
                 "pool_runtime_input_requirements": pool_runtime_input_requirement_count(&result.metadata),
                 "pool_runtime_input_requirement_summaries": pool_runtime_input_requirement_summaries(&result.metadata),
                 "policy_verified": policy_verified,
+                "cache_hit": result.cache_hit,
                 "constraints": &result.metadata.constraints,
             });
             let json = serde_json::to_string_pretty(&summary)
@@ -699,6 +762,169 @@ impl CommandExecutor {
         println!("  Target profile: {}", result.metadata.target_profile.name);
         println!("  Output: {}", output_path);
         println!("  Metadata: {}", metadata_path);
+        if result.cache_hit {
+            println!("  {}", "(incremental cache hit)".yellow());
+        }
+        Ok(())
+    }
+
+    fn build_workspace(args: BuildArgs) -> Result<()> {
+        let ws_root = crate::find_workspace_root(Utf8Path::new("."))?.ok_or_else(|| {
+            crate::error::CompileError::without_span(
+                "no workspace root found; run from a directory containing a [workspace] Cell.toml",
+            )
+        })?;
+        let all_members = crate::resolve_workspace_members(&ws_root)?;
+        let members: Vec<_> = if let Some(ref pkg_name) = args.package {
+            // Find the specific member by reading its manifest for the package name.
+            let mut found = Vec::new();
+            for member_dir in &all_members {
+                let pm = crate::package::PackageManager::new(member_dir.as_std_path());
+                let manifest = pm.read_manifest()?;
+                if manifest.package.name == *pkg_name {
+                    found.push(member_dir.clone());
+                }
+            }
+            if found.is_empty() {
+                return Err(crate::error::CompileError::without_span(format!(
+                    "workspace member '{}' not found; available members: {}",
+                    pkg_name,
+                    all_members.iter().map(|m| m.as_str().to_string()).collect::<Vec<_>>().join(", ")
+                )));
+            }
+            found
+        } else {
+            all_members
+        };
+
+        let opt_level = if args.release { 3 } else { 1 };
+        let mut member_results = Vec::new();
+        let mut failed = 0;
+
+        for member_dir in &members {
+            let options = CompileOptions {
+                opt_level,
+                output: None,
+                debug: false,
+                target: args.target.clone(),
+                target_profile: args.target_profile.clone(),
+                primitive_compat: args.primitive_compat.clone(),
+            };
+
+            let compile_result = match (args.entry_action.as_deref(), args.entry_lock.as_deref()) {
+                (Some(action), None) => compile_path_with_entry_action(member_dir, options, action),
+                (None, Some(lock)) => compile_path_with_entry_lock(member_dir, options, lock),
+                _ => compile_path(member_dir, options),
+            };
+
+            match compile_result {
+                Ok(result) => {
+                    let policy_args = effective_build_check_args(&args)?;
+                    if let Err(e) = validate_check_policy(&result.metadata, &policy_args) {
+                        if args.json {
+                            member_results.push(serde_json::json!({
+                                "member": member_dir.as_str(),
+                                "status": "policy_failed",
+                                "error": e.message,
+                            }));
+                        } else {
+                            eprintln!("{}: policy check failed: {}", member_dir, e.message);
+                        }
+                        failed += 1;
+                        continue;
+                    }
+
+                    let resolved = resolve_input_path(member_dir)?;
+                    let output_path = default_output_path_for_input(member_dir, &resolved, result.artifact_format)?;
+                    result.write_to_path(&output_path)?;
+                    let metadata_path = default_metadata_path_for_artifact(&output_path);
+                    result.write_metadata_to_path(&metadata_path)?;
+
+                    member_results.push(serde_json::json!({
+                        "member": member_dir.as_str(),
+                        "status": "ok",
+                        "artifact": output_path.to_string(),
+                        "metadata": metadata_path.to_string(),
+                        "artifact_format": result.artifact_format.display_name(),
+                        "target_profile": result.metadata.target_profile.name,
+                        "artifact_hash": result.metadata.artifact_hash,
+                        "artifact_size_bytes": result.artifact_bytes.len(),
+                        "cache_hit": result.cache_hit,
+                    }));
+
+                    if !args.json {
+                        println!("{} {}", "Built".green(), member_dir);
+                    }
+                }
+                Err(e) => {
+                    if args.json {
+                        member_results.push(serde_json::json!({
+                            "member": member_dir.as_str(),
+                            "status": "failed",
+                            "error": e.message,
+                        }));
+                    } else {
+                        eprintln!("{}: {}", member_dir, e.message);
+                    }
+                    failed += 1;
+                }
+            }
+        }
+
+        if args.json {
+            let summary = serde_json::json!({
+                "status": if failed == 0 { "ok" } else { "failed" },
+                "mode": "workspace",
+                "members": members.len(),
+                "succeeded": members.len() - failed,
+                "failed": failed,
+                "results": member_results,
+            });
+            let json = serde_json::to_string_pretty(&summary).map_err(|error| {
+                crate::error::CompileError::without_span(format!("failed to serialize workspace build summary: {}", error))
+            })?;
+            println!("{}", json);
+            if failed > 0 {
+                return Err(crate::error::CompileError::without_span(format!(
+                    "{} of {} workspace members failed to build",
+                    failed,
+                    members.len()
+                )));
+            }
+            return Ok(());
+        }
+
+        if failed > 0 {
+            return Err(crate::error::CompileError::without_span(format!(
+                "{} of {} workspace members failed to build",
+                failed,
+                members.len()
+            )));
+        }
+
+        // Write workspace-level Cell.lock at the workspace root.
+        let mut lockfile = Lockfile::read_from_root(ws_root.as_std_path())?.unwrap_or_else(Lockfile::new);
+        // Merge build hashes from each successfully built member.
+        for res in &member_results {
+            if res["status"].as_str() == Some("ok") {
+                let member_name = res["member"].as_str().unwrap_or("unknown");
+                let artifact_hash = res.get("artifact_hash").and_then(|v| v.as_str()).unwrap_or("");
+                if !artifact_hash.is_empty() {
+                    lockfile.dependencies.insert(
+                        member_name.to_string(),
+                        crate::package::LockedDependency {
+                            version: String::new(),
+                            source: crate::package::LockedSource::Path { path: member_name.to_string() },
+                            source_hash: Some(artifact_hash.to_string()),
+                            build: None,
+                        },
+                    );
+                }
+            }
+        }
+        lockfile.write_to_root(ws_root.as_std_path())?;
+
+        println!("{}", format!("Workspace build complete: {} members", members.len()).green());
         Ok(())
     }
 
@@ -849,12 +1075,6 @@ impl CommandExecutor {
     fn doc(args: DocArgs) -> Result<()> {
         let output = Self::generate_docs(&args)?;
         let output_size_bytes = std::fs::metadata(&output).map(|metadata| metadata.len()).unwrap_or(0);
-        let opened = if args.open {
-            open_doc_output(&output)?;
-            true
-        } else {
-            false
-        };
 
         if args.json {
             let summary = serde_json::json!({
@@ -862,17 +1082,25 @@ impl CommandExecutor {
                 "format": display_doc_output_format(&args.output_format),
                 "output": output.display().to_string(),
                 "output_size_bytes": output_size_bytes,
-                "opened": opened,
+                "opened": args.open,
             });
             let json = serde_json::to_string_pretty(&summary)
                 .map_err(|error| crate::error::CompileError::without_span(format!("failed to serialize doc summary: {}", error)))?;
             println!("{}", json);
+
+            if args.open {
+                let _ = std::process::Command::new("open").arg(&output).status();
+            }
 
             return Ok(());
         }
 
         println!("{}", "Documentation generated".green());
         println!("  Output: {}", output.display());
+
+        if args.open {
+            let _ = std::process::Command::new("open").arg(&output).status();
+        }
 
         Ok(())
     }
@@ -998,6 +1226,11 @@ impl CommandExecutor {
         } else {
             pm.init(&name)?;
         }
+        if let Some(namespace) = &args.namespace {
+            let mut manifest = pm.read_manifest()?;
+            manifest.package.namespace = Some(namespace.clone());
+            pm.write_manifest(&manifest)?;
+        }
 
         if args.json {
             let entry = if args.lib { "src/lib.cell" } else { "src/main.cell" };
@@ -1008,6 +1241,7 @@ impl CommandExecutor {
                 "path": path.display().to_string(),
                 "manifest": path.join("Cell.toml").display().to_string(),
                 "entry": entry,
+                "namespace": args.namespace,
                 "created_files": [
                     path.join("Cell.toml").display().to_string(),
                     path.join(entry).display().to_string(),
@@ -1084,11 +1318,13 @@ impl CommandExecutor {
 
     fn add(args: AddArgs) -> Result<()> {
         validate_dependency_target_flags(args.dev, args.build)?;
-        validate_dependency_source_args(args.git.as_deref(), args.path.as_deref(), args.rev.as_deref())?;
+        if args.git.is_some() && args.path.is_some() {
+            return Err(crate::error::CompileError::without_span("cellc add accepts either --git or --path, not both"));
+        }
 
         let pm = PackageManager::new(".");
         let mut manifest = pm.read_manifest()?;
-        let dependency = dependency_from_add_args(&args)?;
+        let dependency = dependency_from_add_args(&args);
         let target = dependency_target_label(args.dev, args.build);
         let mut added = Vec::new();
 
@@ -1096,6 +1332,7 @@ impl CommandExecutor {
             if !args.json {
                 println!("{} {} to {}", "Adding".cyan(), crate_name, target);
             }
+            validate_not_self_dependency(crate_name, &dependency, &manifest)?;
             dependency_map_mut(&mut manifest, args.dev, args.build).insert(crate_name.clone(), dependency.clone());
             added.push(crate_name.clone());
         }
@@ -1165,23 +1402,19 @@ impl CommandExecutor {
             println!("{}", "Cleaning...".cyan());
         }
 
-        let package_root = std::env::current_dir()?.canonicalize()?;
-        let manifest = PackageManager::new(&package_root).read_manifest()?;
-        let existing_paths =
-            clean_generated_paths(&package_root, &manifest).into_iter().filter(|path| path.exists()).collect::<Vec<_>>();
-        for path in &existing_paths {
-            validate_clean_path(&package_root, path)?;
+        let mut paths = vec!["target", ".cell/cache"];
+        if args.cache {
+            paths.push(".cell/build/cache");
         }
-
         let mut removed_paths = Vec::new();
-        for path in existing_paths {
-            let label = clean_path_label(&package_root, &path);
-            if path.exists() {
+
+        for path in paths {
+            if std::path::Path::new(path).exists() {
                 if !args.json {
-                    println!("  Removing {}", label);
+                    println!("  Removing {}", path);
                 }
-                remove_clean_path(&package_root, &path)?;
-                removed_paths.push(label);
+                std::fs::remove_dir_all(path)?;
+                removed_paths.push(path.to_string());
             }
         }
 
@@ -1206,6 +1439,20 @@ impl CommandExecutor {
     }
 
     fn check(args: CheckArgs) -> Result<()> {
+        // Workspace mode: check all members or a specific member.
+        if args.workspace || args.package.is_some() {
+            return Self::check_workspace(args);
+        }
+        let ws_root = crate::find_workspace_root(Utf8Path::new("."))?;
+        if let Some(ws_root) = ws_root {
+            let members = crate::resolve_workspace_members(&ws_root)?;
+            if !members.is_empty() {
+                let mut ws_args = args;
+                ws_args.workspace = true;
+                return Self::check_workspace(ws_args);
+            }
+        }
+
         let args = effective_check_args(args)?;
         let requested_profile = effective_check_target_profile(&args)?;
         let compile_target_profile = compile_target_profile_for_check(requested_profile);
@@ -1248,6 +1495,7 @@ impl CommandExecutor {
                 "compiled_target_profile": result.metadata.target_profile.name.as_str(),
                 "target_profile_policy_violations": target_profile_policy_violations,
                 "metadata_schema_version": result.metadata.metadata_schema_version,
+                "metadata_schema_versions": metadata_schema_versions_json(&result.metadata),
                 "compiler_version": result.metadata.compiler_version,
                 "standalone_runner_compatible": result.metadata.runtime.standalone_runner_compatible,
                 "ckb_runtime_required": result.metadata.runtime.ckb_runtime_required,
@@ -1308,6 +1556,102 @@ impl CommandExecutor {
         Ok(())
     }
 
+    fn check_workspace(args: CheckArgs) -> Result<()> {
+        let ws_root = crate::find_workspace_root(Utf8Path::new("."))?.ok_or_else(|| {
+            crate::error::CompileError::without_span(
+                "no workspace root found; run from a directory containing a [workspace] Cell.toml",
+            )
+        })?;
+        let all_members = crate::resolve_workspace_members(&ws_root)?;
+        let members: Vec<_> = if let Some(ref pkg_name) = args.package {
+            let mut found = Vec::new();
+            for member_dir in &all_members {
+                let pm = crate::package::PackageManager::new(member_dir.as_std_path());
+                let manifest = pm.read_manifest()?;
+                if manifest.package.name == *pkg_name {
+                    found.push(member_dir.clone());
+                }
+            }
+            if found.is_empty() {
+                return Err(crate::error::CompileError::without_span(format!("workspace member '{}' not found", pkg_name)));
+            }
+            found
+        } else {
+            all_members
+        };
+
+        let mut member_results = Vec::new();
+        let mut failed = 0;
+
+        for member_dir in &members {
+            let compile_result = compile_path(
+                member_dir,
+                CompileOptions {
+                    opt_level: 0,
+                    output: None,
+                    debug: false,
+                    target: None,
+                    target_profile: args.target_profile.clone(),
+                    primitive_compat: args.primitive_compat.clone(),
+                },
+            );
+
+            match compile_result {
+                Ok(result) => {
+                    member_results.push(serde_json::json!({
+                        "member": member_dir.as_str(),
+                        "status": "ok",
+                        "artifact_format": result.artifact_format.display_name(),
+                        "target_profile": result.metadata.target_profile.name,
+                    }));
+                    if !args.json {
+                        println!("{} {}", "Checked".green(), member_dir);
+                    }
+                }
+                Err(e) => {
+                    member_results.push(serde_json::json!({
+                        "member": member_dir.as_str(),
+                        "status": "failed",
+                        "error": e.message,
+                    }));
+                    if !args.json {
+                        eprintln!("{}: {}", member_dir, e.message);
+                    }
+                    failed += 1;
+                }
+            }
+        }
+
+        if args.json {
+            let summary = serde_json::json!({
+                "status": if failed == 0 { "ok" } else { "failed" },
+                "mode": "workspace",
+                "members": members.len(),
+                "succeeded": members.len() - failed,
+                "failed": failed,
+                "results": member_results,
+            });
+            let json = serde_json::to_string_pretty(&summary).map_err(|error| {
+                crate::error::CompileError::without_span(format!("failed to serialize workspace check summary: {}", error))
+            })?;
+            println!("{}", json);
+            if failed > 0 {
+                return Err(crate::error::CompileError::without_span(format!(
+                    "{} of {} workspace members failed",
+                    failed,
+                    members.len()
+                )));
+            }
+            return Ok(());
+        }
+
+        if failed > 0 {
+            return Err(crate::error::CompileError::without_span(format!("{} of {} workspace members failed", failed, members.len())));
+        }
+        println!("{}", format!("Workspace check complete: {} members", members.len()).green());
+        Ok(())
+    }
+
     fn metadata(args: MetadataArgs) -> Result<()> {
         let input_path = args.input.unwrap_or_else(|| PathBuf::from("."));
         let input = Utf8Path::from_path(&input_path)
@@ -1360,9 +1704,7 @@ impl CommandExecutor {
             (Some(action), None) => compile_path_with_entry_action(input, options, action),
             (None, Some(lock)) => compile_path_with_entry_lock(input, options, lock),
             (None, None) => compile_path(input, options),
-            (Some(_), Some(_)) => {
-                Err(crate::error::CompileError::without_span("constraints accepts either --entry-action or --entry-lock, not both"))
-            }
+            (Some(_), Some(_)) => unreachable!("validated above"),
         }?;
         let json = serde_json::to_string_pretty(&result.metadata.constraints)
             .map_err(|error| crate::error::CompileError::without_span(format!("failed to serialize constraints: {}", error)))?;
@@ -1400,7 +1742,74 @@ impl CommandExecutor {
             },
         )?;
         let selected = select_entry_witness_metadata(&result.metadata, args.action.as_deref(), args.lock.as_deref())?;
-        let summary = entry_abi_report_json(&result.metadata, &selected)?;
+        let entry_constraints = result
+            .metadata
+            .constraints
+            .entry_abi
+            .iter()
+            .find(|entry| entry.entry_kind == selected.kind && entry.entry_name == selected.name)
+            .ok_or_else(|| {
+                crate::error::CompileError::without_span(format!(
+                    "entry ABI constraints for {} '{}' were not found in metadata",
+                    selected.kind, selected.name
+                ))
+            })?;
+
+        let params = selected
+            .params
+            .iter()
+            .map(|param| {
+                let runtime_bound = selected.runtime_bound_param_names.contains(&param.name) || param.lock_args_data_source;
+                let payload_bound =
+                    !param.lock_args_data_source && !param.cell_bound_abi && !param.ty.starts_with('&') && !runtime_bound;
+                let layout = entry_constraints.params.iter().find(|candidate| candidate.name == param.name);
+                serde_json::json!({
+                    "name": param.name,
+                    "type": param.ty,
+                    "payload_bound": payload_bound,
+                    "runtime_bound": runtime_bound,
+                    "cell_bound": param.cell_bound_abi,
+                    "schema_pointer_abi": param.schema_pointer_abi,
+                    "fixed_byte_len": param.fixed_byte_len,
+                    "abi_kind": layout.map(|layout| layout.abi_kind.as_str()),
+                    "abi_slots": layout.map(|layout| layout.abi_slots),
+                    "slot_start": layout.map(|layout| layout.slot_start),
+                    "slot_end": layout.map(|layout| layout.slot_end),
+                    "witness_bytes": layout.map(|layout| layout.witness_bytes),
+                    "stack_spill_bytes": layout.map(|layout| layout.stack_spill_bytes),
+                    "supported": layout.map(|layout| layout.supported).unwrap_or(false),
+                    "unsupported_reason": layout.and_then(|layout| layout.unsupported_reason.as_deref()),
+                })
+            })
+            .collect::<Vec<_>>();
+        let payload_params = selected
+            .params
+            .iter()
+            .filter(|param| {
+                !param.lock_args_data_source
+                    && !param.cell_bound_abi
+                    && !param.ty.starts_with('&')
+                    && !selected.runtime_bound_param_names.contains(&param.name)
+            })
+            .map(|param| param.name.as_str())
+            .collect::<Vec<_>>();
+        let runtime_bound_params = selected
+            .runtime_bound_param_names
+            .iter()
+            .map(|name| name.as_str())
+            .chain(selected.params.iter().filter(|param| param.lock_args_data_source).map(|param| param.name.as_str()))
+            .collect::<Vec<_>>();
+        let summary = serde_json::json!({
+            "status": if entry_constraints.unsupported { "fail" } else { "ok" },
+            "abi": ENTRY_WITNESS_ABI,
+            "target_profile": result.metadata.target_profile.name,
+            "entry_kind": selected.kind,
+            "entry": selected.name,
+            "payload_params": payload_params,
+            "runtime_bound_params": runtime_bound_params,
+            "layout": entry_constraints,
+            "params": params,
+        });
         let json = serde_json::to_string_pretty(&summary)
             .map_err(|error| crate::error::CompileError::without_span(format!("failed to serialize ABI report: {}", error)))?;
 
@@ -1527,7 +1936,9 @@ impl CommandExecutor {
         let bytes = if let Some(hex) = args.hex.as_deref() {
             decode_hex_arg("ckb-hash", hex, None)?
         } else if let Some(path) = args.file.as_ref() {
-            read_ckb_hash_file(path)?
+            std::fs::read(path).map_err(|error| {
+                crate::error::CompileError::without_span(format!("failed to read CKB hash input '{}': {}", path.display(), error))
+            })?
         } else {
             args.input.unwrap_or_default().into_bytes()
         };
@@ -1546,6 +1957,100 @@ impl CommandExecutor {
             println!("{}", json);
         } else {
             println!("{}", hash_hex);
+        }
+        Ok(())
+    }
+
+    fn ckb_std_compat(args: CkbStdCompatArgs) -> Result<()> {
+        let report = serde_json::json!({
+            "status": "ok",
+            "schema": "cellscript-ckb-std-compat-report-v0.19",
+            "runtime_policy": "inline",
+            "compiler_core_dependency": "no-ckb-std",
+            "compatibility_dependency_scope": "dev-test-and-adapter-contract",
+            "abi_source": "src/ckb_abi.rs",
+            "test_evidence": {
+                "compat_tests": "tests/ckb_std_compat.rs",
+                "constant_parity": true,
+                "source_view_decoding": true,
+                "witness_args_layout": true,
+                "type_id_contract": true,
+                "since_epoch_contract": true,
+                "occupied_capacity_field": true,
+                "packed_transaction_materialization": true,
+                "script_construction_api": true,
+            },
+            "ckb_std_refs": {
+                "constants": "ckb_std::ckb_constants",
+                "witness_args": "ckb_types::packed::WitnessArgs",
+                "type_id": "ckb_std::type_id",
+                "since": "ckb_std::since",
+                "occupied_capacity": "ckb_std::high_level::load_cell_occupied_capacity",
+            },
+            "inline_abi": {
+                "syscalls": {
+                    "load_cell_by_field": crate::ckb_abi::syscall::LOAD_CELL_BY_FIELD,
+                    "load_witness": crate::ckb_abi::syscall::LOAD_WITNESS,
+                    "load_input_by_field": crate::ckb_abi::syscall::LOAD_INPUT_BY_FIELD,
+                    "spawn": crate::ckb_abi::syscall::SPAWN,
+                },
+                "sources": {
+                    "input": crate::ckb_abi::source::INPUT,
+                    "output": crate::ckb_abi::source::OUTPUT,
+                    "group_input": crate::ckb_abi::source::GROUP_INPUT,
+                    "group_output": crate::ckb_abi::source::GROUP_OUTPUT,
+                },
+                "fields": {
+                    "cell_occupied_capacity": crate::ckb_abi::cell_field::OCCUPIED_CAPACITY,
+                    "input_since": crate::ckb_abi::input_field::SINCE,
+                },
+            },
+            "adapter_boundary": {
+                "transaction_realizer": "ckb-sdk-rust-or-CCC-adapter",
+                "compiler_core_uses_ckb_sdk_rust": false,
+                "action_build_contract": "cellscript-ckb-adapter-contract-v0.19",
+                "requires_node_acceptance_for_production": true,
+                "script_construction": {
+                    "owner": "adapter",
+                    "packed_type": "ckb_types::packed::Script",
+                    "evidence_schema": "cellscript-ckb-script-evidence-v0.19",
+                    "supports": [
+                        "arbitrary_code_hash",
+                        "hash_type",
+                        "args",
+                        "script_hash",
+                        "script_ref_readback",
+                        "explicit_cell_dep_binding",
+                        "args_exact_prefix_suffix",
+                        "owner_mode_args"
+                    ],
+                },
+            },
+            "witness_args_policy": {
+                "entry_payload_abi": ENTRY_WITNESS_ABI,
+                "entry_payload_owner": "compiler",
+                "final_witness_args_owner": "adapter",
+                "default_action_payload_field": "input_type",
+                "lock_signature_policy": "explicit-adapter-owned-do-not-overwrite",
+                "placement_requires_deployment_role": true,
+                "ckb_reference": "ckb_types::packed::WitnessArgs",
+            },
+            "non_goals": [
+                "does-not-execute-ckb-vm",
+                "does-not-query-live-cells",
+                "does-not-resolve-celldeps",
+                "does-not-sign-or-submit"
+            ],
+        });
+
+        if args.json {
+            print_json(&report)?;
+        } else {
+            println!("CKB std compatibility: {}", report["status"].as_str().unwrap_or("unknown"));
+            println!("  Schema: {}", report["schema"].as_str().unwrap_or("unknown"));
+            println!("  Runtime policy: {}", report["runtime_policy"].as_str().unwrap_or("unknown"));
+            println!("  ABI source: {}", report["abi_source"].as_str().unwrap_or("unknown"));
+            println!("  Test evidence: {}", report["test_evidence"]["compat_tests"].as_str().unwrap_or("unknown"));
         }
         Ok(())
     }
@@ -1625,73 +2130,56 @@ impl CommandExecutor {
     }
 
     fn explain_assumptions(args: ExplainAssumptionsArgs) -> Result<()> {
-        let compile_options = metadata_workflow_compile_options(args.target, args.target_profile, args.primitive_compat);
-        let result = compile_cli_input_with_entry(
+        let result = compile_cli_input(
             args.input.as_ref(),
-            compile_options,
-            args.entry_action.as_deref(),
-            args.entry_lock.as_deref(),
+            CompileOptions {
+                opt_level: 0,
+                output: None,
+                debug: false,
+                target: args.target,
+                target_profile: args.target_profile,
+                primitive_compat: None,
+            },
         )?;
         let assumptions = result.metadata.runtime.builder_assumptions.clone();
         let summary = serde_json::json!({
             "status": "ok",
             "module": result.metadata.module,
             "target_profile": result.metadata.target_profile.name,
-            "selected_entrypoint": result.metadata.selected_entrypoint,
             "assumption_count": assumptions.len(),
             "proof_plan_soundness": result.metadata.runtime.proof_plan_soundness,
             "builder_assumptions": assumptions,
         });
-        if args.human {
-            print_explain_assumptions_human(&summary);
-        } else {
+        if args.json {
             print_json(&summary)?;
+        } else {
+            println!("Builder assumptions for module `{}`", result.metadata.module);
+            println!("  Assumptions: {}", summary["assumption_count"]);
+            println!("  ProofPlan soundness: {}", summary["proof_plan_soundness"]["status"].as_str().unwrap_or("unknown"));
+            for assumption in result.metadata.runtime.builder_assumptions {
+                println!("  - {} [{}] {}", assumption.assumption_id, assumption.kind, assumption.feature);
+            }
         }
         Ok(())
     }
 
     fn validate_tx(args: ValidateTxArgs) -> Result<()> {
-        validate_metadata_workflow_primitive_compat(args.primitive_compat.as_deref())?;
         let metadata = read_metadata_json(&args.against)?;
         let tx = read_json_value(&args.tx)?;
-        if let Some(soundness) = strict_v0_16_soundness_report_for_mode(&metadata, args.primitive_compat.as_deref()) {
-            let error_message = strict_v0_16_soundness_error_message(&soundness);
-            let summary = serde_json::json!({
-                "status": "failed",
-                "metadata": args.against.display().to_string(),
-                "tx": args.tx.display().to_string(),
-                "proof_plan_soundness": soundness,
-            });
-            if args.human {
-                print_validate_tx_human(&summary);
-            } else {
-                print_json(&summary)?;
-            }
-            return Err(crate::error::CompileError::without_span(error_message));
-        }
-        let mut report = crate::assumptions::validate_transaction_against_metadata(&metadata, &tx);
-        let resource_identity_plan_path = args.resource_identities.as_ref().map(|path| path.display().to_string());
-        if let Some(plan_path) = args.resource_identities.as_ref() {
-            let plan = read_json_value(plan_path)?;
-            validate_tx_resource_identity_plan(&metadata, &tx, &plan, &mut report.violations);
-            report.status = if report.violations.is_empty() { "ok".to_string() } else { "failed".to_string() };
-        }
-        if args.production {
-            validate_tx_fixture_resource_identities(&metadata, &tx, &mut report.violations);
-            report.status = if report.violations.is_empty() { "ok".to_string() } else { "failed".to_string() };
-        }
+        let report = crate::assumptions::validate_transaction_against_metadata(&metadata, &tx);
         let summary = serde_json::json!({
             "status": report.status,
+            "validation_level": "cellscript-metadata-evidence",
+            "ckb_vm_execution": false,
+            "tx_pool_acceptance": false,
             "metadata": args.against.display().to_string(),
             "tx": args.tx.display().to_string(),
-            "production": args.production,
-            "resource_identity_plan": resource_identity_plan_path,
             "validation": report,
         });
-        if args.human {
-            print_validate_tx_human(&summary);
-        } else {
+        if args.json {
             print_json(&summary)?;
+        } else {
+            println!("Transaction validation: {}", summary["status"].as_str().unwrap_or("unknown"));
         }
         if summary["status"] == "failed" {
             return Err(crate::error::CompileError::without_span("transaction violates builder assumptions"));
@@ -1699,207 +2187,61 @@ impl CommandExecutor {
         Ok(())
     }
 
-    fn builder_manifest(args: BuilderManifestArgs) -> Result<()> {
-        if args.entry_action.is_none() && args.entry_lock.is_none() {
-            return Err(crate::error::CompileError::without_span(
-                "builder-manifest requires --entry-action or --entry-lock so the manifest is scoped to one builder contract",
-            ));
-        }
-        let compile_options = metadata_workflow_compile_options(args.target, args.target_profile, args.primitive_compat);
-        let result = compile_cli_input_with_entry(
-            args.input.as_ref(),
-            compile_options,
-            args.entry_action.as_deref(),
-            args.entry_lock.as_deref(),
-        )?;
-        let selected = select_entry_witness_metadata(&result.metadata, args.entry_action.as_deref(), args.entry_lock.as_deref())?;
-        let resource_identity_plan_path = args.resource_identities.as_ref().map(|path| path.display().to_string());
-        let resource_identity_plan =
-            args.resource_identities.as_ref().map(|path| read_json_value(path)).transpose()?.unwrap_or(serde_json::Value::Null);
-        let solver_template = transaction_solver_template(&result.metadata);
-        let manifest = serde_json::json!({
-            "schema": BUILDER_MANIFEST_SCHEMA,
-            "status": "ok",
-            "submit_ready": false,
-            "pre_sign_artifact": true,
-            "module": result.metadata.module,
-            "target_profile": result.metadata.target_profile.name,
-            "compiler_version": result.metadata.compiler_version,
-            "metadata_schema_version": result.metadata.metadata_schema_version,
-            "selected_entrypoint": result.metadata.selected_entrypoint,
-            "input": args.input.as_ref().map(|path| path.display().to_string()),
-            "metadata": &result.metadata,
-            "abi": entry_abi_report_json(&result.metadata, &selected)?,
-            "constraints": &result.metadata.constraints,
-            "entry_witness": entry_witness_contract_json(&selected),
-            "resource_identity_plan_path": resource_identity_plan_path,
-            "resource_identity_plan": resource_identity_plan,
-            "transaction_template": solver_template,
-            "missing_builder_steps": builder_missing_steps_json(),
-            "commands": {
-                "entry_witness": format_entry_command(args.input.as_ref(), selected.kind, selected.name),
-                "resource_identity": "cellc resource-identity <input> --target-profile ckb --plan-output <resource-identities.json>",
-                "builder_check": "cellc builder check --manifest <builder-manifest.json> --tx <tx.json> --production"
-            }
-        });
-        if args.human {
-            write_contract_json_with_human_summary(
-                args.output.as_ref(),
-                &manifest,
-                "Builder manifest generated",
-                print_builder_manifest_human,
-            )?;
-        } else {
-            write_or_print_json(args.output.as_ref(), &manifest, true, "Builder manifest generated")?;
-        }
-        Ok(())
-    }
-
-    fn builder_check(args: BuilderCheckArgs) -> Result<()> {
-        validate_metadata_workflow_primitive_compat(args.primitive_compat.as_deref())?;
-        let manifest = read_json_value(&args.manifest)?;
-        let tx = read_json_value(&args.tx)?;
-        let mut manifest_violations = validate_builder_manifest_shape(&manifest);
-        let metadata = if let Some(metadata_path) = args.metadata.as_ref() {
-            read_metadata_json(metadata_path)?
-        } else {
-            builder_manifest_metadata(&manifest)?
-        };
-
-        validate_builder_manifest_matches_metadata(&manifest, &metadata, &mut manifest_violations);
-        if let Some(soundness) = strict_v0_16_soundness_report_for_mode(&metadata, args.primitive_compat.as_deref()) {
-            manifest_violations.push(strict_v0_16_soundness_error_message(&soundness));
-        }
-
-        let mut report = crate::assumptions::validate_transaction_against_metadata(&metadata, &tx);
-        let resource_identity_plan_path = args.resource_identities.as_ref().map(|path| path.display().to_string());
-        let resource_identity_plan = args
-            .resource_identities
-            .as_ref()
-            .map(|path| read_json_value(path))
-            .transpose()?
-            .or_else(|| manifest.get("resource_identity_plan").filter(|value| !value.is_null()).cloned());
-        if let Some(plan) = resource_identity_plan.as_ref() {
-            validate_tx_resource_identity_plan(&metadata, &tx, plan, &mut report.violations);
-        } else if args.production && metadata_requires_resource_identity_plan(&metadata) {
-            manifest_violations.push(
-                "production builder-check requires --resource-identities or an embedded resource_identity_plan for created resource outputs"
-                    .to_string(),
-            );
-        }
-        if args.production {
-            validate_tx_fixture_resource_identities(&metadata, &tx, &mut report.violations);
-        }
-        report.status = if report.violations.is_empty() { "ok".to_string() } else { "failed".to_string() };
-
-        let status = if manifest_violations.is_empty() && report.status == "ok" { "ok" } else { "failed" };
-        let summary = serde_json::json!({
-            "schema": BUILDER_CHECK_SCHEMA,
-            "status": status,
-            "submit_ready": false,
-            "pre_sign_ready": status == "ok",
-            "manifest": args.manifest.display().to_string(),
-            "tx": args.tx.display().to_string(),
-            "metadata": args.metadata.as_ref().map(|path| path.display().to_string()),
-            "resource_identity_plan": resource_identity_plan_path.or_else(|| {
-                manifest.get("resource_identity_plan_path").and_then(serde_json::Value::as_str).map(str::to_string)
-            }),
-            "production": args.production,
-            "manifest_violations": manifest_violations,
-            "validation": report,
-            "builder_assumption_evidence_template": builder_check_evidence_template_json(&manifest, &report),
-            "missing_submit_steps": builder_check_missing_steps_json(&report),
-        });
-        if args.human {
-            print_builder_check_human(&summary);
-        } else {
-            print_json(&summary)?;
-        }
-        if status == "failed" {
-            return Err(crate::error::CompileError::without_span("builder check failed"));
-        }
-        Ok(())
-    }
-
     fn solve_tx(args: SolveTxArgs) -> Result<()> {
-        let compile_options = metadata_workflow_compile_options(args.target, args.target_profile, args.primitive_compat);
-        let result = compile_cli_input_with_entry(
+        let result = compile_cli_input(
             args.input.as_ref(),
-            compile_options,
-            args.entry_action.as_deref(),
-            args.entry_lock.as_deref(),
-        )?;
-        let template = transaction_solver_template(&result.metadata);
-        if args.human {
-            write_contract_json_with_human_summary(
-                args.output.as_ref(),
-                &template,
-                "Transaction solver template generated",
-                print_solve_tx_human,
-            )?;
-        } else {
-            write_or_print_json(args.output.as_ref(), &template, true, "Transaction solver template generated")?;
-        }
-        Ok(())
-    }
-
-    fn resource_identity(args: ResourceIdentityArgs) -> Result<()> {
-        let metadata_options =
-            metadata_workflow_compile_options(args.target.clone(), args.target_profile.clone(), args.primitive_compat.clone());
-        let source_result = compile_cli_input(args.input.as_ref(), metadata_options)?;
-        let resource_identities = selected_passive_resource_identities(&source_result.metadata, &args.types)?;
-        let output_path = default_resource_identity_artifact_path(args.output.as_ref(), args.input.as_ref())?;
-        let output_utf8 = pathbuf_to_utf8(&output_path, "resource identity artifact output")?;
-        let artifact_target = args.target.clone().unwrap_or_else(|| "riscv64-elf".to_string());
-        let artifact_profile = args.target_profile.clone().unwrap_or_else(|| "ckb".to_string());
-        let identity_artifact = compile_source_with_entry_lock(
-            RESOURCE_IDENTITY_SOURCE,
             CompileOptions {
-                opt_level: 1,
+                opt_level: 0,
                 output: None,
                 debug: false,
-                target: Some(artifact_target),
-                target_profile: Some(artifact_profile),
-                primitive_compat: args.primitive_compat.clone(),
+                target: args.target,
+                target_profile: args.target_profile,
+                primitive_compat: None,
             },
-            RESOURCE_IDENTITY_LOCK_NAME,
         )?;
-        identity_artifact.write_to_path(output_utf8)?;
-        let metadata_path = default_metadata_path_for_artifact(output_utf8);
-        identity_artifact.write_metadata_to_path(&metadata_path)?;
-        if let Some(source_output) = args.source_output.as_ref() {
-            if let Some(parent) = source_output.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            std::fs::write(source_output, RESOURCE_IDENTITY_SOURCE)?;
-        }
-
-        let identity_inputs = parse_resource_identity_inputs(&args.identities)?;
-        let plan = resource_identity_plan_json(
-            &source_result.metadata,
-            &resource_identities,
-            &identity_artifact.metadata,
-            &output_path,
-            &metadata_path,
-            args.source_output.as_ref(),
-            &identity_inputs,
-            args.instance.as_deref(),
-        )?;
-        let plan_output = default_resource_identity_plan_path(args.plan_output.as_ref(), &output_path);
-        if let Some(parent) = plan_output.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let plan_json = serde_json::to_vec_pretty(&plan).map_err(|error| {
-            crate::error::CompileError::without_span(format!("failed to serialize resource identity plan: {}", error))
-        })?;
-        std::fs::write(&plan_output, plan_json)?;
-
-        if args.human {
-            print_resource_identity_human(&plan, &output_path, &metadata_path, &plan_output);
-        } else {
-            print_json(&plan)?;
-        }
+        let template = transaction_solver_template(&result.metadata);
+        write_or_print_json(args.output.as_ref(), &template, args.json, "Transaction template generated (solve-tx is not a solver)")?;
         Ok(())
+    }
+
+    fn verify_ckb_fixtures(args: VerifyCkbFixturesArgs) -> Result<()> {
+        let manifest_bytes = std::fs::read(&args.manifest).map_err(|error| {
+            crate::error::CompileError::without_span(format!(
+                "failed to read fixture manifest '{}': {}",
+                args.manifest.display(),
+                error
+            ))
+        })?;
+        let manifest: serde_json::Value = serde_json::from_slice(&manifest_bytes).map_err(|error| {
+            crate::error::CompileError::without_span(format!(
+                "failed to parse fixture manifest '{}': {}",
+                args.manifest.display(),
+                error
+            ))
+        })?;
+        let base_dir = args.manifest.parent().unwrap_or_else(|| Path::new("."));
+        let report = ckb_fixture_manifest_report(&manifest, base_dir, &manifest_bytes);
+        let issue_count = report["issue_count"].as_u64().unwrap_or(0);
+        if args.json {
+            print_json(&report)?;
+        } else {
+            println!("CKB fixture manifest verification: {}", report["status"].as_str().unwrap_or("unknown"));
+            println!("  Manifest schema: {}", report["manifest_schema"].as_str().unwrap_or("unknown"));
+            println!("  Execution level: {}", report["execution_level"].as_str().unwrap_or("unknown"));
+            println!("  Suites: {}", report["suite_count"].as_u64().unwrap_or(0));
+            println!("  Fixtures: {}", report["fixture_count"].as_u64().unwrap_or(0));
+            println!("  Issues: {issue_count}");
+            if let Some(issues) = report["issues"].as_array() {
+                for issue in issues {
+                    println!("  - {}", issue.as_str().unwrap_or("<invalid issue>"));
+                }
+            }
+        }
+        if issue_count == 0 {
+            Ok(())
+        } else {
+            Err(crate::error::CompileError::without_span(format!("CKB fixture manifest failed verification: {issue_count} issue(s)")))
+        }
     }
 
     fn deploy_plan(args: DeployPlanArgs) -> Result<()> {
@@ -1972,34 +2314,25 @@ impl CommandExecutor {
     }
 
     fn profile(args: ProfileArgs) -> Result<()> {
-        let compile_options = metadata_workflow_compile_options(args.target, args.target_profile, args.primitive_compat);
-        let result = compile_cli_input(args.input.as_ref(), compile_options)?;
+        let result = compile_cli_input(
+            args.input.as_ref(),
+            CompileOptions {
+                opt_level: 0,
+                output: None,
+                debug: false,
+                target: args.target,
+                target_profile: args.target_profile,
+                primitive_compat: None,
+            },
+        )?;
         let report = profile_report_json(&result.metadata, args.entry.as_deref());
         print_or_text_json(args.json, &report, "Profile")?;
         Ok(())
     }
 
     fn trace_tx(args: TraceTxArgs) -> Result<()> {
-        validate_metadata_workflow_primitive_compat(args.primitive_compat.as_deref())?;
         let metadata = read_metadata_json(&args.against)?;
         let tx = read_json_value(&args.tx)?;
-        if let Some(soundness) = strict_v0_16_soundness_report_for_mode(&metadata, args.primitive_compat.as_deref()) {
-            let error_message = strict_v0_16_soundness_error_message(&soundness);
-            let trace = serde_json::json!({
-                "status": "failed",
-                "schema": "cellscript-tx-trace-v0.16",
-                "module": metadata.module,
-                "proof_plan_soundness": soundness,
-                "steps": [],
-            });
-            if args.json {
-                print_json(&trace)?;
-            } else {
-                println!("Transaction trace: failed");
-                println!("  Strict v0.16 ProofPlan soundness: failed");
-            }
-            return Err(crate::error::CompileError::without_span(error_message));
-        }
         let validation = crate::assumptions::validate_transaction_against_metadata(&metadata, &tx);
         let trace = trace_tx_report_json(&metadata, &validation);
         if args.json {
@@ -2014,8 +2347,17 @@ impl CommandExecutor {
     }
 
     fn audit_bundle(args: AuditBundleArgs) -> Result<()> {
-        let compile_options = metadata_workflow_compile_options(args.target, args.target_profile, args.primitive_compat);
-        let result = compile_cli_input(args.input.as_ref(), compile_options)?;
+        let result = compile_cli_input(
+            args.input.as_ref(),
+            CompileOptions {
+                opt_level: 0,
+                output: None,
+                debug: false,
+                target: args.target,
+                target_profile: args.target_profile,
+                primitive_compat: None,
+            },
+        )?;
         let output = args.output.unwrap_or_else(|| PathBuf::from("target/cellscript-audit-bundle"));
         std::fs::create_dir_all(&output)?;
         let bundle = audit_bundle_json(&result.metadata);
@@ -2041,73 +2383,6 @@ impl CommandExecutor {
             println!("  HTML: {}", html_path.display());
         }
         Ok(())
-    }
-
-    fn certify(args: CertifyArgs) -> Result<()> {
-        if args.plugin != NOVASEAL_CERTIFICATION_PLUGIN {
-            return Err(crate::error::CompileError::without_span(format!(
-                "unknown certification plugin '{}'; available plugins: novaseal-profile-v0",
-                args.plugin
-            )));
-        }
-
-        let repo_root = args.repo_root.unwrap_or(std::env::current_dir()?);
-        let report_provided = args.report.is_some();
-        let plugin_report_path = args.report.clone().unwrap_or_else(|| repo_root.join("target/novaseal-production-gates.json"));
-        let report_generated = !report_provided;
-
-        let plugin_report = if report_provided {
-            read_json_value(&plugin_report_path)?
-        } else {
-            let report = super::novaseal_certification::build_report(&repo_root)?;
-            if let Some(parent) = plugin_report_path.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            std::fs::write(
-                &plugin_report_path,
-                serde_json::to_string_pretty(&report).map_err(|error| {
-                    crate::error::CompileError::without_span(format!("failed to serialize NovaSeal production-gate report: {}", error))
-                })?,
-            )?;
-            report
-        };
-
-        let implementation_path = repo_root.join("src/cli/novaseal_certification.rs");
-        let summary = novaseal_certification_summary(
-            &plugin_report,
-            &repo_root,
-            &plugin_report_path,
-            &implementation_path,
-            report_generated,
-            args.require_production,
-        )?;
-        let output_path = args.output.unwrap_or_else(|| repo_root.join("target/cellscript-certification/novaseal-profile-v0.json"));
-        if let Some(parent) = output_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(
-            &output_path,
-            serde_json::to_string_pretty(&summary).map_err(|error| {
-                crate::error::CompileError::without_span(format!("failed to serialize certification report: {}", error))
-            })?,
-        )?;
-
-        if args.json {
-            print_json(&summary)?;
-        } else {
-            println!("Certification report generated");
-            println!("  Plugin: {}", args.plugin);
-            println!("  Status: {}", summary["status"].as_str().unwrap_or("unknown"));
-            println!("  Level: {}", summary["certification_level"].as_str().unwrap_or("unknown"));
-            println!("  Output: {}", output_path.display());
-            println!("  Plugin report: {}", plugin_report_path.display());
-        }
-
-        if summary["status"].as_str() == Some("passed") {
-            Ok(())
-        } else {
-            Err(crate::error::CompileError::without_span(novaseal_certification_failure_message(&summary)))
-        }
     }
 
     fn explain_generics(args: ExplainGenericsArgs) -> Result<()> {
@@ -2180,11 +2455,34 @@ impl CommandExecutor {
                     primitive_compat: None,
                 },
             )?;
+            let artifact = &result.metadata.constraints.artifact;
+            let estimated_cycles_total = result.metadata.actions.iter().map(|action| action.estimated_cycles).sum::<u64>();
+            let estimated_cycles_max_action =
+                result.metadata.actions.iter().map(|action| action.estimated_cycles).max().unwrap_or_default();
             rows.push(serde_json::json!({
                 "opt_level": opt_level,
                 "artifact_format": result.metadata.artifact_format,
                 "target_profile": result.metadata.target_profile.name,
                 "artifact_size_bytes": result.artifact_bytes.len(),
+                "estimated_cycles_total": estimated_cycles_total,
+                "estimated_cycles_max_action": estimated_cycles_max_action,
+                "backend_shape": {
+                    "text_bytes": artifact.text_bytes,
+                    "rodata_bytes": artifact.rodata_bytes,
+                    "executable_text_op_count": artifact.executable_text_op_count,
+                    "covered_text_op_count": artifact.covered_text_op_count,
+                    "relaxed_branch_count": artifact.relaxed_branch_count,
+                    "max_cond_branch_abs_distance": artifact.max_cond_branch_abs_distance,
+                    "machine_block_count": artifact.machine_block_count,
+                    "max_machine_block_size": artifact.max_machine_block_size,
+                    "conditional_branch_block_count": artifact.conditional_branch_block_count,
+                    "labeled_machine_block_count": artifact.labeled_machine_block_count,
+                    "machine_cfg_edge_count": artifact.machine_cfg_edge_count,
+                    "machine_call_edge_count": artifact.machine_call_edge_count,
+                    "unreachable_machine_block_count": artifact.unreachable_machine_block_count,
+                    "layout_order_block_count": artifact.layout_order_block_count,
+                    "layout_order_text_size": artifact.layout_order_text_size,
+                },
                 "constraints_status": result.metadata.constraints.status,
                 "constraints_warnings": result.metadata.constraints.warnings.len(),
                 "constraints_failures": result.metadata.constraints.failures.len(),
@@ -2192,11 +2490,26 @@ impl CommandExecutor {
             }));
         }
         let baseline_size = rows.first().and_then(|row| row["artifact_size_bytes"].as_u64()).unwrap_or_default();
+        let baseline_text_bytes = rows.first().and_then(|row| row["backend_shape"]["text_bytes"].as_u64());
+        let baseline_executable_text_ops = rows.first().and_then(|row| row["backend_shape"]["executable_text_op_count"].as_u64());
+        let baseline_estimated_cycles_total = rows.first().and_then(|row| row["estimated_cycles_total"].as_u64()).unwrap_or_default();
         let summary_rows = rows
             .into_iter()
             .map(|mut row| {
                 let size = row["artifact_size_bytes"].as_u64().unwrap_or_default();
                 row["artifact_size_delta_from_o0"] = serde_json::json!(size as i64 - baseline_size as i64);
+                row["text_bytes_delta_from_o0"] = match (row["backend_shape"]["text_bytes"].as_u64(), baseline_text_bytes) {
+                    (Some(value), Some(baseline)) => serde_json::json!(value as i64 - baseline as i64),
+                    _ => serde_json::Value::Null,
+                };
+                row["executable_text_op_count_delta_from_o0"] =
+                    match (row["backend_shape"]["executable_text_op_count"].as_u64(), baseline_executable_text_ops) {
+                        (Some(value), Some(baseline)) => serde_json::json!(value as i64 - baseline as i64),
+                        _ => serde_json::Value::Null,
+                    };
+                let estimated_cycles_total = row["estimated_cycles_total"].as_u64().unwrap_or_default();
+                row["estimated_cycles_total_delta_from_o0"] =
+                    serde_json::json!(estimated_cycles_total as i64 - baseline_estimated_cycles_total as i64);
                 row
             })
             .collect::<Vec<_>>();
@@ -2255,7 +2568,8 @@ impl CommandExecutor {
                 "script references keep code_hash, hash_type, and args visible",
                 "TYPE_ID metadata uses the CKB TYPE_ID ABI and does not hide builder obligations",
                 "Spawn/IPC is bounded verifier reuse and does not make type scripts multi-tenant",
-                "hash_blake2b(input: Hash) uses CKB Blake2b-256; wider byte serialization hashing remains out of scope"
+                "hash_blake2b(input: Hash) uses CKB Blake2b-256 for one Hash",
+                "hash_pair(left: Hash, right: Hash) uses CKB Blake2b-256 over two Hash values; wider byte serialization hashing remains out of scope"
             ],
         });
         if args.json {
@@ -2317,9 +2631,144 @@ impl CommandExecutor {
             result.metadata.constraints.entry_abi.iter().find(|entry| entry.entry_kind == "action" && entry.entry_name == action.name);
 
         let ckb = result.metadata.constraints.ckb.as_ref();
+        let metadata_bytes = serde_json::to_vec(&result.metadata).map_err(|error| {
+            crate::error::CompileError::without_span(format!("failed to serialize metadata for digest: {}", error))
+        })?;
+        let metadata_hash = crate::hex_encode(&crate::ckb_blake2b256(&metadata_bytes));
+        let ckb_contract = ckb.map(|ckb| {
+            serde_json::json!({
+                "hash_type_policy": ckb.hash_type_policy,
+                "capacity_evidence_contract": ckb.capacity_evidence_contract,
+                "timelock_policy": ckb.timelock_policy,
+                "tx_size_measurement_required": ckb.tx_size_measurement_required,
+                "occupied_capacity_measurement_required": ckb.occupied_capacity_measurement_required,
+                "dry_run_required_for_production": ckb.dry_run_required_for_production,
+            })
+        });
+        let transaction_draft = serde_json::json!({
+            "format": "cellscript-ccc-transaction-draft-v1",
+            "state": "ActionPlan",
+            "status": "template",
+            "ccc_compatible": true,
+            "can_submit": false,
+            "ckb_vm_execution": false,
+            "tx_pool_acceptance": false,
+            "requires_live_cell_resolution": true,
+            "requires_packed_materialization": true,
+            "packed_materialization": {
+                "transaction": "ckb_types::packed::Transaction",
+                "cell_output": "ckb_types::packed::CellOutput",
+                "cell_dep": "ckb_types::packed::CellDep",
+                "out_point": "ckb_types::packed::OutPoint",
+                "script": "ckb_types::packed::Script",
+                "witness_args": "ckb_types::packed::WitnessArgs",
+                "realizer": "cellscript-ckb-adapter via ckb-sdk-rust or CCC",
+            },
+            "cell_deps": [],
+            "header_deps": [],
+            "inputs": [],
+            "outputs": [],
+            "outputs_data": [],
+            "witnesses": [],
+            "required_evidence": [
+                "live_cell_resolution",
+                "outputs_data_pairing",
+                "witness_args_placement",
+                "celldep_resolution",
+                "occupied_capacity",
+                "fee_and_change",
+                "estimate_cycles",
+                "tx_pool_acceptance"
+            ],
+            "notes": [
+                "This is a headless draft template produced from compiler metadata.",
+                "A builder adapter must resolve live cells, fill args, calculate fees/capacity, dry-run, sign, and submit."
+            ]
+        });
+        let resolved_tx_required_fields = serde_json::json!([
+            "schema",
+            "state",
+            "metadata_hash",
+            "artifact_hash",
+            "deployment_ref",
+            "action_selector",
+            "inputs",
+            "outputs",
+            "outputs_data",
+            "witnesses",
+            "cell_deps",
+            "header_deps",
+            "capacity_evidence",
+            "fee_policy",
+            "change_policy",
+            "lineage"
+        ]);
+        let acceptance_report_template = serde_json::json!({
+            "schema": "cellscript-ckb-action-acceptance-report-v0.19",
+            "state": "AcceptedActionTx",
+            "metadata_hash": metadata_hash,
+            "artifact_hash": result.metadata.artifact_hash,
+            "deployment_ref": serde_json::Value::Null,
+            "action_selector": action.name,
+            "ckb_vm_execution": serde_json::Value::Null,
+            "estimate_cycles": serde_json::Value::Null,
+            "tx_pool_acceptance": serde_json::Value::Null,
+            "submitted_tx_hash": serde_json::Value::Null,
+            "serialized_tx_size_bytes": serde_json::Value::Null,
+            "occupied_capacity_shannons": serde_json::Value::Null,
+            "fee_shannons": serde_json::Value::Null,
+            "lineage": [],
+            "known_limitations": [
+                "Template only: adapter must fill live cells, deployment refs, packed transaction bytes, signer policy, and node evidence."
+            ],
+        });
+        let adapter_contract = serde_json::json!({
+            "schema": "cellscript-ckb-adapter-contract-v0.19",
+            "headless": true,
+            "compiler_core_dependency": "no-ckb-sdk-rust",
+            "compiler_output_state": "ActionPlan",
+            "adapter_output_state": "ResolvedActionTx",
+            "accepted_output_state": "AcceptedActionTx",
+            "transaction_realizer": "ckb-sdk-rust-or-CCC-adapter",
+            "must_not_infer_protocol_semantics_from_action_name": true,
+            "must_keep_signer_authority_explicit": true,
+            "must_preserve_outputs_outputs_data_pairing": true,
+            "must_emit_lineage": true,
+            "witness_policy": {
+                "entry_payload_abi": ENTRY_WITNESS_ABI,
+                "entry_payload_owner": "compiler",
+                "final_witness_args_owner": "adapter",
+                "default_action_payload_field": "input_type",
+                "lock_signature_policy": "explicit-adapter-owned-do-not-overwrite",
+                "placement_requires_deployment_role": true,
+            },
+            "acceptance_methods": ["estimate_cycles", "test_tx_pool_accept", "send_transaction_optional"],
+            "not_proven_by_this_plan": ["live_cell_availability", "ckb_vm_execution", "tx_pool_acceptance", "submission"],
+            "resolved_tx_required_fields": resolved_tx_required_fields,
+            "acceptance_report_template": acceptance_report_template,
+        });
+        let preview = serde_json::json!({
+            "format": "cellscript-action-preview-v1",
+            "action": action.name,
+            "summary": format!("Build a CKB transaction for CellScript action {}", action.name),
+            "consumes": action.transaction_runtime_input_requirements,
+            "creates": action.create_set,
+            "transitions": action.mutate_set,
+            "witnesses": {
+                "selector": action.name,
+                "args": action.params,
+            },
+            "warnings": [
+                "Builder preview is metadata-backed; live cell freshness and final fee/capacity must be checked at build time."
+            ],
+            "estimatedFee": serde_json::Value::Null,
+            "requiredSigners": []
+        });
         let plan = serde_json::json!({
             "status": "ok",
             "policy": "cellscript-action-builder-plan-v1",
+            "headless": true,
+            "ui_scope": "none",
             "input": input_path.display().to_string(),
             "action": action.name,
             "target_profile": result.metadata.target_profile.name,
@@ -2337,30 +2786,39 @@ impl CommandExecutor {
                 "runtime_input_requirements": action.transaction_runtime_input_requirements,
                 "fail_closed_runtime_features": action.fail_closed_runtime_features,
             },
-            "ckb": ckb.map(|ckb| serde_json::json!({
-                "hash_type_policy": ckb.hash_type_policy,
-                "capacity_evidence_contract": ckb.capacity_evidence_contract,
-                "timelock_policy": ckb.timelock_policy,
-                "tx_size_measurement_required": ckb.tx_size_measurement_required,
-                "occupied_capacity_measurement_required": ckb.occupied_capacity_measurement_required,
-                "dry_run_required_for_production": ckb.dry_run_required_for_production,
-            })),
+            "ckb": ckb_contract,
+            "transaction_draft": transaction_draft,
+            "adapter_contract": adapter_contract,
+            "preview": preview,
             "constraints_status": result.metadata.constraints.status,
             "constraints_failures": result.metadata.constraints.failures,
             "constraints_warnings": result.metadata.constraints.warnings,
         });
-        let json = serde_json::to_string_pretty(&plan)
-            .map_err(|error| crate::error::CompileError::without_span(format!("failed to serialize action build plan: {}", error)))?;
+        let output_value = if args.fabric_intent {
+            cellfabric_intent_envelope_json(&result.metadata, action, &plan, &input_path, &metadata_hash)?
+        } else {
+            plan
+        };
+        let json = serde_json::to_string_pretty(&output_value).map_err(|error| {
+            crate::error::CompileError::without_span(format!("failed to serialize action build output: {}", error))
+        })?;
 
         if let Some(output_path) = args.output {
             if let Some(parent) = output_path.parent() {
                 std::fs::create_dir_all(parent)?;
             }
             std::fs::write(&output_path, json)?;
-            println!("{}", "Action build plan generated".green());
+            let label = if args.fabric_intent { "CellFabric intent envelope generated" } else { "Action build plan generated" };
+            println!("{}", label.green());
             println!("  Output: {}", output_path.display());
         } else if args.json {
             println!("{}", json);
+        } else if args.fabric_intent {
+            println!("CellFabric intent envelope: {}", action.name);
+            println!("  Target profile: {}", result.metadata.target_profile.name);
+            println!("  Status: requires-runtime-binding");
+            println!("  App conflict key templates: {}", cellfabric_app_conflict_key_templates(&result.metadata.module, action).len());
+            println!("  Embedded action plan: yes");
         } else {
             println!("Action build plan: {}", action.name);
             println!("  Target profile: {}", result.metadata.target_profile.name);
@@ -2369,6 +2827,82 @@ impl CommandExecutor {
             println!("  Mutated outputs: {}", action.mutate_set.len());
             println!("  Runtime input requirements: {}", action.transaction_runtime_input_requirements.len());
         }
+        Ok(())
+    }
+
+    fn gen_builder(args: GenBuilderArgs) -> Result<()> {
+        if args.target != "typescript" {
+            return Err(crate::error::CompileError::without_span(format!(
+                "unsupported builder target '{}'; supported targets: typescript",
+                args.target
+            )));
+        }
+
+        let metadata = if let Some(metadata_path) = args.metadata.as_deref() {
+            read_metadata_json(metadata_path)?
+        } else {
+            let input_path = args.input.clone().unwrap_or_else(|| PathBuf::from("."));
+            let input = Utf8Path::from_path(&input_path).ok_or_else(|| {
+                crate::error::CompileError::without_span(format!("path '{}' is not valid UTF-8", input_path.display()))
+            })?;
+            compile_path(
+                input,
+                CompileOptions {
+                    opt_level: 1,
+                    output: None,
+                    debug: false,
+                    target: None,
+                    target_profile: args.target_profile.or_else(|| Some("ckb".to_string())),
+                    primitive_compat: None,
+                },
+            )?
+            .metadata
+        };
+
+        let metadata_hash = hash_json_value("metadata", &metadata)?;
+        let selected_actions = selected_builder_actions(&metadata, args.action.as_deref())?;
+        let locked_identity = if let Some(lockfile_path) = args.lockfile.as_deref() {
+            Some(verify_builder_lockfile_identity(lockfile_path, &metadata, &metadata_hash)?)
+        } else {
+            None
+        };
+        let deployment_identity = if let Some(deployed_path) = args.deployed.as_deref() {
+            let lockfile_path = args.lockfile.as_deref().ok_or_else(|| {
+                crate::error::CompileError::without_span("gen-builder --deployed requires --lockfile for deployment identity binding")
+            })?;
+            Some(verify_builder_deployment_identity(
+                lockfile_path,
+                deployed_path,
+                &metadata,
+                &metadata_hash,
+                args.deployment_network.as_deref(),
+            )?)
+        } else {
+            None
+        };
+        let output_dir = args.output.unwrap_or_else(|| PathBuf::from("target").join("cellscript-builder").join("typescript"));
+        let package_name = args.package_name.unwrap_or_else(|| default_builder_package_name(&metadata));
+        let summary = write_typescript_builder_package(
+            &output_dir,
+            &package_name,
+            &metadata,
+            &metadata_hash,
+            &selected_actions,
+            locked_identity.as_ref(),
+            deployment_identity.as_ref(),
+            args.lockfile.as_deref(),
+            args.deployed.as_deref(),
+        )?;
+
+        if args.json {
+            print_json(&summary)?;
+        } else {
+            println!("{}", "TypeScript action builder generated".green());
+            println!("  Output: {}", output_dir.display());
+            println!("  Package: {}", package_name);
+            println!("  Actions: {}", selected_actions.len());
+        }
+
         Ok(())
     }
 
@@ -2441,21 +2975,23 @@ impl CommandExecutor {
             std::fs::write(output_path, &witness)?;
         }
 
-        let payload_param_names = payload_params.iter().map(|param| param.name.as_str()).collect::<Vec<_>>();
-        let summary = serde_json::json!({
-            "status": "ok",
-            "abi": ENTRY_WITNESS_ABI,
-            "entry_kind": selected.kind,
-            "entry": selected.name,
-            "witness_hex": witness_hex,
-            "witness_size_bytes": witness.len(),
-            "payload_args": witness_args.len(),
-            "payload_params": payload_param_names,
-            "placement": entry_witness_placement_json(selected.kind),
-            "output": args.output.as_ref().map(|path| path.display().to_string()),
-        });
-        if !args.human {
-            print_json(&summary)?;
+        if args.json {
+            let payload_param_names = payload_params.iter().map(|param| param.name.as_str()).collect::<Vec<_>>();
+            let summary = serde_json::json!({
+                "status": "ok",
+                "abi": ENTRY_WITNESS_ABI,
+                "entry_kind": selected.kind,
+                "entry": selected.name,
+                "witness_hex": witness_hex,
+                "witness_size_bytes": witness.len(),
+                "payload_args": witness_args.len(),
+                "payload_params": payload_param_names,
+                "output": args.output.as_ref().map(|path| path.display().to_string()),
+            });
+            let json = serde_json::to_string_pretty(&summary).map_err(|error| {
+                crate::error::CompileError::without_span(format!("failed to serialize entry witness summary: {}", error))
+            })?;
+            println!("{}", json);
             return Ok(());
         }
 
@@ -2480,20 +3016,18 @@ impl CommandExecutor {
             None => default_metadata_path_for_artifact(artifact_path).into_std_path_buf(),
         };
 
-        let artifact_bytes = read_regular_file(&args.artifact, "artifact")?;
-        let metadata_bytes = read_regular_file(&metadata_path, "metadata")?;
+        let artifact_bytes = std::fs::read(&args.artifact).map_err(|error| {
+            crate::error::CompileError::without_span(format!("failed to read artifact '{}': {}", args.artifact.display(), error))
+        })?;
+        let metadata_bytes = std::fs::read(&metadata_path).map_err(|error| {
+            crate::error::CompileError::without_span(format!("failed to read metadata '{}': {}", metadata_path.display(), error))
+        })?;
         let metadata: CompileMetadata = serde_json::from_slice(&metadata_bytes).map_err(|error| {
             crate::error::CompileError::without_span(format!("failed to parse metadata '{}': {}", metadata_path.display(), error))
         })?;
         let result = validate_artifact_metadata(artifact_bytes, metadata)?;
-        let primitive_compat = args.primitive_compat.clone();
-        let sources_verified = args.verify_sources || primitive_compat.is_some();
-        let source_verification_root = source_verification_root_for_artifact(artifact_path);
-        if sources_verified {
-            validate_source_units_on_disk_under(&result.metadata, &source_verification_root)?;
-        }
-        if primitive_compat.is_some() {
-            validate_source_units_primitive_mode_under(&result.metadata, primitive_compat.clone(), &source_verification_root)?;
+        if args.verify_sources {
+            validate_source_units_on_disk(&result.metadata)?;
         }
         validate_expected_target_profile(result.metadata.target_profile.name.as_str(), args.expect_target_profile.as_deref())?;
         validate_expected_metadata_hash(
@@ -2530,6 +3064,7 @@ impl CommandExecutor {
                 "artifact": args.artifact.display().to_string(),
                 "metadata": metadata_path.display().to_string(),
                 "metadata_schema_version": result.metadata.metadata_schema_version,
+                "metadata_schema_versions": metadata_schema_versions_json(&result.metadata),
                 "compiler_version": result.metadata.compiler_version,
                 "artifact_format": result.artifact_format.display_name(),
                 "target_profile": result.metadata.target_profile.name.as_str(),
@@ -2560,8 +3095,7 @@ impl CommandExecutor {
                 "runtime_required_pool_invariant_blocker_class_summaries": pool_invariant_family_blocker_class_summaries(&result.metadata, "runtime-required"),
                 "pool_runtime_input_requirements": pool_runtime_input_requirement_count(&result.metadata),
                 "pool_runtime_input_requirement_summaries": pool_runtime_input_requirement_summaries(&result.metadata),
-                "sources_verified": sources_verified,
-                "primitive_mode_verified": primitive_compat.is_some(),
+                "sources_verified": args.verify_sources,
                 "expected_target_profile_verified": expected_target_profile_verified,
                 "expected_hashes_verified": expected_hashes_verified,
                 "policy_verified": policy_verified,
@@ -2578,6 +3112,12 @@ impl CommandExecutor {
         println!("  Artifact: {}", args.artifact.display());
         println!("  Metadata: {}", metadata_path.display());
         println!("  Metadata schema: {}", result.metadata.metadata_schema_version);
+        println!(
+            "  Metadata schema components: source={}, artifact={}, constraints={}",
+            result.metadata.source_metadata_schema_version,
+            result.metadata.artifact_metadata_schema_version,
+            result.metadata.constraints_metadata_schema_version
+        );
         println!("  Compiler: {}", result.metadata.compiler_version);
         println!("  Format: {}", result.artifact_format.display_name());
         println!("  Target profile: {}", result.metadata.target_profile.name);
@@ -2589,11 +3129,8 @@ impl CommandExecutor {
         if expected_hashes_verified {
             println!("  Expected hashes: verified");
         }
-        if sources_verified {
+        if args.verify_sources {
             println!("  Sources: verified {} unit(s)", result.metadata.source_units.len());
-        }
-        if primitive_compat.is_some() {
-            println!("  Primitive mode: verified");
         }
         if policy_verified {
             println!("  Policy: verified");
@@ -2633,23 +3170,32 @@ impl CommandExecutor {
                 .chain(result.metadata.locks.iter().filter(|lock| !lock.params.is_empty()).map(|lock| format!("lock {}", lock.name)))
                 .collect::<Vec<_>>();
             if !parameterized_entries.is_empty() {
-                return Err(crate::error::CompileError::without_span(format!(
-                    "cellc run only supports no-argument pure ELF entrypoints; {} requires transaction/parameter ABI context; use `cellc run --simulate` for AST-level simulation or build a transaction witness with `cellc entry-witness`",
-                    parameterized_entries.join(", ")
-                )));
+                eprintln!(
+                    "{}",
+                    format!(
+                        "Warning: {} requires transaction/parameter ABI context; falling back to simulate mode",
+                        parameterized_entries.join(", ")
+                    )
+                    .yellow()
+                );
+                return Self::run_simulate(&result, &args);
             }
 
             if result.metadata.runtime.ckb_runtime_required {
-                return Err(crate::error::CompileError::without_span(format!(
-                    "cellc run cannot provide CKB transaction/syscall context ({}); use `cellc run --simulate` for AST-level simulation or run builder-backed CKB acceptance",
-                    result.metadata.runtime.ckb_runtime_features.join(", ")
-                )));
+                eprintln!(
+                    "{}",
+                    format!(
+                        "Warning: CKB runtime required ({}); falling back to simulate mode",
+                        result.metadata.runtime.ckb_runtime_features.join(", ")
+                    )
+                    .yellow()
+                );
+                return Self::run_simulate(&result, &args);
             }
 
             if !result.metadata.runtime.standalone_runner_compatible {
-                return Err(crate::error::CompileError::without_span(
-                    "cellc run only supports standalone-compatible no-argument pure ELF entrypoints; use `cellc run --simulate` for AST-level simulation",
-                ));
+                eprintln!("{}", "Warning: ELF is not standalone-compatible; falling back to simulate mode".yellow());
+                return Self::run_simulate(&result, &args);
             }
 
             let vm_args = args.args.into_iter().map(|arg| arg.into_bytes()).collect::<Vec<_>>();
@@ -2749,6 +3295,9 @@ impl CommandExecutor {
             if manifest.package.repository.is_empty() {
                 issues.push("package repository is missing".to_string());
             }
+            if manifest.package.namespace.is_none() {
+                issues.push("package namespace is missing (required for publishing)".to_string());
+            }
 
             let entry_path = std::path::Path::new(".").join(&manifest.package.entry);
             if !entry_path.exists() {
@@ -2777,20 +3326,139 @@ impl CommandExecutor {
 
             Ok(())
         } else {
-            let dirty = if args.allow_dirty { "allow-dirty" } else { "clean-tree-only" };
-            Self::experimental_command(
-                "publish",
-                &format!(
-                    "registry publication is not implemented yet (package {} v{}, {})",
-                    manifest.package.name, manifest.package.version, dirty
-                ),
-            )
+            let namespace = manifest.package.namespace.clone().ok_or_else(|| {
+                crate::error::CompileError::without_span(
+                    "package namespace is required for publishing; add namespace = \"<your-namespace>\" to [package] in Cell.toml",
+                )
+            })?;
+
+            if manifest.package.name.is_empty() {
+                return Err(crate::error::CompileError::without_span("package name is empty"));
+            }
+            if manifest.package.version.is_empty() {
+                return Err(crate::error::CompileError::without_span("package version is empty"));
+            }
+
+            // Compute source_hash
+            let source_hash = crate::package::registry::compute_source_hash(std::path::Path::new("."))?;
+
+            // Compile to get build artifact hashes
+            let result = compile_path(".", CompileOptions::default())?;
+
+            // Build registry version entry
+            let version_entry = build_publish_registry_version(&manifest, &result, &source_hash)?;
+
+            if args.offline {
+                // Offline fixture publish: update registry.json without touching the public write API.
+                crate::package::registry::RegistryIndex::append_version(
+                    std::path::Path::new("."),
+                    &manifest.package.name,
+                    &namespace,
+                    version_entry,
+                )?;
+
+                println!("{}", "Published offline registry fixture".green());
+                println!("  Package: {}/{} v{}", namespace, manifest.package.name, manifest.package.version);
+                println!("  Source hash: {}", source_hash);
+                println!();
+                println!("  Audit/offline mirror next steps:");
+                println!("    git add registry.json");
+                println!("    git commit -m \"publish v{}\"", manifest.package.version);
+                println!("    git tag v{}", manifest.package.version);
+                println!("    git push --tags");
+                return Ok(());
+            }
+
+            let api_base = resolve_registry_api_base(args.api_url)?;
+            let registry_origin = registry_origin_from_api_base(&api_base)?;
+            let endpoint = registry_publish_endpoint(&api_base, &namespace, &manifest.package.name);
+            let registry_entry = build_publish_registry_entry(&manifest, &namespace, version_entry)?;
+            let payload = if let Some(payload_path) = args.payload.as_deref() {
+                read_registry_publish_payload(payload_path)?
+            } else {
+                let capability_key_id = args
+                    .capability_key_id
+                    .or_else(|| std::env::var("CELLSCRIPT_CAPABILITY_KEY_ID").ok())
+                    .ok_or_else(|| {
+                        crate::error::CompileError::without_span(format!(
+                            "capability key id is required for public publish; connect JoyID through the registry submit page to derive <principal_id>, run `cellc auth capability create --principal-id <principal_id> --scope publish:{}/{} --expires 90d --json > capability-payload.json`, sign that payload with JoyID through CCC, then run `cellc auth capability submit --payload capability-payload.json --joyid-signature joyid-signature.json`; after registration, pass --capability-key-id or set CELLSCRIPT_CAPABILITY_KEY_ID",
+                            namespace, manifest.package.name
+                        ))
+                    })?;
+                let issued_at = current_utc_timestamp();
+                let expires_at = utc_timestamp_after_seconds(10 * 60);
+                let nonce = registry_publish_nonce(
+                    &registry_origin,
+                    &namespace,
+                    &manifest.package.name,
+                    &manifest.package.version,
+                    &source_hash,
+                    &capability_key_id,
+                    &issued_at,
+                );
+                crate::package::registry::RegistryPublishPayload {
+                    protocol: crate::package::registry::REGISTRY_PUBLISH_PROTOCOL.to_string(),
+                    action: crate::package::registry::PUBLISH_ACTION.to_string(),
+                    registry_origin: registry_origin.clone(),
+                    namespace: namespace.clone(),
+                    name: manifest.package.name.clone(),
+                    version: manifest.package.version.clone(),
+                    source_hash: source_hash.clone(),
+                    manifest_hash: Some(hash_json_value("package manifest", &manifest)?),
+                    capability_key_id,
+                    nonce,
+                    issued_at,
+                    expires_at,
+                    cli_version: crate::VERSION.to_string(),
+                    registry_entry,
+                }
+            };
+            validate_publish_payload_matches_local_package(&payload, &registry_origin, &namespace, &manifest, &source_hash)?;
+            let canonical_payload = registry_publish_canonical_payload(&payload)?;
+
+            if args.print_payload {
+                let preview = serde_json::json!({
+                    "endpoint": endpoint,
+                    "payload": payload,
+                    "canonical_payload": canonical_payload,
+                });
+                if args.json {
+                    print_json(&preview)?;
+                } else {
+                    println!("{}", "Registry publish payload".green());
+                    println!("  Endpoint: {}", endpoint);
+                    println!("  Package: {}/{} v{}", namespace, manifest.package.name, manifest.package.version);
+                    println!("  Source hash: {}", source_hash);
+                    println!();
+                    println!("Canonical payload to sign:");
+                    println!("{}", preview["canonical_payload"].as_str().unwrap_or_default());
+                }
+                return Ok(());
+            }
+
+            let capability_signature =
+                if let Some(signature) = args.capability_signature.or_else(|| std::env::var("CELLSCRIPT_CAPABILITY_SIGNATURE").ok()) {
+                    signature
+                } else {
+                    sign_registry_publish_payload(&payload.capability_key_id, &canonical_payload)?
+                };
+            let source_snapshot =
+                build_registry_source_snapshot(args.source_snapshot.as_deref(), std::path::Path::new("."), &manifest, &source_hash)?;
+            let request = crate::package::registry::RegistryPublishRequest {
+                payload,
+                capability_signature: crate::package::registry::RegistryCapabilitySignature {
+                    algorithm: "p256-sha256".to_string(),
+                    signature: capability_signature,
+                },
+                source_snapshot,
+            };
+            let idempotency_key = resolve_registry_publish_idempotency_key(args.idempotency_key.as_deref(), &request)?;
+            submit_registry_publish_request(&endpoint, &request, &idempotency_key, args.json)
         }
     }
 
     fn install(args: InstallArgs) -> Result<()> {
         let pm = PackageManager::new(".");
-        validate_dependency_source_args(args.git.as_deref(), args.path.as_deref(), args.rev.as_deref())?;
 
         let _manifest = pm.read_manifest()?;
 
@@ -2801,10 +3469,11 @@ impl CommandExecutor {
 
             let dep = DetailedDependency {
                 version: args.version.clone().unwrap_or_else(|| "*".to_string()),
+                namespace: None,
                 git: Some(git_url.clone()),
                 branch: None,
                 tag: None,
-                rev: args.rev.clone(),
+                rev: None,
                 path: None,
                 optional: false,
                 features: Vec::new(),
@@ -2827,6 +3496,7 @@ impl CommandExecutor {
 
             let dep = DetailedDependency {
                 version: args.version.clone().unwrap_or_else(|| "*".to_string()),
+                namespace: None,
                 git: None,
                 branch: None,
                 tag: None,
@@ -2836,6 +3506,9 @@ impl CommandExecutor {
                 features: Vec::new(),
                 default_features: true,
             };
+
+            let manifest_for_check = pm.read_manifest()?;
+            validate_not_self_dependency(&crate_name, &Dependency::Detailed(dep.clone()), &manifest_for_check)?;
 
             pm.resolve_from_path(&crate_name, &path.to_string_lossy())?;
 
@@ -2848,13 +3521,65 @@ impl CommandExecutor {
             println!("{}", format!("Installed {} from path {}", crate_name, path.display()).green());
             Ok(())
         } else if let Some(crate_name) = &args.crate_name {
-            Self::experimental_command(
-                "install",
-                &format!(
-                    "registry package installation is not implemented yet; use --git URL or --path PATH to install {}",
-                    crate_name
-                ),
-            )
+            // Support both:
+            //   cellc install cellscript/amm@1.2.0   (Go-style combined format)
+            //   cellc install amm --namespace cellscript --version 1.2.0
+            let (resolved_name, resolved_namespace, resolved_version) = if args.namespace.is_none() && args.version.is_none() {
+                // Try parsing namespace/name@version format
+                if let Some((ns, rest)) = crate_name.split_once('/') {
+                    if let Some((name, ver)) = rest.split_once('@') {
+                        (name.to_string(), Some(ns.to_string()), Some(ver.to_string()))
+                    } else {
+                        (rest.to_string(), Some(ns.to_string()), None)
+                    }
+                } else if let Some((name, ver)) = crate_name.split_once('@') {
+                    (name.to_string(), None, Some(ver.to_string()))
+                } else {
+                    (crate_name.clone(), None, None)
+                }
+            } else {
+                (crate_name.clone(), args.namespace.clone(), args.version.clone())
+            };
+
+            let version = resolved_version.unwrap_or_else(|| "*".to_string());
+
+            let _resolved = pm.resolve_from_registry_with_namespace_and_policy(
+                &resolved_name,
+                &version,
+                resolved_namespace.as_deref(),
+                crate::package::registry::RegistryResolutionPolicy {
+                    allow_unverified: args.allow_unverified,
+                    allow_quarantined: args.allow_quarantined,
+                },
+            )?;
+
+            let dep = if resolved_namespace.is_some() {
+                Dependency::Detailed(DetailedDependency {
+                    version,
+                    namespace: resolved_namespace.clone(),
+                    git: None,
+                    branch: None,
+                    tag: None,
+                    rev: None,
+                    path: None,
+                    optional: false,
+                    features: Vec::new(),
+                    default_features: true,
+                })
+            } else {
+                Dependency::Simple(version)
+            };
+
+            let mut manifest = pm.read_manifest()?;
+            validate_not_self_dependency(&resolved_name, &dep, &manifest)?;
+            manifest.dependencies.insert(resolved_name.clone(), dep);
+            pm.write_manifest(&manifest)?;
+
+            refresh_lockfile_from_manifest(std::path::Path::new("."))?;
+
+            let ns_display = resolved_namespace.as_deref().unwrap_or("<default>");
+            println!("{}", format!("Installed {}/{} from registry", ns_display, resolved_name).green());
+            Ok(())
         } else {
             let mut pm = PackageManager::new(".");
             pm.resolve_dependencies()?;
@@ -2888,7 +3613,9 @@ impl CommandExecutor {
                 let source = match &package.source {
                     crate::package::PackageSource::Local(path) => format!("path: {}", path.display()),
                     crate::package::PackageSource::Git { url, revision } => format!("git: {}#{}", url, revision),
-                    crate::package::PackageSource::Registry { name, version } => format!("registry: {}@{}", name, version),
+                    crate::package::PackageSource::Registry { registry, namespace, version, .. } => {
+                        format!("registry: {}/{}@{}", registry, namespace, version)
+                    }
                 };
                 println!("  {} v{} ({})", name, package.version, source);
             }
@@ -2944,117 +3671,1366 @@ impl CommandExecutor {
     }
 
     fn login(args: LoginArgs) -> Result<()> {
-        let registry = args.registry.unwrap_or_else(|| "https://cellscript.io".to_string());
+        Self::auth_capability(AuthCapabilityArgs { registry_origin: args.registry, ..Default::default() })
+    }
 
-        let config_dir = dirs_config_dir();
-        std::fs::create_dir_all(&config_dir).map_err(|e| {
-            crate::error::CompileError::without_span(format!("failed to create config directory '{}': {}", config_dir.display(), e))
+    fn auth_capability(args: AuthCapabilityArgs) -> Result<()> {
+        let registry_origin = args
+            .registry_origin
+            .or_else(|| std::env::var("CELLSCRIPT_REGISTRY_ORIGIN").ok())
+            .unwrap_or_else(|| crate::package::registry::DEFAULT_PUBLIC_REGISTRY_ORIGIN.to_string());
+        let principal_type =
+            args.principal_type.or_else(|| std::env::var("CELLSCRIPT_PRINCIPAL_TYPE").ok()).unwrap_or_else(|| "joyid_ckb".to_string());
+        let principal_id = args.principal_id.or_else(|| std::env::var("CELLSCRIPT_PRINCIPAL_ID").ok()).ok_or_else(|| {
+            crate::error::CompileError::without_span(
+                "principal id is required; pass --principal-id or set CELLSCRIPT_PRINCIPAL_ID to the normalized JoyID/CKB identity binding",
+            )
         })?;
-
-        let credentials_path = config_dir.join("credentials.toml");
-
-        let mut credentials: HashMap<String, RegistryCredential> = if credentials_path.exists() {
-            let content = std::fs::read_to_string(&credentials_path).unwrap_or_default();
-            toml::from_str(&content).unwrap_or_default()
-        } else {
-            HashMap::new()
+        let explicit_capability_pubkey = args.capability_pubkey.or_else(|| std::env::var("CELLSCRIPT_CAPABILITY_PUBKEY").ok());
+        let (capability_pubkey, generated_key_id) = match explicit_capability_pubkey {
+            Some(capability_pubkey) => (capability_pubkey, None),
+            None => {
+                let generated = generate_and_store_registry_capability_key()?;
+                (generated.capability_pubkey, Some(generated.key_id))
+            }
         };
+        let capability_key_id = registry_capability_key_id(&capability_pubkey);
+        let requested_scopes = resolve_requested_scopes(args.scopes)?;
+        let issued_at = current_utc_timestamp();
+        let expires_at = utc_timestamp_after_seconds(10 * 60);
+        let capability_expires_at = resolve_capability_expires_at(args.capability_expires_at, args.expires)?;
+        let nonce =
+            registry_auth_nonce(&registry_origin, &principal_type, &principal_id, &capability_pubkey, &requested_scopes, &issued_at);
+        let payload = crate::package::registry::CapabilityAuthorisationPayload::new(
+            registry_origin,
+            principal_type,
+            principal_id,
+            capability_pubkey,
+            requested_scopes,
+            capability_expires_at,
+            nonce,
+            issued_at,
+            expires_at,
+            crate::VERSION.to_string(),
+        );
 
-        eprintln!("Logging in to {}", registry);
-        eprintln!("Enter your authentication token (or press Enter to use environment variable CELLSCRIPT_TOKEN):");
-
-        let mut token = String::new();
-        if std::io::stdin().read_line(&mut token).is_err() || token.trim().is_empty() {
-            token = std::env::var("CELLSCRIPT_TOKEN").unwrap_or_default();
+        if args.json {
+            print_json(&serde_json::to_value(&payload)?)?;
+        } else {
+            println!("{}", "Capability authorisation payload".green());
+            println!("  Protocol: {}", payload.protocol);
+            println!("  Action: {}", payload.action);
+            println!("  Registry: {}", payload.registry_origin);
+            println!("  Principal: {}:{}", payload.principal_type, payload.principal_id);
+            println!("  Capability pubkey: {}", payload.capability_pubkey);
+            println!("  Capability key id: {}", capability_key_id);
+            if generated_key_id.is_some() {
+                println!("  Capability private key: stored in the OS keychain");
+            }
+            println!("  Scopes: {}", payload.requested_scopes.join(", "));
+            println!("  Capability expires: {}", payload.capability_expires_at);
+            println!();
+            println!("Sign this payload with JoyID, then submit the signed authorisation to the registry write API:");
+            println!("{}", serde_json::to_string_pretty(&payload)?);
         }
 
-        if token.trim().is_empty() {
+        Ok(())
+    }
+
+    fn auth_capability_submit(args: AuthCapabilitySubmitArgs) -> Result<()> {
+        let api_base = resolve_registry_api_base(args.api_url)?;
+        let registry_origin = registry_origin_from_api_base(&api_base)?;
+        let payload = read_capability_authorisation_payload(&args.payload)?;
+        if payload.registry_origin != registry_origin {
+            return Err(crate::error::CompileError::without_span(format!(
+                "capability payload registry_origin '{}' does not match API origin '{}'",
+                payload.registry_origin, registry_origin
+            )));
+        }
+        let joyid_signature = read_json_value(&args.joyid_signature)?;
+        let body = serde_json::json!({
+            "payload": payload,
+            "joyid_signature": joyid_signature,
+        });
+        let endpoint = format!("{}/v1/capabilities", api_base.trim_end_matches('/'));
+        let response = submit_registry_json_request(&endpoint, &body, "Submitted capability authorisation", args.json)?;
+        if !args.json {
+            if let Some(key_id) = response.get("key_id").and_then(serde_json::Value::as_str) {
+                println!("  Capability key id: {}", key_id);
+            }
+            if let Some(status) = response.get("status").and_then(serde_json::Value::as_str) {
+                println!("  Status: {}", status);
+            }
+        }
+        Ok(())
+    }
+
+    fn auth_capability_revoke(args: AuthCapabilityRevokeArgs) -> Result<()> {
+        if args.payload.is_none() && args.joyid_signature.is_some() {
             return Err(crate::error::CompileError::without_span(
-                "no authentication token provided; set CELLSCRIPT_TOKEN environment variable or enter token interactively",
+                "capability revocation with --joyid-signature must use --payload from a previously generated revoke challenge",
             ));
         }
 
-        let token = token.trim().to_string();
+        let payload = if let Some(payload_path) = args.payload.as_deref() {
+            read_capability_revocation_payload(payload_path)?
+        } else {
+            let registry_origin = args
+                .registry_origin
+                .or_else(|| std::env::var("CELLSCRIPT_REGISTRY_ORIGIN").ok())
+                .unwrap_or_else(|| crate::package::registry::DEFAULT_PUBLIC_REGISTRY_ORIGIN.to_string());
+            let principal_type = args
+                .principal_type
+                .or_else(|| std::env::var("CELLSCRIPT_PRINCIPAL_TYPE").ok())
+                .unwrap_or_else(|| "joyid_ckb".to_string());
+            let principal_id = args.principal_id.or_else(|| std::env::var("CELLSCRIPT_PRINCIPAL_ID").ok()).ok_or_else(|| {
+                crate::error::CompileError::without_span(
+                    "principal id is required for capability revoke; pass --principal-id or set CELLSCRIPT_PRINCIPAL_ID to the normalized JoyID/CKB identity binding",
+                )
+            })?;
+            let capability_key_id =
+                args.capability_key_id.or_else(|| std::env::var("CELLSCRIPT_CAPABILITY_KEY_ID").ok()).ok_or_else(|| {
+                    crate::error::CompileError::without_span(
+                        "capability key id is required for capability revoke; pass --capability-key-id or set CELLSCRIPT_CAPABILITY_KEY_ID",
+                    )
+                })?;
+            let issued_at = current_utc_timestamp();
+            let expires_at = utc_timestamp_after_seconds(10 * 60);
+            let nonce = registry_revoke_nonce(&registry_origin, &principal_type, &principal_id, &capability_key_id, &issued_at);
+            crate::package::registry::CapabilityRevocationPayload::new(
+                registry_origin,
+                principal_type,
+                principal_id,
+                capability_key_id,
+                nonce,
+                issued_at,
+                expires_at,
+                crate::VERSION.to_string(),
+            )
+        };
 
-        credentials.insert(registry.clone(), RegistryCredential { registry: registry.clone(), token });
+        let Some(signature_path) = args.joyid_signature.as_deref() else {
+            if args.json {
+                print_json(&serde_json::to_value(&payload)?)?;
+            } else {
+                println!("{}", "Capability revocation payload".green());
+                println!("  Protocol: {}", payload.protocol);
+                println!("  Action: {}", payload.action);
+                println!("  Registry: {}", payload.registry_origin);
+                println!("  Principal: {}:{}", payload.principal_type, payload.principal_id);
+                println!("  Capability key id: {}", payload.capability_key_id);
+                println!();
+                println!("Sign this payload with JoyID, then submit it with:");
+                println!("  cellc auth capability revoke --payload <payload.json> --joyid-signature <joyid-signature.json>");
+                println!("{}", serde_json::to_string_pretty(&payload)?);
+            }
+            return Ok(());
+        };
 
-        let content = toml::to_string_pretty(&credentials)?;
-        #[cfg(unix)]
-        {
-            use std::io::Write as _;
-
-            let mut file = std::fs::OpenOptions::new().create(true).write(true).truncate(true).mode(0o600).open(&credentials_path)?;
-            file.write_all(content.as_bytes())?;
-            std::fs::set_permissions(&credentials_path, std::fs::Permissions::from_mode(0o600))?;
+        let api_base = resolve_registry_api_base(args.api_url)?;
+        let registry_origin = registry_origin_from_api_base(&api_base)?;
+        if payload.registry_origin != registry_origin {
+            return Err(crate::error::CompileError::without_span(format!(
+                "capability revocation registry_origin '{}' does not match API origin '{}'",
+                payload.registry_origin, registry_origin
+            )));
         }
-        #[cfg(not(unix))]
-        {
-            std::fs::write(&credentials_path, content)?;
+        let joyid_signature = read_json_value(signature_path)?;
+        let mut body = serde_json::json!({
+            "payload": payload,
+            "joyid_signature": joyid_signature,
+        });
+        if let Some(reason) = args.reason.filter(|reason| !reason.trim().is_empty()) {
+            body["reason"] = serde_json::Value::String(reason);
         }
-
-        println!("{}", format!("Login credentials saved for {}", registry).green());
-        println!("  Config directory: {}", config_dir.display());
+        let endpoint = format!(
+            "{}/v1/capabilities/{}/revoke",
+            api_base.trim_end_matches('/'),
+            body["payload"]["capability_key_id"].as_str().unwrap_or_default()
+        );
+        let response = submit_registry_json_request(&endpoint, &body, "Revoked capability", args.json)?;
+        if !args.json {
+            if let Some(key_id) = response.get("key_id").and_then(serde_json::Value::as_str) {
+                println!("  Capability key id: {}", key_id);
+            }
+            if let Some(revoked_at) = response.get("revoked_at").and_then(serde_json::Value::as_str) {
+                println!("  Revoked at: {}", revoked_at);
+            }
+        }
         Ok(())
+    }
+
+    fn registry_verify(args: RegistryVerifyArgs) -> Result<()> {
+        let root = std::path::Path::new(".");
+
+        // Read Cell.lock
+        let lockfile = Lockfile::read_from_root(root)?
+            .ok_or_else(|| crate::error::CompileError::without_span("Cell.lock not found; run 'cellc build' first"))?;
+
+        // Read Deployed.toml
+        let deployed = crate::package::DeployedManifest::read_from_root(root)?
+            .ok_or_else(|| crate::error::CompileError::without_span("Deployed.toml not found; deploy the contract first"))?;
+
+        let mut violations = Vec::new();
+
+        if lockfile.package.name != deployed.package.name {
+            violations.push(format!(
+                "package name mismatch: Cell.lock has '{}', Deployed.toml has '{}'",
+                lockfile.package.name, deployed.package.name
+            ));
+        }
+        if lockfile.package.version != deployed.package.version {
+            violations.push(format!(
+                "package version mismatch: Cell.lock has '{}', Deployed.toml has '{}'",
+                lockfile.package.version, deployed.package.version
+            ));
+        }
+        if let (Some(lock_hash), Some(deployed_hash)) = (&lockfile.package.source_hash, &deployed.package.source_hash) {
+            if lock_hash != deployed_hash {
+                violations.push(format!("source_hash mismatch: Cell.lock has '{}', Deployed.toml has '{}'", lock_hash, deployed_hash));
+            }
+        } else {
+            violations.push("source_hash must be present in both Cell.lock and Deployed.toml".to_string());
+        }
+
+        match &lockfile.package_build {
+            Some(build) => push_missing_locked_build_identity("Cell.lock [package.build]", build, &mut violations),
+            None => violations.push("Cell.lock has no [package.build]".to_string()),
+        }
+        match &deployed.build {
+            Some(build) => push_missing_deployed_build_identity("Deployed.toml [build]", build, &mut violations),
+            None => violations.push("Deployed.toml has no [build]".to_string()),
+        }
+
+        if let (Some(build), Some(deployed_build)) = (&lockfile.package_build, &deployed.build) {
+            compare_optional_build_field(
+                "compiler_version",
+                &build.compiler_version,
+                &deployed_build.compiler_version,
+                &mut violations,
+            );
+            compare_optional_build_field("artifact_hash", &build.artifact_hash, &deployed_build.artifact_hash, &mut violations);
+            compare_optional_build_field("metadata_hash", &build.metadata_hash, &deployed_build.metadata_hash, &mut violations);
+            compare_optional_build_field("schema_hash", &build.schema_hash, &deployed_build.schema_hash, &mut violations);
+            compare_optional_build_field(
+                "cell_data_codec_manifest_hash",
+                &build.cell_data_codec_manifest_hash,
+                &deployed_build.cell_data_codec_manifest_hash,
+                &mut violations,
+            );
+            compare_optional_build_field("abi_hash", &build.abi_hash, &deployed_build.abi_hash, &mut violations);
+            compare_optional_build_field(
+                "constraints_hash",
+                &build.constraints_hash,
+                &deployed_build.constraints_hash,
+                &mut violations,
+            );
+        }
+
+        // Check deployment records
+        let mut seen_networks = BTreeSet::new();
+        for deployment in &deployed.deployments {
+            seen_networks.insert(deployment.network.clone());
+            push_deployment_status_violation(deployment, &mut violations);
+
+            let Some(deployment_ref) = lockfile.deployment.get(&deployment.network) else {
+                violations.push(format!("deployment for network '{}' is missing from Cell.lock", deployment.network));
+                continue;
+            };
+
+            if deployment_ref.record.is_empty() {
+                violations.push(format!("deployment ref for network '{}' has empty record", deployment.network));
+            } else {
+                let chain_record = format!("{}:{}", deployment.chain_id, deployment.out_point);
+                let network_record = format!("{}:{}", deployment.network, deployment.out_point);
+                if deployment_ref.record != deployment.out_point
+                    && deployment_ref.record != chain_record
+                    && deployment_ref.record != network_record
+                {
+                    violations.push(format!(
+                        "deployment record mismatch for network '{}': Cell.lock has '{}', Deployed.toml out_point is '{}'",
+                        deployment.network, deployment_ref.record, deployment.out_point
+                    ));
+                }
+            }
+
+            match &deployment_ref.code_hash {
+                Some(code_hash) if code_hash == &deployment.code_hash => {}
+                Some(code_hash) => violations.push(format!(
+                    "code_hash mismatch for network '{}': Cell.lock has '{}', Deployed.toml has '{}'",
+                    deployment.network, code_hash, deployment.code_hash
+                )),
+                None => violations.push(format!("deployment ref for network '{}' has no code_hash", deployment.network)),
+            }
+            match &deployment_ref.out_point {
+                Some(out_point) if out_point == &deployment.out_point => {}
+                Some(out_point) => violations.push(format!(
+                    "out_point mismatch for network '{}': Cell.lock has '{}', Deployed.toml has '{}'",
+                    deployment.network, out_point, deployment.out_point
+                )),
+                None => violations.push(format!("deployment ref for network '{}' has no out_point", deployment.network)),
+            }
+            match &deployment_ref.data_hash {
+                Some(data_hash) if data_hash == &deployment.data_hash => {}
+                Some(data_hash) => violations.push(format!(
+                    "data_hash mismatch for network '{}': Cell.lock has '{}', Deployed.toml has '{}'",
+                    deployment.network, data_hash, deployment.data_hash
+                )),
+                None => violations.push(format!("deployment ref for network '{}' has no data_hash", deployment.network)),
+            }
+            if let Some(record_hash) = &deployment_ref.record_hash {
+                let computed = hash_json_value("deployment record", deployment)?;
+                if record_hash != &computed {
+                    violations.push(format!(
+                        "record_hash mismatch for network '{}': Cell.lock has '{}', computed '{}'",
+                        deployment.network, record_hash, computed
+                    ));
+                }
+            }
+
+            // TYPE_ID upgrade lineage (Phase 2, off-chain consistency): when a
+            // deployment declares `upgrade_lineage`, it must not point at itself
+            // and must not be empty. We do not require it to match a record kept
+            // in Deployed.toml, because historical deployments are often pruned;
+            // on-chain TYPE_ID upgrade-chain verification remains a live-RPC
+            // concern. This off-chain check catches the common copy-paste error
+            // where a lineage field accidentally names the current deployment.
+            if let Some(lineage) = &deployment.upgrade_lineage {
+                if lineage.trim().is_empty() {
+                    violations.push(format!(
+                        "upgrade_lineage for network '{}' is empty; remove the field or point it at a prior out_point",
+                        deployment.network
+                    ));
+                } else if lineage.trim() == deployment.out_point {
+                    violations.push(format!(
+                        "upgrade_lineage for network '{}' points at the deployment's own out_point '{}'; lineage must reference a prior deployment",
+                        deployment.network, deployment.out_point
+                    ));
+                }
+            }
+        }
+        for network in lockfile.deployment.keys() {
+            if !seen_networks.contains(network) {
+                violations.push(format!("Cell.lock has stale deployment ref for network '{}'", network));
+            }
+        }
+        let trust_report =
+            verify_registry_trust_metadata(&deployed, args.require_publisher_signature, args.require_audit_report, &mut violations);
+        let live_report = if args.live {
+            let rpc_url = args.rpc_url.clone().or_else(|| std::env::var(CELLSCRIPT_CKB_RPC_URL_ENV).ok()).ok_or_else(|| {
+                crate::error::CompileError::without_span(format!(
+                    "registry verify --live requires --rpc-url or {}",
+                    CELLSCRIPT_CKB_RPC_URL_ENV
+                ))
+            })?;
+            Some(verify_live_deployments(&deployed, &rpc_url, args.network.as_deref(), &mut violations)?)
+        } else {
+            None
+        };
+
+        if args.json {
+            let summary = serde_json::json!({
+                "status": if violations.is_empty() { "ok" } else { "failed" },
+                "trust": trust_report,
+                "live": live_report.unwrap_or_else(|| serde_json::json!({
+                    "enabled": false,
+                    "evidence": []
+                })),
+                "violations": violations,
+            });
+            let json = serde_json::to_string_pretty(&summary)
+                .map_err(|e| crate::error::CompileError::without_span(format!("failed to serialize: {}", e)))?;
+            println!("{}", json);
+            if !violations.is_empty() {
+                return Err(crate::error::CompileError::without_span("registry verification failed"));
+            }
+        } else if violations.is_empty() {
+            println!("{}", "Registry verification passed".green());
+        } else {
+            println!("{}", "Registry verification failed".red());
+            for v in &violations {
+                println!("  - {}", v);
+            }
+            return Err(crate::error::CompileError::without_span("registry verification failed"));
+        }
+
+        Ok(())
+    }
+
+    fn package_verify(args: PackageVerifyArgs) -> Result<()> {
+        let root = std::path::Path::new(".");
+        let mut pm = PackageManager::new(root);
+        let manifest = pm.read_manifest()?;
+
+        // Read Cell.lock
+        let lockfile = Lockfile::read_from_root(root)?
+            .ok_or_else(|| crate::error::CompileError::without_span("Cell.lock not found; run 'cellc build' first"))?;
+
+        let mut violations = Vec::new();
+
+        if lockfile.package.name != manifest.package.name {
+            violations.push(format!(
+                "package name mismatch: Cell.toml has '{}', Cell.lock has '{}'",
+                manifest.package.name, lockfile.package.name
+            ));
+        }
+        if lockfile.package.version != manifest.package.version {
+            violations.push(format!(
+                "package version mismatch: Cell.toml has '{}', Cell.lock has '{}'",
+                manifest.package.version, lockfile.package.version
+            ));
+        }
+        if lockfile.package.namespace != manifest.package.namespace {
+            violations.push(format!(
+                "package namespace mismatch: Cell.toml has '{:?}', Cell.lock has '{:?}'",
+                manifest.package.namespace, lockfile.package.namespace
+            ));
+        }
+
+        match &lockfile.package.source_hash {
+            Some(source_hash) => {
+                let computed = crate::package::registry::compute_source_hash(root)?;
+                if &computed != source_hash {
+                    violations.push(format!("source_hash mismatch: Cell.lock has '{}', computed '{}'", source_hash, computed));
+                }
+            }
+            None => violations.push("Cell.lock [package] has no source_hash; run 'cellc build' to populate".to_string()),
+        }
+
+        match &lockfile.package_build {
+            Some(build) => push_missing_locked_build_identity("Cell.lock [package.build]", build, &mut violations),
+            None => violations.push("Cell.lock has no [package.build]; run 'cellc build' to populate build identity".to_string()),
+        }
+
+        pm.resolve_dependencies()?;
+        for issue in lockfile.consistency_issues_with_resolved(&manifest, pm.get_resolved()) {
+            violations.push(issue);
+        }
+        for (name, locked) in &lockfile.dependencies {
+            if matches!(locked.source, crate::package::LockedSource::Registry { .. }) && locked.source_hash.is_none() {
+                violations.push(format!("registry dependency '{}' has no source_hash in Cell.lock", name));
+            }
+        }
+
+        if args.json {
+            let summary = serde_json::json!({
+                "status": if violations.is_empty() { "ok" } else { "failed" },
+                "violations": violations,
+            });
+            let json = serde_json::to_string_pretty(&summary)
+                .map_err(|e| crate::error::CompileError::without_span(format!("failed to serialize: {}", e)))?;
+            println!("{}", json);
+            if !violations.is_empty() {
+                return Err(crate::error::CompileError::without_span("package verification failed"));
+            }
+        } else if violations.is_empty() {
+            println!("{}", "Package verification passed".green());
+        } else {
+            println!("{}", "Package verification failed".red());
+            for v in &violations {
+                println!("  - {}", v);
+            }
+            return Err(crate::error::CompileError::without_span("package verification failed"));
+        }
+
+        Ok(())
+    }
+
+    fn registry_add(args: RegistryAddArgs) -> Result<()> {
+        let root = std::path::Path::new(".");
+        let cache_dir = root.join(".cell/registry-cache");
+        let registry_url = crate::package::registry::default_registry_url();
+        let discovery = crate::package::registry::DiscoveryIndex::new(&registry_url, &cache_dir);
+
+        let entry_path = discovery.add_entry(&args.namespace, &args.name, &args.source)?;
+        let discovery_clone = entry_path.parent().and_then(|path| path.parent()).unwrap_or(cache_dir.as_path());
+        let entry_rel = entry_path.strip_prefix(discovery_clone).unwrap_or(entry_path.as_path());
+
+        println!("{}", "Registry entry added".green());
+        println!("  Namespace: {}", args.namespace);
+        println!("  Name: {}", args.name);
+        println!("  Source: {}", args.source);
+        println!();
+        println!("  Next steps:");
+        println!("    cd {} && git add {}", discovery_clone.display(), entry_rel.display());
+        println!("    git commit -m \"add {}/{}\"", args.namespace, args.name);
+        println!("    Open a PR to the cellscript-registry repository");
+
+        Ok(())
+    }
+
+    fn registry_edit(args: RegistryEditArgs) -> Result<()> {
+        let version =
+            args.yank.ok_or_else(|| crate::error::CompileError::without_span("registry edit currently requires --yank <VERSION>"))?;
+        let root = std::path::Path::new(".");
+        let mut index = crate::package::registry::RegistryIndex::read_from_repo(root)?;
+        let Some(entry) = index.versions.iter_mut().find(|entry| entry.version == version) else {
+            return Err(crate::error::CompileError::without_span(format!(
+                "registry.json has no version '{}' for {}/{}",
+                version, index.namespace, index.name
+            )));
+        };
+
+        entry.yanked = true;
+        entry.yanked_at = Some(args.yanked_at.unwrap_or_else(current_utc_timestamp));
+        entry.yanked_reason = args.reason;
+        entry.replaced_by = args.replaced_by;
+        let reason = entry.yanked_reason.clone();
+        let replaced_by = entry.replaced_by.clone();
+        index.write_to_repo(root)?;
+
+        println!("{}", "Registry version yanked".green());
+        println!("  Package: {}/{}", index.namespace, index.name);
+        println!("  Version: {}", version);
+        if let Some(reason) = reason.as_deref() {
+            println!("  Reason: {}", reason);
+        }
+        if let Some(replacement) = replaced_by.as_deref() {
+            println!("  Replaced by: {}", replacement);
+        }
+        println!();
+        println!("  Next steps:");
+        println!("    git add registry.json");
+        println!("    git commit -m \"yank {}/{}@{}\"", index.namespace, index.name, version);
+        println!("    Open a PR with the advisory or replacement evidence");
+
+        Ok(())
+    }
+
+    fn certify(args: CertifyArgs) -> Result<()> {
+        if args.plugin != NOVASEAL_CERTIFICATION_PLUGIN {
+            return Err(crate::error::CompileError::without_span(format!(
+                "unknown certification plugin '{}'; available plugins: {}",
+                args.plugin, NOVASEAL_CERTIFICATION_PLUGIN
+            )));
+        }
+
+        let repo_root = args.repo_root.unwrap_or(std::env::current_dir()?);
+        let report_provided = args.report.is_some();
+        let plugin_report_path = args.report.clone().unwrap_or_else(|| repo_root.join("target/novaseal-production-gates.json"));
+        let report_generated = !report_provided;
+
+        let plugin_report = if report_provided {
+            read_json_value(&plugin_report_path)?
+        } else {
+            let report = super::novaseal_certification::build_report(&repo_root)?;
+            if let Some(parent) = plugin_report_path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::write(
+                &plugin_report_path,
+                serde_json::to_string_pretty(&report).map_err(|error| {
+                    crate::error::CompileError::without_span(format!("failed to serialize NovaSeal production-gate report: {}", error))
+                })?,
+            )?;
+            report
+        };
+
+        let implementation_path = repo_root.join("src/cli/novaseal_certification.rs");
+        let summary = novaseal_certification_summary(
+            &plugin_report,
+            &repo_root,
+            &plugin_report_path,
+            &implementation_path,
+            report_generated,
+            args.require_production,
+        )?;
+        let output_path = args.output.unwrap_or_else(|| repo_root.join("target/cellscript-certification/novaseal-profile-v0.json"));
+        if let Some(parent) = output_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(
+            &output_path,
+            serde_json::to_string_pretty(&summary).map_err(|error| {
+                crate::error::CompileError::without_span(format!("failed to serialize certification report: {}", error))
+            })?,
+        )?;
+
+        if args.json {
+            print_json(&summary)?;
+        } else {
+            println!("Certification report generated");
+            println!("  Plugin: {}", args.plugin);
+            println!("  Status: {}", summary["status"].as_str().unwrap_or("unknown"));
+            println!("  Level: {}", summary["certification_level"].as_str().unwrap_or("unknown"));
+            println!("  Output: {}", output_path.display());
+            println!("  Plugin report: {}", plugin_report_path.display());
+        }
+
+        if summary["status"].as_str() == Some("passed") {
+            Ok(())
+        } else {
+            Err(crate::error::CompileError::without_span(novaseal_certification_failure_message(&summary)))
+        }
     }
 }
 
 #[cfg(feature = "vm-runner")]
 type CliVmMachine = TraceMachine<DefaultCoreMachine<u64, WXorXMemory<SparseMemory<u64>>>>;
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-struct RegistryCredential {
-    registry: String,
-    token: String,
+/// Convert days since Unix epoch (1970-01-01) to (year, month, day).
+/// Implements the civil date algorithm from Howard Hinnant.
+fn civil_date_from_days(z: i32) -> (i32, u32, u32) {
+    let z = z + 719468;
+    let era = z / 146097;
+    let doe = z - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = mp + if mp < 10 { 3 } else { -9 };
+    let y = y + if m <= 2 { 1 } else { 0 };
+    (y, m as u32, d as u32)
+}
+
+fn current_utc_timestamp() -> String {
+    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
+    utc_timestamp_from_unix_secs(secs)
+}
+
+fn utc_timestamp_after_seconds(delta_secs: u64) -> String {
+    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
+    utc_timestamp_from_unix_secs(secs.saturating_add(delta_secs))
+}
+
+fn utc_timestamp_from_unix_secs(secs: u64) -> String {
+    let days_since_epoch = secs / 86400;
+    let time_of_day = secs % 86400;
+    let (year, month, day) = civil_date_from_days(days_since_epoch as i32);
+    let hour = (time_of_day / 3600) as u8;
+    let minute = ((time_of_day % 3600) / 60) as u8;
+    let second = (time_of_day % 60) as u8;
+    format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", year, month, day, hour, minute, second)
+}
+
+fn resolve_requested_scopes(mut scopes: Vec<String>) -> Result<Vec<String>> {
+    scopes.retain(|scope| !scope.trim().is_empty());
+    if !scopes.is_empty() {
+        return Ok(scopes);
+    }
+
+    let manifest = PackageManager::new(".").read_manifest().map_err(|_| {
+        crate::error::CompileError::without_span(
+            "at least one capability scope is required; pass --scope publish:<namespace>/<package> outside a package directory",
+        )
+    })?;
+    let namespace = manifest.package.namespace.ok_or_else(|| {
+        crate::error::CompileError::without_span(
+            "cannot infer capability scope because [package].namespace is missing; pass --scope publish:<namespace>/<package>",
+        )
+    })?;
+    if manifest.package.name.is_empty() {
+        return Err(crate::error::CompileError::without_span(
+            "cannot infer capability scope because [package].name is empty; pass --scope publish:<namespace>/<package>",
+        ));
+    }
+
+    Ok(vec![format!("publish:{}/{}", namespace, manifest.package.name)])
+}
+
+fn resolve_capability_expires_at(explicit_timestamp: Option<String>, relative: Option<String>) -> Result<String> {
+    if let Some(timestamp) = explicit_timestamp {
+        return Ok(timestamp);
+    }
+
+    let Some(relative) = relative else {
+        return Ok(utc_timestamp_after_seconds(90 * 24 * 60 * 60));
+    };
+    let trimmed = relative.trim();
+    if let Some(days) = trimmed.strip_suffix('d') {
+        let days: u64 = days.parse().map_err(|_| {
+            crate::error::CompileError::without_span(format!("invalid --expires value '{}'; expected a duration like 90d", relative))
+        })?;
+        return Ok(utc_timestamp_after_seconds(days.saturating_mul(24 * 60 * 60)));
+    }
+    if let Some(hours) = trimmed.strip_suffix('h') {
+        let hours: u64 = hours.parse().map_err(|_| {
+            crate::error::CompileError::without_span(format!(
+                "invalid --expires value '{}'; expected a duration like 90d or 24h",
+                relative
+            ))
+        })?;
+        return Ok(utc_timestamp_after_seconds(hours.saturating_mul(60 * 60)));
+    }
+    if trimmed.contains('T') && trimmed.ends_with('Z') {
+        return Ok(trimmed.to_string());
+    }
+
+    Err(crate::error::CompileError::without_span(format!(
+        "invalid --expires value '{}'; expected a duration like 90d/24h or an absolute UTC timestamp",
+        relative
+    )))
+}
+
+fn registry_auth_nonce(
+    registry_origin: &str,
+    principal_type: &str,
+    principal_id: &str,
+    capability_pubkey: &str,
+    requested_scopes: &[String],
+    issued_at: &str,
+) -> String {
+    let material = format!(
+        "{}\n{}\n{}\n{}\n{}\n{}\n{}",
+        crate::package::registry::REGISTRY_AUTH_PROTOCOL,
+        registry_origin,
+        principal_type,
+        principal_id,
+        capability_pubkey,
+        requested_scopes.join(","),
+        issued_at
+    );
+    format!("0x{}", hex::encode(crate::ckb_blake2b256(material.as_bytes())))
+}
+
+fn registry_revoke_nonce(
+    registry_origin: &str,
+    principal_type: &str,
+    principal_id: &str,
+    capability_key_id: &str,
+    issued_at: &str,
+) -> String {
+    let material = format!(
+        "{}\n{}\n{}\n{}\n{}\n{}",
+        crate::package::registry::REVOKE_CAPABILITY_ACTION,
+        registry_origin,
+        principal_type,
+        principal_id,
+        capability_key_id,
+        issued_at
+    );
+    format!("0x{}", hex::encode(crate::ckb_blake2b256(material.as_bytes())))
+}
+
+struct GeneratedRegistryCapabilityKey {
+    key_id: String,
+    capability_pubkey: String,
+}
+
+fn generate_and_store_registry_capability_key() -> Result<GeneratedRegistryCapabilityKey> {
+    let rng = ring::rand::SystemRandom::new();
+    let pkcs8 = ring::signature::EcdsaKeyPair::generate_pkcs8(&ring::signature::ECDSA_P256_SHA256_FIXED_SIGNING, &rng)
+        .map_err(|error| crate::error::CompileError::without_span(format!("failed to generate capability key: {:?}", error)))?;
+    let key_pair = ring::signature::EcdsaKeyPair::from_pkcs8(&ring::signature::ECDSA_P256_SHA256_FIXED_SIGNING, pkcs8.as_ref(), &rng)
+        .map_err(|error| crate::error::CompileError::without_span(format!("failed to load generated capability key: {:?}", error)))?;
+    let spki = p256_spki_der_from_uncompressed_public_key(key_pair.public_key().as_ref())?;
+    let capability_pubkey = format!("p256-spki:{}", base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(spki));
+    let key_id = registry_capability_key_id(&capability_pubkey);
+    store_registry_capability_private_key(&key_id, pkcs8.as_ref())?;
+    Ok(GeneratedRegistryCapabilityKey { key_id, capability_pubkey })
+}
+
+fn registry_capability_key_id(capability_pubkey: &str) -> String {
+    use sha2::Digest as _;
+    let digest = sha2::Sha256::digest(capability_pubkey.as_bytes());
+    format!("cap_{}", &hex::encode(digest)[..32])
+}
+
+fn p256_spki_der_from_uncompressed_public_key(public_key: &[u8]) -> Result<Vec<u8>> {
+    const P256_SPKI_PREFIX: &[u8] = &[
+        0x30, 0x59, 0x30, 0x13, 0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01, 0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03,
+        0x01, 0x07, 0x03, 0x42, 0x00,
+    ];
+    if public_key.len() != 65 || public_key.first() != Some(&0x04) {
+        return Err(crate::error::CompileError::without_span(format!(
+            "generated capability public key must be an uncompressed 65-byte P-256 point, got {} bytes",
+            public_key.len()
+        )));
+    }
+    let mut spki = Vec::with_capacity(P256_SPKI_PREFIX.len() + public_key.len());
+    spki.extend_from_slice(P256_SPKI_PREFIX);
+    spki.extend_from_slice(public_key);
+    Ok(spki)
+}
+
+fn store_registry_capability_private_key(key_id: &str, pkcs8: &[u8]) -> Result<()> {
+    let secret = base64::engine::general_purpose::STANDARD.encode(pkcs8);
+    let entry = keyring::Entry::new("cellscript-registry", key_id)
+        .map_err(|error| crate::error::CompileError::without_span(format!("failed to open OS keychain: {}", error)))?;
+    entry.set_password(&secret).map_err(|error| {
+        crate::error::CompileError::without_span(format!(
+            "failed to store capability private key '{}' in OS keychain: {}",
+            key_id, error
+        ))
+    })
+}
+
+fn sign_registry_publish_payload(key_id: &str, canonical_payload: &str) -> Result<String> {
+    let Some(pkcs8) = load_registry_capability_private_key(key_id)? else {
+        return Err(crate::error::CompileError::without_span(format!(
+            "capability signature is required for public publish and no private key was found for '{}' in the OS keychain; pass --capability-signature, set CELLSCRIPT_CAPABILITY_SIGNATURE, or set CELLSCRIPT_CAPABILITY_PRIVATE_KEY_PKCS8_B64 for CI",
+            key_id
+        )));
+    };
+    sign_registry_publish_payload_with_pkcs8(&pkcs8, canonical_payload)
+}
+
+fn load_registry_capability_private_key(key_id: &str) -> Result<Option<Vec<u8>>> {
+    if let Ok(value) = std::env::var("CELLSCRIPT_CAPABILITY_PRIVATE_KEY_PKCS8_B64") {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            let decoded = base64::engine::general_purpose::STANDARD.decode(trimmed).map_err(|error| {
+                crate::error::CompileError::without_span(format!(
+                    "failed to decode CELLSCRIPT_CAPABILITY_PRIVATE_KEY_PKCS8_B64: {}",
+                    error
+                ))
+            })?;
+            return Ok(Some(decoded));
+        }
+    }
+
+    let entry = keyring::Entry::new("cellscript-registry", key_id)
+        .map_err(|error| crate::error::CompileError::without_span(format!("failed to open OS keychain: {}", error)))?;
+    match entry.get_password() {
+        Ok(secret) => {
+            let decoded = base64::engine::general_purpose::STANDARD.decode(secret.trim()).map_err(|error| {
+                crate::error::CompileError::without_span(format!(
+                    "failed to decode capability private key '{}' from OS keychain: {}",
+                    key_id, error
+                ))
+            })?;
+            Ok(Some(decoded))
+        }
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(error) => Err(crate::error::CompileError::without_span(format!(
+            "failed to read capability private key '{}' from OS keychain: {}",
+            key_id, error
+        ))),
+    }
+}
+
+fn sign_registry_publish_payload_with_pkcs8(pkcs8: &[u8], canonical_payload: &str) -> Result<String> {
+    let rng = ring::rand::SystemRandom::new();
+    let key_pair = ring::signature::EcdsaKeyPair::from_pkcs8(&ring::signature::ECDSA_P256_SHA256_FIXED_SIGNING, pkcs8, &rng)
+        .map_err(|error| crate::error::CompileError::without_span(format!("failed to load capability private key: {:?}", error)))?;
+    let signature = key_pair
+        .sign(&rng, canonical_payload.as_bytes())
+        .map_err(|error| crate::error::CompileError::without_span(format!("failed to sign publish payload: {:?}", error)))?;
+    Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(signature.as_ref()))
+}
+
+fn registry_publish_nonce(
+    registry_origin: &str,
+    namespace: &str,
+    name: &str,
+    version: &str,
+    source_hash: &str,
+    capability_key_id: &str,
+    issued_at: &str,
+) -> String {
+    let material = format!(
+        "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
+        crate::package::registry::REGISTRY_PUBLISH_PROTOCOL,
+        registry_origin,
+        namespace,
+        name,
+        version,
+        source_hash,
+        capability_key_id,
+        issued_at
+    );
+    format!("0x{}", hex::encode(crate::ckb_blake2b256(material.as_bytes())))
+}
+
+fn build_publish_registry_version(
+    manifest: &PackageManifest,
+    result: &crate::CompileResult,
+    source_hash: &str,
+) -> Result<crate::package::registry::RegistryVersion> {
+    let mut deps = BTreeMap::new();
+    for (dep_name, dep) in &manifest.dependencies {
+        let (namespace, version) = match dep {
+            crate::package::Dependency::Simple(version) => (manifest.package.namespace.clone().unwrap_or_default(), version.clone()),
+            crate::package::Dependency::Detailed(detail) => {
+                let namespace = detail.namespace.clone().unwrap_or_else(|| manifest.package.namespace.clone().unwrap_or_default());
+                (namespace, detail.version.clone())
+            }
+        };
+        deps.insert(dep_name.clone(), crate::package::registry::RegistryDependencyRef { namespace, version });
+    }
+
+    Ok(crate::package::registry::RegistryVersion {
+        version: manifest.package.version.clone(),
+        tag: format!("v{}", manifest.package.version),
+        source_hash: source_hash.to_string(),
+        cellscript_version: result.metadata.compiler_version.clone(),
+        dependencies: deps,
+        abi_index: Some(metadata_abi_hash(&result.metadata)?),
+        schema_hash: Some(result.metadata.molecule_schema_manifest.manifest_hash.clone()),
+        license: if manifest.package.license.is_empty() { None } else { Some(manifest.package.license.clone()) },
+        released_at: Some(current_utc_timestamp()),
+        status: crate::package::registry::RegistryEntryStatus::SourcePublished,
+        yanked: false,
+        yanked_at: None,
+        yanked_reason: None,
+        replaced_by: None,
+        audit: None,
+    })
+}
+
+fn build_publish_registry_entry(
+    manifest: &PackageManifest,
+    namespace: &str,
+    version_entry: crate::package::registry::RegistryVersion,
+) -> Result<serde_json::Value> {
+    let index = crate::package::registry::RegistryIndex {
+        schema_version: crate::package::registry::RegistryIndex::CURRENT_SCHEMA_VERSION,
+        name: manifest.package.name.clone(),
+        namespace: namespace.to_string(),
+        versions: vec![version_entry],
+    };
+    let mut value = serde_json::to_value(index).map_err(|error| {
+        crate::error::CompileError::without_span(format!("failed to serialize registry entry for publish: {}", error))
+    })?;
+    let Some(object) = value.as_object_mut() else {
+        return Err(crate::error::CompileError::without_span("registry entry did not serialize as a JSON object"));
+    };
+    if !manifest.package.repository.is_empty() {
+        object.insert("repository".to_string(), serde_json::Value::String(manifest.package.repository.clone()));
+    }
+    if !manifest.package.description.is_empty() {
+        object.insert("description".to_string(), serde_json::Value::String(manifest.package.description.clone()));
+    }
+    if !manifest.package.homepage.is_empty() {
+        object.insert("homepage".to_string(), serde_json::Value::String(manifest.package.homepage.clone()));
+    }
+    if !manifest.package.documentation.is_empty() {
+        object.insert("documentation".to_string(), serde_json::Value::String(manifest.package.documentation.clone()));
+    }
+    if !manifest.package.keywords.is_empty() {
+        object.insert(
+            "keywords".to_string(),
+            serde_json::to_value(&manifest.package.keywords).map_err(|error| {
+                crate::error::CompileError::without_span(format!("failed to serialize package keywords for publish: {}", error))
+            })?,
+        );
+    }
+    if !manifest.package.categories.is_empty() {
+        object.insert(
+            "categories".to_string(),
+            serde_json::to_value(&manifest.package.categories).map_err(|error| {
+                crate::error::CompileError::without_span(format!("failed to serialize package categories for publish: {}", error))
+            })?,
+        );
+    }
+    Ok(value)
+}
+
+fn resolve_registry_api_base(api_url: Option<String>) -> Result<String> {
+    let value = api_url
+        .or_else(|| std::env::var("CELLSCRIPT_REGISTRY_API_URL").ok())
+        .or_else(|| std::env::var("CELLSCRIPT_REGISTRY_ORIGIN").ok())
+        .unwrap_or_else(|| crate::package::registry::DEFAULT_PUBLIC_REGISTRY_ORIGIN.to_string());
+    let trimmed = value.trim().trim_end_matches('/');
+    if trimmed.is_empty() {
+        return Err(crate::error::CompileError::without_span("registry API URL is empty"));
+    }
+    let _ = registry_origin_from_api_base(trimmed)?;
+    Ok(trimmed.to_string())
+}
+
+fn registry_origin_from_api_base(api_base: &str) -> Result<String> {
+    let Some(scheme_end) = api_base.find("://") else {
+        return Err(crate::error::CompileError::without_span(format!(
+            "registry API URL '{}' must include http:// or https://",
+            api_base
+        )));
+    };
+    let scheme = &api_base[..scheme_end];
+    if scheme != "https" && scheme != "http" {
+        return Err(crate::error::CompileError::without_span(format!(
+            "registry API URL '{}' uses unsupported scheme '{}'",
+            api_base, scheme
+        )));
+    }
+    let rest = &api_base[scheme_end + 3..];
+    let host_end = rest.find('/').unwrap_or(rest.len());
+    if host_end == 0 {
+        return Err(crate::error::CompileError::without_span(format!("registry API URL '{}' has no host", api_base)));
+    }
+    Ok(format!("{}://{}", scheme, &rest[..host_end]))
+}
+
+fn registry_publish_endpoint(api_base: &str, namespace: &str, name: &str) -> String {
+    format!("{}/v1/packages/{}/{}/versions", api_base.trim_end_matches('/'), namespace, name)
+}
+
+fn resolve_registry_publish_idempotency_key(
+    cli_value: Option<&str>,
+    request: &crate::package::registry::RegistryPublishRequest,
+) -> Result<String> {
+    let value = if let Some(value) = cli_value {
+        value.to_string()
+    } else if let Ok(value) = std::env::var("CELLSCRIPT_REGISTRY_IDEMPOTENCY_KEY") {
+        value
+    } else {
+        let digest = hash_json_value("registry publish request", request)?;
+        format!("cellc-publish-{}", digest)
+    };
+    let trimmed = value.trim();
+    if trimmed.len() < 16 || trimmed.len() > 160 || !trimmed.bytes().all(is_idempotency_key_byte) {
+        return Err(crate::error::CompileError::without_span(
+            "publish Idempotency-Key must be 16..160 ASCII token characters: letters, digits, '.', '_', ':', or '-'",
+        ));
+    }
+    Ok(trimmed.to_string())
+}
+
+fn is_idempotency_key_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b':' | b'-')
+}
+
+fn read_registry_publish_payload(path: &Path) -> Result<crate::package::registry::RegistryPublishPayload> {
+    let value = read_json_value(path)?;
+    let payload_value = value.get("payload").cloned().unwrap_or(value);
+    serde_json::from_value(payload_value).map_err(|error| {
+        crate::error::CompileError::without_span(format!("failed to parse registry publish payload '{}': {}", path.display(), error))
+    })
+}
+
+fn read_capability_authorisation_payload(path: &Path) -> Result<crate::package::registry::CapabilityAuthorisationPayload> {
+    let value = read_json_value(path)?;
+    let payload_value = value.get("payload").cloned().unwrap_or(value);
+    serde_json::from_value(payload_value).map_err(|error| {
+        crate::error::CompileError::without_span(format!(
+            "failed to parse capability authorisation payload '{}': {}",
+            path.display(),
+            error
+        ))
+    })
+}
+
+fn read_capability_revocation_payload(path: &Path) -> Result<crate::package::registry::CapabilityRevocationPayload> {
+    let value = read_json_value(path)?;
+    let payload_value = value.get("payload").cloned().unwrap_or(value);
+    serde_json::from_value(payload_value).map_err(|error| {
+        crate::error::CompileError::without_span(format!(
+            "failed to parse capability revocation payload '{}': {}",
+            path.display(),
+            error
+        ))
+    })
+}
+
+fn validate_publish_payload_matches_local_package(
+    payload: &crate::package::registry::RegistryPublishPayload,
+    registry_origin: &str,
+    namespace: &str,
+    manifest: &PackageManifest,
+    source_hash: &str,
+) -> Result<()> {
+    if payload.protocol != crate::package::registry::REGISTRY_PUBLISH_PROTOCOL
+        || payload.action != crate::package::registry::PUBLISH_ACTION
+    {
+        return Err(crate::error::CompileError::without_span("publish payload has the wrong protocol or action"));
+    }
+    if payload.registry_origin != registry_origin {
+        return Err(crate::error::CompileError::without_span(format!(
+            "publish payload registry_origin '{}' does not match API origin '{}'",
+            payload.registry_origin, registry_origin
+        )));
+    }
+    if payload.namespace != namespace || payload.name != manifest.package.name || payload.version != manifest.package.version {
+        return Err(crate::error::CompileError::without_span(format!(
+            "publish payload targets {}/{} v{}, but local package is {}/{} v{}",
+            payload.namespace, payload.name, payload.version, namespace, manifest.package.name, manifest.package.version
+        )));
+    }
+    if payload.source_hash != source_hash {
+        return Err(crate::error::CompileError::without_span(format!(
+            "publish payload source_hash '{}' does not match local source_hash '{}'",
+            payload.source_hash, source_hash
+        )));
+    }
+    Ok(())
+}
+
+fn registry_publish_canonical_payload(payload: &crate::package::registry::RegistryPublishPayload) -> Result<String> {
+    let value = serde_json::to_value(payload)
+        .map_err(|error| crate::error::CompileError::without_span(format!("failed to serialize publish payload: {}", error)))?;
+    canonical_json_string(&value)
+}
+
+fn canonical_json_string(value: &serde_json::Value) -> Result<String> {
+    serde_json::to_string(&sort_json_for_canonical(value))
+        .map_err(|error| crate::error::CompileError::without_span(format!("failed to serialize canonical JSON: {}", error)))
+}
+
+fn sort_json_for_canonical(value: &serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::Array(items) => serde_json::Value::Array(items.iter().map(sort_json_for_canonical).collect()),
+        serde_json::Value::Object(object) => {
+            let mut sorted = serde_json::Map::new();
+            let mut keys: Vec<_> = object.keys().collect();
+            keys.sort();
+            for key in keys {
+                if let Some(item) = object.get(key) {
+                    sorted.insert(key.clone(), sort_json_for_canonical(item));
+                }
+            }
+            serde_json::Value::Object(sorted)
+        }
+        other => other.clone(),
+    }
+}
+
+fn build_registry_source_snapshot(
+    source_snapshot: Option<&Path>,
+    root: &Path,
+    manifest: &PackageManifest,
+    source_hash: &str,
+) -> Result<crate::package::registry::RegistrySourceSnapshot> {
+    let (bytes, content_type) = if let Some(path) = source_snapshot {
+        let bytes = std::fs::read(path).map_err(|error| {
+            crate::error::CompileError::without_span(format!("failed to read source snapshot '{}': {}", path.display(), error))
+        })?;
+        (bytes, source_snapshot_content_type(path).to_string())
+    } else {
+        (build_generated_source_snapshot_bytes(root, manifest)?, "application/vnd.cellscript.source-snapshot+json".to_string())
+    };
+    if bytes.is_empty() {
+        return Err(crate::error::CompileError::without_span("source snapshot is empty"));
+    }
+    Ok(crate::package::registry::RegistrySourceSnapshot {
+        content_base64: base64::engine::general_purpose::STANDARD.encode(&bytes),
+        content_type,
+        size_bytes: bytes.len() as u64,
+        source_hash: source_hash.to_string(),
+    })
+}
+
+fn source_snapshot_content_type(path: &Path) -> &'static str {
+    match path.extension().and_then(|ext| ext.to_str()).unwrap_or_default() {
+        "json" => "application/vnd.cellscript.source-snapshot+json",
+        "tar" => "application/x-tar",
+        "tgz" | "gz" => "application/gzip",
+        _ => "application/octet-stream",
+    }
+}
+
+fn build_generated_source_snapshot_bytes(root: &Path, manifest: &PackageManifest) -> Result<Vec<u8>> {
+    let files = collect_publish_snapshot_files(root, manifest)?;
+    let mut entries = Vec::new();
+    for path in files {
+        let bytes = std::fs::read(&path)
+            .map_err(|error| crate::error::CompileError::without_span(format!("failed to read '{}': {}", path.display(), error)))?;
+        entries.push(serde_json::json!({
+            "path": normalized_relative_path(root, &path),
+            "blake2b256": crate::hex_encode(&crate::ckb_blake2b256(&bytes)),
+            "content_base64": base64::engine::general_purpose::STANDARD.encode(&bytes),
+        }));
+    }
+    let snapshot = serde_json::json!({
+        "schema": "cellscript-source-snapshot-v1",
+        "generated_by": crate::VERSION,
+        "package": {
+            "namespace": manifest.package.namespace.as_deref(),
+            "name": &manifest.package.name,
+            "version": &manifest.package.version,
+        },
+        "files": entries,
+    });
+    serde_json::to_vec(&snapshot)
+        .map_err(|error| crate::error::CompileError::without_span(format!("failed to serialize generated source snapshot: {}", error)))
+}
+
+fn collect_publish_snapshot_files(root: &Path, manifest: &PackageManifest) -> Result<Vec<PathBuf>> {
+    let mut files = BTreeSet::new();
+    let manifest_path = root.join("Cell.toml");
+    if manifest_path.is_file() {
+        files.insert(manifest_path);
+    }
+    let lockfile_path = root.join("Cell.lock");
+    if lockfile_path.is_file() {
+        files.insert(lockfile_path);
+    }
+
+    if manifest.package.source_roots.is_empty() {
+        let src = root.join("src");
+        if src.is_dir() {
+            collect_publish_snapshot_cell_files(&src, &mut files)?;
+        }
+    } else {
+        for source_root in &manifest.package.source_roots {
+            let path = root.join(source_root);
+            if !path.exists() {
+                return Err(crate::error::CompileError::without_span(format!(
+                    "configured source root '{}' does not exist",
+                    path.display()
+                )));
+            }
+            if path.is_dir() {
+                collect_publish_snapshot_cell_files(&path, &mut files)?;
+            } else if path.extension().is_some_and(|ext| ext == "cell") {
+                files.insert(path);
+            }
+        }
+    }
+
+    let entry_path = root.join(&manifest.package.entry);
+    if entry_path.is_file() {
+        files.insert(entry_path);
+    }
+    Ok(files.into_iter().collect())
+}
+
+fn collect_publish_snapshot_cell_files(dir: &Path, files: &mut BTreeSet<PathBuf>) -> Result<()> {
+    let entries = std::fs::read_dir(dir).map_err(|error| {
+        crate::error::CompileError::without_span(format!("failed to read directory '{}': {}", dir.display(), error))
+    })?;
+    for entry in entries {
+        let entry =
+            entry.map_err(|error| crate::error::CompileError::without_span(format!("failed to read directory entry: {}", error)))?;
+        let path = entry.path();
+        if path.is_dir() {
+            collect_publish_snapshot_cell_files(&path, files)?;
+        } else if path.extension().is_some_and(|ext| ext == "cell") {
+            files.insert(path);
+        }
+    }
+    Ok(())
+}
+
+fn normalized_relative_path(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root).unwrap_or(path).to_string_lossy().replace('\\', "/")
+}
+
+fn submit_registry_publish_request(
+    endpoint: &str,
+    request: &crate::package::registry::RegistryPublishRequest,
+    idempotency_key: &str,
+    json_output: bool,
+) -> Result<()> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|error| crate::error::CompileError::without_span(format!("failed to build registry HTTP client: {}", error)))?;
+    let response = submit_registry_publish_request_with_retry(&client, endpoint, request, idempotency_key)?;
+    let status = response.status();
+    let body = response.text().map_err(|error| {
+        crate::error::CompileError::without_span(format!("failed to read registry publish response from '{}': {}", endpoint, error))
+    })?;
+    if !status.is_success() {
+        return Err(crate::error::CompileError::without_span(format!(
+            "registry publish request failed with HTTP {}: {}",
+            status,
+            body.trim()
+        )));
+    }
+
+    let parsed = serde_json::from_str::<serde_json::Value>(&body).unwrap_or_else(|_| serde_json::json!({ "response": body }));
+    if json_output {
+        print_json(&parsed)?;
+    } else {
+        println!("{}", "Published to registry write API".green());
+        if let Some(status) = parsed.get("status").and_then(serde_json::Value::as_str) {
+            println!("  Status: {}", status);
+        }
+        if let Some(direct_url) = parsed.get("direct_url").and_then(serde_json::Value::as_str) {
+            println!("  Direct URL: {}", direct_url);
+        }
+        if let Some(request_id) = parsed.get("request_id").and_then(serde_json::Value::as_str) {
+            println!("  Request id: {}", request_id);
+        }
+    }
+    Ok(())
+}
+
+fn submit_registry_publish_request_with_retry(
+    client: &reqwest::blocking::Client,
+    endpoint: &str,
+    request: &crate::package::registry::RegistryPublishRequest,
+    idempotency_key: &str,
+) -> Result<reqwest::blocking::Response> {
+    let mut transport_error = None;
+    for attempt in 0..2 {
+        let response = client.post(endpoint).header("Idempotency-Key", idempotency_key).json(request).send();
+        match response {
+            Ok(response) => {
+                if attempt == 0 && is_retryable_registry_status(response.status()) {
+                    std::thread::sleep(Duration::from_millis(500));
+                    continue;
+                }
+                return Ok(response);
+            }
+            Err(error) if attempt == 0 => {
+                transport_error = Some(error);
+                std::thread::sleep(Duration::from_millis(500));
+            }
+            Err(error) => {
+                return Err(crate::error::CompileError::without_span(format!(
+                    "failed to submit registry publish request to '{}': {}",
+                    endpoint, error
+                )));
+            }
+        }
+    }
+    let message = transport_error
+        .map(|error| error.to_string())
+        .unwrap_or_else(|| "registry publish request did not produce a response".to_string());
+    Err(crate::error::CompileError::without_span(format!("failed to submit registry publish request to '{}': {}", endpoint, message)))
+}
+
+fn is_retryable_registry_status(status: reqwest::StatusCode) -> bool {
+    matches!(
+        status,
+        reqwest::StatusCode::REQUEST_TIMEOUT
+            | reqwest::StatusCode::BAD_GATEWAY
+            | reqwest::StatusCode::SERVICE_UNAVAILABLE
+            | reqwest::StatusCode::GATEWAY_TIMEOUT
+            | reqwest::StatusCode::INTERNAL_SERVER_ERROR
+    )
+}
+
+fn submit_registry_json_request(
+    endpoint: &str,
+    body: &serde_json::Value,
+    success_label: &str,
+    json_output: bool,
+) -> Result<serde_json::Value> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|error| crate::error::CompileError::without_span(format!("failed to build registry HTTP client: {}", error)))?;
+    let response = client.post(endpoint).json(body).send().map_err(|error| {
+        crate::error::CompileError::without_span(format!("failed to submit registry request to '{}': {}", endpoint, error))
+    })?;
+    let status = response.status();
+    let response_body = response.text().map_err(|error| {
+        crate::error::CompileError::without_span(format!("failed to read registry response from '{}': {}", endpoint, error))
+    })?;
+    if !status.is_success() {
+        return Err(crate::error::CompileError::without_span(format!(
+            "registry request failed with HTTP {}: {}",
+            status,
+            response_body.trim()
+        )));
+    }
+    let parsed =
+        serde_json::from_str::<serde_json::Value>(&response_body).unwrap_or_else(|_| serde_json::json!({ "response": response_body }));
+    if json_output {
+        print_json(&parsed)?;
+    } else {
+        println!("{}", success_label.green());
+        if let Some(request_id) = parsed.get("request_id").and_then(serde_json::Value::as_str) {
+            println!("  Request id: {}", request_id);
+        }
+    }
+    Ok(parsed)
 }
 
 fn compile_cli_input(input: Option<&PathBuf>, options: CompileOptions) -> Result<crate::CompileResult> {
-    compile_cli_input_with_entry(input, options, None, None)
-}
-
-fn compile_cli_input_with_entry(
-    input: Option<&PathBuf>,
-    options: CompileOptions,
-    entry_action: Option<&str>,
-    entry_lock: Option<&str>,
-) -> Result<crate::CompileResult> {
-    if entry_action.is_some() && entry_lock.is_some() {
-        return Err(crate::error::CompileError::without_span("--entry-action and --entry-lock are mutually exclusive"));
-    }
     let input_path = input.cloned().unwrap_or_else(|| PathBuf::from("."));
     let input = Utf8Path::from_path(&input_path)
         .ok_or_else(|| crate::error::CompileError::without_span(format!("path '{}' is not valid UTF-8", input_path.display())))?;
-    match (entry_action, entry_lock) {
-        (Some(action), None) => compile_path_with_entry_action(input, options, action),
-        (None, Some(lock)) => compile_path_with_entry_lock(input, options, lock),
-        (None, None) => compile_path(input, options),
-        (Some(_), Some(_)) => unreachable!("entry exclusivity checked above"),
-    }
-}
-
-fn read_regular_file(path: &Path, label: &str) -> Result<Vec<u8>> {
-    let metadata = std::fs::symlink_metadata(path).map_err(|error| {
-        crate::error::CompileError::without_span(format!("failed to inspect {} '{}': {}", label, path.display(), error))
-    })?;
-    if metadata.file_type().is_symlink() {
-        return Err(crate::error::CompileError::without_span(format!(
-            "refusing to read {} '{}' because it is a symbolic link",
-            label,
-            path.display()
-        )));
-    }
-    if !metadata.is_file() {
-        return Err(crate::error::CompileError::without_span(format!(
-            "refusing to read {} '{}' because it is not a regular file",
-            label,
-            path.display()
-        )));
-    }
-    std::fs::read(path)
-        .map_err(|error| crate::error::CompileError::without_span(format!("failed to read {} '{}': {}", label, path.display(), error)))
+    compile_path(input, options)
 }
 
 fn read_metadata_json(path: &Path) -> Result<CompileMetadata> {
-    let bytes = read_regular_file(path, "metadata")?;
+    let bytes = std::fs::read(path).map_err(|error| {
+        crate::error::CompileError::without_span(format!("failed to read metadata '{}': {}", path.display(), error))
+    })?;
     serde_json::from_slice(&bytes)
         .map_err(|error| crate::error::CompileError::without_span(format!("failed to parse metadata '{}': {}", path.display(), error)))
 }
@@ -3064,6 +5040,13 @@ fn read_json_value(path: &Path) -> Result<serde_json::Value> {
         .map_err(|error| crate::error::CompileError::without_span(format!("failed to read JSON '{}': {}", path.display(), error)))?;
     serde_json::from_slice(&bytes)
         .map_err(|error| crate::error::CompileError::without_span(format!("failed to parse JSON '{}': {}", path.display(), error)))
+}
+
+fn print_json(value: &serde_json::Value) -> Result<()> {
+    let json = serde_json::to_string_pretty(value)
+        .map_err(|error| crate::error::CompileError::without_span(format!("failed to serialize JSON: {}", error)))?;
+    println!("{}", json);
+    Ok(())
 }
 
 fn ckb_blake2b_file_hash(path: &Path) -> Result<Option<String>> {
@@ -3133,6 +5116,7 @@ fn novaseal_failed_dimension_matches(failed_dimensions: &serde_json::Value, expe
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn novaseal_certification_summary(
     plugin_report: &serde_json::Value,
     repo_root: &Path,
@@ -3179,11 +5163,8 @@ fn novaseal_certification_summary(
 
     let checks_json =
         checks.iter().map(|(name, passed)| ((*name).to_string(), serde_json::Value::Bool(*passed))).collect::<serde_json::Map<_, _>>();
-    let failed_checks = checks
-        .iter()
-        .filter(|(_, passed)| !*passed)
-        .map(|(name, _)| serde_json::Value::String((*name).to_string()))
-        .collect::<Vec<_>>();
+    let failed_checks: Vec<serde_json::Value> =
+        checks.iter().filter(|(_, passed)| !*passed).map(|(name, _)| serde_json::Value::String((*name).to_string())).collect();
     let passed = failed_checks.is_empty();
     let external_blockers = plugin_report
         .get("external_blockers")
@@ -3199,6 +5180,7 @@ fn novaseal_certification_summary(
     let failed_local_v1_dimension = novaseal_failed_dimension_matches(&failed_dimensions, NOVASEAL_LOCAL_V1_DIMENSIONS);
     let failed_external_or_endpoint_dimension = novaseal_failed_dimension_matches(&failed_dimensions, NOVASEAL_EXTERNAL_V1_DIMENSIONS);
     let certification_level = json_pointer_str(profile_certification, "/certification_level").unwrap_or("unknown");
+
     let failure_reason = if passed {
         serde_json::Value::Null
     } else if !v1_readiness.is_null() && !json_pointer_bool(v1_readiness, "/local_v1_ready") && planned_missing_non_empty {
@@ -3288,13 +5270,6 @@ fn novaseal_certification_summary(
     }))
 }
 
-fn print_json(value: &serde_json::Value) -> Result<()> {
-    let json = serde_json::to_string_pretty(value)
-        .map_err(|error| crate::error::CompileError::without_span(format!("failed to serialize JSON: {}", error)))?;
-    println!("{}", json);
-    Ok(())
-}
-
 fn write_or_print_json(output: Option<&PathBuf>, value: &serde_json::Value, json_stdout: bool, label: &str) -> Result<()> {
     let json = serde_json::to_string_pretty(value)
         .map_err(|error| crate::error::CompileError::without_span(format!("failed to serialize JSON: {}", error)))?;
@@ -3322,174 +5297,6 @@ fn write_or_print_json(output: Option<&PathBuf>, value: &serde_json::Value, json
     Ok(())
 }
 
-fn write_contract_json_with_human_summary(
-    output: Option<&PathBuf>,
-    value: &serde_json::Value,
-    label: &str,
-    print_summary: fn(&serde_json::Value),
-) -> Result<()> {
-    if let Some(output_path) = output {
-        let json = serde_json::to_string_pretty(value)
-            .map_err(|error| crate::error::CompileError::without_span(format!("failed to serialize JSON: {}", error)))?;
-        if let Some(parent) = output_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(output_path, json)?;
-        println!("{}", label.green());
-        println!("  Output: {}", output_path.display());
-    }
-    print_summary(value);
-    Ok(())
-}
-
-fn print_explain_assumptions_human(summary: &serde_json::Value) {
-    println!("Builder assumptions: {}", json_str(summary, "status"));
-    println!("  Module: {}", json_str(summary, "module"));
-    print_selected_entrypoint(summary.get("selected_entrypoint"));
-    println!("  Assumptions: {}", summary.get("assumption_count").and_then(serde_json::Value::as_u64).unwrap_or(0));
-    println!("  ProofPlan soundness: {}", json_pointer_str_or_unknown(summary, "/proof_plan_soundness/status"));
-    print_top_assumptions(summary.pointer("/builder_assumptions").and_then(serde_json::Value::as_array));
-}
-
-fn print_validate_tx_human(summary: &serde_json::Value) {
-    println!("Transaction validation: {}", json_str(summary, "status"));
-    println!("  Metadata: {}", json_str(summary, "metadata"));
-    println!("  Tx: {}", json_str(summary, "tx"));
-    if summary.get("production").and_then(serde_json::Value::as_bool).unwrap_or(false) {
-        println!("  Production guards: enabled");
-    }
-    if let Some(soundness_status) = summary.pointer("/proof_plan_soundness/status").and_then(serde_json::Value::as_str) {
-        println!("  ProofPlan soundness: {}", soundness_status);
-    }
-    print_validation_report(summary.get("validation"));
-}
-
-fn print_builder_manifest_human(manifest: &serde_json::Value) {
-    println!("  Schema: {}", json_str(manifest, "schema"));
-    println!("  Module: {}", json_str(manifest, "module"));
-    print_selected_entrypoint(manifest.get("selected_entrypoint"));
-    println!("  Submit ready: {}", json_bool(manifest, "submit_ready"));
-    println!(
-        "  Evidence template entries: {}",
-        json_pointer_object_len(manifest, "/transaction_template/transaction_plan/builder_assumption_evidence_template")
-    );
-    println!("  Resource identities: {}", json_pointer_array_len(manifest, "/resource_identity_plan/resource_identities"));
-    print_string_array("  Missing builder steps", manifest.get("missing_builder_steps"));
-}
-
-fn print_builder_check_human(summary: &serde_json::Value) {
-    println!("Builder check: {}", json_str(summary, "status"));
-    println!("  Manifest: {}", json_str(summary, "manifest"));
-    println!("  Tx: {}", json_str(summary, "tx"));
-    println!("  Pre-sign ready: {}", json_bool(summary, "pre_sign_ready"));
-    println!("  Submit ready: {}", json_bool(summary, "submit_ready"));
-    if summary.get("production").and_then(serde_json::Value::as_bool).unwrap_or(false) {
-        println!("  Production guards: enabled");
-    }
-    let manifest_violations = summary.get("manifest_violations").and_then(serde_json::Value::as_array).map_or(0, Vec::len);
-    if manifest_violations > 0 {
-        println!("  Manifest violations: {}", manifest_violations);
-    }
-    print_validation_report(summary.get("validation"));
-    print_string_array("  Missing submit steps", summary.get("missing_submit_steps"));
-}
-
-fn print_solve_tx_human(template: &serde_json::Value) {
-    println!("Transaction template: {}", json_str(template, "status"));
-    println!("  Module: {}", json_str(template, "module"));
-    println!("  Submit ready: {}", json_bool(template, "submit_ready"));
-    println!(
-        "  Evidence requirements: {}",
-        json_pointer_array_len(template, "/transaction_plan/builder_assumption_evidence_requirements")
-    );
-    println!("  Resource identity contracts: {}", json_pointer_array_len(template, "/transaction_plan/resource_identities"));
-    print_string_array("  Missing builder steps", template.get("missing_builder_steps"));
-}
-
-fn print_resource_identity_human(plan: &serde_json::Value, artifact: &Path, metadata: &Utf8Path, plan_output: &Path) {
-    println!("{}", "Resource identity artifact generated".green());
-    println!("  Artifact: {}", artifact.display());
-    println!("  Metadata: {}", metadata);
-    println!("  Plan: {}", plan_output.display());
-    println!("  Schema: {}", json_str(plan, "schema"));
-    println!("  Module: {}", json_str(plan, "module"));
-    println!("  Resource identities: {}", plan.get("resource_identities").and_then(serde_json::Value::as_array).map_or(0, Vec::len));
-}
-
-fn print_selected_entrypoint(value: Option<&serde_json::Value>) {
-    if let Some(entrypoint) = value {
-        let kind = entrypoint.get("kind").and_then(serde_json::Value::as_str).unwrap_or("unknown");
-        let name = entrypoint.get("name").and_then(serde_json::Value::as_str).unwrap_or("unknown");
-        println!("  Entrypoint: {} {}", kind, name);
-    }
-}
-
-fn print_top_assumptions(assumptions: Option<&Vec<serde_json::Value>>) {
-    let Some(assumptions) = assumptions else { return };
-    for assumption in assumptions.iter().take(5) {
-        println!(
-            "  - {} [{}] {}",
-            json_str(assumption, "assumption_id"),
-            json_str(assumption, "kind"),
-            json_str(assumption, "feature")
-        );
-    }
-    if assumptions.len() > 5 {
-        println!("  ... {} more", assumptions.len() - 5);
-    }
-}
-
-fn print_validation_report(report: Option<&serde_json::Value>) {
-    let Some(report) = report else { return };
-    println!("  Validation: {}", json_str(report, "status"));
-    println!(
-        "  Inputs/outputs/cell_deps/witnesses: {}/{}/{}/{}",
-        report.get("input_count").and_then(serde_json::Value::as_u64).unwrap_or(0),
-        report.get("output_count").and_then(serde_json::Value::as_u64).unwrap_or(0),
-        report.get("cell_dep_count").and_then(serde_json::Value::as_u64).unwrap_or(0),
-        report.get("witness_count").and_then(serde_json::Value::as_u64).unwrap_or(0),
-    );
-    let Some(violations) = report.get("violations").and_then(serde_json::Value::as_array) else { return };
-    if violations.is_empty() {
-        return;
-    }
-    println!("  Violations: {}", violations.len());
-    for violation in violations.iter().take(5) {
-        println!("  - {}: {}", json_str(violation, "kind"), json_str(violation, "message"));
-    }
-    if violations.len() > 5 {
-        println!("  ... {} more", violations.len() - 5);
-    }
-}
-
-fn print_string_array(label: &str, value: Option<&serde_json::Value>) {
-    let Some(items) = value.and_then(serde_json::Value::as_array) else { return };
-    if items.is_empty() {
-        return;
-    }
-    println!("{}: {}", label, items.iter().filter_map(serde_json::Value::as_str).collect::<Vec<_>>().join(", "));
-}
-
-fn json_str<'a>(value: &'a serde_json::Value, key: &str) -> &'a str {
-    value.get(key).and_then(serde_json::Value::as_str).unwrap_or("unknown")
-}
-
-fn json_pointer_str_or_unknown<'a>(value: &'a serde_json::Value, pointer: &str) -> &'a str {
-    value.pointer(pointer).and_then(serde_json::Value::as_str).unwrap_or("unknown")
-}
-
-fn json_bool(value: &serde_json::Value, key: &str) -> bool {
-    value.get(key).and_then(serde_json::Value::as_bool).unwrap_or(false)
-}
-
-fn json_pointer_array_len(value: &serde_json::Value, pointer: &str) -> usize {
-    value.pointer(pointer).and_then(serde_json::Value::as_array).map_or(0, Vec::len)
-}
-
-fn json_pointer_object_len(value: &serde_json::Value, pointer: &str) -> usize {
-    value.pointer(pointer).and_then(serde_json::Value::as_object).map_or(0, serde_json::Map::len)
-}
-
 fn print_or_text_json(json: bool, value: &serde_json::Value, label: &str) -> Result<()> {
     if json {
         print_json(value)
@@ -3499,749 +5306,2531 @@ fn print_or_text_json(json: bool, value: &serde_json::Value, label: &str) -> Res
     }
 }
 
-fn metadata_workflow_compile_options(
-    target: Option<String>,
-    target_profile: Option<String>,
-    primitive_compat: Option<String>,
-) -> CompileOptions {
-    CompileOptions { opt_level: 0, output: None, debug: false, target, target_profile, primitive_compat }
+fn selected_builder_actions<'a>(metadata: &'a CompileMetadata, action_name: Option<&str>) -> Result<Vec<&'a crate::ActionMetadata>> {
+    if let Some(action_name) = action_name {
+        let action =
+            metadata.actions.iter().find(|action| action.name == action_name).ok_or_else(|| {
+                crate::error::CompileError::without_span(format!("action '{}' was not found in metadata", action_name))
+            })?;
+        return Ok(vec![action]);
+    }
+
+    if metadata.actions.is_empty() {
+        return Err(crate::error::CompileError::without_span("no actions found in metadata for generated builder"));
+    }
+
+    Ok(metadata.actions.iter().collect())
 }
 
-fn validate_metadata_workflow_primitive_compat(primitive_compat: Option<&str>) -> Result<()> {
-    if primitive_compat.is_some_and(|mode| !matches!(mode, "0.14" | "0.15" | "0.16")) {
+fn read_lockfile_path(path: &Path) -> Result<Lockfile> {
+    let content = std::fs::read_to_string(path).map_err(|error| {
+        crate::error::CompileError::without_span(format!("failed to read lockfile '{}': {}", path.display(), error))
+    })?;
+    toml::from_str(&content)
+        .map_err(|error| crate::error::CompileError::without_span(format!("failed to parse lockfile '{}': {}", path.display(), error)))
+}
+
+fn read_deployed_manifest_path(path: &Path) -> Result<crate::package::DeployedManifest> {
+    let content = std::fs::read_to_string(path).map_err(|error| {
+        crate::error::CompileError::without_span(format!("failed to read deployed manifest '{}': {}", path.display(), error))
+    })?;
+    toml::from_str(&content).map_err(|error| {
+        crate::error::CompileError::without_span(format!("failed to parse deployed manifest '{}': {}", path.display(), error))
+    })
+}
+
+fn verify_builder_lockfile_identity(
+    lockfile_path: &Path,
+    metadata: &CompileMetadata,
+    metadata_hash: &str,
+) -> Result<serde_json::Value> {
+    let lockfile = read_lockfile_path(lockfile_path)?;
+    let expected_build = locked_build_info_from_metadata(metadata)?;
+    let mut violations = Vec::new();
+
+    let locked_compiler_source_hash = lockfile.package.compiler_source_hash.as_ref().or(lockfile.package.source_hash.as_ref());
+    let locked_source_label = if lockfile.package.compiler_source_hash.is_some() { "compiler_source_hash" } else { "source_hash" };
+    match (locked_compiler_source_hash, &metadata.source_hash) {
+        (Some(locked), Some(actual)) if locked == actual => {}
+        (Some(locked), Some(actual)) => violations
+            .push(format!("{} mismatch: Cell.lock has '{}', metadata source_hash is '{}'", locked_source_label, locked, actual)),
+        (None, _) => violations.push("Cell.lock [package] has no compiler_source_hash or source_hash".to_string()),
+        (_, None) => violations.push("metadata has no source_hash".to_string()),
+    }
+
+    match &lockfile.package_build {
+        Some(build) => {
+            push_missing_locked_build_identity("Cell.lock [package.build]", build, &mut violations);
+            compare_builder_identity_field(
+                "compiler_version",
+                &build.compiler_version,
+                &expected_build.compiler_version,
+                &mut violations,
+            );
+            compare_builder_identity_field("target_profile", &build.target_profile, &expected_build.target_profile, &mut violations);
+            compare_builder_identity_field("artifact_hash", &build.artifact_hash, &expected_build.artifact_hash, &mut violations);
+            compare_builder_identity_field("metadata_hash", &build.metadata_hash, &Some(metadata_hash.to_string()), &mut violations);
+            compare_builder_identity_field("schema_hash", &build.schema_hash, &expected_build.schema_hash, &mut violations);
+            compare_builder_identity_field(
+                "cell_data_codec_manifest_hash",
+                &build.cell_data_codec_manifest_hash,
+                &expected_build.cell_data_codec_manifest_hash,
+                &mut violations,
+            );
+            compare_builder_identity_field("abi_hash", &build.abi_hash, &expected_build.abi_hash, &mut violations);
+            compare_builder_identity_field(
+                "constraints_hash",
+                &build.constraints_hash,
+                &expected_build.constraints_hash,
+                &mut violations,
+            );
+        }
+        None => violations.push("Cell.lock has no [package.build]".to_string()),
+    }
+
+    if !violations.is_empty() {
         return Err(crate::error::CompileError::without_span(format!(
-            "unsupported primitive compatibility mode '{}'; supported values: 0.14, 0.15, 0.16",
-            primitive_compat.unwrap_or_default()
+            "generated builder identity verification failed: {}",
+            violations.join("; ")
         )));
+    }
+
+    Ok(serde_json::json!({
+        "schema": "cellscript-builder-locked-identity-v0.20",
+        "package": lockfile.package,
+        "build": lockfile.package_build,
+        "verified_fields": [
+            locked_source_label,
+            "compiler_version",
+            "target_profile",
+            "artifact_hash",
+            "metadata_hash",
+            "schema_hash",
+            "cell_data_codec_manifest_hash",
+            "abi_hash",
+            "constraints_hash"
+        ]
+    }))
+}
+
+fn verify_builder_deployment_identity(
+    lockfile_path: &Path,
+    deployed_path: &Path,
+    metadata: &CompileMetadata,
+    metadata_hash: &str,
+    network_filter: Option<&str>,
+) -> Result<serde_json::Value> {
+    let lockfile = read_lockfile_path(lockfile_path)?;
+    let deployed = read_deployed_manifest_path(deployed_path)?;
+    let expected_build = locked_build_info_from_metadata(metadata)?;
+    let mut violations = Vec::new();
+
+    match (&lockfile.package.source_hash, &deployed.package.source_hash) {
+        (Some(locked), Some(deployed_hash)) if locked == deployed_hash => {}
+        (Some(locked), Some(deployed_hash)) => {
+            violations.push(format!("source_hash mismatch: Cell.lock has '{}', Deployed.toml has '{}'", locked, deployed_hash))
+        }
+        (None, _) => violations.push("Cell.lock [package] has no source_hash".to_string()),
+        (_, None) => violations.push("Deployed.toml [package] has no source_hash".to_string()),
+    }
+
+    let locked_compiler_source_hash = lockfile.package.compiler_source_hash.as_ref().or(lockfile.package.source_hash.as_ref());
+    match (locked_compiler_source_hash, &metadata.source_hash) {
+        (Some(locked), Some(actual)) if locked == actual => {}
+        (Some(locked), Some(actual)) => {
+            violations.push(format!("compiler_source_hash mismatch: Cell.lock has '{}', metadata source_hash is '{}'", locked, actual))
+        }
+        (None, _) => violations.push("Cell.lock [package] has no compiler_source_hash or source_hash".to_string()),
+        (_, None) => violations.push("metadata has no source_hash".to_string()),
+    }
+
+    match &deployed.build {
+        Some(build) => {
+            push_missing_deployed_build_identity("Deployed.toml [build]", build, &mut violations);
+            compare_builder_deployed_field(
+                "compiler_version",
+                &build.compiler_version,
+                &expected_build.compiler_version,
+                &mut violations,
+            );
+            compare_builder_deployed_field("artifact_hash", &build.artifact_hash, &expected_build.artifact_hash, &mut violations);
+            compare_builder_deployed_field("metadata_hash", &build.metadata_hash, &Some(metadata_hash.to_string()), &mut violations);
+            compare_builder_deployed_field("schema_hash", &build.schema_hash, &expected_build.schema_hash, &mut violations);
+            compare_builder_deployed_field(
+                "cell_data_codec_manifest_hash",
+                &build.cell_data_codec_manifest_hash,
+                &expected_build.cell_data_codec_manifest_hash,
+                &mut violations,
+            );
+            compare_builder_deployed_field("abi_hash", &build.abi_hash, &expected_build.abi_hash, &mut violations);
+            compare_builder_deployed_field(
+                "constraints_hash",
+                &build.constraints_hash,
+                &expected_build.constraints_hash,
+                &mut violations,
+            );
+        }
+        None => violations.push("Deployed.toml has no [build]".to_string()),
+    }
+
+    let mut verified_deployments = Vec::new();
+    for deployment in &deployed.deployments {
+        if network_filter.is_some_and(|network| network != deployment.network) {
+            continue;
+        }
+        push_deployment_status_violation(deployment, &mut violations);
+        compare_builder_deployment_record_field(
+            "artifact_hash",
+            &deployment.artifact_hash,
+            &expected_build.artifact_hash,
+            &deployment.network,
+            &mut violations,
+        );
+        compare_builder_deployment_record_field(
+            "metadata_hash",
+            &deployment.metadata_hash,
+            &Some(metadata_hash.to_string()),
+            &deployment.network,
+            &mut violations,
+        );
+        compare_builder_deployment_record_field(
+            "schema_hash",
+            &deployment.schema_hash,
+            &expected_build.schema_hash,
+            &deployment.network,
+            &mut violations,
+        );
+        compare_builder_deployment_record_field(
+            "cell_data_codec_manifest_hash",
+            &deployment.cell_data_codec_manifest_hash,
+            &expected_build.cell_data_codec_manifest_hash,
+            &deployment.network,
+            &mut violations,
+        );
+        compare_builder_deployment_record_field(
+            "abi_hash",
+            &deployment.abi_hash,
+            &expected_build.abi_hash,
+            &deployment.network,
+            &mut violations,
+        );
+        compare_builder_deployment_record_field(
+            "constraints_hash",
+            &deployment.constraints_hash,
+            &expected_build.constraints_hash,
+            &deployment.network,
+            &mut violations,
+        );
+        compare_builder_deployment_record_field(
+            "compiler_version",
+            &deployment.compiler_version,
+            &expected_build.compiler_version,
+            &deployment.network,
+            &mut violations,
+        );
+
+        match lockfile.deployment.get(&deployment.network) {
+            Some(deployment_ref) => {
+                compare_required_deployment_ref_field(
+                    "code_hash",
+                    deployment_ref.code_hash.as_deref(),
+                    &deployment.code_hash,
+                    &deployment.network,
+                    &mut violations,
+                );
+                compare_required_deployment_ref_field(
+                    "out_point",
+                    deployment_ref.out_point.as_deref(),
+                    &deployment.out_point,
+                    &deployment.network,
+                    &mut violations,
+                );
+                compare_required_deployment_ref_field(
+                    "data_hash",
+                    deployment_ref.data_hash.as_deref(),
+                    &deployment.data_hash,
+                    &deployment.network,
+                    &mut violations,
+                );
+                if !deployment_ref.record.is_empty() {
+                    let chain_record = format!("{}:{}", deployment.chain_id, deployment.out_point);
+                    let network_record = format!("{}:{}", deployment.network, deployment.out_point);
+                    if deployment_ref.record != deployment.out_point
+                        && deployment_ref.record != chain_record
+                        && deployment_ref.record != network_record
+                    {
+                        violations.push(format!(
+                            "deployment record mismatch for network '{}': Cell.lock has '{}', Deployed.toml out_point is '{}'",
+                            deployment.network, deployment_ref.record, deployment.out_point
+                        ));
+                    }
+                } else {
+                    violations.push(format!("deployment ref for network '{}' has empty record", deployment.network));
+                }
+            }
+            None => violations.push(format!("deployment for network '{}' is missing from Cell.lock", deployment.network)),
+        }
+
+        verified_deployments.push(deployment);
+    }
+
+    if verified_deployments.is_empty() {
+        violations.push(match network_filter {
+            Some(network) => format!("no deployment record found for requested builder network '{}'", network),
+            None => "no deployment records found for generated builder".to_string(),
+        });
+    }
+
+    if !violations.is_empty() {
+        return Err(crate::error::CompileError::without_span(format!(
+            "generated builder deployment identity verification failed: {}",
+            violations.join("; ")
+        )));
+    }
+
+    Ok(serde_json::json!({
+        "schema": "cellscript-builder-deployment-identity-v0.20",
+        "package": deployed.package.clone(),
+        "build": deployed.build.clone(),
+        "network": network_filter,
+        "deployments": verified_deployments,
+        "verified_fields": [
+            "source_hash",
+            "compiler_source_hash",
+            "compiler_version",
+            "artifact_hash",
+            "metadata_hash",
+            "schema_hash",
+            "cell_data_codec_manifest_hash",
+            "abi_hash",
+            "constraints_hash",
+            "code_hash",
+            "out_point",
+            "data_hash",
+            "deployment_status"
+        ]
+    }))
+}
+
+fn compare_builder_identity_field(
+    field: &str,
+    locked_value: &Option<String>,
+    metadata_value: &Option<String>,
+    violations: &mut Vec<String>,
+) {
+    match (locked_value, metadata_value) {
+        (Some(locked), Some(actual)) if locked == actual => {}
+        (Some(locked), Some(actual)) => {
+            violations.push(format!("{} mismatch: Cell.lock has '{}', metadata has '{}'", field, locked, actual))
+        }
+        (None, _) => {}
+        (_, None) => violations.push(format!("metadata has no {}", field)),
+    }
+}
+
+fn deployment_status_violation(deployment: &crate::package::DeploymentRecord) -> Option<String> {
+    match deployment.status.as_ref() {
+        Some(crate::package::DeploymentStatus::Active) => None,
+        Some(status) => Some(format!("deployment for network '{}' is not active: {:?}", deployment.network, status)),
+        None => Some(format!("deployment for network '{}' has no status; expected active", deployment.network)),
+    }
+}
+
+fn push_deployment_status_violation(deployment: &crate::package::DeploymentRecord, violations: &mut Vec<String>) {
+    if let Some(violation) = deployment_status_violation(deployment) {
+        violations.push(violation);
+    }
+}
+
+fn verify_registry_trust_metadata(
+    deployed: &crate::package::DeployedManifest,
+    require_publisher_signature: bool,
+    require_audit_report: bool,
+    violations: &mut Vec<String>,
+) -> serde_json::Value {
+    let mut evidence = Vec::new();
+    if (require_publisher_signature || require_audit_report) && deployed.deployments.is_empty() {
+        violations.push("trust metadata policy requires at least one deployment record".to_string());
+    }
+    for deployment in &deployed.deployments {
+        let publisher_signature_present = deployment.publisher_signature.as_deref().is_some_and(|value| !value.trim().is_empty());
+        let audit_report_hash_present = deployment.audit_report_hash.as_deref().is_some_and(|value| !value.trim().is_empty());
+        let mut deployment_violations = Vec::new();
+        if require_publisher_signature && !publisher_signature_present {
+            deployment_violations.push(format!(
+                "deployment for network '{}' has no publisher_signature required by trust metadata policy",
+                deployment.network
+            ));
+        }
+        if require_audit_report && !audit_report_hash_present {
+            deployment_violations.push(format!(
+                "deployment for network '{}' has no audit_report_hash required by trust metadata policy",
+                deployment.network
+            ));
+        }
+        for violation in &deployment_violations {
+            if !violations.contains(violation) {
+                violations.push(violation.clone());
+            }
+        }
+        evidence.push(serde_json::json!({
+            "network": deployment.network,
+            "out_point": deployment.out_point,
+            "status": if deployment_violations.is_empty() { "policy-satisfied" } else { "failed" },
+            "publisher_signature_present": publisher_signature_present,
+            "publisher_signature_status": if publisher_signature_present {
+                "present-unverified"
+            } else if require_publisher_signature {
+                "missing"
+            } else {
+                "not-required"
+            },
+            "audit_report_hash_present": audit_report_hash_present,
+            "audit_report_hash_status": if audit_report_hash_present {
+                "present"
+            } else if require_audit_report {
+                "missing"
+            } else {
+                "not-required"
+            },
+            "violations": deployment_violations,
+        }));
+    }
+    serde_json::json!({
+        "enabled": require_publisher_signature || require_audit_report,
+        "checked": deployed.deployments.len(),
+        "verification_boundary": "metadata-presence-only",
+        "publisher_signature_verification": "not-implemented",
+        "policy": {
+            "require_publisher_signature": require_publisher_signature,
+            "require_audit_report": require_audit_report,
+        },
+        "evidence": evidence,
+    })
+}
+
+fn compare_builder_deployed_field(
+    field: &str,
+    deployed_value: &Option<String>,
+    metadata_value: &Option<String>,
+    violations: &mut Vec<String>,
+) {
+    match (deployed_value, metadata_value) {
+        (Some(deployed), Some(actual)) if deployed == actual => {}
+        (Some(deployed), Some(actual)) => {
+            violations.push(format!("{} mismatch: Deployed.toml has '{}', metadata has '{}'", field, deployed, actual))
+        }
+        (None, _) => {}
+        (_, None) => violations.push(format!("metadata has no {}", field)),
+    }
+}
+
+fn compare_builder_deployment_record_field(
+    field: &str,
+    deployed_value: &Option<String>,
+    metadata_value: &Option<String>,
+    network: &str,
+    violations: &mut Vec<String>,
+) {
+    match (deployed_value, metadata_value) {
+        (Some(deployed), Some(actual)) if deployed == actual => {}
+        (Some(deployed), Some(actual)) => violations.push(format!(
+            "{} mismatch for network '{}': Deployed.toml has '{}', metadata has '{}'",
+            field, network, deployed, actual
+        )),
+        (None, _) => violations.push(format!("deployment record for network '{}' has no {}", network, field)),
+        (_, None) => violations.push(format!("metadata has no {}", field)),
+    }
+}
+
+fn compare_required_deployment_ref_field(
+    field: &str,
+    locked_value: Option<&str>,
+    deployed_value: &str,
+    network: &str,
+    violations: &mut Vec<String>,
+) {
+    match locked_value {
+        Some(locked) if locked == deployed_value => {}
+        Some(locked) => violations.push(format!(
+            "{} mismatch for network '{}': Cell.lock has '{}', Deployed.toml has '{}'",
+            field, network, locked, deployed_value
+        )),
+        None => violations.push(format!("deployment ref for network '{}' has no {}", network, field)),
+    }
+}
+
+fn write_typescript_builder_package(
+    output_dir: &Path,
+    package_name: &str,
+    metadata: &CompileMetadata,
+    metadata_hash: &str,
+    actions: &[&crate::ActionMetadata],
+    locked_identity: Option<&serde_json::Value>,
+    deployment_identity: Option<&serde_json::Value>,
+    lockfile_path: Option<&Path>,
+    deployed_path: Option<&Path>,
+) -> Result<serde_json::Value> {
+    let src_dir = output_dir.join("src");
+    let test_dir = output_dir.join("test");
+    std::fs::create_dir_all(&src_dir)?;
+    std::fs::create_dir_all(&test_dir)?;
+
+    let manifest = typescript_builder_manifest(package_name, metadata, actions, metadata_hash, locked_identity, deployment_identity);
+
+    let package_json_path = output_dir.join("package.json");
+    let tsconfig_path = output_dir.join("tsconfig.json");
+    let manifest_path = output_dir.join("cellscript-builder-manifest.json");
+    let metadata_path = src_dir.join("metadata.json");
+    let index_path = src_dir.join("index.ts");
+    let test_path = test_dir.join("builder.test.mjs");
+
+    std::fs::write(&package_json_path, json_bytes_pretty("package.json", &typescript_package_json(package_name))?)?;
+    std::fs::write(&tsconfig_path, json_bytes_pretty("tsconfig.json", &typescript_tsconfig_json())?)?;
+    std::fs::write(&manifest_path, json_bytes_pretty("builder manifest", &manifest)?)?;
+    std::fs::write(&metadata_path, json_bytes_pretty("metadata", metadata)?)?;
+    std::fs::write(
+        &index_path,
+        typescript_builder_index(package_name, metadata, actions, metadata_hash, locked_identity, deployment_identity)?,
+    )?;
+    std::fs::write(&test_path, typescript_builder_test(actions)?)?;
+
+    Ok(serde_json::json!({
+        "status": "ok",
+        "schema": "cellscript-generated-builder-summary-v0.20",
+        "target": "typescript",
+        "output_dir": output_dir.display().to_string(),
+        "package_name": package_name,
+        "metadata_hash": metadata_hash,
+        "artifact_hash": metadata.artifact_hash,
+        "cell_data_codec_abi": metadata.cell_data_codec_manifest.abi,
+        "raw_cell_data_required": metadata.cell_data_codec_manifest.raw_bytes_required,
+        "lockfile_verified": locked_identity.is_some(),
+        "deployment_verified": deployment_identity.is_some(),
+        "lockfile": lockfile_path.map(|path| path.display().to_string()),
+        "deployed": deployed_path.map(|path| path.display().to_string()),
+        "action_count": actions.len(),
+        "actions": actions.iter().map(|action| action.name.as_str()).collect::<Vec<_>>(),
+        "files": [
+            package_json_path.display().to_string(),
+            tsconfig_path.display().to_string(),
+            manifest_path.display().to_string(),
+            metadata_path.display().to_string(),
+            index_path.display().to_string(),
+            test_path.display().to_string()
+        ],
+        "non_claims": [
+            "generated package does not prove live-cell availability",
+            "generated package does not sign or submit transactions by itself",
+            "generated package does not materialize raw cell-data codecs by itself",
+            "generated package requires a runtime adapter for CCC or ckb-sdk-rust"
+        ]
+    }))
+}
+
+fn runtime_error_catalog_json() -> Vec<serde_json::Value> {
+    ALL_RUNTIME_ERRORS
+        .iter()
+        .copied()
+        .map(|error| {
+            let info = runtime_error_info(error);
+            serde_json::json!({
+                "code": info.code,
+                "name": info.name,
+                "description": info.description,
+                "hint": info.hint,
+            })
+        })
+        .collect()
+}
+
+fn builder_action_error_contexts_json(actions: &[&crate::ActionMetadata]) -> Vec<serde_json::Value> {
+    actions
+        .iter()
+        .map(|action| {
+            serde_json::json!({
+                "action": action.name,
+                "fields": action
+                    .params
+                    .iter()
+                    .map(|param| {
+                        serde_json::json!({
+                            "name": param.name,
+                            "type": param.ty,
+                            "source": param.source,
+                            "is_mut": param.is_mut,
+                            "is_ref": param.is_ref,
+                            "witness_data_source": param.witness_data_source,
+                            "lock_args_data_source": param.lock_args_data_source,
+                            "protected_spend_surface": param.protected_spend_surface,
+                            "cell_bound_abi": param.cell_bound_abi,
+                            "schema_pointer_abi": param.schema_pointer_abi,
+                            "schema_length_abi": param.schema_length_abi,
+                            "fixed_byte_len": param.fixed_byte_len,
+                        })
+                    })
+                    .collect::<Vec<_>>(),
+                "entry_witness_required": !action.params.is_empty(),
+                "runtimeInputRequirements": action.transaction_runtime_input_requirements,
+                "verifierObligations": action.verifier_obligations,
+                "failClosedRuntimeFeatures": action.fail_closed_runtime_features,
+            })
+        })
+        .collect()
+}
+
+fn typescript_builder_manifest(
+    package_name: &str,
+    metadata: &CompileMetadata,
+    actions: &[&crate::ActionMetadata],
+    metadata_hash: &str,
+    locked_identity: Option<&serde_json::Value>,
+    deployment_identity: Option<&serde_json::Value>,
+) -> serde_json::Value {
+    serde_json::json!({
+        "schema": "cellscript-generated-action-builder-v0.20",
+        "target": "typescript",
+        "package_name": package_name,
+        "module": metadata.module,
+        "compiler_version": metadata.compiler_version,
+        "metadata_schema_version": metadata.metadata_schema_version,
+        "metadata_schema_versions": metadata_schema_versions_json(metadata),
+        "metadata_hash": metadata_hash,
+        "artifact_hash": metadata.artifact_hash,
+        "source_hash": metadata.source_hash,
+        "target_profile": metadata.target_profile.name,
+        "molecule_schema_manifest": metadata.molecule_schema_manifest,
+        "cell_data_codec_manifest": metadata.cell_data_codec_manifest,
+        "locked_identity": locked_identity,
+        "deployment_identity": deployment_identity,
+        "actions": actions
+            .iter()
+            .map(|action| {
+                serde_json::json!({
+                    "name": action.name,
+                    "params": action.params,
+                    "created_outputs": action.create_set.len(),
+                    "mutated_outputs": action.mutate_set.len(),
+                    "runtime_input_requirements": action.transaction_runtime_input_requirements.len(),
+                    "entry_witness_required": !action.params.is_empty(),
+                })
+            })
+            .collect::<Vec<_>>(),
+        "runtime_error_catalog": runtime_error_catalog_json(),
+        "runtime_contract": {
+            "requires_live_cell_resolution": true,
+            "requires_deployment_resolution": true,
+            "requires_capacity_and_fee_policy": true,
+            "requires_witness_materialization": true,
+            "requires_cell_data_codec_materialization": true,
+            "requires_external_cell_data_codec_adapter": metadata.cell_data_codec_manifest.raw_bytes_required,
+            "cell_data_codec_abi": metadata.cell_data_codec_manifest.abi,
+            "requires_dry_run_before_submit": true,
+            "must_not_infer_protocol_semantics_from_action_name": true,
+        }
+    })
+}
+
+fn typescript_package_json(package_name: &str) -> serde_json::Value {
+    serde_json::json!({
+        "name": package_name,
+        "version": "0.0.0-cellscript-generated",
+        "private": true,
+        "type": "module",
+        "main": "dist/index.js",
+        "types": "dist/index.d.ts",
+        "scripts": {
+            "build": "tsc -p tsconfig.json",
+            "test": "npm run build && node --test test/*.test.mjs"
+        },
+        "devDependencies": {
+            "typescript": "^5.0.0"
+        }
+    })
+}
+
+fn typescript_tsconfig_json() -> serde_json::Value {
+    serde_json::json!({
+        "compilerOptions": {
+            "target": "ES2022",
+            "module": "NodeNext",
+            "moduleResolution": "NodeNext",
+            "declaration": true,
+            "outDir": "dist",
+            "rootDir": "src",
+            "strict": true,
+            "resolveJsonModule": true,
+            "esModuleInterop": true,
+            "skipLibCheck": true
+        },
+        "include": ["src/**/*.ts", "src/**/*.json"]
+    })
+}
+
+fn typescript_builder_index(
+    package_name: &str,
+    metadata: &CompileMetadata,
+    actions: &[&crate::ActionMetadata],
+    metadata_hash: &str,
+    locked_identity: Option<&serde_json::Value>,
+    deployment_identity: Option<&serde_json::Value>,
+) -> Result<String> {
+    let action_specs = actions
+        .iter()
+        .map(|action| {
+            serde_json::json!({
+                "name": action.name,
+                "params": action.params,
+                "createSet": action.create_set,
+                "mutateSet": action.mutate_set,
+                "readRefs": action.read_refs,
+                "verifierObligations": action.verifier_obligations,
+                "runtimeInputRequirements": action.transaction_runtime_input_requirements,
+                "failClosedRuntimeFeatures": action.fail_closed_runtime_features,
+            })
+        })
+        .collect::<Vec<_>>();
+    let action_specs_json = json_string_pretty("action specs", &action_specs)?;
+    let action_error_contexts_json = json_string_pretty("action error contexts", &builder_action_error_contexts_json(actions))?;
+    let runtime_error_catalog_json = json_string_pretty("runtime error catalog", &runtime_error_catalog_json())?;
+    let manifest_json = json_string_pretty(
+        "builder manifest",
+        &typescript_builder_manifest(package_name, metadata, actions, metadata_hash, locked_identity, deployment_identity),
+    )?;
+    let metadata_json = json_string_pretty("metadata", metadata)?;
+
+    let mut ts = String::new();
+    ts.push_str("export const CELLSCRIPT_BUILDER_SCHEMA = \"cellscript-generated-action-builder-v0.20\" as const;\n");
+    ts.push_str(&format!("export const builderManifest = {manifest_json} as const;\n"));
+    ts.push_str(&format!("export const metadata = {metadata_json} as const;\n"));
+    ts.push_str("export const cellDataCodecManifest = metadata.cell_data_codec_manifest;\n");
+    ts.push_str(&format!("export const actionSpecs = {action_specs_json} as const;\n\n"));
+    ts.push_str(&format!("export const actionErrorContexts = {action_error_contexts_json} as const;\n"));
+    ts.push_str(&format!("export const runtimeErrorCatalog = {runtime_error_catalog_json} as const;\n\n"));
+    ts.push_str(
+        "export type HexString = `0x${string}`;\n\
+         export type CellScriptValue = string | number | bigint | boolean | Uint8Array | Record<string, unknown> | null;\n\
+         export type CellScriptParams = object;\n\n\
+         export interface CellScriptLockfilePackage {\n\
+           name?: string;\n\
+           version?: string;\n\
+           namespace?: string | null;\n\
+           source_hash?: string | null;\n\
+           compiler_source_hash?: string | null;\n\
+         }\n\n\
+         export interface CellScriptLockfileBuild {\n\
+           compiler_version?: string | null;\n\
+           target_profile?: string | null;\n\
+           artifact_hash?: string | null;\n\
+           metadata_hash?: string | null;\n\
+           schema_hash?: string | null;\n\
+           cell_data_codec_manifest_hash?: string | null;\n\
+           abi_hash?: string | null;\n\
+           constraints_hash?: string | null;\n\
+         }\n\n\
+         export interface CellScriptLockfileDeployment {\n\
+           record?: string | null;\n\
+           record_hash?: string | null;\n\
+           code_hash?: string | null;\n\
+           out_point?: string | null;\n\
+           data_hash?: string | null;\n\
+         }\n\n\
+         export interface CellScriptLockfile {\n\
+           package?: CellScriptLockfilePackage;\n\
+           package_build?: CellScriptLockfileBuild | null;\n\
+           deployment?: Record<string, CellScriptLockfileDeployment | null | undefined>;\n\
+         }\n\n\
+         export interface CellScriptDeploymentRecord {\n\
+           network: string;\n\
+           chain_id: string;\n\
+           tx_hash: string;\n\
+           output_index: number;\n\
+           code_hash: string;\n\
+           hash_type: string;\n\
+           dep_type: string;\n\
+           data_hash: string;\n\
+           out_point: string;\n\
+           artifact_hash?: string | null;\n\
+           metadata_hash?: string | null;\n\
+           schema_hash?: string | null;\n\
+           cell_data_codec_manifest_hash?: string | null;\n\
+           abi_hash?: string | null;\n\
+           constraints_hash?: string | null;\n\
+           compiler_version?: string | null;\n\
+           type_id?: string | null;\n\
+           status?: string | null;\n\
+           audit_report_hash?: string | null;\n\
+           publisher_signature?: string | null;\n\
+         }\n\n\
+         export interface CellScriptLiveDeploymentEvidence {\n\
+           network?: string;\n\
+           out_point?: string;\n\
+           rpc_status?: string;\n\
+           status?: string;\n\
+           deployment_status?: string | null;\n\
+           expected_data_hash?: string;\n\
+           rpc_data_hash?: string | null;\n\
+           expected_code_hash?: string;\n\
+           rpc_code_hash?: string | null;\n\
+           violations?: readonly string[];\n\
+         }\n\n\
+         export interface CellScriptTrustPolicy {\n\
+           requirePublisherSignature?: boolean;\n\
+           requireAuditReportHash?: boolean;\n\
+         }\n\n\
+         export interface BuildOptions {\n\
+           lockfile?: CellScriptLockfile;\n\
+           deployment?: CellScriptDeploymentRecord;\n\
+           liveDeploymentEvidence?: CellScriptLiveDeploymentEvidence;\n\
+           trustPolicy?: CellScriptTrustPolicy;\n\
+           deploymentRef?: string;\n\
+           dryRun?: boolean;\n\
+           submit?: boolean;\n\
+           feeRate?: bigint | number | string;\n\
+           changeLock?: unknown;\n\
+         }\n\n\
+         export interface ActionBuilderPlan<P extends CellScriptParams = CellScriptParams> {\n\
+           schema: typeof CELLSCRIPT_BUILDER_SCHEMA;\n\
+           state: \"GeneratedActionPlan\";\n\
+           status: \"requires-runtime-resolution\";\n\
+           action: string;\n\
+           params: P;\n\
+           options: BuildOptions;\n\
+           metadataHash: string;\n\
+           artifactHash: string | null;\n\
+           targetProfile: string;\n\
+           canSubmit: false;\n\
+           requiresLiveCellResolution: true;\n\
+           requiresDeploymentResolution: true;\n\
+           cellDataCodecManifest: typeof cellDataCodecManifest;\n\
+           notProvenByGeneratedBuilder: readonly string[];\n\
+         }\n\n\
+         export type ActionBuilderMode = \"build\" | \"dry-run\" | \"submit\";\n\n\
+         export interface ActionBuilderResult<P extends CellScriptParams = CellScriptParams> {\n\
+           schema: typeof CELLSCRIPT_BUILDER_SCHEMA;\n\
+           state: \"ActionBuilderResult\";\n\
+           status: \"built-by-runtime\" | \"dry-run-by-runtime\" | \"submitted-by-runtime\";\n\
+           mode: ActionBuilderMode;\n\
+           plan: ActionBuilderPlan<P>;\n\
+           liveCellResolution: LiveCellResolutionResult;\n\
+           transaction: unknown;\n\
+           dryRunResult?: unknown;\n\
+           submitResult?: unknown;\n\
+           submittedTxHash?: string | null;\n\
+           canSubmit: false;\n\
+           notProvenByGeneratedBuilder: readonly string[];\n\
+         }\n\n\
+         export interface LiveCellResolutionRequest<P extends CellScriptParams = CellScriptParams> {\n\
+           plan: ActionBuilderPlan<P>;\n\
+           options: BuildOptions;\n\
+         }\n\n\
+         export interface LiveCellResolutionResult {\n\
+           inputs?: readonly unknown[];\n\
+           referenceInputs?: readonly unknown[];\n\
+           cellDeps?: readonly unknown[];\n\
+           headerDeps?: readonly unknown[];\n\
+           deploymentRef?: unknown;\n\
+           lineage?: readonly unknown[];\n\
+         }\n\n\
+         export interface CellScriptBuilderRuntime {\n\
+           resolveLiveCells<P extends CellScriptParams>(request: LiveCellResolutionRequest<P>): Promise<LiveCellResolutionResult>;\n\
+           buildTransaction<P extends CellScriptParams>(plan: ActionBuilderPlan<P> & { liveCellResolution: LiveCellResolutionResult }): Promise<unknown>;\n\
+           dryRun?(transaction: unknown): Promise<unknown>;\n\
+           submit?(transaction: unknown): Promise<unknown>;\n\
+         }\n\n\
+         export interface CellScriptRuntimeErrorInfo {\n\
+           code: number;\n\
+           name: string;\n\
+           description: string;\n\
+           hint: string;\n\
+         }\n\n\
+         export interface CellScriptActionFieldContext {\n\
+           name: string;\n\
+           type: string;\n\
+           source: string;\n\
+           is_mut: boolean;\n\
+           is_ref: boolean;\n\
+           witness_data_source: boolean;\n\
+           lock_args_data_source: boolean;\n\
+           protected_spend_surface: boolean;\n\
+           cell_bound_abi: boolean;\n\
+           schema_pointer_abi: boolean;\n\
+           schema_length_abi: boolean;\n\
+           fixed_byte_len?: number | null;\n\
+         }\n\n\
+         export interface CellScriptActionErrorContext {\n\
+           action: string;\n\
+           fields: readonly CellScriptActionFieldContext[];\n\
+           entry_witness_required: boolean;\n\
+           runtimeInputRequirements: readonly unknown[];\n\
+           verifierObligations: readonly unknown[];\n\
+           failClosedRuntimeFeatures: readonly string[];\n\
+         }\n\n\
+         export interface CellScriptRuntimeErrorExplanation extends CellScriptRuntimeErrorInfo {\n\
+           action?: string;\n\
+           actionFields: readonly CellScriptActionFieldContext[];\n\
+           entryWitnessRequired: boolean;\n\
+           runtimeInputRequirements: readonly unknown[];\n\
+           verifierObligations: readonly unknown[];\n\
+           failClosedRuntimeFeatures: readonly string[];\n\
+         }\n\n",
+    );
+    ts.push_str(&format!(
+        "const GENERATED_METADATA_HASH = {};\n\
+         const GENERATED_ARTIFACT_HASH: string | null = {};\n\
+         const GENERATED_SOURCE_HASH: string | null = {};\n\
+         const GENERATED_COMPILER_VERSION = {};\n\
+         const GENERATED_TARGET_PROFILE = {};\n\
+         const GENERATED_SCHEMA_HASH = {};\n\
+         const GENERATED_CELL_DATA_CODEC_MANIFEST_HASH = {};\n\
+         const GENERATED_ABI_HASH = {};\n\
+         const GENERATED_CONSTRAINTS_HASH = {};\n\
+         const BUILDER_MANIFEST_RUNTIME = builderManifest as unknown as {{\n\
+           deployment_identity?: {{ deployments?: readonly CellScriptDeploymentRecord[] }} | null;\n\
+         }};\n\n",
+        typescript_string_literal(metadata_hash),
+        metadata.artifact_hash.as_deref().map(typescript_string_literal).unwrap_or_else(|| "null".to_string()),
+        metadata.source_hash.as_deref().map(typescript_string_literal).unwrap_or_else(|| "null".to_string()),
+        typescript_string_literal(&metadata.compiler_version),
+        typescript_string_literal(&metadata.target_profile.name),
+        typescript_string_literal(&metadata.molecule_schema_manifest.manifest_hash),
+        typescript_string_literal(&metadata.cell_data_codec_manifest.manifest_hash),
+        typescript_string_literal(&metadata_abi_hash(metadata)?),
+        typescript_string_literal(&hash_json_value("constraints", &metadata.constraints)?),
+    ));
+    ts.push_str(
+        "export function runtimeErrorInfoByCode(code: number | string | bigint): CellScriptRuntimeErrorInfo | null {\n\
+           const parsed = runtimeErrorCodeFrom(code);\n\
+           if (parsed === null) {\n\
+             return null;\n\
+           }\n\
+           const item = runtimeErrorCatalog.find((error) => error.code === parsed);\n\
+           return item ? { code: item.code, name: item.name, description: item.description, hint: item.hint } : null;\n\
+         }\n\n\
+         export function runtimeErrorInfoByName(name: string): CellScriptRuntimeErrorInfo | null {\n\
+           const normalized = name.trim().toLowerCase();\n\
+           const item = runtimeErrorCatalog.find((error) => error.name === normalized);\n\
+           return item ? { code: item.code, name: item.name, description: item.description, hint: item.hint } : null;\n\
+         }\n\n\
+         export function runtimeErrorContextForAction(action: string): CellScriptActionErrorContext | null {\n\
+           const context = actionErrorContexts.find((item) => item.action === action);\n\
+           if (!context) {\n\
+             return null;\n\
+           }\n\
+           return {\n\
+             action: context.action,\n\
+             fields: context.fields.map((field) => ({ ...field })),\n\
+             entry_witness_required: context.entry_witness_required,\n\
+             runtimeInputRequirements: [...context.runtimeInputRequirements],\n\
+             verifierObligations: [...context.verifierObligations],\n\
+             failClosedRuntimeFeatures: [...context.failClosedRuntimeFeatures],\n\
+           };\n\
+         }\n\n\
+         export function explainCellScriptRuntimeError(error: unknown, action?: string): CellScriptRuntimeErrorExplanation | null {\n\
+           const code = runtimeErrorCodeFrom(error);\n\
+           const name = runtimeErrorNameFrom(error);\n\
+           const message = runtimeErrorMessageFrom(error);\n\
+           let info = code === null ? null : runtimeErrorInfoByCode(code);\n\
+           if (!info && name) {\n\
+             info = runtimeErrorInfoByName(name);\n\
+           }\n\
+           if (!info && message) {\n\
+             const normalizedMessage = message.toLowerCase();\n\
+             const item = runtimeErrorCatalog.find((known) => normalizedMessage.includes(known.name));\n\
+             info = item ? { code: item.code, name: item.name, description: item.description, hint: item.hint } : null;\n\
+             if (!info && (normalizedMessage.includes(\"entry witness\") || normalizedMessage.includes(\"entry-witness\"))) {\n\
+               info = runtimeErrorInfoByName(\"entry-witness-abi-invalid\");\n\
+             }\n\
+             if (!info && normalizedMessage.includes(\"collection\")) {\n\
+               info = runtimeErrorInfoByName(\"collection-runtime-unsupported\");\n\
+             }\n\
+           }\n\
+           if (!info) {\n\
+             return null;\n\
+           }\n\
+           const context = action ? runtimeErrorContextForAction(action) : null;\n\
+           return {\n\
+             ...info,\n\
+             action: context?.action ?? action,\n\
+             actionFields: context?.fields ?? [],\n\
+             entryWitnessRequired: context?.entry_witness_required ?? false,\n\
+             runtimeInputRequirements: context?.runtimeInputRequirements ?? [],\n\
+             verifierObligations: context?.verifierObligations ?? [],\n\
+             failClosedRuntimeFeatures: context?.failClosedRuntimeFeatures ?? [],\n\
+           };\n\
+         }\n\n\
+         function runtimeErrorCodeFrom(error: unknown): number | null {\n\
+           if (typeof error === \"number\" && Number.isFinite(error)) {\n\
+             return Math.trunc(error);\n\
+           }\n\
+           if (typeof error === \"bigint\") {\n\
+             const value = Number(error);\n\
+             return Number.isSafeInteger(value) ? value : null;\n\
+           }\n\
+           if (typeof error === \"string\") {\n\
+             const trimmed = error.trim();\n\
+             return /^-?\\d+$/.test(trimmed) ? Number(trimmed) : null;\n\
+           }\n\
+           if (typeof error === \"object\" && error !== null) {\n\
+             const record = error as Record<string, unknown>;\n\
+             for (const key of [\"code\", \"exitCode\", \"errorCode\", \"error_code\", \"ecode\"] as const) {\n\
+               const parsed = runtimeErrorCodeFrom(record[key]);\n\
+               if (parsed !== null) {\n\
+                 return parsed;\n\
+               }\n\
+             }\n\
+           }\n\
+           return null;\n\
+         }\n\n\
+         function runtimeErrorNameFrom(error: unknown): string | null {\n\
+           if (typeof error === \"string\") {\n\
+             const trimmed = error.trim().toLowerCase();\n\
+             return runtimeErrorCatalog.some((known) => known.name === trimmed) ? trimmed : null;\n\
+           }\n\
+           if (typeof error === \"object\" && error !== null) {\n\
+             const record = error as Record<string, unknown>;\n\
+             for (const key of [\"name\", \"error\", \"errorName\", \"runtime_error\"] as const) {\n\
+               const value = record[key];\n\
+               if (typeof value === \"string\") {\n\
+                 const match = runtimeErrorNameFrom(value);\n\
+                 if (match) {\n\
+                   return match;\n\
+                 }\n\
+               }\n\
+             }\n\
+           }\n\
+           return null;\n\
+         }\n\n\
+         function runtimeErrorMessageFrom(error: unknown): string | null {\n\
+           if (typeof error === \"string\") {\n\
+             return error;\n\
+           }\n\
+           if (typeof error === \"object\" && error !== null) {\n\
+             const record = error as Record<string, unknown>;\n\
+             for (const key of [\"message\", \"stderr\", \"reason\"] as const) {\n\
+               const value = record[key];\n\
+               if (typeof value === \"string\") {\n\
+                 return value;\n\
+               }\n\
+             }\n\
+           }\n\
+           return null;\n\
+         }\n\n\
+         export function validateCellScriptLockfile(lockfile: CellScriptLockfile): string[] {\n\
+           const violations: string[] = [];\n\
+           const pkg = lockfile.package;\n\
+           if (!pkg) {\n\
+             violations.push(\"Cell.lock has no [package]\");\n\
+           } else {\n\
+             compareRequiredIdentity(\"compiler_source_hash\", pkg.compiler_source_hash ?? pkg.source_hash, GENERATED_SOURCE_HASH, violations);\n\
+           }\n\
+           const build = lockfile.package_build;\n\
+           if (!build) {\n\
+             violations.push(\"Cell.lock has no [package.build]\");\n\
+           } else {\n\
+             compareRequiredIdentity(\"compiler_version\", build.compiler_version, GENERATED_COMPILER_VERSION, violations);\n\
+             compareRequiredIdentity(\"target_profile\", build.target_profile, GENERATED_TARGET_PROFILE, violations);\n\
+             compareRequiredIdentity(\"artifact_hash\", build.artifact_hash, GENERATED_ARTIFACT_HASH, violations);\n\
+             compareRequiredIdentity(\"metadata_hash\", build.metadata_hash, GENERATED_METADATA_HASH, violations);\n\
+             compareRequiredIdentity(\"schema_hash\", build.schema_hash, GENERATED_SCHEMA_HASH, violations);\n\
+             compareRequiredIdentity(\"cell_data_codec_manifest_hash\", build.cell_data_codec_manifest_hash, GENERATED_CELL_DATA_CODEC_MANIFEST_HASH, violations);\n\
+             compareRequiredIdentity(\"abi_hash\", build.abi_hash, GENERATED_ABI_HASH, violations);\n\
+             compareRequiredIdentity(\"constraints_hash\", build.constraints_hash, GENERATED_CONSTRAINTS_HASH, violations);\n\
+           }\n\
+           return violations;\n\
+         }\n\n\
+         export function assertCellScriptLockfile(lockfile: CellScriptLockfile): void {\n\
+           const violations = validateCellScriptLockfile(lockfile);\n\
+           if (violations.length > 0) {\n\
+             throw new Error(\"CellScript builder identity mismatch: \" + violations.join(\"; \"));\n\
+           }\n\
+         }\n\n\
+         export function validateCellScriptDeployment(\n\
+           lockfile?: CellScriptLockfile,\n\
+           deployment?: CellScriptDeploymentRecord,\n\
+           liveEvidence?: CellScriptLiveDeploymentEvidence,\n\
+           trustPolicy?: CellScriptTrustPolicy,\n\
+         ): string[] {\n\
+           const violations: string[] = [];\n\
+           if (!deployment) {\n\
+             if (liveEvidence) {\n\
+               violations.push(\"live deployment evidence requires a deployment record\");\n\
+             }\n\
+             violations.push(...validateCellScriptDeploymentTrust(deployment, trustPolicy));\n\
+             return violations;\n\
+           }\n\
+           violations.push(...validateCellScriptDeploymentTrust(deployment, trustPolicy));\n\
+           if (!deployment.status) {\n\
+             violations.push(\"deployment record has no status; expected 'active'\");\n\
+           } else if (deployment.status !== \"active\") {\n\
+             violations.push(\"deployment status is '\" + deployment.status + \"'\");\n\
+           }\n\
+           compareDeploymentIdentity(\"compiler_version\", deployment.compiler_version, GENERATED_COMPILER_VERSION, violations);\n\
+           compareDeploymentIdentity(\"artifact_hash\", deployment.artifact_hash, GENERATED_ARTIFACT_HASH, violations);\n\
+           compareDeploymentIdentity(\"metadata_hash\", deployment.metadata_hash, GENERATED_METADATA_HASH, violations);\n\
+           compareDeploymentIdentity(\"schema_hash\", deployment.schema_hash, GENERATED_SCHEMA_HASH, violations);\n\
+           compareDeploymentIdentity(\"cell_data_codec_manifest_hash\", deployment.cell_data_codec_manifest_hash, GENERATED_CELL_DATA_CODEC_MANIFEST_HASH, violations);\n\
+           compareDeploymentIdentity(\"abi_hash\", deployment.abi_hash, GENERATED_ABI_HASH, violations);\n\
+           compareDeploymentIdentity(\"constraints_hash\", deployment.constraints_hash, GENERATED_CONSTRAINTS_HASH, violations);\n\
+\n\
+           const lockDeployment = lockfile?.deployment?.[deployment.network];\n\
+           if (lockfile && !lockDeployment) {\n\
+             violations.push(\"Cell.lock has no deployment ref for network '\" + deployment.network + \"'\");\n\
+           } else if (lockDeployment) {\n\
+             compareHexIdentity(\"deployment.code_hash\", lockDeployment.code_hash, deployment.code_hash, violations);\n\
+             compareStringIdentity(\"deployment.out_point\", lockDeployment.out_point, deployment.out_point, violations);\n\
+             compareHexIdentity(\"deployment.data_hash\", lockDeployment.data_hash, deployment.data_hash, violations);\n\
+           }\n\
+\n\
+           const embeddedDeployments = BUILDER_MANIFEST_RUNTIME.deployment_identity?.deployments ?? [];\n\
+           if (embeddedDeployments.length > 0) {\n\
+             const embedded = embeddedDeployments.find((item) => item.network === deployment.network);\n\
+             if (!embedded) {\n\
+               violations.push(\"builder manifest has no embedded deployment for network '\" + deployment.network + \"'\");\n\
+             } else {\n\
+               compareHexIdentity(\"embedded_deployment.code_hash\", deployment.code_hash, embedded.code_hash, violations);\n\
+               compareStringIdentity(\"embedded_deployment.out_point\", deployment.out_point, embedded.out_point, violations);\n\
+               compareHexIdentity(\"embedded_deployment.data_hash\", deployment.data_hash, embedded.data_hash, violations);\n\
+               compareStringIdentity(\"embedded_deployment.hash_type\", deployment.hash_type, embedded.hash_type, violations);\n\
+               if (embedded.status || deployment.status) {\n\
+                 compareStringIdentity(\"embedded_deployment.status\", deployment.status, embedded.status, violations);\n\
+               }\n\
+               if (embedded.type_id || deployment.type_id) {\n\
+                 compareHexIdentity(\"embedded_deployment.type_id\", deployment.type_id, embedded.type_id, violations);\n\
+               }\n\
+             }\n\
+           }\n\
+\n\
+           if (liveEvidence) {\n\
+             if (liveEvidence.status && liveEvidence.status !== \"live-verified\") {\n\
+               violations.push(\"live deployment evidence status is '\" + liveEvidence.status + \"'\");\n\
+             }\n\
+             if (liveEvidence.rpc_status && liveEvidence.rpc_status !== \"live\") {\n\
+               violations.push(\"live deployment RPC status is '\" + liveEvidence.rpc_status + \"'\");\n\
+             }\n\
+             if (!liveEvidence.deployment_status) {\n\
+               violations.push(\"live deployment evidence has no deployment_status\");\n\
+             } else if (liveEvidence.deployment_status !== \"active\") {\n\
+               violations.push(\"live deployment evidence deployment_status is '\" + liveEvidence.deployment_status + \"'\");\n\
+             }\n\
+             if (liveEvidence.violations && liveEvidence.violations.length > 0) {\n\
+               violations.push(\"live deployment evidence reports violations: \" + liveEvidence.violations.join(\"; \"));\n\
+             }\n\
+             compareStringIdentity(\"live_deployment.out_point\", liveEvidence.out_point, deployment.out_point, violations);\n\
+             compareHexIdentity(\"live_deployment.data_hash\", liveEvidence.rpc_data_hash, deployment.data_hash, violations);\n\
+             compareHexIdentity(\"live_deployment.code_hash\", liveEvidence.rpc_code_hash, deployment.code_hash, violations);\n\
+           }\n\
+           return violations;\n\
+         }\n\n\
+         export function validateCellScriptDeploymentTrust(\n\
+           deployment?: CellScriptDeploymentRecord,\n\
+           trustPolicy?: CellScriptTrustPolicy,\n\
+         ): string[] {\n\
+           const violations: string[] = [];\n\
+           const requirePublisherSignature = trustPolicy?.requirePublisherSignature ?? false;\n\
+           const requireAuditReportHash = trustPolicy?.requireAuditReportHash ?? false;\n\
+           if (!requirePublisherSignature && !requireAuditReportHash) {\n\
+             return violations;\n\
+           }\n\
+           if (!deployment) {\n\
+             violations.push(\"trust policy requires a deployment record\");\n\
+             return violations;\n\
+           }\n\
+           if (requirePublisherSignature && !deployment.publisher_signature) {\n\
+             violations.push(\"deployment record has no publisher_signature required by trust policy\");\n\
+           }\n\
+           if (requireAuditReportHash && !deployment.audit_report_hash) {\n\
+             violations.push(\"deployment record has no audit_report_hash required by trust policy\");\n\
+           }\n\
+           return violations;\n\
+         }\n\n\
+         export function assertCellScriptDeployment(\n\
+           lockfile?: CellScriptLockfile,\n\
+           deployment?: CellScriptDeploymentRecord,\n\
+           liveEvidence?: CellScriptLiveDeploymentEvidence,\n\
+           trustPolicy?: CellScriptTrustPolicy,\n\
+         ): void {\n\
+           const violations = validateCellScriptDeployment(lockfile, deployment, liveEvidence, trustPolicy);\n\
+           if (violations.length > 0) {\n\
+             throw new Error(\"CellScript deployment identity mismatch: \" + violations.join(\"; \"));\n\
+           }\n\
+         }\n\n\
+         function compareRequiredIdentity(\n\
+           field: string,\n\
+           actual: string | null | undefined,\n\
+           expected: string | null,\n\
+           violations: string[],\n\
+         ): void {\n\
+           if (expected === null || expected === \"\") {\n\
+             violations.push(\"generated metadata has no \" + field);\n\
+             return;\n\
+           }\n\
+           if (actual === undefined || actual === null || actual === \"\") {\n\
+             violations.push(\"Cell.lock has no \" + field);\n\
+             return;\n\
+           }\n\
+           if (actual !== expected) {\n\
+             violations.push(field + \" mismatch: Cell.lock has '\" + actual + \"', metadata has '\" + expected + \"'\");\n\
+           }\n\
+         }\n\n\
+         function compareDeploymentIdentity(\n\
+           field: string,\n\
+           actual: string | null | undefined,\n\
+           expected: string | null,\n\
+           violations: string[],\n\
+         ): void {\n\
+           if (expected === null || expected === \"\") {\n\
+             violations.push(\"generated metadata has no \" + field);\n\
+             return;\n\
+           }\n\
+           if (actual === undefined || actual === null || actual === \"\") {\n\
+             violations.push(\"deployment record has no \" + field);\n\
+             return;\n\
+           }\n\
+           if (!identityEquals(actual, expected)) {\n\
+             violations.push(field + \" mismatch: deployment has '\" + actual + \"', metadata has '\" + expected + \"'\");\n\
+           }\n\
+         }\n\n\
+         function compareStringIdentity(\n\
+           field: string,\n\
+           actual: string | null | undefined,\n\
+           expected: string | null | undefined,\n\
+           violations: string[],\n\
+         ): void {\n\
+           if (expected === undefined || expected === null || expected === \"\") {\n\
+             violations.push(\"expected \" + field + \" is missing\");\n\
+             return;\n\
+           }\n\
+           if (actual === undefined || actual === null || actual === \"\") {\n\
+             violations.push(field + \" is missing\");\n\
+             return;\n\
+           }\n\
+           if (actual !== expected) {\n\
+             violations.push(field + \" mismatch: actual '\" + actual + \"', expected '\" + expected + \"'\");\n\
+           }\n\
+         }\n\n\
+         function compareHexIdentity(\n\
+           field: string,\n\
+           actual: string | null | undefined,\n\
+           expected: string | null | undefined,\n\
+           violations: string[],\n\
+         ): void {\n\
+           if (expected === undefined || expected === null || expected === \"\") {\n\
+             violations.push(\"expected \" + field + \" is missing\");\n\
+             return;\n\
+           }\n\
+           if (actual === undefined || actual === null || actual === \"\") {\n\
+             violations.push(field + \" is missing\");\n\
+             return;\n\
+           }\n\
+           if (!hexEquals(actual, expected)) {\n\
+             violations.push(field + \" mismatch: actual '\" + actual + \"', expected '\" + expected + \"'\");\n\
+           }\n\
+         }\n\n\
+         function identityEquals(actual: string, expected: string): boolean {\n\
+           return actual === expected || hexEquals(actual, expected);\n\
+         }\n\n\
+         function hexEquals(actual: string, expected: string): boolean {\n\
+           return actual.replace(/^0x/i, \"\").toLowerCase() === expected.replace(/^0x/i, \"\").toLowerCase();\n\
+         }\n\n",
+    );
+
+    for action in actions {
+        let suffix = typescript_type_suffix(&action.name);
+        let params_type = typescript_action_params_type(action);
+        ts.push_str(&format!("export interface {suffix}Params {{\n"));
+        for param in &action.params {
+            ts.push_str(&format!("  {}: {};\n", typescript_object_key(&param.name), typescript_param_type(param)));
+        }
+        if action.params.is_empty() {
+            ts.push_str("  readonly __noParams?: never;\n");
+        }
+        ts.push_str("}\n\n");
+        ts.push_str(&format!(
+            "export function plan{suffix}(params: {params_type}, options: BuildOptions = {{}}): ActionBuilderPlan<{params_type}> {{\n  \
+             return makeActionPlan({}, params, options);\n}}\n\n",
+            typescript_string_literal(&action.name)
+        ));
+    }
+
+    ts.push_str("function makeActionPlan<P extends CellScriptParams>(action: string, params: P, options: BuildOptions): ActionBuilderPlan<P> {\n");
+    ts.push_str("  if (options.lockfile) {\n    assertCellScriptLockfile(options.lockfile);\n  }\n");
+    ts.push_str(
+        "  if (options.deployment || options.liveDeploymentEvidence || options.trustPolicy) {\n    \
+         assertCellScriptDeployment(options.lockfile, options.deployment, options.liveDeploymentEvidence, options.trustPolicy);\n  }\n",
+    );
+    ts.push_str(&format!(
+        "  return {{\n    schema: CELLSCRIPT_BUILDER_SCHEMA,\n    state: \"GeneratedActionPlan\",\n    status: \"requires-runtime-resolution\",\n    action,\n    params,\n    options,\n    metadataHash: {},\n    artifactHash: {},\n    targetProfile: {},\n    canSubmit: false,\n    requiresLiveCellResolution: true,\n    requiresDeploymentResolution: true,\n    cellDataCodecManifest,\n    notProvenByGeneratedBuilder: [\n      \"live_cell_availability\",\n      \"deployment_live_chain_match\",\n      \"capacity_fee_balance\",\n      \"signature_authority\",\n      \"ckb_vm_execution\",\n      \"cell_data_codec_materialization\",\n      \"tx_pool_acceptance\",\n      \"submission\"\n    ] as const,\n  }};\n}}\n\n",
+        typescript_string_literal(metadata_hash),
+        metadata.artifact_hash.as_deref().map(typescript_string_literal).unwrap_or_else(|| "null".to_string()),
+        typescript_string_literal(&metadata.target_profile.name)
+    ));
+
+    ts.push_str(
+        "function assertRuntimeObject(value: unknown, label: string): Record<string, unknown> {\n\
+           if (typeof value !== \"object\" || value === null || Array.isArray(value)) {\n\
+             throw new Error(\"CellScript runtime builder-shape mismatch: \" + label + \" must be an object\");\n\
+           }\n\
+           return value as Record<string, unknown>;\n\
+         }\n\n\
+         function assertLiveCellResolutionResult(value: unknown): LiveCellResolutionResult {\n\
+           const record = assertRuntimeObject(value, \"resolveLiveCells result\");\n\
+           for (const field of [\"inputs\", \"referenceInputs\", \"cellDeps\", \"headerDeps\", \"lineage\"] as const) {\n\
+             const candidate = record[field];\n\
+             if (candidate !== undefined && !Array.isArray(candidate)) {\n\
+               throw new Error(\"CellScript runtime builder-shape mismatch: resolveLiveCells.\" + field + \" must be an array when present\");\n\
+             }\n\
+           }\n\
+           return value as LiveCellResolutionResult;\n\
+         }\n\n\
+         function assertBuiltTransaction(value: unknown): unknown {\n\
+           if (value === undefined || value === null) {\n\
+             throw new Error(\"CellScript runtime builder-shape mismatch: buildTransaction returned no transaction\");\n\
+           }\n\
+           return value;\n\
+         }\n\n\
+         function submittedTxHashFromRuntime(submitResult: unknown): string | null {\n\
+           if (typeof submitResult === \"string\") {\n\
+             return submitResult;\n\
+           }\n\
+           if (typeof submitResult === \"object\" && submitResult !== null) {\n\
+             const record = submitResult as Record<string, unknown>;\n\
+             if (typeof record.txHash === \"string\") {\n\
+               return record.txHash;\n\
+             }\n\
+             if (typeof record.hash === \"string\") {\n\
+               return record.hash;\n\
+             }\n\
+           }\n\
+           return null;\n\
+         }\n\n",
+    );
+
+    ts.push_str("export function createActionBuilder(runtime: CellScriptBuilderRuntime) {\n  return {\n");
+    for action in actions {
+        let method = typescript_identifier(&action.name, "action");
+        let suffix = typescript_type_suffix(&action.name);
+        let params_type = typescript_action_params_type(action);
+        ts.push_str(&format!(
+            "    async {method}(params: {params_type}, options: BuildOptions = {{}}) {{\n      \
+             const plan = plan{suffix}(params, options);\n      \
+             return executeActionBuilderPlan(runtime, plan, options);\n    }},\n"
+        ));
+    }
+    ts.push_str(
+        "  };\n}\n\n\
+         async function executeActionBuilderPlan<P extends CellScriptParams>(\n\
+           runtime: CellScriptBuilderRuntime,\n\
+           plan: ActionBuilderPlan<P>,\n\
+           options: BuildOptions,\n\
+         ): Promise<ActionBuilderResult<P>> {\n\
+           const liveCellResolution = assertLiveCellResolutionResult(await runtime.resolveLiveCells({ plan, options }));\n\
+           const transaction = assertBuiltTransaction(await runtime.buildTransaction({ ...plan, liveCellResolution }));\n\
+           const result: ActionBuilderResult<P> = {\n\
+             schema: CELLSCRIPT_BUILDER_SCHEMA,\n\
+             state: \"ActionBuilderResult\",\n\
+             status: \"built-by-runtime\",\n\
+             mode: \"build\",\n\
+             plan,\n\
+             liveCellResolution,\n\
+             transaction,\n\
+             canSubmit: false,\n\
+             notProvenByGeneratedBuilder: plan.notProvenByGeneratedBuilder,\n\
+           };\n\
+           if (options.dryRun || options.submit) {\n\
+             if (!runtime.dryRun) {\n\
+               throw new Error(\"CellScript builder runtime missing dryRun adapter\");\n\
+             }\n\
+             result.dryRunResult = await runtime.dryRun(transaction);\n\
+             result.status = \"dry-run-by-runtime\";\n\
+             result.mode = \"dry-run\";\n\
+           }\n\
+           if (options.submit) {\n\
+             if (!runtime.submit) {\n\
+               throw new Error(\"CellScript builder runtime missing submit adapter\");\n\
+             }\n\
+             result.submitResult = await runtime.submit(transaction);\n\
+             result.submittedTxHash = submittedTxHashFromRuntime(result.submitResult);\n\
+             result.status = \"submitted-by-runtime\";\n\
+             result.mode = \"submit\";\n\
+           }\n\
+           return result;\n\
+         }\n",
+    );
+
+    Ok(ts)
+}
+
+fn typescript_builder_test(actions: &[&crate::ActionMetadata]) -> Result<String> {
+    let cases = actions
+        .iter()
+        .map(|action| {
+            serde_json::json!({
+                "name": action.name,
+                "plan": format!("plan{}", typescript_type_suffix(&action.name)),
+                "method": typescript_identifier(&action.name, "action"),
+                "params": javascript_sample_params(action),
+            })
+        })
+        .collect::<Vec<_>>();
+    let cases_json = json_string_pretty("builder test cases", &cases)?;
+
+    let mut js = String::new();
+    js.push_str("import assert from \"node:assert/strict\";\n");
+    js.push_str("import test from \"node:test\";\n");
+    js.push_str("import * as builder from \"../dist/index.js\";\n\n");
+    js.push_str(&format!("const actionCases = {cases_json};\n"));
+    js.push_str("const WRONG_HASH = \"0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\";\n\n");
+    js.push_str(
+        "test(\"plans all generated actions without submitting\", () => {\n\
+           for (const actionCase of actionCases) {\n\
+             const plan = builder[actionCase.plan](actionCase.params);\n\
+             assert.equal(plan.schema, builder.CELLSCRIPT_BUILDER_SCHEMA);\n\
+             assert.equal(plan.state, \"GeneratedActionPlan\");\n\
+             assert.equal(plan.status, \"requires-runtime-resolution\");\n\
+             assert.equal(plan.action, actionCase.name);\n\
+             assert.equal(plan.canSubmit, false);\n\
+             assert.equal(plan.requiresLiveCellResolution, true);\n\
+             assert.equal(plan.requiresDeploymentResolution, true);\n\
+             assert.deepEqual(plan.params, actionCase.params);\n\
+           }\n\
+         });\n\n\
+         test(\"delegates live-cell resolution and transaction build to runtime\", async () => {\n\
+           const [first] = actionCases;\n\
+           const calls = [];\n\
+           const runtime = {\n\
+             async resolveLiveCells(request) {\n\
+               calls.push([\"resolveLiveCells\", request.plan.action]);\n\
+               return { inputs: [\"input-0\"], cellDeps: [\"dep-0\"], lineage: [] };\n\
+             },\n\
+             async buildTransaction(plan) {\n\
+               calls.push([\"buildTransaction\", plan.action]);\n\
+               return { action: plan.action, inputs: plan.liveCellResolution.inputs };\n\
+             },\n\
+           };\n\
+           const api = builder.createActionBuilder(runtime);\n\
+           const result = await api[first.method](first.params);\n\
+           assert.equal(result.state, \"ActionBuilderResult\");\n\
+           assert.equal(result.status, \"built-by-runtime\");\n\
+           assert.equal(result.mode, \"build\");\n\
+           assert.equal(result.plan.action, first.name);\n\
+           assert.equal(result.transaction.action, first.name);\n\
+           assert.deepEqual(result.liveCellResolution.inputs, [\"input-0\"]);\n\
+           assert.deepEqual(calls, [[\"resolveLiveCells\", first.name], [\"buildTransaction\", first.name]]);\n\
+         });\n\n\
+         test(\"delegates dry-run and submit modes to runtime\", async () => {\n\
+           const [first] = actionCases;\n\
+           const calls = [];\n\
+           const runtime = {\n\
+             async resolveLiveCells(request) {\n\
+               calls.push([\"resolveLiveCells\", request.plan.action]);\n\
+               return { inputs: [\"input-0\"], cellDeps: [\"dep-0\"], lineage: [] };\n\
+             },\n\
+             async buildTransaction(plan) {\n\
+               calls.push([\"buildTransaction\", plan.action]);\n\
+               return { action: plan.action, built: true };\n\
+             },\n\
+             async dryRun(transaction) {\n\
+               calls.push([\"dryRun\", transaction.action]);\n\
+               return { cycles: 42, exitCode: 0 };\n\
+             },\n\
+             async submit(transaction) {\n\
+               calls.push([\"submit\", transaction.action]);\n\
+               return { txHash: \"0x1234\" };\n\
+             },\n\
+           };\n\
+           const api = builder.createActionBuilder(runtime);\n\
+           const dryRunResult = await api[first.method](first.params, { dryRun: true });\n\
+           assert.equal(dryRunResult.mode, \"dry-run\");\n\
+           assert.deepEqual(dryRunResult.dryRunResult, { cycles: 42, exitCode: 0 });\n\
+           calls.length = 0;\n\
+           const submitResult = await api[first.method](first.params, { submit: true });\n\
+           assert.equal(submitResult.mode, \"submit\");\n\
+           assert.equal(submitResult.submittedTxHash, \"0x1234\");\n\
+           assert.deepEqual(calls, [\n\
+             [\"resolveLiveCells\", first.name],\n\
+             [\"buildTransaction\", first.name],\n\
+             [\"dryRun\", first.name],\n\
+             [\"submit\", first.name],\n\
+           ]);\n\
+         });\n\n\
+         test(\"rejects missing runtime adapters and malformed runtime shapes\", async () => {\n\
+           const [first] = actionCases;\n\
+           const noDryRunRuntime = {\n\
+             async resolveLiveCells() { return { inputs: [] }; },\n\
+             async buildTransaction() { return { tx: true }; },\n\
+           };\n\
+           const badShapeRuntime = {\n\
+             async resolveLiveCells() { return { inputs: \"not-an-array\" }; },\n\
+             async buildTransaction() { return { tx: true }; },\n\
+           };\n\
+           await assert.rejects(\n\
+             () => builder.createActionBuilder(noDryRunRuntime)[first.method](first.params, { dryRun: true }),\n\
+             /missing dryRun adapter/,\n\
+           );\n\
+           await assert.rejects(\n\
+             () => builder.createActionBuilder(badShapeRuntime)[first.method](first.params),\n\
+             /builder-shape mismatch/,\n\
+           );\n\
+         });\n\n\
+         test(\"maps runtime errors to action field context\", () => {\n\
+           const [first] = actionCases;\n\
+           const context = builder.runtimeErrorContextForAction(first.name);\n\
+           assert.equal(context.action, first.name);\n\
+           assert.equal(context.fields.length, Object.keys(first.params).length);\n\
+           const byCode = builder.runtimeErrorInfoByCode(25);\n\
+           assert.equal(byCode.name, \"entry-witness-abi-invalid\");\n\
+           const fromObject = builder.explainCellScriptRuntimeError({ exitCode: 25 }, first.name);\n\
+           assert.equal(fromObject.code, 25);\n\
+           assert.equal(fromObject.action, first.name);\n\
+           assert.equal(fromObject.actionFields.length, context.fields.length);\n\
+           const fromMessage = builder.explainCellScriptRuntimeError({ message: \"entry witness payload layout failed\" }, first.name);\n\
+           assert.equal(fromMessage.name, \"entry-witness-abi-invalid\");\n\
+           assert.equal(builder.explainCellScriptRuntimeError({ exitCode: 999999 }, first.name), null);\n\
+         });\n\n\
+         test(\"rejects mismatched lockfile identity\", () => {\n\
+           const [first] = actionCases;\n\
+           const badLockfile = {\n\
+             package: { source_hash: WRONG_HASH },\n\
+             package_build: {\n\
+               compiler_version: \"wrong-compiler\",\n\
+               target_profile: builder.builderManifest.target_profile,\n\
+               artifact_hash: builder.builderManifest.artifact_hash,\n\
+               metadata_hash: builder.builderManifest.metadata_hash,\n\
+             },\n\
+           };\n\
+           assert.throws(\n\
+             () => builder[first.plan](first.params, { lockfile: badLockfile }),\n\
+             /CellScript builder identity mismatch/,\n\
+           );\n\
+         });\n\n\
+         test(\"rejects mismatched deployment identity when deployment binding is embedded\", () => {\n\
+           const [first] = actionCases;\n\
+           const deployment = builder.builderManifest.deployment_identity?.deployments?.[0];\n\
+           if (!deployment) {\n\
+             assert.deepEqual(builder.validateCellScriptDeployment(undefined, undefined), []);\n\
+             assert.deepEqual(builder.validateCellScriptDeploymentTrust(undefined, undefined), []);\n\
+             assert.deepEqual(\n\
+               builder.validateCellScriptDeploymentTrust(undefined, { requirePublisherSignature: true }),\n\
+               [\"trust policy requires a deployment record\"],\n\
+             );\n\
+             assert.throws(\n\
+               () => builder[first.plan](first.params, { trustPolicy: { requirePublisherSignature: true } }),\n\
+               /trust policy requires a deployment record/,\n\
+             );\n\
+             return;\n\
+           }\n\
+           const badDeployment = { ...deployment, code_hash: WRONG_HASH };\n\
+           assert.throws(\n\
+             () => builder[first.plan](first.params, { deployment: badDeployment }),\n\
+             /CellScript deployment identity mismatch/,\n\
+           );\n\
+           const deprecatedDeployment = { ...deployment, status: \"deprecated\" };\n\
+           assert.throws(\n\
+             () => builder[first.plan](first.params, { deployment: deprecatedDeployment }),\n\
+             /deployment status/,\n\
+           );\n\
+           const { status: _deploymentStatus, ...missingStatusDeployment } = deployment;\n\
+           assert.throws(\n\
+             () => builder[first.plan](first.params, { deployment: missingStatusDeployment }),\n\
+             /no status/,\n\
+           );\n\
+           const { publisher_signature: _publisherSignature, audit_report_hash: _auditReportHash, ...unsignedDeployment } = deployment;\n\
+           assert.throws(\n\
+             () => builder[first.plan](first.params, { deployment: unsignedDeployment, trustPolicy: { requirePublisherSignature: true } }),\n\
+             /publisher_signature/,\n\
+           );\n\
+           const signedDeployment = { ...deployment, publisher_signature: \"sig:fixture\", audit_report_hash: \"0xaaa\" };\n\
+           assert.deepEqual(\n\
+             builder.validateCellScriptDeploymentTrust(signedDeployment, { requirePublisherSignature: true, requireAuditReportHash: true }),\n\
+             [],\n\
+           );\n\
+           assert.throws(\n\
+             () => builder[first.plan](first.params, {\n\
+               deployment,\n\
+               liveDeploymentEvidence: {\n\
+                 status: \"failed\",\n\
+                 deployment_status: \"deprecated\",\n\
+                 rpc_status: \"dead\",\n\
+                 out_point: deployment.out_point,\n\
+                 rpc_data_hash: deployment.data_hash,\n\
+                 rpc_code_hash: deployment.code_hash,\n\
+                 violations: [\"deployment for network 'aggron4' is not active: Deprecated\"],\n\
+               },\n\
+             }),\n\
+             /CellScript deployment identity mismatch/,\n\
+           );\n\
+         });\n",
+    );
+    Ok(js)
+}
+
+fn javascript_sample_params(action: &crate::ActionMetadata) -> serde_json::Value {
+    let mut params = serde_json::Map::new();
+    for param in &action.params {
+        params.insert(param.name.clone(), javascript_sample_param_value(param));
+    }
+    serde_json::Value::Object(params)
+}
+
+fn javascript_sample_param_value(param: &ParamMetadata) -> serde_json::Value {
+    if param.schema_pointer_abi
+        || param.schema_length_abi
+        || param.ty == "Address"
+        || param.ty == "Hash"
+        || param.fixed_byte_len.is_some()
+    {
+        let bytes = param.fixed_byte_len.unwrap_or(if param.ty == "Address" || param.ty == "Hash" { 32 } else { 0 });
+        return serde_json::Value::String(format!("0x{}", "00".repeat(bytes)));
+    }
+
+    match param.ty.as_str() {
+        "bool" => serde_json::Value::Bool(false),
+        "u8" | "u16" | "u32" | "u64" | "u128" | "i8" | "i16" | "i32" | "i64" | "i128" => serde_json::json!(0),
+        "()" => serde_json::Value::Null,
+        _ => serde_json::Value::String("0x".to_string()),
+    }
+}
+
+fn default_builder_package_name(metadata: &CompileMetadata) -> String {
+    let module = metadata.module.replace("::", "-").replace('_', "-");
+    let trimmed = module.trim_matches('-');
+    if trimmed.is_empty() {
+        "@cellscript/generated-builder".to_string()
+    } else {
+        format!("@cellscript/{}-builder", trimmed.to_ascii_lowercase())
+    }
+}
+
+fn typescript_action_params_type(action: &crate::ActionMetadata) -> String {
+    format!("{}Params", typescript_type_suffix(&action.name))
+}
+
+fn typescript_type_suffix(name: &str) -> String {
+    let mut output = String::new();
+    let mut uppercase_next = true;
+    for ch in name.chars() {
+        if ch.is_ascii_alphanumeric() {
+            if uppercase_next {
+                output.push(ch.to_ascii_uppercase());
+                uppercase_next = false;
+            } else {
+                output.push(ch);
+            }
+        } else {
+            uppercase_next = true;
+        }
+    }
+    if output.is_empty() || output.chars().next().is_some_and(|ch| ch.is_ascii_digit()) {
+        output.insert_str(0, "Action");
+    }
+    output
+}
+
+fn typescript_identifier(name: &str, fallback: &str) -> String {
+    let mut ident = String::new();
+    for (index, ch) in name.chars().enumerate() {
+        if ch == '_' || ch == '$' || ch.is_ascii_alphabetic() || (index > 0 && ch.is_ascii_digit()) {
+            ident.push(ch);
+        } else if ch.is_ascii_digit() && index == 0 {
+            ident.push('_');
+            ident.push(ch);
+        } else {
+            ident.push('_');
+        }
+    }
+    if ident.is_empty() || TYPESCRIPT_RESERVED_WORDS.contains(&ident.as_str()) {
+        format!("{}_{}", fallback, &crate::hex_encode(&crate::ckb_blake2b256(name.as_bytes()))[..8].to_ascii_lowercase())
+    } else {
+        ident
+    }
+}
+
+fn typescript_object_key(name: &str) -> String {
+    let ident = typescript_identifier(name, "param");
+    if ident == name {
+        ident
+    } else {
+        typescript_string_literal(name)
+    }
+}
+
+fn typescript_param_type(param: &ParamMetadata) -> &'static str {
+    if param.schema_pointer_abi
+        || param.schema_length_abi
+        || param.fixed_byte_len.is_some()
+        || param.ty == "Address"
+        || param.ty == "Hash"
+    {
+        return "HexString | Uint8Array";
+    }
+
+    match param.ty.as_str() {
+        "bool" => "boolean",
+        "u8" | "u16" | "u32" | "u64" | "u128" | "i8" | "i16" | "i32" | "i64" | "i128" => "bigint | number | string",
+        "()" => "null | undefined",
+        _ => "CellScriptValue",
+    }
+}
+
+fn typescript_string_literal(value: &str) -> String {
+    serde_json::to_string(value).unwrap_or_else(|_| "\"\"".to_string())
+}
+
+fn json_bytes_pretty<T: serde::Serialize>(label: &str, value: &T) -> Result<Vec<u8>> {
+    serde_json::to_vec_pretty(value)
+        .map_err(|error| crate::error::CompileError::without_span(format!("failed to serialize {label}: {error}")))
+}
+
+fn json_string_pretty<T: serde::Serialize>(label: &str, value: &T) -> Result<String> {
+    serde_json::to_string_pretty(value)
+        .map_err(|error| crate::error::CompileError::without_span(format!("failed to serialize {label}: {error}")))
+}
+
+const TYPESCRIPT_RESERVED_WORDS: &[&str] = &[
+    "break",
+    "case",
+    "catch",
+    "class",
+    "const",
+    "continue",
+    "debugger",
+    "default",
+    "delete",
+    "do",
+    "else",
+    "enum",
+    "export",
+    "extends",
+    "false",
+    "finally",
+    "for",
+    "function",
+    "if",
+    "import",
+    "in",
+    "instanceof",
+    "new",
+    "null",
+    "return",
+    "super",
+    "switch",
+    "this",
+    "throw",
+    "true",
+    "try",
+    "typeof",
+    "var",
+    "void",
+    "while",
+    "with",
+    "as",
+    "implements",
+    "interface",
+    "let",
+    "package",
+    "private",
+    "protected",
+    "public",
+    "static",
+    "yield",
+];
+
+fn ckb_fixture_manifest_report(manifest: &serde_json::Value, base_dir: &Path, manifest_bytes: &[u8]) -> serde_json::Value {
+    let mut issues = Vec::<String>::new();
+    let mut rows = Vec::<serde_json::Value>::new();
+    let manifest_hash = crate::hex_encode(&crate::ckb_blake2b256(manifest_bytes));
+
+    match manifest["schema"].as_str() {
+        Some(CKB_STANDARD_COMPAT_MANIFEST_SCHEMA) => {}
+        Some(ICKB_CLAIM_MANIFEST_SCHEMA) => return ickb_claim_manifest_report(manifest, base_dir, manifest_bytes),
+        got => {
+            issues.push(format!(
+                "manifest schema must be {CKB_STANDARD_COMPAT_MANIFEST_SCHEMA} or {ICKB_CLAIM_MANIFEST_SCHEMA}, got {}",
+                got.unwrap_or("<missing>")
+            ));
+            return ckb_fixture_report_json(manifest, manifest_hash, 0, rows, issues);
+        }
+    }
+
+    let Some(suites) = manifest["suites"].as_array() else {
+        issues.push("manifest suites must be an array".to_string());
+        return ckb_fixture_report_json(manifest, manifest_hash, 0, rows, issues);
+    };
+
+    for suite in suites {
+        validate_ckb_fixture_suite(suite, base_dir, &mut rows, &mut issues);
+    }
+
+    ckb_fixture_report_json(manifest, manifest_hash, suites.len(), rows, issues)
+}
+
+fn ickb_claim_manifest_report(manifest: &serde_json::Value, base_dir: &Path, manifest_bytes: &[u8]) -> serde_json::Value {
+    let mut issues = Vec::<String>::new();
+    let mut rows = Vec::<serde_json::Value>::new();
+    let manifest_hash = crate::hex_encode(&crate::ckb_blake2b256(manifest_bytes));
+
+    if manifest["schema"].as_str() != Some(ICKB_CLAIM_MANIFEST_SCHEMA) {
+        issues.push(format!(
+            "iCKB claim manifest schema must be {ICKB_CLAIM_MANIFEST_SCHEMA}, got {}",
+            manifest["schema"].as_str().unwrap_or("<missing>")
+        ));
+    }
+
+    let matrix_path = match manifest["matrix_path"].as_str() {
+        Some(path) if !path.is_empty() => base_dir.join(path),
+        _ => {
+            issues.push("iCKB claim manifest matrix_path must be a non-empty string".to_string());
+            return ckb_fixture_report_json(manifest, manifest_hash, 0, rows, issues);
+        }
+    };
+
+    let matrix_bytes = match std::fs::read(&matrix_path) {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            issues.push(format!("failed to read iCKB matrix {}: {err}", matrix_path.display()));
+            return ckb_fixture_report_json(manifest, manifest_hash, 0, rows, issues);
+        }
+    };
+    let matrix: serde_json::Value = match serde_json::from_slice(&matrix_bytes) {
+        Ok(matrix) => matrix,
+        Err(err) => {
+            issues.push(format!("failed to parse iCKB matrix {}: {err}", matrix_path.display()));
+            return ckb_fixture_report_json(manifest, manifest_hash, 0, rows, issues);
+        }
+    };
+
+    validate_ickb_claim_matrix(&matrix, &mut issues);
+
+    let mut matrix_rows = BTreeMap::<String, &serde_json::Value>::new();
+    if let Some(active_rows) = matrix["rows"].as_array() {
+        for row in active_rows {
+            if let Some(scenario) = row["scenario"].as_str() {
+                if matrix_rows.insert(scenario.to_string(), row).is_some() {
+                    issues.push(format!("iCKB matrix contains duplicate scenario {scenario}"));
+                }
+            } else {
+                issues.push("iCKB matrix row missing scenario".to_string());
+            }
+        }
+    } else {
+        issues.push("iCKB matrix rows must be an array".to_string());
+    }
+
+    let default_production = manifest.get("default_production_evidence");
+    let default_hardening = manifest.get("default_hardening");
+    let Some(families) = manifest["families"].as_array() else {
+        issues.push("iCKB claim manifest families must be an array".to_string());
+        return ckb_fixture_report_json(manifest, manifest_hash, 0, rows, issues);
+    };
+
+    for family in families {
+        validate_ickb_claim_family(family, &matrix_rows, default_production, default_hardening, &mut rows, &mut issues);
+    }
+
+    ckb_fixture_report_json(manifest, manifest_hash, families.len(), rows, issues)
+}
+
+fn ckb_fixture_report_json(
+    manifest: &serde_json::Value,
+    manifest_hash: String,
+    suite_count: usize,
+    rows: Vec<serde_json::Value>,
+    issues: Vec<String>,
+) -> serde_json::Value {
+    let is_ickb_claim = manifest["schema"].as_str() == Some(ICKB_CLAIM_MANIFEST_SCHEMA);
+    let evidence_execution_level = if is_ickb_claim { serde_json::json!(ICKB_DIFF_EVIDENCE_LEVEL) } else { serde_json::Value::Null };
+    let required_executable_gate =
+        if is_ickb_claim { serde_json::json!("cargo test --locked -p cellscript --test ickb_diff") } else { serde_json::Value::Null };
+    serde_json::json!({
+        "schema": "cellscript-ckb-fixture-verification-v0.17",
+        "manifest_schema": manifest["schema"].as_str().unwrap_or("unknown"),
+        "manifest_status": manifest["status"].as_str().unwrap_or("unknown"),
+        "manifest_hash": manifest_hash,
+        "execution_level": if is_ickb_claim { "DIFFERENTIAL_CKB_VM_MANIFEST" } else { "MODEL" },
+        "ckb_vm_execution": false,
+        "committed_ckb_vm_evidence": is_ickb_claim,
+        "evidence_execution_level": evidence_execution_level,
+        "required_executable_gate": required_executable_gate,
+        "suite_count": suite_count,
+        "fixture_count": rows.len(),
+        "status": if issues.is_empty() { "ok" } else { "failed" },
+        "issue_count": issues.len(),
+        "issues": issues,
+        "fixtures": rows,
+        "vm_execution_note": if is_ickb_claim {
+            "This command does not execute CKB VM. It validates the iCKB claim manifest against committed dual-side CKB VM differential rows, production evidence envelopes, and the required executable Rust gate."
+        } else {
+            "This command validates transaction-shape model fixtures only; it does not execute CKB VM or prove production compatibility."
+        },
+    })
+}
+
+fn validate_ickb_claim_matrix(matrix: &serde_json::Value, issues: &mut Vec<String>) {
+    if matrix["schema"].as_str() != Some(ICKB_DIFF_MATRIX_SCHEMA) {
+        issues.push(format!(
+            "iCKB matrix schema must be {ICKB_DIFF_MATRIX_SCHEMA}, got {}",
+            matrix["schema"].as_str().unwrap_or("<missing>")
+        ));
+    }
+    if matrix["mode"].as_str() != Some("EXECUTED_CKB_VM_DIFF") {
+        issues.push("iCKB matrix mode must be EXECUTED_CKB_VM_DIFF".to_string());
+    }
+    if matrix["equivalence_status"].as_str() != Some("PROVEN") {
+        issues.push("iCKB matrix equivalence_status must be PROVEN".to_string());
+    }
+    if matrix["production_equivalence_claim"].as_bool() != Some(true) {
+        issues.push("iCKB matrix production_equivalence_claim must be true".to_string());
+    }
+    if matrix["remaining_model_blockers"].as_array().is_none_or(|blockers| !blockers.is_empty()) {
+        issues.push("iCKB matrix remaining_model_blockers must be empty".to_string());
+    }
+    if matrix["non_executable_model_assumptions"].as_array().is_none_or(|assumptions| !assumptions.is_empty()) {
+        issues.push("iCKB matrix non_executable_model_assumptions must be empty".to_string());
+    }
+}
+
+fn validate_ickb_claim_family(
+    family: &serde_json::Value,
+    matrix_rows: &BTreeMap<String, &serde_json::Value>,
+    default_production: Option<&serde_json::Value>,
+    default_hardening: Option<&serde_json::Value>,
+    rows: &mut Vec<serde_json::Value>,
+    issues: &mut Vec<String>,
+) {
+    let family_id = family["id"].as_str().unwrap_or("<missing-family>");
+    if family["id"].as_str().is_none_or(str::is_empty) {
+        issues.push("iCKB claim family id must be a non-empty string".to_string());
+    }
+    let Some(branches) = family["branches"].as_array() else {
+        issues.push(format!("iCKB claim family {family_id} branches must be an array"));
+        return;
+    };
+
+    for branch in branches {
+        validate_ickb_claim_branch(family_id, branch, matrix_rows, default_production, default_hardening, rows, issues);
+    }
+}
+
+fn validate_ickb_claim_branch(
+    family_id: &str,
+    branch: &serde_json::Value,
+    matrix_rows: &BTreeMap<String, &serde_json::Value>,
+    default_production: Option<&serde_json::Value>,
+    default_hardening: Option<&serde_json::Value>,
+    rows: &mut Vec<serde_json::Value>,
+    issues: &mut Vec<String>,
+) {
+    let branch_id = branch["id"].as_str().unwrap_or("<missing-branch>");
+    if branch["id"].as_str().is_none_or(str::is_empty) {
+        issues.push(format!("iCKB claim family {family_id} has branch with missing id"));
+    }
+    let status = branch["status"].as_str().unwrap_or("<missing-status>");
+    let mut matched = ickb_claim_branch_scenarios(branch, matrix_rows);
+
+    match status {
+        "in_scope" | "fixture_scoped" => {
+            validate_ickb_required_scenarios(family_id, branch_id, branch, matrix_rows, &mut matched, issues);
+            if matched.is_empty() {
+                issues.push(format!("iCKB claim branch {family_id}/{branch_id} has no matching matrix rows"));
+            }
+            for scenario in &matched {
+                if let Some(row) = matrix_rows.get(scenario) {
+                    validate_ickb_claim_row(family_id, branch_id, scenario, row, issues);
+                }
+            }
+
+            let production = branch.get("production_evidence").or(default_production);
+            validate_ickb_evidence_object(
+                "production_evidence",
+                &ICKB_REQUIRED_PRODUCTION_EVIDENCE,
+                production,
+                family_id,
+                branch_id,
+                issues,
+            );
+            let hardening = branch.get("hardening").or(default_hardening);
+            validate_ickb_evidence_object("hardening", &ICKB_REQUIRED_HARDENING_EVIDENCE, hardening, family_id, branch_id, issues);
+            validate_ickb_claim_thresholds(family_id, branch_id, hardening, &matched, matrix_rows, issues);
+            if status == "fixture_scoped" && branch["limitation"].as_str().is_none_or(str::is_empty) {
+                issues.push(format!("iCKB fixture-scoped branch {family_id}/{branch_id} must declare limitation"));
+            }
+        }
+        "retired" => {
+            if branch["reason"].as_str().is_none_or(str::is_empty) {
+                issues.push(format!("iCKB retired branch {family_id}/{branch_id} must declare reason"));
+            }
+            let replacements = json_string_array(branch, "replacement_scenarios");
+            if replacements.is_empty() {
+                issues.push(format!("iCKB retired branch {family_id}/{branch_id} must declare replacement_scenarios"));
+            }
+            for scenario in replacements {
+                if !matrix_rows.contains_key(&scenario) {
+                    issues.push(format!("iCKB retired branch {family_id}/{branch_id} replacement scenario is missing: {scenario}"));
+                }
+            }
+        }
+        "out_of_scope" => {
+            if branch["reason"].as_str().is_none_or(str::is_empty) {
+                issues.push(format!("iCKB out-of-scope branch {family_id}/{branch_id} must declare reason"));
+            }
+            if branch["source_evidence"].as_str().is_none_or(str::is_empty) {
+                issues.push(format!("iCKB out-of-scope branch {family_id}/{branch_id} must declare source_evidence"));
+            }
+        }
+        other => issues.push(format!("iCKB claim branch {family_id}/{branch_id} has unsupported status {other}")),
+    }
+
+    rows.push(serde_json::json!({
+        "family": family_id,
+        "branch": branch_id,
+        "status": status,
+        "matched_rows": matched.len(),
+        "reject_rows": matched.iter().filter(|scenario| {
+            matrix_rows
+                .get(*scenario)
+                .is_some_and(|row| row["original_ickb_expected"].as_str() == Some("fail") || row["cellscript_expected"].as_str() == Some("fail"))
+        }).count(),
+        "evidence_level": if matched.is_empty() { "DECLARATIVE" } else { ICKB_DIFF_EVIDENCE_LEVEL },
+    }));
+}
+
+fn ickb_claim_branch_scenarios(branch: &serde_json::Value, matrix_rows: &BTreeMap<String, &serde_json::Value>) -> BTreeSet<String> {
+    let mut matched = BTreeSet::new();
+    let excludes = json_string_array(branch, "exclude_scenario_prefixes");
+    for scenario in json_string_array(branch, "evidence_scenarios") {
+        matched.insert(scenario);
+    }
+    for prefix in json_string_array(branch, "evidence_scenario_prefixes") {
+        for scenario in matrix_rows.keys() {
+            if scenario.starts_with(&prefix) && !excludes.iter().any(|exclude| scenario.starts_with(exclude)) {
+                matched.insert(scenario.clone());
+            }
+        }
+    }
+    matched
+}
+
+fn validate_ickb_required_scenarios(
+    family_id: &str,
+    branch_id: &str,
+    branch: &serde_json::Value,
+    matrix_rows: &BTreeMap<String, &serde_json::Value>,
+    matched: &mut BTreeSet<String>,
+    issues: &mut Vec<String>,
+) {
+    for scenario in json_string_array(branch, "required_scenarios") {
+        if matrix_rows.contains_key(&scenario) {
+            matched.insert(scenario);
+        } else {
+            issues.push(format!("iCKB claim branch {family_id}/{branch_id} required scenario is missing: {scenario}"));
+        }
+    }
+}
+
+fn validate_ickb_claim_row(family_id: &str, branch_id: &str, scenario: &str, row: &serde_json::Value, issues: &mut Vec<String>) {
+    if row["evidence_level"].as_str() != Some(ICKB_DIFF_EVIDENCE_LEVEL) {
+        issues.push(format!(
+            "iCKB claim branch {family_id}/{branch_id} scenario {scenario} must have evidence_level={ICKB_DIFF_EVIDENCE_LEVEL}"
+        ));
+    }
+    if row["ckb_vm_execution"].as_bool() != Some(true)
+        || row["original_ickb_executed"].as_bool() != Some(true)
+        || row["full_differential"].as_bool() != Some(true)
+    {
+        issues.push(format!("iCKB claim branch {family_id}/{branch_id} scenario {scenario} is not a full dual-side VM row"));
+    }
+    let original = row["original_ickb_expected"].as_str();
+    let cellscript = row["cellscript_expected"].as_str();
+    if original != cellscript {
+        issues.push(format!(
+            "iCKB claim branch {family_id}/{branch_id} scenario {scenario} expectation mismatch original={original:?} cellscript={cellscript:?}"
+        ));
+    }
+    if (original == Some("fail") || cellscript == Some("fail"))
+        && row["failure_mode"].as_str().is_none_or(str::is_empty)
+        && row["execution"]["failure_mode"].as_str().is_none_or(str::is_empty)
+    {
+        issues.push(format!("iCKB claim branch {family_id}/{branch_id} reject scenario {scenario} lacks named failure mode"));
+    }
+    for field in ["tx_size_bytes", "occupied_capacity_shannons", "fee_shannons"] {
+        if !row["execution"].get(field).is_some_and(ckb_fixture_non_empty_json_value) {
+            issues.push(format!("iCKB claim branch {family_id}/{branch_id} scenario {scenario} execution missing {field}"));
+        }
+    }
+    if !row["execution"]["normalized_fixture"].is_object() {
+        issues.push(format!("iCKB claim branch {family_id}/{branch_id} scenario {scenario} missing normalized_fixture"));
+    }
+    validate_ickb_claim_execution_object(family_id, branch_id, scenario, row, issues);
+}
+
+fn validate_ickb_claim_execution_object(
+    family_id: &str,
+    branch_id: &str,
+    scenario: &str,
+    row: &serde_json::Value,
+    issues: &mut Vec<String>,
+) {
+    let Some(execution) = row["execution"].as_object() else {
+        issues.push(format!("iCKB claim branch {family_id}/{branch_id} scenario {scenario} missing execution object"));
+        return;
+    };
+    for field in [
+        "fixture_sha256",
+        "normalized_fixture_sha256",
+        "transaction_context_sha256",
+        "original_ickb_binary_sha256",
+        "cellscript_artifact_sha256",
+        "ckb_vm_or_testtool_version",
+        "original_ickb_exit_code",
+        "cellscript_exit_code",
+        "original_ickb_status",
+        "cellscript_status",
+        "statuses_match",
+        "original_cycles",
+        "cellscript_cycles",
+        "tx_size_bytes",
+        "occupied_capacity_shannons",
+        "fee_shannons",
+    ] {
+        if !execution.get(field).is_some_and(ckb_fixture_non_empty_json_value) {
+            issues.push(format!("iCKB claim branch {family_id}/{branch_id} scenario {scenario} execution missing non-empty {field}"));
+        }
+    }
+
+    for field in ["fixture_sha256", "normalized_fixture_sha256", "original_ickb_binary_sha256", "cellscript_artifact_sha256"] {
+        match execution.get(field).and_then(serde_json::Value::as_str) {
+            Some(hash) if ckb_fixture_is_canonical_prefixed_sha256(hash) => {}
+            _ => issues.push(format!(
+                "iCKB claim branch {family_id}/{branch_id} scenario {scenario} execution.{field} must be canonical 0x-prefixed SHA-256"
+            )),
+        }
+    }
+
+    match execution.get("transaction_context_sha256").and_then(serde_json::Value::as_object) {
+        Some(hashes) => {
+            for side in ["original", "cellscript"] {
+                match hashes.get(side).and_then(serde_json::Value::as_str) {
+                    Some(hash) if ckb_fixture_is_canonical_prefixed_sha256(hash) => {}
+                    _ => issues.push(format!(
+                        "iCKB claim branch {family_id}/{branch_id} scenario {scenario} transaction_context_sha256.{side} must be canonical 0x-prefixed SHA-256"
+                    )),
+                }
+            }
+        }
+        None => issues.push(format!(
+            "iCKB claim branch {family_id}/{branch_id} scenario {scenario} execution.transaction_context_sha256 must be an object"
+        )),
+    }
+
+    if execution.get("statuses_match").and_then(serde_json::Value::as_bool) != Some(true) {
+        issues.push(format!("iCKB claim branch {family_id}/{branch_id} scenario {scenario} execution.statuses_match must be true"));
+    }
+
+    for (side, expected_field, status_field, exit_field, cycle_field) in [
+        ("original", "original_ickb_expected", "original_ickb_status", "original_ickb_exit_code", "original_cycles"),
+        ("cellscript", "cellscript_expected", "cellscript_status", "cellscript_exit_code", "cellscript_cycles"),
+    ] {
+        let expected = row[expected_field].as_str();
+        let status = execution.get(status_field).and_then(serde_json::Value::as_str);
+        if expected.is_some() && status != expected {
+            issues.push(format!(
+                "iCKB claim branch {family_id}/{branch_id} scenario {scenario} {side} status {status:?} does not match {expected_field}={expected:?}"
+            ));
+        }
+        if status == Some("pass") {
+            if execution.get(exit_field).and_then(serde_json::Value::as_i64) != Some(0) {
+                issues
+                    .push(format!("iCKB claim branch {family_id}/{branch_id} scenario {scenario} {side} pass must have exit code 0"));
+            }
+            if execution.get(cycle_field).and_then(serde_json::Value::as_u64).unwrap_or(0) == 0 {
+                issues.push(format!("iCKB claim branch {family_id}/{branch_id} scenario {scenario} {side} pass must consume cycles"));
+            }
+        }
+        if status == Some("fail") && execution.get(exit_field).and_then(serde_json::Value::as_i64) == Some(0) {
+            issues.push(format!(
+                "iCKB claim branch {family_id}/{branch_id} scenario {scenario} {side} fail must have a non-zero exit code"
+            ));
+        }
+    }
+
+    for field in ["tx_size_bytes", "occupied_capacity_shannons"] {
+        if execution.get(field).and_then(serde_json::Value::as_u64).unwrap_or(0) == 0 {
+            issues.push(format!("iCKB claim branch {family_id}/{branch_id} scenario {scenario} execution.{field} must be positive"));
+        }
+    }
+
+    if row["original_ickb_expected"] == "fail" || row["cellscript_expected"] == "fail" {
+        match execution.get("failure_mode").and_then(serde_json::Value::as_str) {
+            Some(mode) if !mode.is_empty() => {}
+            _ => issues.push(format!(
+                "iCKB claim branch {family_id}/{branch_id} scenario {scenario} reject case missing execution.failure_mode"
+            )),
+        }
+    }
+}
+
+fn validate_ickb_evidence_object(
+    label: &str,
+    required: &[&str],
+    object: Option<&serde_json::Value>,
+    family_id: &str,
+    branch_id: &str,
+    issues: &mut Vec<String>,
+) {
+    let Some(object) = object.and_then(serde_json::Value::as_object) else {
+        issues.push(format!("iCKB claim branch {family_id}/{branch_id} missing {label} object"));
+        return;
+    };
+    for field in required {
+        if !object.get(*field).is_some_and(ckb_fixture_non_empty_json_value) {
+            issues.push(format!("iCKB claim branch {family_id}/{branch_id} {label} missing non-empty {field}"));
+        }
+    }
+}
+
+fn validate_ickb_claim_thresholds(
+    family_id: &str,
+    branch_id: &str,
+    hardening: Option<&serde_json::Value>,
+    scenarios: &BTreeSet<String>,
+    matrix_rows: &BTreeMap<String, &serde_json::Value>,
+    issues: &mut Vec<String>,
+) {
+    let max_cycles = hardening.and_then(|value| value["max_cellscript_cycles"].as_u64());
+    let max_tx_size = hardening.and_then(|value| value["max_tx_size_bytes"].as_u64());
+    for scenario in scenarios {
+        let Some(row) = matrix_rows.get(scenario) else {
+            continue;
+        };
+        if let (Some(max), Some(actual)) = (max_cycles, row["execution"]["cellscript_cycles"].as_u64()) {
+            if actual > max {
+                issues.push(format!(
+                    "iCKB claim branch {family_id}/{branch_id} scenario {scenario} cellscript_cycles {actual} exceeds {max}"
+                ));
+            }
+        }
+        if let (Some(max), Some(actual)) = (max_tx_size, row["execution"]["tx_size_bytes"].as_u64()) {
+            if actual > max {
+                issues.push(format!(
+                    "iCKB claim branch {family_id}/{branch_id} scenario {scenario} tx_size_bytes {actual} exceeds {max}"
+                ));
+            }
+        }
+    }
+}
+
+fn json_string_array(value: &serde_json::Value, key: &str) -> Vec<String> {
+    value[key].as_array().into_iter().flatten().filter_map(serde_json::Value::as_str).map(ToString::to_string).collect()
+}
+
+fn ckb_fixture_non_empty_json_value(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Null => false,
+        serde_json::Value::String(value) => !value.is_empty(),
+        serde_json::Value::Array(values) => !values.is_empty(),
+        serde_json::Value::Object(values) => !values.is_empty(),
+        serde_json::Value::Bool(_) | serde_json::Value::Number(_) => true,
+    }
+}
+
+fn ckb_fixture_is_canonical_prefixed_sha256(value: &str) -> bool {
+    value
+        .strip_prefix("0x")
+        .is_some_and(|hex| hex.len() == 64 && hex.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()))
+}
+
+fn validate_ckb_fixture_suite(
+    suite: &serde_json::Value,
+    base_dir: &Path,
+    rows: &mut Vec<serde_json::Value>,
+    issues: &mut Vec<String>,
+) {
+    let suite_name = suite["name"].as_str().unwrap_or("<unknown>");
+    let accepted = ckb_fixture_names(suite, "accepted_fixtures", issues, suite_name);
+    let rejected = ckb_fixture_names(suite, "rejected_fixtures", issues, suite_name);
+    let Some(files) = suite["fixture_files"].as_object() else {
+        issues.push(format!("suite {suite_name} missing fixture_files object"));
+        return;
+    };
+    for fixture_name in accepted.iter().chain(rejected.iter()) {
+        let Some(file) = files.get(*fixture_name).and_then(serde_json::Value::as_str) else {
+            issues.push(format!("suite {suite_name} missing fixture file mapping for {fixture_name}"));
+            continue;
+        };
+        let path = base_dir.join(file);
+        let fixture = match std::fs::read_to_string(&path) {
+            Ok(content) => match serde_json::from_str::<serde_json::Value>(&content) {
+                Ok(value) => value,
+                Err(error) => {
+                    issues.push(format!("fixture {file} failed to parse: {error}"));
+                    continue;
+                }
+            },
+            Err(error) => {
+                issues.push(format!("fixture {file} failed to read: {error}"));
+                continue;
+            }
+        };
+        match validate_ckb_fixture_model(&fixture, suite_name, fixture_name, accepted.contains(fixture_name), file) {
+            Ok(row) => rows.push(row),
+            Err(error) => issues.push(error),
+        }
+    }
+}
+
+fn validate_ckb_fixture_model(
+    fixture: &serde_json::Value,
+    suite_name: &str,
+    fixture_name: &str,
+    should_accept: bool,
+    file: &str,
+) -> std::result::Result<serde_json::Value, String> {
+    if fixture["schema"].as_str() != Some(CKB_STANDARD_FIXTURE_SCHEMA) {
+        return Err(format!("fixture {file} schema must be {CKB_STANDARD_FIXTURE_SCHEMA}"));
+    }
+    if fixture["suite"].as_str() != Some(suite_name) {
+        return Err(format!("fixture {file} suite does not match manifest suite {suite_name}"));
+    }
+    if fixture["fixture_name"].as_str() != Some(fixture_name) {
+        return Err(format!("fixture {file} fixture_name does not match manifest key {fixture_name}"));
+    }
+
+    let shape = &fixture["transaction_shape"];
+    ckb_fixture_require_array(shape, "inputs")?;
+    ckb_fixture_require_array(shape, "outputs")?;
+    ckb_fixture_require_array(shape, "cell_deps")?;
+    ckb_fixture_validate_metadata_expectation(fixture)?;
+    ckb_fixture_validate_capacity_report(fixture)?;
+
+    let expected = fixture["expected_behavior"].as_object().ok_or_else(|| format!("fixture {file} missing expected_behavior"))?;
+    let expected_exit = expected
+        .get("script_exit_code")
+        .and_then(serde_json::Value::as_i64)
+        .ok_or_else(|| format!("fixture {file} missing expected_behavior.script_exit_code"))?;
+    let expected_reason = expected.get("rejection_reason").and_then(serde_json::Value::as_str);
+
+    if should_accept && fixture["status"].as_str() != Some("accepted") {
+        return Err(format!("fixture {file} is listed accepted but status is not accepted"));
+    }
+    if !should_accept && fixture["status"].as_str() != Some("rejected") {
+        return Err(format!("fixture {file} is listed rejected but status is not rejected"));
+    }
+    if should_accept && expected_exit != 0 {
+        return Err(format!("fixture {file} accepted case has non-zero expected exit code"));
+    }
+    if !should_accept && expected_exit == 0 {
+        return Err(format!("fixture {file} rejected case has zero expected exit code"));
+    }
+    if !should_accept && expected_reason.is_none() {
+        return Err(format!("fixture {file} rejected case lacks expected_behavior.rejection_reason"));
+    }
+
+    let verdict = ckb_fixture_evaluate_semantics(fixture)?;
+    if verdict.0 != expected_exit {
+        return Err(format!("fixture {file} model exit {} disagrees with expected exit {expected_exit}", verdict.0));
+    }
+    if expected_exit != 0 && verdict.1.as_deref() != expected_reason {
+        return Err(format!("fixture {file} model rejection {:?} disagrees with expected {:?}", verdict.1, expected_reason));
+    }
+
+    Ok(serde_json::json!({
+        "suite": suite_name,
+        "fixture_name": fixture_name,
+        "file": file,
+        "expected_status": fixture["status"].as_str().unwrap_or("unknown"),
+        "execution_level": "MODEL",
+        "ckb_vm_execution": false,
+        "model_exit_code": verdict.0,
+        "expected_exit_code": expected_exit,
+        "rejection_reason": verdict.1.or_else(|| expected_reason.map(str::to_string)),
+        "status": if verdict.0 == 0 { "accepted" } else { "rejected" },
+    }))
+}
+
+fn ckb_fixture_validate_metadata_expectation(fixture: &serde_json::Value) -> std::result::Result<(), String> {
+    let metadata = fixture["metadata_expectation"].as_object().ok_or("fixture missing metadata_expectation")?;
+    let proof_plan =
+        metadata.get("proof_plan").and_then(serde_json::Value::as_object).ok_or("fixture missing proof_plan expectation")?;
+    for key in ["trigger", "scope", "reads", "coverage", "on_chain_checked"] {
+        if !proof_plan.contains_key(key) {
+            return Err(format!("fixture proof_plan expectation missing {key}"));
+        }
+    }
+    if !metadata.contains_key("codegen_coverage_status") {
+        return Err("fixture metadata expectation missing codegen_coverage_status".to_string());
+    }
+    if fixture.get("cycle_report").is_none() {
+        return Err("fixture missing cycle_report".to_string());
+    }
+    if fixture.get("capacity_report").is_none() {
+        return Err("fixture missing capacity_report".to_string());
     }
     Ok(())
 }
 
-fn strict_v0_16_soundness_report_for_mode(
-    metadata: &CompileMetadata,
-    primitive_compat: Option<&str>,
-) -> Option<ProofPlanSoundnessReport> {
-    if primitive_compat != Some(STRICT_V0_16_PRIMITIVE_COMPAT) {
-        return None;
-    }
-    let soundness = crate::proof_plan::soundness::check_metadata(metadata, true);
-    (soundness.status != "passed").then_some(soundness)
-}
-
-fn strict_v0_16_soundness_error_message(report: &ProofPlanSoundnessReport) -> String {
-    let messages = report
-        .issues
-        .iter()
-        .filter(|issue| issue.severity == "error")
-        .map(|issue| format!("{} {}:{} - {}", issue.code, issue.origin, issue.feature, issue.message))
-        .collect::<Vec<_>>();
-    if messages.is_empty() {
-        "metadata fails strict v0.16 ProofPlan soundness".to_string()
-    } else {
-        format!("metadata fails strict v0.16 ProofPlan soundness:\n  - {}", messages.join("\n  - "))
-    }
-}
-
-fn pathbuf_to_utf8<'a>(path: &'a PathBuf, label: &str) -> Result<&'a Utf8Path> {
-    Utf8Path::from_path(path)
-        .ok_or_else(|| crate::error::CompileError::without_span(format!("{label} path '{}' is not valid UTF-8", path.display())))
-}
-
-fn default_resource_identity_artifact_path(output: Option<&PathBuf>, input: Option<&PathBuf>) -> Result<PathBuf> {
-    if let Some(output) = output {
-        return Ok(output.clone());
-    }
-    let Some(input) = input else {
-        return Ok(PathBuf::from("cellscript-resource-identity.elf"));
-    };
-    let stem = input.file_stem().and_then(|stem| stem.to_str()).unwrap_or("cellscript-resource-identity");
-    let parent = input.parent().unwrap_or_else(|| Path::new("."));
-    Ok(parent.join(format!("{stem}.resource-identity.elf")))
-}
-
-fn default_resource_identity_plan_path(plan_output: Option<&PathBuf>, artifact_output: &Path) -> PathBuf {
-    if let Some(plan_output) = plan_output {
-        return plan_output.clone();
-    }
-    let stem = artifact_output.file_stem().and_then(|stem| stem.to_str()).unwrap_or("cellscript-resource-identity");
-    artifact_output.parent().unwrap_or_else(|| Path::new(".")).join(format!("{stem}.resource-identities.json"))
-}
-
-fn selected_passive_resource_identities(
-    metadata: &CompileMetadata,
-    requested_types: &[String],
-) -> Result<Vec<CkbResourceIdentityMetadata>> {
-    let Some(ckb) = metadata.constraints.ckb.as_ref() else {
-        return Err(crate::error::CompileError::without_span(
-            "resource-identity requires CKB metadata; compile with --target-profile ckb",
-        ));
-    };
-    let requested = requested_types.iter().cloned().collect::<BTreeSet<_>>();
-    let known = ckb.resource_identities.iter().map(|identity| identity.type_name.clone()).collect::<BTreeSet<_>>();
-    let missing = requested.difference(&known).cloned().collect::<Vec<_>>();
-    if !missing.is_empty() {
-        return Err(crate::error::CompileError::without_span(format!(
-            "resource-identity requested unknown resource type(s): {}",
-            missing.join(", ")
-        )));
-    }
-
-    let identities = ckb
-        .resource_identities
-        .iter()
-        .filter(|identity| requested.is_empty() || requested.contains(&identity.type_name))
-        .filter(|identity| identity.status != "ckb-type-id-builder-managed")
-        .cloned()
-        .collect::<Vec<_>>();
-    if identities.is_empty() {
-        let type_id_hint = if ckb.resource_identities.iter().any(|identity| identity.status == "ckb-type-id-builder-managed") {
-            "; selected TYPE_ID resources are builder-managed by their declared TYPE_ID script"
-        } else {
-            ""
-        };
-        return Err(crate::error::CompileError::without_span(format!(
-            "no passive resource identities are available in this module{type_id_hint}"
-        )));
-    }
-    Ok(identities)
-}
-
-fn parse_resource_identity_inputs(values: &[String]) -> Result<ResourceIdentityInputMap> {
-    let mut inputs = ResourceIdentityInputMap::default();
-    for value in values {
-        let Some((selector, material)) = value.split_once('=') else {
-            return Err(crate::error::CompileError::without_span(format!(
-                "invalid --identity '{}'; expected TYPE=INSTANCE or TYPE:BINDING=INSTANCE",
-                value
-            )));
-        };
-        let selector = selector.trim();
-        if selector.is_empty() || material.is_empty() {
-            return Err(crate::error::CompileError::without_span(format!(
-                "invalid --identity '{}'; selector and INSTANCE must be non-empty",
-                value
-            )));
-        }
-        if let Some((type_name, binding)) = selector.split_once(':') {
-            let type_name = type_name.trim();
-            let binding = binding.trim();
-            if type_name.is_empty() || binding.is_empty() {
-                return Err(crate::error::CompileError::without_span(format!(
-                    "invalid --identity '{}'; TYPE and BINDING must be non-empty",
-                    value
-                )));
+fn ckb_fixture_evaluate_semantics(fixture: &serde_json::Value) -> std::result::Result<(i64, Option<String>), String> {
+    let shape = &fixture["transaction_shape"];
+    match fixture["suite"].as_str().ok_or("missing suite")? {
+        "sudt" => ckb_fixture_evaluate_amount_conservation(shape, "sudt-cell", "output_amount > input_amount; conservation violated"),
+        "xudt" => {
+            if ckb_fixture_any_cell_dep_name(shape, "lockup") || ckb_fixture_any_input_witness(shape, "lockup-active") {
+                return Ok(ckb_fixture_reject("extension_policy_violated: lockup period not expired"));
             }
-            if inputs.binding_material.insert((type_name.to_string(), binding.to_string()), material.to_string()).is_some() {
-                return Err(crate::error::CompileError::without_span(format!(
-                    "duplicate --identity material for resource binding '{}:{}'",
-                    type_name, binding
-                )));
+            ckb_fixture_evaluate_amount_conservation(shape, "xudt-cell", "output_amount > input_amount; conservation violated")
+        }
+        "acp" => {
+            let first_input = ckb_fixture_first_cell(shape, "inputs")?;
+            let first_output = ckb_fixture_first_cell(shape, "outputs")?;
+            if ckb_fixture_cell_str(first_input, "witness").contains("wrong")
+                || ckb_fixture_cell_str(first_input, "lock_script") != ckb_fixture_cell_str(first_output, "lock_script")
+            {
+                return Ok(ckb_fixture_reject("witness_lock_hash != args_owner_lock_hash"));
             }
-        } else if inputs.type_material.insert(selector.to_string(), material.to_string()).is_some() {
-            return Err(crate::error::CompileError::without_span(format!(
-                "duplicate --identity material for resource type '{}'",
-                selector
-            )));
+            Ok(ckb_fixture_pass())
         }
-    }
-    Ok(inputs)
-}
-
-fn resource_identity_plan_json(
-    metadata: &CompileMetadata,
-    identities: &[CkbResourceIdentityMetadata],
-    artifact_metadata: &CompileMetadata,
-    artifact_path: &Path,
-    metadata_path: &Utf8Path,
-    source_output: Option<&PathBuf>,
-    identity_inputs: &ResourceIdentityInputMap,
-    default_instance: Option<&str>,
-) -> Result<serde_json::Value> {
-    let Some(artifact_hash) = artifact_metadata.artifact_hash.as_deref() else {
-        return Err(crate::error::CompileError::without_span("resource identity artifact metadata is missing artifact_hash"));
-    };
-    let code_hash = format!("0x{artifact_hash}");
-    let mut entries = Vec::new();
-    for identity in identities {
-        let type_script = resource_identity_script_plan(metadata, identity, None, identity_inputs, default_instance, &code_hash)?;
-        let create_scripts = resource_identity_created_bindings(identity)
-            .into_iter()
-            .map(|(origin, binding)| {
-                let script_plan = resource_identity_script_plan(
-                    metadata,
-                    identity,
-                    Some(binding.as_str()),
-                    identity_inputs,
-                    default_instance,
-                    &code_hash,
-                )?;
-                Ok(serde_json::json!({
-                    "origin": origin,
-                    "binding": binding,
-                    "identity_hash": script_plan.identity_hash,
-                    "identity_material": script_plan.identity_material,
-                    "script": script_plan.script,
-                    "script_hash": script_plan.script_hash,
-                }))
-            })
-            .collect::<Result<Vec<_>>>()?;
-        entries.push(serde_json::json!({
-            "type_name": identity.type_name.as_str(),
-            "kind": identity.kind.as_str(),
-            "identity_policy": identity.identity_policy.as_str(),
-            "schema_hash": identity.schema_hash.as_deref(),
-            "status": "ready",
-            "passive_type_script_status": "compiler-generated-passive-script-args-identity",
-            "identity_hash": type_script.identity_hash,
-            "identity_material": type_script.identity_material,
-            "script": type_script.script,
-            "script_hash": type_script.script_hash,
-            "create_scripts": create_scripts,
-            "created_by": identity.created_by.clone(),
-            "mutated_by": identity.mutated_by.clone(),
-            "consumed_by": identity.consumed_by.clone(),
-            "builder_contract": "use this script exactly as the passive resource type identity; do not substitute scoped action artifacts",
-        }));
-    }
-
-    Ok(serde_json::json!({
-        "status": "ok",
-        "schema": RESOURCE_IDENTITY_PLAN_SCHEMA,
-        "module": metadata.module.as_str(),
-        "compiler_version": metadata.compiler_version.as_str(),
-        "metadata_schema_version": metadata.metadata_schema_version,
-        "target_profile": metadata.target_profile.name.as_str(),
-        "artifact": {
-            "path": artifact_path.display().to_string(),
-            "metadata": metadata_path.to_string(),
-            "source": source_output.map(|path| path.display().to_string()),
-            "entry_lock": RESOURCE_IDENTITY_LOCK_NAME,
-            "format": artifact_metadata.artifact_format.as_str(),
-            "hash": artifact_hash,
-            "code_hash": code_hash.as_str(),
-            "hash_type": RESOURCE_IDENTITY_HASH_TYPE,
-            "source_kind": "compiler-generated-passive-resource-identity",
-        },
-        "resource_identities": entries,
-        "builder_contract": {
-            "validate_tx_flag": "--resource-identities <plan.json>",
-            "witness": "none; this passive badge only decodes Script.args",
-            "script_args": "identity_hash: Hash (32 bytes)",
-            "binding_override": "--identity TYPE:BINDING=INSTANCE overrides one create binding; --identity TYPE=INSTANCE sets the type default",
-            "action_artifact_policy": "forbidden-as-passive-type-identity",
-        },
-    }))
-}
-
-fn resource_identity_script_plan(
-    metadata: &CompileMetadata,
-    identity: &CkbResourceIdentityMetadata,
-    binding: Option<&str>,
-    identity_inputs: &ResourceIdentityInputMap,
-    default_instance: Option<&str>,
-    code_hash: &str,
-) -> Result<ResourceIdentityScriptPlan> {
-    let (instance_bytes, instance_json) =
-        resource_identity_instance_material(&identity.type_name, binding, identity_inputs, default_instance)?;
-    let instance_hash = crate::hex_encode(&crate::ckb_blake2b256(&instance_bytes));
-    let identity_material = resource_identity_hash_material(metadata, identity, binding, &instance_hash);
-    let identity_hash = format!("0x{}", crate::hex_encode(&crate::ckb_blake2b256(identity_material.as_bytes())));
-    let script_hash = ckb_packed_script_hash_hex(code_hash, RESOURCE_IDENTITY_HASH_TYPE, &identity_hash)?;
-    Ok(ResourceIdentityScriptPlan {
-        identity_hash: identity_hash.clone(),
-        identity_material: serde_json::json!({
-            "schema": RESOURCE_IDENTITY_MATERIAL_SCHEMA,
-            "binding": binding,
-            "instance": instance_json,
-            "instance_hash": format!("0x{instance_hash}"),
-            "hash_algorithm": "ckb_blake2b_256",
-            "material": identity_material,
-        }),
-        script: serde_json::json!({
-            "code_hash": code_hash,
-            "hash_type": RESOURCE_IDENTITY_HASH_TYPE,
-            "args": identity_hash,
-        }),
-        script_hash,
-    })
-}
-
-fn resource_identity_created_bindings(identity: &CkbResourceIdentityMetadata) -> Vec<(String, String)> {
-    identity
-        .created_by
-        .iter()
-        .filter_map(|created_by| created_by.rsplit_once(':').map(|(origin, binding)| (origin.to_string(), binding.to_string())))
-        .collect()
-}
-
-fn resource_identity_instance_material(
-    type_name: &str,
-    binding: Option<&str>,
-    identity_inputs: &ResourceIdentityInputMap,
-    default_instance: Option<&str>,
-) -> Result<(Vec<u8>, serde_json::Value)> {
-    let binding_key = binding.map(|binding| (type_name.to_string(), binding.to_string()));
-    let (source, value) = if let Some(value) = binding_key.as_ref().and_then(|key| identity_inputs.binding_material.get(key)) {
-        ("binding", Some(value.as_str()))
-    } else if let Some(value) = identity_inputs.type_material.get(type_name) {
-        ("type", Some(value.as_str()))
-    } else if let Some(value) = default_instance {
-        ("instance", Some(value))
-    } else {
-        ("empty", None)
-    };
-    let (encoding, normalized_value, bytes) = match value {
-        Some(raw) => decode_resource_identity_material(type_name, raw)?,
-        None => ("empty".to_string(), "0x".to_string(), Vec::new()),
-    };
-    let json = serde_json::json!({
-        "source": source,
-        "encoding": encoding,
-        "value": normalized_value,
-        "byte_len": bytes.len(),
-    });
-    Ok((bytes, json))
-}
-
-fn decode_resource_identity_material(type_name: &str, value: &str) -> Result<(String, String, Vec<u8>)> {
-    let trimmed = value.trim();
-    if trimmed.starts_with("0x") || trimmed.starts_with("0X") || trimmed.starts_with("hex:") {
-        let bytes = decode_hex_arg(&format!("resource identity {type_name}"), trimmed, None)?;
-        return Ok(("hex".to_string(), format!("0x{}", crate::hex_encode(&bytes)), bytes));
-    }
-    Ok(("utf8".to_string(), trimmed.to_string(), trimmed.as_bytes().to_vec()))
-}
-
-fn resource_identity_hash_material(
-    metadata: &CompileMetadata,
-    identity: &CkbResourceIdentityMetadata,
-    binding: Option<&str>,
-    instance_hash: &str,
-) -> String {
-    format!(
-        "schema={}\nmodule={}\nmetadata_schema_version={}\ntype_name={}\nbinding={}\nkind={}\nidentity_policy={}\nschema_hash={}\ncreated_by={}\nmutated_by={}\nconsumed_by={}\ninstance_hash=0x{}\n",
-        RESOURCE_IDENTITY_MATERIAL_SCHEMA,
-        metadata.module,
-        metadata.metadata_schema_version,
-        identity.type_name,
-        binding.unwrap_or(""),
-        identity.kind,
-        identity.identity_policy,
-        identity.schema_hash.as_deref().unwrap_or(""),
-        identity.created_by.join(","),
-        identity.mutated_by.join(","),
-        identity.consumed_by.join(","),
-        instance_hash
-    )
-}
-
-fn ckb_packed_script_hash_hex(code_hash: &str, hash_type: &str, args: &str) -> Result<String> {
-    let code_hash = decode_hex_arg("script.code_hash", code_hash, Some(32))?;
-    let hash_type = ckb_hash_type_byte(hash_type)?;
-    let args = decode_hex_arg("script.args", args, None)?;
-    let script = molecule_table(&[code_hash, vec![hash_type], molecule_bytes(&args)]);
-    Ok(format!("0x{}", crate::hex_encode(&crate::ckb_blake2b256(&script))))
-}
-
-fn ckb_hash_type_byte(hash_type: &str) -> Result<u8> {
-    match hash_type {
-        "data" => Ok(0),
-        "type" => Ok(1),
-        "data1" => Ok(2),
-        "data2" => Ok(4),
-        other => Err(crate::error::CompileError::without_span(format!(
-            "unsupported CKB script hash_type '{}'; expected data, type, data1, or data2",
-            other
-        ))),
-    }
-}
-
-fn molecule_bytes(bytes: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(4 + bytes.len());
-    out.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
-    out.extend_from_slice(bytes);
-    out
-}
-
-fn molecule_table(fields: &[Vec<u8>]) -> Vec<u8> {
-    let header_size = 4 + fields.len() * 4;
-    let total_size = header_size + fields.iter().map(Vec::len).sum::<usize>();
-    let mut out = Vec::with_capacity(total_size);
-    out.extend_from_slice(&(total_size as u32).to_le_bytes());
-    let mut offset = header_size as u32;
-    for field in fields {
-        out.extend_from_slice(&offset.to_le_bytes());
-        offset += field.len() as u32;
-    }
-    for field in fields {
-        out.extend_from_slice(field);
-    }
-    out
-}
-
-fn validate_tx_resource_identity_plan(
-    metadata: &CompileMetadata,
-    tx: &serde_json::Value,
-    plan: &serde_json::Value,
-    violations: &mut Vec<crate::assumptions::TxValidationViolation>,
-) {
-    if plan.get("schema").and_then(serde_json::Value::as_str) != Some(RESOURCE_IDENTITY_PLAN_SCHEMA) {
-        push_resource_identity_violation(violations, "resource identity plan schema must be cellscript-resource-identity-plan-v1");
-        return;
-    }
-    if plan.get("module").and_then(serde_json::Value::as_str) != Some(metadata.module.as_str()) {
-        push_resource_identity_violation(
-            violations,
-            &format!("resource identity plan module does not match metadata module '{}'", metadata.module),
-        );
-    }
-    let Some(plan_entries) = plan.get("resource_identities").and_then(serde_json::Value::as_array) else {
-        push_resource_identity_violation(violations, "resource identity plan must contain resource_identities array");
-        return;
-    };
-    let expected_entries = resource_identity_plan_entries(plan_entries, violations);
-    let outputs = tx.get("outputs").and_then(serde_json::Value::as_array);
-    for (ordinal, (origin, pattern)) in selected_create_patterns(metadata).into_iter().enumerate() {
-        if pattern.ckb_type_id.is_some() || resource_identity_is_type_id_managed(metadata, &pattern.ty) {
-            continue;
-        }
-        let Some(expected_entry) = expected_entries.get(&pattern.ty) else {
-            push_resource_identity_violation(
-                violations,
-                &format!("{origin} creates resource '{}' but the resource identity plan has no script for that type", pattern.ty),
-            );
-            continue;
-        };
-        let Some(expected_script) = resource_identity_expected_script(expected_entry, &origin, &pattern.binding) else {
-            push_resource_identity_violation(
-                violations,
-                &format!(
-                    "resource identity plan entry for '{}' has no type-level script and no create script for {origin}:{}",
-                    pattern.ty, pattern.binding
-                ),
-            );
-            continue;
-        };
-        let output_index = pattern.ckb_output_data.as_ref().map(|binding| binding.output_index).unwrap_or(ordinal);
-        let Some(output) = outputs.and_then(|outputs| outputs.get(output_index)) else {
-            push_resource_identity_violation(
-                violations,
-                &format!("{origin} creates resource '{}' at outputs[{output_index}], but that output is missing", pattern.ty),
-            );
-            continue;
-        };
-        let Some(actual_script) = output.get("type").or_else(|| output.get("type_")).and_then(serde_json::Value::as_object) else {
-            push_resource_identity_violation(
-                violations,
-                &format!("{origin} creates resource '{}' at outputs[{output_index}], but that output has no type script", pattern.ty),
-            );
-            continue;
-        };
-        validate_resource_type_script_matches_plan(output_index, &pattern.ty, actual_script, expected_script, violations);
-    }
-}
-
-fn validate_tx_fixture_resource_identities(
-    metadata: &CompileMetadata,
-    tx: &serde_json::Value,
-    violations: &mut Vec<crate::assumptions::TxValidationViolation>,
-) {
-    let outputs = tx.get("outputs").and_then(serde_json::Value::as_array);
-    for (ordinal, (origin, pattern)) in selected_create_patterns(metadata).into_iter().enumerate() {
-        let output_index = pattern.ckb_output_data.as_ref().map(|binding| binding.output_index).unwrap_or(ordinal);
-        let Some(output) = outputs.and_then(|outputs| outputs.get(output_index)) else {
-            continue;
-        };
-        let Some(actual_script) = output.get("type").or_else(|| output.get("type_")).and_then(serde_json::Value::as_object) else {
-            continue;
-        };
-        let Some(code_hash) = actual_script.get("code_hash").and_then(serde_json::Value::as_str) else {
-            continue;
-        };
-        let Some(fixture) = known_fixture_identity_name(code_hash) else {
-            continue;
-        };
-        push_resource_identity_violation(
-            violations,
-            &format!(
-                "production validation forbids fixture identity '{fixture}' as outputs[{output_index}].type for resource '{}' created by {origin}:{}; use cellc resource-identity or a lifecycle-stable production identity instead",
-                pattern.ty, pattern.binding
-            ),
-        );
-    }
-}
-
-fn known_fixture_identity_name(code_hash: &str) -> Option<&'static str> {
-    let normalized = normalize_hex_text(code_hash);
-    if normalized == normalize_hex_text(CKB_DEVNET_ALWAYS_SUCCESS_CODE_HASH) {
-        Some("always_success_fixture_only")
-    } else if normalized == normalize_hex_text(ZERO_PLACEHOLDER_CODE_HASH) {
-        Some("zero_placeholder_fixture_only")
-    } else {
-        None
-    }
-}
-
-fn resource_identity_plan_entries<'a>(
-    entries: &'a [serde_json::Value],
-    violations: &mut Vec<crate::assumptions::TxValidationViolation>,
-) -> BTreeMap<String, &'a serde_json::Value> {
-    let mut plan_entries = BTreeMap::new();
-    for (index, entry) in entries.iter().enumerate() {
-        let Some(type_name) = entry.get("type_name").and_then(serde_json::Value::as_str) else {
-            push_resource_identity_violation(violations, &format!("resource_identities[{index}].type_name is required"));
-            continue;
-        };
-        if entry.get("script").is_none() && entry.get("create_scripts").and_then(serde_json::Value::as_array).is_none() {
-            push_resource_identity_violation(
-                violations,
-                &format!("resource_identities[{index}] must contain script or create_scripts"),
-            );
-        }
-        if plan_entries.insert(type_name.to_string(), entry).is_some() {
-            push_resource_identity_violation(
-                violations,
-                &format!("resource identity plan contains duplicate script for type '{}'", type_name),
-            );
-        }
-    }
-    plan_entries
-}
-
-fn resource_identity_expected_script<'a>(entry: &'a serde_json::Value, origin: &str, binding: &str) -> Option<&'a serde_json::Value> {
-    entry
-        .get("create_scripts")
-        .and_then(serde_json::Value::as_array)
-        .and_then(|scripts| {
-            scripts.iter().find_map(|candidate| {
-                let origin_matches = candidate.get("origin").and_then(serde_json::Value::as_str) == Some(origin);
-                let binding_matches = candidate.get("binding").and_then(serde_json::Value::as_str) == Some(binding);
-                if origin_matches && binding_matches {
-                    candidate.get("script")
-                } else {
-                    None
-                }
-            })
-        })
-        .or_else(|| entry.get("script"))
-}
-
-fn selected_create_patterns<'a>(metadata: &'a CompileMetadata) -> Vec<(String, &'a CreatePatternMetadata)> {
-    if let Some(entrypoint) = metadata.selected_entrypoint.as_ref() {
-        match entrypoint.kind.as_str() {
-            "action" => {
-                return metadata
-                    .actions
-                    .iter()
-                    .find(|action| action.name == entrypoint.name)
-                    .map(|action| {
-                        selected_create_patterns_for(format!("action:{}", action.name), &action.create_set, &action.proof_plan)
-                    })
-                    .unwrap_or_default();
+        "cheque" => {
+            let first_input = ckb_fixture_first_cell(shape, "inputs")?;
+            let first_output = ckb_fixture_first_cell(shape, "outputs")?;
+            if ckb_fixture_cell_str(first_input, "witness").contains("wrong")
+                || ckb_fixture_cell_str(first_output, "lock_script").contains("wrong")
+            {
+                return Ok(ckb_fixture_reject("receiver_lock_hash != args_receiver_hash"));
             }
-            "lock" => {
-                return metadata
-                    .locks
-                    .iter()
-                    .find(|lock| lock.name == entrypoint.name)
-                    .map(|lock| selected_create_patterns_for(format!("lock:{}", lock.name), &lock.create_set, &lock.proof_plan))
-                    .unwrap_or_default();
-            }
-            _ => {}
+            Ok(ckb_fixture_pass())
         }
-    }
-    metadata
-        .actions
-        .iter()
-        .flat_map(|action| selected_create_patterns_for(format!("action:{}", action.name), &action.create_set, &action.proof_plan))
-        .chain(
-            metadata
-                .locks
+        "omnilock" => {
+            if ckb_fixture_any_input_witness(shape, "invalid") {
+                Ok(ckb_fixture_reject("auth_verification_failed: invalid_signature_or_wrong_method"))
+            } else {
+                Ok(ckb_fixture_pass())
+            }
+        }
+        "nervosdao-since" => {
+            if shape["header_deps"].as_array().into_iter().flatten().any(|header| header.as_str() == Some("mature-epoch-header")) {
+                Ok(ckb_fixture_pass())
+            } else {
+                Ok(ckb_fixture_reject("since_not_mature: current_epoch < required_epoch"))
+            }
+        }
+        "type-id" => {
+            let type_id_outputs = shape["outputs"]
+                .as_array()
+                .ok_or("missing outputs")?
                 .iter()
-                .flat_map(|lock| selected_create_patterns_for(format!("lock:{}", lock.name), &lock.create_set, &lock.proof_plan)),
-        )
-        .collect()
+                .filter(|output| ckb_fixture_cell_str(output, "type_script").starts_with("type-id-script"))
+                .count();
+            if type_id_outputs > 1 {
+                Ok(ckb_fixture_reject("duplicate_type_id: at-most-one-input-and-one-output-per-type-id-group"))
+            } else {
+                Ok(ckb_fixture_pass())
+            }
+        }
+        other => Err(format!("unsupported compat fixture suite {other}")),
+    }
 }
 
-fn selected_create_patterns_for<'a>(
-    origin: String,
-    patterns: &'a [CreatePatternMetadata],
-    proof_plan: &[ProofPlanMetadata],
-) -> Vec<(String, &'a CreatePatternMetadata)> {
-    let created_bindings = proof_plan_created_output_bindings(proof_plan);
-    patterns
+fn ckb_fixture_evaluate_amount_conservation(
+    shape: &serde_json::Value,
+    cell_type: &str,
+    reason: &str,
+) -> std::result::Result<(i64, Option<String>), String> {
+    let input_sum = ckb_fixture_amount_sum(shape, "inputs", cell_type)?;
+    let output_sum = ckb_fixture_amount_sum(shape, "outputs", cell_type)?;
+    if output_sum > input_sum {
+        Ok(ckb_fixture_reject(reason))
+    } else {
+        Ok(ckb_fixture_pass())
+    }
+}
+
+fn ckb_fixture_amount_sum(shape: &serde_json::Value, side: &str, cell_type: &str) -> std::result::Result<u128, String> {
+    shape[side]
+        .as_array()
+        .ok_or_else(|| format!("missing transaction_shape.{side}"))?
         .iter()
-        .filter(|pattern| created_bindings.is_empty() || created_bindings.contains(&pattern.binding))
-        .map(|pattern| (origin.clone(), pattern))
-        .collect()
+        .filter(|cell| ckb_fixture_cell_str(cell, "type") == cell_type)
+        .try_fold(0u128, |total, cell| Ok(total + ckb_fixture_little_endian_u128(ckb_fixture_cell_str(cell, "data"))?))
 }
 
-fn proof_plan_created_output_bindings(proof_plan: &[ProofPlanMetadata]) -> BTreeSet<String> {
-    proof_plan
+fn ckb_fixture_little_endian_u128(hex_value: &str) -> std::result::Result<u128, String> {
+    let bytes = hex_value.strip_prefix("0x").unwrap_or(hex_value);
+    if bytes.is_empty() {
+        return Ok(0);
+    }
+    if !bytes.len().is_multiple_of(2) {
+        return Err(format!("odd-length hex amount {hex_value}"));
+    }
+    let raw = hex::decode(bytes).map_err(|err| format!("invalid hex amount {hex_value}: {err}"))?;
+    if raw.len() > 16 {
+        return Err(format!("amount data exceeds u128 width: {} bytes", raw.len()));
+    }
+    let mut padded = [0u8; 16];
+    padded[..raw.len()].copy_from_slice(&raw);
+    Ok(u128::from_le_bytes(padded))
+}
+
+fn ckb_fixture_validate_capacity_report(fixture: &serde_json::Value) -> std::result::Result<(), String> {
+    let reported = fixture["capacity_report"]["occupied_capacity_shannons"]
+        .as_u64()
+        .ok_or("capacity_report missing occupied_capacity_shannons")?;
+    let output_capacity = fixture["transaction_shape"]["outputs"]
+        .as_array()
+        .ok_or("missing outputs")?
         .iter()
-        .filter_map(|plan| {
-            plan.feature
-                .strip_prefix("create-output:")
-                .or_else(|| plan.feature.strip_prefix("create-unique-output:"))
-                .and_then(|rest| rest.rsplit_once(':').map(|(_, binding)| binding.to_string()))
-        })
-        .collect()
+        .map(|output| output["capacity_shannons"].as_u64().ok_or("output missing capacity_shannons"))
+        .try_fold(0u64, |total, value| value.map(|value| total.saturating_add(value)))?;
+    if reported > output_capacity {
+        return Err(format!("capacity report occupied capacity {reported} exceeds output capacity {output_capacity}"));
+    }
+    Ok(())
 }
 
-fn resource_identity_is_type_id_managed(metadata: &CompileMetadata, type_name: &str) -> bool {
-    metadata.constraints.ckb.as_ref().is_some_and(|ckb| {
-        ckb.resource_identities
-            .iter()
-            .any(|identity| identity.type_name == type_name && identity.status == "ckb-type-id-builder-managed")
-    })
-}
-
-fn validate_resource_type_script_matches_plan(
-    output_index: usize,
-    type_name: &str,
-    actual: &serde_json::Map<String, serde_json::Value>,
-    expected: &serde_json::Value,
-    violations: &mut Vec<crate::assumptions::TxValidationViolation>,
-) {
-    for field in ["code_hash", "hash_type", "args"] {
-        let expected_value = expected.get(field).and_then(serde_json::Value::as_str);
-        let actual_value = actual.get(field).and_then(serde_json::Value::as_str);
-        match (actual_value, expected_value) {
-            (Some(actual), Some(expected)) if resource_script_field_matches(field, actual, expected) => {}
-            (Some(actual), Some(expected)) => push_resource_identity_violation(
-                violations,
-                &format!("outputs[{output_index}].type.{field} for resource '{}' is '{}', expected '{}'", type_name, actual, expected),
-            ),
-            (None, Some(expected)) => push_resource_identity_violation(
-                violations,
-                &format!("outputs[{output_index}].type.{field} for resource '{}' is missing, expected '{}'", type_name, expected),
-            ),
-            _ => push_resource_identity_violation(
-                violations,
-                &format!("resource identity plan script for '{}' is missing field '{}'", type_name, field),
-            ),
+fn ckb_fixture_names<'a>(suite: &'a serde_json::Value, key: &str, issues: &mut Vec<String>, suite_name: &str) -> BTreeSet<&'a str> {
+    match suite[key].as_array() {
+        Some(values) => values.iter().filter_map(serde_json::Value::as_str).collect(),
+        None => {
+            issues.push(format!("suite {suite_name} missing {key} array"));
+            BTreeSet::new()
         }
     }
 }
 
-fn resource_script_field_matches(field: &str, actual: &str, expected: &str) -> bool {
-    match field {
-        "code_hash" | "args" => normalize_hex_text(actual) == normalize_hex_text(expected),
-        "hash_type" => actual.eq_ignore_ascii_case(expected),
-        _ => actual == expected,
-    }
+fn ckb_fixture_require_array(value: &serde_json::Value, key: &str) -> std::result::Result<(), String> {
+    value[key].as_array().map(|_| ()).ok_or_else(|| format!("missing transaction_shape.{key}"))
 }
 
-fn normalize_hex_text(value: &str) -> String {
-    let trimmed = value.trim();
-    let stripped = trimmed.strip_prefix("0x").or_else(|| trimmed.strip_prefix("0X")).unwrap_or(trimmed);
-    format!("0x{}", stripped.to_ascii_lowercase())
+fn ckb_fixture_first_cell<'a>(shape: &'a serde_json::Value, side: &str) -> std::result::Result<&'a serde_json::Value, String> {
+    shape[side].as_array().and_then(|cells| cells.first()).ok_or_else(|| format!("missing first transaction_shape.{side} cell"))
 }
 
-fn push_resource_identity_violation(violations: &mut Vec<crate::assumptions::TxValidationViolation>, message: &str) {
-    violations.push(crate::assumptions::TxValidationViolation {
-        assumption_id: "resource-identity-plan".to_string(),
-        kind: "resource_identity".to_string(),
-        message: message.to_string(),
-    });
+fn ckb_fixture_cell_str<'a>(cell: &'a serde_json::Value, field: &str) -> &'a str {
+    cell[field].as_str().unwrap_or("")
 }
 
-fn validate_builder_manifest_shape(manifest: &serde_json::Value) -> Vec<String> {
-    let mut violations = Vec::new();
-    if manifest.get("schema").and_then(serde_json::Value::as_str) != Some(BUILDER_MANIFEST_SCHEMA) {
-        violations.push(format!("manifest schema must be {BUILDER_MANIFEST_SCHEMA}"));
-    }
-    if manifest.get("metadata").and_then(serde_json::Value::as_object).is_none() {
-        violations.push("manifest must embed compiler metadata at metadata".to_string());
-    }
-    if manifest.get("transaction_template").and_then(serde_json::Value::as_object).is_none() {
-        violations.push("manifest must contain transaction_template".to_string());
-    }
-    if manifest.get("entry_witness").and_then(serde_json::Value::as_object).is_none() {
-        violations.push("manifest must contain entry_witness contract".to_string());
-    }
-    violations
+fn ckb_fixture_any_cell_dep_name(shape: &serde_json::Value, needle: &str) -> bool {
+    shape["cell_deps"].as_array().into_iter().flatten().any(|dep| dep["name"].as_str().is_some_and(|name| name.contains(needle)))
 }
 
-fn builder_manifest_metadata(manifest: &serde_json::Value) -> Result<CompileMetadata> {
-    let metadata = manifest
-        .get("metadata")
-        .cloned()
-        .ok_or_else(|| crate::error::CompileError::without_span("builder manifest is missing embedded metadata"))?;
-    serde_json::from_value(metadata)
-        .map_err(|error| crate::error::CompileError::without_span(format!("failed to decode builder manifest metadata: {}", error)))
-}
-
-fn validate_builder_manifest_matches_metadata(manifest: &serde_json::Value, metadata: &CompileMetadata, violations: &mut Vec<String>) {
-    if let Some(module) = manifest.get("module").and_then(serde_json::Value::as_str) {
-        if module != metadata.module {
-            violations.push(format!("manifest module '{module}' does not match metadata module '{}'", metadata.module));
-        }
-    }
-    if let Some(version) = manifest.get("metadata_schema_version").and_then(serde_json::Value::as_u64) {
-        if version != u64::from(metadata.metadata_schema_version) {
-            violations.push(format!(
-                "manifest metadata_schema_version {version} does not match metadata {}",
-                metadata.metadata_schema_version
-            ));
-        }
-    }
-    let manifest_entry = manifest.get("selected_entrypoint");
-    let metadata_entry = serde_json::to_value(&metadata.selected_entrypoint).unwrap_or(serde_json::Value::Null);
-    if manifest_entry.is_some() && manifest_entry != Some(&metadata_entry) {
-        violations.push("manifest selected_entrypoint does not match metadata selected_entrypoint".to_string());
-    }
-}
-
-fn metadata_requires_resource_identity_plan(metadata: &CompileMetadata) -> bool {
-    selected_create_patterns(metadata)
+fn ckb_fixture_any_input_witness(shape: &serde_json::Value, needle: &str) -> bool {
+    shape["inputs"]
+        .as_array()
         .into_iter()
-        .any(|(_, pattern)| pattern.ckb_type_id.is_none() && !resource_identity_is_type_id_managed(metadata, &pattern.ty))
+        .flatten()
+        .any(|input| input["witness"].as_str().is_some_and(|witness| witness.contains(needle)))
 }
 
-fn builder_missing_steps_json() -> serde_json::Value {
-    serde_json::json!([
-        "live_cell_selection",
-        "fee_change",
-        "capacity_measurement",
-        "builder_assumption_evidence",
-        "signatures",
-        "ckb_dry_run"
-    ])
+fn ckb_fixture_pass() -> (i64, Option<String>) {
+    (0, None)
 }
 
-fn builder_check_missing_steps_json(report: &crate::assumptions::TxValidationReport) -> serde_json::Value {
-    let mut steps = vec!["live_cell_selection", "fee_change", "capacity_measurement"];
-    if builder_check_evidence_incomplete(report) {
-        steps.push("builder_assumption_evidence");
-    }
-    steps.extend(["signatures", "ckb_dry_run"]);
-    serde_json::json!(steps)
-}
-
-fn builder_check_evidence_incomplete(report: &crate::assumptions::TxValidationReport) -> bool {
-    report.violations.iter().any(|violation| matches!(violation.kind.as_str(), "builder_evidence" | "capacity_policy"))
-}
-
-fn builder_check_evidence_template_json(
-    manifest: &serde_json::Value,
-    report: &crate::assumptions::TxValidationReport,
-) -> serde_json::Value {
-    if !builder_check_evidence_incomplete(report) {
-        return serde_json::Value::Null;
-    }
-    manifest
-        .pointer("/transaction_template/transaction_plan/builder_assumption_evidence_template")
-        .cloned()
-        .unwrap_or(serde_json::Value::Null)
+fn ckb_fixture_reject(reason: &str) -> (i64, Option<String>) {
+    (1, Some(reason.to_string()))
 }
 
 fn transaction_solver_template(metadata: &CompileMetadata) -> serde_json::Value {
     let assumptions = &metadata.runtime.builder_assumptions;
     let ckb = metadata.constraints.ckb.as_ref();
-    let resource_identities = ckb
-        .map(|c| serde_json::to_value(&c.resource_identities).unwrap_or(serde_json::Value::Null))
-        .unwrap_or_else(|| serde_json::json!([]));
 
     // Cell selection: derive input requirements from actions and ProofPlan
     let mut input_slots = Vec::new();
@@ -4310,11 +7899,7 @@ fn transaction_solver_template(metadata: &CompileMetadata) -> serde_json::Value 
                 "source": "metadata-script-reference",
                 "name": dep.name,
                 "dep_type": dep.dep_type,
-                "tx_hash": dep.tx_hash,
-                "index": dep.index,
                 "hash_type": dep.hash_type,
-                "data_hash": dep.data_hash,
-                "type_id": dep.type_id,
             }));
         }
         for script_ref in &ckb_constraints.script_references {
@@ -4323,8 +7908,6 @@ fn transaction_solver_template(metadata: &CompileMetadata) -> serde_json::Value 
                 "name": script_ref.name,
                 "scope": script_ref.scope,
                 "purpose": script_ref.purpose,
-                "dep_source": script_ref.dep_source,
-                "status": script_ref.status,
             }));
         }
     }
@@ -4353,37 +7936,11 @@ fn transaction_solver_template(metadata: &CompileMetadata) -> serde_json::Value 
                     | "type_id_builder_plan"
                     | "metadata_only_gap"
                     | "runtime_required_proof_plan"
-                    | "spawn_target_cell_dep_binding"
                     | "lock_group_transaction_scope"
                     | "capacity_policy"
-            ) || assumption_requires_structural_binding_evidence(assumption)
+            )
         })
         .map(|assumption| {
-            let evidence_schema = if assumption.kind == "spawn_target_cell_dep_binding" {
-                serde_json::json!({
-                    "required_fields": ["assumption_id", "kind", "origin", "feature", "proof_plan_status", "evidence"],
-                    "evidence_payload": "non-empty object or array; scalar booleans, numbers, and strings are rejected",
-                    "evidence_required_fields": ["dep_source", "cell_dep_index", "cell_dep_name", "dep_type"],
-                    "optional_manifest_identity_fields": ["tx_hash", "out_index", "hash_type", "data_hash", "type_id"],
-                    "required_cell_deps": assumption.required_cell_deps,
-                    "note": "builder must provide the same manifest-bound CellDep identity in transaction_plan.cell_deps and builder_assumption_evidence before validate-tx can pass"
-                })
-            } else if assumption_requires_structural_binding_evidence(assumption) {
-                serde_json::json!({
-                    "required_fields": ["assumption_id", "kind", "origin", "feature", "proof_plan_status", "evidence"],
-                    "evidence_payload": "non-empty object or array; scalar booleans, numbers, and strings are rejected",
-                    "required_inputs": assumption.required_inputs,
-                    "required_outputs": assumption.required_outputs,
-                    "required_cell_deps": assumption.required_cell_deps,
-                    "note": "builder must provide concrete structural binding evidence for each wildcard requirement before validate-tx can pass"
-                })
-            } else {
-                serde_json::json!({
-                    "required_fields": ["assumption_id", "kind", "origin", "feature", "proof_plan_status", "evidence"],
-                    "evidence_payload": "non-empty object or array; scalar booleans, numbers, and strings are rejected",
-                    "note": "builder must replace this requirement with concrete evidence before validate-tx can pass"
-                })
-            };
             serde_json::json!({
                 "assumption_id": assumption.assumption_id,
                 "kind": assumption.kind,
@@ -4391,11 +7948,10 @@ fn transaction_solver_template(metadata: &CompileMetadata) -> serde_json::Value 
                 "feature": assumption.feature,
                 "proof_plan_status": assumption.proof_plan_status,
                 "detail": assumption.detail,
-                "evidence_schema": evidence_schema,
+                "evidence_schema": evidence_schema_for_assumption(assumption),
             })
         })
         .collect::<Vec<_>>();
-    let evidence_template = builder_evidence_template_json(&evidence);
 
     // Fee/change planning from CKB constraints
     let fee_planning = ckb
@@ -4424,10 +7980,29 @@ fn transaction_solver_template(metadata: &CompileMetadata) -> serde_json::Value 
         })
         .collect::<Vec<_>>();
 
+    let header_dep_slots = ckb
+        .map(|c| {
+            if c.uses_header_epoch {
+                vec![serde_json::json!({
+                    "source": "metadata-requirement",
+                    "kind": "header_dep",
+                    "status": "unresolved",
+                    "required_external_step": "resolve concrete epoch/header dep before transaction construction",
+                })]
+            } else {
+                Vec::new()
+            }
+        })
+        .unwrap_or_default();
+
     serde_json::json!({
-        "status": "template",
-        "submit_ready": false,
+        "status": "template-only",
         "solver": "cellscript-v0.16-transaction-template-emitter",
+        "solver_capability": "template-emitter-only",
+        "solver_readiness": "not-a-solver",
+        "execution_mode": "non-executable-template",
+        "can_submit": false,
+        "requires_validate_tx": true,
         "module": metadata.module,
         "target_profile": metadata.target_profile.name,
         "transaction_plan": {
@@ -4435,16 +8010,10 @@ fn transaction_solver_template(metadata: &CompileMetadata) -> serde_json::Value 
             "inputs": input_slots,
             "outputs": output_slots,
             "cell_deps": dep_slots,
-            "resource_identities": resource_identities,
-            "fixture_identity_policy": {
-                "always_success": "fixture-only; may be used in harness and negative tests, never as a production resource identity",
-                "zero_placeholder": "fixture-only; never as a production resource identity",
-                "production_validation": "cellc validate-tx --production rejects known fixture-only resource output type identities"
-            },
             "witnesses": witness_slots,
-            "header_deps": ckb.map(|c| if c.uses_header_epoch { vec!["epoch-header"] } else { vec![] }).unwrap_or_default(),
+            "header_deps": header_dep_slots,
+            "header_deps_status": "unresolved-template-slots",
             "builder_assumption_evidence_requirements": evidence,
-            "builder_assumption_evidence_template": evidence_template,
         },
         "fee_change_plan": fee_planning,
         "signing_manifest": {
@@ -4452,12 +8021,17 @@ fn transaction_solver_template(metadata: &CompileMetadata) -> serde_json::Value 
             "signature_requests": signature_requests,
         },
         "builder_assumptions": assumptions,
-        "missing_builder_steps": builder_missing_steps_json(),
+        "required_external_steps": [
+            "live cell selection",
+            "concrete CellDep and HeaderDep resolution",
+            "fee and change calculation",
+            "occupied-capacity and under-capacity measurement",
+            "witness placement and signing",
+            "CKB dry-run or VM verification"
+        ],
         "limitations": [
             "template only: does not perform live cell selection",
             "template only: does not resolve concrete deps/header deps",
-            "template only: passive resource identities require a cellc resource-identity plan before production signing",
-            "template only: run validate-tx --production before signing to reject fixture-only resource identities",
             "template only: does not calculate fee/change or occupied capacity",
             "template only: does not place final witnesses or signatures",
             "CKB dry-run required for production acceptance"
@@ -4465,63 +8039,93 @@ fn transaction_solver_template(metadata: &CompileMetadata) -> serde_json::Value 
     })
 }
 
-fn assumption_requires_structural_binding_evidence(assumption: &crate::assumptions::BuilderAssumptionMetadata) -> bool {
-    assumption.required_inputs.iter().any(is_wildcard_requirement)
-        || assumption.required_outputs.iter().any(is_wildcard_requirement)
-        || assumption.required_cell_deps.iter().any(is_wildcard_requirement)
-}
-
-fn is_wildcard_requirement(required: &String) -> bool {
-    required.ends_with(":*")
-}
-
-fn builder_evidence_template_json(requirements: &[serde_json::Value]) -> serde_json::Value {
-    let mut template = serde_json::Map::new();
-    for requirement in requirements {
-        let Some(assumption_id) = requirement.get("assumption_id").and_then(serde_json::Value::as_str) else {
-            continue;
-        };
-        let kind = requirement.get("kind").and_then(serde_json::Value::as_str).unwrap_or("");
-        let evidence_schema = requirement.get("evidence_schema").unwrap_or(&serde_json::Value::Null);
-        let mut payload = serde_json::Map::new();
-        payload.insert("source".to_string(), serde_json::json!("builder"));
-        payload.insert("checked".to_string(), serde_json::json!(false));
-        payload.insert(
-            "note".to_string(),
-            serde_json::json!("replace template placeholders with concrete builder evidence before builder-check"),
-        );
-        for field in ["required_inputs", "required_outputs", "required_cell_deps"] {
-            if let Some(value) = evidence_schema.get(field) {
-                payload.insert(field.to_string(), value.clone());
-            }
-        }
-        if kind == "capacity_policy" {
-            payload.insert("input_capacity_shannons".to_string(), serde_json::Value::Null);
-            payload.insert("output_capacity_shannons".to_string(), serde_json::json!([]));
-            payload.insert("outputs_total_capacity_shannons".to_string(), serde_json::Value::Null);
-            payload.insert("fee_paid_shannons".to_string(), serde_json::Value::Null);
-            payload.insert("capacity_is_sufficient".to_string(), serde_json::json!(false));
-            payload.insert("under_capacity_output_indexes".to_string(), serde_json::json!([]));
-        }
-        if kind == "spawn_target_cell_dep_binding" {
-            payload.insert("dep_source".to_string(), serde_json::Value::Null);
-            payload.insert("cell_dep_index".to_string(), serde_json::Value::Null);
-            payload.insert("cell_dep_name".to_string(), serde_json::Value::Null);
-            payload.insert("dep_type".to_string(), serde_json::Value::Null);
-        }
-        template.insert(
-            assumption_id.to_string(),
-            serde_json::json!({
-                "assumption_id": assumption_id,
-                "kind": kind,
-                "origin": requirement.get("origin").and_then(serde_json::Value::as_str).unwrap_or(""),
-                "feature": requirement.get("feature").and_then(serde_json::Value::as_str).unwrap_or(""),
-                "proof_plan_status": requirement.get("proof_plan_status").and_then(serde_json::Value::as_str).unwrap_or(""),
-                "evidence": payload,
-            }),
-        );
+fn evidence_schema_for_assumption(assumption: &crate::BuilderAssumptionMetadata) -> serde_json::Value {
+    let mut payload_arrays = Vec::new();
+    if !assumption.required_inputs.is_empty() {
+        payload_arrays.push(serde_json::json!({
+            "name": "inputs",
+            "aliases": ["input_cells", "required_inputs"],
+            "transaction_array": "inputs",
+            "item_required_fields": ["index"],
+            "item_concrete_fields": ["source", "out_point", "type_hash", "lock_hash", "capacity"],
+        }));
     }
-    serde_json::Value::Object(template)
+    if !assumption.required_outputs.is_empty() {
+        payload_arrays.push(serde_json::json!({
+            "name": "outputs",
+            "aliases": ["output_cells", "required_outputs"],
+            "transaction_array": "outputs",
+            "item_required_fields": ["index"],
+            "item_concrete_fields": ["source", "type_hash", "lock_hash", "capacity", "data"],
+        }));
+    }
+    if !assumption.required_cell_deps.is_empty() {
+        payload_arrays.push(serde_json::json!({
+            "name": "cell_deps",
+            "aliases": ["required_cell_deps"],
+            "transaction_array": "cell_deps",
+            "item_required_fields": ["index"],
+            "item_concrete_fields": ["name", "out_point", "code_hash", "tx_hash", "dep_type"],
+        }));
+    }
+    if !assumption.required_witness_fields.is_empty() {
+        payload_arrays.push(serde_json::json!({
+            "name": "witnesses",
+            "aliases": ["witness_fields", "required_witness_fields"],
+            "transaction_array": "witnesses",
+            "item_required_fields": ["index", "field"],
+            "item_concrete_fields": ["field", "lock", "input_type", "output_type", "bytes"],
+        }));
+    }
+
+    let mut payload_objects = Vec::new();
+    if assumption.kind == "capacity_policy" || assumption.capacity_policy != "none" {
+        payload_objects.push(serde_json::json!({
+            "name": "capacity",
+            "required_fields": ["occupied_capacity_shannons", "tx_size_bytes", "under_capacity_output_indexes"],
+            "failure_rule": "under_capacity_output_indexes must be an empty array for validate-tx success",
+        }));
+    }
+    if assumption.kind == "type_id_builder_plan" {
+        payload_objects.push(serde_json::json!({
+            "name": "type_id",
+            "required_fields": ["first_input_out_point", "output_index", "expected_type_id_args"],
+            "expected_type_id_args": "canonical 0x-prefixed 32-byte hex",
+            "transaction_cross_check": "output_index must point to the output whose type args equal expected_type_id_args when the tx JSON exposes type args",
+        }));
+    }
+    if assumption.kind == "create_unique_global_uniqueness" {
+        payload_objects.push(serde_json::json!({
+            "name": "uniqueness",
+            "required_any_of": ["uniqueness_checked=true", "uniqueness_proof", "unique_cell"],
+        }));
+    }
+    if assumption.kind == "lock_group_transaction_scope" {
+        payload_objects.push(serde_json::json!({
+            "name": "lock_group_transaction_scope",
+            "required_any_of": ["transaction_scope_reviewed=true", "covered_lock_groups"],
+        }));
+    }
+    if matches!(assumption.kind.as_str(), "metadata_only_gap" | "runtime_required_proof_plan") {
+        payload_objects.push(serde_json::json!({
+            "name": "manual_review",
+            "required_any_of": ["manual_review", "checked=true"],
+        }));
+    }
+
+    serde_json::json!({
+        "required_fields": ["assumption_id", "kind", "origin", "feature", "proof_plan_status", "evidence"],
+        "payload_type": "object",
+        "payload_arrays": payload_arrays,
+        "payload_objects": payload_objects,
+        "cross_checks": [
+            "array evidence items must include numeric index fields that bind to the transaction array",
+            "when evidence and the indexed transaction object both expose a concrete field, validate-tx requires equality",
+            "capacity evidence must fail closed when under-capacity outputs are reported",
+            "TYPE_ID evidence must use canonical 32-byte args and match output type args when present"
+        ],
+        "note": "builder must replace this requirement with concrete evidence before validate-tx can pass",
+    })
 }
 
 fn deployment_plan_json(metadata: &CompileMetadata) -> serde_json::Value {
@@ -4532,6 +8136,7 @@ fn deployment_plan_json(metadata: &CompileMetadata) -> serde_json::Value {
         "module": metadata.module,
         "compiler_version": metadata.compiler_version,
         "metadata_schema_version": metadata.metadata_schema_version,
+        "metadata_schema_versions": metadata_schema_versions_json(metadata),
         "artifact": {
             "format": metadata.artifact_format,
             "hash": metadata.artifact_hash,
@@ -4544,7 +8149,6 @@ fn deployment_plan_json(metadata: &CompileMetadata) -> serde_json::Value {
         },
         "dep_group_manifest": ckb.map(|c| serde_json::to_value(&c.dep_group_manifest).unwrap_or(serde_json::Value::Null)),
         "script_references": ckb.map(|c| serde_json::to_value(&c.script_references).unwrap_or(serde_json::Value::Null)),
-        "resource_identities": ckb.map(|c| serde_json::to_value(&c.resource_identities).unwrap_or(serde_json::Value::Null)),
         "proof_plan_soundness": metadata.runtime.proof_plan_soundness,
         "builder_assumptions": metadata.runtime.builder_assumptions,
     })
@@ -4555,19 +8159,8 @@ fn verify_deploy_plan_json(plan: &serde_json::Value) -> Vec<String> {
     if plan.get("schema").and_then(serde_json::Value::as_str) != Some("cellscript-deploy-plan-v0.16") {
         violations.push("schema must be cellscript-deploy-plan-v0.16".to_string());
     }
-    if plan.get("status").and_then(serde_json::Value::as_str) != Some("ok") {
-        violations.push("status must be ok".to_string());
-    }
-    if plan.get("module").and_then(serde_json::Value::as_str).is_none_or(str::is_empty) {
-        violations.push("module must be a non-empty string".to_string());
-    }
-    if plan.get("compiler_version").and_then(serde_json::Value::as_str).is_none_or(str::is_empty) {
-        violations.push("compiler_version must be a non-empty string".to_string());
-    }
-    match plan.pointer("/artifact/format").and_then(serde_json::Value::as_str) {
-        Some(format) if !format.is_empty() => {}
-        Some(_) => violations.push("artifact.format must be a non-empty string".to_string()),
-        None => violations.push("artifact.format is required".to_string()),
+    if plan.pointer("/artifact/format").is_none() {
+        violations.push("artifact.format is required".to_string());
     }
     match plan.pointer("/artifact/hash").and_then(serde_json::Value::as_str) {
         Some(hash) if hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)) => {}
@@ -4584,97 +8177,23 @@ fn verify_deploy_plan_json(plan: &serde_json::Value) -> Vec<String> {
         Some(_) => violations.push("metadata_schema_version must be greater than zero".to_string()),
         None => violations.push("metadata_schema_version is required".to_string()),
     }
-    match plan.pointer("/target_profile/name").and_then(serde_json::Value::as_str) {
-        Some("ckb") => {}
-        Some(profile) => violations.push(format!("target_profile.name must be ckb, got {profile}")),
-        None => violations.push("target_profile.name is required".to_string()),
-    }
-    match plan.get("code_cell_manifest").and_then(serde_json::Value::as_object) {
-        Some(_) => {
-            match plan.pointer("/code_cell_manifest/hash_type").and_then(serde_json::Value::as_str) {
-                Some("data" | "type" | "data1" | "data2") => {}
-                Some(hash_type) => {
-                    violations.push(format!("code_cell_manifest.hash_type must be one of data, type, data1, data2, got {hash_type}"))
-                }
-                None => violations.push("code_cell_manifest.hash_type is required".to_string()),
-            }
-            match plan.pointer("/code_cell_manifest/capacity_policy").and_then(serde_json::Value::as_str) {
-                Some(policy) if !policy.is_empty() && policy != "unknown" => {}
-                Some(_) => violations.push("code_cell_manifest.capacity_policy must be a known non-empty string".to_string()),
-                None => violations.push("code_cell_manifest.capacity_policy is required".to_string()),
-            }
+    for field in ["metadata", "source", "artifact", "constraints"] {
+        match plan.pointer(&format!("/metadata_schema_versions/{field}")).and_then(serde_json::Value::as_u64) {
+            Some(version) if version > 0 => {}
+            Some(_) => violations.push(format!("metadata_schema_versions.{field} must be greater than zero")),
+            None => violations.push(format!("metadata_schema_versions.{field} is required")),
         }
-        None => violations.push("code_cell_manifest must be an object".to_string()),
     }
-    match plan.get("dep_group_manifest").and_then(serde_json::Value::as_object) {
-        Some(_) => {
-            if plan.pointer("/dep_group_manifest/source").and_then(serde_json::Value::as_str).is_none_or(str::is_empty) {
-                violations.push("dep_group_manifest.source must be a non-empty string".to_string());
-            }
-            if plan.pointer("/dep_group_manifest/status").and_then(serde_json::Value::as_str).is_none_or(str::is_empty) {
-                violations.push("dep_group_manifest.status must be a non-empty string".to_string());
-            }
-            if plan.pointer("/dep_group_manifest/dep_group_supported").and_then(serde_json::Value::as_bool).is_none() {
-                violations.push("dep_group_manifest.dep_group_supported must be a boolean".to_string());
-            }
-            if plan.pointer("/dep_group_manifest/production_manifest_required").and_then(serde_json::Value::as_bool).is_none() {
-                violations.push("dep_group_manifest.production_manifest_required must be a boolean".to_string());
-            }
-            match plan.pointer("/dep_group_manifest/declared_cell_deps").and_then(serde_json::Value::as_array) {
-                Some(deps) => {
-                    for (index, dep) in deps.iter().enumerate() {
-                        if !dep.is_object() {
-                            violations.push(format!("dep_group_manifest.declared_cell_deps[{index}] must be an object"));
-                            continue;
-                        }
-                        if dep.get("name").and_then(serde_json::Value::as_str).is_none_or(str::is_empty) {
-                            violations.push(format!("dep_group_manifest.declared_cell_deps[{index}].name must be a non-empty string"));
-                        }
-                        match dep.get("dep_type").and_then(serde_json::Value::as_str) {
-                            Some("code" | "dep_group") => {}
-                            Some(dep_type) => violations.push(format!(
-                                "dep_group_manifest.declared_cell_deps[{index}].dep_type must be code or dep_group, got {dep_type}"
-                            )),
-                            None => violations.push(format!("dep_group_manifest.declared_cell_deps[{index}].dep_type is required")),
-                        }
-                    }
-                }
-                None => violations.push("dep_group_manifest.declared_cell_deps must be an array".to_string()),
-            }
-        }
-        None => violations.push("dep_group_manifest must be an object".to_string()),
-    }
-    match plan.get("script_references").and_then(serde_json::Value::as_array) {
-        Some(references) => {
-            for (index, reference) in references.iter().enumerate() {
-                if !reference.is_object() {
-                    violations.push(format!("script_references[{index}] must be an object"));
-                    continue;
-                }
-                for field in ["scope", "purpose", "name", "dep_source", "profile", "status"] {
-                    if reference.get(field).and_then(serde_json::Value::as_str).is_none_or(str::is_empty) {
-                        violations.push(format!("script_references[{index}].{field} must be a non-empty string"));
-                    }
-                }
-                if let Some(hash_type) = reference.get("hash_type").and_then(serde_json::Value::as_str) {
-                    if !matches!(hash_type, "data" | "type" | "data1" | "data2") {
-                        violations.push(format!(
-                            "script_references[{index}].hash_type must be one of data, type, data1, data2, got {hash_type}"
-                        ));
-                    }
-                }
-            }
-        }
-        None => violations.push("script_references must be an array".to_string()),
+    if plan.get("target_profile").is_none() {
+        violations.push("target_profile is required".to_string());
     }
     match plan.pointer("/proof_plan_soundness/status").and_then(serde_json::Value::as_str) {
         Some("passed") => {}
         Some(status) => violations.push(format!("proof_plan_soundness.status must be passed, got {status}")),
         None => violations.push("proof_plan_soundness.status is required".to_string()),
     }
-    match plan.get("builder_assumptions").and_then(serde_json::Value::as_array) {
-        Some(_) => {}
-        None => violations.push("builder_assumptions must be an array".to_string()),
+    if plan.get("builder_assumptions").is_none() {
+        violations.push("builder_assumptions is required".to_string());
     }
     violations
 }
@@ -4685,6 +8204,8 @@ fn dependency_lock_json(metadata: &CompileMetadata) -> serde_json::Value {
         "status": "ok",
         "schema": "cellscript-dependency-lock-v0.16",
         "module": metadata.module,
+        "metadata_schema_version": metadata.metadata_schema_version,
+        "metadata_schema_versions": metadata_schema_versions_json(metadata),
         "artifact_hash": metadata.artifact_hash,
         "cell_deps": ckb.map(|c| serde_json::to_value(&c.dep_group_manifest.declared_cell_deps).unwrap_or(serde_json::Value::Null)),
         "script_references": ckb.map(|c| serde_json::to_value(&c.script_references).unwrap_or(serde_json::Value::Null)),
@@ -4699,19 +8220,6 @@ fn proof_diff_report(old: &CompileMetadata, new: &CompileMetadata) -> serde_json
     let added = new_keys.difference(&old_keys).cloned().collect::<Vec<_>>();
     let removed = old_keys.difference(&new_keys).cloned().collect::<Vec<_>>();
     let changed = old_keys.intersection(&new_keys).filter(|key| old_map.get(*key) != new_map.get(*key)).cloned().collect::<Vec<_>>();
-    let changed_records = changed
-        .iter()
-        .filter_map(|key| {
-            let (Some(old_record), Some(new_record)) = (old_map.get(key), new_map.get(key)) else {
-                log::warn!("proof diff skipped inconsistent changed proof-plan key '{}'", key);
-                return None;
-            };
-            Some(serde_json::json!({
-                "key": key,
-                "fields": changed_proof_plan_fields(old_record, new_record),
-            }))
-        })
-        .collect::<Vec<_>>();
     serde_json::json!({
         "status": "ok",
         "schema": "cellscript-proof-diff-v0.16",
@@ -4720,34 +8228,7 @@ fn proof_diff_report(old: &CompileMetadata, new: &CompileMetadata) -> serde_json
         "added": added,
         "removed": removed,
         "changed": changed,
-        "changed_records": changed_records,
     })
-}
-
-fn changed_proof_plan_fields(old: &serde_json::Value, new: &serde_json::Value) -> Vec<serde_json::Value> {
-    [
-        "trigger",
-        "scope",
-        "reads",
-        "coverage",
-        "group_cardinality",
-        "builder_assumptions",
-        "codegen_coverage_status",
-        "on_chain_checked",
-    ]
-    .iter()
-    .filter_map(|field| {
-        let old_value = old.get(*field).cloned().unwrap_or(serde_json::Value::Null);
-        let new_value = new.get(*field).cloned().unwrap_or(serde_json::Value::Null);
-        (old_value != new_value).then(|| {
-            serde_json::json!({
-                "field": field,
-                "old": old_value,
-                "new": new_value,
-            })
-        })
-    })
-    .collect()
 }
 
 fn proof_plan_map(plans: &[ProofPlanMetadata]) -> BTreeMap<String, serde_json::Value> {
@@ -4761,8 +8242,6 @@ fn proof_plan_map(plans: &[ProofPlanMetadata]) -> BTreeMap<String, serde_json::V
                     "scope": plan.scope,
                     "reads": plan.reads,
                     "coverage": plan.coverage,
-                    "group_cardinality": plan.group_cardinality,
-                    "builder_assumptions": plan.builder_assumptions,
                     "codegen_coverage_status": plan.codegen_coverage_status,
                     "on_chain_checked": plan.on_chain_checked,
                 }),
@@ -4772,60 +8251,32 @@ fn proof_plan_map(plans: &[ProofPlanMetadata]) -> BTreeMap<String, serde_json::V
 }
 
 fn json_diff_report(kind: &str, old: &serde_json::Value, new: &serde_json::Value) -> serde_json::Value {
-    let mut changed = Vec::new();
-    collect_json_diffs("", old, new, &mut changed);
+    let changed = [
+        "/artifact/hash",
+        "/artifact/size_bytes",
+        "/target_profile/name",
+        "/proof_plan_soundness/status",
+        "/metadata_schema_version",
+        "/metadata_schema_versions/metadata",
+        "/metadata_schema_versions/source",
+        "/metadata_schema_versions/artifact",
+        "/metadata_schema_versions/constraints",
+    ]
+    .iter()
+    .filter(|pointer| old.pointer(pointer) != new.pointer(pointer))
+    .map(|pointer| {
+        serde_json::json!({
+            "path": pointer,
+            "old": old.pointer(pointer).cloned().unwrap_or(serde_json::Value::Null),
+            "new": new.pointer(pointer).cloned().unwrap_or(serde_json::Value::Null),
+        })
+    })
+    .collect::<Vec<_>>();
     serde_json::json!({
         "status": "ok",
         "schema": format!("cellscript-{}-diff-v0.16", kind),
         "changed": changed,
     })
-}
-
-fn collect_json_diffs(path: &str, old: &serde_json::Value, new: &serde_json::Value, changed: &mut Vec<serde_json::Value>) {
-    if old == new {
-        return;
-    }
-
-    match (old, new) {
-        (serde_json::Value::Object(old_object), serde_json::Value::Object(new_object)) => {
-            let keys = old_object.keys().chain(new_object.keys()).collect::<BTreeSet<_>>();
-            for key in keys {
-                let child_path = json_pointer_child(path, key);
-                collect_json_diffs(
-                    &child_path,
-                    old_object.get(key).unwrap_or(&serde_json::Value::Null),
-                    new_object.get(key).unwrap_or(&serde_json::Value::Null),
-                    changed,
-                );
-            }
-        }
-        (serde_json::Value::Array(old_items), serde_json::Value::Array(new_items)) => {
-            let max_len = old_items.len().max(new_items.len());
-            for index in 0..max_len {
-                let child_path = json_pointer_child(path, &index.to_string());
-                collect_json_diffs(
-                    &child_path,
-                    old_items.get(index).unwrap_or(&serde_json::Value::Null),
-                    new_items.get(index).unwrap_or(&serde_json::Value::Null),
-                    changed,
-                );
-            }
-        }
-        _ => changed.push(serde_json::json!({
-            "path": if path.is_empty() { "/" } else { path },
-            "old": old,
-            "new": new,
-        })),
-    }
-}
-
-fn json_pointer_child(parent: &str, token: &str) -> String {
-    let escaped = token.replace('~', "~0").replace('/', "~1");
-    if parent.is_empty() {
-        format!("/{escaped}")
-    } else {
-        format!("{parent}/{escaped}")
-    }
 }
 
 fn profile_report_json(metadata: &CompileMetadata, entry: Option<&str>) -> serde_json::Value {
@@ -5023,6 +8474,7 @@ fn audit_bundle_json(metadata: &CompileMetadata) -> serde_json::Value {
         "module": metadata.module,
         "compiler_version": metadata.compiler_version,
         "metadata_schema_version": metadata.metadata_schema_version,
+        "metadata_schema_versions": metadata_schema_versions_json(metadata),
         "target_profile": metadata.target_profile,
         "source_to_codegen": source_to_codegen,
         "proof_plan": metadata.runtime.proof_plan,
@@ -5054,7 +8506,6 @@ fn proof_plan_summary_json(proof_plan: &[ProofPlanMetadata]) -> serde_json::Valu
     let record_count = proof_plan.len();
     let on_chain_checked_count = proof_plan.iter().filter(|plan| plan.on_chain_checked).count();
     let runtime_required_count = proof_plan.iter().filter(|plan| plan.status == "runtime-required").count();
-    let checked_partial_count = proof_plan.iter().filter(|plan| plan.status == "checked-partial").count();
     let metadata_only_gap_count = proof_plan.iter().filter(|plan| plan.codegen_coverage_status == "gap:metadata-only").count();
     let fail_closed_count =
         proof_plan.iter().filter(|plan| plan.status == "fail-closed" || plan.codegen_coverage_status == "fail-closed").count();
@@ -5064,74 +8515,22 @@ fn proof_plan_summary_json(proof_plan: &[ProofPlanMetadata]) -> serde_json::Valu
         proof_plan.iter().flat_map(|plan| &plan.diagnostics).filter(|diagnostic| diagnostic.severity == "warning").count();
     let macro_provenance_count =
         proof_plan.iter().flat_map(|plan| &plan.coverage).filter(|coverage| coverage.starts_with("macro_expansion:")).count();
-    let invariant_action_match_count = invariant_action_coverage_match_count(proof_plan);
-    let invariant_unmatched_action_coverage_count = invariant_unmatched_action_coverage_count(proof_plan);
     let has_runtime_required_gaps = proof_plan.iter().any(|plan| plan.status == "runtime-required" && !plan.on_chain_checked);
-    let has_partial_gaps = proof_plan.iter().any(|plan| plan.status == "checked-partial" && !plan.on_chain_checked);
     let has_fail_closed_gaps = fail_closed_count > 0;
 
     serde_json::json!({
         "record_count": record_count,
         "on_chain_checked_count": on_chain_checked_count,
         "runtime_required_count": runtime_required_count,
-        "checked_partial_count": checked_partial_count,
         "metadata_only_gap_count": metadata_only_gap_count,
         "fail_closed_count": fail_closed_count,
         "diagnostic_error_count": diagnostic_error_count,
         "diagnostic_warning_count": diagnostic_warning_count,
         "macro_provenance_count": macro_provenance_count,
-        "invariant_action_match_count": invariant_action_match_count,
-        "invariant_unmatched_action_coverage_count": invariant_unmatched_action_coverage_count,
         "has_runtime_required_gaps": has_runtime_required_gaps,
-        "has_partial_gaps": has_partial_gaps,
         "has_fail_closed_gaps": has_fail_closed_gaps,
-        "has_unmatched_invariant_action_coverage": invariant_unmatched_action_coverage_count > 0,
-        "has_blocking_diagnostics": has_runtime_required_gaps || has_partial_gaps || has_fail_closed_gaps || diagnostic_error_count > 0,
+        "has_blocking_diagnostics": has_runtime_required_gaps || has_fail_closed_gaps || diagnostic_error_count > 0,
     })
-}
-
-fn invariant_action_coverage_match_count(proof_plan: &[ProofPlanMetadata]) -> usize {
-    proof_plan
-        .iter()
-        .flat_map(|plan| &plan.coverage)
-        .filter(|coverage| coverage.starts_with("invariant_coverage:matched-action-obligation:"))
-        .count()
-}
-
-fn invariant_unmatched_action_coverage_count(proof_plan: &[ProofPlanMetadata]) -> usize {
-    proof_plan
-        .iter()
-        .filter(|plan| {
-            plan.category == "aggregate-invariant"
-                && plan.builder_assumptions.iter().any(|assumption| {
-                    assumption.starts_with("declared(no_checked_action_obligation_matches:")
-                        || assumption.starts_with("declared(unmatched_related_action_obligation_count:")
-                })
-        })
-        .count()
-}
-
-fn invariant_unmatched_action_coverage_summaries(proof_plan: &[ProofPlanMetadata]) -> Vec<String> {
-    proof_plan
-        .iter()
-        .filter(|plan| {
-            plan.category == "aggregate-invariant"
-                && plan.builder_assumptions.iter().any(|assumption| {
-                    assumption.starts_with("declared(no_checked_action_obligation_matches:")
-                        || assumption.starts_with("declared(unmatched_related_action_obligation_count:")
-                })
-        })
-        .map(|plan| format!("{}:{} ({})", plan.origin, plan.feature, plan.codegen_coverage_status))
-        .collect()
-}
-
-fn checked_runtime_proof_plan_evidence_gap_summaries(proof_plan: &[ProofPlanMetadata]) -> Vec<String> {
-    proof_plan
-        .iter()
-        .filter(|plan| plan.status == "checked-runtime" || plan.on_chain_checked)
-        .filter(|plan| plan.executable_evidence.is_empty() || plan.codegen_coverage_status.starts_with("gap:"))
-        .map(|plan| format!("{}:{} ({})", plan.origin, plan.feature, plan.codegen_coverage_status))
-        .collect()
 }
 
 fn print_proof_plan_summary(proof_plan: &[ProofPlanMetadata]) {
@@ -5140,14 +8539,11 @@ fn print_proof_plan_summary(proof_plan: &[ProofPlanMetadata]) {
     println!("    records: {}", summary["record_count"]);
     println!("    on_chain_checked: {}", summary["on_chain_checked_count"]);
     println!("    runtime_required: {}", summary["runtime_required_count"]);
-    println!("    checked_partial: {}", summary["checked_partial_count"]);
     println!("    metadata_only_gaps: {}", summary["metadata_only_gap_count"]);
     println!("    fail_closed: {}", summary["fail_closed_count"]);
     println!("    diagnostic_errors: {}", summary["diagnostic_error_count"]);
     println!("    diagnostic_warnings: {}", summary["diagnostic_warning_count"]);
     println!("    macro_provenance_records: {}", summary["macro_provenance_count"]);
-    println!("    invariant_action_matches: {}", summary["invariant_action_match_count"]);
-    println!("    invariant_unmatched_action_coverage: {}", summary["invariant_unmatched_action_coverage_count"]);
 }
 
 fn print_proof_plan_record(plan: &ProofPlanMetadata) {
@@ -5230,19 +8626,9 @@ fn proof_plan_read_label(read: &str) -> String {
     }
 }
 
-fn dirs_config_dir() -> PathBuf {
-    if let Ok(config) = std::env::var("CELLSCRIPT_CONFIG") {
-        return PathBuf::from(config);
-    }
-    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
-        return PathBuf::from(xdg).join("cellscript");
-    }
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(home).join(".config").join("cellscript")
-}
-
 fn effective_check_args(mut args: CheckArgs) -> Result<CheckArgs> {
-    let policy = PackageManager::new(".").read_manifest()?.policy;
+    // In a workspace root (virtual manifest without [package]), fall back to default policy.
+    let policy = PackageManager::new(".").read_manifest().map(|m| m.policy).unwrap_or_default();
     merge_check_policy(&mut args, &policy);
     Ok(args)
 }
@@ -5291,38 +8677,6 @@ fn display_doc_output_format(format: &OutputFormat) -> &'static str {
     }
 }
 
-fn open_doc_output(output: &Path) -> Result<()> {
-    let status = std::process::Command::new("open").arg(output).status().map_err(|error| {
-        crate::error::CompileError::without_span(format!("failed to open documentation '{}': {}", output.display(), error))
-    })?;
-    if !status.success() {
-        return Err(crate::error::CompileError::without_span(format!(
-            "failed to open documentation '{}': open exited with {}",
-            output.display(),
-            status
-        )));
-    }
-    Ok(())
-}
-
-fn read_ckb_hash_file(path: &Path) -> Result<Vec<u8>> {
-    let mut file = std::fs::File::open(path).map_err(|error| {
-        crate::error::CompileError::without_span(format!("failed to read CKB hash input '{}': {}", path.display(), error))
-    })?;
-    let mut bytes = Vec::new();
-    file.by_ref().take(CKB_HASH_FILE_SIZE_LIMIT_BYTES + 1).read_to_end(&mut bytes).map_err(|error| {
-        crate::error::CompileError::without_span(format!("failed to read CKB hash input '{}': {}", path.display(), error))
-    })?;
-    if bytes.len() as u64 > CKB_HASH_FILE_SIZE_LIMIT_BYTES {
-        return Err(crate::error::CompileError::without_span(format!(
-            "CKB hash input '{}' is too large: limit is {} bytes",
-            path.display(),
-            CKB_HASH_FILE_SIZE_LIMIT_BYTES
-        )));
-    }
-    Ok(bytes)
-}
-
 fn ensure_new_package_destination(path: &Path) -> Result<()> {
     if !path.exists() {
         return Ok(());
@@ -5338,7 +8692,7 @@ fn ensure_new_package_destination(path: &Path) -> Result<()> {
 }
 
 fn init_git_repo(path: &Path) -> Result<bool> {
-    let output = std::process::Command::new("git").arg("init").arg("--quiet").arg("--").arg(path).output().map_err(|error| {
+    let output = std::process::Command::new("git").arg("init").arg("--quiet").arg(path).output().map_err(|error| {
         crate::error::CompileError::without_span(format!("failed to run git init for '{}': {}", path.display(), error))
     })?;
     if !output.status.success() {
@@ -5346,106 +8700,6 @@ fn init_git_repo(path: &Path) -> Result<bool> {
         return Err(crate::error::CompileError::without_span(format!("git init failed for '{}': {}", path.display(), stderr.trim())));
     }
     Ok(true)
-}
-
-fn clean_generated_paths(package_root: &Path, manifest: &crate::package::PackageManifest) -> Vec<PathBuf> {
-    let mut paths = Vec::new();
-    let mut seen = BTreeSet::new();
-    for raw_path in ["target", "build", "dist", ".cell"] {
-        push_clean_path(package_root, raw_path, &mut paths, &mut seen);
-    }
-
-    if let Some(out_dir) = manifest.build.out_dir.as_deref() {
-        push_clean_path(package_root, out_dir, &mut paths, &mut seen);
-    }
-
-    let mut source_roots = manifest.package.source_roots.clone();
-    if source_roots.is_empty() {
-        source_roots.push("src".to_string());
-    }
-    source_roots.push(
-        Path::new(&manifest.package.entry)
-            .parent()
-            .filter(|parent| !parent.as_os_str().is_empty())
-            .unwrap_or_else(|| Path::new("."))
-            .display()
-            .to_string(),
-    );
-
-    for source_root in source_roots {
-        if let Some(raw_path) = source_root_clean_cache_path(&source_root) {
-            push_clean_path(package_root, &raw_path, &mut paths, &mut seen);
-        }
-    }
-
-    paths
-}
-
-fn source_root_clean_cache_path(source_root: &str) -> Option<String> {
-    let path = Path::new(source_root);
-    if source_root.is_empty()
-        || path.is_absolute()
-        || path.components().any(|component| {
-            matches!(component, std::path::Component::ParentDir | std::path::Component::Prefix(_) | std::path::Component::RootDir)
-        })
-    {
-        return None;
-    }
-    Some(path.join(".cell").display().to_string())
-}
-
-fn push_clean_path(package_root: &Path, raw_path: &str, paths: &mut Vec<PathBuf>, seen: &mut BTreeSet<PathBuf>) {
-    let path = Path::new(raw_path);
-    if raw_path.is_empty()
-        || path.is_absolute()
-        || path.components().any(|component| {
-            matches!(component, std::path::Component::ParentDir | std::path::Component::Prefix(_) | std::path::Component::RootDir)
-        })
-    {
-        return;
-    }
-
-    let candidate = package_root.join(path);
-    if seen.insert(candidate.clone()) {
-        paths.push(candidate);
-    }
-}
-
-fn clean_path_label(package_root: &Path, path: &Path) -> String {
-    path.strip_prefix(package_root).unwrap_or(path).display().to_string()
-}
-
-fn validate_clean_path(package_root: &Path, path: &Path) -> Result<()> {
-    let metadata = std::fs::symlink_metadata(path)?;
-    if metadata.file_type().is_symlink() {
-        return Err(crate::error::CompileError::without_span(format!(
-            "refusing to clean '{}' because it is a symbolic link",
-            path.display()
-        )));
-    }
-
-    let canonical = path.canonicalize()?;
-    if !canonical.starts_with(package_root) {
-        return Err(crate::error::CompileError::without_span(format!(
-            "refusing to remove '{}' because it resolves outside the package root",
-            path.display()
-        )));
-    }
-
-    if !metadata.is_dir() {
-        return Err(crate::error::CompileError::without_span(format!(
-            "refusing to clean '{}' because it is not a directory",
-            path.display()
-        )));
-    }
-
-    Ok(())
-}
-
-fn remove_clean_path(package_root: &Path, path: &Path) -> Result<()> {
-    validate_clean_path(package_root, path)?;
-    std::fs::remove_dir_all(path)?;
-    Ok(())
 }
 
 fn runtime_error_info_from_query(query: &str) -> Option<CellScriptRuntimeErrorInfo> {
@@ -5469,21 +8723,34 @@ fn validate_dependency_target_flags(dev: bool, build: bool) -> Result<()> {
     Ok(())
 }
 
-fn validate_dependency_source_args(git: Option<&str>, path: Option<&Path>, rev: Option<&str>) -> Result<()> {
-    if git.is_some() && path.is_some() {
-        return Err(crate::error::CompileError::without_span("dependency source accepts either --git or --path, not both"));
+/// Reject self-dependency writes to the manifest. A package cannot list itself
+/// (or a path pointing at its own root) as a dependency because that turns the
+/// package graph into an immediate cycle. The empty-name edge case observed in
+/// 0.20 ("cellc install --path ." wrote a `[dependencies.""]` row that broke
+/// every subsequent `cellc build`) is the canonical failure this helper
+/// prevents.
+fn validate_not_self_dependency(crate_name: &str, dep: &Dependency, manifest: &crate::package::PackageManifest) -> Result<()> {
+    if !crate_name.trim().is_empty() && crate_name == manifest.package.name {
+        return Err(crate::error::CompileError::without_span(format!(
+            "refusing to add self-dependency: package '{}' cannot depend on itself",
+            manifest.package.name
+        )));
     }
-    if path.is_some() && rev.is_some() {
-        return Err(crate::error::CompileError::without_span("--rev is only valid with --git dependencies"));
+    if let Dependency::Detailed(detailed) = dep {
+        if let Some(dep_path) = &detailed.path {
+            let dep_canon = std::path::Path::new(dep_path);
+            let manifest_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+            let dep_abs = dep_canon.canonicalize().unwrap_or_else(|_| manifest_dir.join(dep_canon));
+            let manifest_abs = manifest_dir.canonicalize().unwrap_or_else(|_| manifest_dir.clone());
+            if dep_abs == manifest_abs {
+                return Err(crate::error::CompileError::without_span(format!(
+                    "refusing to add self-dependency: path '{}' resolves to the current package root",
+                    dep_path
+                )));
+            }
+        }
     }
-    match (git, rev) {
-        (Some(_), Some(rev)) => validate_git_revision(rev),
-        (Some(_), None) => Err(crate::error::CompileError::without_span(
-            "git dependencies must specify --rev with a full commit hash; branch/tag/default-branch dependencies are not accepted",
-        )),
-        (None, Some(_)) => Err(crate::error::CompileError::without_span("--rev is only valid with --git dependencies")),
-        (None, None) => Ok(()),
-    }
+    Ok(())
 }
 
 fn dependency_target_label(dev: bool, build: bool) -> &'static str {
@@ -5506,21 +8773,23 @@ fn dependency_map_mut(manifest: &mut crate::package::PackageManifest, dev: bool,
     }
 }
 
-fn dependency_from_add_args(args: &AddArgs) -> Result<Dependency> {
+fn dependency_from_add_args(args: &AddArgs) -> Dependency {
     match (&args.git, &args.path) {
-        (Some(git), _) => Ok(Dependency::Detailed(DetailedDependency {
+        (Some(git), _) => Dependency::Detailed(DetailedDependency {
             version: "*".to_string(),
+            namespace: None,
             git: Some(git.clone()),
             branch: None,
             tag: None,
-            rev: args.rev.clone(),
+            rev: None,
             path: None,
             optional: false,
             features: Vec::new(),
             default_features: true,
-        })),
-        (_, Some(path)) => Ok(Dependency::Detailed(DetailedDependency {
+        }),
+        (_, Some(path)) => Dependency::Detailed(DetailedDependency {
             version: "*".to_string(),
+            namespace: None,
             git: None,
             branch: None,
             tag: None,
@@ -5529,8 +8798,44 @@ fn dependency_from_add_args(args: &AddArgs) -> Result<Dependency> {
             optional: false,
             features: Vec::new(),
             default_features: true,
-        })),
-        _ => Ok(Dependency::Simple("*".to_string())),
+        }),
+        _ => Dependency::Simple("*".to_string()),
+    }
+}
+
+fn auth_capability_args_from_matches(m: &clap::ArgMatches) -> AuthCapabilityArgs {
+    AuthCapabilityArgs {
+        registry_origin: m.get_one::<String>("registry-origin").cloned(),
+        principal_type: m.get_one::<String>("principal-type").cloned(),
+        principal_id: m.get_one::<String>("principal-id").cloned(),
+        capability_pubkey: m.get_one::<String>("capability-pubkey").cloned(),
+        scopes: m.get_many::<String>("scope").map(|values| values.cloned().collect()).unwrap_or_default(),
+        expires: m.get_one::<String>("expires").cloned(),
+        capability_expires_at: m.get_one::<String>("capability-expires-at").cloned(),
+        json: m.get_flag("json"),
+    }
+}
+
+fn auth_capability_submit_args_from_matches(m: &clap::ArgMatches) -> AuthCapabilitySubmitArgs {
+    AuthCapabilitySubmitArgs {
+        api_url: m.get_one::<String>("api-url").cloned(),
+        payload: m.get_one::<String>("payload").map(PathBuf::from).expect("required payload"),
+        joyid_signature: m.get_one::<String>("joyid-signature").map(PathBuf::from).expect("required joyid-signature"),
+        json: m.get_flag("json"),
+    }
+}
+
+fn auth_capability_revoke_args_from_matches(m: &clap::ArgMatches) -> AuthCapabilityRevokeArgs {
+    AuthCapabilityRevokeArgs {
+        api_url: m.get_one::<String>("api-url").cloned(),
+        registry_origin: m.get_one::<String>("registry-origin").cloned(),
+        principal_type: m.get_one::<String>("principal-type").cloned(),
+        principal_id: m.get_one::<String>("principal-id").cloned(),
+        capability_key_id: m.get_one::<String>("capability-key-id").cloned(),
+        payload: m.get_one::<String>("payload").map(PathBuf::from),
+        joyid_signature: m.get_one::<String>("joyid-signature").map(PathBuf::from),
+        reason: m.get_one::<String>("reason").cloned(),
+        json: m.get_flag("json"),
     }
 }
 
@@ -5544,6 +8849,662 @@ fn refresh_lockfile_from_manifest(root: &Path) -> Result<()> {
     Ok(())
 }
 
+fn refresh_lockfile_from_build(root: &Path, metadata: &CompileMetadata) -> Result<()> {
+    let mut manager = PackageManager::new(root);
+    let manifest = manager.read_manifest()?;
+    manager.resolve_dependencies()?;
+
+    let mut lockfile = Lockfile::read_from_root(root)?.unwrap_or_default();
+    let mut package = lockfile_package_info(root, &manifest)?;
+    package.compiler_source_hash = metadata.source_hash.clone();
+    lockfile.package = package;
+    lockfile.replace_with_resolved(manager.get_resolved());
+    lockfile.package_build = Some(locked_build_info_from_metadata(metadata)?);
+    refresh_lockfile_deployment_refs(root, &mut lockfile);
+    lockfile.write_to_root(root)?;
+    Ok(())
+}
+
+/// Bridge Deployed.toml deployment records into Cell.lock. Without this,
+/// `cellc registry verify` would always fail with "deployment for network 'X'
+/// is missing from Cell.lock" because nothing in the production build pipeline
+/// ever wrote a `lockfile.deployment` entry. We only keep a record if its
+/// deployment name + tx_hash + output_index match a real Deployed.toml entry;
+/// stale or duplicate networks are dropped. Records that fail the build-identity
+/// match (artifact_hash / metadata_hash / etc. mismatch with Cell.lock's locked
+/// build) are kept but their hash fields are left None so the registry verifier
+/// can surface the mismatch as a violation instead of pretending the deployment
+/// is consistent with the locked build.
+fn refresh_lockfile_deployment_refs(root: &Path, lockfile: &mut crate::package::Lockfile) {
+    let deployed = match crate::package::DeployedManifest::read_from_root(root) {
+        Ok(Some(manifest)) => manifest,
+        Ok(None) => return,
+        Err(_) => return,
+    };
+    let locked_build = lockfile.package_build.as_ref();
+    let mut next: BTreeMap<String, crate::package::LockfileDeploymentRef> = BTreeMap::new();
+    for record in deployed.deployments {
+        if record.network.trim().is_empty() {
+            continue;
+        }
+        if next.contains_key(&record.network) {
+            // First-write wins; later duplicates from Deployed.toml are dropped
+            // to keep Cell.lock deterministic for the same source tree.
+            continue;
+        }
+        let artifact_match = match (&record.artifact_hash, locked_build.and_then(|b| b.artifact_hash.as_ref())) {
+            (Some(a), Some(b)) => a == b,
+            _ => false,
+        };
+        let record_str = record.out_point.clone();
+        let record_hash = if artifact_match { hash_json_value("deployment record", &record).ok() } else { None };
+        let code_hash = if artifact_match { Some(record.code_hash.clone()) } else { None };
+        let out_point = if artifact_match { Some(record.out_point.clone()) } else { None };
+        let data_hash = if artifact_match { Some(record.data_hash.clone()) } else { None };
+        next.insert(
+            record.network.clone(),
+            crate::package::LockfileDeploymentRef { record: record_str, record_hash, code_hash, out_point, data_hash },
+        );
+    }
+    lockfile.deployment = next;
+}
+
+fn lockfile_package_info(root: &Path, manifest: &crate::package::PackageManifest) -> Result<crate::package::LockfilePackageInfo> {
+    Ok(crate::package::LockfilePackageInfo {
+        name: manifest.package.name.clone(),
+        version: manifest.package.version.clone(),
+        namespace: manifest.package.namespace.clone(),
+        source_hash: Some(crate::package::registry::compute_source_hash(root)?),
+        compiler_source_hash: None,
+    })
+}
+
+fn locked_build_info_from_metadata(metadata: &CompileMetadata) -> Result<crate::package::LockedBuildInfo> {
+    Ok(crate::package::LockedBuildInfo {
+        compiler_version: Some(metadata.compiler_version.clone()),
+        target_profile: Some(metadata.target_profile.name.clone()),
+        artifact_hash: metadata.artifact_hash.clone(),
+        metadata_hash: Some(hash_json_value("metadata", metadata)?),
+        schema_hash: Some(metadata.molecule_schema_manifest.manifest_hash.clone()),
+        cell_data_codec_manifest_hash: Some(metadata.cell_data_codec_manifest.manifest_hash.clone()),
+        abi_hash: Some(metadata_abi_hash(metadata)?),
+        constraints_hash: Some(hash_json_value("constraints", &metadata.constraints)?),
+    })
+}
+
+fn metadata_schema_versions_json(metadata: &CompileMetadata) -> serde_json::Value {
+    serde_json::json!({
+        "metadata": metadata.metadata_schema_version,
+        "source": metadata.source_metadata_schema_version,
+        "artifact": metadata.artifact_metadata_schema_version,
+        "constraints": metadata.constraints_metadata_schema_version,
+    })
+}
+
+fn metadata_abi_hash(metadata: &CompileMetadata) -> Result<String> {
+    let abi = serde_json::json!({
+        "metadata_schema_version": metadata.metadata_schema_version,
+        "metadata_schema_versions": metadata_schema_versions_json(metadata),
+        "target_profile": metadata.target_profile.name.as_str(),
+        "types": &metadata.types,
+        "actions": &metadata.actions,
+        "functions": &metadata.functions,
+        "locks": &metadata.locks,
+        "molecule_schema_manifest": &metadata.molecule_schema_manifest,
+        "cell_data_codec_manifest": &metadata.cell_data_codec_manifest,
+    });
+    hash_json_value("abi", &abi)
+}
+
+fn hash_json_value<T: serde::Serialize>(label: &str, value: &T) -> Result<String> {
+    let bytes = serde_json::to_vec(value)
+        .map_err(|e| crate::error::CompileError::without_span(format!("failed to serialize {} for digest: {}", label, e)))?;
+    Ok(crate::hex_encode(&crate::ckb_blake2b256(&bytes)))
+}
+
+fn cellfabric_intent_envelope_json(
+    metadata: &CompileMetadata,
+    action: &crate::ActionMetadata,
+    action_plan: &serde_json::Value,
+    input_path: &Path,
+    metadata_hash: &str,
+) -> Result<serde_json::Value> {
+    let action_plan_hash = hash_json_value("CellScript action plan", action_plan)?;
+    let app_namespace = metadata.module.clone();
+    let app_conflict_key_templates = cellfabric_app_conflict_key_templates(&app_namespace, action);
+    Ok(serde_json::json!({
+        "schema": "cellscript-cellfabric-intent-envelope-v0.20",
+        "status": "requires-runtime-binding",
+        "bridge_boundary": {
+            "kind": "json-bridge",
+            "cellscript_core_dependency": "no-cell-fabric-rust-crate",
+            "cellfabric_expected_role": "intent-ordering-soft-confirmation-and-settlement-tracking",
+            "not_a_cellfabric_signed_intent": true,
+            "not_a_soft_confirmation": true,
+            "not_l1_finality": true,
+            "compiler_must_not_infer_cellfabric_finality": true,
+        },
+        "source": {
+            "input": input_path.display().to_string(),
+            "module": metadata.module.clone(),
+            "action": action.name.clone(),
+            "target_profile": metadata.target_profile.name.clone(),
+            "compiler_version": metadata.compiler_version.clone(),
+            "metadata_hash": metadata_hash,
+            "artifact_hash": &metadata.artifact_hash,
+            "action_plan_hash": action_plan_hash.clone(),
+        },
+        "cellfabric_mapping": {
+            "target": "CellFabric IntentBody template",
+            "candidate_intent_action": "App",
+            "payload_format": "cellscript-action-plan-json-v1",
+            "payload_hash_field": "cellscript_action_plan_hash",
+            "resource_binding": "runtime-resolved-live-cells",
+            "auth_binding": "runtime-wallet-or-live-cell-context",
+            "settlement_compiler": "cellscript-ckb-adapter-or-generated-builder",
+        },
+        "cellfabric_intent_template": {
+            "version": 1,
+            "domain": {
+                "chain_id": metadata.target_profile.name.clone(),
+                "app_namespace": app_namespace.clone(),
+            },
+            "author": {
+                "lock_script_hash": serde_json::Value::Null,
+                "source": "runtime-wallet-or-live-cell-context",
+            },
+            "nonce": serde_json::Value::Null,
+            "validity": {
+                "valid_after_ms": serde_json::Value::Null,
+                "valid_until_ms": serde_json::Value::Null,
+            },
+            "resources": {
+                "consumes": [],
+                "reads": [],
+                "app_keys": app_conflict_key_templates,
+                "status": "template-only-runtime-outpoints-required",
+            },
+            "action": {
+                "kind": "App",
+                "action": action.name.clone(),
+                "payload_format": "cellscript-action-plan-json-v1",
+                "payload_hash": action_plan_hash.clone(),
+            },
+            "constraints": {
+                "source": "cellscript-action-plan",
+                "runtime_input_requirements": &action.transaction_runtime_input_requirements,
+                "verifier_obligations": &action.verifier_obligations,
+                "fail_closed_runtime_features": &action.fail_closed_runtime_features,
+            },
+            "dependencies": {
+                "requires": [],
+                "source": "service-supplied-cellfabric-intent-ids",
+            },
+            "replacement": {
+                "supersedes": [],
+                "rule": "service-policy",
+            },
+            "fee": {
+                "fee_bid_shannons": serde_json::Value::Null,
+                "max_fee_shannons": serde_json::Value::Null,
+                "source": "runtime-builder-policy",
+            },
+            "auth_mode": "CoSignConcreteTx",
+            "metadata": {
+                "cellscript_action": action.name.clone(),
+                "cellscript_metadata_hash": metadata_hash,
+                "cellscript_action_plan_hash": action_plan_hash.clone(),
+                "cellscript_artifact_hash": &metadata.artifact_hash,
+            },
+        },
+        "resource_access_template": {
+            "hard_conflicts": {
+                "status": "runtime-required",
+                "consumed_cell_patterns": &action.consume_set,
+                "runtime_input_requirements": &action.transaction_runtime_input_requirements,
+                "note": "CellFabric OutPointRef conflicts must be filled from resolved live cells before submitting a SignedIntent.",
+            },
+            "reads": &action.read_refs,
+            "writes": {
+                "creates": &action.create_set,
+                "mutates": &action.mutate_set,
+            },
+            "app_conflict_key_templates": cellfabric_app_conflict_key_templates(&app_namespace, action),
+        },
+        "required_runtime_evidence": [
+            "author_lock_script_hash",
+            "intent_nonce",
+            "resolved_consumed_outpoints",
+            "resolved_read_outpoints",
+            "cellfabric_auth_signature",
+            "deployment_identity",
+            "live_cell_resolution",
+            "capacity_fee_balance",
+            "estimate_cycles",
+            "tx_pool_acceptance",
+            "l1_status_observation"
+        ],
+        "non_claims": [
+            "does not create a CellFabric SignedIntent",
+            "does not prove CellFabric orderer acceptance",
+            "does not soft-confirm the action",
+            "does not prove live-cell availability",
+            "does not prove CKB tx-pool acceptance",
+            "does not prove L1 finality"
+        ],
+        "action_plan": action_plan,
+    }))
+}
+
+fn cellfabric_app_conflict_key_templates(app_namespace: &str, action: &crate::ActionMetadata) -> Vec<serde_json::Value> {
+    let mut keys = BTreeSet::<(String, String)>::new();
+    for shared in &action.touches_shared {
+        keys.insert(("cellscript-shared-resource".to_string(), shared.clone()));
+    }
+    for pattern in &action.mutate_set {
+        keys.insert(("cellscript-mutate-binding".to_string(), format!("{}:{}", pattern.ty, pattern.binding)));
+    }
+    for primitive in &action.pool_primitives {
+        if let Ok(value) = serde_json::to_value(primitive) {
+            keys.insert(("cellscript-pool-primitive".to_string(), value.to_string()));
+        }
+    }
+    keys.into_iter()
+        .map(|(key_type, key)| {
+            serde_json::json!({
+                "namespace": app_namespace,
+                "key_type": key_type,
+                "key": key,
+                "key_encoding": "utf8",
+                "key_bytes_hex": crate::hex_encode(key.as_bytes()),
+            })
+        })
+        .collect()
+}
+
+fn push_missing_locked_build_identity(label: &str, build: &crate::package::LockedBuildInfo, violations: &mut Vec<String>) {
+    if build.compiler_version.is_none() {
+        violations.push(format!("{} has no compiler_version", label));
+    }
+    if build.target_profile.is_none() {
+        violations.push(format!("{} has no target_profile", label));
+    }
+    if build.artifact_hash.is_none() {
+        violations.push(format!("{} has no artifact_hash", label));
+    }
+    if build.metadata_hash.is_none() {
+        violations.push(format!("{} has no metadata_hash", label));
+    }
+    if build.schema_hash.is_none() {
+        violations.push(format!("{} has no schema_hash", label));
+    }
+    if build.cell_data_codec_manifest_hash.is_none() {
+        violations.push(format!("{} has no cell_data_codec_manifest_hash", label));
+    }
+    if build.abi_hash.is_none() {
+        violations.push(format!("{} has no abi_hash", label));
+    }
+    if build.constraints_hash.is_none() {
+        violations.push(format!("{} has no constraints_hash", label));
+    }
+}
+
+fn push_missing_deployed_build_identity(label: &str, build: &crate::package::DeployedBuildInfo, violations: &mut Vec<String>) {
+    if build.compiler_version.is_none() {
+        violations.push(format!("{} has no compiler_version", label));
+    }
+    if build.artifact_hash.is_none() {
+        violations.push(format!("{} has no artifact_hash", label));
+    }
+    if build.metadata_hash.is_none() {
+        violations.push(format!("{} has no metadata_hash", label));
+    }
+    if build.schema_hash.is_none() {
+        violations.push(format!("{} has no schema_hash", label));
+    }
+    if build.cell_data_codec_manifest_hash.is_none() {
+        violations.push(format!("{} has no cell_data_codec_manifest_hash", label));
+    }
+    if build.abi_hash.is_none() {
+        violations.push(format!("{} has no abi_hash", label));
+    }
+    if build.constraints_hash.is_none() {
+        violations.push(format!("{} has no constraints_hash", label));
+    }
+}
+
+fn compare_optional_build_field(
+    field: &str,
+    lock_value: &Option<String>,
+    deployed_value: &Option<String>,
+    violations: &mut Vec<String>,
+) {
+    match (lock_value, deployed_value) {
+        (Some(lock_value), Some(deployed_value)) if lock_value == deployed_value => {}
+        (Some(lock_value), Some(deployed_value)) => {
+            violations.push(format!("{} mismatch: Cell.lock has '{}', Deployed.toml has '{}'", field, lock_value, deployed_value))
+        }
+        (None, _) => violations.push(format!("Cell.lock [package.build] has no {}", field)),
+        (_, None) => violations.push(format!("Deployed.toml [build] has no {}", field)),
+    }
+}
+
+fn verify_live_deployments(
+    deployed: &crate::package::DeployedManifest,
+    rpc_url: &str,
+    network_filter: Option<&str>,
+    violations: &mut Vec<String>,
+) -> Result<serde_json::Value> {
+    let chain_info = ckb_rpc_call(rpc_url, "get_blockchain_info", serde_json::json!([]))?;
+    let chain = chain_info.get("chain").or_else(|| chain_info.get("chain_id")).and_then(|value| value.as_str()).map(str::to_string);
+    let mut evidence = Vec::new();
+    let mut checked = 0usize;
+
+    for deployment in &deployed.deployments {
+        if network_filter.is_some_and(|network| network != deployment.network) {
+            continue;
+        }
+        checked += 1;
+        let mut deployment_violations = Vec::new();
+        if let Some(violation) = deployment_status_violation(deployment) {
+            deployment_violations.push(violation);
+        }
+
+        match chain.as_deref() {
+            Some(chain) if chain_id_matches(chain, &deployment.chain_id) => {}
+            Some(chain) => deployment_violations.push(format!(
+                "chain_id mismatch for network '{}': RPC has '{}', Deployed.toml has '{}'",
+                deployment.network, chain, deployment.chain_id
+            )),
+            None => deployment_violations.push("RPC get_blockchain_info did not return chain".to_string()),
+        }
+
+        let out_point = serde_json::json!({
+            "tx_hash": deployment.tx_hash,
+            "index": format!("0x{:x}", deployment.output_index),
+        });
+        let live = ckb_rpc_call(rpc_url, "get_live_cell", serde_json::json!([out_point, true]))?;
+        let rpc_status = live.get("status").and_then(|value| value.as_str()).unwrap_or("unknown").to_string();
+        if rpc_status != "live" {
+            deployment_violations.push(format!(
+                "deployment for network '{}' is not live at {}: RPC status '{}'",
+                deployment.network, deployment.out_point, rpc_status
+            ));
+        }
+
+        let rpc_data_hash = live_cell_data_hash(&live);
+        match rpc_data_hash.as_deref() {
+            Some(hash) if hex_eq(hash, &deployment.data_hash) => {}
+            Some(hash) => deployment_violations.push(format!(
+                "live data_hash mismatch for network '{}': RPC has '{}', Deployed.toml has '{}'",
+                deployment.network, hash, deployment.data_hash
+            )),
+            None => deployment_violations
+                .push(format!("RPC get_live_cell for network '{}' did not return cell.data.hash", deployment.network)),
+        }
+
+        let rpc_code_hash =
+            live_cell_code_hash_for_deployment(&live, deployment, rpc_data_hash.as_deref(), &mut deployment_violations);
+        if let Some(hash) = rpc_code_hash.as_deref() {
+            if !hex_eq(hash, &deployment.code_hash) {
+                deployment_violations.push(format!(
+                    "live code_hash mismatch for network '{}': RPC has '{}', Deployed.toml has '{}'",
+                    deployment.network, hash, deployment.code_hash
+                ));
+            }
+        }
+
+        if let Some(type_id) = &deployment.type_id {
+            let rpc_type_args = live_cell_type_script(&live).and_then(|script| script.get("args")).and_then(|value| value.as_str());
+            match rpc_type_args {
+                Some(args) if hex_eq(args, type_id) => {}
+                Some(args) => deployment_violations.push(format!(
+                    "type_id mismatch for network '{}': RPC type args '{}', Deployed.toml has '{}'",
+                    deployment.network, args, type_id
+                )),
+                None => deployment_violations.push(format!(
+                    "deployment for network '{}' declares type_id but live cell has no type script args",
+                    deployment.network
+                )),
+            }
+        }
+
+        for violation in &deployment_violations {
+            if !violations.contains(violation) {
+                violations.push(violation.clone());
+            }
+        }
+        evidence.push(serde_json::json!({
+            "network": deployment.network,
+            "chain_id": deployment.chain_id,
+            "deployment_status": deployment.status.as_ref(),
+            "out_point": deployment.out_point,
+            "rpc_status": rpc_status,
+            "status": if deployment_violations.is_empty() { "live-verified" } else { "failed" },
+            "expected_data_hash": deployment.data_hash,
+            "rpc_data_hash": rpc_data_hash,
+            "expected_code_hash": deployment.code_hash,
+            "rpc_code_hash": rpc_code_hash,
+            "hash_type": deployment.hash_type,
+            "violations": deployment_violations,
+        }));
+    }
+
+    if checked == 0 {
+        violations.push(match network_filter {
+            Some(network) => format!("no deployment record found for requested live network '{}'", network),
+            None => "no deployment records found for live verification".to_string(),
+        });
+    }
+
+    Ok(serde_json::json!({
+        "enabled": true,
+        "rpc_url": rpc_url,
+        "network": network_filter,
+        "chain": chain,
+        "checked": checked,
+        "evidence": evidence,
+    }))
+}
+
+fn live_cell_data_hash(live: &serde_json::Value) -> Option<String> {
+    live.pointer("/cell/data/hash").or_else(|| live.pointer("/cell/data_hash")).and_then(|value| value.as_str()).map(str::to_string)
+}
+
+fn live_cell_type_script(live: &serde_json::Value) -> Option<&serde_json::Value> {
+    let script = live.pointer("/cell/output/type")?;
+    (!script.is_null()).then_some(script)
+}
+
+fn live_cell_code_hash_for_deployment(
+    live: &serde_json::Value,
+    deployment: &crate::package::DeploymentRecord,
+    rpc_data_hash: Option<&str>,
+    violations: &mut Vec<String>,
+) -> Option<String> {
+    match normalize_hash_type(&deployment.hash_type).as_deref() {
+        Some("data" | "data1" | "data2") => rpc_data_hash.map(str::to_string),
+        Some("type") => {
+            let Some(script) = live_cell_type_script(live) else {
+                violations.push(format!(
+                    "deployment for network '{}' uses hash_type 'type' but live cell has no type script",
+                    deployment.network
+                ));
+                return None;
+            };
+            match ckb_script_hash_from_json(script) {
+                Ok(hash) => Some(hash),
+                Err(error) => {
+                    violations
+                        .push(format!("failed to compute live type script hash for network '{}': {}", deployment.network, error));
+                    None
+                }
+            }
+        }
+        Some(other) => {
+            violations.push(format!("unsupported deployment hash_type '{}' for live verification", other));
+            None
+        }
+        None => {
+            violations.push("deployment hash_type is empty".to_string());
+            None
+        }
+    }
+}
+
+fn ckb_script_hash_from_json(script: &serde_json::Value) -> Result<String> {
+    let code_hash = script
+        .get("code_hash")
+        .and_then(|value| value.as_str())
+        .ok_or_else(|| crate::error::CompileError::without_span("script has no code_hash"))?;
+    let hash_type = script
+        .get("hash_type")
+        .and_then(|value| value.as_str())
+        .ok_or_else(|| crate::error::CompileError::without_span("script has no hash_type"))?;
+    let args = script.get("args").and_then(|value| value.as_str()).unwrap_or("0x");
+
+    let code_hash_bytes = hex::decode(code_hash.trim_start_matches("0x"))
+        .map_err(|error| crate::error::CompileError::without_span(format!("invalid script code_hash: {}", error)))?;
+    if code_hash_bytes.len() != 32 {
+        return Err(crate::error::CompileError::without_span(format!(
+            "script code_hash must be 32 bytes, got {}",
+            code_hash_bytes.len()
+        )));
+    }
+    let hash_type_byte = ckb_hash_type_byte(hash_type)
+        .ok_or_else(|| crate::error::CompileError::without_span(format!("unsupported script hash_type '{}'", hash_type)))?;
+    let args_bytes = hex::decode(args.trim_start_matches("0x"))
+        .map_err(|error| crate::error::CompileError::without_span(format!("invalid script args: {}", error)))?;
+
+    let mut args_molecule = Vec::with_capacity(4 + args_bytes.len());
+    args_molecule.extend_from_slice(&(args_bytes.len() as u32).to_le_bytes());
+    args_molecule.extend_from_slice(&args_bytes);
+
+    let header_size = 4 + 4 * 3;
+    let field_sizes = [32usize, 1usize, args_molecule.len()];
+    let mut cursor = header_size;
+    let mut offsets = Vec::with_capacity(3);
+    for size in field_sizes {
+        offsets.push(cursor);
+        cursor += size;
+    }
+
+    let mut serialized = Vec::with_capacity(cursor);
+    serialized.extend_from_slice(&(cursor as u32).to_le_bytes());
+    for offset in offsets {
+        serialized.extend_from_slice(&(offset as u32).to_le_bytes());
+    }
+    serialized.extend_from_slice(&code_hash_bytes);
+    serialized.push(hash_type_byte);
+    serialized.extend_from_slice(&args_molecule);
+
+    Ok(format!("0x{}", crate::hex_encode(&crate::ckb_blake2b256(&serialized))))
+}
+
+fn ckb_rpc_call(rpc_url: &str, method: &str, params: serde_json::Value) -> Result<serde_json::Value> {
+    let endpoint = parse_http_rpc_url(rpc_url)?;
+    let body = serde_json::to_string(&serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": method,
+        "params": params,
+    }))
+    .map_err(|error| crate::error::CompileError::without_span(format!("failed to serialize JSON-RPC request: {}", error)))?;
+
+    let mut stream = TcpStream::connect((endpoint.host.as_str(), endpoint.port))
+        .map_err(|error| crate::error::CompileError::without_span(format!("failed to connect to CKB RPC '{}': {}", rpc_url, error)))?;
+    stream.set_read_timeout(Some(Duration::from_secs(10))).ok();
+    stream.set_write_timeout(Some(Duration::from_secs(10))).ok();
+    let request = format!(
+        "POST {} HTTP/1.1\r\nHost: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        endpoint.path,
+        endpoint.host_header,
+        body.len(),
+        body
+    );
+    stream.write_all(request.as_bytes()).map_err(|error| {
+        crate::error::CompileError::without_span(format!("failed to write CKB RPC request '{}': {}", method, error))
+    })?;
+
+    let mut response = String::new();
+    stream.read_to_string(&mut response).map_err(|error| {
+        crate::error::CompileError::without_span(format!("failed to read CKB RPC response '{}': {}", method, error))
+    })?;
+    let Some((headers, body)) = response.split_once("\r\n\r\n") else {
+        return Err(crate::error::CompileError::without_span("CKB RPC returned malformed HTTP response"));
+    };
+    let status_line = headers.lines().next().unwrap_or_default();
+    if !status_line.contains(" 200 ") {
+        return Err(crate::error::CompileError::without_span(format!("CKB RPC '{}' returned HTTP status '{}'", method, status_line)));
+    }
+    let value: serde_json::Value = serde_json::from_str(body).map_err(|error| {
+        crate::error::CompileError::without_span(format!("failed to parse CKB RPC response '{}': {}", method, error))
+    })?;
+    if let Some(error) = value.get("error") {
+        return Err(crate::error::CompileError::without_span(format!("CKB RPC '{}' failed: {}", method, error)));
+    }
+    value
+        .get("result")
+        .cloned()
+        .ok_or_else(|| crate::error::CompileError::without_span(format!("CKB RPC '{}' returned no result", method)))
+}
+
+struct HttpRpcEndpoint {
+    host: String,
+    host_header: String,
+    port: u16,
+    path: String,
+}
+
+fn parse_http_rpc_url(url: &str) -> Result<HttpRpcEndpoint> {
+    let rest = url
+        .strip_prefix("http://")
+        .ok_or_else(|| crate::error::CompileError::without_span("only http:// CKB RPC URLs are supported"))?;
+    let (host_port, path) = rest.split_once('/').map_or((rest, "/"), |(host_port, path)| (host_port, path));
+    let path = if path == "/" { "/".to_string() } else { format!("/{path}") };
+    let (host, port) = if let Some((host, port)) = host_port.rsplit_once(':') {
+        let port = port
+            .parse::<u16>()
+            .map_err(|error| crate::error::CompileError::without_span(format!("invalid CKB RPC port '{}': {}", port, error)))?;
+        (host.to_string(), port)
+    } else {
+        (host_port.to_string(), 80)
+    };
+    if host.is_empty() {
+        return Err(crate::error::CompileError::without_span("CKB RPC host is empty"));
+    }
+    Ok(HttpRpcEndpoint { host, host_header: host_port.to_string(), port, path })
+}
+
+fn chain_id_matches(rpc_chain: &str, expected: &str) -> bool {
+    let rpc = normalize_chain_id(rpc_chain);
+    let expected = normalize_chain_id(expected);
+    rpc == expected || (rpc == "ckb" && expected == "ckb-mainnet") || (rpc == "ckb-mainnet" && expected == "ckb")
+}
+
+fn normalize_chain_id(value: &str) -> String {
+    value.trim().to_ascii_lowercase().replace('_', "-")
+}
+
+fn hex_eq(left: &str, right: &str) -> bool {
+    left.trim_start_matches("0x").eq_ignore_ascii_case(right.trim_start_matches("0x"))
+}
+
+fn normalize_hash_type(value: &str) -> Option<String> {
+    let value = value.trim().to_ascii_lowercase();
+    (!value.is_empty()).then_some(value)
+}
+
+fn ckb_hash_type_byte(value: &str) -> Option<u8> {
+    match normalize_hash_type(value)?.as_str() {
+        "data" => Some(0),
+        "type" => Some(1),
+        "data1" => Some(2),
+        "data2" => Some(4),
+        _ => None,
+    }
+}
+
 fn effective_build_check_args(args: &BuildArgs) -> Result<CheckArgs> {
     effective_check_args(CheckArgs {
         all_targets: false,
@@ -5555,6 +9516,8 @@ fn effective_build_check_args(args: &BuildArgs) -> Result<CheckArgs> {
         deny_ckb_runtime: args.deny_ckb_runtime,
         deny_runtime_obligations: args.deny_runtime_obligations,
         primitive_compat: args.primitive_compat.clone(),
+        package: None,
+        workspace: false,
     })
 }
 
@@ -5576,7 +9539,7 @@ fn validate_expected_metadata_hash(field: &str, actual: Option<&str>, expected: 
         )));
     }
     match actual {
-        Some(actual) if actual == expected => Ok(()),
+        Some(actual) if actual.eq_ignore_ascii_case(expected) => Ok(()),
         Some(actual) => Err(crate::error::CompileError::without_span(format!(
             "metadata {} '{}' does not match expected '{}'",
             field, actual, expected
@@ -5611,6 +9574,10 @@ fn validate_check_policy(metadata: &crate::CompileMetadata, args: &CheckArgs) ->
         if let Err(error) = crate::proof_plan::soundness::validate_metadata(metadata, true) {
             violations.push(error.message);
         }
+    } else if matches!(args.primitive_compat.as_deref(), Some("0.17" | "0.18")) {
+        if let Err(error) = crate::validate_primitive_strict_017_metadata(metadata) {
+            violations.push(error.message);
+        }
     } else if metadata.runtime.proof_plan_soundness.status == "failed" {
         violations.push(format!("ProofPlan soundness failed: {} issue(s)", metadata.runtime.proof_plan_soundness.issue_count));
     }
@@ -5640,14 +9607,7 @@ fn validate_check_policy(metadata: &crate::CompileMetadata, args: &CheckArgs) ->
         violations.push(format!("CKB runtime features: {}", metadata.runtime.ckb_runtime_features.join(", ")));
     }
 
-    if args.production || args.deny_runtime_obligations {
-        let checked_runtime_evidence_gaps = checked_runtime_proof_plan_evidence_gap_summaries(&metadata.runtime.proof_plan);
-        if !checked_runtime_evidence_gaps.is_empty() {
-            violations.push(format!("evidence-missing checked-runtime ProofPlan gaps: {}", checked_runtime_evidence_gaps.join(", ")));
-        }
-    }
-
-    if args.production || args.deny_runtime_obligations {
+    if args.deny_runtime_obligations {
         let runtime_required_obligations = metadata
             .runtime
             .verifier_obligations
@@ -5659,17 +9619,6 @@ fn validate_check_policy(metadata: &crate::CompileMetadata, args: &CheckArgs) ->
             violations.push(format!("runtime-required verifier obligations: {}", runtime_required_obligations.join(", ")));
         }
 
-        let partial_obligations = metadata
-            .runtime
-            .verifier_obligations
-            .iter()
-            .filter(|obligation| obligation.status == "checked-partial")
-            .map(|obligation| format!("{}:{} ({})", obligation.scope, obligation.feature, obligation.category))
-            .collect::<Vec<_>>();
-        if !partial_obligations.is_empty() {
-            violations.push(format!("partial verifier obligations: {}", partial_obligations.join(", ")));
-        }
-
         let runtime_required_proof_plan = metadata
             .runtime
             .proof_plan
@@ -5679,22 +9628,6 @@ fn validate_check_policy(metadata: &crate::CompileMetadata, args: &CheckArgs) ->
             .collect::<Vec<_>>();
         if !runtime_required_proof_plan.is_empty() {
             violations.push(format!("runtime-required ProofPlan gaps: {}", runtime_required_proof_plan.join(", ")));
-        }
-
-        let partial_proof_plan = metadata
-            .runtime
-            .proof_plan
-            .iter()
-            .filter(|plan| plan.status == "checked-partial" && !plan.on_chain_checked)
-            .map(|plan| format!("{}:{} ({})", plan.origin, plan.feature, plan.codegen_coverage_status))
-            .collect::<Vec<_>>();
-        if !partial_proof_plan.is_empty() {
-            violations.push(format!("partial ProofPlan gaps: {}", partial_proof_plan.join(", ")));
-        }
-
-        let unmatched_invariant_action_coverage = invariant_unmatched_action_coverage_summaries(&metadata.runtime.proof_plan);
-        if !unmatched_invariant_action_coverage.is_empty() {
-            violations.push(format!("unmatched invariant action coverage: {}", unmatched_invariant_action_coverage.join(", ")));
         }
 
         let transaction_invariants = transaction_invariant_checked_subcondition_summaries(metadata);
@@ -5987,7 +9920,6 @@ struct CompileTestExpectation {
     expect_success: bool,
     expect_fail: bool,
     expected_errors: Vec<String>,
-    expected_error_lines: Vec<ExpectedErrorLine>,
     target: Option<String>,
     production: bool,
     deny_fail_closed: bool,
@@ -6011,12 +9943,6 @@ struct CompileTestExpectation {
     forbidden_locks: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ExpectedErrorLine {
-    line: usize,
-    text: String,
-}
-
 impl CompileTestExpectation {
     fn check_args(&self) -> CheckArgs {
         CheckArgs {
@@ -6029,6 +9955,8 @@ impl CompileTestExpectation {
             deny_ckb_runtime: self.deny_ckb_runtime,
             deny_runtime_obligations: self.deny_runtime_obligations,
             primitive_compat: None,
+            package: None,
+            workspace: false,
         }
     }
 }
@@ -6058,9 +9986,6 @@ fn parse_test_expectation(path: &Path, source: &str) -> Result<CompileTestExpect
             if !expected.is_empty() {
                 expectation.expected_errors.push(expected.to_string());
             }
-        } else if let Some(expected) = directive.strip_prefix("expect-error-line:").map(str::trim) {
-            expectation.expect_fail = true;
-            expectation.expected_error_lines.push(parse_expected_error_line(path, line_number, expected)?);
         } else if let Some(target) = directive.strip_prefix("target:").map(str::trim) {
             if target.is_empty() {
                 return Err(compile_test_directive_error(path, line_number, "target directive requires a non-empty target"));
@@ -6159,32 +10084,11 @@ fn parse_test_expectation(path: &Path, source: &str) -> Result<CompileTestExpect
     }
     if expectation.expect_success && expectation.expect_fail {
         return Err(crate::error::CompileError::without_span(format!(
-            "{}: conflicting cellscript-test directives: expect-success cannot be combined with expect-fail/expect-error/expect-error-line",
+            "{}: conflicting cellscript-test directives: expect-success cannot be combined with expect-fail/expect-error",
             path.display()
         )));
     }
     Ok(expectation)
-}
-
-fn parse_expected_error_line(path: &Path, zero_based_line: usize, directive: &str) -> Result<ExpectedErrorLine> {
-    let Some((line, text)) = directive.split_once(':') else {
-        return Err(compile_test_directive_error(
-            path,
-            zero_based_line,
-            "expect-error-line requires N:TEXT, for example expect-error-line:12:type mismatch",
-        ));
-    };
-    let line = line.trim().parse::<usize>().map_err(|_| {
-        compile_test_directive_error(path, zero_based_line, "expect-error-line requires a positive numeric source line")
-    })?;
-    if line == 0 {
-        return Err(compile_test_directive_error(path, zero_based_line, "expect-error-line source line must be greater than zero"));
-    }
-    let text = text.trim();
-    if text.is_empty() {
-        return Err(compile_test_directive_error(path, zero_based_line, "expect-error-line requires non-empty error text"));
-    }
-    Ok(ExpectedErrorLine { line, text: text.to_string() })
 }
 
 fn push_non_empty_test_directive(
@@ -6218,30 +10122,17 @@ fn evaluate_compile_test_result(
         (true, Ok(_)) => Err(crate::error::CompileError::without_span(format!("{}: expected compile failure, got success", path))),
         (true, Err(error)) => {
             let message = error.to_string();
-            let missing_text = expectation
+            let missing = expectation
                 .expected_errors
                 .iter()
                 .filter(|expected| !message.contains(expected.as_str()))
                 .cloned()
                 .collect::<Vec<_>>();
-            let missing_line = expectation
-                .expected_error_lines
-                .iter()
-                .filter(|expected| !compile_error_matches_line(&error, &message, expected))
-                .map(|expected| format!("{}:{}", expected.line, expected.text))
-                .collect::<Vec<_>>();
-            if missing_text.is_empty() && missing_line.is_empty() {
+            if missing.is_empty() {
                 Ok(())
             } else {
-                let mut missing = Vec::new();
-                if !missing_text.is_empty() {
-                    missing.push(format!("text [{}]", missing_text.join(", ")));
-                }
-                if !missing_line.is_empty() {
-                    missing.push(format!("line [{}]", missing_line.join(", ")));
-                }
                 Err(crate::error::CompileError::without_span(format!(
-                    "{}: expected error not found: {}; actual error: {}",
+                    "{}: expected error text not found: {}; actual error: {}",
                     path,
                     missing.join(", "),
                     message
@@ -6249,15 +10140,6 @@ fn evaluate_compile_test_result(
             }
         }
     }
-}
-
-fn compile_error_matches_line(error: &crate::error::CompileError, message: &str, expected: &ExpectedErrorLine) -> bool {
-    if error.span.line == expected.line && message.contains(expected.text.as_str()) {
-        return true;
-    }
-
-    let line_marker = format!("line {}", expected.line);
-    message.lines().any(|line| line.contains(expected.text.as_str()) && line.contains(&line_marker))
 }
 
 fn validate_compile_test_metadata(
@@ -6437,90 +10319,28 @@ fn compile_test_obligation_summary(metadata: &crate::CompileMetadata, status: Op
         .join("\n")
 }
 
-fn source_verification_root_for_artifact(artifact_path: &Utf8Path) -> Utf8PathBuf {
-    let artifact_dir = artifact_path.parent().unwrap_or_else(|| Utf8Path::new("."));
-    match artifact_dir.file_name() {
-        Some("artifacts" | "build" | "dist" | "target") => artifact_dir.parent().unwrap_or(artifact_dir).to_path_buf(),
-        _ => artifact_dir.to_path_buf(),
-    }
-}
-
 fn collect_cell_files(root: &Path) -> Result<Vec<PathBuf>> {
-    let root_metadata = match std::fs::symlink_metadata(root) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => {
-            return Err(crate::error::CompileError::without_span(format!(
-                "failed to inspect CellScript test path '{}': {}",
-                root.display(),
-                error
-            )));
-        }
-    };
-    if root_metadata.file_type().is_symlink() {
-        return Err(crate::error::CompileError::without_span(format!(
-            "refusing to follow symbolic link '{}' while collecting CellScript test files",
-            root.display()
-        )));
-    }
-    if root_metadata.is_file() {
-        return Ok(if root.extension().and_then(|ext| ext.to_str()) == Some("cell") { vec![root.to_path_buf()] } else { Vec::new() });
-    }
-    if !root_metadata.is_dir() {
+    if !root.exists() {
         return Ok(Vec::new());
+    }
+    if root.is_file() {
+        return Ok(if root.extension().and_then(|ext| ext.to_str()) == Some("cell") { vec![root.to_path_buf()] } else { Vec::new() });
     }
 
     let mut files = Vec::new();
-    let canonical_root = root.canonicalize().map_err(|error| {
-        crate::error::CompileError::without_span(format!(
-            "failed to canonicalize CellScript test root '{}': {}",
-            root.display(),
-            error
-        ))
-    })?;
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
         for entry in std::fs::read_dir(&dir)? {
             let entry = entry?;
             let path = entry.path();
-            let file_type = entry.file_type().map_err(|error| {
-                crate::error::CompileError::without_span(format!(
-                    "failed to inspect CellScript test path '{}': {}",
-                    path.display(),
-                    error
-                ))
-            })?;
-            if file_type.is_symlink() {
-                return Err(crate::error::CompileError::without_span(format!(
-                    "refusing to follow symbolic link '{}' while collecting CellScript test files",
-                    path.display()
-                )));
-            }
-            if file_type.is_dir() {
-                ensure_collected_cell_path_stays_in_root(&canonical_root, &path, "test directory")?;
+            if path.is_dir() {
                 stack.push(path);
-            } else if file_type.is_file() && path.extension().and_then(|ext| ext.to_str()) == Some("cell") {
-                ensure_collected_cell_path_stays_in_root(&canonical_root, &path, "test file")?;
+            } else if path.extension().and_then(|ext| ext.to_str()) == Some("cell") {
                 files.push(path);
             }
         }
     }
     Ok(files)
-}
-
-fn ensure_collected_cell_path_stays_in_root(canonical_root: &Path, path: &Path, label: &str) -> Result<()> {
-    let canonical = path.canonicalize().map_err(|error| {
-        crate::error::CompileError::without_span(format!("failed to canonicalize {} '{}': {}", label, path.display(), error))
-    })?;
-    if !canonical.starts_with(canonical_root) {
-        return Err(crate::error::CompileError::without_span(format!(
-            "{} '{}' resolves outside CellScript test root '{}'",
-            label,
-            path.display(),
-            canonical_root.display()
-        )));
-    }
-    Ok(())
 }
 
 #[cfg(feature = "vm-runner")]
@@ -6549,129 +10369,6 @@ struct SelectedEntryWitnessMetadata<'a> {
     name: &'a str,
     params: &'a [ParamMetadata],
     runtime_bound_param_names: std::collections::BTreeSet<String>,
-}
-
-fn entry_abi_report_json(metadata: &CompileMetadata, selected: &SelectedEntryWitnessMetadata<'_>) -> Result<serde_json::Value> {
-    let entry_constraints = metadata
-        .constraints
-        .entry_abi
-        .iter()
-        .find(|entry| entry.entry_kind == selected.kind && entry.entry_name == selected.name)
-        .ok_or_else(|| {
-            crate::error::CompileError::without_span(format!(
-                "entry ABI constraints for {} '{}' were not found in metadata",
-                selected.kind, selected.name
-            ))
-        })?;
-
-    let params = selected
-        .params
-        .iter()
-        .map(|param| {
-            let runtime_bound = selected.runtime_bound_param_names.contains(&param.name) || param.lock_args_data_source;
-            let payload_bound = !param.lock_args_data_source && !param.cell_bound_abi && !param.ty.starts_with('&') && !runtime_bound;
-            let layout = entry_constraints.params.iter().find(|candidate| candidate.name == param.name);
-            serde_json::json!({
-                "name": param.name,
-                "type": param.ty,
-                "payload_bound": payload_bound,
-                "runtime_bound": runtime_bound,
-                "cell_bound": param.cell_bound_abi,
-                "schema_pointer_abi": param.schema_pointer_abi,
-                "fixed_byte_len": param.fixed_byte_len,
-                "abi_kind": layout.map(|layout| layout.abi_kind.as_str()),
-                "abi_slots": layout.map(|layout| layout.abi_slots),
-                "slot_start": layout.map(|layout| layout.slot_start),
-                "slot_end": layout.map(|layout| layout.slot_end),
-                "witness_bytes": layout.map(|layout| layout.witness_bytes),
-                "stack_spill_bytes": layout.map(|layout| layout.stack_spill_bytes),
-                "supported": layout.map(|layout| layout.supported).unwrap_or(false),
-                "unsupported_reason": layout.and_then(|layout| layout.unsupported_reason.as_deref()),
-            })
-        })
-        .collect::<Vec<_>>();
-    let payload_params = selected
-        .params
-        .iter()
-        .filter(|param| {
-            !param.lock_args_data_source
-                && !param.cell_bound_abi
-                && !param.ty.starts_with('&')
-                && !selected.runtime_bound_param_names.contains(&param.name)
-        })
-        .map(|param| param.name.as_str())
-        .collect::<Vec<_>>();
-    let runtime_bound_params = selected
-        .runtime_bound_param_names
-        .iter()
-        .map(|name| name.as_str())
-        .chain(selected.params.iter().filter(|param| param.lock_args_data_source).map(|param| param.name.as_str()))
-        .collect::<Vec<_>>();
-    Ok(serde_json::json!({
-        "status": if entry_constraints.unsupported { "fail" } else { "ok" },
-        "abi": ENTRY_WITNESS_ABI,
-        "target_profile": metadata.target_profile.name,
-        "entry_kind": selected.kind,
-        "entry": selected.name,
-        "payload_params": payload_params,
-        "runtime_bound_params": runtime_bound_params,
-        "layout": entry_constraints,
-        "params": params,
-    }))
-}
-
-fn entry_witness_contract_json(selected: &SelectedEntryWitnessMetadata<'_>) -> serde_json::Value {
-    let payload_params = selected
-        .params
-        .iter()
-        .filter(|param| {
-            !param.lock_args_data_source
-                && !param.cell_bound_abi
-                && !param.ty.starts_with('&')
-                && !selected.runtime_bound_param_names.contains(&param.name)
-        })
-        .map(|param| {
-            serde_json::json!({
-                "name": param.name,
-                "type": param.ty,
-                "fixed_byte_len": param.fixed_byte_len,
-                "schema_pointer_abi": param.schema_pointer_abi,
-            })
-        })
-        .collect::<Vec<_>>();
-    serde_json::json!({
-        "abi": ENTRY_WITNESS_ABI,
-        "entry_kind": selected.kind,
-        "entry": selected.name,
-        "payload_params": payload_params,
-        "placement": entry_witness_placement_json(selected.kind),
-        "note": "cellc entry-witness emits the raw bytes consumed by the generated _cellscript_entry wrapper; do not wrap them in WitnessArgs.input_type by default"
-    })
-}
-
-fn entry_witness_placement_json(entry_kind: &str) -> serde_json::Value {
-    serde_json::json!({
-        "kind": "raw_script_group_witness",
-        "source": "GroupInput",
-        "group_index": 0,
-        "fallback_source": if entry_kind == "action" { serde_json::Value::String("GroupOutput".to_string()) } else { serde_json::Value::Null },
-        "fallback_group_index": if entry_kind == "action" { serde_json::Value::from(0) } else { serde_json::Value::Null },
-        "fallback_applies_to": if entry_kind == "action" {
-            serde_json::Value::String("output-only type-script action execution".to_string())
-        } else {
-            serde_json::Value::Null
-        },
-        "witness_args_policy": {
-            "input_type": "explicit only when CellScript source calls witness::input_type(...)",
-            "output_type": "explicit only when CellScript source calls witness::output_type(...)"
-        }
-    })
-}
-
-fn format_entry_command(input: Option<&PathBuf>, kind: &str, name: &str) -> String {
-    let input = input.map(|path| path.display().to_string()).unwrap_or_else(|| ".".to_string());
-    let selector = if kind == "lock" { "--lock" } else { "--action" };
-    format!("cellc entry-witness {input} --target-profile ckb {selector} {name} --arg <value> --json")
 }
 
 fn select_entry_witness_metadata<'a>(
@@ -6891,139 +10588,6 @@ fn hex_nibble(byte: u8) -> Option<u8> {
 
 pub struct CliParser;
 
-fn contract_json_arg() -> clap::Arg {
-    clap::Arg::new("json")
-        .long("json")
-        .conflicts_with("human")
-        .action(clap::ArgAction::SetTrue)
-        .help("Compatibility no-op: contract commands emit JSON by default")
-}
-
-fn contract_human_arg() -> clap::Arg {
-    clap::Arg::new("human")
-        .long("human")
-        .conflicts_with("json")
-        .action(clap::ArgAction::SetTrue)
-        .help("Emit a concise human-readable summary instead of the default JSON contract")
-}
-
-fn builder_manifest_clap_command(name: &'static str) -> clap::Command {
-    use clap::Arg;
-    clap::Command::new(name)
-        .about("Emit one builder-facing JSON contract for a scoped action or lock")
-        .arg(Arg::new("input").value_name("INPUT").help("Input .cell file, package directory, or Cell.toml"))
-        .arg(Arg::new("output").long("output").short('o').value_name("FILE").help("Write builder manifest JSON"))
-        .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
-        .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
-        .arg(
-            Arg::new("entry-action")
-                .long("entry-action")
-                .value_name("ACTION")
-                .conflicts_with("entry-lock")
-                .help("Scope the manifest to one generated action entrypoint"),
-        )
-        .arg(
-            Arg::new("entry-lock")
-                .long("entry-lock")
-                .value_name("LOCK")
-                .conflicts_with("entry-action")
-                .help("Scope the manifest to one generated lock entrypoint"),
-        )
-        .arg(
-            Arg::new("resource-identities")
-                .long("resource-identities")
-                .value_name("PLAN_JSON")
-                .help("Embed a resource identity plan emitted by cellc resource-identity"),
-        )
-        .arg(
-            Arg::new("primitive-compat")
-                .long("primitive-compat")
-                .value_name("VERSION")
-                .conflicts_with("primitive-strict")
-                .help("Accept primitive syntax from a previous version with migration hints"),
-        )
-        .arg(
-            Arg::new("primitive-strict")
-                .long("primitive-strict")
-                .value_name("VERSION")
-                .conflicts_with("primitive-compat")
-                .help("Require primitive syntax from a specific version"),
-        )
-        .arg(contract_json_arg())
-        .arg(contract_human_arg())
-}
-
-fn builder_check_clap_command(name: &'static str) -> clap::Command {
-    use clap::Arg;
-    clap::Command::new(name)
-        .about("Validate a candidate transaction against a builder manifest before signing")
-        .arg(Arg::new("manifest").long("manifest").value_name("MANIFEST_JSON").required(true).help("Builder manifest JSON"))
-        .arg(Arg::new("tx").long("tx").value_name("TX_JSON").required(true).help("Candidate transaction JSON"))
-        .arg(Arg::new("metadata").long("metadata").value_name("METADATA_JSON").help("Override embedded manifest metadata"))
-        .arg(
-            Arg::new("resource-identities")
-                .long("resource-identities")
-                .value_name("PLAN_JSON")
-                .help("Resource identity plan emitted by cellc resource-identity"),
-        )
-        .arg(
-            Arg::new("production")
-                .long("production")
-                .action(clap::ArgAction::SetTrue)
-                .help("Require production-facing resource identity guardrails"),
-        )
-        .arg(
-            Arg::new("primitive-compat")
-                .long("primitive-compat")
-                .value_name("VERSION")
-                .conflicts_with("primitive-strict")
-                .help("Accept primitive metadata compatibility mode"),
-        )
-        .arg(
-            Arg::new("primitive-strict")
-                .long("primitive-strict")
-                .value_name("VERSION")
-                .conflicts_with("primitive-compat")
-                .help("Require strict metadata assurance mode, e.g. 0.16"),
-        )
-        .arg(contract_json_arg())
-        .arg(contract_human_arg())
-}
-
-fn builder_manifest_args_from_matches(m: &clap::ArgMatches) -> BuilderManifestArgs {
-    BuilderManifestArgs {
-        input: m.get_one::<String>("input").map(PathBuf::from),
-        output: m.get_one::<String>("output").map(PathBuf::from),
-        target: m.get_one::<String>("target").cloned(),
-        target_profile: m.get_one::<String>("target-profile").cloned(),
-        entry_action: m.get_one::<String>("entry-action").cloned(),
-        entry_lock: m.get_one::<String>("entry-lock").cloned(),
-        resource_identities: m.get_one::<String>("resource-identities").map(PathBuf::from),
-        primitive_compat: resolve_metadata_workflow_primitive_compat(
-            m.get_one::<String>("primitive-compat").cloned(),
-            m.get_one::<String>("primitive-strict").cloned(),
-        ),
-        json: m.get_flag("json"),
-        human: m.get_flag("human"),
-    }
-}
-
-fn builder_check_args_from_matches(m: &clap::ArgMatches) -> BuilderCheckArgs {
-    BuilderCheckArgs {
-        manifest: m.get_one::<String>("manifest").map(PathBuf::from).unwrap_or_default(),
-        tx: m.get_one::<String>("tx").map(PathBuf::from).unwrap_or_default(),
-        metadata: m.get_one::<String>("metadata").map(PathBuf::from),
-        resource_identities: m.get_one::<String>("resource-identities").map(PathBuf::from),
-        production: m.get_flag("production"),
-        primitive_compat: resolve_metadata_workflow_primitive_compat(
-            m.get_one::<String>("primitive-compat").cloned(),
-            m.get_one::<String>("primitive-strict").cloned(),
-        ),
-        json: m.get_flag("json"),
-        human: m.get_flag("human"),
-    }
-}
-
 impl CliParser {
     pub fn parse() -> Command {
         use clap::{Arg, ArgAction, Command as ClapCommand};
@@ -7052,14 +10616,7 @@ impl CliParser {
                             .conflicts_with("entry-action")
                             .help("Compile only this lock as the artifact entrypoint"),
                     )
-                    .arg(
-                        Arg::new("jobs")
-                            .long("jobs")
-                            .short('j')
-                            .value_name("N")
-                            .value_parser(clap::value_parser!(usize))
-                            .help("Reserved for future parallel package builds; only 1 is currently accepted"),
-                    )
+                    .arg(Arg::new("jobs").long("jobs").short('j').value_name("N").help("Number of parallel jobs"))
                     .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON build summary"))
                     .arg(
                         Arg::new("production")
@@ -7096,7 +10653,20 @@ impl CliParser {
                             .long("primitive-strict")
                             .value_name("VERSION")
                             .conflicts_with("primitive-compat")
-                            .help("Require primitive syntax from a specific version (e.g. 0.15 or 0.16), reject legacy forms"),
+                            .help("Require primitive syntax from a specific version (e.g. 0.15, 0.16, 0.17, or 0.18), reject legacy forms"),
+                    )
+                    .arg(
+                        Arg::new("package")
+                            .long("package")
+                            .short('p')
+                            .value_name("NAME")
+                            .help("Build a specific workspace member"),
+                    )
+                    .arg(
+                        Arg::new("workspace")
+                            .long("workspace")
+                            .action(ArgAction::SetTrue)
+                            .help("Build all workspace members"),
                     ),
             )
             .subcommand(
@@ -7140,6 +10710,7 @@ impl CliParser {
                     .arg(Arg::new("name").value_name("NAME").help("Package name"))
                     .arg(Arg::new("path").value_name("PATH").help("Path to create package"))
                     .arg(Arg::new("lib").long("lib").action(ArgAction::SetTrue).help("Create a library package"))
+                    .arg(Arg::new("namespace").long("namespace").value_name("NAMESPACE").help("Package namespace for registry publishing"))
                     .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON init summary")),
             )
             .subcommand(
@@ -7165,20 +10736,14 @@ impl CliParser {
                     .arg(Arg::new("dev").long("dev").action(ArgAction::SetTrue).help("Add as dev dependency"))
                     .arg(Arg::new("build").long("build").action(ArgAction::SetTrue).help("Add as build dependency"))
                     .arg(Arg::new("git").long("git").value_name("URL").help("Add a git dependency source"))
-                    .arg(
-                        Arg::new("rev")
-                            .long("rev")
-                            .value_name("COMMIT")
-                            .requires("git")
-                            .help("Pin a git dependency to a full commit hash"),
-                    )
                     .arg(Arg::new("path").long("path").value_name("PATH").help("Add a local path dependency source"))
                     .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON add summary")),
             )
             .subcommand(
                 ClapCommand::new("clean")
                     .about("Remove build artifacts")
-                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON clean summary")),
+                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON clean summary"))
+                    .arg(Arg::new("cache").long("cache").action(ArgAction::SetTrue).help("Also remove incremental compilation cache (.cell/build/cache)")),
             )
             .subcommand(
                 ClapCommand::new("remove")
@@ -7236,7 +10801,20 @@ impl CliParser {
                             .long("primitive-strict")
                             .value_name("VERSION")
                             .conflicts_with("primitive-compat")
-                            .help("Require primitive syntax from a specific version (e.g. 0.15 or 0.16), reject legacy forms"),
+                            .help("Require primitive syntax from a specific version (e.g. 0.15, 0.16, 0.17, or 0.18), reject legacy forms"),
+                    )
+                    .arg(
+                        Arg::new("package")
+                            .long("package")
+                            .short('p')
+                            .value_name("NAME")
+                            .help("Check a specific workspace member"),
+                    )
+                    .arg(
+                        Arg::new("workspace")
+                            .long("workspace")
+                            .action(ArgAction::SetTrue)
+                            .help("Check all workspace members"),
                     ),
             )
             .subcommand(
@@ -7289,6 +10867,11 @@ impl CliParser {
                     .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON summary")),
             )
             .subcommand(
+                ClapCommand::new("ckb-std-compat")
+                    .about("Report the ckb-std ABI compatibility boundary for CellScript's inline CKB backend")
+                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON report")),
+            )
+            .subcommand(
                 ClapCommand::new("explain")
                     .about("Explain a CellScript runtime error code")
                     .arg(Arg::new("code").value_name("CODE").required(true).help("Runtime error code, E-code, or error name"))
@@ -7314,36 +10897,7 @@ impl CliParser {
                     .arg(Arg::new("input").value_name("INPUT").help("Input .cell file, package directory, or Cell.toml"))
                     .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
                     .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
-                    .arg(
-                        Arg::new("entry-action")
-                            .long("entry-action")
-                            .value_name("ACTION")
-                            .conflicts_with("entry-lock")
-                            .help("Scope assumptions to one generated action entrypoint"),
-                    )
-                    .arg(
-                        Arg::new("entry-lock")
-                            .long("entry-lock")
-                            .value_name("LOCK")
-                            .conflicts_with("entry-action")
-                            .help("Scope assumptions to one generated lock entrypoint"),
-                    )
-                    .arg(
-                        Arg::new("primitive-compat")
-                            .long("primitive-compat")
-                            .value_name("VERSION")
-                            .conflicts_with("primitive-strict")
-                            .help("Accept primitive syntax from a previous version (e.g. 0.14) with migration hints"),
-                    )
-                    .arg(
-                        Arg::new("primitive-strict")
-                            .long("primitive-strict")
-                            .value_name("VERSION")
-                            .conflicts_with("primitive-compat")
-                            .help("Require primitive syntax from a specific version (e.g. 0.15 or 0.16), reject legacy forms"),
-                    )
-                    .arg(contract_json_arg())
-                    .arg(contract_human_arg()),
+                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
             )
             .subcommand(
                 ClapCommand::new("explain-generics")
@@ -7372,8 +10926,7 @@ impl CliParser {
                     .about("Diff ProofPlan semantics between two metadata files")
                     .arg(Arg::new("old").value_name("OLD_METADATA").required(true))
                     .arg(Arg::new("new").value_name("NEW_METADATA").required(true))
-                    .arg(contract_json_arg())
-                    .arg(contract_human_arg()),
+                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
             )
             .subcommand(
                 ClapCommand::new("profile")
@@ -7382,42 +10935,13 @@ impl CliParser {
                     .arg(Arg::new("entry").long("entry").value_name("NAME").help("Limit profile to one action or lock"))
                     .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
                     .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
-                    .arg(
-                        Arg::new("primitive-compat")
-                            .long("primitive-compat")
-                            .value_name("VERSION")
-                            .conflicts_with("primitive-strict")
-                            .help("Accept primitive syntax from a previous version (e.g. 0.14) with migration hints"),
-                    )
-                    .arg(
-                        Arg::new("primitive-strict")
-                            .long("primitive-strict")
-                            .value_name("VERSION")
-                            .conflicts_with("primitive-compat")
-                            .help("Require primitive syntax from a specific version (e.g. 0.15 or 0.16), reject legacy forms"),
-                    )
-                    .arg(contract_json_arg())
-                    .arg(contract_human_arg()),
+                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
             )
             .subcommand(
                 ClapCommand::new("trace-tx")
                     .about("Trace a transaction JSON against v0.16 builder assumptions")
                     .arg(Arg::new("against").long("against").value_name("METADATA").required(true).help("Metadata JSON"))
                     .arg(Arg::new("tx").value_name("TX_JSON").required(true).help("Transaction JSON"))
-                    .arg(
-                        Arg::new("primitive-compat")
-                            .long("primitive-compat")
-                            .value_name("VERSION")
-                            .conflicts_with("primitive-strict")
-                            .help("Accept primitive metadata compatibility mode"),
-                    )
-                    .arg(
-                        Arg::new("primitive-strict")
-                            .long("primitive-strict")
-                            .value_name("VERSION")
-                            .conflicts_with("primitive-compat")
-                            .help("Require strict metadata assurance mode, e.g. 0.16"),
-                    )
                     .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
             )
             .subcommand(
@@ -7427,57 +10951,6 @@ impl CliParser {
                     .arg(Arg::new("output").long("output").short('o').value_name("DIR").help("Output directory"))
                     .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
                     .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
-                    .arg(
-                        Arg::new("primitive-compat")
-                            .long("primitive-compat")
-                            .value_name("VERSION")
-                            .conflicts_with("primitive-strict")
-                            .help("Accept primitive syntax from a previous version (e.g. 0.14) with migration hints"),
-                    )
-                    .arg(
-                        Arg::new("primitive-strict")
-                            .long("primitive-strict")
-                            .value_name("VERSION")
-                            .conflicts_with("primitive-compat")
-                            .help("Require primitive syntax from a specific version (e.g. 0.15 or 0.16), reject legacy forms"),
-                    )
-                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
-            )
-            .subcommand(
-                ClapCommand::new("certify")
-                    .about("Run a deterministic compiler-hosted certification plugin")
-                    .arg(
-                        Arg::new("plugin")
-                            .long("plugin")
-                            .value_name("PLUGIN")
-                            .required(true)
-                            .help("Certification plugin id, e.g. novaseal-profile-v0"),
-                    )
-                    .arg(
-                        Arg::new("repo-root")
-                            .long("repo-root")
-                            .value_name("DIR")
-                            .help("Repository root for Rust certification evidence"),
-                    )
-                    .arg(
-                        Arg::new("report")
-                            .long("report")
-                            .value_name("JSON")
-                            .help("Verify an existing plugin report instead of regenerating it"),
-                    )
-                    .arg(
-                        Arg::new("output")
-                            .long("output")
-                            .short('o')
-                            .value_name("FILE")
-                            .help("Write compiler certification report JSON"),
-                    )
-                    .arg(
-                        Arg::new("require-production")
-                            .long("require-production")
-                            .action(ArgAction::SetTrue)
-                            .help("Require external production attestations, not only local profile certification"),
-                    )
                     .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
             )
             .subcommand(
@@ -7485,102 +10958,7 @@ impl CliParser {
                     .about("Validate a transaction JSON against v0.16 builder assumptions before signing")
                     .arg(Arg::new("against").long("against").value_name("METADATA").required(true).help("Metadata JSON"))
                     .arg(Arg::new("tx").value_name("TX_JSON").required(true).help("Transaction JSON"))
-                    .arg(
-                        Arg::new("resource-identities")
-                            .long("resource-identities")
-                            .value_name("PLAN_JSON")
-                            .help("Resource identity plan emitted by cellc resource-identity"),
-                    )
-                    .arg(
-                        Arg::new("production")
-                            .long("production")
-                            .action(ArgAction::SetTrue)
-                            .help("Reject known fixture-only resource identities before production signing"),
-                    )
-                    .arg(
-                        Arg::new("primitive-compat")
-                            .long("primitive-compat")
-                            .value_name("VERSION")
-                            .conflicts_with("primitive-strict")
-                            .help("Accept primitive metadata compatibility mode"),
-                    )
-                    .arg(
-                        Arg::new("primitive-strict")
-                            .long("primitive-strict")
-                            .value_name("VERSION")
-                            .conflicts_with("primitive-compat")
-                            .help("Require strict metadata assurance mode, e.g. 0.16"),
-                    )
-                    .arg(contract_json_arg())
-                    .arg(contract_human_arg()),
-            )
-            .subcommand(builder_manifest_clap_command("builder-manifest"))
-            .subcommand(builder_check_clap_command("builder-check"))
-            .subcommand(
-                ClapCommand::new("builder")
-                    .about("Builder-facing manifest and transaction checks")
-                    .subcommand_required(true)
-                    .arg_required_else_help(true)
-                    .subcommand(builder_manifest_clap_command("manifest"))
-                    .subcommand(builder_check_clap_command("check")),
-            )
-            .subcommand(
-                ClapCommand::new("resource-identity")
-                    .about("Generate a passive resource type-script identity artifact and builder plan")
-                    .arg(Arg::new("input").value_name("INPUT").help("Input .cell file, package directory, or Cell.toml"))
-                    .arg(Arg::new("output").long("output").short('o').value_name("ELF").help("Write passive identity artifact"))
-                    .arg(
-                        Arg::new("plan-output")
-                            .long("plan-output")
-                            .value_name("JSON")
-                            .help("Write resource identity builder plan JSON"),
-                    )
-                    .arg(
-                        Arg::new("source-output")
-                            .long("source-output")
-                            .value_name("CELL")
-                            .help("Write the compiler-generated passive identity CellScript source for review"),
-                    )
-                    .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
-                    .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
-                    .arg(
-                        Arg::new("type")
-                            .long("type")
-                            .value_name("TYPE")
-                            .num_args(1)
-                            .action(ArgAction::Append)
-                            .help("Limit plan generation to a resource type; repeat for multiple types"),
-                    )
-                    .arg(
-                        Arg::new("identity")
-                            .long("identity")
-                            .value_name("TYPE=INSTANCE")
-                            .num_args(1)
-                            .action(ArgAction::Append)
-                            .help("Per-resource identity material, e.g. Token=0x... or Pool=pool:v1"),
-                    )
-                    .arg(
-                        Arg::new("instance")
-                            .long("instance")
-                            .value_name("INSTANCE")
-                            .help("Default identity material for resource types without --identity"),
-                    )
-                    .arg(
-                        Arg::new("primitive-compat")
-                            .long("primitive-compat")
-                            .value_name("VERSION")
-                            .conflicts_with("primitive-strict")
-                            .help("Accept primitive syntax from a previous version with migration hints"),
-                    )
-                    .arg(
-                        Arg::new("primitive-strict")
-                            .long("primitive-strict")
-                            .value_name("VERSION")
-                            .conflicts_with("primitive-compat")
-                            .help("Require primitive syntax from a specific version"),
-                    )
-                    .arg(contract_json_arg())
-                    .arg(contract_human_arg()),
+                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
             )
             .subcommand(
                 ClapCommand::new("solve-tx")
@@ -7589,36 +10967,13 @@ impl CliParser {
                     .arg(Arg::new("output").long("output").short('o').value_name("FILE").help("Write JSON solver template"))
                     .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
                     .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
-                    .arg(
-                        Arg::new("entry-action")
-                            .long("entry-action")
-                            .value_name("ACTION")
-                            .conflicts_with("entry-lock")
-                            .help("Scope the transaction template to one generated action entrypoint"),
-                    )
-                    .arg(
-                        Arg::new("entry-lock")
-                            .long("entry-lock")
-                            .value_name("LOCK")
-                            .conflicts_with("entry-action")
-                            .help("Scope the transaction template to one generated lock entrypoint"),
-                    )
-                    .arg(
-                        Arg::new("primitive-compat")
-                            .long("primitive-compat")
-                            .value_name("VERSION")
-                            .conflicts_with("primitive-strict")
-                            .help("Accept primitive syntax from a previous version (e.g. 0.14) with migration hints"),
-                    )
-                    .arg(
-                        Arg::new("primitive-strict")
-                            .long("primitive-strict")
-                            .value_name("VERSION")
-                            .conflicts_with("primitive-compat")
-                            .help("Require primitive syntax from a specific version (e.g. 0.15 or 0.16), reject legacy forms"),
-                    )
-                    .arg(contract_json_arg())
-                    .arg(contract_human_arg()),
+                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
+            )
+            .subcommand(
+                ClapCommand::new("verify-ckb-fixtures")
+                    .about("Verify standard CKB compatibility fixtures with the deterministic model runner")
+                    .arg(Arg::new("manifest").value_name("MANIFEST_JSON").required(true).help("CKB fixture manifest JSON"))
+                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
             )
             .subcommand(
                 ClapCommand::new("deploy-plan")
@@ -7661,9 +11016,57 @@ impl CliParser {
                         .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
                         .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
                         .arg(
+                            Arg::new("fabric-intent")
+                                .long("fabric-intent")
+                                .action(ArgAction::SetTrue)
+                                .help("Emit a CellFabric intent envelope instead of the raw CellScript action plan"),
+                        )
+                        .arg(
                             Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON builder plan"),
                         ),
                 ),
+            )
+            .subcommand(
+                ClapCommand::new("gen-builder")
+                    .about("Generate a registry-bound action builder package from CellScript metadata")
+                    .arg(Arg::new("input").value_name("INPUT").help("Input .cell file, package directory, or Cell.toml"))
+                    .arg(
+                        Arg::new("metadata")
+                            .long("metadata")
+                            .value_name("FILE")
+                            .help("Read compile metadata JSON instead of compiling INPUT"),
+                    )
+                    .arg(
+                        Arg::new("lockfile")
+                            .long("lockfile")
+                            .value_name("FILE")
+                            .help("Verify generated builder identity against Cell.lock before writing"),
+                    )
+                    .arg(
+                        Arg::new("deployed")
+                            .long("deployed")
+                            .value_name("FILE")
+                            .help("Verify generated builder deployment identity against Deployed.toml before writing"),
+                    )
+                    .arg(
+                        Arg::new("deployment-network")
+                            .long("deployment-network")
+                            .value_name("NAME")
+                            .help("Verify and embed only this deployment network when using --deployed"),
+                    )
+                    .arg(
+                        Arg::new("target")
+                            .long("target")
+                            .value_name("TARGET")
+                            .required(true)
+                            .value_parser(["typescript"])
+                            .help("Generated builder target"),
+                    )
+                    .arg(Arg::new("action").long("action").value_name("NAME").help("Generate only this action; defaults to all actions"))
+                    .arg(Arg::new("output").long("output").short('o').value_name("DIR").help("Output package directory"))
+                    .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile when compiling INPUT: ckb"))
+                    .arg(Arg::new("package-name").long("package-name").value_name("NAME").help("Generated package.json name"))
+                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable generation summary")),
             )
             .subcommand(
                 ClapCommand::new("entry-witness")
@@ -7682,8 +11085,7 @@ impl CliParser {
                     .arg(Arg::new("output").long("output").short('o').value_name("FILE").help("Write raw witness bytes to a file"))
                     .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
                     .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
-                    .arg(contract_json_arg())
-                    .arg(contract_human_arg()),
+                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON summary")),
             )
             .subcommand(
                 ClapCommand::new("verify-artifact")
@@ -7768,7 +11170,7 @@ impl CliParser {
                             .long("primitive-strict")
                             .value_name("VERSION")
                             .conflicts_with("primitive-compat")
-                            .help("Require primitive syntax from a specific version (e.g. 0.15 or 0.16), reject legacy forms"),
+                            .help("Require primitive syntax from a specific version (e.g. 0.15, 0.16, 0.17, or 0.18), reject legacy forms"),
                     ),
             )
             .subcommand(
@@ -7786,24 +11188,79 @@ impl CliParser {
             )
             .subcommand(
                 ClapCommand::new("publish")
-                    .about("Experimental: publish a package")
+                    .about("Publish a package to the public registry, or write an offline fixture with --offline")
                     .arg(Arg::new("dry-run").long("dry-run").action(ArgAction::SetTrue))
-                    .arg(Arg::new("allow-dirty").long("allow-dirty").action(ArgAction::SetTrue)),
+                    .arg(
+                        Arg::new("offline")
+                            .long("offline")
+                            .action(ArgAction::SetTrue)
+                            .help("Write local registry.json fixture metadata instead of using the public write API"),
+                    )
+                    .arg(Arg::new("allow-dirty").long("allow-dirty").action(ArgAction::SetTrue))
+                    .arg(
+                        Arg::new("api-url")
+                            .long("api-url")
+                            .value_name("URL")
+                            .help("Registry write API base URL; defaults to CELLSCRIPT_REGISTRY_API_URL or api.registry.cellscript.dev"),
+                    )
+                    .arg(
+                        Arg::new("capability-key-id")
+                            .long("capability-key-id")
+                            .value_name("KEY_ID")
+                            .help("Registry capability key id authorised by JoyID"),
+                    )
+                    .arg(
+                        Arg::new("capability-signature")
+                            .long("capability-signature")
+                            .value_name("SIGNATURE")
+                            .help("P-256 signature over the canonical publish payload"),
+                    )
+                    .arg(
+                        Arg::new("idempotency-key")
+                            .long("idempotency-key")
+                            .value_name("KEY")
+                            .help("Publish retry key; defaults to CELLSCRIPT_REGISTRY_IDEMPOTENCY_KEY or a request hash"),
+                    )
+                    .arg(
+                        Arg::new("payload")
+                            .long("payload")
+                            .value_name("FILE")
+                            .help("Previously generated publish payload JSON to submit with a capability signature"),
+                    )
+                    .arg(
+                        Arg::new("source-snapshot")
+                            .long("source-snapshot")
+                            .value_name("FILE")
+                            .help("Immutable source snapshot bytes to upload; defaults to a generated CellScript source snapshot"),
+                    )
+                    .arg(
+                        Arg::new("print-payload")
+                            .long("print-payload")
+                            .action(ArgAction::SetTrue)
+                            .help("Print the publish payload and canonical signing bytes without submitting"),
+                    )
+                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable publish output")),
             )
             .subcommand(
                 ClapCommand::new("install")
-                    .about("Experimental: install a package")
+                    .about("Install a package from registry, git, or path")
                     .arg(Arg::new("crate").value_name("CRATE"))
                     .arg(Arg::new("version").long("version").value_name("VERSION"))
+                    .arg(Arg::new("namespace").long("namespace").value_name("NAMESPACE").help("Package namespace for registry install"))
                     .arg(Arg::new("git").long("git").value_name("URL"))
+                    .arg(Arg::new("path").long("path").value_name("PATH"))
                     .arg(
-                        Arg::new("rev")
-                            .long("rev")
-                            .value_name("COMMIT")
-                            .requires("git")
-                            .help("Pin a git dependency to a full commit hash"),
+                        Arg::new("allow-unverified")
+                            .long("allow-unverified")
+                            .action(ArgAction::SetTrue)
+                            .help("Allow direct install of source_published or indexed_pending registry entries"),
                     )
-                    .arg(Arg::new("path").long("path").value_name("PATH")),
+                    .arg(
+                        Arg::new("allow-quarantined")
+                            .long("allow-quarantined")
+                            .action(ArgAction::SetTrue)
+                            .help("Allow explicit incident-review install of quarantined registry entries"),
+                    ),
             )
             .subcommand(ClapCommand::new("update").about("Experimental: update dependencies"))
             .subcommand(
@@ -7816,22 +11273,251 @@ impl CliParser {
                     .about("Experimental: authenticate against a registry")
                     .arg(Arg::new("registry").long("registry").value_name("URL")),
             )
+            .subcommand(
+                ClapCommand::new("auth")
+                    .about("Manage JoyID-rooted registry capability authorisation")
+                    .subcommand_required(true)
+                    .arg_required_else_help(true)
+                    .subcommand(
+                        ClapCommand::new("login")
+                            .about("Create a JoyID capability authorisation payload")
+                            .arg(Arg::new("registry-origin").long("registry-origin").value_name("URL"))
+                            .arg(Arg::new("principal-type").long("principal-type").value_name("TYPE"))
+                            .arg(
+                                Arg::new("principal-id")
+                                    .long("principal-id")
+                                    .value_name("ID")
+                                    .help("Normalized JoyID/CKB principal binding derived from the CCC JoyID signer"),
+                            )
+                            .arg(Arg::new("capability-pubkey").long("capability-pubkey").value_name("PUBKEY"))
+                            .arg(
+                                Arg::new("scope")
+                                    .long("scope")
+                                    .value_name("SCOPE")
+                                    .action(ArgAction::Append)
+                                    .help("Capability scope, e.g. publish:namespace/package"),
+                            )
+                            .arg(
+                                Arg::new("expires")
+                                    .long("expires")
+                                    .value_name("DURATION")
+                                    .conflicts_with("capability-expires-at")
+                                    .help("Capability lifetime, e.g. 90d or 24h"),
+                            )
+                            .arg(Arg::new("capability-expires-at").long("capability-expires-at").value_name("TIMESTAMP"))
+                            .arg(Arg::new("json").long("json").action(ArgAction::SetTrue)),
+                    )
+                    .subcommand(
+                        ClapCommand::new("capability")
+                            .about("Manage scoped publisher capabilities")
+                            .subcommand_required(true)
+                            .arg_required_else_help(true)
+                            .subcommand(
+                                ClapCommand::new("create")
+                                    .about("Create a JoyID capability authorisation payload for CI or local publishing")
+                                    .arg(Arg::new("registry-origin").long("registry-origin").value_name("URL"))
+                                    .arg(Arg::new("principal-type").long("principal-type").value_name("TYPE"))
+                                    .arg(
+                                        Arg::new("principal-id")
+                                            .long("principal-id")
+                                            .value_name("ID")
+                                            .help("Normalized JoyID/CKB principal binding derived from the CCC JoyID signer"),
+                                    )
+                                    .arg(Arg::new("capability-pubkey").long("capability-pubkey").value_name("PUBKEY"))
+                                    .arg(
+                                        Arg::new("scope")
+                                            .long("scope")
+                                            .value_name("SCOPE")
+                                            .action(ArgAction::Append)
+                                            .help("Capability scope, e.g. publish:namespace/package"),
+                                    )
+                                    .arg(
+                                        Arg::new("expires")
+                                            .long("expires")
+                                            .value_name("DURATION")
+                                            .conflicts_with("capability-expires-at")
+                                            .help("Capability lifetime, e.g. 90d or 24h"),
+                                    )
+                                    .arg(Arg::new("capability-expires-at").long("capability-expires-at").value_name("TIMESTAMP"))
+                                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue)),
+                            )
+                            .subcommand(
+                                ClapCommand::new("submit")
+                                    .about("Submit a JoyID-signed capability authorisation payload to the registry")
+                                    .arg(
+                                        Arg::new("api-url")
+                                            .long("api-url")
+                                            .value_name("URL")
+                                            .help("Registry write API base URL; defaults to CELLSCRIPT_REGISTRY_API_URL"),
+                                    )
+                                    .arg(
+                                        Arg::new("payload")
+                                            .long("payload")
+                                            .value_name("FILE")
+                                            .required(true)
+                                            .help("Capability authorisation payload JSON created by auth capability create"),
+                                    )
+                                    .arg(
+                                        Arg::new("joyid-signature")
+                                            .long("joyid-signature")
+                                            .value_name("FILE")
+                                            .required(true)
+                                            .help("JoyID signature JSON whose challenge is the canonical payload"),
+                                    )
+                                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue)),
+                            )
+                            .subcommand(
+                                ClapCommand::new("revoke")
+                                    .about("Create or submit a JoyID-signed capability revocation payload")
+                                    .arg(
+                                        Arg::new("api-url")
+                                            .long("api-url")
+                                            .value_name("URL")
+                                            .help("Registry write API base URL; defaults to CELLSCRIPT_REGISTRY_API_URL"),
+                                    )
+                                    .arg(Arg::new("registry-origin").long("registry-origin").value_name("URL"))
+                                    .arg(Arg::new("principal-type").long("principal-type").value_name("TYPE"))
+                                    .arg(
+                                        Arg::new("principal-id")
+                                            .long("principal-id")
+                                            .value_name("ID")
+                                            .help("Normalized JoyID/CKB principal binding derived from the CCC JoyID signer"),
+                                    )
+                                    .arg(Arg::new("capability-key-id").long("capability-key-id").value_name("KEY_ID"))
+                                    .arg(
+                                        Arg::new("payload")
+                                            .long("payload")
+                                            .value_name("FILE")
+                                            .help("Previously generated capability revocation payload JSON"),
+                                    )
+                                    .arg(
+                                        Arg::new("joyid-signature")
+                                            .long("joyid-signature")
+                                            .value_name("FILE")
+                                            .help("JoyID signature JSON whose challenge is the canonical revoke payload"),
+                                    )
+                                    .arg(Arg::new("reason").long("reason").value_name("TEXT"))
+                                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue)),
+                            ),
+                    ),
+            )
+            .subcommand(
+                ClapCommand::new("certify")
+                    .about("Run a deterministic compiler-hosted certification plugin (currently: novaseal-profile-v0)")
+                    .arg(
+                        Arg::new("plugin")
+                            .long("plugin")
+                            .value_name("PLUGIN")
+                            .required(true)
+                            .help("Certification plugin id, e.g. novaseal-profile-v0"),
+                    )
+                    .arg(
+                        Arg::new("repo-root")
+                            .long("repo-root")
+                            .value_name("DIR")
+                            .help("Repository root for Rust certification evidence"),
+                    )
+                    .arg(
+                        Arg::new("report")
+                            .long("report")
+                            .value_name("JSON")
+                            .help("Verify an existing plugin report instead of regenerating it"),
+                    )
+                    .arg(
+                        Arg::new("output")
+                            .long("output")
+                            .short('o')
+                            .value_name("FILE")
+                            .help("Write compiler certification report JSON"),
+                    )
+                    .arg(
+                        Arg::new("require-production")
+                            .long("require-production")
+                            .action(ArgAction::SetTrue)
+                            .help("Require external production attestations, not only local profile certification"),
+                    )
+                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
+            )
+            .subcommand(
+                ClapCommand::new("package").about("Package integrity commands").subcommand_required(true).subcommand(
+                    ClapCommand::new("verify")
+                        .about("Verify package integrity against Cell.lock and source tree")
+                        .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON output")),
+                ),
+            )
+            .subcommand(
+                ClapCommand::new("registry")
+                    .about("Registry integrity commands")
+                    .subcommand_required(true)
+                    .subcommand(
+                        ClapCommand::new("verify")
+                            .about("Verify deployment registry records against Cell.lock and chain facts")
+                            .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON output"))
+                            .arg(Arg::new("live").long("live").action(ArgAction::SetTrue).help("Verify deployment facts with CKB RPC get_live_cell"))
+                            .arg(Arg::new("rpc-url").long("rpc-url").value_name("URL").help("CKB RPC URL for --live"))
+                            .arg(Arg::new("network").long("network").value_name("NAME").help("Verify only this deployment network with --live"))
+                            .arg(
+                                Arg::new("require-publisher-signature")
+                                    .long("require-publisher-signature")
+                                    .action(ArgAction::SetTrue)
+                                    .help("Require deployment publisher_signature metadata; cryptographic verification is not yet implemented"),
+                            )
+                            .arg(
+                                Arg::new("require-audit-report")
+                                    .long("require-audit-report")
+                                    .action(ArgAction::SetTrue)
+                                    .help("Require deployment audit_report_hash metadata"),
+                            ),
+                    )
+                    .subcommand(
+                        ClapCommand::new("add")
+                            .about("Register a new package in the discovery index")
+                            .arg(Arg::new("namespace").long("namespace").required(true).value_name("NAMESPACE").help("Package namespace"))
+                            .arg(Arg::new("name").long("name").required(true).value_name("NAME").help("Package name"))
+                            .arg(Arg::new("source").long("source").required(true).value_name("URL").help("Source repository URL")),
+                    )
+                    .subcommand(
+                        ClapCommand::new("edit")
+                            .about("Edit the package registry.json in the current package")
+                            .arg(Arg::new("yank").long("yank").value_name("VERSION").help("Mark an existing version as yanked"))
+                            .arg(Arg::new("reason").long("reason").value_name("TEXT").help("Reason recorded with --yank"))
+                            .arg(Arg::new("replaced-by").long("replaced-by").value_name("VERSION").help("Suggested replacement version recorded with --yank"))
+                            .arg(Arg::new("yanked-at").long("yanked-at").value_name("ISO8601").help("Override yank timestamp; defaults to current UTC")),
+                    ),
+            )
+            .subcommand(
+                ClapCommand::new("registry-verify")
+                    .about("Verify deployment registry records against Cell.lock and chain facts")
+                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON output"))
+                    .arg(Arg::new("live").long("live").action(ArgAction::SetTrue).help("Verify deployment facts with CKB RPC get_live_cell"))
+                    .arg(Arg::new("rpc-url").long("rpc-url").value_name("URL").help("CKB RPC URL for --live"))
+                    .arg(Arg::new("network").long("network").value_name("NAME").help("Verify only this deployment network with --live"))
+                    .arg(
+                        Arg::new("require-publisher-signature")
+                            .long("require-publisher-signature")
+                            .action(ArgAction::SetTrue)
+                            .help("Require deployment publisher_signature metadata; cryptographic verification is not yet implemented"),
+                    )
+                    .arg(
+                        Arg::new("require-audit-report")
+                            .long("require-audit-report")
+                            .action(ArgAction::SetTrue)
+                            .help("Require deployment audit_report_hash metadata"),
+                    ),
+            )
+            .subcommand(
+                ClapCommand::new("package-verify")
+                    .about("Verify package integrity against Cell.lock and source tree")
+                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON output")),
+            )
+            .subcommand(
+                ClapCommand::new("registry-add")
+                    .about("Register a new package in the discovery index")
+                    .arg(Arg::new("namespace").long("namespace").required(true).value_name("NAMESPACE").help("Package namespace"))
+                    .arg(Arg::new("name").long("name").required(true).value_name("NAME").help("Package name"))
+                    .arg(Arg::new("source").long("source").required(true).value_name("URL").help("Source repository URL")),
+            )
             .get_matches();
-
-        macro_rules! required_string {
-            ($matches:expr, $id:literal, $label:literal) => {
-                match $matches.get_one::<String>($id).cloned() {
-                    Some(value) => value,
-                    None => return Command::Invalid(format!("internal CLI parser missing required argument '{}'", $label)),
-                }
-            };
-        }
-
-        macro_rules! required_path {
-            ($matches:expr, $id:literal, $label:literal) => {
-                PathBuf::from(required_string!($matches, $id, $label))
-            };
-        }
 
         match matches.subcommand() {
             Some(("build", m)) => Command::Build(BuildArgs {
@@ -7840,7 +11526,7 @@ impl CliParser {
                 target_profile: m.get_one::<String>("target-profile").cloned(),
                 entry_action: m.get_one::<String>("entry-action").cloned(),
                 entry_lock: m.get_one::<String>("entry-lock").cloned(),
-                jobs: m.get_one::<usize>("jobs").copied(),
+                jobs: m.get_one::<String>("jobs").and_then(|s| s.parse().ok()),
                 json: m.get_flag("json"),
                 production: m.get_flag("production"),
                 deny_fail_closed: m.get_flag("deny-fail-closed"),
@@ -7850,6 +11536,8 @@ impl CliParser {
                     m.get_one::<String>("primitive-compat").cloned(),
                     m.get_one::<String>("primitive-strict").cloned(),
                 ),
+                package: m.get_one::<String>("package").cloned(),
+                workspace: m.get_flag("workspace"),
                 ..Default::default()
             }),
             Some(("test", m)) => Command::Test(TestArgs {
@@ -7880,10 +11568,11 @@ impl CliParser {
                 name: m.get_one::<String>("name").cloned(),
                 path: m.get_one::<String>("path").map(PathBuf::from),
                 lib: m.get_flag("lib"),
+                namespace: m.get_one::<String>("namespace").cloned(),
                 json: m.get_flag("json"),
             }),
             Some(("new", m)) => Command::New(NewArgs {
-                name: required_string!(m, "name", "package name"),
+                name: m.get_one::<String>("name").cloned().expect("required package name"),
                 path: m.get_one::<String>("path").map(PathBuf::from),
                 lib: m.get_flag("lib"),
                 vcs: m.get_one::<String>("vcs").cloned().unwrap_or_else(|| "git".to_string()),
@@ -7894,7 +11583,6 @@ impl CliParser {
                 dev: m.get_flag("dev"),
                 build: m.get_flag("build"),
                 git: m.get_one::<String>("git").cloned(),
-                rev: m.get_one::<String>("rev").cloned(),
                 path: m.get_one::<String>("path").map(PathBuf::from),
                 json: m.get_flag("json"),
             }),
@@ -7904,7 +11592,7 @@ impl CliParser {
                 build: m.get_flag("build"),
                 json: m.get_flag("json"),
             }),
-            Some(("clean", m)) => Command::Clean(CleanArgs { json: m.get_flag("json") }),
+            Some(("clean", m)) => Command::Clean(CleanArgs { json: m.get_flag("json"), cache: m.get_flag("cache") }),
             Some(("repl", _)) => Command::Repl,
             Some(("check", m)) => Command::Check(CheckArgs {
                 all_targets: m.get_flag("all-targets"),
@@ -7919,6 +11607,8 @@ impl CliParser {
                     m.get_one::<String>("primitive-strict").cloned(),
                 ),
                 features: Vec::new(),
+                package: m.get_one::<String>("package").cloned(),
+                workspace: m.get_flag("workspace"),
             }),
             Some(("metadata", m)) => Command::Metadata(MetadataArgs {
                 input: m.get_one::<String>("input").map(PathBuf::from),
@@ -7954,11 +11644,13 @@ impl CliParser {
                 file: m.get_one::<String>("file").map(PathBuf::from),
                 json: m.get_flag("json"),
             }),
-            Some(("explain", m)) => {
-                Command::Explain(ExplainArgs { code: required_string!(m, "code", "runtime error code"), json: m.get_flag("json") })
-            }
+            Some(("ckb-std-compat", m)) => Command::CkbStdCompat(CkbStdCompatArgs { json: m.get_flag("json") }),
+            Some(("explain", m)) => Command::Explain(ExplainArgs {
+                code: m.get_one::<String>("code").cloned().expect("required runtime error code"),
+                json: m.get_flag("json"),
+            }),
             Some(("explain-profile", m)) => Command::ExplainProfile(ExplainProfileArgs {
-                profile: required_string!(m, "profile", "target profile"),
+                profile: m.get_one::<String>("profile").cloned().expect("required target profile"),
                 json: m.get_flag("json"),
             }),
             Some(("explain-proof", m)) => Command::ExplainProof(ExplainProofArgs {
@@ -7971,14 +11663,7 @@ impl CliParser {
                 input: m.get_one::<String>("input").map(PathBuf::from),
                 target: m.get_one::<String>("target").cloned(),
                 target_profile: m.get_one::<String>("target-profile").cloned(),
-                entry_action: m.get_one::<String>("entry-action").cloned(),
-                entry_lock: m.get_one::<String>("entry-lock").cloned(),
-                primitive_compat: resolve_metadata_workflow_primitive_compat(
-                    m.get_one::<String>("primitive-compat").cloned(),
-                    m.get_one::<String>("primitive-strict").cloned(),
-                ),
                 json: m.get_flag("json"),
-                human: m.get_flag("human"),
             }),
             Some(("explain-generics", m)) => Command::ExplainGenerics(ExplainGenericsArgs {
                 input: m.get_one::<String>("input").map(PathBuf::from),
@@ -7993,8 +11678,8 @@ impl CliParser {
                 target_profile: m.get_one::<String>("target-profile").cloned(),
             }),
             Some(("proof-diff", m)) => Command::ProofDiff(ProofDiffArgs {
-                old: required_path!(m, "old", "old metadata"),
-                new: required_path!(m, "new", "new metadata"),
+                old: m.get_one::<String>("old").map(PathBuf::from).expect("required old metadata"),
+                new: m.get_one::<String>("new").map(PathBuf::from).expect("required new metadata"),
                 json: m.get_flag("json"),
             }),
             Some(("profile", m)) => Command::Profile(ProfileArgs {
@@ -8002,19 +11687,11 @@ impl CliParser {
                 entry: m.get_one::<String>("entry").cloned(),
                 target: m.get_one::<String>("target").cloned(),
                 target_profile: m.get_one::<String>("target-profile").cloned(),
-                primitive_compat: resolve_metadata_workflow_primitive_compat(
-                    m.get_one::<String>("primitive-compat").cloned(),
-                    m.get_one::<String>("primitive-strict").cloned(),
-                ),
                 json: m.get_flag("json"),
             }),
             Some(("trace-tx", m)) => Command::TraceTx(TraceTxArgs {
-                against: required_path!(m, "against", "metadata"),
-                tx: required_path!(m, "tx", "transaction JSON"),
-                primitive_compat: resolve_metadata_workflow_primitive_compat(
-                    m.get_one::<String>("primitive-compat").cloned(),
-                    m.get_one::<String>("primitive-strict").cloned(),
-                ),
+                against: m.get_one::<String>("against").map(PathBuf::from).expect("required metadata"),
+                tx: m.get_one::<String>("tx").map(PathBuf::from).expect("required transaction JSON"),
                 json: m.get_flag("json"),
             }),
             Some(("audit-bundle", m)) => Command::AuditBundle(AuditBundleArgs {
@@ -8022,69 +11699,23 @@ impl CliParser {
                 output: m.get_one::<String>("output").map(PathBuf::from),
                 target: m.get_one::<String>("target").cloned(),
                 target_profile: m.get_one::<String>("target-profile").cloned(),
-                primitive_compat: resolve_metadata_workflow_primitive_compat(
-                    m.get_one::<String>("primitive-compat").cloned(),
-                    m.get_one::<String>("primitive-strict").cloned(),
-                ),
                 json: m.get_flag("json"),
-            }),
-            Some(("certify", m)) => Command::Certify(CertifyArgs {
-                plugin: required_string!(m, "plugin", "certification plugin"),
-                repo_root: m.get_one::<String>("repo-root").map(PathBuf::from),
-                report: m.get_one::<String>("report").map(PathBuf::from),
-                output: m.get_one::<String>("output").map(PathBuf::from),
-                json: m.get_flag("json"),
-                require_production: m.get_flag("require-production"),
             }),
             Some(("validate-tx", m)) => Command::ValidateTx(ValidateTxArgs {
-                against: required_path!(m, "against", "metadata"),
-                tx: required_path!(m, "tx", "transaction JSON"),
-                resource_identities: m.get_one::<String>("resource-identities").map(PathBuf::from),
-                production: m.get_flag("production"),
-                primitive_compat: resolve_metadata_workflow_primitive_compat(
-                    m.get_one::<String>("primitive-compat").cloned(),
-                    m.get_one::<String>("primitive-strict").cloned(),
-                ),
+                against: m.get_one::<String>("against").map(PathBuf::from).expect("required metadata"),
+                tx: m.get_one::<String>("tx").map(PathBuf::from).expect("required transaction JSON"),
                 json: m.get_flag("json"),
-                human: m.get_flag("human"),
-            }),
-            Some(("builder-manifest", m)) => Command::BuilderManifest(builder_manifest_args_from_matches(m)),
-            Some(("builder-check", m)) => Command::BuilderCheck(builder_check_args_from_matches(m)),
-            Some(("builder", m)) => match m.subcommand() {
-                Some(("manifest", manifest)) => Command::BuilderManifest(builder_manifest_args_from_matches(manifest)),
-                Some(("check", check)) => Command::BuilderCheck(builder_check_args_from_matches(check)),
-                _ => Command::BuilderManifest(BuilderManifestArgs::default()),
-            },
-            Some(("resource-identity", m)) => Command::ResourceIdentity(ResourceIdentityArgs {
-                input: m.get_one::<String>("input").map(PathBuf::from),
-                output: m.get_one::<String>("output").map(PathBuf::from),
-                plan_output: m.get_one::<String>("plan-output").map(PathBuf::from),
-                source_output: m.get_one::<String>("source-output").map(PathBuf::from),
-                target: m.get_one::<String>("target").cloned(),
-                target_profile: m.get_one::<String>("target-profile").cloned(),
-                primitive_compat: resolve_metadata_workflow_primitive_compat(
-                    m.get_one::<String>("primitive-compat").cloned(),
-                    m.get_one::<String>("primitive-strict").cloned(),
-                ),
-                types: m.get_many::<String>("type").map(|values| values.cloned().collect()).unwrap_or_default(),
-                identities: m.get_many::<String>("identity").map(|values| values.cloned().collect()).unwrap_or_default(),
-                instance: m.get_one::<String>("instance").cloned(),
-                json: m.get_flag("json"),
-                human: m.get_flag("human"),
             }),
             Some(("solve-tx", m)) => Command::SolveTx(SolveTxArgs {
                 input: m.get_one::<String>("input").map(PathBuf::from),
                 output: m.get_one::<String>("output").map(PathBuf::from),
                 target: m.get_one::<String>("target").cloned(),
                 target_profile: m.get_one::<String>("target-profile").cloned(),
-                entry_action: m.get_one::<String>("entry-action").cloned(),
-                entry_lock: m.get_one::<String>("entry-lock").cloned(),
-                primitive_compat: resolve_metadata_workflow_primitive_compat(
-                    m.get_one::<String>("primitive-compat").cloned(),
-                    m.get_one::<String>("primitive-strict").cloned(),
-                ),
                 json: m.get_flag("json"),
-                human: m.get_flag("human"),
+            }),
+            Some(("verify-ckb-fixtures", m)) => Command::VerifyCkbFixtures(VerifyCkbFixturesArgs {
+                manifest: m.get_one::<String>("manifest").map(PathBuf::from).expect("required CKB fixture manifest"),
+                json: m.get_flag("json"),
             }),
             Some(("deploy-plan", m)) => Command::DeployPlan(DeployPlanArgs {
                 input: m.get_one::<String>("input").map(PathBuf::from),
@@ -8093,12 +11724,13 @@ impl CliParser {
                 target_profile: m.get_one::<String>("target-profile").cloned(),
                 json: m.get_flag("json"),
             }),
-            Some(("verify-deploy", m)) => {
-                Command::VerifyDeploy(VerifyDeployArgs { plan: required_path!(m, "plan", "deploy plan"), json: m.get_flag("json") })
-            }
+            Some(("verify-deploy", m)) => Command::VerifyDeploy(VerifyDeployArgs {
+                plan: m.get_one::<String>("plan").map(PathBuf::from).expect("required deploy plan"),
+                json: m.get_flag("json"),
+            }),
             Some(("diff-deploy", m)) => Command::DiffDeploy(DiffDeployArgs {
-                old: required_path!(m, "old", "old deploy plan"),
-                new: required_path!(m, "new", "new deploy plan"),
+                old: m.get_one::<String>("old").map(PathBuf::from).expect("required old deploy plan"),
+                new: m.get_one::<String>("new").map(PathBuf::from).expect("required new deploy plan"),
                 json: m.get_flag("json"),
             }),
             Some(("lock-deps", m)) => Command::LockDeps(LockDepsArgs {
@@ -8115,10 +11747,24 @@ impl CliParser {
                     output: build.get_one::<String>("output").map(PathBuf::from),
                     target: build.get_one::<String>("target").cloned(),
                     target_profile: build.get_one::<String>("target-profile").cloned(),
+                    fabric_intent: build.get_flag("fabric-intent"),
                     json: build.get_flag("json"),
                 }),
                 _ => Command::ActionBuild(ActionBuildArgs::default()),
             },
+            Some(("gen-builder", m)) => Command::GenBuilder(GenBuilderArgs {
+                input: m.get_one::<String>("input").map(PathBuf::from),
+                metadata: m.get_one::<String>("metadata").map(PathBuf::from),
+                lockfile: m.get_one::<String>("lockfile").map(PathBuf::from),
+                deployed: m.get_one::<String>("deployed").map(PathBuf::from),
+                deployment_network: m.get_one::<String>("deployment-network").cloned(),
+                action: m.get_one::<String>("action").cloned(),
+                output: m.get_one::<String>("output").map(PathBuf::from),
+                target: m.get_one::<String>("target").cloned().unwrap_or_else(|| "typescript".to_string()),
+                target_profile: m.get_one::<String>("target-profile").cloned(),
+                package_name: m.get_one::<String>("package-name").cloned(),
+                json: m.get_flag("json"),
+            }),
             Some(("entry-witness", m)) => Command::EntryWitness(EntryWitnessArgs {
                 input: m.get_one::<String>("input").map(PathBuf::from),
                 action: m.get_one::<String>("action").cloned(),
@@ -8128,10 +11774,9 @@ impl CliParser {
                 target: m.get_one::<String>("target").cloned(),
                 target_profile: m.get_one::<String>("target-profile").cloned(),
                 json: m.get_flag("json"),
-                human: m.get_flag("human"),
             }),
             Some(("verify-artifact", m)) => Command::VerifyArtifact(VerifyArtifactArgs {
-                artifact: required_path!(m, "artifact", "artifact"),
+                artifact: m.get_one::<String>("artifact").map(PathBuf::from).expect("required artifact"),
                 metadata: m.get_one::<String>("metadata").map(PathBuf::from),
                 verify_sources: m.get_flag("verify-sources"),
                 json: m.get_flag("json"),
@@ -8153,21 +11798,90 @@ impl CliParser {
                 release: m.get_flag("release"),
                 simulate: m.get_flag("simulate"),
             }),
-            Some(("publish", m)) => {
-                Command::Publish(PublishArgs { dry_run: m.get_flag("dry-run"), allow_dirty: m.get_flag("allow-dirty") })
-            }
+            Some(("publish", m)) => Command::Publish(PublishArgs {
+                dry_run: m.get_flag("dry-run"),
+                offline: m.get_flag("offline"),
+                allow_dirty: m.get_flag("allow-dirty"),
+                api_url: m.get_one::<String>("api-url").cloned(),
+                capability_key_id: m.get_one::<String>("capability-key-id").cloned(),
+                capability_signature: m.get_one::<String>("capability-signature").cloned(),
+                idempotency_key: m.get_one::<String>("idempotency-key").cloned(),
+                payload: m.get_one::<String>("payload").map(PathBuf::from),
+                source_snapshot: m.get_one::<String>("source-snapshot").map(PathBuf::from),
+                print_payload: m.get_flag("print-payload"),
+                json: m.get_flag("json"),
+            }),
             Some(("install", m)) => Command::Install(InstallArgs {
                 crate_name: m.get_one::<String>("crate").cloned(),
                 version: m.get_one::<String>("version").cloned(),
+                namespace: m.get_one::<String>("namespace").cloned(),
                 git: m.get_one::<String>("git").cloned(),
-                rev: m.get_one::<String>("rev").cloned(),
                 path: m.get_one::<String>("path").map(PathBuf::from),
+                allow_unverified: m.get_flag("allow-unverified"),
+                allow_quarantined: m.get_flag("allow-quarantined"),
             }),
             Some(("update", _)) => Command::Update,
             Some(("info", m)) => Command::Info(InfoArgs { json: m.get_flag("json") }),
             Some(("login", m)) => Command::Login(LoginArgs { registry: m.get_one::<String>("registry").cloned() }),
-            Some((name, _)) => Command::Invalid(format!("internal CLI parser missing handler for subcommand '{}'", name)),
-            None => Command::Invalid("internal CLI parser did not receive a subcommand".to_string()),
+            Some(("auth", m)) => match m.subcommand() {
+                Some(("login", login)) => Command::AuthLogin(auth_capability_args_from_matches(login)),
+                Some(("capability", capability)) => match capability.subcommand() {
+                    Some(("create", create)) => Command::AuthCapabilityCreate(auth_capability_args_from_matches(create)),
+                    Some(("submit", submit)) => Command::AuthCapabilitySubmit(auth_capability_submit_args_from_matches(submit)),
+                    Some(("revoke", revoke)) => Command::AuthCapabilityRevoke(auth_capability_revoke_args_from_matches(revoke)),
+                    _ => unreachable!(),
+                },
+                _ => unreachable!(),
+            },
+            Some(("certify", m)) => Command::Certify(CertifyArgs {
+                plugin: m.get_one::<String>("plugin").cloned().unwrap_or_else(|| NOVASEAL_CERTIFICATION_PLUGIN.to_string()),
+                repo_root: m.get_one::<String>("repo-root").map(PathBuf::from),
+                report: m.get_one::<String>("report").map(PathBuf::from),
+                output: m.get_one::<String>("output").map(PathBuf::from),
+                json: m.get_flag("json"),
+                require_production: m.get_flag("require-production"),
+            }),
+            Some(("package", m)) => match m.subcommand() {
+                Some(("verify", verify)) => Command::PackageVerify(PackageVerifyArgs { json: verify.get_flag("json") }),
+                _ => unreachable!(),
+            },
+            Some(("registry", m)) => match m.subcommand() {
+                Some(("verify", verify)) => Command::RegistryVerify(RegistryVerifyArgs {
+                    json: verify.get_flag("json"),
+                    live: verify.get_flag("live"),
+                    rpc_url: verify.get_one::<String>("rpc-url").cloned(),
+                    network: verify.get_one::<String>("network").cloned(),
+                    require_publisher_signature: verify.get_flag("require-publisher-signature"),
+                    require_audit_report: verify.get_flag("require-audit-report"),
+                }),
+                Some(("add", add)) => Command::RegistryAdd(RegistryAddArgs {
+                    namespace: add.get_one::<String>("namespace").cloned().unwrap_or_default(),
+                    name: add.get_one::<String>("name").cloned().unwrap_or_default(),
+                    source: add.get_one::<String>("source").cloned().unwrap_or_default(),
+                }),
+                Some(("edit", edit)) => Command::RegistryEdit(RegistryEditArgs {
+                    yank: edit.get_one::<String>("yank").cloned(),
+                    reason: edit.get_one::<String>("reason").cloned(),
+                    replaced_by: edit.get_one::<String>("replaced-by").cloned(),
+                    yanked_at: edit.get_one::<String>("yanked-at").cloned(),
+                }),
+                _ => unreachable!(),
+            },
+            Some(("registry-verify", m)) => Command::RegistryVerify(RegistryVerifyArgs {
+                json: m.get_flag("json"),
+                live: m.get_flag("live"),
+                rpc_url: m.get_one::<String>("rpc-url").cloned(),
+                network: m.get_one::<String>("network").cloned(),
+                require_publisher_signature: m.get_flag("require-publisher-signature"),
+                require_audit_report: m.get_flag("require-audit-report"),
+            }),
+            Some(("package-verify", m)) => Command::PackageVerify(PackageVerifyArgs { json: m.get_flag("json") }),
+            Some(("registry-add", m)) => Command::RegistryAdd(RegistryAddArgs {
+                namespace: m.get_one::<String>("namespace").cloned().unwrap_or_default(),
+                name: m.get_one::<String>("name").cloned().unwrap_or_default(),
+                source: m.get_one::<String>("source").cloned().unwrap_or_default(),
+            }),
+            _ => unreachable!(),
         }
     }
 }
@@ -8183,314 +11897,12 @@ fn resolve_primitive_compat(compat: Option<String>, strict: Option<String>) -> O
     }
 }
 
-fn resolve_metadata_workflow_primitive_compat(compat: Option<String>, strict: Option<String>) -> Option<String> {
-    resolve_primitive_compat(compat, strict).or_else(|| Some(STRICT_V0_16_PRIMITIVE_COMPAT.to_string()))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn proof_plan_record(status: &str, coverage: &str, evidence: Vec<crate::ProofPlanEvidenceMetadata>) -> ProofPlanMetadata {
-        ProofPlanMetadata {
-            name: "test".to_string(),
-            origin: "action:test".to_string(),
-            category: "create-output".to_string(),
-            feature: "create-output:Token:out".to_string(),
-            source_span: None,
-            trigger: "action".to_string(),
-            scope: "group".to_string(),
-            reads: Vec::new(),
-            coverage: Vec::new(),
-            input_output_relation_checks: Vec::new(),
-            group_cardinality: "single".to_string(),
-            identity_lifecycle_policy: "none".to_string(),
-            preserved_fields: Vec::new(),
-            witness_fields: Vec::new(),
-            lock_args_fields: Vec::new(),
-            on_chain_checked: status == "checked-runtime",
-            on_chain_checked_obligations: Vec::new(),
-            executable_evidence: evidence,
-            builder_assumptions: Vec::new(),
-            codegen_coverage_status: coverage.to_string(),
-            status: status.to_string(),
-            detail: "test detail".to_string(),
-            diagnostics: Vec::new(),
-        }
-    }
-
     #[test]
     fn test_command_execution() {
         let _cmd = Command::Clean(CleanArgs::default());
-    }
-
-    #[test]
-    fn invalid_parser_mapping_returns_error_instead_of_panicking() {
-        let err = CommandExecutor::execute(Command::Invalid("missing parser mapping".to_string()))
-            .expect_err("invalid parser mapping should be reported");
-
-        assert!(err.to_string().contains("missing parser mapping"));
-    }
-
-    #[test]
-    fn ckb_hash_file_rejects_inputs_above_limit() {
-        let temp = tempfile::tempdir().unwrap();
-        let path = temp.path().join("too-large.bin");
-        std::fs::write(&path, vec![0u8; CKB_HASH_FILE_SIZE_LIMIT_BYTES as usize + 1]).unwrap();
-
-        let err = read_ckb_hash_file(&path).expect_err("oversized ckb-hash input should fail");
-
-        assert!(err.to_string().contains("too large"));
-    }
-
-    #[test]
-    fn expected_metadata_hash_comparison_is_case_sensitive() {
-        let expected = "ab".repeat(32);
-        let actual = expected.to_uppercase();
-
-        let err = validate_expected_metadata_hash("artifact_hash", Some(&actual), Some(&expected)).unwrap_err();
-
-        assert!(err.message.contains("does not match expected"), "unexpected error: {}", err.message);
-    }
-
-    fn novaseal_test_plugin_report(production_ready: bool, production_statement_eligible: bool) -> serde_json::Value {
-        serde_json::json!({
-            "schema": NOVASEAL_PLUGIN_REPORT_SCHEMA,
-            "status": if production_ready { "production_ready" } else { "local_production_prep_ready_external_attestation_required" },
-            "production_ready": production_ready,
-            "production_gates_passed": production_ready,
-            "local_production_prep_ready": true,
-            "production_statement_eligible": production_statement_eligible,
-            "failed_dimensions": [
-                "public_shared_cell_dep_attestation",
-                "external_bip340_tcb_review_attestation",
-                "public_btc_spv_evidence",
-                "rwa_legal_registry_review_evidence",
-            ],
-            "external_blockers": [
-                "public_shared_cell_dep_attested",
-                "external_bip340_tcb_review_attested",
-                "public_btc_spv_evidence_attested",
-                "rwa_legal_registry_review_attested",
-            ],
-            "profile_certification": {
-                "schema": NOVASEAL_PROFILE_CERTIFICATION_SCHEMA,
-                "profile": NOVASEAL_AGREEMENT_PROFILE,
-                "conforms_to": NOVASEAL_CANONICAL_SCHEMA,
-                "status": "passed",
-                "certification_level": "public_ecosystem_profile_certification_local_ready",
-                "production_statement_eligible": production_statement_eligible,
-                "production_statement_blockers": [
-                    "public_shared_cell_dep_attested",
-                    "external_bip340_tcb_review_attested",
-                    "public_btc_spv_evidence_attested",
-                    "rwa_legal_registry_review_attested"
-                ]
-            },
-            "gates": [
-                {
-                    "name": NOVASEAL_PROFILE_CERTIFICATION_GATE,
-                    "status": "passed"
-                }
-            ]
-        })
-    }
-
-    #[test]
-    fn novaseal_certification_summary_accepts_local_ready_profile_report() {
-        let temp = tempfile::tempdir().unwrap();
-        let report_path = temp.path().join("novaseal-production-gates.json");
-        let implementation_path = temp.path().join("novaseal_certification.rs");
-        let report = novaseal_test_plugin_report(false, false);
-        std::fs::write(&report_path, serde_json::to_vec_pretty(&report).unwrap()).unwrap();
-        std::fs::write(&implementation_path, b"pub(crate) fn build_report() {}\n").unwrap();
-
-        let summary = novaseal_certification_summary(&report, temp.path(), &report_path, &implementation_path, false, false)
-            .expect("certification summary");
-
-        assert_eq!(summary["schema"], NOVASEAL_CERTIFICATION_REPORT_SCHEMA);
-        assert_eq!(summary["status"], "passed");
-        assert_eq!(summary["plugin"]["id"], NOVASEAL_CERTIFICATION_PLUGIN);
-        assert_eq!(summary["plugin"]["kind"], "compiler-builtin-rust");
-        assert_eq!(summary["plugin_report"]["schema"], NOVASEAL_PLUGIN_REPORT_SCHEMA);
-        assert_eq!(summary["checks"]["local_production_prep_ready"], true);
-        assert_eq!(summary["plugin_report"]["production_gates_passed"], false);
-        assert_eq!(summary["failed_dimensions"][0], "public_shared_cell_dep_attestation");
-        assert_eq!(summary["external_blockers"][0], "public_shared_cell_dep_attested");
-        assert_eq!(summary["external_blockers"][3], "rwa_legal_registry_review_attested");
-    }
-
-    #[test]
-    fn novaseal_certification_summary_requires_v1_local_ready_when_present() {
-        let temp = tempfile::tempdir().unwrap();
-        let report_path = temp.path().join("novaseal-production-gates.json");
-        let implementation_path = temp.path().join("novaseal_certification.rs");
-        let mut report = novaseal_test_plugin_report(false, false);
-        report["v1_readiness"] = serde_json::json!({
-            "status": "planned_profiles_incomplete",
-            "local_v1_ready": false,
-            "planned_profile_matrix": {
-                "missing": ["fungible_xudt_value_flow"]
-            }
-        });
-        std::fs::write(&report_path, serde_json::to_vec_pretty(&report).unwrap()).unwrap();
-        std::fs::write(&implementation_path, b"pub(crate) fn build_report() {}\n").unwrap();
-
-        let summary = novaseal_certification_summary(&report, temp.path(), &report_path, &implementation_path, false, false)
-            .expect("certification summary");
-
-        assert_eq!(summary["status"], "failed");
-        assert_eq!(summary["checks"]["v1_readiness_local_ready"], false);
-        assert_eq!(
-            summary["failure_reason"]["message"],
-            "NovaSeal V1 readiness requires remaining planned profiles and business scenarios"
-        );
-    }
-
-    #[test]
-    fn novaseal_certification_summary_reports_external_v1_blockers_when_planned_matrix_is_complete() {
-        let temp = tempfile::tempdir().unwrap();
-        let report_path = temp.path().join("novaseal-production-gates.json");
-        let implementation_path = temp.path().join("novaseal_certification.rs");
-        let mut report = novaseal_test_plugin_report(false, false);
-        report["v1_readiness"] = serde_json::json!({
-            "status": "failed",
-            "local_v1_ready": false,
-            "planned_profile_matrix": {
-                "status": "passed",
-                "missing": []
-            },
-            "failed_dimensions": [
-                "external_btc_fiber_endpoint_acceptance",
-                "public_btc_spv_evidence"
-            ],
-            "external_blockers": [
-                "public_btc_spv_evidence_attested"
-            ]
-        });
-        std::fs::write(&report_path, serde_json::to_vec_pretty(&report).unwrap()).unwrap();
-        std::fs::write(&implementation_path, b"pub(crate) fn build_report() {}\n").unwrap();
-
-        let summary = novaseal_certification_summary(&report, temp.path(), &report_path, &implementation_path, false, false)
-            .expect("certification summary");
-
-        assert_eq!(summary["status"], "failed");
-        assert_eq!(
-            summary["failure_reason"]["message"],
-            "NovaSeal V1 readiness requires external production evidence and endpoint acceptance"
-        );
-        assert!(summary["failure_reason"]["missing"].as_array().unwrap().is_empty());
-        assert_eq!(summary["failure_reason"]["external_blockers"][0], "public_shared_cell_dep_attested");
-        assert_eq!(summary["failure_reason"]["failed_dimensions"][0], "public_shared_cell_dep_attestation");
-    }
-
-    #[test]
-    fn novaseal_certification_summary_reports_stale_local_v1_evidence_before_external_blockers() {
-        let temp = tempfile::tempdir().unwrap();
-        let report_path = temp.path().join("novaseal-production-gates.json");
-        let implementation_path = temp.path().join("novaseal_certification.rs");
-        let mut report = novaseal_test_plugin_report(false, false);
-        report["failed_dimensions"] = serde_json::json!([
-            "profile_operator_fixtures",
-            "local_bip340_tcb_review",
-            "local_v1_gate",
-            "external_btc_fiber_endpoint_acceptance",
-            "public_btc_spv_evidence"
-        ]);
-        report["v1_readiness"] = serde_json::json!({
-            "status": "failed",
-            "local_v1_ready": false,
-            "planned_profile_matrix": {
-                "status": "passed",
-                "missing": []
-            },
-            "failed_dimensions": [
-                "profile_operator_fixtures",
-                "local_bip340_tcb_review",
-                "local_v1_gate",
-                "external_btc_fiber_endpoint_acceptance",
-                "public_btc_spv_evidence"
-            ],
-            "external_blockers": [
-                "public_btc_spv_evidence_attested"
-            ]
-        });
-        std::fs::write(&report_path, serde_json::to_vec_pretty(&report).unwrap()).unwrap();
-        std::fs::write(&implementation_path, b"pub(crate) fn build_report() {}\n").unwrap();
-
-        let summary = novaseal_certification_summary(&report, temp.path(), &report_path, &implementation_path, false, false)
-            .expect("certification summary");
-
-        assert_eq!(summary["status"], "failed");
-        assert_eq!(summary["failure_reason"]["message"], "NovaSeal V1 readiness requires fresh local evidence reports");
-        assert!(summary["failure_reason"]["missing"].as_array().unwrap().is_empty());
-        assert_eq!(summary["failure_reason"]["failed_dimensions"][0], "profile_operator_fixtures");
-        assert_eq!(summary["failure_reason"]["failed_dimensions"][1], "local_bip340_tcb_review");
-        assert_eq!(summary["failure_reason"]["external_blockers"][0], "public_shared_cell_dep_attested");
-        assert!(summary["failure_reason"]["remediation"][0].as_str().expect("remediation").contains("rerun live devnet reports"));
-    }
-
-    #[test]
-    fn novaseal_certification_summary_requires_external_attestations_in_production_mode() {
-        let temp = tempfile::tempdir().unwrap();
-        let report_path = temp.path().join("novaseal-production-gates.json");
-        let implementation_path = temp.path().join("novaseal_certification.rs");
-        let mut report = novaseal_test_plugin_report(false, false);
-        report["production_gates_passed"] = serde_json::json!(true);
-        std::fs::write(&report_path, serde_json::to_vec_pretty(&report).unwrap()).unwrap();
-        std::fs::write(&implementation_path, b"pub(crate) fn build_report() {}\n").unwrap();
-
-        let summary = novaseal_certification_summary(&report, temp.path(), &report_path, &implementation_path, false, true)
-            .expect("certification summary");
-        let failed_checks = summary["failure_reason"]["failed_checks"].as_array().expect("failed checks");
-
-        assert_eq!(summary["status"], "failed");
-        assert_eq!(summary["plugin_report"]["production_ready"], false);
-        assert_eq!(summary["plugin_report"]["production_gates_passed"], true);
-        assert!(failed_checks.iter().any(|check| check == "production_ready"));
-        assert!(failed_checks.iter().any(|check| check == "production_statement_eligible"));
-        assert_eq!(summary["failure_reason"]["failed_dimensions"][0], "public_shared_cell_dep_attestation");
-        assert_eq!(summary["failure_reason"]["external_blockers"][0], "public_shared_cell_dep_attested");
-        assert_eq!(summary["failure_reason"]["external_blockers"][3], "rwa_legal_registry_review_attested");
-        assert_eq!(summary["failure_reason"]["failed_dimensions"][3], "rwa_legal_registry_review_evidence");
-    }
-
-    #[test]
-    fn novaseal_certification_failure_message_uses_structured_reason_message() {
-        let summary = serde_json::json!({
-            "failure_reason": {
-                "message": "NovaSeal production certification requires remaining external attestations",
-                "failed_checks": ["production_ready"]
-            }
-        });
-        assert_eq!(
-            novaseal_certification_failure_message(&summary),
-            "NovaSeal production certification requires remaining external attestations"
-        );
-
-        let legacy = serde_json::json!({ "failure_reason": "legacy certification failure" });
-        assert_eq!(novaseal_certification_failure_message(&legacy), "legacy certification failure");
-
-        let missing = serde_json::json!({});
-        assert_eq!(novaseal_certification_failure_message(&missing), "certification failed");
-    }
-
-    #[test]
-    fn production_policy_finds_evidence_less_checked_runtime_proof_plan_gap() {
-        let proof_plan = vec![proof_plan_record("checked-runtime", "gap:evidence-missing", Vec::new())];
-
-        let gaps = checked_runtime_proof_plan_evidence_gap_summaries(&proof_plan);
-
-        assert_eq!(gaps, vec!["action:test:create-output:Token:out (gap:evidence-missing)"]);
-    }
-
-    #[test]
-    fn production_policy_finds_evidence_less_on_chain_checked_proof_plan_gap() {
-        let mut proof_plan = vec![proof_plan_record("metadata-only", "gap:evidence-missing", Vec::new())];
-        proof_plan[0].on_chain_checked = true;
-
-        let gaps = checked_runtime_proof_plan_evidence_gap_summaries(&proof_plan);
-
-        assert_eq!(gaps, vec!["action:test:create-output:Token:out (gap:evidence-missing)"]);
     }
 }

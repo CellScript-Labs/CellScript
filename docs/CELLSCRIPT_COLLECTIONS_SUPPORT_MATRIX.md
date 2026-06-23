@@ -1,6 +1,6 @@
 # CellScript Collections Support Matrix
 
-**Status**: production boundary document for the current CellScript 0.15 CKB profile.
+**Status**: production boundary document for the current CellScript CKB profile.
 
 CellScript supports dynamic data in several different layers. These layers must
 not be collapsed into one generic "collections are supported" claim.

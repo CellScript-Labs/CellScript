@@ -1,0 +1,8 @@
+[package]
+name = "cellscript-ckb-sdk-builder-example"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+cellscript-ckb-adapter = { path = "../../crates/cellscript-ckb-adapter" }

@@ -33,17 +33,18 @@ struct Snapshot {
     amount: u64,
 }
 
-action local_value_helpers(owner: Address, candidate: Address, snapshot: Snapshot) -> bool
-where
-    let mut owners = Vec::with_capacity(2)
-    owners.push(owner)
-    owners.insert(0, candidate)
-    owners.swap(0, 1)
+action local_value_helpers(owner: Address, candidate: Address, snapshot: Snapshot) -> bool {
+    verification
+        let mut owners = Vec::with_capacity(2)
+        owners.push(owner)
+        owners.insert(0, candidate)
+        owners.swap(0, 1)
 
-    let mut snapshots = Vec::new()
-    snapshots.push(snapshot)
+        let mut snapshots = Vec::new()
+        snapshots.push(snapshot)
 
-    return owners.contains(owner) && snapshots.len() == 1
+        return owners.contains(owner) && snapshots.len() == 1
+}
 
 resource Blob has store, create, consume, replace {
     owner: Address,
@@ -68,9 +69,10 @@ resource Token has store, create, consume, replace {
     amount: u64,
 }
 
-action hidden_ownership(tokens: Vec<Token>) -> u64
-where
-    return tokens.len()
+action hidden_ownership(tokens: Vec<Token>) -> u64 {
+    verification
+        return tokens.len()
+}
 ```
 
 Use the support matrix for the current status:

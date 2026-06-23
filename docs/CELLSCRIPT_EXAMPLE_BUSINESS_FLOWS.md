@@ -85,21 +85,21 @@ bundled bootstrap path, that first authority is created by `launch.cell`;
 
 ## `amm_pool.cell`
 
-Business purpose: a constant-product AMM pool with LP receipts and mutable pool
-state.
+Business purpose: a bounded constant-product AMM pool with LP receipts and
+mutable pool state.
 
 ```mermaid
 flowchart TD
     A["Token A input Cell"] --> B["seed_pool"]
     C["Token B input Cell"] --> B
-    B --> D["Check distinct symbols and nonzero liquidity"]
+    B --> D["Check distinct token identities, nonzero liquidity, fee cap, and LP bounds"]
     D --> E["Consume both seed tokens"]
     E --> F["Create Pool shared Cell"]
     E --> G["Create LPReceipt for provider"]
 
     H["Pool input Cell"] --> I["swap_a_for_b"]
     J["Token A input Cell"] --> I
-    I --> K["Check input symbol and slippage"]
+    I --> K["Check input symbol, live reserves, fee cap, arithmetic bounds, and slippage"]
     K --> L["Consume input token"]
     L --> M["Update Pool reserves"]
     M --> N["Create Token B output Cell"]
@@ -107,21 +107,23 @@ flowchart TD
     O["Pool input Cell"] --> P["add_liquidity"]
     Q["Token A input Cell"] --> P
     R["Token B input Cell"] --> P
-    P --> S["Check token symbols"]
+    P --> S["Check token symbols, live reserves, deposit bounds, and LP mint amount"]
     S --> T["Update Pool reserves and total LP"]
     T --> U["Create LPReceipt output Cell"]
 
     V["Pool input Cell"] --> W["remove_liquidity"]
     X["LPReceipt input Cell"] --> W
-    W --> Y["Check receipt pool id"]
+    W --> Y["Check receipt pool id, provider, live reserves, and LP burn amount"]
     Y --> Z["Destroy LPReceipt"]
     Z --> AA["Update Pool reserves and total LP"]
     AA --> AB["Create Token A and Token B outputs"]
 ```
 
 CKB acceptance status: all six actions are builder-backed and run on-chain,
-including the helper actions `isqrt` and `min` as scoped entries. There are no
-lock entries in this example.
+including the helper actions `isqrt` and `min` as scoped entries. The AMM is
+still an educational one-direction constant-product pool, not a complete DEX:
+there is no oracle/TWAP, routing, protocol-fee withdrawal, or concentrated
+liquidity. There are no lock entries in this example.
 
 ## `launch.cell`
 

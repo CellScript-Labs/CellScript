@@ -1,13 +1,87 @@
 pub mod ckb_protocols;
 pub mod collections;
 
-use crate::{ckb_blake2b256, ir::IrType, runtime_errors::CellScriptRuntimeError, TargetProfile};
+use crate::{ckb_abi, ckb_blake2b256, ir::IrType, runtime_errors::CellScriptRuntimeError, TargetProfile};
 
 pub struct StdLib;
 
 impl StdLib {
     pub fn functions() -> Vec<StdFunction> {
         vec![
+            StdFunction { name: "syscall_load_tx_hash".to_string(), params: vec![], return_type: Some(IrType::Hash) },
+            StdFunction { name: "syscall_load_script_hash".to_string(), params: vec![], return_type: Some(IrType::Hash) },
+            StdFunction {
+                name: "syscall_load_cell".to_string(),
+                params: vec![
+                    ("index".to_string(), IrType::U64),
+                    ("source".to_string(), IrType::U64),
+                    ("field".to_string(), IrType::U64),
+                ],
+                return_type: Some(IrType::U64),
+            },
+            StdFunction {
+                name: "syscall_load_header".to_string(),
+                params: vec![
+                    ("buffer".to_string(), IrType::U64),
+                    ("size".to_string(), IrType::U64),
+                    ("offset".to_string(), IrType::U64),
+                    ("index".to_string(), IrType::U64),
+                    ("source".to_string(), IrType::U64),
+                ],
+                return_type: Some(IrType::U64),
+            },
+            StdFunction {
+                name: "syscall_load_input".to_string(),
+                params: vec![
+                    ("index".to_string(), IrType::U64),
+                    ("source".to_string(), IrType::U64),
+                    ("field".to_string(), IrType::U64),
+                ],
+                return_type: Some(IrType::U64),
+            },
+            StdFunction {
+                name: "syscall_load_script".to_string(),
+                params: vec![
+                    ("buffer".to_string(), IrType::U64),
+                    ("size".to_string(), IrType::U64),
+                    ("offset".to_string(), IrType::U64),
+                ],
+                return_type: Some(IrType::U64),
+            },
+            StdFunction {
+                name: "syscall_load_cell_by_field".to_string(),
+                params: vec![
+                    ("buffer".to_string(), IrType::U64),
+                    ("size".to_string(), IrType::U64),
+                    ("offset".to_string(), IrType::U64),
+                    ("index".to_string(), IrType::U64),
+                    ("source".to_string(), IrType::U64),
+                    ("field".to_string(), IrType::U64),
+                ],
+                return_type: Some(IrType::U64),
+            },
+            StdFunction {
+                name: "syscall_load_cell_data".to_string(),
+                params: vec![
+                    ("buffer".to_string(), IrType::U64),
+                    ("size".to_string(), IrType::U64),
+                    ("offset".to_string(), IrType::U64),
+                    ("index".to_string(), IrType::U64),
+                    ("source".to_string(), IrType::U64),
+                ],
+                return_type: Some(IrType::U64),
+            },
+            StdFunction {
+                name: "syscall_load_witness".to_string(),
+                params: vec![("index".to_string(), IrType::U64), ("source".to_string(), IrType::U64)],
+                return_type: Some(IrType::U64),
+            },
+            StdFunction { name: "syscall_current_cycles".to_string(), params: vec![], return_type: Some(IrType::U64) },
+            StdFunction {
+                name: "syscall_debug_print".to_string(),
+                params: vec![("msg".to_string(), IrType::Array(Box::new(IrType::U8), 0))],
+                return_type: None,
+            },
             StdFunction {
                 name: "math_min".to_string(),
                 params: vec![("a".to_string(), IrType::U64), ("b".to_string(), IrType::U64)],
@@ -28,11 +102,397 @@ impl StdLib {
                 params: vec![("a".to_string(), IrType::U64), ("b".to_string(), IrType::U64)],
                 return_type: Some(IrType::U64),
             },
+            StdFunction {
+                name: "c256_require_product_lte".to_string(),
+                params: vec![
+                    ("left_amount".to_string(), IrType::U128),
+                    ("left_multiplier".to_string(), IrType::U128),
+                    ("right_amount".to_string(), IrType::U128),
+                    ("right_multiplier".to_string(), IrType::U128),
+                ],
+                return_type: None,
+            },
+            StdFunction {
+                name: "c256_require_product_eq".to_string(),
+                params: vec![
+                    ("left_amount".to_string(), IrType::U128),
+                    ("left_multiplier".to_string(), IrType::U128),
+                    ("right_amount".to_string(), IrType::U128),
+                    ("right_multiplier".to_string(), IrType::U128),
+                ],
+                return_type: None,
+            },
+            StdFunction {
+                name: "c256_require_sum2_products_lte".to_string(),
+                params: vec![
+                    ("left_amount_a".to_string(), IrType::U128),
+                    ("left_multiplier_a".to_string(), IrType::U128),
+                    ("left_amount_b".to_string(), IrType::U128),
+                    ("left_multiplier_b".to_string(), IrType::U128),
+                    ("right_amount_a".to_string(), IrType::U128),
+                    ("right_multiplier_a".to_string(), IrType::U128),
+                    ("right_amount_b".to_string(), IrType::U128),
+                    ("right_multiplier_b".to_string(), IrType::U128),
+                ],
+                return_type: None,
+            },
+            StdFunction {
+                name: "c256_require_sum2_products_eq".to_string(),
+                params: vec![
+                    ("left_amount_a".to_string(), IrType::U128),
+                    ("left_multiplier_a".to_string(), IrType::U128),
+                    ("left_amount_b".to_string(), IrType::U128),
+                    ("left_multiplier_b".to_string(), IrType::U128),
+                    ("right_amount_a".to_string(), IrType::U128),
+                    ("right_multiplier_a".to_string(), IrType::U128),
+                    ("right_amount_b".to_string(), IrType::U128),
+                    ("right_multiplier_b".to_string(), IrType::U128),
+                ],
+                return_type: None,
+            },
             StdFunction { name: "env_current_timepoint".to_string(), params: vec![], return_type: Some(IrType::U64) },
             StdFunction { name: "ckb_header_epoch_number".to_string(), params: vec![], return_type: Some(IrType::U64) },
             StdFunction { name: "ckb_header_epoch_start_block_number".to_string(), params: vec![], return_type: Some(IrType::U64) },
             StdFunction { name: "ckb_header_epoch_length".to_string(), params: vec![], return_type: Some(IrType::U64) },
             StdFunction { name: "ckb_input_since".to_string(), params: vec![], return_type: Some(IrType::U64) },
+            StdFunction {
+                name: "ckb_since_epoch_absolute".to_string(),
+                params: vec![
+                    ("number".to_string(), IrType::U64),
+                    ("index".to_string(), IrType::U64),
+                    ("length".to_string(), IrType::U64),
+                ],
+                return_type: Some(IrType::U64),
+            },
+            StdFunction {
+                name: "ckb_since_epoch_relative".to_string(),
+                params: vec![
+                    ("number".to_string(), IrType::U64),
+                    ("index".to_string(), IrType::U64),
+                    ("length".to_string(), IrType::U64),
+                ],
+                return_type: Some(IrType::U64),
+            },
+            StdFunction { name: "ckb_current_role".to_string(), params: vec![], return_type: Some(IrType::U64) },
+            StdFunction {
+                name: "ckb_cell_capacity".to_string(),
+                params: vec![("source_view".to_string(), IrType::U64)],
+                return_type: Some(IrType::U64),
+            },
+            StdFunction {
+                name: "ckb_cell_occupied_capacity".to_string(),
+                params: vec![("source_view".to_string(), IrType::U64)],
+                return_type: Some(IrType::U64),
+            },
+            StdFunction {
+                name: "ckb_cell_unoccupied_capacity".to_string(),
+                params: vec![("source_view".to_string(), IrType::U64)],
+                return_type: Some(IrType::U64),
+            },
+            StdFunction {
+                name: "ckb_cell_data_u64_le".to_string(),
+                params: vec![("source_view".to_string(), IrType::U64), ("offset".to_string(), IrType::U64)],
+                return_type: Some(IrType::U64),
+            },
+            StdFunction {
+                name: "ckb_cell_data_u32_le".to_string(),
+                params: vec![("source_view".to_string(), IrType::U64), ("offset".to_string(), IrType::U64)],
+                return_type: Some(IrType::U64),
+            },
+            StdFunction { name: "ckb_current_script_hash".to_string(), params: vec![], return_type: Some(IrType::Hash) },
+            StdFunction {
+                name: "ckb_cell_lock_hash_low".to_string(),
+                params: vec![("source_view".to_string(), IrType::U64)],
+                return_type: Some(IrType::U64),
+            },
+            StdFunction {
+                name: "ckb_cell_type_hash_low".to_string(),
+                params: vec![("source_view".to_string(), IrType::U64)],
+                return_type: Some(IrType::U64),
+            },
+            StdFunction {
+                name: "ckb_cell_lock_hash".to_string(),
+                params: vec![("source_view".to_string(), IrType::U64)],
+                return_type: Some(IrType::Hash),
+            },
+            StdFunction {
+                name: "ckb_cell_type_hash".to_string(),
+                params: vec![("source_view".to_string(), IrType::U64)],
+                return_type: Some(IrType::Hash),
+            },
+            StdFunction {
+                name: "ckb_cell_lock_code_hash".to_string(),
+                params: vec![("source_view".to_string(), IrType::U64)],
+                return_type: Some(IrType::Hash),
+            },
+            StdFunction {
+                name: "ckb_cell_type_code_hash".to_string(),
+                params: vec![("source_view".to_string(), IrType::U64)],
+                return_type: Some(IrType::Hash),
+            },
+            StdFunction {
+                name: "ckb_cell_lock_hash_type".to_string(),
+                params: vec![("source_view".to_string(), IrType::U64)],
+                return_type: Some(IrType::U64),
+            },
+            StdFunction {
+                name: "ckb_cell_type_hash_type".to_string(),
+                params: vec![("source_view".to_string(), IrType::U64)],
+                return_type: Some(IrType::U64),
+            },
+            StdFunction {
+                name: "ckb_cell_lock_args_empty".to_string(),
+                params: vec![("source_view".to_string(), IrType::U64)],
+                return_type: Some(IrType::Bool),
+            },
+            StdFunction {
+                name: "ckb_cell_type_args_empty".to_string(),
+                params: vec![("source_view".to_string(), IrType::U64)],
+                return_type: Some(IrType::Bool),
+            },
+            StdFunction {
+                name: "ckb_cell_lock_args_hash".to_string(),
+                params: vec![("source_view".to_string(), IrType::U64)],
+                return_type: Some(IrType::Hash),
+            },
+            StdFunction {
+                name: "ckb_cell_type_args_hash".to_string(),
+                params: vec![("source_view".to_string(), IrType::U64)],
+                return_type: Some(IrType::Hash),
+            },
+            StdFunction {
+                name: "ckb_input_out_point_index".to_string(),
+                params: vec![("source_view".to_string(), IrType::U64)],
+                return_type: Some(IrType::U64),
+            },
+            StdFunction {
+                name: "ckb_input_out_point_tx_hash_low".to_string(),
+                params: vec![("source_view".to_string(), IrType::U64)],
+                return_type: Some(IrType::U64),
+            },
+            StdFunction {
+                name: "ckb_input_out_point_tx_hash".to_string(),
+                params: vec![("source_view".to_string(), IrType::U64)],
+                return_type: Some(IrType::Hash),
+            },
+            StdFunction {
+                name: "ckb_require_cell_lock_hash".to_string(),
+                params: vec![("source_view".to_string(), IrType::U64), ("expected_hash".to_string(), IrType::Hash)],
+                return_type: None,
+            },
+            StdFunction {
+                name: "ckb_require_cell_type_hash".to_string(),
+                params: vec![("source_view".to_string(), IrType::U64), ("expected_hash".to_string(), IrType::Hash)],
+                return_type: None,
+            },
+            StdFunction { name: "ckb_require_current_script_args_empty".to_string(), params: vec![], return_type: None },
+            StdFunction {
+                name: "ckb_require_cell_lock_args_empty".to_string(),
+                params: vec![("source_view".to_string(), IrType::U64)],
+                return_type: None,
+            },
+            StdFunction {
+                name: "ckb_require_cell_type_args_empty".to_string(),
+                params: vec![("source_view".to_string(), IrType::U64)],
+                return_type: None,
+            },
+            StdFunction {
+                name: "ckb_require_cell_lock_args_hash".to_string(),
+                params: vec![("source_view".to_string(), IrType::U64), ("expected_args_hash".to_string(), IrType::Hash)],
+                return_type: None,
+            },
+            StdFunction {
+                name: "ckb_require_cell_type_args_hash".to_string(),
+                params: vec![("source_view".to_string(), IrType::U64), ("expected_args_hash".to_string(), IrType::Hash)],
+                return_type: None,
+            },
+            StdFunction {
+                name: "ckb_require_cell_lock_args_prefix_hash".to_string(),
+                params: vec![("source_view".to_string(), IrType::U64), ("expected_args_hash".to_string(), IrType::Hash)],
+                return_type: None,
+            },
+            StdFunction {
+                name: "ckb_require_cell_type_args_prefix_hash".to_string(),
+                params: vec![("source_view".to_string(), IrType::U64), ("expected_args_hash".to_string(), IrType::Hash)],
+                return_type: None,
+            },
+            StdFunction {
+                name: "ckb_require_cell_lock_args_suffix_hash".to_string(),
+                params: vec![("source_view".to_string(), IrType::U64), ("expected_args_hash".to_string(), IrType::Hash)],
+                return_type: None,
+            },
+            StdFunction {
+                name: "ckb_require_cell_type_args_suffix_hash".to_string(),
+                params: vec![("source_view".to_string(), IrType::U64), ("expected_args_hash".to_string(), IrType::Hash)],
+                return_type: None,
+            },
+            StdFunction {
+                name: "ckb_require_cell_lock_script_hash_type".to_string(),
+                params: vec![
+                    ("source_view".to_string(), IrType::U64),
+                    ("expected_code_hash".to_string(), IrType::Hash),
+                    ("expected_hash_type".to_string(), IrType::U64),
+                ],
+                return_type: None,
+            },
+            StdFunction {
+                name: "ckb_require_cell_type_script_hash_type".to_string(),
+                params: vec![
+                    ("source_view".to_string(), IrType::U64),
+                    ("expected_code_hash".to_string(), IrType::Hash),
+                    ("expected_hash_type".to_string(), IrType::U64),
+                ],
+                return_type: None,
+            },
+            StdFunction {
+                name: "ckb_require_input_out_point_tx_hash".to_string(),
+                params: vec![("source_view".to_string(), IrType::U64), ("expected_hash".to_string(), IrType::Hash)],
+                return_type: None,
+            },
+            StdFunction {
+                name: "ckb_require_input_out_point".to_string(),
+                params: vec![
+                    ("source_view".to_string(), IrType::U64),
+                    ("expected_hash".to_string(), IrType::Hash),
+                    ("expected_index".to_string(), IrType::U64),
+                ],
+                return_type: None,
+            },
+            StdFunction {
+                name: "ckb_require_metapoint_relative".to_string(),
+                params: vec![
+                    ("base_view".to_string(), IrType::U64),
+                    ("related_view".to_string(), IrType::U64),
+                    ("relative_distance".to_string(), IrType::I32),
+                ],
+                return_type: None,
+            },
+            StdFunction {
+                name: "ckb_require_lock_type_metapoint_pairs".to_string(),
+                params: vec![("source_view".to_string(), IrType::U64), ("relative_distance".to_string(), IrType::I32)],
+                return_type: None,
+            },
+            StdFunction {
+                name: "ckb_require_type_lock_metapoint_pairs".to_string(),
+                params: vec![("source_view".to_string(), IrType::U64), ("relative_distance".to_string(), IrType::I32)],
+                return_type: None,
+            },
+            StdFunction {
+                name: "ckb_require_lock_type_metapoint_pairs_from_i32_data".to_string(),
+                params: vec![("source_view".to_string(), IrType::U64), ("distance_offset".to_string(), IrType::U64)],
+                return_type: None,
+            },
+            StdFunction {
+                name: "ckb_require_type_lock_metapoint_pairs_from_i32_data".to_string(),
+                params: vec![("source_view".to_string(), IrType::U64), ("distance_offset".to_string(), IrType::U64)],
+                return_type: None,
+            },
+            StdFunction {
+                name: "ckb_require_lock_type_metapoint_pairs_from_i32_data_filtered".to_string(),
+                params: vec![
+                    ("source_view".to_string(), IrType::U64),
+                    ("distance_offset".to_string(), IrType::U64),
+                    ("expected_related_type_hash".to_string(), IrType::Hash),
+                    ("related_data_rule".to_string(), IrType::U64),
+                ],
+                return_type: None,
+            },
+            StdFunction {
+                name: "ckb_require_type_lock_metapoint_pairs_from_i32_data_filtered".to_string(),
+                params: vec![
+                    ("source_view".to_string(), IrType::U64),
+                    ("distance_offset".to_string(), IrType::U64),
+                    ("expected_related_type_hash".to_string(), IrType::Hash),
+                    ("related_data_rule".to_string(), IrType::U64),
+                ],
+                return_type: None,
+            },
+            StdFunction {
+                name: "ckb_require_lock_match_master_out_point_pairs_from_data".to_string(),
+                params: vec![
+                    ("input_source_view".to_string(), IrType::U64),
+                    ("output_source_view".to_string(), IrType::U64),
+                    ("action_offset".to_string(), IrType::U64),
+                    ("tx_hash_offset".to_string(), IrType::U64),
+                    ("index_offset".to_string(), IrType::U64),
+                ],
+                return_type: None,
+            },
+            StdFunction {
+                name: "dao_accumulated_rate".to_string(),
+                params: vec![("header_view".to_string(), IrType::U64)],
+                return_type: Some(IrType::U64),
+            },
+            StdFunction {
+                name: "dao_input_accumulated_rate".to_string(),
+                params: vec![("input_view".to_string(), IrType::U64)],
+                return_type: Some(IrType::U64),
+            },
+            StdFunction {
+                name: "dao_has_dao_type".to_string(),
+                params: vec![("source_view".to_string(), IrType::U64)],
+                return_type: Some(IrType::Bool),
+            },
+            StdFunction {
+                name: "dao_is_deposit_data".to_string(),
+                params: vec![("source_view".to_string(), IrType::U64)],
+                return_type: Some(IrType::Bool),
+            },
+            StdFunction {
+                name: "dao_is_withdrawal_request_data".to_string(),
+                params: vec![("source_view".to_string(), IrType::U64)],
+                return_type: Some(IrType::Bool),
+            },
+            StdFunction {
+                name: "dao_require_header_dep_for_input".to_string(),
+                params: vec![("input_view".to_string(), IrType::U64), ("header_view".to_string(), IrType::U64)],
+                return_type: None,
+            },
+            StdFunction {
+                name: "dao_require_input_since_at_least".to_string(),
+                params: vec![("input_view".to_string(), IrType::U64), ("required_since".to_string(), IrType::U64)],
+                return_type: None,
+            },
+            StdFunction {
+                name: "dao_require_input_relative_epoch_since_at_least".to_string(),
+                params: vec![
+                    ("input_view".to_string(), IrType::U64),
+                    ("number".to_string(), IrType::U64),
+                    ("index".to_string(), IrType::U64),
+                    ("length".to_string(), IrType::U64),
+                ],
+                return_type: None,
+            },
+            StdFunction {
+                name: "xudt_amount_low".to_string(),
+                params: vec![("source_view".to_string(), IrType::U64)],
+                return_type: Some(IrType::U64),
+            },
+            StdFunction {
+                name: "xudt_require_owner_mode_type_args".to_string(),
+                params: vec![
+                    ("source_view".to_string(), IrType::U64),
+                    ("owner_hash".to_string(), IrType::Hash),
+                    ("flags".to_string(), IrType::U64),
+                ],
+                return_type: None,
+            },
+            StdFunction {
+                name: "xudt_require_owner_mode_type_args_current_script".to_string(),
+                params: vec![("source_view".to_string(), IrType::U64), ("flags".to_string(), IrType::U64)],
+                return_type: None,
+            },
+            StdFunction { name: "xudt_require_group_amount_conserved".to_string(), params: vec![], return_type: None },
+            StdFunction {
+                name: "xudt_require_group_amount_minted".to_string(),
+                params: vec![("delta".to_string(), IrType::U128)],
+                return_type: None,
+            },
+            StdFunction {
+                name: "xudt_require_group_amount_burned".to_string(),
+                params: vec![("delta".to_string(), IrType::U128)],
+                return_type: None,
+            },
             StdFunction { name: "env_remaining_cycles".to_string(), params: vec![], return_type: Some(IrType::U64) },
         ]
     }
@@ -55,9 +515,149 @@ impl StdLib {
         asm.push_str("# CellScript Standard Library\n\n");
         asm.push_str(".section .text\n\n");
 
+        asm.push_str(&Self::generate_syscalls(target_profile));
+
         asm.push_str(&Self::generate_math());
 
         asm.push_str(&Self::generate_env(target_profile));
+
+        asm
+    }
+
+    fn generate_syscalls(target_profile: TargetProfile) -> String {
+        let mut asm = String::new();
+
+        asm.push_str(&format!("# Syscall: load_tx_hash ({})\n", ckb_abi::syscall::LOAD_TX_HASH));
+        asm.push_str(".global __syscall_load_tx_hash\n");
+        asm.push_str("__syscall_load_tx_hash:\n");
+        asm.push_str("    addi sp, sp, -16\n");
+        asm.push_str("    sd ra, 8(sp)\n");
+        asm.push_str(&format!("    li a7, {}\n", ckb_abi::syscall::LOAD_TX_HASH));
+        asm.push_str("    ecall\n");
+        asm.push_str("    ld ra, 8(sp)\n");
+        asm.push_str("    addi sp, sp, 16\n");
+        asm.push_str("    ret\n\n");
+
+        asm.push_str(&format!("# Syscall: load_script_hash ({})\n", ckb_abi::syscall::LOAD_SCRIPT_HASH));
+        asm.push_str(".global __syscall_load_script_hash\n");
+        asm.push_str("__syscall_load_script_hash:\n");
+        asm.push_str("    addi sp, sp, -16\n");
+        asm.push_str("    sd ra, 8(sp)\n");
+        asm.push_str(&format!("    li a7, {}\n", ckb_abi::syscall::LOAD_SCRIPT_HASH));
+        asm.push_str("    ecall\n");
+        asm.push_str("    ld ra, 8(sp)\n");
+        asm.push_str("    addi sp, sp, 16\n");
+        asm.push_str("    ret\n\n");
+
+        asm.push_str(&format!("# Syscall: load_cell ({})\n", ckb_abi::syscall::LOAD_CELL));
+        asm.push_str(".global __syscall_load_cell\n");
+        asm.push_str("__syscall_load_cell:\n");
+        asm.push_str("    addi sp, sp, -16\n");
+        asm.push_str("    sd ra, 8(sp)\n");
+        asm.push_str(&format!("    li a7, {}\n", ckb_abi::syscall::LOAD_CELL));
+        asm.push_str("    # a0 = index, a1 = source, a2 = field\n");
+        asm.push_str("    ecall\n");
+        asm.push_str("    ld ra, 8(sp)\n");
+        asm.push_str("    addi sp, sp, 16\n");
+        asm.push_str("    ret\n\n");
+
+        asm.push_str(&format!("# Syscall: load_header ({})\n", ckb_abi::syscall::LOAD_HEADER));
+        asm.push_str(".global __syscall_load_header\n");
+        asm.push_str("__syscall_load_header:\n");
+        asm.push_str("    addi sp, sp, -16\n");
+        asm.push_str("    sd ra, 8(sp)\n");
+        asm.push_str(&format!("    li a7, {}\n", ckb_abi::syscall::LOAD_HEADER));
+        asm.push_str("    # a0 = buffer, a1 = size pointer, a2 = offset, a3 = index, a4 = source\n");
+        asm.push_str("    ecall\n");
+        asm.push_str("    ld ra, 8(sp)\n");
+        asm.push_str("    addi sp, sp, 16\n");
+        asm.push_str("    ret\n\n");
+
+        asm.push_str(&format!("# Syscall: load_input ({})\n", ckb_abi::syscall::LOAD_INPUT));
+        asm.push_str(".global __syscall_load_input\n");
+        asm.push_str("__syscall_load_input:\n");
+        asm.push_str("    addi sp, sp, -16\n");
+        asm.push_str("    sd ra, 8(sp)\n");
+        asm.push_str(&format!("    li a7, {}\n", ckb_abi::syscall::LOAD_INPUT));
+        asm.push_str("    # a0 = index, a1 = source, a2 = field\n");
+        asm.push_str("    ecall\n");
+        asm.push_str("    ld ra, 8(sp)\n");
+        asm.push_str("    addi sp, sp, 16\n");
+        asm.push_str("    ret\n\n");
+
+        asm.push_str(&format!("# Syscall: load_witness ({})\n", ckb_abi::syscall::LOAD_WITNESS));
+        asm.push_str(".global __syscall_load_witness\n");
+        asm.push_str("__syscall_load_witness:\n");
+        asm.push_str("    addi sp, sp, -16\n");
+        asm.push_str("    sd ra, 8(sp)\n");
+        asm.push_str(&format!("    li a7, {}\n", ckb_abi::syscall::LOAD_WITNESS));
+        asm.push_str("    # a0 = index, a1 = source\n");
+        asm.push_str("    ecall\n");
+        asm.push_str("    ld ra, 8(sp)\n");
+        asm.push_str("    addi sp, sp, 16\n");
+        asm.push_str("    ret\n\n");
+
+        let load_script_syscall = match target_profile {
+            TargetProfile::Ckb => ckb_abi::syscall::LOAD_SCRIPT,
+        };
+        asm.push_str(&format!("# Syscall: load_script ({})\n", load_script_syscall));
+        asm.push_str(".global __syscall_load_script\n");
+        asm.push_str("__syscall_load_script:\n");
+        asm.push_str("    addi sp, sp, -16\n");
+        asm.push_str("    sd ra, 8(sp)\n");
+        asm.push_str(&format!("    li a7, {}\n", load_script_syscall));
+        asm.push_str("    # a0 = buffer, a1 = size pointer, a2 = offset\n");
+        asm.push_str("    ecall\n");
+        asm.push_str("    ld ra, 8(sp)\n");
+        asm.push_str("    addi sp, sp, 16\n");
+        asm.push_str("    ret\n\n");
+
+        asm.push_str(&format!("# Syscall: load_cell_by_field ({})\n", ckb_abi::syscall::LOAD_CELL_BY_FIELD));
+        asm.push_str(".global __syscall_load_cell_by_field\n");
+        asm.push_str("__syscall_load_cell_by_field:\n");
+        asm.push_str("    addi sp, sp, -16\n");
+        asm.push_str("    sd ra, 8(sp)\n");
+        asm.push_str(&format!("    li a7, {}\n", ckb_abi::syscall::LOAD_CELL_BY_FIELD));
+        asm.push_str("    # a0 = buffer, a1 = size pointer, a2 = offset, a3 = index, a4 = source, a5 = field\n");
+        asm.push_str("    ecall\n");
+        asm.push_str("    ld ra, 8(sp)\n");
+        asm.push_str("    addi sp, sp, 16\n");
+        asm.push_str("    ret\n\n");
+
+        asm.push_str(&format!("# Syscall: load_cell_data ({})\n", ckb_abi::syscall::LOAD_CELL_DATA));
+        asm.push_str(".global __syscall_load_cell_data\n");
+        asm.push_str("__syscall_load_cell_data:\n");
+        asm.push_str("    addi sp, sp, -16\n");
+        asm.push_str("    sd ra, 8(sp)\n");
+        asm.push_str(&format!("    li a7, {}\n", ckb_abi::syscall::LOAD_CELL_DATA));
+        asm.push_str("    # a0 = buffer, a1 = size pointer, a2 = offset, a3 = index, a4 = source\n");
+        asm.push_str("    ecall\n");
+        asm.push_str("    ld ra, 8(sp)\n");
+        asm.push_str("    addi sp, sp, 16\n");
+        asm.push_str("    ret\n\n");
+
+        asm.push_str(&format!("# Syscall: current_cycles ({})\n", ckb_abi::syscall::CURRENT_CYCLES));
+        asm.push_str(".global __syscall_current_cycles\n");
+        asm.push_str("__syscall_current_cycles:\n");
+        asm.push_str("    addi sp, sp, -16\n");
+        asm.push_str("    sd ra, 8(sp)\n");
+        asm.push_str(&format!("    li a7, {}\n", ckb_abi::syscall::CURRENT_CYCLES));
+        asm.push_str("    ecall\n");
+        asm.push_str("    ld ra, 8(sp)\n");
+        asm.push_str("    addi sp, sp, 16\n");
+        asm.push_str("    ret\n\n");
+
+        asm.push_str(&format!("# Syscall: debug_print ({})\n", ckb_abi::syscall::DEBUG));
+        asm.push_str(".global __syscall_debug_print\n");
+        asm.push_str("__syscall_debug_print:\n");
+        asm.push_str("    addi sp, sp, -16\n");
+        asm.push_str("    sd ra, 8(sp)\n");
+        asm.push_str(&format!("    li a7, {}\n", ckb_abi::syscall::DEBUG));
+        asm.push_str("    # a0 = msg pointer, a1 = msg length\n");
+        asm.push_str("    ecall\n");
+        asm.push_str("    ld ra, 8(sp)\n");
+        asm.push_str("    addi sp, sp, 16\n");
+        asm.push_str("    ret\n\n");
 
         asm
     }
@@ -70,7 +670,7 @@ impl StdLib {
         asm.push_str(".global __math_min\n");
         asm.push_str("__math_min:\n");
         asm.push_str("    # a0 = a, a1 = b\n");
-        asm.push_str("    bltu a0, a1, .Lmin_ret_a\n");
+        asm.push_str("    blt a0, a1, .Lmin_ret_a\n");
         asm.push_str("    mv a0, a1\n");
         asm.push_str(".Lmin_ret_a:\n");
         asm.push_str("    ret\n\n");
@@ -80,7 +680,7 @@ impl StdLib {
         asm.push_str(".global __math_max\n");
         asm.push_str("__math_max:\n");
         asm.push_str("    # a0 = a, a1 = b\n");
-        asm.push_str("    bltu a1, a0, .Lmax_ret_a\n");
+        asm.push_str("    bgt a0, a1, .Lmax_ret_a\n");
         asm.push_str("    mv a0, a1\n");
         asm.push_str(".Lmax_ret_a:\n");
         asm.push_str("    ret\n\n");
@@ -98,9 +698,9 @@ impl StdLib {
         asm.push_str("    srli s1, a0, 1\n");
         asm.push_str("    addi s1, s1, 1     # y = (x + 1) / 2\n");
         asm.push_str(".Lisqrt_loop:\n");
-        asm.push_str("    bgeu s1, s0, .Lisqrt_ret\n");
+        asm.push_str("    bge s1, s0, .Lisqrt_ret\n");
         asm.push_str("    mv s0, s1          # x = y\n");
-        asm.push_str("    divu t0, a0, s0\n");
+        asm.push_str("    div t0, a0, s0\n");
         asm.push_str("    add s1, s0, t0\n");
         asm.push_str("    srli s1, s1, 1     # y = (x + n/x) / 2\n");
         asm.push_str("    j .Lisqrt_loop\n");
@@ -131,27 +731,39 @@ impl StdLib {
         let mut asm = String::new();
 
         asm.push_str("# Env: current_timepoint (CKB epoch number, not Unix timestamp)\n");
-        Self::push_ckb_header_epoch_helper(&mut asm, "__env_current_timepoint", "ckb_epoch_number", 0, true);
+        asm.push_str(".global __env_current_timepoint\n");
+        asm.push_str("__env_current_timepoint:\n");
+        asm.push_str("    addi sp, sp, -16\n");
+        asm.push_str("    sd ra, 8(sp)\n");
+        // All profiles use CKB epoch number.
+        asm.push_str("    # Load CKB epoch number from header dep\n");
+        asm.push_str(&format!("    li a7, {}  # LOAD_HEADER_BY_FIELD\n", ckb_abi::syscall::LOAD_HEADER_BY_FIELD));
+        asm.push_str("    li a0, 0     # header index\n");
+        asm.push_str(&format!("    li a1, {}     # field = epoch number\n", ckb_abi::header_field::EPOCH_NUMBER));
+        asm.push_str("    ecall\n");
+        asm.push_str("    ld ra, 8(sp)\n");
+        asm.push_str("    addi sp, sp, 16\n");
+        asm.push_str("    ret\n\n");
 
         Self::push_ckb_header_epoch_helper(
             &mut asm,
             "__ckb_header_epoch_number",
             "ckb_epoch_number",
-            0,
+            ckb_abi::header_field::EPOCH_NUMBER,
             target_profile == TargetProfile::Ckb,
         );
         Self::push_ckb_header_epoch_helper(
             &mut asm,
             "__ckb_header_epoch_start_block_number",
             "ckb_epoch_start_block_number",
-            1,
+            ckb_abi::header_field::EPOCH_START_BLOCK_NUMBER,
             target_profile == TargetProfile::Ckb,
         );
         Self::push_ckb_header_epoch_helper(
             &mut asm,
             "__ckb_header_epoch_length",
             "ckb_epoch_length",
-            2,
+            ckb_abi::header_field::EPOCH_LENGTH,
             target_profile == TargetProfile::Ckb,
         );
         Self::push_ckb_input_since_helper(&mut asm, target_profile == TargetProfile::Ckb);
@@ -162,7 +774,7 @@ impl StdLib {
         asm.push_str("__env_remaining_cycles:\n");
         asm.push_str("    addi sp, sp, -16\n");
         asm.push_str("    sd ra, 8(sp)\n");
-        asm.push_str("    li a7, 2042  # CURRENT_CYCLES\n");
+        asm.push_str(&format!("    li a7, {}  # CURRENT_CYCLES\n", ckb_abi::syscall::CURRENT_CYCLES));
         asm.push_str("    ecall\n");
         asm.push_str("    # a0 = current cycles\n");
         asm.push_str("    li t0, 10000000  # max cycles\n");
@@ -185,12 +797,10 @@ impl StdLib {
                 CellScriptRuntimeError::ConsumeInvalidOperand.code(),
                 CellScriptRuntimeError::ConsumeInvalidOperand.name()
             ));
-            asm.push_str("    li a0, 0\n");
-            asm.push_str(&format!("    li a1, {}\n", CellScriptRuntimeError::ConsumeInvalidOperand.code()));
+            asm.push_str(&format!("    li a0, {}\n", CellScriptRuntimeError::ConsumeInvalidOperand.code()));
             asm.push_str("    ret\n\n");
             return;
         }
-        let fail_label = format!(".L{}_fail", symbol.trim_start_matches("__"));
         asm.push_str("    addi sp, sp, -32\n");
         asm.push_str("    sd ra, 24(sp)\n");
         asm.push_str("    # Load from CKB header dep\n");
@@ -200,27 +810,11 @@ impl StdLib {
         asm.push_str("    addi a1, sp, 8\n");
         asm.push_str("    li a2, 0     # offset\n");
         asm.push_str("    li a3, 0     # header index\n");
-        asm.push_str("    li a4, 4     # Source::HeaderDep\n");
+        asm.push_str(&format!("    li a4, {}     # Source::HeaderDep\n", ckb_abi::source::HEADER_DEP));
         asm.push_str(&format!("    li a5, {}     # field = {}\n", field_id, field_name));
-        asm.push_str("    li a7, 2082  # LOAD_HEADER_BY_FIELD\n");
+        asm.push_str(&format!("    li a7, {}  # LOAD_HEADER_BY_FIELD\n", ckb_abi::syscall::LOAD_HEADER_BY_FIELD));
         asm.push_str("    ecall\n");
-        asm.push_str(&format!("    bnez a0, {}\n", fail_label));
-        asm.push_str("    ld t0, 8(sp)\n");
-        asm.push_str("    li t1, 8\n");
-        asm.push_str(&format!("    bne t0, t1, {}\n", fail_label));
         asm.push_str("    ld a0, 16(sp)\n");
-        asm.push_str("    li a1, 0\n");
-        asm.push_str("    ld ra, 24(sp)\n");
-        asm.push_str("    addi sp, sp, 32\n");
-        asm.push_str("    ret\n");
-        asm.push_str(&format!("{}:\n", fail_label));
-        asm.push_str(&format!(
-            "    # cellscript runtime error {} {}\n",
-            CellScriptRuntimeError::SyscallFailed.code(),
-            CellScriptRuntimeError::SyscallFailed.name()
-        ));
-        asm.push_str("    li a0, 0\n");
-        asm.push_str(&format!("    li a1, {}\n", CellScriptRuntimeError::SyscallFailed.code()));
         asm.push_str("    ld ra, 24(sp)\n");
         asm.push_str("    addi sp, sp, 32\n");
         asm.push_str("    ret\n\n");
@@ -237,12 +831,10 @@ impl StdLib {
                 CellScriptRuntimeError::ConsumeInvalidOperand.code(),
                 CellScriptRuntimeError::ConsumeInvalidOperand.name()
             ));
-            asm.push_str("    li a0, 0\n");
-            asm.push_str(&format!("    li a1, {}\n", CellScriptRuntimeError::ConsumeInvalidOperand.code()));
+            asm.push_str(&format!("    li a0, {}\n", CellScriptRuntimeError::ConsumeInvalidOperand.code()));
             asm.push_str("    ret\n\n");
             return;
         }
-        let fail_label = ".Lckb_input_since_fail";
         asm.push_str("    addi sp, sp, -32\n");
         asm.push_str("    sd ra, 24(sp)\n");
         asm.push_str("    # Load CKB input since from current script group\n");
@@ -252,27 +844,11 @@ impl StdLib {
         asm.push_str("    addi a1, sp, 8\n");
         asm.push_str("    li a2, 0     # offset\n");
         asm.push_str("    li a3, 0     # group input index\n");
-        asm.push_str("    li a4, 72057594037927937  # Source::GroupInput\n");
-        asm.push_str("    li a5, 1     # field = Since\n");
-        asm.push_str("    li a7, 2083  # LOAD_INPUT_BY_FIELD\n");
+        asm.push_str(&format!("    li a4, {}  # Source::GroupInput\n", ckb_abi::source::GROUP_INPUT));
+        asm.push_str(&format!("    li a5, {}     # field = Since\n", ckb_abi::input_field::SINCE));
+        asm.push_str(&format!("    li a7, {}  # LOAD_INPUT_BY_FIELD\n", ckb_abi::syscall::LOAD_INPUT_BY_FIELD));
         asm.push_str("    ecall\n");
-        asm.push_str(&format!("    bnez a0, {}\n", fail_label));
-        asm.push_str("    ld t0, 8(sp)\n");
-        asm.push_str("    li t1, 8\n");
-        asm.push_str(&format!("    bne t0, t1, {}\n", fail_label));
         asm.push_str("    ld a0, 16(sp)\n");
-        asm.push_str("    li a1, 0\n");
-        asm.push_str("    ld ra, 24(sp)\n");
-        asm.push_str("    addi sp, sp, 32\n");
-        asm.push_str("    ret\n");
-        asm.push_str(&format!("{}:\n", fail_label));
-        asm.push_str(&format!(
-            "    # cellscript runtime error {} {}\n",
-            CellScriptRuntimeError::SyscallFailed.code(),
-            CellScriptRuntimeError::SyscallFailed.name()
-        ));
-        asm.push_str("    li a0, 0\n");
-        asm.push_str(&format!("    li a1, {}\n", CellScriptRuntimeError::SyscallFailed.code()));
         asm.push_str("    ld ra, 24(sp)\n");
         asm.push_str("    addi sp, sp, 32\n");
         asm.push_str("    ret\n\n");
@@ -421,13 +997,11 @@ mod tests {
     fn test_std_functions() {
         let funcs = StdLib::functions();
         assert!(!funcs.is_empty());
-        assert!(!StdLib::is_std_function("syscall_load_cell"));
-        assert!(!StdLib::is_std_function("syscall_load_script"));
-        assert!(!StdLib::is_std_function("syscall_load_cell_by_field"));
-        assert!(!StdLib::is_std_function("syscall_load_cell_data"));
-        assert!(!StdLib::is_std_function("syscall_current_cycles"));
+        assert!(StdLib::is_std_function("syscall_load_cell"));
+        assert!(StdLib::is_std_function("syscall_load_script"));
+        assert!(StdLib::is_std_function("syscall_load_cell_by_field"));
+        assert!(StdLib::is_std_function("syscall_load_cell_data"));
         assert!(StdLib::is_std_function("math_isqrt"));
-        assert!(StdLib::is_std_function("env_current_timepoint"));
     }
 
     #[test]
@@ -441,56 +1015,30 @@ mod tests {
     #[test]
     fn test_generate_assembly() {
         let asm = StdLib::generate_assembly();
-        assert!(!asm.contains(".global __syscall_"));
-        assert!(!asm.contains("__syscall_load_cell"));
-        assert!(!asm.contains("__syscall_load_script:\n"));
-        assert!(!asm.contains("__syscall_load_cell_by_field:\n"));
-        assert!(!asm.contains("__syscall_load_cell_data:\n"));
+        assert!(asm.contains("__syscall_load_cell"));
+        assert!(asm.contains("__syscall_load_script:\n"));
+        assert!(asm.contains("__syscall_load_cell_by_field:\n"));
+        assert!(asm.contains("__syscall_load_cell_data:\n"));
+        // Default is now CKB profile which uses 2052 for load_script
+        assert!(asm.contains("li a7, 2052"));
+        assert!(asm.contains("li a7, 2081"));
+        assert!(asm.contains("li a7, 2092"));
         assert!(!asm.contains("__hash"));
         assert!(!asm.contains("3001"));
         assert!(!asm.contains("li a7, 2100"));
         assert!(asm.contains("__math_isqrt"));
-        assert!(asm.contains("__env_current_timepoint"));
     }
 
     #[test]
-    fn test_generate_ckb_assembly_uses_checked_env_helpers() {
+    fn test_generate_ckb_assembly_uses_ckb_load_script_syscall() {
         let asm = StdLib::generate_assembly_for_target_profile(TargetProfile::Ckb);
-        assert!(!asm.contains("# Syscall: load_script (2052)"));
-        assert!(!asm.contains("li a7, 2052"));
+        assert!(asm.contains("# Syscall: load_script (2052)"));
+        assert!(asm.contains("li a7, 2052"));
         assert!(!asm.contains("li a7, 2075"));
         assert!(asm.contains("current_timepoint"));
         assert!(asm.contains("__ckb_input_since"));
         assert!(asm.contains("li a7, 2083  # LOAD_INPUT_BY_FIELD"));
         assert!(asm.contains("Source::GroupInput"));
-        assert!(asm.contains("addi a0, sp, 16"));
-        assert!(asm.contains("addi a1, sp, 8"));
-        assert!(asm.contains("bnez a0, .Lenv_current_timepoint_fail"));
-        assert!(asm.contains("li a1, 0"));
-        assert!(
-            asm.contains("# cellscript runtime error 1 syscall-failed\n    li a0, 0\n    li a1, 1"),
-            "generated stdlib helpers must return failure via status a1 instead of forging data:\n{}",
-            asm
-        );
-    }
-
-    #[test]
-    fn generated_stdlib_omits_raw_syscall_wrappers() {
-        let asm = StdLib::generate_assembly_for_target_profile(TargetProfile::Ckb);
-        assert!(!asm.contains(".global __syscall_"), "generated stdlib must not expose raw syscall wrappers:\n{}", asm);
-        assert!(!asm.contains("# Syscall:"), "generated stdlib must not duplicate raw syscall ABI comments:\n{}", asm);
-    }
-
-    #[test]
-    fn generated_stdlib_has_no_raw_syscall_wrapper_symbols() {
-        let asm = StdLib::generate_assembly_for_target_profile(TargetProfile::Ckb);
-        let generated = asm
-            .lines()
-            .filter_map(|line| line.strip_prefix(".global "))
-            .filter(|symbol| symbol.starts_with("__syscall_"))
-            .collect::<std::collections::BTreeSet<_>>();
-
-        assert!(generated.is_empty(), "generated stdlib must not emit raw syscall wrappers: {generated:?}");
     }
 
     #[test]

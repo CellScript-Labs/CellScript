@@ -150,6 +150,7 @@ impl DebugInfoGenerator {
             Type::U8 | Type::U16 | Type::U32 | Type::U64 | Type::U128 => {
                 DebugType::Base { id, name: name.to_string(), encoding: TypeEncoding::Unsigned, size: Self::type_size(ty) }
             }
+            Type::I32 => DebugType::Base { id, name: name.to_string(), encoding: TypeEncoding::Signed, size: Self::type_size(ty) },
             Type::Bool => DebugType::Base { id, name: name.to_string(), encoding: TypeEncoding::Boolean, size: 1 },
             Type::Address | Type::Hash => DebugType::Base { id, name: name.to_string(), encoding: TypeEncoding::Address, size: 32 },
             Type::Array(_, count) => {
@@ -165,6 +166,7 @@ impl DebugInfoGenerator {
             Type::U8 => 1,
             Type::U16 => 2,
             Type::U32 => 4,
+            Type::I32 => 4,
             Type::U64 => 8,
             Type::U128 => 16,
             Type::Bool => 1,

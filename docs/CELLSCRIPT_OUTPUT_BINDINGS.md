@@ -6,10 +6,13 @@ CellScript models persistent state as Cell transformations, not in-place object
 mutation. The canonical one-to-one input/output form is:
 
 ```cellscript
-action update(before: State) -> after: State
-where
-    require after.owner == before.owner
-    require after.counter == before.counter + 1
+action advance(before: State) -> after: State {
+    transition before -> after
+
+    verification
+        require after.owner == before.owner
+        require after.counter == before.counter + 1
+}
 ```
 
 Read this as:
@@ -67,6 +70,8 @@ runtime error code.
 - `swap_a_for_b` updates pool reserves through explicit add/sub requirements
 - `add_liquidity` updates reserves and LP supply through proportional updates
 - `remove_liquidity` updates reserves and LP supply through subtraction
+- the example also exposes explicit guard metadata for fee caps, nonzero pool
+  state, arithmetic bounds, LP mint/burn amounts, and LP provider ownership
 
 The generated metadata exposes input/output bindings, runtime requirements, CKB
 runtime accesses, and scheduler shared-state domains.

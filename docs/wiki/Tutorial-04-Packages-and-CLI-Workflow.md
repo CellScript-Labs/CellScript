@@ -63,13 +63,16 @@ Read the manifest as a build promise:
 - `target` chooses assembly or ELF-style output;
 - `target_profile` chooses the runtime assumptions;
 - `out_dir` chooses where artifacts are written;
-- path dependencies keep local packages explicit.
+- path, git, and registry source-package dependencies keep package inputs
+  explicit and lockable.
 
-Registry publishing and registry dependency resolution are intentionally
-experimental/fail-closed until a trusted registry path is ready. Local path
-dependencies are the supported workflow for repeatable local development.
+Registry source-package resolution is implemented for packages that provide
+`Cell.toml`, `registry.json`, tag-pinned Git provenance, and a verified
+`source_hash`. Local path dependencies remain the fastest repeatable
+development workflow, and non-CellScript registry artifact profiles still fail
+closed until they have their own resolver contracts.
 
-When registry resolution is enabled, `cellc add` must remain a dependency
+For registry resolution, `cellc add` must remain a dependency
 resolver, not a code-snippet finder. Anything reachable by `cellc add` must be
 safe to participate in the package, build, deployment, or declared TCB identity
 chain. Template-only material belongs behind copy/scaffold commands instead.
@@ -235,17 +238,19 @@ external CKB tooling artifacts such as bootstrapper outputs. Resolver profiles
 must stay narrower: an object can be discovered without being installable by
 `cellc add`.
 
-That means registry resolution is stricter than discovery. The future resolver
-path should accept only objects that can be checked fail-closed:
+That means registry resolution is stricter than discovery. Current `cellc`
+registry dependencies are CellScript source-package dependencies. Future
+profile-aware resolver paths should accept only objects that can be checked
+fail-closed:
 
-| Kind | `cellc add` | Boundary |
+| Kind | Current `cellc add` | Future profile boundary |
 | --- | --- | --- |
 | `source_package` / library | yes | Source and API identity must be pinned and reproducible. |
-| `runtime_verifier` / `spawn-verifier` | yes | TCB object; requires verifier ID, ABI, artifact identity, build profile, security status, and production deployment pins when used in production. |
-| `deployable_contract` | yes | Must expose build/audit/deployment identity, not just source text. |
-| `deployed_artifact_record` | yes | Must bind network, OutPoint, dep type, code/data hash, and status. |
-| `reproducible_artifact` | yes, if artifact-safe | Must bind source hash, build profile hash, artifact hash, and compatibility profile. |
-| `protocol_profile_library` | yes, if resolver-safe | Must be a real package with checkable source/schema/API semantics. |
+| `runtime_verifier` / `spawn-verifier` | no, unless wrapped as a CellScript package today | TCB object; requires verifier ID, ABI, artifact identity, build profile, security status, and production deployment pins when used in production. |
+| `deployable_contract` | no, unless it is a CellScript source package today | Must expose build/audit/deployment identity, not just source text. |
+| `deployed_artifact_record` | no | Must bind network, OutPoint, dep type, code/data hash, and status. |
+| `reproducible_artifact` | no | Must bind source hash, build profile hash, artifact hash, and compatibility profile. |
+| `protocol_profile_library` | only if it is a real CellScript package today | Must be a real package with checkable source/schema/API semantics. |
 | `template`, `cookbook`, `protocol_skeleton`, scaffold | no | Copy-only starting material; after copying, it becomes local project code. |
 
 The rule is intentionally blunt:
@@ -283,6 +288,13 @@ cellc add novaseal/mvb-starter
 This keeps the registry as a verifiable dependency and artifact discovery layer,
 not a general examples marketplace.
 
+For mixed projects, keep the records separate. A CellScript app may depend on a
+CellScript library, reference a deployed verifier as TCB evidence, use a
+reproducible bootstrapper artifact during its build process, and copy a cookbook
+starter into local source. Those are four different profile boundaries. They
+may share one registry service and one `namespace/name` style, but they must not
+share one unchecked dependency path.
+
 ## Package Information
 
 ```bash
@@ -295,9 +307,18 @@ debugging dependency resolution.
 
 ## Experimental Commands
 
-Registry publishing, registry package installation, `login`, `run`, and `repl`
-remain experimental/future-facing. Local `install --path` and `update` are
-supported as lockfile helpers for local path dependency workflows.
+Registry source-package installation and registry-backed `update` are supported
+for the CellScript source-package profile. The public registry policy is:
+`cellc auth capability create --principal-id <principal_id> --scope
+publish:namespace/package --expires 90d` authorises a JoyID-rooted publisher
+capability, then `cellc publish` writes a real registry entry. The
+`principal_id` is derived from the connected JoyID signer, not from a display
+address. The same metadata can still be
+mirrored with `cellc publish --offline` to `registry.json` and Git tags for
+audit, local fixtures, and offline fallback. `cellc registry add` manages discovery/claim metadata rather than
+ordinary version publication. `run`, `repl`, cryptographic audit-signature
+verification, and non-CellScript artifact profiles remain future-facing or
+fail-closed.
 
 ## Next
 

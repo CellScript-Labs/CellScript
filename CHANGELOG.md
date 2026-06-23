@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.20.0-nightly - 2026-06-19
+
+- Fix numeric-width soundness by requiring exact non-literal numeric type
+  equality while preserving declared integer literal widths through type
+  checking and IR lowering.
+- Reduce generated branch cost by skipping unconditional jumps to the physical
+  fall-through block and by selecting `beqz`/`bnez` branch forms that keep the
+  fall-through path implicit.
+- Extend `cellc opt-report` and constraint artifact metadata with backend
+  shape counters and estimated-cycle deltas across optimisation levels.
+- Replace the incremental parallel compiler's identity ordering with a real
+  dependency topological sort and cycle-safe fallback ordering.
+- Close the registry source-package plan in docs and tooling: registry install,
+  build, and update use the two-tier Git resolver with yanked-version skipping
+  and `source_hash` verification, while `registry add` now prints next steps
+  for the actual cloned discovery worktree.
+- Harden the CKB/devnet acceptance path with an ELF entry ABI gate that checks
+  RX-only executable segments, `filesz == memsz`, and entry trampoline
+  stack-pointer preservation before local-node evidence is accepted.
+- Require launch, token, and AMM bootstrap examples to carry passing ELF entry
+  ABI evidence alongside existing builder-backed action, lock-spend, cycle,
+  transaction-size, occupied-capacity, and stateful lifecycle checks.
+- Add 0.20 release notes documenting the strengthened devnet acceptance
+  boundary and the remaining difference between compile-only and live local
+  devnet evidence.
+
+## 0.17.0 - 2026-05-04
+
+- Add the research iCKB protocol-equivalence surface with partial CKB VM
+  differential evidence, including 75 original-vs-CellScript executed rows,
+  14 CellScript-only VM rows, 8 original-side VM rows, and an explicit
+  `NOT_PROVEN` production-equivalence gate.
+- Add 0.17 strict CKB protocol helpers for SourceView, DAO accumulated-rate
+  and maturity checks, xUDT group amount helpers, script args/hash guards,
+  MetaPoint/OutPoint relation scans, and C256 product requirements.
+- Add executable iCKB benchmark specs and matrix evidence under
+  `tests/benchmarks`, while keeping iCKB-specific receipt layout and fixture
+  logic out of the generic compiler/runtime surface.
+- Keep production equivalence deliberately unclaimed until owner-auth witness
+  fixtures, byte-accurate receipt decoding, full DAO redeem accounting,
+  generic aggregate lowering, and production manifest closure are complete.
+
 ## 0.16.1 - 2026-06-15
 
 - Close the bundled token/AMM/launch bootstrap lifecycle gaps with explicit
@@ -78,15 +120,10 @@
   as `create`, `consume`, `replace`, `burn`, `relock`, `retarget_type`, and
   `read_ref`.
 - Add `--primitive-compat 0.14` and `--primitive-strict 0.15` migration modes
-  across direct `cellc` compilation and package commands, with CS0150-CS0160
-  diagnostics for legacy `transfer` and `destroy` capabilities.
+  across direct `cellc` compilation and package commands, with CS0151-CS0160
+  diagnostics for legacy `destroy` capability.
 - Allow direct lifecycle operations to be authorized by kernel-effect
-  equivalents: `transfer` accepts `replace + relock`, and `destroy` accepts
-  `consume + burn`.
-- Define expression-local unsigned widening: primitive unsigned integers may
-  widen inside arithmetic and numeric comparison only; integer literals may be
-  context-typed, but non-literal values do not widen across assignment, return,
-  ABI, witness, layout, field initialization, or serialization boundaries.
+  equivalents: `destroy` accepts `consume + burn`.
 - Convert canonical bundled examples, language examples, README examples, wiki
   tutorials, and release gates to strict 0.15 kernel-effect capabilities.
 - Extend strict acceptance and syntax-combination gates so bundled examples

@@ -9,7 +9,7 @@
 | BTC txid/wtxid/output tuple binding | source-guard-present |
 | Transition commitment binding | source-guard-present |
 | Committer BIP340 authority | source-guard-present |
-| Handoff-bound public BTC inclusion/finality SPV verification | missing-external-spv-evidence |
+| Handoff-bound public/mainnet BTC inclusion/finality SPV verification | external-required |
 | Live devnet BTC transaction commitment transition | live-devnet-covered |
 
 ## Fixture Honesty
@@ -19,12 +19,11 @@ are not the live proof themselves and are not BTC network proof. Live stateful
 evidence is recorded in
 `target/novaseal-btc-transaction-commitment-devnet-stateful-live.json`.
 
-## Production Statement Boundary
+## Public/Mainnet Statement Boundary
 
-Production claims remain blocked by missing handoff-bound public BTC SPV
-evidence, missing public/shared CellDep attestation, and missing external
-BIP340 TCB review. The required public BTC report must echo the current live
-CKB and service-builder bindings, carry the CKB-side BTC commitment hash, and
-include recomputable raw transaction, block-header, Merkle, confirmation, and
-output-binding material. Local BTC transaction commitment stateful execution is
-covered by the live devnet runner.
+Source-package readiness is covered by the live devnet runner. Public/mainnet
+BTC-finality claims still require handoff-bound public BTC SPV evidence,
+public/shared CellDep attestation, and external BIP340 TCB review. The required
+public BTC report must echo the current live CKB and service-builder bindings,
+carry the CKB-side BTC commitment hash, and include recomputable raw
+transaction, block-header, Merkle, confirmation, and output-binding material.

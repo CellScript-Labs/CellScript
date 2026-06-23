@@ -1,0 +1,322 @@
+module dob::evolving::v1
+
+const EVOLVING_DOB_VERSION: u16 = 1
+const U64_MAX: u64 = 18446744073709551615
+
+const OP_INIT: u8 = 0
+const OP_EVOLVE: u8 = 1
+const OP_FINALISE: u8 = 2
+
+const PHASE_UNBORN: u8 = 0
+const PHASE_ACTIVE: u8 = 1
+const PHASE_FINAL: u8 = 2
+
+struct DobEvolutionIntentV1 {
+    version: u16,
+    action: u8,
+    spore_id: Hash,
+    cluster_id: Hash,
+    old_generation: u64,
+    new_generation: u64,
+    old_phase: u8,
+    new_phase: u8,
+    old_dna_hash: Hash,
+    new_dna_hash: Hash,
+    old_traits_hash: Hash,
+    new_traits_hash: Hash,
+    old_render_commitment_hash: Hash,
+    new_render_commitment_hash: Hash,
+    rule_hash: Hash,
+    decoder_hash: Hash,
+    owner_lock: Hash,
+    previous_event_hash: Hash,
+    new_event_hash: Hash,
+    expiry: u64,
+}
+
+#[type_id("dob::evolving::v1::DobEvolutionStateV1")]
+resource DobEvolutionStateV1 has store, create, consume, replace
+    identity(ckb_type_id)
+{
+    version: u16,
+    spore_id: Hash,
+    cluster_id: Hash,
+    generation: u64,
+    phase: u8,
+    dna_hash: Hash,
+    traits_hash: Hash,
+    render_commitment_hash: Hash,
+    rule_hash: Hash,
+    decoder_hash: Hash,
+    owner_lock: Hash,
+    latest_event_hash: Hash,
+    expiry: u64,
+}
+
+receipt DobEvolutionEventV1 has store, create {
+    version: u16,
+    action: u8,
+    spore_id: Hash,
+    cluster_id: Hash,
+    old_generation: u64,
+    new_generation: u64,
+    old_phase: u8,
+    new_phase: u8,
+    old_dna_hash: Hash,
+    new_dna_hash: Hash,
+    old_traits_hash: Hash,
+    new_traits_hash: Hash,
+    old_render_commitment_hash: Hash,
+    new_render_commitment_hash: Hash,
+    rule_hash: Hash,
+    decoder_hash: Hash,
+    previous_event_hash: Hash,
+    new_event_hash: Hash,
+}
+
+flow DobEvolutionStateV1.phase {
+    Unborn -> Active;
+    Active -> Final;
+}
+
+action initialise_dob_state(witness intent: DobEvolutionIntentV1) -> (DobEvolutionStateV1, DobEvolutionEventV1) {
+    verification
+        let now = env::current_timepoint()
+
+        require intent.version == EVOLVING_DOB_VERSION
+        require intent.action == OP_INIT
+        require intent.spore_id != Hash::zero()
+        require intent.cluster_id != Hash::zero()
+        require intent.old_generation == 0
+        require intent.new_generation == 0
+        require intent.old_phase == PHASE_UNBORN
+        require intent.new_phase == PHASE_ACTIVE
+        require intent.old_dna_hash == Hash::zero()
+        require intent.new_dna_hash != Hash::zero()
+        require intent.old_traits_hash == Hash::zero()
+        require intent.new_traits_hash != Hash::zero()
+        require intent.old_render_commitment_hash == Hash::zero()
+        require intent.new_render_commitment_hash != Hash::zero()
+        require intent.rule_hash != Hash::zero()
+        require intent.decoder_hash != Hash::zero()
+        require intent.previous_event_hash == Hash::zero()
+        require intent.new_event_hash != Hash::zero()
+        require intent.expiry > now
+        ckb::require_cell_lock_hash(source::input(0), intent.owner_lock)
+
+        let event_identity_hash = hash_pair(intent.spore_id, intent.cluster_id)
+        let event_action_hash = hash_pair(Hash::from_bytes(b"DOB-EVO/1:init:event-hash:000000"), event_identity_hash)
+        let event_dna_hash = hash_pair(intent.old_dna_hash, intent.new_dna_hash)
+        let event_traits_hash = hash_pair(intent.old_traits_hash, intent.new_traits_hash)
+        let event_render_hash = hash_pair(intent.old_render_commitment_hash, intent.new_render_commitment_hash)
+        let event_rule_hash = hash_pair(intent.rule_hash, intent.decoder_hash)
+        let event_left_hash = hash_pair(event_action_hash, event_dna_hash)
+        let event_right_hash = hash_pair(event_traits_hash, event_render_hash)
+        let event_payload_hash = hash_pair(event_left_hash, event_right_hash)
+        let event_chain_hash = hash_pair(intent.previous_event_hash, event_rule_hash)
+        let expected_event_hash = hash_pair(event_chain_hash, event_payload_hash)
+        require intent.new_event_hash == expected_event_hash
+
+        let state = create_unique<DobEvolutionStateV1>(identity = ckb_type_id) {
+            version: EVOLVING_DOB_VERSION,
+            spore_id: intent.spore_id,
+            cluster_id: intent.cluster_id,
+            generation: 0,
+            phase: PHASE_ACTIVE,
+            dna_hash: intent.new_dna_hash,
+            traits_hash: intent.new_traits_hash,
+            render_commitment_hash: intent.new_render_commitment_hash,
+            rule_hash: intent.rule_hash,
+            decoder_hash: intent.decoder_hash,
+            owner_lock: intent.owner_lock,
+            latest_event_hash: intent.new_event_hash,
+            expiry: intent.expiry
+        } with_lock(intent.owner_lock)
+        let event = create DobEvolutionEventV1 {
+            version: EVOLVING_DOB_VERSION,
+            action: OP_INIT,
+            spore_id: intent.spore_id,
+            cluster_id: intent.cluster_id,
+            old_generation: 0,
+            new_generation: 0,
+            old_phase: PHASE_UNBORN,
+            new_phase: PHASE_ACTIVE,
+            old_dna_hash: Hash::zero(),
+            new_dna_hash: intent.new_dna_hash,
+            old_traits_hash: Hash::zero(),
+            new_traits_hash: intent.new_traits_hash,
+            old_render_commitment_hash: Hash::zero(),
+            new_render_commitment_hash: intent.new_render_commitment_hash,
+            rule_hash: intent.rule_hash,
+            decoder_hash: intent.decoder_hash,
+            previous_event_hash: Hash::zero(),
+            new_event_hash: intent.new_event_hash
+        } with_lock(intent.owner_lock)
+        (state, event)
+}
+
+action evolve_dob_state(old_state: DobEvolutionStateV1, witness intent: DobEvolutionIntentV1) -> (DobEvolutionStateV1, DobEvolutionEventV1) {
+    verification
+        let now = env::current_timepoint()
+
+        require old_state.version == EVOLVING_DOB_VERSION
+        require old_state.spore_id != Hash::zero()
+        require old_state.cluster_id != Hash::zero()
+        require old_state.phase == PHASE_ACTIVE
+        require old_state.generation < U64_MAX
+        require old_state.expiry > now
+        require intent.version == EVOLVING_DOB_VERSION
+        require intent.action == OP_EVOLVE
+        require intent.spore_id == old_state.spore_id
+        require intent.cluster_id == old_state.cluster_id
+        require intent.old_generation == old_state.generation
+        require intent.new_generation == old_state.generation + 1
+        require intent.old_phase == PHASE_ACTIVE
+        require intent.new_phase == PHASE_ACTIVE
+        require intent.old_dna_hash == old_state.dna_hash
+        require intent.new_dna_hash != Hash::zero()
+        require intent.old_traits_hash == old_state.traits_hash
+        require intent.new_traits_hash != Hash::zero()
+        require intent.old_render_commitment_hash == old_state.render_commitment_hash
+        require intent.new_render_commitment_hash != Hash::zero()
+        require intent.rule_hash == old_state.rule_hash
+        require intent.decoder_hash == old_state.decoder_hash
+        require intent.owner_lock == old_state.owner_lock
+        require intent.previous_event_hash == old_state.latest_event_hash
+        require intent.new_event_hash != Hash::zero()
+        require intent.new_event_hash != old_state.latest_event_hash
+        require intent.expiry == old_state.expiry
+
+        let event_identity_hash = hash_pair(old_state.spore_id, old_state.cluster_id)
+        let event_action_hash = hash_pair(Hash::from_bytes(b"DOB-EVO/1:evolve:event-hash:0000"), event_identity_hash)
+        let event_dna_hash = hash_pair(old_state.dna_hash, intent.new_dna_hash)
+        let event_traits_hash = hash_pair(old_state.traits_hash, intent.new_traits_hash)
+        let event_render_hash = hash_pair(old_state.render_commitment_hash, intent.new_render_commitment_hash)
+        let event_rule_hash = hash_pair(old_state.rule_hash, old_state.decoder_hash)
+        let event_left_hash = hash_pair(event_action_hash, event_dna_hash)
+        let event_right_hash = hash_pair(event_traits_hash, event_render_hash)
+        let event_payload_hash = hash_pair(event_left_hash, event_right_hash)
+        let event_chain_hash = hash_pair(old_state.latest_event_hash, event_rule_hash)
+        let expected_event_hash = hash_pair(event_chain_hash, event_payload_hash)
+        require intent.new_event_hash == expected_event_hash
+
+        let next_state = replace_unique<DobEvolutionStateV1>(identity = ckb_type_id) old_state {
+            version: EVOLVING_DOB_VERSION,
+            spore_id: intent.spore_id,
+            cluster_id: intent.cluster_id,
+            generation: intent.new_generation,
+            phase: PHASE_ACTIVE,
+            dna_hash: intent.new_dna_hash,
+            traits_hash: intent.new_traits_hash,
+            render_commitment_hash: intent.new_render_commitment_hash,
+            rule_hash: intent.rule_hash,
+            decoder_hash: intent.decoder_hash,
+            owner_lock: old_state.owner_lock,
+            latest_event_hash: intent.new_event_hash,
+            expiry: old_state.expiry
+        }
+        let event = create DobEvolutionEventV1 {
+            version: EVOLVING_DOB_VERSION,
+            action: OP_EVOLVE,
+            spore_id: intent.spore_id,
+            cluster_id: intent.cluster_id,
+            old_generation: old_state.generation,
+            new_generation: intent.new_generation,
+            old_phase: PHASE_ACTIVE,
+            new_phase: PHASE_ACTIVE,
+            old_dna_hash: old_state.dna_hash,
+            new_dna_hash: intent.new_dna_hash,
+            old_traits_hash: old_state.traits_hash,
+            new_traits_hash: intent.new_traits_hash,
+            old_render_commitment_hash: old_state.render_commitment_hash,
+            new_render_commitment_hash: intent.new_render_commitment_hash,
+            rule_hash: old_state.rule_hash,
+            decoder_hash: old_state.decoder_hash,
+            previous_event_hash: old_state.latest_event_hash,
+            new_event_hash: intent.new_event_hash
+        } with_lock(old_state.owner_lock)
+        (next_state, event)
+}
+
+action finalise_dob_state(old_state: DobEvolutionStateV1, witness intent: DobEvolutionIntentV1) -> (DobEvolutionStateV1, DobEvolutionEventV1) {
+    verification
+        let now = env::current_timepoint()
+
+        require old_state.version == EVOLVING_DOB_VERSION
+        require old_state.spore_id != Hash::zero()
+        require old_state.cluster_id != Hash::zero()
+        require old_state.phase == PHASE_ACTIVE
+        require old_state.generation < U64_MAX
+        require old_state.expiry > now
+        require intent.version == EVOLVING_DOB_VERSION
+        require intent.action == OP_FINALISE
+        require intent.spore_id == old_state.spore_id
+        require intent.cluster_id == old_state.cluster_id
+        require intent.old_generation == old_state.generation
+        require intent.new_generation == old_state.generation + 1
+        require intent.old_phase == PHASE_ACTIVE
+        require intent.new_phase == PHASE_FINAL
+        require intent.old_dna_hash == old_state.dna_hash
+        require intent.new_dna_hash != Hash::zero()
+        require intent.old_traits_hash == old_state.traits_hash
+        require intent.new_traits_hash != Hash::zero()
+        require intent.old_render_commitment_hash == old_state.render_commitment_hash
+        require intent.new_render_commitment_hash != Hash::zero()
+        require intent.rule_hash == old_state.rule_hash
+        require intent.decoder_hash == old_state.decoder_hash
+        require intent.owner_lock == old_state.owner_lock
+        require intent.previous_event_hash == old_state.latest_event_hash
+        require intent.new_event_hash != Hash::zero()
+        require intent.new_event_hash != old_state.latest_event_hash
+        require intent.expiry == old_state.expiry
+
+        let event_identity_hash = hash_pair(old_state.spore_id, old_state.cluster_id)
+        let event_action_hash = hash_pair(Hash::from_bytes(b"DOB-EVO/1:final:event-hash:00000"), event_identity_hash)
+        let event_dna_hash = hash_pair(old_state.dna_hash, intent.new_dna_hash)
+        let event_traits_hash = hash_pair(old_state.traits_hash, intent.new_traits_hash)
+        let event_render_hash = hash_pair(old_state.render_commitment_hash, intent.new_render_commitment_hash)
+        let event_rule_hash = hash_pair(old_state.rule_hash, old_state.decoder_hash)
+        let event_left_hash = hash_pair(event_action_hash, event_dna_hash)
+        let event_right_hash = hash_pair(event_traits_hash, event_render_hash)
+        let event_payload_hash = hash_pair(event_left_hash, event_right_hash)
+        let event_chain_hash = hash_pair(old_state.latest_event_hash, event_rule_hash)
+        let expected_event_hash = hash_pair(event_chain_hash, event_payload_hash)
+        require intent.new_event_hash == expected_event_hash
+
+        let final_state = replace_unique<DobEvolutionStateV1>(identity = ckb_type_id) old_state {
+            version: EVOLVING_DOB_VERSION,
+            spore_id: intent.spore_id,
+            cluster_id: intent.cluster_id,
+            generation: intent.new_generation,
+            phase: PHASE_FINAL,
+            dna_hash: intent.new_dna_hash,
+            traits_hash: intent.new_traits_hash,
+            render_commitment_hash: intent.new_render_commitment_hash,
+            rule_hash: intent.rule_hash,
+            decoder_hash: intent.decoder_hash,
+            owner_lock: old_state.owner_lock,
+            latest_event_hash: intent.new_event_hash,
+            expiry: old_state.expiry
+        }
+        let event = create DobEvolutionEventV1 {
+            version: EVOLVING_DOB_VERSION,
+            action: OP_FINALISE,
+            spore_id: intent.spore_id,
+            cluster_id: intent.cluster_id,
+            old_generation: old_state.generation,
+            new_generation: intent.new_generation,
+            old_phase: PHASE_ACTIVE,
+            new_phase: PHASE_FINAL,
+            old_dna_hash: old_state.dna_hash,
+            new_dna_hash: intent.new_dna_hash,
+            old_traits_hash: old_state.traits_hash,
+            new_traits_hash: intent.new_traits_hash,
+            old_render_commitment_hash: old_state.render_commitment_hash,
+            new_render_commitment_hash: intent.new_render_commitment_hash,
+            rule_hash: old_state.rule_hash,
+            decoder_hash: old_state.decoder_hash,
+            previous_event_hash: old_state.latest_event_hash,
+            new_event_hash: intent.new_event_hash
+        } with_lock(old_state.owner_lock)
+        (final_state, event)
+}

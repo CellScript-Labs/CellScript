@@ -29,10 +29,11 @@ DEFAULT_CELLC = Path(__file__).resolve().parents[4] / "target/debug/cellc"
 
 PROBE_SOURCE = """module novaseal::spawn_backend_probe
 
-action probe(message: Hash, witness pubkey: [u8; 32], witness signature: [u8; 64]) -> u64
-where
+action probe(message: Hash, witness pubkey: [u8; 32], witness signature: [u8; 64]) -> u64 {
+    verification
     verifier::btc::bip340::require_signature(message, pubkey, signature)
     return 0
+}
 """
 
 BOUND_CELL_TOML = """[package]
@@ -124,8 +125,8 @@ def analyse_assembly(assembly_path: Path) -> dict[str, Any]:
     spawn_with_fd_body = helper_body(assembly, "__ckb_spawn_with_fd1")
     spawn_helper_lines = [line.strip() for line in spawn_body.splitlines()]
     spawn_with_fd_helper_lines = [line.strip() for line in spawn_with_fd_body.splitlines()]
-    fixed_u64_le_markers = assembly.count("# call __cellscript_fixed_u64_le")
-    fixed_u64_le_last_signature_word = "# cellscript abi: fixed_u64_le word=7 offset=56 width=64" in assembly
+    ipc_word_markers = assembly.count("# cellscript abi: novaseal bip340 ipc word ")
+    ipc_last_signature_word = "# cellscript abi: novaseal bip340 ipc word 17" in assembly
     pipe_write_instruction_count = assembly.count("\n    call __ckb_pipe_write")
     return {
         "assembly_path": "<temporary>/spawn_backend_probe.s",
@@ -138,16 +139,16 @@ def analyse_assembly(assembly_path: Path) -> dict[str, Any]:
             "close": "call __ckb_close" in assembly,
         },
         "fixed_word_envelope": {
-            "fixed_u64_le_markers": fixed_u64_le_markers,
+            "ipc_word_markers": ipc_word_markers,
             "pipe_write_instruction_count": pipe_write_instruction_count,
-            "contains_last_signature_word": fixed_u64_le_last_signature_word,
+            "contains_last_signature_word": ipc_last_signature_word,
         },
         "generic_verifier_surface": {
             "source_uses_btc_bip340_helper": "verifier::btc::bip340::require_signature" in PROBE_SOURCE,
             "lowers_to_spawn_with_fd": "call __ckb_spawn_with_fd1" in assembly,
-            "lowers_to_fixed_18_word_envelope": fixed_u64_le_markers == 16
+            "lowers_to_fixed_18_word_envelope": ipc_word_markers == 18
             and pipe_write_instruction_count == 18
-            and fixed_u64_le_last_signature_word,
+            and ipc_last_signature_word,
         },
         "spawn_helper": {
             "present": bool(spawn_body),
@@ -263,7 +264,7 @@ def build_report(cellc: str, output: Path, audit_surface_path: Path) -> dict[str
     static_cell_dep0_one_fd = bool(spawn_with_fd_helper.get("contains_static_cell_dep0_one_inherited_fd"))
     fixed_word_envelope = assembly.get("fixed_word_envelope", {})
     fixed_word_envelope_lowered = (
-        fixed_word_envelope.get("fixed_u64_le_markers") == 16
+        fixed_word_envelope.get("ipc_word_markers") == 18
         and fixed_word_envelope.get("pipe_write_instruction_count") == 18
         and fixed_word_envelope.get("contains_last_signature_word") is True
     )

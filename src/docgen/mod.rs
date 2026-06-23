@@ -34,6 +34,9 @@ pub struct ItemDoc {
 #[derive(Debug, Clone, Serialize)]
 pub struct AuditDoc {
     pub metadata_schema_version: u32,
+    pub source_metadata_schema_version: u32,
+    pub artifact_metadata_schema_version: u32,
+    pub constraints_metadata_schema_version: u32,
     pub compiler_version: String,
     pub module: String,
     pub artifact_format: String,
@@ -59,7 +62,6 @@ pub struct AuditDoc {
     pub fail_closed_runtime_features: Vec<String>,
     pub verifier_obligations: Vec<AuditObligationDoc>,
     pub proof_plan: Vec<ProofPlanMetadata>,
-    pub invariant_coverage: Vec<AuditInvariantCoverageDoc>,
     pub transaction_invariant_checked_subconditions: Vec<AuditTransactionInvariantSubconditionDoc>,
     pub transaction_runtime_input_requirements: Vec<TransactionRuntimeInputRequirementMetadata>,
     pub pool_primitives: Vec<PoolPrimitiveMetadata>,
@@ -81,16 +83,6 @@ pub struct AuditObligationDoc {
     pub feature: String,
     pub status: String,
     pub detail: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct AuditInvariantCoverageDoc {
-    pub origin: String,
-    pub feature: String,
-    pub action_coverage_status: String,
-    pub matched_action_obligations: Vec<String>,
-    pub codegen_coverage_status: String,
-    pub builder_assumptions: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -150,6 +142,9 @@ impl DocGenerator {
     pub fn set_compile_metadata(&mut self, metadata: &CompileMetadata) {
         self.audit = Some(AuditDoc {
             metadata_schema_version: metadata.metadata_schema_version,
+            source_metadata_schema_version: metadata.source_metadata_schema_version,
+            artifact_metadata_schema_version: metadata.artifact_metadata_schema_version,
+            constraints_metadata_schema_version: metadata.constraints_metadata_schema_version,
             compiler_version: metadata.compiler_version.clone(),
             module: metadata.module.clone(),
             artifact_format: metadata.artifact_format.clone(),
@@ -195,7 +190,6 @@ impl DocGenerator {
                 })
                 .collect(),
             proof_plan: metadata.runtime.proof_plan.clone(),
-            invariant_coverage: invariant_coverage_docs(&metadata.runtime.proof_plan),
             transaction_invariant_checked_subconditions: transaction_invariant_checked_subcondition_docs(
                 &metadata.runtime.verifier_obligations,
             ),
@@ -308,6 +302,9 @@ impl AuditDoc {
         let mut out = String::new();
         out.push_str("## Lowering Audit Report\n\n");
         out.push_str(&format!("- Metadata schema version: `{}`\n", self.metadata_schema_version));
+        out.push_str(&format!("- Source metadata schema version: `{}`\n", self.source_metadata_schema_version));
+        out.push_str(&format!("- Artifact metadata schema version: `{}`\n", self.artifact_metadata_schema_version));
+        out.push_str(&format!("- Constraints metadata schema version: `{}`\n", self.constraints_metadata_schema_version));
         out.push_str(&format!("- Compiler version: `{}`\n", self.compiler_version));
         out.push_str(&format!("- Module: `{}`\n", self.module));
         out.push_str(&format!("- Artifact format: `{}`\n", self.artifact_format));
@@ -449,28 +446,6 @@ impl AuditDoc {
             out.push('\n');
         }
 
-        out.push_str("### Invariant Coverage\n\n");
-        if self.invariant_coverage.is_empty() {
-            out.push_str("_No aggregate invariant coverage records emitted._\n\n");
-        } else {
-            out.push_str(
-                "| Origin | Feature | Action Coverage | Matched Action Obligations | Codegen Coverage | Builder Assumptions |\n",
-            );
-            out.push_str("|---|---|---|---|---|---|\n");
-            for coverage in &self.invariant_coverage {
-                out.push_str(&format!(
-                    "| `{}` | `{}` | `{}` | {} | `{}` | {} |\n",
-                    escape_markdown_table_cell(&coverage.origin),
-                    escape_markdown_table_cell(&coverage.feature),
-                    escape_markdown_table_cell(&coverage.action_coverage_status),
-                    escape_markdown_table_cell(&comma_or_none(&coverage.matched_action_obligations)),
-                    escape_markdown_table_cell(&coverage.codegen_coverage_status),
-                    escape_markdown_table_cell(&comma_or_none(&coverage.builder_assumptions))
-                ));
-            }
-            out.push('\n');
-        }
-
         out.push_str("### Covenant ProofPlan\n\n");
         if self.proof_plan.is_empty() {
             out.push_str("_No Covenant ProofPlan records emitted._\n\n");
@@ -521,6 +496,12 @@ impl AuditDoc {
         out.push_str("<section><h2>Lowering Audit Report</h2>");
         out.push_str("<ul>");
         out.push_str(&format!("<li>Metadata schema version: <code>{}</code></li>", self.metadata_schema_version));
+        out.push_str(&format!("<li>Source metadata schema version: <code>{}</code></li>", self.source_metadata_schema_version));
+        out.push_str(&format!("<li>Artifact metadata schema version: <code>{}</code></li>", self.artifact_metadata_schema_version));
+        out.push_str(&format!(
+            "<li>Constraints metadata schema version: <code>{}</code></li>",
+            self.constraints_metadata_schema_version
+        ));
         out.push_str(&format!("<li>Compiler version: <code>{}</code></li>", escape_html(&self.compiler_version)));
         out.push_str(&format!("<li>Module: <code>{}</code></li>", escape_html(&self.module)));
         out.push_str(&format!("<li>Artifact format: <code>{}</code></li>", escape_html(&self.artifact_format)));
@@ -666,26 +647,6 @@ impl AuditDoc {
             }
             out.push_str("</tbody></table>");
         }
-        out.push_str("<h3>Invariant Coverage</h3>");
-        if self.invariant_coverage.is_empty() {
-            out.push_str("<p><em>No aggregate invariant coverage records emitted.</em></p>");
-        } else {
-            out.push_str(
-                "<table><thead><tr><th>Origin</th><th>Feature</th><th>Action Coverage</th><th>Matched Action Obligations</th><th>Codegen Coverage</th><th>Builder Assumptions</th></tr></thead><tbody>",
-            );
-            for coverage in &self.invariant_coverage {
-                out.push_str(&format!(
-                    "<tr><td><code>{}</code></td><td><code>{}</code></td><td><code>{}</code></td><td>{}</td><td><code>{}</code></td><td>{}</td></tr>",
-                    escape_html(&coverage.origin),
-                    escape_html(&coverage.feature),
-                    escape_html(&coverage.action_coverage_status),
-                    escape_html(&comma_or_none(&coverage.matched_action_obligations)),
-                    escape_html(&coverage.codegen_coverage_status),
-                    escape_html(&comma_or_none(&coverage.builder_assumptions))
-                ));
-            }
-            out.push_str("</tbody></table>");
-        }
         out.push_str("<h3>Covenant ProofPlan</h3>");
         if self.proof_plan.is_empty() {
             out.push_str("<p><em>No Covenant ProofPlan records emitted.</em></p>");
@@ -796,39 +757,6 @@ fn transaction_invariant_checked_subcondition_docs(
                     checked_subconditions,
                     detail: obligation.detail.clone(),
                 })
-            }
-        })
-        .collect()
-}
-
-fn invariant_coverage_docs(proof_plan: &[ProofPlanMetadata]) -> Vec<AuditInvariantCoverageDoc> {
-    proof_plan
-        .iter()
-        .filter(|plan| plan.category == "aggregate-invariant")
-        .map(|plan| {
-            let matched_action_obligations = plan
-                .coverage
-                .iter()
-                .filter_map(|coverage| coverage.strip_prefix("invariant_coverage:matched-action-obligation:").map(str::to_string))
-                .collect::<Vec<_>>();
-            let unmatched = plan
-                .builder_assumptions
-                .iter()
-                .any(|assumption| assumption.starts_with("declared(no_checked_action_obligation_matches:"));
-            let action_coverage_status = if !matched_action_obligations.is_empty() {
-                "matched"
-            } else if unmatched {
-                "unmatched"
-            } else {
-                "not-applicable"
-            };
-            AuditInvariantCoverageDoc {
-                origin: plan.origin.clone(),
-                feature: plan.feature.clone(),
-                action_coverage_status: action_coverage_status.to_string(),
-                matched_action_obligations,
-                codegen_coverage_status: plan.codegen_coverage_status.clone(),
-                builder_assumptions: plan.builder_assumptions.clone(),
             }
         })
         .collect()
@@ -1042,7 +970,6 @@ fn format_capability_clause(capabilities: &[Capability]) -> String {
 fn format_capability(capability: &Capability) -> &'static str {
     match capability {
         Capability::Store => "store",
-        Capability::Transfer => "transfer",
         Capability::Destroy => "destroy",
         Capability::Create => "create",
         Capability::Consume => "consume",
@@ -1108,6 +1035,7 @@ fn format_type(ty: &Type) -> String {
         Type::U8 => "u8".to_string(),
         Type::U16 => "u16".to_string(),
         Type::U32 => "u32".to_string(),
+        Type::I32 => "i32".to_string(),
         Type::U64 => "u64".to_string(),
         Type::U128 => "u128".to_string(),
         Type::Bool => "bool".to_string(),
@@ -1147,7 +1075,7 @@ fn item_name_for_xref(item: &Item) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{compile, lexer, parser, CompileOptions};
+    use crate::{lexer, parser};
 
     #[test]
     fn docgen_emits_markdown_for_action() {
@@ -1155,9 +1083,10 @@ mod tests {
 module demo
 
 /// adds two numbers
-action add(x: u64, y: u64) -> u64
-where
-    return x + y
+action add(x: u64, y: u64) -> u64 {
+    verification
+        return x + y
+}
 "#;
         let tokens = lexer::lex(source).unwrap();
         let module = parser::parse(&tokens).unwrap();
@@ -1235,6 +1164,9 @@ where
         let mut generator = DocGenerator::new(OutputFormat::Markdown);
         generator.audit = Some(AuditDoc {
             metadata_schema_version: crate::METADATA_SCHEMA_VERSION,
+            source_metadata_schema_version: crate::SOURCE_METADATA_SCHEMA_VERSION,
+            artifact_metadata_schema_version: crate::ARTIFACT_METADATA_SCHEMA_VERSION,
+            constraints_metadata_schema_version: crate::CONSTRAINTS_METADATA_SCHEMA_VERSION,
             compiler_version: "test".to_string(),
             module: "demo".to_string(),
             artifact_format: "RISC-V assembly".to_string(),
@@ -1260,7 +1192,6 @@ where
             fail_closed_runtime_features: Vec::new(),
             verifier_obligations: Vec::new(),
             proof_plan: Vec::new(),
-            invariant_coverage: Vec::new(),
             transaction_invariant_checked_subconditions: Vec::new(),
             transaction_runtime_input_requirements: Vec::new(),
             pool_primitives: vec![primitive.clone()],
@@ -1289,6 +1220,9 @@ where
         let mut generator = DocGenerator::new(OutputFormat::Markdown);
         generator.audit = Some(AuditDoc {
             metadata_schema_version: crate::METADATA_SCHEMA_VERSION,
+            source_metadata_schema_version: crate::SOURCE_METADATA_SCHEMA_VERSION,
+            artifact_metadata_schema_version: crate::ARTIFACT_METADATA_SCHEMA_VERSION,
+            constraints_metadata_schema_version: crate::CONSTRAINTS_METADATA_SCHEMA_VERSION,
             compiler_version: "test".to_string(),
             module: "demo".to_string(),
             artifact_format: "RISC-V assembly".to_string(),
@@ -1320,7 +1254,6 @@ where
                 detail: obligation.detail.clone(),
             }],
             proof_plan: Vec::new(),
-            invariant_coverage: Vec::new(),
             transaction_invariant_checked_subconditions: transaction_invariant_checked_subcondition_docs(&[obligation]),
             transaction_runtime_input_requirements: vec![TransactionRuntimeInputRequirementMetadata {
                 scope: "action:claim_vested".to_string(),
@@ -1349,43 +1282,5 @@ where
         assert!(docs.contains("field equality"));
         assert!(docs.contains("field transition"));
         assert!(docs.contains("`consume-load-cell-input`"));
-    }
-
-    #[test]
-    fn docgen_emits_invariant_coverage_summary() {
-        let result = compile(
-            r#"
-module test
-
-invariant token_supply_conserved {
-    trigger: type_group
-    scope: group
-    reads: group_inputs<Token>.amount, group_outputs<Token>.amount
-    assert_conserved(Token.amount, scope = group)
-}
-
-resource Token has store, create, consume {
-    amount: u64,
-}
-
-action pass(token: Token) -> Token
-where
-    let amount = token.amount
-    consume token
-    let out = create Token { amount: amount }
-    return out
-"#,
-            CompileOptions::default(),
-        )
-        .unwrap();
-
-        let mut generator = DocGenerator::new(OutputFormat::Markdown);
-        generator.set_compile_metadata(&result.metadata);
-        let docs = generator.generate().unwrap();
-
-        assert!(docs.contains("### Invariant Coverage"));
-        assert!(docs.contains("`matched`"));
-        assert!(docs.contains("`assert_conserved:Token.amount`"));
-        assert!(docs.contains("action:pass:resource-conservation:Token=checked-runtime"));
     }
 }

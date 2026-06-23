@@ -1,0 +1,27 @@
+# DobEvolutionIntentV1 - owner-lock authorised transition schema.
+#
+# The state cell's CKB lock is the authority boundary. The type script checks
+# that every successor intent preserves the stored owner_lock and that receipts
+# commit to the same event chain. new_event_hash must equal the on-chain
+# hash_pair event commitment tree.
+
+version: u16
+action: u8
+spore_id: Byte32
+cluster_id: Byte32
+old_generation: u64
+new_generation: u64
+old_phase: u8
+new_phase: u8
+old_dna_hash: Byte32
+new_dna_hash: Byte32
+old_traits_hash: Byte32
+new_traits_hash: Byte32
+old_render_commitment_hash: Byte32
+new_render_commitment_hash: Byte32
+rule_hash: Byte32
+decoder_hash: Byte32
+owner_lock: Byte32              # Expected CKB lock hash for genesis input and successor outputs.
+previous_event_hash: Byte32
+new_event_hash: Byte32
+expiry: u64

@@ -2,63 +2,37 @@
 import "../styles/global.css";
 import { exampleGroups, heroExamples, links, modelCards, tools, workflowSteps } from "../data/site";
 import { defaultLocale, translations } from "../i18n/translations";
+import { renderLine } from "../lib/highlight";
+import { provenanceForExample, effectsSummary, formatBytes, shortHash } from "../lib/provenance";
+import NavRail from "../components/NavRail.astro";
+import BrandMark from "../components/BrandMark.astro";
+import { ClientRouter } from "astro:transitions";
+import pipelineFragments from "../data/pipeline-fragments.json";
+import assuranceMetadata from "../data/assurance-metadata.json";
+
+const metadataJson = JSON.stringify(assuranceMetadata, null, 2);
 
 const locale = defaultLocale;
 const t = translations[locale];
 const getExampleItemCopy = (groupId: string, itemId: string) =>
   (t.examples.groups as Record<string, { items: Record<string, readonly [string, string]> }>)[groupId].items[itemId];
 
-const escapeHtml = (value: string) =>
-  value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+// Pre-resolve provenance for each hero example so the static compile-
+// output indicator and the playground link can reference real numbers
+// without a runtime lookup. Falls back to null when an example has no
+// precompiled metadata (none of the current four, but defensive).
+const heroProvenance = heroExamples.map((example) => ({
+  id: example.id,
+  view: provenanceForExample(example.id),
+}));
 
-const tokenGroups = {
-  keyword: new Set(["module", "use", "has", "action", "lock", "fn", "where", "const", "struct", "enum", "invariant"]),
-  cellKind: new Set(["resource", "shared", "receipt", "flow"]),
-  cellEffect: new Set(["consume", "create", "destroy", "preserve", "create_unique", "destroy_unique", "destroy_singleton_type", "claim", "settle", "launch", "read_ref"]),
-  assertion: new Set(["assert", "assert_invariant", "assert_sum", "assert_delta", "assert_unique", "require"]),
-  control: new Set(["if", "else", "for", "in", "while", "match", "return", "let", "mut", "ref", "transition", "read", "protected", "witness", "lock_args"]),
-  builtin: new Set(["u8", "u16", "u32", "u64", "u128", "bool", "Address", "Hash", "String", "Vec", "env", "witness"]),
-  capability: new Set(["store", "create", "consume", "replace", "burn", "relock", "read_ref", "transfer", "destroy", "retarget_type"]),
-};
-
-const classifyCellToken = (token: string) => {
-  if (token.startsWith("//")) return "comment";
-  if (token.startsWith("\"")) return "string";
-  if (/^\d+$/.test(token)) return "number";
-  if (token === "->" || token === "=>") return "arrow";
-  if (/^[{}()[\];:,.<>+\-*/=&|!]$/.test(token) || ["==", "!=", "<=", ">=", "&&", "||"].includes(token)) return "operator";
-  const base = token.includes("::") ? token.split("::").at(-1) ?? token : token;
-  if (tokenGroups.cellKind.has(base)) return "cell-kind";
-  if (tokenGroups.cellEffect.has(base)) return "cell-effect";
-  if (tokenGroups.assertion.has(base)) return "assert";
-  if (tokenGroups.control.has(base)) return "control";
-  if (tokenGroups.builtin.has(base)) return "builtin-type";
-  if (tokenGroups.capability.has(base)) return "capability";
-  if (tokenGroups.keyword.has(base)) return "keyword";
-  return "";
-};
-
-const renderLine = (line: string) => {
-  const tokenPattern = /\/\/.*$|"(?:[^"\\]|\\.)*"|->|=>|==|!=|<=|>=|&&|\|\||[A-Za-z_][A-Za-z0-9_:]*|\d+|[{}()[\];:,.<>+\-*/=&|!]/g;
-  let rendered = "";
-  let cursor = 0;
-
-  for (const match of line.matchAll(tokenPattern)) {
-    const token = match[0];
-    const index = match.index ?? 0;
-    rendered += escapeHtml(line.slice(cursor, index));
-    const tokenClass = classifyCellToken(token);
-    rendered += tokenClass
-      ? `<span class="token-${tokenClass}">${escapeHtml(token)}</span>`
-      : escapeHtml(token);
-    cursor = index + token.length;
-  }
-
-  return rendered + escapeHtml(line.slice(cursor));
-};
+const renderCodeLines = (source: string): string =>
+  source
+    .split("\n")
+    .map((line, index) => (
+      `<span class="line"><span class="ln">${index + 1}</span><span class="src">${renderLine(line)}</span></span>`
+    ))
+    .join("");
 
 ---
 
@@ -68,9 +42,13 @@ const renderLine = (line: string) => {
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light dark" />
-    <meta name="description" content={t.meta.description} data-i18n-content="meta.description" />
-    <link rel="icon" href={`${import.meta.env.BASE_URL}cellscript-logo.png`} />
-    <title data-i18n="meta.title">{t.meta.title}</title>
+    <meta name="description" content={t.meta.description} data-i18n-meta="meta.description" />
+    <meta property="og:title" content={t.meta.title} />
+    <meta property="og:description" content={t.meta.ogDescription} data-i18n-meta="meta.ogDescription" data-i18n-meta-attr="content" />
+    <link rel="icon" type="image/png" href={`${import.meta.env.BASE_URL}cellscript-logo.png`} />
+    <link rel="icon" type="image/png" media="(prefers-color-scheme: light)" href={`${import.meta.env.BASE_URL}cellscript-logo-light.png`} />
+    <link rel="icon" type="image/png" media="(prefers-color-scheme: dark)" href={`${import.meta.env.BASE_URL}cellscript-logo-dark.png`} />
+    <title data-i18n-meta="meta.titleLong">{t.meta.titleLong}</title>
     <script is:inline>
       (() => {
         try {
@@ -79,6 +57,9 @@ const renderLine = (line: string) => {
           document.documentElement.dataset.theme = storedTheme === "light" || storedTheme === "dark" ? storedTheme : "light";
           document.documentElement.dataset.locale = storedLocale === "zh" ? "zh" : "en";
           document.documentElement.lang = document.documentElement.dataset.locale;
+          if (localStorage.getItem("cellscript-rail-collapsed") === "true") {
+            document.documentElement.dataset.railCollapsed = "true";
+          }
         } catch {
           document.documentElement.dataset.theme = "light";
           document.documentElement.dataset.locale = "en";
@@ -86,46 +67,10 @@ const renderLine = (line: string) => {
         }
       })();
     </script>
+    <ClientRouter />
   </head>
   <body>
-    <header class="site-header">
-      <nav class="nav" aria-label={t.nav.primary} data-i18n-aria-label="nav.primary">
-        <a class="brand" href="#top" aria-label={t.nav.home} data-i18n-aria-label="nav.home">
-          <span class="brand-mark" aria-hidden="true"></span>
-          <span>CellScript</span>
-        </a>
-        <div class="nav-links">
-          <a class="nav-link" href={links.docs}>
-            <svg viewBox="0 0 20 20" aria-hidden="true">
-              <path d="M5 3.5h8.5L16 6v12H5z" />
-              <path d="M13.5 3.5V6H16M7.5 9h5M7.5 12h5M7.5 15h3" />
-            </svg>
-            <span data-i18n="nav.docs">{t.nav.docs}</span>
-          </a>
-          <a class="nav-link" href={links.source}>
-            <svg viewBox="0 0 20 20" aria-hidden="true">
-              <path d="M7.5 6.5 4 10l3.5 3.5M12.5 6.5 16 10l-3.5 3.5M11 4.5 9 15.5" />
-            </svg>
-            <span data-i18n="nav.source">{t.nav.source}</span>
-          </a>
-          <button class="nav-link nav-link-disabled" type="button" disabled aria-label={t.nav.registryDisabledAria} data-i18n-aria-label="nav.registryDisabledAria">
-            <svg viewBox="0 0 20 20" aria-hidden="true">
-              <path d="M4.5 6.5c0-1.38 2.46-2.5 5.5-2.5s5.5 1.12 5.5 2.5S13.04 9 10 9 4.5 7.88 4.5 6.5Z" />
-              <path d="M4.5 6.5v7c0 1.38 2.46 2.5 5.5 2.5s5.5-1.12 5.5-2.5v-7M4.5 10c0 1.38 2.46 2.5 5.5 2.5s5.5-1.12 5.5-2.5" />
-            </svg>
-            <span data-i18n="nav.registry">{t.nav.registry}</span>
-          </button>
-          <button class="language-toggle" type="button" aria-label={t.language.aria} data-i18n-aria-label="language.aria" data-language-toggle>
-            <span data-language-label data-i18n="language.switchTo">{t.language.switchTo}</span>
-            <span class="language-short" data-i18n="language.shortSwitch">{t.language.shortSwitch}</span>
-          </button>
-          <button class="theme-toggle" type="button" aria-label={t.theme.switchToDark} aria-pressed="false" data-theme-toggle>
-            <span class="theme-toggle-track" aria-hidden="true"><span class="theme-toggle-thumb"></span></span>
-            <span data-theme-label>{t.theme.dark}</span>
-          </button>
-        </div>
-      </nav>
-    </header>
+    <a class="skip-link" href="#top" data-i18n="a11y.skipToContent">{t.a11y.skipToContent}</a>
 
     <main id="top" class="page">
       <section class="hero" aria-labelledby="hero-title">
@@ -134,23 +79,53 @@ const renderLine = (line: string) => {
           <span></span>
           <span></span>
         </div>
+        <div class="hero-field" aria-hidden="true">
+          <span></span>
+          <span></span>
+          <span></span>
+          <span></span>
+          <span></span>
+        </div>
         <div class="hero-copy">
+          <div class="hero-brand-lockup">
+            <span class="hero-orbit" aria-hidden="true">
+              <i></i>
+              <i></i>
+              <i></i>
+            </span>
+            <BrandMark />
+          </div>
           <h1 id="hero-title" class="shiny-text" aria-label={t.hero.title}>{t.hero.title}</h1>
           <p data-i18n="hero.subtitle">{t.hero.subtitle}</p>
           <div class="hero-actions">
             <a class="button primary" href="#getting-started" data-i18n="hero.getStarted">{t.hero.getStarted}</a>
             <a class="button" href="#core-model" data-i18n="hero.coreModel">{t.hero.coreModel}</a>
           </div>
-          <dl class="hero-ledger" aria-label={t.hero.ledgerLabel} data-i18n-aria-label="hero.ledgerLabel">
-            <div><dt data-i18n="hero.ledger.target.0">{t.hero.ledger.target[0]}</dt><dd data-i18n="hero.ledger.target.1">{t.hero.ledger.target[1]}</dd></div>
-            <div><dt data-i18n="hero.ledger.model.0">{t.hero.ledger.model[0]}</dt><dd data-i18n="hero.ledger.model.1">{t.hero.ledger.model[1]}</dd></div>
-            <div><dt data-i18n="hero.ledger.output.0">{t.hero.ledger.output[0]}</dt><dd data-i18n="hero.ledger.output.1">{t.hero.ledger.output[1]}</dd></div>
-          </dl>
         </div>
 
         <div class="code-shell spotlight-card" data-code-tabs>
+          <script is:inline type="application/json" data-hero-provenance set:html={JSON.stringify(
+            Object.fromEntries(
+              heroProvenance
+                .filter(({ view }) => view)
+                .map(({ id, view }) => [id, {
+                  meta: `${view!.types.length} types · ${view!.actions.length} actions · ${effectsSummary(view!)}`,
+                  readout: `artifact: 0x${shortHash(view!.artifactHash)}… · ${formatBytes(view!.artifactSizeBytes)}`,
+                }]),
+            ),
+          )} />
           <div class="code-head">
             <span><span class="code-dot"></span><span data-file-label>{heroExamples[0].file}</span></span>
+            <span class="compile-meta" data-compile-meta aria-hidden="true">
+              {(() => {
+                const v = heroProvenance[0].view;
+                return v ? `${v.types.length} types · ${v.actions.length} actions · ${effectsSummary(v)}` : "";
+              })()}
+            </span>
+            <button class="copy-btn code-copy" type="button" data-copy-source data-i18n-aria-label="a11y.copyAria" aria-label={t.a11y.copyAria} aria-live="polite">
+              <svg class="copy-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M6 4h8v10H6z" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M4 6v10h8" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
+              <svg class="check-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10.5l4 4 8-9" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+            </button>
           </div>
           <div class="tabbar" role="tablist" aria-label={t.hero.examplesLabel} data-i18n-aria-label="hero.examplesLabel">
             {heroExamples.map((example, index) => (
@@ -170,19 +145,20 @@ const renderLine = (line: string) => {
             ))}
           </div>
           <div class="shell-line"><span class="prompt">$</span><span data-command-label>{heroExamples[0].command}</span></div>
-        </div>
-      </section>
-
-      <section class="section start-section" id="getting-started" aria-labelledby="start">
-        <h2 class="section-title" id="start" data-i18n="sections.gettingStarted">{t.sections.gettingStarted}</h2>
-        <div class="steps">
-          {t.start.steps.map(([label, command], index) => (
-            <article class="step">
-              <span class="step-num">{index + 1}</span>
-              <h3 data-i18n={`start.steps.${index}.0`}>{label}</h3>
-              <p><code data-i18n={`start.steps.${index}.1`}>{command}</code></p>
-            </article>
-          ))}
+          <div class="console-footer">
+            <span class="substrate-readout" data-substrate-readout>
+              {(() => {
+                const v = heroProvenance[0].view;
+                return v
+                  ? `artifact: 0x${shortHash(v.artifactHash)}… · ${formatBytes(v.artifactSizeBytes)}`
+                  : "";
+              })()}
+            </span>
+            <a class="playground-link" href={`/playground?example=${heroExamples[0].id}`} data-playground-link>
+              <span data-i18n="hero.playground.editLive">{t.hero.playground.editLive}</span>
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 10h10M11 6l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
+            </a>
+          </div>
         </div>
       </section>
 
@@ -257,6 +233,54 @@ const renderLine = (line: string) => {
             </ul>
           </aside>
         </div>
+
+        <!-- Scroll-driven pipeline trace: each stage shows a real
+             artifact fragment from the token example, and a thin
+             progress bar on the left tracks how far down the pipeline
+             the user has scrolled. No keyframe animation — the bar is
+             a CSS transform: scaleY driven by scroll position. -->
+        <div class="pipeline-trace" data-pipeline-trace>
+          <div class="pipeline-progress-track" aria-hidden="true">
+            <div class="pipeline-progress-fill" data-pipeline-fill></div>
+          </div>
+          <ol class="pipeline-stages">
+            <li class="pipeline-stage" data-pipeline-stage="0">
+              <div class="pipeline-stage-head">
+                <span class="pipeline-stage-num">01</span>
+                <span class="pipeline-stage-label" data-i18n="workflow.steps.source.0">{t.workflow.steps.source[0]}</span>
+              </div>
+              <pre class="pipeline-fragment pipeline-fragment-source code-snippet" set:html={renderCodeLines(pipelineFragments.source)}></pre>
+            </li>
+            <li class="pipeline-stage" data-pipeline-stage="1">
+              <div class="pipeline-stage-head">
+                <span class="pipeline-stage-num">02</span>
+                <span class="pipeline-stage-label" data-i18n="workflow.steps.parse.0">{t.workflow.steps.parse[0]}</span>
+              </div>
+              <pre class="pipeline-fragment pipeline-fragment-ast">{pipelineFragments.ast}</pre>
+            </li>
+            <li class="pipeline-stage" data-pipeline-stage="2">
+              <div class="pipeline-stage-head">
+                <span class="pipeline-stage-num">03</span>
+                <span class="pipeline-stage-label" data-i18n="workflow.steps.metadata.0">{t.workflow.steps.metadata[0]}</span>
+              </div>
+              <pre class="pipeline-fragment pipeline-fragment-meta">{pipelineFragments.metadata}</pre>
+            </li>
+            <li class="pipeline-stage" data-pipeline-stage="3">
+              <div class="pipeline-stage-head">
+                <span class="pipeline-stage-num">04</span>
+                <span class="pipeline-stage-label" data-i18n="workflow.steps.riscv.0">{t.workflow.steps.riscv[0]}</span>
+              </div>
+              <pre class="pipeline-fragment pipeline-fragment-riscv">{pipelineFragments.riscv}</pre>
+            </li>
+            <li class="pipeline-stage" data-pipeline-stage="4">
+              <div class="pipeline-stage-head">
+                <span class="pipeline-stage-num">05</span>
+                <span class="pipeline-stage-label" data-i18n="workflow.steps.elf.0">{t.workflow.steps.elf[0]}</span>
+              </div>
+              <pre class="pipeline-fragment pipeline-fragment-elf">{pipelineFragments.elf}</pre>
+            </li>
+          </ol>
+        </div>
       </section>
 
       <section class="section model-section" aria-labelledby="core-model">
@@ -295,7 +319,7 @@ const renderLine = (line: string) => {
                     <span data-i18n="model.exampleExcerpt">{t.model.exampleExcerpt}</span>
                     <span>{card.source}</span>
                   </div>
-                  <pre class="mini-code">{card.code}</pre>
+                  <pre class="mini-code code-snippet" set:html={renderCodeLines(card.code)}></pre>
                 </div>
               </article>
             ))}
@@ -319,29 +343,16 @@ const renderLine = (line: string) => {
                 </article>
               ))}
             </div>
-            <details class="metadata-disclosure" open>
+            <details class="metadata-disclosure">
               <summary data-i18n="assurance.metadataExcerpt">{t.assurance.metadataExcerpt}</summary>
-              <span class="metadata-comment"># <span data-i18n="assurance.metadataComment">{t.assurance.metadataComment}</span></span>
-              <pre class="metadata-panel">{`{
-  "metadata_schema_version": 42,
-  "module": "cellscript::vesting",
-  "target_profile": "ckb",
-  "types": {
-    "VestingConfig": { "kind": "shared", "capabilities": ["store", "create", "read_ref"] },
-    "VestingGrant": { "kind": "receipt", "flow": "Granted -> Claimable -> FullyClaimed" }
-  },
-  "actions": [{
-    "name": "claim_vested",
-    "effect_class": "Mutating",
-    "consume_set": ["grant"],
-    "create_set": ["tokens", "updated_grant"],
-    "ckb_runtime_features": ["current_timepoint"]
-  }],
-  "proof_plan": {
-    "status": "review evidence",
-    "limit": "sidecar provenance must be checked outside the compiler"
-  }
-}`}</pre>
+              <div class="metadata-block">
+                <span class="metadata-comment"># <span data-i18n="assurance.metadataComment">{t.assurance.metadataComment}</span></span>
+                <pre class="metadata-panel">{metadataJson}</pre>
+                <button class="copy-btn metadata-copy" type="button" data-copy-text={metadataJson} data-i18n-aria-label="a11y.copyAria" aria-label={t.a11y.copyAria} aria-live="polite">
+                  <svg class="copy-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M6 4h8v10H6z" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M4 6v10h8" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
+                  <svg class="check-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10.5l4 4 8-9" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+                </button>
+              </div>
             </details>
           </article>
         </div>
@@ -418,11 +429,11 @@ const renderLine = (line: string) => {
               >
                 <div class="example-panel-head">
                   <p data-i18n={`examples.groups.${group.id}.summary`}>{t.examples.groups[group.id].summary}</p>
-                  <a href={links.examples} data-i18n="examples.openDirectory">{t.examples.openDirectory}</a>
+                  <a href={links.examples} target="_blank" rel="noopener noreferrer" data-i18n="examples.openDirectory">{t.examples.openDirectory}</a>
                 </div>
                 <div class="examples-grid">
                   {group.items.map(({ path, id, tags }) => (
-                    <a class="example-card" href={`${links.source}/blob/main/${path}`}>
+                    <a class="example-card" href={`${links.source}/blob/main/${path}`} target="_blank" rel="noopener noreferrer" data-id={id}>
                       <h3 data-i18n={`examples.groups.${group.id}.items.${id}.0`}>{getExampleItemCopy(group.id, id)[0]}</h3>
                       <p data-i18n={`examples.groups.${group.id}.items.${id}.1`}>{getExampleItemCopy(group.id, id)[1]}</p>
                       <span class="example-tags">
@@ -437,19 +448,38 @@ const renderLine = (line: string) => {
         </div>
       </section>
 
+      <section class="section start-section" aria-labelledby="getting-started">
+        <h2 class="section-title" id="getting-started" data-i18n="sections.gettingStarted">{t.sections.gettingStarted}</h2>
+        <div class="steps">
+          {t.start.steps.map(([label, command], index) => (
+            <article class="step">
+              <span class="step-num">{index + 1}</span>
+              <h3 data-i18n={`start.steps.${index}.0`}>{label}</h3>
+              <p>
+                <code data-i18n={`start.steps.${index}.1`}>{command}</code>
+                <button class="copy-btn" type="button" data-copy-text={command} data-i18n-aria-label="a11y.copyAria" aria-label={t.a11y.copyAria} aria-live="polite">
+                  <svg class="copy-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M6 4h8v10H6z" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M4 6v10h8" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
+                  <svg class="check-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10.5l4 4 8-9" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+                </button>
+              </p>
+            </article>
+          ))}
+        </div>
+      </section>
+
     </main>
 
     <footer class="footer">
       <div class="footer-inner">
         <div class="footer-copy">
-          <a class="brand" href="#top"><span class="brand-mark" aria-hidden="true"></span><span>CellScript</span></a>
+          <a class="brand" href="#top"><BrandMark /><span>CellScript</span></a>
           <p data-i18n="footer.copy">{t.footer.copy}</p>
         </div>
         <div class="footer-links">
-          <a href={links.wiki} data-i18n="footer.docs">{t.footer.docs}</a>
-          <a href={links.docs} data-i18n="footer.spec">{t.footer.spec}</a>
-          <a href={links.examples} data-i18n="footer.examples">{t.footer.examples}</a>
-          <a href={links.source} data-i18n="footer.source">{t.footer.source}</a>
+          <a href={links.wiki} target="_blank" rel="noopener noreferrer" data-i18n="footer.docs">{t.footer.docs}</a>
+          <a href={links.docs} target="_blank" rel="noopener noreferrer" data-i18n="footer.spec">{t.footer.spec}</a>
+          <a href={links.examples} target="_blank" rel="noopener noreferrer" data-i18n="footer.examples">{t.footer.examples}</a>
+          <a href={links.source} target="_blank" rel="noopener noreferrer" data-i18n="footer.source">{t.footer.source}</a>
         </div>
       </div>
     </footer>
@@ -462,9 +492,6 @@ const renderLine = (line: string) => {
     <script>
       const i18nMessages = (window as any).__CELLSCRIPT_I18N__;
       const defaultLocaleName = (window as any).__CELLSCRIPT_DEFAULT_LOCALE__ ?? "en";
-      const languageTransitionMs = 150;
-      const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
-      const delay = (duration: number) => new Promise((resolve) => window.setTimeout(resolve, duration));
 
       const readLocale = () => document.documentElement.dataset.locale === "zh" ? "zh" : defaultLocaleName;
       const getMessage = (path: string, locale = readLocale()) => {
@@ -486,6 +513,13 @@ const renderLine = (line: string) => {
           const value = getMessage(element.dataset.i18nContent ?? "", nextLocale);
           if (typeof value === "string") element.setAttribute("content", value);
         });
+        // Localize <title> and meta tags marked with data-i18n-meta.
+        document.querySelectorAll<HTMLElement>("[data-i18n-meta]").forEach((element) => {
+          const value = getMessage(element.dataset.i18nMeta ?? "", nextLocale);
+          if (typeof value !== "string") return;
+          if (element.tagName === "TITLE") document.title = value;
+          else element.setAttribute(element.dataset.i18nMetaAttr ?? "content", value);
+        });
         const languageLabel = document.querySelector<HTMLElement>("[data-language-label]");
         const languageToggle = document.querySelector<HTMLButtonElement>("[data-language-toggle]");
         if (languageLabel) languageLabel.textContent = getMessage("language.switchTo", nextLocale) ?? "";
@@ -497,27 +531,6 @@ const renderLine = (line: string) => {
         }
       };
 
-      let languageTransitioning = false;
-      const switchLocale = async (nextLocale: string) => {
-        if (languageTransitioning) return;
-        if (prefersReducedMotion.matches) {
-          applyLocale(nextLocale);
-          syncThemeToggle();
-          return;
-        }
-
-        languageTransitioning = true;
-        languageToggle?.setAttribute("disabled", "");
-        document.documentElement.classList.add("locale-fade-out");
-        await delay(languageTransitionMs);
-        applyLocale(nextLocale);
-        syncThemeToggle();
-        document.documentElement.classList.remove("locale-fade-out");
-        await delay(languageTransitionMs);
-        languageToggle?.removeAttribute("disabled");
-        languageTransitioning = false;
-      };
-
       const root = document.querySelector("[data-code-tabs]");
       if (root) {
         const tabs = Array.from(root.querySelectorAll("[data-tab]"));
@@ -525,25 +538,67 @@ const renderLine = (line: string) => {
         const mobile = root.querySelector("[data-mobile-tabs]");
         const fileLabel = root.querySelector("[data-file-label]");
         const commandLabel = root.querySelector("[data-command-label]");
+        const compileMeta = root.querySelector("[data-compile-meta]");
+        const substrateReadout = root.querySelector("[data-substrate-readout]");
+        const playgroundLink = root.querySelector<HTMLAnchorElement>("[data-playground-link]");
+        let provenanceMap: Record<string, { meta: string; readout: string }> = {};
+        const provenanceScript = root.querySelector<HTMLScriptElement>("[data-hero-provenance]");
+        if (provenanceScript?.textContent) {
+          try { provenanceMap = JSON.parse(provenanceScript.textContent); } catch { /* malformed; leave empty */ }
+        }
 
         const activate = (id: string) => {
           tabs.forEach((tab) => {
             const tabElement = tab as HTMLElement;
-            tabElement.setAttribute("aria-selected", String(tabElement.dataset.tab === id));
+            const active = tabElement.dataset.tab === id;
+            tabElement.setAttribute("aria-selected", String(active));
+            tabElement.tabIndex = active ? 0 : -1;
           });
           panels.forEach((panel) => {
             const panelElement = panel as HTMLElement;
             const active = panelElement.dataset.panel === id;
-            panel.classList.toggle("active", active);
+            panelElement.classList.toggle("active", active);
             if (active && fileLabel && commandLabel && mobile instanceof HTMLSelectElement) {
               fileLabel.textContent = panelElement.dataset.file ?? "";
               commandLabel.textContent = panelElement.dataset.command ?? "";
               mobile.value = id;
             }
           });
+          // Sync the on-chain compile-output indicator and playground link
+          // with the newly active example. Falls back silently when an
+          // example has no precompiled provenance.
+          const summary = provenanceMap[id];
+          if (summary) {
+            if (compileMeta) {
+              compileMeta.textContent = summary.meta;
+              compileMeta.removeAttribute("aria-hidden");
+            }
+            if (substrateReadout) substrateReadout.textContent = summary.readout;
+          } else if (compileMeta) {
+            compileMeta.textContent = "";
+            compileMeta.setAttribute("aria-hidden", "true");
+          }
+          if (playgroundLink) {
+            const url = new URL(playgroundLink.href);
+            url.searchParams.set("example", id);
+            playgroundLink.href = url.pathname + url.search;
+          }
         };
 
-        tabs.forEach((tab) => tab.addEventListener("click", () => activate((tab as HTMLElement).dataset.tab ?? "")));
+        tabs.forEach((tab, index) => {
+          const tabEl = tab as HTMLButtonElement;
+          tabEl.tabIndex = index === 0 ? 0 : -1;
+          tabEl.addEventListener("click", () => activate(tabEl.dataset.tab ?? ""));
+          tabEl.addEventListener("keydown", (event) => {
+            if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
+            event.preventDefault();
+            const direction = event.key === "ArrowRight" ? 1 : -1;
+            const nextIndex = (index + direction + tabs.length) % tabs.length;
+            const nextTab = tabs[nextIndex] as HTMLButtonElement;
+            activate(nextTab?.dataset.tab ?? "");
+            nextTab?.focus();
+          });
+        });
         if (mobile instanceof HTMLSelectElement) {
           mobile.addEventListener("change", () => activate(mobile.value));
         }
@@ -567,7 +622,10 @@ const renderLine = (line: string) => {
 
         modelTabs.forEach((tab, index) => {
           tab.tabIndex = index === 0 ? 0 : -1;
-          tab.addEventListener("click", () => activateModel(tab.dataset.modelTab ?? "0"));
+          tab.addEventListener("click", () => {
+            activateModel(tab.dataset.modelTab ?? "0");
+            tab.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
+          });
           tab.addEventListener("keydown", (event) => {
             if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
             event.preventDefault();
@@ -575,8 +633,24 @@ const renderLine = (line: string) => {
             const nextIndex = (index + direction + modelTabs.length) % modelTabs.length;
             activateModel(String(nextIndex));
             modelTabs[nextIndex]?.focus();
+            modelTabs[nextIndex]?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
           });
         });
+
+        // Horizontal-scroll affordance for the 9-tab row on narrow viewports:
+        // toggle edge-fade classes so users see there is more content to scroll.
+        const modelTabsRow = modelRoot.querySelector<HTMLElement>(".model-tabs");
+        if (modelTabsRow && modelTabsRow.scrollWidth > modelTabsRow.clientWidth) {
+          const updateScrollState = () => {
+            const atStart = modelTabsRow.scrollLeft <= 2;
+            const atEnd = modelTabsRow.scrollLeft + modelTabsRow.clientWidth >= modelTabsRow.scrollWidth - 2;
+            modelTabsRow.classList.toggle("is-scrolled-start", !atStart);
+            modelTabsRow.classList.toggle("is-scrolled-end", !atEnd);
+          };
+          updateScrollState();
+          modelTabsRow.addEventListener("scroll", updateScrollState, { passive: true });
+          window.addEventListener("resize", updateScrollState);
+        }
       }
 
       const toolRoot = document.querySelector("[data-tool-tabs]");
@@ -654,37 +728,70 @@ const renderLine = (line: string) => {
         });
       });
 
-      const themeToggle = document.querySelector<HTMLButtonElement>("[data-theme-toggle]");
-      const themeLabel = document.querySelector<HTMLElement>("[data-theme-label]");
-      const languageToggle = document.querySelector<HTMLButtonElement>("[data-language-toggle]");
+      // Theme and language toggles are now handled by the NavRail
+      // component. We keep the i18n applyLocale for the initial render
+      // and for the locale-fade transition; the NavRail's own script
+      // owns the click handlers.
+      applyLocale(readLocale());
 
-      const readTheme = () => document.documentElement.dataset.theme === "light" ? "light" : "dark";
-      const syncThemeToggle = () => {
-        const nextTheme = readTheme() === "light" ? "dark" : "light";
-        if (themeToggle) {
-          themeToggle.setAttribute("aria-pressed", String(readTheme() === "light"));
-          themeToggle.setAttribute("aria-label", getMessage(nextTheme === "dark" ? "theme.switchToDark" : "theme.switchToLight") ?? "");
-        }
-        if (themeLabel) {
-          themeLabel.textContent = getMessage(nextTheme === "light" ? "theme.light" : "theme.dark") ?? "";
+      // Copy-to-clipboard for commands, hero source, and metadata.
+      // data-copy-text buttons carry their own payload; data-copy-source buttons
+      // resolve their payload at click time from the active hero code panel.
+      const flashCopied = (btn: HTMLButtonElement) => {
+        btn.classList.add("is-copied");
+        btn.setAttribute("aria-label", getMessage("a11y.copiedAria") ?? "Copied to clipboard");
+        window.setTimeout(() => {
+          btn.classList.remove("is-copied");
+          btn.setAttribute("aria-label", getMessage("a11y.copyAria") ?? "Copy to clipboard");
+        }, 1600);
+      };
+
+      const writeClipboard = async (text: string) => {
+        try {
+          await navigator.clipboard.writeText(text);
+          return true;
+        } catch {
+          return false;
         }
       };
 
-      applyLocale(readLocale());
-      syncThemeToggle();
-      languageToggle?.addEventListener("click", () => {
-        void switchLocale(readLocale() === "en" ? "zh" : "en");
+      const copyButtons = Array.from(document.querySelectorAll<HTMLButtonElement>(".copy-btn"));
+      const heroCodeTabs = document.querySelector("[data-code-tabs]");
+      copyButtons.forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          let text = btn.dataset.copyText ?? "";
+          if (btn.hasAttribute("data-copy-source") && heroCodeTabs) {
+            const activePanel = heroCodeTabs.querySelector<HTMLElement>(".code-panel.active");
+            text = activePanel?.textContent?.replace(/\n/g, "\n").trim() ?? "";
+          }
+          if (!text) return;
+          const ok = await writeClipboard(text);
+          if (ok) flashCopied(btn);
+        });
       });
-      themeToggle?.addEventListener("click", () => {
-        const nextTheme = readTheme() === "light" ? "dark" : "light";
-        document.documentElement.dataset.theme = nextTheme;
-        try {
-          localStorage.setItem("cellscript-theme", nextTheme);
-        } catch {
-          // Theme changes still work even when storage is unavailable.
-        }
-        syncThemeToggle();
-      });
+
+      // ---- Pipeline trace: scroll-driven progress bar ----
+      // The progress fill is a CSS transform: scaleY driven by how far
+      // the user has scrolled through the 5 pipeline stages. No
+      // keyframe animation — just a passive scroll listener.
+      const pipelineTrace = document.querySelector<HTMLElement>("[data-pipeline-trace]");
+      const pipelineFill = document.querySelector<HTMLElement>("[data-pipeline-fill]");
+      if (pipelineTrace && pipelineFill) {
+        const updatePipelineProgress = () => {
+          const rect = pipelineTrace.getBoundingClientRect();
+          const viewportH = window.innerHeight;
+          // Progress = how much of the trace has scrolled past the
+          // viewport midline, clamped to [0, 1].
+          const start = rect.top - viewportH * 0.5;
+          const travel = rect.height;
+          const progress = Math.max(0, Math.min(1, -start / travel));
+          pipelineFill.style.transform = `scaleY(${progress.toFixed(3)})`;
+        };
+        updatePipelineProgress();
+        window.addEventListener("scroll", updatePipelineProgress, { passive: true });
+        window.addEventListener("resize", updatePipelineProgress);
+      }
     </script>
+    <NavRail page="home" />
   </body>
 </html>

@@ -1,0 +1,8 @@
+{
+  "schema": "evolving-dob-fixture-v1",
+  "fixture": "stale_state_reject",
+  "action": "evolve_dob_state",
+  "expected": "rejected",
+  "coverage": "source-guard-present",
+  "description": "The intent must echo the consumed state DNA, traits, render commitment, generation, rule, decoder, owner lock, latest event, Cluster, and Spore identity."
+}

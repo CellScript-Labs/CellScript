@@ -3,10 +3,18 @@
 **Status**: production authoring surface for current CellScript metadata and
 builder handoff.
 
-CellScript does not ask contract authors to encode CKB `CellDep`, `hash_type`,
-or capacity evidence in ad hoc scripts. A package can declare deployment-facing
-CKB facts in `Cell.toml`, and the compiler copies those facts into
-`constraints.ckb`.
+CellScript tries to keep verifier logic and deployment evidence separate.
+
+Contract authors should not have to encode CKB `CellDep`, `hash_type`, or
+capacity evidence through ad hoc verifier scripts. Instead, a package can declare
+those deployment-facing CKB facts in `Cell.toml`. The compiler then carries them
+into `constraints.ckb` as structured obligations that builders, release gates,
+and auditors can check.
+
+This does not mean the compiler magically proves every final CKB transaction.
+Capacity, cell layout, and concrete deps are still transaction-level facts.
+The point is to make those assumptions explicit and machine-readable instead of
+leaving them scattered across scripts, builders, and release notes.
 
 ## Manifest Shape
 
@@ -78,7 +86,7 @@ hashing.
 - `ckb.timelock_policy`
 - `ckb.capacity_evidence_contract`
 
-The compiler still does not claim to statically prove full CKB occupied
+The compiler does not claim to statically prove full CKB occupied
 capacity. The production contract is explicit: builders must attach measured
 occupied-capacity evidence and consensus transaction-size evidence for
 state-changing transactions.

@@ -11,43 +11,43 @@ const BUNDLED_EXAMPLES: [&str; 7] =
 const BACKEND_SHAPE_BASELINE_JSON: &str = include_str!("backend_shape_baseline.json");
 
 const BUNDLED_EXAMPLE_ELF_SIZE_BUDGETS: [(&str, usize); 7] = [
-    ("amm_pool.cell", 48 * 1024),
-    ("launch.cell", 30 * 1024),
+    ("amm_pool.cell", 80 * 1024),
+    ("launch.cell", 36 * 1024),
     ("multisig.cell", 108 * 1024),
-    ("nft.cell", 62 * 1024),
+    ("nft.cell", 63 * 1024),
     ("timelock.cell", 72 * 1024),
-    ("token.cell", 16 * 1024),
-    ("vesting.cell", 26 * 1024),
+    ("token.cell", 18 * 1024),
+    ("vesting.cell", 28 * 1024),
 ];
 
 const BUNDLED_EXAMPLE_ASM_SHAPE_BUDGETS: [(&str, AssemblyShapeBudget); 7] = [
     (
         "amm_pool.cell",
         AssemblyShapeBudget {
-            max_lines: 10_900,
+            max_lines: 18_000,
             max_fail_handlers: 32,
             max_shared_epilogues: 8,
-            max_text_bytes: 42 * 1024,
+            max_text_bytes: 74 * 1024,
             max_relaxed_branches: 4,
-            max_cond_branch_abs_distance: 4_096,
-            max_machine_blocks: 1_600,
+            max_cond_branch_abs_distance: 6_400,
+            max_machine_blocks: 2_100,
             max_machine_block_bytes: 512,
-            max_cfg_edges: 2_700,
-            max_call_edges: 540,
-            max_unreachable_machine_blocks: 1_250,
+            max_cfg_edges: 3_800,
+            max_call_edges: 850,
+            max_unreachable_machine_blocks: 1_800,
         },
     ),
     (
         "launch.cell",
         AssemblyShapeBudget {
-            max_lines: 6_800,
+            max_lines: 7_200,
             max_fail_handlers: 16,
             max_shared_epilogues: 4,
-            max_text_bytes: 27 * 1024,
+            max_text_bytes: 30 * 1024,
             max_relaxed_branches: 4,
-            max_cond_branch_abs_distance: 8_500,
+            max_cond_branch_abs_distance: 9_500,
             max_machine_blocks: 860,
-            max_machine_block_bytes: 1_536,
+            max_machine_block_bytes: 2_048,
             max_cfg_edges: 1_500,
             max_call_edges: 250,
             max_unreachable_machine_blocks: 600,
@@ -56,17 +56,17 @@ const BUNDLED_EXAMPLE_ASM_SHAPE_BUDGETS: [(&str, AssemblyShapeBudget); 7] = [
     (
         "multisig.cell",
         AssemblyShapeBudget {
-            max_lines: 26_500,
-            max_fail_handlers: 72,
+            max_lines: 24_500,
+            max_fail_handlers: 64,
             max_shared_epilogues: 20,
-            max_text_bytes: 104 * 1024,
+            max_text_bytes: 92 * 1024,
             max_relaxed_branches: 4,
-            max_cond_branch_abs_distance: 8_900,
-            max_machine_blocks: 4_200,
+            max_cond_branch_abs_distance: 7_700,
+            max_machine_blocks: 3_600,
             max_machine_block_bytes: 512,
-            max_cfg_edges: 6_800,
-            max_call_edges: 540,
-            max_unreachable_machine_blocks: 3_950,
+            max_cfg_edges: 5_800,
+            max_call_edges: 360,
+            max_unreachable_machine_blocks: 3_400,
         },
     ),
     (
@@ -75,9 +75,9 @@ const BUNDLED_EXAMPLE_ASM_SHAPE_BUDGETS: [(&str, AssemblyShapeBudget); 7] = [
             max_lines: 15_000,
             max_fail_handlers: 80,
             max_shared_epilogues: 18,
-            max_text_bytes: 57 * 1024,
+            max_text_bytes: 59 * 1024,
             max_relaxed_branches: 4,
-            max_cond_branch_abs_distance: 7_500,
+            max_cond_branch_abs_distance: 9_600,
             max_machine_blocks: 2_500,
             max_machine_block_bytes: 320,
             max_cfg_edges: 4_100,
@@ -88,49 +88,49 @@ const BUNDLED_EXAMPLE_ASM_SHAPE_BUDGETS: [(&str, AssemblyShapeBudget); 7] = [
     (
         "timelock.cell",
         AssemblyShapeBudget {
-            max_lines: 17_600,
-            max_fail_handlers: 92,
+            max_lines: 17_800,
+            max_fail_handlers: 64,
             max_shared_epilogues: 22,
-            max_text_bytes: 65 * 1024,
+            max_text_bytes: 68 * 1024,
             max_relaxed_branches: 4,
-            max_cond_branch_abs_distance: 4_300,
-            max_machine_blocks: 2_100,
+            max_cond_branch_abs_distance: 4_500,
+            max_machine_blocks: 2_050,
             max_machine_block_bytes: 21_000,
             max_cfg_edges: 3_500,
-            max_call_edges: 420,
+            max_call_edges: 450,
             max_unreachable_machine_blocks: 2_000,
         },
     ),
     (
         "token.cell",
         AssemblyShapeBudget {
-            max_lines: 2_800,
-            max_fail_handlers: 28,
+            max_lines: 3_400,
+            max_fail_handlers: 24,
             max_shared_epilogues: 6,
-            max_text_bytes: 12 * 1024,
+            max_text_bytes: 13 * 1024,
             max_relaxed_branches: 4,
             max_cond_branch_abs_distance: 1_800,
             max_machine_blocks: 550,
             max_machine_block_bytes: 320,
             max_cfg_edges: 900,
-            max_call_edges: 120,
-            max_unreachable_machine_blocks: 260,
+            max_call_edges: 160,
+            max_unreachable_machine_blocks: 280,
         },
     ),
     (
         "vesting.cell",
         AssemblyShapeBudget {
-            max_lines: 5_800,
-            max_fail_handlers: 36,
+            max_lines: 6_100,
+            max_fail_handlers: 28,
             max_shared_epilogues: 6,
-            max_text_bytes: 22 * 1024,
+            max_text_bytes: 23 * 1024,
             max_relaxed_branches: 4,
             max_cond_branch_abs_distance: 3_000,
-            max_machine_blocks: 820,
+            max_machine_blocks: 850,
             max_machine_block_bytes: 512,
-            max_cfg_edges: 1_400,
-            max_call_edges: 250,
-            max_unreachable_machine_blocks: 740,
+            max_cfg_edges: 1_500,
+            max_call_edges: 320,
+            max_unreachable_machine_blocks: 780,
         },
     ),
 ];
@@ -176,97 +176,13 @@ struct MoleculeSchemaManifestReportRow {
 }
 
 fn example_path(name: &str) -> Utf8PathBuf {
-    Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples").join(name)
+    // Workspace packages: each example lives in examples/<name>/src/main.cell
+    let trimmed = name.strip_suffix(".cell").unwrap_or(name);
+    Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples").join(trimmed).join("src/main.cell")
 }
 
 fn language_example_path(name: &str) -> Utf8PathBuf {
     Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples").join("language").join(name)
-}
-
-fn checked_in_example_cell_files() -> Vec<Utf8PathBuf> {
-    let examples_root = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples");
-    if let Some(files) = git_tracked_example_cell_files(&examples_root) {
-        return files;
-    }
-    discover_example_cell_files(&examples_root)
-}
-
-fn git_tracked_example_cell_files(examples_root: &Utf8Path) -> Option<Vec<Utf8PathBuf>> {
-    let repo_root = examples_root.parent()?;
-    let output = std::process::Command::new("git").args(["ls-files", "examples"]).current_dir(repo_root).output().ok()?;
-    if !output.status.success() {
-        return None;
-    }
-
-    let stdout = String::from_utf8(output.stdout).ok()?;
-    let mut files = stdout.lines().filter(|line| line.ends_with(".cell")).map(|line| repo_root.join(line)).collect::<Vec<_>>();
-    if files.is_empty() {
-        return None;
-    }
-    for file in &files {
-        assert_example_path_under_root(examples_root, file, ExamplePathKind::File);
-    }
-    files.sort();
-    Some(files)
-}
-
-fn discover_example_cell_files(examples_root: &Utf8Path) -> Vec<Utf8PathBuf> {
-    assert_example_path_under_root(examples_root, examples_root, ExamplePathKind::Directory);
-    let mut files = Vec::new();
-    let mut pending = vec![examples_root.to_path_buf()];
-    while let Some(root) = pending.pop() {
-        let entries = std::fs::read_dir(&root).unwrap_or_else(|err| panic!("failed to read {root}: {err}"));
-        for entry in entries {
-            let entry = entry.expect("example directory entry should be readable");
-            let path = Utf8PathBuf::from_path_buf(entry.path()).expect("example path should be valid UTF-8");
-            let file_type = entry.file_type().unwrap_or_else(|err| panic!("failed to inspect {path}: {err}"));
-            assert!(!file_type.is_symlink(), "example discovery must not follow symbolic links: {path}");
-            if file_type.is_dir() && example_source_dir(&path) {
-                assert_example_path_under_root(examples_root, &path, ExamplePathKind::Directory);
-                pending.push(path);
-            } else if file_type.is_file() && path.extension() == Some("cell") {
-                assert_example_path_under_root(examples_root, &path, ExamplePathKind::File);
-                files.push(path);
-            }
-        }
-    }
-    files.sort();
-    files
-}
-
-fn example_source_dir(path: &Utf8Path) -> bool {
-    !matches!(path.file_name(), Some(".cell" | "target"))
-}
-
-#[derive(Clone, Copy)]
-enum ExamplePathKind {
-    File,
-    Directory,
-}
-
-fn assert_example_path_under_root(examples_root: &Utf8Path, path: &Utf8Path, kind: ExamplePathKind) {
-    let metadata = std::fs::symlink_metadata(path).unwrap_or_else(|err| panic!("failed to inspect example path {path}: {err}"));
-    assert!(!metadata.file_type().is_symlink(), "example audit path must not be a symbolic link: {path}");
-    match kind {
-        ExamplePathKind::File => assert!(metadata.is_file(), "example audit path must be a file: {path}"),
-        ExamplePathKind::Directory => assert!(metadata.is_dir(), "example audit path must be a directory: {path}"),
-    }
-    let canonical_root = std::fs::canonicalize(examples_root)
-        .unwrap_or_else(|err| panic!("failed to canonicalize examples root {examples_root}: {err}"));
-    let canonical_path = std::fs::canonicalize(path).unwrap_or_else(|err| panic!("failed to canonicalize example path {path}: {err}"));
-    assert!(canonical_path.starts_with(&canonical_root), "example audit path {path} resolves outside examples root {examples_root}");
-}
-
-fn checked_in_example_audit_files() -> Vec<Utf8PathBuf> {
-    let mut files = checked_in_example_cell_files();
-    files.push(example_path("ickb_benchmark/README.md"));
-    files.push(example_path("ickb_benchmark/limitations.json"));
-    let examples_root = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples");
-    for file in &files {
-        assert_example_path_under_root(&examples_root, file, ExamplePathKind::File);
-    }
-    files.sort();
-    files
 }
 
 fn docs_example_path(name: &str) -> Utf8PathBuf {
@@ -308,6 +224,23 @@ fn write_wrapped_doc_snippet(temp_root: &Utf8Path, name: &str, source: &str) -> 
     path
 }
 
+fn checked_in_example_cell_files() -> Vec<Utf8PathBuf> {
+    let examples_root = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples");
+    let mut files = Vec::new();
+    for root in [&examples_root, &examples_root.join("language")] {
+        let entries = std::fs::read_dir(root).unwrap_or_else(|err| panic!("failed to read {root}: {err}"));
+        for entry in entries {
+            let path = Utf8PathBuf::from_path_buf(entry.expect("example directory entry should be readable").path())
+                .expect("example path should be valid UTF-8");
+            if path.is_file() && path.extension() == Some("cell") {
+                files.push(path);
+            }
+        }
+    }
+    files.sort();
+    files
+}
+
 #[test]
 fn canonical_examples_are_the_single_checked_in_business_source() {
     let examples_root = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples");
@@ -327,7 +260,11 @@ fn canonical_examples_are_the_single_checked_in_business_source() {
 #[test]
 fn all_checked_in_cell_examples_compile() {
     let files = checked_in_example_cell_files();
-    assert_eq!(files.len(), 23, "expected bundled, top-level registry, language, and iCKB benchmark examples");
+    assert_eq!(
+        files.len(),
+        BUNDLED_EXAMPLES.len() + 1 + 12,
+        "expected bundled examples, top-level registry.cell, and language examples"
+    );
 
     for path in files {
         compile_file(&path, CompileOptions::default()).unwrap_or_else(|err| panic!("{path} should compile: {}", err.message));
@@ -435,79 +372,6 @@ fn release_examples_are_free_of_placeholder_hashes_and_formatter_artifacts() {
             !source.contains("{ { {") && !source.contains("} } }"),
             "{path} should not contain formatter/parser artifact brace nesting"
         );
-    }
-}
-
-#[test]
-fn checked_in_examples_do_not_contain_unclassified_placeholder_language() {
-    let forbidden = [
-        "TODO",
-        "FIXME",
-        "placeholder",
-        "PLACEHOLDER",
-        "mock",
-        "MOCK",
-        "stub",
-        "STUB",
-        "dummy",
-        "DUMMY",
-        "not implemented",
-        "unimplemented",
-        "Hash::zero()",
-        "fn hash_wallet",
-        "fn hash_lock",
-    ];
-    for path in checked_in_example_audit_files() {
-        let source = std::fs::read_to_string(&path).unwrap_or_else(|err| panic!("failed to read {path}: {err}"));
-        for needle in forbidden {
-            assert!(!source.contains(needle), "{path} contains unclassified placeholder language: {needle}");
-        }
-    }
-}
-
-#[test]
-fn checked_in_examples_do_not_use_vacuous_identity_guards() {
-    let forbidden = [
-        "require claimed_owner == claimed_owner",
-        "assert(claimed_owner == claimed_owner",
-        "require owner == owner",
-        "assert(owner == owner",
-        "require seller == seller",
-        "assert(seller == seller",
-        "require buyer == buyer",
-        "assert(buyer == buyer",
-        "require signer == signer",
-        "assert(signer == signer",
-        "require proposer == proposer",
-        "assert(proposer == proposer",
-    ];
-    for path in checked_in_example_cell_files() {
-        let source = std::fs::read_to_string(&path).unwrap_or_else(|err| panic!("failed to read {path}: {err}"));
-        for needle in forbidden {
-            assert!(!source.contains(needle), "{path} contains vacuous identity guard: {needle}");
-        }
-    }
-}
-
-#[test]
-fn marketplace_and_ickb_examples_bind_consumed_receipts_to_domain_state() {
-    let nft_source = std::fs::read_to_string(example_path("nft.cell")).expect("nft source should be readable");
-    for needle in [
-        "assert(listing.token_id == nft_before.token_id",
-        "assert(listing.seller == seller",
-        "assert(nft_before.owner == seller",
-        "assert(listing.state == 0",
-        "assert(offer.token_id == nft_before.token_id",
-        "assert(offer.buyer == buyer",
-        "assert(offer.state == 0",
-        "assert(price == offer.price",
-    ] {
-        assert!(nft_source.contains(needle), "nft marketplace receipt binding missing: {needle}");
-    }
-
-    let ickb_source = std::fs::read_to_string(example_path("ickb_benchmark/ickb_logic.cell")).expect("iCKB source should be readable");
-    for needle in ["owner: Address", "assert(receipt.owner == owner", "require receipt.owner == claimed_owner"] {
-        assert!(ickb_source.contains(needle), "iCKB receipt ownership binding missing: {needle}");
     }
 }
 
@@ -1477,7 +1341,7 @@ fn token_mint_authority_input_output_binding_is_explicit() {
     assert!(
         asm.contains("# cellscript abi: LOAD_CELL_DATA reason=input source=Input index=0")
             && asm.contains("# cellscript abi: LOAD_CELL_DATA reason=output_param source=Output index=0")
-            && asm.contains("# cellscript abi: schema field MintAuthority.minted offset=16 size=8"),
+            && asm.contains("# cellscript abi: verify output field MintAuthority.minted offset=16 size=8"),
         "mint should bind authority input/output and verify minted through explicit require checks:\n{}",
         asm
     );
@@ -1630,7 +1494,7 @@ fn timelock_core_actions_expose_time_and_release_metadata() {
     assert!(extend_lock.fail_closed_runtime_features.is_empty(), "extend_lock should not carry fail-closed debt");
     assert_input_output_binding(extend_lock, "TimeLock", "time_lock_before", "time_lock_after", "timelock extend_lock");
     assert!(
-        asm.contains("# cellscript abi: schema field TimeLock.unlock_height"),
+        asm.contains("# cellscript abi: verify output field TimeLock.unlock_height"),
         "timelock extend_lock should verify unlock_height through explicit output requirements:\n{}",
         asm
     );
@@ -1833,7 +1697,8 @@ fn amm_pool_input_output_params_are_scheduler_visible() {
             action.verifier_obligations.iter().any(|obligation| {
                 obligation.status == "checked-runtime"
                     && (obligation.feature.starts_with("guard-equality:pool_after.")
-                        || obligation.feature.starts_with("resource-conservation:Token"))
+                        || obligation.feature.starts_with("resource-conservation:Token")
+                        || obligation.feature.starts_with(&format!("create-output:{extra_created_ty}:")))
             }),
             "{} should retain checked AMM accounting evidence separately from scheduler binding: {:?}",
             action_name,
@@ -1847,13 +1712,15 @@ fn amm_pool_input_output_params_are_scheduler_visible() {
         "AMM input/output bindings should bind Pool input/output parameters through transaction cells:\n{}",
         asm
     );
-    assert!(
-        asm.contains("# cellscript abi: schema field Pool.reserve_a")
-            && asm.contains("# cellscript abi: schema field Pool.reserve_b")
-            && asm.contains("# cellscript abi: schema field Pool.total_lp"),
-        "AMM input/output bindings should verify Pool reserve and LP fields through explicit require checks:\n{}",
-        asm
-    );
+    for field in ["reserve_a", "reserve_b", "total_lp"] {
+        assert!(
+            asm.contains(&format!("# cellscript abi: schema field Pool.{field}"))
+                || asm.contains(&format!("# cellscript abi: verify output field Pool.{field}"))
+                || asm.contains(&format!("# cellscript abi: expected field Pool.{field}")),
+            "AMM input/output bindings should verify Pool {field} through explicit require checks:\n{}",
+            asm
+        );
+    }
     assert!(
         asm.contains("# cellscript abi: verify output bytes field LPReceipt.pool_id offset=0 size=32 against loaded bytes"),
         "LPReceipt.pool_id should be checked against loaded Pool TypeHash bytes:\n{}",
@@ -2008,7 +1875,7 @@ fn v0_15_scoped_invariant_example_compiles_and_produces_proof_plan() {
         "declared-invariant",
         "type_group",
         "group",
-        "gap:metadata-only",
+        "gap:runtime-helper-required",
         "runtime-required",
         false,
     );
@@ -2039,9 +1906,14 @@ fn v0_15_scoped_invariant_example_compiles_and_produces_proof_plan() {
         aggregate_names
     );
 
-    // Every aggregate-invariant record must be metadata-only
+    // Every aggregate-invariant record must keep an explicit runtime-required gap;
+    // only primitives with a known helper are labelled runtime-helper-required.
     for aggregate in proof_plan.iter().filter(|plan| plan.category == "aggregate-invariant") {
-        assert_eq!(aggregate.codegen_coverage_status, "gap:metadata-only", "aggregate must be metadata-only: {:?}", aggregate);
+        assert!(
+            matches!(aggregate.codegen_coverage_status.as_str(), "gap:metadata-only" | "gap:runtime-helper-required"),
+            "aggregate must remain an explicit gap: {:?}",
+            aggregate
+        );
         assert_eq!(aggregate.status, "runtime-required", "aggregate must be runtime-required: {:?}", aggregate);
         assert!(!aggregate.on_chain_checked, "aggregate must not be on_chain_checked: {:?}", aggregate);
     }

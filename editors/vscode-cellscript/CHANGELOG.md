@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+- Added VS Code commands for the 0.20 action-builder workflow:
+  entry-witness ABI, action build plans, TypeScript builder generation,
+  package verification, registry verification, and live registry verification.
+- Added extension settings for generated builder output, CKB RPC URL,
+  deployment network filtering, and registry trust metadata gates.
+- Aligned editor diagnostics with compiler severity so future warning-level
+  diagnostics can be surfaced without being treated as hard compiler errors.
+- Reflected split metadata schema versions in compiler-backed reports and
+  generated-builder ABI identity.
+- Clarified the extension registry boundary: editor commands verify package,
+  deployment, live-cell, and trust-metadata evidence, while registry
+  publish/install and cryptographic publisher-signature verification remain
+  compiler/Git workflow responsibilities.
+- Refreshed package metadata and README/validation coverage for the active LSP
+  capability set, including workspace rename.
+
+## 0.17.0
+
+- Updated grammar, snippets, and README examples for the canonical
+  `verification` action/lock surface and removed the legacy authoring model
+  from current guidance.
+- Aligned the extension release boundary with the 0.19 grammar-governance
+  matrix and syntax-combo known-bug-class gate.
+- Updated extension package metadata for the CellScript 0.17.0 nightly line.
+- Kept the extension validation manifest aligned with the compiler and
+  documentation changes inherited from the 0.16 release branch.
+
 ## 0.16.1
 
 - Aligned documentation with the CellScript 0.16.1 release.

@@ -40,7 +40,7 @@ invariant token_supply_conserved {
 invariant token_mint_delta {
     trigger: explicit_entry
     scope: selected_cells
-    reads: group_inputs<Token>.amount, group_outputs<Token>.amount, witness.mint_amount
+    reads: group_inputs<Token>.amount, group_outputs<Token>.amount, witness, witness.mint_amount
 
     assert_delta(Token.amount, witness.mint_amount, scope = selected_cells)
 }
@@ -64,6 +64,8 @@ invariant oracle_singleton {
 }
 
 action transfer_token(token: Token, to: Address) -> next_token: Token
-where
-    consume token
-    create next_token = Token { amount: token.amount, symbol: token.symbol } with_lock(to)
+{
+    verification
+        consume token
+        create next_token = Token { amount: token.amount, symbol: token.symbol } with_lock(to)
+}

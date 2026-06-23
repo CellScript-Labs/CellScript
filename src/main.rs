@@ -13,9 +13,6 @@ use cellscript::{
 #[command(name = "cellc")]
 #[command(about = "CellScript compiler for CKB blockchain")]
 #[command(version = cellscript::VERSION)]
-#[command(
-    after_help = "Commands: build, test, doc, fmt, init, new, add, remove, clean, repl, check, metadata, constraints, abi, scheduler-plan, ckb-hash, explain, explain-profile, explain-proof, explain-assumptions, explain-generics, opt-report, proof-diff, profile, trace-tx, audit-bundle, certify, validate-tx, builder manifest, builder check, builder-manifest, builder-check, resource-identity, solve-tx, deploy-plan, verify-deploy, diff-deploy, lock-deps, action build, entry-witness, verify-artifact, run, publish, install, update, info, login"
-)]
 struct Cli {
     #[arg(value_name = "INPUT")]
     input: Option<String>,
@@ -66,8 +63,7 @@ struct Cli {
 
 fn main() {
     // Start the LSP server before any CLI parsing side effects.
-    if should_start_lsp_server() {
-        let _ = env_logger::try_init();
+    if std::env::args().any(|arg| arg == "--lsp") {
         cellscript::lsp::server::run_lsp_server_blocking();
         return;
     }
@@ -93,6 +89,7 @@ fn main() {
                     | "abi"
                     | "scheduler-plan"
                     | "ckb-hash"
+                    | "ckb-std-compat"
                     | "explain"
                     | "explain-profile"
                     | "explain-proof"
@@ -103,18 +100,15 @@ fn main() {
                     | "profile"
                     | "trace-tx"
                     | "audit-bundle"
-                    | "certify"
                     | "validate-tx"
-                    | "builder"
-                    | "builder-manifest"
-                    | "builder-check"
-                    | "resource-identity"
                     | "solve-tx"
+                    | "verify-ckb-fixtures"
                     | "deploy-plan"
                     | "verify-deploy"
                     | "diff-deploy"
                     | "lock-deps"
                     | "action"
+                    | "gen-builder"
                     | "entry-witness"
                     | "verify-artifact"
                     | "run"
@@ -123,6 +117,13 @@ fn main() {
                     | "update"
                     | "info"
                     | "login"
+                    | "auth"
+                    | "package"
+                    | "registry"
+                    | "registry-verify"
+                    | "package-verify"
+                    | "registry-add"
+                    | "certify"
             )
         })
         .unwrap_or(false)
@@ -237,15 +238,11 @@ fn main() {
         process::exit(1);
     }
 
-    let compile_input = resolved_input.as_path();
     let compile_result = match (cli.entry_action, cli.entry_lock) {
-        (Some(action), None) => compile_path_with_entry_action(compile_input, options, action),
-        (None, Some(lock)) => compile_path_with_entry_lock(compile_input, options, lock),
-        (None, None) => compile_path(compile_input, options),
-        (Some(_), Some(_)) => {
-            eprintln!("{}: --entry-action and --entry-lock are mutually exclusive", "error".red());
-            process::exit(1);
-        }
+        (Some(action), None) => compile_path_with_entry_action(Utf8Path::new(&input_file), options, action),
+        (None, Some(lock)) => compile_path_with_entry_lock(Utf8Path::new(&input_file), options, lock),
+        (None, None) => compile_path(Utf8Path::new(&input_file), options),
+        (Some(_), Some(_)) => unreachable!("validated above"),
     };
 
     match compile_result {
@@ -283,21 +280,6 @@ fn main() {
             process::exit(1);
         }
     }
-}
-
-fn should_start_lsp_server() -> bool {
-    let args = std::env::args_os().collect::<Vec<_>>();
-    let has_lsp = args.iter().skip(1).any(|arg| arg == "--lsp");
-    if !has_lsp {
-        return false;
-    }
-
-    if args.len() == 2 && args[1] == "--lsp" {
-        return true;
-    }
-
-    eprintln!("{}: --lsp must be used by itself as `cellc --lsp`", "error".red());
-    process::exit(2);
 }
 
 fn resolve_primitive_compat(compat: Option<String>, strict: Option<String>) -> Option<String> {

@@ -1,6 +1,22 @@
+[workspace]
+members = [
+    ".",
+    "crates/cellscript-ckb-adapter",
+    "crates/cellscript-wasm",
+    "examples/ckb-sdk-builder",
+]
+exclude = [
+    "proposals/novaseal/agreement-profile-v0/harness/ckb_vm",
+    "proposals/novaseal/v0-mvp-skeleton/harness/ckb_vm",
+    "proposals/novaseal/v0-mvp-skeleton/verifier/novaseal_btc_verifier",
+    "proposals/novaseal/v0-mvp-skeleton/verifier/novaseal_btc_verifier_core",
+    "proposals/novaseal/v0-mvp-skeleton/verifier/novaseal_btc_verifier_riscv",
+]
+resolver = "2"
+
 [package]
 name = "cellscript"
-version = "0.16.2"
+version = "0.17.0"
 edition = "2021"
 rust-version = "1.92.0"
 autobins = false
@@ -15,6 +31,8 @@ exclude = [
     ".playwright-mcp/",
     ".rustfmt.toml",
     ".github/",
+    "BRANCHES.md",
+    "README_REVIEW.md",
     "cellscript-*.png",
     "docs/",
     "docs/wiki/",
@@ -42,33 +60,62 @@ anyhow = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 blake2b_simd = "1.0"
-sha2 = "0.10"
 toml = "0.8"
 hex = "0.4"
 
-indexmap = "2.2"
-stacker = "0.1"
+indexmap = "=2.2.6"
 
 log = "0.4"
-env_logger = "0.11"
+env_logger = { version = "0.11", optional = true }
 
 # CLI
-clap = { version = "4.5", features = ["derive"] }
+clap = { version = "=4.5.49", features = ["derive"], optional = true }
 
-colored = "2.1"
+colored = { version = "2.1", optional = true }
+base64 = { version = "0.22", optional = true }
+keyring = { version = "3", optional = true }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"], optional = true }
+ring = { version = "0.17", optional = true }
 
 camino = "1.1"
 ckb-vm = { version = "0.24", features = ["asm", "detect-asm"], optional = true }
 
+# NovaSeal certifier uses sha2 in src/cli/novaseal_certification.rs
+sha2 = "0.10"
+
 # LSP
-tower-lsp = "0.20"
-tokio = { version = "1", features = ["io-std", "rt"] }
+tower-lsp = { version = "0.20", optional = true }
+tokio = { version = "1", features = ["full"], optional = true }
 
 [features]
-default = []
+default = ["cli", "lsp"]
+# CLI surface: binary, REPL, incremental session. Gated out of the
+# wasm build because clap/colored/env_logger pull native I/O.
+cli = ["dep:base64", "dep:clap", "dep:colored", "dep:env_logger", "dep:keyring", "dep:reqwest", "dep:ring"]
+# Language server. Gated out of the wasm build because tower-lsp +
+# tokio pull mio/std::net.
+lsp = ["dep:tokio", "dep:tower-lsp"]
+# Pure compiler core for the browser playground. Disables cli + lsp so
+# the wasm32 target can build.
+wasm = []
 vm-runner = ["dep:ckb-vm"]
 ckb-acceptance = []
 
 [dev-dependencies]
 pretty_assertions = "1.4"
 tempfile = "3.10"
+ckb-testtool = "1.1"
+ckb-std = { version = "1.1.0", default-features = false, features = ["type-id"] }
+sha2 = "0.10"
+regex = "1"
+cellscript-ckb-adapter = { path = "crates/cellscript-ckb-adapter" }
+ckb-types = "1.0.0"
+
+# Release profile: lean toward smaller artifacts since the primary
+# release consumer (the WASM playground bundle) is size-sensitive, but
+# keep lto=thin and 16 codegen-units so the native CLI/release build
+# stays reasonably fast to compile.
+[profile.release]
+opt-level = "z"
+lto = "thin"
+codegen-units = 16

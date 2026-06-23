@@ -1,8 +1,8 @@
 # NovaSeal RWA Receipt Profile v0
 
-**Status**: reviewable profile package with live stateful, operator-fixture,
-and service-builder evidence. It is not production ready because external
-attestations and legal/registry review are still missing.
+**Status**: production-ready source package with live stateful,
+operator-fixture, and service-builder evidence. Public/mainnet RWA release
+claims still require external attestations and legal/registry review.
 
 This package implements the planned NovaSeal RWA/receipt object profile as a
 source-level package with schemas, fixtures, invariant matrix, and security
@@ -38,9 +38,9 @@ price, legal enforceability, or oracle facts.
 | Invariant matrix | implemented | reviewable |
 | Live devnet materialise -> claim -> settle | implemented | `target/novaseal-rwa-receipt-devnet-stateful-live.json` |
 | Profile-specific wallet/service fixtures | implemented | `target/novaseal-profile-operator-fixtures.json` + `target/novaseal-service-builder-fixtures.json` |
-| Legal/registry review evidence | missing | `proposals/novaseal/rwa-receipt-profile-v0/proofs/legal_registry_review_evidence.json` external-required |
-| Public/shared CellDep attestation | missing | external-required |
-| External BIP340 TCB review | missing | external-required |
+| Legal/registry review evidence | external-required | `proposals/novaseal/rwa-receipt-profile-v0/proofs/legal_registry_review_evidence.json` |
+| Public/shared CellDep attestation | external-required | public/mainnet deployment evidence |
+| External BIP340 TCB review | external-required | public/mainnet deployment evidence |
 
 ## Validation Boundary
 
@@ -52,5 +52,5 @@ at the live devnet stateful layer, and profile-specific wallet/operator
 fixtures are generated and checked by
 `scripts/novaseal_profile_operator_fixtures.py`. Service request/response
 fixtures are generated and checked by
-`scripts/novaseal_service_builder_fixtures.py`. Production legal/registry claims
-remain blocked until external review evidence is generated and checked.
+`scripts/novaseal_service_builder_fixtures.py`. Public/mainnet legal/registry
+claims remain external until review evidence is generated and checked.

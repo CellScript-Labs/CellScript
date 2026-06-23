@@ -2,15 +2,9 @@ use crate::ast::*;
 use crate::error::{CompileError, Result, Span};
 use crate::lexer::token::{Token, TokenKind};
 
-const MAX_PARSE_RECURSION_DEPTH: u16 = 128;
-const PARSER_STACK_RED_ZONE: usize = 64 * 1024;
-const PARSER_STACK_GROWTH: usize = 1024 * 1024;
-
 pub struct Parser<'a> {
     tokens: &'a [Token],
     position: usize,
-    eof: Token,
-    recursion_depth: u16,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -30,11 +24,11 @@ struct TypePolicyDecls {
 
 impl<'a> Parser<'a> {
     pub fn new(tokens: &'a [Token]) -> Self {
-        Self { tokens, position: 0, eof: Token::new(TokenKind::Eof, Span::default(), ""), recursion_depth: 0 }
+        Self { tokens, position: 0 }
     }
 
     fn current(&self) -> &Token {
-        self.tokens.get(self.position.min(self.tokens.len().saturating_sub(1))).unwrap_or(&self.eof)
+        &self.tokens[self.position.min(self.tokens.len() - 1)]
     }
 
     fn current_identifier(&self) -> Option<String> {
@@ -45,32 +39,15 @@ impl<'a> Parser<'a> {
     }
 
     fn peek(&self, offset: usize) -> &Token {
-        self.tokens.get(self.position.saturating_add(offset).min(self.tokens.len().saturating_sub(1))).unwrap_or(&self.eof)
-    }
-
-    fn with_recursion_guard<T>(&mut self, span: Span, f: impl FnOnce(&mut Self) -> Result<T>) -> Result<T> {
-        if self.recursion_depth >= MAX_PARSE_RECURSION_DEPTH {
-            return Err(CompileError::new(
-                format!("parser recursion limit exceeded while parsing nested syntax (limit {})", MAX_PARSE_RECURSION_DEPTH),
-                span,
-            ));
-        }
-
-        self.recursion_depth += 1;
-        let result = stacker::maybe_grow(PARSER_STACK_RED_ZONE, PARSER_STACK_GROWTH, || f(self));
-        self.recursion_depth -= 1;
-        result
+        &self.tokens[(self.position + offset).min(self.tokens.len() - 1)]
     }
 
     fn advance(&mut self) -> &Token {
-        if self.tokens.is_empty() {
-            return &self.eof;
-        }
-        let index = self.position.min(self.tokens.len().saturating_sub(1));
-        if self.position < self.tokens.len().saturating_sub(1) {
+        let token = &self.tokens[self.position];
+        if self.position < self.tokens.len() - 1 {
             self.position += 1;
         }
-        &self.tokens[index]
+        token
     }
 
     fn check(&self, kind: &TokenKind) -> bool {
@@ -85,38 +62,10 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn skip_newlines(&mut self) -> bool {
-        let mut skipped = false;
+    fn skip_newlines(&mut self) {
         while self.check(&TokenKind::Newline) {
-            skipped = true;
             self.advance();
         }
-        skipped
-    }
-
-    fn consume_field_initializer_separator(&mut self, context: &str) -> Result<()> {
-        if self.check(&TokenKind::Comma) {
-            self.advance();
-            self.skip_newlines();
-            return Ok(());
-        }
-
-        if self.previous_token_was_newline() {
-            return Ok(());
-        }
-
-        if self.skip_newlines() || self.check(&TokenKind::RBrace) || self.check(&TokenKind::Eof) {
-            return Ok(());
-        }
-
-        Err(CompileError::new(format!("expected ',', newline, or '}}' after {} field initialiser", context), self.current().span))
-    }
-
-    fn previous_token_was_newline(&self) -> bool {
-        self.position
-            .checked_sub(1)
-            .and_then(|index| self.tokens.get(index))
-            .is_some_and(|token| matches!(token.kind, TokenKind::Newline))
     }
 
     fn consume_optional_semi(&mut self) {
@@ -139,17 +88,14 @@ impl<'a> Parser<'a> {
             TokenKind::Invariant => Some("invariant".to_string()),
             TokenKind::Action => Some("action".to_string()),
             TokenKind::Lock => Some("lock".to_string()),
-            TokenKind::Where => Some("where".to_string()),
             TokenKind::Transition => Some("transition".to_string()),
+            TokenKind::Verification => Some("verification".to_string()),
             TokenKind::Has => Some("has".to_string()),
             TokenKind::Store => Some("store".to_string()),
-            TokenKind::Transfer => Some("transfer".to_string()),
-            TokenKind::DestroyKw => Some("destroy".to_string()),
+            TokenKind::Destroy | TokenKind::DestroyKw => Some("destroy".to_string()),
             TokenKind::Launch => Some("launch".to_string()),
             TokenKind::Assert => Some("assert".to_string()),
             TokenKind::Preserve => Some("preserve".to_string()),
-            TokenKind::Claim => Some("claim".to_string()),
-            TokenKind::Settle => Some("settle".to_string()),
             TokenKind::Address => Some("Address".to_string()),
             TokenKind::Hash => Some("Hash".to_string()),
             TokenKind::Env => Some("env".to_string()),
@@ -167,11 +113,6 @@ impl<'a> Parser<'a> {
         let name = self.ident_like_name().ok_or_else(|| CompileError::new("expected identifier", self.current().span))?;
         self.advance();
         Ok(name)
-    }
-
-    fn parse_name_with_span(&mut self) -> Result<(String, Span)> {
-        let span = self.current().span;
-        self.parse_name().map(|name| (name, span))
     }
 
     fn parse_name_path(&mut self) -> Result<String> {
@@ -205,15 +146,13 @@ impl<'a> Parser<'a> {
     }
 
     fn looks_like_type_name(name: &str) -> bool {
-        name.split("::").last().and_then(|segment| segment.chars().next()).is_some_and(|ch| ch.is_ascii_uppercase())
+        let Some(segment) = name.rsplit("::").next() else {
+            return false;
+        };
+        segment.chars().next().is_some_and(|ch| ch.is_ascii_uppercase()) && !segment.contains('_')
     }
 
     fn parse_binding_pattern(&mut self) -> Result<BindingPattern> {
-        let span = self.current().span;
-        self.with_recursion_guard(span, |this| this.parse_binding_pattern_inner())
-    }
-
-    fn parse_binding_pattern_inner(&mut self) -> Result<BindingPattern> {
         self.skip_newlines();
         match &self.current().kind {
             TokenKind::Underscore => {
@@ -264,11 +203,7 @@ impl<'a> Parser<'a> {
                                 caps.push(Capability::Store);
                                 self.advance();
                             }
-                            TokenKind::Transfer => {
-                                caps.push(Capability::Transfer);
-                                self.advance();
-                            }
-                            TokenKind::DestroyKw => {
+                            TokenKind::Destroy | TokenKind::DestroyKw => {
                                 caps.push(Capability::Destroy);
                                 self.advance();
                             }
@@ -375,7 +310,7 @@ impl<'a> Parser<'a> {
                     let mut parallelizable = true;
                     let mut estimated_cycles = 1000;
                     while !self.check(&TokenKind::RParen) && !self.check(&TokenKind::Eof) {
-                        let (hint_name, hint_span) = self.parse_name_with_span()?;
+                        let hint_name = self.parse_name()?;
                         match hint_name.as_str() {
                             "parallel" => parallelizable = true,
                             "sequential" => parallelizable = false,
@@ -390,9 +325,7 @@ impl<'a> Parser<'a> {
                                     _ => return Err(CompileError::new("expected integer estimated_cycles", self.current().span)),
                                 };
                             }
-                            _ => {
-                                return Err(CompileError::new(format!("unknown scheduler_hint key '{}'", hint_name), hint_span));
-                            }
+                            _ => {}
                         }
 
                         if self.check(&TokenKind::Comma) {
@@ -546,7 +479,7 @@ impl<'a> Parser<'a> {
                                 self.advance();
                                 Some(a)
                             }
-                            _ => return Err(CompileError::new("expected import alias after 'as'", self.current().span)),
+                            _ => None,
                         }
                     }
                     _ => None,
@@ -565,7 +498,7 @@ impl<'a> Parser<'a> {
                             self.advance();
                             Some(a)
                         }
-                        _ => return Err(CompileError::new("expected import alias after 'as'", self.current().span)),
+                        _ => None,
                     }
                 }
                 _ => None,
@@ -837,7 +770,7 @@ impl<'a> Parser<'a> {
         self.advance(); // consume "identity"
         if self.check(&TokenKind::LParen) {
             self.advance();
-            let (kind, kind_span) = self.parse_name_with_span()?;
+            let kind = self.parse_name()?;
             let policy = match kind.as_str() {
                 "ckb_type_id" => IdentityPolicy::CkbTypeId,
                 "field" => {
@@ -855,7 +788,7 @@ impl<'a> Parser<'a> {
                             "unsupported identity policy '{}'; expected none, ckb_type_id, field(...), script_args, or singleton_type",
                             other
                         ),
-                        kind_span,
+                        self.current().span,
                     ));
                 }
             };
@@ -863,7 +796,7 @@ impl<'a> Parser<'a> {
             Ok(policy)
         } else {
             // `identity ckb_type_id` without parens
-            let (kind, kind_span) = self.parse_name_with_span()?;
+            let kind = self.parse_name()?;
             match kind.as_str() {
                 "ckb_type_id" => Ok(IdentityPolicy::CkbTypeId),
                 "script_args" => Ok(IdentityPolicy::ScriptArgs),
@@ -871,7 +804,7 @@ impl<'a> Parser<'a> {
                 "none" => Ok(IdentityPolicy::None),
                 other => Err(crate::error::CompileError::new(
                     format!("unsupported identity policy '{}'; expected none, ckb_type_id, script_args, or singleton_type", other),
-                    kind_span,
+                    self.current().span,
                 )),
             }
         }
@@ -942,11 +875,7 @@ impl<'a> Parser<'a> {
                         caps.push(Capability::Store);
                         self.advance();
                     }
-                    TokenKind::Transfer => {
-                        caps.push(Capability::Transfer);
-                        self.advance();
-                    }
-                    TokenKind::DestroyKw => {
+                    TokenKind::Destroy | TokenKind::DestroyKw => {
                         caps.push(Capability::Destroy);
                         self.advance();
                     }
@@ -1043,10 +972,10 @@ impl<'a> Parser<'a> {
             }
 
             if self.check(&TokenKind::Assert) {
-                if self.check(&TokenKind::Assert) && !self.check_invariant_call_assert() {
-                    asserts.push(self.parse_invariant_assert()?);
+                if self.current().text == "assert_invariant" {
+                    asserts.push(self.parse_invariant_call_assert()?);
                 } else {
-                    asserts.push(self.parse_expr()?);
+                    asserts.push(self.parse_invariant_assert()?);
                 }
                 self.consume_optional_semi();
                 self.skip_newlines();
@@ -1233,10 +1162,6 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn check_invariant_call_assert(&self) -> bool {
-        self.peek(1).kind == TokenKind::LParen || self.peek(1).kind == TokenKind::Not
-    }
-
     fn parse_invariant_assert(&mut self) -> Result<Expr> {
         let start_span = self.current().span;
         self.expect(TokenKind::Assert)?;
@@ -1244,7 +1169,26 @@ impl<'a> Parser<'a> {
         let end_span = self.current().span;
         Ok(Expr::Assert(AssertExpr {
             condition: Box::new(condition),
-            message: Box::new(Expr::String("invariant assertion failed".to_string(), start_span)),
+            message: Box::new(Expr::String("invariant assertion failed".to_string())),
+            span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
+        }))
+    }
+
+    fn parse_invariant_call_assert(&mut self) -> Result<Expr> {
+        let start_span = self.current().span;
+        self.expect(TokenKind::Assert)?;
+        self.expect(TokenKind::LParen)?;
+        self.skip_newlines();
+        let condition = self.parse_expr()?;
+        self.expect(TokenKind::Comma)?;
+        self.skip_newlines();
+        let message = self.parse_expr()?;
+        self.skip_newlines();
+        let end_span = self.current().span;
+        self.expect(TokenKind::RParen)?;
+        Ok(Expr::Assert(AssertExpr {
+            condition: Box::new(condition),
+            message: Box::new(message),
             span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
         }))
     }
@@ -1293,11 +1237,6 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_type(&mut self) -> Result<Type> {
-        let span = self.current().span;
-        self.with_recursion_guard(span, |this| this.parse_type_inner())
-    }
-
-    fn parse_type_inner(&mut self) -> Result<Type> {
         let ty = match &self.current().kind {
             TokenKind::U8 => {
                 self.advance();
@@ -1310,6 +1249,10 @@ impl<'a> Parser<'a> {
             TokenKind::U32 => {
                 self.advance();
                 Type::U32
+            }
+            TokenKind::I32 => {
+                self.advance();
+                Type::I32
             }
             TokenKind::U64 => {
                 self.advance();
@@ -1335,7 +1278,15 @@ impl<'a> Parser<'a> {
                 let mut name = self.parse_name_path()?;
                 if self.check(&TokenKind::Lt) {
                     self.advance();
-                    let args = self.parse_type_list(TokenKind::Gt)?;
+                    let mut args = Vec::new();
+                    while !self.check(&TokenKind::Gt) && !self.check(&TokenKind::Eof) {
+                        args.push(self.parse_type()?);
+                        if self.check(&TokenKind::Comma) {
+                            self.advance();
+                        } else {
+                            break;
+                        }
+                    }
                     self.expect(TokenKind::Gt)?;
                     let rendered_args = args.iter().map(Self::render_type).collect::<Vec<_>>().join(", ");
                     name.push('<');
@@ -1350,8 +1301,7 @@ impl<'a> Parser<'a> {
                 self.expect(TokenKind::Semi)?;
                 let size = match &self.current().kind {
                     TokenKind::Integer(n) => {
-                        let size = usize::try_from(*n)
-                            .map_err(|_| CompileError::new("array size does not fit this target", self.current().span))?;
+                        let size = *n as usize;
                         self.advance();
                         size
                     }
@@ -1364,7 +1314,15 @@ impl<'a> Parser<'a> {
             }
             TokenKind::LParen => {
                 self.advance();
-                let elems = self.parse_type_list(TokenKind::RParen)?;
+                let mut elems = Vec::new();
+                while !self.check(&TokenKind::RParen) && !self.check(&TokenKind::Eof) {
+                    elems.push(self.parse_type()?);
+                    if self.check(&TokenKind::Comma) {
+                        self.advance();
+                    } else {
+                        break;
+                    }
+                }
                 self.expect(TokenKind::RParen)?;
                 Type::Tuple(elems)
             }
@@ -1396,6 +1354,7 @@ impl<'a> Parser<'a> {
             Type::U8 => "u8".to_string(),
             Type::U16 => "u16".to_string(),
             Type::U32 => "u32".to_string(),
+            Type::I32 => "i32".to_string(),
             Type::U64 => "u64".to_string(),
             Type::U128 => "u128".to_string(),
             Type::Bool => "bool".to_string(),
@@ -1425,8 +1384,7 @@ impl<'a> Parser<'a> {
             (None, Vec::new())
         };
 
-        let state_edges = self.parse_action_clauses()?;
-        let body = self.parse_action_where_block()?;
+        let (state_edges, body) = self.parse_action_body()?;
 
         let end_span = self.current().span;
         let effect_declared = effect.is_some();
@@ -1499,9 +1457,6 @@ impl<'a> Parser<'a> {
                 TokenKind::Transition => {
                     state_edges.extend(self.parse_action_state_edges()?);
                 }
-                TokenKind::Identifier(name) if name == "move" => {
-                    return Err(CompileError::new("state edge clauses use 'transition', not legacy 'move'", self.current().span));
-                }
                 _ => break,
             }
         }
@@ -1509,87 +1464,24 @@ impl<'a> Parser<'a> {
         Ok(state_edges)
     }
 
-    fn parse_action_where_block(&mut self) -> Result<Vec<Stmt>> {
-        if !self.check(&TokenKind::Where) {
-            if self.check(&TokenKind::LBrace) {
-                return Err(CompileError::new(
-                    "action proof blocks use `where`; `{ ... }` action bodies are not part of the current syntax",
-                    self.current().span,
-                ));
-            }
-            return Ok(Vec::new());
-        }
+    fn parse_action_body(&mut self) -> Result<(Vec<ActionStateEdge>, Vec<Stmt>)> {
+        self.skip_newlines();
+        self.expect(TokenKind::LBrace)?;
+        self.skip_newlines();
 
-        self.advance();
+        let state_edges = self.parse_action_clauses()?;
+        self.skip_newlines();
+        self.expect(TokenKind::Verification)?;
         self.skip_newlines();
 
         let mut stmts = Vec::new();
-        while !self.check(&TokenKind::Eof) && !self.action_where_block_is_done() {
+        while !self.check(&TokenKind::RBrace) && !self.check(&TokenKind::Eof) {
             stmts.push(self.parse_stmt()?);
             self.skip_newlines();
         }
+        self.expect(TokenKind::RBrace)?;
 
-        Ok(stmts)
-    }
-
-    fn action_where_block_is_done(&self) -> bool {
-        self.looks_like_top_level_item_decl() || self.looks_like_top_level_flow_decl() || self.looks_like_top_level_type_policy_decl()
-    }
-
-    fn looks_like_top_level_item_decl(&self) -> bool {
-        match &self.current().kind {
-            TokenKind::Pound => true,
-            TokenKind::Module
-            | TokenKind::Use
-            | TokenKind::Resource
-            | TokenKind::Shared
-            | TokenKind::Receipt
-            | TokenKind::Struct
-            | TokenKind::Const
-            | TokenKind::Enum
-            | TokenKind::Action
-            | TokenKind::Fn
-            | TokenKind::Lock => Self::token_ident_like_name(&self.peek(1).kind).is_some(),
-            _ => false,
-        }
-    }
-
-    fn looks_like_top_level_flow_decl(&self) -> bool {
-        let TokenKind::Identifier(name) = &self.current().kind else {
-            return false;
-        };
-        if name != "flow" {
-            return false;
-        }
-
-        let mut offset = 1;
-        let mut saw_target_separator = false;
-        loop {
-            match &self.peek(offset).kind {
-                TokenKind::Identifier(_) | TokenKind::Resource | TokenKind::Shared | TokenKind::Receipt | TokenKind::Struct => {
-                    offset += 1;
-                }
-                TokenKind::ColonColon => offset += 1,
-                TokenKind::For => {
-                    saw_target_separator = true;
-                    offset += 1;
-                }
-                TokenKind::Dot => {
-                    saw_target_separator = true;
-                    offset += 1;
-                }
-                TokenKind::LBrace => return saw_target_separator,
-                _ => return false,
-            }
-        }
-    }
-
-    fn looks_like_top_level_type_policy_decl(&self) -> bool {
-        matches!(
-            (&self.current().kind, &self.peek(1).kind),
-            (TokenKind::Identifier(name), TokenKind::LParen)
-                if matches!(name.as_str(), "with_default_hash_type" | "with_capacity_floor")
-        )
+        Ok((state_edges, stmts))
     }
 
     fn parse_action_state_edges(&mut self) -> Result<Vec<ActionStateEdge>> {
@@ -1602,30 +1494,10 @@ impl<'a> Parser<'a> {
             self.advance();
             self.skip_newlines();
             if self.check(&TokenKind::LBrace) {
-                let block_span = self.current().span;
-                self.advance();
-                let mut block_edge_count = 0usize;
-                loop {
-                    self.skip_newlines();
-                    if self.check(&TokenKind::RBrace) {
-                        if block_edge_count == 0 {
-                            return Err(CompileError::new("transition block must contain at least one state edge", block_span));
-                        }
-                        self.advance();
-                        break;
-                    }
-                    if self.check(&TokenKind::Eof) {
-                        return Err(CompileError::new("unterminated transition block", self.current().span));
-                    }
-                    edges.push(self.parse_action_state_edge()?);
-                    block_edge_count += 1;
-                    self.consume_optional_semi();
-                    if self.check(&TokenKind::Comma) {
-                        self.advance();
-                    }
-                }
-                self.skip_newlines();
-                continue;
+                return Err(CompileError::new(
+                    "transition block syntax is not part of the canonical action surface",
+                    self.current().span,
+                ));
             }
             loop {
                 edges.push(self.parse_action_state_edge()?);
@@ -1646,10 +1518,23 @@ impl<'a> Parser<'a> {
         let start_span = self.current().span;
         let first = self.parse_name_path()?;
         if !self.check(&TokenKind::Dot) {
-            return Err(CompileError::new(
-                "state transition must use an explicit input field path: transition input.state: From -> output.state: To",
-                start_span,
-            ));
+            self.expect(TokenKind::Arrow)?;
+            let output_start = self.current().span;
+            let output = self.parse_name_path()?;
+            if self.check(&TokenKind::Dot) {
+                return Err(CompileError::new(
+                    "lineage transition output must be a binding name: transition input -> output",
+                    output_start,
+                ));
+            }
+            let end_span = self.current().span;
+            return Ok(ActionStateEdge {
+                path: StateFieldPath { base: first, field: String::new(), span: start_span },
+                to_path: StateFieldPath { base: output, field: String::new(), span: output_start },
+                from: String::new(),
+                to: String::new(),
+                span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
+            });
         }
         self.advance();
         let field = self.parse_name()?;
@@ -1732,7 +1617,17 @@ impl<'a> Parser<'a> {
         } else {
             Type::Bool
         };
-        let body = self.parse_block()?;
+        self.skip_newlines();
+        self.expect(TokenKind::LBrace)?;
+        self.skip_newlines();
+        self.expect(TokenKind::Verification)?;
+        self.skip_newlines();
+        let mut body = Vec::new();
+        while !self.check(&TokenKind::RBrace) && !self.check(&TokenKind::Eof) {
+            body.push(self.parse_stmt()?);
+            self.skip_newlines();
+        }
+        self.expect(TokenKind::RBrace)?;
 
         let end_span = self.current().span;
         Ok(LockDef {
@@ -1939,25 +1834,17 @@ impl<'a> Parser<'a> {
         Ok(LetStmt { pattern, ty, value, is_mut, span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column) })
     }
 
-    fn parse_return(&mut self) -> Result<ReturnStmt> {
-        let start_span = self.current().span;
+    fn parse_return(&mut self) -> Result<Option<Expr>> {
         self.expect(TokenKind::Return)?;
 
-        let value = if self.check(&TokenKind::Newline) || self.check(&TokenKind::RBrace) || self.check(&TokenKind::Eof) {
-            None
+        if self.check(&TokenKind::Newline) || self.check(&TokenKind::RBrace) || self.check(&TokenKind::Eof) {
+            Ok(None)
         } else {
-            Some(self.parse_expr()?)
-        };
-        let end = value.as_ref().map_or(start_span.end, |expr| expr.span().end).max(start_span.end);
-        Ok(ReturnStmt { value, span: Span::new(start_span.start, end, start_span.line, start_span.column) })
+            Ok(Some(self.parse_expr()?))
+        }
     }
 
     fn parse_if(&mut self) -> Result<IfStmt> {
-        let span = self.current().span;
-        self.with_recursion_guard(span, |this| this.parse_if_inner())
-    }
-
-    fn parse_if_inner(&mut self) -> Result<IfStmt> {
         let start_span = self.current().span;
         self.expect(TokenKind::If)?;
 
@@ -2012,31 +1899,35 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_expr(&mut self) -> Result<Expr> {
-        let span = self.current().span;
-        self.with_recursion_guard(span, |this| this.parse_expr_inner())
-    }
-
-    fn parse_expr_inner(&mut self) -> Result<Expr> {
         self.skip_newlines();
         self.parse_assignment()
     }
 
     fn parse_assignment(&mut self) -> Result<Expr> {
         let left = self.parse_range()?;
+        let start_span = self.current().span;
 
         if self.check(&TokenKind::Eq) {
             self.advance();
             let right = self.parse_expr()?;
-            let span = left.span().combine(&right.span());
-            return Ok(Expr::Assign(AssignExpr { target: Box::new(left), op: AssignOp::Assign, value: Box::new(right), span }));
+            return Ok(Expr::Assign(AssignExpr {
+                target: Box::new(left),
+                op: AssignOp::Assign,
+                value: Box::new(right),
+                span: start_span,
+            }));
         }
 
         if self.check(&TokenKind::Plus) && self.peek(1).kind == TokenKind::Eq {
             self.advance();
             self.advance();
             let right = self.parse_expr()?;
-            let span = left.span().combine(&right.span());
-            return Ok(Expr::Assign(AssignExpr { target: Box::new(left), op: AssignOp::AddAssign, value: Box::new(right), span }));
+            return Ok(Expr::Assign(AssignExpr {
+                target: Box::new(left),
+                op: AssignOp::AddAssign,
+                value: Box::new(right),
+                span: start_span,
+            }));
         }
 
         Ok(left)
@@ -2045,11 +1936,11 @@ impl<'a> Parser<'a> {
     fn parse_range(&mut self) -> Result<Expr> {
         let left = self.parse_or()?;
         if self.check(&TokenKind::Dot) && self.peek(1).kind == TokenKind::Dot {
+            let start_span = self.current().span;
             self.advance();
             self.advance();
             let right = self.parse_or()?;
-            let span = left.span().combine(&right.span());
-            Ok(Expr::Range(RangeExpr { start: Box::new(left), end: Box::new(right), span }))
+            Ok(Expr::Range(RangeExpr { start: Box::new(left), end: Box::new(right), span: start_span }))
         } else {
             Ok(left)
         }
@@ -2064,11 +1955,11 @@ impl<'a> Parser<'a> {
                 break;
             }
             let op = BinaryOp::Or;
+            let start_span = self.current().span;
             self.advance();
             self.skip_newlines();
             let right = self.parse_and()?;
-            let span = left.span().combine(&right.span());
-            left = Expr::Binary(BinaryExpr { op, left: Box::new(left), right: Box::new(right), span });
+            left = Expr::Binary(BinaryExpr { op, left: Box::new(left), right: Box::new(right), span: start_span });
         }
 
         Ok(left)
@@ -2083,11 +1974,11 @@ impl<'a> Parser<'a> {
                 break;
             }
             let op = BinaryOp::And;
+            let start_span = self.current().span;
             self.advance();
             self.skip_newlines();
             let right = self.parse_equality()?;
-            let span = left.span().combine(&right.span());
-            left = Expr::Binary(BinaryExpr { op, left: Box::new(left), right: Box::new(right), span });
+            left = Expr::Binary(BinaryExpr { op, left: Box::new(left), right: Box::new(right), span: start_span });
         }
 
         Ok(left)
@@ -2109,10 +2000,10 @@ impl<'a> Parser<'a> {
             };
 
             if let Some(op) = op {
+                let start_span = self.current().span;
                 self.skip_newlines();
                 let right = self.parse_comparison()?;
-                let span = left.span().combine(&right.span());
-                left = Expr::Binary(BinaryExpr { op, left: Box::new(left), right: Box::new(right), span });
+                left = Expr::Binary(BinaryExpr { op, left: Box::new(left), right: Box::new(right), span: start_span });
             } else {
                 break;
             }
@@ -2143,10 +2034,10 @@ impl<'a> Parser<'a> {
             };
 
             if let Some(op) = op {
+                let start_span = self.current().span;
                 self.skip_newlines();
                 let right = self.parse_term()?;
-                let span = left.span().combine(&right.span());
-                left = Expr::Binary(BinaryExpr { op, left: Box::new(left), right: Box::new(right), span });
+                left = Expr::Binary(BinaryExpr { op, left: Box::new(left), right: Box::new(right), span: start_span });
             } else {
                 break;
             }
@@ -2171,10 +2062,10 @@ impl<'a> Parser<'a> {
             };
 
             if let Some(op) = op {
+                let start_span = self.current().span;
                 self.skip_newlines();
                 let right = self.parse_factor()?;
-                let span = left.span().combine(&right.span());
-                left = Expr::Binary(BinaryExpr { op, left: Box::new(left), right: Box::new(right), span });
+                left = Expr::Binary(BinaryExpr { op, left: Box::new(left), right: Box::new(right), span: start_span });
             } else {
                 break;
             }
@@ -2202,10 +2093,10 @@ impl<'a> Parser<'a> {
             };
 
             if let Some(op) = op {
+                let start_span = self.current().span;
                 self.skip_newlines();
                 let right = self.parse_cast()?;
-                let span = left.span().combine(&right.span());
-                left = Expr::Binary(BinaryExpr { op, left: Box::new(left), right: Box::new(right), span });
+                left = Expr::Binary(BinaryExpr { op, left: Box::new(left), right: Box::new(right), span: start_span });
             } else {
                 break;
             }
@@ -2222,26 +2113,16 @@ impl<'a> Parser<'a> {
             if !is_as {
                 break;
             }
+            let start_span = self.current().span;
             self.advance();
             self.skip_newlines();
-            let start_span = expr.span();
             let ty = self.parse_type()?;
-            let end = self.current().span.start.max(start_span.end);
-            expr = Expr::Cast(CastExpr {
-                expr: Box::new(expr),
-                ty,
-                span: Span::new(start_span.start, end, start_span.line, start_span.column),
-            });
+            expr = Expr::Cast(CastExpr { expr: Box::new(expr), ty, span: start_span });
         }
         Ok(expr)
     }
 
     fn parse_unary(&mut self) -> Result<Expr> {
-        let span = self.current().span;
-        self.with_recursion_guard(span, |this| this.parse_unary_inner())
-    }
-
-    fn parse_unary_inner(&mut self) -> Result<Expr> {
         if self.check(&TokenKind::Minus) {
             let start_span = self.current().span;
             self.advance();
@@ -2277,47 +2158,31 @@ impl<'a> Parser<'a> {
         let mut expr = self.parse_primary()?;
 
         loop {
-            // Allow multiline method chains by skipping newlines before a dot,
-            // but still break if the next non-newline token is not a postfix operator.
-            while self.check(&TokenKind::Newline) {
-                if self.peek(1).kind == TokenKind::Dot {
-                    self.advance(); // skip the newline
-                } else {
-                    break;
-                }
-            }
             if self.check(&TokenKind::Newline) {
                 break;
             }
             if self.check(&TokenKind::Dot) && !matches!(&self.peek(1).kind, TokenKind::Dot) {
-                let start_span = expr.span();
                 self.advance();
-                let (field, end_span) = match &self.current().kind {
-                    _ if self.ident_like_name().is_some() => {
-                        let end_span = self.current().span;
-                        (self.parse_name()?, end_span)
-                    }
+                let field = match &self.current().kind {
+                    _ if self.ident_like_name().is_some() => self.parse_name()?,
                     TokenKind::Integer(n) => {
-                        let end_span = self.current().span;
                         let index = n.to_string();
                         self.advance();
-                        (index, end_span)
+                        index
                     }
                     _ => {
                         return Err(CompileError::new("expected field name", self.current().span));
                     }
                 };
-                expr = Expr::FieldAccess(FieldAccessExpr { expr: Box::new(expr), field, span: start_span.combine(&end_span) });
+                expr = Expr::FieldAccess(FieldAccessExpr { expr: Box::new(expr), field, span: self.current().span });
             } else if self.check(&TokenKind::LParen) {
-                let start_span = expr.span();
-                let (args, end_span) = self.parse_args_with_end_span()?;
-                expr = Expr::Call(CallExpr { func: Box::new(expr), args, span: start_span.combine(&end_span) });
+                let args = self.parse_args()?;
+                expr = Expr::Call(CallExpr { func: Box::new(expr), args, span: self.current().span });
             } else if self.check(&TokenKind::LBracket) {
-                let start_span = expr.span();
                 self.advance();
                 let index = self.parse_expr()?;
-                let end_span = self.expect(TokenKind::RBracket)?.span;
-                expr = Expr::Index(IndexExpr { expr: Box::new(expr), index: Box::new(index), span: start_span.combine(&end_span) });
+                self.expect(TokenKind::RBracket)?;
+                expr = Expr::Index(IndexExpr { expr: Box::new(expr), index: Box::new(index), span: self.current().span });
             } else {
                 break;
             }
@@ -2329,43 +2194,30 @@ impl<'a> Parser<'a> {
     fn parse_primary(&mut self) -> Result<Expr> {
         match &self.current().kind {
             TokenKind::Integer(n) => {
-                let span = self.current().span;
                 let val = *n;
                 self.advance();
-                Ok(Expr::Integer(val, span))
-            }
-            TokenKind::HexLiteral(text) => {
-                let span = self.current().span;
-                let val = u64::from_str_radix(text, 16)
-                    .map_err(|_| CompileError::new(format!("invalid hex integer literal: 0x{}", text), span))?;
-                self.advance();
-                Ok(Expr::Integer(val, span))
+                Ok(Expr::Integer(val))
             }
             TokenKind::True => {
-                let span = self.current().span;
                 self.advance();
-                Ok(Expr::Bool(true, span))
+                Ok(Expr::Bool(true))
             }
             TokenKind::False => {
-                let span = self.current().span;
                 self.advance();
-                Ok(Expr::Bool(false, span))
+                Ok(Expr::Bool(false))
             }
             TokenKind::String(s) => {
-                let span = self.current().span;
                 let val = s.clone();
                 self.advance();
-                Ok(Expr::String(val, span))
+                Ok(Expr::String(val))
             }
             TokenKind::ByteString(b) => {
-                let span = self.current().span;
                 let val = b.clone();
                 self.advance();
-                Ok(Expr::ByteString(val, span))
+                Ok(Expr::ByteString(val))
             }
             TokenKind::Create => self.parse_create(),
             TokenKind::Consume => self.parse_consume(),
-            TokenKind::Transfer => self.parse_transfer_expr(),
             TokenKind::Preserve => self.parse_preserve(),
             TokenKind::DestroyKw => self.parse_destroy(),
             TokenKind::Launch => Err(CompileError::new(
@@ -2375,13 +2227,15 @@ impl<'a> Parser<'a> {
             TokenKind::ReadRef => self.parse_read_ref_expr(),
             TokenKind::If => self.parse_if_expr(),
             TokenKind::Match => self.parse_match_expr(),
-            TokenKind::Assert => self.parse_assert(),
             TokenKind::Require => self.parse_require(),
             TokenKind::Std => self.parse_stdlib_call(),
-            TokenKind::Claim => self.parse_claim_expr(),
-            TokenKind::Settle => self.parse_settle_expr(),
             _ if self.ident_like_name().is_some() => {
-                let start_span = self.current().span;
+                if matches!(self.ident_like_name().as_deref(), Some("claim")) && !self.check_next_lparen() {
+                    return self.parse_claim_expr();
+                }
+                if matches!(self.ident_like_name().as_deref(), Some("settle")) && !self.check_next_lparen() {
+                    return self.parse_settle_expr();
+                }
                 let name = self.parse_name_path()?;
                 // v0.15 destruction policy forms (context-sensitive identifiers)
                 match name.as_str() {
@@ -2394,19 +2248,16 @@ impl<'a> Parser<'a> {
                     _ => {}
                 }
                 if self.check(&TokenKind::LBrace) && Self::looks_like_type_name(&name) {
-                    self.parse_struct_init(name, start_span)
+                    self.parse_struct_init(name)
                 } else {
-                    let end = self.current().span.start.max(start_span.end);
-                    Ok(Expr::Identifier(name, Span::new(start_span.start, end, start_span.line, start_span.column)))
+                    Ok(Expr::Identifier(name))
                 }
             }
             TokenKind::LParen => {
-                let start_span = self.current().span;
                 self.advance();
                 if self.check(&TokenKind::RParen) {
-                    let end_span = self.current().span;
                     self.advance();
-                    return Ok(Expr::Tuple(vec![], Span::new(start_span.start, end_span.end, start_span.line, start_span.column)));
+                    return Ok(Expr::Tuple(vec![]));
                 }
                 let expr = self.parse_expr()?;
                 if self.check(&TokenKind::Comma) {
@@ -2418,9 +2269,8 @@ impl<'a> Parser<'a> {
                         }
                         elems.push(self.parse_expr()?);
                     }
-                    let end_span = self.current().span;
                     self.expect(TokenKind::RParen)?;
-                    Ok(Expr::Tuple(elems, Span::new(start_span.start, end_span.end, start_span.line, start_span.column)))
+                    Ok(Expr::Tuple(elems))
                 } else {
                     self.expect(TokenKind::RParen)?;
                     Ok(expr)
@@ -2428,17 +2278,18 @@ impl<'a> Parser<'a> {
             }
             TokenKind::LBracket => self.parse_array_expr(),
             TokenKind::LBrace => {
-                let start_span = self.current().span;
                 let stmts = self.parse_block()?;
-                let end = self.current().span.start.max(start_span.end);
-                Ok(Expr::Block(stmts, Span::new(start_span.start, end, start_span.line, start_span.column)))
+                Ok(Expr::Block(stmts))
             }
             _ => Err(CompileError::new(format!("unexpected token in expression: {}", self.current().kind), self.current().span)),
         }
     }
 
+    fn check_next_lparen(&self) -> bool {
+        self.peek(1).kind == TokenKind::LParen
+    }
+
     fn parse_array_expr(&mut self) -> Result<Expr> {
-        let start_span = self.current().span;
         self.expect(TokenKind::LBracket)?;
         let mut elems = Vec::new();
         loop {
@@ -2454,12 +2305,11 @@ impl<'a> Parser<'a> {
             }
             break;
         }
-        let end_span = self.current().span;
         self.expect(TokenKind::RBracket)?;
-        Ok(Expr::Array(elems, Span::new(start_span.start, end_span.end, start_span.line, start_span.column)))
+        Ok(Expr::Array(elems))
     }
 
-    fn parse_args_with_end_span(&mut self) -> Result<(Vec<Expr>, Span)> {
+    fn parse_args(&mut self) -> Result<Vec<Expr>> {
         self.expect(TokenKind::LParen)?;
 
         let mut args = Vec::new();
@@ -2477,8 +2327,8 @@ impl<'a> Parser<'a> {
         }
 
         self.skip_newlines();
-        let end_span = self.expect(TokenKind::RParen)?.span;
-        Ok((args, end_span))
+        self.expect(TokenKind::RParen)?;
+        Ok(args)
     }
 
     fn parse_create(&mut self) -> Result<Expr> {
@@ -2492,7 +2342,29 @@ impl<'a> Parser<'a> {
             (None, first)
         };
 
-        let fields = self.parse_field_init_list_with(false, "create")?;
+        self.expect(TokenKind::LBrace)?;
+        self.skip_newlines();
+
+        let mut fields = Vec::new();
+        while !self.check(&TokenKind::RBrace) && !self.check(&TokenKind::Eof) {
+            let field_name = self.parse_name()?;
+            let value = if self.check(&TokenKind::Colon) {
+                self.advance();
+                self.parse_expr()?
+            } else {
+                Expr::Identifier(field_name.clone())
+            };
+            fields.push((field_name, value));
+
+            if self.check(&TokenKind::Comma) {
+                self.advance();
+                self.skip_newlines();
+            } else {
+                self.skip_newlines();
+            }
+        }
+
+        self.expect(TokenKind::RBrace)?;
 
         let lock = match &self.current().kind {
             TokenKind::Identifier(s) if s == "with_lock" => {
@@ -2524,26 +2396,6 @@ impl<'a> Parser<'a> {
         let end_span = self.current().span;
         Ok(Expr::Consume(ConsumeExpr {
             expr: Box::new(expr),
-            span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
-        }))
-    }
-
-    fn parse_transfer_expr(&mut self) -> Result<Expr> {
-        let start_span = self.current().span;
-        self.expect(TokenKind::Transfer)?;
-
-        let expr = self.parse_postfix()?;
-        let to_span = self.current().span;
-        let keyword = self.parse_name()?;
-        if keyword != "to" {
-            return Err(CompileError::new("expected 'to' in transfer expression", to_span));
-        }
-        let to = self.parse_expr()?;
-
-        let end_span = self.current().span;
-        Ok(Expr::Transfer(TransferExpr {
-            expr: Box::new(expr),
-            to: Box::new(to),
             span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
         }))
     }
@@ -2675,9 +2527,12 @@ impl<'a> Parser<'a> {
 
     /// Parse a named argument like `identity = type_id` or `field = amount`.
     fn parse_named_arg(&mut self, expected_name: &str) -> Result<String> {
-        let (name, name_span) = self.parse_name_with_span()?;
+        let name = self.parse_name()?;
         if name != expected_name {
-            return Err(CompileError::new(format!("expected named argument '{}', got '{}'", expected_name, name), name_span));
+            return Err(CompileError::new(
+                format!("expected named argument '{}', got '{}'", expected_name, name),
+                self.current().span,
+            ));
         }
         self.expect(TokenKind::Eq)?;
         let value = self.parse_name()?;
@@ -2741,12 +2596,12 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_identity_policy_from_args(&mut self) -> Result<IdentityPolicy> {
-        let (name, name_span) = self.parse_name_with_span()?;
+        let name = self.parse_name()?;
         if name != "identity" {
-            return Err(CompileError::new(format!("expected 'identity' named argument, got '{}'", name), name_span));
+            return Err(CompileError::new(format!("expected 'identity' named argument, got '{}'", name), self.current().span));
         }
         self.expect(TokenKind::Eq)?;
-        let (kind, kind_span) = self.parse_name_with_span()?;
+        let kind = self.parse_name()?;
         match kind.as_str() {
             "ckb_type_id" => Ok(IdentityPolicy::CkbTypeId),
             "field" => {
@@ -2763,38 +2618,32 @@ impl<'a> Parser<'a> {
                     "unsupported identity policy '{}'; expected none, ckb_type_id, field(...), script_args, or singleton_type",
                     other
                 ),
-                kind_span,
+                self.current().span,
             )),
         }
     }
 
     fn parse_field_init_list(&mut self) -> Result<Vec<(String, Expr)>> {
-        self.parse_field_init_list_with(true, "generic initialiser")
-    }
-
-    fn parse_field_init_list_with(&mut self, allow_path_names: bool, context: &str) -> Result<Vec<(String, Expr)>> {
-        self.parse_field_init_list_with_end_span(allow_path_names, context).map(|(fields, _)| fields)
-    }
-
-    fn parse_field_init_list_with_end_span(&mut self, allow_path_names: bool, context: &str) -> Result<(Vec<(String, Expr)>, Span)> {
         self.expect(TokenKind::LBrace)?;
         self.skip_newlines();
         let mut fields = Vec::new();
         while !self.check(&TokenKind::RBrace) && !self.check(&TokenKind::Eof) {
-            let name_span = self.current().span;
-            let name = if allow_path_names { self.parse_name_path()? } else { self.parse_name()? };
+            let name = self.parse_name_path()?;
             if self.check(&TokenKind::Colon) {
                 self.advance();
                 let value = self.parse_expr()?;
                 fields.push((name, value));
             } else {
                 // Field shorthand: `amount` means `amount: amount`
-                fields.push((name.clone(), Expr::Identifier(name, name_span)));
+                fields.push((name.clone(), Expr::Identifier(name)));
             }
-            self.consume_field_initializer_separator(context)?;
+            if self.check(&TokenKind::Comma) {
+                self.advance();
+            }
+            self.skip_newlines();
         }
-        let end_span = self.expect(TokenKind::RBrace)?.span;
-        Ok((fields, end_span))
+        self.expect(TokenKind::RBrace)?;
+        Ok(fields)
     }
 
     fn parse_read_ref_expr(&mut self) -> Result<Expr> {
@@ -2817,31 +2666,6 @@ impl<'a> Parser<'a> {
 
         let end_span = self.current().span;
         Ok(Expr::ReadRef(ReadRefExpr { ty, span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column) }))
-    }
-
-    fn parse_assert(&mut self) -> Result<Expr> {
-        let start_span = self.current().span;
-        self.expect(TokenKind::Assert)?;
-        if self.check(&TokenKind::Not) {
-            return Err(CompileError::new(
-                "expected '(' after assert; CellScript assertions use assert(condition, message), not assert!(...)",
-                self.current().span,
-            ));
-        }
-        self.expect(TokenKind::LParen)?;
-        self.skip_newlines();
-        let condition = self.parse_expr()?;
-        self.expect(TokenKind::Comma)?;
-        self.skip_newlines();
-        let message = self.parse_expr()?;
-        self.skip_newlines();
-        let end_span = self.current().span;
-        self.expect(TokenKind::RParen)?;
-        Ok(Expr::Assert(AssertExpr {
-            condition: Box::new(condition),
-            message: Box::new(message),
-            span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
-        }))
     }
 
     fn parse_require(&mut self) -> Result<Expr> {
@@ -2895,6 +2719,16 @@ impl<'a> Parser<'a> {
             self.advance();
             self.skip_newlines();
             Some(Box::new(self.parse_expr()?))
+        } else if self.check(&TokenKind::Else) {
+            self.advance();
+            self.skip_newlines();
+            let message_span = self.current().span;
+            if let Some(name) = self.ident_like_name() {
+                self.advance();
+                Some(Box::new(Expr::String(name)))
+            } else {
+                return Err(CompileError::new("require else must name an error identifier", message_span));
+            }
         } else {
             None
         };
@@ -2914,8 +2748,7 @@ impl<'a> Parser<'a> {
         let output_name = self.parse_name()?;
 
         // Expect "from"
-        let from_marker =
-            self.ident_like_name().ok_or_else(|| CompileError::new("expected 'from' in preserve expression", self.current().span))?;
+        let from_marker = self.ident_like_name().unwrap_or_default();
         if from_marker != "from" {
             return Err(CompileError::new("expected 'from' in preserve expression", self.current().span));
         }
@@ -2987,7 +2820,7 @@ impl<'a> Parser<'a> {
         let name = self.parse_name()?;
 
         // Parse argument list
-        let (args, mut end_span) = self.parse_args_with_end_span()?;
+        let args = self.parse_args()?;
 
         // Optional preserve-style field block for lifecycle patterns
         let preserve_fields = if self.check(&TokenKind::LBrace) {
@@ -2999,12 +2832,13 @@ impl<'a> Parser<'a> {
                 self.consume_optional_semi();
                 self.skip_newlines();
             }
-            end_span = self.expect(TokenKind::RBrace)?.span;
+            self.expect(TokenKind::RBrace)?;
             fields
         } else {
             vec![]
         };
 
+        let end_span = self.current().span;
         Ok(Expr::StdlibCall(StdlibCallExpr {
             namespace,
             name,
@@ -3015,11 +2849,6 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_if_expr(&mut self) -> Result<Expr> {
-        let span = self.current().span;
-        self.with_recursion_guard(span, |this| this.parse_if_expr_inner())
-    }
-
-    fn parse_if_expr_inner(&mut self) -> Result<Expr> {
         let start_span = self.current().span;
         self.expect(TokenKind::If)?;
         let condition = self.parse_expr()?;
@@ -3033,10 +2862,7 @@ impl<'a> Parser<'a> {
     fn parse_branch_expr(&mut self) -> Result<Expr> {
         self.skip_newlines();
         if self.check(&TokenKind::LBrace) {
-            let start_span = self.current().span;
-            let stmts = self.parse_block()?;
-            let end = self.current().span.start.max(start_span.end);
-            Ok(Expr::Block(stmts, Span::new(start_span.start, end, start_span.line, start_span.column)))
+            Ok(Expr::Block(self.parse_block()?))
         } else if self.check(&TokenKind::If) {
             self.parse_if_expr()
         } else {
@@ -3044,13 +2870,30 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_struct_init(&mut self, ty: String, start_span: Span) -> Result<Expr> {
-        let (fields, end_span) = self.parse_field_init_list_with_end_span(false, "struct")?;
-        Ok(Expr::StructInit(StructInitExpr {
-            ty,
-            fields,
-            span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
-        }))
+    fn parse_struct_init(&mut self, ty: String) -> Result<Expr> {
+        let start_span = self.current().span;
+        self.expect(TokenKind::LBrace)?;
+        self.skip_newlines();
+
+        let mut fields = Vec::new();
+        while !self.check(&TokenKind::RBrace) && !self.check(&TokenKind::Eof) {
+            let field_name = self.parse_name()?;
+            let value = if self.check(&TokenKind::Colon) {
+                self.advance();
+                self.parse_expr()?
+            } else {
+                Expr::Identifier(field_name.clone())
+            };
+            fields.push((field_name, value));
+
+            if self.check(&TokenKind::Comma) {
+                self.advance();
+            }
+            self.skip_newlines();
+        }
+
+        self.expect(TokenKind::RBrace)?;
+        Ok(Expr::StructInit(StructInitExpr { ty, fields, span: start_span }))
     }
 
     fn parse_match_expr(&mut self) -> Result<Expr> {
@@ -3063,7 +2906,6 @@ impl<'a> Parser<'a> {
 
         let mut arms = Vec::new();
         while !self.check(&TokenKind::RBrace) && !self.check(&TokenKind::Eof) {
-            let arm_start = self.current().span;
             let pattern =
                 if self.check(&TokenKind::Underscore) || matches!(&self.current().kind, TokenKind::Identifier(name) if name == "_") {
                     self.advance();
@@ -3077,14 +2919,8 @@ impl<'a> Parser<'a> {
             if !self.check(&TokenKind::LBrace) {
                 return Err(CompileError::new("match arms must use '{}' proof blocks", self.current().span));
             }
-            let block_span = self.current().span;
-            let value = {
-                let stmts = self.parse_block()?;
-                let end = self.current().span.start.max(block_span.end);
-                Expr::Block(stmts, Span::new(block_span.start, end, block_span.line, block_span.column))
-            };
-            let value_span = value.span();
-            let arm_span = Span::new(arm_start.start, value_span.end, arm_start.line, arm_start.column);
+            let value = Expr::Block(self.parse_block()?);
+            let arm_span = self.current().span;
             arms.push(MatchArm { pattern, value, span: arm_span });
             self.skip_newlines();
             if self.check(&TokenKind::Comma) {
@@ -3152,471 +2988,11 @@ mod tests {
     use crate::lexer::lex;
 
     #[test]
-    fn parser_empty_token_slice_returns_controlled_error() {
-        let mut parser = Parser::new(&[]);
-        let err = parser.parse_module().unwrap_err();
-
-        assert!(err.message.contains("expected 'module', found end of file"), "{}", err.message);
-    }
-
-    #[test]
-    fn array_size_uses_checked_target_width_conversion() {
-        let input = "module test\n\nstruct Huge { bytes: [u8; 18446744073709551615] }\n";
-        let tokens = lex(input).unwrap();
-        let result = parse(&tokens);
-
-        #[cfg(target_pointer_width = "64")]
-        assert!(result.is_ok(), "64-bit targets can represent u64::MAX as usize");
-
-        #[cfg(target_pointer_width = "32")]
-        {
-            let err = result.unwrap_err();
-            assert!(err.message.contains("array size does not fit this target"), "{}", err.message);
-        }
-    }
-
-    #[test]
-    fn parser_rejects_deep_unary_expression_before_stack_overflow() {
-        let input = format!(
-            "module test\n\naction test() -> u64\nwhere\n    return {}1\n",
-            "-".repeat(MAX_PARSE_RECURSION_DEPTH as usize + 8)
-        );
-        let tokens = lex(&input).unwrap();
-        let err = parse(&tokens).unwrap_err();
-
-        assert!(err.message.contains("parser recursion limit exceeded"), "{}", err.message);
-    }
-
-    #[test]
-    fn parser_rejects_deep_if_expression_before_stack_overflow() {
-        let depth = MAX_PARSE_RECURSION_DEPTH as usize + 8;
-        let input = format!(
-            "module test\n\naction test() -> u64\nwhere\n    return {}1{}\n",
-            "if true ".repeat(depth),
-            " else 1".repeat(depth)
-        );
-        let tokens = lex(&input).unwrap();
-        let err = parse(&tokens).unwrap_err();
-
-        assert!(err.message.contains("parser recursion limit exceeded"), "{}", err.message);
-    }
-
-    #[test]
-    fn parser_rejects_deep_parenthesized_expression_before_stack_overflow() {
-        let depth = MAX_PARSE_RECURSION_DEPTH as usize + 8;
-        let input = format!("module test\n\naction test() -> u64\nwhere\n    return {}1{}\n", "(".repeat(depth), ")".repeat(depth));
-        let tokens = lex(&input).unwrap();
-        let err = parse(&tokens).unwrap_err();
-
-        assert!(err.message.contains("parser recursion limit exceeded"), "{}", err.message);
-    }
-
-    #[test]
-    fn binary_expr_spans_cover_full_expression() {
-        let input = r#"
-module test
-
-action test() -> u64
-where
-    let eq = 1 == 2
-    let ne = 1 != 2
-    let lt = 1 < 2
-    let le = 1 <= 2
-    let gt = 2 > 1
-    let ge = 2 >= 1
-    let add = 1 + 2
-    let sub = 2 - 1
-    let mul = 2 * 3
-    let div = 4 / 2
-    let modulo = 5 % 2
-    return 0
-"#;
-        let tokens = lex(input).unwrap();
-        let module = parse(&tokens).unwrap();
-        let Item::Action(action) = &module.items[0] else {
-            panic!("expected action");
-        };
-
-        let cases = [
-            (0, BinaryOp::Eq, "1 == 2", "=="),
-            (1, BinaryOp::Ne, "1 != 2", "!="),
-            (2, BinaryOp::Lt, "1 < 2", "<"),
-            (3, BinaryOp::Le, "1 <= 2", "<="),
-            (4, BinaryOp::Gt, "2 > 1", ">"),
-            (5, BinaryOp::Ge, "2 >= 1", ">="),
-            (6, BinaryOp::Add, "1 + 2", "+"),
-            (7, BinaryOp::Sub, "2 - 1", "-"),
-            (8, BinaryOp::Mul, "2 * 3", "*"),
-            (9, BinaryOp::Div, "4 / 2", "/"),
-            (10, BinaryOp::Mod, "5 % 2", "%"),
-        ];
-
-        for (stmt_index, expected_op, expression_text, _operator_text) in cases {
-            let Stmt::Let(let_stmt) = &action.body[stmt_index] else {
-                panic!("expected let statement");
-            };
-            let Expr::Binary(binary) = &let_stmt.value else {
-                panic!("expected binary expression");
-            };
-            let expression_start = input.find(expression_text).unwrap();
-
-            assert_eq!(binary.op, expected_op);
-            assert_eq!(binary.span.start, expression_start);
-            assert_eq!(binary.span.end, expression_start + expression_text.len());
-        }
-    }
-
-    #[test]
-    fn assignment_range_and_cast_spans_cover_full_expression() {
-        let input = r#"
-module test
-
-action test() -> u64
-where
-    let value = 1
-    value = 2
-    value += 3
-    let range = 0..10
-    let casted = value as u64
-    return value
-"#;
-        let tokens = lex(input).unwrap();
-        let module = parse(&tokens).unwrap();
-        let Item::Action(action) = &module.items[0] else {
-            panic!("expected action");
-        };
-
-        let Stmt::Expr(Expr::Assign(assign)) = &action.body[1] else {
-            panic!("expected assignment expression statement");
-        };
-        let assign_text = "value = 2";
-        let assign_start = input.find(assign_text).unwrap();
-        assert_eq!(assign.span.start, assign_start);
-        assert_eq!(assign.span.end, assign_start + assign_text.len());
-
-        let Stmt::Expr(Expr::Assign(add_assign)) = &action.body[2] else {
-            panic!("expected add-assignment expression statement");
-        };
-        let add_assign_text = "value += 3";
-        let add_assign_start = input.find(add_assign_text).unwrap();
-        assert_eq!(add_assign.span.start, add_assign_start);
-        assert_eq!(add_assign.span.end, add_assign_start + add_assign_text.len());
-
-        let Stmt::Let(range_stmt) = &action.body[3] else {
-            panic!("expected range let statement");
-        };
-        let Expr::Range(range) = &range_stmt.value else {
-            panic!("expected range expression");
-        };
-        let range_text = "0..10";
-        let range_start = input.find(range_text).unwrap();
-        assert_eq!(range.span.start, range_start);
-        assert_eq!(range.span.end, range_start + range_text.len());
-
-        let Stmt::Let(cast_stmt) = &action.body[4] else {
-            panic!("expected cast let statement");
-        };
-        let Expr::Cast(cast) = &cast_stmt.value else {
-            panic!("expected cast expression");
-        };
-        let cast_text = "value as u64";
-        let cast_start = input.find(cast_text).unwrap();
-        assert_eq!(cast.span.start, cast_start);
-        assert_eq!(cast.span.end, cast_start + cast_text.len());
-    }
-
-    #[test]
-    fn postfix_expr_spans_cover_the_full_postfix_chain() {
-        let input = r#"
-module test
-
-action test() -> u64
-where
-    let field = foo.bar.baz
-    let call = foo(1, 2)
-    let index = values[0]
-    return 0
-"#;
-        let tokens = lex(input).unwrap();
-        let module = parse(&tokens).unwrap();
-        let Item::Action(action) = &module.items[0] else {
-            panic!("expected action");
-        };
-
-        let cases = [(0, "foo.bar.baz"), (1, "foo(1, 2)"), (2, "values[0]")];
-
-        for (stmt_index, expression_text) in cases {
-            let Stmt::Let(let_stmt) = &action.body[stmt_index] else {
-                panic!("expected let statement");
-            };
-            let expected_start = input.find(expression_text).unwrap();
-            let expected_end = expected_start + expression_text.len();
-
-            assert_eq!(let_stmt.value.span().start, expected_start);
-            assert_eq!(let_stmt.value.span().end, expected_end);
-        }
-    }
-
-    #[test]
-    fn primitive_and_container_exprs_keep_source_spans() {
-        let input = r#"
-module test
-
-action test() -> u64
-where
-    let values = [1, 2]
-    return values
-"#;
-        let tokens = lex(input).unwrap();
-        let module = parse(&tokens).unwrap();
-        let Item::Action(action) = &module.items[0] else {
-            panic!("expected action");
-        };
-
-        let Stmt::Let(let_stmt) = &action.body[0] else {
-            panic!("expected let statement");
-        };
-        let Expr::Array(items, array_span) = &let_stmt.value else {
-            panic!("expected array expression");
-        };
-        assert_ne!(*array_span, Span::default());
-
-        let Expr::Integer(_, integer_span) = &items[0] else {
-            panic!("expected integer expression");
-        };
-        assert_ne!(*integer_span, Span::default());
-
-        let Stmt::Return(ReturnStmt { value: Some(Expr::Identifier(_, identifier_span)), .. }) = &action.body[1] else {
-            panic!("expected identifier return expression");
-        };
-        assert_ne!(*identifier_span, Span::default());
-    }
-
-    #[test]
-    fn hex_literal_exprs_parse_as_integers() {
-        let input = r#"
-module test
-
-const MASK: u64 = 0xFF
-"#;
-        let tokens = lex(input).unwrap();
-        let module = parse(&tokens).unwrap();
-        let Item::Const(const_def) = &module.items[0] else {
-            panic!("expected const");
-        };
-        let Expr::Integer(value, span) = &const_def.value else {
-            panic!("expected integer literal");
-        };
-        let expected_start = input.find("0xFF").unwrap();
-
-        assert_eq!(*value, 255);
-        assert_eq!(span.start, expected_start);
-        assert_eq!(span.end, expected_start + "0xFF".len());
-    }
-
-    #[test]
-    fn struct_init_span_covers_type_name_and_body() {
-        let input = r#"
-module test
-
-const SNAPSHOT: Token = Token { amount: 1 }
-"#;
-        let tokens = lex(input).unwrap();
-        let module = parse(&tokens).unwrap();
-        let Item::Const(const_def) = &module.items[0] else {
-            panic!("expected const");
-        };
-        let Expr::StructInit(init) = &const_def.value else {
-            panic!("expected struct init");
-        };
-        let expected_start = input.find("Token {").unwrap();
-        let expected_end = expected_start + "Token { amount: 1 }".len();
-
-        assert_eq!(init.span.start, expected_start);
-        assert_eq!(init.span.end, expected_end);
-    }
-
-    #[test]
-    fn field_initializers_accept_newline_separators() {
-        let input = r#"
-module test
-
-action mint(amount: u64, owner: Address) -> Token
-where
-    create Token {
-        amount: amount
-        owner: owner
-    }
-"#;
-        let tokens = lex(input).unwrap();
-        let module = parse(&tokens).unwrap();
-        assert_eq!(module.items.len(), 1);
-    }
-
-    #[test]
-    fn struct_initializers_reject_same_line_adjacent_fields() {
-        let input = r#"
-module test
-
-const SNAPSHOT: Pair = Pair { left: left right: right }
-"#;
-        let tokens = lex(input).unwrap();
-        let err = parse(&tokens).unwrap_err();
-
-        assert!(err.message.contains("expected ',', newline, or '}' after struct field initialiser"), "{}", err.message);
-        assert_eq!(err.span.start, input.find("right").unwrap());
-    }
-
-    #[test]
-    fn create_initializers_reject_same_line_adjacent_fields() {
-        let input = r#"
-module test
-
-action mint(amount: u64, owner: Address) -> Token
-where
-    create Token { amount: amount owner: owner }
-"#;
-        let tokens = lex(input).unwrap();
-        let err = parse(&tokens).unwrap_err();
-
-        assert!(err.message.contains("expected ',', newline, or '}' after create field initialiser"), "{}", err.message);
-        assert_eq!(err.span.start, input.find("owner: owner").unwrap());
-    }
-
-    #[test]
-    fn generic_initializers_reject_same_line_adjacent_fields() {
-        let input = r#"
-module test
-
-action mint(token_id: u64, owner: Address) -> NFT
-where
-    create_unique<NFT>(identity = field(token_id)) { token_id: token_id owner: owner }
-"#;
-        let tokens = lex(input).unwrap();
-        let err = parse(&tokens).unwrap_err();
-
-        assert!(err.message.contains("expected ',', newline, or '}' after generic initialiser field initialiser"), "{}", err.message);
-        assert_eq!(err.span.start, input.find("owner: owner").unwrap());
-    }
-
-    #[test]
-    fn parser_rejects_bang_assert_syntax() {
-        let input = r#"
-module test
-
-action test()
-where
-    assert!(true, "bang")
-"#;
-        let tokens = lex(input).unwrap();
-        let err = parse(&tokens).unwrap_err();
-
-        assert!(err.message.contains("not assert!(...)"), "{}", err.message);
-        assert_eq!(err.span.start, input.find('!').unwrap());
-    }
-
-    #[test]
-    fn named_arg_diagnostic_uses_bad_name_span() {
-        let input = r#"
-module test
-
-const BAD: u64 = destroy_unique(token, wrong = token_id)
-"#;
-        let tokens = lex(input).unwrap();
-        let err = parse(&tokens).unwrap_err();
-
-        assert!(err.message.contains("expected named argument 'identity', got 'wrong'"), "{}", err.message);
-        assert_eq!(err.span.start, input.find("wrong").unwrap());
-    }
-
-    #[test]
-    fn identity_policy_diagnostic_uses_bad_policy_span() {
-        let input = r#"
-module test
-
-resource Token
-identity(mystery)
-{
-    amount: u64
-}
-"#;
-        let tokens = lex(input).unwrap();
-        let err = parse(&tokens).unwrap_err();
-
-        assert!(err.message.contains("unsupported identity policy 'mystery'"), "{}", err.message);
-        assert_eq!(err.span.start, input.find("mystery").unwrap());
-    }
-
-    #[test]
-    fn postfix_exprs_cover_the_consumed_source_range() {
-        let input = r#"
-module test
-
-action test()
-where
-    let value = foo.bar(1)[0]
-"#;
-        let tokens = lex(input).unwrap();
-        let module = parse(&tokens).unwrap();
-        let Item::Action(action) = &module.items[0] else {
-            panic!("expected action");
-        };
-        let Stmt::Let(let_stmt) = &action.body[0] else {
-            panic!("expected let statement");
-        };
-        let Expr::Index(index) = &let_stmt.value else {
-            panic!("expected index expression");
-        };
-
-        let index_start = input.find("foo.bar(1)[0]").unwrap();
-        assert_eq!(index.span.start, index_start);
-        assert_eq!(index.span.end, index_start + "foo.bar(1)[0]".len());
-
-        let Expr::Call(call) = index.expr.as_ref() else {
-            panic!("expected call expression");
-        };
-        let call_start = input.find("foo.bar(1)").unwrap();
-        assert_eq!(call.span.start, call_start);
-        assert_eq!(call.span.end, call_start + "foo.bar(1)".len());
-
-        let Expr::FieldAccess(field) = call.func.as_ref() else {
-            panic!("expected field access expression");
-        };
-        let field_start = input.find("foo.bar").unwrap();
-        assert_eq!(field.span.start, field_start);
-        assert_eq!(field.span.end, field_start + "foo.bar".len());
-    }
-
-    #[test]
-    fn generic_type_arguments_allow_newlines() {
-        let input = r#"
-module test
-
-action test(input: Vec<
-    (
-        u64,
-        u32,
-    ),
-    Hash,
->) -> u64
-where
-    return 0
-"#;
-        let tokens = lex(input).unwrap();
-        let module = parse(&tokens).unwrap();
-        let Item::Action(action) = &module.items[0] else {
-            panic!("expected action");
-        };
-
-        assert_eq!(action.params[0].ty, Type::Named("Vec<(u64, u32), Hash>".to_string()));
-    }
-
-    #[test]
     fn test_parse_resource() {
         let input = r#"
 module test
 
-resource Token has store, transfer, destroy {
+resource Token has store, replace, relock, consume, burn {
     amount: u64
     symbol: [u8; 8]
 }
@@ -3633,7 +3009,7 @@ resource Token has store, transfer, destroy {
 module test
 
 #[capability(store)]
-resource Token has transfer, destroy {
+resource Token has replace, relock, destroy {
     amount: u64
 }
 "#;
@@ -3645,7 +3021,8 @@ resource Token has transfer, destroy {
         };
 
         assert!(resource.capabilities.contains(&Capability::Store));
-        assert!(resource.capabilities.contains(&Capability::Transfer));
+        assert!(resource.capabilities.contains(&Capability::Replace));
+        assert!(resource.capabilities.contains(&Capability::Relock));
         assert!(resource.capabilities.contains(&Capability::Destroy));
     }
 
@@ -3714,7 +3091,7 @@ invariant token_conservation {
     trigger: type_group
     scope: group
     reads: group_inputs<Token>.amount, group_outputs<Token>.amount
-    assert true
+    assert_invariant(true, "token conserved")
 }
 "#;
         let tokens = lex(input).unwrap();
@@ -3754,9 +3131,10 @@ resource Token has store {
 module test
 
 #[type_id("cellscript::action:v1")]
-action run() -> u64
-where
+action run() -> u64 {
+    verification
     return 0
+}
 "#;
         let tokens = lex(input).unwrap();
         let err = parse(&tokens).unwrap_err();
@@ -3784,98 +3162,14 @@ resource Vault<T> has store {
         let input = r#"
 module test
 
-action mint(amount: u64) -> token: Token
-where
+action mint(amount: u64) -> token: Token {
+    verification
     create token = Token { amount: amount, symbol: b"TEST" }
+}
 "#;
         let tokens = lex(input).unwrap();
         let module = parse(&tokens).unwrap();
         assert_eq!(module.items.len(), 1);
-    }
-
-    #[test]
-    fn test_rejects_unknown_scheduler_hint_key() {
-        let input = r#"
-module test
-
-#[scheduler_hint(paralell)]
-action mint() -> u64
-where
-    return 1
-"#;
-        let tokens = lex(input).unwrap();
-        let err = parse(&tokens).unwrap_err();
-
-        assert!(err.message.contains("unknown scheduler_hint key 'paralell'"), "unexpected error: {}", err.message);
-        assert_eq!(&input[err.span.start..err.span.end], "paralell");
-    }
-
-    #[test]
-    fn test_action_where_column_one_flow_identifier_stays_in_body() {
-        let input = r#"
-module test
-
-action echo(flow: u64) -> u64
-where
-flow
-    return flow
-"#;
-        let tokens = lex(input).unwrap();
-        let module = parse(&tokens).unwrap();
-        let action = match &module.items[0] {
-            Item::Action(action) => action,
-            other => panic!("expected action, found {:?}", other),
-        };
-
-        assert_eq!(action.body.len(), 2);
-        assert!(matches!(&action.body[0], Stmt::Expr(Expr::Identifier(name, _)) if name == "flow"));
-    }
-
-    #[test]
-    fn action_where_block_allows_indented_following_top_level_item() {
-        let input = r#"
-module test
-
-action test() -> u64
-where
-    return 1
- resource Token {
-    amount: u64
-}
-"#;
-        let tokens = lex(input).unwrap();
-        let module = parse(&tokens).unwrap();
-
-        assert_eq!(module.items.len(), 2);
-        assert!(matches!(&module.items[0], Item::Action(action) if action.body.len() == 1));
-        assert!(matches!(&module.items[1], Item::Resource(resource) if resource.name == "Token"));
-    }
-
-    #[test]
-    fn action_where_block_keeps_indented_keyword_like_binding_in_body() {
-        let input = r#"
-module test
-
-resource Receipt {
-    amount: u64
-}
-
-action mint() -> Receipt
-where
-    let receipt = create Receipt {
-        amount: 1
-    }
-    receipt
-"#;
-        let tokens = lex(input).unwrap();
-        let module = parse(&tokens).unwrap();
-        let action = match &module.items[1] {
-            Item::Action(action) => action,
-            other => panic!("expected action, found {:?}", other),
-        };
-
-        assert_eq!(action.body.len(), 2);
-        assert!(matches!(&action.body[1], Stmt::Expr(Expr::Identifier(name, _)) if name == "receipt"));
     }
 
     #[test]
@@ -3888,10 +3182,11 @@ flow OfferFlow for Offer.state {
     Live -> Filled by accept;
 }
 
-	action accept(input: Offer) -> output: Offer
+	action accept(input: Offer) -> output: Offer {
 	    transition input.state: Live -> output.state: Filled
-	where
-    require output.state == OfferState::Filled
+        verification
+            require output.state == OfferState::Filled
+    }
 "#;
         let tokens = lex(input).unwrap();
         let module = parse(&tokens).unwrap();
@@ -3910,17 +3205,16 @@ flow OfferFlow for Offer.state {
     }
 
     #[test]
-    fn test_parse_action_transition_block() {
+    fn test_parse_action_continuation_transitions() {
         let input = r#"
 module test
 
-action settle(input: Offer, receipt: Receipt) -> (output: Offer, next_receipt: Receipt)
-    transition {
-        input.state: Live -> output.state: Filled
-        receipt.state: Open -> next_receipt.state: Closed
-    }
-where
-    require output.state == OfferState::Filled
+action settle(input: Offer, receipt: Receipt) -> (output: Offer, next_receipt: Receipt) {
+    transition input -> output
+    transition receipt -> next_receipt
+    verification
+        require output.state == OfferState::Filled
+}
 "#;
         let tokens = lex(input).unwrap();
         let module = parse(&tokens).unwrap();
@@ -3931,37 +3225,40 @@ where
         assert_eq!(action.state_edges[0].path.base, "input");
         assert_eq!(action.state_edges[1].path.base, "receipt");
         assert_eq!(action.state_edges[1].to_path.base, "next_receipt");
+        assert!(action.state_edges[0].path.field.is_empty());
     }
 
     #[test]
-    fn test_rejects_empty_transition_block() {
+    fn test_rejects_transition_block() {
         let input = r#"
 module test
 
-action accept(input: Offer) -> output: Offer
+action accept(input: Offer) -> output: Offer {
     transition {
     }
-where
-    require output.state == OfferState::Filled
+    verification
+        require output.state == OfferState::Filled
+}
 "#;
         let tokens = lex(input).unwrap();
         let err = parse(&tokens).unwrap_err();
-        assert!(err.message.contains("transition block must contain at least one state edge"), "unexpected error: {}", err.message);
+        assert!(err.message.contains("transition block syntax is not part"), "unexpected error: {}", err.message);
     }
 
     #[test]
-    fn test_rejects_legacy_move_clause() {
+    fn test_rejects_legacy_move_as_ordinary_unexpected_token() {
         let input = r#"
 module test
 
-action accept(input: Offer) -> output: Offer
+action accept(input: Offer) -> output: Offer {
     move input.state: Live -> output.state: Filled
-where
-    require output.state == OfferState::Filled
+    verification
+        require output.state == OfferState::Filled
+}
 "#;
         let tokens = lex(input).unwrap();
         let err = parse(&tokens).unwrap_err();
-        assert!(err.message.contains("use 'transition', not legacy 'move'"), "unexpected error: {}", err.message);
+        assert!(err.message.contains("expected 'verification'"), "unexpected error: {}", err.message);
     }
 
     #[test]
@@ -3969,10 +3266,11 @@ where
         let input = r#"
 module test
 
-action accept(input: Offer) -> output: Offer
+action accept(input: Offer) -> output: Offer {
     transition input.state Live -> output.state Filled
-where
-    require output.state == OfferState::Filled
+    verification
+        require output.state == OfferState::Filled
+}
 "#;
         let tokens = lex(input).unwrap();
         let err = parse(&tokens).unwrap_err();
@@ -3980,7 +3278,7 @@ where
     }
 
     #[test]
-    fn test_rejects_action_brace_body() {
+    fn test_rejects_action_brace_body_without_verification() {
         let input = r#"
 module test
 
@@ -3990,22 +3288,7 @@ action accept(input: Offer) -> output: Offer {
 "#;
         let tokens = lex(input).unwrap();
         let err = parse(&tokens).unwrap_err();
-        assert!(err.message.contains("action proof blocks use `where`"), "unexpected error: {}", err.message);
-    }
-
-    #[test]
-    fn test_rejects_typed_let_without_initializer() {
-        let input = r#"
-module test
-
-fn bad() -> u64 {
-    let x: u64
-    return x
-}
-"#;
-        let tokens = lex(input).unwrap();
-        let err = parse(&tokens).unwrap_err();
-        assert!(err.message.contains("expected '='"), "unexpected error: {}", err.message);
+        assert!(err.message.contains("expected 'verification'"), "unexpected error: {}", err.message);
     }
 
     #[test]
@@ -4013,9 +3296,10 @@ fn bad() -> u64 {
         let input = r#"
 module test
 
-action grant(config: read_ref Config) -> grant: Grant
-where
+action grant(config: read_ref Config) -> grant: Grant {
+    verification
     create grant = Grant { admin: config.admin }
+}
 "#;
         let tokens = lex(input).unwrap();
         let err = parse(&tokens).unwrap_err();
@@ -4027,9 +3311,10 @@ where
         let input = r#"
 module test
 
-action accept(input: Offer, output output: Offer)
-where
+action accept(input: Offer, output output: Offer) {
+    verification
     require output.state == 1
+}
 "#;
         let tokens = lex(input).unwrap();
         let err = parse(&tokens).unwrap_err();
@@ -4041,10 +3326,11 @@ where
         let input = r#"
 module test
 
-action grant(read config: Config, token: Token) -> grant: Grant
-where
+action grant(read config: Config, token: Token) -> grant: Grant {
+    verification
     consume token
     create grant = Grant { admin: config.admin }
+}
 "#;
         let tokens = lex(input).unwrap();
         let module = parse(&tokens).unwrap();
@@ -4066,7 +3352,8 @@ where
 module test
 
 lock receipt_owner(protected receipt: ReceiptCell, witness claimed_owner: Address) -> bool {
-    require receipt.owner == claimed_owner
+    verification
+            require receipt.owner == claimed_owner
 }
 "#;
         let tokens = lex(input).unwrap();
@@ -4084,9 +3371,10 @@ lock receipt_owner(protected receipt: ReceiptCell, witness claimed_owner: Addres
         let input = r#"
 module test
 
-action mint(amount: u64, symbol: [u8; 8]) -> Token
-where
+action mint(amount: u64, symbol: [u8; 8]) -> Token {
+    verification
     create Token { amount, symbol }
+}
 "#;
         let tokens = lex(input).unwrap();
         let module = parse(&tokens).unwrap();
@@ -4098,14 +3386,33 @@ where
         let input = r#"
 module test
 
-action test(x: u64, y: u64) -> u64
-where
+action test(x: u64, y: u64) -> u64 {
+    verification
     let z = x + y * 2
     return z
+}
 "#;
         let tokens = lex(input).unwrap();
         let module = parse(&tokens).unwrap();
         assert_eq!(module.items.len(), 1);
+    }
+
+    #[test]
+    fn test_if_expr_with_all_caps_constant_before_block() {
+        let input = r#"
+module test
+
+const SOFT_CAP_PER_DEPOSIT: u128 = 10000000000000
+
+action discount(raw: u128) -> u128 {
+    verification
+    let oversize = if raw > SOFT_CAP_PER_DEPOSIT { raw - SOFT_CAP_PER_DEPOSIT } else { 0 }
+    return raw - oversize
+}
+"#;
+        let tokens = lex(input).unwrap();
+        let module = parse(&tokens).unwrap();
+        assert_eq!(module.items.len(), 2);
     }
 
     #[test]
@@ -4130,26 +3437,14 @@ use cellscript::fungible_token::{Token, MintAuthority}
     }
 
     #[test]
-    fn test_rejects_use_as_without_alias() {
-        let input = r#"
-module test
-
-use demo::types::Token as
-"#;
-        let tokens = lex(input).unwrap();
-        let error = parse(&tokens).unwrap_err();
-
-        assert!(error.message.contains("expected import alias after 'as'"), "{}", error.message);
-    }
-
-    #[test]
     fn test_launch_expression_is_reserved_until_lowering_exists() {
         let input = r#"
 module test
 
-action bad() -> u64
-where
+action bad() -> u64 {
+    verification
     return launch(Token)
+}
 "#;
         let tokens = lex(input).unwrap();
         let err = parse(&tokens).unwrap_err();
@@ -4161,14 +3456,15 @@ where
         let input = r#"
 module test
 
-action test() -> (u64, u64)
-where
+action test() -> (u64, u64) {
+    verification
     let value = foo(
         1,
         2
     )
 
     (value, 3)
+}
 "#;
         let tokens = lex(input).unwrap();
         let module = parse(&tokens).unwrap();
@@ -4185,7 +3481,7 @@ where
         }
 
         match &action.body[1] {
-            Stmt::Expr(Expr::Tuple(items, _)) => {
+            Stmt::Expr(Expr::Tuple(items)) => {
                 assert_eq!(items.len(), 2);
             }
             other => panic!("expected tuple return expr, found {:?}", other),
@@ -4202,49 +3498,17 @@ enum Flag {
     Off,
 }
 
-action test(flag: Flag) -> u64
-where
+action test(flag: Flag) -> u64 {
+    verification
     match flag {
         On => 1,
         Off => 0,
     }
+}
 "#;
         let tokens = lex(input).unwrap();
         let err = parse(&tokens).unwrap_err();
         assert!(err.message.contains("match arms must use"), "unexpected error: {}", err.message);
-    }
-
-    #[test]
-    fn test_match_arm_span_covers_pattern_and_block() {
-        let input = r#"
-module test
-
-enum Flag {
-    On,
-    Off,
-}
-
-action test(flag: Flag) -> u64
-where
-    match flag {
-        On => { 1 },
-        Off => { 0 },
-    }
-"#;
-        let tokens = lex(input).unwrap();
-        let module = parse(&tokens).unwrap();
-        let Item::Action(action) = &module.items[1] else {
-            panic!("expected action");
-        };
-        let Stmt::Expr(Expr::Match(match_expr)) = &action.body[0] else {
-            panic!("expected match expression");
-        };
-        let first_arm = &match_expr.arms[0];
-        let arm_start = input.find("On =>").unwrap();
-        let arm_end = arm_start + input[arm_start..].find("},").unwrap() + 1;
-
-        assert_eq!(first_arm.span.start, arm_start);
-        assert_eq!(first_arm.span.end, arm_end);
     }
 
     // === 0.13.1 preserve sugar and anonymous require block tests ===
@@ -4260,14 +3524,15 @@ resource Offer has store {
     payment_symbol: [u8; 8]
 }
 
-action fill(input: Offer) -> (output: Offer)
-    transition input.state: Live -> output.state: Filled
-where
+action fill(input: Offer) -> (output: Offer) {
+    transition input -> output
+    verification
     preserve output from input {
         seller
         price
         payment_symbol
     }
+}
 "#;
         let tokens = lex(input).unwrap();
         let module = parse(&tokens).unwrap();
@@ -4285,13 +3550,14 @@ where
         let input = r#"
 module test
 
-action test(x: u64, y: u64) -> u64
-where
+action test(x: u64, y: u64) -> u64 {
+    verification
     require {
         x > 0
         y > 0
     }
     return x + y
+}
 "#;
         let tokens = lex(input).unwrap();
         let module = parse(&tokens).unwrap();
@@ -4312,11 +3578,12 @@ resource Token has store {
     amount: u64
 }
 
-action test(input: Token) -> (output: Token)
-where
+action test(input: Token) -> (output: Token) {
+    verification
     preserve output from input {
         amount
     }
+}
 "#;
         let tokens = lex(input).unwrap();
         let module = parse(&tokens).unwrap();
@@ -4342,10 +3609,11 @@ where
         let input = r#"
 module test
 
-action test(input: u64) -> (output: u64)
-where
+action test(input: u64) -> (output: u64) {
+    verification
     preserve output from input {
     }
+}
 "#;
         let tokens = lex(input).unwrap();
         let err = parse(&tokens).unwrap_err();
@@ -4358,10 +3626,11 @@ where
         let input = r#"
 module test
 
-action test() -> u64
-where
+action test() -> u64 {
+    verification
     require {
     }
+}
 "#;
         let tokens = lex(input).unwrap();
         let err = parse(&tokens).unwrap_err();
@@ -4374,11 +3643,12 @@ where
         let input = r#"
 module test
 
-action test(input: u64) -> (output: u64)
-where
+action test(input: u64) -> (output: u64) {
+    verification
     preserve output from input {
         *
     }
+}
 "#;
         let tokens = lex(input).unwrap();
         let err = parse(&tokens).unwrap_err();
@@ -4391,11 +3661,12 @@ where
         let input = r#"
 module test
 
-action test(input: u64) -> (output: u64)
-where
+action test(input: u64) -> (output: u64) {
+    verification
     preserve output from input {
         except
     }
+}
 "#;
         let tokens = lex(input).unwrap();
         let err = parse(&tokens).unwrap_err();
@@ -4408,10 +3679,11 @@ where
         let input = r#"
 module test
 
-action test(input: u64) -> (output: u64)
-where
+action test(input: u64) -> (output: u64) {
+    verification
     preserve output from input
     return 0
+}
 "#;
         let tokens = lex(input).unwrap();
         let err = parse(&tokens).unwrap_err();
@@ -4428,11 +3700,12 @@ resource Token has store {
     amount: u64
 }
 
-action test(input: Token) -> u64
-where
+action test(input: Token) -> u64 {
+    verification
     require {
         consume input
     }
+}
 "#;
         let tokens = lex(input).unwrap();
         let err = parse(&tokens).unwrap_err();
@@ -4445,8 +3718,8 @@ where
         let input = r#"
 module test
 
-action test(x: u64) -> u64
-where
+action test(x: u64) -> u64 {
+    verification
     require {
         if x > 0 {
             true
@@ -4454,6 +3727,7 @@ where
             false
         }
     }
+}
 "#;
         let tokens = lex(input).unwrap();
         let err = parse(&tokens).unwrap_err();

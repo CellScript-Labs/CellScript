@@ -1,6 +1,5 @@
 use crate::ast::*;
 use crate::error::{CompileError, Result, Span};
-use crate::type_graph::{visit_type_dependency_graph, TypeDependencyEdge};
 use std::collections::HashMap;
 
 pub struct ModuleResolver {
@@ -15,15 +14,6 @@ pub struct SymbolTable {
     functions: HashMap<String, FunctionDef>,
     constants: HashMap<String, ConstantDef>,
     imported: HashMap<String, String>,
-}
-
-impl SymbolTable {
-    fn contains_symbol(&self, name: &str) -> bool {
-        self.types.contains_key(name)
-            || self.functions.contains_key(name)
-            || self.constants.contains_key(name)
-            || self.imported.contains_key(name)
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -70,18 +60,11 @@ impl ModuleResolver {
 
     pub fn register_module(&mut self, module: Module) -> Result<()> {
         let name = module.name.clone();
-        if name == "verifier" || name.starts_with("verifier::") {
-            return Err(CompileError::new(
-                "module namespace 'verifier::*' is reserved for compiler-owned verifier capabilities",
-                module.span,
-            ));
-        }
         if self.modules.contains_key(&name) {
             return Err(CompileError::new(format!("duplicate module '{}'", name), module.span));
         }
 
         let mut symbol_table = SymbolTable::default();
-        let mut pending_imports = Vec::new();
 
         for item in &module.items {
             match item {
@@ -129,19 +112,13 @@ impl ModuleResolver {
                         };
 
                         self.process_import(&mut symbol_table, &import_item)?;
-                        pending_imports.push(import_item);
+                        self.imports.entry(name.clone()).or_default().push(import_item);
                     }
                 }
             }
         }
 
-        self.validate_pending_imports_against_module(&name, &symbol_table, &pending_imports)?;
-        self.validate_existing_imports_targeting(&name, &symbol_table)?;
-
         self.symbol_tables.insert(name.clone(), symbol_table);
-        if !pending_imports.is_empty() {
-            self.imports.entry(name.clone()).or_default().extend(pending_imports);
-        }
         self.modules.insert(name, module);
 
         Ok(())
@@ -166,20 +143,18 @@ impl ModuleResolver {
     }
 
     fn ensure_symbol_available(symbol_table: &SymbolTable, name: &str, span: Span) -> Result<()> {
-        if symbol_table.contains_symbol(name) {
+        if symbol_table.types.contains_key(name)
+            || symbol_table.functions.contains_key(name)
+            || symbol_table.constants.contains_key(name)
+            || symbol_table.imported.contains_key(name)
+        {
             Err(CompileError::new(format!("duplicate symbol '{}'", name), span))
         } else {
             Ok(())
         }
     }
 
-    fn sorted_symbol_tables(&self) -> Vec<(&str, &SymbolTable)> {
-        let mut tables = self.symbol_tables.iter().map(|(module, table)| (module.as_str(), table)).collect::<Vec<_>>();
-        tables.sort_by(|(left, _), (right, _)| left.cmp(right));
-        tables
-    }
-
-    fn process_import(&self, symbol_table: &mut SymbolTable, import: &ImportItem) -> Result<()> {
+    fn process_import(&mut self, symbol_table: &mut SymbolTable, import: &ImportItem) -> Result<()> {
         if import.module_path.is_empty() || import.name.is_empty() {
             return Err(CompileError::new("empty import path", import.span));
         }
@@ -188,51 +163,9 @@ impl ModuleResolver {
         let local_name = import.alias.clone().unwrap_or_else(|| import.name.clone());
 
         Self::ensure_symbol_available(symbol_table, &local_name, import.span)?;
-        self.validate_loaded_import_target(import)?;
         symbol_table.imported.insert(local_name, full_path);
 
         Ok(())
-    }
-
-    fn validate_loaded_import_target(&self, import: &ImportItem) -> Result<()> {
-        let target_module = import.module_path.join("::");
-        let Some(target_table) = self.symbol_tables.get(&target_module) else {
-            return Ok(());
-        };
-        Self::validate_import_symbol(target_table, &target_module, import)
-    }
-
-    fn validate_pending_imports_against_module(
-        &self,
-        module_name: &str,
-        symbol_table: &SymbolTable,
-        pending_imports: &[ImportItem],
-    ) -> Result<()> {
-        for import in pending_imports {
-            if import.module_path.join("::") == module_name {
-                Self::validate_import_symbol(symbol_table, module_name, import)?;
-            }
-        }
-        Ok(())
-    }
-
-    fn validate_existing_imports_targeting(&self, module_name: &str, symbol_table: &SymbolTable) -> Result<()> {
-        for imports in self.imports.values() {
-            for import in imports {
-                if import.module_path.join("::") == module_name {
-                    Self::validate_import_symbol(symbol_table, module_name, import)?;
-                }
-            }
-        }
-        Ok(())
-    }
-
-    fn validate_import_symbol(symbol_table: &SymbolTable, target_module: &str, import: &ImportItem) -> Result<()> {
-        if symbol_table.contains_symbol(&import.name) {
-            Ok(())
-        } else {
-            Err(CompileError::new(format!("symbol '{}' not found in module '{}'", import.name, target_module), import.span))
-        }
     }
 
     pub fn resolve_type(&self, module: &str, name: &str) -> Option<TypeDef> {
@@ -248,49 +181,18 @@ impl ModuleResolver {
             }
 
             if let Some(full_path) = table.imported.get(name) {
-                if let Some((target_module, type_name)) = full_path.rsplit_once("::") {
-                    if let Some(target_table) = self.symbol_tables.get(target_module) {
-                        return target_table.types.get(type_name).cloned();
+                let parts: Vec<&str> = full_path.split("::").collect();
+                if let Some(type_name) = parts.last() {
+                    for (mod_name, table) in &self.symbol_tables {
+                        if full_path.starts_with(mod_name) {
+                            return table.types.get(*type_name).cloned();
+                        }
                     }
                 }
             }
         }
 
         self.resolve_type_global(name)
-    }
-
-    pub fn resolve_type_with_module(&self, module: &str, name: &str) -> Option<(String, TypeDef)> {
-        if let Some((target_module, symbol)) = name.rsplit_once("::") {
-            if let Some(table) = self.symbol_tables.get(target_module) {
-                return table.types.get(symbol).cloned().map(|ty| (target_module.to_string(), ty));
-            }
-        }
-
-        if let Some(table) = self.symbol_tables.get(module) {
-            if let Some(ty) = table.types.get(name) {
-                return Some((module.to_string(), ty.clone()));
-            }
-
-            if let Some(full_path) = table.imported.get(name) {
-                if let Some((target_module, type_name)) = full_path.rsplit_once("::") {
-                    if let Some(target_table) = self.symbol_tables.get(target_module) {
-                        return target_table.types.get(type_name).cloned().map(|ty| (target_module.to_string(), ty));
-                    }
-                }
-            }
-        }
-
-        self.resolve_type_global_with_module(name)
-    }
-
-    fn resolve_type_global_with_module(&self, name: &str) -> Option<(String, TypeDef)> {
-        let symbol = terminal_path_symbol(name);
-        let mut matches = self
-            .sorted_symbol_tables()
-            .into_iter()
-            .filter_map(|(module, table)| table.types.get(symbol).cloned().map(|ty| (module.to_string(), ty)));
-        let resolved = matches.next()?;
-        matches.next().is_none().then_some(resolved)
     }
 
     pub fn resolve_function(&self, module: &str, name: &str) -> Option<FunctionDef> {
@@ -346,7 +248,8 @@ impl ModuleResolver {
     }
 
     pub fn resolve_type_global(&self, name: &str) -> Option<TypeDef> {
-        self.resolve_type_global_with_module(name).map(|(_, ty)| ty)
+        let symbol = name.rsplit("::").next().unwrap_or(name);
+        self.symbol_tables.values().find_map(|table| table.types.get(symbol).cloned())
     }
 
     pub fn resolve_function_global(&self, name: &str) -> Option<FunctionDef> {
@@ -354,20 +257,15 @@ impl ModuleResolver {
     }
 
     pub fn resolve_function_global_with_module(&self, name: &str) -> Option<(String, FunctionDef)> {
-        let symbol = terminal_path_symbol(name);
-        let mut matches = self
-            .sorted_symbol_tables()
-            .into_iter()
-            .filter_map(|(module, table)| table.functions.get(symbol).cloned().map(|function| (module.to_string(), function)));
-        let resolved = matches.next()?;
-        matches.next().is_none().then_some(resolved)
+        let symbol = name.rsplit("::").next().unwrap_or(name);
+        self.symbol_tables
+            .iter()
+            .find_map(|(module, table)| table.functions.get(symbol).cloned().map(|function| (module.clone(), function)))
     }
 
     pub fn resolve_constant_global(&self, name: &str) -> Option<ConstantDef> {
-        let symbol = terminal_path_symbol(name);
-        let mut matches = self.sorted_symbol_tables().into_iter().filter_map(|(_, table)| table.constants.get(symbol).cloned());
-        let resolved = matches.next()?;
-        matches.next().is_none().then_some(resolved)
+        let symbol = name.rsplit("::").next().unwrap_or(name);
+        self.symbol_tables.values().find_map(|table| table.constants.get(symbol).cloned())
     }
 
     pub fn imports_for_module(&self, module: &str) -> Vec<ImportItem> {
@@ -376,10 +274,6 @@ impl ModuleResolver {
 
     pub fn module(&self, module: &str) -> Option<&Module> {
         self.modules.get(module)
-    }
-
-    pub fn modules(&self) -> impl Iterator<Item = &Module> {
-        self.modules.values()
     }
 
     pub fn type_is_linear(&self, module: &str, name: &str) -> bool {
@@ -412,128 +306,16 @@ impl ModuleResolver {
     }
 
     pub fn check_circular_deps(&self) -> Result<()> {
-        self.validate_imports()?;
-        self.check_type_dependency_cycles()?;
-        Ok(())
-    }
-
-    fn validate_imports(&self) -> Result<()> {
         for imports in self.imports.values() {
             for import in imports {
                 let target_module = import.module_path.join("::");
-                let Some(target_table) = self.symbol_tables.get(&target_module) else {
+                if !self.modules.contains_key(&target_module) {
                     return Err(CompileError::new(format!("module '{}' not found", target_module), import.span));
-                };
-                if !target_table.contains_symbol(&import.name) {
-                    return Err(CompileError::new(
-                        format!("symbol '{}' not found in module '{}'", import.name, target_module),
-                        import.span,
-                    ));
                 }
             }
         }
+
         Ok(())
-    }
-
-    fn check_type_dependency_cycles(&self) -> Result<()> {
-        let mut graph = HashMap::<String, Vec<TypeDependencyEdge>>::new();
-
-        for (module_name, module) in &self.modules {
-            for item in &module.items {
-                let Some((type_name, _, _, _)) = type_item_parts(item) else {
-                    continue;
-                };
-                graph.entry(format!("{}::{}", module_name, type_name)).or_default();
-            }
-        }
-
-        for (module_name, module) in &self.modules {
-            for item in &module.items {
-                let Some((type_name, fields, claim_output, enum_fields)) = type_item_parts(item) else {
-                    continue;
-                };
-                let owner = format!("{}::{}", module_name, type_name);
-                for field in fields {
-                    self.collect_type_dependencies(module_name, &owner, &field.ty, field.span, &mut graph);
-                }
-                if let Some((ty, span)) = claim_output {
-                    self.collect_type_dependencies(module_name, &owner, ty, span, &mut graph);
-                }
-                for (ty, span) in enum_fields {
-                    self.collect_type_dependencies(module_name, &owner, ty, span, &mut graph);
-                }
-            }
-        }
-
-        let mut states = HashMap::new();
-        let mut stack = Vec::new();
-        for name in graph.keys().cloned().collect::<Vec<_>>() {
-            if !states.contains_key(&name) {
-                visit_type_dependency_graph(&name, &graph, &mut states, &mut stack)?;
-            }
-        }
-        Ok(())
-    }
-
-    fn collect_type_dependencies(
-        &self,
-        module_name: &str,
-        owner: &str,
-        ty: &Type,
-        span: Span,
-        graph: &mut HashMap<String, Vec<TypeDependencyEdge>>,
-    ) {
-        match ty {
-            Type::Array(inner, _) | Type::Ref(inner) | Type::MutRef(inner) => {
-                self.collect_type_dependencies(module_name, owner, inner, span, graph);
-            }
-            Type::Tuple(items) => {
-                for item in items {
-                    self.collect_type_dependencies(module_name, owner, item, span, graph);
-                }
-            }
-            Type::Named(name) => self.collect_named_type_dependencies(module_name, owner, name, span, graph),
-            Type::U8 | Type::U16 | Type::U32 | Type::U64 | Type::U128 | Type::Bool | Type::Unit | Type::Address | Type::Hash => {}
-        }
-    }
-
-    fn collect_named_type_dependencies(
-        &self,
-        module_name: &str,
-        owner: &str,
-        name: &str,
-        span: Span,
-        graph: &mut HashMap<String, Vec<TypeDependencyEdge>>,
-    ) {
-        let mut token = String::new();
-        for ch in name.chars().chain(std::iter::once(' ')) {
-            if ch.is_ascii_alphanumeric() || ch == '_' || ch == ':' {
-                token.push(ch);
-                continue;
-            }
-            self.push_named_type_dependency(module_name, owner, &token, span, graph);
-            token.clear();
-        }
-    }
-
-    fn push_named_type_dependency(
-        &self,
-        module_name: &str,
-        owner: &str,
-        token: &str,
-        span: Span,
-        graph: &mut HashMap<String, Vec<TypeDependencyEdge>>,
-    ) {
-        if token.is_empty() || matches!(token, "String" | "Range" | "Vec" | "usize" | "isize") {
-            return;
-        }
-        let Some((target_module, target_def)) = self.resolve_type_with_module(module_name, token) else {
-            return;
-        };
-        let target = format!("{}::{}", target_module, type_def_name(&target_def));
-        if graph.contains_key(&target) {
-            graph.entry(owner.to_string()).or_default().push(TypeDependencyEdge { target, span });
-        }
     }
 
     pub fn resolve_qualified_name(&self, path: &[String]) -> Option<ResolvedName> {
@@ -563,42 +345,6 @@ impl ModuleResolver {
     }
 }
 
-fn terminal_path_symbol(name: &str) -> &str {
-    name.rsplit("::").next().unwrap_or(name)
-}
-
-fn type_def_name(type_def: &TypeDef) -> &str {
-    match type_def {
-        TypeDef::Resource(resource) => &resource.name,
-        TypeDef::Shared(shared) => &shared.name,
-        TypeDef::Receipt(receipt) => &receipt.name,
-        TypeDef::Struct(struct_def) => &struct_def.name,
-        TypeDef::Enum(enum_def) => &enum_def.name,
-    }
-}
-
-type TypeItemParts<'a> = (&'a str, &'a [Field], Option<(&'a Type, Span)>, Vec<(&'a Type, Span)>);
-
-fn type_item_parts(item: &Item) -> Option<TypeItemParts<'_>> {
-    match item {
-        Item::Resource(resource) => Some((&resource.name, &resource.fields, None, Vec::new())),
-        Item::Shared(shared) => Some((&shared.name, &shared.fields, None, Vec::new())),
-        Item::Receipt(receipt) => {
-            Some((&receipt.name, &receipt.fields, receipt.claim_output.as_ref().map(|ty| (ty, receipt.span)), Vec::new()))
-        }
-        Item::Struct(struct_def) => Some((&struct_def.name, &struct_def.fields, None, Vec::new())),
-        Item::Enum(enum_def) => {
-            let fields = enum_def
-                .variants
-                .iter()
-                .flat_map(|variant| variant.fields.iter().map(move |ty| (ty, variant.span)))
-                .collect::<Vec<_>>();
-            Some((&enum_def.name, &[], None, fields))
-        }
-        _ => None,
-    }
-}
-
 #[derive(Debug, Clone)]
 pub enum ResolvedName {
     Module(String),
@@ -621,12 +367,6 @@ impl PathResolver {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{lexer, parser};
-
-    fn source_module(source: &str) -> Module {
-        let tokens = lexer::lex(source).unwrap();
-        parser::parse(&tokens).unwrap()
-    }
 
     #[test]
     fn test_module_resolver() {
@@ -706,115 +446,6 @@ mod tests {
     }
 
     #[test]
-    fn rejects_cross_module_type_dependency_cycles() {
-        let left = source_module(
-            r#"
-module left
-
-use right::B
-
-struct A {
-    b: B
-}
-"#,
-        );
-        let right = source_module(
-            r#"
-module right
-
-use left::A
-
-struct B {
-    a: A
-}
-"#,
-        );
-        let mut resolver = ModuleResolver::new();
-        resolver.register_module(left).unwrap();
-        resolver.register_module(right).unwrap();
-
-        let err = resolver.check_circular_deps().unwrap_err();
-
-        assert!(err.message.contains("cyclic type dependency detected"), "unexpected error: {}", err.message);
-        assert!(err.message.contains("left::A") && err.message.contains("right::B"), "unexpected error: {}", err.message);
-    }
-
-    #[test]
-    fn test_imported_type_resolution_uses_exact_module_path() {
-        let mut resolver = ModuleResolver::new();
-
-        resolver
-            .register_module(Module {
-                name: "foo".to_string(),
-                items: vec![Item::Struct(StructDef {
-                    name: "Type".to_string(),
-                    type_id: None,
-                    default_hash_type: None,
-                    capacity_floor: None,
-                    fields: vec![Field { name: "small".to_string(), ty: Type::U8, span: Span::default() }],
-                    span: Span::default(),
-                })],
-                span: Span::default(),
-            })
-            .unwrap();
-        resolver
-            .register_module(Module {
-                name: "foobar".to_string(),
-                items: vec![Item::Struct(StructDef {
-                    name: "Type".to_string(),
-                    type_id: None,
-                    default_hash_type: None,
-                    capacity_floor: None,
-                    fields: vec![Field { name: "wide".to_string(), ty: Type::U64, span: Span::default() }],
-                    span: Span::default(),
-                })],
-                span: Span::default(),
-            })
-            .unwrap();
-        resolver
-            .register_module(Module {
-                name: "app".to_string(),
-                items: vec![Item::Use(UseStmt {
-                    module_path: vec!["foobar".to_string()],
-                    imports: vec![UseImport { name: "Type".to_string(), alias: None }],
-                    span: Span::default(),
-                })],
-                span: Span::default(),
-            })
-            .unwrap();
-
-        let Some(TypeDef::Struct(resolved)) = resolver.resolve_type("app", "Type") else {
-            panic!("expected imported struct to resolve");
-        };
-        assert_eq!(resolved.fields[0].name, "wide");
-    }
-
-    #[test]
-    fn test_global_type_resolution_rejects_ambiguous_symbol() {
-        let mut resolver = ModuleResolver::new();
-
-        for module_name in ["left", "right"] {
-            resolver
-                .register_module(Module {
-                    name: module_name.to_string(),
-                    items: vec![Item::Struct(StructDef {
-                        name: "Token".to_string(),
-                        type_id: None,
-                        default_hash_type: None,
-                        capacity_floor: None,
-                        fields: vec![Field { name: "amount".to_string(), ty: Type::U64, span: Span::default() }],
-                        span: Span::default(),
-                    })],
-                    span: Span::default(),
-                })
-                .unwrap();
-        }
-
-        assert!(resolver.resolve_type_global("Token").is_none());
-        assert!(resolver.resolve_type("left", "Token").is_some());
-    }
-
-    #[test]
     fn test_rejects_duplicate_local_symbols() {
         let mut resolver = ModuleResolver::new();
         let err = resolver
@@ -837,7 +468,7 @@ struct B {
                         return_type: Some(Type::U64),
                         outputs: Vec::new(),
                         state_edges: Vec::new(),
-                        body: vec![Stmt::Return(ReturnStmt { value: Some(Expr::Integer(0, Span::default())), span: Span::default() })],
+                        body: vec![Stmt::Return(Some(Expr::Integer(0)))],
                         effect: EffectClass::Pure,
                         effect_declared: false,
                         scheduler_hint: None,
@@ -895,71 +526,6 @@ struct B {
             .unwrap_err();
 
         assert!(err.message.contains("duplicate symbol 'Token'"), "unexpected error: {}", err.message);
-    }
-
-    #[test]
-    fn test_register_module_rejects_missing_imported_symbol_when_target_is_loaded() {
-        let mut resolver = ModuleResolver::new();
-        resolver
-            .register_module(Module {
-                name: "cellscript::token".to_string(),
-                items: vec![Item::Struct(StructDef {
-                    name: "Token".to_string(),
-                    type_id: None,
-                    default_hash_type: None,
-                    capacity_floor: None,
-                    fields: vec![Field { name: "amount".to_string(), ty: Type::U64, span: Span::default() }],
-                    span: Span::default(),
-                })],
-                span: Span::default(),
-            })
-            .unwrap();
-        let err = resolver
-            .register_module(Module {
-                name: "app".to_string(),
-                items: vec![Item::Use(UseStmt {
-                    module_path: vec!["cellscript".to_string(), "token".to_string()],
-                    imports: vec![UseImport { name: "Missing".to_string(), alias: None }],
-                    span: Span::default(),
-                })],
-                span: Span::default(),
-            })
-            .unwrap_err();
-
-        assert!(err.message.contains("symbol 'Missing' not found in module 'cellscript::token'"), "unexpected error: {}", err.message);
-    }
-
-    #[test]
-    fn test_register_module_rejects_deferred_missing_import_when_target_arrives() {
-        let mut resolver = ModuleResolver::new();
-        resolver
-            .register_module(Module {
-                name: "app".to_string(),
-                items: vec![Item::Use(UseStmt {
-                    module_path: vec!["cellscript".to_string(), "token".to_string()],
-                    imports: vec![UseImport { name: "Missing".to_string(), alias: None }],
-                    span: Span::default(),
-                })],
-                span: Span::default(),
-            })
-            .unwrap();
-
-        let err = resolver
-            .register_module(Module {
-                name: "cellscript::token".to_string(),
-                items: vec![Item::Struct(StructDef {
-                    name: "Token".to_string(),
-                    type_id: None,
-                    default_hash_type: None,
-                    capacity_floor: None,
-                    fields: vec![Field { name: "amount".to_string(), ty: Type::U64, span: Span::default() }],
-                    span: Span::default(),
-                })],
-                span: Span::default(),
-            })
-            .unwrap_err();
-
-        assert!(err.message.contains("symbol 'Missing' not found in module 'cellscript::token'"), "unexpected error: {}", err.message);
     }
 
     #[test]

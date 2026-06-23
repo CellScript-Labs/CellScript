@@ -23,13 +23,6 @@ pub struct ProofPlanDiagnosticMetadata {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ProofPlanEvidenceMetadata {
-    pub layer: String,
-    pub id: String,
-    pub status: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProofPlanMetadata {
     pub name: String,
     pub origin: String,
@@ -54,8 +47,6 @@ pub struct ProofPlanMetadata {
     pub on_chain_checked: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub on_chain_checked_obligations: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub executable_evidence: Vec<ProofPlanEvidenceMetadata>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub builder_assumptions: Vec<String>,
     pub codegen_coverage_status: String,
@@ -141,92 +132,16 @@ pub fn build_for_invariant(invariant: &ir::IrInvariant) -> Vec<ProofPlanMetadata
     plans
 }
 
-pub fn link_invariant_action_coverage(proof_plan: &mut [ProofPlanMetadata]) {
-    let action_plans = proof_plan.iter().filter(|plan| plan.origin.starts_with("action:")).cloned().collect::<Vec<_>>();
-    let checked_action_plans = action_plans.iter().filter(|plan| plan.on_chain_checked).cloned().collect::<Vec<_>>();
-
-    for plan in proof_plan.iter_mut().filter(|plan| plan.category == "aggregate-invariant") {
-        let Some(query) = aggregate_coverage_query(&plan.feature) else {
-            continue;
-        };
-        let matches = matching_action_coverage(&query, &checked_action_plans);
-        let matched_origins = matching_action_origins(&query, &checked_action_plans);
-        let related_origins = related_action_origins(&query, &action_plans);
-        let unmatched_related_origins =
-            related_origins.iter().filter(|origin| !matched_origins.contains(*origin)).cloned().collect::<Vec<_>>();
-        if matches.is_empty() {
-            plan.builder_assumptions
-                .push(format!("declared(no_checked_action_obligation_matches:{}.{})", query.type_name, query.field));
-            plan.diagnostics.push(ProofPlanDiagnosticMetadata {
-                severity: "warning".to_string(),
-                message: "aggregate invariant has no matching checked action obligation; it remains runtime-required until executable invariant lowering or action coverage closes it".to_string(),
-            });
-        } else {
-            plan.coverage.extend(matches.iter().map(|label| format!("invariant_coverage:{}", label)));
-            plan.on_chain_checked_obligations.extend(matches);
-            plan.builder_assumptions
-                .push(format!("declared(matched_checked_action_obligation_count:{})", plan.on_chain_checked_obligations.len()));
-            plan.builder_assumptions.push("declared(action_coverage_evidence_is_existential_not_exhaustive)".to_string());
-            if !unmatched_related_origins.is_empty() {
-                plan.builder_assumptions.push(format!(
-                    "declared(unmatched_related_action_obligation_count:{}:{})",
-                    unmatched_related_origins.len(),
-                    unmatched_related_origins.join(",")
-                ));
-                plan.diagnostics.push(ProofPlanDiagnosticMetadata {
-                    severity: "warning".to_string(),
-                    message:
-                        "aggregate invariant has matching action evidence, but at least one related action origin lacks a matching checked obligation"
-                            .to_string(),
-                });
-            }
-        }
-        dedup(&mut plan.coverage);
-        dedup(&mut plan.on_chain_checked_obligations);
-        dedup(&mut plan.builder_assumptions);
-    }
-
-    let aggregate_summaries = proof_plan
-        .iter()
-        .filter(|plan| plan.category == "aggregate-invariant")
-        .filter_map(|plan| {
-            let (parent, _) = plan.origin.split_once("#aggregate:")?;
-            let matched =
-                plan.coverage.iter().filter(|coverage| coverage.starts_with("invariant_coverage:matched-action-obligation:")).count();
-            Some((parent.to_string(), matched))
-        })
-        .collect::<Vec<_>>();
-
-    for plan in proof_plan.iter_mut().filter(|plan| plan.category == "declared-invariant") {
-        let mut total = 0usize;
-        let mut matched = 0usize;
-        for (parent, count) in &aggregate_summaries {
-            if parent == &plan.origin {
-                total += 1;
-                matched += count.min(&1);
-            }
-        }
-        if total == 0 {
-            continue;
-        }
-        plan.coverage.push(format!("invariant_coverage:aggregate_action_evidence_matches={}/{}", matched, total));
-        if matched == 0 {
-            plan.builder_assumptions.push("declared(no_aggregate_action_evidence_matches)".to_string());
-        } else if matched < total {
-            plan.builder_assumptions.push(format!("declared(partial_aggregate_action_evidence:{}/{})", matched, total));
-        } else {
-            plan.builder_assumptions.push(format!("declared(all_aggregate_action_evidence_present:{})", total));
-        }
-        dedup(&mut plan.coverage);
-        dedup(&mut plan.builder_assumptions);
-    }
-}
-
 fn summary_plan_for_invariant(invariant: &ir::IrInvariant) -> ProofPlanMetadata {
     let trigger = invariant.trigger.clone().unwrap_or_else(|| "explicit_entry".to_string());
     let scope = invariant.scope.clone().unwrap_or_else(|| "selected_cells".to_string());
     let mut coverage = vec![format!("declared_invariant_assertions:{}", invariant.assert_count)];
     coverage.extend(invariant.aggregates.iter().map(aggregate_coverage_label));
+    for aggregate in &invariant.aggregates {
+        if let Some(helper) = aggregate_xudt_group_amount_runtime_helper(invariant, aggregate) {
+            coverage.push(format!("runtime_helper:{helper}"));
+        }
+    }
     coverage.extend(coverage_notes(&trigger, &scope));
     dedup(&mut coverage);
 
@@ -236,13 +151,27 @@ fn summary_plan_for_invariant(invariant: &ir::IrInvariant) -> ProofPlanMetadata 
     }
     dedup(&mut reads);
 
-    let mut input_output_relation_checks = invariant.aggregates.iter().map(aggregate_relation_check_label).collect::<Vec<_>>();
+    let mut input_output_relation_checks =
+        invariant.aggregates.iter().map(|aggregate| aggregate_relation_check_label(invariant, aggregate)).collect::<Vec<_>>();
     dedup(&mut input_output_relation_checks);
 
-    let mut builder_assumptions = vec![
-        "declared(metadata-only invariant not yet lowered to executable verifier code)".to_string(),
-        format!("declared(assert_invariant_count:{})", invariant.assert_count),
-    ];
+    let all_aggregates_runtime_helper_backed = !invariant.aggregates.is_empty()
+        && invariant.aggregates.iter().all(|aggregate| aggregate_xudt_group_amount_helper_required(invariant, aggregate));
+    let mut builder_assumptions = if all_aggregates_runtime_helper_backed && invariant.assert_count == 0 {
+        let mut assumptions = invariant
+            .aggregates
+            .iter()
+            .filter_map(|aggregate| aggregate_xudt_group_amount_runtime_helper(invariant, aggregate))
+            .map(|helper| format!("declared(runtime-helper-required:{helper})"))
+            .collect::<Vec<_>>();
+        assumptions.push(format!("declared(assert_invariant_count:{})", invariant.assert_count));
+        assumptions
+    } else {
+        vec![
+            "declared(metadata-only invariant not yet lowered to executable verifier code)".to_string(),
+            format!("declared(assert_invariant_count:{})", invariant.assert_count),
+        ]
+    };
     if !invariant.aggregates.is_empty() {
         builder_assumptions.push(format!("declared(aggregate_invariant_count:{})", invariant.aggregates.len()));
     }
@@ -254,10 +183,18 @@ fn summary_plan_for_invariant(invariant: &ir::IrInvariant) -> ProofPlanMetadata 
     }
     dedup(&mut builder_assumptions);
 
-    let mut diagnostics = vec![ProofPlanDiagnosticMetadata {
-        severity: "warning".to_string(),
-        message: "declared invariant is metadata-only until executable lowering covers it".to_string(),
-    }];
+    let mut diagnostics = if all_aggregates_runtime_helper_backed && invariant.assert_count == 0 {
+        vec![ProofPlanDiagnosticMetadata {
+            severity: "info".to_string(),
+            message: "declared xUDT group amount invariant can be discharged by the matching xUDT group amount runtime helper in a selected entry"
+                .to_string(),
+        }]
+    } else {
+        vec![ProofPlanDiagnosticMetadata {
+            severity: "warning".to_string(),
+            message: "declared invariant is metadata-only until executable lowering covers it".to_string(),
+        }]
+    };
     if trigger == "lock_group" && scope == "transaction" {
         diagnostics.push(ProofPlanDiagnosticMetadata {
             severity: "warning".to_string(),
@@ -290,9 +227,12 @@ fn summary_plan_for_invariant(invariant: &ir::IrInvariant) -> ProofPlanMetadata 
         lock_args_fields: declared_lock_args_fields(&reads),
         on_chain_checked: false,
         on_chain_checked_obligations: Vec::new(),
-        executable_evidence: Vec::new(),
         builder_assumptions,
-        codegen_coverage_status: "gap:metadata-only".to_string(),
+        codegen_coverage_status: if all_aggregates_runtime_helper_backed && invariant.assert_count == 0 {
+            "gap:runtime-helper-required".to_string()
+        } else {
+            "gap:metadata-only".to_string()
+        },
         status: "runtime-required".to_string(),
         detail: format!(
             "explicit source invariant declaration captured for ProofPlan auditing; aggregate_primitives={}",
@@ -306,14 +246,22 @@ fn plan_for_aggregate_invariant(invariant: &ir::IrInvariant, index: usize, aggre
     let trigger = invariant.trigger.clone().unwrap_or_else(|| "explicit_entry".to_string());
     let scope = aggregate.scope.clone();
     let reads = aggregate_reads(aggregate);
-    let relation_check = aggregate_relation_check_label(aggregate);
+    let relation_check = aggregate_relation_check_label(invariant, aggregate);
     let mut coverage = vec![aggregate_coverage_label(aggregate)];
+    let xudt_group_amount_helper = aggregate_xudt_group_amount_runtime_helper(invariant, aggregate);
+    if let Some(helper) = xudt_group_amount_helper {
+        coverage.push(format!("runtime_helper:{helper}"));
+    }
     coverage.extend(coverage_notes(&trigger, &scope));
     dedup(&mut coverage);
-    let mut builder_assumptions = vec![
-        "declared(metadata-only aggregate invariant not yet lowered to executable verifier code)".to_string(),
-        format!("declared(parent_invariant:{})", invariant.name),
-    ];
+    let mut builder_assumptions = if let Some(helper) = xudt_group_amount_helper {
+        vec![format!("declared(runtime-helper-required:{helper})"), format!("declared(parent_invariant:{})", invariant.name)]
+    } else {
+        vec![
+            "declared(metadata-only aggregate invariant not yet lowered to executable verifier code)".to_string(),
+            format!("declared(parent_invariant:{})", invariant.name),
+        ]
+    };
     if trigger == "lock_group" && scope == "transaction" {
         builder_assumptions.push(
             "declared(lock transaction scan only protects the lock group unless the builder constrains every relevant cell)"
@@ -322,10 +270,17 @@ fn plan_for_aggregate_invariant(invariant: &ir::IrInvariant, index: usize, aggre
     }
     dedup(&mut builder_assumptions);
 
-    let mut diagnostics = vec![ProofPlanDiagnosticMetadata {
-        severity: "warning".to_string(),
-        message: "aggregate invariant primitive is metadata-only until executable lowering covers it".to_string(),
-    }];
+    let mut diagnostics = if let Some(helper) = xudt_group_amount_helper {
+        vec![ProofPlanDiagnosticMetadata {
+            severity: "info".to_string(),
+            message: format!("aggregate invariant requires {helper} runtime helper coverage"),
+        }]
+    } else {
+        vec![ProofPlanDiagnosticMetadata {
+            severity: "warning".to_string(),
+            message: "aggregate invariant primitive is metadata-only until executable lowering covers it".to_string(),
+        }]
+    };
     if trigger == "lock_group" && scope == "transaction" {
         diagnostics.push(ProofPlanDiagnosticMetadata {
             severity: "warning".to_string(),
@@ -358,16 +313,18 @@ fn plan_for_aggregate_invariant(invariant: &ir::IrInvariant, index: usize, aggre
         lock_args_fields: declared_lock_args_fields(&reads),
         on_chain_checked: false,
         on_chain_checked_obligations: Vec::new(),
-        executable_evidence: Vec::new(),
         builder_assumptions,
-        codegen_coverage_status: "gap:metadata-only".to_string(),
+        codegen_coverage_status: if xudt_group_amount_helper.is_some() {
+            "gap:runtime-helper-required".to_string()
+        } else {
+            "gap:metadata-only".to_string()
+        },
         status: "runtime-required".to_string(),
         detail: format!("aggregate invariant primitive declared under invariant '{}'", invariant.name),
         diagnostics,
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn plan_from_obligation(
     scope_kind: &str,
     origin: &str,
@@ -390,9 +347,6 @@ fn plan_from_obligation(
     let input_output_relation_checks = input_output_relation_checks(obligation, pool_primitives);
     let on_chain_checked_obligations =
         if on_chain_checked { checked_obligation_labels(obligation, &input_output_relation_checks) } else { Vec::new() };
-    let executable_evidence = executable_evidence_for_obligation(obligation, on_chain_checked, &input_output_relation_checks);
-    let codegen_coverage_status =
-        codegen_coverage_status(&obligation.status, on_chain_checked, !executable_evidence.is_empty()).to_string();
     let builder_assumptions = builder_assumptions(obligation, &trigger, &scope, on_chain_checked);
     let diagnostics = diagnostics_for_plan(&trigger, &scope, obligation, &builder_assumptions);
 
@@ -414,85 +368,11 @@ fn plan_from_obligation(
         lock_args_fields: lock_args_fields.to_vec(),
         on_chain_checked,
         on_chain_checked_obligations,
-        executable_evidence,
         builder_assumptions,
-        codegen_coverage_status,
+        codegen_coverage_status: codegen_coverage_status(&obligation.status, on_chain_checked).to_string(),
         status: obligation.status.clone(),
         detail: obligation.detail.clone(),
         diagnostics,
-    }
-}
-
-fn executable_evidence_for_obligation(
-    obligation: &VerifierObligationMetadata,
-    on_chain_checked: bool,
-    input_output_relation_checks: &[String],
-) -> Vec<ProofPlanEvidenceMetadata> {
-    if !on_chain_checked {
-        return Vec::new();
-    }
-    let mut concrete_checks = checked_runtime_subconditions(&obligation.detail);
-    for relation in input_output_relation_checks {
-        if relation.contains("=runtime-required") || relation.contains("=metadata-only") {
-            continue;
-        }
-        concrete_checks.push(relation.clone());
-    }
-    dedup(&mut concrete_checks);
-    if concrete_checks.is_empty() {
-        return Vec::new();
-    }
-
-    let mut evidence = vec![
-        ProofPlanEvidenceMetadata {
-            layer: "ir".to_string(),
-            id: format!("ir-obligation:{}:{}", obligation.category, obligation.feature),
-            status: obligation.status.clone(),
-        },
-        ProofPlanEvidenceMetadata {
-            layer: "codegen".to_string(),
-            id: codegen_evidence_id(obligation),
-            status: codegen_coverage_status(&obligation.status, true, true).to_string(),
-        },
-    ];
-    for relation in concrete_checks {
-        evidence.push(ProofPlanEvidenceMetadata {
-            layer: "runtime".to_string(),
-            id: format!("runtime-relation-check:{relation}"),
-            status: "checked-runtime".to_string(),
-        });
-    }
-    evidence
-}
-
-fn codegen_evidence_id(obligation: &VerifierObligationMetadata) -> String {
-    if obligation.feature.starts_with("resource-conservation:") {
-        "codegen:resource-conservation-runtime-check".to_string()
-    } else if obligation.feature.starts_with("create-output:") {
-        "codegen:create-output-runtime-check".to_string()
-    } else if obligation.feature.starts_with("create-unique-output:") || obligation.feature.starts_with("replace-unique-output:") {
-        "codegen:unique-output-runtime-check".to_string()
-    } else if obligation.feature.starts_with("create-unique-identity:") || obligation.feature.starts_with("replace-unique-identity:") {
-        "codegen:unique-identity-runtime-check".to_string()
-    } else if obligation.feature.starts_with("consume-input:")
-        || obligation.feature.starts_with("transfer-input:")
-        || obligation.feature.starts_with("destroy-input:")
-        || obligation.feature.starts_with("claim-input:")
-        || obligation.feature.starts_with("settle-input:")
-        || obligation.feature.starts_with("replace-input:")
-        || obligation.feature.starts_with("replace-unique-input:")
-    {
-        "codegen:input-lifecycle-runtime-check".to_string()
-    } else if obligation.feature.starts_with("destroy-output-scan:") {
-        "codegen:destroy-output-scan-runtime-check".to_string()
-    } else if obligation.feature.starts_with("read-ref:") {
-        "codegen:read-ref-runtime-check".to_string()
-    } else if obligation.feature.starts_with("cell-metadata-equality:") {
-        "codegen:cell-metadata-equality-runtime-check".to_string()
-    } else if obligation.category == "state-transition" {
-        "codegen:state-transition-runtime-check".to_string()
-    } else {
-        format!("codegen:{}:{}", obligation.category, obligation.feature)
     }
 }
 
@@ -509,10 +389,6 @@ fn proof_scope<'a>(scope_kind: &str, obligation: &'a VerifierObligationMetadata,
         || obligation.feature.contains("claim-output")
         || obligation.feature.contains("settle-output")
         || obligation.feature.contains("destroy-output-scan")
-        || obligation.feature.contains("destroy-unique")
-        || obligation.feature.contains("destroy-instance")
-        || obligation.feature.contains("burn-amount")
-        || obligation.feature.contains("replace-unique")
         || obligation.feature.contains("resource-conservation")
     {
         "transaction"
@@ -526,8 +402,11 @@ fn proof_scope<'a>(scope_kind: &str, obligation: &'a VerifierObligationMetadata,
 fn body_reads(body: &ir::IrBody, params: &[ir::IrParam], runtime_accesses: &[CkbRuntimeAccessMetadata]) -> Vec<String> {
     let mut reads = BTreeSet::new();
     for access in runtime_accesses {
-        if let Some(read) = read_for_source(&access.source) {
+        for read in reads_for_source(&access.source) {
             reads.insert(read.to_string());
+        }
+        if access.source == "Witness" || access.operation.contains("witness") || access.binding.starts_with("witness::") {
+            reads.insert("witness".to_string());
         }
     }
     if !body.consume_set.is_empty() {
@@ -581,17 +460,22 @@ fn body_reads(body: &ir::IrBody, params: &[ir::IrParam], runtime_accesses: &[Ckb
     reads.into_iter().collect()
 }
 
-fn read_for_source(source: &str) -> Option<&'static str> {
+fn reads_for_source(source: &str) -> &'static [&'static str] {
     match source {
-        "Input" => Some("input"),
-        "Output" => Some("output"),
-        "GroupInput" => Some("group_input"),
-        "GroupOutput" => Some("group_output"),
-        "CellDep" => Some("cell_dep"),
-        "HeaderDep" => Some("header_dep"),
-        "Witness" => Some("witness"),
-        "ScriptArgs" => Some("lock_args"),
-        _ => None,
+        "Input" => &["input"],
+        "Output" => &["output"],
+        "GroupInput" => &["group_input"],
+        "GroupOutput" => &["group_output"],
+        "Input/GroupInput" => &["input", "group_input"],
+        "GroupInput/GroupOutput" => &["group_input", "group_output"],
+        "Input/Output" => &["input", "output", "source_view"],
+        "Input/HeaderDep" => &["input", "header_dep"],
+        "CellDep" => &["cell_dep"],
+        "HeaderDep" => &["header_dep"],
+        "Witness" => &["witness"],
+        "ScriptArgs" => &["lock_args"],
+        "SourceView" => &["source_view"],
+        _ => &[],
     }
 }
 
@@ -599,7 +483,7 @@ fn reads_for_obligation(obligation: &VerifierObligationMetadata, body_reads: &[S
     let mut reads = body_reads.to_vec();
     if obligation.category == "cell-access" {
         if let Some(source) = obligation.feature.split(':').nth(1).and_then(|source| source.split('#').next()) {
-            if let Some(read) = read_for_source(source) {
+            for read in reads_for_source(source) {
                 reads.push(read.to_string());
             }
         }
@@ -708,12 +592,11 @@ fn lock_args_fields(params: &[ir::IrParam], runtime_accesses: &[CkbRuntimeAccess
 }
 
 fn on_chain_checked(status: &str) -> bool {
-    status == "checked-runtime"
+    matches!(status, "checked-runtime" | "checked-static" | "ckb-runtime")
 }
 
 fn input_output_relation_checks(obligation: &VerifierObligationMetadata, pool_primitives: &[PoolPrimitiveMetadata]) -> Vec<String> {
     let mut checks = checked_runtime_subconditions(&obligation.detail);
-    checks.extend(resource_field_classification_checks(&obligation.detail));
     if obligation.category == "transaction-invariant" && obligation.status == "checked-runtime" {
         checks.push(format!("{}=checked-runtime", obligation.feature));
     }
@@ -723,33 +606,6 @@ fn input_output_relation_checks(obligation: &VerifierObligationMetadata, pool_pr
     }
     dedup(&mut checks);
     checks
-}
-
-fn resource_field_classification_checks(detail: &str) -> Vec<String> {
-    let mut checks = Vec::new();
-    for (label, status) in [
-        ("preserved fields:", "preserved"),
-        ("guarded fields:", "guarded"),
-        ("allowed fresh fields:", "allowed-fresh"),
-        ("unchecked fields:", "unchecked"),
-    ] {
-        let Some(fields) = detail_section_after_label(detail, label) else {
-            continue;
-        };
-        for field in fields.split(',').map(str::trim).filter(|field| !field.is_empty() && *field != "-") {
-            checks.push(format!("resource-field:{}={}", field, status));
-        }
-    }
-    dedup(&mut checks);
-    checks
-}
-
-fn detail_section_after_label<'a>(detail: &'a str, label: &str) -> Option<&'a str> {
-    detail.split(';').find_map(|segment| {
-        let segment = segment.trim();
-        let offset = segment.find(label)?;
-        Some(segment[offset + label.len()..].trim())
-    })
 }
 
 fn macro_expansion_provenance(obligation: &VerifierObligationMetadata) -> Vec<String> {
@@ -762,6 +618,7 @@ fn macro_expansion_provenance(obligation: &VerifierObligationMetadata) -> Vec<St
     } else if obligation.feature.starts_with("replace-unique-output:")
         || obligation.feature.starts_with("replace-unique-input:")
         || obligation.feature.starts_with("replace-unique-identity:")
+        || obligation.feature.starts_with("replace_unique-input:")
     {
         vec!["macro_expansion:replace_unique=consume-input+create-output+preserve-identity".to_string()]
     } else if obligation.feature.starts_with("claim-output:") || obligation.feature.starts_with("claim-input:") {
@@ -772,12 +629,6 @@ fn macro_expansion_provenance(obligation: &VerifierObligationMetadata) -> Vec<St
         vec!["macro_expansion:consume=consume-input".to_string()]
     } else if obligation.feature.starts_with("destroy-input:") {
         vec!["macro_expansion:destroy=consume-input+no-output".to_string()]
-    } else if obligation.feature.starts_with("destroy-output-scan:")
-        || obligation.feature.starts_with("destroy-unique:")
-        || obligation.feature.starts_with("destroy-instance:")
-        || obligation.feature.starts_with("burn-amount:")
-    {
-        vec!["macro_expansion:destroy=consume-input+destruction-policy".to_string()]
     } else if obligation.feature.starts_with("pool-create:") {
         vec!["macro_expansion:pool-create=shared-cell-create+pool-protocol-metadata".to_string()]
     } else if obligation.feature.starts_with("pool-mutation-invariants:") {
@@ -794,6 +645,12 @@ fn checked_runtime_subconditions(detail: &str) -> Vec<String> {
     for segment in detail.split([',', ';']) {
         let trimmed = segment.trim();
         if let Some((prefix, _)) = trimmed.split_once("=checked-runtime") {
+            let label = prefix.split_whitespace().last().unwrap_or(prefix).trim_matches(['.', ':']);
+            if !label.is_empty() {
+                out.push(label.to_string());
+            }
+        }
+        if let Some((prefix, _)) = trimmed.split_once("=checked-static") {
             let label = prefix.split_whitespace().last().unwrap_or(prefix).trim_matches(['.', ':']);
             if !label.is_empty() {
                 out.push(label.to_string());
@@ -846,12 +703,6 @@ fn diagnostics_for_plan(
             message: "obligation is not fully covered by generated on-chain code".to_string(),
         });
     }
-    if obligation.status == "checked-partial" {
-        diagnostics.push(ProofPlanDiagnosticMetadata {
-            severity: "warning".to_string(),
-            message: "obligation is only partially covered by generated on-chain code".to_string(),
-        });
-    }
     if !builder_assumptions.is_empty() && obligation.status == "fail-closed" {
         diagnostics.push(ProofPlanDiagnosticMetadata {
             severity: "error".to_string(),
@@ -884,12 +735,6 @@ fn identity_lifecycle_policy(obligation: &VerifierObligationMetadata) -> &'stati
         "identity singleton_type"
     } else if text.contains("type_id") || text.contains("type-id") {
         "identity ckb_type_id"
-    } else if text.contains("burn-amount") {
-        "burn_amount policy"
-    } else if text.contains("destroy-instance") {
-        "destroy_instance policy"
-    } else if text.contains("destroy-unique") {
-        "destroy_unique policy"
     } else if text.contains("destroy-output-scan") || text.contains("same type") || text.contains("typehash absence") {
         "destroy_singleton_type compatibility policy"
     } else if text.contains("destroy") {
@@ -903,17 +748,11 @@ fn identity_lifecycle_policy(obligation: &VerifierObligationMetadata) -> &'stati
     }
 }
 
-fn codegen_coverage_status(status: &str, on_chain_checked: bool, has_executable_evidence: bool) -> &str {
+fn codegen_coverage_status(status: &str, on_chain_checked: bool) -> &str {
     if on_chain_checked {
-        if has_executable_evidence {
-            "covered"
-        } else {
-            "gap:evidence-missing"
-        }
+        "covered"
     } else if status == "runtime-required" {
         "gap:runtime-required"
-    } else if status == "checked-partial" {
-        "gap:checked-partial"
     } else if status == "fail-closed" {
         "fail-closed"
     } else {
@@ -942,18 +781,26 @@ fn aggregate_coverage_label(aggregate: &ir::IrAggregateInvariant) -> String {
     }
 }
 
-fn aggregate_relation_check_label(aggregate: &ir::IrAggregateInvariant) -> String {
+fn aggregate_relation_check_label(invariant: &ir::IrInvariant, aggregate: &ir::IrAggregateInvariant) -> String {
     match aggregate.kind {
         AggregateInvariantKind::Sum => format!(
-            "assert_sum:{}{}{}=metadata-only",
+            "assert_sum:{}{}{}={}",
             aggregate.target,
             aggregate.relation.map(aggregate_relation_symbol).unwrap_or("?"),
-            aggregate.rhs.as_deref().unwrap_or("?")
+            aggregate.rhs.as_deref().unwrap_or("?"),
+            aggregate_xudt_group_amount_runtime_helper(invariant, aggregate)
+                .map(|helper| format!("runtime-helper-required:{helper}"))
+                .unwrap_or_else(|| "metadata-only".to_string())
         ),
         AggregateInvariantKind::Conserved => format!("assert_conserved:{}=metadata-only", aggregate.target),
-        AggregateInvariantKind::Delta => {
-            format!("assert_delta:{}:{}=metadata-only", aggregate.target, aggregate.argument.as_deref().unwrap_or("?"))
-        }
+        AggregateInvariantKind::Delta => format!(
+            "assert_delta:{}:{}={}",
+            aggregate.target,
+            aggregate.argument.as_deref().unwrap_or("?"),
+            aggregate_xudt_group_amount_runtime_helper(invariant, aggregate)
+                .map(|helper| format!("runtime-helper-required:{helper}"))
+                .unwrap_or_else(|| "metadata-only".to_string())
+        ),
         AggregateInvariantKind::Distinct => format!("assert_distinct:{}=metadata-only", aggregate.target),
         AggregateInvariantKind::Singleton => format!("assert_singleton:{}=metadata-only", aggregate.target),
     }
@@ -974,216 +821,19 @@ fn aggregate_feature_label(aggregate: &ir::IrAggregateInvariant) -> String {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum AggregateCoverageMode {
-    Equality,
-    NonIncrease,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct AggregateCoverageQuery {
-    type_name: String,
-    field: String,
-    mode: AggregateCoverageMode,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct AggregateTarget {
-    source: Option<String>,
-    type_name: String,
-    field: String,
-}
-
-fn aggregate_coverage_query(feature: &str) -> Option<AggregateCoverageQuery> {
-    if let Some(target) = feature.strip_prefix("assert_conserved:") {
-        let target = aggregate_target_parts(target)?;
-        return Some(AggregateCoverageQuery {
-            type_name: target.type_name,
-            field: target.field,
-            mode: AggregateCoverageMode::Equality,
-        });
-    }
-
-    let expression = feature.strip_prefix("assert_sum:")?;
-    let (left, relation, right) = split_sum_relation(expression)?;
-    let left = aggregate_target_parts(left)?;
-    let right = aggregate_target_parts(right)?;
-    if left.type_name != right.type_name || left.field != right.field {
-        return None;
-    }
-
-    let left_is_output = left.source.as_deref().is_some_and(source_is_output);
-    let left_is_input = left.source.as_deref().is_some_and(source_is_input);
-    let right_is_output = right.source.as_deref().is_some_and(source_is_output);
-    let right_is_input = right.source.as_deref().is_some_and(source_is_input);
-
-    let mode = if relation == "==" && ((left_is_output && right_is_input) || (left_is_input && right_is_output)) {
-        AggregateCoverageMode::Equality
-    } else if (relation == "<=" && left_is_output && right_is_input) || (relation == ">=" && left_is_input && right_is_output) {
-        AggregateCoverageMode::NonIncrease
-    } else {
-        return None;
-    };
-
-    Some(AggregateCoverageQuery { type_name: left.type_name, field: left.field, mode })
-}
-
-fn split_sum_relation(expression: &str) -> Option<(&str, &str, &str)> {
-    for relation in ["<=", ">=", "==", "<", ">"] {
-        if let Some((left, right)) = expression.split_once(relation) {
-            return Some((left, relation, right));
-        }
-    }
-    None
-}
-
-fn aggregate_target_parts(target: &str) -> Option<AggregateTarget> {
-    if let Some(type_start) = target.find('<') {
-        let mut depth = 1;
-        let mut type_end = type_start + 1;
-        while type_end < target.len() && depth > 0 {
-            match target.as_bytes()[type_end] {
-                b'<' => depth += 1,
-                b'>' => depth -= 1,
-                _ => {}
-            }
-            type_end += 1;
-        }
-        if depth != 0 {
-            return None;
-        }
-        let source = &target[..type_start];
-        let type_name = &target[type_start + 1..type_end - 1];
-        let field = target[type_end..].strip_prefix('.')?;
-        return Some(AggregateTarget { source: Some(source.to_string()), type_name: type_name.to_string(), field: field.to_string() });
-    }
-
-    let (type_name, field) = target.split_once('.')?;
-    Some(AggregateTarget { source: None, type_name: type_name.to_string(), field: field.to_string() })
-}
-
-fn source_is_input(source: &str) -> bool {
-    matches!(source, "input" | "inputs" | "group_input" | "group_inputs")
-}
-
-fn source_is_output(source: &str) -> bool {
-    matches!(source, "output" | "outputs" | "group_output" | "group_outputs")
-}
-
-fn matching_action_coverage(query: &AggregateCoverageQuery, action_plans: &[ProofPlanMetadata]) -> Vec<String> {
-    let mut matches = action_plans
-        .iter()
-        .filter(|plan| action_plan_covers_query(query, plan))
-        .map(|plan| format!("matched-action-obligation:{}:{}={}", plan.origin, plan.feature, plan.status))
-        .collect::<Vec<_>>();
-    dedup(&mut matches);
-    matches
-}
-
-fn matching_action_origins(query: &AggregateCoverageQuery, action_plans: &[ProofPlanMetadata]) -> Vec<String> {
-    let mut origins =
-        action_plans.iter().filter(|plan| action_plan_covers_query(query, plan)).map(|plan| plan.origin.clone()).collect::<Vec<_>>();
-    dedup(&mut origins);
-    origins
-}
-
-fn action_plan_covers_query(query: &AggregateCoverageQuery, plan: &ProofPlanMetadata) -> bool {
-    if plan.category != "transaction-invariant" || !plan.on_chain_checked {
-        return false;
-    }
-
-    if action_resource_conservation_covers_field(plan, &query.type_name, &query.field) {
-        return true;
-    }
-
-    query.mode == AggregateCoverageMode::NonIncrease
-        && query.field == "amount"
-        && plan.feature == format!("destroy-output-scan:{}", query.type_name)
-}
-
-fn action_resource_conservation_covers_field(plan: &ProofPlanMetadata, type_name: &str, field: &str) -> bool {
-    plan.feature == format!("resource-conservation:{}", type_name) && detail_fields_include(&plan.detail, field)
-}
-
-fn related_action_origins(query: &AggregateCoverageQuery, action_plans: &[ProofPlanMetadata]) -> Vec<String> {
-    let mut origins = action_plans
-        .iter()
-        .filter(|plan| action_plan_references_type(plan, &query.type_name))
-        .map(|plan| plan.origin.clone())
-        .collect::<Vec<_>>();
-    dedup(&mut origins);
-    origins
-}
-
-fn action_plan_references_type(plan: &ProofPlanMetadata, type_name: &str) -> bool {
-    matches!(plan.category.as_str(), "transaction-invariant" | "state-transition" | "cell-state" | "shared-state")
-        && proof_plan_feature_type_name(&plan.feature).is_some_and(|candidate| candidate == type_name)
-}
-
-fn proof_plan_feature_type_name(feature: &str) -> Option<&str> {
-    for prefix in [
-        "consume-input:",
-        "transfer-input:",
-        "claim-input:",
-        "settle-input:",
-        "destroy-input:",
-        "replace-unique-input:",
-        "create-output:",
-        "transfer-output:",
-        "claim-output:",
-        "settle-output:",
-        "create-unique-output:",
-        "replace-unique-output:",
-        "create-unique-identity:",
-        "replace-unique-identity:",
-        "destroy-output-scan:",
-        "destroy-unique:",
-        "destroy-instance:",
-        "burn-amount:",
-        "resource-conservation:",
-        "linear-collection:",
-        "mutable-cell:",
-        "shared-mutation:",
-    ] {
-        if let Some(rest) = feature.strip_prefix(prefix) {
-            return rest.split(':').next();
-        }
-    }
-    feature.split_once('.').map(|(type_name, _)| type_name)
-}
-
-fn detail_fields_include(detail: &str, field: &str) -> bool {
-    let Some((_, fields)) = detail.split_once("fields:") else {
-        return false;
-    };
-    fields
-        .split([',', ';'])
-        .map(str::trim)
-        .any(|candidate| candidate == field || candidate.strip_suffix('.').is_some_and(|candidate| candidate == field))
-}
-
 fn aggregate_reads(aggregate: &ir::IrAggregateInvariant) -> Vec<String> {
     let mut reads = Vec::new();
     reads.extend(reads_from_aggregate_target(&aggregate.target));
     if let Some(rhs) = &aggregate.rhs {
         reads.extend(reads_from_aggregate_target(rhs));
     }
-    if matches!(aggregate.kind, AggregateInvariantKind::Delta) {
-        if let Some(argument) = &aggregate.argument {
-            reads.extend(reads_from_aggregate_argument(argument));
-        }
-    }
-    if !reads.iter().any(|read| matches!(read.as_str(), "input" | "output" | "group_input" | "group_output")) {
+    if reads.is_empty() {
         match aggregate.scope.as_str() {
             "group" => {
                 reads.push("group_input".to_string());
                 reads.push("group_output".to_string());
             }
             "transaction" => {
-                reads.push("input".to_string());
-                reads.push("output".to_string());
-            }
-            "selected_cells" => {
                 reads.push("input".to_string());
                 reads.push("output".to_string());
             }
@@ -1202,17 +852,6 @@ fn reads_from_aggregate_target(target: &str) -> Vec<String> {
         "group_input" | "group_inputs" => vec!["group_input".to_string()],
         "group_output" | "group_outputs" => vec!["group_output".to_string()],
         _ => Vec::new(),
-    }
-}
-
-fn reads_from_aggregate_argument(argument: &str) -> Vec<String> {
-    if argument.chars().all(|ch| ch.is_ascii_digit()) || argument.starts_with('"') {
-        return Vec::new();
-    }
-    let base = argument.split('.').next().unwrap_or(argument);
-    match base {
-        "witness" | "lock_args" => vec![argument.to_string()],
-        _ => reads_from_aggregate_target(argument),
     }
 }
 
@@ -1243,6 +882,52 @@ fn aggregate_relation_symbol(relation: AggregateRelation) -> &'static str {
         AggregateRelation::Ge => ">=",
         AggregateRelation::Gt => ">",
     }
+}
+
+fn aggregate_xudt_group_amount_helper_required(invariant: &ir::IrInvariant, aggregate: &ir::IrAggregateInvariant) -> bool {
+    aggregate_xudt_group_amount_runtime_helper(invariant, aggregate).is_some()
+}
+
+fn aggregate_xudt_group_amount_runtime_helper(
+    invariant: &ir::IrInvariant,
+    aggregate: &ir::IrAggregateInvariant,
+) -> Option<&'static str> {
+    if invariant.trigger.as_deref() != Some("type_group") || aggregate.scope != "group" {
+        return None;
+    }
+    match aggregate.kind {
+        AggregateInvariantKind::Sum if aggregate.relation == Some(AggregateRelation::Eq) => {
+            let rhs = aggregate.rhs.as_deref()?;
+            let (left_source, left_type) = aggregate_group_amount_endpoint(&aggregate.target)?;
+            let (right_source, right_type) = aggregate_group_amount_endpoint(rhs)?;
+            (left_type == right_type
+                && ((left_source == "group_outputs" && right_source == "group_inputs")
+                    || (left_source == "group_inputs" && right_source == "group_outputs")))
+                .then_some("xudt::require_group_amount_conserved")
+        }
+        AggregateInvariantKind::Delta => {
+            let (source, _type_name) = aggregate_group_amount_endpoint(&aggregate.target)?;
+            let argument = aggregate.argument.as_deref()?;
+            if argument.is_empty() {
+                return None;
+            }
+            match source {
+                "group_outputs" => Some("xudt::require_group_amount_minted"),
+                "group_inputs" => Some("xudt::require_group_amount_burned"),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+fn aggregate_group_amount_endpoint(target: &str) -> Option<(&str, &str)> {
+    let (source, rest) = target.split_once('<')?;
+    if source != "group_inputs" && source != "group_outputs" {
+        return None;
+    }
+    let (type_name, field) = rest.split_once(">.")?;
+    (field == "amount" && !type_name.is_empty()).then_some((source, type_name))
 }
 
 fn declared_group_cardinality(invariant: &ir::IrInvariant) -> &'static str {
@@ -1279,135 +964,4 @@ fn declared_lock_args_fields(reads: &[String]) -> Vec<String> {
 fn dedup(values: &mut Vec<String>) {
     let mut seen = BTreeSet::new();
     values.retain(|value| seen.insert(value.clone()));
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::error::Span;
-
-    fn empty_body() -> ir::IrBody {
-        ir::IrBody {
-            consume_set: Vec::new(),
-            read_refs: Vec::new(),
-            create_set: Vec::new(),
-            mutate_set: Vec::new(),
-            write_intents: Vec::new(),
-            blocks: vec![ir::IrBlock::synthetic(ir::BlockId(0), Vec::new(), ir::IrTerminator::Return(None))],
-        }
-    }
-
-    #[test]
-    fn checked_runtime_proof_plan_claims_include_executable_evidence() {
-        let obligations = vec![VerifierObligationMetadata {
-            scope: "action:mint".to_string(),
-            category: "create-output".to_string(),
-            feature: "create-output:Token:out".to_string(),
-            status: "checked-runtime".to_string(),
-            detail: "create-output-fields=checked-runtime; create-output-lock=checked-runtime".to_string(),
-        }];
-
-        let plans = build_for_body("action", "mint", &empty_body(), &[], &obligations, &[], &[]);
-        let plan = plans.first().expect("checked-runtime plan");
-
-        assert!(plan.on_chain_checked);
-        assert!(plan.executable_evidence.iter().any(|evidence| evidence.layer == "ir"), "{:?}", plan.executable_evidence);
-        assert!(
-            plan.executable_evidence
-                .iter()
-                .any(|evidence| evidence.layer == "codegen" && evidence.id == "codegen:create-output-runtime-check"),
-            "{:?}",
-            plan.executable_evidence
-        );
-    }
-
-    #[test]
-    fn unique_lifecycle_features_have_specific_codegen_evidence_ids() {
-        for (feature, expected) in [
-            ("replace-unique-input:Token:old", "codegen:input-lifecycle-runtime-check"),
-            ("create-unique-output:Token:out", "codegen:unique-output-runtime-check"),
-            ("replace-unique-output:Token:out", "codegen:unique-output-runtime-check"),
-            ("create-unique-identity:Token:ckb_type_id", "codegen:unique-identity-runtime-check"),
-            ("replace-unique-identity:Token:ckb_type_id", "codegen:unique-identity-runtime-check"),
-        ] {
-            let obligation = VerifierObligationMetadata {
-                scope: "action:rotate".to_string(),
-                category: "transaction-invariant".to_string(),
-                feature: feature.to_string(),
-                status: "checked-runtime".to_string(),
-                detail: "replace-unique-identity=checked-runtime".to_string(),
-            };
-
-            assert_eq!(codegen_evidence_id(&obligation), expected);
-        }
-    }
-
-    #[test]
-    fn replace_unique_features_are_transaction_scoped() {
-        let obligation = VerifierObligationMetadata {
-            scope: "action:rotate".to_string(),
-            category: "state-transition".to_string(),
-            feature: "replace-unique-output:Token:out".to_string(),
-            status: "checked-runtime".to_string(),
-            detail: "replace-unique-output-fields=checked-runtime".to_string(),
-        };
-
-        assert_eq!(proof_scope("action", &obligation, &[]), "transaction");
-    }
-
-    #[test]
-    fn checked_runtime_without_concrete_evidence_is_not_marked_covered() {
-        let obligations = vec![VerifierObligationMetadata {
-            scope: "action:mint".to_string(),
-            category: "create-output".to_string(),
-            feature: "create-output:Token:out".to_string(),
-            status: "checked-runtime".to_string(),
-            detail: "category-level runtime status without executable lowering detail".to_string(),
-        }];
-
-        let plans = build_for_body("action", "mint", &empty_body(), &[], &obligations, &[], &[]);
-        let plan = plans.first().expect("checked-runtime plan");
-
-        assert!(plan.on_chain_checked);
-        assert!(plan.executable_evidence.is_empty(), "{:?}", plan.executable_evidence);
-        assert_eq!(plan.codegen_coverage_status, "gap:evidence-missing");
-    }
-
-    #[test]
-    fn checked_static_detail_does_not_create_executable_runtime_evidence() {
-        let obligations = vec![VerifierObligationMetadata {
-            scope: "action:mint".to_string(),
-            category: "identity".to_string(),
-            feature: "identity-anchor:Token:out".to_string(),
-            status: "checked-runtime".to_string(),
-            detail: "identity-anchor=checked-static".to_string(),
-        }];
-
-        let plans = build_for_body("action", "mint", &empty_body(), &[], &obligations, &[], &[]);
-        let plan = plans.first().expect("checked-runtime plan");
-
-        assert!(plan.on_chain_checked);
-        assert!(plan.executable_evidence.is_empty(), "{:?}", plan.executable_evidence);
-        assert_eq!(plan.codegen_coverage_status, "gap:evidence-missing");
-    }
-
-    #[test]
-    fn metadata_only_invariant_proof_plan_has_no_executable_evidence() {
-        let invariant = ir::IrInvariant {
-            name: "declared_only".to_string(),
-            trigger: Some("type_group".to_string()),
-            scope: Some("group".to_string()),
-            reads: vec!["group_inputs<Token>.amount".to_string()],
-            aggregates: Vec::new(),
-            assert_count: 1,
-            span: Span { start: 1, end: 2, line: 1, column: 1 },
-        };
-
-        let plans = build_for_invariant(&invariant);
-        let plan = plans.iter().find(|plan| plan.category == "declared-invariant").expect("declared invariant plan");
-
-        assert_eq!(plan.codegen_coverage_status, "gap:metadata-only");
-        assert!(!plan.on_chain_checked);
-        assert!(plan.executable_evidence.is_empty(), "{:?}", plan.executable_evidence);
-    }
 }

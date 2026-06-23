@@ -15,8 +15,7 @@ impl Span {
     }
 
     pub fn combine(&self, other: &Span) -> Span {
-        let (line, column) = if other.start < self.start { (other.line, other.column) } else { (self.line, self.column) };
-        Span { start: self.start.min(other.start), end: self.end.max(other.end), line, column }
+        Span { start: self.start.min(other.start), end: self.end.max(other.end), line: self.line, column: self.column }
     }
 }
 
@@ -26,39 +25,50 @@ impl fmt::Display for Span {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DiagnosticSeverity {
+    #[default]
+    Error,
+    Warning,
+}
+
+impl DiagnosticSeverity {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Error => "error",
+            Self::Warning => "warning",
+        }
+    }
+
+    fn colour(self) -> &'static str {
+        match self {
+            Self::Error => "\x1b[31m",
+            Self::Warning => "\x1b[33m",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct CompileError {
     pub message: String,
     pub span: Span,
     pub file: Option<Utf8PathBuf>,
     pub code: Option<String>,
+    pub severity: DiagnosticSeverity,
 }
 
 impl CompileError {
     pub fn new(message: impl Into<String>, span: Span) -> Self {
-        Self { message: message.into(), span, file: None, code: None }
+        Self { message: message.into(), span, file: None, code: None, severity: DiagnosticSeverity::Error }
     }
 
-    pub fn aggregate(errors: Vec<Self>) -> Self {
-        let mut errors = errors.into_iter();
-        let Some(first) = errors.next() else {
-            return Self::without_span("no compile errors to aggregate");
-        };
-        let rest = errors.collect::<Vec<_>>();
-        if rest.is_empty() {
-            return first;
-        }
+    pub fn warning(message: impl Into<String>, span: Span) -> Self {
+        Self::new(message, span).with_severity(DiagnosticSeverity::Warning)
+    }
 
-        let total = rest.len() + 1;
-        let mut message = format!("{} compile errors:\n1. {}", total, first.message);
-        for (index, error) in rest.iter().enumerate() {
-            message.push_str(&format!("\n{}. {}", index + 2, error.message));
-            if error.span != Span::default() {
-                message.push_str(&format!(" (line {}, column {})", error.span.line, error.span.column));
-            }
-        }
-
-        Self { message, span: first.span, file: first.file, code: first.code }
+    pub fn with_severity(mut self, severity: DiagnosticSeverity) -> Self {
+        self.severity = severity;
+        self
     }
 
     pub fn with_code(mut self, code: impl Into<String>) -> Self {
@@ -127,8 +137,6 @@ pub type Result<T> = std::result::Result<T, CompileError>;
 /// mode they appear as warnings with migration hints instead.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MigrationDiagnostic {
-    /// CS0150: legacy `has transfer` capability must be expressed as kernel effects
-    Cs0150,
     /// CS0151: legacy `has destroy` capability must be expressed as kernel effects
     Cs0151,
     /// CS0152: `Address` cannot be used as `LockHash` without a resolver
@@ -154,7 +162,6 @@ pub enum MigrationDiagnostic {
 impl MigrationDiagnostic {
     pub fn code(self) -> &'static str {
         match self {
-            Self::Cs0150 => "CS0150",
             Self::Cs0151 => "CS0151",
             Self::Cs0152 => "CS0152",
             Self::Cs0153 => "CS0153",
@@ -170,7 +177,6 @@ impl MigrationDiagnostic {
 
     pub fn message(self) -> &'static str {
         match self {
-            Self::Cs0150 => "legacy transfer capability must use replace + relock kernel effects",
             Self::Cs0151 => "legacy destroy capability must use consume + burn kernel effects",
             Self::Cs0152 => "Address cannot be used as LockHash without a resolver",
             Self::Cs0153 => "CKB entry role must be explicit",
@@ -186,9 +192,6 @@ impl MigrationDiagnostic {
 
     pub fn hint(self) -> &'static str {
         match self {
-            Self::Cs0150 => {
-                "replace `has transfer` with `has replace, relock`; use explicit lifecycle proof forms for transfer semantics"
-            }
             Self::Cs0151 => {
                 "replace `has destroy` with `has consume, burn`; use a policy-specific destruction form when the proof needs one"
             }
@@ -198,7 +201,7 @@ impl MigrationDiagnostic {
             Self::Cs0155 => {
                 "add `identity = ckb_type_id` to the resource declaration and use create_unique/replace_unique/destroy_unique"
             }
-            Self::Cs0156 => "replace `has transfer` with `has replace, relock` and `has destroy` with `has consume, burn`",
+            Self::Cs0156 => "replace `has destroy` with `has consume, burn`",
             Self::Cs0157 => "add `preserve_layout<T>()` or `migrate_layout<T>(from=..., to=...)` to the replacement",
             Self::Cs0158 => "add `trigger:` and `scope:` to the invariant declaration",
             Self::Cs0159 => "add `acknowledge_coverage` or restructure to `scope: group`",
@@ -210,109 +213,91 @@ impl MigrationDiagnostic {
     pub fn full_message(self) -> String {
         format!("{}: {}\n  hint: {}", self.code(), self.message(), self.hint())
     }
+
+    pub fn warning(self, span: Span) -> CompileError {
+        CompileError::warning(self.full_message(), span).with_code(self.code())
+    }
+
+    pub fn error(self, span: Span) -> CompileError {
+        CompileError::new(self.full_message(), span).with_code(self.code())
+    }
 }
 
 pub struct ErrorReporter {
-    errors: Vec<CompileError>,
+    diagnostics: Vec<CompileError>,
     source: String,
     filename: Option<Utf8PathBuf>,
 }
 
 impl ErrorReporter {
     pub fn new(source: String, filename: Option<Utf8PathBuf>) -> Self {
-        Self { errors: Vec::new(), source, filename }
+        Self { diagnostics: Vec::new(), source, filename }
     }
 
     pub fn report(&mut self, message: impl Into<String>, span: Span) {
-        let mut error = CompileError::new(message, span);
+        self.push(CompileError::new(message, span));
+    }
+
+    pub fn report_warning(&mut self, message: impl Into<String>, span: Span) {
+        self.push(CompileError::warning(message, span));
+    }
+
+    fn push(&mut self, diagnostic: CompileError) {
+        let mut diagnostic = diagnostic;
         if let Some(ref file) = self.filename {
-            error = error.with_file(file.clone());
+            diagnostic = diagnostic.with_file(file.clone());
         }
-        self.errors.push(error);
+        self.diagnostics.push(diagnostic);
     }
 
     pub fn has_errors(&self) -> bool {
-        !self.errors.is_empty()
+        self.diagnostics.iter().any(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
     }
 
     pub fn errors(&self) -> &[CompileError] {
-        &self.errors
+        &self.diagnostics
     }
 
     pub fn print_errors(&self) {
-        for error in &self.errors {
-            eprintln!("\x1b[31merror\x1b[0m: {}", error);
-            if let Some((_, line)) = source_line(&self.source, error.span.line) {
-                eprintln!("  \x1b[34m{}\x1b[0m | {}", error.span.line, line);
-                let (padding, width) = caret_padding_and_width(&self.source, error.span);
-                let spaces = " ".repeat(padding);
-                let carets = "^".repeat(width);
-                eprintln!("{}\x1b[32m{}\x1b[0m", spaces, carets);
+        for diagnostic in &self.diagnostics {
+            eprintln!("{}{}\x1b[0m: {}", diagnostic.severity.colour(), diagnostic.severity.label(), diagnostic);
+            if let Some(line) = self.source.lines().nth(diagnostic.span.line.saturating_sub(1)) {
+                eprintln!("  \x1b[34m{}\x1b[0m | {}", diagnostic.span.line, line);
+                let spaces = " ".repeat(diagnostic.span.line.to_string().len() + 3);
+                let carets = "^".repeat(diagnostic.span.end.saturating_sub(diagnostic.span.start).max(1));
+                eprintln!("{}  \x1b[32m{}\x1b[0m", spaces, carets);
             }
         }
     }
-}
-
-fn source_line(source: &str, target_line: usize) -> Option<(usize, &str)> {
-    if target_line == 0 {
-        return None;
-    }
-
-    let mut current_line = 1usize;
-    let mut line_start = 0usize;
-    for (idx, ch) in source.char_indices() {
-        if ch == '\n' {
-            if current_line == target_line {
-                let line = source[line_start..idx].strip_suffix('\r').unwrap_or(&source[line_start..idx]);
-                return Some((line_start, line));
-            }
-            current_line = current_line.saturating_add(1);
-            line_start = idx + ch.len_utf8();
-        }
-    }
-
-    if current_line == target_line {
-        let line = source[line_start..].strip_suffix('\r').unwrap_or(&source[line_start..]);
-        Some((line_start, line))
-    } else {
-        None
-    }
-}
-
-fn caret_padding_and_width(source: &str, span: Span) -> (usize, usize) {
-    let gutter_width = span.line.to_string().len() + 5;
-    let Some((line_start, line)) = source_line(source, span.line) else {
-        return (gutter_width + span.column.saturating_sub(1), span.end.saturating_sub(span.start).max(1));
-    };
-
-    let line_end = line_start + line.len();
-    let span_start = span.start.clamp(line_start, line_end);
-    let span_end = span.end.clamp(span_start, line_end);
-    let start_columns =
-        source.get(line_start..span_start).map(str::chars).map(Iterator::count).unwrap_or_else(|| span.column.saturating_sub(1));
-    let width = source.get(span_start..span_end).map(str::chars).map(Iterator::count).filter(|count| *count > 0).unwrap_or(1);
-
-    (gutter_width + start_columns, width)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{caret_padding_and_width, Span};
+    use super::*;
 
     #[test]
-    fn caret_padding_starts_at_span_column() {
-        let source = "let answer = 42\n";
-        let span = Span::new(4, 10, 1, 5);
-
-        assert_eq!(caret_padding_and_width(source, span), (10, 6));
+    fn compile_error_defaults_to_error_severity() {
+        let error = CompileError::new("boom", Span::default());
+        assert_eq!(error.severity, DiagnosticSeverity::Error);
     }
 
     #[test]
-    fn caret_width_counts_characters_not_bytes() {
-        let source = "let café = 1\n";
-        let start = source.find("café").expect("fixture contains non-ascii word");
-        let span = Span::new(start, start + "café".len(), 1, 5);
+    fn error_reporter_distinguishes_warnings_from_errors() {
+        let mut reporter = ErrorReporter::new("let x = 1".to_string(), None);
+        reporter.report_warning("compatibility note", Span::new(0, 3, 1, 1));
+        assert!(!reporter.has_errors());
+        assert_eq!(reporter.errors()[0].severity, DiagnosticSeverity::Warning);
 
-        assert_eq!(caret_padding_and_width(source, span), (10, 4));
+        reporter.report("hard failure", Span::new(4, 5, 1, 5));
+        assert!(reporter.has_errors());
+        assert_eq!(reporter.errors()[1].severity, DiagnosticSeverity::Error);
+    }
+
+    #[test]
+    fn migration_diagnostic_can_build_typed_warning() {
+        let warning = MigrationDiagnostic::Cs0151.warning(Span::new(0, 3, 1, 1));
+        assert_eq!(warning.severity, DiagnosticSeverity::Warning);
+        assert_eq!(warning.code.as_deref(), Some("CS0151"));
+        assert!(warning.message.contains("legacy destroy capability"));
     }
 }

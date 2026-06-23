@@ -6,8 +6,6 @@ const MAX_SIGNERS: u8 = 10
 
 const DEFAULT_TIMEOUT: u64 = 1440
 
-const U64_MAX: u64 = 18446744073709551615
-
 enum ProposalStatus {
     Pending,
     Executed,
@@ -64,118 +62,116 @@ receipt ExecutionRecord has create {
     success: bool,
 }
 
-action create_wallet(wallet_id: Hash, signers: Vec<Address>, threshold: u8, current_time: u64) -> wallet: MultisigWallet
-where
-    assert(signers.len() >= MIN_SIGNERS as usize, "Not enough signers")
-    assert(signers.len() <= MAX_SIGNERS as usize, "Too many signers")
-    assert(threshold >= MIN_SIGNERS && threshold <= signers.len() as u8, "Invalid threshold")
-    for i in 0..signers.len() {
-        for j in i + 1..signers.len() {
-            assert(signers[i] != signers[j], "Duplicate signer")
+action create_wallet(wallet_id: Hash, signers: Vec<Address>, threshold: u8, current_time: u64) -> wallet: MultisigWallet {
+    verification
+        require signers.len() >= MIN_SIGNERS as usize, "Not enough signers"
+        require signers.len() <= MAX_SIGNERS as usize, "Too many signers"
+        require threshold >= MIN_SIGNERS && threshold <= signers.len() as u8, "Invalid threshold"
+        for i in 0..signers.len() {
+            for j in i + 1..signers.len() {
+                require signers[i] != signers[j], "Duplicate signer"
+            }
         }
-    }
-    create wallet = MultisigWallet { wallet_id, signers, threshold, nonce: 0, created_at: current_time }
+        create wallet = MultisigWallet { wallet_id, signers, threshold, nonce: 0, created_at: current_time }
 
-action propose_transfer(wallet_before: MultisigWallet, proposer: Address, target: Address, amount: u64, current_time: u64) -> (wallet_after: MultisigWallet, proposal: Proposal)
-where
-    assert(is_signer(&wallet_before, proposer), "Not a signer")
-    assert(amount > 0, "Amount must be positive")
-    assert(target != Address::zero(), "Invalid target address")
-    assert(wallet_before.nonce < U64_MAX, "proposal id overflow")
-    assert(current_time <= U64_MAX - DEFAULT_TIMEOUT, "proposal expiry overflow")
-    let proposal_id = wallet_before.nonce + 1
-    require wallet_after.wallet_id == wallet_before.wallet_id
-    require wallet_after.signers == wallet_before.signers
-    require wallet_after.threshold == wallet_before.threshold
-    require wallet_after.nonce == proposal_id
-    require wallet_after.created_at == wallet_before.created_at
-    create proposal = Proposal { wallet_id: wallet_before.wallet_id, proposal_id, proposer, operation: OperationType::Transfer, target, amount, data: [], required_signatures: wallet_before.threshold, signatures: [], created_at: current_time, expires_at: current_time + DEFAULT_TIMEOUT, state: ProposalStatus::Pending }
+}
+action propose_transfer(wallet_before: MultisigWallet, proposer: Address, target: Address, amount: u64, current_time: u64) -> (wallet_after: MultisigWallet, proposal: Proposal) {
+    verification
+        require is_signer(&wallet_before, proposer), "Not a signer"
+        require amount > 0, "Amount must be positive"
+        require target != Address::zero(), "Invalid target address"
+        let proposal_id = wallet_before.nonce + 1
+        require wallet_after.wallet_id == wallet_before.wallet_id
+        require wallet_after.signers == wallet_before.signers
+        require wallet_after.threshold == wallet_before.threshold
+        require wallet_after.nonce == proposal_id
+        require wallet_after.created_at == wallet_before.created_at
+        create proposal = Proposal { wallet_id: wallet_before.wallet_id, proposal_id, proposer, operation: OperationType::Transfer, target, amount, data: [], required_signatures: wallet_before.threshold, signatures: [], created_at: current_time, expires_at: current_time + DEFAULT_TIMEOUT, state: ProposalStatus::Pending }
 
-action add_signature(proposal_before: Proposal, read wallet: MultisigWallet, signer: Address, signature: [u8; 64], current_time: u64) -> (proposal_after: Proposal, confirmation: SignatureConfirmation)
-where
-    assert(current_time < proposal_before.expires_at, "Proposal expired")
-    assert(is_signer(wallet, signer), "Not a signer")
-    assert(!has_signed(&proposal_before, signer), "Already signed")
-    assert(proposal_before.signatures.len() < wallet.signers.len(), "too many signatures")
-    require proposal_after.wallet_id == proposal_before.wallet_id
-    require proposal_after.proposal_id == proposal_before.proposal_id
-    require proposal_after.proposer == proposal_before.proposer
-    require proposal_after.operation == proposal_before.operation
-    require proposal_after.target == proposal_before.target
-    require proposal_after.amount == proposal_before.amount
-    require proposal_after.data == proposal_before.data
-    require proposal_after.required_signatures == proposal_before.required_signatures
-    require proposal_after.signatures.len() == proposal_before.signatures.len() + 1
-    require proposal_after.created_at == proposal_before.created_at
-    require proposal_after.expires_at == proposal_before.expires_at
-    require proposal_after.state == proposal_before.state
-    create confirmation = SignatureConfirmation { proposal_id: proposal_before.proposal_id, signer, timestamp: current_time }
+}
+action add_signature(proposal_before: Proposal, read wallet: MultisigWallet, signer: Address, signature: [u8; 64], current_time: u64) -> (proposal_after: Proposal, confirmation: SignatureConfirmation) {
+    verification
+        require current_time < proposal_before.expires_at, "Proposal expired"
+        require is_signer(wallet, signer), "Not a signer"
+        require !has_signed(&proposal_before, signer), "Already signed"
+        require proposal_after.wallet_id == proposal_before.wallet_id
+        require proposal_after.proposal_id == proposal_before.proposal_id
+        require proposal_after.proposer == proposal_before.proposer
+        require proposal_after.operation == proposal_before.operation
+        require proposal_after.target == proposal_before.target
+        require proposal_after.amount == proposal_before.amount
+        require proposal_after.data == proposal_before.data
+        require proposal_after.required_signatures == proposal_before.required_signatures
+        require proposal_after.signatures.len() == proposal_before.signatures.len() + 1
+        require proposal_after.created_at == proposal_before.created_at
+        require proposal_after.expires_at == proposal_before.expires_at
+        require proposal_after.state == proposal_before.state
+        create confirmation = SignatureConfirmation { proposal_id: proposal_before.proposal_id, signer, timestamp: current_time }
 
-action execute_proposal(read wallet: MultisigWallet, proposal: Proposal, executor: Address, current_time: u64) -> record: ExecutionRecord
-where
-    assert(is_signer(wallet, executor), "Not a signer")
-    assert(current_time < proposal.expires_at, "Proposal expired")
-    assert(proposal.signatures.len() >= proposal.required_signatures as usize, "Not enough signatures")
-    assert(proposal.wallet_id == wallet.wallet_id, "Wallet mismatch")
-    let success = match proposal.operation { OperationType::Transfer => { true }, _ => { false } }
-    destroy proposal
-    create record = ExecutionRecord { proposal_id: proposal.proposal_id, executor, executed_at: current_time, success }
+}
+action execute_proposal(read wallet: MultisigWallet, proposal: Proposal, executor: Address, current_time: u64) -> record: ExecutionRecord {
+    verification
+        require is_signer(wallet, executor), "Not a signer"
+        require current_time < proposal.expires_at, "Proposal expired"
+        require proposal.signatures.len() >= proposal.required_signatures as usize, "Not enough signatures"
+        require proposal.wallet_id == wallet.wallet_id, "Wallet mismatch"
+        let success = match proposal.operation { OperationType::Transfer => { true }, _ => { false } }
+        destroy proposal
+        create record = ExecutionRecord { proposal_id: proposal.proposal_id, executor, executed_at: current_time, success }
 
-action cancel_proposal(read wallet: MultisigWallet, proposal: Proposal, canceller: Address)
-where
-    assert(proposal.proposer == canceller, "Only proposer can cancel")
-    assert(proposal.wallet_id == wallet.wallet_id, "Wallet mismatch")
-    destroy proposal
+}
+action cancel_proposal(read wallet: MultisigWallet, proposal: Proposal, canceller: Address) {
+    verification
+        require proposal.proposer == canceller, "Only proposer can cancel"
+        require proposal.wallet_id == wallet.wallet_id, "Wallet mismatch"
+        destroy proposal
 
-action propose_add_signer(wallet_before: MultisigWallet, proposer: Address, new_signer: Address, current_time: u64) -> (wallet_after: MultisigWallet, proposal: Proposal)
-where
-    assert(is_signer(&wallet_before, proposer), "Not a signer")
-    assert(!is_signer(&wallet_before, new_signer), "Already a signer")
-    assert(wallet_before.signers.len() < MAX_SIGNERS as usize, "Max signers reached")
-    assert(wallet_before.nonce < U64_MAX, "proposal id overflow")
-    assert(current_time <= U64_MAX - DEFAULT_TIMEOUT, "proposal expiry overflow")
-    let proposal_id = wallet_before.nonce + 1
-    require wallet_after.wallet_id == wallet_before.wallet_id
-    require wallet_after.signers == wallet_before.signers
-    require wallet_after.threshold == wallet_before.threshold
-    require wallet_after.nonce == proposal_id
-    require wallet_after.created_at == wallet_before.created_at
-    let mut data: Vec<u8> = []
-    data.extend_from_slice(&new_signer.0)
-    create proposal = Proposal { wallet_id: wallet_before.wallet_id, proposal_id, proposer, operation: OperationType::AddSigner, target: new_signer, amount: 0, data, required_signatures: wallet_before.threshold, signatures: [], created_at: current_time, expires_at: current_time + DEFAULT_TIMEOUT, state: ProposalStatus::Pending }
+}
+action propose_add_signer(wallet_before: MultisigWallet, proposer: Address, new_signer: Address, current_time: u64) -> (wallet_after: MultisigWallet, proposal: Proposal) {
+    verification
+        require is_signer(&wallet_before, proposer), "Not a signer"
+        require !is_signer(&wallet_before, new_signer), "Already a signer"
+        require wallet_before.signers.len() < MAX_SIGNERS as usize, "Max signers reached"
+        let proposal_id = wallet_before.nonce + 1
+        require wallet_after.wallet_id == wallet_before.wallet_id
+        require wallet_after.signers == wallet_before.signers
+        require wallet_after.threshold == wallet_before.threshold
+        require wallet_after.nonce == proposal_id
+        require wallet_after.created_at == wallet_before.created_at
+        let mut data: Vec<u8> = []
+        data.extend_from_slice(&new_signer.0)
+        create proposal = Proposal { wallet_id: wallet_before.wallet_id, proposal_id, proposer, operation: OperationType::AddSigner, target: new_signer, amount: 0, data, required_signatures: wallet_before.threshold, signatures: [], created_at: current_time, expires_at: current_time + DEFAULT_TIMEOUT, state: ProposalStatus::Pending }
 
-action propose_remove_signer(wallet_before: MultisigWallet, proposer: Address, signer_to_remove: Address, current_time: u64) -> (wallet_after: MultisigWallet, proposal: Proposal)
-where
-    assert(is_signer(&wallet_before, proposer), "Not a signer")
-    assert(is_signer(&wallet_before, signer_to_remove), "Not a signer")
-    assert(wallet_before.signers.len() > 0, "empty signer set")
-    assert(wallet_before.signers.len() - 1 >= wallet_before.threshold as usize, "Would fall below threshold")
-    assert(wallet_before.nonce < U64_MAX, "proposal id overflow")
-    assert(current_time <= U64_MAX - DEFAULT_TIMEOUT, "proposal expiry overflow")
-    let proposal_id = wallet_before.nonce + 1
-    require wallet_after.wallet_id == wallet_before.wallet_id
-    require wallet_after.signers == wallet_before.signers
-    require wallet_after.threshold == wallet_before.threshold
-    require wallet_after.nonce == proposal_id
-    require wallet_after.created_at == wallet_before.created_at
-    create proposal = Proposal { wallet_id: wallet_before.wallet_id, proposal_id, proposer, operation: OperationType::RemoveSigner, target: signer_to_remove, amount: 0, data: [], required_signatures: wallet_before.threshold, signatures: [], created_at: current_time, expires_at: current_time + DEFAULT_TIMEOUT, state: ProposalStatus::Pending }
+}
+action propose_remove_signer(wallet_before: MultisigWallet, proposer: Address, signer_to_remove: Address, current_time: u64) -> (wallet_after: MultisigWallet, proposal: Proposal) {
+    verification
+        require is_signer(&wallet_before, proposer), "Not a signer"
+        require is_signer(&wallet_before, signer_to_remove), "Not a signer"
+        require wallet_before.signers.len() - 1 >= wallet_before.threshold as usize, "Would fall below threshold"
+        let proposal_id = wallet_before.nonce + 1
+        require wallet_after.wallet_id == wallet_before.wallet_id
+        require wallet_after.signers == wallet_before.signers
+        require wallet_after.threshold == wallet_before.threshold
+        require wallet_after.nonce == proposal_id
+        require wallet_after.created_at == wallet_before.created_at
+        create proposal = Proposal { wallet_id: wallet_before.wallet_id, proposal_id, proposer, operation: OperationType::RemoveSigner, target: signer_to_remove, amount: 0, data: [], required_signatures: wallet_before.threshold, signatures: [], created_at: current_time, expires_at: current_time + DEFAULT_TIMEOUT, state: ProposalStatus::Pending }
 
-action propose_change_threshold(wallet_before: MultisigWallet, proposer: Address, new_threshold: u8, current_time: u64) -> (wallet_after: MultisigWallet, proposal: Proposal)
-where
-    assert(is_signer(&wallet_before, proposer), "Not a signer")
-    assert(new_threshold >= MIN_SIGNERS && new_threshold <= wallet_before.signers.len() as u8, "Invalid threshold")
-    assert(wallet_before.nonce < U64_MAX, "proposal id overflow")
-    assert(current_time <= U64_MAX - DEFAULT_TIMEOUT, "proposal expiry overflow")
-    let proposal_id = wallet_before.nonce + 1
-    require wallet_after.wallet_id == wallet_before.wallet_id
-    require wallet_after.signers == wallet_before.signers
-    require wallet_after.threshold == wallet_before.threshold
-    require wallet_after.nonce == proposal_id
-    require wallet_after.created_at == wallet_before.created_at
-    let mut data: Vec<u8> = []
-    data.push(new_threshold)
-    create proposal = Proposal { wallet_id: wallet_before.wallet_id, proposal_id, proposer, operation: OperationType::ChangeThreshold, target: Address::zero(), amount: new_threshold as u64, data, required_signatures: wallet_before.threshold, signatures: [], created_at: current_time, expires_at: current_time + DEFAULT_TIMEOUT, state: ProposalStatus::Pending }
+}
+action propose_change_threshold(wallet_before: MultisigWallet, proposer: Address, new_threshold: u8, current_time: u64) -> (wallet_after: MultisigWallet, proposal: Proposal) {
+    verification
+        require is_signer(&wallet_before, proposer), "Not a signer"
+        require new_threshold >= MIN_SIGNERS && new_threshold <= wallet_before.signers.len() as u8, "Invalid threshold"
+        let proposal_id = wallet_before.nonce + 1
+        require wallet_after.wallet_id == wallet_before.wallet_id
+        require wallet_after.signers == wallet_before.signers
+        require wallet_after.threshold == wallet_before.threshold
+        require wallet_after.nonce == proposal_id
+        require wallet_after.created_at == wallet_before.created_at
+        let mut data: Vec<u8> = []
+        data.push(new_threshold)
+        create proposal = Proposal { wallet_id: wallet_before.wallet_id, proposal_id, proposer, operation: OperationType::ChangeThreshold, target: Address::zero(), amount: new_threshold as u64, data, required_signatures: wallet_before.threshold, signatures: [], created_at: current_time, expires_at: current_time + DEFAULT_TIMEOUT, state: ProposalStatus::Pending }
 
+}
 fn is_signer(wallet: &MultisigWallet, addr: Address) -> bool {
     for signer in &wallet.signers {
         if *signer == addr {
@@ -195,21 +191,26 @@ fn has_signed(proposal: &Proposal, addr: Address) -> bool {
 }
 
 lock is_signer_lock(protected wallet: MultisigWallet, witness addr: Address) -> bool {
-    require is_signer(wallet, addr)
-}
+    verification
+        require is_signer(wallet, addr)
 
+}
 lock can_execute(protected proposal: Proposal, witness current_time: u64) -> bool {
-    require proposal.signatures.len() >= proposal.required_signatures as usize && current_time < proposal.expires_at
-}
+    verification
+        require proposal.signatures.len() >= proposal.required_signatures as usize && current_time < proposal.expires_at
 
+}
 lock can_cancel(protected proposal: Proposal, witness caller: Address) -> bool {
-    require proposal.proposer == caller
-}
+    verification
+        require proposal.proposer == caller
 
+}
 lock has_enough_signatures(protected proposal: Proposal) -> bool {
-    require proposal.signatures.len() >= proposal.required_signatures as usize
-}
+    verification
+        require proposal.signatures.len() >= proposal.required_signatures as usize
 
+}
 lock not_expired(protected proposal: Proposal, witness current_time: u64) -> bool {
-    require current_time < proposal.expires_at
+    verification
+        require current_time < proposal.expires_at
 }

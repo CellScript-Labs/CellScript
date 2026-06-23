@@ -20,7 +20,7 @@ The acceptance target is:
    transactions and prove they do not consume live state.
 
 The `rwa_receipt_lifecycle` scenario is now covered in the V1 readiness matrix.
-Production remains blocked by the shared external attestation requirements and
-the external legal/registry review boundary.
+Public/mainnet RWA release claims still require the shared external attestation
+requirements and the external legal/registry review boundary.
 
 See [DEVNET_FULL_ACCEPTANCE_RUNBOOK.md](../../DEVNET_FULL_ACCEPTANCE_RUNBOOK.md) for prerequisites, freshness rules, and the full command sequence.

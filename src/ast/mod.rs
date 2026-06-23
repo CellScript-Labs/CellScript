@@ -135,9 +135,8 @@ pub struct FlowDef {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Capability {
-    // v0.14 compat capabilities
+    // v0.14 compat capability (Destroy is a protocol verb, prefer consume+burn kernel effects)
     Store,
-    Transfer,
     Destroy,
     // v0.15 kernel effect capabilities
     Create,
@@ -153,13 +152,12 @@ impl Capability {
     /// Returns true if this capability is a v0.14-era protocol verb
     /// that is not allowed in `--primitive-strict=0.15` mode.
     pub fn is_protocol_verb(self) -> bool {
-        matches!(self, Self::Transfer | Self::Destroy)
+        matches!(self, Self::Destroy)
     }
 
     /// Map a protocol capability to its kernel effect equivalents.
     pub fn kernel_effects(self) -> Vec<Capability> {
         match self {
-            Self::Transfer => vec![Self::Replace, Self::Relock],
             Self::Destroy => vec![Self::Consume, Self::Burn],
             other => vec![other],
         }
@@ -302,6 +300,7 @@ pub enum Type {
     U8,
     U16,
     U32,
+    I32,
     U64,
     U128,
     Bool,
@@ -319,7 +318,7 @@ pub enum Type {
 pub enum Stmt {
     Let(LetStmt),
     Expr(Expr),
-    Return(ReturnStmt),
+    Return(Option<Expr>),
     If(IfStmt),
     For(ForStmt),
     While(WhileStmt),
@@ -338,12 +337,6 @@ pub struct LetStmt {
     pub ty: Option<Type>,
     pub value: Expr,
     pub is_mut: bool,
-    pub span: Span,
-}
-
-#[derive(Debug, Clone)]
-pub struct ReturnStmt {
-    pub value: Option<Expr>,
     pub span: Span,
 }
 
@@ -372,11 +365,11 @@ pub struct WhileStmt {
 
 #[derive(Debug, Clone)]
 pub enum Expr {
-    Integer(u64, Span),
-    Bool(bool, Span),
-    String(String, Span),
-    ByteString(Vec<u8>, Span),
-    Identifier(String, Span),
+    Integer(u64),
+    Bool(bool),
+    String(String),
+    ByteString(Vec<u8>),
+    Identifier(String),
     Assign(AssignExpr),
     Binary(BinaryExpr),
     Unary(UnaryExpr),
@@ -385,7 +378,6 @@ pub enum Expr {
     Index(IndexExpr),
     Create(CreateExpr),
     Consume(ConsumeExpr),
-    Transfer(TransferExpr),
     Destroy(DestroyExpr),
     ReadRef(ReadRefExpr),
     Claim(ClaimExpr),
@@ -396,9 +388,9 @@ pub enum Expr {
     Require(RequireExpr),
     RequireBlock(RequireBlockExpr),
     Preserve(PreserveExpr),
-    Block(Vec<Stmt>, Span),
-    Tuple(Vec<Expr>, Span),
-    Array(Vec<Expr>, Span),
+    Block(Vec<Stmt>),
+    Tuple(Vec<Expr>),
+    Array(Vec<Expr>),
     If(IfExpr),
     Cast(CastExpr),
     Range(RangeExpr),
@@ -411,14 +403,11 @@ impl Expr {
     /// Return the source span of this expression.
     pub fn span(&self) -> Span {
         match self {
-            Expr::Integer(_, span)
-            | Expr::Bool(_, span)
-            | Expr::String(_, span)
-            | Expr::ByteString(_, span)
-            | Expr::Identifier(_, span)
-            | Expr::Block(_, span)
-            | Expr::Tuple(_, span)
-            | Expr::Array(_, span) => *span,
+            Expr::Integer(_) => Span::default(), // primitives carry no span
+            Expr::Bool(_) => Span::default(),
+            Expr::String(_) => Span::default(),
+            Expr::ByteString(_) => Span::default(),
+            Expr::Identifier(_) => Span::default(),
             Expr::Assign(e) => e.span,
             Expr::Binary(e) => e.span,
             Expr::Unary(e) => e.span,
@@ -427,7 +416,6 @@ impl Expr {
             Expr::Index(e) => e.span,
             Expr::Create(e) => e.span,
             Expr::Consume(e) => e.span,
-            Expr::Transfer(e) => e.span,
             Expr::Destroy(e) => e.span,
             Expr::ReadRef(e) => e.span,
             Expr::Claim(e) => e.span,
@@ -438,6 +426,9 @@ impl Expr {
             Expr::Require(e) => e.span,
             Expr::RequireBlock(e) => e.span,
             Expr::Preserve(e) => e.span,
+            Expr::Block(_) => Span::default(),
+            Expr::Tuple(_) => Span::default(),
+            Expr::Array(_) => Span::default(),
             Expr::If(e) => e.span,
             Expr::Cast(e) => e.span,
             Expr::Range(e) => e.span,
@@ -535,13 +526,6 @@ pub struct CreateExpr {
 #[derive(Debug, Clone)]
 pub struct ConsumeExpr {
     pub expr: Box<Expr>,
-    pub span: Span,
-}
-
-#[derive(Debug, Clone)]
-pub struct TransferExpr {
-    pub expr: Box<Expr>,
-    pub to: Box<Expr>,
     pub span: Span,
 }
 

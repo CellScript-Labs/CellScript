@@ -24,23 +24,6 @@ pub struct BuilderAssumptionMetadata {
     pub detail: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ExpectedCellDepBinding {
-    dep_source: String,
-    index: usize,
-    name: Option<String>,
-    dep_type: Option<String>,
-    tx_hash: Option<String>,
-    out_index: Option<u32>,
-    hash_type: Option<String>,
-    data_hash: Option<String>,
-    artifact_hash: Option<String>,
-    role: Option<String>,
-    verifier_id: Option<String>,
-    ipc_abi: Option<String>,
-    type_id: Option<String>,
-}
-
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TxValidationReport {
     pub status: String,
@@ -129,28 +112,21 @@ pub fn builder_assumptions_from_metadata(metadata: &CompileMetadata) -> Vec<Buil
             codegen_coverage_status: "builder-required".to_string(),
             status: "builder-required".to_string(),
             detail: detail.to_string(),
-            executable_evidence: Vec::new(),
             diagnostics: Vec::new(),
         };
         push_assumption(&mut assumptions, &mut seen, &synthetic, "capacity_policy", detail.to_string());
     }
 
-    enrich_manifest_bound_spawn_target_assumptions(&mut assumptions, metadata);
-
     assumptions
 }
 
 pub fn validate_transaction_against_metadata(metadata: &CompileMetadata, tx: &Value) -> TxValidationReport {
-    let mut assumptions = if metadata.runtime.builder_assumptions.is_empty() {
+    let assumptions = if metadata.runtime.builder_assumptions.is_empty() {
         builder_assumptions_from_metadata(metadata)
     } else {
         metadata.runtime.builder_assumptions.clone()
     };
-    enrich_manifest_bound_spawn_target_assumptions(&mut assumptions, metadata);
-    let mut report = validate_transaction_against_assumptions(&assumptions, tx);
-    validate_scoped_action_artifact_not_used_as_output_type_identity(metadata, tx, &mut report.violations);
-    report.status = if report.violations.is_empty() { "ok".to_string() } else { "failed".to_string() };
-    report
+    validate_transaction_against_assumptions(&assumptions, tx)
 }
 
 pub fn validate_transaction_against_assumptions(assumptions: &[BuilderAssumptionMetadata], tx: &Value) -> TxValidationReport {
@@ -169,35 +145,21 @@ pub fn validate_transaction_against_assumptions(assumptions: &[BuilderAssumption
         if !assumption.required_outputs.is_empty() && output_count == 0 {
             push_violation(&mut violations, assumption, "transaction has no outputs required by this assumption");
         }
-        if !assumption.required_cell_deps.is_empty() {
-            if let Some(expected) = expected_spawn_cell_dep_binding(assumption) {
-                if cell_dep_count <= expected.index {
-                    push_violation(
-                        &mut violations,
-                        assumption,
-                        &format!("transaction is missing required {} for this spawn target", expected.dep_source),
-                    );
-                } else {
-                    validate_spawn_target_cell_dep_in_tx(tx, assumption, &expected, &mut violations);
-                }
-            } else if cell_dep_count == 0 {
-                push_violation(&mut violations, assumption, "transaction has no cell_deps required by this assumption");
-            }
+        if !assumption.required_cell_deps.is_empty() && cell_dep_count == 0 {
+            push_violation(&mut violations, assumption, "transaction has no cell_deps required by this assumption");
         }
         if !assumption.required_witness_fields.is_empty() && witness_count == 0 {
             push_violation(&mut violations, assumption, "transaction has no witnesses required by this assumption");
         }
-        let structural_binding_evidence_required = requires_structural_binding_evidence(assumption);
-        if requires_explicit_evidence(&assumption.kind) || structural_binding_evidence_required {
+        if requires_explicit_evidence(&assumption.kind) {
             match validate_assumption_evidence(tx, assumption) {
                 EvidenceValidation::Valid => {}
                 EvidenceValidation::Missing => {
-                    let message = if structural_binding_evidence_required {
-                        "missing builder_assumption_evidence entry for this assumption's wildcard structural read bindings"
-                    } else {
-                        "missing builder_assumption_evidence entry for this non-structural assumption"
-                    };
-                    push_violation(&mut violations, assumption, message);
+                    push_violation(
+                        &mut violations,
+                        assumption,
+                        "missing builder_assumption_evidence entry for this non-structural assumption",
+                    );
                 }
                 EvidenceValidation::Invalid(message) => push_violation(&mut violations, assumption, &message),
             }
@@ -259,8 +221,6 @@ fn classify_plan_assumption(plan: &ProofPlanMetadata, assumption: &str) -> &'sta
     let text = format!("{} {} {}", plan.feature, plan.detail, assumption).to_ascii_lowercase();
     if text.contains("lock transaction scan") || text.contains("only protects the lock group") {
         "lock_group_transaction_scope"
-    } else if plan.category == "spawn-target" || plan.feature.starts_with("spawn-target:") || text.contains("spawn target") {
-        "spawn_target_cell_dep_binding"
     } else if text.contains("runtime-required") {
         "runtime_required_proof_plan"
     } else if text.contains("metadata-only") {
@@ -284,106 +244,8 @@ fn required_reads(plan: &ProofPlanMetadata, reads: &[&str]) -> Vec<String> {
     reads.iter().filter(|read| plan.reads.iter().any(|actual| actual == **read)).map(|read| format!("{}:*", read)).collect()
 }
 
-fn enrich_manifest_bound_spawn_target_assumptions(assumptions: &mut [BuilderAssumptionMetadata], metadata: &CompileMetadata) {
-    let Some(ckb) = metadata.constraints.ckb.as_ref() else {
-        return;
-    };
-    let spawn_references = ckb
-        .script_references
-        .iter()
-        .filter(|reference| {
-            reference.purpose == "spawn-target"
-                && reference.status == "builder-required-manifest-bound-cell-dep"
-                && reference.dep_source.starts_with("CellDep#")
-        })
-        .collect::<Vec<_>>();
-    if spawn_references.is_empty() {
-        return;
-    }
-
-    for assumption in assumptions.iter_mut().filter(|assumption| assumption.kind == "spawn_target_cell_dep_binding") {
-        let reference = spawn_references
-            .iter()
-            .find(|reference| assumption.detail.contains(&format!("'{}'", reference.name)))
-            .copied()
-            .or_else(|| (spawn_references.len() == 1).then_some(spawn_references[0]));
-        let Some(reference) = reference else {
-            continue;
-        };
-        let Some(index) = parse_cell_dep_source_index(&reference.dep_source) else {
-            continue;
-        };
-        let dep = ckb.dep_group_manifest.declared_cell_deps.get(index);
-        let dep_type = dep.map(|dep| dep.dep_type.as_str()).unwrap_or("code");
-        let mut required = format!("{}:name={}:dep_type={}", reference.dep_source, reference.name, dep_type);
-        if let Some(tx_hash) = dep.and_then(|dep| dep.tx_hash.as_deref()) {
-            required.push_str(&format!(":tx_hash={tx_hash}"));
-        }
-        if let Some(out_index) = dep.and_then(|dep| dep.index) {
-            required.push_str(&format!(":out_index={out_index}"));
-        }
-        if let Some(hash_type) = dep.and_then(|dep| dep.hash_type.as_deref()) {
-            required.push_str(&format!(":hash_type={hash_type}"));
-        }
-        if let Some(data_hash) = dep.and_then(|dep| dep.data_hash.as_deref()) {
-            required.push_str(&format!(":data_hash={data_hash}"));
-        }
-        if let Some(artifact_hash) = dep.and_then(|dep| dep.artifact_hash.as_deref()) {
-            required.push_str(&format!(":artifact_hash={artifact_hash}"));
-        }
-        if let Some(role) = dep.and_then(|dep| dep.role.as_deref()) {
-            required.push_str(&format!(":role={role}"));
-        }
-        if let Some(verifier_id) = dep.and_then(|dep| dep.verifier_id.as_deref()) {
-            required.push_str(&format!(":verifier_id={verifier_id}"));
-        }
-        if let Some(ipc_abi) = dep.and_then(|dep| dep.ipc_abi.as_deref()) {
-            required.push_str(&format!(":ipc_abi={ipc_abi}"));
-        }
-        if let Some(type_id) = dep.and_then(|dep| dep.type_id.as_deref()) {
-            required.push_str(&format!(":type_id={type_id}"));
-        }
-        assumption.required_cell_deps = vec![required];
-        if !assumption.detail.contains("builder_assumption_evidence must identify") {
-            assumption.detail.push_str(&format!(
-                "; builder_assumption_evidence must identify {} name={} dep_type={}",
-                reference.dep_source, reference.name, dep_type
-            ));
-        }
-    }
-}
-
-fn parse_cell_dep_source_index(dep_source: &str) -> Option<usize> {
-    dep_source.strip_prefix("CellDep#")?.parse().ok()
-}
-
 fn json_array_len(tx: &Value, key: &str) -> usize {
     tx.get(key).and_then(Value::as_array).map_or(0, Vec::len)
-}
-
-fn validate_spawn_target_cell_dep_in_tx(
-    tx: &Value,
-    assumption: &BuilderAssumptionMetadata,
-    expected: &ExpectedCellDepBinding,
-    violations: &mut Vec<TxValidationViolation>,
-) {
-    let Some(cell_dep) = tx.get("cell_deps").and_then(Value::as_array).and_then(|cell_deps| cell_deps.get(expected.index)) else {
-        return;
-    };
-    let Some(object) = cell_dep.as_object() else {
-        push_violation(
-            violations,
-            assumption,
-            &format!("transaction {} must be an object carrying the manifest-bound spawn target identity", expected.dep_source),
-        );
-        return;
-    };
-
-    let mut mismatches = Vec::new();
-    validate_cell_dep_identity_fields(object, expected, "transaction cell_dep", false, &mut mismatches);
-    if !mismatches.is_empty() {
-        push_violation(violations, assumption, &mismatches.join("; "));
-    }
 }
 
 fn validate_assumption_evidence(tx: &Value, assumption: &BuilderAssumptionMetadata) -> EvidenceValidation {
@@ -393,7 +255,7 @@ fn validate_assumption_evidence(tx: &Value, assumption: &BuilderAssumptionMetada
         match value {
             Value::Array(items) => {
                 for item in items {
-                    match validate_evidence_item(item, None, assumption) {
+                    match validate_evidence_item(item, None, assumption, tx) {
                         EvidenceValidation::Valid => return EvidenceValidation::Valid,
                         EvidenceValidation::Missing => {}
                         EvidenceValidation::Invalid(message) => {
@@ -404,27 +266,15 @@ fn validate_assumption_evidence(tx: &Value, assumption: &BuilderAssumptionMetada
             }
             Value::Object(object) => {
                 if let Some(value) = object.get(&assumption.assumption_id) {
-                    if value.as_object().is_some_and(|entry| entry.get("assumption_id").and_then(Value::as_str).is_none()) {
-                        invalid.get_or_insert(
-                            "builder_assumption_evidence object must include an explicit assumption_id matching its map key"
-                                .to_string(),
-                        );
-                    } else {
-                        match validate_evidence_item(value, Some(&assumption.assumption_id), assumption) {
-                            EvidenceValidation::Valid => return EvidenceValidation::Valid,
-                            EvidenceValidation::Missing => {
-                                invalid.get_or_insert(
-                                    "builder_assumption_evidence map value must be an evidence object for this assumption".to_string(),
-                                );
-                            }
-                            EvidenceValidation::Invalid(message) => {
-                                invalid.get_or_insert(message);
-                            }
+                    match validate_evidence_item(value, Some(&assumption.assumption_id), assumption, tx) {
+                        EvidenceValidation::Valid => return EvidenceValidation::Valid,
+                        EvidenceValidation::Missing => {}
+                        EvidenceValidation::Invalid(message) => {
+                            invalid.get_or_insert(message);
                         }
                     }
-                    continue;
                 }
-                match validate_evidence_item(value, None, assumption) {
+                match validate_evidence_item(value, None, assumption, tx) {
                     EvidenceValidation::Valid => return EvidenceValidation::Valid,
                     EvidenceValidation::Missing => {}
                     EvidenceValidation::Invalid(message) => {
@@ -438,13 +288,18 @@ fn validate_assumption_evidence(tx: &Value, assumption: &BuilderAssumptionMetada
     invalid.map(EvidenceValidation::Invalid).unwrap_or(EvidenceValidation::Missing)
 }
 
-fn validate_evidence_item(item: &Value, map_key: Option<&str>, assumption: &BuilderAssumptionMetadata) -> EvidenceValidation {
+fn validate_evidence_item(
+    item: &Value,
+    map_key: Option<&str>,
+    assumption: &BuilderAssumptionMetadata,
+    tx: &Value,
+) -> EvidenceValidation {
     match item {
         Value::String(id) if id == &assumption.assumption_id => EvidenceValidation::Invalid(
             "builder_assumption_evidence must be an object with assumption_id, kind, origin, feature, proof_plan_status, and evidence payload"
                 .to_string(),
         ),
-        Value::Object(object) => validate_evidence_object(object, map_key, assumption),
+        Value::Object(object) => validate_evidence_object(object, map_key, assumption, tx),
         Value::Bool(true) if map_key == Some(assumption.assumption_id.as_str()) => EvidenceValidation::Invalid(
             "builder_assumption_evidence map values must be evidence objects, not booleans".to_string(),
         ),
@@ -456,15 +311,11 @@ fn validate_evidence_object(
     object: &serde_json::Map<String, Value>,
     map_key: Option<&str>,
     assumption: &BuilderAssumptionMetadata,
+    tx: &Value,
 ) -> EvidenceValidation {
-    let Some(id) = object.get("assumption_id").and_then(Value::as_str) else {
-        return if map_key == Some(assumption.assumption_id.as_str()) {
-            EvidenceValidation::Invalid(
-                "builder_assumption_evidence object must include an explicit assumption_id matching its map key".to_string(),
-            )
-        } else {
-            EvidenceValidation::Missing
-        };
+    let id = object.get("assumption_id").and_then(Value::as_str).or(map_key);
+    let Some(id) = id else {
+        return EvidenceValidation::Missing;
     };
     if id != assumption.assumption_id {
         return if map_key == Some(assumption.assumption_id.as_str()) {
@@ -486,15 +337,11 @@ fn validate_evidence_object(
     }
 
     let payload = object.get("evidence").or_else(|| object.get("payload"));
-    let has_payload = payload.is_some_and(structured_evidence_payload);
-    if !has_payload {
-        mismatches.push(format!(
-            "builder_assumption_evidence for {} must include structured evidence or payload as a non-empty object or array",
-            assumption.assumption_id
-        ));
-    }
-    if let Some(payload) = payload {
-        validate_spawn_target_evidence_payload(payload, assumption, &mut mismatches);
+    if !payload.is_some_and(non_empty_evidence_payload) {
+        mismatches
+            .push(format!("builder_assumption_evidence for {} must include non-empty evidence or payload", assumption.assumption_id));
+    } else if let Some(payload) = payload {
+        validate_evidence_payload_shape(&mut mismatches, payload, assumption, tx);
     }
 
     if mismatches.is_empty() {
@@ -504,6 +351,361 @@ fn validate_evidence_object(
     }
 }
 
+fn validate_evidence_payload_shape(mismatches: &mut Vec<String>, payload: &Value, assumption: &BuilderAssumptionMetadata, tx: &Value) {
+    let Some(object) = payload.as_object() else {
+        mismatches.push("evidence payload must be an object with concrete transaction evidence".to_string());
+        return;
+    };
+
+    if !assumption.required_inputs.is_empty() {
+        require_payload_array(
+            mismatches,
+            object,
+            &["inputs", "input_cells", "required_inputs"],
+            "input evidence for required input or group_input reads",
+        );
+        validate_payload_array_items(
+            mismatches,
+            object,
+            &["inputs", "input_cells", "required_inputs"],
+            "inputs",
+            tx,
+            "input evidence",
+            &["index", "out_point", "type_hash", "lock_hash", "capacity"],
+            None,
+        );
+    }
+    if !assumption.required_outputs.is_empty() {
+        require_payload_array(
+            mismatches,
+            object,
+            &["outputs", "output_cells", "required_outputs"],
+            "output evidence for required output or group_output reads",
+        );
+        validate_payload_array_items(
+            mismatches,
+            object,
+            &["outputs", "output_cells", "required_outputs"],
+            "outputs",
+            tx,
+            "output evidence",
+            &["index", "type_hash", "lock_hash", "capacity", "data"],
+            None,
+        );
+    }
+    if !assumption.required_cell_deps.is_empty() {
+        require_payload_array(
+            mismatches,
+            object,
+            &["cell_deps", "required_cell_deps"],
+            "cell_dep evidence for required cell dependency reads",
+        );
+        validate_payload_array_items(
+            mismatches,
+            object,
+            &["cell_deps", "required_cell_deps"],
+            "cell_deps",
+            tx,
+            "cell_dep evidence",
+            &["index", "name", "out_point", "code_hash", "tx_hash", "dep_type"],
+            None,
+        );
+    }
+    if !assumption.required_witness_fields.is_empty() {
+        require_payload_array(
+            mismatches,
+            object,
+            &["witnesses", "witness_fields", "required_witness_fields"],
+            "witness evidence for required witness fields",
+        );
+        validate_payload_array_items(
+            mismatches,
+            object,
+            &["witnesses", "witness_fields", "required_witness_fields"],
+            "witnesses",
+            tx,
+            "witness evidence",
+            &["index", "field", "lock", "input_type", "output_type", "bytes"],
+            Some("field"),
+        );
+    }
+
+    if assumption.kind == "capacity_policy" || assumption.capacity_policy != "none" {
+        require_payload_u64(mismatches, object, "occupied_capacity_shannons");
+        require_payload_u64(mismatches, object, "tx_size_bytes");
+        require_payload_array_present(mismatches, object, &["under_capacity_output_indexes"], "under-capacity output index evidence");
+        if let Some(indexes) = object.get("under_capacity_output_indexes").and_then(Value::as_array) {
+            if !indexes.is_empty() {
+                mismatches.push("capacity evidence reports under-capacity outputs; transaction is not valid".to_string());
+            }
+            validate_index_values(mismatches, indexes, json_array_len(tx, "outputs"), "under_capacity_output_indexes");
+        }
+    }
+
+    if assumption.kind == "type_id_builder_plan" {
+        let has_type_id_object = object.get("type_id").is_some_and(|value| value.as_object().is_some_and(|object| !object.is_empty()));
+        let has_flat_fields = object.get("first_input_out_point").is_some()
+            && object.get("output_index").and_then(Value::as_u64).is_some()
+            && object.get("expected_type_id_args").and_then(Value::as_str).is_some_and(|value| !value.is_empty());
+        if !has_type_id_object && !has_flat_fields {
+            mismatches.push(
+                "type_id_builder_plan evidence must include type_id object or first_input_out_point/output_index/expected_type_id_args"
+                    .to_string(),
+            );
+        }
+        if let Some(type_id) = object.get("type_id").and_then(Value::as_object) {
+            validate_type_id_evidence(mismatches, type_id, tx);
+        } else {
+            validate_flat_type_id_evidence(mismatches, object, tx);
+        }
+    }
+
+    if assumption.kind == "create_unique_global_uniqueness" {
+        let checked = object.get("uniqueness_checked").and_then(Value::as_bool) == Some(true);
+        let proof = object.get("uniqueness_proof").or_else(|| object.get("unique_cell")).is_some_and(non_empty_evidence_payload);
+        if !checked && !proof {
+            mismatches.push(
+                "create_unique_global_uniqueness evidence must include uniqueness_checked=true or uniqueness_proof/unique_cell payload"
+                    .to_string(),
+            );
+        }
+    }
+
+    if assumption.kind == "lock_group_transaction_scope" {
+        let reviewed = object.get("transaction_scope_reviewed").and_then(Value::as_bool) == Some(true);
+        let groups = object.get("covered_lock_groups").is_some_and(non_empty_evidence_payload);
+        if !reviewed && !groups {
+            mismatches.push(
+                "lock_group_transaction_scope evidence must include transaction_scope_reviewed=true or covered_lock_groups"
+                    .to_string(),
+            );
+        }
+    }
+
+    if matches!(assumption.kind.as_str(), "metadata_only_gap" | "runtime_required_proof_plan") {
+        let manual_review = object.get("manual_review").is_some_and(non_empty_evidence_payload);
+        let checked = object.get("checked").and_then(Value::as_bool) == Some(true);
+        if !manual_review && !checked {
+            mismatches.push("metadata/runtime ProofPlan gap evidence must include manual_review payload or checked=true".to_string());
+        }
+    }
+}
+
+fn require_payload_array(mismatches: &mut Vec<String>, object: &serde_json::Map<String, Value>, fields: &[&str], label: &str) {
+    if fields.iter().any(|field| object.get(*field).is_some_and(|value| value.as_array().is_some_and(|items| !items.is_empty()))) {
+        return;
+    }
+    mismatches.push(format!("evidence payload must include non-empty {label} ({})", fields.join(" or ")));
+}
+
+fn require_payload_array_present(mismatches: &mut Vec<String>, object: &serde_json::Map<String, Value>, fields: &[&str], label: &str) {
+    if fields.iter().any(|field| object.get(*field).is_some_and(|value| value.as_array().is_some())) {
+        return;
+    }
+    mismatches.push(format!("evidence payload must include {label} array ({})", fields.join(" or ")));
+}
+
+fn require_payload_u64(mismatches: &mut Vec<String>, object: &serde_json::Map<String, Value>, field: &str) {
+    match object.get(field).and_then(Value::as_u64) {
+        Some(value) if value > 0 => {}
+        Some(_) => mismatches.push(format!("evidence payload numeric {field} must be greater than zero")),
+        None => mismatches.push(format!("evidence payload must include numeric {field}")),
+    }
+}
+
+fn validate_payload_array_items(
+    mismatches: &mut Vec<String>,
+    object: &serde_json::Map<String, Value>,
+    fields: &[&str],
+    tx_field: &str,
+    tx: &Value,
+    label: &str,
+    concrete_fields: &[&str],
+    required_string_field: Option<&str>,
+) {
+    let Some(items) = fields.iter().find_map(|field| object.get(*field).and_then(Value::as_array)) else {
+        return;
+    };
+    let tx_len = json_array_len(tx, tx_field);
+    for (position, item) in items.iter().enumerate() {
+        let Some(item_object) = item.as_object() else {
+            mismatches.push(format!("{label} item {position} must be an object with concrete transaction fields"));
+            continue;
+        };
+        if !concrete_fields.iter().any(|field| item_object.get(*field).is_some_and(non_empty_evidence_payload)) {
+            mismatches.push(format!("{label} item {position} must include one of {}", concrete_fields.join(", ")));
+        }
+        if let Some(required) = required_string_field {
+            if item_object.get(required).and_then(Value::as_str).is_none_or(|value| value.is_empty()) {
+                mismatches.push(format!("{label} item {position} must include non-empty {required}"));
+            }
+        }
+        match item_object.get("index").and_then(Value::as_u64) {
+            Some(index) => {
+                validate_single_index(mismatches, index, tx_len, &format!("{label} index"));
+                validate_evidence_item_matches_tx(mismatches, item_object, tx, tx_field, index as usize, label, position);
+            }
+            None => mismatches.push(format!("{label} item {position} must include numeric index binding to transaction {tx_field}")),
+        }
+    }
+}
+
+fn validate_index_values(mismatches: &mut Vec<String>, indexes: &[Value], tx_len: usize, label: &str) {
+    for (position, index) in indexes.iter().enumerate() {
+        match index.as_u64() {
+            Some(index) => validate_single_index(mismatches, index, tx_len, label),
+            None => mismatches.push(format!("{label} entry {position} must be a numeric output index")),
+        }
+    }
+}
+
+fn validate_single_index(mismatches: &mut Vec<String>, index: u64, tx_len: usize, label: &str) {
+    if index as usize >= tx_len {
+        mismatches.push(format!("{label} {index} is out of range for transaction array length {tx_len}"));
+    }
+}
+
+fn validate_evidence_item_matches_tx(
+    mismatches: &mut Vec<String>,
+    evidence: &serde_json::Map<String, Value>,
+    tx: &Value,
+    tx_field: &str,
+    index: usize,
+    label: &str,
+    position: usize,
+) {
+    let Some(tx_item) = tx.get(tx_field).and_then(Value::as_array).and_then(|items| items.get(index)) else {
+        return;
+    };
+    let Some(tx_object) = tx_item.as_object() else {
+        mismatches.push(format!("transaction {tx_field}[{index}] referenced by {label} item {position} must be an object"));
+        return;
+    };
+    for field in [
+        "source",
+        "out_point",
+        "type_hash",
+        "lock_hash",
+        "capacity",
+        "data",
+        "name",
+        "dep_type",
+        "code_hash",
+        "tx_hash",
+        "field",
+        "lock",
+        "input_type",
+        "output_type",
+        "bytes",
+    ] {
+        validate_matching_field(mismatches, evidence, tx_object, field, tx_field, index, label, position);
+    }
+    validate_matching_alias(mismatches, evidence, tx_object, "capacity", "capacity_shannons", tx_field, index, label, position);
+}
+
+fn validate_matching_field(
+    mismatches: &mut Vec<String>,
+    evidence: &serde_json::Map<String, Value>,
+    tx_object: &serde_json::Map<String, Value>,
+    field: &str,
+    tx_field: &str,
+    index: usize,
+    label: &str,
+    position: usize,
+) {
+    let Some(expected) = evidence.get(field) else {
+        return;
+    };
+    let Some(actual) = tx_object.get(field) else {
+        return;
+    };
+    if expected != actual {
+        mismatches.push(format!("{label} item {position} {field} does not match transaction {tx_field}[{index}].{field}"));
+    }
+}
+
+fn validate_matching_alias(
+    mismatches: &mut Vec<String>,
+    evidence: &serde_json::Map<String, Value>,
+    tx_object: &serde_json::Map<String, Value>,
+    evidence_field: &str,
+    tx_field_name: &str,
+    tx_field: &str,
+    index: usize,
+    label: &str,
+    position: usize,
+) {
+    let Some(expected) = evidence.get(evidence_field) else {
+        return;
+    };
+    let Some(actual) = tx_object.get(tx_field_name) else {
+        return;
+    };
+    if expected != actual {
+        mismatches
+            .push(format!("{label} item {position} {evidence_field} does not match transaction {tx_field}[{index}].{tx_field_name}"));
+    }
+}
+
+fn validate_type_id_evidence(mismatches: &mut Vec<String>, type_id: &serde_json::Map<String, Value>, tx: &Value) {
+    if type_id.get("first_input_out_point").and_then(Value::as_str).is_none_or(|value| value.is_empty()) {
+        mismatches.push("type_id evidence must include first_input_out_point".to_string());
+    }
+    match type_id.get("output_index").and_then(Value::as_u64) {
+        Some(index) => {
+            validate_single_index(mismatches, index, json_array_len(tx, "outputs"), "type_id output_index");
+            validate_type_id_matches_output(mismatches, type_id, tx, index as usize);
+        }
+        None => mismatches.push("type_id evidence must include numeric output_index".to_string()),
+    }
+    match type_id.get("expected_type_id_args").and_then(Value::as_str) {
+        Some(args) if canonical_hex_32(args) => {}
+        Some(_) => mismatches.push("type_id expected_type_id_args must be a canonical 0x-prefixed 32-byte hex string".to_string()),
+        None => mismatches.push("type_id evidence must include expected_type_id_args".to_string()),
+    }
+}
+
+fn validate_flat_type_id_evidence(mismatches: &mut Vec<String>, object: &serde_json::Map<String, Value>, tx: &Value) {
+    if object.get("first_input_out_point").is_some()
+        || object.get("output_index").is_some()
+        || object.get("expected_type_id_args").is_some()
+    {
+        validate_type_id_evidence(mismatches, object, tx);
+    }
+}
+
+fn validate_type_id_matches_output(
+    mismatches: &mut Vec<String>,
+    type_id: &serde_json::Map<String, Value>,
+    tx: &Value,
+    output_index: usize,
+) {
+    let Some(expected_args) = type_id.get("expected_type_id_args").and_then(Value::as_str) else {
+        return;
+    };
+    let Some(output) = tx.get("outputs").and_then(Value::as_array).and_then(|items| items.get(output_index)) else {
+        return;
+    };
+    let Some(actual_args) = output_type_args(output) else {
+        return;
+    };
+    if actual_args != expected_args {
+        mismatches.push(format!("type_id expected_type_id_args does not match transaction outputs[{output_index}] type args"));
+    }
+}
+
+fn output_type_args(output: &Value) -> Option<&str> {
+    output
+        .get("type_args")
+        .or_else(|| output.get("type").and_then(|ty| ty.get("args")))
+        .or_else(|| output.get("type_script").and_then(|ty| ty.get("args")))
+        .and_then(Value::as_str)
+}
+
+fn canonical_hex_32(value: &str) -> bool {
+    value.len() == 66 && value.starts_with("0x") && value[2..].bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
 fn push_evidence_mismatch(mismatches: &mut Vec<String>, object: &serde_json::Map<String, Value>, field: &str, expected: &str) {
     match object.get(field).and_then(Value::as_str) {
         Some(actual) if actual == expected => {}
@@ -511,204 +713,14 @@ fn push_evidence_mismatch(mismatches: &mut Vec<String>, object: &serde_json::Map
     }
 }
 
-fn structured_evidence_payload(value: &Value) -> bool {
+fn non_empty_evidence_payload(value: &Value) -> bool {
     match value {
+        Value::Null => false,
+        Value::Bool(_) | Value::Number(_) => true,
+        Value::String(text) => !text.is_empty(),
         Value::Array(items) => !items.is_empty(),
         Value::Object(object) => !object.is_empty(),
-        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => false,
     }
-}
-
-fn validate_spawn_target_evidence_payload(payload: &Value, assumption: &BuilderAssumptionMetadata, mismatches: &mut Vec<String>) {
-    let Some(expected) = expected_spawn_cell_dep_binding(assumption) else {
-        return;
-    };
-    let Some(object) = spawn_target_payload_object(payload) else {
-        mismatches.push("spawn_target_cell_dep_binding evidence must be an object identifying the required CellDep".to_string());
-        return;
-    };
-
-    validate_cell_dep_identity_fields(object, &expected, "spawn_target_cell_dep_binding evidence", true, mismatches);
-}
-
-fn spawn_target_payload_object(payload: &Value) -> Option<&serde_json::Map<String, Value>> {
-    let object = payload.as_object()?;
-    object.get("cell_dep").and_then(Value::as_object).or(Some(object))
-}
-
-fn evidence_dep_source_matches(object: &serde_json::Map<String, Value>, dep_source: &str, index: usize) -> bool {
-    let mut saw_locator = false;
-    let mut matches = true;
-    if let Some(actual) = object.get("dep_source").and_then(Value::as_str) {
-        saw_locator = true;
-        matches &= actual == dep_source;
-    }
-    match object.get("cell_dep_index") {
-        Some(Value::Number(number)) => {
-            saw_locator = true;
-            matches &= number.as_u64() == Some(index as u64);
-        }
-        Some(Value::String(text)) => {
-            saw_locator = true;
-            matches &= text.parse::<usize>().ok() == Some(index);
-        }
-        _ => {}
-    }
-    saw_locator && matches
-}
-
-fn first_string_field<'a>(object: &'a serde_json::Map<String, Value>, fields: &[&str]) -> Option<&'a str> {
-    fields.iter().find_map(|field| object.get(*field).and_then(Value::as_str))
-}
-
-fn first_u64_field(object: &serde_json::Map<String, Value>, fields: &[&str]) -> Option<u64> {
-    fields.iter().find_map(|field| match object.get(*field) {
-        Some(Value::Number(number)) => number.as_u64(),
-        Some(Value::String(text)) => text.parse::<u64>().ok(),
-        _ => None,
-    })
-}
-
-fn validate_cell_dep_identity_fields(
-    object: &serde_json::Map<String, Value>,
-    expected: &ExpectedCellDepBinding,
-    context: &str,
-    require_dep_source: bool,
-    mismatches: &mut Vec<String>,
-) {
-    if require_dep_source && !evidence_dep_source_matches(object, &expected.dep_source, expected.index) {
-        mismatches.push(format!("{context} must identify {} with cell_dep_index {}", expected.dep_source, expected.index));
-    }
-    if let Some(name) = expected.name.as_deref() {
-        match first_string_field(object, &["cell_dep_name", "name"]) {
-            Some(actual) if actual == name => {}
-            _ => mismatches.push(format!("{context} cell_dep_name must be '{name}'")),
-        }
-    }
-    if let Some(dep_type) = expected.dep_type.as_deref() {
-        match object.get("dep_type").and_then(Value::as_str) {
-            Some(actual) if actual == dep_type => {}
-            _ => mismatches.push(format!("{context} dep_type must be '{dep_type}'")),
-        }
-    }
-    if let Some(tx_hash) = expected.tx_hash.as_deref() {
-        match object.get("tx_hash").and_then(Value::as_str) {
-            Some(actual) if actual == tx_hash => {}
-            _ => mismatches.push(format!("{context} tx_hash must be '{tx_hash}'")),
-        }
-    }
-    if let Some(out_index) = expected.out_index {
-        match first_u64_field(object, &["out_index", "out_point_index", "index"]) {
-            Some(actual) if actual == u64::from(out_index) => {}
-            _ => mismatches.push(format!("{context} out_index must be '{out_index}'")),
-        }
-    }
-    if let Some(hash_type) = expected.hash_type.as_deref() {
-        match object.get("hash_type").and_then(Value::as_str) {
-            Some(actual) if actual == hash_type => {}
-            _ => mismatches.push(format!("{context} hash_type must be '{hash_type}'")),
-        }
-    }
-    if let Some(data_hash) = expected.data_hash.as_deref() {
-        match object.get("data_hash").and_then(Value::as_str) {
-            Some(actual) if actual == data_hash => {}
-            _ => mismatches.push(format!("{context} data_hash must be '{data_hash}'")),
-        }
-    }
-    if let Some(artifact_hash) = expected.artifact_hash.as_deref() {
-        match object.get("artifact_hash").and_then(Value::as_str) {
-            Some(actual) if actual == artifact_hash => {}
-            _ => mismatches.push(format!("{context} artifact_hash must be '{artifact_hash}'")),
-        }
-    }
-    if let Some(role) = expected.role.as_deref() {
-        match object.get("role").and_then(Value::as_str) {
-            Some(actual) if actual == role => {}
-            _ => mismatches.push(format!("{context} role must be '{role}'")),
-        }
-    }
-    if let Some(verifier_id) = expected.verifier_id.as_deref() {
-        match object.get("verifier_id").and_then(Value::as_str) {
-            Some(actual) if actual == verifier_id => {}
-            _ => mismatches.push(format!("{context} verifier_id must be '{verifier_id}'")),
-        }
-    }
-    if let Some(ipc_abi) = expected.ipc_abi.as_deref() {
-        match object.get("ipc_abi").and_then(Value::as_str) {
-            Some(actual) if actual == ipc_abi => {}
-            _ => mismatches.push(format!("{context} ipc_abi must be '{ipc_abi}'")),
-        }
-    }
-    if let Some(type_id) = expected.type_id.as_deref() {
-        match object.get("type_id").and_then(Value::as_str) {
-            Some(actual) if actual == type_id => {}
-            _ => mismatches.push(format!("{context} type_id must be '{type_id}'")),
-        }
-    }
-}
-
-fn expected_spawn_cell_dep_binding(assumption: &BuilderAssumptionMetadata) -> Option<ExpectedCellDepBinding> {
-    if assumption.kind != "spawn_target_cell_dep_binding" {
-        return None;
-    }
-    assumption.required_cell_deps.iter().find_map(|required| parse_expected_cell_dep_binding(required))
-}
-
-fn parse_expected_cell_dep_binding(required: &str) -> Option<ExpectedCellDepBinding> {
-    let mut parts = required.split(':');
-    let dep_source = parts.next()?.to_string();
-    let index = parse_cell_dep_source_index(&dep_source)?;
-    let mut name = None;
-    let mut dep_type = None;
-    let mut tx_hash = None;
-    let mut out_index = None;
-    let mut hash_type = None;
-    let mut data_hash = None;
-    let mut artifact_hash = None;
-    let mut role = None;
-    let mut verifier_id = None;
-    let mut ipc_abi = None;
-    let mut type_id = None;
-    for part in parts {
-        if let Some(value) = part.strip_prefix("name=") {
-            name = Some(value.to_string());
-        } else if let Some(value) = part.strip_prefix("dep_type=") {
-            dep_type = Some(value.to_string());
-        } else if let Some(value) = part.strip_prefix("tx_hash=") {
-            tx_hash = Some(value.to_string());
-        } else if let Some(value) = part.strip_prefix("out_index=") {
-            out_index = value.parse::<u32>().ok();
-        } else if let Some(value) = part.strip_prefix("hash_type=") {
-            hash_type = Some(value.to_string());
-        } else if let Some(value) = part.strip_prefix("data_hash=") {
-            data_hash = Some(value.to_string());
-        } else if let Some(value) = part.strip_prefix("artifact_hash=") {
-            artifact_hash = Some(value.to_string());
-        } else if let Some(value) = part.strip_prefix("role=") {
-            role = Some(value.to_string());
-        } else if let Some(value) = part.strip_prefix("verifier_id=") {
-            verifier_id = Some(value.to_string());
-        } else if let Some(value) = part.strip_prefix("ipc_abi=") {
-            ipc_abi = Some(value.to_string());
-        } else if let Some(value) = part.strip_prefix("type_id=") {
-            type_id = Some(value.to_string());
-        }
-    }
-    Some(ExpectedCellDepBinding {
-        dep_source,
-        index,
-        name,
-        dep_type,
-        tx_hash,
-        out_index,
-        hash_type,
-        data_hash,
-        artifact_hash,
-        role,
-        verifier_id,
-        ipc_abi,
-        type_id,
-    })
 }
 
 fn requires_explicit_evidence(kind: &str) -> bool {
@@ -718,147 +730,9 @@ fn requires_explicit_evidence(kind: &str) -> bool {
             | "type_id_builder_plan"
             | "metadata_only_gap"
             | "runtime_required_proof_plan"
-            | "spawn_target_cell_dep_binding"
             | "lock_group_transaction_scope"
             | "capacity_policy"
     )
-}
-
-fn requires_structural_binding_evidence(assumption: &BuilderAssumptionMetadata) -> bool {
-    assumption.required_inputs.iter().any(|required| is_wildcard_read(required))
-        || assumption.required_outputs.iter().any(|required| is_wildcard_read(required))
-        || assumption.required_cell_deps.iter().any(|required| is_wildcard_read(required))
-}
-
-fn is_wildcard_read(required: &str) -> bool {
-    required.ends_with(":*")
-}
-
-fn validate_scoped_action_artifact_not_used_as_output_type_identity(
-    metadata: &CompileMetadata,
-    tx: &Value,
-    violations: &mut Vec<TxValidationViolation>,
-) {
-    if !metadata_is_action_artifact(metadata) {
-        return;
-    }
-    let Some(artifact_hash) = metadata.artifact_hash.as_deref().and_then(normalized_hex) else {
-        return;
-    };
-    let Some(outputs) = tx.get("outputs").and_then(Value::as_array) else {
-        return;
-    };
-    let created_output_indexes = selected_created_output_indexes(metadata);
-    if created_output_indexes.is_empty() {
-        return;
-    }
-    let passive_resources = metadata
-        .constraints
-        .ckb
-        .as_ref()
-        .map(|ckb| {
-            ckb.resource_identities
-                .iter()
-                .filter(|identity| identity.status != "ckb-type-id-builder-managed")
-                .map(|identity| identity.type_name.clone())
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    let resource_hint = if passive_resources.is_empty() {
-        "resource cell".to_string()
-    } else {
-        format!("resource cell ({})", passive_resources.join(", "))
-    };
-
-    for (index, output) in outputs.iter().enumerate() {
-        if !created_output_indexes.contains(&index) {
-            continue;
-        }
-        let Some(type_script) = output.get("type").or_else(|| output.get("type_")).and_then(Value::as_object) else {
-            continue;
-        };
-        let Some(code_hash) = type_script.get("code_hash").and_then(Value::as_str).and_then(normalized_hex) else {
-            continue;
-        };
-        if code_hash == artifact_hash {
-            violations.push(TxValidationViolation {
-                assumption_id: "resource-identity-active-artifact".to_string(),
-                kind: "resource_identity".to_string(),
-                message: format!(
-                    "outputs[{index}].type uses this scoped action artifact as a passive {resource_hint} type identity; action artifacts are active verifiers and may fail during output creation with entry-witness-abi-invalid; use a compiler-supported resource identity or lifecycle-stable dispatcher artifact instead"
-                ),
-            });
-        }
-    }
-}
-
-fn selected_created_output_indexes(metadata: &CompileMetadata) -> BTreeSet<usize> {
-    let mut indexes = BTreeSet::new();
-    if let Some(entrypoint) = metadata.selected_entrypoint.as_ref() {
-        match entrypoint.kind.as_str() {
-            "action" => {
-                if let Some(action) = metadata.actions.iter().find(|action| action.name == entrypoint.name) {
-                    extend_create_output_indexes(&action.create_set, &action.proof_plan, &mut indexes);
-                }
-                return indexes;
-            }
-            "lock" => {
-                if let Some(lock) = metadata.locks.iter().find(|lock| lock.name == entrypoint.name) {
-                    extend_create_output_indexes(&lock.create_set, &lock.proof_plan, &mut indexes);
-                }
-                return indexes;
-            }
-            _ => return indexes,
-        }
-    }
-    for action in &metadata.actions {
-        extend_create_output_indexes(&action.create_set, &action.proof_plan, &mut indexes);
-    }
-    for lock in &metadata.locks {
-        extend_create_output_indexes(&lock.create_set, &lock.proof_plan, &mut indexes);
-    }
-    indexes
-}
-
-fn extend_create_output_indexes(
-    patterns: &[crate::CreatePatternMetadata],
-    proof_plan: &[ProofPlanMetadata],
-    indexes: &mut BTreeSet<usize>,
-) {
-    let proof_create_bindings = proof_plan_created_output_bindings(proof_plan);
-    for (ordinal, pattern) in patterns.iter().enumerate() {
-        if !proof_create_bindings.is_empty() && !proof_create_bindings.contains(&pattern.binding) {
-            continue;
-        }
-        indexes.insert(pattern.ckb_output_data.as_ref().map(|binding| binding.output_index).unwrap_or(ordinal));
-    }
-}
-
-fn proof_plan_created_output_bindings(proof_plan: &[ProofPlanMetadata]) -> BTreeSet<String> {
-    proof_plan
-        .iter()
-        .filter_map(|plan| {
-            plan.feature
-                .strip_prefix("create-output:")
-                .or_else(|| plan.feature.strip_prefix("create-unique-output:"))
-                .and_then(|rest| rest.rsplit_once(':').map(|(_, binding)| binding.to_string()))
-        })
-        .collect()
-}
-
-fn metadata_is_action_artifact(metadata: &CompileMetadata) -> bool {
-    metadata.selected_entrypoint.as_ref().is_some_and(|entrypoint| entrypoint.kind == "action")
-        || (metadata.selected_entrypoint.is_none() && !metadata.actions.is_empty())
-}
-
-fn normalized_hex(value: &str) -> Option<String> {
-    let trimmed = value.trim();
-    let stripped = trimmed.strip_prefix("0x").unwrap_or(trimmed);
-    if stripped.len() == 64 && stripped.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        Some(stripped.to_ascii_lowercase())
-    } else {
-        None
-    }
 }
 
 fn push_violation(violations: &mut Vec<TxValidationViolation>, assumption: &BuilderAssumptionMetadata, message: &str) {

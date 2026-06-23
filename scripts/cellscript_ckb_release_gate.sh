@@ -3,16 +3,420 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MODE="${1:-quick}"
-if [[ $# -gt 0 ]]; then
-    shift
-fi
+
+export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-/tmp/cellscript-ckb-release-gate-target}"
+export CARGO_INCREMENTAL="${CARGO_INCREMENTAL:-0}"
+export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-1}"
+export CELLSCRIPT_BACKEND_SHAPE_REPORT="${CELLSCRIPT_BACKEND_SHAPE_REPORT:-$ROOT_DIR/target/cellscript-backend-shape/backend-shape-report-$MODE.json}"
+export CELLSCRIPT_MOLECULE_SCHEMA_MANIFEST_REPORT="${CELLSCRIPT_MOLECULE_SCHEMA_MANIFEST_REPORT:-$ROOT_DIR/target/cellscript-schema-manifest/schema-manifest-report-$MODE.json}"
+unset CELLSCRIPT_RISCV_CC CELLSCRIPT_RISCV_AS CELLSCRIPT_RISCV_LD
+
+cd "$ROOT_DIR"
+mkdir -p "$(dirname "$CELLSCRIPT_BACKEND_SHAPE_REPORT")"
+mkdir -p "$(dirname "$CELLSCRIPT_MOLECULE_SCHEMA_MANIFEST_REPORT")"
+
+require_cmd() {
+    if ! command -v "$1" >/dev/null 2>&1; then
+        printf 'missing required command: %s\n' "$1" >&2
+        exit 127
+    fi
+}
+
+run() {
+    printf '\n==> %s\n' "$*"
+    "$@"
+}
+
+check_trailing_whitespace() {
+    local files=(
+        ".github/workflows/ci.yml"
+        "Cargo.toml"
+        "README.md"
+        "README_CH.md"
+        "CHANGELOG.md"
+        "docs/README.md"
+        "roadmap/CELLSCRIPT_ROADMAP.md"
+        "roadmap/CELLSCRIPT_0_13_TODOLIST.md"
+        "docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md"
+        "docs/releases/CELLSCRIPT_0_13_2_RELEASE_NOTES.md"
+        "docs/releases/CELLSCRIPT_0_20_RELEASE_NOTES.md"
+        "docs/releases/CELLSCRIPT_0_13_2_ACCEPTANCE_COMMUNITY_POST.md"
+        "docs/archive/0.13/CELLSCRIPT_0_13_1_PLAN.md"
+        "docs/archive/0.13/CELLSCRIPT_SIGNATURE_DIRECTION_EXECUTION_PLAN.md"
+        "docs/CELLSCRIPT_CKB_DEPLOYMENT_MANIFEST.md"
+        "docs/CELLSCRIPT_CELLFABRIC_BRIDGE.md"
+        "docs/CELLSCRIPT_CAPACITY_AND_BUILDER_CONTRACT.md"
+        "docs/CELLSCRIPT_ENTRY_WITNESS_ABI.md"
+        "docs/CELLSCRIPT_0_20_ROADMAP.md"
+        "docs/CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md"
+        "docs/CELLSCRIPT_SYNTAX_COMBO_AUDIT_METHODOLOGY.md"
+        "docs/wiki/Home.md"
+        "docs/wiki/Tutorial-05-CKB-Target-Profiles.md"
+        "docs/wiki/Tutorial-06-Metadata-Verification-and-Production-Gates.md"
+        "docs/wiki/Tutorial-07-LSP-and-Tooling.md"
+        "docs/wiki/Tutorial-08-Bundled-Example-Contracts.md"
+        "editors/vscode-cellscript/extension.js"
+        "editors/vscode-cellscript/README.md"
+        "editors/vscode-cellscript/CHANGELOG.md"
+        "editors/vscode-cellscript/package-lock.json"
+        "editors/vscode-cellscript/package.json"
+        "editors/vscode-cellscript/scripts/validate.mjs"
+        "scripts/cellscript_ckb_release_gate.sh"
+        "scripts/cellscript_syntax_combo_audit.sh"
+        "scripts/cellscript_syntax_combo_audit.py"
+        "scripts/cellscript_cellfabric_bridge_smoke.sh"
+        "scripts/ckb_cellscript_acceptance.sh"
+        "scripts/validate_cellscript_tooling_release.py"
+        "scripts/validate_ckb_cellscript_production_evidence.py"
+        "src/lib.rs"
+        "src/lsp/mod.rs"
+        "src/package/mod.rs"
+        "tests/syntax_combo/matrix.toml"
+        "tests/syntax_combo/seeds/require-block-lifecycle.cell"
+        "tests/cli.rs"
+        "tests/examples.rs"
+    )
+
+    if rg -n '[ \t]+$' "${files[@]}"; then
+        printf '\nTrailing whitespace found in CellScript CKB release-gate files.\n' >&2
+        exit 1
+    fi
+}
+
+check_release_roadmap_docs() {
+    local required=(
+        'roadmap/CELLSCRIPT_ROADMAP.md::0.13.2 syntax-governance hardening'
+        'roadmap/CELLSCRIPT_ROADMAP.md::syntax-combination audit'
+        'docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md::Stdlib lifecycle and Cell metadata patterns'
+        'docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md::./scripts/cellscript_ckb_release_gate.sh full'
+        'docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md::./scripts/cellscript_syntax_combo_audit.sh ci'
+        'roadmap/CELLSCRIPT_0_13_TODOLIST.md::0.13.2 Syntax Governance And Release Hardening'
+        'docs/releases/CELLSCRIPT_0_13_2_RELEASE_NOTES.md::Syntax Governance And Standard Library'
+        'docs/releases/CELLSCRIPT_0_13_2_RELEASE_NOTES.md::Release tag'
+        'docs/README.md::CellScript Documentation Map'
+        'docs/CELLSCRIPT_0_20_ROADMAP.md::Generated Action Builder'
+        'docs/CELLSCRIPT_0_20_ROADMAP.md::VS Code extension'
+        'docs/CELLSCRIPT_0_20_ROADMAP.md::CellFabric is frozen'
+        'docs/CELLSCRIPT_0_20_ROADMAP.md::cellc action build --fabric-intent'
+        'docs/CELLSCRIPT_0_20_ROADMAP.md::ELF entry ABI gate'
+        'docs/releases/CELLSCRIPT_0_20_RELEASE_NOTES.md::ELF entry ABI gate'
+        'docs/releases/CELLSCRIPT_0_20_RELEASE_NOTES.md::launch.cell, token.cell, and amm_pool.cell'
+        'docs/CELLSCRIPT_CELLFABRIC_BRIDGE.md::cellscript-cellfabric-intent-envelope-v0.20'
+        'docs/wiki/Tutorial-07-LSP-and-Tooling.md::CellScript: Generate TypeScript Action Builder'
+        'docs/wiki/Tutorial-07-LSP-and-Tooling.md::cellscript.builderOutputDir'
+    )
+    local item file pattern
+    for item in "${required[@]}"; do
+        file="${item%%::*}"
+        pattern="${item#*::}"
+        if ! rg --quiet --fixed-strings -- "$pattern" "$file"; then
+            printf '0.13 release roadmap docs are missing required boundary in %s: %s\n' "$file" "$pattern" >&2
+            exit 1
+        fi
+    done
+}
+
+check_ckb_release_docs() {
+    local release_doc="docs/wiki/Tutorial-06-Metadata-Verification-and-Production-Gates.md"
+    local required=(
+        "CKB Release Evidence Gate"
+        "Syntax-Combination Preflight"
+        "syntax-combination audit is a release acceptance preflight"
+        "before builder-backed CKB acceptance"
+        "./scripts/cellscript_ckb_release_gate.sh full"
+        "primitive-strict original bundled-example coverage"
+        "builder-backed action runs"
+        "exact-artifact build reports"
+        "occupied-capacity evidence"
+        "passed final production hardening gate"
+    )
+    local pattern
+    for pattern in "${required[@]}"; do
+        if ! rg --quiet --fixed-strings -- "$pattern" "$release_doc"; then
+            printf 'CKB production-gate docs are missing required boundary: %s\n' "$pattern" >&2
+            exit 1
+        fi
+    done
+}
+
+check_ckb_acceptance_boundaries() {
+    local required=(
+        'scripts/ckb_cellscript_acceptance.sh::Usage: scripts/ckb_cellscript_acceptance.sh'
+        'scripts/ckb_cellscript_acceptance.sh::strict-original-ckb'
+        'scripts/ckb_cellscript_acceptance.sh::bundled_examples_exact_order'
+        'scripts/ckb_cellscript_acceptance.sh::language_examples_exact_order'
+        'scripts/ckb_cellscript_acceptance.sh::strict_original_ckb_compile_policy_fail_closed'
+        'scripts/ckb_cellscript_acceptance.sh::strict_original_ckb_compile_unexpected_failures'
+        'scripts/ckb_cellscript_acceptance.sh::builder_backed_action_count'
+        'scripts/ckb_cellscript_acceptance.sh::final_production_hardening_gate'
+        'scripts/ckb_cellscript_acceptance.sh::run_stateful_scenario_suite'
+        'scripts/ckb_cellscript_acceptance.sh::assert_stateful_step_constraints'
+        'scripts/ckb_cellscript_acceptance.sh::assert_not_live'
+        'scripts/ckb_cellscript_acceptance.sh::stateful_action_coverage'
+        'scripts/ckb_cellscript_acceptance.sh::consensus_serialized_tx_size_bytes'
+        'scripts/ckb_cellscript_acceptance.sh::occupied_capacity_shannons'
+        'scripts/ckb_cellscript_acceptance.sh::ckb_elf_entry_abi_gate'
+        'scripts/ckb_cellscript_acceptance.sh::BUILD_REPORT_SCHEMA'
+        'scripts/ckb_cellscript_acceptance.sh::cellscript_build_reports'
+        'scripts/ckb_cellscript_acceptance.sh::live_code_cell_data_hash_matches_artifact'
+        'scripts/ckb_cellscript_acceptance.sh::preserves_ckb_vm_stack_pointer'
+        'scripts/ckb_cellscript_acceptance.sh::CRITICAL_0_20_DEVNET_EXAMPLES'
+        'scripts/cellscript_ckb_release_gate.sh::--production --stateful-scenarios'
+        'scripts/cellscript_ckb_stateful_scenarios.sh::--production --stateful-scenarios'
+        'scripts/validate_ckb_cellscript_production_evidence.py::validate_elf_entry_abi_gate'
+        'scripts/validate_ckb_cellscript_production_evidence.py::validate_build_reports'
+        'scripts/validate_ckb_cellscript_production_evidence.py::EXPECTED_CRITICAL_ELF_ABI_EXAMPLES'
+        'scripts/validate_ckb_cellscript_production_evidence.py::valid CKB CellScript'
+        'scripts/validate_cellscript_tooling_release.py::valid CellScript tooling release boundary'
+    )
+    local item file pattern
+    for item in "${required[@]}"; do
+        file="${item%%::*}"
+        pattern="${item#*::}"
+        if ! rg --quiet --fixed-strings -- "$pattern" "$file"; then
+            printf 'CKB acceptance boundary is missing required pattern in %s: %s\n' "$file" "$pattern" >&2
+            exit 1
+        fi
+    done
+}
+
+check_grammar_governance_regression() {
+    # Active source, examples, wiki, and editor files must not reintroduce
+    # removed surface syntax that has been deleted from the grammar.
+    # Exception: docs/archive/** and old release notes are historical.
+    local active_files=(
+        "examples/token.cell"
+        "examples/nft.cell"
+        "examples/multisig.cell"
+        "examples/vesting.cell"
+        "examples/timelock.cell"
+        "examples/amm-pool.cell"
+        "examples/registry.cell"
+        "examples/launch.cell"
+        "examples/language/canonical_style.cell"
+        "examples/language/stdlib.cell"
+        "examples/language/order_book.cell"
+        "examples/language/registry.cell"
+        "editors/vscode-cellscript/snippets/cellscript.json"
+        "editors/vscode-cellscript/syntaxes/cellscript.tmLanguage.json"
+        "docs/wiki/Tutorial-01-Getting-Started.md"
+        "docs/wiki/Tutorial-02-Language-Basics.md"
+        "docs/wiki/Tutorial-03-Resources-and-Cell-Effects.md"
+        "docs/wiki/Tutorial-04-Packages-and-CLI-Workflow.md"
+        "docs/wiki/Tutorial-05-CKB-Target-Profiles.md"
+        "docs/wiki/Tutorial-06-Metadata-Verification-and-Production-Gates.md"
+        "docs/wiki/Tutorial-07-LSP-and-Tooling.md"
+        "docs/wiki/Tutorial-08-Bundled-Example-Contracts.md"
+        "docs/wiki/Tutorial-09-Action-Model-and-0-13-Syntax.md"
+        "docs/wiki/Tutorial-10-Standard-Library.md"
+    )
+
+    # Check: 'has destroy' must not appear in active examples/wiki
+    # (destroy was removed from the public grammar in 0.15 strict mode).
+    local f
+    for f in "${active_files[@]}"; do
+        if [ -f "$f" ] && rg --quiet -n 'has destroy' "$f"; then
+            printf 'Grammar governance regression: %s contains removed "has destroy"\n' "$f" >&2
+            exit 1
+        fi
+    done
+
+    printf 'Grammar governance regression check passed.\n'
+}
+
+# Structural invariant: the NovaSeal certification surface must not be lost
+# again. After the 0.17 merge accidentally dropped src/cli/novaseal_certification.rs
+# and the cellc certify subcommand, every release gate must verify the four
+# pieces that wire it together still exist. This check is deliberately text-grep
+# based so it catches any future merge that drops the file or forgets to
+# re-register the module, dispatcher, or main.rs whitelist entry.
+check_novaseal_certify_invariant() {
+    local missing=0
+    if [ ! -f "src/cli/novaseal_certification.rs" ]; then
+        printf 'NovaSeal certifier invariant: src/cli/novaseal_certification.rs is missing\n' >&2
+        missing=1
+    fi
+    if ! rg --quiet -n '^mod novaseal_certification;' src/cli/mod.rs; then
+        printf 'NovaSeal certifier invariant: src/cli/mod.rs does not declare mod novaseal_certification;\n' >&2
+        missing=1
+    fi
+    if ! rg --quiet -n 'Command::Certify' src/cli/commands.rs; then
+        printf 'NovaSeal certifier invariant: src/cli/commands.rs does not dispatch Command::Certify\n' >&2
+        missing=1
+    fi
+    if ! rg --quiet -n '\|\s*"certify"' src/main.rs; then
+        printf 'NovaSeal certifier invariant: src/main.rs whitelist does not include "certify"\n' >&2
+        missing=1
+    fi
+    if [ "$missing" -ne 0 ]; then
+        exit 1
+    fi
+    printf 'NovaSeal certifier structural invariant passed.\n'
+}
+
+# Runtime invariant: the built cellc binary must actually expose certify and
+# refuse to silently no-op. We do not assert pass/fail of the certification
+# (that depends on fresh live reports). We only assert the binary knows the
+# subcommand, the plugin id is wired, and the produced JSON has the expected
+# schema. This is the gate that catches future drift after the merge.
+check_novaseal_certify_runs() {
+    local cellc_bin="target/debug/cellc"
+    if [ ! -x "$cellc_bin" ]; then
+        run cargo build --locked -p cellscript --bin cellc
+        cellc_bin="target/debug/cellc"
+    fi
+    if ! "$cellc_bin" certify --help >/dev/null 2>&1; then
+        printf 'NovaSeal certifier runtime: cellc certify --help failed\n' >&2
+        exit 1
+    fi
+    local cert_report
+    cert_report="$(mktemp)"
+    local exit_code=0
+    "$cellc_bin" certify --plugin novaseal-profile-v0 --repo-root . --output "$cert_report" >/dev/null 2>&1 || exit_code=$?
+    if [ ! -s "$cert_report" ]; then
+        printf 'NovaSeal certifier runtime: cellc certify did not write a report to %s\n' "$cert_report" >&2
+        rm -f "$cert_report"
+        exit 1
+    fi
+    local schema
+    schema="$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('schema',''))" "$cert_report" 2>/dev/null || true)"
+    rm -f "$cert_report"
+    if [ "$schema" != "cellscript-certification-report-v0.1" ]; then
+        printf 'NovaSeal certifier runtime: unexpected certification schema "%s"\n' "$schema" >&2
+        exit 1
+    fi
+    # exit_code is informational; we do not fail on certification outcome
+    # because the only thing this gate protects is "certify still works".
+    printf 'NovaSeal certifier runtime check passed (certify exit=%d, schema=%s).\n' "$exit_code" "$schema"
+}
+
+# Phase 1 end-to-end invariant. The 0.19 closure shipped the package / lockfile
+# / Deployed.toml data model and the 0.20 close-out had to (1) reject
+# self-dependency writes from cellc install / cellc add, and (2) make
+# cellc build actually bridge Deployed.toml deployment records into
+# Cell.lock.[deployment.<network>] so that cellc registry verify can pass
+# end-to-end without manual patching. Both invariants used to be missing
+# and would silently re-regress on any future refactor. This check
+# text-greps the source tree to catch a regression before it ships.
+check_phase1_end_to_end_invariant() {
+    local missing=0
+
+    # Bug 1: cellc install --path <self_root> used to write a [dependencies.""]
+    # row that broke every subsequent cellc build with a circular-dep error.
+    # Reject any self-dependency write at the cellc install / cellc add
+    # boundary.
+    if ! rg --quiet -n 'fn validate_not_self_dependency' src/cli/commands.rs; then
+        printf 'Phase 1 end-to-end invariant: src/cli/commands.rs does not declare fn validate_not_self_dependency\n' >&2
+        missing=1
+    fi
+    if ! rg --quiet -n 'validate_not_self_dependency' src/cli/commands.rs; then
+        printf 'Phase 1 end-to-end invariant: validate_not_self_dependency is declared but never called from src/cli/commands.rs\n' >&2
+        missing=1
+    fi
+
+    # Bug 2: cellc build must bridge Deployed.toml deployment records into
+    # Cell.lock.[deployment.<network>] so that registry verify can pass.
+    if ! rg --quiet -n 'fn refresh_lockfile_deployment_refs' src/cli/commands.rs; then
+        printf 'Phase 1 end-to-end invariant: src/cli/commands.rs does not declare fn refresh_lockfile_deployment_refs\n' >&2
+        missing=1
+    fi
+    # The call must be inside refresh_lockfile_from_build (not just sitting in
+    # the file as a no-op), so look for the un-commented invocation form.
+    if ! rg --quiet -n '^\s*refresh_lockfile_deployment_refs\(' src/cli/commands.rs; then
+        printf 'Phase 1 end-to-end invariant: refresh_lockfile_deployment_refs is not invoked from refresh_lockfile_from_build\n' >&2
+        missing=1
+    fi
+
+    # Test coverage for both fixes. These tests are the only thing that
+    # will catch a future refactor that breaks either invariant.
+    for test_name in \
+        cellc_install_rejects_self_path_dependency \
+        cellc_install_rejects_self_name_dependency \
+        cellc_add_rejects_self_name_dependency \
+        cellc_build_writes_lockfile_deployment_ref_from_deployed_toml \
+        cellc_build_omits_lockfile_deployment_when_artifact_hash_mismatches; do
+        if ! rg --quiet -n "fn ${test_name}\b" tests/cli.rs; then
+            printf 'Phase 1 end-to-end invariant: tests/cli.rs is missing the %s integration test\n' "$test_name" >&2
+            missing=1
+        fi
+    done
+
+    if [ "$missing" -ne 0 ]; then
+        exit 1
+    fi
+    printf 'Phase 1 end-to-end invariant passed.\n'
+}
+
+check_action_builder_toolchain() {
+    local output_dir
+    output_dir="${TMPDIR:-/tmp}/cellscript-release-gate-builder-$MODE"
+    rm -rf "$output_dir"
+
+    # Keep the 0.20 cellc gen-builder workflow in the release tooling gate.
+    run cargo run --locked -p cellscript --bin cellc -- \
+        gen-builder examples/token \
+        --target typescript \
+        --output "$output_dir" \
+        --target-profile ckb \
+        --json
+    run npm --prefix "$output_dir" install --ignore-scripts
+    run npm --prefix "$output_dir" test
+    printf 'CellScript generated builder tooling check passed: %s\n' "$output_dir"
+}
+
+run_common_gate() {
+    require_cmd cargo
+    require_cmd python3
+    require_cmd rg
+    require_cmd npm
+
+    run cargo fmt --all --check
+    run cargo check --locked --all-targets
+    run cargo test --locked -- --test-threads=1
+    run cargo clippy --locked -p cellscript --all-targets -- -D warnings
+    run python3 scripts/validate_cellscript_tooling_release.py
+    run bash -n scripts/ckb_cellscript_acceptance.sh
+    run bash -n scripts/cellscript_ckb_release_gate.sh
+    run bash -n scripts/cellscript_syntax_combo_audit.sh
+    run bash -n scripts/cellscript_cellfabric_bridge_smoke.sh
+    run python3 -m py_compile scripts/cellscript_syntax_combo_audit.py
+    run ./scripts/cellscript_syntax_combo_audit.sh quick
+    run npm --prefix editors/vscode-cellscript run validate
+    run npm --prefix editors/vscode-cellscript run publish:dry-run
+    check_action_builder_toolchain
+    run git diff --check
+    check_trailing_whitespace
+    check_release_roadmap_docs
+    check_ckb_release_docs
+    check_ckb_acceptance_boundaries
+    check_grammar_governance_regression
+    check_novaseal_certify_invariant
+    check_novaseal_certify_runs
+    check_phase1_end_to_end_invariant
+}
+
+run_quick_gate() {
+    run_common_gate
+    run ./scripts/ckb_cellscript_acceptance.sh --compile-only --production
+    printf '\nCellScript backend shape report: %s\n' "$CELLSCRIPT_BACKEND_SHAPE_REPORT"
+    printf 'CellScript Molecule schema manifest report: %s\n' "$CELLSCRIPT_MOLECULE_SCHEMA_MANIFEST_REPORT"
+}
+
+run_production_gate() {
+    run_common_gate
+    run ./scripts/cellscript_syntax_combo_audit.sh ci
+    run ./scripts/cellscript_syntax_combo_audit.sh deep
+    run ./scripts/ckb_cellscript_acceptance.sh --production --stateful-scenarios
+    printf '\nCellScript backend shape report: %s\n' "$CELLSCRIPT_BACKEND_SHAPE_REPORT"
+    printf 'CellScript Molecule schema manifest report: %s\n' "$CELLSCRIPT_MOLECULE_SCHEMA_MANIFEST_REPORT"
+}
 
 case "$MODE" in
     quick)
-        exec "$ROOT_DIR/scripts/cellscript_gate.sh" release-quick "$@"
+        exec "$ROOT_DIR/scripts/cellscript_gate.sh" release-quick
         ;;
     production|full)
-        exec "$ROOT_DIR/scripts/cellscript_gate.sh" release "$@"
+        exec "$ROOT_DIR/scripts/cellscript_gate.sh" release
         ;;
     *)
         printf 'usage: %s [quick|production|full]\n' "$0" >&2

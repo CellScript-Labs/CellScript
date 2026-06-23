@@ -3,12 +3,6 @@
 This directory is organized by document role. Keep new docs in the smallest
 stable category that matches how readers should use them.
 
-## Language
-
-Keep the docs tree in English so release references, wiki imports, and package
-links have one canonical target. README files are the only exception for
-localized orientation notes.
-
 ## Stable Tutorials
 
 `docs/wiki/` contains the GitHub Wiki source. These pages are version-neutral,
@@ -35,8 +29,6 @@ drafts. Released versions should use non-draft filenames.
   note and release-evidence summary.
 - `docs/releases/CELLSCRIPT_0_16_1_RELEASE_NOTES.md` is the final 0.16.1 release
   note and release-evidence summary.
-- `docs/releases/CELLSCRIPT_0_16_2_RELEASE_NOTES.md` is the final 0.16.2 release
-  note and release-evidence summary.
 
 Release candidates and planning notes should not live here unless they are the
 final release record.
@@ -54,11 +46,20 @@ High-value active references include:
   governance summary
 - `CELLSCRIPT_GATE_POLICY.md`
 - `CELLSCRIPT_SYNTAX_COMBO_AUDIT_METHODOLOGY.md`
-- `CELLSCRIPT_CKB_LANGUAGE_AUDIT.md`
+- `CELLSCRIPT_GRAMMAR_GOVERNANCE_RFC.md` for the active grammar-governance
+  direction around transition shape, `verification`, `require`, and accounting
+  syntax
+- `CELLSCRIPT_SURFACE_ELEGANCE_RFC.md` for deferred syntax candidates that
+  require full parser/typechecker/lowering/metadata/formatter/LSP coverage
 - `CELLSCRIPT_CAPACITY_AND_BUILDER_CONTRACT.md`
-- `CELLSCRIPT_CKB_DEPLOYMENT_MANIFEST.md`
+- `CELLSCRIPT_CKB_ADAPTER.md`
+- `CELLSCRIPT_CELLFABRIC_BRIDGE.md`
+- `CELLSCRIPT_PACKAGE_PROVENANCE_AND_DEPLOYMENT_IDENTITY.md`
+- `CELLSCRIPT_REGISTRY_PRODUCTION_BOUNDARY_ADR.md` for the accepted production
+  boundary of the JoyID-rooted public registry write/read architecture
+- `../services/registry-api/README.md` for the Cloudflare Workers + R2 + Neon
+  write API implementation and deployment checklist
 - `CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md`
-- `CELLSCRIPT_DEPENDENCY_PACKAGE_CACHE_AUDIT.md`
 - `CELLSCRIPT_ENTRY_WITNESS_ABI.md`
 - `CELLSCRIPT_EXAMPLE_BUSINESS_FLOWS.md`
 - `CELLSCRIPT_LINEAR_OWNERSHIP.md`
@@ -71,10 +72,9 @@ High-value active references include:
 
 - `docs/spec/` contains normative or semi-normative specifications. The 0.16
   operational semantics live there.
-- `docs/0.17/` contains next-release planning and iCKB investigation material.
-  It is not part of the 0.16 release contract.
-- `docs/0.20/` contains 0.20 compiler audit evidence. Keep the English audit
-  as the canonical copy.
+- `docs/0.20/` contains branch-local audit and investigation material for the
+  current `nightly-0.20` line. It is not part of any prior release contract.
+  Current contents: `CELLSCRIPT_0_20_DOB_EVO_SWARM_AUDIT.md`.
 
 ## Examples
 
@@ -91,6 +91,25 @@ bundled `.cell` examples. These are not release notes.
 may point to release notes and active reference docs, but they should not
 duplicate full release notes.
 
+Active later-stage roadmap notes that live under `docs/` because they are tied
+to branch-specific evidence or forward design:
+
+- `archive/0.17/CELLSCRIPT_0_17_ROADMAP.md`
+- `CELLSCRIPT_0_18_ROADMAP.md`
+- `CELLSCRIPT_0_19_ROADMAP.md`
+- `releases/CELLSCRIPT_0_19_RELEASE_NOTES.md`
+- `CELLSCRIPT_0_20_ROADMAP.md`
+- `CELLSCRIPT_CKB_ECOSYSTEM_REUSE_AUDIT.md` for 0.19 CKB ecosystem reuse scope
+- `CELLSCRIPT_CKB_STD_COMPAT.md` for 0.19 ckb-std compatibility scope
+- `CELLSCRIPT_GRAMMAR_GOVERNANCE_RFC.md` and
+  `CELLSCRIPT_SYNTAX_COMBO_AUDIT_METHODOLOGY.md` for 0.19 grammar/syntax
+  governance scope
+- `CELLSCRIPT_REGISTRY_PHASE1.md` for the 0.19 package/deployment identity
+  registry closure and 0.20 handoff boundary
+- `CELLSCRIPT_0_20_ROADMAP.md` for generated TypeScript action builders,
+  live-chain registry verification, stateful flow evidence, and the bounded
+  CellFabric JSON bridge
+
 ## Archive
 
 `docs/archive/` contains historical plans and superseded execution documents.
@@ -102,6 +121,10 @@ Current archive:
 - `docs/archive/0.13/CELLSCRIPT_0_13_1_PLAN.md`
 - `docs/archive/0.13/CELLSCRIPT_SIGNATURE_DIRECTION_EXECUTION_PLAN.md`
 - `docs/archive/0.15/CELLSCRIPT_0_15_ROADMAP_SUMMARY.md`
+- `docs/archive/0.17/CELLSCRIPT_0_17_ROADMAP.md`
+- `docs/archive/0.17/CELLSCRIPT_0_17_ICKB_FINAL_REPORT.md`
+- `docs/archive/0.17/CELLSCRIPT_0_17_ICKB_PRODUCTION_EQUIVALENCE_GATE.md`
+- `docs/archive/0.17/CELLSCRIPT_0_17_REVIEW_FINDINGS_CLOSURE.md`
 
 When moving a document into the archive, update all public links and add a short
 status note if the file could otherwise be mistaken for active guidance.

@@ -1,0 +1,12 @@
+[workspace]
+members = [
+    "amm_pool",
+    "launch",
+    "multisig",
+    "nft",
+    "registry",
+    "timelock",
+    "token",
+    "vesting",
+    "language",
+]

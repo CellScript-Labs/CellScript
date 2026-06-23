@@ -264,6 +264,7 @@ import os
 import pathlib
 import re
 import shutil
+import struct
 import subprocess
 import sys
 
@@ -274,6 +275,7 @@ report_path = pathlib.Path(sys.argv[4])
 acceptance_mode = sys.argv[5]
 
 SOURCE_PROVENANCE_SCHEMA = "cellscript-ckb-acceptance-source-provenance-v0.1"
+BUILD_REPORT_SCHEMA = "cellscript-ckb-build-report-v0.20"
 SOURCE_PROVENANCE_PATHS = [
     "Cargo.lock",
     "Cargo.toml",
@@ -356,6 +358,16 @@ LOCK_BEHAVIOR_ACCEPTANCE_SCOPE = {
 }
 TRUNCATE = 12000
 UNEXPECTED_PROFILE_TRAILER = bytes.fromhex("53504f5241424900")
+ELF_ENTRY_ABI_SCHEMA = "cellscript-ckb-elf-entry-abi-v0.20"
+ELF64_HEADER_SIZE = 64
+ELF64_PROGRAM_HEADER_SIZE = 56
+ELF_PT_LOAD = 1
+ELF_PF_X = 1
+ELF_PF_W = 2
+ELF_PF_R = 4
+ELF_EM_RISCV = 243
+ENTRY_TRAMPOLINE_SIZE = 20
+CRITICAL_0_20_DEVNET_EXAMPLES = ["launch.cell", "token.cell", "amm_pool.cell"]
 
 examples_dir = repo_root / "examples"
 language_examples_dir = examples_dir / "language"
@@ -363,11 +375,25 @@ language_examples_dir = examples_dir / "language"
 def production_example_path(name):
     return examples_dir / name
 
+def production_example_build_path(name):
+    """Return the path to pass to cellc for building. Uses the workspace package directory when available."""
+    pkg_dir = examples_dir / name.replace(".cell", "")
+    if (pkg_dir / "Cell.toml").is_file():
+        return pkg_dir
+    return examples_dir / name
+
 def language_example_path(name):
     source = language_examples_dir / name
     if source.is_file():
         return source
     return examples_dir / name
+
+def language_example_build_path(name):
+    """Return the path to pass to cellc for building. Uses the workspace package directory when available."""
+    pkg_dir = examples_dir / "language"
+    if (pkg_dir / "Cell.toml").is_file():
+        return pkg_dir
+    return language_example_path(name)
 
 actual_flat_examples = sorted(
     path.name
@@ -427,9 +453,10 @@ baseline_source = baseline_source_root / "ckb_noop.cell"
 baseline_source.write_text(
     """module acceptance::ckb_noop
 
-action main() -> u64
-where
+action main() -> u64 {
+    verification
     0
+}
 """,
     encoding="utf-8",
 )
@@ -439,7 +466,7 @@ TOKEN_TYPES_SOURCE = """resource Token has store, create, consume, replace, burn
     symbol: [u8; 8]
 }
 
-resource MintAuthority has store {
+resource MintAuthority has store, create, replace {
     token_symbol: [u8; 8]
     max_supply: u64
     minted: u64
@@ -448,9 +475,9 @@ resource MintAuthority has store {
 
 TOKEN_ACTION_SOURCES = {
     "mint_with_authority": """
-action mint_with_authority(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after: MintAuthority, token: Token)
-where
-    assert_invariant(auth_before.minted + amount <= auth_before.max_supply, "exceeds max supply")
+action mint_with_authority(auth_before: MintAuthority, to: Address, amount: u64) -> (auth_after: MintAuthority, token: Token) {
+    verification
+    require auth_before.minted + amount <= auth_before.max_supply
 
     require auth_after.token_symbol == auth_before.token_symbol
     require auth_after.max_supply == auth_before.max_supply
@@ -460,26 +487,29 @@ where
         amount: amount,
         symbol: auth_before.token_symbol
     } with_lock(to)
+}
 """,
     "transfer_token": """
-action transfer_token(token: Token, to: Address) -> next_token: Token
-where
+action transfer_token(token: Token, to: Address) -> next_token: Token {
+    verification
     consume token
     create next_token = Token {
         amount: token.amount,
         symbol: token.symbol
     } with_lock(to)
+}
 """,
     "burn": """
-action burn(token: Token)
-where
-    assert_invariant(token.amount > 0, "cannot burn zero")
+action burn(token: Token) {
+    verification
+    require token.amount > 0
     destroy token
+}
 """,
     "merge": """
-action merge(a: Token, b: Token, to: Address) -> merged: Token
-where
-    assert_invariant(a.symbol == b.symbol, "symbol mismatch")
+action merge(a: Token, b: Token, to: Address) -> merged: Token {
+    verification
+    require a.symbol == b.symbol
     let total = a.amount + b.amount
     consume a
     consume b
@@ -488,6 +518,7 @@ where
         amount: total,
         symbol: a.symbol
     } with_lock(to)
+}
 """,
 }
 
@@ -534,21 +565,22 @@ receipt RoyaltyPayment has create {
 
 NFT_ACTION_SOURCES = {
     "create_collection": """
-action create_collection(creator: Address, max_supply: u64) -> collection: Collection
-where
-    assert_invariant(max_supply > 0, "max supply must be positive")
-    assert_invariant(max_supply <= 10000, "max supply too high")
+action create_collection(creator: Address, max_supply: u64) -> collection: Collection {
+    verification
+    require max_supply > 0, "max supply must be positive"
+    require max_supply <= 10000, "max supply too high"
 
     create collection = Collection {
         creator: creator,
         total_supply: 0,
         max_supply: max_supply
     } with_lock(creator)
+}
 """,
     "mint": """
-action mint(collection_before: Collection, to: Address, metadata_hash: Hash) -> (collection_after: Collection, nft: NFT)
-where
-    assert_invariant(collection_before.total_supply < collection_before.max_supply, "max supply reached")
+action mint(collection_before: Collection, to: Address, metadata_hash: Hash) -> (collection_after: Collection, nft: NFT) {
+    verification
+    require collection_before.total_supply < collection_before.max_supply
     let token_id = collection_before.total_supply + 1
 
     require collection_after.creator == collection_before.creator
@@ -562,37 +594,41 @@ where
         royalty_recipient: collection_before.creator,
         royalty_bps: 250
     }
+}
 """,
     "transfer": """
-action transfer(nft_before: NFT, to: Address) -> nft_after: NFT
-where
-    assert_invariant(nft_before.owner != to, "cannot transfer to self")
+action transfer(nft_before: NFT, to: Address) -> nft_after: NFT {
+    verification
+    require nft_before.owner != to
     require nft_after.token_id == nft_before.token_id
     require nft_after.owner == to
     require nft_after.metadata_hash == nft_before.metadata_hash
     require nft_after.royalty_recipient == nft_before.royalty_recipient
     require nft_after.royalty_bps == nft_before.royalty_bps
+}
 """,
     "create_listing": """
-action create_listing(read nft: NFT, price: u64, current_time: u64) -> listing: Listing
-where
-    assert_invariant(price > 0, "price must be positive")
+action create_listing(read nft: NFT, price: u64, current_time: u64) -> listing: Listing {
+    verification
+    require price > 0
     create listing = Listing {
         token_id: nft.token_id,
         seller: nft.owner,
         price: price,
         created_at: current_time
     }
+}
 """,
     "cancel_listing": """
-action cancel_listing(listing: Listing)
-where
+action cancel_listing(listing: Listing) {
+    verification
     destroy listing
+}
 """,
     "buy_from_listing": """
-action buy_from_listing(nft_before: NFT, listing: Listing, buyer: Address, seller: Address, payment: u64) -> (nft_after: NFT, royalty_payment: RoyaltyPayment, seller_payment: RoyaltyPayment)
-where
-    assert_invariant(payment >= listing.price, "insufficient payment")
+action buy_from_listing(nft_before: NFT, listing: Listing, buyer: Address, seller: Address, payment: u64) -> (nft_after: NFT, royalty_payment: RoyaltyPayment, seller_payment: RoyaltyPayment) {
+    verification
+    require payment >= listing.price
 
     let royalty_amount = payment * nft_before.royalty_bps / 10000
     let seller_amount = payment - royalty_amount
@@ -616,23 +652,25 @@ where
         recipient: seller,
         amount: seller_amount
     }
+}
 """,
     "create_offer": """
-action create_offer(token_id: u64, buyer: Address, price: u64, expires_at: u64) -> offer: Offer
-where
-    assert_invariant(price > 0, "price must be positive")
-    assert_invariant(expires_at > 0, "expiration must be in the future")
+action create_offer(token_id: u64, buyer: Address, price: u64, expires_at: u64) -> offer: Offer {
+    verification
+    require price > 0
+    require expires_at > 0
     create offer = Offer {
         token_id: token_id,
         buyer: buyer,
         price: price,
         expires_at: expires_at
     }
+}
 """,
     "accept_offer": """
-action accept_offer(nft_before: NFT, offer: Offer, buyer: Address, seller: Address, price: u64, current_time: u64) -> (nft_after: NFT, royalty_payment: RoyaltyPayment, seller_payment: RoyaltyPayment)
-where
-    assert_invariant(current_time < offer.expires_at, "offer expired")
+action accept_offer(nft_before: NFT, offer: Offer, buyer: Address, seller: Address, price: u64, current_time: u64) -> (nft_after: NFT, royalty_payment: RoyaltyPayment, seller_payment: RoyaltyPayment) {
+    verification
+    require current_time < offer.expires_at
 
     let royalty_amount = price * nft_before.royalty_bps / 10000
     let seller_amount = price - royalty_amount
@@ -656,20 +694,22 @@ where
         recipient: seller,
         amount: seller_amount
     }
+}
 """,
     "burn": """
-action burn(nft: NFT)
-where
+action burn(nft: NFT) {
+    verification
     destroy nft
+}
 """,
     "batch_mint": """
 action batch_mint(
     collection_before: Collection,
     recipients: [Address; 4],
     metadata_hashes: [Hash; 4],
-) -> (collection_after: Collection, nft0: NFT, nft1: NFT, nft2: NFT, nft3: NFT)
-where
-    assert_invariant(collection_before.total_supply + 4 <= collection_before.max_supply, "max supply reached")
+) -> (collection_after: Collection, nft0: NFT, nft1: NFT, nft2: NFT, nft3: NFT) {
+    verification
+    require collection_before.total_supply + 4 <= collection_before.max_supply
     let first_token_id = collection_before.total_supply + 1
 
     require collection_after.creator == collection_before.creator
@@ -704,6 +744,7 @@ where
         royalty_recipient: collection_before.creator,
         royalty_bps: 250
     }
+}
 """,
 }
 
@@ -747,82 +788,89 @@ receipt ReleaseRecord has create {
 
 TIMELOCK_ACTION_SOURCES = {
     "create_absolute_lock": """
-action create_absolute_lock(owner: Address, unlock_height: u64, current_height: u64) -> created_lock: TimeLock
-where
-    assert_invariant(unlock_height > current_height + 10, "too close")
-    assert_invariant(unlock_height <= current_height + 2628000, "too far")
+action create_absolute_lock(owner: Address, unlock_height: u64, current_height: u64) -> created_lock: TimeLock {
+    verification
+    require unlock_height > current_height + 10
+    require unlock_height <= current_height + 2628000
     create created_lock = TimeLock {
         owner: owner,
         lock_type: 0,
         unlock_height: unlock_height,
         created_at: current_height
     }
+}
 """,
     "create_relative_lock": """
-action create_relative_lock(owner: Address, lock_period: u64, current_height: u64) -> created_lock: TimeLock
-where
-    assert_invariant(lock_period >= 10, "too short")
-    assert_invariant(lock_period <= 2628000, "too long")
+action create_relative_lock(owner: Address, lock_period: u64, current_height: u64) -> created_lock: TimeLock {
+    verification
+    require lock_period >= 10
+    require lock_period <= 2628000
     create created_lock = TimeLock {
         owner: owner,
         lock_type: 1,
         unlock_height: current_height + lock_period,
         created_at: current_height
     }
+}
 """,
     "lock_asset": """
-action lock_asset(read time_lock: TimeLock, lock_hash: Hash, amount: u64) -> locked: LockedAsset
-where
-    assert_invariant(amount > 0, "amount must be positive")
+action lock_asset(read time_lock: TimeLock, lock_hash: Hash, amount: u64) -> locked: LockedAsset {
+    verification
+    require amount > 0
     create locked = LockedAsset {
         amount: amount,
         lock_hash: lock_hash
     }
+}
 """,
     "request_release": """
-action request_release(read time_lock: TimeLock, lock_hash: Hash, requester: Address, current_height: u64) -> request: ReleaseRequest
-where
-    assert_invariant(current_height >= time_lock.unlock_height, "cannot unlock yet")
+action request_release(read time_lock: TimeLock, lock_hash: Hash, requester: Address, current_height: u64) -> request: ReleaseRequest {
+    verification
+    require current_height >= time_lock.unlock_height
     create request = ReleaseRequest {
         lock_hash: lock_hash,
         requester: requester,
         requested_at: current_height
     }
+}
 """,
     "request_emergency_release": """
-action request_emergency_release(read time_lock: TimeLock, lock_hash: Hash, requester: Address, current_height: u64) -> emergency: EmergencyRelease
-where
-    assert_invariant(time_lock.owner == requester, "not owner")
-    assert_invariant(current_height < time_lock.unlock_height, "already unlockable")
+action request_emergency_release(read time_lock: TimeLock, lock_hash: Hash, requester: Address, current_height: u64) -> emergency: EmergencyRelease {
+    verification
+    require time_lock.owner == requester
+    require current_height < time_lock.unlock_height
     create emergency = EmergencyRelease {
         lock_hash: lock_hash,
         requester: requester,
         requested_at: current_height,
         approvals: 0
     }
+}
 """,
     "approve_emergency_release": """
-action approve_emergency_release(emergency_before: EmergencyRelease, approver: Address, required_approvals: u8) -> emergency_after: EmergencyRelease
-where
-    assert_invariant(emergency_before.approvals < required_approvals, "already approved")
+action approve_emergency_release(emergency_before: EmergencyRelease, approver: Address, required_approvals: u8) -> emergency_after: EmergencyRelease {
+    verification
+    require emergency_before.approvals < required_approvals
     require emergency_after.lock_hash == emergency_before.lock_hash
     require emergency_after.requester == emergency_before.requester
     require emergency_after.requested_at == emergency_before.requested_at
     require emergency_after.approvals == emergency_before.approvals + 1
+}
 """,
     "extend_lock": """
-action extend_lock(time_lock_before: TimeLock, additional_period: u64, owner: Address, current_height: u64) -> time_lock_after: TimeLock
-where
-    assert_invariant(time_lock_before.owner == owner, "not owner")
-    assert_invariant(current_height < time_lock_before.unlock_height, "already unlocked")
+action extend_lock(time_lock_before: TimeLock, additional_period: u64, owner: Address, current_height: u64) -> time_lock_after: TimeLock {
+    verification
+    require time_lock_before.owner == owner
+    require current_height < time_lock_before.unlock_height
 
     let new_unlock_height = time_lock_before.unlock_height + additional_period
-    assert_invariant(new_unlock_height <= current_height + 2628000, "too far")
+    require new_unlock_height <= current_height + 2628000
 
     require time_lock_after.owner == time_lock_before.owner
     require time_lock_after.lock_type == time_lock_before.lock_type
     require time_lock_after.unlock_height == new_unlock_height
     require time_lock_after.created_at == time_lock_before.created_at
+}
 """,
     "execute_release": """
 action execute_release(
@@ -830,10 +878,10 @@ action execute_release(
     locked_asset: LockedAsset,
     request: ReleaseRequest,
     executor: Address
-) -> record: ReleaseRecord
-where
-    assert_invariant(time_lock.owner == executor, "not owner")
-    assert_invariant(locked_asset.lock_hash == request.lock_hash, "asset/request mismatch")
+) -> record: ReleaseRecord {
+    verification
+    require time_lock.owner == executor
+    require locked_asset.lock_hash == request.lock_hash
 
     create record = ReleaseRecord {
         lock_hash: request.lock_hash,
@@ -844,6 +892,7 @@ where
     destroy time_lock
     destroy locked_asset
     destroy request
+}
 """,
     "execute_emergency_release": """
 action execute_emergency_release(
@@ -852,11 +901,11 @@ action execute_emergency_release(
     emergency: EmergencyRelease,
     executor: Address,
     required_approvals: u8
-) -> record: ReleaseRecord
-where
-    assert_invariant(time_lock.owner == executor, "not owner")
-    assert_invariant(emergency.approvals >= required_approvals, "not enough approvals")
-    assert_invariant(locked_asset.lock_hash == emergency.lock_hash, "asset/emergency mismatch")
+) -> record: ReleaseRecord {
+    verification
+    require time_lock.owner == executor
+    require emergency.approvals >= required_approvals
+    require locked_asset.lock_hash == emergency.lock_hash
 
     create record = ReleaseRecord {
         lock_hash: emergency.lock_hash,
@@ -867,22 +916,23 @@ where
     destroy time_lock
     destroy locked_asset
     destroy emergency
+}
 """,
     "batch_create_locks": """
 action batch_create_locks(
     owners: [Address; 4],
     unlock_heights: [u64; 4],
     current_height: u64,
-) -> (lock0: TimeLock, lock1: TimeLock, lock2: TimeLock, lock3: TimeLock)
-where
-    assert_invariant(unlock_heights[0] > current_height + 10, "too close")
-    assert_invariant(unlock_heights[1] > current_height + 10, "too close")
-    assert_invariant(unlock_heights[2] > current_height + 10, "too close")
-    assert_invariant(unlock_heights[3] > current_height + 10, "too close")
-    assert_invariant(unlock_heights[0] <= current_height + 2628000, "too far")
-    assert_invariant(unlock_heights[1] <= current_height + 2628000, "too far")
-    assert_invariant(unlock_heights[2] <= current_height + 2628000, "too far")
-    assert_invariant(unlock_heights[3] <= current_height + 2628000, "too far")
+) -> (lock0: TimeLock, lock1: TimeLock, lock2: TimeLock, lock3: TimeLock) {
+    verification
+    require unlock_heights[0] > current_height + 10
+    require unlock_heights[1] > current_height + 10
+    require unlock_heights[2] > current_height + 10
+    require unlock_heights[3] > current_height + 10
+    require unlock_heights[0] <= current_height + 2628000
+    require unlock_heights[1] <= current_height + 2628000
+    require unlock_heights[2] <= current_height + 2628000
+    require unlock_heights[3] <= current_height + 2628000
 
     create lock0 = TimeLock {
         owner: owners[0],
@@ -908,6 +958,7 @@ where
         unlock_height: unlock_heights[3],
         created_at: current_height
     }
+}
 """,
 }
 
@@ -939,11 +990,11 @@ receipt LPReceipt has store, create, consume {
     provider: Address
 }
 
-action seed_pool(token_a: Token, token_b: Token, fee_rate_bps: u16, provider: Address) -> (pool: Pool, receipt: LPReceipt)
-where
-    assert_invariant(token_a.symbol != token_b.symbol, "same token")
-    assert_invariant(token_a.amount > 0 && token_b.amount > 0, "empty reserve")
-    assert_invariant(fee_rate_bps <= 10000, "fee too high")
+action seed_pool(token_a: Token, token_b: Token, fee_rate_bps: u16, provider: Address) -> (pool: Pool, receipt: LPReceipt) {
+    verification
+    require token_a.symbol != token_b.symbol
+    require token_a.amount > 0 && token_b.amount > 0
+    require fee_rate_bps <= 10000
 
     let initial_lp = isqrt(token_a.amount * token_b.amount)
 
@@ -964,9 +1015,10 @@ where
         lp_amount: initial_lp,
         provider: provider
     } with_lock(provider)
+}
 
-action isqrt(n: u64) -> u64
-where
+action isqrt(n: u64) -> u64 {
+    verification
     if n == 0 {
         return 0
     }
@@ -980,6 +1032,7 @@ where
     }
 
     x
+}
 """,
     "add_liquidity": """
 resource Token has store, create, consume {
@@ -1002,10 +1055,10 @@ receipt LPReceipt has store, create, consume {
     provider: Address
 }
 
-action add_liquidity(pool_before: Pool, token_a: Token, token_b: Token, provider: Address) -> (pool_after: Pool, receipt: LPReceipt)
-where
-    assert_invariant(token_a.symbol == pool_before.token_a_symbol, "wrong token a")
-    assert_invariant(token_b.symbol == pool_before.token_b_symbol, "wrong token b")
+action add_liquidity(pool_before: Pool, token_a: Token, token_b: Token, provider: Address) -> (pool_after: Pool, receipt: LPReceipt) {
+    verification
+    require token_a.symbol == pool_before.token_a_symbol
+    require token_b.symbol == pool_before.token_b_symbol
 
     let lp_from_a = token_a.amount * pool_before.total_lp / pool_before.reserve_a
     let lp_from_b = token_b.amount * pool_before.total_lp / pool_before.reserve_b
@@ -1026,10 +1079,12 @@ where
         lp_amount: lp_amount,
         provider: provider
     } with_lock(provider)
+}
 
-action min(a: u64, b: u64) -> u64
-where
+action min(a: u64, b: u64) -> u64 {
+    verification
     if a < b { a } else { b }
+}
 """,
     "swap_a_for_b": """
 resource Token has store, create, consume {
@@ -1046,17 +1101,17 @@ shared Pool has store, create, replace {
     fee_rate_bps: u16
 }
 
-action swap_a_for_b(pool_before: Pool, input: Token, min_output: u64, to: Address) -> (pool_after: Pool, token_out: Token)
-where
-    assert_invariant(input.symbol == pool_before.token_a_symbol, "wrong input token")
+action swap_a_for_b(pool_before: Pool, input: Token, min_output: u64, to: Address) -> (pool_after: Pool, token_out: Token) {
+    verification
+    require input.symbol == pool_before.token_a_symbol
 
     let fee = input.amount * pool_before.fee_rate_bps as u64 / 10000
     let net_input = input.amount - fee
 
     let amount_out = pool_before.reserve_b * net_input / (pool_before.reserve_a + net_input)
 
-    assert_invariant(amount_out >= min_output, "slippage exceeded")
-    assert_invariant(amount_out < pool_before.reserve_b, "insufficient reserves")
+    require amount_out >= min_output
+    require amount_out < pool_before.reserve_b
 
     consume input
 
@@ -1071,6 +1126,7 @@ where
         amount: amount_out,
         symbol: pool_before.token_b_symbol
     } with_lock(to)
+}
 """,
     "remove_liquidity": """
 resource Token has store, create, consume {
@@ -1093,9 +1149,9 @@ receipt LPReceipt has store, create, consume {
     provider: Address
 }
 
-action remove_liquidity(pool_before: Pool, receipt: LPReceipt, provider: Address) -> (pool_after: Pool, token_a_out: Token, token_b_out: Token)
-where
-    assert_invariant(receipt.pool_id == pool_before.type_hash(), "wrong pool")
+action remove_liquidity(pool_before: Pool, receipt: LPReceipt, provider: Address) -> (pool_after: Pool, token_a_out: Token, token_b_out: Token) {
+    verification
+    require receipt.pool_id == pool_before.type_hash()
 
     let amount_a = receipt.lp_amount * pool_before.reserve_a / pool_before.total_lp
     let amount_b = receipt.lp_amount * pool_before.reserve_b / pool_before.total_lp
@@ -1118,10 +1174,11 @@ where
         amount: amount_b,
         symbol: pool_before.token_b_symbol
     } with_lock(provider)
+}
 """,
     "isqrt": """
-action isqrt(n: u64) -> u64
-where
+action isqrt(n: u64) -> u64 {
+    verification
     if n == 0 {
         return 0
     }
@@ -1135,11 +1192,13 @@ where
     }
 
     x
+}
 """,
     "min": """
-action min(a: u64, b: u64) -> u64
-where
+action min(a: u64, b: u64) -> u64 {
+    verification
     if a < b { a } else { b }
+}
 """,
 }
 
@@ -1187,11 +1246,11 @@ receipt ExecutionRecord has create {
 
 MULTISIG_ACTION_SOURCES = {
     "create_wallet": """
-action create_wallet(wallet_id: Hash, signer_a: Address, signer_b: Address, threshold: u8, current_time: u64) -> wallet: MultisigWallet
-where
-    assert_invariant(signer_a != signer_b, "duplicate signer")
-    assert_invariant(threshold >= 2, "threshold too low")
-    assert_invariant(threshold <= 2, "threshold too high")
+action create_wallet(wallet_id: Hash, signer_a: Address, signer_b: Address, threshold: u8, current_time: u64) -> wallet: MultisigWallet {
+    verification
+    require signer_a != signer_b
+    require threshold >= 2
+    require threshold <= 2
 
     create wallet = MultisigWallet {
         wallet_id: wallet_id,
@@ -1201,12 +1260,13 @@ where
         nonce: 0,
         created_at: current_time
     }
+}
 """,
     "propose_transfer": """
-action propose_transfer(wallet_before: MultisigWallet, proposer: Address, target: Address, amount: u64, current_time: u64) -> (wallet_after: MultisigWallet, proposal: Proposal)
-where
-    assert_invariant(proposer == wallet_before.signer_a, "not signer")
-    assert_invariant(amount > 0, "amount must be positive")
+action propose_transfer(wallet_before: MultisigWallet, proposer: Address, target: Address, amount: u64, current_time: u64) -> (wallet_after: MultisigWallet, proposal: Proposal) {
+    verification
+    require proposer == wallet_before.signer_a
+    require amount > 0
 
     let proposal_id = wallet_before.nonce + 1
 
@@ -1229,12 +1289,13 @@ where
         created_at: current_time,
         expires_at: current_time + 1440
     }
+}
 """,
     "add_signature": """
-action add_signature(proposal_before: Proposal, signer: Address, current_time: u64) -> (proposal_after: Proposal, confirmation: SignatureConfirmation)
-where
-    assert_invariant(current_time < proposal_before.expires_at, "proposal expired")
-    assert_invariant(proposal_before.signature_count < proposal_before.required_signatures, "already enough signatures")
+action add_signature(proposal_before: Proposal, signer: Address, current_time: u64) -> (proposal_after: Proposal, confirmation: SignatureConfirmation) {
+    verification
+    require current_time < proposal_before.expires_at
+    require proposal_before.signature_count < proposal_before.required_signatures
 
     require proposal_after.wallet_id == proposal_before.wallet_id
     require proposal_after.proposal_id == proposal_before.proposal_id
@@ -1252,13 +1313,14 @@ where
         signer: signer,
         timestamp: current_time
     }
+}
 """,
     "propose_add_signer": """
-action propose_add_signer(wallet_before: MultisigWallet, proposer: Address, new_signer: Address, current_time: u64) -> (wallet_after: MultisigWallet, proposal: Proposal)
-where
-    assert_invariant(proposer == wallet_before.signer_a, "not signer")
-    assert_invariant(new_signer != wallet_before.signer_a, "already signer")
-    assert_invariant(new_signer != wallet_before.signer_b, "already signer")
+action propose_add_signer(wallet_before: MultisigWallet, proposer: Address, new_signer: Address, current_time: u64) -> (wallet_after: MultisigWallet, proposal: Proposal) {
+    verification
+    require proposer == wallet_before.signer_a
+    require new_signer != wallet_before.signer_a
+    require new_signer != wallet_before.signer_b
 
     let proposal_id = wallet_before.nonce + 1
 
@@ -1281,13 +1343,14 @@ where
         created_at: current_time,
         expires_at: current_time + 1440
     }
+}
 """,
     "propose_remove_signer": """
-action propose_remove_signer(wallet_before: MultisigWallet, proposer: Address, signer_to_remove: Address, current_time: u64) -> (wallet_after: MultisigWallet, proposal: Proposal)
-where
-    assert_invariant(proposer == wallet_before.signer_a, "not signer")
-    assert_invariant(signer_to_remove == wallet_before.signer_b, "not removable signer")
-    assert_invariant(wallet_before.threshold <= 1, "would fall below threshold")
+action propose_remove_signer(wallet_before: MultisigWallet, proposer: Address, signer_to_remove: Address, current_time: u64) -> (wallet_after: MultisigWallet, proposal: Proposal) {
+    verification
+    require proposer == wallet_before.signer_a
+    require signer_to_remove == wallet_before.signer_b
+    require wallet_before.threshold <= 1
 
     let proposal_id = wallet_before.nonce + 1
 
@@ -1310,13 +1373,14 @@ where
         created_at: current_time,
         expires_at: current_time + 1440
     }
+}
 """,
     "propose_change_threshold": """
-action propose_change_threshold(wallet_before: MultisigWallet, proposer: Address, new_threshold: u8, current_time: u64) -> (wallet_after: MultisigWallet, proposal: Proposal)
-where
-    assert_invariant(proposer == wallet_before.signer_a, "not signer")
-    assert_invariant(new_threshold >= 1, "threshold too low")
-    assert_invariant(new_threshold <= 2, "threshold too high")
+action propose_change_threshold(wallet_before: MultisigWallet, proposer: Address, new_threshold: u8, current_time: u64) -> (wallet_after: MultisigWallet, proposal: Proposal) {
+    verification
+    require proposer == wallet_before.signer_a
+    require new_threshold >= 1
+    require new_threshold <= 2
 
     let proposal_id = wallet_before.nonce + 1
 
@@ -1339,12 +1403,13 @@ where
         created_at: current_time,
         expires_at: current_time + 1440
     }
+}
 """,
     "execute_proposal": """
-action execute_proposal(proposal: Proposal, executor: Address, current_time: u64) -> record: ExecutionRecord
-where
-    assert_invariant(current_time < proposal.expires_at, "proposal expired")
-    assert_invariant(proposal.signature_count >= proposal.required_signatures, "not enough signatures")
+action execute_proposal(proposal: Proposal, executor: Address, current_time: u64) -> record: ExecutionRecord {
+    verification
+    require current_time < proposal.expires_at
+    require proposal.signature_count >= proposal.required_signatures
 
     create record = ExecutionRecord {
         proposal_id: proposal.proposal_id,
@@ -1354,12 +1419,14 @@ where
     }
 
     destroy proposal
+}
 """,
     "cancel_proposal": """
-action cancel_proposal(proposal: Proposal, canceller: Address)
-where
-    assert_invariant(proposal.proposer == canceller, "only proposer can cancel")
+action cancel_proposal(proposal: Proposal, canceller: Address) {
+    verification
+    require proposal.proposer == canceller
     destroy proposal
+}
 """,
 }
 
@@ -1400,22 +1467,22 @@ shared Pool has store, create, replace {
 
 LAUNCH_ACTION_SOURCES = {
     "launch_token": """
-action launch_token(symbol: [u8; 8], max_supply: u64, initial_mint: u64, pool_seed_amount: u64, pool_paired_token: Token, fee_rate_bps: u16, creator: Address, distribution: [(Address, u64); 4]) -> (auth: MintAuthority, dist0: Token, dist1: Token, dist2: Token, dist3: Token, pool: Pool, lp_receipt: LPReceipt, change: Token)
-where
-    assert_invariant(initial_mint <= max_supply, "initial exceeds max")
-    assert_invariant(pool_seed_amount > 0, "zero pool seed")
-    assert_invariant(pool_paired_token.amount > 0, "zero paired seed")
-    assert_invariant(symbol != pool_paired_token.symbol, "same token")
-    assert_invariant(fee_rate_bps <= 10000, "fee too high")
-    assert_invariant(pool_seed_amount <= initial_mint, "pool seed exceeds mint")
-    assert_invariant(distribution[1].1 <= U64_MAX - distribution[0].1, "distribution overflow")
+action launch_token(symbol: [u8; 8], max_supply: u64, initial_mint: u64, pool_seed_amount: u64, pool_paired_token: Token, fee_rate_bps: u16, creator: Address, distribution: [(Address, u64); 4]) -> (auth: MintAuthority, dist0: Token, dist1: Token, dist2: Token, dist3: Token, pool: Pool, lp_receipt: LPReceipt, change: Token) {
+    verification
+    require initial_mint <= max_supply, "initial exceeds max"
+    require pool_seed_amount > 0, "zero pool seed"
+    require pool_paired_token.amount > 0, "zero paired seed"
+    require symbol != pool_paired_token.symbol, "same token"
+    require fee_rate_bps <= 10000, "fee too high"
+    require pool_seed_amount <= initial_mint, "pool seed exceeds mint"
+    require distribution[1].1 <= U64_MAX - distribution[0].1, "distribution overflow"
     let dist01 = distribution[0].1 + distribution[1].1
-    assert_invariant(distribution[2].1 <= U64_MAX - dist01, "distribution overflow")
+    require distribution[2].1 <= U64_MAX - dist01, "distribution overflow"
     let dist012 = dist01 + distribution[2].1
-    assert_invariant(distribution[3].1 <= U64_MAX - dist012, "distribution overflow")
+    require distribution[3].1 <= U64_MAX - dist012, "distribution overflow"
     let dist_total = dist012 + distribution[3].1
-    assert_invariant(pool_seed_amount <= U64_MAX - dist_total, "allocation overflow")
-    assert_invariant(dist_total + pool_seed_amount <= initial_mint, "allocation exceeds mint")
+    require pool_seed_amount <= U64_MAX - dist_total, "allocation overflow"
+    require dist_total + pool_seed_amount <= initial_mint, "allocation exceeds mint"
 
     create auth = MintAuthority {
         token_symbol: symbol,
@@ -1444,14 +1511,15 @@ where
     } with_lock(creator)
     let remaining = initial_mint - dist_total - pool_seed_amount
     create change = Token { amount: remaining, symbol: symbol } with_lock(creator)
+}
 """,
     "bootstrap_token": """
-action bootstrap_token(symbol: [u8; 8], max_supply: u64, initial_mint: u64, creator: Address, recipients: [(Address, u64); 2]) -> (auth: MintAuthority, rec0: Token, rec1: Token, change: Token)
-where
-    assert_invariant(initial_mint <= max_supply, "initial exceeds max")
-    assert_invariant(recipients[1].1 <= U64_MAX - recipients[0].1, "distribution overflow")
+action bootstrap_token(symbol: [u8; 8], max_supply: u64, initial_mint: u64, creator: Address, recipients: [(Address, u64); 2]) -> (auth: MintAuthority, rec0: Token, rec1: Token, change: Token) {
+    verification
+    require initial_mint <= max_supply, "initial exceeds max"
+    require recipients[1].1 <= U64_MAX - recipients[0].1, "distribution overflow"
     let total_distributed = recipients[0].1 + recipients[1].1
-    assert_invariant(total_distributed <= initial_mint, "distribution exceeds mint")
+    require total_distributed <= initial_mint, "distribution exceeds mint"
 
     create auth = MintAuthority {
         token_symbol: symbol,
@@ -1462,6 +1530,7 @@ where
     create rec1 = Token { amount: recipients[1].1, symbol: symbol } with_lock(recipients[1].0)
     let remaining = initial_mint - total_distributed
     create change = Token { amount: remaining, symbol: symbol } with_lock(creator)
+}
 """,
 }
 
@@ -1619,6 +1688,12 @@ def file_sha256(path):
             h.update(chunk)
     return h.hexdigest()
 
+def sha256_hex(data):
+    return "0x" + hashlib.sha256(data).hexdigest()
+
+def ckb_data_hash_hex(data):
+    return "0x" + hashlib.blake2b(data, digest_size=32, person=b"ckb-default-hash").hexdigest()
+
 def tracked_source_sha256(files):
     h = hashlib.sha256()
     for rel in files:
@@ -1768,6 +1843,109 @@ def internal_assembler_env():
         env.pop(key, None)
     return env
 
+def read_u16_le(data, offset):
+    return struct.unpack_from("<H", data, offset)[0]
+
+def read_u32_le(data, offset):
+    return struct.unpack_from("<I", data, offset)[0]
+
+def read_u64_le(data, offset):
+    return struct.unpack_from("<Q", data, offset)[0]
+
+def audit_ckb_elf_entry_abi(name, artifact_bytes):
+    if len(artifact_bytes) < ELF64_HEADER_SIZE or not artifact_bytes.startswith(b"\x7fELF"):
+        raise RuntimeError(f"{name} artifact is not a complete ELF64 file")
+    if artifact_bytes[4] != 2:
+        raise RuntimeError(f"{name} artifact is not ELFCLASS64")
+    if artifact_bytes[5] != 1:
+        raise RuntimeError(f"{name} artifact is not little-endian ELF")
+    if read_u16_le(artifact_bytes, 18) != ELF_EM_RISCV:
+        raise RuntimeError(f"{name} artifact is not RISC-V ELF")
+
+    entry = read_u64_le(artifact_bytes, 24)
+    program_header_offset = read_u64_le(artifact_bytes, 32)
+    program_header_entry_size = read_u16_le(artifact_bytes, 54)
+    program_header_count = read_u16_le(artifact_bytes, 56)
+    if program_header_entry_size < ELF64_PROGRAM_HEADER_SIZE:
+        raise RuntimeError(f"{name} ELF program header entry size is too small: {program_header_entry_size}")
+    if program_header_offset + program_header_entry_size * program_header_count > len(artifact_bytes):
+        raise RuntimeError(f"{name} ELF program headers exceed artifact size")
+
+    executable_headers = []
+    for index in range(program_header_count):
+        offset = program_header_offset + index * program_header_entry_size
+        p_type = read_u32_le(artifact_bytes, offset)
+        flags = read_u32_le(artifact_bytes, offset + 4)
+        if p_type != ELF_PT_LOAD or flags & ELF_PF_X == 0:
+            continue
+        file_offset = read_u64_le(artifact_bytes, offset + 8)
+        virtual_address = read_u64_le(artifact_bytes, offset + 16)
+        file_size = read_u64_le(artifact_bytes, offset + 32)
+        memory_size = read_u64_le(artifact_bytes, offset + 40)
+        executable_headers.append({
+            "index": index,
+            "flags": flags,
+            "file_offset": file_offset,
+            "virtual_address": virtual_address,
+            "file_size": file_size,
+            "memory_size": memory_size,
+        })
+
+    if not executable_headers:
+        raise RuntimeError(f"{name} ELF does not contain an executable PT_LOAD segment")
+
+    header = executable_headers[0]
+    flags = header["flags"]
+    if flags != (ELF_PF_R | ELF_PF_X):
+        raise RuntimeError(f"{name} executable PT_LOAD flags must be RX-only, got 0x{flags:x}")
+    if flags & ELF_PF_W:
+        raise RuntimeError(f"{name} executable PT_LOAD segment must not be writable")
+    if header["file_size"] != header["memory_size"]:
+        raise RuntimeError(
+            f"{name} executable PT_LOAD must not fake stack memory: "
+            f"filesz={header['file_size']} memsz={header['memory_size']}"
+        )
+    if not (header["virtual_address"] <= entry < header["virtual_address"] + header["file_size"]):
+        raise RuntimeError(f"{name} ELF entry point is outside the executable PT_LOAD segment")
+
+    entry_file_offset = header["file_offset"] + (entry - header["virtual_address"])
+    if entry_file_offset + ENTRY_TRAMPOLINE_SIZE > len(artifact_bytes):
+        raise RuntimeError(f"{name} ELF entry trampoline exceeds artifact size")
+    first_instruction = read_u32_le(artifact_bytes, entry_file_offset)
+    first_opcode = first_instruction & 0x7f
+    first_rd = (first_instruction >> 7) & 0x1f
+    if first_opcode != 0x17 or first_rd != 1:
+        raise RuntimeError(
+            f"{name} ELF entry trampoline must start with auipc ra, not instruction 0x{first_instruction:08x}"
+        )
+
+    return {
+        "schema": ELF_ENTRY_ABI_SCHEMA,
+        "status": "passed",
+        "entry_point": f"0x{entry:x}",
+        "executable_load_segment": {
+            "index": header["index"],
+            "flags": flags,
+            "flags_symbolic": "R|X",
+            "writable": False,
+            "file_offset": header["file_offset"],
+            "virtual_address": f"0x{header['virtual_address']:x}",
+            "file_size": header["file_size"],
+            "memory_size": header["memory_size"],
+            "file_size_equals_memory_size": True,
+        },
+        "trampoline": {
+            "size_bytes": ENTRY_TRAMPOLINE_SIZE,
+            "entry_file_offset": entry_file_offset,
+            "first_instruction_le_hex": f"0x{first_instruction:08x}",
+            "first_instruction_opcode": "auipc",
+            "first_instruction_rd": "ra",
+            "calls_entry_with_ra": True,
+            "preserves_ckb_vm_stack_pointer": True,
+            "forbidden_sp_initialisation": False,
+        },
+    }
+
 def compile_artifact(name, kind, source, artifact, *, entry_args=None):
     entry_args = entry_args or []
     env = internal_assembler_env()
@@ -1787,6 +1965,7 @@ def compile_artifact(name, kind, source, artifact, *, entry_args=None):
         raise RuntimeError(f"{name} artifact is not an ELF")
     if artifact_has_unexpected_profile_trailer:
         raise RuntimeError(f"{name} CKB artifact still contains an unexpected non-CKB ABI trailer")
+    elf_entry_abi = audit_ckb_elf_entry_abi(name, artifact_bytes)
 
     metadata = load_json(metadata_path)
     verify = verify_artifact(artifact)
@@ -1802,6 +1981,7 @@ def compile_artifact(name, kind, source, artifact, *, entry_args=None):
         "artifact_size_bytes": len(artifact_bytes),
         "artifact_starts_with_elf_magic": True,
         "artifact_has_unexpected_profile_trailer": False,
+        "elf_entry_abi": elf_entry_abi,
         "target_profile": "ckb",
         "artifact_packaging": metadata.get("target_profile", {}).get("artifact_packaging"),
         "entry_args": [str(arg) for arg in entry_args],
@@ -1822,7 +2002,7 @@ def strict_policy_fail_closed(stderr):
     )
 
 def strict_original_compile(name):
-    source = production_example_path(name)
+    source = production_example_build_path(name)
     artifact = strict_root / f"{name}.strict.elf"
     result = run(
         [cellc, source, "--target-profile", "ckb", "--target", "riscv64-elf", "--primitive-strict", "0.16", "-o", artifact],
@@ -1831,8 +2011,10 @@ def strict_original_compile(name):
     policy_fail_closed = result["returncode"] != 0 and strict_policy_fail_closed(result["stderr"])
     unexpected_failure = result["returncode"] != 0 and not policy_fail_closed
     verify = None
+    elf_entry_abi = None
     if result["returncode"] == 0:
         verify = verify_artifact(artifact)
+        elf_entry_abi = audit_ckb_elf_entry_abi(name, artifact.read_bytes())
     return {
         "source": str(source),
         "artifact": str(artifact),
@@ -1840,6 +2022,7 @@ def strict_original_compile(name):
         "policy_fail_closed": policy_fail_closed,
         "unexpected_failure": unexpected_failure,
         "verify": verify,
+        "elf_entry_abi": elf_entry_abi,
         "returncode": result["returncode"],
         "stdout": result["stdout"],
         "stderr": result["stderr"],
@@ -1854,8 +2037,10 @@ def strict_scoped_compile(name, source, entry_flag, entry_name):
     policy_fail_closed = result["returncode"] != 0 and strict_policy_fail_closed(result["stderr"])
     unexpected_failure = result["returncode"] != 0 and not policy_fail_closed
     verify = None
+    elf_entry_abi = None
     if result["returncode"] == 0:
         verify = verify_artifact(artifact)
+        elf_entry_abi = audit_ckb_elf_entry_abi(name, artifact.read_bytes())
     return {
         "source": str(source),
         "artifact": str(artifact),
@@ -1865,6 +2050,7 @@ def strict_scoped_compile(name, source, entry_flag, entry_name):
         "policy_fail_closed": policy_fail_closed,
         "unexpected_failure": unexpected_failure,
         "verify": verify,
+        "elf_entry_abi": elf_entry_abi,
         "returncode": result["returncode"],
         "stdout": result["stdout"],
         "stderr": result["stderr"],
@@ -1986,7 +2172,7 @@ for example_name, actions in ORIGINAL_SCOPED_ACTIONS.items():
         record = compile_artifact(
             f"{example_name}:{action}",
             "original-scoped-action-strict",
-            production_example_path(example_name),
+            production_example_build_path(example_name),
             artifact_root / f"original_{example_name.removesuffix('.cell')}_{action}.elf",
             entry_args=["--primitive-strict", "0.16", "--entry-action", action],
         )
@@ -2077,7 +2263,7 @@ for example_name, locks in ORIGINAL_SCOPED_LOCKS.items():
         record = compile_artifact(
             f"{example_name}:{lock}",
             "original-scoped-lock-strict",
-            production_example_path(example_name),
+            production_example_build_path(example_name),
             artifact_root / f"original_{example_name.removesuffix('.cell')}_{lock}.elf",
             entry_args=["--primitive-strict", "0.16", "--entry-lock", lock],
         )
@@ -2091,7 +2277,7 @@ for example_name, actions in ORIGINAL_SCOPED_ACTION_FAIL_CLOSED.items():
     for action in actions:
         record = strict_scoped_compile(
             f"{example_name}:{action}",
-            production_example_path(example_name),
+            production_example_build_path(example_name),
             "--entry-action",
             action,
         )
@@ -2105,7 +2291,7 @@ for example_name, locks in ORIGINAL_SCOPED_LOCK_FAIL_CLOSED.items():
     for lock in locks:
         record = strict_scoped_compile(
             f"{example_name}:{lock}",
-            production_example_path(example_name),
+            production_example_build_path(example_name),
             "--entry-lock",
             lock,
         )
@@ -2190,6 +2376,201 @@ strict_original_unexpected_failures = [
     if record["strict_original_ckb_compile"]["unexpected_failure"]
 ]
 
+def elf_entry_abi_source_example(record):
+    example = record.get("example")
+    if isinstance(example, str) and example:
+        return example
+    original_source = record.get("original_source") or record.get("source")
+    if isinstance(original_source, str):
+        source_name = pathlib.Path(original_source).name
+        if source_name in EXAMPLES:
+            return source_name
+    return None
+
+def collect_elf_entry_abi_gate():
+    rows = []
+    seen_artifacts = set()
+
+    def add_record(record, *, fallback_name=None, fallback_kind=None, source_example=None):
+        artifact = record.get("artifact")
+        if not artifact or artifact in seen_artifacts:
+            return
+        seen_artifacts.add(artifact)
+        audit = record.get("elf_entry_abi")
+        row = {
+            "name": record.get("name") or fallback_name or pathlib.Path(artifact).name,
+            "kind": record.get("kind") or fallback_kind or "unknown",
+            "source": record.get("source"),
+            "original_source": record.get("original_source"),
+            "example": source_example or elf_entry_abi_source_example(record),
+            "artifact": artifact,
+            "status": audit.get("status") if isinstance(audit, dict) else "missing",
+            "preserves_ckb_vm_stack_pointer": False,
+            "entry_trampoline_calls_with_ra": False,
+            "executable_segment_rx_only": False,
+            "executable_segment_file_size_equals_memory_size": False,
+        }
+        if isinstance(audit, dict):
+            trampoline = audit.get("trampoline") or {}
+            executable = audit.get("executable_load_segment") or {}
+            row.update({
+                "preserves_ckb_vm_stack_pointer": trampoline.get("preserves_ckb_vm_stack_pointer") is True,
+                "entry_trampoline_calls_with_ra": trampoline.get("calls_entry_with_ra") is True,
+                "executable_segment_rx_only": executable.get("flags_symbolic") == "R|X" and executable.get("writable") is False,
+                "executable_segment_file_size_equals_memory_size": executable.get("file_size_equals_memory_size") is True,
+                "first_instruction_le_hex": trampoline.get("first_instruction_le_hex"),
+                "entry_point": audit.get("entry_point"),
+            })
+        rows.append(row)
+
+    for record in artifacts:
+        add_record(record)
+    for record in bundled_examples:
+        strict = record["strict_original_ckb_compile"]
+        if strict["status"] == "passed":
+            strict = {**strict, "name": record["name"], "kind": "bundled-example-strict-original", "source": record["source"], "example": record["name"]}
+            add_record(strict, source_example=record["name"])
+    for group in (
+        token_action_artifacts,
+        nft_action_artifacts,
+        timelock_action_artifacts,
+        amm_action_artifacts,
+        multisig_action_artifacts,
+        launch_action_artifacts,
+        original_scoped_action_artifacts,
+        original_scoped_lock_artifacts,
+    ):
+        for record in group:
+            add_record(record)
+
+    failures = [
+        row["name"]
+        for row in rows
+        if row["status"] != "passed"
+        or not row["preserves_ckb_vm_stack_pointer"]
+        or not row["entry_trampoline_calls_with_ra"]
+        or not row["executable_segment_rx_only"]
+        or not row["executable_segment_file_size_equals_memory_size"]
+    ]
+
+    critical = {}
+    for example in CRITICAL_0_20_DEVNET_EXAMPLES:
+        example_rows = [row for row in rows if row.get("example") == example]
+        missing = not example_rows
+        failed = [row["name"] for row in example_rows if row["status"] != "passed"]
+        critical[example] = {
+            "status": "passed" if example_rows and not failed else "failed",
+            "artifact_count": len(example_rows),
+            "audited_artifacts": [row["name"] for row in example_rows],
+            "missing": missing,
+            "failures": failed,
+        }
+        if missing:
+            failures.append(f"{example}:missing")
+        failures.extend(f"{example}:{name}" for name in failed)
+
+    unique_failures = sorted(set(failures))
+    return {
+        "schema": "cellscript-ckb-elf-entry-abi-gate-v0.20",
+        "status": "passed" if not unique_failures else "failed",
+        "requires_ckb_vm_stack_pointer_preserved": True,
+        "requires_entry_trampoline_call_sequence": True,
+        "requires_rx_only_executable_segment": True,
+        "requires_no_fake_stack_load_segment": True,
+        "critical_examples": CRITICAL_0_20_DEVNET_EXAMPLES,
+        "critical_example_gate": critical,
+        "audited_artifact_count": len(rows),
+        "failures": unique_failures,
+        "rows": rows,
+    }
+
+def collect_build_reports():
+    rows = []
+    seen_artifacts = set()
+
+    def add_record(record, *, fallback_name=None, fallback_kind=None, source_example=None):
+        artifact = record.get("artifact")
+        if not artifact or artifact in seen_artifacts:
+            return
+        seen_artifacts.add(artifact)
+        artifact_path = pathlib.Path(artifact)
+        artifact_bytes = artifact_path.read_bytes()
+        verify = record.get("verify") or {}
+        elf_entry_abi = record.get("elf_entry_abi") or {}
+        metadata_sidecar = record.get("metadata")
+        row = {
+            "schema": BUILD_REPORT_SCHEMA,
+            "name": record.get("name") or fallback_name or artifact_path.name,
+            "kind": record.get("kind") or fallback_kind or "unknown",
+            "source": record.get("source"),
+            "original_source": record.get("original_source"),
+            "example": source_example or elf_entry_abi_source_example(record),
+            "entry_flag": record.get("entry_flag"),
+            "entry": record.get("entry"),
+            "target_profile": "ckb",
+            "vm_profile": "ckb-vm",
+            "artifact_format": "riscv64-elf",
+            "artifact_path": str(artifact_path),
+            "metadata_sidecar": metadata_sidecar,
+            "artifact_packaging": record.get("artifact_packaging"),
+            "artifact_size_bytes": len(artifact_bytes),
+            "artifact_hash_algorithm": "ckb-blake2b256",
+            "deployable_elf_hash": ckb_data_hash_hex(artifact_bytes),
+            "artifact_sha256": sha256_hex(artifact_bytes),
+            "deployment_hash_type_used_by_gate": "data1",
+            "verify_artifact_status": "passed" if isinstance(verify, dict) else "missing",
+            "verify_target_profile": verify.get("target_profile") if isinstance(verify, dict) else None,
+            "elf_entry_abi_status": elf_entry_abi.get("status") if isinstance(elf_entry_abi, dict) else "missing",
+            "abi_trailer_stripped": UNEXPECTED_PROFILE_TRAILER not in artifact_bytes[-64:],
+            "onchain_deployments": [],
+        }
+        rows.append(row)
+
+    for record in artifacts:
+        add_record(record)
+    for record in bundled_examples:
+        strict = record["strict_original_ckb_compile"]
+        if strict["status"] == "passed":
+            strict = {
+                **strict,
+                "name": record["name"],
+                "kind": "bundled-example-strict-original",
+                "source": record["source"],
+                "example": record["name"],
+            }
+            add_record(strict, source_example=record["name"])
+    for group in (
+        token_action_artifacts,
+        nft_action_artifacts,
+        timelock_action_artifacts,
+        amm_action_artifacts,
+        multisig_action_artifacts,
+        launch_action_artifacts,
+        original_scoped_action_artifacts,
+        original_scoped_lock_artifacts,
+    ):
+        for record in group:
+            add_record(record)
+
+    return {
+        "schema": "cellscript-ckb-build-report-index-v0.20",
+        "status": "passed",
+        "artifact_count": len(rows),
+        "artifact_hash_algorithm": "ckb-blake2b256",
+        "artifact_format": "riscv64-elf",
+        "target_profile": "ckb",
+        "vm_profile": "ckb-vm",
+        "requires_exact_artifact_hash": True,
+        "requires_elf_entry_abi_gate": True,
+        "requires_live_code_cell_data_hash_match": True,
+        "reports": rows,
+    }
+
+ckb_elf_entry_abi_gate = collect_elf_entry_abi_gate()
+if ckb_elf_entry_abi_gate["status"] != "passed":
+    raise RuntimeError("CKB ELF entry ABI gate failed: " + json.dumps(ckb_elf_entry_abi_gate["failures"], sort_keys=True))
+build_reports = collect_build_reports()
+
 report = {
     "status": "artifact-verified",
     "acceptance_mode": acceptance_mode,
@@ -2214,6 +2595,8 @@ report = {
         ),
     },
     "lock_acceptance_scope": LOCK_ACCEPTANCE_SCOPE,
+    "ckb_elf_entry_abi_gate": ckb_elf_entry_abi_gate,
+    "cellscript_build_reports": build_reports,
     "bundled_examples_strict_admitted": [
         record["name"]
         for record in bundled_examples
@@ -2304,6 +2687,8 @@ report["production_gate"] = {
     "requires_original_scoped_harnesses": True,
     "requires_no_expected_fail_closed_entries": True,
     "requires_all_bundled_examples_strict_original_ckb": True,
+    "requires_ckb_elf_entry_abi_gate": True,
+    "requires_cellscript_build_reports": True,
 }
 if acceptance_mode == "production" and production_failures:
     report["status"] = "failed-production-gate"
@@ -2459,6 +2844,98 @@ report.update({
     },
 })
 
+def refresh_build_report_deployments():
+    build_index = report.get("cellscript_build_reports") or {}
+    reports = build_index.get("reports") or []
+    by_artifact = {
+        row.get("artifact_path"): row
+        for row in reports
+        if isinstance(row, dict) and isinstance(row.get("artifact_path"), str)
+    }
+    for row in reports:
+        if isinstance(row, dict):
+            row["onchain_deployments"] = []
+
+    unexpected_artifacts = []
+
+    def add_deployment(run, *, name=None, kind=None, code=None):
+        code = code or run
+        artifact = code.get("artifact")
+        row = by_artifact.get(artifact)
+        if row is None:
+            unexpected_artifacts.append(artifact)
+            return
+        deploy = code.get("code_cell_deploy") or {}
+        code_dep = code.get("code_cell_dep") or {}
+        out_point_value = code_dep.get("out_point")
+        artifact_hash = code.get("artifact_ckb_data_hash_blake2b")
+        live_hash = code.get("live_code_cell_data_hash")
+        row["onchain_deployments"].append({
+            "run_name": name or run.get("name") or row.get("name"),
+            "run_kind": kind or run.get("kind") or row.get("kind"),
+            "out_point": out_point_value,
+            "tx_hash": deploy.get("tx_hash"),
+            "output_index": "0x0",
+            "artifact_ckb_data_hash_blake2b": artifact_hash,
+            "live_code_cell_data_hash": live_hash,
+            "live_code_cell_data_hash_matches_artifact": live_hash == artifact_hash,
+            "code_cell_live": code.get("code_cell_live") is True,
+        })
+
+    for run in report["onchain"].get("artifact_runs", []):
+        add_deployment(run, kind="artifact-spend")
+    for run in report["onchain"].get("bundled_example_deployment_runs", []):
+        add_deployment(run, kind="bundled-example-deployment")
+    for key in (
+        "token_action_runs",
+        "nft_action_runs",
+        "timelock_action_runs",
+        "multisig_action_runs",
+        "vesting_action_runs",
+        "amm_action_runs",
+        "launch_action_runs",
+        "lock_spend_matrix_runs",
+    ):
+        for run in report["onchain"].get(key, []):
+            code = run.get("code")
+            if isinstance(code, dict):
+                add_deployment(run, kind=key.removesuffix("_runs"), code=code)
+
+    missing = [
+        row.get("name")
+        for row in reports
+        if isinstance(row, dict) and not row.get("onchain_deployments")
+    ]
+    mismatches = [
+        f"{row.get('name')}:{deployment.get('run_name')}"
+        for row in reports
+        if isinstance(row, dict)
+        for deployment in row.get("onchain_deployments", [])
+        if deployment.get("live_code_cell_data_hash_matches_artifact") is not True
+        or deployment.get("code_cell_live") is not True
+    ]
+    build_index.update({
+        "onchain_deployed_artifact_count": sum(
+            1 for row in reports if isinstance(row, dict) and row.get("onchain_deployments")
+        ),
+        "live_code_cell_data_hash_match_count": sum(
+            1
+            for row in reports
+            if isinstance(row, dict)
+            and row.get("onchain_deployments")
+            and all(
+                deployment.get("live_code_cell_data_hash_matches_artifact") is True
+                and deployment.get("code_cell_live") is True
+                for deployment in row.get("onchain_deployments", [])
+            )
+        ),
+        "missing_onchain_deployments": missing,
+        "live_code_cell_data_hash_mismatches": mismatches,
+        "unexpected_onchain_artifacts": [value for value in unexpected_artifacts if value],
+        "status": "passed" if not missing and not mismatches and not unexpected_artifacts else "failed",
+    })
+    return build_index
+
 def write_report():
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
@@ -2543,6 +3020,20 @@ def always_success_lock(args="0x"):
 
 def data_hash(data):
     return "0x" + hashlib.blake2b(data, digest_size=32, person=b"ckb-default-hash").hexdigest()
+
+def live_cell_data_hash(live_cell):
+    cell = (live_cell or {}).get("cell") or {}
+    data = cell.get("data") or {}
+    if isinstance(data, dict):
+        reported_hash = data.get("hash")
+        if isinstance(reported_hash, str) and reported_hash.startswith("0x"):
+            return reported_hash
+        content = data.get("content")
+    else:
+        content = data
+    if isinstance(content, str) and content.startswith("0x"):
+        return data_hash(bytes.fromhex(content[2:]))
+    raise RuntimeError(f"live cell does not expose code data hash/content: {live_cell}")
 
 def ckb_hash(data):
     return hashlib.blake2b(data, digest_size=32, person=b"ckb-default-hash").digest()
@@ -3335,14 +3826,22 @@ def run_artifact(artifact_record, always_success_dep):
     deploy_input = deploy["deploy_input"]
     deploy_result = deploy["code_cell_deploy"]
     deploy_live = assert_live(deploy_result["tx_hash"], 0, f"{name} code cell")
+    live_data_hash = live_cell_data_hash(deploy_live)
     code_dep = {"out_point": out_point(deploy_result["tx_hash"], 0), "dep_type": "code"}
     result.update({
         "deploy_input": deploy_input,
         "code_cell_deploy": deploy_result,
         "code_cell_live": deploy_live.get("status") == "live",
+        "live_code_cell_data_hash": live_data_hash,
+        "live_code_cell_data_hash_matches_artifact": live_data_hash == artifact_ckb_data_hash,
         "code_cell_dep": code_dep,
         "deploy_attempts": deploy["deploy_attempts"],
     })
+    if not result["live_code_cell_data_hash_matches_artifact"]:
+        raise RuntimeError(
+            f"{name} live code cell data hash mismatch: "
+            f"live={live_data_hash} artifact={artifact_ckb_data_hash}"
+        )
 
     create_input = collect_spendable_cellbases(100 * 100_000_000, max_cells=1)
     cellscript_lock = {"code_hash": artifact_ckb_data_hash, "hash_type": "data1", "args": "0x"}
@@ -3441,16 +3940,24 @@ def run_bundled_example_deployment(artifact_record, always_success_dep):
     )
     deploy_result = deploy["code_cell_deploy"]
     deploy_live = assert_live(deploy_result["tx_hash"], 0, f"{name} bundled-example code cell")
+    live_data_hash = live_cell_data_hash(deploy_live)
     result.update({
         "deploy_input": deploy["deploy_input"],
         "valid_deploy_dry_run": deploy["valid_deploy_dry_run"],
         "measured_constraints": measure_release_constraints(deploy["deploy_tx"], deploy["valid_deploy_dry_run"]),
         "code_cell_deploy": deploy_result,
         "code_cell_live": deploy_live.get("status") == "live",
+        "live_code_cell_data_hash": live_data_hash,
+        "live_code_cell_data_hash_matches_artifact": live_data_hash == artifact_ckb_data_hash,
         "code_cell_dep": {"out_point": out_point(deploy_result["tx_hash"], 0), "dep_type": "code"},
         "deploy_attempts": deploy["deploy_attempts"],
         "status": "passed",
     })
+    if not result["live_code_cell_data_hash_matches_artifact"]:
+        raise RuntimeError(
+            f"{name} live bundled-example code cell data hash mismatch: "
+            f"live={live_data_hash} artifact={artifact_ckb_data_hash}"
+        )
     return result
 
 def deploy_code_cell(name, artifact_path, always_success_dep):
@@ -3459,16 +3966,25 @@ def deploy_code_cell(name, artifact_path, always_success_dep):
     deploy = submit_code_cell_deploy_with_fresh_funding(name, artifact, always_success_dep, "action code-cell deploy")
     deploy_result = deploy["code_cell_deploy"]
     deploy_live = assert_live(deploy_result["tx_hash"], 0, f"{name} action code cell")
-    return {
+    live_data_hash = live_cell_data_hash(deploy_live)
+    result = {
         "artifact": str(artifact_path),
         "artifact_size_bytes": len(artifact),
         "artifact_ckb_data_hash_blake2b": artifact_ckb_data_hash,
         "deploy_input": deploy["deploy_input"],
         "code_cell_deploy": deploy_result,
         "code_cell_live": deploy_live.get("status") == "live",
+        "live_code_cell_data_hash": live_data_hash,
+        "live_code_cell_data_hash_matches_artifact": live_data_hash == artifact_ckb_data_hash,
         "code_cell_dep": {"out_point": out_point(deploy_result["tx_hash"], 0), "dep_type": "code"},
         "deploy_attempts": deploy["deploy_attempts"],
     }
+    if not result["live_code_cell_data_hash_matches_artifact"]:
+        raise RuntimeError(
+            f"{name} live action code cell data hash mismatch: "
+            f"live={live_data_hash} artifact={artifact_ckb_data_hash}"
+        )
+    return result
 
 def create_script_locked_cells(label, cells, cell_deps, max_attempts=4):
     total_capacity = sum(cell["capacity"] for cell in cells)
@@ -6827,6 +7343,19 @@ try:
         final_hardening_failures.append(
             "builder-generated lock spend transactions contain under-capacity outputs: " + ", ".join(under_capacity_locks)
         )
+    build_report_gate = refresh_build_report_deployments()
+    if build_report_gate.get("status") != "passed":
+        final_hardening_failures.append(
+            "build report live artifact linkage failed: "
+            + json.dumps(
+                {
+                    "missing_onchain_deployments": build_report_gate.get("missing_onchain_deployments"),
+                    "live_code_cell_data_hash_mismatches": build_report_gate.get("live_code_cell_data_hash_mismatches"),
+                    "unexpected_onchain_artifacts": build_report_gate.get("unexpected_onchain_artifacts"),
+                },
+                sort_keys=True,
+            )
+        )
     report["final_production_hardening_gate"] = {
         "status": "passed" if not final_hardening_failures else "blocked",
         "ready": not final_hardening_failures,
@@ -6835,6 +7364,7 @@ try:
         "requires_consensus_serialized_tx_size": True,
         "requires_exact_occupied_capacity": True,
         "requires_stateful_action_coverage": run_stateful_scenarios,
+        "requires_build_report_live_artifact_linkage": True,
         "failures": final_hardening_failures,
     }
     update_ckb_business_coverage({

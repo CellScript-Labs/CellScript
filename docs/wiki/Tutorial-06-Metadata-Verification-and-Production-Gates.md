@@ -106,6 +106,9 @@ You do not need to memorize the whole sidecar. Start with these fields:
 - `source_content_hash`
 - `source_units`
 - `metadata_schema_version`
+- `source_metadata_schema_version`
+- `artifact_metadata_schema_version`
+- `constraints_metadata_schema_version`
 - `actions`
 - `locks`
 - `schema`
@@ -132,60 +135,49 @@ When reviewing a contract, ask simple questions first:
 - which runtime obligations remain;
 - which CKB profile assumptions are recorded.
 
+The top-level `metadata_schema_version` is the envelope version. The component
+schema fields split review risk by surface: source/package identity,
+artifact-binding facts, and CKB constraint summaries can now move independently
+in future schema revisions. `verify-artifact` still rejects a mismatch in any of
+these versions.
+
 ## v0.16 Assurance Checks
 
 CellScript 0.16 adds a checked assurance layer over ProofPlan metadata:
 
 ```bash
 cellc explain-proof src/main.cell --json
-cellc explain-assumptions src/main.cell
-cellc validate-tx --against build/main.elf.meta.json tx.json
+cellc explain-assumptions src/main.cell --json
+cellc validate-tx --against build/main.elf.meta.json tx.json --json
 ```
 
 `runtime.proof_plan_soundness` tells you whether verifier obligations and
 ProofPlan records agree. `--primitive-strict=0.16` rejects metadata-only or
-runtime-required ProofPlan gaps.
+runtime-required ProofPlan gaps. The soundness key includes origin/scope,
+category, feature, status, and detail; local and runtime ProofPlan records are
+compared by full semantic content, including trigger, reads, coverage, and
+source spans.
 
 `runtime.builder_assumptions` is the machine-readable contract for transaction
-builders. `validate-tx` checks a transaction JSON shape against that contract
-and requires schema-bound evidence objects for non-structural assumptions
-before signing. This is still pre-chain evidence: dry-run, capacity, cycles, and
-commit checks remain required for production claims.
-
-For builder integrations, prefer the scoped manifest/check layer. It packages
-ABI, witness placement, assumptions, resource identity policy, and evidence
-templates into one contract:
-
-```bash
-cellc builder manifest src/main.cell \
-  --entry-action transfer \
-  --target-profile ckb \
-  --resource-identities build/resource-identities.json \
-  --output build/transfer.builder.json
-
-cellc builder check \
-  --manifest build/transfer.builder.json \
-  --tx tx.json \
-  --production
-```
-
-Builder-facing contract commands emit JSON by default. Add `--human` for a
-short terminal summary; keep the default JSON for scripts, CI, and external
-transaction builders.
+builders. `validate-tx` checks a transaction JSON shape against that contract,
+rejects bare evidence tokens, and requires indexed evidence objects for
+non-structural assumptions before signing. Evidence indexes are range-checked
+against the transaction, and concrete fields such as outpoints, hashes,
+capacity, dep metadata, witness bytes, and TYPE_ID args must match when present.
+This is still pre-chain evidence: dry-run, capacity, cycles, and commit checks
+remain required for production claims.
 
 Additional 0.16 reports are available for audit and deployment workflows:
 
 ```bash
-cellc solve-tx src/main.cell          # emits a template, not a final transaction
+cellc solve-tx src/main.cell --json   # emits can_submit=false template output
 cellc deploy-plan src/main.cell --json
 cellc proof-diff old.meta.json new.meta.json --json
 cellc audit-bundle src/main.cell --output target/audit
 ```
 
-`proof-diff` reports added, removed, and changed ProofPlan records. For changed
-records, `changed_records[].fields` names the exact trigger, scope, reads,
-coverage, group cardinality, builder assumption, codegen coverage, or
-on-chain-check field that changed.
+For the review-finding closure matrix, see
+`docs/archive/0.17/CELLSCRIPT_0_17_REVIEW_FINDINGS_CLOSURE.md`.
 
 ## Suggested Compiler CI Gate
 
@@ -273,17 +265,31 @@ stateful scenario/action coverage.
 
 The CKB validator records primitive-strict original bundled-example coverage,
 including strict v0.16 PP0150 fail-closed records, then requires scoped action
-and lock compile coverage, builder-backed action runs, source-bound acceptance
-provenance, builder-backed lock valid-spend and invalid-spend matrices, valid
+and lock compile coverage, builder-backed action runs, source-bound acceptance provenance,
+builder-backed lock valid-spend and invalid-spend matrices, valid
 transaction dry-runs, committed valid transactions, malformed rejection,
-measured cycles, consensus-serialized transaction size, occupied-capacity
-evidence, no under-capacity outputs, bundled example deployment, and a passed
-final production hardening gate. Fail-closed PP0150 records are evidence of a
-strict boundary, not deployable production acceptance.
+measured cycles, consensus-serialized transaction size, occupied-capacity evidence,
+exact-artifact build reports, live code-cell data-hash linkage, no
+under-capacity outputs, bundled example deployment, and a passed final
+production hardening gate. Fail-closed PP0150 records are evidence of a strict
+boundary, not deployable production acceptance.
 
 The report must explicitly record a passed final production hardening gate and
 source provenance for the repository commit, tracked source file list, tracked
-source hash, acceptance runner hash, and evidence validator hash.
+source hash, acceptance runner hash, and evidence validator hash. It must also
+record `cellscript_build_reports`: each row binds the compiled RISC-V ELF,
+`verify-artifact` result, ELF entry ABI result, CKB data hash, and any live
+devnet code-cell deployment whose data hash equals that compiled artifact hash.
+Compile-only reports keep the live deployment list empty and are not external
+release evidence.
+
+For the current NovaSeal profile set, production-ready source-package evidence
+means the live local devnet runners pass for core, Agreement, and the six
+planned profiles: BTC transaction commitment, BTC UTXO seal, dual seal, Fiber
+candidate, Fungible xUDT, and RWA receipt. Public/mainnet deployment evidence is
+separate: profile docs must still name any required CellDep attestation,
+external BIP340 TCB review, public BTC SPV/indexer report, or RWA legal/registry
+review.
 
 The production gate compiles the seven checked-in top-level
 `examples/*.cell` bundled examples directly. Those files are the single

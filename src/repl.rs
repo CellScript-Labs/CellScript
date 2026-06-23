@@ -4,9 +4,7 @@ use crate::lexer::lex;
 use crate::parser::parse;
 use crate::types::check;
 use colored::Colorize;
-use std::io::{self, BufRead, Write};
-
-const REPL_MAX_INPUT_BYTES: usize = 1024 * 1024;
+use std::io::{self, Write};
 
 pub struct Repl {
     history: Vec<String>,
@@ -30,16 +28,14 @@ impl Repl {
         self.print_banner();
 
         let stdin = io::stdin();
-        let mut stdin = stdin.lock();
         let mut stdout = io::stdout();
 
         loop {
             print!("{} ", "cellc>".cyan().bold());
             stdout.flush()?;
 
-            let Some(input) = read_limited_line(&mut stdin, REPL_MAX_INPUT_BYTES)? else {
-                break;
-            };
+            let mut input = String::new();
+            stdin.read_line(&mut input)?;
 
             let input = input.trim();
             if input.is_empty() {
@@ -156,9 +152,10 @@ impl Repl {
         println!("{}", "Example code:".bold());
         println!("  let x = 42");
         println!("  resource Token {{ amount: u64 }}");
-        println!("  action mint()");
-        println!("  where");
-        println!("      create Token {{ amount: 100 }}");
+        println!("  action mint() -> u64 {{");
+        println!("      verification");
+        println!("          return 0");
+        println!("  }}");
     }
 
     fn process_input(&mut self, input: &str) -> Result<(), String> {
@@ -235,80 +232,4 @@ impl Repl {
 pub fn run_repl() -> io::Result<()> {
     let mut repl = Repl::new();
     repl.run()
-}
-
-fn read_limited_line(reader: &mut impl BufRead, max_bytes: usize) -> io::Result<Option<String>> {
-    let mut bytes = Vec::new();
-    loop {
-        let available = reader.fill_buf()?;
-        if available.is_empty() {
-            if bytes.is_empty() {
-                return Ok(None);
-            }
-            break;
-        }
-
-        let newline = available.iter().position(|byte| *byte == b'\n');
-        let take_len = newline.map_or(available.len(), |index| index + 1);
-        if bytes.len().saturating_add(take_len) > max_bytes {
-            let allowed = max_bytes.saturating_sub(bytes.len());
-            if allowed > 0 {
-                bytes.extend_from_slice(&available[..allowed]);
-            }
-            reader.consume(take_len);
-            if newline.is_none() {
-                drain_line(reader)?;
-            }
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, format!("REPL input line exceeds the {} byte limit", max_bytes)));
-        }
-
-        bytes.extend_from_slice(&available[..take_len]);
-        reader.consume(take_len);
-        if newline.is_some() {
-            break;
-        }
-    }
-
-    String::from_utf8(bytes)
-        .map(Some)
-        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, format!("REPL input is not valid UTF-8: {}", error)))
-}
-
-fn drain_line(reader: &mut impl BufRead) -> io::Result<()> {
-    loop {
-        let available = reader.fill_buf()?;
-        if available.is_empty() {
-            return Ok(());
-        }
-        let newline = available.iter().position(|byte| *byte == b'\n');
-        let take_len = newline.map_or(available.len(), |index| index + 1);
-        reader.consume(take_len);
-        if newline.is_some() {
-            return Ok(());
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::io::Cursor;
-
-    #[test]
-    fn repl_read_limited_line_rejects_oversized_input() {
-        let mut input = Cursor::new(vec![b'a'; REPL_MAX_INPUT_BYTES + 1]);
-
-        let err = read_limited_line(&mut input, REPL_MAX_INPUT_BYTES).unwrap_err();
-
-        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
-    }
-
-    #[test]
-    fn repl_read_limited_line_accepts_bounded_input() {
-        let mut input = Cursor::new(b":quit\n".to_vec());
-
-        let line = read_limited_line(&mut input, REPL_MAX_INPUT_BYTES).unwrap();
-
-        assert_eq!(line.as_deref(), Some(":quit\n"));
-    }
 }

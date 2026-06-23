@@ -47,10 +47,10 @@ syntax forms you will see in the examples:
 | `witness arg: T` | Decoded witness data. |
 | `lock_args args: T` | Typed bytes from the executing lock script's `Script.args` (lock parameters only). |
 | `transition old.state: A -> new.state: B` | Explicit field-to-field state edge. |
-| `transition { ... }` | Non-empty block form for multiple explicit state edges. |
+| `transition old -> new` | Same-type Cell continuation declaration. |
+| `verification` | Action or lock proof section. |
 | `create out = T { ... }` | Constraint on a named proposed output Cell. |
 | `require condition, "message"` | Action or lock verifier guard with an optional message. |
-| `assert(condition, "message")` | Internal checked assertion. |
 | `let mut xs: Vec<Hash> = []` | Typed empty local `Vec<T>` literal. |
 
 Names such as `old`, `new`, `input`, and `output` are ordinary bindings. The
@@ -320,11 +320,13 @@ an `Offer.state` graph such as `Live -> Filled`, the action names both Cell
 views:
 
 ```cellscript
-action fill_offer(input: Offer) -> output: Offer
+action fill_offer(input: Offer) -> output: Offer {
     transition input.state: Live -> output.state: Filled
-where
-    require input.price == output.price
-    require input.seller == output.seller
+
+    verification
+        require input.price == output.price
+        require input.seller == output.seller
+}
 ```
 
 The `transition` clause only proves the state edge. Authorization, preservation, and
@@ -333,15 +335,16 @@ conservation checks still belong in explicit `require` statements.
 Consume/create-style actions remain valid as front-end sugar:
 
 ```cellscript
-action transfer_token(token: Token, to: Address) -> next_token: Token
-where
-    assert(token.amount > 0, "empty token")
-    consume token
+action transfer_token(token: Token, to: Address) -> next_token: Token {
+    verification
+        require token.amount > 0, "empty token"
+        consume token
 
-    create next_token = Token {
-        amount: token.amount,
-        symbol: token.symbol
-    } with_lock(to)
+        create next_token = Token {
+            amount: token.amount,
+            symbol: token.symbol
+        } with_lock(to)
+}
 ```
 
 Read this as a Cell transition: spend one token input, then validate a proposed
@@ -387,7 +390,8 @@ shared Wallet has store {
 }
 
 lock owner_only(protected wallet: Wallet, witness claimed_owner: Address) -> bool {
-    require wallet.owner == claimed_owner
+    verification
+        require wallet.owner == claimed_owner
 }
 ```
 
@@ -411,15 +415,16 @@ of hiding it behind account-style authorization language.
 | `require expr` / `require expr, "message"` | Action or lock verifier guard. | If `expr` is false, the current script validation fails. The optional string message is kept for source readability and tooling. |
 | `lock_args T` | Typed fixed-width value decoded from the executing script args. | CKB `Script.args` data for this lock invocation. It is not a signer proof. |
 
-Use `require` for verifier guards inside actions and locks. Use
-`assert` for ordinary internal sanity checks where the condition is not
-part of the protocol boundary you want metadata and reviews to read as a guard.
+Use `require` for verifier guards inside actions and locks. Public action and
+lock code should not use `assert`; invariant assertions remain scoped to
+top-level `invariant` declarations.
 
 This lock checks equality between protected Cell state and witness data:
 
 ```cellscript
 lock owner_only(protected wallet: Wallet, witness claimed_owner: Address) -> bool {
-    require wallet.owner == claimed_owner
+    verification
+        require wallet.owner == claimed_owner
 }
 ```
 
@@ -429,7 +434,8 @@ the transaction. A misleading parameter name does not make it safer:
 ```cellscript
 // Unsafe as an authorization claim: `signer` is only a witness value here.
 lock misleading(protected wallet: Wallet, witness signer: Address) -> bool {
-    require wallet.owner == signer
+    verification
+        require wallet.owner == signer
 }
 ```
 
@@ -443,12 +449,13 @@ lock owner_boundary(
     owner: lock_args Address,
     claimed_owner: witness Address
 ) -> bool {
-    let input = source::group_input(0)
-    let witness_lock = witness::lock(input)
-    let digest = env::sighash_all(input)
-    require wallet.owner == owner
-    require claimed_owner == owner
-    require witness_lock == digest
+    verification
+        let input = source::group_input(0)
+        let witness_lock = witness::lock(input)
+        let digest = env::sighash_all(input)
+        require wallet.owner == owner
+        require claimed_owner == owner
+        require witness_lock == digest
 }
 ```
 
@@ -464,18 +471,11 @@ signature verification primitives are available, treat `Address`,
 does not verify a transaction signature unless the lock also calls an explicit
 signature verification primitive.
 
-## Assertions
+## Invariant Assertions
 
-Use `assert` for internal checked conditions:
-
-```cellscript
-assert(amount > 0, "amount must be positive")
-```
-
+Use `assert_invariant(...)` only inside top-level `invariant` declarations.
 Use `require` when the condition is a verifier guard on an action or lock
-boundary. Use `assert` when you want an internal sanity assertion that still
-fails closed but is not the boundary predicate readers should treat as
-authorization.
+boundary.
 
 ## Comments
 

@@ -159,7 +159,7 @@
       "patterns": [
         {
           "name": "keyword.control.cellscript",
-          "match": "\\b(module|use|if|else|for|in|while|match|return|let|mut|ref|as|where)\\b"
+          "match": "\\b(module|use|if|else|for|in|while|match|return|let|mut|ref|as|verification)\\b"
         },
         {
           "name": "keyword.declaration.cellscript",
@@ -167,7 +167,7 @@
         },
         {
           "name": "keyword.other.cellscript",
-          "match": "\\b(has|store|consume|create|create_unique|replace_unique|read|read_ref|launch|transition|self|env|with_lock|assert|assert_invariant|invariant|require|preserve|from|input|output|protected|witness|lock_args|transfer|claim|settle|destroy|destroy_singleton_type|destroy_unique|destroy_instance|burn_amount|std|replace|burn|relock|retarget_type|identity|with_default_hash_type|with_capacity_floor)\\b"
+          "match": "\\b(has|store|consume|create|create_unique|replace_unique|read|read_ref|launch|transition|self|env|with_lock|assert|assert_invariant|invariant|require|preserve|from|input|output|protected|witness|lock_args|script_args|transfer|claim|settle|destroy|destroy_singleton_type|destroy_unique|destroy_instance|burn_amount|std|replace|burn|relock|retarget_type|identity|ckb_type_id|singleton_type|with_default_hash_type|with_capacity_floor)\\b"
         },
         {
           "name": "constant.language.boolean.cellscript",
@@ -211,7 +211,7 @@
         },
         {
           "name": "support.function.builtin.cellscript",
-          "match": "\\b(assert|assert_invariant|invariant|require|preserve|create_unique|replace_unique|destroy_singleton_type|destroy_unique|destroy_instance|burn_amount|assert_sum|assert_conserved|assert_delta|assert_distinct|assert_singleton|min|max|isqrt)\\b"
+          "match": "\\b(assert|assert_invariant|invariant|require|preserve|create_unique|replace_unique|destroy_singleton_type|destroy_unique|destroy_instance|burn_amount|assert_sum|assert_conserved|assert_delta|assert_distinct|assert_singleton|retarget_type|min|max|isqrt)\\b"
         },
         {
           "name": "support.function.namespace.cellscript",

@@ -11,7 +11,7 @@
         "type": "acp-account-cell",
         "capacity_shannons": 6200000000,
         "lock_script": "acp-lock",
-        "type_script": "asset-type-script",
+        "type_script": "acp-type-script",
         "data": "passthrough",
         "witness": "wrong-lock-witness"
       }
@@ -21,22 +21,22 @@
         "type": "acp-account-cell",
         "capacity_shannons": 6200000000,
         "lock_script": "attacker-lock",
-        "type_script": "asset-type-script",
+        "type_script": "acp-type-script",
         "data": "passthrough"
       }
     ],
     "cell_deps": [
       {
         "dep_type": "code",
-        "name": "acp-lock-script-dep"
+        "name": "acp-type-script-dep"
       }
     ]
   },
   "script_group": {
-    "kind": "lock",
-    "active_group": "lock_group",
-    "script_field": "lock_script",
-    "active_script": "acp-lock",
+    "kind": "type",
+    "active_group": "type_group",
+    "script_field": "type_script",
+    "active_script": "acp-type-script",
     "group_inputs": [
       0
     ],
@@ -45,7 +45,7 @@
     ],
     "positive": [
       {
-        "case": "lock-script-group-selected",
+        "case": "type-script-group-selected",
         "inputs": [
           0
         ],
@@ -59,7 +59,7 @@
       {
         "case": "wrong-script-group-kind",
         "expected": "reject",
-        "reason": "fixture requires lock_group"
+        "reason": "fixture requires type_group"
       },
       {
         "case": "missing-active-group-cell",
@@ -115,13 +115,11 @@
   },
   "metadata_expectation": {
     "proof_plan": {
-      "trigger": "lock_group",
+      "trigger": "type_group",
       "scope": "group",
       "reads": [
         "group_input",
-        "group_output",
-        "witness",
-        "lock_args"
+        "group_output"
       ],
       "coverage": "covered",
       "on_chain_checked": true

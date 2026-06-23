@@ -186,17 +186,17 @@ receipt NovaBtcUtxoSealReceiptV0 has store, create, consume {
     expiry: u64,
 }
 
-action close_btc_utxo_seal(old_cell: NovaBtcUtxoSealCellV0, witness intent: NovaBtcUtxoSealSignedIntentV0, witness owner_sig: SignaturePayload) -> closure_receipt: NovaBtcUtxoSealReceiptV0
-where
+action close_btc_utxo_seal(old_cell: NovaBtcUtxoSealCellV0, witness intent: NovaBtcUtxoSealSignedIntentV0, witness owner_sig: SignaturePayload) -> closure_receipt: NovaBtcUtxoSealReceiptV0 {
+    verification
     let now = env::current_timepoint()
     require old_cell.nonce < U64_MAX
-    let sealed_utxo_commitment_hash = hash_blake2b_packed(BtcUtxoCommitmentV0 {
+    let sealed_utxo_commitment_hash = ckb::hash_data_packed(BtcUtxoCommitmentV0 {
         btc_txid: intent.core.btc_txid,
         btc_vout_index: intent.core.btc_vout_index,
         btc_amount_sats: intent.core.btc_amount_sats,
         script_pubkey_hash: intent.core.script_pubkey_hash
     })
-    let closure_commitment_hash = hash_blake2b_packed(BtcUtxoClosureCommitmentV0 {
+    let closure_commitment_hash = ckb::hash_data_packed(BtcUtxoClosureCommitmentV0 {
         sealed_utxo_commitment_hash: sealed_utxo_commitment_hash,
         spend_txid: intent.core.spend_txid,
         spend_wtxid: intent.core.spend_wtxid,
@@ -204,7 +204,7 @@ where
         transition_commitment_hash: intent.core.transition_commitment_hash,
         payout_commitment_hash: intent.core.payout_commitment_hash
     })
-    let old_state_commitment = hash_blake2b_packed(NovaBtcUtxoSealStateV0 {
+    let old_state_commitment = ckb::hash_data_packed(NovaBtcUtxoSealStateV0 {
         version: old_cell.version,
         seal_id: old_cell.seal_id,
         policy_hash: old_cell.policy_hash,
@@ -215,7 +215,7 @@ where
         nonce: old_cell.nonce,
         expiry: old_cell.expiry
     })
-    let intent_core_hash = hash_blake2b_packed(intent.core)
+    let intent_core_hash = ckb::hash_data_packed(intent.core)
     let receipt_commitment = NovaBtcUtxoSealReceiptCommitmentV0 {
         action: OP_CLOSE_UTXO_SEAL,
         seal_id: old_cell.seal_id,
@@ -232,8 +232,8 @@ where
         intent_core_hash: intent_core_hash,
         payout_commitment_hash: intent.core.payout_commitment_hash
     }
-    let materialized_receipt_hash = hash_blake2b_packed(receipt_commitment)
-    let canonical_envelope_hash = hash_blake2b_packed(NovaSealCanonicalEnvelopeV0 {
+    let materialized_receipt_hash = ckb::hash_data_packed(receipt_commitment)
+    let canonical_envelope_hash = ckb::hash_data_packed(NovaSealCanonicalEnvelopeV0 {
         profile_id: old_cell.seal_id,
         policy_hash: old_cell.policy_hash,
         action: OP_CLOSE_UTXO_SEAL,
@@ -248,7 +248,7 @@ where
         profile_body_hash: intent_core_hash,
         payout_commitment_hash: intent.core.payout_commitment_hash
     })
-    let signed_intent_hash = hash_blake2b_packed(NovaBtcUtxoSealSigningDigestV0 {
+    let signed_intent_hash = ckb::hash_data_packed(NovaBtcUtxoSealSigningDigestV0 {
         intent_core_hash: intent_core_hash,
         canonical_envelope_hash: canonical_envelope_hash,
         expected_receipt_hash: materialized_receipt_hash
@@ -306,19 +306,20 @@ where
         expiry: old_cell.expiry
     }
 
-action nova_btc_utxo_seal_lifecycle(witness op: u8, witness old_cell: NovaBtcUtxoSealCellDataV0, witness intent: NovaBtcUtxoSealSignedIntentV0, witness owner_sig: SignaturePayload) -> u64
-where
+}
+action nova_btc_utxo_seal_lifecycle(witness op: u8, witness old_cell: NovaBtcUtxoSealCellDataV0, witness intent: NovaBtcUtxoSealSignedIntentV0, witness owner_sig: SignaturePayload) -> u64 {
+    verification
     let now = env::current_timepoint()
-    let intent_core_hash = hash_blake2b_packed(intent.core)
+    let intent_core_hash = ckb::hash_data_packed(intent.core)
 
     if (op == OP_INITIALIZE_ACTIVE_SEAL) {
-        let sealed_utxo_commitment_hash = hash_blake2b_packed(BtcUtxoCommitmentV0 {
+        let sealed_utxo_commitment_hash = ckb::hash_data_packed(BtcUtxoCommitmentV0 {
             btc_txid: intent.core.btc_txid,
             btc_vout_index: intent.core.btc_vout_index,
             btc_amount_sats: intent.core.btc_amount_sats,
             script_pubkey_hash: intent.core.script_pubkey_hash
         })
-        let new_state_commitment = hash_blake2b_packed(NovaBtcUtxoSealStateV0 {
+        let new_state_commitment = ckb::hash_data_packed(NovaBtcUtxoSealStateV0 {
             version: BTC_UTXO_SEAL_VERSION,
             seal_id: intent.core.seal_id,
             policy_hash: intent.core.policy_hash,
@@ -329,7 +330,7 @@ where
             nonce: 0,
             expiry: intent.core.expiry
         })
-        let canonical_envelope_hash = hash_blake2b_packed(NovaSealCanonicalEnvelopeV0 {
+        let canonical_envelope_hash = ckb::hash_data_packed(NovaSealCanonicalEnvelopeV0 {
             profile_id: intent.core.seal_id,
             policy_hash: intent.core.policy_hash,
             action: OP_INITIALIZE_ACTIVE_SEAL,
@@ -344,7 +345,7 @@ where
             profile_body_hash: intent_core_hash,
             payout_commitment_hash: intent.core.payout_commitment_hash
         })
-        let signed_intent_hash = hash_blake2b_packed(NovaBtcUtxoSealSigningDigestV0 {
+        let signed_intent_hash = ckb::hash_data_packed(NovaBtcUtxoSealSigningDigestV0 {
             intent_core_hash: intent_core_hash,
             canonical_envelope_hash: canonical_envelope_hash,
             expected_receipt_hash: Hash::zero()
@@ -362,39 +363,39 @@ where
             expiry: intent.core.expiry
         }
 
-        assert(intent.core.action == OP_INITIALIZE_ACTIVE_SEAL, "intent action")
-        assert(intent.core.seal_id != Hash::zero(), "seal id")
-        assert(intent.core.policy_hash != Hash::zero(), "policy")
-        assert(intent.core.owner_authority_hash != Hash::zero(), "owner")
-        assert(intent.core.btc_txid != Hash::zero(), "btc txid")
-        assert(intent.core.script_pubkey_hash != Hash::zero(), "script pubkey")
-        assert(intent.core.btc_amount_sats > 0, "btc amount")
-        assert(intent.core.spend_txid == Hash::zero(), "spend txid")
-        assert(intent.core.spend_wtxid == Hash::zero(), "spend wtxid")
-        assert(intent.core.old_state_hash == Hash::zero(), "old state")
-        assert(intent.core.new_state_hash != Hash::zero(), "new state")
-        assert(intent.core.transition_commitment_hash == Hash::zero(), "transition commitment")
-        assert(intent.core.old_status == 0, "old status")
-        assert(intent.core.new_status == STATUS_ACTIVE, "new status")
-        assert(intent.core.old_nonce == 0, "old nonce")
-        assert(intent.core.new_nonce == 0, "new nonce")
-        assert(now <= intent.core.expiry, "expiry")
-        assert(intent.canonical_envelope_hash == canonical_envelope_hash, "canonical envelope")
-        assert(intent.expected_receipt_hash == Hash::zero(), "expected receipt")
-        assert(owner_sig.pubkey == intent.core.owner_authority_hash.0, "owner signer")
-        assert(ckb::cell_data_hash(source::group_output(0)) == ckb::hash_data_packed(new_cell), "initial output")
+        require intent.core.action == OP_INITIALIZE_ACTIVE_SEAL
+        require intent.core.seal_id != Hash::zero()
+        require intent.core.policy_hash != Hash::zero()
+        require intent.core.owner_authority_hash != Hash::zero()
+        require intent.core.btc_txid != Hash::zero()
+        require intent.core.script_pubkey_hash != Hash::zero()
+        require intent.core.btc_amount_sats > 0
+        require intent.core.spend_txid == Hash::zero()
+        require intent.core.spend_wtxid == Hash::zero()
+        require intent.core.old_state_hash == Hash::zero()
+        require intent.core.new_state_hash != Hash::zero()
+        require intent.core.transition_commitment_hash == Hash::zero()
+        require intent.core.old_status == 0
+        require intent.core.new_status == STATUS_ACTIVE
+        require intent.core.old_nonce == 0
+        require intent.core.new_nonce == 0
+        require now <= intent.core.expiry
+        require intent.canonical_envelope_hash == canonical_envelope_hash
+        require intent.expected_receipt_hash == Hash::zero()
+        require owner_sig.pubkey == intent.core.owner_authority_hash.0
+        require ckb::cell_data_hash(source::group_output(0)) == ckb::hash_data_packed(new_cell)
 
         verifier::btc::bip340::require_signature(signed_intent_hash, owner_sig.pubkey, owner_sig.signature)
     } else {
-        assert(op == OP_CLOSE_UTXO_SEAL, "operation")
-        assert(old_cell.nonce < U64_MAX, "nonce overflow")
-        let sealed_utxo_commitment_hash = hash_blake2b_packed(BtcUtxoCommitmentV0 {
+        require op == OP_CLOSE_UTXO_SEAL
+        require old_cell.nonce < U64_MAX
+        let sealed_utxo_commitment_hash = ckb::hash_data_packed(BtcUtxoCommitmentV0 {
             btc_txid: intent.core.btc_txid,
             btc_vout_index: intent.core.btc_vout_index,
             btc_amount_sats: intent.core.btc_amount_sats,
             script_pubkey_hash: intent.core.script_pubkey_hash
         })
-        let closure_commitment_hash = hash_blake2b_packed(BtcUtxoClosureCommitmentV0 {
+        let closure_commitment_hash = ckb::hash_data_packed(BtcUtxoClosureCommitmentV0 {
             sealed_utxo_commitment_hash: sealed_utxo_commitment_hash,
             spend_txid: intent.core.spend_txid,
             spend_wtxid: intent.core.spend_wtxid,
@@ -402,7 +403,7 @@ where
             transition_commitment_hash: intent.core.transition_commitment_hash,
             payout_commitment_hash: intent.core.payout_commitment_hash
         })
-        let old_state_commitment = hash_blake2b_packed(NovaBtcUtxoSealStateV0 {
+        let old_state_commitment = ckb::hash_data_packed(NovaBtcUtxoSealStateV0 {
             version: old_cell.version,
             seal_id: old_cell.seal_id,
             policy_hash: old_cell.policy_hash,
@@ -429,8 +430,8 @@ where
             intent_core_hash: intent_core_hash,
             payout_commitment_hash: intent.core.payout_commitment_hash
         }
-        let materialized_receipt_hash = hash_blake2b_packed(receipt_commitment)
-        let canonical_envelope_hash = hash_blake2b_packed(NovaSealCanonicalEnvelopeV0 {
+        let materialized_receipt_hash = ckb::hash_data_packed(receipt_commitment)
+        let canonical_envelope_hash = ckb::hash_data_packed(NovaSealCanonicalEnvelopeV0 {
             profile_id: old_cell.seal_id,
             policy_hash: old_cell.policy_hash,
             action: OP_CLOSE_UTXO_SEAL,
@@ -445,7 +446,7 @@ where
             profile_body_hash: intent_core_hash,
             payout_commitment_hash: intent.core.payout_commitment_hash
         })
-        let signed_intent_hash = hash_blake2b_packed(NovaBtcUtxoSealSigningDigestV0 {
+        let signed_intent_hash = ckb::hash_data_packed(NovaBtcUtxoSealSigningDigestV0 {
             intent_core_hash: intent_core_hash,
             canonical_envelope_hash: canonical_envelope_hash,
             expected_receipt_hash: materialized_receipt_hash
@@ -483,37 +484,38 @@ where
             expiry: old_cell.expiry
         }
 
-        assert(old_cell.version == BTC_UTXO_SEAL_VERSION, "old version")
-        assert(old_cell.status == STATUS_ACTIVE, "old status")
-        assert(old_cell.seal_id != Hash::zero(), "seal id")
-        assert(old_cell.policy_hash != Hash::zero(), "policy")
-        assert(old_cell.owner_authority_hash != Hash::zero(), "owner")
-        assert(old_cell.sealed_utxo_commitment_hash == sealed_utxo_commitment_hash, "sealed utxo")
-        assert(now <= old_cell.expiry, "expiry")
-        assert(intent.core.action == OP_CLOSE_UTXO_SEAL, "intent action")
-        assert(intent.core.seal_id == old_cell.seal_id, "intent seal")
-        assert(intent.core.policy_hash == old_cell.policy_hash, "intent policy")
-        assert(intent.core.owner_authority_hash == old_cell.owner_authority_hash, "intent owner")
-        assert(intent.core.btc_txid != Hash::zero(), "btc txid")
-        assert(intent.core.script_pubkey_hash != Hash::zero(), "script pubkey")
-        assert(intent.core.btc_amount_sats > 0, "btc amount")
-        assert(intent.core.spend_txid != Hash::zero(), "spend txid")
-        assert(intent.core.spend_wtxid != Hash::zero(), "spend wtxid")
-        assert(intent.core.old_state_hash == old_cell.state_hash, "old state")
-        assert(intent.core.new_state_hash != old_cell.state_hash, "new state")
-        assert(intent.core.transition_commitment_hash == hash_blake2b(intent.core.new_state_hash), "transition commitment")
-        assert(intent.core.old_status == STATUS_ACTIVE, "intent old status")
-        assert(intent.core.new_status == STATUS_CLOSED, "intent new status")
-        assert(intent.core.old_nonce == old_cell.nonce, "old nonce")
-        assert(intent.core.new_nonce == old_cell.nonce + 1, "new nonce")
-        assert(intent.core.expiry == old_cell.expiry, "intent expiry")
-        assert(intent.canonical_envelope_hash == canonical_envelope_hash, "canonical envelope")
-        assert(intent.expected_receipt_hash == materialized_receipt_hash, "expected receipt")
-        assert(owner_sig.pubkey == old_cell.owner_authority_hash.0, "owner signer")
-        assert(ckb::cell_data_hash(source::group_input(0)) == ckb::hash_data_packed(old_cell), "old input")
-        assert(ckb::cell_data_hash(source::group_output(0)) == ckb::hash_data_packed(new_cell), "closed output")
-        assert(ckb::cell_data_hash(source::output(1)) == ckb::hash_data_packed(receipt), "closure receipt")
+        require old_cell.version == BTC_UTXO_SEAL_VERSION
+        require old_cell.status == STATUS_ACTIVE
+        require old_cell.seal_id != Hash::zero()
+        require old_cell.policy_hash != Hash::zero()
+        require old_cell.owner_authority_hash != Hash::zero()
+        require old_cell.sealed_utxo_commitment_hash == sealed_utxo_commitment_hash
+        require now <= old_cell.expiry
+        require intent.core.action == OP_CLOSE_UTXO_SEAL
+        require intent.core.seal_id == old_cell.seal_id
+        require intent.core.policy_hash == old_cell.policy_hash
+        require intent.core.owner_authority_hash == old_cell.owner_authority_hash
+        require intent.core.btc_txid != Hash::zero()
+        require intent.core.script_pubkey_hash != Hash::zero()
+        require intent.core.btc_amount_sats > 0
+        require intent.core.spend_txid != Hash::zero()
+        require intent.core.spend_wtxid != Hash::zero()
+        require intent.core.old_state_hash == old_cell.state_hash
+        require intent.core.new_state_hash != old_cell.state_hash
+        require intent.core.transition_commitment_hash == hash_blake2b(intent.core.new_state_hash)
+        require intent.core.old_status == STATUS_ACTIVE
+        require intent.core.new_status == STATUS_CLOSED
+        require intent.core.old_nonce == old_cell.nonce
+        require intent.core.new_nonce == old_cell.nonce + 1
+        require intent.core.expiry == old_cell.expiry
+        require intent.canonical_envelope_hash == canonical_envelope_hash
+        require intent.expected_receipt_hash == materialized_receipt_hash
+        require owner_sig.pubkey == old_cell.owner_authority_hash.0
+        require ckb::cell_data_hash(source::group_input(0)) == ckb::hash_data_packed(old_cell)
+        require ckb::cell_data_hash(source::group_output(0)) == ckb::hash_data_packed(new_cell)
+        require ckb::cell_data_hash(source::output(1)) == ckb::hash_data_packed(receipt)
 
         verifier::btc::bip340::require_signature(signed_intent_hash, owner_sig.pubkey, owner_sig.signature)
     }
     0
+}

@@ -25,7 +25,7 @@
 
 ## Risk Posture
 
-This package is reviewable profile evidence, not production evidence. V1
-readiness must continue to fail until the package has wallet vectors,
-builder-backed valid and invalid xUDT transactions, live devnet lifecycle
-evidence, and the shared external attestations.
+This package is production-ready source-package evidence for the current
+Fungible xUDT profile. Public/mainnet deployment still requires wallet/operator
+release review, builder-backed service integration, and the shared external
+attestations.

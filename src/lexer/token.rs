@@ -3,48 +3,46 @@ use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TokenKind {
-    Module,     // module
-    Use,        // use
-    Resource,   // resource
-    Shared,     // shared
-    Receipt,    // receipt
-    Struct,     // struct
-    Const,      // const
-    Enum,       // enum
-    Invariant,  // invariant
-    Action,     // action
-    Fn,         // fn
-    Lock,       // lock
-    Where,      // where
-    Transition, // transition
-    Has,        // has
-    Store,      // store
-    Transfer,   // transfer (capability context)
-    If,         // if
-    Else,       // else
-    For,        // for
-    In,         // in
-    While,      // while
-    Match,      // match
-    Return,     // return
-    Let,        // let
-    Mut,        // mut
-    Ref,        // ref
-    Consume,    // consume
-    Create,     // create
-    ReadRef,    // read_ref
-    DestroyKw,  // destroy (keyword)
-    Launch,     // launch
-    Assert,     // assert / assert_invariant
-    Require,    // require
-    Preserve,   // preserve
-    Claim,      // claim
-    Settle,     // settle
-    True,       // true
-    False,      // false
-    Self_,      // self
-    Env,        // env
-    Std,        // std
+    Module,       // module
+    Use,          // use
+    Resource,     // resource
+    Shared,       // shared
+    Receipt,      // receipt
+    Struct,       // struct
+    Const,        // const
+    Enum,         // enum
+    Invariant,    // invariant
+    Action,       // action
+    Fn,           // fn
+    Lock,         // lock
+    Transition,   // transition
+    Verification, // verification
+    Has,          // has
+    Store,        // store
+    Destroy,      // destroy (capability context)
+    If,           // if
+    Else,         // else
+    For,          // for
+    In,           // in
+    While,        // while
+    Match,        // match
+    Return,       // return
+    Let,          // let
+    Mut,          // mut
+    Ref,          // ref
+    Consume,      // consume
+    Create,       // create
+    ReadRef,      // read_ref
+    DestroyKw,    // destroy (keyword)
+    Launch,       // launch
+    Assert,       // assert_invariant
+    Require,      // require
+    Preserve,     // preserve
+    True,         // true
+    False,        // false
+    Self_,        // self
+    Env,          // env
+    Std,          // std
 
     Identifier(String),
     Integer(u64),
@@ -55,6 +53,7 @@ pub enum TokenKind {
     U8,
     U16,
     U32,
+    I32,
     U64,
     U128,
     Bool,
@@ -118,11 +117,11 @@ impl fmt::Display for TokenKind {
             TokenKind::Action => write!(f, "'action'"),
             TokenKind::Fn => write!(f, "'fn'"),
             TokenKind::Lock => write!(f, "'lock'"),
-            TokenKind::Where => write!(f, "'where'"),
             TokenKind::Transition => write!(f, "'transition'"),
+            TokenKind::Verification => write!(f, "'verification'"),
             TokenKind::Has => write!(f, "'has'"),
             TokenKind::Store => write!(f, "'store'"),
-            TokenKind::Transfer => write!(f, "'transfer'"),
+            TokenKind::Destroy => write!(f, "'destroy'"),
             TokenKind::If => write!(f, "'if'"),
             TokenKind::Else => write!(f, "'else'"),
             TokenKind::For => write!(f, "'for'"),
@@ -138,11 +137,9 @@ impl fmt::Display for TokenKind {
             TokenKind::ReadRef => write!(f, "'read_ref'"),
             TokenKind::DestroyKw => write!(f, "'destroy'"),
             TokenKind::Launch => write!(f, "'launch'"),
-            TokenKind::Assert => write!(f, "'assert'"),
+            TokenKind::Assert => write!(f, "'assert_invariant'"),
             TokenKind::Require => write!(f, "'require'"),
             TokenKind::Preserve => write!(f, "'preserve'"),
-            TokenKind::Claim => write!(f, "'claim'"),
-            TokenKind::Settle => write!(f, "'settle'"),
             TokenKind::True => write!(f, "'true'"),
             TokenKind::False => write!(f, "'false'"),
             TokenKind::Self_ => write!(f, "'self'"),
@@ -156,6 +153,7 @@ impl fmt::Display for TokenKind {
             TokenKind::U8 => write!(f, "'u8'"),
             TokenKind::U16 => write!(f, "'u16'"),
             TokenKind::U32 => write!(f, "'u32'"),
+            TokenKind::I32 => write!(f, "'i32'"),
             TokenKind::U64 => write!(f, "'u64'"),
             TokenKind::U128 => write!(f, "'u128'"),
             TokenKind::Bool => write!(f, "'bool'"),
@@ -235,11 +233,10 @@ pub fn keyword_or_identifier(text: &str) -> TokenKind {
         "action" => TokenKind::Action,
         "fn" => TokenKind::Fn,
         "lock" => TokenKind::Lock,
-        "where" => TokenKind::Where,
         "transition" => TokenKind::Transition,
+        "verification" => TokenKind::Verification,
         "has" => TokenKind::Has,
         "store" => TokenKind::Store,
-        "transfer" => TokenKind::Transfer,
         "destroy" => TokenKind::DestroyKw,
         "if" => TokenKind::If,
         "else" => TokenKind::Else,
@@ -255,11 +252,9 @@ pub fn keyword_or_identifier(text: &str) -> TokenKind {
         "create" => TokenKind::Create,
         "read_ref" => TokenKind::ReadRef,
         "launch" => TokenKind::Launch,
-        "assert" | "assert_invariant" => TokenKind::Assert,
+        "assert_invariant" => TokenKind::Assert,
         "require" => TokenKind::Require,
         "preserve" => TokenKind::Preserve,
-        "claim" => TokenKind::Claim,
-        "settle" => TokenKind::Settle,
         "true" => TokenKind::True,
         "false" => TokenKind::False,
         "self" => TokenKind::Self_,
@@ -268,6 +263,7 @@ pub fn keyword_or_identifier(text: &str) -> TokenKind {
         "u8" => TokenKind::U8,
         "u16" => TokenKind::U16,
         "u32" => TokenKind::U32,
+        "i32" => TokenKind::I32,
         "u64" => TokenKind::U64,
         "u128" => TokenKind::U128,
         "bool" => TokenKind::Bool,

@@ -1,0 +1,59 @@
+name: Website Build
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+      - "nightly-*"
+  workflow_dispatch:
+
+concurrency:
+  group: website-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: website/package-lock.json
+
+      - name: Install website dependencies
+        run: npm --prefix website ci
+
+      - name: Generate registry website data
+        run: npm --prefix website run prepare:registry
+
+      - name: Check generated registry data is committed
+        run: |
+          if [[ -n "$(git status --porcelain -- website/src/data/registry-packages.json)" ]]; then
+            echo "website/src/data/registry-packages.json is stale or missing"
+            git status --short -- website/src/data/registry-packages.json
+            git diff -- website/src/data/registry-packages.json
+            exit 1
+          fi
+
+      - name: Build website
+        run: npm --prefix website run build
+
+      - name: Upload website dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: cellscript-website-dist
+          path: website/dist/
+          if-no-files-found: error

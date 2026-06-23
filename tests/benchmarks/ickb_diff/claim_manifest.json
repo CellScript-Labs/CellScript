@@ -1,0 +1,299 @@
+{
+  "schema": "cellscript-ickb-claim-manifest-v1",
+  "status": "complete-executable-claim-set",
+  "matrix_path": "matrix.json",
+  "claim_scope": {
+    "protocol_support": "complete for declared executable iCKB public branches",
+    "excludes_mathematical_state_space_exhaustiveness": true,
+    "external_audit_claim": false,
+    "builder_scope": "not part of the 0.18 protocol-equivalence claim; headless Action Builder and CCC-compatible drafts are 0.19 scope"
+  },
+  "default_production_evidence": {
+    "script_group": "normalized fixtures declare script_under_test_roles and execute original/generated scripts in matching lock/type positions",
+    "cell_deps": "execution fixture_sha256 covers identical cell dep shape; deployment manifest checks original/generated code hash, hash type, dep type, and missing/wrong dep rejection",
+    "header_deps": "DAO and receipt rows include positive and malformed header_dep permutations",
+    "outputs_data": "normalized fixtures bind outputs and outputs_data by index and include malformed/trailing data rejects",
+    "witnesses": "DAO withdrawal rows include witness input_type placement, empty/short/long, missing, and wrong-index rejects",
+    "capacity_fee_tx_size_cycles": "each active differential row records tx_size_bytes, occupied_capacity_shannons, fee_shannons, original_cycles, and cellscript_cycles; pass rows must carry positive cycle counts, while reject rows preserve exit-code/failure-mode evidence and may report zero cycles from ckb-testtool failure accounting",
+    "deployment_manifest": "artifact hashes and script-role evidence are checked for the differential rows; registry-backed deployment resolution is 0.19 scope",
+    "builder_plan": "not claimed by this manifest; 0.19 owns live-cell resolution and CCC-compatible transaction drafts"
+  },
+  "default_hardening": {
+    "mutation_coverage": "all reject rows must carry a named failure_mode and remain dual-side fail; this manifest validator rejects unnamed reject branches",
+    "deterministic_fuzz_seed": "0x63656c6c7363726970742d69636b622d646966662d7631",
+    "normalized_fixture_generator": "tests/ickb_diff.rs normalized_*_fixture and *_differential_execution helpers",
+    "max_cellscript_cycles": 100000,
+    "max_tx_size_bytes": 1200
+  },
+  "families": [
+    {
+      "id": "ickb-logic-entry-and-script-args",
+      "description": "iCKB Logic rejects non-empty script args before protocol branch dispatch.",
+      "branches": [
+        {
+          "id": "non-empty-script-args",
+          "status": "in_scope",
+          "required_scenarios": [
+            "differential: non-empty script args original vs CellScript agree"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ickb-logic-deposit-and-receipt-creation",
+      "description": "DAO deposit phase and receipt creation paths.",
+      "branches": [
+        {
+          "id": "deposit-phase1-and-output-receipt",
+          "status": "in_scope",
+          "evidence_scenario_prefixes": [
+            "differential: deposit "
+          ],
+          "evidence_scenarios": [
+            "differential: receipt without deposit original vs CellScript agree",
+            "differential: duplicate receipt output original vs CellScript agree"
+          ],
+          "required_scenarios": [
+            "differential: deposit phase 1 original vs CellScript agree",
+            "differential: deposit too small original vs CellScript agree",
+            "differential: deposit too big original vs CellScript agree",
+            "differential: deposit receipt amount mismatch original vs CellScript agree",
+            "differential: deposit receipt quantity zero original vs CellScript agree",
+            "differential: deposit missing DAO type original vs CellScript agree",
+            "differential: deposit wrong DAO type original vs CellScript agree",
+            "differential: deposit wrong iCKB lock original vs CellScript agree",
+            "differential: deposit short DAO data original vs CellScript agree",
+            "differential: deposit long DAO data original vs CellScript agree"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ickb-logic-receipt-mint",
+      "description": "Receipt-to-xUDT minting, receipt groups, rate/header binding, amount conservation, and executable receipt byte layouts.",
+      "branches": [
+        {
+          "id": "single-receipt-mint",
+          "status": "in_scope",
+          "evidence_scenario_prefixes": [
+            "differential: mint from ",
+            "differential: amount ",
+            "differential: wrong xUDT ",
+            "differential: wrong accumulated ",
+            "differential: missing header dep",
+            "differential: xUDT high "
+          ],
+          "required_scenarios": [
+            "differential: mint from receipt original vs CellScript agree",
+            "differential: mint from zero-quantity receipt original vs CellScript agree",
+            "differential: mint from quantity-two receipt original vs CellScript agree",
+            "differential: mint from long receipt data original vs CellScript agree",
+            "differential: mint from malformed receipt data original vs CellScript agree",
+            "differential: xUDT high amount word nonzero original vs CellScript agree"
+          ]
+        },
+        {
+          "id": "receipt-group-mint",
+          "status": "in_scope",
+          "evidence_scenario_prefixes": [
+            "differential: receipt group "
+          ],
+          "required_scenarios": [
+            "differential: receipt group exact mint original vs CellScript agree",
+            "differential: receipt group zero first quantity original vs CellScript agree",
+            "differential: receipt group zero-quantity receipts original vs CellScript agree",
+            "differential: receipt group quantity-two receipts original vs CellScript agree",
+            "differential: receipt group second malformed receipt data original vs CellScript agree",
+            "differential: receipt group xUDT high amount word nonzero original vs CellScript agree"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ickb-logic-dao-withdrawal",
+      "description": "Mature DAO withdrawal, capacity/rate accounting, and malformed multi-input witness/header permutations.",
+      "branches": [
+        {
+          "id": "dao-single-two-three-input-withdrawal",
+          "status": "in_scope",
+          "evidence_scenario_prefixes": [
+            "differential: DAO "
+          ],
+          "required_scenarios": [
+            "differential: DAO mature withdrawal original vs CellScript agree",
+            "differential: DAO immature withdrawal original vs CellScript agree",
+            "differential: DAO two-input max withdrawal capacity original vs CellScript agree",
+            "differential: DAO three-input max withdrawal capacity original vs CellScript agree",
+            "differential: DAO two-input second missing witness input_type original vs CellScript agree",
+            "differential: DAO three-input second missing witness input_type original vs CellScript agree",
+            "differential: DAO three-input third missing witness input_type original vs CellScript agree",
+            "differential: DAO two-input second deposit-data input original vs CellScript agree",
+            "differential: DAO three-input second deposit-data input original vs CellScript agree",
+            "differential: DAO three-input third deposit-data input original vs CellScript agree",
+            "differential: DAO two-input second malformed input data original vs CellScript agree",
+            "differential: DAO three-input second malformed input data original vs CellScript agree",
+            "differential: DAO three-input third malformed input data original vs CellScript agree"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "limit-order",
+      "description": "Limit Order CKB-to-UDT and UDT-to-CKB branches, including master OutPoint and input/output order-data layout checks.",
+      "branches": [
+        {
+          "id": "ckb-to-udt",
+          "status": "in_scope",
+          "evidence_scenario_prefixes": [
+            "differential: limit order "
+          ],
+          "exclude_scenario_prefixes": [
+            "differential: limit order UDT-to-CKB "
+          ],
+          "evidence_scenarios": [
+            "differential: valid limit order original vs CellScript agree"
+          ],
+          "required_scenarios": [
+            "differential: valid limit order original vs CellScript agree",
+            "differential: limit order min-match boundary original vs CellScript agree",
+            "differential: limit order underpayment original vs CellScript agree",
+            "differential: limit order wrong asset original vs CellScript agree",
+            "differential: limit order missing input type original vs CellScript agree",
+            "differential: limit order missing output type original vs CellScript agree",
+            "differential: limit order input short master OutPoint original vs CellScript agree",
+            "differential: limit order input long trailing data original vs CellScript agree",
+            "differential: limit order output long trailing data original vs CellScript agree"
+          ]
+        },
+        {
+          "id": "udt-to-ckb",
+          "status": "in_scope",
+          "evidence_scenario_prefixes": [
+            "differential: limit order UDT-to-CKB "
+          ],
+          "evidence_scenarios": [
+            "differential: valid limit order UDT-to-CKB original vs CellScript agree"
+          ],
+          "required_scenarios": [
+            "differential: valid limit order UDT-to-CKB original vs CellScript agree",
+            "differential: limit order UDT-to-CKB min-match boundary original vs CellScript agree",
+            "differential: limit order UDT-to-CKB wrong asset original vs CellScript agree",
+            "differential: limit order UDT-to-CKB missing input type original vs CellScript agree",
+            "differential: limit order UDT-to-CKB missing output type original vs CellScript agree",
+            "differential: limit order UDT-to-CKB input short master OutPoint original vs CellScript agree",
+            "differential: limit order UDT-to-CKB input long trailing data original vs CellScript agree",
+            "differential: limit order UDT-to-CKB output long trailing data original vs CellScript agree"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "owned-owner-pairing",
+      "description": "Owned-Owner input and output pairing branches.",
+      "branches": [
+        {
+          "id": "input-pairing",
+          "status": "in_scope",
+          "evidence_scenario_prefixes": [
+            "differential: owned-owner "
+          ],
+          "exclude_scenario_prefixes": [
+            "differential: owned-owner output "
+          ],
+          "evidence_scenarios": [
+            "differential: valid owned-owner original vs CellScript agree"
+          ],
+          "required_scenarios": [
+            "differential: valid owned-owner original vs CellScript agree",
+            "differential: owned-owner missing owner original vs CellScript agree",
+            "differential: owned-owner missing owned original vs CellScript agree",
+            "differential: owned-owner duplicate owner original vs CellScript agree",
+            "differential: owned-owner relative mismatch original vs CellScript agree",
+            "differential: owned-owner related type hash mismatch original vs CellScript agree"
+          ]
+        },
+        {
+          "id": "output-pairing",
+          "status": "in_scope",
+          "evidence_scenario_prefixes": [
+            "differential: owned-owner output "
+          ],
+          "evidence_scenarios": [
+            "differential: valid owned-owner output pairing original vs CellScript agree"
+          ],
+          "required_scenarios": [
+            "differential: valid owned-owner output pairing original vs CellScript agree",
+            "differential: owned-owner output missing owner original vs CellScript agree",
+            "differential: owned-owner output missing owned original vs CellScript agree",
+            "differential: owned-owner output duplicate owner original vs CellScript agree",
+            "differential: owned-owner output relative mismatch original vs CellScript agree",
+            "differential: owned-owner output related type hash mismatch original vs CellScript agree"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "fixture-scoped-probes",
+      "description": "Branches whose current evidence uses protocol-shaped bridge helpers rather than 0.19 transaction-builder inference.",
+      "branches": [
+        {
+          "id": "metapoint-and-master-outpoint",
+          "status": "fixture_scoped",
+          "limitation": "0.18 exposes protocol-neutral input OutPoint tx-hash/index reads, full OutPoint binding, relative MetaPoint checks, and lock/type pair-cardinality scans. The Limit Order master-OutPoint data parser remains an iCKB-shaped bridge helper, not a 0.19 builder-level transaction inference API.",
+          "evidence_scenario_prefixes": [
+            "differential: limit order input wrong master ",
+            "differential: limit order output short master ",
+            "differential: limit order UDT-to-CKB input wrong master ",
+            "differential: limit order UDT-to-CKB output short master ",
+            "differential: owned-owner related ",
+            "differential: owned-owner output related "
+          ],
+          "required_scenarios": [
+            "differential: limit order input short master OutPoint original vs CellScript agree",
+            "differential: limit order UDT-to-CKB input short master OutPoint original vs CellScript agree",
+            "differential: owned-owner related type hash mismatch original vs CellScript agree",
+            "differential: owned-owner output related type hash mismatch original vs CellScript agree"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "retired-or-out-of-claim-paths",
+      "description": "Legacy probes that are not executable iCKB public claims.",
+      "branches": [
+        {
+          "id": "synthetic-duplicate-receipt-id",
+          "status": "retired",
+          "reason": "The original executable iCKB receipt data does not expose a standalone synthetic receipt-id branch; duplicate and group mint behavior is covered by executable receipt group rows.",
+          "replacement_scenarios": [
+            "differential: receipt group exact mint original vs CellScript agree",
+            "differential: duplicate receipt output original vs CellScript agree"
+          ]
+        },
+        {
+          "id": "synthetic-wrong-owner-field",
+          "status": "retired",
+          "reason": "The old model-only wrong-owner field was replaced by executable Owned-Owner script pairing rows.",
+          "replacement_scenarios": [
+            "differential: valid owned-owner original vs CellScript agree",
+            "differential: owned-owner missing owner original vs CellScript agree"
+          ]
+        },
+        {
+          "id": "synthetic-immature-redeem-model",
+          "status": "retired",
+          "reason": "The old model-only immature redeem probe was replaced by executed DAO since/header withdrawal fixtures.",
+          "replacement_scenarios": [
+            "differential: DAO immature withdrawal original vs CellScript agree"
+          ]
+        },
+        {
+          "id": "owner-auth-witness-payload",
+          "status": "out_of_scope",
+          "reason": "No executable fixture in the audited original iCKB binaries exposes a separate owner-auth witness payload branch; ownership is represented by script placement and MetaPoint/OutPoint pairing in the executable rows.",
+          "source_evidence": "tests/benchmarks/ickb_diff/original_binaries plus tests/ickb_diff.rs owned-owner normalized fixtures"
+        }
+      ]
+    }
+  ]
+}

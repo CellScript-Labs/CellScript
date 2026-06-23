@@ -1,0 +1,2091 @@
+# CellScript Generated Assembly
+# opt_level=0, debug=false
+.option arch, +rv64imac
+
+.section .rodata
+__type_desc_NovaSealCellV0:
+    .word 7
+    .byte 7
+    .ascii "version"
+    .align 3
+    .word 2
+    .byte 18
+    .ascii "btc_authority_hash"
+    .align 3
+    .word 8
+    .byte 10
+    .ascii "state_hash"
+    .align 3
+    .word 8
+    .byte 11
+    .ascii "policy_hash"
+    .align 3
+    .word 8
+    .byte 19
+    .ascii "latest_receipt_hash"
+    .align 3
+    .word 8
+    .byte 5
+    .ascii "nonce"
+    .align 3
+    .word 4
+    .byte 6
+    .ascii "expiry"
+    .align 3
+    .word 4
+.section .rodata
+__type_desc_OutPoint:
+    .word 2
+    .byte 7
+    .ascii "tx_hash"
+    .align 3
+    .word 8
+    .byte 5
+    .ascii "index"
+    .align 3
+    .word 3
+.section .rodata
+__type_desc_NovaSealIntentCoreV0:
+    .word 11
+    .byte 11
+    .ascii "protocol_id"
+    .align 3
+    .word 8
+    .byte 12
+    .ascii "package_hash"
+    .align 3
+    .word 8
+    .byte 11
+    .ascii "policy_hash"
+    .align 3
+    .word 8
+    .byte 6
+    .ascii "action"
+    .align 3
+    .word 1
+    .byte 13
+    .ascii "terminal_path"
+    .align 3
+    .word 1
+    .byte 8
+    .ascii "old_cell"
+    .align 3
+    .word 11
+    .byte 14
+    .ascii "old_state_hash"
+    .align 3
+    .word 8
+    .byte 14
+    .ascii "new_state_hash"
+    .align 3
+    .word 8
+    .byte 9
+    .ascii "old_nonce"
+    .align 3
+    .word 4
+    .byte 9
+    .ascii "new_nonce"
+    .align 3
+    .word 4
+    .byte 6
+    .ascii "expiry"
+    .align 3
+    .word 4
+.section .rodata
+__type_desc_NovaSealSignedIntentV0:
+    .word 2
+    .byte 4
+    .ascii "core"
+    .align 3
+    .word 11
+    .byte 21
+    .ascii "expected_receipt_hash"
+    .align 3
+    .word 8
+.section .text
+.global _cellscript_entry
+.type _cellscript_entry, @function
+_cellscript_entry:
+    # cellscript entry abi: _cellscript_entry loads Input#0 witness args for novaseal_lifecycle and falls back to GroupInput#0/GroupOutput#0
+    # cellscript entry abi: witness magic CSARGv1 followed by positional fixed/scalar payload
+    li t6, -2304
+    add sp, sp, t6
+    li t6, 2296
+    add t6, sp, t6
+    sd ra, 0(t6)
+    # cellscript abi: LOAD_WITNESS reason=entry_args source=Input index=0
+    li t0, 1024
+    sd t0, 0(sp)
+    addi a0, sp, 8
+    addi a1, sp, 0
+    li a2, 0
+    li a3, 0
+    li a4, 1
+    li a7, 2074
+    ecall
+    # a0 = CKB syscall return code
+    beqz a0, .Lentry_witness_loaded_0
+    j .Lentry_witness_try_group_input_1
+.Lentry_witness_try_group_input_1:
+    # cellscript abi: LOAD_WITNESS reason=entry_args_fallback_group_input source=GroupInput index=0
+    li t0, 1024
+    sd t0, 0(sp)
+    addi a0, sp, 8
+    addi a1, sp, 0
+    li a2, 0
+    li a3, 0
+    li a4, 72057594037927937
+    li a7, 2074
+    ecall
+    # a0 = CKB syscall return code
+    beqz a0, .Lentry_witness_loaded_0
+    j .Lentry_witness_try_group_output_2
+.Lentry_witness_try_group_output_2:
+    # cellscript abi: LOAD_WITNESS reason=entry_args_fallback_group_output source=GroupOutput index=0
+    li t0, 1024
+    sd t0, 0(sp)
+    addi a0, sp, 8
+    addi a1, sp, 0
+    li a2, 0
+    li a3, 0
+    li a4, 72057594037927938
+    li a7, 2074
+    ecall
+    # a0 = CKB syscall return code
+    beqz a0, .Lentry_witness_loaded_0
+    j .Lentry_witness_fail_5
+.Lentry_witness_loaded_0:
+    ld t0, 0(sp)
+    # cellscript entry abi: reject witnesses larger than the local entry buffer
+    li t1, 1025
+    sltu t2, t0, t1
+    bnez t2, .Lentry_witness_buffer_ok_3
+    j .Lentry_witness_fail_5
+.Lentry_witness_buffer_ok_3:
+    li t1, 145
+    sltu t2, t0, t1
+    beqz t2, .Lentry_witness_size_ok_4
+    j .Lentry_witness_fail_5
+.Lentry_witness_size_ok_4:
+    lbu t0, 8(sp)
+    li t1, 67
+    sub t2, t0, t1
+    bnez t2, .Lentry_witness_fail_5
+    lbu t0, 9(sp)
+    li t1, 83
+    sub t2, t0, t1
+    bnez t2, .Lentry_witness_fail_5
+    lbu t0, 10(sp)
+    li t1, 65
+    sub t2, t0, t1
+    bnez t2, .Lentry_witness_fail_5
+    lbu t0, 11(sp)
+    li t1, 82
+    sub t2, t0, t1
+    bnez t2, .Lentry_witness_fail_5
+    lbu t0, 12(sp)
+    li t1, 71
+    sub t2, t0, t1
+    bnez t2, .Lentry_witness_fail_5
+    lbu t0, 13(sp)
+    li t1, 118
+    sub t2, t0, t1
+    bnez t2, .Lentry_witness_fail_5
+    lbu t0, 14(sp)
+    li t1, 49
+    sub t2, t0, t1
+    bnez t2, .Lentry_witness_fail_5
+    lbu t0, 15(sp)
+    li t1, 0
+    sub t2, t0, t1
+    bnez t2, .Lentry_witness_fail_5
+    # cellscript entry abi: witness payload contains schema-backed dynamic segments
+    ld t5, 0(sp)
+    li t6, 8
+    # cellscript entry abi: scalar param op -> a0 size=1
+    addi t1, t6, 1
+    sltu t2, t5, t1
+    beqz t2, .Lentry_witness_scalar_bytes_ok_7
+    j .Lentry_witness_fail_5
+.Lentry_witness_scalar_bytes_ok_7:
+    add t0, sp, t6
+    addi t0, t0, 8
+    li a0, 0
+    lbu t0, 0(t0)
+    or a0, a0, t0
+    addi t6, t6, 1
+    # cellscript entry abi: schema param old_cell -> a1=ptr a2=len (length-prefixed witness bytes)
+    addi t1, t6, 4
+    sltu t2, t5, t1
+    beqz t2, .Lentry_witness_schema_len_ok_8
+    j .Lentry_witness_fail_5
+.Lentry_witness_schema_len_ok_8:
+    add t0, sp, t6
+    addi t0, t0, 8
+    li t4, 0
+    lbu t1, 0(t0)
+    or t4, t4, t1
+    lbu t1, 1(t0)
+    slli t1, t1, 8
+    or t4, t4, t1
+    lbu t1, 2(t0)
+    slli t1, t1, 16
+    or t4, t4, t1
+    lbu t1, 3(t0)
+    slli t1, t1, 24
+    or t4, t4, t1
+    addi t1, t6, 4
+    add t1, t1, t4
+    sltu t2, t5, t1
+    beqz t2, .Lentry_witness_schema_bytes_ok_9
+    j .Lentry_witness_fail_5
+.Lentry_witness_schema_bytes_ok_9:
+    add t0, sp, t6
+    addi t0, t0, 12
+    addi a1, t0, 0
+    addi a2, t4, 0
+    addi t6, t6, 4
+    add t6, t6, t4
+    # cellscript entry abi: schema param intent -> a3=ptr a4=len (length-prefixed witness bytes)
+    addi t1, t6, 4
+    sltu t2, t5, t1
+    beqz t2, .Lentry_witness_schema_len_ok_10
+    j .Lentry_witness_fail_5
+.Lentry_witness_schema_len_ok_10:
+    add t0, sp, t6
+    addi t0, t0, 8
+    li t4, 0
+    lbu t1, 0(t0)
+    or t4, t4, t1
+    lbu t1, 1(t0)
+    slli t1, t1, 8
+    or t4, t4, t1
+    lbu t1, 2(t0)
+    slli t1, t1, 16
+    or t4, t4, t1
+    lbu t1, 3(t0)
+    slli t1, t1, 24
+    or t4, t4, t1
+    addi t1, t6, 4
+    add t1, t1, t4
+    sltu t2, t5, t1
+    beqz t2, .Lentry_witness_schema_bytes_ok_11
+    j .Lentry_witness_fail_5
+.Lentry_witness_schema_bytes_ok_11:
+    add t0, sp, t6
+    addi t0, t0, 12
+    addi a3, t0, 0
+    addi a4, t4, 0
+    addi t6, t6, 4
+    add t6, t6, t4
+    # cellscript entry abi: fixed-byte param state_hash_commitment pointer=a5 length=a6 size=32
+    addi t1, t6, 32
+    sltu t2, t5, t1
+    beqz t2, .Lentry_witness_fixed_bytes_ok_12
+    j .Lentry_witness_fail_5
+.Lentry_witness_fixed_bytes_ok_12:
+    add t0, sp, t6
+    addi t0, t0, 8
+    addi a5, t0, 0
+    li a6, 32
+    addi t6, t6, 32
+    # cellscript entry abi: fixed-byte param pubkey pointer=a7 length=stack+0 size=32
+    addi t1, t6, 32
+    sltu t2, t5, t1
+    beqz t2, .Lentry_witness_fixed_bytes_ok_13
+    j .Lentry_witness_fail_5
+.Lentry_witness_fixed_bytes_ok_13:
+    add t0, sp, t6
+    addi t0, t0, 8
+    addi a7, t0, 0
+    # cellscript entry abi: stack arg8 <- 32
+    li t0, 32
+    # cellscript entry abi: stage stack arg8 at pre-call sp-24
+    sd t0, -24(sp)
+    addi t6, t6, 32
+    # cellscript entry abi: fixed-byte param signature pointer=stack+8 length=stack+16 size=64
+    addi t1, t6, 64
+    sltu t2, t5, t1
+    beqz t2, .Lentry_witness_fixed_bytes_ok_14
+    j .Lentry_witness_fail_5
+.Lentry_witness_fixed_bytes_ok_14:
+    add t0, sp, t6
+    addi t0, t0, 8
+    # cellscript entry abi: stage stack arg9 at pre-call sp-16
+    sd t0, -16(sp)
+    # cellscript entry abi: stack arg10 <- 64
+    li t0, 64
+    # cellscript entry abi: stage stack arg10 at pre-call sp-8
+    sd t0, -8(sp)
+    addi t6, t6, 64
+    # cellscript entry abi: reject trailing witness payload bytes
+    ld t5, 0(sp)
+    sub t2, t5, t6
+    beqz t2, .Lentry_witness_exact_size_ok_15
+    j .Lentry_witness_fail_5
+.Lentry_witness_exact_size_ok_15:
+    # cellscript entry abi: reserve 24 bytes for outgoing stack call arguments
+    addi sp, sp, -24
+    call novaseal_lifecycle
+    addi sp, sp, 24
+    j .Lentry_witness_done_6
+.Lentry_witness_fail_5:
+    # cellscript runtime error 25 entry-witness-abi-invalid
+    li a0, 25
+.Lentry_witness_done_6:
+    li t6, 2296
+    add t6, sp, t6
+    ld ra, 0(t6)
+    li t6, 2304
+    add sp, sp, t6
+    ret
+# cellscript entry abi: novaseal_lifecycle requires-explicit-parameter-abi
+.global novaseal_lifecycle
+.type novaseal_lifecycle, @function
+novaseal_lifecycle:
+    li t6, -3584
+    add sp, sp, t6
+    li t6, 3576
+    add t6, sp, t6
+    sd ra, 0(t6)
+    li t6, 3568
+    add t6, sp, t6
+    sd fp, 0(t6)
+    li fp, 3584
+    add fp, sp, fp
+    sd a0, 0(sp)
+    # cellscript abi: schema param old_cell pointer=a1 length=a2
+    sd a1, 8(sp)
+    sd a2, 280(sp)
+    # cellscript abi: schema param intent pointer=a3 length=a4
+    sd a3, 16(sp)
+    sd a4, 288(sp)
+    # cellscript abi: fixed-byte param state_hash_commitment pointer=a5 length=a6 size=32
+    sd a5, 24(sp)
+    sd a6, 296(sp)
+    # cellscript abi: fixed-byte param pubkey pointer=a7 length=stack+0 size=32
+    sd a7, 32(sp)
+    # cellscript abi: arg8 loaded from caller stack +0
+    ld t0, 0(fp)
+    sd t0, 304(sp)
+    # cellscript abi: fixed-byte param signature pointer=stack+8 length=stack+16 size=64
+    # cellscript abi: arg9 loaded from caller stack +8
+    ld t0, 8(fp)
+    sd t0, 40(sp)
+    # cellscript abi: arg10 loaded from caller stack +16
+    ld t0, 16(fp)
+    sd t0, 312(sp)
+.Lnovaseal_lifecycle_block_0:
+    ld t0, 0(sp)
+    li t1, 0
+    sub t0, t0, t1
+    seqz t0, t0
+    sd t0, 48(sp)
+    ld t0, 48(sp)
+    beqz t0, .Lnovaseal_lifecycle_block_2
+    j .Lnovaseal_lifecycle_block_1
+.Lnovaseal_lifecycle_block_1:
+    # field access .version
+    # cellscript abi: schema field NovaSealCellV0.version offset=0 size=2
+    ld t4, 8(sp)
+    # cellscript abi: exact size check NovaSealCellV0 expected=146
+    ld a0, 280(sp)
+    li a1, 146
+    call __cellscript_require_exact_size
+    beqz a0, .Lschema_size_ok_16
+    j .Lnovaseal_lifecycle_fail_4
+.Lschema_size_ok_16:
+    # cellscript abi: bounds check NovaSealCellV0.version required=2
+    ld a0, 280(sp)
+    li a1, 2
+    call __cellscript_require_min_size
+    beqz a0, .Lschema_bounds_ok_17
+    j .Lnovaseal_lifecycle_fail_2
+.Lschema_bounds_ok_17:
+    li t0, 0
+    lbu t2, 0(t4)
+    or t0, t0, t2
+    lbu t2, 1(t4)
+    slli t2, t2, 8
+    or t0, t0, t2
+    sd t0, 56(sp)
+    ld t0, 56(sp)
+    li t1, 0
+    sub t0, t0, t1
+    seqz t0, t0
+    sd t0, 64(sp)
+    ld t0, 64(sp)
+    beqz t0, .Lnovaseal_lifecycle_block_4
+    j .Lnovaseal_lifecycle_block_3
+.Lnovaseal_lifecycle_block_2:
+    ld t0, 0(sp)
+    li t1, 1
+    sub t0, t0, t1
+    seqz t0, t0
+    sd t0, 272(sp)
+    ld t0, 272(sp)
+    beqz t0, .Lnovaseal_lifecycle_block_20
+    j .Lnovaseal_lifecycle_block_19
+.Lnovaseal_lifecycle_block_3:
+    # field access .nonce
+    # cellscript abi: schema field NovaSealCellV0.nonce offset=130 size=8
+    ld t4, 8(sp)
+    # cellscript abi: exact size check NovaSealCellV0 expected=146
+    ld a0, 280(sp)
+    li a1, 146
+    call __cellscript_require_exact_size
+    beqz a0, .Lschema_size_ok_18
+    j .Lnovaseal_lifecycle_fail_4
+.Lschema_size_ok_18:
+    # cellscript abi: bounds check NovaSealCellV0.nonce required=138
+    ld a0, 280(sp)
+    li a1, 138
+    call __cellscript_require_min_size
+    beqz a0, .Lschema_bounds_ok_19
+    j .Lnovaseal_lifecycle_fail_2
+.Lschema_bounds_ok_19:
+    li t0, 0
+    lbu t2, 130(t4)
+    or t0, t0, t2
+    lbu t2, 131(t4)
+    slli t2, t2, 8
+    or t0, t0, t2
+    lbu t2, 132(t4)
+    slli t2, t2, 16
+    or t0, t0, t2
+    lbu t2, 133(t4)
+    slli t2, t2, 24
+    or t0, t0, t2
+    lbu t2, 134(t4)
+    slli t2, t2, 32
+    or t0, t0, t2
+    lbu t2, 135(t4)
+    slli t2, t2, 40
+    or t0, t0, t2
+    lbu t2, 136(t4)
+    slli t2, t2, 48
+    or t0, t0, t2
+    lbu t2, 137(t4)
+    slli t2, t2, 56
+    or t0, t0, t2
+    sd t0, 72(sp)
+    ld t0, 72(sp)
+    li t1, 0
+    sub t0, t0, t1
+    seqz t0, t0
+    sd t0, 80(sp)
+    ld t0, 80(sp)
+    beqz t0, .Lnovaseal_lifecycle_block_6
+    j .Lnovaseal_lifecycle_block_5
+.Lnovaseal_lifecycle_block_4:
+    li a0, 5
+    j .Lnovaseal_lifecycle_epilogue
+.Lnovaseal_lifecycle_block_5:
+    # call __ckb_source_group_output
+    # cellscript abi: call __ckb_source_group_output scalar arg0 -> a0
+    li a0, 0
+    call __ckb_source_group_output
+    # cellscript abi: scalar runtime helper status check (a1 == 0)
+    beqz a1, .Lruntime_scalar_ok_20
+    addi a0, a1, 0
+    j .Lnovaseal_lifecycle_epilogue
+.Lruntime_scalar_ok_20:
+    sd a0, 88(sp)
+    # call __ckb_cell_data_hash_at
+    # cellscript abi: load 32 bytes from SourceView cell data into addressable Hash
+    li t0, 32
+    sd t0, 320(sp)
+    ld a0, 88(sp)
+    li a1, 2
+    addi a2, sp, 328
+    addi a3, sp, 320
+    call __ckb_cell_data_hash_at
+    beqz a0, .Lcell_data_hash_at_ok_21
+    j .Lnovaseal_lifecycle_epilogue
+.Lcell_data_hash_at_ok_21:
+    addi t0, sp, 328
+    sd t0, 96(sp)
+    # field access .btc_authority_hash
+    # cellscript abi: schema field NovaSealCellV0.btc_authority_hash offset=2 size=32
+    ld t4, 8(sp)
+    # cellscript abi: exact size check NovaSealCellV0 expected=146
+    ld a0, 280(sp)
+    li a1, 146
+    call __cellscript_require_exact_size
+    beqz a0, .Lschema_size_ok_22
+    j .Lnovaseal_lifecycle_fail_4
+.Lschema_size_ok_22:
+    # cellscript abi: bounds check NovaSealCellV0.btc_authority_hash required=34
+    ld a0, 280(sp)
+    li a1, 34
+    call __cellscript_require_min_size
+    beqz a0, .Lschema_bounds_ok_23
+    j .Lnovaseal_lifecycle_fail_2
+.Lschema_bounds_ok_23:
+    addi t0, t4, 2
+    sd t0, 104(sp)
+    # cellscript abi: fixed-byte Eq comparison size=32
+    # cellscript abi: exact size check left fixed-byte comparison loaded bytes var12 expected=32
+    ld a0, 320(sp)
+    li a1, 32
+    call __cellscript_require_exact_size
+    beqz a0, .Lschema_size_ok_24
+    j .Lnovaseal_lifecycle_fail_4
+.Lschema_size_ok_24:
+    # cellscript abi: exact size check NovaSealCellV0 expected=146
+    ld a0, 280(sp)
+    li a1, 146
+    call __cellscript_require_exact_size
+    beqz a0, .Lschema_size_ok_25
+    j .Lnovaseal_lifecycle_fail_4
+.Lschema_size_ok_25:
+    # cellscript abi: bounds check NovaSealCellV0.btc_authority_hash required=34
+    ld a0, 280(sp)
+    li a1, 34
+    call __cellscript_require_min_size
+    beqz a0, .Lschema_bounds_ok_26
+    j .Lnovaseal_lifecycle_fail_2
+.Lschema_bounds_ok_26:
+    ld a0, 96(sp)
+    li t6, 2400
+    add t6, sp, t6
+    sd a0, 0(t6)
+    # cellscript abi: exact size check NovaSealCellV0 expected=146
+    ld a0, 280(sp)
+    li a1, 146
+    call __cellscript_require_exact_size
+    beqz a0, .Lschema_size_ok_27
+    j .Lnovaseal_lifecycle_fail_4
+.Lschema_size_ok_27:
+    # cellscript abi: bounds check NovaSealCellV0.btc_authority_hash required=34
+    ld a0, 280(sp)
+    li a1, 34
+    call __cellscript_require_min_size
+    beqz a0, .Lschema_bounds_ok_28
+    j .Lnovaseal_lifecycle_fail_2
+.Lschema_bounds_ok_28:
+    ld a1, 8(sp)
+    addi a1, a1, 2
+    li t6, 2400
+    add t6, sp, t6
+    ld a0, 0(t6)
+    li a2, 32
+    call __cellscript_memcmp_fixed
+    seqz t3, a0
+    sd t3, 112(sp)
+    ld t0, 112(sp)
+    beqz t0, .Lnovaseal_lifecycle_block_8
+    j .Lnovaseal_lifecycle_block_7
+.Lnovaseal_lifecycle_block_6:
+    li a0, 5
+    j .Lnovaseal_lifecycle_epilogue
+.Lnovaseal_lifecycle_block_7:
+    # call __ckb_source_group_output
+    # cellscript abi: call __ckb_source_group_output scalar arg0 -> a0
+    li a0, 0
+    call __ckb_source_group_output
+    # cellscript abi: scalar runtime helper status check (a1 == 0)
+    beqz a1, .Lruntime_scalar_ok_29
+    addi a0, a1, 0
+    j .Lnovaseal_lifecycle_epilogue
+.Lruntime_scalar_ok_29:
+    sd a0, 120(sp)
+    # call __ckb_cell_data_hash_at
+    # cellscript abi: load 32 bytes from SourceView cell data into addressable Hash
+    li t0, 32
+    sd t0, 840(sp)
+    ld a0, 120(sp)
+    li a1, 34
+    addi a2, sp, 848
+    addi a3, sp, 840
+    call __ckb_cell_data_hash_at
+    beqz a0, .Lcell_data_hash_at_ok_30
+    j .Lnovaseal_lifecycle_epilogue
+.Lcell_data_hash_at_ok_30:
+    addi t0, sp, 848
+    sd t0, 128(sp)
+    # field access .state_hash
+    # cellscript abi: schema field NovaSealCellV0.state_hash offset=34 size=32
+    ld t4, 8(sp)
+    # cellscript abi: exact size check NovaSealCellV0 expected=146
+    ld a0, 280(sp)
+    li a1, 146
+    call __cellscript_require_exact_size
+    beqz a0, .Lschema_size_ok_31
+    j .Lnovaseal_lifecycle_fail_4
+.Lschema_size_ok_31:
+    # cellscript abi: bounds check NovaSealCellV0.state_hash required=66
+    ld a0, 280(sp)
+    li a1, 66
+    call __cellscript_require_min_size
+    beqz a0, .Lschema_bounds_ok_32
+    j .Lnovaseal_lifecycle_fail_2
+.Lschema_bounds_ok_32:
+    addi t0, t4, 34
+    sd t0, 136(sp)
+    # cellscript abi: fixed-byte Eq comparison size=32
+    # cellscript abi: exact size check left fixed-byte comparison loaded bytes var16 expected=32
+    ld a0, 840(sp)
+    li a1, 32
+    call __cellscript_require_exact_size
+    beqz a0, .Lschema_size_ok_33
+    j .Lnovaseal_lifecycle_fail_4
+.Lschema_size_ok_33:
+    # cellscript abi: exact size check NovaSealCellV0 expected=146
+    ld a0, 280(sp)
+    li a1, 146
+    call __cellscript_require_exact_size
+    beqz a0, .Lschema_size_ok_34
+    j .Lnovaseal_lifecycle_fail_4
+.Lschema_size_ok_34:
+    # cellscript abi: bounds check NovaSealCellV0.state_hash required=66
+    ld a0, 280(sp)
+    li a1, 66
+    call __cellscript_require_min_size
+    beqz a0, .Lschema_bounds_ok_35
+    j .Lnovaseal_lifecycle_fail_2
+.Lschema_bounds_ok_35:
+    ld a0, 128(sp)
+    li t6, 2400
+    add t6, sp, t6
+    sd a0, 0(t6)
+    # cellscript abi: exact size check NovaSealCellV0 expected=146
+    ld a0, 280(sp)
+    li a1, 146
+    call __cellscript_require_exact_size
+    beqz a0, .Lschema_size_ok_36
+    j .Lnovaseal_lifecycle_fail_4
+.Lschema_size_ok_36:
+    # cellscript abi: bounds check NovaSealCellV0.state_hash required=66
+    ld a0, 280(sp)
+    li a1, 66
+    call __cellscript_require_min_size
+    beqz a0, .Lschema_bounds_ok_37
+    j .Lnovaseal_lifecycle_fail_2
+.Lschema_bounds_ok_37:
+    ld a1, 8(sp)
+    addi a1, a1, 34
+    li t6, 2400
+    add t6, sp, t6
+    ld a0, 0(t6)
+    li a2, 32
+    call __cellscript_memcmp_fixed
+    seqz t3, a0
+    sd t3, 144(sp)
+    ld t0, 144(sp)
+    beqz t0, .Lnovaseal_lifecycle_block_10
+    j .Lnovaseal_lifecycle_block_9
+.Lnovaseal_lifecycle_block_8:
+    li a0, 5
+    j .Lnovaseal_lifecycle_epilogue
+.Lnovaseal_lifecycle_block_9:
+    # call __ckb_source_group_output
+    # cellscript abi: call __ckb_source_group_output scalar arg0 -> a0
+    li a0, 0
+    call __ckb_source_group_output
+    # cellscript abi: scalar runtime helper status check (a1 == 0)
+    beqz a1, .Lruntime_scalar_ok_38
+    addi a0, a1, 0
+    j .Lnovaseal_lifecycle_epilogue
+.Lruntime_scalar_ok_38:
+    sd a0, 152(sp)
+    # call __ckb_cell_data_hash_at
+    # cellscript abi: load 32 bytes from SourceView cell data into addressable Hash
+    li t0, 32
+    sd t0, 1360(sp)
+    ld a0, 152(sp)
+    li a1, 66
+    addi a2, sp, 1368
+    addi a3, sp, 1360
+    call __ckb_cell_data_hash_at
+    beqz a0, .Lcell_data_hash_at_ok_39
+    j .Lnovaseal_lifecycle_epilogue
+.Lcell_data_hash_at_ok_39:
+    addi t0, sp, 1368
+    sd t0, 160(sp)
+    # field access .policy_hash
+    # cellscript abi: schema field NovaSealCellV0.policy_hash offset=66 size=32
+    ld t4, 8(sp)
+    # cellscript abi: exact size check NovaSealCellV0 expected=146
+    ld a0, 280(sp)
+    li a1, 146
+    call __cellscript_require_exact_size
+    beqz a0, .Lschema_size_ok_40
+    j .Lnovaseal_lifecycle_fail_4
+.Lschema_size_ok_40:
+    # cellscript abi: bounds check NovaSealCellV0.policy_hash required=98
+    ld a0, 280(sp)
+    li a1, 98
+    call __cellscript_require_min_size
+    beqz a0, .Lschema_bounds_ok_41
+    j .Lnovaseal_lifecycle_fail_2
+.Lschema_bounds_ok_41:
+    addi t0, t4, 66
+    sd t0, 168(sp)
+    # cellscript abi: fixed-byte Eq comparison size=32
+    # cellscript abi: exact size check left fixed-byte comparison loaded bytes var20 expected=32
+    ld a0, 1360(sp)
+    li a1, 32
+    call __cellscript_require_exact_size
+    beqz a0, .Lschema_size_ok_42
+    j .Lnovaseal_lifecycle_fail_4
+.Lschema_size_ok_42:
+    # cellscript abi: exact size check NovaSealCellV0 expected=146
+    ld a0, 280(sp)
+    li a1, 146
+    call __cellscript_require_exact_size
+    beqz a0, .Lschema_size_ok_43
+    j .Lnovaseal_lifecycle_fail_4
+.Lschema_size_ok_43:
+    # cellscript abi: bounds check NovaSealCellV0.policy_hash required=98
+    ld a0, 280(sp)
+    li a1, 98
+    call __cellscript_require_min_size
+    beqz a0, .Lschema_bounds_ok_44
+    j .Lnovaseal_lifecycle_fail_2
+.Lschema_bounds_ok_44:
+    ld a0, 160(sp)
+    li t6, 2400
+    add t6, sp, t6
+    sd a0, 0(t6)
+    # cellscript abi: exact size check NovaSealCellV0 expected=146
+    ld a0, 280(sp)
+    li a1, 146
+    call __cellscript_require_exact_size
+    beqz a0, .Lschema_size_ok_45
+    j .Lnovaseal_lifecycle_fail_4
+.Lschema_size_ok_45:
+    # cellscript abi: bounds check NovaSealCellV0.policy_hash required=98
+    ld a0, 280(sp)
+    li a1, 98
+    call __cellscript_require_min_size
+    beqz a0, .Lschema_bounds_ok_46
+    j .Lnovaseal_lifecycle_fail_2
+.Lschema_bounds_ok_46:
+    ld a1, 8(sp)
+    addi a1, a1, 66
+    li t6, 2400
+    add t6, sp, t6
+    ld a0, 0(t6)
+    li a2, 32
+    call __cellscript_memcmp_fixed
+    seqz t3, a0
+    sd t3, 176(sp)
+    ld t0, 176(sp)
+    beqz t0, .Lnovaseal_lifecycle_block_12
+    j .Lnovaseal_lifecycle_block_11
+.Lnovaseal_lifecycle_block_10:
+    li a0, 5
+    j .Lnovaseal_lifecycle_epilogue
+.Lnovaseal_lifecycle_block_11:
+    # call __ckb_source_group_output
+    # cellscript abi: call __ckb_source_group_output scalar arg0 -> a0
+    li a0, 0
+    call __ckb_source_group_output
+    # cellscript abi: scalar runtime helper status check (a1 == 0)
+    beqz a1, .Lruntime_scalar_ok_47
+    addi a0, a1, 0
+    j .Lnovaseal_lifecycle_epilogue
+.Lruntime_scalar_ok_47:
+    sd a0, 184(sp)
+    # call __ckb_cell_data_hash_at
+    # cellscript abi: load 32 bytes from SourceView cell data into addressable Hash
+    li t0, 32
+    sd t0, 1880(sp)
+    ld a0, 184(sp)
+    li a1, 98
+    addi a2, sp, 1888
+    addi a3, sp, 1880
+    call __ckb_cell_data_hash_at
+    beqz a0, .Lcell_data_hash_at_ok_48
+    j .Lnovaseal_lifecycle_epilogue
+.Lcell_data_hash_at_ok_48:
+    addi t0, sp, 1888
+    sd t0, 192(sp)
+    # field access .latest_receipt_hash
+    # cellscript abi: schema field NovaSealCellV0.latest_receipt_hash offset=98 size=32
+    ld t4, 8(sp)
+    # cellscript abi: exact size check NovaSealCellV0 expected=146
+    ld a0, 280(sp)
+    li a1, 146
+    call __cellscript_require_exact_size
+    beqz a0, .Lschema_size_ok_49
+    j .Lnovaseal_lifecycle_fail_4
+.Lschema_size_ok_49:
+    # cellscript abi: bounds check NovaSealCellV0.latest_receipt_hash required=130
+    ld a0, 280(sp)
+    li a1, 130
+    call __cellscript_require_min_size
+    beqz a0, .Lschema_bounds_ok_50
+    j .Lnovaseal_lifecycle_fail_2
+.Lschema_bounds_ok_50:
+    addi t0, t4, 98
+    sd t0, 200(sp)
+    # cellscript abi: fixed-byte Eq comparison size=32
+    # cellscript abi: exact size check left fixed-byte comparison loaded bytes var24 expected=32
+    ld a0, 1880(sp)
+    li a1, 32
+    call __cellscript_require_exact_size
+    beqz a0, .Lschema_size_ok_51
+    j .Lnovaseal_lifecycle_fail_4
+.Lschema_size_ok_51:
+    # cellscript abi: exact size check NovaSealCellV0 expected=146
+    ld a0, 280(sp)
+    li a1, 146
+    call __cellscript_require_exact_size
+    beqz a0, .Lschema_size_ok_52
+    j .Lnovaseal_lifecycle_fail_4
+.Lschema_size_ok_52:
+    # cellscript abi: bounds check NovaSealCellV0.latest_receipt_hash required=130
+    ld a0, 280(sp)
+    li a1, 130
+    call __cellscript_require_min_size
+    beqz a0, .Lschema_bounds_ok_53
+    j .Lnovaseal_lifecycle_fail_2
+.Lschema_bounds_ok_53:
+    ld a0, 192(sp)
+    li t6, 2400
+    add t6, sp, t6
+    sd a0, 0(t6)
+    # cellscript abi: exact size check NovaSealCellV0 expected=146
+    ld a0, 280(sp)
+    li a1, 146
+    call __cellscript_require_exact_size
+    beqz a0, .Lschema_size_ok_54
+    j .Lnovaseal_lifecycle_fail_4
+.Lschema_size_ok_54:
+    # cellscript abi: bounds check NovaSealCellV0.latest_receipt_hash required=130
+    ld a0, 280(sp)
+    li a1, 130
+    call __cellscript_require_min_size
+    beqz a0, .Lschema_bounds_ok_55
+    j .Lnovaseal_lifecycle_fail_2
+.Lschema_bounds_ok_55:
+    ld a1, 8(sp)
+    addi a1, a1, 98
+    li t6, 2400
+    add t6, sp, t6
+    ld a0, 0(t6)
+    li a2, 32
+    call __cellscript_memcmp_fixed
+    seqz t3, a0
+    sd t3, 208(sp)
+    ld t0, 208(sp)
+    beqz t0, .Lnovaseal_lifecycle_block_14
+    j .Lnovaseal_lifecycle_block_13
+.Lnovaseal_lifecycle_block_12:
+    li a0, 5
+    j .Lnovaseal_lifecycle_epilogue
+.Lnovaseal_lifecycle_block_13:
+    # call __ckb_source_group_output
+    # cellscript abi: call __ckb_source_group_output scalar arg0 -> a0
+    li a0, 0
+    call __ckb_source_group_output
+    # cellscript abi: scalar runtime helper status check (a1 == 0)
+    beqz a1, .Lruntime_scalar_ok_56
+    addi a0, a1, 0
+    j .Lnovaseal_lifecycle_epilogue
+.Lruntime_scalar_ok_56:
+    sd a0, 216(sp)
+    # call __ckb_cell_data_u64_le
+    # cellscript abi: call __ckb_cell_data_u64_le scalar arg0 -> a0
+    ld a0, 216(sp)
+    # cellscript abi: call __ckb_cell_data_u64_le scalar arg1 -> a1
+    li a1, 130
+    call __ckb_cell_data_u64_le
+    # cellscript abi: scalar runtime helper status check (a1 == 0)
+    beqz a1, .Lruntime_scalar_ok_57
+    addi a0, a1, 0
+    j .Lnovaseal_lifecycle_epilogue
+.Lruntime_scalar_ok_57:
+    sd a0, 224(sp)
+    ld t0, 224(sp)
+    ld t1, 72(sp)
+    sub t0, t0, t1
+    seqz t0, t0
+    sd t0, 232(sp)
+    ld t0, 232(sp)
+    beqz t0, .Lnovaseal_lifecycle_block_16
+    j .Lnovaseal_lifecycle_block_15
+.Lnovaseal_lifecycle_block_14:
+    li a0, 5
+    j .Lnovaseal_lifecycle_epilogue
+.Lnovaseal_lifecycle_block_15:
+    # call __ckb_source_group_output
+    # cellscript abi: call __ckb_source_group_output scalar arg0 -> a0
+    li a0, 0
+    call __ckb_source_group_output
+    # cellscript abi: scalar runtime helper status check (a1 == 0)
+    beqz a1, .Lruntime_scalar_ok_58
+    addi a0, a1, 0
+    j .Lnovaseal_lifecycle_epilogue
+.Lruntime_scalar_ok_58:
+    sd a0, 240(sp)
+    # call __ckb_cell_data_u64_le
+    # cellscript abi: call __ckb_cell_data_u64_le scalar arg0 -> a0
+    ld a0, 240(sp)
+    # cellscript abi: call __ckb_cell_data_u64_le scalar arg1 -> a1
+    li a1, 138
+    call __ckb_cell_data_u64_le
+    # cellscript abi: scalar runtime helper status check (a1 == 0)
+    beqz a1, .Lruntime_scalar_ok_59
+    addi a0, a1, 0
+    j .Lnovaseal_lifecycle_epilogue
+.Lruntime_scalar_ok_59:
+    sd a0, 248(sp)
+    # field access .expiry
+    # cellscript abi: schema field NovaSealCellV0.expiry offset=138 size=8
+    ld t4, 8(sp)
+    # cellscript abi: exact size check NovaSealCellV0 expected=146
+    ld a0, 280(sp)
+    li a1, 146
+    call __cellscript_require_exact_size
+    beqz a0, .Lschema_size_ok_60
+    j .Lnovaseal_lifecycle_fail_4
+.Lschema_size_ok_60:
+    # cellscript abi: bounds check NovaSealCellV0.expiry required=146
+    ld a0, 280(sp)
+    li a1, 146
+    call __cellscript_require_min_size
+    beqz a0, .Lschema_bounds_ok_61
+    j .Lnovaseal_lifecycle_fail_2
+.Lschema_bounds_ok_61:
+    li t0, 0
+    lbu t2, 138(t4)
+    or t0, t0, t2
+    lbu t2, 139(t4)
+    slli t2, t2, 8
+    or t0, t0, t2
+    lbu t2, 140(t4)
+    slli t2, t2, 16
+    or t0, t0, t2
+    lbu t2, 141(t4)
+    slli t2, t2, 24
+    or t0, t0, t2
+    lbu t2, 142(t4)
+    slli t2, t2, 32
+    or t0, t0, t2
+    lbu t2, 143(t4)
+    slli t2, t2, 40
+    or t0, t0, t2
+    lbu t2, 144(t4)
+    slli t2, t2, 48
+    or t0, t0, t2
+    lbu t2, 145(t4)
+    slli t2, t2, 56
+    or t0, t0, t2
+    sd t0, 256(sp)
+    ld t0, 248(sp)
+    ld t1, 256(sp)
+    sub t0, t0, t1
+    seqz t0, t0
+    sd t0, 264(sp)
+    ld t0, 264(sp)
+    beqz t0, .Lnovaseal_lifecycle_block_18
+    j .Lnovaseal_lifecycle_block_17
+.Lnovaseal_lifecycle_block_16:
+    li a0, 5
+    j .Lnovaseal_lifecycle_epilogue
+.Lnovaseal_lifecycle_block_17:
+    j .Lnovaseal_lifecycle_block_21
+.Lnovaseal_lifecycle_block_18:
+    li a0, 5
+    j .Lnovaseal_lifecycle_epilogue
+.Lnovaseal_lifecycle_block_19:
+    # call __novaseal_bip340_require_signature args=3
+    # cellscript abi: NovaSeal BIP340 verifier IPC envelope via VM2 pipe/spawn/wait
+    call __ckb_pipe
+    beqz a0, .Lckb_syscall_ok_62
+    j .Lnovaseal_lifecycle_fail_1
+.Lckb_syscall_ok_62:
+    addi s10, a1, 0
+    addi s11, a2, 0
+    # cellscript abi: spawn manifest-bound CellDep#0 verifier with read fd inherited
+    li a0, 0
+    addi a1, s10, 0
+    call __ckb_spawn_with_fd1
+    beqz a0, .Lckb_syscall_ok_63
+    j .Lnovaseal_lifecycle_fail_1
+.Lckb_syscall_ok_63:
+    addi s9, a1, 0
+    # cellscript abi: write 18 u64 words for cellscript-btc-bip340-ipc-v0 envelope
+    # cellscript abi: novaseal bip340 ipc word 0
+    addi a0, s11, 0
+    li a1, 4850457270632469326
+    call __ckb_pipe_write
+    beqz a0, .Lckb_syscall_ok_64
+    j .Lnovaseal_lifecycle_fail_1
+.Lckb_syscall_ok_64:
+    # cellscript abi: novaseal bip340 ipc word 1
+    addi a0, s11, 0
+    li a1, 65536
+    call __ckb_pipe_write
+    beqz a0, .Lckb_syscall_ok_65
+    j .Lnovaseal_lifecycle_fail_1
+.Lckb_syscall_ok_65:
+    # cellscript abi: novaseal bip340 ipc word 2
+    addi a0, s11, 0
+    li a1, 0
+    ld t6, 24(sp)
+    lbu t1, 0(t6)
+    or a1, a1, t1
+    ld t6, 24(sp)
+    lbu t1, 1(t6)
+    slli t1, t1, 8
+    or a1, a1, t1
+    ld t6, 24(sp)
+    lbu t1, 2(t6)
+    slli t1, t1, 16
+    or a1, a1, t1
+    ld t6, 24(sp)
+    lbu t1, 3(t6)
+    slli t1, t1, 24
+    or a1, a1, t1
+    ld t6, 24(sp)
+    lbu t1, 4(t6)
+    slli t1, t1, 32
+    or a1, a1, t1
+    ld t6, 24(sp)
+    lbu t1, 5(t6)
+    slli t1, t1, 40
+    or a1, a1, t1
+    ld t6, 24(sp)
+    lbu t1, 6(t6)
+    slli t1, t1, 48
+    or a1, a1, t1
+    ld t6, 24(sp)
+    lbu t1, 7(t6)
+    slli t1, t1, 56
+    or a1, a1, t1
+    call __ckb_pipe_write
+    beqz a0, .Lckb_syscall_ok_66
+    j .Lnovaseal_lifecycle_fail_1
+.Lckb_syscall_ok_66:
+    # cellscript abi: novaseal bip340 ipc word 3
+    addi a0, s11, 0
+    li a1, 0
+    ld t6, 24(sp)
+    lbu t1, 8(t6)
+    or a1, a1, t1
+    ld t6, 24(sp)
+    lbu t1, 9(t6)
+    slli t1, t1, 8
+    or a1, a1, t1
+    ld t6, 24(sp)
+    lbu t1, 10(t6)
+    slli t1, t1, 16
+    or a1, a1, t1
+    ld t6, 24(sp)
+    lbu t1, 11(t6)
+    slli t1, t1, 24
+    or a1, a1, t1
+    ld t6, 24(sp)
+    lbu t1, 12(t6)
+    slli t1, t1, 32
+    or a1, a1, t1
+    ld t6, 24(sp)
+    lbu t1, 13(t6)
+    slli t1, t1, 40
+    or a1, a1, t1
+    ld t6, 24(sp)
+    lbu t1, 14(t6)
+    slli t1, t1, 48
+    or a1, a1, t1
+    ld t6, 24(sp)
+    lbu t1, 15(t6)
+    slli t1, t1, 56
+    or a1, a1, t1
+    call __ckb_pipe_write
+    beqz a0, .Lckb_syscall_ok_67
+    j .Lnovaseal_lifecycle_fail_1
+.Lckb_syscall_ok_67:
+    # cellscript abi: novaseal bip340 ipc word 4
+    addi a0, s11, 0
+    li a1, 0
+    ld t6, 24(sp)
+    lbu t1, 16(t6)
+    or a1, a1, t1
+    ld t6, 24(sp)
+    lbu t1, 17(t6)
+    slli t1, t1, 8
+    or a1, a1, t1
+    ld t6, 24(sp)
+    lbu t1, 18(t6)
+    slli t1, t1, 16
+    or a1, a1, t1
+    ld t6, 24(sp)
+    lbu t1, 19(t6)
+    slli t1, t1, 24
+    or a1, a1, t1
+    ld t6, 24(sp)
+    lbu t1, 20(t6)
+    slli t1, t1, 32
+    or a1, a1, t1
+    ld t6, 24(sp)
+    lbu t1, 21(t6)
+    slli t1, t1, 40
+    or a1, a1, t1
+    ld t6, 24(sp)
+    lbu t1, 22(t6)
+    slli t1, t1, 48
+    or a1, a1, t1
+    ld t6, 24(sp)
+    lbu t1, 23(t6)
+    slli t1, t1, 56
+    or a1, a1, t1
+    call __ckb_pipe_write
+    beqz a0, .Lckb_syscall_ok_68
+    j .Lnovaseal_lifecycle_fail_1
+.Lckb_syscall_ok_68:
+    # cellscript abi: novaseal bip340 ipc word 5
+    addi a0, s11, 0
+    li a1, 0
+    ld t6, 24(sp)
+    lbu t1, 24(t6)
+    or a1, a1, t1
+    ld t6, 24(sp)
+    lbu t1, 25(t6)
+    slli t1, t1, 8
+    or a1, a1, t1
+    ld t6, 24(sp)
+    lbu t1, 26(t6)
+    slli t1, t1, 16
+    or a1, a1, t1
+    ld t6, 24(sp)
+    lbu t1, 27(t6)
+    slli t1, t1, 24
+    or a1, a1, t1
+    ld t6, 24(sp)
+    lbu t1, 28(t6)
+    slli t1, t1, 32
+    or a1, a1, t1
+    ld t6, 24(sp)
+    lbu t1, 29(t6)
+    slli t1, t1, 40
+    or a1, a1, t1
+    ld t6, 24(sp)
+    lbu t1, 30(t6)
+    slli t1, t1, 48
+    or a1, a1, t1
+    ld t6, 24(sp)
+    lbu t1, 31(t6)
+    slli t1, t1, 56
+    or a1, a1, t1
+    call __ckb_pipe_write
+    beqz a0, .Lckb_syscall_ok_69
+    j .Lnovaseal_lifecycle_fail_1
+.Lckb_syscall_ok_69:
+    # cellscript abi: novaseal bip340 ipc word 6
+    addi a0, s11, 0
+    li a1, 0
+    ld t6, 32(sp)
+    lbu t1, 0(t6)
+    or a1, a1, t1
+    ld t6, 32(sp)
+    lbu t1, 1(t6)
+    slli t1, t1, 8
+    or a1, a1, t1
+    ld t6, 32(sp)
+    lbu t1, 2(t6)
+    slli t1, t1, 16
+    or a1, a1, t1
+    ld t6, 32(sp)
+    lbu t1, 3(t6)
+    slli t1, t1, 24
+    or a1, a1, t1
+    ld t6, 32(sp)
+    lbu t1, 4(t6)
+    slli t1, t1, 32
+    or a1, a1, t1
+    ld t6, 32(sp)
+    lbu t1, 5(t6)
+    slli t1, t1, 40
+    or a1, a1, t1
+    ld t6, 32(sp)
+    lbu t1, 6(t6)
+    slli t1, t1, 48
+    or a1, a1, t1
+    ld t6, 32(sp)
+    lbu t1, 7(t6)
+    slli t1, t1, 56
+    or a1, a1, t1
+    call __ckb_pipe_write
+    beqz a0, .Lckb_syscall_ok_70
+    j .Lnovaseal_lifecycle_fail_1
+.Lckb_syscall_ok_70:
+    # cellscript abi: novaseal bip340 ipc word 7
+    addi a0, s11, 0
+    li a1, 0
+    ld t6, 32(sp)
+    lbu t1, 8(t6)
+    or a1, a1, t1
+    ld t6, 32(sp)
+    lbu t1, 9(t6)
+    slli t1, t1, 8
+    or a1, a1, t1
+    ld t6, 32(sp)
+    lbu t1, 10(t6)
+    slli t1, t1, 16
+    or a1, a1, t1
+    ld t6, 32(sp)
+    lbu t1, 11(t6)
+    slli t1, t1, 24
+    or a1, a1, t1
+    ld t6, 32(sp)
+    lbu t1, 12(t6)
+    slli t1, t1, 32
+    or a1, a1, t1
+    ld t6, 32(sp)
+    lbu t1, 13(t6)
+    slli t1, t1, 40
+    or a1, a1, t1
+    ld t6, 32(sp)
+    lbu t1, 14(t6)
+    slli t1, t1, 48
+    or a1, a1, t1
+    ld t6, 32(sp)
+    lbu t1, 15(t6)
+    slli t1, t1, 56
+    or a1, a1, t1
+    call __ckb_pipe_write
+    beqz a0, .Lckb_syscall_ok_71
+    j .Lnovaseal_lifecycle_fail_1
+.Lckb_syscall_ok_71:
+    # cellscript abi: novaseal bip340 ipc word 8
+    addi a0, s11, 0
+    li a1, 0
+    ld t6, 32(sp)
+    lbu t1, 16(t6)
+    or a1, a1, t1
+    ld t6, 32(sp)
+    lbu t1, 17(t6)
+    slli t1, t1, 8
+    or a1, a1, t1
+    ld t6, 32(sp)
+    lbu t1, 18(t6)
+    slli t1, t1, 16
+    or a1, a1, t1
+    ld t6, 32(sp)
+    lbu t1, 19(t6)
+    slli t1, t1, 24
+    or a1, a1, t1
+    ld t6, 32(sp)
+    lbu t1, 20(t6)
+    slli t1, t1, 32
+    or a1, a1, t1
+    ld t6, 32(sp)
+    lbu t1, 21(t6)
+    slli t1, t1, 40
+    or a1, a1, t1
+    ld t6, 32(sp)
+    lbu t1, 22(t6)
+    slli t1, t1, 48
+    or a1, a1, t1
+    ld t6, 32(sp)
+    lbu t1, 23(t6)
+    slli t1, t1, 56
+    or a1, a1, t1
+    call __ckb_pipe_write
+    beqz a0, .Lckb_syscall_ok_72
+    j .Lnovaseal_lifecycle_fail_1
+.Lckb_syscall_ok_72:
+    # cellscript abi: novaseal bip340 ipc word 9
+    addi a0, s11, 0
+    li a1, 0
+    ld t6, 32(sp)
+    lbu t1, 24(t6)
+    or a1, a1, t1
+    ld t6, 32(sp)
+    lbu t1, 25(t6)
+    slli t1, t1, 8
+    or a1, a1, t1
+    ld t6, 32(sp)
+    lbu t1, 26(t6)
+    slli t1, t1, 16
+    or a1, a1, t1
+    ld t6, 32(sp)
+    lbu t1, 27(t6)
+    slli t1, t1, 24
+    or a1, a1, t1
+    ld t6, 32(sp)
+    lbu t1, 28(t6)
+    slli t1, t1, 32
+    or a1, a1, t1
+    ld t6, 32(sp)
+    lbu t1, 29(t6)
+    slli t1, t1, 40
+    or a1, a1, t1
+    ld t6, 32(sp)
+    lbu t1, 30(t6)
+    slli t1, t1, 48
+    or a1, a1, t1
+    ld t6, 32(sp)
+    lbu t1, 31(t6)
+    slli t1, t1, 56
+    or a1, a1, t1
+    call __ckb_pipe_write
+    beqz a0, .Lckb_syscall_ok_73
+    j .Lnovaseal_lifecycle_fail_1
+.Lckb_syscall_ok_73:
+    # cellscript abi: novaseal bip340 ipc word 10
+    addi a0, s11, 0
+    li a1, 0
+    ld t6, 40(sp)
+    lbu t1, 0(t6)
+    or a1, a1, t1
+    ld t6, 40(sp)
+    lbu t1, 1(t6)
+    slli t1, t1, 8
+    or a1, a1, t1
+    ld t6, 40(sp)
+    lbu t1, 2(t6)
+    slli t1, t1, 16
+    or a1, a1, t1
+    ld t6, 40(sp)
+    lbu t1, 3(t6)
+    slli t1, t1, 24
+    or a1, a1, t1
+    ld t6, 40(sp)
+    lbu t1, 4(t6)
+    slli t1, t1, 32
+    or a1, a1, t1
+    ld t6, 40(sp)
+    lbu t1, 5(t6)
+    slli t1, t1, 40
+    or a1, a1, t1
+    ld t6, 40(sp)
+    lbu t1, 6(t6)
+    slli t1, t1, 48
+    or a1, a1, t1
+    ld t6, 40(sp)
+    lbu t1, 7(t6)
+    slli t1, t1, 56
+    or a1, a1, t1
+    call __ckb_pipe_write
+    beqz a0, .Lckb_syscall_ok_74
+    j .Lnovaseal_lifecycle_fail_1
+.Lckb_syscall_ok_74:
+    # cellscript abi: novaseal bip340 ipc word 11
+    addi a0, s11, 0
+    li a1, 0
+    ld t6, 40(sp)
+    lbu t1, 8(t6)
+    or a1, a1, t1
+    ld t6, 40(sp)
+    lbu t1, 9(t6)
+    slli t1, t1, 8
+    or a1, a1, t1
+    ld t6, 40(sp)
+    lbu t1, 10(t6)
+    slli t1, t1, 16
+    or a1, a1, t1
+    ld t6, 40(sp)
+    lbu t1, 11(t6)
+    slli t1, t1, 24
+    or a1, a1, t1
+    ld t6, 40(sp)
+    lbu t1, 12(t6)
+    slli t1, t1, 32
+    or a1, a1, t1
+    ld t6, 40(sp)
+    lbu t1, 13(t6)
+    slli t1, t1, 40
+    or a1, a1, t1
+    ld t6, 40(sp)
+    lbu t1, 14(t6)
+    slli t1, t1, 48
+    or a1, a1, t1
+    ld t6, 40(sp)
+    lbu t1, 15(t6)
+    slli t1, t1, 56
+    or a1, a1, t1
+    call __ckb_pipe_write
+    beqz a0, .Lckb_syscall_ok_75
+    j .Lnovaseal_lifecycle_fail_1
+.Lckb_syscall_ok_75:
+    # cellscript abi: novaseal bip340 ipc word 12
+    addi a0, s11, 0
+    li a1, 0
+    ld t6, 40(sp)
+    lbu t1, 16(t6)
+    or a1, a1, t1
+    ld t6, 40(sp)
+    lbu t1, 17(t6)
+    slli t1, t1, 8
+    or a1, a1, t1
+    ld t6, 40(sp)
+    lbu t1, 18(t6)
+    slli t1, t1, 16
+    or a1, a1, t1
+    ld t6, 40(sp)
+    lbu t1, 19(t6)
+    slli t1, t1, 24
+    or a1, a1, t1
+    ld t6, 40(sp)
+    lbu t1, 20(t6)
+    slli t1, t1, 32
+    or a1, a1, t1
+    ld t6, 40(sp)
+    lbu t1, 21(t6)
+    slli t1, t1, 40
+    or a1, a1, t1
+    ld t6, 40(sp)
+    lbu t1, 22(t6)
+    slli t1, t1, 48
+    or a1, a1, t1
+    ld t6, 40(sp)
+    lbu t1, 23(t6)
+    slli t1, t1, 56
+    or a1, a1, t1
+    call __ckb_pipe_write
+    beqz a0, .Lckb_syscall_ok_76
+    j .Lnovaseal_lifecycle_fail_1
+.Lckb_syscall_ok_76:
+    # cellscript abi: novaseal bip340 ipc word 13
+    addi a0, s11, 0
+    li a1, 0
+    ld t6, 40(sp)
+    lbu t1, 24(t6)
+    or a1, a1, t1
+    ld t6, 40(sp)
+    lbu t1, 25(t6)
+    slli t1, t1, 8
+    or a1, a1, t1
+    ld t6, 40(sp)
+    lbu t1, 26(t6)
+    slli t1, t1, 16
+    or a1, a1, t1
+    ld t6, 40(sp)
+    lbu t1, 27(t6)
+    slli t1, t1, 24
+    or a1, a1, t1
+    ld t6, 40(sp)
+    lbu t1, 28(t6)
+    slli t1, t1, 32
+    or a1, a1, t1
+    ld t6, 40(sp)
+    lbu t1, 29(t6)
+    slli t1, t1, 40
+    or a1, a1, t1
+    ld t6, 40(sp)
+    lbu t1, 30(t6)
+    slli t1, t1, 48
+    or a1, a1, t1
+    ld t6, 40(sp)
+    lbu t1, 31(t6)
+    slli t1, t1, 56
+    or a1, a1, t1
+    call __ckb_pipe_write
+    beqz a0, .Lckb_syscall_ok_77
+    j .Lnovaseal_lifecycle_fail_1
+.Lckb_syscall_ok_77:
+    # cellscript abi: novaseal bip340 ipc word 14
+    addi a0, s11, 0
+    li a1, 0
+    ld t6, 40(sp)
+    lbu t1, 32(t6)
+    or a1, a1, t1
+    ld t6, 40(sp)
+    lbu t1, 33(t6)
+    slli t1, t1, 8
+    or a1, a1, t1
+    ld t6, 40(sp)
+    lbu t1, 34(t6)
+    slli t1, t1, 16
+    or a1, a1, t1
+    ld t6, 40(sp)
+    lbu t1, 35(t6)
+    slli t1, t1, 24
+    or a1, a1, t1
+    ld t6, 40(sp)
+    lbu t1, 36(t6)
+    slli t1, t1, 32
+    or a1, a1, t1
+    ld t6, 40(sp)
+    lbu t1, 37(t6)
+    slli t1, t1, 40
+    or a1, a1, t1
+    ld t6, 40(sp)
+    lbu t1, 38(t6)
+    slli t1, t1, 48
+    or a1, a1, t1
+    ld t6, 40(sp)
+    lbu t1, 39(t6)
+    slli t1, t1, 56
+    or a1, a1, t1
+    call __ckb_pipe_write
+    beqz a0, .Lckb_syscall_ok_78
+    j .Lnovaseal_lifecycle_fail_1
+.Lckb_syscall_ok_78:
+    # cellscript abi: novaseal bip340 ipc word 15
+    addi a0, s11, 0
+    li a1, 0
+    ld t6, 40(sp)
+    lbu t1, 40(t6)
+    or a1, a1, t1
+    ld t6, 40(sp)
+    lbu t1, 41(t6)
+    slli t1, t1, 8
+    or a1, a1, t1
+    ld t6, 40(sp)
+    lbu t1, 42(t6)
+    slli t1, t1, 16
+    or a1, a1, t1
+    ld t6, 40(sp)
+    lbu t1, 43(t6)
+    slli t1, t1, 24
+    or a1, a1, t1
+    ld t6, 40(sp)
+    lbu t1, 44(t6)
+    slli t1, t1, 32
+    or a1, a1, t1
+    ld t6, 40(sp)
+    lbu t1, 45(t6)
+    slli t1, t1, 40
+    or a1, a1, t1
+    ld t6, 40(sp)
+    lbu t1, 46(t6)
+    slli t1, t1, 48
+    or a1, a1, t1
+    ld t6, 40(sp)
+    lbu t1, 47(t6)
+    slli t1, t1, 56
+    or a1, a1, t1
+    call __ckb_pipe_write
+    beqz a0, .Lckb_syscall_ok_79
+    j .Lnovaseal_lifecycle_fail_1
+.Lckb_syscall_ok_79:
+    # cellscript abi: novaseal bip340 ipc word 16
+    addi a0, s11, 0
+    li a1, 0
+    ld t6, 40(sp)
+    lbu t1, 48(t6)
+    or a1, a1, t1
+    ld t6, 40(sp)
+    lbu t1, 49(t6)
+    slli t1, t1, 8
+    or a1, a1, t1
+    ld t6, 40(sp)
+    lbu t1, 50(t6)
+    slli t1, t1, 16
+    or a1, a1, t1
+    ld t6, 40(sp)
+    lbu t1, 51(t6)
+    slli t1, t1, 24
+    or a1, a1, t1
+    ld t6, 40(sp)
+    lbu t1, 52(t6)
+    slli t1, t1, 32
+    or a1, a1, t1
+    ld t6, 40(sp)
+    lbu t1, 53(t6)
+    slli t1, t1, 40
+    or a1, a1, t1
+    ld t6, 40(sp)
+    lbu t1, 54(t6)
+    slli t1, t1, 48
+    or a1, a1, t1
+    ld t6, 40(sp)
+    lbu t1, 55(t6)
+    slli t1, t1, 56
+    or a1, a1, t1
+    call __ckb_pipe_write
+    beqz a0, .Lckb_syscall_ok_80
+    j .Lnovaseal_lifecycle_fail_1
+.Lckb_syscall_ok_80:
+    # cellscript abi: novaseal bip340 ipc word 17
+    addi a0, s11, 0
+    li a1, 0
+    ld t6, 40(sp)
+    lbu t1, 56(t6)
+    or a1, a1, t1
+    ld t6, 40(sp)
+    lbu t1, 57(t6)
+    slli t1, t1, 8
+    or a1, a1, t1
+    ld t6, 40(sp)
+    lbu t1, 58(t6)
+    slli t1, t1, 16
+    or a1, a1, t1
+    ld t6, 40(sp)
+    lbu t1, 59(t6)
+    slli t1, t1, 24
+    or a1, a1, t1
+    ld t6, 40(sp)
+    lbu t1, 60(t6)
+    slli t1, t1, 32
+    or a1, a1, t1
+    ld t6, 40(sp)
+    lbu t1, 61(t6)
+    slli t1, t1, 40
+    or a1, a1, t1
+    ld t6, 40(sp)
+    lbu t1, 62(t6)
+    slli t1, t1, 48
+    or a1, a1, t1
+    ld t6, 40(sp)
+    lbu t1, 63(t6)
+    slli t1, t1, 56
+    or a1, a1, t1
+    call __ckb_pipe_write
+    beqz a0, .Lckb_syscall_ok_81
+    j .Lnovaseal_lifecycle_fail_1
+.Lckb_syscall_ok_81:
+    addi a0, s11, 0
+    call __ckb_close
+    beqz a0, .Lckb_syscall_ok_82
+    j .Lnovaseal_lifecycle_fail_1
+.Lckb_syscall_ok_82:
+    addi a0, s9, 0
+    call __ckb_wait
+    beqz a0, .Lckb_syscall_ok_83
+    j .Lnovaseal_lifecycle_fail_1
+.Lckb_syscall_ok_83:
+    j .Lnovaseal_lifecycle_block_21
+.Lnovaseal_lifecycle_block_20:
+    li a0, 5
+    j .Lnovaseal_lifecycle_epilogue
+.Lnovaseal_lifecycle_block_21:
+    li a0, 0
+    j .Lnovaseal_lifecycle_epilogue
+.Lnovaseal_lifecycle_fail_1:
+    # cellscript runtime error 1 syscall-failed
+    li a0, 1
+    j .Lnovaseal_lifecycle_epilogue
+.Lnovaseal_lifecycle_fail_2:
+    # cellscript runtime error 2 bounds-check-failed
+    li a0, 2
+    j .Lnovaseal_lifecycle_epilogue
+.Lnovaseal_lifecycle_fail_4:
+    # cellscript runtime error 4 exact-size-mismatch
+    li a0, 4
+    j .Lnovaseal_lifecycle_epilogue
+.Lnovaseal_lifecycle_epilogue:
+    li t6, 3576
+    add t6, sp, t6
+    ld ra, 0(t6)
+    li t6, 3568
+    add t6, sp, t6
+    ld fp, 0(t6)
+    li t6, 3584
+    add sp, sp, t6
+    ret
+.section .text
+.global __cellscript_memcmp_fixed
+.type __cellscript_memcmp_fixed, @function
+__cellscript_memcmp_fixed:
+    # cellscript abi: fixed-byte helper compares a0/a1 for a2 bytes; returns a0=0 when equal
+    beqz a2, .L__cellscript_memcmp_fixed_equal
+.L__cellscript_memcmp_fixed_loop:
+    lbu t0, 0(a0)
+    lbu t1, 0(a1)
+    sub t2, t0, t1
+    bnez t2, .L__cellscript_memcmp_fixed_mismatch
+    addi a0, a0, 1
+    addi a1, a1, 1
+    addi a2, a2, -1
+    bnez a2, .L__cellscript_memcmp_fixed_loop
+.L__cellscript_memcmp_fixed_equal:
+    li a0, 0
+    ret
+.L__cellscript_memcmp_fixed_mismatch:
+    li a0, 1
+    ret
+.global __cellscript_memzero_fixed
+.type __cellscript_memzero_fixed, @function
+__cellscript_memzero_fixed:
+    # cellscript abi: fixed-byte helper checks a0 for a1 zero bytes; returns a0=0 when all zero
+    beqz a1, .L__cellscript_memzero_fixed_equal
+.L__cellscript_memzero_fixed_loop:
+    lbu t0, 0(a0)
+    bnez t0, .L__cellscript_memzero_fixed_mismatch
+    addi a0, a0, 1
+    addi a1, a1, -1
+    bnez a1, .L__cellscript_memzero_fixed_loop
+.L__cellscript_memzero_fixed_equal:
+    li a0, 0
+    ret
+.L__cellscript_memzero_fixed_mismatch:
+    li a0, 1
+    ret
+.global __cellscript_require_min_size
+.type __cellscript_require_min_size, @function
+__cellscript_require_min_size:
+    # cellscript abi: returns a0=0 when actual size a0 is at least required size a1
+    slt a0, a0, a1
+    ret
+.global __cellscript_require_exact_size
+.type __cellscript_require_exact_size, @function
+__cellscript_require_exact_size:
+    # cellscript abi: returns a0=0 when actual size a0 equals expected size a1
+    sub a0, a0, a1
+    ret
+.global __env_current_timepoint
+.type __env_current_timepoint, @function
+__env_current_timepoint:
+    addi sp, sp, -32
+    sd ra, 24(sp)
+    # cellscript abi: LOAD_HEADER_BY_FIELD field=ckb_epoch_number source=HeaderDep index=0
+    li t0, 8
+    sd t0, 8(sp)
+    addi a0, sp, 16
+    addi a1, sp, 8
+    li a2, 0
+    li a3, 0
+    li a4, 4
+    li a5, 0
+    li a7, 2082
+    ecall
+    ld a0, 16(sp)
+    ld ra, 24(sp)
+    addi sp, sp, 32
+    ret
+.global __ckb_header_epoch_number
+.type __ckb_header_epoch_number, @function
+__ckb_header_epoch_number:
+    addi sp, sp, -32
+    sd ra, 24(sp)
+    # cellscript abi: LOAD_HEADER_BY_FIELD field=ckb_epoch_number source=HeaderDep index=0
+    li t0, 8
+    sd t0, 8(sp)
+    addi a0, sp, 16
+    addi a1, sp, 8
+    li a2, 0
+    li a3, 0
+    li a4, 4
+    li a5, 0
+    li a7, 2082
+    ecall
+    ld a0, 16(sp)
+    ld ra, 24(sp)
+    addi sp, sp, 32
+    ret
+.global __ckb_header_epoch_start_block_number
+.type __ckb_header_epoch_start_block_number, @function
+__ckb_header_epoch_start_block_number:
+    addi sp, sp, -32
+    sd ra, 24(sp)
+    # cellscript abi: LOAD_HEADER_BY_FIELD field=ckb_epoch_start_block_number source=HeaderDep index=0
+    li t0, 8
+    sd t0, 8(sp)
+    addi a0, sp, 16
+    addi a1, sp, 8
+    li a2, 0
+    li a3, 0
+    li a4, 4
+    li a5, 1
+    li a7, 2082
+    ecall
+    ld a0, 16(sp)
+    ld ra, 24(sp)
+    addi sp, sp, 32
+    ret
+.global __ckb_header_epoch_length
+.type __ckb_header_epoch_length, @function
+__ckb_header_epoch_length:
+    addi sp, sp, -32
+    sd ra, 24(sp)
+    # cellscript abi: LOAD_HEADER_BY_FIELD field=ckb_epoch_length source=HeaderDep index=0
+    li t0, 8
+    sd t0, 8(sp)
+    addi a0, sp, 16
+    addi a1, sp, 8
+    li a2, 0
+    li a3, 0
+    li a4, 4
+    li a5, 2
+    li a7, 2082
+    ecall
+    ld a0, 16(sp)
+    ld ra, 24(sp)
+    addi sp, sp, 32
+    ret
+.global __ckb_input_since
+.type __ckb_input_since, @function
+__ckb_input_since:
+    addi sp, sp, -32
+    sd ra, 24(sp)
+    # cellscript abi: LOAD_INPUT_BY_FIELD field=ckb_input_since source=GroupInput index=0
+    li t0, 8
+    sd t0, 8(sp)
+    addi a0, sp, 16
+    addi a1, sp, 8
+    li a2, 0
+    li a3, 0
+    li a4, 72057594037927937
+    li a5, 1
+    li a7, 2083
+    ecall
+    ld a0, 16(sp)
+    ld ra, 24(sp)
+    addi sp, sp, 32
+    ret
+.global __ckb_wait
+.type __ckb_wait, @function
+__ckb_wait:
+    # cellscript abi: CKB VM v2 syscall 2602 (wait for bounded verifier child)
+    addi sp, sp, -32
+    sd ra, 24(sp)
+    addi a1, sp, 8
+    li a7, 2602
+    ecall
+    bnez a0, .Lckb_wait_failed_84
+    ld t0, 8(sp)
+    beqz t0, .Lckb_wait_exit_ok_85
+.Lckb_wait_failed_84:
+    li a0, 1
+    j .Lckb_wait_done_86
+.Lckb_wait_exit_ok_85:
+    li a0, 0
+.Lckb_wait_done_86:
+    ld ra, 24(sp)
+    addi sp, sp, 32
+    ret
+.global __ckb_pipe
+.type __ckb_pipe, @function
+__ckb_pipe:
+    # cellscript abi: CKB VM v2 syscall 2604 (create IPC pipe; returns read fd in a0 and write fd in a1)
+    addi sp, sp, -32
+    sd ra, 24(sp)
+    addi a0, sp, 8
+    li a7, 2604
+    ecall
+    bnez a0, .Lckb_pipe_failed_87
+    ld a1, 8(sp)
+    ld a2, 16(sp)
+    li a0, 0
+    j .Lckb_pipe_done_88
+.Lckb_pipe_failed_87:
+    li a0, 1
+.Lckb_pipe_done_88:
+    ld ra, 24(sp)
+    addi sp, sp, 32
+    ret
+.global __ckb_pipe_write
+.type __ckb_pipe_write, @function
+__ckb_pipe_write:
+    # cellscript abi: CKB VM v2 syscall 2605 (write u64 payload to IPC pipe)
+    addi sp, sp, -32
+    sd ra, 24(sp)
+    sd a1, 8(sp)
+    li t0, 8
+    sd t0, 16(sp)
+    addi a1, sp, 8
+    addi a2, sp, 16
+    li a7, 2605
+    ecall
+    beqz a0, .Lckb_pipe_write_done_89
+    li a0, 1
+.Lckb_pipe_write_done_89:
+    ld ra, 24(sp)
+    addi sp, sp, 32
+    ret
+.global __ckb_close
+.type __ckb_close, @function
+__ckb_close:
+    # cellscript abi: CKB VM v2 syscall 2608 (close fd)
+    li a7, 2608
+    ecall
+    beqz a0, .Lckb_close_done_90
+    li a0, 1
+.Lckb_close_done_90:
+    ret
+.global __ckb_spawn_with_fd1
+.type __ckb_spawn_with_fd1, @function
+__ckb_spawn_with_fd1:
+    # cellscript abi: CKB VM v2 spawn CellDep#0/code with one inherited fd from a1
+    addi sp, sp, -96
+    sd ra, 88(sp)
+    sd a1, 8(sp)
+    sd zero, 16(sp)
+    sd zero, 32(sp)
+    sd zero, 40(sp)
+    addi t0, sp, 24
+    sd t0, 48(sp)
+    addi t0, sp, 8
+    sd t0, 56(sp)
+    li a0, 0
+    li a1, 3
+    li a2, 0
+    li a3, 0
+    addi a4, sp, 32
+    li a7, 2601
+    ecall
+    bnez a0, .Lckb_spawn_with_fd_failed_91
+    ld a1, 24(sp)
+    li a0, 0
+    j .Lckb_spawn_with_fd_done_92
+.Lckb_spawn_with_fd_failed_91:
+    li a0, 1
+.Lckb_spawn_with_fd_done_92:
+    ld ra, 88(sp)
+    addi sp, sp, 96
+    ret
+.global __ckb_source_group_output
+.type __ckb_source_group_output, @function
+__ckb_source_group_output:
+    # cellscript abi: CKB SourceView helper (Source::GroupOutput)
+    li t0, 6
+    li t1, 4294967296
+    mul t0, t0, t1
+    add a0, a0, t0
+    li a1, 0
+    ret
+.global __ckb_cell_data_hash_at
+.type __ckb_cell_data_hash_at, @function
+__ckb_cell_data_hash_at:
+    # cellscript abi: SourceView cell data 32-byte read at byte offset; a0=source_view, a1=offset, a2=out[32], a3=size_ptr
+    addi sp, sp, -80
+    sd ra, 72(sp)
+    sd a1, 8(sp)
+    sd a2, 16(sp)
+    sd a3, 24(sp)
+    li t6, 4294967296
+    div t0, a0, t6
+    rem t1, a0, t6
+    li t5, 1
+    sub t4, t0, t5
+    bnez t4, .Lsource_view_next_98
+    li t2, 1
+    j .Lsource_view_decoded_97
+.Lsource_view_next_98:
+    li t5, 2
+    sub t4, t0, t5
+    bnez t4, .Lsource_view_next_99
+    li t2, 2
+    j .Lsource_view_decoded_97
+.Lsource_view_next_99:
+    li t5, 3
+    sub t4, t0, t5
+    bnez t4, .Lsource_view_next_100
+    li t2, 3
+    j .Lsource_view_decoded_97
+.Lsource_view_next_100:
+    li t5, 4
+    sub t4, t0, t5
+    bnez t4, .Lsource_view_next_101
+    li t2, 4
+    j .Lsource_view_decoded_97
+.Lsource_view_next_101:
+    li t5, 5
+    sub t4, t0, t5
+    bnez t4, .Lsource_view_next_102
+    li t2, 72057594037927937
+    j .Lsource_view_decoded_97
+.Lsource_view_next_102:
+    li t5, 6
+    sub t4, t0, t5
+    bnez t4, .Lsource_view_next_103
+    li t2, 72057594037927938
+    j .Lsource_view_decoded_97
+.Lsource_view_next_103:
+    j .Lcell_data_hash_at_source_invalid_93
+.Lsource_view_decoded_97:
+    ld a0, 16(sp)
+    ld a1, 24(sp)
+    ld a2, 8(sp)
+    addi a3, t1, 0
+    addi a4, t2, 0
+    li a7, 2092
+    ecall
+    beqz a0, .Lcell_data_hash_at_loaded_95
+    li t0, 3
+    sub t1, a0, t0
+    bnez t1, .Lcell_data_hash_at_failed_94
+.Lcell_data_hash_at_loaded_95:
+    # cellscript abi: normalize fixed 32-byte slice length after LOAD_CELL_DATA
+    ld t0, 24(sp)
+    li t1, 32
+    sd t1, 0(t0)
+    li a0, 0
+    j .Lcell_data_hash_at_done_96
+.Lcell_data_hash_at_source_invalid_93:
+    li a0, 44
+    j .Lcell_data_hash_at_done_96
+.Lcell_data_hash_at_failed_94:
+    li a0, 1
+.Lcell_data_hash_at_done_96:
+    ld ra, 72(sp)
+    addi sp, sp, 80
+    ret
+.global __ckb_cell_data_u64_le
+.type __ckb_cell_data_u64_le, @function
+__ckb_cell_data_u64_le:
+    # cellscript abi: SourceView cell data little-endian u64 read via LOAD_CELL_DATA offset argument
+    addi sp, sp, -64
+    sd ra, 56(sp)
+    # cellscript abi: save requested data offset
+    sd a1, 8(sp)
+    li t6, 4294967296
+    div t0, a0, t6
+    rem t1, a0, t6
+    li t5, 1
+    sub t4, t0, t5
+    bnez t4, .Lsource_view_next_111
+    li t2, 1
+    j .Lsource_view_decoded_110
+.Lsource_view_next_111:
+    li t5, 2
+    sub t4, t0, t5
+    bnez t4, .Lsource_view_next_112
+    li t2, 2
+    j .Lsource_view_decoded_110
+.Lsource_view_next_112:
+    li t5, 3
+    sub t4, t0, t5
+    bnez t4, .Lsource_view_next_113
+    li t2, 3
+    j .Lsource_view_decoded_110
+.Lsource_view_next_113:
+    li t5, 4
+    sub t4, t0, t5
+    bnez t4, .Lsource_view_next_114
+    li t2, 4
+    j .Lsource_view_decoded_110
+.Lsource_view_next_114:
+    li t5, 5
+    sub t4, t0, t5
+    bnez t4, .Lsource_view_next_115
+    li t2, 72057594037927937
+    j .Lsource_view_decoded_110
+.Lsource_view_next_115:
+    li t5, 6
+    sub t4, t0, t5
+    bnez t4, .Lsource_view_next_116
+    li t2, 72057594037927938
+    j .Lsource_view_decoded_110
+.Lsource_view_next_116:
+    j .Lsource_view_invalid_104
+.Lsource_view_decoded_110:
+    li t0, 8
+    sd t0, 16(sp)
+    addi a0, sp, 24
+    addi a1, sp, 16
+    ld a2, 8(sp)
+    addi a3, t1, 0
+    addi a4, t2, 0
+    li a7, 2092
+    ecall
+    beqz a0, .Lcell_data_u64_loaded_107
+    li t0, 3
+    sub t1, a0, t0
+    beqz t1, .Lcell_data_u64_len_enough_108
+    j .Lcell_data_u64_failed_106
+.Lcell_data_u64_loaded_107:
+    j .Lcell_data_u64_ready_109
+.Lcell_data_u64_len_enough_108:
+.Lcell_data_u64_ready_109:
+    ld a0, 24(sp)
+    li a1, 0
+    j .Lcell_data_u64_done_105
+.Lsource_view_invalid_104:
+    li a0, 44
+    addi a1, a0, 0
+    j .Lcell_data_u64_done_105
+.Lcell_data_u64_failed_106:
+    li a0, 3
+    addi a1, a0, 0
+.Lcell_data_u64_done_105:
+    ld ra, 56(sp)
+    addi sp, sp, 64
+    ret

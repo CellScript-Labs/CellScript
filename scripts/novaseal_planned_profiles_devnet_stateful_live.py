@@ -31,7 +31,6 @@ from novaseal_devnet_stateful_live import (
     ckb_hash,
     deploy_code_cell,
     hex0x,
-    packed_hash,
     resolve_ckb_bin,
     schnorr_sign,
     stateful_provenance,
@@ -42,6 +41,10 @@ from novaseal_devnet_stateful_live import (
     u64,
     xonly_pubkey,
 )
+
+
+def data_packed_hash(_type_name: str, packed: bytes) -> bytes:
+    return cell_data_hash(packed)
 
 
 FUNGIBLE_XUDT_VERSION = 0
@@ -78,6 +81,7 @@ HOLDER_AUX_RAND = bytes([0x42]) * 32
 RECEIVER_SECRET_KEY = bytes.fromhex("33" * 32)
 RECEIVER_AUX_RAND = bytes([0x66]) * 32
 BTC_ANCHOR_SOURCE_LOCAL = "local_deterministic_fixture"
+BIP340_CHILD_REJECTED_ERROR_CODE = 56
 
 
 @dataclass(frozen=True)
@@ -394,7 +398,7 @@ def canonical_envelope_hash(
     profile_body_hash: bytes,
     payout_commitment_hash: bytes,
 ) -> bytes:
-    return packed_hash(
+    return data_packed_hash(
         "NovaSealCanonicalEnvelopeV0",
         pack_canonical_envelope(
             {
@@ -590,13 +594,13 @@ def build_xudt_material(
             "nonce": 0,
             "expiry": expiry,
         }
-        new_state_commitment = packed_hash("NovaFungibleXudtStateCommitmentV0", pack_xudt_state_commitment(new_cell))
+        new_state_commitment = data_packed_hash("NovaFungibleXudtStateCommitmentV0", pack_xudt_state_commitment(new_cell))
     else:
         if old_cell is None:
             raise LiveAcceptanceError("xUDT non-issue material requires an old cell")
         new_nonce = old_cell["nonce"] + 1
         expiry = old_cell["expiry"]
-        old_state_commitment = packed_hash("NovaFungibleXudtStateCommitmentV0", pack_xudt_state_commitment(old_cell))
+        old_state_commitment = data_packed_hash("NovaFungibleXudtStateCommitmentV0", pack_xudt_state_commitment(old_cell))
         if op == OP_TRANSFER:
             old_holder = old_cell["holder_authority_hash"]
             new_holder = new_holder_authority_hash or xonly_pubkey(RECEIVER_SECRET_KEY)
@@ -617,7 +621,7 @@ def build_xudt_material(
                     "nonce": new_nonce,
                 }
             )
-            new_state_commitment = packed_hash("NovaFungibleXudtStateCommitmentV0", pack_xudt_state_commitment(new_cell))
+            new_state_commitment = data_packed_hash("NovaFungibleXudtStateCommitmentV0", pack_xudt_state_commitment(new_cell))
         elif op == OP_SETTLE:
             old_holder = old_cell["holder_authority_hash"]
             new_holder = old_cell["holder_authority_hash"]
@@ -653,7 +657,7 @@ def build_xudt_material(
         "payout_commitment_hash": payout_commitment_hash,
     }
     core_data = pack_xudt_intent_core(core)
-    intent_core_hash = packed_hash("NovaFungibleXudtIntentCoreV0", core_data)
+    intent_core_hash = data_packed_hash("NovaFungibleXudtIntentCoreV0", core_data)
     receipt_commitment = {
         "action": op,
         "asset_id": base["asset_id"],
@@ -670,7 +674,7 @@ def build_xudt_material(
         "intent_core_hash": intent_core_hash,
         "payout_commitment_hash": payout_commitment_hash,
     }
-    materialized_receipt_hash = packed_hash(
+    materialized_receipt_hash = data_packed_hash(
         "NovaFungibleXudtReceiptCommitmentV0",
         pack_xudt_receipt_commitment(receipt_commitment),
     )
@@ -688,7 +692,7 @@ def build_xudt_material(
         payout_commitment_hash=payout_commitment_hash,
     )
     signed_intent = pack_xudt_signed_intent(core_data, canonical_hash, materialized_receipt_hash)
-    signed_intent_hash = packed_hash("NovaFungibleXudtSignedIntentV0", signed_intent)
+    signed_intent_hash = data_packed_hash("NovaFungibleXudtSignedIntentV0", signed_intent)
     sig_payload = bytearray(signature_payload(signer_secret, signed_intent_hash, signer_aux))
     if mutate_signature:
         sig_payload[-1] ^= 1
@@ -1047,11 +1051,11 @@ def build_rwa_material(
             "nonce": 0,
             "expiry": expiry,
         }
-        new_state_commitment = packed_hash("NovaRwaReceiptStateCommitmentV0", pack_rwa_state_commitment(new_cell))
+        new_state_commitment = data_packed_hash("NovaRwaReceiptStateCommitmentV0", pack_rwa_state_commitment(new_cell))
     else:
         if old_cell is None:
             raise LiveAcceptanceError("RWA non-materialize material requires an old cell")
-        old_state_commitment = packed_hash("NovaRwaReceiptStateCommitmentV0", pack_rwa_state_commitment(old_cell))
+        old_state_commitment = data_packed_hash("NovaRwaReceiptStateCommitmentV0", pack_rwa_state_commitment(old_cell))
         old_nonce = old_cell["nonce"]
         new_nonce = old_nonce + 1
         expiry = old_cell["expiry"]
@@ -1064,7 +1068,7 @@ def build_rwa_material(
             signer_authority_hash = old_cell["holder_authority_hash"]
             new_cell = dict(old_cell)
             new_cell.update({"status": STATUS_CLAIMED, "latest_receipt_hash": ZERO_HASH, "nonce": new_nonce})
-            new_state_commitment = packed_hash("NovaRwaReceiptStateCommitmentV0", pack_rwa_state_commitment(new_cell))
+            new_state_commitment = data_packed_hash("NovaRwaReceiptStateCommitmentV0", pack_rwa_state_commitment(new_cell))
         elif op == OP_RWA_SETTLE:
             old_status = STATUS_CLAIMED
             new_status = STATUS_RWA_SETTLED
@@ -1093,7 +1097,7 @@ def build_rwa_material(
         "payout_commitment_hash": payout_commitment_hash,
     }
     core_data = pack_rwa_intent_core(core)
-    intent_core_hash = packed_hash("NovaRwaReceiptIntentCoreV0", core_data)
+    intent_core_hash = data_packed_hash("NovaRwaReceiptIntentCoreV0", core_data)
     event_commitment = {
         "action": op,
         "receipt_id": base["receipt_id"],
@@ -1111,7 +1115,7 @@ def build_rwa_material(
         "intent_core_hash": intent_core_hash,
         "payout_commitment_hash": payout_commitment_hash,
     }
-    materialized_receipt_hash = packed_hash("NovaRwaReceiptEventCommitmentV0", pack_rwa_event_commitment(event_commitment))
+    materialized_receipt_hash = data_packed_hash("NovaRwaReceiptEventCommitmentV0", pack_rwa_event_commitment(event_commitment))
     canonical_hash = rwa_canonical_hash(
         op=op,
         base=base,
@@ -1146,7 +1150,7 @@ def build_rwa_material(
         expected_cell_data_hash,
         expected_event_data_hash,
     )
-    signed_intent_hash = packed_hash("NovaRwaReceiptSignedIntentV0", signed_intent)
+    signed_intent_hash = data_packed_hash("NovaRwaReceiptSignedIntentV0", signed_intent)
     issuer_sig = bytearray(signature_payload(TEST_SECRET_KEY, signed_intent_hash, TEST_AUX_RAND))
     holder_sig = bytearray(signature_payload(HOLDER_SECRET_KEY, signed_intent_hash, HOLDER_AUX_RAND))
     if mutate_issuer_signature:
@@ -1469,7 +1473,7 @@ def build_btc_tx_material(
             "nonce": 0,
             "expiry": base["expiry"],
         }
-        new_state_commitment = packed_hash("NovaBtcTransactionCommitmentStateV0", pack_btc_tx_state_commitment(new_cell))
+        new_state_commitment = data_packed_hash("NovaBtcTransactionCommitmentStateV0", pack_btc_tx_state_commitment(new_cell))
         receipt_data = b""
     elif op == OP_BTC_COMMIT_TRANSACTION:
         if old_cell is None:
@@ -1487,7 +1491,7 @@ def build_btc_tx_material(
         transition_commitment_hash = (
             ckb_hash(b"NovaSeal BTC transaction mismatched transition") if transition_hash_mismatch else ckb_hash(new_state_hash)
         )
-        btc_tx_commitment_hash = packed_hash(
+        btc_tx_commitment_hash = data_packed_hash(
             "BtcTransactionPublicCommitmentV0",
             pack_btc_tx_public_commitment(
                 {
@@ -1499,7 +1503,7 @@ def build_btc_tx_material(
                 }
             ),
         )
-        old_state_commitment = packed_hash("NovaBtcTransactionCommitmentStateV0", pack_btc_tx_state_commitment(old_cell))
+        old_state_commitment = data_packed_hash("NovaBtcTransactionCommitmentStateV0", pack_btc_tx_state_commitment(old_cell))
         new_cell = {
             "version": BTC_TX_COMMITMENT_VERSION,
             "seal_id": old_cell["seal_id"],
@@ -1512,7 +1516,7 @@ def build_btc_tx_material(
             "nonce": new_nonce,
             "expiry": old_cell["expiry"],
         }
-        new_state_commitment = packed_hash("NovaBtcTransactionCommitmentStateV0", pack_btc_tx_state_commitment(new_cell))
+        new_state_commitment = data_packed_hash("NovaBtcTransactionCommitmentStateV0", pack_btc_tx_state_commitment(new_cell))
         receipt_commitment = {
             "action": OP_BTC_COMMIT_TRANSACTION,
             "seal_id": old_cell["seal_id"],
@@ -1554,10 +1558,10 @@ def build_btc_tx_material(
         "payout_commitment_hash": payout_commitment_hash,
     }
     core_data = pack_btc_tx_intent_core(core)
-    intent_core_hash = packed_hash("NovaBtcTransactionCommitmentIntentCoreV0", core_data)
+    intent_core_hash = data_packed_hash("NovaBtcTransactionCommitmentIntentCoreV0", core_data)
     if op == OP_BTC_COMMIT_TRANSACTION:
         receipt_commitment["intent_core_hash"] = intent_core_hash
-        expected_receipt_hash = packed_hash(
+        expected_receipt_hash = data_packed_hash(
             "NovaBtcTransactionCommitmentReceiptCommitmentV0",
             pack_btc_tx_receipt_commitment(receipt_commitment),
         )
@@ -1575,7 +1579,7 @@ def build_btc_tx_material(
         payout_commitment_hash=payout_commitment_hash,
     )
     signed_intent = pack_btc_tx_signed_intent(core_data, canonical_hash, expected_receipt_hash)
-    signed_intent_hash = packed_hash("NovaBtcTransactionCommitmentSignedIntentV0", signed_intent)
+    signed_intent_hash = data_packed_hash("NovaBtcTransactionCommitmentSignedIntentV0", signed_intent)
     sig_payload = bytearray(signature_payload(TEST_SECRET_KEY, signed_intent_hash, TEST_AUX_RAND))
     if mutate_signature:
         sig_payload[-1] ^= 1
@@ -1893,7 +1897,7 @@ def build_btc_utxo_material(
 ) -> dict[str, Any]:
     payout_commitment_hash = ZERO_HASH
     btc_txid = ckb_hash(b"NovaSeal mismatched UTXO txid") if utxo_commitment_mismatch else base["btc_txid"]
-    sealed_utxo_commitment_hash = packed_hash(
+    sealed_utxo_commitment_hash = data_packed_hash(
         "BtcUtxoCommitmentV0",
         pack_btc_utxo_commitment(
             {
@@ -1930,7 +1934,7 @@ def build_btc_utxo_material(
             "nonce": 0,
             "expiry": base["expiry"],
         }
-        new_state_commitment = packed_hash("NovaBtcUtxoSealStateV0", pack_btc_utxo_state_commitment(new_cell))
+        new_state_commitment = data_packed_hash("NovaBtcUtxoSealStateV0", pack_btc_utxo_state_commitment(new_cell))
         receipt_data = b""
     elif op == OP_BTC_UTXO_CLOSE:
         if old_cell is None:
@@ -1945,7 +1949,7 @@ def build_btc_utxo_material(
         spend_wtxid = base["spend_wtxid"]
         spend_input_index = base["spend_input_index"]
         transition_commitment_hash = ckb_hash(new_state_hash)
-        closure_commitment_hash = packed_hash(
+        closure_commitment_hash = data_packed_hash(
             "BtcUtxoClosureCommitmentV0",
             pack_btc_utxo_closure_commitment(
                 {
@@ -1958,7 +1962,7 @@ def build_btc_utxo_material(
                 }
             ),
         )
-        old_state_commitment = packed_hash("NovaBtcUtxoSealStateV0", pack_btc_utxo_state_commitment(old_cell))
+        old_state_commitment = data_packed_hash("NovaBtcUtxoSealStateV0", pack_btc_utxo_state_commitment(old_cell))
         new_cell = {
             "version": BTC_UTXO_SEAL_VERSION,
             "seal_id": old_cell["seal_id"],
@@ -2016,10 +2020,10 @@ def build_btc_utxo_material(
         "payout_commitment_hash": payout_commitment_hash,
     }
     core_data = pack_btc_utxo_intent_core(core)
-    intent_core_hash = packed_hash("NovaBtcUtxoSealIntentCoreV0", core_data)
+    intent_core_hash = data_packed_hash("NovaBtcUtxoSealIntentCoreV0", core_data)
     if op == OP_BTC_UTXO_CLOSE:
         receipt_commitment["intent_core_hash"] = intent_core_hash
-        expected_receipt_hash = packed_hash(
+        expected_receipt_hash = data_packed_hash(
             "NovaBtcUtxoSealReceiptCommitmentV0",
             pack_btc_utxo_receipt_commitment(receipt_commitment),
         )
@@ -2037,7 +2041,7 @@ def build_btc_utxo_material(
         payout_commitment_hash=payout_commitment_hash,
     )
     signed_intent = pack_btc_utxo_signed_intent(core_data, canonical_hash, expected_receipt_hash)
-    signed_intent_hash = packed_hash(
+    signed_intent_hash = data_packed_hash(
         "NovaBtcUtxoSealSigningDigestV0",
         pack_btc_utxo_signing_digest(intent_core_hash, canonical_hash, expected_receipt_hash),
     )
@@ -2311,7 +2315,7 @@ def dual_seal_base_state(label: str) -> dict[str, Any]:
     sealed_btc_vout_index = 1
     sealed_btc_amount_sats = 350_000
     script_pubkey_hash = ckb_hash(f"NovaSeal dual sealed BTC script pubkey {label}".encode("ascii"))
-    sealed_utxo_commitment_hash = packed_hash(
+    sealed_utxo_commitment_hash = data_packed_hash(
         "BtcUtxoCommitmentV0",
         pack_btc_utxo_commitment(
             {
@@ -2405,7 +2409,7 @@ def build_dual_seal_material(
             "maturity_timepoint": base["maturity_timepoint"],
             "expiry": base["expiry"],
         }
-        new_state_commitment = packed_hash("NovaDualSealStateV0", pack_dual_seal_state_commitment(new_cell))
+        new_state_commitment = data_packed_hash("NovaDualSealStateV0", pack_dual_seal_state_commitment(new_cell))
         receipt_data = b""
     elif op == OP_DUAL_SEAL_FINALIZE:
         if old_cell is None:
@@ -2417,8 +2421,8 @@ def build_dual_seal_material(
         old_ckb_state_hash = old_cell["ckb_state_hash"]
         new_ckb_state_hash = base["final_ckb_state_hash"]
         btc_closure_commitment_hash = ZERO_HASH if zero_btc_closure else base["btc_closure_commitment_hash"]
-        old_state_commitment = packed_hash("NovaDualSealStateV0", pack_dual_seal_state_commitment(old_cell))
-        finality_commitment_hash = packed_hash(
+        old_state_commitment = data_packed_hash("NovaDualSealStateV0", pack_dual_seal_state_commitment(old_cell))
+        finality_commitment_hash = data_packed_hash(
             "DualSealFinalityCommitmentV0",
             pack_dual_seal_finality_commitment(
                 {
@@ -2474,10 +2478,10 @@ def build_dual_seal_material(
         "payout_commitment_hash": payout_commitment_hash,
     }
     core_data = pack_dual_seal_intent_core(core)
-    intent_core_hash = packed_hash("NovaDualSealIntentCoreV0", core_data)
+    intent_core_hash = data_packed_hash("NovaDualSealIntentCoreV0", core_data)
     if op == OP_DUAL_SEAL_FINALIZE:
         receipt_commitment["intent_core_hash"] = intent_core_hash
-        expected_receipt_hash = packed_hash(
+        expected_receipt_hash = data_packed_hash(
             "NovaDualSealReceiptCommitmentV0",
             pack_dual_seal_receipt_commitment(receipt_commitment),
         )
@@ -2494,7 +2498,7 @@ def build_dual_seal_material(
         payout_commitment_hash=payout_commitment_hash,
     )
     signed_intent = pack_dual_seal_signed_intent(core_data, canonical_hash, expected_receipt_hash)
-    signed_intent_hash = packed_hash("NovaDualSealSignedIntentV0", signed_intent)
+    signed_intent_hash = data_packed_hash("NovaDualSealSignedIntentV0", signed_intent)
     btc_owner_sig_payload = bytearray(signature_payload(TEST_SECRET_KEY, signed_intent_hash, TEST_AUX_RAND))
     ckb_sig_payload = bytearray(signature_payload(HOLDER_SECRET_KEY, signed_intent_hash, HOLDER_AUX_RAND))
     if mutate_btc_owner_signature:
@@ -2830,7 +2834,7 @@ def build_fiber_material(
             "nonce": 0,
             "expiry": base["expiry"],
         }
-        new_state_commitment = packed_hash("NovaFiberCandidateStateV0", pack_fiber_state_commitment(new_cell))
+        new_state_commitment = data_packed_hash("NovaFiberCandidateStateV0", pack_fiber_state_commitment(new_cell))
         receipt_data = b""
     elif op == OP_FIBER_SETTLE:
         if old_cell is None:
@@ -2844,7 +2848,7 @@ def build_fiber_material(
         new_status = FIBER_STATUS_SETTLED
         old_nonce = old_cell["nonce"]
         new_nonce = old_nonce + 1
-        old_state_commitment = packed_hash("NovaFiberCandidateStateV0", pack_fiber_state_commitment(old_cell))
+        old_state_commitment = data_packed_hash("NovaFiberCandidateStateV0", pack_fiber_state_commitment(old_cell))
         new_cell = {
             "version": FIBER_CANDIDATE_VERSION,
             "candidate_id": old_cell["candidate_id"],
@@ -2857,7 +2861,7 @@ def build_fiber_material(
             "nonce": new_nonce,
             "expiry": old_cell["expiry"],
         }
-        new_state_commitment = packed_hash("NovaFiberCandidateStateV0", pack_fiber_state_commitment(new_cell))
+        new_state_commitment = data_packed_hash("NovaFiberCandidateStateV0", pack_fiber_state_commitment(new_cell))
         receipt_commitment = {
             "action": OP_FIBER_SETTLE,
             "candidate_id": old_cell["candidate_id"],
@@ -2900,10 +2904,10 @@ def build_fiber_material(
         "payout_commitment_hash": payout_commitment_hash,
     }
     core_data = pack_fiber_intent_core(core)
-    intent_core_hash = packed_hash("NovaFiberCandidateIntentCoreV0", core_data)
+    intent_core_hash = data_packed_hash("NovaFiberCandidateIntentCoreV0", core_data)
     if op == OP_FIBER_SETTLE:
         receipt_commitment["intent_core_hash"] = intent_core_hash
-        expected_receipt_hash = packed_hash(
+        expected_receipt_hash = data_packed_hash(
             "NovaFiberCandidateReceiptCommitmentV0",
             pack_fiber_receipt_commitment(receipt_commitment),
         )
@@ -2921,7 +2925,7 @@ def build_fiber_material(
         payout_commitment_hash=payout_commitment_hash,
     )
     signed_intent = pack_fiber_signed_intent(core_data, canonical_hash, expected_receipt_hash)
-    signed_intent_hash = packed_hash("NovaFiberCandidateSignedIntentV0", signed_intent)
+    signed_intent_hash = data_packed_hash("NovaFiberCandidateSignedIntentV0", signed_intent)
     sig_payload = bytearray(signature_payload(TEST_SECRET_KEY, signed_intent_hash, TEST_AUX_RAND))
     if mutate_signature:
         sig_payload[-1] ^= 1
@@ -2929,7 +2933,7 @@ def build_fiber_material(
     receipt = None
     settlement_commitment_hash = ZERO_HASH
     if op == OP_FIBER_SETTLE:
-        settlement_commitment_hash = packed_hash(
+        settlement_commitment_hash = data_packed_hash(
             "FiberCandidateSettlementCommitmentV0",
             pack_fiber_settlement_commitment(
                 {
@@ -3157,7 +3161,7 @@ def run_fungible_xudt_live(args: argparse.Namespace, contract: ReportContract) -
             "xUDT wrong holder signature transfer",
             expected_source="Inputs[0].Type",
             expected_data_hash=lifecycle["data_hash"],
-            expected_error_code=5,
+            expected_error_code=BIP340_CHILD_REJECTED_ERROR_CODE,
         )
 
         stage = "negative transfer amount mismatch"
@@ -3250,7 +3254,7 @@ def run_fungible_xudt_live(args: argparse.Namespace, contract: ReportContract) -
             "xUDT wrong holder signature settle",
             expected_source="Inputs[0].Type",
             expected_data_hash=lifecycle["data_hash"],
-            expected_error_code=5,
+            expected_error_code=BIP340_CHILD_REJECTED_ERROR_CODE,
         )
         post_negative_state_live = devnet.assert_live_cell(
             receiver_ref["tx_hash"],
@@ -3454,7 +3458,7 @@ def run_rwa_receipt_live(args: argparse.Namespace, contract: ReportContract) -> 
             "RWA wrong holder claim",
             expected_source="Inputs[0].Type",
             expected_data_hash=lifecycle["data_hash"],
-            expected_error_code=5,
+            expected_error_code=BIP340_CHILD_REJECTED_ERROR_CODE,
         )
         post_claim_negative_live = devnet.assert_live_cell(
             materialized_ref["tx_hash"],
@@ -3524,7 +3528,7 @@ def run_rwa_receipt_live(args: argparse.Namespace, contract: ReportContract) -> 
             "RWA wrong issuer settlement",
             expected_source="Inputs[0].Type",
             expected_data_hash=lifecycle["data_hash"],
-            expected_error_code=5,
+            expected_error_code=BIP340_CHILD_REJECTED_ERROR_CODE,
         )
 
         stage = "negative settlement amount mutation"
@@ -3746,7 +3750,7 @@ def run_btc_transaction_commitment_live(args: argparse.Namespace, contract: Repo
             "BTC transaction wrong committer signature",
             expected_source="Inputs[0].Type",
             expected_data_hash=lifecycle["data_hash"],
-            expected_error_code=5,
+            expected_error_code=BIP340_CHILD_REJECTED_ERROR_CODE,
         )
 
         stage = "negative zero BTC txid"
@@ -4010,7 +4014,7 @@ def run_btc_utxo_seal_live(args: argparse.Namespace, contract: ReportContract) -
             "BTC UTXO wrong owner signature",
             expected_source="Inputs[0].Type",
             expected_data_hash=lifecycle["data_hash"],
-            expected_error_code=5,
+            expected_error_code=BIP340_CHILD_REJECTED_ERROR_CODE,
         )
 
         stage = "negative UTXO commitment mismatch"
@@ -4278,7 +4282,7 @@ def run_dual_seal_live(args: argparse.Namespace, contract: ReportContract) -> di
             "dual-seal wrong BTC owner signature",
             expected_source="Inputs[0].Type",
             expected_data_hash=lifecycle["data_hash"],
-            expected_error_code=5,
+            expected_error_code=BIP340_CHILD_REJECTED_ERROR_CODE,
         )
 
         stage = "negative wrong CKB authority signature"
@@ -4302,7 +4306,7 @@ def run_dual_seal_live(args: argparse.Namespace, contract: ReportContract) -> di
             "dual-seal wrong CKB authority signature",
             expected_source="Inputs[0].Type",
             expected_data_hash=lifecycle["data_hash"],
-            expected_error_code=5,
+            expected_error_code=BIP340_CHILD_REJECTED_ERROR_CODE,
         )
 
         stage = "negative missing BTC closure"
@@ -4530,7 +4534,7 @@ def run_fiber_candidate_live(args: argparse.Namespace, contract: ReportContract)
             "Fiber wrong operator signature",
             expected_source="Inputs[0].Type",
             expected_data_hash=lifecycle["data_hash"],
-            expected_error_code=5,
+            expected_error_code=BIP340_CHILD_REJECTED_ERROR_CODE,
         )
 
         stage = "negative balance replay"

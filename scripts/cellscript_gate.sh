@@ -45,8 +45,19 @@ check_trailing_whitespace() {
         tracked_rust_files+=("$tracked_rust_file")
     done < <(git ls-files '*.rs')
 
+    local tracked_website_files=()
+    local tracked_website_file
+    while IFS= read -r tracked_website_file; do
+        case "$tracked_website_file" in
+            website/*.json|website/*.mjs|website/**/*.astro|website/**/*.css|website/**/*.js|website/**/*.json|website/**/*.py|website/**/*.ts)
+                tracked_website_files+=("$tracked_website_file")
+                ;;
+        esac
+    done < <(git ls-files website)
+
     local files=(
         ".github/workflows/ci.yml"
+        ".github/workflows/website-build.yml"
         "Cargo.toml"
         "CODING_STYLE.md"
         "README.md"
@@ -85,9 +96,9 @@ check_trailing_whitespace() {
         "scripts/validate_cellscript_tooling_release.py"
         "scripts/validate_ckb_cellscript_production_evidence.py"
         "tests/syntax_combo/matrix.toml"
-        "tests/syntax_combo/seeds/legacy-transfer-capability.cell"
         "tests/syntax_combo/seeds/require-block-lifecycle.cell"
         "${tracked_rust_files[@]}"
+        "${tracked_website_files[@]}"
     )
     if ((${#files[@]} > 0)) && rg -n '[ \t]+$' "${files[@]}"; then
         printf '\nTrailing whitespace found in tracked CellScript files.\n' >&2
@@ -338,6 +349,7 @@ check_ckb_release_docs() {
         "primitive-strict original bundled-example coverage"
         "builder-backed action runs"
         "source-bound acceptance provenance"
+        "exact-artifact build reports"
         "occupied-capacity evidence"
         "passed final production hardening gate"
     )
@@ -359,10 +371,14 @@ check_ckb_acceptance_boundaries() {
         'scripts/ckb_cellscript_acceptance.sh::strict_original_ckb_compile_policy_fail_closed'
         'scripts/ckb_cellscript_acceptance.sh::strict_original_ckb_compile_unexpected_failures'
         'scripts/ckb_cellscript_acceptance.sh::SOURCE_PROVENANCE_SCHEMA'
+        'scripts/ckb_cellscript_acceptance.sh::BUILD_REPORT_SCHEMA'
         'scripts/ckb_cellscript_acceptance.sh::tracked_source_sha256'
+        'scripts/ckb_cellscript_acceptance.sh::cellscript_build_reports'
+        'scripts/ckb_cellscript_acceptance.sh::live_code_cell_data_hash_matches_artifact'
         'scripts/ckb_cellscript_acceptance.sh::builder_backed_action_count'
         'scripts/ckb_cellscript_acceptance.sh::final_production_hardening_gate'
         'scripts/validate_ckb_cellscript_production_evidence.py::validate_source_provenance'
+        'scripts/validate_ckb_cellscript_production_evidence.py::validate_build_reports'
         'scripts/validate_ckb_cellscript_production_evidence.py::tracked_source_sha256'
         'scripts/validate_ckb_cellscript_production_evidence.py::valid CKB CellScript'
         'scripts/validate_cellscript_tooling_release.py::valid CellScript tooling release boundary'
@@ -401,14 +417,14 @@ check_novaseal_acceptance_boundaries() {
         'scripts/novaseal_devnet_stateful_acceptance.sh::certifier_status=%s'
         'scripts/novaseal_devnet_stateful_acceptance.sh::certifier_status=not_run'
         'scripts/novaseal_devnet_stateful_acceptance.sh::local_devnet_passed_external_endpoint_required'
-        'scripts/novaseal_devnet_stateful_acceptance.sh::cert_status=1'
+        'scripts/novaseal_devnet_stateful_acceptance.sh::cert_status=$?'
         'proposals/novaseal/DEVNET_FULL_ACCEPTANCE_RUNBOOK.md::external_endpoint_status=external_required'
         'proposals/novaseal/DEVNET_FULL_ACCEPTANCE_RUNBOOK.md::acceptance_blockers=0'
-        'proposals/novaseal/DEVNET_FULL_ACCEPTANCE_RUNBOOK.md::missing public BTC SPV evidence'
+        'proposals/novaseal/DEVNET_FULL_ACCEPTANCE_RUNBOOK.md::Missing public BTC SPV evidence'
         'proposals/novaseal/v0-mvp-skeleton/docs/AUDIT_STATUS.md::external_endpoint_status=external_required'
         'proposals/novaseal/v0-mvp-skeleton/docs/AUDIT_STATUS.md::acceptance_blockers=0'
-        'tests/novaseal_sources.rs::EXPECTED_TRACKED_NOVASEAL_CELL_SOURCES'
-        'tests/novaseal_sources.rs::all_novaseal_executable_entries_compile_for_ckb_profile'
+        'src/cli/novaseal_certification.rs::source_tree_expected_files_and_provenance_reject_symlink_escape'
+        'src/cli/novaseal_certification.rs::source_tree_invalid_paths_empty'
     )
     local item file pattern
     for item in "${required[@]}"; do
@@ -495,6 +511,26 @@ check_script_syntax() {
     fi
 }
 
+run_website_build_check() {
+    require_cmd npm
+    require_cmd python3
+
+    if [[ ! -d website/node_modules ]]; then
+        run npm --prefix website ci
+    fi
+    run npm --prefix website run prepare:registry
+
+    local registry_status
+    registry_status="$(git status --porcelain -- website/src/data/registry-packages.json)"
+    if [[ -n "$registry_status" ]]; then
+        printf '\nwebsite registry data is stale. Run `npm --prefix website run prepare:registry` and commit the generated data.\n' >&2
+        printf '%s\n' "$registry_status" >&2
+        exit 1
+    fi
+
+    run npm --prefix website run build
+}
+
 check_ckb_tx_measure_tool() {
     local ckb_repo="$ROOT_DIR/../ckb"
     local toolchain=""
@@ -554,6 +590,7 @@ run_ci_gate() {
     require_cmd cargo
     require_cmd python3
     require_cmd rg
+    require_cmd npm
 
     printf '{"status":"not-generated","reason":"test suite did not reach backend shape report generation"}\n' >"$CELLSCRIPT_BACKEND_SHAPE_REPORT"
     run cargo fmt --all --check
@@ -562,6 +599,7 @@ run_ci_gate() {
     run ./scripts/cellscript_strict_backend_audit.sh ci
     check_package_contents
     run cargo package --locked --offline --allow-dirty
+    run_website_build_check
     check_script_syntax
     run git diff --check
     check_forbidden_tracked_files
@@ -635,7 +673,7 @@ case "$MODE" in
         run_release_quick_gate "$@"
         ;;
     *)
-        printf 'usage: %s [dev|ci|backend|release]\n' "$0" >&2
+        printf 'usage: %s [dev|ci|backend|release|release-quick]\n' "$0" >&2
         exit 2
         ;;
 esac

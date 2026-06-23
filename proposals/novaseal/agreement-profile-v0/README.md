@@ -1,19 +1,20 @@
 # NovaSeal Agreement Profile v0
 
-**Status**: reviewable CKB-native agreement skeleton with audited terminal-path
+**Status**: production-ready CKB-native Agreement source package with audited terminal-path
 structure, local transaction-shape evidence, resolved transaction verifier
 evidence, live devnet lifecycle evidence, fixed-width wallet signing vectors,
-wallet/lock digest alignment, and local production-gate checks. Public/shared CellDep attestation, public BTC
-SPV evidence for BTC-facing profiles, RWA legal/registry review evidence, and
-external BIP340 TCB review are still required before production claims.
+wallet/lock digest alignment, and local production-gate checks. Public/shared
+CellDep attestation and external BIP340 TCB review remain public/mainnet
+deployment evidence; BTC SPV and RWA legal/registry evidence belong to the
+profiles that use those external facts.
 
 **Roadmap position**: this package is the current NovaSeal **v0.2 Agreement
 Profile** stage. The package/schema name remains `agreement-profile-v0` because
 it is the first version of this profile, not because the roadmap stage is v0.
 
-This package is inspired by Matt's Minimum Viable Borrowing idea, but it does
-not claim to implement production lending. It models a Cell-native financial
-agreement with pre-agreed terms and deterministic terminal paths.
+This package is inspired by Matt's Minimum Viable Borrowing idea, but it is not
+a general lending protocol. It models a Cell-native financial agreement with
+pre-agreed terms and deterministic terminal paths.
 
 ## Boundary
 

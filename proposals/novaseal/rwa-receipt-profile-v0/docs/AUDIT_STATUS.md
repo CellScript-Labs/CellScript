@@ -19,8 +19,8 @@ The fixtures in `fixtures/` are review targets and negative-case labels. They
 are not the live proof themselves. Live stateful evidence is recorded in
 `target/novaseal-rwa-receipt-devnet-stateful-live.json`.
 
-## Production Statement Boundary
+## Public/Mainnet Statement Boundary
 
-Production claims remain blocked by missing public/shared CellDep attestation,
-missing external BIP340 TCB review, and missing external legal/registry review.
-Local RWA stateful acceptance is covered by the live devnet runner.
+Source-package readiness is covered by the live devnet runner. Public/mainnet
+RWA release claims still require public/shared CellDep attestation, external
+BIP340 TCB review, and external legal/registry review.

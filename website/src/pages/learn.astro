@@ -1,0 +1,23 @@
+---
+// Learn is now the default route at "/". This page is a permanent
+// redirect for any bookmarks or links that still point to /learn.
+// Static-site safe: a meta refresh + canonical (no server redirect
+// available in the static build output).
+const url = new URL("/", Astro.site ?? Astro.url);
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="refresh" content="0; url=/" />
+    <link rel="canonical" href={url.href} />
+    <title>CellScript — moved</title>
+    <script is:inline>
+      // Immediate JS redirect for browsers that honour it faster than meta refresh.
+      window.location.replace("/");
+    </script>
+  </head>
+  <body>
+    <p>Moved to <a href="/">CellScript home</a>.</p>
+  </body>
+</html>

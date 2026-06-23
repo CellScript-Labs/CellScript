@@ -177,8 +177,8 @@ struct NativeCkbPayoutV0 {
     nonce: u64,
 }
 
-action nova_agreement_lifecycle(witness op: u8, witness terms: NovaAgreementTermsV0, witness active: NovaAgreementCellV0, witness intent: NovaAgreementSignedIntentV0, witness borrower_sig: AgreementSignaturePayload, witness lender_sig: AgreementSignaturePayload) -> u64
-where
+action nova_agreement_lifecycle(witness op: u8, witness terms: NovaAgreementTermsV0, witness active: NovaAgreementCellV0, witness intent: NovaAgreementSignedIntentV0, witness borrower_sig: AgreementSignaturePayload, witness lender_sig: AgreementSignaturePayload) -> u64 {
+    verification
     let now = env::current_timepoint()
 
     if (op == PATH_ORIGINATE) {
@@ -196,9 +196,9 @@ where
             terms_hash: terms.terms_hash,
             nonce: 0
         }
-        let payout_commitment_hash = hash_blake2b_packed(payout)
-        let intent_core_hash = hash_blake2b_packed(intent.core)
-        let signed_intent_hash = hash_blake2b_packed(intent)
+        let payout_commitment_hash = ckb::hash_data_packed(payout)
+        let intent_core_hash = ckb::hash_data_packed(intent.core)
+        let signed_intent_hash = ckb::hash_data_packed(intent)
         let receipt_commitment = NovaAgreementReceiptCommitmentV0 {
             action: PATH_ORIGINATE,
             agreement_id: terms.agreement_id,
@@ -213,8 +213,8 @@ where
             intent_core_hash: intent_core_hash,
             payout_commitment_hash: payout_commitment_hash
         }
-        let materialized_receipt_hash = hash_blake2b_packed(receipt_commitment)
-        let canonical_envelope_hash = hash_blake2b_packed(NovaSealCanonicalEnvelopeV0 {
+        let materialized_receipt_hash = ckb::hash_data_packed(receipt_commitment)
+        let canonical_envelope_hash = ckb::hash_data_packed(NovaSealCanonicalEnvelopeV0 {
             profile_id: terms.agreement_id,
             policy_hash: terms.terms_hash,
             action: PATH_ORIGINATE,
@@ -250,59 +250,59 @@ where
             timepoint: now
         }
 
-        assert(terms.version == AGREEMENT_VERSION, "terms version")
-        assert(terms.collateral_asset_kind == ASSET_KIND_CKB, "collateral asset")
-        assert(terms.principal_asset_kind == ASSET_KIND_CKB, "principal asset")
-        assert(terms.collateral_asset_hash == Hash::zero(), "collateral asset hash")
-        assert(terms.principal_asset_hash == Hash::zero(), "principal asset hash")
-        assert(terms.collateral_amount > 0, "collateral amount")
-        assert(terms.principal_amount > 0, "principal amount")
-        assert(terms.start_timepoint <= now, "start timepoint")
-        assert(now <= terms.expiry_timepoint, "expiry")
-        assert(terms.start_timepoint < terms.expiry_timepoint, "term order")
-        assert(terms.early_close_policy == EARLY_CLOSE_FIXED_FEE, "early close policy")
-        assert(terms.principal_amount <= U64_MAX - NATIVE_CKB_PAYOUT_OCCUPIED_CAPACITY, "principal capacity overflow")
-        assert(active.version == AGREEMENT_VERSION, "agreement version")
-        assert(active.agreement_id == terms.agreement_id, "agreement id")
-        assert(active.terms_hash == terms.terms_hash, "agreement terms hash")
-        assert(active.borrower_authority_hash == terms.borrower_authority_hash, "borrower authority")
-        assert(active.lender_authority_hash == terms.lender_authority_hash, "lender authority")
-        assert(active.collateral_asset_kind == ASSET_KIND_CKB, "agreement collateral asset")
-        assert(active.collateral_asset_hash == Hash::zero(), "agreement collateral hash")
-        assert(active.collateral_amount == terms.collateral_amount, "agreement collateral amount")
-        assert(active.principal_asset_kind == ASSET_KIND_CKB, "agreement principal asset")
-        assert(active.principal_asset_hash == Hash::zero(), "agreement principal hash")
-        assert(active.principal_amount == terms.principal_amount, "agreement principal amount")
-        assert(active.fixed_fee_amount == terms.fixed_fee_amount, "agreement fixed fee")
-        assert(active.expiry_timepoint == terms.expiry_timepoint, "agreement expiry")
-        assert(active.status == STATUS_ACTIVE, "agreement status")
-        assert(active.latest_receipt_hash == materialized_receipt_hash, "agreement latest receipt")
-        assert(active.nonce == 0, "agreement nonce")
-        assert(intent.core.action == PATH_ORIGINATE, "intent action")
-        assert(intent.core.agreement_id == terms.agreement_id, "intent agreement")
-        assert(intent.core.terms_hash == terms.terms_hash, "intent terms")
-        assert(intent.core.borrower_authority_hash == terms.borrower_authority_hash, "intent borrower")
-        assert(intent.core.lender_authority_hash == terms.lender_authority_hash, "intent lender")
-        assert(intent.core.old_status == STATUS_OFFERED, "intent old status")
-        assert(intent.core.new_status == STATUS_ACTIVE, "intent new status")
-        assert(intent.core.old_nonce == 0, "intent old nonce")
-        assert(intent.core.new_nonce == 0, "intent new nonce")
-        assert(intent.core.terminal_amount == terms.principal_amount, "intent amount")
-        assert(intent.core.payout_commitment_hash == payout_commitment_hash, "intent payout")
-        assert(intent.core.expiry_timepoint == terms.expiry_timepoint, "intent expiry")
-        assert(intent.canonical_envelope_hash == canonical_envelope_hash, "canonical envelope")
-        assert(intent.expected_receipt_hash == materialized_receipt_hash, "expected receipt")
+        require terms.version == AGREEMENT_VERSION
+        require terms.collateral_asset_kind == ASSET_KIND_CKB
+        require terms.principal_asset_kind == ASSET_KIND_CKB
+        require terms.collateral_asset_hash == Hash::zero()
+        require terms.principal_asset_hash == Hash::zero()
+        require terms.collateral_amount > 0
+        require terms.principal_amount > 0
+        require terms.start_timepoint <= now
+        require now <= terms.expiry_timepoint
+        require terms.start_timepoint < terms.expiry_timepoint
+        require terms.early_close_policy == EARLY_CLOSE_FIXED_FEE
+        require terms.principal_amount <= U64_MAX - NATIVE_CKB_PAYOUT_OCCUPIED_CAPACITY
+        require active.version == AGREEMENT_VERSION
+        require active.agreement_id == terms.agreement_id
+        require active.terms_hash == terms.terms_hash
+        require active.borrower_authority_hash == terms.borrower_authority_hash
+        require active.lender_authority_hash == terms.lender_authority_hash
+        require active.collateral_asset_kind == ASSET_KIND_CKB
+        require active.collateral_asset_hash == Hash::zero()
+        require active.collateral_amount == terms.collateral_amount
+        require active.principal_asset_kind == ASSET_KIND_CKB
+        require active.principal_asset_hash == Hash::zero()
+        require active.principal_amount == terms.principal_amount
+        require active.fixed_fee_amount == terms.fixed_fee_amount
+        require active.expiry_timepoint == terms.expiry_timepoint
+        require active.status == STATUS_ACTIVE
+        require active.latest_receipt_hash == materialized_receipt_hash
+        require active.nonce == 0
+        require intent.core.action == PATH_ORIGINATE
+        require intent.core.agreement_id == terms.agreement_id
+        require intent.core.terms_hash == terms.terms_hash
+        require intent.core.borrower_authority_hash == terms.borrower_authority_hash
+        require intent.core.lender_authority_hash == terms.lender_authority_hash
+        require intent.core.old_status == STATUS_OFFERED
+        require intent.core.new_status == STATUS_ACTIVE
+        require intent.core.old_nonce == 0
+        require intent.core.new_nonce == 0
+        require intent.core.terminal_amount == terms.principal_amount
+        require intent.core.payout_commitment_hash == payout_commitment_hash
+        require intent.core.expiry_timepoint == terms.expiry_timepoint
+        require intent.canonical_envelope_hash == canonical_envelope_hash
+        require intent.expected_receipt_hash == materialized_receipt_hash
         // In this harness profile the authority identifier is the same 32-byte
         // value used for BIP340 pubkeys and payout lock args.
-        assert(borrower_sig.pubkey == terms.borrower_authority_hash.0, "borrower pubkey")
-        assert(lender_sig.pubkey == terms.lender_authority_hash.0, "lender pubkey")
-        assert(ckb::cell_data_hash(source::group_output(0)) == ckb::hash_data_packed(active), "agreement output")
+        require borrower_sig.pubkey == terms.borrower_authority_hash.0
+        require lender_sig.pubkey == terms.lender_authority_hash.0
+        require ckb::cell_data_hash(source::group_output(0)) == ckb::hash_data_packed(active)
         // The typed payout data and the actual output capacity/lock args are
         // checked together, so the receipt says what the transaction does.
-        assert(ckb::cell_data_hash(source::output(1)) == ckb::hash_data_packed(payout), "principal payout output")
-        assert(ckb::cell_capacity(source::output(1)) >= NATIVE_CKB_PAYOUT_OCCUPIED_CAPACITY + terms.principal_amount, "principal capacity")
-        assert(ckb::cell_lock_args32(source::output(1)) == terms.borrower_authority_hash, "principal lock")
-        assert(ckb::cell_data_hash(source::output(2)) == ckb::hash_data_packed(receipt), "receipt output")
+        require ckb::cell_data_hash(source::output(1)) == ckb::hash_data_packed(payout)
+        require ckb::cell_capacity(source::output(1)) >= NATIVE_CKB_PAYOUT_OCCUPIED_CAPACITY + terms.principal_amount
+        require ckb::cell_lock_args32(source::output(1)) == terms.borrower_authority_hash
+        require ckb::cell_data_hash(source::output(2)) == ckb::hash_data_packed(receipt)
 
         verifier::btc::bip340::require_signature(signed_intent_hash, borrower_sig.pubkey, borrower_sig.signature)
         verifier::btc::bip340::require_signature(signed_intent_hash, lender_sig.pubkey, lender_sig.signature)
@@ -311,11 +311,11 @@ where
             // Borrower closes before expiry. The fixed fee exists only on this
             // repayment path; the transaction must provide the CKB paid to the
             // lender and the collateral-return output for the borrower.
-            assert(active.nonce < U64_MAX, "nonce overflow")
-            assert(active.fixed_fee_amount <= U64_MAX - active.principal_amount, "repayment overflow")
+            require active.nonce < U64_MAX
+            require active.fixed_fee_amount <= U64_MAX - active.principal_amount
             let repayment_amount = active.principal_amount + active.fixed_fee_amount
-            assert(repayment_amount <= U64_MAX - NATIVE_CKB_PAYOUT_OCCUPIED_CAPACITY, "repayment capacity overflow")
-            assert(active.collateral_amount <= U64_MAX - NATIVE_CKB_PAYOUT_OCCUPIED_CAPACITY, "collateral capacity overflow")
+            require repayment_amount <= U64_MAX - NATIVE_CKB_PAYOUT_OCCUPIED_CAPACITY
+            require active.collateral_amount <= U64_MAX - NATIVE_CKB_PAYOUT_OCCUPIED_CAPACITY
             let lender_payout = NativeCkbPayoutV0 {
                 action: PATH_REPAY_BEFORE_EXPIRY,
                 agreement_id: active.agreement_id,
@@ -338,12 +338,12 @@ where
                 terms_hash: active.terms_hash,
                 nonce: active.nonce + 1
             }
-            let payout_commitment_hash = hash_blake2b_packed(RepayPayoutCommitmentV0 {
-                lender_repayment_hash: hash_blake2b_packed(lender_payout),
-                borrower_collateral_return_hash: hash_blake2b_packed(borrower_payout)
+            let payout_commitment_hash = ckb::hash_data_packed(RepayPayoutCommitmentV0 {
+                lender_repayment_hash: ckb::hash_data_packed(lender_payout),
+                borrower_collateral_return_hash: ckb::hash_data_packed(borrower_payout)
             })
-            let intent_core_hash = hash_blake2b_packed(intent.core)
-            let signed_intent_hash = hash_blake2b_packed(intent)
+            let intent_core_hash = ckb::hash_data_packed(intent.core)
+            let signed_intent_hash = ckb::hash_data_packed(intent)
             let receipt_commitment = NovaAgreementReceiptCommitmentV0 {
                 action: PATH_REPAY_BEFORE_EXPIRY,
                 agreement_id: active.agreement_id,
@@ -358,8 +358,8 @@ where
                 intent_core_hash: intent_core_hash,
                 payout_commitment_hash: payout_commitment_hash
             }
-            let materialized_receipt_hash = hash_blake2b_packed(receipt_commitment)
-            let canonical_envelope_hash = hash_blake2b_packed(NovaSealCanonicalEnvelopeV0 {
+            let materialized_receipt_hash = ckb::hash_data_packed(receipt_commitment)
+            let canonical_envelope_hash = ckb::hash_data_packed(NovaSealCanonicalEnvelopeV0 {
                 profile_id: active.agreement_id,
                 policy_hash: active.terms_hash,
                 action: PATH_REPAY_BEFORE_EXPIRY,
@@ -413,54 +413,54 @@ where
                 timepoint: now
             }
 
-            assert(terms.version == AGREEMENT_VERSION, "terms version")
-            assert(terms.agreement_id == active.agreement_id, "terms agreement")
-            assert(terms.terms_hash == active.terms_hash, "terms hash")
-            assert(terms.borrower_authority_hash == active.borrower_authority_hash, "terms borrower")
-            assert(terms.lender_authority_hash == active.lender_authority_hash, "terms lender")
-            assert(active.version == AGREEMENT_VERSION, "active version")
-            assert(active.status == STATUS_ACTIVE, "active status")
-            assert(active.collateral_asset_kind == ASSET_KIND_CKB, "active collateral asset")
-            assert(active.principal_asset_kind == ASSET_KIND_CKB, "active principal asset")
-            assert(active.collateral_asset_hash == Hash::zero(), "active collateral hash")
-            assert(active.principal_asset_hash == Hash::zero(), "active principal hash")
-            assert(now <= active.expiry_timepoint, "repay expiry")
-            assert(intent.core.action == PATH_REPAY_BEFORE_EXPIRY, "intent action")
-            assert(intent.core.agreement_id == active.agreement_id, "intent agreement")
-            assert(intent.core.terms_hash == active.terms_hash, "intent terms")
-            assert(intent.core.borrower_authority_hash == active.borrower_authority_hash, "intent borrower")
-            assert(intent.core.lender_authority_hash == active.lender_authority_hash, "intent lender")
-            assert(intent.core.old_status == STATUS_ACTIVE, "intent old status")
-            assert(intent.core.new_status == STATUS_REPAID, "intent new status")
-            assert(intent.core.old_nonce == active.nonce, "intent old nonce")
-            assert(intent.core.new_nonce == active.nonce + 1, "intent new nonce")
-            assert(intent.core.terminal_amount == repayment_amount, "intent amount")
-            assert(intent.core.payout_commitment_hash == payout_commitment_hash, "intent payout")
-            assert(intent.core.expiry_timepoint == active.expiry_timepoint, "intent expiry")
-            assert(intent.canonical_envelope_hash == canonical_envelope_hash, "canonical envelope")
-            assert(intent.expected_receipt_hash == materialized_receipt_hash, "expected receipt")
+            require terms.version == AGREEMENT_VERSION
+            require terms.agreement_id == active.agreement_id
+            require terms.terms_hash == active.terms_hash
+            require terms.borrower_authority_hash == active.borrower_authority_hash
+            require terms.lender_authority_hash == active.lender_authority_hash
+            require active.version == AGREEMENT_VERSION
+            require active.status == STATUS_ACTIVE
+            require active.collateral_asset_kind == ASSET_KIND_CKB
+            require active.principal_asset_kind == ASSET_KIND_CKB
+            require active.collateral_asset_hash == Hash::zero()
+            require active.principal_asset_hash == Hash::zero()
+            require now <= active.expiry_timepoint
+            require intent.core.action == PATH_REPAY_BEFORE_EXPIRY
+            require intent.core.agreement_id == active.agreement_id
+            require intent.core.terms_hash == active.terms_hash
+            require intent.core.borrower_authority_hash == active.borrower_authority_hash
+            require intent.core.lender_authority_hash == active.lender_authority_hash
+            require intent.core.old_status == STATUS_ACTIVE
+            require intent.core.new_status == STATUS_REPAID
+            require intent.core.old_nonce == active.nonce
+            require intent.core.new_nonce == active.nonce + 1
+            require intent.core.terminal_amount == repayment_amount
+            require intent.core.payout_commitment_hash == payout_commitment_hash
+            require intent.core.expiry_timepoint == active.expiry_timepoint
+            require intent.canonical_envelope_hash == canonical_envelope_hash
+            require intent.expected_receipt_hash == materialized_receipt_hash
             // Repayment is borrower-authorised in v0.
-            assert(borrower_sig.pubkey == active.borrower_authority_hash.0, "borrower pubkey")
-            assert(ckb::cell_data_hash(source::group_input(0)) == ckb::hash_data_packed(active), "active input")
-            assert(ckb::cell_data_hash(source::group_output(0)) == ckb::hash_data_packed(closed), "closed output")
-            assert(ckb::cell_data_hash(source::output(1)) == ckb::hash_data_packed(lender_payout), "repayment output")
-            assert(ckb::cell_capacity(source::output(1)) >= NATIVE_CKB_PAYOUT_OCCUPIED_CAPACITY + repayment_amount, "repayment capacity")
-            assert(ckb::cell_lock_args32(source::output(1)) == active.lender_authority_hash, "repayment lock")
-            assert(ckb::cell_data_hash(source::output(2)) == ckb::hash_data_packed(borrower_payout), "collateral return output")
-            assert(ckb::cell_capacity(source::output(2)) >= NATIVE_CKB_PAYOUT_OCCUPIED_CAPACITY + active.collateral_amount, "collateral return capacity")
-            assert(ckb::cell_lock_args32(source::output(2)) == active.borrower_authority_hash, "collateral return lock")
-            assert(ckb::cell_data_hash(source::output(3)) == ckb::hash_data_packed(receipt), "receipt output")
+            require borrower_sig.pubkey == active.borrower_authority_hash.0
+            require ckb::cell_data_hash(source::group_input(0)) == ckb::hash_data_packed(active)
+            require ckb::cell_data_hash(source::group_output(0)) == ckb::hash_data_packed(closed)
+            require ckb::cell_data_hash(source::output(1)) == ckb::hash_data_packed(lender_payout)
+            require ckb::cell_capacity(source::output(1)) >= NATIVE_CKB_PAYOUT_OCCUPIED_CAPACITY + repayment_amount
+            require ckb::cell_lock_args32(source::output(1)) == active.lender_authority_hash
+            require ckb::cell_data_hash(source::output(2)) == ckb::hash_data_packed(borrower_payout)
+            require ckb::cell_capacity(source::output(2)) >= NATIVE_CKB_PAYOUT_OCCUPIED_CAPACITY + active.collateral_amount
+            require ckb::cell_lock_args32(source::output(2)) == active.borrower_authority_hash
+            require ckb::cell_data_hash(source::output(3)) == ckb::hash_data_packed(receipt)
 
             verifier::btc::bip340::require_signature(signed_intent_hash, borrower_sig.pubkey, borrower_sig.signature)
         } else {
-            assert(op == PATH_CLAIM_AFTER_EXPIRY, "claim op")
+            require op == PATH_CLAIM_AFTER_EXPIRY
 
             // Lender closes after expiry. The default claim pays the locked
             // collateral only; fixed fee is not added here because no extra CKB
             // is created by the agreement cell.
-            assert(active.nonce < U64_MAX, "nonce overflow")
+            require active.nonce < U64_MAX
             let claim_amount = active.collateral_amount
-            assert(claim_amount <= U64_MAX - NATIVE_CKB_PAYOUT_OCCUPIED_CAPACITY, "claim capacity overflow")
+            require claim_amount <= U64_MAX - NATIVE_CKB_PAYOUT_OCCUPIED_CAPACITY
             let claim_payout = NativeCkbPayoutV0 {
                 action: PATH_CLAIM_AFTER_EXPIRY,
                 agreement_id: active.agreement_id,
@@ -472,9 +472,9 @@ where
                 terms_hash: active.terms_hash,
                 nonce: active.nonce + 1
             }
-            let payout_commitment_hash = hash_blake2b_packed(claim_payout)
-            let intent_core_hash = hash_blake2b_packed(intent.core)
-            let signed_intent_hash = hash_blake2b_packed(intent)
+            let payout_commitment_hash = ckb::hash_data_packed(claim_payout)
+            let intent_core_hash = ckb::hash_data_packed(intent.core)
+            let signed_intent_hash = ckb::hash_data_packed(intent)
             let receipt_commitment = NovaAgreementReceiptCommitmentV0 {
                 action: PATH_CLAIM_AFTER_EXPIRY,
                 agreement_id: active.agreement_id,
@@ -489,8 +489,8 @@ where
                 intent_core_hash: intent_core_hash,
                 payout_commitment_hash: payout_commitment_hash
             }
-            let materialized_receipt_hash = hash_blake2b_packed(receipt_commitment)
-            let canonical_envelope_hash = hash_blake2b_packed(NovaSealCanonicalEnvelopeV0 {
+            let materialized_receipt_hash = ckb::hash_data_packed(receipt_commitment)
+            let canonical_envelope_hash = ckb::hash_data_packed(NovaSealCanonicalEnvelopeV0 {
                 profile_id: active.agreement_id,
                 policy_hash: active.terms_hash,
                 action: PATH_CLAIM_AFTER_EXPIRY,
@@ -544,43 +544,44 @@ where
                 timepoint: now
             }
 
-            assert(terms.version == AGREEMENT_VERSION, "terms version")
-            assert(terms.agreement_id == active.agreement_id, "terms agreement")
-            assert(terms.terms_hash == active.terms_hash, "terms hash")
-            assert(terms.borrower_authority_hash == active.borrower_authority_hash, "terms borrower")
-            assert(terms.lender_authority_hash == active.lender_authority_hash, "terms lender")
-            assert(active.version == AGREEMENT_VERSION, "active version")
-            assert(active.status == STATUS_ACTIVE, "active status")
-            assert(active.collateral_asset_kind == ASSET_KIND_CKB, "active collateral asset")
-            assert(active.principal_asset_kind == ASSET_KIND_CKB, "active principal asset")
-            assert(active.collateral_asset_hash == Hash::zero(), "active collateral hash")
-            assert(active.principal_asset_hash == Hash::zero(), "active principal hash")
-            assert(now > active.expiry_timepoint, "claim expiry")
-            assert(intent.core.action == PATH_CLAIM_AFTER_EXPIRY, "intent action")
-            assert(intent.core.agreement_id == active.agreement_id, "intent agreement")
-            assert(intent.core.terms_hash == active.terms_hash, "intent terms")
-            assert(intent.core.borrower_authority_hash == active.borrower_authority_hash, "intent borrower")
-            assert(intent.core.lender_authority_hash == active.lender_authority_hash, "intent lender")
-            assert(intent.core.old_status == STATUS_ACTIVE, "intent old status")
-            assert(intent.core.new_status == STATUS_DEFAULTED, "intent new status")
-            assert(intent.core.old_nonce == active.nonce, "intent old nonce")
-            assert(intent.core.new_nonce == active.nonce + 1, "intent new nonce")
-            assert(intent.core.terminal_amount == claim_amount, "intent amount")
-            assert(intent.core.payout_commitment_hash == payout_commitment_hash, "intent payout")
-            assert(intent.core.expiry_timepoint == active.expiry_timepoint, "intent expiry")
-            assert(intent.canonical_envelope_hash == canonical_envelope_hash, "canonical envelope")
-            assert(intent.expected_receipt_hash == materialized_receipt_hash, "expected receipt")
+            require terms.version == AGREEMENT_VERSION
+            require terms.agreement_id == active.agreement_id
+            require terms.terms_hash == active.terms_hash
+            require terms.borrower_authority_hash == active.borrower_authority_hash
+            require terms.lender_authority_hash == active.lender_authority_hash
+            require active.version == AGREEMENT_VERSION
+            require active.status == STATUS_ACTIVE
+            require active.collateral_asset_kind == ASSET_KIND_CKB
+            require active.principal_asset_kind == ASSET_KIND_CKB
+            require active.collateral_asset_hash == Hash::zero()
+            require active.principal_asset_hash == Hash::zero()
+            require now > active.expiry_timepoint
+            require intent.core.action == PATH_CLAIM_AFTER_EXPIRY
+            require intent.core.agreement_id == active.agreement_id
+            require intent.core.terms_hash == active.terms_hash
+            require intent.core.borrower_authority_hash == active.borrower_authority_hash
+            require intent.core.lender_authority_hash == active.lender_authority_hash
+            require intent.core.old_status == STATUS_ACTIVE
+            require intent.core.new_status == STATUS_DEFAULTED
+            require intent.core.old_nonce == active.nonce
+            require intent.core.new_nonce == active.nonce + 1
+            require intent.core.terminal_amount == claim_amount
+            require intent.core.payout_commitment_hash == payout_commitment_hash
+            require intent.core.expiry_timepoint == active.expiry_timepoint
+            require intent.canonical_envelope_hash == canonical_envelope_hash
+            require intent.expected_receipt_hash == materialized_receipt_hash
             // Default claim is lender-authorised in v0.
-            assert(lender_sig.pubkey == active.lender_authority_hash.0, "lender pubkey")
-            assert(ckb::cell_data_hash(source::group_input(0)) == ckb::hash_data_packed(active), "active input")
-            assert(ckb::cell_data_hash(source::group_output(0)) == ckb::hash_data_packed(closed), "closed output")
-            assert(ckb::cell_data_hash(source::output(1)) == ckb::hash_data_packed(claim_payout), "claim output")
-            assert(ckb::cell_capacity(source::output(1)) >= NATIVE_CKB_PAYOUT_OCCUPIED_CAPACITY + claim_amount, "claim capacity")
-            assert(ckb::cell_lock_args32(source::output(1)) == active.lender_authority_hash, "claim lock")
-            assert(ckb::cell_data_hash(source::output(2)) == ckb::hash_data_packed(receipt), "receipt output")
+            require lender_sig.pubkey == active.lender_authority_hash.0
+            require ckb::cell_data_hash(source::group_input(0)) == ckb::hash_data_packed(active)
+            require ckb::cell_data_hash(source::group_output(0)) == ckb::hash_data_packed(closed)
+            require ckb::cell_data_hash(source::output(1)) == ckb::hash_data_packed(claim_payout)
+            require ckb::cell_capacity(source::output(1)) >= NATIVE_CKB_PAYOUT_OCCUPIED_CAPACITY + claim_amount
+            require ckb::cell_lock_args32(source::output(1)) == active.lender_authority_hash
+            require ckb::cell_data_hash(source::output(2)) == ckb::hash_data_packed(receipt)
 
             verifier::btc::bip340::require_signature(signed_intent_hash, lender_sig.pubkey, lender_sig.signature)
         }
     }
 
     return 0
+}

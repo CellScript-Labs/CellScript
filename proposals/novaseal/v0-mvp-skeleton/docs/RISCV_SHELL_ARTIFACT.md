@@ -20,12 +20,13 @@ Current summary:
 ```text
 preflight_passed=true
 staged_matches_release=true
-staged_release_elf_size_bytes=187808
-staged_release_elf_sha256=b8a7e8e53d36979d74f55252b52f8b8cc6f3bc8277250d2f8d2d08abd5237459
+staged_release_elf_size_bytes=187816
+staged_release_elf_sha256=54f26ee955ab3ecbbacc3f5eef20ad3ffee9125c14241e8ea44b382618af2391
 generated_spawn_visible=true
 lock_wiring_status=wired_to_bip340_shell
 ready_for_ckb_vm_dry_run=true
-production_ready=false
+source_package_ready=true
+public_mainnet_deployment_ready=false
 ```
 
 ## What This Proves
@@ -41,6 +42,6 @@ production_ready=false
 - This preflight does not execute the ELF; the child-verifier and parent-lock CKB VM harnesses do that separately.
 - The parent-lock CKB VM harness now spawns this ELF, observes child status, records transaction-shape tx-size/capacity facts, and runs the official resolved lock-group verifier plus full transaction script verifier for the three parent authority cases; public/shared deployment attestation is still external.
 - The `.cell` lock constructs and sends the 18-word IPC envelope to this BIP340 shell in the parent-lock harness.
-- The staged ELF is not production-ready until public/shared deployment attestation and external TCB review exist. Eight-fixture transaction coverage exists locally.
+- The staged ELF is source-package ready in the local evidence stack; public/mainnet deployment still requires public/shared deployment attestation and external TCB review.
 
 The value of this preflight is simple: every VM or transaction run can point at a pinned artifact and a mechanical guard against stale ELF evidence. A small thing, but very much the sort of small thing that saves one from explaining oneself to auditors over cold coffee.

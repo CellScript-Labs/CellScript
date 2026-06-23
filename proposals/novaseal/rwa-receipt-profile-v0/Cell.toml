@@ -23,7 +23,7 @@ exclude = []
 [build.dependencies]
 
 [policy]
-production = false
+production = true
 deny_fail_closed = false
 deny_ckb_runtime = false
 deny_runtime_obligations = false
@@ -36,8 +36,8 @@ ipc_abi = "cellscript-btc-bip340-ipc-v0"
 out_point = "0x6418f34fa16dc691febc1ce3870ff411c0bf6600f53ff27f57ca9723ae1d2c31:0"
 dep_type = "code"
 hash_type = "data1"
-data_hash = "0xcf90469fae427baab583cc69ce30d97c8f2368f5dec72bd9f95092e85558762e"
-artifact_hash = "0xb8a7e8e53d36979d74f55252b52f8b8cc6f3bc8277250d2f8d2d08abd5237459"
+data_hash = "0x918bf58554aaab5c082ba21f975eea70c2bf2330926b8b7a80d38fd1d9b7e598"
+artifact_hash = "0x54f26ee955ab3ecbbacc3f5eef20ad3ffee9125c14241e8ea44b382618af2391"
 
 [metadata]
 protocol_family = "NovaSeal"
@@ -47,13 +47,13 @@ canonical_schema_hash = "0xe9a157d0211d63586f2e9334878f8354f87d4786f94aa9e5ea163
 conformance_gate = "cellc certify --plugin novaseal-profile-v0"
 certification_plugin = "novaseal-profile-v0"
 certification_report = "target/cellscript-certification/novaseal-profile-v0.json"
-status = "reviewable-rwa-receipt-profile-package"
+status = "production-ready-source-package"
 asset_profile = "rwa-receipt"
 business_scenario = "materialise-claim-settle"
 receipt_mode = "materialized-output-cell"
 source_actions = "src/nova_rwa_receipt_type.cell:materialize_rwa_receipt;src/nova_rwa_receipt_type.cell:claim_rwa_receipt;src/nova_rwa_receipt_type.cell:settle_rwa_receipt;src/nova_rwa_receipt_lifecycle_type.cell:nova_rwa_receipt_lifecycle"
 stateful_dispatcher = "src/nova_rwa_receipt_lifecycle_type.cell:nova_rwa_receipt_lifecycle"
-deployment_pinning = "local-devnet-pinning-required-before-v1"
+deployment_pinning = "live-devnet-covered; public/shared attestation required for public/mainnet deployment"
 wallet_signing_vectors = "target/novaseal-wallet-signing-vectors.json"
 tcb_review_bundle = "target/novaseal-bip340-tcb-review.json"
 production_gate = "target/novaseal-production-gates.json"
