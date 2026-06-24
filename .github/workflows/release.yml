@@ -50,7 +50,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: "1.85.0"
+          toolchain: "1.92.0"
           targets: ${{ matrix.target }}
 
       - name: Install Linux cross-compilation tools
