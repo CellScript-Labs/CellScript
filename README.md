@@ -628,7 +628,7 @@ policy defaults:
 ```toml
 [package]
 name = "token"
-version = "0.17.0"
+version = "0.20.0-rc.1"
 entry = "src/main.cell"
 source_roots = ["src"]
 
