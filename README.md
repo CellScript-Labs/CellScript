@@ -1,4 +1,3 @@
-# CellScript
 
 <p align="center">
   <img src="assets/readme-logo.png" alt="CellScript" width="560">
