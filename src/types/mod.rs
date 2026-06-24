@@ -413,6 +413,16 @@ impl<'a> TypeChecker<'a> {
     }
 
     pub fn check_module(&mut self, module: &Module) -> Result<()> {
+        let diagnostics = self.check_module_diagnostics(module);
+        if let Some(error) = diagnostics.into_iter().next() {
+            Err(error)
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn check_module_diagnostics(&mut self, module: &Module) -> Vec<CompileError> {
+        let mut diagnostics = Vec::new();
         if self.current_module.is_none() {
             self.current_module = Some(module.name.clone());
         }
@@ -421,17 +431,21 @@ impl<'a> TypeChecker<'a> {
         for item in &module.items {
             if let Some((symbol, span)) = item_symbol_name_and_span(item) {
                 if !seen_symbols.insert(symbol.to_string()) {
-                    return Err(CompileError::new(format!("duplicate symbol '{}'", symbol), span));
+                    diagnostics.push(CompileError::new(format!("duplicate symbol '{}'", symbol), span));
                 }
             }
             match item {
                 Item::Const(const_def) => {
-                    self.validate_type(&const_def.ty)?;
+                    if let Err(error) = self.validate_type(&const_def.ty) {
+                        diagnostics.push(error);
+                    }
                     self.env.insert(const_def.name.clone(), const_def.ty.clone(), false, false);
                     self.constants.insert(const_def.name.clone(), const_def.clone());
                 }
                 Item::Resource(resource) => {
-                    register_type_id(&mut seen_type_ids, &resource.name, resource.type_id.as_ref())?;
+                    if let Err(error) = register_type_id(&mut seen_type_ids, &resource.name, resource.type_id.as_ref()) {
+                        diagnostics.push(error);
+                    }
                     self.linear_types.insert(resource.name.clone());
                     self.cell_type_kinds.insert(resource.name.clone(), CellTypeKind::Resource);
                     self.type_capabilities.insert(resource.name.clone(), resource.capabilities.iter().copied().collect());
@@ -441,7 +455,9 @@ impl<'a> TypeChecker<'a> {
                     );
                 }
                 Item::Shared(shared) => {
-                    register_type_id(&mut seen_type_ids, &shared.name, shared.type_id.as_ref())?;
+                    if let Err(error) = register_type_id(&mut seen_type_ids, &shared.name, shared.type_id.as_ref()) {
+                        diagnostics.push(error);
+                    }
                     self.linear_types.insert(shared.name.clone());
                     self.cell_type_kinds.insert(shared.name.clone(), CellTypeKind::Shared);
                     self.type_capabilities.insert(shared.name.clone(), shared.capabilities.iter().copied().collect());
@@ -451,7 +467,9 @@ impl<'a> TypeChecker<'a> {
                     );
                 }
                 Item::Receipt(receipt) => {
-                    register_type_id(&mut seen_type_ids, &receipt.name, receipt.type_id.as_ref())?;
+                    if let Err(error) = register_type_id(&mut seen_type_ids, &receipt.name, receipt.type_id.as_ref()) {
+                        diagnostics.push(error);
+                    }
                     self.linear_types.insert(receipt.name.clone());
                     self.cell_type_kinds.insert(receipt.name.clone(), CellTypeKind::Receipt);
                     self.type_capabilities.insert(receipt.name.clone(), receipt.capabilities.iter().copied().collect());
@@ -462,7 +480,9 @@ impl<'a> TypeChecker<'a> {
                     );
                 }
                 Item::Struct(struct_def) => {
-                    register_type_id(&mut seen_type_ids, &struct_def.name, struct_def.type_id.as_ref())?;
+                    if let Err(error) = register_type_id(&mut seen_type_ids, &struct_def.name, struct_def.type_id.as_ref()) {
+                        diagnostics.push(error);
+                    }
                     self.type_fields.insert(
                         struct_def.name.clone(),
                         struct_def.fields.iter().map(|field| (field.name.clone(), field.ty.clone())).collect(),
@@ -517,14 +537,20 @@ impl<'a> TypeChecker<'a> {
             }
         }
 
-        self.register_imported_type_ids(&mut seen_type_ids)?;
-        self.register_flows(module)?;
-        self.validate_flow_action_edges(module)?;
+        if let Err(error) = self.register_imported_type_ids(&mut seen_type_ids) {
+            diagnostics.push(error);
+        }
+        if let Err(error) = self.register_flows(module) {
+            diagnostics.push(error);
+        }
+        if let Err(error) = self.validate_flow_action_edges(module) {
+            diagnostics.push(error);
+        }
 
         for item in &module.items {
-            self.check_item(item)?;
+            diagnostics.extend(self.check_item_diagnostics(item));
         }
-        Ok(())
+        diagnostics
     }
 
     fn register_imported_type_ids(&self, seen_type_ids: &mut HashMap<String, Span>) -> Result<()> {
@@ -793,6 +819,15 @@ impl<'a> TypeChecker<'a> {
             Item::Function(f) => self.check_function(f),
             Item::Lock(l) => self.check_lock(l),
             Item::Use(_) => Ok(()),
+        }
+    }
+
+    fn check_item_diagnostics(&mut self, item: &Item) -> Vec<CompileError> {
+        match item {
+            Item::Action(action) => self.check_action_diagnostics(action),
+            Item::Function(function) => self.check_function_diagnostics(function),
+            Item::Lock(lock) => self.check_lock_diagnostics(lock),
+            _ => self.check_item(item).err().into_iter().collect(),
         }
     }
 
@@ -1106,6 +1141,50 @@ impl<'a> TypeChecker<'a> {
         result
     }
 
+    fn check_action_diagnostics(&mut self, action: &ActionDef) -> Vec<CompileError> {
+        let previous_callable = self.current_callable.replace(CallableKind::Action);
+        let previous_return_type = self.current_return_type.replace(action.return_type.clone());
+        let mut diagnostics = Vec::new();
+        let mut env = self.env.child();
+        let core_evidence_bindings = action_core_evidence_binding_names(action);
+
+        push_diagnostic(
+            &mut diagnostics,
+            self.bind_callable_params_with_non_linear(&mut env, &action.params, "action", &action.name, &core_evidence_bindings),
+        );
+        push_diagnostic(&mut diagnostics, self.bind_action_outputs(&mut env, action));
+        push_diagnostic(&mut diagnostics, self.validate_action_state_edges(action, &env));
+        push_diagnostic(&mut diagnostics, self.validate_action_create_targets(action));
+        push_diagnostic(&mut diagnostics, self.validate_action_branch_obligations(action));
+        if let Some(return_type) = &action.return_type {
+            push_diagnostic(&mut diagnostics, self.validate_callable_return_type("action", &action.name, return_type, action.span));
+        }
+        let return_env = env.clone();
+        push_diagnostic(&mut diagnostics, self.check_no_unreachable_stmts(&action.body));
+        push_diagnostic(&mut diagnostics, self.validate_spawn_ipc_fd_usage(&action.body));
+
+        let body_error_start = diagnostics.len();
+        let tail = self.check_body_statements_diagnostics(&mut env, &action.body, &mut diagnostics);
+        let body_had_errors = diagnostics.len() > body_error_start;
+
+        if !body_had_errors {
+            if let Some(return_type) = &action.return_type {
+                push_diagnostic(
+                    &mut diagnostics,
+                    self.check_body_returns_or_tail_expr("action", &action.name, &action.body, return_type, action.span, &return_env),
+                );
+            }
+            if let Some((tail_base, stmt)) = tail {
+                push_diagnostic(&mut diagnostics, self.mark_stmt_as_returned(&mut env, &tail_base, stmt));
+            }
+            push_diagnostic(&mut diagnostics, env.check_linear_complete());
+        }
+
+        self.current_callable = previous_callable;
+        self.current_return_type = previous_return_type;
+        diagnostics
+    }
+
     fn bind_action_outputs(&self, env: &mut TypeEnv, action: &ActionDef) -> Result<()> {
         let mut seen = action.params.iter().map(|param| param.name.clone()).collect::<HashSet<_>>();
         for output in &action.outputs {
@@ -1169,10 +1248,10 @@ impl<'a> TypeChecker<'a> {
                 Stmt::Let(let_stmt) => {
                     guaranteed = self.validate_branch_obligations_in_expr(&let_stmt.value, outputs, guaranteed)?;
                 }
-                Stmt::Expr(expr) | Stmt::Return(Some(expr)) => {
+                Stmt::Expr(expr) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
                     guaranteed = self.validate_branch_obligations_in_expr(expr, outputs, guaranteed)?;
                 }
-                Stmt::Return(None) => {}
+                Stmt::Return(ReturnStmt { value: None, .. }) => {}
                 Stmt::If(if_stmt) => {
                     self.validate_branch_obligations_in_expr(&if_stmt.condition, outputs, guaranteed.clone())?;
                     let then_guaranteed =
@@ -1373,8 +1452,10 @@ impl<'a> TypeChecker<'a> {
         for stmt in stmts {
             match stmt {
                 Stmt::Let(let_stmt) => self.validate_create_targets_in_expr(&let_stmt.value, outputs)?,
-                Stmt::Expr(expr) | Stmt::Return(Some(expr)) => self.validate_create_targets_in_expr(expr, outputs)?,
-                Stmt::Return(None) => {}
+                Stmt::Expr(expr) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
+                    self.validate_create_targets_in_expr(expr, outputs)?
+                }
+                Stmt::Return(ReturnStmt { value: None, .. }) => {}
                 Stmt::If(if_stmt) => {
                     self.validate_create_targets_in_expr(&if_stmt.condition, outputs)?;
                     self.validate_create_targets_in_stmts(&if_stmt.then_branch, outputs)?;
@@ -1681,6 +1762,51 @@ impl<'a> TypeChecker<'a> {
         result
     }
 
+    fn check_function_diagnostics(&mut self, function: &FnDef) -> Vec<CompileError> {
+        let previous_callable = self.current_callable.replace(CallableKind::Function);
+        let previous_return_type = self.current_return_type.replace(function.return_type.clone());
+        let mut diagnostics = Vec::new();
+        let mut env = self.env.child();
+
+        push_diagnostic(&mut diagnostics, self.bind_callable_params(&mut env, &function.params, "function", &function.name));
+        if let Some(return_type) = &function.return_type {
+            push_diagnostic(
+                &mut diagnostics,
+                self.validate_callable_return_type("function", &function.name, return_type, function.span),
+            );
+        }
+        let return_env = env.clone();
+        push_diagnostic(&mut diagnostics, self.check_no_unreachable_stmts(&function.body));
+
+        let body_error_start = diagnostics.len();
+        let tail = self.check_body_statements_diagnostics(&mut env, &function.body, &mut diagnostics);
+        let body_had_errors = diagnostics.len() > body_error_start;
+
+        if !body_had_errors {
+            if let Some(return_type) = &function.return_type {
+                push_diagnostic(
+                    &mut diagnostics,
+                    self.check_body_returns_or_tail_expr(
+                        "function",
+                        &function.name,
+                        &function.body,
+                        return_type,
+                        function.span,
+                        &return_env,
+                    ),
+                );
+            }
+            if let Some((tail_base, stmt)) = tail {
+                push_diagnostic(&mut diagnostics, self.mark_stmt_as_returned(&mut env, &tail_base, stmt));
+            }
+            push_diagnostic(&mut diagnostics, env.check_linear_complete());
+        }
+
+        self.current_callable = previous_callable;
+        self.current_return_type = previous_return_type;
+        diagnostics
+    }
+
     fn check_lock(&mut self, lock: &LockDef) -> Result<()> {
         let previous_callable = self.current_callable.replace(CallableKind::Lock);
         let previous_return_type = self.current_return_type.replace(Some(Type::Bool));
@@ -1713,6 +1839,47 @@ impl<'a> TypeChecker<'a> {
         self.current_callable = previous_callable;
         self.current_return_type = previous_return_type;
         result
+    }
+
+    fn check_lock_diagnostics(&mut self, lock: &LockDef) -> Vec<CompileError> {
+        let previous_callable = self.current_callable.replace(CallableKind::Lock);
+        let previous_return_type = self.current_return_type.replace(Some(Type::Bool));
+        let mut diagnostics = Vec::new();
+
+        if lock.return_type != Type::Bool {
+            diagnostics.push(CompileError::new("lock definitions must return bool", lock.span));
+        }
+
+        let mut env = self.env.child();
+        push_diagnostic(&mut diagnostics, self.bind_callable_params(&mut env, &lock.params, "lock", &lock.name));
+        push_diagnostic(&mut diagnostics, self.check_no_unreachable_stmts(&lock.body));
+        push_diagnostic(&mut diagnostics, self.validate_spawn_ipc_fd_usage(&lock.body));
+
+        let body_error_start = diagnostics.len();
+        let tail = self.check_body_statements_diagnostics(&mut env, &lock.body, &mut diagnostics);
+        let body_had_errors = diagnostics.len() > body_error_start;
+
+        if !body_had_errors {
+            if let Some(stmt) = lock.body.last() {
+                match self.infer_lock_terminal_stmt(&mut env, stmt) {
+                    Ok(return_ty) if !self.is_bool_type(&return_ty) => {
+                        diagnostics.push(CompileError::new("lock body must evaluate to bool", lock.span));
+                    }
+                    Ok(_) => {}
+                    Err(error) => diagnostics.push(error),
+                }
+            } else {
+                diagnostics.push(CompileError::new("lock body must return a bool value", lock.span));
+            }
+            if let Some((tail_base, stmt)) = tail {
+                push_diagnostic(&mut diagnostics, self.mark_stmt_as_returned(&mut env, &tail_base, stmt));
+            }
+            push_diagnostic(&mut diagnostics, env.check_linear_complete());
+        }
+
+        self.current_callable = previous_callable;
+        self.current_return_type = previous_return_type;
+        diagnostics
     }
 
     fn validate_callable_return_type(&self, callable_kind: &str, callable_name: &str, return_type: &Type, span: Span) -> Result<()> {
@@ -2150,6 +2317,113 @@ impl<'a> TypeChecker<'a> {
         Ok(Some((tail_base, last)))
     }
 
+    fn check_body_statements_diagnostics<'body>(
+        &mut self,
+        env: &mut TypeEnv,
+        body: &'body [Stmt],
+        diagnostics: &mut Vec<CompileError>,
+    ) -> Option<(TypeEnv, &'body Stmt)> {
+        let Some((last, prefix)) = body.split_last() else {
+            return None;
+        };
+        for stmt in prefix {
+            self.check_stmt_diagnostics(env, stmt, diagnostics);
+        }
+        let tail_base = env.clone();
+        self.check_stmt_diagnostics(env, last, diagnostics);
+        Some((tail_base, last))
+    }
+
+    fn check_stmt_diagnostics(&mut self, env: &mut TypeEnv, stmt: &Stmt, diagnostics: &mut Vec<CompileError>) {
+        match stmt {
+            Stmt::If(if_stmt) => {
+                let condition_ok = match self.infer_expr(env, &if_stmt.condition) {
+                    Ok(cond_ty) if self.is_bool_type(&cond_ty) => true,
+                    Ok(_) => {
+                        diagnostics.push(CompileError::new("if condition must be boolean", if_stmt.span));
+                        false
+                    }
+                    Err(error) => {
+                        diagnostics.push(error);
+                        false
+                    }
+                };
+
+                let mut then_env = env.child();
+                let then_error_start = diagnostics.len();
+                self.check_body_statements_diagnostics(&mut then_env, &if_stmt.then_branch, diagnostics);
+                let then_had_errors = diagnostics.len() > then_error_start;
+                let then_returns = self.stmts_always_return(&if_stmt.then_branch);
+
+                if let Some(else_branch) = &if_stmt.else_branch {
+                    let mut else_env = env.child();
+                    let else_error_start = diagnostics.len();
+                    self.check_body_statements_diagnostics(&mut else_env, else_branch, diagnostics);
+                    let else_had_errors = diagnostics.len() > else_error_start;
+                    let else_returns = self.stmts_always_return(else_branch);
+                    if condition_ok && !then_had_errors && !else_had_errors {
+                        push_diagnostic(
+                            diagnostics,
+                            env.merge_branch_linear_states(&then_env, then_returns, Some(&else_env), else_returns, if_stmt.span),
+                        );
+                    }
+                } else if condition_ok && !then_had_errors {
+                    push_diagnostic(diagnostics, env.merge_branch_linear_states(&then_env, then_returns, None, false, if_stmt.span));
+                }
+            }
+            Stmt::For(for_stmt) => {
+                let iter_ty = match self.infer_expr(env, &for_stmt.iterable) {
+                    Ok(iter_ty) => iter_ty,
+                    Err(error) => {
+                        diagnostics.push(error);
+                        return;
+                    }
+                };
+                let item_ty = match self.iter_item_type(&iter_ty, for_stmt.span) {
+                    Ok(item_ty) => item_ty,
+                    Err(error) => {
+                        diagnostics.push(error);
+                        return;
+                    }
+                };
+                let mut loop_env = env.child();
+                if let Err(error) = self.bind_pattern(&mut loop_env, &for_stmt.pattern, &item_ty, false, for_stmt.span) {
+                    diagnostics.push(error);
+                    return;
+                }
+                let body_error_start = diagnostics.len();
+                self.check_body_statements_diagnostics(&mut loop_env, &for_stmt.body, diagnostics);
+                if diagnostics.len() == body_error_start {
+                    push_diagnostic(diagnostics, loop_env.check_linear_complete());
+                    push_diagnostic(diagnostics, env.reject_loop_linear_state_changes(&loop_env, for_stmt.span));
+                    env.merge_existing_type_refinements_from(&loop_env);
+                }
+            }
+            Stmt::While(while_stmt) => {
+                let condition_ok = match self.infer_expr(env, &while_stmt.condition) {
+                    Ok(cond_ty) if self.is_bool_type(&cond_ty) => true,
+                    Ok(_) => {
+                        diagnostics.push(CompileError::new("while condition must be boolean", while_stmt.span));
+                        false
+                    }
+                    Err(error) => {
+                        diagnostics.push(error);
+                        false
+                    }
+                };
+                let mut while_env = env.child();
+                let body_error_start = diagnostics.len();
+                self.check_body_statements_diagnostics(&mut while_env, &while_stmt.body, diagnostics);
+                if condition_ok && diagnostics.len() == body_error_start {
+                    push_diagnostic(diagnostics, while_env.check_linear_complete());
+                    push_diagnostic(diagnostics, env.reject_loop_linear_state_changes(&while_env, while_stmt.span));
+                    env.merge_existing_type_refinements_from(&while_env);
+                }
+            }
+            _ => push_diagnostic(diagnostics, self.check_stmt(env, stmt)),
+        }
+    }
+
     fn validate_spawn_ipc_fd_usage(&self, body: &[Stmt]) -> Result<()> {
         let mut state = SpawnIpcFdState::default();
         self.validate_spawn_ipc_fd_usage_statements(body, &mut state)?;
@@ -2169,10 +2443,10 @@ impl<'a> TypeChecker<'a> {
                 self.validate_spawn_ipc_fd_usage_expr(&let_stmt.value, state)?;
                 self.bind_spawn_ipc_fd_pattern(let_stmt, state);
             }
-            Stmt::Expr(expr) | Stmt::Return(Some(expr)) => {
+            Stmt::Expr(expr) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
                 self.validate_spawn_ipc_fd_usage_expr(expr, state)?;
             }
-            Stmt::Return(None) => {}
+            Stmt::Return(ReturnStmt { value: None, .. }) => {}
             Stmt::If(if_stmt) => {
                 self.validate_spawn_ipc_fd_usage_expr(&if_stmt.condition, state)?;
                 let mut then_state = state.clone();
@@ -2452,7 +2726,7 @@ impl<'a> TypeChecker<'a> {
                 self.infer_expr(env, expr)?;
                 Ok(())
             }
-            Stmt::Return(None) => {
+            Stmt::Return(ReturnStmt { value: None, .. }) => {
                 if let Some(Some(expected)) = &self.current_return_type {
                     return Err(CompileError::new(
                         format!("return without value in function returning {:?}", expected),
@@ -2461,23 +2735,21 @@ impl<'a> TypeChecker<'a> {
                 }
                 Ok(())
             }
-            Stmt::Return(Some(expr)) => {
+            Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
+                let return_span = stmt_span(stmt);
                 let ty = match self.current_return_type.clone() {
-                    Some(Some(expected)) => self.infer_expr_with_expected_type(env, expr, &expected, expr_span(expr))?,
+                    Some(Some(expected)) => self.infer_expr_with_expected_type(env, expr, &expected, return_span)?,
                     _ => self.infer_expr(env, expr)?,
                 };
                 match &self.current_return_type {
-                    Some(Some(expected)) if !self.expr_type_compatible_with_expected(expr, &ty, expected, expr_span(expr))? => {
+                    Some(Some(expected)) if !self.expr_type_compatible_with_expected(expr, &ty, expected, return_span)? => {
                         return Err(CompileError::new(
                             format!("return type mismatch: expected {:?}, found {:?}", expected, ty),
-                            expr_span(expr),
+                            return_span,
                         ));
                     }
                     Some(None) => {
-                        return Err(CompileError::new(
-                            "return value is not allowed in a function without a return type",
-                            expr_span(expr),
-                        ));
+                        return Err(CompileError::new("return value is not allowed in a function without a return type", return_span));
                     }
                     _ => {}
                 }
@@ -3987,7 +4259,7 @@ impl<'a> TypeChecker<'a> {
     fn mark_stmt_as_returned(&mut self, env: &mut TypeEnv, tail_base: &TypeEnv, stmt: &Stmt) -> Result<()> {
         match stmt {
             Stmt::Expr(expr) => self.mark_expr_as_moved(env, expr),
-            Stmt::Return(Some(_)) => Ok(()),
+            Stmt::Return(ReturnStmt { value: Some(_), .. }) => Ok(()),
             Stmt::If(if_stmt) if matches!(self.current_return_type, Some(Some(_))) => {
                 let Some(else_branch) = &if_stmt.else_branch else {
                     return Ok(());
@@ -4090,7 +4362,7 @@ impl<'a> TypeChecker<'a> {
     fn infer_lock_terminal_stmt(&mut self, env: &mut TypeEnv, stmt: &Stmt) -> Result<Type> {
         match stmt {
             Stmt::Expr(expr) => self.infer_expr(env, expr),
-            Stmt::Return(Some(expr)) => self.infer_expr(env, expr),
+            Stmt::Return(ReturnStmt { value: Some(expr), .. }) => self.infer_expr(env, expr),
             Stmt::If(if_stmt) => {
                 let cond_ty = self.infer_expr(env, &if_stmt.condition)?;
                 if !self.is_bool_type(&cond_ty) {
@@ -4229,7 +4501,9 @@ impl<'a> TypeChecker<'a> {
             return Ok(());
         };
         match last {
-            Stmt::Expr(expr) | Stmt::Return(Some(expr)) => self.reject_stored_linear_reference_alias(env, expr, span),
+            Stmt::Expr(expr) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
+                self.reject_stored_linear_reference_alias(env, expr, span)
+            }
             Stmt::If(if_stmt) => {
                 self.reject_stored_linear_reference_alias_in_tail_stmt(env, &if_stmt.then_branch, span)?;
                 if let Some(else_branch) = &if_stmt.else_branch {
@@ -5840,11 +6114,25 @@ fn stmt_span(stmt: &Stmt) -> Span {
     match stmt {
         Stmt::Let(let_stmt) => let_stmt.span,
         Stmt::Expr(expr) => expr_span(expr),
-        Stmt::Return(Some(expr)) => expr_span(expr),
-        Stmt::Return(None) => Span::default(),
+        Stmt::Return(ReturnStmt { value: Some(expr), span }) => non_default_span(expr_span(expr), *span),
+        Stmt::Return(ReturnStmt { value: None, span }) => *span,
         Stmt::If(if_stmt) => if_stmt.span,
         Stmt::For(for_stmt) => for_stmt.span,
         Stmt::While(while_stmt) => while_stmt.span,
+    }
+}
+
+fn non_default_span(preferred: Span, fallback: Span) -> Span {
+    if preferred.line == 0 || preferred.column == 0 {
+        fallback
+    } else {
+        preferred
+    }
+}
+
+fn push_diagnostic(diagnostics: &mut Vec<CompileError>, result: Result<()>) {
+    if let Err(error) = result {
+        diagnostics.push(error);
     }
 }
 
@@ -5998,8 +6286,8 @@ fn collect_required_output_fields(expr: &Expr, outputs: &HashSet<String>, fields
 fn collect_required_output_fields_from_stmt(stmt: &Stmt, outputs: &HashSet<String>, fields: &mut HashSet<String>) {
     match stmt {
         Stmt::Let(let_stmt) => collect_required_output_fields(&let_stmt.value, outputs, fields),
-        Stmt::Expr(expr) | Stmt::Return(Some(expr)) => collect_required_output_fields(expr, outputs, fields),
-        Stmt::Return(None) => {}
+        Stmt::Expr(expr) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => collect_required_output_fields(expr, outputs, fields),
+        Stmt::Return(ReturnStmt { value: None, .. }) => {}
         Stmt::If(if_stmt) => {
             collect_required_output_fields(&if_stmt.condition, outputs, fields);
             for stmt in &if_stmt.then_branch {
@@ -6226,8 +6514,10 @@ fn collect_consumed_bindings_from_stmts(stmts: &[Stmt], bindings: &mut HashSet<S
     for stmt in stmts {
         match stmt {
             Stmt::Let(let_stmt) => collect_consumed_bindings_from_expr(&let_stmt.value, bindings),
-            Stmt::Expr(expr) | Stmt::Return(Some(expr)) => collect_consumed_bindings_from_expr(expr, bindings),
-            Stmt::Return(None) => {}
+            Stmt::Expr(expr) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
+                collect_consumed_bindings_from_expr(expr, bindings)
+            }
+            Stmt::Return(ReturnStmt { value: None, .. }) => {}
             Stmt::If(if_stmt) => {
                 collect_consumed_bindings_from_expr(&if_stmt.condition, bindings);
                 collect_consumed_bindings_from_stmts(&if_stmt.then_branch, bindings);
@@ -6427,7 +6717,7 @@ fn collect_mutable_reference_root_names_from_tail_stmts<'a>(stmts: &'a [Stmt], r
         return;
     };
     match last {
-        Stmt::Expr(expr) | Stmt::Return(Some(expr)) => collect_mutable_reference_root_names(expr, roots),
+        Stmt::Expr(expr) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => collect_mutable_reference_root_names(expr, roots),
         Stmt::If(if_stmt) => {
             collect_mutable_reference_root_names_from_tail_stmts(&if_stmt.then_branch, roots);
             if let Some(else_branch) = &if_stmt.else_branch {
@@ -6467,9 +6757,19 @@ pub fn check(module: &Module) -> Result<()> {
     checker.check_module(module)
 }
 
+pub fn diagnostics(module: &Module) -> Vec<CompileError> {
+    let mut checker = TypeChecker::new();
+    checker.check_module_diagnostics(module)
+}
+
 pub fn check_with_resolver(module: &Module, resolver: &ModuleResolver, current_module: &str) -> Result<()> {
     let mut checker = TypeChecker::with_resolver(resolver, current_module);
     checker.check_module(module)
+}
+
+pub fn diagnostics_with_resolver(module: &Module, resolver: &ModuleResolver, current_module: &str) -> Vec<CompileError> {
+    let mut checker = TypeChecker::with_resolver(resolver, current_module);
+    checker.check_module_diagnostics(module)
 }
 
 #[cfg(test)]
@@ -6488,6 +6788,71 @@ mod tests {
     fn source_module(source: &str) -> Module {
         let tokens = lexer::lex(source).unwrap();
         parser::parse(&tokens).unwrap()
+    }
+
+    #[test]
+    fn diagnostics_collect_independent_callable_errors() {
+        let module = source_module(
+            r#"
+module multi_errors
+
+action bad_one() -> u64 {
+    verification
+        return true
+}
+
+action bad_two() -> bool {
+    verification
+        return 1
+}
+"#,
+        );
+        let diagnostics = super::diagnostics(&module);
+        assert_eq!(diagnostics.len(), 2);
+        assert!(diagnostics.iter().any(|error| error.message.contains("expected U64, found Bool")));
+        assert!(diagnostics.iter().any(|error| error.message.contains("expected Bool, found U64")));
+    }
+
+    #[test]
+    fn diagnostics_collect_independent_statement_errors_in_callable() {
+        let module = source_module(
+            r#"
+module multi_errors
+
+action bad() -> bool {
+    verification
+        let first: u64 = true
+        let second: bool = 1
+        return true
+}
+"#,
+        );
+        let diagnostics = super::diagnostics(&module);
+        assert_eq!(diagnostics.len(), 2);
+        assert!(diagnostics.iter().any(|error| error.message.contains("expected U64, found Bool")));
+        assert!(diagnostics.iter().any(|error| error.message.contains("expected Bool, found U64")));
+    }
+
+    #[test]
+    fn diagnostics_collect_nested_statement_errors() {
+        let module = source_module(
+            r#"
+module multi_errors
+
+action bad() -> bool {
+    verification
+        if true {
+            let first: u64 = true
+            let second: bool = 1
+        }
+        return true
+}
+"#,
+        );
+        let diagnostics = super::diagnostics(&module);
+        assert_eq!(diagnostics.len(), 2);
+        assert!(diagnostics.iter().any(|error| error.message.contains("expected U64, found Bool")));
+        assert!(diagnostics.iter().any(|error| error.message.contains("expected Bool, found U64")));
     }
 
     #[test]

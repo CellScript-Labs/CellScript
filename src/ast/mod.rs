@@ -318,7 +318,7 @@ pub enum Type {
 pub enum Stmt {
     Let(LetStmt),
     Expr(Expr),
-    Return(Option<Expr>),
+    Return(ReturnStmt),
     If(IfStmt),
     For(ForStmt),
     While(WhileStmt),
@@ -337,6 +337,12 @@ pub struct LetStmt {
     pub ty: Option<Type>,
     pub value: Expr,
     pub is_mut: bool,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct ReturnStmt {
+    pub value: Option<Expr>,
     pub span: Span,
 }
 

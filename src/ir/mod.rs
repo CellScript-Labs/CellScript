@@ -477,7 +477,12 @@ impl IrGenerator {
         generator
     }
 
-    pub fn generate(mut self, ast: &Module) -> Result<IrModule> {
+    pub fn generate(self, ast: &Module) -> Result<IrModule> {
+        self.generate_diagnostics(ast)
+            .map_err(|errors| errors.into_iter().next().unwrap_or_else(|| CompileError::without_span("IR lowering failed")))
+    }
+
+    pub fn generate_diagnostics(mut self, ast: &Module) -> std::result::Result<IrModule, Vec<CompileError>> {
         for item in &ast.items {
             if let Item::Const(c) = item {
                 self.constants.insert(c.name.clone(), (c.value.clone(), Self::convert_type(&c.ty)));
@@ -595,10 +600,10 @@ impl IrGenerator {
                 Item::Use(_) => {}
             }
         }
-        if let Some(error) = self.errors.into_iter().next() {
-            Err(error)
-        } else {
+        if self.errors.is_empty() {
             Ok(self.module)
+        } else {
+            Err(self.errors)
         }
     }
 
@@ -1050,7 +1055,7 @@ impl IrGenerator {
             Stmt::Expr(expr) | Stmt::Let(LetStmt { value: expr, .. }) => {
                 self.check_expr_effects(expr, footprint);
             }
-            Stmt::Return(Some(expr)) => {
+            Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
                 self.check_expr_effects(expr, footprint);
             }
             Stmt::If(if_stmt) => {
@@ -1742,11 +1747,11 @@ impl IrGenerator {
                 Some(active)
             }
             Stmt::Expr(expr) => self.lower_expr(expr, current, blocks, vars).current,
-            Stmt::Return(None) => {
+            Stmt::Return(ReturnStmt { value: None, .. }) => {
                 self.block_mut(blocks, current).terminator = IrTerminator::Return(None);
                 None
             }
-            Stmt::Return(Some(expr)) => {
+            Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
                 let lowered = if let Some(return_type) = return_type {
                     self.lower_expr_with_expected_type(expr, return_type, current, blocks, vars)
                 } else {
@@ -5947,6 +5952,11 @@ pub fn generate(ast: &Module) -> Result<IrModule> {
     generator.generate(ast)
 }
 
+pub fn generate_diagnostics(ast: &Module) -> std::result::Result<IrModule, Vec<CompileError>> {
+    let generator = IrGenerator::new(ast.name.clone());
+    generator.generate_diagnostics(ast)
+}
+
 pub fn generate_with_resolver(ast: &Module, resolver: &ModuleResolver, module_name: &str) -> Result<IrModule> {
     generate_with_resolver_inner(ast, resolver, module_name, true)
 }
@@ -6199,7 +6209,7 @@ fn collect_call_names_from_stmts(stmts: &[Stmt], names: &mut HashSet<String>) {
 
 fn collect_call_names_from_stmt(stmt: &Stmt, names: &mut HashSet<String>) {
     match stmt {
-        Stmt::Expr(expr) | Stmt::Let(LetStmt { value: expr, .. }) | Stmt::Return(Some(expr)) => {
+        Stmt::Expr(expr) | Stmt::Let(LetStmt { value: expr, .. }) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
             collect_call_names_from_expr(expr, names);
         }
         Stmt::If(if_stmt) => {
@@ -6217,7 +6227,7 @@ fn collect_call_names_from_stmt(stmt: &Stmt, names: &mut HashSet<String>) {
             collect_call_names_from_expr(&while_stmt.condition, names);
             collect_call_names_from_stmts(&while_stmt.body, names);
         }
-        Stmt::Return(None) => {}
+        Stmt::Return(ReturnStmt { value: None, .. }) => {}
     }
 }
 
@@ -6387,7 +6397,7 @@ fn infer_fn_effect_without_call_graph(function: &FnDef) -> EffectClass {
 
 fn collect_ast_stmt_effects(stmt: &Stmt, footprint: &mut EffectFootprint) {
     match stmt {
-        Stmt::Expr(expr) | Stmt::Let(LetStmt { value: expr, .. }) | Stmt::Return(Some(expr)) => {
+        Stmt::Expr(expr) | Stmt::Let(LetStmt { value: expr, .. }) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
             collect_ast_expr_effects(expr, footprint);
         }
         Stmt::If(if_stmt) => {
@@ -6764,8 +6774,10 @@ fn collect_consumed_bindings_from_stmts(stmts: &[Stmt], bindings: &mut HashSet<S
     for stmt in stmts {
         match stmt {
             Stmt::Let(let_stmt) => collect_consumed_bindings_from_expr(&let_stmt.value, bindings),
-            Stmt::Expr(expr) | Stmt::Return(Some(expr)) => collect_consumed_bindings_from_expr(expr, bindings),
-            Stmt::Return(None) => {}
+            Stmt::Expr(expr) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
+                collect_consumed_bindings_from_expr(expr, bindings)
+            }
+            Stmt::Return(ReturnStmt { value: None, .. }) => {}
             Stmt::If(if_stmt) => {
                 collect_consumed_bindings_from_expr(&if_stmt.condition, bindings);
                 collect_consumed_bindings_from_stmts(&if_stmt.then_branch, bindings);

@@ -216,7 +216,7 @@ impl SimulateInterpreter {
                 self.bind_pattern(&let_stmt.pattern, value.clone());
                 Ok(None)
             }
-            Stmt::Return(expr) => {
+            Stmt::Return(ReturnStmt { value: expr, .. }) => {
                 let value = match expr {
                     Some(e) => self.eval_expr(e)?,
                     None => SimValue::Unit,

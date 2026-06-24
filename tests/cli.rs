@@ -19,7 +19,7 @@ fn git_add_all(repo_dir: &std::path::Path) {
 fn git_commit(repo_dir: &std::path::Path, msg: &str) {
     git_add_all(repo_dir);
     let status = Command::new("git")
-        .args(["commit", "-m", msg, "--author=test <test@test.com>"])
+        .args(["-c", "commit.gpgsign=false", "commit", "-m", msg, "--author=test <test@test.com>"])
         .env("GIT_AUTHOR_DATE", "2026-01-01T00:00:00+00:00")
         .env("GIT_COMMITTER_NAME", "test")
         .env("GIT_COMMITTER_EMAIL", "test@test.com")

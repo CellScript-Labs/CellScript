@@ -71,7 +71,7 @@ fn git_commit(repo_dir: &Path, msg: &str) {
     }
     git_add_all(repo_dir);
     let status = std::process::Command::new("git")
-        .args(["commit", "-m", msg, "--author=test <test@test.com>"])
+        .args(["-c", "commit.gpgsign=false", "commit", "-m", msg, "--author=test <test@test.com>"])
         .env("GIT_AUTHOR_DATE", "2026-01-01T00:00:00+00:00")
         .env("GIT_COMMITTER_DATE", "2026-01-01T00:00:00+00:00")
         .current_dir(repo_dir)

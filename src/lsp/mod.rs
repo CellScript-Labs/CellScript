@@ -5,6 +5,7 @@ use camino::Utf8PathBuf;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+#[cfg(not(feature = "wasm"))]
 pub mod server;
 
 pub struct LspServer {
@@ -204,16 +205,11 @@ impl LspServer {
         };
 
         self.ast_cache.insert(uri.to_string(), ast.clone());
-        let diagnostics = match crate::types::check(&ast).and_then(|_| crate::flow::check(&ast)) {
-            Ok(()) => {
-                let mut diagnostics = Vec::new();
-                if let Ok(metadata) = crate::compile_metadata(content, None) {
-                    diagnostics.extend(lowering_diagnostics(content, &ast, &metadata));
-                }
-                diagnostics
-            }
-            Err(error) => vec![diagnostic_from_error(content, &error)],
-        };
+        let report = crate::compile_metadata_with_diagnostics(content, None);
+        let mut diagnostics = report.diagnostics.iter().map(|error| diagnostic_from_error(content, error)).collect::<Vec<_>>();
+        if let Some(metadata) = report.metadata.as_ref() {
+            diagnostics.extend(lowering_diagnostics(content, &ast, metadata));
+        }
         self.diagnostics.insert(uri.to_string(), diagnostics);
     }
 
@@ -1044,7 +1040,7 @@ impl LspServer {
             if let Some(loc) = module.ast.items.iter().find_map(|item| {
                 let name = item_name(item)?;
                 if name == symbol {
-                    Some(Location { uri: module_uri.clone(), range: span_to_range(&module.source, item_span(item)) })
+                    Some(Location { uri: module_uri.clone(), range: item_name_range(&module.source, item, name) })
                 } else {
                     None
                 }
@@ -1769,7 +1765,7 @@ impl LspServer {
             if let Some(location) = ast.items.iter().find_map(|item| {
                 let name = item_name(item)?;
                 if name == symbol {
-                    Some(Location { uri: uri.to_string(), range: span_to_range(source, item_span(item)) })
+                    Some(Location { uri: uri.to_string(), range: item_name_range(source, item, name) })
                 } else {
                     None
                 }
@@ -1782,7 +1778,7 @@ impl LspServer {
             if let Some(location) = module.ast.items.iter().find_map(|item| {
                 let name = item_name(item)?;
                 if name == symbol {
-                    Some(Location { uri: utf8_path_to_file_uri(&module.path), range: span_to_range(&module.source, item_span(item)) })
+                    Some(Location { uri: utf8_path_to_file_uri(&module.path), range: item_name_range(&module.source, item, name) })
                 } else {
                     None
                 }
@@ -2070,10 +2066,24 @@ fn item_span(item: &Item) -> Span {
     }
 }
 
+fn item_name_range(source: &str, item: &Item, name: &str) -> Range {
+    let span = item_span(item);
+    let start = span.start.min(source.len());
+    let end = span.end.min(source.len()).max(start);
+    let slice = &source[start..end];
+    if let Some((relative_start, relative_end)) = word_occurrences(slice, name).into_iter().next() {
+        return Range {
+            start: offset_to_position(source, start + relative_start),
+            end: offset_to_position(source, start + relative_end),
+        };
+    }
+    span_to_range(source, span)
+}
+
 fn stmt_span(stmt: &Stmt) -> Span {
     match stmt {
         Stmt::Let(s) => s.span,
-        Stmt::Return(_) => Span::default(),
+        Stmt::Return(s) => s.span,
         Stmt::If(s) => s.span,
         Stmt::For(s) => s.span,
         Stmt::While(s) => s.span,
@@ -2705,6 +2715,30 @@ action accept(input: Offer) -> output: Offer {
     }
 
     #[test]
+    fn test_type_errors_collect_multiple_diagnostics() {
+        let mut server = LspServer::new();
+        let uri = "file:///multi_errors.cell".to_string();
+        let source = r#"
+module multi_errors
+
+action bad_one() -> u64 {
+    verification
+        return true
+}
+
+action bad_two() -> bool {
+    verification
+        return 1
+}
+"#;
+        server.open_document(uri.clone(), source.to_string());
+        let diagnostics = server.get_diagnostics(&uri);
+        assert_eq!(diagnostics.len(), 2);
+        assert!(diagnostics.iter().any(|diagnostic| diagnostic.message.contains("expected U64, found Bool")));
+        assert!(diagnostics.iter().any(|diagnostic| diagnostic.message.contains("expected Bool, found U64")));
+    }
+
+    #[test]
     fn compiler_warning_diagnostics_keep_warning_severity() {
         let error = CompileError::warning("compatibility note", Span::new(0, 4, 1, 1));
         let diagnostic = diagnostic_from_error("note", &error);
@@ -2721,6 +2755,8 @@ action accept(input: Offer) -> output: Offer {
 
         let definition = server.goto_definition(&uri, Position { line: 8, character: 20 }).expect("definition");
         assert_eq!(definition.range.start.line, 2);
+        assert_eq!(definition.range.start.character, 9);
+        assert_eq!(definition.range.end.character, 14);
 
         let refs = server.find_references(&uri, Position { line: 8, character: 20 });
         assert!(refs.len() >= 2);

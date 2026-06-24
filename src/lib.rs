@@ -24,7 +24,6 @@ pub mod fmt;
 pub mod incremental;
 pub mod ir;
 pub mod lexer;
-#[cfg(not(feature = "wasm"))]
 pub mod lsp;
 pub mod optimize;
 pub mod package;
@@ -44,7 +43,7 @@ pub use proof_plan::soundness::{ProofPlanSoundnessIssue, ProofPlanSoundnessRepor
 pub use proof_plan::{ProofPlanDiagnosticMetadata, ProofPlanMetadata, ProofPlanSourceSpanMetadata};
 
 use camino::{Utf8Path, Utf8PathBuf};
-use error::{CompileError, Result};
+use error::{CompileError, DiagnosticSeverity, Result};
 use resolve::ModuleResolver;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -1818,8 +1817,15 @@ fn stmt_span(stmt: &ast::Stmt) -> error::Span {
     match stmt {
         ast::Stmt::Let(let_stmt) => let_stmt.span,
         ast::Stmt::Expr(expr) => expr_span(expr),
-        ast::Stmt::Return(Some(expr)) => expr_span(expr),
-        ast::Stmt::Return(None) => error::Span::default(),
+        ast::Stmt::Return(ast::ReturnStmt { value: Some(expr), span }) => {
+            let expr_span = expr_span(expr);
+            if expr_span.line == 0 || expr_span.column == 0 {
+                *span
+            } else {
+                expr_span
+            }
+        }
+        ast::Stmt::Return(ast::ReturnStmt { value: None, span }) => *span,
         ast::Stmt::If(if_stmt) => if_stmt.span,
         ast::Stmt::For(for_stmt) => for_stmt.span,
         ast::Stmt::While(while_stmt) => while_stmt.span,
@@ -4166,6 +4172,129 @@ pub fn compile_metadata(source: &str, target: Option<String>) -> Result<CompileM
     bind_source_metadata(&mut metadata, vec![source_unit_from_bytes("<memory>", "memory", source.as_bytes())]);
     validate_compile_metadata(&metadata, artifact_format)?;
     Ok(metadata)
+}
+
+#[derive(Debug, Clone)]
+pub struct CompileMetadataDiagnosticReport {
+    pub metadata: Option<CompileMetadata>,
+    pub diagnostics: Vec<CompileError>,
+}
+
+impl CompileMetadataDiagnosticReport {
+    pub fn has_errors(&self) -> bool {
+        self.diagnostics.iter().any(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
+    }
+}
+
+/// Generate compile metadata while collecting all diagnostics that can be
+/// recovered without parser error recovery. Lexer/parser failures remain
+/// fatal single diagnostics; semantic phases collect independent errors.
+pub fn compile_metadata_with_diagnostics(source: &str, target: Option<String>) -> CompileMetadataDiagnosticReport {
+    let tokens = match lexer::lex(source) {
+        Ok(tokens) => tokens,
+        Err(error) => return CompileMetadataDiagnosticReport { metadata: None, diagnostics: vec![error] },
+    };
+    let ast = match parser::parse(&tokens) {
+        Ok(ast) => ast,
+        Err(error) => return CompileMetadataDiagnosticReport { metadata: None, diagnostics: vec![error] },
+    };
+    let artifact_format = match ArtifactFormat::from_target(target.as_deref().unwrap_or(DEFAULT_TARGET)) {
+        Ok(format) => format,
+        Err(error) => return CompileMetadataDiagnosticReport { metadata: None, diagnostics: vec![error] },
+    };
+    let target_profile = TargetProfile::Ckb;
+
+    let mut diagnostics = types::diagnostics(&ast);
+    if diagnostics.iter().any(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error) {
+        return CompileMetadataDiagnosticReport { metadata: None, diagnostics };
+    }
+
+    diagnostics.extend(flow::diagnostics(&ast));
+    if diagnostics.iter().any(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error) {
+        return CompileMetadataDiagnosticReport { metadata: None, diagnostics };
+    }
+
+    let ir = match ir::generate_diagnostics(&ast) {
+        Ok(ir) => ir,
+        Err(errors) => {
+            diagnostics.extend(errors);
+            return CompileMetadataDiagnosticReport { metadata: None, diagnostics };
+        }
+    };
+    let mut metadata = compile_metadata_from_ir(&ir, artifact_format, target_profile);
+    bind_source_metadata(&mut metadata, vec![source_unit_from_bytes("<memory>", "memory", source.as_bytes())]);
+    if let Err(error) = validate_compile_metadata(&metadata, artifact_format) {
+        diagnostics.push(error);
+        return CompileMetadataDiagnosticReport { metadata: None, diagnostics };
+    }
+
+    CompileMetadataDiagnosticReport { metadata: Some(metadata), diagnostics }
+}
+
+#[cfg(test)]
+mod compile_diagnostic_tests {
+    use super::*;
+
+    #[test]
+    fn compile_metadata_diagnostics_collects_multiple_type_errors() {
+        let source = r#"
+module multi_errors
+
+action bad_one() -> u64 {
+    verification
+        return true
+}
+
+action bad_two() -> bool {
+    verification
+        return 1
+}
+"#;
+        let report = compile_metadata_with_diagnostics(source, None);
+        assert!(report.metadata.is_none());
+        assert_eq!(report.diagnostics.len(), 2);
+        assert!(report.diagnostics.iter().any(|error| error.message.contains("expected U64, found Bool")));
+        assert!(report.diagnostics.iter().any(|error| error.message.contains("expected Bool, found U64")));
+    }
+
+    #[test]
+    fn compile_metadata_diagnostics_collects_multiple_statement_errors() {
+        let source = r#"
+module multi_errors
+
+action bad() -> bool {
+    verification
+        let first: u64 = true
+        let second: bool = 1
+        return true
+}
+"#;
+        let report = compile_metadata_with_diagnostics(source, None);
+        assert!(report.metadata.is_none());
+        assert_eq!(report.diagnostics.len(), 2);
+        assert!(report.diagnostics.iter().any(|error| error.message.contains("expected U64, found Bool")));
+        assert!(report.diagnostics.iter().any(|error| error.message.contains("expected Bool, found U64")));
+    }
+
+    #[test]
+    fn compile_metadata_diagnostics_span_primitive_return_errors() {
+        let source = r#"
+module return_span
+
+action bad() -> bool {
+    verification
+        return 1
+}
+"#;
+        let report = compile_metadata_with_diagnostics(source, None);
+        assert!(report.metadata.is_none());
+        assert_eq!(report.diagnostics.len(), 1);
+        let diagnostic = &report.diagnostics[0];
+        assert!(diagnostic.message.contains("expected Bool, found U64"));
+        assert_eq!(diagnostic.span.line, 6);
+        assert_eq!(diagnostic.span.column, 9);
+        assert_eq!(&source[diagnostic.span.start..diagnostic.span.end], "return 1");
+    }
 }
 
 fn compile_ast(ast: &ast::Module, options: &CompileOptions, resolver: Option<(&ModuleResolver, &str)>) -> Result<CompileResult> {

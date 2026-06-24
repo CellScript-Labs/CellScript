@@ -21,6 +21,17 @@ struct ActionStateContext {
 /// Validate declared flow transitions and statically check
 /// flow-aware creates that can be decided from source.
 pub fn check(module: &Module) -> Result<()> {
+    let diagnostics = diagnostics(module);
+    if let Some(error) = diagnostics.into_iter().next() {
+        Err(error)
+    } else {
+        Ok(())
+    }
+}
+
+/// Return all flow diagnostics that can be collected without parser recovery.
+pub fn diagnostics(module: &Module) -> Vec<CompileError> {
+    let mut diagnostics = Vec::new();
     let mut specs = HashMap::new();
 
     for item in &module.items {
@@ -37,7 +48,8 @@ pub fn check(module: &Module) -> Result<()> {
             }
         }
         if states.len() < 2 {
-            return Err(CompileError::new("flow must mention at least two states", machine.span));
+            diagnostics.push(CompileError::new("flow must mention at least two states", machine.span));
+            continue;
         }
         specs.insert(
             machine.target.base.clone(),
@@ -49,17 +61,25 @@ pub fn check(module: &Module) -> Result<()> {
         match item {
             Item::Action(action) => {
                 let context = action_state_context(&specs, action);
-                validate_stmt_list(&specs, &context, &action.body)?;
+                if let Err(error) = validate_stmt_list(&specs, &context, &action.body) {
+                    diagnostics.push(error);
+                }
             }
             Item::Function(function) => {
-                validate_stmt_list(&specs, &ActionStateContext::default(), &function.body)?;
+                if let Err(error) = validate_stmt_list(&specs, &ActionStateContext::default(), &function.body) {
+                    diagnostics.push(error);
+                }
             }
-            Item::Lock(lock) => validate_stmt_list(&specs, &ActionStateContext::default(), &lock.body)?,
+            Item::Lock(lock) => {
+                if let Err(error) = validate_stmt_list(&specs, &ActionStateContext::default(), &lock.body) {
+                    diagnostics.push(error);
+                }
+            }
             _ => {}
         }
     }
 
-    Ok(())
+    diagnostics
 }
 
 fn action_state_context(specs: &HashMap<String, FlowSpec>, action: &ActionDef) -> ActionStateContext {
@@ -95,8 +115,10 @@ fn collect_state_context_from_stmts(specs: &HashMap<String, FlowSpec>, context: 
                 }
                 collect_state_context_from_expr(specs, context, &let_stmt.value);
             }
-            Stmt::Expr(expr) | Stmt::Return(Some(expr)) => collect_state_context_from_expr(specs, context, expr),
-            Stmt::Return(None) => {}
+            Stmt::Expr(expr) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
+                collect_state_context_from_expr(specs, context, expr)
+            }
+            Stmt::Return(ReturnStmt { value: None, .. }) => {}
             Stmt::If(if_stmt) => {
                 collect_state_context_from_expr(specs, context, &if_stmt.condition);
                 collect_state_context_from_stmts(specs, context, &if_stmt.then_branch);
@@ -244,8 +266,8 @@ fn validate_state_transition_stmt(specs: &HashMap<String, FlowSpec>, context: &A
     match stmt {
         Stmt::Let(let_stmt) => validate_state_transition_expr(specs, context, &let_stmt.value),
         Stmt::Expr(expr) => validate_state_transition_expr(specs, context, expr),
-        Stmt::Return(Some(expr)) => validate_state_transition_expr(specs, context, expr),
-        Stmt::Return(None) => Ok(()),
+        Stmt::Return(ReturnStmt { value: Some(expr), .. }) => validate_state_transition_expr(specs, context, expr),
+        Stmt::Return(ReturnStmt { value: None, .. }) => Ok(()),
         Stmt::If(if_stmt) => {
             validate_state_transition_expr(specs, context, &if_stmt.condition)?;
             validate_stmt_list(specs, context, &if_stmt.then_branch)?;

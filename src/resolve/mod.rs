@@ -468,7 +468,7 @@ mod tests {
                         return_type: Some(Type::U64),
                         outputs: Vec::new(),
                         state_edges: Vec::new(),
-                        body: vec![Stmt::Return(Some(Expr::Integer(0)))],
+                        body: vec![Stmt::Return(ReturnStmt { value: Some(Expr::Integer(0)), span: Span::default() })],
                         effect: EffectClass::Pure,
                         effect_declared: false,
                         scheduler_hint: None,

@@ -11803,7 +11803,7 @@ mod tests {
     fn run_fixture_git_with_identity(fiber_repo: &Path, args: &[&str]) {
         let output = std::process::Command::new("git")
             .current_dir(fiber_repo)
-            .args(["-c", "user.name=CellScript Test", "-c", "user.email=cellscript@example.invalid"])
+            .args(["-c", "user.name=CellScript Test", "-c", "user.email=cellscript@example.invalid", "-c", "commit.gpgsign=false"])
             .args(args)
             .output()
             .unwrap();

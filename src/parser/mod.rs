@@ -50,6 +50,14 @@ impl<'a> Parser<'a> {
         token
     }
 
+    fn previous_non_newline(&self) -> &Token {
+        let mut index = self.position.saturating_sub(1).min(self.tokens.len() - 1);
+        while index > 0 && matches!(self.tokens[index].kind, TokenKind::Newline) {
+            index -= 1;
+        }
+        &self.tokens[index]
+    }
+
     fn check(&self, kind: &TokenKind) -> bool {
         std::mem::discriminant(&self.current().kind) == std::mem::discriminant(kind)
     }
@@ -1834,14 +1842,17 @@ impl<'a> Parser<'a> {
         Ok(LetStmt { pattern, ty, value, is_mut, span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column) })
     }
 
-    fn parse_return(&mut self) -> Result<Option<Expr>> {
+    fn parse_return(&mut self) -> Result<ReturnStmt> {
+        let start_span = self.current().span;
         self.expect(TokenKind::Return)?;
 
-        if self.check(&TokenKind::Newline) || self.check(&TokenKind::RBrace) || self.check(&TokenKind::Eof) {
-            Ok(None)
+        let value = if self.check(&TokenKind::Newline) || self.check(&TokenKind::RBrace) || self.check(&TokenKind::Eof) {
+            None
         } else {
-            Ok(Some(self.parse_expr()?))
-        }
+            Some(self.parse_expr()?)
+        };
+        let end_span = self.previous_non_newline().span;
+        Ok(ReturnStmt { value, span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column) })
     }
 
     fn parse_if(&mut self) -> Result<IfStmt> {
