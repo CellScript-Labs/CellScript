@@ -16,6 +16,7 @@ concurrency:
 
 env:
   CARGO_INCREMENTAL: "0"
+  CKB_SDK_RUST_REF: v5.1.0
 
 jobs:
   build:
@@ -38,6 +39,13 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
+
+      - name: Check out ckb-sdk-rust path dependency
+        run: |
+          git clone --depth 1 --branch "$CKB_SDK_RUST_REF" \
+            https://github.com/nervosnetwork/ckb-sdk-rust.git \
+            "$GITHUB_WORKSPACE/../ckb-sdk-rust"
+          git -C "$GITHUB_WORKSPACE/../ckb-sdk-rust" rev-parse --short HEAD
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
