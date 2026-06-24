@@ -21,6 +21,8 @@ fn git_commit(repo_dir: &std::path::Path, msg: &str) {
     let status = Command::new("git")
         .args(["commit", "-m", msg, "--author=test <test@test.com>"])
         .env("GIT_AUTHOR_DATE", "2026-01-01T00:00:00+00:00")
+        .env("GIT_COMMITTER_NAME", "test")
+        .env("GIT_COMMITTER_EMAIL", "test@test.com")
         .env("GIT_COMMITTER_DATE", "2026-01-01T00:00:00+00:00")
         .current_dir(repo_dir)
         .status()
