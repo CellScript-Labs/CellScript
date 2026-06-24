@@ -23,7 +23,7 @@ autobins = false
 authors = ["CellScript Core Team"]
 description = "CellScript compiler for the Cell model"
 license = "MIT"
-repository = "https://github.com/a19q3/CellScript"
+repository = "https://github.com/CellScript-Labs/CellScript"
 exclude = [
     ".audit-report*.md",
     ".cap/",

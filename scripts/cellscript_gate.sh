@@ -521,7 +521,7 @@ run_website_build_check() {
     run npm --prefix website run prepare:registry
 
     local registry_status
-    registry_status="$(git status --porcelain -- website/src/data/registry-packages.json)"
+    registry_status="$(git -C website status --porcelain -- src/data/registry-packages.json)"
     if [[ -n "$registry_status" ]]; then
         printf '\nwebsite registry data is stale. Run `npm --prefix website run prepare:registry` and commit the generated data.\n' >&2
         printf '%s\n' "$registry_status" >&2

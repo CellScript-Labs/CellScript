@@ -1,8 +1,0 @@
-{
-  "schema": "novaseal-dual-seal-fixture-v0.1",
-  "fixture": "finalize_dual_seal_valid",
-  "action": "finalize_dual_seal",
-  "expected": "accepted",
-  "coverage": "source-guard-present",
-  "description": "BTC owner and CKB authority jointly finalise a matured dual seal with a declared BTC closure commitment."
-}

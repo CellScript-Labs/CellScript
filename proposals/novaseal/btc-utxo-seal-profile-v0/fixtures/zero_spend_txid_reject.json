@@ -1,8 +1,0 @@
-{
-  "schema": "novaseal-btc-utxo-seal-fixture-v0.1",
-  "fixture": "zero_spend_txid_reject",
-  "action": "close_btc_utxo_seal",
-  "expected": "rejected",
-  "coverage": "source-guard-present",
-  "description": "Closure must reject a zero spend txid because it is not a public closure commitment."
-}

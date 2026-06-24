@@ -1,8 +1,0 @@
-{
-  "schema": "novaseal-fungible-xudt-fixture-v0.1",
-  "fixture": "transfer_valid",
-  "action": "transfer_xudt",
-  "expected": "accepted",
-  "coverage": "source-guard-present",
-  "description": "Current holder transfers the whole balance object to a distinct non-zero holder without changing amount or xUDT type hash."
-}

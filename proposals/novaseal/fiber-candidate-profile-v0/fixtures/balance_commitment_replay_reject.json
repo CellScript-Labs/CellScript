@@ -1,8 +1,0 @@
-{
-  "schema": "novaseal-fiber-candidate-fixture-v0.1",
-  "fixture": "balance_commitment_replay_reject",
-  "action": "settle_fiber_candidate",
-  "expected": "rejected",
-  "coverage": "source-guard-present",
-  "description": "Settlement must reject an intent whose new balance commitment does not change."
-}

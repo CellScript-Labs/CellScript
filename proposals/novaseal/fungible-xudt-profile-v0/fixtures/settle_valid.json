@@ -1,8 +1,0 @@
-{
-  "schema": "novaseal-fungible-xudt-fixture-v0.1",
-  "fixture": "settle_valid",
-  "action": "settle_xudt",
-  "expected": "accepted",
-  "coverage": "source-guard-present",
-  "description": "Current holder settles the active balance object into a terminal receipt with new_amount = 0."
-}

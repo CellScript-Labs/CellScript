@@ -1,9 +1,0 @@
-{
-  "schema": "novaseal-agreement-fixture-v0.1",
-  "fixture": "repay_principal_max_fee_1_overflow_reject",
-  "action": "repay_arithmetic_boundary",
-  "expected": "rejected",
-  "coverage": "local-arithmetic-boundary-covered + production-gate-covered",
-  "reject_guard": "active.fixed_fee_amount <= U64_MAX - active.principal_amount",
-  "description": "Repayment terminal amount must reject when principal is U64_MAX and fixed_fee is 1."
-}

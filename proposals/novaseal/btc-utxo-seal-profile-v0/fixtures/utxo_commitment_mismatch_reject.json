@@ -1,8 +1,0 @@
-{
-  "schema": "novaseal-btc-utxo-seal-fixture-v0.1",
-  "fixture": "utxo_commitment_mismatch_reject",
-  "action": "close_btc_utxo_seal",
-  "expected": "rejected",
-  "coverage": "source-guard-present",
-  "description": "Closure must reject an intent whose declared UTXO tuple does not hash to the active seal commitment."
-}

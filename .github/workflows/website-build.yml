@@ -20,6 +20,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -41,10 +43,10 @@ jobs:
 
       - name: Check generated registry data is committed
         run: |
-          if [[ -n "$(git status --porcelain -- website/src/data/registry-packages.json)" ]]; then
+          if [[ -n "$(git -C website status --porcelain -- src/data/registry-packages.json)" ]]; then
             echo "website/src/data/registry-packages.json is stale or missing"
-            git status --short -- website/src/data/registry-packages.json
-            git diff -- website/src/data/registry-packages.json
+            git -C website status --short -- src/data/registry-packages.json
+            git -C website diff -- src/data/registry-packages.json
             exit 1
           fi
 

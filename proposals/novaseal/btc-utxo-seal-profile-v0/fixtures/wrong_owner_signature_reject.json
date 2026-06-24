@@ -1,8 +1,0 @@
-{
-  "schema": "novaseal-btc-utxo-seal-fixture-v0.1",
-  "fixture": "wrong_owner_signature_reject",
-  "action": "close_btc_utxo_seal",
-  "expected": "rejected",
-  "coverage": "source-guard-present",
-  "description": "Closure must reject a BIP340 signature payload whose pubkey is not the seal owner authority hash."
-}

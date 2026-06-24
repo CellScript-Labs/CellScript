@@ -1,8 +1,0 @@
-{
-  "schema": "novaseal-rwa-receipt-fixture-v0.1",
-  "fixture": "claim_valid",
-  "action": "claim_rwa_receipt",
-  "expected": "accepted",
-  "coverage": "source-guard-present",
-  "description": "Current holder claims a materialised receipt without changing the committed amount or asset/document commitments."
-}

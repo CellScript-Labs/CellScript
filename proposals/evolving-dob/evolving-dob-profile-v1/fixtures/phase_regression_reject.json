@@ -1,8 +1,0 @@
-{
-  "schema": "evolving-dob-fixture-v1",
-  "fixture": "phase_regression_reject",
-  "action": "finalise_dob_state",
-  "expected": "rejected",
-  "coverage": "source-guard-present",
-  "description": "A finalised state is terminal; transitions never regress from Final to Active or Unborn."
-}

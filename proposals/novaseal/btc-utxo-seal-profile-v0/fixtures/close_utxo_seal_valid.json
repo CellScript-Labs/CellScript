@@ -1,8 +1,0 @@
-{
-  "schema": "novaseal-btc-utxo-seal-fixture-v0.1",
-  "fixture": "close_utxo_seal_valid",
-  "action": "close_btc_utxo_seal",
-  "expected": "accepted",
-  "coverage": "source-guard-present",
-  "description": "Owner closes a single-use BTC UTXO seal by binding the sealed UTXO tuple to a declared spend transaction input."
-}

@@ -1,8 +1,0 @@
-{
-  "schema": "evolving-dob-fixture-v1",
-  "fixture": "finalise_valid",
-  "action": "finalise_dob_state",
-  "expected": "accepted",
-  "coverage": "source-guard-present",
-  "description": "Finalises an active evolving DOB with one last generation increment and a terminal phase that prevents further evolution."
-}

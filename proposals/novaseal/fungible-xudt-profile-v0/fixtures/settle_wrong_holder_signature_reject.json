@@ -1,8 +1,0 @@
-{
-  "schema": "novaseal-fungible-xudt-fixture-v0.1",
-  "fixture": "settle_wrong_holder_signature_reject",
-  "action": "settle_xudt",
-  "expected": "rejected",
-  "coverage": "source-guard-present",
-  "description": "Settlement must reject a BIP340 signature payload whose pubkey is not the current holder authority hash."
-}

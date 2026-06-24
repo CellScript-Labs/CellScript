@@ -1,8 +1,0 @@
-{
-  "schema": "novaseal-rwa-receipt-fixture-v0.1",
-  "fixture": "wrong_holder_claim_reject",
-  "action": "claim_rwa_receipt",
-  "expected": "rejected",
-  "coverage": "source-guard-present",
-  "description": "Claim must reject a signature payload whose pubkey is not the current holder authority hash."
-}

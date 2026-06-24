@@ -1,8 +1,0 @@
-{
-  "schema": "novaseal-rwa-receipt-fixture-v0.1",
-  "fixture": "settle_valid",
-  "action": "settle_rwa_receipt",
-  "expected": "accepted",
-  "coverage": "source-guard-present",
-  "description": "Issuer and holder jointly settle a claimed receipt into a terminal immutable receipt event."
-}

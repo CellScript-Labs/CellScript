@@ -1,8 +1,0 @@
-{
-  "schema": "novaseal-fiber-candidate-fixture-v0.1",
-  "fixture": "wrong_operator_signature_reject",
-  "action": "settle_fiber_candidate",
-  "expected": "rejected",
-  "coverage": "source-guard-present",
-  "description": "Settlement must reject a BIP340 signature payload whose pubkey is not the operator authority hash."
-}

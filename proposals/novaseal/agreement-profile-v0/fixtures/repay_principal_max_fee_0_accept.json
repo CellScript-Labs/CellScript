@@ -1,9 +1,0 @@
-{
-  "schema": "novaseal-agreement-fixture-v0.1",
-  "fixture": "repay_principal_max_fee_0_accept",
-  "action": "repay_arithmetic_boundary",
-  "expected": "accepted",
-  "coverage": "local-arithmetic-boundary-covered + production-gate-covered",
-  "accept_guard": "active.fixed_fee_amount <= U64_MAX - active.principal_amount",
-  "description": "Repayment terminal amount arithmetic accepts principal U64_MAX with zero fixed_fee. This fixture covers the terminal sum boundary only; payout capacity bounds are a separate guard."
-}

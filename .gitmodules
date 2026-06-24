@@ -1,0 +1,20 @@
+[submodule "website"]
+	path = website
+	url = https://github.com/CellScript-Labs/cellscript-website.git
+	branch = main
+[submodule "editors/vscode-cellscript"]
+	path = editors/vscode-cellscript
+	url = https://github.com/CellScript-Labs/cellscript-vscode.git
+	branch = main
+[submodule "tests/benchmarks"]
+	path = tests/benchmarks
+	url = https://github.com/CellScript-Labs/cellscript-ickb-equivalence.git
+	branch = main
+[submodule "proposals/novaseal"]
+	path = proposals/novaseal
+	url = https://github.com/CellScript-Labs/NovaSeal.git
+	branch = main
+[submodule "proposals/evolving-dob/evolving-dob-profile-v1"]
+	path = proposals/evolving-dob/evolving-dob-profile-v1
+	url = https://github.com/CellScript-Labs/dob-evo.git
+	branch = main

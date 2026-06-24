@@ -1,8 +1,0 @@
-{
-  "schema": "novaseal-btc-transaction-commitment-fixture-v0.1",
-  "fixture": "transition_hash_mismatch_reject",
-  "action": "commit_btc_transaction_transition",
-  "expected": "rejected",
-  "coverage": "source-guard-present",
-  "description": "Commitment must reject an intent whose transition commitment hash does not match the new state hash."
-}

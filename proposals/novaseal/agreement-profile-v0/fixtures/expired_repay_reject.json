@@ -1,9 +1,0 @@
-{
-  "schema": "novaseal-agreement-fixture-v0.1",
-  "fixture": "expired_repay_reject",
-  "action": "repay_before_expiry",
-  "expected": "rejected",
-  "coverage": "source-guard-present + local-transaction-shape-covered + resolved-transaction-covered",
-  "reject_guard": "now <= active.expiry_timepoint",
-  "description": "A repayment terminal path after expiry must reject."
-}
