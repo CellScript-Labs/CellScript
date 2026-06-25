@@ -1479,6 +1479,9 @@ impl<'a> Parser<'a> {
 
         let state_edges = self.parse_action_clauses()?;
         self.skip_newlines();
+        if matches!(&self.current().kind, TokenKind::Identifier(name) if name == "where") {
+            return Err(CompileError::new("`where` action proof blocks are not supported; use `verification`", self.current().span));
+        }
         self.expect(TokenKind::Verification)?;
         self.skip_newlines();
 
@@ -3300,6 +3303,22 @@ action accept(input: Offer) -> output: Offer {
         let tokens = lex(input).unwrap();
         let err = parse(&tokens).unwrap_err();
         assert!(err.message.contains("expected 'verification'"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn test_rejects_where_action_proof_block_without_compatibility() {
+        let input = r#"
+module test
+
+action accept(input: Offer) -> output: Offer {
+    where
+        require input.state == output.state
+}
+"#;
+        let tokens = lex(input).unwrap();
+        let err = parse(&tokens).unwrap_err();
+        assert!(err.message.contains("not supported"), "unexpected error: {}", err.message);
+        assert!(err.message.contains("verification"), "unexpected error: {}", err.message);
     }
 
     #[test]

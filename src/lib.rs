@@ -247,7 +247,7 @@ fn strict_capability_name(capability: ast::Capability) -> &'static str {
 
 const DEFAULT_TARGET: &str = "riscv64-asm";
 const DEFAULT_TARGET_PROFILE: &str = "ckb";
-const ARTIFACT_CACHE_VERSION: &str = "cell-data-codec-manifest-v1";
+const ARTIFACT_CACHE_VERSION: &str = "entry-metadata-scope-v3";
 pub const METADATA_SCHEMA_VERSION: u32 = 43;
 pub const SOURCE_METADATA_SCHEMA_VERSION: u32 = 1;
 pub const ARTIFACT_METADATA_SCHEMA_VERSION: u32 = 1;
@@ -4602,8 +4602,12 @@ fn compile_file_with_entry_scope<P: AsRef<Utf8Path>>(
     }
     result.validate()?;
 
-    // Incremental compilation: store successful compilation result in cache
-    incremental_cache_store(path, &source, &options, &result);
+    // Incremental compilation: store successful compilation result in cache.
+    // Entry-scoped compiles use the same public options as default compiles,
+    // so they must not write the default cache key.
+    if entry_scope.is_none() {
+        incremental_cache_store(path, &source, &options, &result);
+    }
 
     Ok(result)
 }
@@ -25874,7 +25878,7 @@ action transfer(nft_before: NFT, to: Address) -> nft_after: NFT {
     }
 
     #[test]
-    fn dynamic_named_output_constraints_are_proven_in_where_block() {
+    fn dynamic_named_output_constraints_are_proven_in_verification_section() {
         let source = r#"
 module test
 
@@ -25898,18 +25902,18 @@ action mint(collection_before: Collection) -> collection_after: Collection {
         let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
 
         assert!(
-            asm.contains("# cellscript abi: output field verification deferred to explicit where constraints"),
-            "dynamic named outputs should be bound in the prelude and proven by where constraints:\n{}",
+            asm.contains("# cellscript abi: output field verification deferred to explicit verification constraints"),
+            "dynamic named outputs should be bound in the prelude and proven by verification constraints:\n{}",
             asm
         );
         assert!(
             !asm.contains("# cellscript abi: fail closed because the output state is not fully verified"),
-            "signature output constraints should not fail closed before where requirements run:\n{}",
+            "signature output constraints should not fail closed before verification requirements run:\n{}",
             asm
         );
         assert!(
             asm.contains("# cellscript abi: dynamic schema field Collection.name index=0 as Molecule vector bytes"),
-            "dynamic where constraint should still emit runtime Molecule field comparison:\n{}",
+            "dynamic verification constraint should still emit runtime Molecule field comparison:\n{}",
             asm
         );
         assert!(

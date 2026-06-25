@@ -323,4 +323,4 @@ fail-closed.
 ## Next
 
 With a repeatable package workflow in place, continue with
-[CKB Target Profiles](https://github.com/a19q3/CellScript/wiki/Tutorial-05-CKB-Target-Profiles).
+[CKB Target Profiles](https://github.com/CellScript-Labs/CellScript/wiki/Tutorial-05-CKB-Target-Profiles).

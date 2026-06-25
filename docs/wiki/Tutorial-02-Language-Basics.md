@@ -499,5 +499,5 @@ ordinary line comments and block comments are not retained by `cellc fmt`.
 ## Next
 
 With the source shape in mind, continue with
-[Resources and Cell Effects](https://github.com/a19q3/CellScript/wiki/Tutorial-03-Resources-and-Cell-Effects). If a
-CKB term is unclear, use the [CKB Glossary](https://github.com/a19q3/CellScript/wiki/CKB-Glossary).
+[Resources and Cell Effects](https://github.com/CellScript-Labs/CellScript/wiki/Tutorial-03-Resources-and-Cell-Effects). If a
+CKB term is unclear, use the [CKB Glossary](https://github.com/CellScript-Labs/CellScript/wiki/CKB-Glossary).

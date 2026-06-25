@@ -2712,8 +2712,8 @@ impl CodeGenerator {
             self.generate_read_ref(pattern, index)?;
         }
 
-        // Signature-bound outputs are loaded in the entry prelude so `where`
-        // constraints can read them. Explicit `create name = ...` field
+        // Signature-bound outputs are loaded in the entry prelude so
+        // verification constraints can read them. Explicit `create name = ...` field
         // checks must stay in body order because their expected expressions may
         // depend on earlier `let`/index computations.
         let explicit_output_create_bindings = body
@@ -2907,7 +2907,7 @@ impl CodeGenerator {
                 } else if self.can_verify_create_output_fields(pattern) {
                     self.emit_create_output_checks_at(pattern, size_offset, buffer_offset);
                 } else if defer_unverifiable_output_fields && self.create_output_fields_cover_type(pattern) {
-                    self.emit("# cellscript abi: output field verification deferred to explicit where constraints");
+                    self.emit("# cellscript abi: output field verification deferred to explicit verification constraints");
                 } else {
                     self.emit("# cellscript abi: output field verification incomplete for this named output");
                     self.emit("# cellscript abi: fail closed because the output state is not fully verified");

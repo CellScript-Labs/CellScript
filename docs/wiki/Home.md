@@ -112,7 +112,7 @@ transaction, the wiki says so.
 The fastest way to get oriented is to compile the token example:
 
 ```bash
-git clone https://github.com/a19q3/CellScript.git
+git clone https://github.com/CellScript-Labs/CellScript.git
 cd CellScript
 ./scripts/cellscript_gate.sh dev
 cargo run --locked --bin cellc -- examples/token.cell --target riscv64-elf --target-profile ckb --primitive-strict 0.16 -o /tmp/token.elf
@@ -165,7 +165,7 @@ production-ready.
 
 ## Reference Examples
 
-- [CKB hashing workflow](https://github.com/a19q3/CellScript/blob/main/docs/examples/ckb_hashing.md)
-- [Collections matrix](https://github.com/a19q3/CellScript/blob/main/docs/examples/collections_matrix.md)
-- [Deployment manifest](https://github.com/a19q3/CellScript/blob/main/docs/examples/deployment_manifest.md)
-- [Output append](https://github.com/a19q3/CellScript/blob/main/docs/examples/output_append.md)
+- [CKB hashing workflow](https://github.com/CellScript-Labs/CellScript/blob/main/docs/examples/ckb_hashing.md)
+- [Collections matrix](https://github.com/CellScript-Labs/CellScript/blob/main/docs/examples/collections_matrix.md)
+- [Deployment manifest](https://github.com/CellScript-Labs/CellScript/blob/main/docs/examples/deployment_manifest.md)
+- [Output append](https://github.com/CellScript-Labs/CellScript/blob/main/docs/examples/output_append.md)

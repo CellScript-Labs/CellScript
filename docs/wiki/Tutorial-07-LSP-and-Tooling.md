@@ -227,4 +227,4 @@ profiles as future-facing or fail-closed.
 ## Next
 
 With the tooling loop in place, continue with
-[Bundled Example Contracts](https://github.com/a19q3/CellScript/wiki/Tutorial-08-Bundled-Example-Contracts).
+[Bundled Example Contracts](https://github.com/CellScript-Labs/CellScript/wiki/Tutorial-08-Bundled-Example-Contracts).
