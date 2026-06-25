@@ -4231,6 +4231,109 @@ pub fn compile_metadata_with_diagnostics(source: &str, target: Option<String>) -
     CompileMetadataDiagnosticReport { metadata: Some(metadata), diagnostics }
 }
 
+/// Generate compile metadata for a file/package path while collecting semantic
+/// diagnostics. This mirrors `compile_path` input resolution and module
+/// resolution, but skips artifact codegen so CLI tools can report multiple
+/// independent frontend diagnostics before the builder/deployment pipeline.
+pub fn compile_path_metadata_with_diagnostics<P: AsRef<Utf8Path>>(
+    path: P,
+    options: CompileOptions,
+) -> CompileMetadataDiagnosticReport {
+    let resolved = match resolve_input_path(path.as_ref()) {
+        Ok(path) => path,
+        Err(error) => return CompileMetadataDiagnosticReport { metadata: None, diagnostics: vec![error] },
+    };
+    compile_file_metadata_with_diagnostics(&resolved, options)
+}
+
+fn compile_file_metadata_with_diagnostics(path: &Utf8Path, options: CompileOptions) -> CompileMetadataDiagnosticReport {
+    let source = match std::fs::read_to_string(path) {
+        Ok(source) => source,
+        Err(error) => {
+            return CompileMetadataDiagnosticReport {
+                metadata: None,
+                diagnostics: vec![
+                    CompileError::new(format!("failed to read file: {}", error), error::Span::default()).with_file(path.to_owned())
+                ],
+            };
+        }
+    };
+    let tokens = match lexer::lex(&source) {
+        Ok(tokens) => tokens,
+        Err(error) => return CompileMetadataDiagnosticReport { metadata: None, diagnostics: vec![error.with_file(path.to_owned())] },
+    };
+    let ast = match parser::parse(&tokens) {
+        Ok(ast) => ast,
+        Err(error) => return CompileMetadataDiagnosticReport { metadata: None, diagnostics: vec![error.with_file(path.to_owned())] },
+    };
+    let resolver = match build_module_resolver(path, &ast) {
+        Ok(resolver) => resolver,
+        Err(error) => return CompileMetadataDiagnosticReport { metadata: None, diagnostics: vec![error] },
+    };
+    let manifest = match find_package_root(path).and_then(|root| root.map(|root| load_manifest(&root)).transpose()) {
+        Ok(manifest) => manifest,
+        Err(error) => return CompileMetadataDiagnosticReport { metadata: None, diagnostics: vec![error] },
+    };
+    let build = manifest.as_ref().map(|manifest| &manifest.build);
+
+    if let Err(error) = validate_compile_options(&options) {
+        return CompileMetadataDiagnosticReport { metadata: None, diagnostics: vec![error] };
+    }
+    let target_profile = match TargetProfile::from_options(&options, build).and_then(|profile| {
+        profile.ensure_compile_supported()?;
+        Ok(profile)
+    }) {
+        Ok(profile) => profile,
+        Err(error) => return CompileMetadataDiagnosticReport { metadata: None, diagnostics: vec![error] },
+    };
+    let artifact_format = match ArtifactFormat::from_target(resolve_target(&options, build)) {
+        Ok(format) => format,
+        Err(error) => return CompileMetadataDiagnosticReport { metadata: None, diagnostics: vec![error] },
+    };
+
+    if options.is_primitive_strict_015() {
+        if let Err(error) = check_primitive_strict_015(&ast) {
+            return CompileMetadataDiagnosticReport { metadata: None, diagnostics: vec![error.with_file(path.to_owned())] };
+        }
+    }
+
+    let mut diagnostics = attach_default_file(types::diagnostics_with_resolver(&ast, &resolver, &ast.name), path);
+    if diagnostics.iter().any(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error) {
+        return CompileMetadataDiagnosticReport { metadata: None, diagnostics };
+    }
+
+    diagnostics.extend(attach_default_file(flow::diagnostics(&ast), path));
+    if diagnostics.iter().any(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error) {
+        return CompileMetadataDiagnosticReport { metadata: None, diagnostics };
+    }
+
+    let ir = match ir::generate_with_resolver(&ast, &resolver, &ast.name) {
+        Ok(ir) => ir,
+        Err(error) => {
+            diagnostics.push(error.with_file(path.to_owned()));
+            return CompileMetadataDiagnosticReport { metadata: None, diagnostics };
+        }
+    };
+    let mut metadata = compile_metadata_from_ir(&ir, artifact_format, target_profile);
+    match collect_source_units_for_compile_file(path).and_then(|source_units| {
+        bind_source_metadata(&mut metadata, source_units);
+        if let Some(manifest) = manifest.as_ref() {
+            apply_manifest_deploy_metadata(&mut metadata, manifest)?;
+        }
+        validate_compile_metadata(&metadata, artifact_format)
+    }) {
+        Ok(()) => CompileMetadataDiagnosticReport { metadata: Some(metadata), diagnostics },
+        Err(error) => {
+            diagnostics.push(error);
+            CompileMetadataDiagnosticReport { metadata: None, diagnostics }
+        }
+    }
+}
+
+fn attach_default_file(diagnostics: Vec<CompileError>, path: &Utf8Path) -> Vec<CompileError> {
+    diagnostics.into_iter().map(|error| if error.file.is_none() { error.with_file(path.to_owned()) } else { error }).collect()
+}
+
 #[cfg(test)]
 mod compile_diagnostic_tests {
     use super::*;

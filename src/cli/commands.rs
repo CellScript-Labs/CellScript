@@ -1,13 +1,13 @@
 use crate::docgen::{DocGenerator, OutputFormat};
-use crate::error::Result;
+use crate::error::{CompileError, Result};
 use crate::fmt::format_default;
 use crate::package::{Dependency, DetailedDependency, Lockfile, PackageManager, PackageManifest, PolicyConfig};
 use crate::runtime_errors::{runtime_error_info, runtime_error_info_by_code, CellScriptRuntimeErrorInfo, ALL_RUNTIME_ERRORS};
 use crate::{
-    compile_path, compile_path_with_entry_action, compile_path_with_entry_lock, default_metadata_path_for_artifact,
-    default_output_path_for_input, load_modules_for_input, resolve_input_path, validate_artifact_metadata,
-    validate_source_units_on_disk, ArtifactFormat, CompileMetadata, CompileOptions, EntryWitnessArg, ParamMetadata, ProofPlanMetadata,
-    TargetProfile, ENTRY_WITNESS_ABI,
+    compile_path, compile_path_metadata_with_diagnostics, compile_path_with_entry_action, compile_path_with_entry_lock,
+    default_metadata_path_for_artifact, default_output_path_for_input, load_modules_for_input, resolve_input_path,
+    validate_artifact_metadata, validate_source_units_on_disk, ArtifactFormat, CompileMetadata, CompileOptions, EntryWitnessArg,
+    ParamMetadata, ProofPlanMetadata, TargetProfile, ENTRY_WITNESS_ABI,
 };
 use base64::Engine;
 use camino::Utf8Path;
@@ -1462,17 +1462,25 @@ impl CommandExecutor {
             if args.all_targets { vec![Some("riscv64-asm"), Some("riscv64-elf")] } else { vec![None] };
 
         for target in targets {
-            let result = compile_path(
-                ".",
-                CompileOptions {
-                    opt_level: 0,
-                    output: None,
-                    debug: false,
-                    target: target.map(str::to_string),
-                    target_profile: compile_target_profile.clone(),
-                    primitive_compat: args.primitive_compat.clone(),
-                },
-            )?;
+            let compile_options = CompileOptions {
+                opt_level: 0,
+                output: None,
+                debug: false,
+                target: target.map(str::to_string),
+                target_profile: compile_target_profile.clone(),
+                primitive_compat: args.primitive_compat.clone(),
+            };
+            let result = match compile_path(".", compile_options.clone()) {
+                Ok(result) => result,
+                Err(error) => {
+                    let diagnostics = compile_failure_diagnostics(Utf8Path::new("."), compile_options, error);
+                    if args.json {
+                        print_check_failure_json(&diagnostics, target, requested_profile)?;
+                        return Err(CompileError::without_span(format!("check failed with {} diagnostic(s)", diagnostics.len())));
+                    }
+                    return Err(diagnostics_to_error(&diagnostics));
+                }
+            };
             validate_check_policy(&result.metadata, &args)?;
             let target_profile_policy_violations =
                 target_profile_policy_violations(&result.metadata, result.artifact_format, requested_profile);
@@ -1656,17 +1664,18 @@ impl CommandExecutor {
         let input_path = args.input.unwrap_or_else(|| PathBuf::from("."));
         let input = Utf8Path::from_path(&input_path)
             .ok_or_else(|| crate::error::CompileError::without_span(format!("path '{}' is not valid UTF-8", input_path.display())))?;
-        let result = compile_path(
-            input,
-            CompileOptions {
-                opt_level: 0,
-                output: None,
-                debug: false,
-                target: args.target,
-                target_profile: args.target_profile,
-                primitive_compat: None,
-            },
-        )?;
+        let options = CompileOptions {
+            opt_level: 0,
+            output: None,
+            debug: false,
+            target: args.target,
+            target_profile: args.target_profile,
+            primitive_compat: None,
+        };
+        let result = match compile_path(input, options.clone()) {
+            Ok(result) => result,
+            Err(error) => return Err(diagnostics_to_error(&compile_failure_diagnostics(input, options, error))),
+        };
         let json = serde_json::to_string_pretty(&result.metadata)
             .map_err(|error| crate::error::CompileError::without_span(format!("failed to serialize metadata: {}", error)))?;
 
@@ -5025,6 +5034,60 @@ fn compile_cli_input(input: Option<&PathBuf>, options: CompileOptions) -> Result
     let input = Utf8Path::from_path(&input_path)
         .ok_or_else(|| crate::error::CompileError::without_span(format!("path '{}' is not valid UTF-8", input_path.display())))?;
     compile_path(input, options)
+}
+
+fn compile_failure_diagnostics(input: &Utf8Path, options: CompileOptions, fallback: CompileError) -> Vec<CompileError> {
+    let report = compile_path_metadata_with_diagnostics(input, options);
+    if report.diagnostics.is_empty() {
+        vec![fallback]
+    } else {
+        report.diagnostics
+    }
+}
+
+fn diagnostics_to_error(diagnostics: &[CompileError]) -> CompileError {
+    match diagnostics {
+        [] => CompileError::without_span("compile failed"),
+        [diagnostic] => diagnostic.clone(),
+        _ => CompileError::without_span(format!(
+            "{} diagnostics:\n{}",
+            diagnostics.len(),
+            diagnostics.iter().map(|diagnostic| format!("  - {}", diagnostic)).collect::<Vec<_>>().join("\n")
+        )),
+    }
+}
+
+fn print_check_failure_json(diagnostics: &[CompileError], target: Option<&str>, requested_profile: TargetProfile) -> Result<()> {
+    print_json(&serde_json::json!({
+        "status": "failed",
+        "checked_targets": [{
+            "requested_target": target.unwrap_or("package-default"),
+            "target_profile": requested_profile.name(),
+            "status": "failed",
+            "diagnostics": diagnostics_json(diagnostics),
+        }],
+        "diagnostics": diagnostics_json(diagnostics),
+    }))
+}
+
+fn diagnostics_json(diagnostics: &[CompileError]) -> Vec<serde_json::Value> {
+    diagnostics
+        .iter()
+        .map(|diagnostic| {
+            serde_json::json!({
+                "message": &diagnostic.message,
+                "severity": diagnostic.severity.label(),
+                "code": &diagnostic.code,
+                "file": diagnostic.file.as_ref().map(|file| file.as_str()),
+                "span": {
+                    "line": diagnostic.span.line,
+                    "column": diagnostic.span.column,
+                    "start": diagnostic.span.start,
+                    "end": diagnostic.span.end,
+                },
+            })
+        })
+        .collect()
 }
 
 fn read_metadata_json(path: &Path) -> Result<CompileMetadata> {
