@@ -6,7 +6,10 @@
   developer experience: top-level help now shows package commands plus direct
   compile mode, `cellc --list` enumerates commands, unknown bare commands get
   nearest-command suggestions, and direct parse/lex/compile errors print
-  `file:line:column` source snippets.
+  `file:line:column` source snippets. The top-level `cellc --explain <CODE>`
+  alias now mirrors the existing `cellc explain` command, and multi-diagnostic
+  package checks render each frontend error with its own source context instead
+  of collapsing them into one summary string.
 - Fix numeric-width soundness by requiring exact non-literal numeric type
   equality while preserving declared integer literal widths through type
   checking and IR lowering.

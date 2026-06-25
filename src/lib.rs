@@ -4519,11 +4519,7 @@ fn diagnostics_to_compile_error(mut diagnostics: Vec<CompileError>) -> CompileEr
     match diagnostics.len() {
         0 => CompileError::without_span("compilation failed"),
         1 => diagnostics.remove(0),
-        len => CompileError::without_span(format!(
-            "{} diagnostics:\n{}",
-            len,
-            diagnostics.iter().map(|diagnostic| format!("  - {}", diagnostic)).collect::<Vec<_>>().join("\n")
-        )),
+        len => CompileError::without_span(format!("aborting due to {} diagnostics", len)).with_related(diagnostics),
     }
 }
 

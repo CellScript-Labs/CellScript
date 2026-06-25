@@ -69,10 +69,20 @@ fn main() {
         return;
     }
 
-    if let Some(arg) = std::env::args().nth(1) {
+    let mut raw_args = std::env::args();
+    let _program = raw_args.next();
+    if let Some(arg) = raw_args.next() {
         match arg.as_str() {
             "--help" | "-h" => {
                 print_top_level_help();
+                return;
+            }
+            "--explain" => {
+                let Some(code) = raw_args.next() else {
+                    eprintln!("{}: the argument '--explain <CODE>' requires a value", "error".red());
+                    process::exit(2);
+                };
+                run_top_level_explain(code);
                 return;
             }
             "--list" => {
@@ -91,6 +101,10 @@ fn main() {
                 process::exit(1);
             }
             _ => {}
+        }
+        if let Some(code) = arg.strip_prefix("--explain=") {
+            run_top_level_explain(code.to_string());
+            return;
         }
     }
 
@@ -254,6 +268,26 @@ fn print_cli_error(error: &CompileError) {
 }
 
 fn print_cli_error_with_source(error: &CompileError, fallback_file: Option<&Utf8Path>, fallback_source: Option<&str>) {
+    if !error.related.is_empty() {
+        for diagnostic in &error.related {
+            print_single_cli_error(diagnostic, fallback_file, fallback_source);
+        }
+        let error_count =
+            error.related.iter().filter(|diagnostic| diagnostic.severity == cellscript::error::DiagnosticSeverity::Error).count();
+        let warning_count = error.related.len().saturating_sub(error_count);
+        let noun = if error.related.len() == 1 { "diagnostic" } else { "diagnostics" };
+        if warning_count > 0 {
+            eprintln!("{}: aborting due to {} error(s) and {} warning(s)", "error".red(), error_count, warning_count);
+        } else {
+            eprintln!("{}: aborting due to {} {}", "error".red(), error.related.len(), noun);
+        }
+        return;
+    }
+
+    print_single_cli_error(error, fallback_file, fallback_source);
+}
+
+fn print_single_cli_error(error: &CompileError, fallback_file: Option<&Utf8Path>, fallback_source: Option<&str>) {
     let runtime_info = cellscript::runtime_errors::runtime_error_info_for_diagnostic_message(&error.message);
     let label = diagnostic_label(error, runtime_info.as_ref());
     if let Some((file, source)) = diagnostic_source(error, fallback_file, fallback_source) {
@@ -269,6 +303,14 @@ fn print_cli_error_with_source(error: &CompileError, fallback_file: Option<&Utf8
         eprintln!("  {}: run `cellc explain E{:04}` for {}", "help".cyan(), info.code, info.name);
     }
     print_followup_hints(error);
+}
+
+fn run_top_level_explain(code: String) {
+    let command = cellscript::cli::commands::Command::Explain(cellscript::cli::commands::ExplainArgs { code, json: false });
+    if let Err(error) = cellscript::cli::commands::CommandExecutor::execute(command) {
+        print_cli_error(&error);
+        process::exit(1);
+    }
 }
 
 fn diagnostic_label(error: &CompileError, runtime_info: Option<&cellscript::runtime_errors::CellScriptRuntimeErrorInfo>) -> String {
@@ -436,6 +478,7 @@ fn print_top_level_help() {
     println!("      --primitive-compat <VERSION> Accept older primitive syntax with hints");
     println!("      --primitive-strict <VERSION> Reject legacy primitive syntax");
     println!("      --lex / --parse              Stop after lexing or parsing");
+    println!("      --explain <CODE>             Explain a CellScript runtime error code");
     println!("  -i, --interactive                Start the REPL");
     println!("      --gen-stdlib                 Print generated standard library assembly");
     println!("      --lsp                        Start the language server over stdio");

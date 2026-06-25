@@ -5053,11 +5053,9 @@ fn diagnostics_to_error(diagnostics: &[CompileError]) -> CompileError {
     match diagnostics {
         [] => CompileError::without_span("compile failed"),
         [diagnostic] => diagnostic.clone(),
-        _ => CompileError::without_span(format!(
-            "{} diagnostics:\n{}",
-            diagnostics.len(),
-            diagnostics.iter().map(|diagnostic| format!("  - {}", diagnostic)).collect::<Vec<_>>().join("\n")
-        )),
+        _ => {
+            CompileError::without_span(format!("aborting due to {} diagnostics", diagnostics.len())).with_related(diagnostics.to_vec())
+        }
     }
 }
 

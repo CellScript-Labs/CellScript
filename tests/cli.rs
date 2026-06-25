@@ -89,7 +89,18 @@ fn cellc_top_level_help_shows_commands_and_direct_source_mode() {
     assert!(stdout.contains("Direct source mode:"), "unexpected help: {stdout}");
     assert!(stdout.contains("build"), "unexpected help: {stdout}");
     assert!(stdout.contains("verify-artifact"), "unexpected help: {stdout}");
+    assert!(stdout.contains("--explain <CODE>"), "unexpected help: {stdout}");
     assert!(stdout.contains("Run `cellc <command> --help`"), "unexpected help: {stdout}");
+}
+
+#[test]
+fn cellc_top_level_explain_matches_explain_command() {
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).args(["--explain", "E0001"]).output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("CellScript runtime error E0001"), "unexpected explain output: {stdout}");
+    assert!(stdout.contains("syscall-failed"), "unexpected explain output: {stdout}");
 }
 
 #[test]
@@ -163,6 +174,48 @@ resource Token {
     assert!(stderr.contains("bad.cell:4:12") || stderr.contains("bad.cell:4:13"), "unexpected stderr: {stderr}");
     assert!(stderr.contains("4 |     amount:"), "unexpected stderr: {stderr}");
     assert!(stderr.contains("^ expected type"), "unexpected stderr: {stderr}");
+}
+
+#[test]
+fn cellc_check_multiple_diagnostics_prints_each_source_context() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        temp.path().join("Cell.toml"),
+        r#"[package]
+name = "bad"
+version = "0.1.0"
+entry = "src/main.cell"
+"#,
+    )
+    .unwrap();
+    std::fs::create_dir_all(temp.path().join("src")).unwrap();
+    std::fs::write(
+        temp.path().join("src/main.cell"),
+        r#"module multi_errors
+
+action bad_one() -> u64 {
+    verification
+        return true
+}
+
+action bad_two() -> bool {
+    verification
+        return 1
+}
+"#,
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).arg("check").current_dir(temp.path()).output().unwrap();
+    assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("return type mismatch: expected U64, found Bool"), "unexpected stderr: {stderr}");
+    assert!(stderr.contains("return type mismatch: expected Bool, found U64"), "unexpected stderr: {stderr}");
+    assert!(stderr.contains("5 |         return true"), "unexpected stderr: {stderr}");
+    assert!(stderr.contains("10 |         return 1"), "unexpected stderr: {stderr}");
+    assert!(stderr.contains("aborting due to 2 diagnostics"), "unexpected stderr: {stderr}");
+    assert!(!stderr.contains("2 diagnostics:\n  -"), "unexpected collapsed diagnostics: {stderr}");
 }
 
 #[test]

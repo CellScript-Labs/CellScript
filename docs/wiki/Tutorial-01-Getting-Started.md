@@ -63,6 +63,16 @@ To list every package command without the direct source options, use:
 ./target/debug/cellc --list
 ```
 
+Runtime error explanations are available from the top level, matching the
+compiler-style flow of reading an error and asking for the code behind it:
+
+```bash
+./target/debug/cellc --explain E0001
+```
+
+When `cellc check` finds several independent frontend errors, it prints each
+one with its own `file:line:column` source snippet before the final summary.
+
 ## Compile One Source File
 
 Start with `examples/token.cell`. It is small, but it already shows the main

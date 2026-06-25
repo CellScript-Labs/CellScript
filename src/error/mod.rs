@@ -55,11 +55,12 @@ pub struct CompileError {
     pub file: Option<Utf8PathBuf>,
     pub code: Option<String>,
     pub severity: DiagnosticSeverity,
+    pub related: Vec<CompileError>,
 }
 
 impl CompileError {
     pub fn new(message: impl Into<String>, span: Span) -> Self {
-        Self { message: message.into(), span, file: None, code: None, severity: DiagnosticSeverity::Error }
+        Self { message: message.into(), span, file: None, code: None, severity: DiagnosticSeverity::Error, related: Vec::new() }
     }
 
     pub fn warning(message: impl Into<String>, span: Span) -> Self {
@@ -82,6 +83,11 @@ impl CompileError {
 
     pub fn with_file(mut self, file: Utf8PathBuf) -> Self {
         self.file = Some(file);
+        self
+    }
+
+    pub fn with_related(mut self, related: Vec<CompileError>) -> Self {
+        self.related = related;
         self
     }
 }
