@@ -189,10 +189,10 @@ cellc ckb-hash --file build/main.elf
 cellc verify-artifact build/main.elf --expect-target-profile ckb --verify-sources --production
 ```
 
-Builder-facing contract commands such as `entry-witness`, `solve-tx`,
-`explain-assumptions`, `validate-tx`, `resource-identity`, and
-`builder manifest/check` emit JSON by default. Add `--human` when you want a
-short terminal summary instead of the contract JSON.
+Builder-facing contract commands such as `action build`, `entry-witness`,
+`solve-tx`, `explain-assumptions`, `validate-tx`, and `gen-builder` expose the
+metadata that transaction builders consume. Prefer `--json` where a command
+offers it, and reserve human summaries for interactive review.
 
 These reports are not busywork. They answer questions reviewers will ask:
 
@@ -226,15 +226,18 @@ You can also add and lock a local dependency in one command:
 cellc install my_lib --path ../my_lib
 ```
 
-Git dependencies must be pinned to a full commit hash:
+The current CLI can record a Git dependency URL:
 
 ```bash
-cellc add math --git https://example.com/math.git --rev 0123456789abcdef0123456789abcdef01234567
-cellc install math --git https://example.com/math.git --rev 0123456789abcdef0123456789abcdef01234567
+cellc add math --git https://example.com/math.git
+cellc install math --git https://example.com/math.git
 ```
 
-Branch, tag, and default-branch git dependencies are rejected because they can
-move without changing `Cell.toml`.
+For reviewable package identity, prefer a manifest-level detailed dependency
+with `rev = "<full-commit-hash>"`, then run `cellc install` so `Cell.lock`
+records the resolved package source. Branch, tag, and default-branch Git
+dependencies are easier to move without changing `Cell.toml`, so treat them as
+development convenience rather than production evidence.
 
 Remove it:
 
@@ -295,16 +298,13 @@ hashes, build profile, TCB/security status, and any production CellDep pins.
 A NovaSeal starter project, by contrast, is not dependency-safe merely because
 it contains useful `.cell` code. If users are expected to copy it and edit terms,
 authorities, manifests, or deployment pins, it belongs in a cookbook or template
-flow such as:
-
-```bash
-cellc new my_agreement --template novaseal/mvb-starter
-cellc cookbook copy novaseal/agreement-profile ./my-agreement
-```
+flow, not in dependency resolution. The current `cellc` CLI does not ship a
+template or cookbook-copy command; copy starter material with repository tooling
+or a future scaffold command, then treat the result as local project source.
 
 It should not be installed with:
 
-```bash
+```text
 cellc add novaseal/mvb-starter
 ```
 

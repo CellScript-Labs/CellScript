@@ -1,8 +1,9 @@
 # Tutorial 11: Scoped Invariants and ProofPlan
 
-CellScript 0.15 adds scoped invariants and Covenant ProofPlan metadata. This
-chapter explains what they are for, what the compiler records today, and how to
-read the evidence without mistaking metadata for executable verifier code.
+CellScript's current invariant surface started in 0.15 and remains part of the
+0.20 authoring model. This chapter explains what it is for, what the compiler
+records today, and how to read the evidence without mistaking metadata for
+executable verifier code.
 
 ## What You Will Learn
 
@@ -43,7 +44,7 @@ coverage status, warnings, and builder assumptions.
 
 ## Triggers
 
-CellScript 0.15 supports three invariant triggers:
+The current invariant surface supports three invariant triggers:
 
 | Trigger | Use it when |
 |---|---|
@@ -56,7 +57,7 @@ claiming to describe.
 
 ## Scopes
 
-CellScript 0.15 supports three scopes:
+The current invariant surface supports three scopes:
 
 | Scope | Meaning |
 |---|---|
@@ -70,7 +71,7 @@ has been fully checked.
 
 ## Aggregate Primitives
 
-The v0.15 aggregate primitives are:
+The aggregate primitives are:
 
 | Primitive | Typical use |
 |---|---|
@@ -113,7 +114,8 @@ invariant token_positive {
 
 `assert_invariant` is accepted alongside aggregate primitives. It is recorded in
 ProofPlan metadata and counts toward `declared_invariant_assertions` coverage.
-Like aggregate primitives, it is currently metadata-only in 0.15.
+Like aggregate primitives, it is currently metadata-only unless later action
+evidence or stricter gates close it.
 
 ## Inspect ProofPlan Output
 
@@ -210,7 +212,7 @@ Interpretation:
 
 ## Metadata-Only Is Not Failure
 
-In 0.15, many declared aggregate invariants intentionally emit
+In the default development mode, many declared aggregate invariants intentionally emit
 `gap:metadata-only`. That is useful, not useless:
 
 - reviews can see the intended invariant;
@@ -333,7 +335,7 @@ witness, layout, struct field initialization, or serialization boundaries.
 
 For boundary values, the source should show intent:
 
-```cellscript
+```text
 receipt.amount = value as u64
 ```
 
@@ -403,7 +405,9 @@ commands unless you create a `Cell.toml` there.
   metadata verification.
 - Use `Tutorial-08-Bundled-Example-Contracts` to see production-oriented example
   contracts.
-- Read `docs/releases/CELLSCRIPT_0_15_RELEASE_NOTES.md` for the release boundary.
-- Read `roadmap/CELLSCRIPT_0_16_ROADMAP.md` and
-  `docs/releases/CELLSCRIPT_0_16_2_RELEASE_NOTES.md` for the implemented
-  0.16 ProofPlan soundness and metadata-assurance boundary.
+- Read `docs/releases/CELLSCRIPT_0_20_RELEASE_NOTES.md` for the current source,
+  package, and evidence boundary.
+- Read `docs/releases/CELLSCRIPT_0_15_RELEASE_NOTES.md`,
+  `roadmap/CELLSCRIPT_0_16_ROADMAP.md`, and
+  `docs/releases/CELLSCRIPT_0_16_2_RELEASE_NOTES.md` for the historical
+  ProofPlan soundness and metadata-assurance boundary.

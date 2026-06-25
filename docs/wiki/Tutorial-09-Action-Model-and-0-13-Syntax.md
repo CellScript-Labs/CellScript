@@ -6,7 +6,7 @@ the proposed Cell transformation is allowed.
 
 The canonical form is:
 
-```cellscript
+```text
 action NAME(params...) -> outputs {
     transition old_state -> new_state
     transition another_old.state: A -> another_new.state: B
@@ -15,7 +15,7 @@ action NAME(params...) -> outputs {
         require ...
         consume ...
         destroy ...
-        preserve old_state -> new_state {
+        preserve new_state from old_state {
             field_a
             field_b
         }
@@ -50,9 +50,7 @@ shared Pool has store {
     fee_rate_bps: u16
 }
 
-action swap_a_for_b(pool_before: Pool, input: Token, min_output: u64, to: Address)
-    -> (pool_after: Pool, token_out: Token)
-{
+action swap_a_for_b(pool_before: Pool, input: Token, min_output: u64, to: Address) -> (pool_after: Pool, token_out: Token) {
     transition pool_before -> pool_after
 
     verification
@@ -67,7 +65,7 @@ action swap_a_for_b(pool_before: Pool, input: Token, min_output: u64, to: Addres
         consume input
         require pool_after.reserve_a == pool_before.reserve_a + input.amount
         require pool_after.reserve_b == pool_before.reserve_b - amount_out
-        preserve pool_before -> pool_after {
+        preserve pool_after from pool_before {
             token_a_symbol
             token_b_symbol
             total_lp
@@ -98,7 +96,7 @@ action fill_offer(input: Offer, buyer: Address) -> output: Offer {
 
     verification
         require output.buyer == buyer
-        preserve input -> output {
+        preserve output from input {
             seller
             price
             payment_symbol
@@ -124,9 +122,7 @@ receipt Listing has consume, burn {
     expires_at: u64
 }
 
-action buy_listing(listing: Listing, nft_before: NFT, payment: Token, buyer: Address)
-    -> (nft_after: NFT, seller_payment: Token)
-{
+action buy_listing(listing: Listing, nft_before: NFT, payment: Token, buyer: Address) -> (nft_after: NFT, seller_payment: Token) {
     transition nft_before -> nft_after
 
     verification
@@ -137,7 +133,7 @@ action buy_listing(listing: Listing, nft_before: NFT, payment: Token, buyer: Add
         consume payment
         destroy listing
         require nft_after.owner == buyer
-        preserve nft_before -> nft_after {
+        preserve nft_after from nft_before {
             collection_id
             token_id
             metadata_hash
@@ -158,9 +154,7 @@ Split and merge are resource accounting actions, not identity-bearing state
 continuations:
 
 ```cellscript
-action split_token(token: Token, amount_a: u64, owner_a: Address, owner_b: Address)
-    -> (part_a: Token, part_b: Token)
-{
+action split_token(token: Token, amount_a: u64, owner_a: Address, owner_b: Address) -> (part_a: Token, part_b: Token) {
     verification
         require amount_a > 0
         require amount_a < token.amount

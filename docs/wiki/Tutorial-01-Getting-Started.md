@@ -48,6 +48,14 @@ Or call the built binary directly:
 
 Both forms are useful. `cargo run` is convenient while developing the compiler.
 The direct binary is closer to how users call `cellc` after installation.
+The top-level help shows the legacy direct single-file compiler flags. Package
+commands have their own help pages:
+
+```bash
+./target/debug/cellc build --help
+./target/debug/cellc check --help
+./target/debug/cellc init --help
+```
 
 ## Compile One Source File
 

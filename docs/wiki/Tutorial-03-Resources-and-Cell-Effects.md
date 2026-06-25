@@ -14,7 +14,7 @@ place. A transaction spends Cells and creates new Cells.
 - how `action(before: T) -> after: T` expresses the verifier core for
   input-to-output transitions;
 - how `create_unique` and `replace_unique` preserve declared identity;
-- why v0.15 uses explicit destruction policy forms;
+- why the current syntax uses explicit destruction policy forms;
 - why unsupported CKB runtime behavior should fail closed.
 
 ## The Main Effects
@@ -138,7 +138,7 @@ symmetrically. If one branch requires `output.claimable`, sibling branches must
 also constrain `output.claimable` unless it was already constrained in the
 surrounding proof scope.
 
-Bare `destroy token` remains available. In `--primitive-compat=0.15` legacy
+Bare `destroy token` remains available. In `--primitive-compat=0.14` legacy
 compatibility mode, it must be authorized by the `consume + burn` kernel effects
 instead of the legacy `destroy` attribute. Choose a policy-specific destruction
 form when reviewers need to see whether the contract proves singleton absence,
@@ -152,7 +152,7 @@ verifier model this is sugar for selecting and checking a proposed transaction
 output; the script still validates an existing transaction, it does not allocate
 Cells inside CKB-VM.
 
-```cellscript
+```text
 create token = Token {
     amount,
     symbol: auth.token_symbol
@@ -230,7 +230,7 @@ identity evidence across input and output: fixed-width field bytes for
 `field(...)`, LockHash for `script_args`, and TypeHash for `ckb_type_id` or
 `singleton_type`.
 
-For `create_unique`, 0.15 emits local runtime anchors for the created output.
+For `create_unique`, the compiler emits local runtime anchors for the created output.
 The full global uniqueness proof is recorded as runtime-required and still
 needs TYPE_ID builder-plan evidence or builder/indexer evidence; do not treat
 compiler metadata alone as a chain-wide uniqueness proof.
@@ -239,7 +239,7 @@ compiler metadata alone as a chain-wide uniqueness proof.
 
 Use the destruction form that matches the proof you need:
 
-```cellscript
+```text
 destroy_singleton_type(config)
 destroy_unique(asset, identity = type_id)
 destroy_instance(nft, identity_field = token_id)
@@ -323,7 +323,7 @@ closed.
 ## Next
 
 After you know how values move, continue with
-[Action Model and 0.13 Syntax](https://github.com/CellScript-Labs/CellScript/wiki/Tutorial-09-Action-Model-and-0-13-Syntax)
+[Action Model and Canonical Syntax](https://github.com/CellScript-Labs/CellScript/wiki/Tutorial-09-Action-Model-and-0-13-Syntax)
 for a deeper walkthrough of signature-direction actions, then use
 [Cookbook Recipes](https://github.com/CellScript-Labs/CellScript/wiki/Cookbook-Recipes)
 for small copyable patterns.

@@ -85,14 +85,18 @@ AMM, and launch examples now compile their bundled business actions as original
 scoped entries under that strict gate; keep the matching chain evidence before
 calling the artifacts production-ready.
 
-To exercise the package form and dependency graph:
+To exercise the package form and dependency graph from the examples workspace:
 
 ```bash
-cellc build examples/token --target riscv64-elf --target-profile ckb
-cellc build examples/amm_pool --target riscv64-elf --target-profile ckb
-cellc build examples/launch --target riscv64-elf --target-profile ckb
-cellc build --workspace --manifest-path examples/Cell.toml --json
+cd examples
+cellc build --package token --target riscv64-elf --target-profile ckb --json
+cellc build --package amm_pool --target riscv64-elf --target-profile ckb --json
+cellc build --package launch --target riscv64-elf --target-profile ckb --json
 ```
+
+Do not treat `cellc build --workspace` as the canonical compile-all command for
+this checked-in examples tree. Some folders under `examples/` are compiler and
+tooling fixtures rather than packages with a `src/main.cell` entry.
 
 Package metadata includes source-unit hashes for the entry package and local
 path dependencies, so reviewers can see which `.cell` files participated in the

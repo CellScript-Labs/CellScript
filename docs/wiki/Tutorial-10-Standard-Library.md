@@ -25,7 +25,8 @@ compiler does not understand.
 
 ## Namespaces
 
-The 0.15 release line uses these source-facing namespaces:
+The current stdlib surface keeps the 0.15 lifecycle namespace model and uses
+these source-facing namespaces:
 
 | Namespace | Purpose |
 |---|---|
@@ -73,7 +74,7 @@ replaced with ad hoc field names.
 pattern. It requires both values to have an `amount` field with matching field
 types and then checks:
 
-```cellscript
+```text
 require output.amount == input.amount
 ```
 
@@ -95,7 +96,7 @@ reviewable.
 
 ## Lifecycle Patterns
 
-Lifecycle patterns are the main reason stdlib exists in the 0.15 line. The
+Lifecycle patterns are the main reason the stable stdlib surface exists. The
 old core `transfer`, `claim`, and `settle` expression verbs are gone. The
 stdlib replacements are explicit patterns with canonical expansions.
 
@@ -128,7 +129,7 @@ action transfer_coin(coin: Coin, to: Address) -> next_coin: Coin {
 
 This has the same audit shape as writing the pieces directly:
 
-```cellscript
+```text
 consume coin
 
 create next_coin = Coin {
@@ -183,7 +184,7 @@ Lifecycle stdlib patterns are Cell effects. Do not put them inside anonymous
 
 Allowed:
 
-```cellscript
+```text
 require {
     output.amount == input.amount
     output.nonce == input.nonce + 1
@@ -192,7 +193,7 @@ require {
 
 Rejected:
 
-```cellscript
+```text
 require {
     std::lifecycle::transfer(input, output, to) {
         amount
@@ -295,9 +296,9 @@ The compact language example lives at:
 examples/language/stdlib.cell
 ```
 
-It demonstrates the stable 0.15 stdlib patterns:
+It demonstrates the stable stdlib patterns:
 
-```cellscript
+```text
 std::cell::preserve_type(coin_after, coin_before)
 std::cell::same_lock(coin_after, coin_before)
 std::cell::preserve_lock(coin_after, coin_before)

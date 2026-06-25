@@ -92,7 +92,7 @@ that call surface.
 
 Common field and parameter types include:
 
-```cellscript
+```text
 u8
 u16
 u32
@@ -112,7 +112,7 @@ schema or CKB data layout.
 CellScript supports expression-local primitive unsigned integer widening for
 arithmetic and numeric comparison:
 
-```cellscript
+```text
 let total: u64 = amount_u64 + fee_u16
 let under_limit: bool = fee_u16 < amount_u64
 ```
@@ -124,13 +124,13 @@ boundaries.
 
 Integer literals may be context-typed by an expected primitive integer type:
 
-```cellscript
+```text
 let byte: u8 = 1
 ```
 
 Non-literal numeric values must keep their actual width at boundaries:
 
-```cellscript
+```text
 let amount64: u64 = amount16        // rejected
 let explicit: u64 = amount16 as u64 // accepted
 ```
@@ -177,7 +177,7 @@ A struct is a shape. It does not create on-chain storage by itself. A local
 Struct literals and Cell `create` literals both support field shorthand when the
 field name and local variable name match:
 
-```cellscript
+```text
 let config = Config { threshold }
 
 create token = Token {
@@ -193,7 +193,7 @@ The shorthand is exactly `field: field`; it does not infer or rename fields.
 Use `[]` and `[x, y]` for local `Vec<T>` construction only where the expected
 type is already known:
 
-```cellscript
+```text
 let mut keys: Vec<Hash> = []
 let mut owners: Vec<Address> = [primary_owner, backup_owner]
 
@@ -242,7 +242,8 @@ Supported spellings are `Data`, `Data1`, `Data2`, and `Type`. The lowercase CKB
 forms are accepted too. Unknown hash types are compile errors, not deployment
 warnings.
 
-CellScript 0.15 resets `has ...` clauses from protocol verbs to kernel effects.
+The current syntax inherits the 0.15 reset of `has ...` clauses from protocol
+verbs to kernel effects.
 New strict-mode declarations should use capabilities such as `create`,
 `consume`, `replace`, `burn`, `relock`, `retarget_type`, and `read_ref`.
 The older `transfer` and `destroy` capability words are accepted only through
@@ -366,9 +367,9 @@ transaction; it does not allocate Cells inside CKB-VM.
 
 ## Scoped Invariants
 
-CellScript 0.15 adds top-level invariant declarations. They are deliberately
-explicit about the verifier trigger, the protected scope, and the CKB views
-they read:
+The current authoring surface includes top-level invariant declarations. They
+are deliberately explicit about the verifier trigger, the protected scope, and
+the CKB views they read:
 
 ```cellscript
 invariant token_conservation {
@@ -384,8 +385,7 @@ Supported triggers are `explicit_entry`, `lock_group`, and `type_group`.
 Supported scopes are `selected_cells`, `group`, and `transaction`.
 Aggregate primitives such as `assert_sum`, `assert_conserved`,
 `assert_delta`, `assert_distinct`, and `assert_singleton` are recorded in
-ProofPlan metadata in 0.15; executable aggregate lowering is still a later
-milestone.
+ProofPlan metadata; executable aggregate lowering is still a later milestone.
 
 ## Locks
 
