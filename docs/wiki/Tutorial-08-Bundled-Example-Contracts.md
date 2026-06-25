@@ -18,11 +18,24 @@ example.
 | `examples/amm_pool.cell` | Shared pool state, bounded swap logic, liquidity receipts, LP ownership checks, and settlement effects. |
 | `examples/launch.cell` | Mint-authority bootstrap and launch/pool composition patterns. |
 
-The top-level `examples/*.cell` files are the canonical bundled business
-source. They are both the clean reading surface and the source compiled by the
-CKB acceptance runner. There are no checked-in `examples/business` or
-`examples/acceptance` mirrors; acceptance-only profile/effect/scheduler
-metadata belongs in runner configuration or generated files under `target/`.
+The top-level `examples/*.cell` files are the clean reading surface and remain
+the CKB acceptance runner's business-source mirror. The package directories under
+`examples/<name>/` are the package workflow version of the same examples. Use
+them when you want to exercise `Cell.toml`, path dependencies, source hashing,
+and cross-package type/schema imports.
+
+The package examples deliberately show the current multi-file boundary:
+
+- `examples/amm_pool` imports `Token` from `examples/token`;
+- `examples/vesting` imports `Token` from `examples/token`;
+- `examples/launch` imports `Token` and `MintAuthority` from `examples/token`,
+  plus `Pool` and `LPReceipt` from `examples/amm_pool`.
+
+Those imports reuse Cell schemas across packages. They do not link CKB scripts
+into one deployed program; each package entry still compiles to its own artifact.
+There are no checked-in `examples/business` or `examples/acceptance` mirrors;
+acceptance-only profile/effect/scheduler metadata belongs in runner
+configuration or generated files under `target/`.
 
 `examples/registry.cell` and every checked-in `examples/language/*.cell` file
 are intentionally outside the bundled production matrix. They are language
@@ -71,6 +84,19 @@ Use `--primitive-strict 0.16` for the pre-production ProofPlan gate. The token,
 AMM, and launch examples now compile their bundled business actions as original
 scoped entries under that strict gate; keep the matching chain evidence before
 calling the artifacts production-ready.
+
+To exercise the package form and dependency graph:
+
+```bash
+cellc build examples/token --target riscv64-elf --target-profile ckb
+cellc build examples/amm_pool --target riscv64-elf --target-profile ckb
+cellc build examples/launch --target riscv64-elf --target-profile ckb
+cellc build --workspace --manifest-path examples/Cell.toml --json
+```
+
+Package metadata includes source-unit hashes for the entry package and local
+path dependencies, so reviewers can see which `.cell` files participated in the
+compile.
 
 ## Token Walkthrough
 

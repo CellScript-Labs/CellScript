@@ -31,6 +31,52 @@ either without coordinating with the release gate.
    — what each gate mode (dev / ci / backend / release / release-quick) is
    meant to catch.
 
+## Official CKB AI resources
+
+For CKB-related work, prefer official CKB documentation over model memory. Start
+with:
+
+- `https://docs.nervos.org/llms.txt`
+- `https://docs.nervos.org/llms-full.txt`
+- `https://docs.nervos.org/docs/ai-agents/ai-resource`
+- `https://ckb-ai.ckbdev.com/`
+
+Treat the official docs and LLM files as the source of truth for Cell Model,
+Script, transaction, SDK, testing, deployment, and version-sensitive behaviour.
+CKB AI MCP and CKB Dev Skills are useful for discovery, workflow guidance, Cell
+queries, RPC usage, debugging, examples, and prompts, but they are still under
+active development. Verify important or version-sensitive answers against the
+official docs, source repositories, RFCs, or release notes before coding or
+making claims.
+
+CKB uses the Cell Model, not an account model. Transactions consume live Cells
+and create new Cells. State changes happen through Cell replacement. Lock
+Scripts control spending; Type Scripts validate state rules; Scripts run in
+CKB-VM.
+
+Before coding CKB-facing changes, determine whether the task is dApp
+integration, Script development, node/RPC work, or CellScript compiler/backend
+work, then use the relevant official docs, maintained templates, and tooling.
+Use these defaults unless the task explicitly requires a different path:
+
+- For on-chain Scripts, prefer Rust with `ckb-std`; use C with `ckb-c-stdlib`
+  only for low-level or legacy C workflows, and JS with `ckb-js-vm` only when
+  the task explicitly targets the JS VM and the target network supports it.
+- For dApps, prefer CCC, including `@ckb-ccc/shell` for TypeScript transaction
+  work and `@ckb-ccc/connector-react` for React wallet connection flows.
+- For project scaffolding, prefer maintained `ckb-script-templates`.
+- For Script unit tests, prefer `ckb-testtool`; use `ckb-debugger` to reproduce
+  VM execution, inspect failures, or debug exported transactions.
+- For local development, prefer OffCKB unless the task depends on node, RPC,
+  networking, or custom chain configuration behaviour.
+- For Script deployment, prefer Type ID when upgradeability is required; use
+  direct data deployment only for immutable Scripts, examples, or cases where
+  upgradeability is intentionally not needed.
+- For serialization, use Molecule.
+
+Do not guess CKB node behaviour, VM behaviour, RPC schemas, SDK APIs, syscalls,
+deployed Scripts, network behaviour, or OffCKB behaviour. Verify before coding.
+
 ## Build, test, lint — the only commands you should reach for
 
 The unified entry point is `./scripts/cellscript_gate.sh <mode>`. CI runs it

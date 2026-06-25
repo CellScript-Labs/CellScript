@@ -2,6 +2,7 @@ use crate::ast::*;
 use crate::error::{CompileError, Result, Span};
 use std::collections::HashMap;
 
+#[derive(Debug)]
 pub struct ModuleResolver {
     modules: HashMap<String, Module>,
     symbol_tables: HashMap<String, SymbolTable>,
@@ -170,9 +171,7 @@ impl ModuleResolver {
 
     pub fn resolve_type(&self, module: &str, name: &str) -> Option<TypeDef> {
         if let Some((target_module, symbol)) = name.rsplit_once("::") {
-            if let Some(table) = self.symbol_tables.get(target_module) {
-                return table.types.get(symbol).cloned();
-            }
+            return self.symbol_tables.get(target_module).and_then(|table| table.types.get(symbol).cloned());
         }
 
         if let Some(table) = self.symbol_tables.get(module) {
@@ -181,18 +180,13 @@ impl ModuleResolver {
             }
 
             if let Some(full_path) = table.imported.get(name) {
-                let parts: Vec<&str> = full_path.split("::").collect();
-                if let Some(type_name) = parts.last() {
-                    for (mod_name, table) in &self.symbol_tables {
-                        if full_path.starts_with(mod_name) {
-                            return table.types.get(*type_name).cloned();
-                        }
-                    }
+                if let Some((target_module, symbol)) = full_path.rsplit_once("::") {
+                    return self.symbol_tables.get(target_module).and_then(|target_table| target_table.types.get(symbol).cloned());
                 }
             }
         }
 
-        self.resolve_type_global(name)
+        None
     }
 
     pub fn resolve_function(&self, module: &str, name: &str) -> Option<FunctionDef> {
@@ -201,9 +195,10 @@ impl ModuleResolver {
 
     pub fn resolve_function_with_module(&self, module: &str, name: &str) -> Option<(String, FunctionDef)> {
         if let Some((target_module, symbol)) = name.rsplit_once("::") {
-            if let Some(table) = self.symbol_tables.get(target_module) {
-                return table.functions.get(symbol).cloned().map(|function| (target_module.to_string(), function));
-            }
+            return self
+                .symbol_tables
+                .get(target_module)
+                .and_then(|table| table.functions.get(symbol).cloned().map(|function| (target_module.to_string(), function)));
         }
 
         if let Some(table) = self.symbol_tables.get(module) {
@@ -220,14 +215,12 @@ impl ModuleResolver {
             }
         }
 
-        self.resolve_function_global_with_module(name)
+        None
     }
 
     pub fn resolve_constant(&self, module: &str, name: &str) -> Option<ConstantDef> {
         if let Some((target_module, symbol)) = name.rsplit_once("::") {
-            if let Some(table) = self.symbol_tables.get(target_module) {
-                return table.constants.get(symbol).cloned();
-            }
+            return self.symbol_tables.get(target_module).and_then(|table| table.constants.get(symbol).cloned());
         }
 
         if let Some(table) = self.symbol_tables.get(module) {
@@ -244,28 +237,7 @@ impl ModuleResolver {
             }
         }
 
-        self.resolve_constant_global(name)
-    }
-
-    pub fn resolve_type_global(&self, name: &str) -> Option<TypeDef> {
-        let symbol = name.rsplit("::").next().unwrap_or(name);
-        self.symbol_tables.values().find_map(|table| table.types.get(symbol).cloned())
-    }
-
-    pub fn resolve_function_global(&self, name: &str) -> Option<FunctionDef> {
-        self.resolve_function_global_with_module(name).map(|(_, function)| function)
-    }
-
-    pub fn resolve_function_global_with_module(&self, name: &str) -> Option<(String, FunctionDef)> {
-        let symbol = name.rsplit("::").next().unwrap_or(name);
-        self.symbol_tables
-            .iter()
-            .find_map(|(module, table)| table.functions.get(symbol).cloned().map(|function| (module.clone(), function)))
-    }
-
-    pub fn resolve_constant_global(&self, name: &str) -> Option<ConstantDef> {
-        let symbol = name.rsplit("::").next().unwrap_or(name);
-        self.symbol_tables.values().find_map(|table| table.constants.get(symbol).cloned())
+        None
     }
 
     pub fn imports_for_module(&self, module: &str) -> Vec<ImportItem> {
@@ -274,6 +246,12 @@ impl ModuleResolver {
 
     pub fn module(&self, module: &str) -> Option<&Module> {
         self.modules.get(module)
+    }
+
+    pub fn module_has_symbol(&self, module: &str, name: &str) -> bool {
+        self.symbol_tables.get(module).is_some_and(|table| {
+            table.types.contains_key(name) || table.functions.contains_key(name) || table.constants.contains_key(name)
+        })
     }
 
     pub fn type_is_linear(&self, module: &str, name: &str) -> bool {
@@ -306,11 +284,24 @@ impl ModuleResolver {
     }
 
     pub fn check_circular_deps(&self) -> Result<()> {
-        for imports in self.imports.values() {
+        self.validate_imports()
+    }
+
+    pub fn validate_imports(&self) -> Result<()> {
+        for (module, imports) in &self.imports {
             for import in imports {
                 let target_module = import.module_path.join("::");
-                if !self.modules.contains_key(&target_module) {
-                    return Err(CompileError::new(format!("module '{}' not found", target_module), import.span));
+                if !self.symbol_tables.contains_key(&target_module) {
+                    return Err(CompileError::new(
+                        format!("module '{}' imported by '{}' not found", target_module, module),
+                        import.span,
+                    ));
+                };
+                if !self.module_has_symbol(&target_module, &import.name) {
+                    return Err(CompileError::new(
+                        format!("symbol '{}' imported by '{}' not found in module '{}'", import.name, module, target_module),
+                        import.span,
+                    ));
                 }
             }
         }
@@ -323,21 +314,29 @@ impl ModuleResolver {
             return None;
         }
 
-        let module_name = &path[0];
+        let full_path = path.join("::");
+        if self.modules.contains_key(&full_path) {
+            return Some(ResolvedName::Module(full_path));
+        }
 
-        if let Some(table) = self.symbol_tables.get(module_name) {
-            if path.len() == 1 {
-                return Some(ResolvedName::Module(module_name.clone()));
-            }
+        let (module_name, symbol_name) = if path.len() == 1 {
+            (path[0].clone(), None)
+        } else {
+            let (module_path, symbol) = path.split_at(path.len() - 1);
+            (module_path.join("::"), symbol.first().map(String::as_str))
+        };
 
-            let symbol_name = &path[1];
+        if let Some(table) = self.symbol_tables.get(&module_name) {
+            let Some(symbol_name) = symbol_name else {
+                return Some(ResolvedName::Module(module_name));
+            };
 
             if let Some(ty) = table.types.get(symbol_name) {
-                return Some(ResolvedName::Type(module_name.clone(), symbol_name.clone(), ty.clone()));
+                return Some(ResolvedName::Type(module_name.clone(), symbol_name.to_string(), ty.clone()));
             }
 
             if let Some(func) = table.functions.get(symbol_name) {
-                return Some(ResolvedName::Function(module_name.clone(), symbol_name.clone(), func.clone()));
+                return Some(ResolvedName::Function(module_name, symbol_name.to_string(), func.clone()));
             }
         }
 

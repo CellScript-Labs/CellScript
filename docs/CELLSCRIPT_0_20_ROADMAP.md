@@ -197,6 +197,40 @@ audit bundles all surface the split contract. Enum `match` exhaustiveness was
 already enforced by type checking; the remaining pattern item is a larger AST
 cleanup to replace raw `MatchArm.pattern: String` with structured pattern nodes.
 
+Twenty-fourth slice: multi-file project support is now a compiler/tooling
+contract rather than only an audit topic. Package compilation loads a validated
+source graph, import resolution is exact-path, incremental cache keys include
+dependency `.cell` files plus package manifests and lockfiles, file-backed LSP
+diagnostics use the package graph, and the WASM package exposes an additive
+multi-source metadata diagnostics API. Cross-file function-call linking remains
+deferred and fail-closed; the supported reusable pattern for 0.20 is shared
+schema/type imports that are inlined into each entry artifact.
+
+Twenty-fifth slice: the website playground now has a browser-local multi-file
+workspace UI that matches the compiler boundary. The UI provides a file tree
+over virtual `.cell` paths, an explicit entry file, file-aware diagnostics, and
+import/export for local workspaces. It does not add a server compile API,
+server-side source persistence, or remote project storage: all source parsing,
+source-set validation, and metadata compilation stay inside the existing Web
+Worker / WASM path. Import/export uses local file selection, multiple `.cell`
+files, and downloadable workspace JSON generated in the browser, with
+source-count and total-byte limits to keep browser CPU and memory bounded.
+
+Twenty-sixth slice: protocol-source multi-file adoption is now tracked as an
+evidence-gated candidate instead of a marketing claim. NovaSeal
+`fungible-xudt-profile-v0` now shares witness and commitment schema structs
+through `src/nova_fungible_xudt_schema.cell`; both
+`nova_fungible_xudt_type.cell` and
+`nova_fungible_xudt_lifecycle_type.cell` import those types. Metadata and
+artifact-preparation runs include the shared schema in `source_units`, proving
+that the compiler sees the cross-file graph. The live local devnet stateful run
+now passes issue, transfer, settle, and required negative cases for lifecycle
+artifact data hash
+`0x394da78133cb2f5a5d6cd911feceeab9e97e6ad5d36c0e50f18be56653af85e5`.
+iCKB benchmark sources remain unchanged because their three `.cell` files do
+not currently contain a natural shared schema/type boundary, and the checked-out
+DobEvo proposal contains no `.cell` source to refactor.
+
 The generated package should provide:
 
 - typed action functions;
@@ -265,6 +299,9 @@ Current status:
   commands and metadata, fixed keyboard focus/anchor behaviour, made the
   nine-tab model row scroll on mobile, and raised code/link contrast for WCAG
   AA readability.
+- The playground multi-file direction is browser-local only: virtual file tree,
+  local import/export, debounced Web Worker compilation, bounded source-set
+  size, no uploaded source archive, and no server-owned project state.
 - Phase 1 registry tutorial entry points are now visible from the wiki sidebar,
   while stale dependency-cache, codegen-refactor, iCKB investigation, and
   error-flow audit documents have been removed or archived so old audit notes do
@@ -280,6 +317,9 @@ Acceptance:
   runtime adapters and node-backed gates.
 - website changes carry their own build, interaction, accessibility, or
   Playwright smoke evidence; website polish is not protocol evidence.
+- playground file-tree or import/export changes carry browser build and
+  interaction smoke evidence, and must demonstrate that compile work still runs
+  client-side through WASM rather than a server endpoint.
 - the documentation map and wiki navigation point to current 0.20 status
   documents instead of stale audit files.
 
@@ -399,6 +439,30 @@ iCKB remains a benchmark and differential-evidence surface under
 claim. The refreshed committed matrix is evidence for the benchmark surface; it
 does not promote iCKB compatibility to the 0.20 release boundary.
 
+### Multi-File Protocol Showcase Policy
+
+NovaSeal, iCKB, and DobEvo / DOB-EVO sources may be refactored in 0.20 to
+demonstrate shared schema/type imports when that improves reviewability. Such
+changes are allowed to replace duplicated local type definitions with explicit
+`.cell` modules and `use` imports, but they must not introduce an ELF linker,
+cross-script runtime coupling, or cross-file helper calls as a cross-script
+linkage claim. Helper calls remain compile-time inlining inside one entry
+artifact.
+
+Any proposal/protocol source change that alters a deployable artifact,
+stateful workflow, or evidence-bound package must ship with matching evidence
+before it is presented as a protocol improvement:
+
+- NovaSeal shared-schema refactors require updated `cellc certify --plugin
+  novaseal-profile-v0` output and live local devnet/profile reports for the
+  affected profile set.
+- iCKB benchmark source refactors require the relevant CKB VM differential
+  matrix rows to be regenerated and kept labelled as benchmark/differential
+  evidence unless a later roadmap promotes the production-equivalence claim.
+- DobEvo / DOB-EVO package refactors require the DOB devnet workflow and
+  registry-pressure checks to be rerun, with public-promotion blockers
+  preserved until fixture depth and deployment-policy follow-ups close.
+
 Acceptance:
 
 - proposal-local gates must declare their scope, report schema, profile id, and
@@ -411,6 +475,9 @@ Acceptance:
   evidence before builders or registries claim byte-for-byte materialisation;
 - iCKB reports must remain labelled as benchmark/differential evidence unless a
   later roadmap explicitly promotes production-equivalence closure.
+- protocol-source multi-file showcases must include profile-specific devnet or
+  CKB VM evidence before the release notes can describe them as shipped
+  protocol behavior.
 
 ## P1: Registry Trust Hardening
 
@@ -472,6 +539,8 @@ stateful flow runner, and bridge envelope have real service-side consumers.
   without adapter identity, roundtrip vectors, and manifest hashes.
 - Do not treat public website polish or documentation navigation as protocol,
   compiler, or CKB VM evidence.
+- Do not add server-side playground source storage, server-side playground
+  compilation, or uploaded workspace persistence for multi-file authoring.
 - Do not mark a deployment mainnet-certified without external audit and chain
   evidence.
 - Do not make builder success a substitute for CKB VM / tx-pool acceptance.
@@ -496,7 +565,9 @@ negative builder-shape rejection fixtures
 deployment registry mismatch rejection fixtures
 cellc certify --plugin novaseal-profile-v0 when NovaSeal proposal evidence is claimed
 Evolving DOB devnet workflow and registry-pressure checks when DOB proposal evidence is claimed
+CKB VM differential matrix refresh when iCKB benchmark/protocol sources change
 website build and interaction/a11y smoke checks when website files change
+browser-local playground file-tree/import-export smoke checks when playground multi-file UI changes
 ```
 
 Required report fields:

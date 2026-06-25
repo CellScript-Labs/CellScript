@@ -74,7 +74,12 @@ High-value active references include:
   operational semantics live there.
 - `docs/0.20/` contains branch-local audit and investigation material for the
   current `nightly-0.20` line. It is not part of any prior release contract.
-  Current contents: `CELLSCRIPT_0_20_DOB_EVO_SWARM_AUDIT.md`.
+  Current contents: `compiler_swarm_audit.md`,
+  `CELLSCRIPT_0_20_DOB_EVO_SWARM_AUDIT.md`,
+  `CELLSCRIPT_MULTI_FILE_AUDIT_V2.md`, and
+  `CELLSCRIPT_MULTI_FILE_PROJECT_SUPPORT_AUDIT.md` (superseded by the v2
+  audit), plus `CELLSCRIPT_PROTOCOL_MULTI_FILE_EVIDENCE.md` for the
+  evidence-gated NovaSeal/iCKB/DobEvo protocol-source boundary.
 
 ## Examples
 

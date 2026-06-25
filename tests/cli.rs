@@ -2302,7 +2302,7 @@ action wrapper(amount: u64) -> Token {
 }
 
 #[test]
-fn cellc_rejects_external_dependency_function_calls_until_linking_exists() {
+fn cellc_compiles_external_dependency_function_calls() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
     let dep_root = root.join("dep_pkg");
@@ -2358,9 +2358,237 @@ action run(x: u64) -> u64 {
     .unwrap();
 
     let output = Command::new(env!("CARGO_BIN_EXE_cellc")).arg(&app_root).output().unwrap();
-    assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("external function call 'dep::math::add_one' is not linkable yet"), "unexpected stderr: {}", stderr);
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+
+    let artifact = std::fs::read_to_string(app_root.join("build").join("main.s")).unwrap();
+    assert!(artifact.contains("call __cellscript_ext_dep__math__add_one"), "external call was not lowered:\n{}", artifact);
+    assert!(artifact.contains("__cellscript_ext_dep__math__add_one:"), "external helper body was not merged:\n{}", artifact);
+    assert!(!artifact.contains("call dep::math::add_one"), "qualified label leaked into assembly:\n{}", artifact);
+}
+
+#[test]
+fn cellc_compiles_aliased_external_dependency_function_calls() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let dep_root = root.join("dep_pkg");
+    let app_root = root.join("app_pkg");
+
+    std::fs::create_dir_all(dep_root.join("src")).unwrap();
+    std::fs::create_dir_all(app_root.join("src")).unwrap();
+
+    std::fs::write(
+        dep_root.join("Cell.toml"),
+        r#"
+[package]
+name = "dep_pkg"
+version = "0.1.0"
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        dep_root.join("src").join("math.cell"),
+        r#"
+module dep::math
+
+fn add_one(x: u64) -> u64 {
+    return x + 1
+}
+"#,
+    )
+    .unwrap();
+
+    std::fs::write(
+        app_root.join("Cell.toml"),
+        r#"
+[package]
+name = "app_pkg"
+version = "0.1.0"
+
+[dependencies]
+dep_pkg = { path = "../dep_pkg" }
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        app_root.join("src").join("main.cell"),
+        r#"
+module app::main
+
+use dep::math::add_one as plus_one
+use dep::math::add_one as inc
+
+action run(x: u64) -> u64 {
+    verification
+        return plus_one(x) + inc(x)
+}
+"#,
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).arg(&app_root).output().unwrap();
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+
+    let artifact = std::fs::read_to_string(app_root.join("build").join("main.s")).unwrap();
+    assert!(artifact.contains("call plus_one"), "aliased external call was not lowered:\n{}", artifact);
+    assert!(artifact.contains("plus_one:"), "aliased external helper body was not merged:\n{}", artifact);
+    assert!(!artifact.contains("call inc"), "duplicate alias did not reuse the canonical imported label:\n{}", artifact);
+    assert!(!artifact.contains("inc:"), "duplicate alias emitted a second helper body:\n{}", artifact);
+    assert!(!artifact.contains("call add_one"), "alias call fell back to the dependency basename:\n{}", artifact);
+}
+
+#[test]
+fn cellc_compiles_same_basename_external_dependency_function_calls_without_collision() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let dep_a_root = root.join("dep_a_pkg");
+    let dep_b_root = root.join("dep_b_pkg");
+    let app_root = root.join("app_pkg");
+
+    std::fs::create_dir_all(dep_a_root.join("src")).unwrap();
+    std::fs::create_dir_all(dep_b_root.join("src")).unwrap();
+    std::fs::create_dir_all(app_root.join("src")).unwrap();
+
+    for (dep_root, package, module, delta) in
+        [(&dep_a_root, "dep_a_pkg", "dep_a::math", 1_u64), (&dep_b_root, "dep_b_pkg", "dep_b::math", 2_u64)]
+    {
+        std::fs::write(
+            dep_root.join("Cell.toml"),
+            format!(
+                r#"
+[package]
+name = "{package}"
+version = "0.1.0"
+"#
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            dep_root.join("src").join("math.cell"),
+            format!(
+                r#"
+module {module}
+
+fn add_one(x: u64) -> u64 {{
+    return x + {delta}
+}}
+"#
+            ),
+        )
+        .unwrap();
+    }
+
+    std::fs::write(
+        app_root.join("Cell.toml"),
+        r#"
+[package]
+name = "app_pkg"
+version = "0.1.0"
+
+[dependencies]
+dep_a_pkg = { path = "../dep_a_pkg" }
+dep_b_pkg = { path = "../dep_b_pkg" }
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        app_root.join("src").join("main.cell"),
+        r#"
+module app::main
+
+action run(x: u64) -> u64 {
+    verification
+        return dep_a::math::add_one(x) + dep_b::math::add_one(x)
+}
+"#,
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).arg(&app_root).output().unwrap();
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+
+    let artifact = std::fs::read_to_string(app_root.join("build").join("main.s")).unwrap();
+    assert!(artifact.contains("call __cellscript_ext_dep_a__math__add_one"), "dep_a call was not lowered:\n{}", artifact);
+    assert!(artifact.contains("call __cellscript_ext_dep_b__math__add_one"), "dep_b call was not lowered:\n{}", artifact);
+    assert!(
+        artifact.contains("__cellscript_ext_dep_a__math__add_one:") && artifact.contains("__cellscript_ext_dep_b__math__add_one:"),
+        "same-basename external helpers were not both merged:\n{}",
+        artifact
+    );
+    assert!(!artifact.contains("call dep_a::math::add_one"), "dep_a qualified label leaked into assembly:\n{}", artifact);
+    assert!(!artifact.contains("call dep_b::math::add_one"), "dep_b qualified label leaked into assembly:\n{}", artifact);
+}
+
+#[test]
+fn cellc_compiles_transitive_external_dependency_function_calls() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let dep_root = root.join("dep_pkg");
+    let app_root = root.join("app_pkg");
+
+    std::fs::create_dir_all(dep_root.join("src")).unwrap();
+    std::fs::create_dir_all(app_root.join("src")).unwrap();
+
+    std::fs::write(
+        dep_root.join("Cell.toml"),
+        r#"
+[package]
+name = "dep_pkg"
+version = "0.1.0"
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        dep_root.join("src").join("math.cell"),
+        r#"
+module dep::math
+
+fn add_one(x: u64) -> u64 {
+    return x + 1
+}
+
+fn add_two(x: u64) -> u64 {
+    return add_one(x) + 1
+}
+"#,
+    )
+    .unwrap();
+
+    std::fs::write(
+        app_root.join("Cell.toml"),
+        r#"
+[package]
+name = "app_pkg"
+version = "0.1.0"
+
+[dependencies]
+dep_pkg = { path = "../dep_pkg" }
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        app_root.join("src").join("main.cell"),
+        r#"
+module app::main
+
+action run(x: u64) -> u64 {
+    verification
+        return dep::math::add_two(x)
+}
+"#,
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).arg(&app_root).output().unwrap();
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+
+    let artifact = std::fs::read_to_string(app_root.join("build").join("main.s")).unwrap();
+    assert!(artifact.contains("call __cellscript_ext_dep__math__add_two"), "outer helper call was not lowered:\n{}", artifact);
+    assert!(artifact.contains("call __cellscript_ext_dep__math__add_one"), "transitive helper call was not lowered:\n{}", artifact);
+    assert!(
+        artifact.contains("__cellscript_ext_dep__math__add_two:") && artifact.contains("__cellscript_ext_dep__math__add_one:"),
+        "transitive external helpers were not merged:\n{}",
+        artifact
+    );
 }
 
 #[test]
@@ -6814,6 +7042,79 @@ action compute() -> u64 { verification let v: u64 = 7 return v }
 
     let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(summary["status"], "ok");
+}
+
+#[test]
+fn cellc_workspace_build_member_with_path_dependency_import() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+
+    std::fs::write(
+        root.join("Cell.toml"),
+        r#"[workspace]
+members = ["shared_types", "app"]
+"#,
+    )
+    .unwrap();
+
+    let shared = root.join("shared_types");
+    std::fs::create_dir_all(shared.join("src")).unwrap();
+    std::fs::write(
+        shared.join("Cell.toml"),
+        r#"[package]
+name = "shared_types"
+version = "0.1.0"
+entry = "src/types.cell"
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        shared.join("src").join("types.cell"),
+        r#"module shared::types
+
+resource Token has store, replace, relock, consume, burn {
+    amount: u64
+}
+"#,
+    )
+    .unwrap();
+
+    let app = root.join("app");
+    std::fs::create_dir_all(app.join("src")).unwrap();
+    std::fs::write(
+        app.join("Cell.toml"),
+        r#"[package]
+name = "app"
+version = "0.1.0"
+
+[dependencies]
+shared_types = { path = "../shared_types" }
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        app.join("src").join("main.cell"),
+        r#"module app::main
+
+use shared::types::Token
+
+action passthrough(token: Token) -> Token {
+    verification
+        token
+}
+"#,
+    )
+    .unwrap();
+
+    let output =
+        Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("build").arg("-p").arg("app").arg("--json").output().unwrap();
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+
+    let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(summary["status"], "ok");
+    let members = summary["results"].as_array().unwrap();
+    assert_eq!(members.len(), 1);
+    assert!(members[0]["member"].as_str().unwrap().contains("app"));
 }
 
 // ── Incremental compilation e2e tests ────────────────────────────────────────

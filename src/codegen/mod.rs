@@ -9634,10 +9634,7 @@ impl CodeGenerator {
         }
         if func.contains("::") {
             return Err(CompileError::new(
-                format!(
-                    "external function call '{}' is not linkable yet; importable function summaries are only used for type/effect checking",
-                    func
-                ),
+                format!("qualified function call '{}' reached codegen without IR label normalization; this is a compiler bug", func),
                 crate::error::Span::default(),
             ));
         }

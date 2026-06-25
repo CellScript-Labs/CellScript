@@ -2,7 +2,7 @@
 
 **Status**: In progress for the 0.20 nightly line.
 
-**Updated**: 2026-06-22.
+**Updated**: 2026-06-25.
 
 CellScript 0.20 hardens the generated-builder and live/devnet acceptance path.
 The important post-audit change is that CKB-facing acceptance now checks the
@@ -78,6 +78,44 @@ deploy plans, dependency locks, audit bundles, and generated-builder ABI hashes
 also expose the split schema object so downstream tools can tell which metadata
 surface changed.
 
+## Multi-File Project Boundary
+
+The 0.20 compiler path now treats multi-file packages as a validated source
+graph instead of an entry-file side effect:
+
+- package compilation loads the entry package and local path dependency
+  `.cell` sources before frontend checks;
+- `use` imports are exact-path and fail closed when the module or symbol is not
+  present;
+- package diagnostics run type, flow, and IR checks across loaded modules;
+- incremental cache identity includes dependency `.cell` files, `Cell.toml`,
+  and `Cell.lock`;
+- file-backed LSP diagnostics use the package graph; and
+- the WASM package keeps the legacy single-source functions while adding an
+  additive multi-source metadata diagnostics API for browser tools.
+
+This is still one artifact per entry. Cross-file type/schema imports and helper
+calls are resolved at compile time and inlined into the entry artifact,
+including aliased imports, fully-qualified calls, and transitive helper calls.
+Any ELF-linker-style or cross-script runtime-linking claim remains outside the
+0.20 production boundary.
+
+NovaSeal fungible-xUDT now includes the first protocol-source multi-file
+candidate: shared witness and commitment schema structs live in
+`src/nova_fungible_xudt_schema.cell` and are imported by both the profile action
+entry and the lifecycle type entry. Metadata and artifact-preparation evidence
+show the shared schema in the compiled source graph, and the live local devnet
+stateful profile passes issue, transfer, settle, and required negative cases
+for lifecycle artifact data hash
+`0x394da78133cb2f5a5d6cd911feceeab9e97e6ad5d36c0e50f18be56653af85e5`.
+
+iCKB benchmark sources are unchanged because the current files do not expose a
+natural shared-schema boundary, and the checked-out DobEvo / DOB-EVO proposal
+contains no `.cell` source to refactor. Future protocol-source changes must
+still carry proposal-specific evidence: NovaSeal profile certification plus
+live local devnet/profile reports, iCKB CKB VM differential matrix refreshes,
+or DobEvo / DOB-EVO devnet workflow and registry-pressure reruns.
+
 ## Critical Example Coverage
 
 The 0.20 devnet acceptance path explicitly keeps launch.cell, token.cell, and
@@ -95,6 +133,19 @@ The existing local CKB acceptance still covers:
 - occupied-capacity checks;
 - stateful lifecycle scenarios, including launch-to-mint and AMM
   seed/add/swap/remove flows.
+
+## Browser Playground Scope
+
+The playground exposes the new multi-source WASM boundary through a
+browser-local file tree, explicit entry file, file-aware diagnostics, and local
+import/export. This UI remains client-side: no server compile API, no uploaded
+source archive, no server-owned project state, and no server-side cache.
+Import/export uses local file selection, multiple `.cell` files, and
+downloadable workspace JSON generated in the browser, with source-count and
+total-byte limits so browser CPU and memory stay bounded.
+
+The release claim is a client-side playground workspace over the existing
+WASM compiler path, not a server-backed workspace service.
 
 ## Validation Commands
 
@@ -114,3 +165,10 @@ For a bounded local preflight without a CKB node:
 Compile-only evidence is useful for checking the ABI and compiler boundary, but
 it is not sufficient for external release because it skips the local devnet
 dry-run, tx-pool, commit, and live/dead lineage checks.
+
+For website/playground changes, also run:
+
+```bash
+website/scripts/build-wasm.sh
+(cd website && npm run build)
+```

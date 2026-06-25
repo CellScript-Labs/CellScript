@@ -75,6 +75,19 @@ module cellscript::timelock
 Module names are not decoration. They are part of source identity and appear in
 metadata, so use names you are willing to keep stable.
 
+CellScript does not have a Rust-style `mod` item. In packages, the module graph
+is formed by discovering `.cell` files from `Cell.toml` `source_roots`, reading
+each file's `module` declaration, and resolving explicit `use path::Symbol`
+imports. A wrong import path is an error even if another loaded module happens
+to define a symbol with the same basename.
+
+The current production boundary supports cross-file type and schema imports
+end-to-end: resources, shared cells, receipts, structs, enums, and constants can
+be imported into the entry module for metadata and artifact generation.
+Cross-file function-style linking remains fail-closed. Keep executable business
+logic in the compiled entry module unless a future release explicitly documents
+that call surface.
+
 ## Scalar and Fixed Types
 
 Common field and parameter types include:

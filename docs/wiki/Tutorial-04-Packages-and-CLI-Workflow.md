@@ -47,6 +47,7 @@ name = "my_contract"
 version = "0.1.0"
 edition = "2021"
 entry = "src/main.cell"
+source_roots = ["src"]
 
 [build]
 target = "riscv64-elf"
@@ -60,6 +61,8 @@ my_lib = { path = "../my_lib" }
 Read the manifest as a build promise:
 
 - `entry` tells the compiler where the package starts;
+- `source_roots` tells the compiler which package directories contain `.cell`
+  modules;
 - `target` chooses assembly or ELF-style output;
 - `target_profile` chooses the runtime assumptions;
 - `out_dir` chooses where artifacts are written;
@@ -71,6 +74,26 @@ Registry source-package resolution is implemented for packages that provide
 `source_hash`. Local path dependencies remain the fastest repeatable
 development workflow, and non-CellScript registry artifact profiles still fail
 closed until they have their own resolver contracts.
+
+## Multi-file Packages
+
+Package builds are entry-driven, but the frontend loads the full package source
+set before compiling the entry artifact. The compiler walks `source_roots`
+(defaulting to `src`), parses every `.cell` file it finds, registers each file's
+`module` declaration, and validates every `use path::Symbol` import against the
+loaded module graph. Path dependencies are loaded the same way, so shared schema
+packages can provide common Cell types without copying them into every contract.
+
+There is no `mod` keyword and no implicit basename lookup. The module declared
+inside the file is the source identity. Duplicate module declarations fail, bad
+imports fail, and invalid package modules fail during `build` or `check` even
+when the entry file does not reference them directly.
+
+This is not a contract linker. Each CKB script remains an independent RISC-V
+artifact. Cross-file helper calls are resolved at compile time and inlined into
+the entry artifact, but there is no ELF linker and no cross-script runtime
+coupling. Use multi-file packages for schema reuse, shared helper functions,
+reviewable module organization, and repeatable source/package hashes.
 
 For registry resolution, `cellc add` must remain a dependency
 resolver, not a code-snippet finder. Anything reachable by `cellc add` must be

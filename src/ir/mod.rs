@@ -404,6 +404,7 @@ pub struct IrGenerator {
     external_function_param_types: HashMap<String, Vec<IrType>>,
     function_return_types: HashMap<String, Option<IrType>>,
     external_function_return_types: HashMap<String, Option<IrType>>,
+    call_target_labels: HashMap<String, String>,
     lowering_lock_entry: bool,
     errors: Vec<CompileError>,
 }
@@ -446,6 +447,7 @@ impl IrGenerator {
             external_function_param_types: HashMap::new(),
             function_return_types: HashMap::new(),
             external_function_return_types: HashMap::new(),
+            call_target_labels: HashMap::new(),
             lowering_lock_entry: false,
             errors: Vec::new(),
         }
@@ -466,6 +468,7 @@ impl IrGenerator {
         external_function_effects: HashMap<String, EffectClass>,
         external_function_param_types: HashMap<String, Vec<IrType>>,
         external_function_return_types: HashMap<String, Option<IrType>>,
+        call_target_labels: HashMap<String, String>,
     ) -> Self {
         let mut generator = Self::with_type_fields(module_name, type_fields);
         generator.type_kinds.extend(type_kinds);
@@ -474,6 +477,7 @@ impl IrGenerator {
         generator.external_function_effects = external_function_effects;
         generator.external_function_param_types = external_function_param_types;
         generator.external_function_return_types = external_function_return_types;
+        generator.call_target_labels = call_target_labels;
         generator
     }
 
@@ -5787,6 +5791,9 @@ impl IrGenerator {
     }
 
     fn lower_call_target_name(&self, name: &str) -> String {
+        if let Some(label) = self.call_target_labels.get(name) {
+            return label.clone();
+        }
         if let Some((module, symbol)) = name.rsplit_once("::") {
             if module == self.module.name {
                 return symbol.to_string();
@@ -5978,6 +5985,9 @@ fn generate_with_resolver_inner(
     let mut external_function_effects = HashMap::new();
     let mut external_function_param_types = HashMap::new();
     let mut external_function_return_types = HashMap::new();
+    let mut call_target_labels = HashMap::new();
+
+    let mut resolved_external_types: Vec<(String, TypeDef)> = Vec::new();
 
     for item in &ast.items {
         let Item::Use(use_stmt) = item else {
@@ -6000,25 +6010,48 @@ fn generate_with_resolver_inner(
                     type_fields.insert(local_name.clone(), fields);
                 }
                 if external_type_names.insert(local_name.clone()) {
-                    if let Some(ir_type_def) = resolver_type_def_to_ir(&local_name, &type_def) {
-                        external_type_defs.push(ir_type_def);
-                    }
+                    resolved_external_types.push((local_name.clone(), type_def));
                 }
             }
-            if let Some(function) = resolver.resolve_function(module_name, &local_name) {
-                external_function_effects.insert(local_name.clone(), function_def_effect_class(&function));
-                external_function_param_types.insert(local_name.clone(), function_def_param_types_ir(&function));
-                external_function_return_types.insert(local_name.clone(), function_def_return_type(&function));
-                push_external_callable_abi(&mut external_callable_abis, &mut external_callable_names, local_name, &function);
+            if let Some((owner_module, function)) = resolver.resolve_function_with_module(module_name, &local_name) {
+                register_external_callable_context(
+                    module_name,
+                    &owner_module,
+                    &local_name,
+                    &function,
+                    Some(&local_name),
+                    &mut external_function_effects,
+                    &mut external_function_param_types,
+                    &mut external_function_return_types,
+                    &mut call_target_labels,
+                    &mut external_callable_abis,
+                    &mut external_callable_names,
+                );
             }
         }
     }
+
+    for (local_name, type_def) in resolved_external_types {
+        if let Some(ir_type_def) = resolver_type_def_to_ir(&local_name, &type_def, &type_fields) {
+            external_type_defs.push(ir_type_def);
+        }
+    }
+
     for call_name in collect_call_names(ast) {
-        if let Some(function) = resolver.resolve_function(module_name, &call_name) {
-            external_function_effects.insert(call_name.clone(), function_def_effect_class(&function));
-            external_function_param_types.insert(call_name.clone(), function_def_param_types_ir(&function));
-            external_function_return_types.insert(call_name.clone(), function_def_return_type(&function));
-            push_external_callable_abi(&mut external_callable_abis, &mut external_callable_names, call_name, &function);
+        if let Some((owner_module, function)) = resolver.resolve_function_with_module(module_name, &call_name) {
+            register_external_callable_context(
+                module_name,
+                &owner_module,
+                &call_name,
+                &function,
+                None,
+                &mut external_function_effects,
+                &mut external_function_param_types,
+                &mut external_function_return_types,
+                &mut call_target_labels,
+                &mut external_callable_abis,
+                &mut external_callable_names,
+            );
         }
     }
 
@@ -6031,6 +6064,7 @@ fn generate_with_resolver_inner(
         external_function_effects,
         external_function_param_types,
         external_function_return_types,
+        call_target_labels,
     );
     let mut ir = generator.generate(ast)?;
     ir.external_type_defs = external_type_defs;
@@ -6044,17 +6078,31 @@ fn generate_with_resolver_inner(
 fn append_external_callable_bodies(ir: &mut IrModule, ast: &Module, resolver: &ModuleResolver, module_name: &str) -> Result<()> {
     let mut known_callables = ir_callable_names(ir);
     let mut imported_callables = HashSet::new();
-    let mut pending = collect_call_names(ast).into_iter().collect::<Vec<_>>();
+    let entry_call_labels = imported_callable_label_overrides(ast, resolver, module_name);
+    let mut pending = collect_call_names(ast)
+        .into_iter()
+        .map(|call_name| PendingExternalCall { lookup_module: module_name.to_string(), call_name })
+        .collect::<Vec<_>>();
 
-    while let Some(call_name) = pending.pop() {
-        let symbol = call_name.rsplit("::").next().unwrap_or(&call_name).to_string();
-        if known_callables.contains(&symbol) {
+    while let Some(pending_call) = pending.pop() {
+        let Some((owner_module, function)) =
+            resolver.resolve_function_with_module(&pending_call.lookup_module, &pending_call.call_name)
+        else {
+            continue;
+        };
+        let symbol = function_def_name(&function).to_string();
+        let label = if pending_call.lookup_module == module_name {
+            entry_call_labels
+                .get(&pending_call.call_name)
+                .cloned()
+                .unwrap_or_else(|| callable_label_for(module_name, &owner_module, &symbol))
+        } else {
+            callable_label_for(module_name, &owner_module, &symbol)
+        };
+        if known_callables.contains(&label) {
             continue;
         }
 
-        let Some((owner_module, _)) = resolver.resolve_function_with_module(module_name, &call_name) else {
-            continue;
-        };
         let import_key = format!("{}::{}", owner_module, symbol);
         if owner_module == module_name || !imported_callables.insert(import_key) {
             continue;
@@ -6070,15 +6118,108 @@ fn append_external_callable_bodies(ir: &mut IrModule, ast: &Module, resolver: &M
             ir.enum_fixed_sizes.entry(name).or_insert(size);
         }
 
-        if let Some(item) = external_ir.items.into_iter().find(|item| ir_item_callable_name(item).is_some_and(|name| name == symbol)) {
-            if known_callables.insert(symbol) {
-                collect_ir_item_call_names(&item, &mut pending);
+        if let Some(mut item) =
+            external_ir.items.into_iter().find(|item| ir_item_callable_name(item).is_some_and(|name| name == symbol))
+        {
+            rewrite_external_callable_item_calls(&mut item, &owner_module, module_name, resolver, &mut pending);
+            rename_ir_item_callable(&mut item, label.clone());
+            if known_callables.insert(label) {
                 ir.items.push(item);
             }
         }
     }
 
     Ok(())
+}
+
+fn imported_callable_label_overrides(ast: &Module, resolver: &ModuleResolver, module_name: &str) -> HashMap<String, String> {
+    let mut labels = HashMap::new();
+    for item in &ast.items {
+        let Item::Use(use_stmt) = item else {
+            continue;
+        };
+        for import in &use_stmt.imports {
+            let local_name = import.alias.clone().unwrap_or_else(|| import.name.clone());
+            let Some((owner_module, function)) = resolver.resolve_function_with_module(module_name, &local_name) else {
+                continue;
+            };
+            let symbol = function_def_name(&function);
+            let full_path = format!("{}::{}", owner_module, symbol);
+            let label = labels.get(&full_path).cloned().unwrap_or_else(|| {
+                if owner_module == module_name {
+                    symbol.to_string()
+                } else {
+                    local_name.clone()
+                }
+            });
+            labels.insert(local_name, label.clone());
+            labels.entry(full_path).or_insert(label);
+        }
+    }
+    labels
+}
+
+fn register_external_callable_context(
+    consumer_module: &str,
+    owner_module: &str,
+    source_name: &str,
+    function: &FunctionDef,
+    preferred_label: Option<&str>,
+    external_function_effects: &mut HashMap<String, EffectClass>,
+    external_function_param_types: &mut HashMap<String, Vec<IrType>>,
+    external_function_return_types: &mut HashMap<String, Option<IrType>>,
+    call_target_labels: &mut HashMap<String, String>,
+    external_callable_abis: &mut Vec<IrCallableAbi>,
+    external_callable_names: &mut HashSet<String>,
+) {
+    let symbol = function_def_name(function);
+    let full_path = format!("{}::{}", owner_module, symbol);
+    let label = call_target_labels
+        .get(&full_path)
+        .or_else(|| call_target_labels.get(source_name))
+        .cloned()
+        .or_else(|| preferred_label.map(str::to_string))
+        .unwrap_or_else(|| callable_label_for(consumer_module, owner_module, symbol));
+    let effect = function_def_effect_class(function);
+    let params = function_def_param_types_ir(function);
+    let return_type = function_def_return_type(function);
+
+    for key in [source_name.to_string(), full_path.clone(), label.clone()] {
+        external_function_effects.insert(key.clone(), effect);
+        external_function_param_types.insert(key.clone(), params.clone());
+        external_function_return_types.insert(key, return_type.clone());
+    }
+    call_target_labels.insert(source_name.to_string(), label.clone());
+    call_target_labels.entry(full_path).or_insert_with(|| label.clone());
+    if owner_module != consumer_module {
+        push_external_callable_abi(external_callable_abis, external_callable_names, label, function);
+    }
+}
+
+fn callable_label_for(consumer_module: &str, owner_module: &str, symbol: &str) -> String {
+    if owner_module == consumer_module {
+        symbol.to_string()
+    } else {
+        format!("__cellscript_ext_{}__{}", sanitize_callable_label_part(owner_module), sanitize_callable_label_part(symbol))
+    }
+}
+
+fn sanitize_callable_label_part(value: &str) -> String {
+    value.chars().map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' }).collect::<String>()
+}
+
+fn function_def_name(function: &FunctionDef) -> &str {
+    match function {
+        FunctionDef::Action(action) => &action.name,
+        FunctionDef::Function(function) => &function.name,
+        FunctionDef::Lock(lock) => &lock.name,
+    }
+}
+
+#[derive(Debug, Clone)]
+struct PendingExternalCall {
+    lookup_module: String,
+    call_name: String,
 }
 
 fn ir_callable_names(ir: &IrModule) -> HashSet<String> {
@@ -6120,20 +6261,49 @@ fn merge_external_callable_abis(ir: &mut IrModule, external_ir: &IrModule) {
     }
 }
 
-fn collect_ir_item_call_names(item: &IrItem, pending: &mut Vec<String>) {
+fn rename_ir_item_callable(item: &mut IrItem, label: String) {
     match item {
-        IrItem::Action(action) => collect_ir_body_call_names(&action.body, pending),
-        IrItem::PureFn(function) => collect_ir_body_call_names(&function.body, pending),
-        IrItem::Lock(lock) => collect_ir_body_call_names(&lock.body, pending),
+        IrItem::Action(action) => action.name = label,
+        IrItem::PureFn(function) => function.name = label,
+        IrItem::Lock(lock) => lock.name = label,
         IrItem::TypeDef(_) | IrItem::Invariant(_) => {}
     }
 }
 
-fn collect_ir_body_call_names(body: &IrBody, pending: &mut Vec<String>) {
-    for block in &body.blocks {
-        for instruction in &block.instructions {
+fn rewrite_external_callable_item_calls(
+    item: &mut IrItem,
+    owner_module: &str,
+    entry_module: &str,
+    resolver: &ModuleResolver,
+    pending: &mut Vec<PendingExternalCall>,
+) {
+    match item {
+        IrItem::Action(action) => rewrite_external_body_calls(&mut action.body, owner_module, entry_module, resolver, pending),
+        IrItem::PureFn(function) => rewrite_external_body_calls(&mut function.body, owner_module, entry_module, resolver, pending),
+        IrItem::Lock(lock) => rewrite_external_body_calls(&mut lock.body, owner_module, entry_module, resolver, pending),
+        IrItem::TypeDef(_) | IrItem::Invariant(_) => {}
+    }
+}
+
+fn rewrite_external_body_calls(
+    body: &mut IrBody,
+    owner_module: &str,
+    entry_module: &str,
+    resolver: &ModuleResolver,
+    pending: &mut Vec<PendingExternalCall>,
+) {
+    for block in &mut body.blocks {
+        for instruction in &mut block.instructions {
             if let IrInstruction::Call { func, .. } = instruction {
-                pending.push(func.clone());
+                let original = func.clone();
+                let Some((callee_module, function)) = resolver.resolve_function_with_module(owner_module, &original) else {
+                    continue;
+                };
+                let symbol = function_def_name(&function).to_string();
+                *func = callable_label_for(entry_module, &callee_module, &symbol);
+                if callee_module != entry_module {
+                    pending.push(PendingExternalCall { lookup_module: owner_module.to_string(), call_name: original });
+                }
             }
         }
     }
@@ -6548,7 +6718,11 @@ fn resolver_type_fields_to_ir(type_def: &TypeDef) -> Option<HashMap<String, IrTy
     Some(fields.iter().map(|field| (field.name.clone(), ast_type_to_ir_type(&field.ty))).collect())
 }
 
-fn resolver_type_def_to_ir(local_name: &str, type_def: &TypeDef) -> Option<IrTypeDef> {
+fn resolver_type_def_to_ir(
+    local_name: &str,
+    type_def: &TypeDef,
+    type_fields: &HashMap<String, HashMap<String, IrType>>,
+) -> Option<IrTypeDef> {
     match type_def {
         TypeDef::Resource(resource) => Some(IrTypeDef {
             name: local_name.to_string(),
@@ -6556,7 +6730,7 @@ fn resolver_type_def_to_ir(local_name: &str, type_def: &TypeDef) -> Option<IrTyp
             default_hash_type: resource.default_hash_type.as_ref().map(|hash_type| hash_type.value.clone()),
             capacity_floor_shannons: resource.capacity_floor.as_ref().map(|floor| floor.shannons),
             kind: IrTypeKind::Resource,
-            fields: layout_resolver_fields(&resource.fields),
+            fields: layout_resolver_fields(&resource.fields, type_fields),
             capabilities: resource.capabilities.clone(),
             claim_output: None,
             flow_states: None,
@@ -6570,7 +6744,7 @@ fn resolver_type_def_to_ir(local_name: &str, type_def: &TypeDef) -> Option<IrTyp
             default_hash_type: shared.default_hash_type.as_ref().map(|hash_type| hash_type.value.clone()),
             capacity_floor_shannons: shared.capacity_floor.as_ref().map(|floor| floor.shannons),
             kind: IrTypeKind::Shared,
-            fields: layout_resolver_fields(&shared.fields),
+            fields: layout_resolver_fields(&shared.fields, type_fields),
             capabilities: shared.capabilities.clone(),
             claim_output: None,
             flow_states: None,
@@ -6584,7 +6758,7 @@ fn resolver_type_def_to_ir(local_name: &str, type_def: &TypeDef) -> Option<IrTyp
             default_hash_type: receipt.default_hash_type.as_ref().map(|hash_type| hash_type.value.clone()),
             capacity_floor_shannons: receipt.capacity_floor.as_ref().map(|floor| floor.shannons),
             kind: IrTypeKind::Receipt,
-            fields: layout_resolver_fields(&receipt.fields),
+            fields: layout_resolver_fields(&receipt.fields, type_fields),
             capabilities: receipt.capabilities.clone(),
             claim_output: receipt.claim_output.as_ref().map(ast_type_to_ir_type),
             flow_states: None,
@@ -6598,7 +6772,7 @@ fn resolver_type_def_to_ir(local_name: &str, type_def: &TypeDef) -> Option<IrTyp
             default_hash_type: struct_def.default_hash_type.as_ref().map(|hash_type| hash_type.value.clone()),
             capacity_floor_shannons: struct_def.capacity_floor.as_ref().map(|floor| floor.shannons),
             kind: IrTypeKind::Struct,
-            fields: layout_resolver_fields(&struct_def.fields),
+            fields: layout_resolver_fields(&struct_def.fields, type_fields),
             capabilities: Vec::new(),
             claim_output: None,
             flow_states: None,
@@ -6620,13 +6794,13 @@ fn lower_identity_policy_ast(policy: &IdentityPolicy) -> IrIdentityPolicy {
     }
 }
 
-fn layout_resolver_fields(fields: &[Field]) -> Vec<IrField> {
+fn layout_resolver_fields(fields: &[Field], type_fields: &HashMap<String, HashMap<String, IrType>>) -> Vec<IrField> {
     let mut next_offset = Some(0usize);
     fields
         .iter()
         .map(|field| {
             let ty = ast_type_to_ir_type(&field.ty);
-            let fixed_size = fixed_encoded_size_for_ir_type(&ty);
+            let fixed_size = fixed_encoded_size_for_resolver_ir_type(&ty, type_fields, &mut HashSet::new());
             let offset = next_offset.unwrap_or(0);
             next_offset = next_offset.and_then(|current| fixed_size.and_then(|size| current.checked_add(size)));
             IrField { name: field.name.clone(), ty, offset, fixed_size }
@@ -6634,7 +6808,11 @@ fn layout_resolver_fields(fields: &[Field]) -> Vec<IrField> {
         .collect()
 }
 
-fn fixed_encoded_size_for_ir_type(ty: &IrType) -> Option<usize> {
+fn fixed_encoded_size_for_resolver_ir_type(
+    ty: &IrType,
+    type_fields: &HashMap<String, HashMap<String, IrType>>,
+    seen: &mut HashSet<String>,
+) -> Option<usize> {
     match ty {
         IrType::U8 | IrType::Bool => Some(1),
         IrType::U16 => Some(2),
@@ -6643,12 +6821,28 @@ fn fixed_encoded_size_for_ir_type(ty: &IrType) -> Option<usize> {
         IrType::U64 => Some(8),
         IrType::U128 => Some(16),
         IrType::Address | IrType::Hash => Some(32),
-        IrType::Array(inner, len) => fixed_encoded_size_for_ir_type(inner).and_then(|inner_size| inner_size.checked_mul(*len)),
-        IrType::Tuple(items) => {
-            items.iter().try_fold(0usize, |acc, item| fixed_encoded_size_for_ir_type(item).and_then(|size| acc.checked_add(size)))
+        IrType::Array(inner, len) => {
+            fixed_encoded_size_for_resolver_ir_type(inner, type_fields, seen).and_then(|inner_size| inner_size.checked_mul(*len))
         }
+        IrType::Tuple(items) => items.iter().try_fold(0usize, |acc, item| {
+            fixed_encoded_size_for_resolver_ir_type(item, type_fields, seen).and_then(|size| acc.checked_add(size))
+        }),
         IrType::Unit => Some(0),
-        IrType::Named(_) | IrType::Ref(_) | IrType::MutRef(_) => None,
+        IrType::Named(name) => {
+            let base_name = name.split('<').next().unwrap_or(name.as_str());
+            if !seen.insert(base_name.to_string()) {
+                return None;
+            }
+            let size = type_fields.get(base_name).and_then(|fields| {
+                fields.values().try_fold(0usize, |acc, field_ty| {
+                    fixed_encoded_size_for_resolver_ir_type(field_ty, type_fields, seen)
+                        .and_then(|field_size| acc.checked_add(field_size))
+                })
+            });
+            seen.remove(base_name);
+            size
+        }
+        IrType::Ref(_) | IrType::MutRef(_) => None,
     }
 }
 

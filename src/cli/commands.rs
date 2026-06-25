@@ -688,6 +688,7 @@ impl CommandExecutor {
         if args.entry_action.is_some() && args.entry_lock.is_some() {
             return Err(crate::error::CompileError::without_span("--entry-action and --entry-lock are mutually exclusive"));
         }
+        let cache_options = options.clone();
         let result = match (args.entry_action.as_deref(), args.entry_lock.as_deref()) {
             (Some(action), None) => compile_path_with_entry_action(input, options, action),
             (None, Some(lock)) => compile_path_with_entry_lock(input, options, lock),
@@ -703,6 +704,9 @@ impl CommandExecutor {
         result.write_metadata_to_path(&metadata_path)?;
 
         refresh_lockfile_from_build(std::path::Path::new("."), &result.metadata)?;
+        if args.entry_action.is_none() && args.entry_lock.is_none() {
+            crate::refresh_incremental_cache_for_input(input, &cache_options, &result)?;
+        }
 
         let policy_verified = policy_args.production
             || policy_args.deny_fail_closed

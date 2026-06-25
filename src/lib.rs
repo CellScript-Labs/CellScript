@@ -44,6 +44,7 @@ pub use proof_plan::{ProofPlanDiagnosticMetadata, ProofPlanMetadata, ProofPlanSo
 
 use camino::{Utf8Path, Utf8PathBuf};
 use error::{CompileError, DiagnosticSeverity, Result};
+use package::{BuildConfig, CkbCellDepConfig, PackageManifest, WorkspaceManifest};
 use resolve::ModuleResolver;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -247,7 +248,7 @@ fn strict_capability_name(capability: ast::Capability) -> &'static str {
 
 const DEFAULT_TARGET: &str = "riscv64-asm";
 const DEFAULT_TARGET_PROFILE: &str = "ckb";
-const ARTIFACT_CACHE_VERSION: &str = "entry-metadata-scope-v3";
+const ARTIFACT_CACHE_VERSION: &str = "project-source-set-v5";
 pub const METADATA_SCHEMA_VERSION: u32 = 43;
 pub const SOURCE_METADATA_SCHEMA_VERSION: u32 = 1;
 pub const ARTIFACT_METADATA_SCHEMA_VERSION: u32 = 1;
@@ -287,7 +288,7 @@ impl TargetProfile {
         }
     }
 
-    fn from_options(options: &CompileOptions, build: Option<&CellBuildConfig>) -> Result<Self> {
+    fn from_options(options: &CompileOptions, build: Option<&BuildConfig>) -> Result<Self> {
         let profile = options
             .target_profile
             .as_deref()
@@ -1652,7 +1653,7 @@ fn collect_ckb_entry_script_references(
     }
 }
 
-fn apply_manifest_deploy_metadata(metadata: &mut CompileMetadata, manifest: &CellManifest) -> Result<()> {
+fn apply_manifest_deploy_metadata(metadata: &mut CompileMetadata, manifest: &PackageManifest) -> Result<()> {
     let Some(ckb_manifest) = manifest.deploy.ckb.as_ref() else {
         return Ok(());
     };
@@ -1742,7 +1743,7 @@ fn validate_ckb_dep_type(dep_type: &str) -> Result<()> {
     }
 }
 
-fn parse_ckb_cell_dep_location(dep: &CellCkbCellDepConfig) -> Result<(Option<String>, Option<u32>)> {
+fn parse_ckb_cell_dep_location(dep: &CkbCellDepConfig) -> Result<(Option<String>, Option<u32>)> {
     if let Some(out_point) = dep.out_point.as_deref() {
         if dep.tx_hash.is_some() || dep.index.is_some() {
             return Err(CompileError::without_span("CKB cell_dep location must use either out_point or tx_hash/index, not both"));
@@ -4028,6 +4029,19 @@ pub struct LoadedModule {
     pub ast: ast::Module,
 }
 
+#[derive(Debug)]
+struct LoadedProject {
+    entry_index: usize,
+    modules: Vec<LoadedModule>,
+    resolver: ModuleResolver,
+}
+
+impl LoadedProject {
+    fn entry(&self) -> &LoadedModule {
+        &self.modules[self.entry_index]
+    }
+}
+
 impl CompileResult {
     /// Validate that artifact bytes, hash, format, and metadata agree.
     pub fn validate(&self) -> Result<()> {
@@ -4122,27 +4136,106 @@ pub fn default_metadata_path_for_artifact<P: AsRef<Utf8Path>>(artifact_path: P) 
 
 pub fn load_modules_for_input<P: AsRef<Utf8Path>>(input: P) -> Result<Vec<LoadedModule>> {
     let resolved = resolve_input_path(input.as_ref())?;
-    let mut files = if let Some(package_root) = find_package_root(&resolved)? {
-        collect_package_cell_files(&package_root)?
-    } else {
-        vec![resolved.clone()]
+    load_project_modules_for_entry(&resolved, None)
+}
+
+fn load_project_for_entry(entry_path: &Utf8Path, entry_source_override: Option<&str>) -> Result<LoadedProject> {
+    let entry_path = canonical_utf8_path(entry_path)?;
+    let modules = load_project_modules_for_entry(&entry_path, entry_source_override)?;
+    let Some(entry_index) = modules.iter().position(|module| module.path == entry_path) else {
+        return Err(CompileError::new(
+            format!("entry source '{}' was not loaded into the project graph", entry_path),
+            error::Span::default(),
+        ));
     };
+    let resolver = build_module_resolver_from_loaded_modules(&modules)?;
+    Ok(LoadedProject { entry_index, modules, resolver })
+}
 
-    if !files.contains(&resolved) {
-        files.push(resolved);
-        files.sort();
+fn load_virtual_project_for_entry(sources: &[InMemorySource], entry_path: &str) -> Result<LoadedProject> {
+    if sources.is_empty() {
+        return Err(CompileError::without_span("multi-file compile requires at least one source"));
     }
+    let entry_path_buf = Utf8PathBuf::from(entry_path);
+    let mut seen_paths = HashSet::new();
+    let mut modules = Vec::with_capacity(sources.len());
+    for source in sources {
+        if source.path.is_empty() {
+            return Err(CompileError::without_span("multi-file compile source path must not be empty"));
+        }
+        if !seen_paths.insert(source.path.clone()) {
+            return Err(CompileError::without_span(format!("duplicate multi-file compile source path '{}'", source.path)));
+        }
+        modules.push(parse_loaded_module(Utf8PathBuf::from(source.path.clone()), source.source.clone())?);
+    }
+    let Some(entry_index) = modules.iter().position(|module| module.path == entry_path_buf) else {
+        return Err(CompileError::without_span(format!("entry source '{}' was not provided", entry_path)));
+    };
+    let resolver = build_module_resolver_from_loaded_modules(&modules)?;
+    Ok(LoadedProject { entry_index, modules, resolver })
+}
 
-    files
+fn load_project_modules_for_entry(entry_path: &Utf8Path, entry_source_override: Option<&str>) -> Result<Vec<LoadedModule>> {
+    let entry_path = canonical_utf8_path(entry_path)?;
+    let source_paths = collect_source_paths_for_compile_file(&entry_path)?;
+    source_paths
         .into_iter()
         .map(|path| {
-            let source = std::fs::read_to_string(&path)
-                .map_err(|e| CompileError::new(format!("failed to read module '{}': {}", path, e), error::Span::default()))?;
-            let tokens = lexer::lex(&source).map_err(|e| e.with_file(path.clone()))?;
-            let ast = parser::parse(&tokens).map_err(|e| e.with_file(path.clone()))?;
-            Ok(LoadedModule { path, source, ast })
+            let source = if path == entry_path {
+                if let Some(source) = entry_source_override {
+                    source.to_string()
+                } else {
+                    read_module_source(&path)?
+                }
+            } else {
+                read_module_source(&path)?
+            };
+            parse_loaded_module(path, source)
         })
         .collect()
+}
+
+fn read_module_source(path: &Utf8Path) -> Result<String> {
+    std::fs::read_to_string(path)
+        .map_err(|e| CompileError::new(format!("failed to read module '{}': {}", path, e), error::Span::default()))
+}
+
+fn parse_loaded_module(path: Utf8PathBuf, source: String) -> Result<LoadedModule> {
+    let tokens = lexer::lex(&source).map_err(|e| e.with_file(path.clone()))?;
+    let ast = parser::parse(&tokens).map_err(|e| e.with_file(path.clone()))?;
+    Ok(LoadedModule { path, source, ast })
+}
+
+fn build_module_resolver_from_loaded_modules(modules: &[LoadedModule]) -> Result<ModuleResolver> {
+    let mut resolver = ModuleResolver::new();
+    for module in modules {
+        resolver.register_module(module.ast.clone()).map_err(|error| attach_file_if_missing(error, &module.path))?;
+    }
+    validate_loaded_project_imports(&resolver, modules)?;
+    Ok(resolver)
+}
+
+fn validate_loaded_project_imports(resolver: &ModuleResolver, modules: &[LoadedModule]) -> Result<()> {
+    for module in modules {
+        for import in resolver.imports_for_module(&module.ast.name) {
+            let target_module = import.module_path.join("::");
+            if resolver.module(&target_module).is_none() {
+                return Err(CompileError::new(
+                    format!("module '{}' imported by '{}' not found", target_module, module.ast.name),
+                    import.span,
+                )
+                .with_file(module.path.clone()));
+            }
+            if !resolver.module_has_symbol(&target_module, &import.name) {
+                return Err(CompileError::new(
+                    format!("symbol '{}' imported by '{}' not found in module '{}'", import.name, module.ast.name, target_module),
+                    import.span,
+                )
+                .with_file(module.path.clone()));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Compile CellScript source code
@@ -4184,6 +4277,14 @@ impl CompileMetadataDiagnosticReport {
     pub fn has_errors(&self) -> bool {
         self.diagnostics.iter().any(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InMemorySource {
+    pub path: String,
+    pub source: String,
+    #[serde(default)]
+    pub role: Option<String>,
 }
 
 /// Generate compile metadata while collecting all diagnostics that can be
@@ -4231,6 +4332,58 @@ pub fn compile_metadata_with_diagnostics(source: &str, target: Option<String>) -
     CompileMetadataDiagnosticReport { metadata: Some(metadata), diagnostics }
 }
 
+pub fn compile_sources_metadata_with_diagnostics(
+    sources: &[InMemorySource],
+    entry_path: &str,
+    target: Option<String>,
+) -> CompileMetadataDiagnosticReport {
+    let project = match load_virtual_project_for_entry(sources, entry_path) {
+        Ok(project) => project,
+        Err(error) => return CompileMetadataDiagnosticReport { metadata: None, diagnostics: vec![error] },
+    };
+    let options = CompileOptions { target, ..CompileOptions::default() };
+    let artifact_format = match ArtifactFormat::from_target(resolve_target(&options, None)) {
+        Ok(format) => format,
+        Err(error) => return CompileMetadataDiagnosticReport { metadata: None, diagnostics: vec![error] },
+    };
+    let target_profile = TargetProfile::Ckb;
+
+    let mut diagnostics = project_frontend_diagnostics(&project, &options, true);
+    if diagnostics.iter().any(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error) {
+        return CompileMetadataDiagnosticReport { metadata: None, diagnostics };
+    }
+
+    let entry = project.entry();
+    let ir = match ir::generate_with_resolver(&entry.ast, &project.resolver, &entry.ast.name) {
+        Ok(ir) => ir,
+        Err(error) => {
+            diagnostics.push(attach_file_if_missing(error, &entry.path));
+            return CompileMetadataDiagnosticReport { metadata: None, diagnostics };
+        }
+    };
+    let mut metadata = compile_metadata_from_ir(&ir, artifact_format, target_profile);
+    let source_units = sources
+        .iter()
+        .map(|source| {
+            source_unit_from_bytes(
+                source.path.clone(),
+                source
+                    .role
+                    .clone()
+                    .unwrap_or_else(|| if source.path == entry_path { "entry".to_string() } else { "memory".to_string() }),
+                source.source.as_bytes(),
+            )
+        })
+        .collect();
+    bind_source_metadata(&mut metadata, source_units);
+    if let Err(error) = validate_compile_metadata(&metadata, artifact_format) {
+        diagnostics.push(error);
+        return CompileMetadataDiagnosticReport { metadata: None, diagnostics };
+    }
+
+    CompileMetadataDiagnosticReport { metadata: Some(metadata), diagnostics }
+}
+
 /// Generate compile metadata for a file/package path while collecting semantic
 /// diagnostics. This mirrors `compile_path` input resolution and module
 /// resolution, but skips artifact codegen so CLI tools can report multiple
@@ -4243,31 +4396,28 @@ pub fn compile_path_metadata_with_diagnostics<P: AsRef<Utf8Path>>(
         Ok(path) => path,
         Err(error) => return CompileMetadataDiagnosticReport { metadata: None, diagnostics: vec![error] },
     };
-    compile_file_metadata_with_diagnostics(&resolved, options)
+    compile_file_metadata_with_diagnostics(&resolved, options, None)
 }
 
-fn compile_file_metadata_with_diagnostics(path: &Utf8Path, options: CompileOptions) -> CompileMetadataDiagnosticReport {
-    let source = match std::fs::read_to_string(path) {
-        Ok(source) => source,
-        Err(error) => {
-            return CompileMetadataDiagnosticReport {
-                metadata: None,
-                diagnostics: vec![
-                    CompileError::new(format!("failed to read file: {}", error), error::Span::default()).with_file(path.to_owned())
-                ],
-            };
-        }
+pub fn compile_path_metadata_with_diagnostics_for_source<P: AsRef<Utf8Path>>(
+    path: P,
+    source: &str,
+    options: CompileOptions,
+) -> CompileMetadataDiagnosticReport {
+    let resolved = match resolve_input_path(path.as_ref()) {
+        Ok(path) => path,
+        Err(error) => return CompileMetadataDiagnosticReport { metadata: None, diagnostics: vec![error] },
     };
-    let tokens = match lexer::lex(&source) {
-        Ok(tokens) => tokens,
-        Err(error) => return CompileMetadataDiagnosticReport { metadata: None, diagnostics: vec![error.with_file(path.to_owned())] },
-    };
-    let ast = match parser::parse(&tokens) {
-        Ok(ast) => ast,
-        Err(error) => return CompileMetadataDiagnosticReport { metadata: None, diagnostics: vec![error.with_file(path.to_owned())] },
-    };
-    let resolver = match build_module_resolver(path, &ast) {
-        Ok(resolver) => resolver,
+    compile_file_metadata_with_diagnostics(&resolved, options, Some(source))
+}
+
+fn compile_file_metadata_with_diagnostics(
+    path: &Utf8Path,
+    options: CompileOptions,
+    entry_source_override: Option<&str>,
+) -> CompileMetadataDiagnosticReport {
+    let project = match load_project_for_entry(path, entry_source_override) {
+        Ok(project) => project,
         Err(error) => return CompileMetadataDiagnosticReport { metadata: None, diagnostics: vec![error] },
     };
     let manifest = match find_package_root(path).and_then(|root| root.map(|root| load_manifest(&root)).transpose()) {
@@ -4291,26 +4441,18 @@ fn compile_file_metadata_with_diagnostics(path: &Utf8Path, options: CompileOptio
         Err(error) => return CompileMetadataDiagnosticReport { metadata: None, diagnostics: vec![error] },
     };
 
-    if options.is_primitive_strict_015() {
-        if let Err(error) = check_primitive_strict_015(&ast) {
-            return CompileMetadataDiagnosticReport { metadata: None, diagnostics: vec![error.with_file(path.to_owned())] };
-        }
-    }
-
-    let mut diagnostics = attach_default_file(types::diagnostics_with_resolver(&ast, &resolver, &ast.name), path);
+    let check_all_modules = manifest.is_some();
+    let mut diagnostics = project_frontend_diagnostics(&project, &options, check_all_modules);
     if diagnostics.iter().any(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error) {
         return CompileMetadataDiagnosticReport { metadata: None, diagnostics };
     }
 
-    diagnostics.extend(attach_default_file(flow::diagnostics(&ast), path));
-    if diagnostics.iter().any(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error) {
-        return CompileMetadataDiagnosticReport { metadata: None, diagnostics };
-    }
+    let entry = project.entry();
 
-    let ir = match ir::generate_with_resolver(&ast, &resolver, &ast.name) {
+    let ir = match ir::generate_with_resolver(&entry.ast, &project.resolver, &entry.ast.name) {
         Ok(ir) => ir,
         Err(error) => {
-            diagnostics.push(error.with_file(path.to_owned()));
+            diagnostics.push(attach_file_if_missing(error, &entry.path));
             return CompileMetadataDiagnosticReport { metadata: None, diagnostics };
         }
     };
@@ -4331,7 +4473,58 @@ fn compile_file_metadata_with_diagnostics(path: &Utf8Path, options: CompileOptio
 }
 
 fn attach_default_file(diagnostics: Vec<CompileError>, path: &Utf8Path) -> Vec<CompileError> {
-    diagnostics.into_iter().map(|error| if error.file.is_none() { error.with_file(path.to_owned()) } else { error }).collect()
+    diagnostics.into_iter().map(|error| attach_file_if_missing(error, path)).collect()
+}
+
+fn attach_file_if_missing(error: CompileError, path: &Utf8Path) -> CompileError {
+    if error.file.is_none() {
+        error.with_file(path.to_owned())
+    } else {
+        error
+    }
+}
+
+fn project_frontend_diagnostics(project: &LoadedProject, options: &CompileOptions, check_all_modules: bool) -> Vec<CompileError> {
+    let mut diagnostics = Vec::new();
+    for (index, module) in project.modules.iter().enumerate() {
+        if !check_all_modules && index != project.entry_index {
+            continue;
+        }
+        let module_error_start = diagnostics.len();
+
+        if options.is_primitive_strict_015() {
+            if let Err(error) = check_primitive_strict_015(&module.ast) {
+                diagnostics.push(attach_file_if_missing(error, &module.path));
+            }
+        }
+
+        diagnostics.extend(attach_default_file(
+            types::diagnostics_with_resolver(&module.ast, &project.resolver, &module.ast.name),
+            &module.path,
+        ));
+        diagnostics.extend(attach_default_file(flow::diagnostics(&module.ast), &module.path));
+
+        let module_has_errors =
+            diagnostics[module_error_start..].iter().any(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error);
+        if !module_has_errors {
+            if let Err(error) = ir::generate_with_resolver(&module.ast, &project.resolver, &module.ast.name) {
+                diagnostics.push(attach_file_if_missing(error, &module.path));
+            }
+        }
+    }
+    diagnostics
+}
+
+fn diagnostics_to_compile_error(mut diagnostics: Vec<CompileError>) -> CompileError {
+    match diagnostics.len() {
+        0 => CompileError::without_span("compilation failed"),
+        1 => diagnostics.remove(0),
+        len => CompileError::without_span(format!(
+            "{} diagnostics:\n{}",
+            len,
+            diagnostics.iter().map(|diagnostic| format!("  - {}", diagnostic)).collect::<Vec<_>>().join("\n")
+        )),
+    }
 }
 
 #[cfg(test)]
@@ -4414,7 +4607,7 @@ fn compile_ast_with_build(
     ast: &ast::Module,
     options: &CompileOptions,
     resolver: Option<(&ModuleResolver, &str)>,
-    build: Option<&CellBuildConfig>,
+    build: Option<&BuildConfig>,
     entry_scope: Option<&CompileEntryScope>,
 ) -> Result<CompileResult> {
     validate_compile_options(options)?;
@@ -4574,29 +4767,35 @@ fn compile_file_with_entry_scope<P: AsRef<Utf8Path>>(
     entry_scope: Option<CompileEntryScope>,
 ) -> Result<CompileResult> {
     let path = path.as_ref();
-    let source =
-        std::fs::read_to_string(path).map_err(|e| CompileError::new(format!("failed to read file: {}", e), error::Span::default()))?;
+    let path = canonical_utf8_path(path)?;
+    let source_units = collect_source_units_for_compile_file(&path)?;
+    let cache_units = collect_cache_units_for_compile_file(&path, &source_units)?;
 
     // Incremental compilation: skip recompilation if cache hit and source unchanged.
     // Cache is only used for default entry scope (no --entry-action / --entry-lock).
     if entry_scope.is_none() {
-        if let Some(cached) = incremental_cache_hit(path, &source, &options) {
+        if let Some(cached) = incremental_cache_hit(&path, &cache_units, &options) {
             return Ok(cached);
         }
     }
 
-    let tokens = lexer::lex(&source)?;
-    let ast = parser::parse(&tokens)?;
-    let resolver = build_module_resolver(path, &ast)?;
-    let manifest = find_package_root(path)?.map(|root| load_manifest(&root)).transpose()?;
+    let project = load_project_for_entry(&path, None)?;
+    let manifest = find_package_root(&path)?.map(|root| load_manifest(&root)).transpose()?;
+    let diagnostics = project_frontend_diagnostics(&project, &options, manifest.is_some());
+    if diagnostics.iter().any(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error) {
+        return Err(diagnostics_to_compile_error(diagnostics));
+    }
+
+    let entry = project.entry();
+    let ast = &entry.ast;
     let mut result = compile_ast_with_build(
-        &ast,
+        ast,
         &options,
-        Some((&resolver, &ast.name)),
+        Some((&project.resolver, &ast.name)),
         manifest.as_ref().map(|manifest| &manifest.build),
         entry_scope.as_ref(),
     )?;
-    bind_source_metadata(&mut result.metadata, collect_source_units_for_compile_file(path)?);
+    bind_source_metadata(&mut result.metadata, source_units);
     if let Some(manifest) = manifest.as_ref() {
         apply_manifest_deploy_metadata(&mut result.metadata, manifest)?;
     }
@@ -4606,17 +4805,30 @@ fn compile_file_with_entry_scope<P: AsRef<Utf8Path>>(
     // Entry-scoped compiles use the same public options as default compiles,
     // so they must not write the default cache key.
     if entry_scope.is_none() {
-        incremental_cache_store(path, &source, &options, &result);
+        incremental_cache_store(&path, &cache_units, &options, &result);
     }
 
     Ok(result)
 }
 
+#[cfg(feature = "cli")]
+pub(crate) fn refresh_incremental_cache_for_input<P: AsRef<Utf8Path>>(
+    input: P,
+    options: &CompileOptions,
+    result: &CompileResult,
+) -> Result<()> {
+    let resolved = resolve_input_path(input.as_ref())?;
+    let source_units = collect_source_units_for_compile_file(&resolved)?;
+    let cache_units = collect_cache_units_for_compile_file(&resolved, &source_units)?;
+    incremental_cache_store(&resolved, &cache_units, options, result);
+    Ok(())
+}
+
 /// Check incremental compilation cache for a previous compile result.
 /// Returns `Some(result)` if the cache is valid and the source has not changed.
-fn incremental_cache_hit(path: &Utf8Path, source: &str, options: &CompileOptions) -> Option<CompileResult> {
+fn incremental_cache_hit(path: &Utf8Path, cache_units: &[SourceUnitMetadata], options: &CompileOptions) -> Option<CompileResult> {
     let cache_dir = incremental_cache_dir(path)?;
-    let cache_key = incremental_cache_key(source, options);
+    let cache_key = incremental_cache_key(cache_units, options);
     let entry_dir = cache_dir.join(&cache_key);
 
     let artifact_path = entry_dir.join("artifact");
@@ -4629,7 +4841,7 @@ fn incremental_cache_hit(path: &Utf8Path, source: &str, options: &CompileOptions
     // Verify the source content hash still matches.
     let source_hash_file = entry_dir.join("source_hash");
     let cached_source_hash = std::fs::read_to_string(&source_hash_file).ok()?;
-    let current_source_hash = hex_encode(&ckb_blake2b256(source.as_bytes()));
+    let current_source_hash = source_set_hash(cache_units);
     if cached_source_hash != current_source_hash {
         return None;
     }
@@ -4660,9 +4872,9 @@ fn incremental_cache_hit(path: &Utf8Path, source: &str, options: &CompileOptions
 }
 
 /// Store compile result to incremental cache after a successful compile.
-fn incremental_cache_store(path: &Utf8Path, source: &str, options: &CompileOptions, result: &CompileResult) {
+fn incremental_cache_store(path: &Utf8Path, cache_units: &[SourceUnitMetadata], options: &CompileOptions, result: &CompileResult) {
     let Some(cache_dir) = incremental_cache_dir(path) else { return };
-    let cache_key = incremental_cache_key(source, options);
+    let cache_key = incremental_cache_key(cache_units, options);
     let entry_dir = cache_dir.join(&cache_key);
 
     let _ = std::fs::create_dir_all(&entry_dir);
@@ -4670,8 +4882,11 @@ fn incremental_cache_store(path: &Utf8Path, source: &str, options: &CompileOptio
     let _ = std::fs::write(entry_dir.join("artifact"), &result.artifact_bytes);
     let metadata_json = serde_json::to_string_pretty(&result.metadata).unwrap_or_default();
     let _ = std::fs::write(entry_dir.join("metadata.json"), metadata_json);
-    let source_hash = hex_encode(&ckb_blake2b256(source.as_bytes()));
+    let source_hash = source_set_hash(cache_units);
     let _ = std::fs::write(entry_dir.join("source_hash"), &source_hash);
+    if let Ok(cache_units_json) = serde_json::to_string_pretty(cache_units) {
+        let _ = std::fs::write(entry_dir.join("source_units.json"), cache_units_json);
+    }
 }
 
 fn incremental_cache_dir(path: &Utf8Path) -> Option<Utf8PathBuf> {
@@ -4686,7 +4901,7 @@ fn incremental_cache_dir(path: &Utf8Path) -> Option<Utf8PathBuf> {
     Some(parent.join(".cell/build/cache"))
 }
 
-fn incremental_cache_key(source: &str, options: &CompileOptions) -> String {
+fn incremental_cache_key(cache_units: &[SourceUnitMetadata], options: &CompileOptions) -> String {
     let mut key_input = String::new();
     key_input.push_str("cellscript-incremental-cache-v2");
     key_input.push_str(&format!("-compiler-{}", VERSION));
@@ -4696,12 +4911,27 @@ fn incremental_cache_key(source: &str, options: &CompileOptions) -> String {
         SOURCE_METADATA_SCHEMA_VERSION, ARTIFACT_METADATA_SCHEMA_VERSION, CONSTRAINTS_METADATA_SCHEMA_VERSION
     ));
     key_input.push_str(&format!("-artifact-cache-{}", ARTIFACT_CACHE_VERSION));
-    key_input.push_str(&hex_encode(&ckb_blake2b256(source.as_bytes())));
+    key_input.push_str(&source_set_hash(cache_units));
     key_input.push_str(&format!("-O{}", options.opt_level));
     key_input.push_str(&format!("-{}", options.target.as_deref().unwrap_or("default")));
     key_input.push_str(&format!("-{}", options.target_profile.as_deref().unwrap_or("default")));
     key_input.push_str(&format!("-debug{}", options.debug));
     key_input.push_str(&format!("-primitive-{}", options.primitive_compat.as_deref().unwrap_or("default")));
+    hex_encode(&ckb_blake2b256(key_input.as_bytes()))
+}
+
+fn source_set_hash(cache_units: &[SourceUnitMetadata]) -> String {
+    let mut key_input = String::new();
+    for unit in cache_units {
+        key_input.push_str(&unit.role);
+        key_input.push('\0');
+        key_input.push_str(&unit.path);
+        key_input.push('\0');
+        key_input.push_str(&unit.hash);
+        key_input.push('\0');
+        key_input.push_str(&unit.size_bytes.to_string());
+        key_input.push('\n');
+    }
     hex_encode(&ckb_blake2b256(key_input.as_bytes()))
 }
 
@@ -4726,7 +4956,7 @@ fn source_unit_from_file(path: &Utf8Path, role: &str) -> Result<SourceUnitMetada
     Ok(source_unit_from_bytes(path.to_string(), role.to_string(), &bytes))
 }
 
-fn collect_source_units_for_compile_file(entry_path: &Utf8Path) -> Result<Vec<SourceUnitMetadata>> {
+fn collect_source_paths_for_compile_file(entry_path: &Utf8Path) -> Result<BTreeSet<Utf8PathBuf>> {
     let entry_path = canonical_utf8_path(entry_path)?;
     let mut source_paths = BTreeSet::new();
     let package_root = find_package_root(&entry_path)?;
@@ -4741,6 +4971,14 @@ fn collect_source_units_for_compile_file(entry_path: &Utf8Path) -> Result<Vec<So
     }
     source_paths.insert(entry_path.clone());
 
+    Ok(source_paths)
+}
+
+fn collect_source_units_for_compile_file(entry_path: &Utf8Path) -> Result<Vec<SourceUnitMetadata>> {
+    let entry_path = canonical_utf8_path(entry_path)?;
+    let package_root = find_package_root(&entry_path)?;
+    let source_paths = collect_source_paths_for_compile_file(&entry_path)?;
+
     source_paths
         .into_iter()
         .map(|source_path| {
@@ -4754,6 +4992,47 @@ fn collect_source_units_for_compile_file(entry_path: &Utf8Path) -> Result<Vec<So
             source_unit_from_file(&source_path, role)
         })
         .collect()
+}
+
+fn collect_cache_units_for_compile_file(
+    entry_path: &Utf8Path,
+    source_units: &[SourceUnitMetadata],
+) -> Result<Vec<SourceUnitMetadata>> {
+    let entry_path = canonical_utf8_path(entry_path)?;
+    let mut units = source_units.to_vec();
+    if let Some(package_root) = find_package_root(&entry_path)? {
+        let mut package_roots = BTreeSet::new();
+        let mut visited_roots = HashSet::new();
+        collect_package_roots_recursive(&package_root, &mut visited_roots, &mut package_roots)?;
+        for package_root in package_roots {
+            let manifest_path = package_root.join("Cell.toml");
+            if manifest_path.exists() {
+                units.push(source_unit_from_file(&manifest_path, "manifest")?);
+            }
+            let lock_path = package_root.join("Cell.lock");
+            if lock_path.exists() {
+                units.push(source_unit_from_file(&lock_path, "lockfile")?);
+            }
+        }
+    }
+    units.sort_by(|left, right| left.path.cmp(&right.path).then_with(|| left.role.cmp(&right.role)));
+    Ok(units)
+}
+
+fn collect_package_roots_recursive(
+    package_root: &Utf8Path,
+    visited_roots: &mut HashSet<Utf8PathBuf>,
+    package_roots: &mut BTreeSet<Utf8PathBuf>,
+) -> Result<()> {
+    let package_root = canonical_utf8_path(package_root)?;
+    if !visited_roots.insert(package_root.clone()) {
+        return Ok(());
+    }
+    package_roots.insert(package_root.clone());
+    for dep_root in local_dependency_roots(&package_root)? {
+        collect_package_roots_recursive(&dep_root, visited_roots, package_roots)?;
+    }
+    Ok(())
 }
 
 fn collect_package_source_paths_recursive(
@@ -4776,119 +5055,12 @@ fn collect_package_source_paths_recursive(
     Ok(())
 }
 
-fn build_module_resolver(path: &Utf8Path, current_module: &ast::Module) -> Result<ModuleResolver> {
-    let mut resolver = ModuleResolver::new();
-    resolver.register_module(current_module.clone())?;
-
-    let current_path = canonical_utf8_path(path)?;
-    if let Some(package_root) = find_package_root(path)? {
-        let mut visited_roots = HashSet::new();
-        let mut loading_roots = Vec::new();
-        load_package_modules(&mut resolver, &package_root, &current_path, &mut visited_roots, &mut loading_roots)?;
-    } else if let Some(parent) = path.parent() {
-        for candidate in collect_cell_files(parent)? {
-            if candidate == current_path {
-                continue;
-            }
-            register_module_file(&mut resolver, &candidate)?;
-        }
-    }
-
-    Ok(resolver)
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct CellManifest {
-    #[serde(default)]
-    package: Option<CellManifestPackage>,
-    #[serde(default)]
-    workspace: Option<CellWorkspaceConfig>,
-    #[serde(default)]
-    build: CellBuildConfig,
-    #[serde(default)]
-    deploy: CellDeployConfig,
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct CellManifestPackage {
-    #[serde(default)]
-    entry: Option<String>,
-    #[serde(default)]
-    source_roots: Vec<String>,
-}
-
-#[derive(Debug, Default, Deserialize)]
-#[allow(dead_code)]
-struct CellWorkspaceConfig {
-    #[serde(default)]
-    members: Vec<String>,
-    #[serde(default)]
-    exclude: Vec<String>,
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct CellBuildConfig {
-    #[serde(default)]
-    target: Option<String>,
-    #[serde(default)]
-    target_profile: Option<String>,
-    #[serde(default)]
-    out_dir: Option<String>,
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct CellDeployConfig {
-    #[serde(default)]
-    ckb: Option<CellCkbDeployConfig>,
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct CellCkbDeployConfig {
-    #[serde(default)]
-    artifact_hash: Option<String>,
-    #[serde(default)]
-    data_hash: Option<String>,
-    #[serde(default)]
-    out_point: Option<String>,
-    #[serde(default)]
-    dep_type: Option<String>,
-    #[serde(default)]
-    hash_type: Option<String>,
-    #[serde(default)]
-    type_id: Option<String>,
-    #[serde(default)]
-    cell_deps: Vec<CellCkbCellDepConfig>,
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct CellCkbCellDepConfig {
-    #[serde(default)]
-    name: Option<String>,
-    #[serde(default)]
-    out_point: Option<String>,
-    #[serde(default)]
-    tx_hash: Option<String>,
-    #[serde(default)]
-    index: Option<u32>,
-    #[serde(default)]
-    dep_type: Option<String>,
-    #[serde(default)]
-    data_hash: Option<String>,
-    #[serde(default)]
-    hash_type: Option<String>,
-    #[serde(default)]
-    type_id: Option<String>,
-}
-
 fn find_package_root(path: &Utf8Path) -> Result<Option<Utf8PathBuf>> {
     let mut current = path.parent();
     while let Some(dir) = current {
         let manifest = dir.join("Cell.toml");
-        if manifest.exists() {
-            let manifest = load_manifest(dir)?;
-            if manifest.package.is_some() {
-                return Ok(Some(dir.to_path_buf()));
-            }
+        if manifest.exists() && manifest_has_table(&manifest, "package")? {
+            return Ok(Some(dir.to_path_buf()));
         }
         current = dir.parent();
     }
@@ -4902,13 +5074,8 @@ pub fn find_workspace_root(path: &Utf8Path) -> Result<Option<Utf8PathBuf>> {
     let mut current = path.parent();
     while let Some(dir) = current {
         let manifest_path = dir.join("Cell.toml");
-        if manifest_path.exists() {
-            if let Ok(content) = std::fs::read_to_string(&manifest_path) {
-                let has_workspace = content.contains("[workspace]");
-                if has_workspace {
-                    return Ok(Some(dir.to_path_buf()));
-                }
-            }
+        if manifest_path.exists() && manifest_has_table(&manifest_path, "workspace")? {
+            return Ok(Some(dir.to_path_buf()));
         }
         current = dir.parent();
     }
@@ -4918,12 +5085,21 @@ pub fn find_workspace_root(path: &Utf8Path) -> Result<Option<Utf8PathBuf>> {
 /// Resolve workspace member directories from a workspace root.
 /// Reads the `[workspace]` section and resolves member paths.
 pub fn resolve_workspace_members(workspace_root: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
-    let manifest = load_manifest(workspace_root)?;
-    let Some(ws_config) = manifest.workspace else {
-        return Ok(Vec::new());
+    let manifest_path = workspace_root.join("Cell.toml");
+    let manifest_source = std::fs::read_to_string(&manifest_path)
+        .map_err(|e| CompileError::new(format!("failed to read manifest '{}': {}", manifest_path, e), error::Span::default()))?;
+    let member_patterns = if manifest_has_table(&manifest_path, "package")? {
+        let manifest: PackageManifest = toml::from_str(&manifest_source)
+            .map_err(|e| CompileError::new(format!("failed to parse manifest '{}': {}", manifest_path, e), error::Span::default()))?;
+        manifest.workspace.map(|workspace| workspace.members).unwrap_or_default()
+    } else {
+        let manifest: WorkspaceManifest = toml::from_str(&manifest_source).map_err(|e| {
+            CompileError::new(format!("failed to parse workspace manifest '{}': {}", manifest_path, e), error::Span::default())
+        })?;
+        manifest.workspace.members
     };
     let mut members = Vec::new();
-    for member_pattern in &ws_config.members {
+    for member_pattern in &member_patterns {
         let member_path = workspace_root.join(member_pattern);
         if !member_path.is_dir() {
             return Err(CompileError::new(
@@ -4940,41 +5116,6 @@ pub fn resolve_workspace_members(workspace_root: &Utf8Path) -> Result<Vec<Utf8Pa
         members.push(canonical_utf8_path(&member_path)?);
     }
     Ok(members)
-}
-
-fn load_package_modules(
-    resolver: &mut ModuleResolver,
-    package_root: &Utf8Path,
-    current_path: &Utf8Path,
-    visited_roots: &mut HashSet<Utf8PathBuf>,
-    loading_roots: &mut Vec<Utf8PathBuf>,
-) -> Result<()> {
-    let package_root = canonical_utf8_path(package_root)?;
-    if visited_roots.contains(&package_root) {
-        return Ok(());
-    }
-    if let Some(index) = loading_roots.iter().position(|root| root == &package_root) {
-        let mut cycle = loading_roots[index..].to_vec();
-        cycle.push(package_root.clone());
-        let cycle = cycle.into_iter().map(|path| path.to_string()).collect::<Vec<_>>().join(" -> ");
-        return Err(CompileError::new(format!("path dependency cycle detected: {}", cycle), error::Span::default()));
-    }
-    loading_roots.push(package_root.clone());
-
-    for candidate in collect_package_cell_files(&package_root)? {
-        if candidate == current_path {
-            continue;
-        }
-        register_module_file(resolver, &candidate)?;
-    }
-
-    for dep_root in local_dependency_roots(&package_root)? {
-        load_package_modules(resolver, &dep_root, current_path, visited_roots, loading_roots)?;
-    }
-
-    loading_roots.pop();
-    visited_roots.insert(package_root);
-    Ok(())
 }
 
 fn local_dependency_roots(package_root: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
@@ -5022,7 +5163,7 @@ fn resolve_input_file(input: &Utf8Path) -> Result<Utf8PathBuf> {
 fn resolve_package_entry(package_root: &Utf8Path) -> Result<Utf8PathBuf> {
     let manifest = load_manifest(package_root)?;
 
-    let entry = manifest.package.as_ref().and_then(|package| package.entry.clone()).unwrap_or_else(default_package_entry);
+    let entry = manifest.package.entry;
     let entry_path = package_root.join(entry);
     if !entry_path.exists() {
         return Err(CompileError::new(format!("package entry '{}' does not exist", entry_path), error::Span::default()));
@@ -9892,7 +10033,7 @@ fn type_field_has_fixed_width(type_layouts: &MetadataTypeLayouts, type_name: &st
     type_layouts
         .get(type_name)
         .and_then(|fields| fields.get(field))
-        .and_then(metadata_layout_fixed_byte_width)
+        .and_then(|layout| metadata_layout_or_named_fixed_byte_width(layout, type_layouts))
         .is_some_and(|width| width == expected_width)
 }
 
@@ -11504,7 +11645,7 @@ fn metadata_unique_identity_policy_is_executable(
         ir::IrIdentityPolicy::Field(field) => type_layouts
             .get(pattern.ty.as_str())
             .and_then(|fields| fields.get(field))
-            .is_some_and(|layout| metadata_layout_fixed_byte_width(layout).is_some()),
+            .is_some_and(|layout| metadata_layout_or_named_fixed_byte_width(layout, type_layouts).is_some()),
     }
 }
 
@@ -11750,8 +11891,13 @@ fn metadata_prelude_availability(
                         };
                         layout
                     };
-                    if metadata_layout_fixed_byte_width(&layout).is_some() && layout.ty == dest.ty {
+                    if metadata_layout_or_named_fixed_byte_width(&layout, type_layouts).is_some() && layout.ty == dest.ty {
                         availability.fixed_value_vars.insert(dest.id);
+                        if metadata_ir_type_fixed_width(&dest.ty, type_layouts).is_some_and(|width| width > 8) {
+                            availability
+                                .aggregate_pointer_vars
+                                .insert(dest.id, MetadataAggregatePointerSource { ty: dest.ty.clone() });
+                        }
                     }
                     if metadata_layout_fixed_scalar_width(&layout).is_some() && layout.ty == dest.ty {
                         availability.scalar_vars.insert(dest.id);
@@ -11760,7 +11906,7 @@ fn metadata_prelude_availability(
                             availability.u64_operand_vars.insert(dest.id);
                         }
                     }
-                    if metadata_layout_fixed_byte_width(&layout).is_none()
+                    if metadata_layout_or_named_fixed_byte_width(&layout, type_layouts).is_none()
                         && metadata_molecule_vector_element_fixed_width(&layout.ty, type_layouts).is_some()
                         && layout.ty == dest.ty
                     {
@@ -12082,7 +12228,7 @@ fn metadata_can_verify_create_output_fields(
     }
     pattern.fields.iter().all(|(field, value)| {
         layouts.get(field).is_some_and(|layout| {
-            if let Some(width) = metadata_layout_fixed_byte_width(layout) {
+            if let Some(width) = metadata_layout_or_named_fixed_byte_width(layout, type_layouts) {
                 metadata_fixed_value_available_with_width(value, availability, width)
             } else {
                 metadata_dynamic_create_output_value_available(value, layout, availability, type_layouts)
@@ -12544,6 +12690,10 @@ fn metadata_layout_fixed_byte_width(layout: &MetadataFieldLayout) -> Option<usiz
     metadata_fixed_byte_width(&layout.ty, layout.fixed_size).or(layout.fixed_enum_size)
 }
 
+fn metadata_layout_or_named_fixed_byte_width(layout: &MetadataFieldLayout, type_layouts: &MetadataTypeLayouts) -> Option<usize> {
+    metadata_layout_fixed_byte_width(layout).or(layout.fixed_size).or_else(|| metadata_ir_type_fixed_width(&layout.ty, type_layouts))
+}
+
 fn metadata_fixed_aggregate_pointer_size(ty: &ir::IrType) -> Option<usize> {
     match ty {
         ir::IrType::Array(_, _) | ir::IrType::Tuple(_) => type_static_length(ty).filter(|width| *width > 8),
@@ -12574,7 +12724,7 @@ fn metadata_inline_type_fixed_width(ty: &str, type_layouts: &MetadataTypeLayouts
         other => type_layouts.get(other).and_then(|fields| {
             fields
                 .values()
-                .try_fold(0usize, |acc, layout| metadata_layout_fixed_byte_width(layout).and_then(|width| acc.checked_add(width)))
+                .try_fold(0usize, |acc, layout| layout.fixed_size.or(layout.fixed_enum_size).and_then(|width| acc.checked_add(width)))
         }),
     }
 }
@@ -13042,7 +13192,7 @@ fn is_executable_schema_field_access(
     let Some(layout) = type_layouts.get(type_name).and_then(|fields| fields.get(field)) else {
         return false;
     };
-    metadata_layout_fixed_byte_width(layout).is_some()
+    metadata_layout_or_named_fixed_byte_width(layout, type_layouts).is_some()
         || metadata_molecule_vector_element_fixed_width(&layout.ty, type_layouts).is_some()
 }
 
@@ -13061,7 +13211,7 @@ fn is_executable_aggregate_field_access(
     let Some(layout) = metadata_aggregate_or_named_field_layout(&source.ty, field, type_layouts) else {
         return false;
     };
-    metadata_layout_fixed_byte_width(&layout).is_some()
+    metadata_layout_or_named_fixed_byte_width(&layout, type_layouts).is_some()
 }
 
 fn is_executable_tuple_call_return_field_access(obj: &ir::IrOperand, field: &str, availability: &MetadataPreludeAvailability) -> bool {
@@ -13647,44 +13797,41 @@ fn scheduler_access_is_cell_state_access(access: &CkbRuntimeAccessMetadata) -> b
 
 fn metadata_type_layouts(ir: &ir::IrModule) -> MetadataTypeLayouts {
     let mut layouts = HashMap::new();
+    let type_defs = metadata_type_defs_by_name(ir);
     for type_def in &ir.external_type_defs {
-        let fields = type_def
-            .fields
-            .iter()
-            .map(|field| {
-                let fixed_enum_size = match &field.ty {
-                    ir::IrType::Named(name) => ir.enum_fixed_sizes.get(name).copied(),
-                    _ => None,
-                };
-                (
-                    field.name.clone(),
-                    MetadataFieldLayout { ty: field.ty.clone(), offset: field.offset, fixed_size: field.fixed_size, fixed_enum_size },
-                )
-            })
-            .collect();
+        let fields = metadata_layout_fields(type_def, &type_defs, &ir.enum_fixed_sizes);
         layouts.insert(type_def.name.clone(), fields);
     }
     for item in &ir.items {
         let ir::IrItem::TypeDef(type_def) = item else {
             continue;
         };
-        let fields = type_def
-            .fields
-            .iter()
-            .map(|field| {
-                let fixed_enum_size = match &field.ty {
-                    ir::IrType::Named(name) => ir.enum_fixed_sizes.get(name).copied(),
-                    _ => None,
-                };
-                (
-                    field.name.clone(),
-                    MetadataFieldLayout { ty: field.ty.clone(), offset: field.offset, fixed_size: field.fixed_size, fixed_enum_size },
-                )
-            })
-            .collect();
+        let fields = metadata_layout_fields(type_def, &type_defs, &ir.enum_fixed_sizes);
         layouts.insert(type_def.name.clone(), fields);
     }
     layouts
+}
+
+fn metadata_layout_fields(
+    type_def: &ir::IrTypeDef,
+    type_defs: &BTreeMap<String, &ir::IrTypeDef>,
+    enum_fixed_sizes: &HashMap<String, usize>,
+) -> HashMap<String, MetadataFieldLayout> {
+    let mut next_offset = Some(0usize);
+    type_def
+        .fields
+        .iter()
+        .map(|field| {
+            let fixed_enum_size = match &field.ty {
+                ir::IrType::Named(name) => enum_fixed_sizes.get(name).copied(),
+                _ => None,
+            };
+            let fixed_size = ir_type_encoded_size(&field.ty, type_defs, &mut BTreeSet::new()).or(field.fixed_size).or(fixed_enum_size);
+            let offset = next_offset.unwrap_or(field.offset);
+            next_offset = next_offset.and_then(|current| fixed_size.and_then(|size| current.checked_add(size)));
+            (field.name.clone(), MetadataFieldLayout { ty: field.ty.clone(), offset, fixed_size, fixed_enum_size })
+        })
+        .collect()
 }
 
 fn metadata_flow_states(ir: &ir::IrModule) -> HashMap<String, Vec<String>> {
@@ -13788,7 +13935,7 @@ fn type_metadata(
         },
         flow_states,
         encoded_size: type_encoded_size(type_def, type_defs),
-        fields: type_def.fields.iter().map(|field| field_metadata(field, type_defs)).collect(),
+        fields: fields_metadata(type_def, type_defs),
         molecule_schema: type_molecule_schema_metadata(type_def, type_defs),
         identity_policy: metadata_identity_policy(&type_def.identity),
     }
@@ -14359,12 +14506,25 @@ fn flow_rule_metadata(rule: &ir::IrFlowRule) -> FlowTransitionMetadata {
     FlowTransitionMetadata { from: rule.from.clone(), to: rule.to.clone(), from_index: rule.from_index, to_index: rule.to_index }
 }
 
-fn field_metadata(field: &ir::IrField, type_defs: &BTreeMap<String, &ir::IrTypeDef>) -> FieldMetadata {
-    let encoded_size = ir_type_encoded_size(&field.ty, type_defs, &mut BTreeSet::new()).or(field.fixed_size);
+fn fields_metadata(type_def: &ir::IrTypeDef, type_defs: &BTreeMap<String, &ir::IrTypeDef>) -> Vec<FieldMetadata> {
+    let mut next_offset = Some(0usize);
+    type_def
+        .fields
+        .iter()
+        .map(|field| {
+            let encoded_size = ir_type_encoded_size(&field.ty, type_defs, &mut BTreeSet::new()).or(field.fixed_size);
+            let offset = next_offset.unwrap_or(field.offset);
+            next_offset = next_offset.and_then(|current| encoded_size.and_then(|size| current.checked_add(size)));
+            field_metadata(field, encoded_size, offset)
+        })
+        .collect()
+}
+
+fn field_metadata(field: &ir::IrField, encoded_size: Option<usize>, offset: usize) -> FieldMetadata {
     FieldMetadata {
         name: field.name.clone(),
         ty: ir_type_to_string(&field.ty),
-        offset: field.offset,
+        offset,
         encoded_size,
         fixed_width: encoded_size.is_some(),
     }
@@ -14855,7 +15015,7 @@ fn mutate_preserved_field_is_verifier_coverable(pattern: &ir::MutatePattern, fie
     if metadata_type_encoded_size_from_layouts(fields).is_none() {
         return true;
     }
-    let Some(width) = metadata_layout_fixed_byte_width(layout) else {
+    let Some(width) = metadata_layout_or_named_fixed_byte_width(layout, type_layouts) else {
         return false;
     };
     layout.offset + width <= METADATA_MUTATE_CELL_BUFFER_SIZE
@@ -14879,7 +15039,7 @@ fn mutate_preserved_data_except_transition_is_verifier_coverable(
     }
     pattern.transitions.iter().all(|transition| {
         fields.get(&transition.field).is_some_and(|layout| {
-            metadata_layout_fixed_byte_width(layout)
+            metadata_layout_or_named_fixed_byte_width(layout, type_layouts)
                 .map(|width| layout.offset + width)
                 .is_some_and(|end| end <= METADATA_MUTATE_CELL_BUFFER_SIZE)
         })
@@ -14929,7 +15089,7 @@ fn mutate_transition_is_verifier_coverable(
         };
     }
     if transition.op == ir::MutateTransitionOp::Set {
-        let Some(width) = metadata_layout_fixed_byte_width(layout) else {
+        let Some(width) = metadata_layout_or_named_fixed_byte_width(layout, type_layouts) else {
             return false;
         };
         if !dynamic_table && layout.offset + width > METADATA_MUTATE_CELL_BUFFER_SIZE {
@@ -15037,27 +15197,22 @@ fn collect_package_cell_files(package_root: &Utf8Path) -> Result<Vec<Utf8PathBuf
     let mut roots = Vec::new();
     let mut seen_roots = HashSet::new();
 
-    if let Some(package) = &manifest.package {
-        if !package.source_roots.is_empty() {
-            for source_root in &package.source_roots {
-                let root = package_root.join(source_root);
-                if !root.exists() {
-                    return Err(CompileError::new(
-                        format!("configured source root '{}' does not exist", root),
-                        error::Span::default(),
-                    ));
-                }
-                if !root.is_dir() {
-                    return Err(CompileError::new(
-                        format!("configured source root '{}' is not a directory", root),
-                        error::Span::default(),
-                    ));
-                }
+    if !manifest.package.source_roots.is_empty() {
+        for source_root in &manifest.package.source_roots {
+            let root = package_root.join(source_root);
+            if !root.exists() {
+                return Err(CompileError::new(format!("configured source root '{}' does not exist", root), error::Span::default()));
+            }
+            if !root.is_dir() {
+                return Err(CompileError::new(
+                    format!("configured source root '{}' is not a directory", root),
+                    error::Span::default(),
+                ));
+            }
 
-                let root = canonical_utf8_path(&root)?;
-                if seen_roots.insert(root.clone()) {
-                    roots.push(root);
-                }
+            let root = canonical_utf8_path(&root)?;
+            if seen_roots.insert(root.clone()) {
+                roots.push(root);
             }
         }
     }
@@ -15073,7 +15228,7 @@ fn collect_package_cell_files(package_root: &Utf8Path) -> Result<Vec<Utf8PathBuf
     }
 
     let mut explicit_entry = None;
-    if let Some(entry) = manifest.package.as_ref().and_then(|package| package.entry.clone()) {
+    if let Some(entry) = explicit_manifest_entry(package_root)? {
         let entry_path = package_root.join(entry);
         if !entry_path.exists() {
             return Err(CompileError::new(format!("package entry '{}' does not exist", entry_path), error::Span::default()));
@@ -15146,14 +15301,6 @@ fn should_skip_cell_dir(path: &Utf8Path) -> bool {
     matches!(path.file_name(), Some(".git" | ".cell" | "target")) || path.join("Cell.toml").exists()
 }
 
-fn register_module_file(resolver: &mut ModuleResolver, path: &Utf8Path) -> Result<()> {
-    let source = std::fs::read_to_string(path)
-        .map_err(|e| CompileError::new(format!("failed to read module file '{}': {}", path, e), error::Span::default()))?;
-    let tokens = lexer::lex(&source).map_err(|e| e.with_file(path.to_path_buf()))?;
-    let module = parser::parse(&tokens).map_err(|e| e.with_file(path.to_path_buf()))?;
-    resolver.register_module(module)
-}
-
 fn canonical_utf8_path(path: &Utf8Path) -> Result<Utf8PathBuf> {
     let canonical = std::fs::canonicalize(path)
         .map_err(|e| CompileError::new(format!("failed to canonicalize '{}': {}", path, e), error::Span::default()))?;
@@ -15161,11 +15308,7 @@ fn canonical_utf8_path(path: &Utf8Path) -> Result<Utf8PathBuf> {
         .map_err(|non_utf8| CompileError::new(format!("path is not valid UTF-8: {}", non_utf8.display()), error::Span::default()))
 }
 
-fn default_package_entry() -> String {
-    "src/main.cell".to_string()
-}
-
-fn load_manifest(package_root: &Utf8Path) -> Result<CellManifest> {
+fn load_manifest(package_root: &Utf8Path) -> Result<PackageManifest> {
     let manifest_path = package_root.join("Cell.toml");
     if !manifest_path.exists() {
         return Err(CompileError::new(format!("Cell.toml not found in '{}'", package_root), error::Span::default()));
@@ -15177,7 +15320,30 @@ fn load_manifest(package_root: &Utf8Path) -> Result<CellManifest> {
         .map_err(|e| CompileError::new(format!("failed to parse manifest '{}': {}", manifest_path, e), error::Span::default()))
 }
 
-fn resolve_target<'a>(options: &'a CompileOptions, build: Option<&'a CellBuildConfig>) -> &'a str {
+fn manifest_has_table(manifest_path: &Utf8Path, table: &str) -> Result<bool> {
+    let manifest_source = std::fs::read_to_string(manifest_path)
+        .map_err(|e| CompileError::new(format!("failed to read manifest '{}': {}", manifest_path, e), error::Span::default()))?;
+    let manifest: toml::Value = toml::from_str(&manifest_source)
+        .map_err(|e| CompileError::new(format!("failed to parse manifest '{}': {}", manifest_path, e), error::Span::default()))?;
+    Ok(manifest.get(table).is_some())
+}
+
+fn explicit_manifest_entry(package_root: &Utf8Path) -> Result<Option<String>> {
+    let manifest_path = package_root.join("Cell.toml");
+    let manifest_source = std::fs::read_to_string(&manifest_path)
+        .map_err(|e| CompileError::new(format!("failed to read manifest '{}': {}", manifest_path, e), error::Span::default()))?;
+    let manifest: toml::Value = toml::from_str(&manifest_source)
+        .map_err(|e| CompileError::new(format!("failed to parse manifest '{}': {}", manifest_path, e), error::Span::default()))?;
+    let Some(package) = manifest.get("package").and_then(toml::Value::as_table) else {
+        return Ok(None);
+    };
+    let Some(entry) = package.get("entry").and_then(toml::Value::as_str) else {
+        return Ok(None);
+    };
+    Ok(Some(entry.to_string()))
+}
+
+fn resolve_target<'a>(options: &'a CompileOptions, build: Option<&'a BuildConfig>) -> &'a str {
     options.target.as_deref().or_else(|| build.and_then(|build| build.target.as_deref())).unwrap_or(DEFAULT_TARGET)
 }
 
@@ -15192,8 +15358,8 @@ mod tests {
     use super::{
         compile, compile_file, compile_file_with_entry_action, compile_file_with_entry_lock, compile_path,
         decode_scheduler_witness_hex, default_output_path_for_input, encode_entry_witness_args_for_params, incremental_cache_key,
-        load_modules_for_input, resolve_input_path, ActionMetadata, ArtifactFormat, CompileOptions, EntryWitnessArg,
-        ENTRY_WITNESS_ABI_MAGIC, SCHEDULER_WITNESS_ABI_MOLECULE,
+        load_modules_for_input, resolve_input_path, source_unit_from_bytes, ActionMetadata, ArtifactFormat, CompileOptions,
+        EntryWitnessArg, ENTRY_WITNESS_ABI_MAGIC, SCHEDULER_WITNESS_ABI_MOLECULE,
     };
     use crate::{ir, lexer, parser};
     use camino::{Utf8Path, Utf8PathBuf};
@@ -23525,16 +23691,17 @@ action main() -> u64 {
         let strict_release_elf = CompileOptions { primitive_compat: Some("0.16".to_string()), ..release_elf.clone() };
         let debug_release_elf = CompileOptions { debug: true, ..release_elf.clone() };
 
-        let release_key = incremental_cache_key(SIMPLE_PROGRAM, &release_elf);
+        let cache_units = vec![source_unit_from_bytes("<memory>", "entry", SIMPLE_PROGRAM.as_bytes())];
+        let release_key = incremental_cache_key(&cache_units, &release_elf);
 
         assert_ne!(
             release_key,
-            incremental_cache_key(SIMPLE_PROGRAM, &strict_release_elf),
+            incremental_cache_key(&cache_units, &strict_release_elf),
             "primitive strict metadata must not reuse a non-strict cache entry"
         );
         assert_ne!(
             release_key,
-            incremental_cache_key(SIMPLE_PROGRAM, &debug_release_elf),
+            incremental_cache_key(&cache_units, &debug_release_elf),
             "debug artefacts must not reuse a non-debug cache entry"
         );
     }
@@ -27394,6 +27561,60 @@ action pass_through(token: Token) -> Token {
     }
 
     #[test]
+    fn compile_file_metadata_lays_out_imported_nested_fixed_structs() {
+        let temp = tempdir().unwrap();
+        let root = Utf8Path::from_path(temp.path()).unwrap();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(
+            root.join("Cell.toml"),
+            r#"
+[package]
+name = "nested_layout"
+version = "0.1.0"
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("src").join("schema.cell"),
+            r#"
+module nested_layout::schema
+
+struct Core {
+    amount: u64,
+    owner: Hash,
+}
+
+struct Signed {
+    core: Core,
+    digest: Hash,
+    receipt: Hash,
+}
+"#,
+        )
+        .unwrap();
+        let entry = root.join("src").join("main.cell");
+        std::fs::write(
+            &entry,
+            r#"
+module nested_layout::main
+
+use nested_layout::schema::{Core, Signed}
+
+action inspect(witness signed: Signed) -> u64 {
+    verification
+        1
+}
+"#,
+        )
+        .unwrap();
+
+        let result = compile_file(&entry, CompileOptions::default()).unwrap();
+        let signed = result.metadata.types.iter().find(|ty| ty.name == "Signed").expect("Signed metadata");
+        let offsets = signed.fields.iter().map(|field| (field.name.as_str(), field.offset, field.encoded_size)).collect::<Vec<_>>();
+        assert_eq!(offsets, vec![("core", 0, Some(40)), ("digest", 40, Some(32)), ("receipt", 72, Some(32))]);
+    }
+
+    #[test]
     fn resolve_input_path_accepts_package_root_and_manifest() {
         let temp = tempdir().unwrap();
         let root = Utf8Path::from_path(temp.path()).unwrap();
@@ -27912,6 +28133,163 @@ action pass(token: Token) -> Token {
         let result = compile_path(root, CompileOptions::default()).unwrap();
         assert_eq!(result.artifact_format, ArtifactFormat::RiscvAssembly);
         assert!(!result.artifact_bytes.is_empty());
+    }
+
+    #[test]
+    fn compile_path_rejects_missing_import_even_with_same_named_type_loaded() {
+        let temp = tempdir().unwrap();
+        let root = Utf8Path::from_path(temp.path()).unwrap();
+
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(
+            root.join("Cell.toml"),
+            r#"
+[package]
+name = "bad-import"
+version = "0.1.0"
+entry = "src/main.cell"
+source_roots = ["src"]
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("src").join("other.cell"),
+            r#"
+module real::other
+
+resource Token {
+    value: u64
+}
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("src").join("main.cell"),
+            r#"
+module app
+
+use missing::module::Token
+
+action pass(token: Token) -> Token {
+    verification
+        token
+}
+"#,
+        )
+        .unwrap();
+
+        let err = compile_path(root, CompileOptions::default()).unwrap_err();
+        assert!(err.message.contains("module 'missing::module' imported by 'app' not found"));
+    }
+
+    #[test]
+    fn compile_path_rejects_invalid_unreferenced_package_module() {
+        let temp = tempdir().unwrap();
+        let root = Utf8Path::from_path(temp.path()).unwrap();
+
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(
+            root.join("Cell.toml"),
+            r#"
+[package]
+name = "unreferenced-bad"
+version = "0.1.0"
+entry = "src/main.cell"
+source_roots = ["src"]
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("src").join("main.cell"),
+            r#"
+module app
+
+action ok() -> bool {
+    verification
+        true
+}
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("src").join("helper.cell"),
+            r#"
+module helper
+
+action broken() -> u64 {
+    verification
+        true
+}
+"#,
+        )
+        .unwrap();
+
+        let err = compile_path(root, CompileOptions::default()).unwrap_err();
+        assert!(err.file.as_ref().is_some_and(|path| path.file_name() == Some("helper.cell")));
+        assert!(err.message.contains("expected U64, found Bool"));
+    }
+
+    #[test]
+    fn incremental_cache_invalidates_when_imported_cell_changes() {
+        let temp = tempdir().unwrap();
+        let root = Utf8Path::from_path(temp.path()).unwrap();
+
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(
+            root.join("Cell.toml"),
+            r#"
+[package]
+name = "cache-drift"
+version = "0.1.0"
+entry = "src/main.cell"
+source_roots = ["src"]
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("src").join("types.cell"),
+            r#"
+module dep::types
+
+resource Pair {
+    value: u64
+}
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("src").join("main.cell"),
+            r#"
+module app
+
+use dep::types::Pair
+
+action keep(pair: Pair) -> Pair {
+    verification
+        pair
+}
+"#,
+        )
+        .unwrap();
+
+        let first = compile_path(root, CompileOptions::default()).unwrap();
+        assert!(!first.cache_hit);
+
+        std::fs::write(
+            root.join("src").join("types.cell"),
+            r#"
+module dep::types
+
+resource Pair {
+    value: u64,
+    nonce: u64
+}
+"#,
+        )
+        .unwrap();
+
+        let second = compile_path(root, CompileOptions::default()).unwrap();
+        assert!(!second.cache_hit);
     }
 
     #[test]

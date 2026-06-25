@@ -13,7 +13,8 @@
 //! uniformly and render diagnostics.
 
 use cellscript::error::{CompileError, Span};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
 
 #[derive(Serialize)]
@@ -34,7 +35,16 @@ struct CompileDiagnostic {
     message: String,
     severity: &'static str,
     code: Option<String>,
+    file: Option<String>,
     range: Option<CompileDiagnosticRange>,
+}
+
+#[derive(Deserialize)]
+struct CompileSourceInput {
+    path: String,
+    source: String,
+    #[serde(default)]
+    role: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -90,6 +100,36 @@ pub fn compile_metadata_json_diagnostics(source: &str, target: Option<String>) -
         .unwrap_or_else(|e| diagnostic_error_json(&format!("failed to serialize diagnostic report: {e}"), source))
 }
 
+/// Compile a virtual multi-file source set and return metadata diagnostics.
+///
+/// `sources_json` must be a JSON array of `{ path, source, role? }` objects.
+/// `entry_path` selects the source that should produce metadata. This is an
+/// additive API; the single-source functions remain stable.
+#[wasm_bindgen]
+pub fn compile_metadata_json_sources(sources_json: &str, entry_path: &str, target: Option<String>) -> String {
+    let inputs: Vec<CompileSourceInput> = match serde_json::from_str(sources_json) {
+        Ok(inputs) => inputs,
+        Err(error) => return diagnostic_error_json(&format!("failed to parse source set JSON: {error}"), ""),
+    };
+    let sources = inputs
+        .into_iter()
+        .map(|input| cellscript::InMemorySource { path: input.path, source: input.source, role: input.role })
+        .collect::<Vec<_>>();
+    let source_by_path = sources.iter().map(|source| (source.path.clone(), source.source.clone())).collect::<HashMap<_, _>>();
+    let fallback_source = sources.iter().find(|source| source.path == entry_path).map(|source| source.source.as_str()).unwrap_or("");
+    let report = cellscript::compile_sources_metadata_with_diagnostics(&sources, entry_path, target);
+    let result = CompileDiagnosticResult {
+        metadata: report.metadata,
+        diagnostics: report
+            .diagnostics
+            .iter()
+            .map(|error| diagnostic_from_error_for_sources(error, &source_by_path, fallback_source))
+            .collect(),
+    };
+    serde_json::to_string(&result)
+        .unwrap_or_else(|e| diagnostic_error_json(&format!("failed to serialize multi-file diagnostic report: {e}"), fallback_source))
+}
+
 /// Query the in-process CellScript language service for browser tooling.
 ///
 /// `line` and `character` are zero-based UTF-16 positions, matching LSP.
@@ -138,8 +178,18 @@ fn diagnostic_from_error(error: &CompileError, source: &str) -> CompileDiagnosti
         message: error.message.clone(),
         severity: error.severity.label(),
         code: error.code.clone(),
+        file: error.file.as_ref().map(|file| file.to_string()),
         range: span_range(error.span, source),
     }
+}
+
+fn diagnostic_from_error_for_sources(
+    error: &CompileError,
+    source_by_path: &HashMap<String, String>,
+    fallback_source: &str,
+) -> CompileDiagnostic {
+    let source = error.file.as_ref().and_then(|file| source_by_path.get(file.as_str())).map(String::as_str).unwrap_or(fallback_source);
+    diagnostic_from_error(error, source)
 }
 
 fn span_range(span: Span, source: &str) -> Option<CompileDiagnosticRange> {

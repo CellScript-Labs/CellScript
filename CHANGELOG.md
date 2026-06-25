@@ -25,6 +25,24 @@
 - Add 0.20 release notes documenting the strengthened devnet acceptance
   boundary and the remaining difference between compile-only and live local
   devnet evidence.
+- Promote multi-file package support into the 0.20 compiler/tooling boundary:
+  exact-path imports, source-graph diagnostics, dependency-aware cache keys,
+  package-aware LSP diagnostics, and an additive WASM multi-source metadata API.
+- Mature cross-file helper reuse by inlining aliased imports, fully-qualified
+  calls, same-basename dependency helpers, and transitive helper calls into the
+  entry artifact with stable internal labels, while keeping ELF-linker and
+  cross-script runtime-linking claims out of scope.
+- Record the 0.20 evidence gate for protocol-source multi-file showcases:
+  NovaSeal, iCKB, and DobEvo / DOB-EVO source refactors may demonstrate shared
+  schema/type imports only when the matching devnet or CKB VM evidence is
+  regenerated, and playground multi-file import/export remains browser-local.
+- Add the first protocol-source multi-file candidate in NovaSeal
+  fungible-xUDT by moving shared schema structs into
+  `nova_fungible_xudt_schema.cell` and importing them from both profile and
+  lifecycle entries. Metadata/artifact preparation records the shared schema
+  source unit, and live local devnet stateful evidence passes issue, transfer,
+  settle, and required negative cases for lifecycle data hash
+  `0x394da78133cb2f5a5d6cd911feceeab9e97e6ad5d36c0e50f18be56653af85e5`.
 
 ## 0.17.0 - 2026-05-04
 

@@ -223,6 +223,13 @@ builders and live-chain verification:
 - stale/wrong-network/wrong-code-hash/missing-CellDep/deprecated deployment
   rejection fixtures;
 - stateful flow runner evidence for canonical examples;
+- multi-file package support as a compiler/tooling boundary. NovaSeal
+  fungible-xUDT has a shared-schema refactor with live local devnet stateful
+  evidence for issue, transfer, settle, and required negative cases; iCKB and
+  DobEvo remain unrefactored unless a real shared-schema boundary and matching
+  evidence exist;
+- browser-local playground file-tree and import/export support without
+  server-side source storage or compile load;
 - registry trust hardening for publisher signatures, trust anchors, mutable
   channels, revocation, and possible on-chain registry/index/proxy design.
 

@@ -3,8 +3,8 @@
 use camino::{Utf8Path, Utf8PathBuf};
 use cellscript::{
     codegen::{analyze_backend_shape, BackendShapeMetrics},
-    compile_file, compile_file_with_entry_action, compile_file_with_entry_lock, ArtifactFormat, CompileMetadata, CompileOptions,
-    CompileResult, ProofPlanMetadata,
+    compile_file, compile_file_with_entry_action, compile_file_with_entry_lock, compile_path, ArtifactFormat, CompileMetadata,
+    CompileOptions, CompileResult, ProofPlanMetadata,
 };
 use std::collections::BTreeSet;
 
@@ -1222,6 +1222,24 @@ fn bundled_examples_compile_to_non_empty_assembly() {
         assert!(!result.metadata.constraints.entry_abi.is_empty(), "missing entry ABI constraints for {}", example);
         assert!(result.metadata.constraints.ckb.is_some(), "missing CKB constraints for {}", example);
         assert!(!result.metadata.actions.is_empty(), "missing action metadata for {}", example);
+    }
+}
+
+#[test]
+fn bundled_package_examples_compile_with_cross_package_source_units() {
+    for package in ["amm_pool", "launch", "vesting"] {
+        let package_root = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples").join(package);
+        let result = compile_path(&package_root, CompileOptions::default()).unwrap_or_else(|err| {
+            panic!("failed to compile package example {}: {}", package, err);
+        });
+        let roles = result.metadata.source_units.iter().map(|unit| unit.role.as_str()).collect::<BTreeSet<_>>();
+        assert!(roles.contains("entry"), "{} should bind its entry source unit", package);
+        assert!(roles.contains("dependency"), "{} should bind dependency source units", package);
+        assert!(
+            result.metadata.source_units.iter().any(|unit| unit.path.contains("examples/token/src/main.cell")),
+            "{} should include token package source evidence",
+            package
+        );
     }
 }
 

@@ -205,8 +205,17 @@ impl LspServer {
         };
 
         self.ast_cache.insert(uri.to_string(), ast.clone());
-        let report = crate::compile_metadata_with_diagnostics(content, None);
-        let mut diagnostics = report.diagnostics.iter().map(|error| diagnostic_from_error(content, error)).collect::<Vec<_>>();
+        let uri_path = file_uri_to_utf8_path(uri).filter(|path| path.exists());
+        let report = uri_path
+            .as_ref()
+            .map(|path| crate::compile_path_metadata_with_diagnostics_for_source(path, content, crate::CompileOptions::default()))
+            .unwrap_or_else(|| crate::compile_metadata_with_diagnostics(content, None));
+        let mut diagnostics = report
+            .diagnostics
+            .iter()
+            .filter(|error| diagnostic_belongs_to_uri(error, uri_path.as_ref()))
+            .map(|error| diagnostic_from_error(content, error))
+            .collect::<Vec<_>>();
         if let Some(metadata) = report.metadata.as_ref() {
             diagnostics.extend(lowering_diagnostics(content, &ast, metadata));
         }
@@ -1954,6 +1963,14 @@ fn diagnostic_from_error(source: &str, error: &CompileError) -> Diagnostic {
     }
 }
 
+fn diagnostic_belongs_to_uri(error: &CompileError, uri_path: Option<&Utf8PathBuf>) -> bool {
+    match (&error.file, uri_path) {
+        (Some(file), Some(path)) => same_workspace_path(file, path),
+        (Some(_), None) => false,
+        (None, _) => true,
+    }
+}
+
 fn lowering_diagnostics(source: &str, module: &Module, metadata: &crate::CompileMetadata) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     for action in &metadata.actions {
@@ -2926,7 +2943,8 @@ action use_collection() -> Vec<NFT> {
         let temp = tempdir().unwrap();
         let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
         std::fs::create_dir_all(root.join("src")).unwrap();
-        std::fs::write(root.join("Cell.toml"), "[package]\nentry = \"src/main.cell\"\n").unwrap();
+        std::fs::write(root.join("Cell.toml"), "[package]\nname = \"demo\"\nversion = \"0.1.0\"\nentry = \"src/main.cell\"\n")
+            .unwrap();
         std::fs::write(root.join("src/types.cell"), "module demo::types\n\nresource Token {\n    amount: u64,\n}\n").unwrap();
         let main_source =
             "module demo::main\n\nuse demo::types::Token\n\naction inspect(token: Token) -> u64 {\n    verification\n        token.amount\n}\n";
@@ -2947,7 +2965,8 @@ action use_collection() -> Vec<NFT> {
         let temp = tempdir().unwrap();
         let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
         std::fs::create_dir_all(root.join("src")).unwrap();
-        std::fs::write(root.join("Cell.toml"), "[package]\nentry = \"src/main.cell\"\n").unwrap();
+        std::fs::write(root.join("Cell.toml"), "[package]\nname = \"demo\"\nversion = \"0.1.0\"\nentry = \"src/main.cell\"\n")
+            .unwrap();
         let types_source = "module demo::types\n\nresource Token {\n    amount: u64,\n}\n";
         let types_path = root.join("src/types.cell");
         std::fs::write(&types_path, types_source).unwrap();
@@ -2970,7 +2989,8 @@ action use_collection() -> Vec<NFT> {
         let temp = tempdir().unwrap();
         let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
         std::fs::create_dir_all(root.join("src")).unwrap();
-        std::fs::write(root.join("Cell.toml"), "[package]\nentry = \"src/main.cell\"\n").unwrap();
+        std::fs::write(root.join("Cell.toml"), "[package]\nname = \"demo\"\nversion = \"0.1.0\"\nentry = \"src/main.cell\"\n")
+            .unwrap();
         let types_source = "module demo::types\n\nresource Token {\n    amount: u64,\n}\n";
         let types_path = root.join("src/types.cell");
         std::fs::write(&types_path, types_source).unwrap();

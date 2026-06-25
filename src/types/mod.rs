@@ -2323,9 +2323,7 @@ impl<'a> TypeChecker<'a> {
         body: &'body [Stmt],
         diagnostics: &mut Vec<CompileError>,
     ) -> Option<(TypeEnv, &'body Stmt)> {
-        let Some((last, prefix)) = body.split_last() else {
-            return None;
-        };
+        let (last, prefix) = body.split_last()?;
         for stmt in prefix {
             self.check_stmt_diagnostics(env, stmt, diagnostics);
         }
