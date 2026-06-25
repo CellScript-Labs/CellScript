@@ -27,6 +27,16 @@ run() {
     "$@"
 }
 
+cargo_fmt_workspace() {
+    run cargo fmt \
+        --manifest-path "$ROOT_DIR/Cargo.toml" \
+        --package cellscript \
+        --package cellscript-ckb-adapter \
+        --package cellscript-wasm \
+        --package cellscript-ckb-sdk-builder-example \
+        "$@"
+}
+
 python_syntax_check() {
     python3 - "$@" <<'PY'
 import sys
@@ -574,7 +584,7 @@ run_dev_gate() {
     require_cmd python3
     require_cmd rg
 
-    run cargo fmt --all
+    cargo_fmt_workspace
     run cargo check --locked -p cellscript --all-targets
     run ./scripts/cellscript_strict_backend_audit.sh quick
     run ./scripts/cellscript_syntax_combo_audit.sh quick
@@ -593,7 +603,7 @@ run_ci_gate() {
     require_cmd npm
 
     printf '{"status":"not-generated","reason":"test suite did not reach backend shape report generation"}\n' >"$CELLSCRIPT_BACKEND_SHAPE_REPORT"
-    run cargo fmt --all --check
+    cargo_fmt_workspace --check
     run cargo test --locked -p cellscript -- --test-threads=1
     run cargo clippy --locked -p cellscript --all-targets -- -D warnings
     run ./scripts/cellscript_strict_backend_audit.sh ci
@@ -615,7 +625,7 @@ run_backend_gate() {
     require_cmd python3
     require_cmd rg
 
-    run cargo fmt --all --check
+    cargo_fmt_workspace --check
     run cargo check --locked -p cellscript --all-targets
     run cargo test --locked -p cellscript
     run cargo clippy --locked -p cellscript --all-targets -- -D warnings

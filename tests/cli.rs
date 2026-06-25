@@ -80,6 +80,92 @@ fn ckb_script_hash_for_test(code_hash: &str, hash_type: &str, args: &str) -> Str
 }
 
 #[test]
+fn cellc_top_level_help_shows_commands_and_direct_source_mode() {
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).arg("--help").output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("cellc <COMMAND> [OPTIONS]"), "unexpected help: {stdout}");
+    assert!(stdout.contains("Direct source mode:"), "unexpected help: {stdout}");
+    assert!(stdout.contains("build"), "unexpected help: {stdout}");
+    assert!(stdout.contains("verify-artifact"), "unexpected help: {stdout}");
+    assert!(stdout.contains("Run `cellc <command> --help`"), "unexpected help: {stdout}");
+}
+
+#[test]
+fn cellc_list_reports_package_commands_without_direct_flags() {
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).arg("--list").output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Installed cellc commands"), "unexpected list: {stdout}");
+    assert!(stdout.contains("build"), "unexpected list: {stdout}");
+    assert!(stdout.contains("registry"), "unexpected list: {stdout}");
+    assert!(stdout.contains("certify"), "unexpected list: {stdout}");
+    assert!(!stdout.contains("--target-profile"), "unexpected direct flag in command list: {stdout}");
+}
+
+#[test]
+fn cellc_help_subcommand_delegates_to_package_help() {
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).args(["help", "build"]).output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Compile the current package"), "unexpected help: {stdout}");
+    assert!(stdout.contains("Usage: cellc build [OPTIONS]"), "unexpected help: {stdout}");
+}
+
+#[test]
+fn cellc_unknown_bare_command_suggests_nearest_command() {
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).arg("buil").output().unwrap();
+    assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("no such command or input: `buil`"), "unexpected stderr: {stderr}");
+    assert!(stderr.contains("similar name exists: `build`"), "unexpected stderr: {stderr}");
+    assert!(stderr.contains("pass a .cell file, package directory, or Cell.toml"), "unexpected stderr: {stderr}");
+}
+
+#[test]
+fn cellc_empty_directory_error_suggests_init_or_source_input() {
+    let temp = tempfile::tempdir().unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(temp.path()).output().unwrap();
+    assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("error: Cell.toml not found"), "unexpected stderr: {stderr}");
+    assert!(!stderr.contains("line 0"), "unexpected no-span line marker: {stderr}");
+    assert!(stderr.contains("cellc init"), "unexpected stderr: {stderr}");
+    assert!(stderr.contains("pass a .cell file"), "unexpected stderr: {stderr}");
+}
+
+#[test]
+fn cellc_direct_parse_error_prints_source_context() {
+    let temp = tempfile::tempdir().unwrap();
+    let input = temp.path().join("bad.cell");
+    std::fs::write(
+        &input,
+        r#"module demo::bad
+
+resource Token {
+    amount:
+}
+"#,
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).arg(&input).arg("--parse").output().unwrap();
+    assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("error: expected type"), "unexpected stderr: {stderr}");
+    assert!(stderr.contains("-->"), "unexpected stderr: {stderr}");
+    assert!(stderr.contains("bad.cell:4:12") || stderr.contains("bad.cell:4:13"), "unexpected stderr: {stderr}");
+    assert!(stderr.contains("4 |     amount:"), "unexpected stderr: {stderr}");
+    assert!(stderr.contains("^ expected type"), "unexpected stderr: {stderr}");
+}
+
+#[test]
 fn cellc_auth_login_outputs_capability_authorisation_payload() {
     let output = cellc_command()
         .arg("auth")

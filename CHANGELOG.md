@@ -2,6 +2,11 @@
 
 ## 0.20.0-nightly - 2026-06-19
 
+- Bring `cellc` CLI discovery and direct-source diagnostics closer to Rust's
+  developer experience: top-level help now shows package commands plus direct
+  compile mode, `cellc --list` enumerates commands, unknown bare commands get
+  nearest-command suggestions, and direct parse/lex/compile errors print
+  `file:line:column` source snippets.
 - Fix numeric-width soundness by requiring exact non-literal numeric type
   equality while preserving declared integer literal widths through type
   checking and IR lowering.

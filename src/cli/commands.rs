@@ -10657,9 +10657,13 @@ pub struct CliParser;
 
 impl CliParser {
     pub fn parse() -> Command {
+        Self::parse_matches(Self::command().get_matches())
+    }
+
+    pub fn command() -> clap::Command {
         use clap::{Arg, ArgAction, Command as ClapCommand};
 
-        let matches = ClapCommand::new("cellc")
+        ClapCommand::new("cellc")
             .version(crate::VERSION)
             .about("CellScript compiler for CKB blockchain")
             .subcommand_required(true)
@@ -11584,8 +11588,9 @@ impl CliParser {
                     .arg(Arg::new("name").long("name").required(true).value_name("NAME").help("Package name"))
                     .arg(Arg::new("source").long("source").required(true).value_name("URL").help("Source repository URL")),
             )
-            .get_matches();
+    }
 
+    fn parse_matches(matches: clap::ArgMatches) -> Command {
         match matches.subcommand() {
             Some(("build", m)) => Command::Build(BuildArgs {
                 release: m.get_flag("release"),
