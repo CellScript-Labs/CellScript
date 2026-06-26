@@ -6,8 +6,8 @@ use std::path::Path;
 use std::process;
 
 use cellscript::{
-    compile_path, compile_path_with_entry_action, compile_path_with_entry_lock, default_metadata_path_for_artifact,
-    default_output_path_for_input, resolve_input_path, CompileOptions,
+    compile_path, compile_path_metadata_with_diagnostics, compile_path_with_entry_action, compile_path_with_entry_lock,
+    default_metadata_path_for_artifact, default_output_path_for_input, resolve_input_path, CompileOptions,
 };
 
 #[derive(Parser, Debug)]
@@ -183,13 +183,14 @@ fn main() {
             }
         };
 
-        match cellscript::parser::parse(&tokens) {
+        match cellscript::parser::parse_diagnostics(&tokens) {
             Ok(ast) => {
                 println!("{}: parsed successfully", "success".green());
                 println!("{:#?}", ast);
             }
-            Err(e) => {
-                print_cli_error_with_source(&e, Some(&resolved_input), Some(&source));
+            Err(diagnostics) => {
+                let error = diagnostics_to_cli_error(diagnostics);
+                print_cli_error_with_source(&error, Some(&resolved_input), Some(&source));
                 process::exit(1);
             }
         }
@@ -211,6 +212,7 @@ fn main() {
         process::exit(1);
     }
 
+    let diagnostics_options = options.clone();
     let compile_result = match (cli.entry_action, cli.entry_lock) {
         (Some(action), None) => compile_path_with_entry_action(Utf8Path::new(&input_file), options, action),
         (None, Some(lock)) => compile_path_with_entry_lock(Utf8Path::new(&input_file), options, lock),
@@ -249,7 +251,13 @@ fn main() {
             println!("  Metadata: {}", metadata_path);
         }
         Err(e) => {
-            print_cli_error_with_source(&e, Some(&resolved_input), Some(&source));
+            let report = compile_path_metadata_with_diagnostics(Utf8Path::new(&input_file), diagnostics_options);
+            if report.diagnostics.is_empty() {
+                print_cli_error_with_source(&e, Some(&resolved_input), Some(&source));
+            } else {
+                let error = diagnostics_to_cli_error(report.diagnostics);
+                print_cli_error_with_source(&error, Some(&resolved_input), Some(&source));
+            }
             process::exit(1);
         }
     }
@@ -265,6 +273,14 @@ fn resolve_primitive_compat(compat: Option<String>, strict: Option<String>) -> O
 
 fn print_cli_error(error: &CompileError) {
     print_cli_error_with_source(error, None, None);
+}
+
+fn diagnostics_to_cli_error(mut diagnostics: Vec<CompileError>) -> CompileError {
+    match diagnostics.len() {
+        0 => CompileError::without_span("compilation failed"),
+        1 => diagnostics.remove(0),
+        len => CompileError::without_span(format!("aborting due to {} diagnostics", len)).with_related(diagnostics),
+    }
 }
 
 fn print_cli_error_with_source(error: &CompileError, fallback_file: Option<&Utf8Path>, fallback_source: Option<&str>) {

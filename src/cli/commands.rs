@@ -1,5 +1,5 @@
 use crate::docgen::{DocGenerator, OutputFormat};
-use crate::error::{CompileError, Result};
+use crate::error::{CompileError, DiagnosticSeverity, Result};
 use crate::fmt::format_default;
 use crate::package::{Dependency, DetailedDependency, Lockfile, PackageManager, PackageManifest, PolicyConfig};
 use crate::runtime_errors::{runtime_error_info, runtime_error_info_by_code, CellScriptRuntimeErrorInfo, ALL_RUNTIME_ERRORS};
@@ -5060,15 +5060,23 @@ fn diagnostics_to_error(diagnostics: &[CompileError]) -> CompileError {
 }
 
 fn print_check_failure_json(diagnostics: &[CompileError], target: Option<&str>, requested_profile: TargetProfile) -> Result<()> {
+    let counts = diagnostic_counts(diagnostics);
+    let diagnostics = diagnostics_json(diagnostics);
     print_json(&serde_json::json!({
         "status": "failed",
+        "diagnostic_count": counts.total,
+        "error_count": counts.errors,
+        "warning_count": counts.warnings,
         "checked_targets": [{
             "requested_target": target.unwrap_or("package-default"),
             "target_profile": requested_profile.name(),
             "status": "failed",
-            "diagnostics": diagnostics_json(diagnostics),
+            "diagnostic_count": counts.total,
+            "error_count": counts.errors,
+            "warning_count": counts.warnings,
+            "diagnostics": diagnostics,
         }],
-        "diagnostics": diagnostics_json(diagnostics),
+        "diagnostics": diagnostics,
     }))
 }
 
@@ -5087,9 +5095,67 @@ fn diagnostics_json(diagnostics: &[CompileError]) -> Vec<serde_json::Value> {
                     "start": diagnostic.span.start,
                     "end": diagnostic.span.end,
                 },
+                "range": diagnostic_range_json(diagnostic),
             })
         })
         .collect()
+}
+
+#[derive(Debug, Clone, Copy)]
+struct DiagnosticCounts {
+    total: usize,
+    errors: usize,
+    warnings: usize,
+}
+
+fn diagnostic_counts(diagnostics: &[CompileError]) -> DiagnosticCounts {
+    let errors = diagnostics.iter().filter(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error).count();
+    DiagnosticCounts { total: diagnostics.len(), errors, warnings: diagnostics.len().saturating_sub(errors) }
+}
+
+fn diagnostic_range_json(diagnostic: &CompileError) -> serde_json::Value {
+    if diagnostic.span.line == 0 || diagnostic.span.column == 0 {
+        return serde_json::Value::Null;
+    }
+    let (end_line, end_column) = diagnostic
+        .file
+        .as_ref()
+        .and_then(|file| std::fs::read_to_string(file.as_std_path()).ok())
+        .map(|source| line_column_at(&source, diagnostic.span.end))
+        .unwrap_or_else(|| {
+            let width = diagnostic.span.end.saturating_sub(diagnostic.span.start).max(1);
+            (diagnostic.span.line, diagnostic.span.column.saturating_add(width))
+        });
+    serde_json::json!({
+        "start": {
+            "line": diagnostic.span.line,
+            "column": diagnostic.span.column,
+            "offset": diagnostic.span.start,
+        },
+        "end": {
+            "line": end_line,
+            "column": end_column,
+            "offset": diagnostic.span.end,
+        },
+    })
+}
+
+fn line_column_at(source: &str, byte_offset: usize) -> (usize, usize) {
+    let mut line = 1;
+    let mut column = 1;
+    let capped_offset = byte_offset.min(source.len());
+    for (offset, ch) in source.char_indices() {
+        if offset >= capped_offset {
+            break;
+        }
+        if ch == '\n' {
+            line += 1;
+            column = 1;
+        } else {
+            column += 1;
+        }
+    }
+    (line, column)
 }
 
 fn read_metadata_json(path: &Path) -> Result<CompileMetadata> {

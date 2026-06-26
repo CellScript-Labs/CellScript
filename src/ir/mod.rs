@@ -5965,7 +5965,19 @@ pub fn generate_diagnostics(ast: &Module) -> std::result::Result<IrModule, Vec<C
 }
 
 pub fn generate_with_resolver(ast: &Module, resolver: &ModuleResolver, module_name: &str) -> Result<IrModule> {
-    generate_with_resolver_inner(ast, resolver, module_name, true)
+    generate_with_resolver_diagnostics(ast, resolver, module_name).map_err(collapse_ir_errors)
+}
+
+pub fn generate_with_resolver_diagnostics(
+    ast: &Module,
+    resolver: &ModuleResolver,
+    module_name: &str,
+) -> std::result::Result<IrModule, Vec<CompileError>> {
+    generate_with_resolver_diagnostics_inner(ast, resolver, module_name, true)
+}
+
+fn collapse_ir_errors(errors: Vec<CompileError>) -> CompileError {
+    errors.into_iter().next().unwrap_or_else(|| CompileError::without_span("IR lowering failed"))
 }
 
 fn generate_with_resolver_inner(
@@ -5974,6 +5986,15 @@ fn generate_with_resolver_inner(
     module_name: &str,
     include_external_callables: bool,
 ) -> Result<IrModule> {
+    generate_with_resolver_diagnostics_inner(ast, resolver, module_name, include_external_callables).map_err(collapse_ir_errors)
+}
+
+fn generate_with_resolver_diagnostics_inner(
+    ast: &Module,
+    resolver: &ModuleResolver,
+    module_name: &str,
+    include_external_callables: bool,
+) -> std::result::Result<IrModule, Vec<CompileError>> {
     let mut type_fields = HashMap::new();
     let mut type_kinds = HashMap::new();
     let mut receipt_claim_outputs = HashMap::new();
@@ -6066,11 +6087,11 @@ fn generate_with_resolver_inner(
         external_function_return_types,
         call_target_labels,
     );
-    let mut ir = generator.generate(ast)?;
+    let mut ir = generator.generate_diagnostics(ast)?;
     ir.external_type_defs = external_type_defs;
     ir.external_callable_abis = external_callable_abis;
     if include_external_callables {
-        append_external_callable_bodies(&mut ir, ast, resolver, module_name)?;
+        append_external_callable_bodies(&mut ir, ast, resolver, module_name).map_err(|error| vec![error])?;
     }
     Ok(ir)
 }

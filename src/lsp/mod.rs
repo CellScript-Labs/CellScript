@@ -196,10 +196,10 @@ impl LspServer {
             }
         };
 
-        let ast = match crate::parser::parse(&tokens) {
+        let ast = match crate::parser::parse_diagnostics(&tokens) {
             Ok(ast) => ast,
-            Err(error) => {
-                self.diagnostics.insert(uri.to_string(), vec![diagnostic_from_error(content, &error)]);
+            Err(errors) => {
+                self.diagnostics.insert(uri.to_string(), errors.iter().map(|error| diagnostic_from_error(content, error)).collect());
                 return;
             }
         };
@@ -2729,6 +2729,27 @@ action accept(input: Offer) -> output: Offer {
         let diagnostics = server.get_diagnostics(&uri);
         assert!(!diagnostics.is_empty());
         assert_eq!(diagnostics[0].severity, DiagnosticSeverity::Error);
+    }
+
+    #[test]
+    fn test_parse_recovery_collects_multiple_diagnostics() {
+        let mut server = LspServer::new();
+        let uri = "file:///multi_parse_errors.cell".to_string();
+        let source = r#"
+module multi_parse_errors
+
+action bad() -> bool {
+    verification
+        let first: u64 true
+        let second: bool 1
+        return true
+}
+"#;
+        server.open_document(uri.clone(), source.to_string());
+        let diagnostics = server.get_diagnostics(&uri);
+        assert_eq!(diagnostics.len(), 2);
+        assert!(diagnostics.iter().any(|diagnostic| diagnostic.message.contains("expected '=', found 'true'")));
+        assert!(diagnostics.iter().any(|diagnostic| diagnostic.message.contains("expected '=', found integer 1")));
     }
 
     #[test]

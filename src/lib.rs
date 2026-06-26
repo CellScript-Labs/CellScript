@@ -4152,26 +4152,54 @@ fn load_project_for_entry(entry_path: &Utf8Path, entry_source_override: Option<&
     Ok(LoadedProject { entry_index, modules, resolver })
 }
 
-fn load_virtual_project_for_entry(sources: &[InMemorySource], entry_path: &str) -> Result<LoadedProject> {
+fn load_project_for_entry_diagnostics(
+    entry_path: &Utf8Path,
+    entry_source_override: Option<&str>,
+) -> std::result::Result<LoadedProject, Vec<CompileError>> {
+    let entry_path = canonical_utf8_path(entry_path).map_err(|error| vec![error])?;
+    let modules = load_project_modules_for_entry_diagnostics(&entry_path, entry_source_override)?;
+    let Some(entry_index) = modules.iter().position(|module| module.path == entry_path) else {
+        return Err(vec![CompileError::new(
+            format!("entry source '{}' was not loaded into the project graph", entry_path),
+            error::Span::default(),
+        )]);
+    };
+    let resolver = build_module_resolver_from_loaded_modules(&modules).map_err(|error| vec![error])?;
+    Ok(LoadedProject { entry_index, modules, resolver })
+}
+
+fn load_virtual_project_for_entry_diagnostics(
+    sources: &[InMemorySource],
+    entry_path: &str,
+) -> std::result::Result<LoadedProject, Vec<CompileError>> {
     if sources.is_empty() {
-        return Err(CompileError::without_span("multi-file compile requires at least one source"));
+        return Err(vec![CompileError::without_span("multi-file compile requires at least one source")]);
     }
     let entry_path_buf = Utf8PathBuf::from(entry_path);
     let mut seen_paths = HashSet::new();
     let mut modules = Vec::with_capacity(sources.len());
+    let mut diagnostics = Vec::new();
     for source in sources {
         if source.path.is_empty() {
-            return Err(CompileError::without_span("multi-file compile source path must not be empty"));
+            diagnostics.push(CompileError::without_span("multi-file compile source path must not be empty"));
+            continue;
         }
         if !seen_paths.insert(source.path.clone()) {
-            return Err(CompileError::without_span(format!("duplicate multi-file compile source path '{}'", source.path)));
+            diagnostics.push(CompileError::without_span(format!("duplicate multi-file compile source path '{}'", source.path)));
+            continue;
         }
-        modules.push(parse_loaded_module(Utf8PathBuf::from(source.path.clone()), source.source.clone())?);
+        match parse_loaded_module_diagnostics(Utf8PathBuf::from(source.path.clone()), source.source.clone()) {
+            Ok(module) => modules.push(module),
+            Err(errors) => diagnostics.extend(errors),
+        }
+    }
+    if !diagnostics.is_empty() {
+        return Err(diagnostics);
     }
     let Some(entry_index) = modules.iter().position(|module| module.path == entry_path_buf) else {
-        return Err(CompileError::without_span(format!("entry source '{}' was not provided", entry_path)));
+        return Err(vec![CompileError::without_span(format!("entry source '{}' was not provided", entry_path))]);
     };
-    let resolver = build_module_resolver_from_loaded_modules(&modules)?;
+    let resolver = build_module_resolver_from_loaded_modules(&modules).map_err(|error| vec![error])?;
     Ok(LoadedProject { entry_index, modules, resolver })
 }
 
@@ -4195,6 +4223,48 @@ fn load_project_modules_for_entry(entry_path: &Utf8Path, entry_source_override: 
         .collect()
 }
 
+fn load_project_modules_for_entry_diagnostics(
+    entry_path: &Utf8Path,
+    entry_source_override: Option<&str>,
+) -> std::result::Result<Vec<LoadedModule>, Vec<CompileError>> {
+    let entry_path = canonical_utf8_path(entry_path).map_err(|error| vec![error])?;
+    let source_paths = collect_source_paths_for_compile_file(&entry_path).map_err(|error| vec![error])?;
+    let mut modules = Vec::with_capacity(source_paths.len());
+    let mut diagnostics = Vec::new();
+    for path in source_paths {
+        let source = if path == entry_path {
+            if let Some(source) = entry_source_override {
+                source.to_string()
+            } else {
+                match read_module_source(&path) {
+                    Ok(source) => source,
+                    Err(error) => {
+                        diagnostics.push(error);
+                        continue;
+                    }
+                }
+            }
+        } else {
+            match read_module_source(&path) {
+                Ok(source) => source,
+                Err(error) => {
+                    diagnostics.push(error);
+                    continue;
+                }
+            }
+        };
+        match parse_loaded_module_diagnostics(path, source) {
+            Ok(module) => modules.push(module),
+            Err(errors) => diagnostics.extend(errors),
+        }
+    }
+    if diagnostics.is_empty() {
+        Ok(modules)
+    } else {
+        Err(diagnostics)
+    }
+}
+
 fn read_module_source(path: &Utf8Path) -> Result<String> {
     std::fs::read_to_string(path)
         .map_err(|e| CompileError::new(format!("failed to read module '{}': {}", path, e), error::Span::default()))
@@ -4203,6 +4273,13 @@ fn read_module_source(path: &Utf8Path) -> Result<String> {
 fn parse_loaded_module(path: Utf8PathBuf, source: String) -> Result<LoadedModule> {
     let tokens = lexer::lex(&source).map_err(|e| e.with_file(path.clone()))?;
     let ast = parser::parse(&tokens).map_err(|e| e.with_file(path.clone()))?;
+    Ok(LoadedModule { path, source, ast })
+}
+
+fn parse_loaded_module_diagnostics(path: Utf8PathBuf, source: String) -> std::result::Result<LoadedModule, Vec<CompileError>> {
+    let tokens = lexer::lex(&source).map_err(|e| vec![e.with_file(path.clone())])?;
+    let ast = parser::parse_diagnostics(&tokens)
+        .map_err(|errors| errors.into_iter().map(|error| error.with_file(path.clone())).collect::<Vec<_>>())?;
     Ok(LoadedModule { path, source, ast })
 }
 
@@ -4287,17 +4364,18 @@ pub struct InMemorySource {
     pub role: Option<String>,
 }
 
-/// Generate compile metadata while collecting all diagnostics that can be
-/// recovered without parser error recovery. Lexer/parser failures remain
-/// fatal single diagnostics; semantic phases collect independent errors.
+/// Generate compile metadata while collecting all recoverable diagnostics.
+/// Lexer failures remain fatal single diagnostics. Parser recovery collects
+/// independent item and statement errors, then semantic phases collect type,
+/// flow, and IR diagnostics when parsing succeeds.
 pub fn compile_metadata_with_diagnostics(source: &str, target: Option<String>) -> CompileMetadataDiagnosticReport {
     let tokens = match lexer::lex(source) {
         Ok(tokens) => tokens,
         Err(error) => return CompileMetadataDiagnosticReport { metadata: None, diagnostics: vec![error] },
     };
-    let ast = match parser::parse(&tokens) {
+    let ast = match parser::parse_diagnostics(&tokens) {
         Ok(ast) => ast,
-        Err(error) => return CompileMetadataDiagnosticReport { metadata: None, diagnostics: vec![error] },
+        Err(diagnostics) => return CompileMetadataDiagnosticReport { metadata: None, diagnostics },
     };
     let artifact_format = match ArtifactFormat::from_target(target.as_deref().unwrap_or(DEFAULT_TARGET)) {
         Ok(format) => format,
@@ -4337,9 +4415,9 @@ pub fn compile_sources_metadata_with_diagnostics(
     entry_path: &str,
     target: Option<String>,
 ) -> CompileMetadataDiagnosticReport {
-    let project = match load_virtual_project_for_entry(sources, entry_path) {
+    let project = match load_virtual_project_for_entry_diagnostics(sources, entry_path) {
         Ok(project) => project,
-        Err(error) => return CompileMetadataDiagnosticReport { metadata: None, diagnostics: vec![error] },
+        Err(diagnostics) => return CompileMetadataDiagnosticReport { metadata: None, diagnostics },
     };
     let options = CompileOptions { target, ..CompileOptions::default() };
     let artifact_format = match ArtifactFormat::from_target(resolve_target(&options, None)) {
@@ -4354,10 +4432,10 @@ pub fn compile_sources_metadata_with_diagnostics(
     }
 
     let entry = project.entry();
-    let ir = match ir::generate_with_resolver(&entry.ast, &project.resolver, &entry.ast.name) {
+    let ir = match ir::generate_with_resolver_diagnostics(&entry.ast, &project.resolver, &entry.ast.name) {
         Ok(ir) => ir,
-        Err(error) => {
-            diagnostics.push(attach_file_if_missing(error, &entry.path));
+        Err(errors) => {
+            diagnostics.extend(attach_default_file(errors, &entry.path));
             return CompileMetadataDiagnosticReport { metadata: None, diagnostics };
         }
     };
@@ -4416,9 +4494,9 @@ fn compile_file_metadata_with_diagnostics(
     options: CompileOptions,
     entry_source_override: Option<&str>,
 ) -> CompileMetadataDiagnosticReport {
-    let project = match load_project_for_entry(path, entry_source_override) {
+    let project = match load_project_for_entry_diagnostics(path, entry_source_override) {
         Ok(project) => project,
-        Err(error) => return CompileMetadataDiagnosticReport { metadata: None, diagnostics: vec![error] },
+        Err(diagnostics) => return CompileMetadataDiagnosticReport { metadata: None, diagnostics },
     };
     let manifest = match find_package_root(path).and_then(|root| root.map(|root| load_manifest(&root)).transpose()) {
         Ok(manifest) => manifest,
@@ -4449,10 +4527,10 @@ fn compile_file_metadata_with_diagnostics(
 
     let entry = project.entry();
 
-    let ir = match ir::generate_with_resolver(&entry.ast, &project.resolver, &entry.ast.name) {
+    let ir = match ir::generate_with_resolver_diagnostics(&entry.ast, &project.resolver, &entry.ast.name) {
         Ok(ir) => ir,
-        Err(error) => {
-            diagnostics.push(attach_file_if_missing(error, &entry.path));
+        Err(errors) => {
+            diagnostics.extend(attach_default_file(errors, &entry.path));
             return CompileMetadataDiagnosticReport { metadata: None, diagnostics };
         }
     };
@@ -4507,8 +4585,8 @@ fn project_frontend_diagnostics(project: &LoadedProject, options: &CompileOption
         let module_has_errors =
             diagnostics[module_error_start..].iter().any(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error);
         if !module_has_errors {
-            if let Err(error) = ir::generate_with_resolver(&module.ast, &project.resolver, &module.ast.name) {
-                diagnostics.push(attach_file_if_missing(error, &module.path));
+            if let Err(errors) = ir::generate_with_resolver_diagnostics(&module.ast, &project.resolver, &module.ast.name) {
+                diagnostics.extend(attach_default_file(errors, &module.path));
             }
         }
     }
@@ -4550,6 +4628,64 @@ action bad_two() -> bool {
     }
 
     #[test]
+    fn compile_metadata_diagnostics_collects_multiple_parse_errors() {
+        let source = r#"
+module multi_parse_errors
+
+action bad() -> bool {
+    verification
+        let first: u64 true
+        let second: bool 1
+        return true
+}
+"#;
+        let report = compile_metadata_with_diagnostics(source, None);
+        assert!(report.metadata.is_none());
+        assert_eq!(report.diagnostics.len(), 2);
+        assert!(report.diagnostics.iter().any(|error| error.message.contains("expected '=', found 'true'")));
+        assert!(report.diagnostics.iter().any(|error| error.message.contains("expected '=', found integer 1")));
+    }
+
+    #[test]
+    fn compile_sources_metadata_diagnostics_collects_parse_errors_across_files() {
+        let sources = vec![
+            InMemorySource {
+                path: "src/main.cell".to_string(),
+                role: Some("entry".to_string()),
+                source: r#"
+module demo::main
+
+action bad() -> bool {
+    verification
+        let first: u64 true
+        return true
+}
+"#
+                .to_string(),
+            },
+            InMemorySource {
+                path: "src/helper.cell".to_string(),
+                role: None,
+                source: r#"
+module demo::helper
+
+action also_bad() -> bool {
+    verification
+        let second: bool 1
+        return true
+}
+"#
+                .to_string(),
+            },
+        ];
+        let report = compile_sources_metadata_with_diagnostics(&sources, "src/main.cell", None);
+        assert!(report.metadata.is_none());
+        assert_eq!(report.diagnostics.len(), 2);
+        assert!(report.diagnostics.iter().any(|error| error.file.as_ref().is_some_and(|file| file.as_str() == "src/main.cell")));
+        assert!(report.diagnostics.iter().any(|error| error.file.as_ref().is_some_and(|file| file.as_str() == "src/helper.cell")));
+    }
+
+    #[test]
     fn compile_metadata_diagnostics_collects_multiple_statement_errors() {
         let source = r#"
 module multi_errors
@@ -4586,6 +4722,41 @@ action bad() -> bool {
         assert_eq!(diagnostic.span.line, 6);
         assert_eq!(diagnostic.span.column, 9);
         assert_eq!(&source[diagnostic.span.start..diagnostic.span.end], "return 1");
+    }
+
+    #[test]
+    fn compile_metadata_diagnostics_collects_multiple_ir_errors() {
+        let source = r#"
+module multi_ir_errors
+
+resource Token {
+    amount: u64,
+}
+
+#[effect(ReadOnly)]
+action issue_one(amount: u64) -> Token {
+    verification
+        let out = create Token {
+            amount: amount
+        }
+        return out
+}
+
+#[effect(ReadOnly)]
+action issue_two(amount: u64) -> Token {
+    verification
+        let out = create Token {
+            amount: amount
+        }
+        return out
+}
+"#;
+        let report = compile_metadata_with_diagnostics(source, None);
+        assert!(report.metadata.is_none());
+        assert_eq!(report.diagnostics.len(), 2);
+        assert!(report.diagnostics.iter().any(|error| error.message.contains("action 'issue_one'")));
+        assert!(report.diagnostics.iter().any(|error| error.message.contains("action 'issue_two'")));
+        assert!(report.diagnostics.iter().all(|error| error.message.contains("declared effect ReadOnly is too weak")));
     }
 }
 

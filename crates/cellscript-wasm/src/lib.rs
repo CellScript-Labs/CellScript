@@ -50,7 +50,18 @@ struct CompileSourceInput {
 #[derive(Serialize)]
 struct CompileDiagnosticResult<T: Serialize> {
     metadata: Option<T>,
+    diagnostic_count: usize,
+    error_count: usize,
+    warning_count: usize,
     diagnostics: Vec<CompileDiagnostic>,
+}
+
+impl<T: Serialize> CompileDiagnosticResult<T> {
+    fn new(metadata: Option<T>, diagnostics: Vec<CompileDiagnostic>) -> Self {
+        let warning_count = diagnostics.iter().filter(|diagnostic| diagnostic.severity == "warning").count();
+        let error_count = diagnostics.len().saturating_sub(warning_count);
+        Self { metadata, diagnostic_count: diagnostics.len(), error_count, warning_count, diagnostics }
+    }
 }
 
 #[derive(Serialize)]
@@ -81,10 +92,10 @@ pub fn compile_metadata_json(source: &str, target: Option<String>) -> String {
 /// Compile CellScript source and return a stable result envelope for tools.
 ///
 /// On success the response is:
-/// `{ "metadata": <CompileMetadata>, "diagnostics": [] }`
+/// `{ "metadata": <CompileMetadata>, "diagnostic_count": 0, "error_count": 0, "warning_count": 0, "diagnostics": [] }`
 ///
 /// On failure the response is:
-/// `{ "metadata": null, "diagnostics": [{ message, severity, code, range }, ...] }`
+/// `{ "metadata": null, "diagnostic_count": N, "error_count": E, "warning_count": W, "diagnostics": [{ message, severity, code, range }, ...] }`
 ///
 /// `range` is omitted when the compiler error is not tied to a source
 /// span. Offsets are UTF-8 byte offsets from the original source; line and
@@ -92,10 +103,8 @@ pub fn compile_metadata_json(source: &str, target: Option<String>) -> String {
 #[wasm_bindgen]
 pub fn compile_metadata_json_diagnostics(source: &str, target: Option<String>) -> String {
     let report = cellscript::compile_metadata_with_diagnostics(source, target);
-    let result = CompileDiagnosticResult {
-        metadata: report.metadata,
-        diagnostics: report.diagnostics.iter().map(|error| diagnostic_from_error(error, source)).collect(),
-    };
+    let diagnostics = report.diagnostics.iter().map(|error| diagnostic_from_error(error, source)).collect();
+    let result = CompileDiagnosticResult::new(report.metadata, diagnostics);
     serde_json::to_string(&result)
         .unwrap_or_else(|e| diagnostic_error_json(&format!("failed to serialize diagnostic report: {e}"), source))
 }
@@ -118,14 +127,9 @@ pub fn compile_metadata_json_sources(sources_json: &str, entry_path: &str, targe
     let source_by_path = sources.iter().map(|source| (source.path.clone(), source.source.clone())).collect::<HashMap<_, _>>();
     let fallback_source = sources.iter().find(|source| source.path == entry_path).map(|source| source.source.as_str()).unwrap_or("");
     let report = cellscript::compile_sources_metadata_with_diagnostics(&sources, entry_path, target);
-    let result = CompileDiagnosticResult {
-        metadata: report.metadata,
-        diagnostics: report
-            .diagnostics
-            .iter()
-            .map(|error| diagnostic_from_error_for_sources(error, &source_by_path, fallback_source))
-            .collect(),
-    };
+    let diagnostics =
+        report.diagnostics.iter().map(|error| diagnostic_from_error_for_sources(error, &source_by_path, fallback_source)).collect();
+    let result = CompileDiagnosticResult::new(report.metadata, diagnostics);
     serde_json::to_string(&result)
         .unwrap_or_else(|e| diagnostic_error_json(&format!("failed to serialize multi-file diagnostic report: {e}"), fallback_source))
 }
@@ -164,12 +168,17 @@ fn error_json(message: &str) -> String {
 }
 
 fn diagnostic_error_json(message: &str, source: &str) -> String {
-    let result: CompileDiagnosticResult<serde_json::Value> = CompileDiagnosticResult {
-        metadata: None,
-        diagnostics: vec![diagnostic_from_error(&CompileError::without_span(message), source)],
-    };
+    let result: CompileDiagnosticResult<serde_json::Value> =
+        CompileDiagnosticResult::new(None, vec![diagnostic_from_error(&CompileError::without_span(message), source)]);
     serde_json::to_string(&result).unwrap_or_else(|_| {
-        serde_json::json!({ "metadata": null, "diagnostics": [{ "message": message, "severity": "error" }] }).to_string()
+        serde_json::json!({
+            "metadata": null,
+            "diagnostic_count": 1,
+            "error_count": 1,
+            "warning_count": 0,
+            "diagnostics": [{ "message": message, "severity": "error" }],
+        })
+        .to_string()
     })
 }
 

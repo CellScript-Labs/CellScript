@@ -5,6 +5,8 @@ use crate::lexer::token::{Token, TokenKind};
 pub struct Parser<'a> {
     tokens: &'a [Token],
     position: usize,
+    recover: bool,
+    diagnostics: Vec<CompileError>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -24,7 +26,11 @@ struct TypePolicyDecls {
 
 impl<'a> Parser<'a> {
     pub fn new(tokens: &'a [Token]) -> Self {
-        Self { tokens, position: 0 }
+        Self { tokens, position: 0, recover: false, diagnostics: Vec::new() }
+    }
+
+    pub fn new_recovering(tokens: &'a [Token]) -> Self {
+        Self { tokens, position: 0, recover: true, diagnostics: Vec::new() }
     }
 
     fn current(&self) -> &Token {
@@ -79,6 +85,123 @@ impl<'a> Parser<'a> {
     fn consume_optional_semi(&mut self) {
         if self.check(&TokenKind::Semi) {
             self.advance();
+        }
+    }
+
+    fn record_diagnostic(&mut self, error: CompileError) {
+        self.diagnostics.push(error);
+    }
+
+    fn is_item_start(&self) -> bool {
+        matches!(
+            &self.current().kind,
+            TokenKind::Pound
+                | TokenKind::Use
+                | TokenKind::Resource
+                | TokenKind::Shared
+                | TokenKind::Receipt
+                | TokenKind::Struct
+                | TokenKind::Invariant
+                | TokenKind::Const
+                | TokenKind::Enum
+                | TokenKind::Action
+                | TokenKind::Fn
+                | TokenKind::Lock
+        ) || matches!(&self.current().kind, TokenKind::Identifier(name) if name == "flow")
+    }
+
+    fn synchronize_item(&mut self, start_position: usize) {
+        if self.position == start_position && !self.check(&TokenKind::Eof) {
+            self.advance();
+        }
+        let mut brace_depth = 0usize;
+        while !self.check(&TokenKind::Eof) {
+            match &self.current().kind {
+                TokenKind::LBrace => {
+                    brace_depth = brace_depth.saturating_add(1);
+                    self.advance();
+                }
+                TokenKind::RBrace => {
+                    brace_depth = brace_depth.saturating_sub(1);
+                    self.advance();
+                    if brace_depth == 0 {
+                        self.skip_newlines();
+                        if self.is_item_start() {
+                            break;
+                        }
+                    }
+                }
+                TokenKind::Newline | TokenKind::Semi if brace_depth == 0 => {
+                    self.advance();
+                    self.skip_newlines();
+                    if self.is_item_start() {
+                        break;
+                    }
+                }
+                _ if brace_depth == 0 && self.position != start_position && self.is_item_start() => break,
+                _ => {
+                    self.advance();
+                }
+            }
+        }
+    }
+
+    fn synchronize_stmt(&mut self, start_position: usize) {
+        if self.position == start_position && !self.check(&TokenKind::Eof) {
+            self.advance();
+        }
+        let mut paren_depth = 0usize;
+        let mut bracket_depth = 0usize;
+        let mut brace_depth = 0usize;
+        while !self.check(&TokenKind::Eof) {
+            match &self.current().kind {
+                TokenKind::LParen => {
+                    paren_depth = paren_depth.saturating_add(1);
+                    self.advance();
+                }
+                TokenKind::RParen => {
+                    paren_depth = paren_depth.saturating_sub(1);
+                    self.advance();
+                }
+                TokenKind::LBracket => {
+                    bracket_depth = bracket_depth.saturating_add(1);
+                    self.advance();
+                }
+                TokenKind::RBracket => {
+                    bracket_depth = bracket_depth.saturating_sub(1);
+                    self.advance();
+                }
+                TokenKind::LBrace => {
+                    brace_depth = brace_depth.saturating_add(1);
+                    self.advance();
+                }
+                TokenKind::RBrace if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 => break,
+                TokenKind::RBrace => {
+                    brace_depth = brace_depth.saturating_sub(1);
+                    self.advance();
+                }
+                TokenKind::Newline | TokenKind::Semi if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 => {
+                    self.advance();
+                    self.skip_newlines();
+                    break;
+                }
+                _ => {
+                    self.advance();
+                }
+            }
+        }
+    }
+
+    fn parse_stmt_recovering(&mut self) -> Result<Option<Stmt>> {
+        let start_position = self.position;
+        match self.parse_stmt() {
+            Ok(stmt) => Ok(Some(stmt)),
+            Err(error) if self.recover => {
+                self.record_diagnostic(error);
+                self.synchronize_stmt(start_position);
+                Ok(None)
+            }
+            Err(error) => Err(error),
         }
     }
 
@@ -374,7 +497,15 @@ impl<'a> Parser<'a> {
             if self.check(&TokenKind::Eof) {
                 break;
             }
-            items.push(self.parse_item()?);
+            let start_position = self.position;
+            match self.parse_item() {
+                Ok(item) => items.push(item),
+                Err(error) if self.recover => {
+                    self.record_diagnostic(error);
+                    self.synchronize_item(start_position);
+                }
+                Err(error) => return Err(error),
+            }
             self.skip_newlines();
         }
 
@@ -1487,7 +1618,9 @@ impl<'a> Parser<'a> {
 
         let mut stmts = Vec::new();
         while !self.check(&TokenKind::RBrace) && !self.check(&TokenKind::Eof) {
-            stmts.push(self.parse_stmt()?);
+            if let Some(stmt) = self.parse_stmt_recovering()? {
+                stmts.push(stmt);
+            }
             self.skip_newlines();
         }
         self.expect(TokenKind::RBrace)?;
@@ -1635,7 +1768,9 @@ impl<'a> Parser<'a> {
         self.skip_newlines();
         let mut body = Vec::new();
         while !self.check(&TokenKind::RBrace) && !self.check(&TokenKind::Eof) {
-            body.push(self.parse_stmt()?);
+            if let Some(stmt) = self.parse_stmt_recovering()? {
+                body.push(stmt);
+            }
             self.skip_newlines();
         }
         self.expect(TokenKind::RBrace)?;
@@ -1794,7 +1929,9 @@ impl<'a> Parser<'a> {
 
         let mut stmts = Vec::new();
         while !self.check(&TokenKind::RBrace) && !self.check(&TokenKind::Eof) {
-            stmts.push(self.parse_stmt()?);
+            if let Some(stmt) = self.parse_stmt_recovering()? {
+                stmts.push(stmt);
+            }
             self.skip_newlines();
         }
 
@@ -2956,6 +3093,21 @@ pub fn parse(tokens: &[Token]) -> Result<Module> {
     parser.parse_module()
 }
 
+pub fn parse_diagnostics(tokens: &[Token]) -> std::result::Result<Module, Vec<CompileError>> {
+    let mut parser = Parser::new_recovering(tokens);
+    parser.skip_newlines();
+    let parsed = parser.parse_module();
+    match (parsed, parser.diagnostics.is_empty()) {
+        (Ok(module), true) => Ok(module),
+        (Ok(_), false) => Err(parser.diagnostics),
+        (Err(error), true) => Err(vec![error]),
+        (Err(error), false) => {
+            parser.diagnostics.push(error);
+            Err(parser.diagnostics)
+        }
+    }
+}
+
 fn merge_capabilities(attr_capabilities: Option<Vec<Capability>>, inline_capabilities: Vec<Capability>) -> Vec<Capability> {
     let mut merged = attr_capabilities.unwrap_or_default();
     for capability in inline_capabilities {
@@ -3015,6 +3167,46 @@ resource Token has store, replace, relock, consume, burn {
         let module = parse(&tokens).unwrap();
         assert_eq!(module.name, "test");
         assert_eq!(module.items.len(), 1);
+    }
+
+    #[test]
+    fn parse_diagnostics_collects_multiple_statement_errors() {
+        let input = r#"
+module test
+
+action bad() -> bool {
+    verification
+        let first: u64 true
+        let second: bool 1
+        return true
+}
+"#;
+        let tokens = lex(input).unwrap();
+        let diagnostics = parse_diagnostics(&tokens).expect_err("recovery should report parse diagnostics");
+        assert_eq!(diagnostics.len(), 2);
+        assert!(diagnostics.iter().any(|error| error.message.contains("expected '=', found 'true'")));
+        assert!(diagnostics.iter().any(|error| error.message.contains("expected '=', found integer 1")));
+    }
+
+    #[test]
+    fn parse_diagnostics_collects_multiple_top_level_errors() {
+        let input = r#"
+module test
+
+resource BrokenOne {
+    amount:
+}
+
+resource BrokenTwo {
+    amount:
+}
+"#;
+        let tokens = lex(input).unwrap();
+        let diagnostics = parse_diagnostics(&tokens).expect_err("recovery should report parse diagnostics");
+        assert_eq!(diagnostics.len(), 2);
+        assert!(diagnostics.iter().all(|error| error.message.contains("expected type")));
+        assert_eq!(diagnostics[0].span.line, 5);
+        assert_eq!(diagnostics[1].span.line, 9);
     }
 
     #[test]

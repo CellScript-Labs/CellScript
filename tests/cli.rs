@@ -177,6 +177,64 @@ resource Token {
 }
 
 #[test]
+fn cellc_parse_reports_multiple_recovered_syntax_errors() {
+    let temp = tempfile::tempdir().unwrap();
+    let input = temp.path().join("bad.cell");
+    std::fs::write(
+        &input,
+        r#"module multi_parse_errors
+
+action bad() -> bool {
+    verification
+        let first: u64 true
+        let second: bool 1
+        return true
+}
+"#,
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).arg(&input).arg("--parse").output().unwrap();
+    assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("expected '=', found 'true'"), "unexpected stderr: {stderr}");
+    assert!(stderr.contains("expected '=', found integer 1"), "unexpected stderr: {stderr}");
+    assert!(stderr.contains("5 |         let first: u64 true"), "unexpected stderr: {stderr}");
+    assert!(stderr.contains("6 |         let second: bool 1"), "unexpected stderr: {stderr}");
+    assert!(stderr.contains("aborting due to 2 diagnostics"), "unexpected stderr: {stderr}");
+}
+
+#[test]
+fn cellc_direct_compile_reports_multiple_recovered_syntax_errors() {
+    let temp = tempfile::tempdir().unwrap();
+    let input = temp.path().join("bad.cell");
+    std::fs::write(
+        &input,
+        r#"module multi_parse_errors
+
+action bad() -> bool {
+    verification
+        let first: u64 true
+        let second: bool 1
+        return true
+}
+"#,
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).arg(&input).output().unwrap();
+    assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("expected '=', found 'true'"), "unexpected stderr: {stderr}");
+    assert!(stderr.contains("expected '=', found integer 1"), "unexpected stderr: {stderr}");
+    assert!(stderr.contains("5 |         let first: u64 true"), "unexpected stderr: {stderr}");
+    assert!(stderr.contains("6 |         let second: bool 1"), "unexpected stderr: {stderr}");
+    assert!(stderr.contains("aborting due to 2 diagnostics"), "unexpected stderr: {stderr}");
+}
+
+#[test]
 fn cellc_check_multiple_diagnostics_prints_each_source_context() {
     let temp = tempfile::tempdir().unwrap();
     std::fs::write(
@@ -3015,6 +3073,117 @@ action bad() -> bool {
     assert_eq!(diagnostics.len(), 2, "unexpected diagnostics: {stdout}");
     assert!(diagnostics.iter().any(|diagnostic| diagnostic["message"].as_str().unwrap().contains("expected U64, found Bool")));
     assert!(diagnostics.iter().any(|diagnostic| diagnostic["message"].as_str().unwrap().contains("expected Bool, found U64")));
+    assert_eq!(stdout["diagnostic_count"], 2);
+    assert_eq!(stdout["error_count"], 2);
+    assert_eq!(stdout["warning_count"], 0);
+    assert!(diagnostics.iter().all(|diagnostic| diagnostic.get("range").is_some()));
+    assert!(diagnostics.iter().all(|diagnostic| diagnostic["range"]["start"]["line"].as_u64().unwrap_or_default() > 0));
+}
+
+#[test]
+fn cellc_check_json_reports_multiple_parse_diagnostics() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("Cell.toml"),
+        r#"
+[package]
+name = "demo"
+version = "0.1.0"
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("src").join("main.cell"),
+        r#"
+module demo::main
+
+action bad() -> bool {
+    verification
+        let first: u64 true
+        let second: bool 1
+        return true
+}
+"#,
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("check").arg("--json").output().unwrap();
+    assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
+    let stdout: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(stdout["status"], "failed");
+    assert_eq!(stdout["diagnostic_count"], 2);
+    assert_eq!(stdout["error_count"], 2);
+    assert_eq!(stdout["warning_count"], 0);
+    let diagnostics = stdout["diagnostics"].as_array().unwrap();
+    assert_eq!(diagnostics.len(), 2, "unexpected diagnostics: {stdout}");
+    assert!(diagnostics.iter().any(|diagnostic| diagnostic["message"].as_str().unwrap().contains("expected '=', found 'true'")));
+    assert!(diagnostics.iter().any(|diagnostic| diagnostic["message"].as_str().unwrap().contains("expected '=', found integer 1")));
+    assert!(diagnostics.iter().all(|diagnostic| diagnostic["range"]["start"]["line"].as_u64().unwrap_or_default() > 0));
+}
+
+#[test]
+fn cellc_check_json_reports_multiple_ir_diagnostics() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("Cell.toml"),
+        r#"
+[package]
+name = "demo"
+version = "0.1.0"
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("src").join("main.cell"),
+        r#"
+module demo::main
+
+resource Token {
+    amount: u64,
+}
+
+#[effect(ReadOnly)]
+action issue_one(amount: u64) -> Token {
+    verification
+        let out = create Token {
+            amount: amount
+        }
+        return out
+}
+
+#[effect(ReadOnly)]
+action issue_two(amount: u64) -> Token {
+    verification
+        let out = create Token {
+            amount: amount
+        }
+        return out
+}
+"#,
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("check").arg("--json").output().unwrap();
+    assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
+    let stdout: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(stdout["status"], "failed");
+    assert_eq!(stdout["diagnostic_count"], 2);
+    assert_eq!(stdout["error_count"], 2);
+    assert_eq!(stdout["warning_count"], 0);
+    let diagnostics = stdout["diagnostics"].as_array().unwrap();
+    assert_eq!(diagnostics.len(), 2, "unexpected diagnostics: {stdout}");
+    assert!(diagnostics.iter().any(|diagnostic| diagnostic["message"].as_str().unwrap().contains("action 'issue_one'")));
+    assert!(diagnostics.iter().any(|diagnostic| diagnostic["message"].as_str().unwrap().contains("action 'issue_two'")));
+    assert!(diagnostics.iter().all(|diagnostic| {
+        diagnostic["message"].as_str().unwrap().contains("declared effect ReadOnly is too weak")
+            && diagnostic["range"]["start"]["line"].as_u64().unwrap_or_default() > 0
+    }));
 }
 
 #[test]
