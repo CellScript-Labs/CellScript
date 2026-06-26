@@ -48,6 +48,63 @@ impl DiagnosticSeverity {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct RelatedDiagnostics(Option<Box<RelatedDiagnosticList>>);
+
+#[derive(Debug, Clone)]
+struct RelatedDiagnosticList(Vec<CompileError>);
+
+impl RelatedDiagnostics {
+    pub fn is_empty(&self) -> bool {
+        self.as_slice().is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.as_slice().len()
+    }
+
+    pub fn iter(&self) -> std::slice::Iter<'_, CompileError> {
+        self.as_slice().iter()
+    }
+
+    pub fn as_slice(&self) -> &[CompileError] {
+        self.0.as_deref().map(RelatedDiagnosticList::as_slice).unwrap_or(&[])
+    }
+}
+
+impl From<Vec<CompileError>> for RelatedDiagnostics {
+    fn from(diagnostics: Vec<CompileError>) -> Self {
+        if diagnostics.is_empty() {
+            Self::default()
+        } else {
+            Self(Some(Box::new(RelatedDiagnosticList(diagnostics))))
+        }
+    }
+}
+
+impl std::ops::Deref for RelatedDiagnostics {
+    type Target = [CompileError];
+
+    fn deref(&self) -> &Self::Target {
+        self.as_slice()
+    }
+}
+
+impl<'a> IntoIterator for &'a RelatedDiagnostics {
+    type Item = &'a CompileError;
+    type IntoIter = std::slice::Iter<'a, CompileError>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+impl RelatedDiagnosticList {
+    fn as_slice(&self) -> &[CompileError] {
+        &self.0
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct CompileError {
     pub message: String,
@@ -55,12 +112,19 @@ pub struct CompileError {
     pub file: Option<Utf8PathBuf>,
     pub code: Option<String>,
     pub severity: DiagnosticSeverity,
-    pub related: Vec<CompileError>,
+    pub related: RelatedDiagnostics,
 }
 
 impl CompileError {
     pub fn new(message: impl Into<String>, span: Span) -> Self {
-        Self { message: message.into(), span, file: None, code: None, severity: DiagnosticSeverity::Error, related: Vec::new() }
+        Self {
+            message: message.into(),
+            span,
+            file: None,
+            code: None,
+            severity: DiagnosticSeverity::Error,
+            related: RelatedDiagnostics::default(),
+        }
     }
 
     pub fn warning(message: impl Into<String>, span: Span) -> Self {
@@ -87,7 +151,7 @@ impl CompileError {
     }
 
     pub fn with_related(mut self, related: Vec<CompileError>) -> Self {
-        self.related = related;
+        self.related = related.into();
         self
     }
 }

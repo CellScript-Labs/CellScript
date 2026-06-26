@@ -30,6 +30,7 @@ exclude = [
     ".codex/",
     ".gitignore",
     ".gitmodules",
+    ".idea/",
     ".playwright-mcp/",
     ".rustfmt.toml",
     ".github/",

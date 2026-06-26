@@ -107,9 +107,13 @@ check_trailing_whitespace() {
         "scripts/validate_ckb_cellscript_production_evidence.py"
         "tests/syntax_combo/matrix.toml"
         "tests/syntax_combo/seeds/require-block-lifecycle.cell"
-        "${tracked_rust_files[@]}"
-        "${tracked_website_files[@]}"
     )
+    if ((${#tracked_rust_files[@]} > 0)); then
+        files+=("${tracked_rust_files[@]}")
+    fi
+    if ((${#tracked_website_files[@]} > 0)); then
+        files+=("${tracked_website_files[@]}")
+    fi
     if ((${#files[@]} > 0)) && rg -n '[ \t]+$' "${files[@]}"; then
         printf '\nTrailing whitespace found in tracked CellScript files.\n' >&2
         exit 1
@@ -170,6 +174,17 @@ manifest_paths = [
         text=True,
     ).splitlines()
 ]
+novaseal_root = root / "proposals/novaseal"
+if novaseal_root.is_dir():
+    manifest_paths.extend(
+        novaseal_root / rel
+        for rel in subprocess.check_output(
+            ["git", "-C", str(novaseal_root), "ls-files", "**/Cell.toml"],
+            cwd=root,
+            text=True,
+        ).splitlines()
+    )
+manifest_paths = sorted(set(manifest_paths))
 if not manifest_paths:
     failures.append("no tracked NovaSeal Cell.toml manifests found")
 

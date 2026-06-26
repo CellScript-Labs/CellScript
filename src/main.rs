@@ -474,6 +474,7 @@ fn print_top_level_help() {
         "validate-tx",
         "deploy-plan",
         "registry",
+        "certify",
         "publish",
         "install",
         "fmt",

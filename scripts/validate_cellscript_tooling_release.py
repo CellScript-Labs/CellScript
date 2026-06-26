@@ -42,14 +42,15 @@ def main() -> int:
         for package in cargo_lock.get("package", [])
         if package.get("name") == "cellscript"
     ]
-    changelog_match = re.search(r"^## ([0-9]+\.[0-9]+\.[0-9]+) - ", changelog, re.MULTILINE)
+    release_surface = ".".join(crate_version.split("-", 1)[0].split(".")[:2])
+    changelog_match = re.search(r"^## ([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?) - ", changelog, re.MULTILINE)
 
     require(lock_versions == [crate_version], "Cargo.lock cellscript version must match Cargo.toml package.version")
     require(package_json["version"] == crate_version, "VS Code extension version must match Cargo.toml package.version")
     require(changelog_match is not None, "CHANGELOG.md must start with a semver release heading")
     require(changelog_match.group(1) == crate_version, "CHANGELOG.md current release heading must match Cargo.toml package.version")
     require(f"## {crate_version}" in extension_changelog, "VS Code extension changelog must include the current package version")
-    require(f"current {crate_version.rsplit('.', 1)[0]} authoring surface" in extension_readme, "VS Code extension README must name the current authoring surface")
+    require(f"current {release_surface} authoring surface" in extension_readme, "VS Code extension README must name the current authoring surface")
     require("current 0.15 authoring surface" not in extension_readme, "VS Code extension README must not describe the current surface as 0.15")
     require_contains(
         "src/lib.rs",

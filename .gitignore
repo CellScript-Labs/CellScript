@@ -5,6 +5,7 @@ services/registry-api/dist/
 editors/vscode-cellscript/dist/
 
 .DS_Store
+.idea/
 .vscode/
 .cap/
 .wrangler/
