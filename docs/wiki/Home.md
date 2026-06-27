@@ -44,7 +44,8 @@ If you already know what you need, jump directly:
 - compiling for CKB: read [CKB Target Profiles](Tutorial-05-CKB-Target-Profiles.md);
 - preparing evidence: use [Metadata, Verification, and Production Gates](Tutorial-06-Metadata-Verification-and-Production-Gates.md);
 - working in an editor: read [LSP and Tooling](Tutorial-07-LSP-and-Tooling.md);
-- learning by example: finish with [Bundled Example Contracts](Tutorial-08-Bundled-Example-Contracts.md).
+- learning by example: finish with [Bundled Example Contracts](Tutorial-08-Bundled-Example-Contracts.md);
+- driving `cellc` from an agent: read [Agentic Loops and cellc-mcp](Tutorial-13-Agentic-Loops-and-cellc-mcp.md).
 
 ## Tutorial Path
 
@@ -76,6 +77,9 @@ If you already know what you need, jump directly:
    command-backed reports.
 12. [Bundled Example Contracts](Tutorial-08-Bundled-Example-Contracts.md): study
    the examples in a useful order.
+13. [Agentic Loops and cellc-mcp](Tutorial-13-Agentic-Loops-and-cellc-mcp.md):
+   drive the read-only compiler surface from an automated writer in a
+   write → check → explain → fix loop.
 
 ## The Core Idea
 
