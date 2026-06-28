@@ -6,7 +6,7 @@ and the locks that decide whether a Cell may be spent. The compiler then turns
 that `.cell` source into ckb-vm compatible RISC-V assembly or ELF artifacts, and
 writes metadata that explains what was built.
 
-Last updated: 2026-06-22.
+Last updated: 2026-06-28.
 
 This wiki is a guided path. It starts with one compiled example, then slowly
 builds the mental model: source files, Cell effects, packages, the CKB profile,
@@ -46,7 +46,8 @@ If you already know what you need, jump directly:
 - compiling for CKB: read [CKB Target Profiles](Tutorial-05-CKB-Target-Profiles.md);
 - preparing evidence: use [Metadata, Verification, and Production Gates](Tutorial-06-Metadata-Verification-and-Production-Gates.md);
 - working in an editor: read [LSP and Tooling](Tutorial-07-LSP-and-Tooling.md);
-- learning by example: finish with [Bundled Example Contracts](Tutorial-08-Bundled-Example-Contracts.md).
+- learning by example: finish with [Bundled Example Contracts](Tutorial-08-Bundled-Example-Contracts.md);
+- driving `cellc` from an agent: read [Agentic Loops and cellc-mcp](Tutorial-13-Agentic-Loops-and-cellc-mcp.md).
 
 ## Tutorial Path
 
@@ -78,6 +79,9 @@ If you already know what you need, jump directly:
    metadata-only ProofPlan gaps.
 12. [Phase 1 Registry: End-to-End](Tutorial-12-Phase1-Registry-End-to-End.md):
    follow the registry package flow from init through verification.
+13. [Agentic Loops and cellc-mcp](Tutorial-13-Agentic-Loops-and-cellc-mcp.md):
+   drive the read-oriented compiler surface from an automated writer in a
+   write -> check -> explain -> fix loop.
 
 After the numbered path, use [Cookbook Recipes](Cookbook-Recipes.md) for small
 patterns and keep [CKB Glossary](CKB-Glossary.md) nearby for terminology.

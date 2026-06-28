@@ -51,6 +51,9 @@
   source unit, and live local devnet stateful evidence passes issue, transfer,
   settle, and required negative cases for lifecycle data hash
   `0x394da78133cb2f5a5d6cd911feceeab9e97e6ad5d36c0e50f18be56653af85e5`.
+- Add Tutorial 13 for agentic `cellc` loops, documenting the
+  write-check-explain-fix workflow, `cellc-mcp` wrapper boundary, read-vs-write
+  rule, and the distinction between compiler evidence and CKB chain evidence.
 
 ## 0.17.0 - 2026-05-04
 

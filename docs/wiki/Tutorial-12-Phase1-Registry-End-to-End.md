@@ -135,5 +135,6 @@ Phase 1 should reject:
 - [Packages and CLI Workflow](Tutorial-04-Packages-and-CLI-Workflow)
 - [Metadata, Verification, and Production Gates](Tutorial-06-Metadata-Verification-and-Production-Gates)
 - [CKB Target Profiles](Tutorial-05-CKB-Target-Profiles)
+- [Agentic Loops and cellc-mcp](Tutorial-13-Agentic-Loops-and-cellc-mcp)
 - `docs/CELLSCRIPT_PACKAGE_PROVENANCE_AND_DEPLOYMENT_IDENTITY.md`
 - `docs/CELLSCRIPT_REGISTRY_PHASE1.md`

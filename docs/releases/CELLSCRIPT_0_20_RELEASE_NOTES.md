@@ -193,6 +193,15 @@ its own Playwright smoke evidence through `website/scripts/`. This is
 not a protocol or CKB VM evidence change; it is the public-website
 leg of the release.
 
+### Agentic Compiler Loop Tutorial
+
+Tutorial 13 documents a bounded write-check-explain-fix loop around the
+read-oriented `cellc` surface. It covers `cellc check --json`, diagnostic
+codes, `cellc explain`, the `cellc-mcp` wrapper boundary, and the rule that
+artifact-producing or chain-facing steps need explicit confirmation. The
+tutorial keeps the same release boundary as the production-gate docs:
+compiler acceptance is compiler evidence, not CKB chain evidence.
+
 ## Validation Commands
 
 For 0.20 release readiness, run:
