@@ -1,3 +1,5 @@
+# Tutorial 01: Getting Started
+
 This chapter gets you from a fresh checkout to one compiled CellScript artifact.
 Do not worry about learning the whole language yet. The goal is smaller: build
 the compiler, compile one example, and see how the executable artifact and its

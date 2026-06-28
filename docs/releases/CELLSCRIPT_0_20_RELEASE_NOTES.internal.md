@@ -147,6 +147,52 @@ total-byte limits so browser CPU and memory stay bounded.
 The release claim is a client-side playground workspace over the existing
 WASM compiler path, not a server-backed workspace service.
 
+## Post-`0.20.0-rc.2` Polish
+
+The release notes above were frozen at `0.20.0-rc.2`. A small set of
+post-rc.2 commits deepened the developer experience without changing the
+shipped boundary. They are recorded here so the 0.20 line and the audit
+trail in `CELLSCRIPT_0_16_TO_0_20_AUDIT.md` agree.
+
+### Multi-Diagnostic Recovery and Reporting
+
+The CLI diagnostic surface now has explicit recovery semantics. When one
+frontend error hides another, both are surfaced with their own source
+context, and the recovery report groups them by file so the next fix is
+unambiguous. The changes stack on top of the 0.20-rc.2 "multi-diagnostic
+package checks" claim:
+
+- `cellc` direct parse, lex, and compile errors already print
+  `file:line:column` source snippets at `0.20.0-rc.2`; the post-rc.2
+  polish improves how those snippets group, deduplicate, and recover
+  after a partial parse failure.
+- The `--explain <CODE>` alias and the per-error source context render
+  the same way whether the error comes from the package graph, the
+  entry file, or a dependency `.cell` file imported through `use`.
+- `ErrorReporter::has_errors()` continues to only treat error severity
+  as release-blocking; the post-rc.2 polish tightens the warning-vs-
+  error boundary so a partial-failure recovery report never silently
+  reclassifies a warning as a release blocker.
+
+### Wiki Tutorial Accuracy
+
+Tutorial 12 (Phase 1 registry end-to-end) and the surrounding tutorial
+chain were reviewed end-to-end. The post-rc.2 fix corrects stale
+references in the Phase 1 navigation, the `cellc install` /
+`cellc registry verify` examples, and the generated TypeScript builder
+section. A developer following the tutorial from `cellc init` to a
+live CKB-validated deploy now reads commands that match the shipped
+CLI surface and the shipped trust-policy flags.
+
+### Website Highlighting Audit
+
+The website code, syntax, and docs pages received a coordinated
+highlighting audit. The audit covers the playground, the docs tree,
+and the syntax sample pages; it is a polish-only change and carries
+its own Playwright smoke evidence through `website/scripts/`. This is
+not a protocol or CKB VM evidence change; it is the public-website
+leg of the release.
+
 ## Validation Commands
 
 For 0.20 release readiness, run:

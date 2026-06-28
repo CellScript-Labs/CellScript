@@ -1,4 +1,4 @@
-# Action Model And Canonical Syntax
+# Tutorial 09: Action Model and Canonical Syntax
 
 An `action` is a verifier case, not a method call and not runtime execution.
 A user builds a CKB transaction, and the selected action verifier checks whether

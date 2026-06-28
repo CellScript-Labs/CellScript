@@ -1,3 +1,5 @@
+# Tutorial 04: Packages and CLI Workflow
+
 Small experiments can be compiled as single `.cell` files. Once a contract has
 more than one source file, a dependency, or a release target, use a package.
 

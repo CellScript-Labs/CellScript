@@ -102,8 +102,9 @@ to branch-specific evidence or forward design:
 - `archive/0.17/CELLSCRIPT_0_17_ROADMAP.md`
 - `CELLSCRIPT_0_18_ROADMAP.md`
 - `CELLSCRIPT_0_19_ROADMAP.md`
-- `releases/CELLSCRIPT_0_19_RELEASE_NOTES.md`
+- `releases/CELLSCRIPT_0_16_TO_0_20_RELEASE_NOTES.md`
 - `CELLSCRIPT_0_20_ROADMAP.md`
+- `CELLSCRIPT_0_21_ROADMAP.md`
 - `CELLSCRIPT_CKB_ECOSYSTEM_REUSE_AUDIT.md` for 0.19 CKB ecosystem reuse scope
 - `CELLSCRIPT_CKB_STD_COMPAT.md` for 0.19 ckb-std compatibility scope
 - `CELLSCRIPT_GRAMMAR_GOVERNANCE_RFC.md` and
@@ -114,6 +115,9 @@ to branch-specific evidence or forward design:
 - `CELLSCRIPT_0_20_ROADMAP.md` for generated TypeScript action builders,
   live-chain registry verification, stateful flow evidence, and the bounded
   CellFabric JSON bridge
+- `CELLSCRIPT_0_21_ROADMAP.md` for semantic closure, authenticated compiler
+  evidence, derived cyclic graph views, type-level TemplateLayout metadata, and
+  deferred optional template Merkleisation
 
 ## Archive
 

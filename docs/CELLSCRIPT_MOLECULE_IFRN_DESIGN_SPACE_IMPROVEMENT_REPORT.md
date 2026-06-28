@@ -61,8 +61,8 @@ a real six-contract Infern parity matrix.
 | v0-mvp packed layout is not a production ABI conclusion | `proposals/novaseal/v0-mvp-skeleton/docs/SCHEMA_LAYOUT.md:44-54` |
 | newer NovaSeal profiles mostly use whole-cell packed hashes | `proposals/novaseal/fungible-xudt-profile-v0/src/nova_fungible_xudt_lifecycle_type.cell:226-227`, `proposals/novaseal/btc-transaction-commitment-profile-v0/src/nova_btc_transaction_commitment_type.cell:361`, `proposals/novaseal/fiber-candidate-profile-v0/src/nova_fiber_candidate_type.cell:378` |
 | iCKB specs live under the benchmark test surface, not public examples | `tests/benchmarks/ickb_specs/README.md:3-9`, `tests/benchmarks/ickb_diff/claim_manifest.json:5-9`, `roadmap/CELLSCRIPT_ROADMAP.md:343`, `roadmap/CELLSCRIPT_ROADMAP_OVERVIEW.md:330` |
-| 0.20 has an ELF entry ABI gate and the build-report linkage | `docs/releases/CELLSCRIPT_0_20_RELEASE_NOTES.md`, `scripts/ckb_cellscript_acceptance.sh`, `scripts/validate_ckb_cellscript_production_evidence.py`, `docs/CELLSCRIPT_GATE_POLICY.md` |
-| `cell_data_codec_manifest` is emitted and exposed to generated builders | `src/lib.rs`, `src/cli/commands.rs`, `tests/cli.rs`, `docs/releases/CELLSCRIPT_0_20_RELEASE_NOTES.md` |
+| 0.20 has an ELF entry ABI gate and the build-report linkage | `docs/releases/CELLSCRIPT_0_16_TO_0_20_RELEASE_NOTES.md`, `scripts/ckb_cellscript_acceptance.sh`, `scripts/validate_ckb_cellscript_production_evidence.py`, `docs/CELLSCRIPT_GATE_POLICY.md` |
+| `cell_data_codec_manifest` is emitted and exposed to generated builders | `src/lib.rs`, `src/cli/commands.rs`, `tests/cli.rs`, `docs/releases/CELLSCRIPT_0_16_TO_0_20_RELEASE_NOTES.md` |
 | DOB-EVO is mainly a lock-hash / production-policy issue, not Molecule-only evidence | `docs/0.20/CELLSCRIPT_0_20_DOB_EVO_SWARM_AUDIT.md:64`, `docs/0.20/CELLSCRIPT_0_20_DOB_EVO_SWARM_AUDIT.md:69` |
 
 ## Technical Conclusion

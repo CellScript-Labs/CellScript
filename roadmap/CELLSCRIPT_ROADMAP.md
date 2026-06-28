@@ -1,6 +1,6 @@
 # CellScript Roadmap
 
-**Updated**: 2026-06-10
+**Updated**: 2026-06-26
 
 This roadmap is the high-level planning map for CellScript. It links the
 release-specific trackers and the deeper design notes so the project does not
@@ -27,8 +27,9 @@ The current project direction is simple:
 | 0.16 release scope | `v0.16.1` is released for the scoped metadata-assurance line, including operational semantics, ProofPlan soundness, builder assumptions, transaction validation/solver templates, deployment governance, audit tooling, standard CKB compatibility fixtures, compiler hardening, proposal-local NovaSeal devnet/profile certification, and bundled example bootstrap cleanup. | [0.16 roadmap](CELLSCRIPT_0_16_ROADMAP.md), [0.16.1 release notes](../docs/releases/CELLSCRIPT_0_16_1_RELEASE_NOTES.md) |
 | 0.17/0.18 iCKB equivalence state | The standalone 0.17 line introduced the protocol-semantics surface and partial CKB VM differential evidence; the carried-forward 0.18 work closes the manifest-declared executable iCKB claim set as `EXECUTED_CKB_VM_DIFF` / `PROVEN`. | [0.17 roadmap](../docs/archive/0.17/CELLSCRIPT_0_17_ROADMAP.md), [0.17 iCKB final report](../docs/archive/0.17/CELLSCRIPT_0_17_ICKB_FINAL_REPORT.md) |
 | 0.18 planning scope | First-class read-only `ScriptRef` / `ScriptArgs` surface and the remaining iCKB equivalence-closure prerequisites. | [0.18 roadmap](../docs/CELLSCRIPT_0_18_ROADMAP.md) |
-| 0.19 scope | Scope complete for CKB ecosystem reuse, `ckb-std` compatibility, grammar governance, and Phase 1 package/deployment identity registry closure. Generated builders and live-chain registry proof moved to 0.20. | [0.19 roadmap](../docs/CELLSCRIPT_0_19_ROADMAP.md), [0.19 release notes](../docs/releases/CELLSCRIPT_0_19_RELEASE_NOTES.md), [CKB ecosystem reuse audit](../docs/CELLSCRIPT_CKB_ECOSYSTEM_REUSE_AUDIT.md), [ckb-std compatibility](../docs/CELLSCRIPT_CKB_STD_COMPAT.md), [Registry Phase 1](../docs/CELLSCRIPT_REGISTRY_PHASE1.md) |
+| 0.19 scope | Scope complete for CKB ecosystem reuse, `ckb-std` compatibility, grammar governance, and Phase 1 package/deployment identity registry closure. Generated builders and live-chain registry proof moved to 0.20. | [0.19 roadmap](../docs/CELLSCRIPT_0_19_ROADMAP.md), [0.16-0.20 release notes](../docs/releases/CELLSCRIPT_0_16_TO_0_20_RELEASE_NOTES.md), [CKB ecosystem reuse audit](../docs/CELLSCRIPT_CKB_ECOSYSTEM_REUSE_AUDIT.md), [ckb-std compatibility](../docs/CELLSCRIPT_CKB_STD_COMPAT.md), [Registry Phase 1](../docs/CELLSCRIPT_REGISTRY_PHASE1.md) |
 | 0.20 planned scope | Generated Action Builder, live-chain deployment verification, stateful transaction flows, and registry trust hardening. | [0.20 roadmap](../docs/CELLSCRIPT_0_20_ROADMAP.md) |
+| 0.21 planned scope | Semantic closure, authenticated compiler evidence, CLI UX reorganisation, dedicated MCP server and CellScript programming skills, derived cyclic graph views, type-level TemplateLayout metadata, and deferred optional template Merkleisation. | [0.21 roadmap](../docs/CELLSCRIPT_0_21_ROADMAP.md), [0.21 CLI UX plan](CELLSCRIPT_0_21_CLI_UX_PLAN.md) |
 | CKB language fit | CKB-first design is confirmed; remaining gaps are signer binding, continuity policy, capacity policy, and declarative time policy. | [CKB language audit](../docs/CELLSCRIPT_CKB_LANGUAGE_AUDIT.md) |
 | Surface syntax | Low-risk syntax pass and 0.13.2 syntax-governance hardening are implemented; authority-sensitive syntax remains staged. | [Surface elegance RFC](../docs/CELLSCRIPT_SURFACE_ELEGANCE_RFC.md), [Syntax-combination audit](../docs/CELLSCRIPT_SYNTAX_COMBO_AUDIT_METHODOLOGY.md) |
 | Collections | Stack-backed fixed-width `Vec<T>` helper surface is implemented; cell-backed and generic map ownership remain fail-closed. | [Collections support matrix](../docs/CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md), [0.13 release scope](../docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md) |
@@ -204,7 +205,7 @@ are moved to 0.20.
 Detailed status:
 
 - [0.19 roadmap](../docs/CELLSCRIPT_0_19_ROADMAP.md)
-- [0.19 closure notes](../docs/releases/CELLSCRIPT_0_19_RELEASE_NOTES.md)
+- [0.16-0.20 release notes](../docs/releases/CELLSCRIPT_0_16_TO_0_20_RELEASE_NOTES.md)
 - [Registry Phase 1](../docs/CELLSCRIPT_REGISTRY_PHASE1.md)
 
 ### 0.20: Generated Builder And Live Registry Proof
@@ -236,6 +237,38 @@ builders and live-chain verification:
 Detailed status:
 
 - [0.20 roadmap](../docs/CELLSCRIPT_0_20_ROADMAP.md)
+
+### 0.21: Semantic Closure And Authenticated Evidence
+
+0.21 keeps the action-centred CellScript model intact and closes the highest
+value gaps around executable protocol law and evidence integrity:
+
+- executable lowering for supported aggregate invariant shapes;
+- static validation that action `transition` edges are declared by their
+  `flow` rules;
+- completed live-cell action resolution and action-aware CKB Script scans where
+  metadata already proves the required source views;
+- an authenticated compile receipt envelope over the existing
+  `CompileMetadata`, ProofPlan, audit bundle, metadata hash, and artifact hash
+  stream;
+- a canonical grouped `cellc` command tree with compatibility aliases,
+  complete help text, and an explicit diagnostic transport contract;
+- a dedicated CellScript MCP server and programming skill pack so agents can
+  query compiler evidence, docs, examples, command discovery, and gate policy
+  without inventing workflows;
+- a derived cyclic ProtocolGraph view for audit and builder guidance, not a
+  core compiler graph IR;
+- type-level TemplateLayout metadata that separates semantic validity from
+  physical commitment layout.
+
+Actor syntax, general template Merkleisation, and `observes` / `covid`
+composition syntax stay deferred until a concrete CKB protocol proves that the
+existing action surface and metadata cannot express the requirement clearly.
+
+Detailed status:
+
+- [0.21 roadmap](../docs/CELLSCRIPT_0_21_ROADMAP.md)
+- [0.21 CLI UX reorganisation plan](CELLSCRIPT_0_21_CLI_UX_PLAN.md)
 
 ### Next Authorization Hardening Track
 

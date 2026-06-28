@@ -1,3 +1,5 @@
+# Cookbook Recipes
+
 This page is a practical companion to the tutorials. Each recipe gives you a
 small goal, the code or command to start from, and the boundary you should keep
 in mind.

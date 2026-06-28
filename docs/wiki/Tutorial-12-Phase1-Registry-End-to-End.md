@@ -1,4 +1,4 @@
-# Phase 1 Registry: End-to-End
+# Tutorial 12: Phase 1 Registry: End-to-End
 
 This tutorial walks through the Phase 1 registry loop at the level a package
 author or reviewer needs: source identity, build identity, deployment identity,

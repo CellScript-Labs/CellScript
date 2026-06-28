@@ -101,3 +101,4 @@ docs/**/*_CN.md
 docs/**/*_ZH.md
 docs/**/*_CH.md
 !README_CH.md
+AGENTS.md

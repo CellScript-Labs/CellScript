@@ -1,3 +1,5 @@
+# CKB Glossary
+
 This page explains the CKB words that appear throughout the CellScript wiki.
 Keep it nearby while reading the tutorials. The goal is not to replace the CKB
 documentation; the goal is to make CellScript examples easier to read.

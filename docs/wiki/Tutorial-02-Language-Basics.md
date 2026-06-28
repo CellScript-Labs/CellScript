@@ -1,3 +1,5 @@
+# Tutorial 02: Language Basics
+
 CellScript source reads best when you treat it as a small Cell story. First you
 name the module. Then you describe the state that can exist on chain. Finally
 you write the actions and locks that say how that state may change or be spent.
@@ -81,12 +83,17 @@ each file's `module` declaration, and resolving explicit `use path::Symbol`
 imports. A wrong import path is an error even if another loaded module happens
 to define a symbol with the same basename.
 
-The current production boundary supports cross-file type and schema imports
-end-to-end: resources, shared cells, receipts, structs, enums, and constants can
-be imported into the entry module for metadata and artifact generation.
-Cross-file function-style linking remains fail-closed. Keep executable business
-logic in the compiled entry module unless a future release explicitly documents
-that call surface.
+The current production boundary supports cross-file type, schema, and helper
+reuse end-to-end: resources, shared cells, receipts, structs, enums, constants,
+and imported helper functions can be resolved from loaded modules for metadata
+and artifact generation. Helper calls are compile-time reuse, not runtime
+linkage: imported helper bodies are inlined into the single selected entry
+artifact, including aliased imports, fully-qualified calls, same-basename
+dependency helpers, and transitive helper calls.
+
+There is still no ELF linker and no cross-script runtime linkage. Each CKB
+script remains an independent artifact, so executable business logic must be
+reachable from the selected entry.
 
 ## Scalar and Fixed Types
 

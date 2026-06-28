@@ -202,9 +202,10 @@ contract rather than only an audit topic. Package compilation loads a validated
 source graph, import resolution is exact-path, incremental cache keys include
 dependency `.cell` files plus package manifests and lockfiles, file-backed LSP
 diagnostics use the package graph, and the WASM package exposes an additive
-multi-source metadata diagnostics API. Cross-file function-call linking remains
-deferred and fail-closed; the supported reusable pattern for 0.20 is shared
-schema/type imports that are inlined into each entry artifact.
+multi-source metadata diagnostics API. Cross-file helper calls are resolved at
+compile time and inlined into the selected entry artifact; the remaining
+boundary is ELF-linker-style or cross-script runtime linkage, not
+schema/type/helper reuse inside one artifact.
 
 Twenty-fifth slice: the website playground now has a browser-local multi-file
 workspace UI that matches the compiler boundary. The UI provides a file tree
@@ -289,8 +290,8 @@ Current status:
   typescript`, `cellc package verify`, and `cellc registry verify --live` as
   first-class tooling surfaces.
 - `docs/CELLSCRIPT_GATE_POLICY.md`, `CHANGELOG.md`, and
-  `docs/releases/CELLSCRIPT_0_20_RELEASE_NOTES.md` define the current release
-  evidence boundary, including compile-only versus local-devnet evidence,
+  `docs/releases/CELLSCRIPT_0_16_TO_0_20_RELEASE_NOTES.md` define the current
+  release evidence boundary, including compile-only versus local-devnet evidence,
   exact-artifact build reports, ELF entry ABI checks, and codec-manifest
   identity.
 - The public Astro website is part of the release communication surface. Recent

@@ -405,8 +405,8 @@ commands unless you create a `Cell.toml` there.
   metadata verification.
 - Use `Tutorial-08-Bundled-Example-Contracts` to see production-oriented example
   contracts.
-- Read `docs/releases/CELLSCRIPT_0_20_RELEASE_NOTES.md` for the current source,
-  package, and evidence boundary.
+- Read `docs/releases/CELLSCRIPT_0_16_TO_0_20_RELEASE_NOTES.md` for the current
+  source, package, and evidence boundary.
 - Read `docs/releases/CELLSCRIPT_0_15_RELEASE_NOTES.md`,
   `roadmap/CELLSCRIPT_0_16_ROADMAP.md`, and
   `docs/releases/CELLSCRIPT_0_16_2_RELEASE_NOTES.md` for the historical

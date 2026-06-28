@@ -1,3 +1,5 @@
+# Tutorial 08: Bundled Example Contracts
+
 The repository includes seven bundled examples. Treat them as guided reading,
 not just files to compile. Each one teaches a different part of the language:
 linear resources, shared state, receipts, locks, proposal flows, time checks,
@@ -240,8 +242,9 @@ cellc check --target-profile ckb --production
 cellc build --target riscv64-elf --target-profile ckb --production
 cellc verify-artifact build/main.elf --verify-sources --expect-target-profile ckb --production
 cellc examples/nft.cell --entry-action transfer --target riscv64-elf --target-profile ckb --primitive-strict 0.16 --production
-# --entry-action selects a single action entry point for targeted inspection
 ```
+
+`--entry-action` selects a single action entry point for targeted inspection.
 
 For release-facing CKB evidence, run the CellScript acceptance gate:
 

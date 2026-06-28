@@ -1,3 +1,5 @@
+# Tutorial 03: Resources and Cell Effects
+
 CellScript is built around explicit Cell movement. An effect is not just a
 helper call. It is a statement about the transaction you expect to validate:
 which inputs are consumed, which outputs are proposed, which dependencies are

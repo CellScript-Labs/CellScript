@@ -1,3 +1,5 @@
+# Tutorial 07: LSP and Tooling
+
 You can write CellScript with any text editor and the `cellc` CLI. The LSP and
 VS Code extension make that loop shorter. Parse errors, type errors,
 flow mistakes, symbols, hovers, formatting, and compiler-backed reports
@@ -95,6 +97,11 @@ The extension contributes commands for the local compiler and builder loop:
 | `CellScript: Show Constraints` | `cellc constraints` |
 | `CellScript: Show Entry Witness ABI` | selects an action/lock, then runs `cellc abi` |
 | `CellScript: Show Action Build Plan` | selects an action, then runs `cellc action build --json` |
+| `CellScript: Show Builder Assumptions` | `cellc explain-assumptions --json` |
+| `CellScript: Show Transaction Template` | `cellc solve-tx --json` |
+| `CellScript: Show Deploy Plan` | `cellc deploy-plan --json` |
+| `CellScript: Show Profile` | `cellc profile --json` |
+| `CellScript: Generate Audit Bundle` | `cellc audit-bundle --output <scratch> --json` |
 | `CellScript: Generate TypeScript Action Builder` | `cellc gen-builder --target typescript` |
 | `CellScript: Verify Package` | `cellc package verify --json` |
 | `CellScript: Verify Registry` | `cellc registry verify --json` |
