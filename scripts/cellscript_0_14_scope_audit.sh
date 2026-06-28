@@ -40,7 +40,11 @@ if [[ -z "${CELLC_BIN:-}" ]]; then
     export CELLC_BIN="$CARGO_TARGET_DIR/debug/cellc"
 fi
 
-run cargo test --locked -p cellscript --test v0_14 -- --test-threads=1
+if [[ -f tests/v0_14.rs ]]; then
+    run cargo test --locked -p cellscript --test v0_14 -- --test-threads=1
+else
+    printf '\n==> retired tests/v0_14.rs integration suite; continuing with scoped example audit\n'
+fi
 run cargo test --locked -p cellscript --test fuzzy_debug -- --test-threads=1
 
 require_doc_boundary roadmap/CELLSCRIPT_0_14_ROADMAP.md 'v0.14 does not ship a source-level `max_cycles` spawn parameter'

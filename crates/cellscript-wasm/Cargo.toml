@@ -1,6 +1,6 @@
 [package]
 name = "cellscript-wasm"
-version = "0.20.0-rc.2"
+version = "0.20.0"
 edition = "2021"
 rust-version = "1.85.0"
 publish = false

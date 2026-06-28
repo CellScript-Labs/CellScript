@@ -222,10 +222,8 @@ def main() -> int:
     require_contains(
         "website/src/pages/index.astro",
         [
-            "CellScript Registry",
-            "data-home-search",
-            "/registry/submit",
-            "/learn",
+            'href="/registry"',
+            'data-i18n="nav.registryBrowse"',
         ],
     )
     require_contains(

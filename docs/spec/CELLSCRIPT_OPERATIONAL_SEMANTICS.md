@@ -189,8 +189,9 @@ For manifest-bound spawn targets, validation also checks the referenced
 
 ## Conformance Fixtures
 
-The conformance tests live in `tests/v0_16.rs` and
-`tests/compat/ckb_standard/manifest.json`. They check:
+The historical 0.16 conformance suite has been retired from the main branch;
+the remaining standard-compatibility fixtures live in
+`tests/compat/ckb_standard/manifest.json`. The conformance boundary checks:
 
 - ProofPlan soundness metadata is emitted and passes for checked runtime cases;
 - `--primitive-strict=0.16` rejects metadata-only ProofPlan gaps;

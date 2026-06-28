@@ -3,9 +3,7 @@
 **Status**: formal 0.19 headless Rust adapter crate with full transaction lifecycle
 bridge plus focused local-node acceptance evidence.
 
-See also
-[`CELLSCRIPT_CKB_ECOSYSTEM_REUSE_AUDIT.md`](CELLSCRIPT_CKB_ECOSYSTEM_REUSE_AUDIT.md)
-for the audit of which CKB-facing responsibilities belong to CellScript,
+This document defines which CKB-facing responsibilities belong to CellScript,
 `ckb-std`, `ckb-sdk-rust`, and the adapter.
 
 CellScript is the semantic compiler. `ckb-std` is the contract-side ABI/runtime

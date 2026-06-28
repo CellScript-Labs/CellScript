@@ -139,7 +139,9 @@ fixed-byte args through `__ckb_require_cell_*_args_exact`.
 
 ## VM Evidence
 
-0.18 Script construction is covered by `tests/v0_18.rs`:
+0.18 Script construction was covered by the retired version-labelled
+integration suite and is now guarded through the current compiler and CKB
+gates:
 
 - compiler/lowering evidence for constructed `Script` requirements;
 - literal code-hash construction through `Hash::from_bytes([u8; 32])`;

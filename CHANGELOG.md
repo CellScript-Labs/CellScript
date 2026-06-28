@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.20.0-rc.2 - 2026-06-19
+## 0.20.0 - 2026-06-28
 
 - Bring `cellc` CLI discovery and direct-source diagnostics closer to Rust's
   developer experience: top-level help now shows package commands plus direct

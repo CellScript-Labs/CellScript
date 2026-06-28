@@ -21,7 +21,7 @@ release. CKB production completeness and non-critical cleanup remain 0.17 work.
 
 | Area | 0.16 Status | Artifact | Remaining / next scope |
 |---|---|---|---|
-| Operational semantics | Implemented as mechanically precise prose plus conformance tests | `docs/spec/CELLSCRIPT_OPERATIONAL_SEMANTICS.md` and `tests/v0_16.rs` | Machine-checked/formal proof backend |
+| Operational semantics | Implemented as mechanically precise prose plus conformance tests | `docs/spec/CELLSCRIPT_OPERATIONAL_SEMANTICS.md`; the retired 0.16 integration suite has been folded into the current gate boundary | Machine-checked/formal proof backend |
 | ProofPlan soundness checks | Implemented as fail-closed metadata consistency checker | `proof_plan::soundness`, `runtime.proof_plan_soundness`, and `--primitive-strict=0.16` enforcement | Formal invariant proof and source-to-assembly coverage |
 | Standard CKB compatibility suite | Implemented as descriptive fixture suite | `tests/compat/ckb_standard/manifest.json` and descriptive fixture files | Executable CKB VM accepted/rejected runner |
 | Builder assumption contract | Implemented | `runtime.builder_assumptions`, `cellc explain-assumptions`, schema-bound `validate-tx` evidence | Full CKB transaction semantic validation |

@@ -226,8 +226,10 @@ Notes:
     codegen uses schema/type layout offsets instead of generic runtime
     deserializers, and the 0.13 gate keeps that path test-covered.
   - [x] broader malformed/adversarial coverage:
-    `tests/adversarial_0_13.rs` locks rejection of unsupported full maps,
-    cell-backed vectors, untyped vector mutation, and invalid hash_type DSL.
+    the retired 0.13 adversarial integration suite locked rejection of
+    unsupported full maps, cell-backed vectors, untyped vector mutation, and
+    invalid hash_type DSL before the main branch moved that coverage into the
+    current compiler gates.
   - [x] builder-backed on-chain lock valid-spend and invalid-spend matrix for
     all bundled production locks. The matrix is now part of the CKB production
     acceptance report instead of a compile-only claim.

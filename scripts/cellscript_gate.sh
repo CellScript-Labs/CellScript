@@ -52,7 +52,9 @@ check_trailing_whitespace() {
     local tracked_rust_files=()
     local tracked_rust_file
     while IFS= read -r tracked_rust_file; do
-        tracked_rust_files+=("$tracked_rust_file")
+        if [[ -f "$tracked_rust_file" ]]; then
+            tracked_rust_files+=("$tracked_rust_file")
+        fi
     done < <(git ls-files '*.rs')
 
     local tracked_website_files=()
@@ -60,7 +62,9 @@ check_trailing_whitespace() {
     while IFS= read -r tracked_website_file; do
         case "$tracked_website_file" in
             website/*.json|website/*.mjs|website/**/*.astro|website/**/*.css|website/**/*.js|website/**/*.json|website/**/*.py|website/**/*.ts)
-                tracked_website_files+=("$tracked_website_file")
+                if [[ -f "$tracked_website_file" ]]; then
+                    tracked_website_files+=("$tracked_website_file")
+                fi
                 ;;
         esac
     done < <(git ls-files website)

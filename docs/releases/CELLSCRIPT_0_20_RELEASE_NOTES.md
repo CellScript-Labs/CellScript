@@ -1,8 +1,8 @@
 # CellScript 0.20 Release Notes
 
-**Status**: In progress for the 0.20 nightly line.
+**Status**: Final release notes for CellScript 0.20.0.
 
-**Updated**: 2026-06-25.
+**Updated**: 2026-06-28.
 
 CellScript 0.20 hardens the generated-builder and live/devnet acceptance path.
 The important post-audit change is that CKB-facing acceptance now checks the
@@ -147,12 +147,12 @@ total-byte limits so browser CPU and memory stay bounded.
 The release claim is a client-side playground workspace over the existing
 WASM compiler path, not a server-backed workspace service.
 
-## Post-`0.20.0-rc.2` Polish
+## Final Polish After rc.2
 
-The release notes above were frozen at `0.20.0-rc.2`. A small set of
-post-rc.2 commits deepened the developer experience without changing the
-shipped boundary. They are recorded here so the 0.20 line and the audit
-trail in `CELLSCRIPT_0_16_TO_0_20_AUDIT.md` agree.
+The release notes above were frozen at the second release candidate. A small
+set of later commits deepened the developer experience without changing the
+shipped boundary. They are recorded here so the 0.20 line and the release
+trail agree.
 
 ### Multi-Diagnostic Recovery and Reporting
 
@@ -163,7 +163,7 @@ unambiguous. The changes stack on top of the 0.20-rc.2 "multi-diagnostic
 package checks" claim:
 
 - `cellc` direct parse, lex, and compile errors already print
-  `file:line:column` source snippets at `0.20.0-rc.2`; the post-rc.2
+  `file:line:column` source snippets at the second release candidate; the final
   polish improves how those snippets group, deduplicate, and recover
   after a partial parse failure.
 - The `--explain <CODE>` alias and the per-error source context render

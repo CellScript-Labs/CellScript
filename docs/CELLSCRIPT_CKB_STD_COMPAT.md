@@ -5,9 +5,8 @@ ckb-std constant parity, SourceView decoding, WitnessArgs layout fixtures,
 occupied-capacity field lowering, the formal headless CKB adapter crate, and
 focused local-node adapter acceptance.
 
-See also
-[`CELLSCRIPT_CKB_ECOSYSTEM_REUSE_AUDIT.md`](CELLSCRIPT_CKB_ECOSYSTEM_REUSE_AUDIT.md)
-for the audit of overlap with `ckb-std` and `ckb-sdk-rust`.
+See also [`CELLSCRIPT_CKB_ADAPTER.md`](CELLSCRIPT_CKB_ADAPTER.md) for the
+transaction-realisation boundary with `ckb-sdk-rust`.
 
 `ckb-std` is the canonical Rust-side contract standard library for CKB.
 CellScript should treat it as the contract-side ABI and runtime oracle, not as a

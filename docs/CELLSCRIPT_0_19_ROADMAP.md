@@ -70,12 +70,12 @@ evidence.
 
 0.19 also owns the CKB ecosystem reuse and ckb-std compatibility work:
 
-- [`CELLSCRIPT_CKB_ECOSYSTEM_REUSE_AUDIT.md`](CELLSCRIPT_CKB_ECOSYSTEM_REUSE_AUDIT.md)
-  defines which CKB-facing responsibilities must stay in `ckb-std`,
-  `ckb-sdk-rust`, or `cellscript-ckb-adapter` instead of compiler core.
 - [`CELLSCRIPT_CKB_STD_COMPAT.md`](CELLSCRIPT_CKB_STD_COMPAT.md) defines the
   contract-side compatibility boundary for generated verifier code, parity
   tests, and future Rust-shim/native-simulation workflows.
+- [`CELLSCRIPT_CKB_ADAPTER.md`](CELLSCRIPT_CKB_ADAPTER.md) defines the
+  transaction-realisation boundary between compiler outputs, `ckb-sdk-rust`,
+  and local-node acceptance evidence.
 
 These two documents are part of 0.19 scope because they govern how the
 registry/deployment/adapter layer reuses existing CKB ecosystem libraries.

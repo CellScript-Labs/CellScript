@@ -421,7 +421,6 @@ or CellFabric intent engine.
 - [CKB deployment manifest](docs/CELLSCRIPT_CKB_DEPLOYMENT_MANIFEST.md)
 - [Capacity and builder contract](docs/CELLSCRIPT_CAPACITY_AND_BUILDER_CONTRACT.md)
 - [CKB adapter boundary](docs/CELLSCRIPT_CKB_ADAPTER.md)
-- [CKB ecosystem reuse audit](docs/CELLSCRIPT_CKB_ECOSYSTEM_REUSE_AUDIT.md)
 - [ckb-std compatibility](docs/CELLSCRIPT_CKB_STD_COMPAT.md)
 - [Token and AMM bootstrap builder path](docs/examples/token_amm_bootstrap.md)
 - [Linear ownership](docs/CELLSCRIPT_LINEAR_OWNERSHIP.md)
@@ -628,7 +627,7 @@ policy defaults:
 ```toml
 [package]
 name = "token"
-version = "0.20.0-rc.2"
+version = "0.20.0"
 entry = "src/main.cell"
 source_roots = ["src"]
 
