@@ -51,6 +51,11 @@ jobs:
           sudo apt-get install -y ripgrep
           rg --version
 
+      - name: Configure Git identity for local registry fixtures
+        run: |
+          git config --global user.name "CellScript CI"
+          git config --global user.email "ci@cellscript.dev"
+
       - name: Cache Cargo dependencies
         uses: actions/cache@v4
         with:
