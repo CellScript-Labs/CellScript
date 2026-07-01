@@ -12744,6 +12744,7 @@ impl CliParser {
                     .arg_required_else_help(true)
                     .subcommand(
                         ClapCommand::new("login")
+                            .hide(true)
                             .about("Create a JoyID capability authorisation payload")
                             .arg(
                                 Arg::new("registry-origin")

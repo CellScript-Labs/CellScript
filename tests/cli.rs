@@ -156,6 +156,16 @@ fn cellc_list_reports_package_commands_without_direct_flags() {
 }
 
 #[test]
+fn cellc_auth_help_hides_legacy_login_alias() {
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).args(["auth", "--help"]).output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("capability"), "unexpected auth help: {stdout}");
+    assert!(!stdout.contains("login"), "legacy auth login alias should be hidden from auth help: {stdout}");
+}
+
+#[test]
 fn cellc_help_subcommand_delegates_to_package_help() {
     let output = Command::new(env!("CARGO_BIN_EXE_cellc")).args(["help", "build"]).output().unwrap();
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));

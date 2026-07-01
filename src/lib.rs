@@ -3,6 +3,7 @@
 
 #![allow(clippy::ptr_arg, clippy::too_many_arguments)]
 
+pub(crate) mod aggregate_lowering;
 pub mod assumptions;
 pub mod ast;
 pub mod ckb_abi;
@@ -6398,74 +6399,12 @@ fn auto_lowered_aggregate_runtime_helper_for_action(
     aggregate: &ir::IrAggregateInvariant,
     action: &ir::IrAction,
 ) -> Option<&'static str> {
-    let type_name = auto_lowered_group_amount_conservation_type(invariant, aggregate)?;
-    if body_contains_runtime_helper(&action.body, "__xudt_require_group_amount_conserved") {
+    let type_name = aggregate_lowering::xudt_group_amount_conservation_type(invariant, aggregate)?;
+    if aggregate_lowering::body_contains_runtime_helper(&action.body, aggregate_lowering::XUDT_GROUP_AMOUNT_CONSERVED_CODEGEN_HELPER) {
         return None;
     }
-    action_has_group_amount_conservation_evidence(action, type_name).then_some("xudt::require_group_amount_conserved")
-}
-
-fn auto_lowered_group_amount_conservation_type<'a>(
-    invariant: &ir::IrInvariant,
-    aggregate: &'a ir::IrAggregateInvariant,
-) -> Option<&'a str> {
-    if invariant.trigger.as_deref() != Some("type_group") || aggregate.scope != "group" {
-        return None;
-    }
-    if aggregate.kind != ast::AggregateInvariantKind::Sum || aggregate.relation != Some(ast::AggregateRelation::Eq) {
-        return None;
-    }
-    let rhs = aggregate.rhs.as_deref()?;
-    let (left_source, left_type) = aggregate_group_amount_endpoint(&aggregate.target)?;
-    let (right_source, right_type) = aggregate_group_amount_endpoint(rhs)?;
-    (left_type == right_type
-        && ((left_source == "group_outputs" && right_source == "group_inputs")
-            || (left_source == "group_inputs" && right_source == "group_outputs")))
-        .then_some(left_type)
-}
-
-fn action_has_group_amount_conservation_evidence(action: &ir::IrAction, type_name: &str) -> bool {
-    let consumed = action
-        .body
-        .consume_set
-        .iter()
-        .filter(|pattern| pattern.operation == "consume")
-        .filter_map(|pattern| {
-            action.params.iter().find(|param| param.name == pattern.binding && named_type_name(&param.ty) == Some(type_name))
-        })
-        .collect::<Vec<_>>();
-    let created = action
-        .body
-        .create_set
-        .iter()
-        .filter(|pattern| matches!(pattern.operation.as_str(), "create" | "output") && pattern.ty == type_name)
-        .collect::<Vec<_>>();
-    let ([consumed], [created]) = (consumed.as_slice(), created.as_slice()) else {
-        return false;
-    };
-    let Some((_, amount)) = created.fields.iter().find(|(field, _)| field == "amount") else {
-        return false;
-    };
-    let ir::IrOperand::Var(amount) = amount else {
-        return false;
-    };
-    let aliases = metadata_field_aliases(&action.body);
-    aliases.get(&amount.id).is_some_and(|alias| alias.root_id == consumed.binding.id && alias.field == "amount")
-}
-
-fn body_contains_runtime_helper(body: &ir::IrBody, helper: &str) -> bool {
-    body.blocks.iter().any(|block| {
-        block.instructions.iter().any(|instruction| matches!(instruction, ir::IrInstruction::Call { func, .. } if func == helper))
-    })
-}
-
-fn aggregate_group_amount_endpoint(target: &str) -> Option<(&str, &str)> {
-    let (source, rest) = target.split_once('<')?;
-    if source != "group_inputs" && source != "group_outputs" {
-        return None;
-    }
-    let (type_name, field) = rest.split_once(">.")?;
-    (field == "amount" && !type_name.is_empty()).then_some((source, type_name))
+    aggregate_lowering::action_has_group_amount_conservation_evidence(action, type_name)
+        .then_some(aggregate_lowering::XUDT_GROUP_AMOUNT_CONSERVED_METADATA_HELPER)
 }
 
 fn module_verifier_obligations(

@@ -2,6 +2,9 @@
 
 pub mod soundness;
 
+use crate::aggregate_lowering::{
+    aggregate_group_amount_endpoint, xudt_group_amount_conservation_type, XUDT_GROUP_AMOUNT_CONSERVED_METADATA_HELPER,
+};
 use crate::ast::{AggregateInvariantKind, AggregateRelation, ParamSource};
 use crate::ir::{self, IrInstruction};
 use crate::{CkbRuntimeAccessMetadata, PoolPrimitiveMetadata, VerifierObligationMetadata};
@@ -1002,13 +1005,7 @@ fn aggregate_xudt_group_amount_runtime_helper(
     }
     match aggregate.kind {
         AggregateInvariantKind::Sum if aggregate.relation == Some(AggregateRelation::Eq) => {
-            let rhs = aggregate.rhs.as_deref()?;
-            let (left_source, left_type) = aggregate_group_amount_endpoint(&aggregate.target)?;
-            let (right_source, right_type) = aggregate_group_amount_endpoint(rhs)?;
-            (left_type == right_type
-                && ((left_source == "group_outputs" && right_source == "group_inputs")
-                    || (left_source == "group_inputs" && right_source == "group_outputs")))
-                .then_some("xudt::require_group_amount_conserved")
+            xudt_group_amount_conservation_type(invariant, aggregate).map(|_| XUDT_GROUP_AMOUNT_CONSERVED_METADATA_HELPER)
         }
         AggregateInvariantKind::Delta => {
             let (source, _type_name) = aggregate_group_amount_endpoint(&aggregate.target)?;
@@ -1024,15 +1021,6 @@ fn aggregate_xudt_group_amount_runtime_helper(
         }
         _ => None,
     }
-}
-
-fn aggregate_group_amount_endpoint(target: &str) -> Option<(&str, &str)> {
-    let (source, rest) = target.split_once('<')?;
-    if source != "group_inputs" && source != "group_outputs" {
-        return None;
-    }
-    let (type_name, field) = rest.split_once(">.")?;
-    (field == "amount" && !type_name.is_empty()).then_some((source, type_name))
 }
 
 fn declared_group_cardinality(invariant: &ir::IrInvariant) -> &'static str {
