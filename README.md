@@ -107,9 +107,9 @@ Inspect what the compiler can explain about the NFT example:
 cellc metadata examples/nft.cell --target-profile ckb
 cellc constraints examples/nft.cell --target-profile ckb
 cellc scheduler-plan examples/nft.cell --target-profile ckb
-cellc explain-assumptions examples/nft.cell --target-profile ckb --json
-cellc solve-tx examples/nft.cell --target-profile ckb --json
-cellc deploy-plan examples/nft.cell --target-profile ckb --json
+cellc explain assumptions examples/nft.cell --target-profile ckb --json
+cellc tx solve examples/nft.cell --target-profile ckb --json
+cellc deploy plan examples/nft.cell --target-profile ckb --json
 cellc profile examples/nft.cell --target-profile ckb --json
 cellc audit-bundle examples/nft.cell --target-profile ckb --json
 ```
@@ -202,8 +202,8 @@ transformations:
 - **Scheduler-aware metadata** — CKB-targeted builds expose access summaries
   and shared touch domains so block builders can reason about independent work.
 - **Typed schema metadata** — Cell data layout, type identity, source hashes,
-  runtime accesses, and verifier obligations are emitted as machine-readable
-  metadata.
+  runtime accesses, TemplateLayout records, and verifier obligations are emitted
+  as machine-readable metadata.
 - **RISC-V output** — the executable target is ckb-vm-compatible RISC-V
   assembly or ELF. CellScript does not introduce a separate VM.
 - **Package-aware compilation** — packages use `Cell.toml`, local modules,
@@ -287,13 +287,18 @@ invariant token_conservation {
 }
 ```
 
-Declared invariants must state their CKB trigger and scope explicitly. In v0.15
-they are emitted into Covenant ProofPlan metadata with trigger/scope/read
-coverage, aggregate primitive relation checks, and a `gap:metadata-only` status
-until executable verifier lowering is available. ProofPlan records also carry
-macro expansion provenance for selected protocol flows and warnings for risky
-coverage assumptions such as `lock_group` verifiers that scan transaction-wide
-views.
+Declared invariants must state their CKB trigger and scope explicitly. They are
+emitted into Covenant ProofPlan metadata with trigger/scope/read coverage and
+aggregate primitive relation checks. Most aggregate declarations remain
+`gap:metadata-only` or `gap:runtime-helper-required` until executable verifier
+lowering is available; recognised xUDT group amount conservation equality is
+auto-lowered into action-prelude runtime helper calls only for matching
+one-input/one-output amount-preserving actions, while xUDT `assert_delta`
+records are marked `covered` only when generated action code emits the matching
+runtime helper and the corresponding ProofPlan record is rebuilt with generated
+helper coverage. ProofPlan records also carry macro expansion provenance for
+selected protocol flows and warnings for risky coverage assumptions such as
+`lock_group` verifiers that scan transaction-wide views.
 
 **Complete fungible-token example:**
 
@@ -522,7 +527,7 @@ policy gates need — without re-parsing source:
 | Scheduler witness ABI & access domains | `codegen/` | CKB block builder, parallel scheduler |
 | Source hashes, artifact CKB Blake2b | `lib.rs` | `cellc verify-artifact`, CI gates |
 | Verifier obligations, pool invariants | `ir/` | On-chain verifier, policy checker |
-| Covenant ProofPlan trigger/scope/read coverage, risk diagnostics, macro provenance | `proof_plan/` | `cellc explain-proof`, auditors |
+| Covenant ProofPlan trigger/scope/read coverage, risk diagnostics, macro provenance | `proof_plan/` | `cellc explain proof`, auditors |
 | Target-profile policy violations | `lib.rs` | `cellc check`, CI gates |
 
 `cellc constraints` produces a human-readable subset focused on production
@@ -627,7 +632,7 @@ policy defaults:
 ```toml
 [package]
 name = "token"
-version = "0.20.0"
+version = "0.21.0-rc.1"
 entry = "src/main.cell"
 source_roots = ["src"]
 
@@ -751,18 +756,20 @@ still fail closed.
 | `cellc constraints` | Emit profile-aware production constraints |
 | `cellc abi` | Explain `_cellscript_entry` witness ABI layout for an action or lock |
 | `cellc entry-witness` | Encode `_cellscript_entry` witness bytes |
-| `cellc action build` | Emit a semantic action-builder contract and transaction draft |
+| `cellc action build` | Emit a semantic action-builder contract, transaction draft, and compile-only action scan selectors |
 | `cellc gen-builder --target typescript` | Generate a TypeScript action-builder package from metadata, lockfile, and optional deployment facts |
 | `cellc scheduler-plan` | Consume scheduler hints and report serial/conflict policy |
 | `cellc ckb-hash` | Compute CKB default Blake2b-256 hashes for builders and release evidence |
-| `cellc explain-assumptions` | Emit v0.16 builder-assumption evidence from ProofPlan metadata |
-| `cellc validate-tx` | Validate transaction JSON shape against builder assumptions before signing |
-| `cellc solve-tx` | Emit a deterministic transaction template from metadata |
-| `cellc deploy-plan` | Emit a reproducible deployment plan |
-| `cellc verify-deploy` / `diff-deploy` / `lock-deps` | Verify, compare, and lock deployment metadata |
-| `cellc proof-diff` / `profile` / `trace-tx` / `audit-bundle` | Emit v0.16 audit and debug reports |
+| `cellc explain assumptions` | Emit v0.16 builder-assumption evidence from ProofPlan metadata |
+| `cellc explain graph` | Derive a cyclic ProtocolGraph audit view from compile metadata |
+| `cellc tx validate` | Validate transaction JSON shape against builder assumptions before signing |
+| `cellc tx solve` | Emit a deterministic transaction template from metadata |
+| `cellc deploy plan` | Emit a reproducible deployment plan |
+| `cellc deploy verify` / `deploy diff` / `deploy lock-deps` | Verify, compare, and lock deployment metadata |
+| `cellc proof-diff` / `profile` / `tx trace` / `audit-bundle` | Emit v0.16 audit and debug reports |
 | `cellc opt-report` | Compare O0..O3 artifact size and constraints status |
-| `cellc verify-artifact` | Verify an artifact against its metadata sidecar |
+| `cellc receipt` / `sign-receipt` / `verify-receipt` | Emit, sign, and verify compile receipts over metadata/artifact hashes |
+| `cellc verify-artifact` | Verify an artifact against its metadata sidecar, with optional receipt binding |
 | `cellc test` | Run compiler and policy tests (no trusted runtime execution) |
 | `cellc doc` | Generate API and audit documentation |
 | `cellc fmt` | Format `.cell` sources or check formatting |

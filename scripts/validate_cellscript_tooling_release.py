@@ -245,7 +245,8 @@ def main() -> int:
     require_contains(
         "src/main.rs",
         [
-            '"certify"',
+            "cellc_cli_command().get_subcommands()",
+            "cellscript::cli::run()",
         ],
     )
     require_contains(

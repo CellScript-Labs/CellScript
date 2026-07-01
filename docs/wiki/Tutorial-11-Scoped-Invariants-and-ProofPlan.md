@@ -9,9 +9,9 @@ executable verifier code.
 
 - how to declare an invariant with an explicit trigger, scope, and read set;
 - how the aggregate invariant primitives map to ProofPlan records;
-- how to inspect those records with `cellc explain-proof`;
-- which ProofPlan records are checked on chain today and which are
-  `gap:metadata-only`;
+- how to inspect those records with `cellc explain proof`;
+- which ProofPlan records are checked on chain today, which require a runtime
+  helper, and which are `gap:metadata-only`;
 - how to use ProofPlan output in reviews and production gates.
 
 ## The Core Rule
@@ -114,15 +114,15 @@ invariant token_positive {
 
 `assert_invariant` is accepted alongside aggregate primitives. It is recorded in
 ProofPlan metadata and counts toward `declared_invariant_assertions` coverage.
-Like aggregate primitives, it is currently metadata-only unless later action
-evidence or stricter gates close it.
+Like most aggregate primitives, it is currently metadata-only unless later
+action evidence or stricter gates close it.
 
 ## Inspect ProofPlan Output
 
 Run:
 
 ```bash
-cargo run --locked --bin cellc -- explain-proof \
+cargo run --locked --bin cellc -- explain proof \
   examples/language/v0_15_scoped_invariant.cell \
   --target riscv64-elf \
   --target-profile ckb
@@ -223,14 +223,29 @@ In the default development mode, many declared aggregate invariants intentionall
 But it is not the same as an on-chain proof. Do not claim a metadata-only
 invariant is enforced by CKB-VM.
 
-## Why Invariants Have No Generated Code
+## Why Invariants Have No Standalone Generated Code
 
-Declared invariants do not produce RISC-V instructions. The compiler records
-their trigger, scope, reads, and aggregate relations into ProofPlan metadata,
-but the code-generation stage treats invariants as a no-op. Every
-action, function, and lock has an IR body that the code generator walks to emit
-assembly; an invariant has no body, no verifier obligations, and no ABI slot,
-so there is nothing for the code generator to lower.
+Declared invariants do not produce their own RISC-V entry block. The compiler
+records their trigger, scope, reads, and aggregate relations into ProofPlan
+metadata. Every action, function, and lock has an IR body that the code
+generator walks to emit assembly; an invariant has no callable body and no ABI
+slot of its own.
+
+There is one important evidence link in the current compiler: xUDT group amount
+`assert_sum(group_outputs<T>.amount) == assert_sum(group_inputs<T>.amount)` is
+auto-lowered into action-prelude calls to
+`xudt::require_group_amount_conserved()` for recognised type-group invariants
+only when a specific action locally preserves one consumed `T.amount` into one
+created `T.amount`.
+xUDT `assert_delta(...)` records are marked `covered` only when generated action
+code already emits the matching `xudt::require_group_amount_*` runtime helper.
+If the helper is required but absent, the record stays
+`gap:runtime-helper-required`. Strict gates require the ProofPlan record itself
+to carry that generated helper coverage; a matching raw runtime-access entry
+elsewhere in the module does not discharge stale `gap:runtime-helper-required`
+metadata.
+Other aggregate primitives remain metadata-only unless a later lowering path
+proves them.
 
 This is not a temporary shortcut — it reflects a deliberate split between two
 audit layers:
@@ -244,8 +259,8 @@ audit layers:
 2. **Invariant-level declarations** are auditable claims about what the
    protocol *should* guarantee. They live in metadata so that reviewers, CI
    pipelines, and future tooling can verify the claim is satisfied — by the
-   action-level checks above, by builder policy, or by a future executable
-   invariant lowering pass.
+   action-level checks above, by recognised helper-backed coverage, by builder
+   policy, or by a future executable invariant lowering pass.
 
 When an invariant's aggregate matches a checked action obligation, ProofPlan
 records the link under `invariant_coverage:matched-action-obligation:*`. When
@@ -284,7 +299,7 @@ CellScript uses a **progressive guarantee** model for invariant enforcement:
 | Stage | What happens to invariants |
 |---|---|
 | Development (default) | Invariants emit `gap:metadata-only` and `runtime-required`. Compilation succeeds. Warnings and builder assumptions are recorded for review. |
-| Pre-production (`--primitive-strict 0.16`) | Strict soundness rejects any ProofPlan record that is still `metadata-only` or `runtime-required` (PP0150). Every declared invariant must have matching action evidence or compilation fails. |
+| Pre-production (`--primitive-strict 0.16`) | Strict soundness rejects any ProofPlan record that is still `metadata-only` or `runtime-required` (PP0150). A helper-backed xUDT aggregate must show matching generated helper coverage on the ProofPlan record itself; other declared invariants need matching executable evidence or compilation fails. |
 | CI gate (`--deny-runtime-obligations`) | Additionally rejects unmatched invariant action coverage, runtime-required transaction invariants, and partial ProofPlan gaps. |
 
 Under strict mode, the compiler enforces the following invariant-specific
@@ -349,7 +364,7 @@ values, and serialized layouts changed width.
 For tooling, use:
 
 ```bash
-cargo run --locked --bin cellc -- explain-proof \
+cargo run --locked --bin cellc -- explain proof \
   examples/language/v0_15_scoped_invariant.cell \
   --target riscv64-elf \
   --target-profile ckb \
@@ -366,7 +381,7 @@ Before treating an invariant as production evidence, check:
 1. Does every invariant have the intended `trigger`?
 2. Is the `scope` narrow enough for the actual verifier boundary?
 3. Are all transaction views listed in `reads`?
-4. Does `cellc explain-proof` report `gap:metadata-only`?
+4. Does `cellc explain proof` report `gap:metadata-only`?
 5. If there is a gap, who closes it: action checks, lock/type verifier code,
    builder policy, or future executable invariant lowering?
 6. Are warnings about transaction-wide or lock-group coverage understood?

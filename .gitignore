@@ -8,6 +8,7 @@ editors/vscode-cellscript/dist/
 .idea/
 .vscode/
 .cap/
+.playwright-mcp/
 .wrangler/
 __pycache__/
 *.py[cod]

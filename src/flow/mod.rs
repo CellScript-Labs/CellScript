@@ -7,6 +7,7 @@ pub const FLOW_STATE_FIELD_NAME: &str = "state";
 #[derive(Debug, Clone)]
 struct FlowSpec {
     states: Vec<String>,
+    edges: HashSet<(String, String)>,
     state_field_name: String,
     state_field_span: Option<Span>,
 }
@@ -39,13 +40,16 @@ pub fn diagnostics(module: &Module) -> Vec<CompileError> {
             continue;
         };
         let mut states = Vec::new();
+        let mut edges = HashSet::new();
         for transition in &machine.transitions {
-            for raw in [&transition.from, &transition.to] {
-                let state = raw.rsplit_once("::").map_or(raw.as_str(), |(_, state)| state).to_string();
-                if !states.iter().any(|existing| existing == &state) {
-                    states.push(state);
+            let from = normalise_flow_state_name(&transition.from);
+            let to = normalise_flow_state_name(&transition.to);
+            for state in [&from, &to] {
+                if !states.iter().any(|existing| existing == state) {
+                    states.push(state.clone());
                 }
             }
+            edges.insert((from, to));
         }
         if states.len() < 2 {
             diagnostics.push(CompileError::new("flow must mention at least two states", machine.span));
@@ -53,13 +57,16 @@ pub fn diagnostics(module: &Module) -> Vec<CompileError> {
         }
         specs.insert(
             machine.target.base.clone(),
-            FlowSpec { states, state_field_name: machine.target.field.clone(), state_field_span: Some(machine.target.span) },
+            FlowSpec { states, edges, state_field_name: machine.target.field.clone(), state_field_span: Some(machine.target.span) },
         );
     }
 
     for item in &module.items {
         match item {
             Item::Action(action) => {
+                if let Err(error) = validate_action_state_edges(&specs, action) {
+                    diagnostics.push(error);
+                }
                 let context = action_state_context(&specs, action);
                 if let Err(error) = validate_stmt_list(&specs, &context, &action.body) {
                     diagnostics.push(error);
@@ -82,6 +89,10 @@ pub fn diagnostics(module: &Module) -> Vec<CompileError> {
     diagnostics
 }
 
+fn normalise_flow_state_name(raw: &str) -> String {
+    raw.rsplit_once("::").map_or(raw, |(_, state)| state).to_string()
+}
+
 fn action_state_context(specs: &HashMap<String, FlowSpec>, action: &ActionDef) -> ActionStateContext {
     let mut context = ActionStateContext::default();
 
@@ -95,6 +106,70 @@ fn action_state_context(specs: &HashMap<String, FlowSpec>, action: &ActionDef) -
 
     collect_state_context_from_stmts(specs, &mut context, &action.body);
     context
+}
+
+fn validate_action_state_edges(specs: &HashMap<String, FlowSpec>, action: &ActionDef) -> Result<()> {
+    for edge in &action.state_edges {
+        if edge.from.is_empty() && edge.to.is_empty() {
+            continue;
+        }
+
+        let Some(type_name) = action_param_flow_type(specs, action, &edge.path.base) else {
+            continue;
+        };
+        let Some(output_type_name) = action_output_flow_type(specs, action, &edge.to_path.base) else {
+            continue;
+        };
+        if type_name != output_type_name {
+            continue;
+        }
+        let Some(spec) = specs.get(type_name) else {
+            continue;
+        };
+        if edge.path.field != spec.state_field_name || edge.to_path.field != spec.state_field_name {
+            continue;
+        }
+
+        let from = normalise_flow_state_name(&edge.from);
+        let to = normalise_flow_state_name(&edge.to);
+        if !spec.edges.contains(&(from.clone(), to.clone())) {
+            return Err(CompileError::new(
+                format!(
+                    "action '{}' transition '{}.{} {} -> {}' is not declared in the flow",
+                    action.name, type_name, spec.state_field_name, from, to
+                ),
+                edge.span,
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn action_param_flow_type<'a>(specs: &HashMap<String, FlowSpec>, action: &'a ActionDef, binding: &str) -> Option<&'a str> {
+    action.params.iter().find_map(|param| {
+        if param.name == binding {
+            if let Type::Named(ty) = &param.ty {
+                if specs.contains_key(ty) {
+                    return Some(ty.as_str());
+                }
+            }
+        }
+        None
+    })
+}
+
+fn action_output_flow_type<'a>(specs: &HashMap<String, FlowSpec>, action: &'a ActionDef, binding: &str) -> Option<&'a str> {
+    action.outputs.iter().find_map(|output| {
+        if output.name == binding {
+            if let Type::Named(ty) = &output.ty {
+                if specs.contains_key(ty) {
+                    return Some(ty.as_str());
+                }
+            }
+        }
+        None
+    })
 }
 
 fn collect_state_context_from_stmts(specs: &HashMap<String, FlowSpec>, context: &mut ActionStateContext, stmts: &[Stmt]) {
@@ -464,4 +539,88 @@ fn static_flow_state_value(expr: &Expr, context: &ActionStateContext, _type_name
         }
         _ => None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{lexer, parser::Parser};
+
+    fn parse_module(source: &str) -> Module {
+        let tokens = lexer::lex(source.trim_start()).expect("lex source");
+        Parser::new(&tokens).parse_module().expect("parse source")
+    }
+
+    #[test]
+    fn diagnostics_reject_action_edge_absent_from_declared_flow() {
+        let module = parse_module(
+            r#"
+module test
+
+enum OfferState {
+    Live,
+    Filled,
+    Cancelled,
+}
+
+resource Offer has store {
+    state: OfferState
+    amount: u64
+}
+
+flow Offer.state {
+    Live -> Filled;
+}
+
+action cancel(input: Offer) -> output: Offer {
+    transition input.state: Live -> output.state: Cancelled
+    verification
+        require input.amount == output.amount
+}
+"#,
+        );
+
+        let diagnostics = super::diagnostics(&module);
+
+        assert!(
+            diagnostics.iter().any(|diagnostic| {
+                diagnostic.message.contains("action 'cancel' transition 'Offer.state Live -> Cancelled' is not declared")
+            }),
+            "expected undeclared flow edge diagnostic, got: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn diagnostics_accept_declared_cyclic_flow_edge() {
+        let module = parse_module(
+            r#"
+module test
+
+enum OfferState {
+    Created,
+    Live,
+}
+
+resource Offer has store {
+    state: OfferState
+    amount: u64
+}
+
+flow Offer.state {
+    Created -> Live;
+    Live -> Created;
+}
+
+action reset(input: Offer) -> output: Offer {
+    transition input.state: Live -> output.state: Created
+    verification
+        require input.amount == output.amount
+}
+"#,
+        );
+
+        let diagnostics = super::diagnostics(&module);
+
+        assert!(diagnostics.is_empty(), "declared cyclic flow edge should be accepted, got: {diagnostics:?}");
+    }
 }

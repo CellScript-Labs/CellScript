@@ -1,5 +1,46 @@
 # Changelog
 
+## 0.21.0-rc.1 - 2026-07-01
+
+- Promote the common xUDT group amount aggregate invariant shape from
+  metadata-only evidence into executable helper-backed lowering. Matching
+  transfer-style actions now get an auto-lowered
+  `__xudt_require_group_amount_conserved` prelude, ProofPlan records distinguish
+  metadata-only, runtime-helper-required, and checked-runtime coverage, and
+  strict `0.17` metadata validation rejects stale helper gaps that are not
+  backed by generated runtime accesses.
+- Add static flow edge membership validation. Actions that claim a state
+  transition must use an edge declared by the corresponding `flow` block, while
+  declared cyclic flows remain valid.
+- Extend the CKB adapter with materialised action-plan resolution,
+  action-aware scan selector evidence, variable-length `args_parts` script
+  argument construction, manifest-backed CellDep completion, and fail-closed
+  validation for missing or mismatched live-cell scan evidence.
+- Bump compile metadata to schema version 44 and add type-level
+  `template_layouts` plus action `state_transition_edges`. TemplateLayout
+  records are metadata-only in this RC: they derive flat layouts, mark cyclic
+  flows with `RootRequired`, and reject unsupported `consensus_checked = true`
+  claims.
+- Add compile receipts as authenticated metadata envelopes. `cellc receipt`,
+  `cellc sign-receipt`, and `cellc verify-receipt` bind source, metadata,
+  ProofPlan, ProtocolGraph, TemplateLayout, artifact hashes, and optional
+  Ed25519 signatures; AST and IR normalised hashes remain explicitly deferred.
+- Reorganise the CLI around canonical nested command groups for `explain`,
+  `tx`, `deploy`, `registry`, `package`, and `auth capability` while keeping
+  legacy flat aliases executable but hidden from public discovery.
+- Add structured diagnostic transport through `--message-format=json`, explicit
+  colour control through `--color=auto|always|never`, and `NO_COLOR` handling
+  without changing successful `--json` payload semantics.
+- Add the derived `ProtocolGraph` audit view and embed it in audit bundles. The
+  graph remains a metadata-derived view, not a new IR or consensus source of
+  truth.
+- Add the in-repository read-only `cellscript-mcp` server and six CellScript
+  programming skills. The dev, CI, and release-auxiliary gates now run the
+  skill-pack freshness check.
+- Document the 0.21 boundary across the roadmap, README, CKB adapter guide,
+  metadata/gate tutorial, ProofPlan tutorial, and agentic tooling tutorial.
+  P2 Template Merkleisation and new observation syntax remain deferred.
+
 ## 0.20.0 - 2026-06-28
 
 - Bring `cellc` CLI discovery and direct-source diagnostics closer to Rust's

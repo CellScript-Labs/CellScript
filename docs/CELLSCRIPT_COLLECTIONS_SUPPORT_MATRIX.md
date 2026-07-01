@@ -37,7 +37,7 @@ swap, clear
 
 `Vec::capacity()` reports the fixed stack backing capacity
 (`256 / element_width`), not the requested `Vec::with_capacity(n)` argument.
-`cellc explain-generics` exposes each checked instantiation, including element
+`cellc explain generics` exposes each checked instantiation, including element
 type, element width, backing model, helper set, and constructor provenance.
 
 Generated public collection symbols in `src/stdlib/collections.rs` are kept as

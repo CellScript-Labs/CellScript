@@ -13,7 +13,7 @@ crate at the repo root is `cellscript` (workspace member `.`); a sibling crate
 website submodule under `website/` ships an Astro + WASM playground that loads
 the prebuilt bundle.
 
-Version line: the workspace `Cargo.toml` pins `version = "0.20.0-rc.1"` and
+Version line: the workspace `Cargo.toml` pins `version = "0.21.0-rc.1"` and
 `rust-version = "1.92.0"`. CI installs exactly that toolchain; do not bump
 either without coordinating with the release gate.
 
@@ -22,10 +22,11 @@ either without coordinating with the release gate.
 1. `CODING_STYLE.md` — the tracked project standard for compiler, backend,
    docs, and release work. Treat it as a contract, not a suggestion.
 2. `CHANGELOG.md` — current scope and what the latest release ships.
-3. `BRANCHES.md` — which branch (`main` vs `0.16` vs
+3. `BRANCHES.md` — which branch or release line (`main` /
+   `nightly-0.21` vs `v0.20.0` vs `0.16` vs
    `research/protocol-equivalence`) represents which evidence level. Don't
-   describe `research/protocol-equivalence` as production-equivalent; it
-   keeps `equivalence_status = NOT_PROVEN` and
+   describe `research/protocol-equivalence` as production-equivalent; it keeps
+   `equivalence_status = NOT_PROVEN` and
    `production_equivalence_claim = false` by design.
 4. `docs/CELLSCRIPT_GATE_POLICY.md` and `docs/wiki/Tutorial-06-Metadata-Verification-and-Production-Gates.md`
    — what each gate mode (dev / ci / backend / release / release-quick) is

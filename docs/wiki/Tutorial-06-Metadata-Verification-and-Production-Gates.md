@@ -119,6 +119,7 @@ You do not need to memorize the whole sidecar. Start with these fields:
 - `runtime.proof_plan`
 - `runtime.proof_plan_soundness`
 - `runtime.builder_assumptions`
+- `template_layouts`
 - `constraints`
 - `runtime_error_registry`
 - `constraints.artifact`
@@ -148,9 +149,9 @@ these versions.
 CellScript 0.16 adds a checked assurance layer over ProofPlan metadata:
 
 ```bash
-cellc explain-proof src/main.cell --json
-cellc explain-assumptions src/main.cell --json
-cellc validate-tx --against build/main.elf.meta.json tx.json --json
+cellc explain proof src/main.cell --json
+cellc explain assumptions src/main.cell --json
+cellc tx validate --against build/main.elf.meta.json --tx tx.json --json
 ```
 
 `runtime.proof_plan_soundness` tells you whether verifier obligations and
@@ -161,7 +162,7 @@ compared by full semantic content, including trigger, reads, coverage, and
 source spans.
 
 `runtime.builder_assumptions` is the machine-readable contract for transaction
-builders. `validate-tx` checks a transaction JSON shape against that contract,
+builders. `tx validate` checks a transaction JSON shape against that contract,
 rejects bare evidence tokens, and requires indexed evidence objects for
 non-structural assumptions before signing. Evidence indexes are range-checked
 against the transaction, and concrete fields such as outpoints, hashes,
@@ -169,14 +170,36 @@ capacity, dep metadata, witness bytes, and TYPE_ID args must match when present.
 This is still pre-chain evidence: dry-run, capacity, cycles, and commit checks
 remain required for production claims.
 
-Additional 0.16 reports are available for audit and deployment workflows:
+Additional audit reports are available for audit and deployment workflows:
 
 ```bash
-cellc solve-tx src/main.cell --json   # emits can_submit=false template output
-cellc deploy-plan src/main.cell --json
+cellc tx solve src/main.cell --json   # emits can_submit=false template output
+cellc explain graph src/main.cell --format mermaid
+cellc deploy plan src/main.cell --json
 cellc proof-diff old.meta.json new.meta.json --json
 cellc audit-bundle src/main.cell --output target/audit
 ```
+
+Compile receipts bind the same evidence stream to deterministic hashes:
+
+```bash
+cellc receipt src/main.cell --output target/main.receipt.json
+cellc sign-receipt target/main.receipt.json --role publisher --key publisher.ed25519.pkcs8
+cellc verify-receipt target/main.receipt.json \
+  --metadata target/main.elf.meta.json \
+  --artifact target/main.elf
+cellc verify-artifact target/main.elf --receipt target/main.receipt.json
+```
+
+Receipt signatures authenticate metadata/artifact evidence and derived report
+hashes. They do not prove transaction validity, live-cell freshness, dry-run
+success, capacity sufficiency, or successful submission.
+
+`template_layouts` is metadata-only in the current compiler: records are derived
+from resource/shared/receipt type metadata, use a `Flat` layout by default, and
+set `consensus_checked = false` until a backend verifier explicitly enforces a
+template commitment. Cyclic flow state machines are marked with
+`cycle_policy = RootRequired`; acyclic layouts use `PathOnlyAllowed`.
 
 For the review-finding closure matrix, see
 `docs/archive/0.17/CELLSCRIPT_0_17_REVIEW_FINDINGS_CLOSURE.md`.

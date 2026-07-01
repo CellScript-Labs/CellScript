@@ -1,6 +1,7 @@
 use anyhow::{bail, Result};
 use cellscript_ckb_adapter::{
-    build_deploy_transaction, load_action_plan, load_deployment_manifest, CellScriptAdapter, DeployArtifactSpec,
+    build_action_transaction, build_deploy_transaction, load_action_plan, load_deployment_manifest, preview_resolved_action,
+    resolve_materialized_action_plan, resolve_materialized_action_plan_with_manifest, CellScriptAdapter, DeployArtifactSpec,
 };
 use ckb_types::{
     bytes::Bytes,
@@ -298,25 +299,59 @@ fn cmd_build_deploy(rpc: &str, json: bool, args: BuildDeployArgs) -> Result<()> 
 
 fn cmd_action(rpc: &str, json: bool, args: ActionArgs) -> Result<()> {
     let plan = load_action_plan(&args.plan)?;
-
-    // Load manifest for CellDep resolution if provided.
-    if let Some(manifest_path) = args.manifest {
-        let _manifest = load_deployment_manifest(&manifest_path)?;
-        // TODO: wire ManifestCellDepResolver into action resolution.
-    }
+    let manifest = args.manifest.as_ref().map(load_deployment_manifest).transpose()?;
+    let resolved = if let Some(manifest) = manifest.as_ref() {
+        resolve_materialized_action_plan_with_manifest(&plan, Some(manifest))
+    } else {
+        resolve_materialized_action_plan(&plan)
+    };
 
     if json {
-        let output = serde_json::json!({
-            "action": plan.action,
-            "policy": plan.policy,
-            "artifact_hash": plan.artifact_hash,
-            "can_submit": plan.transaction_draft.can_submit,
-        });
+        let output = match resolved {
+            Ok(resolved) => {
+                let (tx, evidence) = build_action_transaction(&resolved)?;
+                serde_json::json!({
+                    "action": plan.action,
+                    "policy": plan.policy,
+                    "artifact_hash": plan.artifact_hash,
+                    "can_submit": false,
+                    "resolution_status": "resolved-action-tx",
+                    "manifest_cell_dep_resolution": manifest.is_some(),
+                    "preview": preview_resolved_action(&resolved),
+                    "evidence": evidence,
+                    "transaction": serde_json::to_value(cellscript_ckb_adapter::to_rpc_transaction(&tx))?,
+                })
+            }
+            Err(error) => serde_json::json!({
+                "action": plan.action,
+                "policy": plan.policy,
+                "artifact_hash": plan.artifact_hash,
+                "can_submit": plan.transaction_draft.can_submit,
+                "resolution_status": "requires-runtime-resolution",
+                "manifest_cell_dep_resolution": manifest.is_some(),
+                "reason": error.to_string(),
+            }),
+        };
         println!("{}", serde_json::to_string_pretty(&output)?);
     } else {
         println!("action: {}", plan.action);
         println!("  policy: {}", plan.policy);
         println!("  can_submit: {}", plan.transaction_draft.can_submit);
+        println!("  manifest_cell_dep_resolution: {}", manifest.is_some());
+        match resolved {
+            Ok(resolved) => {
+                let (_tx, evidence) = build_action_transaction(&resolved)?;
+                println!("  resolution_status: resolved-action-tx");
+                println!("  inputs: {}", evidence.inputs);
+                println!("  outputs: {}", evidence.outputs);
+                println!("  cell_deps: {}", evidence.cell_deps);
+                println!("  outputs_data: {}", evidence.outputs_data);
+            }
+            Err(error) => {
+                println!("  resolution_status: requires-runtime-resolution");
+                println!("  reason: {error}");
+            }
+        }
     }
 
     // rpc is not used yet for action resolution; suppress warning.

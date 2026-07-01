@@ -133,7 +133,7 @@ where an obligation came from, which trigger and scope apply, what CKB views it
 reads, which checks are covered by generated code, and which builder
 assumptions remain.
 
-Use `cellc explain-proof` to read ProofPlan data in human-readable or JSON form.
+Use `cellc explain proof` to read ProofPlan data in human-readable or JSON form.
 If a plan says `runtime-required` or `gap:metadata-only`, it is not yet a fully
 covered on-chain proof.
 

@@ -62,7 +62,7 @@ scripts during creation, so the generated `_cellscript_entry` wrapper will look
 for action witness bytes and can fail with `entry-witness-abi-invalid`.
 
 Current compiler metadata exposes this boundary through
-`constraints.ckb.resource_identities` and `cellc solve-tx` under
+`constraints.ckb.resource_identities` and `cellc tx solve` under
 `transaction_plan.resource_identities`. Entries marked
 `compiler-passive-identity-available` should be materialized with
 `cellc resource-identity`, which emits the passive artifact plus the exact
@@ -173,8 +173,8 @@ transaction against it:
 INPUT=examples/amm_pool.cell ACTION=swap_a_for_b TX=build/swap.tx.json RID=build/resource-identities.json MANIFEST=build/swap.builder.json MIN_OUT=49000 TO=0x1111111111111111111111111111111111111111111111111111111111111111; cellc resource-identity "$INPUT" --target-profile ckb --identity Token=token-default --identity Token:token_out=token-b --identity Pool=pool-main --identity LPReceipt=pool-main --plan-output "$RID" && cellc builder manifest "$INPUT" --target-profile ckb --entry-action "$ACTION" --resource-identities "$RID" --output "$MANIFEST" --primitive-strict 0.16 && cellc entry-witness "$INPUT" --target-profile ckb --action "$ACTION" --arg "$MIN_OUT" --arg "$TO" && cellc builder check --manifest "$MANIFEST" --tx "$TX" --production --primitive-strict 0.16
 ```
 
-Use `cellc abi`, `cellc constraints`, `cellc explain-assumptions`, and
-`cellc solve-tx` directly when debugging one layer of the manifest.
+Use `cellc abi`, `cellc constraints`, `cellc explain assumptions`, and
+`cellc tx solve` directly when debugging one layer of the manifest.
 Builder-facing contract commands emit JSON by default; add `--human` for a
 short terminal summary.
 The manifest also carries
@@ -193,17 +193,17 @@ Before signing, builders should inspect both the proof plan and the concrete
 transaction requirements:
 
 ```bash
-cellc explain-assumptions examples/token.cell \
+cellc explain assumptions examples/token.cell \
   --target-profile ckb \
   --primitive-strict 0.16 \
   --json
 
-cellc explain-assumptions examples/amm_pool.cell \
+cellc explain assumptions examples/amm_pool.cell \
   --target-profile ckb \
   --primitive-strict 0.16 \
   --json
 
-cellc explain-assumptions examples/launch.cell \
+cellc explain assumptions examples/launch.cell \
   --target-profile ckb \
   --primitive-strict 0.16 \
   --json
@@ -250,8 +250,8 @@ They prove the transaction shape is plausible; they do not prove the production
 resource identity story. The compiler now exposes passive resource identity
 contracts in metadata and emits resource identity plans so builders can fail
 early instead of discovering identity mistakes through an opaque action-witness
-error. Use `cellc validate-tx --production` to reject known fixture identities
-before signing.
+error. Use `cellc builder check --production` with the generated manifest to
+reject known fixture identities before signing.
 
 The production gate now exercises these flows with original scoped strict
 artifacts for `token.cell`, `amm_pool.cell`, and `launch.cell`; generated

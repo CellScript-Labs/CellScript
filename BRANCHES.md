@@ -1,9 +1,29 @@
 # Branch Context
 
-## main / 0.12
+## 0.12-era proposal baseline
 
-`main` and the 0.12-era work are the formal proposal baseline for grant-style
-acceptance discussions.
+The 0.12-era work is the formal proposal baseline for grant-style acceptance
+discussions. Do not use that historical baseline to describe the current
+`main` branch state.
+
+## main / nightly-0.21
+
+`main` and `nightly-0.21` currently carry the 0.21 release-candidate
+implementation checkpoint. This line includes the 0.21 compiler, metadata,
+CLI, MCP, skill-pack, and builder-resolution work, but it is not a production
+CKB release claim until the matching `ci`, backend, and release gates have
+recorded passing evidence.
+
+Use this line for 0.21 RC integration work. Keep P2 Template Merkleisation and
+new observation syntax out of this line unless their parser, metadata,
+backend, docs, and gate evidence are all promoted together.
+
+## v0.20.0
+
+`v0.20.0` is the latest stable release baseline before the 0.21 RC line. Use it
+as the comparison point for 0.21 audits, metadata schema changes, and
+compatibility notes. Be explicit when comparing against the tag ref
+`refs/tags/v0.20.0`, because local branches may also be named `v0.20.0`.
 
 ## 0.16
 

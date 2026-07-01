@@ -16,7 +16,7 @@ resolver = "2"
 
 [package]
 name = "cellscript"
-version = "0.20.0"
+version = "0.21.0-rc.1"
 edition = "2021"
 rust-version = "1.92.0"
 autobins = false
@@ -52,6 +52,11 @@ exclude = [
 [[bin]]
 name = "cellc"
 path = "src/main.rs"
+test = false
+
+[[bin]]
+name = "cellscript-mcp"
+path = "src/mcp_main.rs"
 test = false
 
 [lib]

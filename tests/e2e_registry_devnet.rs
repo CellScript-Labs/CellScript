@@ -1916,22 +1916,27 @@ fn cellc_build(pkg_dir: &std::path::Path) -> std::path::PathBuf {
 
 fn cellc_deploy_plan(source: &std::path::Path, output_path: &std::path::Path) {
     let result = std::process::Command::new(cellc_bin())
-        .args(["deploy-plan", &source.to_string_lossy(), "--target-profile", "ckb", "--output", &output_path.to_string_lossy()])
+        .args(["deploy", "plan"])
+        .arg(source)
+        .args(["--target-profile", "ckb", "--output"])
+        .arg(output_path)
         .output()
-        .expect("cellc deploy-plan failed");
-    assert!(result.status.success(), "cellc deploy-plan failed: {}", String::from_utf8_lossy(&result.stderr));
+        .expect("cellc deploy plan failed");
+    assert!(result.status.success(), "cellc deploy plan failed: {}", String::from_utf8_lossy(&result.stderr));
 }
 
 fn cellc_verify_deploy(plan_path: &std::path::Path) -> serde_json::Value {
     let output = std::process::Command::new(cellc_bin())
-        .args(["verify-deploy", &plan_path.to_string_lossy(), "--json"])
+        .args(["deploy", "verify", "--plan"])
+        .arg(plan_path)
+        .arg("--json")
         .output()
-        .expect("cellc verify-deploy failed");
+        .expect("cellc deploy verify failed");
     if output.status.success() {
         serde_json::from_slice(&output.stdout).unwrap()
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        panic!("cellc verify-deploy failed: {}", stderr);
+        panic!("cellc deploy verify failed: {}", stderr);
     }
 }
 
@@ -2001,13 +2006,13 @@ action ping(value: u64) -> u64 {
     let toolchain_artifact_hash = cellc_ckb_hash(&artifact_path);
     eprintln!("Toolchain artifact hash: {}", toolchain_artifact_hash);
 
-    // ── 4. cellc deploy-plan: emit deployment plan ──
+    // ── 4. cellc deploy plan: emit deployment plan ──
     let deploy_plan_path = temp.path().join("deploy-plan.json");
     cellc_deploy_plan(&pkg_dir, &deploy_plan_path);
     let deploy_plan: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&deploy_plan_path).unwrap()).unwrap();
     assert!(deploy_plan["metadata_schema_version"].as_u64().unwrap() > 0, "deploy plan must have valid schema version");
 
-    // ── 5. cellc verify-deploy: verify the plan ──
+    // ── 5. cellc deploy verify: verify the plan ──
     let verify_result = cellc_verify_deploy(&deploy_plan_path);
     assert_eq!(verify_result["status"], "ok", "deploy plan must verify successfully");
 
@@ -2213,7 +2218,7 @@ action ping(value: u64) -> u64 {
     let violations = cross_verify_lockfile_deployed(&read_lock, &read_deployed);
     assert!(violations.is_empty(), "no violations: {violations:?}");
 
-    eprintln!("✓ Live devnet: cellc build → deploy-plan → adapter → devnet → verify — full toolchain passed");
+    eprintln!("✓ Live devnet: cellc build -> deploy plan -> adapter -> devnet -> verify - full toolchain passed");
 }
 
 // ===========================================================================
@@ -2323,7 +2328,7 @@ action verify(amount: u64) -> u64 {
     let toolchain_hash = cellc_ckb_hash(&artifact_path);
     cellc_verify_artifact(&artifact_path, toolchain_hash.trim_start_matches("0x"));
 
-    // ── 7. cellc deploy-plan + verify-deploy ──
+    // ── 7. cellc deploy plan + deploy verify ──
     let deploy_plan_path = temp.path().join("app-deploy-plan.json");
     cellc_deploy_plan(&clone_app, &deploy_plan_path);
     let verify_result = cellc_verify_deploy(&deploy_plan_path);

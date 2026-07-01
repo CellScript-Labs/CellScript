@@ -114,16 +114,12 @@ fn validate_compile_options(options: &CompileOptions) -> Result<()> {
 }
 
 pub(crate) fn validate_primitive_strict_017_metadata(metadata: &CompileMetadata) -> Result<()> {
-    let xudt_group_amount_helpers = available_xudt_group_amount_helpers(metadata);
     let gaps = metadata
         .runtime
         .proof_plan
         .iter()
         .filter_map(|plan| {
             if !matches!(plan.category.as_str(), "declared-invariant" | "aggregate-invariant") {
-                return None;
-            }
-            if strict_017_runtime_helper_gap_is_discharged(plan, &xudt_group_amount_helpers) {
                 return None;
             }
             let rejects_metadata_only = plan.status == "runtime-required" || plan.codegen_coverage_status == "gap:metadata-only";
@@ -152,28 +148,6 @@ pub(crate) fn validate_primitive_strict_017_metadata(metadata: &CompileMetadata)
     }
 }
 
-fn available_xudt_group_amount_helpers(metadata: &CompileMetadata) -> BTreeSet<&'static str> {
-    let mut helpers = BTreeSet::new();
-    for access in &metadata.runtime.ckb_runtime_accesses {
-        if access.syscall != "LOAD_CELL_DATA" || access.source != "GroupInput/GroupOutput" {
-            continue;
-        }
-        match access.operation.as_str() {
-            "xudt-group-amount-conservation" => {
-                helpers.insert("xudt::require_group_amount_conserved");
-            }
-            "xudt-group-amount-minted-delta" => {
-                helpers.insert("xudt::require_group_amount_minted");
-            }
-            "xudt-group-amount-burned-delta" => {
-                helpers.insert("xudt::require_group_amount_burned");
-            }
-            _ => {}
-        }
-    }
-    helpers
-}
-
 fn strict_017_required_runtime_helpers(plan: &ProofPlanMetadata) -> Vec<String> {
     let mut helpers = BTreeSet::new();
     for coverage in &plan.coverage {
@@ -187,19 +161,6 @@ fn strict_017_required_runtime_helpers(plan: &ProofPlanMetadata) -> Vec<String> 
         }
     }
     helpers.into_iter().collect()
-}
-
-fn strict_017_runtime_helper_gap_is_discharged(
-    plan: &ProofPlanMetadata,
-    available_xudt_group_amount_helpers: &BTreeSet<&'static str>,
-) -> bool {
-    plan.codegen_coverage_status == "gap:runtime-helper-required"
-        && available_xudt_group_amount_helpers.iter().any(|helper| {
-            let coverage_label = format!("runtime_helper:{helper}");
-            let relation_label = format!("runtime-helper-required:{helper}");
-            plan.coverage.iter().any(|coverage| coverage == &coverage_label)
-                || plan.input_output_relation_checks.iter().any(|check| check.contains(&relation_label))
-        })
 }
 
 /// In `--primitive-strict=0.15` or newer strict mode, reject v0.14 protocol verbs (`destroy`)
@@ -249,7 +210,7 @@ fn strict_capability_name(capability: ast::Capability) -> &'static str {
 const DEFAULT_TARGET: &str = "riscv64-asm";
 const DEFAULT_TARGET_PROFILE: &str = "ckb";
 const ARTIFACT_CACHE_VERSION: &str = "project-source-set-v5";
-pub const METADATA_SCHEMA_VERSION: u32 = 43;
+pub const METADATA_SCHEMA_VERSION: u32 = 44;
 pub const SOURCE_METADATA_SCHEMA_VERSION: u32 = 1;
 pub const ARTIFACT_METADATA_SCHEMA_VERSION: u32 = 1;
 pub const CONSTRAINTS_METADATA_SCHEMA_VERSION: u32 = 1;
@@ -446,6 +407,8 @@ pub struct CompileMetadata {
     pub molecule_schema_manifest: MoleculeSchemaManifestMetadata,
     #[serde(default)]
     pub cell_data_codec_manifest: CellDataCodecManifestMetadata,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub template_layouts: Vec<TemplateLayoutMetadata>,
     pub types: Vec<TypeMetadata>,
     pub actions: Vec<ActionMetadata>,
     pub functions: Vec<FunctionMetadata>,
@@ -532,6 +495,33 @@ pub struct ExternalCodecAdapterMetadata {
     pub content_hash: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub test_vector_hashes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TemplateLayoutMetadata {
+    pub schema: String,
+    pub version: u32,
+    pub scope: String,
+    pub type_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state_field: Option<String>,
+    pub state_machine_acyclic: bool,
+    pub cycle_policy: String,
+    pub layout: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub root_hash: Option<String>,
+    pub leaf_schema: TemplateLayoutLeafSchemaMetadata,
+    pub consensus_checked: bool,
+    pub template_layout_hash: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TemplateLayoutLeafSchemaMetadata {
+    pub abi: String,
+    pub layout: String,
+    pub schema_hash: String,
+    pub encoded_size: Option<usize>,
+    pub field_count: usize,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -995,6 +985,7 @@ pub fn validate_compile_metadata(metadata: &CompileMetadata, artifact_format: Ar
     validate_molecule_schema_metadata(metadata)?;
     validate_molecule_schema_manifest_metadata(metadata)?;
     validate_cell_data_codec_manifest_metadata(metadata)?;
+    validate_template_layout_metadata(metadata)?;
     validate_source_metadata(metadata)?;
     crate::proof_plan::soundness::validate_metadata(metadata, false)?;
 
@@ -3117,6 +3108,90 @@ fn validate_cell_data_codec_manifest_metadata(metadata: &CompileMetadata) -> Res
     Ok(())
 }
 
+fn validate_template_layout_metadata(metadata: &CompileMetadata) -> Result<()> {
+    let expected = template_layout_metadata(&metadata.types);
+    if metadata.template_layouts.len() != expected.len() {
+        return Err(CompileError::without_span(format!(
+            "metadata template_layouts length {} does not match derived type layout count {}",
+            metadata.template_layouts.len(),
+            expected.len()
+        )));
+    }
+
+    let mut sorted = metadata.template_layouts.clone();
+    sorted.sort_by(|left, right| left.type_name.cmp(&right.type_name));
+    if sorted != metadata.template_layouts {
+        return Err(CompileError::without_span("metadata template_layouts must be sorted by type_name"));
+    }
+
+    for (layout, expected_layout) in metadata.template_layouts.iter().zip(expected.iter()) {
+        if layout.schema != "cellscript-template-layout-v0.21" {
+            return Err(CompileError::without_span(format!(
+                "metadata template_layout '{}' has unsupported schema '{}'",
+                layout.type_name, layout.schema
+            )));
+        }
+        if layout.version != 1 {
+            return Err(CompileError::without_span(format!(
+                "metadata template_layout '{}' has unsupported version {}",
+                layout.type_name, layout.version
+            )));
+        }
+        if !matches!(layout.scope.as_str(), "Type" | "TypeFamily") {
+            return Err(CompileError::without_span(format!(
+                "metadata template_layout '{}' has unsupported scope '{}'",
+                layout.type_name, layout.scope
+            )));
+        }
+        if !matches!(layout.layout.as_str(), "Flat" | "MerkleCandidate") {
+            return Err(CompileError::without_span(format!(
+                "metadata template_layout '{}' has unsupported layout '{}'",
+                layout.type_name, layout.layout
+            )));
+        }
+        if !matches!(layout.cycle_policy.as_str(), "RootRequired" | "PathOnlyAllowed") {
+            return Err(CompileError::without_span(format!(
+                "metadata template_layout '{}' has unsupported cycle_policy '{}'",
+                layout.type_name, layout.cycle_policy
+            )));
+        }
+        if layout.consensus_checked {
+            return Err(CompileError::without_span(format!(
+                "metadata template_layout '{}' cannot set consensus_checked=true until a backend verifier supports TemplateLayout commitments",
+                layout.type_name
+            )));
+        }
+        if let Some(root_hash) = layout.root_hash.as_deref() {
+            if !is_canonical_hash_hex(root_hash) {
+                return Err(CompileError::without_span(format!(
+                    "metadata template_layout '{}' root_hash '{}' is not a canonical 32-byte lowercase hex hash",
+                    layout.type_name, root_hash
+                )));
+            }
+        }
+        if !is_canonical_hash_hex(&layout.template_layout_hash) {
+            return Err(CompileError::without_span(format!(
+                "metadata template_layout '{}' template_layout_hash '{}' is invalid",
+                layout.type_name, layout.template_layout_hash
+            )));
+        }
+        if layout.template_layout_hash != template_layout_hash(layout) {
+            return Err(CompileError::without_span(format!(
+                "metadata template_layout '{}' template_layout_hash '{}' does not match layout fields",
+                layout.type_name, layout.template_layout_hash
+            )));
+        }
+        if layout != expected_layout {
+            return Err(CompileError::without_span(format!(
+                "metadata template_layout '{}' does not match derived type metadata",
+                layout.type_name
+            )));
+        }
+    }
+
+    Ok(())
+}
+
 pub fn validate_source_units_on_disk(metadata: &CompileMetadata) -> Result<()> {
     validate_source_metadata(metadata)?;
     if metadata.source_units.is_empty() {
@@ -3437,6 +3512,8 @@ pub struct ActionMetadata {
     pub create_set: Vec<CreatePatternMetadata>,
     pub mutate_set: Vec<MutatePatternMetadata>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub state_transition_edges: Vec<StateTransitionEdgeMetadata>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pool_primitives: Vec<PoolPrimitiveMetadata>,
     pub ckb_runtime_accesses: Vec<CkbRuntimeAccessMetadata>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3530,6 +3607,19 @@ impl LockMetadata {
 
 fn ckb_type_id_output_indexes_from_create_set(create_set: &[CreatePatternMetadata]) -> Vec<usize> {
     create_set.iter().filter_map(|pattern| pattern.ckb_type_id.as_ref().map(|plan| plan.output_index)).collect()
+}
+
+fn state_transition_edge_metadata(edge: &ir::IrStateTransitionEdge) -> StateTransitionEdgeMetadata {
+    StateTransitionEdgeMetadata {
+        input_binding: edge.input_binding.clone(),
+        output_binding: edge.output_binding.clone(),
+        type_name: edge.type_name.clone(),
+        field_name: edge.field_name.clone(),
+        from: edge.from.clone(),
+        to: edge.to.clone(),
+        from_index: edge.from_index,
+        to_index: edge.to_index,
+    }
 }
 
 fn default_scheduler_witness_abi() -> String {
@@ -4010,6 +4100,20 @@ pub struct MutatePatternMetadata {
     pub lock_hash_preservation_status: String,
     pub field_equality_status: String,
     pub field_transition_status: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StateTransitionEdgeMetadata {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_binding: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_binding: Option<String>,
+    pub type_name: String,
+    pub field_name: String,
+    pub from: String,
+    pub to: String,
+    pub from_index: usize,
+    pub to_index: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -5382,8 +5486,15 @@ fn compile_metadata_from_ir(ir: &ir::IrModule, artifact_format: ArtifactFormat, 
     let ckb_runtime_accesses = module_ckb_runtime_accesses(ir, &cell_type_kinds, &type_layouts);
     let verifier_obligations =
         module_verifier_obligations(ir, &type_layouts, &flow_states, &flow_state_fields, &cell_type_kinds, &pure_const_returns);
-    let proof_plan =
-        module_proof_plan_metadata(ir, &type_layouts, &flow_states, &flow_state_fields, &cell_type_kinds, &pure_const_returns);
+    let proof_plan = module_proof_plan_metadata(
+        ir,
+        &type_layouts,
+        &flow_states,
+        &flow_state_fields,
+        &cell_type_kinds,
+        &pure_const_returns,
+        &ckb_runtime_accesses,
+    );
     let collection_instantiations = module_collection_instantiation_metadata(ir, &type_layouts, &pure_const_returns);
     let transaction_runtime_input_requirements = transaction_runtime_input_requirements_from_obligations(&verifier_obligations);
     let pool_primitives = module_pool_primitive_metadata(ir, &type_layouts, &cell_type_kinds, &pure_const_returns);
@@ -5459,6 +5570,7 @@ fn compile_metadata_from_ir(ir: &ir::IrModule, artifact_format: ArtifactFormat, 
         constraints: ConstraintsMetadata::default(),
         molecule_schema_manifest,
         cell_data_codec_manifest,
+        template_layouts: template_layout_metadata(&types),
         types,
         actions: ir
             .items
@@ -5475,10 +5587,17 @@ fn compile_metadata_from_ir(ir: &ir::IrModule, artifact_format: ArtifactFormat, 
                         action.return_type.as_ref(),
                         &pure_const_returns,
                     );
-                    let ckb_runtime_features =
-                        merge_ckb_runtime_features(body_ckb_runtime_features(&action.name, &action.body, &cell_type_kinds, &type_layouts), &action.params);
-                    let ckb_runtime_accesses =
-                        merge_ckb_runtime_accesses(body_ckb_runtime_accesses(&action.name, &action.body, &cell_type_kinds, &type_layouts), &action.params);
+                    let mut ckb_runtime_features = auto_lowered_aggregate_runtime_features_for_action(ir, action);
+                    ckb_runtime_features.extend(merge_ckb_runtime_features(
+                        body_ckb_runtime_features(&action.name, &action.body, &cell_type_kinds, &type_layouts),
+                        &action.params,
+                    ));
+                    let ckb_runtime_features = ckb_runtime_features.into_iter().collect::<Vec<_>>();
+                    let mut ckb_runtime_accesses = auto_lowered_aggregate_runtime_accesses_for_action(ir, action);
+                    ckb_runtime_accesses.extend(merge_ckb_runtime_accesses(
+                        body_ckb_runtime_accesses(&action.name, &action.body, &cell_type_kinds, &type_layouts),
+                        &action.params,
+                    ));
                     let verifier_obligations = body_verifier_obligations(
                         "action",
                         &action.name,
@@ -5545,6 +5664,11 @@ fn compile_metadata_from_ir(ir: &ir::IrModule, artifact_format: ArtifactFormat, 
                             .map(|(index, pattern)| create_pattern_metadata(pattern, index, &type_defs, target_profile))
                             .collect(),
                         mutate_set: action.body.mutate_set.iter().map(|pattern| mutate_pattern_metadata(pattern, &type_layouts)).collect(),
+                        state_transition_edges: action
+                            .state_transition_edges
+                            .iter()
+                            .map(state_transition_edge_metadata)
+                            .collect(),
                         pool_primitives,
                         ckb_script_group: ckb_script_group_metadata("action", &ckb_runtime_accesses, target_profile),
                         ckb_runtime_accesses,
@@ -6174,10 +6298,13 @@ fn module_ckb_runtime_accesses(
     let mut accesses = Vec::new();
     for item in &ir.items {
         match item {
-            ir::IrItem::Action(action) => accesses.extend(merge_ckb_runtime_accesses(
-                body_ckb_runtime_accesses(&action.name, &action.body, cell_type_kinds, type_layouts),
-                &action.params,
-            )),
+            ir::IrItem::Action(action) => {
+                accesses.extend(auto_lowered_aggregate_runtime_accesses_for_action(ir, action));
+                accesses.extend(merge_ckb_runtime_accesses(
+                    body_ckb_runtime_accesses(&action.name, &action.body, cell_type_kinds, type_layouts),
+                    &action.params,
+                ));
+            }
             ir::IrItem::PureFn(function) => accesses.extend(merge_ckb_runtime_accesses(
                 body_ckb_runtime_accesses(&function.name, &function.body, cell_type_kinds, type_layouts),
                 &function.params,
@@ -6200,10 +6327,13 @@ fn module_ckb_runtime_features(
     let mut features = BTreeSet::new();
     for item in &ir.items {
         match item {
-            ir::IrItem::Action(action) => features.extend(merge_ckb_runtime_features(
-                body_ckb_runtime_features(&action.name, &action.body, cell_type_kinds, type_layouts),
-                &action.params,
-            )),
+            ir::IrItem::Action(action) => {
+                features.extend(auto_lowered_aggregate_runtime_features_for_action(ir, action));
+                features.extend(merge_ckb_runtime_features(
+                    body_ckb_runtime_features(&action.name, &action.body, cell_type_kinds, type_layouts),
+                    &action.params,
+                ));
+            }
             ir::IrItem::PureFn(function) => features.extend(merge_ckb_runtime_features(
                 body_ckb_runtime_features(&function.name, &function.body, cell_type_kinds, type_layouts),
                 &function.params,
@@ -6216,6 +6346,126 @@ fn module_ckb_runtime_features(
         }
     }
     features.into_iter().collect()
+}
+
+fn auto_lowered_aggregate_runtime_features_for_action(ir: &ir::IrModule, action: &ir::IrAction) -> BTreeSet<String> {
+    let mut features = BTreeSet::new();
+    for helper in auto_lowered_aggregate_runtime_helpers_for_action(ir, action) {
+        if helper == "xudt::require_group_amount_conserved" {
+            features.insert("ckb-xudt-layout-binding".to_string());
+            features.insert("ckb-xudt-group-amount-conservation".to_string());
+        }
+    }
+    features
+}
+
+fn auto_lowered_aggregate_runtime_accesses_for_action(ir: &ir::IrModule, action: &ir::IrAction) -> Vec<CkbRuntimeAccessMetadata> {
+    auto_lowered_aggregate_runtime_helpers_for_action(ir, action)
+        .into_iter()
+        .enumerate()
+        .map(|(index, helper)| CkbRuntimeAccessMetadata {
+            operation: match helper.as_str() {
+                "xudt::require_group_amount_conserved" => "xudt-group-amount-conservation".to_string(),
+                _ => "auto-lowered-aggregate".to_string(),
+            },
+            syscall: "LOAD_CELL_DATA".to_string(),
+            source: "GroupInput/GroupOutput".to_string(),
+            index,
+            binding: helper,
+        })
+        .collect()
+}
+
+fn auto_lowered_aggregate_runtime_helpers_for_action(ir: &ir::IrModule, action: &ir::IrAction) -> BTreeSet<String> {
+    ir.items
+        .iter()
+        .filter_map(|item| match item {
+            ir::IrItem::Invariant(invariant) => Some(invariant),
+            _ => None,
+        })
+        .flat_map(|invariant| {
+            invariant
+                .aggregates
+                .iter()
+                .filter_map(|aggregate| auto_lowered_aggregate_runtime_helper_for_action(invariant, aggregate, action))
+        })
+        .map(str::to_string)
+        .collect()
+}
+
+fn auto_lowered_aggregate_runtime_helper_for_action(
+    invariant: &ir::IrInvariant,
+    aggregate: &ir::IrAggregateInvariant,
+    action: &ir::IrAction,
+) -> Option<&'static str> {
+    let type_name = auto_lowered_group_amount_conservation_type(invariant, aggregate)?;
+    if body_contains_runtime_helper(&action.body, "__xudt_require_group_amount_conserved") {
+        return None;
+    }
+    action_has_group_amount_conservation_evidence(action, type_name).then_some("xudt::require_group_amount_conserved")
+}
+
+fn auto_lowered_group_amount_conservation_type<'a>(
+    invariant: &ir::IrInvariant,
+    aggregate: &'a ir::IrAggregateInvariant,
+) -> Option<&'a str> {
+    if invariant.trigger.as_deref() != Some("type_group") || aggregate.scope != "group" {
+        return None;
+    }
+    if aggregate.kind != ast::AggregateInvariantKind::Sum || aggregate.relation != Some(ast::AggregateRelation::Eq) {
+        return None;
+    }
+    let rhs = aggregate.rhs.as_deref()?;
+    let (left_source, left_type) = aggregate_group_amount_endpoint(&aggregate.target)?;
+    let (right_source, right_type) = aggregate_group_amount_endpoint(rhs)?;
+    (left_type == right_type
+        && ((left_source == "group_outputs" && right_source == "group_inputs")
+            || (left_source == "group_inputs" && right_source == "group_outputs")))
+        .then_some(left_type)
+}
+
+fn action_has_group_amount_conservation_evidence(action: &ir::IrAction, type_name: &str) -> bool {
+    let consumed = action
+        .body
+        .consume_set
+        .iter()
+        .filter(|pattern| pattern.operation == "consume")
+        .filter_map(|pattern| {
+            action.params.iter().find(|param| param.name == pattern.binding && named_type_name(&param.ty) == Some(type_name))
+        })
+        .collect::<Vec<_>>();
+    let created = action
+        .body
+        .create_set
+        .iter()
+        .filter(|pattern| matches!(pattern.operation.as_str(), "create" | "output") && pattern.ty == type_name)
+        .collect::<Vec<_>>();
+    let ([consumed], [created]) = (consumed.as_slice(), created.as_slice()) else {
+        return false;
+    };
+    let Some((_, amount)) = created.fields.iter().find(|(field, _)| field == "amount") else {
+        return false;
+    };
+    let ir::IrOperand::Var(amount) = amount else {
+        return false;
+    };
+    let aliases = metadata_field_aliases(&action.body);
+    aliases.get(&amount.id).is_some_and(|alias| alias.root_id == consumed.binding.id && alias.field == "amount")
+}
+
+fn body_contains_runtime_helper(body: &ir::IrBody, helper: &str) -> bool {
+    body.blocks.iter().any(|block| {
+        block.instructions.iter().any(|instruction| matches!(instruction, ir::IrInstruction::Call { func, .. } if func == helper))
+    })
+}
+
+fn aggregate_group_amount_endpoint(target: &str) -> Option<(&str, &str)> {
+    let (source, rest) = target.split_once('<')?;
+    if source != "group_inputs" && source != "group_outputs" {
+        return None;
+    }
+    let (type_name, field) = rest.split_once(">.")?;
+    (field == "amount" && !type_name.is_empty()).then_some((source, type_name))
 }
 
 fn module_verifier_obligations(
@@ -6240,14 +6490,17 @@ fn module_verifier_obligations(
                     action.return_type.as_ref(),
                     pure_const_returns,
                 );
-                let ckb_runtime_features = merge_ckb_runtime_features(
+                let mut ckb_runtime_features = auto_lowered_aggregate_runtime_features_for_action(ir, action);
+                ckb_runtime_features.extend(merge_ckb_runtime_features(
                     body_ckb_runtime_features(&action.name, &action.body, cell_type_kinds, type_layouts),
                     &action.params,
-                );
-                let ckb_runtime_accesses = merge_ckb_runtime_accesses(
+                ));
+                let ckb_runtime_features = ckb_runtime_features.into_iter().collect::<Vec<_>>();
+                let mut ckb_runtime_accesses = auto_lowered_aggregate_runtime_accesses_for_action(ir, action);
+                ckb_runtime_accesses.extend(merge_ckb_runtime_accesses(
                     body_ckb_runtime_accesses(&action.name, &action.body, cell_type_kinds, type_layouts),
                     &action.params,
-                );
+                ));
                 obligations.extend(body_verifier_obligations(
                     "action",
                     &action.name,
@@ -6347,6 +6600,7 @@ fn module_proof_plan_metadata(
     flow_state_fields: &HashMap<String, String>,
     cell_type_kinds: &HashMap<String, ir::IrTypeKind>,
     pure_const_returns: &HashMap<String, ir::IrConst>,
+    module_ckb_runtime_accesses: &[CkbRuntimeAccessMetadata],
 ) -> Vec<ProofPlanMetadata> {
     let mut proof_plan = Vec::new();
     for item in &ir.items {
@@ -6362,14 +6616,17 @@ fn module_proof_plan_metadata(
                     action.return_type.as_ref(),
                     pure_const_returns,
                 );
-                let ckb_runtime_features = merge_ckb_runtime_features(
+                let mut ckb_runtime_features = auto_lowered_aggregate_runtime_features_for_action(ir, action);
+                ckb_runtime_features.extend(merge_ckb_runtime_features(
                     body_ckb_runtime_features(&action.name, &action.body, cell_type_kinds, type_layouts),
                     &action.params,
-                );
-                let ckb_runtime_accesses = merge_ckb_runtime_accesses(
+                ));
+                let ckb_runtime_features = ckb_runtime_features.into_iter().collect::<Vec<_>>();
+                let mut ckb_runtime_accesses = auto_lowered_aggregate_runtime_accesses_for_action(ir, action);
+                ckb_runtime_accesses.extend(merge_ckb_runtime_accesses(
                     body_ckb_runtime_accesses(&action.name, &action.body, cell_type_kinds, type_layouts),
                     &action.params,
-                );
+                ));
                 let verifier_obligations = body_verifier_obligations(
                     "action",
                     &action.name,
@@ -6511,7 +6768,7 @@ fn module_proof_plan_metadata(
                 ));
             }
             ir::IrItem::Invariant(invariant) => {
-                proof_plan.extend(crate::proof_plan::build_for_invariant(invariant));
+                proof_plan.extend(crate::proof_plan::build_for_invariant(invariant, module_ckb_runtime_accesses));
             }
             ir::IrItem::TypeDef(_) => {}
         }
@@ -14244,6 +14501,118 @@ fn molecule_schema_manifest_metadata(types: &[TypeMetadata], target_profile: Tar
     }
 }
 
+fn template_layout_metadata(types: &[TypeMetadata]) -> Vec<TemplateLayoutMetadata> {
+    let mut layouts = types
+        .iter()
+        .filter(|ty| matches!(ty.kind.as_str(), "Resource" | "Shared" | "Receipt"))
+        .filter_map(template_layout_for_type)
+        .collect::<Vec<_>>();
+    layouts.sort_by(|left, right| left.type_name.cmp(&right.type_name));
+    layouts
+}
+
+fn template_layout_for_type(ty: &TypeMetadata) -> Option<TemplateLayoutMetadata> {
+    let molecule_schema = ty.molecule_schema.as_ref()?;
+    let state_machine_acyclic = flow_transitions_are_acyclic(&ty.flow_transitions);
+    let cycle_policy = if state_machine_acyclic { "PathOnlyAllowed" } else { "RootRequired" };
+    let leaf_schema = TemplateLayoutLeafSchemaMetadata {
+        abi: molecule_schema.abi.clone(),
+        layout: molecule_schema.layout.clone(),
+        schema_hash: molecule_schema.schema_hash.clone(),
+        encoded_size: ty.encoded_size,
+        field_count: ty.fields.len(),
+    };
+    let mut layout = TemplateLayoutMetadata {
+        schema: "cellscript-template-layout-v0.21".to_string(),
+        version: 1,
+        scope: "Type".to_string(),
+        type_name: ty.name.clone(),
+        state_field: ty.flow_state_field.clone(),
+        state_machine_acyclic,
+        cycle_policy: cycle_policy.to_string(),
+        layout: "Flat".to_string(),
+        root_hash: None,
+        leaf_schema,
+        consensus_checked: false,
+        template_layout_hash: String::new(),
+    };
+    layout.template_layout_hash = template_layout_hash(&layout);
+    Some(layout)
+}
+
+fn flow_transitions_are_acyclic(transitions: &[FlowTransitionMetadata]) -> bool {
+    let mut adjacency: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    for transition in transitions {
+        adjacency.entry(&transition.from).or_default().push(&transition.to);
+    }
+    let mut visiting = BTreeSet::new();
+    let mut visited = BTreeSet::new();
+    for node in adjacency.keys() {
+        if !flow_transition_visit_is_acyclic(node, &adjacency, &mut visiting, &mut visited) {
+            return false;
+        }
+    }
+    true
+}
+
+fn flow_transition_visit_is_acyclic<'a>(
+    node: &'a str,
+    adjacency: &BTreeMap<&'a str, Vec<&'a str>>,
+    visiting: &mut BTreeSet<&'a str>,
+    visited: &mut BTreeSet<&'a str>,
+) -> bool {
+    if visited.contains(node) {
+        return true;
+    }
+    if !visiting.insert(node) {
+        return false;
+    }
+    if let Some(targets) = adjacency.get(node) {
+        for target in targets {
+            if !flow_transition_visit_is_acyclic(target, adjacency, visiting, visited) {
+                return false;
+            }
+        }
+    }
+    visiting.remove(node);
+    visited.insert(node);
+    true
+}
+
+fn template_layout_hash(layout: &TemplateLayoutMetadata) -> String {
+    let mut canonical = String::new();
+    canonical.push_str(&layout.schema);
+    canonical.push('|');
+    canonical.push_str(&layout.version.to_string());
+    canonical.push('|');
+    canonical.push_str(&layout.scope);
+    canonical.push('|');
+    canonical.push_str(&layout.type_name);
+    canonical.push('|');
+    canonical.push_str(layout.state_field.as_deref().unwrap_or(""));
+    canonical.push('|');
+    canonical.push_str(if layout.state_machine_acyclic { "acyclic" } else { "cyclic" });
+    canonical.push('|');
+    canonical.push_str(&layout.cycle_policy);
+    canonical.push('|');
+    canonical.push_str(&layout.layout);
+    canonical.push('|');
+    canonical.push_str(layout.root_hash.as_deref().unwrap_or(""));
+    canonical.push('|');
+    canonical.push_str(&layout.leaf_schema.abi);
+    canonical.push('|');
+    canonical.push_str(&layout.leaf_schema.layout);
+    canonical.push('|');
+    canonical.push_str(&layout.leaf_schema.schema_hash);
+    canonical.push('|');
+    canonical.push_str(&layout.leaf_schema.encoded_size.map(|size| size.to_string()).unwrap_or_else(|| "dynamic".to_string()));
+    canonical.push('|');
+    canonical.push_str(&layout.leaf_schema.field_count.to_string());
+    canonical.push('|');
+    canonical.push_str(if layout.consensus_checked { "consensus" } else { "metadata-only" });
+    hex_encode(&ckb_blake2b256(canonical.as_bytes()))
+}
+
 fn cell_data_codec_manifest_metadata(
     accesses: &[CkbRuntimeAccessMetadata],
     molecule_schema_manifest: &MoleculeSchemaManifestMetadata,
@@ -15525,8 +15894,9 @@ mod tests {
     use super::{
         compile, compile_file, compile_file_with_entry_action, compile_file_with_entry_lock, compile_path,
         decode_scheduler_witness_hex, default_output_path_for_input, encode_entry_witness_args_for_params, incremental_cache_key,
-        load_modules_for_input, resolve_input_path, source_unit_from_bytes, ActionMetadata, ArtifactFormat, CompileOptions,
-        EntryWitnessArg, ENTRY_WITNESS_ABI_MAGIC, SCHEDULER_WITNESS_ABI_MOLECULE,
+        load_modules_for_input, resolve_input_path, source_unit_from_bytes, validate_primitive_strict_017_metadata, ActionMetadata,
+        ArtifactFormat, CkbRuntimeAccessMetadata, CompileOptions, EntryWitnessArg, ENTRY_WITNESS_ABI_MAGIC,
+        SCHEDULER_WITNESS_ABI_MOLECULE,
     };
     use crate::{ir, lexer, parser};
     use camino::{Utf8Path, Utf8PathBuf};
@@ -25650,6 +26020,318 @@ action run() -> u64 {
     }
 
     #[test]
+    fn compile_metadata_marks_helper_backed_xudt_group_amount_invariants_checked() {
+        let source = r#"
+module test
+
+invariant xudt_group_transfer_conservation {
+    trigger: type_group
+    scope: group
+    reads: group_inputs<Token>.amount, group_outputs<Token>.amount
+    assert_sum(group_outputs<Token>.amount) == assert_sum(group_inputs<Token>.amount)
+}
+
+invariant xudt_group_mint_delta {
+    trigger: type_group
+    scope: group
+    reads: group_inputs<Token>.amount, group_outputs<Token>.amount
+    assert_delta(group_outputs<Token>.amount, minted, scope = group)
+}
+
+resource Token {
+    amount: u128,
+}
+
+action transfer(token: Token, to: Address) -> next_token: Token {
+    verification
+    xudt::require_group_amount_conserved()
+
+    consume token
+
+    create next_token = Token {
+        amount: token.amount
+    } with_lock(to)
+}
+
+action mint(existing: Token, minted: u128, to: Address) -> token: Token {
+    verification
+    xudt::require_group_amount_minted(minted)
+
+    consume existing
+
+    create token = Token {
+        amount: existing.amount + minted
+    } with_lock(to)
+}
+"#;
+
+        let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..Default::default() }).unwrap();
+
+        assert!(
+            result.metadata.runtime.ckb_runtime_accesses.iter().any(|access| access.binding == "xudt::require_group_amount_conserved"),
+            "{:?}",
+            result.metadata.runtime.ckb_runtime_accesses
+        );
+        assert!(
+            result.metadata.runtime.ckb_runtime_accesses.iter().any(|access| access.binding == "xudt::require_group_amount_minted"),
+            "{:?}",
+            result.metadata.runtime.ckb_runtime_accesses
+        );
+
+        let conservation_summary = result
+            .metadata
+            .runtime
+            .proof_plan
+            .iter()
+            .find(|plan| plan.origin == "invariant:xudt_group_transfer_conservation")
+            .expect("conservation invariant summary ProofPlan record");
+        assert_eq!(conservation_summary.status, "checked-runtime");
+        assert!(conservation_summary.on_chain_checked);
+        assert_eq!(conservation_summary.codegen_coverage_status, "covered");
+        assert!(
+            conservation_summary
+                .coverage
+                .iter()
+                .any(|coverage| coverage == "runtime_helper_checked:xudt::require_group_amount_conserved"),
+            "{:?}",
+            conservation_summary.coverage
+        );
+
+        let conservation = result
+            .metadata
+            .runtime
+            .proof_plan
+            .iter()
+            .find(|plan| plan.origin == "invariant:xudt_group_transfer_conservation#aggregate:0")
+            .expect("conservation aggregate ProofPlan record");
+        assert_eq!(conservation.status, "checked-runtime");
+        assert!(conservation.on_chain_checked);
+        assert_eq!(conservation.codegen_coverage_status, "covered");
+        assert_eq!(
+            conservation.input_output_relation_checks,
+            vec!["assert_sum:group_outputs<Token>.amount==group_inputs<Token>.amount=checked-runtime:xudt::require_group_amount_conserved"]
+        );
+
+        let mint_delta = result
+            .metadata
+            .runtime
+            .proof_plan
+            .iter()
+            .find(|plan| plan.origin == "invariant:xudt_group_mint_delta#aggregate:0")
+            .expect("mint delta aggregate ProofPlan record");
+        assert_eq!(mint_delta.status, "checked-runtime");
+        assert!(mint_delta.on_chain_checked);
+        assert_eq!(mint_delta.codegen_coverage_status, "covered");
+        assert_eq!(
+            mint_delta.input_output_relation_checks,
+            vec!["assert_delta:group_outputs<Token>.amount:minted=checked-runtime:xudt::require_group_amount_minted"]
+        );
+    }
+
+    #[test]
+    fn compile_auto_lowers_xudt_group_amount_conservation_invariant() {
+        let source = r#"
+module test
+
+invariant xudt_group_transfer_conservation {
+    trigger: type_group
+    scope: group
+    reads: group_inputs<Token>.amount, group_outputs<Token>.amount
+    assert_sum(group_outputs<Token>.amount) == assert_sum(group_inputs<Token>.amount)
+}
+
+resource Token {
+    amount: u128,
+}
+
+action transfer(token: Token, to: Address) -> next_token: Token {
+    verification
+    consume token
+
+    create next_token = Token {
+        amount: token.amount
+    } with_lock(to)
+}
+
+action mint(minted: u128, to: Address) -> token: Token {
+    verification
+    create token = Token {
+        amount: minted
+    } with_lock(to)
+}
+"#;
+
+        let result = compile(
+            source,
+            CompileOptions {
+                target_profile: Some("ckb".to_string()),
+                primitive_compat: Some("0.17".to_string()),
+                target: Some("riscv64-asm".to_string()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+        let action_section = |label: &str| {
+            let marker = format!("\n{label}:\n");
+            let start = asm.find(&marker).unwrap_or_else(|| panic!("missing action label {label}:\n{asm}"));
+            let rest = &asm[start..];
+            let end = rest[1..].find("\n.global ").map(|offset| offset + 1).unwrap_or(rest.len());
+            &rest[..end]
+        };
+        let transfer_asm = action_section("transfer");
+        let mint_asm = action_section("mint");
+        assert!(
+            transfer_asm.contains("# cellscript aggregate invariant: auto-lowered xUDT group amount conservation"),
+            "auto-lowered aggregate check missing from transfer:\n{}",
+            transfer_asm
+        );
+        assert!(
+            transfer_asm.contains("call __xudt_require_group_amount_conserved"),
+            "auto-lowered helper call missing from transfer:\n{}",
+            transfer_asm
+        );
+        assert!(
+            !mint_asm.contains("call __xudt_require_group_amount_conserved"),
+            "mint action must not be over-constrained by conservation lowering:\n{}",
+            mint_asm
+        );
+
+        let aggregate = result
+            .metadata
+            .runtime
+            .proof_plan
+            .iter()
+            .find(|plan| plan.origin == "invariant:xudt_group_transfer_conservation#aggregate:0")
+            .expect("xUDT conservation aggregate ProofPlan record");
+        assert_eq!(aggregate.status, "checked-runtime");
+        assert_eq!(aggregate.codegen_coverage_status, "covered");
+    }
+
+    #[test]
+    fn compile_primitive_strict_017_rejects_xudt_conservation_without_matching_action() {
+        let source = r#"
+module test
+
+invariant xudt_group_transfer_conservation {
+    trigger: type_group
+    scope: group
+    reads: group_inputs<Token>.amount, group_outputs<Token>.amount
+    assert_sum(group_outputs<Token>.amount) == assert_sum(group_inputs<Token>.amount)
+}
+
+resource Token {
+    amount: u128,
+}
+
+action mint(minted: u128, to: Address) -> token: Token {
+    verification
+    create token = Token {
+        amount: minted
+    } with_lock(to)
+}
+"#;
+
+        let err = compile(
+            source,
+            CompileOptions {
+                target_profile: Some("ckb".to_string()),
+                primitive_compat: Some("0.17".to_string()),
+                ..Default::default()
+            },
+        )
+        .unwrap_err();
+
+        assert!(err.message.contains("PP0170 invariant:xudt_group_transfer_conservation"), "unexpected error: {}", err.message);
+        assert!(
+            err.message.contains("runtime-helper-required:xudt::require_group_amount_conserved"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn compile_primitive_strict_017_rejects_xudt_group_delta_without_helper() {
+        let source = r#"
+module test
+
+invariant xudt_group_mint_delta {
+    trigger: type_group
+    scope: group
+    reads: group_inputs<Token>.amount, group_outputs<Token>.amount
+    assert_delta(group_outputs<Token>.amount, minted, scope = group)
+}
+
+resource Token {
+    amount: u128,
+}
+
+action run() -> u64 {
+    verification
+        return 0
+}
+"#;
+
+        let err = compile(
+            source,
+            CompileOptions {
+                target_profile: Some("ckb".to_string()),
+                primitive_compat: Some("0.17".to_string()),
+                ..Default::default()
+            },
+        )
+        .unwrap_err();
+
+        assert!(err.message.contains("PP0170 invariant:xudt_group_mint_delta"), "unexpected error: {}", err.message);
+        assert!(
+            err.message.contains("runtime-helper-required:xudt::require_group_amount_minted"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn primitive_strict_017_rejects_stale_xudt_runtime_helper_gap_metadata() {
+        let source = r#"
+module test
+
+invariant xudt_group_mint_delta {
+    trigger: type_group
+    scope: group
+    reads: group_inputs<Token>.amount, group_outputs<Token>.amount
+    assert_delta(group_outputs<Token>.amount, minted, scope = group)
+}
+
+resource Token {
+    amount: u128,
+}
+
+action run() -> u64 {
+    verification
+        return 0
+}
+"#;
+
+        let mut result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..Default::default() }).unwrap();
+        result.metadata.runtime.ckb_runtime_accesses.push(CkbRuntimeAccessMetadata {
+            operation: "xudt-group-amount-minted-delta".to_string(),
+            syscall: "LOAD_CELL_DATA".to_string(),
+            source: "GroupInput/GroupOutput".to_string(),
+            index: 0,
+            binding: "xudt::require_group_amount_minted".to_string(),
+        });
+
+        let err = validate_primitive_strict_017_metadata(&result.metadata).unwrap_err();
+
+        assert!(err.message.contains("PP0170 invariant:xudt_group_mint_delta"), "unexpected error: {}", err.message);
+        assert!(
+            err.message.contains("runtime-helper-required:xudt::require_group_amount_minted"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
     fn compile_metadata_exposes_transaction_and_selected_cell_aggregate_invariants() {
         let source = r#"
 module test
@@ -26068,6 +26750,7 @@ action transfer_token(token: Token, to: Address) -> next_token: Token {
             read_refs: vec![],
             create_set: vec![],
             mutate_set: vec![],
+            state_transition_edges: vec![],
             pool_primitives: vec![],
             ckb_script_group: None,
             ckb_runtime_accesses: vec![],
@@ -27068,6 +27751,77 @@ action value() -> u64 {
         let err = result.validate().unwrap_err();
 
         assert!(err.message.contains("molecule_schema.schema_hash"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn compile_metadata_exposes_template_layout_for_cyclic_flow_type() {
+        let program = r#"
+module test
+
+enum PoolState {
+    Idle,
+    Active,
+}
+
+resource Pool has store {
+    state: PoolState,
+    reserve: u64,
+}
+
+flow Pool.state {
+    Idle -> Active;
+    Active -> Idle;
+}
+
+action activate(input: Pool) -> output: Pool {
+    transition input.state: Idle -> output.state: Active
+    verification
+        require output.reserve == input.reserve
+}
+"#;
+
+        let result = compile(program, CompileOptions::default()).unwrap();
+        let pool = result.metadata.types.iter().find(|ty| ty.name == "Pool").expect("Pool type metadata");
+        let pool_schema = pool.molecule_schema.as_ref().expect("Pool molecule schema metadata");
+        let layout =
+            result.metadata.template_layouts.iter().find(|layout| layout.type_name == "Pool").expect("Pool TemplateLayout metadata");
+
+        assert_eq!(layout.schema, "cellscript-template-layout-v0.21");
+        assert_eq!(layout.scope, "Type");
+        assert_eq!(layout.state_field.as_deref(), Some("state"));
+        assert!(!layout.state_machine_acyclic);
+        assert_eq!(layout.cycle_policy, "RootRequired");
+        assert_eq!(layout.layout, "Flat");
+        assert_eq!(layout.root_hash, None);
+        assert!(!layout.consensus_checked);
+        assert_eq!(layout.leaf_schema.abi, "molecule");
+        assert_eq!(layout.leaf_schema.schema_hash, pool_schema.schema_hash);
+        assert_eq!(layout.leaf_schema.field_count, pool.fields.len());
+        assert!(crate::is_canonical_hash_hex(&layout.template_layout_hash));
+        result.validate().unwrap();
+    }
+
+    #[test]
+    fn compile_result_validation_rejects_unsupported_template_layout_claim() {
+        let program = r#"
+module test
+
+resource Pool has store {
+    reserve: u64,
+}
+
+action swap(input: Pool) -> output: Pool {
+    verification
+        require output.reserve == input.reserve
+}
+"#;
+        let mut result = compile(program, CompileOptions::default()).unwrap();
+        let layout = result.metadata.template_layouts.first_mut().expect("TemplateLayout metadata");
+        layout.consensus_checked = true;
+
+        let err = result.validate().unwrap_err();
+
+        assert!(err.message.contains("consensus_checked=true"), "unexpected error: {}", err.message);
     }
 
     #[test]

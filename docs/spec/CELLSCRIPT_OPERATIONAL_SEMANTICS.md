@@ -20,7 +20,7 @@ T |- tx against assumptions => ok | reject
 
 `E` is the expression environment. `S` is the linear resource state and Cell
 effect log. `M` is compile metadata. `T` is a transaction JSON shape plus
-schema-bound evidence consumed by `cellc validate-tx`.
+schema-bound evidence consumed by `cellc tx validate`.
 
 ## Expression Evaluation
 
@@ -179,8 +179,8 @@ signature_policy
 failure_mode
 ```
 
-`cellc explain-assumptions` emits this schema. `cellc validate-tx --against
-metadata.json tx.json` checks a concrete transaction shape and requires
+`cellc explain assumptions` emits this schema. `cellc tx validate --against
+metadata.json --tx tx.json` checks a concrete transaction shape and requires
 schema-bound evidence objects for non-structural assumptions before signing.
 For manifest-bound spawn targets, validation also checks the referenced
 `cell_deps[index]` object against the declared CellDep identity (`name`,
@@ -195,7 +195,7 @@ the remaining standard-compatibility fixtures live in
 
 - ProofPlan soundness metadata is emitted and passes for checked runtime cases;
 - `--primitive-strict=0.16` rejects metadata-only ProofPlan gaps;
-- schema-bound builder assumption evidence is required by `validate-tx`;
+- schema-bound builder assumption evidence is required by `tx validate`;
 - manifest-bound spawn-target CellDep identity is checked in both transaction
   deps and builder evidence;
 - the standard CKB compatibility suite names accepted and rejected fixtures for

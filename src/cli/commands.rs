@@ -19,7 +19,7 @@ use ckb_vm::{
 use colored::Colorize;
 use ring::signature::KeyPair;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::io::{Read, Write};
+use std::io::{IsTerminal, Read, Write};
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -98,6 +98,7 @@ pub enum Command {
     ExplainProof(ExplainProofArgs),
     ExplainAssumptions(ExplainAssumptionsArgs),
     ExplainGenerics(ExplainGenericsArgs),
+    ExplainGraph(ExplainGraphArgs),
     OptReport(OptReportArgs),
     ProofDiff(ProofDiffArgs),
     Profile(ProfileArgs),
@@ -114,6 +115,9 @@ pub enum Command {
     GenBuilder(GenBuilderArgs),
     /// Encode generated entry wrapper witness bytes
     EntryWitness(EntryWitnessArgs),
+    Receipt(ReceiptArgs),
+    SignReceipt(SignReceiptArgs),
+    VerifyReceipt(VerifyReceiptArgs),
     VerifyArtifact(VerifyArtifactArgs),
     Run(RunArgs),
     Publish(PublishArgs),
@@ -238,6 +242,7 @@ pub struct CheckArgs {
     pub target_profile: Option<String>,
     pub features: Vec<String>,
     pub json: bool,
+    pub message_format: Option<String>,
     pub production: bool,
     pub deny_fail_closed: bool,
     pub deny_ckb_runtime: bool,
@@ -332,6 +337,15 @@ pub struct ExplainGenericsArgs {
     pub target: Option<String>,
     pub target_profile: Option<String>,
     pub json: bool,
+}
+
+#[derive(Debug, Default)]
+pub struct ExplainGraphArgs {
+    pub input: Option<PathBuf>,
+    pub target: Option<String>,
+    pub target_profile: Option<String>,
+    pub json: bool,
+    pub format: Option<String>,
 }
 
 #[derive(Debug, Default)]
@@ -467,9 +481,36 @@ pub struct EntryWitnessArgs {
 }
 
 #[derive(Debug, Default)]
+pub struct ReceiptArgs {
+    pub input: Option<PathBuf>,
+    pub output: PathBuf,
+    pub target: Option<String>,
+    pub target_profile: Option<String>,
+    pub json: bool,
+}
+
+#[derive(Debug, Default)]
+pub struct SignReceiptArgs {
+    pub receipt: PathBuf,
+    pub role: String,
+    pub key: String,
+    pub output: Option<PathBuf>,
+    pub json: bool,
+}
+
+#[derive(Debug, Default)]
+pub struct VerifyReceiptArgs {
+    pub receipt: PathBuf,
+    pub metadata: PathBuf,
+    pub artifact: PathBuf,
+    pub json: bool,
+}
+
+#[derive(Debug, Default)]
 pub struct VerifyArtifactArgs {
     pub artifact: PathBuf,
     pub metadata: Option<PathBuf>,
+    pub receipt: Option<PathBuf>,
     pub verify_sources: bool,
     pub json: bool,
     pub expect_target_profile: Option<String>,
@@ -625,6 +666,7 @@ impl CommandExecutor {
             Command::ExplainProof(args) => Self::explain_proof(args),
             Command::ExplainAssumptions(args) => Self::explain_assumptions(args),
             Command::ExplainGenerics(args) => Self::explain_generics(args),
+            Command::ExplainGraph(args) => Self::explain_graph(args),
             Command::OptReport(args) => Self::opt_report(args),
             Command::ProofDiff(args) => Self::proof_diff(args),
             Command::Profile(args) => Self::profile(args),
@@ -640,6 +682,9 @@ impl CommandExecutor {
             Command::ActionBuild(args) => Self::action_build(args),
             Command::GenBuilder(args) => Self::gen_builder(args),
             Command::EntryWitness(args) => Self::entry_witness(args),
+            Command::Receipt(args) => Self::receipt(args),
+            Command::SignReceipt(args) => Self::sign_receipt(args),
+            Command::VerifyReceipt(args) => Self::verify_receipt(args),
             Command::VerifyArtifact(args) => Self::verify_artifact(args),
             Command::Run(args) => Self::run(args),
             Command::Publish(args) => Self::publish(args),
@@ -1458,6 +1503,7 @@ impl CommandExecutor {
         }
 
         let args = effective_check_args(args)?;
+        let message_format_json = check_message_format_json(&args);
         let requested_profile = effective_check_target_profile(&args)?;
         let compile_target_profile = compile_target_profile_for_check(requested_profile);
         let mut checked_targets = Vec::new();
@@ -1478,7 +1524,7 @@ impl CommandExecutor {
                 Ok(result) => result,
                 Err(error) => {
                     let diagnostics = compile_failure_diagnostics(Utf8Path::new("."), compile_options, error);
-                    if args.json {
+                    if args.json || message_format_json {
                         print_check_failure_json(&diagnostics, target, requested_profile)?;
                         return Err(CompileError::without_span(format!("check failed with {} diagnostic(s)", diagnostics.len())));
                     }
@@ -1569,6 +1615,7 @@ impl CommandExecutor {
     }
 
     fn check_workspace(args: CheckArgs) -> Result<()> {
+        let message_format_json = check_message_format_json(&args);
         let ws_root = crate::find_workspace_root(Utf8Path::new("."))?.ok_or_else(|| {
             crate::error::CompileError::without_span(
                 "no workspace root found; run from a directory containing a [workspace] Cell.toml",
@@ -1616,7 +1663,7 @@ impl CommandExecutor {
                         "artifact_format": result.artifact_format.display_name(),
                         "target_profile": result.metadata.target_profile.name,
                     }));
-                    if !args.json {
+                    if !args.json && !message_format_json {
                         println!("{} {}", "Checked".green(), member_dir);
                     }
                 }
@@ -1626,7 +1673,7 @@ impl CommandExecutor {
                         "status": "failed",
                         "error": e.message,
                     }));
-                    if !args.json {
+                    if !args.json && !message_format_json {
                         eprintln!("{}: {}", member_dir, e.message);
                     }
                     failed += 1;
@@ -1634,7 +1681,7 @@ impl CommandExecutor {
             }
         }
 
-        if args.json {
+        if args.json || (message_format_json && failed > 0) {
             let summary = serde_json::json!({
                 "status": if failed == 0 { "ok" } else { "failed" },
                 "mode": "workspace",
@@ -2213,7 +2260,7 @@ impl CommandExecutor {
             },
         )?;
         let template = transaction_solver_template(&result.metadata);
-        write_or_print_json(args.output.as_ref(), &template, args.json, "Transaction template generated (solve-tx is not a solver)")?;
+        write_or_print_json(args.output.as_ref(), &template, args.json, "Transaction template generated (tx solve is not a solver)")?;
         Ok(())
     }
 
@@ -2451,6 +2498,44 @@ impl CommandExecutor {
         Ok(())
     }
 
+    fn explain_graph(args: ExplainGraphArgs) -> Result<()> {
+        let input_path = args.input.unwrap_or_else(|| PathBuf::from("."));
+        let input = Utf8Path::from_path(&input_path)
+            .ok_or_else(|| crate::error::CompileError::without_span(format!("path '{}' is not valid UTF-8", input_path.display())))?;
+        let result = compile_path(
+            input,
+            CompileOptions {
+                opt_level: 0,
+                output: None,
+                debug: false,
+                target: args.target,
+                target_profile: args.target_profile,
+                primitive_compat: None,
+            },
+        )?;
+        let graph = protocol_graph_json(&result.metadata);
+        let format = args.format.as_deref().unwrap_or(if args.json { "json" } else { "summary" });
+        match format {
+            "json" => print_json(&graph),
+            "mermaid" => {
+                print!("{}", protocol_graph_mermaid(&graph));
+                Ok(())
+            }
+            "summary" => {
+                println!("ProtocolGraph: {}", graph["schema"].as_str().unwrap_or("unknown"));
+                println!("  Vertices: {}", graph["vertex_count"].as_u64().unwrap_or_default());
+                println!("  Edges: {}", graph["edge_count"].as_u64().unwrap_or_default());
+                println!("  Cycles: {}", if graph["cycle_detected"].as_bool().unwrap_or(false) { "detected" } else { "not detected" });
+                println!("  Consensus checked: no");
+                Ok(())
+            }
+            other => Err(crate::error::CompileError::without_span(format!(
+                "unsupported graph format '{}'; expected json or mermaid",
+                other
+            ))),
+        }
+    }
+
     fn opt_report(args: OptReportArgs) -> Result<()> {
         let input_path = args.input.unwrap_or_else(|| PathBuf::from("."));
         let input = Utf8Path::from_path(&input_path)
@@ -2658,6 +2743,7 @@ impl CommandExecutor {
                 "dry_run_required_for_production": ckb.dry_run_required_for_production,
             })
         });
+        let action_scan_selectors = action_scan_selectors_json(action);
         let transaction_draft = serde_json::json!({
             "format": "cellscript-ccc-transaction-draft-v1",
             "state": "ActionPlan",
@@ -2797,11 +2883,13 @@ impl CommandExecutor {
                 "read_refs": action.read_refs,
                 "verifier_obligations": action.verifier_obligations,
                 "runtime_input_requirements": action.transaction_runtime_input_requirements,
+                "action_scan_selectors": action_scan_selectors,
                 "fail_closed_runtime_features": action.fail_closed_runtime_features,
             },
             "ckb": ckb_contract,
             "transaction_draft": transaction_draft,
             "adapter_contract": adapter_contract,
+            "action_scan_selectors": action_scan_selectors,
             "preview": preview,
             "constraints_status": result.metadata.constraints.status,
             "constraints_failures": result.metadata.constraints.failures,
@@ -3020,6 +3108,146 @@ impl CommandExecutor {
         Ok(())
     }
 
+    fn receipt(args: ReceiptArgs) -> Result<()> {
+        let input_path = args.input.clone().unwrap_or_else(|| PathBuf::from("."));
+        let input = Utf8Path::from_path(&input_path)
+            .ok_or_else(|| crate::error::CompileError::without_span(format!("path '{}' is not valid UTF-8", input_path.display())))?;
+        let input_path = resolve_input_path(input)?;
+        let compile_result = compile_path(
+            &input_path,
+            CompileOptions { target: args.target.clone(), target_profile: args.target_profile.clone(), ..CompileOptions::default() },
+        )?;
+        let receipt = compile_receipt_json(&compile_result.metadata)?;
+        if let Some(parent) = args.output.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(
+            &args.output,
+            serde_json::to_vec_pretty(&receipt).map_err(|error| {
+                crate::error::CompileError::without_span(format!("failed to serialize compile receipt: {}", error))
+            })?,
+        )?;
+
+        if args.json {
+            let summary = serde_json::json!({
+                "status": "ok",
+                "receipt": args.output.display().to_string(),
+                "schema": receipt["schema"],
+                "artifact_hash": receipt["artifact_hash"],
+                "metadata_hash": receipt["metadata_hash"],
+                "signature_count": 0,
+                "unsigned_advisory": true,
+            });
+            print_json(&summary)
+        } else {
+            println!("{}", "Compile receipt written".green());
+            println!("  Receipt: {}", args.output.display());
+            println!("  Artifact hash: {}", receipt["artifact_hash"].as_str().unwrap_or("missing"));
+            println!("  Metadata hash: {}", receipt["metadata_hash"].as_str().unwrap_or("missing"));
+            println!("  Signatures: unsigned advisory");
+            Ok(())
+        }
+    }
+
+    fn sign_receipt(args: SignReceiptArgs) -> Result<()> {
+        let mut receipt = read_json_value(&args.receipt)?;
+        validate_compile_receipt_schema(&receipt)?;
+        let payload_hash = compile_receipt_payload_hash(&receipt)?;
+        let key_bytes = read_ed25519_pkcs8_key_arg(&args.key)?;
+        let key_pair = ring::signature::Ed25519KeyPair::from_pkcs8(&key_bytes)
+            .map_err(|error| crate::error::CompileError::without_span(format!("failed to load Ed25519 private key: {:?}", error)))?;
+        let signature = key_pair.sign(payload_hash.as_bytes());
+        let signature_entry = serde_json::json!({
+            "role": validate_receipt_signature_role(&args.role)?,
+            "algorithm": "ed25519",
+            "public_key": format!("ed25519-pk:{}", base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(key_pair.public_key().as_ref())),
+            "payload_hash": payload_hash,
+            "signature": format!("ed25519-sig:{}", base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(signature.as_ref())),
+        });
+        let object = receipt.as_object_mut().ok_or_else(|| {
+            crate::error::CompileError::without_span("compile receipt must be a JSON object before it can be signed")
+        })?;
+        match object.get_mut("signatures") {
+            Some(serde_json::Value::Array(signatures)) => signatures.push(signature_entry.clone()),
+            Some(_) => {
+                return Err(crate::error::CompileError::without_span(
+                    "compile receipt signatures field must be an array before it can be signed",
+                ));
+            }
+            None => {
+                object.insert("signatures".to_string(), serde_json::json!([signature_entry.clone()]));
+            }
+        }
+
+        let output_path = args.output.unwrap_or_else(|| args.receipt.clone());
+        if let Some(parent) = output_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(
+            &output_path,
+            serde_json::to_vec_pretty(&receipt)
+                .map_err(|error| crate::error::CompileError::without_span(format!("failed to serialize signed receipt: {}", error)))?,
+        )?;
+
+        if args.json {
+            let summary = serde_json::json!({
+                "status": "ok",
+                "receipt": output_path.display().to_string(),
+                "role": signature_entry["role"],
+                "algorithm": signature_entry["algorithm"],
+                "public_key": signature_entry["public_key"],
+                "payload_hash": signature_entry["payload_hash"],
+            });
+            print_json(&summary)
+        } else {
+            println!("{}", "Compile receipt signed".green());
+            println!("  Receipt: {}", output_path.display());
+            println!("  Role: {}", signature_entry["role"].as_str().unwrap_or("unknown"));
+            println!("  Payload hash: {}", signature_entry["payload_hash"].as_str().unwrap_or("missing"));
+            Ok(())
+        }
+    }
+
+    fn verify_receipt(args: VerifyReceiptArgs) -> Result<()> {
+        let receipt = read_json_value(&args.receipt)?;
+        let artifact_bytes = std::fs::read(&args.artifact).map_err(|error| {
+            crate::error::CompileError::without_span(format!("failed to read artifact '{}': {}", args.artifact.display(), error))
+        })?;
+        let metadata_bytes = std::fs::read(&args.metadata).map_err(|error| {
+            crate::error::CompileError::without_span(format!("failed to read metadata '{}': {}", args.metadata.display(), error))
+        })?;
+        let metadata: CompileMetadata = serde_json::from_slice(&metadata_bytes).map_err(|error| {
+            crate::error::CompileError::without_span(format!("failed to parse metadata '{}': {}", args.metadata.display(), error))
+        })?;
+        let validated = validate_artifact_metadata(artifact_bytes, metadata)?;
+        let report = verify_compile_receipt_against_metadata(&receipt, &validated.metadata)?;
+
+        if args.json {
+            let summary = serde_json::json!({
+                "status": "ok",
+                "receipt": args.receipt.display().to_string(),
+                "metadata": args.metadata.display().to_string(),
+                "artifact": args.artifact.display().to_string(),
+                "payload_hash": report.payload_hash,
+                "signatures_verified": report.signatures_verified,
+                "unsigned_advisory": report.unsigned_advisory,
+            });
+            print_json(&summary)
+        } else {
+            println!("{}", "Compile receipt verification succeeded".green());
+            println!("  Receipt: {}", args.receipt.display());
+            println!("  Artifact: {}", args.artifact.display());
+            println!("  Metadata: {}", args.metadata.display());
+            println!("  Payload hash: {}", report.payload_hash);
+            if report.unsigned_advisory {
+                println!("  Signatures: unsigned advisory");
+            } else {
+                println!("  Signatures verified: {}", report.signatures_verified);
+            }
+            Ok(())
+        }
+    }
+
     fn verify_artifact(args: VerifyArtifactArgs) -> Result<()> {
         let artifact_path = Utf8Path::from_path(&args.artifact).ok_or_else(|| {
             crate::error::CompileError::without_span(format!("artifact path '{}' is not valid UTF-8", args.artifact.display()))
@@ -3065,6 +3293,12 @@ impl CommandExecutor {
                 ..CheckArgs::default()
             },
         )?;
+        let receipt_report = if let Some(receipt_path) = args.receipt.as_deref() {
+            let receipt = read_json_value(receipt_path)?;
+            Some(verify_compile_receipt_against_metadata(&receipt, &result.metadata)?)
+        } else {
+            None
+        };
 
         let expected_target_profile_verified = args.expect_target_profile.is_some();
         let expected_hashes_verified =
@@ -3072,7 +3306,7 @@ impl CommandExecutor {
         let policy_verified = args.production || args.deny_fail_closed || args.deny_ckb_runtime || args.deny_runtime_obligations;
 
         if args.json {
-            let summary = serde_json::json!({
+            let mut summary = serde_json::json!({
                 "status": "ok",
                 "artifact": args.artifact.display().to_string(),
                 "metadata": metadata_path.display().to_string(),
@@ -3114,6 +3348,21 @@ impl CommandExecutor {
                 "policy_verified": policy_verified,
                 "constraints": &result.metadata.constraints,
             });
+            if let Some(object) = summary.as_object_mut() {
+                object.insert("receipt_verified".to_string(), serde_json::json!(receipt_report.is_some()));
+                object.insert(
+                    "receipt_payload_hash".to_string(),
+                    serde_json::json!(receipt_report.as_ref().map(|report| report.payload_hash.as_str())),
+                );
+                object.insert(
+                    "receipt_signatures_verified".to_string(),
+                    serde_json::json!(receipt_report.as_ref().map(|report| report.signatures_verified).unwrap_or(0)),
+                );
+                object.insert(
+                    "receipt_unsigned_advisory".to_string(),
+                    serde_json::json!(receipt_report.as_ref().map(|report| report.unsigned_advisory).unwrap_or(false)),
+                );
+            }
             let json = serde_json::to_string_pretty(&summary).map_err(|error| {
                 crate::error::CompileError::without_span(format!("failed to serialize verification summary: {}", error))
             })?;
@@ -3147,6 +3396,15 @@ impl CommandExecutor {
         }
         if policy_verified {
             println!("  Policy: verified");
+        }
+        if let Some(report) = receipt_report {
+            println!("  Receipt: verified");
+            println!("  Receipt payload hash: {}", report.payload_hash);
+            if report.unsigned_advisory {
+                println!("  Receipt signatures: unsigned advisory");
+            } else {
+                println!("  Receipt signatures verified: {}", report.signatures_verified);
+            }
         }
         Ok(())
     }
@@ -5080,6 +5338,10 @@ fn print_check_failure_json(diagnostics: &[CompileError], target: Option<&str>, 
     }))
 }
 
+fn check_message_format_json(args: &CheckArgs) -> bool {
+    args.message_format.as_deref() == Some("json")
+}
+
 fn diagnostics_json(diagnostics: &[CompileError]) -> Vec<serde_json::Value> {
     diagnostics
         .iter()
@@ -6003,6 +6265,7 @@ fn builder_action_error_contexts_json(actions: &[&crate::ActionMetadata]) -> Vec
                     .collect::<Vec<_>>(),
                 "entry_witness_required": !action.params.is_empty(),
                 "runtimeInputRequirements": action.transaction_runtime_input_requirements,
+                "actionScanSelectors": action_scan_selectors_json(action),
                 "verifierObligations": action.verifier_obligations,
                 "failClosedRuntimeFeatures": action.fail_closed_runtime_features,
             })
@@ -6043,6 +6306,7 @@ fn typescript_builder_manifest(
                     "created_outputs": action.create_set.len(),
                     "mutated_outputs": action.mutate_set.len(),
                     "runtime_input_requirements": action.transaction_runtime_input_requirements.len(),
+                    "action_scan_selectors": action_scan_selectors_json(action),
                     "entry_witness_required": !action.params.is_empty(),
                 })
             })
@@ -6058,6 +6322,8 @@ fn typescript_builder_manifest(
             "cell_data_codec_abi": metadata.cell_data_codec_manifest.abi,
             "requires_dry_run_before_submit": true,
             "must_not_infer_protocol_semantics_from_action_name": true,
+            "action_scan_selectors_schema": "cellscript-action-scan-selectors-v0.21",
+            "action_scan_selector_source": "transaction_runtime_input_requirements",
         }
     })
 }
@@ -6117,6 +6383,7 @@ fn typescript_builder_index(
                 "readRefs": action.read_refs,
                 "verifierObligations": action.verifier_obligations,
                 "runtimeInputRequirements": action.transaction_runtime_input_requirements,
+                "actionScanSelectors": action_scan_selectors_json(action),
                 "failClosedRuntimeFeatures": action.fail_closed_runtime_features,
             })
         })
@@ -6132,6 +6399,7 @@ fn typescript_builder_index(
 
     let mut ts = String::new();
     ts.push_str("export const CELLSCRIPT_BUILDER_SCHEMA = \"cellscript-generated-action-builder-v0.20\" as const;\n");
+    ts.push_str("export const ACTION_SCAN_SELECTORS_SCHEMA = \"cellscript-action-scan-selectors-v0.21\" as const;\n");
     ts.push_str(&format!("export const builderManifest = {manifest_json} as const;\n"));
     ts.push_str(&format!("export const metadata = {metadata_json} as const;\n"));
     ts.push_str("export const cellDataCodecManifest = metadata.cell_data_codec_manifest;\n");
@@ -6142,6 +6410,23 @@ fn typescript_builder_index(
         "export type HexString = `0x${string}`;\n\
          export type CellScriptValue = string | number | bigint | boolean | Uint8Array | Record<string, unknown> | null;\n\
          export type CellScriptParams = object;\n\n\
+         export type ActionScanSelectors = Record<string, unknown> & {\n\
+           schema: typeof ACTION_SCAN_SELECTORS_SCHEMA;\n\
+           source?: string;\n\
+           status?: string;\n\
+           selector_count?: number;\n\
+           selectors?: readonly unknown[];\n\
+         };\n\n\
+         export type ScanSelectorEvidence = Record<string, unknown> & {\n\
+           selector_index: number;\n\
+           status: \"resolved\";\n\
+           source?: string;\n\
+           role?: string;\n\
+           binding?: string;\n\
+           feature?: string;\n\
+           component?: string;\n\
+           script_field?: string | null;\n\
+         };\n\n\
          export interface CellScriptLockfilePackage {\n\
            name?: string;\n\
            version?: string;\n\
@@ -6231,11 +6516,15 @@ fn typescript_builder_index(
            artifactHash: string | null;\n\
            targetProfile: string;\n\
            canSubmit: false;\n\
-           requiresLiveCellResolution: true;\n\
-           requiresDeploymentResolution: true;\n\
-           cellDataCodecManifest: typeof cellDataCodecManifest;\n\
-           notProvenByGeneratedBuilder: readonly string[];\n\
-         }\n\n\
+         requiresLiveCellResolution: true;\n\
+         requiresDeploymentResolution: true;\n\
+         cellDataCodecManifest: typeof cellDataCodecManifest;\n\
+         runtimeInputRequirements: readonly unknown[];\n\
+         actionScanSelectors: ActionScanSelectors;\n\
+         verifierObligations: readonly unknown[];\n\
+         failClosedRuntimeFeatures: readonly string[];\n\
+         notProvenByGeneratedBuilder: readonly string[];\n\
+       }\n\n\
          export type ActionBuilderMode = \"build\" | \"dry-run\" | \"submit\";\n\n\
          export interface ActionBuilderResult<P extends CellScriptParams = CellScriptParams> {\n\
            schema: typeof CELLSCRIPT_BUILDER_SCHEMA;\n\
@@ -6262,6 +6551,7 @@ fn typescript_builder_index(
            headerDeps?: readonly unknown[];\n\
            deploymentRef?: unknown;\n\
            lineage?: readonly unknown[];\n\
+           scanSelectorEvidence?: readonly ScanSelectorEvidence[];\n\
          }\n\n\
          export interface CellScriptBuilderRuntime {\n\
            resolveLiveCells<P extends CellScriptParams>(request: LiveCellResolutionRequest<P>): Promise<LiveCellResolutionResult>;\n\
@@ -6292,19 +6582,21 @@ fn typescript_builder_index(
          export interface CellScriptActionErrorContext {\n\
            action: string;\n\
            fields: readonly CellScriptActionFieldContext[];\n\
-           entry_witness_required: boolean;\n\
-           runtimeInputRequirements: readonly unknown[];\n\
-           verifierObligations: readonly unknown[];\n\
-           failClosedRuntimeFeatures: readonly string[];\n\
-         }\n\n\
+         entry_witness_required: boolean;\n\
+         runtimeInputRequirements: readonly unknown[];\n\
+         actionScanSelectors: ActionScanSelectors;\n\
+         verifierObligations: readonly unknown[];\n\
+         failClosedRuntimeFeatures: readonly string[];\n\
+       }\n\n\
          export interface CellScriptRuntimeErrorExplanation extends CellScriptRuntimeErrorInfo {\n\
            action?: string;\n\
            actionFields: readonly CellScriptActionFieldContext[];\n\
-           entryWitnessRequired: boolean;\n\
-           runtimeInputRequirements: readonly unknown[];\n\
-           verifierObligations: readonly unknown[];\n\
-           failClosedRuntimeFeatures: readonly string[];\n\
-         }\n\n",
+         entryWitnessRequired: boolean;\n\
+         runtimeInputRequirements: readonly unknown[];\n\
+         actionScanSelectors?: ActionScanSelectors;\n\
+         verifierObligations: readonly unknown[];\n\
+         failClosedRuntimeFeatures: readonly string[];\n\
+       }\n\n",
     );
     ts.push_str(&format!(
         "const GENERATED_METADATA_HASH = {};\n\
@@ -6353,6 +6645,7 @@ fn typescript_builder_index(
              fields: context.fields.map((field) => ({ ...field })),\n\
              entry_witness_required: context.entry_witness_required,\n\
              runtimeInputRequirements: [...context.runtimeInputRequirements],\n\
+             actionScanSelectors: context.actionScanSelectors as ActionScanSelectors,\n\
              verifierObligations: [...context.verifierObligations],\n\
              failClosedRuntimeFeatures: [...context.failClosedRuntimeFeatures],\n\
            };\n\
@@ -6386,6 +6679,7 @@ fn typescript_builder_index(
              actionFields: context?.fields ?? [],\n\
              entryWitnessRequired: context?.entry_witness_required ?? false,\n\
              runtimeInputRequirements: context?.runtimeInputRequirements ?? [],\n\
+             actionScanSelectors: context?.actionScanSelectors,\n\
              verifierObligations: context?.verifierObligations ?? [],\n\
              failClosedRuntimeFeatures: context?.failClosedRuntimeFeatures ?? [],\n\
            };\n\
@@ -6684,14 +6978,18 @@ fn typescript_builder_index(
         ));
     }
 
-    ts.push_str("function makeActionPlan<P extends CellScriptParams>(action: string, params: P, options: BuildOptions): ActionBuilderPlan<P> {\n");
+    ts.push_str(
+        "function makeActionPlan<P extends CellScriptParams>(action: string, params: P, options: BuildOptions): ActionBuilderPlan<P> {\n  \
+         const actionSpec = actionSpecs.find((item) => item.name === action);\n  \
+         if (!actionSpec) {\n    throw new Error(\"CellScript generated builder has no action spec for '\" + action + \"'\");\n  }\n",
+    );
     ts.push_str("  if (options.lockfile) {\n    assertCellScriptLockfile(options.lockfile);\n  }\n");
     ts.push_str(
         "  if (options.deployment || options.liveDeploymentEvidence || options.trustPolicy) {\n    \
          assertCellScriptDeployment(options.lockfile, options.deployment, options.liveDeploymentEvidence, options.trustPolicy);\n  }\n",
     );
     ts.push_str(&format!(
-        "  return {{\n    schema: CELLSCRIPT_BUILDER_SCHEMA,\n    state: \"GeneratedActionPlan\",\n    status: \"requires-runtime-resolution\",\n    action,\n    params,\n    options,\n    metadataHash: {},\n    artifactHash: {},\n    targetProfile: {},\n    canSubmit: false,\n    requiresLiveCellResolution: true,\n    requiresDeploymentResolution: true,\n    cellDataCodecManifest,\n    notProvenByGeneratedBuilder: [\n      \"live_cell_availability\",\n      \"deployment_live_chain_match\",\n      \"capacity_fee_balance\",\n      \"signature_authority\",\n      \"ckb_vm_execution\",\n      \"cell_data_codec_materialization\",\n      \"tx_pool_acceptance\",\n      \"submission\"\n    ] as const,\n  }};\n}}\n\n",
+        "  return {{\n    schema: CELLSCRIPT_BUILDER_SCHEMA,\n    state: \"GeneratedActionPlan\",\n    status: \"requires-runtime-resolution\",\n    action,\n    params,\n    options,\n    metadataHash: {},\n    artifactHash: {},\n    targetProfile: {},\n    canSubmit: false,\n    requiresLiveCellResolution: true,\n    requiresDeploymentResolution: true,\n    cellDataCodecManifest,\n    runtimeInputRequirements: [...actionSpec.runtimeInputRequirements],\n    actionScanSelectors: actionSpec.actionScanSelectors as ActionScanSelectors,\n    verifierObligations: [...actionSpec.verifierObligations],\n    failClosedRuntimeFeatures: [...actionSpec.failClosedRuntimeFeatures],\n    notProvenByGeneratedBuilder: [\n      \"live_cell_availability\",\n      \"deployment_live_chain_match\",\n      \"capacity_fee_balance\",\n      \"signature_authority\",\n      \"ckb_vm_execution\",\n      \"cell_data_codec_materialization\",\n      \"tx_pool_acceptance\",\n      \"submission\"\n    ] as const,\n  }};\n}}\n\n",
         typescript_string_literal(metadata_hash),
         metadata.artifact_hash.as_deref().map(typescript_string_literal).unwrap_or_else(|| "null".to_string()),
         typescript_string_literal(&metadata.target_profile.name)
@@ -6704,7 +7002,7 @@ fn typescript_builder_index(
            }\n\
            return value as Record<string, unknown>;\n\
          }\n\n\
-         function assertLiveCellResolutionResult(value: unknown): LiveCellResolutionResult {\n\
+         function assertLiveCellResolutionResult<P extends CellScriptParams>(value: unknown, plan: ActionBuilderPlan<P>): LiveCellResolutionResult {\n\
            const record = assertRuntimeObject(value, \"resolveLiveCells result\");\n\
            for (const field of [\"inputs\", \"referenceInputs\", \"cellDeps\", \"headerDeps\", \"lineage\"] as const) {\n\
              const candidate = record[field];\n\
@@ -6712,7 +7010,74 @@ fn typescript_builder_index(
                throw new Error(\"CellScript runtime builder-shape mismatch: resolveLiveCells.\" + field + \" must be an array when present\");\n\
              }\n\
            }\n\
+           assertScanSelectorEvidence(record.scanSelectorEvidence, plan);\n\
            return value as LiveCellResolutionResult;\n\
+         }\n\n\
+         function assertScanSelectorEvidence<P extends CellScriptParams>(value: unknown, plan: ActionBuilderPlan<P>): void {\n\
+           const selectors = actionScanSelectorItems(plan.actionScanSelectors);\n\
+           if (selectors.length === 0) {\n\
+             if (value !== undefined && !Array.isArray(value)) {\n\
+               throw new Error(\"CellScript runtime builder-shape mismatch: resolveLiveCells.scanSelectorEvidence must be an array when present\");\n\
+             }\n\
+             return;\n\
+           }\n\
+           if (!Array.isArray(value)) {\n\
+             throw new Error(\"CellScript runtime builder-shape mismatch: resolveLiveCells.scanSelectorEvidence is required for action scan selectors\");\n\
+           }\n\
+           if (value.length !== selectors.length) {\n\
+             throw new Error(\"CellScript runtime builder-shape mismatch: resolveLiveCells.scanSelectorEvidence length \" + value.length + \" does not match actionScanSelectors.selector_count \" + selectors.length);\n\
+           }\n\
+           const selectorsByIndex = new Map<number, Record<string, unknown>>();\n\
+           selectors.forEach((selector, fallbackIndex) => {\n\
+             selectorsByIndex.set(selectorIndex(selector, fallbackIndex), selector);\n\
+           });\n\
+           for (const item of value) {\n\
+             const evidence = assertRuntimeObject(item, \"scanSelectorEvidence item\");\n\
+             const rawIndex = evidence.selector_index;\n\
+             if (typeof rawIndex !== \"number\" || !Number.isInteger(rawIndex)) {\n\
+               throw new Error(\"CellScript runtime builder-shape mismatch: scanSelectorEvidence.selector_index must be an integer\");\n\
+             }\n\
+             const selector = selectorsByIndex.get(rawIndex);\n\
+             if (!selector) {\n\
+               throw new Error(\"CellScript runtime builder-shape mismatch: scanSelectorEvidence selector_index \" + rawIndex + \" is not declared by actionScanSelectors\");\n\
+             }\n\
+             if (evidence.status !== \"resolved\") {\n\
+               throw new Error(\"CellScript runtime builder-shape mismatch: scanSelectorEvidence.status for selector \" + rawIndex + \" must be 'resolved'\");\n\
+             }\n\
+             assertSelectorEvidenceField(evidence, selector, \"source\", \"ckb_source\", rawIndex);\n\
+             assertSelectorEvidenceField(evidence, selector, \"role\", \"role\", rawIndex);\n\
+             assertSelectorEvidenceField(evidence, selector, \"binding\", \"binding\", rawIndex);\n\
+             assertSelectorEvidenceField(evidence, selector, \"feature\", \"feature\", rawIndex);\n\
+             assertSelectorEvidenceField(evidence, selector, \"component\", \"component\", rawIndex);\n\
+             assertSelectorEvidenceField(evidence, selector, \"script_field\", \"script_field\", rawIndex);\n\
+           }\n\
+         }\n\n\
+         function actionScanSelectorItems(actionScanSelectors: ActionScanSelectors): Record<string, unknown>[] {\n\
+           const selectors = actionScanSelectors.selectors;\n\
+           return Array.isArray(selectors) ? selectors.filter(isRuntimeRecord) : [];\n\
+         }\n\n\
+         function isRuntimeRecord(value: unknown): value is Record<string, unknown> {\n\
+           return typeof value === \"object\" && value !== null && !Array.isArray(value);\n\
+         }\n\n\
+         function selectorIndex(selector: Record<string, unknown>, fallbackIndex: number): number {\n\
+           const value = selector.selector_index;\n\
+           return typeof value === \"number\" && Number.isInteger(value) ? value : fallbackIndex;\n\
+         }\n\n\
+         function assertSelectorEvidenceField(\n\
+           evidence: Record<string, unknown>,\n\
+           selector: Record<string, unknown>,\n\
+           evidenceField: string,\n\
+           selectorField: string,\n\
+           selectorIndex: number,\n\
+         ): void {\n\
+           const expected = selector[selectorField];\n\
+           const actual = evidence[evidenceField];\n\
+           if (expected === undefined || expected === null || actual === undefined || actual === null) {\n\
+             return;\n\
+           }\n\
+           if (actual !== expected) {\n\
+             throw new Error(\"CellScript runtime builder-shape mismatch: scanSelectorEvidence.\" + evidenceField + \" mismatch for selector \" + selectorIndex);\n\
+           }\n\
          }\n\n\
          function assertBuiltTransaction(value: unknown): unknown {\n\
            if (value === undefined || value === null) {\n\
@@ -6755,7 +7120,7 @@ fn typescript_builder_index(
            plan: ActionBuilderPlan<P>,\n\
            options: BuildOptions,\n\
          ): Promise<ActionBuilderResult<P>> {\n\
-           const liveCellResolution = assertLiveCellResolutionResult(await runtime.resolveLiveCells({ plan, options }));\n\
+           const liveCellResolution = assertLiveCellResolutionResult(await runtime.resolveLiveCells({ plan, options }), plan);\n\
            const transaction = assertBuiltTransaction(await runtime.buildTransaction({ ...plan, liveCellResolution }));\n\
            const result: ActionBuilderResult<P> = {\n\
              schema: CELLSCRIPT_BUILDER_SCHEMA,\n\
@@ -6813,6 +7178,21 @@ fn typescript_builder_test(actions: &[&crate::ActionMetadata]) -> Result<String>
     js.push_str(&format!("const actionCases = {cases_json};\n"));
     js.push_str("const WRONG_HASH = \"0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\";\n\n");
     js.push_str(
+        "function selectorEvidenceForPlan(plan) {\n\
+           const selectors = Array.isArray(plan.actionScanSelectors?.selectors) ? plan.actionScanSelectors.selectors : [];\n\
+           return selectors.map((selector, fallbackIndex) => ({\n\
+             selector_index: Number.isInteger(selector.selector_index) ? selector.selector_index : fallbackIndex,\n\
+             status: \"resolved\",\n\
+             source: selector.ckb_source,\n\
+             role: selector.role,\n\
+             binding: selector.binding,\n\
+             feature: selector.feature,\n\
+             component: selector.component,\n\
+             script_field: selector.script_field,\n\
+           }));\n\
+         }\n\n",
+    );
+    js.push_str(
         "test(\"plans all generated actions without submitting\", () => {\n\
            for (const actionCase of actionCases) {\n\
              const plan = builder[actionCase.plan](actionCase.params);\n\
@@ -6823,6 +7203,9 @@ fn typescript_builder_test(actions: &[&crate::ActionMetadata]) -> Result<String>
              assert.equal(plan.canSubmit, false);\n\
              assert.equal(plan.requiresLiveCellResolution, true);\n\
              assert.equal(plan.requiresDeploymentResolution, true);\n\
+             assert.equal(plan.actionScanSelectors.schema, builder.ACTION_SCAN_SELECTORS_SCHEMA);\n\
+             assert.equal(plan.actionScanSelectors.source, \"transaction_runtime_input_requirements\");\n\
+             assert.equal(plan.runtimeInputRequirements.length, plan.actionScanSelectors.selector_count);\n\
              assert.deepEqual(plan.params, actionCase.params);\n\
            }\n\
          });\n\n\
@@ -6832,7 +7215,9 @@ fn typescript_builder_test(actions: &[&crate::ActionMetadata]) -> Result<String>
            const runtime = {\n\
              async resolveLiveCells(request) {\n\
                calls.push([\"resolveLiveCells\", request.plan.action]);\n\
-               return { inputs: [\"input-0\"], cellDeps: [\"dep-0\"], lineage: [] };\n\
+               assert.equal(request.plan.actionScanSelectors.schema, builder.ACTION_SCAN_SELECTORS_SCHEMA);\n\
+               assert.equal(request.plan.actionScanSelectors.source, \"transaction_runtime_input_requirements\");\n\
+               return { inputs: [\"input-0\"], cellDeps: [\"dep-0\"], lineage: [], scanSelectorEvidence: selectorEvidenceForPlan(request.plan) };\n\
              },\n\
              async buildTransaction(plan) {\n\
                calls.push([\"buildTransaction\", plan.action]);\n\
@@ -6855,7 +7240,7 @@ fn typescript_builder_test(actions: &[&crate::ActionMetadata]) -> Result<String>
            const runtime = {\n\
              async resolveLiveCells(request) {\n\
                calls.push([\"resolveLiveCells\", request.plan.action]);\n\
-               return { inputs: [\"input-0\"], cellDeps: [\"dep-0\"], lineage: [] };\n\
+               return { inputs: [\"input-0\"], cellDeps: [\"dep-0\"], lineage: [], scanSelectorEvidence: selectorEvidenceForPlan(request.plan) };\n\
              },\n\
              async buildTransaction(plan) {\n\
                calls.push([\"buildTransaction\", plan.action]);\n\
@@ -6887,12 +7272,27 @@ fn typescript_builder_test(actions: &[&crate::ActionMetadata]) -> Result<String>
          });\n\n\
          test(\"rejects missing runtime adapters and malformed runtime shapes\", async () => {\n\
            const [first] = actionCases;\n\
+           const firstPlan = builder[first.plan](first.params);\n\
            const noDryRunRuntime = {\n\
-             async resolveLiveCells() { return { inputs: [] }; },\n\
+             async resolveLiveCells(request) { return { inputs: [], scanSelectorEvidence: selectorEvidenceForPlan(request.plan) }; },\n\
              async buildTransaction() { return { tx: true }; },\n\
            };\n\
            const badShapeRuntime = {\n\
              async resolveLiveCells() { return { inputs: \"not-an-array\" }; },\n\
+             async buildTransaction() { return { tx: true }; },\n\
+           };\n\
+           const missingSelectorEvidenceRuntime = {\n\
+             async resolveLiveCells() { return { inputs: [] }; },\n\
+             async buildTransaction() { return { tx: true }; },\n\
+           };\n\
+           const mismatchedSelectorEvidenceRuntime = {\n\
+             async resolveLiveCells(request) {\n\
+               const evidence = selectorEvidenceForPlan(request.plan);\n\
+               if (evidence.length > 0) {\n\
+                 evidence[0] = { ...evidence[0], role: \"wrong-role\" };\n\
+               }\n\
+               return { inputs: [], scanSelectorEvidence: evidence };\n\
+             },\n\
              async buildTransaction() { return { tx: true }; },\n\
            };\n\
            await assert.rejects(\n\
@@ -6903,6 +7303,16 @@ fn typescript_builder_test(actions: &[&crate::ActionMetadata]) -> Result<String>
              () => builder.createActionBuilder(badShapeRuntime)[first.method](first.params),\n\
              /builder-shape mismatch/,\n\
            );\n\
+           if ((firstPlan.actionScanSelectors.selectors ?? []).length > 0) {\n\
+             await assert.rejects(\n\
+               () => builder.createActionBuilder(missingSelectorEvidenceRuntime)[first.method](first.params),\n\
+               /scanSelectorEvidence/,\n\
+             );\n\
+             await assert.rejects(\n\
+               () => builder.createActionBuilder(mismatchedSelectorEvidenceRuntime)[first.method](first.params),\n\
+               /scanSelectorEvidence.role mismatch/,\n\
+             );\n\
+           }\n\
          });\n\n\
          test(\"maps runtime errors to action field context\", () => {\n\
            const [first] = actionCases;\n\
@@ -8214,7 +8624,7 @@ fn evidence_schema_for_assumption(assumption: &crate::BuilderAssumptionMetadata)
         payload_objects.push(serde_json::json!({
             "name": "capacity",
             "required_fields": ["occupied_capacity_shannons", "tx_size_bytes", "under_capacity_output_indexes"],
-            "failure_rule": "under_capacity_output_indexes must be an empty array for validate-tx success",
+            "failure_rule": "under_capacity_output_indexes must be an empty array for tx validate success",
         }));
     }
     if assumption.kind == "type_id_builder_plan" {
@@ -8251,11 +8661,11 @@ fn evidence_schema_for_assumption(assumption: &crate::BuilderAssumptionMetadata)
         "payload_objects": payload_objects,
         "cross_checks": [
             "array evidence items must include numeric index fields that bind to the transaction array",
-            "when evidence and the indexed transaction object both expose a concrete field, validate-tx requires equality",
+            "when evidence and the indexed transaction object both expose a concrete field, tx validate requires equality",
             "capacity evidence must fail closed when under-capacity outputs are reported",
             "TYPE_ID evidence must use canonical 32-byte args and match output type args when present"
         ],
-        "note": "builder must replace this requirement with concrete evidence before validate-tx can pass",
+        "note": "builder must replace this requirement with concrete evidence before tx validate can pass",
     })
 }
 
@@ -8510,6 +8920,300 @@ fn trace_tx_report_json(metadata: &CompileMetadata, validation: &crate::TxValida
     })
 }
 
+fn protocol_graph_json(metadata: &CompileMetadata) -> serde_json::Value {
+    let mut vertices = BTreeMap::<String, serde_json::Value>::new();
+    let type_names = metadata.types.iter().map(|ty| ty.name.clone()).collect::<BTreeSet<_>>();
+
+    for ty in &metadata.types {
+        if ty.flow_states.is_empty() {
+            protocol_graph_insert_vertex(
+                &mut vertices,
+                protocol_graph_type_vertex_id(&ty.name),
+                &ty.name,
+                &ty.kind,
+                Some(&ty.name),
+                None,
+                false,
+            );
+        } else {
+            for state in &ty.flow_states {
+                protocol_graph_insert_vertex(
+                    &mut vertices,
+                    protocol_graph_state_vertex_id(&ty.name, state),
+                    &format!("{}[{}]", ty.name, state),
+                    &ty.kind,
+                    Some(&ty.name),
+                    Some(state),
+                    false,
+                );
+            }
+        }
+    }
+
+    let mut edges = Vec::new();
+    let mut seen_edges = BTreeSet::new();
+    for action in &metadata.actions {
+        for edge in &action.state_transition_edges {
+            let source = protocol_graph_state_vertex_id(&edge.type_name, &edge.from);
+            let target = protocol_graph_state_vertex_id(&edge.type_name, &edge.to);
+            protocol_graph_push_edge(
+                &mut edges,
+                &mut seen_edges,
+                action,
+                source,
+                target,
+                "state-transition",
+                Some(serde_json::json!({
+                    "type_name": &edge.type_name,
+                    "field_name": &edge.field_name,
+                    "from": &edge.from,
+                    "to": &edge.to,
+                    "from_index": edge.from_index,
+                    "to_index": edge.to_index,
+                    "input_binding": &edge.input_binding,
+                    "output_binding": &edge.output_binding,
+                })),
+            );
+        }
+
+        if action.state_transition_edges.is_empty() {
+            let (sources, targets) = protocol_graph_type_pattern_vertices(action, &type_names);
+            for source in sources {
+                protocol_graph_ensure_vertex(&mut vertices, &source);
+                for target in &targets {
+                    protocol_graph_ensure_vertex(&mut vertices, target);
+                    protocol_graph_push_edge(
+                        &mut edges,
+                        &mut seen_edges,
+                        action,
+                        source.clone(),
+                        target.clone(),
+                        "type-pattern",
+                        None,
+                    );
+                }
+            }
+        }
+    }
+
+    let vertex_values = vertices.values().cloned().collect::<Vec<_>>();
+    let cycle_detected = protocol_graph_has_cycle(&edges);
+    let self_loop_count = edges.iter().filter(|edge| edge.get("source_vertex") == edge.get("target_vertex")).count();
+
+    serde_json::json!({
+        "status": "ok",
+        "schema": "cellscript-protocol-graph-v0.21",
+        "derivation": "derived-from-compile-metadata",
+        "consensus_checked": false,
+        "module": metadata.module,
+        "target_profile": metadata.target_profile.name,
+        "vertex_count": vertex_values.len(),
+        "edge_count": edges.len(),
+        "cycle_detected": cycle_detected,
+        "self_loop_count": self_loop_count,
+        "vertices": vertex_values,
+        "edges": edges,
+    })
+}
+
+fn protocol_graph_insert_vertex(
+    vertices: &mut BTreeMap<String, serde_json::Value>,
+    id: String,
+    label: &str,
+    kind: &str,
+    type_name: Option<&str>,
+    state: Option<&str>,
+    synthetic: bool,
+) {
+    vertices.entry(id.clone()).or_insert_with(|| {
+        serde_json::json!({
+            "id": id,
+            "label": label,
+            "kind": kind,
+            "type_name": type_name,
+            "state": state,
+            "synthetic": synthetic,
+        })
+    });
+}
+
+fn protocol_graph_ensure_vertex(vertices: &mut BTreeMap<String, serde_json::Value>, id: &str) {
+    if vertices.contains_key(id) {
+        return;
+    }
+    let (label, kind) = match id {
+        "transaction:start" => ("transaction start", "transaction-boundary"),
+        "transaction:end" => ("transaction end", "transaction-boundary"),
+        other => (other, "type"),
+    };
+    protocol_graph_insert_vertex(vertices, id.to_string(), label, kind, None, None, true);
+}
+
+fn protocol_graph_push_edge(
+    edges: &mut Vec<serde_json::Value>,
+    seen: &mut BTreeSet<(String, String, String, String)>,
+    action: &crate::ActionMetadata,
+    source: String,
+    target: String,
+    derivation: &str,
+    state_transition: Option<serde_json::Value>,
+) {
+    let key = (action.name.clone(), source.clone(), target.clone(), derivation.to_string());
+    if !seen.insert(key) {
+        return;
+    }
+    let proof_plan_ids = action.proof_plan.iter().map(|plan| format!("{}:{}", plan.origin, plan.feature)).collect::<Vec<_>>();
+    let builder_assumptions = action
+        .proof_plan
+        .iter()
+        .flat_map(|plan| plan.builder_assumptions.iter().cloned())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let source_span = action.proof_plan.iter().find_map(|plan| plan.source_span.clone());
+
+    edges.push(serde_json::json!({
+        "action_name": &action.name,
+        "source_vertex": source,
+        "target_vertex": target,
+        "derivation": derivation,
+        "state_transition": state_transition,
+        "consume_set": &action.consume_set,
+        "read_refs": &action.read_refs,
+        "create_set": &action.create_set,
+        "mutate_set": &action.mutate_set,
+        "proof_plan_ids": proof_plan_ids,
+        "ckb_runtime_accesses": &action.ckb_runtime_accesses,
+        "builder_assumptions": builder_assumptions,
+        "touches_shared": &action.touches_shared,
+        "source_span": source_span,
+    }));
+}
+
+fn protocol_graph_type_pattern_vertices(action: &crate::ActionMetadata, type_names: &BTreeSet<String>) -> (Vec<String>, Vec<String>) {
+    let param_types = action
+        .params
+        .iter()
+        .filter_map(|param| protocol_graph_base_type(&param.ty, type_names).map(|ty| (param.name.as_str(), ty)))
+        .collect::<BTreeMap<_, _>>();
+    let mut sources = BTreeSet::new();
+    let mut targets = BTreeSet::new();
+
+    for pattern in &action.consume_set {
+        if let Some(ty) = param_types.get(pattern.binding.as_str()) {
+            sources.insert(protocol_graph_type_vertex_id(ty));
+        }
+    }
+    for pattern in &action.mutate_set {
+        sources.insert(protocol_graph_type_vertex_id(&pattern.ty));
+        targets.insert(protocol_graph_type_vertex_id(&pattern.ty));
+    }
+    for pattern in &action.create_set {
+        targets.insert(protocol_graph_type_vertex_id(&pattern.ty));
+    }
+
+    if sources.is_empty() {
+        sources.insert("transaction:start".to_string());
+    }
+    if targets.is_empty() {
+        targets.insert("transaction:end".to_string());
+    }
+
+    (sources.into_iter().collect(), targets.into_iter().collect())
+}
+
+fn protocol_graph_base_type(ty: &str, type_names: &BTreeSet<String>) -> Option<String> {
+    let trimmed = ty.trim().trim_start_matches('&').trim();
+    let trimmed = trimmed.strip_prefix("mut ").unwrap_or(trimmed).trim();
+    let base = trimmed.split('<').next().unwrap_or(trimmed).trim();
+    type_names.contains(base).then(|| base.to_string())
+}
+
+fn protocol_graph_type_vertex_id(type_name: &str) -> String {
+    type_name.to_string()
+}
+
+fn protocol_graph_state_vertex_id(type_name: &str, state: &str) -> String {
+    format!("{}:{}", type_name, state)
+}
+
+fn protocol_graph_has_cycle(edges: &[serde_json::Value]) -> bool {
+    let mut adjacency = BTreeMap::<String, Vec<String>>::new();
+    for edge in edges {
+        let Some(source) = edge.get("source_vertex").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        let Some(target) = edge.get("target_vertex").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        adjacency.entry(source.to_string()).or_default().push(target.to_string());
+    }
+
+    let mut visiting = BTreeSet::new();
+    let mut visited = BTreeSet::new();
+    for node in adjacency.keys() {
+        if protocol_graph_cycle_visit(node, &adjacency, &mut visiting, &mut visited) {
+            return true;
+        }
+    }
+    false
+}
+
+fn protocol_graph_cycle_visit(
+    node: &str,
+    adjacency: &BTreeMap<String, Vec<String>>,
+    visiting: &mut BTreeSet<String>,
+    visited: &mut BTreeSet<String>,
+) -> bool {
+    if visited.contains(node) {
+        return false;
+    }
+    if !visiting.insert(node.to_string()) {
+        return true;
+    }
+    if let Some(targets) = adjacency.get(node) {
+        for target in targets {
+            if protocol_graph_cycle_visit(target, adjacency, visiting, visited) {
+                return true;
+            }
+        }
+    }
+    visiting.remove(node);
+    visited.insert(node.to_string());
+    false
+}
+
+fn protocol_graph_mermaid(graph: &serde_json::Value) -> String {
+    let mut output = String::from("flowchart LR\n");
+    let mut ids = BTreeMap::new();
+    if let Some(vertices) = graph.get("vertices").and_then(serde_json::Value::as_array) {
+        for (index, vertex) in vertices.iter().enumerate() {
+            let id = vertex.get("id").and_then(serde_json::Value::as_str).unwrap_or("vertex");
+            let label = vertex.get("label").and_then(serde_json::Value::as_str).unwrap_or(id);
+            let mermaid_id = format!("v{}", index);
+            ids.insert(id.to_string(), mermaid_id.clone());
+            output.push_str(&format!("  {}[\"{}\"]\n", mermaid_id, protocol_graph_mermaid_escape(label)));
+        }
+    }
+    if let Some(edges) = graph.get("edges").and_then(serde_json::Value::as_array) {
+        for edge in edges {
+            let Some(source) = edge.get("source_vertex").and_then(serde_json::Value::as_str).and_then(|id| ids.get(id)) else {
+                continue;
+            };
+            let Some(target) = edge.get("target_vertex").and_then(serde_json::Value::as_str).and_then(|id| ids.get(id)) else {
+                continue;
+            };
+            let action = edge.get("action_name").and_then(serde_json::Value::as_str).unwrap_or("action");
+            output.push_str(&format!("  {} -->|{}| {}\n", source, protocol_graph_mermaid_escape(action), target));
+        }
+    }
+    output
+}
+
+fn protocol_graph_mermaid_escape(label: &str) -> String {
+    label.replace('\\', "\\\\").replace('"', "\\\"").replace('|', " ")
+}
+
 fn audit_bundle_json(metadata: &CompileMetadata) -> serde_json::Value {
     // Source-to-codegen mapping: link ProofPlan records to source spans, IR effects, and codegen coverage
     let source_to_codegen = metadata
@@ -8610,6 +9314,8 @@ fn audit_bundle_json(metadata: &CompileMetadata) -> serde_json::Value {
         "source_to_codegen": source_to_codegen,
         "proof_plan": metadata.runtime.proof_plan,
         "proof_plan_soundness": metadata.runtime.proof_plan_soundness,
+        "protocol_graph": protocol_graph_json(metadata),
+        "template_layouts": metadata.template_layouts,
         "builder_assumptions": metadata.runtime.builder_assumptions,
         "constraints": metadata.constraints,
         "actions": action_traces,
@@ -9091,6 +9797,344 @@ fn hash_json_value<T: serde::Serialize>(label: &str, value: &T) -> Result<String
     let bytes = serde_json::to_vec(value)
         .map_err(|e| crate::error::CompileError::without_span(format!("failed to serialize {} for digest: {}", label, e)))?;
     Ok(crate::hex_encode(&crate::ckb_blake2b256(&bytes)))
+}
+
+struct CompileReceiptVerificationReport {
+    payload_hash: String,
+    signatures_verified: usize,
+    unsigned_advisory: bool,
+}
+
+fn compile_receipt_json(metadata: &CompileMetadata) -> Result<serde_json::Value> {
+    let proof_plan_hash = hash_json_value("proof_plan", &metadata.runtime.proof_plan)?;
+    let protocol_graph = protocol_graph_json(metadata);
+    let protocol_graph_hash = hash_json_value("protocol_graph", &protocol_graph)?;
+    let template_layout_hash = if metadata.template_layouts.is_empty() {
+        serde_json::Value::Null
+    } else {
+        serde_json::Value::String(hash_json_value("template_layouts", &metadata.template_layouts)?)
+    };
+    Ok(serde_json::json!({
+        "schema": "cellscript-compile-receipt-v1",
+        "compiler_version": metadata.compiler_version,
+        "rust_toolchain": cellscript_rust_toolchain(),
+        "target": metadata.artifact_format,
+        "target_profile": metadata.target_profile.name,
+        "source_hash": metadata.source_hash,
+        "source_content_hash": metadata.source_content_hash,
+        "ast_normalised_hash": serde_json::Value::Null,
+        "ir_normalised_hash": serde_json::Value::Null,
+        "normalisation_status": "ast-ir-normalised-hashes-not-yet-emitted",
+        "proof_plan_hash": proof_plan_hash,
+        "protocol_graph_hash": protocol_graph_hash,
+        "template_layout_hash": template_layout_hash,
+        "artifact_hash": metadata.artifact_hash,
+        "metadata_hash": hash_json_value("metadata", metadata)?,
+        "metadata_schema_version": metadata.metadata_schema_version,
+        "metadata_schema_versions": metadata_schema_versions_json(metadata),
+        "signatures": [],
+    }))
+}
+
+fn verify_compile_receipt_against_metadata(
+    receipt: &serde_json::Value,
+    metadata: &CompileMetadata,
+) -> Result<CompileReceiptVerificationReport> {
+    validate_compile_receipt_schema(receipt)?;
+    let expected = compile_receipt_json(metadata)?;
+    for pointer in [
+        "/compiler_version",
+        "/rust_toolchain",
+        "/target",
+        "/target_profile",
+        "/source_hash",
+        "/source_content_hash",
+        "/ast_normalised_hash",
+        "/ir_normalised_hash",
+        "/normalisation_status",
+        "/proof_plan_hash",
+        "/protocol_graph_hash",
+        "/template_layout_hash",
+        "/artifact_hash",
+        "/metadata_hash",
+        "/metadata_schema_version",
+        "/metadata_schema_versions",
+    ] {
+        if receipt.pointer(pointer) != expected.pointer(pointer) {
+            return Err(crate::error::CompileError::without_span(format!(
+                "compile receipt field '{}' does not match validated metadata/artifact evidence",
+                pointer.trim_start_matches('/')
+            )));
+        }
+    }
+    verify_compile_receipt_signatures(receipt)
+}
+
+fn validate_compile_receipt_schema(receipt: &serde_json::Value) -> Result<()> {
+    match receipt.get("schema").and_then(serde_json::Value::as_str) {
+        Some("cellscript-compile-receipt-v1") => Ok(()),
+        Some(schema) => Err(crate::error::CompileError::without_span(format!(
+            "unsupported compile receipt schema '{}'; expected cellscript-compile-receipt-v1",
+            schema
+        ))),
+        None => Err(crate::error::CompileError::without_span("compile receipt is missing schema")),
+    }
+}
+
+fn compile_receipt_payload_hash(receipt: &serde_json::Value) -> Result<String> {
+    let mut unsigned = receipt.clone();
+    let object = unsigned
+        .as_object_mut()
+        .ok_or_else(|| crate::error::CompileError::without_span("compile receipt must be a JSON object before it can be hashed"))?;
+    object.remove("signatures");
+    hash_json_value("compile receipt signing payload", &unsigned)
+}
+
+fn verify_compile_receipt_signatures(receipt: &serde_json::Value) -> Result<CompileReceiptVerificationReport> {
+    let payload_hash = compile_receipt_payload_hash(receipt)?;
+    let signatures = match receipt.get("signatures") {
+        None => return Ok(CompileReceiptVerificationReport { payload_hash, signatures_verified: 0, unsigned_advisory: true }),
+        Some(serde_json::Value::Array(signatures)) => signatures,
+        Some(_) => {
+            return Err(crate::error::CompileError::without_span("compile receipt signatures field must be an array when present"));
+        }
+    };
+    if signatures.is_empty() {
+        return Ok(CompileReceiptVerificationReport { payload_hash, signatures_verified: 0, unsigned_advisory: true });
+    }
+
+    for (index, signature) in signatures.iter().enumerate() {
+        let prefix = format!("compile receipt signatures[{index}]");
+        let algorithm = signature
+            .get("algorithm")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| crate::error::CompileError::without_span(format!("{prefix}.algorithm is required")))?;
+        if algorithm != "ed25519" {
+            return Err(crate::error::CompileError::without_span(format!(
+                "{prefix}.algorithm '{}' is unsupported; expected ed25519",
+                algorithm
+            )));
+        }
+        let signature_payload_hash = signature
+            .get("payload_hash")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| crate::error::CompileError::without_span(format!("{prefix}.payload_hash is required")))?;
+        if signature_payload_hash != payload_hash {
+            return Err(crate::error::CompileError::without_span(format!(
+                "{prefix}.payload_hash does not match current compile receipt payload hash"
+            )));
+        }
+        let public_key = decode_prefixed_base64_field(signature, "public_key", "ed25519-pk:", &prefix)?;
+        let signature_bytes = decode_prefixed_base64_field(signature, "signature", "ed25519-sig:", &prefix)?;
+        ring::signature::UnparsedPublicKey::new(&ring::signature::ED25519, public_key)
+            .verify(payload_hash.as_bytes(), &signature_bytes)
+            .map_err(|_| crate::error::CompileError::without_span(format!("{prefix}.signature failed Ed25519 verification")))?;
+    }
+
+    Ok(CompileReceiptVerificationReport { payload_hash, signatures_verified: signatures.len(), unsigned_advisory: false })
+}
+
+fn decode_prefixed_base64_field(value: &serde_json::Value, field: &str, prefix: &str, diagnostic_prefix: &str) -> Result<Vec<u8>> {
+    let text = value
+        .get(field)
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| crate::error::CompileError::without_span(format!("{diagnostic_prefix}.{field} is required")))?;
+    let encoded = text
+        .strip_prefix(prefix)
+        .ok_or_else(|| crate::error::CompileError::without_span(format!("{diagnostic_prefix}.{field} must start with '{prefix}'")))?;
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(encoded).map_err(|error| {
+        crate::error::CompileError::without_span(format!("{diagnostic_prefix}.{field} has invalid base64url payload: {error}"))
+    })
+}
+
+fn read_ed25519_pkcs8_key_arg(key: &str) -> Result<Vec<u8>> {
+    let key = key.trim();
+    if key.is_empty() {
+        return Err(crate::error::CompileError::without_span("receipt signing key must be non-empty"));
+    }
+    let path = key.strip_prefix('@').unwrap_or(key);
+    if Path::new(path).exists() {
+        return std::fs::read(path)
+            .map_err(|error| crate::error::CompileError::without_span(format!("failed to read Ed25519 key '{}': {}", path, error)));
+    }
+    let encoded = key.strip_prefix("ed25519-pkcs8:").or_else(|| key.strip_prefix("base64:")).unwrap_or(key);
+    base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .or_else(|_| base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(encoded))
+        .map_err(|error| {
+            crate::error::CompileError::without_span(format!(
+                "receipt signing key must be a file path or base64 Ed25519 PKCS#8 DER: {}",
+                error
+            ))
+        })
+}
+
+fn validate_receipt_signature_role(role: &str) -> Result<&str> {
+    match role {
+        "compiler" | "publisher" => Ok(role),
+        other => Err(crate::error::CompileError::without_span(format!(
+            "unsupported receipt signature role '{}'; expected compiler or publisher",
+            other
+        ))),
+    }
+}
+
+fn cellscript_rust_toolchain() -> String {
+    include_str!("../../Cargo.toml")
+        .lines()
+        .find_map(|line| {
+            let line = line.trim();
+            line.strip_prefix("rust-version")
+                .and_then(|rest| rest.split_once('='))
+                .map(|(_, value)| value.trim().trim_matches('"').to_string())
+        })
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
+fn action_scan_selectors_json(action: &crate::ActionMetadata) -> serde_json::Value {
+    let runtime_required_selector_count =
+        action.transaction_runtime_input_requirements.iter().filter(|requirement| requirement.status == "runtime-required").count();
+    let checked_runtime_selector_count =
+        action.transaction_runtime_input_requirements.iter().filter(|requirement| requirement.status == "checked-runtime").count();
+    let ckb_sources = action
+        .transaction_runtime_input_requirements
+        .iter()
+        .map(|requirement| requirement.source.clone())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let selectors = action
+        .transaction_runtime_input_requirements
+        .iter()
+        .enumerate()
+        .map(|(index, requirement)| action_scan_selector_json(action, index, requirement))
+        .collect::<Vec<_>>();
+
+    serde_json::json!({
+        "schema": "cellscript-action-scan-selectors-v0.21",
+        "status": action_scan_selector_status(selectors.len(), runtime_required_selector_count),
+        "evidence_level": "compile-only",
+        "source": "transaction_runtime_input_requirements",
+        "action": action.name,
+        "selector_count": selectors.len(),
+        "checked_runtime_selector_count": checked_runtime_selector_count,
+        "runtime_required_selector_count": runtime_required_selector_count,
+        "ckb_sources": ckb_sources,
+        "selectors": selectors,
+        "non_claims": [
+            "does-not-query-live-cells",
+            "does-not-bind-outpoints",
+            "does-not-prove-ckb-vm-execution",
+            "does-not-prove-tx-pool-acceptance"
+        ],
+    })
+}
+
+fn action_scan_selector_status(selector_count: usize, runtime_required_selector_count: usize) -> &'static str {
+    if selector_count == 0 {
+        "no-action-scans-required"
+    } else if runtime_required_selector_count == 0 {
+        "compile-checked-runtime-selectors"
+    } else {
+        "requires-runtime-resolution"
+    }
+}
+
+fn action_scan_selector_json(
+    action: &crate::ActionMetadata,
+    index: usize,
+    requirement: &crate::TransactionRuntimeInputRequirementMetadata,
+) -> serde_json::Value {
+    serde_json::json!({
+        "selector_index": index,
+        "requirement_index": index,
+        "action": action.name,
+        "scope": requirement.scope,
+        "feature": requirement.feature,
+        "component": requirement.component,
+        "requirement_status": requirement.status,
+        "scan_status": action_scan_requirement_status(requirement),
+        "ckb_source": requirement.source,
+        "role": action_scan_source_role(&requirement.source),
+        "binding": requirement.binding,
+        "field": requirement.field,
+        "abi": requirement.abi,
+        "byte_len": requirement.byte_len,
+        "script_field": action_scan_script_field(requirement),
+        "script_args": serde_json::Value::Null,
+        "args_pattern": action_scan_args_pattern(requirement),
+        "selector": {
+            "kind": action_scan_kind(&requirement.source),
+            "source": requirement.source,
+            "binding": requirement.binding,
+            "field": requirement.field,
+            "component": requirement.component,
+            "abi": requirement.abi,
+        },
+        "resolution": {
+            "status": action_scan_requirement_status(requirement),
+            "blocker": requirement.blocker,
+            "blocker_class": requirement.blocker_class,
+            "adapter_action": action_scan_adapter_action(requirement),
+        },
+    })
+}
+
+fn action_scan_requirement_status(requirement: &crate::TransactionRuntimeInputRequirementMetadata) -> &'static str {
+    if requirement.status == "runtime-required" {
+        "requires-runtime-resolution"
+    } else {
+        "verifier-covered"
+    }
+}
+
+fn action_scan_source_role(source: &str) -> &'static str {
+    match source {
+        "Input" => "transaction-input-live-cell",
+        "Output" => "transaction-output",
+        "InputOutput" => "paired-input-output",
+        "CellDep" => "cell-dep",
+        "HeaderDep" => "header-dep",
+        "Transaction" => "whole-transaction",
+        _ => "runtime-transaction-component",
+    }
+}
+
+fn action_scan_kind(source: &str) -> &'static str {
+    match source {
+        "Input" => "input-cell-selector",
+        "Output" => "output-cell-selector",
+        "InputOutput" => "input-output-pair-selector",
+        "CellDep" => "cell-dep-selector",
+        "HeaderDep" => "header-dep-selector",
+        "Transaction" => "transaction-selector",
+        _ => "transaction-component-selector",
+    }
+}
+
+fn action_scan_script_field(requirement: &crate::TransactionRuntimeInputRequirementMetadata) -> Option<&'static str> {
+    match requirement.field.as_deref() {
+        Some("lock_hash") => Some("lock"),
+        Some("identity" | "ckb_type_script_hash-absence") => Some("type"),
+        _ => None,
+    }
+}
+
+fn action_scan_args_pattern(requirement: &crate::TransactionRuntimeInputRequirementMetadata) -> &'static str {
+    if action_scan_script_field(requirement).is_some() {
+        "runtime-supplied-from-resolved-script"
+    } else {
+        "not-applicable"
+    }
+}
+
+fn action_scan_adapter_action(requirement: &crate::TransactionRuntimeInputRequirementMetadata) -> &'static str {
+    if requirement.status == "runtime-required" {
+        "resolve-or-reject-before-signing"
+    } else {
+        "materialize-and-preserve-verifier-covered-shape"
+    }
 }
 
 fn cellfabric_intent_envelope_json(
@@ -9642,6 +10686,7 @@ fn effective_build_check_args(args: &BuildArgs) -> Result<CheckArgs> {
         target_profile: args.target_profile.clone(),
         features: args.features.clone(),
         json: false,
+        message_format: None,
         production: args.production,
         deny_fail_closed: args.deny_fail_closed,
         deny_ckb_runtime: args.deny_ckb_runtime,
@@ -10081,6 +11126,7 @@ impl CompileTestExpectation {
             target_profile: None,
             features: Vec::new(),
             json: false,
+            message_format: None,
             production: self.production,
             deny_fail_closed: self.deny_fail_closed,
             deny_ckb_runtime: self.deny_ckb_runtime,
@@ -10717,11 +11763,41 @@ fn hex_nibble(byte: u8) -> Option<u8> {
     }
 }
 
+fn warn_legacy_alias(legacy: &str, canonical: &str, json: bool) {
+    if !json && std::io::stderr().is_terminal() {
+        eprintln!("warning: `cellc {legacy}` is a compatibility alias; use `cellc {canonical}`");
+    }
+}
+
+fn cli_no_color_env_set() -> bool {
+    std::env::var_os("NO_COLOR").map(|value| !value.is_empty()).unwrap_or(false)
+}
+
+fn apply_cli_color_policy(color: Option<&str>) {
+    match color.unwrap_or("auto") {
+        "always" => colored::control::set_override(true),
+        "never" => colored::control::set_override(false),
+        _ => {
+            if cli_no_color_env_set() || (!std::io::stdout().is_terminal() && !std::io::stderr().is_terminal()) {
+                colored::control::set_override(false);
+            } else {
+                colored::control::unset_override();
+            }
+        }
+    }
+}
+
 pub struct CliParser;
 
 impl CliParser {
     pub fn parse() -> Command {
-        Self::parse_matches(Self::command().get_matches())
+        let matches = Self::command().get_matches();
+        let color = matches
+            .get_one::<String>("color")
+            .map(String::as_str)
+            .or_else(|| matches.subcommand().and_then(|(_, subcommand)| subcommand.get_one::<String>("color").map(String::as_str)));
+        apply_cli_color_policy(color);
+        Self::parse_matches(matches)
     }
 
     pub fn command() -> clap::Command {
@@ -10732,8 +11808,17 @@ impl CliParser {
             .about("CellScript compiler for CKB blockchain")
             .subcommand_required(true)
             .arg_required_else_help(true)
+            .arg(
+                Arg::new("color")
+                    .long("color")
+                    .value_name("WHEN")
+                    .value_parser(["auto", "always", "never"])
+                    .global(true)
+                    .help("Control ANSI colour output: auto, always, or never"),
+            )
             .subcommand(
                 ClapCommand::new("build")
+                    .display_order(10)
                     .about("Compile the current package")
                     .arg(Arg::new("release").long("release").short('r').action(ArgAction::SetTrue).help("Build in release mode"))
                     .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
@@ -10834,6 +11919,7 @@ impl CliParser {
             )
             .subcommand(
                 ClapCommand::new("fmt")
+                    .display_order(130)
                     .about("Format source code")
                     .arg(Arg::new("check").long("check").action(ArgAction::SetTrue).help("Check formatting without modifying files"))
                     .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON format summary"))
@@ -10841,6 +11927,7 @@ impl CliParser {
             )
             .subcommand(
                 ClapCommand::new("init")
+                    .display_order(140)
                     .about("Create a new package")
                     .arg(Arg::new("name").value_name("NAME").help("Package name"))
                     .arg(Arg::new("path").value_name("PATH").help("Path to create package"))
@@ -10891,6 +11978,7 @@ impl CliParser {
             .subcommand(ClapCommand::new("repl").about("Start interactive REPL"))
             .subcommand(
                 ClapCommand::new("check")
+                    .display_order(20)
                     .about("Type-check and lower the current package without writing artifacts")
                     .arg(
                         Arg::new("all-targets")
@@ -10900,6 +11988,13 @@ impl CliParser {
                     )
                     .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
                     .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON check summary"))
+                    .arg(
+                        Arg::new("message-format")
+                            .long("message-format")
+                            .value_name("FORMAT")
+                            .value_parser(["human", "json"])
+                            .help("Select diagnostic output format without changing successful --json summaries"),
+                    )
                     .arg(
                         Arg::new("production")
                             .long("production")
@@ -10954,6 +12049,7 @@ impl CliParser {
             )
             .subcommand(
                 ClapCommand::new("metadata")
+                    .display_order(30)
                     .about("Emit compile metadata for lowering, scheduler, and CKB runtime auditing")
                     .arg(Arg::new("input").value_name("INPUT").help("Input .cell file, package directory, or Cell.toml"))
                     .arg(Arg::new("output").long("output").short('o').value_name("FILE").help("Write JSON metadata to a file"))
@@ -11008,18 +12104,66 @@ impl CliParser {
             )
             .subcommand(
                 ClapCommand::new("explain")
-                    .about("Explain a CellScript runtime error code")
-                    .arg(Arg::new("code").value_name("CODE").required(true).help("Runtime error code, E-code, or error name"))
-                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON explanation")),
+                    .about("Explain runtime errors, target profiles, ProofPlan records, assumptions, generics, and graph views")
+                    .arg_required_else_help(true)
+                    .arg(Arg::new("code").value_name("CODE").help("Runtime error code, E-code, or error name"))
+                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON explanation"))
+                    .subcommand(
+                        ClapCommand::new("profile")
+                            .about("Explain a CellScript target profile semantic contract")
+                            .arg(Arg::new("profile").value_name("PROFILE").required(true).help("Target profile name, e.g. ckb"))
+                            .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON explanation")),
+                    )
+                    .subcommand(
+                        ClapCommand::new("proof")
+                            .about("Explain Covenant ProofPlan trigger, scope, reads, coverage, and on-chain status")
+                            .arg(Arg::new("input").value_name("INPUT").help("Input .cell file, package directory, or Cell.toml"))
+                            .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
+                            .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
+                            .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON ProofPlan")),
+                    )
+                    .subcommand(
+                        ClapCommand::new("assumptions")
+                            .about("Explain v0.16 builder assumptions derived from ProofPlan metadata")
+                            .arg(Arg::new("input").value_name("INPUT").help("Input .cell file, package directory, or Cell.toml"))
+                            .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
+                            .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
+                            .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
+                    )
+                    .subcommand(
+                        ClapCommand::new("generics")
+                            .about("Explain checked bounded generic collection instantiations")
+                            .arg(Arg::new("input").value_name("INPUT").help("Input .cell file, package directory, or Cell.toml"))
+                            .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
+                            .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
+                            .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON explanation")),
+                    )
+                    .subcommand(
+                        ClapCommand::new("graph")
+                            .about("Derive a cyclic ProtocolGraph audit view from compile metadata")
+                            .arg(Arg::new("input").value_name("INPUT").help("Input .cell file, package directory, or Cell.toml"))
+                            .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
+                            .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
+                            .arg(
+                                Arg::new("format")
+                                    .long("format")
+                                    .value_name("FORMAT")
+                                    .value_parser(["json", "mermaid"])
+                                    .help("ProtocolGraph output format"),
+                            )
+                            .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable ProtocolGraph JSON")),
+                    ),
             )
             .subcommand(
                 ClapCommand::new("explain-profile")
+                    .hide(true)
                     .about("Explain a CellScript target profile semantic contract")
                     .arg(Arg::new("profile").value_name("PROFILE").required(true).help("Target profile name, e.g. ckb"))
                     .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON explanation")),
             )
             .subcommand(
                 ClapCommand::new("explain-proof")
+                    .hide(true)
                     .about("Explain Covenant ProofPlan trigger, scope, reads, coverage, and on-chain status")
                     .arg(Arg::new("input").value_name("INPUT").help("Input .cell file, package directory, or Cell.toml"))
                     .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
@@ -11028,6 +12172,7 @@ impl CliParser {
             )
             .subcommand(
                 ClapCommand::new("explain-assumptions")
+                    .hide(true)
                     .about("Explain v0.16 builder assumptions derived from ProofPlan metadata")
                     .arg(Arg::new("input").value_name("INPUT").help("Input .cell file, package directory, or Cell.toml"))
                     .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
@@ -11036,11 +12181,28 @@ impl CliParser {
             )
             .subcommand(
                 ClapCommand::new("explain-generics")
+                    .hide(true)
                     .about("Explain checked bounded generic collection instantiations")
                     .arg(Arg::new("input").value_name("INPUT").help("Input .cell file, package directory, or Cell.toml"))
                     .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
                     .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
                     .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON explanation")),
+            )
+            .subcommand(
+                ClapCommand::new("explain-graph")
+                    .hide(true)
+                    .about("Derive a cyclic ProtocolGraph audit view from compile metadata")
+                    .arg(Arg::new("input").value_name("INPUT").help("Input .cell file, package directory, or Cell.toml"))
+                    .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
+                    .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
+                    .arg(
+                        Arg::new("format")
+                            .long("format")
+                            .value_name("FORMAT")
+                            .value_parser(["json", "mermaid"])
+                            .help("ProtocolGraph output format"),
+                    )
+                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable ProtocolGraph JSON")),
             )
             .subcommand(
                 ClapCommand::new("opt-report")
@@ -11073,7 +12235,38 @@ impl CliParser {
                     .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
             )
             .subcommand(
+                ClapCommand::new("tx")
+                    .display_order(70)
+                    .about("Validate, solve, and trace transaction evidence")
+                    .subcommand_required(true)
+                    .arg_required_else_help(true)
+                    .subcommand(
+                        ClapCommand::new("validate")
+                            .about("Validate a transaction JSON against v0.16 builder assumptions before signing")
+                            .arg(Arg::new("against").long("against").value_name("METADATA").required(true).help("Metadata JSON"))
+                            .arg(Arg::new("tx").long("tx").value_name("TX_JSON").required(true).help("Transaction JSON"))
+                            .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
+                    )
+                    .subcommand(
+                        ClapCommand::new("solve")
+                            .about("Emit a deterministic v0.16 transaction template from metadata and builder assumptions")
+                            .arg(Arg::new("input").value_name("INPUT").help("Input .cell file, package directory, or Cell.toml"))
+                            .arg(Arg::new("output").long("output").short('o').value_name("FILE").help("Write JSON solver template"))
+                            .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
+                            .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
+                            .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
+                    )
+                    .subcommand(
+                        ClapCommand::new("trace")
+                            .about("Trace a transaction JSON against v0.16 builder assumptions")
+                            .arg(Arg::new("against").long("against").value_name("METADATA").required(true).help("Metadata JSON"))
+                            .arg(Arg::new("tx").long("tx").value_name("TX_JSON").required(true).help("Transaction JSON"))
+                            .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
+                    ),
+            )
+            .subcommand(
                 ClapCommand::new("trace-tx")
+                    .hide(true)
                     .about("Trace a transaction JSON against v0.16 builder assumptions")
                     .arg(Arg::new("against").long("against").value_name("METADATA").required(true).help("Metadata JSON"))
                     .arg(Arg::new("tx").value_name("TX_JSON").required(true).help("Transaction JSON"))
@@ -11090,6 +12283,7 @@ impl CliParser {
             )
             .subcommand(
                 ClapCommand::new("validate-tx")
+                    .hide(true)
                     .about("Validate a transaction JSON against v0.16 builder assumptions before signing")
                     .arg(Arg::new("against").long("against").value_name("METADATA").required(true).help("Metadata JSON"))
                     .arg(Arg::new("tx").value_name("TX_JSON").required(true).help("Transaction JSON"))
@@ -11097,6 +12291,7 @@ impl CliParser {
             )
             .subcommand(
                 ClapCommand::new("solve-tx")
+                    .hide(true)
                     .about("Emit a deterministic v0.16 transaction template from metadata and builder assumptions")
                     .arg(Arg::new("input").value_name("INPUT").help("Input .cell file, package directory, or Cell.toml"))
                     .arg(Arg::new("output").long("output").short('o').value_name("FILE").help("Write JSON solver template"))
@@ -11111,7 +12306,46 @@ impl CliParser {
                     .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
             )
             .subcommand(
+                ClapCommand::new("deploy")
+                    .display_order(80)
+                    .about("Plan, verify, diff, and lock deployment evidence")
+                    .subcommand_required(true)
+                    .arg_required_else_help(true)
+                    .subcommand(
+                        ClapCommand::new("plan")
+                            .about("Emit a reproducible v0.16 deployment plan")
+                            .arg(Arg::new("input").value_name("INPUT").help("Input .cell file, package directory, or Cell.toml"))
+                            .arg(Arg::new("output").long("output").short('o').value_name("FILE").help("Write JSON deploy plan"))
+                            .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
+                            .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
+                            .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
+                    )
+                    .subcommand(
+                        ClapCommand::new("verify")
+                            .about("Verify a v0.16 deployment plan schema and local integrity fields")
+                            .arg(Arg::new("plan").long("plan").value_name("DEPLOY_PLAN").required(true).help("Deployment plan JSON"))
+                            .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
+                    )
+                    .subcommand(
+                        ClapCommand::new("diff")
+                            .about("Diff two v0.16 deployment plans")
+                            .arg(Arg::new("old").long("old").value_name("OLD_DEPLOY_PLAN").required(true).help("Previous deployment plan JSON"))
+                            .arg(Arg::new("new").long("new").value_name("NEW_DEPLOY_PLAN").required(true).help("New deployment plan JSON"))
+                            .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
+                    )
+                    .subcommand(
+                        ClapCommand::new("lock-deps")
+                            .about("Emit a v0.16 dependency lock from deployment metadata")
+                            .arg(Arg::new("input").value_name("INPUT").help("Input .cell file, package directory, or Cell.toml"))
+                            .arg(Arg::new("output").long("output").short('o').value_name("FILE").help("Write dependency lock JSON"))
+                            .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
+                            .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
+                            .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
+                    ),
+            )
+            .subcommand(
                 ClapCommand::new("deploy-plan")
+                    .hide(true)
                     .about("Emit a reproducible v0.16 deployment plan")
                     .arg(Arg::new("input").value_name("INPUT").help("Input .cell file, package directory, or Cell.toml"))
                     .arg(Arg::new("output").long("output").short('o').value_name("FILE").help("Write JSON deploy plan"))
@@ -11121,12 +12355,14 @@ impl CliParser {
             )
             .subcommand(
                 ClapCommand::new("verify-deploy")
+                    .hide(true)
                     .about("Verify a v0.16 deployment plan schema and local integrity fields")
                     .arg(Arg::new("plan").value_name("DEPLOY_PLAN").required(true))
                     .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
             )
             .subcommand(
                 ClapCommand::new("diff-deploy")
+                    .hide(true)
                     .about("Diff two v0.16 deployment plans")
                     .arg(Arg::new("old").value_name("OLD_DEPLOY_PLAN").required(true))
                     .arg(Arg::new("new").value_name("NEW_DEPLOY_PLAN").required(true))
@@ -11134,6 +12370,7 @@ impl CliParser {
             )
             .subcommand(
                 ClapCommand::new("lock-deps")
+                    .hide(true)
                     .about("Emit a v0.16 dependency lock from deployment metadata")
                     .arg(Arg::new("input").value_name("INPUT").help("Input .cell file, package directory, or Cell.toml"))
                     .arg(Arg::new("output").long("output").short('o').value_name("FILE").help("Write dependency lock JSON"))
@@ -11142,7 +12379,10 @@ impl CliParser {
                     .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
             )
             .subcommand(
-                ClapCommand::new("action").about("Plan and explain action-level transaction builder inputs").subcommand(
+                ClapCommand::new("action")
+                    .display_order(50)
+                    .about("Plan and explain action-level transaction builder inputs")
+                    .subcommand(
                     ClapCommand::new("build")
                         .about("Emit a builder plan for a CellScript action without signing or submitting a transaction")
                         .arg(Arg::new("input").value_name("INPUT").help("Input .cell file, package directory, or Cell.toml"))
@@ -11163,6 +12403,7 @@ impl CliParser {
             )
             .subcommand(
                 ClapCommand::new("gen-builder")
+                    .display_order(60)
                     .about("Generate a registry-bound action builder package from CellScript metadata")
                     .arg(Arg::new("input").value_name("INPUT").help("Input .cell file, package directory, or Cell.toml"))
                     .arg(
@@ -11223,7 +12464,76 @@ impl CliParser {
                     .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON summary")),
             )
             .subcommand(
+                ClapCommand::new("receipt")
+                    .display_order(40)
+                    .about("Emit an authenticated compile-receipt envelope over metadata and artifact hashes")
+                    .arg(Arg::new("input").value_name("INPUT").help("Input .cell file, package directory, or Cell.toml"))
+                    .arg(
+                        Arg::new("output")
+                            .long("output")
+                            .short('o')
+                            .value_name("FILE")
+                            .required(true)
+                            .help("Write the compile receipt JSON to this file"),
+                    )
+                    .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
+                    .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
+                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON summary")),
+            )
+            .subcommand(
+                ClapCommand::new("sign-receipt")
+                    .display_order(41)
+                    .about("Append an Ed25519 signature to a compile receipt")
+                    .arg(Arg::new("receipt").value_name("RECEIPT").required(true).help("Compile receipt JSON to sign"))
+                    .arg(
+                        Arg::new("role")
+                            .long("role")
+                            .value_name("ROLE")
+                            .required(true)
+                            .help("Signature role to record: compiler or publisher"),
+                    )
+                    .arg(
+                        Arg::new("key")
+                            .long("key")
+                            .value_name("KEY")
+                            .required(true)
+                            .help("Ed25519 PKCS#8 key as a file path, @file, or base64 DER"),
+                    )
+                    .arg(
+                        Arg::new("output")
+                            .long("output")
+                            .short('o')
+                            .value_name("FILE")
+                            .help("Write the signed receipt here; defaults to updating RECEIPT in place"),
+                    )
+                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON summary")),
+            )
+            .subcommand(
+                ClapCommand::new("verify-receipt")
+                    .display_order(42)
+                    .about("Verify a compile receipt against metadata, artifact bytes, and Ed25519 signatures")
+                    .arg(Arg::new("receipt").value_name("RECEIPT").required(true).help("Compile receipt JSON to verify"))
+                    .arg(
+                        Arg::new("metadata")
+                            .long("metadata")
+                            .short('m')
+                            .value_name("FILE")
+                            .required(true)
+                            .help("Metadata JSON sidecar to bind to the receipt"),
+                    )
+                    .arg(
+                        Arg::new("artifact")
+                            .long("artifact")
+                            .short('a')
+                            .value_name("FILE")
+                            .required(true)
+                            .help("Artifact bytes to bind to the receipt"),
+                    )
+                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON summary")),
+            )
+            .subcommand(
                 ClapCommand::new("verify-artifact")
+                    .display_order(43)
                     .about("Verify an emitted CellScript artifact against its metadata sidecar")
                     .arg(Arg::new("artifact").value_name("ARTIFACT").required(true).help("Artifact file to verify"))
                     .arg(
@@ -11232,6 +12542,12 @@ impl CliParser {
                             .short('m')
                             .value_name("FILE")
                             .help("Metadata JSON file; defaults to ARTIFACT.meta.json"),
+                    )
+                    .arg(
+                        Arg::new("receipt")
+                            .long("receipt")
+                            .value_name("FILE")
+                            .help("Also verify a compile receipt against the artifact and metadata"),
                     )
                     .arg(
                         Arg::new("verify-sources")
@@ -11323,15 +12639,26 @@ impl CliParser {
             )
             .subcommand(
                 ClapCommand::new("publish")
+                    .display_order(110)
                     .about("Publish a package to the public registry, or write an offline fixture with --offline")
-                    .arg(Arg::new("dry-run").long("dry-run").action(ArgAction::SetTrue))
+                    .arg(
+                        Arg::new("dry-run")
+                            .long("dry-run")
+                            .action(ArgAction::SetTrue)
+                            .help("Validate the publish request without submitting it"),
+                    )
                     .arg(
                         Arg::new("offline")
                             .long("offline")
                             .action(ArgAction::SetTrue)
                             .help("Write local registry.json fixture metadata instead of using the public write API"),
                     )
-                    .arg(Arg::new("allow-dirty").long("allow-dirty").action(ArgAction::SetTrue))
+                    .arg(
+                        Arg::new("allow-dirty")
+                            .long("allow-dirty")
+                            .action(ArgAction::SetTrue)
+                            .help("Allow publishing from a working tree with uncommitted changes"),
+                    )
                     .arg(
                         Arg::new("api-url")
                             .long("api-url")
@@ -11378,12 +12705,13 @@ impl CliParser {
             )
             .subcommand(
                 ClapCommand::new("install")
+                    .display_order(120)
                     .about("Install a package from registry, git, or path")
-                    .arg(Arg::new("crate").value_name("CRATE"))
-                    .arg(Arg::new("version").long("version").value_name("VERSION"))
+                    .arg(Arg::new("crate").value_name("CRATE").help("Registry package name, or namespace/name@version"))
+                    .arg(Arg::new("version").long("version").value_name("VERSION").help("Package version constraint to install"))
                     .arg(Arg::new("namespace").long("namespace").value_name("NAMESPACE").help("Package namespace for registry install"))
-                    .arg(Arg::new("git").long("git").value_name("URL"))
-                    .arg(Arg::new("path").long("path").value_name("PATH"))
+                    .arg(Arg::new("git").long("git").value_name("URL").help("Install from a git repository URL"))
+                    .arg(Arg::new("path").long("path").value_name("PATH").help("Install from a local package path"))
                     .arg(
                         Arg::new("allow-unverified")
                             .long("allow-unverified")
@@ -11405,6 +12733,7 @@ impl CliParser {
             )
             .subcommand(
                 ClapCommand::new("login")
+                    .hide(true)
                     .about("Experimental: authenticate against a registry")
                     .arg(Arg::new("registry").long("registry").value_name("URL")),
             )
@@ -11416,15 +12745,30 @@ impl CliParser {
                     .subcommand(
                         ClapCommand::new("login")
                             .about("Create a JoyID capability authorisation payload")
-                            .arg(Arg::new("registry-origin").long("registry-origin").value_name("URL"))
-                            .arg(Arg::new("principal-type").long("principal-type").value_name("TYPE"))
+                            .arg(
+                                Arg::new("registry-origin")
+                                    .long("registry-origin")
+                                    .value_name("URL")
+                                    .help("Registry origin bound into the JoyID capability challenge"),
+                            )
+                            .arg(
+                                Arg::new("principal-type")
+                                    .long("principal-type")
+                                    .value_name("TYPE")
+                                    .help("Principal type for the identity binding; defaults to joyid_ckb"),
+                            )
                             .arg(
                                 Arg::new("principal-id")
                                     .long("principal-id")
                                     .value_name("ID")
                                     .help("Normalized JoyID/CKB principal binding derived from the CCC JoyID signer"),
                             )
-                            .arg(Arg::new("capability-pubkey").long("capability-pubkey").value_name("PUBKEY"))
+                            .arg(
+                                Arg::new("capability-pubkey")
+                                    .long("capability-pubkey")
+                                    .value_name("PUBKEY")
+                                    .help("Capability public key that will authorise scoped registry requests"),
+                            )
                             .arg(
                                 Arg::new("scope")
                                     .long("scope")
@@ -11439,8 +12783,18 @@ impl CliParser {
                                     .conflicts_with("capability-expires-at")
                                     .help("Capability lifetime, e.g. 90d or 24h"),
                             )
-                            .arg(Arg::new("capability-expires-at").long("capability-expires-at").value_name("TIMESTAMP"))
-                            .arg(Arg::new("json").long("json").action(ArgAction::SetTrue)),
+                            .arg(
+                                Arg::new("capability-expires-at")
+                                    .long("capability-expires-at")
+                                    .value_name("TIMESTAMP")
+                                    .help("Absolute UTC capability expiry timestamp, e.g. 2026-12-31T00:00:00Z"),
+                            )
+                            .arg(
+                                Arg::new("json")
+                                    .long("json")
+                                    .action(ArgAction::SetTrue)
+                                    .help("Emit the capability authorisation payload as JSON"),
+                            ),
                     )
                     .subcommand(
                         ClapCommand::new("capability")
@@ -11450,15 +12804,30 @@ impl CliParser {
                             .subcommand(
                                 ClapCommand::new("create")
                                     .about("Create a JoyID capability authorisation payload for CI or local publishing")
-                                    .arg(Arg::new("registry-origin").long("registry-origin").value_name("URL"))
-                                    .arg(Arg::new("principal-type").long("principal-type").value_name("TYPE"))
+                                    .arg(
+                                        Arg::new("registry-origin")
+                                            .long("registry-origin")
+                                            .value_name("URL")
+                                            .help("Registry origin bound into the JoyID capability challenge"),
+                                    )
+                                    .arg(
+                                        Arg::new("principal-type")
+                                            .long("principal-type")
+                                            .value_name("TYPE")
+                                            .help("Principal type for the identity binding; defaults to joyid_ckb"),
+                                    )
                                     .arg(
                                         Arg::new("principal-id")
                                             .long("principal-id")
                                             .value_name("ID")
                                             .help("Normalized JoyID/CKB principal binding derived from the CCC JoyID signer"),
                                     )
-                                    .arg(Arg::new("capability-pubkey").long("capability-pubkey").value_name("PUBKEY"))
+                                    .arg(
+                                        Arg::new("capability-pubkey")
+                                            .long("capability-pubkey")
+                                            .value_name("PUBKEY")
+                                            .help("Capability public key that will authorise scoped registry requests"),
+                                    )
                                     .arg(
                                         Arg::new("scope")
                                             .long("scope")
@@ -11473,8 +12842,18 @@ impl CliParser {
                                             .conflicts_with("capability-expires-at")
                                             .help("Capability lifetime, e.g. 90d or 24h"),
                                     )
-                                    .arg(Arg::new("capability-expires-at").long("capability-expires-at").value_name("TIMESTAMP"))
-                                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue)),
+                                    .arg(
+                                        Arg::new("capability-expires-at")
+                                            .long("capability-expires-at")
+                                            .value_name("TIMESTAMP")
+                                            .help("Absolute UTC capability expiry timestamp, e.g. 2026-12-31T00:00:00Z"),
+                                    )
+                                    .arg(
+                                        Arg::new("json")
+                                            .long("json")
+                                            .action(ArgAction::SetTrue)
+                                            .help("Emit the capability authorisation payload as JSON"),
+                                    ),
                             )
                             .subcommand(
                                 ClapCommand::new("submit")
@@ -11499,7 +12878,12 @@ impl CliParser {
                                             .required(true)
                                             .help("JoyID signature JSON whose challenge is the canonical payload"),
                                     )
-                                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue)),
+                                    .arg(
+                                        Arg::new("json")
+                                            .long("json")
+                                            .action(ArgAction::SetTrue)
+                                            .help("Emit machine-readable capability submission output"),
+                                    ),
                             )
                             .subcommand(
                                 ClapCommand::new("revoke")
@@ -11510,15 +12894,30 @@ impl CliParser {
                                             .value_name("URL")
                                             .help("Registry write API base URL; defaults to CELLSCRIPT_REGISTRY_API_URL"),
                                     )
-                                    .arg(Arg::new("registry-origin").long("registry-origin").value_name("URL"))
-                                    .arg(Arg::new("principal-type").long("principal-type").value_name("TYPE"))
+                                    .arg(
+                                        Arg::new("registry-origin")
+                                            .long("registry-origin")
+                                            .value_name("URL")
+                                            .help("Registry origin bound into the JoyID revocation challenge"),
+                                    )
+                                    .arg(
+                                        Arg::new("principal-type")
+                                            .long("principal-type")
+                                            .value_name("TYPE")
+                                            .help("Principal type for the identity binding; defaults to joyid_ckb"),
+                                    )
                                     .arg(
                                         Arg::new("principal-id")
                                             .long("principal-id")
                                             .value_name("ID")
                                             .help("Normalized JoyID/CKB principal binding derived from the CCC JoyID signer"),
                                     )
-                                    .arg(Arg::new("capability-key-id").long("capability-key-id").value_name("KEY_ID"))
+                                    .arg(
+                                        Arg::new("capability-key-id")
+                                            .long("capability-key-id")
+                                            .value_name("KEY_ID")
+                                            .help("Capability key id to revoke"),
+                                    )
                                     .arg(
                                         Arg::new("payload")
                                             .long("payload")
@@ -11531,13 +12930,24 @@ impl CliParser {
                                             .value_name("FILE")
                                             .help("JoyID signature JSON whose challenge is the canonical revoke payload"),
                                     )
-                                    .arg(Arg::new("reason").long("reason").value_name("TEXT"))
-                                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue)),
+                                    .arg(
+                                        Arg::new("reason")
+                                            .long("reason")
+                                            .value_name("TEXT")
+                                            .help("Human-readable reason to include with the revocation request"),
+                                    )
+                                    .arg(
+                                        Arg::new("json")
+                                            .long("json")
+                                            .action(ArgAction::SetTrue)
+                                            .help("Emit machine-readable capability revocation output"),
+                                    ),
                             ),
                     ),
             )
             .subcommand(
                 ClapCommand::new("certify")
+                    .display_order(100)
                     .about("Run a deterministic compiler-hosted certification plugin (currently: novaseal-profile-v0)")
                     .arg(
                         Arg::new("plugin")
@@ -11582,6 +12992,7 @@ impl CliParser {
             )
             .subcommand(
                 ClapCommand::new("registry")
+                    .display_order(90)
                     .about("Registry integrity commands")
                     .subcommand_required(true)
                     .subcommand(
@@ -11622,6 +13033,7 @@ impl CliParser {
             )
             .subcommand(
                 ClapCommand::new("registry-verify")
+                    .hide(true)
                     .about("Verify deployment registry records against Cell.lock and chain facts")
                     .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON output"))
                     .arg(Arg::new("live").long("live").action(ArgAction::SetTrue).help("Verify deployment facts with CKB RPC get_live_cell"))
@@ -11642,11 +13054,13 @@ impl CliParser {
             )
             .subcommand(
                 ClapCommand::new("package-verify")
+                    .hide(true)
                     .about("Verify package integrity against Cell.lock and source tree")
                     .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON output")),
             )
             .subcommand(
                 ClapCommand::new("registry-add")
+                    .hide(true)
                     .about("Register a new package in the discovery index")
                     .arg(Arg::new("namespace").long("namespace").required(true).value_name("NAMESPACE").help("Package namespace"))
                     .arg(Arg::new("name").long("name").required(true).value_name("NAME").help("Package name"))
@@ -11734,6 +13148,7 @@ impl CliParser {
                 all_targets: m.get_flag("all-targets"),
                 target_profile: m.get_one::<String>("target-profile").cloned(),
                 json: m.get_flag("json"),
+                message_format: m.get_one::<String>("message-format").cloned(),
                 production: m.get_flag("production"),
                 deny_fail_closed: m.get_flag("deny-fail-closed"),
                 deny_ckb_runtime: m.get_flag("deny-ckb-runtime"),
@@ -11781,32 +13196,85 @@ impl CliParser {
                 json: m.get_flag("json"),
             }),
             Some(("ckb-std-compat", m)) => Command::CkbStdCompat(CkbStdCompatArgs { json: m.get_flag("json") }),
-            Some(("explain", m)) => Command::Explain(ExplainArgs {
-                code: m.get_one::<String>("code").cloned().expect("required runtime error code"),
-                json: m.get_flag("json"),
-            }),
-            Some(("explain-profile", m)) => Command::ExplainProfile(ExplainProfileArgs {
-                profile: m.get_one::<String>("profile").cloned().expect("required target profile"),
-                json: m.get_flag("json"),
-            }),
-            Some(("explain-proof", m)) => Command::ExplainProof(ExplainProofArgs {
-                input: m.get_one::<String>("input").map(PathBuf::from),
-                target: m.get_one::<String>("target").cloned(),
-                target_profile: m.get_one::<String>("target-profile").cloned(),
-                json: m.get_flag("json"),
-            }),
-            Some(("explain-assumptions", m)) => Command::ExplainAssumptions(ExplainAssumptionsArgs {
-                input: m.get_one::<String>("input").map(PathBuf::from),
-                target: m.get_one::<String>("target").cloned(),
-                target_profile: m.get_one::<String>("target-profile").cloned(),
-                json: m.get_flag("json"),
-            }),
-            Some(("explain-generics", m)) => Command::ExplainGenerics(ExplainGenericsArgs {
-                input: m.get_one::<String>("input").map(PathBuf::from),
-                target: m.get_one::<String>("target").cloned(),
-                target_profile: m.get_one::<String>("target-profile").cloned(),
-                json: m.get_flag("json"),
-            }),
+            Some(("explain", m)) => match m.subcommand() {
+                Some(("profile", profile)) => Command::ExplainProfile(ExplainProfileArgs {
+                    profile: profile.get_one::<String>("profile").cloned().expect("required target profile"),
+                    json: profile.get_flag("json"),
+                }),
+                Some(("proof", proof)) => Command::ExplainProof(ExplainProofArgs {
+                    input: proof.get_one::<String>("input").map(PathBuf::from),
+                    target: proof.get_one::<String>("target").cloned(),
+                    target_profile: proof.get_one::<String>("target-profile").cloned(),
+                    json: proof.get_flag("json"),
+                }),
+                Some(("assumptions", assumptions)) => Command::ExplainAssumptions(ExplainAssumptionsArgs {
+                    input: assumptions.get_one::<String>("input").map(PathBuf::from),
+                    target: assumptions.get_one::<String>("target").cloned(),
+                    target_profile: assumptions.get_one::<String>("target-profile").cloned(),
+                    json: assumptions.get_flag("json"),
+                }),
+                Some(("generics", generics)) => Command::ExplainGenerics(ExplainGenericsArgs {
+                    input: generics.get_one::<String>("input").map(PathBuf::from),
+                    target: generics.get_one::<String>("target").cloned(),
+                    target_profile: generics.get_one::<String>("target-profile").cloned(),
+                    json: generics.get_flag("json"),
+                }),
+                Some(("graph", graph)) => Command::ExplainGraph(ExplainGraphArgs {
+                    input: graph.get_one::<String>("input").map(PathBuf::from),
+                    target: graph.get_one::<String>("target").cloned(),
+                    target_profile: graph.get_one::<String>("target-profile").cloned(),
+                    json: graph.get_flag("json"),
+                    format: graph.get_one::<String>("format").cloned(),
+                }),
+                _ => Command::Explain(ExplainArgs {
+                    code: m.get_one::<String>("code").cloned().expect("required runtime error code"),
+                    json: m.get_flag("json"),
+                }),
+            },
+            Some(("explain-profile", m)) => {
+                warn_legacy_alias("explain-profile", "explain profile", m.get_flag("json"));
+                Command::ExplainProfile(ExplainProfileArgs {
+                    profile: m.get_one::<String>("profile").cloned().expect("required target profile"),
+                    json: m.get_flag("json"),
+                })
+            }
+            Some(("explain-proof", m)) => {
+                warn_legacy_alias("explain-proof", "explain proof", m.get_flag("json"));
+                Command::ExplainProof(ExplainProofArgs {
+                    input: m.get_one::<String>("input").map(PathBuf::from),
+                    target: m.get_one::<String>("target").cloned(),
+                    target_profile: m.get_one::<String>("target-profile").cloned(),
+                    json: m.get_flag("json"),
+                })
+            }
+            Some(("explain-assumptions", m)) => {
+                warn_legacy_alias("explain-assumptions", "explain assumptions", m.get_flag("json"));
+                Command::ExplainAssumptions(ExplainAssumptionsArgs {
+                    input: m.get_one::<String>("input").map(PathBuf::from),
+                    target: m.get_one::<String>("target").cloned(),
+                    target_profile: m.get_one::<String>("target-profile").cloned(),
+                    json: m.get_flag("json"),
+                })
+            }
+            Some(("explain-generics", m)) => {
+                warn_legacy_alias("explain-generics", "explain generics", m.get_flag("json"));
+                Command::ExplainGenerics(ExplainGenericsArgs {
+                    input: m.get_one::<String>("input").map(PathBuf::from),
+                    target: m.get_one::<String>("target").cloned(),
+                    target_profile: m.get_one::<String>("target-profile").cloned(),
+                    json: m.get_flag("json"),
+                })
+            }
+            Some(("explain-graph", m)) => {
+                warn_legacy_alias("explain-graph", "explain graph", m.get_flag("json"));
+                Command::ExplainGraph(ExplainGraphArgs {
+                    input: m.get_one::<String>("input").map(PathBuf::from),
+                    target: m.get_one::<String>("target").cloned(),
+                    target_profile: m.get_one::<String>("target-profile").cloned(),
+                    json: m.get_flag("json"),
+                    format: m.get_one::<String>("format").cloned(),
+                })
+            }
             Some(("opt-report", m)) => Command::OptReport(OptReportArgs {
                 input: m.get_one::<String>("input").map(PathBuf::from),
                 output: m.get_one::<String>("output").map(PathBuf::from),
@@ -11825,11 +13293,34 @@ impl CliParser {
                 target_profile: m.get_one::<String>("target-profile").cloned(),
                 json: m.get_flag("json"),
             }),
-            Some(("trace-tx", m)) => Command::TraceTx(TraceTxArgs {
-                against: m.get_one::<String>("against").map(PathBuf::from).expect("required metadata"),
-                tx: m.get_one::<String>("tx").map(PathBuf::from).expect("required transaction JSON"),
-                json: m.get_flag("json"),
-            }),
+            Some(("tx", m)) => match m.subcommand() {
+                Some(("validate", validate)) => Command::ValidateTx(ValidateTxArgs {
+                    against: validate.get_one::<String>("against").map(PathBuf::from).expect("required metadata"),
+                    tx: validate.get_one::<String>("tx").map(PathBuf::from).expect("required transaction JSON"),
+                    json: validate.get_flag("json"),
+                }),
+                Some(("solve", solve)) => Command::SolveTx(SolveTxArgs {
+                    input: solve.get_one::<String>("input").map(PathBuf::from),
+                    output: solve.get_one::<String>("output").map(PathBuf::from),
+                    target: solve.get_one::<String>("target").cloned(),
+                    target_profile: solve.get_one::<String>("target-profile").cloned(),
+                    json: solve.get_flag("json"),
+                }),
+                Some(("trace", trace)) => Command::TraceTx(TraceTxArgs {
+                    against: trace.get_one::<String>("against").map(PathBuf::from).expect("required metadata"),
+                    tx: trace.get_one::<String>("tx").map(PathBuf::from).expect("required transaction JSON"),
+                    json: trace.get_flag("json"),
+                }),
+                _ => unreachable!(),
+            },
+            Some(("trace-tx", m)) => {
+                warn_legacy_alias("trace-tx", "tx trace", m.get_flag("json"));
+                Command::TraceTx(TraceTxArgs {
+                    against: m.get_one::<String>("against").map(PathBuf::from).expect("required metadata"),
+                    tx: m.get_one::<String>("tx").map(PathBuf::from).expect("required transaction JSON"),
+                    json: m.get_flag("json"),
+                })
+            }
             Some(("audit-bundle", m)) => Command::AuditBundle(AuditBundleArgs {
                 input: m.get_one::<String>("input").map(PathBuf::from),
                 output: m.get_one::<String>("output").map(PathBuf::from),
@@ -11837,45 +13328,89 @@ impl CliParser {
                 target_profile: m.get_one::<String>("target-profile").cloned(),
                 json: m.get_flag("json"),
             }),
-            Some(("validate-tx", m)) => Command::ValidateTx(ValidateTxArgs {
-                against: m.get_one::<String>("against").map(PathBuf::from).expect("required metadata"),
-                tx: m.get_one::<String>("tx").map(PathBuf::from).expect("required transaction JSON"),
-                json: m.get_flag("json"),
-            }),
-            Some(("solve-tx", m)) => Command::SolveTx(SolveTxArgs {
-                input: m.get_one::<String>("input").map(PathBuf::from),
-                output: m.get_one::<String>("output").map(PathBuf::from),
-                target: m.get_one::<String>("target").cloned(),
-                target_profile: m.get_one::<String>("target-profile").cloned(),
-                json: m.get_flag("json"),
-            }),
+            Some(("validate-tx", m)) => {
+                warn_legacy_alias("validate-tx", "tx validate", m.get_flag("json"));
+                Command::ValidateTx(ValidateTxArgs {
+                    against: m.get_one::<String>("against").map(PathBuf::from).expect("required metadata"),
+                    tx: m.get_one::<String>("tx").map(PathBuf::from).expect("required transaction JSON"),
+                    json: m.get_flag("json"),
+                })
+            }
+            Some(("solve-tx", m)) => {
+                warn_legacy_alias("solve-tx", "tx solve", m.get_flag("json"));
+                Command::SolveTx(SolveTxArgs {
+                    input: m.get_one::<String>("input").map(PathBuf::from),
+                    output: m.get_one::<String>("output").map(PathBuf::from),
+                    target: m.get_one::<String>("target").cloned(),
+                    target_profile: m.get_one::<String>("target-profile").cloned(),
+                    json: m.get_flag("json"),
+                })
+            }
             Some(("verify-ckb-fixtures", m)) => Command::VerifyCkbFixtures(VerifyCkbFixturesArgs {
                 manifest: m.get_one::<String>("manifest").map(PathBuf::from).expect("required CKB fixture manifest"),
                 json: m.get_flag("json"),
             }),
-            Some(("deploy-plan", m)) => Command::DeployPlan(DeployPlanArgs {
-                input: m.get_one::<String>("input").map(PathBuf::from),
-                output: m.get_one::<String>("output").map(PathBuf::from),
-                target: m.get_one::<String>("target").cloned(),
-                target_profile: m.get_one::<String>("target-profile").cloned(),
-                json: m.get_flag("json"),
-            }),
-            Some(("verify-deploy", m)) => Command::VerifyDeploy(VerifyDeployArgs {
-                plan: m.get_one::<String>("plan").map(PathBuf::from).expect("required deploy plan"),
-                json: m.get_flag("json"),
-            }),
-            Some(("diff-deploy", m)) => Command::DiffDeploy(DiffDeployArgs {
-                old: m.get_one::<String>("old").map(PathBuf::from).expect("required old deploy plan"),
-                new: m.get_one::<String>("new").map(PathBuf::from).expect("required new deploy plan"),
-                json: m.get_flag("json"),
-            }),
-            Some(("lock-deps", m)) => Command::LockDeps(LockDepsArgs {
-                input: m.get_one::<String>("input").map(PathBuf::from),
-                output: m.get_one::<String>("output").map(PathBuf::from),
-                target: m.get_one::<String>("target").cloned(),
-                target_profile: m.get_one::<String>("target-profile").cloned(),
-                json: m.get_flag("json"),
-            }),
+            Some(("deploy", m)) => match m.subcommand() {
+                Some(("plan", plan)) => Command::DeployPlan(DeployPlanArgs {
+                    input: plan.get_one::<String>("input").map(PathBuf::from),
+                    output: plan.get_one::<String>("output").map(PathBuf::from),
+                    target: plan.get_one::<String>("target").cloned(),
+                    target_profile: plan.get_one::<String>("target-profile").cloned(),
+                    json: plan.get_flag("json"),
+                }),
+                Some(("verify", verify)) => Command::VerifyDeploy(VerifyDeployArgs {
+                    plan: verify.get_one::<String>("plan").map(PathBuf::from).expect("required deploy plan"),
+                    json: verify.get_flag("json"),
+                }),
+                Some(("diff", diff)) => Command::DiffDeploy(DiffDeployArgs {
+                    old: diff.get_one::<String>("old").map(PathBuf::from).expect("required old deploy plan"),
+                    new: diff.get_one::<String>("new").map(PathBuf::from).expect("required new deploy plan"),
+                    json: diff.get_flag("json"),
+                }),
+                Some(("lock-deps", lock_deps)) => Command::LockDeps(LockDepsArgs {
+                    input: lock_deps.get_one::<String>("input").map(PathBuf::from),
+                    output: lock_deps.get_one::<String>("output").map(PathBuf::from),
+                    target: lock_deps.get_one::<String>("target").cloned(),
+                    target_profile: lock_deps.get_one::<String>("target-profile").cloned(),
+                    json: lock_deps.get_flag("json"),
+                }),
+                _ => unreachable!(),
+            },
+            Some(("deploy-plan", m)) => {
+                warn_legacy_alias("deploy-plan", "deploy plan", m.get_flag("json"));
+                Command::DeployPlan(DeployPlanArgs {
+                    input: m.get_one::<String>("input").map(PathBuf::from),
+                    output: m.get_one::<String>("output").map(PathBuf::from),
+                    target: m.get_one::<String>("target").cloned(),
+                    target_profile: m.get_one::<String>("target-profile").cloned(),
+                    json: m.get_flag("json"),
+                })
+            }
+            Some(("verify-deploy", m)) => {
+                warn_legacy_alias("verify-deploy", "deploy verify", m.get_flag("json"));
+                Command::VerifyDeploy(VerifyDeployArgs {
+                    plan: m.get_one::<String>("plan").map(PathBuf::from).expect("required deploy plan"),
+                    json: m.get_flag("json"),
+                })
+            }
+            Some(("diff-deploy", m)) => {
+                warn_legacy_alias("diff-deploy", "deploy diff", m.get_flag("json"));
+                Command::DiffDeploy(DiffDeployArgs {
+                    old: m.get_one::<String>("old").map(PathBuf::from).expect("required old deploy plan"),
+                    new: m.get_one::<String>("new").map(PathBuf::from).expect("required new deploy plan"),
+                    json: m.get_flag("json"),
+                })
+            }
+            Some(("lock-deps", m)) => {
+                warn_legacy_alias("lock-deps", "deploy lock-deps", m.get_flag("json"));
+                Command::LockDeps(LockDepsArgs {
+                    input: m.get_one::<String>("input").map(PathBuf::from),
+                    output: m.get_one::<String>("output").map(PathBuf::from),
+                    target: m.get_one::<String>("target").cloned(),
+                    target_profile: m.get_one::<String>("target-profile").cloned(),
+                    json: m.get_flag("json"),
+                })
+            }
             Some(("action", m)) => match m.subcommand() {
                 Some(("build", build)) => Command::ActionBuild(ActionBuildArgs {
                     input: build.get_one::<String>("input").map(PathBuf::from),
@@ -11911,9 +13446,30 @@ impl CliParser {
                 target_profile: m.get_one::<String>("target-profile").cloned(),
                 json: m.get_flag("json"),
             }),
+            Some(("receipt", m)) => Command::Receipt(ReceiptArgs {
+                input: m.get_one::<String>("input").map(PathBuf::from),
+                output: m.get_one::<String>("output").map(PathBuf::from).expect("required output"),
+                target: m.get_one::<String>("target").cloned(),
+                target_profile: m.get_one::<String>("target-profile").cloned(),
+                json: m.get_flag("json"),
+            }),
+            Some(("sign-receipt", m)) => Command::SignReceipt(SignReceiptArgs {
+                receipt: m.get_one::<String>("receipt").map(PathBuf::from).expect("required receipt"),
+                role: m.get_one::<String>("role").cloned().expect("required role"),
+                key: m.get_one::<String>("key").cloned().expect("required key"),
+                output: m.get_one::<String>("output").map(PathBuf::from),
+                json: m.get_flag("json"),
+            }),
+            Some(("verify-receipt", m)) => Command::VerifyReceipt(VerifyReceiptArgs {
+                receipt: m.get_one::<String>("receipt").map(PathBuf::from).expect("required receipt"),
+                metadata: m.get_one::<String>("metadata").map(PathBuf::from).expect("required metadata"),
+                artifact: m.get_one::<String>("artifact").map(PathBuf::from).expect("required artifact"),
+                json: m.get_flag("json"),
+            }),
             Some(("verify-artifact", m)) => Command::VerifyArtifact(VerifyArtifactArgs {
                 artifact: m.get_one::<String>("artifact").map(PathBuf::from).expect("required artifact"),
                 metadata: m.get_one::<String>("metadata").map(PathBuf::from),
+                receipt: m.get_one::<String>("receipt").map(PathBuf::from),
                 verify_sources: m.get_flag("verify-sources"),
                 json: m.get_flag("json"),
                 expect_target_profile: m.get_one::<String>("expect-target-profile").cloned(),
@@ -11958,7 +13514,10 @@ impl CliParser {
             }),
             Some(("update", _)) => Command::Update,
             Some(("info", m)) => Command::Info(InfoArgs { json: m.get_flag("json") }),
-            Some(("login", m)) => Command::Login(LoginArgs { registry: m.get_one::<String>("registry").cloned() }),
+            Some(("login", m)) => {
+                warn_legacy_alias("login", "auth capability create", false);
+                Command::Login(LoginArgs { registry: m.get_one::<String>("registry").cloned() })
+            }
             Some(("auth", m)) => match m.subcommand() {
                 Some(("login", login)) => Command::AuthLogin(auth_capability_args_from_matches(login)),
                 Some(("capability", capability)) => match capability.subcommand() {
@@ -12003,20 +13562,29 @@ impl CliParser {
                 }),
                 _ => unreachable!(),
             },
-            Some(("registry-verify", m)) => Command::RegistryVerify(RegistryVerifyArgs {
-                json: m.get_flag("json"),
-                live: m.get_flag("live"),
-                rpc_url: m.get_one::<String>("rpc-url").cloned(),
-                network: m.get_one::<String>("network").cloned(),
-                require_publisher_signature: m.get_flag("require-publisher-signature"),
-                require_audit_report: m.get_flag("require-audit-report"),
-            }),
-            Some(("package-verify", m)) => Command::PackageVerify(PackageVerifyArgs { json: m.get_flag("json") }),
-            Some(("registry-add", m)) => Command::RegistryAdd(RegistryAddArgs {
-                namespace: m.get_one::<String>("namespace").cloned().unwrap_or_default(),
-                name: m.get_one::<String>("name").cloned().unwrap_or_default(),
-                source: m.get_one::<String>("source").cloned().unwrap_or_default(),
-            }),
+            Some(("registry-verify", m)) => {
+                warn_legacy_alias("registry-verify", "registry verify", m.get_flag("json"));
+                Command::RegistryVerify(RegistryVerifyArgs {
+                    json: m.get_flag("json"),
+                    live: m.get_flag("live"),
+                    rpc_url: m.get_one::<String>("rpc-url").cloned(),
+                    network: m.get_one::<String>("network").cloned(),
+                    require_publisher_signature: m.get_flag("require-publisher-signature"),
+                    require_audit_report: m.get_flag("require-audit-report"),
+                })
+            }
+            Some(("package-verify", m)) => {
+                warn_legacy_alias("package-verify", "package verify", m.get_flag("json"));
+                Command::PackageVerify(PackageVerifyArgs { json: m.get_flag("json") })
+            }
+            Some(("registry-add", m)) => {
+                warn_legacy_alias("registry-add", "registry add", false);
+                Command::RegistryAdd(RegistryAddArgs {
+                    namespace: m.get_one::<String>("namespace").cloned().unwrap_or_default(),
+                    name: m.get_one::<String>("name").cloned().unwrap_or_default(),
+                    source: m.get_one::<String>("source").cloned().unwrap_or_default(),
+                })
+            }
             _ => unreachable!(),
         }
     }
@@ -12040,5 +13608,35 @@ mod tests {
     #[test]
     fn test_command_execution() {
         let _cmd = Command::Clean(CleanArgs::default());
+    }
+
+    #[test]
+    fn visible_021_group_arguments_have_help_text() {
+        let command = CliParser::command();
+        let mut missing = Vec::new();
+        for group in ["explain", "auth", "registry", "publish", "install", "tx", "deploy"] {
+            let Some(subcommand) = command.get_subcommands().find(|subcommand| subcommand.get_name() == group) else {
+                missing.push(format!("cellc {group}: missing command"));
+                continue;
+            };
+            collect_missing_visible_arg_help(&mut missing, &format!("cellc {group}"), subcommand);
+        }
+
+        assert!(missing.is_empty(), "visible 0.21 CLI arguments missing help text:\n{}", missing.join("\n"));
+    }
+
+    fn collect_missing_visible_arg_help(missing: &mut Vec<String>, path: &str, command: &clap::Command) {
+        if command.is_hide_set() {
+            return;
+        }
+        for arg in command.get_arguments().filter(|arg| !arg.is_hide_set()) {
+            let help = arg.get_help().map(|help| help.to_string()).unwrap_or_default();
+            if help.trim().is_empty() {
+                missing.push(format!("{path} {}", arg.get_id()));
+            }
+        }
+        for subcommand in command.get_subcommands() {
+            collect_missing_visible_arg_help(missing, &format!("{path} {}", subcommand.get_name()), subcommand);
+        }
     }
 }

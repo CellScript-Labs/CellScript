@@ -19,7 +19,7 @@ Current stack-backed local `Vec<T>` support is deliberately bounded compiler
 lowering for verifier-local fixed-width values. It is not a production
 allocation-backed collection runtime. `Vec::capacity()` reports the fixed
 backing capacity (`256 / element_width`), not the requested
-`Vec::with_capacity(n)` argument, and `cellc explain-generics` records each
+`Vec::with_capacity(n)` argument, and `cellc explain generics` records each
 checked instantiation with the concrete element type, width, backing model, and
 helper set. The helper set preserves whether the value was constructed through
 `Vec::new` or `Vec::with_capacity`. Generated raw collection symbols remain

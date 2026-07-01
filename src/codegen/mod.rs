@@ -1,4 +1,4 @@
-use crate::ast::{BinaryOp, ParamSource, UnaryOp};
+use crate::ast::{AggregateInvariantKind, AggregateRelation, BinaryOp, ParamSource, UnaryOp};
 use crate::ckb_abi;
 use crate::error::{CompileError, Result};
 use crate::flow::FLOW_STATE_FIELD_NAME;
@@ -151,6 +151,7 @@ fn referenced_v014_runtime_helpers(ir: &IrModule) -> BTreeSet<String> {
             }
         }
     }
+    helpers.extend(auto_lowered_aggregate_runtime_helpers_by_action(ir).into_values().flatten());
     if helpers.contains("__ckb_cell_unoccupied_capacity") {
         helpers.insert("__ckb_cell_capacity".to_string());
         helpers.insert("__ckb_cell_occupied_capacity".to_string());
@@ -176,6 +177,139 @@ fn referenced_v014_runtime_helpers(ir: &IrModule) -> BTreeSet<String> {
         helpers.insert("__ckb_wait".to_string());
     }
     helpers
+}
+
+fn auto_lowered_aggregate_runtime_helpers_by_action(ir: &IrModule) -> HashMap<String, BTreeSet<String>> {
+    let invariants = ir
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            IrItem::Invariant(invariant) => Some(invariant),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let mut by_action = HashMap::new();
+    for item in &ir.items {
+        let IrItem::Action(action) = item else {
+            continue;
+        };
+        let helpers = invariants
+            .iter()
+            .flat_map(|invariant| {
+                invariant
+                    .aggregates
+                    .iter()
+                    .filter_map(|aggregate| auto_lowered_aggregate_runtime_helper_for_action(invariant, aggregate, action))
+            })
+            .map(str::to_string)
+            .collect::<BTreeSet<_>>();
+        if !helpers.is_empty() {
+            by_action.insert(action.name.clone(), helpers);
+        }
+    }
+    by_action
+}
+
+fn auto_lowered_aggregate_runtime_helper_for_action(
+    invariant: &IrInvariant,
+    aggregate: &IrAggregateInvariant,
+    action: &IrAction,
+) -> Option<&'static str> {
+    let type_name = auto_lowered_group_amount_conservation_type(invariant, aggregate)?;
+    if body_contains_runtime_helper(&action.body, "__xudt_require_group_amount_conserved") {
+        return None;
+    }
+    action_has_group_amount_conservation_evidence(action, type_name).then_some("__xudt_require_group_amount_conserved")
+}
+
+fn auto_lowered_group_amount_conservation_type<'a>(invariant: &IrInvariant, aggregate: &'a IrAggregateInvariant) -> Option<&'a str> {
+    if invariant.trigger.as_deref() != Some("type_group") || aggregate.scope != "group" {
+        return None;
+    }
+    if aggregate.kind != AggregateInvariantKind::Sum || aggregate.relation != Some(AggregateRelation::Eq) {
+        return None;
+    }
+    let rhs = aggregate.rhs.as_deref()?;
+    let (left_source, left_type) = aggregate_group_amount_endpoint(&aggregate.target)?;
+    let (right_source, right_type) = aggregate_group_amount_endpoint(rhs)?;
+    (left_type == right_type
+        && ((left_source == "group_outputs" && right_source == "group_inputs")
+            || (left_source == "group_inputs" && right_source == "group_outputs")))
+        .then_some(left_type)
+}
+
+#[derive(Debug, Clone)]
+struct IrFieldAlias {
+    root_id: usize,
+    field: String,
+}
+
+fn action_has_group_amount_conservation_evidence(action: &IrAction, type_name: &str) -> bool {
+    let consumed = action
+        .body
+        .consume_set
+        .iter()
+        .filter(|pattern| pattern.operation == "consume")
+        .filter_map(|pattern| {
+            action.params.iter().find(|param| param.name == pattern.binding && named_type_name(&param.ty) == Some(type_name))
+        })
+        .collect::<Vec<_>>();
+    let created = action
+        .body
+        .create_set
+        .iter()
+        .filter(|pattern| matches!(pattern.operation.as_str(), "create" | "output") && pattern.ty == type_name)
+        .collect::<Vec<_>>();
+    let ([consumed], [created]) = (consumed.as_slice(), created.as_slice()) else {
+        return false;
+    };
+    let Some((_, amount)) = created.fields.iter().find(|(field, _)| field == "amount") else {
+        return false;
+    };
+    let IrOperand::Var(amount) = amount else {
+        return false;
+    };
+    let aliases = ir_field_aliases(&action.body);
+    aliases.get(&amount.id).is_some_and(|alias| alias.root_id == consumed.binding.id && alias.field == "amount")
+}
+
+fn ir_field_aliases(body: &IrBody) -> HashMap<usize, IrFieldAlias> {
+    let mut aliases = HashMap::new();
+    for block in &body.blocks {
+        for instruction in &block.instructions {
+            match instruction {
+                IrInstruction::FieldAccess { dest, obj: IrOperand::Var(obj), field } => {
+                    let alias = aliases.get(&obj.id).cloned().map_or_else(
+                        || IrFieldAlias { root_id: obj.id, field: field.clone() },
+                        |parent: IrFieldAlias| IrFieldAlias { root_id: parent.root_id, field: format!("{}.{}", parent.field, field) },
+                    );
+                    aliases.insert(dest.id, alias);
+                }
+                IrInstruction::Move { dest, src: IrOperand::Var(src) } => {
+                    if let Some(alias) = aliases.get(&src.id).cloned() {
+                        aliases.insert(dest.id, alias);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    aliases
+}
+
+fn body_contains_runtime_helper(body: &IrBody, helper: &str) -> bool {
+    body.blocks.iter().any(|block| {
+        block.instructions.iter().any(|instruction| matches!(instruction, IrInstruction::Call { func, .. } if func == helper))
+    })
+}
+
+fn aggregate_group_amount_endpoint(target: &str) -> Option<(&str, &str)> {
+    let (source, rest) = target.split_once('<')?;
+    if source != "group_inputs" && source != "group_outputs" {
+        return None;
+    }
+    let (type_name, field) = rest.split_once(">.")?;
+    (field == "amount" && !type_name.is_empty()).then_some((source, type_name))
 }
 
 fn is_v014_runtime_helper(func: &str) -> bool {
@@ -749,6 +883,8 @@ pub struct CodeGenerator {
     flow_rules: HashMap<String, Vec<IrFlowRule>>,
     /// Action-specific state edges for the function currently being emitted.
     current_state_transition_edges: Vec<IrStateTransitionEdge>,
+    /// Runtime helpers emitted in action preludes by compiler-lowered aggregate invariants.
+    auto_aggregate_runtime_helpers_by_action: HashMap<String, BTreeSet<String>>,
     /// ABI summaries for locally emitted actions/functions/locks.
     callable_abis: HashMap<String, CallableAbi>,
     /// Function parameters whose slot contains a pointer to encoded schema bytes.
@@ -916,6 +1052,7 @@ impl CodeGenerator {
             flow_state_fields: HashMap::new(),
             flow_rules: HashMap::new(),
             current_state_transition_edges: Vec::new(),
+            auto_aggregate_runtime_helpers_by_action: HashMap::new(),
             callable_abis: HashMap::new(),
             schema_pointer_vars: BTreeSet::new(),
             param_vars: BTreeSet::new(),
@@ -976,6 +1113,7 @@ impl CodeGenerator {
         let has_entrypoint = ir.items.iter().any(|item| matches!(item, IrItem::Action(_) | IrItem::Lock(_)));
         self.enum_fixed_sizes = ir.enum_fixed_sizes.clone();
         self.pure_const_returns = collect_pure_const_returns(ir);
+        self.auto_aggregate_runtime_helpers_by_action = auto_lowered_aggregate_runtime_helpers_by_action(ir);
         for item in &ir.items {
             if let IrItem::TypeDef(type_def) = item {
                 self.register_type_def(type_def);
@@ -1881,6 +2019,7 @@ impl CodeGenerator {
 
         self.emit_prologue();
         self.emit_param_spills(&action.params)?;
+        self.emit_auto_aggregate_invariant_checks(&action.name);
 
         self.generate_body(&action.body)?;
         self.emit_shared_epilogue();
@@ -1914,6 +2053,25 @@ impl CodeGenerator {
         self.verified_collection_construction_vectors.clear();
         self.param_vars.clear();
         Ok(())
+    }
+
+    fn emit_auto_aggregate_invariant_checks(&mut self, action_name: &str) {
+        let helpers = self
+            .auto_aggregate_runtime_helpers_by_action
+            .get(action_name)
+            .into_iter()
+            .flat_map(|helpers| helpers.iter().cloned())
+            .collect::<Vec<_>>();
+        for helper in helpers {
+            if helper == "__xudt_require_group_amount_conserved" {
+                self.emit("# cellscript aggregate invariant: auto-lowered xUDT group amount conservation");
+                self.emit("call __xudt_require_group_amount_conserved");
+                let ok_label = self.fresh_label("auto_aggregate_xudt_conserved_ok");
+                self.emit(format!("beqz a0, {}", ok_label));
+                self.emit_epilogue();
+                self.emit_label(&ok_label);
+            }
+        }
     }
 
     fn generate_pure_fn(&mut self, function: &IrPureFn) -> Result<()> {

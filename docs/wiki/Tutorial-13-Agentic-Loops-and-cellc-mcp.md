@@ -139,19 +139,34 @@ other bundled contracts gives it correct patterns to imitate, which shortens the
 first few rounds of the loop. See
 [Bundled Example Contracts](Tutorial-08-Bundled-Example-Contracts.md).
 
-## A Reference Wrapper: cellc-mcp
+## The In-Repo MCP Server: cellscript-mcp
 
-A loop needs the compiler available as callable tools. `cellc-mcp` is a
-reference wrapper, a small Model Context Protocol server that exposes the
-read-oriented commands above as agent tools, so an MCP-capable model can call
-them directly. It is published at
-[github.com/toastmanAu/cellc-mcp](https://github.com/toastmanAu/cellc-mcp).
+A loop needs the compiler available as callable tools. This repository now
+ships the `cellscript-mcp` binary, a small Model Context Protocol server that
+exposes read-oriented compiler commands and project documentation as agent
+tools, so an MCP-capable model can call them directly.
 
-The wrapper is deliberately thin. It owns only the boundary work an agent caller
-needs: locating the binary, running each command, and presenting the JSON in a
-form sized for a model's context. Compilation still belongs to `cellc`. Because
-the wrapper invokes the same `cellc` binary, the diagnostics a model sees are
-the compiler's, not a re-implementation.
+The server is deliberately thin. It owns only the boundary work an agent caller
+needs: locating `cellc`, running read-only commands, preserving stdout/stderr,
+and returning structured evidence. Compilation still belongs to `cellc`.
+Because the server invokes the same `cellc` binary, the diagnostics a model
+sees are the compiler's, not a re-implementation.
+
+The default tool set is read-only:
+
+- `cellscript_command_tree`
+- `cellscript_check`
+- `cellscript_constraints`
+- `cellscript_metadata`
+- `cellscript_template_layouts`
+- `cellscript_protocol_graph`
+- `cellscript_explain`
+- `cellscript_gate_policy`
+- `cellscript_docs_topic`
+- `cellscript_evidence_levels`
+
+The server does not expose signing, publish, deployment submission, registry
+mutation, or editor/shell configuration mutation by default.
 
 Any MCP client can drive it; the wrapper does not assume a particular model. A
 local model that has little or no CellScript in its training data benefits most,

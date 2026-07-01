@@ -44,7 +44,7 @@ adapter:
 
 ```text
 CellScript compiler
-  -> artifact / metadata / ABI / deploy-plan / action build plan / witness bytes
+  -> artifact / metadata / ABI / deploy plan / action build plan / witness bytes
 
 cellscript-ckb-adapter
   -> reads compiler outputs
@@ -127,7 +127,7 @@ Completed 0.19 implementation slices:
 - TYPE_ID lifecycle and args-hash helpers are pinned to the
   `ckb-std::type_id` contract.
 - since/epoch fixtures cover valid and malformed `ckb-std::since` cases.
-- `cellc validate-tx --json` explicitly reports metadata/evidence-only
+- `cellc tx validate --json` explicitly reports metadata/evidence-only
   validation and no CKB VM or tx-pool acceptance.
 - `cellc action build --json` emits a v0.19 adapter contract and
   packed-materialization requirements for headless `ckb-sdk-rust` / CCC

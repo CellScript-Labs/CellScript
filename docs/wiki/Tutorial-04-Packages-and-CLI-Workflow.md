@@ -192,7 +192,7 @@ cellc verify-artifact build/main.elf --expect-target-profile ckb --verify-source
 ```
 
 Builder-facing contract commands such as `action build`, `entry-witness`,
-`solve-tx`, `explain-assumptions`, `validate-tx`, and `gen-builder` expose the
+`tx solve`, `explain assumptions`, `tx validate`, and `gen-builder` expose the
 metadata that transaction builders consume. Prefer `--json` where a command
 offers it, and reserve human summaries for interactive review.
 

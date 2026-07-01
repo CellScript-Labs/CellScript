@@ -113,7 +113,7 @@ Current implementation evidence:
   the `ckb-std::type_id` API contract.
 - since/epoch tests cover both valid encodings and malformed cases accepted or
   rejected by `ckb-std::since`.
-- `cellc validate-tx --json` reports `validation_level =
+- `cellc tx validate --json` reports `validation_level =
   cellscript-metadata-evidence`, `ckb_vm_execution = false`, and
   `tx_pool_acceptance = false`.
 - `cellc ckb-std-compat --json` emits the runtime policy, ABI mirror source,

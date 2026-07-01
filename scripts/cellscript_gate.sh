@@ -607,6 +607,7 @@ run_dev_gate() {
     run cargo check --locked -p cellscript --all-targets
     run ./scripts/cellscript_strict_backend_audit.sh quick
     run ./scripts/cellscript_syntax_combo_audit.sh quick
+    run python3 scripts/check_cellscript_skill_pack.py
     check_forbidden_tracked_files
     run git diff --check
 }
@@ -626,6 +627,7 @@ run_ci_gate() {
     run cargo test --locked -p cellscript -- --test-threads=1
     run cargo clippy --locked -p cellscript --all-targets -- -D warnings
     run ./scripts/cellscript_strict_backend_audit.sh ci
+    run python3 scripts/check_cellscript_skill_pack.py
     check_package_contents
     run cargo package --locked --offline --allow-dirty
     run_website_build_check
@@ -656,6 +658,7 @@ run_release_auxiliary_checks() {
     require_cmd npm
 
     run python3 scripts/validate_cellscript_tooling_release.py
+    run python3 scripts/check_cellscript_skill_pack.py
     check_script_syntax
     check_trailing_whitespace
     check_release_roadmap_docs

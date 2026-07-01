@@ -2251,15 +2251,16 @@ fn v0_15_scoped_invariant_example_compiles_and_produces_proof_plan() {
     let proof_plan = &result.metadata.runtime.proof_plan;
     assert!(!proof_plan.is_empty(), "scoped invariant example must emit ProofPlan records");
 
-    // All declared-invariant and aggregate-invariant records must be metadata-only
+    // The 0.21 xUDT amount sum pattern is helper-covered; the remaining
+    // aggregate primitives in this example stay explicit metadata-only gaps.
     let declared = assert_proof_plan_invariant_record(
         proof_plan,
         "declared-invariant",
         "type_group",
         "group",
-        "gap:runtime-helper-required",
-        "runtime-required",
-        false,
+        "covered",
+        "checked-runtime",
+        true,
     );
     assert_eq!(declared.name, "token_amount_conservation");
 
@@ -2288,9 +2289,19 @@ fn v0_15_scoped_invariant_example_compiles_and_produces_proof_plan() {
         aggregate_names
     );
 
-    // Every aggregate-invariant record must keep an explicit runtime-required gap;
-    // only primitives with a known helper are labelled runtime-helper-required.
+    let helper_checked_aggregate = proof_plan
+        .iter()
+        .find(|plan| plan.category == "aggregate-invariant" && plan.feature.starts_with("assert_sum:"))
+        .expect("missing helper-covered assert_sum aggregate");
+    assert_eq!(helper_checked_aggregate.codegen_coverage_status, "covered");
+    assert_eq!(helper_checked_aggregate.status, "checked-runtime");
+    assert!(helper_checked_aggregate.on_chain_checked);
+
+    // The other aggregate primitives must keep explicit runtime-required gaps.
     for aggregate in proof_plan.iter().filter(|plan| plan.category == "aggregate-invariant") {
+        if aggregate.feature.starts_with("assert_sum:") {
+            continue;
+        }
         assert!(
             matches!(aggregate.codegen_coverage_status.as_str(), "gap:metadata-only" | "gap:runtime-helper-required"),
             "aggregate must remain an explicit gap: {:?}",

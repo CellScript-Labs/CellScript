@@ -124,22 +124,34 @@ pub fn build_for_body(
     plans
 }
 
-pub fn build_for_invariant(invariant: &ir::IrInvariant) -> Vec<ProofPlanMetadata> {
-    let mut plans = vec![summary_plan_for_invariant(invariant)];
+pub fn build_for_invariant(invariant: &ir::IrInvariant, runtime_accesses: &[CkbRuntimeAccessMetadata]) -> Vec<ProofPlanMetadata> {
+    let mut plans = vec![summary_plan_for_invariant(invariant, runtime_accesses)];
     plans.extend(
-        invariant.aggregates.iter().enumerate().map(|(index, aggregate)| plan_for_aggregate_invariant(invariant, index, aggregate)),
+        invariant
+            .aggregates
+            .iter()
+            .enumerate()
+            .map(|(index, aggregate)| plan_for_aggregate_invariant(invariant, index, aggregate, runtime_accesses)),
     );
     plans
 }
 
-fn summary_plan_for_invariant(invariant: &ir::IrInvariant) -> ProofPlanMetadata {
+fn summary_plan_for_invariant(invariant: &ir::IrInvariant, runtime_accesses: &[CkbRuntimeAccessMetadata]) -> ProofPlanMetadata {
     let trigger = invariant.trigger.clone().unwrap_or_else(|| "explicit_entry".to_string());
     let scope = invariant.scope.clone().unwrap_or_else(|| "selected_cells".to_string());
     let mut coverage = vec![format!("declared_invariant_assertions:{}", invariant.assert_count)];
     coverage.extend(invariant.aggregates.iter().map(aggregate_coverage_label));
-    for aggregate in &invariant.aggregates {
-        if let Some(helper) = aggregate_xudt_group_amount_runtime_helper(invariant, aggregate) {
+    let aggregate_evidence = invariant
+        .aggregates
+        .iter()
+        .map(|aggregate| aggregate_lowering_evidence(invariant, aggregate, runtime_accesses))
+        .collect::<Vec<_>>();
+    for evidence in &aggregate_evidence {
+        if let Some(helper) = evidence.helper() {
             coverage.push(format!("runtime_helper:{helper}"));
+        }
+        if let AggregateLoweringEvidence::RuntimeHelperChecked(helper) = evidence {
+            coverage.push(format!("runtime_helper_checked:{helper}"));
         }
     }
     coverage.extend(coverage_notes(&trigger, &scope));
@@ -151,13 +163,28 @@ fn summary_plan_for_invariant(invariant: &ir::IrInvariant) -> ProofPlanMetadata 
     }
     dedup(&mut reads);
 
-    let mut input_output_relation_checks =
-        invariant.aggregates.iter().map(|aggregate| aggregate_relation_check_label(invariant, aggregate)).collect::<Vec<_>>();
+    let mut input_output_relation_checks = invariant
+        .aggregates
+        .iter()
+        .zip(aggregate_evidence.iter().copied())
+        .map(|(aggregate, evidence)| aggregate_relation_check_label(aggregate, evidence))
+        .collect::<Vec<_>>();
     dedup(&mut input_output_relation_checks);
 
-    let all_aggregates_runtime_helper_backed = !invariant.aggregates.is_empty()
-        && invariant.aggregates.iter().all(|aggregate| aggregate_xudt_group_amount_helper_required(invariant, aggregate));
-    let mut builder_assumptions = if all_aggregates_runtime_helper_backed && invariant.assert_count == 0 {
+    let all_aggregates_runtime_helper_backed =
+        !aggregate_evidence.is_empty() && aggregate_evidence.iter().all(AggregateLoweringEvidence::is_runtime_helper_backed);
+    let all_aggregates_runtime_helper_checked =
+        !aggregate_evidence.is_empty() && aggregate_evidence.iter().all(AggregateLoweringEvidence::is_checked);
+    let executable_by_runtime_helper = all_aggregates_runtime_helper_checked && invariant.assert_count == 0;
+    let mut builder_assumptions = if executable_by_runtime_helper {
+        let mut assumptions = aggregate_evidence
+            .iter()
+            .filter_map(AggregateLoweringEvidence::helper)
+            .map(|helper| format!("declared(runtime-helper-checked:{helper})"))
+            .collect::<Vec<_>>();
+        assumptions.push(format!("declared(assert_invariant_count:{})", invariant.assert_count));
+        assumptions
+    } else if all_aggregates_runtime_helper_backed && invariant.assert_count == 0 {
         let mut assumptions = invariant
             .aggregates
             .iter()
@@ -183,7 +210,12 @@ fn summary_plan_for_invariant(invariant: &ir::IrInvariant) -> ProofPlanMetadata 
     }
     dedup(&mut builder_assumptions);
 
-    let mut diagnostics = if all_aggregates_runtime_helper_backed && invariant.assert_count == 0 {
+    let mut diagnostics = if executable_by_runtime_helper {
+        vec![ProofPlanDiagnosticMetadata {
+            severity: "info".to_string(),
+            message: "declared xUDT group amount invariant is discharged by matching generated runtime helper coverage".to_string(),
+        }]
+    } else if all_aggregates_runtime_helper_backed && invariant.assert_count == 0 {
         vec![ProofPlanDiagnosticMetadata {
             severity: "info".to_string(),
             message: "declared xUDT group amount invariant can be discharged by the matching xUDT group amount runtime helper in a selected entry"
@@ -203,6 +235,10 @@ fn summary_plan_for_invariant(invariant: &ir::IrInvariant) -> ProofPlanMetadata 
                     .to_string(),
         });
     }
+
+    let status = if executable_by_runtime_helper { "checked-runtime" } else { "runtime-required" };
+    let on_chain_checked_obligations =
+        if executable_by_runtime_helper { vec![format!("declared-invariant:{}={status}", invariant.name)] } else { Vec::new() };
 
     ProofPlanMetadata {
         name: invariant.name.clone(),
@@ -225,15 +261,17 @@ fn summary_plan_for_invariant(invariant: &ir::IrInvariant) -> ProofPlanMetadata 
         preserved_fields: Vec::new(),
         witness_fields: declared_witness_fields(&reads),
         lock_args_fields: declared_lock_args_fields(&reads),
-        on_chain_checked: false,
-        on_chain_checked_obligations: Vec::new(),
+        on_chain_checked: executable_by_runtime_helper,
+        on_chain_checked_obligations,
         builder_assumptions,
-        codegen_coverage_status: if all_aggregates_runtime_helper_backed && invariant.assert_count == 0 {
+        codegen_coverage_status: if executable_by_runtime_helper {
+            "covered".to_string()
+        } else if all_aggregates_runtime_helper_backed && invariant.assert_count == 0 {
             "gap:runtime-helper-required".to_string()
         } else {
             "gap:metadata-only".to_string()
         },
-        status: "runtime-required".to_string(),
+        status: status.to_string(),
         detail: format!(
             "explicit source invariant declaration captured for ProofPlan auditing; aggregate_primitives={}",
             invariant.aggregates.len()
@@ -242,25 +280,37 @@ fn summary_plan_for_invariant(invariant: &ir::IrInvariant) -> ProofPlanMetadata 
     }
 }
 
-fn plan_for_aggregate_invariant(invariant: &ir::IrInvariant, index: usize, aggregate: &ir::IrAggregateInvariant) -> ProofPlanMetadata {
+fn plan_for_aggregate_invariant(
+    invariant: &ir::IrInvariant,
+    index: usize,
+    aggregate: &ir::IrAggregateInvariant,
+    runtime_accesses: &[CkbRuntimeAccessMetadata],
+) -> ProofPlanMetadata {
     let trigger = invariant.trigger.clone().unwrap_or_else(|| "explicit_entry".to_string());
     let scope = aggregate.scope.clone();
     let reads = aggregate_reads(aggregate);
-    let relation_check = aggregate_relation_check_label(invariant, aggregate);
+    let evidence = aggregate_lowering_evidence(invariant, aggregate, runtime_accesses);
+    let relation_check = aggregate_relation_check_label(aggregate, evidence);
     let mut coverage = vec![aggregate_coverage_label(aggregate)];
-    let xudt_group_amount_helper = aggregate_xudt_group_amount_runtime_helper(invariant, aggregate);
-    if let Some(helper) = xudt_group_amount_helper {
+    if let Some(helper) = evidence.helper() {
         coverage.push(format!("runtime_helper:{helper}"));
+    }
+    if let AggregateLoweringEvidence::RuntimeHelperChecked(helper) = evidence {
+        coverage.push(format!("runtime_helper_checked:{helper}"));
     }
     coverage.extend(coverage_notes(&trigger, &scope));
     dedup(&mut coverage);
-    let mut builder_assumptions = if let Some(helper) = xudt_group_amount_helper {
-        vec![format!("declared(runtime-helper-required:{helper})"), format!("declared(parent_invariant:{})", invariant.name)]
-    } else {
-        vec![
+    let mut builder_assumptions = match evidence {
+        AggregateLoweringEvidence::RuntimeHelperChecked(helper) => {
+            vec![format!("declared(runtime-helper-checked:{helper})"), format!("declared(parent_invariant:{})", invariant.name)]
+        }
+        AggregateLoweringEvidence::RuntimeHelperRequired(helper) => {
+            vec![format!("declared(runtime-helper-required:{helper})"), format!("declared(parent_invariant:{})", invariant.name)]
+        }
+        AggregateLoweringEvidence::MetadataOnly => vec![
             "declared(metadata-only aggregate invariant not yet lowered to executable verifier code)".to_string(),
             format!("declared(parent_invariant:{})", invariant.name),
-        ]
+        ],
     };
     if trigger == "lock_group" && scope == "transaction" {
         builder_assumptions.push(
@@ -270,16 +320,19 @@ fn plan_for_aggregate_invariant(invariant: &ir::IrInvariant, index: usize, aggre
     }
     dedup(&mut builder_assumptions);
 
-    let mut diagnostics = if let Some(helper) = xudt_group_amount_helper {
-        vec![ProofPlanDiagnosticMetadata {
+    let mut diagnostics = match evidence {
+        AggregateLoweringEvidence::RuntimeHelperChecked(helper) => vec![ProofPlanDiagnosticMetadata {
+            severity: "info".to_string(),
+            message: format!("aggregate invariant is discharged by generated {helper} runtime helper coverage"),
+        }],
+        AggregateLoweringEvidence::RuntimeHelperRequired(helper) => vec![ProofPlanDiagnosticMetadata {
             severity: "info".to_string(),
             message: format!("aggregate invariant requires {helper} runtime helper coverage"),
-        }]
-    } else {
-        vec![ProofPlanDiagnosticMetadata {
+        }],
+        AggregateLoweringEvidence::MetadataOnly => vec![ProofPlanDiagnosticMetadata {
             severity: "warning".to_string(),
             message: "aggregate invariant primitive is metadata-only until executable lowering covers it".to_string(),
-        }]
+        }],
     };
     if trigger == "lock_group" && scope == "transaction" {
         diagnostics.push(ProofPlanDiagnosticMetadata {
@@ -290,11 +343,16 @@ fn plan_for_aggregate_invariant(invariant: &ir::IrInvariant, index: usize, aggre
         });
     }
 
+    let feature = aggregate_feature_label(aggregate);
+    let status = if evidence.is_checked() { "checked-runtime" } else { "runtime-required" };
+    let on_chain_checked_obligations =
+        if evidence.is_checked() { vec![format!("aggregate-invariant:{feature}={status}")] } else { Vec::new() };
+
     ProofPlanMetadata {
         name: format!("{}#aggregate{}", invariant.name, index),
         origin: format!("invariant:{}#aggregate:{}", invariant.name, index),
         category: "aggregate-invariant".to_string(),
-        feature: aggregate_feature_label(aggregate),
+        feature,
         source_span: Some(ProofPlanSourceSpanMetadata {
             start: aggregate.span.start,
             end: aggregate.span.end,
@@ -311,15 +369,11 @@ fn plan_for_aggregate_invariant(invariant: &ir::IrInvariant, index: usize, aggre
         preserved_fields: Vec::new(),
         witness_fields: declared_witness_fields(&reads),
         lock_args_fields: declared_lock_args_fields(&reads),
-        on_chain_checked: false,
-        on_chain_checked_obligations: Vec::new(),
+        on_chain_checked: evidence.is_checked(),
+        on_chain_checked_obligations,
         builder_assumptions,
-        codegen_coverage_status: if xudt_group_amount_helper.is_some() {
-            "gap:runtime-helper-required".to_string()
-        } else {
-            "gap:metadata-only".to_string()
-        },
-        status: "runtime-required".to_string(),
+        codegen_coverage_status: evidence.codegen_coverage_status().to_string(),
+        status: status.to_string(),
         detail: format!("aggregate invariant primitive declared under invariant '{}'", invariant.name),
         diagnostics,
     }
@@ -760,6 +814,46 @@ fn codegen_coverage_status(status: &str, on_chain_checked: bool) -> &str {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AggregateLoweringEvidence {
+    MetadataOnly,
+    RuntimeHelperRequired(&'static str),
+    RuntimeHelperChecked(&'static str),
+}
+
+impl AggregateLoweringEvidence {
+    fn helper(&self) -> Option<&'static str> {
+        match *self {
+            Self::MetadataOnly => None,
+            Self::RuntimeHelperRequired(helper) | Self::RuntimeHelperChecked(helper) => Some(helper),
+        }
+    }
+
+    fn is_runtime_helper_backed(&self) -> bool {
+        !matches!(self, Self::MetadataOnly)
+    }
+
+    fn is_checked(&self) -> bool {
+        matches!(self, Self::RuntimeHelperChecked(_))
+    }
+
+    fn relation_status(&self) -> String {
+        match *self {
+            Self::MetadataOnly => "metadata-only".to_string(),
+            Self::RuntimeHelperRequired(helper) => format!("runtime-helper-required:{helper}"),
+            Self::RuntimeHelperChecked(helper) => format!("checked-runtime:{helper}"),
+        }
+    }
+
+    fn codegen_coverage_status(&self) -> &'static str {
+        match *self {
+            Self::MetadataOnly => "gap:metadata-only",
+            Self::RuntimeHelperRequired(_) => "gap:runtime-helper-required",
+            Self::RuntimeHelperChecked(_) => "covered",
+        }
+    }
+}
+
 fn aggregate_coverage_label(aggregate: &ir::IrAggregateInvariant) -> String {
     match aggregate.kind {
         AggregateInvariantKind::Sum => format!(
@@ -781,25 +875,21 @@ fn aggregate_coverage_label(aggregate: &ir::IrAggregateInvariant) -> String {
     }
 }
 
-fn aggregate_relation_check_label(invariant: &ir::IrInvariant, aggregate: &ir::IrAggregateInvariant) -> String {
+fn aggregate_relation_check_label(aggregate: &ir::IrAggregateInvariant, evidence: AggregateLoweringEvidence) -> String {
     match aggregate.kind {
         AggregateInvariantKind::Sum => format!(
             "assert_sum:{}{}{}={}",
             aggregate.target,
             aggregate.relation.map(aggregate_relation_symbol).unwrap_or("?"),
             aggregate.rhs.as_deref().unwrap_or("?"),
-            aggregate_xudt_group_amount_runtime_helper(invariant, aggregate)
-                .map(|helper| format!("runtime-helper-required:{helper}"))
-                .unwrap_or_else(|| "metadata-only".to_string())
+            evidence.relation_status()
         ),
         AggregateInvariantKind::Conserved => format!("assert_conserved:{}=metadata-only", aggregate.target),
         AggregateInvariantKind::Delta => format!(
             "assert_delta:{}:{}={}",
             aggregate.target,
             aggregate.argument.as_deref().unwrap_or("?"),
-            aggregate_xudt_group_amount_runtime_helper(invariant, aggregate)
-                .map(|helper| format!("runtime-helper-required:{helper}"))
-                .unwrap_or_else(|| "metadata-only".to_string())
+            evidence.relation_status()
         ),
         AggregateInvariantKind::Distinct => format!("assert_distinct:{}=metadata-only", aggregate.target),
         AggregateInvariantKind::Singleton => format!("assert_singleton:{}=metadata-only", aggregate.target),
@@ -884,8 +974,23 @@ fn aggregate_relation_symbol(relation: AggregateRelation) -> &'static str {
     }
 }
 
-fn aggregate_xudt_group_amount_helper_required(invariant: &ir::IrInvariant, aggregate: &ir::IrAggregateInvariant) -> bool {
-    aggregate_xudt_group_amount_runtime_helper(invariant, aggregate).is_some()
+fn aggregate_lowering_evidence(
+    invariant: &ir::IrInvariant,
+    aggregate: &ir::IrAggregateInvariant,
+    runtime_accesses: &[CkbRuntimeAccessMetadata],
+) -> AggregateLoweringEvidence {
+    let Some(helper) = aggregate_xudt_group_amount_runtime_helper(invariant, aggregate) else {
+        return AggregateLoweringEvidence::MetadataOnly;
+    };
+    if runtime_helper_access_is_available(runtime_accesses, helper) {
+        AggregateLoweringEvidence::RuntimeHelperChecked(helper)
+    } else {
+        AggregateLoweringEvidence::RuntimeHelperRequired(helper)
+    }
+}
+
+fn runtime_helper_access_is_available(runtime_accesses: &[CkbRuntimeAccessMetadata], helper: &str) -> bool {
+    runtime_accesses.iter().any(|access| access.binding == helper && access.source == "GroupInput/GroupOutput")
 }
 
 fn aggregate_xudt_group_amount_runtime_helper(

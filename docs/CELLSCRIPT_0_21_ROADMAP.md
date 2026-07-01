@@ -1,6 +1,7 @@
 # CellScript 0.21 Roadmap
 
-**Status**: Planning
+**Status**: Implementation checkpoint; P0/P1 slices are in tree, with release
+claims still gated by CI/release evidence.
 **Scope**: semantic closure, authenticated compiler evidence, CLI UX
 reorganisation, agent-facing developer tooling, derived protocol views, and
 audit-visible template layout
@@ -67,8 +68,12 @@ CellScript source
 
 0.15 introduced aggregate invariant declarations and ProofPlan records, but
 many aggregate invariants are still metadata-only or runtime-helper-required.
-0.21 should promote the common group-scan cases into executable verifier
-lowering.
+0.21 starts promoting the common group-scan cases into executable verifier
+lowering. The first compiler-owned slice recognises xUDT group amount
+conservation equality and emits the runtime group scanner only in matching
+action preludes where the action locally proves one consumed amount is preserved
+into one created amount. Delta and generic fixed-field scans remain
+explicit-helper or fail-closed until their bindings are lowered safely.
 
 Target declarations:
 
@@ -90,11 +95,15 @@ Required compiler work:
 
 Acceptance:
 
-- iCKB benchmark specs should be able to remove manual xUDT helper shadowing
-  for the aggregate cases that the compiler now lowers;
+- iCKB benchmark specs should be able to remove manual xUDT conservation-helper
+  shadowing for the action-local aggregate equality case that the compiler now
+  lowers;
 - existing iCKB differential rows must keep passing for the promoted cases;
 - strict gates must reject unsupported aggregate declarations instead of
   silently recording them as executable;
+- strict gates must reject stale helper-required aggregate ProofPlan records
+  even when a raw matching runtime access is present elsewhere in module
+  metadata;
 - ProofPlan output must distinguish executable aggregate lowering from
   metadata-only or helper-required aggregate declarations.
 
@@ -139,6 +148,41 @@ Required work:
   current fixed-width surfaces are too narrow;
 - keep all builder results explicit about what is compiler-proven, builder
   assumed, node-dry-run checked, tx-pool accepted, or submitted.
+
+Current implementation note:
+
+- the adapter now resolves builder/runtime-filled materialised action drafts
+  into `ResolvedActionTx`, including packed inputs, outputs, outputs_data,
+  witnesses, CellDeps, header deps, lineage, and manifest-assisted CellDep
+  completion for matching output scripts;
+- `cellc action build --json` now emits
+  `action_scan_selectors.schema =
+  cellscript-action-scan-selectors-v0.21`. The selectors are derived directly
+  from `transaction_runtime_input_requirements` and expose action, source,
+  role, component, field, ABI, blocker, and adapter-action hints for builder
+  runtimes;
+- `cellc gen-builder --target typescript` now embeds the same selector envelope
+  in the generated builder manifest, exports it through `actionSpecs`, includes
+  it on every `GeneratedActionPlan`, and passes it through the runtime
+  `resolveLiveCells` request;
+- generated TypeScript builders now require `resolveLiveCells` to return
+  `scanSelectorEvidence` for declared selectors. Missing evidence or selector
+  mismatches such as a wrong role/source/binding fail before
+  `buildTransaction` is called;
+- the Rust adapter now applies the same fail-closed check to materialised
+  `ActionPlan` JSON: when `action_scan_selectors` is declared,
+  `transaction_draft.scan_selector_evidence` must resolve every selector and
+  must match source, role, binding, feature, component, and script field before
+  `ResolvedActionTx` is constructed;
+- materialised output lock/type scripts now support byte-fragment
+  `args_parts` construction (`hex`, `utf8`, `u8`, `u32_le`, `u64_le`) for
+  variable-length ScriptArgs while rejecting ambiguous drafts that combine
+  non-empty `args` with `args_parts`;
+- plain compiler `ActionPlan` templates still do not include live-cell
+  candidates or node-backed evidence. Selectors are compile-only guidance:
+  runtime-required selectors remain `requires-runtime-resolution`, and full
+  automatic live-cell discovery remains open until a builder or adapter binds
+  them to concrete cells and CKB node evidence.
 
 Acceptance:
 
@@ -201,6 +245,20 @@ Acceptance:
 - unsigned sidecars remain usable for local development but are labelled
   advisory across trust boundaries.
 
+Current implementation note:
+
+- `cellc receipt` writes a `cellscript-compile-receipt-v1` envelope from
+  compiler metadata, including artifact, metadata, ProofPlan, ProtocolGraph,
+  and TemplateLayout hashes;
+- `cellc sign-receipt` signs the canonical receipt payload hash with Ed25519
+  PKCS#8 keys and records the signature role, public key, algorithm, payload
+  hash, and signature bytes;
+- `cellc verify-receipt` rebinds the receipt to the supplied metadata and
+  artifact, verifies signatures when present, and reports unsigned receipts as
+  advisory;
+- `cellc verify-artifact --receipt` consumes the same receipt verification path
+  while preserving the existing artifact hash, metadata, and policy checks.
+
 ## P1: CLI UX Reorganisation And Diagnostic Contract
 
 The current CLI exposes the right categories of functionality, but too many
@@ -250,6 +308,19 @@ Acceptance:
 - machine-readable diagnostics can be requested without scraping coloured text;
 - parser changes do not alter backend, metadata, registry, deployment, or CKB
   semantics.
+
+Current implementation note:
+
+- `cellc --help` and `cellc --list --json` expose the canonical 0.21 command
+  groups while preserving executable legacy aliases for the compatibility
+  window;
+- canonical nested forms are wired for explain, transaction, deployment,
+  registry, package, and auth workflows, with legacy aliases routed to the same
+  handlers;
+- `--message-format=json` is available for diagnostics without changing
+  successful payload `--json` output;
+- `--color=auto|always|never` is available and `NO_COLOR` disables ANSI colour
+  output in automatic mode.
 
 ## P1: Dedicated MCP Server And Programming Skills
 
@@ -314,6 +385,19 @@ Acceptance:
 - the skill pack is covered by a lightweight freshness check that fails when
   referenced docs or command names disappear.
 
+Current implementation note:
+
+- `cellscript-mcp` is an in-repository stdio MCP server that exposes read-only
+  compiler and documentation tools while delegating compiler facts to `cellc`;
+- the first tool set covers command discovery, check, constraints, metadata,
+  TemplateLayout extraction, ProtocolGraph, diagnostics, gate policy, docs by
+  topic, and evidence-level reporting;
+- write, signing, publish, deployment submission, registry mutation, and
+  shell/editor configuration tools are intentionally absent by default;
+- the CellScript skill pack lives under `docs/skills/cellscript-*` and
+  `scripts/check_cellscript_skill_pack.py` verifies that referenced docs,
+  examples, and command names still exist.
+
 ## P1: Derived Cyclic ProtocolGraph View
 
 CellScript needs a whole-protocol audit view, not a new core graph IR.
@@ -364,6 +448,16 @@ Acceptance:
 - WASM/browser metadata does not bloat by default. Large graph payloads should
   be opt-in or omitted from the default playground JSON.
 
+Current implementation note:
+
+- `cellc explain graph` is the canonical grouped command and
+  `cellc explain-graph` remains a compatibility alias;
+- JSON and Mermaid outputs are derived from existing `CompileMetadata`, including
+  flow-state vertices, action edges, runtime accesses, builder assumptions, and
+  cycle detection;
+- audit bundles embed the derived `protocol_graph` view without making it core
+  IR or consensus state.
+
 ## P1: Type-Level TemplateLayout Metadata
 
 Template layout describes physical commitment shape, not semantic validity.
@@ -403,6 +497,17 @@ Acceptance:
 - audit output clearly says whether the layout is flat, Merkle-candidate, or
   consensus-checked;
 - unsupported layout claims fail validation instead of being ignored.
+
+Current implementation note:
+
+- `CompileMetadata.template_layouts` now carries
+  `cellscript-template-layout-v0.21` records for resource, shared, and receipt
+  cell types;
+- each record includes deterministic `template_layout_hash` material that is
+  validated with the rest of compile metadata and included in compile receipt
+  hashing;
+- current layouts remain metadata-only with `consensus_checked = false`; any
+  unsupported consensus-checked claim is rejected by metadata validation.
 
 ## P2: Optional Template Merkleisation Backend
 
@@ -468,7 +573,8 @@ Non-goals:
 0.21 claims should stay conservative:
 
 - executable aggregate invariant lowering is a compiler/backend claim only for
-  the aggregate shapes that have tests and generated verifier evidence;
+  the aggregate shapes that have tests and generated verifier evidence on the
+  corresponding ProofPlan record;
 - authenticated receipts prove metadata/artifact integrity, not transaction
   validity;
 - CLI command grouping is a discovery and compatibility improvement, not a

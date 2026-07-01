@@ -1,7 +1,8 @@
 use camino::Utf8Path;
 use cellscript::error::CompileError;
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use colored::Colorize;
+use std::io::IsTerminal;
 use std::path::Path;
 use std::process;
 
@@ -9,6 +10,19 @@ use cellscript::{
     compile_path, compile_path_metadata_with_diagnostics, compile_path_with_entry_action, compile_path_with_entry_lock,
     default_metadata_path_for_artifact, default_output_path_for_input, resolve_input_path, CompileOptions,
 };
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+enum MessageFormat {
+    Human,
+    Json,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+enum ColorChoice {
+    Auto,
+    Always,
+    Never,
+}
 
 #[derive(Parser, Debug)]
 #[command(name = "cellc")]
@@ -26,6 +40,12 @@ struct Cli {
 
     #[arg(short, long)]
     debug: bool,
+
+    #[arg(long, value_enum, default_value = "human")]
+    message_format: MessageFormat,
+
+    #[arg(long, value_enum, default_value = "auto")]
+    color: ColorChoice,
 
     #[arg(short, long)]
     target: Option<String>,
@@ -63,6 +83,8 @@ struct Cli {
 }
 
 fn main() {
+    apply_no_color_environment();
+
     // Start the LSP server before any CLI parsing side effects.
     if std::env::args().any(|arg| arg == "--lsp") {
         cellscript::lsp::server::run_lsp_server_blocking();
@@ -90,8 +112,11 @@ fn main() {
                 return;
             }
             _ if is_package_command(&arg) || arg == "help" => {
+                let suppress_human_error = process_args_request_message_format_json();
                 if let Err(e) = cellscript::cli::run() {
-                    print_cli_error(&e);
+                    if !suppress_human_error {
+                        print_cli_error(&e);
+                    }
                     process::exit(1);
                 }
                 return;
@@ -109,6 +134,8 @@ fn main() {
     }
 
     let cli = Cli::parse();
+    let message_format = cli.message_format;
+    apply_color_policy(cli.color);
 
     env_logger::init();
 
@@ -127,7 +154,7 @@ fn main() {
             .map(cellscript::TargetProfile::from_name)
             .transpose()
             .unwrap_or_else(|e| {
-                print_cli_error(&e);
+                emit_cli_error(&e, message_format, None, None);
                 process::exit(1);
             })
             .unwrap_or(cellscript::TargetProfile::Ckb);
@@ -137,7 +164,8 @@ fn main() {
     }
 
     if cli.opt > 3 {
-        eprintln!("{}: optimization level must be between 0 and 3", "error".red());
+        let error = CompileError::without_span("optimization level must be between 0 and 3");
+        emit_cli_error(&error, message_format, None, None);
         process::exit(1);
     }
 
@@ -145,7 +173,7 @@ fn main() {
     let resolved_input = match resolve_input_path(Utf8Path::new(&input_file)) {
         Ok(path) => path,
         Err(e) => {
-            print_cli_error(&e);
+            emit_cli_error(&e, message_format, None, None);
             process::exit(1);
         }
     };
@@ -153,7 +181,8 @@ fn main() {
     let source = match std::fs::read_to_string(&resolved_input) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("{}: failed to read '{}': {}", "error".red(), resolved_input, e);
+            let error = CompileError::without_span(format!("failed to read '{}': {}", resolved_input, e));
+            emit_cli_error(&error, message_format, None, None);
             process::exit(1);
         }
     };
@@ -167,7 +196,7 @@ fn main() {
                 }
             }
             Err(e) => {
-                print_cli_error_with_source(&e, Some(&resolved_input), Some(&source));
+                emit_cli_error(&e, message_format, Some(&resolved_input), Some(&source));
                 process::exit(1);
             }
         }
@@ -178,7 +207,7 @@ fn main() {
         let tokens = match cellscript::lexer::lex(&source) {
             Ok(t) => t,
             Err(e) => {
-                print_cli_error_with_source(&e, Some(&resolved_input), Some(&source));
+                emit_cli_error(&e, message_format, Some(&resolved_input), Some(&source));
                 process::exit(1);
             }
         };
@@ -190,7 +219,7 @@ fn main() {
             }
             Err(diagnostics) => {
                 let error = diagnostics_to_cli_error(diagnostics);
-                print_cli_error_with_source(&error, Some(&resolved_input), Some(&source));
+                emit_cli_error(&error, message_format, Some(&resolved_input), Some(&source));
                 process::exit(1);
             }
         }
@@ -208,7 +237,8 @@ fn main() {
     };
 
     if cli.entry_action.is_some() && cli.entry_lock.is_some() {
-        eprintln!("{}: --entry-action and --entry-lock are mutually exclusive", "error".red());
+        let error = CompileError::without_span("--entry-action and --entry-lock are mutually exclusive");
+        emit_cli_error(&error, message_format, None, None);
         process::exit(1);
     }
 
@@ -229,17 +259,17 @@ fn main() {
                 .map(Ok)
                 .unwrap_or_else(|| default_output_path_for_input(Utf8Path::new(&input_file), &resolved_input, result.artifact_format))
                 .unwrap_or_else(|e| {
-                    print_cli_error(&e);
+                    emit_cli_error(&e, message_format, None, None);
                     process::exit(1);
                 });
 
             if let Err(e) = result.write_to_path(&output_path) {
-                print_cli_error(&e);
+                emit_cli_error(&e, message_format, None, None);
                 process::exit(1);
             }
             let metadata_path = default_metadata_path_for_artifact(&output_path);
             if let Err(e) = result.write_metadata_to_path(&metadata_path) {
-                print_cli_error(&e);
+                emit_cli_error(&e, message_format, None, None);
                 process::exit(1);
             }
 
@@ -253,14 +283,51 @@ fn main() {
         Err(e) => {
             let report = compile_path_metadata_with_diagnostics(Utf8Path::new(&input_file), diagnostics_options);
             if report.diagnostics.is_empty() {
-                print_cli_error_with_source(&e, Some(&resolved_input), Some(&source));
+                emit_cli_error(&e, message_format, Some(&resolved_input), Some(&source));
             } else {
                 let error = diagnostics_to_cli_error(report.diagnostics);
-                print_cli_error_with_source(&error, Some(&resolved_input), Some(&source));
+                emit_cli_error(&error, message_format, Some(&resolved_input), Some(&source));
             }
             process::exit(1);
         }
     }
+}
+
+fn no_color_env_set() -> bool {
+    std::env::var_os("NO_COLOR").map(|value| !value.is_empty()).unwrap_or(false)
+}
+
+fn apply_no_color_environment() {
+    if no_color_env_set() {
+        colored::control::set_override(false);
+    }
+}
+
+fn apply_color_policy(choice: ColorChoice) {
+    match choice {
+        ColorChoice::Always => colored::control::set_override(true),
+        ColorChoice::Never => colored::control::set_override(false),
+        ColorChoice::Auto => {
+            if no_color_env_set() || (!std::io::stdout().is_terminal() && !std::io::stderr().is_terminal()) {
+                colored::control::set_override(false);
+            } else {
+                colored::control::unset_override();
+            }
+        }
+    }
+}
+
+fn process_args_request_message_format_json() -> bool {
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        if arg == "--message-format=json" {
+            return true;
+        }
+        if arg == "--message-format" && args.next().as_deref() == Some("json") {
+            return true;
+        }
+    }
+    false
 }
 
 fn resolve_primitive_compat(compat: Option<String>, strict: Option<String>) -> Option<String> {
@@ -273,6 +340,18 @@ fn resolve_primitive_compat(compat: Option<String>, strict: Option<String>) -> O
 
 fn print_cli_error(error: &CompileError) {
     print_cli_error_with_source(error, None, None);
+}
+
+fn emit_cli_error(
+    error: &CompileError,
+    message_format: MessageFormat,
+    fallback_file: Option<&Utf8Path>,
+    fallback_source: Option<&str>,
+) {
+    match message_format {
+        MessageFormat::Human => print_cli_error_with_source(error, fallback_file, fallback_source),
+        MessageFormat::Json => print_cli_error_json(error, fallback_file, fallback_source),
+    }
 }
 
 fn diagnostics_to_cli_error(mut diagnostics: Vec<CompileError>) -> CompileError {
@@ -301,6 +380,101 @@ fn print_cli_error_with_source(error: &CompileError, fallback_file: Option<&Utf8
     }
 
     print_single_cli_error(error, fallback_file, fallback_source);
+}
+
+fn print_cli_error_json(error: &CompileError, fallback_file: Option<&Utf8Path>, fallback_source: Option<&str>) {
+    let diagnostics = cli_error_diagnostics(error);
+    let error_count =
+        diagnostics.iter().filter(|diagnostic| diagnostic.severity == cellscript::error::DiagnosticSeverity::Error).count();
+    let diagnostic_values =
+        diagnostics.iter().map(|diagnostic| diagnostic_json_value(diagnostic, fallback_file, fallback_source)).collect::<Vec<_>>();
+    let payload = serde_json::json!({
+        "status": "failed",
+        "diagnostic_count": diagnostic_values.len(),
+        "error_count": error_count,
+        "warning_count": diagnostic_values.len().saturating_sub(error_count),
+        "diagnostics": diagnostic_values,
+    });
+    match serde_json::to_string_pretty(&payload) {
+        Ok(json) => eprintln!("{}", json),
+        Err(error) => eprintln!("{}: failed to serialize diagnostic JSON: {}", "error".red(), error),
+    }
+}
+
+fn cli_error_diagnostics(error: &CompileError) -> Vec<&CompileError> {
+    if error.related.is_empty() {
+        vec![error]
+    } else {
+        error.related.iter().collect()
+    }
+}
+
+fn diagnostic_json_value(
+    diagnostic: &CompileError,
+    fallback_file: Option<&Utf8Path>,
+    fallback_source: Option<&str>,
+) -> serde_json::Value {
+    let runtime_code = cellscript::runtime_errors::runtime_error_info_for_diagnostic_message(&diagnostic.message)
+        .map(|info| format!("E{:04}", info.code));
+    let file = diagnostic.file.as_ref().map(|file| file.as_str()).or_else(|| fallback_file.map(Utf8Path::as_str));
+    serde_json::json!({
+        "message": &diagnostic.message,
+        "severity": diagnostic.severity.label(),
+        "code": diagnostic.code.as_deref().or(runtime_code.as_deref()),
+        "file": file,
+        "span": {
+            "line": diagnostic.span.line,
+            "column": diagnostic.span.column,
+            "start": diagnostic.span.start,
+            "end": diagnostic.span.end,
+        },
+        "range": diagnostic_range_json(diagnostic, fallback_source),
+    })
+}
+
+fn diagnostic_range_json(diagnostic: &CompileError, fallback_source: Option<&str>) -> serde_json::Value {
+    if diagnostic.span.line == 0 || diagnostic.span.column == 0 {
+        return serde_json::Value::Null;
+    }
+    let source = diagnostic
+        .file
+        .as_ref()
+        .and_then(|file| std::fs::read_to_string(file.as_std_path()).ok())
+        .or_else(|| fallback_source.map(str::to_string));
+    let (end_line, end_column) = source.as_deref().map(|source| line_column_at(source, diagnostic.span.end)).unwrap_or_else(|| {
+        let width = diagnostic.span.end.saturating_sub(diagnostic.span.start).max(1);
+        (diagnostic.span.line, diagnostic.span.column.saturating_add(width))
+    });
+    serde_json::json!({
+        "start": {
+            "line": diagnostic.span.line,
+            "column": diagnostic.span.column,
+            "offset": diagnostic.span.start,
+        },
+        "end": {
+            "line": end_line,
+            "column": end_column,
+            "offset": diagnostic.span.end,
+        },
+    })
+}
+
+fn line_column_at(source: &str, byte_offset: usize) -> (usize, usize) {
+    let mut line = 1;
+    let mut column = 1;
+    let capped_offset = byte_offset.min(source.len());
+    for (offset, ch) in source.char_indices() {
+        if offset >= capped_offset {
+            break;
+        }
+        if ch == '\n' {
+            line += 1;
+            column = 1;
+        } else {
+            column += 1;
+        }
+    }
+    (line, column)
 }
 
 fn print_single_cli_error(error: &CompileError, fallback_file: Option<&Utf8Path>, fallback_source: Option<&str>) {
@@ -464,25 +638,9 @@ fn print_top_level_help() {
     println!("  cellc examples/token.cell --target riscv64-elf --target-profile ckb -o target/token.elf");
     println!("  cellc . --target riscv64-asm --target-profile ckb\n");
     println!("Common commands:");
-    for command in [
-        "build",
-        "check",
-        "metadata",
-        "verify-artifact",
-        "action",
-        "gen-builder",
-        "validate-tx",
-        "deploy-plan",
-        "registry",
-        "certify",
-        "publish",
-        "install",
-        "fmt",
-        "init",
-    ] {
-        if let Some(about) = package_command_about(command) {
-            println!("  {:<18} {}", command, about);
-        }
+    for command in common_top_level_commands() {
+        let about = command.get_about().map(|about| about.to_string()).unwrap_or_default();
+        println!("  {:<18} {}", command.get_name(), about);
     }
     println!("\nDirect options:");
     println!("  -O, --opt <OPT>                  Optimization level 0..3 [default: 0]");
@@ -490,6 +648,8 @@ fn print_top_level_help() {
     println!("  -d, --debug                      Include debug metadata where supported");
     println!("  -t, --target <TARGET>            Target: riscv64-asm or riscv64-elf");
     println!("      --target-profile <PROFILE>   Target profile: ckb");
+    println!("      --message-format <FORMAT>    Diagnostic format: human or json [default: human]");
+    println!("      --color <WHEN>               Colour output: auto, always, or never [default: auto]");
     println!("      --entry-action <ACTION>      Compile one action as entrypoint");
     println!("      --entry-lock <LOCK>          Compile one lock as entrypoint");
     println!("      --primitive-compat <VERSION> Accept older primitive syntax with hints");
@@ -504,19 +664,24 @@ fn print_top_level_help() {
     println!("Run `cellc --list` to see every command.");
 }
 
+fn common_top_level_commands() -> Vec<clap::Command> {
+    let mut commands = cellc_cli_command()
+        .get_subcommands()
+        .filter(|command| !command.is_hide_set() && command.get_display_order() < 200)
+        .cloned()
+        .collect::<Vec<_>>();
+    commands.sort_by(|left, right| {
+        left.get_display_order().cmp(&right.get_display_order()).then_with(|| left.get_name().cmp(right.get_name()))
+    });
+    commands
+}
+
 fn print_command_list() {
     println!("Installed cellc commands:\n");
-    for command in cellc_cli_command().get_subcommands() {
+    for command in cellc_cli_command().get_subcommands().filter(|command| !command.is_hide_set()) {
         let about = command.get_about().map(|about| about.to_string()).unwrap_or_default();
         println!("  {:<22} {}", command.get_name(), about);
     }
-}
-
-fn package_command_about(command_name: &str) -> Option<String> {
-    cellc_cli_command()
-        .get_subcommands()
-        .find(|command| command.get_name() == command_name)
-        .and_then(|command| command.get_about().map(|about| about.to_string()))
 }
 
 fn cellc_cli_command() -> clap::Command {

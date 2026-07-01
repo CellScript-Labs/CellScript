@@ -53,8 +53,8 @@ compiled artifact bytes
 CompileMetadata
 cellc action build JSON
 cellc entry-witness bytes
-cellc deploy-plan JSON
-cellc lock-deps JSON
+cellc deploy plan JSON
+cellc deploy lock-deps JSON
 constraints.ckb
 ```
 
@@ -123,7 +123,7 @@ The first useful adapter flow is code-cell deployment:
 
 ```text
 CellScript artifact binary
-+ deploy-plan
++ deploy plan
 + constraints.ckb
 + capacity input cell
       |
@@ -207,7 +207,7 @@ cellc action build JSON
 ResolvedActionTx
       |
       v
-cellc validate-tx
+cellc tx validate
 + estimate_cycles
 + tx-pool acceptance
       |
@@ -234,6 +234,64 @@ produce. It also emits `witness_policy`, `resolved_tx_required_fields`, and an
 `acceptance_report_template` for adapter output. The draft still reports
 `can_submit = false`, `ckb_vm_execution = false`, and `tx_pool_acceptance =
 false`.
+
+For 0.21 builder runtimes, the same JSON includes
+`action_scan_selectors.schema = cellscript-action-scan-selectors-v0.21` both at
+top level and under `builder_requirements`. This envelope is a compile-only
+projection of `transaction_runtime_input_requirements`: each selector records
+the action, feature, CKB source, role, binding, component, field, ABI, status,
+blocker class, and adapter action. It is designed to let builders ask the right
+live-cell or transaction-shape question without inferring protocol semantics
+from the action name. It is not an indexer query result, outpoint binding,
+dry-run, tx-pool acceptance, or submission claim.
+
+Generated TypeScript builders carry this same envelope in
+`cellscript-builder-manifest.json`, `actionSpecs`, and each
+`GeneratedActionPlan.actionScanSelectors`. Runtime adapters receive it through
+`resolveLiveCells({ plan, options })`, so generated builders and Rust adapter
+flows can share the same selector vocabulary while keeping live-cell selection
+adapter-owned.
+
+The generated builder also expects `resolveLiveCells` to return
+`scanSelectorEvidence` for declared selectors. The evidence is still
+adapter-owned and compile-guided, not node proof. It is checked before
+`buildTransaction`: missing selector evidence and mismatched selector fields
+such as role, source, binding, feature, component, or script field fail closed.
+For materialised `ActionPlan` JSON consumed by the Rust adapter, the same
+evidence is represented as `transaction_draft.scan_selector_evidence` and is
+validated before `ResolvedActionTx` construction.
+
+0.21 adds a strict materialised-plan bridge:
+`resolve_materialized_action_plan()` and
+`resolve_materialized_action_plan_with_manifest()` turn a builder/runtime-filled
+`transaction_draft.inputs`, `outputs`, `outputs_data`, `witnesses`,
+`cell_deps`, `header_deps`, and `lineage` section into `ResolvedActionTx`.
+When a deployment manifest is supplied, matching output lock/type scripts can
+complete their CellDeps through `ManifestCellDepResolver`. Plain compiler
+templates still fail closed with a `requires-runtime-resolution` diagnostic;
+they do not imply live-cell discovery, signing authority, dry-run success, or
+tx-pool acceptance.
+
+Materialised output lock/type scripts still accept the compact
+`args = "0x..."` form. Builder runtimes that need variable-length construction
+may instead provide `args_parts`, a byte-fragment array:
+
+```json
+{
+  "args": "0x",
+  "args_parts": [
+    { "kind": "utf8", "value": "CS" },
+    { "kind": "u8", "value": 7 },
+    { "kind": "u32_le", "value": 42 },
+    { "kind": "hex", "value": "0xaa55" }
+  ]
+}
+```
+
+The adapter concatenates those fragments into packed `Script.args` and rejects
+ambiguous drafts that combine non-empty `args` with `args_parts`. This is byte
+construction only; protocol-specific ScriptArgs meaning and node acceptance
+remain adapter/node evidence.
 
 The adapter-side example also emits a headless `ActionPreview` data model for
 consumed inputs, created outputs, lineage, witnesses, warnings, and estimated
@@ -265,7 +323,7 @@ A production adapter flow should be:
 ```text
 cellc action build
   -> adapter materialise
-  -> cellc validate-tx
+  -> cellc tx validate
   -> ckb-sdk-rust estimate_cycles
   -> ckb-sdk-rust test_tx_pool_accept
   -> optional ckb-sdk-rust send_transaction
@@ -323,9 +381,9 @@ Final CKB witnesses still belong to the transaction builder. The adapter must
 place CellScript entry witness bytes inside the correct `WitnessArgs` field and
 leave lock signatures explicit. It must not assume hidden signer authority.
 
-## `solve-tx`
+## `tx solve`
 
-`cellc solve-tx` is a planning and debugging helper. It is not a chain
+`cellc tx solve` is a planning and debugging helper. It is not a chain
 transaction builder.
 
 It does not perform:

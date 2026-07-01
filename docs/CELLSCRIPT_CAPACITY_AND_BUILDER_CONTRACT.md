@@ -103,7 +103,7 @@ Statuses have builder meaning:
   emit a passive resource identity artifact and JSON plan for that resource.
 
 Scoped action artifacts are active verifiers. They must not be used as passive
-type-script identities for newly-created resource Cells. `cellc validate-tx`
+type-script identities for newly-created resource Cells. `cellc tx validate`
 rejects transactions whose output type script uses the current scoped action
 artifact hash as a resource identity, because CKB would execute that artifact
 during output creation and the entry wrapper may expect action witness bytes.
@@ -126,9 +126,9 @@ the same resource type needs more than one passive identity. Production
 builders should pass the plan back into validation:
 
 ```bash
-cellc validate-tx --against build/action.elf.meta.json \
+cellc tx validate --against build/action.elf.meta.json \
   --resource-identities build/resource-identities.json \
-  build/tx.json
+  --tx build/tx.json
 ```
 
 For builder-facing integrations, prefer the manifest/check layer over manually
@@ -166,13 +166,13 @@ contexts; forbidden as the type script for real `MintAuthority`, `Token`,
 For production-facing validation, pass `--production`:
 
 ```bash
-cellc validate-tx --against build/action.elf.meta.json \
+cellc tx validate --against build/action.elf.meta.json \
   --resource-identities build/resource-identities.json \
   --production \
-  build/tx.json
+  --tx build/tx.json
 ```
 
-In production mode, `validate-tx` rejects known fixture-only resource type
+In production mode, `tx validate` rejects known fixture-only resource type
 identities such as the devnet `always_success` code hash and all-zero
 placeholder hashes. This keeps fixture plumbing useful without allowing it to
 become a resource identity scheme.
