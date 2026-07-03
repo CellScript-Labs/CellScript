@@ -111,6 +111,14 @@ check_trailing_whitespace() {
         "scripts/validate_ckb_cellscript_production_evidence.py"
         "tests/syntax_combo/matrix.toml"
         "tests/syntax_combo/seeds/require-block-lifecycle.cell"
+        "docs/releases/CELLSCRIPT_0_20_RELEASE_NOTES.md"
+        "docs/releases/CELLSCRIPT_0_21_RELEASE_NOTES.md"
+        "docs/releases/CELLSCRIPT_0_16_TO_0_20_RELEASE_NOTES.md"
+        "docs/CELLSCRIPT_0_20_ROADMAP.md"
+        "docs/CELLSCRIPT_0_21_ROADMAP.md"
+        "roadmap/CELLSCRIPT_0_21_CLI_UX_PLAN.md"
+        "examples/atomic_swap.cell"
+        "examples/multi_phase_dao.cell"
     )
     if ((${#tracked_rust_files[@]} > 0)); then
         files+=("${tracked_rust_files[@]}")
@@ -411,6 +419,9 @@ check_ckb_acceptance_boundaries() {
         'scripts/validate_ckb_cellscript_production_evidence.py::tracked_source_sha256'
         'scripts/validate_ckb_cellscript_production_evidence.py::valid CKB CellScript'
         'scripts/validate_cellscript_tooling_release.py::valid CellScript tooling release boundary'
+        'src/lib.rs::cellscript-template-layout-v0.21'
+        'src/cli/commands.rs::cellscript-protocol-graph-v0.21'
+        'src/cli/commands.rs::cellscript-action-scan-selectors-v0.21'
     )
     local item file pattern
     for item in "${required[@]}"; do

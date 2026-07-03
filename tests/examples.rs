@@ -8,13 +8,24 @@ use cellscript::{
 };
 use std::collections::BTreeSet;
 
-const BUNDLED_EXAMPLES: [&str; 7] =
-    ["amm_pool.cell", "launch.cell", "multisig.cell", "nft.cell", "timelock.cell", "token.cell", "vesting.cell"];
+const BUNDLED_EXAMPLES: [&str; 9] = [
+    "amm_pool.cell",
+    "atomic_swap.cell",
+    "launch.cell",
+    "multi_phase_dao.cell",
+    "multisig.cell",
+    "nft.cell",
+    "timelock.cell",
+    "token.cell",
+    "vesting.cell",
+];
 const BACKEND_SHAPE_BASELINE_JSON: &str = include_str!("backend_shape_baseline.json");
 
-const BUNDLED_EXAMPLE_ELF_SIZE_BUDGETS: [(&str, usize); 7] = [
+const BUNDLED_EXAMPLE_ELF_SIZE_BUDGETS: [(&str, usize); 9] = [
     ("amm_pool.cell", 80 * 1024),
+    ("atomic_swap.cell", 80 * 1024),
     ("launch.cell", 36 * 1024),
+    ("multi_phase_dao.cell", 80 * 1024),
     ("multisig.cell", 108 * 1024),
     ("nft.cell", 63 * 1024),
     ("timelock.cell", 72 * 1024),
@@ -121,7 +132,7 @@ const ENTRY_ARTIFACT_SIZE_BUDGETS: [(&str, EntryArtifactSizeBudget); 4] = [
     ),
 ];
 
-const BUNDLED_EXAMPLE_ASM_SHAPE_BUDGETS: [(&str, AssemblyShapeBudget); 7] = [
+const BUNDLED_EXAMPLE_ASM_SHAPE_BUDGETS: [(&str, AssemblyShapeBudget); 9] = [
     (
         "amm_pool.cell",
         AssemblyShapeBudget {
@@ -232,6 +243,38 @@ const BUNDLED_EXAMPLE_ASM_SHAPE_BUDGETS: [(&str, AssemblyShapeBudget); 7] = [
             max_cfg_edges: 1_500,
             max_call_edges: 320,
             max_unreachable_machine_blocks: 780,
+        },
+    ),
+    (
+        "atomic_swap.cell",
+        AssemblyShapeBudget {
+            max_lines: 18_000,
+            max_fail_handlers: 48,
+            max_shared_epilogues: 12,
+            max_text_bytes: 74 * 1024,
+            max_relaxed_branches: 4,
+            max_cond_branch_abs_distance: 9_600,
+            max_machine_blocks: 2_600,
+            max_machine_block_bytes: 21_000,
+            max_cfg_edges: 4_200,
+            max_call_edges: 560,
+            max_unreachable_machine_blocks: 2_400,
+        },
+    ),
+    (
+        "multi_phase_dao.cell",
+        AssemblyShapeBudget {
+            max_lines: 15_000,
+            max_fail_handlers: 48,
+            max_shared_epilogues: 12,
+            max_text_bytes: 60 * 1024,
+            max_relaxed_branches: 4,
+            max_cond_branch_abs_distance: 9_600,
+            max_machine_blocks: 2_200,
+            max_machine_block_bytes: 21_000,
+            max_cfg_edges: 3_600,
+            max_call_edges: 560,
+            max_unreachable_machine_blocks: 2_000,
         },
     ),
 ];

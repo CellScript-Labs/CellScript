@@ -420,6 +420,249 @@ fn cellc_audit_bundle_embeds_protocol_graph() {
     assert_eq!(bundle["template_layouts"][0]["consensus_checked"], false);
 }
 
+/// Source whose `flow` block declares a genuine state-machine cycle (Open <-> Closed),
+/// which must lower to a `RootRequired` template layout with `state_machine_acyclic = false`.
+fn cyclic_flow_template_layout_source() -> String {
+    r#"
+module demo::cyclic_flow
+
+resource Pool has store {
+    state: u8
+    reserve: u64
+}
+
+flow Pool.state {
+    Open -> Closed;
+    Closed -> Open;
+}
+
+action close(pool_before: Pool) -> pool_after: Pool {
+    transition pool_before.state: Open -> pool_after.state: Closed
+    verification
+        require pool_after.reserve == pool_before.reserve
+}
+
+action reopen(pool_before: Pool) -> pool_after: Pool {
+    transition pool_before.state: Closed -> pool_after.state: Open
+    verification
+        require pool_after.reserve == pool_before.reserve
+}
+"#
+    .to_string()
+}
+
+/// Source whose `flow` block declares a linear (acyclic) state machine, which must
+/// lower to a `PathOnlyAllowed` template layout with `state_machine_acyclic = true`.
+fn acyclic_flow_template_layout_source() -> String {
+    r#"
+module demo::acyclic_flow
+
+resource Grant has store {
+    state: u8
+    amount: u64
+}
+
+flow Grant.state {
+    Granted -> Claimable;
+    Claimable -> FullyClaimed;
+}
+
+action claim(grant_before: Grant) -> grant_after: Grant {
+    transition grant_before.state: Claimable -> grant_after.state: FullyClaimed
+    verification
+        require grant_after.amount == grant_before.amount
+}
+"#
+    .to_string()
+}
+
+#[test]
+fn cellc_audit_bundle_marks_cyclic_flow_type_as_root_required() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("pool.cell");
+    let output_dir = dir.path().join("audit");
+    std::fs::write(&input, cyclic_flow_template_layout_source()).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc"))
+        .arg("audit-bundle")
+        .arg(&input)
+        .args(["--output"])
+        .arg(&output_dir)
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+
+    let bundle: serde_json::Value = serde_json::from_slice(&std::fs::read(output_dir.join("audit-bundle.json")).unwrap()).unwrap();
+    assert_eq!(bundle["protocol_graph"]["schema"], "cellscript-protocol-graph-v0.21");
+    assert_eq!(bundle["protocol_graph"]["cycle_detected"], true);
+    let cyclic_layout = bundle["template_layouts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|layout| layout["type_name"] == "Pool")
+        .expect("Pool template layout");
+    assert_eq!(cyclic_layout["schema"], "cellscript-template-layout-v0.21");
+    assert_eq!(cyclic_layout["cycle_policy"], "RootRequired", "unexpected layout: {cyclic_layout}");
+    assert_eq!(cyclic_layout["state_machine_acyclic"], false);
+    assert_eq!(cyclic_layout["consensus_checked"], false);
+}
+
+#[test]
+fn cellc_audit_bundle_marks_acyclic_flow_type_as_path_only() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("grant.cell");
+    let output_dir = dir.path().join("audit");
+    std::fs::write(&input, acyclic_flow_template_layout_source()).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc"))
+        .arg("audit-bundle")
+        .arg(&input)
+        .args(["--output"])
+        .arg(&output_dir)
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+
+    let bundle: serde_json::Value = serde_json::from_slice(&std::fs::read(output_dir.join("audit-bundle.json")).unwrap()).unwrap();
+    let acyclic_layout = bundle["template_layouts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|layout| layout["type_name"] == "Grant")
+        .expect("Grant template layout");
+    assert_eq!(acyclic_layout["schema"], "cellscript-template-layout-v0.21");
+    assert_eq!(acyclic_layout["cycle_policy"], "PathOnlyAllowed", "unexpected layout: {acyclic_layout}");
+    assert_eq!(acyclic_layout["state_machine_acyclic"], true);
+}
+
+#[test]
+fn cellc_audit_bundle_template_layout_hash_distinguishes_cyclic_vs_acyclic() {
+    let dir = tempfile::tempdir().unwrap();
+    let cyclic_input = dir.path().join("cyclic.cell");
+    let acyclic_input = dir.path().join("acyclic.cell");
+    std::fs::write(&cyclic_input, cyclic_flow_template_layout_source()).unwrap();
+    std::fs::write(&acyclic_input, acyclic_flow_template_layout_source()).unwrap();
+
+    let build_cyclic =
+        Command::new(env!("CARGO_BIN_EXE_cellc")).arg(&cyclic_input).arg("-o").arg(dir.path().join("cyclic.s")).status().unwrap();
+    assert!(build_cyclic.success());
+    let build_acyclic =
+        Command::new(env!("CARGO_BIN_EXE_cellc")).arg(&acyclic_input).arg("-o").arg(dir.path().join("acyclic.s")).status().unwrap();
+    assert!(build_acyclic.success());
+
+    let cyclic_meta: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(dir.path().join("cyclic.s.meta.json")).unwrap()).unwrap();
+    let acyclic_meta: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(dir.path().join("acyclic.s.meta.json")).unwrap()).unwrap();
+
+    let cyclic_hash =
+        cyclic_meta["template_layouts"].as_array().unwrap().iter().find(|layout| layout["type_name"] == "Pool").expect("Pool layout")
+            ["template_layout_hash"]
+            .as_str()
+            .unwrap();
+    let acyclic_hash = acyclic_meta["template_layouts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|layout| layout["type_name"] == "Grant")
+        .expect("Grant layout")["template_layout_hash"]
+        .as_str()
+        .unwrap();
+    // The canonical hash input embeds the acyclic/cyclic marker and the cycle
+    // policy, so the two layouts must produce distinct hashes.
+    assert_eq!(cyclic_hash.len(), 64);
+    assert_eq!(acyclic_hash.len(), 64);
+    assert_ne!(cyclic_hash, acyclic_hash, "cyclic and acyclic layout hashes must differ");
+}
+
+#[test]
+fn cellc_verify_artifact_rejects_template_layout_consensus_checked_true() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("pool.cell");
+    let output = dir.path().join("pool.s");
+    std::fs::write(&input, cyclic_flow_template_layout_source()).unwrap();
+    let build = Command::new(env!("CARGO_BIN_EXE_cellc")).arg(&input).arg("-o").arg(&output).status().unwrap();
+    assert!(build.success());
+
+    let metadata_path = dir.path().join("pool.s.meta.json");
+    let mut metadata_json: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&metadata_path).unwrap()).unwrap();
+    // RC deferral: consensus-checked TemplateLayout commitments are not supported,
+    // so externally-supplied metadata carrying consensus_checked=true must be rejected.
+    metadata_json["template_layouts"][0]["consensus_checked"] = serde_json::json!(true);
+    let tampered = dir.path().join("consensus-true.meta.json");
+    std::fs::write(&tampered, serde_json::to_vec_pretty(&metadata_json).unwrap()).unwrap();
+
+    let verify = Command::new(env!("CARGO_BIN_EXE_cellc"))
+        .arg("verify-artifact")
+        .arg(&output)
+        .arg("--metadata")
+        .arg(&tampered)
+        .output()
+        .unwrap();
+    assert!(!verify.status.success(), "unexpected success: {}", String::from_utf8_lossy(&verify.stdout));
+    let stderr = String::from_utf8_lossy(&verify.stderr);
+    assert!(
+        stderr.contains("cannot set consensus_checked=true until a backend verifier supports TemplateLayout commitments"),
+        "unexpected stderr: {stderr}"
+    );
+}
+
+#[test]
+fn cellc_verify_artifact_rejects_template_layout_unsupported_cycle_policy() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("pool.cell");
+    let output = dir.path().join("pool.s");
+    std::fs::write(&input, cyclic_flow_template_layout_source()).unwrap();
+    let build = Command::new(env!("CARGO_BIN_EXE_cellc")).arg(&input).arg("-o").arg(&output).status().unwrap();
+    assert!(build.success());
+
+    let metadata_path = dir.path().join("pool.s.meta.json");
+    let mut metadata_json: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&metadata_path).unwrap()).unwrap();
+    metadata_json["template_layouts"][0]["cycle_policy"] = serde_json::json!("Provisional");
+    let tampered = dir.path().join("bad-cycle-policy.meta.json");
+    std::fs::write(&tampered, serde_json::to_vec_pretty(&metadata_json).unwrap()).unwrap();
+
+    let verify = Command::new(env!("CARGO_BIN_EXE_cellc"))
+        .arg("verify-artifact")
+        .arg(&output)
+        .arg("--metadata")
+        .arg(&tampered)
+        .output()
+        .unwrap();
+    assert!(!verify.status.success(), "unexpected success: {}", String::from_utf8_lossy(&verify.stdout));
+    let stderr = String::from_utf8_lossy(&verify.stderr);
+    assert!(stderr.contains("unsupported cycle_policy"), "unexpected stderr: {stderr}");
+}
+
+#[test]
+fn cellc_verify_artifact_rejects_template_layout_unsupported_layout() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("pool.cell");
+    let output = dir.path().join("pool.s");
+    std::fs::write(&input, cyclic_flow_template_layout_source()).unwrap();
+    let build = Command::new(env!("CARGO_BIN_EXE_cellc")).arg(&input).arg("-o").arg(&output).status().unwrap();
+    assert!(build.success());
+
+    let metadata_path = dir.path().join("pool.s.meta.json");
+    let mut metadata_json: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&metadata_path).unwrap()).unwrap();
+    metadata_json["template_layouts"][0]["layout"] = serde_json::json!("MerkleRoot");
+    let tampered = dir.path().join("bad-layout.meta.json");
+    std::fs::write(&tampered, serde_json::to_vec_pretty(&metadata_json).unwrap()).unwrap();
+
+    let verify = Command::new(env!("CARGO_BIN_EXE_cellc"))
+        .arg("verify-artifact")
+        .arg(&output)
+        .arg("--metadata")
+        .arg(&tampered)
+        .output()
+        .unwrap();
+    assert!(!verify.status.success(), "unexpected success: {}", String::from_utf8_lossy(&verify.stdout));
+    let stderr = String::from_utf8_lossy(&verify.stderr);
+    assert!(stderr.contains("unsupported layout"), "unexpected stderr: {stderr}");
+}
+
 #[test]
 fn cellc_unknown_bare_command_suggests_nearest_command() {
     let output = Command::new(env!("CARGO_BIN_EXE_cellc")).arg("buil").output().unwrap();
@@ -2101,7 +2344,17 @@ fn cellc_compiles_bundled_examples_to_requested_outputs() {
     let examples_dir = manifest_dir.join("examples");
     let output_dir = tempfile::tempdir().unwrap();
 
-    for example in ["amm_pool.cell", "launch.cell", "multisig.cell", "nft.cell", "timelock.cell", "token.cell", "vesting.cell"] {
+    for example in [
+        "amm_pool.cell",
+        "atomic_swap.cell",
+        "launch.cell",
+        "multi_phase_dao.cell",
+        "multisig.cell",
+        "nft.cell",
+        "timelock.cell",
+        "token.cell",
+        "vesting.cell",
+    ] {
         let input = examples_dir.join(example);
         let output = output_dir.path().join(example.replace(".cell", ".s"));
 
@@ -4542,6 +4795,439 @@ action credit(ledger_before: Ledger, delta: u64) -> ledger_after: Ledger {
 }
 
 #[test]
+fn cellc_check_rejects_undeclared_flow_edge() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("Cell.toml"),
+        r#"
+[package]
+name = "demo"
+version = "0.1.0"
+"#,
+    )
+    .unwrap();
+    // All three states are declared in the flow, but only Live -> Filled and the
+    // Filled <-> Cancelled edges exist. `cancel` uses Live -> Cancelled, which is
+    // not a declared edge, so the static flow-edge membership check must reject it.
+    std::fs::write(
+        root.join("src").join("main.cell"),
+        r#"
+module demo::main
+
+resource Offer has store {
+    state: u8
+    amount: u64
+}
+
+flow Offer.state {
+    Live -> Filled;
+    Filled -> Cancelled;
+    Cancelled -> Filled;
+}
+
+action cancel(input: Offer) -> output: Offer {
+    transition input.state: Live -> output.state: Cancelled
+    verification
+        require input.amount == output.amount
+}
+"#,
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("check").output().unwrap();
+    assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("action 'cancel' transition 'Offer.state Live -> Cancelled' is not declared in the flow"),
+        "unexpected stderr: {stderr}"
+    );
+}
+
+#[test]
+fn cellc_check_accepts_declared_cyclic_flow_edge() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("Cell.toml"),
+        r#"
+[package]
+name = "demo"
+version = "0.1.0"
+"#,
+    )
+    .unwrap();
+    // Declared cyclic edges (Open <-> Closed) must be accepted by the static flow
+    // membership validator; the cycle is a legitimate state machine, not an error.
+    std::fs::write(
+        root.join("src").join("main.cell"),
+        r#"
+module demo::main
+
+resource Pool has store {
+    state: u8
+    reserve: u64
+}
+
+flow Pool.state {
+    Open -> Closed;
+    Closed -> Open;
+}
+
+action close(pool_before: Pool) -> pool_after: Pool {
+    transition pool_before.state: Open -> pool_after.state: Closed
+    verification
+        require pool_after.reserve == pool_before.reserve
+}
+
+action reopen(pool_before: Pool) -> pool_after: Pool {
+    transition pool_before.state: Closed -> pool_after.state: Open
+    verification
+        require pool_after.reserve == pool_before.reserve
+}
+"#,
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("check").output().unwrap();
+    assert!(output.status.success(), "unexpected failure: {}", String::from_utf8_lossy(&output.stderr));
+}
+
+#[test]
+fn cellc_check_accepts_declared_linear_flow_edge() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("Cell.toml"),
+        r#"
+[package]
+name = "demo"
+version = "0.1.0"
+"#,
+    )
+    .unwrap();
+    // A linear (acyclic) state machine must be accepted when every action uses a
+    // declared edge. This is the positive counterpart to the undeclared-edge test.
+    std::fs::write(
+        root.join("src").join("main.cell"),
+        r#"
+module demo::main
+
+resource Offer has store {
+    state: u8
+    amount: u64
+}
+
+flow Offer.state {
+    Live -> Filled;
+    Filled -> Cancelled;
+    Cancelled -> Filled;
+}
+
+action fill(input: Offer) -> output: Offer {
+    transition input.state: Live -> output.state: Filled
+    verification
+        require input.amount == output.amount
+}
+"#,
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("check").output().unwrap();
+    assert!(output.status.success(), "unexpected failure: {}", String::from_utf8_lossy(&output.stderr));
+}
+
+#[test]
+fn cellc_check_rejects_flow_create_missing_state_field() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("Cell.toml"),
+        r#"
+[package]
+name = "demo"
+version = "0.1.0"
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("src").join("main.cell"),
+        r#"
+module demo::main
+
+resource Offer has store, create {
+    state: u8
+    amount: u64
+}
+
+flow Offer.state {
+    Live -> Filled;
+}
+
+action seed(recipient: Address) -> output: Offer {
+    verification
+        create output = Offer { amount: 0 } with_lock(recipient)
+}
+"#,
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("check").output().unwrap();
+    assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("create of flow type 'Offer' must set its state field"), "unexpected stderr: {stderr}");
+}
+
+#[test]
+fn cellc_check_rejects_initial_flow_create_non_static_state() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("Cell.toml"),
+        r#"
+[package]
+name = "demo"
+version = "0.1.0"
+"#,
+    )
+    .unwrap();
+    // The initial create of a flow-typed cell uses a runtime-derived state value,
+    // which the static flow-state contract forbids.
+    std::fs::write(
+        root.join("src").join("main.cell"),
+        r#"
+module demo::main
+
+resource Offer has store, create {
+    state: u8
+    amount: u64
+}
+
+flow Offer.state {
+    Live -> Filled;
+}
+
+action seed(dynamic_state: u8, recipient: Address) -> output: Offer {
+    verification
+        create output = Offer { state: dynamic_state, amount: 0 } with_lock(recipient)
+}
+"#,
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("check").output().unwrap();
+    assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("initial create of flow type 'Offer' must use a statically known declared state"),
+        "unexpected stderr: {stderr}"
+    );
+}
+
+#[test]
+fn cellc_check_rejects_flow_state_index_out_of_range() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("Cell.toml"),
+        r#"
+[package]
+name = "demo"
+version = "0.1.0"
+"#,
+    )
+    .unwrap();
+    // A statically-known state index that falls outside the declared state set
+    // (two states: Live=0, Filled=1) must be rejected by the flow-state contract.
+    std::fs::write(
+        root.join("src").join("main.cell"),
+        r#"
+module demo::main
+
+resource Offer has store, create {
+    state: u8
+    amount: u64
+}
+
+flow Offer.state {
+    Live -> Filled;
+}
+
+action seed(recipient: Address) -> output: Offer {
+    verification
+        create output = Offer { state: 99, amount: 0 } with_lock(recipient)
+}
+"#,
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("check").output().unwrap();
+    assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("flow state index 99 is out of range for 'Offer' with 2 states"), "unexpected stderr: {stderr}");
+}
+
+#[test]
+fn cellc_check_rejects_duplicate_flow_edge() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("Cell.toml"),
+        r#"
+[package]
+name = "demo"
+version = "0.1.0"
+"#,
+    )
+    .unwrap();
+    // Declaring the same edge twice is a static error: the flow block must declare a
+    // set of distinct transitions, not a multiset.
+    std::fs::write(
+        root.join("src").join("main.cell"),
+        r#"
+module demo::main
+
+resource Offer has store {
+    state: u8
+    amount: u64
+}
+
+flow Offer.state {
+    Live -> Filled;
+    Live -> Filled;
+    Filled -> Cancelled;
+}
+
+action fill(input: Offer) -> output: Offer {
+    transition input.state: Live -> output.state: Filled
+    verification
+        require input.amount == output.amount
+}
+"#,
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("check").output().unwrap();
+    assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("duplicate state transition 'Live -> Filled'"), "unexpected stderr: {stderr}");
+}
+
+#[test]
+fn cellc_check_rejects_transition_on_type_without_flow_block() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("Cell.toml"),
+        r#"
+[package]
+name = "demo"
+version = "0.1.0"
+"#,
+    )
+    .unwrap();
+    // An action declares a state-annotated transition, but the target type has no
+    // `flow` block. The compiler must reject it rather than silently accepting the
+    // transition as a plain consume/create.
+    std::fs::write(
+        root.join("src").join("main.cell"),
+        r#"
+module demo::main
+
+resource Offer has store {
+    state: u8
+    amount: u64
+}
+
+action fill(input: Offer) -> output: Offer {
+    transition input.state: Live -> output.state: Filled
+    verification
+        require input.amount == output.amount
+}
+"#,
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("check").output().unwrap();
+    assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("type 'Offer' has no declared flow"), "unexpected stderr: {stderr}");
+}
+
+#[test]
+fn cellc_check_rejects_aggregate_invariant_scope_mismatch() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("Cell.toml"),
+        r#"
+[package]
+name = "demo"
+version = "0.1.0"
+
+[build]
+target_profile = "ckb"
+"#,
+    )
+    .unwrap();
+    // The invariant declares scope: transaction but the aggregate reads group-scoped
+    // endpoints (group_inputs/group_outputs). The aggregate scope must match the
+    // enclosing invariant scope.
+    std::fs::write(
+        root.join("src").join("main.cell"),
+        r#"
+module demo::main
+
+resource Token has store, create, consume {
+    amount: u128,
+}
+
+invariant wrong_scope_conservation {
+    trigger: type_group
+    scope: transaction
+    reads: group_inputs<Token>.amount, group_outputs<Token>.amount
+    assert_sum(group_outputs<Token>.amount) == assert_sum(group_inputs<Token>.amount)
+}
+
+action transfer(input: Token) -> output: Token {
+    verification
+        xudt::require_group_amount_conserved()
+        preserve output from input {
+            amount
+        }
+}
+"#,
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("check").output().unwrap();
+    assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("aggregate invariant scope 'group' must match enclosing invariant scope 'transaction'"),
+        "unexpected stderr: {stderr}"
+    );
+}
+
+#[test]
 fn cellc_check_reports_claim_source_predicate_blocker_class() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
@@ -6595,6 +7281,604 @@ action mint(amount: u64) -> Token {
         .is_some_and(|items| items.iter().any(|item| item.as_str().is_some_and(|text| text.contains("does not soft-confirm")))));
     assert_eq!(envelope["action_plan"]["policy"], "cellscript-action-builder-plan-v1");
     assert_eq!(envelope["action_plan"]["transaction_draft"]["state"], "ActionPlan");
+}
+
+/// Source declaring an xUDT group-amount-conservation invariant, with the
+/// action calling the matching `xudt::require_group_amount_conserved()` helper
+/// so the invariant lowers to a checked runtime helper.
+fn xudt_conserved_source_with_runtime_helper() -> &'static str {
+    r#"
+module demo::main
+
+resource Token has store, create, consume {
+    amount: u128,
+}
+
+invariant xudt_group_transfer_conservation {
+    trigger: type_group
+    scope: group
+    reads: group_inputs<Token>.amount, group_outputs<Token>.amount
+    assert_sum(group_outputs<Token>.amount) == assert_sum(group_inputs<Token>.amount)
+}
+
+action transfer(input: Token) -> output: Token {
+    verification
+        xudt::require_group_amount_conserved()
+        preserve output from input {
+            amount
+        }
+}
+"#
+}
+
+/// Source declaring the same invariant but without the action-side helper call, so
+/// the aggregate is recognised as runtime-helper-backed but not yet discharged.
+fn xudt_conserved_source_without_helper_call() -> &'static str {
+    r#"
+module demo::main
+
+resource Token has store, create, consume {
+    amount: u128,
+}
+
+invariant xudt_group_transfer_conservation {
+    trigger: type_group
+    scope: group
+    reads: group_inputs<Token>.amount, group_outputs<Token>.amount
+    assert_sum(group_outputs<Token>.amount) == assert_sum(group_inputs<Token>.amount)
+}
+
+action transfer(input: Token) -> output: Token {
+    verification
+        preserve output from input {
+            amount
+        }
+}
+"#
+}
+
+fn write_xudt_package(root: &std::path::Path, source: &str) {
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("Cell.toml"),
+        r#"
+[package]
+name = "demo"
+version = "0.1.0"
+
+[build]
+target_profile = "ckb"
+"#,
+    )
+    .unwrap();
+    std::fs::write(root.join("src").join("main.cell"), source).unwrap();
+}
+
+#[test]
+fn cellc_check_xudt_group_amount_conserved_lowers_to_runtime_helper() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    write_xudt_package(root, xudt_conserved_source_with_runtime_helper());
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("build").output().unwrap();
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+
+    let metadata: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(root.join("build").join("main.s.meta.json")).unwrap()).unwrap();
+    let proof_plan = metadata["runtime"]["proof_plan"].as_array().expect("proof_plan array");
+    let aggregate =
+        proof_plan.iter().find(|plan| plan["category"] == "aggregate-invariant").expect("aggregate-invariant ProofPlan record");
+
+    assert_eq!(aggregate["status"], "checked-runtime", "unexpected metadata: {:?}", aggregate);
+    assert_eq!(aggregate["codegen_coverage_status"], "covered", "unexpected metadata: {:?}", aggregate);
+    assert_eq!(aggregate["on_chain_checked"], true);
+    assert!(
+        aggregate["builder_assumptions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|assumption| assumption == "declared(runtime-helper-checked:xudt::require_group_amount_conserved)"),
+        "missing checked helper assumption: {:?}",
+        aggregate["builder_assumptions"]
+    );
+
+    let runtime_accesses = metadata["runtime"]["ckb_runtime_accesses"].as_array().expect("ckb_runtime_accesses array");
+    assert!(
+        runtime_accesses.iter().any(|access| {
+            access["operation"] == "xudt-group-amount-conservation" && access["binding"] == "xudt::require_group_amount_conserved"
+        }),
+        "missing xudt conserved runtime access: {:?}",
+        runtime_accesses
+    );
+}
+
+#[test]
+fn cellc_check_xudt_conserved_runtime_helper_required_gap_metadata() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    write_xudt_package(root, xudt_conserved_source_without_helper_call());
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("build").output().unwrap();
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+
+    let metadata: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(root.join("build").join("main.s.meta.json")).unwrap()).unwrap();
+    let proof_plan = metadata["runtime"]["proof_plan"].as_array().expect("proof_plan array");
+    let aggregate =
+        proof_plan.iter().find(|plan| plan["category"] == "aggregate-invariant").expect("aggregate-invariant ProofPlan record");
+
+    // The invariant is recognised as runtime-helper-backed but the action does not
+    // call the helper, so it must surface as a runtime-helper-required gap, not as
+    // checked or as a pure metadata-only gap.
+    assert_eq!(aggregate["status"], "runtime-required", "unexpected metadata: {:?}", aggregate);
+    assert_eq!(aggregate["codegen_coverage_status"], "gap:runtime-helper-required", "unexpected metadata: {:?}", aggregate);
+    assert_eq!(aggregate["on_chain_checked"], false);
+    assert!(
+        aggregate["builder_assumptions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|assumption| assumption == "declared(runtime-helper-required:xudt::require_group_amount_conserved)"),
+        "missing required helper assumption: {:?}",
+        aggregate["builder_assumptions"]
+    );
+}
+
+#[test]
+fn cellc_check_primitive_strict_017_rejects_stale_xudt_helper_gap() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    write_xudt_package(root, xudt_conserved_source_without_helper_call());
+
+    // The invariant is runtime-helper-required; strict 0.17 mode must fail closed
+    // because the matching runtime access is missing from generated code.
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc"))
+        .current_dir(root)
+        .arg("build")
+        .arg("--primitive-strict")
+        .arg("0.17")
+        .output()
+        .unwrap();
+    assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("0.17 CKB source strict check failed"), "unexpected stderr: {stderr}");
+    assert!(stderr.contains("PP0170"), "unexpected stderr: {stderr}");
+    assert!(
+        stderr.contains("0.17 strict mode requires matching runtime-helper-required:xudt::require_group_amount_conserved coverage"),
+        "unexpected stderr: {stderr}"
+    );
+}
+
+#[test]
+fn cellc_explain_proof_plan_distinguishes_three_coverage_states() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    write_xudt_package(root, xudt_conserved_source_with_runtime_helper());
+
+    let output =
+        Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).args(["explain", "proof"]).arg("--json").output().unwrap();
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+
+    let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let proof_plan = summary["proof_plan"].as_array().expect("proof_plan array");
+    let aggregate =
+        proof_plan.iter().find(|plan| plan["category"] == "aggregate-invariant").expect("aggregate-invariant ProofPlan record");
+
+    // The same builder-assumption label surface must expose the checked-runtime
+    // state distinctly from the runtime-required and metadata-only labels used by
+    // the other two coverage branches.
+    assert_eq!(aggregate["status"], "checked-runtime", "unexpected metadata: {:?}", aggregate);
+    assert_eq!(aggregate["codegen_coverage_status"], "covered", "unexpected metadata: {:?}", aggregate);
+    let assumptions = aggregate["builder_assumptions"].as_array().unwrap();
+    assert!(
+        assumptions.iter().any(|assumption| {
+            let text = assumption.as_str().unwrap_or("");
+            text.contains("runtime-helper-checked:xudt::require_group_amount_conserved")
+        }),
+        "expected checked helper label in assumptions: {assumptions:?}"
+    );
+    // The three label prefixes must be the canonical, distinguishable strings that
+    // metadata consumers (registry, audit bundles) key off.
+    let label = |prefix: &str| assumptions.iter().any(|assumption| assumption.as_str().is_some_and(|text| text.starts_with(prefix)));
+    assert!(label("declared(runtime-helper-checked:"));
+    // The other two branches use these prefixes; they must not collide with checked.
+    let all_assumption_text = assumptions.iter().map(|assumption| assumption.as_str().unwrap_or("")).collect::<Vec<_>>().join("\n");
+    assert!(!all_assumption_text.contains("declared(runtime-helper-required:"));
+    assert!(!all_assumption_text.contains("declared(metadata-only invariant"));
+}
+
+fn atomic_swap_inline_source() -> &'static str {
+    r#"
+module demo::atomic_swap
+
+resource SwapLock has store, create, consume, replace, burn, read_ref {
+    swap_id: Hash,
+    initiator: Address,
+    participant: Address,
+    hashlock: Hash,
+    timeout_timepoint: u64,
+    asset_type: AssetType,
+    amount: u64,
+    state: u8,
+}
+
+receipt PreimageClaim has create, consume, burn {
+    swap_id: Hash,
+    preimage: Hash,
+    claimed_by: Address,
+    claimed_at: u64,
+}
+
+enum AssetType {
+    Native,
+    Token(Hash),
+}
+
+flow SwapLock.state {
+    Pending -> Claimed;
+    Pending -> Refunded;
+}
+
+action initiate_swap(swap_id: Hash, initiator: Address, participant: Address, hashlock: Hash, timeout_timepoint: u64, asset_type: AssetType, amount: u64) -> swap_lock: SwapLock {
+    verification
+        require amount > 0, "zero amount"
+        require timeout_timepoint > 0, "zero timeout"
+        create swap_lock = SwapLock { swap_id, initiator, participant, hashlock, timeout_timepoint, asset_type, amount, state: Pending } with_lock(initiator)
+
+}
+
+action claim_with_preimage(lock: SwapLock, preimage: Hash, claimed_by: Address, current_timepoint: u64) -> (claim: PreimageClaim, updated_lock: SwapLock) {
+    transition lock.state: Pending -> updated_lock.state: Claimed
+    verification
+        require claimed_by == lock.participant, "not the participant"
+        require current_timepoint < lock.timeout_timepoint, "claim window expired"
+        require hash_blake2b(preimage) == lock.hashlock, "wrong preimage"
+        consume lock
+        create claim = PreimageClaim { swap_id: lock.swap_id, preimage, claimed_by, claimed_at: current_timepoint }
+        create updated_lock = SwapLock { swap_id: lock.swap_id, initiator: lock.initiator, participant: lock.participant, hashlock: lock.hashlock, timeout_timepoint: lock.timeout_timepoint, asset_type: lock.asset_type, amount: lock.amount, state: Claimed } with_lock(lock.initiator)
+
+}
+
+action refund_after_timeout(lock: SwapLock, refunded_by: Address, current_timepoint: u64) -> updated_lock: SwapLock {
+    transition lock.state: Pending -> updated_lock.state: Refunded
+    verification
+        require refunded_by == lock.initiator, "not the initiator"
+        require current_timepoint >= lock.timeout_timepoint + 100, "timeout not reached"
+        consume lock
+        create updated_lock = SwapLock { swap_id: lock.swap_id, initiator: lock.initiator, participant: lock.participant, hashlock: lock.hashlock, timeout_timepoint: lock.timeout_timepoint, asset_type: lock.asset_type, amount: lock.amount, state: Refunded } with_lock(refunded_by)
+
+}
+"#
+}
+
+#[test]
+fn cellc_atomic_swap_full_lifecycle_build_check_audit_receipt() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("Cell.toml"),
+        r#"
+[package]
+name = "demo"
+version = "0.1.0"
+
+[build]
+target_profile = "ckb"
+"#,
+    )
+    .unwrap();
+    std::fs::write(root.join("src").join("main.cell"), atomic_swap_inline_source()).unwrap();
+
+    // 1. check succeeds with the linear (acyclic) state machine.
+    let check = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("check").output().unwrap();
+    assert!(check.status.success(), "check failed: {}", String::from_utf8_lossy(&check.stderr));
+
+    // 2. build produces an artifact + metadata.
+    let build = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("build").output().unwrap();
+    assert!(build.status.success(), "build failed: {}", String::from_utf8_lossy(&build.stderr));
+    let metadata: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(root.join("build").join("main.s.meta.json")).unwrap()).unwrap();
+    let swap_layout = metadata["template_layouts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|layout| layout["type_name"] == "SwapLock")
+        .expect("SwapLock template layout");
+    assert_eq!(swap_layout["schema"], "cellscript-template-layout-v0.21");
+    // The flow is linear (Pending -> Claimed/Refunded), so the layout must be PathOnlyAllowed.
+    assert_eq!(swap_layout["cycle_policy"], "PathOnlyAllowed");
+    assert_eq!(swap_layout["state_machine_acyclic"], true);
+
+    // 3. explain graph reports the action transitions + template-layout-aware protocol view.
+    let graph = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).args(["explain", "graph"]).arg("--json").output().unwrap();
+    assert!(graph.status.success(), "{}", String::from_utf8_lossy(&graph.stderr));
+    let graph_json: serde_json::Value = serde_json::from_slice(&graph.stdout).unwrap();
+    assert_eq!(graph_json["schema"], "cellscript-protocol-graph-v0.21");
+    assert_eq!(graph_json["consensus_checked"], false);
+    assert!(
+        graph_json["edges"].as_array().unwrap().iter().any(|edge| {
+            edge["action_name"] == "claim_with_preimage"
+                && edge["source_vertex"] == "SwapLock:Pending"
+                && edge["target_vertex"] == "SwapLock:Claimed"
+                && edge["derivation"] == "state-transition"
+        }),
+        "expected claim_with_preimage state-transition edge: {graph_json}"
+    );
+
+    // 4. audit-bundle embeds both protocol_graph and template_layouts with the v0.21 schemas.
+    let audit = Command::new(env!("CARGO_BIN_EXE_cellc"))
+        .current_dir(root)
+        .arg("audit-bundle")
+        .args(["--output"])
+        .arg(root.join("audit"))
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert!(audit.status.success(), "{}", String::from_utf8_lossy(&audit.stderr));
+    let bundle: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(root.join("audit").join("audit-bundle.json")).unwrap()).unwrap();
+    assert_eq!(bundle["protocol_graph"]["schema"], "cellscript-protocol-graph-v0.21");
+    assert!(bundle["template_layouts"].as_array().unwrap().iter().any(|layout| {
+        layout["schema"] == "cellscript-template-layout-v0.21"
+            && layout["type_name"] == "SwapLock"
+            && layout["consensus_checked"] == false
+    }));
+
+    // 5. action build surfaces runtime-required scan selectors for the consume/create actions.
+    let action_build = Command::new(env!("CARGO_BIN_EXE_cellc"))
+        .current_dir(root)
+        .arg("action")
+        .arg("build")
+        .arg("--action")
+        .arg("claim_with_preimage")
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert!(action_build.status.success(), "{}", String::from_utf8_lossy(&action_build.stderr));
+    let plan: serde_json::Value = serde_json::from_slice(&action_build.stdout).unwrap();
+    let scan_selectors = &plan["action_scan_selectors"];
+    assert_eq!(scan_selectors["schema"], "cellscript-action-scan-selectors-v0.21");
+    assert!(
+        scan_selectors["runtime_required_selector_count"].as_u64().unwrap() >= 1,
+        "claim_with_preimage should declare at least one runtime-required selector: {scan_selectors}"
+    );
+}
+
+#[test]
+fn cellc_multi_phase_dao_flow_lifecycle_build_check_audit_receipt() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("Cell.toml"),
+        r#"
+[package]
+name = "demo"
+version = "0.1.0"
+
+[build]
+target_profile = "ckb"
+"#,
+    )
+    .unwrap();
+    // A linear Proposal state machine: Draft -> Active -> {Executed, Defeated}.
+    std::fs::write(
+        root.join("src").join("main.cell"),
+        r#"
+module demo::dao
+
+shared DaoConfig has store, create, read_ref {
+    admin: Address,
+    quorum_bps: u64,
+}
+
+receipt Proposal has store, create, consume {
+    proposal_id: Hash,
+    state: u8,
+    proposer: Address,
+    for_votes: u64,
+    against_votes: u64,
+    end_timepoint: u64,
+}
+
+receipt ExecutionRecord has create {
+    proposal_id: Hash,
+    executed_at: u64,
+    for_votes: u64,
+    against_votes: u64,
+}
+
+flow Proposal.state {
+    Draft -> Active;
+    Active -> Executed;
+    Active -> Defeated;
+}
+
+action propose(proposer: Address, proposal_id: Hash, end_timepoint: u64) -> proposal: Proposal {
+    verification
+        create proposal = Proposal { proposal_id, state: Draft, proposer, for_votes: 0, against_votes: 0, end_timepoint } with_lock(proposer)
+
+}
+
+action activate_proposal(proposal_before: Proposal, current_timepoint: u64) -> proposal_after: Proposal {
+    transition proposal_before.state: Draft -> proposal_after.state: Active
+    verification
+        require proposal_before.state == Proposal::Draft, "not draft"
+        preserve proposal_after from proposal_before {
+            proposal_id
+            proposer
+            for_votes
+            against_votes
+            end_timepoint
+        }
+        consume proposal_before
+        create proposal_after = Proposal { proposal_id: proposal_before.proposal_id, state: Proposal::Active, proposer: proposal_before.proposer, for_votes: proposal_before.for_votes, against_votes: proposal_before.against_votes, end_timepoint: proposal_before.end_timepoint } with_lock(proposal_before.proposer)
+
+}
+
+action execute_proposal(proposal_before: Proposal, read config: DaoConfig, current_timepoint: u64) -> (proposal_after: Proposal, record: ExecutionRecord) {
+    transition proposal_before.state: Active -> proposal_after.state: Executed
+    verification
+        require proposal_before.state == Proposal::Active, "not active"
+        require current_timepoint >= proposal_before.end_timepoint, "voting not closed"
+        require proposal_before.for_votes > proposal_before.against_votes, "not enough for-votes"
+        consume proposal_before
+        create proposal_after = Proposal { proposal_id: proposal_before.proposal_id, state: Proposal::Executed, proposer: proposal_before.proposer, for_votes: proposal_before.for_votes, against_votes: proposal_before.against_votes, end_timepoint: proposal_before.end_timepoint } with_lock(proposal_before.proposer)
+        create record = ExecutionRecord { proposal_id: proposal_before.proposal_id, executed_at: current_timepoint, for_votes: proposal_before.for_votes, against_votes: proposal_before.against_votes }
+
+}
+"#,
+    )
+    .unwrap();
+
+    let check = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("check").output().unwrap();
+    assert!(check.status.success(), "check failed: {}", String::from_utf8_lossy(&check.stderr));
+
+    let build = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("build").output().unwrap();
+    assert!(build.status.success(), "build failed: {}", String::from_utf8_lossy(&build.stderr));
+    let metadata: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(root.join("build").join("main.s.meta.json")).unwrap()).unwrap();
+    let proposal_layout = metadata["template_layouts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|layout| layout["type_name"] == "Proposal")
+        .expect("Proposal template layout");
+    assert_eq!(proposal_layout["schema"], "cellscript-template-layout-v0.21");
+    // Linear flow => PathOnlyAllowed + acyclic.
+    assert_eq!(proposal_layout["cycle_policy"], "PathOnlyAllowed");
+    assert_eq!(proposal_layout["state_machine_acyclic"], true);
+
+    let audit = Command::new(env!("CARGO_BIN_EXE_cellc"))
+        .current_dir(root)
+        .arg("audit-bundle")
+        .args(["--output"])
+        .arg(root.join("audit"))
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert!(audit.status.success(), "{}", String::from_utf8_lossy(&audit.stderr));
+    let bundle: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(root.join("audit").join("audit-bundle.json")).unwrap()).unwrap();
+    assert_eq!(bundle["protocol_graph"]["schema"], "cellscript-protocol-graph-v0.21");
+    // The audit bundle must carry the Active -> Executed and Active -> Defeated edges.
+    let edges = bundle["protocol_graph"]["edges"].as_array().unwrap();
+    assert!(
+        edges.iter().any(|edge| { edge["action_name"] == "execute_proposal" && edge["derivation"] == "state-transition" }),
+        "expected execute_proposal state-transition edge: {bundle}"
+    );
+
+    // The DAO exposes three entry actions, so action build for each must succeed and
+    // surface scan selectors under the v0.21 schema.
+    for action in ["propose", "activate_proposal", "execute_proposal"] {
+        let action_build = Command::new(env!("CARGO_BIN_EXE_cellc"))
+            .current_dir(root)
+            .arg("action")
+            .arg("build")
+            .arg("--action")
+            .arg(action)
+            .arg("--json")
+            .output()
+            .unwrap();
+        assert!(action_build.status.success(), "{action} build failed: {}", String::from_utf8_lossy(&action_build.stderr));
+        let plan: serde_json::Value = serde_json::from_slice(&action_build.stdout).unwrap();
+        assert_eq!(plan["action_scan_selectors"]["schema"], "cellscript-action-scan-selectors-v0.21", "{action} selector schema");
+    }
+}
+
+#[test]
+fn cellc_multi_phase_dao_rejects_undeclared_state_transition() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("Cell.toml"),
+        r#"
+[package]
+name = "demo"
+version = "0.1.0"
+"#,
+    )
+    .unwrap();
+    // The flow declares Draft -> Active and Active -> {Executed, Defeated}, but the
+    // action tries Draft -> Executed, which is not a declared edge. The static flow
+    // membership validator must reject it.
+    std::fs::write(
+        root.join("src").join("main.cell"),
+        r#"
+module demo::dao_bad
+
+receipt Proposal has store, create, consume {
+    proposal_id: Hash,
+    state: u8,
+    proposer: Address,
+}
+
+flow Proposal.state {
+    Draft -> Active;
+    Active -> Executed;
+    Active -> Defeated;
+}
+
+action fast_track(proposal_before: Proposal) -> proposal_after: Proposal {
+    transition proposal_before.state: Draft -> proposal_after.state: Executed
+    verification
+        require proposal_after.proposer == proposal_before.proposer
+}
+"#,
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("check").output().unwrap();
+    assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("action 'fast_track' transition 'Proposal.state Draft -> Executed' is not declared in the flow"),
+        "unexpected stderr: {stderr}"
+    );
+}
+
+#[test]
+fn cellc_cross_module_launch_composition_distributes_correctly() {
+    // The bundled launch example composes token minting with AMM seeding and a 4-way
+    // distribution; compile it from the repository root so cross-module stdlib imports
+    // (cellscript::fungible_token, cellscript::amm_pool) resolve, then assert the full
+    // audit lifecycle and the eight-output distribution shape.
+    let launch_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples").join("launch");
+
+    let build = Command::new(env!("CARGO_BIN_EXE_cellc")).arg(&launch_path).output().unwrap();
+    assert!(build.status.success(), "build failed: {}", String::from_utf8_lossy(&build.stderr));
+
+    let metadata: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(launch_path.join("build").join("main.s.meta.json")).unwrap()).unwrap();
+    // The build writes into the example package directory; remove the generated build
+    // output so the test leaves no artifacts behind (the directory is gitignored, but
+    // we keep the working tree clean regardless).
+    let _ = std::fs::remove_dir_all(launch_path.join("build"));
+    // The launch_token action must expose eight create outputs (auth + 4 distributions +
+    // pool + lp_receipt + change).
+    let launch_action =
+        metadata["actions"].as_array().unwrap().iter().find(|action| action["name"] == "launch_token").expect("launch_token action");
+    assert_eq!(
+        launch_action["create_set"].as_array().map(|create_set| create_set.len()).unwrap_or(0),
+        8,
+        "expected launch_token with eight create outputs: {launch_action}"
+    );
+
+    let audit_dir = tempfile::tempdir().unwrap();
+    let audit = Command::new(env!("CARGO_BIN_EXE_cellc"))
+        .arg("audit-bundle")
+        .arg(&launch_path)
+        .args(["--output"])
+        .arg(audit_dir.path())
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert!(audit.status.success(), "{}", String::from_utf8_lossy(&audit.stderr));
+    let bundle: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(audit_dir.path().join("audit-bundle.json")).unwrap()).unwrap();
+    assert_eq!(bundle["protocol_graph"]["schema"], "cellscript-protocol-graph-v0.21");
 }
 
 #[test]

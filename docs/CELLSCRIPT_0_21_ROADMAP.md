@@ -568,6 +568,36 @@ Non-goals:
 - no runtime cross-script call semantics;
 - no hidden covenant authority.
 
+## Validation Hardening
+
+After the initial 0.21 RC cut, the validation boundary was tightened to close
+coverage gaps around the new contracts and to reduce gate maintenance debt:
+
+- Flow-edge membership, create-state contract, and aggregate-invariant scope
+  rules now have focused regression tests covering declared/undeclared/cyclic
+  edges, missing and out-of-range state fields, and scope mismatches.
+- xUDT conserved lowering and the three ProofPlan coverage states
+  (`metadata-only`, `runtime-helper-required`, `checked-runtime`) are asserted
+  end-to-end, including the strict `0.17` stale-helper rejection.
+- TemplateLayout `RootRequired` (cyclic) vs `PathOnlyAllowed` (acyclic)
+  assignment, hash divergence, and the `consensus_checked=true` RC deferral are
+  covered by metadata-tamper rejection tests.
+- The CKB adapter's variable-length `args_parts`, manifest-backed CellDep
+  resolution, and fail-closed scan-selector evidence have dedicated negative
+  suites.
+- Two non-production examples (`atomic_swap.cell`, `multi_phase_dao.cell`) were
+  added under `examples/` to exercise flow-edge validation and state-transition
+  lifecycle end-to-end; they are excluded from the production deployment matrix.
+- The syntax-combination audit gained three governance bug classes for
+  flow-edge, flow-create-state, and aggregate-invariant contracts.
+- The 0.21 schema tokens are now part of the gate's acceptance-boundary audit.
+- Tautological registry tests and unreachable dead code in
+  `scripts/cellscript_ckb_release_gate.sh` were removed; the legacy release
+  gate is now a thin delegation shim to the unified gate.
+
+These changes raise the evidence floor for the 0.21 contracts without altering
+compiler semantics, generated artifacts, or the public CLI surface.
+
 ## Evidence Boundary
 
 0.21 claims should stay conservative:

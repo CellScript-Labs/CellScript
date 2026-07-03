@@ -301,6 +301,11 @@ NON_PRODUCTION_EXAMPLES = [
     # by broader CellScript tooling tests, not by the CKB production
     # bundled-contract matrix.
     "registry.cell",
+    # 0.21 business-flow examples. These illustrate flow-edge validation,
+    # state transitions, and cross-module composition for auditing and docs.
+    # They are not part of the production bundled-contract deployment matrix.
+    "atomic_swap.cell",
+    "multi_phase_dao.cell",
 ]
 LANGUAGE_EXAMPLES = [
     "canonical_style.cell",

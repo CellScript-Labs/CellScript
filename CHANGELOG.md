@@ -40,6 +40,15 @@
 - Document the 0.21 boundary across the roadmap, README, CKB adapter guide,
   metadata/gate tutorial, ProofPlan tutorial, and agentic tooling tutorial.
   P2 Template Merkleisation and new observation syntax remain deferred.
+- Tighten the 0.21 RC validation boundary: add focused regression coverage for
+  flow-edge membership, xUDT conserved lowering and ProofPlan coverage states,
+  TemplateLayout cycle policy and `consensus_checked` rejection, CKB adapter
+  `args_parts`/manifest CellDep/scan-selector evidence; add non-production
+  `atomic_swap` and `multi_phase_dao` business-flow examples; extend the
+  syntax-combo audit with flow, flow-create-state, and aggregate-invariant bug
+  classes; add the 0.21 schema tokens to the acceptance-boundary audit; remove
+  tautological registry tests and unreachable dead code in
+  `scripts/cellscript_ckb_release_gate.sh`.
 
 ## 0.20.0 - 2026-06-28
 

@@ -2,7 +2,7 @@
 
 **Status**: Release-candidate notes for CellScript 0.21.0-rc.1.
 
-**Updated**: 2026-07-01.
+**Updated**: 2026-07-03.
 
 CellScript 0.21 is a semantic-closure and tooling release candidate. It
 promotes the most common aggregate invariant shape into executable verifier
@@ -118,6 +118,30 @@ The repository also ships six CellScript programming skills under
 `docs/skills/`. The unified dev, CI, and release-auxiliary gates run
 `scripts/check_cellscript_skill_pack.py` to ensure the skill pack still points
 at current docs and command names.
+
+## Release-Candidate Validation Hardening
+
+The 0.21 RC validation boundary was tightened after the initial candidate cut:
+
+- Added focused regression coverage for every new 0.21 contract: flow-edge
+  membership (undeclared/cyclic/linear edges, create-state contract, duplicate
+  and out-of-range states), xUDT conserved lowering and the three ProofPlan
+  coverage states, TemplateLayout `RootRequired`/`PathOnlyAllowed` assignment
+  and `consensus_checked=true` rejection, CKB adapter `args_parts`,
+  manifest-backed CellDep resolution, and fail-closed scan-selector evidence.
+- Added two non-production business-flow examples (`atomic_swap.cell`,
+  `multi_phase_dao.cell`) under `examples/` to exercise flow-edge validation,
+  state transitions, and cross-module composition end-to-end. They are not part
+  of the production bundled-contract deployment matrix.
+- Extended the syntax-combination audit with three new governance bug classes
+  (`SCA-BUG-FLOW-EDGE-UNDECLARED`, `SCA-BUG-FLOW-CREATE-STATE-CONTRACT`,
+  `SCA-BUG-AGGREGATE-INVARIANT-CONTRACT`).
+- Added the 0.21 schema tokens (`cellscript-template-layout-v0.21`,
+  `cellscript-protocol-graph-v0.21`, `cellscript-action-scan-selectors-v0.21`)
+  to the gate's acceptance-boundary audit.
+- Removed tautological registry tests that re-implemented comparison logic
+  inline instead of exercising the production verification path, and trimmed
+  unreachable dead code from `scripts/cellscript_ckb_release_gate.sh`.
 
 ## Deferred Work
 

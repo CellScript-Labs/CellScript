@@ -33,7 +33,7 @@ EXPECTED_EXAMPLES = [
     "token.cell",
     "vesting.cell",
 ]
-EXPECTED_NON_PRODUCTION_EXAMPLES = ["registry.cell"]
+EXPECTED_NON_PRODUCTION_EXAMPLES = ["registry.cell", "atomic_swap.cell", "multi_phase_dao.cell"]
 EXPECTED_LANGUAGE_EXAMPLES = [
     "canonical_style.cell",
     "order_book.cell",

@@ -194,13 +194,11 @@ def main() -> int:
     require_contains(
         "scripts/cellscript_ckb_release_gate.sh",
         [
-            "check_action_builder_toolchain",
-            "cellc gen-builder",
-            "npm --prefix",
-            "generated builder",
-            "check_novaseal_certify_invariant",
-            "check_novaseal_certify_runs",
-            "check_phase1_end_to_end_invariant",
+            # The legacy release gate is now a thin shim to the unified gate
+            # script; assert the delegation contract rather than the deleted
+            # dead-code function bodies.
+            "exec \"$ROOT_DIR/scripts/cellscript_gate.sh\" release",
+            "exec \"$ROOT_DIR/scripts/cellscript_gate.sh\" release-quick",
         ],
     )
     require_contains(

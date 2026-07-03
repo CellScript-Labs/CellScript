@@ -193,6 +193,30 @@ BUG_CLASS_CONTRACTS: tuple[dict[str, Any], ...] = (
         "required_origins": ("matrix:deep/reject/stdlib-namespace",),
         "release_boundary": "unsupported helper families stay rejected under release-local deep replay",
     },
+    {
+        "id": "SCA-BUG-FLOW-EDGE-UNDECLARED",
+        "name": "flow state transitions must use edges declared in the flow block",
+        "min_mode": "ci",
+        "required_cases": ("reject-flow-undeclared-edge", "accept-flow-declared-cyclic-edge"),
+        "required_origins": ("generated",),
+        "release_boundary": "transition input.state: A -> output.state: B must fail closed when A -> B is not a declared flow edge",
+    },
+    {
+        "id": "SCA-BUG-FLOW-CREATE-STATE-CONTRACT",
+        "name": "initial create of a flow type must set a statically known declared state",
+        "min_mode": "ci",
+        "required_cases": ("reject-flow-create-missing-state", "reject-flow-create-non-static-initial"),
+        "required_origins": ("generated",),
+        "release_boundary": "flow-typed create must set the state field to a declared state literal, not a runtime value",
+    },
+    {
+        "id": "SCA-BUG-AGGREGATE-INVARIANT-CONTRACT",
+        "name": "xUDT group amount conservation invariant must lower to the matching runtime helper",
+        "min_mode": "ci",
+        "required_cases": ("accept-invariant-xudt-conserved",),
+        "required_origins": ("generated",),
+        "release_boundary": "assert_sum(group_outputs<T>.amount) == assert_sum(group_inputs<T>.amount) is recognised as the xUDT conserved aggregate and surfaces the runtime-helper-required gap",
+    },
 )
 
 
@@ -1196,7 +1220,128 @@ action bad(voucher: Voucher) -> coin: Coin {
     }
 }
 """,
-            expected=Expected("reject_compile", ("declare a claim output type",)),
+                expected=Expected("reject_compile", ("declare a claim output type",)),
+        ),
+        AuditCase(
+            name="reject-flow-undeclared-edge",
+            source="""\
+module cellscript::audit::reject_flow_undeclared_edge
+
+resource Offer has store {
+    state: u8
+    amount: u64
+}
+
+flow Offer.state {
+    Live -> Filled;
+    Filled -> Cancelled;
+    Cancelled -> Filled;
+}
+
+action cancel(input: Offer) -> output: Offer {
+    transition input.state: Live -> output.state: Cancelled
+    verification
+        require input.amount == output.amount
+}
+""",
+            expected=Expected("reject_compile", ("is not declared in the flow",)),
+        ),
+        AuditCase(
+            name="accept-flow-declared-cyclic-edge",
+            source="""\
+module cellscript::audit::accept_flow_declared_cyclic_edge
+
+resource Pool has store {
+    state: u8
+    reserve: u64
+}
+
+flow Pool.state {
+    Open -> Closed;
+    Closed -> Open;
+}
+
+action close(pool_before: Pool) -> pool_after: Pool {
+    transition pool_before.state: Open -> pool_after.state: Closed
+    verification
+        require pool_after.reserve == pool_before.reserve
+}
+
+action reopen(pool_before: Pool) -> pool_after: Pool {
+    transition pool_before.state: Closed -> pool_after.state: Open
+    verification
+        require pool_after.reserve == pool_before.reserve
+}
+""",
+            expected=Expected("accept"),
+        ),
+        AuditCase(
+            name="reject-flow-create-missing-state",
+            source="""\
+module cellscript::audit::reject_flow_create_missing_state
+
+resource Offer has store, create {
+    state: u8
+    amount: u64
+}
+
+flow Offer.state {
+    Live -> Filled;
+}
+
+action seed(recipient: Address) -> output: Offer {
+    verification
+        create output = Offer { amount: 0 } with_lock(recipient)
+}
+""",
+            expected=Expected("reject_compile", ("must set its state field",)),
+        ),
+        AuditCase(
+            name="reject-flow-create-non-static-initial",
+            source="""\
+module cellscript::audit::reject_flow_create_non_static_initial
+
+resource Offer has store, create {
+    state: u8
+    amount: u64
+}
+
+flow Offer.state {
+    Live -> Filled;
+}
+
+action seed(dynamic_state: u8, recipient: Address) -> output: Offer {
+    verification
+        create output = Offer { state: dynamic_state, amount: 0 } with_lock(recipient)
+}
+""",
+            expected=Expected("reject_compile", ("must use a statically known declared state",)),
+        ),
+        AuditCase(
+            name="accept-invariant-xudt-conserved",
+            source="""\
+module cellscript::audit::accept_invariant_xudt_conserved
+
+resource Token has store, create, consume {
+    amount: u128,
+}
+
+invariant xudt_group_transfer_conservation {
+    trigger: type_group
+    scope: group
+    reads: group_inputs<Token>.amount, group_outputs<Token>.amount
+    assert_sum(group_outputs<Token>.amount) == assert_sum(group_inputs<Token>.amount)
+}
+
+action transfer(input: Token) -> output: Token {
+    verification
+        xudt::require_group_amount_conserved()
+        preserve output from input {
+            amount
+        }
+}
+""",
+            expected=Expected("accept"),
         ),
     ]
     return cases

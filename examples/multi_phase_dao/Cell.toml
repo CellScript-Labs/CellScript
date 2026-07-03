@@ -1,0 +1,6 @@
+[package]
+name = "multi_phase_dao"
+version = "0.1.0"
+
+[dependencies]
+token = { path = "../token" }

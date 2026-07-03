@@ -12,6 +12,18 @@
     "unreachable_machine_block_count": 1742
   },
   {
+    "example": "atomic_swap.cell",
+    "line_count": 13225,
+    "text_size": 52596,
+    "relaxed_branch_count": 0,
+    "max_cond_branch_abs_distance": 3172,
+    "machine_block_count": 1345,
+    "max_machine_block_size": 20252,
+    "machine_cfg_edge_count": 2124,
+    "machine_call_edge_count": 161,
+    "unreachable_machine_block_count": 1155
+  },
+  {
     "example": "launch.cell",
     "line_count": 6350,
     "text_size": 26224,
@@ -22,6 +34,18 @@
     "machine_cfg_edge_count": 885,
     "machine_call_edge_count": 156,
     "unreachable_machine_block_count": 144
+  },
+  {
+    "example": "multi_phase_dao.cell",
+    "line_count": 8890,
+    "text_size": 35308,
+    "relaxed_branch_count": 1,
+    "max_cond_branch_abs_distance": 4952,
+    "machine_block_count": 1246,
+    "max_machine_block_size": 208,
+    "machine_cfg_edge_count": 2296,
+    "machine_call_edge_count": 499,
+    "unreachable_machine_block_count": 1153
   },
   {
     "example": "multisig.cell",

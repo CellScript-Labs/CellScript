@@ -60,8 +60,27 @@ Use these only when you need a focused failure:
 ./scripts/cellscript_strict_backend_audit.sh ci
 ./scripts/cellscript_strict_backend_audit.sh full
 ./scripts/ckb_cellscript_acceptance.sh --production --stateful-scenarios
-./scripts/cellscript_0_14_scope_audit.sh
 ```
+
+`./scripts/cellscript_0_14_scope_audit.sh` is a historical standalone audit
+from the 0.14 release line. It is not invoked by any current gate mode and is
+retained for manual 0.14-compat debugging only; it is not part of the 0.21
+release-evidence boundary.
+
+The following ecosystem/bridge scripts are standalone manual tools that are
+**not** wired into any gate mode and are **not** part of the release-evidence
+boundary. They require sibling checkouts (`../ckb`, `../CellFabric`) or external
+runtimes and are documented in their respective guides for focused, opt-in use:
+
+- `./scripts/cellscript_ckb_ecosystem_reuse_gate.sh` — CKB-ecosystem reuse
+  checks; see `docs/CELLSCRIPT_CKB_ADAPTER.md`.
+- `./scripts/cellscript_ckb_adapter_acceptance.sh` — adapter acceptance against
+  a sibling CKB checkout; see `docs/CELLSCRIPT_CKB_STD_COMPAT.md`.
+- `./scripts/cellscript_cellfabric_bridge_smoke.sh` — CellFabric bridge smoke
+  test; see `docs/CELLSCRIPT_CELLFABRIC_BRIDGE.md`.
+
+These must not be described as gating evidence, and passing one does not imply
+any release-gate mode passed.
 
 Passing one component does not imply the corresponding higher-level gate passed.
 For example, CKB acceptance proves selected transaction behavior, while the

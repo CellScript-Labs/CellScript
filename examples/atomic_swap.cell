@@ -1,0 +1,119 @@
+module cellscript::atomic_swap
+
+// HTLC-style atomic swap: a participant locks an asset behind a hashlock +
+// timelock, then either the counterparty claims it by revealing a preimage,
+// or the original owner refunds it once the timeout expires. This example
+// exercises consume/create/destroy, witness binding, hash commitments, and
+// time-point guards across a multi-action business flow.
+
+const REFUND_LOCK_PERIOD: u64 = 100
+
+resource SwapLock has store, create, consume, replace, burn, read_ref {
+    swap_id: Hash,
+    initiator: Address,
+    participant: Address,
+    hashlock: Hash,
+    timeout_timepoint: u64,
+    asset_type: AssetType,
+    amount: u64,
+    state: u8,
+}
+
+receipt PreimageClaim has create, consume, burn {
+    swap_id: Hash,
+    preimage: Hash,
+    claimed_by: Address,
+    claimed_at: u64,
+}
+
+receipt RefundClaim has create, consume, burn {
+    swap_id: Hash,
+    refunded_by: Address,
+    refunded_at: u64,
+}
+
+enum AssetType {
+    Native,
+    Token(Hash),
+}
+
+flow SwapLock.state {
+    Pending -> Claimed;
+    Pending -> Refunded;
+}
+
+action initiate_swap(
+    swap_id: Hash,
+    initiator: Address,
+    participant: Address,
+    hashlock: Hash,
+    timeout_timepoint: u64,
+    asset_type: AssetType,
+    amount: u64,
+) -> swap_lock: SwapLock {
+    verification
+        require amount > 0, "zero amount"
+        require timeout_timepoint > 0, "zero timeout"
+        create swap_lock = SwapLock { swap_id, initiator, participant, hashlock, timeout_timepoint, asset_type, amount, state: Pending } with_lock(initiator)
+
+}
+
+action claim_with_preimage(
+    lock: SwapLock,
+    preimage: Hash,
+    claimed_by: Address,
+    current_timepoint: u64,
+) -> (claim: PreimageClaim, updated_lock: SwapLock) {
+    transition lock.state: Pending -> updated_lock.state: Claimed
+    verification
+        require claimed_by == lock.participant, "not the participant"
+        require current_timepoint < lock.timeout_timepoint, "claim window expired"
+        require hash_blake2b(preimage) == lock.hashlock, "wrong preimage"
+        require lock.state == SwapLock::Pending, "not pending"
+        preserve updated_lock from lock {
+            swap_id
+            initiator
+            participant
+            hashlock
+            timeout_timepoint
+            asset_type
+            amount
+        }
+        consume lock
+        create claim = PreimageClaim { swap_id: lock.swap_id, preimage, claimed_by, claimed_at: current_timepoint }
+        create updated_lock = SwapLock { swap_id: lock.swap_id, initiator: lock.initiator, participant: lock.participant, hashlock: lock.hashlock, timeout_timepoint: lock.timeout_timepoint, asset_type: lock.asset_type, amount: lock.amount, state: Claimed } with_lock(lock.initiator)
+
+}
+
+action refund_after_timeout(
+    lock: SwapLock,
+    refunded_by: Address,
+    current_timepoint: u64,
+) -> (refund: RefundClaim, updated_lock: SwapLock) {
+    transition lock.state: Pending -> updated_lock.state: Refunded
+    verification
+        require refunded_by == lock.initiator, "not the initiator"
+        require current_timepoint >= lock.timeout_timepoint + REFUND_LOCK_PERIOD, "timeout not reached"
+        require lock.state == SwapLock::Pending, "not pending"
+        preserve updated_lock from lock {
+            swap_id
+            participant
+            hashlock
+            timeout_timepoint
+            asset_type
+            amount
+        }
+        consume lock
+        create refund = RefundClaim { swap_id: lock.swap_id, refunded_by, refunded_at: current_timepoint }
+        create updated_lock = SwapLock { swap_id: lock.swap_id, initiator: lock.initiator, participant: lock.participant, hashlock: lock.hashlock, timeout_timepoint: lock.timeout_timepoint, asset_type: lock.asset_type, amount: lock.amount, state: Refunded } with_lock(refunded_by)
+
+}
+
+fn is_swap_pending(lock: &SwapLock) -> bool {
+    lock.state == SwapLock::Pending
+}
+
+lock swap_admin(protected lock: SwapLock, witness claimed_admin: Address) -> bool {
+    verification
+        require claimed_admin == lock.initiator
+}

@@ -1,7 +1,9 @@
 [workspace]
 members = [
     "amm_pool",
+    "atomic_swap",
     "launch",
+    "multi_phase_dao",
     "multisig",
     "nft",
     "registry",
