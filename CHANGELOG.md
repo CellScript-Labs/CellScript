@@ -35,8 +35,12 @@
   graph remains a metadata-derived view, not a new IR or consensus source of
   truth.
 - Add the in-repository read-only `cellscript-mcp` server and six CellScript
-  programming skills. The dev, CI, and release-auxiliary gates now run the
-  skill-pack freshness check.
+  programming skills. The dev and CI gates now run the skill-pack freshness
+  check, and release modes inherit it through the embedded CI gate before
+  release-only auxiliary checks.
+- Reduce gate repetition: release auxiliary checks no longer repeat CI-level
+  script, whitespace, and skill-pack checks; website builds avoid duplicate
+  registry generation; the standalone website artifact workflow is manual-only.
 - Document the 0.21 boundary across the roadmap, README, CKB adapter guide,
   metadata/gate tutorial, ProofPlan tutorial, and agentic tooling tutorial.
   P2 Template Merkleisation and new observation syntax remain deferred.

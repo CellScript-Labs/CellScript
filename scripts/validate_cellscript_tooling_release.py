@@ -227,19 +227,27 @@ def main() -> int:
     require_contains(
         "scripts/cellscript_gate.sh",
         [
+            "run_in_dir",
             "run_website_build_check",
             "website registry data is stale",
-            "npm --prefix website run build",
+            "run_in_dir website npm exec -- astro check",
+            "run_in_dir website npm exec -- astro build",
+            "run_in_dir editors/vscode-cellscript npm exec -- vsce package --no-dependencies --out /tmp/cellscript-vscode-dry-run.vsix",
+            "node editors/vscode-cellscript/scripts/validate.mjs",
         ],
     )
     require_contains(
         ".github/workflows/website-build.yml",
         [
+            "workflow_dispatch:",
             "Generate registry website data",
             "Check generated registry data is committed",
             "Upload website dist",
         ],
     )
+    website_build_workflow = read(".github/workflows/website-build.yml")
+    require("pull_request:" not in website_build_workflow, "website artifact workflow must not duplicate the unified CI gate on pull requests")
+    require("push:" not in website_build_workflow, "website artifact workflow must not duplicate the unified CI gate on pushes")
     require_contains(
         "src/main.rs",
         [

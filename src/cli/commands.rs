@@ -7027,31 +7027,47 @@ fn typescript_builder_index(
            if (value.length !== selectors.length) {\n\
              throw new Error(\"CellScript runtime builder-shape mismatch: resolveLiveCells.scanSelectorEvidence length \" + value.length + \" does not match actionScanSelectors.selector_count \" + selectors.length);\n\
            }\n\
-           const selectorsByIndex = new Map<number, Record<string, unknown>>();\n\
-           selectors.forEach((selector, fallbackIndex) => {\n\
-             selectorsByIndex.set(selectorIndex(selector, fallbackIndex), selector);\n\
-           });\n\
-           for (const item of value) {\n\
-             const evidence = assertRuntimeObject(item, \"scanSelectorEvidence item\");\n\
-             const rawIndex = evidence.selector_index;\n\
-             if (typeof rawIndex !== \"number\" || !Number.isInteger(rawIndex)) {\n\
-               throw new Error(\"CellScript runtime builder-shape mismatch: scanSelectorEvidence.selector_index must be an integer\");\n\
-             }\n\
-             const selector = selectorsByIndex.get(rawIndex);\n\
-             if (!selector) {\n\
-               throw new Error(\"CellScript runtime builder-shape mismatch: scanSelectorEvidence selector_index \" + rawIndex + \" is not declared by actionScanSelectors\");\n\
-             }\n\
-             if (evidence.status !== \"resolved\") {\n\
-               throw new Error(\"CellScript runtime builder-shape mismatch: scanSelectorEvidence.status for selector \" + rawIndex + \" must be 'resolved'\");\n\
-             }\n\
+         const selectorsByIndex = new Map<number, Record<string, unknown>>();\n\
+         const declaredSelectorIndexes: number[] = [];\n\
+         selectors.forEach((selector, fallbackIndex) => {\n\
+           const index = selectorIndex(selector, fallbackIndex);\n\
+           if (selectorsByIndex.has(index)) {\n\
+             throw new Error(\"CellScript runtime builder-shape mismatch: actionScanSelectors contains duplicate selector_index \" + index);\n\
+           }\n\
+           selectorsByIndex.set(index, selector);\n\
+           declaredSelectorIndexes.push(index);\n\
+         });\n\
+         const seenEvidenceIndexes = new Set<number>();\n\
+         for (const item of value) {\n\
+           const evidence = assertRuntimeObject(item, \"scanSelectorEvidence item\");\n\
+           const rawIndex = evidence.selector_index;\n\
+           if (typeof rawIndex !== \"number\" || !Number.isInteger(rawIndex)) {\n\
+             throw new Error(\"CellScript runtime builder-shape mismatch: scanSelectorEvidence.selector_index must be an integer\");\n\
+           }\n\
+           if (seenEvidenceIndexes.has(rawIndex)) {\n\
+             throw new Error(\"CellScript runtime builder-shape mismatch: scanSelectorEvidence contains duplicate selector_index \" + rawIndex);\n\
+           }\n\
+           const selector = selectorsByIndex.get(rawIndex);\n\
+           if (!selector) {\n\
+             throw new Error(\"CellScript runtime builder-shape mismatch: scanSelectorEvidence selector_index \" + rawIndex + \" is not declared by actionScanSelectors\");\n\
+           }\n\
+           seenEvidenceIndexes.add(rawIndex);\n\
+           if (evidence.status !== \"resolved\") {\n\
+             throw new Error(\"CellScript runtime builder-shape mismatch: scanSelectorEvidence.status for selector \" + rawIndex + \" must be 'resolved'\");\n\
+           }\n\
              assertSelectorEvidenceField(evidence, selector, \"source\", \"ckb_source\", rawIndex);\n\
              assertSelectorEvidenceField(evidence, selector, \"role\", \"role\", rawIndex);\n\
              assertSelectorEvidenceField(evidence, selector, \"binding\", \"binding\", rawIndex);\n\
              assertSelectorEvidenceField(evidence, selector, \"feature\", \"feature\", rawIndex);\n\
-             assertSelectorEvidenceField(evidence, selector, \"component\", \"component\", rawIndex);\n\
-             assertSelectorEvidenceField(evidence, selector, \"script_field\", \"script_field\", rawIndex);\n\
+           assertSelectorEvidenceField(evidence, selector, \"component\", \"component\", rawIndex);\n\
+           assertSelectorEvidenceField(evidence, selector, \"script_field\", \"script_field\", rawIndex);\n\
+         }\n\
+         for (const index of declaredSelectorIndexes) {\n\
+           if (!seenEvidenceIndexes.has(index)) {\n\
+             throw new Error(\"CellScript runtime builder-shape mismatch: scanSelectorEvidence is missing selector_index \" + index);\n\
            }\n\
-         }\n\n\
+         }\n\
+       }\n\n\
          function actionScanSelectorItems(actionScanSelectors: ActionScanSelectors): Record<string, unknown>[] {\n\
            const selectors = actionScanSelectors.selectors;\n\
            return Array.isArray(selectors) ? selectors.filter(isRuntimeRecord) : [];\n\
@@ -7070,14 +7086,20 @@ fn typescript_builder_index(
            selectorField: string,\n\
            selectorIndex: number,\n\
          ): void {\n\
-           const expected = selector[selectorField];\n\
-           const actual = evidence[evidenceField];\n\
-           if (expected === undefined || expected === null || actual === undefined || actual === null) {\n\
-             return;\n\
+         const expected = selector[selectorField];\n\
+         const actual = evidence[evidenceField];\n\
+         if (expected === undefined || expected === null) {\n\
+           if (actual !== undefined && actual !== null) {\n\
+             throw new Error(\"CellScript runtime builder-shape mismatch: scanSelectorEvidence.\" + evidenceField + \" unexpected for selector \" + selectorIndex);\n\
            }\n\
-           if (actual !== expected) {\n\
-             throw new Error(\"CellScript runtime builder-shape mismatch: scanSelectorEvidence.\" + evidenceField + \" mismatch for selector \" + selectorIndex);\n\
-           }\n\
+           return;\n\
+         }\n\
+         if (actual === undefined || actual === null) {\n\
+           throw new Error(\"CellScript runtime builder-shape mismatch: scanSelectorEvidence.\" + evidenceField + \" missing for selector \" + selectorIndex);\n\
+         }\n\
+         if (actual !== expected) {\n\
+           throw new Error(\"CellScript runtime builder-shape mismatch: scanSelectorEvidence.\" + evidenceField + \" mismatch for selector \" + selectorIndex);\n\
+         }\n\
          }\n\n\
          function assertBuiltTransaction(value: unknown): unknown {\n\
            if (value === undefined || value === null) {\n\
@@ -7285,19 +7307,39 @@ fn typescript_builder_test(actions: &[&crate::ActionMetadata]) -> Result<String>
              async resolveLiveCells() { return { inputs: [] }; },\n\
              async buildTransaction() { return { tx: true }; },\n\
            };\n\
-           const mismatchedSelectorEvidenceRuntime = {\n\
-             async resolveLiveCells(request) {\n\
-               const evidence = selectorEvidenceForPlan(request.plan);\n\
-               if (evidence.length > 0) {\n\
-                 evidence[0] = { ...evidence[0], role: \"wrong-role\" };\n\
-               }\n\
-               return { inputs: [], scanSelectorEvidence: evidence };\n\
-             },\n\
-             async buildTransaction() { return { tx: true }; },\n\
-           };\n\
-           await assert.rejects(\n\
-             () => builder.createActionBuilder(noDryRunRuntime)[first.method](first.params, { dryRun: true }),\n\
-             /missing dryRun adapter/,\n\
+         const mismatchedSelectorEvidenceRuntime = {\n\
+           async resolveLiveCells(request) {\n\
+             const evidence = selectorEvidenceForPlan(request.plan);\n\
+             if (evidence.length > 0) {\n\
+               evidence[0] = { ...evidence[0], role: \"wrong-role\" };\n\
+             }\n\
+             return { inputs: [], scanSelectorEvidence: evidence };\n\
+           },\n\
+           async buildTransaction() { return { tx: true }; },\n\
+         };\n\
+         const missingSelectorFieldRuntime = {\n\
+           async resolveLiveCells(request) {\n\
+             const evidence = selectorEvidenceForPlan(request.plan);\n\
+             if (evidence.length > 0) {\n\
+               delete evidence[0].source;\n\
+             }\n\
+             return { inputs: [], scanSelectorEvidence: evidence };\n\
+           },\n\
+           async buildTransaction() { return { tx: true }; },\n\
+         };\n\
+         const duplicateSelectorEvidenceRuntime = {\n\
+           async resolveLiveCells(request) {\n\
+             const evidence = selectorEvidenceForPlan(request.plan);\n\
+             if (evidence.length > 1) {\n\
+               evidence[1] = { ...evidence[0] };\n\
+             }\n\
+             return { inputs: [], scanSelectorEvidence: evidence };\n\
+           },\n\
+           async buildTransaction() { return { tx: true }; },\n\
+         };\n\
+         await assert.rejects(\n\
+           () => builder.createActionBuilder(noDryRunRuntime)[first.method](first.params, { dryRun: true }),\n\
+           /missing dryRun adapter/,\n\
            );\n\
            await assert.rejects(\n\
              () => builder.createActionBuilder(badShapeRuntime)[first.method](first.params),\n\
@@ -7308,12 +7350,22 @@ fn typescript_builder_test(actions: &[&crate::ActionMetadata]) -> Result<String>
                () => builder.createActionBuilder(missingSelectorEvidenceRuntime)[first.method](first.params),\n\
                /scanSelectorEvidence/,\n\
              );\n\
+           await assert.rejects(\n\
+             () => builder.createActionBuilder(mismatchedSelectorEvidenceRuntime)[first.method](first.params),\n\
+             /scanSelectorEvidence.role mismatch/,\n\
+           );\n\
+           await assert.rejects(\n\
+             () => builder.createActionBuilder(missingSelectorFieldRuntime)[first.method](first.params),\n\
+             /scanSelectorEvidence.source missing/,\n\
+           );\n\
+           if ((firstPlan.actionScanSelectors.selectors ?? []).length > 1) {\n\
              await assert.rejects(\n\
-               () => builder.createActionBuilder(mismatchedSelectorEvidenceRuntime)[first.method](first.params),\n\
-               /scanSelectorEvidence.role mismatch/,\n\
+               () => builder.createActionBuilder(duplicateSelectorEvidenceRuntime)[first.method](first.params),\n\
+               /duplicate selector_index/,\n\
              );\n\
            }\n\
-         });\n\n\
+         }\n\
+       });\n\n\
          test(\"maps runtime errors to action field context\", () => {\n\
            const [first] = actionCases;\n\
            const context = builder.runtimeErrorContextForAction(first.name);\n\

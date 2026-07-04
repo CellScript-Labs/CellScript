@@ -27,6 +27,13 @@ run() {
     "$@"
 }
 
+run_in_dir() {
+    local dir="$1"
+    shift
+    printf '\n==> (cd %s && %s)\n' "$dir" "$*"
+    (cd "$dir" && "$@")
+}
+
 cargo_fmt_workspace() {
     run cargo fmt \
         --manifest-path "$ROOT_DIR/Cargo.toml" \
@@ -568,7 +575,8 @@ run_website_build_check() {
         exit 1
     fi
 
-    run npm --prefix website run build
+    run_in_dir website npm exec -- astro check
+    run_in_dir website npm exec -- astro build
 }
 
 check_ckb_tx_measure_tool() {
@@ -669,9 +677,6 @@ run_release_auxiliary_checks() {
     require_cmd npm
 
     run python3 scripts/validate_cellscript_tooling_release.py
-    run python3 scripts/check_cellscript_skill_pack.py
-    check_script_syntax
-    check_trailing_whitespace
     check_release_roadmap_docs
     check_ckb_release_docs
     check_ckb_acceptance_boundaries
@@ -679,8 +684,8 @@ run_release_auxiliary_checks() {
     check_ckb_tx_measure_tool
     check_novaseal_rust_tooling
     check_novaseal_verifier_pinning
-    run npm --prefix editors/vscode-cellscript run validate
-    run npm --prefix editors/vscode-cellscript run publish:dry-run
+    run_in_dir editors/vscode-cellscript npm exec -- vsce package --no-dependencies --out /tmp/cellscript-vscode-dry-run.vsix
+    run node editors/vscode-cellscript/scripts/validate.mjs
 }
 
 run_release_quick_gate() {

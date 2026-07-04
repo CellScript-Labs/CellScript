@@ -13,7 +13,11 @@ use ckb_types::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::{collections::HashMap, fs, path::Path};
+use std::{
+    collections::{HashMap, HashSet},
+    fs,
+    path::Path,
+};
 
 pub const ACTION_PLAN_POLICY: &str = "cellscript-action-builder-plan-v1";
 pub const ADAPTER_CONTRACT_SCHEMA: &str = "cellscript-ckb-adapter-contract-v0.19";
@@ -833,7 +837,11 @@ fn validate_scan_selector_evidence(plan: &ActionPlan) -> Result<()> {
         .enumerate()
         .map(|(fallback_index, selector)| (selector.selector_index.unwrap_or(fallback_index), selector))
         .collect::<HashMap<_, _>>();
+    let mut seen_selector_indexes = HashSet::new();
     for item in evidence {
+        if !seen_selector_indexes.insert(item.selector_index) {
+            bail!("transaction_draft.scan_selector_evidence contains duplicate selector_index {}", item.selector_index);
+        }
         let selector = selectors_by_index.get(&item.selector_index).ok_or_else(|| {
             anyhow::anyhow!(
                 "transaction_draft.scan_selector_evidence selector_index {} is not declared by action_scan_selectors",
@@ -864,6 +872,14 @@ fn validate_scan_selector_evidence(plan: &ActionPlan) -> Result<()> {
             selector.script_field.as_deref(),
         )?;
     }
+    for selector_index in selectors_by_index.keys() {
+        if !seen_selector_indexes.contains(selector_index) {
+            bail!(
+                "transaction_draft.scan_selector_evidence is missing selector_index {} declared by action_scan_selectors",
+                selector_index
+            );
+        }
+    }
     Ok(())
 }
 
@@ -873,15 +889,19 @@ fn compare_scan_selector_evidence_field(
     actual: Option<&str>,
     expected: Option<&str>,
 ) -> Result<()> {
-    let (Some(actual), Some(expected)) = (actual, expected) else {
-        return Ok(());
-    };
-    if actual != expected {
-        bail!(
+    match (actual, expected) {
+        (Some(actual), Some(expected)) if actual == expected => Ok(()),
+        (Some(actual), Some(expected)) => bail!(
             "transaction_draft.scan_selector_evidence.{field} mismatch for selector {selector_index}: got '{actual}', expected '{expected}'"
-        );
+        ),
+        (None, Some(expected)) => bail!(
+            "transaction_draft.scan_selector_evidence.{field} missing for selector {selector_index}: expected '{expected}'"
+        ),
+        (Some(actual), None) => bail!(
+            "transaction_draft.scan_selector_evidence.{field} unexpected for selector {selector_index}: got '{actual}', expected null"
+        ),
+        (None, None) => Ok(()),
     }
-    Ok(())
 }
 
 fn has_materialized_action_draft(draft: &TransactionDraft) -> bool {
@@ -3091,6 +3111,32 @@ mod tests {
         let parsed = parse_action_plan(serde_json::to_vec(&plan).unwrap().as_slice()).unwrap();
         let error = resolve_materialized_action_plan(&parsed).unwrap_err().to_string();
         assert!(error.contains("selector_index 7 is not declared by action_scan_selectors"), "{error}");
+    }
+
+    #[test]
+    fn scan_selector_evidence_rejects_duplicate_selector_index_even_with_matching_length() {
+        let mut plan = materialized_action_plan_json(true);
+        let mut second_selector = plan["action_scan_selectors"]["selectors"][0].clone();
+        second_selector["selector_index"] = serde_json::json!(1);
+        second_selector["binding"] = serde_json::json!("create_Token_again");
+        plan["action_scan_selectors"]["selector_count"] = serde_json::json!(2);
+        plan["action_scan_selectors"]["selectors"].as_array_mut().unwrap().push(second_selector);
+        let evidence = plan["transaction_draft"]["scan_selector_evidence"][0].clone();
+        plan["transaction_draft"]["scan_selector_evidence"] = serde_json::json!([evidence.clone(), evidence]);
+
+        let parsed = parse_action_plan(serde_json::to_vec(&plan).unwrap().as_slice()).unwrap();
+        let error = resolve_materialized_action_plan(&parsed).unwrap_err().to_string();
+        assert!(error.contains("duplicate selector_index 0"), "{error}");
+    }
+
+    #[test]
+    fn scan_selector_evidence_rejects_missing_declared_field() {
+        let mut plan = materialized_action_plan_json(true);
+        plan["transaction_draft"]["scan_selector_evidence"][0].as_object_mut().unwrap().remove("source");
+
+        let parsed = parse_action_plan(serde_json::to_vec(&plan).unwrap().as_slice()).unwrap();
+        let error = resolve_materialized_action_plan(&parsed).unwrap_err().to_string();
+        assert!(error.contains("scan_selector_evidence.source missing"), "{error}");
     }
 
     #[test]

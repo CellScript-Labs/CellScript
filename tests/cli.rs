@@ -7997,6 +7997,10 @@ action mint(amount: u64, owner: Address) -> Token {
     assert!(index_ts.contains("actionScanSelectors"), "{index_ts}");
     assert!(index_ts.contains("scanSelectorEvidence"), "{index_ts}");
     assert!(index_ts.contains("assertScanSelectorEvidence"), "{index_ts}");
+    assert!(index_ts.contains("duplicate selector_index"), "{index_ts}");
+    assert!(index_ts.contains("seenEvidenceIndexes"), "{index_ts}");
+    assert!(index_ts.contains("missing for selector"), "{index_ts}");
+    assert!(index_ts.contains("unexpected for selector"), "{index_ts}");
     assert!(index_ts.contains("export interface MintParams"), "{index_ts}");
     assert!(index_ts.contains("amount: bigint | number | string;"), "{index_ts}");
     assert!(index_ts.contains("owner: HexString | Uint8Array;"), "{index_ts}");
@@ -8027,6 +8031,8 @@ action mint(amount: u64, owner: Address) -> Token {
     assert!(builder_test.contains("actionScanSelectors.schema"), "{builder_test}");
     assert!(builder_test.contains("selectorEvidenceForPlan"), "{builder_test}");
     assert!(builder_test.contains("scanSelectorEvidence.role mismatch"), "{builder_test}");
+    assert!(builder_test.contains("scanSelectorEvidence.source missing"), "{builder_test}");
+    assert!(builder_test.contains("duplicate selector_index"), "{builder_test}");
     assert!(builder_test.contains("delegates live-cell resolution and transaction build to runtime"), "{builder_test}");
     assert!(builder_test.contains("delegates dry-run and submit modes to runtime"), "{builder_test}");
     assert!(builder_test.contains("rejects missing runtime adapters and malformed runtime shapes"), "{builder_test}");
