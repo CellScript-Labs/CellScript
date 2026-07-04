@@ -2,10 +2,12 @@
 
 ## Status
 
-Proposed. Implementation gated on review of WASM bundle size budget
-(see §10) and playground editor approach (see §4.2 and Appendix A).
+Implemented across the 0.20-0.21 line for the website playground, WASM
+metadata-only compile path, multi-file browser workspace, and agent-facing
+documentation surface. Path B, full ELF generation inside the browser WASM
+bundle, remains deferred.
 
-Updated: 2026-06-22.
+Updated: 2026-07-01 for CellScript 0.21.0-rc.1.
 
 ## Goal
 

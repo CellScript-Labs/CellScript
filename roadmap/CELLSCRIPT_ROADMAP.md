@@ -26,11 +26,11 @@ The current project direction is simple:
 | 0.15 release scope | `v0.15.0` is released from `nightly-0.15` with scoped invariants, aggregate invariant primitives, invariant/action coverage links, Covenant ProofPlan output, risk diagnostics, macro provenance, identity-aware lifecycle forms, and final release-gate evidence. | [0.15 roadmap](CELLSCRIPT_0_15_ROADMAP.md), [0.15 roadmap summary](../docs/archive/0.15/CELLSCRIPT_0_15_ROADMAP_SUMMARY.md), [0.15 release notes](../docs/releases/CELLSCRIPT_0_15_RELEASE_NOTES.md) |
 | 0.16 release scope | `v0.16.1` is released for the scoped metadata-assurance line, including operational semantics, ProofPlan soundness, builder assumptions, transaction validation/solver templates, deployment governance, audit tooling, standard CKB compatibility fixtures, compiler hardening, proposal-local NovaSeal devnet/profile certification, and bundled example bootstrap cleanup. | [0.16 roadmap](CELLSCRIPT_0_16_ROADMAP.md), [0.16.1 release notes](../docs/releases/CELLSCRIPT_0_16_1_RELEASE_NOTES.md) |
 | 0.17/0.18 iCKB equivalence state | The standalone 0.17 line introduced the protocol-semantics surface and partial CKB VM differential evidence; the carried-forward 0.18 work closes the manifest-declared executable iCKB claim set as `EXECUTED_CKB_VM_DIFF` / `PROVEN`. | [0.17 roadmap](../docs/archive/0.17/CELLSCRIPT_0_17_ROADMAP.md), [0.17 iCKB final report](../docs/archive/0.17/CELLSCRIPT_0_17_ICKB_FINAL_REPORT.md) |
-| 0.18 planning scope | First-class read-only `ScriptRef` / `ScriptArgs` surface and the remaining iCKB equivalence-closure prerequisites. | [0.18 roadmap](../docs/CELLSCRIPT_0_18_ROADMAP.md) |
-| 0.19 scope | Scope complete for CKB ecosystem reuse, `ckb-std` compatibility, grammar governance, and Phase 1 package/deployment identity registry closure. Generated builders and live-chain registry proof moved to 0.20. | [0.19 roadmap](../docs/CELLSCRIPT_0_19_ROADMAP.md), [0.16-0.20 release notes](../docs/releases/CELLSCRIPT_0_16_TO_0_20_RELEASE_NOTES.md), [ckb-std compatibility](../docs/CELLSCRIPT_CKB_STD_COMPAT.md), [Registry Phase 1](../docs/CELLSCRIPT_REGISTRY_PHASE1.md) |
-| 0.20 planned scope | Generated Action Builder, live-chain deployment verification, stateful transaction flows, and registry trust hardening. | [0.20 roadmap](../docs/CELLSCRIPT_0_20_ROADMAP.md) |
+| 0.18 planning scope | First-class read-only `ScriptRef` / `ScriptArgs` surface and the remaining iCKB equivalence-closure prerequisites. | [0.18 roadmap](../docs/archive/0.18/CELLSCRIPT_0_18_ROADMAP.md) |
+| 0.19 scope | Scope complete for CKB ecosystem reuse, `ckb-std` compatibility, grammar governance, and Phase 1 package/deployment identity registry closure. Generated builders and live-chain registry proof moved to 0.20. | [0.19 roadmap](../docs/archive/0.19/CELLSCRIPT_0_19_ROADMAP.md), [0.16-0.20 release notes](../docs/releases/CELLSCRIPT_0_16_TO_0_20_RELEASE_NOTES.md), [ckb-std compatibility](../docs/CELLSCRIPT_CKB_STD_COMPAT.md), [Registry Phase 1](../docs/CELLSCRIPT_REGISTRY_PHASE1.md) |
+| 0.20 planned scope | Generated Action Builder, live-chain deployment verification, stateful transaction flows, and registry trust hardening. | [0.20 roadmap](../docs/archive/0.20/CELLSCRIPT_0_20_ROADMAP.md) |
 | 0.21 planned scope | Semantic closure, authenticated compiler evidence, CLI UX reorganisation, dedicated MCP server and CellScript programming skills, derived cyclic graph views, type-level TemplateLayout metadata, and deferred optional template Merkleisation. | [0.21 roadmap](../docs/CELLSCRIPT_0_21_ROADMAP.md), [0.21 CLI UX plan](CELLSCRIPT_0_21_CLI_UX_PLAN.md) |
-| CKB language fit | CKB-first design is confirmed; remaining gaps are signer binding, continuity policy, capacity policy, and declarative time policy. | [CKB language audit](../docs/CELLSCRIPT_CKB_LANGUAGE_AUDIT.md) |
+| CKB language fit | CKB-first design is confirmed; remaining gaps are signer binding, continuity policy, capacity policy, and declarative time policy. | [CKB target profiles](../docs/wiki/Tutorial-05-CKB-Target-Profiles.md), [production gates](../docs/wiki/Tutorial-06-Metadata-Verification-and-Production-Gates.md) |
 | Surface syntax | Low-risk syntax pass and 0.13.2 syntax-governance hardening are implemented; authority-sensitive syntax remains staged. | [Surface elegance RFC](../docs/CELLSCRIPT_SURFACE_ELEGANCE_RFC.md), [Syntax-combination audit](../docs/CELLSCRIPT_SYNTAX_COMBO_AUDIT_METHODOLOGY.md) |
 | Collections | Stack-backed fixed-width `Vec<T>` helper surface is implemented; cell-backed and generic map ownership remain fail-closed. | [Collections support matrix](../docs/CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md), [0.13 release scope](../docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md) |
 | CKB production evidence | Bundled actions and locks have builder-backed local CKB evidence; full release claims also require stateful coverage for every production acceptance action. | [Metadata and production gates wiki](../docs/wiki/Tutorial-06-Metadata-Verification-and-Production-Gates.md) |
@@ -175,7 +175,7 @@ script construction or deployment solving to the compiler.
 
 Detailed status:
 
-- [0.18 roadmap](../docs/CELLSCRIPT_0_18_ROADMAP.md)
+- [0.18 roadmap](../docs/archive/0.18/CELLSCRIPT_0_18_ROADMAP.md)
 
 ### 0.19: Package Registry Phase 1 And Adapter Boundary
 
@@ -204,7 +204,7 @@ are moved to 0.20.
 
 Detailed status:
 
-- [0.19 roadmap](../docs/CELLSCRIPT_0_19_ROADMAP.md)
+- [0.19 roadmap](../docs/archive/0.19/CELLSCRIPT_0_19_ROADMAP.md)
 - [0.16-0.20 release notes](../docs/releases/CELLSCRIPT_0_16_TO_0_20_RELEASE_NOTES.md)
 - [Registry Phase 1](../docs/CELLSCRIPT_REGISTRY_PHASE1.md)
 
@@ -236,7 +236,7 @@ builders and live-chain verification:
 
 Detailed status:
 
-- [0.20 roadmap](../docs/CELLSCRIPT_0_20_ROADMAP.md)
+- [0.20 roadmap](../docs/archive/0.20/CELLSCRIPT_0_20_ROADMAP.md)
 
 ### 0.21: Semantic Closure And Authenticated Evidence
 
@@ -294,7 +294,7 @@ Non-goals:
 Source documents:
 
 - [Surface elegance RFC](../docs/CELLSCRIPT_SURFACE_ELEGANCE_RFC.md)
-- [CKB language audit](../docs/CELLSCRIPT_CKB_LANGUAGE_AUDIT.md)
+- [CKB target profiles](../docs/wiki/Tutorial-05-CKB-Target-Profiles.md)
 
 ### CKB Evidence Hardening Track
 
@@ -314,7 +314,7 @@ Priorities:
 
 Source documents:
 
-- [CKB language audit](../docs/CELLSCRIPT_CKB_LANGUAGE_AUDIT.md)
+- [CKB target profiles](../docs/wiki/Tutorial-05-CKB-Target-Profiles.md)
 - [Capacity and builder contract](../docs/CELLSCRIPT_CAPACITY_AND_BUILDER_CONTRACT.md)
 - [Metadata and production gates wiki](../docs/wiki/Tutorial-06-Metadata-Verification-and-Production-Gates.md)
 
@@ -359,7 +359,7 @@ Source documents:
 
 - [Capacity and builder contract](../docs/CELLSCRIPT_CAPACITY_AND_BUILDER_CONTRACT.md)
 - [Output bindings](../docs/CELLSCRIPT_OUTPUT_BINDINGS.md)
-- [CKB language audit](../docs/CELLSCRIPT_CKB_LANGUAGE_AUDIT.md)
+- [CKB target profiles](../docs/wiki/Tutorial-05-CKB-Target-Profiles.md)
 
 ### Documentation And Developer Experience Track
 

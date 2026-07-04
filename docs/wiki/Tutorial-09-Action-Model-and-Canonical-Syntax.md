@@ -79,7 +79,9 @@ action swap_a_for_b(pool_before: Pool, input: Token, min_output: u64, to: Addres
 ```
 
 The transition line says the Pool Cell continues. The `require` and `preserve`
-statements prove the allowed delta.
+statements prove the allowed delta. `quote_swap_out` stands for a local pure
+helper; production examples should define pricing helpers in the same package so
+the selected entry can inline them into the artifact.
 
 ## Flow State Edges
 
@@ -146,7 +148,11 @@ action buy_listing(listing: Listing, nft_before: NFT, payment: Token, buyer: Add
 ```
 
 Read this as: NFT continues, Listing terminates, Payment is consumed, Seller
-payment is created.
+payment is created. Under the CKB profile, `env::current_timepoint()` reads the
+first HeaderDep epoch number, so `expires_at` must use the same epoch/timepoint
+unit rather than a Unix timestamp. `hash_nft` is likewise a local pure helper
+placeholder; real packages should define the hash helper or replace the guard
+with explicit field checks.
 
 ## Resource Accounting Without Transition
 

@@ -10,6 +10,23 @@ raised during review. It does not re-audit the external Infern repository; any
 Infern conclusions remain engineering inferences from the described raw-layout
 patterns and the current CellScript capability boundary.
 
+## 0.21 Closure Addendum
+
+The 0.21 RC keeps this report as the 0.20-era design-space closure record and
+adds three concrete follow-through points:
+
+- `cell_data_codec_manifest` remains the codec-identity bridge into generated
+  builders and deployment identity;
+- action-aware scan selectors now give adapters a structured live-cell evidence
+  vocabulary instead of relying on action names;
+- TemplateLayout records shipped as metadata-only evidence with
+  `consensus_checked = false`; executable template-commitment verification
+  remains future work.
+
+Raw-layout DSL support, multi-ABI builder codec backends, registry/indexer
+support for multiple ABI families, and full Infern parity evidence remain
+productisation work rather than 0.21 production claims.
+
 ## Closure Status
 
 The CellScript-repository P0/P1 design-space compression items are closed for
@@ -56,7 +73,7 @@ a real six-contract Infern parity matrix.
 | public scheduler policy witness remains Molecule-only | `src/lib.rs:3411-3416` |
 | `lock_args` is a fixed-width `Script.args` escape hatch | `docs/CELLSCRIPT_ENTRY_WITNESS_ABI.md:40-43` |
 | schema-backed dynamic witness payloads are Molecule data | `docs/CELLSCRIPT_ENTRY_WITNESS_ABI.md:70-80` |
-| raw cell data and OutPoint helpers exist | `docs/CELLSCRIPT_0_18_ROADMAP.md:93-110` |
+| raw cell data and OutPoint helpers exist | `docs/archive/0.18/CELLSCRIPT_0_18_ROADMAP.md:93-110` |
 | NovaSeal v0-mvp demonstrates raw byte-offset source expressibility | `proposals/novaseal/v0-mvp-skeleton/src/nova_state_lifecycle_type.cell:138-177`, `proposals/novaseal/v0-mvp-skeleton/src/nova_state_type.cell:125-155` |
 | v0-mvp packed layout is not a production ABI conclusion | `proposals/novaseal/v0-mvp-skeleton/docs/SCHEMA_LAYOUT.md:44-54` |
 | newer NovaSeal profiles mostly use whole-cell packed hashes | `proposals/novaseal/fungible-xudt-profile-v0/src/nova_fungible_xudt_lifecycle_type.cell:226-227`, `proposals/novaseal/btc-transaction-commitment-profile-v0/src/nova_btc_transaction_commitment_type.cell:361`, `proposals/novaseal/fiber-candidate-profile-v0/src/nova_fiber_candidate_type.cell:378` |

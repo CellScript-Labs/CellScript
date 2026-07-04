@@ -6,7 +6,7 @@ and the locks that decide whether a Cell may be spent. The compiler then turns
 that `.cell` source into ckb-vm compatible RISC-V assembly or ELF artifacts, and
 writes metadata that explains what was built.
 
-Last updated: 2026-06-28.
+Last updated: 2026-07-01 (CellScript 0.21.0-rc.1).
 
 This wiki is a guided path. It starts with one compiled example, then slowly
 builds the mental model: source files, Cell effects, packages, the CKB profile,
@@ -30,6 +30,8 @@ After that, the wiki continues outward:
 - the CKB profile chooses the chain-facing runtime rules;
 - metadata explains the artifact;
 - v0.16 assurance commands explain ProofPlan soundness and builder assumptions;
+- v0.21 receipts, TemplateLayout metadata, ProtocolGraph views, and nested CLI
+  command groups make evidence easier to audit;
 - production evidence proves more than compiler success;
 - editor tooling shortens the local loop;
 - bundled examples show the style in real contracts.
@@ -38,7 +40,7 @@ If you already know what you need, jump directly:
 
 - writing source: start with [Language Basics](Tutorial-02-Language-Basics.md);
 - understanding Cell movement: read [Resources and Cell Effects](Tutorial-03-Resources-and-Cell-Effects.md);
-- understanding actions: read [Action Model and Canonical Syntax](Tutorial-09-Action-Model-and-0-13-Syntax.md);
+- understanding actions: read [Action Model and Canonical Syntax](Tutorial-09-Action-Model-and-Canonical-Syntax.md);
 - using stdlib patterns: read [Standard Library](Tutorial-10-Standard-Library.md);
 - copying a known pattern: use [Cookbook Recipes](Cookbook-Recipes.md);
 - checking CKB terms: keep [CKB Glossary](CKB-Glossary.md) nearby;
@@ -47,7 +49,7 @@ If you already know what you need, jump directly:
 - preparing evidence: use [Metadata, Verification, and Production Gates](Tutorial-06-Metadata-Verification-and-Production-Gates.md);
 - working in an editor: read [LSP and Tooling](Tutorial-07-LSP-and-Tooling.md);
 - learning by example: finish with [Bundled Example Contracts](Tutorial-08-Bundled-Example-Contracts.md);
-- driving `cellc` from an agent: read [Agentic Loops and cellc-mcp](Tutorial-13-Agentic-Loops-and-cellc-mcp.md).
+- driving `cellc` from an agent: read [Agentic Loops and cellscript-mcp](Tutorial-13-Agentic-Loops-and-cellscript-mcp.md).
 
 ## Tutorial Path
 
@@ -68,7 +70,7 @@ If you already know what you need, jump directly:
    command-backed reports.
 8. [Bundled Example Contracts](Tutorial-08-Bundled-Example-Contracts.md): study
    the examples in a useful order.
-9. [Action Model and Canonical Syntax](Tutorial-09-Action-Model-and-0-13-Syntax.md):
+9. [Action Model and Canonical Syntax](Tutorial-09-Action-Model-and-Canonical-Syntax.md):
    learn the signature-direction action model, `verification`, `transition`,
    named outputs, and source qualifiers.
 10. [Standard Library](Tutorial-10-Standard-Library.md):
@@ -79,7 +81,7 @@ If you already know what you need, jump directly:
    metadata-only ProofPlan gaps.
 12. [Phase 1 Registry: End-to-End](Tutorial-12-Phase1-Registry-End-to-End.md):
    follow the registry package flow from init through verification.
-13. [Agentic Loops and cellc-mcp](Tutorial-13-Agentic-Loops-and-cellc-mcp.md):
+13. [Agentic Loops and cellscript-mcp](Tutorial-13-Agentic-Loops-and-cellscript-mcp.md):
    drive the read-oriented compiler surface from an automated writer in a
    write -> check -> explain -> fix loop.
 
@@ -111,6 +113,8 @@ That is why the language has:
   constraints, runtime requirements, and verifier obligations.
 - builder assumption records and schema-bound transaction-shape validation for
   pre-signing review.
+- compile receipts that authenticate metadata/artifact evidence without
+  claiming transaction validity.
 
 The wiki uses the same rule throughout: if something is only compiler evidence,
 it is described as compiler evidence. If something needs a builder-backed CKB

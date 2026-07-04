@@ -89,7 +89,7 @@ Then declare the allowed transition graph separately:
 ```cellscript
 flow GrantFlow for VestingGrant.state {
     Granted -> Claimable by unlock_grant;
-    Claimable -> FullyClaimed by claim_all;
+    Claimable -> FullyClaimed by claim_vested;
 }
 ```
 
@@ -325,7 +325,7 @@ closed.
 ## Next
 
 After you know how values move, continue with
-[Action Model and Canonical Syntax](https://github.com/CellScript-Labs/CellScript/wiki/Tutorial-09-Action-Model-and-0-13-Syntax)
+[Action Model and Canonical Syntax](https://github.com/CellScript-Labs/CellScript/wiki/Tutorial-09-Action-Model-and-Canonical-Syntax)
 for a deeper walkthrough of signature-direction actions, then use
 [Cookbook Recipes](https://github.com/CellScript-Labs/CellScript/wiki/Cookbook-Recipes)
 for small copyable patterns.

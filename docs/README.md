@@ -91,14 +91,18 @@ bundled `.cell` examples. These are not release notes.
 may point to release notes and active reference docs, but they should not
 duplicate full release notes.
 
-Active later-stage roadmap notes that live under `docs/` because they are tied
-to branch-specific evidence or forward design:
+Archived later-stage roadmap notes that live under `docs/archive/` because they
+are tied to historical branch-specific evidence:
 
 - `archive/0.17/CELLSCRIPT_0_17_ROADMAP.md`
-- `CELLSCRIPT_0_18_ROADMAP.md`
-- `CELLSCRIPT_0_19_ROADMAP.md`
+- `archive/0.18/CELLSCRIPT_0_18_ROADMAP.md`
+- `archive/0.19/CELLSCRIPT_0_19_ROADMAP.md`
+- `archive/0.20/CELLSCRIPT_0_20_ROADMAP.md`
 - `releases/CELLSCRIPT_0_16_TO_0_20_RELEASE_NOTES.md`
-- `CELLSCRIPT_0_20_ROADMAP.md`
+
+Active later-stage roadmap notes that live under `docs/` because they are tied
+to current branch-specific evidence or forward design:
+
 - `CELLSCRIPT_0_21_ROADMAP.md`
 - `CELLSCRIPT_CKB_STD_COMPAT.md` for 0.19 ckb-std compatibility scope
 - `CELLSCRIPT_GRAMMAR_GOVERNANCE_RFC.md` and
@@ -106,7 +110,7 @@ to branch-specific evidence or forward design:
   governance scope
 - `CELLSCRIPT_REGISTRY_PHASE1.md` for the 0.19 package/deployment identity
   registry closure and 0.20 handoff boundary
-- `CELLSCRIPT_0_20_ROADMAP.md` for generated TypeScript action builders,
+- `archive/0.20/CELLSCRIPT_0_20_ROADMAP.md` for generated TypeScript action builders,
   live-chain registry verification, stateful flow evidence, and the bounded
   CellFabric JSON bridge
 - `CELLSCRIPT_0_21_ROADMAP.md` for semantic closure, authenticated compiler

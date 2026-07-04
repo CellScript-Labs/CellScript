@@ -1,6 +1,6 @@
 # CellScript 0.20 Roadmap
 
-**Status**: In progress
+**Status**: Scope complete; released 2026-06-28 as 0.20.0
 **Scope**: Generated Action Builder, live-chain deployment verification,
 stateful transaction flows, and registry trust hardening
 **Depends on**: 0.19 Phase 1 package / deployment identity registry closure

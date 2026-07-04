@@ -63,17 +63,17 @@ ckb-sdk-rust (5.x)
 ```
 
 The adapter boundary is documented in
-[`CELLSCRIPT_CKB_ADAPTER.md`](CELLSCRIPT_CKB_ADAPTER.md). It is intentionally
+[`CELLSCRIPT_CKB_ADAPTER.md`](../../CELLSCRIPT_CKB_ADAPTER.md). It is intentionally
 outside compiler core: CellScript emits verified transaction intent,
 `ckb-sdk-rust` realises that intent, and CKB node acceptance is the production
 evidence.
 
 0.19 also owns the CKB ecosystem reuse and ckb-std compatibility work:
 
-- [`CELLSCRIPT_CKB_STD_COMPAT.md`](CELLSCRIPT_CKB_STD_COMPAT.md) defines the
+- [`CELLSCRIPT_CKB_STD_COMPAT.md`](../../CELLSCRIPT_CKB_STD_COMPAT.md) defines the
   contract-side compatibility boundary for generated verifier code, parity
   tests, and future Rust-shim/native-simulation workflows.
-- [`CELLSCRIPT_CKB_ADAPTER.md`](CELLSCRIPT_CKB_ADAPTER.md) defines the
+- [`CELLSCRIPT_CKB_ADAPTER.md`](../../CELLSCRIPT_CKB_ADAPTER.md) defines the
   transaction-realisation boundary between compiler outputs, `ckb-sdk-rust`,
   and local-node acceptance evidence.
 
@@ -83,13 +83,13 @@ They are not 0.18 protocol-equivalence evidence.
 
 0.19 also owns the active grammar and syntax-governance pass:
 
-- [`CELLSCRIPT_GRAMMAR_GOVERNANCE_RFC.md`](CELLSCRIPT_GRAMMAR_GOVERNANCE_RFC.md)
+- [`CELLSCRIPT_GRAMMAR_GOVERNANCE_RFC.md`](../../CELLSCRIPT_GRAMMAR_GOVERNANCE_RFC.md)
   defines the public semantic split between action shape, Cell movement,
   verification constraints, and global protocol law.
-- [`CELLSCRIPT_SYNTAX_COMBO_AUDIT_METHODOLOGY.md`](CELLSCRIPT_SYNTAX_COMBO_AUDIT_METHODOLOGY.md)
+- [`CELLSCRIPT_SYNTAX_COMBO_AUDIT_METHODOLOGY.md`](../../CELLSCRIPT_SYNTAX_COMBO_AUDIT_METHODOLOGY.md)
   defines the reusable syntax-combination audit method that must guard parser,
   typechecker, lowering, metadata, codegen, formatter, LSP, and docs changes.
-- [`CELLSCRIPT_SURFACE_ELEGANCE_RFC.md`](CELLSCRIPT_SURFACE_ELEGANCE_RFC.md)
+- [`CELLSCRIPT_SURFACE_ELEGANCE_RFC.md`](../../CELLSCRIPT_SURFACE_ELEGANCE_RFC.md)
   remains a candidate syntax backlog. Items in that RFC are not shipped unless
   they have parser, typechecker, lowering, metadata, formatter, LSP, examples,
   and regression coverage.
@@ -478,4 +478,4 @@ Representative Phase 1 flows:
 
 Open questions about generated builders, live-chain registry proof, signed
 mutable channels, and on-chain registry/index/proxy design move to
-[`CELLSCRIPT_0_20_ROADMAP.md`](CELLSCRIPT_0_20_ROADMAP.md).
+[`CELLSCRIPT_0_20_ROADMAP.md`](../0.20/CELLSCRIPT_0_20_ROADMAP.md).

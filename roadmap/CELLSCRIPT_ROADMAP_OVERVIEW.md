@@ -75,11 +75,11 @@ Each release answers a specific question:
 | v0.15 release scope | `v0.15.0` is released from `nightly-0.15` with scoped invariants, aggregate invariant primitives, Covenant ProofPlan output, risk diagnostics, macro provenance, identity-aware lifecycle forms, and final release-gate evidence. | [v0.15 roadmap](CELLSCRIPT_0_15_ROADMAP.md), [v0.15 release notes](../docs/releases/CELLSCRIPT_0_15_RELEASE_NOTES.md) |
 | v0.16 release scope | Released as `v0.16.1` for the scoped metadata/tooling line. Adds operational semantics, ProofPlan soundness, builder assumptions, schema-bound transaction validation, solver templates, deployment governance, audit tooling, descriptive standard CKB compatibility fixtures, compiler hardening, proposal-local NovaSeal devnet/profile certification, and bundled example bootstrap cleanup. | [v0.16 roadmap](CELLSCRIPT_0_16_ROADMAP.md), [v0.16.1 release notes](../docs/releases/CELLSCRIPT_0_16_1_RELEASE_NOTES.md) |
 | v0.17/0.18 iCKB equivalence state | The standalone v0.17 branch is a partial protocol-equivalence milestone; the carried-forward v0.18 work closes the manifest-declared executable iCKB claim set as `EXECUTED_CKB_VM_DIFF` / `PROVEN`. | [v0.17 roadmap](../docs/archive/0.17/CELLSCRIPT_0_17_ROADMAP.md), [iCKB final report](../docs/archive/0.17/CELLSCRIPT_0_17_ICKB_FINAL_REPORT.md) |
-| v0.18 planning scope | First-class read-only ScriptRef / ScriptArgs API and iCKB equivalence-closure prerequisites. | [v0.18 roadmap](../docs/CELLSCRIPT_0_18_ROADMAP.md) |
-| v0.19 scope | Scope complete for CKB ecosystem reuse, `ckb-std` compatibility, grammar governance, and Phase 1 package/deployment identity registry closure. | [v0.19 roadmap](../docs/CELLSCRIPT_0_19_ROADMAP.md), [v0.16-0.20 release notes](../docs/releases/CELLSCRIPT_0_16_TO_0_20_RELEASE_NOTES.md) |
-| v0.20 planned scope | Generated Action Builder, live-chain deployment verification, stateful transaction flows, and registry trust hardening. | [v0.20 roadmap](../docs/CELLSCRIPT_0_20_ROADMAP.md) |
+| v0.18 planning scope | First-class read-only ScriptRef / ScriptArgs API and iCKB equivalence-closure prerequisites. | [v0.18 roadmap](../docs/archive/0.18/CELLSCRIPT_0_18_ROADMAP.md) |
+| v0.19 scope | Scope complete for CKB ecosystem reuse, `ckb-std` compatibility, grammar governance, and Phase 1 package/deployment identity registry closure. | [v0.19 roadmap](../docs/archive/0.19/CELLSCRIPT_0_19_ROADMAP.md), [v0.16-0.20 release notes](../docs/releases/CELLSCRIPT_0_16_TO_0_20_RELEASE_NOTES.md) |
+| v0.20 planned scope | Generated Action Builder, live-chain deployment verification, stateful transaction flows, and registry trust hardening. | [v0.20 roadmap](../docs/archive/0.20/CELLSCRIPT_0_20_ROADMAP.md) |
 | v0.21 planned scope | Semantic closure, authenticated compiler evidence, CLI UX reorganisation, dedicated MCP server and CellScript programming skills, derived cyclic ProtocolGraph views, type-level TemplateLayout metadata, and deferred optional template Merkleisation. | [v0.21 roadmap](../docs/CELLSCRIPT_0_21_ROADMAP.md), [v0.21 CLI UX plan](CELLSCRIPT_0_21_CLI_UX_PLAN.md) |
-| CKB language fit | CKB-first design is confirmed; remaining hardening areas are signer binding, continuity policy, capacity policy, and declarative time policy. | [CKB language audit](../docs/CELLSCRIPT_CKB_LANGUAGE_AUDIT.md) |
+| CKB language fit | CKB-first design is confirmed; remaining hardening areas are signer binding, continuity policy, capacity policy, and declarative time policy. | [CKB target profiles](../docs/wiki/Tutorial-05-CKB-Target-Profiles.md), [production gates](../docs/wiki/Tutorial-06-Metadata-Verification-and-Production-Gates.md) |
 | Surface syntax | Low-risk syntax pass is implemented; authority-sensitive syntax remains staged. | [Surface elegance RFC](../docs/CELLSCRIPT_SURFACE_ELEGANCE_RFC.md) |
 | Collections | Stack-backed fixed-width `Vec<T>` helper surface is implemented; cell-backed and generic map ownership remain fail-closed. | [Collections support matrix](../docs/CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md), [v0.13 release scope](../docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md) |
 | CKB production evidence | Bundled actions and locks have builder-backed local CKB evidence; full release claims also require stateful coverage for every production acceptance action. | [Metadata and production gates wiki](../docs/wiki/Tutorial-06-Metadata-Verification-and-Production-Gates.md) |
@@ -953,7 +953,7 @@ Non-goals:
 Source documents:
 
 - [Surface elegance RFC](../docs/CELLSCRIPT_SURFACE_ELEGANCE_RFC.md)
-- [CKB language audit](../docs/CELLSCRIPT_CKB_LANGUAGE_AUDIT.md)
+- [CKB target profiles](../docs/wiki/Tutorial-05-CKB-Target-Profiles.md)
 
 ### 9.2 CKB Evidence Hardening
 
@@ -972,7 +972,7 @@ Priorities:
 
 Source documents:
 
-- [CKB language audit](../docs/CELLSCRIPT_CKB_LANGUAGE_AUDIT.md)
+- [CKB target profiles](../docs/wiki/Tutorial-05-CKB-Target-Profiles.md)
 - [Capacity and builder contract](../docs/CELLSCRIPT_CAPACITY_AND_BUILDER_CONTRACT.md)
 - [Metadata and production gates wiki](../docs/wiki/Tutorial-06-Metadata-Verification-and-Production-Gates.md)
 
@@ -1022,7 +1022,7 @@ Source documents:
 
 - [Capacity and builder contract](../docs/CELLSCRIPT_CAPACITY_AND_BUILDER_CONTRACT.md)
 - [Output bindings](../docs/CELLSCRIPT_OUTPUT_BINDINGS.md)
-- [CKB language audit](../docs/CELLSCRIPT_CKB_LANGUAGE_AUDIT.md)
+- [CKB target profiles](../docs/wiki/Tutorial-05-CKB-Target-Profiles.md)
 
 ### 9.5 Documentation and Developer Experience
 

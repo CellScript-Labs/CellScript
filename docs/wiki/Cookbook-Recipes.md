@@ -120,16 +120,47 @@ and output binding. Do not treat it as account storage.
 Use the destruction form that says what the verifier should prove:
 
 ```cellscript
-destroy_singleton_type(config)
-destroy_unique(asset, identity = type_id)
-destroy_instance(badge, identity_field = badge_id)
-burn_amount(token, field = amount)
+#[type_id("cookbook::Config:v1")]
+resource Config has store, consume, burn
+    identity(ckb_type_id)
+{
+    value: u64
+}
+
+#[type_id("cookbook::Asset:v1")]
+resource Asset has store, consume, burn
+    identity(ckb_type_id)
+{
+    amount: u64
+}
+
+resource Badge has store, consume, burn
+    identity(field(badge_id))
+{
+    badge_id: u64
+}
+
+resource Token has store, consume, burn
+    identity(field(amount))
+{
+    amount: u64
+}
+
+action retire(config: Config, asset: Asset, badge: Badge, token: Token) {
+    verification
+        destroy_singleton_type(config)
+        destroy_unique(asset, identity = type_id)
+        destroy_instance(badge, identity_field = badge_id)
+        burn_amount(token, field = amount)
+}
 ```
 
-In `--primitive-compat=0.15` legacy compatibility mode, bare `destroy value` requires
-the `consume + burn` kernel effects instead of the legacy `destroy` attribute.
-Keep the policy explicit when reviewers must distinguish output absence,
-identity consumption, instance consumption, and quantity burn.
+The resource declarations are part of the recipe: strict modes require
+`consume + burn` before a value may be destroyed. In
+`--primitive-compat=0.15` legacy compatibility mode, bare `destroy value` also
+requires `consume + burn` instead of the legacy `destroy` attribute. Keep the
+policy explicit when reviewers must distinguish output absence, identity
+consumption, instance consumption, and quantity burn.
 
 ## Recipe: Write An Honest Lock Predicate
 
@@ -216,6 +247,24 @@ cellc entry-witness . --target-profile ckb --action transfer
 
 These reports tell builders and reviewers what data the entry expects. They do
 not prove that the transaction has been assembled correctly.
+
+## Recipe: Sign And Verify A Compile Receipt
+
+Use receipts when you need an authenticated envelope for build evidence:
+
+```bash
+cellc receipt src/main.cell --output target/main.receipt.json
+cellc sign-receipt target/main.receipt.json --role publisher --key publisher.ed25519.pkcs8
+cellc verify-receipt target/main.receipt.json \
+  --metadata target/main.elf.meta.json \
+  --artifact target/main.elf
+cellc verify-artifact target/main.elf --receipt target/main.receipt.json
+```
+
+A receipt binds source, metadata, ProofPlan, ProtocolGraph, TemplateLayout, and
+artifact hashes. A receipt signature authenticates that evidence envelope; it
+does not prove transaction freshness, capacity sufficiency, dry-run success, or
+submission.
 
 ## Recipe: Check A Package Before Building
 

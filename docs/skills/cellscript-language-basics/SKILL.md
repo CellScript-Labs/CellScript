@@ -4,7 +4,7 @@ description: CellScript action, transition, resource, shared, receipt, capabilit
 references:
   - docs/wiki/Tutorial-02-Language-Basics.md
   - docs/wiki/Tutorial-03-Resources-and-Cell-Effects.md
-  - docs/wiki/Tutorial-09-Action-Model-and-0-13-Syntax.md
+  - docs/wiki/Tutorial-09-Action-Model-and-Canonical-Syntax.md
   - examples/token.cell
 commands:
   - cellc check

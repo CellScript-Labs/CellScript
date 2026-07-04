@@ -2,7 +2,7 @@
 name: cellscript-diagnostics
 description: Parser, type, lowering, runtime, and production-gate diagnostics with migration hints and safe next actions.
 references:
-  - docs/wiki/Tutorial-13-Agentic-Loops-and-cellc-mcp.md
+  - docs/wiki/Tutorial-13-Agentic-Loops-and-cellscript-mcp.md
   - docs/wiki/Tutorial-07-LSP-and-Tooling.md
   - docs/wiki/Tutorial-06-Metadata-Verification-and-Production-Gates.md
 commands:

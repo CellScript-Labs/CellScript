@@ -39,7 +39,11 @@ The profile checks and records:
 - raw ELF packaging without ABI trailer;
 - Molecule-facing schema, entry witness metadata, and typed lock args ABI;
 - CKB Blake2b release/deployment hash helper support;
+- `args_parts` lock-args partition metadata for typed builders;
 - manifest-level `hash_type`, CellDep, and DepGroup reporting;
+- manifest-backed CellDep binding evidence through `cell_data_codec_manifest`;
+- action-aware scan-selector evidence for builder-side Cell discovery;
+- TemplateLayout metadata for verifier root/path shape analysis;
 - declared capacity floors, occupied-capacity checks, tx-size requirements, and
   builder-evidence requirements in constraints;
 - CKB policy checks for unsupported runtime or stateful shapes.
@@ -106,6 +110,13 @@ source-level floor, and `occupied_capacity("TypeName")` makes capacity policy
 visible to reports. The final transaction still needs builder-side occupied
 capacity measurement, enough output capacity, and tx-size evidence.
 
+CellScript 0.21 records more CKB-facing builder evidence, but the boundary is
+still precise. `args_parts`, action scan selectors, manifest-backed CellDeps,
+and TemplateLayout make transaction construction auditable. TemplateLayout is
+metadata-only in 0.21: it can say a root/path claim is represented in metadata,
+or that a claim still needs runtime-helper coverage, but it does not by itself
+prove a consensus Merkle path.
+
 ## Evidence Beyond Compilation
 
 Compiler metadata is necessary, but it is not a substitute for builder-backed
@@ -118,6 +129,8 @@ You can think of the layers like this:
 
 - target profile: "can this source be lowered under CKB rules";
 - artifact verification: "does this artifact match its metadata";
+- strict primitive gates: "does this release line reject evidence gaps at the
+  intended policy boundary";
 - CKB acceptance: "can builder-generated transactions use the artifact as
   claimed."
 

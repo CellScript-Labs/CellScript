@@ -111,6 +111,10 @@ The extension contributes commands for the local compiler and builder loop:
 `CellScript: Show Production Report` is useful while editing because it displays
 compiler version, metadata, constraints, and release-audit boundaries.
 
+The 0.21 compiler also ships `cellscript-mcp`, compile receipts, ProtocolGraph,
+TemplateLayout, and helper-backed aggregate evidence. Those remain compiler/MCP
+surfaces in this extension release rather than command-palette entries.
+
 That report is a guide, not a deployment certificate. Chain acceptance still
 requires CLI evidence and builder-backed CKB transactions.
 

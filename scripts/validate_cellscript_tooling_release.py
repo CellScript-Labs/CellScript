@@ -280,7 +280,7 @@ def main() -> int:
         ],
     )
     require_contains(
-        "docs/CELLSCRIPT_0_20_ROADMAP.md",
+        "docs/archive/0.20/CELLSCRIPT_0_20_ROADMAP.md",
         [
             "VS Code extension",
             "check_action_builder_toolchain",

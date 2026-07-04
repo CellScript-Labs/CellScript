@@ -1,4 +1,4 @@
-# Tutorial 13: Agentic Loops and cellc-mcp
+# Tutorial 13: Agentic Loops and cellscript-mcp
 
 CellScript is a small, narrow language with a deterministic compiler and
 machine-readable diagnostics. Those properties make it a good fit for an
@@ -8,7 +8,7 @@ prose.
 
 This chapter describes that loop. It explains why the `cellc` surface is shaped
 for automated callers, which commands give stable machine-readable output, and
-where a reference wrapper (`cellc-mcp`) exposes those commands as agent tools.
+where a reference wrapper (`cellscript-mcp`) exposes those commands as agent tools.
 It keeps the same boundary as the rest of the wiki: a loop that ends at "the
 compiler accepted this" has produced compiler evidence, not CKB chain
 acceptance.
@@ -18,7 +18,7 @@ acceptance.
 - why `cellc` suits a write -> check -> explain -> fix loop;
 - which commands emit stable, machine-readable output an agent can act on;
 - how stable diagnostic codes and `cellc explain` close the correction loop;
-- what a reference MCP wrapper (`cellc-mcp`) exposes, and how an agent uses it;
+- what a reference MCP wrapper (`cellscript-mcp`) exposes, and how an agent uses it;
 - the read-vs-write rule that keeps an automated loop safe;
 - where the loop's evidence stops, and what still needs builder and CKB
   evidence.
@@ -167,6 +167,23 @@ The default tool set is read-only:
 
 The server does not expose signing, publish, deployment submission, registry
 mutation, or editor/shell configuration mutation by default.
+
+## CellScript Programming Skills
+
+The 0.21 repository also ships six read-oriented programming skills under
+`docs/skills/`. They are not a separate compiler implementation; they are
+agent-facing instructions that route common tasks back to `cellc`, the wiki,
+and the gate policy:
+
+- `cellscript-diagnostics`
+- `cellscript-language-basics`
+- `cellscript-metadata-audit`
+- `cellscript-package-cli`
+- `cellscript-ckb-model`
+- `cellscript-builder-deployment`
+
+The dev and CI gates run the skill-pack freshness check so these files cannot
+silently drift away from the documented compiler surface.
 
 Any MCP client can drive it; the wrapper does not assume a particular model. A
 local model that has little or no CellScript in its training data benefits most,

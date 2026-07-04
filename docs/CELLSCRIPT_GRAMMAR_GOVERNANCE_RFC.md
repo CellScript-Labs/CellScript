@@ -2,7 +2,11 @@
 
 ## Status
 
-Active 0.19 grammar-governance contract.
+Active grammar-governance contract. The 0.19 matrix below remains the baseline
+for canonical action/lock syntax; the current 0.21 RC extends that surface with
+aggregate-invariant helper coverage, flow-edge membership validation,
+TemplateLayout metadata, compile receipts, nested CLI command groups,
+structured diagnostic transport, and the `cellscript-mcp` skill-pack surface.
 
 This document defines the public syntax boundary that parser, formatter, LSP,
 examples, docs, lowering metadata, and release gates must keep aligned.
@@ -24,7 +28,7 @@ Short form:
 
 ## Canonical Surface
 
-The 0.19 public action form is:
+The canonical public action form is:
 
 ```cellscript
 action NAME(params...) -> outputs {
@@ -43,7 +47,7 @@ action NAME(params...) -> outputs {
 }
 ```
 
-The 0.19 public lock form is:
+The canonical public lock form is:
 
 ```cellscript
 lock NAME(protected cell: T, witness arg: U) -> bool {
@@ -72,7 +76,7 @@ schema gains a field, either preserving a new field without review or leaving it
 outside the visible audit trail. The parser therefore rejects `except` and `*`
 inside `preserve` blocks and asks authors to write an explicit whitelist.
 
-## 0.19 Release Status Matrix
+## Baseline Release Status Matrix
 
 | Track | Status | Implementation / evidence | Release gate |
 |---|---|---|---|
@@ -87,6 +91,20 @@ inside `preserve` blocks and asks authors to write an explicit whitelist.
 This matrix is compiler-governance evidence. It is not a replacement for
 builder-backed CKB transaction acceptance, external audit, or exhaustive
 adversarial state-space verification.
+
+## 0.21 Governance Delta
+
+The 0.21 RC adds governance requirements that build on the baseline matrix:
+
+| Surface | Governance rule | Evidence |
+|---|---|---|
+| Aggregate helper coverage | xUDT group amount invariants must report `gap:metadata-only`, `gap:runtime-helper-required`, or `checked-runtime`; strict 0.17 rejects stale helper gaps with PP0170. | `CHANGELOG.md` 0.21.0-rc.1 and `tests/cli.rs` strict 0.17 cases. |
+| Flow-edge membership | An action transition must use an edge declared by the corresponding `flow` block; cyclic flows remain valid. | `src/flow/mod.rs` diagnostics and syntax-combo flow bug classes. |
+| TemplateLayout metadata | Layout records are metadata-only in this RC, mark cyclic flows as `RootRequired`, acyclic flows as `PathOnlyAllowed`, and reject unsupported `consensus_checked = true`. | `CompileMetadata.template_layouts` schema v44. |
+| Compile receipts | `cellc receipt`, `cellc sign-receipt`, `cellc verify-receipt`, and `verify-artifact --receipt` bind metadata/artifact evidence without claiming transaction validity. | `cellscript-compile-receipt-v1`. |
+| CLI command groups | Public discovery uses nested `explain`, `tx`, `deploy`, `registry`, `package`, and `auth capability` groups; hidden flat aliases are compatibility only. | `cellc --list` and CLI help. |
+| Diagnostic transport | `--message-format=json`, `--color=auto|always|never`, and `NO_COLOR` are part of the scripted diagnostics surface. | CLI command definitions and gate usage. |
+| Agent tooling | `cellscript-mcp` and the six `docs/skills/cellscript-*` skills are read-oriented compiler surfaces whose freshness is checked by dev/ci gates. | `scripts/check_cellscript_skill_pack.py`. |
 
 ## `verification`
 

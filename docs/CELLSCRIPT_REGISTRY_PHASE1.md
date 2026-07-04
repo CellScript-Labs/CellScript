@@ -1,5 +1,9 @@
 # CellScript Registry Phase 1: JoyID-Rooted Package Publishing for CKB Smart Contracts
 
+**Status**: public walkthrough of the Phase 1 registry contract for the current
+CellScript CKB profile. Policy decisions defer to
+[`CELLSCRIPT_REGISTRY_PRODUCTION_BOUNDARY_ADR.md`](CELLSCRIPT_REGISTRY_PRODUCTION_BOUNDARY_ADR.md).
+
 Publishing and consuming smart contract libraries should feel like a normal
 package workflow: `cellc publish` publishes a package, and the registry shows
 the new entry. The CellScript public registry policy therefore treats publish
@@ -187,7 +191,7 @@ namespace = "cellscript"
 source_hash = "blake2b:0xabcd..."
 
 [package.build]
-compiler_version = "0.19.0"
+compiler_version = "0.21.0-rc.1"
 target_profile = "ckb"
 artifact_hash = "blake2b:0x1234..."
 
@@ -217,7 +221,7 @@ version = "1.2.0"
 source_hash = "blake2b:0xabcd..."
 
 [build]
-compiler_version = "0.19.0"
+compiler_version = "0.21.0-rc.1"
 artifact_hash = "blake2b:0x1234..."
 
 [[deployments]]

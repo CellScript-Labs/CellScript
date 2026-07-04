@@ -1,9 +1,10 @@
 # Tutorial 08: Bundled Example Contracts
 
-The repository includes seven bundled examples. Treat them as guided reading,
-not just files to compile. Each one teaches a different part of the language:
-linear resources, shared state, receipts, locks, proposal flows, time checks,
-and CKB production evidence.
+The repository includes ten top-level example files. Seven are in the bundled
+CKB production matrix; three are non-production language or business-flow
+examples. Treat them as guided reading, not just files to compile. Each one
+teaches a different part of the language: linear resources, shared state,
+receipts, locks, proposal flows, time checks, and evidence boundaries.
 
 This chapter helps you choose what to read first and what to learn from each
 example.
@@ -19,6 +20,9 @@ example.
 | `examples/vesting.cell` | Vesting grants, receipts, claim flow, and admin-boundary comments. |
 | `examples/amm_pool.cell` | Shared pool state, bounded swap logic, liquidity receipts, LP ownership checks, and settlement effects. |
 | `examples/launch.cell` | Mint-authority bootstrap and launch/pool composition patterns. |
+| `examples/registry.cell` | Registry/package language surface and compiler tooling; non-production. |
+| `examples/atomic_swap.cell` | Atomic swap flow-edge validation and settlement lifecycle; non-production. |
+| `examples/multi_phase_dao.cell` | Multi-stage DAO proposal flow and state-transition membership; non-production. |
 
 The top-level `examples/*.cell` files are the clean reading surface and remain
 the CKB acceptance runner's business-source mirror. The package directories under
@@ -39,12 +43,14 @@ There are no checked-in `examples/business` or `examples/acceptance` mirrors;
 acceptance-only profile/effect/scheduler metadata belongs in runner
 configuration or generated files under `target/`.
 
-`examples/registry.cell` and every checked-in `examples/language/*.cell` file
-are intentionally outside the bundled production matrix. They are language
-examples for compiler/tooling surfaces such as local stack-backed `Vec<T>`,
-stdlib patterns, CKB source/witness, TYPE_ID, Spawn/IPC, capacity/time, and
-dynamic BLAKE2b. They are covered by compiler/tooling tests rather than CKB
-production action acceptance.
+`examples/registry.cell`, `examples/atomic_swap.cell`,
+`examples/multi_phase_dao.cell`, and every checked-in `examples/language/*.cell`
+file are intentionally outside the bundled production matrix. They are language
+and non-production business-flow examples for compiler/tooling surfaces such as
+local stack-backed `Vec<T>`, stdlib patterns, CKB source/witness, TYPE_ID,
+Spawn/IPC, capacity/time, dynamic BLAKE2b, flow-edge validation, and
+state-transition lifecycle checks. They are covered by compiler/tooling tests
+rather than CKB production action acceptance.
 
 For a visual business-flow map of every bundled example, see
 [`CELLSCRIPT_EXAMPLE_BUSINESS_FLOWS.md`](https://github.com/CellScript-Labs/CellScript/blob/main/docs/CELLSCRIPT_EXAMPLE_BUSINESS_FLOWS.md).
@@ -65,6 +71,8 @@ If you are learning the language, read them in this order:
 5. `vesting.cell`: learn receipt-style claim flows.
 6. `amm_pool.cell`: learn shared pool state after you understand resources.
 7. `launch.cell`: read this last because it composes multiple patterns.
+8. `atomic_swap.cell`: inspect after Tutorial 11 if you want flow-edge evidence.
+9. `multi_phase_dao.cell`: inspect after registry and flow-state material.
 
 Do not try to learn everything from the densest example first. The examples are
 more useful when each one adds one new idea.

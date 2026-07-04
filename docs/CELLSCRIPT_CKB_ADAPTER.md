@@ -1,7 +1,10 @@
 # CellScript CKB Adapter
 
-**Status**: formal 0.19 headless Rust adapter crate with full transaction lifecycle
-bridge plus focused local-node acceptance evidence.
+**Status**: production contract for the current CellScript CKB profile. The
+headless Rust adapter crate landed in the 0.19 line; 0.21 extends the builder
+resolution surface with materialised action plans, action-aware scan selector
+evidence, variable-length `args_parts`, manifest-backed CellDep completion, and
+fail-closed live-cell evidence validation.
 
 This document defines which CKB-facing responsibilities belong to CellScript,
 `ckb-std`, `ckb-sdk-rust`, and the adapter.
@@ -304,6 +307,11 @@ Focused local gate:
 ./scripts/cellscript_ckb_ecosystem_reuse_gate.sh full
 ```
 
+These ecosystem-reuse scripts are standalone manual tools, not unified gate
+modes and not release-evidence claims. See
+[`CELLSCRIPT_GATE_POLICY.md`](CELLSCRIPT_GATE_POLICY.md) for the release gate
+boundary.
+
 Focused local-node adapter gate:
 
 ```text
@@ -314,7 +322,8 @@ That script starts a local CKB devnet, checks a compiler action plan, verifies
 the formal adapter crate materialization path, runs `estimate_cycles`, runs
 `test_tx_pool_accept`, submits the deploy transaction, generates blocks until
 committed, and verifies the code cell is live on-chain. It is adapter-boundary
-evidence, not a replacement for stateful business-flow acceptance.
+evidence, not a replacement for stateful business-flow acceptance and not a
+unified `cellscript_gate.sh` release mode.
 
 ## Validation Loop
 

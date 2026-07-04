@@ -1,9 +1,12 @@
 # CellScript ckb-std Compatibility
 
-**Status**: 0.19 scope compatibility contract with implementation landed for
-ckb-std constant parity, SourceView decoding, WitnessArgs layout fixtures,
-occupied-capacity field lowering, the formal headless CKB adapter crate, and
-focused local-node adapter acceptance.
+**Status**: production compatibility contract for the current CellScript CKB
+profile. The 0.19 line landed ckb-std constant parity, SourceView decoding,
+WitnessArgs layout fixtures, occupied-capacity field lowering, the formal
+headless CKB adapter crate, and focused local-node adapter acceptance; 0.21
+extends the builder-facing boundary with action-aware scan selectors,
+`args_parts`, manifest-backed CellDep completion, and helper-backed aggregate
+invariant evidence.
 
 See also [`CELLSCRIPT_CKB_ADAPTER.md`](CELLSCRIPT_CKB_ADAPTER.md) for the
 transaction-realisation boundary with `ckb-sdk-rust`.
@@ -12,10 +15,9 @@ transaction-realisation boundary with `ckb-sdk-rust`.
 CellScript should treat it as the contract-side ABI and runtime oracle, not as a
 transaction builder and not as a compiler-core dependency.
 
-This document belongs to the 0.19 registry/deployment/adapter scope. It defines
-the compatibility contract that the 0.19 adapter boundary and the 0.20
-generated Action Builder must respect; it is not counted as 0.18
-protocol-equivalence evidence.
+This document defines the compatibility contract that the adapter boundary,
+generated Action Builder, and CKB-facing metadata must respect across the
+current 0.21 RC line. It is not counted as 0.18 protocol-equivalence evidence.
 
 In practical terms:
 
@@ -34,6 +36,24 @@ The three components sit on different sides of the same production workflow:
 | `cellscript-ckb-adapter` | Consume compiler outputs and use `ckb-sdk-rust` to materialise deployments and action transactions. |
 | `ckb-sdk-rust` (5.x) | Provide off-chain CKB data structures (`ckb-types` 1.0.0), sync and async RPC / indexer clients, `CellCollector` (Default / Offchain / LightClient), `CellDepResolver`, `HeaderDepResolver`, `Signer` and lock-specific `ScriptUnlocker` (SecpSighash, SecpMultisig Legacy/V2, ACP, Cheque, OmniLock), `CapacityBalancer` / `CapacityProvider`, protocol `tx_builder` modules, acceptance, and submission. |
 | CKB node | Execute the script, measure cycles, and accept or reject the concrete transaction. |
+
+## 0.21 Extensions
+
+The 0.21 RC keeps the same ckb-std compatibility boundary but extends what
+builders and adapters must preserve:
+
+- action-aware scan selectors identify which live-cell or transaction-shape
+  evidence a builder must supply;
+- `args_parts` lets adapters construct variable-length `Script.args` from
+  typed byte fragments while rejecting ambiguous drafts that also set non-empty
+  `args`;
+- manifest-backed CellDep completion resolves script dependencies from
+  deployment records rather than action-name convention;
+- helper-backed aggregate invariant evidence distinguishes
+  `gap:metadata-only`, `gap:runtime-helper-required`, and `checked-runtime`.
+
+These extensions do not turn compile-only evidence into CKB node acceptance.
+They make the adapter contract fail closed before signing or submission.
 
 ## Boundary
 
@@ -209,10 +229,10 @@ that a CellScript artifact behaves like the corresponding CKB contract-side
 ABI, and that a concrete transaction carrying that artifact is accepted or
 rejected by the node for the expected reason.
 
-The current 0.19 evidence now covers ABI compatibility, headless adapter
-materialization, and focused local-node adapter acceptance. It is still not a
-wallet UI, CellFabric, package registry production gate, external audit, or
-exhaustive adversarial state-space proof.
+The current evidence covers ABI compatibility, headless adapter materialization,
+0.21 builder-resolution metadata, and focused local-node adapter acceptance. It
+is still not a wallet UI, CellFabric, package registry production gate,
+external audit, or exhaustive adversarial state-space proof.
 
 ## Cookbook Topics
 

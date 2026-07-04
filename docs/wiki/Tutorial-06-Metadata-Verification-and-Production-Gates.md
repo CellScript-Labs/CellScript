@@ -144,9 +144,11 @@ artifact-binding facts, and CKB constraint summaries can now move independently
 in future schema revisions. `verify-artifact` still rejects a mismatch in any of
 these versions.
 
-## v0.16 Assurance Checks
+## Assurance Layer
 
-CellScript 0.16 adds a checked assurance layer over ProofPlan metadata:
+CellScript 0.16 added a checked assurance layer over ProofPlan metadata, and
+0.21 extends the same evidence stream with ProtocolGraph, TemplateLayout, and
+compile receipt binding:
 
 ```bash
 cellc explain proof src/main.cell --json
@@ -180,6 +182,8 @@ cellc proof-diff old.meta.json new.meta.json --json
 cellc audit-bundle src/main.cell --output target/audit
 ```
 
+## 0.21 Compile Receipts
+
 Compile receipts bind the same evidence stream to deterministic hashes:
 
 ```bash
@@ -195,11 +199,25 @@ Receipt signatures authenticate metadata/artifact evidence and derived report
 hashes. They do not prove transaction validity, live-cell freshness, dry-run
 success, capacity sufficiency, or successful submission.
 
+## 0.21 TemplateLayout Metadata
+
 `template_layouts` is metadata-only in the current compiler: records are derived
 from resource/shared/receipt type metadata, use a `Flat` layout by default, and
 set `consensus_checked = false` until a backend verifier explicitly enforces a
 template commitment. Cyclic flow state machines are marked with
 `cycle_policy = RootRequired`; acyclic layouts use `PathOnlyAllowed`.
+
+The compiler rejects unsupported `consensus_checked = true` claims in this RC.
+That keeps TemplateLayout from looking consensus-enforced before generated
+verifier code actually checks the template commitment.
+
+ProofPlan coverage states are intentionally explicit:
+
+| State | Meaning |
+|---|---|
+| `gap:metadata-only` | The claim is preserved for audit but has no executable verifier coverage. |
+| `gap:runtime-helper-required` | The claim maps to a runtime helper, but the selected entry did not emit matching helper coverage. |
+| `checked-runtime` | Generated runtime access backs the claim for the selected entry. |
 
 For the review-finding closure matrix, see
 `docs/archive/0.17/CELLSCRIPT_0_17_REVIEW_FINDINGS_CLOSURE.md`.
@@ -256,11 +274,13 @@ component scripts:
 ./scripts/cellscript_gate.sh ci
 ./scripts/cellscript_gate.sh backend
 ./scripts/cellscript_gate.sh release
+./scripts/cellscript_gate.sh release-quick
 ```
 
 `dev` is the local fast path. `ci` is the pull-request gate. `backend` is for
-IR/codegen/RISC-V changes. `release` is the production CKB evidence gate. See
-`docs/CELLSCRIPT_GATE_POLICY.md` for the exact command contract.
+IR/codegen/RISC-V changes. `release` is the production CKB evidence gate.
+`release-quick` is a compile-only release preflight, not external live/devnet
+evidence. See `docs/CELLSCRIPT_GATE_POLICY.md` for the exact command contract.
 
 ## CKB Release Evidence Gate
 
@@ -316,20 +336,21 @@ separate: profile docs must still name any required CellDep attestation,
 external BIP340 TCB review, public BTC SPV/indexer report, or RWA legal/registry
 review.
 
-The production gate compiles the seven checked-in top-level
-`examples/*.cell` bundled examples directly. Those files are the single
-canonical business source and the cleaner reading surface; there are no
-checked-in `examples/business` or `examples/acceptance` mirrors. Acceptance-only
-profile/effect/scheduler metadata belongs in runner configuration or generated
-files under `target/`.
+The production gate compiles the seven production checked-in top-level example
+contracts directly: token, NFT, timelock, multisig, vesting, AMM pool, and
+launch. Those files are the single canonical production business source and the
+cleaner reading surface; there are no checked-in `examples/business` or
+`examples/acceptance` mirrors. Acceptance-only profile/effect/scheduler
+metadata belongs in runner configuration or generated files under `target/`.
 
 Lock behavior coverage is machine-readable through
 `lock_acceptance_scope.onchain_lock_spend_matrix_scope`; each listed lock must
 have both valid-spend and invalid-spend evidence.
 
-`examples/registry.cell` and every checked-in `examples/language/*.cell` file
-are non-production language examples covered by compiler/tooling tests, not by
-the bundled CKB production matrix.
+`examples/registry.cell`, `examples/atomic_swap.cell`,
+`examples/multi_phase_dao.cell`, and every checked-in `examples/language/*.cell`
+file are non-production examples covered by compiler/tooling tests, not by the
+bundled CKB production matrix.
 
 `--compile-only` and bounded diagnostic runs can help development, but they are
 not external production release evidence.

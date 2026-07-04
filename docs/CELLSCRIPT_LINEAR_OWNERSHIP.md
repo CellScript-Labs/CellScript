@@ -25,6 +25,12 @@ These are compile-time checks. Generated verifier code may also clear consumed
 stack slots as a runtime defense, but stack clearing is not the primary
 ownership model.
 
+For state machines, 0.21 also validates flow-edge membership statically. An
+action that claims `transition before.state: A -> after.state: B` must use an
+edge declared by the corresponding `flow` block. This is a linearity rule for
+state continuation: undeclared transitions fail before lowering instead of
+leaving the verifier to infer protocol intent from action names.
+
 ## Required End States
 
 Every acquired cell-backed value must reach an explicit terminal operation:

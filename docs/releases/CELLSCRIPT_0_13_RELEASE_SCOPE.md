@@ -184,7 +184,7 @@ Deferred authorization roadmap:
 Detailed design:
 
 - [Surface elegance RFC](../CELLSCRIPT_SURFACE_ELEGANCE_RFC.md)
-- [CKB language audit](../CELLSCRIPT_CKB_LANGUAGE_AUDIT.md)
+- [CKB target profiles](../wiki/Tutorial-05-CKB-Target-Profiles.md)
 - [CKB glossary](../wiki/CKB-Glossary.md)
 
 ## CKB Production Evidence
@@ -212,7 +212,7 @@ Detailed evidence docs:
 
 - [Metadata verification and production gates wiki](../wiki/Tutorial-06-Metadata-Verification-and-Production-Gates.md)
 - [Capacity and builder contract](../CELLSCRIPT_CAPACITY_AND_BUILDER_CONTRACT.md)
-- [CKB language audit](../CELLSCRIPT_CKB_LANGUAGE_AUDIT.md)
+- [CKB target profiles](../wiki/Tutorial-05-CKB-Target-Profiles.md)
 
 ## Documentation And Tooling
 

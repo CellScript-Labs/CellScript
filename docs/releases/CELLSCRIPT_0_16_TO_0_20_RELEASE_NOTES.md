@@ -468,7 +468,7 @@ slice, iCKB production equivalence with the original iCKB family
 
 ## Cross-References
 
-- Open direction: `docs/CELLSCRIPT_0_20_ROADMAP.md` and the
+- Open direction: `docs/archive/0.20/CELLSCRIPT_0_20_ROADMAP.md` and the
   planning draft for the next line at `docs/CELLSCRIPT_0_21_ROADMAP.md`.
 - Public registry RFC thread:
   [Package Management for CellScript: A Go-style, GitHub-based

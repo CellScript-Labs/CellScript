@@ -1,12 +1,15 @@
 # CellScript Package Provenance and Deployment Identity
 
-**Status**: RFC — early design discussion
+**Status**: implementation contract for the current CellScript CKB profile.
+Phase 1 landed in the 0.19 line; Phase 2 source-package, generated-builder,
+deployment identity, and trust-metadata checks extend through 0.20 and the
+0.21 RC.
 
 **Scope**: Source package registry, deployment registry, lockfile binding, and
 builder verification for CellScript on CKB
 
-**Depends on**: v0.12 stable developer surface, v0.17 CKB protocol semantics,
-v0.18 first-class ScriptRef / ScriptArgs work
+**Historical scope anchors**: v0.12 stable developer surface, v0.17 CKB
+protocol semantics, and v0.18 first-class ScriptRef / ScriptArgs work.
 
 **Forum thread**: <https://talk.nervos.org/t/cellscript-package-and-deployment-registry-early-design-discussion/10210>
 
@@ -412,7 +415,7 @@ namespace = "cellscript"
 source_hash = "blake2b:0xabcd..."
 
 [package.build]
-compiler_version = "0.19.0"
+compiler_version = "0.21.0-rc.1"
 target_profile = "ckb"
 artifact_hash = "blake2b:0x1234..."
 metadata_hash = "blake2b:0x5678..."
@@ -583,7 +586,7 @@ version = "1.2.0"
 source_hash = "blake2b:0xabcd..."
 
 [build]
-compiler_version = "0.19.0"
+compiler_version = "0.21.0-rc.1"
 artifact_hash = "blake2b:0x1234..."
 metadata_hash = "blake2b:0x5678..."
 schema_hash = "blake2b:0x9abc..."
@@ -704,7 +707,7 @@ namespace = "cellscript"
 source_hash = "blake2b:0xabcd..."
 
 [package.build]
-compiler_version = "0.19.0"
+compiler_version = "0.21.0-rc.1"
 target_profile = "ckb"
 artifact_hash = "blake2b:0x1234..."
 metadata_hash = "blake2b:0x5678..."
@@ -835,7 +838,7 @@ version = "1.2.0"
 source_hash = "blake2b:0xabcd..."
 
 [build]
-compiler_version = "0.19.0"
+compiler_version = "0.21.0-rc.1"
 artifact_hash = "blake2b:0x1234..."
 metadata_hash = "blake2b:0x5678..."
 schema_hash = "blake2b:0x9abc..."

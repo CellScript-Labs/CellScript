@@ -120,6 +120,10 @@ read-only data without consuming that Cell.
 CellScript records read-only accesses and deployment metadata so builders and
 reviewers can see which dependencies must be present.
 
+Manifest-backed CellDep completion means the adapter fills concrete CellDeps
+from deployment records instead of guessing them from action names or local
+defaults. Missing or mismatched manifest evidence fails closed.
+
 ## DepGroup
 
 A DepGroup packages multiple CellDeps behind one dependency reference. Release
@@ -136,6 +140,46 @@ assumptions remain.
 Use `cellc explain proof` to read ProofPlan data in human-readable or JSON form.
 If a plan says `runtime-required` or `gap:metadata-only`, it is not yet a fully
 covered on-chain proof.
+
+The 0.21 coverage states distinguish `gap:metadata-only`,
+`gap:runtime-helper-required`, and `checked-runtime`. A helper-required gap says
+the invariant maps to a known runtime helper, but the selected entry still needs
+matching generated helper coverage before strict 0.17 will accept it.
+
+## TemplateLayout
+
+TemplateLayout is metadata for the flat field layout of `resource`, `shared`,
+and `receipt` types. In the 0.21 RC it is metadata-only: cyclic flow state
+machines are marked `RootRequired`, acyclic layouts are `PathOnlyAllowed`, and
+unsupported `consensus_checked = true` claims are rejected until verifier code
+checks template commitments.
+
+## ProtocolGraph
+
+ProtocolGraph is a derived audit view of actions, flows, and evidence edges. It
+is generated from compile metadata, included in audit bundles, and can be
+rendered as JSON or Mermaid. It is not a new IR and not a consensus source of
+truth.
+
+## Compile Receipt
+
+A compile receipt is an authenticated metadata envelope. It binds source,
+metadata, ProofPlan, ProtocolGraph, TemplateLayout, artifact hashes, and
+optional Ed25519 signatures. It proves evidence integrity, not transaction
+validity or live-cell freshness.
+
+## `args_parts`
+
+`args_parts` is an adapter-side script-args construction form for variable
+length script args. Builders provide ordered byte fragments; the adapter rejects
+ambiguous drafts that mix non-empty `args` with `args_parts`.
+
+## Scan-Selector Evidence
+
+Scan-selector evidence records which live-cell selector satisfied an action's
+builder assumption. The adapter uses it to fail closed when a transaction
+claims a selected Cell but the recorded live-cell scan evidence is missing or
+mismatched.
 
 ## Sighash
 

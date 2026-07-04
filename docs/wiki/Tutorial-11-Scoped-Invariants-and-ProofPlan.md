@@ -300,6 +300,7 @@ CellScript uses a **progressive guarantee** model for invariant enforcement:
 |---|---|
 | Development (default) | Invariants emit `gap:metadata-only` and `runtime-required`. Compilation succeeds. Warnings and builder assumptions are recorded for review. |
 | Pre-production (`--primitive-strict 0.16`) | Strict soundness rejects any ProofPlan record that is still `metadata-only` or `runtime-required` (PP0150). A helper-backed xUDT aggregate must show matching generated helper coverage on the ProofPlan record itself; other declared invariants need matching executable evidence or compilation fails. |
+| Helper-coverage strictness (`--primitive-strict 0.17`) | Rejects stale `gap:runtime-helper-required` records (PP0170) when the selected entry does not emit the matching generated runtime helper coverage. |
 | CI gate (`--deny-runtime-obligations`) | Additionally rejects unmatched invariant action coverage, runtime-required transaction invariants, and partial ProofPlan gaps. |
 
 Under strict mode, the compiler enforces the following invariant-specific
@@ -308,6 +309,9 @@ rules:
 - **PP0150**: a `metadata-only` or `runtime-required` ProofPlan record is a
   compile error. The invariant must be closed by action evidence, lock/type
   verifier code, or executable lowering.
+- **PP0170**: a `gap:runtime-helper-required` record is a compile error under
+  strict 0.17 unless the selected entry emits the matching helper coverage, such
+  as `runtime-helper-required:xudt::require_group_amount_conserved`.
 - **PP0101**: a ProofPlan record cannot simultaneously claim `on_chain_checked`
   and `runtime-required`.
 - **PP0104**: a `gap:*` coverage status is incompatible with `on_chain_checked`.

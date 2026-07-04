@@ -438,7 +438,7 @@ or CellFabric intent engine.
 - [Collections matrix example](docs/examples/collections_matrix.md)
 - [Deployment manifest example](docs/examples/deployment_manifest.md)
 - [Output append example](docs/examples/output_append.md)
-- [0.20 generated builder roadmap](docs/CELLSCRIPT_0_20_ROADMAP.md)
+- [0.20 generated builder roadmap](docs/archive/0.20/CELLSCRIPT_0_20_ROADMAP.md)
 - [Roadmap overview](roadmap/CELLSCRIPT_ROADMAP.md)
 - [0.13 release scope](docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md)
 - [0.14 roadmap](roadmap/CELLSCRIPT_0_14_ROADMAP.md)
@@ -448,8 +448,8 @@ or CellFabric intent engine.
 - [0.16 roadmap](roadmap/CELLSCRIPT_0_16_ROADMAP.md)
 - [0.16 release notes](docs/releases/CELLSCRIPT_0_16_RELEASE_NOTES.md)
 - [0.17 roadmap](docs/archive/0.17/CELLSCRIPT_0_17_ROADMAP.md)
-- [0.18 roadmap](docs/CELLSCRIPT_0_18_ROADMAP.md)
-- [0.19 roadmap](docs/CELLSCRIPT_0_19_ROADMAP.md)
+- [0.18 roadmap](docs/archive/0.18/CELLSCRIPT_0_18_ROADMAP.md)
+- [0.19 roadmap](docs/archive/0.19/CELLSCRIPT_0_19_ROADMAP.md)
 
 ---
 

@@ -148,6 +148,27 @@ cellc check --json
 `check --all-targets` is useful before committing. It catches source and profile
 problems without producing build artifacts.
 
+## Diagnostic Output Formatting
+
+Use `--message-format=json` when a CI job or agent loop needs structured
+diagnostics without parsing human text:
+
+```bash
+cellc check --target-profile ckb --message-format=json
+```
+
+Colour is controlled separately:
+
+```bash
+cellc check --color=auto
+cellc check --color=always
+cellc check --color=never
+NO_COLOR=1 cellc check
+```
+
+`--json` still means a command-specific success payload where that command
+supports one. `--message-format=json` is for diagnostic transport on failures.
+
 ## Format And Generate Docs
 
 Format the package:
@@ -191,10 +212,33 @@ cellc ckb-hash --file build/main.elf
 cellc verify-artifact build/main.elf --expect-target-profile ckb --verify-sources --production
 ```
 
-Builder-facing contract commands such as `action build`, `entry-witness`,
-`tx solve`, `explain assumptions`, `tx validate`, and `gen-builder` expose the
-metadata that transaction builders consume. Prefer `--json` where a command
-offers it, and reserve human summaries for interactive review.
+Builder-facing contract commands expose the metadata that transaction builders
+consume. Prefer the canonical 0.21 nested forms:
+
+```bash
+cellc action build . --action transfer --json
+cellc entry-witness . --target-profile ckb --action transfer
+cellc explain assumptions . --target-profile ckb --json
+cellc tx solve . --target-profile ckb --json
+cellc tx validate --against build/main.elf.meta.json --tx tx.json --json
+cellc tx trace --against build/main.elf.meta.json --tx tx.json --json
+cellc deploy plan . --target-profile ckb --json
+cellc deploy verify --plan Deployed.toml --json
+cellc registry verify --json
+cellc package verify --json
+cellc auth capability create --principal-id joyid:example --scope publish:cellscript/my_contract --expires 90d --json
+cellc gen-builder . --target typescript --target-profile ckb --json
+```
+
+Legacy flat aliases such as `solve-tx`, `deploy-plan`, and
+`explain-assumptions` remain executable for compatibility, but they are hidden
+from public discovery. Prefer `--json` where a command offers it, and reserve
+human summaries for interactive review.
+
+0.21 builder/deployment review also records action-aware scan selector
+evidence, variable-length `args_parts`, and manifest-backed CellDep completion
+where the adapter has enough deployment metadata to resolve them. Missing or
+mismatched live-cell scan evidence fails closed.
 
 These reports are not busywork. They answer questions reviewers will ask:
 
