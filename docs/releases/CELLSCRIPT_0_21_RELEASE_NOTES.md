@@ -1,6 +1,6 @@
 # CellScript 0.21 Release Candidate Notes
 
-**Status**: Release-candidate notes for CellScript 0.21.0-rc.1.
+**Status**: Stable release notes for CellScript 0.21.0.
 
 **Updated**: 2026-07-03.
 

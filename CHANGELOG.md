@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.21.0-rc.1 - 2026-07-01
+## 0.21.0 - 2026-07-11
 
 - Promote the common xUDT group amount aggregate invariant shape from
   metadata-only evidence into executable helper-backed lowering. Matching

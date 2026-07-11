@@ -415,7 +415,7 @@ namespace = "cellscript"
 source_hash = "blake2b:0xabcd..."
 
 [package.build]
-compiler_version = "0.21.0-rc.1"
+compiler_version = "0.21.0"
 target_profile = "ckb"
 artifact_hash = "blake2b:0x1234..."
 metadata_hash = "blake2b:0x5678..."
@@ -586,7 +586,7 @@ version = "1.2.0"
 source_hash = "blake2b:0xabcd..."
 
 [build]
-compiler_version = "0.21.0-rc.1"
+compiler_version = "0.21.0"
 artifact_hash = "blake2b:0x1234..."
 metadata_hash = "blake2b:0x5678..."
 schema_hash = "blake2b:0x9abc..."
@@ -707,7 +707,7 @@ namespace = "cellscript"
 source_hash = "blake2b:0xabcd..."
 
 [package.build]
-compiler_version = "0.21.0-rc.1"
+compiler_version = "0.21.0"
 target_profile = "ckb"
 artifact_hash = "blake2b:0x1234..."
 metadata_hash = "blake2b:0x5678..."
@@ -838,7 +838,7 @@ version = "1.2.0"
 source_hash = "blake2b:0xabcd..."
 
 [build]
-compiler_version = "0.21.0-rc.1"
+compiler_version = "0.21.0"
 artifact_hash = "blake2b:0x1234..."
 metadata_hash = "blake2b:0x5678..."
 schema_hash = "blake2b:0x9abc..."

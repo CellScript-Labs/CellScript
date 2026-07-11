@@ -98,7 +98,7 @@ The 0.21 RC adds governance requirements that build on the baseline matrix:
 
 | Surface | Governance rule | Evidence |
 |---|---|---|
-| Aggregate helper coverage | xUDT group amount invariants must report `gap:metadata-only`, `gap:runtime-helper-required`, or `checked-runtime`; strict 0.17 rejects stale helper gaps with PP0170. | `CHANGELOG.md` 0.21.0-rc.1 and `tests/cli.rs` strict 0.17 cases. |
+| Aggregate helper coverage | xUDT group amount invariants must report `gap:metadata-only`, `gap:runtime-helper-required`, or `checked-runtime`; strict 0.17 rejects stale helper gaps with PP0170. | `CHANGELOG.md` 0.21.0 and `tests/cli.rs` strict 0.17 cases. |
 | Flow-edge membership | An action transition must use an edge declared by the corresponding `flow` block; cyclic flows remain valid. | `src/flow/mod.rs` diagnostics and syntax-combo flow bug classes. |
 | TemplateLayout metadata | Layout records are metadata-only in this RC, mark cyclic flows as `RootRequired`, acyclic flows as `PathOnlyAllowed`, and reject unsupported `consensus_checked = true`. | `CompileMetadata.template_layouts` schema v44. |
 | Compile receipts | `cellc receipt`, `cellc sign-receipt`, `cellc verify-receipt`, and `verify-artifact --receipt` bind metadata/artifact evidence without claiming transaction validity. | `cellscript-compile-receipt-v1`. |

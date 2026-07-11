@@ -7,7 +7,7 @@ metadata-only compile path, multi-file browser workspace, and agent-facing
 documentation surface. Path B, full ELF generation inside the browser WASM
 bundle, remains deferred.
 
-Updated: 2026-07-01 for CellScript 0.21.0-rc.1.
+Updated: 2026-07-11 for CellScript 0.21.0.
 
 ## Goal
 

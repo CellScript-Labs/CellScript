@@ -13,7 +13,7 @@ crate at the repo root is `cellscript` (workspace member `.`); a sibling crate
 website submodule under `website/` ships an Astro + WASM playground that loads
 the prebuilt bundle.
 
-Version line: the workspace `Cargo.toml` pins `version = "0.21.0-rc.1"` and
+Version line: the workspace `Cargo.toml` pins `version = "0.21.0"` and
 `rust-version = "1.92.0"`. CI installs exactly that toolchain; do not bump
 either without coordinating with the release gate.
 

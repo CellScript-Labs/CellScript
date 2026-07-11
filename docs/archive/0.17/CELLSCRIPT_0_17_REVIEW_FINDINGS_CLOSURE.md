@@ -2,6 +2,11 @@
 
 Updated: 2026-04-28.
 
+> **Historical closure note.** This document records the 0.16 review-finding
+> closure as handled on the 0.17 line. References to `tests/v0_16.rs` were valid
+> when this note was written; that standalone test target was later
+> consolidated into current iCKB, CKB-compat, and in-crate test coverage.
+
 This note records how the 0.17 branch handles the four 0.16 review findings.
 It is intentionally precise about what is fixed and what remains outside the
 0.16/0.17 evidence boundary.
@@ -17,7 +22,7 @@ It is intentionally precise about what is fixed and what remains outside the
 
 ## Tests
 
-Focused coverage lives in `tests/v0_16.rs`:
+Historical focused coverage lived in `tests/v0_16.rs`:
 
 - `proof_plan_soundness_rejects_duplicate_and_incomplete_semantic_records`
 - `proof_plan_soundness_rejects_obligation_scope_mismatches`
@@ -29,13 +34,24 @@ Focused coverage lives in `tests/v0_16.rs`:
 - `ckb_stdlib_protocol_functions_cover_core_operations`
 - `cli_solve_tx_is_explicitly_template_only`
 
-Run:
+The original 0.17-era command was:
 
 ```bash
 cargo test --locked -p cellscript --test v0_16
 ```
 
-Full branch validation also includes:
+That target no longer exists as a standalone file. For fresh evidence on the
+current line, use the consolidated iCKB/CKB compatibility tests and the unified
+gate:
+
+```bash
+cargo test --locked -p cellscript --test ickb_benchmark
+cargo test --locked -p cellscript --test ckb_compat_runner
+cargo test --locked -p cellscript --test ickb_diff
+./scripts/cellscript_gate.sh dev
+```
+
+Full 0.17 branch validation also included:
 
 ```bash
 cargo fmt --all

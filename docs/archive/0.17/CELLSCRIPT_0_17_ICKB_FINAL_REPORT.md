@@ -1,5 +1,15 @@
 # iCKB CellScript Completeness Benchmark Final Report
 
+> **Historical record.** This report captures the 0.17 release state. Test-file
+> references such as `tests/v0_17.rs` and `tests/v0_16.rs` were accurate at the
+> time of writing; those versioned test files were later consolidated into
+> `tests/ickb_benchmark.rs`, `tests/ickb_diff.rs`, `tests/ckb_compat_runner.rs`,
+> and the compiler's in-crate unit tests across the 0.18-0.21 release lines, so
+> the `cargo test --test v0_17` / `--test v0_16` commands below no longer
+> resolve as standalone targets. The commands are preserved verbatim as a
+> record of the 0.17 evidence run; run the current equivalents listed in
+> `tests/benchmarks/ickb_specs/README.md` for fresh evidence.
+
 ## Executive Summary
 
 CellScript now has **complete iCKB protocol support for the declared executable

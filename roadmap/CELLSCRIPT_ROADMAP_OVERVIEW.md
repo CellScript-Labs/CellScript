@@ -1,7 +1,7 @@
-# CellScript Roadmap: v0.12 -> v0.21
+# CellScript Roadmap: v0.12 -> v0.22
 > From Production Foundation to Protocol Builders
 
-**Updated**: 2026-06-26
+**Updated**: 2026-07-04
 **Status**: Living Document
 **Audience**: CKB Smart Contract Developers
 **Canonical folder**: `roadmap/`
@@ -62,6 +62,12 @@ Each release answers a specific question:
   authenticated compiler evidence, CLI UX reorganisation, dedicated MCP server
   and CellScript programming skills, derived protocol graphs, and audit-visible
   template layout without actorising the core.
+- **v0.22** — *Can theory-guided protocol law become readable and
+  evidence-tiered?* Add callable effect signatures, terminal flow metadata,
+  typed transaction-view handles, bounded source-view quantifiers, bounded
+  cell-collection design, type validity blocks, explicit borrow regions,
+  capability algebra diagnostics, concrete payload ADTs, and ProtocolGraph
+  role UX while keeping the action core intact.
 
 ---
 
@@ -79,6 +85,7 @@ Each release answers a specific question:
 | v0.19 scope | Scope complete for CKB ecosystem reuse, `ckb-std` compatibility, grammar governance, and Phase 1 package/deployment identity registry closure. | [v0.19 roadmap](../docs/archive/0.19/CELLSCRIPT_0_19_ROADMAP.md), [v0.16-0.20 release notes](../docs/releases/CELLSCRIPT_0_16_TO_0_20_RELEASE_NOTES.md) |
 | v0.20 planned scope | Generated Action Builder, live-chain deployment verification, stateful transaction flows, and registry trust hardening. | [v0.20 roadmap](../docs/archive/0.20/CELLSCRIPT_0_20_ROADMAP.md) |
 | v0.21 planned scope | Semantic closure, authenticated compiler evidence, CLI UX reorganisation, dedicated MCP server and CellScript programming skills, derived cyclic ProtocolGraph views, type-level TemplateLayout metadata, and deferred optional template Merkleisation. | [v0.21 roadmap](../docs/CELLSCRIPT_0_21_ROADMAP.md), [v0.21 CLI UX plan](CELLSCRIPT_0_21_CLI_UX_PLAN.md) |
+| v0.22 draft scope | Draft type-theory and set-theory guided language hardening proposal. This scope requires pre-talk soundness fixes and Nervos Talk Discussion before adoption: callable effects for ordinary functions, terminal flow metadata, typed transaction-view handles, finite source-view quantifiers, bounded cell-collection design, type validity blocks, explicit borrow regions, capability algebra explanations, concrete payload ADTs, and ProtocolGraph role UX. | [v0.22 type and set theory roadmap draft](CELLSCRIPT_0_22_TYPE_AND_SET_THEORY_ROADMAP.md) |
 | CKB language fit | CKB-first design is confirmed; remaining hardening areas are signer binding, continuity policy, capacity policy, and declarative time policy. | [CKB target profiles](../docs/wiki/Tutorial-05-CKB-Target-Profiles.md), [production gates](../docs/wiki/Tutorial-06-Metadata-Verification-and-Production-Gates.md) |
 | Surface syntax | Low-risk syntax pass is implemented; authority-sensitive syntax remains staged. | [Surface elegance RFC](../docs/CELLSCRIPT_SURFACE_ELEGANCE_RFC.md) |
 | Collections | Stack-backed fixed-width `Vec<T>` helper surface is implemented; cell-backed and generic map ownership remain fail-closed. | [Collections support matrix](../docs/CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md), [v0.13 release scope](../docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md) |
@@ -100,7 +107,8 @@ Each release answers a specific question:
 | v0.18 | First-Class Script API and Equivalence Closure | "Make ScriptRef/ScriptArgs and remaining iCKB proof prerequisites first-class." | Planning |
 | v0.19 | Package Registry Phase 1 and Adapter Boundary | "Resolve and verify package/build/deployment identity before builders consume it." | Scope complete |
 | v0.20 | Generated Builder and Live Registry Proof | "Turn verified artifacts into valid transactions through registry-bound builders." | In progress: generated TypeScript builders, live registry verification, VS Code commands, and generated-builder tooling-gate checks are active. |
-| v0.21 | Semantic Closure and Authenticated Evidence | "Make declared protocol law executable and tamper-evident without changing the action core." | Planning: aggregate lowering, flow validation, authenticated receipt envelope, CLI UX reorganisation, dedicated MCP server and CellScript programming skills, derived graph view, and TemplateLayout metadata. |
+| v0.21 | Semantic Closure and Authenticated Evidence | "Make declared protocol law executable and tamper-evident without changing the action core." | Implementation checkpoint: RC cut 2026-07-01 as 0.21.0-rc.1; aggregate lowering, flow-edge validation, compile receipts, nested CLI, MCP server + 6 skills, ProtocolGraph view, and TemplateLayout metadata are active; v0.21.0 tag pending. |
+| v0.22 | Theory-Guided Protocol Law | "Make protocol law readable, finite, effect-aware, and evidence-tiered." | Draft: requires pre-talk soundness fixes and Nervos Talk Discussion before adoption; proposed scope covers callable effects, terminal flow metadata, typed transaction-view handles, bounded quantifiers, bounded cell collections, validity blocks, borrow regions, capability algebra, payload ADTs, and ProtocolGraph role UX. |
 
 The roadmap is intentionally cumulative. Later releases should not re-open an
 earlier feature boundary unless the prior boundary was proven unsafe or
