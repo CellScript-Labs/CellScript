@@ -66,10 +66,23 @@ metadata assurance, and CKB target-profile stability.
 
 ## Quick Start
 
-Install from this repository:
+Install a published release (one line, four platform binaries):
 
 ```bash
-cd cellscript
+curl -fsSL https://raw.githubusercontent.com/CellScript-Labs/CellScript/main/scripts/install.sh | sh
+```
+
+Or pin a specific version:
+
+```bash
+CELLSCRIPT_VERSION=0.21.1 curl -fsSL https://raw.githubusercontent.com/CellScript-Labs/CellScript/main/scripts/install.sh | sh
+```
+
+Build from this repository instead (tracks `main`):
+
+```bash
+git clone https://github.com/CellScript-Labs/CellScript.git
+cd CellScript
 cargo install --path .
 ```
 
@@ -450,6 +463,9 @@ or CellFabric intent engine.
 - [0.17 roadmap](docs/archive/0.17/CELLSCRIPT_0_17_ROADMAP.md)
 - [0.18 roadmap](docs/archive/0.18/CELLSCRIPT_0_18_ROADMAP.md)
 - [0.19 roadmap](docs/archive/0.19/CELLSCRIPT_0_19_ROADMAP.md)
+- [0.20 release notes](docs/releases/CELLSCRIPT_0_20_RELEASE_NOTES.md)
+- [0.21 release notes](docs/releases/CELLSCRIPT_0_21_RELEASE_NOTES.md)
+- [Agentic Loops and cellscript-mcp tutorial](docs/wiki/Tutorial-13-Agentic-Loops-and-cellscript-mcp.md)
 
 ---
 
@@ -548,6 +564,7 @@ CKB cycle/capacity estimates.
 | **CLI** | `cli/` + `main.rs` | `cellc` binary with all subcommands |
 | **LSP** | `lsp/` + `lsp/server.rs` | In-process `LspServer` + `tower-lsp` JSON-RPC over stdio (`cellc --lsp`) |
 | **VS Code** | `editors/vscode-cellscript/` | Shells out to `cellc` for LSP startup, reports, action-builder generation, and package/registry verification |
+| **MCP server** | `cellscript-mcp` (separate bin) | Read-only Model Context Protocol JSON-RPC server that exposes compiler reports and explain commands to MCP-aware agents (Claude Code, Cursor, Aider, Codex, etc.) |
 | **Formatter** | `fmt/` | Idempotent formatter for `cellc fmt` and LSP |
 | **Doc generator** | `docgen/` | HTML/Markdown/JSON docs from AST + metadata |
 | **Simulator** | `simulate.rs` | Simulated evaluator — emits `TraceEvent` logs without ckb-vm |
@@ -632,7 +649,7 @@ policy defaults:
 ```toml
 [package]
 name = "token"
-version = "0.21.0"
+version = "0.21.1"
 entry = "src/main.cell"
 source_roots = ["src"]
 
@@ -794,7 +811,9 @@ still fail closed.
 | `--target-profile ckb` | Use the CKB profile |
 | `--entry-action <ACTION>` | Compile a single action as the artifact entrypoint |
 | `--entry-lock <LOCK>` | Compile a single lock as the artifact entrypoint |
-| `--json` | Emit machine-readable summaries where supported |
+| `--json` | Emit machine-readable summaries where supported (successful payloads) |
+| `--message-format=json` | Emit diagnostics as structured JSON (CI / agent loops). Plain output otherwise. |
+| `--color=auto\|always\|never` | Control ANSI colour output. `auto` is the default; `NO_COLOR=1` forces `never` |
 | `--production` | Apply production-oriented metadata policy checks |
 | `--deny-fail-closed` | Reject fail-closed runtime features or obligations |
 | `--deny-ckb-runtime` | Reject CKB transaction/syscall runtime requirements |

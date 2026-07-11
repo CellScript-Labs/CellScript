@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.21.1 - 2026-07-11
+
+- Close the 0.21 README documentation gap that the 0.21.0 changelog entry
+  claimed but did not fully land:
+  - Document the published-release install path
+    (`scripts/install.sh` one-liner, including the `CELLSCRIPT_VERSION`
+    pin) as the recommended way to install `cellc`; keep the source-tree
+    `cargo install --path .` flow as the "tracks main" option.
+  - Add `cellscript-mcp` to the README tooling-surface table so the 0.21
+    agentic-loop surface is discoverable from the project front page.
+  - Add `--message-format=json` and `--color=auto|always|never` to the
+    README CLI options table, matching what `Tutorial-04` and the 0.21
+    release notes already describe.
+  - Add the 0.20 release notes, the 0.21 release notes, and the new
+    `Tutorial-13: Agentic Loops and cellscript-mcp` link to the README
+    docs list (the previous list stopped at 0.19).
+  - Bump the wiki `Home.md` last-updated marker from `0.21.0-rc.1` to
+    `0.21.0` so it matches the published tag.
+- Bump the workspace crate versions (`cellscript`,
+  `cellscript-ckb-adapter`, `cellscript-wasm`) from `0.21.0` to `0.21.1`
+  so `cellc --version` reports the same value as the new release tag.
+- No compiler, runtime, metadata, ABI, or CLI behaviour changes — the
+  patch is documentation + version metadata only. The CKB target profile,
+  the `--primitive-strict 0.16` / `0.17` gates, the xUDT aggregate
+  invariant lowering, the flow edge validation, the CKB adapter
+  resolution, the compile receipts, the `cellscript-mcp` server, and the
+  CLI surface are byte-identical to 0.21.0.
+
 ## 0.21.0 - 2026-07-11
 
 - Promote the common xUDT group amount aggregate invariant shape from
