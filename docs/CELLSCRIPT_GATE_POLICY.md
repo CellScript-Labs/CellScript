@@ -23,6 +23,30 @@ deciding whether a change is ready.
 `release-quick` is kept for `scripts/cellscript_ckb_release_gate.sh quick`.
 Use `release` for any production or external live/devnet claim.
 
+### Nightly 0.22 compiler evidence
+
+The `nightly-0.22` line adds compile-time callable-effect contracts and
+transaction-local terminal-flow evidence. These remain inside the existing gate
+modes; they do not create a new gate command:
+
+- `dev` and `ci` reject underdeclared `fn` effects, including transitive calls
+  through source-authenticated package imports.
+- canonical 0.22 flows use an enum-backed state field, exactly one `initial`
+  state, at least one `terminal` state, and no outgoing terminal edge;
+- terminal discharge is currently only `terminal-by-output-state`, backed by
+  generated state-transition checks and emitted as `checked-runtime` ProofPlan
+  evidence;
+- legacy flows without initial/terminal declarations and numeric state fields
+  remain accepted for migration, but metadata carries explicit audit warnings;
+- none of this metadata proves that every live on-chain Cell eventually reaches
+  a terminal state. `release` still requires exact-artifact and chain evidence
+  before a production claim.
+
+Metadata schema `45` carries declared/inferred/effective function effects and
+the initial, terminal, discharge, state-model, and audit-warning fields for
+flows. Consumers must reject unsupported schema versions instead of silently
+dropping these fields.
+
 ## Command Cheatsheet
 
 ```bash

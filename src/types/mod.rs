@@ -610,6 +610,57 @@ impl<'a> TypeChecker<'a> {
             })?;
 
             let (states, field_enum_type) = self.flow_states_for_decl(machine, field_ty)?;
+            let has_terminal_contract = !machine.initial_states.is_empty() || !machine.terminal_states.is_empty();
+            let (_initial_state, terminal_states) = if has_terminal_contract {
+                if machine.initial_states.len() != 1 {
+                    return Err(CompileError::new(
+                        format!(
+                            "flow '{}.{}' must declare exactly one initial state; found {}",
+                            type_name,
+                            field_name,
+                            machine.initial_states.len()
+                        ),
+                        machine.span,
+                    ));
+                }
+                if machine.terminal_states.is_empty() {
+                    return Err(CompileError::new(
+                        format!("flow '{}.{}' must declare at least one terminal state", type_name, field_name),
+                        machine.span,
+                    ));
+                }
+                let initial = self.canonical_state_name_for_flow(
+                    &type_name,
+                    field_enum_type.as_deref(),
+                    &states,
+                    &machine.initial_states[0],
+                    machine.span,
+                )?;
+                let mut terminals = Vec::new();
+                for raw_terminal in &machine.terminal_states {
+                    let terminal = self.canonical_state_name_for_flow(
+                        &type_name,
+                        field_enum_type.as_deref(),
+                        &states,
+                        raw_terminal,
+                        machine.span,
+                    )?;
+                    if !terminals.iter().any(|existing| existing == &terminal) {
+                        terminals.push(terminal);
+                    } else {
+                        return Err(CompileError::new(format!("duplicate terminal state '{}'", terminal), machine.span));
+                    }
+                }
+                if terminals.iter().any(|terminal| terminal == &initial) {
+                    return Err(CompileError::new(
+                        format!("flow state '{}' cannot be both initial and terminal", initial),
+                        machine.span,
+                    ));
+                }
+                (Some(initial), terminals)
+            } else {
+                (None, Vec::new())
+            };
             let mut seen_transitions = HashSet::new();
             let mut normalized_transitions = Vec::new();
             for transition in &machine.transitions {
@@ -632,6 +683,12 @@ impl<'a> TypeChecker<'a> {
                 }
                 if !seen_transitions.insert((from.clone(), to.clone())) {
                     return Err(CompileError::new(format!("duplicate state transition '{} -> {}'", from, to), transition.span));
+                }
+                if terminal_states.iter().any(|terminal| terminal == &from) {
+                    return Err(CompileError::new(
+                        format!("terminal state '{}' cannot have an outgoing transition", from),
+                        transition.span,
+                    ));
                 }
                 if let Some(action) = &transition.action {
                     match self.functions.get(action) {
@@ -4025,7 +4082,7 @@ impl<'a> TypeChecker<'a> {
             && !matches!(self.current_callable, Some(CallableKind::Action | CallableKind::Lock))
         {
             return Err(CompileError::new(
-                "require/preserve is verifier-boundary syntax for actions and locks; use ordinary boolean expressions inside pure functions",
+                "require/preserve is verifier-boundary syntax for actions and locks; use ordinary boolean expressions inside functions",
                 expr_span(expr),
             ));
         }
@@ -4050,15 +4107,6 @@ impl<'a> TypeChecker<'a> {
         };
 
         match (self.current_callable, operation) {
-            (Some(CallableKind::Function), Some(operation)) => {
-                return Err(CompileError::new(
-                    format!(
-                        "pure function cannot contain '{}' Cell/runtime operation; move state transition logic into an action",
-                        operation
-                    ),
-                    expr_span(expr),
-                ));
-            }
             (Some(CallableKind::Lock), Some(operation)) if operation != "read_ref" => {
                 return Err(CompileError::new(
                     format!("lock cannot contain '{}' Cell state transition; move state transition logic into an action", operation),
@@ -4072,46 +4120,8 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn validate_runtime_call_allowed_in_current_callable(&self, call: &CallExpr) -> Result<()> {
-        if self.current_callable != Some(CallableKind::Function) {
-            return Ok(());
-        }
-
-        match call.func.as_ref() {
-            Expr::Identifier(name)
-                if name.starts_with("env::")
-                    || name.starts_with("ckb::")
-                    || name.starts_with("source::")
-                    || name.starts_with("dao::")
-                    || name.starts_with("xudt::")
-                    || name.starts_with("witness::")
-                    || name.starts_with("script::require_")
-                    || matches!(
-                        name.as_str(),
-                        "spawn"
-                            | "pipe"
-                            | "pipe_write"
-                            | "pipe_read"
-                            | "wait"
-                            | "process_id"
-                            | "inherited_fd"
-                            | "close"
-                            | "require_maturity"
-                            | "require_time"
-                            | "require_epoch_after"
-                            | "require_epoch_relative"
-                    ) =>
-            {
-                Err(CompileError::new(
-                    format!("pure function cannot call '{}' runtime builtin; move runtime-dependent logic into an action", name),
-                    call.span,
-                ))
-            }
-            Expr::FieldAccess(field) if field.field == "type_hash" => Err(CompileError::new(
-                "pure function cannot call 'type_hash' Cell identity builtin; move Cell identity logic into an action",
-                call.span,
-            )),
-            _ => Ok(()),
-        }
+        let _ = call;
+        Ok(())
     }
 
     fn initializer_types_equal(&self, actual: &Type, expected: &Type) -> bool {
@@ -5876,12 +5886,8 @@ impl<'a> TypeChecker<'a> {
 
     fn validate_call_allowed(&self, callee_name: &str, callee_kind: CallableKind, span: Span) -> Result<()> {
         match (self.current_callable, callee_kind) {
-            (Some(CallableKind::Function), CallableKind::Action) => Err(CompileError::new(
-                format!("pure function cannot call action '{}'; move state transition logic into an action", callee_name),
-                span,
-            )),
             (Some(CallableKind::Function), CallableKind::Lock) => {
-                Err(CompileError::new(format!("pure function cannot call lock '{}'", callee_name), span))
+                Err(CompileError::new(format!("function cannot call lock '{}'", callee_name), span))
             }
             (Some(CallableKind::Lock), CallableKind::Action) => {
                 Err(CompileError::new(format!("lock cannot call action '{}'", callee_name), span))

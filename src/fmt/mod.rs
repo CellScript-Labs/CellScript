@@ -175,6 +175,15 @@ impl Formatter {
         };
         self.push_line(&header);
         self.indent_level += 1;
+        if !machine.initial_states.is_empty() {
+            self.push_line(&format!("initial {};", machine.initial_states.join(", ")));
+        }
+        if !machine.terminal_states.is_empty() {
+            self.push_line(&format!("terminal {};", machine.terminal_states.join(", ")));
+        }
+        if (!machine.initial_states.is_empty() || !machine.terminal_states.is_empty()) && !machine.transitions.is_empty() {
+            self.push_line("");
+        }
         for transition in &machine.transitions {
             let mut line = format!("{} -> {}", transition.from, transition.to);
             if let Some(action) = &transition.action {
@@ -339,6 +348,9 @@ impl Formatter {
             for line in doc.lines() {
                 self.push_line(&format!("/// {}", line));
             }
+        }
+        if function.effect_declared {
+            self.push_line(&format!("#[effect({})]", function.effect.as_str()));
         }
 
         let params = function.params.iter().map(format_param).collect::<Vec<_>>().join(", ");

@@ -129,6 +129,8 @@ pub struct StateTransition {
 pub struct FlowDef {
     pub name: Option<String>,
     pub target: StateFieldPath,
+    pub initial_states: Vec<String>,
+    pub terminal_states: Vec<String>,
     pub transitions: Vec<StateTransition>,
     pub span: Span,
 }
@@ -282,6 +284,8 @@ pub struct FnDef {
     pub params: Vec<Param>,
     pub return_type: Option<Type>,
     pub body: Vec<Stmt>,
+    pub effect: EffectClass,
+    pub effect_declared: bool,
     pub doc_comment: Option<String>,
     pub span: Span,
 }
@@ -713,6 +717,18 @@ pub enum EffectClass {
     Mutating,
     Creating,
     Destroying,
+}
+
+impl EffectClass {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Pure => "Pure",
+            Self::ReadOnly => "ReadOnly",
+            Self::Mutating => "Mutating",
+            Self::Creating => "Creating",
+            Self::Destroying => "Destroying",
+        }
+    }
 }
 
 /// Stdlib call expression: `std::namespace::name(args)` or `std::namespace::name(args) { field1, field2 }`

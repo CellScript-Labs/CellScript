@@ -1343,7 +1343,12 @@ impl LspServer {
                 range: Some(range),
             }),
             Item::Function(f) => Some(Hover {
-                contents: format!("```cellscript\nfn {}\n```\n\n{}", f.name, f.doc_comment.as_deref().unwrap_or("No documentation")),
+                contents: format!(
+                    "```cellscript\nfn {}\n```\n\n{}{}",
+                    f.name,
+                    f.doc_comment.as_deref().unwrap_or("No documentation"),
+                    function_metadata_hover(&f.name, f, metadata)
+                ),
                 range: Some(range),
             }),
             Item::Lock(l) => Some(Hover { contents: format!("```cellscript\nlock {}\n```", l.name), range: Some(range) }),
@@ -2193,7 +2198,15 @@ fn receipt_flow_hover(receipt: &ReceiptDef, metadata: Option<&crate::CompileMeta
         };
 
         return format!(
-            "\n\n**Flow metadata**\n\nStates: `{}`\n\nTransitions: `{}`",
+            "\n\n**Flow metadata**\n\nState model: `{}`\n\nInitial: `{}`\n\nTerminals: `{}`\n\nTerminal discharge: `{}`\n\nStates: `{}`\n\nTransitions: `{}`",
+            type_metadata.flow_state_model.as_deref().unwrap_or("unspecified"),
+            type_metadata.flow_initial_state.as_deref().unwrap_or("legacy-undeclared"),
+            if type_metadata.flow_terminal_states.is_empty() {
+                "legacy-undeclared".to_string()
+            } else {
+                type_metadata.flow_terminal_states.join(", ")
+            },
+            type_metadata.flow_terminal_discharge.as_deref().unwrap_or("legacy-undeclared"),
             type_metadata.flow_states.join(" -> "),
             transitions
         );
@@ -2248,6 +2261,24 @@ fn action_metadata_hover(name: &str, metadata: Option<&crate::CompileMetadata>) 
         accesses,
         obligations
     )
+}
+
+fn function_metadata_hover(name: &str, function: &FnDef, metadata: Option<&crate::CompileMetadata>) -> String {
+    if let Some(metadata) = metadata {
+        if let Some(function_metadata) = metadata.functions.iter().find(|candidate| candidate.name == name) {
+            let declared = function_metadata.declared_effect_class.as_deref().unwrap_or("inferred");
+            return format!(
+                "\n\n**Effect metadata**\n\nDeclared: `{}`\n\nInferred: `{}`\n\nEffective: `{}`",
+                declared, function_metadata.inferred_effect_class, function_metadata.effect_class
+            );
+        }
+    }
+
+    if function.effect_declared {
+        format!("\n\n**Declared effect**: `{}`", function.effect.as_str())
+    } else {
+        "\n\n**Effect**: inferred from the transitive call graph".to_string()
+    }
 }
 
 fn position_to_offset(source: &str, position: Position) -> Option<usize> {

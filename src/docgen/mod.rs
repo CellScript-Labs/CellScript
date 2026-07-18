@@ -852,7 +852,10 @@ fn item_doc(item: &Item) -> Option<ItemDoc> {
                 format!("flow {}.{}", machine.target.base, machine.target.field)
             },
             summary: format!(
-                "Transitions: {}",
+                "Initial: {}. Terminals: {}. Discharge: {}. Transitions: {}",
+                machine.initial_states.first().map(String::as_str).unwrap_or("legacy-undeclared"),
+                comma_or_none(&machine.terminal_states),
+                if machine.terminal_states.is_empty() { "legacy-undeclared" } else { "terminal-by-output-state" },
                 machine
                     .transitions
                     .iter()
@@ -916,7 +919,13 @@ fn item_doc(item: &Item) -> Option<ItemDoc> {
             kind: "fn".to_string(),
             name: function.name.clone(),
             signature: function_signature(function),
-            summary: function.doc_comment.clone().unwrap_or_else(|| "Pure helper function.".to_string()),
+            summary: function.doc_comment.clone().unwrap_or_else(|| {
+                if function.effect_declared {
+                    format!("Declared effect: {}.", function.effect.as_str())
+                } else {
+                    "Effect inferred from the transitive call graph.".to_string()
+                }
+            }),
         }),
         Item::Lock(lock) => Some(ItemDoc {
             kind: "lock".to_string(),
@@ -945,7 +954,11 @@ fn action_signature(keyword: &str, action: &ActionDef) -> String {
 
 fn function_signature(function: &FnDef) -> String {
     let params = function.params.iter().map(format_param).collect::<Vec<_>>().join(", ");
-    let mut signature = format!("fn {}({})", function.name, params);
+    let mut signature = if function.effect_declared {
+        format!("#[effect({})] fn {}({})", function.effect.as_str(), function.name, params)
+    } else {
+        format!("fn {}({})", function.name, params)
+    };
     if let Some(return_type) = &function.return_type {
         signature.push_str(&format!(" -> {}", format_type(return_type)));
     }

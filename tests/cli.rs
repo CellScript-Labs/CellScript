@@ -355,7 +355,7 @@ fn cellc_explain_graph_reports_cyclic_protocol_view() {
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
 
     let graph: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(graph["schema"], "cellscript-protocol-graph-v0.21");
+    assert_eq!(graph["schema"], "cellscript-protocol-graph-v0.22");
     assert_eq!(graph["derivation"], "derived-from-compile-metadata");
     assert_eq!(graph["consensus_checked"], false);
     assert_eq!(graph["cycle_detected"], true);
@@ -412,7 +412,7 @@ fn cellc_audit_bundle_embeds_protocol_graph() {
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
 
     let bundle: serde_json::Value = serde_json::from_slice(&std::fs::read(output_dir.join("audit-bundle.json")).unwrap()).unwrap();
-    assert_eq!(bundle["protocol_graph"]["schema"], "cellscript-protocol-graph-v0.21");
+    assert_eq!(bundle["protocol_graph"]["schema"], "cellscript-protocol-graph-v0.22");
     assert_eq!(bundle["protocol_graph"]["cycle_detected"], true);
     assert_eq!(bundle["template_layouts"][0]["schema"], "cellscript-template-layout-v0.21");
     assert_eq!(bundle["template_layouts"][0]["type_name"], "Pool");
@@ -494,7 +494,7 @@ fn cellc_audit_bundle_marks_cyclic_flow_type_as_root_required() {
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
 
     let bundle: serde_json::Value = serde_json::from_slice(&std::fs::read(output_dir.join("audit-bundle.json")).unwrap()).unwrap();
-    assert_eq!(bundle["protocol_graph"]["schema"], "cellscript-protocol-graph-v0.21");
+    assert_eq!(bundle["protocol_graph"]["schema"], "cellscript-protocol-graph-v0.22");
     assert_eq!(bundle["protocol_graph"]["cycle_detected"], true);
     let cyclic_layout = bundle["template_layouts"]
         .as_array()
@@ -7515,6 +7515,9 @@ enum AssetType {
 }
 
 flow SwapLock.state {
+    initial Pending;
+    terminal Claimed, Refunded;
+
     Pending -> Claimed;
     Pending -> Refunded;
 }
@@ -7594,8 +7597,18 @@ target_profile = "ckb"
     let graph = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).args(["explain", "graph"]).arg("--json").output().unwrap();
     assert!(graph.status.success(), "{}", String::from_utf8_lossy(&graph.stderr));
     let graph_json: serde_json::Value = serde_json::from_slice(&graph.stdout).unwrap();
-    assert_eq!(graph_json["schema"], "cellscript-protocol-graph-v0.21");
+    assert_eq!(graph_json["schema"], "cellscript-protocol-graph-v0.22");
     assert_eq!(graph_json["consensus_checked"], false);
+    assert!(graph_json["vertices"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|vertex| { vertex["id"] == "SwapLock:Pending" && vertex["initial"] == true && vertex["terminal"] == false }));
+    assert!(graph_json["vertices"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|vertex| { vertex["id"] == "SwapLock:Claimed" && vertex["initial"] == false && vertex["terminal"] == true }));
     assert!(
         graph_json["edges"].as_array().unwrap().iter().any(|edge| {
             edge["action_name"] == "claim_with_preimage"
@@ -7618,7 +7631,7 @@ target_profile = "ckb"
     assert!(audit.status.success(), "{}", String::from_utf8_lossy(&audit.stderr));
     let bundle: serde_json::Value =
         serde_json::from_slice(&std::fs::read(root.join("audit").join("audit-bundle.json")).unwrap()).unwrap();
-    assert_eq!(bundle["protocol_graph"]["schema"], "cellscript-protocol-graph-v0.21");
+    assert_eq!(bundle["protocol_graph"]["schema"], "cellscript-protocol-graph-v0.22");
     assert!(bundle["template_layouts"].as_array().unwrap().iter().any(|layout| {
         layout["schema"] == "cellscript-template-layout-v0.21"
             && layout["type_name"] == "SwapLock"
@@ -7761,7 +7774,7 @@ action execute_proposal(proposal_before: Proposal, read config: DaoConfig, curre
     assert!(audit.status.success(), "{}", String::from_utf8_lossy(&audit.stderr));
     let bundle: serde_json::Value =
         serde_json::from_slice(&std::fs::read(root.join("audit").join("audit-bundle.json")).unwrap()).unwrap();
-    assert_eq!(bundle["protocol_graph"]["schema"], "cellscript-protocol-graph-v0.21");
+    assert_eq!(bundle["protocol_graph"]["schema"], "cellscript-protocol-graph-v0.22");
     // The audit bundle must carry the Active -> Executed and Active -> Defeated edges.
     let edges = bundle["protocol_graph"]["edges"].as_array().unwrap();
     assert!(
@@ -7878,7 +7891,7 @@ fn cellc_cross_module_launch_composition_distributes_correctly() {
     assert!(audit.status.success(), "{}", String::from_utf8_lossy(&audit.stderr));
     let bundle: serde_json::Value =
         serde_json::from_slice(&std::fs::read(audit_dir.path().join("audit-bundle.json")).unwrap()).unwrap();
-    assert_eq!(bundle["protocol_graph"]["schema"], "cellscript-protocol-graph-v0.21");
+    assert_eq!(bundle["protocol_graph"]["schema"], "cellscript-protocol-graph-v0.22");
 }
 
 #[test]

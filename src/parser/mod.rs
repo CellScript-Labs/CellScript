@@ -508,7 +508,10 @@ impl<'a> Parser<'a> {
             }
             TokenKind::Fn => {
                 self.reject_type_id_attr(&attrs)?;
-                Ok(Item::Function(self.parse_fn()?))
+                if attrs.capabilities.is_some() || attrs.scheduler_hint.is_some() {
+                    return Err(CompileError::new("fn definitions only accept the #[effect(...)] attribute", self.current().span));
+                }
+                Ok(Item::Function(self.parse_fn(attrs.effect)?))
             }
             TokenKind::Lock => {
                 self.reject_type_id_attr(&attrs)?;
@@ -751,8 +754,24 @@ impl<'a> Parser<'a> {
         self.expect(TokenKind::LBrace)?;
         self.skip_newlines();
 
+        let mut initial_states = Vec::new();
+        let mut terminal_states = Vec::new();
         let mut transitions = Vec::new();
         while !self.check(&TokenKind::RBrace) && !self.check(&TokenKind::Eof) {
+            if self.current_identifier().as_deref() == Some("initial") {
+                self.advance();
+                initial_states.extend(self.parse_flow_state_list("initial")?);
+                self.expect(TokenKind::Semi)?;
+                self.skip_newlines();
+                continue;
+            }
+            if self.current_identifier().as_deref() == Some("terminal") {
+                self.advance();
+                terminal_states.extend(self.parse_flow_state_list("terminal")?);
+                self.expect(TokenKind::Semi)?;
+                self.skip_newlines();
+                continue;
+            }
             let transition_start = self.current().span;
             let from = self.parse_name_path()?;
             self.expect(TokenKind::Arrow)?;
@@ -781,7 +800,30 @@ impl<'a> Parser<'a> {
         self.consume_optional_semi();
 
         let end_span = self.current().span;
-        Ok(FlowDef { name, target, transitions, span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column) })
+        Ok(FlowDef {
+            name,
+            target,
+            initial_states,
+            terminal_states,
+            transitions,
+            span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
+        })
+    }
+
+    fn parse_flow_state_list(&mut self, declaration: &str) -> Result<Vec<String>> {
+        let mut states = Vec::new();
+        while !self.check(&TokenKind::Semi) && !self.check(&TokenKind::Eof) {
+            states.push(self.parse_name_path()?);
+            if self.check(&TokenKind::Comma) {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+        if states.is_empty() {
+            return Err(CompileError::new(format!("{} declaration must name at least one state", declaration), self.current().span));
+        }
+        Ok(states)
     }
 
     fn parse_state_field_path(&mut self) -> Result<StateFieldPath> {
@@ -1650,7 +1692,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_fn(&mut self) -> Result<FnDef> {
+    fn parse_fn(&mut self, effect: Option<EffectClass>) -> Result<FnDef> {
         let start_span = self.current().span;
         self.expect(TokenKind::Fn)?;
 
@@ -1670,6 +1712,8 @@ impl<'a> Parser<'a> {
             params,
             return_type,
             body,
+            effect: effect.unwrap_or(EffectClass::Pure),
+            effect_declared: effect.is_some(),
             doc_comment: None,
             span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
         })
@@ -3306,11 +3350,33 @@ action mint(amount: u64) -> token: Token {
     }
 
     #[test]
+    fn parses_function_effect_attribute() {
+        let input = r#"
+module test
+
+#[effect(ReadOnly)]
+fn inspect(value: &u64) -> u64 {
+    return *value
+}
+"#;
+        let tokens = lex(input).unwrap();
+        let module = parse(&tokens).unwrap();
+        let Item::Function(function) = &module.items[0] else {
+            panic!("expected function");
+        };
+        assert!(function.effect_declared);
+        assert_eq!(function.effect, EffectClass::ReadOnly);
+    }
+
+    #[test]
     fn test_parse_flow_and_action_transition_clause() {
         let input = r#"
 module test
 
 flow OfferFlow for Offer.state {
+    initial Created;
+    terminal Filled;
+
     Created -> Live by publish;
     Live -> Filled by accept;
 }
@@ -3324,6 +3390,11 @@ flow OfferFlow for Offer.state {
         let tokens = lex(input).unwrap();
         let module = parse(&tokens).unwrap();
         assert!(matches!(&module.items[0], Item::Flow(machine) if machine.name.as_deref() == Some("OfferFlow")));
+        let Item::Flow(machine) = &module.items[0] else {
+            panic!("expected flow");
+        };
+        assert_eq!(machine.initial_states, vec!["Created"]);
+        assert_eq!(machine.terminal_states, vec!["Filled"]);
         let Item::Action(action) = &module.items[1] else {
             panic!("expected action");
         };

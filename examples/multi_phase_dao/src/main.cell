@@ -13,9 +13,16 @@ shared DaoConfig has store, create, read_ref {
     quorum_bps: u64,
 }
 
+enum ProposalState {
+    Draft,
+    Active,
+    Executed,
+    Defeated,
+}
+
 receipt Proposal has store, create, consume {
     proposal_id: Hash,
-    state: u8,
+    state: ProposalState,
     proposer: Address,
     for_votes: u64,
     against_votes: u64,
@@ -39,6 +46,9 @@ receipt ExecutionRecord has create {
 }
 
 flow Proposal.state {
+    initial Draft;
+    terminal Executed, Defeated;
+
     Draft -> Active;
     Active -> Executed;
     Active -> Defeated;
@@ -54,7 +64,7 @@ action propose(
     verification
         require voting_duration > 0, "zero voting duration"
         let now = env::current_timepoint()
-        create proposal = Proposal { proposal_id, state: Draft, proposer, for_votes: 0, against_votes: 0, start_timepoint: now, end_timepoint: now + voting_duration, execution_payload_hash } with_lock(proposer)
+        create proposal = Proposal { proposal_id, state: ProposalState::Draft, proposer, for_votes: 0, against_votes: 0, start_timepoint: now, end_timepoint: now + voting_duration, execution_payload_hash } with_lock(proposer)
 
 }
 
@@ -64,7 +74,7 @@ action activate_proposal(
 ) -> proposal_after: Proposal {
     transition proposal_before.state: Draft -> proposal_after.state: Active
     verification
-        require proposal_before.state == Proposal::Draft, "not draft"
+        require proposal_before.state == ProposalState::Draft, "not draft"
         require current_timepoint >= proposal_before.start_timepoint, "not started"
         preserve proposal_after from proposal_before {
             proposal_id
@@ -74,10 +84,10 @@ action activate_proposal(
             end_timepoint
             execution_payload_hash
         }
-        require proposal_after.state == Proposal::Active
+        require proposal_after.state == ProposalState::Active
         require proposal_after.start_timepoint == current_timepoint
         consume proposal_before
-        create proposal_after = Proposal { proposal_id: proposal_before.proposal_id, state: Proposal::Active, proposer: proposal_before.proposer, for_votes: proposal_before.for_votes, against_votes: proposal_before.against_votes, start_timepoint: current_timepoint, end_timepoint: proposal_before.end_timepoint, execution_payload_hash: proposal_before.execution_payload_hash } with_lock(proposal_before.proposer)
+        create proposal_after = Proposal { proposal_id: proposal_before.proposal_id, state: ProposalState::Active, proposer: proposal_before.proposer, for_votes: proposal_before.for_votes, against_votes: proposal_before.against_votes, start_timepoint: current_timepoint, end_timepoint: proposal_before.end_timepoint, execution_payload_hash: proposal_before.execution_payload_hash } with_lock(proposal_before.proposer)
 
 }
 
@@ -89,7 +99,7 @@ action cast_vote(
     current_timepoint: u64,
 ) -> (vote: VoteReceipt) {
     verification
-        require proposal.state == Proposal::Active, "proposal not active"
+        require proposal.state == ProposalState::Active, "proposal not active"
         require current_timepoint < proposal.end_timepoint, "voting closed"
         require voting_token.amount > 0, "zero weight"
         consume voting_token
@@ -104,7 +114,7 @@ action execute_proposal(
 ) -> (proposal_after: Proposal, record: ExecutionRecord) {
     transition proposal_before.state: Active -> proposal_after.state: Executed
     verification
-        require proposal_before.state == Proposal::Active, "not active"
+        require proposal_before.state == ProposalState::Active, "not active"
         require current_timepoint >= proposal_before.end_timepoint, "voting not closed"
         let total_votes = proposal_before.for_votes + proposal_before.against_votes
         require total_votes > 0, "no votes cast"
@@ -120,9 +130,9 @@ action execute_proposal(
             end_timepoint
             execution_payload_hash
         }
-        require proposal_after.state == Proposal::Executed
+        require proposal_after.state == ProposalState::Executed
         consume proposal_before
-        create proposal_after = Proposal { proposal_id: proposal_before.proposal_id, state: Proposal::Executed, proposer: proposal_before.proposer, for_votes: proposal_before.for_votes, against_votes: proposal_before.against_votes, start_timepoint: proposal_before.start_timepoint, end_timepoint: proposal_before.end_timepoint, execution_payload_hash: proposal_before.execution_payload_hash } with_lock(proposal_before.proposer)
+        create proposal_after = Proposal { proposal_id: proposal_before.proposal_id, state: ProposalState::Executed, proposer: proposal_before.proposer, for_votes: proposal_before.for_votes, against_votes: proposal_before.against_votes, start_timepoint: proposal_before.start_timepoint, end_timepoint: proposal_before.end_timepoint, execution_payload_hash: proposal_before.execution_payload_hash } with_lock(proposal_before.proposer)
         create record = ExecutionRecord { proposal_id: proposal_before.proposal_id, executed_at: current_timepoint, for_votes: proposal_before.for_votes, against_votes: proposal_before.against_votes }
 
 }
@@ -133,7 +143,7 @@ action defeat_proposal(
 ) -> proposal_after: Proposal {
     transition proposal_before.state: Active -> proposal_after.state: Defeated
     verification
-        require proposal_before.state == Proposal::Active, "not active"
+        require proposal_before.state == ProposalState::Active, "not active"
         require current_timepoint >= proposal_before.end_timepoint, "voting not closed"
         require proposal_before.for_votes <= proposal_before.against_votes, "still passing"
         preserve proposal_after from proposal_before {
@@ -145,14 +155,14 @@ action defeat_proposal(
             end_timepoint
             execution_payload_hash
         }
-        require proposal_after.state == Proposal::Defeated
+        require proposal_after.state == ProposalState::Defeated
         consume proposal_before
-        create proposal_after = Proposal { proposal_id: proposal_before.proposal_id, state: Proposal::Defeated, proposer: proposal_before.proposer, for_votes: proposal_before.for_votes, against_votes: proposal_before.against_votes, start_timepoint: proposal_before.start_timepoint, end_timepoint: proposal_before.end_timepoint, execution_payload_hash: proposal_before.execution_payload_hash } with_lock(proposal_before.proposer)
+        create proposal_after = Proposal { proposal_id: proposal_before.proposal_id, state: ProposalState::Defeated, proposer: proposal_before.proposer, for_votes: proposal_before.for_votes, against_votes: proposal_before.against_votes, start_timepoint: proposal_before.start_timepoint, end_timepoint: proposal_before.end_timepoint, execution_payload_hash: proposal_before.execution_payload_hash } with_lock(proposal_before.proposer)
 
 }
 
 fn proposal_is_active(proposal: &Proposal) -> bool {
-    proposal.state == Proposal::Active
+    proposal.state == ProposalState::Active
 }
 
 lock dao_admin(protected config: DaoConfig, witness claimed_admin: Address) -> bool {

@@ -8986,6 +8986,8 @@ fn protocol_graph_json(metadata: &CompileMetadata) -> serde_json::Value {
                 Some(&ty.name),
                 None,
                 false,
+                false,
+                false,
             );
         } else {
             for state in &ty.flow_states {
@@ -8997,6 +8999,8 @@ fn protocol_graph_json(metadata: &CompileMetadata) -> serde_json::Value {
                     Some(&ty.name),
                     Some(state),
                     false,
+                    ty.flow_initial_state.as_deref() == Some(state.as_str()),
+                    ty.flow_terminal_states.iter().any(|terminal| terminal == state),
                 );
             }
         }
@@ -9054,7 +9058,7 @@ fn protocol_graph_json(metadata: &CompileMetadata) -> serde_json::Value {
 
     serde_json::json!({
         "status": "ok",
-        "schema": "cellscript-protocol-graph-v0.21",
+        "schema": "cellscript-protocol-graph-v0.22",
         "derivation": "derived-from-compile-metadata",
         "consensus_checked": false,
         "module": metadata.module,
@@ -9076,6 +9080,8 @@ fn protocol_graph_insert_vertex(
     type_name: Option<&str>,
     state: Option<&str>,
     synthetic: bool,
+    initial: bool,
+    terminal: bool,
 ) {
     vertices.entry(id.clone()).or_insert_with(|| {
         serde_json::json!({
@@ -9085,6 +9091,8 @@ fn protocol_graph_insert_vertex(
             "type_name": type_name,
             "state": state,
             "synthetic": synthetic,
+            "initial": initial,
+            "terminal": terminal,
         })
     });
 }
@@ -9098,7 +9106,7 @@ fn protocol_graph_ensure_vertex(vertices: &mut BTreeMap<String, serde_json::Valu
         "transaction:end" => ("transaction end", "transaction-boundary"),
         other => (other, "type"),
     };
-    protocol_graph_insert_vertex(vertices, id.to_string(), label, kind, None, None, true);
+    protocol_graph_insert_vertex(vertices, id.to_string(), label, kind, None, None, true, false, false);
 }
 
 fn protocol_graph_push_edge(
@@ -9244,7 +9252,16 @@ fn protocol_graph_mermaid(graph: &serde_json::Value) -> String {
             let label = vertex.get("label").and_then(serde_json::Value::as_str).unwrap_or(id);
             let mermaid_id = format!("v{}", index);
             ids.insert(id.to_string(), mermaid_id.clone());
-            output.push_str(&format!("  {}[\"{}\"]\n", mermaid_id, protocol_graph_mermaid_escape(label)));
+            let initial = vertex.get("initial").and_then(serde_json::Value::as_bool).unwrap_or(false);
+            let terminal = vertex.get("terminal").and_then(serde_json::Value::as_bool).unwrap_or(false);
+            let escaped = protocol_graph_mermaid_escape(label);
+            if initial {
+                output.push_str(&format!("  {}((\"{}\"))\n", mermaid_id, escaped));
+            } else if terminal {
+                output.push_str(&format!("  {}[[\"{}\"]]\n", mermaid_id, escaped));
+            } else {
+                output.push_str(&format!("  {}[\"{}\"]\n", mermaid_id, escaped));
+            }
         }
     }
     if let Some(edges) = graph.get("edges").and_then(serde_json::Value::as_array) {

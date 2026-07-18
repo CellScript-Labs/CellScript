@@ -222,6 +222,51 @@ ProofPlan coverage states are intentionally explicit:
 For the review-finding closure matrix, see
 `docs/archive/0.17/CELLSCRIPT_0_17_REVIEW_FINDINGS_CLOSURE.md`.
 
+## Nightly 0.22 Effect And Terminal Evidence
+
+Function helpers can now publish the same stable effect contract as actions:
+
+```cellscript
+#[effect(ReadOnly)]
+fn read_threshold(config: &Config) -> u64 {
+    config.threshold
+}
+```
+
+Function metadata distinguishes `declared_effect_class`,
+`inferred_effect_class`, and the effective `effect_class`. The compiler walks
+the call graph transitively and recomputes imported helpers from loaded package
+source. An imported `#[effect(Pure)] fn` that wraps a creating or mutating
+action is rejected; the attribute is not treated as an unauthenticated promise.
+
+Canonical terminal flows use enum-backed states:
+
+```cellscript
+flow SwapLock.state {
+    initial Pending;
+    terminal Claimed, Refunded;
+
+    Pending -> Claimed;
+    Pending -> Refunded;
+}
+```
+
+Inspect these type metadata fields together:
+
+- `flow_initial_state` and `flow_terminal_states` describe the local state
+  contract;
+- `flow_terminal_discharge = terminal-by-output-state` identifies the only
+  implemented 0.22 discharge model;
+- `flow_state_model = enum-backed` distinguishes the canonical surface from
+  migration-only numeric flows;
+- `flow_audit_warnings` reports legacy declarations or an initial state with no
+  outgoing edge.
+
+An action edge that reaches a declared terminal emits a `flow-terminal` /
+`terminal-by-output-state` verifier obligation and matching ProofPlan record.
+That record proves the selected transaction's output-state check. It is not a
+global liveness, chain inclusion, capacity, or eventual-termination proof.
+
 ## Suggested Compiler CI Gate
 
 For CKB packages, a useful compiler CI gate is:

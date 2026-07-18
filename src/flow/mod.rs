@@ -39,6 +39,40 @@ pub fn diagnostics(module: &Module) -> Vec<CompileError> {
         let Item::Flow(machine) = item else {
             continue;
         };
+        let has_terminal_contract = !machine.initial_states.is_empty() || !machine.terminal_states.is_empty();
+        if has_terminal_contract {
+            if machine.initial_states.len() != 1 {
+                diagnostics.push(CompileError::new(
+                    format!("flow must declare exactly one initial state; found {}", machine.initial_states.len()),
+                    machine.span,
+                ));
+                continue;
+            }
+            if machine.terminal_states.is_empty() {
+                diagnostics.push(CompileError::new("flow must declare at least one terminal state", machine.span));
+                continue;
+            }
+            let initial = normalise_flow_state_name(&machine.initial_states[0]);
+            let terminals = machine.terminal_states.iter().map(|state| normalise_flow_state_name(state)).collect::<HashSet<_>>();
+            if terminals.len() != machine.terminal_states.len() {
+                diagnostics.push(CompileError::new("flow contains duplicate terminal states", machine.span));
+                continue;
+            }
+            if terminals.contains(&initial) {
+                diagnostics
+                    .push(CompileError::new(format!("flow state '{}' cannot be both initial and terminal", initial), machine.span));
+                continue;
+            }
+            if let Some(transition) =
+                machine.transitions.iter().find(|transition| terminals.contains(&normalise_flow_state_name(&transition.from)))
+            {
+                diagnostics.push(CompileError::new(
+                    format!("terminal state '{}' cannot have an outgoing transition", normalise_flow_state_name(&transition.from)),
+                    transition.span,
+                ));
+                continue;
+            }
+        }
         let mut states = Vec::new();
         let mut edges = HashSet::new();
         for transition in &machine.transitions {

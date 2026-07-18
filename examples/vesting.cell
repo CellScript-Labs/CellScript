@@ -10,8 +10,14 @@ shared VestingConfig has store, create, read_ref {
     revocable: bool,
 }
 
+enum VestingState {
+    Granted,
+    Claimable,
+    FullyClaimed,
+}
+
 receipt VestingGrant has store, create, consume {
-    state: u8,
+    state: VestingState,
     beneficiary: Address,
     total_amount: u64,
     claimed_amount: u64,
@@ -22,6 +28,9 @@ receipt VestingGrant has store, create, consume {
 }
 
 flow VestingGrant.state {
+    initial Granted;
+    terminal FullyClaimed;
+
     Granted -> Claimable;
     Granted -> FullyClaimed;
     Claimable -> FullyClaimed;
@@ -39,7 +48,7 @@ action grant_vesting(read config: VestingConfig, tokens: Token, beneficiary: Add
         require tokens.amount > 0, "zero grant"
         let now = env::current_timepoint()
         consume tokens
-        create grant = VestingGrant { state: Granted, beneficiary, total_amount: tokens.amount, claimed_amount: 0, grant_timepoint: now, cliff_timepoint: now + config.cliff_period, end_timepoint: now + config.total_vesting_period, token_symbol: config.token_symbol } with_lock(beneficiary)
+        create grant = VestingGrant { state: VestingState::Granted, beneficiary, total_amount: tokens.amount, claimed_amount: 0, grant_timepoint: now, cliff_timepoint: now + config.cliff_period, end_timepoint: now + config.total_vesting_period, token_symbol: config.token_symbol } with_lock(beneficiary)
 
 }
 action claim_vested(grant: VestingGrant) -> (tokens: Token, updated_grant: VestingGrant) {
@@ -47,14 +56,14 @@ action claim_vested(grant: VestingGrant) -> (tokens: Token, updated_grant: Vesti
     verification
         let now = env::current_timepoint()
         require now >= grant.cliff_timepoint, "cliff not reached"
-        require grant.state < VestingGrant::FullyClaimed, "already fully claimed"
+        require grant.state != VestingState::FullyClaimed, "already fully claimed"
         let elapsed = now - grant.cliff_timepoint
         let vesting_period = grant.end_timepoint - grant.cliff_timepoint
         let vested_total = if now >= grant.end_timepoint { grant.total_amount } else { grant.total_amount * elapsed / vesting_period }
         let claimable = vested_total - grant.claimed_amount
         require claimable > 0, "nothing to claim"
         consume grant
-        let new_state: u8 = if vested_total == grant.total_amount { VestingGrant::FullyClaimed } else { VestingGrant::Claimable }
+        let new_state: VestingState = if vested_total == grant.total_amount { VestingState::FullyClaimed } else { VestingState::Claimable }
         create tokens = Token { amount: claimable, symbol: grant.token_symbol } with_lock(grant.beneficiary)
         create updated_grant = VestingGrant { state: new_state, beneficiary: grant.beneficiary, total_amount: grant.total_amount, claimed_amount: grant.claimed_amount + claimable, grant_timepoint: grant.grant_timepoint, cliff_timepoint: grant.cliff_timepoint, end_timepoint: grant.end_timepoint, token_symbol: grant.token_symbol } with_lock(grant.beneficiary)
 
@@ -63,7 +72,7 @@ action revoke_grant(read config: VestingConfig, grant: VestingGrant, claimed_adm
     verification
         require config.revocable, "not revocable"
         require is_vesting_admin(config, claimed_admin), "not admin"
-        require grant.state < VestingGrant::FullyClaimed, "already fully claimed"
+        require grant.state != VestingState::FullyClaimed, "already fully claimed"
         let now = env::current_timepoint()
         let elapsed = if now >= grant.cliff_timepoint { now - grant.cliff_timepoint } else { 0 }
         let vesting_period = grant.end_timepoint - grant.cliff_timepoint

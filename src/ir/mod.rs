@@ -42,6 +42,11 @@ pub struct IrTypeDef {
     pub flow_states: Option<Vec<String>>,
     pub flow_state_field: Option<String>,
     pub flow_rules: Vec<IrFlowRule>,
+    pub flow_initial_state: Option<String>,
+    pub flow_terminal_states: Vec<String>,
+    pub flow_terminal_discharge: Option<String>,
+    pub flow_state_model: Option<String>,
+    pub flow_audit_warnings: Vec<String>,
     /// Identity policy for v0.15 cell identity system
     pub identity: IrIdentityPolicy,
 }
@@ -174,6 +179,9 @@ pub struct IrPureFn {
     pub params: Vec<IrParam>,
     pub return_type: Option<IrType>,
     pub body: IrBody,
+    pub declared_effect_class: Option<EffectClass>,
+    pub inferred_effect_class: EffectClass,
+    pub effect_class: EffectClass,
 }
 
 /// IR Lock
@@ -379,6 +387,37 @@ struct EffectFootprint {
     has_create: bool,
 }
 
+fn is_read_only_runtime_call(call: &CallExpr) -> bool {
+    match call.func.as_ref() {
+        Expr::Identifier(name) => {
+            name.starts_with("env::")
+                || name.starts_with("ckb::")
+                || name.starts_with("source::")
+                || name.starts_with("dao::")
+                || name.starts_with("xudt::")
+                || name.starts_with("witness::")
+                || name.starts_with("script::require_")
+                || matches!(
+                    name.as_str(),
+                    "spawn"
+                        | "pipe"
+                        | "pipe_write"
+                        | "pipe_read"
+                        | "wait"
+                        | "process_id"
+                        | "inherited_fd"
+                        | "close"
+                        | "require_maturity"
+                        | "require_time"
+                        | "require_epoch_after"
+                        | "require_epoch_relative"
+                )
+        }
+        Expr::FieldAccess(field) => field.field == "type_hash",
+        _ => false,
+    }
+}
+
 pub struct IrGenerator {
     module: IrModule,
     var_counter: usize,
@@ -396,6 +435,10 @@ pub struct IrGenerator {
     flow_states: HashMap<String, Vec<String>>,
     flow_state_fields: HashMap<String, String>,
     flow_rules: HashMap<String, Vec<IrFlowRule>>,
+    flow_initial_states: HashMap<String, String>,
+    flow_terminal_states: HashMap<String, Vec<String>>,
+    flow_state_models: HashMap<String, String>,
+    flow_audit_warnings: HashMap<String, Vec<String>>,
     enum_variants: HashMap<String, HashMap<String, u64>>,
     constants: HashMap<String, (Expr, IrType)>,
     function_effects: HashMap<String, EffectClass>,
@@ -439,6 +482,10 @@ impl IrGenerator {
             flow_states: HashMap::new(),
             flow_state_fields: HashMap::new(),
             flow_rules: HashMap::new(),
+            flow_initial_states: HashMap::new(),
+            flow_terminal_states: HashMap::new(),
+            flow_state_models: HashMap::new(),
+            flow_audit_warnings: HashMap::new(),
             enum_variants: HashMap::new(),
             constants: HashMap::new(),
             function_effects: HashMap::new(),
@@ -590,8 +637,15 @@ impl IrGenerator {
                 }
                 Item::Function(f) => {
                     let inferred_effect = self.analyze_body_effect_class(&f.body);
-                    if inferred_effect != EffectClass::Pure {
-                        self.record_error(format!("fn '{}' must be pure; inferred effect is {:?}", f.name, inferred_effect), f.span);
+                    let declared_effect = self.convert_effect_class(f.effect);
+                    if f.effect_declared && !self.effect_covers(declared_effect, inferred_effect) {
+                        self.record_error(
+                            format!(
+                                "declared effect {:?} is too weak for function '{}'; inferred effect is {:?}",
+                                declared_effect, f.name, inferred_effect
+                            ),
+                            f.span,
+                        );
                     }
                     let ir_item = IrItem::PureFn(self.gen_function(f));
                     self.module.items.push(ir_item);
@@ -633,7 +687,45 @@ impl IrGenerator {
 
             self.flow_states.insert(type_name.clone(), states);
             self.flow_state_fields.insert(type_name.clone(), field_name);
-            self.flow_rules.insert(type_name, rules);
+            self.flow_rules.insert(type_name.clone(), rules);
+
+            let initial_state = machine.initial_states.first().map(|state| self.canonical_state_name(&type_name, state));
+            let terminal_states =
+                machine.terminal_states.iter().map(|state| self.canonical_state_name(&type_name, state)).collect::<Vec<_>>();
+            if let Some(initial_state) = initial_state.clone() {
+                self.flow_initial_states.insert(type_name.clone(), initial_state);
+            }
+            if !terminal_states.is_empty() {
+                self.flow_terminal_states.insert(type_name.clone(), terminal_states);
+            }
+
+            let state_model = self
+                .type_fields
+                .get(&type_name)
+                .and_then(|fields| fields.get(&machine.target.field))
+                .map_or("legacy-numeric", |ty| if matches!(ty, IrType::Named(_)) { "enum-backed" } else { "legacy-numeric" });
+            self.flow_state_models.insert(type_name.clone(), state_model.to_string());
+            let mut warnings = Vec::new();
+            if machine.initial_states.is_empty() && machine.terminal_states.is_empty() {
+                warnings.push(
+                    "legacy flow omits 0.22 initial/terminal declarations; migrate before claiming 0.22 terminal coverage".to_string(),
+                );
+            }
+            if state_model == "legacy-numeric" {
+                warnings.push("legacy numeric flow state; canonical 0.22 flows use a no-payload enum-backed state field".to_string());
+            }
+            if let Some(initial_state) = initial_state {
+                let has_outgoing = machine
+                    .transitions
+                    .iter()
+                    .any(|transition| self.canonical_state_name(&type_name, &transition.from) == initial_state);
+                if !has_outgoing {
+                    warnings.push(format!("initial state '{}' has no outgoing transition", initial_state));
+                }
+            }
+            if !warnings.is_empty() {
+                self.flow_audit_warnings.insert(type_name, warnings);
+            }
         }
     }
 
@@ -677,6 +769,14 @@ impl IrGenerator {
             flow_states: self.flow_states.get(&resource.name).cloned(),
             flow_state_field: self.flow_state_fields.get(&resource.name).cloned(),
             flow_rules: self.flow_rules.get(&resource.name).cloned().unwrap_or_default(),
+            flow_initial_state: self.flow_initial_states.get(&resource.name).cloned(),
+            flow_terminal_states: self.flow_terminal_states.get(&resource.name).cloned().unwrap_or_default(),
+            flow_terminal_discharge: self
+                .flow_terminal_states
+                .contains_key(&resource.name)
+                .then(|| "terminal-by-output-state".to_string()),
+            flow_state_model: self.flow_state_models.get(&resource.name).cloned(),
+            flow_audit_warnings: self.flow_audit_warnings.get(&resource.name).cloned().unwrap_or_default(),
             identity: Self::lower_identity_policy(&resource.identity),
         }
     }
@@ -694,6 +794,14 @@ impl IrGenerator {
             flow_states: self.flow_states.get(&shared.name).cloned(),
             flow_state_field: self.flow_state_fields.get(&shared.name).cloned(),
             flow_rules: self.flow_rules.get(&shared.name).cloned().unwrap_or_default(),
+            flow_initial_state: self.flow_initial_states.get(&shared.name).cloned(),
+            flow_terminal_states: self.flow_terminal_states.get(&shared.name).cloned().unwrap_or_default(),
+            flow_terminal_discharge: self
+                .flow_terminal_states
+                .contains_key(&shared.name)
+                .then(|| "terminal-by-output-state".to_string()),
+            flow_state_model: self.flow_state_models.get(&shared.name).cloned(),
+            flow_audit_warnings: self.flow_audit_warnings.get(&shared.name).cloned().unwrap_or_default(),
             identity: Self::lower_identity_policy(&shared.identity),
         }
     }
@@ -711,6 +819,14 @@ impl IrGenerator {
             flow_states: self.flow_states.get(&receipt.name).cloned(),
             flow_state_field: self.flow_state_fields.get(&receipt.name).cloned(),
             flow_rules: self.flow_rules.get(&receipt.name).cloned().unwrap_or_default(),
+            flow_initial_state: self.flow_initial_states.get(&receipt.name).cloned(),
+            flow_terminal_states: self.flow_terminal_states.get(&receipt.name).cloned().unwrap_or_default(),
+            flow_terminal_discharge: self
+                .flow_terminal_states
+                .contains_key(&receipt.name)
+                .then(|| "terminal-by-output-state".to_string()),
+            flow_state_model: self.flow_state_models.get(&receipt.name).cloned(),
+            flow_audit_warnings: self.flow_audit_warnings.get(&receipt.name).cloned().unwrap_or_default(),
             identity: Self::lower_identity_policy(&receipt.identity),
         }
     }
@@ -728,6 +844,14 @@ impl IrGenerator {
             flow_states: self.flow_states.get(&struct_def.name).cloned(),
             flow_state_field: self.flow_state_fields.get(&struct_def.name).cloned(),
             flow_rules: self.flow_rules.get(&struct_def.name).cloned().unwrap_or_default(),
+            flow_initial_state: self.flow_initial_states.get(&struct_def.name).cloned(),
+            flow_terminal_states: self.flow_terminal_states.get(&struct_def.name).cloned().unwrap_or_default(),
+            flow_terminal_discharge: self
+                .flow_terminal_states
+                .contains_key(&struct_def.name)
+                .then(|| "terminal-by-output-state".to_string()),
+            flow_state_model: self.flow_state_models.get(&struct_def.name).cloned(),
+            flow_audit_warnings: self.flow_audit_warnings.get(&struct_def.name).cloned().unwrap_or_default(),
             identity: IrIdentityPolicy::None,
         }
     }
@@ -788,9 +912,12 @@ impl IrGenerator {
                     }
                     Item::Function(function) => {
                         let inferred = self.analyze_body_effect_class(&function.body);
-                        if self.function_effects.get(&function.name).copied() != Some(inferred) {
-                            self.function_effects.insert(function.name.clone(), inferred);
-                            self.function_effects.insert(format!("{}::{}", self.module.name, function.name), inferred);
+                        let declared = self.convert_effect_class(function.effect);
+                        let effective =
+                            if function.effect_declared && self.effect_covers(declared, inferred) { declared } else { inferred };
+                        if self.function_effects.get(&function.name).copied() != Some(effective) {
+                            self.function_effects.insert(function.name.clone(), effective);
+                            self.function_effects.insert(format!("{}::{}", self.module.name, function.name), effective);
                             changed = true;
                         }
                     }
@@ -816,8 +943,13 @@ impl IrGenerator {
         let return_type = function.return_type.as_ref().map(Self::convert_type);
         let (params, body) =
             self.lower_signature_and_body(&function.params, &[], &function.body, return_type.clone(), &HashSet::new());
+        let inferred_effect_class = self.analyze_body_effect_class(&function.body);
+        let declared_effect_class = function.effect_declared.then(|| self.convert_effect_class(function.effect));
+        let effect_class = declared_effect_class
+            .filter(|declared| self.effect_covers(*declared, inferred_effect_class))
+            .unwrap_or(inferred_effect_class);
 
-        IrPureFn { name: function.name.clone(), params, return_type, body }
+        IrPureFn { name: function.name.clone(), params, return_type, body, declared_effect_class, inferred_effect_class, effect_class }
     }
 
     fn layout_fields(&self, fields: &[Field]) -> Vec<IrField> {
@@ -1044,14 +1176,7 @@ impl IrGenerator {
     }
 
     fn effect_covers(&self, declared: EffectClass, inferred: EffectClass) -> bool {
-        matches!(
-            (declared, inferred),
-            (EffectClass::Pure, EffectClass::Pure)
-                | (EffectClass::ReadOnly, EffectClass::Pure | EffectClass::ReadOnly)
-                | (EffectClass::Creating, EffectClass::Pure | EffectClass::ReadOnly | EffectClass::Creating)
-                | (EffectClass::Destroying, EffectClass::Pure | EffectClass::ReadOnly | EffectClass::Destroying)
-                | (EffectClass::Mutating, _)
-        )
+        effect_class_covers(declared, inferred)
     }
 
     fn check_stmt_effects(&self, stmt: &Stmt, footprint: &mut EffectFootprint) {
@@ -1154,6 +1279,9 @@ impl IrGenerator {
                 self.check_expr_effects(&unary.expr, footprint);
             }
             Expr::Call(call) => {
+                if is_read_only_runtime_call(call) {
+                    self.apply_effect_to_footprint(EffectClass::ReadOnly, footprint);
+                }
                 if let Expr::Identifier(name) = call.func.as_ref() {
                     if let Some(effect) = self.function_effects.get(name).copied() {
                         self.apply_effect_to_footprint(effect, footprint);
@@ -1210,16 +1338,7 @@ impl IrGenerator {
     }
 
     fn apply_effect_to_footprint(&self, effect: EffectClass, footprint: &mut EffectFootprint) {
-        match effect {
-            EffectClass::Pure => {}
-            EffectClass::ReadOnly => footprint.has_read_ref = true,
-            EffectClass::Creating => footprint.has_create = true,
-            EffectClass::Destroying => footprint.has_consume = true,
-            EffectClass::Mutating => {
-                footprint.has_consume = true;
-                footprint.has_create = true;
-            }
-        }
+        apply_effect_to_footprint(effect, footprint);
     }
 
     fn convert_effect_class(&self, effect: crate::ast::EffectClass) -> EffectClass {
@@ -6129,6 +6248,7 @@ fn generate_with_resolver_diagnostics_inner(
                     &owner_module,
                     &local_name,
                     &function,
+                    resolver,
                     Some(&local_name),
                     &mut external_function_effects,
                     &mut external_function_param_types,
@@ -6154,6 +6274,7 @@ fn generate_with_resolver_diagnostics_inner(
                 &owner_module,
                 &call_name,
                 &function,
+                resolver,
                 None,
                 &mut external_function_effects,
                 &mut external_function_param_types,
@@ -6274,6 +6395,7 @@ fn register_external_callable_context(
     owner_module: &str,
     source_name: &str,
     function: &FunctionDef,
+    resolver: &ModuleResolver,
     preferred_label: Option<&str>,
     external_function_effects: &mut HashMap<String, EffectClass>,
     external_function_param_types: &mut HashMap<String, Vec<IrType>>,
@@ -6290,7 +6412,7 @@ fn register_external_callable_context(
         .cloned()
         .or_else(|| preferred_label.map(str::to_string))
         .unwrap_or_else(|| callable_label_for(consumer_module, owner_module, symbol));
-    let effect = function_def_effect_class(function);
+    let effect = function_def_transitive_effect_class(resolver, owner_module, function, &mut HashSet::new());
     let params = function_def_param_types_ir(function);
     let return_type = function_def_return_type(function);
 
@@ -6614,18 +6736,81 @@ fn collect_call_names_from_expr(expr: &Expr, names: &mut HashSet<String>) {
     }
 }
 
-fn function_def_effect_class(function: &FunctionDef) -> EffectClass {
+fn function_def_transitive_effect_class(
+    resolver: &ModuleResolver,
+    owner_module: &str,
+    function: &FunctionDef,
+    visiting: &mut HashSet<String>,
+) -> EffectClass {
+    let key = format!("{}::{}", owner_module, function_def_name(function));
+    let direct = function_def_inferred_effect_class(function);
+    if !visiting.insert(key.clone()) {
+        return direct;
+    }
+
+    let mut footprint = EffectFootprint::default();
+    apply_effect_to_footprint(direct, &mut footprint);
+    let mut call_names = HashSet::new();
+    collect_call_names_from_stmts(function_def_body(function), &mut call_names);
+    for call_name in call_names {
+        let Some((callee_module, callee)) = resolver.resolve_function_with_module(owner_module, &call_name) else {
+            continue;
+        };
+        let effect = function_def_transitive_effect_class(resolver, &callee_module, &callee, visiting);
+        apply_effect_to_footprint(effect, &mut footprint);
+    }
+    visiting.remove(&key);
+
+    let inferred = effect_from_footprint(&footprint);
+    function_def_declared_effect_class(function).filter(|declared| effect_class_covers(*declared, inferred)).unwrap_or(inferred)
+}
+
+fn function_def_inferred_effect_class(function: &FunctionDef) -> EffectClass {
     match function {
-        FunctionDef::Action(action) => {
-            if action.effect_declared {
-                ast_effect_to_ir(action.effect)
-            } else {
-                infer_action_effect_without_call_graph(action)
-            }
-        }
+        FunctionDef::Action(action) => infer_action_effect_without_call_graph(action),
         FunctionDef::Function(function) => infer_fn_effect_without_call_graph(function),
         FunctionDef::Lock(_) => EffectClass::ReadOnly,
     }
+}
+
+fn function_def_declared_effect_class(function: &FunctionDef) -> Option<EffectClass> {
+    match function {
+        FunctionDef::Action(action) => action.effect_declared.then(|| ast_effect_to_ir(action.effect)),
+        FunctionDef::Function(function) => function.effect_declared.then(|| ast_effect_to_ir(function.effect)),
+        FunctionDef::Lock(_) => None,
+    }
+}
+
+fn function_def_body(function: &FunctionDef) -> &[Stmt] {
+    match function {
+        FunctionDef::Action(action) => &action.body,
+        FunctionDef::Function(function) => &function.body,
+        FunctionDef::Lock(lock) => &lock.body,
+    }
+}
+
+fn apply_effect_to_footprint(effect: EffectClass, footprint: &mut EffectFootprint) {
+    match effect {
+        EffectClass::Pure => {}
+        EffectClass::ReadOnly => footprint.has_read_ref = true,
+        EffectClass::Creating => footprint.has_create = true,
+        EffectClass::Destroying => footprint.has_consume = true,
+        EffectClass::Mutating => {
+            footprint.has_consume = true;
+            footprint.has_create = true;
+        }
+    }
+}
+
+fn effect_class_covers(declared: EffectClass, inferred: EffectClass) -> bool {
+    matches!(
+        (declared, inferred),
+        (EffectClass::Pure, EffectClass::Pure)
+            | (EffectClass::ReadOnly, EffectClass::Pure | EffectClass::ReadOnly)
+            | (EffectClass::Creating, EffectClass::Pure | EffectClass::ReadOnly | EffectClass::Creating)
+            | (EffectClass::Destroying, EffectClass::Pure | EffectClass::ReadOnly | EffectClass::Destroying)
+            | (EffectClass::Mutating, _)
+    )
 }
 
 fn function_def_return_type(function: &FunctionDef) -> Option<IrType> {
@@ -6752,6 +6937,9 @@ fn collect_ast_expr_effects(expr: &Expr, footprint: &mut EffectFootprint) {
         }
         Expr::Unary(unary) => collect_ast_expr_effects(&unary.expr, footprint),
         Expr::Call(call) => {
+            if is_read_only_runtime_call(call) {
+                footprint.has_read_ref = true;
+            }
             for arg in &call.args {
                 collect_ast_expr_effects(arg, footprint);
             }
@@ -6846,6 +7034,11 @@ fn resolver_type_def_to_ir(
             flow_states: None,
             flow_state_field: None,
             flow_rules: Vec::new(),
+            flow_initial_state: None,
+            flow_terminal_states: Vec::new(),
+            flow_terminal_discharge: None,
+            flow_state_model: None,
+            flow_audit_warnings: Vec::new(),
             identity: lower_identity_policy_ast(&resource.identity),
         }),
         TypeDef::Shared(shared) => Some(IrTypeDef {
@@ -6860,6 +7053,11 @@ fn resolver_type_def_to_ir(
             flow_states: None,
             flow_state_field: None,
             flow_rules: Vec::new(),
+            flow_initial_state: None,
+            flow_terminal_states: Vec::new(),
+            flow_terminal_discharge: None,
+            flow_state_model: None,
+            flow_audit_warnings: Vec::new(),
             identity: lower_identity_policy_ast(&shared.identity),
         }),
         TypeDef::Receipt(receipt) => Some(IrTypeDef {
@@ -6874,6 +7072,11 @@ fn resolver_type_def_to_ir(
             flow_states: None,
             flow_state_field: None,
             flow_rules: Vec::new(),
+            flow_initial_state: None,
+            flow_terminal_states: Vec::new(),
+            flow_terminal_discharge: None,
+            flow_state_model: None,
+            flow_audit_warnings: Vec::new(),
             identity: lower_identity_policy_ast(&receipt.identity),
         }),
         TypeDef::Struct(struct_def) => Some(IrTypeDef {
@@ -6888,6 +7091,11 @@ fn resolver_type_def_to_ir(
             flow_states: None,
             flow_state_field: None,
             flow_rules: Vec::new(),
+            flow_initial_state: None,
+            flow_terminal_states: Vec::new(),
+            flow_terminal_discharge: None,
+            flow_state_model: None,
+            flow_audit_warnings: Vec::new(),
             identity: IrIdentityPolicy::None,
         }),
         TypeDef::Enum(_) => None,
@@ -7580,5 +7788,66 @@ action settle_coin(coin: Coin) -> next_coin: Coin {
         assert!(output.lock.is_some(), "stdlib settle must bind the explicit output lock target");
         assert!(output.fields.iter().any(|(field, _)| field == "amount"));
         assert!(output.fields.iter().any(|(field, _)| field == "owner"));
+    }
+
+    #[test]
+    fn imported_function_effects_are_recomputed_transitively_from_source() {
+        fn parse_module(source: &str) -> Module {
+            parse(&lex(source).unwrap()).unwrap()
+        }
+
+        let dep = parse_module(
+            r#"
+module dep
+
+resource Token has destroy {
+    amount: u64
+}
+
+action issue(amount: u64) -> u64 {
+    verification
+        let token = create Token { amount: amount }
+        destroy token
+        return amount
+}
+"#,
+        );
+        let bridge = parse_module(
+            r#"
+module bridge
+
+use dep::{issue}
+
+#[effect(Pure)]
+fn hidden_issue(amount: u64) -> u64 {
+    return issue(amount)
+}
+"#,
+        );
+        let consumer = parse_module(
+            r#"
+module consumer
+
+use bridge::{hidden_issue}
+
+action run(amount: u64) -> u64 {
+    verification
+        return hidden_issue(amount)
+}
+"#,
+        );
+
+        let mut resolver = ModuleResolver::new();
+        resolver.register_module(dep).unwrap();
+        resolver.register_module(bridge).unwrap();
+        resolver.register_module(consumer.clone()).unwrap();
+
+        let error = generate_with_resolver(&consumer, &resolver, "consumer").unwrap_err();
+        assert!(
+            error.message.contains("declared effect Pure is too weak for function 'hidden_issue'")
+                && error.message.contains("inferred effect is Mutating"),
+            "unexpected error: {}",
+            error.message
+        );
     }
 }

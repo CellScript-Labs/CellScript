@@ -8,6 +8,12 @@ module cellscript::atomic_swap
 
 const REFUND_LOCK_PERIOD: u64 = 100
 
+enum SwapState {
+    Pending,
+    Claimed,
+    Refunded,
+}
+
 resource SwapLock has store, create, consume, replace, burn, read_ref {
     swap_id: Hash,
     initiator: Address,
@@ -16,7 +22,7 @@ resource SwapLock has store, create, consume, replace, burn, read_ref {
     timeout_timepoint: u64,
     asset_type: AssetType,
     amount: u64,
-    state: u8,
+    state: SwapState,
 }
 
 receipt PreimageClaim has create, consume, burn {
@@ -38,6 +44,9 @@ enum AssetType {
 }
 
 flow SwapLock.state {
+    initial Pending;
+    terminal Claimed, Refunded;
+
     Pending -> Claimed;
     Pending -> Refunded;
 }
@@ -54,7 +63,7 @@ action initiate_swap(
     verification
         require amount > 0, "zero amount"
         require timeout_timepoint > 0, "zero timeout"
-        create swap_lock = SwapLock { swap_id, initiator, participant, hashlock, timeout_timepoint, asset_type, amount, state: Pending } with_lock(initiator)
+        create swap_lock = SwapLock { swap_id, initiator, participant, hashlock, timeout_timepoint, asset_type, amount, state: SwapState::Pending } with_lock(initiator)
 
 }
 
@@ -69,7 +78,7 @@ action claim_with_preimage(
         require claimed_by == lock.participant, "not the participant"
         require current_timepoint < lock.timeout_timepoint, "claim window expired"
         require hash_blake2b(preimage) == lock.hashlock, "wrong preimage"
-        require lock.state == SwapLock::Pending, "not pending"
+        require lock.state == SwapState::Pending, "not pending"
         preserve updated_lock from lock {
             swap_id
             initiator
@@ -81,7 +90,7 @@ action claim_with_preimage(
         }
         consume lock
         create claim = PreimageClaim { swap_id: lock.swap_id, preimage, claimed_by, claimed_at: current_timepoint }
-        create updated_lock = SwapLock { swap_id: lock.swap_id, initiator: lock.initiator, participant: lock.participant, hashlock: lock.hashlock, timeout_timepoint: lock.timeout_timepoint, asset_type: lock.asset_type, amount: lock.amount, state: Claimed } with_lock(lock.initiator)
+        create updated_lock = SwapLock { swap_id: lock.swap_id, initiator: lock.initiator, participant: lock.participant, hashlock: lock.hashlock, timeout_timepoint: lock.timeout_timepoint, asset_type: lock.asset_type, amount: lock.amount, state: SwapState::Claimed } with_lock(lock.initiator)
 
 }
 
@@ -94,7 +103,7 @@ action refund_after_timeout(
     verification
         require refunded_by == lock.initiator, "not the initiator"
         require current_timepoint >= lock.timeout_timepoint + REFUND_LOCK_PERIOD, "timeout not reached"
-        require lock.state == SwapLock::Pending, "not pending"
+        require lock.state == SwapState::Pending, "not pending"
         preserve updated_lock from lock {
             swap_id
             participant
@@ -105,12 +114,12 @@ action refund_after_timeout(
         }
         consume lock
         create refund = RefundClaim { swap_id: lock.swap_id, refunded_by, refunded_at: current_timepoint }
-        create updated_lock = SwapLock { swap_id: lock.swap_id, initiator: lock.initiator, participant: lock.participant, hashlock: lock.hashlock, timeout_timepoint: lock.timeout_timepoint, asset_type: lock.asset_type, amount: lock.amount, state: Refunded } with_lock(refunded_by)
+        create updated_lock = SwapLock { swap_id: lock.swap_id, initiator: lock.initiator, participant: lock.participant, hashlock: lock.hashlock, timeout_timepoint: lock.timeout_timepoint, asset_type: lock.asset_type, amount: lock.amount, state: SwapState::Refunded } with_lock(refunded_by)
 
 }
 
 fn is_swap_pending(lock: &SwapLock) -> bool {
-    lock.state == SwapLock::Pending
+    lock.state == SwapState::Pending
 }
 
 lock swap_admin(protected lock: SwapLock, witness claimed_admin: Address) -> bool {

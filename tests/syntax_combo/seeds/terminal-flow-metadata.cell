@@ -1,0 +1,20 @@
+// audit: phase=accept
+module cellscript::audit::seed_terminal_flow_metadata
+
+enum SwapState {
+    Pending,
+    Claimed,
+    Refunded,
+}
+
+resource SwapLock {
+    state: SwapState,
+}
+
+flow SwapLock.state {
+    initial Pending;
+    terminal Claimed, Refunded;
+
+    Pending -> Claimed;
+    Pending -> Refunded;
+}

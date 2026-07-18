@@ -201,7 +201,7 @@ fn strict_capability_name(capability: ast::Capability) -> &'static str {
 const DEFAULT_TARGET: &str = "riscv64-asm";
 const DEFAULT_TARGET_PROFILE: &str = "ckb";
 const ARTIFACT_CACHE_VERSION: &str = "project-source-set-v5";
-pub const METADATA_SCHEMA_VERSION: u32 = 44;
+pub const METADATA_SCHEMA_VERSION: u32 = 45;
 pub const SOURCE_METADATA_SCHEMA_VERSION: u32 = 1;
 pub const ARTIFACT_METADATA_SCHEMA_VERSION: u32 = 1;
 pub const CONSTRAINTS_METADATA_SCHEMA_VERSION: u32 = 1;
@@ -3436,6 +3436,16 @@ pub struct TypeMetadata {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub flow_state_field: Option<String>,
     pub flow_transitions: Vec<FlowTransitionMetadata>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flow_initial_state: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub flow_terminal_states: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flow_terminal_discharge: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flow_state_model: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub flow_audit_warnings: Vec<String>,
     pub encoded_size: Option<usize>,
     pub fields: Vec<FieldMetadata>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3615,6 +3625,10 @@ fn state_transition_edge_metadata(edge: &ir::IrStateTransitionEdge) -> StateTran
 
 fn default_scheduler_witness_abi() -> String {
     SCHEDULER_WITNESS_ABI_MOLECULE.to_string()
+}
+
+fn default_pure_effect_class() -> String {
+    "Pure".to_string()
 }
 
 /// Decode a hex-encoded scheduler witness from compile metadata.
@@ -3949,6 +3963,12 @@ pub struct FunctionMetadata {
     pub name: String,
     pub params: Vec<ParamMetadata>,
     pub return_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub declared_effect_class: Option<String>,
+    #[serde(default = "default_pure_effect_class")]
+    pub inferred_effect_class: String,
+    #[serde(default = "default_pure_effect_class")]
+    pub effect_class: String,
     pub mutate_set: Vec<MutatePatternMetadata>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pool_primitives: Vec<PoolPrimitiveMetadata>,
@@ -5589,7 +5609,7 @@ fn compile_metadata_from_ir(ir: &ir::IrModule, artifact_format: ArtifactFormat, 
                         body_ckb_runtime_accesses(&action.name, &action.body, &cell_type_kinds, &type_layouts),
                         &action.params,
                     ));
-                    let verifier_obligations = body_verifier_obligations(
+                    let mut verifier_obligations = body_verifier_obligations(
                         "action",
                         &action.name,
                         &action.body,
@@ -5604,6 +5624,7 @@ fn compile_metadata_from_ir(ir: &ir::IrModule, artifact_format: ArtifactFormat, 
                         action.return_type.as_ref(),
                         &pure_const_returns,
                     );
+                    verifier_obligations.extend(action_terminal_flow_obligations(ir, action));
                     let pool_primitives = body_pool_primitive_metadata(
                         "action",
                         &action.name,
@@ -5738,6 +5759,9 @@ fn compile_metadata_from_ir(ir: &ir::IrModule, artifact_format: ArtifactFormat, 
                         name: function.name.clone(),
                         params: param_metadata_for_body(&function.params, &function.body, &cell_type_kinds),
                         return_type: function.return_type.as_ref().map(ir_type_to_string),
+                        declared_effect_class: function.declared_effect_class.map(|effect| format!("{:?}", effect)),
+                        inferred_effect_class: format!("{:?}", function.inferred_effect_class),
+                        effect_class: format!("{:?}", function.effect_class),
                         mutate_set: function.body.mutate_set.iter().map(|pattern| mutate_pattern_metadata(pattern, &type_layouts)).collect(),
                         pool_primitives,
                         ckb_runtime_accesses,
@@ -6397,6 +6421,30 @@ fn auto_lowered_aggregate_runtime_helper_for_action(
         .then_some(aggregate_lowering::XUDT_GROUP_AMOUNT_CONSERVED_METADATA_HELPER)
 }
 
+fn action_terminal_flow_obligations(ir: &ir::IrModule, action: &ir::IrAction) -> Vec<VerifierObligationMetadata> {
+    let type_defs = metadata_type_defs_by_name(ir);
+    action
+        .state_transition_edges
+        .iter()
+        .filter_map(|edge| {
+            let type_def = type_defs.get(&edge.type_name)?;
+            if !type_def.flow_terminal_states.iter().any(|terminal| terminal == &edge.to) {
+                return None;
+            }
+            Some(VerifierObligationMetadata {
+                scope: format!("action:{}", action.name),
+                category: "flow-terminal".to_string(),
+                feature: "terminal-by-output-state".to_string(),
+                status: "checked-runtime".to_string(),
+                detail: format!(
+                    "output binding '{}' for '{}.{}' is checked to reach declared terminal state '{}'; this is transaction-local terminal discharge, not a global liveness proof",
+                    edge.output_binding.as_deref().unwrap_or("unnamed-output"), edge.type_name, edge.field_name, edge.to
+                ),
+            })
+        })
+        .collect()
+}
+
 fn module_verifier_obligations(
     ir: &ir::IrModule,
     type_layouts: &MetadataTypeLayouts,
@@ -6430,7 +6478,7 @@ fn module_verifier_obligations(
                     body_ckb_runtime_accesses(&action.name, &action.body, cell_type_kinds, type_layouts),
                     &action.params,
                 ));
-                obligations.extend(body_verifier_obligations(
+                let mut action_obligations = body_verifier_obligations(
                     "action",
                     &action.name,
                     &action.body,
@@ -6444,7 +6492,9 @@ fn module_verifier_obligations(
                     cell_type_kinds,
                     action.return_type.as_ref(),
                     pure_const_returns,
-                ));
+                );
+                action_obligations.extend(action_terminal_flow_obligations(ir, action));
+                obligations.extend(action_obligations);
             }
             ir::IrItem::PureFn(function) => {
                 let param_schema_vars = schema_pointer_var_ids(&function.body, &function.params);
@@ -6556,7 +6606,7 @@ fn module_proof_plan_metadata(
                     body_ckb_runtime_accesses(&action.name, &action.body, cell_type_kinds, type_layouts),
                     &action.params,
                 ));
-                let verifier_obligations = body_verifier_obligations(
+                let mut verifier_obligations = body_verifier_obligations(
                     "action",
                     &action.name,
                     &action.body,
@@ -6571,6 +6621,7 @@ fn module_proof_plan_metadata(
                     action.return_type.as_ref(),
                     pure_const_returns,
                 );
+                verifier_obligations.extend(action_terminal_flow_obligations(ir, action));
                 let pool_primitives = body_pool_primitive_metadata(
                     "action",
                     &action.name,
@@ -14286,6 +14337,11 @@ fn type_metadata(
         } else {
             type_def.flow_rules.iter().map(flow_rule_metadata).collect()
         },
+        flow_initial_state: type_def.flow_initial_state.clone(),
+        flow_terminal_states: type_def.flow_terminal_states.clone(),
+        flow_terminal_discharge: type_def.flow_terminal_discharge.clone(),
+        flow_state_model: type_def.flow_state_model.clone(),
+        flow_audit_warnings: type_def.flow_audit_warnings.clone(),
         flow_states,
         encoded_size: type_encoded_size(type_def, type_defs),
         fields: fields_metadata(type_def, type_defs),
@@ -24296,17 +24352,31 @@ resource Token has store {
     }
 
     #[test]
-    fn compile_rejects_impure_helper_functions() {
-        let err = compile(IMPURE_FN_PROGRAM, CompileOptions::default()).unwrap_err();
+    fn compile_infers_read_only_helper_function_effects() {
+        let result = compile(IMPURE_FN_PROGRAM, CompileOptions::default()).unwrap();
+        let function = result.metadata.functions.iter().find(|function| function.name == "helper").expect("helper metadata");
 
-        assert!(err.message.contains("pure function cannot contain 'read_ref'"), "unexpected error: {}", err.message);
+        assert_eq!(function.declared_effect_class, None);
+        assert_eq!(function.inferred_effect_class, "ReadOnly");
+        assert_eq!(function.effect_class, "ReadOnly");
     }
 
     #[test]
-    fn compile_rejects_helper_functions_that_indirectly_call_impure_actions() {
-        let err = compile(INDIRECT_IMPURE_FN_PROGRAM, CompileOptions::default()).unwrap_err();
+    fn compile_infers_helper_function_effects_through_action_calls() {
+        let result = compile(INDIRECT_IMPURE_FN_PROGRAM, CompileOptions::default()).unwrap();
+        let function = result.metadata.functions.iter().find(|function| function.name == "helper").expect("helper metadata");
 
-        assert!(err.message.contains("pure function cannot call action 'issue'"), "unexpected error: {}", err.message);
+        assert_eq!(function.inferred_effect_class, "Mutating");
+        assert_eq!(function.effect_class, "Mutating");
+    }
+
+    #[test]
+    fn compile_rejects_underdeclared_helper_function_effects() {
+        let source = INDIRECT_IMPURE_FN_PROGRAM.replace("fn helper", "#[effect(Pure)]\nfn helper");
+        let err = compile(&source, CompileOptions::default()).unwrap_err();
+
+        assert!(err.message.contains("declared effect Pure is too weak for function 'helper'"), "unexpected error: {}", err.message);
+        assert!(err.message.contains("inferred effect is Mutating"), "unexpected error: {}", err.message);
     }
 
     #[test]
@@ -24727,7 +24797,7 @@ action mint(amount: u64, symbol: [u8; 8]) -> Token {
     fn compile_rejects_pure_functions_that_call_locks() {
         let err = compile(FN_CALLS_LOCK_PROGRAM, CompileOptions::default()).unwrap_err();
 
-        assert!(err.message.contains("pure function cannot call lock 'guard'"), "unexpected error: {}", err.message);
+        assert!(err.message.contains("function cannot call lock 'guard'"), "unexpected error: {}", err.message);
     }
 
     #[test]
@@ -24900,6 +24970,9 @@ resource Offer has store {
 }
 
 flow OfferFlow for Offer.state {
+    initial Created;
+    terminal Filled, Cancelled;
+
     Created -> Live;
     Live -> Filled by accept;
     Live -> Cancelled;
@@ -24922,10 +24995,24 @@ action accept(input: Offer) -> output: Offer {
 
         assert_eq!(offer.flow_states, vec!["Created", "Live", "Filled", "Cancelled"]);
         assert_eq!(offer.flow_state_field.as_deref(), Some("state"));
+        assert_eq!(offer.flow_initial_state.as_deref(), Some("Created"));
+        assert_eq!(offer.flow_terminal_states, vec!["Filled", "Cancelled"]);
+        assert_eq!(offer.flow_terminal_discharge.as_deref(), Some("terminal-by-output-state"));
+        assert_eq!(offer.flow_state_model.as_deref(), Some("enum-backed"));
+        assert!(offer.flow_audit_warnings.is_empty());
         assert!(offer.flow_transitions.iter().any(|transition| transition.from == "Live" && transition.to == "Filled"));
         assert!(action.verifier_obligations.iter().any(|obligation| {
             obligation.category == "state-transition" && obligation.feature == "Offer.state" && obligation.status == "checked-runtime"
         }));
+        assert!(action.verifier_obligations.iter().any(|obligation| {
+            obligation.category == "flow-terminal"
+                && obligation.feature == "terminal-by-output-state"
+                && obligation.status == "checked-runtime"
+        }));
+        assert!(action
+            .proof_plan
+            .iter()
+            .any(|plan| { plan.category == "flow-terminal" && plan.feature == "terminal-by-output-state" && plan.on_chain_checked }));
         assert!(
             asm.contains("# cellscript abi: state transition Offer.state state_count=4"),
             "missing explicit flow runtime transition marker:\n{}",
@@ -24933,6 +25020,36 @@ action accept(input: Offer) -> output: Offer {
         );
         assert!(asm.contains("li t3, 1"), "action transition should check source state Live=1:\n{}", asm);
         assert!(asm.contains("li t3, 2"), "action transition should check target state Filled=2:\n{}", asm);
+    }
+
+    #[test]
+    fn compile_rejects_invalid_terminal_flow_contracts() {
+        let missing_initial = r#"
+module test
+
+enum State { Start, Done }
+resource Ticket { state: State }
+flow Ticket.state {
+    terminal Done;
+    Start -> Done;
+}
+"#;
+        let error = compile(missing_initial, CompileOptions::default()).unwrap_err();
+        assert!(error.message.contains("must declare exactly one initial state; found 0"), "unexpected error: {}", error.message);
+
+        let overlap = missing_initial.replace("terminal Done;", "initial Done;\n    terminal Done;");
+        let error = compile(&overlap, CompileOptions::default()).unwrap_err();
+        assert!(error.message.contains("cannot be both initial and terminal"), "unexpected error: {}", error.message);
+
+        let outgoing = missing_initial
+            .replace("terminal Done;", "initial Start;\n    terminal Done;")
+            .replace("Start -> Done;", "Start -> Done;\n    Done -> Start;");
+        let error = compile(&outgoing, CompileOptions::default()).unwrap_err();
+        assert!(
+            error.message.contains("terminal state 'Done' cannot have an outgoing transition"),
+            "unexpected error: {}",
+            error.message
+        );
     }
 
     #[test]
