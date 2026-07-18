@@ -20112,12 +20112,11 @@ module test
 
 enum AssetType {
     Native,
-    Token(Hash),
+    Token(u64),
 }
 
-action bad() -> AssetType {
-    verification
-        return AssetType::Token
+fn bad() -> AssetType {
+    return AssetType::Token
 }
 "#;
 
@@ -21650,7 +21649,8 @@ action bad(token: Token) {
 
         let err = compile(FUNCTION_VEC_CELL_PARAM_PROGRAM, CompileOptions::default()).unwrap_err();
         assert!(
-            err.message.contains("function 'bad' parameter 'tokens' cannot use owned cell-backed type Vec<Token>"),
+            err.message
+                .contains("type 'Vec<Token>' cannot store a cell-backed resource; use a source-aware BoundedCellSet<T, N> with explicit ownership"),
             "unexpected error: {}",
             err.message
         );
@@ -23176,20 +23176,22 @@ action grant(read config: Config, token: Token) -> Grant {
     }
 
     #[test]
-    fn compile_rejects_enum_payload_variants_until_lowering_exists() {
+    fn compile_rejects_payload_enum_pattern_arity_mismatches() {
         let err = compile(ENUM_PAYLOAD_VARIANT_PROGRAM, CompileOptions::default()).unwrap_err();
         assert!(
-            err.message.contains("match pattern 'MaybeAmount::Some' targets a payload enum variant"),
+            err.message.contains("match pattern 'MaybeAmount::Some' expects 1 payload binding(s), got 0"),
             "unexpected error: {}",
             err.message
         );
     }
 
     #[test]
-    fn compile_rejects_payload_or_unknown_enum_variant_values() {
+    fn compile_rejects_malformed_or_unknown_enum_variant_values() {
         let payload = compile(ENUM_PAYLOAD_VALUE_PROGRAM, CompileOptions::default()).unwrap_err();
         assert!(
-            payload.message.contains("enum payload variant 'AssetType::Token' cannot be used as a value"),
+            payload
+                .message
+                .contains("enum payload variant 'AssetType::Token' requires an explicit fixed-width payload constructor call"),
             "unexpected error: {}",
             payload.message
         );
@@ -24570,58 +24572,14 @@ action bad() -> u64 {
     }
 
     #[test]
-    fn compile_marks_cell_backed_vec_runtime_features() {
-        let result = compile(CELL_BACKED_VEC_PROGRAM, CompileOptions::default()).unwrap();
-        let action = result.metadata.actions.iter().find(|action| action.name == "batch_mint").expect("batch_mint action metadata");
-
-        // Cell-backed collection operations are tracked as explicit fail-closed
-        // runtime features.
+    fn compile_rejects_cell_backed_vec_with_source_aware_guidance() {
+        let err = compile(CELL_BACKED_VEC_PROGRAM, CompileOptions::default()).unwrap_err();
         assert!(
-            action.fail_closed_runtime_features.contains(&"cell-backed-collection-push".to_string()),
-            "cell-backed push must be visible in fail-closed features: {:?}",
-            action.fail_closed_runtime_features
-        );
-        assert!(
-            action.fail_closed_runtime_features.contains(&"cell-backed-collection-return".to_string()),
-            "cell-backed Vec return must be visible in fail-closed features: {:?}",
-            action.fail_closed_runtime_features
-        );
-        assert!(
-            result.metadata.runtime.fail_closed_runtime_features.contains(&"cell-backed-collection-push".to_string()),
-            "runtime metadata must aggregate cell-backed collection fail-closed features: {:?}",
-            result.metadata.runtime.fail_closed_runtime_features
-        );
-        let linear_collection_obligation = action
-            .verifier_obligations
-            .iter()
-            .find(|obligation| obligation.feature == "linear-collection:NFT")
-            .expect("cell-backed collection obligation");
-        assert_eq!(linear_collection_obligation.category, "transaction-invariant");
-        assert_eq!(linear_collection_obligation.status, "runtime-required");
-        assert!(
-            linear_collection_obligation.detail.contains("linear-collection-ownership=runtime-required"),
-            "linear collection obligation must expose the blocker detail: {:?}",
-            linear_collection_obligation
-        );
-        assert!(
-            action.transaction_runtime_input_requirements.iter().any(|requirement| {
-                requirement.feature == "linear-collection:NFT"
-                    && requirement.component == "linear-collection-ownership"
-                    && requirement.status == "runtime-required"
-                    && requirement.blocker_class.as_deref() == Some("linear-collection-ownership-gap")
-            }),
-            "action metadata must expose a linear collection runtime input blocker: {:?}",
-            action.transaction_runtime_input_requirements
-        );
-        assert!(
-            result.metadata.runtime.transaction_runtime_input_requirements.iter().any(|requirement| {
-                requirement.feature == "linear-collection:NFT"
-                    && requirement.component == "linear-collection-ownership"
-                    && requirement.status == "runtime-required"
-                    && requirement.blocker_class.as_deref() == Some("linear-collection-ownership-gap")
-            }),
-            "runtime metadata must aggregate the linear collection runtime input blocker: {:?}",
-            result.metadata.runtime.transaction_runtime_input_requirements
+            err.message.contains(
+                "type 'Vec<NFT>' cannot store a cell-backed resource; use a source-aware BoundedCellSet<T, N> with explicit ownership"
+            ),
+            "unexpected error: {}",
+            err.message
         );
     }
 
@@ -25886,36 +25844,36 @@ resource Token has store {
     }
 
     #[test]
-    fn compile_rejects_pure_functions_that_call_env_runtime_builtins() {
-        let err = compile(FN_ENV_RUNTIME_PROGRAM, CompileOptions::default()).unwrap_err();
+    fn compile_infers_read_only_effect_for_env_runtime_builtins() {
+        let result = compile(FN_ENV_RUNTIME_PROGRAM, CompileOptions::default()).unwrap();
+        let function = result.metadata.functions.iter().find(|function| function.name == "helper").expect("helper metadata");
 
-        assert!(
-            err.message.contains("pure function cannot call 'env::current_timepoint' runtime builtin"),
-            "unexpected error: {}",
-            err.message
-        );
+        assert_eq!(function.declared_effect_class, None);
+        assert_eq!(function.inferred_effect_class, "ReadOnly");
+        assert_eq!(function.effect_class, "ReadOnly");
+        assert_eq!(function.effect_evidence_tier, crate::EvidenceTier::CheckedStatic);
     }
 
     #[test]
-    fn compile_rejects_pure_functions_that_call_ckb_header_runtime_builtins() {
-        let err = compile(FN_CKB_HEADER_RUNTIME_PROGRAM, CompileOptions::default()).unwrap_err();
+    fn compile_infers_read_only_effect_for_ckb_header_runtime_builtins() {
+        let result = compile(FN_CKB_HEADER_RUNTIME_PROGRAM, CompileOptions::default()).unwrap();
+        let function = result.metadata.functions.iter().find(|function| function.name == "helper").expect("helper metadata");
 
-        assert!(
-            err.message.contains("pure function cannot call 'ckb::header_epoch_number' runtime builtin"),
-            "unexpected error: {}",
-            err.message
-        );
+        assert_eq!(function.declared_effect_class, None);
+        assert_eq!(function.inferred_effect_class, "ReadOnly");
+        assert_eq!(function.effect_class, "ReadOnly");
+        assert_eq!(function.effect_evidence_tier, crate::EvidenceTier::CheckedStatic);
     }
 
     #[test]
-    fn compile_rejects_pure_functions_that_call_type_hash_runtime_builtin() {
-        let err = compile(FN_TYPE_HASH_RUNTIME_PROGRAM, CompileOptions::default()).unwrap_err();
+    fn compile_infers_read_only_effect_for_type_hash_runtime_builtins() {
+        let result = compile(FN_TYPE_HASH_RUNTIME_PROGRAM, CompileOptions::default()).unwrap();
+        let function = result.metadata.functions.iter().find(|function| function.name == "helper").expect("helper metadata");
 
-        assert!(
-            err.message.contains("pure function cannot call 'type_hash' Cell identity builtin"),
-            "unexpected error: {}",
-            err.message
-        );
+        assert_eq!(function.declared_effect_class, None);
+        assert_eq!(function.inferred_effect_class, "ReadOnly");
+        assert_eq!(function.effect_class, "ReadOnly");
+        assert_eq!(function.effect_evidence_tier, crate::EvidenceTier::CheckedStatic);
     }
 
     #[test]

@@ -31,7 +31,7 @@ fn git_commit(repo_dir: &std::path::Path, msg: &str) {
 }
 
 fn git_tag(repo_dir: &std::path::Path, tag: &str) {
-    let status = Command::new("git").args(["tag", tag]).current_dir(repo_dir).status().expect("git tag");
+    let status = Command::new("git").args(["-c", "tag.gpgSign=false", "tag", tag]).current_dir(repo_dir).status().expect("git tag");
     assert!(status.success());
 }
 
@@ -4807,7 +4807,7 @@ action issue(digest: Hash) -> Fingerprint {
 }
 
 #[test]
-fn cellc_check_reports_linear_collection_ownership_blocker_class() {
+fn cellc_check_rejects_cell_backed_vec_with_source_aware_guidance() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
 
@@ -4846,41 +4846,20 @@ action batch_mint(owner: Address) -> Vec<NFT> {
     .unwrap();
 
     let json_output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("check").arg("--json").output().unwrap();
-    assert!(json_output.status.success(), "unexpected failure: {}", String::from_utf8_lossy(&json_output.stderr));
+    assert!(!json_output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&json_output.stdout));
     let stdout: serde_json::Value = serde_json::from_slice(&json_output.stdout).unwrap();
-    let target = &stdout["checked_targets"][0];
-    assert_eq!(target["transaction_runtime_input_requirements"], 2, "unexpected stdout: {}", stdout);
-    assert_eq!(target["runtime_required_transaction_runtime_input_requirements"], 1, "unexpected stdout: {}", stdout);
-    assert_eq!(target["checked_transaction_runtime_input_requirements"], 1, "unexpected stdout: {}", stdout);
-    assert_eq!(target["runtime_required_transaction_runtime_input_blockers"], 1, "unexpected stdout: {}", stdout);
-    assert_eq!(target["runtime_required_transaction_runtime_input_blocker_classes"], 1, "unexpected stdout: {}", stdout);
-
-    let runtime_inputs = target["runtime_required_transaction_runtime_input_requirement_summaries"]
-        .as_array()
-        .expect("runtime-required transaction runtime input summaries array");
+    assert_eq!(stdout["status"], "failed");
+    assert_eq!(stdout["diagnostic_count"], 1);
+    let diagnostics = stdout["diagnostics"].as_array().expect("diagnostics array");
     assert!(
-        runtime_inputs.iter().any(|value| value.as_str().is_some_and(|summary| {
-            summary.contains("linear-collection:NFT:linear-collection-ownership=Transaction:NFT.collection-payload")
-                && summary.contains("cell-backed-collection-linear-ownership-model")
-                && summary.contains("(runtime-required)")
-                && summary.contains("blocker=cell-backed collection ownership is not backed by an executable linear collection model")
-                && summary.contains("blocker_class=linear-collection-ownership-gap")
-        })),
-        "unexpected runtime-required transaction runtime input summaries: {}",
+        diagnostics.iter().any(|diagnostic| {
+            diagnostic["message"].as_str().is_some_and(|message| {
+                message.contains("type 'Vec<NFT>' cannot store a cell-backed resource")
+                    && message.contains("use a source-aware BoundedCellSet<T, N> with explicit ownership")
+            })
+        }),
+        "unexpected diagnostics: {}",
         stdout
-    );
-
-    let output =
-        Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("check").arg("--deny-runtime-obligations").output().unwrap();
-    assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("linear-collection:NFT"), "unexpected stderr: {}", stderr);
-    assert!(stderr.contains("linear-collection-ownership"), "unexpected stderr: {}", stderr);
-    assert!(stderr.contains("linear-collection-ownership-gap"), "unexpected stderr: {}", stderr);
-    assert!(
-        stderr.contains("cell-backed collection ownership is not backed by an executable linear collection model"),
-        "unexpected stderr: {}",
-        stderr
     );
 }
 
@@ -5799,16 +5778,12 @@ action ping() -> u64 {
     std::fs::write(
         root.join("tests").join("negative.cell"),
         r#"
-// cellscript-test: expect-error: pure function cannot call action
+// cellscript-test: expect-error: declared effect Pure is too weak for function 'helper'
 module demo::tests::negative
 
-action impure() -> u64 {
-    verification
-        1
-
-}
+#[effect(Pure)]
 fn helper() -> u64 {
-    impure()
+    return env::current_timepoint()
 }
 "#,
     )
@@ -5856,13 +5831,9 @@ action ping() -> u64 {
 // cellscript-test: expect-error: this text is intentionally absent
 module demo::tests::negative
 
-action impure() -> u64 {
-    verification
-        1
-
-}
+#[effect(Pure)]
 fn helper() -> u64 {
-    impure()
+    return env::current_timepoint()
 }
 "#,
     )

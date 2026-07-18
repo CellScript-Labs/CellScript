@@ -108,7 +108,11 @@ fn git_commit(repo_dir: &Path, msg: &str) {
 }
 
 fn git_tag(repo_dir: &Path, tag: &str) {
-    let status = std::process::Command::new("git").args(["tag", tag]).current_dir(repo_dir).status().expect("git tag");
+    let status = std::process::Command::new("git")
+        .args(["-c", "tag.gpgSign=false", "tag", tag])
+        .current_dir(repo_dir)
+        .status()
+        .expect("git tag");
     assert!(status.success(), "git tag failed");
 }
 

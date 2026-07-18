@@ -13,15 +13,15 @@
   },
   {
     "example": "atomic_swap.cell",
-    "line_count": 13225,
-    "text_size": 52596,
-    "relaxed_branch_count": 0,
-    "max_cond_branch_abs_distance": 3172,
-    "machine_block_count": 1345,
+    "line_count": 11223,
+    "text_size": 46204,
+    "relaxed_branch_count": 2,
+    "max_cond_branch_abs_distance": 5264,
+    "machine_block_count": 861,
     "max_machine_block_size": 20252,
-    "machine_cfg_edge_count": 2124,
-    "machine_call_edge_count": 161,
-    "unreachable_machine_block_count": 1155
+    "machine_cfg_edge_count": 1603,
+    "machine_call_edge_count": 368,
+    "unreachable_machine_block_count": 765
   },
   {
     "example": "launch.cell",

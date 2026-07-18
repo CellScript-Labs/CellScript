@@ -3,8 +3,8 @@
 use camino::{Utf8Path, Utf8PathBuf};
 use cellscript::{
     codegen::{analyze_backend_shape, BackendShapeMetrics},
-    compile_file, compile_file_with_entry_action, compile_file_with_entry_lock, compile_path, ArtifactFormat, CompileMetadata,
-    CompileOptions, CompileResult, ProofPlanMetadata,
+    compile_file, compile_file_with_entry_action, compile_file_with_entry_lock, compile_metadata_with_diagnostics, compile_path,
+    ArtifactFormat, CompileMetadata, CompileOptions, CompileResult, ProofPlanMetadata,
 };
 use std::collections::BTreeSet;
 
@@ -446,7 +446,11 @@ fn all_checked_in_cell_examples_compile() {
 #[test]
 fn docs_examples_cellscript_blocks_match_declared_compile_boundary() {
     let collections = markdown_cellscript_blocks(&docs_example_path("collections_matrix.md"));
-    assert_eq!(collections.len(), 2, "collections_matrix.md should have one positive and one negative CellScript block");
+    assert_eq!(
+        collections.len(),
+        3,
+        "collections_matrix.md should have local-helper, schema-boundary, and rejected CellScript blocks"
+    );
     let output_append = markdown_cellscript_blocks(&docs_example_path("output_append.md"));
     assert_eq!(output_append.len(), 1, "output_append.md should have one conceptual CellScript block");
 
@@ -460,10 +464,10 @@ fn docs_examples_cellscript_blocks_match_declared_compile_boundary() {
     compile_file(&output_append_path, CompileOptions::default())
         .unwrap_or_else(|err| panic!("{output_append_path} should compile: {}", err.message));
 
-    let negative_collections = write_wrapped_doc_snippet(&temp_root, "collections_negative", &collections[1]);
-    let negative_result = compile_file(&negative_collections, CompileOptions::default())
-        .unwrap_or_else(|err| panic!("{negative_collections} should compile as a schema-boundary example: {}", err.message));
-    let nested_dynamic = negative_result
+    let schema_boundary_collections = write_wrapped_doc_snippet(&temp_root, "collections_schema_boundary", &collections[1]);
+    let schema_boundary_result = compile_file(&schema_boundary_collections, CompileOptions::default())
+        .unwrap_or_else(|err| panic!("{schema_boundary_collections} should compile as a schema-boundary example: {}", err.message));
+    let nested_dynamic = schema_boundary_result
         .metadata
         .molecule_schema_manifest
         .entries
@@ -476,14 +480,21 @@ fn docs_examples_cellscript_blocks_match_declared_compile_boundary() {
         "NestedDynamic should keep rows as an explicit dynamic schema field: {nested_dynamic:?}"
     );
     assert!(
-        negative_result.metadata.runtime.collection_instantiations.is_empty(),
+        schema_boundary_result.metadata.runtime.collection_instantiations.is_empty(),
         "schema-boundary example must not be reported as stack-backed local collection helper support: {:?}",
-        negative_result.metadata.runtime.collection_instantiations
+        schema_boundary_result.metadata.runtime.collection_instantiations
     );
-    let hidden_ownership = action(&negative_result.metadata, "hidden_ownership");
+
+    let rejected_collections = write_wrapped_doc_snippet(&temp_root, "collections_rejected", &collections[2]);
+    let rejected_source = std::fs::read_to_string(&rejected_collections).expect("rejected collection snippet should be readable");
+    let rejected_report = compile_metadata_with_diagnostics(&rejected_source, None);
     assert!(
-        hidden_ownership.consume_set.is_empty() && hidden_ownership.create_set.is_empty() && hidden_ownership.mutate_set.is_empty(),
-        "cell-backed collection snippet must not claim resource ownership transitions: {hidden_ownership:?}"
+        rejected_report.diagnostics.iter().any(|diagnostic| {
+            diagnostic.message.contains("type 'Vec<Token>' cannot store a cell-backed resource")
+                && diagnostic.message.contains("use a source-aware BoundedCellSet<T, N> with explicit ownership")
+        }),
+        "cell-backed collection snippet should fail closed with source-aware guidance: {:?}",
+        rejected_report.diagnostics
     );
 }
 

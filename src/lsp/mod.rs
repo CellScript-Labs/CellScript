@@ -3191,27 +3191,18 @@ action update(amount: u64) -> u64 {
     fn test_code_actions_for_lowering_diagnostics() {
         let mut server = LspServer::new();
         let uri = "file:///metadata_action.cell".to_string();
-        let source = r#"
-module metadata_action
+        let diagnostic_range = Range { start: Position { line: 2, character: 0 }, end: Position { line: 5, character: 1 } };
+        server.diagnostics.insert(
+            uri.clone(),
+            vec![Diagnostic {
+                range: diagnostic_range,
+                severity: DiagnosticSeverity::Warning,
+                message: "action emits fail-closed runtime traps".to_string(),
+                source: "cellscript-lowering".to_string(),
+            }],
+        );
 
-resource NFT {
-    token_id: u64,
-}
-
-action use_collection() -> Vec<NFT> {
-    verification
-        let mut items = Vec::new()
-        let nft = create NFT {
-            token_id: 1,
-        }
-        items.push(nft)
-        return items
-}
-"#;
-        server.open_document(uri.clone(), source.to_string());
-
-        let actions =
-            server.code_action(&uri, Range { start: Position { line: 0, character: 0 }, end: Position { line: 20, character: 0 } });
+        let actions = server.code_action(&uri, diagnostic_range);
         assert!(actions.iter().any(|action| action.title.contains("cellc metadata")));
         assert!(actions.iter().any(|action| action.title.contains("riscv64-asm")));
         assert!(actions.iter().all(|action| action.edit.is_none()));

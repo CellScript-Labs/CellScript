@@ -487,7 +487,7 @@ fn molecule_inline_type_fixed_width(
 }
 
 fn layout_fixed_scalar_width(layout: &SchemaFieldLayout) -> Option<usize> {
-    fixed_scalar_width(&layout.ty, layout.fixed_size).or(layout.fixed_enum_size)
+    fixed_scalar_width(&layout.ty, layout.fixed_size).or_else(|| layout.fixed_enum_size.filter(|width| *width <= 8))
 }
 
 fn layout_fixed_byte_width(layout: &SchemaFieldLayout) -> Option<usize> {

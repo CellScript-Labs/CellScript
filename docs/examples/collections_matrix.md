@@ -11,9 +11,11 @@ Recommended authoring rule:
 - use schema/ABI vectors such as `Vec<u8>`, `Vec<Address>`, and `Vec<Hash>`
   for Molecule/witness payloads
 - use profile-gated checks for dynamic cell layouts
-- treat nested dynamic containers and cell-backed collection ownership as
-  schema/ABI boundary shapes only unless metadata, constraints, and verifier
-  evidence prove a concrete production helper or ownership model
+- treat nested dynamic containers as schema/ABI boundary shapes unless
+  metadata, constraints, and verifier evidence prove a concrete production
+  helper
+- model Cell-backed collections with a source-aware `BoundedCellSet<T, N>`;
+  `Vec<Cell>` is rejected because it hides transaction source and ownership
 
 Current stack-backed local `Vec<T>` support is deliberately bounded compiler
 lowering for verifier-local fixed-width values. It is not a production
@@ -57,13 +59,19 @@ resource FixedVotes has store, create, consume, replace {
 }
 ```
 
-Avoid claiming production support for shapes like:
+Treat nested dynamic layouts as schema/ABI shapes, not stack-backed local
+collection helpers:
 
 ```cellscript
 resource NestedDynamic has store, create, consume, replace {
     rows: Vec<Vec<u8>>,
 }
+```
 
+Cell-backed `Vec<T>` is rejected. Use a source-aware bounded set with explicit
+ownership instead:
+
+```cellscript
 resource Token has store, create, consume, replace {
     owner: Address,
     amount: u64,
