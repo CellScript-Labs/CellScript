@@ -1,0 +1,29 @@
+// audit: phase=accept
+// audit: protocol_role_action=refund
+// audit: protocol_role=participant
+// audit: protocol_role_source=verification-predicate
+// audit: protocol_role_conflict=true
+module cellscript::audit::seed_protocolgraph_role_conflict
+
+enum SwapState {
+    Pending,
+    Refunded,
+}
+
+resource SwapLock has store {
+    state: SwapState,
+    initiator: Address,
+    participant: Address,
+}
+
+flow SwapLock.state {
+    initial Pending;
+    terminal Refunded;
+    Pending -> Refunded;
+}
+
+action refund(input swap: SwapLock, witness initiator: Address) -> output: SwapLock {
+    transition swap.state: Pending -> output.state: Refunded
+    verification
+        require initiator == swap.participant
+}

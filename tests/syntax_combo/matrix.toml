@@ -4,8 +4,8 @@
 
 [mode.quick]
 budget = 64
-min_cases = 19
-min_accept = 9
+min_cases = 21
+min_accept = 11
 min_reject = 10
 required_origins = [
     "generated",
@@ -33,13 +33,15 @@ required_origins = [
     "tests/syntax_combo/seeds/payload-enum-dynamic-reject.cell",
     "tests/syntax_combo/seeds/payload-enum-linear-drop-reject.cell",
     "tests/syntax_combo/seeds/payload-enum-generic-reject.cell",
+    "tests/syntax_combo/seeds/protocolgraph-role-weak.cell",
+    "tests/syntax_combo/seeds/protocolgraph-role-conflict.cell",
 ]
 description = "Local smoke: deterministic generated cases plus regression seeds."
 
 [mode.ci]
 budget = 1000
-min_cases = 41
-min_accept = 23
+min_cases = 43
+min_accept = 25
 min_reject = 18
 required_origins = [
     "generated",
@@ -78,13 +80,15 @@ required_origins = [
     "tests/syntax_combo/seeds/payload-enum-dynamic-reject.cell",
     "tests/syntax_combo/seeds/payload-enum-linear-drop-reject.cell",
     "tests/syntax_combo/seeds/payload-enum-generic-reject.cell",
+    "tests/syntax_combo/seeds/protocolgraph-role-weak.cell",
+    "tests/syntax_combo/seeds/protocolgraph-role-conflict.cell",
 ]
 description = "PR gate: pairwise generated cases plus regression seeds."
 
 [mode.deep]
 budget = 5000
-min_cases = 44
-min_accept = 23
+min_cases = 46
+min_accept = 25
 min_reject = 21
 required_origins = [
     "generated",
@@ -126,6 +130,8 @@ required_origins = [
     "tests/syntax_combo/seeds/payload-enum-dynamic-reject.cell",
     "tests/syntax_combo/seeds/payload-enum-linear-drop-reject.cell",
     "tests/syntax_combo/seeds/payload-enum-generic-reject.cell",
+    "tests/syntax_combo/seeds/protocolgraph-role-weak.cell",
+    "tests/syntax_combo/seeds/protocolgraph-role-conflict.cell",
 ]
 description = "Release audit: triplewise sample, mutations, and selected CKB acceptance."
 
@@ -177,6 +183,8 @@ required_bug_classes.quick = [
     "SCA-BUG-0.22-PAYLOAD-MATCH-NONEXHAUSTIVE",
     "SCA-BUG-0.22-PAYLOAD-DYNAMIC-ACCEPTED",
     "SCA-BUG-0.22-PAYLOAD-LINEAR-DROP",
+    "SCA-BUG-0.22-PROTOCOLGRAPH-ROLE-OVERCLAIM",
+    "SCA-BUG-0.22-PROTOCOLGRAPH-ROLE-CONFLICT",
 ]
 
 required_bug_classes.ci = [

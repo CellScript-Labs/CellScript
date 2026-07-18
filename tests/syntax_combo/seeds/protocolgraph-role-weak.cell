@@ -1,0 +1,16 @@
+// audit: phase=accept
+// audit: protocol_role_action=inspect
+// audit: protocol_role=owner
+// audit: protocol_role_source=field-name
+// audit: protocol_role_conflict=false
+module cellscript::audit::seed_protocolgraph_role_weak
+
+resource Vault has store {
+    owner: Address,
+    amount: u64,
+}
+
+action inspect(input vault: Vault) -> output: Vault {
+    verification
+        require output.amount == vault.amount
+}

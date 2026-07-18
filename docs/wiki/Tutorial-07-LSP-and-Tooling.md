@@ -122,6 +122,14 @@ The 0.21 compiler also ships `cellscript-mcp`, compile receipts, ProtocolGraph,
 TemplateLayout, and helper-backed aggregate evidence. Those remain compiler/MCP
 surfaces in this extension release rather than command-palette entries.
 
+On the 0.22 nightly line, `cellc explain graph --json` attributes participant
+roles on each edge. Prefer `role_source = verification-predicate`; binding
+sources are secondary and `field-name` is weak metadata. Always display
+`role_warnings` and `authorization_proven` alongside the role. Mermaid output
+includes the selected role and source in the edge label, while summary output
+reports the deduplicated role-lint count. These labels explain the protocol;
+they do not prove that an Address signed or that a lock authorized the action.
+
 That report is a guide, not a deployment certificate. Chain acceptance still
 requires CLI evidence and builder-backed CKB transactions.
 

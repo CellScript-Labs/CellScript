@@ -148,13 +148,13 @@ artifact-binding facts, and CKB constraint summaries can now move independently
 in future schema revisions. `verify-artifact` still rejects a mismatch in any of
 these versions.
 
-Schema 52 includes `runtime.transaction_view_handles`. Each record identifies the
+Schema 53 includes `runtime.transaction_view_handles`. Each record identifies the
 callable scope, source (`Input`, `GroupOutput`, `CellDep`, and so on), public
 handle type, and evidence tiers. A conforming record is a read-only view with
 `lifecycle_authority = false`; it is evidence of a transaction read surface,
 not evidence that a Cell was consumed or an output was created.
 
-Schema 52 also makes capability authority auditable. The top-level
+Schema 53 also makes capability authority auditable. The top-level
 `capability_registry` fixes both the closed vocabulary and entailment version;
 each persistent type repeats `capability_set_version`. For every accepted
 `destroy` or `replace_unique`, inspect `runtime.capability_proofs`: `required`,
@@ -163,7 +163,7 @@ the proof's versions must match the registry. `replace_unique` additionally
 records the exact `identity(...)` condition declared by the same resource.
 No proof may source authority from a container or another Cell type.
 
-Schema 52 adds top-level `enum_layouts` for concrete payload ADTs. Audit the
+Schema 53 includes top-level `enum_layouts` for concrete payload ADTs. Audit the
 `packed-tagged-union-v1` layout, one-byte tag, sequential variant tags, packed
 field offsets, encoded size, ownership, storage, and ABI together. A
 `linear-cell-handle` field is exactly eight bytes and forces
@@ -189,7 +189,7 @@ the `consume_each` runtime-helper tier. For `BoundedList<P, N>` driving
 `builder-evidence-required`; it is not proof that a transaction builder supplied
 the matching outputs or sufficient capacity.
 
-Schema 52 also carries `types[].validity_predicates`. Review each predicate's
+Schema 53 also carries `types[].validity_predicates`. Review each predicate's
 `expression`, `dependencies`, `evidence_tier`,
 `runtime_checked_on_create`, `create_paths_selected`,
 `create_paths_checked`, `update_paths_selected`, `create_path_status`,
@@ -208,7 +208,7 @@ are compile errors. Pure imported helpers are retained transitively and receive
 module-qualified dependency names; lifecycle helpers and transaction-view
 reads are rejected in validity predicates.
 
-Schema 52 records explicit borrow blocks in `runtime.borrow_regions`. Review
+Schema 53 records explicit borrow blocks in `runtime.borrow_regions`. Review
 `root`, `binding`, `view_type`, `storage`, `abi`, `allowed_effects`,
 `evidence_tier`, and `source_span`. A canonical record has `View<T>`,
 `storage = none`, `abi = none`, `allowed_effects = [Pure, ReadOnly]`, and
@@ -254,6 +254,23 @@ cellc deploy plan src/main.cell --json
 cellc proof-diff old.meta.json new.meta.json --json
 cellc audit-bundle src/main.cell --output target/audit
 ```
+
+ProtocolGraph role labels are explanatory metadata. For each action, inspect
+`actions[].protocol_role_candidates`; for each graph edge, inspect `role`,
+`role_source`, `role_source_used`, `role_candidates`, `role_status`, and
+`role_warnings`. The deterministic precedence is:
+
+1. a direct verification equality between an Address-valued Cell field and an
+   Address supplied by witness, default entry witness, or `lock_args`;
+2. a participant-like witness or `lock_args` Address binding;
+3. a participant-like Address field name.
+
+The third form is deliberately weak. Renaming `participant` to a neutral field
+name yields `PG-ROLE-MISSING`; it never silently creates authority. Conflicting
+roles yield `PG-ROLE-CONFLICT` while preserving all sources. Every role record
+is `metadata-only` with `authorization_proven = false`, and no role appears as
+authorization evidence in ProofPlan. Authorization still has to be enforced by
+the lock/type Script and its generated runtime checks.
 
 ## 0.21 Compile Receipts
 

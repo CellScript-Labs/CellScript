@@ -345,6 +345,82 @@ action swap(input pool: Pool) -> output: Pool {
     .to_string()
 }
 
+fn protocol_graph_explicit_role_source() -> String {
+    r#"
+module test
+
+enum SwapState {
+    Pending,
+    Claimed,
+}
+
+resource SwapLock has store {
+    state: SwapState,
+    participant: Address,
+}
+
+flow SwapLock.state {
+    initial Pending;
+    terminal Claimed;
+    Pending -> Claimed;
+}
+
+action claim(input swap: SwapLock, witness participant: Address) -> output: SwapLock {
+    transition swap.state: Pending -> output.state: Claimed
+    verification
+        require participant == swap.participant
+}
+"#
+    .to_string()
+}
+
+fn protocol_graph_conflicting_role_source() -> String {
+    r#"
+module test
+
+enum SwapState {
+    Pending,
+    Refunded,
+}
+
+resource SwapLock has store {
+    state: SwapState,
+    initiator: Address,
+    participant: Address,
+}
+
+flow SwapLock.state {
+    initial Pending;
+    terminal Refunded;
+    Pending -> Refunded;
+}
+
+action refund(input swap: SwapLock, witness initiator: Address) -> output: SwapLock {
+    transition swap.state: Pending -> output.state: Refunded
+    verification
+        require initiator == swap.participant
+}
+"#
+    .to_string()
+}
+
+fn protocol_graph_weak_field_role_source() -> String {
+    r#"
+module test
+
+resource Vault has store {
+    owner: Address,
+    amount: u64,
+}
+
+action inspect(input vault: Vault) -> output: Vault {
+    verification
+        require output.amount == vault.amount
+}
+"#
+    .to_string()
+}
+
 #[test]
 fn cellc_explain_graph_reports_cyclic_protocol_view() {
     let dir = tempfile::tempdir().unwrap();
@@ -366,6 +442,72 @@ fn cellc_explain_graph_reports_cyclic_protocol_view() {
             && edge["target_vertex"] == "Pool"
             && edge["derivation"] == "type-pattern"
     }));
+    assert!(graph["role_lints"].as_array().unwrap().iter().any(|lint| lint["code"] == "PG-ROLE-MISSING"));
+}
+
+#[test]
+fn cellc_explain_graph_attributes_explicit_protocol_role_without_authorization_claim() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("role.cell");
+    std::fs::write(&input, protocol_graph_explicit_role_source()).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).args(["explain", "graph"]).arg(&input).arg("--json").output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+
+    let graph: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let edge = graph["edges"].as_array().unwrap().iter().find(|edge| edge["action_name"] == "claim").expect("claim graph edge");
+    assert_eq!(edge["role"], "participant");
+    assert_eq!(edge["role_source"], "verification-predicate");
+    assert_eq!(edge["role_strength"], "explicit");
+    assert_eq!(edge["role_status"], "attributed");
+    assert_eq!(edge["role_evidence_tier"], "metadata-only");
+    assert_eq!(edge["authorization_proven"], false);
+    assert_eq!(edge["role_conflict"], false);
+    assert_eq!(edge["role_source_used"]["actor_binding"], "participant");
+    assert_eq!(edge["role_source_used"]["actor_source"], "witness");
+    assert_eq!(graph["role_model"]["authorization_proven"], false);
+    assert_eq!(graph["role_warning_count"], 0);
+}
+
+#[test]
+fn cellc_explain_graph_lints_weak_field_role_without_overclaiming_authority() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("weak-role.cell");
+    std::fs::write(&input, protocol_graph_weak_field_role_source()).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).args(["explain", "graph"]).arg(&input).arg("--json").output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+
+    let graph: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let edge = graph["edges"].as_array().unwrap().first().expect("Vault graph edge");
+    assert_eq!(edge["role"], "owner");
+    assert_eq!(edge["role_source"], "field-name");
+    assert_eq!(edge["role_status"], "weak-field-inference");
+    assert_eq!(edge["authorization_proven"], false);
+    assert!(edge["role_warnings"].as_array().unwrap().iter().any(|warning| warning["code"] == "PG-ROLE-WEAK-FIELD"));
+}
+
+#[test]
+fn cellc_explain_graph_resolves_conflicting_role_sources_deterministically() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("conflicting-role.cell");
+    std::fs::write(&input, protocol_graph_conflicting_role_source()).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).args(["explain", "graph"]).arg(&input).arg("--json").output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+
+    let graph: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let edge = graph["edges"].as_array().unwrap().iter().find(|edge| edge["action_name"] == "refund").expect("refund graph edge");
+    assert_eq!(edge["role"], "participant");
+    assert_eq!(edge["role_source"], "verification-predicate");
+    assert_eq!(edge["role_status"], "conflicting");
+    assert_eq!(edge["role_conflict"], true);
+    assert!(edge["role_candidates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|candidate| { candidate["role"] == "initiator" && candidate["source"] == "witness-binding" }));
+    assert!(graph["role_lints"].as_array().unwrap().iter().any(|warning| warning["code"] == "PG-ROLE-CONFLICT"));
 }
 
 #[test]

@@ -37,6 +37,14 @@
   an explicit pure-helper register-pair return ABI up to 16 bytes. Schema 52
   publishes canonical `enum_layouts`; dynamic, recursive, and generic payloads
   remain fail-closed/deferred.
+- Add participant-role attribution to the derived ProtocolGraph without adding
+  core session/channel syntax. Action metadata retains candidates from explicit
+  Address equality predicates, witness or lock-args bindings, and weak
+  participant-like Address field names in that precedence order. Graph edges
+  publish the selected source, every candidate, deterministic conflict/missing
+  lints, `metadata-only` evidence, and `authorization_proven = false`; roles are
+  intentionally absent from ProofPlan. Schema 53 carries
+  `actions[].protocol_role_candidates`.
 - Add canonical type `validity` blocks. Pure field predicates lower to
   fail-closed checks before selected create/constructor instructions; paths
   without concrete lowering remain `runtime-helper-required`. The only

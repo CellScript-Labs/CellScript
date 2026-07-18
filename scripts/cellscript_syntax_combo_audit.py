@@ -263,6 +263,22 @@ BUG_CLASS_CONTRACTS: tuple[dict[str, Any], ...] = (
         "release_boundary": "a Cell payload cannot disappear through wildcard binding or implicit arm-local drop",
     },
     {
+        "id": "SCA-BUG-0.22-PROTOCOLGRAPH-ROLE-OVERCLAIM",
+        "name": "field-name role hints remain weak metadata and never authorization evidence",
+        "min_mode": "quick",
+        "required_cases": ("seed-protocolgraph-role-weak",),
+        "required_origins": ("tests/syntax_combo/seeds/protocolgraph-role-weak.cell",),
+        "release_boundary": "a participant-like Address field records source=field-name, evidence_tier=metadata-only, and authorization_proven=false",
+    },
+    {
+        "id": "SCA-BUG-0.22-PROTOCOLGRAPH-ROLE-CONFLICT",
+        "name": "conflicting ProtocolGraph role sources remain attributed and deterministically ordered",
+        "min_mode": "quick",
+        "required_cases": ("seed-protocolgraph-role-conflict",),
+        "required_origins": ("tests/syntax_combo/seeds/protocolgraph-role-conflict.cell",),
+        "release_boundary": "explicit predicates precede witness/lock_args bindings and weak field names without entering ProofPlan",
+    },
+    {
         "id": "SCA-BUG-STDLIB-ARGUMENT-VALIDATION",
         "name": "stdlib lifecycle helpers validate arity, cell kind, lock target, and claim output",
         "min_mode": "ci",
@@ -365,6 +381,10 @@ class Oracle:
     capability_operation: str | None = None
     capability_type: str | None = None
     payload_enum: str | None = None
+    protocol_role_action: str | None = None
+    protocol_role: str | None = None
+    protocol_role_source: str | None = None
+    protocol_role_conflict: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -1597,6 +1617,10 @@ def parse_seed(path: Path) -> AuditCase:
     capability_operation: str | None = None
     capability_type: str | None = None
     payload_enum: str | None = None
+    protocol_role_action: str | None = None
+    protocol_role: str | None = None
+    protocol_role_source: str | None = None
+    protocol_role_conflict: bool | None = None
     for line in text.splitlines():
         stripped = line.strip()
         if not stripped.startswith("// audit:"):
@@ -1623,6 +1647,14 @@ def parse_seed(path: Path) -> AuditCase:
             capability_type = value
         elif key == "payload_enum":
             payload_enum = value
+        elif key == "protocol_role_action":
+            protocol_role_action = value
+        elif key == "protocol_role":
+            protocol_role = value
+        elif key == "protocol_role_source":
+            protocol_role_source = value
+        elif key == "protocol_role_conflict":
+            protocol_role_conflict = value.lower() == "true"
     return AuditCase(
         name=f"seed-{path.stem}",
         source=text,
@@ -1635,6 +1667,10 @@ def parse_seed(path: Path) -> AuditCase:
             capability_operation=capability_operation,
             capability_type=capability_type,
             payload_enum=payload_enum,
+            protocol_role_action=protocol_role_action,
+            protocol_role=protocol_role,
+            protocol_role_source=protocol_role_source,
+            protocol_role_conflict=protocol_role_conflict,
         ),
         origin=str(path.relative_to(ROOT)),
     )
@@ -1890,6 +1926,71 @@ def validate_metadata(case: AuditCase, metadata_path: Path, run_dir: Path) -> li
                         run_dir,
                     )
                 )
+    if oracle.protocol_role_action:
+        action = find_action(metadata, oracle.protocol_role_action)
+        if action is None:
+            failures.append(
+                failure(
+                    case,
+                    "metadata",
+                    "SCA-META-PROTOCOL-ROLE-ACTION",
+                    f"missing ProtocolGraph role action {oracle.protocol_role_action}",
+                    run_dir,
+                )
+            )
+        else:
+            candidates = action.get("protocol_role_candidates", [])
+            if not candidates:
+                failures.append(
+                    failure(case, "metadata", "SCA-META-PROTOCOL-ROLE", "missing attributed role candidates", run_dir)
+                )
+            else:
+                selected = candidates[0]
+                if selected.get("role") != oracle.protocol_role or selected.get("source") != oracle.protocol_role_source:
+                    failures.append(
+                        failure(
+                            case,
+                            "metadata",
+                            "SCA-META-PROTOCOL-ROLE-PRECEDENCE",
+                            f"selected role/source {selected.get('role')!r}@{selected.get('source')!r} does not match {oracle.protocol_role!r}@{oracle.protocol_role_source!r}",
+                            run_dir,
+                        )
+                    )
+                if any(
+                    candidate.get("evidence_tier") != "metadata-only" or candidate.get("authorization_proven") is not False
+                    for candidate in candidates
+                ):
+                    failures.append(
+                        failure(
+                            case,
+                            "metadata",
+                            "SCA-META-PROTOCOL-ROLE-OVERCLAIM",
+                            "role candidates must remain metadata-only with authorization_proven=false",
+                            run_dir,
+                        )
+                    )
+                roles = {candidate.get("role") for candidate in candidates}
+                actual_conflict = len(roles) > 1
+                if oracle.protocol_role_conflict is not None and actual_conflict != oracle.protocol_role_conflict:
+                    failures.append(
+                        failure(
+                            case,
+                            "metadata",
+                            "SCA-META-PROTOCOL-ROLE-CONFLICT",
+                            f"role conflict={actual_conflict} does not match expected {oracle.protocol_role_conflict}",
+                            run_dir,
+                        )
+                    )
+                if any(plan.get("category") == "protocol-role" for plan in action.get("proof_plan", [])):
+                    failures.append(
+                        failure(
+                            case,
+                            "metadata",
+                            "SCA-META-PROTOCOL-ROLE-PROOFPLAN",
+                            "ProtocolGraph roles must not appear as ProofPlan authorization evidence",
+                            run_dir,
+                        )
+                    )
     if oracle.borrow_scope:
         borrow_regions = [
             region

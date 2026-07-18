@@ -20756,6 +20756,7 @@ mod tests {
                 params: vec![],
                 return_type: Some(IrType::U64),
                 state_transition_edges: vec![],
+                protocol_role_candidates: vec![],
                 effect_class: EffectClass::Pure,
                 scheduler_hints: SchedulerHints::default(),
                 body: IrBody {

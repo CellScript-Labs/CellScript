@@ -2526,6 +2526,8 @@ impl CommandExecutor {
                 println!("  Vertices: {}", graph["vertex_count"].as_u64().unwrap_or_default());
                 println!("  Edges: {}", graph["edge_count"].as_u64().unwrap_or_default());
                 println!("  Cycles: {}", if graph["cycle_detected"].as_bool().unwrap_or(false) { "detected" } else { "not detected" });
+                println!("  Role lints: {}", graph["role_warning_count"].as_u64().unwrap_or_default());
+                println!("  Role authority: metadata-only (never authorization proof)");
                 println!("  Consensus checked: no");
                 Ok(())
             }
@@ -9055,6 +9057,7 @@ fn protocol_graph_json(metadata: &CompileMetadata) -> serde_json::Value {
     let vertex_values = vertices.values().cloned().collect::<Vec<_>>();
     let cycle_detected = protocol_graph_has_cycle(&edges);
     let self_loop_count = edges.iter().filter(|edge| edge.get("source_vertex") == edge.get("target_vertex")).count();
+    let role_lints = protocol_graph_role_lints(&edges);
 
     serde_json::json!({
         "status": "ok",
@@ -9067,6 +9070,14 @@ fn protocol_graph_json(metadata: &CompileMetadata) -> serde_json::Value {
         "edge_count": edges.len(),
         "cycle_detected": cycle_detected,
         "self_loop_count": self_loop_count,
+        "role_model": {
+            "semantics": "explanatory-metadata-only",
+            "evidence_tier": "metadata-only",
+            "authorization_proven": false,
+            "source_precedence": ["verification-predicate", "witness-or-lock-args-binding", "field-name"],
+        },
+        "role_warning_count": role_lints.len(),
+        "role_lints": role_lints,
         "vertices": vertex_values,
         "edges": edges,
     })
@@ -9131,6 +9142,7 @@ fn protocol_graph_push_edge(
         .into_iter()
         .collect::<Vec<_>>();
     let source_span = action.proof_plan.iter().find_map(|plan| plan.source_span.clone());
+    let role = protocol_graph_role_view(action);
 
     edges.push(serde_json::json!({
         "action_name": &action.name,
@@ -9147,7 +9159,104 @@ fn protocol_graph_push_edge(
         "builder_assumptions": builder_assumptions,
         "touches_shared": &action.touches_shared,
         "source_span": source_span,
+        "role": role["role"].clone(),
+        "role_source": role["role_source"].clone(),
+        "role_strength": role["role_strength"].clone(),
+        "role_status": role["role_status"].clone(),
+        "role_source_used": role["role_source_used"].clone(),
+        "role_candidates": role["role_candidates"].clone(),
+        "role_conflict": role["role_conflict"].clone(),
+        "role_warnings": role["role_warnings"].clone(),
+        "role_evidence_tier": "metadata-only",
+        "authorization_proven": false,
     }));
+}
+
+fn protocol_graph_role_view(action: &crate::ActionMetadata) -> serde_json::Value {
+    let selected = action.protocol_role_candidates.first();
+    let roles = action.protocol_role_candidates.iter().map(|candidate| candidate.role.as_str()).collect::<BTreeSet<_>>();
+    let conflict = roles.len() > 1;
+    let mut warnings = Vec::new();
+
+    if selected.is_none() {
+        warnings.push(serde_json::json!({
+            "code": "PG-ROLE-MISSING",
+            "severity": "warning",
+            "action_name": &action.name,
+            "message": format!(
+                "action '{}' has no explicit predicate, witness/lock_args binding, or weak participant field candidate; role remains unknown",
+                action.name
+            ),
+        }));
+    }
+    if selected.is_some_and(|candidate| candidate.source == "field-name") {
+        warnings.push(serde_json::json!({
+            "code": "PG-ROLE-WEAK-FIELD",
+            "severity": "warning",
+            "action_name": &action.name,
+            "message": format!(
+                "action '{}' role '{}' comes only from a field name and does not prove signer or authorization authority",
+                action.name,
+                selected.map_or("unknown", |candidate| candidate.role.as_str())
+            ),
+        }));
+    }
+    if conflict {
+        let sources = action
+            .protocol_role_candidates
+            .iter()
+            .map(|candidate| format!("{}@{}", candidate.role, candidate.source))
+            .collect::<Vec<_>>();
+        warnings.push(serde_json::json!({
+            "code": "PG-ROLE-CONFLICT",
+            "severity": "warning",
+            "action_name": &action.name,
+            "message": format!(
+                "action '{}' has conflicting role candidates [{}]; selected '{}@{}' by canonical source precedence",
+                action.name,
+                sources.join(", "),
+                selected.map_or("unknown", |candidate| candidate.role.as_str()),
+                selected.map_or("none", |candidate| candidate.source.as_str())
+            ),
+        }));
+    }
+
+    let status = if selected.is_none() {
+        "missing"
+    } else if conflict {
+        "conflicting"
+    } else if selected.is_some_and(|candidate| candidate.source == "field-name") {
+        "weak-field-inference"
+    } else {
+        "attributed"
+    };
+
+    serde_json::json!({
+        "role": selected.map(|candidate| candidate.role.as_str()),
+        "role_source": selected.map(|candidate| candidate.source.as_str()),
+        "role_strength": selected.map(|candidate| candidate.strength.as_str()),
+        "role_status": status,
+        "role_source_used": selected,
+        "role_candidates": &action.protocol_role_candidates,
+        "role_conflict": conflict,
+        "role_warnings": warnings,
+    })
+}
+
+fn protocol_graph_role_lints(edges: &[serde_json::Value]) -> Vec<serde_json::Value> {
+    let mut lints = BTreeMap::new();
+    for edge in edges {
+        let Some(warnings) = edge.get("role_warnings").and_then(serde_json::Value::as_array) else {
+            continue;
+        };
+        for warning in warnings {
+            let action = warning.get("action_name").and_then(serde_json::Value::as_str).unwrap_or_default();
+            let code = warning.get("code").and_then(serde_json::Value::as_str).unwrap_or_default();
+            let message = warning.get("message").and_then(serde_json::Value::as_str).unwrap_or_default();
+            lints.entry(format!("{action}\0{code}\0{message}")).or_insert_with(|| warning.clone());
+        }
+    }
+    lints.into_values().collect()
 }
 
 fn protocol_graph_type_pattern_vertices(action: &crate::ActionMetadata, type_names: &BTreeSet<String>) -> (Vec<String>, Vec<String>) {
@@ -9273,7 +9382,14 @@ fn protocol_graph_mermaid(graph: &serde_json::Value) -> String {
                 continue;
             };
             let action = edge.get("action_name").and_then(serde_json::Value::as_str).unwrap_or("action");
-            output.push_str(&format!("  {} -->|{}| {}\n", source, protocol_graph_mermaid_escape(action), target));
+            let label = match (
+                edge.get("role").and_then(serde_json::Value::as_str),
+                edge.get("role_source").and_then(serde_json::Value::as_str),
+            ) {
+                (Some(role), Some(source)) => format!("{action} · {role} via {source}"),
+                _ => format!("{action} · role unknown"),
+            };
+            output.push_str(&format!("  {} -->|{}| {}\n", source, protocol_graph_mermaid_escape(&label), target));
         }
     }
     output

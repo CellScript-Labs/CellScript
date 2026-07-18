@@ -52,7 +52,7 @@ modes; they do not create a new gate command:
   a terminal state. `release` still requires exact-artifact and chain evidence
   before a production claim.
 
-Metadata schema `52` carries declared/inferred/effective function effects, the
+Metadata schema `53` carries declared/inferred/effective function effects, the
 initial, terminal, discharge, state-model, and audit-warning fields for flows,
 the canonical evidence tier on ProofPlan, flow, and function metadata, and
 typed transaction-view handle records under
@@ -72,6 +72,18 @@ Cell payload are local-only linear handles and cannot cross storage or entry
 ABI boundaries. Dynamic, recursive, and generic payload ADTs fail before IR.
 Quick syntax coverage pins exhaustive matching, dynamic rejection, and
 arm-local linear discharge through the three `SCA-BUG-0.22-PAYLOAD-*` classes.
+
+ProtocolGraph participant roles remain a derived audit view, never a verifier
+or authorization condition. `actions[].protocol_role_candidates` preserves
+the source of each candidate. A direct Address equality in a verification
+predicate wins over witness/entry-witness or `lock_args` bindings, which win
+over participant-like Address field names. Every candidate must carry
+`evidence_tier = metadata-only` and `authorization_proven = false`; the
+metadata validator rejects a `protocol-role` ProofPlan category. Graph edges
+publish `role_source_used`, all candidates, and deterministic
+`PG-ROLE-MISSING`, `PG-ROLE-WEAK-FIELD`, or `PG-ROLE-CONFLICT` lints. The quick
+syntax gate pins the overclaim and conflict boundaries with the two
+`SCA-BUG-0.22-PROTOCOLGRAPH-*` classes.
 
 The top-level `capability_registry` is a closed, versioned audit contract.
 Every `types[]` record carries the matching `capability_set_version`.

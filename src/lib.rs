@@ -201,7 +201,7 @@ fn strict_capability_name(capability: ast::Capability) -> &'static str {
 const DEFAULT_TARGET: &str = "riscv64-asm";
 const DEFAULT_TARGET_PROFILE: &str = "ckb";
 const ARTIFACT_CACHE_VERSION: &str = "project-source-set-v5";
-pub const METADATA_SCHEMA_VERSION: u32 = 52;
+pub const METADATA_SCHEMA_VERSION: u32 = 53;
 pub const SOURCE_METADATA_SCHEMA_VERSION: u32 = 1;
 pub const ARTIFACT_METADATA_SCHEMA_VERSION: u32 = 1;
 pub const CONSTRAINTS_METADATA_SCHEMA_VERSION: u32 = 1;
@@ -459,6 +459,27 @@ pub struct PayloadEnumFieldMetadata {
     pub offset_bytes: usize,
     pub width_bytes: usize,
     pub ownership: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProtocolRoleCandidateMetadata {
+    pub role: String,
+    pub source: String,
+    pub strength: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actor_binding: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actor_source: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cell_binding: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub field_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub predicate: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_span: Option<ProofPlanSourceSpanMetadata>,
+    pub evidence_tier: EvidenceTier,
+    pub authorization_proven: bool,
 }
 
 fn missing_metadata_component_schema_version() -> u32 {
@@ -1085,6 +1106,7 @@ pub fn validate_compile_metadata(metadata: &CompileMetadata, artifact_format: Ar
     validate_type_identity_metadata(metadata)?;
     validate_capability_metadata(metadata)?;
     validate_payload_enum_layout_metadata(metadata)?;
+    validate_protocol_role_metadata(metadata)?;
     validate_type_validity_metadata(metadata)?;
     validate_capacity_floor_metadata(metadata)?;
     validate_ckb_constraints_summary_metadata(metadata)?;
@@ -1304,6 +1326,110 @@ fn validate_payload_enum_layout_metadata(metadata: &CompileMetadata) -> Result<(
         }
     }
     Ok(())
+}
+
+fn validate_protocol_role_metadata(metadata: &CompileMetadata) -> Result<()> {
+    for action in &metadata.actions {
+        let mut seen = HashSet::new();
+        let mut previous_key = None;
+        for (index, candidate) in action.protocol_role_candidates.iter().enumerate() {
+            let prefix = format!("metadata action '{}'.protocol_role_candidates[{index}]", action.name);
+            if candidate.role.trim().is_empty() {
+                return Err(CompileError::without_span(format!("{prefix}.role must not be empty")));
+            }
+            if candidate.evidence_tier != EvidenceTier::MetadataOnly || candidate.authorization_proven {
+                return Err(CompileError::without_span(format!("{prefix} must remain metadata-only with authorization_proven=false")));
+            }
+            let expected_strength = match candidate.source.as_str() {
+                "verification-predicate" => {
+                    if candidate.actor_binding.is_none()
+                        || candidate.actor_source.is_none()
+                        || candidate.cell_binding.is_none()
+                        || candidate.field_name.is_none()
+                        || candidate.predicate.as_deref().is_none_or(str::is_empty)
+                        || candidate.source_span.is_none()
+                    {
+                        return Err(CompileError::without_span(format!(
+                            "{prefix} explicit predicate source is missing actor, Cell field, predicate, or span attribution"
+                        )));
+                    }
+                    "explicit"
+                }
+                "witness-binding" | "lock-args-binding" => {
+                    if candidate.actor_binding.is_none()
+                        || candidate.actor_source.is_none()
+                        || candidate.cell_binding.is_some()
+                        || candidate.field_name.is_some()
+                        || candidate.predicate.is_some()
+                    {
+                        return Err(CompileError::without_span(format!(
+                            "{prefix} binding source must attribute only its actor binding and ABI source"
+                        )));
+                    }
+                    "binding"
+                }
+                "field-name" => {
+                    if candidate.cell_binding.is_none()
+                        || candidate.field_name.is_none()
+                        || candidate.actor_binding.is_some()
+                        || candidate.actor_source.is_some()
+                        || candidate.predicate.is_some()
+                    {
+                        return Err(CompileError::without_span(format!(
+                            "{prefix} weak field source must attribute exactly one Cell binding and field"
+                        )));
+                    }
+                    "weak"
+                }
+                other => {
+                    return Err(CompileError::without_span(format!("{prefix}.source '{other}' is not canonical")));
+                }
+            };
+            if candidate.strength != expected_strength {
+                return Err(CompileError::without_span(format!(
+                    "{prefix}.strength '{}' does not match source '{}'",
+                    candidate.strength, candidate.source
+                )));
+            }
+            let key = (
+                protocol_role_metadata_source_rank(&candidate.source),
+                candidate.role.clone(),
+                candidate.actor_binding.clone(),
+                candidate.cell_binding.clone(),
+                candidate.field_name.clone(),
+                candidate.predicate.clone(),
+            );
+            if previous_key.as_ref().is_some_and(|previous| previous > &key) {
+                return Err(CompileError::without_span(format!(
+                    "metadata action '{}' protocol role candidates are not in canonical source-precedence order",
+                    action.name
+                )));
+            }
+            if !seen.insert(key.clone()) {
+                return Err(CompileError::without_span(format!(
+                    "metadata action '{}' repeats a ProtocolGraph role candidate",
+                    action.name
+                )));
+            }
+            previous_key = Some(key);
+        }
+        if action.proof_plan.iter().any(|plan| plan.category == "protocol-role") {
+            return Err(CompileError::without_span(format!(
+                "metadata action '{}' must not represent ProtocolGraph roles as ProofPlan authorization evidence",
+                action.name
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn protocol_role_metadata_source_rank(source: &str) -> u8 {
+    match source {
+        "verification-predicate" => 0,
+        "witness-binding" | "lock-args-binding" => 1,
+        "field-name" => 2,
+        _ => u8::MAX,
+    }
 }
 
 fn validate_transaction_view_handle_metadata(metadata: &CompileMetadata) -> Result<()> {
@@ -4097,6 +4223,8 @@ pub struct ActionMetadata {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub state_transition_edges: Vec<StateTransitionEdgeMetadata>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub protocol_role_candidates: Vec<ProtocolRoleCandidateMetadata>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pool_primitives: Vec<PoolPrimitiveMetadata>,
     pub ckb_runtime_accesses: Vec<CkbRuntimeAccessMetadata>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -4202,6 +4330,27 @@ fn state_transition_edge_metadata(edge: &ir::IrStateTransitionEdge) -> StateTran
         to: edge.to.clone(),
         from_index: edge.from_index,
         to_index: edge.to_index,
+    }
+}
+
+fn protocol_role_candidate_metadata(candidate: &ir::IrProtocolRoleCandidate) -> ProtocolRoleCandidateMetadata {
+    ProtocolRoleCandidateMetadata {
+        role: candidate.role.clone(),
+        source: candidate.source.clone(),
+        strength: candidate.strength.clone(),
+        actor_binding: candidate.actor_binding.clone(),
+        actor_source: candidate.actor_source.clone(),
+        cell_binding: candidate.cell_binding.clone(),
+        field_name: candidate.field_name.clone(),
+        predicate: candidate.predicate.clone(),
+        source_span: candidate.span.map(|span| ProofPlanSourceSpanMetadata {
+            start: span.start,
+            end: span.end,
+            line: span.line,
+            column: span.column,
+        }),
+        evidence_tier: EvidenceTier::MetadataOnly,
+        authorization_proven: false,
     }
 }
 
@@ -6300,6 +6449,11 @@ fn compile_metadata_from_ir(ir: &ir::IrModule, artifact_format: ArtifactFormat, 
                             .state_transition_edges
                             .iter()
                             .map(state_transition_edge_metadata)
+                            .collect(),
+                        protocol_role_candidates: action
+                            .protocol_role_candidates
+                            .iter()
+                            .map(protocol_role_candidate_metadata)
                             .collect(),
                         pool_primitives,
                         ckb_script_group: ckb_script_group_metadata("action", &ckb_runtime_accesses, target_profile),
@@ -28250,6 +28404,7 @@ action transfer_token(token: Token, to: Address) -> next_token: Token {
             create_set: vec![],
             mutate_set: vec![],
             state_transition_edges: vec![],
+            protocol_role_candidates: vec![],
             pool_primitives: vec![],
             ckb_script_group: None,
             ckb_runtime_accesses: vec![],
@@ -29295,6 +29450,78 @@ action activate(input: Pool) -> output: Pool {
         assert_eq!(layout.leaf_schema.field_count, pool.fields.len());
         assert!(crate::is_canonical_hash_hex(&layout.template_layout_hash));
         result.validate().unwrap();
+    }
+
+    #[test]
+    fn compile_metadata_preserves_protocol_role_sources_without_authorization_claims() {
+        let program = r#"
+module test
+
+enum SwapState {
+    Pending,
+    Claimed,
+}
+
+resource SwapLock has store {
+    state: SwapState,
+    participant: Address,
+}
+
+flow SwapLock.state {
+    initial Pending;
+    terminal Claimed;
+    Pending -> Claimed;
+}
+
+action claim(input swap: SwapLock, witness participant: Address) -> output: SwapLock {
+    transition swap.state: Pending -> output.state: Claimed
+    verification
+        require participant == swap.participant
+}
+"#;
+
+        let result = compile(program, CompileOptions::default()).unwrap();
+        let action = result.metadata.actions.iter().find(|action| action.name == "claim").expect("claim metadata");
+        let selected = action.protocol_role_candidates.first().expect("explicit role candidate");
+
+        assert_eq!(selected.role, "participant");
+        assert_eq!(selected.source, "verification-predicate");
+        assert_eq!(selected.strength, "explicit");
+        assert_eq!(selected.actor_binding.as_deref(), Some("participant"));
+        assert_eq!(selected.actor_source.as_deref(), Some("witness"));
+        assert_eq!(selected.cell_binding.as_deref(), Some("swap"));
+        assert_eq!(selected.field_name.as_deref(), Some("participant"));
+        assert_eq!(selected.evidence_tier, crate::EvidenceTier::MetadataOnly);
+        assert!(!selected.authorization_proven);
+        assert!(action.protocol_role_candidates.iter().any(|candidate| candidate.source == "witness-binding"));
+        assert!(action.protocol_role_candidates.iter().any(|candidate| candidate.source == "field-name"));
+        assert!(!action.proof_plan.iter().any(|plan| plan.category == "protocol-role"));
+        assert!(!result.metadata.runtime.proof_plan.iter().any(|plan| plan.category == "protocol-role"));
+        result.validate().unwrap();
+    }
+
+    #[test]
+    fn compile_result_validation_rejects_protocol_role_authorization_overclaim() {
+        let program = r#"
+module test
+
+resource Vault has store {
+    owner: Address,
+}
+
+action inspect(input vault: Vault) -> output: Vault {
+    verification
+        require output.owner == vault.owner
+}
+"#;
+        let mut result = compile(program, CompileOptions::default()).unwrap();
+        let candidate = result.metadata.actions[0].protocol_role_candidates.first_mut().expect("weak owner role candidate");
+        candidate.authorization_proven = true;
+
+        let error = result.validate().unwrap_err();
+
+        assert!(error.message.contains("metadata-only"), "unexpected error: {error}");
+        assert!(error.message.contains("authorization_proven=false"), "unexpected error: {error}");
     }
 
     #[test]

@@ -146,6 +146,25 @@ pub struct IrStateTransitionEdge {
     pub to_index: usize,
 }
 
+/// Explanatory participant-role candidate retained for ProtocolGraph.
+///
+/// These records never participate in verifier lowering or capability
+/// entailment.  The graph renderer resolves them deterministically and keeps
+/// the source attribution so field-name hints cannot be mistaken for
+/// authorization evidence.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IrProtocolRoleCandidate {
+    pub role: String,
+    pub source: String,
+    pub strength: String,
+    pub actor_binding: Option<String>,
+    pub actor_source: Option<String>,
+    pub cell_binding: Option<String>,
+    pub field_name: Option<String>,
+    pub predicate: Option<String>,
+    pub span: Option<Span>,
+}
+
 /// Destruction policy in IR, mirroring the AST-level DestructionPolicy
 /// but simplified for codegen.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -220,6 +239,7 @@ pub struct IrAction {
     pub params: Vec<IrParam>,
     pub return_type: Option<IrType>,
     pub state_transition_edges: Vec<IrStateTransitionEdge>,
+    pub protocol_role_candidates: Vec<IrProtocolRoleCandidate>,
     pub body: IrBody,
     pub effect_class: EffectClass,
     pub scheduler_hints: SchedulerHints,
@@ -537,6 +557,142 @@ pub struct IrGenerator {
 struct LoweredExpr {
     operand: IrOperand,
     current: Option<BlockId>,
+}
+
+fn collect_protocol_role_equalities_from_statements<'a>(statements: &'a [Stmt], equalities: &mut Vec<&'a BinaryExpr>) {
+    for statement in statements {
+        match statement {
+            Stmt::Let(statement) => collect_protocol_role_equalities_from_expr(&statement.value, equalities),
+            Stmt::Expr(expr) => collect_protocol_role_equalities_from_expr(expr, equalities),
+            Stmt::Return(statement) => {
+                if let Some(value) = &statement.value {
+                    collect_protocol_role_equalities_from_expr(value, equalities);
+                }
+            }
+            Stmt::If(statement) => {
+                collect_protocol_role_equalities_from_expr(&statement.condition, equalities);
+                collect_protocol_role_equalities_from_statements(&statement.then_branch, equalities);
+                if let Some(else_branch) = &statement.else_branch {
+                    collect_protocol_role_equalities_from_statements(else_branch, equalities);
+                }
+            }
+            Stmt::For(statement) => {
+                collect_protocol_role_equalities_from_expr(&statement.iterable, equalities);
+                collect_protocol_role_equalities_from_statements(&statement.body, equalities);
+            }
+            Stmt::While(statement) => {
+                collect_protocol_role_equalities_from_expr(&statement.condition, equalities);
+                collect_protocol_role_equalities_from_statements(&statement.body, equalities);
+            }
+            Stmt::Borrow(statement) => collect_protocol_role_equalities_from_statements(&statement.body, equalities),
+        }
+    }
+}
+
+fn collect_protocol_role_equalities_from_expr<'a>(expr: &'a Expr, equalities: &mut Vec<&'a BinaryExpr>) {
+    match expr {
+        Expr::Require(require) => collect_protocol_role_condition_equalities(&require.condition, equalities),
+        Expr::RequireBlock(block) => {
+            for condition in &block.expressions {
+                collect_protocol_role_condition_equalities(condition, equalities);
+            }
+        }
+        Expr::Assert(assertion) => collect_protocol_role_condition_equalities(&assertion.condition, equalities),
+        Expr::Block(statements) => collect_protocol_role_equalities_from_statements(statements, equalities),
+        Expr::If(branch) => {
+            collect_protocol_role_equalities_from_expr(&branch.condition, equalities);
+            collect_protocol_role_equalities_from_expr(&branch.then_branch, equalities);
+            collect_protocol_role_equalities_from_expr(&branch.else_branch, equalities);
+        }
+        Expr::Match(match_expr) => {
+            collect_protocol_role_equalities_from_expr(&match_expr.expr, equalities);
+            for arm in &match_expr.arms {
+                collect_protocol_role_equalities_from_expr(&arm.value, equalities);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_protocol_role_condition_equalities<'a>(expr: &'a Expr, equalities: &mut Vec<&'a BinaryExpr>) {
+    match expr {
+        Expr::Binary(binary) if binary.op == BinaryOp::Eq => equalities.push(binary),
+        Expr::Binary(binary) if matches!(binary.op, BinaryOp::And | BinaryOp::Or) => {
+            collect_protocol_role_condition_equalities(&binary.left, equalities);
+            collect_protocol_role_condition_equalities(&binary.right, equalities);
+        }
+        Expr::Unary(unary) => collect_protocol_role_condition_equalities(&unary.expr, equalities),
+        _ => {}
+    }
+}
+
+fn protocol_role_field_access(expr: &Expr) -> Option<(&str, &str)> {
+    let Expr::FieldAccess(access) = expr else {
+        return None;
+    };
+    let Expr::Identifier(binding) = access.expr.as_ref() else {
+        return None;
+    };
+    Some((binding, &access.field))
+}
+
+fn protocol_role_actor_param(param: &Param) -> bool {
+    matches!(&param.ty, Type::Address) && matches!(param.source, ParamSource::Default | ParamSource::Witness | ParamSource::LockArgs)
+}
+
+fn protocol_role_param_source(source: ParamSource) -> &'static str {
+    match source {
+        ParamSource::Default => "entry-witness-default",
+        ParamSource::Witness => "witness",
+        ParamSource::LockArgs => "lock_args",
+        ParamSource::Input => "input",
+        ParamSource::Output => "output",
+        ParamSource::Protected => "protected",
+    }
+}
+
+fn protocol_role_source_rank(source: &str) -> u8 {
+    match source {
+        "verification-predicate" => 0,
+        "witness-binding" | "lock-args-binding" => 1,
+        "field-name" => 2,
+        _ => u8::MAX,
+    }
+}
+
+fn protocol_role_name(name: &str) -> Option<String> {
+    const ROLE_NAMES: &[&str] = &[
+        "admin",
+        "arbiter",
+        "authority",
+        "beneficiary",
+        "borrower",
+        "buyer",
+        "claimant",
+        "counterparty",
+        "depositor",
+        "initiator",
+        "issuer",
+        "lender",
+        "maker",
+        "minter",
+        "operator",
+        "owner",
+        "participant",
+        "payee",
+        "payer",
+        "proposer",
+        "recipient",
+        "refundee",
+        "seller",
+        "sender",
+        "signer",
+        "sponsor",
+        "taker",
+        "withdrawer",
+    ];
+    let normalized = name.to_ascii_lowercase();
+    normalized.split('_').find(|part| ROLE_NAMES.binary_search(part).is_ok()).map(str::to_string)
 }
 
 impl IrGenerator {
@@ -1288,6 +1444,7 @@ impl IrGenerator {
             params,
             return_type,
             state_transition_edges: self.action_state_transition_edges(action),
+            protocol_role_candidates: self.action_protocol_role_candidates(action),
             body,
             effect_class: if action.effect_declared { declared_effect_class } else { effect_class },
             scheduler_hints: action
@@ -1300,6 +1457,122 @@ impl IrGenerator {
                 })
                 .unwrap_or(SchedulerHints { parallelizable: touches_shared.is_empty(), touches_shared, estimated_cycles }),
         }
+    }
+
+    fn action_protocol_role_candidates(&self, action: &ActionDef) -> Vec<IrProtocolRoleCandidate> {
+        let mut candidates = Vec::new();
+        let mut equalities = Vec::new();
+        collect_protocol_role_equalities_from_statements(&action.body, &mut equalities);
+
+        for equality in equalities {
+            let predicate = crate::fmt::format_expression(&Expr::Binary(equality.clone()));
+            for (field_side, actor_side) in
+                [(equality.left.as_ref(), equality.right.as_ref()), (equality.right.as_ref(), equality.left.as_ref())]
+            {
+                let Some((cell_binding, field_name)) = protocol_role_field_access(field_side) else {
+                    continue;
+                };
+                let Expr::Identifier(actor_binding) = actor_side else {
+                    continue;
+                };
+                let Some(cell_param) = action.params.iter().find(|param| param.name == cell_binding) else {
+                    continue;
+                };
+                let Some(type_name) = Self::named_type_name_from_ast_type(&cell_param.ty) else {
+                    continue;
+                };
+                if !self.type_fields.get(type_name).and_then(|fields| fields.get(field_name)).is_some_and(|ty| *ty == IrType::Address)
+                {
+                    continue;
+                }
+                let Some(actor_param) = action.params.iter().find(|param| param.name == *actor_binding) else {
+                    continue;
+                };
+                if !protocol_role_actor_param(actor_param) {
+                    continue;
+                }
+                let role = protocol_role_name(field_name).unwrap_or_else(|| field_name.to_ascii_lowercase());
+                candidates.push(IrProtocolRoleCandidate {
+                    role,
+                    source: "verification-predicate".to_string(),
+                    strength: "explicit".to_string(),
+                    actor_binding: Some(actor_binding.clone()),
+                    actor_source: Some(protocol_role_param_source(actor_param.source).to_string()),
+                    cell_binding: Some(cell_binding.to_string()),
+                    field_name: Some(field_name.to_string()),
+                    predicate: Some(predicate.clone()),
+                    span: Some(equality.span),
+                });
+            }
+        }
+
+        for param in &action.params {
+            if !matches!(&param.ty, Type::Address) {
+                continue;
+            }
+            let Some(role) = protocol_role_name(&param.name) else {
+                continue;
+            };
+            let (source, actor_source) = match param.source {
+                ParamSource::Witness => ("witness-binding", "witness"),
+                ParamSource::LockArgs => ("lock-args-binding", "lock_args"),
+                ParamSource::Default => ("witness-binding", "entry-witness-default"),
+                ParamSource::Input | ParamSource::Output | ParamSource::Protected => continue,
+            };
+            candidates.push(IrProtocolRoleCandidate {
+                role,
+                source: source.to_string(),
+                strength: "binding".to_string(),
+                actor_binding: Some(param.name.clone()),
+                actor_source: Some(actor_source.to_string()),
+                cell_binding: None,
+                field_name: None,
+                predicate: None,
+                span: Some(param.span),
+            });
+        }
+
+        for param in &action.params {
+            let Some(type_name) = Self::named_type_name_from_ast_type(&param.ty) else {
+                continue;
+            };
+            let Some(fields) = self.type_fields.get(type_name) else {
+                continue;
+            };
+            let mut fields = fields.iter().collect::<Vec<_>>();
+            fields.sort_by(|(left, _), (right, _)| left.cmp(right));
+            for (field_name, field_ty) in fields {
+                if *field_ty != IrType::Address {
+                    continue;
+                }
+                let Some(role) = protocol_role_name(field_name) else {
+                    continue;
+                };
+                candidates.push(IrProtocolRoleCandidate {
+                    role,
+                    source: "field-name".to_string(),
+                    strength: "weak".to_string(),
+                    actor_binding: None,
+                    actor_source: None,
+                    cell_binding: Some(param.name.clone()),
+                    field_name: Some(field_name.clone()),
+                    predicate: None,
+                    span: None,
+                });
+            }
+        }
+
+        candidates.sort_by(|left, right| {
+            protocol_role_source_rank(&left.source)
+                .cmp(&protocol_role_source_rank(&right.source))
+                .then_with(|| left.role.cmp(&right.role))
+                .then_with(|| left.actor_binding.cmp(&right.actor_binding))
+                .then_with(|| left.cell_binding.cmp(&right.cell_binding))
+                .then_with(|| left.field_name.cmp(&right.field_name))
+                .then_with(|| left.predicate.cmp(&right.predicate))
+        });
+        candidates.dedup();
+        candidates
     }
 
     fn action_state_transition_edges(&self, action: &ActionDef) -> Vec<IrStateTransitionEdge> {
