@@ -560,7 +560,7 @@ check_ckb_acceptance_boundaries() {
         'scripts/validate_ckb_cellscript_production_evidence.py::valid CKB CellScript'
         'scripts/validate_cellscript_tooling_release.py::valid CellScript tooling release boundary'
         'src/lib.rs::cellscript-template-layout-v0.21'
-        'src/cli/commands.rs::cellscript-protocol-graph-v0.21'
+        'src/cli/commands.rs::cellscript-protocol-graph-v0.22'
         'src/cli/commands.rs::cellscript-action-scan-selectors-v0.21'
     )
     local item file pattern
