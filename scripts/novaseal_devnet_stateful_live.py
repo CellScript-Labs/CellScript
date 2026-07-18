@@ -927,6 +927,8 @@ def compile_lifecycle(repo_root: pathlib.Path, output: pathlib.Path) -> None:
         "cargo",
         "run",
         "--quiet",
+        "--bin",
+        "cellc",
         "--",
         "proposals/novaseal/v0-mvp-skeleton/src/nova_state_lifecycle_type.cell",
         "--target-profile",

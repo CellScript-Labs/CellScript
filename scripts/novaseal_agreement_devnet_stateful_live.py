@@ -701,6 +701,8 @@ def compile_agreement_lifecycle(repo_root: pathlib.Path, output: pathlib.Path) -
         "cargo",
         "run",
         "--quiet",
+        "--bin",
+        "cellc",
         "--",
         "proposals/novaseal/agreement-profile-v0/src/nova_agreement_lifecycle_type.cell",
         "--target-profile",
