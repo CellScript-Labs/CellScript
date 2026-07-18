@@ -14786,6 +14786,10 @@ fn body_ckb_runtime_features(
                 ir::IrInstruction::Call { func, .. } if func.starts_with("__ckb_spawn") => {
                     features.insert("ckb-spawn-ipc".to_string());
                 }
+                ir::IrInstruction::Call { func, .. } if func == "__novaseal_bip340_require_signature" => {
+                    features.insert("btc-bip340-runtime-verifier".to_string());
+                    features.insert("ckb-spawn-ipc".to_string());
+                }
                 ir::IrInstruction::Call { func, .. }
                     if matches!(
                         func.as_str(),
@@ -15025,6 +15029,45 @@ fn body_ckb_runtime_accesses(
                 });
             }
             if let ir::IrInstruction::Call { func, .. } = instruction {
+                if func == "__novaseal_bip340_require_signature" {
+                    accesses.extend([
+                        CkbRuntimeAccessMetadata {
+                            operation: "bip340-pipe".to_string(),
+                            syscall: "PIPE".to_string(),
+                            source: "Process".to_string(),
+                            index: 0,
+                            binding: "verifier::btc::bip340::require_signature".to_string(),
+                        },
+                        CkbRuntimeAccessMetadata {
+                            operation: "bip340-spawn".to_string(),
+                            syscall: "SPAWN".to_string(),
+                            source: "CellDep".to_string(),
+                            index: 0,
+                            binding: "cellscript_btc_bip340_verifier_riscv".to_string(),
+                        },
+                        CkbRuntimeAccessMetadata {
+                            operation: "bip340-pipe-write-18-words".to_string(),
+                            syscall: "PIPE_WRITE".to_string(),
+                            source: "Process".to_string(),
+                            index: 0,
+                            binding: "cellscript-btc-bip340-ipc-v0".to_string(),
+                        },
+                        CkbRuntimeAccessMetadata {
+                            operation: "bip340-close".to_string(),
+                            syscall: "CLOSE".to_string(),
+                            source: "Process".to_string(),
+                            index: 0,
+                            binding: "cellscript-btc-bip340-ipc-v0".to_string(),
+                        },
+                        CkbRuntimeAccessMetadata {
+                            operation: "bip340-wait".to_string(),
+                            syscall: "WAIT".to_string(),
+                            source: "Process".to_string(),
+                            index: 0,
+                            binding: "cellscript_btc_bip340_verifier_riscv".to_string(),
+                        },
+                    ]);
+                }
                 if let Some((operation, syscall, source, binding)) = ckb_v014_runtime_access(func) {
                     accesses.push(CkbRuntimeAccessMetadata {
                         operation: operation.to_string(),
@@ -22797,7 +22840,8 @@ action verify(witness message: Hash, witness pubkey: [u8; 32], witness signature
 }
 "#;
         let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
-        let asm = String::from_utf8(result.artifact_bytes).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+        let action = result.metadata.actions.iter().find(|action| action.name == "verify").expect("verify metadata");
 
         assert_eq!(
             asm.matches("# cellscript abi: novaseal bip340 ipc word ").count(),
@@ -22817,6 +22861,24 @@ action verify(witness message: Hash, witness pubkey: [u8; 32], witness signature
                 && asm.contains("cellscript runtime error 52 bip340-message-write-failed"),
             "BIP340 IPC word range and fail-closed write path must remain visible:\n{}",
             asm
+        );
+        for operation in ["bip340-pipe", "bip340-spawn", "bip340-pipe-write-18-words", "bip340-close", "bip340-wait"] {
+            assert!(
+                action.ckb_runtime_accesses.iter().any(|access| access.operation == operation),
+                "BIP340 lowering metadata omitted {operation}: {:?}",
+                action.ckb_runtime_accesses
+            );
+        }
+        assert!(
+            action.ckb_runtime_features.iter().any(|feature| feature == "btc-bip340-runtime-verifier")
+                && action.ckb_runtime_features.iter().any(|feature| feature == "ckb-spawn-ipc"),
+            "BIP340 lowering metadata omitted verifier or VM2 feature: {:?}",
+            action.ckb_runtime_features
+        );
+        assert!(
+            action.proof_plan.iter().any(|plan| plan.feature.contains("bip340")),
+            "BIP340 lowering must remain visible in ProofPlan: {:?}",
+            action.proof_plan
         );
     }
 
