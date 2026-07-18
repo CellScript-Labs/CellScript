@@ -555,6 +555,7 @@ pub enum Stmt {
     If(IfStmt),
     For(ForStmt),
     While(WhileStmt),
+    Borrow(BorrowStmt),
 }
 
 #[derive(Debug, Clone)]
@@ -598,6 +599,18 @@ pub struct ForStmt {
 #[derive(Debug, Clone)]
 pub struct WhileStmt {
     pub condition: Expr,
+    pub body: Vec<Stmt>,
+    pub span: Span,
+}
+
+/// Compile-time-only read-only view of a linear root.
+///
+/// The binding is deliberately represented as a statement-scoped marker rather
+/// than a first-class source type: it has no layout, ABI, or serializable form.
+#[derive(Debug, Clone)]
+pub struct BorrowStmt {
+    pub root: String,
+    pub binding: String,
     pub body: Vec<Stmt>,
     pub span: Span,
 }

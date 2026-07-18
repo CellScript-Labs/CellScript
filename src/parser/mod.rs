@@ -2092,6 +2092,7 @@ impl<'a> Parser<'a> {
             TokenKind::If => Stmt::If(self.parse_if()?),
             TokenKind::For => Stmt::For(self.parse_for()?),
             TokenKind::While => Stmt::While(self.parse_while()?),
+            TokenKind::Borrow => Stmt::Borrow(self.parse_borrow()?),
             _ => {
                 let expr = self.parse_expr()?;
                 Stmt::Expr(expr)
@@ -2193,6 +2194,21 @@ impl<'a> Parser<'a> {
 
         let end_span = self.current().span;
         Ok(WhileStmt { condition, body, span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column) })
+    }
+
+    fn parse_borrow(&mut self) -> Result<BorrowStmt> {
+        let start_span = self.current().span;
+        self.expect(TokenKind::Borrow)?;
+        let root = self.parse_name()?;
+        let as_span = self.current().span;
+        let keyword = self.parse_name()?;
+        if keyword != "as" {
+            return Err(CompileError::new("expected 'as' in borrow block", as_span));
+        }
+        let binding = self.parse_name()?;
+        let body = self.parse_block()?;
+        let end_span = self.previous_non_newline().span;
+        Ok(BorrowStmt { root, binding, body, span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column) })
     }
 
     fn parse_expr(&mut self) -> Result<Expr> {

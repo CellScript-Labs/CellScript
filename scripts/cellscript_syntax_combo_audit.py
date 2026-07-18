@@ -187,6 +187,33 @@ BUG_CLASS_CONTRACTS: tuple[dict[str, Any], ...] = (
         "release_boundary": "env::block_number is the only approved 0.22 validity environment read",
     },
     {
+        "id": "SCA-BUG-0.22-BORROW-EFFECT-COMPAT",
+        "name": "borrowed linear views may reach only Pure or ReadOnly helpers with dedicated &T parameters",
+        "min_mode": "quick",
+        "required_cases": ("seed-explicit-borrow", "seed-explicit-borrow-effect-reject"),
+        "required_origins": (
+            "tests/syntax_combo/seeds/explicit-borrow.cell",
+            "tests/syntax_combo/seeds/explicit-borrow-effect-reject.cell",
+        ),
+        "release_boundary": "borrow calls are checked against authenticated callable effects and explicit read-only reference parameters",
+    },
+    {
+        "id": "SCA-BUG-0.22-BORROW-ESCAPE",
+        "name": "borrowed View<T> markers cannot acquire layout, storage, ABI, or return representation",
+        "min_mode": "quick",
+        "required_cases": ("seed-explicit-borrow-escape-reject",),
+        "required_origins": ("tests/syntax_combo/seeds/explicit-borrow-escape-reject.cell",),
+        "release_boundary": "borrow markers cannot escape through local aggregates, assignments, returns, or generic calls",
+    },
+    {
+        "id": "SCA-BUG-0.22-BORROW-CROSSES-CONSUME",
+        "name": "borrowed views cannot cross lifecycle discharge of their linear root",
+        "min_mode": "quick",
+        "required_cases": ("seed-explicit-borrow-cross-consume-reject",),
+        "required_origins": ("tests/syntax_combo/seeds/explicit-borrow-cross-consume-reject.cell",),
+        "release_boundary": "every path rejects consume, destroy, transfer, claim, or settle of a root while its borrow block is active",
+    },
+    {
         "id": "SCA-BUG-STDLIB-ARGUMENT-VALIDATION",
         "name": "stdlib lifecycle helpers validate arity, cell kind, lock target, and claim output",
         "min_mode": "ci",
@@ -284,6 +311,8 @@ class Oracle:
     obligation_contains: tuple[str, ...] = ()
     validity_type: str | None = None
     validity_tiers: tuple[str, ...] = ()
+    borrow_scope: str | None = None
+    borrow_view_type: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1511,6 +1540,8 @@ def parse_seed(path: Path) -> AuditCase:
     contains: list[str] = []
     validity_type: str | None = None
     validity_tiers: list[str] = []
+    borrow_scope: str | None = None
+    borrow_view_type: str | None = None
     for line in text.splitlines():
         stripped = line.strip()
         if not stripped.startswith("// audit:"):
@@ -1527,11 +1558,20 @@ def parse_seed(path: Path) -> AuditCase:
             validity_type = value
         elif key == "validity_tier":
             validity_tiers.append(value)
+        elif key == "borrow_scope":
+            borrow_scope = value
+        elif key == "borrow_view_type":
+            borrow_view_type = value
     return AuditCase(
         name=f"seed-{path.stem}",
         source=text,
         expected=Expected(phase, tuple(contains)),
-        oracle=Oracle(validity_type=validity_type, validity_tiers=tuple(validity_tiers)),
+        oracle=Oracle(
+            validity_type=validity_type,
+            validity_tiers=tuple(validity_tiers),
+            borrow_scope=borrow_scope,
+            borrow_view_type=borrow_view_type,
+        ),
         origin=str(path.relative_to(ROOT)),
     )
 
@@ -1720,6 +1760,55 @@ def validate_metadata(case: AuditCase, metadata_path: Path, run_dir: Path) -> li
         failures.append(failure(case, "metadata", "SCA-META-PROFILE", "metadata target_profile.name is not ckb", run_dir))
 
     oracle = case.oracle
+    if oracle.borrow_scope:
+        borrow_regions = [
+            region
+            for region in metadata.get("runtime", {}).get("borrow_regions", [])
+            if region.get("scope_name") == oracle.borrow_scope
+        ]
+        if not borrow_regions:
+            failures.append(
+                failure(case, "metadata", "SCA-META-BORROW-REGION", f"missing borrow metadata for {oracle.borrow_scope}", run_dir)
+            )
+        else:
+            region = borrow_regions[0]
+            expected_view = oracle.borrow_view_type
+            if expected_view and region.get("view_type") != expected_view:
+                failures.append(
+                    failure(
+                        case,
+                        "metadata",
+                        "SCA-META-BORROW-VIEW",
+                        f"borrow view type {region.get('view_type')!r} does not match {expected_view!r}",
+                        run_dir,
+                    )
+                )
+            if region.get("storage") != "none" or region.get("abi") != "none" or region.get("evidence_tier") != "checked-static":
+                failures.append(
+                    failure(
+                        case,
+                        "metadata",
+                        "SCA-META-BORROW-EVIDENCE",
+                        "borrow region must declare storage=none, abi=none, and checked-static evidence",
+                        run_dir,
+                    )
+                )
+            proof_plan = metadata.get("runtime", {}).get("proof_plan", [])
+            borrow_plans = [
+                plan
+                for plan in proof_plan
+                if str(plan.get("origin", "")).startswith(f"action:{oracle.borrow_scope}#borrow-region:")
+            ]
+            if not borrow_plans or borrow_plans[0].get("evidence_tier") != "checked-static":
+                failures.append(
+                    failure(
+                        case,
+                        "metadata",
+                        "SCA-META-BORROW-PROOFPLAN",
+                        "borrow region is missing a checked-static ProofPlan record",
+                        run_dir,
+                    )
+                )
     if oracle.validity_type:
         type_metadata = next((item for item in metadata.get("types", []) if item.get("name") == oracle.validity_type), None)
         if type_metadata is None:

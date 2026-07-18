@@ -25,6 +25,7 @@ pub enum TokenKind {
     For,          // for
     In,           // in
     While,        // while
+    Borrow,       // borrow
     Match,        // match
     Return,       // return
     Let,          // let
@@ -127,6 +128,7 @@ impl fmt::Display for TokenKind {
             TokenKind::For => write!(f, "'for'"),
             TokenKind::In => write!(f, "'in'"),
             TokenKind::While => write!(f, "'while'"),
+            TokenKind::Borrow => write!(f, "'borrow'"),
             TokenKind::Match => write!(f, "'match'"),
             TokenKind::Return => write!(f, "'return'"),
             TokenKind::Let => write!(f, "'let'"),
@@ -243,6 +245,7 @@ pub fn keyword_or_identifier(text: &str) -> TokenKind {
         "for" => TokenKind::For,
         "in" => TokenKind::In,
         "while" => TokenKind::While,
+        "borrow" => TokenKind::Borrow,
         "match" => TokenKind::Match,
         "return" => TokenKind::Return,
         "let" => TokenKind::Let,

@@ -918,6 +918,7 @@ impl LspServer {
             ("if", "if ${1:condition} {\n    $0\n}"),
             ("for", "for ${1:item} in ${2:iterable} {\n    $0\n}"),
             ("while", "while ${1:condition} {\n    $0\n}"),
+            ("borrow", "borrow ${1:root} as ${2:view} {\n    $0\n}"),
             ("return", "return $0"),
             ("create", "create ${1:output} = ${2:Type} { $0 }"),
             ("destroy", "destroy ${1:expr}"),
@@ -2185,6 +2186,7 @@ fn stmt_span(stmt: &Stmt) -> Span {
         Stmt::If(s) => s.span,
         Stmt::For(s) => s.span,
         Stmt::While(s) => s.span,
+        Stmt::Borrow(s) => s.span,
         Stmt::Expr(_) => Span::default(),
     }
 }

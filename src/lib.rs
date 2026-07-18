@@ -201,7 +201,7 @@ fn strict_capability_name(capability: ast::Capability) -> &'static str {
 const DEFAULT_TARGET: &str = "riscv64-asm";
 const DEFAULT_TARGET_PROFILE: &str = "ckb";
 const ARTIFACT_CACHE_VERSION: &str = "project-source-set-v5";
-pub const METADATA_SCHEMA_VERSION: u32 = 49;
+pub const METADATA_SCHEMA_VERSION: u32 = 50;
 pub const SOURCE_METADATA_SCHEMA_VERSION: u32 = 1;
 pub const ARTIFACT_METADATA_SCHEMA_VERSION: u32 = 1;
 pub const CONSTRAINTS_METADATA_SCHEMA_VERSION: u32 = 1;
@@ -779,6 +779,8 @@ pub struct RuntimeMetadata {
     pub ckb_runtime_accesses: Vec<CkbRuntimeAccessMetadata>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub transaction_view_handles: Vec<TransactionViewHandleMetadata>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub borrow_regions: Vec<BorrowRegionMetadata>,
     pub verifier_obligations: Vec<VerifierObligationMetadata>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub proof_plan: Vec<ProofPlanMetadata>,
@@ -805,6 +807,20 @@ pub struct TransactionViewHandleMetadata {
     pub lifecycle_authority: bool,
     pub typing_evidence_tier: EvidenceTier,
     pub read_evidence_tier: EvidenceTier,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BorrowRegionMetadata {
+    pub scope_kind: String,
+    pub scope_name: String,
+    pub root: String,
+    pub binding: String,
+    pub view_type: String,
+    pub storage: String,
+    pub abi: String,
+    pub allowed_effects: Vec<String>,
+    pub evidence_tier: EvidenceTier,
+    pub source_span: crate::proof_plan::ProofPlanSourceSpanMetadata,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -1002,6 +1018,7 @@ pub fn validate_compile_metadata(metadata: &CompileMetadata, artifact_format: Ar
     validate_ckb_type_id_output_metadata(metadata)?;
     validate_ckb_runtime_access_metadata(metadata)?;
     validate_transaction_view_handle_metadata(metadata)?;
+    validate_borrow_region_metadata(metadata)?;
     validate_collection_instantiation_metadata(metadata)?;
     validate_ckb_script_group_metadata(metadata)?;
     validate_ckb_script_reference_metadata(metadata)?;
@@ -1047,6 +1064,39 @@ fn validate_transaction_view_handle_metadata(metadata: &CompileMetadata) -> Resu
                 "{} must use checked-static typing evidence and checked-runtime read evidence",
                 prefix
             )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_borrow_region_metadata(metadata: &CompileMetadata) -> Result<()> {
+    for (index, region) in metadata.runtime.borrow_regions.iter().enumerate() {
+        let prefix = format!("metadata runtime.borrow_regions[{}]", index);
+        for (field, value) in [
+            ("scope_kind", region.scope_kind.as_str()),
+            ("scope_name", region.scope_name.as_str()),
+            ("root", region.root.as_str()),
+            ("binding", region.binding.as_str()),
+            ("view_type", region.view_type.as_str()),
+        ] {
+            if value.trim().is_empty() {
+                return Err(CompileError::without_span(format!("{}.{} must not be empty", prefix, field)));
+            }
+        }
+        if !region.view_type.starts_with("View<") || !region.view_type.ends_with('>') {
+            return Err(CompileError::without_span(format!(
+                "{}.view_type '{}' must be a canonical View<T> marker",
+                prefix, region.view_type
+            )));
+        }
+        if region.storage != "none" || region.abi != "none" {
+            return Err(CompileError::without_span(format!("{} must declare storage=none and abi=none", prefix)));
+        }
+        if region.allowed_effects != ["Pure", "ReadOnly"] {
+            return Err(CompileError::without_span(format!("{} must allow exactly Pure and ReadOnly callees", prefix)));
+        }
+        if region.evidence_tier != EvidenceTier::CheckedStatic {
+            return Err(CompileError::without_span(format!("{}.evidence_tier must be checked-static", prefix)));
         }
     }
     Ok(())
@@ -2049,6 +2099,7 @@ fn stmt_span(stmt: &ast::Stmt) -> error::Span {
         ast::Stmt::If(if_stmt) => if_stmt.span,
         ast::Stmt::For(for_stmt) => for_stmt.span,
         ast::Stmt::While(while_stmt) => while_stmt.span,
+        ast::Stmt::Borrow(borrow_stmt) => borrow_stmt.span,
     }
 }
 
@@ -5807,6 +5858,7 @@ fn compile_metadata_from_ir(ir: &ir::IrModule, artifact_format: ArtifactFormat, 
     let molecule_schema_manifest = molecule_schema_manifest_metadata(&types, target_profile);
     let cell_data_codec_manifest = cell_data_codec_manifest_metadata(&ckb_runtime_accesses, &molecule_schema_manifest, target_profile);
     let transaction_view_handles = transaction_view_handle_metadata(ir);
+    let borrow_regions = borrow_region_metadata(ir);
     let mut metadata = CompileMetadata {
         metadata_schema_version: METADATA_SCHEMA_VERSION,
         source_metadata_schema_version: SOURCE_METADATA_SCHEMA_VERSION,
@@ -5857,6 +5909,7 @@ fn compile_metadata_from_ir(ir: &ir::IrModule, artifact_format: ArtifactFormat, 
             fail_closed_runtime_features,
             ckb_runtime_accesses,
             transaction_view_handles,
+            borrow_regions,
             verifier_obligations,
             proof_plan,
             proof_plan_soundness: ProofPlanSoundnessReport::default(),
@@ -6650,6 +6703,36 @@ fn transaction_view_handle_metadata(ir: &ir::IrModule) -> Vec<TransactionViewHan
     });
     handles.dedup();
     handles
+}
+
+fn borrow_region_metadata(ir: &ir::IrModule) -> Vec<BorrowRegionMetadata> {
+    let mut regions = Vec::new();
+    for item in &ir.items {
+        let (scope_kind, scope_name, body) = match item {
+            ir::IrItem::Action(action) => ("action", action.name.as_str(), &action.body),
+            ir::IrItem::PureFn(function) => ("function", function.name.as_str(), &function.body),
+            ir::IrItem::Lock(lock) => ("lock", lock.name.as_str(), &lock.body),
+            ir::IrItem::TypeDef(_) | ir::IrItem::Invariant(_) => continue,
+        };
+        regions.extend(body.borrow_regions.iter().map(|region| BorrowRegionMetadata {
+            scope_kind: scope_kind.to_string(),
+            scope_name: scope_name.to_string(),
+            root: region.root.clone(),
+            binding: region.binding.clone(),
+            view_type: format!("View<{}>", region.root_type),
+            storage: "none".to_string(),
+            abi: "none".to_string(),
+            allowed_effects: vec!["Pure".to_string(), "ReadOnly".to_string()],
+            evidence_tier: EvidenceTier::CheckedStatic,
+            source_span: crate::proof_plan::ProofPlanSourceSpanMetadata {
+                start: region.span.start,
+                end: region.span.end,
+                line: region.span.line,
+                column: region.span.column,
+            },
+        }));
+    }
+    regions
 }
 
 fn body_transaction_view_handles(scope_kind: &str, scope_name: &str, body: &ir::IrBody) -> Vec<TransactionViewHandleMetadata> {
@@ -20693,6 +20776,161 @@ action activate(ticket: Ticket) -> Ticket {
             err.message.contains("local binding cannot store a read-only reference rooted at linear/resource value 'token'"),
             "unexpected error: {}",
             err.message
+        );
+    }
+
+    #[test]
+    fn compile_lowers_explicit_borrow_regions_without_materializing_a_view() {
+        let source = r#"
+module test
+
+resource Token has destroy {
+    amount: u64,
+}
+
+#[effect(Pure)]
+fn amount_is(token: &Token, expected: u64) -> bool {
+    return token.amount == expected
+}
+
+#[effect(ReadOnly)]
+fn positive(token: &Token) -> bool {
+    return token.amount > 0
+}
+
+action inspect(token: Token, expected: u64) -> u64 {
+    verification
+        borrow token as view {
+            require amount_is(view, expected)
+            require positive(view)
+            require view.amount > 0
+        }
+        destroy token
+        return expected
+}
+"#;
+
+        let result = compile(source, CompileOptions::default()).unwrap();
+        let region = result.metadata.runtime.borrow_regions.first().expect("borrow region metadata");
+        assert_eq!(region.view_type, "View<Token>");
+        assert_eq!(region.storage, "none");
+        assert_eq!(region.abi, "none");
+        assert_eq!(region.evidence_tier, crate::EvidenceTier::CheckedStatic);
+        let plan =
+            result.metadata.runtime.proof_plan.iter().find(|plan| plan.category == "borrow-region").expect("borrow ProofPlan entry");
+        assert_eq!(plan.evidence_tier, crate::EvidenceTier::CheckedStatic);
+        assert_eq!(plan.codegen_coverage_status, "covered");
+        assert!(plan.coverage.contains(&"abi:none".to_string()));
+
+        let assembly = String::from_utf8(result.artifact_bytes).unwrap();
+        assert!(assembly.contains("call amount_is"), "missing pure borrow helper call:\n{}", assembly);
+        assert!(assembly.contains("call positive"), "missing read-only borrow helper call:\n{}", assembly);
+        assert!(!assembly.contains("View<Token>"), "borrow marker leaked into runtime assembly:\n{}", assembly);
+    }
+
+    #[test]
+    fn compile_rejects_borrow_regions_that_cross_root_lifecycle_operations() {
+        let direct = r#"
+module test
+resource Token has destroy { amount: u64 }
+action bad(token: Token) {
+    verification
+        borrow token as view {
+            require view.amount > 0
+            destroy token
+        }
+}
+"#;
+        let error = compile(direct, CompileOptions::default()).unwrap_err();
+        assert!(
+            error.message.contains("borrow 'view' cannot cross destroy of linear root 'token'"),
+            "unexpected error: {}",
+            error.message
+        );
+
+        let branch = r#"
+module test
+resource Token has destroy { amount: u64 }
+action bad(token: Token, flag: bool) {
+    verification
+        borrow token as view {
+            if flag {
+                destroy token
+            }
+            require view.amount > 0
+        }
+}
+"#;
+        let error = compile(branch, CompileOptions::default()).unwrap_err();
+        assert!(
+            error.message.contains("borrow 'view' cannot cross destroy of linear root 'token'"),
+            "unexpected error: {}",
+            error.message
+        );
+    }
+
+    #[test]
+    fn compile_rejects_borrow_escape_through_storage_and_return() {
+        let stored = r#"
+module test
+resource Token has destroy { amount: u64 }
+action bad(token: Token) {
+    verification
+        borrow token as view {
+            let escaped = (view, 1)
+        }
+        destroy token
+}
+"#;
+        let error = compile(stored, CompileOptions::default()).unwrap_err();
+        assert!(
+            error.message.contains("borrow 'view' cannot escape borrow block rooted at linear value 'token'"),
+            "unexpected error: {}",
+            error.message
+        );
+
+        let returned = r#"
+module test
+resource Token has destroy { amount: u64 }
+action bad(token: Token) -> u64 {
+    verification
+        borrow token as view {
+            return view
+        }
+}
+"#;
+        let error = compile(returned, CompileOptions::default()).unwrap_err();
+        assert!(
+            error.message.contains("borrow 'view' cannot escape borrow block rooted at linear value 'token'"),
+            "unexpected error: {}",
+            error.message
+        );
+    }
+
+    #[test]
+    fn compile_checks_callee_effects_for_borrowed_views() {
+        let source = r#"
+module test
+resource Token has destroy { amount: u64 }
+
+#[effect(Mutating)]
+fn incompatible(token: &Token) -> bool {
+    return token.amount > 0
+}
+
+action bad(token: Token) {
+    verification
+        borrow token as view {
+            require incompatible(view)
+        }
+        destroy token
+}
+"#;
+        let error = compile(source, CompileOptions::default()).unwrap_err();
+        assert!(
+            error.message.contains("function 'incompatible' has Mutating effect and cannot receive borrowed linear view 'view'"),
+            "unexpected error: {}",
+            error.message
         );
     }
 

@@ -1,0 +1,20 @@
+// audit: phase=reject_compile
+// audit: contains=has Mutating effect and cannot receive borrowed linear view 'view'
+module cellscript::audit::seed_explicit_borrow_effect_reject
+
+resource Token has consume {
+    amount: u64,
+}
+
+#[effect(Mutating)]
+fn incompatible(token: &Token) -> bool {
+    return token.amount > 0
+}
+
+action bad(token: Token) {
+    verification
+        borrow token as view {
+            require incompatible(view)
+        }
+        consume token
+}

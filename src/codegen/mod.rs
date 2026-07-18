@@ -20048,6 +20048,7 @@ mod tests {
             mutate_set: Vec::new(),
             write_intents: Vec::new(),
             bounded_collection_ops: Vec::new(),
+            borrow_regions: Vec::new(),
             blocks: Vec::new(),
         };
 
@@ -20422,6 +20423,7 @@ mod tests {
                     mutate_set: vec![],
                     write_intents: vec![],
                     bounded_collection_ops: vec![],
+                    borrow_regions: vec![],
                     blocks: vec![IrBlock {
                         id: BlockId(0),
                         instructions: vec![],

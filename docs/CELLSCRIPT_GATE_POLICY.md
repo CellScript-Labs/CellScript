@@ -52,11 +52,12 @@ modes; they do not create a new gate command:
   a terminal state. `release` still requires exact-artifact and chain evidence
   before a production claim.
 
-Metadata schema `49` carries declared/inferred/effective function effects, the
+Metadata schema `50` carries declared/inferred/effective function effects, the
 initial, terminal, discharge, state-model, and audit-warning fields for flows,
 the canonical evidence tier on ProofPlan, flow, and function metadata, and
 typed transaction-view handle records under
-`runtime.transaction_view_handles`, plus `types[].validity_predicates`. Handle records must remain
+`runtime.transaction_view_handles`, `runtime.borrow_regions`, plus
+`types[].validity_predicates`. Handle records must remain
 `ownership = read-only-view`, carry `lifecycle_authority = false`, and report
 checked-static typing plus checked-runtime read evidence.
 Consumers must reject unsupported schema versions instead of silently dropping
@@ -97,6 +98,14 @@ CKB-VM syscall: its record names both
 syntax audit requires positive evidence records and the unknown-environment
 negative seed through `SCA-BUG-0.22-VALIDITY-EVIDENCE-MISSING` and
 `SCA-BUG-0.22-VALIDITY-ENV-UNKNOWN`.
+
+Explicit borrow blocks are a checked-static compiler contract. Each
+`runtime.borrow_regions` record must use canonical `View<T>`, declare
+`storage = none` and `abi = none`, and allow only `Pure` and `ReadOnly`
+callees with a dedicated `&T` parameter. The matching `borrow-region`
+ProofPlan entry records escape and root-lifecycle rejection. Quick syntax
+coverage pins effect compatibility, escape rejection, and crossing
+`consume`/`destroy` through the three `SCA-BUG-0.22-BORROW-*` classes.
 
 ## Command Cheatsheet
 

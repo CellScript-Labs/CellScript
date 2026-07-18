@@ -1,0 +1,15 @@
+// audit: phase=reject_compile
+// audit: contains=cannot escape borrow block rooted at linear value 'token'
+module cellscript::audit::seed_explicit_borrow_escape_reject
+
+resource Token has consume {
+    amount: u64,
+}
+
+action bad(token: Token) {
+    verification
+        borrow token as view {
+            let escaped = (view, 1)
+        }
+        consume token
+}

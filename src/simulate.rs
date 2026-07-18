@@ -267,6 +267,21 @@ impl SimulateInterpreter {
                 }
                 Ok(None)
             }
+            Stmt::Borrow(borrow_stmt) => {
+                let root = self
+                    .env
+                    .get(&borrow_stmt.root)
+                    .cloned()
+                    .ok_or_else(|| SimulateError::UndefinedVariable { name: borrow_stmt.root.clone() })?;
+                let previous = self.env.insert(borrow_stmt.binding.clone(), root);
+                let result = self.exec_stmts(&borrow_stmt.body);
+                if let Some(previous) = previous {
+                    self.env.insert(borrow_stmt.binding.clone(), previous);
+                } else {
+                    self.env.remove(&borrow_stmt.binding);
+                }
+                result
+            }
         }
     }
 

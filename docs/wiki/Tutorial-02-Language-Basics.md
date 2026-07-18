@@ -263,6 +263,35 @@ syscall. Inspect `types[].validity_predicates` and the matching `type-validity`
 ProofPlan entries before treating a path as enforced. LSP type hover displays
 the same predicate, tier, and create/update status.
 
+### Explicit Read-Only Borrow Regions
+
+Use a lexical borrow block when several checks need to inspect one linear Cell
+before its lifecycle operation:
+
+```cellscript
+#[effect(Pure)]
+fn amount_is(token: &Token, expected: u64) -> bool {
+    return token.amount == expected
+}
+
+action inspect(token: Token, expected: u64) -> u64 {
+    verification
+        borrow token as view {
+            require amount_is(view, expected)
+            require view.amount > 0
+        }
+        consume token
+        return expected
+}
+```
+
+`view` is a compiler-only `View<Token>` marker. It cannot be returned,
+assigned, stored in an aggregate or collection, passed through an
+untyped/generic slot, or used across `consume`, `destroy`, transfer, claim, or
+settle of `token`. Calls that receive it must be `Pure` or `ReadOnly` functions
+with an explicit `&Token` parameter. The block does not replace the
+transaction's explicit consume/create lifecycle.
+
 Persistent declarations can also declare the default CKB script hash type used
 for their type identity metadata:
 

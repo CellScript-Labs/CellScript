@@ -170,8 +170,62 @@ pub fn build_for_body(
             .enumerate()
             .map(|(index, operation)| plan_for_bounded_collection(scope_kind, name, index, operation)),
     );
+    plans
+        .extend(body.borrow_regions.iter().enumerate().map(|(index, region)| plan_for_borrow_region(scope_kind, name, index, region)));
 
     plans
+}
+
+fn plan_for_borrow_region(scope_kind: &str, scope_name: &str, index: usize, region: &ir::IrBorrowRegion) -> ProofPlanMetadata {
+    let feature = format!("View<{}>:{}->{}", region.root_type, region.root, region.binding);
+    ProofPlanMetadata {
+        name: format!("{}#borrow-region{}", scope_name, index),
+        origin: format!("{}:{}#borrow-region:{}", scope_kind, scope_name, index),
+        category: "borrow-region".to_string(),
+        feature: feature.clone(),
+        evidence_tier: EvidenceTier::CheckedStatic,
+        source_span: Some(ProofPlanSourceSpanMetadata {
+            start: region.span.start,
+            end: region.span.end,
+            line: region.span.line,
+            column: region.span.column,
+        }),
+        trigger: trigger_for_scope_kind(scope_kind).to_string(),
+        scope: "lexical-block-with-flow-sensitive-checks".to_string(),
+        reads: vec![region.root.clone()],
+        coverage: vec![
+            format!("root:{}:{}", region.root, region.root_type),
+            format!("view:{}", region.binding),
+            "storage:none".to_string(),
+            "abi:none".to_string(),
+            "allowed-effects:Pure,ReadOnly".to_string(),
+            "lifecycle-crossing:rejected".to_string(),
+            "escape:return,aggregate,assignment,generic-call-rejected".to_string(),
+        ],
+        input_output_relation_checks: Vec::new(),
+        group_cardinality: "single-linear-root".to_string(),
+        identity_lifecycle_policy: "borrow preserves root Cell identity and cannot consume, destroy, transfer, claim, or settle it"
+            .to_string(),
+        preserved_fields: Vec::new(),
+        witness_fields: Vec::new(),
+        lock_args_fields: Vec::new(),
+        on_chain_checked: true,
+        on_chain_checked_obligations: vec![
+            format!("borrow-region:{}=checked-static", feature),
+            "compiler rejects borrow escape, lifecycle crossing, and effect-incompatible calls before codegen".to_string(),
+        ],
+        builder_assumptions: Vec::new(),
+        codegen_coverage_status: "covered".to_string(),
+        status: "checked-static".to_string(),
+        detail: format!(
+            "borrowed view '{}' of linear root '{}' is erased after static region, escape, lifecycle, and callee-effect checks",
+            region.binding, region.root
+        ),
+        diagnostics: vec![ProofPlanDiagnosticMetadata {
+            severity: "info".to_string(),
+            message: "borrow region is a compiler marker and emits no serializable value or callable ABI slot".to_string(),
+        }],
+    }
 }
 
 fn plan_for_bounded_collection(

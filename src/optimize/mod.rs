@@ -155,6 +155,12 @@ impl Optimizer {
                     span: while_stmt.span,
                 })])
             }
+            Stmt::Borrow(borrow_stmt) => Ok(vec![Stmt::Borrow(BorrowStmt {
+                root: borrow_stmt.root.clone(),
+                binding: borrow_stmt.binding.clone(),
+                body: self.with_child_scope(|this| this.optimize_stmts(&borrow_stmt.body))?,
+                span: borrow_stmt.span,
+            })]),
         }
     }
 
@@ -557,6 +563,7 @@ fn collect_call_names_from_stmt(stmt: &Stmt, names: &mut Vec<String>) {
             collect_call_names_from_expr(&while_stmt.condition, names);
             collect_call_names_from_stmts(&while_stmt.body, names);
         }
+        Stmt::Borrow(borrow_stmt) => collect_call_names_from_stmts(&borrow_stmt.body, names),
     }
 }
 
@@ -683,6 +690,12 @@ fn collect_used_names_from_stmt(stmt: &Stmt, names: &mut HashSet<String>) {
         Stmt::While(while_stmt) => {
             collect_used_names_from_expr(&while_stmt.condition, names);
             for stmt in &while_stmt.body {
+                collect_used_names_from_stmt(stmt, names);
+            }
+        }
+        Stmt::Borrow(borrow_stmt) => {
+            names.insert(borrow_stmt.root.clone());
+            for stmt in &borrow_stmt.body {
                 collect_used_names_from_stmt(stmt, names);
             }
         }
@@ -834,7 +847,7 @@ fn stmt_is_pure_inlineable(stmt: &Stmt) -> bool {
                 && if_stmt.then_branch.iter().all(stmt_is_pure_inlineable)
                 && if_stmt.else_branch.as_ref().is_none_or(|branch| branch.iter().all(stmt_is_pure_inlineable))
         }
-        Stmt::For(_) | Stmt::While(_) => false,
+        Stmt::For(_) | Stmt::While(_) | Stmt::Borrow(_) => false,
     }
 }
 

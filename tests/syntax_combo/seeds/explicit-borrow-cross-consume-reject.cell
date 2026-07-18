@@ -1,0 +1,17 @@
+// audit: phase=reject_compile
+// audit: contains=cannot cross consume of linear root 'token'
+module cellscript::audit::seed_explicit_borrow_cross_consume_reject
+
+resource Token has consume {
+    amount: u64,
+}
+
+action bad(token: Token, flag: bool) {
+    verification
+        borrow token as view {
+            if flag {
+                consume token
+            }
+            require view.amount > 0
+        }
+}

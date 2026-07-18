@@ -294,6 +294,14 @@ pub struct TypeChecker<'a> {
     current_callable: Option<CallableKind>,
     current_return_type: Option<Option<Type>>,
     current_validity: bool,
+    active_borrows: Vec<ActiveBorrow>,
+}
+
+#[derive(Debug, Clone)]
+struct ActiveBorrow {
+    root: String,
+    binding: String,
+    root_ty: Type,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -422,6 +430,7 @@ impl<'a> TypeChecker<'a> {
             current_callable: None,
             current_return_type: None,
             current_validity: false,
+            active_borrows: Vec::new(),
         }
     }
 
@@ -1591,6 +1600,9 @@ impl<'a> TypeChecker<'a> {
                     self.validate_branch_obligations_in_expr(&while_stmt.condition, outputs, guaranteed.clone())?;
                     self.validate_branch_obligations_in_stmts(&while_stmt.body, outputs, guaranteed.clone())?;
                 }
+                Stmt::Borrow(borrow_stmt) => {
+                    guaranteed = self.validate_branch_obligations_in_stmts(&borrow_stmt.body, outputs, guaranteed)?;
+                }
             }
         }
 
@@ -1786,6 +1798,7 @@ impl<'a> TypeChecker<'a> {
                     self.validate_create_targets_in_expr(&while_stmt.condition, outputs)?;
                     self.validate_create_targets_in_stmts(&while_stmt.body, outputs)?;
                 }
+                Stmt::Borrow(borrow_stmt) => self.validate_create_targets_in_stmts(&borrow_stmt.body, outputs)?,
             }
         }
         Ok(())
@@ -2812,6 +2825,7 @@ impl<'a> TypeChecker<'a> {
                 let mut loop_state = state.clone();
                 self.validate_spawn_ipc_fd_usage_statements(&while_stmt.body, &mut loop_state)?;
             }
+            Stmt::Borrow(borrow_stmt) => self.validate_spawn_ipc_fd_usage_statements(&borrow_stmt.body, state)?,
         }
         Ok(())
     }
@@ -3042,6 +3056,7 @@ impl<'a> TypeChecker<'a> {
     fn check_stmt(&mut self, env: &mut TypeEnv, stmt: &Stmt) -> Result<()> {
         match stmt {
             Stmt::Let(let_stmt) => {
+                self.reject_direct_borrow_escape(&let_stmt.value, let_stmt.span)?;
                 let ty = self.infer_let_value_type(env, let_stmt)?;
                 if let Some(ref declared_ty) = let_stmt.ty {
                     self.validate_type(declared_ty)?;
@@ -3055,6 +3070,7 @@ impl<'a> TypeChecker<'a> {
                 if matches!(ty, Type::Unit) {
                     return Err(CompileError::new("cannot bind the result of a function without a return value", let_stmt.span));
                 }
+                self.reject_borrow_escape_type(&let_stmt.value, &ty, let_stmt.span)?;
                 self.reject_local_reference_to_linear_root(env, &let_stmt.value, &ty, let_stmt.span)?;
                 self.reject_local_mutable_reference_alias(&ty, let_stmt.span)?;
                 self.mark_expr_as_moved(env, &let_stmt.value)?;
@@ -3076,6 +3092,7 @@ impl<'a> TypeChecker<'a> {
             }
             Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
                 let return_span = stmt_span(stmt);
+                self.reject_direct_borrow_escape(expr, return_span)?;
                 let ty = match self.current_return_type.clone() {
                     Some(Some(expected)) => self.infer_expr_with_expected_type(env, expr, &expected, return_span)?,
                     _ => self.infer_expr(env, expr)?,
@@ -3092,6 +3109,7 @@ impl<'a> TypeChecker<'a> {
                     }
                     _ => {}
                 }
+                self.reject_borrow_escape_type(expr, &ty, return_span)?;
                 self.mark_expr_as_moved(env, expr)?;
                 Ok(())
             }
@@ -3144,7 +3162,39 @@ impl<'a> TypeChecker<'a> {
                 env.merge_existing_type_refinements_from(&while_env);
                 Ok(())
             }
+            Stmt::Borrow(borrow_stmt) => self.check_borrow_stmt(env, borrow_stmt),
         }
+    }
+
+    fn check_borrow_stmt(&mut self, env: &mut TypeEnv, borrow_stmt: &BorrowStmt) -> Result<()> {
+        let root_ty = env.lookup(&borrow_stmt.root).cloned().ok_or_else(|| {
+            CompileError::new(format!("borrow root '{}' is not a local linear value", borrow_stmt.root), borrow_stmt.span)
+        })?;
+        if !self.is_linear_type(&root_ty) {
+            return Err(CompileError::new(
+                format!("borrow root '{}' must be a cell-backed linear value", borrow_stmt.root),
+                borrow_stmt.span,
+            ));
+        }
+        if env.linear_state(&borrow_stmt.root) != Some(LinearState::Available) {
+            return Err(CompileError::new(format!("borrow root '{}' is no longer available", borrow_stmt.root), borrow_stmt.span));
+        }
+
+        let mut borrow_env = env.child();
+        borrow_env.bind_new(borrow_stmt.binding.clone(), Type::Ref(Box::new(root_ty.clone())), false, false, borrow_stmt.span)?;
+        self.active_borrows.push(ActiveBorrow { root: borrow_stmt.root.clone(), binding: borrow_stmt.binding.clone(), root_ty });
+        let result = (|| {
+            for stmt in &borrow_stmt.body {
+                self.check_stmt(&mut borrow_env, stmt)?;
+            }
+            borrow_env.check_linear_complete()
+        })();
+        self.active_borrows.pop();
+        result?;
+
+        env.merge_existing_linear_states_from(&borrow_env);
+        env.merge_existing_type_refinements_from(&borrow_env);
+        Ok(())
     }
 
     fn check_no_unreachable_stmts(&self, stmts: &[Stmt]) -> Result<()> {
@@ -3169,6 +3219,7 @@ impl<'a> TypeChecker<'a> {
             }
             Stmt::For(for_stmt) => self.check_no_unreachable_stmts(&for_stmt.body)?,
             Stmt::While(while_stmt) => self.check_no_unreachable_stmts(&while_stmt.body)?,
+            Stmt::Borrow(borrow_stmt) => self.check_no_unreachable_stmts(&borrow_stmt.body)?,
             Stmt::Expr(Expr::Block(stmts)) => self.check_no_unreachable_stmts(stmts)?,
             _ => {}
         }
@@ -3324,6 +3375,7 @@ impl<'a> TypeChecker<'a> {
             }
             Expr::Assign(assign) => self.infer_assign_expr(env, assign),
             Expr::Binary(bin) => {
+                self.reject_direct_borrow_escape(expr, bin.span)?;
                 let left_ty = self.infer_expr(env, &bin.left)?;
                 let right_ty = self.infer_expr(env, &bin.right)?;
 
@@ -3361,6 +3413,7 @@ impl<'a> TypeChecker<'a> {
                 }
             }
             Expr::Unary(unary) => {
+                self.reject_direct_borrow_escape(expr, unary.span)?;
                 let expr_ty = self.infer_expr(env, &unary.expr)?;
                 match unary.op {
                     UnaryOp::Neg => {
@@ -3410,6 +3463,7 @@ impl<'a> TypeChecker<'a> {
                 Ok(field_ty)
             }
             Expr::Index(index) => {
+                self.reject_direct_borrow_escape(expr, index.span)?;
                 let expr_ty = self.infer_expr(env, &index.expr)?;
                 let index_ty = self.infer_expr(env, &index.index)?;
                 if !self.is_numeric_type(&index_ty) {
@@ -3537,6 +3591,7 @@ impl<'a> TypeChecker<'a> {
                 Ok(Type::Bool)
             }
             Expr::Block(stmts) => {
+                self.reject_direct_borrow_escape(expr, expr_span(expr))?;
                 let mut block_env = env.child();
                 let last_ty = self.infer_tail_block_value(&mut block_env, stmts)?;
                 block_env.check_linear_complete()?;
@@ -3544,6 +3599,7 @@ impl<'a> TypeChecker<'a> {
                 Ok(last_ty)
             }
             Expr::Tuple(elems) => {
+                self.reject_direct_borrow_escape(expr, expr_span(expr))?;
                 let mut types = Vec::new();
                 for elem in elems {
                     types.push(self.infer_expr(env, elem)?);
@@ -3551,6 +3607,7 @@ impl<'a> TypeChecker<'a> {
                 Ok(Type::Tuple(types))
             }
             Expr::Array(elems) => {
+                self.reject_direct_borrow_escape(expr, expr_span(expr))?;
                 if elems.is_empty() {
                     return Err(CompileError::new("empty array literal requires an explicit array type annotation", expr_span(expr)));
                 }
@@ -3564,6 +3621,7 @@ impl<'a> TypeChecker<'a> {
                 Ok(Type::Array(Box::new(elem_ty), elems.len()))
             }
             Expr::If(if_expr) => {
+                self.reject_direct_borrow_escape(expr, if_expr.span)?;
                 let cond_ty = self.infer_expr(env, &if_expr.condition)?;
                 if !self.is_bool_type(&cond_ty) {
                     return Err(CompileError::new("if expression condition must be boolean", if_expr.span));
@@ -3583,6 +3641,7 @@ impl<'a> TypeChecker<'a> {
                 }
             }
             Expr::Cast(cast) => {
+                self.reject_direct_borrow_escape(expr, cast.span)?;
                 let source_ty = self.infer_expr(env, &cast.expr)?;
                 self.validate_checked_cast(&cast.expr, &source_ty, &cast.ty, cast.span)?;
                 Ok(cast.ty.clone())
@@ -3593,10 +3652,12 @@ impl<'a> TypeChecker<'a> {
                 Ok(Type::Named("Range".to_string()))
             }
             Expr::StructInit(init) => {
+                self.reject_direct_borrow_escape(expr, init.span)?;
                 self.check_field_initializer(env, &init.ty, &init.fields, init.span, "struct literal")?;
                 Ok(Type::Named(init.ty.clone()))
             }
             Expr::Match(match_expr) => {
+                self.reject_direct_borrow_escape(expr, match_expr.span)?;
                 let scrutinee_ty = self.infer_expr(env, &match_expr.expr)?;
                 self.check_match_patterns(&scrutinee_ty, match_expr)?;
                 let mut arm_ty = None;
@@ -3750,6 +3811,7 @@ impl<'a> TypeChecker<'a> {
                 call.span,
             )
         })?;
+        self.validate_stdlib_borrow_call(&qualified, call)?;
         self.validate_stdlib_arity(&qualified, call, signature.arity)?;
         if !signature.allows_preserve_fields && !call.preserve_fields.is_empty() {
             return Err(CompileError::new(format!("{} does not accept a preserve-field block", qualified), call.span));
@@ -3827,6 +3889,35 @@ impl<'a> TypeChecker<'a> {
         } else {
             Err(CompileError::new(format!("{} expects {} arguments, got {}", qualified, expected, call.args.len()), call.span))
         }
+    }
+
+    fn validate_stdlib_borrow_call(&self, qualified: &str, call: &StdlibCallExpr) -> Result<()> {
+        let read_only = matches!(
+            (call.namespace.as_str(), call.name.as_str()),
+            ("cell", "same_lock" | "preserve_lock" | "preserve_capacity" | "same_type" | "preserve_type")
+                | ("accounting", "conserved")
+        );
+        for arg in &call.args {
+            let Some(borrow) = self.active_borrow_used_by_expr(arg) else {
+                continue;
+            };
+            if !read_only {
+                return Err(CompileError::new(
+                    format!(
+                        "function '{}' has Mutating effect and cannot receive borrowed linear view '{}'",
+                        qualified, borrow.binding
+                    ),
+                    call.span,
+                ));
+            }
+            if !matches!(arg, Expr::Identifier(name) if name == &borrow.binding) {
+                return Err(CompileError::new(
+                    format!("borrow '{}' cannot escape borrow block rooted at linear value '{}'", borrow.binding, borrow.root),
+                    call.span,
+                ));
+            }
+        }
+        Ok(())
     }
 
     fn is_script_args_payload_type(ty: &Type) -> bool {
@@ -4615,6 +4706,7 @@ impl<'a> TypeChecker<'a> {
                 self.stmts_always_return(&if_stmt.then_branch) && self.stmts_always_return(else_branch)
             }
             Stmt::Expr(Expr::Block(stmts)) => self.stmts_always_return(stmts),
+            Stmt::Borrow(borrow_stmt) => self.stmts_always_return(&borrow_stmt.body),
             _ => false,
         }
     }
@@ -4714,6 +4806,7 @@ impl<'a> TypeChecker<'a> {
     fn mark_expr_as_moved(&mut self, env: &mut TypeEnv, expr: &Expr) -> Result<()> {
         match expr {
             Expr::Identifier(name) => {
+                self.reject_active_borrow_root_lifecycle(name, "move", expr_span(expr))?;
                 if let Some(ty) = env.lookup(name).cloned() {
                     if self.is_linear_type(&ty) {
                         env.consume(name)?;
@@ -4766,6 +4859,103 @@ impl<'a> TypeChecker<'a> {
             self.reject_unrooted_linear_reference_type(ty, span)?;
         }
         Ok(())
+    }
+
+    fn reject_borrow_escape_type(&self, expr: &Expr, ty: &Type, span: Span) -> Result<()> {
+        if !self.type_contains_reference(ty) {
+            return Ok(());
+        }
+        let Some(borrow) = self.active_borrow_used_by_expr(expr) else {
+            return Ok(());
+        };
+        Err(CompileError::new(
+            format!("borrow '{}' cannot escape borrow block rooted at linear value '{}'", borrow.binding, borrow.root),
+            span,
+        ))
+    }
+
+    fn reject_direct_borrow_escape(&self, expr: &Expr, span: Span) -> Result<()> {
+        let Some(borrow) = self.active_borrows.iter().rev().find(|borrow| expr_contains_borrow_marker(expr, &borrow.binding)) else {
+            return Ok(());
+        };
+        Err(CompileError::new(
+            format!("borrow '{}' cannot escape borrow block rooted at linear value '{}'", borrow.binding, borrow.root),
+            span,
+        ))
+    }
+
+    fn active_borrow_used_by_expr(&self, expr: &Expr) -> Option<&ActiveBorrow> {
+        self.active_borrows.iter().rev().find(|borrow| expr_uses_identifier(expr, &borrow.binding))
+    }
+
+    fn reject_active_borrow_root_lifecycle(&self, root: &str, operation: &str, span: Span) -> Result<()> {
+        let Some(borrow) = self.active_borrows.iter().rev().find(|borrow| borrow.root == root) else {
+            return Ok(());
+        };
+        Err(CompileError::new(
+            format!("borrow '{}' cannot cross {} of linear root '{}'", borrow.binding, operation, borrow.root),
+            span,
+        ))
+    }
+
+    fn validate_borrow_call(
+        &self,
+        callee_name: &str,
+        callee_kind: CallableKind,
+        callee_effect: EffectClass,
+        params: &[Type],
+        call: &CallExpr,
+    ) -> Result<()> {
+        for (index, arg) in call.args.iter().enumerate() {
+            let Some(borrow) = self.active_borrow_used_by_expr(arg) else {
+                continue;
+            };
+            if !matches!(arg, Expr::Identifier(name) if name == &borrow.binding) {
+                return Err(CompileError::new(
+                    format!("borrow '{}' cannot escape borrow block rooted at linear value '{}'", borrow.binding, borrow.root),
+                    call.span,
+                ));
+            }
+            if callee_kind != CallableKind::Function || !matches!(callee_effect, EffectClass::Pure | EffectClass::ReadOnly) {
+                return Err(CompileError::new(
+                    format!(
+                        "function '{}' has {} effect and cannot receive borrowed linear view '{}'",
+                        callee_name,
+                        callee_effect.as_str(),
+                        borrow.binding
+                    ),
+                    call.span,
+                ));
+            }
+            let compatible =
+                params.get(index).is_some_and(|param| matches!(param, Type::Ref(inner) if self.types_equal(inner, &borrow.root_ty)));
+            if !compatible {
+                return Err(CompileError::new(
+                    format!(
+                        "function '{}' argument {} must declare a dedicated read-only &{} parameter to receive borrowed view '{}'",
+                        callee_name,
+                        index + 1,
+                        type_repr(&borrow.root_ty),
+                        borrow.binding
+                    ),
+                    call.span,
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn reject_borrow_view_in_builtin_call(&self, callee_name: &str, call: &CallExpr) -> Result<()> {
+        let Some(borrow) = call.args.iter().find_map(|arg| self.active_borrow_used_by_expr(arg)) else {
+            return Ok(());
+        };
+        Err(CompileError::new(
+            format!(
+                "builtin '{}' has no dedicated borrowed-view parameter and cannot receive borrowed linear view '{}'",
+                callee_name, borrow.binding
+            ),
+            call.span,
+        ))
     }
 
     fn reject_stored_linear_reference_alias(&self, env: &TypeEnv, expr: &Expr, span: Span) -> Result<()> {
@@ -4853,12 +5043,14 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn infer_assign_expr(&mut self, env: &mut TypeEnv, assign: &AssignExpr) -> Result<Type> {
+        self.reject_direct_borrow_escape(&assign.value, assign.span)?;
         match assign.target.as_ref() {
             Expr::Identifier(name) => {
                 let Some(target_ty) = env.lookup(name).cloned() else {
                     return Err(CompileError::new(format!("undefined variable '{}'", name), assign.span));
                 };
                 let value_ty = self.infer_expr_with_expected_type(env, &assign.value, &target_ty, expr_span(&assign.value))?;
+                self.reject_borrow_escape_type(&assign.value, &value_ty, assign.span)?;
                 self.reject_assignment_reference_to_linear_root(env, &assign.value, assign.span)?;
                 self.reject_assignment_mutable_reference_alias(&value_ty, assign.span)?;
                 if self.is_linear_type(&target_ty) {
@@ -4912,6 +5104,7 @@ impl<'a> TypeChecker<'a> {
                 }
                 let target_ty = self.infer_expr(env, &assign.target)?;
                 let value_ty = self.infer_expr_with_expected_type(env, &assign.value, &target_ty, expr_span(&assign.value))?;
+                self.reject_borrow_escape_type(&assign.value, &value_ty, assign.span)?;
                 self.reject_assignment_reference_to_linear_root(env, &assign.value, assign.span)?;
                 self.reject_assignment_mutable_reference_alias(&value_ty, assign.span)?;
                 match assign.op {
@@ -5359,12 +5552,16 @@ impl<'a> TypeChecker<'a> {
                 }
                 if let Some(signature) = self.functions.get(name).cloned() {
                     self.validate_call_allowed(name, signature.kind, signature.effect, call.span)?;
+                    self.validate_borrow_call(name, signature.kind, signature.effect, &signature.params, call)?;
                     self.validate_call_args(name, &signature.params, arg_types, &call.args, call.span)?;
                     return Ok(signature.return_type.unwrap_or(Type::Unit));
                 }
                 if let Some(function) = self.resolve_function(name) {
-                    self.validate_call_allowed(name, function_def_kind(&function), function_def_effect(&function), call.span)?;
+                    let kind = function_def_kind(&function);
+                    let effect = function_def_effect(&function);
+                    self.validate_call_allowed(name, kind, effect, call.span)?;
                     let params = function_def_param_types(&function);
+                    self.validate_borrow_call(name, kind, effect, &params, call)?;
                     self.validate_call_args(name, &params, arg_types, &call.args, call.span)?;
                     return Ok(self.function_return_type(&function).unwrap_or(Type::Unit));
                 }
@@ -5372,10 +5569,12 @@ impl<'a> TypeChecker<'a> {
                     if self.current_module.as_deref() == Some(prefix) {
                         if let Some(signature) = self.functions.get(suffix).cloned() {
                             self.validate_call_allowed(name, signature.kind, signature.effect, call.span)?;
+                            self.validate_borrow_call(name, signature.kind, signature.effect, &signature.params, call)?;
                             self.validate_call_args(name, &signature.params, arg_types, &call.args, call.span)?;
                             return Ok(signature.return_type.unwrap_or(Type::Unit));
                         }
                     }
+                    self.reject_borrow_view_in_builtin_call(name, call)?;
                     return Ok(match (prefix, suffix) {
                         ("env", "current_timepoint") => {
                             self.validate_builtin_arity(name, 0, arg_types, call.span)?;
@@ -5906,6 +6105,7 @@ impl<'a> TypeChecker<'a> {
                         _ => return Err(CompileError::new(format!("unknown namespaced function '{}'", name), call.span)),
                     });
                 }
+                self.reject_borrow_view_in_builtin_call(name, call)?;
                 if name == "min" || name == "max" || name == "isqrt" {
                     self.validate_numeric_builtin_call(name, arg_types, call.span)?;
                     return Ok(Type::U64);
@@ -6766,7 +6966,10 @@ impl<'a> TypeChecker<'a> {
             return Err(CompileError::new(format!("{} requires a cell-backed linear value", operation), span));
         }
         match expr {
-            Expr::Identifier(name) => Ok((ty, name.clone())),
+            Expr::Identifier(name) => {
+                self.reject_active_borrow_root_lifecycle(name, operation, span)?;
+                Ok((ty, name.clone()))
+            }
             _ => Err(CompileError::new(
                 format!("{} requires a named cell-backed value so the compiler can track linear ownership", operation),
                 span,
@@ -6901,6 +7104,7 @@ fn stmt_span(stmt: &Stmt) -> Span {
         Stmt::If(if_stmt) => if_stmt.span,
         Stmt::For(for_stmt) => for_stmt.span,
         Stmt::While(while_stmt) => while_stmt.span,
+        Stmt::Borrow(borrow_stmt) => borrow_stmt.span,
     }
 }
 
@@ -6947,6 +7151,126 @@ fn expr_span(expr: &Expr) -> Span {
         Expr::Match(match_expr) => match_expr.span,
         Expr::RequireBlock(require_block) => require_block.span,
         Expr::Preserve(preserve) => preserve.span,
+    }
+}
+
+fn expr_uses_identifier(expr: &Expr, expected: &str) -> bool {
+    match expr {
+        Expr::Identifier(name) => name == expected,
+        Expr::Assign(assign) => expr_uses_identifier(&assign.target, expected) || expr_uses_identifier(&assign.value, expected),
+        Expr::Binary(binary) => expr_uses_identifier(&binary.left, expected) || expr_uses_identifier(&binary.right, expected),
+        Expr::Unary(unary) => expr_uses_identifier(&unary.expr, expected),
+        Expr::Call(call) => {
+            expr_uses_identifier(&call.func, expected) || call.args.iter().any(|arg| expr_uses_identifier(arg, expected))
+        }
+        Expr::FieldAccess(field) => expr_uses_identifier(&field.expr, expected),
+        Expr::Index(index) => expr_uses_identifier(&index.expr, expected) || expr_uses_identifier(&index.index, expected),
+        Expr::Create(create) => {
+            create.fields.iter().any(|(_, value)| expr_uses_identifier(value, expected))
+                || create.lock.as_ref().is_some_and(|lock| expr_uses_identifier(lock, expected))
+        }
+        Expr::Consume(consume) => expr_uses_identifier(&consume.expr, expected),
+        Expr::Destroy(destroy) => expr_uses_identifier(&destroy.expr, expected),
+        Expr::ReadRef(_) => false,
+        Expr::Claim(claim) => expr_uses_identifier(&claim.receipt, expected),
+        Expr::Settle(settle) => expr_uses_identifier(&settle.expr, expected),
+        Expr::CreateUnique(create) => {
+            create.fields.iter().any(|(_, value)| expr_uses_identifier(value, expected))
+                || create.lock.as_ref().is_some_and(|lock| expr_uses_identifier(lock, expected))
+        }
+        Expr::ReplaceUnique(replace) => {
+            expr_uses_identifier(&replace.expr, expected)
+                || replace.fields.iter().any(|(_, value)| expr_uses_identifier(value, expected))
+        }
+        Expr::Assert(assert_expr) => {
+            expr_uses_identifier(&assert_expr.condition, expected) || expr_uses_identifier(&assert_expr.message, expected)
+        }
+        Expr::Require(require_expr) => {
+            expr_uses_identifier(&require_expr.condition, expected)
+                || require_expr.message.as_ref().is_some_and(|message| expr_uses_identifier(message, expected))
+        }
+        Expr::Block(stmts) => stmts.iter().any(|stmt| stmt_uses_identifier(stmt, expected)),
+        Expr::Tuple(items) | Expr::Array(items) => items.iter().any(|item| expr_uses_identifier(item, expected)),
+        Expr::If(if_expr) => {
+            expr_uses_identifier(&if_expr.condition, expected)
+                || expr_uses_identifier(&if_expr.then_branch, expected)
+                || expr_uses_identifier(&if_expr.else_branch, expected)
+        }
+        Expr::Cast(cast) => expr_uses_identifier(&cast.expr, expected),
+        Expr::Range(range) => expr_uses_identifier(&range.start, expected) || expr_uses_identifier(&range.end, expected),
+        Expr::StructInit(init) => init.fields.iter().any(|(_, value)| expr_uses_identifier(value, expected)),
+        Expr::Match(match_expr) => {
+            expr_uses_identifier(&match_expr.expr, expected)
+                || match_expr.arms.iter().any(|arm| expr_uses_identifier(&arm.value, expected))
+        }
+        Expr::RequireBlock(require_block) => require_block.expressions.iter().any(|expr| expr_uses_identifier(expr, expected)),
+        Expr::Preserve(preserve) => preserve.output_name == expected || preserve.input_name == expected,
+        Expr::StdlibCall(call) => call.args.iter().any(|arg| expr_uses_identifier(arg, expected)),
+        Expr::Integer(_) | Expr::Bool(_) | Expr::String(_) | Expr::ByteString(_) => false,
+    }
+}
+
+fn expr_contains_borrow_marker(expr: &Expr, binding: &str) -> bool {
+    match expr {
+        Expr::Identifier(name) => name == binding,
+        Expr::Tuple(items) | Expr::Array(items) => items.iter().any(|item| expr_contains_borrow_marker(item, binding)),
+        Expr::StructInit(init) => init.fields.iter().any(|(_, value)| expr_contains_borrow_marker(value, binding)),
+        Expr::Cast(cast) => expr_contains_borrow_marker(&cast.expr, binding),
+        Expr::If(if_expr) => {
+            expr_contains_borrow_marker(&if_expr.then_branch, binding) || expr_contains_borrow_marker(&if_expr.else_branch, binding)
+        }
+        Expr::Match(match_expr) => match_expr.arms.iter().any(|arm| expr_contains_borrow_marker(&arm.value, binding)),
+        Expr::Block(stmts) => stmts.last().is_some_and(|stmt| match stmt {
+            Stmt::Expr(expr) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => expr_contains_borrow_marker(expr, binding),
+            _ => false,
+        }),
+        Expr::Unary(unary) => expr_contains_borrow_marker(&unary.expr, binding),
+        Expr::Assign(assign) => expr_contains_borrow_marker(&assign.value, binding),
+        Expr::Integer(_)
+        | Expr::Bool(_)
+        | Expr::String(_)
+        | Expr::ByteString(_)
+        | Expr::Call(_)
+        | Expr::FieldAccess(_)
+        | Expr::Create(_)
+        | Expr::Consume(_)
+        | Expr::Destroy(_)
+        | Expr::ReadRef(_)
+        | Expr::Claim(_)
+        | Expr::Settle(_)
+        | Expr::CreateUnique(_)
+        | Expr::ReplaceUnique(_)
+        | Expr::Assert(_)
+        | Expr::Require(_)
+        | Expr::Range(_)
+        | Expr::RequireBlock(_)
+        | Expr::Preserve(_)
+        | Expr::StdlibCall(_) => false,
+        Expr::Binary(binary) => {
+            expr_contains_borrow_marker(&binary.left, binding) || expr_contains_borrow_marker(&binary.right, binding)
+        }
+        Expr::Index(index) => expr_contains_borrow_marker(&index.expr, binding),
+    }
+}
+
+fn stmt_uses_identifier(stmt: &Stmt, expected: &str) -> bool {
+    match stmt {
+        Stmt::Let(let_stmt) => expr_uses_identifier(&let_stmt.value, expected),
+        Stmt::Expr(expr) => expr_uses_identifier(expr, expected),
+        Stmt::Return(return_stmt) => return_stmt.value.as_ref().is_some_and(|value| expr_uses_identifier(value, expected)),
+        Stmt::If(if_stmt) => {
+            expr_uses_identifier(&if_stmt.condition, expected)
+                || if_stmt.then_branch.iter().any(|stmt| stmt_uses_identifier(stmt, expected))
+                || if_stmt.else_branch.as_ref().is_some_and(|branch| branch.iter().any(|stmt| stmt_uses_identifier(stmt, expected)))
+        }
+        Stmt::For(for_stmt) => {
+            expr_uses_identifier(&for_stmt.iterable, expected) || for_stmt.body.iter().any(|stmt| stmt_uses_identifier(stmt, expected))
+        }
+        Stmt::While(while_stmt) => {
+            expr_uses_identifier(&while_stmt.condition, expected)
+                || while_stmt.body.iter().any(|stmt| stmt_uses_identifier(stmt, expected))
+        }
+        Stmt::Borrow(borrow_stmt) => borrow_stmt.body.iter().any(|stmt| stmt_uses_identifier(stmt, expected)),
     }
 }
 
@@ -7090,6 +7414,11 @@ fn collect_required_output_fields_from_stmt(stmt: &Stmt, outputs: &HashSet<Strin
         Stmt::While(while_stmt) => {
             collect_required_output_fields(&while_stmt.condition, outputs, fields);
             for stmt in &while_stmt.body {
+                collect_required_output_fields_from_stmt(stmt, outputs, fields);
+            }
+        }
+        Stmt::Borrow(borrow_stmt) => {
+            for stmt in &borrow_stmt.body {
                 collect_required_output_fields_from_stmt(stmt, outputs, fields);
             }
         }
@@ -7298,6 +7627,7 @@ fn collect_consumed_bindings_from_stmts(stmts: &[Stmt], bindings: &mut HashSet<S
                 collect_consumed_bindings_from_expr(&while_stmt.condition, bindings);
                 collect_consumed_bindings_from_stmts(&while_stmt.body, bindings);
             }
+            Stmt::Borrow(borrow_stmt) => collect_consumed_bindings_from_stmts(&borrow_stmt.body, bindings),
         }
     }
 }

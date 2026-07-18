@@ -231,7 +231,16 @@ pub struct IrBody {
     pub mutate_set: Vec<MutatePattern>,
     pub write_intents: Vec<WriteIntent>,
     pub bounded_collection_ops: Vec<IrBoundedCollectionOp>,
+    pub borrow_regions: Vec<IrBorrowRegion>,
     pub blocks: Vec<IrBlock>,
+}
+
+#[derive(Debug, Clone)]
+pub struct IrBorrowRegion {
+    pub root: String,
+    pub binding: String,
+    pub root_type: String,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone)]
@@ -484,6 +493,7 @@ pub struct IrGenerator {
     external_function_return_types: HashMap<String, Option<IrType>>,
     call_target_labels: HashMap<String, String>,
     lowering_lock_entry: bool,
+    borrow_regions: Vec<IrBorrowRegion>,
     errors: Vec<CompileError>,
 }
 
@@ -532,6 +542,7 @@ impl IrGenerator {
             external_function_return_types: HashMap::new(),
             call_target_labels: HashMap::new(),
             lowering_lock_entry: false,
+            borrow_regions: Vec::new(),
             errors: Vec::new(),
         }
     }
@@ -1277,6 +1288,11 @@ impl IrGenerator {
                     self.check_stmt_effects(stmt, footprint);
                 }
             }
+            Stmt::Borrow(borrow_stmt) => {
+                for stmt in &borrow_stmt.body {
+                    self.check_stmt_effects(stmt, footprint);
+                }
+            }
             _ => {}
         }
     }
@@ -1430,6 +1446,7 @@ impl IrGenerator {
         return_type: Option<IrType>,
         core_input_bindings: &HashSet<String>,
     ) -> (Vec<IrParam>, IrBody) {
+        self.borrow_regions.clear();
         let mut vars = HashMap::new();
         let mut ir_params = params
             .iter()
@@ -1472,10 +1489,14 @@ impl IrGenerator {
         let mutate_set = self.collect_mutate_param_patterns(&ir_params, consume_set.len(), create_set.len());
         let write_intents = Self::collect_write_intents(&create_set, &mutate_set);
         let bounded_collection_ops = collect_bounded_collection_ops(stmts, params);
+        let borrow_regions = std::mem::take(&mut self.borrow_regions);
         self.transition_param_ids.clear();
         self.transition_coverable_value_ids.clear();
 
-        (ir_params, IrBody { consume_set, read_refs, create_set, mutate_set, write_intents, bounded_collection_ops, blocks })
+        (
+            ir_params,
+            IrBody { consume_set, read_refs, create_set, mutate_set, write_intents, bounded_collection_ops, borrow_regions, blocks },
+        )
     }
 
     fn collect_write_intents(create_set: &[CreatePattern], mutate_set: &[MutatePattern]) -> Vec<WriteIntent> {
@@ -1959,6 +1980,27 @@ impl IrGenerator {
             Stmt::If(if_stmt) => self.lower_if_stmt(if_stmt, current, blocks, vars, return_type, false),
             Stmt::For(for_stmt) => self.lower_for_stmt(for_stmt, current, blocks, vars, return_type),
             Stmt::While(while_stmt) => self.lower_while_stmt(while_stmt, current, blocks, vars, return_type),
+            Stmt::Borrow(borrow_stmt) => {
+                let Some(root) = vars.get(&borrow_stmt.root).cloned() else {
+                    self.record_error(format!("borrow root '{}' was not lowered", borrow_stmt.root), borrow_stmt.span);
+                    return Some(current);
+                };
+                self.borrow_regions.push(IrBorrowRegion {
+                    root: borrow_stmt.root.clone(),
+                    binding: borrow_stmt.binding.clone(),
+                    root_type: ir_type_display(&root.ty),
+                    span: borrow_stmt.span,
+                });
+                let view = IrVar { id: root.id, name: borrow_stmt.binding.clone(), ty: IrType::Ref(Box::new(root.ty)) };
+                let previous = vars.insert(borrow_stmt.binding.clone(), view);
+                let exit = self.lower_stmts(&borrow_stmt.body, current, blocks, vars, return_type, false);
+                if let Some(previous) = previous {
+                    vars.insert(borrow_stmt.binding.clone(), previous);
+                } else {
+                    vars.remove(&borrow_stmt.binding);
+                }
+                exit
+            }
         }
     }
 
@@ -6282,6 +6324,26 @@ fn inline_ir_type_repr(ty: &IrType) -> Option<String> {
     }
 }
 
+fn ir_type_display(ty: &IrType) -> String {
+    match ty {
+        IrType::U8 => "u8".to_string(),
+        IrType::U16 => "u16".to_string(),
+        IrType::U32 => "u32".to_string(),
+        IrType::I32 => "i32".to_string(),
+        IrType::U64 => "u64".to_string(),
+        IrType::U128 => "u128".to_string(),
+        IrType::Bool => "bool".to_string(),
+        IrType::Unit => "()".to_string(),
+        IrType::Address => "Address".to_string(),
+        IrType::Hash => "Hash".to_string(),
+        IrType::Array(inner, len) => format!("[{}; {}]", ir_type_display(inner), len),
+        IrType::Tuple(items) => format!("({})", items.iter().map(ir_type_display).collect::<Vec<_>>().join(", ")),
+        IrType::Named(name) => name.clone(),
+        IrType::Ref(inner) => format!("&{}", ir_type_display(inner)),
+        IrType::MutRef(inner) => format!("&mut {}", ir_type_display(inner)),
+    }
+}
+
 fn collection_item_ir_type(ty: &IrType) -> Option<IrType> {
     let IrType::Named(name) = ty else {
         return None;
@@ -7249,6 +7311,7 @@ fn collect_bounded_collection_ops_from_stmts(stmts: &[Stmt], params: &[Param], o
                 collect_bounded_collection_ops_from_expr(&while_stmt.condition, params, ops);
                 collect_bounded_collection_ops_from_stmts(&while_stmt.body, params, ops);
             }
+            Stmt::Borrow(borrow_stmt) => collect_bounded_collection_ops_from_stmts(&borrow_stmt.body, params, ops),
             Stmt::Return(ReturnStmt { value: None, .. }) => {}
         }
     }
@@ -7319,6 +7382,7 @@ fn collect_call_names_from_stmt(stmt: &Stmt, names: &mut HashSet<String>) {
             collect_call_names_from_expr(&while_stmt.condition, names);
             collect_call_names_from_stmts(&while_stmt.body, names);
         }
+        Stmt::Borrow(borrow_stmt) => collect_call_names_from_stmts(&borrow_stmt.body, names),
         Stmt::Return(ReturnStmt { value: None, .. }) => {}
     }
 }
@@ -7575,6 +7639,11 @@ fn collect_ast_stmt_effects(stmt: &Stmt, footprint: &mut EffectFootprint) {
         Stmt::While(while_stmt) => {
             collect_ast_expr_effects(&while_stmt.condition, footprint);
             for stmt in &while_stmt.body {
+                collect_ast_stmt_effects(stmt, footprint);
+            }
+        }
+        Stmt::Borrow(borrow_stmt) => {
+            for stmt in &borrow_stmt.body {
                 collect_ast_stmt_effects(stmt, footprint);
             }
         }
@@ -7999,6 +8068,7 @@ fn collect_consumed_bindings_from_stmts(stmts: &[Stmt], bindings: &mut HashSet<S
                 collect_consumed_bindings_from_expr(&while_stmt.condition, bindings);
                 collect_consumed_bindings_from_stmts(&while_stmt.body, bindings);
             }
+            Stmt::Borrow(borrow_stmt) => collect_consumed_bindings_from_stmts(&borrow_stmt.body, bindings),
         }
     }
 }

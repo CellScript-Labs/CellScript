@@ -449,6 +449,7 @@ impl Formatter {
             Stmt::If(if_stmt) => self.format_if_stmt(if_stmt),
             Stmt::For(for_stmt) => self.format_for_stmt(for_stmt),
             Stmt::While(while_stmt) => self.format_while_stmt(while_stmt),
+            Stmt::Borrow(borrow_stmt) => self.format_borrow_stmt(borrow_stmt),
         }
     }
 
@@ -498,6 +499,16 @@ impl Formatter {
         self.push_line(&format!("while {} {{", self.format_expr(&while_stmt.condition)));
         self.indent_level += 1;
         for stmt in &while_stmt.body {
+            self.format_stmt(stmt);
+        }
+        self.indent_level -= 1;
+        self.push_line("}");
+    }
+
+    fn format_borrow_stmt(&mut self, borrow_stmt: &BorrowStmt) {
+        self.push_line(&format!("borrow {} as {} {{", borrow_stmt.root, borrow_stmt.binding));
+        self.indent_level += 1;
+        for stmt in &borrow_stmt.body {
             self.format_stmt(stmt);
         }
         self.indent_level -= 1;

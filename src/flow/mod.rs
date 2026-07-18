@@ -243,6 +243,7 @@ fn collect_state_context_from_stmts(specs: &HashMap<String, FlowSpec>, context: 
                 collect_state_context_from_expr(specs, context, &while_stmt.condition);
                 collect_state_context_from_stmts(specs, context, &while_stmt.body);
             }
+            Stmt::Borrow(borrow_stmt) => collect_state_context_from_stmts(specs, context, &borrow_stmt.body),
         }
     }
 }
@@ -393,6 +394,7 @@ fn validate_state_transition_stmt(specs: &HashMap<String, FlowSpec>, context: &A
             validate_state_transition_expr(specs, context, &while_stmt.condition)?;
             validate_stmt_list(specs, context, &while_stmt.body)
         }
+        Stmt::Borrow(borrow_stmt) => validate_stmt_list(specs, context, &borrow_stmt.body),
     }
 }
 

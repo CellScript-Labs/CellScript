@@ -145,7 +145,7 @@ artifact-binding facts, and CKB constraint summaries can now move independently
 in future schema revisions. `verify-artifact` still rejects a mismatch in any of
 these versions.
 
-Schema 49 includes `runtime.transaction_view_handles`. Each record identifies the
+Schema 50 includes `runtime.transaction_view_handles`. Each record identifies the
 callable scope, source (`Input`, `GroupOutput`, `CellDep`, and so on), public
 handle type, and evidence tiers. A conforming record is a read-only view with
 `lifecycle_authority = false`; it is evidence of a transaction read surface,
@@ -167,7 +167,7 @@ the `consume_each` runtime-helper tier. For `BoundedList<P, N>` driving
 `builder-evidence-required`; it is not proof that a transaction builder supplied
 the matching outputs or sufficient capacity.
 
-Schema 49 also adds `types[].validity_predicates`. Review each predicate's
+Schema 50 also adds `types[].validity_predicates`. Review each predicate's
 `expression`, `dependencies`, `evidence_tier`,
 `runtime_checked_on_create`, `create_paths_selected`,
 `create_paths_checked`, `update_paths_selected`, `create_path_status`,
@@ -185,6 +185,15 @@ evidence instead of emitting a fictional runtime call. Unknown `env::*` reads
 are compile errors. Pure imported helpers are retained transitively and receive
 module-qualified dependency names; lifecycle helpers and transaction-view
 reads are rejected in validity predicates.
+
+Schema 50 records explicit borrow blocks in `runtime.borrow_regions`. Review
+`root`, `binding`, `view_type`, `storage`, `abi`, `allowed_effects`,
+`evidence_tier`, and `source_span`. A canonical record has `View<T>`,
+`storage = none`, `abi = none`, `allowed_effects = [Pure, ReadOnly]`, and
+`checked-static` evidence. Its matching `borrow-region` ProofPlan entry proves
+compiler rejection of escape, root lifecycle crossing, and incompatible
+callee effects; it does not describe a runtime allocation or persistent CKB
+Cell reference.
 
 ## Assurance Layer
 

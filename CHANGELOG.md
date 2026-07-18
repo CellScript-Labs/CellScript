@@ -33,10 +33,15 @@
   lifecycle syntax, and non-Pure helper graphs are rejected. Type hover,
   metadata, ProofPlan, formatter, imported helper retention, and syntax-combo
   gates expose the same boundary.
-- Bump compile metadata to schema version 49 for callable/flow/evidence fields,
+- Add explicit `borrow root as view { ... }` regions for compile-time-only
+  `View<T>` access to linear Cells. Views have no layout, storage,
+  serialization, or ABI representation; escape, root lifecycle crossing, and
+  calls outside `Pure`/`ReadOnly` helpers with dedicated `&T` parameters fail
+  closed. Runtime metadata and ProofPlan expose the checked-static evidence.
+- Bump compile metadata to schema version 50 for callable/flow/evidence fields,
   `runtime.transaction_view_handles`, and bounded collection source, ownership,
   cardinality, vacuity, capacity-builder, evidence-tier, and type-validity
-  fields.
+  fields, plus `runtime.borrow_regions`.
 
 ## 0.21.1 - 2026-07-11
 

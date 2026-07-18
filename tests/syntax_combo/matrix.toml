@@ -4,9 +4,9 @@
 
 [mode.quick]
 budget = 64
-min_cases = 15
-min_accept = 8
-min_reject = 7
+min_cases = 19
+min_accept = 9
+min_reject = 10
 required_origins = [
     "generated",
     "tests/syntax_combo/seeds/bounded-quantifier.cell",
@@ -21,14 +21,18 @@ required_origins = [
     "tests/syntax_combo/seeds/terminal-flow-outgoing-reject.cell",
     "tests/syntax_combo/seeds/type-validity.cell",
     "tests/syntax_combo/seeds/type-validity-unknown-env-reject.cell",
+    "tests/syntax_combo/seeds/explicit-borrow.cell",
+    "tests/syntax_combo/seeds/explicit-borrow-effect-reject.cell",
+    "tests/syntax_combo/seeds/explicit-borrow-escape-reject.cell",
+    "tests/syntax_combo/seeds/explicit-borrow-cross-consume-reject.cell",
 ]
 description = "Local smoke: deterministic generated cases plus regression seeds."
 
 [mode.ci]
 budget = 1000
-min_cases = 37
-min_accept = 22
-min_reject = 15
+min_cases = 41
+min_accept = 23
+min_reject = 18
 required_origins = [
     "generated",
     "tests/syntax_combo/seeds/bounded-quantifier.cell",
@@ -54,14 +58,18 @@ required_origins = [
     "tests/syntax_combo/seeds/terminal-flow-outgoing-reject.cell",
     "tests/syntax_combo/seeds/type-validity.cell",
     "tests/syntax_combo/seeds/type-validity-unknown-env-reject.cell",
+    "tests/syntax_combo/seeds/explicit-borrow.cell",
+    "tests/syntax_combo/seeds/explicit-borrow-effect-reject.cell",
+    "tests/syntax_combo/seeds/explicit-borrow-escape-reject.cell",
+    "tests/syntax_combo/seeds/explicit-borrow-cross-consume-reject.cell",
 ]
 description = "PR gate: pairwise generated cases plus regression seeds."
 
 [mode.deep]
 budget = 5000
-min_cases = 40
-min_accept = 22
-min_reject = 18
+min_cases = 44
+min_accept = 23
+min_reject = 21
 required_origins = [
     "generated",
     "tests/syntax_combo/seeds/bounded-quantifier.cell",
@@ -90,6 +98,10 @@ required_origins = [
     "tests/syntax_combo/seeds/terminal-flow-outgoing-reject.cell",
     "tests/syntax_combo/seeds/type-validity.cell",
     "tests/syntax_combo/seeds/type-validity-unknown-env-reject.cell",
+    "tests/syntax_combo/seeds/explicit-borrow.cell",
+    "tests/syntax_combo/seeds/explicit-borrow-effect-reject.cell",
+    "tests/syntax_combo/seeds/explicit-borrow-escape-reject.cell",
+    "tests/syntax_combo/seeds/explicit-borrow-cross-consume-reject.cell",
 ]
 description = "Release audit: triplewise sample, mutations, and selected CKB acceptance."
 
@@ -133,6 +145,9 @@ required_bug_classes.quick = [
     "SCA-BUG-0.22-CREATE-EACH-CARDINALITY-MISSING",
     "SCA-BUG-0.22-VALIDITY-EVIDENCE-MISSING",
     "SCA-BUG-0.22-VALIDITY-ENV-UNKNOWN",
+    "SCA-BUG-0.22-BORROW-EFFECT-COMPAT",
+    "SCA-BUG-0.22-BORROW-ESCAPE",
+    "SCA-BUG-0.22-BORROW-CROSSES-CONSUME",
 ]
 
 required_bug_classes.ci = [
