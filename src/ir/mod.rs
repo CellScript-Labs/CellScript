@@ -58,6 +58,7 @@ pub struct IrInvariant {
     pub scope: Option<String>,
     pub reads: Vec<AggregateTarget>,
     pub aggregates: Vec<IrAggregateInvariant>,
+    pub quantifiers: Vec<BoundedQuantifier>,
     pub assert_count: usize,
     pub span: Span,
 }
@@ -875,6 +876,7 @@ impl IrGenerator {
                     span: aggregate.span,
                 })
                 .collect(),
+            quantifiers: invariant.quantifiers.clone(),
             assert_count: invariant.asserts.len(),
             span: invariant.span,
         }

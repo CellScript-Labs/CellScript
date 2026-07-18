@@ -922,6 +922,11 @@ impl LspServer {
             ("create", "create ${1:output} = ${2:Type} { $0 }"),
             ("destroy", "destroy ${1:expr}"),
             ("require", "require ${1:condition}"),
+            (
+                "forall",
+                "forall ${1:output} ${2:item} in ${3:group_outputs<CellType>} {\n    require ${2:item}.${4:field} ${5:>} ${6:0}\n}",
+            ),
+            ("count", "count(${1:outputs<CellType>} where ${2:field} == ${3:value}) == ${4:1}"),
             ("verification", "verification\n    $0"),
             ("require_block", "require {\n    ${1:condition}\n}"),
             ("preserve", "preserve ${1:output} from ${2:input} {\n    ${3:field}\n}"),
@@ -1368,7 +1373,20 @@ impl LspServer {
                 range: Some(range),
             }),
             Item::Lock(l) => Some(Hover { contents: format!("```cellscript\nlock {}\n```", l.name), range: Some(range) }),
-            Item::Invariant(i) => Some(Hover { contents: format!("```cellscript\ninvariant {}\n```", i.name), range: Some(range) }),
+            Item::Invariant(i) => Some(Hover {
+                contents: format!(
+                    "```cellscript\ninvariant {}\n```\n\nReads: {}\n\nBounded quantifiers: {}{}",
+                    i.name,
+                    i.reads.iter().map(ToString::to_string).collect::<Vec<_>>().join(", "),
+                    i.quantifiers.len(),
+                    if i.quantifiers.is_empty() {
+                        ""
+                    } else {
+                        " (runtime-helper-required; scan cost and vacuous/count policy are emitted in ProofPlan)"
+                    }
+                ),
+                range: Some(range),
+            }),
             _ => None,
         }
     }
@@ -2592,6 +2610,8 @@ mod tests {
         assert!(keywords.iter().any(|k| k.label == "transition"));
         assert!(!keywords.iter().any(|k| k.label == "move"));
         assert!(keywords.iter().any(|k| k.label == "require"));
+        assert!(keywords.iter().any(|k| k.label == "forall"));
+        assert!(keywords.iter().any(|k| k.label == "count"));
         assert!(!keywords.iter().any(|k| k.label == "transfer"));
         assert!(keywords.iter().any(|k| k.label == "std::cell::same_lock"));
         assert!(keywords.iter().any(|k| k.label == "std::cell::preserve_capacity"));

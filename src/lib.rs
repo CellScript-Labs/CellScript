@@ -29580,4 +29580,60 @@ action inspect() -> u64 {
             assert!(asm.contains(helper), "typed transaction view did not retain runtime helper {helper}:\n{asm}");
         }
     }
+
+    #[test]
+    fn bounded_quantifier_proof_plan_records_scan_and_vacuity_contracts() {
+        let source = r#"
+module test
+
+resource Token {
+    amount: u64
+}
+
+invariant positive_outputs {
+    trigger: type_group
+    scope: group
+    reads: group_outputs<Token>.amount
+    forall output token in group_outputs<Token> {
+        require token.amount > 0
+    }
+}
+
+invariant one_claim {
+    trigger: explicit_entry
+    scope: transaction
+    reads: outputs<Token>.amount
+    count(outputs<Token> where amount == 7) == 1
+}
+
+action run() -> u64 {
+    verification
+        return 0
+}
+"#;
+        let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..Default::default() }).unwrap();
+        let forall = result
+            .metadata
+            .runtime
+            .proof_plan
+            .iter()
+            .find(|plan| plan.feature == "forall:group_outputs<Token>")
+            .expect("forall ProofPlan record");
+        assert_eq!(forall.category, "bounded-source-quantifier");
+        assert_eq!(forall.evidence_tier, crate::EvidenceTier::RuntimeHelperRequired);
+        assert!(forall.coverage.contains(&"complexity:O(group_outputs)".to_string()));
+        assert!(forall.coverage.contains(&"vacuous:true-when-cardinality-zero".to_string()));
+        assert!(forall.coverage.contains(&"field_read:group_outputs<Token>.amount".to_string()));
+
+        let count = result
+            .metadata
+            .runtime
+            .proof_plan
+            .iter()
+            .find(|plan| plan.feature == "count:outputs<Token>==1")
+            .expect("count ProofPlan record");
+        assert!(count.coverage.contains(&"accumulator_width:u64".to_string()));
+        assert!(count.coverage.contains(&"overflow_policy:fail-closed".to_string()));
+        assert!(count.coverage.contains(&"actual_scanned_cardinality:runtime-recorded".to_string()));
+    }
 }

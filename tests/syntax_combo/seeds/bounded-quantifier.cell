@@ -1,0 +1,21 @@
+// audit: phase=accept
+module cellscript::audit::seed_bounded_quantifier
+
+resource Token {
+    amount: u64,
+}
+
+invariant positive_outputs {
+    trigger: type_group
+    scope: group
+    reads: group_outputs<Token>.amount
+
+    forall output token in group_outputs<Token> {
+        require token.amount > 0
+    }
+}
+
+action run() -> u64 {
+    verification
+        return 0
+}

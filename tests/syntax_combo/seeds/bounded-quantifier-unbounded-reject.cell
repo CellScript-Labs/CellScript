@@ -1,0 +1,17 @@
+// audit: phase=reject_parse
+// audit: contains=unbounded forall
+module cellscript::audit::seed_bounded_quantifier_unbounded_reject
+
+resource Token {
+    amount: u64,
+}
+
+invariant bad {
+    trigger: type_group
+    scope: group
+    reads: group_outputs<Token>.amount
+
+    forall token: Token {
+        require token.amount > 0
+    }
+}

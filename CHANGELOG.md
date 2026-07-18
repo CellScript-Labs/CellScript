@@ -13,6 +13,11 @@
   explicit low-level migration surface.
 - Bump compile metadata to schema version 47 for the callable/flow/evidence
   fields and `runtime.transaction_view_handles`.
+- Add finite invariant quantifiers: `forall <role> <binding> in
+  <source_view<T>> { require ... }` and `count(<source_view<T>> where ...)`.
+  They share the closed aggregate target model, reject unbounded and impure
+  bodies, and emit ProofPlan scan complexity, field reads, cardinality/vacuous
+  policy, `u64` count overflow policy, and runtime-helper-required evidence.
 
 ## 0.21.1 - 2026-07-11
 

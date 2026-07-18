@@ -16,6 +16,7 @@ struct FunctionSignature {
     params: Vec<Type>,
     return_type: Option<Type>,
     kind: CallableKind,
+    effect: EffectClass,
 }
 
 #[derive(Debug, Clone)]
@@ -317,6 +318,14 @@ fn function_def_param_types(function: &FunctionDef) -> Vec<Type> {
     }
 }
 
+fn function_def_effect(function: &FunctionDef) -> EffectClass {
+    match function {
+        FunctionDef::Action(action) => action.effect,
+        FunctionDef::Function(function) => function.effect,
+        FunctionDef::Lock(_) => EffectClass::ReadOnly,
+    }
+}
+
 fn type_repr(ty: &Type) -> String {
     match ty {
         Type::U8 => "u8".to_string(),
@@ -518,6 +527,7 @@ impl<'a> TypeChecker<'a> {
                             params: action.params.iter().map(|param| param.ty.clone()).collect(),
                             return_type: action.return_type.clone(),
                             kind: CallableKind::Action,
+                            effect: action.effect,
                         },
                     );
                 }
@@ -528,6 +538,7 @@ impl<'a> TypeChecker<'a> {
                             params: function.params.iter().map(|param| param.ty.clone()).collect(),
                             return_type: function.return_type.clone(),
                             kind: CallableKind::Function,
+                            effect: function.effect,
                         },
                     );
                 }
@@ -538,6 +549,7 @@ impl<'a> TypeChecker<'a> {
                             params: lock.params.iter().map(|param| param.ty.clone()).collect(),
                             return_type: Some(Type::Bool),
                             kind: CallableKind::Lock,
+                            effect: EffectClass::ReadOnly,
                         },
                     );
                 }
@@ -977,10 +989,10 @@ impl<'a> TypeChecker<'a> {
             }
         }
 
-        if invariant.asserts.is_empty() && invariant.aggregates.is_empty() {
+        if invariant.asserts.is_empty() && invariant.aggregates.is_empty() && invariant.quantifiers.is_empty() {
             return Err(CompileError::new(
                 format!(
-                    "invariant '{}' must contain at least one assert_invariant expression or aggregate invariant primitive",
+                    "invariant '{}' must contain at least one assert_invariant expression, aggregate primitive, or bounded quantifier",
                     invariant.name
                 ),
                 invariant.span,
@@ -1003,11 +1015,129 @@ impl<'a> TypeChecker<'a> {
                 }
                 self.infer_expr(&mut assert_env, expr)?;
             }
+            for quantifier in &invariant.quantifiers {
+                self.check_bounded_quantifier(invariant, quantifier)?;
+            }
             Ok(())
         })();
         self.current_callable = previous_callable;
         assert_result?;
 
+        Ok(())
+    }
+
+    fn check_bounded_quantifier(&mut self, invariant: &InvariantDef, quantifier: &BoundedQuantifier) -> Result<()> {
+        if !matches!(
+            quantifier.range.source,
+            SourceView::Input
+                | SourceView::Output
+                | SourceView::GroupInput
+                | SourceView::GroupOutput
+                | SourceView::SelectedCells
+                | SourceView::CellDep
+        ) {
+            return Err(CompileError::new(
+                format!(
+                    "bounded quantifier in '{}' uses unsupported source '{}'; expected inputs, outputs, group_inputs, group_outputs, selected_cells, or cell_deps",
+                    invariant.name, quantifier.range
+                ),
+                quantifier.span,
+            ));
+        }
+        let Some(type_name) = quantifier.range.type_name.as_deref() else {
+            return Err(CompileError::new(
+                format!("bounded quantifier in '{}' must name a cell-backed type argument", invariant.name),
+                quantifier.span,
+            ));
+        };
+        if self.resolve_cell_type_kind(type_name).is_none() {
+            return Err(CompileError::new(
+                format!("bounded quantifier in '{}' references non-cell-backed type '{}'", invariant.name, type_name),
+                quantifier.span,
+            ));
+        }
+        if !invariant.reads.iter().any(|read| read.source == quantifier.range.source && read.type_name.as_deref() == Some(type_name)) {
+            return Err(CompileError::new(
+                format!(
+                    "bounded quantifier range '{}' must be declared by invariant '{}' reads metadata",
+                    quantifier.range, invariant.name
+                ),
+                quantifier.span,
+            ));
+        }
+        let range_scope = match quantifier.range.source {
+            SourceView::GroupInput | SourceView::GroupOutput => "group",
+            SourceView::Input | SourceView::Output | SourceView::CellDep => "transaction",
+            SourceView::SelectedCells => "selected_cells",
+            _ => unreachable!("unsupported quantifier source rejected above"),
+        };
+        if invariant.scope.as_deref().is_some_and(|scope| scope != range_scope) {
+            return Err(CompileError::new(
+                format!(
+                    "bounded quantifier range '{}' has scope '{}', which does not match enclosing invariant scope '{}'",
+                    quantifier.range,
+                    range_scope,
+                    invariant.scope.as_deref().unwrap_or("unspecified")
+                ),
+                quantifier.span,
+            ));
+        }
+
+        let mut env = TypeEnv::default();
+        match quantifier.kind {
+            BoundedQuantifierKind::ForAll => {
+                let expected_role = match quantifier.range.source {
+                    SourceView::Input | SourceView::GroupInput => "input",
+                    SourceView::Output | SourceView::GroupOutput => "output",
+                    SourceView::CellDep => "cell_dep",
+                    SourceView::SelectedCells => "cell",
+                    _ => unreachable!("unsupported quantifier source rejected above"),
+                };
+                if quantifier.role.as_deref() != Some(expected_role) {
+                    return Err(CompileError::new(
+                        format!(
+                            "forall role '{}' does not match source '{}'; expected role '{}'",
+                            quantifier.role.as_deref().unwrap_or("missing"),
+                            quantifier.range,
+                            expected_role
+                        ),
+                        quantifier.span,
+                    ));
+                }
+                let binding = quantifier
+                    .binding
+                    .as_ref()
+                    .ok_or_else(|| CompileError::new("forall quantifier is missing its element binding", quantifier.span))?;
+                env.insert(binding.clone(), Type::Named(type_name.to_string()), false, false);
+                for predicate in &quantifier.predicates {
+                    let predicate_ty = self.infer_expr(&mut env, predicate)?;
+                    if predicate_ty != Type::Bool {
+                        return Err(CompileError::new("forall require predicate must be boolean", predicate.span()));
+                    }
+                }
+            }
+            BoundedQuantifierKind::Count => {
+                let fields = self.resolve_named_type_fields(type_name).ok_or_else(|| {
+                    CompileError::new(format!("count quantifier cannot resolve fields for type '{}'", type_name), quantifier.span)
+                })?;
+                for (field, ty) in fields {
+                    env.insert(field, ty, false, false);
+                }
+                let predicate = quantifier
+                    .predicates
+                    .first()
+                    .ok_or_else(|| CompileError::new("count quantifier is missing its where predicate", quantifier.span))?;
+                let predicate_ty = self.infer_expr(&mut env, predicate)?;
+                if predicate_ty != Type::Bool {
+                    return Err(CompileError::new("count where predicate must be boolean", predicate.span()));
+                }
+                let expected = quantifier
+                    .expected
+                    .as_ref()
+                    .ok_or_else(|| CompileError::new("count quantifier is missing its comparison expression", quantifier.span))?;
+                self.infer_expr_with_expected_type(&mut env, expected, &Type::U64, expected.span())?;
+            }
+        }
         Ok(())
     }
 
@@ -4087,13 +4217,16 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn validate_expr_allowed_in_current_callable(&self, expr: &Expr) -> Result<()> {
-        if matches!(expr, Expr::Require(_) | Expr::RequireBlock(_) | Expr::Preserve(_))
-            && !matches!(self.current_callable, Some(CallableKind::Action | CallableKind::Lock))
+        if matches!(expr, Expr::Require(_) | Expr::RequireBlock(_))
+            && !matches!(self.current_callable, Some(CallableKind::Action | CallableKind::Invariant | CallableKind::Lock))
         {
             return Err(CompileError::new(
                 "require/preserve is verifier-boundary syntax for actions and locks; use ordinary boolean expressions inside functions",
                 expr_span(expr),
             ));
+        }
+        if matches!(expr, Expr::Preserve(_)) && !matches!(self.current_callable, Some(CallableKind::Action | CallableKind::Lock)) {
+            return Err(CompileError::new("preserve is verifier-boundary syntax for actions and locks", expr_span(expr)));
         }
 
         let operation = match expr {
@@ -4976,12 +5109,12 @@ impl<'a> TypeChecker<'a> {
                     return Err(CompileError::new(format!("function '{}' does not accept type arguments", name), call.span));
                 }
                 if let Some(signature) = self.functions.get(name).cloned() {
-                    self.validate_call_allowed(name, signature.kind, call.span)?;
+                    self.validate_call_allowed(name, signature.kind, signature.effect, call.span)?;
                     self.validate_call_args(name, &signature.params, arg_types, &call.args, call.span)?;
                     return Ok(signature.return_type.unwrap_or(Type::Unit));
                 }
                 if let Some(function) = self.resolve_function(name) {
-                    self.validate_call_allowed(name, function_def_kind(&function), call.span)?;
+                    self.validate_call_allowed(name, function_def_kind(&function), function_def_effect(&function), call.span)?;
                     let params = function_def_param_types(&function);
                     self.validate_call_args(name, &params, arg_types, &call.args, call.span)?;
                     return Ok(self.function_return_type(&function).unwrap_or(Type::Unit));
@@ -4989,7 +5122,7 @@ impl<'a> TypeChecker<'a> {
                 if let Some((prefix, suffix)) = name.rsplit_once("::") {
                     if self.current_module.as_deref() == Some(prefix) {
                         if let Some(signature) = self.functions.get(suffix).cloned() {
-                            self.validate_call_allowed(name, signature.kind, call.span)?;
+                            self.validate_call_allowed(name, signature.kind, signature.effect, call.span)?;
                             self.validate_call_args(name, &signature.params, arg_types, &call.args, call.span)?;
                             return Ok(signature.return_type.unwrap_or(Type::Unit));
                         }
@@ -6064,7 +6197,13 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
-    fn validate_call_allowed(&self, callee_name: &str, callee_kind: CallableKind, span: Span) -> Result<()> {
+    fn validate_call_allowed(
+        &self,
+        callee_name: &str,
+        callee_kind: CallableKind,
+        callee_effect: EffectClass,
+        span: Span,
+    ) -> Result<()> {
         match (self.current_callable, callee_kind) {
             (Some(CallableKind::Invariant), CallableKind::Action | CallableKind::Lock) => Err(CompileError::new(
                 format!("invariant cannot call stateful entry '{}'; call a pure helper instead", callee_name),
@@ -6079,6 +6218,14 @@ impl<'a> TypeChecker<'a> {
             (Some(CallableKind::Lock), CallableKind::Lock) => {
                 Err(CompileError::new(format!("lock cannot call lock '{}'", callee_name), span))
             }
+            (Some(CallableKind::Invariant), CallableKind::Function) if callee_effect != EffectClass::Pure => Err(CompileError::new(
+                format!(
+                    "invariant predicate cannot call function '{}' with {} effect; only transitively Pure helpers are allowed",
+                    callee_name,
+                    callee_effect.as_str()
+                ),
+                span,
+            )),
             _ => Ok(()),
         }
     }
@@ -7905,5 +8052,120 @@ action inspect() -> u64 {
 
         let err = check(&module).unwrap_err();
         assert!(err.message.contains("consume requires a cell-backed linear value"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn bounded_quantifiers_type_check_finite_cell_sources() {
+        let module = source_module(
+            r#"
+module test
+
+resource Token {
+    amount: u64
+}
+
+invariant positive_outputs {
+    trigger: type_group
+    scope: group
+    reads: group_outputs<Token>.amount
+    forall output token in group_outputs<Token> {
+        require token.amount > 0
+    }
+}
+
+invariant one_claim {
+    trigger: explicit_entry
+    scope: transaction
+    reads: outputs<Token>.amount
+    count(outputs<Token> where amount == 7) == 1
+}
+"#,
+        );
+
+        check(&module).unwrap();
+    }
+
+    #[test]
+    fn bounded_quantifier_requires_declared_read_coverage() {
+        let module = source_module(
+            r#"
+module test
+
+resource Token {
+    amount: u64
+}
+
+invariant bad {
+    trigger: type_group
+    scope: group
+    reads: group_inputs<Token>.amount
+    forall output token in group_outputs<Token> {
+        require token.amount > 0
+    }
+}
+"#,
+        );
+
+        let err = check(&module).unwrap_err();
+        assert!(
+            err.message.contains("must be declared") && err.message.contains("reads metadata"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn bounded_quantifier_predicate_rejects_lifecycle_operations() {
+        let module = source_module(
+            r#"
+module test
+
+resource Token has consume {
+    amount: u64
+}
+
+invariant bad {
+    trigger: type_group
+    scope: group
+    reads: group_outputs<Token>.amount
+    forall output token in group_outputs<Token> {
+        require consume token > 0
+    }
+}
+"#,
+        );
+
+        let err = check(&module).unwrap_err();
+        assert!(err.message.contains("contains cell/runtime operation"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn bounded_quantifier_predicate_rejects_non_pure_helper_effect() {
+        let module = source_module(
+            r#"
+module test
+
+resource Token {
+    amount: u64
+}
+
+#[effect(ReadOnly)]
+fn positive(amount: u64) -> bool {
+    return amount > 0
+}
+
+invariant bad {
+    trigger: type_group
+    scope: group
+    reads: group_outputs<Token>.amount
+    forall output token in group_outputs<Token> {
+        require positive(token.amount)
+    }
+}
+"#,
+        );
+
+        let err = check(&module).unwrap_err();
+        assert!(err.message.contains("only transitively Pure helpers are allowed"), "unexpected error: {}", err.message);
     }
 }

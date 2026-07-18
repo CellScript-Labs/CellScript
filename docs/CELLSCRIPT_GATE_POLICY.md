@@ -62,6 +62,13 @@ checked-static typing plus checked-runtime read evidence.
 Consumers must reject unsupported schema versions instead of silently dropping
 these fields.
 
+Bounded invariant quantifiers are finite-source declarations. Their ProofPlan
+records use `bounded-source-quantifier`, identify the closed source view, and
+record scan complexity, field reads, runtime cardinality, vacuous `forall`
+status, and `u64` count overflow policy. Until a selected entry emits the named
+bounded scan helper, their tier is `runtime-helper-required`, never
+`checked-runtime` or `metadata-only`.
+
 ## Command Cheatsheet
 
 ```bash

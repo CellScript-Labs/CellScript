@@ -1071,6 +1071,7 @@ impl<'a> Parser<'a> {
         let mut scope = None;
         let mut reads = Vec::new();
         let mut aggregates = Vec::new();
+        let mut quantifiers = Vec::new();
         let mut asserts = Vec::new();
 
         while !self.check(&TokenKind::RBrace) && !self.check(&TokenKind::Eof) {
@@ -1091,6 +1092,18 @@ impl<'a> Parser<'a> {
             }
 
             if let Some(name) = self.ident_like_name() {
+                if name == "forall" {
+                    quantifiers.push(self.parse_bounded_forall()?);
+                    self.consume_optional_semi();
+                    self.skip_newlines();
+                    continue;
+                }
+                if name == "count" {
+                    quantifiers.push(self.parse_bounded_count()?);
+                    self.consume_optional_semi();
+                    self.skip_newlines();
+                    continue;
+                }
                 if Self::is_invariant_aggregate_start(&name) {
                     aggregates.push(self.parse_aggregate_invariant()?);
                     self.consume_optional_semi();
@@ -1142,7 +1155,109 @@ impl<'a> Parser<'a> {
             scope,
             reads,
             aggregates,
+            quantifiers,
             asserts,
+            span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
+        })
+    }
+
+    fn parse_bounded_forall(&mut self) -> Result<BoundedQuantifier> {
+        let start_span = self.current().span;
+        let keyword = self.parse_name()?;
+        debug_assert_eq!(keyword, "forall");
+        let role = self.parse_name().map_err(|_| {
+            CompileError::new(
+                "forall requires a role, binding, and finite source view: `forall output token in outputs<Token> { ... }`",
+                start_span,
+            )
+        })?;
+        let binding_span = self.current().span;
+        let binding = self.parse_name().map_err(|_| {
+            CompileError::new(
+                "unbounded forall is not supported; name a finite source view with `forall <role> <binding> in <source_view<T>>`",
+                binding_span,
+            )
+        })?;
+        if !self.check(&TokenKind::In) {
+            return Err(CompileError::new(
+                "unbounded forall is not supported; expected `in` followed by a finite source view",
+                self.current().span,
+            ));
+        }
+        self.advance();
+        let range = self.parse_invariant_target()?;
+        if range.field.is_some() {
+            return Err(CompileError::new("forall range must name a source view and cell type, not a projected field", start_span));
+        }
+        self.expect(TokenKind::LBrace)?;
+        self.skip_newlines();
+        let mut predicates = Vec::new();
+        while !self.check(&TokenKind::RBrace) && !self.check(&TokenKind::Eof) {
+            if !self.check(&TokenKind::Require) {
+                return Err(CompileError::new(
+                    "forall body only accepts pure `require` predicates; lifecycle and control-flow statements are not allowed",
+                    self.current().span,
+                ));
+            }
+            predicates.push(self.parse_require()?);
+            self.consume_optional_semi();
+            self.skip_newlines();
+        }
+        if predicates.is_empty() {
+            return Err(CompileError::new("forall body must contain at least one require predicate", start_span));
+        }
+        let end_span = self.current().span;
+        self.expect(TokenKind::RBrace)?;
+        Ok(BoundedQuantifier {
+            kind: BoundedQuantifierKind::ForAll,
+            role: Some(role),
+            binding: Some(binding),
+            range,
+            predicates,
+            relation: None,
+            expected: None,
+            span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
+        })
+    }
+
+    fn parse_bounded_count(&mut self) -> Result<BoundedQuantifier> {
+        let start_span = self.current().span;
+        let keyword = self.parse_name()?;
+        debug_assert_eq!(keyword, "count");
+        self.expect(TokenKind::LParen)?;
+        let range = self.parse_invariant_target()?;
+        if range.field.is_some() {
+            return Err(CompileError::new("count range must name a source view and cell type, not a projected field", start_span));
+        }
+        let where_span = self.current().span;
+        let where_name = self
+            .ident_like_name()
+            .ok_or_else(|| CompileError::new("count requires `where <predicate>` after its finite source view", where_span))?;
+        if where_name != "where" {
+            return Err(CompileError::new("count requires `where <predicate>` after its finite source view", where_span));
+        }
+        self.advance();
+        let predicate = self.parse_expr()?;
+        self.expect(TokenKind::RParen)?;
+        let relation = match self.current().kind {
+            TokenKind::Lt => AggregateRelation::Lt,
+            TokenKind::Le => AggregateRelation::Le,
+            TokenKind::EqEq => AggregateRelation::Eq,
+            TokenKind::Ge => AggregateRelation::Ge,
+            TokenKind::Gt => AggregateRelation::Gt,
+            _ => return Err(CompileError::new("count requires a comparison against a u64 expression", self.current().span)),
+        };
+        self.advance();
+        let expected = self.parse_expr()?;
+        let end_span = self.current().span;
+        Ok(BoundedQuantifier {
+            kind: BoundedQuantifierKind::Count,
+            role: None,
+            binding: None,
+            range,
+            predicates: vec![predicate],
+            relation: Some(relation),
+            expected: Some(expected),
             span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
         })
     }
@@ -4020,5 +4135,28 @@ action test(x: u64) -> u64 {
         let err = parse(&tokens).unwrap_err();
         assert!(err.message.contains("control flow"), "unexpected error: {}", err.message);
         assert_eq!(err.code.as_deref(), Some("E1006"));
+    }
+
+    #[test]
+    fn bounded_quantifier_rejects_unbounded_forall_syntax() {
+        let input = r#"
+module test
+
+resource Token {
+    amount: u64
+}
+
+invariant bad {
+    trigger: type_group
+    scope: group
+    reads: group_outputs<Token>.amount
+    forall token: Token {
+        require token.amount > 0
+    }
+}
+"#;
+        let tokens = lex(input).unwrap();
+        let err = parse(&tokens).unwrap_err();
+        assert!(err.message.contains("unbounded forall"), "unexpected error: {}", err.message);
     }
 }

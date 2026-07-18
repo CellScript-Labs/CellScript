@@ -9,6 +9,8 @@ min_accept = 8
 min_reject = 7
 required_origins = [
     "generated",
+    "tests/syntax_combo/seeds/bounded-quantifier.cell",
+    "tests/syntax_combo/seeds/bounded-quantifier-unbounded-reject.cell",
     "tests/syntax_combo/seeds/function-effect-signature.cell",
     "tests/syntax_combo/seeds/require-block-lifecycle.cell",
     "tests/syntax_combo/seeds/terminal-flow-metadata.cell",
@@ -23,6 +25,8 @@ min_accept = 22
 min_reject = 15
 required_origins = [
     "generated",
+    "tests/syntax_combo/seeds/bounded-quantifier.cell",
+    "tests/syntax_combo/seeds/bounded-quantifier-unbounded-reject.cell",
     "matrix:continuity/std-cell",
     "matrix:lifecycle/proof/control-flow",
     "matrix:lifecycle/proof/local-binding",
@@ -48,6 +52,8 @@ min_accept = 22
 min_reject = 18
 required_origins = [
     "generated",
+    "tests/syntax_combo/seeds/bounded-quantifier.cell",
+    "tests/syntax_combo/seeds/bounded-quantifier-unbounded-reject.cell",
     "matrix:continuity/std-cell",
     "matrix:deep/reject/proof-purity",
     "matrix:deep/reject/source-qualifier",

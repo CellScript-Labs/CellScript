@@ -215,7 +215,26 @@ pub struct InvariantDef {
     pub scope: Option<String>,
     pub reads: Vec<AggregateTarget>,
     pub aggregates: Vec<AggregateInvariant>,
+    pub quantifiers: Vec<BoundedQuantifier>,
     pub asserts: Vec<Expr>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BoundedQuantifierKind {
+    ForAll,
+    Count,
+}
+
+#[derive(Debug, Clone)]
+pub struct BoundedQuantifier {
+    pub kind: BoundedQuantifierKind,
+    pub role: Option<String>,
+    pub binding: Option<String>,
+    pub range: AggregateTarget,
+    pub predicates: Vec<Expr>,
+    pub relation: Option<AggregateRelation>,
+    pub expected: Option<Expr>,
     pub span: Span,
 }
 

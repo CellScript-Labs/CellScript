@@ -151,6 +151,13 @@ handle type, and evidence tiers. A conforming record is a read-only view with
 `lifecycle_authority = false`; it is evidence of a transaction read surface,
 not evidence that a Cell was consumed or an output was created.
 
+Bounded `forall` and `count` invariant clauses appear as
+`bounded-source-quantifier` ProofPlan records. Review `reads`, `coverage`,
+`group_cardinality`, and `evidence_tier`: coverage names the source scan,
+complexity, declared field reads, runtime cardinality, vacuous-zero behavior,
+and count overflow policy. A `runtime-helper-required` record is a known helper
+contract, not proof that the selected artifact emitted or executed that helper.
+
 ## Assurance Layer
 
 CellScript 0.16 added a checked assurance layer over ProofPlan metadata, and

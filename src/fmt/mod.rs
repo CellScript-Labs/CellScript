@@ -295,6 +295,31 @@ impl Formatter {
         for aggregate in &invariant.aggregates {
             self.push_line(&format_aggregate_invariant(aggregate));
         }
+        for quantifier in &invariant.quantifiers {
+            match quantifier.kind {
+                BoundedQuantifierKind::ForAll => {
+                    self.push_line(&format!(
+                        "forall {} {} in {} {{",
+                        quantifier.role.as_deref().unwrap_or("item"),
+                        quantifier.binding.as_deref().unwrap_or("value"),
+                        quantifier.range
+                    ));
+                    self.indent_level += 1;
+                    for predicate in &quantifier.predicates {
+                        self.push_line(&self.format_expr(predicate));
+                    }
+                    self.indent_level -= 1;
+                    self.push_line("}");
+                }
+                BoundedQuantifierKind::Count => self.push_line(&format!(
+                    "count({} where {}) {} {}",
+                    quantifier.range,
+                    quantifier.predicates.first().map(|predicate| self.format_expr(predicate)).unwrap_or_else(|| "false".to_string()),
+                    quantifier.relation.map(format_aggregate_relation).unwrap_or("?"),
+                    quantifier.expected.as_ref().map(|expected| self.format_expr(expected)).unwrap_or_else(|| "0".to_string())
+                )),
+            }
+        }
         for expr in &invariant.asserts {
             self.push_line(&self.format_expr(expr));
         }
@@ -829,6 +854,10 @@ pub fn format_default(module: &Module) -> Result<String> {
     format(module, FormatConfig::default())
 }
 
+pub(crate) fn format_expression(expr: &Expr) -> String {
+    Formatter::new(FormatConfig::default()).format_expr(expr)
+}
+
 /// Verify that formatting is idempotent: re-formatting the output produces the same output.
 /// Returns `Ok(())` if idempotent, or an error message describing the diff.
 pub fn verify_idempotent(source: &str, config: FormatConfig) -> Result<()> {
@@ -1195,6 +1224,40 @@ action inspect() -> u64 {
 
         let tokens = lexer::lex(&formatted).unwrap();
         let reparsed = parser::parse(&tokens).unwrap();
+        assert_eq!(formatted, format_default(&reparsed).unwrap());
+    }
+
+    #[test]
+    fn format_round_trips_bounded_invariant_quantifiers() {
+        let source = r#"
+module fmt::quantifiers
+
+resource Token {
+    amount: u64
+}
+
+invariant positive_outputs {
+    trigger: type_group
+    scope: group
+    reads: group_outputs<Token>.amount
+    forall output token in group_outputs<Token> {
+        require token.amount > 0
+    }
+}
+
+invariant one_claim {
+    trigger: explicit_entry
+    scope: transaction
+    reads: outputs<Token>.amount
+    count(outputs<Token> where amount == 7) == 1
+}
+"#;
+        let tokens = lexer::lex(source).unwrap();
+        let module = parser::parse(&tokens).unwrap();
+        let formatted = format_default(&module).unwrap();
+        assert!(formatted.contains("forall output token in group_outputs<Token>"), "unexpected output:\n{}", formatted);
+        assert!(formatted.contains("count(outputs<Token> where amount == 7) == 1"), "unexpected output:\n{}", formatted);
+        let reparsed = parser::parse(&lexer::lex(&formatted).unwrap()).unwrap();
         assert_eq!(formatted, format_default(&reparsed).unwrap());
     }
 }

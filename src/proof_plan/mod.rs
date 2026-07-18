@@ -5,7 +5,7 @@ pub mod soundness;
 use crate::aggregate_lowering::{
     aggregate_group_amount_endpoint, xudt_group_amount_conservation_type, XUDT_GROUP_AMOUNT_CONSERVED_METADATA_HELPER,
 };
-use crate::ast::{AggregateInvariantKind, AggregateRelation, AggregateTarget, ParamSource, SourceView};
+use crate::ast::{AggregateInvariantKind, AggregateRelation, AggregateTarget, BoundedQuantifierKind, ParamSource, SourceView};
 use crate::ir::{self, IrInstruction};
 use crate::{CkbRuntimeAccessMetadata, PoolPrimitiveMetadata, VerifierObligationMetadata};
 use serde::{Deserialize, Serialize};
@@ -181,6 +181,9 @@ pub fn build_for_invariant(invariant: &ir::IrInvariant, runtime_accesses: &[CkbR
             .enumerate()
             .map(|(index, aggregate)| plan_for_aggregate_invariant(invariant, index, aggregate, runtime_accesses)),
     );
+    plans.extend(
+        invariant.quantifiers.iter().enumerate().map(|(index, quantifier)| plan_for_bounded_quantifier(invariant, index, quantifier)),
+    );
     plans
 }
 
@@ -189,6 +192,7 @@ fn summary_plan_for_invariant(invariant: &ir::IrInvariant, runtime_accesses: &[C
     let scope = invariant.scope.clone().unwrap_or_else(|| "selected_cells".to_string());
     let mut coverage = vec![format!("declared_invariant_assertions:{}", invariant.assert_count)];
     coverage.extend(invariant.aggregates.iter().map(aggregate_coverage_label));
+    coverage.extend(invariant.quantifiers.iter().map(bounded_quantifier_coverage_label));
     let aggregate_evidence = invariant
         .aggregates
         .iter()
@@ -209,6 +213,9 @@ fn summary_plan_for_invariant(invariant: &ir::IrInvariant, runtime_accesses: &[C
     for aggregate in &invariant.aggregates {
         reads.extend(aggregate_reads(aggregate));
     }
+    for quantifier in &invariant.quantifiers {
+        reads.extend(reads_from_aggregate_target(&quantifier.range));
+    }
     dedup(&mut reads);
 
     let mut input_output_relation_checks = invariant
@@ -223,7 +230,13 @@ fn summary_plan_for_invariant(invariant: &ir::IrInvariant, runtime_accesses: &[C
         !aggregate_evidence.is_empty() && aggregate_evidence.iter().all(AggregateLoweringEvidence::is_runtime_helper_backed);
     let all_aggregates_runtime_helper_checked =
         !aggregate_evidence.is_empty() && aggregate_evidence.iter().all(AggregateLoweringEvidence::is_checked);
-    let executable_by_runtime_helper = all_aggregates_runtime_helper_checked && invariant.assert_count == 0;
+    let has_helper_backed_feature = !invariant.aggregates.is_empty() || !invariant.quantifiers.is_empty();
+    let all_non_assert_features_helper_backed = invariant.assert_count == 0
+        && has_helper_backed_feature
+        && (invariant.aggregates.is_empty() || all_aggregates_runtime_helper_backed);
+    let executable_by_runtime_helper =
+        all_aggregates_runtime_helper_checked && invariant.quantifiers.is_empty() && invariant.assert_count == 0;
+    let runtime_helper_required = all_non_assert_features_helper_backed && !executable_by_runtime_helper;
     let mut builder_assumptions = if executable_by_runtime_helper {
         let mut assumptions = aggregate_evidence
             .iter()
@@ -232,14 +245,25 @@ fn summary_plan_for_invariant(invariant: &ir::IrInvariant, runtime_accesses: &[C
             .collect::<Vec<_>>();
         assumptions.push(format!("declared(assert_invariant_count:{})", invariant.assert_count));
         assumptions
-    } else if all_aggregates_runtime_helper_backed && invariant.assert_count == 0 {
+    } else if runtime_helper_required {
         let mut assumptions = invariant
             .aggregates
             .iter()
             .filter_map(|aggregate| aggregate_xudt_group_amount_runtime_helper(invariant, aggregate))
             .map(|helper| format!("declared(runtime-helper-required:{helper})"))
             .collect::<Vec<_>>();
+        assumptions.extend(invariant.quantifiers.iter().map(|quantifier| {
+            format!(
+                "declared(runtime-helper-required:{})",
+                if quantifier.kind == BoundedQuantifierKind::ForAll {
+                    "__cellscript_bounded_forall"
+                } else {
+                    "__cellscript_bounded_count"
+                }
+            )
+        }));
         assumptions.push(format!("declared(assert_invariant_count:{})", invariant.assert_count));
+        assumptions.push(format!("declared(bounded_quantifier_count:{})", invariant.quantifiers.len()));
         assumptions
     } else {
         vec![
@@ -249,6 +273,9 @@ fn summary_plan_for_invariant(invariant: &ir::IrInvariant, runtime_accesses: &[C
     };
     if !invariant.aggregates.is_empty() {
         builder_assumptions.push(format!("declared(aggregate_invariant_count:{})", invariant.aggregates.len()));
+    }
+    if !invariant.quantifiers.is_empty() {
+        builder_assumptions.push(format!("declared(bounded_quantifier_count:{})", invariant.quantifiers.len()));
     }
     if trigger == "lock_group" && scope == "transaction" {
         builder_assumptions.push(
@@ -263,10 +290,10 @@ fn summary_plan_for_invariant(invariant: &ir::IrInvariant, runtime_accesses: &[C
             severity: "info".to_string(),
             message: "declared xUDT group amount invariant is discharged by matching generated runtime helper coverage".to_string(),
         }]
-    } else if all_aggregates_runtime_helper_backed && invariant.assert_count == 0 {
+    } else if runtime_helper_required {
         vec![ProofPlanDiagnosticMetadata {
             severity: "info".to_string(),
-            message: "declared xUDT group amount invariant can be discharged by the matching xUDT group amount runtime helper in a selected entry"
+            message: "declared invariant has a known runtime-helper contract; selected entries must emit matching coverage before claiming checked-runtime evidence"
                 .to_string(),
         }]
     } else {
@@ -287,7 +314,7 @@ fn summary_plan_for_invariant(invariant: &ir::IrInvariant, runtime_accesses: &[C
     let status = if executable_by_runtime_helper { "checked-runtime" } else { "runtime-required" };
     let evidence_tier = if executable_by_runtime_helper {
         EvidenceTier::CheckedRuntime
-    } else if all_aggregates_runtime_helper_backed && invariant.assert_count == 0 {
+    } else if runtime_helper_required {
         EvidenceTier::RuntimeHelperRequired
     } else {
         EvidenceTier::MetadataOnly
@@ -322,15 +349,16 @@ fn summary_plan_for_invariant(invariant: &ir::IrInvariant, runtime_accesses: &[C
         builder_assumptions,
         codegen_coverage_status: if executable_by_runtime_helper {
             "covered".to_string()
-        } else if all_aggregates_runtime_helper_backed && invariant.assert_count == 0 {
+        } else if runtime_helper_required {
             "gap:runtime-helper-required".to_string()
         } else {
             "gap:metadata-only".to_string()
         },
         status: status.to_string(),
         detail: format!(
-            "explicit source invariant declaration captured for ProofPlan auditing; aggregate_primitives={}",
-            invariant.aggregates.len()
+            "explicit source invariant declaration captured for ProofPlan auditing; aggregate_primitives={}; bounded_quantifiers={}",
+            invariant.aggregates.len(),
+            invariant.quantifiers.len()
         ),
         diagnostics,
     }
@@ -438,6 +466,108 @@ fn plan_for_aggregate_invariant(
         status: status.to_string(),
         detail: format!("aggregate invariant primitive declared under invariant '{}'", invariant.name),
         diagnostics,
+    }
+}
+
+fn plan_for_bounded_quantifier(
+    invariant: &ir::IrInvariant,
+    index: usize,
+    quantifier: &crate::ast::BoundedQuantifier,
+) -> ProofPlanMetadata {
+    let trigger = invariant.trigger.clone().unwrap_or_else(|| "explicit_entry".to_string());
+    let scope = bounded_quantifier_scope(quantifier).to_string();
+    let kind = match quantifier.kind {
+        BoundedQuantifierKind::ForAll => "forall",
+        BoundedQuantifierKind::Count => "count",
+    };
+    let helper = match quantifier.kind {
+        BoundedQuantifierKind::ForAll => "__cellscript_bounded_forall",
+        BoundedQuantifierKind::Count => "__cellscript_bounded_count",
+    };
+    let predicates = quantifier.predicates.iter().map(crate::fmt::format_expression).collect::<Vec<_>>();
+    let declared_field_reads = invariant
+        .reads
+        .iter()
+        .filter(|read| read.source == quantifier.range.source && read.type_name == quantifier.range.type_name)
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+    let mut reads = reads_from_aggregate_target(&quantifier.range);
+    reads.extend(declared_field_reads.iter().cloned());
+    dedup(&mut reads);
+    let mut coverage = vec![
+        format!("bounded_quantifier:{kind}"),
+        format!("range:{}", quantifier.range),
+        format!("source:{}", quantifier.range.source.as_str()),
+        format!("complexity:O({})", quantifier.range.source.as_str()),
+        format!("scan:one Source::{} scan", quantifier.range.source.as_str()),
+        "source_view_cap:ckb-consensus-bounded".to_string(),
+        "actual_scanned_cardinality:runtime-recorded".to_string(),
+        "cycle_estimate:base-plus-per-cell-predicate".to_string(),
+        format!("runtime_helper:{helper}"),
+    ];
+    coverage.extend(predicates.iter().map(|predicate| format!("predicate:{predicate}")));
+    coverage.extend(declared_field_reads.iter().map(|read| format!("field_read:{read}")));
+    match quantifier.kind {
+        BoundedQuantifierKind::ForAll => {
+            coverage.push("vacuous:true-when-cardinality-zero".to_string());
+            coverage.push("cardinality_zero_audit:required".to_string());
+        }
+        BoundedQuantifierKind::Count => {
+            coverage.push("accumulator_width:u64".to_string());
+            coverage.push("overflow_policy:fail-closed".to_string());
+        }
+    }
+    dedup(&mut coverage);
+    let relation = match quantifier.kind {
+        BoundedQuantifierKind::ForAll => format!("forall({})=runtime-helper-required:{helper}", quantifier.range),
+        BoundedQuantifierKind::Count => format!(
+            "count({}){}{}=runtime-helper-required:{helper}",
+            quantifier.range,
+            quantifier.relation.map(aggregate_relation_symbol).unwrap_or("?"),
+            quantifier.expected.as_ref().map(crate::fmt::format_expression).unwrap_or_else(|| "?".to_string())
+        ),
+    };
+    let feature = bounded_quantifier_feature_label(quantifier);
+    ProofPlanMetadata {
+        name: format!("{}#quantifier{}", invariant.name, index),
+        origin: format!("invariant:{}#quantifier:{}", invariant.name, index),
+        category: "bounded-source-quantifier".to_string(),
+        feature,
+        evidence_tier: EvidenceTier::RuntimeHelperRequired,
+        source_span: Some(ProofPlanSourceSpanMetadata {
+            start: quantifier.span.start,
+            end: quantifier.span.end,
+            line: quantifier.span.line,
+            column: quantifier.span.column,
+        }),
+        trigger,
+        scope,
+        reads: reads.clone(),
+        coverage,
+        input_output_relation_checks: vec![relation],
+        group_cardinality: bounded_quantifier_cardinality(quantifier).to_string(),
+        identity_lifecycle_policy: "read-only bounded transaction-view scan; no lifecycle authority".to_string(),
+        preserved_fields: Vec::new(),
+        witness_fields: declared_witness_fields(&reads),
+        lock_args_fields: declared_lock_args_fields(&reads),
+        on_chain_checked: false,
+        on_chain_checked_obligations: Vec::new(),
+        builder_assumptions: vec![
+            format!("declared(runtime-helper-required:{helper})"),
+            "declared(actual cardinality and vacuous status are runtime evidence)".to_string(),
+        ],
+        codegen_coverage_status: "gap:runtime-helper-required".to_string(),
+        status: "runtime-required".to_string(),
+        detail: format!(
+            "bounded {kind} over {}; predicates={}; accumulator={}",
+            quantifier.range,
+            predicates.len(),
+            if quantifier.kind == BoundedQuantifierKind::Count { "u64/fail-closed-overflow" } else { "not-applicable" }
+        ),
+        diagnostics: vec![ProofPlanDiagnosticMetadata {
+            severity: "info".to_string(),
+            message: format!("bounded {kind} has a known {helper} contract but no emitted helper for this selected entry"),
+        }],
     }
 }
 
@@ -973,6 +1103,44 @@ fn aggregate_coverage_label(aggregate: &ir::IrAggregateInvariant) -> String {
         ),
         AggregateInvariantKind::Distinct => format!("aggregate_assertion:distinct({}) scope={}", aggregate.target, aggregate.scope),
         AggregateInvariantKind::Singleton => format!("aggregate_assertion:singleton({}) scope={}", aggregate.target, aggregate.scope),
+    }
+}
+
+fn bounded_quantifier_coverage_label(quantifier: &crate::ast::BoundedQuantifier) -> String {
+    format!("bounded_quantifier:{}", bounded_quantifier_feature_label(quantifier))
+}
+
+fn bounded_quantifier_feature_label(quantifier: &crate::ast::BoundedQuantifier) -> String {
+    match quantifier.kind {
+        BoundedQuantifierKind::ForAll => format!("forall:{}", quantifier.range),
+        BoundedQuantifierKind::Count => format!(
+            "count:{}{}{}",
+            quantifier.range,
+            quantifier.relation.map(aggregate_relation_symbol).unwrap_or("?"),
+            quantifier.expected.as_ref().map(crate::fmt::format_expression).unwrap_or_else(|| "?".to_string())
+        ),
+    }
+}
+
+fn bounded_quantifier_scope(quantifier: &crate::ast::BoundedQuantifier) -> &'static str {
+    match quantifier.range.source {
+        SourceView::GroupInput | SourceView::GroupOutput => "group",
+        SourceView::Input | SourceView::Output | SourceView::CellDep => "transaction",
+        SourceView::SelectedCells => "selected_cells",
+        _ => "unsupported",
+    }
+}
+
+fn bounded_quantifier_cardinality(quantifier: &crate::ast::BoundedQuantifier) -> &'static str {
+    match quantifier.range.source {
+        SourceView::GroupInput | SourceView::GroupOutput => {
+            "ckb ScriptGroup cardinality; actual scanned cardinality recorded at runtime"
+        }
+        SourceView::Input | SourceView::Output | SourceView::CellDep => {
+            "transaction source cardinality; actual scanned cardinality recorded at runtime"
+        }
+        SourceView::SelectedCells => "selected cell-set cardinality; actual scanned cardinality recorded at runtime",
+        _ => "unsupported quantifier cardinality",
     }
 }
 
