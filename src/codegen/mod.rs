@@ -1416,10 +1416,16 @@ impl CodeGenerator {
                     self.emit("add t0, sp, t6");
                     self.emit(format!("addi t0, t0, {}", ENTRY_WITNESS_BUFFER_OFFSET));
                     if abi_index < 8 {
-                        self.emit_entry_witness_scalar_load_from_reg(&format!("a{}", abi_index), "t0", width, param.ty == IrType::I32);
+                        self.emit_entry_witness_scalar_load_from_reg(
+                            &format!("a{}", abi_index),
+                            "t0",
+                            "t1",
+                            width,
+                            param.ty == IrType::I32,
+                        );
                     } else {
                         let caller_stack_offset = (abi_index - 8) * 8;
-                        self.emit_entry_witness_scalar_load_from_reg("t3", "t0", width, param.ty == IrType::I32);
+                        self.emit_entry_witness_scalar_load_from_reg("t3", "t0", "t1", width, param.ty == IrType::I32);
                         self.emit(format!(
                             "# cellscript entry abi: scalar param {} stored to caller stack +{}",
                             param.name, caller_stack_offset
@@ -1628,14 +1634,24 @@ impl CodeGenerator {
         }
     }
 
-    fn emit_entry_witness_scalar_load_from_reg(&mut self, dest_reg: &str, base_reg: &str, width: usize, signed_i32: bool) {
+    fn emit_entry_witness_scalar_load_from_reg(
+        &mut self,
+        dest_reg: &str,
+        base_reg: &str,
+        byte_reg: &str,
+        width: usize,
+        signed_i32: bool,
+    ) {
+        debug_assert_ne!(dest_reg, base_reg, "entry scalar decoder destination must not alias its base");
+        debug_assert_ne!(byte_reg, base_reg, "entry scalar decoder scratch must not alias its base");
+        debug_assert_ne!(byte_reg, dest_reg, "entry scalar decoder scratch must not alias its destination");
         self.emit(format!("li {}, 0", dest_reg));
         for byte_index in 0..width {
-            self.emit(format!("lbu t0, {}({})", byte_index, base_reg));
+            self.emit(format!("lbu {}, {}({})", byte_reg, byte_index, base_reg));
             if byte_index != 0 {
-                self.emit(format!("slli t0, t0, {}", byte_index * 8));
+                self.emit(format!("slli {}, {}, {}", byte_reg, byte_reg, byte_index * 8));
             }
-            self.emit(format!("or {}, {}, t0", dest_reg, dest_reg));
+            self.emit(format!("or {}, {}, {}", dest_reg, dest_reg, byte_reg));
         }
         if signed_i32 {
             self.emit_sign_extend_i32(dest_reg);
@@ -1653,14 +1669,17 @@ impl CodeGenerator {
         }
     }
 
-    fn emit_entry_load_u32_from_reg(&mut self, dest_reg: &str, base_reg: &str) {
+    fn emit_entry_load_u32_from_reg(&mut self, dest_reg: &str, base_reg: &str, byte_reg: &str) {
+        debug_assert_ne!(dest_reg, base_reg, "entry u32 decoder destination must not alias its base");
+        debug_assert_ne!(byte_reg, base_reg, "entry u32 decoder scratch must not alias its base");
+        debug_assert_ne!(byte_reg, dest_reg, "entry u32 decoder scratch must not alias its destination");
         self.emit(format!("li {}, 0", dest_reg));
         for byte_index in 0..4 {
-            self.emit(format!("lbu t0, {}({})", byte_index, base_reg));
+            self.emit(format!("lbu {}, {}({})", byte_reg, byte_index, base_reg));
             if byte_index != 0 {
-                self.emit(format!("slli t0, t0, {}", byte_index * 8));
+                self.emit(format!("slli {}, {}, {}", byte_reg, byte_reg, byte_index * 8));
             }
-            self.emit(format!("or {}, {}, t0", dest_reg, dest_reg));
+            self.emit(format!("or {}, {}, {}", dest_reg, dest_reg, byte_reg));
         }
     }
 
@@ -1718,14 +1737,14 @@ impl CodeGenerator {
 
         self.emit_sp_addi("t0", ENTRY_SCRIPT_BUFFER_OFFSET);
         self.emit("add t0, t0, t4");
-        self.emit_entry_load_u32_from_reg("t5", "t0");
+        self.emit_entry_load_u32_from_reg("t5", "t0", "t1");
         self.emit("addi t6, t4, 4");
         self.emit("add t1, t6, t5");
         self.emit("sltu t2, t3, t1");
         self.emit(format!("beqz t2, {}", args_span_ok_label));
         self.emit(format!("j {}", fail_label));
         self.emit_label(&args_span_ok_label);
-        self.emit_stack_store("t6", ENTRY_SCRIPT_ARGS_START_OFFSET);
+        self.emit_stack_store_with_avoid("t6", ENTRY_SCRIPT_ARGS_START_OFFSET, &["t5"]);
         self.emit_stack_store("t5", ENTRY_SCRIPT_ARGS_LEN_OFFSET);
         self.emit("li t0, 0");
         self.emit_stack_store("t0", ENTRY_SCRIPT_ARGS_CURSOR_OFFSET);
@@ -1749,34 +1768,36 @@ impl CodeGenerator {
         };
         let bytes_ok_label = self.fresh_label("entry_lock_args_bytes_ok");
         self.emit(format!("# cellscript entry abi: lock_args param {} consumes {} script arg byte(s)", param.name, width));
-        self.emit_stack_load("t6", ENTRY_SCRIPT_ARGS_CURSOR_OFFSET);
-        self.emit_stack_load("t5", ENTRY_SCRIPT_ARGS_LEN_OFFSET);
-        self.emit(format!("addi t1, t6, {}", width));
-        self.emit("sltu t2, t5, t1");
+        let witness_cursor_live = ["t5", "t6"];
+        let witness_and_script_cursor_live = ["t3", "t5", "t6"];
+        self.emit_stack_load_with_avoid("t3", ENTRY_SCRIPT_ARGS_CURSOR_OFFSET, &witness_cursor_live);
+        self.emit_stack_load_with_avoid("t4", ENTRY_SCRIPT_ARGS_LEN_OFFSET, &witness_and_script_cursor_live);
+        self.emit(format!("addi t1, t3, {}", width));
+        self.emit("sltu t2, t4, t1");
         self.emit(format!("beqz t2, {}", bytes_ok_label));
         self.emit(format!("j {}", fail_label));
         self.emit_label(&bytes_ok_label);
-        self.emit_stack_load("t3", ENTRY_SCRIPT_ARGS_START_OFFSET);
-        self.emit("add t3, t3, t6");
+        self.emit_stack_load_with_avoid("t4", ENTRY_SCRIPT_ARGS_START_OFFSET, &witness_and_script_cursor_live);
+        self.emit("add t4, t4, t3");
         self.emit_sp_addi("t0", ENTRY_SCRIPT_BUFFER_OFFSET);
-        self.emit("add t0, t0, t3");
+        self.emit("add t0, t0, t4");
 
         if fixed_byte_width.is_some() {
             self.emit_entry_abi_reg_arg(*abi_index, "t0", outgoing_stack_arg_bytes);
             self.emit_entry_abi_immediate_arg(*abi_index + 1, width as u64, outgoing_stack_arg_bytes);
             *abi_index += 2;
         } else if *abi_index < 8 {
-            self.emit_entry_witness_scalar_load_from_reg(&format!("a{}", *abi_index), "t0", width, param.ty == IrType::I32);
+            self.emit_entry_witness_scalar_load_from_reg(&format!("a{}", *abi_index), "t0", "t1", width, param.ty == IrType::I32);
             *abi_index += 1;
         } else {
-            self.emit_entry_witness_scalar_load_from_reg("t4", "t0", width, param.ty == IrType::I32);
+            self.emit_entry_witness_scalar_load_from_reg("t4", "t0", "t1", width, param.ty == IrType::I32);
             self.emit_entry_abi_reg_arg(*abi_index, "t4", outgoing_stack_arg_bytes);
             *abi_index += 1;
         }
 
-        self.emit_stack_load("t6", ENTRY_SCRIPT_ARGS_CURSOR_OFFSET);
-        self.emit(format!("addi t6, t6, {}", width));
-        self.emit_stack_store("t6", ENTRY_SCRIPT_ARGS_CURSOR_OFFSET);
+        self.emit_stack_load_with_avoid("t3", ENTRY_SCRIPT_ARGS_CURSOR_OFFSET, &witness_cursor_live);
+        self.emit(format!("addi t3, t3, {}", width));
+        self.emit_stack_store_with_avoid("t3", ENTRY_SCRIPT_ARGS_CURSOR_OFFSET, &witness_cursor_live);
     }
 
     fn emit_entry_lock_args_exact_size_check(&mut self, fail_label: &str) {
@@ -3436,7 +3457,12 @@ impl CodeGenerator {
 
     /// Emit `ld rd, offset(sp)` through the centralized stack-offset gate.
     fn emit_stack_load(&mut self, rd: &str, offset: usize) {
-        self.emit_stack_access("ld", rd, offset);
+        self.emit_stack_access_with_avoid("ld", rd, offset, &[]);
+    }
+
+    /// Emit `ld rd, offset(sp)` without clobbering explicitly live registers.
+    fn emit_stack_load_with_avoid(&mut self, rd: &str, offset: usize, avoid: &[&str]) {
+        self.emit_stack_access_with_avoid("ld", rd, offset, avoid);
     }
 
     /// Emit `lbu rd, offset(sp)` through the centralized stack-offset gate.
@@ -3446,7 +3472,12 @@ impl CodeGenerator {
 
     /// Emit `sd rs2, offset(sp)` through the centralized stack-offset gate.
     fn emit_stack_store(&mut self, rs2: &str, offset: usize) {
-        self.emit_stack_access("sd", rs2, offset);
+        self.emit_stack_access_with_avoid("sd", rs2, offset, &[]);
+    }
+
+    /// Emit `sd rs2, offset(sp)` without clobbering explicitly live registers.
+    fn emit_stack_store_with_avoid(&mut self, rs2: &str, offset: usize, avoid: &[&str]) {
+        self.emit_stack_access_with_avoid("sd", rs2, offset, avoid);
     }
 
     /// Emit `sb rs2, offset(sp)` through the centralized stack-offset gate.
@@ -3455,11 +3486,18 @@ impl CodeGenerator {
     }
 
     fn emit_stack_access(&mut self, opcode: &str, register: &str, offset: usize) {
+        self.emit_stack_access_with_avoid(opcode, register, offset, &[]);
+    }
+
+    fn emit_stack_access_with_avoid(&mut self, opcode: &str, register: &str, offset: usize, avoid: &[&str]) {
         let offset = i64::try_from(offset).expect("stack offset should fit in i64");
         if small_signed_immediate(offset) {
             self.emit(format!("{} {}, {}(sp)", opcode, register, offset));
         } else {
-            let scratch = scratch_register_avoiding(&[register]);
+            let mut live_registers = Vec::with_capacity(1 + avoid.len());
+            live_registers.push(register);
+            live_registers.extend_from_slice(avoid);
+            let scratch = scratch_register_avoiding(&live_registers);
             self.emit(format!("li {}, {}", scratch, offset));
             self.emit(format!("add {}, sp, {}", scratch, scratch));
             self.emit(format!("{} {}, 0({})", opcode, register, scratch));
@@ -3587,7 +3625,7 @@ impl CodeGenerator {
                 body.read_refs.iter().enumerate().map(|(index, pattern)| (pattern.binding.as_str(), index)).collect::<HashMap<_, _>>();
             let mut read_ref_param_index = 0usize;
             for param in params {
-                if param.source == ParamSource::Output {
+                if matches!(param.source, ParamSource::Output | ParamSource::LockArgs) {
                     continue;
                 }
                 if !self.param_is_runtime_bound(param) {
@@ -5646,7 +5684,7 @@ impl CodeGenerator {
             self.emit_loaded_field_equals_expected(size_offset, buffer_offset, layout, expected, context);
             return true;
         }
-        let Some(width) = layout_fixed_byte_width(layout) else {
+        let Some(width) = layout_fixed_byte_width(layout).or_else(|| self.fixed_named_type_width(&layout.ty)) else {
             return false;
         };
         let Some(source) = self.expected_fixed_byte_source(expected, width) else {
@@ -6356,7 +6394,7 @@ impl CodeGenerator {
         }
         pattern.fields.iter().all(|(field, value)| {
             self.type_layouts.get(&pattern.ty).and_then(|layouts| layouts.get(field)).is_some_and(|layout| {
-                if let Some(width) = layout_fixed_byte_width(layout) {
+                if let Some(width) = layout_fixed_byte_width(layout).or_else(|| self.fixed_named_type_width(&layout.ty)) {
                     self.is_prelude_available_fixed_value(value, width)
                 } else {
                     self.can_verify_dynamic_create_output_field_value(value, layout)
@@ -6405,7 +6443,7 @@ impl CodeGenerator {
             let Some(layout) = self.type_layouts.get(&pattern.ty).and_then(|fields| fields.get(field)).cloned() else {
                 continue;
             };
-            if layout_fixed_byte_width(&layout).is_some() {
+            if layout_fixed_byte_width(&layout).or_else(|| self.fixed_named_type_width(&layout.ty)).is_some() {
                 if is_fixed_type {
                     self.emit_loaded_field_bytes_equals_expected(
                         size_offset,
@@ -6466,7 +6504,7 @@ impl CodeGenerator {
         field_count: usize,
         expected: &IrOperand,
     ) -> bool {
-        let Some(width) = layout_fixed_byte_width(layout) else {
+        let Some(width) = layout_fixed_byte_width(layout).or_else(|| self.fixed_named_type_width(&layout.ty)) else {
             return false;
         };
         let output_start_offset = self.runtime_expr_temp_offset(0).expect("runtime temp slot 0");
@@ -9730,7 +9768,6 @@ impl CodeGenerator {
                 return Ok(());
             };
             let ipc_buffer_offset = self.runtime_scratch_buffer_offset();
-            let ipc_size_offset = self.runtime_scratch_size_offset();
             self.emit("# cellscript abi: NovaSeal BIP340 verifier IPC envelope via VM2 pipe/spawn/wait");
             let pipe_ok = self.fresh_label("novaseal_bip340_pipe_ok");
             self.emit("call __ckb_pipe");
@@ -9778,18 +9815,17 @@ impl CodeGenerator {
             self.emit_fail(CellScriptRuntimeError::Bip340SpawnFailed);
             self.emit_label(&spawn_ok);
             self.emit_stack_store("a1", child_pid_offset);
-            self.emit("# cellscript abi: BIP340 IPC write canonical 144-byte envelope");
-            self.emit("li t0, 144");
-            self.emit_stack_store("t0", ipc_size_offset);
-            self.emit_stack_load("a0", write_fd_offset);
-            self.emit_sp_addi("a1", ipc_buffer_offset);
-            self.emit_sp_addi("a2", ipc_size_offset);
-            self.emit(format!("li a7, {}", ckb_abi::syscall::WRITE));
-            self.emit("ecall");
-            let write_ok = self.fresh_label("novaseal_bip340_write_ok");
-            self.emit(format!("beqz a0, {}", write_ok));
-            self.emit_fail(CellScriptRuntimeError::Bip340MessageWriteFailed);
-            self.emit_label(&write_ok);
+            self.emit("# cellscript abi: BIP340 IPC write canonical 18-word little-endian envelope");
+            for word_index in 0..18 {
+                self.emit(format!("# cellscript abi: novaseal bip340 ipc word {}", word_index));
+                self.emit_stack_load("a0", write_fd_offset);
+                self.emit_stack_load("a1", ipc_buffer_offset + word_index * 8);
+                self.emit("call __ckb_pipe_write");
+                let write_ok = self.fresh_label("novaseal_bip340_write_ok");
+                self.emit(format!("beqz a0, {}", write_ok));
+                self.emit_fail(CellScriptRuntimeError::Bip340MessageWriteFailed);
+                self.emit_label(&write_ok);
+            }
             self.emit_stack_load("a0", write_fd_offset);
             self.emit("call __ckb_close");
             let close_ok = self.fresh_label("novaseal_bip340_close_ok");

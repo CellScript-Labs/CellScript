@@ -22014,6 +22014,31 @@ action bad(token: Token) {
             "lock_args Address should consume exactly 32 script arg bytes:\n{}",
             asm
         );
+        let script_args_decode = asm
+            .split("# cellscript entry abi: lock_args param owner consumes 32 script arg byte(s)")
+            .next()
+            .expect("Script.args decoder prefix");
+        assert!(
+            script_args_decode.contains("lbu t1, 1(t0)"),
+            "Script.args u32 decoder must keep its base pointer live:\n{}",
+            script_args_decode
+        );
+        assert!(
+            !script_args_decode.contains("lbu t0, 1(t0)"),
+            "Script.args u32 decoder must not overwrite its base pointer:\n{}",
+            script_args_decode
+        );
+        assert!(
+            script_args_decode.contains("sd t6, 0(t3)") && script_args_decode.contains("sd t5, 0(t6)"),
+            "Script.args start/length stores must preserve the decoded byte length:\n{}",
+            script_args_decode
+        );
+        assert!(
+            !asm.contains("# cellscript abi: bind read-only param owner to Input#")
+                && !asm.contains("# cellscript abi: bind read-only param owner to CellDep#"),
+            "lock_args must remain bound to Script.args instead of transaction cell data:\n{}",
+            asm
+        );
         assert!(
             !asm.contains("# cellscript abi: LOAD_WITNESS reason=entry_args"),
             "lock_args-only wrapper should not require a witness payload:\n{}",
@@ -22025,6 +22050,52 @@ action bad(token: Token) {
         assert_eq!(owner.source, "lock_args");
         assert!(owner.lock_args_data_source);
         assert_eq!(result.metadata.constraints.ckb.as_ref().expect("ckb constraints").max_entry_witness_bytes, 0);
+    }
+
+    #[test]
+    fn compile_preserves_dynamic_witness_cursor_across_lock_args() {
+        let source = r#"
+module lock_args_dynamic_witness;
+
+resource Token {
+    owner: Address,
+}
+
+struct Claim {
+    owner: Address,
+}
+
+lock guarded(protected token: Token, lock_args owner: Address, witness proof: Claim, witness nonce: u64) -> bool {
+    verification
+    require owner == token.owner
+    require proof.owner == token.owner
+    require nonce > 0
+}
+"#;
+        let result = compile(source, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes).unwrap();
+        let lock_args_decode = asm
+            .split("# cellscript entry abi: lock_args param owner consumes 32 script arg byte(s)")
+            .nth(1)
+            .and_then(|suffix| suffix.split("# cellscript entry abi: schema param proof").next())
+            .expect("lock args decode before dynamic witness decode");
+
+        assert!(
+            !lock_args_decode.contains("t5") && !lock_args_decode.contains("t6") && !lock_args_decode.contains("\n    li t3,"),
+            "lock_args decoding must preserve the live witness and Script.args cursor registers:\n{}",
+            lock_args_decode
+        );
+
+        let scalar_decode = asm
+            .split("# cellscript entry abi: scalar param nonce")
+            .nth(1)
+            .and_then(|suffix| suffix.split("# cellscript entry abi: reject trailing witness payload bytes").next())
+            .expect("scalar witness decode");
+        assert!(
+            scalar_decode.contains("lbu t1, 1(t0)") && !scalar_decode.contains("lbu t0, 1(t0)"),
+            "scalar witness decoding must keep its base pointer live:\n{}",
+            scalar_decode
+        );
     }
 
     #[test]
@@ -22711,6 +22782,81 @@ action verify_runtime_hashes(witness envelope: Envelope, witness expected: Hash)
             !action.fail_closed_runtime_features.contains(&"fixed-byte-comparison".to_string()),
             "addressable runtime Hash results must not be reported as unresolved: {:?}",
             action.fail_closed_runtime_features
+        );
+    }
+
+    #[test]
+    fn compile_lowers_bip340_ipc_as_eighteen_checked_words() {
+        let source = r#"
+module bip340_ipc_words;
+
+action verify(witness message: Hash, witness pubkey: [u8; 32], witness signature: [u8; 64]) -> bool {
+    verification
+    verifier::btc::bip340::require_signature(message, pubkey, signature)
+    true
+}
+"#;
+        let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes).unwrap();
+
+        assert_eq!(
+            asm.matches("# cellscript abi: novaseal bip340 ipc word ").count(),
+            18,
+            "BIP340 IPC must expose all 18 frozen envelope words:\n{}",
+            asm
+        );
+        assert_eq!(
+            asm.matches("call __ckb_pipe_write").count(),
+            18,
+            "each BIP340 IPC word must use the checked VM2 write helper:\n{}",
+            asm
+        );
+        assert!(
+            asm.contains("# cellscript abi: novaseal bip340 ipc word 0")
+                && asm.contains("# cellscript abi: novaseal bip340 ipc word 17")
+                && asm.contains("cellscript runtime error 52 bip340-message-write-failed"),
+            "BIP340 IPC word range and fail-closed write path must remain visible:\n{}",
+            asm
+        );
+    }
+
+    #[test]
+    fn compile_verifies_fixed_named_aggregate_output_fields() {
+        let source = r#"
+module fixed_named_output_field;
+
+struct OutPoint {
+    tx_hash: Hash,
+    index: u32,
+}
+
+receipt Receipt {
+    old_cell: OutPoint,
+    digest: Hash,
+}
+
+action issue(witness old_cell: OutPoint, witness digest: Hash) -> issued: Receipt {
+    verification
+    create issued = Receipt {
+        old_cell: old_cell,
+        digest: digest,
+    }
+}
+"#;
+        let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes).unwrap();
+        let action = result.metadata.actions.iter().find(|action| action.name == "issue").expect("issue metadata");
+
+        assert!(
+            asm.contains("# cellscript abi: verify output bytes field Receipt.old_cell offset=0 size=36"),
+            "fixed named aggregate output fields must be compared as packed bytes:\n{}",
+            asm
+        );
+        assert!(
+            !asm.contains("# cellscript abi: ordered named output field verification incomplete")
+                && !action.fail_closed_runtime_features.contains(&"output-verification-incomplete".to_string()),
+            "fixed named aggregate output verification must stay aligned across metadata and codegen:\n{}",
+            asm
         );
     }
 
