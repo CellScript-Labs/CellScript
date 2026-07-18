@@ -13422,6 +13422,26 @@ fn metadata_prelude_availability(
                         "__ckb_hash_pair" => {
                             args.len() == 2 && args.iter().all(|arg| metadata_fixed_value_available_with_width(arg, &availability, 32))
                         }
+                        "__ckb_hash_blake2b_var" | "__ckb_hash_blake2b_packed" | "__ckb_hash_data_packed" => {
+                            args.len() == 1
+                                && args
+                                    .first()
+                                    .is_some_and(|arg| metadata_fixed_hash_input_available(arg, &availability, type_layouts))
+                        }
+                        "__ckb_current_script_hash" => args.is_empty(),
+                        "__ckb_input_out_point_tx_hash"
+                        | "__ckb_cell_lock_hash"
+                        | "__ckb_cell_type_hash"
+                        | "__ckb_cell_data_hash"
+                        | "__ckb_cell_lock_code_hash"
+                        | "__ckb_cell_type_code_hash"
+                        | "__ckb_cell_lock_args_hash"
+                        | "__ckb_cell_type_args_hash"
+                        | "__ckb_witness_raw"
+                        | "__ckb_witness_lock"
+                        | "__ckb_witness_input_type"
+                        | "__ckb_witness_output_type" => args.len() == 1,
+                        "__ckb_cell_data_hash_at" => args.len() == 2,
                         _ => false,
                     };
                     if fixed_hash_result {
@@ -13467,6 +13487,14 @@ fn metadata_prelude_availability(
                         .is_some_and(|len| type_static_length(&dest.ty).is_some_and(|dest_len| dest_len == len))
                     {
                         availability.fixed_value_vars.insert(dest.id);
+                    }
+                }
+                ir::IrInstruction::Tuple { dest, fields } => {
+                    if metadata_ir_type_fixed_width(&dest.ty, type_layouts).is_some()
+                        && fields.iter().all(|field| metadata_fixed_aggregate_part_available(field, &availability, type_layouts))
+                    {
+                        availability.fixed_value_vars.insert(dest.id);
+                        availability.aggregate_pointer_vars.insert(dest.id, MetadataAggregatePointerSource { ty: dest.ty.clone() });
                     }
                 }
                 ir::IrInstruction::EnumConstruct { dest, .. } => {
@@ -13965,6 +13993,32 @@ fn metadata_can_verify_fixed_byte_comparison(
     }
     metadata_fixed_value_available_with_width(left, availability, width)
         && metadata_fixed_value_available_with_width(right, availability, width)
+}
+
+fn metadata_fixed_hash_input_available(
+    operand: &ir::IrOperand,
+    availability: &MetadataPreludeAvailability,
+    type_layouts: &MetadataTypeLayouts,
+) -> bool {
+    let width = operand_fixed_byte_width(operand).or_else(|| match operand {
+        ir::IrOperand::Var(var) => metadata_ir_type_fixed_width(&var.ty, type_layouts),
+        ir::IrOperand::Const(_) => None,
+    });
+    width.is_some_and(|width| metadata_fixed_value_available_with_layout_width(operand, availability, width, type_layouts))
+}
+
+fn metadata_fixed_aggregate_part_available(
+    operand: &ir::IrOperand,
+    availability: &MetadataPreludeAvailability,
+    type_layouts: &MetadataTypeLayouts,
+) -> bool {
+    match operand {
+        ir::IrOperand::Const(value) => {
+            metadata_fixed_scalar_const_value(value).is_some() || metadata_fixed_byte_const_len(value).is_some()
+        }
+        ir::IrOperand::Var(var) => metadata_ir_type_fixed_width(&var.ty, type_layouts)
+            .is_some_and(|width| metadata_fixed_value_available_with_layout_width(operand, availability, width, type_layouts)),
+    }
 }
 
 fn metadata_fixed_value_available_with_width(
@@ -22622,6 +22676,40 @@ action grant(read config: Config, token: Token) -> Grant {
         assert!(
             !action.fail_closed_runtime_features.contains(&"fixed-byte-comparison".to_string()),
             "metadata should not report fixed-byte comparison when both operands are verifier-coverable: {:?}",
+            action.fail_closed_runtime_features
+        );
+    }
+
+    #[test]
+    fn compile_marks_addressable_runtime_hash_comparisons_as_checked() {
+        let source = r#"
+module runtime_hash_comparison;
+
+struct Envelope {
+    digest: Hash,
+}
+
+action verify_runtime_hashes(witness envelope: Envelope, witness expected: Hash) -> bool {
+    verification
+    let input = source::input(0)
+    let out_point_hash = ckb::input_out_point_tx_hash(input)
+    let local_envelope = Envelope { digest: envelope.digest }
+    let packed_hash = ckb::hash_data_packed(local_envelope)
+    require out_point_hash == expected
+    require packed_hash == expected
+    true
+}
+"#;
+        let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+        let action = result.metadata.actions.iter().find(|action| action.name == "verify_runtime_hashes").unwrap();
+
+        assert!(asm.contains("call __ckb_input_out_point_tx_hash"), "full OutPoint hash read must be emitted:\n{asm}");
+        assert!(asm.contains("call __ckb_hash_blake2b_var"), "packed-data hash must be emitted:\n{asm}");
+        assert!(asm.contains("call __cellscript_memcmp_fixed"), "runtime Hash equality must use the fixed-byte helper:\n{asm}");
+        assert!(
+            !action.fail_closed_runtime_features.contains(&"fixed-byte-comparison".to_string()),
+            "addressable runtime Hash results must not be reported as unresolved: {:?}",
             action.fail_closed_runtime_features
         );
     }
