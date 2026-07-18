@@ -329,48 +329,10 @@ impl<'a> Parser<'a> {
                 "capability" => {
                     let mut caps = Vec::new();
                     while !self.check(&TokenKind::RParen) && !self.check(&TokenKind::Eof) {
-                        match &self.current().kind {
-                            TokenKind::Store => {
-                                caps.push(Capability::Store);
-                                self.advance();
-                            }
-                            TokenKind::Destroy | TokenKind::DestroyKw => {
-                                caps.push(Capability::Destroy);
-                                self.advance();
-                            }
-                            TokenKind::Create => {
-                                caps.push(Capability::Create);
-                                self.advance();
-                            }
-                            TokenKind::Consume => {
-                                caps.push(Capability::Consume);
-                                self.advance();
-                            }
-                            TokenKind::ReadRef => {
-                                caps.push(Capability::ReadRef);
-                                self.advance();
-                            }
-                            // v0.15 context-sensitive capability keywords (identifiers)
-                            TokenKind::Identifier(s) if s == "replace" => {
-                                caps.push(Capability::Replace);
-                                self.advance();
-                            }
-                            TokenKind::Identifier(s) if s == "burn" => {
-                                caps.push(Capability::Burn);
-                                self.advance();
-                            }
-                            TokenKind::Identifier(s) if s == "relock" => {
-                                caps.push(Capability::Relock);
-                                self.advance();
-                            }
-                            TokenKind::Identifier(s) if s == "retarget_type" => {
-                                caps.push(Capability::RetargetType);
-                                self.advance();
-                            }
-                            _ => {
-                                return Err(CompileError::new("expected capability name", self.current().span));
-                            }
-                        }
+                        let capability = Capability::from_source_name(&self.current().text)
+                            .ok_or_else(|| CompileError::new("expected canonical capability name", self.current().span))?;
+                        caps.push(capability);
+                        self.advance();
 
                         if self.check(&TokenKind::Comma) {
                             self.advance();
@@ -1009,46 +971,11 @@ impl<'a> Parser<'a> {
             self.advance();
 
             loop {
-                match &self.current().kind {
-                    TokenKind::Store => {
-                        caps.push(Capability::Store);
-                        self.advance();
-                    }
-                    TokenKind::Destroy | TokenKind::DestroyKw => {
-                        caps.push(Capability::Destroy);
-                        self.advance();
-                    }
-                    TokenKind::Create => {
-                        caps.push(Capability::Create);
-                        self.advance();
-                    }
-                    TokenKind::Consume => {
-                        caps.push(Capability::Consume);
-                        self.advance();
-                    }
-                    TokenKind::ReadRef => {
-                        caps.push(Capability::ReadRef);
-                        self.advance();
-                    }
-                    // v0.15 context-sensitive capability keywords (identifiers)
-                    TokenKind::Identifier(s) if s == "replace" => {
-                        caps.push(Capability::Replace);
-                        self.advance();
-                    }
-                    TokenKind::Identifier(s) if s == "burn" => {
-                        caps.push(Capability::Burn);
-                        self.advance();
-                    }
-                    TokenKind::Identifier(s) if s == "relock" => {
-                        caps.push(Capability::Relock);
-                        self.advance();
-                    }
-                    TokenKind::Identifier(s) if s == "retarget_type" => {
-                        caps.push(Capability::RetargetType);
-                        self.advance();
-                    }
-                    _ => break,
-                }
+                let Some(capability) = Capability::from_source_name(&self.current().text) else {
+                    break;
+                };
+                caps.push(capability);
+                self.advance();
 
                 if self.check(&TokenKind::Comma) {
                     self.advance();

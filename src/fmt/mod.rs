@@ -630,17 +630,7 @@ impl Formatter {
 }
 
 fn format_capability(capability: &Capability) -> &'static str {
-    match capability {
-        Capability::Store => "store",
-        Capability::Destroy => "destroy",
-        Capability::Create => "create",
-        Capability::Consume => "consume",
-        Capability::Replace => "replace",
-        Capability::Burn => "burn",
-        Capability::Relock => "relock",
-        Capability::RetargetType => "retarget_type",
-        Capability::ReadRef => "read_ref",
-    }
+    capability.as_str()
 }
 
 fn has_type_policy(

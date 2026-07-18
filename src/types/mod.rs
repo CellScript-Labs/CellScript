@@ -3239,7 +3239,8 @@ impl<'a> TypeChecker<'a> {
                 }
             }
             Expr::Cast(cast) => {
-                self.infer_expr(env, &cast.expr)?;
+                let source_ty = self.infer_expr(env, &cast.expr)?;
+                self.validate_checked_cast(&cast.expr, &source_ty, &cast.ty, cast.span)?;
                 Ok(cast.ty.clone())
             }
             Expr::Range(range) => {
@@ -3399,6 +3400,16 @@ impl<'a> TypeChecker<'a> {
 
     fn infer_stdlib_call(&mut self, env: &mut TypeEnv, call: &StdlibCallExpr) -> Result<Type> {
         let qualified = format!("std::{}::{}", call.namespace, call.name);
+        let signature = crate::stdlib::signature::lookup(&call.namespace, &call.name).ok_or_else(|| {
+            CompileError::new(
+                format!("unknown stdlib pattern '{}' — each stdlib primitive must have a canonical signature", qualified),
+                call.span,
+            )
+        })?;
+        self.validate_stdlib_arity(&qualified, call, signature.arity)?;
+        if !signature.allows_preserve_fields && !call.preserve_fields.is_empty() {
+            return Err(CompileError::new(format!("{} does not accept a preserve-field block", qualified), call.span));
+        }
         match qualified.as_str() {
             "std::cell::same_lock" | "std::cell::preserve_lock" | "std::cell::preserve_capacity" => {
                 self.validate_stdlib_arity(&qualified, call, 2)?;
@@ -6103,6 +6114,53 @@ impl<'a> TypeChecker<'a> {
             || matches!(ty, Type::Named(name) if name == "usize" || name == "isize")
     }
 
+    fn validate_checked_cast(&self, expr: &Expr, source: &Type, target: &Type, span: Span) -> Result<()> {
+        if self.types_equal(source, target) {
+            return Ok(());
+        }
+
+        if let Expr::Integer(value) = expr {
+            if Self::integer_literal_fits_expected_type(*value, target) {
+                return Ok(());
+            }
+        }
+
+        if self.is_numeric_type(source) && self.is_numeric_type(target) {
+            let source_signed = matches!(source, Type::I32) || matches!(source, Type::Named(name) if name == "isize");
+            let target_signed = matches!(target, Type::I32) || matches!(target, Type::Named(name) if name == "isize");
+            if source_signed || target_signed {
+                return Err(CompileError::new(
+                    format!(
+                        "unsupported signed numeric cast from {} to {}; 0.22 casts must preserve signedness or use a checked conversion",
+                        type_repr(source),
+                        type_repr(target)
+                    ),
+                    span,
+                ));
+            }
+            if matches!(source, Type::U128) && !matches!(target, Type::U128) {
+                return Err(CompileError::new(
+                    format!(
+                        "unsupported full-width narrowing cast from {} to {}; use an explicit checked conversion once u128 narrowing is available",
+                        type_repr(source),
+                        type_repr(target)
+                    ),
+                    span,
+                ));
+            }
+            return Ok(());
+        }
+
+        Err(CompileError::new(
+            format!(
+                "unsupported cast from {} to {}; casts cannot erase Cell identity, linear ownership, reference, or capability boundaries",
+                type_repr(source),
+                type_repr(target)
+            ),
+            span,
+        ))
+    }
+
     fn is_bool_type(&self, ty: &Type) -> bool {
         matches!(ty, Type::Bool)
     }
@@ -6733,17 +6791,7 @@ fn push_unique_root<'a>(roots: &mut Vec<&'a str>, root: &'a str) {
 }
 
 fn capability_name(capability: Capability) -> &'static str {
-    match capability {
-        Capability::Store => "store",
-        Capability::Destroy => "destroy",
-        Capability::Create => "create",
-        Capability::Consume => "consume",
-        Capability::Replace => "replace",
-        Capability::Burn => "burn",
-        Capability::Relock => "relock",
-        Capability::RetargetType => "retarget_type",
-        Capability::ReadRef => "read_ref",
-    }
+    capability.as_str()
 }
 
 fn is_state_storage_type(ty: &Type) -> bool {
@@ -6809,6 +6857,42 @@ action bad_two() -> bool {
         assert_eq!(diagnostics.len(), 2);
         assert!(diagnostics.iter().any(|error| error.message.contains("expected U64, found Bool")));
         assert!(diagnostics.iter().any(|error| error.message.contains("expected Bool, found U64")));
+    }
+
+    #[test]
+    fn checked_casts_reject_cell_identity_erasure() {
+        let module = source_module(
+            r#"
+module checked_casts
+
+resource Token has store, create, consume {
+    amount: u64
+}
+
+action erase(token: Token) -> u64 {
+    verification
+        let erased = token as u64
+        consume token
+        return erased
+}
+"#,
+        );
+        let error = super::check(&module).expect_err("cell-backed cast must fail");
+        assert!(error.message.contains("casts cannot erase Cell identity"), "unexpected error: {}", error.message);
+    }
+
+    #[test]
+    fn checked_casts_accept_unsigned_numeric_narrowing_for_runtime_guarding() {
+        let module = source_module(
+            r#"
+module checked_casts
+
+fn narrow(value: u64) -> u8 {
+    return value as u8
+}
+"#,
+        );
+        super::check(&module).expect("numeric narrowing is checked during lowering");
     }
 
     #[test]

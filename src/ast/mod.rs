@@ -149,6 +149,40 @@ pub enum Capability {
 }
 
 impl Capability {
+    /// Version of the closed CellScript capability vocabulary.
+    pub const REGISTRY_VERSION: u32 = 1;
+
+    /// Canonical capability order used by parser-facing tools and metadata.
+    pub const ALL: [Capability; 9] = [
+        Self::Store,
+        Self::Create,
+        Self::Consume,
+        Self::Destroy,
+        Self::Replace,
+        Self::Burn,
+        Self::Relock,
+        Self::RetargetType,
+        Self::ReadRef,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Store => "store",
+            Self::Destroy => "destroy",
+            Self::Create => "create",
+            Self::Consume => "consume",
+            Self::Replace => "replace",
+            Self::Burn => "burn",
+            Self::Relock => "relock",
+            Self::RetargetType => "retarget_type",
+            Self::ReadRef => "read_ref",
+        }
+    }
+
+    pub fn from_source_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|capability| capability.as_str() == name)
+    }
+
     /// Returns true if this capability is a v0.14-era protocol verb
     /// that is not allowed in `--primitive-strict=0.15` mode.
     pub fn is_protocol_verb(self) -> bool {

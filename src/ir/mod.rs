@@ -2016,7 +2016,7 @@ impl IrGenerator {
             Expr::Block(stmts) => self.lower_tail_block_value(stmts, current, blocks, vars),
             Expr::If(if_expr) => self.lower_if_expr(if_expr, current, blocks, vars),
             Expr::Match(match_expr) => self.lower_match_expr(match_expr, current, blocks, vars),
-            Expr::Cast(cast) => self.lower_expr(&cast.expr, current, blocks, vars),
+            Expr::Cast(cast) => self.lower_cast_expr(cast, current, blocks, vars),
             Expr::Array(items) => self.lower_array_expr(items, current, blocks, vars),
             Expr::Tuple(items) => self.lower_tuple_expr(items, current, blocks, vars),
             Expr::String(_) => {
@@ -2633,11 +2633,57 @@ impl IrGenerator {
     }
 
     fn fail_closed_return_operand(&self) -> IrOperand {
+        self.fail_closed_runtime_return_operand(CellScriptRuntimeError::AssertionFailed)
+    }
+
+    fn fail_closed_runtime_return_operand(&self, error: CellScriptRuntimeError) -> IrOperand {
         if self.lowering_lock_entry {
             IrOperand::Const(IrConst::Bool(false))
         } else {
-            IrOperand::Const(IrConst::U64(CellScriptRuntimeError::AssertionFailed.code()))
+            IrOperand::Const(IrConst::U64(error.code()))
         }
+    }
+
+    fn lower_cast_expr(
+        &mut self,
+        cast: &CastExpr,
+        current: BlockId,
+        blocks: &mut Vec<IrBlock>,
+        vars: &mut HashMap<String, IrVar>,
+    ) -> LoweredExpr {
+        if let Expr::Integer(value) = cast.expr.as_ref() {
+            let target = Self::convert_type(&cast.ty);
+            if let Some(value) = Self::integer_const_for_expected_type(*value, &target) {
+                return LoweredExpr { operand: IrOperand::Const(value), current: Some(current) };
+            }
+        }
+
+        let lowered = self.lower_expr(&cast.expr, current, blocks, vars);
+        let Some(active) = lowered.current else {
+            return lowered;
+        };
+        let source_ty = self.operand_type(&lowered.operand);
+        let target_ty = Self::convert_type(&cast.ty);
+        let Some(maximum) = checked_cast_maximum(&source_ty, &target_ty) else {
+            return LoweredExpr { operand: lowered.operand, current: Some(active) };
+        };
+
+        let condition = self.new_var("cast_fits", IrType::Bool);
+        self.block_mut(blocks, active).instructions.push(IrInstruction::Binary {
+            dest: condition.clone(),
+            op: BinaryOp::Le,
+            left: lowered.operand.clone(),
+            right: IrOperand::Const(maximum),
+        });
+
+        let ok_block = self.push_block(blocks);
+        let fail_block = self.push_block(blocks);
+        self.block_mut(blocks, active).terminator =
+            IrTerminator::Branch { cond: IrOperand::Var(condition), then_block: ok_block, else_block: fail_block };
+        self.block_mut(blocks, fail_block).terminator =
+            IrTerminator::Return(Some(self.fail_closed_runtime_return_operand(CellScriptRuntimeError::NumericOrDiscriminantInvalid)));
+
+        LoweredExpr { operand: lowered.operand, current: Some(ok_block) }
     }
 
     /// Lower `require { expr1, expr2, ... }` — desugar into independent atomic `require` statements.
@@ -2715,7 +2761,7 @@ impl IrGenerator {
     ) -> LoweredExpr {
         if call.args.len() != 2 {
             self.record_error(format!("{} expects 2 arguments (output, input), got {}", qualified, call.args.len()), call.span);
-            return LoweredExpr { operand: IrOperand::Const(IrConst::Bool(true)), current: Some(current) };
+            return LoweredExpr { operand: IrOperand::Const(IrConst::Bool(false)), current: Some(current) };
         }
 
         let left = self.lower_expr(&call.args[0], current, blocks, vars);
@@ -2810,6 +2856,21 @@ impl IrGenerator {
     ) -> LoweredExpr {
         let qualified = format!("std::{}::{}", call.namespace, call.name);
         let mut active = current;
+        let Some(signature) = crate::stdlib::signature::lookup(&call.namespace, &call.name) else {
+            self.record_error(
+                format!("unknown stdlib pattern '{}' — each stdlib primitive must have a canonical signature", qualified),
+                call.span,
+            );
+            return LoweredExpr { operand: IrOperand::Const(IrConst::Bool(false)), current: Some(active) };
+        };
+        if call.args.len() != signature.arity {
+            self.record_error(format!("{} expects {} arguments, got {}", qualified, signature.arity, call.args.len()), call.span);
+            return LoweredExpr { operand: IrOperand::Const(IrConst::Bool(false)), current: Some(active) };
+        }
+        if !signature.allows_preserve_fields && !call.preserve_fields.is_empty() {
+            self.record_error(format!("{} does not accept a preserve-field block", qualified), call.span);
+            return LoweredExpr { operand: IrOperand::Const(IrConst::Bool(false)), current: Some(active) };
+        }
 
         match qualified.as_str() {
             // Constraint patterns — expand to canonical verifier constraints
@@ -2822,7 +2883,7 @@ impl IrGenerator {
                         format!("{} expects 2 arguments (output, input), got {}", qualified, call.args.len()),
                         call.span,
                     );
-                    return LoweredExpr { operand: IrOperand::Const(IrConst::Bool(true)), current: Some(active) };
+                    return LoweredExpr { operand: IrOperand::Const(IrConst::Bool(false)), current: Some(active) };
                 }
                 let output = &call.args[0];
                 let input = &call.args[1];
@@ -2862,7 +2923,7 @@ impl IrGenerator {
                         format!("{} expects 2 arguments (output, input), got {}", qualified, call.args.len()),
                         call.span,
                     );
-                    return LoweredExpr { operand: IrOperand::Const(IrConst::Bool(true)), current: Some(active) };
+                    return LoweredExpr { operand: IrOperand::Const(IrConst::Bool(false)), current: Some(active) };
                 }
                 let output = &call.args[0];
                 let input = &call.args[1];
@@ -2890,7 +2951,7 @@ impl IrGenerator {
                         format!("std::lifecycle::transfer expects 3 arguments (input, output, to), got {}", call.args.len()),
                         call.span,
                     );
-                    return LoweredExpr { operand: IrOperand::Const(IrConst::Bool(true)), current: Some(active) };
+                    return LoweredExpr { operand: IrOperand::Const(IrConst::Bool(false)), current: Some(active) };
                 }
                 let input = &call.args[0];
                 let output = &call.args[1];
@@ -2909,7 +2970,7 @@ impl IrGenerator {
                     Expr::Identifier(name) => name.clone(),
                     _ => {
                         self.record_error("std::lifecycle::transfer output must be a named Cell output binding", call.span);
-                        return LoweredExpr { operand: IrOperand::Const(IrConst::Bool(true)), current: Some(active) };
+                        return LoweredExpr { operand: IrOperand::Const(IrConst::Bool(false)), current: Some(active) };
                     }
                 };
                 let output_ty = vars
@@ -2994,7 +3055,7 @@ impl IrGenerator {
             "std::receipt::claim" => {
                 if call.args.len() != 3 {
                     self.record_error(format!("std::receipt::claim expects 3 arguments, got {}", call.args.len()), call.span);
-                    return LoweredExpr { operand: IrOperand::Const(IrConst::Bool(true)), current: Some(active) };
+                    return LoweredExpr { operand: IrOperand::Const(IrConst::Bool(false)), current: Some(active) };
                 }
                 let receipt = &call.args[0];
 
@@ -3018,7 +3079,7 @@ impl IrGenerator {
                     blocks,
                     vars,
                 ) else {
-                    return LoweredExpr { operand: IrOperand::Const(IrConst::Bool(true)), current: Some(active) };
+                    return LoweredExpr { operand: IrOperand::Const(IrConst::Bool(false)), current: Some(active) };
                 };
                 active = next;
 
@@ -3027,7 +3088,7 @@ impl IrGenerator {
             "std::lifecycle::settle" => {
                 if call.args.len() != 3 {
                     self.record_error(format!("std::lifecycle::settle expects 3 arguments, got {}", call.args.len()), call.span);
-                    return LoweredExpr { operand: IrOperand::Const(IrConst::Bool(true)), current: Some(active) };
+                    return LoweredExpr { operand: IrOperand::Const(IrConst::Bool(false)), current: Some(active) };
                 }
                 let input = &call.args[0];
 
@@ -3051,7 +3112,7 @@ impl IrGenerator {
                     blocks,
                     vars,
                 ) else {
-                    return LoweredExpr { operand: IrOperand::Const(IrConst::Bool(true)), current: Some(active) };
+                    return LoweredExpr { operand: IrOperand::Const(IrConst::Bool(false)), current: Some(active) };
                 };
                 active = next;
 
@@ -3066,7 +3127,7 @@ impl IrGenerator {
                     ),
                     call.span,
                 );
-                LoweredExpr { operand: IrOperand::Const(IrConst::Bool(true)), current: Some(active) }
+                LoweredExpr { operand: IrOperand::Const(IrConst::Bool(false)), current: Some(active) }
             }
         }
     }
@@ -5951,6 +6012,34 @@ fn fixed_byte_width_for_script_args_operand(operand: &IrOperand, ty: &IrType) ->
             IrType::Array(inner, len) if matches!(inner.as_ref(), IrType::U8) => Some(*len),
             _ => None,
         },
+    }
+}
+
+fn checked_cast_maximum(source: &IrType, target: &IrType) -> Option<IrConst> {
+    let source_bits = unsigned_ir_bits(source)?;
+    let target_bits = unsigned_ir_bits(target)?;
+    if target_bits >= source_bits || source_bits > 64 {
+        return None;
+    }
+    let maximum = if target_bits == 64 { u64::MAX } else { (1u64 << target_bits) - 1 };
+    match source {
+        IrType::U8 => u8::try_from(maximum).ok().map(IrConst::U8),
+        IrType::U16 => u16::try_from(maximum).ok().map(IrConst::U16),
+        IrType::U32 => u32::try_from(maximum).ok().map(IrConst::U32),
+        IrType::U64 | IrType::Named(_) => Some(IrConst::U64(maximum)),
+        _ => None,
+    }
+}
+
+fn unsigned_ir_bits(ty: &IrType) -> Option<u32> {
+    match ty {
+        IrType::U8 => Some(8),
+        IrType::U16 => Some(16),
+        IrType::U32 => Some(32),
+        IrType::U64 => Some(64),
+        IrType::U128 => Some(128),
+        IrType::Named(name) if name == "usize" => Some(64),
+        _ => None,
     }
 }
 

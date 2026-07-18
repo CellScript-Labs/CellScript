@@ -195,17 +195,7 @@ fn check_primitive_strict_015(module: &ast::Module) -> Result<()> {
 }
 
 fn strict_capability_name(capability: ast::Capability) -> &'static str {
-    match capability {
-        ast::Capability::Store => "store",
-        ast::Capability::Destroy => "destroy",
-        ast::Capability::Create => "create",
-        ast::Capability::Consume => "consume",
-        ast::Capability::Replace => "replace",
-        ast::Capability::Burn => "burn",
-        ast::Capability::Relock => "relock",
-        ast::Capability::RetargetType => "retarget_type",
-        ast::Capability::ReadRef => "read_ref",
-    }
+    capability.as_str()
 }
 
 const DEFAULT_TARGET: &str = "riscv64-asm";
@@ -14936,18 +14926,7 @@ fn molecule_identifier(input: &str) -> String {
 }
 
 fn metadata_capability_name(capability: &crate::ast::Capability) -> String {
-    match capability {
-        crate::ast::Capability::Store => "store",
-        crate::ast::Capability::Destroy => "destroy",
-        crate::ast::Capability::Create => "create",
-        crate::ast::Capability::Consume => "consume",
-        crate::ast::Capability::Replace => "replace",
-        crate::ast::Capability::Burn => "burn",
-        crate::ast::Capability::Relock => "relock",
-        crate::ast::Capability::RetargetType => "retarget_type",
-        crate::ast::Capability::ReadRef => "read_ref",
-    }
-    .to_string()
+    capability.as_str().to_string()
 }
 
 fn is_default_identity_policy(value: &Option<String>) -> bool {
@@ -16842,6 +16821,15 @@ module test
 action widen(x: u16) -> u64 {
     verification
         return x as u64
+}
+"#;
+
+    const CHECKED_NARROWING_CAST_PROGRAM: &str = r#"
+module test
+
+action narrow(x: u64) -> u8 {
+    verification
+        return x as u8
 }
 "#;
 
@@ -20204,6 +20192,19 @@ action activate(ticket: Ticket) -> Ticket {
 
         assert!(!asm.contains("li t0, 0"), "cast lowering regressed to zero fallback:\n{}", asm);
         assert!(asm.contains(".global widen"), "missing widened function symbol:\n{}", asm);
+    }
+
+    #[test]
+    fn compile_guards_numeric_narrowing_casts() {
+        let result = compile(CHECKED_NARROWING_CAST_PROGRAM, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+
+        assert!(asm.contains("li t1, 255"), "narrowing cast is missing its u8 upper bound:\n{}", asm);
+        assert!(
+            asm.contains("numeric-or-discriminant-invalid") || asm.contains("li a0, 20"),
+            "narrowing cast is missing its fail-closed runtime path:\n{}",
+            asm
+        );
     }
 
     #[test]

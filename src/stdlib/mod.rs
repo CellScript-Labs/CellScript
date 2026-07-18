@@ -1,5 +1,6 @@
 pub mod ckb_protocols;
 pub mod collections;
+pub mod signature;
 
 use crate::{ckb_abi, ckb_blake2b256, ir::IrType, runtime_errors::CellScriptRuntimeError, TargetProfile};
 
