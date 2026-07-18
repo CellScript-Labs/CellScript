@@ -3315,10 +3315,13 @@ fn validate_core_security_source(repo_root: &Path) -> Result<Value> {
             .join("proposals/novaseal/v0-mvp-skeleton/fixtures/authority_rotation_without_explicit_action_reject.json")
             .is_file(),
         "state_action_binds_sig_pubkey_to_old_cell_authority": source.contains("require sig.pubkey == old_cell.btc_authority_hash.0"),
-        "lifecycle_binds_sig_pubkey_to_old_cell_authority": source.contains("assert(sig.pubkey == old_cell.btc_authority_hash.0"),
+        "lifecycle_binds_sig_pubkey_to_old_cell_authority": source.contains("require pubkey == old_cell.btc_authority_hash.0"),
         "lock_binds_sig_pubkey_to_cell_authority_in_both_lock_surfaces": source.matches("require sig.pubkey == cell.btc_authority_hash.0").count() >= 2,
         "core_nonce_increment_guarded": source.contains("require old_cell.nonce < U64_MAX")
-            && source.contains("assert(old_cell.nonce < U64_MAX"),
+            && source.contains("require ckb::cell_data_u64_le(source::input(0), 130) < U64_MAX")
+            && source.contains(
+                "require ckb::cell_data_u64_le(source::output(0), 130) == ckb::cell_data_u64_le(source::input(0), 130) + 1",
+            ),
     });
     Ok(json!({
         "status": if object_values_all_true(Some(&checks)) { "passed" } else { "failed" },
@@ -4933,7 +4936,10 @@ fn validate_btc_tx_commitment_profile_package(repo_root: &Path) -> Result<Value>
         ),
         (
             "manifest_btc_public_verification_gap".to_string(),
-            Value::Bool(metadata_str("btc_public_verification") == Some("missing-spv-or-indexer-evidence")),
+            Value::Bool(
+                metadata_str("btc_public_verification")
+                    == Some("live-devnet-tuple-bound; public/mainnet SPV-or-indexer attestation required for BTC-finality claims"),
+            ),
         ),
         (
             "manifest_source_actions".to_string(),
@@ -4969,7 +4975,8 @@ fn validate_btc_tx_commitment_profile_package(repo_root: &Path) -> Result<Value>
         (
             "btc_public_verification_gap_explicit".to_string(),
             Value::Bool(
-                coverage_by_id.get("btc_public_verification").and_then(Value::as_str) == Some("missing-spv-or-indexer-evidence"),
+                coverage_by_id.get("btc_public_verification").and_then(Value::as_str)
+                    == Some("external-public-mainnet-spv-or-indexer-evidence-required"),
             ),
         ),
     ]);
@@ -5047,7 +5054,10 @@ fn validate_btc_utxo_seal_profile_package(repo_root: &Path) -> Result<Value> {
         ),
         (
             "manifest_btc_public_verification_gap".to_string(),
-            Value::Bool(metadata_str("btc_public_verification") == Some("missing-spv-or-indexer-evidence")),
+            Value::Bool(
+                metadata_str("btc_public_verification")
+                    == Some("live-devnet-spend-tuple-bound; public/mainnet SPV-or-indexer attestation required for BTC-spend claims"),
+            ),
         ),
         (
             "manifest_source_actions".to_string(),
@@ -5079,7 +5089,8 @@ fn validate_btc_utxo_seal_profile_package(repo_root: &Path) -> Result<Value> {
         (
             "btc_public_verification_gap_explicit".to_string(),
             Value::Bool(
-                coverage_by_id.get("btc_public_verification").and_then(Value::as_str) == Some("missing-spv-or-indexer-evidence"),
+                coverage_by_id.get("btc_public_verification").and_then(Value::as_str)
+                    == Some("external-public-mainnet-spv-or-indexer-evidence-required"),
             ),
         ),
     ]);
@@ -5157,7 +5168,10 @@ fn validate_dual_seal_profile_package(repo_root: &Path) -> Result<Value> {
         ),
         (
             "manifest_btc_public_verification_gap".to_string(),
-            Value::Bool(metadata_str("btc_public_verification") == Some("missing-spv-or-indexer-evidence")),
+            Value::Bool(
+                metadata_str("btc_public_verification")
+                    == Some("live-devnet-closure-bound; public/mainnet SPV-or-indexer attestation required for BTC-finality claims"),
+            ),
         ),
         (
             "manifest_ckb_finality_gap".to_string(),
@@ -5190,7 +5204,8 @@ fn validate_dual_seal_profile_package(repo_root: &Path) -> Result<Value> {
         (
             "btc_public_verification_gap_explicit".to_string(),
             Value::Bool(
-                coverage_by_id.get("btc_public_verification").and_then(Value::as_str) == Some("missing-spv-or-indexer-evidence"),
+                coverage_by_id.get("btc_public_verification").and_then(Value::as_str)
+                    == Some("external-public-mainnet-spv-or-indexer-evidence-required"),
             ),
         ),
         (
