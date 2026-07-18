@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased - 0.22.0
+## 0.22.0 - 2026-07-19
 
 - Start the `nightly-0.22` language line with checked casts, canonical helper
   and capability registries, transitive callable effects, initial/terminal

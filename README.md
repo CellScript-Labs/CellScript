@@ -75,7 +75,7 @@ curl -fsSL https://raw.githubusercontent.com/CellScript-Labs/CellScript/main/scr
 Or pin a specific version:
 
 ```bash
-CELLSCRIPT_VERSION=0.21.1 curl -fsSL https://raw.githubusercontent.com/CellScript-Labs/CellScript/main/scripts/install.sh | sh
+CELLSCRIPT_VERSION=0.22.0 curl -fsSL https://raw.githubusercontent.com/CellScript-Labs/CellScript/main/scripts/install.sh | sh
 ```
 
 Build from this repository instead (tracks `main`):
@@ -649,7 +649,7 @@ policy defaults:
 ```toml
 [package]
 name = "token"
-version = "0.21.1"
+version = "0.22.0"
 entry = "src/main.cell"
 source_roots = ["src"]
 

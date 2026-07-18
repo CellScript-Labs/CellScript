@@ -214,7 +214,9 @@ def main() -> int:
         "website/package.json",
         [
             '"prepare:registry": "python3 scripts/generate-registry-data.py"',
-            '"build": "npm run prepare:registry && astro check && astro build"',
+            '"build": "npm run prepare:registry && astro check && astro build && npm run check:docs && npm run check:dist"',
+            '"check:docs": "node scripts/check-doc-links.mjs"',
+            '"check:dist": "node scripts/check-dist-regressions.mjs"',
         ],
     )
     require_contains(
