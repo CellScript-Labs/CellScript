@@ -201,7 +201,7 @@ fn strict_capability_name(capability: ast::Capability) -> &'static str {
 const DEFAULT_TARGET: &str = "riscv64-asm";
 const DEFAULT_TARGET_PROFILE: &str = "ckb";
 const ARTIFACT_CACHE_VERSION: &str = "project-source-set-v5";
-pub const METADATA_SCHEMA_VERSION: u32 = 48;
+pub const METADATA_SCHEMA_VERSION: u32 = 49;
 pub const SOURCE_METADATA_SCHEMA_VERSION: u32 = 1;
 pub const ARTIFACT_METADATA_SCHEMA_VERSION: u32 = 1;
 pub const CONSTRAINTS_METADATA_SCHEMA_VERSION: u32 = 1;
@@ -995,6 +995,7 @@ pub fn validate_compile_metadata(metadata: &CompileMetadata, artifact_format: Ar
         ));
     }
     validate_type_identity_metadata(metadata)?;
+    validate_type_validity_metadata(metadata)?;
     validate_capacity_floor_metadata(metadata)?;
     validate_ckb_constraints_summary_metadata(metadata)?;
     validate_ckb_output_data_binding_metadata(metadata)?;
@@ -1046,6 +1047,102 @@ fn validate_transaction_view_handle_metadata(metadata: &CompileMetadata) -> Resu
                 "{} must use checked-static typing evidence and checked-runtime read evidence",
                 prefix
             )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_type_validity_metadata(metadata: &CompileMetadata) -> Result<()> {
+    for ty in &metadata.types {
+        for (index, predicate) in ty.validity_predicates.iter().enumerate() {
+            let prefix = format!("metadata type '{}'.validity_predicates[{index}]", ty.name);
+            if predicate.expression.trim().is_empty() {
+                return Err(CompileError::without_span(format!("{prefix}.expression must not be empty")));
+            }
+            if predicate.source_span.end <= predicate.source_span.start || predicate.source_span.line == 0 {
+                return Err(CompileError::without_span(format!("{prefix}.source_span must identify a non-empty source range")));
+            }
+            if predicate.create_paths_checked > predicate.create_paths_selected {
+                return Err(CompileError::without_span(format!("{prefix}.create_paths_checked cannot exceed create_paths_selected")));
+            }
+            match predicate.evidence_tier {
+                EvidenceTier::CheckedStatic => {
+                    if predicate.runtime_checked_on_create
+                        || predicate.create_path_status != "checked-static"
+                        || predicate.update_path_status != "checked-static"
+                        || predicate.create_paths_checked != predicate.create_paths_selected
+                    {
+                        return Err(CompileError::without_span(format!(
+                            "{prefix} checked-static evidence cannot depend on runtime create/update checks"
+                        )));
+                    }
+                }
+                EvidenceTier::CheckedRuntime => {
+                    if !predicate.runtime_checked_on_create
+                        || predicate.create_path_status != "checked-runtime"
+                        || predicate.create_paths_selected == 0
+                        || predicate.create_paths_checked != predicate.create_paths_selected
+                        || !matches!(
+                            predicate.update_path_status.as_str(),
+                            "runtime-helper-required" | "local-struct-not-cell-update" | "not-selected"
+                        )
+                    {
+                        return Err(CompileError::without_span(format!(
+                            "{prefix} checked-runtime evidence requires a selected fail-closed create-path check and a canonical update status"
+                        )));
+                    }
+                }
+                EvidenceTier::RuntimeHelperRequired => {
+                    if predicate.runtime_checked_on_create
+                        || !matches!(
+                            predicate.create_path_status.as_str(),
+                            "not-selected-runtime-helper-required"
+                                | "selected-runtime-helper-required"
+                                | "partial-runtime-helper-required"
+                        )
+                        || match predicate.create_path_status.as_str() {
+                            "not-selected-runtime-helper-required" => {
+                                predicate.create_paths_selected != 0 || predicate.create_paths_checked != 0
+                            }
+                            "selected-runtime-helper-required" => {
+                                predicate.create_paths_selected == 0 || predicate.create_paths_checked != 0
+                            }
+                            "partial-runtime-helper-required" => {
+                                predicate.create_paths_checked == 0
+                                    || predicate.create_paths_checked >= predicate.create_paths_selected
+                            }
+                            _ => true,
+                        }
+                        || !matches!(
+                            predicate.update_path_status.as_str(),
+                            "runtime-helper-required" | "local-struct-not-cell-update" | "not-selected"
+                        )
+                    {
+                        return Err(CompileError::without_span(format!(
+                            "{prefix} runtime-helper evidence must identify an unselected create path and a canonical update status"
+                        )));
+                    }
+                }
+                EvidenceTier::BuilderEvidenceRequired => {
+                    if predicate.runtime_checked_on_create
+                        || predicate.create_path_status != "builder-header-evidence-required"
+                        || predicate.update_path_status != "builder-header-evidence-required"
+                        || predicate.create_paths_checked != 0
+                        || !predicate.dependencies.iter().any(|dependency| dependency == "environment:env::block_number")
+                        || !predicate.dependencies.iter().any(|dependency| dependency == "builder:header-dep-block-number-evidence")
+                    {
+                        return Err(CompileError::without_span(format!(
+                            "{prefix} builder evidence must name env::block_number and the header-dep block-number contract"
+                        )));
+                    }
+                }
+                EvidenceTier::MetadataOnly | EvidenceTier::ChainEvidenceRequired => {
+                    return Err(CompileError::without_span(format!(
+                        "{prefix} uses unsupported validity evidence tier '{}'",
+                        predicate.evidence_tier.as_str()
+                    )));
+                }
+            }
         }
     }
     Ok(())
@@ -3588,12 +3685,28 @@ pub struct TypeMetadata {
     pub flow_state_model: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub flow_audit_warnings: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub validity_predicates: Vec<ValidityPredicateMetadata>,
     pub encoded_size: Option<usize>,
     pub fields: Vec<FieldMetadata>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub molecule_schema: Option<MoleculeSchemaMetadata>,
     #[serde(default, skip_serializing_if = "is_default_identity_policy")]
     pub identity_policy: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ValidityPredicateMetadata {
+    pub expression: String,
+    pub evidence_tier: EvidenceTier,
+    pub dependencies: Vec<String>,
+    pub runtime_checked_on_create: bool,
+    pub create_paths_selected: usize,
+    pub create_paths_checked: usize,
+    pub update_paths_selected: usize,
+    pub create_path_status: String,
+    pub update_path_status: String,
+    pub source_span: ProofPlanSourceSpanMetadata,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -5665,10 +5778,30 @@ fn compile_metadata_from_ir(ir: &ir::IrModule, artifact_format: ArtifactFormat, 
     let ckb_runtime_required = !ckb_runtime_features.is_empty();
     let standalone_runner_compatible = !ckb_runtime_required && !has_entry_params;
     let embeds_vm_abi_trailer = target_profile.embeds_vm_abi_trailer(artifact_format);
-    let mut types =
-        ir.external_type_defs.iter().map(|type_def| type_metadata(type_def, &type_defs, target_profile)).collect::<Vec<_>>();
+    let validity_paths = module_validity_path_coverage(ir);
+    let mut types = ir
+        .external_type_defs
+        .iter()
+        .map(|type_def| {
+            type_metadata(
+                type_def,
+                &type_defs,
+                target_profile,
+                validity_paths.selected_create_count(&type_def.name),
+                validity_paths.checked_create_count(&type_def.name),
+                validity_paths.update_count(&type_def.name),
+            )
+        })
+        .collect::<Vec<_>>();
     types.extend(ir.items.iter().filter_map(|item| match item {
-        ir::IrItem::TypeDef(type_def) => Some(type_metadata(type_def, &type_defs, target_profile)),
+        ir::IrItem::TypeDef(type_def) => Some(type_metadata(
+            type_def,
+            &type_defs,
+            target_profile,
+            validity_paths.selected_create_count(&type_def.name),
+            validity_paths.checked_create_count(&type_def.name),
+            validity_paths.update_count(&type_def.name),
+        )),
         _ => None,
     }));
     let molecule_schema_manifest = molecule_schema_manifest_metadata(&types, target_profile);
@@ -6835,6 +6968,15 @@ fn module_proof_plan_metadata(
     module_ckb_runtime_accesses: &[CkbRuntimeAccessMetadata],
 ) -> Vec<ProofPlanMetadata> {
     let mut proof_plan = Vec::new();
+    let validity_paths = module_validity_path_coverage(ir);
+    for type_def in &ir.external_type_defs {
+        proof_plan.extend(crate::proof_plan::build_for_type_validity(
+            type_def,
+            validity_paths.selected_create_count(&type_def.name),
+            validity_paths.checked_create_count(&type_def.name),
+            validity_paths.update_count(&type_def.name),
+        ));
+    }
     for item in &ir.items {
         match item {
             ir::IrItem::Action(action) => {
@@ -7003,7 +7145,14 @@ fn module_proof_plan_metadata(
             ir::IrItem::Invariant(invariant) => {
                 proof_plan.extend(crate::proof_plan::build_for_invariant(invariant, module_ckb_runtime_accesses));
             }
-            ir::IrItem::TypeDef(_) => {}
+            ir::IrItem::TypeDef(type_def) => {
+                proof_plan.extend(crate::proof_plan::build_for_type_validity(
+                    type_def,
+                    validity_paths.selected_create_count(&type_def.name),
+                    validity_paths.checked_create_count(&type_def.name),
+                    validity_paths.update_count(&type_def.name),
+                ));
+            }
         }
     }
     proof_plan
@@ -14597,10 +14746,107 @@ fn metadata_type_defs_by_name(ir: &ir::IrModule) -> BTreeMap<String, &ir::IrType
     type_defs
 }
 
+#[derive(Debug, Default)]
+struct ValidityPathCoverage {
+    selected_create: BTreeMap<String, usize>,
+    checked_create: BTreeMap<String, usize>,
+    updates: BTreeMap<String, usize>,
+}
+
+impl ValidityPathCoverage {
+    fn selected_create_count(&self, type_name: &str) -> usize {
+        self.selected_create.get(type_name).copied().unwrap_or(0)
+    }
+
+    fn checked_create_count(&self, type_name: &str) -> usize {
+        self.checked_create.get(type_name).copied().unwrap_or(0)
+    }
+
+    fn update_count(&self, type_name: &str) -> usize {
+        self.updates.get(type_name).copied().unwrap_or(0)
+    }
+}
+
+fn increment_validity_path(paths: &mut BTreeMap<String, usize>, type_name: &str) {
+    *paths.entry(type_name.to_string()).or_default() += 1;
+}
+
+fn module_validity_path_coverage(ir: &ir::IrModule) -> ValidityPathCoverage {
+    let mut coverage = ValidityPathCoverage::default();
+    for item in &ir.items {
+        let (body, params) = match item {
+            ir::IrItem::Action(action) => (&action.body, action.params.as_slice()),
+            ir::IrItem::PureFn(function) => (&function.body, function.params.as_slice()),
+            ir::IrItem::Lock(lock) => (&lock.body, lock.params.as_slice()),
+            ir::IrItem::TypeDef(_) | ir::IrItem::Invariant(_) => continue,
+        };
+        let mut update_types = body.mutate_set.iter().map(|pattern| pattern.ty.clone()).collect::<BTreeSet<_>>();
+        let consumed_bindings = body.consume_set.iter().map(|pattern| pattern.binding.as_str()).collect::<BTreeSet<_>>();
+        let consumed_type_names = params
+            .iter()
+            .filter(|param| consumed_bindings.contains(param.name.as_str()))
+            .filter_map(|param| match &param.ty {
+                ir::IrType::Named(name) => Some(name.clone()),
+                _ => None,
+            })
+            .collect::<BTreeSet<_>>();
+        update_types.extend(
+            body.create_set.iter().filter(|pattern| consumed_type_names.contains(&pattern.ty)).map(|pattern| pattern.ty.clone()),
+        );
+        let input_types = params
+            .iter()
+            .filter(|param| param.source == crate::ast::ParamSource::Input)
+            .filter_map(|param| match &param.ty {
+                ir::IrType::Named(name) => Some(name.clone()),
+                _ => None,
+            })
+            .collect::<BTreeSet<_>>();
+        update_types.extend(params.iter().filter(|param| param.source == crate::ast::ParamSource::Output).filter_map(|param| {
+            match &param.ty {
+                ir::IrType::Named(name) if input_types.contains(name) => Some(name.clone()),
+                _ => None,
+            }
+        }));
+        for type_name in update_types {
+            increment_validity_path(&mut coverage.updates, &type_name);
+        }
+        for pattern in &body.create_set {
+            increment_validity_path(&mut coverage.selected_create, &pattern.ty);
+        }
+        for block in &body.blocks {
+            for instruction in &block.instructions {
+                match instruction {
+                    ir::IrInstruction::Create { pattern, .. }
+                    | ir::IrInstruction::CreateUnique { pattern, .. }
+                    | ir::IrInstruction::ReplaceUnique { pattern, .. } => {
+                        increment_validity_path(&mut coverage.checked_create, &pattern.ty);
+                    }
+                    ir::IrInstruction::Claim { dest, .. } | ir::IrInstruction::Settle { dest, .. } => {
+                        if let ir::IrType::Named(name) = &dest.ty {
+                            increment_validity_path(&mut coverage.checked_create, name);
+                        }
+                    }
+                    ir::IrInstruction::Tuple { dest, .. } => {
+                        if let ir::IrType::Named(name) = &dest.ty {
+                            increment_validity_path(&mut coverage.selected_create, name);
+                            increment_validity_path(&mut coverage.checked_create, name);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    coverage
+}
+
 fn type_metadata(
     type_def: &ir::IrTypeDef,
     type_defs: &BTreeMap<String, &ir::IrTypeDef>,
     target_profile: TargetProfile,
+    create_paths_selected: usize,
+    create_paths_checked: usize,
+    update_paths_selected: usize,
 ) -> TypeMetadata {
     let flow_states = type_def.flow_states.clone().unwrap_or_default();
     let type_id = type_def.type_id.clone();
@@ -14634,11 +14880,76 @@ fn type_metadata(
         flow_terminal_evidence_tier: type_def.flow_terminal_discharge.as_ref().map(|_| EvidenceTier::CheckedRuntime),
         flow_state_model: type_def.flow_state_model.clone(),
         flow_audit_warnings: type_def.flow_audit_warnings.clone(),
+        validity_predicates: type_def
+            .validity_predicates
+            .iter()
+            .map(|predicate| {
+                validity_predicate_metadata(type_def, predicate, create_paths_selected, create_paths_checked, update_paths_selected)
+            })
+            .collect(),
         flow_states,
         encoded_size: type_encoded_size(type_def, type_defs),
         fields: fields_metadata(type_def, type_defs),
         molecule_schema: type_molecule_schema_metadata(type_def, type_defs),
         identity_policy: metadata_identity_policy(&type_def.identity),
+    }
+}
+
+fn validity_predicate_metadata(
+    type_def: &ir::IrTypeDef,
+    predicate: &ir::IrValidityPredicate,
+    create_paths_selected: usize,
+    create_paths_checked: usize,
+    update_paths_selected: usize,
+) -> ValidityPredicateMetadata {
+    let all_create_paths_checked = create_paths_selected > 0 && create_paths_checked == create_paths_selected;
+    let predicate_create_paths_checked = match predicate.evidence {
+        ir::IrValidityEvidence::CheckedStatic => create_paths_selected,
+        ir::IrValidityEvidence::CheckedRuntime => create_paths_checked,
+        ir::IrValidityEvidence::BuilderEvidenceRequired => 0,
+    };
+    let evidence_tier = match predicate.evidence {
+        ir::IrValidityEvidence::CheckedStatic => EvidenceTier::CheckedStatic,
+        ir::IrValidityEvidence::CheckedRuntime => {
+            if all_create_paths_checked {
+                EvidenceTier::CheckedRuntime
+            } else {
+                EvidenceTier::RuntimeHelperRequired
+            }
+        }
+        ir::IrValidityEvidence::BuilderEvidenceRequired => EvidenceTier::BuilderEvidenceRequired,
+    };
+    let create_path_status = match predicate.evidence {
+        ir::IrValidityEvidence::CheckedStatic => "checked-static",
+        ir::IrValidityEvidence::CheckedRuntime if all_create_paths_checked => "checked-runtime",
+        ir::IrValidityEvidence::CheckedRuntime if create_paths_selected == 0 => "not-selected-runtime-helper-required",
+        ir::IrValidityEvidence::CheckedRuntime if create_paths_checked == 0 => "selected-runtime-helper-required",
+        ir::IrValidityEvidence::CheckedRuntime => "partial-runtime-helper-required",
+        ir::IrValidityEvidence::BuilderEvidenceRequired => "builder-header-evidence-required",
+    };
+    let update_path_status = match predicate.evidence {
+        ir::IrValidityEvidence::CheckedStatic => "checked-static",
+        ir::IrValidityEvidence::BuilderEvidenceRequired => "builder-header-evidence-required",
+        ir::IrValidityEvidence::CheckedRuntime if update_paths_selected > 0 => "runtime-helper-required",
+        ir::IrValidityEvidence::CheckedRuntime if type_def.kind == ir::IrTypeKind::Struct => "local-struct-not-cell-update",
+        ir::IrValidityEvidence::CheckedRuntime => "not-selected",
+    };
+    ValidityPredicateMetadata {
+        expression: predicate.rendered.clone(),
+        evidence_tier,
+        dependencies: predicate.dependencies.clone(),
+        runtime_checked_on_create: predicate.runtime_checked_on_create && all_create_paths_checked,
+        create_paths_selected,
+        create_paths_checked: predicate_create_paths_checked,
+        update_paths_selected,
+        create_path_status: create_path_status.to_string(),
+        update_path_status: update_path_status.to_string(),
+        source_span: ProofPlanSourceSpanMetadata {
+            start: predicate.span.start,
+            end: predicate.span.end,
+            line: predicate.span.line,
+            column: predicate.span.column,
+        },
     }
 }
 
@@ -29974,5 +30285,427 @@ action run(witness plans: BoundedList<Plan, 2>) -> u64 {
             let error = compile(source, CompileOptions::default()).unwrap_err();
             assert!(error.message.contains(expected), "expected '{expected}', got: {}", error.message);
         }
+    }
+
+    #[test]
+    fn type_validity_records_checked_runtime_and_builder_evidence() {
+        let source = r#"
+module validity::evidence
+
+resource TimeLock has store, create {
+    amount: u64
+    owner: Address
+    locktime: u64
+
+    validity
+        require true
+        require amount > 0
+        require owner != Address::zero()
+        require locktime > env::block_number()
+}
+
+action mint(amount: u64, owner: Address, locktime: u64) -> TimeLock {
+    verification
+        return create TimeLock { amount: amount, owner: owner, locktime: locktime }
+}
+"#;
+        let result = compile(source, CompileOptions::default()).unwrap();
+        let time_lock = result.metadata.types.iter().find(|ty| ty.name == "TimeLock").expect("TimeLock metadata");
+        assert_eq!(time_lock.validity_predicates.len(), 4);
+
+        let static_predicate = &time_lock.validity_predicates[0];
+        assert_eq!(static_predicate.evidence_tier, crate::EvidenceTier::CheckedStatic);
+        assert_eq!(static_predicate.create_path_status, "checked-static");
+        assert!(!static_predicate.runtime_checked_on_create);
+
+        for expression in ["amount > 0", "owner != Address::zero()"] {
+            let predicate = time_lock
+                .validity_predicates
+                .iter()
+                .find(|predicate| predicate.expression == expression)
+                .unwrap_or_else(|| panic!("missing validity predicate {expression}"));
+            assert_eq!(predicate.evidence_tier, crate::EvidenceTier::CheckedRuntime);
+            assert_eq!(predicate.create_path_status, "checked-runtime");
+            assert!(predicate.runtime_checked_on_create);
+            assert_eq!(predicate.create_paths_selected, 1);
+            assert_eq!(predicate.create_paths_checked, 1);
+        }
+
+        let environment = time_lock
+            .validity_predicates
+            .iter()
+            .find(|predicate| predicate.expression.contains("env::block_number"))
+            .expect("environment validity predicate");
+        assert_eq!(environment.evidence_tier, crate::EvidenceTier::BuilderEvidenceRequired);
+        assert_eq!(environment.create_path_status, "builder-header-evidence-required");
+        assert_eq!(environment.create_paths_selected, 1);
+        assert_eq!(environment.create_paths_checked, 0);
+        assert!(environment.dependencies.contains(&"environment:env::block_number".to_string()));
+        assert!(environment.dependencies.contains(&"builder:header-dep-block-number-evidence".to_string()));
+        assert!(!environment.runtime_checked_on_create);
+
+        let plans =
+            result.metadata.runtime.proof_plan.iter().filter(|plan| plan.origin.starts_with("validity:TimeLock#")).collect::<Vec<_>>();
+        assert_eq!(plans.len(), 4);
+        assert!(plans.iter().any(|plan| plan.evidence_tier == crate::EvidenceTier::CheckedStatic));
+        assert!(plans.iter().any(|plan| plan.evidence_tier == crate::EvidenceTier::CheckedRuntime));
+        let builder = plans
+            .iter()
+            .find(|plan| plan.evidence_tier == crate::EvidenceTier::BuilderEvidenceRequired)
+            .expect("builder validity ProofPlan");
+        assert!(!builder.on_chain_checked);
+        assert_eq!(builder.codegen_coverage_status, "gap:builder-evidence-required");
+
+        let asm = String::from_utf8(result.artifact_bytes).unwrap();
+        assert!(!asm.contains("env::block_number"), "environment evidence must not be emitted as a fake syscall:\n{asm}");
+    }
+
+    #[test]
+    fn type_validity_lowers_field_predicate_before_create() {
+        let source = r#"
+module validity::lowering
+
+resource Token has store, create {
+    amount: u64
+
+    validity
+        require amount > 0, "amount must be positive"
+}
+
+action mint(amount: u64) -> Token {
+    verification
+        return create Token { amount: amount }
+}
+"#;
+        let ast = parse_module_for_test(source);
+        crate::types::check(&ast).unwrap();
+        let module = ir::generate(&ast).unwrap();
+        let action = module
+            .items
+            .iter()
+            .find_map(|item| match item {
+                ir::IrItem::Action(action) if action.name == "mint" => Some(action),
+                _ => None,
+            })
+            .expect("mint IR action");
+        let create_block = action
+            .body
+            .blocks
+            .iter()
+            .find(|block| block.instructions.iter().any(|instruction| matches!(instruction, ir::IrInstruction::Create { .. })))
+            .expect("create instruction block");
+        assert!(action.body.blocks.iter().any(|block| {
+            matches!(block.terminator, ir::IrTerminator::Branch { then_block, .. } if then_block == create_block.id)
+        }));
+    }
+
+    #[test]
+    fn type_validity_keeps_pure_helper_dependencies_through_optimization() {
+        let source = r#"
+module validity::helpers
+
+fn positive(value: u64) -> bool {
+    let floor = 0
+    return value > floor
+}
+
+const MIN_AMOUNT: u64 = 1
+
+resource Token has store, create {
+    amount: u64
+
+    validity
+        require true
+        require positive(amount) && amount >= MIN_AMOUNT
+}
+
+action mint(amount: u64) -> Token {
+    verification
+        return create Token { amount: amount }
+}
+"#;
+        let result = compile(source, CompileOptions { opt_level: 2, ..CompileOptions::default() }).unwrap();
+        let token = result.metadata.types.iter().find(|ty| ty.name == "Token").expect("Token metadata");
+        assert_eq!(token.validity_predicates[0].evidence_tier, crate::EvidenceTier::CheckedStatic);
+        let helper = token
+            .validity_predicates
+            .iter()
+            .find(|predicate| predicate.expression.contains("positive"))
+            .expect("helper predicate metadata");
+        assert_eq!(helper.evidence_tier, crate::EvidenceTier::CheckedRuntime);
+        assert!(helper.dependencies.contains(&"helper:positive".to_string()));
+        assert!(helper.dependencies.contains(&"constant:MIN_AMOUNT".to_string()));
+    }
+
+    #[test]
+    fn imported_type_validity_keeps_explicit_pure_helper_evidence() {
+        let sources = vec![
+            crate::InMemorySource {
+                path: "src/main.cell".to_string(),
+                role: Some("entry".to_string()),
+                source: r#"
+module validity::main
+
+use validity::schema::{Token}
+
+action mint(amount: u64) -> Token {
+    verification
+        return create Token { amount: amount }
+}
+"#
+                .to_string(),
+            },
+            crate::InMemorySource {
+                path: "src/schema.cell".to_string(),
+                role: None,
+                source: r#"
+module validity::schema
+
+const MIN_AMOUNT: u64 = 1
+
+fn positive(value: u64) -> bool {
+    return value > 0
+}
+
+resource Token has store, create {
+    amount: u64
+
+    validity
+        require positive(amount) && amount >= MIN_AMOUNT
+}
+"#
+                .to_string(),
+            },
+        ];
+        let report = crate::compile_sources_metadata_with_diagnostics(&sources, "src/main.cell", None);
+        assert!(report.diagnostics.is_empty(), "unexpected diagnostics: {:?}", report.diagnostics);
+        let metadata = report.metadata.expect("imported validity metadata");
+        let token = metadata.types.iter().find(|ty| ty.name == "Token").expect("imported Token metadata");
+        let predicate = token.validity_predicates.first().expect("imported Token validity predicate");
+        assert_eq!(predicate.evidence_tier, crate::EvidenceTier::CheckedRuntime);
+        assert_eq!(predicate.create_path_status, "checked-runtime");
+        assert!(predicate.dependencies.contains(&"helper:validity::schema::positive".to_string()));
+        assert!(predicate.dependencies.contains(&"constant:validity::schema::MIN_AMOUNT".to_string()));
+        assert!(
+            metadata.functions.iter().any(|function| function.name.contains("positive")),
+            "imported validity helper body was not retained"
+        );
+    }
+
+    #[test]
+    fn type_validity_marks_signature_only_create_and_update_paths_as_runtime_gaps() {
+        let source = r#"
+module validity::gaps
+
+resource Pool has store {
+    reserve: u64
+
+    validity
+        require reserve > 0
+}
+
+action update(input: Pool) -> output: Pool {
+    verification
+        require output.reserve == input.reserve
+}
+"#;
+        let result = compile(source, CompileOptions::default()).unwrap();
+        let pool = result.metadata.types.iter().find(|ty| ty.name == "Pool").expect("Pool metadata");
+        let predicate = pool.validity_predicates.first().expect("Pool validity predicate");
+        assert_eq!(predicate.evidence_tier, crate::EvidenceTier::RuntimeHelperRequired);
+        assert_eq!(predicate.create_path_status, "selected-runtime-helper-required");
+        assert_eq!(predicate.update_path_status, "runtime-helper-required");
+        assert!(!predicate.runtime_checked_on_create);
+        assert_eq!(predicate.create_paths_selected, 1);
+        assert_eq!(predicate.create_paths_checked, 0);
+        assert_eq!(predicate.update_paths_selected, 1);
+
+        let update_plan = result
+            .metadata
+            .runtime
+            .proof_plan
+            .iter()
+            .find(|plan| plan.origin == "validity:Pool#predicate:0#update")
+            .expect("update validity ProofPlan gap");
+        assert_eq!(update_plan.evidence_tier, crate::EvidenceTier::RuntimeHelperRequired);
+        assert!(!update_plan.on_chain_checked);
+        assert_eq!(update_plan.codegen_coverage_status, "gap:runtime-helper-required");
+    }
+
+    #[test]
+    fn type_validity_never_promotes_partial_create_path_coverage() {
+        let source = r#"
+module validity::partial
+
+resource Pool has store, create {
+    reserve: u64
+
+    validity
+        require reserve > 0
+}
+
+action mint(reserve: u64) -> Pool {
+    verification
+        return create Pool { reserve: reserve }
+}
+
+action update(input: Pool) -> output: Pool {
+    verification
+        require output.reserve == input.reserve
+}
+"#;
+        let result = compile(source, CompileOptions::default()).unwrap();
+        let pool = result.metadata.types.iter().find(|ty| ty.name == "Pool").expect("Pool metadata");
+        let predicate = pool.validity_predicates.first().expect("Pool validity predicate");
+        assert_eq!(predicate.evidence_tier, crate::EvidenceTier::RuntimeHelperRequired);
+        assert_eq!(predicate.create_path_status, "partial-runtime-helper-required");
+        assert_eq!(predicate.create_paths_selected, 2);
+        assert_eq!(predicate.create_paths_checked, 1);
+        assert!(!predicate.runtime_checked_on_create);
+        let plan = result
+            .metadata
+            .runtime
+            .proof_plan
+            .iter()
+            .find(|plan| plan.origin == "validity:Pool#predicate:0")
+            .expect("partial validity ProofPlan");
+        assert_eq!(plan.evidence_tier, crate::EvidenceTier::RuntimeHelperRequired);
+        assert!(plan.coverage.contains(&"create_paths_selected:2".to_string()));
+        assert!(plan.coverage.contains(&"create_paths_checked:1".to_string()));
+        assert!(!plan.on_chain_checked);
+    }
+
+    #[test]
+    fn type_validity_rejects_deferred_or_impure_surfaces() {
+        let cases = [
+            (
+                r#"
+module bad
+struct Value { amount: u64 where amount > 0 }
+"#,
+                "field-level 'where' refinements are deferred",
+            ),
+            (
+                r#"
+module bad
+struct Value {
+    amount: u64
+    validity
+}
+"#,
+                "validity block must contain at least one require predicate",
+            ),
+            (
+                r#"
+module bad
+struct Value {
+    amount: u64
+    validity
+        require amount
+}
+"#,
+                "validity predicate for 'Value' must be boolean",
+            ),
+            (
+                r#"
+module bad
+struct Value {
+    amount: u64
+    validity
+        require amount > env::timestamp()
+}
+"#,
+                "only env::block_number() is approved",
+            ),
+            (
+                r#"
+module bad
+struct Value {
+    amount: u64
+    validity
+        require amount > ckb::header_epoch_number()
+}
+"#,
+                "validity predicate cannot read transaction view",
+            ),
+            (
+                r#"
+module bad
+resource Token has store, create { amount: u64 }
+#[effect(Creating)]
+fn impure(amount: u64) -> bool { return true }
+struct Value {
+    amount: u64
+    validity
+        require impure(amount)
+}
+"#,
+                "validity",
+            ),
+        ];
+        for (source, expected) in cases {
+            let error = compile(source, CompileOptions::default()).unwrap_err();
+            assert!(error.message.contains(expected), "expected '{expected}', got: {}", error.message);
+        }
+    }
+
+    #[test]
+    fn validity_remains_a_contextual_field_name() {
+        let source = r#"
+module validity::contextual
+
+struct Legacy {
+    validity: u64
+}
+
+action read() -> u64 {
+    verification
+        let value = Legacy { validity: 7 }
+        return value.validity
+}
+"#;
+        compile(source, CompileOptions::default()).unwrap();
+    }
+
+    #[test]
+    fn compile_result_validation_rejects_tampered_validity_evidence() {
+        let source = r#"
+module validity::tamper
+
+struct Value {
+    amount: u64
+    validity
+        require amount > 0
+}
+
+action make(amount: u64) -> u64 {
+    verification
+        let value = Value { amount: amount }
+        return value.amount
+}
+"#;
+        let mut result = compile(source, CompileOptions::default()).unwrap();
+        let predicate =
+            &mut result.metadata.types.iter_mut().find(|ty| ty.name == "Value").expect("Value metadata").validity_predicates[0];
+        predicate.runtime_checked_on_create = false;
+        let error = result.validate().unwrap_err();
+        assert!(error.message.contains("checked-runtime evidence requires"), "unexpected error: {}", error.message);
+
+        let mut result = compile(
+            r#"
+module validity::tamper_builder
+struct Value {
+    height: u64
+    validity
+        require height > env::block_number()
+}
+"#,
+            CompileOptions::default(),
+        )
+        .unwrap();
+        let predicate = &mut result.metadata.types[0].validity_predicates[0];
+        predicate.dependencies.retain(|dependency| dependency != "builder:header-dep-block-number-evidence");
+        let error = result.validate().unwrap_err();
+        assert!(error.message.contains("header-dep block-number contract"), "unexpected error: {}", error.message);
     }
 }

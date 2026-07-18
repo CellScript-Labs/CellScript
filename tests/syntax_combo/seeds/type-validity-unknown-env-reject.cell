@@ -1,0 +1,10 @@
+// audit: phase=reject_compile
+// audit: contains=only env::block_number() is approved
+module cellscript::audit::seed_type_validity_unknown_env_reject
+
+struct Timestamped {
+    timestamp: u64,
+
+    validity
+        require timestamp > env::timestamp()
+}

@@ -404,7 +404,7 @@ fn check_local_runtime_plan_consistency(metadata: &CompileMetadata, issues: &mut
 
     for key in runtime_identities {
         let (origin, feature, status) = split_plan_identity_key(&key);
-        if origin.starts_with("invariant:") {
+        if origin.starts_with("invariant:") || origin.starts_with("validity:") {
             continue;
         }
         if !local_identities.contains(&key) {

@@ -628,7 +628,7 @@ impl<'a> Parser<'a> {
         let type_policy = self.parse_type_policy_decls()?;
         self.skip_newlines();
 
-        let fields = self.parse_fields()?;
+        let (fields, validity) = self.parse_fields_and_validity()?;
 
         let end_span = self.current().span;
         Ok(ResourceDef {
@@ -639,6 +639,7 @@ impl<'a> Parser<'a> {
             capacity_floor: type_policy.capacity_floor,
             capabilities,
             fields,
+            validity,
             span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
         })
     }
@@ -654,7 +655,7 @@ impl<'a> Parser<'a> {
         self.skip_newlines();
         let type_policy = self.parse_type_policy_decls()?;
         self.skip_newlines();
-        let fields = self.parse_fields()?;
+        let (fields, validity) = self.parse_fields_and_validity()?;
 
         let end_span = self.current().span;
         Ok(SharedDef {
@@ -665,6 +666,7 @@ impl<'a> Parser<'a> {
             capacity_floor: type_policy.capacity_floor,
             capabilities,
             fields,
+            validity,
             span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
         })
     }
@@ -686,7 +688,7 @@ impl<'a> Parser<'a> {
         self.skip_newlines();
         let type_policy = self.parse_type_policy_decls()?;
         self.skip_newlines();
-        let fields = self.parse_fields()?;
+        let (fields, validity) = self.parse_fields_and_validity()?;
 
         let end_span = self.current().span;
         Ok(ReceiptDef {
@@ -698,6 +700,7 @@ impl<'a> Parser<'a> {
             claim_output,
             capabilities,
             fields,
+            validity,
             span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
         })
     }
@@ -712,7 +715,7 @@ impl<'a> Parser<'a> {
         self.skip_newlines();
         let type_policy = self.parse_type_policy_decls()?;
         self.skip_newlines();
-        let fields = self.parse_fields()?;
+        let (fields, validity) = self.parse_fields_and_validity()?;
 
         let end_span = self.current().span;
         Ok(StructDef {
@@ -721,6 +724,7 @@ impl<'a> Parser<'a> {
             default_hash_type: type_policy.default_hash_type,
             capacity_floor: type_policy.capacity_floor,
             fields,
+            validity,
             span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
         })
     }
@@ -1030,12 +1034,39 @@ impl<'a> Parser<'a> {
         Ok(caps)
     }
 
-    fn parse_fields(&mut self) -> Result<Vec<Field>> {
+    fn parse_fields_and_validity(&mut self) -> Result<(Vec<Field>, Option<ValidityBlock>)> {
         self.expect(TokenKind::LBrace)?;
         self.skip_newlines();
 
         let mut fields = Vec::new();
+        let mut validity = None;
         while !self.check(&TokenKind::RBrace) && !self.check(&TokenKind::Eof) {
+            if self.current_identifier().as_deref() == Some("validity") && self.peek(1).kind != TokenKind::Colon {
+                if validity.is_some() {
+                    return Err(CompileError::new("type declaration contains more than one validity block", self.current().span));
+                }
+                let start = self.current().span;
+                self.advance();
+                self.skip_newlines();
+                let mut predicates = Vec::new();
+                while !self.check(&TokenKind::RBrace) && !self.check(&TokenKind::Eof) {
+                    if !self.check(&TokenKind::Require) {
+                        return Err(CompileError::new(
+                            "validity block only accepts pure require predicates and must be the final section of the type body",
+                            self.current().span,
+                        ));
+                    }
+                    predicates.push(self.parse_require()?);
+                    self.consume_optional_semi();
+                    self.skip_newlines();
+                }
+                if predicates.is_empty() {
+                    return Err(CompileError::new("validity block must contain at least one require predicate", start));
+                }
+                let end = predicates.last().map(Expr::span).unwrap_or(start);
+                validity = Some(ValidityBlock { predicates, span: Span::new(start.start, end.end, start.line, start.column) });
+                break;
+            }
             let field = self.parse_field()?;
             fields.push(field);
             if self.check(&TokenKind::Comma) {
@@ -1045,7 +1076,7 @@ impl<'a> Parser<'a> {
         }
 
         self.expect(TokenKind::RBrace)?;
-        Ok(fields)
+        Ok((fields, validity))
     }
 
     fn parse_field(&mut self) -> Result<Field> {
@@ -1055,6 +1086,12 @@ impl<'a> Parser<'a> {
 
         self.expect(TokenKind::Colon)?;
         let ty = self.parse_type()?;
+        if self.current_identifier().as_deref() == Some("where") {
+            return Err(CompileError::new(
+                "field-level 'where' refinements are deferred; declare predicates in the type validity block",
+                self.current().span,
+            ));
+        }
 
         let end_span = self.current().span;
         Ok(Field { name, ty, span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column) })

@@ -219,19 +219,26 @@ impl ModuleResolver {
     }
 
     pub fn resolve_constant(&self, module: &str, name: &str) -> Option<ConstantDef> {
+        self.resolve_constant_with_module(module, name).map(|(_, constant)| constant)
+    }
+
+    pub fn resolve_constant_with_module(&self, module: &str, name: &str) -> Option<(String, ConstantDef)> {
         if let Some((target_module, symbol)) = name.rsplit_once("::") {
-            return self.symbol_tables.get(target_module).and_then(|table| table.constants.get(symbol).cloned());
+            return self
+                .symbol_tables
+                .get(target_module)
+                .and_then(|table| table.constants.get(symbol).cloned().map(|constant| (target_module.to_string(), constant)));
         }
 
         if let Some(table) = self.symbol_tables.get(module) {
             if let Some(constant) = table.constants.get(name) {
-                return Some(constant.clone());
+                return Some((module.to_string(), constant.clone()));
             }
 
             if let Some(full_path) = table.imported.get(name) {
                 if let Some((target_module, symbol)) = full_path.rsplit_once("::") {
                     if let Some(target_table) = self.symbol_tables.get(target_module) {
-                        return target_table.constants.get(symbol).cloned();
+                        return target_table.constants.get(symbol).cloned().map(|constant| (target_module.to_string(), constant));
                     }
                 }
             }
@@ -381,6 +388,7 @@ mod tests {
                 capabilities: vec![Capability::Store],
                 identity: IdentityPolicy::default(),
                 fields: vec![Field { name: "amount".to_string(), ty: Type::U64, span: Span::default() }],
+                validity: None,
                 span: Span::default(),
             })],
             span: Span::default(),
@@ -408,6 +416,7 @@ mod tests {
                         capabilities: vec![Capability::Store],
                         identity: IdentityPolicy::default(),
                         fields: vec![Field { name: "amount".to_string(), ty: Type::U64, span: Span::default() }],
+                        validity: None,
                         span: Span::default(),
                     }),
                     Item::Resource(ResourceDef {
@@ -418,6 +427,7 @@ mod tests {
                         capabilities: vec![Capability::Store],
                         identity: IdentityPolicy::default(),
                         fields: vec![Field { name: "max_supply".to_string(), ty: Type::U64, span: Span::default() }],
+                        validity: None,
                         span: Span::default(),
                     }),
                 ],
@@ -459,6 +469,7 @@ mod tests {
                         capabilities: vec![Capability::Store],
                         identity: IdentityPolicy::default(),
                         fields: vec![Field { name: "amount".to_string(), ty: Type::U64, span: Span::default() }],
+                        validity: None,
                         span: Span::default(),
                     }),
                     Item::Action(ActionDef {
@@ -496,6 +507,7 @@ mod tests {
                     capabilities: vec![Capability::Store],
                     identity: IdentityPolicy::default(),
                     fields: vec![Field { name: "amount".to_string(), ty: Type::U64, span: Span::default() }],
+                    validity: None,
                     span: Span::default(),
                 })],
                 span: Span::default(),
@@ -517,6 +529,7 @@ mod tests {
                         default_hash_type: None,
                         capacity_floor: None,
                         fields: vec![Field { name: "amount".to_string(), ty: Type::U64, span: Span::default() }],
+                        validity: None,
                         span: Span::default(),
                     }),
                 ],

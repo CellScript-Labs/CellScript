@@ -78,6 +78,7 @@ impl Formatter {
                     Some(&resource.identity),
                     resource.default_hash_type.as_ref(),
                     resource.capacity_floor.as_ref(),
+                    resource.validity.as_ref(),
                 )
             }
             Item::Shared(shared) => {
@@ -90,6 +91,7 @@ impl Formatter {
                     Some(&shared.identity),
                     shared.default_hash_type.as_ref(),
                     shared.capacity_floor.as_ref(),
+                    shared.validity.as_ref(),
                 )
             }
             Item::Receipt(receipt) => {
@@ -106,6 +108,7 @@ impl Formatter {
                     None,
                     struct_def.default_hash_type.as_ref(),
                     struct_def.capacity_floor.as_ref(),
+                    struct_def.validity.as_ref(),
                 )
             }
             Item::Flow(machine) => self.format_flow(machine),
@@ -212,6 +215,7 @@ impl Formatter {
         identity: Option<&IdentityPolicy>,
         default_hash_type: Option<&HashTypeDecl>,
         capacity_floor: Option<&CapacityFloorDecl>,
+        validity: Option<&ValidityBlock>,
     ) -> Result<()> {
         let mut header = format!("{} {}", keyword, name);
         if let Some(capabilities) = capabilities {
@@ -231,6 +235,7 @@ impl Formatter {
         for field in fields {
             self.push_line(&format!("{}: {},", field.name, format_type(&field.ty)));
         }
+        self.format_validity_block(validity);
         self.indent_level -= 1;
         self.push_line("}");
         Ok(())
@@ -256,9 +261,23 @@ impl Formatter {
         for field in &receipt.fields {
             self.push_line(&format!("{}: {},", field.name, format_type(&field.ty)));
         }
+        self.format_validity_block(receipt.validity.as_ref());
         self.indent_level -= 1;
         self.push_line("}");
         Ok(())
+    }
+
+    fn format_validity_block(&mut self, validity: Option<&ValidityBlock>) {
+        let Some(validity) = validity else {
+            return;
+        };
+        self.push_line("");
+        self.push_line("validity");
+        self.indent_level += 1;
+        for predicate in &validity.predicates {
+            self.push_line(&self.format_expr(predicate));
+        }
+        self.indent_level -= 1;
     }
 
     fn format_type_policy(
@@ -1324,6 +1343,31 @@ action batch(input inputs: BoundedCellSet<Token, 16>, witness plans: BoundedList
         assert!(formatted.contains("witness plans: BoundedList<Plan, 16>"), "unexpected output:\n{formatted}");
         assert!(formatted.contains("consume_each token in inputs"), "unexpected output:\n{formatted}");
         assert!(formatted.contains("create_each plan in plans"), "unexpected output:\n{formatted}");
+        let reparsed = parser::parse(&lexer::lex(&formatted).unwrap()).unwrap();
+        assert_eq!(formatted, format_default(&reparsed).unwrap());
+    }
+
+    #[test]
+    fn format_round_trips_type_validity_blocks() {
+        let source = r#"
+module fmt::validity
+
+resource Token has store, create {
+    amount: u64
+    validity
+        require amount > 0, "amount must be positive"
+        require amount > env::block_number()
+}
+
+struct Legacy {
+    validity: u64
+}
+"#;
+        let module = parser::parse(&lexer::lex(source).unwrap()).unwrap();
+        let formatted = format_default(&module).unwrap();
+        assert!(formatted.contains("\n    validity\n        require amount > 0, \"amount must be positive\""));
+        assert!(formatted.contains("require amount > env::block_number()"));
+        assert!(formatted.contains("validity: u64,"), "contextual field was reformatted as a block:\n{formatted}");
         let reparsed = parser::parse(&lexer::lex(&formatted).unwrap()).unwrap();
         assert_eq!(formatted, format_default(&reparsed).unwrap());
     }

@@ -936,6 +936,7 @@ impl LspServer {
                 "create_each ${1:plan} in ${2:plans} {\n    require ${1:plan}.${3:field} ${4:>} ${5:0}\n    create ${6:CellType} { $0 }\n}",
             ),
             ("verification", "verification\n    $0"),
+            ("validity", "validity\n    require ${1:field} ${2:>} ${3:0}"),
             ("require_block", "require {\n    ${1:condition}\n}"),
             ("preserve", "preserve ${1:output} from ${2:input} {\n    ${3:field}\n}"),
             ("std::cell::same_lock", "std::cell::same_lock(${1:output}, ${2:input})"),
@@ -1370,15 +1371,31 @@ impl LspServer {
         let range = span_to_range(source, item_span(item));
         match item {
             Item::Resource(r) => Some(Hover {
-                contents: format!("```cellscript\nresource {}\n```\n\nCapabilities: {:?}", r.name, r.capabilities),
+                contents: format!(
+                    "```cellscript\nresource {}\n```\n\nCapabilities: {:?}{}",
+                    r.name,
+                    r.capabilities,
+                    type_validity_hover(&r.name, metadata)
+                ),
                 range: Some(range),
             }),
-            Item::Shared(s) => Some(Hover { contents: format!("```cellscript\nshared {}\n```", s.name), range: Some(range) }),
+            Item::Shared(s) => Some(Hover {
+                contents: format!("```cellscript\nshared {}\n```{}", s.name, type_validity_hover(&s.name, metadata)),
+                range: Some(range),
+            }),
             Item::Receipt(r) => Some(Hover {
-                contents: format!("```cellscript\nreceipt {}\n```{}", r.name, receipt_flow_hover(r, metadata)),
+                contents: format!(
+                    "```cellscript\nreceipt {}\n```{}{}",
+                    r.name,
+                    receipt_flow_hover(r, metadata),
+                    type_validity_hover(&r.name, metadata)
+                ),
                 range: Some(range),
             }),
-            Item::Struct(s) => Some(Hover { contents: format!("```cellscript\nstruct {}\n```", s.name), range: Some(range) }),
+            Item::Struct(s) => Some(Hover {
+                contents: format!("```cellscript\nstruct {}\n```{}", s.name, type_validity_hover(&s.name, metadata)),
+                range: Some(range),
+            }),
             Item::Action(a) => Some(Hover {
                 contents: format!(
                     "```cellscript\naction {}\n```\n\n{}{}",
@@ -2275,6 +2292,35 @@ fn receipt_flow_hover(receipt: &ReceiptDef, metadata: Option<&crate::CompileMeta
     String::new()
 }
 
+fn type_validity_hover(name: &str, metadata: Option<&crate::CompileMetadata>) -> String {
+    let Some(type_metadata) = metadata.and_then(|metadata| metadata.types.iter().find(|type_metadata| type_metadata.name == name))
+    else {
+        return String::new();
+    };
+    if type_metadata.validity_predicates.is_empty() {
+        return String::new();
+    }
+
+    let predicates = type_metadata
+        .validity_predicates
+        .iter()
+        .map(|predicate| {
+            format!(
+                "- `{}` — `{}`; create: `{}` ({}/{} paths); update: `{}` ({} paths)",
+                predicate.expression,
+                predicate.evidence_tier.as_str(),
+                predicate.create_path_status,
+                predicate.create_paths_checked,
+                predicate.create_paths_selected,
+                predicate.update_path_status,
+                predicate.update_paths_selected
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!("\n\n**Validity metadata**\n\n{predicates}")
+}
+
 fn action_metadata_hover(name: &str, metadata: Option<&crate::CompileMetadata>) -> String {
     let Some(metadata) = metadata else {
         return String::new();
@@ -2635,6 +2681,7 @@ mod tests {
         assert!(keywords.iter().any(|k| k.label == "transition"));
         assert!(!keywords.iter().any(|k| k.label == "move"));
         assert!(keywords.iter().any(|k| k.label == "require"));
+        assert!(keywords.iter().any(|k| k.label == "validity"));
         assert!(keywords.iter().any(|k| k.label == "forall"));
         assert!(keywords.iter().any(|k| k.label == "count"));
         assert!(keywords.iter().any(|k| k.label == "consume_each"));
@@ -2984,6 +3031,38 @@ action activate(ticket: Ticket) -> active_ticket: Ticket {
         assert!(hover.contents.contains("Flow metadata"));
         assert!(hover.contents.contains("States: `Created -> Active`"));
         assert!(hover.contents.contains("Created[0] -> Active[1]"));
+    }
+
+    #[test]
+    fn test_type_hover_includes_validity_evidence() {
+        let mut server = LspServer::new();
+        let uri = "file:///validity_hover.cell".to_string();
+        let source = r#"
+module validity_hover
+
+resource Token has store, create {
+    amount: u64
+    height: u64
+
+    validity
+        require amount > 0
+        require height > env::block_number()
+}
+
+action mint(amount: u64, height: u64) -> Token {
+    verification
+        return create Token { amount: amount, height: height }
+}
+"#;
+        server.open_document(uri.clone(), source.to_string());
+
+        let offset = source.find("Token has").expect("resource name");
+        let hover = server.hover(&uri, offset_to_position(source, offset)).expect("hover");
+        assert!(hover.contents.contains("Validity metadata"));
+        assert!(hover.contents.contains("`amount > 0` — `checked-runtime`"));
+        assert!(hover.contents.contains("create: `checked-runtime`"));
+        assert!(hover.contents.contains("`height > env::block_number()` — `builder-evidence-required`"));
+        assert!(hover.contents.contains("create: `builder-header-evidence-required`"));
     }
 
     #[test]

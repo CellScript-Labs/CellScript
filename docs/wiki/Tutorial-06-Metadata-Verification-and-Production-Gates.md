@@ -145,7 +145,7 @@ artifact-binding facts, and CKB constraint summaries can now move independently
 in future schema revisions. `verify-artifact` still rejects a mismatch in any of
 these versions.
 
-Schema 48 includes `runtime.transaction_view_handles`. Each record identifies the
+Schema 49 includes `runtime.transaction_view_handles`. Each record identifies the
 callable scope, source (`Input`, `GroupOutput`, `CellDep`, and so on), public
 handle type, and evidence tiers. A conforming record is a read-only view with
 `lifecycle_authority = false`; it is evidence of a transaction read surface,
@@ -166,6 +166,25 @@ the `consume_each` runtime-helper tier. For `BoundedList<P, N>` driving
 `capacity_builder_evidence_required = true`. Its ProofPlan evidence is
 `builder-evidence-required`; it is not proof that a transaction builder supplied
 the matching outputs or sufficient capacity.
+
+Schema 49 also adds `types[].validity_predicates`. Review each predicate's
+`expression`, `dependencies`, `evidence_tier`,
+`runtime_checked_on_create`, `create_paths_selected`,
+`create_paths_checked`, `update_paths_selected`, `create_path_status`,
+`update_path_status`, and `source_span` together. `checked-runtime` means every
+selected constructor/create path emitted a fail-closed predicate before its
+output instruction. Partial path coverage is
+`partial-runtime-helper-required`, never `checked-runtime`. A named output or
+update path without concrete predicate lowering stays
+`runtime-helper-required`; it is not silently promoted by metadata.
+
+`env::block_number()` is the only approved validity environment read in this
+line. CKB-VM does not expose an ambient current-tip block-number syscall, so
+CellScript records `builder-evidence-required` with explicit header-dep builder
+evidence instead of emitting a fictional runtime call. Unknown `env::*` reads
+are compile errors. Pure imported helpers are retained transitively and receive
+module-qualified dependency names; lifecycle helpers and transaction-view
+reads are rejected in validity predicates.
 
 ## Assurance Layer
 

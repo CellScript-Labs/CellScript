@@ -33,6 +33,7 @@ pub struct ResourceDef {
     pub capacity_floor: Option<CapacityFloorDecl>,
     pub capabilities: Vec<Capability>,
     pub fields: Vec<Field>,
+    pub validity: Option<ValidityBlock>,
     pub span: Span,
 }
 
@@ -45,6 +46,7 @@ pub struct SharedDef {
     pub capacity_floor: Option<CapacityFloorDecl>,
     pub capabilities: Vec<Capability>,
     pub fields: Vec<Field>,
+    pub validity: Option<ValidityBlock>,
     pub span: Span,
 }
 
@@ -58,6 +60,7 @@ pub struct ReceiptDef {
     pub claim_output: Option<Type>,
     pub capabilities: Vec<Capability>,
     pub fields: Vec<Field>,
+    pub validity: Option<ValidityBlock>,
     pub span: Span,
 }
 
@@ -68,6 +71,13 @@ pub struct StructDef {
     pub default_hash_type: Option<HashTypeDecl>,
     pub capacity_floor: Option<CapacityFloorDecl>,
     pub fields: Vec<Field>,
+    pub validity: Option<ValidityBlock>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct ValidityBlock {
+    pub predicates: Vec<Expr>,
     pub span: Span,
 }
 

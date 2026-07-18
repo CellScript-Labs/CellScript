@@ -293,6 +293,7 @@ pub struct TypeChecker<'a> {
     current_module: Option<String>,
     current_callable: Option<CallableKind>,
     current_return_type: Option<Option<Type>>,
+    current_validity: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -420,6 +421,7 @@ impl<'a> TypeChecker<'a> {
             current_module: None,
             current_callable: None,
             current_return_type: None,
+            current_validity: false,
         }
     }
 
@@ -910,11 +912,13 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn check_resource(&mut self, resource: &ResourceDef) -> Result<()> {
-        self.validate_schema_fields(&resource.fields, "resource", &resource.name)
+        self.validate_schema_fields(&resource.fields, "resource", &resource.name)?;
+        self.check_type_validity(&resource.name, &resource.fields, resource.validity.as_ref())
     }
 
     fn check_shared(&mut self, shared: &SharedDef) -> Result<()> {
-        self.validate_schema_fields(&shared.fields, "shared", &shared.name)
+        self.validate_schema_fields(&shared.fields, "shared", &shared.name)?;
+        self.check_type_validity(&shared.name, &shared.fields, shared.validity.as_ref())
     }
 
     fn check_receipt(&mut self, receipt: &ReceiptDef) -> Result<()> {
@@ -923,11 +927,126 @@ impl<'a> TypeChecker<'a> {
             self.validate_type(output)?;
             self.validate_receipt_claim_output(output, receipt.span)?;
         }
-        Ok(())
+        self.check_type_validity(&receipt.name, &receipt.fields, receipt.validity.as_ref())
     }
 
     fn check_struct(&mut self, struct_def: &StructDef) -> Result<()> {
-        self.validate_schema_fields(&struct_def.fields, "struct", &struct_def.name)
+        self.validate_schema_fields(&struct_def.fields, "struct", &struct_def.name)?;
+        self.check_type_validity(&struct_def.name, &struct_def.fields, struct_def.validity.as_ref())
+    }
+
+    fn check_type_validity(&mut self, type_name: &str, fields: &[Field], validity: Option<&ValidityBlock>) -> Result<()> {
+        let Some(validity) = validity else {
+            return Ok(());
+        };
+        let mut env = self.env.child();
+        for field in fields {
+            env.insert(field.name.clone(), field.ty.clone(), false, false);
+        }
+        let previous_callable = self.current_callable.replace(CallableKind::Invariant);
+        let previous_validity = std::mem::replace(&mut self.current_validity, true);
+        let result = (|| {
+            for predicate in &validity.predicates {
+                let Expr::Require(require) = predicate else {
+                    return Err(CompileError::new(
+                        format!("validity block for '{}' contains non-require syntax", type_name),
+                        predicate.span(),
+                    ));
+                };
+                Self::validate_require_condition_is_pure(&require.condition, "validity predicate")?;
+                Self::validate_validity_surface(&require.condition)?;
+                let ty = self.infer_expr(&mut env, &require.condition)?;
+                if !self.is_bool_type(&ty) {
+                    return Err(CompileError::new(format!("validity predicate for '{}' must be boolean", type_name), require.span));
+                }
+                if let Some(message) = &require.message {
+                    if !matches!(message.as_ref(), Expr::String(_)) {
+                        return Err(CompileError::new("validity require message must be a string literal", expr_span(message)));
+                    }
+                }
+            }
+            Ok(())
+        })();
+        self.current_callable = previous_callable;
+        self.current_validity = previous_validity;
+        result
+    }
+
+    fn validate_validity_surface(expr: &Expr) -> Result<()> {
+        match expr {
+            Expr::Call(call) => {
+                if let Expr::Identifier(name) = call.func.as_ref() {
+                    if name == "env::block_number" {
+                        if !call.args.is_empty() {
+                            return Err(CompileError::new("env::block_number expects 0 arguments", call.span));
+                        }
+                    } else if name.starts_with("env::") {
+                        return Err(CompileError::new(
+                            format!("unknown validity environment read '{}'; only env::block_number() is approved", name),
+                            call.span,
+                        ));
+                    } else if ["source::", "ckb::", "witness::", "dao::", "xudt::"].iter().any(|prefix| name.starts_with(prefix)) {
+                        return Err(CompileError::new(
+                            format!("validity predicate cannot read transaction view '{}'; use the approved env::block_number evidence contract or an action invariant", name),
+                            call.span,
+                        ));
+                    }
+                }
+                Self::validate_validity_surface(&call.func)?;
+                for arg in &call.args {
+                    Self::validate_validity_surface(arg)?;
+                }
+            }
+            Expr::Binary(binary) => {
+                Self::validate_validity_surface(&binary.left)?;
+                Self::validate_validity_surface(&binary.right)?;
+            }
+            Expr::Unary(unary) => Self::validate_validity_surface(&unary.expr)?,
+            Expr::FieldAccess(field) => Self::validate_validity_surface(&field.expr)?,
+            Expr::Index(index) => {
+                Self::validate_validity_surface(&index.expr)?;
+                Self::validate_validity_surface(&index.index)?;
+            }
+            Expr::Tuple(items) | Expr::Array(items) => {
+                for item in items {
+                    Self::validate_validity_surface(item)?;
+                }
+            }
+            Expr::Cast(cast) => Self::validate_validity_surface(&cast.expr)?,
+            Expr::Range(range) => {
+                Self::validate_validity_surface(&range.start)?;
+                Self::validate_validity_surface(&range.end)?;
+            }
+            Expr::StructInit(init) => {
+                for (_, value) in &init.fields {
+                    Self::validate_validity_surface(value)?;
+                }
+            }
+            Expr::Create(_)
+            | Expr::Consume(_)
+            | Expr::Destroy(_)
+            | Expr::ReadRef(_)
+            | Expr::Claim(_)
+            | Expr::Settle(_)
+            | Expr::CreateUnique(_)
+            | Expr::ReplaceUnique(_)
+            | Expr::Assign(_)
+            | Expr::If(_)
+            | Expr::Match(_)
+            | Expr::Block(_)
+            | Expr::Assert(_)
+            | Expr::Require(_)
+            | Expr::RequireBlock(_)
+            | Expr::Preserve(_)
+            | Expr::StdlibCall(_) => {
+                return Err(CompileError::new(
+                    "validity predicates must be pure expressions without lifecycle, verifier-boundary, or control-flow syntax",
+                    expr.span(),
+                ));
+            }
+            Expr::Integer(_) | Expr::Bool(_) | Expr::String(_) | Expr::ByteString(_) | Expr::Identifier(_) => {}
+        }
+        Ok(())
     }
 
     fn check_invariant(&mut self, invariant: &InvariantDef) -> Result<()> {
@@ -5262,6 +5381,10 @@ impl<'a> TypeChecker<'a> {
                             self.validate_builtin_arity(name, 0, arg_types, call.span)?;
                             Type::U64
                         }
+                        ("env", "block_number") if self.current_validity => {
+                            self.validate_builtin_arity(name, 0, arg_types, call.span)?;
+                            Type::U64
+                        }
                         ("script", "hash_type_data" | "hash_type_type" | "hash_type_data1" | "hash_type_data2") => {
                             self.validate_builtin_arity(name, 0, arg_types, call.span)?;
                             Type::U64
@@ -6335,10 +6458,13 @@ impl<'a> TypeChecker<'a> {
         span: Span,
     ) -> Result<()> {
         match (self.current_callable, callee_kind) {
-            (Some(CallableKind::Invariant), CallableKind::Action | CallableKind::Lock) => Err(CompileError::new(
-                format!("invariant cannot call stateful entry '{}'; call a pure helper instead", callee_name),
-                span,
-            )),
+            (Some(CallableKind::Invariant), CallableKind::Action | CallableKind::Lock) => {
+                let context = if self.current_validity { "validity predicate" } else { "invariant" };
+                Err(CompileError::new(
+                    format!("{} cannot call stateful entry '{}'; call a pure helper instead", context, callee_name),
+                    span,
+                ))
+            }
             (Some(CallableKind::Function), CallableKind::Lock) => {
                 Err(CompileError::new(format!("function cannot call lock '{}'", callee_name), span))
             }
@@ -6348,14 +6474,18 @@ impl<'a> TypeChecker<'a> {
             (Some(CallableKind::Lock), CallableKind::Lock) => {
                 Err(CompileError::new(format!("lock cannot call lock '{}'", callee_name), span))
             }
-            (Some(CallableKind::Invariant), CallableKind::Function) if callee_effect != EffectClass::Pure => Err(CompileError::new(
-                format!(
-                    "invariant predicate cannot call function '{}' with {} effect; only transitively Pure helpers are allowed",
-                    callee_name,
-                    callee_effect.as_str()
-                ),
-                span,
-            )),
+            (Some(CallableKind::Invariant), CallableKind::Function) if callee_effect != EffectClass::Pure => {
+                let context = if self.current_validity { "validity predicate" } else { "invariant predicate" };
+                Err(CompileError::new(
+                    format!(
+                        "{} cannot call function '{}' with {} effect; only transitively Pure helpers are allowed",
+                        context,
+                        callee_name,
+                        callee_effect.as_str()
+                    ),
+                    span,
+                ))
+            }
             _ => Ok(()),
         }
     }
@@ -6538,7 +6668,7 @@ impl<'a> TypeChecker<'a> {
                     return false;
                 }
                 let fixed = if self.enum_variants.contains_key(base) {
-                    !self.enum_payload_variants.get(base).is_some_and(|variants| !variants.is_empty())
+                    self.enum_payload_variants.get(base).is_none_or(|variants| variants.is_empty())
                 } else {
                     self.resolve_named_type_fields(base)
                         .is_some_and(|fields| fields.values().all(|field| self.bounded_list_element_is_fixed_width(field, visiting)))

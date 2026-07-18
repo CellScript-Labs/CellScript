@@ -24,9 +24,19 @@
   status; ProofPlan keeps consume iteration at `runtime-helper-required` and
   output cardinality/capacity at `builder-evidence-required`. Generic
   `Vec<Resource>` remains rejected.
-- Bump compile metadata to schema version 48 for callable/flow/evidence fields,
+- Add canonical type `validity` blocks. Pure field predicates lower to
+  fail-closed checks before selected create/constructor instructions; paths
+  without concrete lowering remain `runtime-helper-required`. The only
+  approved environment read is `env::block_number()`, recorded as an explicit
+  `builder-evidence-required` header-dep obligation because CKB-VM has no
+  ambient tip-height syscall. Unknown `env::*`, transaction-view reads,
+  lifecycle syntax, and non-Pure helper graphs are rejected. Type hover,
+  metadata, ProofPlan, formatter, imported helper retention, and syntax-combo
+  gates expose the same boundary.
+- Bump compile metadata to schema version 49 for callable/flow/evidence fields,
   `runtime.transaction_view_handles`, and bounded collection source, ownership,
-  cardinality, vacuity, capacity-builder, and evidence-tier fields.
+  cardinality, vacuity, capacity-builder, evidence-tier, and type-validity
+  fields.
 
 ## 0.21.1 - 2026-07-11
 

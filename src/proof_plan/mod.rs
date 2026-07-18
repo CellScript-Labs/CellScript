@@ -25,13 +25,14 @@ pub struct ProofPlanDiagnosticMetadata {
     pub message: String,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum EvidenceTier {
     CheckedStatic,
     CheckedRuntime,
     RuntimeHelperRequired,
     BuilderEvidenceRequired,
+    #[default]
     MetadataOnly,
     ChainEvidenceRequired,
 }
@@ -59,12 +60,6 @@ impl EvidenceTier {
 
     pub const fn is_checked(self) -> bool {
         matches!(self, Self::CheckedStatic | Self::CheckedRuntime)
-    }
-}
-
-impl Default for EvidenceTier {
-    fn default() -> Self {
-        Self::MetadataOnly
     }
 }
 
@@ -304,6 +299,177 @@ pub fn build_for_invariant(invariant: &ir::IrInvariant, runtime_accesses: &[CkbR
     plans.extend(
         invariant.quantifiers.iter().enumerate().map(|(index, quantifier)| plan_for_bounded_quantifier(invariant, index, quantifier)),
     );
+    plans
+}
+
+pub fn build_for_type_validity(
+    type_def: &ir::IrTypeDef,
+    create_paths_selected: usize,
+    create_paths_checked: usize,
+    update_paths_selected: usize,
+) -> Vec<ProofPlanMetadata> {
+    let mut plans = Vec::new();
+    for (index, predicate) in type_def.validity_predicates.iter().enumerate() {
+        let feature = format!("{}#{}:{}", type_def.name, index, predicate.rendered);
+        let all_create_paths_checked = create_paths_selected > 0 && create_paths_checked == create_paths_selected;
+        let (evidence_tier, status, codegen_coverage_status, on_chain_checked, create_status) = match predicate.evidence {
+            ir::IrValidityEvidence::CheckedStatic => {
+                (EvidenceTier::CheckedStatic, "checked-static", "covered", true, "checked-static")
+            }
+            ir::IrValidityEvidence::CheckedRuntime if all_create_paths_checked => {
+                (EvidenceTier::CheckedRuntime, "checked-runtime", "covered", true, "checked-runtime")
+            }
+            ir::IrValidityEvidence::CheckedRuntime if create_paths_selected == 0 => (
+                EvidenceTier::RuntimeHelperRequired,
+                "runtime-required",
+                "gap:runtime-helper-required",
+                false,
+                "not-selected-runtime-helper-required",
+            ),
+            ir::IrValidityEvidence::CheckedRuntime if create_paths_checked == 0 => (
+                EvidenceTier::RuntimeHelperRequired,
+                "runtime-required",
+                "gap:runtime-helper-required",
+                false,
+                "selected-runtime-helper-required",
+            ),
+            ir::IrValidityEvidence::CheckedRuntime => (
+                EvidenceTier::RuntimeHelperRequired,
+                "runtime-required",
+                "gap:runtime-helper-required",
+                false,
+                "partial-runtime-helper-required",
+            ),
+            ir::IrValidityEvidence::BuilderEvidenceRequired => (
+                EvidenceTier::BuilderEvidenceRequired,
+                "builder-evidence-required",
+                "gap:builder-evidence-required",
+                false,
+                "builder-header-evidence-required",
+            ),
+        };
+        let mut reads = Vec::new();
+        if predicate.dependencies.iter().any(|dependency| dependency.starts_with("field:")) {
+            reads.push("output".to_string());
+        }
+        if predicate.dependencies.iter().any(|dependency| dependency.starts_with("environment:")) {
+            reads.push("header_dep".to_string());
+        }
+        dedup(&mut reads);
+        let mut coverage = vec![
+            format!("predicate:{}", predicate.rendered),
+            format!("create_path:{create_status}"),
+            format!("create_paths_selected:{create_paths_selected}"),
+            format!(
+                "create_paths_checked:{}",
+                if predicate.evidence == ir::IrValidityEvidence::BuilderEvidenceRequired { 0 } else { create_paths_checked }
+            ),
+            format!("runtime_checked_on_create:{}", predicate.runtime_checked_on_create && all_create_paths_checked),
+        ];
+        coverage.extend(predicate.dependencies.iter().map(|dependency| format!("dependency:{dependency}")));
+        let mut builder_assumptions = Vec::new();
+        if predicate.evidence == ir::IrValidityEvidence::BuilderEvidenceRequired {
+            builder_assumptions.extend([
+                "declared(builder-evidence-required:header-dep-block-number-evidence)".to_string(),
+                "declared(env::block_number is not a CKB-VM ambient tip-height syscall)".to_string(),
+            ]);
+        } else if predicate.evidence == ir::IrValidityEvidence::CheckedRuntime && !all_create_paths_checked {
+            builder_assumptions.push(format!(
+                "declared(runtime-helper-required:create paths checked {create_paths_checked}/{create_paths_selected})"
+            ));
+        }
+        let category = "type-validity".to_string();
+        let on_chain_checked_obligations = if on_chain_checked { vec![format!("{category}:{feature}={status}")] } else { Vec::new() };
+        plans.push(ProofPlanMetadata {
+            name: format!("{}#validity{}", type_def.name, index),
+            origin: format!("validity:{}#predicate:{}", type_def.name, index),
+            category,
+            feature,
+            evidence_tier,
+            source_span: Some(ProofPlanSourceSpanMetadata {
+                start: predicate.span.start,
+                end: predicate.span.end,
+                line: predicate.span.line,
+                column: predicate.span.column,
+            }),
+            trigger: "type_script_output_validation".to_string(),
+            scope: "selected_cells".to_string(),
+            reads: reads.clone(),
+            coverage,
+            input_output_relation_checks: vec![format!("valid({})={create_status}", type_def.name)],
+            group_cardinality: "each-created-output-of-declared-type".to_string(),
+            identity_lifecycle_policy: "predicate observes proposed field values; it grants no consume/create authority".to_string(),
+            preserved_fields: Vec::new(),
+            witness_fields: Vec::new(),
+            lock_args_fields: Vec::new(),
+            on_chain_checked,
+            on_chain_checked_obligations,
+            builder_assumptions,
+            codegen_coverage_status: codegen_coverage_status.to_string(),
+            status: status.to_string(),
+            detail: format!("type validity predicate for '{}' create path", type_def.name),
+            diagnostics: vec![ProofPlanDiagnosticMetadata {
+                severity: if on_chain_checked { "info".to_string() } else { "warning".to_string() },
+                message: if predicate.evidence == ir::IrValidityEvidence::BuilderEvidenceRequired {
+                    "env::block_number requires explicit builder/header evidence and is not emitted as an ambient CKB-VM syscall"
+                        .to_string()
+                } else if on_chain_checked {
+                    "validity predicate is discharged before every selected output create instruction".to_string()
+                } else if create_paths_selected == 0 {
+                    "validity predicate has no selected create path in this module and remains a runtime-helper obligation"
+                        .to_string()
+                } else {
+                    format!(
+                        "validity predicate is checked on {create_paths_checked}/{create_paths_selected} selected create paths and remains a runtime-helper obligation"
+                    )
+                },
+            }],
+        });
+
+        if predicate.evidence == ir::IrValidityEvidence::CheckedRuntime && update_paths_selected > 0 {
+            plans.push(ProofPlanMetadata {
+                name: format!("{}#validity{}#update", type_def.name, index),
+                origin: format!("validity:{}#predicate:{}#update", type_def.name, index),
+                category: "type-validity-update-path".to_string(),
+                feature: format!("{}#{}:update", type_def.name, index),
+                evidence_tier: EvidenceTier::RuntimeHelperRequired,
+                source_span: Some(ProofPlanSourceSpanMetadata {
+                    start: predicate.span.start,
+                    end: predicate.span.end,
+                    line: predicate.span.line,
+                    column: predicate.span.column,
+                }),
+                trigger: "type_script_output_validation".to_string(),
+                scope: "selected_cells".to_string(),
+                reads: vec!["input".to_string(), "output".to_string()],
+                coverage: vec![
+                    format!("predicate:{}", predicate.rendered),
+                    format!("update_paths_selected:{update_paths_selected}"),
+                    "update_path:runtime-helper-required".to_string(),
+                ],
+                input_output_relation_checks: vec![format!("valid({})_after_update=runtime-helper-required", type_def.name)],
+                group_cardinality: "each-mutated-output-of-declared-type".to_string(),
+                identity_lifecycle_policy: "update must preserve Cell identity while validating final output fields".to_string(),
+                preserved_fields: Vec::new(),
+                witness_fields: Vec::new(),
+                lock_args_fields: Vec::new(),
+                on_chain_checked: false,
+                on_chain_checked_obligations: Vec::new(),
+                builder_assumptions: vec!["declared(runtime-helper-required:final mutated output validity check)".to_string()],
+                codegen_coverage_status: "gap:runtime-helper-required".to_string(),
+                status: "runtime-required".to_string(),
+                detail: format!(
+                    "type validity predicate for '{}' has a selected mutate path without final-field lowering",
+                    type_def.name
+                ),
+                diagnostics: vec![ProofPlanDiagnosticMetadata {
+                    severity: "warning".to_string(),
+                    message: "selected mutate path records a fail-closed validity gap until final-field output checking is emitted"
+                        .to_string(),
+                }],
+            });
+        }
+    }
     plans
 }
 

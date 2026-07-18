@@ -171,6 +171,22 @@ BUG_CLASS_CONTRACTS: tuple[dict[str, Any], ...] = (
         "release_boundary": "bounded output plans compile only with metadata and ProofPlan builder-evidence contracts",
     },
     {
+        "id": "SCA-BUG-0.22-VALIDITY-EVIDENCE-MISSING",
+        "name": "type validity predicates carry canonical metadata and ProofPlan evidence tiers",
+        "min_mode": "quick",
+        "required_cases": ("seed-type-validity",),
+        "required_origins": ("tests/syntax_combo/seeds/type-validity.cell",),
+        "release_boundary": "every accepted validity predicate is paired with a canonical evidence tier and ProofPlan record",
+    },
+    {
+        "id": "SCA-BUG-0.22-VALIDITY-ENV-UNKNOWN",
+        "name": "unknown validity environment reads fail closed",
+        "min_mode": "quick",
+        "required_cases": ("seed-type-validity-unknown-env-reject",),
+        "required_origins": ("tests/syntax_combo/seeds/type-validity-unknown-env-reject.cell",),
+        "release_boundary": "env::block_number is the only approved 0.22 validity environment read",
+    },
+    {
         "id": "SCA-BUG-STDLIB-ARGUMENT-VALIDATION",
         "name": "stdlib lifecycle helpers validate arity, cell kind, lock target, and claim output",
         "min_mode": "ci",
@@ -266,6 +282,8 @@ class Oracle:
     locked_outputs: tuple[str, ...] = ()
     create_fields: dict[str, tuple[str, ...]] = field(default_factory=dict)
     obligation_contains: tuple[str, ...] = ()
+    validity_type: str | None = None
+    validity_tiers: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -1491,6 +1509,8 @@ def parse_seed(path: Path) -> AuditCase:
     text = path.read_text(encoding="utf-8")
     phase = "accept"
     contains: list[str] = []
+    validity_type: str | None = None
+    validity_tiers: list[str] = []
     for line in text.splitlines():
         stripped = line.strip()
         if not stripped.startswith("// audit:"):
@@ -1503,10 +1523,15 @@ def parse_seed(path: Path) -> AuditCase:
             phase = value
         elif key == "contains":
             contains.append(value)
+        elif key == "validity_type":
+            validity_type = value
+        elif key == "validity_tier":
+            validity_tiers.append(value)
     return AuditCase(
         name=f"seed-{path.stem}",
         source=text,
         expected=Expected(phase, tuple(contains)),
+        oracle=Oracle(validity_type=validity_type, validity_tiers=tuple(validity_tiers)),
         origin=str(path.relative_to(ROOT)),
     )
 
@@ -1695,6 +1720,62 @@ def validate_metadata(case: AuditCase, metadata_path: Path, run_dir: Path) -> li
         failures.append(failure(case, "metadata", "SCA-META-PROFILE", "metadata target_profile.name is not ckb", run_dir))
 
     oracle = case.oracle
+    if oracle.validity_type:
+        type_metadata = next((item for item in metadata.get("types", []) if item.get("name") == oracle.validity_type), None)
+        if type_metadata is None:
+            failures.append(
+                failure(case, "metadata", "SCA-META-VALIDITY-TYPE", f"missing type metadata for {oracle.validity_type}", run_dir)
+            )
+        else:
+            predicates = type_metadata.get("validity_predicates", [])
+            if not predicates:
+                failures.append(
+                    failure(case, "metadata", "SCA-META-VALIDITY", "validity metadata has no predicate records", run_dir)
+                )
+            canonical_tiers = {
+                "checked-static",
+                "checked-runtime",
+                "runtime-helper-required",
+                "builder-evidence-required",
+                "metadata-only",
+                "chain-evidence-required",
+            }
+            actual_tiers = tuple(predicate.get("evidence_tier") for predicate in predicates)
+            if any(tier not in canonical_tiers for tier in actual_tiers):
+                failures.append(
+                    failure(
+                        case,
+                        "metadata",
+                        "SCA-META-VALIDITY-TIER",
+                        f"validity metadata contains non-canonical evidence tiers: {actual_tiers!r}",
+                        run_dir,
+                    )
+                )
+            for tier in oracle.validity_tiers:
+                if tier not in actual_tiers:
+                    failures.append(
+                        failure(
+                            case,
+                            "metadata",
+                            "SCA-META-VALIDITY-TIER",
+                            f"validity metadata is missing evidence tier {tier!r}",
+                            run_dir,
+                        )
+                    )
+            proof_plan = metadata.get("runtime", {}).get("proof_plan", [])
+            validity_plans = [
+                plan for plan in proof_plan if str(plan.get("origin", "")).startswith(f"validity:{oracle.validity_type}#")
+            ]
+            if len(validity_plans) < len(predicates):
+                failures.append(
+                    failure(
+                        case,
+                        "metadata",
+                        "SCA-META-VALIDITY-PROOFPLAN",
+                        f"validity ProofPlan count {len(validity_plans)} is smaller than predicate count {len(predicates)}",
+                        run_dir,
+                    )
+                )
     if oracle.action:
         action = find_action(metadata, oracle.action)
         if action is None:

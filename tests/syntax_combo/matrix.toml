@@ -19,6 +19,8 @@ required_origins = [
     "tests/syntax_combo/seeds/require-block-lifecycle.cell",
     "tests/syntax_combo/seeds/terminal-flow-metadata.cell",
     "tests/syntax_combo/seeds/terminal-flow-outgoing-reject.cell",
+    "tests/syntax_combo/seeds/type-validity.cell",
+    "tests/syntax_combo/seeds/type-validity-unknown-env-reject.cell",
 ]
 description = "Local smoke: deterministic generated cases plus regression seeds."
 
@@ -50,6 +52,8 @@ required_origins = [
     "tests/syntax_combo/seeds/require-block-lifecycle.cell",
     "tests/syntax_combo/seeds/terminal-flow-metadata.cell",
     "tests/syntax_combo/seeds/terminal-flow-outgoing-reject.cell",
+    "tests/syntax_combo/seeds/type-validity.cell",
+    "tests/syntax_combo/seeds/type-validity-unknown-env-reject.cell",
 ]
 description = "PR gate: pairwise generated cases plus regression seeds."
 
@@ -84,6 +88,8 @@ required_origins = [
     "tests/syntax_combo/seeds/require-block-lifecycle.cell",
     "tests/syntax_combo/seeds/terminal-flow-metadata.cell",
     "tests/syntax_combo/seeds/terminal-flow-outgoing-reject.cell",
+    "tests/syntax_combo/seeds/type-validity.cell",
+    "tests/syntax_combo/seeds/type-validity-unknown-env-reject.cell",
 ]
 description = "Release audit: triplewise sample, mutations, and selected CKB acceptance."
 
@@ -125,6 +131,8 @@ required_bug_classes.quick = [
     "SCA-BUG-0.22-CELLSET-VEC-RESOURCE",
     "SCA-BUG-0.22-CONSUME-EACH-DUPLICATE",
     "SCA-BUG-0.22-CREATE-EACH-CARDINALITY-MISSING",
+    "SCA-BUG-0.22-VALIDITY-EVIDENCE-MISSING",
+    "SCA-BUG-0.22-VALIDITY-ENV-UNKNOWN",
 ]
 
 required_bug_classes.ci = [

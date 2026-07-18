@@ -232,6 +232,37 @@ or use an explicit stdlib lifecycle pattern such as
 `std::lifecycle::transfer`, `std::receipt::claim`, or
 `std::lifecycle::settle`.
 
+### Type Validity
+
+On the nightly 0.22 line, a type can state pure value predicates in a final
+`validity` section:
+
+```cellscript
+resource TimeLock has store, create, consume {
+    amount: u64
+    locktime: u64
+    owner: Address
+
+    validity
+        require amount > 0
+        require owner != Address::zero()
+        require locktime > env::block_number()
+}
+```
+
+The fields are in scope, and a predicate may call only transitively Pure
+helpers. Field-level `where` syntax, lifecycle operations, transaction-view
+reads, and unknown `env::*` functions are rejected. Concrete create and local
+constructor paths emit fail-closed field checks. A signature-only output or
+update path records a `runtime-helper-required` gap instead of claiming that it
+was checked.
+
+`env::block_number()` is the one approved environment read. It is an explicit
+`builder-evidence-required` header-dep contract, not a CKB-VM ambient-tip
+syscall. Inspect `types[].validity_predicates` and the matching `type-validity`
+ProofPlan entries before treating a path as enforced. LSP type hover displays
+the same predicate, tier, and create/update status.
+
 Persistent declarations can also declare the default CKB script hash type used
 for their type identity metadata:
 

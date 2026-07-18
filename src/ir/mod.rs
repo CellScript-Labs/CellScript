@@ -47,8 +47,27 @@ pub struct IrTypeDef {
     pub flow_terminal_discharge: Option<String>,
     pub flow_state_model: Option<String>,
     pub flow_audit_warnings: Vec<String>,
+    pub validity_predicates: Vec<IrValidityPredicate>,
     /// Identity policy for v0.15 cell identity system
     pub identity: IrIdentityPolicy,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IrValidityEvidence {
+    CheckedStatic,
+    CheckedRuntime,
+    BuilderEvidenceRequired,
+}
+
+#[derive(Debug, Clone)]
+pub struct IrValidityPredicate {
+    pub expression: Expr,
+    pub message: Option<Expr>,
+    pub rendered: String,
+    pub evidence: IrValidityEvidence,
+    pub dependencies: Vec<String>,
+    pub runtime_checked_on_create: bool,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone)]
@@ -454,6 +473,7 @@ pub struct IrGenerator {
     flow_terminal_states: HashMap<String, Vec<String>>,
     flow_state_models: HashMap<String, String>,
     flow_audit_warnings: HashMap<String, Vec<String>>,
+    type_validity: HashMap<String, Vec<IrValidityPredicate>>,
     enum_variants: HashMap<String, HashMap<String, u64>>,
     constants: HashMap<String, (Expr, IrType)>,
     function_effects: HashMap<String, EffectClass>,
@@ -501,6 +521,7 @@ impl IrGenerator {
             flow_terminal_states: HashMap::new(),
             flow_state_models: HashMap::new(),
             flow_audit_warnings: HashMap::new(),
+            type_validity: HashMap::new(),
             enum_variants: HashMap::new(),
             constants: HashMap::new(),
             function_effects: HashMap::new(),
@@ -527,6 +548,7 @@ impl IrGenerator {
         type_kinds: HashMap<String, IrTypeKind>,
         receipt_claim_outputs: HashMap<String, Option<IrType>>,
         flow_states: HashMap<String, Vec<String>>,
+        type_validity: HashMap<String, Vec<IrValidityPredicate>>,
         external_function_effects: HashMap<String, EffectClass>,
         external_function_param_types: HashMap<String, Vec<IrType>>,
         external_function_return_types: HashMap<String, Option<IrType>>,
@@ -536,6 +558,7 @@ impl IrGenerator {
         generator.type_kinds.extend(type_kinds);
         generator.receipt_claim_outputs.extend(receipt_claim_outputs);
         generator.flow_states.extend(flow_states);
+        generator.type_validity.extend(type_validity);
         generator.external_function_effects = external_function_effects;
         generator.external_function_param_types = external_function_param_types;
         generator.external_function_return_types = external_function_return_types;
@@ -549,6 +572,14 @@ impl IrGenerator {
     }
 
     pub fn generate_diagnostics(mut self, ast: &Module) -> std::result::Result<IrModule, Vec<CompileError>> {
+        let validity_constant_names = ast
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                Item::Const(constant) => Some(constant.name.as_str()),
+                _ => None,
+            })
+            .collect::<HashSet<_>>();
         for item in &ast.items {
             if let Item::Const(c) = item {
                 self.constants.insert(c.name.clone(), (c.value.clone(), Self::convert_type(&c.ty)));
@@ -560,12 +591,20 @@ impl IrGenerator {
                         r.name.clone(),
                         r.fields.iter().map(|field| (field.name.clone(), Self::convert_type(&field.ty))).collect(),
                     );
+                    self.type_validity.insert(
+                        r.name.clone(),
+                        ir_validity_predicates_with_constants(r.validity.as_ref(), &r.fields, &validity_constant_names),
+                    );
                 }
                 Item::Shared(s) => {
                     self.type_kinds.insert(s.name.clone(), IrTypeKind::Shared);
                     self.type_fields.insert(
                         s.name.clone(),
                         s.fields.iter().map(|field| (field.name.clone(), Self::convert_type(&field.ty))).collect(),
+                    );
+                    self.type_validity.insert(
+                        s.name.clone(),
+                        ir_validity_predicates_with_constants(s.validity.as_ref(), &s.fields, &validity_constant_names),
                     );
                 }
                 Item::Receipt(r) => {
@@ -575,12 +614,20 @@ impl IrGenerator {
                         r.name.clone(),
                         r.fields.iter().map(|field| (field.name.clone(), Self::convert_type(&field.ty))).collect(),
                     );
+                    self.type_validity.insert(
+                        r.name.clone(),
+                        ir_validity_predicates_with_constants(r.validity.as_ref(), &r.fields, &validity_constant_names),
+                    );
                 }
                 Item::Struct(s) => {
                     self.type_kinds.insert(s.name.clone(), IrTypeKind::Struct);
                     self.type_fields.insert(
                         s.name.clone(),
                         s.fields.iter().map(|field| (field.name.clone(), Self::convert_type(&field.ty))).collect(),
+                    );
+                    self.type_validity.insert(
+                        s.name.clone(),
+                        ir_validity_predicates_with_constants(s.validity.as_ref(), &s.fields, &validity_constant_names),
                     );
                 }
                 Item::Enum(e) => {
@@ -792,6 +839,7 @@ impl IrGenerator {
                 .then(|| "terminal-by-output-state".to_string()),
             flow_state_model: self.flow_state_models.get(&resource.name).cloned(),
             flow_audit_warnings: self.flow_audit_warnings.get(&resource.name).cloned().unwrap_or_default(),
+            validity_predicates: self.type_validity.get(&resource.name).cloned().unwrap_or_default(),
             identity: Self::lower_identity_policy(&resource.identity),
         }
     }
@@ -817,6 +865,7 @@ impl IrGenerator {
                 .then(|| "terminal-by-output-state".to_string()),
             flow_state_model: self.flow_state_models.get(&shared.name).cloned(),
             flow_audit_warnings: self.flow_audit_warnings.get(&shared.name).cloned().unwrap_or_default(),
+            validity_predicates: self.type_validity.get(&shared.name).cloned().unwrap_or_default(),
             identity: Self::lower_identity_policy(&shared.identity),
         }
     }
@@ -842,6 +891,7 @@ impl IrGenerator {
                 .then(|| "terminal-by-output-state".to_string()),
             flow_state_model: self.flow_state_models.get(&receipt.name).cloned(),
             flow_audit_warnings: self.flow_audit_warnings.get(&receipt.name).cloned().unwrap_or_default(),
+            validity_predicates: self.type_validity.get(&receipt.name).cloned().unwrap_or_default(),
             identity: Self::lower_identity_policy(&receipt.identity),
         }
     }
@@ -867,6 +917,7 @@ impl IrGenerator {
                 .then(|| "terminal-by-output-state".to_string()),
             flow_state_model: self.flow_state_models.get(&struct_def.name).cloned(),
             flow_audit_warnings: self.flow_audit_warnings.get(&struct_def.name).cloned().unwrap_or_default(),
+            validity_predicates: self.type_validity.get(&struct_def.name).cloned().unwrap_or_default(),
             identity: IrIdentityPolicy::None,
         }
     }
@@ -3385,6 +3436,10 @@ impl IrGenerator {
             None
         };
 
+        let Some(active) = self.lower_type_validity_checks(&create.ty, &field_vars, active, blocks, vars) else {
+            return LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: None };
+        };
+
         let pattern = CreatePattern {
             operation: if create.target.is_some() { "output".to_string() } else { "create".to_string() },
             ty: create.ty.clone(),
@@ -3396,6 +3451,33 @@ impl IrGenerator {
         self.block_mut(blocks, active).instructions.push(IrInstruction::Create { dest: dest.clone(), pattern });
         self.aggregate_fields.insert(dest.id, field_vars);
         LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) }
+    }
+
+    fn lower_type_validity_checks(
+        &mut self,
+        type_name: &str,
+        field_vars: &HashMap<String, IrVar>,
+        current: BlockId,
+        blocks: &mut Vec<IrBlock>,
+        vars: &HashMap<String, IrVar>,
+    ) -> Option<BlockId> {
+        let predicates = self.type_validity.get(type_name).cloned().unwrap_or_default();
+        let mut active = current;
+        for predicate in predicates.into_iter().filter(|predicate| predicate.evidence == IrValidityEvidence::CheckedRuntime) {
+            let mut validity_vars = vars.clone();
+            validity_vars.extend(field_vars.iter().map(|(name, var)| (name.clone(), var.clone())));
+            let require = RequireExpr {
+                condition: Box::new(predicate.expression),
+                message: predicate
+                    .message
+                    .map(Box::new)
+                    .or_else(|| Some(Box::new(Expr::String(format!("type validity failed: {type_name}"))))),
+                span: predicate.span,
+            };
+            let lowered = self.lower_require_expr(&require, active, blocks, &mut validity_vars);
+            active = lowered.current?;
+        }
+        Some(active)
     }
 
     fn lower_flow_state_initializer(&self, type_name: &str, field_name: &str, expr: &Expr) -> Option<IrOperand> {
@@ -3506,6 +3588,10 @@ impl IrGenerator {
             None
         };
 
+        let Some(active) = self.lower_type_validity_checks(&cu.ty, &field_vars, active, blocks, vars) else {
+            return LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: None };
+        };
+
         let identity = Self::lower_identity_policy(&cu.identity);
         let pattern = CreatePattern {
             operation: "create_unique".to_string(),
@@ -3562,6 +3648,10 @@ impl IrGenerator {
             field_vars.insert(field_name.clone(), field_var);
         }
 
+        let Some(active) = self.lower_type_validity_checks(&ru.ty, &field_vars, active, blocks, vars) else {
+            return LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: None };
+        };
+
         let identity = Self::lower_identity_policy(&ru.identity);
         let pattern = CreatePattern {
             operation: "replace_unique".to_string(),
@@ -3601,6 +3691,14 @@ impl IrGenerator {
         let dest_ty = self.claim_output_type_for_operand(&lowered_receipt.operand);
         let dest = self.new_var("claim_tmp", dest_ty);
         let claim_output_fields = self.materialize_matching_output_fields(&lowered_receipt.operand, &dest.ty, active, blocks);
+        let validity_active = if let IrType::Named(type_name) = &dest.ty {
+            self.lower_type_validity_checks(type_name, &claim_output_fields, active, blocks, vars)
+        } else {
+            Some(active)
+        };
+        let Some(active) = validity_active else {
+            return LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: None };
+        };
         self.block_mut(blocks, active)
             .instructions
             .push(IrInstruction::Claim { dest: dest.clone(), receipt: lowered_receipt.operand });
@@ -3624,6 +3722,14 @@ impl IrGenerator {
         let dest_ty = self.operand_type(&lowered.operand);
         let dest = self.new_var("settle_tmp", dest_ty);
         let settle_output_fields = self.materialize_matching_output_fields(&lowered.operand, &dest.ty, active, blocks);
+        let validity_active = if let IrType::Named(type_name) = &dest.ty {
+            self.lower_type_validity_checks(type_name, &settle_output_fields, active, blocks, vars)
+        } else {
+            Some(active)
+        };
+        let Some(active) = validity_active else {
+            return LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: None };
+        };
         self.block_mut(blocks, active).instructions.push(IrInstruction::Settle { dest: dest.clone(), operand: lowered.operand });
         if !settle_output_fields.is_empty() {
             self.aggregate_fields.insert(dest.id, settle_output_fields);
@@ -3969,6 +4075,10 @@ impl IrGenerator {
             self.block_mut(blocks, active).instructions.push(IrInstruction::Move { dest: field_var.clone(), src: lowered.operand });
             field_map.insert(field_name.clone(), field_var);
         }
+
+        let Some(active) = self.lower_type_validity_checks(&init.ty, &field_map, active, blocks, vars) else {
+            return LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: None };
+        };
 
         self.block_mut(blocks, active).instructions.push(IrInstruction::Tuple { dest: aggregate.clone(), fields: tuple_operands });
         self.aggregate_fields.insert(aggregate.id, field_map);
@@ -6329,6 +6439,316 @@ fn unsigned_ir_bits(ty: &IrType) -> Option<u32> {
     }
 }
 
+fn ir_validity_predicates(validity: Option<&ValidityBlock>, fields: &[Field]) -> Vec<IrValidityPredicate> {
+    let Some(validity) = validity else {
+        return Vec::new();
+    };
+    let field_names = fields.iter().map(|field| field.name.as_str()).collect::<HashSet<_>>();
+    validity
+        .predicates
+        .iter()
+        .filter_map(|predicate| {
+            let Expr::Require(require) = predicate else {
+                return None;
+            };
+            let mut dependencies = BTreeSet::new();
+            collect_validity_dependencies(&require.condition, &field_names, &mut dependencies);
+            let evidence = if validity_expr_uses_block_number(&require.condition) {
+                IrValidityEvidence::BuilderEvidenceRequired
+            } else if matches!(require.condition.as_ref(), Expr::Bool(true)) {
+                IrValidityEvidence::CheckedStatic
+            } else {
+                IrValidityEvidence::CheckedRuntime
+            };
+            Some(IrValidityPredicate {
+                expression: (*require.condition).clone(),
+                message: require.message.as_deref().cloned(),
+                rendered: crate::fmt::format_expression(&require.condition),
+                evidence,
+                dependencies: dependencies.into_iter().collect(),
+                runtime_checked_on_create: evidence == IrValidityEvidence::CheckedRuntime,
+                span: require.span,
+            })
+        })
+        .collect()
+}
+
+fn ir_validity_predicates_with_constants(
+    validity: Option<&ValidityBlock>,
+    fields: &[Field],
+    constant_names: &HashSet<&str>,
+) -> Vec<IrValidityPredicate> {
+    let mut predicates = ir_validity_predicates(validity, fields);
+    for predicate in &mut predicates {
+        let mut dependencies = predicate.dependencies.iter().cloned().collect::<BTreeSet<_>>();
+        collect_validity_constant_dependencies(&predicate.expression, constant_names, &mut dependencies);
+        predicate.dependencies = dependencies.into_iter().collect();
+    }
+    predicates
+}
+
+fn collect_validity_constant_dependencies(expr: &Expr, constants: &HashSet<&str>, dependencies: &mut BTreeSet<String>) {
+    match expr {
+        Expr::Identifier(name) => {
+            if constants.contains(name.as_str()) {
+                dependencies.insert(format!("constant:{name}"));
+            }
+        }
+        Expr::Call(call) => {
+            for arg in &call.args {
+                collect_validity_constant_dependencies(arg, constants, dependencies);
+            }
+        }
+        Expr::Binary(binary) => {
+            collect_validity_constant_dependencies(&binary.left, constants, dependencies);
+            collect_validity_constant_dependencies(&binary.right, constants, dependencies);
+        }
+        Expr::Unary(unary) => collect_validity_constant_dependencies(&unary.expr, constants, dependencies),
+        Expr::FieldAccess(field) => collect_validity_constant_dependencies(&field.expr, constants, dependencies),
+        Expr::Index(index) => {
+            collect_validity_constant_dependencies(&index.expr, constants, dependencies);
+            collect_validity_constant_dependencies(&index.index, constants, dependencies);
+        }
+        Expr::Tuple(items) | Expr::Array(items) => {
+            for item in items {
+                collect_validity_constant_dependencies(item, constants, dependencies);
+            }
+        }
+        Expr::Cast(cast) => collect_validity_constant_dependencies(&cast.expr, constants, dependencies),
+        Expr::Range(range) => {
+            collect_validity_constant_dependencies(&range.start, constants, dependencies);
+            collect_validity_constant_dependencies(&range.end, constants, dependencies);
+        }
+        Expr::StructInit(init) => {
+            for (_, value) in &init.fields {
+                collect_validity_constant_dependencies(value, constants, dependencies);
+            }
+        }
+        Expr::Integer(_)
+        | Expr::Bool(_)
+        | Expr::String(_)
+        | Expr::ByteString(_)
+        | Expr::Assign(_)
+        | Expr::Create(_)
+        | Expr::Consume(_)
+        | Expr::Destroy(_)
+        | Expr::ReadRef(_)
+        | Expr::Claim(_)
+        | Expr::Settle(_)
+        | Expr::CreateUnique(_)
+        | Expr::ReplaceUnique(_)
+        | Expr::Assert(_)
+        | Expr::Require(_)
+        | Expr::RequireBlock(_)
+        | Expr::Preserve(_)
+        | Expr::Block(_)
+        | Expr::If(_)
+        | Expr::Match(_)
+        | Expr::StdlibCall(_) => {}
+    }
+}
+
+fn validity_expr_uses_block_number(expr: &Expr) -> bool {
+    match expr {
+        Expr::Call(call) => {
+            matches!(call.func.as_ref(), Expr::Identifier(name) if name == "env::block_number")
+                || validity_expr_uses_block_number(&call.func)
+                || call.args.iter().any(validity_expr_uses_block_number)
+        }
+        Expr::Binary(binary) => validity_expr_uses_block_number(&binary.left) || validity_expr_uses_block_number(&binary.right),
+        Expr::Unary(unary) => validity_expr_uses_block_number(&unary.expr),
+        Expr::FieldAccess(field) => validity_expr_uses_block_number(&field.expr),
+        Expr::Index(index) => validity_expr_uses_block_number(&index.expr) || validity_expr_uses_block_number(&index.index),
+        Expr::Tuple(items) | Expr::Array(items) => items.iter().any(validity_expr_uses_block_number),
+        Expr::Cast(cast) => validity_expr_uses_block_number(&cast.expr),
+        Expr::Range(range) => validity_expr_uses_block_number(&range.start) || validity_expr_uses_block_number(&range.end),
+        Expr::StructInit(init) => init.fields.iter().any(|(_, value)| validity_expr_uses_block_number(value)),
+        Expr::Integer(_)
+        | Expr::Bool(_)
+        | Expr::String(_)
+        | Expr::ByteString(_)
+        | Expr::Identifier(_)
+        | Expr::Assign(_)
+        | Expr::Create(_)
+        | Expr::Consume(_)
+        | Expr::Destroy(_)
+        | Expr::ReadRef(_)
+        | Expr::Claim(_)
+        | Expr::Settle(_)
+        | Expr::CreateUnique(_)
+        | Expr::ReplaceUnique(_)
+        | Expr::Assert(_)
+        | Expr::Require(_)
+        | Expr::RequireBlock(_)
+        | Expr::Preserve(_)
+        | Expr::Block(_)
+        | Expr::If(_)
+        | Expr::Match(_)
+        | Expr::StdlibCall(_) => false,
+    }
+}
+
+fn collect_validity_dependencies(expr: &Expr, fields: &HashSet<&str>, dependencies: &mut BTreeSet<String>) {
+    match expr {
+        Expr::Identifier(name) => {
+            if fields.contains(name.as_str()) {
+                dependencies.insert(format!("field:{name}"));
+            }
+        }
+        Expr::Call(call) => {
+            if let Expr::Identifier(name) = call.func.as_ref() {
+                if name == "env::block_number" {
+                    dependencies.insert("environment:env::block_number".to_string());
+                    dependencies.insert("builder:header-dep-block-number-evidence".to_string());
+                } else if !matches!(name.as_str(), "Address::zero" | "Hash::zero") {
+                    dependencies.insert(format!("helper:{name}"));
+                }
+            }
+            for arg in &call.args {
+                collect_validity_dependencies(arg, fields, dependencies);
+            }
+        }
+        Expr::Binary(binary) => {
+            collect_validity_dependencies(&binary.left, fields, dependencies);
+            collect_validity_dependencies(&binary.right, fields, dependencies);
+        }
+        Expr::Unary(unary) => collect_validity_dependencies(&unary.expr, fields, dependencies),
+        Expr::FieldAccess(field) => collect_validity_dependencies(&field.expr, fields, dependencies),
+        Expr::Index(index) => {
+            collect_validity_dependencies(&index.expr, fields, dependencies);
+            collect_validity_dependencies(&index.index, fields, dependencies);
+        }
+        Expr::Tuple(items) | Expr::Array(items) => {
+            for item in items {
+                collect_validity_dependencies(item, fields, dependencies);
+            }
+        }
+        Expr::Cast(cast) => collect_validity_dependencies(&cast.expr, fields, dependencies),
+        Expr::Range(range) => {
+            collect_validity_dependencies(&range.start, fields, dependencies);
+            collect_validity_dependencies(&range.end, fields, dependencies);
+        }
+        Expr::StructInit(init) => {
+            for (_, value) in &init.fields {
+                collect_validity_dependencies(value, fields, dependencies);
+            }
+        }
+        Expr::Integer(_)
+        | Expr::Bool(_)
+        | Expr::String(_)
+        | Expr::ByteString(_)
+        | Expr::Assign(_)
+        | Expr::Create(_)
+        | Expr::Consume(_)
+        | Expr::Destroy(_)
+        | Expr::ReadRef(_)
+        | Expr::Claim(_)
+        | Expr::Settle(_)
+        | Expr::CreateUnique(_)
+        | Expr::ReplaceUnique(_)
+        | Expr::Assert(_)
+        | Expr::Require(_)
+        | Expr::RequireBlock(_)
+        | Expr::Preserve(_)
+        | Expr::Block(_)
+        | Expr::If(_)
+        | Expr::Match(_)
+        | Expr::StdlibCall(_) => {}
+    }
+}
+
+fn qualify_external_validity_predicates(type_def: &mut IrTypeDef, owner_module: &str, resolver: &ModuleResolver) {
+    let field_names = type_def.fields.iter().map(|field| field.name.clone()).collect::<Vec<_>>();
+    let fields = field_names.iter().map(String::as_str).collect::<HashSet<_>>();
+    for predicate in &mut type_def.validity_predicates {
+        let mut external_constant_dependencies = BTreeSet::new();
+        qualify_validity_dependencies(&mut predicate.expression, owner_module, resolver, &fields, &mut external_constant_dependencies);
+        let mut dependencies = BTreeSet::new();
+        collect_validity_dependencies(&predicate.expression, &fields, &mut dependencies);
+        dependencies.extend(external_constant_dependencies);
+        predicate.dependencies = dependencies.into_iter().collect();
+    }
+}
+
+fn qualify_validity_dependencies(
+    expr: &mut Expr,
+    owner_module: &str,
+    resolver: &ModuleResolver,
+    fields: &HashSet<&str>,
+    constant_dependencies: &mut BTreeSet<String>,
+) {
+    match expr {
+        Expr::Call(call) => {
+            if let Expr::Identifier(name) = call.func.as_mut() {
+                if let Some((callee_module, function)) = resolver.resolve_function_with_module(owner_module, name) {
+                    *name = format!("{}::{}", callee_module, function_def_name(&function));
+                }
+            }
+            qualify_validity_dependencies(&mut call.func, owner_module, resolver, fields, constant_dependencies);
+            for arg in &mut call.args {
+                qualify_validity_dependencies(arg, owner_module, resolver, fields, constant_dependencies);
+            }
+        }
+        Expr::Binary(binary) => {
+            qualify_validity_dependencies(&mut binary.left, owner_module, resolver, fields, constant_dependencies);
+            qualify_validity_dependencies(&mut binary.right, owner_module, resolver, fields, constant_dependencies);
+        }
+        Expr::Unary(unary) => qualify_validity_dependencies(&mut unary.expr, owner_module, resolver, fields, constant_dependencies),
+        Expr::FieldAccess(field) => {
+            qualify_validity_dependencies(&mut field.expr, owner_module, resolver, fields, constant_dependencies)
+        }
+        Expr::Index(index) => {
+            qualify_validity_dependencies(&mut index.expr, owner_module, resolver, fields, constant_dependencies);
+            qualify_validity_dependencies(&mut index.index, owner_module, resolver, fields, constant_dependencies);
+        }
+        Expr::Tuple(items) | Expr::Array(items) => {
+            for item in items {
+                qualify_validity_dependencies(item, owner_module, resolver, fields, constant_dependencies);
+            }
+        }
+        Expr::Cast(cast) => qualify_validity_dependencies(&mut cast.expr, owner_module, resolver, fields, constant_dependencies),
+        Expr::Range(range) => {
+            qualify_validity_dependencies(&mut range.start, owner_module, resolver, fields, constant_dependencies);
+            qualify_validity_dependencies(&mut range.end, owner_module, resolver, fields, constant_dependencies);
+        }
+        Expr::StructInit(init) => {
+            for (_, value) in &mut init.fields {
+                qualify_validity_dependencies(value, owner_module, resolver, fields, constant_dependencies);
+            }
+        }
+        Expr::Identifier(name) if !fields.contains(name.as_str()) => {
+            let source_name = name.clone();
+            if let Some((constant_module, constant)) = resolver.resolve_constant_with_module(owner_module, &source_name) {
+                constant_dependencies.insert(format!("constant:{constant_module}::{}", constant.name));
+                *expr = constant.value;
+                qualify_validity_dependencies(expr, owner_module, resolver, fields, constant_dependencies);
+            }
+        }
+        Expr::Integer(_)
+        | Expr::Bool(_)
+        | Expr::String(_)
+        | Expr::ByteString(_)
+        | Expr::Identifier(_)
+        | Expr::Assign(_)
+        | Expr::Create(_)
+        | Expr::Consume(_)
+        | Expr::Destroy(_)
+        | Expr::ReadRef(_)
+        | Expr::Claim(_)
+        | Expr::Settle(_)
+        | Expr::CreateUnique(_)
+        | Expr::ReplaceUnique(_)
+        | Expr::Assert(_)
+        | Expr::Require(_)
+        | Expr::RequireBlock(_)
+        | Expr::Preserve(_)
+        | Expr::Block(_)
+        | Expr::If(_)
+        | Expr::Match(_)
+        | Expr::StdlibCall(_) => {}
+    }
+}
+
 pub fn generate(ast: &Module) -> Result<IrModule> {
     let generator = IrGenerator::new(ast.name.clone());
     generator.generate(ast)
@@ -6383,7 +6803,7 @@ fn generate_with_resolver_diagnostics_inner(
     let mut external_function_return_types = HashMap::new();
     let mut call_target_labels = HashMap::new();
 
-    let mut resolved_external_types: Vec<(String, TypeDef)> = Vec::new();
+    let mut resolved_external_types: Vec<(String, String, TypeDef)> = Vec::new();
 
     for item in &ast.items {
         let Item::Use(use_stmt) = item else {
@@ -6406,7 +6826,7 @@ fn generate_with_resolver_diagnostics_inner(
                     type_fields.insert(local_name.clone(), fields);
                 }
                 if external_type_names.insert(local_name.clone()) {
-                    resolved_external_types.push((local_name.clone(), type_def));
+                    resolved_external_types.push((local_name.clone(), use_stmt.module_path.join("::"), type_def));
                 }
             }
             if let Some((owner_module, function)) = resolver.resolve_function_with_module(module_name, &local_name) {
@@ -6428,13 +6848,24 @@ fn generate_with_resolver_diagnostics_inner(
         }
     }
 
-    for (local_name, type_def) in resolved_external_types {
-        if let Some(ir_type_def) = resolver_type_def_to_ir(&local_name, &type_def, &type_fields) {
+    for (local_name, owner_module, type_def) in resolved_external_types {
+        if let Some(mut ir_type_def) = resolver_type_def_to_ir(&local_name, &type_def, &type_fields) {
+            qualify_external_validity_predicates(&mut ir_type_def, &owner_module, resolver);
             external_type_defs.push(ir_type_def);
         }
     }
+    let imported_type_validity = external_type_defs
+        .iter()
+        .map(|type_def| (type_def.name.clone(), type_def.validity_predicates.clone()))
+        .collect::<HashMap<_, _>>();
 
-    for call_name in collect_call_names(ast) {
+    let mut call_names = collect_call_names(ast);
+    for predicates in imported_type_validity.values() {
+        for predicate in predicates {
+            collect_call_names_from_expr(&predicate.expression, &mut call_names);
+        }
+    }
+    for call_name in call_names {
         if let Some((owner_module, function)) = resolver.resolve_function_with_module(module_name, &call_name) {
             register_external_callable_context(
                 module_name,
@@ -6459,6 +6890,7 @@ fn generate_with_resolver_diagnostics_inner(
         type_kinds,
         receipt_claim_outputs,
         flow_states,
+        imported_type_validity,
         external_function_effects,
         external_function_param_types,
         external_function_return_types,
@@ -6481,6 +6913,14 @@ fn append_external_callable_bodies(ir: &mut IrModule, ast: &Module, resolver: &M
         .into_iter()
         .map(|call_name| PendingExternalCall { lookup_module: module_name.to_string(), call_name })
         .collect::<Vec<_>>();
+    let mut validity_calls = HashSet::new();
+    for type_def in &ir.external_type_defs {
+        for predicate in &type_def.validity_predicates {
+            collect_call_names_from_expr(&predicate.expression, &mut validity_calls);
+        }
+    }
+    pending
+        .extend(validity_calls.into_iter().map(|call_name| PendingExternalCall { lookup_module: module_name.to_string(), call_name }));
 
     while let Some(pending_call) = pending.pop() {
         let Some((owner_module, function)) =
@@ -6764,10 +7204,22 @@ fn collect_call_names(ast: &Module) -> HashSet<String> {
             Item::Action(action) => collect_call_names_from_stmts(&action.body, &mut names),
             Item::Function(function) => collect_call_names_from_stmts(&function.body, &mut names),
             Item::Lock(lock) => collect_call_names_from_stmts(&lock.body, &mut names),
-            _ => {}
+            Item::Resource(resource) => collect_call_names_from_validity(resource.validity.as_ref(), &mut names),
+            Item::Shared(shared) => collect_call_names_from_validity(shared.validity.as_ref(), &mut names),
+            Item::Receipt(receipt) => collect_call_names_from_validity(receipt.validity.as_ref(), &mut names),
+            Item::Struct(struct_def) => collect_call_names_from_validity(struct_def.validity.as_ref(), &mut names),
+            Item::Flow(_) | Item::Invariant(_) | Item::Const(_) | Item::Enum(_) | Item::Use(_) => {}
         }
     }
     names
+}
+
+fn collect_call_names_from_validity(validity: Option<&ValidityBlock>, names: &mut HashSet<String>) {
+    if let Some(validity) = validity {
+        for predicate in &validity.predicates {
+            collect_call_names_from_expr(predicate, names);
+        }
+    }
 }
 
 fn collect_bounded_collection_ops(stmts: &[Stmt], params: &[Param]) -> Vec<IrBoundedCollectionOp> {
@@ -7277,6 +7729,7 @@ fn resolver_type_def_to_ir(
             flow_terminal_discharge: None,
             flow_state_model: None,
             flow_audit_warnings: Vec::new(),
+            validity_predicates: ir_validity_predicates(resource.validity.as_ref(), &resource.fields),
             identity: lower_identity_policy_ast(&resource.identity),
         }),
         TypeDef::Shared(shared) => Some(IrTypeDef {
@@ -7296,6 +7749,7 @@ fn resolver_type_def_to_ir(
             flow_terminal_discharge: None,
             flow_state_model: None,
             flow_audit_warnings: Vec::new(),
+            validity_predicates: ir_validity_predicates(shared.validity.as_ref(), &shared.fields),
             identity: lower_identity_policy_ast(&shared.identity),
         }),
         TypeDef::Receipt(receipt) => Some(IrTypeDef {
@@ -7315,6 +7769,7 @@ fn resolver_type_def_to_ir(
             flow_terminal_discharge: None,
             flow_state_model: None,
             flow_audit_warnings: Vec::new(),
+            validity_predicates: ir_validity_predicates(receipt.validity.as_ref(), &receipt.fields),
             identity: lower_identity_policy_ast(&receipt.identity),
         }),
         TypeDef::Struct(struct_def) => Some(IrTypeDef {
@@ -7334,6 +7789,7 @@ fn resolver_type_def_to_ir(
             flow_terminal_discharge: None,
             flow_state_model: None,
             flow_audit_warnings: Vec::new(),
+            validity_predicates: ir_validity_predicates(struct_def.validity.as_ref(), &struct_def.fields),
             identity: IrIdentityPolicy::None,
         }),
         TypeDef::Enum(_) => None,

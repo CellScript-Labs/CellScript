@@ -52,11 +52,11 @@ modes; they do not create a new gate command:
   a terminal state. `release` still requires exact-artifact and chain evidence
   before a production claim.
 
-Metadata schema `48` carries declared/inferred/effective function effects, the
+Metadata schema `49` carries declared/inferred/effective function effects, the
 initial, terminal, discharge, state-model, and audit-warning fields for flows,
 the canonical evidence tier on ProofPlan, flow, and function metadata, and
 typed transaction-view handle records under
-`runtime.transaction_view_handles`. Handle records must remain
+`runtime.transaction_view_handles`, plus `types[].validity_predicates`. Handle records must remain
 `ownership = read-only-view`, carry `lifecycle_authority = false`, and report
 checked-static typing plus checked-runtime read evidence.
 Consumers must reject unsupported schema versions instead of silently dropping
@@ -80,6 +80,23 @@ zero policy, and ownership. Consume iteration remains
 `builder-evidence-required` output-count and capacity obligations. The quick
 syntax gate covers missing bounds, duplicate consumption, and
 `Vec<Resource>` rejection.
+
+Type validity uses one evidence contract across parser, type checking, IR,
+metadata, ProofPlan, codegen, formatter, and LSP. A pure field predicate is
+`checked-runtime` only when a concrete constructor/create instruction emits a
+fail-closed guard before the output instruction on every selected create path.
+`create_paths_selected` and `create_paths_checked` make partial coverage
+auditable; partial, signature-only, or update paths without that lowering are
+`runtime-helper-required`, and production gates must not promote them. Literal
+`true` predicates may be `checked-static`.
+`env::block_number()` is never treated as a compiler constant or an ambient
+CKB-VM syscall: its record names both
+`environment:env::block_number` and
+`builder:header-dep-block-number-evidence`, with
+`builder-evidence-required`. Every other `env::*` read fails closed. The quick
+syntax audit requires positive evidence records and the unknown-environment
+negative seed through `SCA-BUG-0.22-VALIDITY-EVIDENCE-MISSING` and
+`SCA-BUG-0.22-VALIDITY-ENV-UNKNOWN`.
 
 ## Command Cheatsheet
 

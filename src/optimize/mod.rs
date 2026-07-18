@@ -478,6 +478,10 @@ fn eliminate_unused_functions(module: &mut Module) {
         match item {
             Item::Action(action) => collect_call_names_from_stmts(&action.body, &mut pending),
             Item::Lock(lock) => collect_call_names_from_stmts(&lock.body, &mut pending),
+            Item::Resource(resource) => collect_call_names_from_validity(resource.validity.as_ref(), &mut pending),
+            Item::Shared(shared) => collect_call_names_from_validity(shared.validity.as_ref(), &mut pending),
+            Item::Receipt(receipt) => collect_call_names_from_validity(receipt.validity.as_ref(), &mut pending),
+            Item::Struct(struct_def) => collect_call_names_from_validity(struct_def.validity.as_ref(), &mut pending),
             _ => {}
         }
     }
@@ -498,6 +502,14 @@ fn eliminate_unused_functions(module: &mut Module) {
         Item::Function(function) => reachable.contains(&function.name),
         _ => true,
     });
+}
+
+fn collect_call_names_from_validity(validity: Option<&ValidityBlock>, names: &mut Vec<String>) {
+    if let Some(validity) = validity {
+        for predicate in &validity.predicates {
+            collect_call_names_from_expr(predicate, names);
+        }
+    }
 }
 
 fn eliminate_unused_lets(stmts: Vec<Stmt>) -> Vec<Stmt> {

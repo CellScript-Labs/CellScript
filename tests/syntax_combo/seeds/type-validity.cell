@@ -1,0 +1,19 @@
+// audit: phase=accept
+// audit: validity_type=TimeLock
+// audit: validity_tier=checked-runtime
+// audit: validity_tier=builder-evidence-required
+module cellscript::audit::seed_type_validity
+
+resource TimeLock has store, create {
+    amount: u64,
+    locktime: u64,
+
+    validity
+        require amount > 0
+        require locktime > env::block_number()
+}
+
+action mint(amount: u64, locktime: u64) -> TimeLock {
+    verification
+        return create TimeLock { amount: amount, locktime: locktime }
+}
