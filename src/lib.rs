@@ -201,7 +201,7 @@ fn strict_capability_name(capability: ast::Capability) -> &'static str {
 const DEFAULT_TARGET: &str = "riscv64-asm";
 const DEFAULT_TARGET_PROFILE: &str = "ckb";
 const ARTIFACT_CACHE_VERSION: &str = "project-source-set-v5";
-pub const METADATA_SCHEMA_VERSION: u32 = 46;
+pub const METADATA_SCHEMA_VERSION: u32 = 47;
 pub const SOURCE_METADATA_SCHEMA_VERSION: u32 = 1;
 pub const ARTIFACT_METADATA_SCHEMA_VERSION: u32 = 1;
 pub const CONSTRAINTS_METADATA_SCHEMA_VERSION: u32 = 1;
@@ -777,6 +777,8 @@ pub struct RuntimeMetadata {
     pub standalone_runner_compatible: bool,
     pub fail_closed_runtime_features: Vec<String>,
     pub ckb_runtime_accesses: Vec<CkbRuntimeAccessMetadata>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub transaction_view_handles: Vec<TransactionViewHandleMetadata>,
     pub verifier_obligations: Vec<VerifierObligationMetadata>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub proof_plan: Vec<ProofPlanMetadata>,
@@ -790,6 +792,19 @@ pub struct RuntimeMetadata {
     pub transaction_runtime_input_requirements: Vec<TransactionRuntimeInputRequirementMetadata>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pool_primitives: Vec<PoolPrimitiveMetadata>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TransactionViewHandleMetadata {
+    pub scope_kind: String,
+    pub scope_name: String,
+    pub binding: String,
+    pub handle_type: String,
+    pub source: String,
+    pub ownership: String,
+    pub lifecycle_authority: bool,
+    pub typing_evidence_tier: EvidenceTier,
+    pub read_evidence_tier: EvidenceTier,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -971,6 +986,7 @@ pub fn validate_compile_metadata(metadata: &CompileMetadata, artifact_format: Ar
     validate_ckb_output_data_binding_metadata(metadata)?;
     validate_ckb_type_id_output_metadata(metadata)?;
     validate_ckb_runtime_access_metadata(metadata)?;
+    validate_transaction_view_handle_metadata(metadata)?;
     validate_ckb_script_group_metadata(metadata)?;
     validate_ckb_script_reference_metadata(metadata)?;
     validate_molecule_schema_metadata(metadata)?;
@@ -980,6 +996,43 @@ pub fn validate_compile_metadata(metadata: &CompileMetadata, artifact_format: Ar
     validate_source_metadata(metadata)?;
     crate::proof_plan::soundness::validate_metadata(metadata, false)?;
 
+    Ok(())
+}
+
+fn validate_transaction_view_handle_metadata(metadata: &CompileMetadata) -> Result<()> {
+    for (index, handle) in metadata.runtime.transaction_view_handles.iter().enumerate() {
+        let prefix = format!("metadata runtime.transaction_view_handles[{}]", index);
+        for (field, value) in [
+            ("scope_kind", handle.scope_kind.as_str()),
+            ("scope_name", handle.scope_name.as_str()),
+            ("binding", handle.binding.as_str()),
+            ("handle_type", handle.handle_type.as_str()),
+            ("source", handle.source.as_str()),
+        ] {
+            if value.trim().is_empty() {
+                return Err(CompileError::without_span(format!("{}.{} must not be empty", prefix, field)));
+            }
+        }
+        let base_type = handle.handle_type.split('<').next().unwrap_or(handle.handle_type.as_str());
+        if !matches!(
+            base_type,
+            "InputView" | "OutputView" | "CellDepView" | "HeaderDepView" | "WitnessArgsView" | "OutPoint" | "ScriptView"
+        ) {
+            return Err(CompileError::without_span(format!(
+                "{}.handle_type '{}' is not a supported typed transaction-view handle",
+                prefix, handle.handle_type
+            )));
+        }
+        if handle.ownership != "read-only-view" || handle.lifecycle_authority {
+            return Err(CompileError::without_span(format!("{} must remain a read-only view with lifecycle_authority=false", prefix)));
+        }
+        if handle.typing_evidence_tier != EvidenceTier::CheckedStatic || handle.read_evidence_tier != EvidenceTier::CheckedRuntime {
+            return Err(CompileError::without_span(format!(
+                "{} must use checked-static typing evidence and checked-runtime read evidence",
+                prefix
+            )));
+        }
+    }
     Ok(())
 }
 
@@ -5529,6 +5582,7 @@ fn compile_metadata_from_ir(ir: &ir::IrModule, artifact_format: ArtifactFormat, 
     }));
     let molecule_schema_manifest = molecule_schema_manifest_metadata(&types, target_profile);
     let cell_data_codec_manifest = cell_data_codec_manifest_metadata(&ckb_runtime_accesses, &molecule_schema_manifest, target_profile);
+    let transaction_view_handles = transaction_view_handle_metadata(ir);
     let mut metadata = CompileMetadata {
         metadata_schema_version: METADATA_SCHEMA_VERSION,
         source_metadata_schema_version: SOURCE_METADATA_SCHEMA_VERSION,
@@ -5578,6 +5632,7 @@ fn compile_metadata_from_ir(ir: &ir::IrModule, artifact_format: ArtifactFormat, 
             standalone_runner_compatible,
             fail_closed_runtime_features,
             ckb_runtime_accesses,
+            transaction_view_handles,
             verifier_obligations,
             proof_plan,
             proof_plan_soundness: ProofPlanSoundnessReport::default(),
@@ -6341,6 +6396,104 @@ fn module_ckb_runtime_accesses(
         }
     }
     accesses
+}
+
+fn transaction_view_handle_metadata(ir: &ir::IrModule) -> Vec<TransactionViewHandleMetadata> {
+    let mut handles = Vec::new();
+    for item in &ir.items {
+        match item {
+            ir::IrItem::Action(action) => {
+                handles.extend(body_transaction_view_handles("action", &action.name, &action.body));
+            }
+            ir::IrItem::PureFn(function) => {
+                handles.extend(body_transaction_view_handles("function", &function.name, &function.body));
+            }
+            ir::IrItem::Lock(lock) => {
+                handles.extend(body_transaction_view_handles("lock", &lock.name, &lock.body));
+            }
+            ir::IrItem::TypeDef(_) | ir::IrItem::Invariant(_) => {}
+        }
+    }
+    handles.sort_by(|left, right| {
+        (left.scope_kind.as_str(), left.scope_name.as_str(), left.binding.as_str(), left.handle_type.as_str(), left.source.as_str())
+            .cmp(&(
+                right.scope_kind.as_str(),
+                right.scope_name.as_str(),
+                right.binding.as_str(),
+                right.handle_type.as_str(),
+                right.source.as_str(),
+            ))
+    });
+    handles.dedup();
+    handles
+}
+
+fn body_transaction_view_handles(scope_kind: &str, scope_name: &str, body: &ir::IrBody) -> Vec<TransactionViewHandleMetadata> {
+    let mut handles = Vec::new();
+    let mut sources = HashMap::<usize, String>::new();
+    for block in &body.blocks {
+        for instruction in &block.instructions {
+            let (dest, explicit_source, inherited_source) = match instruction {
+                ir::IrInstruction::Call { dest: Some(dest), func, args } => {
+                    let inherited = args.first().and_then(|operand| match operand {
+                        ir::IrOperand::Var(var) => sources.get(&var.id).cloned(),
+                        ir::IrOperand::Const(_) => None,
+                    });
+                    (dest, transaction_view_source_for_constructor(func, &dest.ty), inherited)
+                }
+                ir::IrInstruction::Move { dest, src: ir::IrOperand::Var(src) } => (dest, None, sources.get(&src.id).cloned()),
+                _ => continue,
+            };
+            let Some(handle_type) = transaction_view_handle_type(&dest.ty) else {
+                continue;
+            };
+            let source = explicit_source.or(inherited_source).unwrap_or_else(|| "Derived".to_string());
+            sources.insert(dest.id, source.clone());
+            handles.push(TransactionViewHandleMetadata {
+                scope_kind: scope_kind.to_string(),
+                scope_name: scope_name.to_string(),
+                binding: dest.name.clone(),
+                handle_type,
+                source,
+                ownership: "read-only-view".to_string(),
+                lifecycle_authority: false,
+                typing_evidence_tier: EvidenceTier::CheckedStatic,
+                read_evidence_tier: EvidenceTier::CheckedRuntime,
+            });
+        }
+    }
+    handles
+}
+
+fn transaction_view_handle_type(ty: &ir::IrType) -> Option<String> {
+    let ir::IrType::Named(name) = ty else {
+        return None;
+    };
+    let base = name.split('<').next().unwrap_or(name.as_str());
+    match base {
+        "InputView" | "OutputView" | "CellDepView" | "HeaderDepView" | "WitnessArgsView" => Some(name.clone()),
+        "__ckb_input_out_point_ref" => Some("OutPoint".to_string()),
+        "__ckb_lock_script_ref" | "__ckb_type_script_ref" => Some("ScriptView".to_string()),
+        _ => None,
+    }
+}
+
+fn transaction_view_source_for_constructor(func: &str, ty: &ir::IrType) -> Option<String> {
+    let ir::IrType::Named(name) = ty else {
+        return None;
+    };
+    let base = name.split('<').next().unwrap_or(name.as_str());
+    let source = match (func, base) {
+        ("__ckb_source_input", "InputView") => "Input",
+        ("__ckb_source_group_input", "InputView") => "GroupInput",
+        ("__ckb_source_output", "OutputView") => "Output",
+        ("__ckb_source_group_output", "OutputView") => "GroupOutput",
+        ("__ckb_source_cell_dep", "CellDepView") => "CellDep",
+        ("__ckb_source_header_dep", "HeaderDepView") => "HeaderDep",
+        ("__ckb_source_input", "WitnessArgsView") => "WitnessArgs/Input",
+        _ => return None,
+    };
+    Some(source.to_string())
 }
 
 fn module_ckb_runtime_features(
@@ -29375,5 +29528,56 @@ resource Token has store, replace, relock, consume, burn {
 
         let err = compile_path(root, CompileOptions::default()).unwrap_err();
         assert!(err.message.contains("duplicate module 'demo::token'"));
+    }
+
+    #[test]
+    fn typed_transaction_views_lower_to_existing_ckb_runtime_helpers() {
+        let program = r#"
+module ckb::typed_views
+
+resource Token has store {
+    amount: u64
+}
+
+action inspect() -> u64 {
+    verification
+        let input = ckb::input<Token>(0)
+        let output = ckb::group_output<Token>(0)
+        let dep = ckb::cell_dep(0)
+        let witness_args = witness::args(0)
+        let out_point = ckb::input_out_point(input)
+        let lock = ckb::lock_script(input)
+        require lock.args_empty || lock.hash_type <= 4
+        return input.capacity + output.output_index + dep.data_size + witness_args.size + out_point.index
+}
+"#;
+
+        let result = compile(program, CompileOptions::default()).unwrap();
+        assert!(result.metadata.runtime.transaction_view_handles.iter().any(|handle| {
+            handle.handle_type == "InputView<Token>"
+                && handle.source == "Input"
+                && handle.ownership == "read-only-view"
+                && !handle.lifecycle_authority
+                && handle.typing_evidence_tier == crate::EvidenceTier::CheckedStatic
+                && handle.read_evidence_tier == crate::EvidenceTier::CheckedRuntime
+        }));
+        assert!(result
+            .metadata
+            .runtime
+            .transaction_view_handles
+            .iter()
+            .any(|handle| handle.handle_type == "OutPoint" && handle.source == "Input"));
+        let asm = String::from_utf8(result.artifact_bytes).unwrap();
+        for helper in [
+            "__ckb_cell_capacity",
+            "__ckb_cell_output_index",
+            "__ckb_cell_data_size",
+            "__ckb_witness_size",
+            "__ckb_input_out_point_index",
+            "__ckb_cell_lock_args_empty",
+            "__ckb_cell_lock_hash_type",
+        ] {
+            assert!(asm.contains(helper), "typed transaction view did not retain runtime helper {helper}:\n{asm}");
+        }
     }
 }

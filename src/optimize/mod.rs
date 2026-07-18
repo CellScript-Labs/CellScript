@@ -206,7 +206,7 @@ impl Optimizer {
                         return Ok(inlined);
                     }
                 }
-                Ok(Expr::Call(CallExpr { func: Box::new(func), args, span: call.span }))
+                Ok(Expr::Call(CallExpr { func: Box::new(func), type_args: call.type_args.clone(), args, span: call.span }))
             }
             Expr::FieldAccess(field) => Ok(Expr::FieldAccess(FieldAccessExpr {
                 expr: Box::new(self.optimize_expr(&field.expr)?),
@@ -846,6 +846,7 @@ fn substitute_expr(expr: &Expr, substitutions: &HashMap<String, Expr>) -> Expr {
         }
         Expr::Call(call) => Expr::Call(CallExpr {
             func: Box::new(substitute_expr(&call.func, substitutions)),
+            type_args: call.type_args.clone(),
             args: call.args.iter().map(|arg| substitute_expr(arg, substitutions)).collect(),
             span: call.span,
         }),
@@ -1058,6 +1059,7 @@ mod tests {
                         Stmt::Return(ReturnStmt {
                             value: Some(Expr::Call(CallExpr {
                                 func: Box::new(Expr::Identifier("add_step".to_string())),
+                                type_args: Vec::new(),
                                 args: vec![Expr::Integer(40)],
                                 span: Span::default(),
                             })),

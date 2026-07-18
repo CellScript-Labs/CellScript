@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased - 0.22.0
+
+- Start the `nightly-0.22` language line with checked casts, canonical helper
+  and capability registries, transitive callable effects, initial/terminal
+  flow evidence, the six-tier ProofPlan taxonomy, and typed aggregate targets.
+- Add typed read-only CKB transaction-view handles (`InputView<T>`,
+  `OutputView<T>`, `CellDepView`, `HeaderDepView`, `WitnessArgsView`,
+  `OutPoint`, and `ScriptView`). Their metadata records source, ownership,
+  absence of lifecycle authority, checked-static typing evidence, and
+  checked-runtime read evidence. Existing `source::*` functions remain the
+  explicit low-level migration surface.
+- Bump compile metadata to schema version 47 for the callable/flow/evidence
+  fields and `runtime.transaction_view_handles`.
+
 ## 0.21.1 - 2026-07-11
 
 - Close the 0.21 README documentation gap that the 0.21.0 changelog entry

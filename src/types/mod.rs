@@ -341,6 +341,14 @@ const CKB_LOCK_SCRIPT_REF_TYPE: &str = "__ckb_lock_script_ref";
 const CKB_TYPE_SCRIPT_REF_TYPE: &str = "__ckb_type_script_ref";
 const CKB_SCRIPT_ARGS_TYPE: &str = "ScriptArgs";
 const CKB_SCRIPT_VALUE_TYPE: &str = "Script";
+const CKB_INPUT_VIEW_TYPE: &str = "InputView";
+const CKB_OUTPUT_VIEW_TYPE: &str = "OutputView";
+const CKB_CELL_DEP_VIEW_TYPE: &str = "CellDepView";
+const CKB_HEADER_DEP_VIEW_TYPE: &str = "HeaderDepView";
+const CKB_WITNESS_ARGS_VIEW_TYPE: &str = "WitnessArgsView";
+const CKB_OUT_POINT_TYPE: &str = "OutPoint";
+const CKB_SCRIPT_VIEW_TYPE: &str = "ScriptView";
+const CKB_SCRIPT_HASH_TYPE: &str = "ScriptHash";
 
 fn param_source_repr(source: ParamSource) -> &'static str {
     match source {
@@ -4748,6 +4756,61 @@ impl<'a> TypeChecker<'a> {
             Type::Ref(inner) | Type::MutRef(inner) => self.lookup_field_type(inner, field, span),
             Type::Named(name) => {
                 let base_name = name.split('<').next().unwrap_or(name.as_str());
+                if matches!(base_name, CKB_INPUT_VIEW_TYPE | CKB_OUTPUT_VIEW_TYPE | CKB_CELL_DEP_VIEW_TYPE) {
+                    return match field {
+                        "capacity" | "data_size" => Ok(Type::U64),
+                        "output_index" if base_name == CKB_OUTPUT_VIEW_TYPE => Ok(Type::U64),
+                        "lock_hash" | "type_hash" => Ok(Type::Named(CKB_SCRIPT_HASH_TYPE.to_string())),
+                        "lock" | "type" | "type_script" => Ok(Type::Named(CKB_SCRIPT_VIEW_TYPE.to_string())),
+                        "out_point" if base_name == CKB_INPUT_VIEW_TYPE => Ok(Type::Named(CKB_OUT_POINT_TYPE.to_string())),
+                        _ => Err(CompileError::new(
+                            format!(
+                                "unknown transaction-view field '{}'; expected capacity, data_size, lock_hash, type_hash, lock, type_script{}",
+                                field,
+                                match base_name {
+                                    CKB_INPUT_VIEW_TYPE => ", or out_point",
+                                    CKB_OUTPUT_VIEW_TYPE => ", or output_index",
+                                    _ => "",
+                                }
+                            ),
+                            span,
+                        )),
+                    };
+                }
+                if base_name == CKB_WITNESS_ARGS_VIEW_TYPE {
+                    return match field {
+                        "size" => Ok(Type::U64),
+                        "lock" | "input_type" | "output_type" => Ok(Type::Hash),
+                        _ => Err(CompileError::new(
+                            format!("unknown WitnessArgsView field '{}'; expected size, lock, input_type, or output_type", field),
+                            span,
+                        )),
+                    };
+                }
+                if base_name == CKB_OUT_POINT_TYPE {
+                    return match field {
+                        "index" => Ok(Type::U64),
+                        "tx_hash" => Ok(Type::Hash),
+                        _ => Err(CompileError::new(format!("unknown OutPoint field '{}'; expected tx_hash or index", field), span)),
+                    };
+                }
+                if base_name == CKB_SCRIPT_VIEW_TYPE {
+                    return match field {
+                        "hash" | "code_hash" | "args_hash" => Ok(Type::Named(CKB_SCRIPT_HASH_TYPE.to_string())),
+                        "hash_type" => Ok(Type::U64),
+                        "args_empty" => Ok(Type::Bool),
+                        _ => Err(CompileError::new(
+                            format!(
+                                "unknown ScriptView field '{}'; expected hash, code_hash, hash_type, args_empty, or args_hash",
+                                field
+                            ),
+                            span,
+                        )),
+                    };
+                }
+                if base_name == CKB_SCRIPT_HASH_TYPE && field == "0" {
+                    return Ok(Type::Array(Box::new(Type::U8), 32));
+                }
                 if base_name == CKB_LOCK_SCRIPT_REF_TYPE || base_name == CKB_TYPE_SCRIPT_REF_TYPE {
                     return match field {
                         "code_hash" | "args_hash" => Ok(Type::Hash),
@@ -4807,9 +4870,111 @@ impl<'a> TypeChecker<'a> {
         None
     }
 
+    fn is_cell_view_type(ty: &Type) -> bool {
+        matches!(ty, Type::U64)
+            || matches!(
+                ty,
+                Type::Named(name)
+                    if matches!(
+                        name.split('<').next().unwrap_or(name.as_str()),
+                        CKB_INPUT_VIEW_TYPE | CKB_OUTPUT_VIEW_TYPE | CKB_CELL_DEP_VIEW_TYPE
+                    )
+            )
+    }
+
+    fn is_witness_args_view_type(ty: &Type) -> bool {
+        matches!(ty, Type::U64) || matches!(ty, Type::Named(name) if name == CKB_WITNESS_ARGS_VIEW_TYPE)
+    }
+
+    fn is_input_view_type(ty: &Type) -> bool {
+        matches!(ty, Type::U64) || matches!(ty, Type::Named(name) if name.starts_with("InputView<"))
+    }
+
+    fn is_header_dep_view_type(ty: &Type) -> bool {
+        matches!(ty, Type::U64) || matches!(ty, Type::Named(name) if name == CKB_HEADER_DEP_VIEW_TYPE)
+    }
+
+    fn typed_view_type_argument(&self, name: &str, call: &CallExpr) -> Result<String> {
+        if call.type_args.len() != 1 {
+            return Err(CompileError::new(format!("{} requires exactly one cell type argument", name), call.span));
+        }
+        let ty = &call.type_args[0];
+        let Some(type_name) = Self::base_type_name(ty) else {
+            return Err(CompileError::new(format!("{} type argument must be a named cell-backed type", name), call.span));
+        };
+        if self.resolve_cell_type_kind(type_name).is_none() {
+            return Err(CompileError::new(
+                format!("{} type argument '{}' is not a cell-backed resource, shared type, or receipt", name, type_repr(ty)),
+                call.span,
+            ));
+        }
+        Ok(type_repr(ty))
+    }
+
+    fn infer_transaction_view_constructor(&self, name: &str, call: &CallExpr, arg_types: &[Type]) -> Result<Option<Type>> {
+        let typed_view = match name {
+            "ckb::input" | "ckb::group_input" => Some(CKB_INPUT_VIEW_TYPE),
+            "ckb::output" | "ckb::group_output" => Some(CKB_OUTPUT_VIEW_TYPE),
+            _ => None,
+        };
+        if let Some(view_type) = typed_view {
+            self.validate_builtin_arity(name, 1, arg_types, call.span)?;
+            if arg_types[0] != Type::U64 {
+                return Err(CompileError::new(format!("{} expects a u64 index", name), call.span));
+            }
+            let type_name = self.typed_view_type_argument(name, call)?;
+            return Ok(Some(Type::Named(format!("{view_type}<{type_name}>"))));
+        }
+
+        let result = match name {
+            "ckb::cell_dep" => Some(Type::Named(CKB_CELL_DEP_VIEW_TYPE.to_string())),
+            "ckb::header_dep" => Some(Type::Named(CKB_HEADER_DEP_VIEW_TYPE.to_string())),
+            "witness::args" => Some(Type::Named(CKB_WITNESS_ARGS_VIEW_TYPE.to_string())),
+            _ => None,
+        };
+        if let Some(result) = result {
+            if !call.type_args.is_empty() {
+                return Err(CompileError::new(format!("{} does not accept type arguments", name), call.span));
+            }
+            self.validate_builtin_arity(name, 1, arg_types, call.span)?;
+            if arg_types[0] != Type::U64 {
+                return Err(CompileError::new(format!("{} expects a u64 index", name), call.span));
+            }
+            return Ok(Some(result));
+        }
+
+        let result = match name {
+            "ckb::input_out_point" => {
+                self.validate_builtin_arity(name, 1, arg_types, call.span)?;
+                if !Self::is_input_view_type(&arg_types[0]) {
+                    return Err(CompileError::new("ckb::input_out_point expects an InputView<T>", call.span));
+                }
+                Some(Type::Named(CKB_OUT_POINT_TYPE.to_string()))
+            }
+            "ckb::lock_script" | "ckb::type_script" => {
+                self.validate_builtin_arity(name, 1, arg_types, call.span)?;
+                if !Self::is_cell_view_type(&arg_types[0]) {
+                    return Err(CompileError::new(format!("{} expects a cell-backed transaction view", name), call.span));
+                }
+                Some(Type::Named(CKB_SCRIPT_VIEW_TYPE.to_string()))
+            }
+            _ => None,
+        };
+        if result.is_some() && !call.type_args.is_empty() {
+            return Err(CompileError::new(format!("{} does not accept type arguments", name), call.span));
+        }
+        Ok(result)
+    }
+
     fn infer_call_type(&mut self, env: &mut TypeEnv, call: &CallExpr, arg_types: &[Type]) -> Result<Type> {
         match call.func.as_ref() {
             Expr::Identifier(name) => {
+                if let Some(view_type) = self.infer_transaction_view_constructor(name, call, arg_types)? {
+                    return Ok(view_type);
+                }
+                if !call.type_args.is_empty() {
+                    return Err(CompileError::new(format!("function '{}' does not accept type arguments", name), call.span));
+                }
                 if let Some(signature) = self.functions.get(name).cloned() {
                     self.validate_call_allowed(name, signature.kind, call.span)?;
                     self.validate_call_args(name, &signature.params, arg_types, &call.args, call.span)?;
@@ -4871,7 +5036,7 @@ impl<'a> TypeChecker<'a> {
                         }
                         ("script", "require_cell_lock_matches" | "require_cell_type_matches") => {
                             self.validate_builtin_arity(name, 2, arg_types, call.span)?;
-                            if arg_types[0] != Type::U64 || !Self::is_script_value_type(&arg_types[1]) {
+                            if !Self::is_cell_view_type(&arg_types[0]) || !Self::is_script_value_type(&arg_types[1]) {
                                 return Err(CompileError::new(
                                     format!("{} expects (source_view: u64, expected_script: Script)", name),
                                     call.span,
@@ -4881,7 +5046,7 @@ impl<'a> TypeChecker<'a> {
                         }
                         ("env", "sighash_all") => {
                             self.validate_builtin_arity(name, 1, arg_types, call.span)?;
-                            if arg_types[0] != Type::U64 {
+                            if !Self::is_cell_view_type(&arg_types[0]) {
                                 return Err(CompileError::new(
                                     "env::sighash_all expects a source view returned by source::*",
                                     call.span,
@@ -4929,7 +5094,12 @@ impl<'a> TypeChecker<'a> {
                             | "cell_data_size",
                         ) => {
                             self.validate_builtin_arity(name, 1, arg_types, call.span)?;
-                            if arg_types[0] != Type::U64 {
+                            let source_ok = if matches!(suffix, "input_out_point_index" | "input_out_point_tx_hash_low") {
+                                Self::is_input_view_type(&arg_types[0])
+                            } else {
+                                Self::is_cell_view_type(&arg_types[0])
+                            };
+                            if !source_ok {
                                 return Err(CompileError::new(
                                     format!("{} expects a source view returned by source::*", name),
                                     call.span,
@@ -4939,7 +5109,7 @@ impl<'a> TypeChecker<'a> {
                         }
                         ("ckb", "input_out_point_tx_hash") => {
                             self.validate_builtin_arity(name, 1, arg_types, call.span)?;
-                            if arg_types[0] != Type::U64 {
+                            if !Self::is_input_view_type(&arg_types[0]) {
                                 return Err(CompileError::new(
                                     format!("{} expects a source view returned by source::*", name),
                                     call.span,
@@ -4956,7 +5126,7 @@ impl<'a> TypeChecker<'a> {
                         }
                         ("ckb", "cell_data_hash_at") => {
                             self.validate_builtin_arity(name, 2, arg_types, call.span)?;
-                            if arg_types[0] != Type::U64 || arg_types[1] != Type::U64 {
+                            if !Self::is_cell_view_type(&arg_types[0]) || arg_types[1] != Type::U64 {
                                 return Err(CompileError::new(
                                     "ckb::cell_data_hash_at expects (source_view: u64, offset: u64)",
                                     call.span,
@@ -4966,7 +5136,7 @@ impl<'a> TypeChecker<'a> {
                         }
                         ("ckb", "cell_data_u32_le" | "cell_data_u64_le") => {
                             self.validate_builtin_arity(name, 2, arg_types, call.span)?;
-                            if arg_types[0] != Type::U64 || arg_types[1] != Type::U64 {
+                            if !Self::is_cell_view_type(&arg_types[0]) || arg_types[1] != Type::U64 {
                                 return Err(CompileError::new(format!("{} expects (source_view: u64, offset: u64)", name), call.span));
                             }
                             Type::U64
@@ -4984,7 +5154,7 @@ impl<'a> TypeChecker<'a> {
                             | "cell_type_args_hash",
                         ) => {
                             self.validate_builtin_arity(name, 1, arg_types, call.span)?;
-                            if arg_types[0] != Type::U64 {
+                            if !Self::is_cell_view_type(&arg_types[0]) {
                                 return Err(CompileError::new(
                                     format!("{} expects a source view returned by source::*", name),
                                     call.span,
@@ -4994,7 +5164,7 @@ impl<'a> TypeChecker<'a> {
                         }
                         ("ckb", "cell_lock_args_empty" | "cell_type_args_empty") => {
                             self.validate_builtin_arity(name, 1, arg_types, call.span)?;
-                            if arg_types[0] != Type::U64 {
+                            if !Self::is_cell_view_type(&arg_types[0]) {
                                 return Err(CompileError::new(
                                     format!("{} expects a source view returned by source::*", name),
                                     call.span,
@@ -5004,7 +5174,7 @@ impl<'a> TypeChecker<'a> {
                         }
                         ("ckb", "require_cell_lock_hash" | "require_cell_type_hash") => {
                             self.validate_builtin_arity(name, 2, arg_types, call.span)?;
-                            if arg_types[0] != Type::U64 || arg_types[1] != Type::Hash {
+                            if !Self::is_cell_view_type(&arg_types[0]) || arg_types[1] != Type::Hash {
                                 return Err(CompileError::new(
                                     format!("{} expects (source_view: u64, expected_hash: Hash)", name),
                                     call.span,
@@ -5018,7 +5188,7 @@ impl<'a> TypeChecker<'a> {
                         }
                         ("ckb", "require_cell_lock_args_empty" | "require_cell_type_args_empty") => {
                             self.validate_builtin_arity(name, 1, arg_types, call.span)?;
-                            if arg_types[0] != Type::U64 {
+                            if !Self::is_cell_view_type(&arg_types[0]) {
                                 return Err(CompileError::new(
                                     format!("{} expects a source view returned by source::*", name),
                                     call.span,
@@ -5036,7 +5206,7 @@ impl<'a> TypeChecker<'a> {
                             | "require_cell_type_args_suffix_hash",
                         ) => {
                             self.validate_builtin_arity(name, 2, arg_types, call.span)?;
-                            if arg_types[0] != Type::U64 || arg_types[1] != Type::Hash {
+                            if !Self::is_cell_view_type(&arg_types[0]) || arg_types[1] != Type::Hash {
                                 return Err(CompileError::new(
                                     format!("{} expects (source_view: u64, expected_args_hash: Hash)", name),
                                     call.span,
@@ -5046,7 +5216,7 @@ impl<'a> TypeChecker<'a> {
                         }
                         ("ckb", "require_cell_lock_script_hash_type" | "require_cell_type_script_hash_type") => {
                             self.validate_builtin_arity(name, 3, arg_types, call.span)?;
-                            if arg_types[0] != Type::U64 || arg_types[1] != Type::Hash || arg_types[2] != Type::U64 {
+                            if !Self::is_cell_view_type(&arg_types[0]) || arg_types[1] != Type::Hash || arg_types[2] != Type::U64 {
                                 return Err(CompileError::new(
                                     format!("{} expects (source_view: u64, expected_code_hash: Hash, expected_hash_type: u64)", name),
                                     call.span,
@@ -5059,7 +5229,7 @@ impl<'a> TypeChecker<'a> {
                             let expected_arity = if expects_index { 3 } else { 2 };
                             self.validate_builtin_arity(name, expected_arity, arg_types, call.span)?;
                             let expected_index_ok = !expects_index || arg_types[2] == Type::U64;
-                            if arg_types[0] != Type::U64 || arg_types[1] != Type::Hash || !expected_index_ok {
+                            if !Self::is_input_view_type(&arg_types[0]) || arg_types[1] != Type::Hash || !expected_index_ok {
                                 return Err(CompileError::new(
                                     format!(
                                         "{} expects {}",
@@ -5089,7 +5259,10 @@ impl<'a> TypeChecker<'a> {
                         }
                         ("ckb", "require_metapoint_relative") => {
                             self.validate_builtin_arity(name, 3, arg_types, call.span)?;
-                            if arg_types[0] != Type::U64 || arg_types[1] != Type::U64 || arg_types[2] != Type::I32 {
+                            if !Self::is_cell_view_type(&arg_types[0])
+                                || !Self::is_cell_view_type(&arg_types[1])
+                                || arg_types[2] != Type::I32
+                            {
                                 return Err(CompileError::new(
                                     "ckb::require_metapoint_relative expects (base_view: u64, related_view: u64, relative_distance: i32)",
                                     call.span,
@@ -5099,7 +5272,7 @@ impl<'a> TypeChecker<'a> {
                         }
                         ("ckb", "require_lock_type_metapoint_pairs" | "require_type_lock_metapoint_pairs") => {
                             self.validate_builtin_arity(name, 2, arg_types, call.span)?;
-                            if arg_types[0] != Type::U64 || arg_types[1] != Type::I32 {
+                            if !Self::is_cell_view_type(&arg_types[0]) || arg_types[1] != Type::I32 {
                                 return Err(CompileError::new(
                                     format!("{} expects (source_view: u64, relative_distance: i32)", name),
                                     call.span,
@@ -5112,7 +5285,7 @@ impl<'a> TypeChecker<'a> {
                             "require_lock_type_metapoint_pairs_from_i32_data" | "require_type_lock_metapoint_pairs_from_i32_data",
                         ) => {
                             self.validate_builtin_arity(name, 2, arg_types, call.span)?;
-                            if arg_types[0] != Type::U64 || arg_types[1] != Type::U64 {
+                            if !Self::is_cell_view_type(&arg_types[0]) || arg_types[1] != Type::U64 {
                                 return Err(CompileError::new(
                                     format!("{} expects (source_view: u64, distance_offset: u64)", name),
                                     call.span,
@@ -5126,7 +5299,7 @@ impl<'a> TypeChecker<'a> {
                             | "require_type_lock_metapoint_pairs_from_i32_data_filtered",
                         ) => {
                             self.validate_builtin_arity(name, 4, arg_types, call.span)?;
-                            if arg_types[0] != Type::U64
+                            if !Self::is_cell_view_type(&arg_types[0])
                                 || arg_types[1] != Type::U64
                                 || arg_types[2] != Type::Hash
                                 || arg_types[3] != Type::U64
@@ -5143,7 +5316,10 @@ impl<'a> TypeChecker<'a> {
                         }
                         ("ckb", "require_lock_match_master_out_point_pairs_from_data") => {
                             self.validate_builtin_arity(name, 5, arg_types, call.span)?;
-                            if arg_types.iter().any(|ty| *ty != Type::U64) {
+                            if !Self::is_cell_view_type(&arg_types[0])
+                                || !Self::is_cell_view_type(&arg_types[1])
+                                || arg_types[2..].iter().any(|ty| *ty != Type::U64)
+                            {
                                 return Err(CompileError::new(
                                     "ckb::require_lock_match_master_out_point_pairs_from_data expects (input_source_view: u64, output_source_view: u64, action_offset: u64, tx_hash_offset: u64, index_offset: u64)",
                                     call.span,
@@ -5160,7 +5336,7 @@ impl<'a> TypeChecker<'a> {
                         }
                         ("dao", "accumulated_rate") => {
                             self.validate_builtin_arity(name, 1, arg_types, call.span)?;
-                            if arg_types[0] != Type::U64 {
+                            if !Self::is_header_dep_view_type(&arg_types[0]) {
                                 return Err(CompileError::new(
                                     "dao::accumulated_rate expects a HeaderDep source view returned by source::header_dep",
                                     call.span,
@@ -5170,7 +5346,7 @@ impl<'a> TypeChecker<'a> {
                         }
                         ("dao", "input_accumulated_rate") => {
                             self.validate_builtin_arity(name, 1, arg_types, call.span)?;
-                            if arg_types[0] != Type::U64 {
+                            if !Self::is_input_view_type(&arg_types[0]) {
                                 return Err(CompileError::new(
                                     "dao::input_accumulated_rate expects an Input or GroupInput source view returned by source::input/source::group_input",
                                     call.span,
@@ -5180,7 +5356,7 @@ impl<'a> TypeChecker<'a> {
                         }
                         ("dao", "is_deposit_data" | "is_withdrawal_request_data" | "has_dao_type") => {
                             self.validate_builtin_arity(name, 1, arg_types, call.span)?;
-                            if arg_types[0] != Type::U64 {
+                            if !Self::is_cell_view_type(&arg_types[0]) {
                                 return Err(CompileError::new(
                                     format!("{} expects a source view returned by source::*", name),
                                     call.span,
@@ -5190,7 +5366,7 @@ impl<'a> TypeChecker<'a> {
                         }
                         ("dao", "require_header_dep_for_input") => {
                             self.validate_builtin_arity(name, 2, arg_types, call.span)?;
-                            if arg_types[0] != Type::U64 || arg_types[1] != Type::U64 {
+                            if !Self::is_input_view_type(&arg_types[0]) || !Self::is_header_dep_view_type(&arg_types[1]) {
                                 return Err(CompileError::new(
                                     "dao::require_header_dep_for_input expects (input_view: u64, header_view: u64)",
                                     call.span,
@@ -5200,7 +5376,7 @@ impl<'a> TypeChecker<'a> {
                         }
                         ("dao", "require_input_since_at_least") => {
                             self.validate_builtin_arity(name, 2, arg_types, call.span)?;
-                            if arg_types[0] != Type::U64 || arg_types[1] != Type::U64 {
+                            if !Self::is_input_view_type(&arg_types[0]) || arg_types[1] != Type::U64 {
                                 return Err(CompileError::new(
                                     "dao::require_input_since_at_least expects (input_view: u64, required_since: u64)",
                                     call.span,
@@ -5210,7 +5386,7 @@ impl<'a> TypeChecker<'a> {
                         }
                         ("dao", "require_input_relative_epoch_since_at_least") => {
                             self.validate_builtin_arity(name, 4, arg_types, call.span)?;
-                            if arg_types.iter().any(|ty| *ty != Type::U64) {
+                            if !Self::is_input_view_type(&arg_types[0]) || arg_types[1..].iter().any(|ty| *ty != Type::U64) {
                                 return Err(CompileError::new(
                                     "dao::require_input_relative_epoch_since_at_least expects (input_view: u64, number: u64, index: u64, length: u64)",
                                     call.span,
@@ -5220,7 +5396,7 @@ impl<'a> TypeChecker<'a> {
                         }
                         ("xudt", "owner_mode_input_type_hash" | "amount_low" | "amount_high") => {
                             self.validate_builtin_arity(name, 1, arg_types, call.span)?;
-                            if arg_types[0] != Type::U64 {
+                            if !Self::is_cell_view_type(&arg_types[0]) {
                                 return Err(CompileError::new(
                                     format!("{} expects a source view returned by source::*", name),
                                     call.span,
@@ -5230,7 +5406,7 @@ impl<'a> TypeChecker<'a> {
                         }
                         ("xudt", "require_owner_mode_input_type") => {
                             self.validate_builtin_arity(name, 2, arg_types, call.span)?;
-                            if arg_types[0] != Type::U64 || arg_types[1] != Type::Hash {
+                            if !Self::is_cell_view_type(&arg_types[0]) || arg_types[1] != Type::Hash {
                                 return Err(CompileError::new(
                                     "xudt::require_owner_mode_input_type expects (source_view: u64, expected_hash: Hash)",
                                     call.span,
@@ -5240,7 +5416,7 @@ impl<'a> TypeChecker<'a> {
                         }
                         ("xudt", "require_owner_mode_type_args") => {
                             self.validate_builtin_arity(name, 3, arg_types, call.span)?;
-                            if arg_types[0] != Type::U64 || arg_types[1] != Type::Hash || arg_types[2] != Type::U64 {
+                            if !Self::is_cell_view_type(&arg_types[0]) || arg_types[1] != Type::Hash || arg_types[2] != Type::U64 {
                                 return Err(CompileError::new(
                                     "xudt::require_owner_mode_type_args expects (source_view: u64, owner_hash: Hash, flags: u64)",
                                     call.span,
@@ -5250,7 +5426,7 @@ impl<'a> TypeChecker<'a> {
                         }
                         ("xudt", "require_owner_mode_type_args_current_script") => {
                             self.validate_builtin_arity(name, 2, arg_types, call.span)?;
-                            if arg_types[0] != Type::U64 || arg_types[1] != Type::U64 {
+                            if !Self::is_cell_view_type(&arg_types[0]) || arg_types[1] != Type::U64 {
                                 return Err(CompileError::new(
                                     "xudt::require_owner_mode_type_args_current_script expects (source_view: u64, flags: u64)",
                                     call.span,
@@ -5294,7 +5470,7 @@ impl<'a> TypeChecker<'a> {
                         }
                         ("witness", "raw" | "lock" | "input_type" | "output_type" | "size") => {
                             self.validate_builtin_arity(name, 1, arg_types, call.span)?;
-                            if arg_types[0] != Type::U64 {
+                            if !Self::is_witness_args_view_type(&arg_types[0]) {
                                 return Err(CompileError::new(
                                     format!("{} expects a source view returned by source::*", name),
                                     call.span,
@@ -5308,7 +5484,7 @@ impl<'a> TypeChecker<'a> {
                         }
                         ("ckb", "require_witness_size_at_least") => {
                             self.validate_builtin_arity(name, 2, arg_types, call.span)?;
-                            if arg_types[0] != Type::U64 || arg_types[1] != Type::U64 {
+                            if !Self::is_witness_args_view_type(&arg_types[0]) || arg_types[1] != Type::U64 {
                                 return Err(CompileError::new(
                                     format!("{} expects (source_view: u64, min_size: u64)", name),
                                     call.span,
@@ -5935,6 +6111,24 @@ impl<'a> TypeChecker<'a> {
             _ => {}
         }
 
+        if matches!(base_name, CKB_INPUT_VIEW_TYPE | CKB_OUTPUT_VIEW_TYPE) {
+            let inner = name
+                .split_once('<')
+                .and_then(|(_, rest)| rest.strip_suffix('>'))
+                .ok_or_else(|| CompileError::new(format!("type '{}' requires one cell type argument", base_name), Span::default()))?;
+            let inner_type = self.parse_named_type_repr(inner);
+            let Some(inner_name) = Self::base_type_name(&inner_type) else {
+                return Err(CompileError::new(format!("type '{}' requires a named cell type argument", base_name), Span::default()));
+            };
+            if self.resolve_cell_type_kind(inner_name).is_none() {
+                return Err(CompileError::new(
+                    format!("type '{}' requires a cell-backed resource, shared type, or receipt argument", base_name),
+                    Span::default(),
+                ));
+            }
+            return Ok(());
+        }
+
         if name.contains('<') && base_name != "Vec" {
             return Err(CompileError::new(
                 format!(
@@ -5952,7 +6146,19 @@ impl<'a> TypeChecker<'a> {
         }
 
         match base_name {
-            "String" | "Range" | "Vec" | "usize" | "isize" | CKB_SCRIPT_ARGS_TYPE | CKB_SCRIPT_VALUE_TYPE => return Ok(()),
+            "String"
+            | "Range"
+            | "Vec"
+            | "usize"
+            | "isize"
+            | CKB_SCRIPT_ARGS_TYPE
+            | CKB_SCRIPT_VALUE_TYPE
+            | CKB_CELL_DEP_VIEW_TYPE
+            | CKB_HEADER_DEP_VIEW_TYPE
+            | CKB_WITNESS_ARGS_VIEW_TYPE
+            | CKB_OUT_POINT_TYPE
+            | CKB_SCRIPT_VIEW_TYPE
+            | CKB_SCRIPT_HASH_TYPE => return Ok(()),
             _ => {}
         }
 
@@ -7610,5 +7816,94 @@ action bad_transfer(coin: Coin, to: Address) -> next_coin: Coin {
 
         let err = check(&module).unwrap_err();
         assert!(err.message.contains("std::lifecycle::transfer expects 3 arguments"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn typed_transaction_views_are_source_specific_read_only_handles() {
+        let module = source_module(
+            r#"
+module test
+
+resource Token has store {
+    amount: u64
+}
+
+action inspect() -> u64 {
+    verification
+        let input = ckb::input<Token>(0)
+        let output = ckb::output<Token>(0)
+        let dep = ckb::cell_dep(0)
+        let witness_args = witness::args(0)
+        let out_point = input.out_point
+        let lock = input.lock
+        require lock.args_empty || lock.hash_type <= 4
+        return input.capacity + output.output_index + dep.data_size + witness_args.size + out_point.index
+}
+"#,
+        );
+
+        check(&module).unwrap();
+    }
+
+    #[test]
+    fn typed_transaction_view_requires_a_cell_backed_type_argument() {
+        let module = source_module(
+            r#"
+module test
+
+action inspect() -> u64 {
+    verification
+        let input = ckb::input<u64>(0)
+        return input.capacity
+}
+"#,
+        );
+
+        let err = check(&module).unwrap_err();
+        assert!(err.message.contains("type argument must be a named cell-backed type"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn typed_transaction_view_rejects_source_mismatch() {
+        let module = source_module(
+            r#"
+module test
+
+resource Token has store {
+    amount: u64
+}
+
+action inspect() -> u64 {
+    verification
+        return dao::accumulated_rate(ckb::input<Token>(0))
+}
+"#,
+        );
+
+        let err = check(&module).unwrap_err();
+        assert!(err.message.contains("HeaderDep"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn typed_transaction_view_cannot_enter_linear_lifecycle_operations() {
+        let module = source_module(
+            r#"
+module test
+
+resource Token has store {
+    amount: u64
+}
+
+action inspect() -> u64 {
+    verification
+        let input = ckb::input<Token>(0)
+        consume input
+        return 0
+}
+"#,
+        );
+
+        let err = check(&module).unwrap_err();
+        assert!(err.message.contains("consume requires a cell-backed linear value"), "unexpected error: {}", err.message);
     }
 }

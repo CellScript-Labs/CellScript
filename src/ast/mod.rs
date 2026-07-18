@@ -663,6 +663,7 @@ pub enum UnaryOp {
 #[derive(Debug, Clone)]
 pub struct CallExpr {
     pub func: Box<Expr>,
+    pub type_args: Vec<Type>,
     pub args: Vec<Expr>,
     pub span: Span,
 }

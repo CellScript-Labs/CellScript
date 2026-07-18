@@ -3012,6 +3012,7 @@ impl IrGenerator {
                         field: "type_hash".to_string(),
                         span: call.span,
                     })),
+                    type_args: Vec::new(),
                     args: vec![],
                     span: call.span,
                 });
@@ -3021,6 +3022,7 @@ impl IrGenerator {
                         field: "type_hash".to_string(),
                         span: call.span,
                     })),
+                    type_args: Vec::new(),
                     args: vec![],
                     span: call.span,
                 });
@@ -3130,6 +3132,7 @@ impl IrGenerator {
                         field: "type_hash".to_string(),
                         span: call.span,
                     })),
+                    type_args: Vec::new(),
                     args: vec![],
                     span: call.span,
                 });
@@ -3139,6 +3142,7 @@ impl IrGenerator {
                         field: "type_hash".to_string(),
                         span: call.span,
                     })),
+                    type_args: Vec::new(),
                     args: vec![],
                     span: call.span,
                 });
@@ -3983,6 +3987,24 @@ impl IrGenerator {
                     func: func.to_string(),
                     args: vec![lowered_base.operand],
                 });
+                return LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) };
+            }
+
+            if let Some((func, dest_name, return_ty)) = typed_view_property_runtime_helper(&base_var.ty, &field.field) {
+                let dest = self.new_var(dest_name, return_ty);
+                self.block_mut(blocks, active).instructions.push(IrInstruction::Call {
+                    dest: Some(dest.clone()),
+                    func: func.to_string(),
+                    args: vec![lowered_base.operand],
+                });
+                return LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) };
+            }
+
+            if let Some(wrapper_ty) = typed_view_property_wrapper(&base_var.ty, &field.field) {
+                let dest = self.new_var(format!("{}_view", field.field), IrType::Named(wrapper_ty.to_string()));
+                self.block_mut(blocks, active)
+                    .instructions
+                    .push(IrInstruction::Move { dest: dest.clone(), src: lowered_base.operand });
                 return LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) };
             }
 
@@ -4862,6 +4884,66 @@ impl IrGenerator {
                     blocks,
                     vars,
                 ),
+                "ckb::input" | "ckb::group_input" if call.args.len() == 1 && call.type_args.len() == 1 => {
+                    let type_name = inline_ir_type_repr(&ast_type_to_ir(&call.type_args[0])).unwrap_or_else(|| "unknown".to_string());
+                    self.lower_simple_runtime_call(
+                        if name == "ckb::input" { "__ckb_source_input" } else { "__ckb_source_group_input" },
+                        if name == "ckb::input" { "typed_input_view" } else { "typed_group_input_view" },
+                        IrType::Named(format!("InputView<{type_name}>")),
+                        &call.args,
+                        current,
+                        blocks,
+                        vars,
+                    )
+                }
+                "ckb::output" | "ckb::group_output" if call.args.len() == 1 && call.type_args.len() == 1 => {
+                    let type_name = inline_ir_type_repr(&ast_type_to_ir(&call.type_args[0])).unwrap_or_else(|| "unknown".to_string());
+                    self.lower_simple_runtime_call(
+                        if name == "ckb::output" { "__ckb_source_output" } else { "__ckb_source_group_output" },
+                        if name == "ckb::output" { "typed_output_view" } else { "typed_group_output_view" },
+                        IrType::Named(format!("OutputView<{type_name}>")),
+                        &call.args,
+                        current,
+                        blocks,
+                        vars,
+                    )
+                }
+                "ckb::cell_dep" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__ckb_source_cell_dep",
+                    "typed_cell_dep_view",
+                    IrType::Named("CellDepView".to_string()),
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "ckb::header_dep" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__ckb_source_header_dep",
+                    "typed_header_dep_view",
+                    IrType::Named("HeaderDepView".to_string()),
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "witness::args" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__ckb_source_input",
+                    "typed_witness_args_view",
+                    IrType::Named("WitnessArgsView".to_string()),
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "ckb::input_out_point" if call.args.len() == 1 => {
+                    self.lower_transparent_view_wrapper(call, CKB_INPUT_OUT_POINT_REF_TYPE, current, blocks, vars)
+                }
+                "ckb::lock_script" if call.args.len() == 1 => {
+                    self.lower_transparent_view_wrapper(call, CKB_LOCK_SCRIPT_REF_TYPE, current, blocks, vars)
+                }
+                "ckb::type_script" if call.args.len() == 1 => {
+                    self.lower_transparent_view_wrapper(call, CKB_TYPE_SCRIPT_REF_TYPE, current, blocks, vars)
+                }
                 "source::input" if call.args.len() == 1 => self.lower_simple_runtime_call(
                     "__ckb_source_input",
                     "source_input",
@@ -5798,6 +5880,21 @@ impl IrGenerator {
         Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) })
     }
 
+    fn lower_transparent_view_wrapper(
+        &mut self,
+        call: &CallExpr,
+        wrapper_type: &str,
+        current: BlockId,
+        blocks: &mut Vec<IrBlock>,
+        vars: &mut HashMap<String, IrVar>,
+    ) -> Option<LoweredExpr> {
+        let lowered = self.lower_expr(&call.args[0], current, blocks, vars);
+        let active = lowered.current?;
+        let dest = self.new_var("typed_transaction_view", IrType::Named(wrapper_type.to_string()));
+        self.block_mut(blocks, active).instructions.push(IrInstruction::Move { dest: dest.clone(), src: lowered.operand });
+        Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) })
+    }
+
     fn lower_void_runtime_call(
         &mut self,
         func: &str,
@@ -6076,8 +6173,49 @@ fn parse_inline_ir_type_repr(repr: &str) -> IrType {
 
 const CKB_LOCK_SCRIPT_REF_TYPE: &str = "__ckb_lock_script_ref";
 const CKB_TYPE_SCRIPT_REF_TYPE: &str = "__ckb_type_script_ref";
+const CKB_INPUT_OUT_POINT_REF_TYPE: &str = "__ckb_input_out_point_ref";
 const CKB_SCRIPT_ARGS_TYPE: &str = "ScriptArgs";
 const CKB_SCRIPT_VALUE_TYPE: &str = "Script";
+
+fn typed_view_property_runtime_helper(ty: &IrType, field: &str) -> Option<(&'static str, &'static str, IrType)> {
+    let IrType::Named(name) = ty else {
+        return None;
+    };
+    let base_name = name.split('<').next().unwrap_or(name.as_str());
+    match (base_name, field) {
+        ("InputView" | "OutputView" | "CellDepView", "capacity") => Some(("__ckb_cell_capacity", "typed_view_capacity", IrType::U64)),
+        ("InputView" | "OutputView" | "CellDepView", "data_size") => {
+            Some(("__ckb_cell_data_size", "typed_view_data_size", IrType::U64))
+        }
+        ("OutputView", "output_index") => Some(("__ckb_cell_output_index", "typed_view_output_index", IrType::U64)),
+        ("InputView" | "OutputView" | "CellDepView", "lock_hash") => {
+            Some(("__ckb_cell_lock_hash", "typed_view_lock_hash", IrType::Hash))
+        }
+        ("InputView" | "OutputView" | "CellDepView", "type_hash") => {
+            Some(("__ckb_cell_type_hash", "typed_view_type_hash", IrType::Hash))
+        }
+        ("WitnessArgsView", "size") => Some(("__ckb_witness_size", "typed_witness_size", IrType::U64)),
+        ("WitnessArgsView", "lock") => Some(("__ckb_witness_lock", "typed_witness_lock", IrType::Hash)),
+        ("WitnessArgsView", "input_type") => Some(("__ckb_witness_input_type", "typed_witness_input_type", IrType::Hash)),
+        ("WitnessArgsView", "output_type") => Some(("__ckb_witness_output_type", "typed_witness_output_type", IrType::Hash)),
+        (CKB_INPUT_OUT_POINT_REF_TYPE, "index") => Some(("__ckb_input_out_point_index", "typed_out_point_index", IrType::U64)),
+        (CKB_INPUT_OUT_POINT_REF_TYPE, "tx_hash") => Some(("__ckb_input_out_point_tx_hash", "typed_out_point_tx_hash", IrType::Hash)),
+        _ => None,
+    }
+}
+
+fn typed_view_property_wrapper(ty: &IrType, field: &str) -> Option<&'static str> {
+    let IrType::Named(name) = ty else {
+        return None;
+    };
+    let base_name = name.split('<').next().unwrap_or(name.as_str());
+    match (base_name, field) {
+        ("InputView", "out_point") => Some(CKB_INPUT_OUT_POINT_REF_TYPE),
+        ("InputView" | "OutputView" | "CellDepView", "lock") => Some(CKB_LOCK_SCRIPT_REF_TYPE),
+        ("InputView" | "OutputView" | "CellDepView", "type" | "type_script") => Some(CKB_TYPE_SCRIPT_REF_TYPE),
+        _ => None,
+    }
+}
 
 fn script_ref_property_runtime_helper(ty: &IrType, field: &str) -> Option<(&'static str, &'static str, IrType)> {
     let IrType::Named(name) = ty else {
@@ -6089,6 +6227,11 @@ fn script_ref_property_runtime_helper(ty: &IrType, field: &str) -> Option<(&'sta
         return None;
     }
     match field {
+        "hash" => Some((
+            if lock_script { "__ckb_cell_lock_hash" } else { "__ckb_cell_type_hash" },
+            if lock_script { "ckb_cell_lock_hash" } else { "ckb_cell_type_hash" },
+            IrType::Hash,
+        )),
         "code_hash" => Some((
             if lock_script { "__ckb_cell_lock_code_hash" } else { "__ckb_cell_type_code_hash" },
             if lock_script { "ckb_cell_lock_code_hash" } else { "ckb_cell_type_code_hash" },

@@ -2315,9 +2315,26 @@ impl<'a> Parser<'a> {
                     }
                 };
                 expr = Expr::FieldAccess(FieldAccessExpr { expr: Box::new(expr), field, span: self.current().span });
+            } else if self.check(&TokenKind::Lt) && Self::supports_generic_call(&expr) {
+                self.advance();
+                let mut type_args = Vec::new();
+                while !self.check(&TokenKind::Gt) && !self.check(&TokenKind::Eof) {
+                    type_args.push(self.parse_type()?);
+                    if self.check(&TokenKind::Comma) {
+                        self.advance();
+                    } else {
+                        break;
+                    }
+                }
+                self.expect(TokenKind::Gt)?;
+                if !self.check(&TokenKind::LParen) {
+                    return Err(CompileError::new("generic callable type arguments must be followed by '(...)'", self.current().span));
+                }
+                let args = self.parse_args()?;
+                expr = Expr::Call(CallExpr { func: Box::new(expr), type_args, args, span: self.current().span });
             } else if self.check(&TokenKind::LParen) {
                 let args = self.parse_args()?;
-                expr = Expr::Call(CallExpr { func: Box::new(expr), args, span: self.current().span });
+                expr = Expr::Call(CallExpr { func: Box::new(expr), type_args: Vec::new(), args, span: self.current().span });
             } else if self.check(&TokenKind::LBracket) {
                 self.advance();
                 let index = self.parse_expr()?;
@@ -2329,6 +2346,14 @@ impl<'a> Parser<'a> {
         }
 
         Ok(expr)
+    }
+
+    fn supports_generic_call(expr: &Expr) -> bool {
+        matches!(
+            expr,
+            Expr::Identifier(name)
+                if matches!(name.as_str(), "ckb::input" | "ckb::output" | "ckb::group_input" | "ckb::group_output")
+        )
     }
 
     fn parse_primary(&mut self) -> Result<Expr> {

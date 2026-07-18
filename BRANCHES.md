@@ -6,6 +6,14 @@ The 0.12-era work is the formal proposal baseline for grant-style acceptance
 discussions. Do not use that historical baseline to describe the current
 `main` branch state.
 
+## nightly-0.22
+
+`nightly-0.22` is the active implementation line for the 0.22 type-and-set
+theory roadmap. It begins from the integrated 0.21.1 `main` checkpoint. Treat
+features as shipped only when parser, formatter, type checking, lowering,
+metadata, LSP, tests, docs, and the matching gate agree; the branch name is not
+production evidence by itself.
+
 ## main / nightly-0.21
 
 `main` and `nightly-0.21` currently carry the 0.21 release-candidate
@@ -14,7 +22,7 @@ CLI, MCP, skill-pack, and builder-resolution work, but it is not a production
 CKB release claim until the matching `ci`, backend, and release gates have
 recorded passing evidence.
 
-Use this line for 0.21 RC integration work. Keep P2 Template Merkleisation and
+Use this line for 0.21 maintenance work. Keep P2 Template Merkleisation and
 new observation syntax out of this line unless their parser, metadata,
 backend, docs, and gate evidence are all promoted together.
 

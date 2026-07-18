@@ -52,9 +52,13 @@ modes; they do not create a new gate command:
   a terminal state. `release` still requires exact-artifact and chain evidence
   before a production claim.
 
-Metadata schema `46` carries declared/inferred/effective function effects, the
+Metadata schema `47` carries declared/inferred/effective function effects, the
 initial, terminal, discharge, state-model, and audit-warning fields for flows,
-and the canonical evidence tier on ProofPlan, flow, and function metadata.
+the canonical evidence tier on ProofPlan, flow, and function metadata, and
+typed transaction-view handle records under
+`runtime.transaction_view_handles`. Handle records must remain
+`ownership = read-only-view`, carry `lifecycle_authority = false`, and report
+checked-static typing plus checked-runtime read evidence.
 Consumers must reject unsupported schema versions instead of silently dropping
 these fields.
 

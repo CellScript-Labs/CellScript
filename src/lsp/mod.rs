@@ -526,6 +526,13 @@ impl LspServer {
                 return items;
             }
             "witness" => {
+                items.push(CompletionItem {
+                    label: "args".to_string(),
+                    kind: CompletionItemKind::Function,
+                    detail: Some("witness::args".to_string()),
+                    documentation: Some("Named read-only WitnessArgs transaction view".to_string()),
+                    insert_text: Some("witness::args(${1:0})".to_string()),
+                });
                 for name in ["raw", "lock", "input_type", "output_type", "size"] {
                     items.push(CompletionItem {
                         label: name.to_string(),
@@ -561,6 +568,15 @@ impl LspServer {
             }
             "ckb" => {
                 for (name, insert) in [
+                    ("input", "ckb::input<${1:CellType}>(${2:0})"),
+                    ("output", "ckb::output<${1:CellType}>(${2:0})"),
+                    ("group_input", "ckb::group_input<${1:CellType}>(${2:0})"),
+                    ("group_output", "ckb::group_output<${1:CellType}>(${2:0})"),
+                    ("cell_dep", "ckb::cell_dep(${1:0})"),
+                    ("header_dep", "ckb::header_dep(${1:0})"),
+                    ("input_out_point", "ckb::input_out_point(${1:input})"),
+                    ("lock_script", "ckb::lock_script(${1:cell})"),
+                    ("type_script", "ckb::type_script(${1:cell})"),
                     ("header_epoch_number", "ckb::header_epoch_number()"),
                     ("header_epoch_start_block_number", "ckb::header_epoch_start_block_number()"),
                     ("header_epoch_length", "ckb::header_epoch_length()"),

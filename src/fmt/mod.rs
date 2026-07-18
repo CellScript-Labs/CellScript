@@ -473,8 +473,13 @@ impl Formatter {
             Expr::Unary(unary) => format!("{}{}", format_unary_op(unary.op), self.format_expr(&unary.expr)),
             Expr::Call(call) => {
                 let func = self.format_expr(&call.func);
+                let type_args = if call.type_args.is_empty() {
+                    String::new()
+                } else {
+                    format!("<{}>", call.type_args.iter().map(format_type).collect::<Vec<_>>().join(", "))
+                };
                 let args = call.args.iter().map(|arg| self.format_expr(arg)).collect::<Vec<_>>().join(", ");
-                format!("{}({})", func, args)
+                format!("{}{}({})", func, type_args, args)
             }
             Expr::FieldAccess(field) => format!("{}.{}", self.format_expr(&field.expr), field.field),
             Expr::Index(index) => format!("{}[{}]", self.format_expr(&index.expr), self.format_expr(&index.index)),
@@ -1164,5 +1169,32 @@ with_capacity_floor(6100000000)
         let reparsed = parser::parse(&tokens).unwrap();
         let reformatted = format_default(&reparsed).unwrap();
         assert_eq!(formatted, reformatted);
+    }
+
+    #[test]
+    fn format_round_trips_typed_transaction_view_calls() {
+        let source = r#"
+module fmt::views
+
+resource Token has store {
+    amount: u64
+}
+
+action inspect() -> u64 {
+    verification
+        let input = ckb::input<Token>(0)
+        let output = ckb::group_output<Token>(0)
+        return input.capacity + output.output_index
+}
+"#;
+        let tokens = lexer::lex(source).unwrap();
+        let module = parser::parse(&tokens).unwrap();
+        let formatted = format_default(&module).unwrap();
+        assert!(formatted.contains("ckb::input<Token>(0)"), "unexpected formatted source:\n{}", formatted);
+        assert!(formatted.contains("ckb::group_output<Token>(0)"), "unexpected formatted source:\n{}", formatted);
+
+        let tokens = lexer::lex(&formatted).unwrap();
+        let reparsed = parser::parse(&tokens).unwrap();
+        assert_eq!(formatted, format_default(&reparsed).unwrap());
     }
 }

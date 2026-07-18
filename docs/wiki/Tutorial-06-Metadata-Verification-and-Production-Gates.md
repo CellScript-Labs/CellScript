@@ -118,6 +118,7 @@ You do not need to memorize the whole sidecar. Start with these fields:
 - `verifier_obligations`
 - `runtime.proof_plan`
 - `runtime.proof_plan_soundness`
+- `runtime.transaction_view_handles`
 - `runtime.builder_assumptions`
 - `template_layouts`
 - `constraints`
@@ -143,6 +144,12 @@ schema fields split review risk by surface: source/package identity,
 artifact-binding facts, and CKB constraint summaries can now move independently
 in future schema revisions. `verify-artifact` still rejects a mismatch in any of
 these versions.
+
+Schema 47 adds `runtime.transaction_view_handles`. Each record identifies the
+callable scope, source (`Input`, `GroupOutput`, `CellDep`, and so on), public
+handle type, and evidence tiers. A conforming record is a read-only view with
+`lifecycle_authority = false`; it is evidence of a transaction read surface,
+not evidence that a Cell was consumed or an output was created.
 
 ## Assurance Layer
 
