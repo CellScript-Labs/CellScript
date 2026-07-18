@@ -880,7 +880,7 @@ fn item_doc(item: &Item) -> Option<ItemDoc> {
                 "Trigger: {}. Scope: {}. Reads: {}. Aggregate primitives: {}.",
                 invariant.trigger.as_deref().unwrap_or("unspecified"),
                 invariant.scope.as_deref().unwrap_or("unspecified"),
-                comma_or_none(&invariant.reads),
+                comma_or_none(&invariant.reads.iter().map(ToString::to_string).collect::<Vec<_>>()),
                 invariant.aggregates.len()
             ),
         }),

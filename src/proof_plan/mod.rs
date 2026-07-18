@@ -5,7 +5,7 @@ pub mod soundness;
 use crate::aggregate_lowering::{
     aggregate_group_amount_endpoint, xudt_group_amount_conservation_type, XUDT_GROUP_AMOUNT_CONSERVED_METADATA_HELPER,
 };
-use crate::ast::{AggregateInvariantKind, AggregateRelation, ParamSource};
+use crate::ast::{AggregateInvariantKind, AggregateRelation, AggregateTarget, ParamSource, SourceView};
 use crate::ir::{self, IrInstruction};
 use crate::{CkbRuntimeAccessMetadata, PoolPrimitiveMetadata, VerifierObligationMetadata};
 use serde::{Deserialize, Serialize};
@@ -205,7 +205,7 @@ fn summary_plan_for_invariant(invariant: &ir::IrInvariant, runtime_accesses: &[C
     coverage.extend(coverage_notes(&trigger, &scope));
     dedup(&mut coverage);
 
-    let mut reads = invariant.reads.clone();
+    let mut reads = invariant.reads.iter().map(ToString::to_string).collect::<Vec<_>>();
     for aggregate in &invariant.aggregates {
         reads.extend(aggregate_reads(aggregate));
     }
@@ -961,7 +961,7 @@ fn aggregate_coverage_label(aggregate: &ir::IrAggregateInvariant) -> String {
             "aggregate_assertion:{}{}{} scope={}",
             aggregate.target,
             aggregate.relation.map(aggregate_relation_symbol).unwrap_or("?"),
-            aggregate.rhs.as_deref().unwrap_or("?"),
+            aggregate.rhs.as_ref().map(ToString::to_string).unwrap_or_else(|| "?".to_string()),
             aggregate.scope
         ),
         AggregateInvariantKind::Conserved => format!("aggregate_assertion:conserved({}) scope={}", aggregate.target, aggregate.scope),
@@ -982,7 +982,7 @@ fn aggregate_relation_check_label(aggregate: &ir::IrAggregateInvariant, evidence
             "assert_sum:{}{}{}={}",
             aggregate.target,
             aggregate.relation.map(aggregate_relation_symbol).unwrap_or("?"),
-            aggregate.rhs.as_deref().unwrap_or("?"),
+            aggregate.rhs.as_ref().map(ToString::to_string).unwrap_or_else(|| "?".to_string()),
             evidence.relation_status()
         ),
         AggregateInvariantKind::Conserved => format!("assert_conserved:{}=metadata-only", aggregate.target),
@@ -1003,7 +1003,7 @@ fn aggregate_feature_label(aggregate: &ir::IrAggregateInvariant) -> String {
             "assert_sum:{}{}{}",
             aggregate.target,
             aggregate.relation.map(aggregate_relation_symbol).unwrap_or("?"),
-            aggregate.rhs.as_deref().unwrap_or("?")
+            aggregate.rhs.as_ref().map(ToString::to_string).unwrap_or_else(|| "?".to_string())
         ),
         AggregateInvariantKind::Conserved => format!("assert_conserved:{}", aggregate.target),
         AggregateInvariantKind::Delta => format!("assert_delta:{}:{}", aggregate.target, aggregate.argument.as_deref().unwrap_or("?")),
@@ -1035,15 +1035,8 @@ fn aggregate_reads(aggregate: &ir::IrAggregateInvariant) -> Vec<String> {
     reads
 }
 
-fn reads_from_aggregate_target(target: &str) -> Vec<String> {
-    let base = target.split(['<', '.']).next().unwrap_or(target);
-    match base {
-        "input" | "inputs" => vec!["input".to_string()],
-        "output" | "outputs" => vec!["output".to_string()],
-        "group_input" | "group_inputs" => vec!["group_input".to_string()],
-        "group_output" | "group_outputs" => vec!["group_output".to_string()],
-        _ => Vec::new(),
-    }
+fn reads_from_aggregate_target(target: &AggregateTarget) -> Vec<String> {
+    target.source.proof_plan_read().map(str::to_string).into_iter().collect()
 }
 
 fn aggregate_group_cardinality(aggregate: &ir::IrAggregateInvariant) -> &'static str {
@@ -1112,8 +1105,8 @@ fn aggregate_xudt_group_amount_runtime_helper(
                 return None;
             }
             match source {
-                "group_outputs" => Some("xudt::require_group_amount_minted"),
-                "group_inputs" => Some("xudt::require_group_amount_burned"),
+                SourceView::GroupOutput => Some("xudt::require_group_amount_minted"),
+                SourceView::GroupInput => Some("xudt::require_group_amount_burned"),
                 _ => None,
             }
         }

@@ -1,4 +1,5 @@
 use crate::error::Span;
+use std::fmt;
 
 #[derive(Debug, Clone)]
 pub struct Module {
@@ -212,7 +213,7 @@ pub struct InvariantDef {
     pub name: String,
     pub trigger: Option<String>,
     pub scope: Option<String>,
-    pub reads: Vec<String>,
+    pub reads: Vec<AggregateTarget>,
     pub aggregates: Vec<AggregateInvariant>,
     pub asserts: Vec<Expr>,
     pub span: Span,
@@ -236,14 +237,136 @@ pub enum AggregateRelation {
     Gt,
 }
 
+/// Closed transaction/source view vocabulary used by invariants and aggregate
+/// targets. `SelectedCells` represents the legacy `Type.field` aggregate form;
+/// `TypeIdentity` represents the singleton `type_id` target.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SourceView {
+    Input,
+    Output,
+    GroupInput,
+    GroupOutput,
+    CellDep,
+    HeaderDep,
+    WitnessArgs,
+    LockArgs,
+    SelectedCells,
+    TypeIdentity,
+}
+
+impl SourceView {
+    pub const TRANSACTION_VIEWS: [Self; 8] = [
+        Self::Input,
+        Self::Output,
+        Self::GroupInput,
+        Self::GroupOutput,
+        Self::CellDep,
+        Self::HeaderDep,
+        Self::WitnessArgs,
+        Self::LockArgs,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Input => "inputs",
+            Self::Output => "outputs",
+            Self::GroupInput => "group_inputs",
+            Self::GroupOutput => "group_outputs",
+            Self::CellDep => "cell_deps",
+            Self::HeaderDep => "header_deps",
+            Self::WitnessArgs => "witness",
+            Self::LockArgs => "lock_args",
+            Self::SelectedCells => "selected_cells",
+            Self::TypeIdentity => "type_id",
+        }
+    }
+
+    pub fn from_source_name(name: &str) -> Option<Self> {
+        match name {
+            "input" | "inputs" => Some(Self::Input),
+            "output" | "outputs" => Some(Self::Output),
+            "group_input" | "group_inputs" => Some(Self::GroupInput),
+            "group_output" | "group_outputs" => Some(Self::GroupOutput),
+            "cell_dep" | "cell_deps" => Some(Self::CellDep),
+            "header_dep" | "header_deps" => Some(Self::HeaderDep),
+            "witness" | "witness_args" => Some(Self::WitnessArgs),
+            "lock_args" => Some(Self::LockArgs),
+            "selected_cells" => Some(Self::SelectedCells),
+            "type_id" => Some(Self::TypeIdentity),
+            _ => None,
+        }
+    }
+
+    pub const fn aggregate_scope(self) -> Option<&'static str> {
+        match self {
+            Self::GroupInput | Self::GroupOutput => Some("group"),
+            Self::Input | Self::Output => Some("transaction"),
+            _ => None,
+        }
+    }
+
+    pub const fn proof_plan_read(self) -> Option<&'static str> {
+        match self {
+            Self::Input => Some("input"),
+            Self::Output => Some("output"),
+            Self::GroupInput => Some("group_input"),
+            Self::GroupOutput => Some("group_output"),
+            Self::CellDep => Some("cell_dep"),
+            Self::HeaderDep => Some("header_dep"),
+            Self::WitnessArgs => Some("witness"),
+            Self::LockArgs => Some("lock_args"),
+            Self::SelectedCells | Self::TypeIdentity => None,
+        }
+    }
+}
+
+/// Typed target shared by invariant read declarations and aggregate operands.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct AggregateTarget {
+    pub source: SourceView,
+    pub type_name: Option<String>,
+    pub field: Option<String>,
+}
+
+impl AggregateTarget {
+    pub fn type_and_field(&self) -> Option<(&str, &str)> {
+        Some((self.type_name.as_deref()?, self.field.as_deref()?))
+    }
+}
+
+impl fmt::Display for AggregateTarget {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.source {
+            SourceView::SelectedCells => {
+                if let Some(type_name) = &self.type_name {
+                    formatter.write_str(type_name)?;
+                } else {
+                    formatter.write_str(self.source.as_str())?;
+                }
+            }
+            SourceView::TypeIdentity => formatter.write_str(self.source.as_str())?,
+            source => {
+                formatter.write_str(source.as_str())?;
+                if let Some(type_name) = &self.type_name {
+                    write!(formatter, "<{type_name}>")?;
+                }
+            }
+        }
+        if let Some(field) = &self.field {
+            write!(formatter, ".{field}")?;
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct AggregateInvariant {
     pub kind: AggregateInvariantKind,
-    pub target: String,
+    pub target: AggregateTarget,
     pub scope: String,
     pub argument: Option<String>,
     pub relation: Option<AggregateRelation>,
-    pub rhs: Option<String>,
+    pub rhs: Option<AggregateTarget>,
     pub span: Span,
 }
 

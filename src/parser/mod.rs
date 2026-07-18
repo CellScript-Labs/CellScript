@@ -1160,7 +1160,7 @@ impl<'a> Parser<'a> {
 
         self.expect(TokenKind::LParen)?;
         self.skip_newlines();
-        let target = self.parse_invariant_read()?;
+        let target = self.parse_invariant_target()?;
         self.skip_newlines();
         self.expect(TokenKind::Comma)?;
         self.skip_newlines();
@@ -1233,10 +1233,10 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_aggregate_sum_operand(&mut self) -> Result<String> {
+    fn parse_aggregate_sum_operand(&mut self) -> Result<AggregateTarget> {
         self.expect(TokenKind::LParen)?;
         self.skip_newlines();
-        let target = self.parse_invariant_read()?;
+        let target = self.parse_invariant_target()?;
         self.skip_newlines();
         self.expect(TokenKind::RParen)?;
         Ok(target)
@@ -1266,7 +1266,7 @@ impl<'a> Parser<'a> {
                 self.advance();
                 Ok(rendered)
             }
-            _ => self.parse_invariant_read(),
+            _ => self.parse_invariant_target().map(|target| target.to_string()),
         }
     }
 
@@ -1301,7 +1301,7 @@ impl<'a> Parser<'a> {
         }))
     }
 
-    fn parse_invariant_reads(&mut self) -> Result<Vec<String>> {
+    fn parse_invariant_reads(&mut self) -> Result<Vec<AggregateTarget>> {
         let mut reads = Vec::new();
         self.skip_newlines();
         if self.check(&TokenKind::RBrace) || self.check(&TokenKind::Semi) {
@@ -1309,7 +1309,7 @@ impl<'a> Parser<'a> {
         }
 
         loop {
-            reads.push(self.parse_invariant_read()?);
+            reads.push(self.parse_invariant_target()?);
             if self.check(&TokenKind::Comma) {
                 self.advance();
                 self.skip_newlines();
@@ -1324,24 +1324,42 @@ impl<'a> Parser<'a> {
         Ok(reads)
     }
 
-    fn parse_invariant_read(&mut self) -> Result<String> {
-        let mut read = self.parse_name_path()?;
+    fn parse_invariant_target(&mut self) -> Result<AggregateTarget> {
+        let start_span = self.current().span;
+        let root = self.parse_name_path()?;
+        let mut type_name = None;
         if self.check(&TokenKind::Lt) {
             self.advance();
             let ty = self.parse_type()?;
             self.expect(TokenKind::Gt)?;
-            read.push('<');
-            read.push_str(&Self::render_type(&ty));
-            read.push('>');
+            type_name = Some(Self::render_type(&ty));
         }
 
+        let mut fields = Vec::new();
         while self.check(&TokenKind::Dot) {
             self.advance();
-            read.push('.');
-            read.push_str(&self.parse_name()?);
+            fields.push(self.parse_name()?);
         }
 
-        Ok(read)
+        let field = (!fields.is_empty()).then(|| fields.join("."));
+        let source = if let Some(source) = SourceView::from_source_name(&root) {
+            source
+        } else {
+            if type_name.is_some() {
+                return Err(CompileError::new(
+                    format!("unknown invariant source view '{}'; generic source views use the closed CKB view registry", root),
+                    start_span,
+                ));
+            }
+            type_name = Some(root);
+            SourceView::SelectedCells
+        };
+
+        if source == SourceView::TypeIdentity && (type_name.is_some() || field.is_some()) {
+            return Err(CompileError::new("type_id aggregate target cannot have a type argument or field projection", start_span));
+        }
+
+        Ok(AggregateTarget { source, type_name, field })
     }
 
     fn parse_type(&mut self) -> Result<Type> {
@@ -3099,7 +3117,7 @@ fn normalize_hash_type_decl(value: &str) -> Option<String> {
     }
 }
 
-fn aggregate_scope_from_targets(left: &str, right: Option<&str>) -> Option<String> {
+fn aggregate_scope_from_targets(left: &AggregateTarget, right: Option<&AggregateTarget>) -> Option<String> {
     let left_scope = aggregate_scope_from_target(left)?;
     if let Some(right) = right {
         let right_scope = aggregate_scope_from_target(right)?;
@@ -3110,13 +3128,8 @@ fn aggregate_scope_from_targets(left: &str, right: Option<&str>) -> Option<Strin
     Some(left_scope.to_string())
 }
 
-fn aggregate_scope_from_target(target: &str) -> Option<&'static str> {
-    let base = target.split(['<', '.']).next().unwrap_or(target);
-    match base {
-        "group_input" | "group_inputs" | "group_output" | "group_outputs" => Some("group"),
-        "input" | "inputs" | "output" | "outputs" => Some("transaction"),
-        _ => None,
-    }
+fn aggregate_scope_from_target(target: &AggregateTarget) -> Option<&'static str> {
+    target.source.aggregate_scope()
 }
 
 #[cfg(test)]
@@ -3225,7 +3238,12 @@ invariant token_conservation {
         assert_eq!(invariant.name, "token_conservation");
         assert_eq!(invariant.trigger.as_deref(), Some("type_group"));
         assert_eq!(invariant.scope.as_deref(), Some("group"));
-        assert_eq!(invariant.reads, vec!["group_inputs<Token>.amount", "group_outputs<Token>.amount"]);
+        assert_eq!(
+            invariant.reads.iter().map(ToString::to_string).collect::<Vec<_>>(),
+            vec!["group_inputs<Token>.amount", "group_outputs<Token>.amount"]
+        );
+        assert_eq!(invariant.reads[0].source, SourceView::GroupInput);
+        assert_eq!(invariant.reads[0].type_and_field(), Some(("Token", "amount")));
         assert_eq!(invariant.asserts.len(), 1);
     }
 
@@ -3251,12 +3269,36 @@ invariant token_conservation {
 
         assert_eq!(invariant.aggregates.len(), 2);
         assert_eq!(invariant.aggregates[0].kind, AggregateInvariantKind::Conserved);
-        assert_eq!(invariant.aggregates[0].target, "Token.amount");
+        assert_eq!(invariant.aggregates[0].target.to_string(), "Token.amount");
+        assert_eq!(invariant.aggregates[0].target.source, SourceView::SelectedCells);
+        assert_eq!(invariant.aggregates[0].target.type_and_field(), Some(("Token", "amount")));
         assert_eq!(invariant.aggregates[0].scope, "group");
         assert_eq!(invariant.aggregates[1].kind, AggregateInvariantKind::Sum);
         assert_eq!(invariant.aggregates[1].relation, Some(AggregateRelation::Le));
-        assert_eq!(invariant.aggregates[1].target, "group_outputs<Token>.amount");
-        assert_eq!(invariant.aggregates[1].rhs.as_deref(), Some("group_inputs<Token>.amount"));
+        assert_eq!(invariant.aggregates[1].target.to_string(), "group_outputs<Token>.amount");
+        assert_eq!(invariant.aggregates[1].target.source, SourceView::GroupOutput);
+        assert_eq!(invariant.aggregates[1].rhs.as_ref().map(ToString::to_string).as_deref(), Some("group_inputs<Token>.amount"));
+    }
+
+    #[test]
+    fn test_parse_rejects_unknown_generic_invariant_source_view() {
+        let input = r#"
+module test
+
+invariant invalid_source {
+    trigger: type_group
+    scope: group
+    reads: mystery<Token>.amount
+    assert_conserved(Token.amount, scope = group)
+}
+
+resource Token {
+    amount: u64
+}
+"#;
+        let tokens = lex(input).unwrap();
+        let error = parse(&tokens).unwrap_err();
+        assert!(error.message.contains("unknown invariant source view 'mystery'"), "{}", error.message);
     }
 
     #[test]

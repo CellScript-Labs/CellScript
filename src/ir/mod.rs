@@ -56,7 +56,7 @@ pub struct IrInvariant {
     pub name: String,
     pub trigger: Option<String>,
     pub scope: Option<String>,
-    pub reads: Vec<String>,
+    pub reads: Vec<AggregateTarget>,
     pub aggregates: Vec<IrAggregateInvariant>,
     pub assert_count: usize,
     pub span: Span,
@@ -65,11 +65,11 @@ pub struct IrInvariant {
 #[derive(Debug, Clone)]
 pub struct IrAggregateInvariant {
     pub kind: AggregateInvariantKind,
-    pub target: String,
+    pub target: AggregateTarget,
     pub scope: String,
     pub argument: Option<String>,
     pub relation: Option<AggregateRelation>,
-    pub rhs: Option<String>,
+    pub rhs: Option<AggregateTarget>,
     pub span: Span,
 }
 

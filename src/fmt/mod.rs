@@ -290,7 +290,7 @@ impl Formatter {
             self.push_line(&format!("scope: {}", scope));
         }
         if !invariant.reads.is_empty() {
-            self.push_line(&format!("reads: {}", invariant.reads.join(", ")));
+            self.push_line(&format!("reads: {}", invariant.reads.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ")));
         }
         for aggregate in &invariant.aggregates {
             self.push_line(&format_aggregate_invariant(aggregate));
@@ -681,7 +681,7 @@ fn format_aggregate_invariant(aggregate: &AggregateInvariant) -> String {
             "assert_sum({}) {} assert_sum({})",
             aggregate.target,
             aggregate.relation.map(format_aggregate_relation).unwrap_or("?"),
-            aggregate.rhs.as_deref().unwrap_or("?")
+            aggregate.rhs.as_ref().map(ToString::to_string).unwrap_or_else(|| "?".to_string())
         ),
         AggregateInvariantKind::Conserved => format!("assert_conserved({}, scope = {})", aggregate.target, aggregate.scope),
         AggregateInvariantKind::Delta => format!(
@@ -866,6 +866,32 @@ action add(x: u64, y: u64) -> u64 {
         assert!(formatted.contains("action add(x: u64, y: u64) -> u64 {\n    verification"));
         assert!(formatted.contains("let z = x + y"));
         assert!(formatted.contains("return z"));
+    }
+
+    #[test]
+    fn format_canonicalizes_typed_invariant_source_views() {
+        let source = r#"
+module demo
+
+invariant token_conservation {
+    trigger: type_group
+    scope: group
+    reads: group_input<Token>.amount, group_output<Token>.amount
+    assert_sum(group_output<Token>.amount) == assert_sum(group_input<Token>.amount)
+}
+
+resource Token {
+    amount: u128
+}
+"#;
+        let tokens = lexer::lex(source).unwrap();
+        let module = parser::parse(&tokens).unwrap();
+        let formatted = format_default(&module).unwrap();
+
+        assert!(formatted.contains("reads: group_inputs<Token>.amount, group_outputs<Token>.amount"), "{formatted}");
+        assert!(formatted.contains("assert_sum(group_outputs<Token>.amount) == assert_sum(group_inputs<Token>.amount)"));
+        let reparsed = parser::parse(&lexer::lex(&formatted).unwrap()).unwrap();
+        assert_eq!(format_default(&reparsed).unwrap(), formatted);
     }
 
     #[test]

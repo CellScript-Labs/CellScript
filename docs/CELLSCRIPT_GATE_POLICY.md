@@ -31,6 +31,9 @@ modes; they do not create a new gate command:
 
 - `dev` and `ci` reject underdeclared `fn` effects, including transitive calls
   through source-authenticated package imports.
+- invariant `reads` and aggregate operands share the closed `SourceView` /
+  typed-target model; parser, type checking, IR, ProofPlan, formatter, and
+  xUDT helper selection no longer reparse source-view strings independently;
 - canonical 0.22 flows use an enum-backed state field, exactly one `initial`
   state, at least one `terminal` state, and no outgoing terminal edge;
 - terminal discharge is currently only `terminal-by-output-state`, backed by

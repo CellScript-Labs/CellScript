@@ -1,4 +1,4 @@
-use crate::ast::{AggregateInvariantKind, AggregateRelation};
+use crate::ast::{AggregateInvariantKind, AggregateRelation, AggregateTarget, SourceView};
 use crate::ir;
 use std::collections::HashMap;
 
@@ -21,12 +21,12 @@ pub(crate) fn xudt_group_amount_conservation_type<'a>(
     if aggregate.kind != AggregateInvariantKind::Sum || aggregate.relation != Some(AggregateRelation::Eq) {
         return None;
     }
-    let rhs = aggregate.rhs.as_deref()?;
+    let rhs = aggregate.rhs.as_ref()?;
     let (left_source, left_type) = aggregate_group_amount_endpoint(&aggregate.target)?;
     let (right_source, right_type) = aggregate_group_amount_endpoint(rhs)?;
     (left_type == right_type
-        && ((left_source == "group_outputs" && right_source == "group_inputs")
-            || (left_source == "group_inputs" && right_source == "group_outputs")))
+        && ((left_source == SourceView::GroupOutput && right_source == SourceView::GroupInput)
+            || (left_source == SourceView::GroupInput && right_source == SourceView::GroupOutput)))
         .then_some(left_type)
 }
 
@@ -65,13 +65,11 @@ pub(crate) fn body_contains_runtime_helper(body: &ir::IrBody, helper: &str) -> b
     })
 }
 
-pub(crate) fn aggregate_group_amount_endpoint(target: &str) -> Option<(&str, &str)> {
-    let (source, rest) = target.split_once('<')?;
-    if source != "group_inputs" && source != "group_outputs" {
+pub(crate) fn aggregate_group_amount_endpoint(target: &AggregateTarget) -> Option<(SourceView, &str)> {
+    if !matches!(target.source, SourceView::GroupInput | SourceView::GroupOutput) || target.field.as_deref() != Some("amount") {
         return None;
     }
-    let (type_name, field) = rest.split_once(">.")?;
-    (field == "amount" && !type_name.is_empty()).then_some((source, type_name))
+    Some((target.source, target.type_name.as_deref()?))
 }
 
 fn field_aliases(body: &ir::IrBody) -> HashMap<usize, FieldAlias> {

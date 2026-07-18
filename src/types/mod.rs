@@ -7,6 +7,7 @@ use std::collections::{HashMap, HashSet};
 enum CallableKind {
     Action,
     Function,
+    Invariant,
     Lock,
 }
 
@@ -957,19 +958,14 @@ impl<'a> TypeChecker<'a> {
         }
 
         for read in &invariant.reads {
-            let base = read.split(['<', '.']).next().unwrap_or(read.as_str());
-            match base {
-                "input" | "inputs" | "output" | "outputs" | "group_input" | "group_inputs" | "group_output" | "group_outputs"
-                | "cell_dep" | "cell_deps" | "header_dep" | "header_deps" | "witness" | "lock_args" => {}
-                _ => {
-                    return Err(CompileError::new(
-                        format!(
-                            "invariant '{}' has unsupported read source '{}'; expected input/output/group_input/group_output/cell_dep/header_dep/witness/lock_args variants",
-                            invariant.name, read
-                        ),
-                        invariant.span,
-                    ));
-                }
+            if !SourceView::TRANSACTION_VIEWS.contains(&read.source) {
+                return Err(CompileError::new(
+                    format!(
+                        "invariant '{}' has unsupported read source '{}'; expected input/output/group_input/group_output/cell_dep/header_dep/witness/lock_args variants",
+                        invariant.name, read
+                    ),
+                    invariant.span,
+                ));
             }
         }
 
@@ -987,7 +983,7 @@ impl<'a> TypeChecker<'a> {
             self.check_aggregate_invariant(invariant, aggregate)?;
         }
 
-        let previous_callable = self.current_callable.replace(CallableKind::Function);
+        let previous_callable = self.current_callable.replace(CallableKind::Invariant);
         let mut assert_env = TypeEnv::default();
         let assert_result = (|| -> Result<()> {
             for expr in &invariant.asserts {
@@ -1058,7 +1054,7 @@ impl<'a> TypeChecker<'a> {
                 }
             }
             AggregateInvariantKind::Singleton => {
-                if aggregate.target != "type_id" {
+                if aggregate.target.source != SourceView::TypeIdentity {
                     self.validate_aggregate_field_target(invariant, aggregate, &aggregate.target)?;
                 }
             }
@@ -1067,8 +1063,13 @@ impl<'a> TypeChecker<'a> {
         Ok(())
     }
 
-    fn validate_aggregate_field_target(&self, invariant: &InvariantDef, aggregate: &AggregateInvariant, target: &str) -> Result<()> {
-        let Some((type_name, field_name)) = aggregate_target_type_and_field(target) else {
+    fn validate_aggregate_field_target(
+        &self,
+        invariant: &InvariantDef,
+        aggregate: &AggregateInvariant,
+        target: &AggregateTarget,
+    ) -> Result<()> {
+        let Some((type_name, field_name)) = target.type_and_field() else {
             return Err(CompileError::new(
                 format!(
                     "aggregate invariant in '{}' must target a concrete field like Token.amount or group_inputs<Token>.amount",
@@ -4107,6 +4108,9 @@ impl<'a> TypeChecker<'a> {
         };
 
         match (self.current_callable, operation) {
+            (Some(CallableKind::Invariant), Some(operation)) => {
+                return Err(CompileError::new(format!("pure function cannot contain '{}'", operation), expr_span(expr)));
+            }
             (Some(CallableKind::Lock), Some(operation)) if operation != "read_ref" => {
                 return Err(CompileError::new(
                     format!("lock cannot contain '{}' Cell state transition; move state transition logic into an action", operation),
@@ -5886,6 +5890,10 @@ impl<'a> TypeChecker<'a> {
 
     fn validate_call_allowed(&self, callee_name: &str, callee_kind: CallableKind, span: Span) -> Result<()> {
         match (self.current_callable, callee_kind) {
+            (Some(CallableKind::Invariant), CallableKind::Action | CallableKind::Lock) => Err(CompileError::new(
+                format!("invariant cannot call stateful entry '{}'; call a pure helper instead", callee_name),
+                span,
+            )),
             (Some(CallableKind::Function), CallableKind::Lock) => {
                 Err(CompileError::new(format!("function cannot call lock '{}'", callee_name), span))
             }
@@ -6450,23 +6458,6 @@ fn item_symbol_name_and_span(item: &Item) -> Option<(&str, Span)> {
         Item::Lock(def) => Some((&def.name, def.span)),
         Item::Use(_) => None,
     }
-}
-
-fn aggregate_target_type_and_field(target: &str) -> Option<(&str, &str)> {
-    if let Some((before_field, field)) = target.rsplit_once('.') {
-        if field.is_empty() {
-            return None;
-        }
-        if let Some(type_name) = before_field.split('<').nth(1).and_then(|rest| rest.split('>').next()) {
-            if !type_name.is_empty() {
-                return Some((type_name, field));
-            }
-        }
-        if !before_field.is_empty() {
-            return Some((before_field, field));
-        }
-    }
-    None
 }
 
 fn aggregate_field_type_is_supported(ty: &Type) -> bool {

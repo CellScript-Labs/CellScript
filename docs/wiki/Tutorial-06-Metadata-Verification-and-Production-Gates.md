@@ -219,6 +219,14 @@ ProofPlan coverage states are intentionally explicit:
 | `gap:runtime-helper-required` | The claim maps to a runtime helper, but the selected entry did not emit matching helper coverage. |
 | `checked-runtime` | Generated runtime access backs the claim for the selected entry. |
 
+On the nightly 0.22 line, invariant read ranges and aggregate operands are
+parsed once into a closed typed target: a source view (`inputs`, `outputs`,
+`group_inputs`, `group_outputs`, `cell_deps`, `header_deps`, `witness`, or
+`lock_args`) plus optional cell type and field. The formatter emits canonical
+plural source-view names, while ProofPlan keeps the same readable target text.
+Unknown generic source views fail in the parser; later compiler phases do not
+recover their meaning by splitting strings.
+
 Nightly 0.22 also records who must discharge every obligation:
 
 | Evidence tier | Discharged by |
