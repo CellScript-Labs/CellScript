@@ -927,6 +927,14 @@ impl LspServer {
                 "forall ${1:output} ${2:item} in ${3:group_outputs<CellType>} {\n    require ${2:item}.${4:field} ${5:>} ${6:0}\n}",
             ),
             ("count", "count(${1:outputs<CellType>} where ${2:field} == ${3:value}) == ${4:1}"),
+            (
+                "consume_each",
+                "consume_each ${1:item} in ${2:inputs} {\n    require ${1:item}.${3:field} ${4:>} ${5:0}\n}",
+            ),
+            (
+                "create_each",
+                "create_each ${1:plan} in ${2:plans} {\n    require ${1:plan}.${3:field} ${4:>} ${5:0}\n    create ${6:CellType} { $0 }\n}",
+            ),
             ("verification", "verification\n    $0"),
             ("require_block", "require {\n    ${1:condition}\n}"),
             ("preserve", "preserve ${1:output} from ${2:input} {\n    ${3:field}\n}"),
@@ -956,7 +964,24 @@ impl LspServer {
 
     fn type_completions(&self) -> Vec<CompletionItem> {
         let types = vec![
-            "u8", "u16", "u32", "u64", "u128", "i8", "i16", "i32", "i64", "i128", "bool", "String", "Address", "Hash", "Bytes", "Vec",
+            "u8",
+            "u16",
+            "u32",
+            "u64",
+            "u128",
+            "i8",
+            "i16",
+            "i32",
+            "i64",
+            "i128",
+            "bool",
+            "String",
+            "Address",
+            "Hash",
+            "Bytes",
+            "Vec",
+            "BoundedCellSet",
+            "BoundedList",
         ];
 
         types
@@ -2612,6 +2637,8 @@ mod tests {
         assert!(keywords.iter().any(|k| k.label == "require"));
         assert!(keywords.iter().any(|k| k.label == "forall"));
         assert!(keywords.iter().any(|k| k.label == "count"));
+        assert!(keywords.iter().any(|k| k.label == "consume_each"));
+        assert!(keywords.iter().any(|k| k.label == "create_each"));
         assert!(!keywords.iter().any(|k| k.label == "transfer"));
         assert!(keywords.iter().any(|k| k.label == "std::cell::same_lock"));
         assert!(keywords.iter().any(|k| k.label == "std::cell::preserve_capacity"));
@@ -2621,6 +2648,9 @@ mod tests {
         assert!(keywords.iter().any(|k| k.label == "protected"));
         assert!(keywords.iter().any(|k| k.label == "witness"));
         assert!(keywords.iter().any(|k| k.label == "lock_args"));
+        let types = server.type_completions();
+        assert!(types.iter().any(|item| item.label == "BoundedCellSet"));
+        assert!(types.iter().any(|item| item.label == "BoundedList"));
     }
 
     #[test]

@@ -145,7 +145,7 @@ artifact-binding facts, and CKB constraint summaries can now move independently
 in future schema revisions. `verify-artifact` still rejects a mismatch in any of
 these versions.
 
-Schema 47 adds `runtime.transaction_view_handles`. Each record identifies the
+Schema 48 includes `runtime.transaction_view_handles`. Each record identifies the
 callable scope, source (`Input`, `GroupOutput`, `CellDep`, and so on), public
 handle type, and evidence tiers. A conforming record is a read-only view with
 `lifecycle_authority = false`; it is evidence of a transaction read surface,
@@ -157,6 +157,15 @@ Bounded `forall` and `count` invariant clauses appear as
 complexity, declared field reads, runtime cardinality, vacuous-zero behavior,
 and count overflow policy. A `runtime-helper-required` record is a known helper
 contract, not proof that the selected artifact emitted or executed that helper.
+
+`runtime.collection_instantiations` also distinguishes local stack collections
+from source-aware bounded Cell collections. For `BoundedCellSet<T, N>`, verify
+`source = input`, `ownership = linear-cell-set`, the finite `max_elements`, and
+the `consume_each` runtime-helper tier. For `BoundedList<P, N>` driving
+`create_each`, verify `source = witness`, `output_cardinality_max = N`, and
+`capacity_builder_evidence_required = true`. Its ProofPlan evidence is
+`builder-evidence-required`; it is not proof that a transaction builder supplied
+the matching outputs or sufficient capacity.
 
 ## Assurance Layer
 

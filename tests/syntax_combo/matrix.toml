@@ -11,6 +11,10 @@ required_origins = [
     "generated",
     "tests/syntax_combo/seeds/bounded-quantifier.cell",
     "tests/syntax_combo/seeds/bounded-quantifier-unbounded-reject.cell",
+    "tests/syntax_combo/seeds/bounded-collection.cell",
+    "tests/syntax_combo/seeds/bounded-collection-missing-cardinality-reject.cell",
+    "tests/syntax_combo/seeds/bounded-collection-duplicate-consume-reject.cell",
+    "tests/syntax_combo/seeds/bounded-collection-vec-resource-reject.cell",
     "tests/syntax_combo/seeds/function-effect-signature.cell",
     "tests/syntax_combo/seeds/require-block-lifecycle.cell",
     "tests/syntax_combo/seeds/terminal-flow-metadata.cell",
@@ -27,6 +31,10 @@ required_origins = [
     "generated",
     "tests/syntax_combo/seeds/bounded-quantifier.cell",
     "tests/syntax_combo/seeds/bounded-quantifier-unbounded-reject.cell",
+    "tests/syntax_combo/seeds/bounded-collection.cell",
+    "tests/syntax_combo/seeds/bounded-collection-missing-cardinality-reject.cell",
+    "tests/syntax_combo/seeds/bounded-collection-duplicate-consume-reject.cell",
+    "tests/syntax_combo/seeds/bounded-collection-vec-resource-reject.cell",
     "matrix:continuity/std-cell",
     "matrix:lifecycle/proof/control-flow",
     "matrix:lifecycle/proof/local-binding",
@@ -54,6 +62,10 @@ required_origins = [
     "generated",
     "tests/syntax_combo/seeds/bounded-quantifier.cell",
     "tests/syntax_combo/seeds/bounded-quantifier-unbounded-reject.cell",
+    "tests/syntax_combo/seeds/bounded-collection.cell",
+    "tests/syntax_combo/seeds/bounded-collection-missing-cardinality-reject.cell",
+    "tests/syntax_combo/seeds/bounded-collection-duplicate-consume-reject.cell",
+    "tests/syntax_combo/seeds/bounded-collection-vec-resource-reject.cell",
     "matrix:continuity/std-cell",
     "matrix:deep/reject/proof-purity",
     "matrix:deep/reject/source-qualifier",
@@ -84,7 +96,7 @@ proof_syntax = ["require", "require_block", "assert", "branch_require", "helper_
 continuity = ["explicit_require", "preserve", "same_type", "same_lock", "preserve_lock", "preserve_capacity", "conserved"]
 control_flow = ["straight_line", "if", "nested_if", "match", "loop", "block_tail"]
 data_shape = ["u64", "bool", "u32", "u128", "fixed_bytes", "tuple", "enum", "fixed_struct", "dynamic_field"]
-collection = ["none", "vec_literal", "vec_helper", "unsupported_map", "cell_backed_attempt"]
+collection = ["none", "vec_literal", "vec_helper", "bounded_cell_set", "bounded_plan", "unsupported_map", "cell_backed_attempt"]
 profile = ["default", "ckb", "production"]
 backend = ["parse", "fmt", "check", "metadata", "asm", "elf", "ckb_acceptance_subset"]
 
@@ -109,6 +121,10 @@ required_bug_classes.quick = [
     "SCA-BUG-SOURCE-QUALIFIER-LINEARITY",
     "SCA-BUG-RECEIPT-CLAIM-CONTRACT",
     "SCA-BUG-LOCK-SOURCE-QUALIFIERS",
+    "SCA-BUG-0.22-CELLSET-UNBOUNDED",
+    "SCA-BUG-0.22-CELLSET-VEC-RESOURCE",
+    "SCA-BUG-0.22-CONSUME-EACH-DUPLICATE",
+    "SCA-BUG-0.22-CREATE-EACH-CARDINALITY-MISSING",
 ]
 
 required_bug_classes.ci = [

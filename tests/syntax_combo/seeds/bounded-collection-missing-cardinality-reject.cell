@@ -1,0 +1,12 @@
+// audit: phase=reject_compile
+// audit: contains=explicit maximum cardinality
+module cellscript::audit::seed_bounded_collection_missing_cardinality_reject
+
+resource Token has store, consume {
+    amount: u64,
+}
+
+action batch(input inputs: BoundedCellSet<Token>) -> u64 {
+    verification
+        return 0
+}

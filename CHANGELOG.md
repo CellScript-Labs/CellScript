@@ -11,13 +11,22 @@
   absence of lifecycle authority, checked-static typing evidence, and
   checked-runtime read evidence. Existing `source::*` functions remain the
   explicit low-level migration surface.
-- Bump compile metadata to schema version 47 for the callable/flow/evidence
-  fields and `runtime.transaction_view_handles`.
 - Add finite invariant quantifiers: `forall <role> <binding> in
   <source_view<T>> { require ... }` and `count(<source_view<T>> where ...)`.
   They share the closed aggregate target model, reject unbounded and impure
   bodies, and emit ProofPlan scan complexity, field reads, cardinality/vacuous
   policy, `u64` count overflow policy, and runtime-helper-required evidence.
+- Add source-aware bounded collection contracts: `input`-qualified
+  `BoundedCellSet<CellType, N>` values are linearly discharged by
+  `consume_each`, while `witness`-qualified fixed-width `BoundedList<Plan, N>`
+  values may drive one `create` template per element through `create_each`.
+  Metadata records source, ownership, maximum/runtime cardinality and vacuous
+  status; ProofPlan keeps consume iteration at `runtime-helper-required` and
+  output cardinality/capacity at `builder-evidence-required`. Generic
+  `Vec<Resource>` remains rejected.
+- Bump compile metadata to schema version 48 for callable/flow/evidence fields,
+  `runtime.transaction_view_handles`, and bounded collection source, ownership,
+  cardinality, vacuity, capacity-builder, and evidence-tier fields.
 
 ## 0.21.1 - 2026-07-11
 

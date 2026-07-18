@@ -52,7 +52,7 @@ modes; they do not create a new gate command:
   a terminal state. `release` still requires exact-artifact and chain evidence
   before a production claim.
 
-Metadata schema `47` carries declared/inferred/effective function effects, the
+Metadata schema `48` carries declared/inferred/effective function effects, the
 initial, terminal, discharge, state-model, and audit-warning fields for flows,
 the canonical evidence tier on ProofPlan, flow, and function metadata, and
 typed transaction-view handle records under
@@ -68,6 +68,18 @@ record scan complexity, field reads, runtime cardinality, vacuous `forall`
 status, and `u64` count overflow policy. Until a selected entry emits the named
 bounded scan helper, their tier is `runtime-helper-required`, never
 `checked-runtime` or `metadata-only`.
+
+Bounded Cell collections use the same finite-evidence rule. An action may take
+`input cells: BoundedCellSet<T, N>` and discharge its linear ownership exactly
+once with `consume_each`. A fixed-width witness plan may use
+`witness plans: BoundedList<P, N>` and exactly one `create` template per plan
+element through `create_each`. `runtime.collection_instantiations` records the
+explicit source, maximum cardinality, runtime-cardinality placeholder, vacuous
+zero policy, and ownership. Consume iteration remains
+`runtime-helper-required`; create iteration additionally emits
+`builder-evidence-required` output-count and capacity obligations. The quick
+syntax gate covers missing bounds, duplicate consumption, and
+`Vec<Resource>` rejection.
 
 ## Command Cheatsheet
 

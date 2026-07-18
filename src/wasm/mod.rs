@@ -371,6 +371,7 @@ mod tests {
             create_set: Vec::new(),
             mutate_set: Vec::new(),
             write_intents: Vec::new(),
+            bounded_collection_ops: Vec::new(),
             blocks: Vec::new(),
         }
     }

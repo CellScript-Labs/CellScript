@@ -423,6 +423,7 @@ impl Formatter {
                 line.push_str(&self.format_expr(&let_stmt.value));
                 self.push_line(&line);
             }
+            Stmt::Expr(Expr::Call(call)) if bounded_each_call_parts(call).is_some() => self.format_bounded_each(call),
             Stmt::Expr(expr) => self.push_line(&self.format_expr(expr)),
             Stmt::Return(ReturnStmt { value: None, .. }) => self.push_line("return"),
             Stmt::Return(ReturnStmt { value: Some(expr), .. }) => self.push_line(&format!("return {}", self.format_expr(expr))),
@@ -430,6 +431,20 @@ impl Formatter {
             Stmt::For(for_stmt) => self.format_for_stmt(for_stmt),
             Stmt::While(while_stmt) => self.format_while_stmt(while_stmt),
         }
+    }
+
+    fn format_bounded_each(&mut self, call: &CallExpr) {
+        let Some((operation, binding, collection, body)) = bounded_each_call_parts(call) else {
+            self.push_line(&self.format_expr(&Expr::Call(call.clone())));
+            return;
+        };
+        self.push_line(&format!("{} {} in {} {{", operation, binding, self.format_expr(collection)));
+        self.indent_level += 1;
+        for stmt in body {
+            self.format_stmt(stmt);
+        }
+        self.indent_level -= 1;
+        self.push_line("}");
     }
 
     fn format_if_stmt(&mut self, if_stmt: &IfStmt) {
@@ -703,6 +718,21 @@ fn format_effect(effect: EffectClass) -> &'static str {
         EffectClass::Creating => "creating",
         EffectClass::Destroying => "destroying",
     }
+}
+
+fn bounded_each_call_parts(call: &CallExpr) -> Option<(&'static str, &str, &Expr, &[Stmt])> {
+    let Expr::Identifier(func) = call.func.as_ref() else {
+        return None;
+    };
+    let operation = match func.as_str() {
+        "__cellscript_consume_each" => "consume_each",
+        "__cellscript_create_each" => "create_each",
+        _ => return None,
+    };
+    let [Expr::Identifier(binding), collection, Expr::Block(body)] = call.args.as_slice() else {
+        return None;
+    };
+    Some((operation, binding, collection, body))
 }
 
 fn format_aggregate_invariant(aggregate: &AggregateInvariant) -> String {
@@ -1257,6 +1287,43 @@ invariant one_claim {
         let formatted = format_default(&module).unwrap();
         assert!(formatted.contains("forall output token in group_outputs<Token>"), "unexpected output:\n{}", formatted);
         assert!(formatted.contains("count(outputs<Token> where amount == 7) == 1"), "unexpected output:\n{}", formatted);
+        let reparsed = parser::parse(&lexer::lex(&formatted).unwrap()).unwrap();
+        assert_eq!(formatted, format_default(&reparsed).unwrap());
+    }
+
+    #[test]
+    fn format_round_trips_bounded_collection_lifecycle_blocks() {
+        let source = r#"
+module fmt::bounded_collections
+
+struct Plan {
+    owner: Address
+    amount: u64
+}
+
+resource Token has store, create, consume {
+    owner: Address
+    amount: u64
+}
+
+action batch(input inputs: BoundedCellSet<Token, 16>, witness plans: BoundedList<Plan, 16>) -> u64 {
+    verification
+        consume_each token in inputs {
+            require token.amount > 0
+        }
+        create_each plan in plans {
+            require plan.amount > 0
+            create Token { owner: plan.owner, amount: plan.amount }
+        }
+        return 0
+}
+"#;
+        let module = parser::parse(&lexer::lex(source).unwrap()).unwrap();
+        let formatted = format_default(&module).unwrap();
+        assert!(formatted.contains("input inputs: BoundedCellSet<Token, 16>"), "unexpected output:\n{formatted}");
+        assert!(formatted.contains("witness plans: BoundedList<Plan, 16>"), "unexpected output:\n{formatted}");
+        assert!(formatted.contains("consume_each token in inputs"), "unexpected output:\n{formatted}");
+        assert!(formatted.contains("create_each plan in plans"), "unexpected output:\n{formatted}");
         let reparsed = parser::parse(&lexer::lex(&formatted).unwrap()).unwrap();
         assert_eq!(formatted, format_default(&reparsed).unwrap());
     }

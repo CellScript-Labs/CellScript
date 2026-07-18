@@ -201,7 +201,7 @@ fn strict_capability_name(capability: ast::Capability) -> &'static str {
 const DEFAULT_TARGET: &str = "riscv64-asm";
 const DEFAULT_TARGET_PROFILE: &str = "ckb";
 const ARTIFACT_CACHE_VERSION: &str = "project-source-set-v5";
-pub const METADATA_SCHEMA_VERSION: u32 = 47;
+pub const METADATA_SCHEMA_VERSION: u32 = 48;
 pub const SOURCE_METADATA_SCHEMA_VERSION: u32 = 1;
 pub const ARTIFACT_METADATA_SCHEMA_VERSION: u32 = 1;
 pub const CONSTRAINTS_METADATA_SCHEMA_VERSION: u32 = 1;
@@ -817,6 +817,20 @@ pub struct CollectionInstantiationMetadata {
     pub backing: String,
     pub max_elements: usize,
     pub status: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub source: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub ownership: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actual_scanned_cardinality: Option<usize>,
+    #[serde(default)]
+    pub vacuous_possible: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_cardinality_max: Option<usize>,
+    #[serde(default)]
+    pub capacity_builder_evidence_required: bool,
+    #[serde(default = "default_metadata_only_evidence_tier")]
+    pub evidence_tier: EvidenceTier,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub helpers: Vec<String>,
 }
@@ -987,6 +1001,7 @@ pub fn validate_compile_metadata(metadata: &CompileMetadata, artifact_format: Ar
     validate_ckb_type_id_output_metadata(metadata)?;
     validate_ckb_runtime_access_metadata(metadata)?;
     validate_transaction_view_handle_metadata(metadata)?;
+    validate_collection_instantiation_metadata(metadata)?;
     validate_ckb_script_group_metadata(metadata)?;
     validate_ckb_script_reference_metadata(metadata)?;
     validate_molecule_schema_metadata(metadata)?;
@@ -1030,6 +1045,78 @@ fn validate_transaction_view_handle_metadata(metadata: &CompileMetadata) -> Resu
             return Err(CompileError::without_span(format!(
                 "{} must use checked-static typing evidence and checked-runtime read evidence",
                 prefix
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_collection_instantiation_metadata(metadata: &CompileMetadata) -> Result<()> {
+    for (index, collection) in metadata.runtime.collection_instantiations.iter().enumerate() {
+        let prefix = format!("metadata runtime.collection_instantiations[{index}]");
+        for (field, value) in [
+            ("scope_kind", collection.scope_kind.as_str()),
+            ("scope_name", collection.scope_name.as_str()),
+            ("collection_ty", collection.collection_ty.as_str()),
+            ("element_ty", collection.element_ty.as_str()),
+            ("backing", collection.backing.as_str()),
+            ("status", collection.status.as_str()),
+        ] {
+            if value.trim().is_empty() {
+                return Err(CompileError::without_span(format!("{prefix}.{field} must not be empty")));
+            }
+        }
+        if collection.max_elements == 0 {
+            return Err(CompileError::without_span(format!("{prefix}.max_elements must be greater than zero")));
+        }
+
+        if collection.backing.starts_with("bounded-source:") {
+            if !collection.vacuous_possible || collection.actual_scanned_cardinality.is_some() {
+                return Err(CompileError::without_span(format!(
+                    "{prefix} must declare vacuous_possible=true and leave actual_scanned_cardinality for runtime evidence"
+                )));
+            }
+            match collection.ownership.as_str() {
+                "linear-cell-set" => {
+                    if collection.source != "input"
+                        || collection.status != "runtime-helper-required"
+                        || collection.evidence_tier != EvidenceTier::RuntimeHelperRequired
+                        || collection.output_cardinality_max.is_some()
+                        || collection.capacity_builder_evidence_required
+                        || !collection.helpers.iter().any(|helper| helper == "consume_each")
+                    {
+                        return Err(CompileError::without_span(format!(
+                            "{prefix} bounded Cell set must use input source, consume_each runtime-helper evidence, and no output builder obligation"
+                        )));
+                    }
+                }
+                "bounded-output-plan" => {
+                    if collection.source != "witness"
+                        || collection.status != "builder-evidence-required"
+                        || collection.evidence_tier != EvidenceTier::BuilderEvidenceRequired
+                        || collection.output_cardinality_max != Some(collection.max_elements)
+                        || !collection.capacity_builder_evidence_required
+                        || !collection.helpers.iter().any(|helper| helper == "create_each")
+                    {
+                        return Err(CompileError::without_span(format!(
+                            "{prefix} bounded output plan must use witness source and carry output-cardinality/capacity builder evidence"
+                        )));
+                    }
+                }
+                ownership => {
+                    return Err(CompileError::without_span(format!(
+                        "{prefix}.ownership '{ownership}' is not a supported bounded collection ownership model"
+                    )));
+                }
+            }
+        } else if collection.backing.starts_with("stack-fixed-buffer:")
+            && (collection.source != "local-stack"
+                || collection.ownership != "owned-local-values"
+                || collection.status != "checked-runtime"
+                || collection.evidence_tier != EvidenceTier::CheckedRuntime)
+        {
+            return Err(CompileError::without_span(format!(
+                "{prefix} stack collection must use checked-runtime local owned-value evidence"
             )));
         }
     }
@@ -3688,6 +3775,10 @@ fn default_pure_effect_class() -> String {
 
 fn default_checked_static_evidence_tier() -> EvidenceTier {
     EvidenceTier::CheckedStatic
+}
+
+fn default_metadata_only_evidence_tier() -> EvidenceTier {
+    EvidenceTier::MetadataOnly
 }
 
 /// Decode a hex-encoded scheduler witness from compile metadata.
@@ -6988,6 +7079,13 @@ impl CollectionInstantiationBuilder {
             backing: format!("stack-fixed-buffer:{STACK_COLLECTION_BACKING_BYTES}"),
             max_elements,
             status: "checked-runtime".to_string(),
+            source: "local-stack".to_string(),
+            ownership: "owned-local-values".to_string(),
+            actual_scanned_cardinality: None,
+            vacuous_possible: false,
+            output_cardinality_max: None,
+            capacity_builder_evidence_required: false,
+            evidence_tier: EvidenceTier::CheckedRuntime,
             helpers: self.helpers.into_iter().collect(),
         }
     }
@@ -7039,6 +7137,36 @@ fn body_collection_instantiation_metadata(
     type_layouts: &MetadataTypeLayouts,
     pure_const_returns: &HashMap<String, ir::IrConst>,
 ) -> Vec<CollectionInstantiationMetadata> {
+    let mut bounded = body
+        .bounded_collection_ops
+        .iter()
+        .map(|op| CollectionInstantiationMetadata {
+            scope_kind: scope_kind.to_string(),
+            scope_name: scope_name.to_string(),
+            collection_ty: op.collection_type.clone(),
+            element_ty: op.element_type.clone(),
+            element_width_bytes: metadata_inline_type_fixed_width(&op.element_type, type_layouts).unwrap_or(0),
+            backing: format!("bounded-source:{}", param_source_metadata(op.source)),
+            max_elements: op.max_elements,
+            status: if op.operation == "create_each" {
+                "builder-evidence-required".to_string()
+            } else {
+                "runtime-helper-required".to_string()
+            },
+            source: param_source_metadata(op.source).to_string(),
+            ownership: if op.operation == "consume_each" { "linear-cell-set".to_string() } else { "bounded-output-plan".to_string() },
+            actual_scanned_cardinality: None,
+            vacuous_possible: true,
+            output_cardinality_max: (op.operation == "create_each").then_some(op.max_elements),
+            capacity_builder_evidence_required: op.operation == "create_each",
+            evidence_tier: if op.operation == "create_each" {
+                EvidenceTier::BuilderEvidenceRequired
+            } else {
+                EvidenceTier::RuntimeHelperRequired
+            },
+            helpers: vec![op.operation.clone()],
+        })
+        .collect::<Vec<_>>();
     let param_schema_vars =
         params.iter().filter(|param| named_type_name(&param.ty).is_some()).map(|param| param.binding.id).collect::<BTreeSet<_>>();
     let availability = metadata_prelude_availability(body, &param_schema_vars, type_layouts, params, pure_const_returns);
@@ -7253,7 +7381,8 @@ fn body_collection_instantiation_metadata(
         }
     }
 
-    builders.into_values().map(CollectionInstantiationBuilder::into_metadata).collect()
+    bounded.extend(builders.into_values().map(CollectionInstantiationBuilder::into_metadata));
+    bounded
 }
 
 fn metadata_operand_is_stack_collection(operand: &ir::IrOperand, availability: &MetadataPreludeAvailability) -> bool {
@@ -29635,5 +29764,215 @@ action run() -> u64 {
         assert!(count.coverage.contains(&"accumulator_width:u64".to_string()));
         assert!(count.coverage.contains(&"overflow_policy:fail-closed".to_string()));
         assert!(count.coverage.contains(&"actual_scanned_cardinality:runtime-recorded".to_string()));
+    }
+
+    #[test]
+    fn bounded_cell_collections_record_source_ownership_and_builder_obligations() {
+        let source = r#"
+module bounded::collections
+
+struct Plan {
+    owner: Address
+    amount: u64
+}
+
+resource Token has store, create, consume {
+    owner: Address
+    amount: u64
+}
+
+action batch(input inputs: BoundedCellSet<Token, 16>, witness plans: BoundedList<Plan, 16>) -> u64 {
+    verification
+        consume_each token in inputs {
+            require token.amount > 0
+        }
+        create_each plan in plans {
+            require plan.amount > 0
+            create Token { owner: plan.owner, amount: plan.amount }
+        }
+        return 0
+}
+"#;
+        let result = compile(source, CompileOptions::default()).unwrap();
+        let consumed = result
+            .metadata
+            .runtime
+            .collection_instantiations
+            .iter()
+            .find(|collection| collection.ownership == "linear-cell-set")
+            .expect("bounded input Cell set metadata");
+        assert_eq!(consumed.collection_ty, "BoundedCellSet<Token, 16>");
+        assert_eq!(consumed.source, "input");
+        assert_eq!(consumed.max_elements, 16);
+        assert!(consumed.vacuous_possible);
+        assert_eq!(consumed.evidence_tier, crate::EvidenceTier::RuntimeHelperRequired);
+
+        let created = result
+            .metadata
+            .runtime
+            .collection_instantiations
+            .iter()
+            .find(|collection| collection.ownership == "bounded-output-plan")
+            .expect("bounded output plan metadata");
+        assert_eq!(created.collection_ty, "BoundedList<Plan, 16>");
+        assert_eq!(created.source, "witness");
+        assert_eq!(created.output_cardinality_max, Some(16));
+        assert!(created.capacity_builder_evidence_required);
+        assert_eq!(created.evidence_tier, crate::EvidenceTier::BuilderEvidenceRequired);
+
+        let consume_plan = result
+            .metadata
+            .runtime
+            .proof_plan
+            .iter()
+            .find(|plan| plan.category == "bounded-cell-collection" && plan.feature.starts_with("consume_each:"))
+            .expect("bounded consume ProofPlan");
+        assert_eq!(consume_plan.evidence_tier, crate::EvidenceTier::RuntimeHelperRequired);
+        assert!(consume_plan.coverage.contains(&"maximum_cardinality:16".to_string()));
+        assert!(consume_plan.coverage.contains(&"vacuous:true-when-cardinality-zero".to_string()));
+
+        let create_plan = result
+            .metadata
+            .runtime
+            .proof_plan
+            .iter()
+            .find(|plan| plan.category == "bounded-cell-collection" && plan.feature.starts_with("create_each:"))
+            .expect("bounded create ProofPlan");
+        assert_eq!(create_plan.evidence_tier, crate::EvidenceTier::BuilderEvidenceRequired);
+        assert!(create_plan.coverage.contains(&"output_cardinality_max:16".to_string()));
+        assert!(create_plan.coverage.contains(&"capacity_builder_evidence_required:true".to_string()));
+        assert!(!create_plan.on_chain_checked);
+    }
+
+    #[test]
+    fn bounded_cell_collections_reject_unbounded_or_wrong_ownership_surfaces() {
+        let cases = [
+            (
+                r#"
+module bad
+resource Token has store, consume { amount: u64 }
+action run(inputs: BoundedCellSet<Token, 16>) -> u64 {
+    verification
+        consume_each token in inputs { require token.amount > 0 }
+        return 0
+}
+"#,
+                "requires an explicit source classification",
+            ),
+            (
+                r#"
+module bad
+resource Token has store, consume { amount: u64 }
+action run(input inputs: Vec<Token>) -> u64 {
+    verification
+        return 0
+}
+"#,
+                "cannot store a cell-backed resource",
+            ),
+            (
+                r#"
+module bad
+resource Token has store, consume { amount: u64 }
+action run(input inputs: BoundedCellSet<Token, 0>) -> u64 {
+    verification
+        consume_each token in inputs { require token.amount > 0 }
+        return 0
+}
+"#,
+                "maximum cardinality in 1..=1024",
+            ),
+            (
+                r#"
+module bad
+resource Token has store, consume { amount: u64 }
+action run(input inputs: BoundedCellSet<Token>) -> u64 {
+    verification
+        return 0
+}
+"#,
+                "explicit maximum cardinality",
+            ),
+            (
+                r#"
+module bad
+struct Plan { amount: u64 }
+action run(witness plans: BoundedList<Plan, 2>) -> u64 {
+    verification
+        consume_each plan in plans { require plan.amount > 0 }
+        return 0
+}
+"#,
+                "consume_each expects BoundedCellSet",
+            ),
+            (
+                r#"
+module bad
+struct Plan { amount: u64 }
+resource Token has store, create { amount: u64 }
+action run(witness plans: BoundedList<Plan, 2>) -> u64 {
+    verification
+        create_each plan in plans { require plan.amount > 0 }
+        return 0
+}
+"#,
+                "exactly one create template",
+            ),
+            (
+                r#"
+module bad
+resource Token has store, consume { amount: u64 }
+action run(input inputs: BoundedCellSet<Token, 2>) -> u64 {
+    verification
+        consume_each token in inputs { require token.amount > 0 }
+        consume_each token in inputs { require token.amount > 0 }
+        return 0
+}
+"#,
+                "already Consumed",
+            ),
+            (
+                r#"
+module bad
+struct Plan { memo: String }
+action run(witness plans: BoundedList<Plan, 2>) -> u64 {
+    verification
+        return 0
+}
+"#,
+                "fixed-width element type",
+            ),
+            (
+                r#"
+module bad
+shared Config has store { value: u64 }
+action run(input configs: BoundedCellSet<Config, 2>) -> u64 {
+    verification
+        return 0
+}
+"#,
+                "requires a linear resource element",
+            ),
+            (
+                r#"
+module bad
+struct Plan { amount: u64 }
+resource Token has store, create { amount: u64 }
+action run(witness plans: BoundedList<Plan, 2>) -> u64 {
+    verification
+        create_each plan in plans {
+            create Token { amount: plan.amount }
+            create Token { amount: plan.amount }
+        }
+        return 0
+}
+"#,
+                "exactly one create template per bounded plan element, found 2",
+            ),
+        ];
+        for (source, expected) in cases {
+            let error = compile(source, CompileOptions::default()).unwrap_err();
+            assert!(error.message.contains(expected), "expected '{expected}', got: {}", error.message);
+        }
     }
 }

@@ -169,7 +169,127 @@ pub fn build_for_body(
         }
     }
 
+    plans.extend(
+        body.bounded_collection_ops
+            .iter()
+            .enumerate()
+            .map(|(index, operation)| plan_for_bounded_collection(scope_kind, name, index, operation)),
+    );
+
     plans
+}
+
+fn plan_for_bounded_collection(
+    scope_kind: &str,
+    scope_name: &str,
+    index: usize,
+    operation: &ir::IrBoundedCollectionOp,
+) -> ProofPlanMetadata {
+    let source = match operation.source {
+        ParamSource::Default => "default",
+        ParamSource::Input => "input",
+        ParamSource::Output => "output",
+        ParamSource::Protected => "protected",
+        ParamSource::Witness => "witness",
+        ParamSource::LockArgs => "lock_args",
+    };
+    let is_create = operation.operation == "create_each";
+    let helper = if is_create { "__cellscript_bounded_create_each" } else { "__cellscript_bounded_consume_each" };
+    let evidence_tier = if is_create { EvidenceTier::BuilderEvidenceRequired } else { EvidenceTier::RuntimeHelperRequired };
+    let status = if is_create { "builder-evidence-required" } else { "runtime-required" };
+    let codegen_coverage_status = if is_create { "gap:builder-evidence-required" } else { "gap:runtime-helper-required" };
+    let mut reads = vec![source.to_string()];
+    if is_create && source == "witness" {
+        reads.push("witness".to_string());
+    }
+    dedup(&mut reads);
+    let mut coverage = vec![
+        format!("operation:{}", operation.operation),
+        format!("collection:{}", operation.collection_type),
+        format!("element:{}", operation.element_type),
+        format!("source:{source}"),
+        format!("maximum_cardinality:{}", operation.max_elements),
+        "actual_scanned_cardinality:runtime-recorded".to_string(),
+        "vacuous:true-when-cardinality-zero".to_string(),
+        format!("runtime_helper:{helper}"),
+    ];
+    let mut builder_assumptions = vec![format!("declared(runtime-helper-required:{helper})")];
+    if is_create {
+        coverage.extend([
+            format!("output_cardinality_max:{}", operation.max_elements),
+            "capacity_builder_evidence_required:true".to_string(),
+            format!("output_type:{}", operation.output_type.as_deref().unwrap_or("unknown")),
+        ]);
+        builder_assumptions.extend([
+            "declared(builder must provide exactly one output per plan element)".to_string(),
+            "declared(builder must prove aggregate output capacity and occupied-capacity floors)".to_string(),
+        ]);
+    }
+    let feature = format!("{}:{}:{}", operation.operation, operation.collection_binding, operation.collection_type);
+    ProofPlanMetadata {
+        name: format!("{}#bounded-collection{}", scope_name, index),
+        origin: format!("{}:{}#bounded-collection:{}", scope_kind, scope_name, index),
+        category: "bounded-cell-collection".to_string(),
+        feature,
+        evidence_tier,
+        source_span: Some(ProofPlanSourceSpanMetadata {
+            start: operation.span.start,
+            end: operation.span.end,
+            line: operation.span.line,
+            column: operation.span.column,
+        }),
+        trigger: trigger_for_scope_kind(scope_kind).to_string(),
+        scope: if is_create { "transaction".to_string() } else { "selected_cells".to_string() },
+        reads: reads.clone(),
+        coverage,
+        input_output_relation_checks: if is_create {
+            vec![format!(
+                "output_count({})=plan_count({})<= {}",
+                operation.output_type.as_deref().unwrap_or("unknown"),
+                operation.collection_binding,
+                operation.max_elements
+            )]
+        } else {
+            vec![format!(
+                "consumed_count({})=input_set_count({})<= {}",
+                operation.element_type, operation.collection_binding, operation.max_elements
+            )]
+        },
+        group_cardinality: format!("runtime-cardinality:0..={}", operation.max_elements),
+        identity_lifecycle_policy: if is_create {
+            "bounded witness plan has no Cell identity; create template produces fresh output Cells".to_string()
+        } else {
+            "linear input Cell set is consumed exactly once; per-element binding cannot escape".to_string()
+        },
+        preserved_fields: Vec::new(),
+        witness_fields: if source == "witness" { vec![format!("witness.{}", operation.collection_binding)] } else { Vec::new() },
+        lock_args_fields: Vec::new(),
+        on_chain_checked: false,
+        on_chain_checked_obligations: Vec::new(),
+        builder_assumptions,
+        codegen_coverage_status: codegen_coverage_status.to_string(),
+        status: status.to_string(),
+        detail: if is_create {
+            format!(
+                "bounded create_each over witness plan '{}' requires runtime iteration plus output-count and capacity builder evidence",
+                operation.collection_binding
+            )
+        } else {
+            format!(
+                "bounded consume_each over input Cell set '{}' requires emitted source iteration coverage",
+                operation.collection_binding
+            )
+        },
+        diagnostics: vec![ProofPlanDiagnosticMetadata {
+            severity: "info".to_string(),
+            message: if is_create {
+                "bounded create_each is not considered checked until runtime helper coverage and matching builder evidence are attached"
+                    .to_string()
+            } else {
+                format!("bounded consume_each has a known {helper} contract but no emitted helper for this selected entry")
+            },
+        }],
+    }
 }
 
 pub fn build_for_invariant(invariant: &ir::IrInvariant, runtime_accesses: &[CkbRuntimeAccessMetadata]) -> Vec<ProofPlanMetadata> {

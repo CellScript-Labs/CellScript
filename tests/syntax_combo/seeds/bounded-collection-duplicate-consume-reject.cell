@@ -1,0 +1,18 @@
+// audit: phase=reject_compile
+// audit: contains=already Consumed
+module cellscript::audit::seed_bounded_collection_duplicate_consume_reject
+
+resource Token has store, consume {
+    amount: u64,
+}
+
+action batch(input inputs: BoundedCellSet<Token, 4>) -> u64 {
+    verification
+        consume_each token in inputs {
+            require token.amount > 0
+        }
+        consume_each token in inputs {
+            require token.amount > 0
+        }
+        return 0
+}

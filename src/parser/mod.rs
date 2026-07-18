@@ -1521,7 +1521,12 @@ impl<'a> Parser<'a> {
                     self.advance();
                     let mut args = Vec::new();
                     while !self.check(&TokenKind::Gt) && !self.check(&TokenKind::Eof) {
-                        args.push(self.parse_type()?);
+                        if let TokenKind::Integer(value) = self.current().kind {
+                            args.push(Type::Named(value.to_string()));
+                            self.advance();
+                        } else {
+                            args.push(self.parse_type()?);
+                        }
                         if self.check(&TokenKind::Comma) {
                             self.advance();
                         } else {
@@ -2510,6 +2515,9 @@ impl<'a> Parser<'a> {
             TokenKind::Require => self.parse_require(),
             TokenKind::Std => self.parse_stdlib_call(),
             _ if self.ident_like_name().is_some() => {
+                if matches!(self.ident_like_name().as_deref(), Some("consume_each" | "create_each")) {
+                    return self.parse_bounded_collection_each();
+                }
                 if matches!(self.ident_like_name().as_deref(), Some("claim")) && !self.check_next_lparen() {
                     return self.parse_claim_expr();
                 }
@@ -2563,6 +2571,25 @@ impl<'a> Parser<'a> {
             }
             _ => Err(CompileError::new(format!("unexpected token in expression: {}", self.current().kind), self.current().span)),
         }
+    }
+
+    fn parse_bounded_collection_each(&mut self) -> Result<Expr> {
+        let start_span = self.current().span;
+        let operation = self.parse_name()?;
+        let binding = self.parse_name()?;
+        self.expect(TokenKind::In)?;
+        let collection = self.parse_expr()?;
+        if !self.check(&TokenKind::LBrace) {
+            return Err(CompileError::new(format!("{} requires a braced per-element contract body", operation), self.current().span));
+        }
+        let body = self.parse_block()?;
+        let end_span = self.current().span;
+        Ok(Expr::Call(CallExpr {
+            func: Box::new(Expr::Identifier(format!("__cellscript_{}", operation))),
+            type_args: Vec::new(),
+            args: vec![Expr::Identifier(binding), collection, Expr::Block(body)],
+            span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
+        }))
     }
 
     fn check_next_lparen(&self) -> bool {

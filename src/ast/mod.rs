@@ -494,6 +494,49 @@ pub enum Type {
     MutRef(Box<Type>),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BoundedCollectionKind {
+    CellSet,
+    List,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BoundedCollectionType {
+    pub kind: BoundedCollectionKind,
+    pub element_type: String,
+    pub max_elements: usize,
+}
+
+pub fn parse_bounded_collection_type(ty: &Type) -> Option<BoundedCollectionType> {
+    let Type::Named(name) = ty else {
+        return None;
+    };
+    let (base, args) = name.split_once('<')?;
+    let args = args.strip_suffix('>')?;
+    let mut depth = 0usize;
+    let mut split = None;
+    for (index, ch) in args.char_indices() {
+        match ch {
+            '<' | '[' | '(' => depth += 1,
+            '>' | ']' | ')' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                split = Some(index);
+                break;
+            }
+            _ => {}
+        }
+    }
+    let split = split?;
+    let element_type = args[..split].trim();
+    let max_elements = args[split + 1..].trim().parse::<usize>().ok()?;
+    let kind = match base.trim() {
+        "BoundedCellSet" => BoundedCollectionKind::CellSet,
+        "BoundedList" => BoundedCollectionKind::List,
+        _ => return None,
+    };
+    (!element_type.is_empty()).then(|| BoundedCollectionType { kind, element_type: element_type.to_string(), max_elements })
+}
+
 #[derive(Debug, Clone)]
 pub enum Stmt {
     Let(LetStmt),

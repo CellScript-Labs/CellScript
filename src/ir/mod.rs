@@ -211,7 +211,21 @@ pub struct IrBody {
     pub create_set: Vec<CreatePattern>,
     pub mutate_set: Vec<MutatePattern>,
     pub write_intents: Vec<WriteIntent>,
+    pub bounded_collection_ops: Vec<IrBoundedCollectionOp>,
     pub blocks: Vec<IrBlock>,
+}
+
+#[derive(Debug, Clone)]
+pub struct IrBoundedCollectionOp {
+    pub operation: String,
+    pub binding: String,
+    pub collection_binding: String,
+    pub collection_type: String,
+    pub element_type: String,
+    pub max_elements: usize,
+    pub source: ParamSource,
+    pub output_type: Option<String>,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone)]
@@ -1285,7 +1299,11 @@ impl IrGenerator {
                     self.apply_effect_to_footprint(EffectClass::ReadOnly, footprint);
                 }
                 if let Expr::Identifier(name) = call.func.as_ref() {
-                    if let Some(effect) = self.function_effects.get(name).copied() {
+                    if name == "__cellscript_consume_each" {
+                        self.apply_effect_to_footprint(EffectClass::Mutating, footprint);
+                    } else if name == "__cellscript_create_each" {
+                        self.apply_effect_to_footprint(EffectClass::Creating, footprint);
+                    } else if let Some(effect) = self.function_effects.get(name).copied() {
                         self.apply_effect_to_footprint(effect, footprint);
                     } else if let Some(effect) = self.external_function_effects.get(name).copied() {
                         self.apply_effect_to_footprint(effect, footprint);
@@ -1402,10 +1420,11 @@ impl IrGenerator {
         let create_set = self.collect_create_patterns(&blocks, &ir_params);
         let mutate_set = self.collect_mutate_param_patterns(&ir_params, consume_set.len(), create_set.len());
         let write_intents = Self::collect_write_intents(&create_set, &mutate_set);
+        let bounded_collection_ops = collect_bounded_collection_ops(stmts, params);
         self.transition_param_ids.clear();
         self.transition_coverable_value_ids.clear();
 
-        (ir_params, IrBody { consume_set, read_refs, create_set, mutate_set, write_intents, blocks })
+        (ir_params, IrBody { consume_set, read_refs, create_set, mutate_set, write_intents, bounded_collection_ops, blocks })
     }
 
     fn collect_write_intents(create_set: &[CreatePattern], mutate_set: &[MutatePattern]) -> Vec<WriteIntent> {
@@ -4431,6 +4450,9 @@ impl IrGenerator {
     ) -> Option<LoweredExpr> {
         match call.func.as_ref() {
             Expr::Identifier(name) => match name.as_str() {
+                "__cellscript_consume_each" | "__cellscript_create_each" => {
+                    Some(LoweredExpr { operand: IrOperand::Const(IrConst::Unit), current: Some(current) })
+                }
                 "Address::zero" if call.args.is_empty() => {
                     Some(LoweredExpr { operand: IrOperand::Const(IrConst::Address([0; 32])), current: Some(current) })
                 }
@@ -6746,6 +6768,77 @@ fn collect_call_names(ast: &Module) -> HashSet<String> {
         }
     }
     names
+}
+
+fn collect_bounded_collection_ops(stmts: &[Stmt], params: &[Param]) -> Vec<IrBoundedCollectionOp> {
+    let mut ops = Vec::new();
+    collect_bounded_collection_ops_from_stmts(stmts, params, &mut ops);
+    ops
+}
+
+fn collect_bounded_collection_ops_from_stmts(stmts: &[Stmt], params: &[Param], ops: &mut Vec<IrBoundedCollectionOp>) {
+    for stmt in stmts {
+        match stmt {
+            Stmt::Expr(expr) | Stmt::Let(LetStmt { value: expr, .. }) | Stmt::Return(ReturnStmt { value: Some(expr), .. }) => {
+                collect_bounded_collection_ops_from_expr(expr, params, ops);
+            }
+            Stmt::If(if_stmt) => {
+                collect_bounded_collection_ops_from_expr(&if_stmt.condition, params, ops);
+                collect_bounded_collection_ops_from_stmts(&if_stmt.then_branch, params, ops);
+                if let Some(else_branch) = &if_stmt.else_branch {
+                    collect_bounded_collection_ops_from_stmts(else_branch, params, ops);
+                }
+            }
+            Stmt::For(for_stmt) => {
+                collect_bounded_collection_ops_from_expr(&for_stmt.iterable, params, ops);
+                collect_bounded_collection_ops_from_stmts(&for_stmt.body, params, ops);
+            }
+            Stmt::While(while_stmt) => {
+                collect_bounded_collection_ops_from_expr(&while_stmt.condition, params, ops);
+                collect_bounded_collection_ops_from_stmts(&while_stmt.body, params, ops);
+            }
+            Stmt::Return(ReturnStmt { value: None, .. }) => {}
+        }
+    }
+}
+
+fn collect_bounded_collection_ops_from_expr(expr: &Expr, params: &[Param], ops: &mut Vec<IrBoundedCollectionOp>) {
+    let Expr::Call(call) = expr else {
+        return;
+    };
+    let Expr::Identifier(operation) = call.func.as_ref() else {
+        return;
+    };
+    if !matches!(operation.as_str(), "__cellscript_consume_each" | "__cellscript_create_each") {
+        return;
+    }
+    let [Expr::Identifier(binding), Expr::Identifier(collection_binding), Expr::Block(body)] = call.args.as_slice() else {
+        return;
+    };
+    let Some(param) = params.iter().find(|param| param.name == *collection_binding) else {
+        return;
+    };
+    let Some(collection) = parse_bounded_collection_type(&param.ty) else {
+        return;
+    };
+    let Type::Named(collection_type) = &param.ty else {
+        return;
+    };
+    let output_type = body.iter().find_map(|stmt| match stmt {
+        Stmt::Expr(Expr::Create(create)) => Some(create.ty.clone()),
+        _ => None,
+    });
+    ops.push(IrBoundedCollectionOp {
+        operation: operation.trim_start_matches("__cellscript_").to_string(),
+        binding: binding.clone(),
+        collection_binding: collection_binding.clone(),
+        collection_type: collection_type.clone(),
+        element_type: collection.element_type,
+        max_elements: collection.max_elements,
+        source: param.source,
+        output_type,
+        span: call.span,
+    });
 }
 
 fn collect_call_names_from_stmts(stmts: &[Stmt], names: &mut HashSet<String>) {
