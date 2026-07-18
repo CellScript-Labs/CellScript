@@ -1,6 +1,6 @@
 //! Builder assumption schema and transaction-shape validation for v0.16.
 
-use crate::{ckb_blake2b256, hex_encode, CompileMetadata, ProofPlanMetadata};
+use crate::{ckb_blake2b256, hex_encode, CompileMetadata, EvidenceTier, ProofPlanMetadata};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeSet;
@@ -95,6 +95,7 @@ pub fn builder_assumptions_from_metadata(metadata: &CompileMetadata) -> Vec<Buil
             origin: "constraints.ckb".to_string(),
             category: "builder-assumption".to_string(),
             feature: "capacity-planning".to_string(),
+            evidence_tier: EvidenceTier::ChainEvidenceRequired,
             source_span: None,
             trigger: "builder".to_string(),
             scope: "transaction".to_string(),

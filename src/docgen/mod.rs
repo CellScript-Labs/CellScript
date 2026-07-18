@@ -450,13 +450,14 @@ impl AuditDoc {
         if self.proof_plan.is_empty() {
             out.push_str("_No Covenant ProofPlan records emitted._\n\n");
         } else {
-            out.push_str("| Constraint | Origin | Trigger | Scope | Reads | Coverage | On Chain Checked | Codegen Coverage | Builder Assumptions |\n");
-            out.push_str("|---|---|---|---|---|---|---|---|---|\n");
+            out.push_str("| Constraint | Origin | Evidence Tier | Trigger | Scope | Reads | Coverage | On Chain Checked | Codegen Coverage | Builder Assumptions |\n");
+            out.push_str("|---|---|---|---|---|---|---|---|---|---|\n");
             for plan in &self.proof_plan {
                 out.push_str(&format!(
-                    "| `{}` | `{}` | `{}` | `{}` | {} | {} | `{}` | `{}` | {} |\n",
+                    "| `{}` | `{}` | `{}` | `{}` | `{}` | {} | {} | `{}` | `{}` | {} |\n",
                     escape_markdown_table_cell(&plan.name),
                     escape_markdown_table_cell(&plan.origin),
+                    plan.evidence_tier.as_str(),
                     escape_markdown_table_cell(&plan.trigger),
                     escape_markdown_table_cell(&plan.scope),
                     escape_markdown_table_cell(&comma_or_none(&plan.reads)),
@@ -652,13 +653,14 @@ impl AuditDoc {
             out.push_str("<p><em>No Covenant ProofPlan records emitted.</em></p>");
         } else {
             out.push_str(
-                "<table><thead><tr><th>Constraint</th><th>Origin</th><th>Trigger</th><th>Scope</th><th>Reads</th><th>Coverage</th><th>On Chain Checked</th><th>Codegen Coverage</th><th>Builder Assumptions</th></tr></thead><tbody>",
+                "<table><thead><tr><th>Constraint</th><th>Origin</th><th>Evidence Tier</th><th>Trigger</th><th>Scope</th><th>Reads</th><th>Coverage</th><th>On Chain Checked</th><th>Codegen Coverage</th><th>Builder Assumptions</th></tr></thead><tbody>",
             );
             for plan in &self.proof_plan {
                 out.push_str(&format!(
-                    "<tr><td><code>{}</code></td><td><code>{}</code></td><td><code>{}</code></td><td><code>{}</code></td><td>{}</td><td>{}</td><td><code>{}</code></td><td><code>{}</code></td><td>{}</td></tr>",
+                    "<tr><td><code>{}</code></td><td><code>{}</code></td><td><code>{}</code></td><td><code>{}</code></td><td><code>{}</code></td><td>{}</td><td>{}</td><td><code>{}</code></td><td><code>{}</code></td><td>{}</td></tr>",
                     escape_html(&plan.name),
                     escape_html(&plan.origin),
+                    plan.evidence_tier.as_str(),
                     escape_html(&plan.trigger),
                     escape_html(&plan.scope),
                     escape_html(&comma_or_none(&plan.reads)),

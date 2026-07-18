@@ -1,7 +1,7 @@
 //! ProofPlan soundness checks for v0.16 assurance metadata.
 
 use crate::error::{CompileError, Result};
-use crate::{CompileMetadata, ProofPlanMetadata, VerifierObligationMetadata};
+use crate::{CompileMetadata, EvidenceTier, ProofPlanMetadata, VerifierObligationMetadata};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -136,6 +136,32 @@ pub fn validate_metadata(metadata: &CompileMetadata, strict: bool) -> Result<()>
 }
 
 fn check_plan_record(plan: &ProofPlanMetadata, strict: bool, issues: &mut Vec<ProofPlanSoundnessIssue>) {
+    if plan.on_chain_checked != plan.evidence_tier.is_checked() {
+        push_issue(issues, "error", "PP0005", &plan.origin, &plan.feature, "ProofPlan evidence_tier must agree with on_chain_checked");
+    }
+
+    if plan.codegen_coverage_status == "gap:metadata-only" && plan.evidence_tier != EvidenceTier::MetadataOnly {
+        push_issue(
+            issues,
+            "error",
+            "PP0006",
+            &plan.origin,
+            &plan.feature,
+            "metadata-only codegen gap must use evidence_tier='metadata-only'",
+        );
+    }
+
+    if plan.codegen_coverage_status == "gap:runtime-helper-required" && plan.evidence_tier != EvidenceTier::RuntimeHelperRequired {
+        push_issue(
+            issues,
+            "error",
+            "PP0007",
+            &plan.origin,
+            &plan.feature,
+            "runtime-helper codegen gap must use evidence_tier='runtime-helper-required'",
+        );
+    }
+
     if plan.on_chain_checked && plan.status == "runtime-required" {
         push_issue(
             issues,
@@ -173,7 +199,11 @@ fn check_plan_record(plan: &ProofPlanMetadata, strict: bool, issues: &mut Vec<Pr
         push_issue(issues, "error", "PP0104", &plan.origin, &plan.feature, "ProofPlan coverage gap cannot be marked on-chain checked");
     }
 
-    if strict && (plan.status == "runtime-required" || plan.codegen_coverage_status == "gap:metadata-only") {
+    if strict
+        && (plan.status == "runtime-required"
+            || plan.codegen_coverage_status == "gap:metadata-only"
+            || plan.evidence_tier == EvidenceTier::MetadataOnly)
+    {
         push_issue(
             issues,
             "error",

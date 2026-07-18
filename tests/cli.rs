@@ -6605,6 +6605,52 @@ action run() -> u64 {
 }
 
 #[test]
+fn cellc_check_production_rejects_metadata_only_executable_claim() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("Cell.toml"),
+        r#"
+[package]
+name = "demo"
+version = "0.1.0"
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("src").join("main.cell"),
+        r#"
+module demo::main
+
+invariant enforce_token_conservation {
+    trigger: type_group
+    scope: group
+    reads: group_inputs<Token>.amount, group_outputs<Token>.amount
+    assert_conserved(Token.amount, scope = group)
+}
+
+resource Token {
+    amount: u64,
+}
+
+action run() -> u64 {
+    verification
+        return 0
+}
+"#,
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("check").arg("--production").output().unwrap();
+    assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("metadata-only ProofPlan records cannot support executable production claims"), "{stderr}");
+    assert!(stderr.contains("invariant:enforce_token_conservation"), "{stderr}");
+}
+
+#[test]
 fn cellc_clean_subcommand_supports_json_summary() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
@@ -7370,6 +7416,7 @@ fn cellc_check_xudt_group_amount_conserved_lowers_to_runtime_helper() {
         proof_plan.iter().find(|plan| plan["category"] == "aggregate-invariant").expect("aggregate-invariant ProofPlan record");
 
     assert_eq!(aggregate["status"], "checked-runtime", "unexpected metadata: {:?}", aggregate);
+    assert_eq!(aggregate["evidence_tier"], "checked-runtime", "unexpected metadata: {:?}", aggregate);
     assert_eq!(aggregate["codegen_coverage_status"], "covered", "unexpected metadata: {:?}", aggregate);
     assert_eq!(aggregate["on_chain_checked"], true);
     assert!(

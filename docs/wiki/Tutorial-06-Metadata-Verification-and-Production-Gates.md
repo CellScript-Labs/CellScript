@@ -219,6 +219,23 @@ ProofPlan coverage states are intentionally explicit:
 | `gap:runtime-helper-required` | The claim maps to a runtime helper, but the selected entry did not emit matching helper coverage. |
 | `checked-runtime` | Generated runtime access backs the claim for the selected entry. |
 
+Nightly 0.22 also records who must discharge every obligation:
+
+| Evidence tier | Discharged by |
+|---|---|
+| `checked-static` | Compiler or static analysis. |
+| `checked-runtime` | Generated verifier code. |
+| `runtime-helper-required` | A known helper contract that is not emitted for the selected entry. |
+| `builder-evidence-required` | Transaction-builder or indexer evidence. |
+| `metadata-only` | Audit metadata with no executable enforcement. |
+| `chain-evidence-required` | Dry-run, tx-pool, commit, capacity, or cycle evidence. |
+
+The tier is serialized as `evidence_tier` in each ProofPlan record and is also
+shown by `cellc explain proof`. `--production` rejects metadata-only records
+whose invariant, terminal, or assert/check/enforce/require/validate/verify
+naming promises executable enforcement. This does not turn builder or chain
+evidence into compiler proof; those tiers remain external obligations.
+
 For the review-finding closure matrix, see
 `docs/archive/0.17/CELLSCRIPT_0_17_REVIEW_FINDINGS_CLOSURE.md`.
 
@@ -238,6 +255,8 @@ Function metadata distinguishes `declared_effect_class`,
 the call graph transitively and recomputes imported helpers from loaded package
 source. An imported `#[effect(Pure)] fn` that wraps a creating or mutating
 action is rejected; the attribute is not treated as an unauthenticated promise.
+`effect_evidence_tier = checked-static` records that this contract is discharged
+by the compiler.
 
 Canonical terminal flows use enum-backed states:
 
@@ -257,6 +276,8 @@ Inspect these type metadata fields together:
   contract;
 - `flow_terminal_discharge = terminal-by-output-state` identifies the only
   implemented 0.22 discharge model;
+- `flow_terminal_evidence_tier = checked-runtime` records generated verifier
+  discharge;
 - `flow_state_model = enum-backed` distinguishes the canonical surface from
   migration-only numeric flows;
 - `flow_audit_warnings` reports legacy declarations or an initial state with no

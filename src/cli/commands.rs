@@ -9423,6 +9423,10 @@ fn proof_plan_summary_json(proof_plan: &[ProofPlanMetadata]) -> serde_json::Valu
         proof_plan.iter().flat_map(|plan| &plan.coverage).filter(|coverage| coverage.starts_with("macro_expansion:")).count();
     let has_runtime_required_gaps = proof_plan.iter().any(|plan| plan.status == "runtime-required" && !plan.on_chain_checked);
     let has_fail_closed_gaps = fail_closed_count > 0;
+    let evidence_tier_counts = crate::EvidenceTier::ALL
+        .into_iter()
+        .map(|tier| (tier.as_str().to_string(), proof_plan.iter().filter(|plan| plan.evidence_tier == tier).count()))
+        .collect::<BTreeMap<_, _>>();
 
     serde_json::json!({
         "record_count": record_count,
@@ -9435,6 +9439,7 @@ fn proof_plan_summary_json(proof_plan: &[ProofPlanMetadata]) -> serde_json::Valu
         "macro_provenance_count": macro_provenance_count,
         "has_runtime_required_gaps": has_runtime_required_gaps,
         "has_fail_closed_gaps": has_fail_closed_gaps,
+        "evidence_tier_counts": evidence_tier_counts,
         "has_blocking_diagnostics": has_runtime_required_gaps || has_fail_closed_gaps || diagnostic_error_count > 0,
     })
 }
@@ -9450,6 +9455,7 @@ fn print_proof_plan_summary(proof_plan: &[ProofPlanMetadata]) {
     println!("    diagnostic_errors: {}", summary["diagnostic_error_count"]);
     println!("    diagnostic_warnings: {}", summary["diagnostic_warning_count"]);
     println!("    macro_provenance_records: {}", summary["macro_provenance_count"]);
+    println!("    evidence_tiers: {}", summary["evidence_tier_counts"]);
 }
 
 fn print_proof_plan_record(plan: &ProofPlanMetadata) {
@@ -9459,6 +9465,7 @@ fn print_proof_plan_record(plan: &ProofPlanMetadata) {
     println!();
     println!("constraint: {}", plan.name);
     println!("  origin: {}", plan.origin);
+    println!("  evidence_tier: {}", plan.evidence_tier.as_str());
     println!("  trigger: {}", plan.trigger);
     println!("  scope: {}", plan.scope);
     println!("  reads:");
@@ -10848,6 +10855,22 @@ fn validate_check_policy(metadata: &crate::CompileMetadata, args: &CheckArgs) ->
         }
     }
 
+    if args.production {
+        let metadata_only_executable_claims = metadata
+            .runtime
+            .proof_plan
+            .iter()
+            .filter(|plan| plan.evidence_tier == crate::EvidenceTier::MetadataOnly && proof_plan_claims_executable_enforcement(plan))
+            .map(|plan| format!("{}:{} ({})", plan.origin, plan.feature, plan.codegen_coverage_status))
+            .collect::<Vec<_>>();
+        if !metadata_only_executable_claims.is_empty() {
+            violations.push(format!(
+                "metadata-only ProofPlan records cannot support executable production claims: {}",
+                metadata_only_executable_claims.join(", ")
+            ));
+        }
+    }
+
     if args.deny_ckb_runtime && metadata.runtime.ckb_runtime_required {
         violations.push(format!("CKB runtime features: {}", metadata.runtime.ckb_runtime_features.join(", ")));
     }
@@ -10930,6 +10953,18 @@ fn validate_check_policy(metadata: &crate::CompileMetadata, args: &CheckArgs) ->
     }
 
     Err(crate::error::CompileError::without_span(format!("check policy failed:\n  - {}", violations.join("\n  - "))))
+}
+
+fn proof_plan_claims_executable_enforcement(plan: &ProofPlanMetadata) -> bool {
+    let name = plan.name.to_ascii_lowercase();
+    let feature = plan.feature.to_ascii_lowercase();
+    let executable_prefix = |value: &str| {
+        ["assert", "check", "enforce", "require", "validate", "verify"]
+            .into_iter()
+            .any(|prefix| value == prefix || value.starts_with(&format!("{prefix}_")) || value.starts_with(&format!("{prefix}:")))
+    };
+
+    plan.category.contains("invariant") || plan.category == "flow-terminal" || executable_prefix(&name) || executable_prefix(&feature)
 }
 
 fn target_profile_policy_violations(

@@ -25,12 +25,57 @@ pub struct ProofPlanDiagnosticMetadata {
     pub message: String,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum EvidenceTier {
+    CheckedStatic,
+    CheckedRuntime,
+    RuntimeHelperRequired,
+    BuilderEvidenceRequired,
+    MetadataOnly,
+    ChainEvidenceRequired,
+}
+
+impl EvidenceTier {
+    pub const ALL: [Self; 6] = [
+        Self::CheckedStatic,
+        Self::CheckedRuntime,
+        Self::RuntimeHelperRequired,
+        Self::BuilderEvidenceRequired,
+        Self::MetadataOnly,
+        Self::ChainEvidenceRequired,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::CheckedStatic => "checked-static",
+            Self::CheckedRuntime => "checked-runtime",
+            Self::RuntimeHelperRequired => "runtime-helper-required",
+            Self::BuilderEvidenceRequired => "builder-evidence-required",
+            Self::MetadataOnly => "metadata-only",
+            Self::ChainEvidenceRequired => "chain-evidence-required",
+        }
+    }
+
+    pub const fn is_checked(self) -> bool {
+        matches!(self, Self::CheckedStatic | Self::CheckedRuntime)
+    }
+}
+
+impl Default for EvidenceTier {
+    fn default() -> Self {
+        Self::MetadataOnly
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProofPlanMetadata {
     pub name: String,
     pub origin: String,
     pub category: String,
     pub feature: String,
+    #[serde(default)]
+    pub evidence_tier: EvidenceTier,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_span: Option<ProofPlanSourceSpanMetadata>,
     pub trigger: String,
@@ -240,6 +285,13 @@ fn summary_plan_for_invariant(invariant: &ir::IrInvariant, runtime_accesses: &[C
     }
 
     let status = if executable_by_runtime_helper { "checked-runtime" } else { "runtime-required" };
+    let evidence_tier = if executable_by_runtime_helper {
+        EvidenceTier::CheckedRuntime
+    } else if all_aggregates_runtime_helper_backed && invariant.assert_count == 0 {
+        EvidenceTier::RuntimeHelperRequired
+    } else {
+        EvidenceTier::MetadataOnly
+    };
     let on_chain_checked_obligations =
         if executable_by_runtime_helper { vec![format!("declared-invariant:{}={status}", invariant.name)] } else { Vec::new() };
 
@@ -248,6 +300,7 @@ fn summary_plan_for_invariant(invariant: &ir::IrInvariant, runtime_accesses: &[C
         origin: format!("invariant:{}", invariant.name),
         category: "declared-invariant".to_string(),
         feature: invariant.name.clone(),
+        evidence_tier,
         source_span: Some(ProofPlanSourceSpanMetadata {
             start: invariant.span.start,
             end: invariant.span.end,
@@ -348,6 +401,11 @@ fn plan_for_aggregate_invariant(
 
     let feature = aggregate_feature_label(aggregate);
     let status = if evidence.is_checked() { "checked-runtime" } else { "runtime-required" };
+    let evidence_tier = match evidence {
+        AggregateLoweringEvidence::RuntimeHelperChecked(_) => EvidenceTier::CheckedRuntime,
+        AggregateLoweringEvidence::RuntimeHelperRequired(_) => EvidenceTier::RuntimeHelperRequired,
+        AggregateLoweringEvidence::MetadataOnly => EvidenceTier::MetadataOnly,
+    };
     let on_chain_checked_obligations =
         if evidence.is_checked() { vec![format!("aggregate-invariant:{feature}={status}")] } else { Vec::new() };
 
@@ -356,6 +414,7 @@ fn plan_for_aggregate_invariant(
         origin: format!("invariant:{}#aggregate:{}", invariant.name, index),
         category: "aggregate-invariant".to_string(),
         feature,
+        evidence_tier,
         source_span: Some(ProofPlanSourceSpanMetadata {
             start: aggregate.span.start,
             end: aggregate.span.end,
@@ -406,12 +465,14 @@ fn plan_from_obligation(
         if on_chain_checked { checked_obligation_labels(obligation, &input_output_relation_checks) } else { Vec::new() };
     let builder_assumptions = builder_assumptions(obligation, &trigger, &scope, on_chain_checked);
     let diagnostics = diagnostics_for_plan(&trigger, &scope, obligation, &builder_assumptions);
+    let evidence_tier = evidence_tier_for_obligation(obligation, on_chain_checked, &builder_assumptions);
 
     ProofPlanMetadata {
         name: obligation.feature.clone(),
         origin: origin.to_string(),
         category: obligation.category.clone(),
         feature: obligation.feature.clone(),
+        evidence_tier,
         source_span: None,
         trigger,
         scope,
@@ -431,6 +492,43 @@ fn plan_from_obligation(
         detail: obligation.detail.clone(),
         diagnostics,
     }
+}
+
+fn evidence_tier_for_obligation(
+    obligation: &VerifierObligationMetadata,
+    on_chain_checked: bool,
+    builder_assumptions: &[String],
+) -> EvidenceTier {
+    if on_chain_checked {
+        return if obligation.status == "checked-static" { EvidenceTier::CheckedStatic } else { EvidenceTier::CheckedRuntime };
+    }
+
+    if obligation.status == "metadata-only" || obligation.detail.to_ascii_lowercase().contains("metadata-only") {
+        return EvidenceTier::MetadataOnly;
+    }
+    if obligation.status == "chain-evidence-required"
+        || obligation.feature.contains("capacity")
+        || obligation.feature.contains("dry-run")
+        || obligation.feature.contains("tx-pool")
+        || obligation.feature.contains("commit")
+        || obligation.feature.contains("cycle")
+    {
+        return EvidenceTier::ChainEvidenceRequired;
+    }
+    if obligation.status == "builder-evidence-required"
+        || obligation.status == "builder-required"
+        || builder_assumptions.iter().any(|assumption| {
+            let assumption = assumption.to_ascii_lowercase();
+            assumption.contains("builder") || assumption.contains("indexer") || assumption.contains("cell selection")
+        })
+    {
+        return EvidenceTier::BuilderEvidenceRequired;
+    }
+    if obligation.status == "runtime-helper-required" || obligation.status == "runtime-required" {
+        return EvidenceTier::RuntimeHelperRequired;
+    }
+
+    EvidenceTier::MetadataOnly
 }
 
 fn trigger_for_scope_kind(scope_kind: &str) -> &'static str {
@@ -1057,4 +1155,27 @@ fn declared_lock_args_fields(reads: &[String]) -> Vec<String> {
 fn dedup(values: &mut Vec<String>) {
     let mut seen = BTreeSet::new();
     values.retain(|value| seen.insert(value.clone()));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::EvidenceTier;
+    use std::collections::BTreeSet;
+
+    #[test]
+    fn evidence_tier_registry_is_complete_and_unique() {
+        let names = EvidenceTier::ALL.into_iter().map(EvidenceTier::as_str).collect::<Vec<_>>();
+        assert_eq!(
+            names,
+            vec![
+                "checked-static",
+                "checked-runtime",
+                "runtime-helper-required",
+                "builder-evidence-required",
+                "metadata-only",
+                "chain-evidence-required",
+            ]
+        );
+        assert_eq!(names.iter().copied().collect::<BTreeSet<_>>().len(), names.len());
+    }
 }

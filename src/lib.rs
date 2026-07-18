@@ -41,7 +41,7 @@ pub mod wasm;
 
 pub use assumptions::{BuilderAssumptionMetadata, TxValidationReport, TxValidationViolation};
 pub use proof_plan::soundness::{ProofPlanSoundnessIssue, ProofPlanSoundnessReport};
-pub use proof_plan::{ProofPlanDiagnosticMetadata, ProofPlanMetadata, ProofPlanSourceSpanMetadata};
+pub use proof_plan::{EvidenceTier, ProofPlanDiagnosticMetadata, ProofPlanMetadata, ProofPlanSourceSpanMetadata};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use error::{CompileError, DiagnosticSeverity, Result};
@@ -201,7 +201,7 @@ fn strict_capability_name(capability: ast::Capability) -> &'static str {
 const DEFAULT_TARGET: &str = "riscv64-asm";
 const DEFAULT_TARGET_PROFILE: &str = "ckb";
 const ARTIFACT_CACHE_VERSION: &str = "project-source-set-v5";
-pub const METADATA_SCHEMA_VERSION: u32 = 45;
+pub const METADATA_SCHEMA_VERSION: u32 = 46;
 pub const SOURCE_METADATA_SCHEMA_VERSION: u32 = 1;
 pub const ARTIFACT_METADATA_SCHEMA_VERSION: u32 = 1;
 pub const CONSTRAINTS_METADATA_SCHEMA_VERSION: u32 = 1;
@@ -3443,6 +3443,8 @@ pub struct TypeMetadata {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub flow_terminal_discharge: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flow_terminal_evidence_tier: Option<EvidenceTier>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub flow_state_model: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub flow_audit_warnings: Vec<String>,
@@ -3629,6 +3631,10 @@ fn default_scheduler_witness_abi() -> String {
 
 fn default_pure_effect_class() -> String {
     "Pure".to_string()
+}
+
+fn default_checked_static_evidence_tier() -> EvidenceTier {
+    EvidenceTier::CheckedStatic
 }
 
 /// Decode a hex-encoded scheduler witness from compile metadata.
@@ -3969,6 +3975,8 @@ pub struct FunctionMetadata {
     pub inferred_effect_class: String,
     #[serde(default = "default_pure_effect_class")]
     pub effect_class: String,
+    #[serde(default = "default_checked_static_evidence_tier")]
+    pub effect_evidence_tier: EvidenceTier,
     pub mutate_set: Vec<MutatePatternMetadata>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pool_primitives: Vec<PoolPrimitiveMetadata>,
@@ -5762,6 +5770,7 @@ fn compile_metadata_from_ir(ir: &ir::IrModule, artifact_format: ArtifactFormat, 
                         declared_effect_class: function.declared_effect_class.map(|effect| format!("{:?}", effect)),
                         inferred_effect_class: format!("{:?}", function.inferred_effect_class),
                         effect_class: format!("{:?}", function.effect_class),
+                        effect_evidence_tier: EvidenceTier::CheckedStatic,
                         mutate_set: function.body.mutate_set.iter().map(|pattern| mutate_pattern_metadata(pattern, &type_layouts)).collect(),
                         pool_primitives,
                         ckb_runtime_accesses,
@@ -14340,6 +14349,7 @@ fn type_metadata(
         flow_initial_state: type_def.flow_initial_state.clone(),
         flow_terminal_states: type_def.flow_terminal_states.clone(),
         flow_terminal_discharge: type_def.flow_terminal_discharge.clone(),
+        flow_terminal_evidence_tier: type_def.flow_terminal_discharge.as_ref().map(|_| EvidenceTier::CheckedRuntime),
         flow_state_model: type_def.flow_state_model.clone(),
         flow_audit_warnings: type_def.flow_audit_warnings.clone(),
         flow_states,
@@ -24359,6 +24369,7 @@ resource Token has store {
         assert_eq!(function.declared_effect_class, None);
         assert_eq!(function.inferred_effect_class, "ReadOnly");
         assert_eq!(function.effect_class, "ReadOnly");
+        assert_eq!(function.effect_evidence_tier, crate::EvidenceTier::CheckedStatic);
     }
 
     #[test]
@@ -24368,6 +24379,7 @@ resource Token has store {
 
         assert_eq!(function.inferred_effect_class, "Mutating");
         assert_eq!(function.effect_class, "Mutating");
+        assert_eq!(function.effect_evidence_tier, crate::EvidenceTier::CheckedStatic);
     }
 
     #[test]
@@ -24998,6 +25010,7 @@ action accept(input: Offer) -> output: Offer {
         assert_eq!(offer.flow_initial_state.as_deref(), Some("Created"));
         assert_eq!(offer.flow_terminal_states, vec!["Filled", "Cancelled"]);
         assert_eq!(offer.flow_terminal_discharge.as_deref(), Some("terminal-by-output-state"));
+        assert_eq!(offer.flow_terminal_evidence_tier, Some(crate::EvidenceTier::CheckedRuntime));
         assert_eq!(offer.flow_state_model.as_deref(), Some("enum-backed"));
         assert!(offer.flow_audit_warnings.is_empty());
         assert!(offer.flow_transitions.iter().any(|transition| transition.from == "Live" && transition.to == "Filled"));
@@ -25009,10 +25022,12 @@ action accept(input: Offer) -> output: Offer {
                 && obligation.feature == "terminal-by-output-state"
                 && obligation.status == "checked-runtime"
         }));
-        assert!(action
-            .proof_plan
-            .iter()
-            .any(|plan| { plan.category == "flow-terminal" && plan.feature == "terminal-by-output-state" && plan.on_chain_checked }));
+        assert!(action.proof_plan.iter().any(|plan| {
+            plan.category == "flow-terminal"
+                && plan.feature == "terminal-by-output-state"
+                && plan.evidence_tier == crate::EvidenceTier::CheckedRuntime
+                && plan.on_chain_checked
+        }));
         assert!(
             asm.contains("# cellscript abi: state transition Offer.state state_count=4"),
             "missing explicit flow runtime transition marker:\n{}",

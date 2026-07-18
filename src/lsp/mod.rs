@@ -2198,7 +2198,7 @@ fn receipt_flow_hover(receipt: &ReceiptDef, metadata: Option<&crate::CompileMeta
         };
 
         return format!(
-            "\n\n**Flow metadata**\n\nState model: `{}`\n\nInitial: `{}`\n\nTerminals: `{}`\n\nTerminal discharge: `{}`\n\nStates: `{}`\n\nTransitions: `{}`",
+            "\n\n**Flow metadata**\n\nState model: `{}`\n\nInitial: `{}`\n\nTerminals: `{}`\n\nTerminal discharge: `{}`\n\nTerminal evidence: `{}`\n\nStates: `{}`\n\nTransitions: `{}`",
             type_metadata.flow_state_model.as_deref().unwrap_or("unspecified"),
             type_metadata.flow_initial_state.as_deref().unwrap_or("legacy-undeclared"),
             if type_metadata.flow_terminal_states.is_empty() {
@@ -2207,6 +2207,7 @@ fn receipt_flow_hover(receipt: &ReceiptDef, metadata: Option<&crate::CompileMeta
                 type_metadata.flow_terminal_states.join(", ")
             },
             type_metadata.flow_terminal_discharge.as_deref().unwrap_or("legacy-undeclared"),
+            type_metadata.flow_terminal_evidence_tier.map_or("legacy-undeclared", crate::EvidenceTier::as_str),
             type_metadata.flow_states.join(" -> "),
             transitions
         );
@@ -2268,8 +2269,11 @@ fn function_metadata_hover(name: &str, function: &FnDef, metadata: Option<&crate
         if let Some(function_metadata) = metadata.functions.iter().find(|candidate| candidate.name == name) {
             let declared = function_metadata.declared_effect_class.as_deref().unwrap_or("inferred");
             return format!(
-                "\n\n**Effect metadata**\n\nDeclared: `{}`\n\nInferred: `{}`\n\nEffective: `{}`",
-                declared, function_metadata.inferred_effect_class, function_metadata.effect_class
+                "\n\n**Effect metadata**\n\nDeclared: `{}`\n\nInferred: `{}`\n\nEffective: `{}`\n\nEvidence: `{}`",
+                declared,
+                function_metadata.inferred_effect_class,
+                function_metadata.effect_class,
+                function_metadata.effect_evidence_tier.as_str()
             );
         }
     }

@@ -36,16 +36,24 @@ modes; they do not create a new gate command:
 - terminal discharge is currently only `terminal-by-output-state`, backed by
   generated state-transition checks and emitted as `checked-runtime` ProofPlan
   evidence;
+- every ProofPlan record carries exactly one evidence tier:
+  `checked-static`, `checked-runtime`, `runtime-helper-required`,
+  `builder-evidence-required`, `metadata-only`, or
+  `chain-evidence-required`;
+- `--production` rejects `metadata-only` records whose invariant, terminal, or
+  assert/check/enforce/require/validate/verify naming claims executable
+  enforcement;
 - legacy flows without initial/terminal declarations and numeric state fields
   remain accepted for migration, but metadata carries explicit audit warnings;
 - none of this metadata proves that every live on-chain Cell eventually reaches
   a terminal state. `release` still requires exact-artifact and chain evidence
   before a production claim.
 
-Metadata schema `45` carries declared/inferred/effective function effects and
-the initial, terminal, discharge, state-model, and audit-warning fields for
-flows. Consumers must reject unsupported schema versions instead of silently
-dropping these fields.
+Metadata schema `46` carries declared/inferred/effective function effects, the
+initial, terminal, discharge, state-model, and audit-warning fields for flows,
+and the canonical evidence tier on ProofPlan, flow, and function metadata.
+Consumers must reject unsupported schema versions instead of silently dropping
+these fields.
 
 ## Command Cheatsheet
 
