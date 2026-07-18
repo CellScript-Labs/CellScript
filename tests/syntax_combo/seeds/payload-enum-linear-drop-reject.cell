@@ -1,0 +1,21 @@
+// audit: phase=reject_compile
+// audit: contains=linear resource 'token' was not consumed
+module cellscript::audit::seed_payload_enum_linear_drop_reject
+
+resource Token has consume {
+    amount: u64,
+}
+
+enum MaybeToken {
+    None,
+    Some(Token),
+}
+
+action discard(input: Token) {
+    verification
+        let wrapped = MaybeToken::Some(input)
+        match wrapped {
+            MaybeToken::Some(token) => require true,
+            MaybeToken::None => require true,
+        }
+}

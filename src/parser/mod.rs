@@ -975,6 +975,12 @@ impl<'a> Parser<'a> {
         let start_span = self.current().span;
         self.expect(TokenKind::Enum)?;
         let name = self.parse_name_path()?;
+        if self.check(&TokenKind::Lt) {
+            return Err(CompileError::new(
+                "generic enum declarations are deferred in 0.22; declare a concrete fixed-width payload enum",
+                self.current().span,
+            ));
+        }
         self.expect(TokenKind::LBrace)?;
         self.skip_newlines();
 
@@ -3266,21 +3272,20 @@ impl<'a> Parser<'a> {
 
         let mut arms = Vec::new();
         while !self.check(&TokenKind::RBrace) && !self.check(&TokenKind::Eof) {
-            let pattern =
-                if self.check(&TokenKind::Underscore) || matches!(&self.current().kind, TokenKind::Identifier(name) if name == "_") {
-                    self.advance();
-                    "_".to_string()
-                } else {
-                    self.parse_name_path()?
-                };
+            let arm_start = self.current().span;
+            let pattern = self.parse_match_pattern()?;
             self.skip_newlines();
             self.expect(TokenKind::FatArrow)?;
             self.skip_newlines();
-            if !self.check(&TokenKind::LBrace) {
-                return Err(CompileError::new("match arms must use '{}' proof blocks", self.current().span));
-            }
-            let value = Expr::Block(self.parse_block()?);
-            let arm_span = self.current().span;
+            let value = if self.check(&TokenKind::LBrace) {
+                Expr::Block(self.parse_block()?)
+            } else if self.check(&TokenKind::Require) {
+                self.parse_match_arm_require()?
+            } else {
+                self.parse_expr()?
+            };
+            let arm_end = self.current().span;
+            let arm_span = Span::new(arm_start.start, arm_end.end, arm_start.line, arm_start.column);
             arms.push(MatchArm { pattern, value, span: arm_span });
             self.skip_newlines();
             if self.check(&TokenKind::Comma) {
@@ -3293,6 +3298,60 @@ impl<'a> Parser<'a> {
 
         self.expect(TokenKind::RBrace)?;
         Ok(Expr::Match(MatchExpr { expr: Box::new(expr), arms, span: start_span }))
+    }
+
+    fn parse_match_pattern(&mut self) -> Result<MatchPattern> {
+        if self.check(&TokenKind::Underscore) || matches!(&self.current().kind, TokenKind::Identifier(name) if name == "_") {
+            self.advance();
+            return Ok(MatchPattern::Wildcard);
+        }
+        let path = self.parse_name_path()?;
+        let mut bindings = Vec::new();
+        if self.check(&TokenKind::LParen) {
+            self.advance();
+            self.skip_newlines();
+            while !self.check(&TokenKind::RParen) && !self.check(&TokenKind::Eof) {
+                bindings.push(self.parse_binding_pattern()?);
+                self.skip_newlines();
+                if self.check(&TokenKind::Comma) {
+                    self.advance();
+                    self.skip_newlines();
+                } else {
+                    break;
+                }
+            }
+            self.expect(TokenKind::RParen)?;
+        }
+        Ok(MatchPattern::Variant { path, bindings })
+    }
+
+    fn parse_match_arm_require(&mut self) -> Result<Expr> {
+        let start_span = self.current().span;
+        self.expect(TokenKind::Require)?;
+        let condition = self.parse_expr()?;
+        let message = if self.check(&TokenKind::Comma) && matches!(self.peek(1).kind, TokenKind::String(_)) {
+            self.advance();
+            self.skip_newlines();
+            Some(Box::new(self.parse_expr()?))
+        } else if self.check(&TokenKind::Else) {
+            self.advance();
+            self.skip_newlines();
+            let message_span = self.current().span;
+            if let Some(name) = self.ident_like_name() {
+                self.advance();
+                Some(Box::new(Expr::String(name)))
+            } else {
+                return Err(CompileError::new("require else must name an error identifier", message_span));
+            }
+        } else {
+            None
+        };
+        let end_span = self.current().span;
+        Ok(Expr::Require(RequireExpr {
+            condition: Box::new(condition),
+            message,
+            span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
+        }))
     }
 }
 
@@ -3971,7 +4030,7 @@ action test() -> (u64, u64) {
     }
 
     #[test]
-    fn test_rejects_unbraced_match_arms() {
+    fn test_parses_expression_match_arms() {
         let input = r#"
 module test
 
@@ -3989,8 +4048,11 @@ action test(flag: Flag) -> u64 {
 }
 "#;
         let tokens = lex(input).unwrap();
-        let err = parse(&tokens).unwrap_err();
-        assert!(err.message.contains("match arms must use"), "unexpected error: {}", err.message);
+        let module = parse(&tokens).unwrap();
+        let Item::Action(action) = &module.items[1] else { panic!("expected action") };
+        let Stmt::Expr(Expr::Match(match_expr)) = &action.body[0] else { panic!("expected match expression") };
+        assert_eq!(match_expr.arms.len(), 2);
+        assert!(matches!(match_expr.arms[0].pattern, MatchPattern::Variant { ref path, .. } if path == "On"));
     }
 
     // === 0.13.1 preserve sugar and anonymous require block tests ===

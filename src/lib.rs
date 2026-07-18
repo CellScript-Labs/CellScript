@@ -201,7 +201,7 @@ fn strict_capability_name(capability: ast::Capability) -> &'static str {
 const DEFAULT_TARGET: &str = "riscv64-asm";
 const DEFAULT_TARGET_PROFILE: &str = "ckb";
 const ARTIFACT_CACHE_VERSION: &str = "project-source-set-v5";
-pub const METADATA_SCHEMA_VERSION: u32 = 51;
+pub const METADATA_SCHEMA_VERSION: u32 = 52;
 pub const SOURCE_METADATA_SCHEMA_VERSION: u32 = 1;
 pub const ARTIFACT_METADATA_SCHEMA_VERSION: u32 = 1;
 pub const CONSTRAINTS_METADATA_SCHEMA_VERSION: u32 = 1;
@@ -393,6 +393,8 @@ pub struct CompileMetadata {
     pub lowering: LoweringMetadata,
     #[serde(default)]
     pub capability_registry: CapabilityRegistryMetadata,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub enum_layouts: Vec<PayloadEnumLayoutMetadata>,
     pub runtime: RuntimeMetadata,
     #[serde(default)]
     pub constraints: ConstraintsMetadata,
@@ -427,6 +429,36 @@ pub struct CapabilityOperationRuleMetadata {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub legacy_alternatives: Vec<String>,
     pub identity_preservation_required: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PayloadEnumLayoutMetadata {
+    pub name: String,
+    pub generic: bool,
+    pub layout: String,
+    pub abi: String,
+    pub storage: String,
+    pub tag_width_bytes: usize,
+    pub encoded_size_bytes: usize,
+    pub contains_linear_payload: bool,
+    pub variants: Vec<PayloadEnumVariantMetadata>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PayloadEnumVariantMetadata {
+    pub name: String,
+    pub tag: u8,
+    pub payload_width_bytes: usize,
+    pub fields: Vec<PayloadEnumFieldMetadata>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PayloadEnumFieldMetadata {
+    pub index: usize,
+    pub r#type: String,
+    pub offset_bytes: usize,
+    pub width_bytes: usize,
+    pub ownership: String,
 }
 
 fn missing_metadata_component_schema_version() -> u32 {
@@ -1052,6 +1084,7 @@ pub fn validate_compile_metadata(metadata: &CompileMetadata, artifact_format: Ar
     }
     validate_type_identity_metadata(metadata)?;
     validate_capability_metadata(metadata)?;
+    validate_payload_enum_layout_metadata(metadata)?;
     validate_type_validity_metadata(metadata)?;
     validate_capacity_floor_metadata(metadata)?;
     validate_ckb_constraints_summary_metadata(metadata)?;
@@ -1170,6 +1203,104 @@ fn validate_capability_metadata(metadata: &CompileMetadata) -> Result<()> {
                     "{prefix}.identity_condition does not match the declared per-resource identity policy"
                 )));
             }
+        }
+    }
+    Ok(())
+}
+
+fn validate_payload_enum_layout_metadata(metadata: &CompileMetadata) -> Result<()> {
+    let mut names = HashSet::new();
+    let mut previous_name: Option<&str> = None;
+    for layout in &metadata.enum_layouts {
+        if layout.name.is_empty() || !names.insert(layout.name.as_str()) {
+            return Err(CompileError::without_span(format!(
+                "metadata enum_layouts contains an empty or duplicate enum name '{}'",
+                layout.name
+            )));
+        }
+        if previous_name.is_some_and(|previous| previous >= layout.name.as_str()) {
+            return Err(CompileError::without_span("metadata enum_layouts must use canonical name order"));
+        }
+        previous_name = Some(&layout.name);
+        if layout.generic {
+            return Err(CompileError::without_span(format!(
+                "metadata enum '{}' cannot be generic in the concrete 0.22 payload ADT surface",
+                layout.name
+            )));
+        }
+        if layout.tag_width_bytes != 1 || layout.variants.is_empty() || layout.variants.len() > u8::MAX as usize + 1 {
+            return Err(CompileError::without_span(format!(
+                "metadata enum '{}' must use a one-byte tag and declare 1..=256 variants",
+                layout.name
+            )));
+        }
+        let has_payload = layout.variants.iter().any(|variant| !variant.fields.is_empty());
+        let expected_layout = if has_payload { "packed-tagged-union-v1" } else { "u8-discriminant-v1" };
+        let expected_abi = if has_payload && layout.encoded_size_bytes <= 16 {
+            "fixed-bytes-pointer-v1+register-pair-return-v1"
+        } else if has_payload {
+            "fixed-bytes-pointer-v1"
+        } else {
+            "scalar-u8-v1"
+        };
+        let expected_storage = if layout.contains_linear_payload { "local-linear-handle-v1" } else { "serializable-fixed-width" };
+        if layout.layout != expected_layout || layout.abi != expected_abi || layout.storage != expected_storage {
+            return Err(CompileError::without_span(format!(
+                "metadata enum '{}' layout/ABI/storage contract is not canonical",
+                layout.name
+            )));
+        }
+
+        let mut variant_names = HashSet::new();
+        let mut max_payload_width = 0usize;
+        let mut observed_linear = false;
+        for (tag, variant) in layout.variants.iter().enumerate() {
+            if variant.name.is_empty() || !variant_names.insert(variant.name.as_str()) || variant.tag as usize != tag {
+                return Err(CompileError::without_span(format!(
+                    "metadata enum '{}' variants must have unique names and canonical sequential tags",
+                    layout.name
+                )));
+            }
+            let mut next_offset = 1usize;
+            for (index, field) in variant.fields.iter().enumerate() {
+                if field.index != index || field.offset_bytes != next_offset || field.r#type.is_empty() {
+                    return Err(CompileError::without_span(format!(
+                        "metadata enum '{}::{}' fields must use canonical indices and packed offsets",
+                        layout.name, variant.name
+                    )));
+                }
+                let linear = field.ownership == "linear-cell-handle";
+                if linear && field.width_bytes != 8 {
+                    return Err(CompileError::without_span(format!(
+                        "metadata enum '{}::{}' linear payload handles must be eight bytes",
+                        layout.name, variant.name
+                    )));
+                }
+                if !linear && field.ownership != "owned-fixed-width" {
+                    return Err(CompileError::without_span(format!(
+                        "metadata enum '{}::{}' field ownership '{}' is not canonical",
+                        layout.name, variant.name, field.ownership
+                    )));
+                }
+                observed_linear |= linear;
+                next_offset = next_offset.checked_add(field.width_bytes).ok_or_else(|| {
+                    CompileError::without_span(format!("metadata enum '{}::{}' payload width overflow", layout.name, variant.name))
+                })?;
+            }
+            let payload_width = next_offset - 1;
+            if variant.payload_width_bytes != payload_width {
+                return Err(CompileError::without_span(format!(
+                    "metadata enum '{}::{}' payload width does not match its field layout",
+                    layout.name, variant.name
+                )));
+            }
+            max_payload_width = max_payload_width.max(payload_width);
+        }
+        if layout.encoded_size_bytes != 1 + max_payload_width || layout.contains_linear_payload != observed_linear {
+            return Err(CompileError::without_span(format!(
+                "metadata enum '{}' encoded size or linear payload flag does not match its variants",
+                layout.name
+            )));
         }
     }
     Ok(())
@@ -6028,6 +6159,7 @@ fn compile_metadata_from_ir(ir: &ir::IrModule, artifact_format: ArtifactFormat, 
                     .to_string(),
         },
         capability_registry: capability_registry_metadata(),
+        enum_layouts: payload_enum_layout_metadata(ir),
         runtime: RuntimeMetadata {
             vm_target: "CKB-VM compatible RISC-V 64 IMC+B+MOP".to_string(),
             vm_version: "VERSION2".to_string(),
@@ -6486,6 +6618,12 @@ fn scope_ir_to_entry(ir: &ir::IrModule, scope: &CompileEntryScope) -> Result<ir:
             .filter(|(name, _)| used_types.contains(*name))
             .map(|(name, size)| (name.clone(), *size))
             .collect(),
+        enum_layouts: ir
+            .enum_layouts
+            .iter()
+            .filter(|(name, _)| used_types.contains(*name))
+            .map(|(name, layout)| (name.clone(), layout.clone()))
+            .collect(),
     })
 }
 
@@ -6641,6 +6779,18 @@ fn collect_instruction_scope(instruction: &ir::IrInstruction, used_types: &mut B
             for field in fields {
                 collect_operand_named_types(field, used_types);
             }
+        }
+        ir::IrInstruction::EnumConstruct { dest, enum_name, fields, .. } => {
+            collect_ir_type_named_types(&dest.ty, used_types);
+            used_types.insert(enum_name.clone());
+            for field in fields {
+                collect_operand_named_types(field, used_types);
+            }
+        }
+        ir::IrInstruction::EnumTag { dest, operand, enum_name } | ir::IrInstruction::EnumPayload { dest, operand, enum_name, .. } => {
+            collect_ir_type_named_types(&dest.ty, used_types);
+            collect_operand_named_types(operand, used_types);
+            used_types.insert(enum_name.clone());
         }
         ir::IrInstruction::Consume { operand } | ir::IrInstruction::Destroy { operand, .. } => {
             collect_operand_named_types(operand, used_types);
@@ -6907,6 +7057,77 @@ fn capability_registry_metadata() -> CapabilityRegistryMetadata {
             })
             .collect(),
         inheritance_syntax: "none; authority remains an explicit per-resource capability set".to_string(),
+    }
+}
+
+fn payload_enum_layout_metadata(ir: &ir::IrModule) -> Vec<PayloadEnumLayoutMetadata> {
+    let mut layouts = ir.enum_layouts.values().cloned().collect::<Vec<_>>();
+    layouts.sort_by(|left, right| left.name.cmp(&right.name));
+    layouts
+        .into_iter()
+        .map(|layout| {
+            let has_payload = layout.has_payload();
+            PayloadEnumLayoutMetadata {
+                name: layout.name,
+                generic: false,
+                layout: if has_payload { "packed-tagged-union-v1" } else { "u8-discriminant-v1" }.to_string(),
+                abi: if has_payload && layout.encoded_size <= 16 {
+                    "fixed-bytes-pointer-v1+register-pair-return-v1"
+                } else if has_payload {
+                    "fixed-bytes-pointer-v1"
+                } else {
+                    "scalar-u8-v1"
+                }
+                .to_string(),
+                storage: if layout.contains_linear_payload { "local-linear-handle-v1" } else { "serializable-fixed-width" }
+                    .to_string(),
+                tag_width_bytes: layout.tag_width,
+                encoded_size_bytes: layout.encoded_size,
+                contains_linear_payload: layout.contains_linear_payload,
+                variants: layout
+                    .variants
+                    .into_iter()
+                    .map(|variant| PayloadEnumVariantMetadata {
+                        name: variant.name,
+                        tag: variant.tag,
+                        payload_width_bytes: variant.payload_width,
+                        fields: variant
+                            .fields
+                            .into_iter()
+                            .map(|field| PayloadEnumFieldMetadata {
+                                index: field.index,
+                                r#type: payload_ir_type_name(&field.ty),
+                                offset_bytes: field.offset,
+                                width_bytes: field.width,
+                                ownership: if field.linear { "linear-cell-handle" } else { "owned-fixed-width" }.to_string(),
+                            })
+                            .collect(),
+                    })
+                    .collect(),
+            }
+        })
+        .collect()
+}
+
+fn payload_ir_type_name(ty: &ir::IrType) -> String {
+    match ty {
+        ir::IrType::U8 => "u8".to_string(),
+        ir::IrType::U16 => "u16".to_string(),
+        ir::IrType::U32 => "u32".to_string(),
+        ir::IrType::I32 => "i32".to_string(),
+        ir::IrType::U64 => "u64".to_string(),
+        ir::IrType::U128 => "u128".to_string(),
+        ir::IrType::Bool => "bool".to_string(),
+        ir::IrType::Unit => "()".to_string(),
+        ir::IrType::Address => "Address".to_string(),
+        ir::IrType::Hash => "Hash".to_string(),
+        ir::IrType::Array(inner, len) => format!("[{}; {}]", payload_ir_type_name(inner), len),
+        ir::IrType::Tuple(items) => {
+            format!("({})", items.iter().map(payload_ir_type_name).collect::<Vec<_>>().join(", "))
+        }
+        ir::IrType::Named(name) => name.clone(),
+        ir::IrType::Ref(inner) => format!("&{}", payload_ir_type_name(inner)),
+        ir::IrType::MutRef(inner) => format!("&mut {}", payload_ir_type_name(inner)),
     }
 }
 
@@ -15681,7 +15902,17 @@ fn molecule_struct_for_type(
         let mut fields = Vec::new();
         for field in &type_def.fields {
             let ty = molecule_type_for_ir_type(&field.ty, &type_def.name, &field.name, type_defs, aliases, structs, emitted, visiting)
-                .or_else(|| (field.fixed_size == Some(1)).then(|| molecule_fixed_array_alias(aliases, "CellScriptEnumTag", "byte", 1)))
+                .or_else(|| {
+                    field.fixed_size.map(|size| {
+                        if size == 1 {
+                            molecule_fixed_array_alias(aliases, "CellScriptEnumTag", "byte", 1)
+                        } else {
+                            let alias =
+                                format!("{}{}FixedBytes", molecule_identifier(&type_def.name), molecule_identifier(&field.name));
+                            molecule_fixed_array_alias(aliases, &alias, "byte", size)
+                        }
+                    })
+                })
                 .or_else(|| {
                     (field.fixed_size.is_none()).then(|| {
                         let alias = format!("{}{}Bytes", molecule_identifier(&type_def.name), molecule_identifier(&field.name));
@@ -15726,7 +15957,17 @@ fn molecule_table_for_type(
         let mut fields = Vec::new();
         for field in &type_def.fields {
             let ty = molecule_type_for_ir_type(&field.ty, &type_def.name, &field.name, type_defs, aliases, structs, emitted, visiting)
-                .or_else(|| (field.fixed_size == Some(1)).then(|| molecule_fixed_array_alias(aliases, "CellScriptEnumTag", "byte", 1)))
+                .or_else(|| {
+                    field.fixed_size.map(|size| {
+                        if size == 1 {
+                            molecule_fixed_array_alias(aliases, "CellScriptEnumTag", "byte", 1)
+                        } else {
+                            let alias =
+                                format!("{}{}FixedBytes", molecule_identifier(&type_def.name), molecule_identifier(&field.name));
+                            molecule_fixed_array_alias(aliases, &alias, "byte", size)
+                        }
+                    })
+                })
                 .or_else(|| {
                     (field.fixed_size.is_none()).then(|| {
                         let alias = format!("{}{}Bytes", molecule_identifier(&type_def.name), molecule_identifier(&field.name));
@@ -28549,7 +28790,7 @@ action create_lock(owner: Address) -> TimeLock {
     }
 
     #[test]
-    fn payload_enum_fields_use_dynamic_molecule_schema_metadata() {
+    fn payload_enum_fields_use_fixed_tagged_union_molecule_schema_metadata() {
         let source = r#"
 module payload_enum_schema
 
@@ -28581,17 +28822,14 @@ lock asset_matches(protected locked_asset: LockedAsset, witness expected: Hash) 
 "#;
         let result = compile(source, CompileOptions::default()).unwrap();
         let locked = result.metadata.types.iter().find(|ty| ty.name == "LockedAsset").expect("LockedAsset metadata");
-        assert_eq!(locked.encoded_size, None);
+        assert_eq!(locked.encoded_size, Some(73));
         let asset_type = locked.fields.iter().find(|field| field.name == "asset_type").expect("asset_type field");
-        assert_eq!(asset_type.encoded_size, None);
-        let schema = locked.molecule_schema.as_ref().expect("LockedAsset should have a dynamic Molecule schema");
-        assert_eq!(schema.layout, "molecule-table-v1");
-        assert_eq!(schema.dynamic_fields, vec!["asset_type"]);
-        assert!(schema.schema.contains("asset_type: LockedAssetAssetTypeBytes"));
-        assert!(
-            !schema.schema.contains("asset_type: CellScriptEnumTag"),
-            "payload enum fields must not be represented as one-byte enum tags"
-        );
+        assert_eq!(asset_type.encoded_size, Some(33));
+        let schema = locked.molecule_schema.as_ref().expect("LockedAsset should have a fixed Molecule schema");
+        assert_eq!(schema.layout, "fixed-struct-v1");
+        assert!(schema.dynamic_fields.is_empty());
+        assert!(schema.schema.contains("array LockedAssetAssetTypeFixedBytes [byte; 33];"));
+        assert!(schema.schema.contains("asset_type: LockedAssetAssetTypeFixedBytes"));
 
         let ckb = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
         assert!(
@@ -31300,5 +31538,115 @@ struct Value {
         predicate.dependencies.retain(|dependency| dependency != "builder:header-dep-block-number-evidence");
         let error = result.validate().unwrap_err();
         assert!(error.message.contains("header-dep block-number contract"), "unexpected error: {}", error.message);
+    }
+
+    #[test]
+    fn concrete_payload_enum_compiles_with_tagged_union_lowering() {
+        let source = r#"
+module payload::limit
+
+enum Limit {
+    None,
+    Some(u64),
+}
+
+fn get_limit(enabled: bool) -> Limit {
+    if enabled {
+        Limit::Some(100)
+    } else {
+        Limit::None
+    }
+}
+
+action spend(amount: u64, enabled: bool) {
+    verification
+        match get_limit(enabled) {
+            Limit::Some(value) => require amount <= value,
+            Limit::None => require false, "missing limit",
+        }
+}
+"#;
+        let result = compile(source, CompileOptions::default()).unwrap();
+        let layout = result.metadata.enum_layouts.iter().find(|layout| layout.name == "Limit").expect("Limit enum metadata");
+        assert_eq!(layout.layout, "packed-tagged-union-v1");
+        assert_eq!(layout.abi, "fixed-bytes-pointer-v1+register-pair-return-v1");
+        assert_eq!(layout.encoded_size_bytes, 9);
+        assert_eq!(layout.variants[1].fields[0].offset_bytes, 1);
+        assert_eq!(layout.variants[1].fields[0].width_bytes, 8);
+        let mut docs = crate::docgen::DocGenerator::new(crate::docgen::OutputFormat::Markdown);
+        docs.add_module(&result.ast);
+        docs.set_compile_metadata(&result.metadata);
+        let docs = docs.generate().unwrap();
+        assert!(docs.contains("### Concrete Enum Layouts"));
+        assert!(docs.contains("Limit"));
+        assert!(docs.contains("fixed-bytes-pointer-v1+register-pair-return-v1"));
+        let assembly = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+        assert!(assembly.contains("construct payload enum Limit::Some"), "missing payload constructor:\n{assembly}");
+        assert!(assembly.contains("return payload enum Limit size=9 via a0/a1 register pair"));
+        assert!(assembly.contains("receive payload enum Limit size=9 from a0/a1 register pair"));
+    }
+
+    #[test]
+    fn concrete_payload_enum_rejects_nonexhaustive_dynamic_generic_and_linear_drop_cases() {
+        let cases = [
+            (
+                r#"
+module payload::nonexhaustive
+enum Limit { None, Some(u64) }
+action spend(limit: Limit) {
+    verification
+        match limit { Limit::Some(value) => require value > 0 }
+}
+"#,
+                "non-exhaustive match",
+            ),
+            (
+                r#"
+module payload::dynamic
+enum Bytes { None, Some(Vec<u8>) }
+"#,
+                "variable-width or recursive",
+            ),
+            (
+                r#"
+module payload::generic
+enum Option<T> { None, Some(T) }
+"#,
+                "generic enum declarations are deferred",
+            ),
+            (
+                r#"
+module payload::linear_drop
+resource Token has consume { amount: u64 }
+enum MaybeToken { None, Some(Token) }
+action discard(input: Token) {
+    verification
+        let wrapped = MaybeToken::Some(input)
+        match wrapped {
+            MaybeToken::Some(token) => require true,
+            MaybeToken::None => require true,
+        }
+}
+"#,
+                "linear resource 'token' was not consumed",
+            ),
+        ];
+        for (source, expected) in cases {
+            let error = compile(source, CompileOptions::default()).unwrap_err();
+            assert!(error.message.contains(expected), "expected '{expected}', got: {}", error.message);
+        }
+    }
+
+    #[test]
+    fn compile_result_validation_rejects_tampered_payload_enum_layout() {
+        let source = r#"
+module payload::tamper
+enum Limit { None, Some(u64) }
+fn limit() -> Limit { Limit::Some(7) }
+"#;
+        let mut result = compile(source, CompileOptions::default()).unwrap();
+        result.metadata.enum_layouts[0].variants[1].fields[0].offset_bytes = 2;
+        let error = result.validate().unwrap_err();
+        assert!(error.message.contains("canonical indices and packed offsets"), "unexpected error: {}", error.message);
     }
 }

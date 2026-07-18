@@ -148,13 +148,13 @@ artifact-binding facts, and CKB constraint summaries can now move independently
 in future schema revisions. `verify-artifact` still rejects a mismatch in any of
 these versions.
 
-Schema 51 includes `runtime.transaction_view_handles`. Each record identifies the
+Schema 52 includes `runtime.transaction_view_handles`. Each record identifies the
 callable scope, source (`Input`, `GroupOutput`, `CellDep`, and so on), public
 handle type, and evidence tiers. A conforming record is a read-only view with
 `lifecycle_authority = false`; it is evidence of a transaction read surface,
 not evidence that a Cell was consumed or an output was created.
 
-Schema 51 also makes capability authority auditable. The top-level
+Schema 52 also makes capability authority auditable. The top-level
 `capability_registry` fixes both the closed vocabulary and entailment version;
 each persistent type repeats `capability_set_version`. For every accepted
 `destroy` or `replace_unique`, inspect `runtime.capability_proofs`: `required`,
@@ -162,6 +162,16 @@ each persistent type repeats `capability_set_version`. For every accepted
 the proof's versions must match the registry. `replace_unique` additionally
 records the exact `identity(...)` condition declared by the same resource.
 No proof may source authority from a container or another Cell type.
+
+Schema 52 adds top-level `enum_layouts` for concrete payload ADTs. Audit the
+`packed-tagged-union-v1` layout, one-byte tag, sequential variant tags, packed
+field offsets, encoded size, ownership, storage, and ABI together. A
+`linear-cell-handle` field is exactly eight bytes and forces
+`local-linear-handle-v1` storage; it is never a persistent serialization claim.
+Non-linear fixed payloads use `serializable-fixed-width`. Pure helpers may
+return layouts of at most 16 bytes through
+`fixed-bytes-pointer-v1+register-pair-return-v1`; larger layouts remain local or
+parameter values. Generic and variable-width payload enums are compile errors.
 
 Bounded `forall` and `count` invariant clauses appear as
 `bounded-source-quantifier` ProofPlan records. Review `reads`, `coverage`,
@@ -179,7 +189,7 @@ the `consume_each` runtime-helper tier. For `BoundedList<P, N>` driving
 `builder-evidence-required`; it is not proof that a transaction builder supplied
 the matching outputs or sufficient capacity.
 
-Schema 51 also carries `types[].validity_predicates`. Review each predicate's
+Schema 52 also carries `types[].validity_predicates`. Review each predicate's
 `expression`, `dependencies`, `evidence_tier`,
 `runtime_checked_on_create`, `create_paths_selected`,
 `create_paths_checked`, `update_paths_selected`, `create_path_status`,
@@ -198,7 +208,7 @@ are compile errors. Pure imported helpers are retained transitively and receive
 module-qualified dependency names; lifecycle helpers and transaction-view
 reads are rejected in validity predicates.
 
-Schema 51 records explicit borrow blocks in `runtime.borrow_regions`. Review
+Schema 52 records explicit borrow blocks in `runtime.borrow_regions`. Review
 `root`, `binding`, `view_type`, `storage`, `abi`, `allowed_effects`,
 `evidence_tier`, and `source_span`. A canonical record has `View<T>`,
 `storage = none`, `abi = none`, `allowed_effects = [Pure, ReadOnly]`, and

@@ -380,12 +380,30 @@ impl LspServer {
         for item in &module.items {
             match item {
                 Item::Enum(enum_def) if enum_def.name == type_name => {
-                    items.extend(enum_def.variants.iter().filter(|variant| variant.fields.is_empty()).map(|variant| CompletionItem {
-                        label: variant.name.clone(),
-                        kind: CompletionItemKind::EnumMember,
-                        detail: Some(format!("enum variant {}::{}", enum_def.name, variant.name)),
-                        documentation: None,
-                        insert_text: Some(variant.name.clone()),
+                    items.extend(enum_def.variants.iter().map(|variant| {
+                        let payload = variant.fields.iter().map(type_to_string).collect::<Vec<_>>();
+                        let insert_text = if payload.is_empty() {
+                            variant.name.clone()
+                        } else {
+                            format!(
+                                "{}({})",
+                                variant.name,
+                                (0..payload.len()).map(|index| format!("value{}", index + 1)).collect::<Vec<_>>().join(", ")
+                            )
+                        };
+                        CompletionItem {
+                            label: variant.name.clone(),
+                            kind: CompletionItemKind::EnumMember,
+                            detail: Some(if payload.is_empty() {
+                                format!("enum variant {}::{}", enum_def.name, variant.name)
+                            } else {
+                                format!("enum variant {}::{}({})", enum_def.name, variant.name, payload.join(", "))
+                            }),
+                            documentation: (!payload.is_empty()).then(|| {
+                                "Concrete fixed-width payload constructor; generic and variable-width payload ADTs remain deferred.".to_string()
+                            }),
+                            insert_text: Some(insert_text),
+                        }
                     }));
                 }
                 _ => {}
@@ -1403,6 +1421,7 @@ impl LspServer {
                 contents: format!("```cellscript\nstruct {}\n```{}", s.name, type_validity_hover(&s.name, metadata)),
                 range: Some(range),
             }),
+            Item::Enum(e) => Some(Hover { contents: payload_enum_hover(e, metadata), range: Some(range) }),
             Item::Action(a) => Some(Hover {
                 contents: format!(
                     "```cellscript\naction {}\n```\n\n{}{}",
@@ -2319,6 +2338,36 @@ fn receipt_flow_hover(receipt: &ReceiptDef, metadata: Option<&crate::CompileMeta
     String::new()
 }
 
+fn payload_enum_hover(enum_def: &EnumDef, metadata: Option<&crate::CompileMetadata>) -> String {
+    let variants = enum_def
+        .variants
+        .iter()
+        .map(|variant| {
+            if variant.fields.is_empty() {
+                variant.name.clone()
+            } else {
+                format!("{}({})", variant.name, variant.fields.iter().map(type_to_string).collect::<Vec<_>>().join(", "))
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let mut hover = format!("```cellscript\nenum {} {{ {} }}\n```", enum_def.name, variants);
+    if let Some(layout) = metadata.and_then(|metadata| metadata.enum_layouts.iter().find(|layout| layout.name == enum_def.name)) {
+        hover.push_str(&format!(
+            "\n\n**Layout metadata**\n\nLayout: `{}`\n\nABI: `{}`\n\nStorage: `{}`\n\nTag: `{}` byte\n\nEncoded size: `{}` bytes\n\nLinear payload: `{}`",
+            layout.layout,
+            layout.abi,
+            layout.storage,
+            layout.tag_width_bytes,
+            layout.encoded_size_bytes,
+            layout.contains_linear_payload
+        ));
+    } else if enum_def.variants.iter().any(|variant| !variant.fields.is_empty()) {
+        hover.push_str("\n\nConcrete fixed-width payload enum; generic and variable-width payload ADTs are deferred.");
+    }
+    hover
+}
+
 fn type_validity_hover(name: &str, metadata: Option<&crate::CompileMetadata>) -> String {
     let Some(type_metadata) = metadata.and_then(|metadata| metadata.types.iter().find(|type_metadata| type_metadata.name == name))
     else {
@@ -2760,6 +2809,20 @@ mod tests {
 
         let dao = server.member_completions("file:///test.cell", "dao");
         assert!(dao.iter().any(|item| item.label == "require_input_relative_epoch_since_at_least"));
+    }
+
+    #[test]
+    fn test_payload_enum_namespace_completions_expose_constructor_shape() {
+        let source = "module payload_completion\nenum Limit { None, Some(u64) }\n";
+        let tokens = crate::lexer::lex(source).unwrap();
+        let module = crate::parser::parse(&tokens).unwrap();
+        let server = LspServer::new();
+        let completions = server.namespace_symbol_completions(&module, "Limit");
+        let some = completions.iter().find(|item| item.label == "Some").expect("Some completion");
+        assert_eq!(some.insert_text.as_deref(), Some("Some(value1)"));
+        assert!(some.detail.as_deref().is_some_and(|detail| detail.contains("Some(u64)")));
+        let none = completions.iter().find(|item| item.label == "None").expect("None completion");
+        assert_eq!(none.insert_text.as_deref(), Some("None"));
     }
 
     #[test]

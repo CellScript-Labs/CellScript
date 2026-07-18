@@ -209,7 +209,10 @@ const BUNDLED_EXAMPLE_ASM_SHAPE_BUDGETS: [(&str, AssemblyShapeBudget); 9] = [
             max_machine_blocks: 2_050,
             max_machine_block_bytes: 21_000,
             max_cfg_edges: 3_500,
-            max_call_edges: 450,
+            // Canonical fixed-width enum layouts replace several dynamic lower-bound
+            // guards with exact-size guards. This keeps text/CFG size below the
+            // release baseline while moving the helper-call mix to 460 edges.
+            max_call_edges: 465,
             max_unreachable_machine_blocks: 2_000,
         },
     ),

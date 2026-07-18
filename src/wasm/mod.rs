@@ -385,6 +385,7 @@ mod tests {
             external_type_defs: Vec::new(),
             external_callable_abis: Vec::new(),
             enum_fixed_sizes: Default::default(),
+            enum_layouts: Default::default(),
         };
         let report = audit_module(&ir);
         assert_eq!(report.status, WasmSupportStatus::AuditOnly);
@@ -398,6 +399,7 @@ mod tests {
             external_type_defs: Vec::new(),
             external_callable_abis: Vec::new(),
             enum_fixed_sizes: Default::default(),
+            enum_layouts: Default::default(),
             items: vec![IrItem::Action(IrAction {
                 name: "main".to_string(),
                 params: Vec::new(),

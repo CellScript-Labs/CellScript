@@ -31,6 +31,12 @@
   policy. Schema 51 records the registry, per-type capability-set version, and
   required/provided/entailed/missing proof fields, and rejects transitive
   authority from container-like resources.
+- Add concrete fixed-width payload enums before generic ADTs. Payload variants
+  now support constructor calls, exhaustive destructuring, packed one-byte-tag
+  layouts, arm-local linear Cell ownership, RISC-V construction/projection, and
+  an explicit pure-helper register-pair return ABI up to 16 bytes. Schema 52
+  publishes canonical `enum_layouts`; dynamic, recursive, and generic payloads
+  remain fail-closed/deferred.
 - Add canonical type `validity` blocks. Pure field predicates lower to
   fail-closed checks before selected create/constructor instructions; paths
   without concrete lowering remain `runtime-helper-required`. The only

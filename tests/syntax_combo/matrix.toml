@@ -28,6 +28,11 @@ required_origins = [
     "tests/syntax_combo/seeds/capability-entailment.cell",
     "tests/syntax_combo/seeds/capability-missing-identity-reject.cell",
     "tests/syntax_combo/seeds/capability-transitive-grant-reject.cell",
+    "tests/syntax_combo/seeds/payload-enum.cell",
+    "tests/syntax_combo/seeds/payload-enum-nonexhaustive-reject.cell",
+    "tests/syntax_combo/seeds/payload-enum-dynamic-reject.cell",
+    "tests/syntax_combo/seeds/payload-enum-linear-drop-reject.cell",
+    "tests/syntax_combo/seeds/payload-enum-generic-reject.cell",
 ]
 description = "Local smoke: deterministic generated cases plus regression seeds."
 
@@ -68,6 +73,11 @@ required_origins = [
     "tests/syntax_combo/seeds/capability-entailment.cell",
     "tests/syntax_combo/seeds/capability-missing-identity-reject.cell",
     "tests/syntax_combo/seeds/capability-transitive-grant-reject.cell",
+    "tests/syntax_combo/seeds/payload-enum.cell",
+    "tests/syntax_combo/seeds/payload-enum-nonexhaustive-reject.cell",
+    "tests/syntax_combo/seeds/payload-enum-dynamic-reject.cell",
+    "tests/syntax_combo/seeds/payload-enum-linear-drop-reject.cell",
+    "tests/syntax_combo/seeds/payload-enum-generic-reject.cell",
 ]
 description = "PR gate: pairwise generated cases plus regression seeds."
 
@@ -111,6 +121,11 @@ required_origins = [
     "tests/syntax_combo/seeds/capability-entailment.cell",
     "tests/syntax_combo/seeds/capability-missing-identity-reject.cell",
     "tests/syntax_combo/seeds/capability-transitive-grant-reject.cell",
+    "tests/syntax_combo/seeds/payload-enum.cell",
+    "tests/syntax_combo/seeds/payload-enum-nonexhaustive-reject.cell",
+    "tests/syntax_combo/seeds/payload-enum-dynamic-reject.cell",
+    "tests/syntax_combo/seeds/payload-enum-linear-drop-reject.cell",
+    "tests/syntax_combo/seeds/payload-enum-generic-reject.cell",
 ]
 description = "Release audit: triplewise sample, mutations, and selected CKB acceptance."
 
@@ -159,6 +174,9 @@ required_bug_classes.quick = [
     "SCA-BUG-0.22-BORROW-CROSSES-CONSUME",
     "SCA-BUG-0.22-CAPABILITY-OVERGRANT",
     "SCA-BUG-0.22-CAPABILITY-TRANSITIVE-GRANT",
+    "SCA-BUG-0.22-PAYLOAD-MATCH-NONEXHAUSTIVE",
+    "SCA-BUG-0.22-PAYLOAD-DYNAMIC-ACCEPTED",
+    "SCA-BUG-0.22-PAYLOAD-LINEAR-DROP",
 ]
 
 required_bug_classes.ci = [

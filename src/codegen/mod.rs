@@ -783,6 +783,8 @@ pub struct CodeGenerator {
     type_layouts: HashMap<String, HashMap<String, SchemaFieldLayout>>,
     /// Fieldless enum storage widths, keyed by enum name.
     enum_fixed_sizes: HashMap<String, usize>,
+    /// Canonical tagged-union layouts for concrete payload enums.
+    enum_layouts: HashMap<String, IrEnumLayout>,
     /// Fixed encoded size of named schemas when all fields have fixed-width layouts.
     type_fixed_sizes: HashMap<String, usize>,
     /// Named types declared as receipts.
@@ -911,6 +913,13 @@ impl CodeGenerator {
         fixed_byte_width(ty, type_static_length(ty)).or_else(|| self.fixed_named_type_width(ty))
     }
 
+    fn payload_enum_width(&self, ty: &IrType) -> Option<usize> {
+        let IrType::Named(name) = ty else {
+            return None;
+        };
+        self.enum_layouts.get(name).filter(|layout| layout.has_payload()).map(|layout| layout.encoded_size)
+    }
+
     fn const_data_label_for_bytes(&mut self, bytes: Vec<u8>) -> String {
         if let Some(label) = self.const_data_labels.get(&bytes) {
             return label.clone();
@@ -959,6 +968,7 @@ impl CodeGenerator {
             next_collection_slot: 0,
             type_layouts: HashMap::new(),
             enum_fixed_sizes: HashMap::new(),
+            enum_layouts: HashMap::new(),
             type_fixed_sizes: HashMap::new(),
             receipt_type_names: BTreeSet::new(),
             cell_type_names: BTreeSet::new(),
@@ -1026,6 +1036,7 @@ impl CodeGenerator {
     pub fn generate(mut self, ir: &IrModule, format: ArtifactFormat) -> Result<Vec<u8>> {
         let has_entrypoint = ir.items.iter().any(|item| matches!(item, IrItem::Action(_) | IrItem::Lock(_)));
         self.enum_fixed_sizes = ir.enum_fixed_sizes.clone();
+        self.enum_layouts = ir.enum_layouts.clone();
         self.pure_const_returns = collect_pure_const_returns(ir);
         self.auto_aggregate_runtime_helpers_by_action = auto_lowered_aggregate_runtime_helpers_by_action(ir);
         for item in &ir.items {
@@ -1198,7 +1209,7 @@ impl CodeGenerator {
         let type_hash_param_indices = callable_abi.as_ref().map(|abi| abi.type_hash_param_indices.clone()).unwrap_or_default();
         let runtime_bound_param_indices = callable_abi.as_ref().map(|abi| abi.runtime_bound_param_indices.clone()).unwrap_or_default();
         let outgoing_stack_arg_bytes = align_stack_arg_bytes(entry_abi_arg_count(params, callable_abi.as_ref()).saturating_sub(8) * 8);
-        let payload = entry_witness_payload_layout(params, &runtime_bound_param_indices);
+        let payload = entry_witness_payload_layout(params, &runtime_bound_param_indices, &self.enum_layouts);
         let payload_len = payload.iter().map(|arg| arg.width).sum::<usize>();
         let has_witness_payload = payload.iter().any(|arg| arg.width > 0 || arg.unsupported);
         let has_lock_args = params.iter().any(|param| param.source == ParamSource::LockArgs);
@@ -1318,7 +1329,7 @@ impl CodeGenerator {
                         self.emit_entry_abi_zero_arg(abi_index + 1, outgoing_stack_arg_bytes);
                         abi_index += 2;
                     }
-                } else if entry_witness_dynamic_schema_param(&param.ty) {
+                } else if entry_witness_dynamic_schema_param(&param.ty) && self.payload_enum_width(&param.ty).is_none() {
                     let len_ok_label = self.fresh_label("entry_witness_schema_len_ok");
                     let bytes_ok_label = self.fresh_label("entry_witness_schema_bytes_ok");
                     self.emit(format!(
@@ -1364,8 +1375,9 @@ impl CodeGenerator {
                         self.emit_entry_abi_zero_arg(abi_index + 1, outgoing_stack_arg_bytes);
                         abi_index += 2;
                     }
-                } else if let Some(width) =
-                    fixed_byte_pointer_param_width(&param.ty).or_else(|| fixed_aggregate_pointer_param_width(&param.ty))
+                } else if let Some(width) = self
+                    .payload_enum_width(&param.ty)
+                    .or_else(|| fixed_byte_pointer_param_width(&param.ty).or_else(|| fixed_aggregate_pointer_param_width(&param.ty)))
                 {
                     let bytes_ok_label = self.fresh_label("entry_witness_fixed_bytes_ok");
                     self.emit(format!(
@@ -1451,7 +1463,7 @@ impl CodeGenerator {
                         self.emit_entry_abi_zero_arg(abi_index + 1, outgoing_stack_arg_bytes);
                         abi_index += 2;
                     }
-                } else if entry_witness_dynamic_schema_param(&param.ty) {
+                } else if entry_witness_dynamic_schema_param(&param.ty) && self.payload_enum_width(&param.ty).is_none() {
                     self.emit(format!("# cellscript entry abi: schema param {} is runtime-loaded; pass null ABI bytes", param.name));
                     self.emit_entry_abi_zero_arg(abi_index, outgoing_stack_arg_bytes);
                     self.emit_entry_abi_zero_arg(abi_index + 1, outgoing_stack_arg_bytes);
@@ -1465,8 +1477,9 @@ impl CodeGenerator {
                         self.emit_entry_abi_zero_arg(abi_index + 1, outgoing_stack_arg_bytes);
                         abi_index += 2;
                     }
-                } else if let Some(width) =
-                    fixed_byte_pointer_param_width(&param.ty).or_else(|| fixed_aggregate_pointer_param_width(&param.ty))
+                } else if let Some(width) = self
+                    .payload_enum_width(&param.ty)
+                    .or_else(|| fixed_byte_pointer_param_width(&param.ty).or_else(|| fixed_aggregate_pointer_param_width(&param.ty)))
                 {
                     self.emit(format!(
                         "# cellscript entry abi: fixed-byte param {} pointer={} length={} size={}",
@@ -1721,7 +1734,9 @@ impl CodeGenerator {
         outgoing_stack_arg_bytes: usize,
         fail_label: &str,
     ) {
-        let fixed_byte_width = fixed_byte_pointer_param_width(&param.ty).or_else(|| fixed_aggregate_pointer_param_width(&param.ty));
+        let fixed_byte_width = self
+            .payload_enum_width(&param.ty)
+            .or_else(|| fixed_byte_pointer_param_width(&param.ty).or_else(|| fixed_aggregate_pointer_param_width(&param.ty)));
         let scalar_width = entry_witness_register_param_width(&param.ty);
         let Some(width) = fixed_byte_width.or(scalar_width) else {
             self.emit(format!("# cellscript entry abi: unsupported lock_args param {} shape; fail closed", param.name));
@@ -3178,6 +3193,15 @@ impl CodeGenerator {
             IrInstruction::Tuple { dest, fields } => {
                 self.emit_tuple(dest, fields)?;
             }
+            IrInstruction::EnumConstruct { dest, enum_name, variant, fields } => {
+                self.emit_enum_construct(dest, enum_name, variant, fields)?;
+            }
+            IrInstruction::EnumTag { dest, operand, enum_name } => {
+                self.emit_enum_tag(dest, operand, enum_name)?;
+            }
+            IrInstruction::EnumPayload { dest, operand, enum_name, variant, field_index } => {
+                self.emit_enum_payload(dest, operand, enum_name, variant, *field_index)?;
+            }
             IrInstruction::Consume { operand } => {
                 self.emit_consume(operand)?;
             }
@@ -3222,6 +3246,34 @@ impl CodeGenerator {
                         self.emit_epilogue();
                     }
                     return Ok(());
+                }
+                if let IrOperand::Var(var) = operand {
+                    if let IrType::Named(name) = &var.ty {
+                        if let Some(layout) = self.enum_layouts.get(name).filter(|layout| layout.has_payload()).cloned() {
+                            let Some(source) = self.expected_fixed_byte_source(operand, layout.encoded_size) else {
+                                self.emit("# cellscript abi: payload enum return source is unavailable; fail closed");
+                                self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+                                return Ok(());
+                            };
+                            self.emit_prepare_fixed_byte_source(&source, layout.encoded_size, "payload enum return");
+                            if !self.emit_fixed_byte_source_pointer_or_const_to("t4", &source) {
+                                self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+                                return Ok(());
+                            }
+                            self.emit_unaligned_scalar_load("t4", "a0", "t2", 0, layout.encoded_size.min(8));
+                            if layout.encoded_size > 8 {
+                                self.emit_unaligned_scalar_load("t4", "a1", "t2", 8, layout.encoded_size - 8);
+                            } else {
+                                self.emit("li a1, 0");
+                            }
+                            self.emit(format!(
+                                "# cellscript abi: return payload enum {} size={} via a0/a1 register pair",
+                                name, layout.encoded_size
+                            ));
+                            self.emit_epilogue();
+                            return Ok(());
+                        }
+                    }
                 }
                 if let IrOperand::Var(v) = operand {
                     if let Some(fields) = self.tuple_aggregate_fields.get(&v.id).cloned() {
@@ -3359,6 +3411,22 @@ impl CodeGenerator {
             self.emit(format!("li {}, {}", scratch, offset));
             self.emit(format!("add {}, {}, {}", scratch, base, scratch));
             self.emit(format!("{} {}, 0({})", opcode, dst, scratch));
+        }
+    }
+
+    fn emit_memory_store_with_avoid(&mut self, opcode: &str, src: &str, base: &str, offset: usize, avoid: &[&str]) {
+        let offset = i64::try_from(offset).expect("memory offset should fit in i64");
+        if small_signed_immediate(offset) {
+            self.emit(format!("{} {}, {}({})", opcode, src, offset, base));
+        } else {
+            let mut registers = Vec::with_capacity(2 + avoid.len());
+            registers.push(src);
+            registers.push(base);
+            registers.extend_from_slice(avoid);
+            let scratch = scratch_register_avoiding(&registers);
+            self.emit(format!("li {}, {}", scratch, offset));
+            self.emit(format!("add {}, {}, {}", scratch, base, scratch));
+            self.emit(format!("{} {}, 0({})", opcode, src, scratch));
         }
     }
 
@@ -6979,6 +7047,16 @@ impl CodeGenerator {
                     self.record_operand(field, max_var_id);
                 }
             }
+            IrInstruction::EnumConstruct { dest, fields, .. } => {
+                self.record_var(dest, max_var_id);
+                for field in fields {
+                    self.record_operand(field, max_var_id);
+                }
+            }
+            IrInstruction::EnumTag { dest, operand, .. } | IrInstruction::EnumPayload { dest, operand, .. } => {
+                self.record_var(dest, max_var_id);
+                self.record_operand(operand, max_var_id);
+            }
             IrInstruction::Binary { dest, left, right, .. } => {
                 self.record_var(dest, max_var_id);
                 self.record_operand(left, max_var_id);
@@ -7106,7 +7184,22 @@ impl CodeGenerator {
             | IrInstruction::CollectionNew { dest, .. }
             | IrInstruction::Move { dest, .. }
             | IrInstruction::Tuple { dest, .. }
+            | IrInstruction::EnumConstruct { dest, .. }
+            | IrInstruction::EnumTag { dest, .. }
             | IrInstruction::Binary { dest, .. } => record(offsets, dest),
+            IrInstruction::EnumPayload { dest, enum_name, variant, field_index, .. } => {
+                record(offsets, dest);
+                if let Some(field) = self
+                    .enum_layouts
+                    .get(enum_name)
+                    .and_then(|layout| layout.variants.iter().find(|candidate| candidate.name == *variant))
+                    .and_then(|variant| variant.fields.get(*field_index))
+                {
+                    if !field.linear && !is_fixed_scalar_ir_type(&field.ty) && field.width > 0 {
+                        offsets.insert(dest.id, field.width);
+                    }
+                }
+            }
             IrInstruction::Call { dest, func, .. } => {
                 if let Some(dest) = dest {
                     if is_ckb_fixed_hash_helper(func) && dest.ty == IrType::Hash {
@@ -7161,6 +7254,9 @@ impl CodeGenerator {
             | IrInstruction::Transfer { dest, .. }
             | IrInstruction::Move { dest, .. }
             | IrInstruction::Tuple { dest, .. }
+            | IrInstruction::EnumConstruct { dest, .. }
+            | IrInstruction::EnumTag { dest, .. }
+            | IrInstruction::EnumPayload { dest, .. }
             | IrInstruction::Binary { dest, .. }
             | IrInstruction::Call { dest: Some(dest), .. } => {
                 if dest.ty == IrType::U128 {
@@ -9799,7 +9895,41 @@ impl CodeGenerator {
         }
 
         if let Some(d) = dest {
-            if d.ty == IrType::U128 {
+            let payload_enum = match &d.ty {
+                IrType::Named(name) => {
+                    self.enum_layouts.get(name).filter(|layout| layout.has_payload()).map(|layout| (name.clone(), layout.clone()))
+                }
+                _ => None,
+            };
+            if let Some((name, layout)) = payload_enum {
+                if let Some(offset) = self.fixed_byte_local_offsets.get(&d.id).copied() {
+                    self.emit(format!(
+                        "# cellscript abi: receive payload enum {} size={} from a0/a1 register pair",
+                        name, layout.encoded_size
+                    ));
+                    let low_width = layout.encoded_size.min(8);
+                    for byte_index in 0..low_width {
+                        self.emit_stack_store_byte("a0", offset + byte_index);
+                        if byte_index + 1 < low_width {
+                            self.emit("srli a0, a0, 8");
+                        }
+                    }
+                    if layout.encoded_size > 8 {
+                        let high_width = layout.encoded_size - 8;
+                        for byte_index in 0..high_width {
+                            self.emit_stack_store_byte("a1", offset + 8 + byte_index);
+                            if byte_index + 1 < high_width {
+                                self.emit("srli a1, a1, 8");
+                            }
+                        }
+                    }
+                    self.emit_sp_addi("t0", offset);
+                    self.emit_stack_store("t0", d.id * 8);
+                } else {
+                    self.emit("# cellscript abi: payload enum call destination has no storage; fail closed");
+                    self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+                }
+            } else if d.ty == IrType::U128 {
                 if let Some(offset) = self.u128_value_offsets.get(&d.id).copied() {
                     self.emit("# cellscript abi: receive u128 return from a0(low)/a1(high)");
                     self.emit_stack_store("a0", offset);
@@ -10463,6 +10593,27 @@ impl CodeGenerator {
         arg: &IrOperand,
         outgoing_stack_arg_bytes: usize,
     ) -> bool {
+        if let IrType::Named(name) = &param.ty {
+            if let Some(layout) = self.enum_layouts.get(name).filter(|layout| layout.has_payload()) {
+                let width = layout.encoded_size;
+                self.emit(format!(
+                    "# cellscript abi: call {} payload enum param {} pointer={} length={} size={}",
+                    func,
+                    param.name,
+                    abi_arg_label(*abi_index),
+                    abi_arg_label(*abi_index + 1),
+                    width
+                ));
+                if !self.emit_call_pointer_arg(func, &param.name, abi_index, arg, Some(width), outgoing_stack_arg_bytes) {
+                    return false;
+                }
+                if !self.emit_call_length_arg(func, &param.name, abi_index, arg, CallLengthKind::FixedBytes, outgoing_stack_arg_bytes)
+                {
+                    return false;
+                }
+                return true;
+            }
+        }
         if named_type_name(&param.ty).is_some() {
             self.emit(format!(
                 "# cellscript abi: call {} schema param {} pointer={} length={}",
@@ -10574,6 +10725,16 @@ impl CodeGenerator {
         };
         if let Some(size_offset) = size_offset {
             self.emit_stack_load(&register, size_offset);
+        } else if let (IrOperand::Var(var), CallLengthKind::FixedBytes) = (arg, kind) {
+            if let Some(width) = self.fixed_named_type_width(&var.ty) {
+                self.emit(format!("li {}, {}", register, width));
+            } else {
+                self.emit(format!(
+                    "# cellscript abi: call {} fixed-byte param {} has no tracked ABI length; pass zero length to fail closed",
+                    func, label
+                ));
+                self.emit(format!("li {}, 0", register));
+            }
         } else if let CallLengthKind::FixedBytes = kind {
             if matches!(arg, IrOperand::Const(_)) {
                 self.emit(format!(
@@ -10780,6 +10941,178 @@ impl CodeGenerator {
             return Ok(());
         }
         self.emit_stack_store("zero", dest.id * 8);
+        Ok(())
+    }
+
+    fn emit_enum_construct(&mut self, dest: &IrVar, enum_name: &str, variant_name: &str, fields: &[IrOperand]) -> Result<()> {
+        let Some(layout) = self.enum_layouts.get(enum_name).cloned() else {
+            return Err(CompileError::new(
+                format!("payload enum '{}' reached codegen without an IR layout", enum_name),
+                crate::error::Span::default(),
+            ));
+        };
+        let Some(variant) = layout.variants.iter().find(|variant| variant.name == variant_name).cloned() else {
+            return Err(CompileError::new(
+                format!("payload enum '{}::{}' reached codegen without a variant layout", enum_name, variant_name),
+                crate::error::Span::default(),
+            ));
+        };
+        if fields.len() != variant.fields.len() {
+            return Err(CompileError::new(
+                format!(
+                    "payload enum '{}::{}' codegen arity mismatch: expected {}, found {}",
+                    enum_name,
+                    variant_name,
+                    variant.fields.len(),
+                    fields.len()
+                ),
+                crate::error::Span::default(),
+            ));
+        }
+        let Some(dest_offset) = self.fixed_byte_local_offsets.get(&dest.id).copied() else {
+            return Err(CompileError::new(
+                format!("payload enum '{}' destination has no fixed-byte local storage", enum_name),
+                crate::error::Span::default(),
+            ));
+        };
+
+        self.emit(format!(
+            "# cellscript abi: construct payload enum {}::{} var{} tagged-union-v1 size={}",
+            enum_name, variant_name, dest.id, layout.encoded_size
+        ));
+        self.emit_sp_addi("a0", dest_offset);
+        self.emit(format!("li a1, {}", layout.encoded_size));
+        self.emit("call __cellscript_memzero_fixed");
+        self.emit_sp_addi("t4", dest_offset);
+        self.emit(format!("li t0, {}", variant.tag));
+        self.emit_memory_store_with_avoid("sb", "t0", "t4", 0, &["t0", "t4"]);
+
+        for (operand, field) in fields.iter().zip(&variant.fields) {
+            if field.width == 0 {
+                continue;
+            }
+            if field.linear || (field.width <= 8 && is_fixed_scalar_ir_type(&field.ty)) {
+                self.emit(format!(
+                    "# cellscript abi: payload enum field {}.{}[{}] offset={} size={}{}",
+                    enum_name,
+                    variant_name,
+                    field.index,
+                    field.offset,
+                    field.width,
+                    if field.linear { " local-linear-handle" } else { "" }
+                ));
+                self.emit_operand_to_register("t0", operand);
+                for byte_index in 0..field.width {
+                    self.emit_memory_store_with_avoid("sb", "t0", "t4", field.offset + byte_index, &["t0", "t4"]);
+                    if byte_index + 1 < field.width {
+                        self.emit("srli t0, t0, 8");
+                    }
+                }
+                continue;
+            }
+
+            let Some(source) = self.expected_fixed_byte_source(operand, field.width) else {
+                self.emit("# cellscript abi: payload enum field source is unavailable; fail closed");
+                self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+                return Ok(());
+            };
+            self.emit_prepare_fixed_byte_source(&source, field.width, "payload enum field");
+            if !self.emit_fixed_byte_source_pointer_or_const_to("a0", &source) {
+                self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+                return Ok(());
+            }
+            self.emit_sp_addi("a1", dest_offset + field.offset);
+            self.emit(format!("li a2, {}", field.width));
+            self.emit("call __cellscript_memcpy_fixed");
+            self.emit_sp_addi("t4", dest_offset);
+        }
+        self.emit_sp_addi("t0", dest_offset);
+        self.emit_stack_store("t0", dest.id * 8);
+        Ok(())
+    }
+
+    fn emit_enum_tag(&mut self, dest: &IrVar, operand: &IrOperand, enum_name: &str) -> Result<()> {
+        let Some(layout) = self.enum_layouts.get(enum_name).cloned() else {
+            return Err(CompileError::new(
+                format!("payload enum '{}' tag read has no IR layout", enum_name),
+                crate::error::Span::default(),
+            ));
+        };
+        let Some(source) = self.expected_fixed_byte_source(operand, layout.encoded_size) else {
+            self.emit("# cellscript abi: payload enum tag source is unavailable; fail closed");
+            self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+            return Ok(());
+        };
+        self.emit_prepare_fixed_byte_source(&source, layout.encoded_size, "payload enum tag");
+        if !self.emit_fixed_byte_source_pointer_or_const_to("t4", &source) {
+            self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+            return Ok(());
+        }
+        self.emit_memory_load_with_avoid("lbu", "t0", "t4", 0, &["t0", "t4"]);
+        self.emit_stack_store("t0", dest.id * 8);
+        Ok(())
+    }
+
+    fn emit_enum_payload(
+        &mut self,
+        dest: &IrVar,
+        operand: &IrOperand,
+        enum_name: &str,
+        variant_name: &str,
+        field_index: usize,
+    ) -> Result<()> {
+        let Some(layout) = self.enum_layouts.get(enum_name).cloned() else {
+            return Err(CompileError::new(
+                format!("payload enum '{}' projection has no IR layout", enum_name),
+                crate::error::Span::default(),
+            ));
+        };
+        let Some(field) = layout
+            .variants
+            .iter()
+            .find(|variant| variant.name == variant_name)
+            .and_then(|variant| variant.fields.get(field_index))
+            .cloned()
+        else {
+            return Err(CompileError::new(
+                format!("payload enum '{}::{}' field {} has no IR layout", enum_name, variant_name, field_index),
+                crate::error::Span::default(),
+            ));
+        };
+        let Some(source) = self.expected_fixed_byte_source(operand, layout.encoded_size) else {
+            self.emit("# cellscript abi: payload enum projection source is unavailable; fail closed");
+            self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+            return Ok(());
+        };
+        self.emit_prepare_fixed_byte_source(&source, layout.encoded_size, "payload enum projection");
+        if !self.emit_fixed_byte_source_pointer_or_const_to("t4", &source) {
+            self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+            return Ok(());
+        }
+        if field.width == 0 {
+            self.emit_stack_store("zero", dest.id * 8);
+            return Ok(());
+        }
+        if field.linear || (field.width <= 8 && is_fixed_scalar_ir_type(&field.ty)) {
+            self.emit_unaligned_scalar_load("t4", "t0", "t2", field.offset, field.width);
+            if field.ty == IrType::I32 {
+                self.emit_sign_extend_i32("t0");
+            }
+            self.emit_stack_store("t0", dest.id * 8);
+            return Ok(());
+        }
+
+        let Some(dest_offset) = self.fixed_byte_local_offsets.get(&dest.id).copied() else {
+            self.emit("# cellscript abi: payload enum projection destination has no fixed-byte storage; fail closed");
+            self.emit_fail(CellScriptRuntimeError::FixedByteComparisonUnresolved);
+            return Ok(());
+        };
+        self.emit_large_addi("a0", "t4", field.offset as i64);
+        self.emit_sp_addi("a1", dest_offset);
+        self.emit(format!("li a2, {}", field.width));
+        self.emit("call __cellscript_memcpy_fixed");
+        self.emit_sp_addi("t0", dest_offset);
+        self.emit_stack_store("t0", dest.id * 8);
         Ok(())
     }
 
@@ -17525,13 +17858,22 @@ fn first_entrypoint(ir: &IrModule) -> Option<(&str, &[IrParam])> {
     None
 }
 
-fn entry_witness_payload_layout(params: &[IrParam], runtime_bound_param_indices: &BTreeSet<usize>) -> Vec<EntryWitnessPayloadArg> {
+fn entry_witness_payload_layout(
+    params: &[IrParam],
+    runtime_bound_param_indices: &BTreeSet<usize>,
+    enum_layouts: &HashMap<String, IrEnumLayout>,
+) -> Vec<EntryWitnessPayloadArg> {
     params
         .iter()
         .enumerate()
         .map(|(index, param)| {
             if !entry_param_consumes_witness_payload(param, index, runtime_bound_param_indices) {
                 EntryWitnessPayloadArg { width: 0, schema_dynamic: false, unsupported: false }
+            } else if let Some(layout) = match &param.ty {
+                IrType::Named(name) => enum_layouts.get(name).filter(|layout| layout.has_payload()),
+                _ => None,
+            } {
+                EntryWitnessPayloadArg { width: layout.encoded_size, schema_dynamic: false, unsupported: false }
             } else if entry_witness_dynamic_schema_param(&param.ty) {
                 EntryWitnessPayloadArg { width: 4, schema_dynamic: true, unsupported: false }
             } else if let Some(width) =
@@ -20434,6 +20776,7 @@ mod tests {
             external_type_defs: vec![],
             external_callable_abis: vec![],
             enum_fixed_sizes: HashMap::new(),
+            enum_layouts: HashMap::new(),
         };
         let assembly = CodeGenerator::new(CodegenOptions::default()).generate(&ir, ArtifactFormat::RiscvAssembly).unwrap();
         let assembly = String::from_utf8(assembly).unwrap();

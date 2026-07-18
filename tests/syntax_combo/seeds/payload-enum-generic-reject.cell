@@ -1,0 +1,8 @@
+// audit: phase=reject_parse
+// audit: contains=generic enum declarations are deferred
+module cellscript::audit::seed_payload_enum_generic_reject
+
+enum Option<T> {
+    None,
+    Some(T),
+}

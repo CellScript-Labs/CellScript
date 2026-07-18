@@ -1,0 +1,8 @@
+// audit: phase=reject_compile
+// audit: contains=variable-width or recursive
+module cellscript::audit::seed_payload_enum_dynamic_reject
+
+enum DynamicPayload {
+    None,
+    Some(Vec<u8>),
+}

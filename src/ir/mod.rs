@@ -11,6 +11,39 @@ pub struct IrModule {
     pub external_type_defs: Vec<IrTypeDef>,
     pub external_callable_abis: Vec<IrCallableAbi>,
     pub enum_fixed_sizes: HashMap<String, usize>,
+    pub enum_layouts: HashMap<String, IrEnumLayout>,
+}
+
+#[derive(Debug, Clone)]
+pub struct IrEnumLayout {
+    pub name: String,
+    pub tag_width: usize,
+    pub encoded_size: usize,
+    pub variants: Vec<IrEnumVariantLayout>,
+    pub contains_linear_payload: bool,
+}
+
+impl IrEnumLayout {
+    pub fn has_payload(&self) -> bool {
+        self.variants.iter().any(|variant| !variant.fields.is_empty())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct IrEnumVariantLayout {
+    pub name: String,
+    pub tag: u8,
+    pub payload_width: usize,
+    pub fields: Vec<IrEnumFieldLayout>,
+}
+
+#[derive(Debug, Clone)]
+pub struct IrEnumFieldLayout {
+    pub index: usize,
+    pub ty: IrType,
+    pub offset: usize,
+    pub width: usize,
+    pub linear: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -356,6 +389,9 @@ pub enum IrInstruction {
     ReadRef { dest: IrVar, ty: String },
     Move { dest: IrVar, src: IrOperand },
     Tuple { dest: IrVar, fields: Vec<IrOperand> },
+    EnumConstruct { dest: IrVar, enum_name: String, variant: String, fields: Vec<IrOperand> },
+    EnumTag { dest: IrVar, operand: IrOperand, enum_name: String },
+    EnumPayload { dest: IrVar, operand: IrOperand, enum_name: String, variant: String, field_index: usize },
     Consume { operand: IrOperand },
     Create { dest: IrVar, pattern: CreatePattern },
     Transfer { dest: IrVar, operand: IrOperand, to: IrOperand },
@@ -484,6 +520,7 @@ pub struct IrGenerator {
     flow_audit_warnings: HashMap<String, Vec<String>>,
     type_validity: HashMap<String, Vec<IrValidityPredicate>>,
     enum_variants: HashMap<String, HashMap<String, u64>>,
+    enum_definitions: HashMap<String, EnumDef>,
     constants: HashMap<String, (Expr, IrType)>,
     function_effects: HashMap<String, EffectClass>,
     external_function_effects: HashMap<String, EffectClass>,
@@ -511,6 +548,7 @@ impl IrGenerator {
                 external_type_defs: Vec::new(),
                 external_callable_abis: Vec::new(),
                 enum_fixed_sizes: HashMap::new(),
+                enum_layouts: HashMap::new(),
             },
             var_counter: 0,
             block_counter: 0,
@@ -533,6 +571,7 @@ impl IrGenerator {
             flow_audit_warnings: HashMap::new(),
             type_validity: HashMap::new(),
             enum_variants: HashMap::new(),
+            enum_definitions: HashMap::new(),
             constants: HashMap::new(),
             function_effects: HashMap::new(),
             external_function_effects: HashMap::new(),
@@ -560,6 +599,7 @@ impl IrGenerator {
         receipt_claim_outputs: HashMap<String, Option<IrType>>,
         flow_states: HashMap<String, Vec<String>>,
         type_validity: HashMap<String, Vec<IrValidityPredicate>>,
+        enum_definitions: HashMap<String, EnumDef>,
         external_function_effects: HashMap<String, EffectClass>,
         external_function_param_types: HashMap<String, Vec<IrType>>,
         external_function_return_types: HashMap<String, Option<IrType>>,
@@ -570,6 +610,14 @@ impl IrGenerator {
         generator.receipt_claim_outputs.extend(receipt_claim_outputs);
         generator.flow_states.extend(flow_states);
         generator.type_validity.extend(type_validity);
+        for (name, mut definition) in enum_definitions {
+            definition.name = name.clone();
+            generator.enum_variants.insert(
+                name.clone(),
+                definition.variants.iter().enumerate().map(|(index, variant)| (variant.name.clone(), index as u64)).collect(),
+            );
+            generator.enum_definitions.insert(name, definition);
+        }
         generator.external_function_effects = external_function_effects;
         generator.external_function_param_types = external_function_param_types;
         generator.external_function_return_types = external_function_return_types;
@@ -642,13 +690,11 @@ impl IrGenerator {
                     );
                 }
                 Item::Enum(e) => {
+                    self.enum_definitions.insert(e.name.clone(), e.clone());
                     self.enum_variants.insert(
                         e.name.clone(),
                         e.variants.iter().enumerate().map(|(index, variant)| (variant.name.clone(), index as u64)).collect(),
                     );
-                    if e.variants.iter().all(|variant| variant.fields.is_empty()) && e.variants.len() <= u8::MAX as usize + 1 {
-                        self.module.enum_fixed_sizes.insert(e.name.clone(), 1);
-                    }
                 }
                 Item::Action(action) => {
                     let params = action.params.iter().map(|param| ast_type_to_ir(&param.ty)).collect::<Vec<_>>();
@@ -678,6 +724,7 @@ impl IrGenerator {
             }
         }
 
+        self.register_enum_layouts();
         self.register_flows(&ast.items);
         self.infer_module_function_effects(&ast.items);
 
@@ -1042,6 +1089,123 @@ impl IrGenerator {
                 IrField { name: field.name.clone(), ty, offset, fixed_size }
             })
             .collect()
+    }
+
+    fn register_enum_layouts(&mut self) {
+        let names = self.enum_definitions.keys().cloned().collect::<Vec<_>>();
+        let mut layouts = self.module.enum_layouts.clone();
+        for name in names {
+            let mut visiting = HashSet::new();
+            match self.build_enum_layout(&name, &mut layouts, &mut visiting) {
+                Some(layout) => {
+                    self.module.enum_fixed_sizes.insert(name.clone(), layout.encoded_size);
+                    layouts.insert(name, layout);
+                }
+                None => self.record_error(
+                    format!(
+                        "enum '{}' has no fixed-width runtime layout; generic, dynamic, and recursive payload ADTs are deferred",
+                        name
+                    ),
+                    self.enum_definitions.get(&name).map_or(Span::default(), |definition| definition.span),
+                ),
+            }
+        }
+        self.module.enum_layouts = layouts;
+    }
+
+    fn build_enum_layout(
+        &self,
+        name: &str,
+        layouts: &mut HashMap<String, IrEnumLayout>,
+        visiting: &mut HashSet<String>,
+    ) -> Option<IrEnumLayout> {
+        if let Some(layout) = layouts.get(name) {
+            return Some(layout.clone());
+        }
+        if !visiting.insert(name.to_string()) {
+            return None;
+        }
+        let definition = self.enum_definitions.get(name)?;
+        if definition.variants.is_empty() || definition.variants.len() > u8::MAX as usize + 1 {
+            visiting.remove(name);
+            return None;
+        }
+
+        let mut contains_linear_payload = false;
+        let mut max_payload_width = 0usize;
+        let mut variants = Vec::with_capacity(definition.variants.len());
+        for (tag, variant) in definition.variants.iter().enumerate() {
+            let mut next_offset = 1usize;
+            let mut fields = Vec::with_capacity(variant.fields.len());
+            for (index, field_ty) in variant.fields.iter().enumerate() {
+                let ir_ty = Self::convert_type(field_ty);
+                let (width, linear) = self.enum_payload_runtime_layout(&ir_ty, layouts, visiting)?;
+                fields.push(IrEnumFieldLayout { index, ty: ir_ty, offset: next_offset, width, linear });
+                next_offset = next_offset.checked_add(width)?;
+                contains_linear_payload |= linear;
+            }
+            let payload_width = next_offset.checked_sub(1)?;
+            max_payload_width = max_payload_width.max(payload_width);
+            variants.push(IrEnumVariantLayout { name: variant.name.clone(), tag: u8::try_from(tag).ok()?, payload_width, fields });
+        }
+        visiting.remove(name);
+        Some(IrEnumLayout {
+            name: name.to_string(),
+            tag_width: 1,
+            encoded_size: 1usize.checked_add(max_payload_width)?,
+            variants,
+            contains_linear_payload,
+        })
+    }
+
+    fn enum_payload_runtime_layout(
+        &self,
+        ty: &IrType,
+        layouts: &mut HashMap<String, IrEnumLayout>,
+        visiting: &mut HashSet<String>,
+    ) -> Option<(usize, bool)> {
+        match ty {
+            IrType::U8 | IrType::Bool => Some((1, false)),
+            IrType::U16 => Some((2, false)),
+            IrType::U32 | IrType::I32 => Some((4, false)),
+            IrType::U64 => Some((8, false)),
+            IrType::U128 => Some((16, false)),
+            IrType::Address | IrType::Hash => Some((32, false)),
+            IrType::Unit => Some((0, false)),
+            IrType::Array(inner, len) => {
+                let (width, linear) = self.enum_payload_runtime_layout(inner, layouts, visiting)?;
+                Some((width.checked_mul(*len)?, linear))
+            }
+            IrType::Tuple(items) => items.iter().try_fold((0usize, false), |(total, any_linear), item| {
+                let (width, linear) = self.enum_payload_runtime_layout(item, layouts, visiting)?;
+                Some((total.checked_add(width)?, any_linear || linear))
+            }),
+            IrType::Named(name) => {
+                let base_name = name.split('<').next().unwrap_or(name.as_str());
+                if base_name != name {
+                    return None;
+                }
+                if matches!(self.type_kinds.get(base_name), Some(IrTypeKind::Resource | IrTypeKind::Shared | IrTypeKind::Receipt)) {
+                    return Some((8, true));
+                }
+                if self.enum_definitions.contains_key(base_name) || layouts.contains_key(base_name) {
+                    let layout = self.build_enum_layout(base_name, layouts, visiting)?;
+                    let result = (layout.encoded_size, layout.contains_linear_payload);
+                    layouts.insert(base_name.to_string(), layout);
+                    return Some(result);
+                }
+                if !visiting.insert(base_name.to_string()) {
+                    return None;
+                }
+                let result = self.type_fields.get(base_name)?.values().try_fold((0usize, false), |(total, any_linear), field_ty| {
+                    let (width, linear) = self.enum_payload_runtime_layout(field_ty, layouts, visiting)?;
+                    Some((total.checked_add(width)?, any_linear || linear))
+                });
+                visiting.remove(base_name);
+                result
+            }
+            IrType::Ref(_) | IrType::MutRef(_) => None,
+        }
     }
 
     fn fixed_encoded_size(&self, ty: &IrType) -> Option<usize> {
@@ -2121,6 +2285,8 @@ impl IrGenerator {
                     LoweredExpr { operand: constant, current: Some(current) }
                 } else if let Some(zero) = self.lower_zero_value(name) {
                     LoweredExpr { operand: zero, current: Some(current) }
+                } else if let Some(lowered) = self.try_lower_enum_constructor_path(name, &[], current, blocks, vars, Span::default()) {
+                    lowered
                 } else if let Some(enum_variant) = self.lower_enum_variant(name) {
                     LoweredExpr { operand: enum_variant, current: Some(current) }
                 } else if let Some(flow_state) = self.lower_flow_state_name(name) {
@@ -2187,6 +2353,11 @@ impl IrGenerator {
                 LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) }
             }
             Expr::Call(call) => {
+                if let Expr::Identifier(path) = call.func.as_ref() {
+                    if let Some(lowered) = self.try_lower_enum_constructor_path(path, &call.args, current, blocks, vars, call.span) {
+                        return lowered;
+                    }
+                }
                 if let Some(lowered) = self.try_lower_builtin_call(call, current, blocks, vars) {
                     return lowered;
                 }
@@ -4519,6 +4690,21 @@ impl IrGenerator {
         let Some(mut check_block) = lowered_scrutinee.current else {
             return lowered_scrutinee;
         };
+        let payload_layout = match self.operand_type(&lowered_scrutinee.operand) {
+            IrType::Named(name) => self.module.enum_layouts.get(&name).filter(|layout| layout.has_payload()).cloned(),
+            _ => None,
+        };
+        let comparison_operand = if let Some(layout) = &payload_layout {
+            let tag = self.new_var("match_enum_tag", IrType::U8);
+            self.block_mut(blocks, check_block).instructions.push(IrInstruction::EnumTag {
+                dest: tag.clone(),
+                operand: lowered_scrutinee.operand.clone(),
+                enum_name: layout.name.clone(),
+            });
+            IrOperand::Var(tag)
+        } else {
+            lowered_scrutinee.operand.clone()
+        };
 
         if match_expr.arms.is_empty() {
             self.record_error("match expression reached IR lowering without arms", match_expr.span);
@@ -4534,10 +4720,24 @@ impl IrGenerator {
 
         for (index, arm) in match_expr.arms.iter().enumerate() {
             let arm_entry = arm_entries[index];
-            if arm.pattern == "_" {
+            if matches!(arm.pattern, MatchPattern::Wildcard) {
                 self.block_mut(blocks, check_block).terminator = IrTerminator::Jump(arm_entry);
             } else {
-                let Some(pattern_operand) = self.lower_match_pattern_operand(&arm.pattern, arm.span) else {
+                let MatchPattern::Variant { path, .. } = &arm.pattern else { unreachable!("wildcard match arm handled above") };
+                let pattern_operand = if let Some(layout) = &payload_layout {
+                    let (enum_name, variant_name) = path.rsplit_once("::").unwrap_or((layout.name.as_str(), path.as_str()));
+                    if enum_name != layout.name {
+                        self.record_error(format!("match pattern '{}' does not belong to enum '{}'", path, layout.name), arm.span);
+                        return LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(check_block) };
+                    }
+                    let Some(variant) = layout.variants.iter().find(|variant| variant.name == variant_name) else {
+                        self.record_error(format!("unknown match variant '{}'", path), arm.span);
+                        return LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(check_block) };
+                    };
+                    IrOperand::Const(IrConst::U8(variant.tag))
+                } else if let Some(pattern_operand) = self.lower_match_pattern_operand(path, arm.span) {
+                    pattern_operand
+                } else {
                     return LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(check_block) };
                 };
 
@@ -4547,7 +4747,7 @@ impl IrGenerator {
                     block.instructions.push(IrInstruction::Binary {
                         dest: cond_var.clone(),
                         op: BinaryOp::Eq,
-                        left: lowered_scrutinee.operand.clone(),
+                        left: comparison_operand.clone(),
                         right: pattern_operand,
                     });
                 }
@@ -4565,6 +4765,34 @@ impl IrGenerator {
             }
 
             let mut arm_vars = vars.clone();
+            if let (Some(layout), MatchPattern::Variant { path, bindings }) = (&payload_layout, &arm.pattern) {
+                let variant_name = path.rsplit_once("::").map_or(path.as_str(), |(_, variant)| variant);
+                if let Some(variant) = layout.variants.iter().find(|variant| variant.name == variant_name) {
+                    for (binding, field) in bindings.iter().zip(&variant.fields) {
+                        if matches!(binding, BindingPattern::Wildcard) {
+                            continue;
+                        }
+                        let dest = self.new_var(format!("match_{}_field_{}", variant_name, field.index), field.ty.clone());
+                        self.block_mut(blocks, arm_entry).instructions.push(IrInstruction::EnumPayload {
+                            dest: dest.clone(),
+                            operand: lowered_scrutinee.operand.clone(),
+                            enum_name: layout.name.clone(),
+                            variant: variant_name.to_string(),
+                            field_index: field.index,
+                        });
+                        match binding {
+                            BindingPattern::Name(name) => {
+                                arm_vars.insert(name.clone(), dest);
+                            }
+                            BindingPattern::Tuple(_) => self.record_error(
+                                "nested enum payload binding patterns are deferred; bind the fixed-width payload field to a name",
+                                arm.span,
+                            ),
+                            BindingPattern::Wildcard => {}
+                        }
+                    }
+                }
+            }
             let lowered_value = self.lower_expr(&arm.value, arm_entry, blocks, &mut arm_vars);
             let Some(arm_exit) = lowered_value.current else {
                 continue;
@@ -6148,6 +6376,58 @@ impl IrGenerator {
         Some(IrOperand::Const(IrConst::U64(ordinal)))
     }
 
+    fn try_lower_enum_constructor_path(
+        &mut self,
+        path: &str,
+        args: &[Expr],
+        current: BlockId,
+        blocks: &mut Vec<IrBlock>,
+        vars: &mut HashMap<String, IrVar>,
+        span: Span,
+    ) -> Option<LoweredExpr> {
+        let (enum_name, variant_name) = path.rsplit_once("::")?;
+        let layout = self.module.enum_layouts.get(enum_name)?.clone();
+        if !layout.has_payload() {
+            return None;
+        }
+        let Some(variant) = layout.variants.iter().find(|variant| variant.name == variant_name).cloned() else {
+            self.record_error(format!("unknown enum variant '{}::{}' during IR lowering", enum_name, variant_name), span);
+            return Some(LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(current) });
+        };
+        if variant.fields.len() != args.len() {
+            self.record_error(
+                format!(
+                    "enum constructor '{}::{}' expects {} payload value(s), got {}",
+                    enum_name,
+                    variant_name,
+                    variant.fields.len(),
+                    args.len()
+                ),
+                span,
+            );
+            return Some(LoweredExpr { operand: IrOperand::Const(IrConst::U64(0)), current: Some(current) });
+        }
+
+        let mut active = current;
+        let mut fields = Vec::with_capacity(args.len());
+        for (argument, field) in args.iter().zip(&variant.fields) {
+            let lowered = self.lower_expr_with_expected_type(argument, &field.ty, active, blocks, vars);
+            let Some(next) = lowered.current else {
+                return Some(lowered);
+            };
+            active = next;
+            fields.push(lowered.operand);
+        }
+        let dest = self.new_var(format!("{}_{}_payload", enum_name, variant_name), IrType::Named(enum_name.to_string()));
+        self.block_mut(blocks, active).instructions.push(IrInstruction::EnumConstruct {
+            dest: dest.clone(),
+            enum_name: enum_name.to_string(),
+            variant: variant_name.to_string(),
+            fields,
+        });
+        Some(LoweredExpr { operand: IrOperand::Var(dest), current: Some(active) })
+    }
+
     fn lower_flow_state_name(&self, name: &str) -> Option<IrOperand> {
         let (type_name, _) = name.rsplit_once("::")?;
         self.lower_flow_state_operand(type_name, name)
@@ -6860,6 +7140,7 @@ fn generate_with_resolver_diagnostics_inner(
     let mut external_type_names = HashSet::new();
     let mut external_callable_abis = Vec::new();
     let mut external_callable_names = HashSet::new();
+    let mut external_enum_definitions = HashMap::new();
     let mut external_function_effects = HashMap::new();
     let mut external_function_param_types = HashMap::new();
     let mut external_function_return_types = HashMap::new();
@@ -6911,6 +7192,10 @@ fn generate_with_resolver_diagnostics_inner(
     }
 
     for (local_name, owner_module, type_def) in resolved_external_types {
+        if let TypeDef::Enum(mut enum_def) = type_def.clone() {
+            enum_def.name = local_name.clone();
+            external_enum_definitions.insert(local_name.clone(), enum_def);
+        }
         if let Some(mut ir_type_def) = resolver_type_def_to_ir(&local_name, &type_def, &type_fields) {
             qualify_external_validity_predicates(&mut ir_type_def, &owner_module, resolver);
             external_type_defs.push(ir_type_def);
@@ -6953,6 +7238,7 @@ fn generate_with_resolver_diagnostics_inner(
         receipt_claim_outputs,
         flow_states,
         imported_type_validity,
+        external_enum_definitions,
         external_function_effects,
         external_function_param_types,
         external_function_return_types,
@@ -7016,6 +7302,9 @@ fn append_external_callable_bodies(ir: &mut IrModule, ast: &Module, resolver: &M
         merge_external_callable_abis(ir, &external_ir);
         for (name, size) in external_ir.enum_fixed_sizes {
             ir.enum_fixed_sizes.entry(name).or_insert(size);
+        }
+        for (name, layout) in external_ir.enum_layouts {
+            ir.enum_layouts.entry(name).or_insert(layout);
         }
 
         if let Some(mut item) =
@@ -8613,5 +8902,34 @@ action run(amount: u64) -> u64 {
             "unexpected error: {}",
             error.message
         );
+    }
+
+    #[test]
+    fn imported_concrete_payload_enum_keeps_layout_and_constructor_lowering() {
+        fn parse_module(source: &str) -> Module {
+            parse(&lex(source).unwrap()).unwrap()
+        }
+
+        let dep = parse_module(
+            r#"
+module dep
+enum Limit { None, Some(u64) }
+"#,
+        );
+        let consumer = parse_module(
+            r#"
+module consumer
+use dep::{Limit}
+fn make() -> Limit { Limit::Some(7) }
+"#,
+        );
+        let mut resolver = ModuleResolver::new();
+        resolver.register_module(dep).unwrap();
+        resolver.register_module(consumer.clone()).unwrap();
+
+        let ir = generate_with_resolver(&consumer, &resolver, "consumer").unwrap();
+        let layout = ir.enum_layouts.get("Limit").expect("imported enum layout");
+        assert_eq!(layout.encoded_size, 9);
+        assert!(ir.items.iter().any(|item| matches!(item, IrItem::PureFn(function) if function.body.blocks.iter().any(|block| block.instructions.iter().any(|instruction| matches!(instruction, IrInstruction::EnumConstruct { enum_name, variant, .. } if enum_name == "Limit" && variant == "Some"))))));
     }
 }

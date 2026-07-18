@@ -1,0 +1,15 @@
+// audit: phase=reject_compile
+// audit: contains=non-exhaustive match
+module cellscript::audit::seed_payload_enum_nonexhaustive_reject
+
+enum Limit {
+    None,
+    Some(u64),
+}
+
+action spend(limit: Limit) {
+    verification
+        match limit {
+            Limit::Some(value) => require value > 0,
+        }
+}

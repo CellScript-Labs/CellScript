@@ -627,7 +627,7 @@ pub enum Stmt {
     Borrow(BorrowStmt),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BindingPattern {
     Name(String),
     Tuple(Vec<BindingPattern>),
@@ -983,9 +983,35 @@ pub struct MatchExpr {
 
 #[derive(Debug, Clone)]
 pub struct MatchArm {
-    pub pattern: String,
+    pub pattern: MatchPattern,
     pub value: Expr,
     pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MatchPattern {
+    Wildcard,
+    Variant { path: String, bindings: Vec<BindingPattern> },
+}
+
+impl fmt::Display for MatchPattern {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Wildcard => formatter.write_str("_"),
+            Self::Variant { path, bindings } if bindings.is_empty() => formatter.write_str(path),
+            Self::Variant { path, bindings } => {
+                write!(formatter, "{}({})", path, bindings.iter().map(binding_pattern_source).collect::<Vec<_>>().join(", "))
+            }
+        }
+    }
+}
+
+fn binding_pattern_source(pattern: &BindingPattern) -> String {
+    match pattern {
+        BindingPattern::Name(name) => name.clone(),
+        BindingPattern::Tuple(items) => format!("({})", items.iter().map(binding_pattern_source).collect::<Vec<_>>().join(", ")),
+        BindingPattern::Wildcard => "_".to_string(),
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

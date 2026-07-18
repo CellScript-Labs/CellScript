@@ -20,6 +20,12 @@ struct FunctionSignature {
 }
 
 #[derive(Debug, Clone)]
+struct MatchPayloadBindings {
+    patterns: Vec<BindingPattern>,
+    field_types: Vec<Type>,
+}
+
+#[derive(Debug, Clone)]
 struct FlowSpec {
     type_name: String,
     field_name: String,
@@ -280,6 +286,7 @@ pub struct TypeChecker<'a> {
     type_fields: HashMap<String, HashMap<String, Type>>,
     enum_variants: HashMap<String, Vec<String>>,
     enum_payload_variants: HashMap<String, HashSet<String>>,
+    enum_variant_fields: HashMap<String, HashMap<String, Vec<Type>>>,
     functions: HashMap<String, FunctionSignature>,
     linear_types: HashSet<String>,
     cell_type_kinds: HashMap<String, CellTypeKind>,
@@ -417,6 +424,7 @@ impl<'a> TypeChecker<'a> {
             type_fields: HashMap::new(),
             enum_variants: HashMap::new(),
             enum_payload_variants: HashMap::new(),
+            enum_variant_fields: HashMap::new(),
             functions: HashMap::new(),
             linear_types: HashSet::new(),
             cell_type_kinds: HashMap::new(),
@@ -534,6 +542,10 @@ impl<'a> TypeChecker<'a> {
                             .filter(|variant| !variant.fields.is_empty())
                             .map(|variant| variant.name.clone())
                             .collect(),
+                    );
+                    self.enum_variant_fields.insert(
+                        enum_def.name.clone(),
+                        enum_def.variants.iter().map(|variant| (variant.name.clone(), variant.fields.clone())).collect(),
                     );
                 }
                 Item::Action(action) => {
@@ -1421,11 +1433,29 @@ impl<'a> TypeChecker<'a> {
                 &format!("{} '{}' field '{}'", item_kind, item_name, field.name),
                 field.span,
             )?;
+            if self.enum_type_contains_linear_payload(&field.ty, &mut HashSet::new()) {
+                return Err(CompileError::new(
+                    format!(
+                        "{} '{}' field '{}' cannot store an enum with a linear Cell payload; linear payload enums are local-only handles",
+                        item_kind, item_name, field.name
+                    ),
+                    field.span,
+                ));
+            }
         }
         Ok(())
     }
 
     fn check_enum(&mut self, enum_def: &EnumDef) -> Result<()> {
+        if enum_def.variants.is_empty() {
+            return Err(CompileError::new(format!("enum '{}' must declare at least one variant", enum_def.name), enum_def.span));
+        }
+        if enum_def.variants.len() > u8::MAX as usize + 1 {
+            return Err(CompileError::new(
+                format!("enum '{}' has too many variants for the 0.22 u8 tag ABI", enum_def.name),
+                enum_def.span,
+            ));
+        }
         let mut seen = HashSet::new();
         for variant in &enum_def.variants {
             if !seen.insert(variant.name.clone()) {
@@ -1438,9 +1468,99 @@ impl<'a> TypeChecker<'a> {
                     &format!("enum variant '{}::{}' payload", enum_def.name, variant.name),
                     variant.span,
                 )?;
+                if self.payload_type_runtime_width(field_ty, &mut HashSet::new()).is_none() {
+                    return Err(CompileError::new(
+                        format!(
+                            "enum variant '{}::{}' payload type '{}' is variable-width or recursive; 0.22 payload enums require a concrete fixed-width layout",
+                            enum_def.name,
+                            variant.name,
+                            type_repr(field_ty)
+                        ),
+                        variant.span,
+                    ));
+                }
             }
         }
         Ok(())
+    }
+
+    fn payload_type_runtime_width(&self, ty: &Type, visiting: &mut HashSet<String>) -> Option<usize> {
+        match ty {
+            Type::U8 | Type::Bool => Some(1),
+            Type::U16 => Some(2),
+            Type::U32 | Type::I32 => Some(4),
+            Type::U64 => Some(8),
+            Type::U128 => Some(16),
+            Type::Address | Type::Hash => Some(32),
+            Type::Unit => Some(0),
+            Type::Array(inner, len) => self.payload_type_runtime_width(inner, visiting)?.checked_mul(*len),
+            Type::Tuple(items) => {
+                items.iter().try_fold(0usize, |width, item| width.checked_add(self.payload_type_runtime_width(item, visiting)?))
+            }
+            Type::Ref(_) | Type::MutRef(_) => None,
+            Type::Named(name) => {
+                if name.contains('<') {
+                    return None;
+                }
+                if self.resolve_cell_type_kind(name).is_some() {
+                    return Some(8);
+                }
+                if !visiting.insert(name.clone()) {
+                    return None;
+                }
+                let width = if let Some(variants) = self.resolve_enum_variant_fields(name) {
+                    variants
+                        .values()
+                        .map(|fields| {
+                            fields
+                                .iter()
+                                .try_fold(0usize, |width, field| width.checked_add(self.payload_type_runtime_width(field, visiting)?))
+                        })
+                        .collect::<Option<Vec<_>>>()?
+                        .into_iter()
+                        .max()
+                        .unwrap_or(0)
+                        .checked_add(1)
+                } else {
+                    self.resolve_named_type_fields(name).and_then(|fields| {
+                        fields
+                            .values()
+                            .try_fold(0usize, |width, field| width.checked_add(self.payload_type_runtime_width(field, visiting)?))
+                    })
+                };
+                visiting.remove(name);
+                width
+            }
+        }
+    }
+
+    fn enum_type_contains_linear_payload(&self, ty: &Type, visiting: &mut HashSet<String>) -> bool {
+        match ty {
+            Type::Array(inner, _) => self.enum_type_contains_linear_payload(inner, visiting),
+            Type::Tuple(items) => items.iter().any(|item| self.enum_type_contains_linear_payload(item, visiting)),
+            Type::Named(name) => {
+                if !visiting.insert(name.clone()) {
+                    return false;
+                }
+                let contains = self
+                    .resolve_enum_variant_fields(name)
+                    .is_some_and(|variants| variants.values().flatten().any(|field| self.is_linear_type_with_seen(field, visiting)));
+                visiting.remove(name);
+                contains
+            }
+            Type::U8
+            | Type::U16
+            | Type::U32
+            | Type::I32
+            | Type::U64
+            | Type::U128
+            | Type::Bool
+            | Type::Unit
+            | Type::Address
+            | Type::Hash
+            | Type::Ref(_)
+            | Type::MutRef(_) => false,
+        }
     }
 
     fn check_const(&mut self, const_def: &ConstDef) -> Result<()> {
@@ -2259,6 +2379,46 @@ impl<'a> TypeChecker<'a> {
                 span,
             ));
         }
+        if callable_kind != "function" && self.enum_type_contains_linear_payload(return_type, &mut HashSet::new()) {
+            return Err(CompileError::new(
+                format!(
+                    "{} '{}' cannot return a linear payload enum across an entry ABI; destructure and discharge the Cell payload locally",
+                    callable_kind, callable_name
+                ),
+                span,
+            ));
+        }
+        if let Type::Named(enum_name) = return_type {
+            if let Some(variants) = self.resolve_enum_variant_fields(enum_name) {
+                let has_payload = variants.values().any(|fields| !fields.is_empty());
+                if has_payload && callable_kind != "function" {
+                    return Err(CompileError::new(
+                        format!(
+                            "{} '{}' cannot return a payload enum across an entry ABI; payload enum returns are pure-helper ABI values",
+                            callable_kind, callable_name
+                        ),
+                        span,
+                    ));
+                }
+                if has_payload {
+                    let width = self.payload_type_runtime_width(return_type, &mut HashSet::new()).ok_or_else(|| {
+                        CompileError::new(
+                            format!("function '{}' payload enum return has no fixed-width ABI layout", callable_name),
+                            span,
+                        )
+                    })?;
+                    if width > 16 {
+                        return Err(CompileError::new(
+                            format!(
+                                "function '{}' payload enum return is {} bytes; 0.22 register-pair return ABI supports at most 16 bytes",
+                                callable_name, width
+                            ),
+                            span,
+                        ));
+                    }
+                }
+            }
+        }
         Ok(())
     }
 
@@ -2293,12 +2453,27 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn type_contains_cell_backed_value(&self, ty: &Type) -> bool {
+        self.type_contains_cell_backed_value_with_seen(ty, &mut HashSet::new())
+    }
+
+    fn type_contains_cell_backed_value_with_seen(&self, ty: &Type, visiting: &mut HashSet<String>) -> bool {
         match ty {
-            Type::Array(inner, _) => self.type_contains_cell_backed_value(inner),
-            Type::Tuple(items) => items.iter().any(|item| self.type_contains_cell_backed_value(item)),
+            Type::Array(inner, _) => self.type_contains_cell_backed_value_with_seen(inner, visiting),
+            Type::Tuple(items) => items.iter().any(|item| self.type_contains_cell_backed_value_with_seen(item, visiting)),
             Type::Named(name) => {
                 let base_name = name.split('<').next().unwrap_or(name.as_str());
-                self.resolve_cell_type_kind(base_name).is_some() || self.named_type_generic_payload_contains_cell_backed_value(name)
+                if self.resolve_cell_type_kind(base_name).is_some() || self.named_type_generic_payload_contains_cell_backed_value(name)
+                {
+                    return true;
+                }
+                if !visiting.insert(base_name.to_string()) {
+                    return false;
+                }
+                let contains = self.resolve_enum_variant_fields(base_name).is_some_and(|variants| {
+                    variants.values().flatten().any(|field| self.type_contains_cell_backed_value_with_seen(field, visiting))
+                });
+                visiting.remove(base_name);
+                contains
             }
             Type::Ref(_) | Type::MutRef(_) => false,
             _ => false,
@@ -2377,6 +2552,15 @@ impl<'a> TypeChecker<'a> {
                 ));
             }
             self.validate_type(&param.ty)?;
+            if callable_kind != "function" && self.enum_type_contains_linear_payload(&param.ty, &mut HashSet::new()) {
+                return Err(CompileError::new(
+                    format!(
+                        "{} '{}' parameter '{}' cannot cross an entry ABI with a linear payload enum; construct and destructure it within one callable",
+                        callable_kind, callable_name, param.name
+                    ),
+                    param.span,
+                ));
+            }
             self.validate_callable_param_source(param, callable_kind, callable_name)?;
             self.validate_callable_param_reference_shape(param, callable_kind, callable_name)?;
             self.validate_callable_param_state_authority(param, callable_kind, callable_name)?;
@@ -3462,6 +3646,9 @@ impl<'a> TypeChecker<'a> {
                 }
             }
             Expr::Call(call) => {
+                if let Some(result) = self.infer_enum_constructor_call(env, call)? {
+                    return Ok(result);
+                }
                 if let Some(result) = self.infer_bounded_collection_each(env, call)? {
                     return Ok(result);
                 }
@@ -3681,17 +3868,26 @@ impl<'a> TypeChecker<'a> {
             Expr::Match(match_expr) => {
                 self.reject_direct_borrow_escape(expr, match_expr.span)?;
                 let scrutinee_ty = self.infer_expr(env, &match_expr.expr)?;
-                self.check_match_patterns(&scrutinee_ty, match_expr)?;
+                let payloads = self.check_match_patterns(&scrutinee_ty, match_expr)?;
+                if self.is_linear_type(&scrutinee_ty) {
+                    self.mark_expr_as_moved(env, &match_expr.expr)?;
+                }
                 let mut arm_ty = None;
                 let mut arm_envs = Vec::with_capacity(match_expr.arms.len());
-                for arm in &match_expr.arms {
+                for (arm, payload) in match_expr.arms.iter().zip(payloads) {
                     let mut arm_env = env.child();
+                    if let Some(payload) = payload {
+                        for (binding, field_ty) in payload.patterns.iter().zip(payload.field_types.iter()) {
+                            self.bind_pattern(&mut arm_env, binding, field_ty, false, arm.span)?;
+                        }
+                    }
                     let ty = self.infer_expr(&mut arm_env, &arm.value)?;
                     if arm_ty.as_ref().is_none_or(|existing| self.types_equal(existing, &ty)) {
                         arm_ty = Some(ty);
                     } else {
                         return Err(CompileError::new("match arms must have matching types", arm.span));
                     }
+                    arm_env.check_linear_complete()?;
                     arm_envs.push(arm_env);
                 }
                 env.merge_match_linear_states(&arm_envs, match_expr.span)?;
@@ -4182,29 +4378,38 @@ impl<'a> TypeChecker<'a> {
         Ok(expected_ty.clone())
     }
 
-    fn check_match_patterns(&self, scrutinee_ty: &Type, match_expr: &MatchExpr) -> Result<()> {
+    fn check_match_patterns(&self, scrutinee_ty: &Type, match_expr: &MatchExpr) -> Result<Vec<Option<MatchPayloadBindings>>> {
         let Type::Named(enum_name) = scrutinee_ty else {
-            return Ok(());
+            return Ok(vec![None; match_expr.arms.len()]);
         };
         let Some(variants) = self.resolve_enum_variants(enum_name) else {
-            return Ok(());
+            return Ok(vec![None; match_expr.arms.len()]);
         };
+        let variant_fields = self.resolve_enum_variant_fields(enum_name).unwrap_or_default();
         let variant_set = variants.iter().map(String::as_str).collect::<HashSet<_>>();
         let mut seen = HashSet::new();
         let mut has_wildcard = false;
+        let mut payloads = Vec::with_capacity(match_expr.arms.len());
 
         for arm in &match_expr.arms {
-            if arm.pattern == "_" {
+            let MatchPattern::Variant { path, bindings } = &arm.pattern else {
                 if has_wildcard {
                     return Err(CompileError::new("duplicate wildcard match arm", arm.span));
                 }
+                if self.is_linear_type(scrutinee_ty) {
+                    return Err(CompileError::new(
+                        "wildcard match arm cannot discard an enum that may contain a linear Cell payload",
+                        arm.span,
+                    ));
+                }
                 has_wildcard = true;
+                payloads.push(None);
                 continue;
-            }
+            };
             if has_wildcard {
                 return Err(CompileError::new("wildcard pattern '_' must be the last match arm", arm.span));
             }
-            let Some(variant) = match_pattern_variant(enum_name, &arm.pattern) else {
+            let Some(variant) = match_pattern_variant(enum_name, path) else {
                 return Err(CompileError::new(
                     format!("match pattern '{}' does not match enum '{}'", arm.pattern, enum_name),
                     arm.span,
@@ -4216,18 +4421,37 @@ impl<'a> TypeChecker<'a> {
                     arm.span,
                 ));
             }
-            if self.enum_payload_variants.get(enum_name).is_some_and(|payloads| payloads.contains(variant)) {
+            let fields = variant_fields.get(variant).cloned().unwrap_or_default();
+            if bindings.len() != fields.len() {
                 return Err(CompileError::new(
                     format!(
-                        "match pattern '{}::{}' targets a payload enum variant; payload destructuring lowering is not implemented",
-                        enum_name, variant
+                        "match pattern '{}::{}' expects {} payload binding(s), got {}",
+                        enum_name,
+                        variant,
+                        fields.len(),
+                        bindings.len()
                     ),
                     arm.span,
                 ));
             }
+            for (binding, field_ty) in bindings.iter().zip(&fields) {
+                if matches!(binding, BindingPattern::Tuple(_)) {
+                    return Err(CompileError::new(
+                        "nested enum payload binding patterns are deferred; bind each fixed-width payload field to a name",
+                        arm.span,
+                    ));
+                }
+                if matches!(binding, BindingPattern::Wildcard) && self.is_linear_type(field_ty) {
+                    return Err(CompileError::new(
+                        "wildcard payload binding cannot discard a linear Cell value; bind it and consume, borrow, or preserve it",
+                        arm.span,
+                    ));
+                }
+            }
             if !seen.insert(variant.to_string()) {
                 return Err(CompileError::new(format!("duplicate match arm for enum variant '{}::{}'", enum_name, variant), arm.span));
             }
+            payloads.push(Some(MatchPayloadBindings { patterns: bindings.clone(), field_types: fields }));
         }
 
         if !has_wildcard && seen.len() != variants.len() {
@@ -4238,7 +4462,7 @@ impl<'a> TypeChecker<'a> {
             ));
         }
 
-        Ok(())
+        Ok(payloads)
     }
 
     fn resolve_enum_variants(&self, enum_name: &str) -> Option<Vec<String>> {
@@ -4250,6 +4474,19 @@ impl<'a> TypeChecker<'a> {
             .and_then(|(resolver, module)| resolver.resolve_type(module, enum_name))
             .and_then(|ty| match ty {
                 TypeDef::Enum(enum_def) => Some(enum_def.variants.into_iter().map(|variant| variant.name).collect()),
+                _ => None,
+            })
+    }
+
+    fn resolve_enum_variant_fields(&self, enum_name: &str) -> Option<HashMap<String, Vec<Type>>> {
+        if let Some(variants) = self.enum_variant_fields.get(enum_name) {
+            return Some(variants.clone());
+        }
+        self.resolver
+            .zip(self.current_module.as_deref())
+            .and_then(|(resolver, module)| resolver.resolve_type(module, enum_name))
+            .and_then(|ty| match ty {
+                TypeDef::Enum(enum_def) => Some(enum_def.variants.into_iter().map(|variant| (variant.name, variant.fields)).collect()),
                 _ => None,
             })
     }
@@ -4452,12 +4689,61 @@ impl<'a> TypeChecker<'a> {
         }
         if self.enum_variant_has_payload(enum_name, variant) {
             return Err(CompileError::new(
-                format!(
-                    "enum payload variant '{}::{}' cannot be used as a value until payload construction lowering is implemented",
-                    enum_name, variant
-                ),
+                format!("enum payload variant '{}::{}' requires an explicit fixed-width payload constructor call", enum_name, variant),
                 span,
             ));
+        }
+        Ok(Some(Type::Named(enum_name.to_string())))
+    }
+
+    fn infer_enum_constructor_call(&mut self, env: &mut TypeEnv, call: &CallExpr) -> Result<Option<Type>> {
+        let Expr::Identifier(path) = call.func.as_ref() else {
+            return Ok(None);
+        };
+        let Some((enum_name, variant_name)) = path.rsplit_once("::") else {
+            return Ok(None);
+        };
+        let Some(variants) = self.resolve_enum_variant_fields(enum_name) else {
+            return Ok(None);
+        };
+        let Some(fields) = variants.get(variant_name) else {
+            return Err(CompileError::new(format!("unknown enum variant '{}::{}'", enum_name, variant_name), call.span));
+        };
+        if fields.is_empty() {
+            return Err(CompileError::new(
+                format!("enum variant '{}::{}' has no payload and must be written without parentheses", enum_name, variant_name),
+                call.span,
+            ));
+        }
+        if call.args.len() != fields.len() {
+            return Err(CompileError::new(
+                format!(
+                    "enum variant '{}::{}' expects {} payload value(s), got {}",
+                    enum_name,
+                    variant_name,
+                    fields.len(),
+                    call.args.len()
+                ),
+                call.span,
+            ));
+        }
+        for (argument, expected) in call.args.iter().zip(fields) {
+            let actual = self.infer_expr_with_expected_type(env, argument, expected, expr_span(argument))?;
+            if !self.types_equal(&actual, expected) {
+                return Err(CompileError::new(
+                    format!(
+                        "enum variant '{}::{}' payload type mismatch: expected {}, found {}",
+                        enum_name,
+                        variant_name,
+                        type_repr(expected),
+                        type_repr(&actual)
+                    ),
+                    expr_span(argument),
+                ));
+            }
+        }
+        for argument in &call.args {
+            self.mark_expr_as_moved(env, argument)?;
         }
         Ok(Some(Type::Named(enum_name.to_string())))
     }
@@ -6889,8 +7175,9 @@ impl<'a> TypeChecker<'a> {
                 if matches!(base, "String" | "Vec" | "BoundedList" | "BoundedCellSet") || !visiting.insert(base.to_string()) {
                     return false;
                 }
-                let fixed = if self.enum_variants.contains_key(base) {
-                    self.enum_payload_variants.get(base).is_none_or(|variants| variants.is_empty())
+                let fixed = if self.resolve_enum_variant_fields(base).is_some() {
+                    self.payload_type_runtime_width(ty, &mut HashSet::new()).is_some()
+                        && !self.enum_type_contains_linear_payload(ty, &mut HashSet::new())
                 } else {
                     self.resolve_named_type_fields(base)
                         .is_some_and(|fields| fields.values().all(|field| self.bounded_list_element_is_fixed_width(field, visiting)))
@@ -7105,19 +7392,34 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn is_linear_type(&self, ty: &Type) -> bool {
+        self.is_linear_type_with_seen(ty, &mut HashSet::new())
+    }
+
+    fn is_linear_type_with_seen(&self, ty: &Type, visiting: &mut HashSet<String>) -> bool {
         match ty {
-            Type::Array(inner, _) => self.is_linear_type(inner),
-            Type::Tuple(items) => items.iter().any(|item| self.is_linear_type(item)),
+            Type::Array(inner, _) => self.is_linear_type_with_seen(inner, visiting),
+            Type::Tuple(items) => items.iter().any(|item| self.is_linear_type_with_seen(item, visiting)),
             Type::Named(name) => {
                 if parse_bounded_collection_type(ty).is_some_and(|collection| collection.kind == BoundedCollectionKind::CellSet) {
                     return true;
                 }
                 let base_name = name.split('<').next().unwrap_or(name.as_str());
-                self.linear_types.contains(base_name)
+                if self.linear_types.contains(base_name)
                     || self
                         .resolver
                         .zip(self.current_module.as_ref())
                         .is_some_and(|(resolver, module)| resolver.type_is_linear(module, base_name))
+                {
+                    return true;
+                }
+                if !visiting.insert(base_name.to_string()) {
+                    return false;
+                }
+                let linear = self
+                    .resolve_enum_variant_fields(base_name)
+                    .is_some_and(|variants| variants.values().flatten().any(|field| self.is_linear_type_with_seen(field, visiting)));
+                visiting.remove(base_name);
+                linear
             }
             _ => false,
         }

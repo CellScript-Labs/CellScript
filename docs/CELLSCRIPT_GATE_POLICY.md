@@ -52,7 +52,7 @@ modes; they do not create a new gate command:
   a terminal state. `release` still requires exact-artifact and chain evidence
   before a production claim.
 
-Metadata schema `51` carries declared/inferred/effective function effects, the
+Metadata schema `52` carries declared/inferred/effective function effects, the
 initial, terminal, discharge, state-model, and audit-warning fields for flows,
 the canonical evidence tier on ProofPlan, flow, and function metadata, and
 typed transaction-view handle records under
@@ -63,6 +63,15 @@ typed transaction-view handle records under
 checked-static typing plus checked-runtime read evidence.
 Consumers must reject unsupported schema versions instead of silently dropping
 these fields.
+
+Concrete payload enum evidence is top-level under `enum_layouts`. Every record
+pins the one-byte tag, packed variant field offsets, encoded width, storage
+class, ownership, and ABI. Non-linear values use fixed bytes; pure-helper
+returns up to 16 bytes use the `a0`/`a1` register-pair ABI. Enums containing a
+Cell payload are local-only linear handles and cannot cross storage or entry
+ABI boundaries. Dynamic, recursive, and generic payload ADTs fail before IR.
+Quick syntax coverage pins exhaustive matching, dynamic rejection, and
+arm-local linear discharge through the three `SCA-BUG-0.22-PAYLOAD-*` classes.
 
 The top-level `capability_registry` is a closed, versioned audit contract.
 Every `types[]` record carries the matching `capability_set_version`.

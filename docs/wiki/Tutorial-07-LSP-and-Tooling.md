@@ -54,6 +54,13 @@ cellc --lsp
 
 In practice you usually let the editor start it for you.
 
+On `nightly-0.22`, qualified enum completion includes concrete payload
+constructors: after `Limit::`, `Some` advertises `Some(u64)` and inserts
+`Some(value1)`, while `None` remains a bare variant. Enum hover reads the same
+compiler metadata as `cellc metadata` and shows the tagged-union layout, ABI,
+storage class, encoded width, and linear-payload flag. Generic or
+variable-width payload ADTs are intentionally not advertised as supported.
+
 ## VS Code Extension
 
 The extension lives in:

@@ -233,6 +233,36 @@ BUG_CLASS_CONTRACTS: tuple[dict[str, Any], ...] = (
         "release_boundary": "capability lookup uses the exact lifecycle operand type and does not traverse container-like declarations",
     },
     {
+        "id": "SCA-BUG-0.22-PAYLOAD-MATCH-NONEXHAUSTIVE",
+        "name": "payload enum matches remain exhaustive after destructuring",
+        "min_mode": "quick",
+        "required_cases": ("seed-payload-enum", "seed-payload-enum-nonexhaustive-reject"),
+        "required_origins": (
+            "tests/syntax_combo/seeds/payload-enum.cell",
+            "tests/syntax_combo/seeds/payload-enum-nonexhaustive-reject.cell",
+        ),
+        "release_boundary": "every concrete payload variant is covered exactly once unless a final non-linear wildcard arm is explicit",
+    },
+    {
+        "id": "SCA-BUG-0.22-PAYLOAD-DYNAMIC-ACCEPTED",
+        "name": "payload enum layout accepts only concrete fixed-width values",
+        "min_mode": "quick",
+        "required_cases": ("seed-payload-enum-dynamic-reject", "seed-payload-enum-generic-reject"),
+        "required_origins": (
+            "tests/syntax_combo/seeds/payload-enum-dynamic-reject.cell",
+            "tests/syntax_combo/seeds/payload-enum-generic-reject.cell",
+        ),
+        "release_boundary": "dynamic and generic payload ADTs fail closed before IR, ABI, or metadata claims are emitted",
+    },
+    {
+        "id": "SCA-BUG-0.22-PAYLOAD-LINEAR-DROP",
+        "name": "linear Cell payload ownership is discharged inside every match arm",
+        "min_mode": "quick",
+        "required_cases": ("seed-payload-enum-linear-drop-reject",),
+        "required_origins": ("tests/syntax_combo/seeds/payload-enum-linear-drop-reject.cell",),
+        "release_boundary": "a Cell payload cannot disappear through wildcard binding or implicit arm-local drop",
+    },
+    {
         "id": "SCA-BUG-STDLIB-ARGUMENT-VALIDATION",
         "name": "stdlib lifecycle helpers validate arity, cell kind, lock target, and claim output",
         "min_mode": "ci",
@@ -334,6 +364,7 @@ class Oracle:
     borrow_view_type: str | None = None
     capability_operation: str | None = None
     capability_type: str | None = None
+    payload_enum: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1565,6 +1596,7 @@ def parse_seed(path: Path) -> AuditCase:
     borrow_view_type: str | None = None
     capability_operation: str | None = None
     capability_type: str | None = None
+    payload_enum: str | None = None
     for line in text.splitlines():
         stripped = line.strip()
         if not stripped.startswith("// audit:"):
@@ -1589,6 +1621,8 @@ def parse_seed(path: Path) -> AuditCase:
             capability_operation = value
         elif key == "capability_type":
             capability_type = value
+        elif key == "payload_enum":
+            payload_enum = value
     return AuditCase(
         name=f"seed-{path.stem}",
         source=text,
@@ -1600,6 +1634,7 @@ def parse_seed(path: Path) -> AuditCase:
             borrow_view_type=borrow_view_type,
             capability_operation=capability_operation,
             capability_type=capability_type,
+            payload_enum=payload_enum,
         ),
         origin=str(path.relative_to(ROOT)),
     )
@@ -1826,6 +1861,32 @@ def validate_metadata(case: AuditCase, metadata_path: Path, run_dir: Path) -> li
                         "metadata",
                         "SCA-META-CAPABILITY-EVIDENCE",
                         "capability proof is missing required/provided/entailed/missing/version evidence",
+                        run_dir,
+                    )
+                )
+    if oracle.payload_enum:
+        layouts = [layout for layout in metadata.get("enum_layouts", []) if layout.get("name") == oracle.payload_enum]
+        if not layouts:
+            failures.append(
+                failure(case, "metadata", "SCA-META-PAYLOAD-ENUM", f"missing payload enum layout for {oracle.payload_enum}", run_dir)
+            )
+        else:
+            layout = layouts[0]
+            variants = layout.get("variants", [])
+            payload_fields = [field for variant in variants for field in variant.get("fields", [])]
+            if (
+                layout.get("generic") is not False
+                or layout.get("layout") != "packed-tagged-union-v1"
+                or layout.get("tag_width_bytes") != 1
+                or layout.get("encoded_size_bytes", 0) <= 1
+                or not payload_fields
+            ):
+                failures.append(
+                    failure(
+                        case,
+                        "metadata",
+                        "SCA-META-PAYLOAD-ENUM-LAYOUT",
+                        "payload enum metadata is missing its concrete fixed-width tagged-union contract",
                         run_dir,
                     )
                 )

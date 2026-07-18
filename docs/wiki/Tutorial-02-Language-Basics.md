@@ -195,6 +195,42 @@ create token = Token {
 
 The shorthand is exactly `field: field`; it does not infer or rename fields.
 
+## Concrete Payload Enums
+
+Nightly 0.22 supports concrete, fixed-width payload variants:
+
+```cellscript
+enum Limit {
+    None,
+    Some(u64),
+}
+
+fn get_limit(enabled: bool) -> Limit {
+    if enabled { Limit::Some(100) } else { Limit::None }
+}
+```
+
+Destructure payloads with an exhaustive `match`:
+
+```cellscript
+match get_limit(enabled) {
+    Limit::Some(value) => require amount <= value,
+    Limit::None => require false, "missing limit",
+}
+```
+
+The encoded form is a one-byte variant tag followed by the packed payload of
+the selected variant, padded to the enum's maximum fixed width. Metadata under
+`enum_layouts` records every tag, offset, width, ownership class, storage
+boundary, and ABI. A pure helper may return an encoded enum of at most 16 bytes
+through the `a0`/`a1` register pair.
+
+Payloads using `Vec`, maps, another variable-width shape, recursion, or generic
+parameters are rejected. `enum Option<T>` and `enum Result<T, E>` remain
+deferred. A payload containing a Cell is local-only and linear: bind it in the
+matching arm and explicitly consume, borrow, preserve, or otherwise discharge
+it; `_` cannot discard it.
+
 ## Typed Vec Literals
 
 Use `[]` and `[x, y]` for local `Vec<T>` construction only where the expected

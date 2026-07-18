@@ -3,8 +3,9 @@
 use crate::ast::*;
 use crate::error::Result;
 use crate::{
-    CapabilityProofMetadata, CapabilityRegistryMetadata, CompileMetadata, PoolInvariantMetadata, PoolPrimitiveMetadata,
-    PoolRuntimeInputRequirementMetadata, ProofPlanMetadata, TransactionRuntimeInputRequirementMetadata, VerifierObligationMetadata,
+    CapabilityProofMetadata, CapabilityRegistryMetadata, CompileMetadata, PayloadEnumLayoutMetadata, PoolInvariantMetadata,
+    PoolPrimitiveMetadata, PoolRuntimeInputRequirementMetadata, ProofPlanMetadata, TransactionRuntimeInputRequirementMetadata,
+    VerifierObligationMetadata,
 };
 use serde::Serialize;
 use std::collections::HashMap;
@@ -62,6 +63,7 @@ pub struct AuditDoc {
     pub fail_closed_runtime_features: Vec<String>,
     pub capability_registry: CapabilityRegistryMetadata,
     pub capability_proofs: Vec<CapabilityProofMetadata>,
+    pub enum_layouts: Vec<PayloadEnumLayoutMetadata>,
     pub verifier_obligations: Vec<AuditObligationDoc>,
     pub proof_plan: Vec<ProofPlanMetadata>,
     pub transaction_invariant_checked_subconditions: Vec<AuditTransactionInvariantSubconditionDoc>,
@@ -181,6 +183,7 @@ impl DocGenerator {
             fail_closed_runtime_features: metadata.runtime.fail_closed_runtime_features.clone(),
             capability_registry: metadata.capability_registry.clone(),
             capability_proofs: metadata.runtime.capability_proofs.clone(),
+            enum_layouts: metadata.enum_layouts.clone(),
             verifier_obligations: metadata
                 .runtime
                 .verifier_obligations
@@ -382,6 +385,46 @@ impl AuditDoc {
                     escape_markdown_table_cell(proof.identity_condition.as_deref().unwrap_or("none")),
                     proof.capability_set_version,
                     proof.entailment_version
+                ));
+            }
+            out.push('\n');
+        }
+
+        out.push_str("### Concrete Enum Layouts\n\n");
+        if self.enum_layouts.is_empty() {
+            out.push_str("_No enum layouts emitted._\n\n");
+        } else {
+            out.push_str("| Enum | Layout | ABI | Storage | Tag Bytes | Encoded Bytes | Linear Payload | Variants |\n");
+            out.push_str("|---|---|---|---|---|---|---|---|\n");
+            for layout in &self.enum_layouts {
+                let variants = layout
+                    .variants
+                    .iter()
+                    .map(|variant| {
+                        let fields = variant
+                            .fields
+                            .iter()
+                            .map(|field| format!("{}@{}+{}:{}", field.r#type, field.offset_bytes, field.width_bytes, field.ownership))
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        if fields.is_empty() {
+                            format!("{}={}", variant.name, variant.tag)
+                        } else {
+                            format!("{}={}({})", variant.name, variant.tag, fields)
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                out.push_str(&format!(
+                    "| `{}` | `{}` | `{}` | `{}` | `{}` | `{}` | `{}` | {} |\n",
+                    escape_markdown_table_cell(&layout.name),
+                    escape_markdown_table_cell(&layout.layout),
+                    escape_markdown_table_cell(&layout.abi),
+                    escape_markdown_table_cell(&layout.storage),
+                    layout.tag_width_bytes,
+                    layout.encoded_size_bytes,
+                    layout.contains_linear_payload,
+                    escape_markdown_table_cell(&variants)
                 ));
             }
             out.push('\n');
@@ -619,6 +662,25 @@ impl AuditDoc {
                     escape_html(proof.identity_condition.as_deref().unwrap_or("none")),
                     proof.capability_set_version,
                     proof.entailment_version
+                ));
+            }
+            out.push_str("</tbody></table>");
+        }
+        out.push_str("<h3>Concrete Enum Layouts</h3>");
+        if self.enum_layouts.is_empty() {
+            out.push_str("<p><em>No enum layouts emitted.</em></p>");
+        } else {
+            out.push_str("<table><thead><tr><th>Enum</th><th>Layout</th><th>ABI</th><th>Storage</th><th>Tag Bytes</th><th>Encoded Bytes</th><th>Linear Payload</th></tr></thead><tbody>");
+            for layout in &self.enum_layouts {
+                out.push_str(&format!(
+                    "<tr><td><code>{}</code></td><td><code>{}</code></td><td><code>{}</code></td><td><code>{}</code></td><td><code>{}</code></td><td><code>{}</code></td><td><code>{}</code></td></tr>",
+                    escape_html(&layout.name),
+                    escape_html(&layout.layout),
+                    escape_html(&layout.abi),
+                    escape_html(&layout.storage),
+                    layout.tag_width_bytes,
+                    layout.encoded_size_bytes,
+                    layout.contains_linear_payload
                 ));
             }
             out.push_str("</tbody></table>");
@@ -1263,6 +1325,7 @@ action add(x: u64, y: u64) -> u64 {
             fail_closed_runtime_features: Vec::new(),
             capability_registry: CapabilityRegistryMetadata::default(),
             capability_proofs: Vec::new(),
+            enum_layouts: Vec::new(),
             verifier_obligations: Vec::new(),
             proof_plan: Vec::new(),
             transaction_invariant_checked_subconditions: Vec::new(),
@@ -1321,6 +1384,7 @@ action add(x: u64, y: u64) -> u64 {
             fail_closed_runtime_features: Vec::new(),
             capability_registry: CapabilityRegistryMetadata::default(),
             capability_proofs: Vec::new(),
+            enum_layouts: Vec::new(),
             verifier_obligations: vec![AuditObligationDoc {
                 scope: obligation.scope.clone(),
                 category: obligation.category.clone(),
