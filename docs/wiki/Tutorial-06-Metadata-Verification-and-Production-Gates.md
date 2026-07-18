@@ -119,6 +119,9 @@ You do not need to memorize the whole sidecar. Start with these fields:
 - `runtime.proof_plan`
 - `runtime.proof_plan_soundness`
 - `runtime.transaction_view_handles`
+- `capability_registry`
+- `types[].capability_set_version`
+- `runtime.capability_proofs`
 - `runtime.builder_assumptions`
 - `template_layouts`
 - `constraints`
@@ -145,11 +148,20 @@ artifact-binding facts, and CKB constraint summaries can now move independently
 in future schema revisions. `verify-artifact` still rejects a mismatch in any of
 these versions.
 
-Schema 50 includes `runtime.transaction_view_handles`. Each record identifies the
+Schema 51 includes `runtime.transaction_view_handles`. Each record identifies the
 callable scope, source (`Input`, `GroupOutput`, `CellDep`, and so on), public
 handle type, and evidence tiers. A conforming record is a read-only view with
 `lifecycle_authority = false`; it is evidence of a transaction read surface,
 not evidence that a Cell was consumed or an output was created.
+
+Schema 51 also makes capability authority auditable. The top-level
+`capability_registry` fixes both the closed vocabulary and entailment version;
+each persistent type repeats `capability_set_version`. For every accepted
+`destroy` or `replace_unique`, inspect `runtime.capability_proofs`: `required`,
+`provided`, `entailed`, and `missing` must agree, `missing` must be empty, and
+the proof's versions must match the registry. `replace_unique` additionally
+records the exact `identity(...)` condition declared by the same resource.
+No proof may source authority from a container or another Cell type.
 
 Bounded `forall` and `count` invariant clauses appear as
 `bounded-source-quantifier` ProofPlan records. Review `reads`, `coverage`,
@@ -167,7 +179,7 @@ the `consume_each` runtime-helper tier. For `BoundedList<P, N>` driving
 `builder-evidence-required`; it is not proof that a transaction builder supplied
 the matching outputs or sufficient capacity.
 
-Schema 50 also adds `types[].validity_predicates`. Review each predicate's
+Schema 51 also carries `types[].validity_predicates`. Review each predicate's
 `expression`, `dependencies`, `evidence_tier`,
 `runtime_checked_on_create`, `create_paths_selected`,
 `create_paths_checked`, `update_paths_selected`, `create_path_status`,
@@ -186,7 +198,7 @@ are compile errors. Pure imported helpers are retained transitively and receive
 module-qualified dependency names; lifecycle helpers and transaction-view
 reads are rejected in validity predicates.
 
-Schema 50 records explicit borrow blocks in `runtime.borrow_regions`. Review
+Schema 51 records explicit borrow blocks in `runtime.borrow_regions`. Review
 `root`, `binding`, `view_type`, `storage`, `abi`, `allowed_effects`,
 `evidence_tier`, and `source_span`. A canonical record has `View<T>`,
 `storage = none`, `abi = none`, `allowed_effects = [Pure, ReadOnly]`, and

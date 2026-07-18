@@ -25,6 +25,9 @@ required_origins = [
     "tests/syntax_combo/seeds/explicit-borrow-effect-reject.cell",
     "tests/syntax_combo/seeds/explicit-borrow-escape-reject.cell",
     "tests/syntax_combo/seeds/explicit-borrow-cross-consume-reject.cell",
+    "tests/syntax_combo/seeds/capability-entailment.cell",
+    "tests/syntax_combo/seeds/capability-missing-identity-reject.cell",
+    "tests/syntax_combo/seeds/capability-transitive-grant-reject.cell",
 ]
 description = "Local smoke: deterministic generated cases plus regression seeds."
 
@@ -62,6 +65,9 @@ required_origins = [
     "tests/syntax_combo/seeds/explicit-borrow-effect-reject.cell",
     "tests/syntax_combo/seeds/explicit-borrow-escape-reject.cell",
     "tests/syntax_combo/seeds/explicit-borrow-cross-consume-reject.cell",
+    "tests/syntax_combo/seeds/capability-entailment.cell",
+    "tests/syntax_combo/seeds/capability-missing-identity-reject.cell",
+    "tests/syntax_combo/seeds/capability-transitive-grant-reject.cell",
 ]
 description = "PR gate: pairwise generated cases plus regression seeds."
 
@@ -102,6 +108,9 @@ required_origins = [
     "tests/syntax_combo/seeds/explicit-borrow-effect-reject.cell",
     "tests/syntax_combo/seeds/explicit-borrow-escape-reject.cell",
     "tests/syntax_combo/seeds/explicit-borrow-cross-consume-reject.cell",
+    "tests/syntax_combo/seeds/capability-entailment.cell",
+    "tests/syntax_combo/seeds/capability-missing-identity-reject.cell",
+    "tests/syntax_combo/seeds/capability-transitive-grant-reject.cell",
 ]
 description = "Release audit: triplewise sample, mutations, and selected CKB acceptance."
 
@@ -148,6 +157,8 @@ required_bug_classes.quick = [
     "SCA-BUG-0.22-BORROW-EFFECT-COMPAT",
     "SCA-BUG-0.22-BORROW-ESCAPE",
     "SCA-BUG-0.22-BORROW-CROSSES-CONSUME",
+    "SCA-BUG-0.22-CAPABILITY-OVERGRANT",
+    "SCA-BUG-0.22-CAPABILITY-TRANSITIVE-GRANT",
 ]
 
 required_bug_classes.ci = [

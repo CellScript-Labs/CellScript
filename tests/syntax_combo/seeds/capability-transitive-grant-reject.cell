@@ -1,0 +1,19 @@
+// audit: phase=reject_compile
+// audit: contains=operation 'destroy' on type 'Token'
+// audit: contains=provided [store]
+// audit: contains=missing [consume, burn]
+module cellscript::audit::seed_capability_transitive_grant_reject
+
+resource Token has store {
+    amount: u64,
+}
+
+resource Container has consume, burn {
+    token_id: u64,
+}
+
+action bad(token: Token, container: Container) {
+    verification
+        destroy token
+        destroy container
+}

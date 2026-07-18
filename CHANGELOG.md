@@ -24,6 +24,13 @@
   status; ProofPlan keeps consume iteration at `runtime-helper-required` and
   output cardinality/capacity at `builder-evidence-required`. Generic
   `Vec<Resource>` remains rejected.
+- Add the versioned capability algebra without inheritance syntax. The closed
+  registry is shared by parsing, formatting, type checking, docgen, LSP, and
+  metadata; `destroy` derives exactly `consume + burn`, while
+  `replace_unique` requires `replace` plus the type's exact declared identity
+  policy. Schema 51 records the registry, per-type capability-set version, and
+  required/provided/entailed/missing proof fields, and rejects transitive
+  authority from container-like resources.
 - Add canonical type `validity` blocks. Pure field predicates lower to
   fail-closed checks before selected create/constructor instructions; paths
   without concrete lowering remain `runtime-helper-required`. The only

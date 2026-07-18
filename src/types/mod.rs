@@ -284,6 +284,7 @@ pub struct TypeChecker<'a> {
     linear_types: HashSet<String>,
     cell_type_kinds: HashMap<String, CellTypeKind>,
     type_capabilities: HashMap<String, HashSet<Capability>>,
+    type_identities: HashMap<String, IdentityPolicy>,
     receipt_claim_outputs: HashMap<String, Option<Type>>,
     flow_states: HashMap<String, Vec<String>>,
     flow_state_fields: HashMap<String, String>,
@@ -420,6 +421,7 @@ impl<'a> TypeChecker<'a> {
             linear_types: HashSet::new(),
             cell_type_kinds: HashMap::new(),
             type_capabilities: HashMap::new(),
+            type_identities: HashMap::new(),
             receipt_claim_outputs: HashMap::new(),
             flow_states: HashMap::new(),
             flow_state_fields: HashMap::new(),
@@ -478,6 +480,7 @@ impl<'a> TypeChecker<'a> {
                     self.linear_types.insert(resource.name.clone());
                     self.cell_type_kinds.insert(resource.name.clone(), CellTypeKind::Resource);
                     self.type_capabilities.insert(resource.name.clone(), resource.capabilities.iter().copied().collect());
+                    self.type_identities.insert(resource.name.clone(), resource.identity.clone());
                     self.type_fields.insert(
                         resource.name.clone(),
                         resource.fields.iter().map(|field| (field.name.clone(), field.ty.clone())).collect(),
@@ -490,6 +493,7 @@ impl<'a> TypeChecker<'a> {
                     self.linear_types.insert(shared.name.clone());
                     self.cell_type_kinds.insert(shared.name.clone(), CellTypeKind::Shared);
                     self.type_capabilities.insert(shared.name.clone(), shared.capabilities.iter().copied().collect());
+                    self.type_identities.insert(shared.name.clone(), shared.identity.clone());
                     self.type_fields.insert(
                         shared.name.clone(),
                         shared.fields.iter().map(|field| (field.name.clone(), field.ty.clone())).collect(),
@@ -502,6 +506,7 @@ impl<'a> TypeChecker<'a> {
                     self.linear_types.insert(receipt.name.clone());
                     self.cell_type_kinds.insert(receipt.name.clone(), CellTypeKind::Receipt);
                     self.type_capabilities.insert(receipt.name.clone(), receipt.capabilities.iter().copied().collect());
+                    self.type_identities.insert(receipt.name.clone(), receipt.identity.clone());
                     self.receipt_claim_outputs.insert(receipt.name.clone(), receipt.claim_output.clone());
                     self.type_fields.insert(
                         receipt.name.clone(),
@@ -921,22 +926,43 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn check_resource(&mut self, resource: &ResourceDef) -> Result<()> {
+        self.validate_capability_set(&resource.name, &resource.capabilities, resource.span)?;
         self.validate_schema_fields(&resource.fields, "resource", &resource.name)?;
         self.check_type_validity(&resource.name, &resource.fields, resource.validity.as_ref())
     }
 
     fn check_shared(&mut self, shared: &SharedDef) -> Result<()> {
+        self.validate_capability_set(&shared.name, &shared.capabilities, shared.span)?;
         self.validate_schema_fields(&shared.fields, "shared", &shared.name)?;
         self.check_type_validity(&shared.name, &shared.fields, shared.validity.as_ref())
     }
 
     fn check_receipt(&mut self, receipt: &ReceiptDef) -> Result<()> {
+        self.validate_capability_set(&receipt.name, &receipt.capabilities, receipt.span)?;
         self.validate_schema_fields(&receipt.fields, "receipt", &receipt.name)?;
         if let Some(output) = &receipt.claim_output {
             self.validate_type(output)?;
             self.validate_receipt_claim_output(output, receipt.span)?;
         }
         self.check_type_validity(&receipt.name, &receipt.fields, receipt.validity.as_ref())
+    }
+
+    fn validate_capability_set(&self, type_name: &str, capabilities: &[Capability], span: Span) -> Result<()> {
+        let mut seen = HashSet::new();
+        for capability in capabilities {
+            if !seen.insert(*capability) {
+                return Err(CompileError::new(
+                    format!(
+                        "type '{}' repeats canonical capability '{}' (capability-set version {})",
+                        type_name,
+                        capability.as_str(),
+                        Capability::REGISTRY_VERSION
+                    ),
+                    span,
+                ));
+            }
+        }
+        Ok(())
     }
 
     fn check_struct(&mut self, struct_def: &StructDef) -> Result<()> {
@@ -3513,13 +3539,7 @@ impl<'a> TypeChecker<'a> {
             }
             Expr::Destroy(destroy) => {
                 let (destroy_ty, name) = self.require_named_linear_cell_operand(env, &destroy.expr, "destroy", destroy.span)?;
-                self.require_capability_or_kernel_effects(
-                    &destroy_ty,
-                    Capability::Destroy,
-                    &[Capability::Consume, Capability::Burn],
-                    "destroy",
-                    destroy.span,
-                )?;
+                self.require_capability_operation(&destroy_ty, CapabilityOperation::Destroy, None, destroy.span)?;
                 env.destroy(&name)?;
                 Ok(Type::U64)
             }
@@ -3545,6 +3565,7 @@ impl<'a> TypeChecker<'a> {
                 self.require_create_target_cell_backed(&cu.ty, cu.span)?;
                 self.check_field_initializer(env, &cu.ty, &cu.fields, cu.span, "create_unique")?;
                 self.validate_unique_identity_policy(&cu.ty, &cu.identity, cu.span, "create_unique")?;
+                self.require_declared_identity_match(&cu.ty, &cu.identity, cu.span, "create_unique")?;
                 if let Some(lock) = &cu.lock {
                     let lock_ty = self.infer_expr(env, lock)?;
                     if !Self::is_address_like_type(&lock_ty) {
@@ -3564,6 +3585,7 @@ impl<'a> TypeChecker<'a> {
                 }
                 self.check_field_initializer(env, &ru.ty, &ru.fields, ru.span, "replace_unique")?;
                 self.validate_unique_identity_policy(&ru.ty, &ru.identity, ru.span, "replace_unique")?;
+                self.require_capability_operation(&input_ty, CapabilityOperation::ReplaceUnique, Some(&ru.identity), ru.span)?;
                 env.consume(&name)?;
                 Ok(input_ty)
             }
@@ -6990,30 +7012,93 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
-    fn require_capability_or_kernel_effects(
+    fn resolve_identity_policy(&self, name: &str) -> Option<IdentityPolicy> {
+        if let Some(identity) = self.type_identities.get(name) {
+            return Some(identity.clone());
+        }
+        let (resolver, module) = (self.resolver?, self.current_module.as_ref()?);
+        match resolver.resolve_type(module, name)? {
+            TypeDef::Resource(resource) => Some(resource.identity),
+            TypeDef::Shared(shared) => Some(shared.identity),
+            TypeDef::Receipt(receipt) => Some(receipt.identity),
+            TypeDef::Struct(_) | TypeDef::Enum(_) => None,
+        }
+    }
+
+    fn require_declared_identity_match(&self, type_name: &str, requested: &IdentityPolicy, span: Span, operation: &str) -> Result<()> {
+        let declared = self.resolve_identity_policy(type_name).unwrap_or_default();
+        if declared == *requested && !matches!(&declared, IdentityPolicy::None) {
+            return Ok(());
+        }
+        let required = identity_condition(requested);
+        let provided = identity_condition(&declared);
+        Err(CompileError::new(
+            format!(
+                "{} rejected for type '{}': required identity condition '{}'; provided '{}'; missing '{}'; capability-set version {}; entailment version {}",
+                operation,
+                type_name,
+                required,
+                provided,
+                required,
+                Capability::REGISTRY_VERSION,
+                CapabilityOperation::ENTAILMENT_VERSION
+            ),
+            span,
+        ))
+    }
+
+    fn require_capability_operation(
         &self,
         ty: &Type,
-        legacy_capability: Capability,
-        kernel_effects: &[Capability],
-        operation: &str,
+        operation: CapabilityOperation,
+        requested_identity: Option<&IdentityPolicy>,
         span: Span,
     ) -> Result<()> {
         let Some(type_name) = Self::base_type_name(ty) else {
-            return Err(CompileError::new(format!("{} requires a cell-backed value", operation), span));
+            return Err(CompileError::new(format!("{} requires a cell-backed value", operation.as_str()), span));
         };
         let Some(capabilities) = self.resolve_capabilities(type_name) else {
-            return Err(CompileError::new(format!("{} requires a cell-backed value", operation), span));
+            return Err(CompileError::new(format!("{} requires a cell-backed value", operation.as_str()), span));
         };
-        if capabilities.contains(&legacy_capability) || kernel_effects.iter().all(|effect| capabilities.contains(effect)) {
+        let entailment = operation.evaluate(&capabilities);
+        let declared_identity = self.resolve_identity_policy(type_name).unwrap_or_default();
+        let identity_matches = !operation.requires_identity_preservation()
+            || requested_identity
+                .is_some_and(|requested| *requested == declared_identity && !matches!(&declared_identity, IdentityPolicy::None));
+        if entailment.missing.is_empty() && identity_matches {
             return Ok(());
+        }
+
+        let mut required = entailment.required.iter().map(|capability| capability.as_str().to_string()).collect::<Vec<_>>();
+        if operation.requires_identity_preservation() {
+            required.push("identity-preservation".to_string());
+        }
+        let mut provided = capabilities.iter().copied().collect::<Vec<_>>();
+        provided.sort_by_key(|capability| capability.registry_index());
+        let mut provided = provided.iter().map(|capability| capability.as_str().to_string()).collect::<Vec<_>>();
+        if !matches!(&declared_identity, IdentityPolicy::None) {
+            provided.push(identity_condition(&declared_identity));
+        }
+        let mut entailed = entailment.entailed.iter().map(|capability| capability.as_str().to_string()).collect::<Vec<_>>();
+        let mut missing = entailment.missing.iter().map(|capability| capability.as_str().to_string()).collect::<Vec<_>>();
+        if operation.requires_identity_preservation() {
+            if identity_matches {
+                entailed.push("identity-preservation".to_string());
+            } else {
+                missing.push(requested_identity.map_or_else(|| "identity(...)".to_string(), identity_condition));
+            }
         }
         Err(CompileError::new(
             format!(
-                "type '{}' does not declare '{}' capability or kernel effects '{}' required by {}",
+                "capability check rejected for operation '{}' on type '{}': required [{}]; provided [{}]; entailed [{}]; missing [{}]; capability-set version {}; entailment version {}",
+                operation.as_str(),
                 type_name,
-                capability_name(legacy_capability),
-                kernel_effects.iter().map(|effect| capability_name(*effect)).collect::<Vec<_>>().join("+"),
-                operation
+                required.join(", "),
+                provided.join(", "),
+                entailed.join(", "),
+                missing.join(", "),
+                Capability::REGISTRY_VERSION,
+                CapabilityOperation::ENTAILMENT_VERSION
             ),
             span,
         ))
@@ -7829,8 +7914,14 @@ fn push_unique_root<'a>(roots: &mut Vec<&'a str>, root: &'a str) {
     }
 }
 
-fn capability_name(capability: Capability) -> &'static str {
-    capability.as_str()
+fn identity_condition(identity: &IdentityPolicy) -> String {
+    match identity {
+        IdentityPolicy::None => "identity(none)".to_string(),
+        IdentityPolicy::CkbTypeId => "identity(ckb_type_id)".to_string(),
+        IdentityPolicy::Field(field) => format!("identity(field({field}))"),
+        IdentityPolicy::ScriptArgs => "identity(script_args)".to_string(),
+        IdentityPolicy::SingletonType => "identity(singleton_type)".to_string(),
+    }
 }
 
 fn is_state_storage_type(ty: &Type) -> bool {

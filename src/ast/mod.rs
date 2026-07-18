@@ -209,6 +209,75 @@ impl Capability {
             other => vec![other],
         }
     }
+
+    pub const fn registry_index(self) -> usize {
+        match self {
+            Self::Store => 0,
+            Self::Create => 1,
+            Self::Consume => 2,
+            Self::Destroy => 3,
+            Self::Replace => 4,
+            Self::Burn => 5,
+            Self::Relock => 6,
+            Self::RetargetType => 7,
+            Self::ReadRef => 8,
+        }
+    }
+
+    pub fn canonical_names() -> Vec<String> {
+        Self::ALL.into_iter().map(|capability| capability.as_str().to_string()).collect()
+    }
+}
+
+/// Closed lifecycle operations whose authority is derived from a capability
+/// set rather than from one same-named source token.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CapabilityOperation {
+    Destroy,
+    ReplaceUnique,
+}
+
+impl CapabilityOperation {
+    /// Version of the closed operation-to-capability entailment relation.
+    pub const ENTAILMENT_VERSION: u32 = 1;
+
+    pub const ALL: [CapabilityOperation; 2] = [Self::Destroy, Self::ReplaceUnique];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Destroy => "destroy",
+            Self::ReplaceUnique => "replace_unique",
+        }
+    }
+
+    pub fn required_capabilities(self) -> Vec<Capability> {
+        match self {
+            Self::Destroy => vec![Capability::Consume, Capability::Burn],
+            Self::ReplaceUnique => vec![Capability::Replace],
+        }
+    }
+
+    pub const fn requires_identity_preservation(self) -> bool {
+        matches!(self, Self::ReplaceUnique)
+    }
+
+    pub fn evaluate(self, provided: &std::collections::HashSet<Capability>) -> CapabilityEntailment {
+        let required = self.required_capabilities();
+        let legacy_destroy = self == Self::Destroy && provided.contains(&Capability::Destroy);
+        let mut entailed =
+            required.iter().copied().filter(|capability| provided.contains(capability) || legacy_destroy).collect::<Vec<_>>();
+        entailed.sort_by_key(|capability| capability.registry_index());
+        let missing = required.iter().copied().filter(|capability| !entailed.contains(capability)).collect();
+        CapabilityEntailment { required, entailed, missing, legacy_destroy }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CapabilityEntailment {
+    pub required: Vec<Capability>,
+    pub entailed: Vec<Capability>,
+    pub missing: Vec<Capability>,
+    pub legacy_destroy: bool,
 }
 
 #[derive(Debug, Clone)]

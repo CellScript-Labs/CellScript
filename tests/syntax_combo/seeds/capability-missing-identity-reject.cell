@@ -1,0 +1,13 @@
+// audit: phase=reject_compile
+// audit: contains=required [replace, identity-preservation]
+// audit: contains=missing [replace, identity(ckb_type_id)]
+module cellscript::audit::seed_capability_missing_identity_reject
+
+resource Token has store {
+    amount: u64,
+}
+
+action rotate(old: Token) -> Token {
+    verification
+        replace_unique<Token>(identity = ckb_type_id) old { amount: old.amount }
+}

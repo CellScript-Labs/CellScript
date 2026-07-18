@@ -317,6 +317,21 @@ The older `transfer` and `destroy` capability words are accepted only through
 the `--primitive-compat=0.14` migration path; `--primitive-strict=0.16`
 includes the 0.15 kernel-effect checks and rejects them in type declarations.
 
+The 0.22 capability algebra is deliberately closed and has no inheritance or
+shortcut syntax. Composite lifecycle forms are checked against the exact
+operand resource:
+
+- `destroy token` requires `consume + burn`; the legacy `destroy` word is only
+  a compatibility alternative and is exposed as such in metadata;
+- `replace_unique<T>(...)` requires `replace` and an identity argument that
+  exactly matches `T`'s declared non-`none` identity policy;
+- a container's capability set never grants authority over a different inner
+  or adjacent Cell resource.
+
+Compiler errors report the required, provided, entailed, and missing authority
+plus the capability-set and entailment versions. Successful composite checks
+emit the same fields under `runtime.capability_proofs`.
+
 ## Identity Policies
 
 A persistent declaration can name the identity policy that later lifecycle

@@ -1373,21 +1373,27 @@ impl LspServer {
         match item {
             Item::Resource(r) => Some(Hover {
                 contents: format!(
-                    "```cellscript\nresource {}\n```\n\nCapabilities: {:?}{}",
+                    "```cellscript\nresource {}\n```{}{}",
                     r.name,
-                    r.capabilities,
+                    capability_hover(&r.capabilities),
                     type_validity_hover(&r.name, metadata)
                 ),
                 range: Some(range),
             }),
             Item::Shared(s) => Some(Hover {
-                contents: format!("```cellscript\nshared {}\n```{}", s.name, type_validity_hover(&s.name, metadata)),
+                contents: format!(
+                    "```cellscript\nshared {}\n```{}{}",
+                    s.name,
+                    capability_hover(&s.capabilities),
+                    type_validity_hover(&s.name, metadata)
+                ),
                 range: Some(range),
             }),
             Item::Receipt(r) => Some(Hover {
                 contents: format!(
-                    "```cellscript\nreceipt {}\n```{}{}",
+                    "```cellscript\nreceipt {}\n```{}{}{}",
                     r.name,
+                    capability_hover(&r.capabilities),
                     receipt_flow_hover(r, metadata),
                     type_validity_hover(&r.name, metadata)
                 ),
@@ -2252,6 +2258,25 @@ fn action_outputs_to_string(outputs: &[ActionOutput]) -> String {
 
 fn position_in_range(pos: Position, range: Range) -> bool {
     position_le(range.start, pos) && position_le(pos, range.end)
+}
+
+fn capability_hover(capabilities: &[Capability]) -> String {
+    let rendered = if capabilities.is_empty() {
+        "none".to_string()
+    } else {
+        Capability::ALL
+            .into_iter()
+            .filter(|capability| capabilities.contains(capability))
+            .map(|capability| capability.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    format!(
+        "\n\nCapabilities (set v{}, entailment v{}): `{}`\n\nDerived rules: `destroy <= consume + burn`; `replace_unique <= replace + identity-preservation`. Authority is per resource and never inherited.",
+        Capability::REGISTRY_VERSION,
+        CapabilityOperation::ENTAILMENT_VERSION,
+        rendered
+    )
 }
 
 fn receipt_flow_hover(receipt: &ReceiptDef, metadata: Option<&crate::CompileMetadata>) -> String {

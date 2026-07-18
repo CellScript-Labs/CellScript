@@ -1,0 +1,13 @@
+// audit: phase=accept
+// audit: capability_operation=destroy
+// audit: capability_type=Token
+module cellscript::audit::seed_capability_entailment
+
+resource Token has store, consume, burn {
+    amount: u64,
+}
+
+action burn(token: Token) {
+    verification
+        destroy token
+}

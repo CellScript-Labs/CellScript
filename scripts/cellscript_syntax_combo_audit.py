@@ -214,6 +214,25 @@ BUG_CLASS_CONTRACTS: tuple[dict[str, Any], ...] = (
         "release_boundary": "every path rejects consume, destroy, transfer, claim, or settle of a root while its borrow block is active",
     },
     {
+        "id": "SCA-BUG-0.22-CAPABILITY-OVERGRANT",
+        "name": "composite lifecycle authority is derived only by the closed versioned entailment relation",
+        "min_mode": "quick",
+        "required_cases": ("seed-capability-entailment", "seed-capability-missing-identity-reject"),
+        "required_origins": (
+            "tests/syntax_combo/seeds/capability-entailment.cell",
+            "tests/syntax_combo/seeds/capability-missing-identity-reject.cell",
+        ),
+        "release_boundary": "destroy requires consume+burn and replace_unique requires replace plus an exact declared identity condition",
+    },
+    {
+        "id": "SCA-BUG-0.22-CAPABILITY-TRANSITIVE-GRANT",
+        "name": "container capability sets never grant authority over another Cell resource",
+        "min_mode": "quick",
+        "required_cases": ("seed-capability-transitive-grant-reject",),
+        "required_origins": ("tests/syntax_combo/seeds/capability-transitive-grant-reject.cell",),
+        "release_boundary": "capability lookup uses the exact lifecycle operand type and does not traverse container-like declarations",
+    },
+    {
         "id": "SCA-BUG-STDLIB-ARGUMENT-VALIDATION",
         "name": "stdlib lifecycle helpers validate arity, cell kind, lock target, and claim output",
         "min_mode": "ci",
@@ -313,6 +332,8 @@ class Oracle:
     validity_tiers: tuple[str, ...] = ()
     borrow_scope: str | None = None
     borrow_view_type: str | None = None
+    capability_operation: str | None = None
+    capability_type: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1542,6 +1563,8 @@ def parse_seed(path: Path) -> AuditCase:
     validity_tiers: list[str] = []
     borrow_scope: str | None = None
     borrow_view_type: str | None = None
+    capability_operation: str | None = None
+    capability_type: str | None = None
     for line in text.splitlines():
         stripped = line.strip()
         if not stripped.startswith("// audit:"):
@@ -1562,6 +1585,10 @@ def parse_seed(path: Path) -> AuditCase:
             borrow_scope = value
         elif key == "borrow_view_type":
             borrow_view_type = value
+        elif key == "capability_operation":
+            capability_operation = value
+        elif key == "capability_type":
+            capability_type = value
     return AuditCase(
         name=f"seed-{path.stem}",
         source=text,
@@ -1571,6 +1598,8 @@ def parse_seed(path: Path) -> AuditCase:
             validity_tiers=tuple(validity_tiers),
             borrow_scope=borrow_scope,
             borrow_view_type=borrow_view_type,
+            capability_operation=capability_operation,
+            capability_type=capability_type,
         ),
         origin=str(path.relative_to(ROOT)),
     )
@@ -1760,6 +1789,46 @@ def validate_metadata(case: AuditCase, metadata_path: Path, run_dir: Path) -> li
         failures.append(failure(case, "metadata", "SCA-META-PROFILE", "metadata target_profile.name is not ckb", run_dir))
 
     oracle = case.oracle
+    if oracle.capability_operation:
+        registry = metadata.get("capability_registry", {})
+        canonical = ["store", "create", "consume", "destroy", "replace", "burn", "relock", "retarget_type", "read_ref"]
+        if registry.get("capability_set_version") != 1 or registry.get("entailment_version") != 1:
+            failures.append(
+                failure(case, "metadata", "SCA-META-CAPABILITY-VERSION", "capability registry versions are not set to v1", run_dir)
+            )
+        if registry.get("capabilities") != canonical:
+            failures.append(
+                failure(case, "metadata", "SCA-META-CAPABILITY-REGISTRY", "capability registry is not canonical", run_dir)
+            )
+        proofs = [
+            proof
+            for proof in metadata.get("runtime", {}).get("capability_proofs", [])
+            if proof.get("operation") == oracle.capability_operation
+            and (oracle.capability_type is None or proof.get("type_name") == oracle.capability_type)
+        ]
+        if not proofs:
+            failures.append(
+                failure(
+                    case,
+                    "metadata",
+                    "SCA-META-CAPABILITY-PROOF",
+                    f"missing capability proof for {oracle.capability_operation}",
+                    run_dir,
+                )
+            )
+        else:
+            proof = proofs[0]
+            required_fields = {"required", "provided", "entailed", "missing", "capability_set_version", "entailment_version"}
+            if not required_fields.issubset(proof) or proof.get("missing") != []:
+                failures.append(
+                    failure(
+                        case,
+                        "metadata",
+                        "SCA-META-CAPABILITY-EVIDENCE",
+                        "capability proof is missing required/provided/entailed/missing/version evidence",
+                        run_dir,
+                    )
+                )
     if oracle.borrow_scope:
         borrow_regions = [
             region

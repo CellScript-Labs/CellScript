@@ -201,7 +201,7 @@ fn strict_capability_name(capability: ast::Capability) -> &'static str {
 const DEFAULT_TARGET: &str = "riscv64-asm";
 const DEFAULT_TARGET_PROFILE: &str = "ckb";
 const ARTIFACT_CACHE_VERSION: &str = "project-source-set-v5";
-pub const METADATA_SCHEMA_VERSION: u32 = 50;
+pub const METADATA_SCHEMA_VERSION: u32 = 51;
 pub const SOURCE_METADATA_SCHEMA_VERSION: u32 = 1;
 pub const ARTIFACT_METADATA_SCHEMA_VERSION: u32 = 1;
 pub const CONSTRAINTS_METADATA_SCHEMA_VERSION: u32 = 1;
@@ -391,6 +391,8 @@ pub struct CompileMetadata {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub source_units: Vec<SourceUnitMetadata>,
     pub lowering: LoweringMetadata,
+    #[serde(default)]
+    pub capability_registry: CapabilityRegistryMetadata,
     pub runtime: RuntimeMetadata,
     #[serde(default)]
     pub constraints: ConstraintsMetadata,
@@ -407,6 +409,24 @@ pub struct CompileMetadata {
     /// Embedded DWARF debug section names (non-empty when debug mode is enabled for ELF artifacts)
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub debug_info_sections: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CapabilityRegistryMetadata {
+    pub capability_set_version: u32,
+    pub entailment_version: u32,
+    pub capabilities: Vec<String>,
+    pub operation_rules: Vec<CapabilityOperationRuleMetadata>,
+    pub inheritance_syntax: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CapabilityOperationRuleMetadata {
+    pub operation: String,
+    pub required: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub legacy_alternatives: Vec<String>,
+    pub identity_preservation_required: bool,
 }
 
 fn missing_metadata_component_schema_version() -> u32 {
@@ -781,6 +801,8 @@ pub struct RuntimeMetadata {
     pub transaction_view_handles: Vec<TransactionViewHandleMetadata>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub borrow_regions: Vec<BorrowRegionMetadata>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub capability_proofs: Vec<CapabilityProofMetadata>,
     pub verifier_obligations: Vec<VerifierObligationMetadata>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub proof_plan: Vec<ProofPlanMetadata>,
@@ -821,6 +843,24 @@ pub struct BorrowRegionMetadata {
     pub allowed_effects: Vec<String>,
     pub evidence_tier: EvidenceTier,
     pub source_span: crate::proof_plan::ProofPlanSourceSpanMetadata,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CapabilityProofMetadata {
+    pub scope_kind: String,
+    pub scope_name: String,
+    pub operation: String,
+    pub type_name: String,
+    pub binding: String,
+    pub required: Vec<String>,
+    pub provided: Vec<String>,
+    pub entailed: Vec<String>,
+    pub missing: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity_condition: Option<String>,
+    pub capability_set_version: u32,
+    pub entailment_version: u32,
+    pub evidence_tier: EvidenceTier,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -1011,6 +1051,7 @@ pub fn validate_compile_metadata(metadata: &CompileMetadata, artifact_format: Ar
         ));
     }
     validate_type_identity_metadata(metadata)?;
+    validate_capability_metadata(metadata)?;
     validate_type_validity_metadata(metadata)?;
     validate_capacity_floor_metadata(metadata)?;
     validate_ckb_constraints_summary_metadata(metadata)?;
@@ -1029,6 +1070,108 @@ pub fn validate_compile_metadata(metadata: &CompileMetadata, artifact_format: Ar
     validate_source_metadata(metadata)?;
     crate::proof_plan::soundness::validate_metadata(metadata, false)?;
 
+    Ok(())
+}
+
+fn validate_capability_metadata(metadata: &CompileMetadata) -> Result<()> {
+    let expected = capability_registry_metadata();
+    if metadata.capability_registry != expected {
+        return Err(CompileError::without_span(format!(
+            "metadata capability_registry does not match the compiler's closed registry: expected capability-set version {} and entailment version {}",
+            expected.capability_set_version, expected.entailment_version
+        )));
+    }
+    let canonical = expected.capabilities.iter().cloned().collect::<HashSet<_>>();
+    for ty in &metadata.types {
+        if ty.capability_set_version != ast::Capability::REGISTRY_VERSION {
+            return Err(CompileError::without_span(format!(
+                "metadata type '{}' capability_set_version {} does not match registry version {}",
+                ty.name,
+                ty.capability_set_version,
+                ast::Capability::REGISTRY_VERSION
+            )));
+        }
+        let mut seen = HashSet::new();
+        for capability in &ty.capabilities {
+            if !canonical.contains(capability) {
+                return Err(CompileError::without_span(format!(
+                    "metadata type '{}' contains unknown capability '{}'",
+                    ty.name, capability
+                )));
+            }
+            if !seen.insert(capability) {
+                return Err(CompileError::without_span(format!("metadata type '{}' repeats capability '{}'", ty.name, capability)));
+            }
+        }
+        let canonical_order =
+            expected.capabilities.iter().filter(|capability| seen.contains(*capability)).cloned().collect::<Vec<_>>();
+        if ty.capabilities != canonical_order {
+            return Err(CompileError::without_span(format!(
+                "metadata type '{}' capabilities must follow closed registry order",
+                ty.name
+            )));
+        }
+    }
+    for (index, proof) in metadata.runtime.capability_proofs.iter().enumerate() {
+        let prefix = format!("metadata runtime.capability_proofs[{index}]");
+        if proof.capability_set_version != ast::Capability::REGISTRY_VERSION
+            || proof.entailment_version != ast::CapabilityOperation::ENTAILMENT_VERSION
+        {
+            return Err(CompileError::without_span(format!("{prefix} uses an unsupported capability or entailment version")));
+        }
+        if proof.evidence_tier != EvidenceTier::CheckedStatic {
+            return Err(CompileError::without_span(format!("{prefix}.evidence_tier must be checked-static")));
+        }
+        if !proof.missing.is_empty() {
+            return Err(CompileError::without_span(format!("{prefix} is emitted for an operation with missing authority")));
+        }
+        let operation =
+            ast::CapabilityOperation::ALL.into_iter().find(|operation| operation.as_str() == proof.operation).ok_or_else(|| {
+                CompileError::without_span(format!("{prefix}.operation '{}' is not in the closed relation", proof.operation))
+            })?;
+        let mut expected_required =
+            operation.required_capabilities().into_iter().map(|capability| capability.as_str().to_string()).collect::<Vec<_>>();
+        if operation.requires_identity_preservation() {
+            expected_required.push("identity-preservation".to_string());
+            if proof
+                .identity_condition
+                .as_deref()
+                .is_none_or(|condition| !condition.starts_with("identity(") || !condition.ends_with(')'))
+            {
+                return Err(CompileError::without_span(format!("{prefix} is missing its exact identity condition")));
+            }
+        } else if proof.identity_condition.is_some() {
+            return Err(CompileError::without_span(format!("{prefix} must not attach an identity condition")));
+        }
+        if proof.required != expected_required {
+            return Err(CompileError::without_span(format!("{prefix}.required does not match the closed operation rule")));
+        }
+        if proof.required.iter().any(|required| !proof.entailed.contains(required)) {
+            return Err(CompileError::without_span(format!("{prefix}.entailed does not cover every required authority")));
+        }
+        if proof.provided.iter().any(|provided| !canonical.contains(provided)) {
+            return Err(CompileError::without_span(format!("{prefix}.provided contains a capability outside the closed registry")));
+        }
+        let ty = metadata
+            .types
+            .iter()
+            .find(|ty| ty.name == proof.type_name)
+            .ok_or_else(|| CompileError::without_span(format!("{prefix}.type_name '{}' has no type metadata", proof.type_name)))?;
+        if proof.provided != ty.capabilities {
+            return Err(CompileError::without_span(format!(
+                "{prefix}.provided does not match the per-resource capability set of '{}'",
+                proof.type_name
+            )));
+        }
+        if operation.requires_identity_preservation() {
+            let expected_identity = ty.identity_policy.as_ref().map(|identity| format!("identity({identity})"));
+            if proof.identity_condition != expected_identity {
+                return Err(CompileError::without_span(format!(
+                    "{prefix}.identity_condition does not match the declared per-resource identity policy"
+                )));
+            }
+        }
+    }
     Ok(())
 }
 
@@ -3718,6 +3861,8 @@ pub struct TypeMetadata {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ckb_type_id: Option<CkbTypeIdMetadata>,
     pub kind: String,
+    #[serde(default)]
+    pub capability_set_version: u32,
     pub capabilities: Vec<String>,
     pub claim_output: Option<String>,
     pub flow_states: Vec<String>,
@@ -5859,6 +6004,7 @@ fn compile_metadata_from_ir(ir: &ir::IrModule, artifact_format: ArtifactFormat, 
     let cell_data_codec_manifest = cell_data_codec_manifest_metadata(&ckb_runtime_accesses, &molecule_schema_manifest, target_profile);
     let transaction_view_handles = transaction_view_handle_metadata(ir);
     let borrow_regions = borrow_region_metadata(ir);
+    let capability_proofs = capability_proof_metadata(ir);
     let mut metadata = CompileMetadata {
         metadata_schema_version: METADATA_SCHEMA_VERSION,
         source_metadata_schema_version: SOURCE_METADATA_SCHEMA_VERSION,
@@ -5881,6 +6027,7 @@ fn compile_metadata_from_ir(ir: &ir::IrModule, artifact_format: ArtifactFormat, 
                 "Pure computation lowering is executable; stateful protocol lowering is represented in metadata and asm but is not yet a proved schema decoder/verifier"
                     .to_string(),
         },
+        capability_registry: capability_registry_metadata(),
         runtime: RuntimeMetadata {
             vm_target: "CKB-VM compatible RISC-V 64 IMC+B+MOP".to_string(),
             vm_version: "VERSION2".to_string(),
@@ -5910,6 +6057,7 @@ fn compile_metadata_from_ir(ir: &ir::IrModule, artifact_format: ArtifactFormat, 
             ckb_runtime_accesses,
             transaction_view_handles,
             borrow_regions,
+            capability_proofs,
             verifier_obligations,
             proof_plan,
             proof_plan_soundness: ProofPlanSoundnessReport::default(),
@@ -6733,6 +6881,121 @@ fn borrow_region_metadata(ir: &ir::IrModule) -> Vec<BorrowRegionMetadata> {
         }));
     }
     regions
+}
+
+fn capability_registry_metadata() -> CapabilityRegistryMetadata {
+    CapabilityRegistryMetadata {
+        capability_set_version: ast::Capability::REGISTRY_VERSION,
+        entailment_version: ast::CapabilityOperation::ENTAILMENT_VERSION,
+        capabilities: ast::Capability::canonical_names(),
+        operation_rules: ast::CapabilityOperation::ALL
+            .into_iter()
+            .map(|operation| CapabilityOperationRuleMetadata {
+                operation: operation.as_str().to_string(),
+                required: operation
+                    .required_capabilities()
+                    .into_iter()
+                    .map(|capability| capability.as_str().to_string())
+                    .chain(operation.requires_identity_preservation().then(|| "identity-preservation".to_string()))
+                    .collect(),
+                legacy_alternatives: if operation == ast::CapabilityOperation::Destroy {
+                    vec!["destroy (legacy compatibility only)".to_string()]
+                } else {
+                    Vec::new()
+                },
+                identity_preservation_required: operation.requires_identity_preservation(),
+            })
+            .collect(),
+        inheritance_syntax: "none; authority remains an explicit per-resource capability set".to_string(),
+    }
+}
+
+fn capability_proof_metadata(ir: &ir::IrModule) -> Vec<CapabilityProofMetadata> {
+    let mut type_defs = HashMap::<String, &ir::IrTypeDef>::new();
+    for type_def in &ir.external_type_defs {
+        type_defs.insert(type_def.name.clone(), type_def);
+    }
+    for item in &ir.items {
+        if let ir::IrItem::TypeDef(type_def) = item {
+            type_defs.insert(type_def.name.clone(), type_def);
+        }
+    }
+
+    let mut proofs = Vec::new();
+    for item in &ir.items {
+        let (scope_kind, scope_name, body) = match item {
+            ir::IrItem::Action(action) => ("action", action.name.as_str(), &action.body),
+            ir::IrItem::PureFn(function) => ("function", function.name.as_str(), &function.body),
+            ir::IrItem::Lock(lock) => ("lock", lock.name.as_str(), &lock.body),
+            ir::IrItem::TypeDef(_) | ir::IrItem::Invariant(_) => continue,
+        };
+        for block in &body.blocks {
+            for instruction in &block.instructions {
+                let (operation, operand, identity) = match instruction {
+                    ir::IrInstruction::Destroy { operand, .. } => (ast::CapabilityOperation::Destroy, operand, None),
+                    ir::IrInstruction::ReplaceUnique { operand, identity, .. } => {
+                        (ast::CapabilityOperation::ReplaceUnique, operand, Some(identity))
+                    }
+                    _ => continue,
+                };
+                let Some(type_name) = operand_named_type_name(operand) else {
+                    continue;
+                };
+                let Some(type_def) = type_defs.get(&type_name) else {
+                    continue;
+                };
+                let provided_set = type_def.capabilities.iter().copied().collect::<HashSet<_>>();
+                let evaluation = operation.evaluate(&provided_set);
+                let provided = ast::Capability::ALL
+                    .into_iter()
+                    .filter(|capability| provided_set.contains(capability))
+                    .map(|capability| capability.as_str().to_string())
+                    .collect::<Vec<_>>();
+                let mut required = evaluation.required.iter().map(|capability| capability.as_str().to_string()).collect::<Vec<_>>();
+                let mut entailed = evaluation.entailed.iter().map(|capability| capability.as_str().to_string()).collect::<Vec<_>>();
+                let mut missing = evaluation.missing.iter().map(|capability| capability.as_str().to_string()).collect::<Vec<_>>();
+                let identity_condition = identity.and_then(capability_identity_condition);
+                if operation.requires_identity_preservation() {
+                    required.push("identity-preservation".to_string());
+                    if identity_condition.is_some() {
+                        entailed.push("identity-preservation".to_string());
+                    } else {
+                        missing.push("identity(...)".to_string());
+                    }
+                }
+                proofs.push(CapabilityProofMetadata {
+                    scope_kind: scope_kind.to_string(),
+                    scope_name: scope_name.to_string(),
+                    operation: operation.as_str().to_string(),
+                    type_name,
+                    binding: operand_var_name(operand).unwrap_or("<anonymous>").to_string(),
+                    required,
+                    provided,
+                    entailed,
+                    missing,
+                    identity_condition,
+                    capability_set_version: ast::Capability::REGISTRY_VERSION,
+                    entailment_version: ast::CapabilityOperation::ENTAILMENT_VERSION,
+                    evidence_tier: EvidenceTier::CheckedStatic,
+                });
+            }
+        }
+    }
+    proofs.sort_by(|left, right| {
+        (left.scope_kind.as_str(), left.scope_name.as_str(), left.operation.as_str(), left.type_name.as_str(), left.binding.as_str())
+            .cmp(&(
+                right.scope_kind.as_str(),
+                right.scope_name.as_str(),
+                right.operation.as_str(),
+                right.type_name.as_str(),
+                right.binding.as_str(),
+            ))
+    });
+    proofs
+}
+
+fn capability_identity_condition(identity: &ir::IrIdentityPolicy) -> Option<String> {
+    metadata_identity_policy(identity).map(|policy| format!("identity({policy})"))
 }
 
 fn body_transaction_view_handles(scope_kind: &str, scope_name: &str, body: &ir::IrBody) -> Vec<TransactionViewHandleMetadata> {
@@ -14949,7 +15212,12 @@ fn type_metadata(
         type_id_hash,
         ckb_type_id,
         kind: format!("{:?}", type_def.kind),
-        capabilities: type_def.capabilities.iter().map(metadata_capability_name).collect(),
+        capability_set_version: ast::Capability::REGISTRY_VERSION,
+        capabilities: ast::Capability::ALL
+            .into_iter()
+            .filter(|capability| type_def.capabilities.contains(capability))
+            .map(|capability| metadata_capability_name(&capability))
+            .collect(),
         claim_output: type_def.claim_output.as_ref().map(ir_type_to_string),
         flow_state_field: type_def.flow_state_field.clone(),
         flow_transitions: if type_def.flow_rules.is_empty() {
@@ -27537,7 +27805,9 @@ action run() -> u64 {
     #[test]
     fn compile_rejects_destroy_without_destroy_capability() {
         let err = compile(MISSING_DESTROY_CAPABILITY_PROGRAM, CompileOptions::default()).unwrap_err();
-        assert!(err.message.contains("does not declare 'destroy' capability"), "unexpected error: {}", err.message);
+        assert!(err.message.contains("required [consume, burn]"), "unexpected error: {}", err.message);
+        assert!(err.message.contains("missing [consume, burn]"), "unexpected error: {}", err.message);
+        assert!(err.message.contains("capability-set version 1"), "unexpected error: {}", err.message);
     }
 
     #[test]
@@ -27555,7 +27825,92 @@ action burn(token: Token) {
 }
 "#;
 
-        compile(source, CompileOptions { primitive_compat: Some("0.15".to_string()), ..Default::default() }).unwrap();
+        let result = compile(source, CompileOptions { primitive_compat: Some("0.15".to_string()), ..Default::default() }).unwrap();
+        assert_eq!(result.metadata.capability_registry.capabilities, crate::ast::Capability::canonical_names());
+        assert_eq!(result.metadata.capability_registry.capability_set_version, crate::ast::Capability::REGISTRY_VERSION);
+        assert_eq!(result.metadata.types[0].capability_set_version, crate::ast::Capability::REGISTRY_VERSION);
+        let proof = result.metadata.runtime.capability_proofs.first().expect("destroy capability proof");
+        assert_eq!(proof.operation, "destroy");
+        assert_eq!(proof.required, ["consume", "burn"]);
+        assert_eq!(proof.provided, ["store", "consume", "burn"]);
+        assert_eq!(proof.entailed, ["consume", "burn"]);
+        assert!(proof.missing.is_empty());
+        assert_eq!(proof.capability_set_version, crate::ast::Capability::REGISTRY_VERSION);
+        assert_eq!(proof.entailment_version, crate::ast::CapabilityOperation::ENTAILMENT_VERSION);
+    }
+
+    #[test]
+    fn compile_rejects_replace_unique_without_capability_and_identity_authority() {
+        let source = r#"
+module test
+
+resource Token has store {
+    amount: u64,
+}
+
+action rotate(old: Token) -> Token {
+    verification
+        replace_unique<Token>(identity = ckb_type_id) old { amount: old.amount }
+}
+"#;
+
+        let err = compile(source, CompileOptions::default()).unwrap_err();
+        assert!(err.message.contains("required [replace, identity-preservation]"), "unexpected error: {}", err.message);
+        assert!(err.message.contains("missing [replace, identity(ckb_type_id)]"), "unexpected error: {}", err.message);
+        assert!(err.message.contains("provided [store]"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn compile_does_not_inherit_container_capability_authority() {
+        let source = r#"
+module test
+
+resource Token has store {
+    amount: u64,
+}
+
+resource Container has consume, burn {
+    token_id: u64,
+}
+
+action bad(token: Token, container: Container) {
+    verification
+        destroy token
+        destroy container
+}
+"#;
+
+        let err = compile(source, CompileOptions::default()).unwrap_err();
+        assert!(err.message.contains("operation 'destroy' on type 'Token'"), "unexpected error: {}", err.message);
+        assert!(err.message.contains("provided [store]"), "unexpected error: {}", err.message);
+        assert!(err.message.contains("missing [consume, burn]"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn compile_emits_replace_unique_capability_and_identity_proof() {
+        let source = r#"
+module test
+
+resource Token has store, replace
+    identity(field(id))
+{
+    id: u64,
+    amount: u64,
+}
+
+action rotate(old: Token, amount: u64) -> Token {
+    verification
+        replace_unique<Token>(identity = field(id)) old { id: old.id, amount: amount }
+}
+"#;
+
+        let result = compile(source, CompileOptions::default()).unwrap();
+        let proof = result.metadata.runtime.capability_proofs.first().expect("replace_unique capability proof");
+        assert_eq!(proof.required, ["replace", "identity-preservation"]);
+        assert_eq!(proof.provided, ["store", "replace"]);
+        assert_eq!(proof.entailed, ["replace", "identity-preservation"]);
+        assert!(proof.missing.is_empty());
+        assert_eq!(proof.identity_condition.as_deref(), Some("identity(field(id))"));
     }
 
     #[test]
@@ -28911,7 +29266,7 @@ action mint(token_id: u64, owner: Address) -> NFT {
         let program = r#"
 module audit::replace_unique_field_runtime
 
-resource NFT has store
+resource NFT has store, replace
     identity(field(token_id))
 {
     token_id: u64,
@@ -28990,7 +29345,7 @@ action mint(amount: u64) -> Token {
         let script_args_program = r#"
 module audit::unique_script_args_runtime
 
-resource Token has store
+resource Token has store, replace
     identity(script_args)
 {
     amount: u64
@@ -29023,7 +29378,7 @@ action replace(old: Token, amount: u64) -> Token {
         let singleton_program = r#"
 module audit::unique_singleton_runtime
 
-resource Config has store
+resource Config has store, replace
     identity(singleton_type)
 {
     value: u64

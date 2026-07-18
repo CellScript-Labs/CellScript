@@ -52,16 +52,28 @@ modes; they do not create a new gate command:
   a terminal state. `release` still requires exact-artifact and chain evidence
   before a production claim.
 
-Metadata schema `50` carries declared/inferred/effective function effects, the
+Metadata schema `51` carries declared/inferred/effective function effects, the
 initial, terminal, discharge, state-model, and audit-warning fields for flows,
 the canonical evidence tier on ProofPlan, flow, and function metadata, and
 typed transaction-view handle records under
-`runtime.transaction_view_handles`, `runtime.borrow_regions`, plus
+`runtime.transaction_view_handles`, `runtime.borrow_regions`,
+`runtime.capability_proofs`, plus
 `types[].validity_predicates`. Handle records must remain
 `ownership = read-only-view`, carry `lifecycle_authority = false`, and report
 checked-static typing plus checked-runtime read evidence.
 Consumers must reject unsupported schema versions instead of silently dropping
 these fields.
+
+The top-level `capability_registry` is a closed, versioned audit contract.
+Every `types[]` record carries the matching `capability_set_version`.
+Composite operations emit `runtime.capability_proofs` with required, provided,
+entailed, missing, identity-condition, capability-set-version, and
+entailment-version fields. `destroy` is accepted by `consume + burn` (or a
+labelled legacy compatibility alternative); `replace_unique` requires
+`replace + identity-preservation`. Gates reject missing authority and any
+attempt to borrow authority from another container/resource type. Quick syntax
+coverage pins this with `SCA-BUG-0.22-CAPABILITY-OVERGRANT` and
+`SCA-BUG-0.22-CAPABILITY-TRANSITIVE-GRANT`.
 
 Bounded invariant quantifiers are finite-source declarations. Their ProofPlan
 records use `bounded-source-quantifier`, identify the closed source view, and

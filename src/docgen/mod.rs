@@ -3,8 +3,8 @@
 use crate::ast::*;
 use crate::error::Result;
 use crate::{
-    CompileMetadata, PoolInvariantMetadata, PoolPrimitiveMetadata, PoolRuntimeInputRequirementMetadata, ProofPlanMetadata,
-    TransactionRuntimeInputRequirementMetadata, VerifierObligationMetadata,
+    CapabilityProofMetadata, CapabilityRegistryMetadata, CompileMetadata, PoolInvariantMetadata, PoolPrimitiveMetadata,
+    PoolRuntimeInputRequirementMetadata, ProofPlanMetadata, TransactionRuntimeInputRequirementMetadata, VerifierObligationMetadata,
 };
 use serde::Serialize;
 use std::collections::HashMap;
@@ -60,6 +60,8 @@ pub struct AuditDoc {
     pub standalone_runner_compatible: bool,
     pub ckb_runtime_features: Vec<String>,
     pub fail_closed_runtime_features: Vec<String>,
+    pub capability_registry: CapabilityRegistryMetadata,
+    pub capability_proofs: Vec<CapabilityProofMetadata>,
     pub verifier_obligations: Vec<AuditObligationDoc>,
     pub proof_plan: Vec<ProofPlanMetadata>,
     pub transaction_invariant_checked_subconditions: Vec<AuditTransactionInvariantSubconditionDoc>,
@@ -177,6 +179,8 @@ impl DocGenerator {
             standalone_runner_compatible: metadata.runtime.standalone_runner_compatible,
             ckb_runtime_features: metadata.runtime.ckb_runtime_features.clone(),
             fail_closed_runtime_features: metadata.runtime.fail_closed_runtime_features.clone(),
+            capability_registry: metadata.capability_registry.clone(),
+            capability_proofs: metadata.runtime.capability_proofs.clone(),
             verifier_obligations: metadata
                 .runtime
                 .verifier_obligations
@@ -346,6 +350,38 @@ impl AuditDoc {
                     escape_markdown_table_cell(&unit.path),
                     escape_markdown_table_cell(&unit.hash),
                     unit.size_bytes
+                ));
+            }
+            out.push('\n');
+        }
+
+        out.push_str("### Capability Registry and Entailment\n\n");
+        out.push_str(&format!(
+            "- Capability-set version: `{}`\n- Entailment version: `{}`\n- Closed registry: `{}`\n- Inheritance syntax: `{}`\n\n",
+            self.capability_registry.capability_set_version,
+            self.capability_registry.entailment_version,
+            comma_or_none(&self.capability_registry.capabilities),
+            self.capability_registry.inheritance_syntax
+        ));
+        if self.capability_proofs.is_empty() {
+            out.push_str("_No composite capability entailment was used._\n\n");
+        } else {
+            out.push_str("| Scope | Operation | Type | Required | Provided | Entailed | Missing | Identity | Set Version | Entailment Version |\n");
+            out.push_str("|---|---|---|---|---|---|---|---|---|---|\n");
+            for proof in &self.capability_proofs {
+                out.push_str(&format!(
+                    "| `{}:{}` | `{}` | `{}` | {} | {} | {} | {} | `{}` | `{}` | `{}` |\n",
+                    escape_markdown_table_cell(&proof.scope_kind),
+                    escape_markdown_table_cell(&proof.scope_name),
+                    escape_markdown_table_cell(&proof.operation),
+                    escape_markdown_table_cell(&proof.type_name),
+                    escape_markdown_table_cell(&comma_or_none(&proof.required)),
+                    escape_markdown_table_cell(&comma_or_none(&proof.provided)),
+                    escape_markdown_table_cell(&comma_or_none(&proof.entailed)),
+                    escape_markdown_table_cell(&comma_or_none(&proof.missing)),
+                    escape_markdown_table_cell(proof.identity_condition.as_deref().unwrap_or("none")),
+                    proof.capability_set_version,
+                    proof.entailment_version
                 ));
             }
             out.push('\n');
@@ -553,6 +589,36 @@ impl AuditDoc {
                     escape_html(&unit.path),
                     escape_html(&unit.hash),
                     unit.size_bytes
+                ));
+            }
+            out.push_str("</tbody></table>");
+        }
+        out.push_str("<h3>Capability Registry and Entailment</h3>");
+        out.push_str(&format!(
+            "<p>Capability-set version <code>{}</code>; entailment version <code>{}</code>; closed registry <code>{}</code>; inheritance syntax <code>{}</code>.</p>",
+            self.capability_registry.capability_set_version,
+            self.capability_registry.entailment_version,
+            escape_html(&comma_or_none(&self.capability_registry.capabilities)),
+            escape_html(&self.capability_registry.inheritance_syntax)
+        ));
+        if self.capability_proofs.is_empty() {
+            out.push_str("<p><em>No composite capability entailment was used.</em></p>");
+        } else {
+            out.push_str("<table><thead><tr><th>Scope</th><th>Operation</th><th>Type</th><th>Required</th><th>Provided</th><th>Entailed</th><th>Missing</th><th>Identity</th><th>Set Version</th><th>Entailment Version</th></tr></thead><tbody>");
+            for proof in &self.capability_proofs {
+                out.push_str(&format!(
+                    "<tr><td><code>{}:{}</code></td><td><code>{}</code></td><td><code>{}</code></td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td><code>{}</code></td><td><code>{}</code></td><td><code>{}</code></td></tr>",
+                    escape_html(&proof.scope_kind),
+                    escape_html(&proof.scope_name),
+                    escape_html(&proof.operation),
+                    escape_html(&proof.type_name),
+                    escape_html(&comma_or_none(&proof.required)),
+                    escape_html(&comma_or_none(&proof.provided)),
+                    escape_html(&comma_or_none(&proof.entailed)),
+                    escape_html(&comma_or_none(&proof.missing)),
+                    escape_html(proof.identity_condition.as_deref().unwrap_or("none")),
+                    proof.capability_set_version,
+                    proof.entailment_version
                 ));
             }
             out.push_str("</tbody></table>");
@@ -1195,6 +1261,8 @@ action add(x: u64, y: u64) -> u64 {
             standalone_runner_compatible: false,
             ckb_runtime_features: Vec::new(),
             fail_closed_runtime_features: Vec::new(),
+            capability_registry: CapabilityRegistryMetadata::default(),
+            capability_proofs: Vec::new(),
             verifier_obligations: Vec::new(),
             proof_plan: Vec::new(),
             transaction_invariant_checked_subconditions: Vec::new(),
@@ -1251,6 +1319,8 @@ action add(x: u64, y: u64) -> u64 {
             standalone_runner_compatible: false,
             ckb_runtime_features: Vec::new(),
             fail_closed_runtime_features: Vec::new(),
+            capability_registry: CapabilityRegistryMetadata::default(),
+            capability_proofs: Vec::new(),
             verifier_obligations: vec![AuditObligationDoc {
                 scope: obligation.scope.clone(),
                 category: obligation.category.clone(),
