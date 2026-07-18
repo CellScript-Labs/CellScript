@@ -169,7 +169,7 @@ text = re.sub(
 path.write_text(text, encoding="utf-8")
 PY
 
-cargo run --locked -p cellscript --bin cellc -- action build examples/token.cell --action mint --json >"$ACTION_PLAN_JSON"
+cargo run --locked -p cellscript --bin cellc -- action build examples/token.cell --action mint_with_authority --json >"$ACTION_PLAN_JSON"
 cargo test --locked -p cellscript-ckb-adapter materializes_resolved_action_with_ckb_sdk_transaction_builder -- --test-threads=1
 cargo test --locked -p cellscript-ckb-adapter builds_deploy_transaction_with_type_id_code_cell -- --test-threads=1
 
