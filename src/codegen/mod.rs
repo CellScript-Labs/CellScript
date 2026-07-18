@@ -487,11 +487,15 @@ fn molecule_inline_type_fixed_width(
 }
 
 fn layout_fixed_scalar_width(layout: &SchemaFieldLayout) -> Option<usize> {
-    fixed_scalar_width(&layout.ty, layout.fixed_size).or_else(|| layout.fixed_enum_size.filter(|width| *width <= 8))
+    fixed_scalar_width(&layout.ty, layout.fixed_size).or_else(|| (layout.fixed_enum_size == Some(1)).then_some(1))
 }
 
 fn layout_fixed_byte_width(layout: &SchemaFieldLayout) -> Option<usize> {
     fixed_byte_width(&layout.ty, layout.fixed_size).or(layout.fixed_enum_size)
+}
+
+fn layout_flow_state_width(layout: &SchemaFieldLayout) -> Option<usize> {
+    layout_fixed_scalar_width(layout)
 }
 
 fn type_static_length(ty: &IrType) -> Option<usize> {
@@ -6738,7 +6742,7 @@ impl CodeGenerator {
         let Some(state_layout) = self.type_layouts.get(&pattern.ty).and_then(|fields| fields.get(&state_field)).cloned() else {
             return;
         };
-        let Some(width) = layout_fixed_scalar_width(&state_layout) else {
+        let Some(width) = layout_flow_state_width(&state_layout) else {
             return;
         };
         let Some(expected_size) = self.type_fixed_sizes.get(&pattern.ty).copied() else {
@@ -6855,7 +6859,7 @@ impl CodeGenerator {
         let Some(state_layout) = self.type_layouts.get(&pattern.ty).and_then(|fields| fields.get(&state_field)).cloned() else {
             return;
         };
-        let Some(width) = layout_fixed_scalar_width(&state_layout) else {
+        let Some(width) = layout_flow_state_width(&state_layout) else {
             return;
         };
         let Some(expected_size) = self.type_fixed_sizes.get(&pattern.ty).copied() else {

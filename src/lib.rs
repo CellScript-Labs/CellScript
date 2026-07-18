@@ -4876,7 +4876,25 @@ struct MetadataFieldLayout {
     fixed_enum_size: Option<usize>,
 }
 
-type MetadataTypeLayouts = HashMap<String, HashMap<String, MetadataFieldLayout>>;
+#[derive(Debug, Clone, Default)]
+struct MetadataTypeLayouts {
+    fields: HashMap<String, HashMap<String, MetadataFieldLayout>>,
+    enum_fixed_sizes: HashMap<String, usize>,
+}
+
+impl std::ops::Deref for MetadataTypeLayouts {
+    type Target = HashMap<String, HashMap<String, MetadataFieldLayout>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.fields
+    }
+}
+
+impl std::ops::DerefMut for MetadataTypeLayouts {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.fields
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct LoadedModule {
@@ -6427,7 +6445,12 @@ fn compile_metadata_from_ir(ir: &ir::IrModule, artifact_format: ArtifactFormat, 
                     let scheduler_witness_molecule_hex = hex_bytes(&scheduler_witness_molecule);
                     Some(ActionMetadata {
                         name: action.name.clone(),
-                        params: param_metadata_for_body(&action.params, &action.body, &cell_type_kinds),
+                        params: param_metadata_for_body(
+                            &action.params,
+                            &action.body,
+                            &cell_type_kinds,
+                            &ir.enum_layouts,
+                        ),
                         effect_class: scheduler_effect_class,
                         parallelizable: action.scheduler_hints.parallelizable,
                         touches_shared: action.scheduler_hints.touches_shared.iter().map(hex_hash).collect(),
@@ -6531,7 +6554,12 @@ fn compile_metadata_from_ir(ir: &ir::IrModule, artifact_format: ArtifactFormat, 
                     );
                     Some(FunctionMetadata {
                         name: function.name.clone(),
-                        params: param_metadata_for_body(&function.params, &function.body, &cell_type_kinds),
+                        params: param_metadata_for_body(
+                            &function.params,
+                            &function.body,
+                            &cell_type_kinds,
+                            &ir.enum_layouts,
+                        ),
                         return_type: function.return_type.as_ref().map(ir_type_to_string),
                         declared_effect_class: function.declared_effect_class.map(|effect| format!("{:?}", effect)),
                         inferred_effect_class: format!("{:?}", function.inferred_effect_class),
@@ -6602,7 +6630,12 @@ fn compile_metadata_from_ir(ir: &ir::IrModule, artifact_format: ArtifactFormat, 
                     let standalone_runner_compatible = ckb_runtime_features.is_empty() && lock.params.is_empty();
                     Some(LockMetadata {
                         name: lock.name.clone(),
-                        params: param_metadata_for_body(&lock.params, &lock.body, &cell_type_kinds),
+                        params: param_metadata_for_body(
+                            &lock.params,
+                            &lock.body,
+                            &cell_type_kinds,
+                            &ir.enum_layouts,
+                        ),
                         consume_set: lock.body.consume_set.iter().map(cell_pattern_metadata).collect(),
                         read_refs: lock.body.read_refs.iter().map(cell_pattern_metadata).collect(),
                         create_set: lock
@@ -12787,7 +12820,7 @@ fn metadata_can_verify_state_transition(
     let Some(state_layout) = layouts.get(state_field) else {
         return false;
     };
-    if metadata_layout_fixed_scalar_width(state_layout).is_none() {
+    if metadata_layout_flow_state_width(state_layout).is_none() {
         return false;
     }
     if pattern.operation == "output" {
@@ -13395,6 +13428,12 @@ fn metadata_prelude_availability(
                         availability.fixed_value_vars.insert(dest.id);
                     }
                 }
+                ir::IrInstruction::Call { dest: Some(dest), .. }
+                    if named_type_name(&dest.ty).and_then(|name| type_layouts.enum_fixed_sizes.get(name)).is_some() =>
+                {
+                    availability.fixed_value_vars.insert(dest.id);
+                    availability.aggregate_pointer_vars.insert(dest.id, MetadataAggregatePointerSource { ty: dest.ty.clone() });
+                }
                 ir::IrInstruction::Create { dest, .. }
                 | ir::IrInstruction::CreateUnique { dest, .. }
                 | ir::IrInstruction::ReplaceUnique { dest, .. } => {
@@ -13428,6 +13467,28 @@ fn metadata_prelude_availability(
                         .is_some_and(|len| type_static_length(&dest.ty).is_some_and(|dest_len| dest_len == len))
                     {
                         availability.fixed_value_vars.insert(dest.id);
+                    }
+                }
+                ir::IrInstruction::EnumConstruct { dest, .. } => {
+                    if metadata_ir_type_fixed_width(&dest.ty, type_layouts).is_some() {
+                        availability.fixed_value_vars.insert(dest.id);
+                        availability.aggregate_pointer_vars.insert(dest.id, MetadataAggregatePointerSource { ty: dest.ty.clone() });
+                    }
+                }
+                ir::IrInstruction::EnumTag { dest, .. } => {
+                    availability.scalar_vars.insert(dest.id);
+                    availability.fixed_value_vars.insert(dest.id);
+                }
+                ir::IrInstruction::EnumPayload { dest, .. } => {
+                    if let Some(width) = metadata_ir_type_fixed_width(&dest.ty, type_layouts) {
+                        availability.fixed_value_vars.insert(dest.id);
+                        if width <= 8 {
+                            availability.scalar_vars.insert(dest.id);
+                        } else {
+                            availability
+                                .aggregate_pointer_vars
+                                .insert(dest.id, MetadataAggregatePointerSource { ty: dest.ty.clone() });
+                        }
                     }
                 }
                 ir::IrInstruction::FieldAccess { dest, obj: ir::IrOperand::Var(obj), field } => {
@@ -13627,10 +13688,17 @@ fn metadata_prelude_availability(
                         availability.scalar_vars.insert(dest.id);
                         availability.fixed_value_vars.insert(dest.id);
                     }
-                    if metadata_fixed_value_available(src, &availability)
-                        && metadata_fixed_byte_width(&dest.ty, type_static_length(&dest.ty)).is_some()
-                    {
-                        availability.fixed_value_vars.insert(dest.id);
+                    if let Some(width) = metadata_ir_type_fixed_width(&dest.ty, type_layouts) {
+                        if metadata_fixed_value_available_with_layout_width(src, &availability, width, type_layouts) {
+                            availability.fixed_value_vars.insert(dest.id);
+                            if width > 8
+                                || named_type_name(&dest.ty).is_some_and(|name| type_layouts.enum_fixed_sizes.contains_key(name))
+                            {
+                                availability
+                                    .aggregate_pointer_vars
+                                    .insert(dest.id, MetadataAggregatePointerSource { ty: dest.ty.clone() });
+                            }
+                        }
                     }
                     if dest.ty == ir::IrType::U64 && metadata_u64_value_available(src, &availability) {
                         availability.u64_value_vars.insert(dest.id);
@@ -13641,6 +13709,9 @@ fn metadata_prelude_availability(
                     if let ir::IrOperand::Var(src_var) = src {
                         if availability.schema_pointer_vars.contains(&src_var.id) && named_type_name(&dest.ty).is_some() {
                             availability.schema_pointer_vars.insert(dest.id);
+                        }
+                        if let Some(source) = availability.aggregate_pointer_vars.get(&src_var.id).cloned() {
+                            availability.aggregate_pointer_vars.insert(dest.id, source);
                         }
                         if availability.dynamic_collection_vars.contains(&src_var.id) && dest.ty == src_var.ty {
                             availability.dynamic_collection_vars.insert(dest.id);
@@ -13794,7 +13865,7 @@ fn metadata_can_verify_create_output_fields(
     pattern.fields.iter().all(|(field, value)| {
         layouts.get(field).is_some_and(|layout| {
             if let Some(width) = metadata_layout_or_named_fixed_byte_width(layout, type_layouts) {
-                metadata_fixed_value_available_with_width(value, availability, width)
+                metadata_fixed_value_available_with_layout_width(value, availability, width, type_layouts)
             } else {
                 metadata_dynamic_create_output_value_available(value, layout, availability, type_layouts)
             }
@@ -14248,11 +14319,15 @@ fn metadata_fixed_byte_width(ty: &ir::IrType, fixed_size: Option<usize>) -> Opti
 }
 
 fn metadata_layout_fixed_scalar_width(layout: &MetadataFieldLayout) -> Option<usize> {
-    metadata_fixed_scalar_width(&layout.ty, layout.fixed_size).or(layout.fixed_enum_size)
+    metadata_fixed_scalar_width(&layout.ty, layout.fixed_size).or_else(|| (layout.fixed_enum_size == Some(1)).then_some(1))
 }
 
 fn metadata_layout_fixed_byte_width(layout: &MetadataFieldLayout) -> Option<usize> {
     metadata_fixed_byte_width(&layout.ty, layout.fixed_size).or(layout.fixed_enum_size)
+}
+
+fn metadata_layout_flow_state_width(layout: &MetadataFieldLayout) -> Option<usize> {
+    metadata_layout_fixed_scalar_width(layout)
 }
 
 fn metadata_layout_or_named_fixed_byte_width(layout: &MetadataFieldLayout, type_layouts: &MetadataTypeLayouts) -> Option<usize> {
@@ -14286,10 +14361,12 @@ fn metadata_inline_type_fixed_width(ty: &str, type_layouts: &MetadataTypeLayouts
         "u64" => Some(8),
         "u128" => Some(16),
         "Address" | "Hash" => Some(32),
-        other => type_layouts.get(other).and_then(|fields| {
-            fields
-                .values()
-                .try_fold(0usize, |acc, layout| layout.fixed_size.or(layout.fixed_enum_size).and_then(|width| acc.checked_add(width)))
+        other => type_layouts.enum_fixed_sizes.get(other).copied().or_else(|| {
+            type_layouts.get(other).and_then(|fields| {
+                fields.values().try_fold(0usize, |acc, layout| {
+                    layout.fixed_size.or(layout.fixed_enum_size).and_then(|width| acc.checked_add(width))
+                })
+            })
         }),
     }
 }
@@ -15374,7 +15451,7 @@ fn metadata_type_layouts(ir: &ir::IrModule) -> MetadataTypeLayouts {
         let fields = metadata_layout_fields(type_def, &type_defs, &ir.enum_fixed_sizes);
         layouts.insert(type_def.name.clone(), fields);
     }
-    layouts
+    MetadataTypeLayouts { fields: layouts, enum_fixed_sizes: ir.enum_fixed_sizes.clone() }
 }
 
 fn metadata_layout_fields(
@@ -16677,9 +16754,10 @@ fn param_metadata_for_body(
     params: &[ir::IrParam],
     body: &ir::IrBody,
     cell_type_kinds: &HashMap<String, ir::IrTypeKind>,
+    enum_layouts: &HashMap<String, ir::IrEnumLayout>,
 ) -> Vec<ParamMetadata> {
     let type_hash_param_ids = param_type_hash_param_ids(body);
-    params.iter().map(|param| param_metadata(param, &type_hash_param_ids, cell_type_kinds)).collect()
+    params.iter().map(|param| param_metadata(param, &type_hash_param_ids, cell_type_kinds, enum_layouts)).collect()
 }
 
 fn param_type_hash_param_ids(body: &ir::IrBody) -> BTreeSet<usize> {
@@ -16700,11 +16778,17 @@ fn param_metadata(
     param: &ir::IrParam,
     type_hash_param_ids: &BTreeSet<usize>,
     cell_type_kinds: &HashMap<String, ir::IrTypeKind>,
+    enum_layouts: &HashMap<String, ir::IrEnumLayout>,
 ) -> ParamMetadata {
-    let schema_pointer_abi = named_type_name(&param.ty).is_some();
-    let fixed_byte_len = metadata_fixed_byte_width(&param.ty, type_static_length(&param.ty))
-        .filter(|width| *width > 8)
-        .or_else(|| metadata_fixed_aggregate_pointer_size(&param.ty));
+    let named_type = named_type_name(&param.ty);
+    let enum_fixed_len =
+        named_type.and_then(|name| enum_layouts.get(name)).filter(|layout| layout.has_payload()).map(|layout| layout.encoded_size);
+    let schema_pointer_abi = named_type.is_some() && enum_fixed_len.is_none();
+    let fixed_byte_len = enum_fixed_len.or_else(|| {
+        metadata_fixed_byte_width(&param.ty, type_static_length(&param.ty))
+            .filter(|width| *width > 8)
+            .or_else(|| metadata_fixed_aggregate_pointer_size(&param.ty))
+    });
     let type_hash_abi = schema_pointer_abi && type_hash_param_ids.contains(&param.binding.id);
     let cell_bound_abi = param.is_ref
         || matches!(
@@ -31769,6 +31853,105 @@ action spend(amount: u64, enabled: bool) {
         assert!(assembly.contains("construct payload enum Limit::Some"), "missing payload constructor:\n{assembly}");
         assert!(assembly.contains("return payload enum Limit size=9 via a0/a1 register pair"));
         assert!(assembly.contains("receive payload enum Limit size=9 from a0/a1 register pair"));
+    }
+
+    #[test]
+    fn payload_enum_create_fields_are_checked_in_strict_proof_plan_mode() {
+        let source = r#"
+module payload::output_field
+
+enum AssetType {
+    Native,
+    Token(Hash),
+    NFT(Hash, u64),
+}
+
+resource LockedAsset has store, create {
+    asset_type: AssetType,
+    amount: u64,
+}
+
+action lock_asset(asset_type: AssetType, amount: u64) -> locked: LockedAsset {
+    verification
+        require amount > 0
+        create locked = LockedAsset { asset_type, amount }
+}
+"#;
+        let result = compile(
+            source,
+            CompileOptions {
+                target: Some("riscv64-elf".to_string()),
+                primitive_compat: Some("0.16".to_string()),
+                ..CompileOptions::default()
+            },
+        )
+        .unwrap();
+        let action = result.metadata.actions.iter().find(|action| action.name == "lock_asset").expect("lock_asset metadata");
+        let asset_type = action.params.iter().find(|param| param.name == "asset_type").expect("asset_type parameter metadata");
+        assert!(!asset_type.schema_pointer_abi);
+        assert!(!asset_type.schema_length_abi);
+        assert!(asset_type.fixed_byte_pointer_abi);
+        assert!(asset_type.fixed_byte_length_abi);
+        assert_eq!(asset_type.fixed_byte_len, Some(41));
+        let native_asset_type = vec![0; 41];
+        let witness =
+            action.entry_witness_args(&[EntryWitnessArg::Bytes(native_asset_type.clone()), EntryWitnessArg::U64(7)]).unwrap();
+        let mut expected_witness = ENTRY_WITNESS_ABI_MAGIC.to_vec();
+        expected_witness.extend_from_slice(&native_asset_type);
+        expected_witness.extend_from_slice(&7u64.to_le_bytes());
+        assert_eq!(witness, expected_witness);
+        let constraints = result
+            .metadata
+            .constraints
+            .entry_abi
+            .iter()
+            .find(|entry| entry.entry_kind == "action" && entry.entry_name == "lock_asset")
+            .expect("lock_asset entry ABI constraints");
+        assert_eq!(constraints.witness_payload_bytes, 49);
+        assert_eq!(constraints.min_witness_bytes, 57);
+        let obligation = action
+            .verifier_obligations
+            .iter()
+            .find(|obligation| obligation.feature == "create-output:LockedAsset:locked")
+            .expect("create-output obligation");
+        assert_eq!(obligation.status, "checked-runtime");
+        assert!(obligation.detail.contains("create-output-fields=checked-runtime"));
+        assert!(action.transaction_runtime_input_requirements.iter().any(|requirement| {
+            requirement.feature == "create-output:LockedAsset:locked"
+                && requirement.component == "create-output-fields"
+                && requirement.status == "checked-runtime"
+        }));
+        assert!(!action.fail_closed_runtime_features.contains(&"output-verification-incomplete".to_string()));
+    }
+
+    #[test]
+    fn no_payload_enum_field_comparisons_load_the_discriminant_value() {
+        let source = r#"
+module payload::state
+
+enum State {
+    Open,
+    Closed,
+}
+
+resource Item has store, consume {
+    state: State,
+}
+
+action close(item: Item) {
+    verification
+        require item.state != State::Closed
+        consume item
+}
+"#;
+        let result = compile(source, CompileOptions::default()).unwrap();
+        let assembly = String::from_utf8(result.artifact_bytes).unwrap();
+        assert!(
+            assembly.contains(
+                "# cellscript abi: expected field Item.state offset=0 size=1\n    ld t4, 0(sp)\n    li t1, 0\n    lbu t2, 0(t4)"
+            ),
+            "one-byte no-payload enum comparisons must load the field discriminant, not the pointer/length representation:\n{assembly}"
+        );
     }
 
     #[test]

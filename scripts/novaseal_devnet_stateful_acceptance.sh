@@ -36,8 +36,14 @@ if [[ "$REPORT_ONLY" != true ]]; then
   rm -f "$REPORT"
   cert_stderr="$(mktemp)"
   if [[ -z "${CELLC_BIN:-}" ]]; then
-    cargo build --locked --manifest-path "$ROOT_DIR/Cargo.toml" --bin cellc >/dev/null
-    CELLC_BIN="$ROOT_DIR/target/debug/cellc"
+    CELLC_TARGET_DIR="${CELLSCRIPT_CELLC_TARGET_DIR:-$ROOT_DIR/target/cellscript-cellc}"
+    cargo build \
+      --locked \
+      --manifest-path "$ROOT_DIR/Cargo.toml" \
+      --bin cellc \
+      --target-dir "$CELLC_TARGET_DIR" \
+      >/dev/null
+    CELLC_BIN="$CELLC_TARGET_DIR/debug/cellc"
   elif [[ ! -x "$CELLC_BIN" ]]; then
     if [[ -n "$cert_stderr" ]]; then
       rm -f "$cert_stderr"

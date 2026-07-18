@@ -10,8 +10,8 @@ fi
 cd "$ROOT_DIR"
 
 if [[ -z "${CELLC_BIN:-}" ]]; then
-    TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT_DIR/target}"
-    cargo build --locked --bin cellc >/dev/null
+    TARGET_DIR="${CELLSCRIPT_CELLC_TARGET_DIR:-$ROOT_DIR/target/cellscript-cellc}"
+    cargo build --locked --bin cellc --target-dir "$TARGET_DIR" >/dev/null
     export CELLC_BIN="$TARGET_DIR/debug/cellc"
 fi
 

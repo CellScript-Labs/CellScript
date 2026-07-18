@@ -225,7 +225,14 @@ else
 fi
 
 CELLC_BUILD_JSON="$RUN_DIR/cellc-build.jsonl"
-if ! cargo build --locked --manifest-path "$REPO_ROOT/Cargo.toml" --bin cellc --message-format=json-render-diagnostics >"$CELLC_BUILD_JSON"; then
+CELLC_TARGET_DIR="${CELLSCRIPT_CELLC_TARGET_DIR:-$REPO_ROOT/target/cellscript-cellc}"
+if ! cargo build \
+  --locked \
+  --manifest-path "$REPO_ROOT/Cargo.toml" \
+  --bin cellc \
+  --target-dir "$CELLC_TARGET_DIR" \
+  --message-format=json-render-diagnostics \
+  >"$CELLC_BUILD_JSON"; then
   cat "$CELLC_BUILD_JSON" >&2
   exit 1
 fi
@@ -3231,14 +3238,12 @@ def locked_asset_data(amount, lock_hash):
         raise RuntimeError(f"LockedAsset lock_hash must be exactly 32 bytes, got {len(lock_hash)}")
     return amount.to_bytes(8, "little") + lock_hash
 
-def locked_asset_molecule_data(asset_type, amount, lock_hash):
+def locked_asset_payload_enum_data(asset_type, amount, lock_hash):
+    if len(asset_type) != 41:
+        raise RuntimeError(f"LockedAsset asset_type must be exactly 41 bytes, got {len(asset_type)}")
     if len(lock_hash) != 32:
         raise RuntimeError(f"LockedAsset lock_hash must be exactly 32 bytes, got {len(lock_hash)}")
-    return molecule_table([
-        asset_type,
-        amount.to_bytes(8, "little"),
-        lock_hash,
-    ])
+    return asset_type + amount.to_bytes(8, "little") + lock_hash
 
 def release_request_data(lock_hash, requester, requested_at, state=None):
     if len(lock_hash) != 32:
@@ -4081,7 +4086,7 @@ def lock_spend_case_specs(example, lock_name, lock_script):
         hash_a, 1, addr_a, 0, addr_c, 500, b"", [(addr_a, signature_a)], 2, 10, 2000
     )
     nft_valid = nft_data(1, addr_a, hash_a, addr_b, 250)
-    asset_type_native = molecule_table([bytes([0])])
+    asset_type_native = bytes([0]) + bytes(40)
     time_lock_valid = timelock_data(addr_a, 0, 100, 10, lock_id=hash_a)
     lock_seed = bytes([0x66]) * 32
     committed_lock_id = hashlib.blake2b(lock_seed, digest_size=32, person=b"ckb-default-hash").digest()
@@ -4168,10 +4173,10 @@ def lock_spend_case_specs(example, lock_name, lock_script):
             "invalid_witnesses": [entry_witness(hash_b)],
         },
         ("timelock.cell", "asset_matches"): {
-            "valid_cells": [cell(locked_asset_molecule_data(asset_type_native, 100, hash_a))],
+            "valid_cells": [cell(locked_asset_payload_enum_data(asset_type_native, 100, hash_a))],
             "valid_read_deps": [cell(time_lock_valid)],
             "valid_witnesses": [entry_witness(), "0x"],
-            "invalid_cells": [cell(locked_asset_molecule_data(asset_type_native, 100, hash_b))],
+            "invalid_cells": [cell(locked_asset_payload_enum_data(asset_type_native, 100, hash_b))],
             "invalid_read_deps": [cell(time_lock_valid)],
             "invalid_witnesses": [entry_witness(), "0x"],
         },
@@ -5675,10 +5680,10 @@ def build_timelock_action_case(action_record, cellscript_lock, cellscript_type, 
         unlock_height = 500
         created_at = 1
         amount = 42
-        asset_type_payload = molecule_bytes(bytes([0]))
+        asset_type_payload = bytes([0]) + bytes(40)
         lock_hash = scoped_lock_id()
-        locked_asset_payload = locked_asset_molecule_data(asset_type_payload, amount, lock_hash) if original_scoped else locked_asset_data(amount, lock_hash)
-        malformed_locked_asset_payload = locked_asset_molecule_data(asset_type_payload, amount + 1, lock_hash) if original_scoped else locked_asset_data(amount + 1, lock_hash)
+        locked_asset_payload = locked_asset_payload_enum_data(asset_type_payload, amount, lock_hash) if original_scoped else locked_asset_data(amount, lock_hash)
+        malformed_locked_asset_payload = locked_asset_payload_enum_data(asset_type_payload, amount + 1, lock_hash) if original_scoped else locked_asset_data(amount + 1, lock_hash)
         locked_asset_type = always_success_lock("0x20")
         initial = create_script_locked_cells(
             "timelock.lock_asset",
@@ -5694,7 +5699,7 @@ def build_timelock_action_case(action_record, cellscript_lock, cellscript_type, 
             {"capacity": hex_u64(300 * 100_000_000), "lock": cellscript_lock, "type": locked_asset_type},
             {"capacity": hex_u64(700 * 100_000_000), "lock": always_success_lock(), "type": None},
         ]
-        witness = [entry_witness(molecule_bytes(asset_type_payload), amount)] if original_scoped else [entry_witness(lock_hash, amount)]
+        witness = [entry_witness(asset_type_payload, amount)] if original_scoped else [entry_witness(lock_hash, amount)]
         valid_tx = transaction(inputs, outputs, ["0x" + locked_asset_payload.hex(), "0x"], action_cell_deps, witness)
         malformed_tx = transaction(inputs, outputs, ["0x" + malformed_locked_asset_payload.hex(), "0x"], action_cell_deps, witness)
     elif action == "request_release":
@@ -5792,8 +5797,8 @@ def build_timelock_action_case(action_record, cellscript_lock, cellscript_type, 
         locked_asset_type = always_success_lock("0x02")
         release_request_type = always_success_lock("0x03")
         release_record_type = always_success_lock("0x04")
-        asset_type_payload = bytes([0])
-        locked_asset_payload = locked_asset_molecule_data(asset_type_payload, 42, lock_hash) if original_scoped else locked_asset_data(42, lock_hash)
+        asset_type_payload = bytes([0]) + bytes(40)
+        locked_asset_payload = locked_asset_payload_enum_data(asset_type_payload, 42, lock_hash) if original_scoped else locked_asset_data(42, lock_hash)
         initial = create_script_locked_cells(
             "timelock.execute_release",
             [
@@ -5817,9 +5822,9 @@ def build_timelock_action_case(action_record, cellscript_lock, cellscript_type, 
         emergency_type = always_success_lock("0x13")
         release_record_type = always_success_lock("0x14")
         required_approvals = 2
-        asset_type_payload = bytes([0])
+        asset_type_payload = bytes([0]) + bytes(40)
         reason_payload = molecule_bytes(b"emergency release")
-        locked_asset_payload = locked_asset_molecule_data(asset_type_payload, 42, lock_hash) if original_scoped else locked_asset_data(42, lock_hash)
+        locked_asset_payload = locked_asset_payload_enum_data(asset_type_payload, 42, lock_hash) if original_scoped else locked_asset_data(42, lock_hash)
         emergency_payload = emergency_release_molecule_data(lock_hash, owner, reason_payload, 120, [owner, bytes([0x42]) * 32]) if original_scoped else emergency_release_data(lock_hash, owner, 120, 3)
         initial = create_script_locked_cells(
             "timelock.execute_emergency_release",
@@ -6328,7 +6333,7 @@ def run_stateful_timelock_release(always_success_dep):
     record_type = always_success_lock("0xb4")
     owner = actions["execute_release"]["lock_hash"]
     lock_id = decode_hex(script_hash(time_lock_type), 32)
-    asset_type_payload = bytes([0])
+    asset_type_payload = bytes([0]) + bytes(40)
     current_height = 50
     unlock_height = 100
     release_height = 125
@@ -6365,11 +6370,11 @@ def run_stateful_timelock_release(always_success_dep):
             {"capacity": hex_u64(700 * 100_000_000), "lock": always_success_lock(), "type": None},
         ],
         [
-            "0x" + locked_asset_molecule_data(asset_type_payload, 42, lock_id).hex(),
+            "0x" + locked_asset_payload_enum_data(asset_type_payload, 42, lock_id).hex(),
             "0x",
         ],
         [time_lock_dep] + actions["lock_asset"]["cell_deps"],
-        [entry_witness(molecule_bytes(asset_type_payload), 42)],
+        [entry_witness(asset_type_payload, 42)],
     )
     step = run_stateful_step(scenario, "lock_asset_against_live_lock", tx2, [lock_asset_input])
     steps.append(step)
