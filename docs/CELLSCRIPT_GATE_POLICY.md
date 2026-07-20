@@ -23,6 +23,38 @@ deciding whether a change is ready.
 `release-quick` is kept for `scripts/cellscript_ckb_release_gate.sh quick`.
 Use `release` for any production or external live/devnet claim.
 
+### Fiber integration evidence
+
+The no-profile Fiber path has a separate, non-gating acceptance entry point:
+
+```bash
+./scripts/cellscript_fiber_acceptance.sh --static
+```
+
+Static mode runs the dedicated CKB-VM transaction matrix, adapter tests, and
+adapter clippy. It proves only compiler/artifact compatibility; it does not
+prove that a Fiber node loaded configuration, advertised an asset, opened a
+channel, routed a payment, or settled on chain.
+
+Full mode consumes externally produced `compatibility.json` and
+`acceptance.json` reports from a pinned Fiber checkout. It validates exact
+revision/fingerprint bindings and requires every declared positive and negative
+matrix row. The script does not start, restart, configure, sign for, or stop
+operator-owned CKB/Fiber nodes. Until the live matrix is stable and explicitly
+promoted, neither `dev`, `ci`, `backend`, nor `release` runs this external
+integration boundary.
+
+The ordinary `dev`, `ci`, and `backend` gates do compile the adapter; `ci` and
+`backend` also run its unit tests and clippy. This is workspace-code coverage,
+not external Fiber lifecycle evidence.
+
+On 2026-07-20, bounded non-gating local-devnet runs passed Fiber's official
+`udt-router-pay` and
+`watchtower/force-close-with-pending-tlcs-and-udt` collections with the exact
+CellScript artifact and generated native configuration. Those observations are
+recorded in the roadmap, but do not satisfy full mode because the CKB executable
+was a dirty local build and the complete declared matrix was not produced.
+
 ### Nightly 0.22 compiler evidence
 
 The `nightly-0.22` line adds compile-time callable-effect contracts and
@@ -52,7 +84,7 @@ modes; they do not create a new gate command:
   a terminal state. `release` still requires exact-artifact and chain evidence
   before a production claim.
 
-Metadata schema `53` carries declared/inferred/effective function effects, the
+Metadata schema `54` carries declared/inferred/effective function effects, the
 initial, terminal, discharge, state-model, and audit-warning fields for flows,
 the canonical evidence tier on ProofPlan, flow, and function metadata, and
 typed transaction-view handle records under
@@ -63,6 +95,13 @@ typed transaction-view handle records under
 checked-static typing plus checked-runtime read evidence.
 Consumers must reject unsupported schema versions instead of silently dropping
 these fields.
+
+Schema 54 additionally carries
+`runtime.fungible_type_group_entry`. That record is present only for the
+dedicated, payload-free `fungible-type-group-v1` compilation path and binds the
+selected type, 16-byte field, runtime helper, witness policy, 32-byte owner-lock
+issuance/destruction rule, and non-owner non-empty/conservation contract.
+Ordinary action compilation must not emit it.
 
 Concrete payload enum evidence is top-level under `enum_layouts`. Every record
 pins the one-byte tag, packed variant field offsets, encoded width, storage

@@ -39,6 +39,7 @@ cargo_fmt_workspace() {
         --manifest-path "$ROOT_DIR/Cargo.toml" \
         --package cellscript \
         --package cellscript-ckb-adapter \
+        --package cellscript-fiber-adapter \
         --package cellscript-wasm \
         --package cellscript-ckb-sdk-builder-example \
         "$@"
@@ -757,6 +758,7 @@ run_dev_gate() {
 
     cargo_fmt_workspace
     run cargo check --locked -p cellscript --all-targets
+    run cargo check --locked -p cellscript-fiber-adapter --all-targets
     run ./scripts/cellscript_strict_backend_audit.sh quick
     run ./scripts/cellscript_syntax_combo_audit.sh quick
     run python3 scripts/check_cellscript_skill_pack.py
@@ -779,7 +781,9 @@ run_ci_gate() {
     printf '{"status":"not-generated","reason":"test suite did not reach backend shape report generation"}\n' >"$CELLSCRIPT_BACKEND_SHAPE_REPORT"
     cargo_fmt_workspace --check
     run cargo test --locked -p cellscript -- --test-threads=1
+    run cargo test --locked -p cellscript-fiber-adapter -- --test-threads=1
     run cargo clippy --locked -p cellscript --all-targets -- -D warnings
+    run cargo clippy --locked -p cellscript-fiber-adapter --all-targets -- -D warnings
     run ./scripts/cellscript_strict_backend_audit.sh ci
     run python3 scripts/check_cellscript_skill_pack.py
     check_cellscript_doc_status_freshness
@@ -804,8 +808,11 @@ run_backend_gate() {
 
     cargo_fmt_workspace --check
     run cargo check --locked -p cellscript --all-targets
+    run cargo check --locked -p cellscript-fiber-adapter --all-targets
     run cargo test --locked -p cellscript
+    run cargo test --locked -p cellscript-fiber-adapter -- --test-threads=1
     run cargo clippy --locked -p cellscript --all-targets -- -D warnings
+    run cargo clippy --locked -p cellscript-fiber-adapter --all-targets -- -D warnings
     run ./scripts/cellscript_strict_backend_audit.sh full
     run git diff --check
 }

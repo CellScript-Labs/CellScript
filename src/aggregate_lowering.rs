@@ -4,6 +4,8 @@ use std::collections::HashMap;
 
 pub(crate) const XUDT_GROUP_AMOUNT_CONSERVED_CODEGEN_HELPER: &str = "__xudt_require_group_amount_conserved";
 pub(crate) const XUDT_GROUP_AMOUNT_CONSERVED_METADATA_HELPER: &str = "xudt::require_group_amount_conserved";
+pub(crate) const FUNGIBLE_TYPE_GROUP_V1_CODEGEN_HELPER: &str = "__cellscript_require_fungible_type_group_v1";
+pub(crate) const FUNGIBLE_TYPE_GROUP_V1_METADATA_HELPER: &str = "fungible::require_type_group_v1";
 
 #[derive(Debug, Clone)]
 struct FieldAlias {
@@ -28,6 +30,26 @@ pub(crate) fn xudt_group_amount_conservation_type<'a>(
         && ((left_source == SourceView::GroupOutput && right_source == SourceView::GroupInput)
             || (left_source == SourceView::GroupInput && right_source == SourceView::GroupOutput)))
         .then_some(left_type)
+}
+
+pub(crate) fn fungible_type_group_v1_conservation_type<'a>(
+    invariant: &ir::IrInvariant,
+    aggregate: &'a ir::IrAggregateInvariant,
+) -> Option<(&'a str, &'a str)> {
+    if invariant.trigger.as_deref() != Some("type_group") || aggregate.scope != "group" {
+        return None;
+    }
+    if aggregate.kind != AggregateInvariantKind::Sum || aggregate.relation != Some(AggregateRelation::Eq) {
+        return None;
+    }
+    let rhs = aggregate.rhs.as_ref()?;
+    let (left_source, left_type, left_field) = aggregate_group_field_endpoint(&aggregate.target)?;
+    let (right_source, right_type, right_field) = aggregate_group_field_endpoint(rhs)?;
+    (left_type == right_type
+        && left_field == right_field
+        && ((left_source == SourceView::GroupOutput && right_source == SourceView::GroupInput)
+            || (left_source == SourceView::GroupInput && right_source == SourceView::GroupOutput)))
+        .then_some((left_type, left_field))
 }
 
 pub(crate) fn action_has_group_amount_conservation_evidence(action: &ir::IrAction, type_name: &str) -> bool {
@@ -70,6 +92,13 @@ pub(crate) fn aggregate_group_amount_endpoint(target: &AggregateTarget) -> Optio
         return None;
     }
     Some((target.source, target.type_name.as_deref()?))
+}
+
+pub(crate) fn aggregate_group_field_endpoint(target: &AggregateTarget) -> Option<(SourceView, &str, &str)> {
+    if !matches!(target.source, SourceView::GroupInput | SourceView::GroupOutput) {
+        return None;
+    }
+    Some((target.source, target.type_name.as_deref()?, target.field.as_deref()?))
 }
 
 fn field_aliases(body: &ir::IrBody) -> HashMap<usize, FieldAlias> {

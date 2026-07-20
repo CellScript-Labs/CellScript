@@ -1,6 +1,6 @@
 use crate::aggregate_lowering::{
     action_has_group_amount_conservation_evidence, body_contains_runtime_helper, xudt_group_amount_conservation_type,
-    XUDT_GROUP_AMOUNT_CONSERVED_CODEGEN_HELPER,
+    FUNGIBLE_TYPE_GROUP_V1_CODEGEN_HELPER, XUDT_GROUP_AMOUNT_CONSERVED_CODEGEN_HELPER,
 };
 use crate::ast::{BinaryOp, ParamSource, UnaryOp};
 use crate::ckb_abi;
@@ -315,6 +315,7 @@ fn is_v014_runtime_helper(func: &str) -> bool {
             | "__xudt_require_owner_mode_input_type"
             | "__xudt_require_owner_mode_type_args"
             | "__xudt_require_owner_mode_type_args_current_script"
+            | "__cellscript_require_fungible_type_group_v1"
             | "__xudt_require_group_amount_conserved"
             | "__xudt_require_group_amount_minted"
             | "__xudt_require_group_amount_burned"
@@ -12065,6 +12066,10 @@ impl CodeGenerator {
                 "__xudt_require_owner_mode_type_args_current_script",
                 "xUDT owner-mode type args binding check against current script hash",
             ),
+            (
+                FUNGIBLE_TYPE_GROUP_V1_CODEGEN_HELPER,
+                "chain-neutral fungible type-group v1 conservation",
+            ),
             ("__xudt_require_group_amount_conserved", "xUDT group input/output amount conservation"),
             ("__xudt_require_group_amount_minted", "xUDT group output-input amount delta check"),
             ("__xudt_require_group_amount_burned", "xUDT group input-output amount delta check"),
@@ -12278,7 +12283,9 @@ impl CodeGenerator {
                 "__xudt_require_owner_mode_type_args_current_script" => {
                     self.emit_runtime_xudt_require_owner_mode_type_args_current_script_helper(enabled)
                 }
-                "__xudt_require_group_amount_conserved" => self.emit_runtime_xudt_require_group_amount_conserved_helper(enabled),
+                FUNGIBLE_TYPE_GROUP_V1_CODEGEN_HELPER | "__xudt_require_group_amount_conserved" => {
+                    self.emit_runtime_fungible_type_group_conservation_helper(name, detail, enabled)
+                }
                 "__xudt_require_group_amount_minted" => {
                     self.emit_runtime_xudt_require_group_amount_delta_helper(name, true, enabled);
                 }
@@ -17407,10 +17414,18 @@ impl CodeGenerator {
         self.emit("ret");
     }
 
-    fn emit_runtime_xudt_require_group_amount_conserved_helper(&mut self, enabled: bool) {
-        self.emit_global("__xudt_require_group_amount_conserved");
-        self.emit_label("__xudt_require_group_amount_conserved");
-        self.emit("# cellscript abi: scans current xUDT type group and requires sum(inputs.amount) == sum(outputs.amount)");
+    fn emit_runtime_fungible_type_group_conservation_helper(&mut self, symbol: &str, detail: &str, enabled: bool) {
+        self.emit_global(symbol);
+        self.emit_label(symbol);
+        let owner_mode = symbol == FUNGIBLE_TYPE_GROUP_V1_CODEGEN_HELPER;
+        if owner_mode {
+            self.emit(format!(
+                "# cellscript abi: {detail}; owner-authorized issuance or non-empty input/output checked-u128 conservation"
+            ));
+            self.emit("# cellscript abi: owner authorization: current Script args are one 32-byte input lock hash");
+        } else {
+            self.emit(format!("# cellscript abi: {detail}; requires non-empty input/output groups and conserves checked u128 sums"));
+        }
         if !enabled {
             self.emit(format!("li a0, {}", CellScriptRuntimeError::SyscallFailed.code()));
             self.emit("ret");
@@ -17427,7 +17442,27 @@ impl CodeGenerator {
         const SOURCE_OFFSET: usize = 72;
         const SUM_LOW_OFFSET: usize = 80;
         const SUM_HIGH_OFFSET: usize = 88;
+        const CURRENT_SCRIPT_BUFFER_OFFSET: usize = 96;
+        const CURRENT_SCRIPT_SIZE_OFFSET: usize = 240;
+        const OWNER_LOCK_BUFFER_OFFSET: usize = 192;
+        const OWNER_LOCK_SIZE_OFFSET: usize = 224;
+        const OWNER_INPUT_INDEX_OFFSET: usize = 232;
+        const OWNER_AUTHORIZED_OFFSET: usize = 248;
+        const OWNER_SCRIPT_SIZE: u64 = 85;
 
+        let frame_size = if owner_mode { 272usize } else { 112usize };
+        let ra_offset = frame_size - 8;
+
+        let conservation_start = self.fresh_label("fungible_group_conservation_start");
+        let owner_script_loaded = self.fresh_label("fungible_group_owner_script_loaded");
+        let owner_scan_loop = self.fresh_label("fungible_group_owner_scan_loop");
+        let owner_lock_loaded = self.fresh_label("fungible_group_owner_lock_loaded");
+        let owner_not_matched = self.fresh_label("fungible_group_owner_not_matched");
+        let owner_matched = self.fresh_label("fungible_group_owner_matched");
+        let owner_authorized = self.fresh_label("fungible_group_owner_authorized");
+        let owner_script_failed = self.fresh_label("fungible_group_owner_script_failed");
+        let owner_script_malformed = self.fresh_label("fungible_group_owner_script_malformed");
+        let owner_scan_failed = self.fresh_label("fungible_group_owner_scan_failed");
         let scan_source = self.fresh_label("xudt_group_scan_source");
         let scan_loop = self.fresh_label("xudt_group_scan_loop");
         let scan_done = self.fresh_label("xudt_group_scan_done");
@@ -17440,10 +17475,90 @@ impl CodeGenerator {
         let done = self.fresh_label("xudt_group_done");
         let abi = self.runtime_abi();
 
-        self.emit("addi sp, sp, -112");
-        self.emit("sd ra, 104(sp)");
+        self.emit(format!("addi sp, sp, -{}", frame_size));
+        self.emit(format!("sd ra, {}(sp)", ra_offset));
         for offset in [INPUT_LOW_OFFSET, INPUT_HIGH_OFFSET, OUTPUT_LOW_OFFSET, OUTPUT_HIGH_OFFSET] {
             self.emit(format!("sd zero, {}(sp)", offset));
+        }
+
+        if owner_mode {
+            self.emit("# cellscript abi: load and validate current Script with exactly 32 bytes of owner-lock-hash args");
+            self.emit("li t0, 96");
+            self.emit(format!("sd t0, {}(sp)", CURRENT_SCRIPT_SIZE_OFFSET));
+            self.emit(format!("addi a0, sp, {}", CURRENT_SCRIPT_BUFFER_OFFSET));
+            self.emit(format!("addi a1, sp, {}", CURRENT_SCRIPT_SIZE_OFFSET));
+            self.emit("li a2, 0");
+            self.emit(format!("li a7, {}", abi.load_script));
+            self.emit("ecall");
+            self.emit(format!("beqz a0, {}", owner_script_loaded));
+            self.emit(format!("j {}", owner_script_failed));
+
+            self.emit_label(&owner_script_loaded);
+            self.emit(format!("ld t0, {}(sp)", CURRENT_SCRIPT_SIZE_OFFSET));
+            self.emit(format!("li t1, {}", OWNER_SCRIPT_SIZE));
+            self.emit("sub t2, t0, t1");
+            self.emit(format!("bnez t2, {}", owner_script_malformed));
+            for (offset, expected) in [(0usize, OWNER_SCRIPT_SIZE), (4, 16), (8, 48), (12, 49), (49, 32)] {
+                self.emit_stack_u32_le_to("t0", CURRENT_SCRIPT_BUFFER_OFFSET + offset);
+                self.emit(format!("li t1, {}", expected));
+                self.emit("sub t2, t0, t1");
+                self.emit(format!("bnez t2, {}", owner_script_malformed));
+            }
+
+            self.emit("# cellscript abi: owner mode succeeds only when an absolute Input lock hash equals Script args");
+            self.emit(format!("sd zero, {}(sp)", OWNER_INPUT_INDEX_OFFSET));
+            self.emit(format!("sd zero, {}(sp)", OWNER_AUTHORIZED_OFFSET));
+            self.emit_label(&owner_scan_loop);
+            self.emit("li t0, 32");
+            self.emit(format!("sd t0, {}(sp)", OWNER_LOCK_SIZE_OFFSET));
+            self.emit(format!("addi a0, sp, {}", OWNER_LOCK_BUFFER_OFFSET));
+            self.emit(format!("addi a1, sp, {}", OWNER_LOCK_SIZE_OFFSET));
+            self.emit("li a2, 0");
+            self.emit(format!("ld a3, {}(sp)", OWNER_INPUT_INDEX_OFFSET));
+            self.emit(format!("li a4, {}", CKB_SOURCE_INPUT));
+            self.emit(format!("li a5, {}", CKB_CELL_FIELD_LOCK_HASH));
+            self.emit(format!("li a7, {}", abi.load_cell_by_field));
+            self.emit("ecall");
+            self.emit(format!("beqz a0, {}", owner_lock_loaded));
+            self.emit(format!("li t0, {}", CKB_INDEX_OUT_OF_BOUND));
+            self.emit("sub t1, a0, t0");
+            self.emit(format!("beqz t1, {}", conservation_start));
+            self.emit(format!("j {}", owner_scan_failed));
+
+            self.emit_label(&owner_lock_loaded);
+            self.emit(format!("ld t0, {}(sp)", OWNER_LOCK_SIZE_OFFSET));
+            self.emit("li t1, 32");
+            self.emit("sub t2, t0, t1");
+            self.emit(format!("bnez t2, {}", owner_scan_failed));
+            self.emit(format!("addi a0, sp, {}", OWNER_LOCK_BUFFER_OFFSET));
+            self.emit(format!("addi a1, sp, {}", CURRENT_SCRIPT_BUFFER_OFFSET + 53));
+            self.emit("li a2, 32");
+            self.emit("call __cellscript_memcmp_fixed");
+            self.emit(format!("beqz a0, {}", owner_matched));
+            self.emit(format!("j {}", owner_not_matched));
+
+            self.emit_label(&owner_not_matched);
+            self.emit(format!("ld t0, {}(sp)", OWNER_INPUT_INDEX_OFFSET));
+            self.emit("addi t0, t0, 1");
+            self.emit(format!("sd t0, {}(sp)", OWNER_INPUT_INDEX_OFFSET));
+            self.emit(format!("j {}", owner_scan_loop));
+
+            self.emit_label(&owner_matched);
+            self.emit("li t0, 1");
+            self.emit(format!("sd t0, {}(sp)", OWNER_AUTHORIZED_OFFSET));
+            self.emit(format!("j {}", conservation_start));
+
+            self.emit_label(&owner_script_failed);
+            self.emit(format!("li a0, {}", CellScriptRuntimeError::SyscallFailed.code()));
+            self.emit(format!("j {}", done));
+            self.emit_label(&owner_script_malformed);
+            self.emit(format!("li a0, {}", CellScriptRuntimeError::ScriptFieldMalformed.code()));
+            self.emit(format!("j {}", done));
+            self.emit_label(&owner_scan_failed);
+            self.emit(format!("li a0, {}", CellScriptRuntimeError::CkbSourceViewInvalid.code()));
+            self.emit(format!("j {}", done));
+
+            self.emit_label(&conservation_start);
         }
 
         self.emit(format!("li t0, {}", CKB_SOURCE_GROUP_FLAG | CKB_SOURCE_INPUT));
@@ -17506,10 +17621,22 @@ impl CodeGenerator {
         self.emit(format!("j {}", scan_loop));
 
         self.emit_label(&compare);
+        let non_empty = self.fresh_label("fungible_group_non_empty");
+        if owner_mode {
+            self.emit(format!("ld t4, {}(sp)", OWNER_AUTHORIZED_OFFSET));
+            self.emit(format!("bnez t4, {}", non_empty));
+        }
+        self.emit(format!("ld t3, {}(sp)", INDEX_OFFSET));
+        self.emit(format!("beqz t3, {}", mismatch));
+        self.emit_label(&non_empty);
         self.emit(format!("ld t0, {}(sp)", SOURCE_OFFSET));
         self.emit(format!("li t1, {}", CKB_SOURCE_GROUP_FLAG | CKB_SOURCE_INPUT));
         self.emit("sub t2, t0, t1");
         self.emit(format!("beqz t2, {}", output_phase));
+        if owner_mode {
+            self.emit(format!("ld t0, {}(sp)", OWNER_AUTHORIZED_OFFSET));
+            self.emit(format!("bnez t0, {}", owner_authorized));
+        }
         self.emit(format!("ld t0, {}(sp)", INPUT_LOW_OFFSET));
         self.emit(format!("ld t1, {}(sp)", OUTPUT_LOW_OFFSET));
         self.emit("sub t2, t0, t1");
@@ -17520,6 +17647,11 @@ impl CodeGenerator {
         self.emit(format!("bnez t2, {}", mismatch));
         self.emit("li a0, 0");
         self.emit(format!("j {}", done));
+        if owner_mode {
+            self.emit_label(&owner_authorized);
+            self.emit("li a0, 0");
+            self.emit(format!("j {}", done));
+        }
 
         self.emit_label(&scan_failed);
         self.emit(format!("li a0, {}", CellScriptRuntimeError::XudtBindingMismatch.code()));
@@ -17533,8 +17665,8 @@ impl CodeGenerator {
         self.emit_label(&mismatch);
         self.emit(format!("li a0, {}", CellScriptRuntimeError::AggregateAmountMismatch.code()));
         self.emit_label(&done);
-        self.emit("ld ra, 104(sp)");
-        self.emit("addi sp, sp, 112");
+        self.emit(format!("ld ra, {}(sp)", ra_offset));
+        self.emit(format!("addi sp, sp, {}", frame_size));
         self.emit("ret");
     }
 
@@ -19856,6 +19988,7 @@ fn is_void_runtime_requirement_call(func: &str) -> bool {
             | "__xudt_require_owner_mode_input_type"
             | "__xudt_require_owner_mode_type_args"
             | "__xudt_require_owner_mode_type_args_current_script"
+            | "__cellscript_require_fungible_type_group_v1"
             | "__xudt_require_group_amount_conserved"
             | "__xudt_require_group_amount_minted"
             | "__xudt_require_group_amount_burned"

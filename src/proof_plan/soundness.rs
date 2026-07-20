@@ -462,6 +462,7 @@ fn proof_plan_requires_concrete_reads(plan: &ProofPlanMetadata) -> bool {
                     | "GroupInput"
                     | "GroupOutput"
                     | "GroupInput/GroupOutput"
+                    | "CurrentScript/Input/GroupInput/GroupOutput"
                     | "Input/Output"
                     | "Input/HeaderDep"
                     | "SourceView"

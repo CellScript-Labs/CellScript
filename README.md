@@ -58,11 +58,30 @@ It is suitable for:
 - compiling and inspecting the bundled examples;
 - exploring schema-backed CKB Cell effects, metadata, constraints, and CKB target-profile
   checks;
+- statically checking the experimental no-profile Fiber-compatible fungible
+  invariant entry and running its local CKB-VM matrix;
 - trying the local VS Code extension and LSP tooling.
 
 It is not yet recommended for unaudited mainnet deployment without manual
 review. The current focus is developer-readiness, diagnostics, ProofPlan /
 metadata assurance, and CKB target-profile stability.
+
+The Fiber adapter is a bounded workspace integration, not a claim that Fiber
+understands arbitrary CellScript contracts. From a source checkout, run:
+
+```bash
+cargo run --locked -p cellscript-fiber-adapter --bin cellscript-fiber -- check token.cell
+./scripts/cellscript_fiber_acceptance.sh --static
+```
+
+`check` does not modify Fiber or CKB. `enable` can resolve a live deployment and
+asset Cell, while `materialize-config` replaces only `ckb.udt_whitelist` in an
+existing native Fiber YAML file; the operator still controls the required node
+restart. The exact v1 artifact has passed bounded local-devnet runs of Fiber's
+official multi-hop UDT payment and pending-TLC watchtower force-close suites.
+Production and general-support claims still require the clean pinned full
+matrix described in
+`roadmap/CELLSCRIPT_0_22_FIBER_NATIVE_SUPPORT_PLAN.md`.
 
 ## Quick Start
 

@@ -538,13 +538,14 @@ pub struct DeployArtifactSpec {
     pub capacity_input_shannons: u64,
     /// Optional data of the capacity input cell (for change calculation).
     pub capacity_input_data: Bytes,
-    /// Declared hash_type for the code cell type script (typically "type" for TYPE_ID).
-    /// Ignored when `type_script` is explicitly provided.
+    /// Hash type used by Scripts that execute this deployed artifact.
+    /// `Type` requires a code-cell Type Script; data hash types use the artifact data hash.
     pub type_id_hash_type: ScriptHashType,
     /// Optional explicit type script for the code cell.
-    /// When set, overrides the default TYPE_ID construction from `type_id_hash_type`.
-    /// When None, a TYPE_ID type script is auto-constructed from the first input.
-    /// Set to `None` with `type_id_hash_type = ScriptHashType::Data` for a data-only deployment.
+    /// When set, uses this Type Script on the code Cell.
+    /// When `None` and `type_id_hash_type` is `Type`, the canonical CKB TYPE_ID
+    /// Script is constructed from the first input. When `None` and a data hash
+    /// type is selected, the deployment is data-only.
     pub type_script: Option<Script>,
     /// CellDeps required by the deployed artifact.
     pub cell_deps: Vec<CellDep>,
@@ -617,25 +618,25 @@ pub fn build_deploy_transaction(spec: &DeployArtifactSpec) -> Result<(Transactio
         bail!("capacity input must have non-zero capacity");
     }
 
-    // Step 1+2: Construct type script for the code cell.
-    let type_id_args = type_id_args_from_first_input(&spec.capacity_input, 0);
-    let type_script = if let Some(ref ts) = spec.type_script {
-        ts.clone()
+    // Step 1+2: Construct the optional type script for the code cell.
+    let calculated_type_id_args = type_id_args_from_first_input(&spec.capacity_input, 0);
+    let type_script = if let Some(ref script) = spec.type_script {
+        Some(script.clone())
+    } else if spec.type_id_hash_type == ScriptHashType::Type {
+        let mut type_id_code_hash = [0u8; 32];
+        type_id_code_hash[25..].copy_from_slice(b"TYPE_ID");
+        Some(construct_script(&ScriptSpec::new(type_id_code_hash, ScriptHashType::Type, calculated_type_id_args.to_vec())))
     } else {
-        // Auto-construct TYPE_ID type script from first input
-        construct_script(&ScriptSpec::new(
-            [0u8; 32], // code_hash placeholder; will be the data hash after deployment
-            spec.type_id_hash_type,
-            type_id_args.to_vec(),
-        ))
+        None
     };
+    let type_id_args = type_script.as_ref().map(|script| script.args().raw_data().to_vec()).unwrap_or_default();
 
     // Step 3: Build code cell output with TYPE_ID type script.
     let code_data_capacity = Capacity::bytes(spec.artifact_binary.len())?;
     // We need to compute the actual code_hash which is blake2b of the artifact.
     let data_hash = blake2b_256(&spec.artifact_binary);
     // Build the code output with a placeholder capacity (we'll compute exact occupied first).
-    let code_output_builder = CellOutput::new_builder().lock(spec.deployer_lock.clone()).type_(Some(type_script.clone()).pack());
+    let code_output_builder = CellOutput::new_builder().lock(spec.deployer_lock.clone()).type_(type_script.clone().pack());
     // Compute occupied capacity for the code cell.
     let code_occupied = code_output_builder.clone().build().occupied_capacity(code_data_capacity)?;
     let code_capacity_shannons = code_occupied.as_u64();
@@ -695,6 +696,16 @@ pub fn build_deploy_transaction(spec: &DeployArtifactSpec) -> Result<(Transactio
     assert_eq!(tx.outputs().len(), 2, "deploy tx must have 2 outputs");
     assert_eq!(tx.outputs_data().len(), 2, "deploy tx must have 2 outputs_data entries");
 
+    let code_hash = if spec.type_id_hash_type == ScriptHashType::Type {
+        type_script
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("type-hash deployment requires a code-cell Type Script"))?
+            .calc_script_hash()
+            .as_slice()
+            .to_vec()
+    } else {
+        data_hash.to_vec()
+    };
     let evidence = ResolvedDeployEvidence {
         schema: DEPLOY_EVIDENCE_SCHEMA,
         state: "ResolvedDeployTx",
@@ -702,8 +713,8 @@ pub fn build_deploy_transaction(spec: &DeployArtifactSpec) -> Result<(Transactio
         artifact_hash: spec.artifact_hash.clone(),
         code_output_index: 0,
         change_output_index: 1,
-        type_id_args: type_id_args.to_vec(),
-        code_hash: data_hash.to_vec(),
+        type_id_args,
+        code_hash,
         hash_type: format!("{:?}", spec.type_id_hash_type).to_ascii_lowercase(),
         occupied_capacity_shannons: code_capacity_shannons,
         change_capacity_shannons,
@@ -735,7 +746,10 @@ pub fn build_deployment_manifest_from_evidence(
             name: evidence.name.clone(),
             code_hash: format!("0x{}", code_hash_hex),
             hash_type: evidence.hash_type.clone(),
-            args: format!("0x{}", evidence.type_id_args.iter().map(|b| format!("{:02x}", b)).collect::<String>()),
+            // Deployment manifests bind code identity and CellDep location.
+            // Concrete asset Script args are resolved separately from an
+            // ActionPlan or a verified live asset Cell.
+            args: "0x".to_string(),
             dep_type: "code".to_string(),
             out_point,
         }],
@@ -2517,12 +2531,27 @@ mod tests {
     }
 
     #[test]
-    fn deploy_code_hash_is_blake2b_of_artifact() {
+    fn deploy_type_hash_is_live_code_cell_type_script_hash() {
         let spec = sample_deploy_spec();
-        let (_tx, evidence) = build_deploy_transaction(&spec).unwrap();
+        let (tx, evidence) = build_deploy_transaction(&spec).unwrap();
 
-        let expected_hash = blake2b_256(&spec.artifact_binary);
-        assert_eq!(evidence.code_hash, expected_hash.to_vec());
+        let type_script = tx.outputs().get(0).unwrap().type_().to_opt().unwrap();
+        let mut expected_type_id_code_hash = [0u8; 32];
+        expected_type_id_code_hash[25..].copy_from_slice(b"TYPE_ID");
+        assert_eq!(type_script.code_hash().as_slice(), expected_type_id_code_hash);
+        assert_eq!(evidence.code_hash, type_script.calc_script_hash().as_slice());
+    }
+
+    #[test]
+    fn deploy_data_hash_type_uses_artifact_hash_and_no_type_script() {
+        let mut spec = sample_deploy_spec();
+        spec.type_id_hash_type = ScriptHashType::Data2;
+        let (tx, evidence) = build_deploy_transaction(&spec).unwrap();
+
+        assert!(tx.outputs().get(0).unwrap().type_().to_opt().is_none());
+        assert_eq!(evidence.code_hash, blake2b_256(&spec.artifact_binary).to_vec());
+        assert_eq!(evidence.hash_type, "data2");
+        assert!(evidence.type_id_args.is_empty());
     }
 
     #[test]
@@ -2574,7 +2603,7 @@ mod tests {
         assert_eq!(dep.name, "test-token");
         assert!(dep.code_hash.starts_with("0x"));
         assert_eq!(dep.hash_type, "type");
-        assert!(dep.args.starts_with("0x"));
+        assert_eq!(dep.args, "0x");
         assert_eq!(dep.dep_type, "code");
         assert!(dep.out_point.contains(":0"));
 

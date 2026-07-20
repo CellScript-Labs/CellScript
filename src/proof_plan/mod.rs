@@ -3,7 +3,8 @@
 pub mod soundness;
 
 use crate::aggregate_lowering::{
-    aggregate_group_amount_endpoint, xudt_group_amount_conservation_type, XUDT_GROUP_AMOUNT_CONSERVED_METADATA_HELPER,
+    aggregate_group_amount_endpoint, fungible_type_group_v1_conservation_type, xudt_group_amount_conservation_type,
+    FUNGIBLE_TYPE_GROUP_V1_METADATA_HELPER, XUDT_GROUP_AMOUNT_CONSERVED_METADATA_HELPER,
 };
 use crate::ast::{AggregateInvariantKind, AggregateRelation, AggregateTarget, BoundedQuantifierKind, ParamSource, SourceView};
 use crate::ir::{self, IrInstruction};
@@ -589,7 +590,7 @@ fn summary_plan_for_invariant(invariant: &ir::IrInvariant, runtime_accesses: &[C
         let mut assumptions = invariant
             .aggregates
             .iter()
-            .filter_map(|aggregate| aggregate_xudt_group_amount_runtime_helper(invariant, aggregate))
+            .flat_map(|aggregate| aggregate_group_amount_runtime_helpers(invariant, aggregate))
             .map(|helper| format!("declared(runtime-helper-required:{helper})"))
             .collect::<Vec<_>>();
         assumptions.extend(invariant.quantifiers.iter().map(|quantifier| {
@@ -1093,6 +1094,7 @@ fn reads_for_source(source: &str) -> &'static [&'static str] {
         "GroupOutput" => &["group_output"],
         "Input/GroupInput" => &["input", "group_input"],
         "GroupInput/GroupOutput" => &["group_input", "group_output"],
+        "CurrentScript/Input/GroupInput/GroupOutput" => &["current_script", "input", "group_input", "group_output"],
         "Input/Output" => &["input", "output", "source_view"],
         "Input/HeaderDep" => &["input", "header_dep"],
         "CellDep" => &["cell_dep"],
@@ -1581,44 +1583,56 @@ fn aggregate_lowering_evidence(
     aggregate: &ir::IrAggregateInvariant,
     runtime_accesses: &[CkbRuntimeAccessMetadata],
 ) -> AggregateLoweringEvidence {
-    let Some(helper) = aggregate_xudt_group_amount_runtime_helper(invariant, aggregate) else {
+    let helpers = aggregate_group_amount_runtime_helpers(invariant, aggregate);
+    if helpers.is_empty() {
         return AggregateLoweringEvidence::MetadataOnly;
-    };
-    if runtime_helper_access_is_available(runtime_accesses, helper) {
-        AggregateLoweringEvidence::RuntimeHelperChecked(helper)
-    } else {
-        AggregateLoweringEvidence::RuntimeHelperRequired(helper)
     }
+    if let Some(helper) = helpers.iter().copied().find(|helper| runtime_helper_access_is_available(runtime_accesses, helper)) {
+        return AggregateLoweringEvidence::RuntimeHelperChecked(helper);
+    }
+    AggregateLoweringEvidence::RuntimeHelperRequired(helpers[0])
 }
 
 fn runtime_helper_access_is_available(runtime_accesses: &[CkbRuntimeAccessMetadata], helper: &str) -> bool {
-    runtime_accesses.iter().any(|access| access.binding == helper && access.source == "GroupInput/GroupOutput")
+    runtime_accesses.iter().any(|access| {
+        access.binding == helper
+            && (access.source == "GroupInput/GroupOutput"
+                || (helper == FUNGIBLE_TYPE_GROUP_V1_METADATA_HELPER && access.source == "CurrentScript/Input/GroupInput/GroupOutput"))
+    })
 }
 
-fn aggregate_xudt_group_amount_runtime_helper(
-    invariant: &ir::IrInvariant,
-    aggregate: &ir::IrAggregateInvariant,
-) -> Option<&'static str> {
+fn aggregate_group_amount_runtime_helpers(invariant: &ir::IrInvariant, aggregate: &ir::IrAggregateInvariant) -> Vec<&'static str> {
     if invariant.trigger.as_deref() != Some("type_group") || aggregate.scope != "group" {
-        return None;
+        return Vec::new();
     }
     match aggregate.kind {
         AggregateInvariantKind::Sum if aggregate.relation == Some(AggregateRelation::Eq) => {
-            xudt_group_amount_conservation_type(invariant, aggregate).map(|_| XUDT_GROUP_AMOUNT_CONSERVED_METADATA_HELPER)
+            let mut helpers = Vec::new();
+            if xudt_group_amount_conservation_type(invariant, aggregate).is_some() {
+                helpers.push(XUDT_GROUP_AMOUNT_CONSERVED_METADATA_HELPER);
+            }
+            if fungible_type_group_v1_conservation_type(invariant, aggregate).is_some() {
+                helpers.push(FUNGIBLE_TYPE_GROUP_V1_METADATA_HELPER);
+            }
+            helpers
         }
         AggregateInvariantKind::Delta => {
-            let (source, _type_name) = aggregate_group_amount_endpoint(&aggregate.target)?;
-            let argument = aggregate.argument.as_deref()?;
+            let Some((source, _type_name)) = aggregate_group_amount_endpoint(&aggregate.target) else {
+                return Vec::new();
+            };
+            let Some(argument) = aggregate.argument.as_deref() else {
+                return Vec::new();
+            };
             if argument.is_empty() {
-                return None;
+                return Vec::new();
             }
             match source {
-                SourceView::GroupOutput => Some("xudt::require_group_amount_minted"),
-                SourceView::GroupInput => Some("xudt::require_group_amount_burned"),
-                _ => None,
+                SourceView::GroupOutput => vec!["xudt::require_group_amount_minted"],
+                SourceView::GroupInput => vec!["xudt::require_group_amount_burned"],
+                _ => Vec::new(),
             }
         }
-        _ => None,
+        _ => Vec::new(),
     }
 }
 

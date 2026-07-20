@@ -201,7 +201,7 @@ fn strict_capability_name(capability: ast::Capability) -> &'static str {
 const DEFAULT_TARGET: &str = "riscv64-asm";
 const DEFAULT_TARGET_PROFILE: &str = "ckb";
 const ARTIFACT_CACHE_VERSION: &str = "project-source-set-v5";
-pub const METADATA_SCHEMA_VERSION: u32 = 53;
+pub const METADATA_SCHEMA_VERSION: u32 = 54;
 pub const SOURCE_METADATA_SCHEMA_VERSION: u32 = 1;
 pub const ARTIFACT_METADATA_SCHEMA_VERSION: u32 = 1;
 pub const CONSTRAINTS_METADATA_SCHEMA_VERSION: u32 = 1;
@@ -869,6 +869,34 @@ pub struct RuntimeMetadata {
     pub transaction_runtime_input_requirements: Vec<TransactionRuntimeInputRequirementMetadata>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pool_primitives: Vec<PoolPrimitiveMetadata>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fungible_type_group_entry: Option<FungibleTypeGroupEntryMetadata>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FungibleTypeGroupEntryMetadata {
+    pub contract: String,
+    pub entry_action: String,
+    pub invariant: String,
+    pub type_name: String,
+    pub field: String,
+    pub data_length_bytes: usize,
+    pub amount_offset_bytes: usize,
+    pub amount_width_bytes: usize,
+    pub endianness: String,
+    pub arithmetic: String,
+    pub group_scope: String,
+    pub owner_mode: String,
+    pub owner_args_length_bytes: usize,
+    pub owner_authorized_mint: bool,
+    pub owner_authorized_burn: bool,
+    pub non_owner_input_group_non_empty: bool,
+    pub non_owner_output_group_non_empty: bool,
+    pub non_owner_conservation_required: bool,
+    pub payload_required: bool,
+    pub witness_policy: String,
+    pub runtime_helper: String,
+    pub evidence_tier: EvidenceTier,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1113,6 +1141,7 @@ pub fn validate_compile_metadata(metadata: &CompileMetadata, artifact_format: Ar
     validate_ckb_output_data_binding_metadata(metadata)?;
     validate_ckb_type_id_output_metadata(metadata)?;
     validate_ckb_runtime_access_metadata(metadata)?;
+    validate_fungible_type_group_entry_metadata(metadata)?;
     validate_transaction_view_handle_metadata(metadata)?;
     validate_borrow_region_metadata(metadata)?;
     validate_collection_instantiation_metadata(metadata)?;
@@ -3115,6 +3144,106 @@ fn validate_ckb_runtime_access_metadata(metadata: &CompileMetadata) -> Result<()
     Ok(())
 }
 
+fn validate_fungible_type_group_entry_metadata(metadata: &CompileMetadata) -> Result<()> {
+    let declared = metadata.runtime.fungible_type_group_entry.as_ref();
+    let entry = metadata.actions.iter().find(|action| action.name == FUNGIBLE_TYPE_GROUP_V1_ENTRY_ACTION);
+    let Some(contract) = declared else {
+        if entry.is_some() {
+            return Err(CompileError::without_span(
+                "metadata contains the reserved fungible type-group entry action without its structured runtime contract",
+            ));
+        }
+        return Ok(());
+    };
+    let Some(entry) = entry else {
+        return Err(CompileError::without_span(
+            "metadata declares a fungible type-group runtime contract without its reserved entry action",
+        ));
+    };
+    if metadata.actions.len() != 1 {
+        return Err(CompileError::without_span(
+            "fungible-type-group-v1 artifact metadata must contain only its dedicated verifier action",
+        ));
+    }
+    if contract.contract != FUNGIBLE_TYPE_GROUP_V1_CONTRACT
+        || contract.entry_action != FUNGIBLE_TYPE_GROUP_V1_ENTRY_ACTION
+        || contract.data_length_bytes != 16
+        || contract.amount_offset_bytes != 0
+        || contract.amount_width_bytes != 16
+        || contract.endianness != "little"
+        || contract.arithmetic != "checked-u128-sum-equality"
+        || contract.group_scope != "complete-ckb-type-script-group"
+        || contract.owner_mode != "script-args-32-byte-owner-lock-hash"
+        || contract.owner_args_length_bytes != 32
+        || !contract.owner_authorized_mint
+        || !contract.owner_authorized_burn
+        || !contract.non_owner_input_group_non_empty
+        || !contract.non_owner_output_group_non_empty
+        || !contract.non_owner_conservation_required
+        || contract.payload_required
+        || contract.witness_policy != "ignored; no empty-witness requirement"
+        || contract.runtime_helper != aggregate_lowering::FUNGIBLE_TYPE_GROUP_V1_METADATA_HELPER
+        || contract.evidence_tier != EvidenceTier::CheckedRuntime
+    {
+        return Err(CompileError::without_span(
+            "metadata fungible_type_group_entry does not match the closed fungible-type-group-v1 contract",
+        ));
+    }
+    if !entry.params.is_empty()
+        || !entry.consume_set.is_empty()
+        || !entry.read_refs.is_empty()
+        || !entry.create_set.is_empty()
+        || !entry.mutate_set.is_empty()
+        || entry.block_count != 1
+    {
+        return Err(CompileError::without_span(
+            "fungible-type-group-v1 entry must be payload-free and must not carry ordinary action lifecycle sets",
+        ));
+    }
+    if entry.ckb_runtime_accesses.len() != 1
+        || !entry.ckb_runtime_accesses.iter().any(|access| {
+            access.operation == "fungible-type-group-owner-or-conservation"
+                && access.syscall == "LOAD_SCRIPT+LOAD_CELL_BY_FIELD+LOAD_CELL_DATA"
+                && access.source == "CurrentScript/Input/GroupInput/GroupOutput"
+                && access.binding == aggregate_lowering::FUNGIBLE_TYPE_GROUP_V1_METADATA_HELPER
+        })
+    {
+        return Err(CompileError::without_span(
+            "fungible-type-group-v1 entry must have exactly one complete-group checked conservation runtime access",
+        ));
+    }
+    let Some(type_metadata) = metadata.types.iter().find(|type_metadata| type_metadata.name == contract.type_name) else {
+        return Err(CompileError::without_span(format!(
+            "fungible-type-group-v1 selected type '{}' is missing from metadata",
+            contract.type_name
+        )));
+    };
+    let [field] = type_metadata.fields.as_slice() else {
+        return Err(CompileError::without_span("fungible-type-group-v1 selected type must encode exactly one field"));
+    };
+    if type_metadata.encoded_size != Some(16)
+        || field.name != contract.field
+        || field.ty != "u128"
+        || field.offset != 0
+        || field.encoded_size != Some(16)
+        || !field.fixed_width
+    {
+        return Err(CompileError::without_span(
+            "fungible-type-group-v1 selected type metadata must encode one little-endian u128 in exactly 16 bytes at offset zero",
+        ));
+    }
+    let proof_origin = format!("invariant:{}", contract.invariant);
+    if !metadata.runtime.proof_plan.iter().any(|plan| {
+        plan.origin == proof_origin
+            && plan.status == "checked-runtime"
+            && plan.on_chain_checked
+            && plan.codegen_coverage_status == "covered"
+    }) {
+        return Err(CompileError::without_span("fungible-type-group-v1 invariant is missing checked-runtime ProofPlan coverage"));
+    }
+    Ok(())
+}
+
 type CkbRuntimeAccessFingerprint = (String, String, String, usize, String);
 
 fn ckb_runtime_access_fingerprints<'a>(
@@ -3198,6 +3327,7 @@ fn is_known_ckb_runtime_source(source: &str) -> bool {
             | "CurrentScript"
             | "CurrentScript/Output"
             | "CurrentScript/SourceView"
+            | "CurrentScript/Input/GroupInput/GroupOutput"
             | "Process"
             | "Profile"
     )
@@ -3219,6 +3349,7 @@ fn is_known_ckb_runtime_syscall(syscall: &str) -> bool {
             | "LOAD_CELL_BY_FIELD+LOAD_CELL_DATA"
             | "LOAD_INPUT_BY_FIELD/SOURCE_VIEW"
             | "LOAD_SCRIPT+LOAD_CELL_BY_FIELD"
+            | "LOAD_SCRIPT+LOAD_CELL_BY_FIELD+LOAD_CELL_DATA"
             | "LOAD_SCRIPT_HASH+LOAD_CELL_BY_FIELD"
             | "LOAD_SCRIPT_HASH+LOAD_CELL_BY_FIELD+LOAD_INPUT_BY_FIELD/SOURCE_VIEW"
             | "LOAD_SCRIPT_HASH+LOAD_CELL_BY_FIELD+LOAD_CELL_DATA+LOAD_INPUT_BY_FIELD"
@@ -3260,6 +3391,7 @@ fn ckb_runtime_syscall_allows_source(syscall: &str, source: &str) -> bool {
         "LOAD_CELL_BY_FIELD+LOAD_CELL_DATA" => source == "SourceView",
         "LOAD_INPUT_BY_FIELD/SOURCE_VIEW" => source == "Input/Output",
         "LOAD_SCRIPT+LOAD_CELL_BY_FIELD" => source == "CurrentScript/Output",
+        "LOAD_SCRIPT+LOAD_CELL_BY_FIELD+LOAD_CELL_DATA" => source == "CurrentScript/Input/GroupInput/GroupOutput",
         "LOAD_SCRIPT_HASH+LOAD_CELL_BY_FIELD" => source == "CurrentScript/SourceView",
         "LOAD_SCRIPT_HASH+LOAD_CELL_BY_FIELD+LOAD_INPUT_BY_FIELD/SOURCE_VIEW"
         | "LOAD_SCRIPT_HASH+LOAD_CELL_BY_FIELD+LOAD_CELL_DATA+LOAD_INPUT_BY_FIELD/SOURCE_VIEW"
@@ -5203,6 +5335,17 @@ pub fn compile(source: &str, options: CompileOptions) -> Result<CompileResult> {
     Ok(result)
 }
 
+/// Compile the unique structurally eligible fungible Type Script invariant
+/// from in-memory source as the payload-free `fungible-type-group-v1` entry.
+pub fn compile_fungible_type_group_entry(source: &str, options: CompileOptions) -> Result<CompileResult> {
+    let tokens = lexer::lex(source)?;
+    let ast = parser::parse(&tokens)?;
+    let mut result = compile_ast_with_build(&ast, &options, None, None, Some(&CompileEntryScope::FungibleTypeGroupV1))?;
+    bind_source_metadata(&mut result.metadata, vec![source_unit_from_bytes("<memory>", "memory", source.as_bytes())]);
+    result.validate()?;
+    Ok(result)
+}
+
 /// Only generate compile metadata, without asm/elf artifact.
 pub fn compile_metadata(source: &str, target: Option<String>) -> Result<CompileMetadata> {
     let tokens = lexer::lex(source)?;
@@ -5642,6 +5785,7 @@ fn compile_ast(ast: &ast::Module, options: &CompileOptions, resolver: Option<(&M
 pub enum CompileEntryScope {
     Action(String),
     Lock(String),
+    FungibleTypeGroupV1,
 }
 
 fn compile_ast_with_build(
@@ -5784,6 +5928,12 @@ pub fn compile_file_with_entry_lock<P: AsRef<Utf8Path>>(
     compile_file_with_entry_scope(path, options, Some(CompileEntryScope::Lock(lock.into())))
 }
 
+/// Compile the unique structurally eligible fungible Type Script invariant as
+/// the payload-free `fungible-type-group-v1` verifier entry.
+pub fn compile_file_with_fungible_type_group_entry<P: AsRef<Utf8Path>>(path: P, options: CompileOptions) -> Result<CompileResult> {
+    compile_file_with_entry_scope(path, options, Some(CompileEntryScope::FungibleTypeGroupV1))
+}
+
 pub fn compile_path_with_entry_action<P: AsRef<Utf8Path>>(
     path: P,
     options: CompileOptions,
@@ -5800,6 +5950,13 @@ pub fn compile_path_with_entry_lock<P: AsRef<Utf8Path>>(
 ) -> Result<CompileResult> {
     let resolved = resolve_input_path(path)?;
     compile_file_with_entry_lock(&resolved, options, lock)
+}
+
+/// Resolve a file or package and compile its unique structurally eligible
+/// fungible Type Script invariant as a payload-free verifier entry.
+pub fn compile_path_with_fungible_type_group_entry<P: AsRef<Utf8Path>>(path: P, options: CompileOptions) -> Result<CompileResult> {
+    let resolved = resolve_input_path(path)?;
+    compile_file_with_fungible_type_group_entry(&resolved, options)
 }
 
 fn compile_file_with_entry_scope<P: AsRef<Utf8Path>>(
@@ -6364,6 +6521,7 @@ fn compile_metadata_from_ir(ir: &ir::IrModule, artifact_format: ArtifactFormat, 
             collection_instantiations,
             transaction_runtime_input_requirements,
             pool_primitives,
+            fungible_type_group_entry: fungible_type_group_entry_metadata(ir),
         },
         constraints: ConstraintsMetadata::default(),
         molecule_schema_manifest,
@@ -6669,19 +6827,232 @@ fn compile_metadata_from_ir(ir: &ir::IrModule, artifact_format: ArtifactFormat, 
     metadata
 }
 
+const FUNGIBLE_TYPE_GROUP_V1_CONTRACT: &str = "fungible-type-group-v1";
+const FUNGIBLE_TYPE_GROUP_V1_ENTRY_ACTION: &str = "__cellscript_fungible_type_group_v1";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FungibleTypeGroupV1Candidate {
+    invariant: String,
+    type_name: String,
+    field: String,
+}
+
+fn invariant_mentions_type(invariant: &ir::IrInvariant, type_name: &str) -> bool {
+    let target_mentions_type = |target: &ast::AggregateTarget| target.type_name.as_deref() == Some(type_name);
+    invariant.reads.iter().any(target_mentions_type)
+        || invariant
+            .aggregates
+            .iter()
+            .any(|aggregate| target_mentions_type(&aggregate.target) || aggregate.rhs.as_ref().is_some_and(target_mentions_type))
+        || invariant.quantifiers.iter().any(|quantifier| target_mentions_type(&quantifier.range))
+}
+
+fn fungible_type_group_v1_candidates(ir: &ir::IrModule) -> Vec<FungibleTypeGroupV1Candidate> {
+    let type_defs = ir
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            ir::IrItem::TypeDef(type_def) => Some((type_def.name.as_str(), type_def)),
+            _ => None,
+        })
+        .chain(ir.external_type_defs.iter().map(|type_def| (type_def.name.as_str(), type_def)))
+        .collect::<HashMap<_, _>>();
+
+    ir.items
+        .iter()
+        .filter_map(|item| match item {
+            ir::IrItem::Invariant(invariant) => Some(invariant),
+            _ => None,
+        })
+        .filter_map(|invariant| {
+            let [aggregate] = invariant.aggregates.as_slice() else {
+                return None;
+            };
+            if !invariant.quantifiers.is_empty() || invariant.assert_count != 0 {
+                return None;
+            }
+            let (type_name, selected_field) = aggregate_lowering::fungible_type_group_v1_conservation_type(invariant, aggregate)?;
+            let rhs = aggregate.rhs.as_ref()?;
+            let (_, _, left_field) = aggregate_lowering::aggregate_group_field_endpoint(&aggregate.target)?;
+            let (_, _, right_field) = aggregate_lowering::aggregate_group_field_endpoint(rhs)?;
+            if left_field != right_field || left_field != selected_field {
+                return None;
+            }
+            if invariant.scope.as_deref() != Some("group")
+                || invariant.reads.len() != 2
+                || !invariant.reads.contains(&aggregate.target)
+                || !invariant.reads.contains(rhs)
+            {
+                return None;
+            }
+            let type_def = type_defs.get(type_name)?;
+            let [field] = type_def.fields.as_slice() else {
+                return None;
+            };
+            if field.name != left_field
+                || !matches!(&field.ty, ir::IrType::U128)
+                || field.offset != 0
+                || type_def.kind == ir::IrTypeKind::Struct
+                || !type_def.validity_predicates.is_empty()
+                || type_def.type_id.is_some()
+                || type_def.capacity_floor_shannons.is_some()
+                || type_def.claim_output.is_some()
+                || type_def.flow_states.as_ref().is_some_and(|states| !states.is_empty())
+                || type_def.flow_state_field.is_some()
+                || !type_def.flow_rules.is_empty()
+                || type_def.flow_initial_state.is_some()
+                || !type_def.flow_terminal_states.is_empty()
+                || type_def.flow_terminal_discharge.is_some()
+                || type_def.flow_state_model.is_some()
+                || type_def.identity != ir::IrIdentityPolicy::None
+            {
+                return None;
+            }
+            Some(FungibleTypeGroupV1Candidate {
+                invariant: invariant.name.clone(),
+                type_name: type_name.to_string(),
+                field: left_field.to_string(),
+            })
+        })
+        .filter(|candidate| {
+            ir.items
+                .iter()
+                .filter_map(|item| match item {
+                    ir::IrItem::Invariant(invariant) => Some(invariant),
+                    _ => None,
+                })
+                .all(|invariant| invariant.name == candidate.invariant || !invariant_mentions_type(invariant, &candidate.type_name))
+        })
+        .collect()
+}
+
+fn fungible_type_group_entry_metadata(ir: &ir::IrModule) -> Option<FungibleTypeGroupEntryMetadata> {
+    let has_entry = ir.items.iter().any(
+        |item| matches!(item, ir::IrItem::Action(action) if action.name == FUNGIBLE_TYPE_GROUP_V1_ENTRY_ACTION && action.params.is_empty()),
+    );
+    let candidates = fungible_type_group_v1_candidates(ir);
+    let [candidate] = candidates.as_slice() else {
+        return None;
+    };
+    has_entry.then(|| FungibleTypeGroupEntryMetadata {
+        contract: FUNGIBLE_TYPE_GROUP_V1_CONTRACT.to_string(),
+        entry_action: FUNGIBLE_TYPE_GROUP_V1_ENTRY_ACTION.to_string(),
+        invariant: candidate.invariant.clone(),
+        type_name: candidate.type_name.clone(),
+        field: candidate.field.clone(),
+        data_length_bytes: 16,
+        amount_offset_bytes: 0,
+        amount_width_bytes: 16,
+        endianness: "little".to_string(),
+        arithmetic: "checked-u128-sum-equality".to_string(),
+        group_scope: "complete-ckb-type-script-group".to_string(),
+        owner_mode: "script-args-32-byte-owner-lock-hash".to_string(),
+        owner_args_length_bytes: 32,
+        owner_authorized_mint: true,
+        owner_authorized_burn: true,
+        non_owner_input_group_non_empty: true,
+        non_owner_output_group_non_empty: true,
+        non_owner_conservation_required: true,
+        payload_required: false,
+        witness_policy: "ignored; no empty-witness requirement".to_string(),
+        runtime_helper: aggregate_lowering::FUNGIBLE_TYPE_GROUP_V1_METADATA_HELPER.to_string(),
+        evidence_tier: EvidenceTier::CheckedRuntime,
+    })
+}
+
+fn scope_ir_to_fungible_type_group_v1(ir: &ir::IrModule) -> Result<ir::IrModule> {
+    let candidates = fungible_type_group_v1_candidates(ir);
+    let [candidate] = candidates.as_slice() else {
+        let detail = if candidates.is_empty() {
+            "no eligible invariant was found; expected one persistent type encoded as exactly one u128 field and one type_group/group equality between complete group input and output sums, with no additional type or invariant rules"
+                .to_string()
+        } else {
+            format!(
+                "{} eligible invariants were found ({}); the entry must resolve to exactly one structural candidate",
+                candidates.len(),
+                candidates.iter().map(|candidate| candidate.invariant.as_str()).collect::<Vec<_>>().join(", ")
+            )
+        };
+        return Err(CompileError::without_span(format!("cannot compile {} entry: {}", FUNGIBLE_TYPE_GROUP_V1_CONTRACT, detail)));
+    };
+
+    let selected_type = ir.items.iter().find_map(|item| match item {
+        ir::IrItem::TypeDef(type_def) if type_def.name == candidate.type_name => Some(item.clone()),
+        _ => None,
+    });
+    let selected_invariant = ir
+        .items
+        .iter()
+        .find_map(|item| match item {
+            ir::IrItem::Invariant(invariant) if invariant.name == candidate.invariant => Some(item.clone()),
+            _ => None,
+        })
+        .ok_or_else(|| CompileError::without_span("selected fungible invariant disappeared during entry scoping"))?;
+    let entry = ir::IrItem::Action(ir::IrAction {
+        name: FUNGIBLE_TYPE_GROUP_V1_ENTRY_ACTION.to_string(),
+        params: Vec::new(),
+        return_type: None,
+        state_transition_edges: Vec::new(),
+        protocol_role_candidates: Vec::new(),
+        body: ir::IrBody {
+            consume_set: Vec::new(),
+            read_refs: Vec::new(),
+            create_set: Vec::new(),
+            mutate_set: Vec::new(),
+            write_intents: Vec::new(),
+            bounded_collection_ops: Vec::new(),
+            borrow_regions: Vec::new(),
+            blocks: vec![ir::IrBlock {
+                id: ir::BlockId(0),
+                instructions: vec![ir::IrInstruction::Call {
+                    dest: None,
+                    func: aggregate_lowering::FUNGIBLE_TYPE_GROUP_V1_CODEGEN_HELPER.to_string(),
+                    args: Vec::new(),
+                }],
+                terminator: ir::IrTerminator::Return(None),
+            }],
+        },
+        effect_class: ir::EffectClass::ReadOnly,
+        scheduler_hints: ir::SchedulerHints { parallelizable: false, touches_shared: Vec::new(), estimated_cycles: 0 },
+    });
+
+    let mut items = Vec::new();
+    if let Some(type_def) = selected_type {
+        items.push(type_def);
+    }
+    items.push(selected_invariant);
+    items.push(entry);
+
+    Ok(ir::IrModule {
+        name: ir.name.clone(),
+        items,
+        external_type_defs: ir.external_type_defs.iter().filter(|type_def| type_def.name == candidate.type_name).cloned().collect(),
+        external_callable_abis: Vec::new(),
+        enum_fixed_sizes: HashMap::new(),
+        enum_layouts: HashMap::new(),
+    })
+}
+
 fn scope_ir_to_entry(ir: &ir::IrModule, scope: &CompileEntryScope) -> Result<ir::IrModule> {
+    if *scope == CompileEntryScope::FungibleTypeGroupV1 {
+        return scope_ir_to_fungible_type_group_v1(ir);
+    }
     let selected_item = ir
         .items
         .iter()
         .find(|item| match (scope, item) {
             (CompileEntryScope::Action(name), ir::IrItem::Action(action)) => action.name == *name,
             (CompileEntryScope::Lock(name), ir::IrItem::Lock(lock)) => lock.name == *name,
+            (CompileEntryScope::FungibleTypeGroupV1, _) => false,
             _ => false,
         })
         .cloned()
         .ok_or_else(|| match scope {
             CompileEntryScope::Action(name) => CompileError::without_span(format!("entry action '{}' was not found", name)),
             CompileEntryScope::Lock(name) => CompileError::without_span(format!("entry lock '{}' was not found", name)),
+            CompileEntryScope::FungibleTypeGroupV1 => {
+                CompileError::without_span("fungible type-group entry selection unexpectedly reached ordinary entry lookup")
+            }
         })?;
 
     let action_by_name = ir
@@ -14771,6 +15142,11 @@ fn body_ckb_runtime_features(
                     features.insert("ckb-xudt-layout-binding".to_string());
                     features.insert("ckb-xudt-group-amount-conservation".to_string());
                 }
+                ir::IrInstruction::Call { func, .. } if func == aggregate_lowering::FUNGIBLE_TYPE_GROUP_V1_CODEGEN_HELPER => {
+                    features.insert("ckb-fungible-type-group-v1".to_string());
+                    features.insert("ckb-u128-group-amount-conservation".to_string());
+                    features.insert("ckb-owner-lock-authorized-issuance".to_string());
+                }
                 ir::IrInstruction::Call { func, .. }
                     if matches!(func.as_str(), "__xudt_require_group_amount_minted" | "__xudt_require_group_amount_burned") =>
                 {
@@ -15398,6 +15774,12 @@ fn ckb_v014_runtime_access(func: &str) -> Option<(&'static str, &'static str, &'
             "LOAD_CELL_DATA",
             "GroupInput/GroupOutput",
             "xudt::require_group_amount_conserved",
+        )),
+        aggregate_lowering::FUNGIBLE_TYPE_GROUP_V1_CODEGEN_HELPER => Some((
+            "fungible-type-group-owner-or-conservation",
+            "LOAD_SCRIPT+LOAD_CELL_BY_FIELD+LOAD_CELL_DATA",
+            "CurrentScript/Input/GroupInput/GroupOutput",
+            aggregate_lowering::FUNGIBLE_TYPE_GROUP_V1_METADATA_HELPER,
         )),
         "__xudt_require_group_amount_minted" => {
             Some(("xudt-group-amount-minted-delta", "LOAD_CELL_DATA", "GroupInput/GroupOutput", "xudt::require_group_amount_minted"))
@@ -17396,11 +17778,11 @@ pub const NAME: &str = "cellc";
 #[cfg(test)]
 mod tests {
     use super::{
-        compile, compile_file, compile_file_with_entry_action, compile_file_with_entry_lock, compile_path,
-        decode_scheduler_witness_hex, default_output_path_for_input, encode_entry_witness_args_for_params, incremental_cache_key,
-        load_modules_for_input, resolve_input_path, source_unit_from_bytes, validate_primitive_strict_017_metadata, ActionMetadata,
-        ArtifactFormat, CkbRuntimeAccessMetadata, CompileOptions, EntryWitnessArg, ENTRY_WITNESS_ABI_MAGIC,
-        SCHEDULER_WITNESS_ABI_MOLECULE,
+        compile, compile_file, compile_file_with_entry_action, compile_file_with_entry_lock, compile_fungible_type_group_entry,
+        compile_path, decode_scheduler_witness_hex, default_output_path_for_input, encode_entry_witness_args_for_params,
+        incremental_cache_key, load_modules_for_input, resolve_input_path, source_unit_from_bytes,
+        validate_primitive_strict_017_metadata, ActionMetadata, ArtifactFormat, CkbRuntimeAccessMetadata, CompileOptions,
+        EntryWitnessArg, ENTRY_WITNESS_ABI_MAGIC, SCHEDULER_WITNESS_ABI_MOLECULE,
     };
     use crate::{ir, lexer, parser};
     use camino::{Utf8Path, Utf8PathBuf};
@@ -28110,6 +28492,114 @@ action mint(minted: u128, to: Address) -> token: Token {
             .expect("xUDT conservation aggregate ProofPlan record");
         assert_eq!(aggregate.status, "checked-runtime");
         assert_eq!(aggregate.codegen_coverage_status, "covered");
+    }
+
+    #[test]
+    fn compile_fungible_type_group_entry_is_structural_payload_free_and_checked() {
+        let source = r#"
+module test
+
+invariant conserved_units {
+    trigger: type_group
+    scope: group
+    reads: group_inputs<Coin>.units, group_outputs<Coin>.units
+    assert_sum(group_outputs<Coin>.units) == assert_sum(group_inputs<Coin>.units)
+}
+
+resource Coin {
+    units: u128,
+}
+
+action business_transfer(coin: Coin, to: Address) -> next: Coin {
+    verification
+    consume coin
+    create next = Coin { units: coin.units } with_lock(to)
+}
+"#;
+
+        let result = compile_fungible_type_group_entry(
+            source,
+            CompileOptions {
+                target_profile: Some("ckb".to_string()),
+                primitive_compat: Some("0.17".to_string()),
+                target: Some("riscv64-asm".to_string()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+        let contract = result.metadata.runtime.fungible_type_group_entry.as_ref().expect("structured fungible entry contract");
+
+        assert_eq!(contract.contract, "fungible-type-group-v1");
+        assert_eq!(contract.invariant, "conserved_units");
+        assert_eq!(contract.type_name, "Coin");
+        assert_eq!(contract.field, "units");
+        assert_eq!(contract.data_length_bytes, 16);
+        assert!(!contract.payload_required);
+        assert_eq!(contract.owner_mode, "script-args-32-byte-owner-lock-hash");
+        assert_eq!(contract.owner_args_length_bytes, 32);
+        assert!(contract.owner_authorized_mint);
+        assert!(contract.owner_authorized_burn);
+        assert!(contract.non_owner_input_group_non_empty);
+        assert!(contract.non_owner_output_group_non_empty);
+        assert!(contract.non_owner_conservation_required);
+        assert_eq!(result.metadata.actions.len(), 1);
+        assert_eq!(result.metadata.actions[0].name, "__cellscript_fungible_type_group_v1");
+        assert!(result.metadata.actions[0].params.is_empty());
+        assert!(result.metadata.actions[0].consume_set.is_empty());
+        assert!(result.metadata.actions[0].create_set.is_empty());
+        assert!(asm.contains("__cellscript_fungible_type_group_v1:"), "{asm}");
+        assert!(asm.contains("call __cellscript_require_fungible_type_group_v1"), "{asm}");
+        assert!(asm.contains("owner authorization: current Script args are one 32-byte input lock hash"), "{asm}");
+        assert!(asm.contains("beqz t3, .Lxudt_group_mismatch"), "non-empty group check missing:\n{asm}");
+        assert!(!asm.contains("business_transfer:"), "ordinary business action leaked into invariant artifact:\n{asm}");
+        assert!(result.metadata.runtime.proof_plan.iter().any(|plan| {
+            plan.origin == "invariant:conserved_units" && plan.status == "checked-runtime" && plan.codegen_coverage_status == "covered"
+        }));
+    }
+
+    #[test]
+    fn compile_fungible_type_group_entry_rejects_ambiguous_or_wide_assets() {
+        let ambiguous = r#"
+module test
+
+invariant first_conservation {
+    trigger: type_group
+    scope: group
+    reads: group_inputs<First>.value, group_outputs<First>.value
+    assert_sum(group_outputs<First>.value) == assert_sum(group_inputs<First>.value)
+}
+
+invariant second_conservation {
+    trigger: type_group
+    scope: group
+    reads: group_inputs<Second>.quantity, group_outputs<Second>.quantity
+    assert_sum(group_outputs<Second>.quantity) == assert_sum(group_inputs<Second>.quantity)
+}
+
+resource First { value: u128 }
+resource Second { quantity: u128 }
+"#;
+        let err = compile_fungible_type_group_entry(ambiguous, CompileOptions::default()).unwrap_err();
+        assert!(err.message.contains("2 eligible invariants"), "{}", err.message);
+
+        let wide = r#"
+module test
+
+invariant wide_conservation {
+    trigger: type_group
+    scope: group
+    reads: group_inputs<Wide>.value, group_outputs<Wide>.value
+    assert_sum(group_outputs<Wide>.value) == assert_sum(group_inputs<Wide>.value)
+}
+
+resource Wide {
+    value: u128,
+    tag: u64,
+}
+"#;
+        let err = compile_fungible_type_group_entry(wide, CompileOptions::default()).unwrap_err();
+        assert!(err.message.contains("no eligible invariant"), "{}", err.message);
     }
 
     #[test]

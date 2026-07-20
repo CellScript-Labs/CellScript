@@ -1,0 +1,12 @@
+module fiber_devnet_asset
+
+invariant conserved_quantity {
+    trigger: type_group
+    scope: group
+    reads: group_inputs<FiberDevnetAsset>.quantity, group_outputs<FiberDevnetAsset>.quantity
+    assert_sum(group_outputs<FiberDevnetAsset>.quantity) == assert_sum(group_inputs<FiberDevnetAsset>.quantity)
+}
+
+resource FiberDevnetAsset {
+    quantity: u128,
+}

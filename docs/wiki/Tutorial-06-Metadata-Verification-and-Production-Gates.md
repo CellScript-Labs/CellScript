@@ -446,6 +446,31 @@ IR/codegen/RISC-V changes. `release` is the production CKB evidence gate.
 `release-quick` is a compile-only release preflight, not external live/devnet
 evidence. See `docs/CELLSCRIPT_GATE_POLICY.md` for the exact command contract.
 
+Fiber's no-profile compatibility harness is deliberately separate from these
+unified gates:
+
+```bash
+./scripts/cellscript_fiber_acceptance.sh --static
+```
+
+This runs the dedicated invariant-entry CKB-VM matrix plus adapter tests. A
+passing result means the exact compiled entry accepts and rejects the covered
+CKB transaction shapes; it does not mean a Fiber node has loaded or announced
+the generated UDT configuration. Full mode validates a complete externally
+produced lifecycle report against an exact Fiber revision, but never manages
+node processes or signing keys. Treat `StaticallyCompatible`,
+`LocalNodeConfiguredRestartRequired`, `LocalNodeAdvertised`, `ChannelReady`,
+and `TopologyCertified` as distinct monotonic evidence states.
+
+The entry uses the 32-byte Type Script args as an owner Lock Script hash.
+Issuance or destruction is accepted only when an absolute input has that Lock
+Script hash; every ordinary Fiber channel transaction instead takes the
+non-owner path and must have non-empty, checked-`u128`, conserved Type Script
+groups. A 2026-07-20 bounded devnet run reached `LocalNodeAdvertised` and passed
+Fiber's official routed-payment and pending-TLC watchtower suites, but it is not
+full or release evidence because it did not produce the complete clean pinned
+matrix.
+
 ## CKB Release Evidence Gate
 
 When you are ready to make a CKB production claim, move from compiler evidence
