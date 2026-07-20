@@ -20,11 +20,11 @@ builder-backed CKB evidence
 
 | Work package | Status on 2026-07-20 | Evidence boundary |
 | --- | --- | --- |
-| Phase 0: contract and evidence model | Implemented | Metadata schema 54, the closed `fungible-type-group-v1` contract, diagnostics, and monotonic operational states are encoded in Rust types and tests. |
+| Phase 0: contract and evidence model | Implemented | Metadata schema 55, the closed `fungible-type-group-v1` contract, diagnostics, and monotonic operational states are encoded in Rust types and tests. |
 | Phase 1: static compatibility | Implemented | Structural selection, dedicated-entry compilation, metadata/artifact validation, and fail-closed diagnostics are covered by compiler and adapter tests. |
-| Phase 2: conservation closure | Implemented | The generated ELF scans the complete Type Script group, checks exact 16-byte little-endian `u128` data and checked sums, permits issuance/destruction only when an input Lock Script hash matches the 32-byte owner hash in the Type Script args, and otherwise requires non-empty conserved groups. CKB-VM tests cover owner issuance/destruction, split, merge, `2 -> 3`, malformed data, overflow, unauthorised mint/burn, and Fiber's xUDT-compatible witness bytes. |
+| Phase 2: conservation closure | Implemented | The generated ELF scans the complete Type Script group, checks exact 16-byte little-endian `u128` data and checked sums, permits issuance/destruction only when an absolute input matches either the legacy 32-byte Lock authority or the tagged 33-byte Type Script authority, and otherwise requires non-empty conserved groups. CKB-VM tests cover both authority modes, split, merge, `2 -> 3`, malformed data, overflow, unauthorised mint/burn, and Fiber's xUDT-compatible witness bytes. |
 | Phase 3: adapter and CLI | Implemented for bounded static and live-identity checks | `check`, `enable`, `configure`, `doctor`, deterministic config generation, direct/TYPE_ID CellDep resolution, local RPC inspection, and separate code/asset identities exist. The current Fiber baseline still requires a node restart to load generated UDT configuration. |
-| Phase 4: full Fiber acceptance | Bounded live slices passed; complete matrix pending | Two isolated, freshly initialised CKB dev chains ran Fiber `e00d0e3c...`: the official `udt-router-pay` collection passed 16/16 requests and 24/24 assertions, and `force-close-with-pending-tlcs-and-udt` passed 28/28 requests and 32/32 assertions. Both used the same CellScript ELF and exact generated UDT configuration; `doctor` observed the local signed announcement. These runs do not fill or certify every row in the declared full matrix. |
+| Phase 4: full Fiber acceptance | Bounded live slices passed; complete matrix pending | One isolated CKB dev chain and fresh Fiber stores ran the officially reachable Fiber `04e091b...`: `udt-router-pay` passed 16/16 requests and 24/24 assertions; the pinned Bruno 1.20.0 watchtower collection passed 28/28 requests and 32/32 assertions. A third UDT lifecycle run passed 14/15 raw requests and 25/25 assertions; its sole raw failure was the expected exact-args rejection of the collection's intentionally different asset. These runs do not fill or certify every row in the declared full matrix. |
 | Phase 5: gate promotion and hot loading | Not implemented | The Fiber harness remains standalone and non-gating. No unsupported hot-load RPC is assumed. |
 
 Implemented surfaces are `src/lib.rs`, `src/aggregate_lowering.rs`,
@@ -35,9 +35,17 @@ Implemented surfaces are `src/lib.rs`, `src/aggregate_lowering.rs`,
 The strongest purely static result remains `StaticallyCompatible`, followed by
 verified deployment/asset identities and
 `LocalNodeConfiguredRestartRequired`. The bounded devnet runs additionally
-reached `LocalNodeAdvertised` and exercised exact-asset channels, routing, and
-watchtower settlement. They are dated integration observations, not a
+observed the exact entry through `node_info` and exercised exact-asset channels,
+routing, cooperative-shutdown initiation, and watchtower settlement. They are
+dated integration observations, not a `LocalNodeAdvertised` or
 `TopologyCertified` report and not a substitute for the complete matrix.
+
+Full-matrix reports use content-addressed external evidence. Each completed
+row and certified topology report must reference a non-empty regular file under
+an explicit evidence root and record its CKB Blake2b-256 digest. The validator
+rejects absolute paths, parent traversal, symlinks, missing files, and hash
+mismatches. This closes report-to-file integrity; operator authentication and
+reproducible Fiber binary provenance remain separate release obligations.
 
 ## Executive Decision
 
@@ -110,6 +118,84 @@ Native support therefore means native interoperability at the CKB Script and
 transaction boundary. It does not mean embedding the CellScript compiler into a
 Fiber node.
 
+## Capability Envelope And Deliberate Non-Goals
+
+The no-profile design separates a narrow channel asset from richer business
+policy. The Fiber-managed Type Script has one job: preserve a checked `u128`
+amount across every ordinary channel transaction and allow supply changes only
+when a transaction contains an input matching the authority encoded in the
+asset Script args. Legacy 32-byte args identify an input Lock Script hash;
+tagged 33-byte args identify `0x01` plus an input Type Script hash. It does not
+interpret a second Fiber profile.
+
+This permits richer issuance systems without making ordinary channel exit
+depend on them. A direct Lock authority covers owner, multisig, or governance
+issuance. A tagged Type Script authority covers one-shot genesis, supply-cap,
+reserve/compliance, and bridge-policy Cells while leaving each policy Cell's
+Lock free to use owner, multisig, or governance authorisation. Such a policy
+Cell executes only on issuance, destruction, deposit, or redemption
+transactions outside the ordinary Fiber channel lifecycle.
+
+### Supported composition families
+
+| Family | CellScript/Fiber composition | Evidence boundary |
+| --- | --- | --- |
+| Ordinary fungible token | One `u128` amount plus legacy Lock-hash issuance/destruction. | Dedicated ELF and CKB-VM group matrix. |
+| Fixed supply | A one-shot authority Type Script authorises initial issuance and is destroyed; no later live input can carry that Type Script. | Requires builder/live-chain evidence that the authority was consumed and cannot be recreated. The channel entry alone cannot prove global non-existence. |
+| Owner, multisig, or governance issuance | The concrete owner/multisig/governance Lock Script hash is the asset owner hash. | The asset entry proves hash equality; the selected Lock Script separately proves authorisation. |
+| Supply-cap stablecoin | Tagged asset args identify a stateful policy Type Script that checks `issued + mint <= cap`; consuming that policy Cell authorises the matching asset mint. | The policy artifact and its live state require their own deployment and transition evidence. |
+| External reserve or compliance policy | Tagged asset args identify the reserve/compliance policy Type Script; its state stays in a separate Cell and gates issuance/redemption only. | Ordinary channel settlement deliberately neither reads nor promises freshness of that Cell. |
+| Wrapped asset | Tagged asset args identify a bridge policy Type Script that accounts for locked and issued units; its authorised transition mints or destroys the plain channel asset. | External-chain event verification and bridge security remain separate TCB obligations. |
+| Deposit/redeem bridge | Deposit and redeem actions consume/update the tagged bridge/policy Cell while creating or destroying the plain asset. | Fiber only handles the resulting amount Cells; it is not the bridge verifier. |
+| Multi-asset package | Multiple structurally eligible types may share a package; `--asset <Type>` selects one closed entry and ambiguity without selection fails. | Every selected asset receives its own artifact, concrete Script identity, CellDeps, config entry, and evidence binding. |
+| Type ID upgradeable deployment | Fiber may resolve the code dependency through the verified canonical Type ID Cell. | An upgrade changes code provenance and requires compatibility re-audit even if the Type ID identity remains stable. |
+| Multi-hop, cooperative close, force close, and watchtower settlement | These use Fiber's ordinary lifecycle with the same exact asset Script on every route leg. | Requires live topology/lifecycle evidence in addition to compiler and CKB-VM evidence. |
+
+The corresponding source examples live under `examples/fiber/`. They are
+composition examples, not a claim that a single asset Type Script proves the
+entire policy system. Each policy artifact, Lock Script, deployment, live Cell,
+and transition must be audited on its own terms.
+
+### Shapes not directly supported
+
+| Shape | Missing Fiber-side capability | Why the adapter fails closed |
+| --- | --- | --- |
+| NFT or per-token-unit state | Object/token-ID channel accounting, object-preserving commitment state, routing, and settlement. | Fiber's current UDT balance model is amount-oriented; a `u128` route cannot identify or preserve a particular object. |
+| Extra state in the asset Cell | A custom data codec and a lifecycle-wide promise to preserve every opaque byte. | Fiber emits canonical 16-byte amount outputs, so accepting trailing state risks silent loss. |
+| Rebasing or implicit-interest balance | A versioned index snapshot, historical settlement rule, routing liquidity model, and old-commitment exit semantics. | A channel must settle deterministically long after an index changes. |
+| Payment-time dynamic oracle | Oracle discovery, freshness, HeaderDep/CellDep construction, commitment binding, and watchtower replay. | An oracle-dependent exit can become unspendable after the channel was opened. |
+| KYC witness on every payment | A chain-off policy-proof protocol or application witness hook present on every lifecycle path. | Most Fiber payments are off-chain updates and do not execute the CKB Type Script per payment. |
+| Fixed global output indexes | A stable custom transaction template across funding, commitment, shutdown, and force-close builders. | Fiber may add change, channel, TLC, and settlement outputs. |
+| Mandatory receipt/registry/nonce Cell per payment | Pluggable compound input/output construction, capacity funding, concurrency, and watchtower support. | The ordinary builder does not execute arbitrary CellScript transaction templates. |
+| Transfer callbacks | A deterministic, versioned, resource-bounded hook VM shared by both peers and reconciled with on-chain settlement. | Fiber does not call CellScript functions for each off-chain balance update. |
+| Confidential amount | Commitment/range-proof channel state and privacy-aware routing. | Routing and balance checks currently consume concrete amounts. |
+
+These are primarily missing protocol and builder hooks, not missing CellScript
+syntax. Adding a source annotation or profile would not make Fiber construct a
+safe funding, commitment, shutdown, force-close, or watchtower transaction.
+
+### Relationship to agent-payment work
+
+Fiber issue [#1255](https://github.com/nervosnetwork/fiber/issues/1255)
+is Quake's draft design for an agent-facing layer built from HTTP 402,
+x402/L402 patterns, Biscuit delegation, Hold Invoices, and Custom Records.
+Its statements about CKB, RGB++ multi-asset support, and NFTs describe the
+proposed product envelope; they are not lifecycle compatibility evidence for
+an arbitrary UDT or NFT. That work is
+complementary: it can carry service identifiers, request/result commitments,
+payment proofs, spending limits, and delegated application authority. It does
+not change the CKB UDT Cell codec, add arbitrary transaction outputs, preserve
+NFT identities, provide dynamic-oracle exit semantics, or execute a CKB
+witness policy on every off-chain payment.
+
+The intended stack is therefore:
+
+1. agent gateway/Biscuit/Custom Records for application authentication and
+   service exchange;
+2. Fiber for invoices, channels, routing, and lifecycle settlement;
+3. the CellScript dedicated entry for amount codec, conservation, supply
+   authority, artifact identity, and fail-closed CKB settlement.
+
 ## Current Fiber Boundary
 
 This plan uses the Fiber source at commit
@@ -117,11 +203,11 @@ This plan uses the Fiber source at commit
 as its dated design baseline. The implementation must revalidate these facts
 against the pinned Fiber revision used by its acceptance environment.
 
-The source-equivalent revision
-`e00d0e3c9a9284ea1c7705d360be615cfce1a5c6` is also accepted: its diff from
-the baseline contains only one `.gitignore` entry and no runtime, RPC,
-configuration, transaction, or contract change. Any later source change
-requires a new audit before the adapter accepts it.
+The adapter accepts only this exact 40-character revision. A previously
+recorded `e00d0e3c9a9284ea1c7705d360be615cfce1a5c6` revision could not be
+resolved from Fiber's official remote during the strict audit and is therefore
+not evidence, regardless of an earlier local claim about its diff. Any source
+change requires a new audit before the adapter accepts it.
 
 Current relevant behavior is:
 
@@ -205,7 +291,7 @@ operator documentation. Where the documentation describes policy at a higher
 level and the source defines a narrower runtime behavior, v1 adopts the
 narrower source boundary and tests it.
 
-| Boundary | Parent Fiber `e00d0e3c...` | Official documentation | CellScript conclusion |
+| Boundary | Audited Fiber `04e091b...` | Official documentation | CellScript conclusion |
 | --- | --- | --- | --- |
 | UDT registration | Startup reads `ckb.udt_whitelist` into the contracts context and announces the configured entries. | The configuration reference documents `name`, `script`, `auto_accept_amount`, and `cell_deps`. | Generate the native whitelist record; do not invent a profile or require Fiber to read CellScript metadata. |
 | Script-args matching | Args are matched by a regular expression over the complete `0x`-prefixed string; Fiber does not add anchors. | Examples permit regex matchers such as `0x.*`. | Escape the concrete args and generate `^...$`; reject wildcard, prefix, suffix, and unanchored variants. |
@@ -213,19 +299,19 @@ narrower source boundary and tests it.
 | Asset identity on routes | Channel and route selection compare the concrete UDT Type Script. | The stablecoin guide configures the asset on every node and opens an asset channel on every route leg. | Separate code deployment identity from the concrete asset Script and require the same Script on all certified legs. |
 | Witness behavior | Fiber writes an xUDT-compatible WitnessArgs prefix on relevant funding/commitment/watchtower paths. | Operator guides do not define a CellScript payload convention. | The entry is payload-free and ignores Fiber's existing witness bytes; it never assumes an empty witness. |
 | Configuration lifecycle | The audited RPC set has no generic UDT import/remove/reload method. | UDT support is documented as node configuration. | Materialise a complete native config and require an operator-controlled restart plus `node_info` and signed-announcement verification. |
-| Issuance and destruction | Fiber treats the UDT Type Script as opaque and does not implement its owner policy. | Fiber's UDT documentation does not grant mint/burn authority. | Type Script args are exactly one 32-byte owner Lock Script hash. An input with that lock hash authorises issuance/destruction; ordinary Fiber channel transactions have no owner input and must conserve the complete group. |
+| Issuance and destruction | Fiber treats the UDT Type Script as opaque and does not implement its supply policy. | Fiber's UDT documentation does not grant mint/burn authority. | Legacy 32-byte args identify an input Lock Script hash; tagged 33-byte args contain `0x01` plus an input Type Script hash. A matching absolute input authorises issuance/destruction; ordinary Fiber channel transactions contain neither authority and must conserve the complete group. |
 | CellDeps | Fiber configuration supports concrete deps and Type-ID resolution. | The configuration reference requires CellDeps for the UDT. | Verify the deployed code Cell and each resolved dependency live; never derive asset args from code-cell TYPE_ID args. |
 
-The accepted second revision was audited with:
+The baseline revision was resolved from the official remote with:
 
 ```bash
-git -C ../fiber diff --name-status \
-  04e091b08953368aa5ee977f562ad628c3000ff4 \
-  e00d0e3c9a9284ea1c7705d360be615cfce1a5c6
+git ls-remote https://github.com/nervosnetwork/fiber.git \
+  04e091b08953368aa5ee977f562ad628c3000ff4
 ```
 
-The result is only `M .gitignore`. This is why the adapter accepts those two
-exact revisions rather than a prefix or an open-ended version range.
+The audit also fetched and built that exact object in a detached worktree.
+The unavailable `e00d0e3c...` value is covered by a regression test proving
+that the adapter rejects it, as well as prefixes and open-ended version ranges.
 
 ## Supported V1 Asset Contract
 
@@ -242,8 +328,8 @@ all of the following properties:
 | Transfer shape | Supports `N` inputs to `M` outputs, including split, merge, and change |
 | Entry ABI | Uses a dedicated payload-free, chain-neutral invariant entry; requires no CellScript action selector |
 | Witnesses | Tolerates Fiber's existing xUDT-compatible witness bytes and requires no additional application witness |
-| Script args | Exactly 32 bytes containing the owner Lock Script hash |
-| Supply authority | Any absolute input whose Lock Script hash equals the owner hash authorises issuance or destruction; otherwise both Type Script group sides must be non-empty and conserved |
+| Script args | Either exactly 32 bytes containing the legacy input Lock Script hash, or exactly 33 bytes containing `0x01` plus an input Type Script hash |
+| Supply authority | Any absolute input matching the selected Lock/Type authority authorises issuance or destruction; otherwise both Type Script group sides must be non-empty and conserved |
 | Dependencies | Uses a finite, deployment-manifest-backed CellDep set |
 | Transaction shape | Does not require fixed global output indexes or non-Fiber outputs |
 | Environment | Does not require dynamic HeaderDeps, oracle Cells, or ambient chain reads |
@@ -326,20 +412,24 @@ The compiler instead introduces an internal, chain-neutral
 aggregate invariant and emits only the following consensus behavior:
 
 ```text
-require current Type Script args.length == 32
-owner_lock_hash = current Type Script args
-owner_authorized = false
+require args.length == 32 or (args.length == 33 and args[0] == 0x01)
+authority_kind = args.length == 32 ? input_lock : input_type
+authority_hash = args.length == 32 ? args[0..32] : args[1..33]
+authority_present = false
 
 for every absolute transaction input:
-    if input.lock_script_hash == owner_lock_hash:
-        owner_authorized = true
+    if authority_kind == input_lock and input.lock_script_hash == authority_hash:
+        authority_present = true
+    if authority_kind == input_type and input has a Type Script:
+        if input.type_script_hash == authority_hash:
+            authority_present = true
 
 for every Cell in the current Type Script input and output groups:
     require data.length == 16
     decode amount as u128 little-endian
     add with checked u128 arithmetic
 
-if owner_authorized:
+if authority_present:
     return success  // shape and overflow were still checked
 
 require sum(inputs) == sum(outputs)
@@ -355,8 +445,8 @@ The entry:
 - does not require the Fiber witness to be empty and does not parse its
   xUDT-compatible prefix;
 - carries emitted-helper and ProofPlan evidence tied to the exact artifact;
-- permits mint or burn only when an absolute input Lock Script hash equals the
-  owner hash in the current Type Script args;
+- permits mint or burn only when an absolute input matches the Lock or tagged
+  Type Script authority in the current Type Script args;
 - rejects unauthorised mint/burn, malformed data, and checked-sum overflow;
 - contains no Fiber-specific action names or source annotations.
 
@@ -759,8 +849,8 @@ following matrix.
 ### Positive Cases
 
 - deploy the exact invariant artifact and verify the live code Cell;
-- issue and destroy the asset with an input whose Lock Script hash equals the
-  32-byte owner hash in the Type Script args;
+- issue and destroy the asset with a matching legacy input Lock authority and
+  with a matching tagged input Type Script authority;
 - resolve the concrete asset Type Script independently of the code Cell's
   TYPE_ID args;
 - compile the exact anchored args matcher and prove its match/rejection set;
@@ -803,7 +893,8 @@ following matrix.
 - checked-sum overflow;
 - an attempted mint path without an owner-matching absolute input;
 - an attempted burn path without an owner-matching absolute input;
-- Type Script args whose length is not exactly 32 bytes;
+- Type Script args other than exactly 32 bytes or `0x01` followed by exactly
+  32 bytes;
 - a required custom entry witness;
 - an entry that incorrectly assumes the Fiber witness is empty;
 - a required HeaderDep or dynamic oracle Cell;
@@ -830,35 +921,38 @@ provenance.
 
 ### Bounded Devnet Acceptance Snapshot — 2026-07-20
 
-The implementation was exercised in two isolated copies of Fiber's official
-dev-chain fixtures. The parent Fiber and CKB trees were not modified. Both runs
-used fresh CKB data and fresh Fiber stores; the second run existed specifically
-to prevent channel state from the routing suite contaminating the watchtower
-suite.
+The implementation was exercised in a detached copy of Fiber's official
+dev-chain fixtures. The parent Fiber and CKB trees were not modified. One fresh
+CKB chain was used throughout, while each suite started with a fresh Fiber store
+so prior channel state could not contaminate the next suite.
 
 | Evidence | Observed value |
 | --- | --- |
-| Fiber source | `e00d0e3c9a9284ea1c7705d360be615cfce1a5c6`; `fnn` reported `e00d0e3` and Fiber `0.9.0-rc7` |
-| CKB network identity | Runtime genesis `0xf9d20bb794eaadeaa0ad38e31dcea595948eac4ff62c6896a7f646e556c0be50` on both isolated chains |
-| CellScript ELF | 5,980 bytes; CKB data hash `0x3260f2f21fabace50291f758d1c6642bade11f343068c5084bafed4cd9360d11`; SHA-256 `da172c6a9bfcaee2c019ba60d333c8c9e036f869231b5df7ee3baf8360c5129c` |
-| Code CellDep | `0xc5b09cda61fd8bd473f909106e876318393c5f8e64deb4565ab9e3e00f3783a8:8` with `dep_type=code` |
+| Fiber source | Official commit `04e091b08953368aa5ee977f562ad628c3000ff4`; SQLite build; `fnn` reported `04e091b`, Fiber `0.9.0-rc7` |
+| CKB network identity | Clean portable CKB `0.207.0 (8f6cacf 2026-06-10)`; runtime genesis `0xaaf8beb6e566cfe58b54d2d8161554ec95e5a824ea8a7a7b957e0ca706afdb09` |
+| CellScript ELF | 6,372 bytes; CKB data hash `0x93afabb9ee143b2aed1ca74bbd0f46bdb63b513c77df143059aba46498a43999`; SHA-256 `c8767652f16c7be6a89a0f001935bd0b2282fd7376efe6b6e043612c64cc3126` |
+| Code CellDep | `0x99681f1f2526d906016cf73bf0ca1b4396ca1736f7567ee3047f13d2b01ae2c6:8` with `dep_type=code` |
 | Concrete asset args | `0x32e555f3ff8e135cece1351a6a2971518392c1e30375c1e006ad0ce8eac07947` |
 | Native Fiber config | Exact `data2` code hash, `^<complete-args>$`, live CellDep, and `auto_accept_amount=1000` observed through `node_info` |
-| Registration | `doctor` reached `LocalNodeAdvertised` after peer connection and observed the same entry in the local signed graph announcement |
-| Routing suite | Fiber official `e2e/udt-router-pay`: 16/16 requests and 24/24 assertions passed, including two-hop invoice/keysend payments and insufficient-liquidity rejection |
-| Settlement suite | Fiber official `e2e/watchtower/force-close-with-pending-tlcs-and-udt`: 28/28 requests and 32/32 assertions passed, including two pending TLCs, forced close, watchtower settlement, and final UDT balance checks |
+| Local observation | All three `node_info` responses reported the same genesis, exact anchored asset entry, `data2` code hash, `auto_accept_amount=1000`, and live code CellDep |
+| Routing suite | Fiber official `e2e/udt-router-pay`, Bruno 3.5.2: 16/16 requests and 24/24 assertions passed, including two-hop invoice/keysend payments and insufficient-liquidity rejection |
+| Settlement suite | Fiber official `e2e/watchtower/force-close-with-pending-tlcs-and-udt`, Bruno 1.20.0: 28/28 requests and 32/32 assertions passed, including two pending TLCs, forced close, watchtower settlement, and final UDT balance checks |
+| Direct lifecycle suite | Fiber official `e2e/udt`, Bruno 1.20.0: 14/15 raw requests and 25/25 assertions passed. The only raw failure was the collection's wrong-args case: its post-script expected wildcard acceptance, while the exact generated config correctly returned `Invalid UDT type script`. Auto-accept, manual accept, direct TLC, invalid-open rejection, and cooperative-shutdown initiation all succeeded. |
 
 The runs also exercised the owner-mode path indirectly: Fiber's official
 `udt-init` created the initial supply through an owner-lock input, then all
 channel and settlement transactions succeeded through the non-owner conserved
 path.
 
-This snapshot is deliberately **not** marked `TopologyCertified` or release
-evidence. The local CKB executable identified itself as
-`0.207.0 (4358d51-dirty 2026-07-12)`, so only the genesis identity and observed
-transactions are bound, not a reproducible clean CKB build. Cooperative close,
-restart/reestablishment, the remaining malformed-topology cases, and the full
-declared matrix still need an immutable report from a clean pinned environment.
+This snapshot is deliberately **not** marked `LocalNodeAdvertised`,
+`TopologyCertified`, or release evidence. The Fiber build used its maintained
+SQLite feature because the default vendored RocksDB binding did not compile
+with the host C++ compiler, and the CKB fixture required `--skip-spec-check`
+after its copied ChainSpec/config hashes diverged even though the runtime
+genesis was verified exactly. Cooperative close was initiated but not followed
+through a separate finality assertion; restart/reestablishment, the remaining
+malformed-topology cases, and the full declared matrix still need an immutable,
+content-addressed report from a clean pinned environment.
 
 ## Implementation Work Packages
 
@@ -909,8 +1003,9 @@ Deliverables:
   entry independently of ordinary 1-to-1 action recognition;
 - bounded `N -> M` input/output coverage;
 - overflow rejection;
-- explicit 32-byte owner-lock issuance/destruction and unauthorised
-  create/destroy rejection on the channel entry;
+- explicit legacy input-Lock and tagged input-Type-Script
+  issuance/destruction, plus unauthorised create/destroy rejection on the
+  channel entry;
 - ProofPlan coverage tied to emitted helper calls;
 - CKB-VM valid and malformed transaction fixtures.
 
@@ -1095,7 +1190,8 @@ The no-profile Fiber track is complete only when all of the following are true:
 - the emitted codec is exactly the Fiber-compatible 16-byte `u128` layout;
 - checked-runtime conservation covers real bounded `N -> M` type groups,
   rejects overflow and unauthorised mint/burn on channel paths, and permits
-  issuance/destruction only through the 32-byte owner-lock rule;
+  issuance/destruction only through the legacy input-Lock or tagged
+  input-Type-Script authority rule;
 - the adapter resolves or deploys the exact artifact, separately resolves one
   concrete asset Type Script, and never treats code-cell TYPE_ID args as asset
   args;

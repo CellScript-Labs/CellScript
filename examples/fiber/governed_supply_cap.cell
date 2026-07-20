@@ -1,0 +1,54 @@
+module cellscript::fiber::governed_supply_cap
+
+invariant stablecoin_conservation {
+    trigger: type_group
+    scope: group
+    reads: group_inputs<GovernedUsd>.quantity, group_outputs<GovernedUsd>.quantity
+    assert_sum(group_outputs<GovernedUsd>.quantity) == assert_sum(group_inputs<GovernedUsd>.quantity)
+}
+
+resource GovernedUsd has store, create, consume, burn {
+    quantity: u128,
+}
+
+#[type_id("cellscript::fiber::governed_supply_cap::SupplyPolicy:v1")]
+resource SupplyPolicy has store, create, consume, replace
+    identity(ckb_type_id)
+{
+    cap: u128,
+    issued: u128,
+}
+
+action create_policy(cap: u128, controller: Address) -> SupplyPolicy {
+    verification
+        require cap > 0, "cap must be positive"
+        create_unique<SupplyPolicy>(identity = ckb_type_id) { cap, issued: 0 } with_lock(controller)
+}
+
+action issue(
+    policy_before: SupplyPolicy,
+    recipient: Address,
+    quantity: u128,
+) -> (policy_after: SupplyPolicy, asset: GovernedUsd) {
+    transition policy_before -> policy_after
+
+    verification
+        require policy_before.issued <= policy_before.cap, "invalid policy state"
+        require quantity <= policy_before.cap - policy_before.issued, "supply cap exceeded"
+        require policy_after.cap == policy_before.cap, "cap changed"
+        require policy_after.issued == policy_before.issued + quantity, "issued supply mismatch"
+        create asset = GovernedUsd { quantity } with_lock(recipient)
+}
+
+action redeem(
+    policy_before: SupplyPolicy,
+    asset: GovernedUsd,
+) -> policy_after: SupplyPolicy {
+    transition policy_before -> policy_after
+
+    verification
+        require asset.quantity <= policy_before.issued, "redeem exceeds issued supply"
+        require policy_after.cap == policy_before.cap, "cap changed"
+        require policy_after.issued == policy_before.issued - asset.quantity, "issued supply mismatch"
+        destroy asset
+}

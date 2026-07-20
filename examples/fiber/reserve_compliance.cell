@@ -1,0 +1,54 @@
+module cellscript::fiber::reserve_compliance
+
+invariant regulated_asset_conservation {
+    trigger: type_group
+    scope: group
+    reads: group_inputs<RegulatedUsd>.quantity, group_outputs<RegulatedUsd>.quantity
+    assert_sum(group_outputs<RegulatedUsd>.quantity) == assert_sum(group_inputs<RegulatedUsd>.quantity)
+}
+
+resource RegulatedUsd has store, create, consume {
+    quantity: u128,
+}
+
+#[type_id("cellscript::fiber::reserve_compliance::ReservePolicy:v1")]
+resource ReservePolicy has store, create, consume, replace
+    identity(ckb_type_id)
+{
+    reserve_units: u128,
+    issued_units: u128,
+    compliance_epoch: u64,
+}
+
+action create_policy(reserve_units: u128, compliance_epoch: u64, controller: Address) -> ReservePolicy {
+    verification
+        create_unique<ReservePolicy>(identity = ckb_type_id) {
+            reserve_units,
+            issued_units: 0,
+            compliance_epoch,
+        } with_lock(controller)
+}
+
+action issue_backed(
+    policy_before: ReservePolicy,
+    recipient: Address,
+    quantity: u128,
+) -> (policy_after: ReservePolicy, asset: RegulatedUsd) {
+    transition policy_before -> policy_after
+
+    verification
+        require policy_before.issued_units <= policy_before.reserve_units, "invalid reserve state"
+        require quantity <= policy_before.reserve_units - policy_before.issued_units, "insufficient verified reserve"
+        require policy_after.reserve_units == policy_before.reserve_units, "reserve changed during issuance"
+        require policy_after.issued_units == policy_before.issued_units + quantity, "issued units mismatch"
+        require policy_after.compliance_epoch == policy_before.compliance_epoch, "compliance epoch changed"
+        create asset = RegulatedUsd { quantity } with_lock(recipient)
+}
+
+action update_policy(policy_before: ReservePolicy) -> policy_after: ReservePolicy {
+    transition policy_before -> policy_after
+
+    verification
+        require policy_after.reserve_units >= policy_after.issued_units, "reserve below issued supply"
+        require policy_after.compliance_epoch >= policy_before.compliance_epoch, "compliance epoch regressed"
+}

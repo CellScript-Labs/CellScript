@@ -2,17 +2,24 @@
 
 ## 0.22.0 - 2026-07-19
 
-- Add the bounded no-profile Fiber interoperability path. Metadata schema 54
+- Add the bounded no-profile Fiber interoperability path. Metadata schema 55
   records the structurally derived `fungible-type-group-v1` entry; its ELF
   verifies exact 16-byte little-endian `u128` data, checked full-group
-  conservation, owner-lock-authorised issuance/destruction, and unauthorised
+  conservation, legacy owner-lock or tagged policy-Type-authorised
+  issuance/destruction, and unauthorised
   mint/burn rejection, while ignoring Fiber's xUDT-compatible witness prefix.
   The separate `cellscript-fiber-adapter` derives and materialises native Fiber
   configuration from compiler and live CKB evidence without a Fiber profile or
   a `fiber-lib` dependency. Bounded local-devnet runs passed Fiber's official
   multi-hop UDT payment and pending-TLC watchtower force-close collections.
   The clean, pinned full lifecycle/negative matrix remains pending, so this is
-  not a production-readiness claim.
+  not a production-readiness claim. Full external matrix validation requires
+  content-addressed evidence files under an explicit confined root for every
+  completed row and certified topology report; arbitrary non-empty evidence
+  labels no longer qualify.
+  Multi-asset packages may select one structurally eligible asset with
+  `cellscript-fiber ... --asset <Type>`; omission remains valid only when the
+  package contains exactly one candidate.
 - Start the `nightly-0.22` language line with checked casts, canonical helper
   and capability registries, transitive callable effects, initial/terminal
   flow evidence, the six-tier ProofPlan taxonomy, and typed aggregate targets.

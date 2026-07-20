@@ -4,7 +4,10 @@ use crate::{
     FIBER_ACCEPTANCE_SCHEMA, FIBER_COMPATIBILITY_SCHEMA, FIBER_REGISTRATION_SCHEMA, FIBER_TOPOLOGY_SCHEMA,
 };
 use serde::{Deserialize, Serialize};
-use std::{fs, path::Path};
+use std::{
+    fs,
+    path::{Component, Path},
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum OperationalState {
@@ -174,6 +177,8 @@ impl FiberCompatibilityReportV1 {
             || self.descriptor.payload_required
             || self.descriptor.owner_mode != "script-args-32-byte-owner-lock-hash"
             || self.descriptor.owner_args_length_bytes != 32
+            || self.descriptor.authority_modes != ["input-lock-hash".to_string(), "tagged-input-type-script-hash".to_string()]
+            || self.descriptor.authority_args_lengths_bytes != [32, 33]
             || !self.descriptor.owner_authorized_mint
             || !self.descriptor.owner_authorized_burn
             || !self.descriptor.non_owner_input_group_non_empty
@@ -319,6 +324,43 @@ pub struct TopologyReportV1 {
     pub payment_observed: bool,
     pub certified: bool,
     pub reason: String,
+    #[serde(default)]
+    pub evidence: Vec<EvidenceReference>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EvidenceReference {
+    pub path: String,
+    pub blake2b_256: String,
+}
+
+impl EvidenceReference {
+    fn validate(&self, root: &Path) -> anyhow::Result<()> {
+        let relative = Path::new(&self.path);
+        if relative.is_absolute() || relative.components().any(|component| !matches!(component, Component::Normal(_))) {
+            anyhow::bail!("Fiber evidence path must be a normalized relative path: {}", self.path);
+        }
+        canonical_hex(&self.blake2b_256, Some(32), "evidence.blake2b_256")?;
+        let mut path = root.to_path_buf();
+        for component in relative.components() {
+            let Component::Normal(component) = component else {
+                unreachable!("evidence path components were validated above");
+            };
+            path.push(component);
+            if fs::symlink_metadata(&path)?.file_type().is_symlink() {
+                anyhow::bail!("Fiber evidence path must not traverse a symlink: {}", self.path);
+            }
+        }
+        let metadata = fs::symlink_metadata(&path)?;
+        if !metadata.is_file() || metadata.len() == 0 {
+            anyhow::bail!("Fiber evidence must be a non-empty regular file without symlinks: {}", self.path);
+        }
+        let actual = format!("0x{}", hex::encode(cellscript::ckb_blake2b256(&fs::read(&path)?)));
+        if actual != self.blake2b_256.to_ascii_lowercase() {
+            anyhow::bail!("Fiber evidence hash mismatch for {}", self.path);
+        }
+        Ok(())
+    }
 }
 
 impl TopologyReportV1 {
@@ -335,6 +377,7 @@ impl TopologyReportV1 {
             payment_observed: false,
             certified: false,
             reason: "topology certification requires restarted participating nodes, live channels, liquidity, reserve, gossip, and a concrete payment".to_string(),
+            evidence: Vec::new(),
         }
     }
 
@@ -349,11 +392,20 @@ impl TopologyReportV1 {
                 || !self.liquidity_sufficient
                 || !self.ckb_reserve_sufficient
                 || !self.gossip_converged
-                || !self.payment_observed)
+                || !self.payment_observed
+                || self.evidence.is_empty())
         {
             anyhow::bail!(
                 "topology report claims certification without complete node/channel/liquidity/reserve/gossip/payment evidence"
             );
+        }
+        Ok(())
+    }
+
+    pub fn validate_evidence(&self, root: &Path) -> anyhow::Result<()> {
+        self.validate()?;
+        for evidence in &self.evidence {
+            evidence.validate(root)?;
         }
         Ok(())
     }
@@ -374,7 +426,7 @@ pub struct AcceptanceMatrixRow {
     pub id: String,
     pub class: String,
     pub status: AcceptanceRowStatus,
-    pub evidence: Vec<String>,
+    pub evidence: Vec<EvidenceReference>,
     pub detail: String,
 }
 
@@ -429,6 +481,16 @@ impl AcceptanceMatrixReportV1 {
         }
         Ok(())
     }
+
+    pub fn validate_evidence(&self, root: &Path) -> anyhow::Result<()> {
+        self.validate()?;
+        for row in &self.rows {
+            for evidence in &row.evidence {
+                evidence.validate(root)?;
+            }
+        }
+        Ok(())
+    }
 }
 
 pub(crate) fn validate_git_revision(value: &str, label: &str) -> anyhow::Result<()> {
@@ -442,10 +504,12 @@ pub(crate) fn node_commit_matches_revision(commit_info: &str, revision: &str) ->
     let Some(reported) = commit_info.split_whitespace().next() else {
         return false;
     };
-    !reported.ends_with("-dirty")
-        && reported.len() >= 7
-        && revision.len() == 40
-        && revision.to_ascii_lowercase().starts_with(&reported.to_ascii_lowercase())
+    if reported.ends_with("-dirty") || revision.len() != 40 {
+        return false;
+    }
+    let reported = reported.to_ascii_lowercase();
+    let revision = revision.to_ascii_lowercase();
+    (reported.len() == 40 && reported == revision) || (reported.len() == 7 && revision.starts_with(&reported))
 }
 
 pub(crate) fn chain_identity_matches(observed_chain_hash: &str, expected: &str) -> bool {
@@ -523,6 +587,7 @@ fn required_acceptance_rows() -> Vec<(&'static str, &'static str)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
     #[test]
     fn pending_matrix_is_explicitly_incomplete() {
@@ -546,5 +611,67 @@ mod tests {
         assert!(chain_identity_matches(&genesis, &genesis));
         assert!(!chain_identity_matches(&genesis, &"22".repeat(20)));
         assert!(!chain_identity_matches(&genesis, &format!("0x{}", "33".repeat(32))));
+    }
+
+    #[test]
+    fn node_revision_accepts_only_fibers_seven_hex_abbreviation_or_the_full_hash() {
+        let revision = "04e091b08953368aa5ee977f562ad628c3000ff4";
+        assert!(node_commit_matches_revision("04e091b 2026-07-01", revision));
+        assert!(node_commit_matches_revision(revision, revision));
+        assert!(!node_commit_matches_revision("04e091b-dirty 2026-07-01", revision));
+        assert!(!node_commit_matches_revision("04e091b0 2026-07-01", revision));
+        assert!(!node_commit_matches_revision("04e091 2026-07-01", revision));
+    }
+
+    #[test]
+    fn external_evidence_is_content_addressed_and_confined() {
+        let root = tempfile::tempdir().unwrap();
+        let bytes = b"fiber acceptance evidence\n";
+        fs::write(root.path().join("row.log"), bytes).unwrap();
+        let valid = EvidenceReference {
+            path: "row.log".to_string(),
+            blake2b_256: format!("0x{}", hex::encode(cellscript::ckb_blake2b256(bytes))),
+        };
+        valid.validate(root.path()).unwrap();
+
+        let mut tampered = valid.clone();
+        tampered.blake2b_256 = format!("0x{}", "00".repeat(32));
+        assert!(tampered.validate(root.path()).is_err());
+
+        let escaped = EvidenceReference { path: "../row.log".to_string(), blake2b_256: valid.blake2b_256 };
+        assert!(escaped.validate(root.path()).is_err());
+
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(root.path(), root.path().join("linked")).unwrap();
+            let linked = EvidenceReference {
+                path: "linked/row.log".to_string(),
+                blake2b_256: format!("0x{}", hex::encode(cellscript::ckb_blake2b256(bytes))),
+            };
+            assert!(linked.validate(root.path()).is_err());
+        }
+    }
+
+    #[test]
+    fn certified_topology_requires_verified_evidence_files() {
+        let root = tempfile::tempdir().unwrap();
+        let mut report = TopologyReportV1::pending("0x01");
+        report.status = OperationalState::TopologyCertified;
+        report.certified = true;
+        report.participating_nodes = vec!["node-a".to_string(), "node-b".to_string()];
+        report.exact_asset_route_channels = vec!["channel-a-b".to_string()];
+        report.liquidity_sufficient = true;
+        report.ckb_reserve_sufficient = true;
+        report.gossip_converged = true;
+        report.payment_observed = true;
+        assert!(report.validate().is_err());
+
+        let bytes = b"topology evidence\n";
+        fs::write(root.path().join("topology.log"), bytes).unwrap();
+        report.evidence.push(EvidenceReference {
+            path: "topology.log".to_string(),
+            blake2b_256: format!("0x{}", hex::encode(cellscript::ckb_blake2b256(bytes))),
+        });
+        report.validate_evidence(root.path()).unwrap();
     }
 }

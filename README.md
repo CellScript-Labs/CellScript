@@ -74,6 +74,18 @@ cargo run --locked -p cellscript-fiber-adapter --bin cellscript-fiber -- check t
 ./scripts/cellscript_fiber_acceptance.sh --static
 ```
 
+When one package contains multiple structurally eligible assets, selection is
+explicit and fail-closed:
+
+```bash
+cargo run --locked -p cellscript-fiber-adapter --bin cellscript-fiber -- \
+  check examples/fiber/multi_asset.cell --asset FiberUsd
+```
+
+The supported policy compositions and deliberate protocol non-goals are
+documented in `roadmap/CELLSCRIPT_0_22_FIBER_NATIVE_SUPPORT_PLAN.md`; runnable
+source examples live in `examples/fiber/`.
+
 `check` does not modify Fiber or CKB. `enable` can resolve a live deployment and
 asset Cell, while `materialize-config` replaces only `ckb.udt_whitelist` in an
 existing native Fiber YAML file; the operator still controls the required node

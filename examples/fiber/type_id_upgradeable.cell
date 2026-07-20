@@ -1,0 +1,23 @@
+module cellscript::fiber::type_id_upgradeable
+
+invariant upgradeable_asset_conservation {
+    trigger: type_group
+    scope: group
+    reads: group_inputs<UpgradeableAsset>.quantity, group_outputs<UpgradeableAsset>.quantity
+    assert_sum(group_outputs<UpgradeableAsset>.quantity) == assert_sum(group_inputs<UpgradeableAsset>.quantity)
+}
+
+resource UpgradeableAsset has store, create, consume {
+    quantity: u128,
+}
+
+resource UpgradePolicy has store, create, consume, replace {
+    artifact_epoch: u64,
+}
+
+action record_upgrade(policy_before: UpgradePolicy) -> policy_after: UpgradePolicy {
+    transition policy_before -> policy_after
+
+    verification
+        require policy_after.artifact_epoch == policy_before.artifact_epoch + 1, "artifact epoch mismatch"
+}

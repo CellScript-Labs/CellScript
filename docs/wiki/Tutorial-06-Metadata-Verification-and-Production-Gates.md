@@ -457,19 +457,27 @@ This runs the dedicated invariant-entry CKB-VM matrix plus adapter tests. A
 passing result means the exact compiled entry accepts and rejects the covered
 CKB transaction shapes; it does not mean a Fiber node has loaded or announced
 the generated UDT configuration. Full mode validates a complete externally
-produced lifecycle report against an exact Fiber revision, but never manages
-node processes or signing keys. Treat `StaticallyCompatible`,
+produced lifecycle report against an exact Fiber revision. Completed rows and
+certified topology reports reference files under an explicit evidence root by
+normalized relative path plus CKB Blake2b-256 digest; missing, empty,
+symlinked, path-escaping, or modified evidence fails closed. This proves bundle
+integrity, not the identity of its operator. Full mode never manages node
+processes or signing keys. Treat `StaticallyCompatible`,
 `LocalNodeConfiguredRestartRequired`, `LocalNodeAdvertised`, `ChannelReady`,
 and `TopologyCertified` as distinct monotonic evidence states.
 
-The entry uses the 32-byte Type Script args as an owner Lock Script hash.
-Issuance or destruction is accepted only when an absolute input has that Lock
-Script hash; every ordinary Fiber channel transaction instead takes the
-non-owner path and must have non-empty, checked-`u128`, conserved Type Script
-groups. A 2026-07-20 bounded devnet run reached `LocalNodeAdvertised` and passed
-Fiber's official routed-payment and pending-TLC watchtower suites, but it is not
-full or release evidence because it did not produce the complete clean pinned
-matrix.
+The entry accepts either legacy 32-byte Type Script args containing an input
+Lock Script hash, or tagged 33-byte args containing `0x01` followed by an input
+Type Script hash. Issuance or destruction requires a matching absolute input.
+The tagged form lets a stateful policy Type Script enforce caps, reserves, or
+bridge accounting while that policy Cell's Lock independently carries
+single-owner, multisig, or governance authorisation. Every ordinary Fiber
+channel transaction instead takes the unauthorised path and must have
+non-empty, checked-`u128`, conserved Type Script groups. A 2026-07-20 bounded
+devnet run observed the exact config through `node_info` and passed Fiber's
+official routed-payment and pending-TLC watchtower suites, but it did not
+produce a signed-announcement report or the complete pinned matrix and is not
+full or release evidence.
 
 ## CKB Release Evidence Gate
 

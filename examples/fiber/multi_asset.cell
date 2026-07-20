@@ -1,0 +1,35 @@
+module cellscript::fiber::multi_asset
+
+invariant usd_conservation {
+    trigger: type_group
+    scope: group
+    reads: group_inputs<FiberUsd>.quantity, group_outputs<FiberUsd>.quantity
+    assert_sum(group_outputs<FiberUsd>.quantity) == assert_sum(group_inputs<FiberUsd>.quantity)
+}
+
+invariant eur_conservation {
+    trigger: type_group
+    scope: group
+    reads: group_inputs<FiberEur>.quantity, group_outputs<FiberEur>.quantity
+    assert_sum(group_outputs<FiberEur>.quantity) == assert_sum(group_inputs<FiberEur>.quantity)
+}
+
+resource FiberUsd has store, create, consume {
+    quantity: u128,
+}
+
+resource FiberEur has store, create, consume {
+    quantity: u128,
+}
+
+action transfer_usd(asset: FiberUsd, recipient: Address) -> next: FiberUsd {
+    verification
+        consume asset
+        create next = FiberUsd { quantity: asset.quantity } with_lock(recipient)
+}
+
+action transfer_eur(asset: FiberEur, recipient: Address) -> next: FiberEur {
+    verification
+        consume asset
+        create next = FiberEur { quantity: asset.quantity } with_lock(recipient)
+}

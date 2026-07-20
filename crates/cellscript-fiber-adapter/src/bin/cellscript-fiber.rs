@@ -1,9 +1,10 @@
 use anyhow::Context;
 use cellscript_fiber_adapter::{
-    build_fiber_udt_config, check_path, is_audited_fiber_revision, materialize_fiber_config, render_fiber_config_overlay,
-    resolve_asset_from_action_plan, resolve_asset_from_live_cell, verify_code_deployment, verify_local_registration,
-    write_json_atomic, AcceptanceMatrixReportV1, DependencyMode, FiberCompatibilityReportV1, FiberRpcClient, HttpCkbEvidenceProvider,
-    OperationalState, OutPointRef, RegistrationReportV1, TopologyReportV1, AUDITED_FIBER_REVISION, FIBER_CONFIG_SCHEMA,
+    build_fiber_udt_config, check_path, check_path_for, is_audited_fiber_revision, materialize_fiber_config,
+    render_fiber_config_overlay, resolve_asset_from_action_plan, resolve_asset_from_live_cell, verify_code_deployment,
+    verify_local_registration, write_json_atomic, AcceptanceMatrixReportV1, DependencyMode, FiberCompatibilityReportV1,
+    FiberRpcClient, HttpCkbEvidenceProvider, OperationalState, OutPointRef, RegistrationReportV1, TopologyReportV1,
+    AUDITED_FIBER_REVISION, FIBER_CONFIG_SCHEMA,
 };
 use clap::{Args, Parser, Subcommand};
 use serde_json::json;
@@ -45,12 +46,18 @@ struct CheckArgs {
     /// Optional path for the exact dedicated RISC-V ELF artifact.
     #[arg(long)]
     artifact_output: Option<PathBuf>,
+    /// Select a named asset type when the package contains more than one eligible Fiber asset.
+    #[arg(long)]
+    asset: Option<String>,
 }
 
 #[derive(Debug, Args)]
 struct EnableArgs {
     /// CellScript file, package directory, or Cell.toml.
     source: PathBuf,
+    /// Select a named asset type when the package contains more than one eligible Fiber asset.
+    #[arg(long)]
+    asset: Option<String>,
     /// Explicit node policy. This is not contract semantics.
     #[arg(long)]
     auto_accept: u128,
@@ -125,6 +132,9 @@ struct AcceptArgs {
     /// Certified topology report bound to the same environment.
     #[arg(long)]
     topology_report: PathBuf,
+    /// Root containing the content-addressed evidence files referenced by the reports.
+    #[arg(long)]
+    evidence_root: PathBuf,
 }
 
 fn main() {
@@ -165,7 +175,7 @@ fn materialize_config(args: MaterializeConfigArgs) -> anyhow::Result<()> {
 }
 
 fn check(args: CheckArgs) -> anyhow::Result<()> {
-    let checked = check_path(&args.source)?;
+    let checked = check_selected_path(&args.source, args.asset.as_deref())?;
     if let Some(path) = args.artifact_output.as_deref() {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
@@ -193,7 +203,7 @@ fn enable(args: EnableArgs, verify_fiber_when_requested: bool) -> anyhow::Result
             AUDITED_FIBER_REVISION
         );
     }
-    let checked = check_path(&args.source)?;
+    let checked = check_selected_path(&args.source, args.asset.as_deref())?;
     let output_dir = evidence_dir(&args.output_root, &args.network, &checked.descriptor);
     fs::create_dir_all(&output_dir)?;
     fs::write(output_dir.join("fungible-type-group-v1.elf"), &checked.compile_result.artifact_bytes)?;
@@ -289,6 +299,13 @@ fn enable(args: EnableArgs, verify_fiber_when_requested: bool) -> anyhow::Result
     Ok(())
 }
 
+fn check_selected_path(source: &Path, asset: Option<&str>) -> anyhow::Result<cellscript_fiber_adapter::CheckedFiberAsset> {
+    match asset {
+        Some(asset) => check_path_for(source, asset),
+        None => check_path(source),
+    }
+}
+
 fn doctor(args: DoctorArgs) -> anyhow::Result<()> {
     let bytes = fs::read(&args.report)?;
     let mut report: FiberCompatibilityReportV1 = serde_json::from_slice(&bytes)?;
@@ -323,9 +340,9 @@ fn accept(args: AcceptArgs) -> anyhow::Result<()> {
     let registration: RegistrationReportV1 = serde_json::from_slice(&fs::read(&args.registration_report)?)?;
     registration.validate(&compatibility)?;
     let topology: TopologyReportV1 = serde_json::from_slice(&fs::read(&args.topology_report)?)?;
-    topology.validate()?;
+    topology.validate_evidence(&args.evidence_root)?;
     let report: AcceptanceMatrixReportV1 = serde_json::from_slice(&fs::read(&args.report)?)?;
-    report.validate()?;
+    report.validate_evidence(&args.evidence_root)?;
     if !report.complete {
         anyhow::bail!("Fiber acceptance matrix is structurally valid but incomplete");
     }
@@ -336,7 +353,7 @@ fn accept(args: AcceptArgs) -> anyhow::Result<()> {
     {
         anyhow::bail!("acceptance, registration, topology, and compatibility reports are not jointly topology-certified and bound");
     }
-    println!("TopologyCertified acceptance evidence: {}", args.report.display());
+    println!("TopologyCertified evidence bundle integrity validated: {}", args.report.display());
     Ok(())
 }
 

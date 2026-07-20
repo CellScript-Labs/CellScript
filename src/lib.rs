@@ -201,7 +201,7 @@ fn strict_capability_name(capability: ast::Capability) -> &'static str {
 const DEFAULT_TARGET: &str = "riscv64-asm";
 const DEFAULT_TARGET_PROFILE: &str = "ckb";
 const ARTIFACT_CACHE_VERSION: &str = "project-source-set-v5";
-pub const METADATA_SCHEMA_VERSION: u32 = 54;
+pub const METADATA_SCHEMA_VERSION: u32 = 55;
 pub const SOURCE_METADATA_SCHEMA_VERSION: u32 = 1;
 pub const ARTIFACT_METADATA_SCHEMA_VERSION: u32 = 1;
 pub const CONSTRAINTS_METADATA_SCHEMA_VERSION: u32 = 1;
@@ -888,6 +888,8 @@ pub struct FungibleTypeGroupEntryMetadata {
     pub group_scope: String,
     pub owner_mode: String,
     pub owner_args_length_bytes: usize,
+    pub authority_modes: Vec<String>,
+    pub authority_args_lengths_bytes: Vec<usize>,
     pub owner_authorized_mint: bool,
     pub owner_authorized_burn: bool,
     pub non_owner_input_group_non_empty: bool,
@@ -3175,6 +3177,8 @@ fn validate_fungible_type_group_entry_metadata(metadata: &CompileMetadata) -> Re
         || contract.group_scope != "complete-ckb-type-script-group"
         || contract.owner_mode != "script-args-32-byte-owner-lock-hash"
         || contract.owner_args_length_bytes != 32
+        || contract.authority_modes != ["input-lock-hash".to_string(), "tagged-input-type-script-hash".to_string()]
+        || contract.authority_args_lengths_bytes != [32, 33]
         || !contract.owner_authorized_mint
         || !contract.owner_authorized_burn
         || !contract.non_owner_input_group_non_empty
@@ -5346,6 +5350,22 @@ pub fn compile_fungible_type_group_entry(source: &str, options: CompileOptions) 
     Ok(result)
 }
 
+/// Compile one named structurally eligible fungible type from an in-memory
+/// multi-asset source as the payload-free `fungible-type-group-v1` entry.
+pub fn compile_fungible_type_group_entry_for(
+    source: &str,
+    options: CompileOptions,
+    type_name: impl Into<String>,
+) -> Result<CompileResult> {
+    let tokens = lexer::lex(source)?;
+    let ast = parser::parse(&tokens)?;
+    let scope = CompileEntryScope::FungibleTypeGroupV1For(type_name.into());
+    let mut result = compile_ast_with_build(&ast, &options, None, None, Some(&scope))?;
+    bind_source_metadata(&mut result.metadata, vec![source_unit_from_bytes("<memory>", "memory", source.as_bytes())]);
+    result.validate()?;
+    Ok(result)
+}
+
 /// Only generate compile metadata, without asm/elf artifact.
 pub fn compile_metadata(source: &str, target: Option<String>) -> Result<CompileMetadata> {
     let tokens = lexer::lex(source)?;
@@ -5786,6 +5806,7 @@ pub enum CompileEntryScope {
     Action(String),
     Lock(String),
     FungibleTypeGroupV1,
+    FungibleTypeGroupV1For(String),
 }
 
 fn compile_ast_with_build(
@@ -5934,6 +5955,16 @@ pub fn compile_file_with_fungible_type_group_entry<P: AsRef<Utf8Path>>(path: P, 
     compile_file_with_entry_scope(path, options, Some(CompileEntryScope::FungibleTypeGroupV1))
 }
 
+/// Compile one named structurally eligible fungible type from a file or
+/// package containing multiple Fiber-compatible assets.
+pub fn compile_file_with_fungible_type_group_entry_for<P: AsRef<Utf8Path>>(
+    path: P,
+    options: CompileOptions,
+    type_name: impl Into<String>,
+) -> Result<CompileResult> {
+    compile_file_with_entry_scope(path, options, Some(CompileEntryScope::FungibleTypeGroupV1For(type_name.into())))
+}
+
 pub fn compile_path_with_entry_action<P: AsRef<Utf8Path>>(
     path: P,
     options: CompileOptions,
@@ -5957,6 +5988,17 @@ pub fn compile_path_with_entry_lock<P: AsRef<Utf8Path>>(
 pub fn compile_path_with_fungible_type_group_entry<P: AsRef<Utf8Path>>(path: P, options: CompileOptions) -> Result<CompileResult> {
     let resolved = resolve_input_path(path)?;
     compile_file_with_fungible_type_group_entry(&resolved, options)
+}
+
+/// Resolve a file or package and compile one named structurally eligible
+/// fungible type from a multi-asset package.
+pub fn compile_path_with_fungible_type_group_entry_for<P: AsRef<Utf8Path>>(
+    path: P,
+    options: CompileOptions,
+    type_name: impl Into<String>,
+) -> Result<CompileResult> {
+    let resolved = resolve_input_path(path)?;
+    compile_file_with_fungible_type_group_entry_for(&resolved, options, type_name)
 }
 
 fn compile_file_with_entry_scope<P: AsRef<Utf8Path>>(
@@ -6948,6 +6990,8 @@ fn fungible_type_group_entry_metadata(ir: &ir::IrModule) -> Option<FungibleTypeG
         group_scope: "complete-ckb-type-script-group".to_string(),
         owner_mode: "script-args-32-byte-owner-lock-hash".to_string(),
         owner_args_length_bytes: 32,
+        authority_modes: vec!["input-lock-hash".to_string(), "tagged-input-type-script-hash".to_string()],
+        authority_args_lengths_bytes: vec![32, 33],
         owner_authorized_mint: true,
         owner_authorized_burn: true,
         non_owner_input_group_non_empty: true,
@@ -6960,12 +7004,17 @@ fn fungible_type_group_entry_metadata(ir: &ir::IrModule) -> Option<FungibleTypeG
     })
 }
 
-fn scope_ir_to_fungible_type_group_v1(ir: &ir::IrModule) -> Result<ir::IrModule> {
-    let candidates = fungible_type_group_v1_candidates(ir);
+fn scope_ir_to_fungible_type_group_v1(ir: &ir::IrModule, selected_type: Option<&str>) -> Result<ir::IrModule> {
+    let candidates = fungible_type_group_v1_candidates(ir)
+        .into_iter()
+        .filter(|candidate| selected_type.is_none_or(|selected| candidate.type_name == selected))
+        .collect::<Vec<_>>();
     let [candidate] = candidates.as_slice() else {
         let detail = if candidates.is_empty() {
-            "no eligible invariant was found; expected one persistent type encoded as exactly one u128 field and one type_group/group equality between complete group input and output sums, with no additional type or invariant rules"
-                .to_string()
+            selected_type.map_or_else(
+                || "no eligible invariant was found; expected one persistent type encoded as exactly one u128 field and one type_group/group equality between complete group input and output sums, with no additional type or invariant rules".to_string(),
+                |selected| format!("no eligible invariant was found for selected type '{selected}'"),
+            )
         } else {
             format!(
                 "{} eligible invariants were found ({}); the entry must resolve to exactly one structural candidate",
@@ -7034,8 +7083,12 @@ fn scope_ir_to_fungible_type_group_v1(ir: &ir::IrModule) -> Result<ir::IrModule>
 }
 
 fn scope_ir_to_entry(ir: &ir::IrModule, scope: &CompileEntryScope) -> Result<ir::IrModule> {
-    if *scope == CompileEntryScope::FungibleTypeGroupV1 {
-        return scope_ir_to_fungible_type_group_v1(ir);
+    match scope {
+        CompileEntryScope::FungibleTypeGroupV1 => return scope_ir_to_fungible_type_group_v1(ir, None),
+        CompileEntryScope::FungibleTypeGroupV1For(type_name) => {
+            return scope_ir_to_fungible_type_group_v1(ir, Some(type_name));
+        }
+        _ => {}
     }
     let selected_item = ir
         .items
@@ -7044,6 +7097,7 @@ fn scope_ir_to_entry(ir: &ir::IrModule, scope: &CompileEntryScope) -> Result<ir:
             (CompileEntryScope::Action(name), ir::IrItem::Action(action)) => action.name == *name,
             (CompileEntryScope::Lock(name), ir::IrItem::Lock(lock)) => lock.name == *name,
             (CompileEntryScope::FungibleTypeGroupV1, _) => false,
+            (CompileEntryScope::FungibleTypeGroupV1For(_), _) => false,
             _ => false,
         })
         .cloned()
@@ -7053,6 +7107,9 @@ fn scope_ir_to_entry(ir: &ir::IrModule, scope: &CompileEntryScope) -> Result<ir:
             CompileEntryScope::FungibleTypeGroupV1 => {
                 CompileError::without_span("fungible type-group entry selection unexpectedly reached ordinary entry lookup")
             }
+            CompileEntryScope::FungibleTypeGroupV1For(type_name) => CompileError::without_span(format!(
+                "fungible type-group entry selection for '{type_name}' unexpectedly reached ordinary entry lookup"
+            )),
         })?;
 
     let action_by_name = ir
@@ -28538,6 +28595,8 @@ action business_transfer(coin: Coin, to: Address) -> next: Coin {
         assert!(!contract.payload_required);
         assert_eq!(contract.owner_mode, "script-args-32-byte-owner-lock-hash");
         assert_eq!(contract.owner_args_length_bytes, 32);
+        assert_eq!(contract.authority_modes, ["input-lock-hash", "tagged-input-type-script-hash"]);
+        assert_eq!(contract.authority_args_lengths_bytes, [32, 33]);
         assert!(contract.owner_authorized_mint);
         assert!(contract.owner_authorized_burn);
         assert!(contract.non_owner_input_group_non_empty);
@@ -28550,7 +28609,7 @@ action business_transfer(coin: Coin, to: Address) -> next: Coin {
         assert!(result.metadata.actions[0].create_set.is_empty());
         assert!(asm.contains("__cellscript_fungible_type_group_v1:"), "{asm}");
         assert!(asm.contains("call __cellscript_require_fungible_type_group_v1"), "{asm}");
-        assert!(asm.contains("owner authorization: current Script args are one 32-byte input lock hash"), "{asm}");
+        assert!(asm.contains("32-byte input lock hash or 0x01-tagged 32-byte input Type Script hash"), "{asm}");
         assert!(asm.contains("beqz t3, .Lxudt_group_mismatch"), "non-empty group check missing:\n{asm}");
         assert!(!asm.contains("business_transfer:"), "ordinary business action leaked into invariant artifact:\n{asm}");
         assert!(result.metadata.runtime.proof_plan.iter().any(|plan| {

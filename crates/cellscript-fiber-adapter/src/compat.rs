@@ -33,17 +33,26 @@ pub struct CheckedFiberAsset {
 }
 
 pub fn check_path(path: impl AsRef<Path>) -> anyhow::Result<CheckedFiberAsset> {
+    check_path_selected(path, None)
+}
+
+pub fn check_path_for(path: impl AsRef<Path>, type_name: impl Into<String>) -> anyhow::Result<CheckedFiberAsset> {
+    check_path_selected(path, Some(type_name.into()))
+}
+
+fn check_path_selected(path: impl AsRef<Path>, type_name: Option<String>) -> anyhow::Result<CheckedFiberAsset> {
     let path =
         camino::Utf8Path::from_path(path.as_ref()).ok_or_else(|| anyhow::anyhow!("CellScript source path is not valid UTF-8"))?;
-    let compile_result = cellscript::compile_path_with_fungible_type_group_entry(
-        path,
-        CompileOptions {
-            target: Some("riscv64-elf".to_string()),
-            target_profile: Some("ckb".to_string()),
-            primitive_compat: Some("0.17".to_string()),
-            ..Default::default()
-        },
-    )?;
+    let options = CompileOptions {
+        target: Some("riscv64-elf".to_string()),
+        target_profile: Some("ckb".to_string()),
+        primitive_compat: Some("0.17".to_string()),
+        ..Default::default()
+    };
+    let compile_result = match type_name {
+        Some(type_name) => cellscript::compile_path_with_fungible_type_group_entry_for(path, options, type_name)?,
+        None => cellscript::compile_path_with_fungible_type_group_entry(path, options)?,
+    };
     match analyze_compile_result(&compile_result) {
         FiberCompatibility::Compatible(descriptor) => Ok(CheckedFiberAsset { descriptor, compile_result }),
         FiberCompatibility::Incompatible(diagnostics) => Err(anyhow::anyhow!(render_diagnostics(&diagnostics))),
@@ -106,6 +115,8 @@ pub fn analyze_compile_result(result: &CompileResult) -> FiberCompatibility {
         || contract.runtime_helper != "fungible::require_type_group_v1"
         || contract.owner_mode != "script-args-32-byte-owner-lock-hash"
         || contract.owner_args_length_bytes != 32
+        || contract.authority_modes != ["input-lock-hash".to_string(), "tagged-input-type-script-hash".to_string()]
+        || contract.authority_args_lengths_bytes != [32, 33]
         || !contract.owner_authorized_mint
         || !contract.owner_authorized_burn
         || !contract.non_owner_input_group_non_empty
@@ -115,7 +126,7 @@ pub fn analyze_compile_result(result: &CompileResult) -> FiberCompatibility {
         diagnostics.push(FiberDiagnostic::incompatible(
             "FBR1004",
             "conservation",
-            "entry lacks the closed owner-lock issuance plus checked-runtime non-owner complete-group conservation contract",
+            "entry lacks the closed lock/type-authority issuance plus checked-runtime unauthorised complete-group conservation contract",
             "use one type_group/group sum-equality invariant eligible for fungible-type-group-v1",
         ));
     }
@@ -187,6 +198,8 @@ pub fn analyze_compile_result(result: &CompileResult) -> FiberCompatibility {
         group_scope: contract.group_scope.clone(),
         owner_mode: contract.owner_mode.clone(),
         owner_args_length_bytes: contract.owner_args_length_bytes,
+        authority_modes: contract.authority_modes.clone(),
+        authority_args_lengths_bytes: contract.authority_args_lengths_bytes.clone(),
         owner_authorized_mint: contract.owner_authorized_mint,
         owner_authorized_burn: contract.owner_authorized_burn,
         non_owner_input_group_non_empty: contract.non_owner_input_group_non_empty,
@@ -243,6 +256,27 @@ invariant singleton_output {
 resource Asset { quantity: u128 }
 "#;
 
+    const MULTI_ASSET_SOURCE: &str = r#"
+module multi_asset
+
+invariant usd_supply {
+    trigger: type_group
+    scope: group
+    reads: group_inputs<Usd>.quantity, group_outputs<Usd>.quantity
+    assert_sum(group_outputs<Usd>.quantity) == assert_sum(group_inputs<Usd>.quantity)
+}
+
+invariant eur_supply {
+    trigger: type_group
+    scope: group
+    reads: group_inputs<Eur>.quantity, group_outputs<Eur>.quantity
+    assert_sum(group_outputs<Eur>.quantity) == assert_sum(group_inputs<Eur>.quantity)
+}
+
+resource Usd { quantity: u128 }
+resource Eur { quantity: u128 }
+"#;
+
     #[test]
     fn analyzer_accepts_only_the_dedicated_structural_artifact() {
         let result = cellscript::compile_fungible_type_group_entry(
@@ -258,6 +292,8 @@ resource Asset { quantity: u128 }
         assert!(!descriptor.payload_required);
         assert_eq!(descriptor.owner_mode, "script-args-32-byte-owner-lock-hash");
         assert_eq!(descriptor.owner_args_length_bytes, 32);
+        assert_eq!(descriptor.authority_modes, ["input-lock-hash", "tagged-input-type-script-hash"]);
+        assert_eq!(descriptor.authority_args_lengths_bytes, [32, 33]);
         assert!(descriptor.non_owner_conservation_required);
     }
 
@@ -269,5 +305,25 @@ resource Asset { quantity: u128 }
         )
         .expect_err("additional asset rules must not be discarded by the dedicated entry");
         assert!(error.message.contains("no eligible invariant"), "unexpected diagnostic: {}", error.message);
+    }
+
+    #[test]
+    fn named_selector_compiles_each_asset_from_a_multi_asset_package() {
+        let options = || CompileOptions {
+            target: Some("riscv64-elf".to_string()),
+            target_profile: Some("ckb".to_string()),
+            ..Default::default()
+        };
+        assert!(cellscript::compile_fungible_type_group_entry(MULTI_ASSET_SOURCE, options()).is_err());
+        for selected in ["Usd", "Eur"] {
+            let result = cellscript::compile_fungible_type_group_entry_for(MULTI_ASSET_SOURCE, options(), selected).unwrap();
+            let FiberCompatibility::Compatible(descriptor) = analyze_compile_result(&result) else {
+                panic!("expected compatible descriptor for {selected}")
+            };
+            assert_eq!(descriptor.selected_type, selected);
+        }
+        let error = cellscript::compile_fungible_type_group_entry_for(MULTI_ASSET_SOURCE, options(), "Missing")
+            .expect_err("unknown selected asset must fail closed");
+        assert!(error.message.contains("selected type 'Missing'"), "unexpected diagnostic: {}", error.message);
     }
 }

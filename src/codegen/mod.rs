@@ -17422,7 +17422,7 @@ impl CodeGenerator {
             self.emit(format!(
                 "# cellscript abi: {detail}; owner-authorized issuance or non-empty input/output checked-u128 conservation"
             ));
-            self.emit("# cellscript abi: owner authorization: current Script args are one 32-byte input lock hash");
+            self.emit("# cellscript abi: supply authorization: 32-byte input lock hash or 0x01-tagged 32-byte input Type Script hash");
         } else {
             self.emit(format!("# cellscript abi: {detail}; requires non-empty input/output groups and conserves checked u128 sums"));
         }
@@ -17448,17 +17448,25 @@ impl CodeGenerator {
         const OWNER_LOCK_SIZE_OFFSET: usize = 224;
         const OWNER_INPUT_INDEX_OFFSET: usize = 232;
         const OWNER_AUTHORIZED_OFFSET: usize = 248;
-        const OWNER_SCRIPT_SIZE: u64 = 85;
+        const OWNER_AUTHORITY_FIELD_OFFSET: usize = 256;
+        const LEGACY_OWNER_SCRIPT_SIZE: u64 = 85;
+        const TAGGED_TYPE_OWNER_SCRIPT_SIZE: u64 = 86;
+        const TAGGED_TYPE_AUTHORITY: u64 = 1;
 
         let frame_size = if owner_mode { 272usize } else { 112usize };
         let ra_offset = frame_size - 8;
 
         let conservation_start = self.fresh_label("fungible_group_conservation_start");
         let owner_script_loaded = self.fresh_label("fungible_group_owner_script_loaded");
+        let owner_legacy_lock_mode = self.fresh_label("fungible_group_owner_legacy_lock_mode");
+        let owner_tagged_type_mode = self.fresh_label("fungible_group_owner_tagged_type_mode");
+        let owner_authority_mode_ready = self.fresh_label("fungible_group_owner_authority_mode_ready");
         let owner_scan_loop = self.fresh_label("fungible_group_owner_scan_loop");
         let owner_lock_loaded = self.fresh_label("fungible_group_owner_lock_loaded");
         let owner_not_matched = self.fresh_label("fungible_group_owner_not_matched");
         let owner_matched = self.fresh_label("fungible_group_owner_matched");
+        let owner_expected_type_hash = self.fresh_label("fungible_group_owner_expected_type_hash");
+        let owner_expected_hash_ready = self.fresh_label("fungible_group_owner_expected_hash_ready");
         let owner_authorized = self.fresh_label("fungible_group_owner_authorized");
         let owner_script_failed = self.fresh_label("fungible_group_owner_script_failed");
         let owner_script_malformed = self.fresh_label("fungible_group_owner_script_malformed");
@@ -17482,7 +17490,7 @@ impl CodeGenerator {
         }
 
         if owner_mode {
-            self.emit("# cellscript abi: load and validate current Script with exactly 32 bytes of owner-lock-hash args");
+            self.emit("# cellscript abi: authority args are legacy 32-byte lock hash or 0x01 plus 32-byte policy Type Script hash");
             self.emit("li t0, 96");
             self.emit(format!("sd t0, {}(sp)", CURRENT_SCRIPT_SIZE_OFFSET));
             self.emit(format!("addi a0, sp, {}", CURRENT_SCRIPT_BUFFER_OFFSET));
@@ -17495,17 +17503,42 @@ impl CodeGenerator {
 
             self.emit_label(&owner_script_loaded);
             self.emit(format!("ld t0, {}(sp)", CURRENT_SCRIPT_SIZE_OFFSET));
-            self.emit(format!("li t1, {}", OWNER_SCRIPT_SIZE));
+            self.emit(format!("li t1, {}", LEGACY_OWNER_SCRIPT_SIZE));
             self.emit("sub t2, t0, t1");
-            self.emit(format!("bnez t2, {}", owner_script_malformed));
-            for (offset, expected) in [(0usize, OWNER_SCRIPT_SIZE), (4, 16), (8, 48), (12, 49), (49, 32)] {
+            self.emit(format!("beqz t2, {}", owner_legacy_lock_mode));
+            self.emit(format!("li t1, {}", TAGGED_TYPE_OWNER_SCRIPT_SIZE));
+            self.emit("sub t2, t0, t1");
+            self.emit(format!("beqz t2, {}", owner_tagged_type_mode));
+            self.emit(format!("j {}", owner_script_malformed));
+
+            self.emit_label(&owner_legacy_lock_mode);
+            for (offset, expected) in [(0usize, LEGACY_OWNER_SCRIPT_SIZE), (4, 16), (8, 48), (12, 49), (49, 32)] {
                 self.emit_stack_u32_le_to("t0", CURRENT_SCRIPT_BUFFER_OFFSET + offset);
                 self.emit(format!("li t1, {}", expected));
                 self.emit("sub t2, t0, t1");
                 self.emit(format!("bnez t2, {}", owner_script_malformed));
             }
+            self.emit(format!("li t0, {}", CKB_CELL_FIELD_LOCK_HASH));
+            self.emit(format!("sd t0, {}(sp)", OWNER_AUTHORITY_FIELD_OFFSET));
+            self.emit(format!("j {}", owner_authority_mode_ready));
 
-            self.emit("# cellscript abi: owner mode succeeds only when an absolute Input lock hash equals Script args");
+            self.emit_label(&owner_tagged_type_mode);
+            for (offset, expected) in [(0usize, TAGGED_TYPE_OWNER_SCRIPT_SIZE), (4, 16), (8, 48), (12, 49), (49, 33)] {
+                self.emit_stack_u32_le_to("t0", CURRENT_SCRIPT_BUFFER_OFFSET + offset);
+                self.emit(format!("li t1, {}", expected));
+                self.emit("sub t2, t0, t1");
+                self.emit(format!("bnez t2, {}", owner_script_malformed));
+            }
+            self.emit(format!("lbu t0, {}(sp)", CURRENT_SCRIPT_BUFFER_OFFSET + 53));
+            self.emit(format!("li t1, {}", TAGGED_TYPE_AUTHORITY));
+            self.emit("sub t2, t0, t1");
+            self.emit(format!("bnez t2, {}", owner_script_malformed));
+            self.emit(format!("li t0, {}", CKB_CELL_FIELD_TYPE_HASH));
+            self.emit(format!("sd t0, {}(sp)", OWNER_AUTHORITY_FIELD_OFFSET));
+
+            self.emit_label(&owner_authority_mode_ready);
+
+            self.emit("# cellscript abi: supply authority succeeds only when an absolute Input lock/type hash equals Script args");
             self.emit(format!("sd zero, {}(sp)", OWNER_INPUT_INDEX_OFFSET));
             self.emit(format!("sd zero, {}(sp)", OWNER_AUTHORIZED_OFFSET));
             self.emit_label(&owner_scan_loop);
@@ -17516,13 +17549,16 @@ impl CodeGenerator {
             self.emit("li a2, 0");
             self.emit(format!("ld a3, {}(sp)", OWNER_INPUT_INDEX_OFFSET));
             self.emit(format!("li a4, {}", CKB_SOURCE_INPUT));
-            self.emit(format!("li a5, {}", CKB_CELL_FIELD_LOCK_HASH));
+            self.emit(format!("ld a5, {}(sp)", OWNER_AUTHORITY_FIELD_OFFSET));
             self.emit(format!("li a7, {}", abi.load_cell_by_field));
             self.emit("ecall");
             self.emit(format!("beqz a0, {}", owner_lock_loaded));
             self.emit(format!("li t0, {}", CKB_INDEX_OUT_OF_BOUND));
             self.emit("sub t1, a0, t0");
             self.emit(format!("beqz t1, {}", conservation_start));
+            self.emit(format!("li t0, {}", CKB_ITEM_MISSING));
+            self.emit("sub t1, a0, t0");
+            self.emit(format!("beqz t1, {}", owner_not_matched));
             self.emit(format!("j {}", owner_scan_failed));
 
             self.emit_label(&owner_lock_loaded);
@@ -17531,7 +17567,15 @@ impl CodeGenerator {
             self.emit("sub t2, t0, t1");
             self.emit(format!("bnez t2, {}", owner_scan_failed));
             self.emit(format!("addi a0, sp, {}", OWNER_LOCK_BUFFER_OFFSET));
+            self.emit(format!("ld t0, {}(sp)", OWNER_AUTHORITY_FIELD_OFFSET));
+            self.emit(format!("li t1, {}", CKB_CELL_FIELD_TYPE_HASH));
+            self.emit("sub t2, t0, t1");
+            self.emit(format!("beqz t2, {}", owner_expected_type_hash));
             self.emit(format!("addi a1, sp, {}", CURRENT_SCRIPT_BUFFER_OFFSET + 53));
+            self.emit(format!("j {}", owner_expected_hash_ready));
+            self.emit_label(&owner_expected_type_hash);
+            self.emit(format!("addi a1, sp, {}", CURRENT_SCRIPT_BUFFER_OFFSET + 54));
+            self.emit_label(&owner_expected_hash_ready);
             self.emit("li a2, 32");
             self.emit("call __cellscript_memcmp_fixed");
             self.emit(format!("beqz a0, {}", owner_matched));

@@ -39,6 +39,8 @@ pub struct FiberAssetDescriptor {
     pub group_scope: String,
     pub owner_mode: String,
     pub owner_args_length_bytes: usize,
+    pub authority_modes: Vec<String>,
+    pub authority_args_lengths_bytes: Vec<usize>,
     pub owner_authorized_mint: bool,
     pub owner_authorized_burn: bool,
     pub non_owner_input_group_non_empty: bool,

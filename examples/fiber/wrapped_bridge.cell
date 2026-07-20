@@ -1,0 +1,62 @@
+module cellscript::fiber::wrapped_bridge
+
+invariant wrapped_asset_conservation {
+    trigger: type_group
+    scope: group
+    reads: group_inputs<WrappedAsset>.quantity, group_outputs<WrappedAsset>.quantity
+    assert_sum(group_outputs<WrappedAsset>.quantity) == assert_sum(group_inputs<WrappedAsset>.quantity)
+}
+
+resource WrappedAsset has store, create, consume, burn {
+    quantity: u128,
+}
+
+#[type_id("cellscript::fiber::wrapped_bridge::BridgePolicy:v1")]
+resource BridgePolicy has store, create, consume, replace
+    identity(ckb_type_id)
+{
+    locked_units: u128,
+    issued_units: u128,
+    event_nonce: u64,
+}
+
+action create_bridge(controller: Address) -> BridgePolicy {
+    verification
+        create_unique<BridgePolicy>(identity = ckb_type_id) {
+            locked_units: 0,
+            issued_units: 0,
+            event_nonce: 0,
+        } with_lock(controller)
+}
+
+action deposit(
+    bridge_before: BridgePolicy,
+    recipient: Address,
+    quantity: u128,
+) -> (bridge_after: BridgePolicy, wrapped: WrappedAsset) {
+    transition bridge_before -> bridge_after
+
+    verification
+        require bridge_after.locked_units == bridge_before.locked_units + quantity, "locked backing mismatch"
+        require bridge_after.issued_units == bridge_before.issued_units + quantity, "wrapped supply mismatch"
+        require bridge_after.locked_units >= bridge_before.locked_units, "locked backing overflow"
+        require bridge_after.issued_units >= bridge_before.issued_units, "wrapped supply overflow"
+        require bridge_after.event_nonce == bridge_before.event_nonce + 1, "bridge nonce mismatch"
+        require bridge_after.issued_units <= bridge_after.locked_units, "wrapped supply exceeds backing"
+        create wrapped = WrappedAsset { quantity } with_lock(recipient)
+}
+
+action redeem(
+    bridge_before: BridgePolicy,
+    wrapped: WrappedAsset,
+) -> bridge_after: BridgePolicy {
+    transition bridge_before -> bridge_after
+
+    verification
+        require wrapped.quantity <= bridge_before.issued_units, "redeem exceeds wrapped supply"
+        require wrapped.quantity <= bridge_before.locked_units, "redeem exceeds locked backing"
+        require bridge_after.locked_units == bridge_before.locked_units - wrapped.quantity, "locked backing mismatch"
+        require bridge_after.issued_units == bridge_before.issued_units - wrapped.quantity, "wrapped supply mismatch"
+        require bridge_after.event_nonce == bridge_before.event_nonce + 1, "bridge nonce mismatch"
+        destroy wrapped
+}

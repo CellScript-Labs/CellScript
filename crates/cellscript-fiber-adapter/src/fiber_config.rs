@@ -137,7 +137,7 @@ pub fn build_fiber_udt_config(
     cell_deps: Vec<FiberUdtDep>,
 ) -> anyhow::Result<(FiberUdtArgInfo, ExactArgsMatcherEvidence)> {
     let asset_script = asset_script.clone().canonicalized()?;
-    canonical_hex(&asset_script.args, Some(32), "asset_script.args")?;
+    validate_authority_args(&asset_script.args)?;
     let matcher = exact_args_matcher(&asset_script.args)?;
     let config = FiberUdtArgInfo {
         name: name.into(),
@@ -151,6 +151,18 @@ pub fn build_fiber_udt_config(
     };
     config.validate()?;
     Ok((config, matcher))
+}
+
+fn validate_authority_args(args: &str) -> anyhow::Result<()> {
+    let args = canonical_hex(args, None, "asset_script.args")?;
+    let bytes = hex::decode(&args[2..])?;
+    if bytes.len() == 32 || (bytes.len() == 33 && bytes[0] == 1) {
+        Ok(())
+    } else {
+        anyhow::bail!(
+            "asset_script.args must be a 32-byte input Lock Script hash or 0x01 followed by a 32-byte input Type Script hash"
+        )
+    }
 }
 
 pub fn render_fiber_config_overlay(config: &FiberUdtArgInfo) -> anyhow::Result<String> {
@@ -269,6 +281,23 @@ mod tests {
         assert_eq!(first, second);
         assert!(first.contains(&format!("args: \"^{}$\"", owner_args)));
         assert!(first.contains("auto_accept_amount: 42"));
+    }
+
+    #[test]
+    fn tagged_type_script_authority_is_accepted_and_other_tags_fail_closed() {
+        let tagged = format!("0x01{}", "22".repeat(32));
+        let script =
+            ScriptIdentity { code_hash: format!("0x{}", "ab".repeat(32)), hash_type: "data2".to_string(), args: tagged.clone() };
+        let (config, matcher) = build_fiber_udt_config("policy-asset", &script, None, vec![direct_dep()]).unwrap();
+        assert_eq!(matcher.intended_args, tagged);
+        assert_eq!(config.script.args, format!("^{tagged}$"));
+
+        let invalid = ScriptIdentity {
+            code_hash: format!("0x{}", "ab".repeat(32)),
+            hash_type: "data2".to_string(),
+            args: format!("0x02{}", "22".repeat(32)),
+        };
+        assert!(build_fiber_udt_config("invalid", &invalid, None, vec![direct_dep()]).is_err());
     }
 
     #[test]

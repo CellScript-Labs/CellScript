@@ -1,0 +1,38 @@
+module cellscript::fiber::fixed_supply
+
+invariant fixed_asset_conservation {
+    trigger: type_group
+    scope: group
+    reads: group_inputs<FixedAsset>.quantity, group_outputs<FixedAsset>.quantity
+    assert_sum(group_outputs<FixedAsset>.quantity) == assert_sum(group_inputs<FixedAsset>.quantity)
+}
+
+resource FixedAsset has store, create, consume {
+    quantity: u128,
+}
+
+#[type_id("cellscript::fiber::fixed_supply::OneShotGenesisAuthority:v1")]
+resource OneShotGenesisAuthority has store, create, consume, burn
+    identity(ckb_type_id)
+{
+    initial_supply: u128,
+}
+
+action create_genesis_authority(initial_supply: u128, controller: Address) -> OneShotGenesisAuthority {
+    verification
+        require initial_supply > 0, "initial supply must be positive"
+        create_unique<OneShotGenesisAuthority>(identity = ckb_type_id) { initial_supply } with_lock(controller)
+}
+
+action initialize(authority: OneShotGenesisAuthority, recipient: Address) -> asset: FixedAsset {
+    verification
+        require authority.initial_supply > 0, "initial supply must be positive"
+        destroy_singleton_type(authority)
+        create asset = FixedAsset { quantity: authority.initial_supply } with_lock(recipient)
+}
+
+action transfer(asset: FixedAsset, recipient: Address) -> next: FixedAsset {
+    verification
+        consume asset
+        create next = FixedAsset { quantity: asset.quantity } with_lock(recipient)
+}

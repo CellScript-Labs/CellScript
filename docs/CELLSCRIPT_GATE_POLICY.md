@@ -39,7 +39,13 @@ channel, routed a payment, or settled on chain.
 Full mode consumes externally produced `compatibility.json` and
 `acceptance.json` reports from a pinned Fiber checkout. It validates exact
 revision/fingerprint bindings and requires every declared positive and negative
-matrix row. The script does not start, restart, configure, sign for, or stop
+matrix row. Every completed row and certified topology report must cite a
+non-empty regular file beneath an explicit evidence root together with its CKB
+Blake2b-256 digest. Absolute paths, parent traversal, symlinks, missing files,
+and digest mismatches fail closed. These bindings prove evidence-bundle
+integrity, not who produced it. Fiber's native `node_info` exposes a seven-hex
+build abbreviation, so full mode also checks the selected checkout's complete
+40-hex HEAD. The script does not start, restart, configure, sign for, or stop
 operator-owned CKB/Fiber nodes. Until the live matrix is stable and explicitly
 promoted, neither `dev`, `ci`, `backend`, nor `release` runs this external
 integration boundary.
@@ -53,7 +59,9 @@ On 2026-07-20, bounded non-gating local-devnet runs passed Fiber's official
 `watchtower/force-close-with-pending-tlcs-and-udt` collections with the exact
 CellScript artifact and generated native configuration. Those observations are
 recorded in the roadmap, but do not satisfy full mode because the CKB executable
-was a dirty local build and the complete declared matrix was not produced.
+and Fiber source/build were observed only in a bounded local fixture, no signed
+announcement report was captured, and the complete declared matrix was not
+produced.
 
 ### Nightly 0.22 compiler evidence
 
@@ -96,11 +104,12 @@ checked-static typing plus checked-runtime read evidence.
 Consumers must reject unsupported schema versions instead of silently dropping
 these fields.
 
-Schema 54 additionally carries
+Schema 55 additionally carries
 `runtime.fungible_type_group_entry`. That record is present only for the
 dedicated, payload-free `fungible-type-group-v1` compilation path and binds the
-selected type, 16-byte field, runtime helper, witness policy, 32-byte owner-lock
-issuance/destruction rule, and non-owner non-empty/conservation contract.
+selected type, 16-byte field, runtime helper, witness policy, the legacy
+32-byte input-Lock authority and tagged 33-byte input-Type-Script authority,
+and the unauthorised non-empty/conservation contract.
 Ordinary action compilation must not emit it.
 
 Concrete payload enum evidence is top-level under `enum_layouts`. Every record

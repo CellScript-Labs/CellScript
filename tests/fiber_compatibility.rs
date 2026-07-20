@@ -59,6 +59,19 @@ fn fungible_type_group_entry_accepts_owner_authorized_issuance_and_destruction()
 }
 
 #[test]
+fn fungible_type_group_entry_accepts_tagged_policy_type_authority() {
+    for (inputs, outputs, name) in [
+        (Vec::new(), vec![amount_data(100)], "policy-authorized issuance"),
+        (vec![amount_data(100)], Vec::new(), "policy-authorized destruction"),
+    ] {
+        let result = execute_amounts_with_type_authority(inputs, outputs, true);
+        assert!(result.is_ok(), "{name} rejected: {result:#?}");
+    }
+    let result = execute_amounts_with_type_authority(Vec::new(), vec![amount_data(100)], false);
+    assert!(result.is_err(), "tagged Type Script authority passed without a matching input");
+}
+
+#[test]
 fn fungible_type_group_entry_keeps_codec_and_overflow_checks_in_owner_mode() {
     let cases = [
         (Vec::new(), vec![Bytes::from(vec![0u8; 15])], "owner issuance with short data"),
@@ -104,7 +117,7 @@ fn execute_amounts(
     fiber_witness: bool,
     owner_authorized: bool,
 ) -> Result<u64, ckb_testtool::ckb_error::Error> {
-    execute_amounts_with_optional_owner_args(input_data, output_data, fiber_witness, owner_authorized, None)
+    execute_amounts_with_optional_owner_args(input_data, output_data, fiber_witness, owner_authorized, None, false, false)
 }
 
 fn execute_amounts_with_owner_args(
@@ -114,7 +127,15 @@ fn execute_amounts_with_owner_args(
     owner_authorized: bool,
     owner_args: Bytes,
 ) -> Result<u64, ckb_testtool::ckb_error::Error> {
-    execute_amounts_with_optional_owner_args(input_data, output_data, fiber_witness, owner_authorized, Some(owner_args))
+    execute_amounts_with_optional_owner_args(input_data, output_data, fiber_witness, owner_authorized, Some(owner_args), false, false)
+}
+
+fn execute_amounts_with_type_authority(
+    input_data: Vec<Bytes>,
+    output_data: Vec<Bytes>,
+    policy_authorized: bool,
+) -> Result<u64, ckb_testtool::ckb_error::Error> {
+    execute_amounts_with_optional_owner_args(input_data, output_data, false, false, None, true, policy_authorized)
 }
 
 fn execute_amounts_with_optional_owner_args(
@@ -123,6 +144,8 @@ fn execute_amounts_with_optional_owner_args(
     fiber_witness: bool,
     owner_authorized: bool,
     owner_args: Option<Bytes>,
+    tagged_type_authority: bool,
+    policy_authorized: bool,
 ) -> Result<u64, ckb_testtool::ckb_error::Error> {
     let mut context = Context::new_with_deterministic_rng();
     let fungible_out_point = context.deploy_cell(Bytes::from(compile_fungible_elf()));
@@ -130,14 +153,23 @@ fn execute_amounts_with_optional_owner_args(
     let normal_lock = context.build_script(&lock_out_point, Bytes::from(vec![0x01])).expect("normal always-success lock");
     let owner_lock = context.build_script(&lock_out_point, Bytes::from(vec![0x02])).expect("owner always-success lock");
     let owner_lock_hash = Bytes::copy_from_slice(owner_lock.calc_script_hash().as_slice());
-    let fungible_script =
-        context.build_script(&fungible_out_point, owner_args.unwrap_or(owner_lock_hash)).expect("fungible type script");
+    let policy_script = context.build_script(&lock_out_point, Bytes::from(vec![0x03])).expect("policy type script");
+    let authority_args = if tagged_type_authority {
+        let mut args = vec![1u8];
+        args.extend_from_slice(policy_script.calc_script_hash().as_slice());
+        Bytes::from(args)
+    } else {
+        owner_args.unwrap_or(owner_lock_hash)
+    };
+    let fungible_script = context.build_script(&fungible_out_point, authority_args).expect("fungible type script");
     let capacity_lock = if owner_authorized { owner_lock.clone() } else { normal_lock.clone() };
 
-    let capacity_input = context.create_cell(
-        packed::CellOutput::new_builder().capacity::<packed::Uint64>(1_000_000_000_000u64.pack()).lock(capacity_lock).build(),
-        Bytes::default(),
-    );
+    let capacity_output = packed::CellOutput::new_builder()
+        .capacity::<packed::Uint64>(1_000_000_000_000u64.pack())
+        .lock(capacity_lock)
+        .type_(if policy_authorized { packed::ScriptOpt::from(policy_script) } else { packed::ScriptOpt::default() })
+        .build();
+    let capacity_input = context.create_cell(capacity_output, Bytes::default());
     let mut input_out_points = vec![capacity_input];
     for data in input_data {
         input_out_points.push(

@@ -10,6 +10,7 @@ ACCEPTANCE_REPORT=""
 COMPATIBILITY_REPORT=""
 REGISTRATION_REPORT=""
 TOPOLOGY_REPORT=""
+EVIDENCE_ROOT=""
 
 usage() {
   cat <<'USAGE'
@@ -23,6 +24,7 @@ Runs the non-gating CellScript 0.22 Fiber acceptance boundary.
   --compatibility-report <path>  Generated compatibility.json bound to the same environment.
   --registration-report <path>   LocalNodeAdvertised registration.json for the same binding.
   --topology-report <path>       TopologyCertified topology.json for the same binding.
+  --evidence-root <path>         Root containing content-addressed evidence files.
   --fiber-repo <path>            Fiber checkout used by the topology (default: ../fiber).
   --fiber-revision <commit>      Exact accepted Fiber commit.
   -h, --help                     Show this help.
@@ -58,6 +60,10 @@ while [[ $# -gt 0 ]]; do
       TOPOLOGY_REPORT="${2:?missing value for --topology-report}"
       shift 2
       ;;
+    --evidence-root)
+      EVIDENCE_ROOT="${2:?missing value for --evidence-root}"
+      shift 2
+      ;;
     --fiber-repo)
       FIBER_REPO="${2:?missing value for --fiber-repo}"
       shift 2
@@ -89,8 +95,8 @@ if [[ "$MODE" == "static" ]]; then
   exit 0
 fi
 
-if [[ -z "$ACCEPTANCE_REPORT" || -z "$COMPATIBILITY_REPORT" || -z "$REGISTRATION_REPORT" || -z "$TOPOLOGY_REPORT" ]]; then
-  echo "--full requires acceptance, compatibility, registration, and topology reports" >&2
+if [[ -z "$ACCEPTANCE_REPORT" || -z "$COMPATIBILITY_REPORT" || -z "$REGISTRATION_REPORT" || -z "$TOPOLOGY_REPORT" || -z "$EVIDENCE_ROOT" ]]; then
+  echo "--full requires acceptance, compatibility, registration, topology, and evidence-root arguments" >&2
   exit 2
 fi
 if [[ ! -d "$FIBER_REPO/.git" && ! -f "$FIBER_REPO/.git" ]]; then
@@ -127,5 +133,6 @@ PY
 cargo run --locked -p cellscript-fiber-adapter --bin cellscript-fiber -- accept "$ACCEPTANCE_REPORT" \
   --compatibility-report "$COMPATIBILITY_REPORT" \
   --registration-report "$REGISTRATION_REPORT" \
-  --topology-report "$TOPOLOGY_REPORT"
-echo "CellScript Fiber full lifecycle evidence passed for $FIBER_REVISION."
+  --topology-report "$TOPOLOGY_REPORT" \
+  --evidence-root "$EVIDENCE_ROOT"
+echo "CellScript Fiber full evidence-bundle integrity passed for $FIBER_REVISION; operator identity and binary provenance remain external."

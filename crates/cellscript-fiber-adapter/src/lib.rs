@@ -12,7 +12,7 @@ mod evidence;
 mod fiber_config;
 mod fiber_rpc;
 
-pub use compat::{analyze_compile_result, check_path, CheckedFiberAsset, FiberCompatibility, FiberDiagnostic};
+pub use compat::{analyze_compile_result, check_path, check_path_for, CheckedFiberAsset, FiberCompatibility, FiberDiagnostic};
 pub use deployment::{
     resolve_asset_from_action_plan, resolve_asset_from_live_cell, verify_code_deployment, CkbEvidenceProvider, CodeDeploymentIdentity,
     DependencyMode, HttpCkbEvidenceProvider, LiveCell, LiveCellDepEvidence, OutPointRef, ResolvedAssetScript,
@@ -20,8 +20,8 @@ pub use deployment::{
 };
 pub use descriptor::{FiberAssetDescriptor, ScriptIdentity};
 pub use evidence::{
-    write_json_atomic, AcceptanceMatrixReportV1, AcceptanceMatrixRow, EvidenceBinding, FiberCompatibilityReportV1, OperationalState,
-    RegistrationReportV1, TopologyReportV1,
+    write_json_atomic, AcceptanceMatrixReportV1, AcceptanceMatrixRow, EvidenceBinding, EvidenceReference, FiberCompatibilityReportV1,
+    OperationalState, RegistrationReportV1, TopologyReportV1,
 };
 pub use fiber_config::{
     build_fiber_udt_config, materialize_fiber_config, render_fiber_config_overlay, ExactArgsMatcherEvidence, FiberCellDep,
@@ -36,13 +36,20 @@ pub const FIBER_TOPOLOGY_SCHEMA: &str = "cellscript-fiber-topology-v1";
 pub const FIBER_ACCEPTANCE_SCHEMA: &str = "cellscript-fiber-acceptance-v1";
 pub const FUNGIBLE_ENTRY_CONTRACT: &str = "fungible-type-group-v1";
 pub const AUDITED_FIBER_REVISION: &str = "04e091b08953368aa5ee977f562ad628c3000ff4";
-pub const AUDITED_FIBER_REVISIONS: &[&str] = &[
-    AUDITED_FIBER_REVISION,
-    // Source-equivalent to the baseline for every runtime/config/RPC file;
-    // the only intervening change is a .gitignore entry.
-    "e00d0e3c9a9284ea1c7705d360be615cfce1a5c6",
-];
+pub const AUDITED_FIBER_REVISIONS: &[&str] = &[AUDITED_FIBER_REVISION];
 
 pub fn is_audited_fiber_revision(revision: &str) -> bool {
     AUDITED_FIBER_REVISIONS.contains(&revision)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_audited_fiber_revision, AUDITED_FIBER_REVISION};
+
+    #[test]
+    fn audited_fiber_revision_is_an_exact_allowlist() {
+        assert!(is_audited_fiber_revision(AUDITED_FIBER_REVISION));
+        assert!(!is_audited_fiber_revision("04e091b"));
+        assert!(!is_audited_fiber_revision("e00d0e3c9a9284ea1c7705d360be615cfce1a5c6"));
+    }
 }
