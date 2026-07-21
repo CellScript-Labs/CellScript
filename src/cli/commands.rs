@@ -4899,30 +4899,45 @@ fn resolve_registry_api_base(api_url: Option<String>) -> Result<String> {
     if trimmed.is_empty() {
         return Err(crate::error::CompileError::without_span("registry API URL is empty"));
     }
-    let _ = registry_origin_from_api_base(trimmed)?;
+    let _ = parse_registry_api_url(trimmed)?;
     Ok(trimmed.to_string())
 }
 
 fn registry_origin_from_api_base(api_base: &str) -> Result<String> {
-    let Some(scheme_end) = api_base.find("://") else {
-        return Err(crate::error::CompileError::without_span(format!(
-            "registry API URL '{}' must include http:// or https://",
-            api_base
-        )));
-    };
-    let scheme = &api_base[..scheme_end];
-    if scheme != "https" && scheme != "http" {
-        return Err(crate::error::CompileError::without_span(format!(
-            "registry API URL '{}' uses unsupported scheme '{}'",
-            api_base, scheme
-        )));
-    }
-    let rest = &api_base[scheme_end + 3..];
-    let host_end = rest.find('/').unwrap_or(rest.len());
-    if host_end == 0 {
+    Ok(parse_registry_api_url(api_base)?.origin().ascii_serialization())
+}
+
+fn parse_registry_api_url(api_base: &str) -> Result<reqwest::Url> {
+    let url = reqwest::Url::parse(api_base)
+        .map_err(|error| crate::error::CompileError::without_span(format!("invalid registry API URL '{}': {}", api_base, error)))?;
+    let Some(host) = url.host_str() else {
         return Err(crate::error::CompileError::without_span(format!("registry API URL '{}' has no host", api_base)));
+    };
+    let host = host.trim_start_matches('[').trim_end_matches(']');
+    let is_loopback =
+        host.eq_ignore_ascii_case("localhost") || host.parse::<std::net::IpAddr>().is_ok_and(|address| address.is_loopback());
+    match url.scheme() {
+        "https" => {}
+        "http" if is_loopback => {}
+        "http" => {
+            return Err(crate::error::CompileError::without_span(
+                "registry API URL must use HTTPS; plaintext HTTP is allowed only for loopback development servers",
+            ));
+        }
+        scheme => {
+            return Err(crate::error::CompileError::without_span(format!(
+                "registry API URL '{}' uses unsupported scheme '{}'",
+                api_base, scheme
+            )));
+        }
     }
-    Ok(format!("{}://{}", scheme, &rest[..host_end]))
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err(crate::error::CompileError::without_span("registry API URL must not contain credentials"));
+    }
+    if url.query().is_some() || url.fragment().is_some() {
+        return Err(crate::error::CompileError::without_span("registry API URL must not contain a query or fragment"));
+    }
+    Ok(url)
 }
 
 fn registry_publish_endpoint(api_base: &str, namespace: &str, name: &str) -> String {
@@ -5175,10 +5190,7 @@ fn submit_registry_publish_request(
     idempotency_key: &str,
     json_output: bool,
 ) -> Result<()> {
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(30))
-        .build()
-        .map_err(|error| crate::error::CompileError::without_span(format!("failed to build registry HTTP client: {}", error)))?;
+    let client = registry_http_client()?;
     let response = submit_registry_publish_request_with_retry(&client, endpoint, request, idempotency_key)?;
     let status = response.status();
     let body = response.text().map_err(|error| {
@@ -5208,6 +5220,14 @@ fn submit_registry_publish_request(
         }
     }
     Ok(())
+}
+
+fn registry_http_client() -> Result<reqwest::blocking::Client> {
+    reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|error| crate::error::CompileError::without_span(format!("failed to build registry HTTP client: {}", error)))
 }
 
 fn submit_registry_publish_request_with_retry(
@@ -5262,10 +5282,7 @@ fn submit_registry_json_request(
     success_label: &str,
     json_output: bool,
 ) -> Result<serde_json::Value> {
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(30))
-        .build()
-        .map_err(|error| crate::error::CompileError::without_span(format!("failed to build registry HTTP client: {}", error)))?;
+    let client = registry_http_client()?;
     let response = client.post(endpoint).json(body).send().map_err(|error| {
         crate::error::CompileError::without_span(format!("failed to submit registry request to '{}': {}", endpoint, error))
     })?;
@@ -9721,7 +9738,9 @@ fn ensure_new_package_destination(path: &Path) -> Result<()> {
 }
 
 fn init_git_repo(path: &Path) -> Result<bool> {
-    let output = std::process::Command::new("git").arg("init").arg("--quiet").arg(path).output().map_err(|error| {
+    // Absolute destinations are supported by `cellc new`; `--` keeps a
+    // destination beginning with '-' from being interpreted as a git option.
+    let output = std::process::Command::new("git").arg("init").arg("--quiet").arg("--").arg(path).output().map_err(|error| {
         crate::error::CompileError::without_span(format!("failed to run git init for '{}': {}", path.display(), error))
     })?;
     if !output.status.success() {
@@ -13829,6 +13848,43 @@ mod tests {
     #[test]
     fn test_command_execution() {
         let _cmd = Command::Clean(CleanArgs::default());
+    }
+
+    #[test]
+    fn registry_api_urls_require_https_except_for_loopback() {
+        assert_eq!(registry_origin_from_api_base("https://registry.example/api").unwrap(), "https://registry.example");
+        assert!(resolve_registry_api_base(Some("http://registry.example".to_string())).is_err());
+        assert!(resolve_registry_api_base(Some("http://127.0.0.1:8232".to_string())).is_ok());
+        assert!(resolve_registry_api_base(Some("http://[::1]:8232".to_string())).is_ok());
+        assert!(resolve_registry_api_base(Some("https://user:secret@registry.example".to_string())).is_err());
+        assert!(resolve_registry_api_base(Some("https://registry.example?next=http://internal".to_string())).is_err());
+    }
+
+    #[test]
+    fn registry_http_client_does_not_follow_redirects() {
+        use std::io::{Read, Write};
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0u8; 4096];
+            let _ = stream.read(&mut request).unwrap();
+            stream
+                .write_all(
+                    b"HTTP/1.1 307 Temporary Redirect\r\nLocation: http://127.0.0.1:9/internal\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                )
+                .unwrap();
+        });
+
+        let response = registry_http_client()
+            .unwrap()
+            .post(format!("http://{address}/publish"))
+            .body("signed metadata")
+            .send()
+            .expect("redirect response should be returned without following Location");
+        assert_eq!(response.status(), reqwest::StatusCode::TEMPORARY_REDIRECT);
+        server.join().unwrap();
     }
 
     #[test]

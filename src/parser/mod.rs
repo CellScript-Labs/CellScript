@@ -2,11 +2,18 @@ use crate::ast::*;
 use crate::error::{CompileError, Result, Span};
 use crate::lexer::token::{Token, TokenKind};
 
+const MAX_PARSE_RECURSION_DEPTH: usize = 32;
+
 pub struct Parser<'a> {
     tokens: &'a [Token],
     position: usize,
     recover: bool,
     diagnostics: Vec<CompileError>,
+    expression_depth: usize,
+    type_depth: usize,
+    unary_depth: usize,
+    statement_depth: usize,
+    if_depth: usize,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -26,11 +33,31 @@ struct TypePolicyDecls {
 
 impl<'a> Parser<'a> {
     pub fn new(tokens: &'a [Token]) -> Self {
-        Self { tokens, position: 0, recover: false, diagnostics: Vec::new() }
+        Self {
+            tokens,
+            position: 0,
+            recover: false,
+            diagnostics: Vec::new(),
+            expression_depth: 0,
+            type_depth: 0,
+            unary_depth: 0,
+            statement_depth: 0,
+            if_depth: 0,
+        }
     }
 
     pub fn new_recovering(tokens: &'a [Token]) -> Self {
-        Self { tokens, position: 0, recover: true, diagnostics: Vec::new() }
+        Self {
+            tokens,
+            position: 0,
+            recover: true,
+            diagnostics: Vec::new(),
+            expression_depth: 0,
+            type_depth: 0,
+            unary_depth: 0,
+            statement_depth: 0,
+            if_depth: 0,
+        }
     }
 
     fn current(&self) -> &Token {
@@ -1521,6 +1548,19 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_type(&mut self) -> Result<Type> {
+        if self.type_depth >= MAX_PARSE_RECURSION_DEPTH {
+            return Err(CompileError::new(
+                format!("type nesting exceeds the parser limit of {}", MAX_PARSE_RECURSION_DEPTH),
+                self.current().span,
+            ));
+        }
+        self.type_depth += 1;
+        let result = self.parse_type_inner();
+        self.type_depth -= 1;
+        result
+    }
+
+    fn parse_type_inner(&mut self) -> Result<Type> {
         let ty = match &self.current().kind {
             TokenKind::U8 => {
                 self.advance();
@@ -2092,6 +2132,19 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_stmt(&mut self) -> Result<Stmt> {
+        if self.statement_depth >= MAX_PARSE_RECURSION_DEPTH {
+            return Err(CompileError::new(
+                format!("statement nesting exceeds the parser limit of {}", MAX_PARSE_RECURSION_DEPTH),
+                self.current().span,
+            ));
+        }
+        self.statement_depth += 1;
+        let result = self.parse_stmt_inner();
+        self.statement_depth -= 1;
+        result
+    }
+
+    fn parse_stmt_inner(&mut self) -> Result<Stmt> {
         let stmt = match &self.current().kind {
             TokenKind::Let => Stmt::Let(self.parse_let()?),
             TokenKind::Return => Stmt::Return(self.parse_return()?),
@@ -2149,6 +2202,19 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_if(&mut self) -> Result<IfStmt> {
+        if self.if_depth >= MAX_PARSE_RECURSION_DEPTH {
+            return Err(CompileError::new(
+                format!("if nesting exceeds the parser limit of {}", MAX_PARSE_RECURSION_DEPTH),
+                self.current().span,
+            ));
+        }
+        self.if_depth += 1;
+        let result = self.parse_if_inner();
+        self.if_depth -= 1;
+        result
+    }
+
+    fn parse_if_inner(&mut self) -> Result<IfStmt> {
         let start_span = self.current().span;
         self.expect(TokenKind::If)?;
 
@@ -2218,6 +2284,19 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_expr(&mut self) -> Result<Expr> {
+        if self.expression_depth >= MAX_PARSE_RECURSION_DEPTH {
+            return Err(CompileError::new(
+                format!("expression nesting exceeds the parser limit of {}", MAX_PARSE_RECURSION_DEPTH),
+                self.current().span,
+            ));
+        }
+        self.expression_depth += 1;
+        let result = self.parse_expr_inner();
+        self.expression_depth -= 1;
+        result
+    }
+
+    fn parse_expr_inner(&mut self) -> Result<Expr> {
         self.skip_newlines();
         self.parse_assignment()
     }
@@ -2442,6 +2521,19 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_unary(&mut self) -> Result<Expr> {
+        if self.unary_depth >= MAX_PARSE_RECURSION_DEPTH {
+            return Err(CompileError::new(
+                format!("unary expression nesting exceeds the parser limit of {}", MAX_PARSE_RECURSION_DEPTH),
+                self.current().span,
+            ));
+        }
+        self.unary_depth += 1;
+        let result = self.parse_unary_inner();
+        self.unary_depth -= 1;
+        result
+    }
+
+    fn parse_unary_inner(&mut self) -> Result<Expr> {
         if self.check(&TokenKind::Minus) {
             let start_span = self.current().span;
             self.advance();
@@ -4300,5 +4392,54 @@ invariant bad {
         let tokens = lex(input).unwrap();
         let err = parse(&tokens).unwrap_err();
         assert!(err.message.contains("unbounded forall"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn rejects_deeply_nested_expressions_without_stack_overflow() {
+        let expression = format!("{}1{}", "(".repeat(MAX_PARSE_RECURSION_DEPTH + 1), ")".repeat(MAX_PARSE_RECURSION_DEPTH + 1));
+        let input = format!("module test\naction deep() -> u64 {{\nverification\nreturn {expression}\n}}");
+        let tokens = lex(&input).unwrap();
+        let error = parse(&tokens).expect_err("deep expression must hit the parser recursion budget");
+        assert!(error.message.contains("expression nesting exceeds"), "unexpected error: {}", error.message);
+    }
+
+    #[test]
+    fn rejects_deeply_nested_unary_expressions_without_stack_overflow() {
+        let expression = format!("{}1", "-".repeat(MAX_PARSE_RECURSION_DEPTH + 1));
+        let input = format!("module test\naction deep() -> i32 {{\nverification\nreturn {expression}\n}}");
+        let tokens = lex(&input).unwrap();
+        let error = parse(&tokens).expect_err("deep unary expression must hit the parser recursion budget");
+        assert!(error.message.contains("unary expression nesting exceeds"), "unexpected error: {}", error.message);
+    }
+
+    #[test]
+    fn rejects_deeply_nested_types_without_stack_overflow() {
+        let ty = format!("{}u8{}", "[".repeat(MAX_PARSE_RECURSION_DEPTH + 1), "; 1]".repeat(MAX_PARSE_RECURSION_DEPTH + 1));
+        let input = format!("module test\nstruct Deep {{\nvalue: {ty}\n}}");
+        let tokens = lex(&input).unwrap();
+        let error = parse(&tokens).expect_err("deep type must hit the parser recursion budget");
+        assert!(error.message.contains("type nesting exceeds"), "unexpected error: {}", error.message);
+    }
+
+    #[test]
+    fn rejects_deeply_nested_statements_without_stack_overflow() {
+        let nested = format!(
+            "{}return 1\n{}",
+            "if true {\n".repeat(MAX_PARSE_RECURSION_DEPTH + 1),
+            "}\n".repeat(MAX_PARSE_RECURSION_DEPTH + 1)
+        );
+        let input = format!("module test\naction deep() -> u64 {{\nverification\n{nested}}}");
+        let tokens = lex(&input).unwrap();
+        let error = parse(&tokens).expect_err("deep statements must hit the parser recursion budget");
+        assert!(error.message.contains("statement nesting exceeds"), "unexpected error: {}", error.message);
+    }
+
+    #[test]
+    fn rejects_deep_else_if_chains_without_stack_overflow() {
+        let chain = format!("{}{{ return 1 }}", "if true { return 1 } else ".repeat(MAX_PARSE_RECURSION_DEPTH + 1));
+        let input = format!("module test\naction deep() -> u64 {{\nverification\n{chain}\n}}");
+        let tokens = lex(&input).unwrap();
+        let error = parse(&tokens).expect_err("deep else-if chain must hit the parser recursion budget");
+        assert!(error.message.contains("if nesting exceeds"), "unexpected error: {}", error.message);
     }
 }

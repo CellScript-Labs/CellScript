@@ -26,6 +26,21 @@ runtime error `25 entry-witness-abi-invalid`.
 Entries whose parameters are entirely runtime-bound or `lock_args`-backed do not
 require a witness envelope.
 
+## Compiler Buffer And Frame Bounds
+
+The generated entry trampoline has a 4096-byte local witness decode buffer and
+a 1024-byte local `Script` buffer. These are CellScript process-safety limits,
+not CKB consensus limits. A witness that cannot fit the local decode buffer is
+rejected before copying.
+
+The trampoline frame size is derived from the two buffers, their size/cursor
+slots, 208 reserved ABI bytes, and the saved return address. It is currently
+5376 bytes and 16-byte aligned. The return-address offset is derived from that
+frame size rather than maintained as an independent magic number. Outgoing
+arguments beyond `a7` are staged below the current frame, then exposed by the
+caller's stack adjustment; a callee prologue grows in the opposite direction
+and cannot overlap the entry buffers.
+
 ## Parameter Order
 
 Parameters are encoded in source order. The ABI does not include names or field

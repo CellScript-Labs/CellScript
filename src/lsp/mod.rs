@@ -145,13 +145,11 @@ impl LspServer {
     }
 
     pub fn open_document(&mut self, uri: String, content: String) {
-        self.documents.insert(uri.clone(), content.clone());
-        self.parse_document(&uri, &content);
+        self.store_document(uri, content);
     }
 
     pub fn update_document(&mut self, uri: String, content: String) {
-        self.documents.insert(uri.clone(), content.clone());
-        self.parse_document(&uri, &content);
+        self.store_document(uri, content);
     }
 
     /// Apply incremental text changes to a document and re-parse.
@@ -173,16 +171,42 @@ impl LspServer {
                     content = apply_incremental_change(&content, range, &change.text);
                 }
             }
+            if content.len() > crate::MAX_SOURCE_BYTES {
+                self.reject_oversized_document(uri);
+                return;
+            }
         }
 
-        self.documents.insert(uri.to_string(), content.clone());
-        self.parse_document(uri, &content);
+        self.store_document(uri.to_string(), content);
     }
 
     pub fn close_document(&mut self, uri: &str) {
         self.documents.remove(uri);
         self.ast_cache.remove(uri);
         self.diagnostics.remove(uri);
+    }
+
+    fn store_document(&mut self, uri: String, content: String) {
+        if content.len() > crate::MAX_SOURCE_BYTES {
+            self.reject_oversized_document(&uri);
+            return;
+        }
+        self.parse_document(&uri, &content);
+        self.documents.insert(uri, content);
+    }
+
+    fn reject_oversized_document(&mut self, uri: &str) {
+        self.documents.remove(uri);
+        self.ast_cache.remove(uri);
+        self.diagnostics.insert(
+            uri.to_string(),
+            vec![Diagnostic {
+                range: Range { start: Position { line: 0, character: 0 }, end: Position { line: 0, character: 0 } },
+                severity: DiagnosticSeverity::Error,
+                message: format!("source exceeds the {} byte compiler limit", crate::MAX_SOURCE_BYTES),
+                source: "cellscript".to_string(),
+            }],
+        );
     }
 
     fn parse_document(&mut self, uri: &str, content: &str) {
@@ -2741,6 +2765,23 @@ mod tests {
 
         let keywords: Vec<_> = completions.iter().filter(|c| c.kind == CompletionItemKind::Keyword).collect();
         assert!(!keywords.is_empty());
+    }
+
+    #[test]
+    fn lsp_rejects_oversized_documents_without_retaining_them() {
+        let mut server = LspServer::new();
+        let uri = "file:///oversized.cell".to_string();
+        let source = " ".repeat(crate::MAX_SOURCE_BYTES + 1);
+
+        server.open_document(uri.clone(), source.clone());
+        assert!(!server.documents.contains_key(&uri));
+        assert!(server.get_diagnostics(&uri)[0].message.contains("source exceeds"));
+
+        server.open_document(uri.clone(), "module ok".to_string());
+        assert!(server.documents.contains_key(&uri));
+        server.update_document(uri.clone(), source);
+        assert!(!server.documents.contains_key(&uri));
+        assert!(server.get_diagnostics(&uri)[0].message.contains("source exceeds"));
     }
 
     #[test]

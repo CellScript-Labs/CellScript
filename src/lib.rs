@@ -205,6 +205,10 @@ pub const METADATA_SCHEMA_VERSION: u32 = 55;
 pub const SOURCE_METADATA_SCHEMA_VERSION: u32 = 1;
 pub const ARTIFACT_METADATA_SCHEMA_VERSION: u32 = 1;
 pub const CONSTRAINTS_METADATA_SCHEMA_VERSION: u32 = 1;
+/// Maximum UTF-8 source bytes accepted by a single compiler input.
+///
+/// This is a process-safety boundary shared by native, LSP, and WASM callers.
+pub const MAX_SOURCE_BYTES: usize = 1024 * 1024;
 const STACK_COLLECTION_BACKING_BYTES: usize = 256;
 pub const ENTRY_WITNESS_ABI: &str = "cellscript-entry-witness-v1";
 pub(crate) const ENTRY_WITNESS_ABI_MAGIC: &[u8; 8] = b"CSARGv1\0";
@@ -1773,13 +1777,19 @@ pub(crate) fn hex_encode(bytes: &[u8]) -> String {
     out
 }
 
-pub fn ckb_blake2b256(data: &[u8]) -> [u8; 32] {
+fn ckb_blake2b256_parts(parts: &[&[u8]]) -> [u8; 32] {
     let mut state = blake2b_simd::Params::new().hash_length(32).personal(CKB_DEFAULT_HASH_PERSONALIZATION).to_state();
-    state.update(data);
+    for part in parts {
+        state.update(part);
+    }
     let digest = state.finalize();
     let mut out = [0u8; 32];
     out.copy_from_slice(digest.as_bytes());
     out
+}
+
+pub fn ckb_blake2b256(data: &[u8]) -> [u8; 32] {
+    ckb_blake2b256_parts(&[data])
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -5184,6 +5194,13 @@ fn load_virtual_project_for_entry_diagnostics(
 ) -> std::result::Result<LoadedProject, Vec<CompileError>> {
     if sources.is_empty() {
         return Err(vec![CompileError::without_span("multi-file compile requires at least one source")]);
+    }
+    let total_source_bytes = sources
+        .iter()
+        .try_fold(0usize, |total, source| total.checked_add(source.source.len()))
+        .ok_or_else(|| vec![CompileError::without_span("multi-file source byte count overflowed")])?;
+    if total_source_bytes > MAX_SOURCE_BYTES {
+        return Err(vec![CompileError::without_span(format!("source set exceeds the {} byte compiler limit", MAX_SOURCE_BYTES))]);
     }
     let entry_path_buf = Utf8PathBuf::from(entry_path);
     let mut seen_paths = HashSet::new();
@@ -30955,6 +30972,41 @@ action stack_arg(a: A, b: B, c: C, owner: Address, required: u64) -> u64 {
         expected.extend_from_slice(&owner);
         expected.extend_from_slice(&2u64.to_le_bytes());
         assert_eq!(witness, expected);
+    }
+
+    #[test]
+    fn nested_helper_stack_args_preserve_entry_witness_frame() {
+        let program = r#"
+module vm::nested_stack_abi
+
+fn leaf(a: u64, b: u64, c: u64, d: u64, e: u64, f: u64, g: u64, h: u64, i: u64) -> u64 {
+    return a + i
+}
+
+fn middle(a: u64, b: u64, c: u64, d: u64, e: u64, f: u64, g: u64, h: u64, i: u64) -> u64 {
+    return leaf(a, b, c, d, e, f, g, h, i)
+}
+
+action nested(a: u64, b: u64, c: u64, d: u64, e: u64, f: u64, g: u64, h: u64, i: u64) -> u64 {
+    verification
+        return middle(a, b, c, d, e, f, g, h, i)
+}
+"#;
+
+        let result = compile(program, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes).unwrap();
+        assert!(asm.contains("# cellscript entry abi: stage stack arg8 at pre-call sp-16"), "entry stack arg was not staged:\n{asm}");
+        assert_eq!(
+            asm.matches("# cellscript abi: stage outgoing stack arg8 at pre-call sp-16").count(),
+            2,
+            "both nested helper calls must stage their ninth argument below the caller frame:\n{asm}"
+        );
+        assert!(
+            asm.matches("# cellscript abi: arg8 loaded from caller stack +0").count() >= 3,
+            "action and helper callees must load the ninth argument from the incoming caller area:\n{asm}"
+        );
+        assert!(asm.contains("li t6, 5368"), "entry return address must remain at the derived frame offset:\n{asm}");
+        assert!(asm.contains("li t6, -5376"), "entry trampoline must reserve the complete derived frame:\n{asm}");
     }
 
     #[test]

@@ -120,6 +120,12 @@ impl<'a> Lexer<'a> {
                     break;
                 }
             }
+            if self.position == hex_start {
+                return Err(CompileError::new(
+                    "hex literal requires at least one hexadecimal digit",
+                    Span::new(start, self.position, start_line, start_col),
+                ));
+            }
             let text = &self.input[hex_start..self.position];
             let span = Span::new(start, self.position, start_line, start_col);
             return Ok(Token::new(TokenKind::HexLiteral(text.to_string()), span, &self.input[start..self.position]));
@@ -454,6 +460,12 @@ impl<'a> Lexer<'a> {
 }
 
 pub fn lex(input: &str) -> Result<Vec<Token>> {
+    if input.len() > crate::MAX_SOURCE_BYTES {
+        return Err(CompileError::new(
+            format!("source exceeds the {} byte compiler limit", crate::MAX_SOURCE_BYTES),
+            Span::new(0, input.len(), 1, 1),
+        ));
+    }
     Lexer::new(input).tokenize()
 }
 
@@ -488,6 +500,21 @@ mod tests {
         let tokens = lex(input).unwrap();
         assert!(matches!(tokens[0].kind, TokenKind::Integer(42)));
         assert!(matches!(tokens[1].kind, TokenKind::HexLiteral(ref s) if s == "FF"));
+    }
+
+    #[test]
+    fn rejects_hex_literal_without_digits() {
+        for source in ["0x", "0xG"] {
+            let error = lex(source).expect_err("empty hex payload must be rejected");
+            assert!(error.message.contains("at least one hexadecimal digit"), "unexpected error: {}", error.message);
+        }
+    }
+
+    #[test]
+    fn rejects_source_over_byte_budget() {
+        let source = " ".repeat(crate::MAX_SOURCE_BYTES + 1);
+        let error = lex(&source).expect_err("oversized source must be rejected before token allocation");
+        assert!(error.message.contains("source exceeds"), "unexpected error: {}", error.message);
     }
 
     #[test]

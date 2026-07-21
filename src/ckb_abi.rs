@@ -118,10 +118,8 @@ pub mod type_id {
     }
 
     pub fn args_from_first_input_and_output_index(first_input: &[u8], output_index: u64) -> [u8; 32] {
-        let mut material = Vec::with_capacity(first_input.len() + core::mem::size_of::<u64>());
-        material.extend_from_slice(first_input);
-        material.extend_from_slice(&output_index.to_le_bytes());
-        crate::ckb_blake2b256(&material)
+        let output_index = output_index.to_le_bytes();
+        crate::ckb_blake2b256_parts(&[first_input, &output_index])
     }
 }
 
@@ -141,6 +139,8 @@ pub fn encode_source_view(view: u64, index: u64) -> Option<u64> {
 }
 
 pub fn decode_source_view(value: u64) -> Option<(u64, u64)> {
+    // `index == 0` is valid. In particular, exact multiples of SHIFT encode
+    // the first item in a source view; the quotient is the closed view tag.
     let view = value / source_view::SHIFT;
     let index = value % source_view::SHIFT;
     let source = match view {

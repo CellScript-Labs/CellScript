@@ -74,12 +74,15 @@ const RUNTIME_SCRATCH_SLOT_SIZE: usize = 8 + RUNTIME_SCRATCH_BUFFER_SIZE;
 const RUNTIME_SCRATCH_SIZE: usize = RUNTIME_SCRATCH_SLOT_SIZE * 2;
 const RUNTIME_EXPR_TEMP_SLOTS: usize = 16;
 const RUNTIME_EXPR_TEMP_SIZE: usize = RUNTIME_EXPR_TEMP_SLOTS * 8;
+const _: () = assert!(RUNTIME_EXPR_TEMP_SLOTS >= 4);
 const RUNTIME_CELL_BUFFER_SIZE: usize = 512;
 const RUNTIME_CELL_SLOT_SIZE: usize = 8 + RUNTIME_CELL_BUFFER_SIZE;
 const RUNTIME_COLLECTION_BUFFER_SIZE: usize = 256;
 const ENTRY_WITNESS_LABEL: &str = "_cellscript_entry";
 const ENTRY_WITNESS_MAGIC: &[u8; 8] = ENTRY_WITNESS_ABI_MAGIC;
 const ENTRY_WITNESS_HEADER_SIZE: usize = 8;
+const ENTRY_WITNESS_SIZE_OFFSET: usize = 0;
+const ENTRY_WITNESS_BUFFER_OFFSET: usize = 8;
 const ENTRY_WITNESS_BUFFER_SIZE: usize = 4096;
 const ENTRY_SCRIPT_SIZE_OFFSET: usize = ENTRY_WITNESS_BUFFER_OFFSET + ENTRY_WITNESS_BUFFER_SIZE;
 const ENTRY_SCRIPT_ARGS_START_OFFSET: usize = ENTRY_SCRIPT_SIZE_OFFSET + 8;
@@ -87,10 +90,14 @@ const ENTRY_SCRIPT_ARGS_LEN_OFFSET: usize = ENTRY_SCRIPT_ARGS_START_OFFSET + 8;
 const ENTRY_SCRIPT_ARGS_CURSOR_OFFSET: usize = ENTRY_SCRIPT_ARGS_LEN_OFFSET + 8;
 const ENTRY_SCRIPT_BUFFER_OFFSET: usize = ENTRY_SCRIPT_ARGS_CURSOR_OFFSET + 8;
 const ENTRY_SCRIPT_BUFFER_SIZE: usize = 1024;
-const ENTRY_WITNESS_FRAME_SIZE: usize = 5376;
-const ENTRY_WITNESS_SIZE_OFFSET: usize = 0;
-const ENTRY_WITNESS_BUFFER_OFFSET: usize = 8;
+// Reserved local-frame space keeps the entry trampoline's buffers isolated
+// from its saved return address and preserves the v1 frame contract.
+const ENTRY_WITNESS_RESERVED_FRAME_BYTES: usize = 208;
+const ENTRY_WITNESS_FRAME_SIZE: usize =
+    ENTRY_SCRIPT_BUFFER_OFFSET + ENTRY_SCRIPT_BUFFER_SIZE + ENTRY_WITNESS_RESERVED_FRAME_BYTES + core::mem::size_of::<u64>();
 const ENTRY_WITNESS_RA_OFFSET: usize = ENTRY_WITNESS_FRAME_SIZE - 8;
+const _: () = assert!(ENTRY_SCRIPT_BUFFER_OFFSET + ENTRY_SCRIPT_BUFFER_SIZE <= ENTRY_WITNESS_RA_OFFSET);
+const _: () = assert!(ENTRY_WITNESS_FRAME_SIZE.is_multiple_of(16));
 
 #[derive(Debug, Clone, Copy)]
 struct RuntimeSyscallAbi {
@@ -3866,8 +3873,13 @@ impl CodeGenerator {
         self.frame_size = align_frame(next_cell_slot + RUNTIME_EXPR_TEMP_SIZE + RUNTIME_SCRATCH_SIZE + 16);
     }
 
-    fn runtime_expr_temp_offset(&self, depth: usize) -> Option<usize> {
-        (depth < RUNTIME_EXPR_TEMP_SLOTS).then(|| self.runtime_scratch_size_offset() - RUNTIME_EXPR_TEMP_SIZE + depth * 8)
+    fn runtime_expr_temp_offset(&self, depth: usize) -> usize {
+        debug_assert!(depth < RUNTIME_EXPR_TEMP_SLOTS);
+        self.runtime_scratch_size_offset() - RUNTIME_EXPR_TEMP_SIZE + depth * 8
+    }
+
+    fn checked_runtime_expr_temp_offset(&self, depth: usize) -> Option<usize> {
+        (depth < RUNTIME_EXPR_TEMP_SLOTS).then(|| self.runtime_expr_temp_offset(depth))
     }
 
     fn runtime_scratch_size_offset(&self) -> usize {
@@ -4660,9 +4672,9 @@ impl CodeGenerator {
         output_buffer_offset: usize,
         fail_code: CellScriptRuntimeError,
     ) {
-        let start_offset = self.runtime_expr_temp_offset(0).expect("runtime temp slot 0");
-        let len_offset = self.runtime_expr_temp_offset(1).expect("runtime temp slot 1");
-        let output_start_offset = self.runtime_expr_temp_offset(2).expect("runtime temp slot 2");
+        let start_offset = self.runtime_expr_temp_offset(0);
+        let len_offset = self.runtime_expr_temp_offset(1);
+        let output_start_offset = self.runtime_expr_temp_offset(2);
         if let Some(width) = layout_fixed_byte_width(layout) {
             self.emit_dynamic_table_fixed_field_pointer_to_stack(
                 input_size_offset,
@@ -4699,10 +4711,10 @@ impl CodeGenerator {
                 field_count,
                 &format!("{} output.{}", type_name, field),
                 output_start_offset,
-                self.runtime_expr_temp_offset(3).expect("runtime temp slot 3"),
+                self.runtime_expr_temp_offset(3),
             );
             self.emit_stack_load("t0", len_offset);
-            self.emit_stack_load("t1", self.runtime_expr_temp_offset(3).expect("runtime temp slot 3"));
+            self.emit_stack_load("t1", self.runtime_expr_temp_offset(3));
             self.emit("sub t2, t0, t1");
             let len_ok = self.fresh_label("mutate_table_field_len_ok");
             self.emit(format!("beqz t2, {}", len_ok));
@@ -4882,10 +4894,10 @@ impl CodeGenerator {
         output_size_offset: usize,
         output_buffer_offset: usize,
     ) {
-        let input_start_offset = self.runtime_expr_temp_offset(0).expect("runtime temp slot 0");
-        let input_len_offset = self.runtime_expr_temp_offset(1).expect("runtime temp slot 1");
-        let output_start_offset = self.runtime_expr_temp_offset(2).expect("runtime temp slot 2");
-        let output_len_offset = self.runtime_expr_temp_offset(3).expect("runtime temp slot 3");
+        let input_start_offset = self.runtime_expr_temp_offset(0);
+        let input_len_offset = self.runtime_expr_temp_offset(1);
+        let output_start_offset = self.runtime_expr_temp_offset(2);
+        let output_len_offset = self.runtime_expr_temp_offset(3);
         self.emit_dynamic_table_field_span_to_stack(
             input_size_offset,
             input_buffer_offset,
@@ -5275,7 +5287,7 @@ impl CodeGenerator {
             ));
             self.emit_sp_addi("t4", input_buffer_offset);
             self.emit_unaligned_scalar_load("t4", "t0", "t2", layout.offset, width);
-            let input_value_offset = self.runtime_expr_temp_offset(RUNTIME_EXPR_TEMP_SLOTS - 2).expect("runtime temp slot");
+            let input_value_offset = self.runtime_expr_temp_offset(RUNTIME_EXPR_TEMP_SLOTS - 2);
             self.emit("# cellscript abi: preserve mutate input scalar before transition expression");
             self.emit_stack_store("t0", input_value_offset);
             self.emit_prelude_u64_operand_source_to_t1(&delta);
@@ -5290,7 +5302,7 @@ impl CodeGenerator {
                     unreachable!("append transitions are verified by emit_mutate_replacement_dynamic_table_append_checks")
                 }
             }
-            let expected_value_offset = self.runtime_expr_temp_offset(RUNTIME_EXPR_TEMP_SLOTS - 1).expect("runtime temp slot");
+            let expected_value_offset = self.runtime_expr_temp_offset(RUNTIME_EXPR_TEMP_SLOTS - 1);
             self.emit("# cellscript abi: preserve mutate expected scalar across output field load");
             self.emit_stack_store("t1", expected_value_offset);
             self.emit_sp_addi("t4", output_buffer_offset);
@@ -5366,7 +5378,7 @@ impl CodeGenerator {
             );
             self.emit("add t4, t4, t5");
             self.emit_unaligned_scalar_load("t4", "t0", "t2", 0, width);
-            let input_value_offset = self.runtime_expr_temp_offset(RUNTIME_EXPR_TEMP_SLOTS - 2).expect("runtime temp slot");
+            let input_value_offset = self.runtime_expr_temp_offset(RUNTIME_EXPR_TEMP_SLOTS - 2);
             self.emit("# cellscript abi: preserve mutate table input scalar before transition expression");
             self.emit_stack_store("t0", input_value_offset);
             self.emit_prelude_u64_operand_source_to_t1(&delta);
@@ -5377,7 +5389,7 @@ impl CodeGenerator {
                 MutateTransitionOp::Set => {}
                 MutateTransitionOp::Append => {}
             }
-            let expected_value_offset = self.runtime_expr_temp_offset(RUNTIME_EXPR_TEMP_SLOTS - 1).expect("runtime temp slot");
+            let expected_value_offset = self.runtime_expr_temp_offset(RUNTIME_EXPR_TEMP_SLOTS - 1);
             self.emit("# cellscript abi: preserve mutate table expected scalar across output field load");
             self.emit_stack_store("t1", expected_value_offset);
             self.emit_sp_addi("t4", output_buffer_offset);
@@ -5575,7 +5587,7 @@ impl CodeGenerator {
         self.emit(format!("# cellscript abi: verify output field {} offset={} size={}", context, layout.offset, width));
         self.emit_sp_addi("t4", buffer_offset);
         self.emit_unaligned_scalar_load("t4", "t0", "t2", layout.offset, width);
-        let actual_value_offset = self.runtime_expr_temp_offset(RUNTIME_EXPR_TEMP_SLOTS - 1).expect("runtime temp slot");
+        let actual_value_offset = self.runtime_expr_temp_offset(RUNTIME_EXPR_TEMP_SLOTS - 1);
         self.emit("# cellscript abi: preserve output scalar before expected expression");
         self.emit_stack_store("t0", actual_value_offset);
         self.emit_expected_operand_to_t1(expected);
@@ -5938,7 +5950,7 @@ impl CodeGenerator {
                 if !self.emit_fixed_byte_source_pointer_to("a0", left_source) {
                     return false;
                 }
-                let Some(left_pointer_offset) = self.runtime_expr_temp_offset(0) else {
+                let Some(left_pointer_offset) = self.checked_runtime_expr_temp_offset(0) else {
                     return false;
                 };
                 self.emit_stack_store("a0", left_pointer_offset);
@@ -6266,7 +6278,7 @@ impl CodeGenerator {
             PreludeU64ValueSource::Field(source) => self.emit_schema_field_source_to_t1(source),
             PreludeU64ValueSource::Binary { op, left, right } => {
                 self.emit(format!("# cellscript abi: expected expression u64 {:?}", op));
-                let Some(temp_offset) = self.runtime_expr_temp_offset(_depth) else {
+                let Some(temp_offset) = self.checked_runtime_expr_temp_offset(_depth) else {
                     self.emit("# cellscript abi: fail closed because expression verifier temp stack is exhausted");
                     self.emit_fail(CellScriptRuntimeError::DataPreservationMismatch);
                     return;
@@ -6285,7 +6297,7 @@ impl CodeGenerator {
             }
             PreludeU64ValueSource::Min { left, right } => {
                 self.emit("# cellscript abi: expected expression u64 min");
-                let Some(temp_offset) = self.runtime_expr_temp_offset(_depth) else {
+                let Some(temp_offset) = self.checked_runtime_expr_temp_offset(_depth) else {
                     self.emit("# cellscript abi: fail closed because expression verifier temp stack is exhausted");
                     self.emit_fail(CellScriptRuntimeError::DataPreservationMismatch);
                     return;
@@ -6508,8 +6520,8 @@ impl CodeGenerator {
         let Some(width) = layout_fixed_byte_width(layout).or_else(|| self.fixed_named_type_width(&layout.ty)) else {
             return false;
         };
-        let output_start_offset = self.runtime_expr_temp_offset(0).expect("runtime temp slot 0");
-        let output_len_offset = self.runtime_expr_temp_offset(1).expect("runtime temp slot 1");
+        let output_start_offset = self.runtime_expr_temp_offset(0);
+        let output_len_offset = self.runtime_expr_temp_offset(1);
         self.emit_dynamic_table_field_span_to_stack(
             output_size_offset,
             output_buffer_offset,
@@ -6534,7 +6546,7 @@ impl CodeGenerator {
             ));
             self.emit_stack_load("t4", output_start_offset);
             self.emit_unaligned_scalar_load("t4", "t0", "t2", 0, width);
-            let actual_value_offset = self.runtime_expr_temp_offset(RUNTIME_EXPR_TEMP_SLOTS - 1).expect("runtime temp slot");
+            let actual_value_offset = self.runtime_expr_temp_offset(RUNTIME_EXPR_TEMP_SLOTS - 1);
             self.emit("# cellscript abi: preserve output table scalar before expected expression");
             self.emit_stack_store("t0", actual_value_offset);
             self.emit_expected_operand_to_t1(expected);
@@ -6578,8 +6590,8 @@ impl CodeGenerator {
         let IrOperand::Var(var) = expected else {
             return false;
         };
-        let output_start_offset = self.runtime_expr_temp_offset(0).expect("runtime temp slot 0");
-        let output_len_offset = self.runtime_expr_temp_offset(1).expect("runtime temp slot 1");
+        let output_start_offset = self.runtime_expr_temp_offset(0);
+        let output_len_offset = self.runtime_expr_temp_offset(1);
         self.emit_dynamic_table_field_span_to_stack(
             output_size_offset,
             output_buffer_offset,
@@ -8935,8 +8947,8 @@ impl CodeGenerator {
         self.emit("sltu t2, t0, t1");
         self.emit(format!("bnez t2, {}", done_label));
 
-        let left_offset = self.runtime_expr_temp_offset(0).expect("runtime temp slot 0");
-        let right_offset = self.runtime_expr_temp_offset(1).expect("runtime temp slot 1");
+        let left_offset = self.runtime_expr_temp_offset(0);
+        let right_offset = self.runtime_expr_temp_offset(1);
         self.emit_stack_store("zero", left_offset);
         self.emit("addi t0, t0, -1");
         self.emit_stack_store("t0", right_offset);
@@ -9112,7 +9124,7 @@ impl CodeGenerator {
         }
 
         self.emit(format!("# cellscript abi: stack collection contains element_size={}", element_width));
-        let index_offset = self.runtime_expr_temp_offset(0).expect("runtime temp slot 0");
+        let index_offset = self.runtime_expr_temp_offset(0);
         self.emit_stack_store("zero", index_offset);
         self.emit_stack_store("zero", dest.id * 8);
         let loop_label = self.fresh_label("stack_collection_contains_loop");
@@ -9201,6 +9213,9 @@ impl CodeGenerator {
         if dest_fixed_bytes && removed_value_slots + 1 > RUNTIME_EXPR_TEMP_SLOTS {
             return false;
         }
+        let Some(index_offset) = self.checked_runtime_expr_temp_offset(removed_value_slots) else {
+            return false;
+        };
 
         self.emit(format!("# cellscript abi: stack collection remove element_size={}", element_width));
         self.emit_stack_load("t4", collection.id * 8);
@@ -9220,7 +9235,7 @@ impl CodeGenerator {
             self.emit_unaligned_scalar_load("t5", "t6", "t2", 0, element_width);
             self.emit_stack_store("t6", dest.id * 8);
         } else {
-            let removed_offset = self.runtime_expr_temp_offset(0).expect("runtime temp slot 0");
+            let removed_offset = self.runtime_expr_temp_offset(0);
             self.emit(format!("# cellscript abi: stack collection remove snapshot fixed bytes size={}", element_width));
             for byte_index in 0..element_width {
                 if byte_index <= 2047 {
@@ -9236,7 +9251,6 @@ impl CodeGenerator {
             self.emit_stack_store("t6", dest.id * 8);
         }
 
-        let index_offset = self.runtime_expr_temp_offset(removed_value_slots).expect("runtime temp slot");
         self.emit_stack_store("t1", index_offset);
         let shift_loop = self.fresh_label("stack_collection_remove_shift_loop");
         let shift_done = self.fresh_label("stack_collection_remove_shift_done");
@@ -9391,13 +9405,13 @@ impl CodeGenerator {
         self.emit_fail(CellScriptRuntimeError::CollectionBoundsInvalid);
         self.emit_label(&capacity_ok);
 
-        let index_offset = self.runtime_expr_temp_offset(0).expect("runtime temp slot 0");
-        let current_offset = self.runtime_expr_temp_offset(1).expect("runtime temp slot 1");
+        let index_offset = self.runtime_expr_temp_offset(0);
+        let current_offset = self.runtime_expr_temp_offset(1);
         self.emit_stack_store("t1", index_offset);
         self.emit_stack_store("t0", current_offset);
         if let Some(source) = fixed_byte_source.as_ref() {
             self.emit_prepare_fixed_byte_source(source, element_width, "stack collection insert");
-            let value_offset = self.runtime_expr_temp_offset(2).expect("runtime temp slot 2");
+            let value_offset = self.runtime_expr_temp_offset(2);
             self.emit(format!("# cellscript abi: stack collection insert snapshot fixed bytes size={}", element_width));
             for byte_index in 0..element_width {
                 self.emit_fixed_byte_source_byte_to("t1", "t6", source, byte_index);
@@ -9462,7 +9476,7 @@ impl CodeGenerator {
                 _ => return false,
             }
         } else {
-            let value_offset = self.runtime_expr_temp_offset(2).expect("runtime temp slot 2");
+            let value_offset = self.runtime_expr_temp_offset(2);
             self.emit(format!("# cellscript abi: stack collection insert copy fixed bytes size={}", element_width));
             for byte_index in 0..element_width {
                 self.emit_sp_addi("t6", value_offset + byte_index);
@@ -9756,15 +9770,15 @@ impl CodeGenerator {
             self.emit_prepare_fixed_byte_source(&message, 32, "novaseal bip340 message");
             self.emit_prepare_fixed_byte_source(&pubkey, 32, "novaseal bip340 pubkey");
             self.emit_prepare_fixed_byte_source(&signature, 64, "novaseal bip340 signature");
-            let Some(read_fd_offset) = self.runtime_expr_temp_offset(0) else {
+            let Some(read_fd_offset) = self.checked_runtime_expr_temp_offset(0) else {
                 self.emit_fail(CellScriptRuntimeError::Bip340MessageMaterializationUnresolved);
                 return Ok(());
             };
-            let Some(write_fd_offset) = self.runtime_expr_temp_offset(1) else {
+            let Some(write_fd_offset) = self.checked_runtime_expr_temp_offset(1) else {
                 self.emit_fail(CellScriptRuntimeError::Bip340MessageMaterializationUnresolved);
                 return Ok(());
             };
-            let Some(child_pid_offset) = self.runtime_expr_temp_offset(2) else {
+            let Some(child_pid_offset) = self.checked_runtime_expr_temp_offset(2) else {
                 self.emit_fail(CellScriptRuntimeError::Bip340MessageMaterializationUnresolved);
                 return Ok(());
             };
@@ -11379,8 +11393,8 @@ impl CodeGenerator {
         let output_buffer_offset = self.runtime_scratch_buffer_offset();
         self.emit_load_cell_data_syscall("create_unique_identity_field", CKB_SOURCE_OUTPUT, output_index);
         self.emit_return_on_syscall_error(CellScriptRuntimeError::CellLoadFailed);
-        let output_pointer_offset = self.runtime_expr_temp_offset(0).expect("runtime temp slot 0");
-        let output_len_offset = self.runtime_expr_temp_offset(1).expect("runtime temp slot 1");
+        let output_pointer_offset = self.runtime_expr_temp_offset(0);
+        let output_len_offset = self.runtime_expr_temp_offset(1);
         let context = format!("create_unique identity field {}.{}", pattern.ty, field);
         if self.type_fixed_sizes.contains_key(&pattern.ty) {
             self.emit_loaded_fixed_field_pointer_to_stack(
@@ -11507,10 +11521,10 @@ impl CodeGenerator {
         let output_buffer_offset = self.runtime_scratch_buffer_offset();
         self.emit_load_cell_data_syscall("replace_unique_identity_field_output", CKB_SOURCE_OUTPUT, output_index);
         self.emit_return_on_syscall_error(CellScriptRuntimeError::CellLoadFailed);
-        let input_pointer_offset = self.runtime_expr_temp_offset(0).expect("runtime temp slot 0");
-        let input_len_offset = self.runtime_expr_temp_offset(1).expect("runtime temp slot 1");
-        let output_pointer_offset = self.runtime_expr_temp_offset(2).expect("runtime temp slot 2");
-        let output_len_offset = self.runtime_expr_temp_offset(3).expect("runtime temp slot 3");
+        let input_pointer_offset = self.runtime_expr_temp_offset(0);
+        let input_len_offset = self.runtime_expr_temp_offset(1);
+        let output_pointer_offset = self.runtime_expr_temp_offset(2);
+        let output_len_offset = self.runtime_expr_temp_offset(3);
         let input_context = format!("replace_unique input identity field {}.{}", pattern.ty, field);
         let output_context = format!("replace_unique output identity field {}.{}", pattern.ty, field);
         if self.type_fixed_sizes.contains_key(&pattern.ty) {
@@ -19839,7 +19853,7 @@ fn parse_immediate(value: &str) -> Result<i64> {
             .map(|value| -value)
             .map_err(|_| CompileError::new(format!("invalid immediate '{}'", value), crate::error::Span::default()));
     }
-    if let Some(hex) = value.strip_prefix("0x") {
+    if let Some(hex) = value.strip_prefix("0x").or_else(|| value.strip_prefix("+0x")) {
         return i64::from_str_radix(hex, 16)
             .map_err(|_| CompileError::new(format!("invalid immediate '{}'", value), crate::error::Span::default()));
     }
@@ -19848,11 +19862,11 @@ fn parse_immediate(value: &str) -> Result<i64> {
 
 fn parse_li_immediate(value: &str) -> Result<i128> {
     if let Some(hex) = value.strip_prefix("-0x") {
-        return i128::from_str_radix(hex, 16)
-            .map(|value| -value)
-            .map_err(|_| CompileError::new(format!("invalid immediate '{}'", value), crate::error::Span::default()));
+        let parsed = i128::from_str_radix(hex, 16)
+            .map_err(|_| CompileError::new(format!("invalid immediate '{}'", value), crate::error::Span::default()))?;
+        return validate_li_immediate(-parsed, value);
     }
-    if let Some(hex) = value.strip_prefix("0x") {
+    if let Some(hex) = value.strip_prefix("0x").or_else(|| value.strip_prefix("+0x")) {
         let parsed = u128::from_str_radix(hex, 16)
             .map_err(|_| CompileError::new(format!("invalid immediate '{}'", value), crate::error::Span::default()))?;
         if parsed <= u128::from(u64::MAX) {
@@ -19861,7 +19875,10 @@ fn parse_li_immediate(value: &str) -> Result<i128> {
         return Err(CompileError::new(format!("li immediate '{}' does not fit 64 bits", value), crate::error::Span::default()));
     }
     if value.starts_with('-') {
-        value.parse::<i128>().map_err(|_| CompileError::new(format!("invalid immediate '{}'", value), crate::error::Span::default()))
+        let parsed = value
+            .parse::<i128>()
+            .map_err(|_| CompileError::new(format!("invalid immediate '{}'", value), crate::error::Span::default()))?;
+        validate_li_immediate(parsed, value)
     } else {
         value
             .parse::<u128>()
@@ -19873,6 +19890,14 @@ fn parse_li_immediate(value: &str) -> Result<i128> {
                     Err(CompileError::new(format!("li immediate '{}' does not fit 64 bits", value), crate::error::Span::default()))
                 }
             })
+    }
+}
+
+fn validate_li_immediate(parsed: i128, source: &str) -> Result<i128> {
+    if (i64::MIN as i128..=u64::MAX as i128).contains(&parsed) {
+        Ok(parsed)
+    } else {
+        Err(CompileError::new(format!("li immediate '{}' does not fit 64 bits", source), crate::error::Span::default()))
     }
 }
 
@@ -19960,7 +19985,10 @@ fn split_hi_lo(value: i64) -> Result<(i64, i64)> {
             crate::error::Span::default(),
         ));
     }
-    let hi = (value + 0x800) >> 12;
+    let adjusted = value.checked_add(0x800).ok_or_else(|| {
+        CompileError::new(format!("value '{}' overflowed while splitting its immediate", value), crate::error::Span::default())
+    })?;
+    let hi = adjusted >> 12;
     let lo = value - (hi << 12);
     if !(-2048..=2047).contains(&lo) {
         return Err(CompileError::new(format!("low immediate '{}' is out of range after split", lo), crate::error::Span::default()));
@@ -20469,6 +20497,41 @@ mod tests {
 
         let elf = assemble_elf_internal(&lines).expect("internal assembler should encode u64-width li literals");
         assert!(elf.starts_with(b"\x7fELF"));
+    }
+
+    #[test]
+    fn li_parser_enforces_the_complete_64_bit_domain() {
+        assert_eq!(parse_li_immediate("-0x8000000000000000").unwrap(), i64::MIN as i128);
+        assert_eq!(parse_li_immediate("+0xffffffffffffffff").unwrap(), u64::MAX as i128);
+        for value in ["-0x8000000000000001", "-9223372036854775809", "0x10000000000000000", "18446744073709551616"] {
+            let error = parse_li_immediate(value).expect_err("out-of-domain li literal must fail during parsing");
+            assert!(error.message.contains("does not fit 64 bits"), "unexpected error for {value}: {}", error.message);
+        }
+    }
+
+    #[test]
+    fn signed_immediate_parser_accepts_explicit_plus() {
+        assert_eq!(parse_immediate("+12").unwrap(), 12);
+        assert_eq!(parse_immediate("+0x7ff").unwrap(), 0x7ff);
+    }
+
+    #[test]
+    fn split_hi_lo_rejects_extreme_values_before_arithmetic() {
+        assert!(split_hi_lo(i64::MIN).is_err());
+        assert!(split_hi_lo(i64::MAX).is_err());
+        assert_eq!(split_hi_lo(i32::MIN as i64).unwrap(), (-0x80000, 0));
+        assert_eq!(split_hi_lo(0x7fff_f7ff).unwrap(), (0x7ffff, 0x7ff));
+        assert!(split_hi_lo(0x7fff_f800).is_err());
+    }
+
+    #[test]
+    fn runtime_expression_temp_offsets_are_explicitly_bounded() {
+        let mut generator = CodeGenerator::new(CodegenOptions::default());
+        generator.frame_size = RUNTIME_EXPR_TEMP_SIZE + RUNTIME_SCRATCH_SIZE + 16;
+        assert!(generator.checked_runtime_expr_temp_offset(0).is_some());
+        assert!(generator.checked_runtime_expr_temp_offset(RUNTIME_EXPR_TEMP_SLOTS - 1).is_some());
+        assert_eq!(generator.checked_runtime_expr_temp_offset(RUNTIME_EXPR_TEMP_SLOTS), None);
+        assert_eq!(generator.checked_runtime_expr_temp_offset(usize::MAX), None);
     }
 
     #[test]

@@ -17,6 +17,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
 
+const MAX_SOURCE_SET_JSON_BYTES: usize = cellscript::MAX_SOURCE_BYTES * 2 + 64 * 1024;
+
 #[derive(Serialize)]
 struct CompileDiagnosticRange {
     start: CompileDiagnosticPosition,
@@ -116,6 +118,9 @@ pub fn compile_metadata_json_diagnostics(source: &str, target: Option<String>) -
 /// additive API; the single-source functions remain stable.
 #[wasm_bindgen]
 pub fn compile_metadata_json_sources(sources_json: &str, entry_path: &str, target: Option<String>) -> String {
+    if sources_json.len() > MAX_SOURCE_SET_JSON_BYTES {
+        return diagnostic_error_json(&format!("source set JSON exceeds the {} byte WASM input limit", MAX_SOURCE_SET_JSON_BYTES), "");
+    }
     let inputs: Vec<CompileSourceInput> = match serde_json::from_str(sources_json) {
         Ok(inputs) => inputs,
         Err(error) => return diagnostic_error_json(&format!("failed to parse source set JSON: {error}"), ""),
@@ -142,6 +147,9 @@ pub fn compile_metadata_json_sources(sources_json: &str, entry_path: &str, targe
 /// WASM calls per cursor move.
 #[wasm_bindgen]
 pub fn language_service_json(source: &str, line: u32, character: u32) -> String {
+    if source.len() > cellscript::MAX_SOURCE_BYTES {
+        return error_json(&format!("source exceeds the {} byte compiler limit", cellscript::MAX_SOURCE_BYTES));
+    }
     let uri = "file:///playground.cell";
     let position = cellscript::lsp::Position { line, character };
     let mut server = cellscript::lsp::LspServer::new();
@@ -231,4 +239,31 @@ fn line_column_at(source: &str, byte_offset: usize) -> (usize, usize) {
         }
     }
     (line, column)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wasm_single_source_entrypoints_reject_oversized_input() {
+        let source = " ".repeat(cellscript::MAX_SOURCE_BYTES + 1);
+        let compile: serde_json::Value = serde_json::from_str(&compile_metadata_json(&source, None)).unwrap();
+        assert!(compile["error"].as_str().is_some_and(|message| message.contains("source exceeds")));
+
+        let language: serde_json::Value = serde_json::from_str(&language_service_json(&source, 0, 0)).unwrap();
+        assert!(language["error"].as_str().is_some_and(|message| message.contains("source exceeds")));
+    }
+
+    #[test]
+    fn wasm_multi_source_entrypoint_rejects_aggregate_source_budget() {
+        let half = cellscript::MAX_SOURCE_BYTES / 2 + 1;
+        let sources = serde_json::json!([
+            { "path": "a.cell", "source": " ".repeat(half) },
+            { "path": "b.cell", "source": " ".repeat(half) }
+        ])
+        .to_string();
+        let result: serde_json::Value = serde_json::from_str(&compile_metadata_json_sources(&sources, "a.cell", None)).unwrap();
+        assert!(result["diagnostics"][0]["message"].as_str().is_some_and(|message| message.contains("source set exceeds")));
+    }
 }

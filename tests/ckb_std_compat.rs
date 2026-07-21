@@ -77,8 +77,10 @@ fn cellscript_source_view_decodes_to_ckb_std_source_values() {
         (ckb_abi::source_view::GROUP_INPUT, Source::GroupInput as u64),
         (ckb_abi::source_view::GROUP_OUTPUT, Source::GroupOutput as u64),
     ] {
-        let encoded = ckb_abi::encode_source_view(view, 13).expect("valid SourceView");
-        assert_eq!(ckb_abi::decode_source_view(encoded), Some((expected_source, 13)));
+        for index in [0, 13, ckb_abi::source_view::SHIFT - 1] {
+            let encoded = ckb_abi::encode_source_view(view, index).expect("valid SourceView");
+            assert_eq!(ckb_abi::decode_source_view(encoded), Some((expected_source, index)));
+        }
     }
     assert!(ckb_abi::encode_source_view(99, 0).is_none());
     assert!(ckb_abi::encode_source_view(ckb_abi::source_view::INPUT, ckb_abi::source_view::SHIFT).is_none());
