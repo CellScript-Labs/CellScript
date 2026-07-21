@@ -453,10 +453,9 @@ impl<'a> TypeChecker<'a> {
 
     pub fn check_module(&mut self, module: &Module) -> Result<()> {
         let diagnostics = self.check_module_diagnostics(module);
-        if let Some(error) = diagnostics.into_iter().next() {
-            Err(error)
-        } else {
-            Ok(())
+        match diagnostics.into_iter().next() {
+            Some(error) => Err(error),
+            _ => Ok(()),
         }
     }
 

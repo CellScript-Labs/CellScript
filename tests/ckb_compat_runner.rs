@@ -82,13 +82,13 @@ fn run_fixture_model(fixture: &Value) -> Result<FixtureVerdict, String> {
     if exit_code != 0 && verdict.reason.is_none() {
         return Err("semantic model rejected without a named invariant reason".to_string());
     }
-    if let Some(expected_reason) = &reason {
-        if verdict.reason.as_deref() != Some(expected_reason.as_str()) {
-            return Err(format!(
-                "fixture semantic model reason {:?} disagrees with expected reason {:?}",
-                verdict.reason, expected_reason
-            ));
-        }
+    if let Some(expected_reason) = &reason
+        && verdict.reason.as_deref() != Some(expected_reason.as_str())
+    {
+        return Err(format!(
+            "fixture semantic model reason {:?} disagrees with expected reason {:?}",
+            verdict.reason, expected_reason
+        ));
     }
 
     Ok(FixtureVerdict { exit_code, reason: reason.or(verdict.reason) })

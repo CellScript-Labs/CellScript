@@ -7490,7 +7490,7 @@ fn typescript_identifier(name: &str, fallback: &str) -> String {
         }
     }
     if ident.is_empty() || TYPESCRIPT_RESERVED_WORDS.contains(&ident.as_str()) {
-        format!("{}_{}", fallback, &crate::hex_encode(&crate::ckb_blake2b256(name.as_bytes()))[..8].to_ascii_lowercase())
+        format!("{}_{}", fallback, crate::hex_encode(&crate::ckb_blake2b256(name.as_bytes()))[..8].to_ascii_lowercase())
     } else {
         ident
     }

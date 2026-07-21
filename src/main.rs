@@ -1,3 +1,6 @@
+// Keep the Edition 2024 let-chain cleanup separate from the toolchain migration.
+#![allow(clippy::collapsible_if)]
+
 use camino::Utf8Path;
 use cellscript::error::{CompileError, CompileErrorCategory};
 use clap::{Parser, ValueEnum};

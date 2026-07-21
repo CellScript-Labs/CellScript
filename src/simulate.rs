@@ -559,7 +559,7 @@ impl SimulateInterpreter {
             }
             BindingPattern::Tuple(patterns) => {
                 if let SimValue::Tuple(values) = value {
-                    for (p, v) in patterns.iter().zip(values.into_iter()) {
+                    for (p, v) in patterns.iter().zip(values) {
                         self.bind_pattern(p, v);
                     }
                 }

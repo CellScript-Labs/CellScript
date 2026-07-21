@@ -10,6 +10,10 @@
 //!    write Deployed.toml + Cell.lock, cross-verify three identity layers.
 //! 3. **Live devnet deploy** (`#[ignore]`): Submit real transactions to a CKB devnet,
 //!    query on-chain state, verify Cell.lock ↔ Deployed.toml ↔ on-chain consistency.
+
+// Keep the Edition 2024 let-chain cleanup separate from the toolchain migration.
+#![allow(clippy::collapsible_if)]
+
 //!
 //! ## Running
 //!
@@ -62,7 +66,9 @@ impl RegistryEnvGuard {
         // lock does not cascade into every later test in this binary.
         let guard = REGISTRY_ENV_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let previous = std::env::var_os(cellscript::package::registry::REGISTRY_URL_ENV);
-        std::env::set_var(cellscript::package::registry::REGISTRY_URL_ENV, url);
+        // SAFETY: CI runs tests with one test thread, and this guard serializes
+        // registry URL changes within this test binary.
+        unsafe { std::env::set_var(cellscript::package::registry::REGISTRY_URL_ENV, url) };
         Self { previous, _guard: guard }
     }
 }
@@ -70,9 +76,11 @@ impl RegistryEnvGuard {
 impl Drop for RegistryEnvGuard {
     fn drop(&mut self) {
         if let Some(previous) = &self.previous {
-            std::env::set_var(cellscript::package::registry::REGISTRY_URL_ENV, previous);
+            // SAFETY: See `RegistryEnvGuard::new`; the guard still owns the lock.
+            unsafe { std::env::set_var(cellscript::package::registry::REGISTRY_URL_ENV, previous) };
         } else {
-            std::env::remove_var(cellscript::package::registry::REGISTRY_URL_ENV);
+            // SAFETY: See `RegistryEnvGuard::new`; the guard still owns the lock.
+            unsafe { std::env::remove_var(cellscript::package::registry::REGISTRY_URL_ENV) };
         }
     }
 }

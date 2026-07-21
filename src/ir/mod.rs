@@ -1540,7 +1540,7 @@ impl IrGenerator {
                 continue;
             };
             let mut fields = fields.iter().collect::<Vec<_>>();
-            fields.sort_by(|(left, _), (right, _)| left.cmp(right));
+            fields.sort_by_key(|(name, _)| *name);
             for (field_name, field_ty) in fields {
                 if *field_ty != IrType::Address {
                     continue;

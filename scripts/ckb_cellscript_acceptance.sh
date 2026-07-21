@@ -3583,11 +3583,6 @@ def ensure_ckb_tx_measure_bin():
     if tx_measure_bin.exists():
         return tx_measure_bin
     cargo_env = os.environ.copy()
-    toolchain_file = ckb_repo / "rust-toolchain.toml"
-    if toolchain_file.exists():
-        match = re.search(r'channel\s*=\s*"([^"]+)"', toolchain_file.read_text(encoding="utf-8"))
-        if match:
-            cargo_env["RUSTUP_TOOLCHAIN"] = match.group(1)
     helper_root.mkdir(parents=True, exist_ok=True)
     source_bin = repo_root / "src" / "bin" / "ckb_tx_measure.rs"
     lock_src = repo_root / "tools" / "ckb-tx-measure" / "Cargo.lock"
@@ -3596,11 +3591,12 @@ def ensure_ckb_tx_measure_bin():
         f"""[package]
 name = "cellscript-ckb-tx-measure"
 version = "0.1.0"
-edition = "2021"
-rust-version = "1.92.0"
+edition = "2024"
+rust-version = "1.97.1"
 publish = false
 
 [workspace]
+resolver = "3"
 
 [[bin]]
 name = "cellscript-ckb-tx-measure"

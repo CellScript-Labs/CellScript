@@ -3,4 +3,7 @@ use_field_init_shorthand = true
 use_try_shorthand = true
 use_small_heuristics = "Max"
 newline_style = "auto"
-edition = "2021"
+edition = "2024"
+# Keep the established layout while the language edition migrates. A future
+# style-edition change can be reviewed as a dedicated mechanical diff.
+style_edition = "2021"

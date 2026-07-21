@@ -69,10 +69,10 @@ pub(crate) fn canonical_hex(value: &str, expected_bytes: Option<usize>, field: &
     if raw.len() % 2 != 0 || !raw.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         anyhow::bail!("{field} must contain an even number of hexadecimal digits");
     }
-    if let Some(expected_bytes) = expected_bytes {
-        if raw.len() != expected_bytes * 2 {
-            anyhow::bail!("{field} must be {expected_bytes} bytes, got {}", raw.len() / 2);
-        }
+    if let Some(expected_bytes) = expected_bytes
+        && raw.len() != expected_bytes * 2
+    {
+        anyhow::bail!("{field} must be {expected_bytes} bytes, got {}", raw.len() / 2);
     }
     Ok(format!("0x{}", raw.to_ascii_lowercase()))
 }

@@ -2,6 +2,9 @@
 
 ## 0.22.0 - 2026-07-19
 
+- Migrate every in-tree Rust crate to Edition 2024 and Rust 1.97.1, adopt the
+  Edition 2024 dependency resolver, pin the repository toolchain, and align CI,
+  release builds, rustfmt, fixtures, and generated helper manifests.
 - Harden diagnostic and CLI ergonomics: make global `--json` the canonical
   machine-output switch and emit exactly one success or failure document on
   stdout; retain hidden `--message-format=json` compatibility, classify exit

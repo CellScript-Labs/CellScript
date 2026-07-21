@@ -23,10 +23,9 @@ struct ActionStateContext {
 /// flow-aware creates that can be decided from source.
 pub fn check(module: &Module) -> Result<()> {
     let diagnostics = diagnostics(module);
-    if let Some(error) = diagnostics.into_iter().next() {
-        Err(error)
-    } else {
-        Ok(())
+    match diagnostics.into_iter().next() {
+        Some(error) => Err(error),
+        _ => Ok(()),
     }
 }
 

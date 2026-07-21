@@ -34,7 +34,9 @@ impl RegistryEnvGuard {
     fn new(url: &Path) -> Self {
         let guard = REGISTRY_ENV_LOCK.lock().unwrap();
         let previous = std::env::var_os(cellscript::package::registry::REGISTRY_URL_ENV);
-        std::env::set_var(cellscript::package::registry::REGISTRY_URL_ENV, url);
+        // SAFETY: CI runs tests with one test thread, and this guard serializes
+        // registry URL changes within this test binary.
+        unsafe { std::env::set_var(cellscript::package::registry::REGISTRY_URL_ENV, url) };
         Self { previous, _guard: guard }
     }
 }
@@ -42,9 +44,11 @@ impl RegistryEnvGuard {
 impl Drop for RegistryEnvGuard {
     fn drop(&mut self) {
         if let Some(previous) = &self.previous {
-            std::env::set_var(cellscript::package::registry::REGISTRY_URL_ENV, previous);
+            // SAFETY: See `RegistryEnvGuard::new`; the guard still owns the lock.
+            unsafe { std::env::set_var(cellscript::package::registry::REGISTRY_URL_ENV, previous) };
         } else {
-            std::env::remove_var(cellscript::package::registry::REGISTRY_URL_ENV);
+            // SAFETY: See `RegistryEnvGuard::new`; the guard still owns the lock.
+            unsafe { std::env::remove_var(cellscript::package::registry::REGISTRY_URL_ENV) };
         }
     }
 }

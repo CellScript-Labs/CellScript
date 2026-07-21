@@ -13,13 +13,13 @@ exclude = [
     "proposals/novaseal/v0-mvp-skeleton/verifier/novaseal_btc_verifier_core",
     "proposals/novaseal/v0-mvp-skeleton/verifier/novaseal_btc_verifier_riscv",
 ]
-resolver = "2"
+resolver = "3"
 
 [package]
 name = "cellscript"
 version = "0.22.0"
-edition = "2021"
-rust-version = "1.92.0"
+edition = "2024"
+rust-version = "1.97.1"
 autobins = false
 authors = ["CellScript Core Team"]
 description = "CellScript compiler for the Cell model"
@@ -34,6 +34,7 @@ exclude = [
     ".idea/",
     ".playwright-mcp/",
     ".rustfmt.toml",
+    "rust-toolchain.toml",
     ".github/",
     "AGENTS.md",
     "BRANCHES.md",

@@ -1,3 +1,6 @@
+// Keep the Edition 2024 let-chain cleanup separate from the toolchain migration.
+#![allow(clippy::collapsible_if)]
+
 use std::{path::PathBuf, process::Command};
 
 pub fn cellc_bin() -> PathBuf {

@@ -28,6 +28,17 @@ run_capture() {
     "$@" >"$output"
 }
 
+cargo_fmt_workspace() {
+    run cargo fmt \
+        --manifest-path "$ROOT_DIR/Cargo.toml" \
+        --package cellscript \
+        --package cellscript-ckb-adapter \
+        --package cellscript-fiber-adapter \
+        --package cellscript-wasm \
+        --package cellscript-ckb-sdk-builder-example \
+        "$@"
+}
+
 require_cmd() {
     if ! command -v "$1" >/dev/null 2>&1; then
         printf 'missing required command: %s\n' "$1" >&2
@@ -92,8 +103,7 @@ run_quick_gate() {
     require_cmd git
     require_cmd python3
 
-    run cargo fmt --all --check
-    run cargo fmt --manifest-path examples/ckb-sdk-builder/Cargo.toml --check
+    cargo_fmt_workspace --check
     run cargo test --locked -p cellscript --test ckb_std_compat -- --test-threads=1
     run cargo test --locked -p cellscript --test cli cellc_action_build_emits_builder_plan_json -- --test-threads=1
     run cargo test --locked -p cellscript --test cli cellc_ckb_std_compat_reports_runtime_boundary -- --test-threads=1

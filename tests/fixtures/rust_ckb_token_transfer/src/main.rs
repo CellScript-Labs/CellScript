@@ -34,7 +34,7 @@ const ERROR_WITNESS: i8 = 12;
 const ERROR_DATA_MISMATCH: i8 = 13;
 const ERROR_LOCK_MISMATCH: i8 = 14;
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_main() -> i8 {
     match run() {
         Ok(()) => 0,

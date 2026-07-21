@@ -1,7 +1,10 @@
 //! CellScript - Domain-specific language compiler for CKB blockchain
 //! Currently the backend can output RISC-V assembly or ELF artifacts.
 
-#![allow(clippy::ptr_arg, clippy::too_many_arguments)]
+// Rust 2024 makes let-chains available, so Clippy 1.97 newly proposes folding
+// a large legacy control-flow surface. Keep that mechanical rewrite separate
+// from the edition migration so each semantic branch remains reviewable.
+#![allow(clippy::collapsible_if, clippy::collapsible_match, clippy::ptr_arg, clippy::too_many_arguments)]
 
 pub(crate) mod aggregate_lowering;
 pub mod assumptions;
@@ -8447,7 +8450,7 @@ struct CollectionInstantiationBuilder {
 
 impl CollectionInstantiationBuilder {
     fn into_metadata(self) -> CollectionInstantiationMetadata {
-        let max_elements = if self.element_width_bytes == 0 { 0 } else { STACK_COLLECTION_BACKING_BYTES / self.element_width_bytes };
+        let max_elements = STACK_COLLECTION_BACKING_BYTES.checked_div(self.element_width_bytes).unwrap_or(0);
         CollectionInstantiationMetadata {
             scope_kind: self.scope_kind,
             scope_name: self.scope_name,

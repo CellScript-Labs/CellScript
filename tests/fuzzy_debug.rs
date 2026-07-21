@@ -328,17 +328,17 @@ fn fuzzy_metadata_tampering_never_panics() {
             6 => metadata.runtime.vm_abi.format = "fuzz".to_string(),
             7 => metadata.molecule_schema_manifest.manifest_hash.push_str("00"),
             8 => {
-                if let Some(action) = metadata.actions.first_mut() {
-                    if let Some(binding) = action.create_set.first_mut().and_then(|create| create.ckb_output_data.as_mut()) {
-                        binding.output_data_index = binding.output_data_index.saturating_add(1);
-                    }
+                if let Some(action) = metadata.actions.first_mut()
+                    && let Some(binding) = action.create_set.first_mut().and_then(|create| create.ckb_output_data.as_mut())
+                {
+                    binding.output_data_index = binding.output_data_index.saturating_add(1);
                 }
             }
             _ => {
-                if let Some(ty) = metadata.types.first_mut() {
-                    if let Some(schema) = ty.molecule_schema.as_mut() {
-                        schema.schema_hash.push_str("ff");
-                    }
+                if let Some(ty) = metadata.types.first_mut()
+                    && let Some(schema) = ty.molecule_schema.as_mut()
+                {
+                    schema.schema_hash.push_str("ff");
                 }
             }
         }

@@ -2755,10 +2755,12 @@ fn assert_original_binary_evidence_covers_rows(matrix: &Value) {
         if let Some(execution) = row["execution"].as_object() {
             for (key, value) in execution {
                 let is_original_or_shared = key.starts_with("original_") || key.starts_with("shared_");
-                if is_original_or_shared && key.ends_with("_binary_sha256") && !key.contains("patched") {
-                    if let Some(hash) = value.as_str() {
-                        used.insert(hash);
-                    }
+                if is_original_or_shared
+                    && key.ends_with("_binary_sha256")
+                    && !key.contains("patched")
+                    && let Some(hash) = value.as_str()
+                {
+                    used.insert(hash);
                 }
             }
         }

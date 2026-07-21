@@ -1049,10 +1049,7 @@ impl<'a> Parser<'a> {
         if self.check(&TokenKind::Has) {
             self.advance();
 
-            loop {
-                let Some(capability) = Capability::from_source_name(&self.current().text) else {
-                    break;
-                };
+            while let Some(capability) = Capability::from_source_name(&self.current().text) {
                 caps.push(capability);
                 self.advance();
 

@@ -40,8 +40,8 @@ jobs:
 
       - name: Install Rust toolchain
         run: |
-          rustup toolchain install 1.92.0 --profile minimal --component rustfmt --component clippy
-          rustup default 1.92.0
+          rustup toolchain install 1.97.1 --profile minimal --component rustfmt --component clippy
+          rustup default 1.97.1
           rustc --version
           cargo --version
 

@@ -1,11 +1,12 @@
 [package]
 name = "cellscript-ckb-tx-measure"
 version = "0.1.0"
-edition = "2021"
-rust-version = "1.85.0"
+edition = "2024"
+rust-version = "1.97.1"
 publish = false
 
 [workspace]
+resolver = "3"
 
 [[bin]]
 name = "cellscript-ckb-tx-measure"

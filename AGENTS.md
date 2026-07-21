@@ -13,9 +13,10 @@ crate at the repo root is `cellscript` (workspace member `.`); a sibling crate
 website submodule under `website/` ships an Astro + WASM playground that loads
 the prebuilt bundle.
 
-Version line: the workspace `Cargo.toml` pins `version = "0.22.0"` and
-`rust-version = "1.92.0"`. CI installs exactly that toolchain; do not bump
-either without coordinating with the release gate.
+Version line: the workspace `Cargo.toml` pins `version = "0.22.0"`, Rust
+Edition 2024, and `rust-version = "1.97.1"`. `rust-toolchain.toml` and CI pin
+that exact toolchain; do not bump either version without coordinating with the
+release gate.
 
 ## Required reading before any non-trivial change
 
@@ -86,9 +87,9 @@ require extra tooling.
 
 | Mode | What it does |
 | --- | --- |
-| `dev` | `cargo fmt --all`, `cargo check --locked -p cellscript --all-targets`, strict backend audit (quick), syntax combo audit (quick), forbidden tracked-file check, `git diff --check`. Run before committing. |
+| `dev` | Explicit workspace-package formatting, `cargo check --locked -p cellscript --all-targets`, strict backend audit (quick), syntax combo audit (quick), forbidden tracked-file check, `git diff --check`. Run before committing. |
 | `ci` | `dev` checks plus `cargo test --locked -p cellscript -- --test-threads=1`, `cargo clippy --locked -p cellscript --all-targets -- -D warnings`, full package contents check, website build check (requires `npm`), shell + Python syntax check, trailing-whitespace check. Run before claiming merge-readiness. |
-| `backend` | For IR / codegen / assembler / ABI / ELF / RISC-V changes: `cargo fmt --all --check`, `cargo check --locked -p cellscript --all-targets`, `cargo test --locked -p cellscript`, `cargo clippy ... -D warnings`, strict backend audit (full, which itself fires the CKB stateful-scenarios harness via `cellscript_ckb_stateful_scenarios.sh`), `git diff --check`. |
+| `backend` | For IR / codegen / assembler / ABI / ELF / RISC-V changes: explicit workspace-package format checking, `cargo check --locked -p cellscript --all-targets`, `cargo test --locked -p cellscript`, `cargo clippy ... -D warnings`, strict backend audit (full, which itself fires the CKB stateful-scenarios harness via `cellscript_ckb_stateful_scenarios.sh`), `git diff --check`. |
 | `release` / `release-quick` | Everything `ci` does plus release-auxiliary checks (CKB acceptance, NovaSeal pinning, NovaSeal Rust tooling for RISC-V, VS Code extension validate + publish dry-run, CKB tx measure tool, etc.) and the CKB acceptance harness (`scripts/ckb_cellscript_acceptance.sh`). These modes need the CKB submodule, the NovaSeal submodule, a sibling `ckb-sdk-rust` checkout at tag `v5.1.0`, and `riscv64imac-unknown-none-elf` for NovaSeal verifier builds. Do not run them casually. |
 
 Focused commands are still useful while debugging — `cargo check --locked -p
@@ -98,8 +99,8 @@ matching gate (`CODING_STYLE.md` is explicit about this).
 
 Notes on Rust toolchain / target:
 
-- `rust-version = "1.92.0"` in `Cargo.toml`; `rustup toolchain install 1.92.0`
-  and `rustup default 1.92.0` are what CI uses.
+- `rust-version = "1.97.1"` in every in-tree Cargo manifest;
+  `rust-toolchain.toml` and CI select that exact toolchain.
 - The NovaSeal verifier (`proposals/novaseal/v0-mvp-skeleton/verifier/novaseal_btc_verifier_riscv`)
   builds with `--target riscv64imac-unknown-none-elf` in release mode.
   `scripts/cellscript_gate.sh` will not pass without it.
@@ -279,8 +280,8 @@ Existing command families to be aware of:
 - `proposals/novaseal` is a submodule (`NovaSeal.git`, branch `main`). Same
   for `proposals/evolving-dob/evolving-dob-profile-v1`.
 - `tools/ckb-tx-measure` depends on `../ckb/util/jsonrpc-types` and
-  `../ckb/util/types`; the gate script picks up the CKB repo's
-  `rust-toolchain.toml` and uses that toolchain for the test build.
+  `../ckb/util/types`; the gate builds the helper with CellScript's pinned
+  Rust 1.97.1 toolchain so its declared `rust-version` remains enforceable.
 - `--primitive-strict 0.16` is the current production assurance gate; the
   README mentions it and the policy lives in `docs/`.
 

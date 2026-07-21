@@ -1,8 +1,8 @@
 [package]
 name = "cellscript-fiber-adapter"
 version = "0.22.0"
-edition = "2021"
-rust-version = "1.92.0"
+edition = "2024"
+rust-version = "1.97.1"
 publish = false
 description = "No-profile Fiber interoperability adapter for structurally compatible CellScript fungible Type Scripts"
 license = "MIT"

@@ -456,14 +456,14 @@ fn validate_action_scan_selectors_schema(plan: &ActionPlan) -> Result<()> {
     if scan_selectors.source.as_deref() != Some("transaction_runtime_input_requirements") {
         bail!("action_scan_selectors.source must be transaction_runtime_input_requirements, got {:?}", scan_selectors.source);
     }
-    if let Some(selector_count) = scan_selectors.selector_count {
-        if selector_count != scan_selectors.selectors.len() {
-            bail!(
-                "action_scan_selectors.selector_count {} does not match selectors length {}",
-                selector_count,
-                scan_selectors.selectors.len()
-            );
-        }
+    if let Some(selector_count) = scan_selectors.selector_count
+        && selector_count != scan_selectors.selectors.len()
+    {
+        bail!(
+            "action_scan_selectors.selector_count {} does not match selectors length {}",
+            selector_count,
+            scan_selectors.selectors.len()
+        );
     }
     let mut indexes = HashMap::new();
     for (fallback_index, selector) in scan_selectors.selectors.iter().enumerate() {
@@ -1049,7 +1049,7 @@ fn parse_byte32_hex(label: &str, value: &str) -> Result<[u8; 32]> {
 
 fn parse_hex_bytes(label: &str, value: &str) -> Result<Vec<u8>> {
     let hex = value.trim().strip_prefix("0x").unwrap_or(value.trim());
-    if hex.len() % 2 != 0 {
+    if !hex.len().is_multiple_of(2) {
         bail!("{label} hex must have an even number of digits");
     }
     hex::decode(hex).map_err(|error| anyhow::anyhow!("invalid {label} hex: {error}"))
