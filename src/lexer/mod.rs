@@ -191,7 +191,7 @@ impl<'a> Lexer<'a> {
                     Some(c) => {
                         return Err(CompileError::new(
                             format!("unknown escape sequence: \\{}", c),
-                            Span::new(self.position, self.position + 1, self.line, self.column),
+                            Span::new(self.position, self.position + c.len_utf8(), self.line, self.column),
                         ));
                     }
                     None => break,
@@ -299,7 +299,7 @@ impl<'a> Lexer<'a> {
             } else {
                 return Err(CompileError::new(
                     "non-ASCII character in byte string",
-                    Span::new(self.position, self.position + 1, self.line, self.column),
+                    Span::new(self.position, self.position + c.len_utf8(), self.line, self.column),
                 ));
             }
         }

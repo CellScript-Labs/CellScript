@@ -2,6 +2,11 @@
 
 ## 0.22.0 - 2026-07-19
 
+- Harden diagnostic and CLI ergonomics: make `--message-format` global across
+  package commands, keep structured diagnostics on stderr and successful JSON
+  payloads on stdout, classify exit codes, preserve error causes, assign a
+  stable backend diagnostic family, render Unicode source snippets by terminal
+  width, expose JSON run metrics, and make MCP documentation reads UTF-8-safe.
 - Add the bounded no-profile Fiber interoperability path. Metadata schema 55
   records the structurally derived `fungible-type-group-v1` entry; its ELF
   verifies exact 16-byte little-endian `u128` data, checked full-group

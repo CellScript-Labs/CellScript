@@ -3011,6 +3011,19 @@ action accept(input: Offer) -> output: Offer {
     }
 
     #[test]
+    fn parse_failure_drops_the_previous_successful_ast() {
+        let mut server = LspServer::new();
+        let uri = "file:///changing.cell".to_string();
+        server.open_document(uri.clone(), "module changing\naction ok() -> bool { verification true }\n".to_string());
+        assert!(server.ast_cache.contains_key(&uri));
+
+        server.update_document(uri.clone(), "module changing\naction broken( {\n".to_string());
+
+        assert!(!server.ast_cache.contains_key(&uri));
+        assert!(!server.get_diagnostics(&uri).is_empty());
+    }
+
+    #[test]
     fn test_parse_recovery_collects_multiple_diagnostics() {
         let mut server = LspServer::new();
         let uri = "file:///multi_parse_errors.cell".to_string();

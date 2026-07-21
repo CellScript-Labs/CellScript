@@ -479,7 +479,7 @@ fn docs_for_topic(topic: &str) -> anyhow::Result<Vec<PathBuf>> {
             "docs/CELLSCRIPT_CAPACITY_AND_BUILDER_CONTRACT.md",
             "docs/CELLSCRIPT_PACKAGE_PROVENANCE_AND_DEPLOYMENT_IDENTITY.md",
         ],
-        "diagnostics" => vec!["docs/wiki/Tutorial-13-Agentic-Loops-and-cellc-mcp.md", "docs/wiki/Tutorial-07-LSP-and-Tooling.md"],
+        "diagnostics" => vec!["docs/wiki/Tutorial-13-Agentic-Loops-and-cellscript-mcp.md", "docs/wiki/Tutorial-07-LSP-and-Tooling.md"],
         "roadmap-0.21" => vec!["docs/CELLSCRIPT_0_21_ROADMAP.md", "roadmap/CELLSCRIPT_0_21_CLI_UX_PLAN.md"],
         _ => return Err(anyhow::anyhow!("unknown docs topic '{topic}'")),
     };
@@ -491,6 +491,28 @@ fn read_bounded_file(path: &Path) -> anyhow::Result<String> {
     if content.len() <= MAX_DOC_BYTES_PER_FILE {
         Ok(content)
     } else {
-        Ok(format!("{}\n\n[truncated by cellscript-mcp after {} bytes]", &content[..MAX_DOC_BYTES_PER_FILE], MAX_DOC_BYTES_PER_FILE))
+        let mut end = MAX_DOC_BYTES_PER_FILE;
+        while end > 0 && !content.is_char_boundary(end) {
+            end -= 1;
+        }
+        Ok(format!("{}\n\n[truncated by cellscript-mcp at the {} byte limit]", &content[..end], MAX_DOC_BYTES_PER_FILE))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bounded_doc_reads_never_split_a_utf8_character() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("utf8.md");
+        let content = format!("{}界tail", "a".repeat(MAX_DOC_BYTES_PER_FILE - 1));
+        std::fs::write(&path, content).unwrap();
+
+        let bounded = read_bounded_file(&path).unwrap();
+        assert!(bounded.starts_with(&"a".repeat(MAX_DOC_BYTES_PER_FILE - 1)));
+        assert!(!bounded.contains('界'));
+        assert!(bounded.contains("truncated by cellscript-mcp"));
     }
 }

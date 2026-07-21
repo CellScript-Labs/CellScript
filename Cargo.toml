@@ -83,6 +83,7 @@ env_logger = { version = "0.11", optional = true }
 clap = { version = "=4.5.49", features = ["derive"], optional = true }
 
 colored = { version = "2.1", optional = true }
+unicode-width = { version = "=0.1.14", optional = true }
 base64 = { version = "0.22", optional = true }
 keyring = { version = "3", optional = true }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"], optional = true }
@@ -102,7 +103,7 @@ tokio = { version = "1", features = ["full"], optional = true }
 default = ["cli", "lsp"]
 # CLI surface: binary, REPL, incremental session. Gated out of the
 # wasm build because clap/colored/env_logger pull native I/O.
-cli = ["dep:base64", "dep:clap", "dep:colored", "dep:env_logger", "dep:keyring", "dep:reqwest", "dep:ring"]
+cli = ["dep:base64", "dep:clap", "dep:colored", "dep:env_logger", "dep:keyring", "dep:reqwest", "dep:ring", "dep:unicode-width"]
 # Language server. Gated out of the wasm build because tower-lsp +
 # tokio pull mio/std::net.
 lsp = ["dep:tokio", "dep:tower-lsp"]

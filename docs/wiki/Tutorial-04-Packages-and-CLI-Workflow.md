@@ -155,6 +155,7 @@ diagnostics without parsing human text:
 
 ```bash
 cellc check --target-profile ckb --message-format=json
+cellc build --message-format=json
 ```
 
 Colour is controlled separately:
@@ -166,8 +167,17 @@ cellc check --color=never
 NO_COLOR=1 cellc check
 ```
 
-`--json` still means a command-specific success payload where that command
-supports one. `--message-format=json` is for diagnostic transport on failures.
+`--message-format` and `--color` are global flags and may appear on every
+subcommand. `--json` still means a command-specific payload where that command
+supports one. Successful `--json` payloads use stdout; structured diagnostics
+selected by `--message-format=json` use stderr. Keeping the streams separate
+lets a caller parse a successful payload without mixing it with warnings or
+failure diagnostics.
+
+Structured failures include an error category and the process exit code.
+Usage errors exit with `2`, ordinary compilation failures with `1`, I/O with
+`74`, network availability failures with `69`, authentication failures with
+`77`, and internal failures with `70`.
 
 ## Format And Generate Docs
 

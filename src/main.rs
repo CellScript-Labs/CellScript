@@ -1,10 +1,11 @@
 use camino::Utf8Path;
-use cellscript::error::CompileError;
+use cellscript::error::{CompileError, CompileErrorCategory};
 use clap::{Parser, ValueEnum};
 use colored::Colorize;
-use std::io::IsTerminal;
+use std::error::Error as _;
 use std::path::Path;
 use std::process;
+use unicode_width::UnicodeWidthStr;
 
 use cellscript::{
     compile_path, compile_path_metadata_with_diagnostics, compile_path_with_entry_action, compile_path_with_entry_lock,
@@ -22,6 +23,16 @@ enum ColorChoice {
     Auto,
     Always,
     Never,
+}
+
+impl ColorChoice {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Always => "always",
+            Self::Never => "never",
+        }
+    }
 }
 
 #[derive(Parser, Debug)]
@@ -83,7 +94,9 @@ struct Cli {
 }
 
 fn main() {
-    apply_no_color_environment();
+    let requested_color = requested_color();
+    cellscript::cli::apply_color_policy(requested_color.as_deref());
+    let requested_message_format = requested_message_format();
 
     // Start the LSP server before any CLI parsing side effects.
     if std::env::args().any(|arg| arg == "--lsp") {
@@ -91,39 +104,34 @@ fn main() {
         return;
     }
 
-    let mut raw_args = std::env::args();
-    let _program = raw_args.next();
-    if let Some(arg) = raw_args.next() {
-        match arg.as_str() {
+    let raw_args = std::env::args().skip(1).collect::<Vec<_>>();
+    if let Some((arg_index, arg)) = routing_argument(&raw_args) {
+        match arg {
             "--help" | "-h" => {
                 print_top_level_help();
                 return;
             }
             "--explain" => {
-                let Some(code) = raw_args.next() else {
+                let Some(code) = raw_args.get(arg_index + 1) else {
                     eprintln!("{}: the argument '--explain <CODE>' requires a value", "error".red());
                     process::exit(2);
                 };
-                run_top_level_explain(code);
+                run_top_level_explain(code.clone());
                 return;
             }
             "--list" => {
                 print_command_list();
                 return;
             }
-            _ if is_package_command(&arg) || arg == "help" => {
-                let suppress_human_error = process_args_request_message_format_json();
+            _ if is_package_command(arg) || arg == "help" => {
                 if let Err(e) = cellscript::cli::run() {
-                    if !suppress_human_error {
-                        print_cli_error(&e);
-                    }
-                    process::exit(1);
+                    terminate_cli_error(&e, requested_message_format, None, None);
                 }
                 return;
             }
-            _ if looks_like_unknown_command(&arg) => {
-                print_unknown_command(&arg);
-                process::exit(1);
+            _ if looks_like_unknown_command(arg) => {
+                print_unknown_command(arg);
+                process::exit(CompileErrorCategory::Usage.exit_code());
             }
             _ => {}
         }
@@ -133,16 +141,24 @@ fn main() {
         }
     }
 
-    let cli = Cli::parse();
+    let cli = Cli::try_parse().unwrap_or_else(|error| {
+        if matches!(error.kind(), clap::error::ErrorKind::DisplayHelp | clap::error::ErrorKind::DisplayVersion) {
+            if let Err(io_error) = error.print() {
+                terminate_cli_error(&CompileError::from(io_error), requested_message_format, None, None);
+            }
+            process::exit(0);
+        }
+        let error = CompileError::without_span(error.to_string()).with_code("CLI0001").with_category(CompileErrorCategory::Usage);
+        terminate_cli_error(&error, requested_message_format, None, None)
+    });
     let message_format = cli.message_format;
-    apply_color_policy(cli.color);
+    cellscript::cli::apply_color_policy(Some(cli.color.as_str()));
 
     env_logger::init();
 
     if cli.interactive {
         if let Err(e) = cellscript::repl::run_repl() {
-            eprintln!("{}: {}", "REPL error".red(), e);
-            process::exit(1);
+            terminate_cli_error(&CompileError::from(e), message_format, None, None);
         }
         return;
     }
@@ -153,10 +169,7 @@ fn main() {
             .as_deref()
             .map(cellscript::TargetProfile::from_name)
             .transpose()
-            .unwrap_or_else(|e| {
-                emit_cli_error(&e, message_format, None, None);
-                process::exit(1);
-            })
+            .unwrap_or_else(|e| terminate_cli_error(&e, message_format, None, None))
             .unwrap_or(cellscript::TargetProfile::Ckb);
         let asm = cellscript::stdlib::StdLib::generate_assembly_for_target_profile(target_profile);
         println!("{}", asm);
@@ -164,26 +177,27 @@ fn main() {
     }
 
     if cli.opt > 3 {
-        let error = CompileError::without_span("optimization level must be between 0 and 3");
-        emit_cli_error(&error, message_format, None, None);
-        process::exit(1);
+        let error =
+            CompileError::without_span("optimization level must be between 0 and 3").with_category(CompileErrorCategory::Usage);
+        terminate_cli_error(&error, message_format, None, None);
     }
 
     let input_file = cli.input.unwrap_or_else(|| ".".to_string());
     let resolved_input = match resolve_input_path(Utf8Path::new(&input_file)) {
         Ok(path) => path,
         Err(e) => {
-            emit_cli_error(&e, message_format, None, None);
-            process::exit(1);
+            terminate_cli_error(&e, message_format, None, None);
         }
     };
 
     let source = match std::fs::read_to_string(&resolved_input) {
         Ok(s) => s,
         Err(e) => {
-            let error = CompileError::without_span(format!("failed to read '{}': {}", resolved_input, e));
-            emit_cli_error(&error, message_format, None, None);
-            process::exit(1);
+            let error = CompileError::without_span(format!("failed to read '{}': {}", resolved_input, e))
+                .with_category(CompileErrorCategory::Io)
+                .with_file(resolved_input.clone())
+                .with_source(e);
+            terminate_cli_error(&error, message_format, None, None);
         }
     };
 
@@ -196,8 +210,7 @@ fn main() {
                 }
             }
             Err(e) => {
-                emit_cli_error(&e, message_format, Some(&resolved_input), Some(&source));
-                process::exit(1);
+                terminate_cli_error(&e, message_format, Some(&resolved_input), Some(&source));
             }
         }
         return;
@@ -207,8 +220,7 @@ fn main() {
         let tokens = match cellscript::lexer::lex(&source) {
             Ok(t) => t,
             Err(e) => {
-                emit_cli_error(&e, message_format, Some(&resolved_input), Some(&source));
-                process::exit(1);
+                terminate_cli_error(&e, message_format, Some(&resolved_input), Some(&source));
             }
         };
 
@@ -219,8 +231,7 @@ fn main() {
             }
             Err(diagnostics) => {
                 let error = diagnostics_to_cli_error(diagnostics);
-                emit_cli_error(&error, message_format, Some(&resolved_input), Some(&source));
-                process::exit(1);
+                terminate_cli_error(&error, message_format, Some(&resolved_input), Some(&source));
             }
         }
         return;
@@ -237,9 +248,9 @@ fn main() {
     };
 
     if cli.entry_action.is_some() && cli.entry_lock.is_some() {
-        let error = CompileError::without_span("--entry-action and --entry-lock are mutually exclusive");
-        emit_cli_error(&error, message_format, None, None);
-        process::exit(1);
+        let error = CompileError::without_span("--entry-action and --entry-lock are mutually exclusive")
+            .with_category(CompileErrorCategory::Usage);
+        terminate_cli_error(&error, message_format, None, None);
     }
 
     let diagnostics_options = options.clone();
@@ -258,19 +269,14 @@ fn main() {
                 .map(|path| path.to_owned())
                 .map(Ok)
                 .unwrap_or_else(|| default_output_path_for_input(Utf8Path::new(&input_file), &resolved_input, result.artifact_format))
-                .unwrap_or_else(|e| {
-                    emit_cli_error(&e, message_format, None, None);
-                    process::exit(1);
-                });
+                .unwrap_or_else(|e| terminate_cli_error(&e, message_format, None, None));
 
             if let Err(e) = result.write_to_path(&output_path) {
-                emit_cli_error(&e, message_format, None, None);
-                process::exit(1);
+                terminate_cli_error(&e, message_format, None, None);
             }
             let metadata_path = default_metadata_path_for_artifact(&output_path);
             if let Err(e) = result.write_metadata_to_path(&metadata_path) {
-                emit_cli_error(&e, message_format, None, None);
-                process::exit(1);
+                terminate_cli_error(&e, message_format, None, None);
             }
 
             println!("{}: compiled successfully", "success".green());
@@ -281,53 +287,66 @@ fn main() {
             println!("  Metadata: {}", metadata_path);
         }
         Err(e) => {
+            if !should_collect_compile_failure_diagnostics(&e) {
+                terminate_cli_error(&e, message_format, Some(&resolved_input), Some(&source));
+            }
             let report = compile_path_metadata_with_diagnostics(Utf8Path::new(&input_file), diagnostics_options);
             if report.diagnostics.is_empty() {
-                emit_cli_error(&e, message_format, Some(&resolved_input), Some(&source));
+                terminate_cli_error(&e, message_format, Some(&resolved_input), Some(&source));
             } else {
                 let error = diagnostics_to_cli_error(report.diagnostics);
-                emit_cli_error(&error, message_format, Some(&resolved_input), Some(&source));
-            }
-            process::exit(1);
-        }
-    }
-}
-
-fn no_color_env_set() -> bool {
-    std::env::var_os("NO_COLOR").map(|value| !value.is_empty()).unwrap_or(false)
-}
-
-fn apply_no_color_environment() {
-    if no_color_env_set() {
-        colored::control::set_override(false);
-    }
-}
-
-fn apply_color_policy(choice: ColorChoice) {
-    match choice {
-        ColorChoice::Always => colored::control::set_override(true),
-        ColorChoice::Never => colored::control::set_override(false),
-        ColorChoice::Auto => {
-            if no_color_env_set() || (!std::io::stdout().is_terminal() && !std::io::stderr().is_terminal()) {
-                colored::control::set_override(false);
-            } else {
-                colored::control::unset_override();
+                terminate_cli_error(&error, message_format, Some(&resolved_input), Some(&source));
             }
         }
     }
 }
 
-fn process_args_request_message_format_json() -> bool {
+fn should_collect_compile_failure_diagnostics(error: &CompileError) -> bool {
+    error.category == CompileErrorCategory::Compilation && !error.code.as_deref().is_some_and(|code| code.starts_with("CG"))
+}
+
+fn requested_message_format() -> MessageFormat {
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
+        if arg == "--" {
+            break;
+        }
         if arg == "--message-format=json" {
-            return true;
+            return MessageFormat::Json;
         }
         if arg == "--message-format" && args.next().as_deref() == Some("json") {
-            return true;
+            return MessageFormat::Json;
         }
     }
-    false
+    MessageFormat::Human
+}
+
+fn requested_color() -> Option<String> {
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        if arg == "--" {
+            break;
+        }
+        if let Some(value) = arg.strip_prefix("--color=") {
+            return Some(value.to_string());
+        }
+        if arg == "--color" {
+            return args.next();
+        }
+    }
+    None
+}
+
+fn routing_argument(args: &[String]) -> Option<(usize, &str)> {
+    let mut index = 0;
+    while let Some(arg) = args.get(index) {
+        match arg.as_str() {
+            "--color" | "--message-format" => index = index.saturating_add(2),
+            value if value.starts_with("--color=") || value.starts_with("--message-format=") => index += 1,
+            value => return Some((index, value)),
+        }
+    }
+    None
 }
 
 fn resolve_primitive_compat(compat: Option<String>, strict: Option<String>) -> Option<String> {
@@ -336,10 +355,6 @@ fn resolve_primitive_compat(compat: Option<String>, strict: Option<String>) -> O
     } else {
         compat
     }
-}
-
-fn print_cli_error(error: &CompileError) {
-    print_cli_error_with_source(error, None, None);
 }
 
 fn emit_cli_error(
@@ -352,6 +367,16 @@ fn emit_cli_error(
         MessageFormat::Human => print_cli_error_with_source(error, fallback_file, fallback_source),
         MessageFormat::Json => print_cli_error_json(error, fallback_file, fallback_source),
     }
+}
+
+fn terminate_cli_error(
+    error: &CompileError,
+    message_format: MessageFormat,
+    fallback_file: Option<&Utf8Path>,
+    fallback_source: Option<&str>,
+) -> ! {
+    emit_cli_error(error, message_format, fallback_file, fallback_source);
+    process::exit(error.exit_code())
 }
 
 fn diagnostics_to_cli_error(mut diagnostics: Vec<CompileError>) -> CompileError {
@@ -390,6 +415,8 @@ fn print_cli_error_json(error: &CompileError, fallback_file: Option<&Utf8Path>, 
         diagnostics.iter().map(|diagnostic| diagnostic_json_value(diagnostic, fallback_file, fallback_source)).collect::<Vec<_>>();
     let payload = serde_json::json!({
         "status": "failed",
+        "category": error.category.label(),
+        "exit_code": error.exit_code(),
         "diagnostic_count": diagnostic_values.len(),
         "error_count": error_count,
         "warning_count": diagnostic_values.len().saturating_sub(error_count),
@@ -414,12 +441,13 @@ fn diagnostic_json_value(
     fallback_file: Option<&Utf8Path>,
     fallback_source: Option<&str>,
 ) -> serde_json::Value {
-    let runtime_code = cellscript::runtime_errors::runtime_error_info_for_diagnostic_message(&diagnostic.message)
-        .map(|info| format!("E{:04}", info.code));
+    let runtime_code =
+        cellscript::runtime_errors::runtime_error_info_for_diagnostic(diagnostic).map(|info| format!("E{:04}", info.code));
     let file = diagnostic.file.as_ref().map(|file| file.as_str()).or_else(|| fallback_file.map(Utf8Path::as_str));
     serde_json::json!({
         "message": &diagnostic.message,
         "severity": diagnostic.severity.label(),
+        "category": diagnostic.category.label(),
         "code": diagnostic.code.as_deref().or(runtime_code.as_deref()),
         "file": file,
         "span": {
@@ -429,7 +457,18 @@ fn diagnostic_json_value(
             "end": diagnostic.span.end,
         },
         "range": diagnostic_range_json(diagnostic, fallback_source),
+        "causes": error_causes(diagnostic),
     })
+}
+
+fn error_causes(error: &CompileError) -> Vec<String> {
+    let mut causes = Vec::new();
+    let mut source = error.source();
+    while let Some(cause) = source {
+        causes.push(cause.to_string());
+        source = cause.source();
+    }
+    causes
 }
 
 fn diagnostic_range_json(diagnostic: &CompileError, fallback_source: Option<&str>) -> serde_json::Value {
@@ -478,7 +517,7 @@ fn line_column_at(source: &str, byte_offset: usize) -> (usize, usize) {
 }
 
 fn print_single_cli_error(error: &CompileError, fallback_file: Option<&Utf8Path>, fallback_source: Option<&str>) {
-    let runtime_info = cellscript::runtime_errors::runtime_error_info_for_diagnostic_message(&error.message);
+    let runtime_info = cellscript::runtime_errors::runtime_error_info_for_diagnostic(error);
     let label = diagnostic_label(error, runtime_info.as_ref());
     if let Some((file, source)) = diagnostic_source(error, fallback_file, fallback_source) {
         eprintln!("{}: {}", colour_diagnostic_label(&label, error), error.message);
@@ -489,8 +528,13 @@ fn print_single_cli_error(error: &CompileError, fallback_file: Option<&Utf8Path>
         eprintln!("{}: {}", colour_diagnostic_label(&label, error), error);
     }
 
-    if let Some(info) = cellscript::runtime_errors::runtime_error_info_for_diagnostic_message(&error.message) {
+    if let Some(info) = cellscript::runtime_errors::runtime_error_info_for_diagnostic(error) {
         eprintln!("  {}: run `cellc explain E{:04}` for {}", "help".cyan(), info.code, info.name);
+    }
+    for cause in error_causes(error) {
+        if !error.message.ends_with(&cause) {
+            eprintln!("  {}: {}", "caused by".cyan(), cause);
+        }
     }
     print_followup_hints(error);
 }
@@ -498,8 +542,7 @@ fn print_single_cli_error(error: &CompileError, fallback_file: Option<&Utf8Path>
 fn run_top_level_explain(code: String) {
     let command = cellscript::cli::commands::Command::Explain(cellscript::cli::commands::ExplainArgs { code, json: false });
     if let Err(error) = cellscript::cli::commands::CommandExecutor::execute(command) {
-        print_cli_error(&error);
-        process::exit(1);
+        terminate_cli_error(&error, requested_message_format(), None, None);
     }
 }
 
@@ -544,17 +587,25 @@ fn print_source_snippet(file: String, source: &str, error: &CompileError) {
     let line_text = source.lines().nth(line_number.saturating_sub(1)).unwrap_or("");
     let column = error.span.column.max(1);
     let line_width = line_number.to_string().len();
-    let line_char_count = line_text.chars().count();
-    let underline_offset = column.saturating_sub(1).min(line_char_count);
-    let span_width = error.span.end.saturating_sub(error.span.start).max(1);
-    let remaining_width = line_char_count.saturating_sub(underline_offset).max(1);
-    let underline_width = span_width.min(remaining_width).max(1);
+    let line_start = source.split_inclusive('\n').take(line_number.saturating_sub(1)).map(str::len).sum::<usize>();
+    let start_in_line = floor_char_boundary(line_text, error.span.start.saturating_sub(line_start).min(line_text.len()));
+    let end_in_line =
+        floor_char_boundary(line_text, error.span.end.saturating_sub(line_start).min(line_text.len())).max(start_in_line);
+    let underline_offset = UnicodeWidthStr::width(&line_text[..start_in_line]);
+    let underline_width = UnicodeWidthStr::width(&line_text[start_in_line..end_in_line]).max(1);
     let underline = format!("{}{}", " ".repeat(underline_offset), "^".repeat(underline_width));
 
     eprintln!(" {} {}:{}:{}", "-->".blue(), file, line_number, column);
     eprintln!("{:>width$} |", "", width = line_width);
     eprintln!("{:>width$} | {}", line_number, line_text, width = line_width);
     eprintln!("{:>width$} | {} {}", "", underline.red(), error.message, width = line_width);
+}
+
+fn floor_char_boundary(value: &str, mut index: usize) -> usize {
+    while index > 0 && !value.is_char_boundary(index) {
+        index -= 1;
+    }
+    index
 }
 
 fn is_package_command(arg: &str) -> bool {
@@ -567,6 +618,9 @@ fn looks_like_unknown_command(arg: &str) -> bool {
     }
     if arg.contains('/') || arg.contains('\\') || arg.ends_with(".cell") || arg == "Cell.toml" {
         return false;
+    }
+    if closest_command(arg).is_some() {
+        return true;
     }
     if arg.contains('.') || Path::new(arg).exists() {
         return false;
@@ -640,7 +694,7 @@ fn print_top_level_help() {
     println!("Common commands:");
     for command in common_top_level_commands() {
         let about = command.get_about().map(|about| about.to_string()).unwrap_or_default();
-        println!("  {:<18} {}", command.get_name(), about);
+        print_command_row(command.get_name(), &about);
     }
     println!("\nDirect options:");
     println!("  -O, --opt <OPT>                  Optimization level 0..3 [default: 0]");
@@ -680,8 +734,12 @@ fn print_command_list() {
     println!("Installed cellc commands:\n");
     for command in cellc_cli_command().get_subcommands().filter(|command| !command.is_hide_set()) {
         let about = command.get_about().map(|about| about.to_string()).unwrap_or_default();
-        println!("  {:<22} {}", command.get_name(), about);
+        print_command_row(command.get_name(), &about);
     }
+}
+
+fn print_command_row(name: &str, about: &str) {
+    println!("  {:<24} {}", name, about);
 }
 
 fn cellc_cli_command() -> clap::Command {

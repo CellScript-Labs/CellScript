@@ -5079,11 +5079,18 @@ impl CompileResult {
         if let Some(parent) = output_path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| {
                 CompileError::new(format!("failed to create output directory '{}': {}", parent, e), error::Span::default())
+                    .with_category(error::CompileErrorCategory::Io)
+                    .with_file(output_path.to_owned())
+                    .with_source(e)
             })?;
         }
 
-        std::fs::write(output_path, &self.artifact_bytes)
-            .map_err(|e| CompileError::new(format!("failed to write output '{}': {}", output_path, e), error::Span::default()))
+        std::fs::write(output_path, &self.artifact_bytes).map_err(|e| {
+            CompileError::new(format!("failed to write output '{}': {}", output_path, e), error::Span::default())
+                .with_category(error::CompileErrorCategory::Io)
+                .with_file(output_path.to_owned())
+                .with_source(e)
+        })
     }
 
     pub fn default_metadata_path(&self, artifact_path: &Utf8Path) -> Utf8PathBuf {
@@ -5095,13 +5102,23 @@ impl CompileResult {
         if let Some(parent) = output_path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| {
                 CompileError::new(format!("failed to create metadata directory '{}': {}", parent, e), error::Span::default())
+                    .with_category(error::CompileErrorCategory::Io)
+                    .with_file(output_path.to_owned())
+                    .with_source(e)
             })?;
         }
 
-        let json = serde_json::to_vec_pretty(&self.metadata)
-            .map_err(|e| CompileError::new(format!("failed to serialize metadata: {}", e), error::Span::default()))?;
-        std::fs::write(output_path, json)
-            .map_err(|e| CompileError::new(format!("failed to write metadata '{}': {}", output_path, e), error::Span::default()))
+        let json = serde_json::to_vec_pretty(&self.metadata).map_err(|e| {
+            CompileError::new(format!("failed to serialize metadata: {}", e), error::Span::default())
+                .with_category(error::CompileErrorCategory::Internal)
+                .with_source(e)
+        })?;
+        std::fs::write(output_path, json).map_err(|e| {
+            CompileError::new(format!("failed to write metadata '{}': {}", output_path, e), error::Span::default())
+                .with_category(error::CompileErrorCategory::Io)
+                .with_file(output_path.to_owned())
+                .with_source(e)
+        })
     }
 }
 
@@ -5890,9 +5907,15 @@ fn compile_ast_with_build(
 
     // 5. Code generation
     let codegen_options = codegen::CodegenOptions { opt_level: options.opt_level, debug: options.debug, target_profile };
-    let mut artifact_bytes = codegen::generate(ir, &codegen_options, artifact_format)?;
+    let mut artifact_bytes = codegen::generate(ir, &codegen_options, artifact_format).map_err(|error| {
+        if error.code.is_some() {
+            error
+        } else {
+            error.with_code("CG2000")
+        }
+    })?;
     if artifact_bytes.is_empty() {
-        return Err(CompileError::new("backend produced an empty artifact", error::Span::default()));
+        return Err(CompileError::new("backend produced an empty artifact", error::Span::default()).with_code("CG2001"));
     }
 
     // 5b. Debug info generation (embed DWARF section when debug option enabled and artifact is ELF).
@@ -6399,14 +6422,17 @@ fn resolve_input_file(input: &Utf8Path) -> Result<Utf8PathBuf> {
 
     if input.file_name() == Some("Cell.toml") {
         let Some(parent) = input.parent() else {
-            return Err(CompileError::new("Cell.toml must live inside a package directory", error::Span::default()));
+            return Err(CompileError::new("Cell.toml must live inside a package directory", error::Span::default())
+                .with_category(error::CompileErrorCategory::Usage));
         };
         return resolve_package_entry(parent);
     }
 
     if input.extension() == Some("cell") {
         if !input.exists() {
-            return Err(CompileError::new(format!("input file '{}' does not exist", input), error::Span::default()));
+            return Err(CompileError::new(format!("input file '{}' does not exist", input), error::Span::default())
+                .with_category(error::CompileErrorCategory::Io)
+                .with_file(input.to_owned()));
         }
         return canonical_utf8_path(input);
     }
@@ -6414,7 +6440,9 @@ fn resolve_input_file(input: &Utf8Path) -> Result<Utf8PathBuf> {
     Err(CompileError::new(
         format!("unsupported input '{}'; expected a .cell file, package directory, or Cell.toml", input),
         error::Span::default(),
-    ))
+    )
+    .with_category(error::CompileErrorCategory::Usage)
+    .with_file(input.to_owned()))
 }
 
 fn resolve_package_entry(package_root: &Utf8Path) -> Result<Utf8PathBuf> {
@@ -6423,7 +6451,9 @@ fn resolve_package_entry(package_root: &Utf8Path) -> Result<Utf8PathBuf> {
     let entry = manifest.package.entry;
     let entry_path = package_root.join(entry);
     if !entry_path.exists() {
-        return Err(CompileError::new(format!("package entry '{}' does not exist", entry_path), error::Span::default()));
+        return Err(CompileError::new(format!("package entry '{}' does not exist", entry_path), error::Span::default())
+            .with_category(error::CompileErrorCategory::Io)
+            .with_file(entry_path));
     }
 
     canonical_utf8_path(&entry_path)
@@ -17767,11 +17797,20 @@ fn collect_cell_files(root: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
 }
 
 fn collect_cell_files_recursive(root: &Utf8Path, files: &mut Vec<Utf8PathBuf>) -> Result<()> {
-    let entries = std::fs::read_dir(root)
-        .map_err(|e| CompileError::new(format!("failed to read module directory '{}': {}", root, e), error::Span::default()))?;
+    let entries = std::fs::read_dir(root).map_err(|e| {
+        CompileError::new(format!("failed to read module directory '{}': {}", root, e), error::Span::default())
+            .with_category(error::CompileErrorCategory::Io)
+            .with_file(root.to_owned())
+            .with_source(e)
+    })?;
 
     for entry in entries {
-        let entry = entry.map_err(|e| CompileError::new(format!("failed to read directory entry: {}", e), error::Span::default()))?;
+        let entry = entry.map_err(|e| {
+            CompileError::new(format!("failed to read directory entry in '{}': {}", root, e), error::Span::default())
+                .with_category(error::CompileErrorCategory::Io)
+                .with_file(root.to_owned())
+                .with_source(e)
+        })?;
         let path = entry.path();
         let Ok(candidate) = Utf8PathBuf::from_path_buf(path) else {
             continue;
@@ -17798,8 +17837,12 @@ fn should_skip_cell_dir(path: &Utf8Path) -> bool {
 }
 
 fn canonical_utf8_path(path: &Utf8Path) -> Result<Utf8PathBuf> {
-    let canonical = std::fs::canonicalize(path)
-        .map_err(|e| CompileError::new(format!("failed to canonicalize '{}': {}", path, e), error::Span::default()))?;
+    let canonical = std::fs::canonicalize(path).map_err(|e| {
+        CompileError::new(format!("failed to canonicalize '{}': {}", path, e), error::Span::default())
+            .with_category(error::CompileErrorCategory::Io)
+            .with_file(path.to_owned())
+            .with_source(e)
+    })?;
     Utf8PathBuf::from_path_buf(canonical)
         .map_err(|non_utf8| CompileError::new(format!("path is not valid UTF-8: {}", non_utf8.display()), error::Span::default()))
 }
@@ -17807,11 +17850,17 @@ fn canonical_utf8_path(path: &Utf8Path) -> Result<Utf8PathBuf> {
 fn load_manifest(package_root: &Utf8Path) -> Result<PackageManifest> {
     let manifest_path = package_root.join("Cell.toml");
     if !manifest_path.exists() {
-        return Err(CompileError::new(format!("Cell.toml not found in '{}'", package_root), error::Span::default()));
+        return Err(CompileError::new(format!("Cell.toml not found in '{}'", package_root), error::Span::default())
+            .with_category(error::CompileErrorCategory::Io)
+            .with_file(manifest_path));
     }
 
-    let manifest_source = std::fs::read_to_string(&manifest_path)
-        .map_err(|e| CompileError::new(format!("failed to read manifest '{}': {}", manifest_path, e), error::Span::default()))?;
+    let manifest_source = std::fs::read_to_string(&manifest_path).map_err(|e| {
+        CompileError::new(format!("failed to read manifest '{}': {}", manifest_path, e), error::Span::default())
+            .with_category(error::CompileErrorCategory::Io)
+            .with_file(manifest_path.clone())
+            .with_source(e)
+    })?;
     toml::from_str(&manifest_source)
         .map_err(|e| CompileError::new(format!("failed to parse manifest '{}': {}", manifest_path, e), error::Span::default()))
 }

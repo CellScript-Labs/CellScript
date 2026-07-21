@@ -422,6 +422,8 @@ pub const ALL_RUNTIME_ERRORS: &[CellScriptRuntimeError] = &[
     CellScriptRuntimeError::PackedHashPreimageMaterializationUnresolved,
 ];
 
+pub const RESERVED_RUNTIME_ERROR_CODES: &[u64] = &[6, 19, 27, 28, 29, 30, 31];
+
 pub fn runtime_error_info(error: CellScriptRuntimeError) -> CellScriptRuntimeErrorInfo {
     CellScriptRuntimeErrorInfo { code: error.code(), name: error.name(), description: error.description(), hint: error.hint() }
 }
@@ -434,6 +436,19 @@ pub fn runtime_error_info_by_name(name: &str) -> Option<CellScriptRuntimeErrorIn
     ALL_RUNTIME_ERRORS.iter().copied().find(|error| error.name() == name).map(runtime_error_info)
 }
 
+pub fn runtime_error_info_for_diagnostic(error: &crate::error::CompileError) -> Option<CellScriptRuntimeErrorInfo> {
+    if let Some(code) = error.code.as_deref().and_then(parse_diagnostic_runtime_code) {
+        return runtime_error_info_by_code(code);
+    }
+    runtime_error_info_for_diagnostic_message(&error.message)
+}
+
+fn parse_diagnostic_runtime_code(code: &str) -> Option<u64> {
+    code.strip_prefix('E')?.parse().ok()
+}
+
+/// Compatibility bridge for legacy diagnostics that predate typed runtime
+/// codes. New diagnostics should attach their exact `E####` code instead.
 pub fn runtime_error_info_for_diagnostic_message(message: &str) -> Option<CellScriptRuntimeErrorInfo> {
     if let Some(info) = ALL_RUNTIME_ERRORS.iter().copied().map(runtime_error_info).find(|info| message.contains(info.name)) {
         return Some(info);
@@ -475,6 +490,10 @@ mod tests {
             assert!(codes.insert(info.code), "duplicate runtime error code {}", info.code);
             assert!(names.insert(info.name), "duplicate runtime error name {}", info.name);
         }
+        for code in RESERVED_RUNTIME_ERROR_CODES {
+            assert!(!codes.contains(code), "reserved runtime error code {} is registered", code);
+            assert_eq!(runtime_error_info_by_code(*code), None);
+        }
     }
 
     #[test]
@@ -485,6 +504,12 @@ mod tests {
         );
         assert_eq!(runtime_error_info_for_diagnostic_message("fixed-byte-comparison unresolved").map(|info| info.code), Some(18));
         assert_eq!(runtime_error_info_for_diagnostic_message("ordinary type mismatch").map(|info| info.code), None);
+    }
+
+    #[test]
+    fn typed_diagnostic_runtime_code_wins_over_message_heuristics() {
+        let diagnostic = crate::error::CompileError::without_span("entry witness text in an unrelated diagnostic").with_code("E0018");
+        assert_eq!(runtime_error_info_for_diagnostic(&diagnostic).map(|info| info.code), Some(18));
     }
 
     #[test]

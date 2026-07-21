@@ -1,5 +1,6 @@
 use camino::Utf8PathBuf;
 use std::fmt;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Span {
@@ -15,13 +16,49 @@ impl Span {
     }
 
     pub fn combine(&self, other: &Span) -> Span {
-        Span { start: self.start.min(other.start), end: self.end.max(other.end), line: self.line, column: self.column }
+        let (line, column) = if self.start <= other.start { (self.line, self.column) } else { (other.line, other.column) };
+        Span { start: self.start.min(other.start), end: self.end.max(other.end), line, column }
     }
 }
 
 impl fmt::Display for Span {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}:{}-{}:{}:{}", self.line, self.column, self.end, self.start, self.end)
+        write!(f, "{}:{} (bytes {}..{})", self.line, self.column, self.start, self.end)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CompileErrorCategory {
+    #[default]
+    Compilation,
+    Usage,
+    Io,
+    Network,
+    Authentication,
+    Internal,
+}
+
+impl CompileErrorCategory {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Compilation => "compilation",
+            Self::Usage => "usage",
+            Self::Io => "io",
+            Self::Network => "network",
+            Self::Authentication => "authentication",
+            Self::Internal => "internal",
+        }
+    }
+
+    pub const fn exit_code(self) -> i32 {
+        match self {
+            Self::Compilation => 1,
+            Self::Usage => 2,
+            Self::Io => 74,
+            Self::Network => 69,
+            Self::Authentication => 77,
+            Self::Internal => 70,
+        }
     }
 }
 
@@ -113,6 +150,8 @@ pub struct CompileError {
     pub code: Option<String>,
     pub severity: DiagnosticSeverity,
     pub related: RelatedDiagnostics,
+    pub category: CompileErrorCategory,
+    cause: Option<Arc<dyn std::error::Error + Send + Sync>>,
 }
 
 impl CompileError {
@@ -124,6 +163,8 @@ impl CompileError {
             code: None,
             severity: DiagnosticSeverity::Error,
             related: RelatedDiagnostics::default(),
+            category: CompileErrorCategory::Compilation,
+            cause: None,
         }
     }
 
@@ -139,6 +180,23 @@ impl CompileError {
     pub fn with_code(mut self, code: impl Into<String>) -> Self {
         self.code = Some(code.into());
         self
+    }
+
+    pub fn with_category(mut self, category: CompileErrorCategory) -> Self {
+        self.category = category;
+        self
+    }
+
+    pub fn with_source<E>(mut self, source: E) -> Self
+    where
+        E: std::error::Error + Send + Sync + 'static,
+    {
+        self.cause = Some(Arc::new(source));
+        self
+    }
+
+    pub const fn exit_code(&self) -> i32 {
+        self.category.exit_code()
     }
 
     pub fn without_span(message: impl Into<String>) -> Self {
@@ -172,29 +230,33 @@ impl fmt::Display for CompileError {
     }
 }
 
-impl std::error::Error for CompileError {}
+impl std::error::Error for CompileError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.cause.as_deref().map(|cause| cause as &(dyn std::error::Error + 'static))
+    }
+}
 
 impl From<std::io::Error> for CompileError {
     fn from(value: std::io::Error) -> Self {
-        Self::without_span(value.to_string())
+        Self::without_span(value.to_string()).with_code("IO0001").with_category(CompileErrorCategory::Io).with_source(value)
     }
 }
 
 impl From<toml::de::Error> for CompileError {
     fn from(value: toml::de::Error) -> Self {
-        Self::without_span(value.to_string())
+        Self::without_span(value.to_string()).with_source(value)
     }
 }
 
 impl From<toml::ser::Error> for CompileError {
     fn from(value: toml::ser::Error) -> Self {
-        Self::without_span(value.to_string())
+        Self::without_span(value.to_string()).with_source(value)
     }
 }
 
 impl From<serde_json::Error> for CompileError {
     fn from(value: serde_json::Error) -> Self {
-        Self::without_span(value.to_string())
+        Self::without_span(value.to_string()).with_source(value)
     }
 }
 
@@ -349,6 +411,31 @@ mod tests {
     fn compile_error_defaults_to_error_severity() {
         let error = CompileError::new("boom", Span::default());
         assert_eq!(error.severity, DiagnosticSeverity::Error);
+        assert_eq!(error.category, CompileErrorCategory::Compilation);
+        assert_eq!(error.exit_code(), 1);
+    }
+
+    #[test]
+    fn span_combine_uses_the_earliest_start_position() {
+        let later = Span::new(8, 10, 3, 4);
+        let earlier = Span::new(2, 5, 1, 3);
+        assert_eq!(later.combine(&earlier), Span::new(2, 10, 1, 3));
+        assert_eq!(earlier.combine(&later), Span::new(2, 10, 1, 3));
+    }
+
+    #[test]
+    fn span_display_names_source_and_byte_positions_unambiguously() {
+        assert_eq!(Span::new(8, 12, 2, 5).to_string(), "2:5 (bytes 8..12)");
+    }
+
+    #[test]
+    fn io_errors_retain_their_category_and_source() {
+        use std::error::Error;
+
+        let error = CompileError::from(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied"));
+        assert_eq!(error.category, CompileErrorCategory::Io);
+        assert_eq!(error.exit_code(), 74);
+        assert!(error.source().is_some());
     }
 
     #[test]

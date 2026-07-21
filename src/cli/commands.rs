@@ -529,6 +529,7 @@ pub struct RunArgs {
     pub args: Vec<String>,
     pub release: bool,
     pub simulate: bool,
+    pub json: bool,
 }
 
 #[derive(Debug, Default)]
@@ -1503,7 +1504,6 @@ impl CommandExecutor {
         }
 
         let args = effective_check_args(args)?;
-        let message_format_json = check_message_format_json(&args);
         let requested_profile = effective_check_target_profile(&args)?;
         let compile_target_profile = compile_target_profile_for_check(requested_profile);
         let mut checked_targets = Vec::new();
@@ -1524,7 +1524,7 @@ impl CommandExecutor {
                 Ok(result) => result,
                 Err(error) => {
                     let diagnostics = compile_failure_diagnostics(Utf8Path::new("."), compile_options, error);
-                    if args.json || message_format_json {
+                    if args.json {
                         print_check_failure_json(&diagnostics, target, requested_profile)?;
                         return Err(CompileError::without_span(format!("check failed with {} diagnostic(s)", diagnostics.len())));
                     }
@@ -1640,6 +1640,7 @@ impl CommandExecutor {
         };
 
         let mut member_results = Vec::new();
+        let mut failure_diagnostics = Vec::new();
         let mut failed = 0;
 
         for member_dir in &members {
@@ -1668,6 +1669,10 @@ impl CommandExecutor {
                     }
                 }
                 Err(e) => {
+                    failure_diagnostics.push(
+                        CompileError::without_span(format!("workspace member '{}': {}", member_dir, e.message))
+                            .with_file(member_dir.clone()),
+                    );
                     member_results.push(serde_json::json!({
                         "member": member_dir.as_str(),
                         "status": "failed",
@@ -1681,7 +1686,7 @@ impl CommandExecutor {
             }
         }
 
-        if args.json || (message_format_json && failed > 0) {
+        if args.json {
             let summary = serde_json::json!({
                 "status": if failed == 0 { "ok" } else { "failed" },
                 "mode": "workspace",
@@ -1705,6 +1710,9 @@ impl CommandExecutor {
         }
 
         if failed > 0 {
+            if message_format_json {
+                return Err(diagnostics_to_error(&failure_diagnostics));
+            }
             return Err(crate::error::CompileError::without_span(format!("{} of {} workspace members failed", failed, members.len())));
         }
         println!("{}", format!("Workspace check complete: {} members", members.len()).green());
@@ -3474,6 +3482,14 @@ impl CommandExecutor {
             let vm_args = args.args.into_iter().map(|arg| arg.into_bytes()).collect::<Vec<_>>();
             let cycles = run_elf_in_ckb_vm(&result.artifact_bytes, &vm_args)?;
 
+            if args.json {
+                return print_json(&serde_json::json!({
+                    "status": "ok",
+                    "mode": "ckb-vm",
+                    "artifact_format": result.artifact_format.display_name(),
+                    "cycles": cycles,
+                }));
+            }
             println!("{}", "Run complete".green());
             println!("  Artifact format: {}", result.artifact_format.display_name());
             println!("  Cycles: {}", cycles);
@@ -3494,7 +3510,7 @@ impl CommandExecutor {
         }
     }
 
-    fn run_simulate(compile_result: &crate::CompileResult, _args: &RunArgs) -> Result<()> {
+    fn run_simulate(compile_result: &crate::CompileResult, args: &RunArgs) -> Result<()> {
         use crate::simulate::{SimValue, SimulateInterpreter};
 
         let modules = crate::load_modules_for_input(".")?;
@@ -3526,6 +3542,22 @@ impl CommandExecutor {
         let sim_result = interp
             .simulate_action(&entry.name, &sim_args)
             .map_err(|e| crate::error::CompileError::without_span(format!("simulation error: {}", e)))?;
+
+        if args.json {
+            return print_json(&serde_json::json!({
+                "status": "ok",
+                "mode": "simulate",
+                "entry": {
+                    "kind": "action",
+                    "name": sim_result.entry_name,
+                },
+                "steps": sim_result.steps,
+                "has_cell_operations": sim_result.has_cell_ops,
+                "result": sim_result.return_value.to_string(),
+                "trace": sim_result.trace.iter().map(ToString::to_string).collect::<Vec<_>>(),
+                "cycles": serde_json::Value::Null,
+            }));
+        }
 
         println!("{}", "Simulate complete".green());
         println!("  Entry: action {}", sim_result.entry_name);
@@ -4614,6 +4646,7 @@ fn resolve_capability_expires_at(explicit_timestamp: Option<String>, relative: O
     if let Some(days) = trimmed.strip_suffix('d') {
         let days: u64 = days.parse().map_err(|_| {
             crate::error::CompileError::without_span(format!("invalid --expires value '{}'; expected a duration like 90d", relative))
+                .with_category(crate::error::CompileErrorCategory::Usage)
         })?;
         return Ok(utc_timestamp_after_seconds(days.saturating_mul(24 * 60 * 60)));
     }
@@ -4623,6 +4656,7 @@ fn resolve_capability_expires_at(explicit_timestamp: Option<String>, relative: O
                 "invalid --expires value '{}'; expected a duration like 90d or 24h",
                 relative
             ))
+            .with_category(crate::error::CompileErrorCategory::Usage)
         })?;
         return Ok(utc_timestamp_after_seconds(hours.saturating_mul(60 * 60)));
     }
@@ -4633,7 +4667,8 @@ fn resolve_capability_expires_at(explicit_timestamp: Option<String>, relative: O
     Err(crate::error::CompileError::without_span(format!(
         "invalid --expires value '{}'; expected a duration like 90d/24h or an absolute UTC timestamp",
         relative
-    )))
+    ))
+    .with_category(crate::error::CompileErrorCategory::Usage))
 }
 
 fn registry_auth_nonce(
@@ -4719,22 +4754,30 @@ fn p256_spki_der_from_uncompressed_public_key(public_key: &[u8]) -> Result<Vec<u
 
 fn store_registry_capability_private_key(key_id: &str, pkcs8: &[u8]) -> Result<()> {
     let secret = base64::engine::general_purpose::STANDARD.encode(pkcs8);
-    let entry = keyring::Entry::new("cellscript-registry", key_id)
-        .map_err(|error| crate::error::CompileError::without_span(format!("failed to open OS keychain: {}", error)))?;
+    let entry = keyring::Entry::new("cellscript-registry", key_id).map_err(|error| {
+        crate::error::CompileError::without_span(format!("failed to open OS keychain: {}", error))
+            .with_category(crate::error::CompileErrorCategory::Authentication)
+            .with_source(error)
+    })?;
     entry.set_password(&secret).map_err(|error| {
         crate::error::CompileError::without_span(format!(
             "failed to store capability private key '{}' in OS keychain: {}",
             key_id, error
         ))
+        .with_category(crate::error::CompileErrorCategory::Authentication)
+        .with_source(error)
     })
 }
 
 fn sign_registry_publish_payload(key_id: &str, canonical_payload: &str) -> Result<String> {
     let Some(pkcs8) = load_registry_capability_private_key(key_id)? else {
-        return Err(crate::error::CompileError::without_span(format!(
-            "capability signature is required for public publish and no private key was found for '{}' in the OS keychain; pass --capability-signature, set CELLSCRIPT_CAPABILITY_SIGNATURE, or set CELLSCRIPT_CAPABILITY_PRIVATE_KEY_PKCS8_B64 for CI",
-            key_id
-        )));
+        return Err(
+            crate::error::CompileError::without_span(format!(
+                "capability signature is required for public publish and no private key was found for '{}' in the OS keychain; pass --capability-signature, set CELLSCRIPT_CAPABILITY_SIGNATURE, or set CELLSCRIPT_CAPABILITY_PRIVATE_KEY_PKCS8_B64 for CI",
+                key_id
+            ))
+            .with_category(crate::error::CompileErrorCategory::Authentication),
+        );
     };
     sign_registry_publish_payload_with_pkcs8(&pkcs8, canonical_payload)
 }
@@ -4753,8 +4796,11 @@ fn load_registry_capability_private_key(key_id: &str) -> Result<Option<Vec<u8>>>
         }
     }
 
-    let entry = keyring::Entry::new("cellscript-registry", key_id)
-        .map_err(|error| crate::error::CompileError::without_span(format!("failed to open OS keychain: {}", error)))?;
+    let entry = keyring::Entry::new("cellscript-registry", key_id).map_err(|error| {
+        crate::error::CompileError::without_span(format!("failed to open OS keychain: {}", error))
+            .with_category(crate::error::CompileErrorCategory::Authentication)
+            .with_source(error)
+    })?;
     match entry.get_password() {
         Ok(secret) => {
             let decoded = base64::engine::general_purpose::STANDARD.decode(secret.trim()).map_err(|error| {
@@ -4769,7 +4815,9 @@ fn load_registry_capability_private_key(key_id: &str) -> Result<Option<Vec<u8>>>
         Err(error) => Err(crate::error::CompileError::without_span(format!(
             "failed to read capability private key '{}' from OS keychain: {}",
             key_id, error
-        ))),
+        ))
+        .with_category(crate::error::CompileErrorCategory::Authentication)
+        .with_source(error)),
     }
 }
 
@@ -5195,13 +5243,16 @@ fn submit_registry_publish_request(
     let status = response.status();
     let body = response.text().map_err(|error| {
         crate::error::CompileError::without_span(format!("failed to read registry publish response from '{}': {}", endpoint, error))
+            .with_category(crate::error::CompileErrorCategory::Network)
+            .with_source(error)
     })?;
     if !status.is_success() {
         return Err(crate::error::CompileError::without_span(format!(
             "registry publish request failed with HTTP {}: {}",
             status,
             body.trim()
-        )));
+        ))
+        .with_category(registry_http_error_category(status)));
     }
 
     let parsed = serde_json::from_str::<serde_json::Value>(&body).unwrap_or_else(|_| serde_json::json!({ "response": body }));
@@ -5223,11 +5274,13 @@ fn submit_registry_publish_request(
 }
 
 fn registry_http_client() -> Result<reqwest::blocking::Client> {
-    reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(30))
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .map_err(|error| crate::error::CompileError::without_span(format!("failed to build registry HTTP client: {}", error)))
+    reqwest::blocking::Client::builder().timeout(Duration::from_secs(30)).redirect(reqwest::redirect::Policy::none()).build().map_err(
+        |error| {
+            crate::error::CompileError::without_span(format!("failed to build registry HTTP client: {}", error))
+                .with_category(crate::error::CompileErrorCategory::Network)
+                .with_source(error)
+        },
+    )
 }
 
 fn submit_registry_publish_request_with_retry(
@@ -5255,14 +5308,17 @@ fn submit_registry_publish_request_with_retry(
                 return Err(crate::error::CompileError::without_span(format!(
                     "failed to submit registry publish request to '{}': {}",
                     endpoint, error
-                )));
+                ))
+                .with_category(crate::error::CompileErrorCategory::Network)
+                .with_source(error));
             }
         }
     }
     let message = transport_error
         .map(|error| error.to_string())
         .unwrap_or_else(|| "registry publish request did not produce a response".to_string());
-    Err(crate::error::CompileError::without_span(format!("failed to submit registry publish request to '{}': {}", endpoint, message)))
+    Err(crate::error::CompileError::without_span(format!("failed to submit registry publish request to '{}': {}", endpoint, message))
+        .with_category(crate::error::CompileErrorCategory::Network))
 }
 
 fn is_retryable_registry_status(status: reqwest::StatusCode) -> bool {
@@ -5276,6 +5332,14 @@ fn is_retryable_registry_status(status: reqwest::StatusCode) -> bool {
     )
 }
 
+fn registry_http_error_category(status: reqwest::StatusCode) -> crate::error::CompileErrorCategory {
+    if matches!(status, reqwest::StatusCode::UNAUTHORIZED | reqwest::StatusCode::FORBIDDEN) {
+        crate::error::CompileErrorCategory::Authentication
+    } else {
+        crate::error::CompileErrorCategory::Network
+    }
+}
+
 fn submit_registry_json_request(
     endpoint: &str,
     body: &serde_json::Value,
@@ -5285,17 +5349,22 @@ fn submit_registry_json_request(
     let client = registry_http_client()?;
     let response = client.post(endpoint).json(body).send().map_err(|error| {
         crate::error::CompileError::without_span(format!("failed to submit registry request to '{}': {}", endpoint, error))
+            .with_category(crate::error::CompileErrorCategory::Network)
+            .with_source(error)
     })?;
     let status = response.status();
     let response_body = response.text().map_err(|error| {
         crate::error::CompileError::without_span(format!("failed to read registry response from '{}': {}", endpoint, error))
+            .with_category(crate::error::CompileErrorCategory::Network)
+            .with_source(error)
     })?;
     if !status.is_success() {
         return Err(crate::error::CompileError::without_span(format!(
             "registry request failed with HTTP {}: {}",
             status,
             response_body.trim()
-        )));
+        ))
+        .with_category(registry_http_error_category(status)));
     }
     let parsed =
         serde_json::from_str::<serde_json::Value>(&response_body).unwrap_or_else(|_| serde_json::json!({ "response": response_body }));
@@ -5318,6 +5387,11 @@ fn compile_cli_input(input: Option<&PathBuf>, options: CompileOptions) -> Result
 }
 
 fn compile_failure_diagnostics(input: &Utf8Path, options: CompileOptions, fallback: CompileError) -> Vec<CompileError> {
+    if fallback.category != crate::error::CompileErrorCategory::Compilation
+        || fallback.code.as_deref().is_some_and(|code| code.starts_with("CG"))
+    {
+        return vec![fallback];
+    }
     let report = compile_path_metadata_with_diagnostics(input, options);
     if report.diagnostics.is_empty() {
         vec![fallback]
@@ -5442,21 +5516,29 @@ fn line_column_at(source: &str, byte_offset: usize) -> (usize, usize) {
 fn read_metadata_json(path: &Path) -> Result<CompileMetadata> {
     let bytes = std::fs::read(path).map_err(|error| {
         crate::error::CompileError::without_span(format!("failed to read metadata '{}': {}", path.display(), error))
+            .with_category(crate::error::CompileErrorCategory::Io)
+            .with_source(error)
     })?;
     serde_json::from_slice(&bytes)
         .map_err(|error| crate::error::CompileError::without_span(format!("failed to parse metadata '{}': {}", path.display(), error)))
 }
 
 fn read_json_value(path: &Path) -> Result<serde_json::Value> {
-    let bytes = std::fs::read(path)
-        .map_err(|error| crate::error::CompileError::without_span(format!("failed to read JSON '{}': {}", path.display(), error)))?;
+    let bytes = std::fs::read(path).map_err(|error| {
+        crate::error::CompileError::without_span(format!("failed to read JSON '{}': {}", path.display(), error))
+            .with_category(crate::error::CompileErrorCategory::Io)
+            .with_source(error)
+    })?;
     serde_json::from_slice(&bytes)
         .map_err(|error| crate::error::CompileError::without_span(format!("failed to parse JSON '{}': {}", path.display(), error)))
 }
 
 fn print_json(value: &serde_json::Value) -> Result<()> {
-    let json = serde_json::to_string_pretty(value)
-        .map_err(|error| crate::error::CompileError::without_span(format!("failed to serialize JSON: {}", error)))?;
+    let json = serde_json::to_string_pretty(value).map_err(|error| {
+        crate::error::CompileError::without_span(format!("failed to serialize JSON: {}", error))
+            .with_category(crate::error::CompileErrorCategory::Internal)
+            .with_source(error)
+    })?;
     println!("{}", json);
     Ok(())
 }
@@ -12008,35 +12090,28 @@ fn warn_legacy_alias(legacy: &str, canonical: &str, json: bool) {
     }
 }
 
-fn cli_no_color_env_set() -> bool {
-    std::env::var_os("NO_COLOR").map(|value| !value.is_empty()).unwrap_or(false)
-}
-
-fn apply_cli_color_policy(color: Option<&str>) {
-    match color.unwrap_or("auto") {
-        "always" => colored::control::set_override(true),
-        "never" => colored::control::set_override(false),
-        _ => {
-            if cli_no_color_env_set() || (!std::io::stdout().is_terminal() && !std::io::stderr().is_terminal()) {
-                colored::control::set_override(false);
-            } else {
-                colored::control::unset_override();
-            }
-        }
-    }
-}
-
 pub struct CliParser;
 
 impl CliParser {
-    pub fn parse() -> Command {
-        let matches = Self::command().get_matches();
+    pub fn parse() -> Result<Command> {
+        let matches = match Self::command().try_get_matches() {
+            Ok(matches) => matches,
+            Err(error) if matches!(error.kind(), clap::error::ErrorKind::DisplayHelp | clap::error::ErrorKind::DisplayVersion) => {
+                error.print().map_err(crate::error::CompileError::from)?;
+                std::process::exit(0);
+            }
+            Err(error) => {
+                return Err(crate::error::CompileError::without_span(error.to_string())
+                    .with_code("CLI0001")
+                    .with_category(crate::error::CompileErrorCategory::Usage));
+            }
+        };
         let color = matches
             .get_one::<String>("color")
             .map(String::as_str)
             .or_else(|| matches.subcommand().and_then(|(_, subcommand)| subcommand.get_one::<String>("color").map(String::as_str)));
-        apply_cli_color_policy(color);
-        Self::parse_matches(matches)
+        crate::cli::apply_color_policy(color);
+        Ok(Self::parse_matches(matches))
     }
 
     pub fn command() -> clap::Command {
@@ -12054,6 +12129,14 @@ impl CliParser {
                     .value_parser(["auto", "always", "never"])
                     .global(true)
                     .help("Control ANSI colour output: auto, always, or never"),
+            )
+            .arg(
+                Arg::new("message-format")
+                    .long("message-format")
+                    .value_name("FORMAT")
+                    .value_parser(["human", "json"])
+                    .global(true)
+                    .help("Select diagnostic output format without changing successful --json summaries"),
             )
             .subcommand(
                 ClapCommand::new("build")
@@ -12227,13 +12310,6 @@ impl CliParser {
                     )
                     .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
                     .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON check summary"))
-                    .arg(
-                        Arg::new("message-format")
-                            .long("message-format")
-                            .value_name("FORMAT")
-                            .value_parser(["human", "json"])
-                            .help("Select diagnostic output format without changing successful --json summaries"),
-                    )
                     .arg(
                         Arg::new("production")
                             .long("production")
@@ -12867,6 +12943,7 @@ impl CliParser {
                 ClapCommand::new("run")
                     .about("Experimental: build and run a package")
                     .arg(Arg::new("release").long("release").short('r').action(ArgAction::SetTrue).help("Run in release mode"))
+                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable run summary"))
                     .arg(
                         Arg::new("simulate")
                             .long("simulate")
@@ -13729,6 +13806,7 @@ impl CliParser {
                 args: m.get_many::<String>("args").map(|values| values.cloned().collect()).unwrap_or_default(),
                 release: m.get_flag("release"),
                 simulate: m.get_flag("simulate"),
+                json: m.get_flag("json"),
             }),
             Some(("publish", m)) => Command::Publish(PublishArgs {
                 dry_run: m.get_flag("dry-run"),

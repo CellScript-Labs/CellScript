@@ -829,7 +829,7 @@ still fail closed.
 | `cellc registry verify` | Verify deployment identity against `Cell.lock` and `Deployed.toml`; `--live` adds CKB RPC evidence |
 | `cellc certify --plugin novaseal-profile-v0` | Run the deterministic compiler-hosted NovaSeal profile certification (consumes `target/novaseal-*.json` and the local certifier source) |
 | `cellc repl` | Start the interactive REPL |
-| `cellc run` | Run ELF entrypoints via VM runner or simulator |
+| `cellc run` | Run ELF entrypoints via VM runner or simulator; `--json` includes cycles for VM execution and `cycles: null` for simulation |
 | `cellc publish` / `cellc publish --offline` / `cellc registry add` / `cellc registry edit --yank` | Public publish plus explicit local/offline registry metadata flow; public registry policy makes bare `cellc publish` an authenticated registry write, with Git/static metadata retained for audit and fallback |
 | `cellc auth capability create/submit/revoke` / public registry write API / non-CellScript artifact install | JoyID-rooted publication policy and future-facing artifact profiles; fail-closed where unsupported |
 
@@ -843,12 +843,19 @@ still fail closed.
 | `--entry-action <ACTION>` | Compile a single action as the artifact entrypoint |
 | `--entry-lock <LOCK>` | Compile a single lock as the artifact entrypoint |
 | `--json` | Emit machine-readable summaries where supported (successful payloads) |
-| `--message-format=json` | Emit diagnostics as structured JSON (CI / agent loops). Plain output otherwise. |
+| `--message-format=json` | Global diagnostic transport for direct mode and every subcommand; failures are JSON on stderr. |
 | `--color=auto\|always\|never` | Control ANSI colour output. `auto` is the default; `NO_COLOR=1` forces `never` |
 | `--production` | Apply production-oriented metadata policy checks |
 | `--deny-fail-closed` | Reject fail-closed runtime features or obligations |
 | `--deny-ckb-runtime` | Reject CKB transaction/syscall runtime requirements |
 | `--deny-runtime-obligations` | Reject runtime-required verifier obligations |
+
+Successful command payloads selected by `--json` are written to stdout.
+Diagnostics selected by `--message-format=json` are written to stderr and
+include `status`, `category`, `exit_code`, stable diagnostic codes when
+available, source ranges, and cause chains. Usage errors exit with `2`;
+compilation errors use `1`; classified I/O, network, authentication, and
+internal failures use `74`, `69`, `77`, and `70` respectively.
 
 ---
 
