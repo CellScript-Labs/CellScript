@@ -396,9 +396,11 @@ action owned(owner: Address) -> u64 {
         .output()
         .unwrap();
     assert!(!output.status.success(), "unicode hex input should fail");
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(!stderr.contains("panicked"), "CLI hex decoder panicked instead of returning a diagnostic: {stderr}");
-    assert!(stderr.contains("invalid hex byte"), "unexpected stderr: {stderr}");
+    assert!(output.stderr.is_empty(), "unexpected stderr: {}", String::from_utf8_lossy(&output.stderr));
+    let failure: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let message = failure["diagnostics"][0]["message"].as_str().unwrap_or_default();
+    assert!(!message.contains("panicked"), "CLI hex decoder panicked instead of returning a diagnostic: {failure}");
+    assert!(message.contains("invalid hex byte"), "unexpected failure: {failure}");
 }
 
 #[test]

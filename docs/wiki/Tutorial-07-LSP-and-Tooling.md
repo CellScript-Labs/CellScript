@@ -15,6 +15,12 @@ making `ErrorReporter::has_errors()` true. Release gates and production
 commands remain error-gated, so a warning is a review signal rather than a
 deployment certificate.
 
+Backend diagnostics use stable `E2xxx` codes. LSP clients receive the code in
+the standard diagnostic `code` field and a `codeDescription` link to the
+compiler registry, so hover or diagnostic-detail UI can show the exact rule
+instead of only the message. The same record is available through
+`cellc explain E2202 --json`.
+
 ## What You Will Learn
 
 - what the LSP server supports;
@@ -68,6 +74,17 @@ The extension lives in:
 ```text
 editors/vscode-cellscript
 ```
+
+It is a pinned Git submodule. Initialize it before local validation or
+packaging:
+
+```bash
+git submodule update --init editors/vscode-cellscript
+```
+
+If that command cannot fetch the recorded commit, the parent repository points
+at an unavailable extension revision and the release must update its gitlink;
+do not silently substitute an arbitrary branch tip.
 
 Validate and package it locally:
 

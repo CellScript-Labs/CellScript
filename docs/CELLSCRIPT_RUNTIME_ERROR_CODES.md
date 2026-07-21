@@ -13,7 +13,8 @@ li a0, 14
 Use the error name first when debugging. Numeric codes are retained for VM,
 wallet, explorer, and acceptance-script compatibility.
 
-The same table is emitted in metadata schema 30 under
+The table was introduced in compile metadata schema 30 and is emitted by the
+current schema 55 under
 `constraints.runtime_errors`, so `cellc constraints`, `cellc check --json`, and
 sidecar metadata all expose the same machine-readable registry.
 When a CLI failure can be tied to this registry, stderr uses the same

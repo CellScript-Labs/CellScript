@@ -30,7 +30,8 @@ The current project direction is simple:
 | 0.19 scope | Scope complete for CKB ecosystem reuse, `ckb-std` compatibility, grammar governance, and Phase 1 package/deployment identity registry closure. Generated builders and live-chain registry proof moved to 0.20. | [0.19 roadmap](../docs/archive/0.19/CELLSCRIPT_0_19_ROADMAP.md), [0.16-0.20 release notes](../docs/releases/CELLSCRIPT_0_16_TO_0_20_RELEASE_NOTES.md), [ckb-std compatibility](../docs/CELLSCRIPT_CKB_STD_COMPAT.md), [Registry Phase 1](../docs/CELLSCRIPT_REGISTRY_PHASE1.md) |
 | 0.20 planned scope | Generated Action Builder, live-chain deployment verification, stateful transaction flows, and registry trust hardening. | [0.20 roadmap](../docs/archive/0.20/CELLSCRIPT_0_20_ROADMAP.md) |
 | 0.21 planned scope | Semantic closure, authenticated compiler evidence, CLI UX reorganisation, dedicated MCP server and CellScript programming skills, derived cyclic graph views, type-level TemplateLayout metadata, and deferred optional template Merkleisation. | [0.21 roadmap](../docs/CELLSCRIPT_0_21_ROADMAP.md), [0.21 CLI UX plan](CELLSCRIPT_0_21_CLI_UX_PLAN.md) |
-| 0.22 Fiber native-support proposal | Proposed no-profile fungible Type Script integration: derive compatibility from typed compiler evidence, reuse deployment manifests, generate Fiber UDT configuration, and require complete CKB/Fiber lifecycle evidence. This is not an implementation or release claim. | [0.22 no-profile Fiber native-support plan](CELLSCRIPT_0_22_FIBER_NATIVE_SUPPORT_PLAN.md) |
+| 0.22 release scope | Released typed transaction views, finite invariant quantifiers, bounded collections, capability entailment, concrete payload enums, validity blocks, borrow regions, stable `E2xxx` diagnostics, and metadata schema 55. | [0.22 release notes](../docs/releases/CELLSCRIPT_0_22_RELEASE_NOTES.md), [0.22 type/set roadmap](CELLSCRIPT_0_22_TYPE_AND_SET_THEORY_ROADMAP.md) |
+| 0.22 bounded Fiber interoperability | The dedicated `fungible-type-group-v1` compiler/adapter path and local-devnet scenarios are implemented. The pinned complete external lifecycle/negative matrix remains pending, so this is not a production-readiness claim. | [0.22 Fiber plan](CELLSCRIPT_0_22_FIBER_NATIVE_SUPPORT_PLAN.md), [operator guide](../examples/fiber/README.md) |
 | CKB language fit | CKB-first design is confirmed; remaining gaps are signer binding, continuity policy, capacity policy, and declarative time policy. | [CKB target profiles](../docs/wiki/Tutorial-05-CKB-Target-Profiles.md), [production gates](../docs/wiki/Tutorial-06-Metadata-Verification-and-Production-Gates.md) |
 | Surface syntax | Low-risk syntax pass and 0.13.2 syntax-governance hardening are implemented; authority-sensitive syntax remains staged. | [Surface elegance RFC](../docs/CELLSCRIPT_SURFACE_ELEGANCE_RFC.md), [Syntax-combination audit](../docs/CELLSCRIPT_SYNTAX_COMBO_AUDIT_METHODOLOGY.md) |
 | Collections | Stack-backed fixed-width `Vec<T>` helper surface is implemented; cell-backed and generic map ownership remain fail-closed. | [Collections support matrix](../docs/CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md), [0.13 release scope](../docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md) |
@@ -271,6 +272,33 @@ Detailed status:
 - [0.21 roadmap](../docs/CELLSCRIPT_0_21_ROADMAP.md)
 - [0.21 CLI UX reorganisation plan](CELLSCRIPT_0_21_CLI_UX_PLAN.md)
 
+### 0.22: Typed Finite Evidence And Bounded Fiber Interoperability
+
+0.22 ships the first implementation slice of the type/set roadmap:
+
+- typed read-only CKB transaction-view handles;
+- finite `forall` and `count(...)` invariant scans;
+- `BoundedCellSet<T, N>` / `BoundedList<T, N>` contracts with explicit
+  lifecycle and builder-evidence boundaries;
+- closed capability entailment, concrete fixed-width payload enums, type
+  `validity`, and compile-time-only borrow regions;
+- stable `E2xxx` backend diagnostics transported through CLI JSON and LSP;
+- current compile metadata schema 55.
+
+The same release implements a narrow, no-profile Fiber path through the
+separate `cellscript-fiber-adapter`. It derives a dedicated
+`fungible-type-group-v1` artifact and Fiber UDT configuration from typed
+compiler, deployment, live-cell, and node evidence. Bounded local-devnet
+scenarios have passed, but the clean pinned full lifecycle/negative matrix is
+still required before any production-readiness claim.
+
+Detailed status:
+
+- [0.22 release notes](../docs/releases/CELLSCRIPT_0_22_RELEASE_NOTES.md)
+- [0.22 type and set theory roadmap](CELLSCRIPT_0_22_TYPE_AND_SET_THEORY_ROADMAP.md)
+- [0.22 bounded Fiber plan](CELLSCRIPT_0_22_FIBER_NATIVE_SUPPORT_PLAN.md)
+- [Fiber operator guide](../examples/fiber/README.md)
+
 ### Next Authorization Hardening Track
 
 The next security-sensitive track should make CKB authorization literal before
@@ -329,6 +357,8 @@ Completed:
 - stack-backed fixed-width `Vec<T>` helper support;
 - typed/contextual `Vec<T>` literals for local stack vectors;
 - metadata and `cellc explain-generics` visibility for checked instantiations.
+- source-aware `BoundedCellSet<T, N>` and witness/static
+  `BoundedList<T, N>` contracts with finite cardinality evidence.
 
 Deferred:
 

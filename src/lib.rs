@@ -5911,11 +5911,11 @@ fn compile_ast_with_build(
         if error.code.is_some() {
             error
         } else {
-            error.with_code("CG2000")
+            error.with_code("E2000")
         }
     })?;
     if artifact_bytes.is_empty() {
-        return Err(CompileError::new("backend produced an empty artifact", error::Span::default()).with_code("CG2001"));
+        return Err(CompileError::new("backend produced an empty artifact", error::Span::default()).with_code("E2001"));
     }
 
     // 5b. Debug info generation (embed DWARF section when debug option enabled and artifact is ELF).

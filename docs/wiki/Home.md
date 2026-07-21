@@ -6,7 +6,7 @@ and the locks that decide whether a Cell may be spent. The compiler then turns
 that `.cell` source into ckb-vm compatible RISC-V assembly or ELF artifacts, and
 writes metadata that explains what was built.
 
-Last updated: 2026-07-11 (CellScript 0.21.0).
+Last updated: 2026-07-21 (CellScript 0.22.0).
 
 This wiki is a guided path. It starts with one compiled example, then slowly
 builds the mental model: source files, Cell effects, packages, the CKB profile,
@@ -32,6 +32,10 @@ After that, the wiki continues outward:
 - v0.16 assurance commands explain ProofPlan soundness and builder assumptions;
 - v0.21 receipts, TemplateLayout metadata, ProtocolGraph views, and nested CLI
   command groups make evidence easier to audit;
+- v0.22 typed transaction views, finite invariant quantifiers, bounded
+  collections, payload enums, validity predicates, borrow regions, stable
+  `E2xxx` diagnostics, and bounded Fiber interoperability extend that evidence
+  without hiding builder or chain obligations;
 - production evidence proves more than compiler success;
 - editor tooling shortens the local loop;
 - bundled examples show the style in real contracts.
@@ -50,6 +54,8 @@ If you already know what you need, jump directly:
 - working in an editor: read [LSP and Tooling](Tutorial-07-LSP-and-Tooling.md);
 - learning by example: finish with [Bundled Example Contracts](Tutorial-08-Bundled-Example-Contracts.md);
 - driving `cellc` from an agent: read [Agentic Loops and cellscript-mcp](Tutorial-13-Agentic-Loops-and-cellscript-mcp.md).
+- using CellScript fungible assets with Fiber: read the
+  [bounded Fiber interoperability guide](https://github.com/CellScript-Labs/CellScript/blob/nightly-0.22/examples/fiber/README.md).
 
 ## Tutorial Path
 
@@ -127,6 +133,7 @@ The fastest way to get oriented is to compile the token example:
 ```bash
 git clone https://github.com/CellScript-Labs/CellScript.git
 cd CellScript
+git submodule update --init editors/vscode-cellscript # only needed for local extension work
 ./scripts/cellscript_gate.sh dev
 cargo run --locked --bin cellc -- examples/token.cell --target riscv64-elf --target-profile ckb --primitive-strict 0.16 -o /tmp/token.elf
 cargo run --locked --bin cellc -- verify-artifact /tmp/token.elf --expect-target-profile ckb

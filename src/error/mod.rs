@@ -62,6 +62,99 @@ impl CompileErrorCategory {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CompilerErrorInfo {
+    pub code: &'static str,
+    pub name: &'static str,
+    pub description: &'static str,
+    pub hint: &'static str,
+}
+
+pub const COMPILER_ERROR_INFOS: &[CompilerErrorInfo] = &[
+    CompilerErrorInfo {
+        code: "E2000",
+        name: "backend-uncategorized",
+        description: "The backend failed outside a more specific classified boundary.",
+        hint: "Preserve the complete diagnostic and report the generated input that reached code generation.",
+    },
+    CompilerErrorInfo {
+        code: "E2001",
+        name: "backend-empty-artifact",
+        description: "Code generation completed without producing artifact bytes.",
+        hint: "Check entrypoint selection and the requested artifact target.",
+    },
+    CompilerErrorInfo {
+        code: "E2100",
+        name: "type-layout-lowering",
+        description: "A type definition could not be lowered to its backend storage layout.",
+        hint: "Inspect fixed widths, schema fields, and payload layout requirements.",
+    },
+    CompilerErrorInfo {
+        code: "E2101",
+        name: "entry-abi-lowering",
+        description: "The selected entrypoint could not be lowered to the CellScript entry ABI.",
+        hint: "Check entry parameters and witness ABI support for the selected target.",
+    },
+    CompilerErrorInfo {
+        code: "E2102",
+        name: "action-lowering",
+        description: "An action body could not be lowered to executable backend operations.",
+        hint: "Inspect the named action and the unsupported operation reported by the diagnostic.",
+    },
+    CompilerErrorInfo {
+        code: "E2103",
+        name: "lock-lowering",
+        description: "A lock body could not be lowered to executable backend operations.",
+        hint: "Inspect the named lock and its target-specific runtime requirements.",
+    },
+    CompilerErrorInfo {
+        code: "E2104",
+        name: "pure-function-lowering",
+        description: "A pure function could not be lowered to backend instructions.",
+        hint: "Inspect the function call ABI, return layout, and unsupported expression in the diagnostic.",
+    },
+    CompilerErrorInfo {
+        code: "E2200",
+        name: "unresolved-assembly-symbol",
+        description: "Generated assembly references a label or call target that was not emitted.",
+        hint: "Check callable reachability and generated helper closure.",
+    },
+    CompilerErrorInfo {
+        code: "E2201",
+        name: "assembly-layout",
+        description: "Generated assembly could not be parsed or arranged into a valid machine layout.",
+        hint: "Inspect labels, sections, branch targets, and block ordering in the generated assembly.",
+    },
+    CompilerErrorInfo {
+        code: "E2202",
+        name: "instruction-encoding",
+        description: "A generated RISC-V instruction or immediate could not be encoded.",
+        hint: "Inspect the mnemonic, operands, register names, and immediate range in the diagnostic.",
+    },
+    CompilerErrorInfo {
+        code: "E2300",
+        name: "elf-emission",
+        description: "The backend could not construct a valid RISC-V ELF artifact.",
+        hint: "Inspect entrypoint, section layout, offsets, and ELF size constraints.",
+    },
+    CompilerErrorInfo {
+        code: "E2400",
+        name: "external-toolchain",
+        description: "An explicitly configured external RISC-V toolchain failed validation or execution.",
+        hint: "Check CELLSCRIPT_RISCV_CC or the CELLSCRIPT_RISCV_AS/CELLSCRIPT_RISCV_LD pair and their stderr output.",
+    },
+    CompilerErrorInfo {
+        code: "E2900",
+        name: "backend-invariant",
+        description: "A backend invariant was violated after semantic checking.",
+        hint: "Retain the source and compiler version and report this as a compiler defect.",
+    },
+];
+
+pub fn compiler_error_info_by_code(code: &str) -> Option<CompilerErrorInfo> {
+    COMPILER_ERROR_INFOS.iter().copied().find(|info| info.code == code)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DiagnosticSeverity {
     #[default]
@@ -151,6 +244,7 @@ pub struct CompileError {
     pub severity: DiagnosticSeverity,
     pub related: RelatedDiagnostics,
     pub category: CompileErrorCategory,
+    pub details: Option<serde_json::Value>,
     cause: Option<Arc<dyn std::error::Error + Send + Sync>>,
 }
 
@@ -164,6 +258,7 @@ impl CompileError {
             severity: DiagnosticSeverity::Error,
             related: RelatedDiagnostics::default(),
             category: CompileErrorCategory::Compilation,
+            details: None,
             cause: None,
         }
     }
@@ -210,6 +305,11 @@ impl CompileError {
 
     pub fn with_related(mut self, related: Vec<CompileError>) -> Self {
         self.related = related.into();
+        self
+    }
+
+    pub fn with_details(mut self, details: serde_json::Value) -> Self {
+        self.details = Some(details);
         self
     }
 }
@@ -436,6 +536,18 @@ mod tests {
         assert_eq!(error.category, CompileErrorCategory::Io);
         assert_eq!(error.exit_code(), 74);
         assert!(error.source().is_some());
+    }
+
+    #[test]
+    fn compiler_error_registry_has_unique_stable_codes() {
+        let mut codes = std::collections::BTreeSet::new();
+        for info in COMPILER_ERROR_INFOS {
+            assert!(codes.insert(info.code), "duplicate compiler error code {}", info.code);
+            assert_eq!(compiler_error_info_by_code(info.code), Some(*info));
+            assert!(info.code.starts_with("E2"));
+            assert!(!info.description.is_empty());
+            assert!(!info.hint.is_empty());
+        }
     }
 
     #[test]

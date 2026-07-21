@@ -16,6 +16,9 @@ place. A transaction spends Cells and creates new Cells.
 - how `action(before: T) -> after: T` expresses the verifier core for
   input-to-output transitions;
 - how `create_unique` and `replace_unique` preserve declared identity;
+- how bounded source collections make finite batch movement explicit;
+- how compile-time borrow views inspect a linear Cell without granting
+  lifecycle authority;
 - why the current syntax uses explicit destruction policy forms;
 - why unsupported CKB runtime behavior should fail closed.
 
@@ -62,6 +65,60 @@ The `Token` cannot simply disappear. It must be consumed, returned, destroyed,
 validated as a named successor output, or handled by an explicit stdlib
 lifecycle pattern. Silent loss is rejected because silent loss would make Cell
 movement unclear.
+
+## Finite Batch Movement In 0.22
+
+Use source-aware bounded collections when one action must account for a finite
+set of Cells or witness plans:
+
+```cellscript
+action batch(
+    input inputs: BoundedCellSet<Token, 16>,
+    witness payouts: BoundedList<Payout, 16>
+) -> u64 {
+    verification
+        consume_each token in inputs {
+            require token.amount > 0
+        }
+
+        create_each payout in payouts {
+            require payout.amount > 0
+            create Token { owner: payout.owner, amount: payout.amount }
+        }
+
+        return 0
+}
+```
+
+`BoundedCellSet<T, N>` is input-qualified and linearly owned: every selected
+Cell must be discharged by `consume_each`. `BoundedList<T, N>` is fixed-width
+and may come from witness/static input; `create_each` records a maximum output
+cardinality and capacity-builder obligation. The bound makes review and
+ProofPlan complexity finite. It does not prove that a builder supplied the
+outputs or enough capacity.
+
+Generic `Vec<Resource>` and unbounded iteration remain rejected. Inspect
+`runtime.collection_instantiations` and the matching ProofPlan records before
+treating a batch path as executable.
+
+## Borrowed Read Views
+
+An explicit borrow region creates a compile-time-only `View<T>` over a linear
+Cell:
+
+```cellscript
+borrow token as view {
+    require view.amount > 0
+    require positive(view)
+}
+consume token
+```
+
+The view has no storage, serialization, or ABI representation and cannot
+escape the block. The root cannot cross a lifecycle boundary while borrowed,
+and callees must be `Pure` or `ReadOnly` helpers with compatible `&T`
+parameters. Borrowing grants observation, never permission to consume, create,
+replace, or authorize a Cell.
 
 ## Flows Use Explicit State Fields
 

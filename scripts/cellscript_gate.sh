@@ -121,6 +121,7 @@ check_trailing_whitespace() {
         "tests/syntax_combo/seeds/require-block-lifecycle.cell"
         "docs/releases/CELLSCRIPT_0_20_RELEASE_NOTES.md"
         "docs/releases/CELLSCRIPT_0_21_RELEASE_NOTES.md"
+        "docs/releases/CELLSCRIPT_0_22_RELEASE_NOTES.md"
         "docs/releases/CELLSCRIPT_0_16_TO_0_20_RELEASE_NOTES.md"
         "docs/archive/0.20/CELLSCRIPT_0_20_ROADMAP.md"
         "docs/CELLSCRIPT_0_21_ROADMAP.md"

@@ -1,14 +1,15 @@
 # Tutorial 11: Scoped Invariants and ProofPlan
 
-CellScript's current invariant surface started in 0.15 and remains part of the
-0.20 authoring model. This chapter explains what it is for, what the compiler
-records today, and how to read the evidence without mistaking metadata for
-executable verifier code.
+CellScript's invariant surface started in 0.15 and remains part of the 0.22
+authoring model. The 0.22 line adds finite typed quantification over closed CKB
+source views. This chapter explains what the compiler records and how to read
+the evidence without mistaking metadata for executable verifier code.
 
 ## What You Will Learn
 
 - how to declare an invariant with an explicit trigger, scope, and read set;
 - how the aggregate invariant primitives map to ProofPlan records;
+- how bounded `forall` and `count(...)` clauses describe finite source scans;
 - how to inspect those records with `cellc explain proof`;
 - which ProofPlan records are checked on chain today, which require a runtime
   helper, and which are `gap:metadata-only`;
@@ -96,6 +97,49 @@ invariant nft_no_duplicates {
 This does not hide the hard part. A transaction-wide uniqueness claim needs the
 builder and verifier boundary to agree on what was read. ProofPlan records that
 assumption instead of pretending it is automatically solved.
+
+## Finite Quantifiers In 0.22
+
+`forall` ranges over one closed, typed transaction source view:
+
+```cellscript
+invariant positive_outputs {
+    trigger: type_group
+    scope: group
+    reads: group_outputs<Token>.amount
+
+    forall output token in group_outputs<Token> {
+        require token.amount > 0
+    }
+}
+```
+
+`count` filters the same finite source model:
+
+```cellscript
+count(outputs<Token> where amount == 7) == 1
+```
+
+The compiler rejects unknown generic views, unbounded sources, impure bodies,
+and reads that are absent from the invariant contract. The resulting
+`bounded-source-quantifier` ProofPlan record exposes:
+
+- the source view and concrete Cell type;
+- declared field reads and predicate text;
+- scan complexity and runtime cardinality;
+- zero-cardinality/vacuous behavior;
+- the `u64` overflow policy for `count`;
+- the evidence tier for the selected artifact.
+
+A `runtime-helper-required` quantifier is a known finite helper contract, not
+proof that the helper was emitted or executed. Keep it distinct from
+`checked-runtime`, builder evidence, and chain evidence.
+
+Bounded collection iteration is related but not interchangeable. A
+`BoundedCellSet<T, N>` plus `consume_each` describes linear lifecycle discharge;
+`forall` and `count` describe invariant observation. See
+[Resources and Cell Effects](Tutorial-03-Resources-and-Cell-Effects.md) for the
+batch movement rules.
 
 ## Simple Invariant Assertions
 

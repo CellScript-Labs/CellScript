@@ -454,6 +454,13 @@ CellScript includes production-style local language tooling for early users:
   status-bar feedback. It shells out to `cellc` (or a `cargo run` fallback), so
   behavior stays identical to CLI and CI gates.
 
+The extension is a Git submodule. A source checkout that will build or package
+it must initialize the pinned, release-reviewed commit first:
+
+```bash
+git submodule update --init editors/vscode-cellscript
+```
+
 The 0.19 ecosystem-reuse work adds a formal headless
 `cellscript-ckb-adapter` crate. The compiler emits semantic action plans and
 ABI evidence; the adapter uses `ckb-sdk-rust` to materialize CKB transaction
@@ -496,6 +503,9 @@ or CellFabric intent engine.
 - [0.19 roadmap](docs/archive/0.19/CELLSCRIPT_0_19_ROADMAP.md)
 - [0.20 release notes](docs/releases/CELLSCRIPT_0_20_RELEASE_NOTES.md)
 - [0.21 release notes](docs/releases/CELLSCRIPT_0_21_RELEASE_NOTES.md)
+- [0.22 release notes](docs/releases/CELLSCRIPT_0_22_RELEASE_NOTES.md)
+- [0.22 type and set theory roadmap](roadmap/CELLSCRIPT_0_22_TYPE_AND_SET_THEORY_ROADMAP.md)
+- [0.22 bounded Fiber interoperability guide](examples/fiber/README.md)
 - [Agentic Loops and cellscript-mcp tutorial](docs/wiki/Tutorial-13-Agentic-Loops-and-cellscript-mcp.md)
 
 ---
@@ -842,20 +852,22 @@ still fail closed.
 | `--target-profile ckb` | Use the CKB profile |
 | `--entry-action <ACTION>` | Compile a single action as the artifact entrypoint |
 | `--entry-lock <LOCK>` | Compile a single lock as the artifact entrypoint |
-| `--json` | Emit machine-readable summaries where supported (successful payloads) |
-| `--message-format=json` | Global diagnostic transport for direct mode and every subcommand; failures are JSON on stderr. |
+| `--json` | Emit one machine-readable result on stdout for success or failure; the flag is global and may appear before or after a subcommand |
 | `--color=auto\|always\|never` | Control ANSI colour output. `auto` is the default; `NO_COLOR=1` forces `never` |
 | `--production` | Apply production-oriented metadata policy checks |
 | `--deny-fail-closed` | Reject fail-closed runtime features or obligations |
 | `--deny-ckb-runtime` | Reject CKB transaction/syscall runtime requirements |
 | `--deny-runtime-obligations` | Reject runtime-required verifier obligations |
 
-Successful command payloads selected by `--json` are written to stdout.
-Diagnostics selected by `--message-format=json` are written to stderr and
-include `status`, `category`, `exit_code`, stable diagnostic codes when
-available, source ranges, and cause chains. Usage errors exit with `2`;
-compilation errors use `1`; classified I/O, network, authentication, and
-internal failures use `74`, `69`, `77`, and `70` respectively.
+Results selected by `--json` are written to stdout for both success and
+failure, so `cellc build --json | jq` cannot lose an error document. Failure
+results include `status`, `category`, `exit_code`, stable diagnostic codes when
+available, source ranges, and cause chains. The hidden
+`--message-format=json` spelling remains a deprecated compatibility alias.
+Usage errors exit with `2`; compilation errors use `1`; classified I/O,
+network, authentication, and internal failures use `74`, `69`, `77`, and `70`
+respectively. Compiler backend codes are documented in
+[`docs/CELLSCRIPT_COMPILER_ERROR_CODES.md`](docs/CELLSCRIPT_COMPILER_ERROR_CODES.md).
 
 ---
 

@@ -207,10 +207,10 @@ coverage pins effect compatibility, escape rejection, and crossing
 ./scripts/cellscript_gate.sh release-quick
 ```
 
-For scripted gate wrappers, `--json` selects command result payloads on stdout,
-while the global `--message-format=json` selects failure diagnostics on stderr.
-Do not merge the two streams before parsing them. Structured diagnostics carry
-their category and exit code in addition to source ranges and diagnostic codes.
+For scripted gate wrappers, the global `--json` flag selects one command result
+on stdout for either success or failure. Structured failures carry their
+category and exit code in addition to source ranges and diagnostic codes.
+`--message-format=json` remains a hidden deprecated alias for compatibility.
 
 The old release wrapper remains supported:
 

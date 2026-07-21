@@ -119,7 +119,8 @@ fn cellc_top_level_help_shows_commands_and_direct_source_mode() {
     assert!(!stdout.contains("validate-tx"), "legacy tx alias should be hidden from top-level help: {stdout}");
     assert!(!stdout.contains("deploy-plan"), "legacy deploy alias should be hidden from top-level help: {stdout}");
     assert!(stdout.contains("--explain <CODE>"), "unexpected help: {stdout}");
-    assert!(stdout.contains("--message-format <FORMAT>"), "unexpected help: {stdout}");
+    assert!(stdout.contains("--json"), "unexpected help: {stdout}");
+    assert!(!stdout.contains("--message-format"), "deprecated flag should be hidden: {stdout}");
     assert!(stdout.contains("--color <WHEN>"), "unexpected help: {stdout}");
     assert!(stdout.contains("Run `cellc <command> --help`"), "unexpected help: {stdout}");
 }
@@ -282,6 +283,31 @@ fn cellscript_mcp_reads_the_diagnostics_topic() {
     assert!(documents.iter().any(|document| {
         document["path"].as_str().is_some_and(|path| path.ends_with("Tutorial-13-Agentic-Loops-and-cellscript-mcp.md"))
     }));
+}
+
+#[test]
+fn cellscript_mcp_reads_the_022_language_and_fiber_topics() {
+    for (topic, expected_path) in [
+        ("language-0.22", "roadmap/CELLSCRIPT_0_22_TYPE_AND_SET_THEORY_ROADMAP.md"),
+        ("fiber-interop", "examples/fiber/README.md"),
+        ("roadmap-0.22", "docs/releases/CELLSCRIPT_0_22_RELEASE_NOTES.md"),
+    ] {
+        let responses = run_mcp_messages(vec![serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": topic,
+            "method": "tools/call",
+            "params": {
+                "name": "cellscript_docs_topic",
+                "arguments": { "topic": topic }
+            }
+        })]);
+        let result = &responses[0]["result"];
+        let documents = result["structuredContent"]["documents"].as_array().expect("0.22 topic documents");
+        assert!(
+            documents.iter().any(|document| document["path"] == expected_path),
+            "missing {expected_path} from {topic}: {documents:?}"
+        );
+    }
 }
 
 #[test]
@@ -861,15 +887,17 @@ fn cellc_command_typo_wins_over_an_ambiguous_extensionless_file() {
 
 #[test]
 fn cellc_structured_failures_expose_usage_and_io_exit_categories() {
-    let usage = Command::new(env!("CARGO_BIN_EXE_cellc")).args(["--message-format=json", "--not-a-cellc-option"]).output().unwrap();
+    let usage = Command::new(env!("CARGO_BIN_EXE_cellc")).args(["--json", "--not-a-cellc-option"]).output().unwrap();
     assert_eq!(usage.status.code(), Some(2));
-    let usage_json: serde_json::Value = serde_json::from_slice(&usage.stderr).unwrap();
+    assert!(usage.stderr.is_empty(), "unexpected stderr: {}", String::from_utf8_lossy(&usage.stderr));
+    let usage_json: serde_json::Value = serde_json::from_slice(&usage.stdout).unwrap();
     assert_eq!(usage_json["category"], "usage");
     assert_eq!(usage_json["exit_code"], 2);
 
-    let missing = Command::new(env!("CARGO_BIN_EXE_cellc")).args(["--message-format=json", "missing.cell"]).output().unwrap();
+    let missing = Command::new(env!("CARGO_BIN_EXE_cellc")).args(["--json", "missing.cell"]).output().unwrap();
     assert_eq!(missing.status.code(), Some(74));
-    let missing_json: serde_json::Value = serde_json::from_slice(&missing.stderr).unwrap();
+    assert!(missing.stderr.is_empty(), "unexpected stderr: {}", String::from_utf8_lossy(&missing.stderr));
+    let missing_json: serde_json::Value = serde_json::from_slice(&missing.stdout).unwrap();
     assert_eq!(missing_json["category"], "io");
     assert_eq!(missing_json["exit_code"], 74);
     assert_eq!(missing_json["diagnostics"][0]["file"], "missing.cell");
@@ -994,7 +1022,7 @@ action bad() -> bool {
 }
 
 #[test]
-fn cellc_direct_message_format_json_reports_recovered_syntax_errors() {
+fn cellc_direct_json_reports_recovered_syntax_errors_on_stdout() {
     let temp = tempfile::tempdir().unwrap();
     let input = temp.path().join("bad.cell");
     std::fs::write(
@@ -1011,21 +1039,37 @@ action bad() -> bool {
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).arg("--message-format=json").arg("--parse").arg(&input).output().unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).arg("--json").arg("--parse").arg(&input).output().unwrap();
     assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
-    assert!(output.stdout.is_empty(), "unexpected stdout: {}", String::from_utf8_lossy(&output.stdout));
+    assert!(output.stderr.is_empty(), "unexpected stderr: {}", String::from_utf8_lossy(&output.stderr));
 
-    let stderr: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
-    assert_eq!(stderr["status"], "failed");
-    assert_eq!(stderr["diagnostic_count"], 2);
-    assert_eq!(stderr["error_count"], 2);
-    assert_eq!(stderr["warning_count"], 0);
-    let diagnostics = stderr["diagnostics"].as_array().unwrap();
+    let stdout: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(stdout["status"], "failed");
+    assert_eq!(stdout["diagnostic_count"], 2, "unexpected diagnostics: {stdout}");
+    assert_eq!(stdout["error_count"], 2);
+    assert_eq!(stdout["warning_count"], 0);
+    let diagnostics = stdout["diagnostics"].as_array().unwrap();
     assert!(diagnostics.iter().any(|diagnostic| diagnostic["message"].as_str().unwrap().contains("expected '=', found 'true'")));
     assert!(diagnostics.iter().any(|diagnostic| diagnostic["message"].as_str().unwrap().contains("expected '=', found integer 1")));
     assert!(diagnostics.iter().all(|diagnostic| diagnostic["range"]["start"]["line"].as_u64().unwrap_or_default() > 0));
-    let raw_stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(!raw_stderr.contains("-->"), "JSON diagnostics should not include human source snippets: {raw_stderr}");
+    let raw_stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!raw_stdout.contains("-->"), "JSON diagnostics should not include human source snippets: {raw_stdout}");
+}
+
+#[test]
+fn cellc_direct_json_success_is_a_single_stdout_document() {
+    let temp = tempfile::tempdir().unwrap();
+    let input = temp.path().join("ok.cell");
+    std::fs::write(&input, "module demo::ok\naction main() -> u64 {\n    verification\n        0\n}\n").unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).args(["--json", "--lex"]).arg(&input).output().unwrap();
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(output.stderr.is_empty(), "unexpected stderr: {}", String::from_utf8_lossy(&output.stderr));
+    let stdout: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(stdout["status"], "ok");
+    assert_eq!(stdout["mode"], "lex");
+    assert!(stdout["token_count"].as_u64().unwrap_or_default() > 0);
+    assert!(stdout["tokens"].is_array());
 }
 
 #[test]
@@ -1150,9 +1194,12 @@ fn cellc_auth_capability_create_requires_principal_id() {
         .unwrap();
 
     assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("principal id is required"), "unexpected stderr: {stderr}");
-    assert!(stderr.contains("--principal-id"), "unexpected stderr: {stderr}");
+    assert!(output.stderr.is_empty(), "unexpected stderr: {}", String::from_utf8_lossy(&output.stderr));
+    let failure: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(failure["status"], "failed");
+    let message = failure["diagnostics"][0]["message"].as_str().unwrap_or_default();
+    assert!(message.contains("principal id is required"), "unexpected failure: {failure}");
+    assert!(message.contains("--principal-id"), "unexpected failure: {failure}");
 }
 
 fn write_publish_fixture_package(root: &std::path::Path) {
@@ -2019,11 +2066,10 @@ fn cellc_verify_ckb_fixtures_rejects_invalid_manifest_claim() {
     assert_eq!(report["status"], "failed");
     let issues = report["issues"].as_array().unwrap().iter().filter_map(|issue| issue.as_str()).collect::<Vec<_>>().join("\n");
     assert!(issues.contains("manifest schema must be cellscript-ckb-standard-compat-v0.16"), "{issues}");
-    assert!(
-        String::from_utf8_lossy(&output.stderr).contains("CKB fixture manifest failed verification"),
-        "stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    assert!(output.stderr.is_empty(), "unexpected stderr: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(report["diagnostics"][0]["message"]
+        .as_str()
+        .is_some_and(|message| message.contains("CKB fixture manifest failed verification")));
 }
 
 #[test]
@@ -4066,7 +4112,7 @@ action bad() -> bool {
 }
 
 #[test]
-fn cellc_check_message_format_json_reports_diagnostics_without_json_summary_flag() {
+fn cellc_check_json_reports_diagnostics_on_stdout() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
 
@@ -4095,32 +4141,42 @@ action bad() -> bool {
     )
     .unwrap();
 
-    let output =
-        Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).args(["check", "--message-format=json"]).output().unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).args(["check", "--json"]).output().unwrap();
     assert!(!output.status.success(), "unexpected success: {}", String::from_utf8_lossy(&output.stdout));
-    assert!(output.stdout.is_empty(), "unexpected stdout: {}", String::from_utf8_lossy(&output.stdout));
-    let stderr: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
-    assert_eq!(stderr["status"], "failed");
-    assert_eq!(stderr["diagnostic_count"], 2);
-    assert_eq!(stderr["error_count"], 2);
-    assert_eq!(stderr["warning_count"], 0);
-    let diagnostics = stderr["diagnostics"].as_array().unwrap();
+    assert!(output.stderr.is_empty(), "unexpected stderr: {}", String::from_utf8_lossy(&output.stderr));
+    let stdout: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(stdout["status"], "failed");
+    assert_eq!(stdout["diagnostic_count"], 2);
+    assert_eq!(stdout["error_count"], 2);
+    assert_eq!(stdout["warning_count"], 0);
+    let diagnostics = stdout["diagnostics"].as_array().unwrap();
     assert!(diagnostics.iter().any(|diagnostic| diagnostic["message"].as_str().unwrap().contains("expected '=', found 'true'")));
     assert!(diagnostics.iter().any(|diagnostic| diagnostic["message"].as_str().unwrap().contains("expected '=', found integer 1")));
     assert!(diagnostics.iter().all(|diagnostic| diagnostic["range"]["start"]["line"].as_u64().unwrap_or_default() > 0));
 }
 
 #[test]
-fn cellc_message_format_is_global_for_package_commands() {
+fn cellc_json_is_global_for_package_commands_and_build_failures_use_stdout() {
     let temp = tempfile::tempdir().unwrap();
-    for args in [["build", "--message-format=json"], ["--message-format=json", "build"]] {
+    for args in [["build", "--json"], ["--json", "build"]] {
         let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(temp.path()).args(args).output().unwrap();
         assert!(!output.status.success());
-        assert!(output.stdout.is_empty(), "unexpected stdout: {}", String::from_utf8_lossy(&output.stdout));
-        let diagnostic: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+        assert!(output.stderr.is_empty(), "unexpected stderr: {}", String::from_utf8_lossy(&output.stderr));
+        let diagnostic: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
         assert_eq!(diagnostic["status"], "failed");
         assert_eq!(diagnostic["diagnostic_count"], 1);
     }
+}
+
+#[test]
+fn cellc_message_format_json_remains_a_hidden_stdout_compatibility_alias() {
+    let temp = tempfile::tempdir().unwrap();
+    let output =
+        Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(temp.path()).args(["build", "--message-format=json"]).output().unwrap();
+    assert!(!output.status.success());
+    assert!(output.stderr.is_empty(), "unexpected stderr: {}", String::from_utf8_lossy(&output.stderr));
+    let diagnostic: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(diagnostic["status"], "failed");
 }
 
 #[test]
@@ -6518,6 +6574,20 @@ fn cellc_explain_subcommand_reports_runtime_error() {
     assert_eq!(summary["name"], "fixed-byte-comparison-unresolved");
     assert!(summary["description"].as_str().unwrap().contains("fixed-byte verifier comparison"));
     assert!(summary["hint"].as_str().unwrap().contains("schema-backed"));
+}
+
+#[test]
+fn cellc_explain_subcommand_reports_compiler_error() {
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).args(["explain", "E2202", "--json"]).output().unwrap();
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+
+    let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(summary["status"], "ok");
+    assert_eq!(summary["domain"], "compiler");
+    assert_eq!(summary["code"], "E2202");
+    assert_eq!(summary["name"], "instruction-encoding");
+    assert!(summary["description"].as_str().unwrap().contains("RISC-V instruction"));
+    assert!(summary["hint"].as_str().unwrap().contains("immediate range"));
 }
 
 #[test]
@@ -9178,8 +9248,11 @@ action owned(owner: Address) -> u64 {
         .output()
         .unwrap();
     assert!(!output.status.success(), "stdout: {}", String::from_utf8_lossy(&output.stdout));
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("parameter 'owner' expects 32 byte(s), got 3"), "unexpected stderr: {}", stderr);
+    assert!(output.stderr.is_empty(), "unexpected stderr: {}", String::from_utf8_lossy(&output.stderr));
+    let failure: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(failure["diagnostics"][0]["message"]
+        .as_str()
+        .is_some_and(|message| message.contains("parameter 'owner' expects 32 byte(s), got 3")));
 }
 
 #[test]
@@ -9247,8 +9320,14 @@ fn cellc_run_simulate_json_reports_steps_and_null_cycles() {
     let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(summary["status"], "ok");
     assert_eq!(summary["mode"], "simulate");
+    assert_eq!(summary["artifact_format"], "RISC-V ELF");
+    assert_eq!(summary["entry"]["kind"], "action");
+    assert_eq!(summary["entry"]["name"], "main");
     assert!(summary["steps"].as_u64().is_some());
     assert!(summary["cycles"].is_null());
+    assert!(summary["has_cell_operations"].is_boolean());
+    assert!(summary["result"].is_string());
+    assert!(summary["trace"].is_array());
 }
 
 #[cfg(feature = "vm-runner")]
@@ -9280,13 +9359,19 @@ action main() -> u64 {
     )
     .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).arg("run").output().unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_cellc")).current_dir(root).args(["run", "--json"]).output().unwrap();
     assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("Run complete"));
-    assert!(stdout.contains("Artifact format: RISC-V ELF"));
-    assert!(stdout.contains("Cycles:"));
+    let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(summary["status"], "ok");
+    assert_eq!(summary["mode"], "ckb-vm");
+    assert_eq!(summary["artifact_format"], "RISC-V ELF");
+    assert_eq!(summary["entry"]["kind"], "action");
+    assert_eq!(summary["entry"]["name"], "main");
+    assert!(summary["cycles"].as_u64().is_some());
+    assert!(summary["steps"].is_null());
+    assert!(summary["has_cell_operations"].is_null());
+    assert!(summary["result"].is_null());
+    assert!(summary["trace"].is_array());
 }
 
 #[cfg(feature = "vm-runner")]

@@ -121,7 +121,7 @@ def main() -> int:
         failures.extend(validate_skill(repo_root, path, command_names))
 
     report = {
-        "schema": "cellscript-skill-pack-freshness-v0.21",
+        "schema": "cellscript-skill-pack-freshness-v0.22",
         "status": "failed" if failures else "passed",
         "skills": sorted(found),
         "skill_count": len(skill_files),

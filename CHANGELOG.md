@@ -2,11 +2,13 @@
 
 ## 0.22.0 - 2026-07-19
 
-- Harden diagnostic and CLI ergonomics: make `--message-format` global across
-  package commands, keep structured diagnostics on stderr and successful JSON
-  payloads on stdout, classify exit codes, preserve error causes, assign a
-  stable backend diagnostic family, render Unicode source snippets by terminal
-  width, expose JSON run metrics, and make MCP documentation reads UTF-8-safe.
+- Harden diagnostic and CLI ergonomics: make global `--json` the canonical
+  machine-output switch and emit exactly one success or failure document on
+  stdout; retain hidden `--message-format=json` compatibility, classify exit
+  codes, preserve error causes, assign stable `E2xxx` backend diagnostics with
+  LSP `codeDescription` links, render Unicode source snippets by terminal
+  width, unify VM/simulator run metrics, centralise core command rendering,
+  and make MCP documentation reads UTF-8-safe.
 - Add the bounded no-profile Fiber interoperability path. Metadata schema 55
   records the structurally derived `fungible-type-group-v1` entry; its ELF
   verifies exact 16-byte little-endian `u128` data, checked full-group
@@ -82,10 +84,15 @@
   serialization, or ABI representation; escape, root lifecycle crossing, and
   calls outside `Pure`/`ReadOnly` helpers with dedicated `&T` parameters fail
   closed. Runtime metadata and ProofPlan expose the checked-static evidence.
-- Bump compile metadata to schema version 50 for callable/flow/evidence fields,
-  `runtime.transaction_view_handles`, and bounded collection source, ownership,
-  cardinality, vacuity, capacity-builder, evidence-tier, and type-validity
-  fields, plus `runtime.borrow_regions`.
+- Advance compile metadata through schema version 55. The 0.22 schema sequence
+  adds callable/flow/evidence fields, `runtime.transaction_view_handles`,
+  bounded collection source/ownership/cardinality/vacuity/capacity evidence,
+  type validity, borrow regions, capability proofs, enum layouts, protocol-role
+  candidates, and the bounded Fiber compatibility contract.
+- Publish the complete 0.22 release record, refresh the current wiki/roadmap and
+  MCP documentation topics, document extension submodule initialization, and
+  replace the unreachable VS Code gitlink with a validated 0.22 extension
+  commit.
 
 ## 0.21.1 - 2026-07-11
 

@@ -135,7 +135,7 @@ fn command_tree_tool(_arguments: Value) -> anyhow::Result<Value> {
 }
 
 fn check_tool(arguments: Value) -> anyhow::Result<Value> {
-    let mut args = vec!["check".to_string(), "--json".to_string(), "--message-format=json".to_string()];
+    let mut args = vec!["check".to_string(), "--json".to_string()];
     if optional_bool(&arguments, "all_targets") {
         args.push("--all-targets".to_string());
     }
@@ -308,7 +308,7 @@ fn tool_specs() -> Vec<Value> {
         ),
         tool_spec(
             "cellscript_check",
-            "Run read-only package checking through `cellc check --json --message-format=json`.",
+            "Run read-only package checking through `cellc check --json`.",
             schema_with_properties(json!({
                 "cwd": string_schema("Package directory to check."),
                 "target_profile": string_schema("Target profile, for example ckb."),
@@ -346,7 +346,10 @@ fn tool_specs() -> Vec<Value> {
                         "metadata-audit",
                         "builder-deployment",
                         "diagnostics",
-                        "roadmap-0.21"
+                        "language-0.22",
+                        "fiber-interop",
+                        "roadmap-0.21",
+                        "roadmap-0.22"
                     ]
                 }
             })),
@@ -479,8 +482,27 @@ fn docs_for_topic(topic: &str) -> anyhow::Result<Vec<PathBuf>> {
             "docs/CELLSCRIPT_CAPACITY_AND_BUILDER_CONTRACT.md",
             "docs/CELLSCRIPT_PACKAGE_PROVENANCE_AND_DEPLOYMENT_IDENTITY.md",
         ],
-        "diagnostics" => vec!["docs/wiki/Tutorial-13-Agentic-Loops-and-cellscript-mcp.md", "docs/wiki/Tutorial-07-LSP-and-Tooling.md"],
+        "diagnostics" => vec![
+            "docs/wiki/Tutorial-13-Agentic-Loops-and-cellscript-mcp.md",
+            "docs/wiki/Tutorial-07-LSP-and-Tooling.md",
+            "docs/CELLSCRIPT_COMPILER_ERROR_CODES.md",
+        ],
+        "language-0.22" => vec![
+            "docs/releases/CELLSCRIPT_0_22_RELEASE_NOTES.md",
+            "docs/wiki/Tutorial-02-Language-Basics.md",
+            "docs/wiki/Tutorial-03-Resources-and-Cell-Effects.md",
+            "docs/wiki/Tutorial-11-Scoped-Invariants-and-ProofPlan.md",
+            "roadmap/CELLSCRIPT_0_22_TYPE_AND_SET_THEORY_ROADMAP.md",
+        ],
+        "fiber-interop" => {
+            vec!["examples/fiber/README.md", "roadmap/CELLSCRIPT_0_22_FIBER_NATIVE_SUPPORT_PLAN.md", "docs/CELLSCRIPT_GATE_POLICY.md"]
+        }
         "roadmap-0.21" => vec!["docs/CELLSCRIPT_0_21_ROADMAP.md", "roadmap/CELLSCRIPT_0_21_CLI_UX_PLAN.md"],
+        "roadmap-0.22" => vec![
+            "docs/releases/CELLSCRIPT_0_22_RELEASE_NOTES.md",
+            "roadmap/CELLSCRIPT_0_22_TYPE_AND_SET_THEORY_ROADMAP.md",
+            "roadmap/CELLSCRIPT_0_22_FIBER_NATIVE_SUPPORT_PLAN.md",
+        ],
         _ => return Err(anyhow::anyhow!("unknown docs topic '{topic}'")),
     };
     Ok(paths.into_iter().map(PathBuf::from).collect())
@@ -514,5 +536,18 @@ mod tests {
         assert!(bounded.starts_with(&"a".repeat(MAX_DOC_BYTES_PER_FILE - 1)));
         assert!(!bounded.contains('界'));
         assert!(bounded.contains("truncated by cellscript-mcp"));
+    }
+
+    #[test]
+    fn docs_topic_catalog_covers_the_022_language_and_fiber_surfaces() {
+        let language = docs_for_topic("language-0.22").unwrap();
+        assert!(language.iter().any(|path| path.ends_with("CELLSCRIPT_0_22_TYPE_AND_SET_THEORY_ROADMAP.md")));
+        assert!(language.iter().any(|path| path.ends_with("Tutorial-11-Scoped-Invariants-and-ProofPlan.md")));
+
+        let fiber = docs_for_topic("fiber-interop").unwrap();
+        assert!(fiber.iter().any(|path| path.ends_with("examples/fiber/README.md")));
+
+        let roadmap = docs_for_topic("roadmap-0.22").unwrap();
+        assert!(roadmap.iter().any(|path| path.ends_with("CELLSCRIPT_0_22_RELEASE_NOTES.md")));
     }
 }

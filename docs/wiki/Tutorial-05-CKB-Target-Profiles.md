@@ -117,6 +117,20 @@ metadata-only in 0.21: it can say a root/path claim is represented in metadata,
 or that a claim still needs runtime-helper coverage, but it does not by itself
 prove a consensus Merkle path.
 
+## Fiber Is An Interoperability Path, Not A Target Profile
+
+CellScript 0.22 can derive a narrow `fungible-type-group-v1` artifact for native
+Fiber UDT channels. This does not add a `fiber` compiler profile. The adapter
+starts from the ordinary `ckb` profile and binds compiler metadata to a concrete
+deployment, live asset Script, CellDeps, and operator-controlled Fiber
+configuration.
+
+Use the separate `cellscript-fiber` binary and follow the
+[bounded Fiber interoperability guide](https://github.com/CellScript-Labs/CellScript/blob/nightly-0.22/examples/fiber/README.md). A successful
+offline compatibility check proves only that the source matches the closed
+fungible contract. Production readiness still needs live CKB identity, node
+configuration, restart, announcement, and lifecycle/negative evidence.
+
 ## Evidence Beyond Compilation
 
 Compiler metadata is necessary, but it is not a substitute for builder-backed

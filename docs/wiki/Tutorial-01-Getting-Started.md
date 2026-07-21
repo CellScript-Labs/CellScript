@@ -24,6 +24,16 @@ cd CellScript
 cargo test --locked
 ```
 
+The compiler does not require every optional submodule. If you plan to build or
+package the local VS Code extension, initialize its pinned commit explicitly:
+
+```bash
+git submodule update --init editors/vscode-cellscript
+```
+
+An empty `editors/vscode-cellscript` directory means the submodule has not been
+initialized; it does not mean the extension sources were removed.
+
 If this fails, fix the local Rust or repository setup before continuing. It is
 much easier to understand compiler errors after the checkout itself is known to
 be healthy.

@@ -3,6 +3,7 @@ use cellscript::error::{CompileError, CompileErrorCategory};
 use clap::{Parser, ValueEnum};
 use colored::Colorize;
 use std::error::Error as _;
+use std::io::IsTerminal;
 use std::path::Path;
 use std::process;
 use unicode_width::UnicodeWidthStr;
@@ -52,8 +53,12 @@ struct Cli {
     #[arg(short, long)]
     debug: bool,
 
-    #[arg(long, value_enum, default_value = "human")]
+    #[arg(long, value_enum, default_value = "human", hide = true)]
     message_format: MessageFormat,
+
+    /// Emit one machine-readable JSON result on stdout for success or failure.
+    #[arg(long)]
+    json: bool,
 
     #[arg(long, value_enum, default_value = "auto")]
     color: ColorChoice,
@@ -96,7 +101,8 @@ struct Cli {
 fn main() {
     let requested_color = requested_color();
     cellscript::cli::apply_color_policy(requested_color.as_deref());
-    let requested_message_format = requested_message_format();
+    let requested_message_format = requested_output_format();
+    warn_deprecated_message_format();
 
     // Start the LSP server before any CLI parsing side effects.
     if std::env::args().any(|arg| arg == "--lsp") {
@@ -113,8 +119,10 @@ fn main() {
             }
             "--explain" => {
                 let Some(code) = raw_args.get(arg_index + 1) else {
-                    eprintln!("{}: the argument '--explain <CODE>' requires a value", "error".red());
-                    process::exit(2);
+                    let error = CompileError::without_span("the argument '--explain <CODE>' requires a value")
+                        .with_code("CLI0001")
+                        .with_category(CompileErrorCategory::Usage);
+                    terminate_cli_error(&error, requested_message_format, None, None);
                 };
                 run_top_level_explain(code.clone());
                 return;
@@ -130,6 +138,12 @@ fn main() {
                 return;
             }
             _ if looks_like_unknown_command(arg) => {
+                if requested_message_format == MessageFormat::Json {
+                    let error = CompileError::without_span(format!("no such command or input: `{}`", arg))
+                        .with_code("CLI0002")
+                        .with_category(CompileErrorCategory::Usage);
+                    terminate_cli_error(&error, requested_message_format, None, None);
+                }
                 print_unknown_command(arg);
                 process::exit(CompileErrorCategory::Usage.exit_code());
             }
@@ -151,7 +165,7 @@ fn main() {
         let error = CompileError::without_span(error.to_string()).with_code("CLI0001").with_category(CompileErrorCategory::Usage);
         terminate_cli_error(&error, requested_message_format, None, None)
     });
-    let message_format = cli.message_format;
+    let message_format = if cli.json { MessageFormat::Json } else { cli.message_format };
     cellscript::cli::apply_color_policy(Some(cli.color.as_str()));
 
     env_logger::init();
@@ -172,7 +186,16 @@ fn main() {
             .unwrap_or_else(|e| terminate_cli_error(&e, message_format, None, None))
             .unwrap_or(cellscript::TargetProfile::Ckb);
         let asm = cellscript::stdlib::StdLib::generate_assembly_for_target_profile(target_profile);
-        println!("{}", asm);
+        if message_format == MessageFormat::Json {
+            print_main_json(&serde_json::json!({
+                "status": "ok",
+                "mode": "stdlib",
+                "target_profile": target_profile.name(),
+                "assembly": asm,
+            }));
+        } else {
+            println!("{}", asm);
+        }
         return;
     }
 
@@ -204,9 +227,19 @@ fn main() {
     if cli.lex {
         match cellscript::lexer::lex(&source) {
             Ok(tokens) => {
-                println!("{}: found {} tokens", "success".green(), tokens.len());
-                for token in tokens {
-                    println!("  {:?}", token);
+                if message_format == MessageFormat::Json {
+                    print_main_json(&serde_json::json!({
+                        "status": "ok",
+                        "mode": "lex",
+                        "input": resolved_input.as_str(),
+                        "token_count": tokens.len(),
+                        "tokens": tokens.iter().map(|token| format!("{:?}", token)).collect::<Vec<_>>(),
+                    }));
+                } else {
+                    println!("{}: found {} tokens", "success".green(), tokens.len());
+                    for token in tokens {
+                        println!("  {:?}", token);
+                    }
                 }
             }
             Err(e) => {
@@ -226,8 +259,17 @@ fn main() {
 
         match cellscript::parser::parse_diagnostics(&tokens) {
             Ok(ast) => {
-                println!("{}: parsed successfully", "success".green());
-                println!("{:#?}", ast);
+                if message_format == MessageFormat::Json {
+                    print_main_json(&serde_json::json!({
+                        "status": "ok",
+                        "mode": "parse",
+                        "input": resolved_input.as_str(),
+                        "ast": format!("{:#?}", ast),
+                    }));
+                } else {
+                    println!("{}: parsed successfully", "success".green());
+                    println!("{:#?}", ast);
+                }
             }
             Err(diagnostics) => {
                 let error = diagnostics_to_cli_error(diagnostics);
@@ -279,12 +321,26 @@ fn main() {
                 terminate_cli_error(&e, message_format, None, None);
             }
 
-            println!("{}: compiled successfully", "success".green());
-            println!("  Artifact format: {}", result.artifact_format.display_name());
-            println!("  Target profile: {}", result.metadata.target_profile.name);
-            println!("  Artifact hash: {:x?}", result.artifact_hash);
-            println!("  Output: {}", output_path);
-            println!("  Metadata: {}", metadata_path);
+            if message_format == MessageFormat::Json {
+                let payload = serde_json::json!({
+                    "status": "ok",
+                    "mode": "direct-build",
+                    "artifact": output_path.as_str(),
+                    "metadata": metadata_path.as_str(),
+                    "artifact_format": result.artifact_format.display_name(),
+                    "target_profile": result.metadata.target_profile.name,
+                    "artifact_hash": result.metadata.artifact_hash,
+                    "artifact_size_bytes": result.artifact_bytes.len(),
+                });
+                print_main_json(&payload);
+            } else {
+                println!("{}: compiled successfully", "success".green());
+                println!("  Artifact format: {}", result.artifact_format.display_name());
+                println!("  Target profile: {}", result.metadata.target_profile.name);
+                println!("  Artifact hash: {:x?}", result.artifact_hash);
+                println!("  Output: {}", output_path);
+                println!("  Metadata: {}", metadata_path);
+            }
         }
         Err(e) => {
             if !should_collect_compile_failure_diagnostics(&e) {
@@ -302,14 +358,18 @@ fn main() {
 }
 
 fn should_collect_compile_failure_diagnostics(error: &CompileError) -> bool {
-    error.category == CompileErrorCategory::Compilation && !error.code.as_deref().is_some_and(|code| code.starts_with("CG"))
+    error.category == CompileErrorCategory::Compilation
+        && error.code.as_deref().is_none_or(|code| cellscript::error::compiler_error_info_by_code(code).is_none())
 }
 
-fn requested_message_format() -> MessageFormat {
+fn requested_output_format() -> MessageFormat {
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         if arg == "--" {
             break;
+        }
+        if arg == "--json" {
+            return MessageFormat::Json;
         }
         if arg == "--message-format=json" {
             return MessageFormat::Json;
@@ -319,6 +379,20 @@ fn requested_message_format() -> MessageFormat {
         }
     }
     MessageFormat::Human
+}
+
+fn warn_deprecated_message_format() {
+    if !std::io::stderr().is_terminal() {
+        return;
+    }
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        let legacy_json = arg == "--message-format=json" || (arg == "--message-format" && args.next().as_deref() == Some("json"));
+        if legacy_json {
+            eprintln!("warning: `--message-format=json` is deprecated; use the global `--json` flag");
+            break;
+        }
+    }
 }
 
 fn requested_color() -> Option<String> {
@@ -341,6 +415,7 @@ fn routing_argument(args: &[String]) -> Option<(usize, &str)> {
     let mut index = 0;
     while let Some(arg) = args.get(index) {
         match arg.as_str() {
+            "--json" => index += 1,
             "--color" | "--message-format" => index = index.saturating_add(2),
             value if value.starts_with("--color=") || value.starts_with("--message-format=") => index += 1,
             value => return Some((index, value)),
@@ -413,7 +488,7 @@ fn print_cli_error_json(error: &CompileError, fallback_file: Option<&Utf8Path>, 
         diagnostics.iter().filter(|diagnostic| diagnostic.severity == cellscript::error::DiagnosticSeverity::Error).count();
     let diagnostic_values =
         diagnostics.iter().map(|diagnostic| diagnostic_json_value(diagnostic, fallback_file, fallback_source)).collect::<Vec<_>>();
-    let payload = serde_json::json!({
+    let mut payload = serde_json::json!({
         "status": "failed",
         "category": error.category.label(),
         "exit_code": error.exit_code(),
@@ -422,10 +497,18 @@ fn print_cli_error_json(error: &CompileError, fallback_file: Option<&Utf8Path>, 
         "warning_count": diagnostic_values.len().saturating_sub(error_count),
         "diagnostics": diagnostic_values,
     });
-    match serde_json::to_string_pretty(&payload) {
-        Ok(json) => eprintln!("{}", json),
-        Err(error) => eprintln!("{}: failed to serialize diagnostic JSON: {}", "error".red(), error),
+    if let (Some(details), Some(payload)) = (error.details.as_ref().and_then(serde_json::Value::as_object), payload.as_object_mut()) {
+        for (key, value) in details {
+            payload.entry(key.clone()).or_insert_with(|| value.clone());
+        }
     }
+    print_main_json(&payload);
+}
+
+fn print_main_json(payload: &serde_json::Value) {
+    let json = serde_json::to_string_pretty(payload)
+        .unwrap_or_else(|_| "{\"status\":\"failed\",\"category\":\"internal\",\"exit_code\":70}".to_string());
+    println!("{}", json);
 }
 
 fn cli_error_diagnostics(error: &CompileError) -> Vec<&CompileError> {
@@ -443,12 +526,16 @@ fn diagnostic_json_value(
 ) -> serde_json::Value {
     let runtime_code =
         cellscript::runtime_errors::runtime_error_info_for_diagnostic(diagnostic).map(|info| format!("E{:04}", info.code));
+    let compiler_info = diagnostic.code.as_deref().and_then(cellscript::error::compiler_error_info_by_code);
     let file = diagnostic.file.as_ref().map(|file| file.as_str()).or_else(|| fallback_file.map(Utf8Path::as_str));
     serde_json::json!({
         "message": &diagnostic.message,
         "severity": diagnostic.severity.label(),
         "category": diagnostic.category.label(),
         "code": diagnostic.code.as_deref().or(runtime_code.as_deref()),
+        "code_name": compiler_info.map(|info| info.name),
+        "code_description": compiler_info.map(|info| info.description),
+        "hint": compiler_info.map(|info| info.hint),
         "file": file,
         "span": {
             "line": diagnostic.span.line,
@@ -530,6 +617,8 @@ fn print_single_cli_error(error: &CompileError, fallback_file: Option<&Utf8Path>
 
     if let Some(info) = cellscript::runtime_errors::runtime_error_info_for_diagnostic(error) {
         eprintln!("  {}: run `cellc explain E{:04}` for {}", "help".cyan(), info.code, info.name);
+    } else if let Some(info) = error.code.as_deref().and_then(cellscript::error::compiler_error_info_by_code) {
+        eprintln!("  {}: run `cellc explain {}` for {}", "help".cyan(), info.code, info.name);
     }
     for cause in error_causes(error) {
         if !error.message.ends_with(&cause) {
@@ -540,9 +629,12 @@ fn print_single_cli_error(error: &CompileError, fallback_file: Option<&Utf8Path>
 }
 
 fn run_top_level_explain(code: String) {
-    let command = cellscript::cli::commands::Command::Explain(cellscript::cli::commands::ExplainArgs { code, json: false });
+    let command = cellscript::cli::commands::Command::Explain(cellscript::cli::commands::ExplainArgs {
+        code,
+        json: requested_output_format() == MessageFormat::Json,
+    });
     if let Err(error) = cellscript::cli::commands::CommandExecutor::execute(command) {
-        terminate_cli_error(&error, requested_message_format(), None, None);
+        terminate_cli_error(&error, requested_output_format(), None, None);
     }
 }
 
@@ -702,7 +794,7 @@ fn print_top_level_help() {
     println!("  -d, --debug                      Include debug metadata where supported");
     println!("  -t, --target <TARGET>            Target: riscv64-asm or riscv64-elf");
     println!("      --target-profile <PROFILE>   Target profile: ckb");
-    println!("      --message-format <FORMAT>    Diagnostic format: human or json [default: human]");
+    println!("      --json                       Emit one JSON result on stdout for success or failure");
     println!("      --color <WHEN>               Colour output: auto, always, or never [default: auto]");
     println!("      --entry-action <ACTION>      Compile one action as entrypoint");
     println!("      --entry-lock <LOCK>          Compile one lock as entrypoint");

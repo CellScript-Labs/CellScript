@@ -103,7 +103,7 @@ The 0.21 RC adds governance requirements that build on the baseline matrix:
 | TemplateLayout metadata | Layout records are metadata-only in this RC, mark cyclic flows as `RootRequired`, acyclic flows as `PathOnlyAllowed`, and reject unsupported `consensus_checked = true`. | `CompileMetadata.template_layouts` schema v44. |
 | Compile receipts | `cellc receipt`, `cellc sign-receipt`, `cellc verify-receipt`, and `verify-artifact --receipt` bind metadata/artifact evidence without claiming transaction validity. | `cellscript-compile-receipt-v1`. |
 | CLI command groups | Public discovery uses nested `explain`, `tx`, `deploy`, `registry`, `package`, and `auth capability` groups; hidden flat aliases are compatibility only. | `cellc --list` and CLI help. |
-| Diagnostic transport | `--message-format=json`, `--color=auto|always|never`, and `NO_COLOR` are part of the scripted diagnostics surface. | CLI command definitions and gate usage. |
+| Diagnostic transport | Global `--json`, `--color=auto|always|never`, and `NO_COLOR` are part of the scripted diagnostics surface; hidden `--message-format=json` is compatibility-only. | CLI command definitions and gate usage. |
 | Agent tooling | `cellscript-mcp` and the six `docs/skills/cellscript-*` skills are read-oriented compiler surfaces whose freshness is checked by dev/ci gates. | `scripts/check_cellscript_skill_pack.py`. |
 
 ## `verification`

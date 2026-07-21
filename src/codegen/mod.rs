@@ -1065,7 +1065,7 @@ impl CodeGenerator {
 
         for item in &ir.items {
             if let IrItem::TypeDef(type_def) = item {
-                self.generate_type_def(type_def)?;
+                self.generate_type_def(type_def).map_err(|error| with_codegen_code(error, "E2100"))?;
             }
         }
 
@@ -1074,24 +1074,24 @@ impl CodeGenerator {
             if entry_params.is_empty() {
                 self.emit_entry_direct_wrapper(entry_name);
             } else {
-                self.emit_entry_witness_wrapper(entry_name, entry_params)?;
+                self.emit_entry_witness_wrapper(entry_name, entry_params).map_err(|error| with_codegen_code(error, "E2101"))?;
             }
         }
 
         for item in &ir.items {
             if let IrItem::Action(action) = item {
-                self.generate_action(action)?;
+                self.generate_action(action).map_err(|error| with_codegen_code(error, "E2102"))?;
             }
         }
         for item in &ir.items {
             if let IrItem::Lock(lock) = item {
-                self.generate_lock(lock)?;
+                self.generate_lock(lock).map_err(|error| with_codegen_code(error, "E2103"))?;
             }
         }
         if has_entrypoint {
             for item in &ir.items {
                 if let IrItem::PureFn(function) = item {
-                    self.generate_pure_fn(function)?;
+                    self.generate_pure_fn(function).map_err(|error| with_codegen_code(error, "E2104"))?;
                 }
             }
         }
@@ -1099,7 +1099,13 @@ impl CodeGenerator {
         self.generate_runtime_support(ir);
         self.emit_const_data_pool();
 
-        self.assemble(format)
+        self.assemble(format).map_err(|error| {
+            let fallback = match format {
+                ArtifactFormat::RiscvAssembly => "E2900",
+                ArtifactFormat::RiscvElf => "E2300",
+            };
+            with_codegen_code(error, fallback)
+        })
     }
 
     fn emit_header(&mut self) {
@@ -18055,6 +18061,14 @@ pub fn generate(ir: &IrModule, options: &CodegenOptions, format: ArtifactFormat)
     generator.generate(ir, format)
 }
 
+fn with_codegen_code(error: CompileError, code: &'static str) -> CompileError {
+    if error.code.is_some() {
+        error
+    } else {
+        error.with_code(code)
+    }
+}
+
 pub fn analyze_backend_shape(assembly: &str) -> Result<BackendShapeMetrics> {
     let lines = assembly.lines().map(str::to_string).collect::<Vec<_>>();
     MachineLayoutPlan::build(&lines).map(|plan| plan.metrics.into())
@@ -18335,8 +18349,8 @@ enum Instruction {
 }
 
 fn assemble_elf(lines: &[String]) -> Result<Vec<u8>> {
-    reject_unresolved_calls(lines)?;
-    if let Some(external) = try_external_elf_toolchain(lines)? {
+    reject_unresolved_calls(lines).map_err(|error| with_codegen_code(error, "E2200"))?;
+    if let Some(external) = try_external_elf_toolchain(lines).map_err(|error| with_codegen_code(error, "E2400"))? {
         return Ok(external);
     }
     assemble_elf_internal(lines)
@@ -18374,7 +18388,7 @@ fn reject_unresolved_calls(lines: &[String]) -> Result<()> {
 }
 
 fn assemble_elf_internal(lines: &[String]) -> Result<Vec<u8>> {
-    let plan = MachineLayoutPlan::build(lines)?;
+    let plan = MachineLayoutPlan::build(lines).map_err(|error| with_codegen_code(error, "E2201"))?;
     let parsed = &plan.parsed;
     let layout = plan.layout;
     let _layout_control_metrics = (
@@ -18413,10 +18427,12 @@ fn assemble_elf_internal(lines: &[String]) -> Result<Vec<u8>> {
     encode_li_sequence(&mut text_bytes, 17, i128::from(EXIT_SYSCALL_NUMBER))?;
     text_bytes.extend_from_slice(&encode_ecall().to_le_bytes());
     debug_assert_eq!(text_bytes.len(), START_TRAMPOLINE_SIZE);
-    parsed.encode_section(SectionKind::Text, &mut text_bytes, &layout, START_TRAMPOLINE_SIZE)?;
+    parsed
+        .encode_section(SectionKind::Text, &mut text_bytes, &layout, START_TRAMPOLINE_SIZE)
+        .map_err(|error| with_codegen_code(error, "E2202"))?;
 
     let mut rodata_bytes = Vec::with_capacity(rodata_size);
-    parsed.encode_section(SectionKind::Rodata, &mut rodata_bytes, &layout, 0)?;
+    parsed.encode_section(SectionKind::Rodata, &mut rodata_bytes, &layout, 0).map_err(|error| with_codegen_code(error, "E2202"))?;
 
     let segment_file_payload_size = rodata_offset + rodata_bytes.len();
     let segment_file_offset = align_up(ELF_HEADER_SIZE + ELF_PROGRAM_HEADER_SIZE, ELF_SEGMENT_ALIGN);
@@ -20786,6 +20802,15 @@ mod tests {
         let err = assemble_elf_internal(&lines).unwrap_err();
 
         assert!(err.message.contains("unknown assembly label 'missing'"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn elf_assembly_classifies_unresolved_symbols() {
+        let lines = vec![".section .text".to_string(), ".global main".to_string(), "main:".to_string(), "call missing".to_string()];
+        let err = assemble_elf(&lines).unwrap_err();
+
+        assert_eq!(err.code.as_deref(), Some("E2200"));
+        assert!(err.message.contains("unresolved call target"), "unexpected error: {}", err.message);
     }
 
     #[test]

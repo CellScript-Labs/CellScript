@@ -189,7 +189,8 @@ the `consume_each` runtime-helper tier. For `BoundedList<P, N>` driving
 `builder-evidence-required`; it is not proof that a transaction builder supplied
 the matching outputs or sufficient capacity.
 
-Schema 53 also carries `types[].validity_predicates`. Review each predicate's
+The validity record first appeared during the 0.22 schema sequence and is
+emitted by current schema 55 as `types[].validity_predicates`. Review each predicate's
 `expression`, `dependencies`, `evidence_tier`,
 `runtime_checked_on_create`, `create_paths_selected`,
 `create_paths_checked`, `update_paths_selected`, `create_path_status`,
@@ -208,7 +209,8 @@ are compile errors. Pure imported helpers are retained transitively and receive
 module-qualified dependency names; lifecycle helpers and transaction-view
 reads are rejected in validity predicates.
 
-Schema 53 records explicit borrow blocks in `runtime.borrow_regions`. Review
+Current schema 55 records explicit borrow blocks in
+`runtime.borrow_regions`. Review
 `root`, `binding`, `view_type`, `storage`, `abi`, `allowed_effects`,
 `evidence_tier`, and `source_span`. A canonical record has `View<T>`,
 `storage = none`, `abi = none`, `allowed_effects = [Pure, ReadOnly]`, and

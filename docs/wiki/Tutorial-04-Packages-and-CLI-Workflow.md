@@ -150,12 +150,12 @@ problems without producing build artifacts.
 
 ## Diagnostic Output Formatting
 
-Use `--message-format=json` when a CI job or agent loop needs structured
-diagnostics without parsing human text:
+Use the global `--json` flag when a CI job or agent loop needs structured
+results without parsing human text:
 
 ```bash
-cellc check --target-profile ckb --message-format=json
-cellc build --message-format=json
+cellc check --target-profile ckb --json
+cellc build --json
 ```
 
 Colour is controlled separately:
@@ -167,17 +167,19 @@ cellc check --color=never
 NO_COLOR=1 cellc check
 ```
 
-`--message-format` and `--color` are global flags and may appear on every
-subcommand. `--json` still means a command-specific payload where that command
-supports one. Successful `--json` payloads use stdout; structured diagnostics
-selected by `--message-format=json` use stderr. Keeping the streams separate
-lets a caller parse a successful payload without mixing it with warnings or
-failure diagnostics.
+`--json` and `--color` are global flags and may appear before or after every
+subcommand. `--json` emits one stdout document for success or failure, so a
+caller can always parse the same stream. The old `--message-format=json`
+spelling remains a hidden deprecated alias during the compatibility window.
 
 Structured failures include an error category and the process exit code.
 Usage errors exit with `2`, ordinary compilation failures with `1`, I/O with
 `74`, network availability failures with `69`, authentication failures with
 `77`, and internal failures with `70`.
+
+Backend failures use stable `E2xxx` codes. `cellc explain E2202 --json` returns
+the rule name, description, and recovery hint; LSP diagnostics expose the same
+code and a `codeDescription` link.
 
 ## Format And Generate Docs
 

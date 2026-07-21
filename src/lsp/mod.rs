@@ -18,6 +18,8 @@ pub struct LspServer {
 pub struct Diagnostic {
     pub range: Range,
     pub severity: DiagnosticSeverity,
+    pub code: Option<String>,
+    pub code_description: Option<String>,
     pub message: String,
     pub source: String,
 }
@@ -203,6 +205,8 @@ impl LspServer {
             vec![Diagnostic {
                 range: Range { start: Position { line: 0, character: 0 }, end: Position { line: 0, character: 0 } },
                 severity: DiagnosticSeverity::Error,
+                code: None,
+                code_description: None,
                 message: format!("source exceeds the {} byte compiler limit", crate::MAX_SOURCE_BYTES),
                 source: "cellscript".to_string(),
             }],
@@ -2083,12 +2087,23 @@ fn span_to_range(source: &str, span: Span) -> Range {
 }
 
 fn diagnostic_from_error(source: &str, error: &CompileError) -> Diagnostic {
+    let code = error.code.clone();
+    let code_description = code.as_deref().and_then(|code| {
+        crate::error::compiler_error_info_by_code(code).map(|_| {
+            format!(
+                "https://github.com/CellScript-Labs/CellScript/blob/nightly-0.22/docs/CELLSCRIPT_COMPILER_ERROR_CODES.md#{}",
+                code.to_ascii_lowercase()
+            )
+        })
+    });
     Diagnostic {
         range: span_to_range(source, error.span),
         severity: match error.severity {
             CompilerDiagnosticSeverity::Error => DiagnosticSeverity::Error,
             CompilerDiagnosticSeverity::Warning => DiagnosticSeverity::Warning,
         },
+        code,
+        code_description,
         message: error.message.clone(),
         source: "cellscript".to_string(),
     }
@@ -2119,6 +2134,8 @@ fn lowering_diagnostics(source: &str, module: &Module, metadata: &crate::Compile
         diagnostics.push(Diagnostic {
             range: span_to_range(source, span),
             severity: DiagnosticSeverity::Warning,
+            code: None,
+            code_description: None,
             message: format!(
                 "action '{}' {}; fail-closed runtime features: {}; CKB runtime features: {}; CKB accesses: {}",
                 action.name,
@@ -2146,6 +2163,8 @@ fn lowering_diagnostics(source: &str, module: &Module, metadata: &crate::Compile
         diagnostics.push(Diagnostic {
             range: span_to_range(source, span),
             severity: DiagnosticSeverity::Warning,
+            code: None,
+            code_description: None,
             message: format!(
                 "lock '{}' {}; fail-closed runtime features: {}; CKB runtime features: {}; CKB accesses: {}",
                 lock.name,
@@ -3024,6 +3043,15 @@ action accept(input: Offer) -> output: Offer {
     }
 
     #[test]
+    fn compiler_diagnostic_codes_keep_their_lsp_documentation_link() {
+        let error = CompileError::without_span("instruction encoding failed").with_code("E2202");
+        let diagnostic = diagnostic_from_error("", &error);
+
+        assert_eq!(diagnostic.code.as_deref(), Some("E2202"));
+        assert!(diagnostic.code_description.as_deref().is_some_and(|url| url.ends_with("#e2202")));
+    }
+
+    #[test]
     fn test_parse_recovery_collects_multiple_diagnostics() {
         let mut server = LspServer::new();
         let uri = "file:///multi_parse_errors.cell".to_string();
@@ -3251,6 +3279,8 @@ action update(amount: u64) -> u64 {
             vec![Diagnostic {
                 range: diagnostic_range,
                 severity: DiagnosticSeverity::Warning,
+                code: None,
+                code_description: None,
                 message: "action emits fail-closed runtime traps".to_string(),
                 source: "cellscript-lowering".to_string(),
             }],

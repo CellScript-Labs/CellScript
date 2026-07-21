@@ -43,6 +43,28 @@ There are no checked-in `examples/business` or `examples/acceptance` mirrors;
 acceptance-only profile/effect/scheduler metadata belongs in runner
 configuration or generated files under `target/`.
 
+## Fiber Interoperability Examples
+
+CellScript 0.22 also includes seven bounded interoperability examples under
+`examples/fiber/`. They are not additional members of the bundled CKB
+production matrix:
+
+| Example | Interoperability boundary |
+|---|---|
+| `ordinary_fungible.cell` | Owner-authorized fungible asset; start here. |
+| `fixed_supply.cell` | One initial issuance followed by conserved supply. |
+| `governed_supply_cap.cell` | Policy-Cell-governed supply cap. |
+| `reserve_compliance.cell` | Issuance gated by reserve/compliance state. |
+| `wrapped_bridge.cell` | External bridge accounting remains outside Fiber payments. |
+| `multi_asset.cell` | Explicit `--asset` selection for multiple eligible types. |
+| `type_id_upgradeable.cell` | Type ID deployment with upgrade re-audit obligations. |
+
+The `cellscript-fiber` adapter derives the dedicated artifact and native Fiber
+configuration; it does not change the `.cell` source into a Fiber-specific
+language. Follow the
+[bounded Fiber interoperability guide](https://github.com/CellScript-Labs/CellScript/blob/nightly-0.22/examples/fiber/README.md)
+for the check, deployment, enable, materialization, and doctor workflow.
+
 `examples/registry.cell`, `examples/atomic_swap.cell`,
 `examples/multi_phase_dao.cell`, and every checked-in `examples/language/*.cell`
 file are intentionally outside the bundled production matrix. They are language

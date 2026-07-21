@@ -24,6 +24,6 @@ next check.
 
 Validation defaults:
 
-- run `cellc check --message-format=json`;
+- run `cellc check --json`;
 - run `cellc explain <CODE>`;
 - keep write-producing commands behind explicit confirmation.

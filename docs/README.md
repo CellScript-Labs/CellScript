@@ -29,6 +29,12 @@ drafts. Released versions should use non-draft filenames.
   note and release-evidence summary.
 - `docs/releases/CELLSCRIPT_0_16_1_RELEASE_NOTES.md` is the final 0.16.1 release
   note and release-evidence summary.
+- `docs/releases/CELLSCRIPT_0_20_RELEASE_NOTES.md` records the generated-builder
+  and live-registry line.
+- `docs/releases/CELLSCRIPT_0_21_RELEASE_NOTES.md` records semantic closure,
+  authenticated evidence, the canonical CLI tree, MCP, and skill-pack scope.
+- `docs/releases/CELLSCRIPT_0_22_RELEASE_NOTES.md` records the current typed
+  language, diagnostics, metadata schema 55, and bounded Fiber boundary.
 
 Release candidates and planning notes should not live here unless they are the
 final release record.
@@ -65,7 +71,10 @@ High-value active references include:
 - `CELLSCRIPT_LINEAR_OWNERSHIP.md`
 - `CELLSCRIPT_OUTPUT_BINDINGS.md`
 - `CELLSCRIPT_RUNTIME_ERROR_CODES.md`
+- `CELLSCRIPT_COMPILER_ERROR_CODES.md`
 - `CELLSCRIPT_SCHEDULER_HINTS.md`
+- `../examples/fiber/README.md` for the bounded 0.22 Fiber interoperability
+  operator workflow
 
 ## Specs And Future Tracks
 
@@ -116,6 +125,11 @@ to current branch-specific evidence or forward design:
 - `CELLSCRIPT_0_21_ROADMAP.md` for semantic closure, authenticated compiler
   evidence, derived cyclic graph views, type-level TemplateLayout metadata, and
   deferred optional template Merkleisation
+- `../roadmap/CELLSCRIPT_0_22_TYPE_AND_SET_THEORY_ROADMAP.md` for the 0.22 typed
+  transaction-view, finite quantifier, bounded collection, validity, borrow,
+  capability, and payload-enum design/implementation record
+- `../roadmap/CELLSCRIPT_0_22_FIBER_NATIVE_SUPPORT_PLAN.md` for the implemented
+  bounded Fiber path and its still-pending production evidence
 
 ## Archive
 

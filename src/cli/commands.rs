@@ -1,5 +1,5 @@
 use crate::docgen::{DocGenerator, OutputFormat};
-use crate::error::{CompileError, DiagnosticSeverity, Result};
+use crate::error::{CompileError, Result};
 use crate::fmt::format_default;
 use crate::package::{Dependency, DetailedDependency, Lockfile, PackageManager, PackageManifest, PolicyConfig};
 use crate::runtime_errors::{runtime_error_info, runtime_error_info_by_code, CellScriptRuntimeErrorInfo, ALL_RUNTIME_ERRORS};
@@ -242,7 +242,6 @@ pub struct CheckArgs {
     pub target_profile: Option<String>,
     pub features: Vec<String>,
     pub json: bool,
-    pub message_format: Option<String>,
     pub production: bool,
     pub deny_fail_closed: bool,
     pub deny_ckb_runtime: bool,
@@ -638,6 +637,110 @@ pub struct CertifyArgs {
 
 pub struct CommandExecutor;
 
+#[derive(Debug)]
+struct CommandOutcome {
+    machine: serde_json::Value,
+    human_lines: Vec<String>,
+}
+
+impl CommandOutcome {
+    fn emit(self, json: bool) -> Result<()> {
+        if json {
+            print_json(&self.machine)
+        } else {
+            for line in self.human_lines {
+                println!("{}", line);
+            }
+            Ok(())
+        }
+    }
+
+    fn failure(self, message: impl Into<String>) -> CompileError {
+        CompileError::without_span(message).with_details(self.machine)
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+struct RunEntryOutcome {
+    kind: String,
+    name: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct RunOutcome {
+    status: &'static str,
+    mode: &'static str,
+    artifact_format: String,
+    entry: Option<RunEntryOutcome>,
+    cycles: Option<u64>,
+    steps: Option<u64>,
+    has_cell_operations: Option<bool>,
+    result: Option<String>,
+    trace: Vec<String>,
+}
+
+impl RunOutcome {
+    fn emit(self, json: bool) -> Result<()> {
+        if json {
+            let value = serde_json::to_value(&self).map_err(|error| {
+                CompileError::without_span(format!("failed to serialize run outcome: {}", error))
+                    .with_category(crate::error::CompileErrorCategory::Internal)
+                    .with_source(error)
+            })?;
+            return print_json(&value);
+        }
+
+        match self.mode {
+            "ckb-vm" => {
+                println!("{}", "Run complete".green());
+                println!("  Artifact format: {}", self.artifact_format);
+                if let Some(entry) = self.entry {
+                    println!("  Entry: {} {}", entry.kind, entry.name);
+                }
+                if let Some(cycles) = self.cycles {
+                    println!("  Cycles: {}", cycles);
+                }
+            }
+            "simulate" => {
+                println!("{}", "Simulate complete".green());
+                if let Some(entry) = self.entry {
+                    println!("  Entry: {} {}", entry.kind, entry.name);
+                }
+                if let Some(steps) = self.steps {
+                    println!("  Steps: {}", steps);
+                }
+                match self.has_cell_operations {
+                    Some(true) => println!("  Cell operations: {} (simulated)", "yes".yellow()),
+                    Some(false) => println!("  Cell operations: none (pure computation)"),
+                    None => {}
+                }
+                if let Some(result) = self.result {
+                    println!("  Result: {}", result);
+                }
+                if !self.trace.is_empty() {
+                    println!("  Trace:");
+                    for event in self.trace {
+                        println!("{}", event);
+                    }
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+}
+
+#[cfg(feature = "vm-runner")]
+fn run_entry_outcome(metadata: &CompileMetadata) -> Option<RunEntryOutcome> {
+    metadata
+        .actions
+        .iter()
+        .find(|action| action.name == "main")
+        .or_else(|| metadata.actions.iter().find(|action| action.params.is_empty()))
+        .map(|action| RunEntryOutcome { kind: "action".to_string(), name: action.name.clone() })
+        .or_else(|| metadata.locks.first().map(|lock| RunEntryOutcome { kind: "lock".to_string(), name: lock.name.clone() }))
+}
+
 impl CommandExecutor {
     fn experimental_command(name: &str, detail: &str) -> Result<()> {
         Err(crate::error::CompileError::without_span(format!("cellc {} is still experimental: {}", name, detail)))
@@ -758,64 +861,59 @@ impl CommandExecutor {
             || policy_args.deny_fail_closed
             || policy_args.deny_ckb_runtime
             || policy_args.deny_runtime_obligations;
-        if args.json {
-            let summary = serde_json::json!({
-                "status": "ok",
-                "artifact": output_path.to_string(),
-                "metadata": metadata_path.to_string(),
-                "artifact_format": result.artifact_format.display_name(),
-                "opt_level": opt_level,
-                "target_profile": result.metadata.target_profile.name.as_str(),
-                "artifact_hash": result.metadata.artifact_hash,
-                "artifact_size_bytes": result.artifact_bytes.len(),
-                "source_hash": result.metadata.source_hash,
-                "source_content_hash": result.metadata.source_content_hash,
-                "metadata_schema_version": result.metadata.metadata_schema_version,
-                "metadata_schema_versions": metadata_schema_versions_json(&result.metadata),
-                "compiler_version": result.metadata.compiler_version,
-                "standalone_runner_compatible": result.metadata.runtime.standalone_runner_compatible,
-                "ckb_runtime_required": result.metadata.runtime.ckb_runtime_required,
-                "verifier_obligations": result.metadata.runtime.verifier_obligations.len(),
-                "runtime_required_verifier_obligations": runtime_required_obligation_count(&result.metadata),
-                "fail_closed_verifier_obligations": fail_closed_obligation_count(&result.metadata),
-                "runtime_required_transaction_invariants": runtime_required_transaction_invariant_count(&result.metadata),
-                "runtime_required_transaction_invariant_checked_subconditions": runtime_required_transaction_invariant_checked_subcondition_count(&result.metadata),
-                "runtime_required_transaction_invariant_checked_subcondition_summaries": transaction_invariant_checked_subcondition_summaries(&result.metadata),
-                "transaction_runtime_input_requirements": transaction_runtime_input_requirement_count(&result.metadata),
-                "transaction_runtime_input_requirement_summaries": transaction_runtime_input_requirement_summaries(&result.metadata),
-                "checked_transaction_runtime_input_requirements": transaction_runtime_input_requirement_count_by_status(&result.metadata, "checked-runtime"),
-                "checked_transaction_runtime_input_requirement_summaries": transaction_runtime_input_requirement_summaries_by_status(&result.metadata, "checked-runtime"),
-                "runtime_required_transaction_runtime_input_requirements": transaction_runtime_input_requirement_count_by_status(&result.metadata, "runtime-required"),
-                "runtime_required_transaction_runtime_input_requirement_summaries": transaction_runtime_input_requirement_summaries_by_status(&result.metadata, "runtime-required"),
-                "runtime_required_transaction_runtime_input_blockers": transaction_runtime_input_blocker_count_by_status(&result.metadata, "runtime-required"),
-                "runtime_required_transaction_runtime_input_blocker_summaries": transaction_runtime_input_blocker_summaries_by_status(&result.metadata, "runtime-required"),
-                "runtime_required_transaction_runtime_input_blocker_classes": transaction_runtime_input_blocker_class_count_by_status(&result.metadata, "runtime-required"),
-                "runtime_required_transaction_runtime_input_blocker_class_summaries": transaction_runtime_input_blocker_class_summaries_by_status(&result.metadata, "runtime-required"),
-                "checked_pool_invariant_families": checked_pool_invariant_family_count(&result.metadata),
-                "runtime_required_pool_invariant_families": runtime_required_pool_invariant_family_count(&result.metadata),
-                "runtime_required_pool_invariant_blocker_classes": pool_invariant_family_blocker_class_count(&result.metadata, "runtime-required"),
-                "runtime_required_pool_invariant_blocker_class_summaries": pool_invariant_family_blocker_class_summaries(&result.metadata, "runtime-required"),
-                "pool_runtime_input_requirements": pool_runtime_input_requirement_count(&result.metadata),
-                "pool_runtime_input_requirement_summaries": pool_runtime_input_requirement_summaries(&result.metadata),
-                "policy_verified": policy_verified,
-                "cache_hit": result.cache_hit,
-                "constraints": &result.metadata.constraints,
-            });
-            let json = serde_json::to_string_pretty(&summary)
-                .map_err(|error| crate::error::CompileError::without_span(format!("failed to serialize build summary: {}", error)))?;
-            println!("{}", json);
-            return Ok(());
-        }
-
-        println!("{}", "Build complete".green());
-        println!("  Artifact format: {}", result.artifact_format.display_name());
-        println!("  Target profile: {}", result.metadata.target_profile.name);
-        println!("  Output: {}", output_path);
-        println!("  Metadata: {}", metadata_path);
+        let summary = serde_json::json!({
+            "status": "ok",
+            "artifact": output_path.to_string(),
+            "metadata": metadata_path.to_string(),
+            "artifact_format": result.artifact_format.display_name(),
+            "opt_level": opt_level,
+            "target_profile": result.metadata.target_profile.name.as_str(),
+            "artifact_hash": result.metadata.artifact_hash,
+            "artifact_size_bytes": result.artifact_bytes.len(),
+            "source_hash": result.metadata.source_hash,
+            "source_content_hash": result.metadata.source_content_hash,
+            "metadata_schema_version": result.metadata.metadata_schema_version,
+            "metadata_schema_versions": metadata_schema_versions_json(&result.metadata),
+            "compiler_version": result.metadata.compiler_version,
+            "standalone_runner_compatible": result.metadata.runtime.standalone_runner_compatible,
+            "ckb_runtime_required": result.metadata.runtime.ckb_runtime_required,
+            "verifier_obligations": result.metadata.runtime.verifier_obligations.len(),
+            "runtime_required_verifier_obligations": runtime_required_obligation_count(&result.metadata),
+            "fail_closed_verifier_obligations": fail_closed_obligation_count(&result.metadata),
+            "runtime_required_transaction_invariants": runtime_required_transaction_invariant_count(&result.metadata),
+            "runtime_required_transaction_invariant_checked_subconditions": runtime_required_transaction_invariant_checked_subcondition_count(&result.metadata),
+            "runtime_required_transaction_invariant_checked_subcondition_summaries": transaction_invariant_checked_subcondition_summaries(&result.metadata),
+            "transaction_runtime_input_requirements": transaction_runtime_input_requirement_count(&result.metadata),
+            "transaction_runtime_input_requirement_summaries": transaction_runtime_input_requirement_summaries(&result.metadata),
+            "checked_transaction_runtime_input_requirements": transaction_runtime_input_requirement_count_by_status(&result.metadata, "checked-runtime"),
+            "checked_transaction_runtime_input_requirement_summaries": transaction_runtime_input_requirement_summaries_by_status(&result.metadata, "checked-runtime"),
+            "runtime_required_transaction_runtime_input_requirements": transaction_runtime_input_requirement_count_by_status(&result.metadata, "runtime-required"),
+            "runtime_required_transaction_runtime_input_requirement_summaries": transaction_runtime_input_requirement_summaries_by_status(&result.metadata, "runtime-required"),
+            "runtime_required_transaction_runtime_input_blockers": transaction_runtime_input_blocker_count_by_status(&result.metadata, "runtime-required"),
+            "runtime_required_transaction_runtime_input_blocker_summaries": transaction_runtime_input_blocker_summaries_by_status(&result.metadata, "runtime-required"),
+            "runtime_required_transaction_runtime_input_blocker_classes": transaction_runtime_input_blocker_class_count_by_status(&result.metadata, "runtime-required"),
+            "runtime_required_transaction_runtime_input_blocker_class_summaries": transaction_runtime_input_blocker_class_summaries_by_status(&result.metadata, "runtime-required"),
+            "checked_pool_invariant_families": checked_pool_invariant_family_count(&result.metadata),
+            "runtime_required_pool_invariant_families": runtime_required_pool_invariant_family_count(&result.metadata),
+            "runtime_required_pool_invariant_blocker_classes": pool_invariant_family_blocker_class_count(&result.metadata, "runtime-required"),
+            "runtime_required_pool_invariant_blocker_class_summaries": pool_invariant_family_blocker_class_summaries(&result.metadata, "runtime-required"),
+            "pool_runtime_input_requirements": pool_runtime_input_requirement_count(&result.metadata),
+            "pool_runtime_input_requirement_summaries": pool_runtime_input_requirement_summaries(&result.metadata),
+            "policy_verified": policy_verified,
+            "cache_hit": result.cache_hit,
+            "constraints": &result.metadata.constraints,
+        });
+        let mut human_lines = vec![
+            "Build complete".green().to_string(),
+            format!("  Artifact format: {}", result.artifact_format.display_name()),
+            format!("  Target profile: {}", result.metadata.target_profile.name),
+            format!("  Output: {}", output_path),
+            format!("  Metadata: {}", metadata_path),
+        ];
         if result.cache_hit {
-            println!("  {}", "(incremental cache hit)".yellow());
+            human_lines.push(format!("  {}", "(incremental cache hit)".yellow()));
         }
-        Ok(())
+        CommandOutcome { machine: summary, human_lines }.emit(args.json)
     }
 
     fn build_workspace(args: BuildArgs) -> Result<()> {
@@ -849,6 +947,8 @@ impl CommandExecutor {
 
         let opt_level = if args.release { 3 } else { 1 };
         let mut member_results = Vec::new();
+        let mut human_lines = Vec::new();
+        let mut failure_diagnostics = Vec::new();
         let mut failed = 0;
 
         for member_dir in &members {
@@ -871,15 +971,12 @@ impl CommandExecutor {
                 Ok(result) => {
                     let policy_args = effective_build_check_args(&args)?;
                     if let Err(e) = validate_check_policy(&result.metadata, &policy_args) {
-                        if args.json {
-                            member_results.push(serde_json::json!({
-                                "member": member_dir.as_str(),
-                                "status": "policy_failed",
-                                "error": e.message,
-                            }));
-                        } else {
-                            eprintln!("{}: policy check failed: {}", member_dir, e.message);
-                        }
+                        failure_diagnostics.push(e.clone().with_file(member_dir.clone()));
+                        member_results.push(serde_json::json!({
+                            "member": member_dir.as_str(),
+                            "status": "failed",
+                            "error": e.message,
+                        }));
                         failed += 1;
                         continue;
                     }
@@ -902,54 +999,28 @@ impl CommandExecutor {
                         "cache_hit": result.cache_hit,
                     }));
 
-                    if !args.json {
-                        println!("{} {}", "Built".green(), member_dir);
-                    }
+                    human_lines.push(format!("{} {}", "Built".green(), member_dir));
                 }
                 Err(e) => {
-                    if args.json {
-                        member_results.push(serde_json::json!({
-                            "member": member_dir.as_str(),
-                            "status": "failed",
-                            "error": e.message,
-                        }));
-                    } else {
-                        eprintln!("{}: {}", member_dir, e.message);
-                    }
+                    failure_diagnostics.push(e.clone().with_file(member_dir.clone()));
+                    member_results.push(serde_json::json!({
+                        "member": member_dir.as_str(),
+                        "status": "failed",
+                        "error": e.message,
+                    }));
                     failed += 1;
                 }
             }
         }
 
-        if args.json {
-            let summary = serde_json::json!({
-                "status": if failed == 0 { "ok" } else { "failed" },
-                "mode": "workspace",
+        if failed > 0 {
+            return Err(diagnostics_to_error(&failure_diagnostics).with_details(serde_json::json!({
+                "mode": "workspace-build",
                 "members": members.len(),
-                "succeeded": members.len() - failed,
+                "succeeded": members.len().saturating_sub(failed),
                 "failed": failed,
                 "results": member_results,
-            });
-            let json = serde_json::to_string_pretty(&summary).map_err(|error| {
-                crate::error::CompileError::without_span(format!("failed to serialize workspace build summary: {}", error))
-            })?;
-            println!("{}", json);
-            if failed > 0 {
-                return Err(crate::error::CompileError::without_span(format!(
-                    "{} of {} workspace members failed to build",
-                    failed,
-                    members.len()
-                )));
-            }
-            return Ok(());
-        }
-
-        if failed > 0 {
-            return Err(crate::error::CompileError::without_span(format!(
-                "{} of {} workspace members failed to build",
-                failed,
-                members.len()
-            )));
+            })));
         }
 
         // Write workspace-level Cell.lock at the workspace root.
@@ -974,8 +1045,21 @@ impl CommandExecutor {
         }
         lockfile.write_to_root(ws_root.as_std_path())?;
 
-        println!("{}", format!("Workspace build complete: {} members", members.len()).green());
-        Ok(())
+        CommandOutcome {
+            machine: serde_json::json!({
+                "status": "ok",
+                "mode": "workspace-build",
+                "members": members.len(),
+                "succeeded": members.len(),
+                "failed": 0,
+                "results": member_results,
+            }),
+            human_lines: {
+                human_lines.push(format!("Workspace build complete: {} members", members.len()).green().to_string());
+                human_lines
+            },
+        }
+        .emit(args.json)
     }
 
     fn test(args: TestArgs) -> Result<()> {
@@ -984,12 +1068,6 @@ impl CommandExecutor {
         } else {
             None
         };
-        if args.doc && !args.json {
-            println!("{}", "Documentation generated".green());
-            if let Some(output) = &doc_output {
-                println!("  Output: {}", output.display());
-            }
-        }
 
         let mut test_inputs = collect_cell_files(Path::new("tests"))?;
         if let Some(filter) = &args.filter {
@@ -1009,8 +1087,19 @@ impl CommandExecutor {
                     primitive_compat: None,
                 },
             )?;
-            if args.json {
-                let summary = serde_json::json!({
+            let mut human_lines = Vec::new();
+            if let Some(output) = &doc_output {
+                human_lines.push("Documentation generated".green().to_string());
+                human_lines.push(format!("  Output: {}", output.display()));
+            }
+            human_lines.push("Test compile complete".green().to_string());
+            human_lines.push("  Package check: passed".to_string());
+            human_lines.push("  Test files: 0".to_string());
+            if !args.no_run {
+                human_lines.push("  Execution: skipped; no CellScript test files were found".to_string());
+            }
+            return CommandOutcome {
+                machine: serde_json::json!({
                     "status": "ok",
                     "package_check": "passed",
                     "test_files": 0,
@@ -1022,20 +1111,10 @@ impl CommandExecutor {
                     "docs_generated": args.doc,
                     "doc_output": doc_output.as_ref().map(|path| path.display().to_string()),
                     "tests": [],
-                });
-                let json = serde_json::to_string_pretty(&summary).map_err(|error| {
-                    crate::error::CompileError::without_span(format!("failed to serialize test summary: {}", error))
-                })?;
-                println!("{}", json);
-                return Ok(());
+                }),
+                human_lines,
             }
-            println!("{}", "Test compile complete".green());
-            println!("  Package check: passed");
-            println!("  Test files: 0");
-            if !args.no_run {
-                println!("  Execution: skipped; no CellScript test files were found");
-            }
-            return Ok(());
+            .emit(args.json);
         }
 
         let mut passed = 0usize;
@@ -1091,11 +1170,31 @@ impl CommandExecutor {
         }
 
         if !failures.is_empty() {
-            return Err(crate::error::CompileError::without_span(format!("test failed:\n  - {}", failures.join("\n  - "))));
+            return Err(crate::error::CompileError::without_span(format!("test failed:\n  - {}", failures.join("\n  - ")))
+                .with_details(serde_json::json!({
+                    "mode": "test",
+                    "test_files": test_inputs.len(),
+                    "passed": passed,
+                    "failed": failures.len(),
+                    "fail_fast": args.fail_fast,
+                    "no_run": args.no_run,
+                    "tests": test_reports,
+                })));
         }
 
-        if args.json {
-            let summary = serde_json::json!({
+        let mut human_lines = Vec::new();
+        if let Some(output) = &doc_output {
+            human_lines.push("Documentation generated".green().to_string());
+            human_lines.push(format!("  Output: {}", output.display()));
+        }
+        human_lines.push("Test compile complete".green().to_string());
+        human_lines.push(format!("  Compiled {} test file(s)", passed));
+        if !args.no_run {
+            human_lines
+                .push("  Execution: skipped; CellScript test execution is not enabled in the default toolchain yet".to_string());
+        }
+        CommandOutcome {
+            machine: serde_json::json!({
                 "status": "ok",
                 "package_check": "not-run",
                 "test_files": test_inputs.len(),
@@ -1107,52 +1206,32 @@ impl CommandExecutor {
                 "docs_generated": args.doc,
                 "doc_output": doc_output.as_ref().map(|path| path.display().to_string()),
                 "tests": test_reports,
-            });
-            let json = serde_json::to_string_pretty(&summary)
-                .map_err(|error| crate::error::CompileError::without_span(format!("failed to serialize test summary: {}", error)))?;
-            println!("{}", json);
-            return Ok(());
+            }),
+            human_lines,
         }
-
-        println!("{}", "Test compile complete".green());
-        println!("  Compiled {} test file(s)", passed);
-        if !args.no_run {
-            println!("  Execution: skipped; CellScript test execution is not enabled in the default toolchain yet");
-        }
-        Ok(())
+        .emit(args.json)
     }
 
     fn doc(args: DocArgs) -> Result<()> {
         let output = Self::generate_docs(&args)?;
         let output_size_bytes = std::fs::metadata(&output).map(|metadata| metadata.len()).unwrap_or(0);
 
-        if args.json {
-            let summary = serde_json::json!({
+        let outcome = CommandOutcome {
+            machine: serde_json::json!({
                 "status": "ok",
                 "format": display_doc_output_format(&args.output_format),
                 "output": output.display().to_string(),
                 "output_size_bytes": output_size_bytes,
                 "opened": args.open,
-            });
-            let json = serde_json::to_string_pretty(&summary)
-                .map_err(|error| crate::error::CompileError::without_span(format!("failed to serialize doc summary: {}", error)))?;
-            println!("{}", json);
-
-            if args.open {
-                let _ = std::process::Command::new("open").arg(&output).status();
-            }
-
-            return Ok(());
-        }
-
-        println!("{}", "Documentation generated".green());
-        println!("  Output: {}", output.display());
+            }),
+            human_lines: vec!["Documentation generated".green().to_string(), format!("  Output: {}", output.display())],
+        };
 
         if args.open {
             let _ = std::process::Command::new("open").arg(&output).status();
         }
 
-        Ok(())
+        outcome.emit(args.json)
     }
 
     fn generate_docs(args: &DocArgs) -> Result<PathBuf> {
@@ -1208,67 +1287,49 @@ impl CommandExecutor {
 
         if args.check {
             if changed.is_empty() {
-                if args.json {
-                    let summary = serde_json::json!({
+                CommandOutcome {
+                    machine: serde_json::json!({
                         "status": "ok",
                         "mode": "check",
                         "changed": 0,
                         "changed_files": changed_files,
-                    });
-                    let json = serde_json::to_string_pretty(&summary).map_err(|error| {
-                        crate::error::CompileError::without_span(format!("failed to serialize fmt summary: {}", error))
-                    })?;
-                    println!("{}", json);
-                    return Ok(());
+                    }),
+                    human_lines: vec!["Formatting is clean".green().to_string()],
                 }
-                println!("{}", "Formatting is clean".green());
-                Ok(())
+                .emit(args.json)
             } else {
-                if args.json {
-                    let summary = serde_json::json!({
+                let outcome = CommandOutcome {
+                    machine: serde_json::json!({
                         "status": "failed",
                         "mode": "check",
                         "changed": changed.len(),
                         "changed_files": changed_files,
-                    });
-                    let json = serde_json::to_string_pretty(&summary).map_err(|error| {
-                        crate::error::CompileError::without_span(format!("failed to serialize fmt summary: {}", error))
-                    })?;
-                    println!("{}", json);
-                }
-                Err(crate::error::CompileError::without_span(format!(
+                    }),
+                    human_lines: Vec::new(),
+                };
+                Err(outcome.failure(format!(
                     "format check failed for {} file(s): {}",
                     changed.len(),
-                    changed_files.join(", ")
+                    changed.iter().map(|path| path.as_str()).collect::<Vec<_>>().join(", ")
                 )))
             }
         } else {
-            if args.json {
-                let summary = serde_json::json!({
+            CommandOutcome {
+                machine: serde_json::json!({
                     "status": "ok",
                     "mode": "write",
                     "changed": changed.len(),
                     "changed_files": changed_files,
-                });
-                let json = serde_json::to_string_pretty(&summary).map_err(|error| {
-                    crate::error::CompileError::without_span(format!("failed to serialize fmt summary: {}", error))
-                })?;
-                println!("{}", json);
-                return Ok(());
+                }),
+                human_lines: vec!["Formatting complete".green().to_string(), format!("  Updated {} file(s)", changed.len())],
             }
-            println!("{}", "Formatting complete".green());
-            println!("  Updated {} file(s)", changed.len());
-            Ok(())
+            .emit(args.json)
         }
     }
 
     fn init(args: InitArgs) -> Result<()> {
         let path = args.path.unwrap_or_else(|| PathBuf::from("."));
         let name = args.name.unwrap_or_else(|| path.file_name().unwrap_or_default().to_string_lossy().to_string());
-
-        if !args.json {
-            println!("{} {} in {}", "Creating".cyan(), if args.lib { "library" } else { "binary" }, path.display());
-        }
 
         let pm = PackageManager::new(&path);
         if args.lib {
@@ -1282,9 +1343,9 @@ impl CommandExecutor {
             pm.write_manifest(&manifest)?;
         }
 
-        if args.json {
-            let entry = if args.lib { "src/lib.cell" } else { "src/main.cell" };
-            let summary = serde_json::json!({
+        let entry = if args.lib { "src/lib.cell" } else { "src/main.cell" };
+        CommandOutcome {
+            machine: serde_json::json!({
                 "status": "ok",
                 "kind": if args.lib { "library" } else { "binary" },
                 "package": name,
@@ -1297,28 +1358,20 @@ impl CommandExecutor {
                     path.join(entry).display().to_string(),
                     path.join(".gitignore").display().to_string(),
                 ],
-            });
-            let json = serde_json::to_string_pretty(&summary)
-                .map_err(|error| crate::error::CompileError::without_span(format!("failed to serialize init summary: {}", error)))?;
-            println!("{}", json);
-            return Ok(());
+            }),
+            human_lines: vec![
+                "Created package successfully".green().to_string(),
+                "  To get started:".to_string(),
+                format!("    cd {}", path.display()),
+                "    cellc build".to_string(),
+            ],
         }
-
-        println!("{}", "Created package successfully".green());
-        println!("  To get started:");
-        println!("    cd {}", path.display());
-        println!("    cellc build");
-
-        Ok(())
+        .emit(args.json)
     }
 
     fn create_new(args: NewArgs) -> Result<()> {
         let path = args.path.unwrap_or_else(|| PathBuf::from(&args.name));
         ensure_new_package_destination(&path)?;
-
-        if !args.json {
-            println!("{} {} in {}", "Creating".cyan(), if args.lib { "library" } else { "binary" }, path.display());
-        }
 
         let pm = PackageManager::new(&path);
         if args.lib {
@@ -1335,9 +1388,9 @@ impl CommandExecutor {
             }
         };
 
-        if args.json {
-            let entry = if args.lib { "src/lib.cell" } else { "src/main.cell" };
-            let summary = serde_json::json!({
+        let entry = if args.lib { "src/lib.cell" } else { "src/main.cell" };
+        CommandOutcome {
+            machine: serde_json::json!({
                 "status": "ok",
                 "command": "new",
                 "kind": if args.lib { "library" } else { "binary" },
@@ -1352,18 +1405,15 @@ impl CommandExecutor {
                     path.join(entry).display().to_string(),
                     path.join(".gitignore").display().to_string(),
                 ],
-            });
-            let json = serde_json::to_string_pretty(&summary)
-                .map_err(|error| crate::error::CompileError::without_span(format!("failed to serialize new summary: {}", error)))?;
-            println!("{}", json);
-            return Ok(());
+            }),
+            human_lines: vec![
+                "Created package successfully".green().to_string(),
+                "  To get started:".to_string(),
+                format!("    cd {}", path.display()),
+                "    cellc build".to_string(),
+            ],
         }
-
-        println!("{}", "Created package successfully".green());
-        println!("  To get started:");
-        println!("    cd {}", path.display());
-        println!("    cellc build");
-        Ok(())
+        .emit(args.json)
     }
 
     fn add(args: AddArgs) -> Result<()> {
@@ -1379,9 +1429,6 @@ impl CommandExecutor {
         let mut added = Vec::new();
 
         for crate_name in &args.crates {
-            if !args.json {
-                println!("{} {} to {}", "Adding".cyan(), crate_name, target);
-            }
             validate_not_self_dependency(crate_name, &dependency, &manifest)?;
             dependency_map_mut(&mut manifest, args.dev, args.build).insert(crate_name.clone(), dependency.clone());
             added.push(crate_name.clone());
@@ -1389,21 +1436,16 @@ impl CommandExecutor {
 
         pm.write_manifest(&manifest)?;
 
-        if args.json {
-            let summary = serde_json::json!({
+        CommandOutcome {
+            machine: serde_json::json!({
                 "status": "ok",
                 "target": target,
                 "added": added,
                 "dependency": dependency,
-            });
-            let json = serde_json::to_string_pretty(&summary)
-                .map_err(|error| crate::error::CompileError::without_span(format!("failed to serialize add summary: {}", error)))?;
-            println!("{}", json);
-            return Ok(());
+            }),
+            human_lines: vec!["Dependencies added successfully".green().to_string()],
         }
-
-        println!("{}", "Dependencies added successfully".green());
-        Ok(())
+        .emit(args.json)
     }
 
     fn remove(args: RemoveArgs) -> Result<()> {
@@ -1415,9 +1457,6 @@ impl CommandExecutor {
         let mut missing = Vec::new();
 
         for crate_name in &args.crates {
-            if !args.json {
-                println!("{} {} from {}", "Removing".cyan(), crate_name, target);
-            }
             if dependency_map_mut(&mut manifest, args.dev, args.build).remove(crate_name).is_some() {
                 removed.push(crate_name.clone());
             } else {
@@ -1430,28 +1469,19 @@ impl CommandExecutor {
             refresh_lockfile_from_manifest(Path::new("."))?;
         }
 
-        if args.json {
-            let summary = serde_json::json!({
+        CommandOutcome {
+            machine: serde_json::json!({
                 "status": "ok",
                 "target": target,
                 "removed": removed,
                 "missing": missing,
-            });
-            let json = serde_json::to_string_pretty(&summary)
-                .map_err(|error| crate::error::CompileError::without_span(format!("failed to serialize remove summary: {}", error)))?;
-            println!("{}", json);
-            return Ok(());
+            }),
+            human_lines: vec!["Dependencies removed successfully".green().to_string()],
         }
-
-        println!("{}", "Dependencies removed successfully".green());
-        Ok(())
+        .emit(args.json)
     }
 
     fn clean(args: CleanArgs) -> Result<()> {
-        if !args.json {
-            println!("{}", "Cleaning...".cyan());
-        }
-
         let mut paths = vec!["target", ".cell/cache"];
         if args.cache {
             paths.push(".cell/build/cache");
@@ -1460,28 +1490,20 @@ impl CommandExecutor {
 
         for path in paths {
             if std::path::Path::new(path).exists() {
-                if !args.json {
-                    println!("  Removing {}", path);
-                }
                 std::fs::remove_dir_all(path)?;
                 removed_paths.push(path.to_string());
             }
         }
 
-        if args.json {
-            let summary = serde_json::json!({
+        CommandOutcome {
+            machine: serde_json::json!({
                 "status": "ok",
                 "removed": removed_paths.len(),
                 "removed_paths": removed_paths,
-            });
-            let json = serde_json::to_string_pretty(&summary)
-                .map_err(|error| crate::error::CompileError::without_span(format!("failed to serialize clean summary: {}", error)))?;
-            println!("{}", json);
-            return Ok(());
+            }),
+            human_lines: vec!["Clean complete".green().to_string()],
         }
-
-        println!("{}", "Clean complete".green());
-        Ok(())
+        .emit(args.json)
     }
 
     fn repl() -> Result<()> {
@@ -1524,10 +1546,6 @@ impl CommandExecutor {
                 Ok(result) => result,
                 Err(error) => {
                     let diagnostics = compile_failure_diagnostics(Utf8Path::new("."), compile_options, error);
-                    if args.json {
-                        print_check_failure_json(&diagnostics, target, requested_profile)?;
-                        return Err(CompileError::without_span(format!("check failed with {} diagnostic(s)", diagnostics.len())));
-                    }
                     return Err(diagnostics_to_error(&diagnostics));
                 }
             };
@@ -1587,35 +1605,24 @@ impl CommandExecutor {
 
         let policy_verified = args.production || args.deny_fail_closed || args.deny_ckb_runtime;
         let policy_verified = policy_verified || args.deny_runtime_obligations;
-        if args.json {
-            let summary = serde_json::json!({
-                "status": "ok",
-                "checked_targets": checked_target_json,
-                "all_targets": args.all_targets,
-                "policy_verified": policy_verified,
-                "policy": {
-                    "production": args.production,
-                    "deny_fail_closed": args.deny_fail_closed,
-                    "deny_ckb_runtime": args.deny_ckb_runtime,
-                    "deny_runtime_obligations": args.deny_runtime_obligations,
-                },
-            });
-            let json = serde_json::to_string_pretty(&summary)
-                .map_err(|error| crate::error::CompileError::without_span(format!("failed to serialize check summary: {}", error)))?;
-            println!("{}", json);
-            return Ok(());
-        }
-
-        println!("{}", "Check succeeded".green());
-        println!("  Target profile: {}", requested_profile.name());
-        for target in checked_targets {
-            println!("  Checked: {}", target);
-        }
-        Ok(())
+        let summary = serde_json::json!({
+            "status": "ok",
+            "checked_targets": checked_target_json,
+            "all_targets": args.all_targets,
+            "policy_verified": policy_verified,
+            "policy": {
+                "production": args.production,
+                "deny_fail_closed": args.deny_fail_closed,
+                "deny_ckb_runtime": args.deny_ckb_runtime,
+                "deny_runtime_obligations": args.deny_runtime_obligations,
+            },
+        });
+        let mut human_lines = vec!["Check succeeded".green().to_string(), format!("  Target profile: {}", requested_profile.name())];
+        human_lines.extend(checked_targets.into_iter().map(|target| format!("  Checked: {}", target)));
+        CommandOutcome { machine: summary, human_lines }.emit(args.json)
     }
 
     fn check_workspace(args: CheckArgs) -> Result<()> {
-        let message_format_json = check_message_format_json(&args);
         let ws_root = crate::find_workspace_root(Utf8Path::new("."))?.ok_or_else(|| {
             crate::error::CompileError::without_span(
                 "no workspace root found; run from a directory containing a [workspace] Cell.toml",
@@ -1640,6 +1647,7 @@ impl CommandExecutor {
         };
 
         let mut member_results = Vec::new();
+        let mut human_lines = Vec::new();
         let mut failure_diagnostics = Vec::new();
         let mut failed = 0;
 
@@ -1664,59 +1672,44 @@ impl CommandExecutor {
                         "artifact_format": result.artifact_format.display_name(),
                         "target_profile": result.metadata.target_profile.name,
                     }));
-                    if !args.json && !message_format_json {
-                        println!("{} {}", "Checked".green(), member_dir);
-                    }
+                    human_lines.push(format!("{} {}", "Checked".green(), member_dir));
                 }
                 Err(e) => {
-                    failure_diagnostics.push(
-                        CompileError::without_span(format!("workspace member '{}': {}", member_dir, e.message))
-                            .with_file(member_dir.clone()),
-                    );
+                    failure_diagnostics.push(e.clone().with_file(member_dir.clone()));
                     member_results.push(serde_json::json!({
                         "member": member_dir.as_str(),
                         "status": "failed",
                         "error": e.message,
                     }));
-                    if !args.json && !message_format_json {
-                        eprintln!("{}: {}", member_dir, e.message);
-                    }
                     failed += 1;
                 }
             }
         }
 
-        if args.json {
-            let summary = serde_json::json!({
-                "status": if failed == 0 { "ok" } else { "failed" },
-                "mode": "workspace",
+        if failed > 0 {
+            return Err(diagnostics_to_error(&failure_diagnostics).with_details(serde_json::json!({
+                "mode": "workspace-check",
                 "members": members.len(),
-                "succeeded": members.len() - failed,
+                "succeeded": members.len().saturating_sub(failed),
                 "failed": failed,
                 "results": member_results,
-            });
-            let json = serde_json::to_string_pretty(&summary).map_err(|error| {
-                crate::error::CompileError::without_span(format!("failed to serialize workspace check summary: {}", error))
-            })?;
-            println!("{}", json);
-            if failed > 0 {
-                return Err(crate::error::CompileError::without_span(format!(
-                    "{} of {} workspace members failed",
-                    failed,
-                    members.len()
-                )));
-            }
-            return Ok(());
+            })));
         }
-
-        if failed > 0 {
-            if message_format_json {
-                return Err(diagnostics_to_error(&failure_diagnostics));
-            }
-            return Err(crate::error::CompileError::without_span(format!("{} of {} workspace members failed", failed, members.len())));
+        CommandOutcome {
+            machine: serde_json::json!({
+                "status": "ok",
+                "mode": "workspace-check",
+                "members": members.len(),
+                "succeeded": members.len(),
+                "failed": 0,
+                "results": member_results,
+            }),
+            human_lines: {
+                human_lines.push(format!("Workspace check complete: {} members", members.len()).green().to_string());
+                human_lines
+            },
         }
-        println!("{}", format!("Workspace check complete: {} members", members.len()).green());
-        Ok(())
+        .emit(args.json)
     }
 
     fn metadata(args: MetadataArgs) -> Result<()> {
@@ -2012,21 +2005,17 @@ impl CommandExecutor {
         };
         let hash = crate::ckb_blake2b256(&bytes);
         let hash_hex = crate::hex_encode(&hash);
-        if args.json {
-            let summary = serde_json::json!({
+        CommandOutcome {
+            machine: serde_json::json!({
                 "status": "ok",
                 "algorithm": "blake2b-256",
                 "personalization": std::str::from_utf8(crate::CKB_DEFAULT_HASH_PERSONALIZATION).unwrap_or("ckb-default-hash"),
                 "input_bytes": bytes.len(),
                 "hash": hash_hex,
-            });
-            let json = serde_json::to_string_pretty(&summary)
-                .map_err(|error| crate::error::CompileError::without_span(format!("failed to serialize CKB hash: {}", error)))?;
-            println!("{}", json);
-        } else {
-            println!("{}", hash_hex);
+            }),
+            human_lines: vec![hash_hex],
         }
-        Ok(())
+        .emit(args.json)
     }
 
     fn ckb_std_compat(args: CkbStdCompatArgs) -> Result<()> {
@@ -2111,46 +2100,62 @@ impl CommandExecutor {
             ],
         });
 
-        if args.json {
-            print_json(&report)?;
-        } else {
-            println!("CKB std compatibility: {}", report["status"].as_str().unwrap_or("unknown"));
-            println!("  Schema: {}", report["schema"].as_str().unwrap_or("unknown"));
-            println!("  Runtime policy: {}", report["runtime_policy"].as_str().unwrap_or("unknown"));
-            println!("  ABI source: {}", report["abi_source"].as_str().unwrap_or("unknown"));
-            println!("  Test evidence: {}", report["test_evidence"]["compat_tests"].as_str().unwrap_or("unknown"));
+        CommandOutcome {
+            human_lines: vec![
+                format!("CKB std compatibility: {}", report["status"].as_str().unwrap_or("unknown")),
+                format!("  Schema: {}", report["schema"].as_str().unwrap_or("unknown")),
+                format!("  Runtime policy: {}", report["runtime_policy"].as_str().unwrap_or("unknown")),
+                format!("  ABI source: {}", report["abi_source"].as_str().unwrap_or("unknown")),
+                format!("  Test evidence: {}", report["test_evidence"]["compat_tests"].as_str().unwrap_or("unknown")),
+            ],
+            machine: report,
         }
-        Ok(())
+        .emit(args.json)
     }
 
     fn explain(args: ExplainArgs) -> Result<()> {
+        if let Some(info) = crate::error::compiler_error_info_by_code(&args.code.to_ascii_uppercase()) {
+            let outcome = CommandOutcome {
+                machine: serde_json::json!({
+                    "status": "ok",
+                    "domain": "compiler",
+                    "code": info.code,
+                    "name": info.name,
+                    "description": info.description,
+                    "hint": info.hint,
+                }),
+                human_lines: vec![
+                    format!("CellScript compiler error {}: {}", info.code, info.name),
+                    format!("  Description: {}", info.description),
+                    format!("  Hint: {}", info.hint),
+                ],
+            };
+            return outcome.emit(args.json);
+        }
+
         let info = runtime_error_info_from_query(&args.code).ok_or_else(|| {
             crate::error::CompileError::without_span(format!(
-                "unknown CellScript runtime error '{}'; use a numeric code, E-code, or runtime error name",
+                "unknown CellScript error '{}'; use a runtime numeric/E-code/name or compiler E2xxx code",
                 args.code
             ))
         })?;
 
-        if args.json {
-            let summary = serde_json::json!({
+        CommandOutcome {
+            machine: serde_json::json!({
                 "status": "ok",
                 "code": info.code,
                 "ecode": format!("E{:04}", info.code),
                 "name": info.name,
                 "description": info.description,
                 "hint": info.hint,
-            });
-            let json = serde_json::to_string_pretty(&summary).map_err(|error| {
-                crate::error::CompileError::without_span(format!("failed to serialize error explanation: {}", error))
-            })?;
-            println!("{}", json);
-            return Ok(());
+            }),
+            human_lines: vec![
+                format!("CellScript runtime error E{:04} ({}): {}", info.code, info.code, info.name),
+                format!("  Description: {}", info.description),
+                format!("  Hint: {}", info.hint),
+            ],
         }
-
-        println!("CellScript runtime error E{:04} ({}): {}", info.code, info.code, info.name);
-        println!("  Description: {}", info.description);
-        println!("  Hint: {}", info.hint);
-        Ok(())
+        .emit(args.json)
     }
 
     fn explain_proof(args: ExplainProofArgs) -> Result<()> {
@@ -2218,17 +2223,20 @@ impl CommandExecutor {
             "proof_plan_soundness": result.metadata.runtime.proof_plan_soundness,
             "builder_assumptions": assumptions,
         });
-        if args.json {
-            print_json(&summary)?;
-        } else {
-            println!("Builder assumptions for module `{}`", result.metadata.module);
-            println!("  Assumptions: {}", summary["assumption_count"]);
-            println!("  ProofPlan soundness: {}", summary["proof_plan_soundness"]["status"].as_str().unwrap_or("unknown"));
-            for assumption in result.metadata.runtime.builder_assumptions {
-                println!("  - {} [{}] {}", assumption.assumption_id, assumption.kind, assumption.feature);
-            }
-        }
-        Ok(())
+        let mut human_lines = vec![
+            format!("Builder assumptions for module `{}`", result.metadata.module),
+            format!("  Assumptions: {}", summary["assumption_count"]),
+            format!("  ProofPlan soundness: {}", summary["proof_plan_soundness"]["status"].as_str().unwrap_or("unknown")),
+        ];
+        human_lines.extend(
+            result
+                .metadata
+                .runtime
+                .builder_assumptions
+                .iter()
+                .map(|assumption| format!("  - {} [{}] {}", assumption.assumption_id, assumption.kind, assumption.feature)),
+        );
+        CommandOutcome { machine: summary, human_lines }.emit(args.json)
     }
 
     fn validate_tx(args: ValidateTxArgs) -> Result<()> {
@@ -2244,15 +2252,12 @@ impl CommandExecutor {
             "tx": args.tx.display().to_string(),
             "validation": report,
         });
-        if args.json {
-            print_json(&summary)?;
-        } else {
-            println!("Transaction validation: {}", summary["status"].as_str().unwrap_or("unknown"));
+        let failed = summary["status"] == "failed";
+        let outcome = CommandOutcome { machine: summary, human_lines: vec![format!("Transaction validation: {}", report.status)] };
+        if failed {
+            return Err(outcome.failure("transaction violates builder assumptions"));
         }
-        if summary["status"] == "failed" {
-            return Err(crate::error::CompileError::without_span("transaction violates builder assumptions"));
-        }
-        Ok(())
+        outcome.emit(args.json)
     }
 
     fn solve_tx(args: SolveTxArgs) -> Result<()> {
@@ -2290,25 +2295,22 @@ impl CommandExecutor {
         let base_dir = args.manifest.parent().unwrap_or_else(|| Path::new("."));
         let report = ckb_fixture_manifest_report(&manifest, base_dir, &manifest_bytes);
         let issue_count = report["issue_count"].as_u64().unwrap_or(0);
-        if args.json {
-            print_json(&report)?;
-        } else {
-            println!("CKB fixture manifest verification: {}", report["status"].as_str().unwrap_or("unknown"));
-            println!("  Manifest schema: {}", report["manifest_schema"].as_str().unwrap_or("unknown"));
-            println!("  Execution level: {}", report["execution_level"].as_str().unwrap_or("unknown"));
-            println!("  Suites: {}", report["suite_count"].as_u64().unwrap_or(0));
-            println!("  Fixtures: {}", report["fixture_count"].as_u64().unwrap_or(0));
-            println!("  Issues: {issue_count}");
-            if let Some(issues) = report["issues"].as_array() {
-                for issue in issues {
-                    println!("  - {}", issue.as_str().unwrap_or("<invalid issue>"));
-                }
-            }
+        let mut human_lines = vec![
+            format!("CKB fixture manifest verification: {}", report["status"].as_str().unwrap_or("unknown")),
+            format!("  Manifest schema: {}", report["manifest_schema"].as_str().unwrap_or("unknown")),
+            format!("  Execution level: {}", report["execution_level"].as_str().unwrap_or("unknown")),
+            format!("  Suites: {}", report["suite_count"].as_u64().unwrap_or(0)),
+            format!("  Fixtures: {}", report["fixture_count"].as_u64().unwrap_or(0)),
+            format!("  Issues: {issue_count}"),
+        ];
+        if let Some(issues) = report["issues"].as_array() {
+            human_lines.extend(issues.iter().map(|issue| format!("  - {}", issue.as_str().unwrap_or("<invalid issue>"))));
         }
+        let outcome = CommandOutcome { machine: report, human_lines };
         if issue_count == 0 {
-            Ok(())
+            outcome.emit(args.json)
         } else {
-            Err(crate::error::CompileError::without_span(format!("CKB fixture manifest failed verification: {issue_count} issue(s)")))
+            Err(outcome.failure(format!("CKB fixture manifest failed verification: {issue_count} issue(s)")))
         }
     }
 
@@ -2337,15 +2339,15 @@ impl CommandExecutor {
             "plan": args.plan.display().to_string(),
             "violations": violations,
         });
-        if args.json {
-            print_json(&summary)?;
-        } else {
-            println!("Deploy plan verification: {}", summary["status"].as_str().unwrap_or("unknown"));
+        let failed = summary["status"] == "failed";
+        let outcome = CommandOutcome {
+            human_lines: vec![format!("Deploy plan verification: {}", summary["status"].as_str().unwrap_or("unknown"))],
+            machine: summary,
+        };
+        if failed {
+            return Err(outcome.failure("deploy plan verification failed"));
         }
-        if summary["status"] == "failed" {
-            return Err(crate::error::CompileError::without_span("deploy plan verification failed"));
-        }
-        Ok(())
+        outcome.emit(args.json)
     }
 
     fn diff_deploy(args: DiffDeployArgs) -> Result<()> {
@@ -2403,15 +2405,14 @@ impl CommandExecutor {
         let tx = read_json_value(&args.tx)?;
         let validation = crate::assumptions::validate_transaction_against_metadata(&metadata, &tx);
         let trace = trace_tx_report_json(&metadata, &validation);
-        if args.json {
-            print_json(&trace)?;
-        } else {
-            println!("Transaction trace: {}", trace["status"].as_str().unwrap_or("unknown"));
-        }
+        let outcome = CommandOutcome {
+            human_lines: vec![format!("Transaction trace: {}", trace["status"].as_str().unwrap_or("unknown"))],
+            machine: trace,
+        };
         if validation.status == "failed" {
-            return Err(crate::error::CompileError::without_span("transaction trace found builder assumption violations"));
+            return Err(outcome.failure("transaction trace found builder assumption violations"));
         }
-        Ok(())
+        outcome.emit(args.json)
     }
 
     fn audit_bundle(args: AuditBundleArgs) -> Result<()> {
@@ -2443,14 +2444,15 @@ impl CommandExecutor {
             "json": json_path.display().to_string(),
             "html": html_path.display().to_string(),
         });
-        if args.json {
-            print_json(&summary)?;
-        } else {
-            println!("Audit bundle generated");
-            println!("  JSON: {}", json_path.display());
-            println!("  HTML: {}", html_path.display());
+        CommandOutcome {
+            machine: summary,
+            human_lines: vec![
+                "Audit bundle generated".to_string(),
+                format!("  JSON: {}", json_path.display()),
+                format!("  HTML: {}", html_path.display()),
+            ],
         }
-        Ok(())
+        .emit(args.json)
     }
 
     fn explain_generics(args: ExplainGenericsArgs) -> Result<()> {
@@ -2470,40 +2472,35 @@ impl CommandExecutor {
         )?;
         let instantiations = result.metadata.runtime.collection_instantiations;
 
-        if args.json {
-            let summary = serde_json::json!({
+        let mut human_lines = Vec::new();
+        if instantiations.is_empty() {
+            human_lines.push("No checked bounded generic collection instantiations found.".to_string());
+        } else {
+            human_lines.push("Checked bounded generic collection instantiations:".to_string());
+            for instantiation in &instantiations {
+                human_lines.push(format!(
+                    "  {} {}: {} -> {} ({} byte element, max {}, {})",
+                    instantiation.scope_kind,
+                    instantiation.scope_name,
+                    instantiation.collection_ty,
+                    instantiation.element_ty,
+                    instantiation.element_width_bytes,
+                    instantiation.max_elements,
+                    instantiation.status
+                ));
+                human_lines.push(format!("    backing: {}", instantiation.backing));
+                human_lines.push(format!("    helpers: {}", instantiation.helpers.join(", ")));
+            }
+        }
+        CommandOutcome {
+            machine: serde_json::json!({
                 "status": "ok",
                 "count": instantiations.len(),
                 "collection_instantiations": instantiations,
-            });
-            let json = serde_json::to_string_pretty(&summary).map_err(|error| {
-                crate::error::CompileError::without_span(format!("failed to serialize generic explanation: {}", error))
-            })?;
-            println!("{}", json);
-            return Ok(());
+            }),
+            human_lines,
         }
-
-        if instantiations.is_empty() {
-            println!("No checked bounded generic collection instantiations found.");
-            return Ok(());
-        }
-
-        println!("Checked bounded generic collection instantiations:");
-        for instantiation in instantiations {
-            println!(
-                "  {} {}: {} -> {} ({} byte element, max {}, {})",
-                instantiation.scope_kind,
-                instantiation.scope_name,
-                instantiation.collection_ty,
-                instantiation.element_ty,
-                instantiation.element_width_bytes,
-                instantiation.max_elements,
-                instantiation.status
-            );
-            println!("    backing: {}", instantiation.backing);
-            println!("    helpers: {}", instantiation.helpers.join(", "));
-        }
-        Ok(())
+        .emit(args.json)
     }
 
     fn explain_graph(args: ExplainGraphArgs) -> Result<()> {
@@ -3005,16 +3002,16 @@ impl CommandExecutor {
             args.deployed.as_deref(),
         )?;
 
-        if args.json {
-            print_json(&summary)?;
-        } else {
-            println!("{}", "TypeScript action builder generated".green());
-            println!("  Output: {}", output_dir.display());
-            println!("  Package: {}", package_name);
-            println!("  Actions: {}", selected_actions.len());
+        CommandOutcome {
+            machine: summary,
+            human_lines: vec![
+                "TypeScript action builder generated".green().to_string(),
+                format!("  Output: {}", output_dir.display()),
+                format!("  Package: {}", package_name),
+                format!("  Actions: {}", selected_actions.len()),
+            ],
         }
-
-        Ok(())
+        .emit(args.json)
     }
 
     /// Encode witness bytes for the generated `_cellscript_entry` wrapper.
@@ -3086,9 +3083,20 @@ impl CommandExecutor {
             std::fs::write(output_path, &witness)?;
         }
 
-        if args.json {
-            let payload_param_names = payload_params.iter().map(|param| param.name.as_str()).collect::<Vec<_>>();
-            let summary = serde_json::json!({
+        let payload_param_names = payload_params.iter().map(|param| param.name.as_str()).collect::<Vec<_>>();
+        let human_lines = if let Some(output_path) = &args.output {
+            vec![
+                "Entry witness encoded".green().to_string(),
+                format!("  ABI: {}", ENTRY_WITNESS_ABI),
+                format!("  Entry: {} {}", selected.kind, selected.name),
+                format!("  Output: {}", output_path.display()),
+                format!("  Hex: {}", witness_hex),
+            ]
+        } else {
+            vec![witness_hex.clone()]
+        };
+        CommandOutcome {
+            machine: serde_json::json!({
                 "status": "ok",
                 "abi": ENTRY_WITNESS_ABI,
                 "entry_kind": selected.kind,
@@ -3098,24 +3106,10 @@ impl CommandExecutor {
                 "payload_args": witness_args.len(),
                 "payload_params": payload_param_names,
                 "output": args.output.as_ref().map(|path| path.display().to_string()),
-            });
-            let json = serde_json::to_string_pretty(&summary).map_err(|error| {
-                crate::error::CompileError::without_span(format!("failed to serialize entry witness summary: {}", error))
-            })?;
-            println!("{}", json);
-            return Ok(());
+            }),
+            human_lines,
         }
-
-        if let Some(output_path) = &args.output {
-            println!("{}", "Entry witness encoded".green());
-            println!("  ABI: {}", ENTRY_WITNESS_ABI);
-            println!("  Entry: {} {}", selected.kind, selected.name);
-            println!("  Output: {}", output_path.display());
-            println!("  Hex: {}", witness_hex);
-        } else {
-            println!("{}", witness_hex);
-        }
-        Ok(())
+        .emit(args.json)
     }
 
     fn receipt(args: ReceiptArgs) -> Result<()> {
@@ -3137,9 +3131,8 @@ impl CommandExecutor {
                 crate::error::CompileError::without_span(format!("failed to serialize compile receipt: {}", error))
             })?,
         )?;
-
-        if args.json {
-            let summary = serde_json::json!({
+        CommandOutcome {
+            machine: serde_json::json!({
                 "status": "ok",
                 "receipt": args.output.display().to_string(),
                 "schema": receipt["schema"],
@@ -3147,16 +3140,16 @@ impl CommandExecutor {
                 "metadata_hash": receipt["metadata_hash"],
                 "signature_count": 0,
                 "unsigned_advisory": true,
-            });
-            print_json(&summary)
-        } else {
-            println!("{}", "Compile receipt written".green());
-            println!("  Receipt: {}", args.output.display());
-            println!("  Artifact hash: {}", receipt["artifact_hash"].as_str().unwrap_or("missing"));
-            println!("  Metadata hash: {}", receipt["metadata_hash"].as_str().unwrap_or("missing"));
-            println!("  Signatures: unsigned advisory");
-            Ok(())
+            }),
+            human_lines: vec![
+                "Compile receipt written".green().to_string(),
+                format!("  Receipt: {}", args.output.display()),
+                format!("  Artifact hash: {}", receipt["artifact_hash"].as_str().unwrap_or("missing")),
+                format!("  Metadata hash: {}", receipt["metadata_hash"].as_str().unwrap_or("missing")),
+                "  Signatures: unsigned advisory".to_string(),
+            ],
         }
+        .emit(args.json)
     }
 
     fn sign_receipt(args: SignReceiptArgs) -> Result<()> {
@@ -3199,23 +3192,23 @@ impl CommandExecutor {
                 .map_err(|error| crate::error::CompileError::without_span(format!("failed to serialize signed receipt: {}", error)))?,
         )?;
 
-        if args.json {
-            let summary = serde_json::json!({
+        CommandOutcome {
+            machine: serde_json::json!({
                 "status": "ok",
                 "receipt": output_path.display().to_string(),
                 "role": signature_entry["role"],
                 "algorithm": signature_entry["algorithm"],
                 "public_key": signature_entry["public_key"],
                 "payload_hash": signature_entry["payload_hash"],
-            });
-            print_json(&summary)
-        } else {
-            println!("{}", "Compile receipt signed".green());
-            println!("  Receipt: {}", output_path.display());
-            println!("  Role: {}", signature_entry["role"].as_str().unwrap_or("unknown"));
-            println!("  Payload hash: {}", signature_entry["payload_hash"].as_str().unwrap_or("missing"));
-            Ok(())
+            }),
+            human_lines: vec![
+                "Compile receipt signed".green().to_string(),
+                format!("  Receipt: {}", output_path.display()),
+                format!("  Role: {}", signature_entry["role"].as_str().unwrap_or("unknown")),
+                format!("  Payload hash: {}", signature_entry["payload_hash"].as_str().unwrap_or("missing")),
+            ],
         }
+        .emit(args.json)
     }
 
     fn verify_receipt(args: VerifyReceiptArgs) -> Result<()> {
@@ -3232,8 +3225,13 @@ impl CommandExecutor {
         let validated = validate_artifact_metadata(artifact_bytes, metadata)?;
         let report = verify_compile_receipt_against_metadata(&receipt, &validated.metadata)?;
 
-        if args.json {
-            let summary = serde_json::json!({
+        let signature_line = if report.unsigned_advisory {
+            "  Signatures: unsigned advisory".to_string()
+        } else {
+            format!("  Signatures verified: {}", report.signatures_verified)
+        };
+        CommandOutcome {
+            machine: serde_json::json!({
                 "status": "ok",
                 "receipt": args.receipt.display().to_string(),
                 "metadata": args.metadata.display().to_string(),
@@ -3241,21 +3239,17 @@ impl CommandExecutor {
                 "payload_hash": report.payload_hash,
                 "signatures_verified": report.signatures_verified,
                 "unsigned_advisory": report.unsigned_advisory,
-            });
-            print_json(&summary)
-        } else {
-            println!("{}", "Compile receipt verification succeeded".green());
-            println!("  Receipt: {}", args.receipt.display());
-            println!("  Artifact: {}", args.artifact.display());
-            println!("  Metadata: {}", args.metadata.display());
-            println!("  Payload hash: {}", report.payload_hash);
-            if report.unsigned_advisory {
-                println!("  Signatures: unsigned advisory");
-            } else {
-                println!("  Signatures verified: {}", report.signatures_verified);
-            }
-            Ok(())
+            }),
+            human_lines: vec![
+                "Compile receipt verification succeeded".green().to_string(),
+                format!("  Receipt: {}", args.receipt.display()),
+                format!("  Artifact: {}", args.artifact.display()),
+                format!("  Metadata: {}", args.metadata.display()),
+                format!("  Payload hash: {}", report.payload_hash),
+                signature_line,
+            ],
         }
+        .emit(args.json)
     }
 
     fn verify_artifact(args: VerifyArtifactArgs) -> Result<()> {
@@ -3481,19 +3475,18 @@ impl CommandExecutor {
 
             let vm_args = args.args.into_iter().map(|arg| arg.into_bytes()).collect::<Vec<_>>();
             let cycles = run_elf_in_ckb_vm(&result.artifact_bytes, &vm_args)?;
-
-            if args.json {
-                return print_json(&serde_json::json!({
-                    "status": "ok",
-                    "mode": "ckb-vm",
-                    "artifact_format": result.artifact_format.display_name(),
-                    "cycles": cycles,
-                }));
+            RunOutcome {
+                status: "ok",
+                mode: "ckb-vm",
+                artifact_format: result.artifact_format.display_name().to_string(),
+                entry: run_entry_outcome(&result.metadata),
+                cycles: Some(cycles),
+                steps: None,
+                has_cell_operations: None,
+                result: None,
+                trace: Vec::new(),
             }
-            println!("{}", "Run complete".green());
-            println!("  Artifact format: {}", result.artifact_format.display_name());
-            println!("  Cycles: {}", cycles);
-            Ok(())
+            .emit(args.json)
         }
 
         #[cfg(not(feature = "vm-runner"))]
@@ -3543,40 +3536,18 @@ impl CommandExecutor {
             .simulate_action(&entry.name, &sim_args)
             .map_err(|e| crate::error::CompileError::without_span(format!("simulation error: {}", e)))?;
 
-        if args.json {
-            return print_json(&serde_json::json!({
-                "status": "ok",
-                "mode": "simulate",
-                "entry": {
-                    "kind": "action",
-                    "name": sim_result.entry_name,
-                },
-                "steps": sim_result.steps,
-                "has_cell_operations": sim_result.has_cell_ops,
-                "result": sim_result.return_value.to_string(),
-                "trace": sim_result.trace.iter().map(ToString::to_string).collect::<Vec<_>>(),
-                "cycles": serde_json::Value::Null,
-            }));
+        RunOutcome {
+            status: "ok",
+            mode: "simulate",
+            artifact_format: compile_result.artifact_format.display_name().to_string(),
+            entry: Some(RunEntryOutcome { kind: "action".to_string(), name: sim_result.entry_name }),
+            cycles: None,
+            steps: Some(sim_result.steps),
+            has_cell_operations: Some(sim_result.has_cell_ops),
+            result: Some(sim_result.return_value.to_string()),
+            trace: sim_result.trace.iter().map(ToString::to_string).collect(),
         }
-
-        println!("{}", "Simulate complete".green());
-        println!("  Entry: action {}", sim_result.entry_name);
-        println!("  Steps: {}", sim_result.steps);
-        if sim_result.has_cell_ops {
-            println!("  Cell operations: {} (simulated)", "yes".yellow());
-        } else {
-            println!("  Cell operations: none (pure computation)");
-        }
-        println!("  Result: {}", sim_result.return_value);
-
-        if !sim_result.trace.is_empty() {
-            println!("  Trace:");
-            for event in &sim_result.trace {
-                println!("{}", event);
-            }
-        }
-
-        Ok(())
+        .emit(args.json)
     }
 
     fn publish(args: PublishArgs) -> Result<()> {
@@ -3940,9 +3911,19 @@ impl CommandExecutor {
     fn info(args: InfoArgs) -> Result<()> {
         let pm = PackageManager::new(".");
         let manifest = pm.read_manifest()?;
-
-        if args.json {
-            let summary = serde_json::json!({
+        let mut human_lines = vec![
+            "Package Info:".bold().to_string(),
+            format!("  Name:        {}", manifest.package.name),
+            format!("  Version:     {}", manifest.package.version),
+            format!("  Description: {}", manifest.package.description),
+            format!("  License:     {}", manifest.package.license),
+            format!("  Authors:     {}", manifest.package.authors.join(", ")),
+            format!("  Entry:       {}", manifest.package.entry),
+            "  Dependencies:".to_string(),
+        ];
+        human_lines.extend(manifest.dependencies.iter().map(|(name, dep)| format!("    - {}: {:?}", name, dep)));
+        CommandOutcome {
+            machine: serde_json::json!({
                 "status": "ok",
                 "manifest": "Cell.toml",
                 "package": manifest.package,
@@ -3952,27 +3933,10 @@ impl CommandExecutor {
                 "policy": manifest.policy,
                 "deploy": manifest.deploy,
                 "metadata": manifest.metadata,
-            });
-            let json = serde_json::to_string_pretty(&summary).map_err(|error| {
-                crate::error::CompileError::without_span(format!("failed to serialize package info summary: {}", error))
-            })?;
-            println!("{}", json);
-            return Ok(());
+            }),
+            human_lines,
         }
-
-        println!("{}", "Package Info:".bold());
-        println!("  Name:        {}", manifest.package.name);
-        println!("  Version:     {}", manifest.package.version);
-        println!("  Description: {}", manifest.package.description);
-        println!("  License:     {}", manifest.package.license);
-        println!("  Authors:     {}", manifest.package.authors.join(", "));
-        println!("  Entry:       {}", manifest.package.entry);
-        println!("  Dependencies:");
-        for (name, dep) in &manifest.dependencies {
-            println!("    - {}: {:?}", name, dep);
-        }
-
-        Ok(())
+        .emit(args.json)
     }
 
     fn login(args: LoginArgs) -> Result<()> {
@@ -4018,28 +3982,27 @@ impl CommandExecutor {
             expires_at,
             crate::VERSION.to_string(),
         );
-
-        if args.json {
-            print_json(&serde_json::to_value(&payload)?)?;
-        } else {
-            println!("{}", "Capability authorisation payload".green());
-            println!("  Protocol: {}", payload.protocol);
-            println!("  Action: {}", payload.action);
-            println!("  Registry: {}", payload.registry_origin);
-            println!("  Principal: {}:{}", payload.principal_type, payload.principal_id);
-            println!("  Capability pubkey: {}", payload.capability_pubkey);
-            println!("  Capability key id: {}", capability_key_id);
-            if generated_key_id.is_some() {
-                println!("  Capability private key: stored in the OS keychain");
-            }
-            println!("  Scopes: {}", payload.requested_scopes.join(", "));
-            println!("  Capability expires: {}", payload.capability_expires_at);
-            println!();
-            println!("Sign this payload with JoyID, then submit the signed authorisation to the registry write API:");
-            println!("{}", serde_json::to_string_pretty(&payload)?);
+        let machine = serde_json::to_value(&payload)?;
+        let mut human_lines = vec![
+            "Capability authorisation payload".green().to_string(),
+            format!("  Protocol: {}", payload.protocol),
+            format!("  Action: {}", payload.action),
+            format!("  Registry: {}", payload.registry_origin),
+            format!("  Principal: {}:{}", payload.principal_type, payload.principal_id),
+            format!("  Capability pubkey: {}", payload.capability_pubkey),
+            format!("  Capability key id: {}", capability_key_id),
+        ];
+        if generated_key_id.is_some() {
+            human_lines.push("  Capability private key: stored in the OS keychain".to_string());
         }
-
-        Ok(())
+        human_lines.extend([
+            format!("  Scopes: {}", payload.requested_scopes.join(", ")),
+            format!("  Capability expires: {}", payload.capability_expires_at),
+            String::new(),
+            "Sign this payload with JoyID, then submit the signed authorisation to the registry write API:".to_string(),
+            serde_json::to_string_pretty(&payload)?,
+        ]);
+        CommandOutcome { machine, human_lines }.emit(args.json)
     }
 
     fn auth_capability_submit(args: AuthCapabilitySubmitArgs) -> Result<()> {
@@ -4333,33 +4296,30 @@ impl CommandExecutor {
             None
         };
 
-        if args.json {
-            let summary = serde_json::json!({
-                "status": if violations.is_empty() { "ok" } else { "failed" },
+        let passed = violations.is_empty();
+        let outcome = CommandOutcome {
+            machine: serde_json::json!({
+                "status": if passed { "ok" } else { "failed" },
                 "trust": trust_report,
                 "live": live_report.unwrap_or_else(|| serde_json::json!({
                     "enabled": false,
                     "evidence": []
                 })),
                 "violations": violations,
-            });
-            let json = serde_json::to_string_pretty(&summary)
-                .map_err(|e| crate::error::CompileError::without_span(format!("failed to serialize: {}", e)))?;
-            println!("{}", json);
-            if !violations.is_empty() {
-                return Err(crate::error::CompileError::without_span("registry verification failed"));
-            }
-        } else if violations.is_empty() {
-            println!("{}", "Registry verification passed".green());
+            }),
+            human_lines: if passed {
+                vec!["Registry verification passed".green().to_string()]
+            } else {
+                let mut lines = vec!["Registry verification failed".red().to_string()];
+                lines.extend(violations.iter().map(|violation| format!("  - {}", violation)));
+                lines
+            },
+        };
+        if passed {
+            outcome.emit(args.json)
         } else {
-            println!("{}", "Registry verification failed".red());
-            for v in &violations {
-                println!("  - {}", v);
-            }
-            return Err(crate::error::CompileError::without_span("registry verification failed"));
+            Err(outcome.failure(format!("registry verification failed:\n  - {}", violations.join("\n  - "))))
         }
-
-        Ok(())
     }
 
     fn package_verify(args: PackageVerifyArgs) -> Result<()> {
@@ -4417,28 +4377,25 @@ impl CommandExecutor {
             }
         }
 
-        if args.json {
-            let summary = serde_json::json!({
-                "status": if violations.is_empty() { "ok" } else { "failed" },
+        let passed = violations.is_empty();
+        let outcome = CommandOutcome {
+            machine: serde_json::json!({
+                "status": if passed { "ok" } else { "failed" },
                 "violations": violations,
-            });
-            let json = serde_json::to_string_pretty(&summary)
-                .map_err(|e| crate::error::CompileError::without_span(format!("failed to serialize: {}", e)))?;
-            println!("{}", json);
-            if !violations.is_empty() {
-                return Err(crate::error::CompileError::without_span("package verification failed"));
-            }
-        } else if violations.is_empty() {
-            println!("{}", "Package verification passed".green());
+            }),
+            human_lines: if passed {
+                vec!["Package verification passed".green().to_string()]
+            } else {
+                let mut lines = vec!["Package verification failed".red().to_string()];
+                lines.extend(violations.iter().map(|violation| format!("  - {}", violation)));
+                lines
+            },
+        };
+        if passed {
+            outcome.emit(args.json)
         } else {
-            println!("{}", "Package verification failed".red());
-            for v in &violations {
-                println!("  - {}", v);
-            }
-            return Err(crate::error::CompileError::without_span("package verification failed"));
+            Err(outcome.failure(format!("package verification failed:\n  - {}", violations.join("\n  - "))))
         }
-
-        Ok(())
     }
 
     fn registry_add(args: RegistryAddArgs) -> Result<()> {
@@ -4551,21 +4508,23 @@ impl CommandExecutor {
             })?,
         )?;
 
-        if args.json {
-            print_json(&summary)?;
+        let passed = summary["status"].as_str() == Some("passed");
+        let failure_message = (!passed).then(|| novaseal_certification_failure_message(&summary));
+        let outcome = CommandOutcome {
+            human_lines: vec![
+                "Certification report generated".to_string(),
+                format!("  Plugin: {}", args.plugin),
+                format!("  Status: {}", summary["status"].as_str().unwrap_or("unknown")),
+                format!("  Level: {}", summary["certification_level"].as_str().unwrap_or("unknown")),
+                format!("  Output: {}", output_path.display()),
+                format!("  Plugin report: {}", plugin_report_path.display()),
+            ],
+            machine: summary,
+        };
+        if passed {
+            outcome.emit(args.json)
         } else {
-            println!("Certification report generated");
-            println!("  Plugin: {}", args.plugin);
-            println!("  Status: {}", summary["status"].as_str().unwrap_or("unknown"));
-            println!("  Level: {}", summary["certification_level"].as_str().unwrap_or("unknown"));
-            println!("  Output: {}", output_path.display());
-            println!("  Plugin report: {}", plugin_report_path.display());
-        }
-
-        if summary["status"].as_str() == Some("passed") {
-            Ok(())
-        } else {
-            Err(crate::error::CompileError::without_span(novaseal_certification_failure_message(&summary)))
+            Err(outcome.failure(failure_message.unwrap_or_else(|| "certification failed".to_string())))
         }
     }
 }
@@ -5408,109 +5367,6 @@ fn diagnostics_to_error(diagnostics: &[CompileError]) -> CompileError {
             CompileError::without_span(format!("aborting due to {} diagnostics", diagnostics.len())).with_related(diagnostics.to_vec())
         }
     }
-}
-
-fn print_check_failure_json(diagnostics: &[CompileError], target: Option<&str>, requested_profile: TargetProfile) -> Result<()> {
-    let counts = diagnostic_counts(diagnostics);
-    let diagnostics = diagnostics_json(diagnostics);
-    print_json(&serde_json::json!({
-        "status": "failed",
-        "diagnostic_count": counts.total,
-        "error_count": counts.errors,
-        "warning_count": counts.warnings,
-        "checked_targets": [{
-            "requested_target": target.unwrap_or("package-default"),
-            "target_profile": requested_profile.name(),
-            "status": "failed",
-            "diagnostic_count": counts.total,
-            "error_count": counts.errors,
-            "warning_count": counts.warnings,
-            "diagnostics": diagnostics,
-        }],
-        "diagnostics": diagnostics,
-    }))
-}
-
-fn check_message_format_json(args: &CheckArgs) -> bool {
-    args.message_format.as_deref() == Some("json")
-}
-
-fn diagnostics_json(diagnostics: &[CompileError]) -> Vec<serde_json::Value> {
-    diagnostics
-        .iter()
-        .map(|diagnostic| {
-            serde_json::json!({
-                "message": &diagnostic.message,
-                "severity": diagnostic.severity.label(),
-                "code": &diagnostic.code,
-                "file": diagnostic.file.as_ref().map(|file| file.as_str()),
-                "span": {
-                    "line": diagnostic.span.line,
-                    "column": diagnostic.span.column,
-                    "start": diagnostic.span.start,
-                    "end": diagnostic.span.end,
-                },
-                "range": diagnostic_range_json(diagnostic),
-            })
-        })
-        .collect()
-}
-
-#[derive(Debug, Clone, Copy)]
-struct DiagnosticCounts {
-    total: usize,
-    errors: usize,
-    warnings: usize,
-}
-
-fn diagnostic_counts(diagnostics: &[CompileError]) -> DiagnosticCounts {
-    let errors = diagnostics.iter().filter(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error).count();
-    DiagnosticCounts { total: diagnostics.len(), errors, warnings: diagnostics.len().saturating_sub(errors) }
-}
-
-fn diagnostic_range_json(diagnostic: &CompileError) -> serde_json::Value {
-    if diagnostic.span.line == 0 || diagnostic.span.column == 0 {
-        return serde_json::Value::Null;
-    }
-    let (end_line, end_column) = diagnostic
-        .file
-        .as_ref()
-        .and_then(|file| std::fs::read_to_string(file.as_std_path()).ok())
-        .map(|source| line_column_at(&source, diagnostic.span.end))
-        .unwrap_or_else(|| {
-            let width = diagnostic.span.end.saturating_sub(diagnostic.span.start).max(1);
-            (diagnostic.span.line, diagnostic.span.column.saturating_add(width))
-        });
-    serde_json::json!({
-        "start": {
-            "line": diagnostic.span.line,
-            "column": diagnostic.span.column,
-            "offset": diagnostic.span.start,
-        },
-        "end": {
-            "line": end_line,
-            "column": end_column,
-            "offset": diagnostic.span.end,
-        },
-    })
-}
-
-fn line_column_at(source: &str, byte_offset: usize) -> (usize, usize) {
-    let mut line = 1;
-    let mut column = 1;
-    let capped_offset = byte_offset.min(source.len());
-    for (offset, ch) in source.char_indices() {
-        if offset >= capped_offset {
-            break;
-        }
-        if ch == '\n' {
-            line += 1;
-            column = 1;
-        } else {
-            column += 1;
-        }
-    }
-    (line, column)
 }
 
 fn read_metadata_json(path: &Path) -> Result<CompileMetadata> {
@@ -9942,7 +9798,7 @@ fn auth_capability_args_from_matches(m: &clap::ArgMatches) -> AuthCapabilityArgs
         scopes: m.get_many::<String>("scope").map(|values| values.cloned().collect()).unwrap_or_default(),
         expires: m.get_one::<String>("expires").cloned(),
         capability_expires_at: m.get_one::<String>("capability-expires-at").cloned(),
-        json: m.get_flag("json"),
+        json: json_output(m),
     }
 }
 
@@ -9951,7 +9807,7 @@ fn auth_capability_submit_args_from_matches(m: &clap::ArgMatches) -> AuthCapabil
         api_url: m.get_one::<String>("api-url").cloned(),
         payload: m.get_one::<String>("payload").map(PathBuf::from).expect("required payload"),
         joyid_signature: m.get_one::<String>("joyid-signature").map(PathBuf::from).expect("required joyid-signature"),
-        json: m.get_flag("json"),
+        json: json_output(m),
     }
 }
 
@@ -9965,7 +9821,7 @@ fn auth_capability_revoke_args_from_matches(m: &clap::ArgMatches) -> AuthCapabil
         payload: m.get_one::<String>("payload").map(PathBuf::from),
         joyid_signature: m.get_one::<String>("joyid-signature").map(PathBuf::from),
         reason: m.get_one::<String>("reason").cloned(),
-        json: m.get_flag("json"),
+        json: json_output(m),
     }
 }
 
@@ -10979,7 +10835,6 @@ fn effective_build_check_args(args: &BuildArgs) -> Result<CheckArgs> {
         target_profile: args.target_profile.clone(),
         features: args.features.clone(),
         json: false,
-        message_format: None,
         production: args.production,
         deny_fail_closed: args.deny_fail_closed,
         deny_ckb_runtime: args.deny_ckb_runtime,
@@ -11447,7 +11302,6 @@ impl CompileTestExpectation {
             target_profile: None,
             features: Vec::new(),
             json: false,
-            message_format: None,
             production: self.production,
             deny_fail_closed: self.deny_fail_closed,
             deny_ckb_runtime: self.deny_ckb_runtime,
@@ -12090,6 +11944,10 @@ fn warn_legacy_alias(legacy: &str, canonical: &str, json: bool) {
     }
 }
 
+fn json_output(matches: &clap::ArgMatches) -> bool {
+    matches.get_flag("json") || matches.get_one::<String>("message-format").is_some_and(|format| format == "json")
+}
+
 pub struct CliParser;
 
 impl CliParser {
@@ -12131,12 +11989,20 @@ impl CliParser {
                     .help("Control ANSI colour output: auto, always, or never"),
             )
             .arg(
+                Arg::new("json")
+                    .long("json")
+                    .global(true)
+                    .action(ArgAction::SetTrue)
+                    .help("Emit one machine-readable JSON result on stdout for success or failure"),
+            )
+            .arg(
                 Arg::new("message-format")
                     .long("message-format")
                     .value_name("FORMAT")
                     .value_parser(["human", "json"])
                     .global(true)
-                    .help("Select diagnostic output format without changing successful --json summaries"),
+                    .hide(true)
+                    .help("Deprecated compatibility alias for --json"),
             )
             .subcommand(
                 ClapCommand::new("build")
@@ -12159,7 +12025,7 @@ impl CliParser {
                             .help("Compile only this lock as the artifact entrypoint"),
                     )
                     .arg(Arg::new("jobs").long("jobs").short('j').value_name("N").help("Number of parallel jobs"))
-                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON build summary"))
+
                     .arg(
                         Arg::new("production")
                             .long("production")
@@ -12224,13 +12090,13 @@ impl CliParser {
                     .arg(Arg::new("nocapture").long("nocapture").action(ArgAction::SetTrue).help("Don't capture stdout"))
                     .arg(Arg::new("fail-fast").long("fail-fast").action(ArgAction::SetTrue).help("Stop on first failure"))
                     .arg(Arg::new("doc").long("doc").action(ArgAction::SetTrue).help("Generate docs before compiling tests"))
-                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON test summary")),
+                    ,
             )
             .subcommand(
                 ClapCommand::new("doc")
                     .about("Generate documentation")
                     .arg(Arg::new("open").long("open").short('o').action(ArgAction::SetTrue).help("Open docs in browser"))
-                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON doc summary"))
+
                     .arg(
                         Arg::new("format")
                             .long("format")
@@ -12244,7 +12110,7 @@ impl CliParser {
                     .display_order(130)
                     .about("Format source code")
                     .arg(Arg::new("check").long("check").action(ArgAction::SetTrue).help("Check formatting without modifying files"))
-                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON format summary"))
+
                     .arg(Arg::new("files").value_name("FILES").num_args(1..).help("Files to format")),
             )
             .subcommand(
@@ -12255,7 +12121,7 @@ impl CliParser {
                     .arg(Arg::new("path").value_name("PATH").help("Path to create package"))
                     .arg(Arg::new("lib").long("lib").action(ArgAction::SetTrue).help("Create a library package"))
                     .arg(Arg::new("namespace").long("namespace").value_name("NAMESPACE").help("Package namespace for registry publishing"))
-                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON init summary")),
+                    ,
             )
             .subcommand(
                 ClapCommand::new("new")
@@ -12271,7 +12137,7 @@ impl CliParser {
                             .value_parser(["git", "none"])
                             .help("Initialize version control: git or none"),
                     )
-                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON new summary")),
+                    ,
             )
             .subcommand(
                 ClapCommand::new("add")
@@ -12281,12 +12147,12 @@ impl CliParser {
                     .arg(Arg::new("build").long("build").action(ArgAction::SetTrue).help("Add as build dependency"))
                     .arg(Arg::new("git").long("git").value_name("URL").help("Add a git dependency source"))
                     .arg(Arg::new("path").long("path").value_name("PATH").help("Add a local path dependency source"))
-                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON add summary")),
+                    ,
             )
             .subcommand(
                 ClapCommand::new("clean")
                     .about("Remove build artifacts")
-                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON clean summary"))
+
                     .arg(Arg::new("cache").long("cache").action(ArgAction::SetTrue).help("Also remove incremental compilation cache (.cell/build/cache)")),
             )
             .subcommand(
@@ -12295,7 +12161,7 @@ impl CliParser {
                     .arg(Arg::new("crates").value_name("CRATES").required(true).num_args(1..).help("Crates to remove"))
                     .arg(Arg::new("dev").long("dev").action(ArgAction::SetTrue).help("Remove from dev dependency section"))
                     .arg(Arg::new("build").long("build").action(ArgAction::SetTrue).help("Remove from build dependency section"))
-                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON remove summary")),
+                    ,
             )
             .subcommand(ClapCommand::new("repl").about("Start interactive REPL"))
             .subcommand(
@@ -12309,7 +12175,7 @@ impl CliParser {
                             .help("Also check the current ELF-compatible target path"),
                     )
                     .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
-                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON check summary"))
+
                     .arg(
                         Arg::new("production")
                             .long("production")
@@ -12410,24 +12276,24 @@ impl CliParser {
                     .arg(Arg::new("input").value_name("TEXT").help("UTF-8 text to hash; omitted input hashes empty bytes"))
                     .arg(Arg::new("hex").long("hex").value_name("HEX").help("Hex bytes to hash"))
                     .arg(Arg::new("file").long("file").value_name("FILE").help("File bytes to hash"))
-                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON summary")),
+                    ,
             )
             .subcommand(
                 ClapCommand::new("ckb-std-compat")
                     .about("Report the ckb-std ABI compatibility boundary for CellScript's inline CKB backend")
-                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON report")),
+                    ,
             )
             .subcommand(
                 ClapCommand::new("explain")
                     .about("Explain runtime errors, target profiles, ProofPlan records, assumptions, generics, and graph views")
                     .arg_required_else_help(true)
                     .arg(Arg::new("code").value_name("CODE").help("Runtime error code, E-code, or error name"))
-                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON explanation"))
+
                     .subcommand(
                         ClapCommand::new("profile")
                             .about("Explain a CellScript target profile semantic contract")
                             .arg(Arg::new("profile").value_name("PROFILE").required(true).help("Target profile name, e.g. ckb"))
-                            .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON explanation")),
+                            ,
                     )
                     .subcommand(
                         ClapCommand::new("proof")
@@ -12435,7 +12301,7 @@ impl CliParser {
                             .arg(Arg::new("input").value_name("INPUT").help("Input .cell file, package directory, or Cell.toml"))
                             .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
                             .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
-                            .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON ProofPlan")),
+                            ,
                     )
                     .subcommand(
                         ClapCommand::new("assumptions")
@@ -12443,7 +12309,7 @@ impl CliParser {
                             .arg(Arg::new("input").value_name("INPUT").help("Input .cell file, package directory, or Cell.toml"))
                             .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
                             .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
-                            .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
+                            ,
                     )
                     .subcommand(
                         ClapCommand::new("generics")
@@ -12451,7 +12317,7 @@ impl CliParser {
                             .arg(Arg::new("input").value_name("INPUT").help("Input .cell file, package directory, or Cell.toml"))
                             .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
                             .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
-                            .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON explanation")),
+                            ,
                     )
                     .subcommand(
                         ClapCommand::new("graph")
@@ -12466,7 +12332,7 @@ impl CliParser {
                                     .value_parser(["json", "mermaid"])
                                     .help("ProtocolGraph output format"),
                             )
-                            .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable ProtocolGraph JSON")),
+                            ,
                     ),
             )
             .subcommand(
@@ -12474,7 +12340,7 @@ impl CliParser {
                     .hide(true)
                     .about("Explain a CellScript target profile semantic contract")
                     .arg(Arg::new("profile").value_name("PROFILE").required(true).help("Target profile name, e.g. ckb"))
-                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON explanation")),
+                    ,
             )
             .subcommand(
                 ClapCommand::new("explain-proof")
@@ -12483,7 +12349,7 @@ impl CliParser {
                     .arg(Arg::new("input").value_name("INPUT").help("Input .cell file, package directory, or Cell.toml"))
                     .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
                     .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
-                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON ProofPlan")),
+                    ,
             )
             .subcommand(
                 ClapCommand::new("explain-assumptions")
@@ -12492,7 +12358,7 @@ impl CliParser {
                     .arg(Arg::new("input").value_name("INPUT").help("Input .cell file, package directory, or Cell.toml"))
                     .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
                     .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
-                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
+                    ,
             )
             .subcommand(
                 ClapCommand::new("explain-generics")
@@ -12501,7 +12367,7 @@ impl CliParser {
                     .arg(Arg::new("input").value_name("INPUT").help("Input .cell file, package directory, or Cell.toml"))
                     .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
                     .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
-                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON explanation")),
+                    ,
             )
             .subcommand(
                 ClapCommand::new("explain-graph")
@@ -12517,7 +12383,7 @@ impl CliParser {
                             .value_parser(["json", "mermaid"])
                             .help("ProtocolGraph output format"),
                     )
-                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable ProtocolGraph JSON")),
+                    ,
             )
             .subcommand(
                 ClapCommand::new("opt-report")
@@ -12538,7 +12404,7 @@ impl CliParser {
                     .about("Diff ProofPlan semantics between two metadata files")
                     .arg(Arg::new("old").value_name("OLD_METADATA").required(true))
                     .arg(Arg::new("new").value_name("NEW_METADATA").required(true))
-                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
+                    ,
             )
             .subcommand(
                 ClapCommand::new("profile")
@@ -12547,7 +12413,7 @@ impl CliParser {
                     .arg(Arg::new("entry").long("entry").value_name("NAME").help("Limit profile to one action or lock"))
                     .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
                     .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
-                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
+                    ,
             )
             .subcommand(
                 ClapCommand::new("tx")
@@ -12560,7 +12426,7 @@ impl CliParser {
                             .about("Validate a transaction JSON against v0.16 builder assumptions before signing")
                             .arg(Arg::new("against").long("against").value_name("METADATA").required(true).help("Metadata JSON"))
                             .arg(Arg::new("tx").long("tx").value_name("TX_JSON").required(true).help("Transaction JSON"))
-                            .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
+                            ,
                     )
                     .subcommand(
                         ClapCommand::new("solve")
@@ -12569,14 +12435,14 @@ impl CliParser {
                             .arg(Arg::new("output").long("output").short('o').value_name("FILE").help("Write JSON solver template"))
                             .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
                             .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
-                            .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
+                            ,
                     )
                     .subcommand(
                         ClapCommand::new("trace")
                             .about("Trace a transaction JSON against v0.16 builder assumptions")
                             .arg(Arg::new("against").long("against").value_name("METADATA").required(true).help("Metadata JSON"))
                             .arg(Arg::new("tx").long("tx").value_name("TX_JSON").required(true).help("Transaction JSON"))
-                            .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
+                            ,
                     ),
             )
             .subcommand(
@@ -12585,7 +12451,7 @@ impl CliParser {
                     .about("Trace a transaction JSON against v0.16 builder assumptions")
                     .arg(Arg::new("against").long("against").value_name("METADATA").required(true).help("Metadata JSON"))
                     .arg(Arg::new("tx").value_name("TX_JSON").required(true).help("Transaction JSON"))
-                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
+                    ,
             )
             .subcommand(
                 ClapCommand::new("audit-bundle")
@@ -12594,7 +12460,7 @@ impl CliParser {
                     .arg(Arg::new("output").long("output").short('o').value_name("DIR").help("Output directory"))
                     .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
                     .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
-                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
+                    ,
             )
             .subcommand(
                 ClapCommand::new("validate-tx")
@@ -12602,7 +12468,7 @@ impl CliParser {
                     .about("Validate a transaction JSON against v0.16 builder assumptions before signing")
                     .arg(Arg::new("against").long("against").value_name("METADATA").required(true).help("Metadata JSON"))
                     .arg(Arg::new("tx").value_name("TX_JSON").required(true).help("Transaction JSON"))
-                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
+                    ,
             )
             .subcommand(
                 ClapCommand::new("solve-tx")
@@ -12612,13 +12478,13 @@ impl CliParser {
                     .arg(Arg::new("output").long("output").short('o').value_name("FILE").help("Write JSON solver template"))
                     .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
                     .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
-                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
+                    ,
             )
             .subcommand(
                 ClapCommand::new("verify-ckb-fixtures")
                     .about("Verify standard CKB compatibility fixtures with the deterministic model runner")
                     .arg(Arg::new("manifest").value_name("MANIFEST_JSON").required(true).help("CKB fixture manifest JSON"))
-                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
+                    ,
             )
             .subcommand(
                 ClapCommand::new("deploy")
@@ -12633,20 +12499,20 @@ impl CliParser {
                             .arg(Arg::new("output").long("output").short('o').value_name("FILE").help("Write JSON deploy plan"))
                             .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
                             .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
-                            .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
+                            ,
                     )
                     .subcommand(
                         ClapCommand::new("verify")
                             .about("Verify a v0.16 deployment plan schema and local integrity fields")
                             .arg(Arg::new("plan").long("plan").value_name("DEPLOY_PLAN").required(true).help("Deployment plan JSON"))
-                            .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
+                            ,
                     )
                     .subcommand(
                         ClapCommand::new("diff")
                             .about("Diff two v0.16 deployment plans")
                             .arg(Arg::new("old").long("old").value_name("OLD_DEPLOY_PLAN").required(true).help("Previous deployment plan JSON"))
                             .arg(Arg::new("new").long("new").value_name("NEW_DEPLOY_PLAN").required(true).help("New deployment plan JSON"))
-                            .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
+                            ,
                     )
                     .subcommand(
                         ClapCommand::new("lock-deps")
@@ -12655,7 +12521,7 @@ impl CliParser {
                             .arg(Arg::new("output").long("output").short('o').value_name("FILE").help("Write dependency lock JSON"))
                             .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
                             .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
-                            .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
+                            ,
                     ),
             )
             .subcommand(
@@ -12666,14 +12532,14 @@ impl CliParser {
                     .arg(Arg::new("output").long("output").short('o').value_name("FILE").help("Write JSON deploy plan"))
                     .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
                     .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
-                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
+                    ,
             )
             .subcommand(
                 ClapCommand::new("verify-deploy")
                     .hide(true)
                     .about("Verify a v0.16 deployment plan schema and local integrity fields")
                     .arg(Arg::new("plan").value_name("DEPLOY_PLAN").required(true))
-                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
+                    ,
             )
             .subcommand(
                 ClapCommand::new("diff-deploy")
@@ -12681,7 +12547,7 @@ impl CliParser {
                     .about("Diff two v0.16 deployment plans")
                     .arg(Arg::new("old").value_name("OLD_DEPLOY_PLAN").required(true))
                     .arg(Arg::new("new").value_name("NEW_DEPLOY_PLAN").required(true))
-                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
+                    ,
             )
             .subcommand(
                 ClapCommand::new("lock-deps")
@@ -12691,7 +12557,7 @@ impl CliParser {
                     .arg(Arg::new("output").long("output").short('o').value_name("FILE").help("Write dependency lock JSON"))
                     .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
                     .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
-                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
+                    ,
             )
             .subcommand(
                 ClapCommand::new("action")
@@ -12757,7 +12623,7 @@ impl CliParser {
                     .arg(Arg::new("output").long("output").short('o').value_name("DIR").help("Output package directory"))
                     .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile when compiling INPUT: ckb"))
                     .arg(Arg::new("package-name").long("package-name").value_name("NAME").help("Generated package.json name"))
-                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable generation summary")),
+                    ,
             )
             .subcommand(
                 ClapCommand::new("entry-witness")
@@ -12776,7 +12642,7 @@ impl CliParser {
                     .arg(Arg::new("output").long("output").short('o').value_name("FILE").help("Write raw witness bytes to a file"))
                     .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
                     .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
-                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON summary")),
+                    ,
             )
             .subcommand(
                 ClapCommand::new("receipt")
@@ -12793,7 +12659,7 @@ impl CliParser {
                     )
                     .arg(Arg::new("target").long("target").short('t').value_name("TARGET").help("Target architecture"))
                     .arg(Arg::new("target-profile").long("target-profile").value_name("PROFILE").help("Target profile: ckb"))
-                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON summary")),
+                    ,
             )
             .subcommand(
                 ClapCommand::new("sign-receipt")
@@ -12821,7 +12687,7 @@ impl CliParser {
                             .value_name("FILE")
                             .help("Write the signed receipt here; defaults to updating RECEIPT in place"),
                     )
-                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON summary")),
+                    ,
             )
             .subcommand(
                 ClapCommand::new("verify-receipt")
@@ -12844,7 +12710,7 @@ impl CliParser {
                             .required(true)
                             .help("Artifact bytes to bind to the receipt"),
                     )
-                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable JSON summary")),
+                    ,
             )
             .subcommand(
                 ClapCommand::new("verify-artifact")
@@ -12943,7 +12809,7 @@ impl CliParser {
                 ClapCommand::new("run")
                     .about("Experimental: build and run a package")
                     .arg(Arg::new("release").long("release").short('r').action(ArgAction::SetTrue).help("Run in release mode"))
-                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit a machine-readable run summary"))
+
                     .arg(
                         Arg::new("simulate")
                             .long("simulate")
@@ -13017,7 +12883,7 @@ impl CliParser {
                             .action(ArgAction::SetTrue)
                             .help("Print the publish payload and canonical signing bytes without submitting"),
                     )
-                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable publish output")),
+                    ,
             )
             .subcommand(
                 ClapCommand::new("install")
@@ -13045,7 +12911,7 @@ impl CliParser {
             .subcommand(
                 ClapCommand::new("info")
                     .about("Show package information")
-                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable package information")),
+                    ,
             )
             .subcommand(
                 ClapCommand::new("login")
@@ -13298,13 +13164,13 @@ impl CliParser {
                             .action(ArgAction::SetTrue)
                             .help("Require external production attestations, not only local profile certification"),
                     )
-                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON")),
+                    ,
             )
             .subcommand(
                 ClapCommand::new("package").about("Package integrity commands").subcommand_required(true).subcommand(
                     ClapCommand::new("verify")
                         .about("Verify package integrity against Cell.lock and source tree")
-                        .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON output")),
+                        ,
                 ),
             )
             .subcommand(
@@ -13315,7 +13181,7 @@ impl CliParser {
                     .subcommand(
                         ClapCommand::new("verify")
                             .about("Verify deployment registry records against Cell.lock and chain facts")
-                            .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON output"))
+
                             .arg(Arg::new("live").long("live").action(ArgAction::SetTrue).help("Verify deployment facts with CKB RPC get_live_cell"))
                             .arg(Arg::new("rpc-url").long("rpc-url").value_name("URL").help("CKB RPC URL for --live"))
                             .arg(Arg::new("network").long("network").value_name("NAME").help("Verify only this deployment network with --live"))
@@ -13352,7 +13218,7 @@ impl CliParser {
                 ClapCommand::new("registry-verify")
                     .hide(true)
                     .about("Verify deployment registry records against Cell.lock and chain facts")
-                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON output"))
+
                     .arg(Arg::new("live").long("live").action(ArgAction::SetTrue).help("Verify deployment facts with CKB RPC get_live_cell"))
                     .arg(Arg::new("rpc-url").long("rpc-url").value_name("URL").help("CKB RPC URL for --live"))
                     .arg(Arg::new("network").long("network").value_name("NAME").help("Verify only this deployment network with --live"))
@@ -13373,7 +13239,7 @@ impl CliParser {
                 ClapCommand::new("package-verify")
                     .hide(true)
                     .about("Verify package integrity against Cell.lock and source tree")
-                    .arg(Arg::new("json").long("json").action(ArgAction::SetTrue).help("Emit machine-readable JSON output")),
+                    ,
             )
             .subcommand(
                 ClapCommand::new("registry-add")
@@ -13394,7 +13260,7 @@ impl CliParser {
                 entry_action: m.get_one::<String>("entry-action").cloned(),
                 entry_lock: m.get_one::<String>("entry-lock").cloned(),
                 jobs: m.get_one::<String>("jobs").and_then(|s| s.parse().ok()),
-                json: m.get_flag("json"),
+                json: json_output(m),
                 production: m.get_flag("production"),
                 deny_fail_closed: m.get_flag("deny-fail-closed"),
                 deny_ckb_runtime: m.get_flag("deny-ckb-runtime"),
@@ -13413,12 +13279,12 @@ impl CliParser {
                 nocapture: m.get_flag("nocapture"),
                 fail_fast: m.get_flag("fail-fast"),
                 doc: m.get_flag("doc"),
-                json: m.get_flag("json"),
+                json: json_output(m),
                 ..Default::default()
             }),
             Some(("doc", m)) => Command::Doc(DocArgs {
                 open: m.get_flag("open"),
-                json: m.get_flag("json"),
+                json: json_output(m),
                 output_format: match m.get_one::<String>("format").map(|s| s.as_str()) {
                     Some("markdown") => OutputFormat::Markdown,
                     Some("json") => OutputFormat::Json,
@@ -13428,7 +13294,7 @@ impl CliParser {
             }),
             Some(("fmt", m)) => Command::Fmt(FmtArgs {
                 check: m.get_flag("check"),
-                json: m.get_flag("json"),
+                json: json_output(m),
                 files: m.get_many::<String>("files").map(|v| v.map(PathBuf::from).collect()).unwrap_or_default(),
             }),
             Some(("init", m)) => Command::Init(InitArgs {
@@ -13436,14 +13302,14 @@ impl CliParser {
                 path: m.get_one::<String>("path").map(PathBuf::from),
                 lib: m.get_flag("lib"),
                 namespace: m.get_one::<String>("namespace").cloned(),
-                json: m.get_flag("json"),
+                json: json_output(m),
             }),
             Some(("new", m)) => Command::New(NewArgs {
                 name: m.get_one::<String>("name").cloned().expect("required package name"),
                 path: m.get_one::<String>("path").map(PathBuf::from),
                 lib: m.get_flag("lib"),
                 vcs: m.get_one::<String>("vcs").cloned().unwrap_or_else(|| "git".to_string()),
-                json: m.get_flag("json"),
+                json: json_output(m),
             }),
             Some(("add", m)) => Command::Add(AddArgs {
                 crates: m.get_many::<String>("crates").map(|v| v.cloned().collect()).unwrap_or_default(),
@@ -13451,21 +13317,20 @@ impl CliParser {
                 build: m.get_flag("build"),
                 git: m.get_one::<String>("git").cloned(),
                 path: m.get_one::<String>("path").map(PathBuf::from),
-                json: m.get_flag("json"),
+                json: json_output(m),
             }),
             Some(("remove", m)) => Command::Remove(RemoveArgs {
                 crates: m.get_many::<String>("crates").map(|v| v.cloned().collect()).unwrap_or_default(),
                 dev: m.get_flag("dev"),
                 build: m.get_flag("build"),
-                json: m.get_flag("json"),
+                json: json_output(m),
             }),
-            Some(("clean", m)) => Command::Clean(CleanArgs { json: m.get_flag("json"), cache: m.get_flag("cache") }),
+            Some(("clean", m)) => Command::Clean(CleanArgs { json: json_output(m), cache: m.get_flag("cache") }),
             Some(("repl", _)) => Command::Repl,
             Some(("check", m)) => Command::Check(CheckArgs {
                 all_targets: m.get_flag("all-targets"),
                 target_profile: m.get_one::<String>("target-profile").cloned(),
-                json: m.get_flag("json"),
-                message_format: m.get_one::<String>("message-format").cloned(),
+                json: json_output(m),
                 production: m.get_flag("production"),
                 deny_fail_closed: m.get_flag("deny-fail-closed"),
                 deny_ckb_runtime: m.get_flag("deny-ckb-runtime"),
@@ -13510,85 +13375,85 @@ impl CliParser {
                 input: m.get_one::<String>("input").cloned(),
                 hex: m.get_one::<String>("hex").cloned(),
                 file: m.get_one::<String>("file").map(PathBuf::from),
-                json: m.get_flag("json"),
+                json: json_output(m),
             }),
-            Some(("ckb-std-compat", m)) => Command::CkbStdCompat(CkbStdCompatArgs { json: m.get_flag("json") }),
+            Some(("ckb-std-compat", m)) => Command::CkbStdCompat(CkbStdCompatArgs { json: json_output(m) }),
             Some(("explain", m)) => match m.subcommand() {
                 Some(("profile", profile)) => Command::ExplainProfile(ExplainProfileArgs {
                     profile: profile.get_one::<String>("profile").cloned().expect("required target profile"),
-                    json: profile.get_flag("json"),
+                    json: json_output(profile),
                 }),
                 Some(("proof", proof)) => Command::ExplainProof(ExplainProofArgs {
                     input: proof.get_one::<String>("input").map(PathBuf::from),
                     target: proof.get_one::<String>("target").cloned(),
                     target_profile: proof.get_one::<String>("target-profile").cloned(),
-                    json: proof.get_flag("json"),
+                    json: json_output(proof),
                 }),
                 Some(("assumptions", assumptions)) => Command::ExplainAssumptions(ExplainAssumptionsArgs {
                     input: assumptions.get_one::<String>("input").map(PathBuf::from),
                     target: assumptions.get_one::<String>("target").cloned(),
                     target_profile: assumptions.get_one::<String>("target-profile").cloned(),
-                    json: assumptions.get_flag("json"),
+                    json: json_output(assumptions),
                 }),
                 Some(("generics", generics)) => Command::ExplainGenerics(ExplainGenericsArgs {
                     input: generics.get_one::<String>("input").map(PathBuf::from),
                     target: generics.get_one::<String>("target").cloned(),
                     target_profile: generics.get_one::<String>("target-profile").cloned(),
-                    json: generics.get_flag("json"),
+                    json: json_output(generics),
                 }),
                 Some(("graph", graph)) => Command::ExplainGraph(ExplainGraphArgs {
                     input: graph.get_one::<String>("input").map(PathBuf::from),
                     target: graph.get_one::<String>("target").cloned(),
                     target_profile: graph.get_one::<String>("target-profile").cloned(),
-                    json: graph.get_flag("json"),
+                    json: json_output(graph),
                     format: graph.get_one::<String>("format").cloned(),
                 }),
                 _ => Command::Explain(ExplainArgs {
                     code: m.get_one::<String>("code").cloned().expect("required runtime error code"),
-                    json: m.get_flag("json"),
+                    json: json_output(m),
                 }),
             },
             Some(("explain-profile", m)) => {
-                warn_legacy_alias("explain-profile", "explain profile", m.get_flag("json"));
+                warn_legacy_alias("explain-profile", "explain profile", json_output(m));
                 Command::ExplainProfile(ExplainProfileArgs {
                     profile: m.get_one::<String>("profile").cloned().expect("required target profile"),
-                    json: m.get_flag("json"),
+                    json: json_output(m),
                 })
             }
             Some(("explain-proof", m)) => {
-                warn_legacy_alias("explain-proof", "explain proof", m.get_flag("json"));
+                warn_legacy_alias("explain-proof", "explain proof", json_output(m));
                 Command::ExplainProof(ExplainProofArgs {
                     input: m.get_one::<String>("input").map(PathBuf::from),
                     target: m.get_one::<String>("target").cloned(),
                     target_profile: m.get_one::<String>("target-profile").cloned(),
-                    json: m.get_flag("json"),
+                    json: json_output(m),
                 })
             }
             Some(("explain-assumptions", m)) => {
-                warn_legacy_alias("explain-assumptions", "explain assumptions", m.get_flag("json"));
+                warn_legacy_alias("explain-assumptions", "explain assumptions", json_output(m));
                 Command::ExplainAssumptions(ExplainAssumptionsArgs {
                     input: m.get_one::<String>("input").map(PathBuf::from),
                     target: m.get_one::<String>("target").cloned(),
                     target_profile: m.get_one::<String>("target-profile").cloned(),
-                    json: m.get_flag("json"),
+                    json: json_output(m),
                 })
             }
             Some(("explain-generics", m)) => {
-                warn_legacy_alias("explain-generics", "explain generics", m.get_flag("json"));
+                warn_legacy_alias("explain-generics", "explain generics", json_output(m));
                 Command::ExplainGenerics(ExplainGenericsArgs {
                     input: m.get_one::<String>("input").map(PathBuf::from),
                     target: m.get_one::<String>("target").cloned(),
                     target_profile: m.get_one::<String>("target-profile").cloned(),
-                    json: m.get_flag("json"),
+                    json: json_output(m),
                 })
             }
             Some(("explain-graph", m)) => {
-                warn_legacy_alias("explain-graph", "explain graph", m.get_flag("json"));
+                warn_legacy_alias("explain-graph", "explain graph", json_output(m));
                 Command::ExplainGraph(ExplainGraphArgs {
                     input: m.get_one::<String>("input").map(PathBuf::from),
                     target: m.get_one::<String>("target").cloned(),
                     target_profile: m.get_one::<String>("target-profile").cloned(),
-                    json: m.get_flag("json"),
+                    json: json_output(m),
                     format: m.get_one::<String>("format").cloned(),
                 })
             }
@@ -13601,41 +13466,41 @@ impl CliParser {
             Some(("proof-diff", m)) => Command::ProofDiff(ProofDiffArgs {
                 old: m.get_one::<String>("old").map(PathBuf::from).expect("required old metadata"),
                 new: m.get_one::<String>("new").map(PathBuf::from).expect("required new metadata"),
-                json: m.get_flag("json"),
+                json: json_output(m),
             }),
             Some(("profile", m)) => Command::Profile(ProfileArgs {
                 input: m.get_one::<String>("input").map(PathBuf::from),
                 entry: m.get_one::<String>("entry").cloned(),
                 target: m.get_one::<String>("target").cloned(),
                 target_profile: m.get_one::<String>("target-profile").cloned(),
-                json: m.get_flag("json"),
+                json: json_output(m),
             }),
             Some(("tx", m)) => match m.subcommand() {
                 Some(("validate", validate)) => Command::ValidateTx(ValidateTxArgs {
                     against: validate.get_one::<String>("against").map(PathBuf::from).expect("required metadata"),
                     tx: validate.get_one::<String>("tx").map(PathBuf::from).expect("required transaction JSON"),
-                    json: validate.get_flag("json"),
+                    json: json_output(validate),
                 }),
                 Some(("solve", solve)) => Command::SolveTx(SolveTxArgs {
                     input: solve.get_one::<String>("input").map(PathBuf::from),
                     output: solve.get_one::<String>("output").map(PathBuf::from),
                     target: solve.get_one::<String>("target").cloned(),
                     target_profile: solve.get_one::<String>("target-profile").cloned(),
-                    json: solve.get_flag("json"),
+                    json: json_output(solve),
                 }),
                 Some(("trace", trace)) => Command::TraceTx(TraceTxArgs {
                     against: trace.get_one::<String>("against").map(PathBuf::from).expect("required metadata"),
                     tx: trace.get_one::<String>("tx").map(PathBuf::from).expect("required transaction JSON"),
-                    json: trace.get_flag("json"),
+                    json: json_output(trace),
                 }),
                 _ => unreachable!(),
             },
             Some(("trace-tx", m)) => {
-                warn_legacy_alias("trace-tx", "tx trace", m.get_flag("json"));
+                warn_legacy_alias("trace-tx", "tx trace", json_output(m));
                 Command::TraceTx(TraceTxArgs {
                     against: m.get_one::<String>("against").map(PathBuf::from).expect("required metadata"),
                     tx: m.get_one::<String>("tx").map(PathBuf::from).expect("required transaction JSON"),
-                    json: m.get_flag("json"),
+                    json: json_output(m),
                 })
             }
             Some(("audit-bundle", m)) => Command::AuditBundle(AuditBundleArgs {
@@ -13643,29 +13508,29 @@ impl CliParser {
                 output: m.get_one::<String>("output").map(PathBuf::from),
                 target: m.get_one::<String>("target").cloned(),
                 target_profile: m.get_one::<String>("target-profile").cloned(),
-                json: m.get_flag("json"),
+                json: json_output(m),
             }),
             Some(("validate-tx", m)) => {
-                warn_legacy_alias("validate-tx", "tx validate", m.get_flag("json"));
+                warn_legacy_alias("validate-tx", "tx validate", json_output(m));
                 Command::ValidateTx(ValidateTxArgs {
                     against: m.get_one::<String>("against").map(PathBuf::from).expect("required metadata"),
                     tx: m.get_one::<String>("tx").map(PathBuf::from).expect("required transaction JSON"),
-                    json: m.get_flag("json"),
+                    json: json_output(m),
                 })
             }
             Some(("solve-tx", m)) => {
-                warn_legacy_alias("solve-tx", "tx solve", m.get_flag("json"));
+                warn_legacy_alias("solve-tx", "tx solve", json_output(m));
                 Command::SolveTx(SolveTxArgs {
                     input: m.get_one::<String>("input").map(PathBuf::from),
                     output: m.get_one::<String>("output").map(PathBuf::from),
                     target: m.get_one::<String>("target").cloned(),
                     target_profile: m.get_one::<String>("target-profile").cloned(),
-                    json: m.get_flag("json"),
+                    json: json_output(m),
                 })
             }
             Some(("verify-ckb-fixtures", m)) => Command::VerifyCkbFixtures(VerifyCkbFixturesArgs {
                 manifest: m.get_one::<String>("manifest").map(PathBuf::from).expect("required CKB fixture manifest"),
-                json: m.get_flag("json"),
+                json: json_output(m),
             }),
             Some(("deploy", m)) => match m.subcommand() {
                 Some(("plan", plan)) => Command::DeployPlan(DeployPlanArgs {
@@ -13673,59 +13538,59 @@ impl CliParser {
                     output: plan.get_one::<String>("output").map(PathBuf::from),
                     target: plan.get_one::<String>("target").cloned(),
                     target_profile: plan.get_one::<String>("target-profile").cloned(),
-                    json: plan.get_flag("json"),
+                    json: json_output(plan),
                 }),
                 Some(("verify", verify)) => Command::VerifyDeploy(VerifyDeployArgs {
                     plan: verify.get_one::<String>("plan").map(PathBuf::from).expect("required deploy plan"),
-                    json: verify.get_flag("json"),
+                    json: json_output(verify),
                 }),
                 Some(("diff", diff)) => Command::DiffDeploy(DiffDeployArgs {
                     old: diff.get_one::<String>("old").map(PathBuf::from).expect("required old deploy plan"),
                     new: diff.get_one::<String>("new").map(PathBuf::from).expect("required new deploy plan"),
-                    json: diff.get_flag("json"),
+                    json: json_output(diff),
                 }),
                 Some(("lock-deps", lock_deps)) => Command::LockDeps(LockDepsArgs {
                     input: lock_deps.get_one::<String>("input").map(PathBuf::from),
                     output: lock_deps.get_one::<String>("output").map(PathBuf::from),
                     target: lock_deps.get_one::<String>("target").cloned(),
                     target_profile: lock_deps.get_one::<String>("target-profile").cloned(),
-                    json: lock_deps.get_flag("json"),
+                    json: json_output(lock_deps),
                 }),
                 _ => unreachable!(),
             },
             Some(("deploy-plan", m)) => {
-                warn_legacy_alias("deploy-plan", "deploy plan", m.get_flag("json"));
+                warn_legacy_alias("deploy-plan", "deploy plan", json_output(m));
                 Command::DeployPlan(DeployPlanArgs {
                     input: m.get_one::<String>("input").map(PathBuf::from),
                     output: m.get_one::<String>("output").map(PathBuf::from),
                     target: m.get_one::<String>("target").cloned(),
                     target_profile: m.get_one::<String>("target-profile").cloned(),
-                    json: m.get_flag("json"),
+                    json: json_output(m),
                 })
             }
             Some(("verify-deploy", m)) => {
-                warn_legacy_alias("verify-deploy", "deploy verify", m.get_flag("json"));
+                warn_legacy_alias("verify-deploy", "deploy verify", json_output(m));
                 Command::VerifyDeploy(VerifyDeployArgs {
                     plan: m.get_one::<String>("plan").map(PathBuf::from).expect("required deploy plan"),
-                    json: m.get_flag("json"),
+                    json: json_output(m),
                 })
             }
             Some(("diff-deploy", m)) => {
-                warn_legacy_alias("diff-deploy", "deploy diff", m.get_flag("json"));
+                warn_legacy_alias("diff-deploy", "deploy diff", json_output(m));
                 Command::DiffDeploy(DiffDeployArgs {
                     old: m.get_one::<String>("old").map(PathBuf::from).expect("required old deploy plan"),
                     new: m.get_one::<String>("new").map(PathBuf::from).expect("required new deploy plan"),
-                    json: m.get_flag("json"),
+                    json: json_output(m),
                 })
             }
             Some(("lock-deps", m)) => {
-                warn_legacy_alias("lock-deps", "deploy lock-deps", m.get_flag("json"));
+                warn_legacy_alias("lock-deps", "deploy lock-deps", json_output(m));
                 Command::LockDeps(LockDepsArgs {
                     input: m.get_one::<String>("input").map(PathBuf::from),
                     output: m.get_one::<String>("output").map(PathBuf::from),
                     target: m.get_one::<String>("target").cloned(),
                     target_profile: m.get_one::<String>("target-profile").cloned(),
-                    json: m.get_flag("json"),
+                    json: json_output(m),
                 })
             }
             Some(("action", m)) => match m.subcommand() {
@@ -13736,7 +13601,7 @@ impl CliParser {
                     target: build.get_one::<String>("target").cloned(),
                     target_profile: build.get_one::<String>("target-profile").cloned(),
                     fabric_intent: build.get_flag("fabric-intent"),
-                    json: build.get_flag("json"),
+                    json: json_output(build),
                 }),
                 _ => Command::ActionBuild(ActionBuildArgs::default()),
             },
@@ -13751,7 +13616,7 @@ impl CliParser {
                 target: m.get_one::<String>("target").cloned().unwrap_or_else(|| "typescript".to_string()),
                 target_profile: m.get_one::<String>("target-profile").cloned(),
                 package_name: m.get_one::<String>("package-name").cloned(),
-                json: m.get_flag("json"),
+                json: json_output(m),
             }),
             Some(("entry-witness", m)) => Command::EntryWitness(EntryWitnessArgs {
                 input: m.get_one::<String>("input").map(PathBuf::from),
@@ -13761,34 +13626,34 @@ impl CliParser {
                 output: m.get_one::<String>("output").map(PathBuf::from),
                 target: m.get_one::<String>("target").cloned(),
                 target_profile: m.get_one::<String>("target-profile").cloned(),
-                json: m.get_flag("json"),
+                json: json_output(m),
             }),
             Some(("receipt", m)) => Command::Receipt(ReceiptArgs {
                 input: m.get_one::<String>("input").map(PathBuf::from),
                 output: m.get_one::<String>("output").map(PathBuf::from).expect("required output"),
                 target: m.get_one::<String>("target").cloned(),
                 target_profile: m.get_one::<String>("target-profile").cloned(),
-                json: m.get_flag("json"),
+                json: json_output(m),
             }),
             Some(("sign-receipt", m)) => Command::SignReceipt(SignReceiptArgs {
                 receipt: m.get_one::<String>("receipt").map(PathBuf::from).expect("required receipt"),
                 role: m.get_one::<String>("role").cloned().expect("required role"),
                 key: m.get_one::<String>("key").cloned().expect("required key"),
                 output: m.get_one::<String>("output").map(PathBuf::from),
-                json: m.get_flag("json"),
+                json: json_output(m),
             }),
             Some(("verify-receipt", m)) => Command::VerifyReceipt(VerifyReceiptArgs {
                 receipt: m.get_one::<String>("receipt").map(PathBuf::from).expect("required receipt"),
                 metadata: m.get_one::<String>("metadata").map(PathBuf::from).expect("required metadata"),
                 artifact: m.get_one::<String>("artifact").map(PathBuf::from).expect("required artifact"),
-                json: m.get_flag("json"),
+                json: json_output(m),
             }),
             Some(("verify-artifact", m)) => Command::VerifyArtifact(VerifyArtifactArgs {
                 artifact: m.get_one::<String>("artifact").map(PathBuf::from).expect("required artifact"),
                 metadata: m.get_one::<String>("metadata").map(PathBuf::from),
                 receipt: m.get_one::<String>("receipt").map(PathBuf::from),
                 verify_sources: m.get_flag("verify-sources"),
-                json: m.get_flag("json"),
+                json: json_output(m),
                 expect_target_profile: m.get_one::<String>("expect-target-profile").cloned(),
                 expect_artifact_hash: m.get_one::<String>("expect-artifact-hash").cloned(),
                 expect_source_hash: m.get_one::<String>("expect-source-hash").cloned(),
@@ -13806,7 +13671,7 @@ impl CliParser {
                 args: m.get_many::<String>("args").map(|values| values.cloned().collect()).unwrap_or_default(),
                 release: m.get_flag("release"),
                 simulate: m.get_flag("simulate"),
-                json: m.get_flag("json"),
+                json: json_output(m),
             }),
             Some(("publish", m)) => Command::Publish(PublishArgs {
                 dry_run: m.get_flag("dry-run"),
@@ -13819,7 +13684,7 @@ impl CliParser {
                 payload: m.get_one::<String>("payload").map(PathBuf::from),
                 source_snapshot: m.get_one::<String>("source-snapshot").map(PathBuf::from),
                 print_payload: m.get_flag("print-payload"),
-                json: m.get_flag("json"),
+                json: json_output(m),
             }),
             Some(("install", m)) => Command::Install(InstallArgs {
                 crate_name: m.get_one::<String>("crate").cloned(),
@@ -13831,7 +13696,7 @@ impl CliParser {
                 allow_quarantined: m.get_flag("allow-quarantined"),
             }),
             Some(("update", _)) => Command::Update,
-            Some(("info", m)) => Command::Info(InfoArgs { json: m.get_flag("json") }),
+            Some(("info", m)) => Command::Info(InfoArgs { json: json_output(m) }),
             Some(("login", m)) => {
                 warn_legacy_alias("login", "auth capability create", false);
                 Command::Login(LoginArgs { registry: m.get_one::<String>("registry").cloned() })
@@ -13851,16 +13716,16 @@ impl CliParser {
                 repo_root: m.get_one::<String>("repo-root").map(PathBuf::from),
                 report: m.get_one::<String>("report").map(PathBuf::from),
                 output: m.get_one::<String>("output").map(PathBuf::from),
-                json: m.get_flag("json"),
+                json: json_output(m),
                 require_production: m.get_flag("require-production"),
             }),
             Some(("package", m)) => match m.subcommand() {
-                Some(("verify", verify)) => Command::PackageVerify(PackageVerifyArgs { json: verify.get_flag("json") }),
+                Some(("verify", verify)) => Command::PackageVerify(PackageVerifyArgs { json: json_output(verify) }),
                 _ => unreachable!(),
             },
             Some(("registry", m)) => match m.subcommand() {
                 Some(("verify", verify)) => Command::RegistryVerify(RegistryVerifyArgs {
-                    json: verify.get_flag("json"),
+                    json: json_output(verify),
                     live: verify.get_flag("live"),
                     rpc_url: verify.get_one::<String>("rpc-url").cloned(),
                     network: verify.get_one::<String>("network").cloned(),
@@ -13881,9 +13746,9 @@ impl CliParser {
                 _ => unreachable!(),
             },
             Some(("registry-verify", m)) => {
-                warn_legacy_alias("registry-verify", "registry verify", m.get_flag("json"));
+                warn_legacy_alias("registry-verify", "registry verify", json_output(m));
                 Command::RegistryVerify(RegistryVerifyArgs {
-                    json: m.get_flag("json"),
+                    json: json_output(m),
                     live: m.get_flag("live"),
                     rpc_url: m.get_one::<String>("rpc-url").cloned(),
                     network: m.get_one::<String>("network").cloned(),
@@ -13892,8 +13757,8 @@ impl CliParser {
                 })
             }
             Some(("package-verify", m)) => {
-                warn_legacy_alias("package-verify", "package verify", m.get_flag("json"));
-                Command::PackageVerify(PackageVerifyArgs { json: m.get_flag("json") })
+                warn_legacy_alias("package-verify", "package verify", json_output(m));
+                Command::PackageVerify(PackageVerifyArgs { json: json_output(m) })
             }
             Some(("registry-add", m)) => {
                 warn_legacy_alias("registry-add", "registry add", false);

@@ -16,3 +16,5 @@
 - [Tutorial 13: Agentic Loops and cellscript-mcp](https://github.com/CellScript-Labs/CellScript/wiki/Tutorial-13-Agentic-Loops-and-cellscript-mcp)
 - [Cookbook Recipes](https://github.com/CellScript-Labs/CellScript/wiki/Cookbook-Recipes)
 - [CKB Glossary](https://github.com/CellScript-Labs/CellScript/wiki/CKB-Glossary)
+- [CellScript 0.22 Release Notes](https://github.com/CellScript-Labs/CellScript/blob/nightly-0.22/docs/releases/CELLSCRIPT_0_22_RELEASE_NOTES.md)
+- [Bounded Fiber Interoperability Guide](https://github.com/CellScript-Labs/CellScript/blob/nightly-0.22/examples/fiber/README.md)
