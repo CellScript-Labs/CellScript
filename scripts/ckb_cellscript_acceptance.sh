@@ -3740,10 +3740,17 @@ def get_block_by_number(number, attempts=20, delay_seconds=0.05):
 def epoch_number_from_header(header):
     return int(header["epoch"], 16) & ((1 << 24) - 1)
 
-def wait_header_epoch_at_least(min_epoch, max_blocks=1200):
-    last_header = None
+CKB_CONSENSUS_MAX_EPOCH_LENGTH = 1800
+
+def wait_header_epoch_at_least(min_epoch, max_blocks=None):
+    last_header = rpc("get_tip_header")
+    initial_epoch = epoch_number_from_header(last_header)
+    if max_blocks is None:
+        remaining_epochs = max(0, min_epoch - initial_epoch)
+        max_blocks = (remaining_epochs + 1) * CKB_CONSENSUS_MAX_EPOCH_LENGTH
     for generated in range(max_blocks + 1):
-        last_header = rpc("get_tip_header")
+        if generated > 0:
+            last_header = rpc("get_tip_header")
         epoch_number = epoch_number_from_header(last_header)
         if epoch_number >= min_epoch:
             return {
@@ -6776,7 +6783,7 @@ def run_stateful_timelock_release(always_success_dep):
         actions["request_release"]["cell_deps"],
     )
     request_input = request_initial["cells"][0]
-    release_timepoint = wait_header_epoch_at_least(unlock_height, max_blocks=15000)
+    release_timepoint = wait_header_epoch_at_least(unlock_height)
     release_height = release_timepoint["epoch_number"]
     tx3 = transaction(
         request_input,
