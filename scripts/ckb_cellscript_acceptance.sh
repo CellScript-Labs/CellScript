@@ -3020,6 +3020,7 @@ fi
 python3 - "$RPC_URL" "$REPORT_JSON" "$CKB_REPO" "$CKB_BIN" "$CKB_LOG" "$REPO_ROOT" "$RUN_STATEFUL_SCENARIOS" "$CKB_DIR" "$CKB_PIN_FILE" <<'PY'
 import hashlib
 import json
+import math
 import os
 import pathlib
 import re
