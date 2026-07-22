@@ -3033,7 +3033,7 @@ import urllib.request
 
 rpc_url, report_path, ckb_repo, ckb_bin, ckb_log, repo_root, run_stateful_scenarios, ckb_dir, ckb_pin_file = sys.argv[1:]
 report_path = pathlib.Path(report_path)
-ckb_repo = pathlib.Path(ckb_repo)
+ckb_repo = pathlib.Path(ckb_repo).resolve()
 repo_root = pathlib.Path(repo_root)
 ckb_dir = pathlib.Path(ckb_dir)
 ckb_pin_file = pathlib.Path(ckb_pin_file)
