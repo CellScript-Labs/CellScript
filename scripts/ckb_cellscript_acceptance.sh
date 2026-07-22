@@ -6485,15 +6485,16 @@ def build_stateful_action_branch_case(record, always_success_dep):
         )
     elif example == "nft.cell":
         destination_lock = always_success_lock()
+        destination_owner = decode_hex(script_hash(destination_lock), 32)
         case = build_nft_action_case(
             record,
             cellscript_lock,
             always_success_lock(),
             destination_lock,
             decode_hex(script_hash(cellscript_lock), 32),
-            decode_hex(script_hash(destination_lock), 32),
+            destination_owner,
             bytes(range(32)),
-            bytes(reversed(range(32))),
+            destination_owner,
             always_success_lock("0x21"),
             always_success_lock("0x22"),
             always_success_lock("0x23"),
@@ -6588,12 +6589,15 @@ def run_stateful_action_branch(record, always_success_dep):
     case = build_stateful_action_branch_case(record, always_success_dep)
     coverage_id = action_id(record)
     scenario = coverage_id.replace(":", ".") + ".stateful-branch"
-    step = run_stateful_step(
-        scenario,
-        "valid_action_branch",
-        case["valid_tx"],
-        consumed_cells_from_tx(case["valid_tx"]),
-    )
+    try:
+        step = run_stateful_step(
+            scenario,
+            "valid_action_branch",
+            case["valid_tx"],
+            consumed_cells_from_tx(case["valid_tx"]),
+        )
+    except Exception as error:
+        raise RuntimeError(f"stateful action branch failed for {coverage_id}: {error}") from error
     return {
         "name": scenario,
         "kind": "stateful-action-branch",
