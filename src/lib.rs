@@ -203,7 +203,7 @@ fn strict_capability_name(capability: ast::Capability) -> &'static str {
 
 const DEFAULT_TARGET: &str = "riscv64-asm";
 const DEFAULT_TARGET_PROFILE: &str = "ckb";
-const ARTIFACT_CACHE_VERSION: &str = "project-source-set-v5";
+const ARTIFACT_CACHE_VERSION: &str = "project-source-set-v8";
 pub const METADATA_SCHEMA_VERSION: u32 = 55;
 pub const SOURCE_METADATA_SCHEMA_VERSION: u32 = 1;
 pub const ARTIFACT_METADATA_SCHEMA_VERSION: u32 = 1;
@@ -3378,6 +3378,7 @@ fn is_known_ckb_runtime_syscall(syscall: &str) -> bool {
             | "CKB_SIGHASH_ALL"
             | "CAPACITY_POLICY"
             | "CKB_BLAKE2B"
+            | "SHA256"
             | "SPAWN"
             | "WAIT"
             | "PROCESS_ID"
@@ -3392,7 +3393,7 @@ fn is_known_ckb_runtime_syscall(syscall: &str) -> bool {
 fn ckb_runtime_syscall_allows_source(syscall: &str, source: &str) -> bool {
     match syscall {
         "LOAD_CELL" => matches!(source, "Input" | "Output" | "CellDep" | "GroupInput" | "GroupOutput"),
-        "LOAD_CELL_BY_FIELD" => matches!(source, "Input" | "Output" | "GroupInput" | "GroupOutput" | "SourceView"),
+        "LOAD_CELL_BY_FIELD" => matches!(source, "Input" | "Output" | "GroupInput" | "GroupOutput" | "CellDep" | "SourceView"),
         "LOAD_CELL_DATA" => {
             matches!(source, "Input" | "Output" | "GroupInput" | "GroupOutput" | "SourceView" | "GroupInput/GroupOutput")
         }
@@ -3418,6 +3419,7 @@ fn ckb_runtime_syscall_allows_source(syscall: &str, source: &str) -> bool {
         "LOAD_WITNESS_ARGS_OUTPUT_TYPE" => source == "GroupOutput",
         "CAPACITY_POLICY" => source == "Output",
         "CKB_BLAKE2B" => source == "Profile",
+        "SHA256" => source == "Profile",
         "SPAWN" => source == "CellDep",
         "WAIT" | "PROCESS_ID" | "PIPE" | "PIPE_WRITE" | "PIPE_READ" | "INHERITED_FD" | "CLOSE" => source == "Process",
         _ => false,
@@ -9789,10 +9791,11 @@ fn resource_conservation_launch_token_is_checked(
     };
     if !create_field_matches_param(pool_pattern, "token_a_symbol", "symbol", params, type_layouts, availability, 8)
         || !create_field_matches_param(pool_pattern, "reserve_a", "pool_seed_amount", params, type_layouts, availability, 8)
-        || !create_field_matches_param(pool_pattern, "total_lp", "pool_seed_amount", params, type_layouts, availability, 8)
         || !create_field_matches_param(pool_pattern, "fee_rate_bps", "fee_rate_bps", params, type_layouts, availability, 2)
         || !create_pattern_field_is_alias(body, pool_pattern, "token_b_symbol", "pool_paired_token", "symbol")
         || !create_pattern_field_is_alias(body, pool_pattern, "reserve_b", "pool_paired_token", "amount")
+        || !create_pattern_field_is_type_hash_of(body, pool_pattern, "token_a_type", "dist0")
+        || !create_pattern_field_is_type_hash_of(body, pool_pattern, "token_b_type", "pool_paired_token")
     {
         return false;
     }
@@ -9801,7 +9804,8 @@ fn resource_conservation_launch_token_is_checked(
     else {
         return false;
     };
-    create_field_matches_param(lp_pattern, "lp_amount", "pool_seed_amount", params, type_layouts, availability, 8)
+    metadata_can_verify_create_output_fields(lp_pattern, type_layouts, availability)
+        && pool_launch_token_lp_supply_invariant_is_checked(name, pool_pattern, body, type_layouts, availability)
 }
 
 fn resource_conservation_has_single_u64_amount_field(type_layouts: &MetadataTypeLayouts, type_name: &str) -> bool {
@@ -11150,6 +11154,45 @@ fn create_pattern_field_is_alias(
     operand_is_alias(body, operand, root_name, root_field)
 }
 
+fn create_pattern_field_is_type_hash_of(body: &ir::IrBody, pattern: &ir::CreatePattern, field: &str, binding: &str) -> bool {
+    let Some(operand) = create_pattern_field_operand(pattern, field) else {
+        return false;
+    };
+    let ir::IrOperand::Var(expected) = operand else {
+        return false;
+    };
+
+    let mut sources = HashMap::<usize, String>::new();
+    let mut stored_sources = HashMap::<String, String>::new();
+    for block in &body.blocks {
+        for instruction in &block.instructions {
+            match instruction {
+                ir::IrInstruction::TypeHash { dest, operand: ir::IrOperand::Var(source) } => {
+                    sources.insert(dest.id, source.name.clone());
+                }
+                ir::IrInstruction::Move { dest, src } => {
+                    if let Some(source) = type_hash_source(src, &sources) {
+                        sources.insert(dest.id, source);
+                    }
+                }
+                ir::IrInstruction::StoreVar { name, src } => {
+                    if let Some(source) = type_hash_source(src, &sources) {
+                        stored_sources.insert(name.clone(), source);
+                    }
+                }
+                ir::IrInstruction::LoadVar { dest, name } => {
+                    if let Some(source) = stored_sources.get(name).cloned() {
+                        sources.insert(dest.id, source);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    sources.get(&expected.id).is_some_and(|source| source == binding)
+}
+
 fn operand_is_alias(body: &ir::IrBody, operand: &ir::IrOperand, root_name: &str, field: &str) -> bool {
     let ir::IrOperand::Var(var) = operand else {
         return false;
@@ -11569,20 +11612,12 @@ fn pool_launch_token_lp_supply_invariant_is_checked(
     let Some(pool_total_lp) = create_pattern_field_operand(pool_pattern, "total_lp") else {
         return false;
     };
-    let Some(pool_reserve_a) = create_pattern_field_operand(pool_pattern, "reserve_a") else {
-        return false;
-    };
-    metadata_fixed_value_available_with_width(pool_total_lp, availability, 8)
-        && metadata_fixed_value_available_with_width(pool_reserve_a, availability, 8)
-        && ir_operands_same_verifier_source(pool_total_lp, pool_reserve_a)
-        && body.create_set.iter().any(|candidate| {
-            candidate.ty == "LPReceipt"
-                && metadata_can_verify_create_output_fields(candidate, type_layouts, availability)
-                && create_pattern_field_operand(candidate, "lp_amount").is_some_and(|receipt_lp| {
-                    metadata_fixed_value_available_with_width(receipt_lp, availability, 8)
-                        && ir_operands_same_verifier_source(pool_total_lp, receipt_lp)
-                })
-        })
+    body.create_set.iter().any(|candidate| {
+        candidate.ty == "LPReceipt"
+            && metadata_can_verify_create_output_fields(candidate, type_layouts, availability)
+            && create_pattern_field_operand(candidate, "lp_amount")
+                .is_some_and(|receipt_lp| ir_operands_same_verifier_source(pool_total_lp, receipt_lp))
+    })
 }
 
 fn pool_seed_token_pair_identity_admission_is_checked(name: &str, body: &ir::IrBody, pool_pattern: &ir::CreatePattern) -> bool {
@@ -13894,10 +13929,10 @@ fn metadata_prelude_availability(
                 }
                 ir::IrInstruction::Call { dest: Some(dest), func, args } if dest.ty == ir::IrType::Hash => {
                     let fixed_hash_result = match func.as_str() {
-                        "__ckb_hash_chain" | "__ckb_hash_blake2b" => {
+                        "__ckb_hash_chain" | "__ckb_hash_blake2b" | "__ckb_hash_sha256" | "__ckb_hash_sha256d" => {
                             args.first().is_some_and(|arg| metadata_fixed_value_available_with_width(arg, &availability, 32))
                         }
-                        "__ckb_hash_pair" => {
+                        "__ckb_hash_pair" | "__ckb_hash_sha256_pair" | "__ckb_hash_sha256d_pair" => {
                             args.len() == 2 && args.iter().all(|arg| metadata_fixed_value_available_with_width(arg, &availability, 32))
                         }
                         "__ckb_hash_blake2b_var" | "__ckb_hash_blake2b_packed" | "__ckb_hash_data_packed" => {
@@ -15269,9 +15304,18 @@ fn body_ckb_runtime_features(
                 ir::IrInstruction::Call { func, .. } if func.starts_with("__ckb_spawn") => {
                     features.insert("ckb-spawn-ipc".to_string());
                 }
-                ir::IrInstruction::Call { func, .. } if func == "__novaseal_bip340_require_signature" => {
+                ir::IrInstruction::Call { func, .. }
+                    if matches!(
+                        func.as_str(),
+                        "__novaseal_bip340_require_signature" | "__novaseal_bip340_require_signature_from_cell_dep"
+                    ) =>
+                {
                     features.insert("btc-bip340-runtime-verifier".to_string());
                     features.insert("ckb-spawn-ipc".to_string());
+                }
+                ir::IrInstruction::Call { func, .. } if func == "__ckb_require_bounded_cell_dep_data_hash" => {
+                    features.insert("ckb-bounded-cell-dep-scan".to_string());
+                    features.insert("ckb-cell-dep-data-hash-binding".to_string());
                 }
                 ir::IrInstruction::Call { func, .. }
                     if matches!(
@@ -15299,7 +15343,13 @@ fn body_ckb_runtime_features(
                 ir::IrInstruction::Call { func, .. } if func == "__ckb_require_witness_size_at_least" => {
                     features.insert("ckb-witness-args".to_string());
                 }
-                ir::IrInstruction::Call { func, .. } if func.starts_with("__ckb_require_") => {
+                ir::IrInstruction::Call { func, .. }
+                    if func.starts_with("__ckb_require_")
+                        && !matches!(
+                            func.as_str(),
+                            "__ckb_require_bounded_cell_dep_data_hash" | "__ckb_require_sha256d_merkle_root"
+                        ) =>
+                {
                     features.insert("ckb-declarative-since".to_string());
                 }
                 ir::IrInstruction::Call { func, .. } if func == "__ckb_occupied_capacity" => {
@@ -15314,6 +15364,22 @@ fn body_ckb_runtime_features(
                 }
                 ir::IrInstruction::Call { func, .. } if func == "__ckb_hash_blake2b" => {
                     features.insert("ckb-blake2b".to_string());
+                }
+                ir::IrInstruction::Call { func, .. }
+                    if matches!(
+                        func.as_str(),
+                        "__ckb_hash_sha256" | "__ckb_hash_sha256_pair" | "__ckb_hash_sha256d" | "__ckb_hash_sha256d_pair"
+                    ) =>
+                {
+                    features.insert("bounded-sha256".to_string());
+                    if matches!(func.as_str(), "__ckb_hash_sha256d" | "__ckb_hash_sha256d_pair") {
+                        features.insert("bounded-sha256d".to_string());
+                    }
+                }
+                ir::IrInstruction::Call { func, .. } if func == "__ckb_require_sha256d_merkle_root" => {
+                    features.insert("bounded-sha256".to_string());
+                    features.insert("bounded-sha256d".to_string());
+                    features.insert("bounded-sha256d-merkle-proof".to_string());
                 }
                 _ => {}
             }
@@ -15511,8 +15577,19 @@ fn body_ckb_runtime_accesses(
                     binding: "ckb::input_since".to_string(),
                 });
             }
-            if let ir::IrInstruction::Call { func, .. } = instruction {
-                if func == "__novaseal_bip340_require_signature" {
+            if let ir::IrInstruction::Call { func, args, .. } = instruction {
+                if matches!(func.as_str(), "__novaseal_bip340_require_signature" | "__novaseal_bip340_require_signature_from_cell_dep")
+                {
+                    let dep_index = if func == "__novaseal_bip340_require_signature_from_cell_dep" {
+                        args.first()
+                            .and_then(|arg| match arg {
+                                ir::IrOperand::Const(ir::IrConst::U64(value)) => usize::try_from(*value).ok(),
+                                _ => None,
+                            })
+                            .unwrap_or_default()
+                    } else {
+                        0
+                    };
                     accesses.extend([
                         CkbRuntimeAccessMetadata {
                             operation: "bip340-pipe".to_string(),
@@ -15525,8 +15602,12 @@ fn body_ckb_runtime_accesses(
                             operation: "bip340-spawn".to_string(),
                             syscall: "SPAWN".to_string(),
                             source: "CellDep".to_string(),
-                            index: 0,
-                            binding: "cellscript_btc_bip340_verifier_riscv".to_string(),
+                            index: dep_index,
+                            binding: if func == "__novaseal_bip340_require_signature_from_cell_dep" {
+                                "verifier::btc::bip340::require_signature_from_cell_dep".to_string()
+                            } else {
+                                "cellscript_btc_bip340_verifier_riscv".to_string()
+                            },
                         },
                         CkbRuntimeAccessMetadata {
                             operation: "bip340-pipe-write-18-words".to_string(),
@@ -15550,6 +15631,15 @@ fn body_ckb_runtime_accesses(
                             binding: "cellscript_btc_bip340_verifier_riscv".to_string(),
                         },
                     ]);
+                }
+                if func == "__ckb_require_bounded_cell_dep_data_hash" {
+                    accesses.push(CkbRuntimeAccessMetadata {
+                        operation: "bounded-cell-dep-data-hash-scan".to_string(),
+                        syscall: "LOAD_CELL_BY_FIELD".to_string(),
+                        source: "CellDep".to_string(),
+                        index: 0,
+                        binding: "ckb::require_bounded_cell_dep_data_hash".to_string(),
+                    });
                 }
                 if let Some((operation, syscall, source, binding)) = ckb_v014_runtime_access(func) {
                     accesses.push(CkbRuntimeAccessMetadata {
@@ -15778,6 +15868,12 @@ fn ckb_v014_runtime_access(func: &str) -> Option<(&'static str, &'static str, &'
         "__ckb_require_cell_type_hash" => {
             Some(("cell-type-hash-require", "LOAD_CELL_BY_FIELD", "SourceView", "ckb::require_cell_type_hash"))
         }
+        "__ckb_require_cell_data_hash" => {
+            Some(("cell-data-hash-require", "LOAD_CELL_BY_FIELD", "SourceView", "ckb::require_cell_data_hash"))
+        }
+        "__ckb_require_bounded_cell_dep_data_hash" => {
+            Some(("bounded-cell-dep-data-hash-scan", "LOAD_CELL_BY_FIELD", "CellDep", "ckb::require_bounded_cell_dep_data_hash"))
+        }
         "__ckb_require_cell_lock_args_empty" => {
             Some(("cell-lock-script-empty-args-require", "LOAD_CELL_BY_FIELD", "SourceView", "ckb::require_cell_lock_args_empty"))
         }
@@ -15917,6 +16013,13 @@ fn ckb_v014_runtime_access(func: &str) -> Option<(&'static str, &'static str, &'
         "__ckb_hash_chain" => Some(("hash-chain", "CKB_BLAKE2B", "Profile", "hash_chain")),
         "__ckb_hash_pair" => Some(("hash-pair", "CKB_BLAKE2B", "Profile", "hash_pair")),
         "__ckb_hash_blake2b" => Some(("hash-blake2b", "CKB_BLAKE2B", "Profile", "hash_blake2b")),
+        "__ckb_hash_sha256" => Some(("hash-sha256", "SHA256", "Profile", "ckb::hash_sha256")),
+        "__ckb_hash_sha256d" => Some(("hash-sha256d", "SHA256", "Profile", "ckb::hash_sha256d")),
+        "__ckb_hash_sha256_pair" => Some(("hash-sha256-pair", "SHA256", "Profile", "ckb::hash_sha256_pair")),
+        "__ckb_hash_sha256d_pair" => Some(("hash-sha256d-pair", "SHA256", "Profile", "ckb::hash_sha256d_pair")),
+        "__ckb_require_sha256d_merkle_root" => {
+            Some(("bounded-sha256d-merkle-proof", "SHA256", "Profile", "ckb::require_sha256d_merkle_root"))
+        }
         _ => None,
     }
 }
@@ -23341,9 +23444,11 @@ action verify_runtime_hashes(witness envelope: Envelope, witness expected: Hash)
         let source = r#"
 module bip340_ipc_words;
 
-action verify(witness message: Hash, witness pubkey: [u8; 32], witness signature: [u8; 64]) -> bool {
+action verify(witness verifier_data_hash: Hash, witness message: Hash, witness pubkey: [u8; 32], witness signature: [u8; 64]) -> bool {
     verification
-    verifier::btc::bip340::require_signature(message, pubkey, signature)
+    let verifier_dep = source::cell_dep(3)
+    ckb::require_cell_data_hash(verifier_dep, verifier_data_hash)
+    verifier::btc::bip340::require_signature_from_cell_dep(3, message, pubkey, signature)
     true
 }
 "#;
@@ -23384,10 +23489,98 @@ action verify(witness message: Hash, witness pubkey: [u8; 32], witness signature
             action.ckb_runtime_features
         );
         assert!(
+            action
+                .ckb_runtime_accesses
+                .iter()
+                .any(|access| access.operation == "bip340-spawn" && access.source == "CellDep" && access.index == 3),
+            "explicit verifier CellDep index must remain visible in metadata: {:?}",
+            action.ckb_runtime_accesses
+        );
+        assert!(
             action.proof_plan.iter().any(|plan| plan.feature.contains("bip340")),
             "BIP340 lowering must remain visible in ProofPlan: {:?}",
             action.proof_plan
         );
+    }
+
+    #[test]
+    fn compile_lowers_bounded_cell_dep_data_hash_scan() {
+        let source = r#"
+module bounded_cell_dep_scan;
+
+action verify(witness expected: Hash) -> bool {
+    verification
+    ckb::require_bounded_cell_dep_data_hash(8, expected)
+    true
+}
+"#;
+        let result = compile(source, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() }).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+        let action = result.metadata.actions.iter().find(|action| action.name == "verify").expect("verify metadata");
+
+        assert!(
+            asm.contains("call __ckb_require_bounded_cell_dep_data_hash")
+                && asm.contains("scan resolved CellDeps with LOAD_CELL_BY_FIELD")
+                && asm.contains("cellscript runtime error 63 bounded-cell-dep-not-found"),
+            "bounded CellDep scan and stable failure code must remain visible:\n{asm}"
+        );
+        assert!(
+            action.ckb_runtime_features.iter().any(|feature| feature == "ckb-bounded-cell-dep-scan")
+                && action.ckb_runtime_features.iter().any(|feature| feature == "ckb-cell-dep-data-hash-binding"),
+            "bounded CellDep features missing from metadata: {:?}",
+            action.ckb_runtime_features
+        );
+        assert!(
+            action
+                .ckb_runtime_accesses
+                .iter()
+                .any(|access| access.operation == "bounded-cell-dep-data-hash-scan" && access.source == "CellDep"),
+            "bounded CellDep access missing from metadata: {:?}",
+            action.ckb_runtime_accesses
+        );
+    }
+
+    #[test]
+    fn compile_lowers_bounded_sha256_and_merkle_primitives_to_elf() {
+        let source = r#"
+module bounded_sha256;
+
+action verify(
+    witness input: Hash,
+    witness other: Hash,
+    witness siblings: [Hash; 16],
+    witness expected_sha256: Hash,
+    witness expected_sha256d: Hash,
+    witness expected_pair: Hash,
+    witness expected_root: Hash,
+) -> bool {
+    verification
+    require ckb::hash_sha256(input) == expected_sha256
+    require ckb::hash_sha256d(input) == expected_sha256d
+    require ckb::hash_sha256d_pair(input, other) == expected_pair
+    ckb::require_sha256d_merkle_root(input, siblings, 0, 0, expected_root)
+    true
+}
+"#;
+        let result = compile(
+            source,
+            CompileOptions {
+                target: Some("riscv64-elf".to_string()),
+                target_profile: Some("ckb".to_string()),
+                ..CompileOptions::default()
+            },
+        )
+        .unwrap();
+        let action = result.metadata.actions.iter().find(|action| action.name == "verify").expect("verify metadata");
+
+        assert!(result.artifact_bytes.starts_with(b"\x7fELF"), "SHA-256 helpers must assemble into a RISC-V ELF");
+        for feature in ["bounded-sha256", "bounded-sha256d", "bounded-sha256d-merkle-proof"] {
+            assert!(
+                action.ckb_runtime_features.iter().any(|candidate| candidate == feature),
+                "missing {feature} in runtime features: {:?}",
+                action.ckb_runtime_features
+            );
+        }
     }
 
     #[test]

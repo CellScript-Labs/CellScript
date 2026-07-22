@@ -77,6 +77,28 @@ also lowers to an executable in-script RISC-V Blake2b-256 helper for 32-byte
 digest inputs. It does not claim arbitrary byte-slice or resource serialization
 hashing.
 
+For protocols that require Bitcoin-style hashing, the bounded executable
+surface is separate and fixed-width:
+
+```cellscript
+let digest = ckb::hash_sha256(value_hash)
+let double_digest = ckb::hash_sha256d(value_hash)
+let parent = ckb::hash_sha256d_pair(left_hash, right_hash)
+ckb::require_sha256d_merkle_root(leaf, siblings, 12, leaf_index, expected_root)
+```
+
+Single-value helpers accept exactly 32 bytes, pair helpers concatenate exactly
+two 32-byte values, and the Merkle helper accepts `[Hash; 16]` with a literal
+depth in `0..=16`. Byte order is caller-owned. These helpers do not validate
+Bitcoin headers, PoW/difficulty, confirmations, reorgs, or an RGB++ witness.
+
+Verifier dependencies can be bound in-script by resolved index with
+`ckb::require_cell_data_hash(source::cell_dep(index), expected_hash)`, or found
+within a literal `1..=64` bound with
+`ckb::require_bounded_cell_dep_data_hash`. The manifest/builder must still pin
+the out point and `dep_type`; a VM scan sees the resolved CellDep sequence and
+cannot prove which DepGroup container produced it.
+
 ## Constraints Output
 
 `cellc constraints --target-profile ckb` emits:

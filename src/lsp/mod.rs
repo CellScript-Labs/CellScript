@@ -651,6 +651,19 @@ impl LspServer {
                     ("cell_type_args_hash", "ckb::cell_type_args_hash(${1:source::group_input(0)})"),
                     ("require_cell_lock_hash", "ckb::require_cell_lock_hash(${1:source::group_input(0)}, ${2:expected_lock_hash})"),
                     ("require_cell_type_hash", "ckb::require_cell_type_hash(${1:source::group_input(0)}, ${2:expected_type_hash})"),
+                    ("require_cell_data_hash", "ckb::require_cell_data_hash(${1:source::cell_dep(0)}, ${2:expected_data_hash})"),
+                    (
+                        "require_bounded_cell_dep_data_hash",
+                        "ckb::require_bounded_cell_dep_data_hash(${1:8}, ${2:expected_data_hash})",
+                    ),
+                    ("hash_sha256", "ckb::hash_sha256(${1:input})"),
+                    ("hash_sha256d", "ckb::hash_sha256d(${1:input})"),
+                    ("hash_sha256_pair", "ckb::hash_sha256_pair(${1:left}, ${2:right})"),
+                    ("hash_sha256d_pair", "ckb::hash_sha256d_pair(${1:left}, ${2:right})"),
+                    (
+                        "require_sha256d_merkle_root",
+                        "ckb::require_sha256d_merkle_root(${1:leaf}, ${2:siblings}, ${3:depth}, ${4:leaf_index}, ${5:expected_root})",
+                    ),
                     ("require_current_script_args_empty", "ckb::require_current_script_args_empty()"),
                     ("require_cell_lock_args_empty", "ckb::require_cell_lock_args_empty(${1:source::group_input(0)})"),
                     ("require_cell_type_args_empty", "ckb::require_cell_type_args_empty(${1:source::group_input(0)})"),
@@ -734,6 +747,27 @@ impl LspServer {
                         label: name.to_string(),
                         kind: CompletionItemKind::Function,
                         detail: Some(format!("ckb::{}", name)),
+                        documentation: None,
+                        insert_text: Some(insert.to_string()),
+                    });
+                }
+                return items;
+            }
+            "verifier::btc::bip340" => {
+                for (name, insert) in [
+                    (
+                        "require_signature",
+                        "verifier::btc::bip340::require_signature(${1:message_hash}, ${2:pubkey}, ${3:signature})",
+                    ),
+                    (
+                        "require_signature_from_cell_dep",
+                        "verifier::btc::bip340::require_signature_from_cell_dep(${1:dep_index}, ${2:message_hash}, ${3:pubkey}, ${4:signature})",
+                    ),
+                ] {
+                    items.push(CompletionItem {
+                        label: name.to_string(),
+                        kind: CompletionItemKind::Function,
+                        detail: Some(format!("verifier::btc::bip340::{}", name)),
                         documentation: None,
                         insert_text: Some(insert.to_string()),
                     });
@@ -2866,6 +2900,12 @@ mod tests {
         assert!(ckb.iter().any(|item| item.label == "require_cell_lock_args_prefix_hash"));
         assert!(ckb.iter().any(|item| item.label == "require_cell_type_args_suffix_hash"));
         assert!(ckb.iter().any(|item| item.label == "require_cell_lock_args_empty"));
+        assert!(ckb.iter().any(|item| item.label == "require_bounded_cell_dep_data_hash"));
+        assert!(ckb.iter().any(|item| item.label == "hash_sha256d"));
+        assert!(ckb.iter().any(|item| item.label == "require_sha256d_merkle_root"));
+
+        let bip340 = server.member_completions("file:///test.cell", "verifier::btc::bip340");
+        assert!(bip340.iter().any(|item| item.label == "require_signature_from_cell_dep"));
 
         let dao = server.member_completions("file:///test.cell", "dao");
         assert!(dao.iter().any(|item| item.label == "require_input_relative_epoch_since_at_least"));

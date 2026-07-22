@@ -1,0 +1,18 @@
+module cellscript::ecosystem::spore_identity_adapter
+
+// This composition lock binds one transfer-shaped transaction to an exact
+// Spore Type Script identity. The selected code_hash/hash_type/Spore ID live
+// in this lock's Script.args; they are not accepted from witness data.
+lock require_spore_transfer_identity(
+    lock_args spore_code_hash: Hash,
+    lock_args spore_hash_type: u64,
+    lock_args spore_id: [u8; 32],
+) -> bool {
+    verification
+        let spore_input = source::input(0)
+        let spore_output = source::output(0)
+        let expected_spore_type = script::new(spore_code_hash, spore_hash_type, script::args(spore_id))
+        script::require_cell_type_matches(spore_input, expected_spore_type)
+        script::require_cell_type_matches(spore_output, expected_spore_type)
+        true
+}

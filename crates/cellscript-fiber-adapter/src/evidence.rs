@@ -5,8 +5,10 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use std::{
-    fs,
+    fs::{self, OpenOptions},
+    io::Write,
     path::{Component, Path},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -341,7 +343,11 @@ impl EvidenceReference {
             anyhow::bail!("Fiber evidence path must be a normalized relative path: {}", self.path);
         }
         canonical_hex(&self.blake2b_256, Some(32), "evidence.blake2b_256")?;
-        let mut path = root.to_path_buf();
+        let root_metadata = fs::symlink_metadata(root)?;
+        if root_metadata.file_type().is_symlink() || !root_metadata.is_dir() {
+            anyhow::bail!("Fiber evidence root must be a real directory, not a symlink: {}", root.display());
+        }
+        let mut path = fs::canonicalize(root)?;
         for component in relative.components() {
             let Component::Normal(component) = component else {
                 unreachable!("evidence path components were validated above");
@@ -521,10 +527,32 @@ pub fn write_json_atomic(path: impl AsRef<Path>, value: &impl Serialize) -> anyh
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let temp = path.with_extension(format!("{}.tmp", path.extension().and_then(|value| value.to_str()).unwrap_or("json")));
     let bytes = serde_json::to_vec_pretty(value)?;
-    fs::write(&temp, bytes)?;
-    fs::rename(&temp, path)?;
+    let nonce = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+    let original_extension = path.extension().and_then(|value| value.to_str()).unwrap_or("json");
+    let mut opened = None;
+    for attempt in 0..16u8 {
+        let temp = path.with_extension(format!("{original_extension}.tmp-{}-{nonce}-{attempt}", std::process::id()));
+        match OpenOptions::new().write(true).create_new(true).open(&temp) {
+            Ok(file) => {
+                opened = Some((temp, file));
+                break;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error.into()),
+        }
+    }
+    let (temp, mut file) = opened.ok_or_else(|| anyhow::anyhow!("unable to create a unique temporary evidence file"))?;
+    if let Err(error) = file.write_all(&bytes).and_then(|()| file.sync_all()) {
+        drop(file);
+        let _ = fs::remove_file(&temp);
+        return Err(error.into());
+    }
+    drop(file);
+    if let Err(error) = fs::rename(&temp, path) {
+        let _ = fs::remove_file(&temp);
+        return Err(error.into());
+    }
     Ok(())
 }
 
@@ -638,7 +666,7 @@ mod tests {
         tampered.blake2b_256 = format!("0x{}", "00".repeat(32));
         assert!(tampered.validate(root.path()).is_err());
 
-        let escaped = EvidenceReference { path: "../row.log".to_string(), blake2b_256: valid.blake2b_256 };
+        let escaped = EvidenceReference { path: "../row.log".to_string(), blake2b_256: valid.blake2b_256.clone() };
         assert!(escaped.validate(root.path()).is_err());
 
         #[cfg(unix)]
@@ -649,6 +677,10 @@ mod tests {
                 blake2b_256: format!("0x{}", hex::encode(cellscript::ckb_blake2b256(bytes))),
             };
             assert!(linked.validate(root.path()).is_err());
+
+            let root_link = tempfile::tempdir().unwrap();
+            std::os::unix::fs::symlink(root.path(), root_link.path().join("evidence-root")).unwrap();
+            assert!(valid.validate(&root_link.path().join("evidence-root")).is_err());
         }
     }
 
@@ -673,5 +705,20 @@ mod tests {
             blake2b_256: format!("0x{}", hex::encode(cellscript::ckb_blake2b256(bytes))),
         });
         report.validate_evidence(root.path()).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_json_write_does_not_follow_the_legacy_temp_symlink() {
+        let root = tempfile::tempdir().unwrap();
+        let victim = root.path().join("victim.txt");
+        fs::write(&victim, b"do not overwrite").unwrap();
+        let report = root.path().join("report.json");
+        std::os::unix::fs::symlink(&victim, root.path().join("report.json.tmp")).unwrap();
+
+        write_json_atomic(&report, &serde_json::json!({"ok": true})).unwrap();
+
+        assert_eq!(fs::read(&victim).unwrap(), b"do not overwrite");
+        assert_eq!(serde_json::from_slice::<serde_json::Value>(&fs::read(report).unwrap()).unwrap(), serde_json::json!({"ok": true}));
     }
 }

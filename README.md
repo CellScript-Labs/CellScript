@@ -5,7 +5,7 @@
 
 [![CellScript CI](https://github.com/CellScript-Labs/CellScript/actions/workflows/ci.yml/badge.svg)](https://github.com/CellScript-Labs/CellScript/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE-MIT)
-[![Rust 1.92+](https://img.shields.io/badge/rust-1.92%2B-orange.svg)](Cargo.toml)
+[![Rust 1.97.1](https://img.shields.io/badge/rust-1.97.1-orange.svg)](Cargo.toml)
 [![Targets: CKB](https://img.shields.io/badge/targets-CKB-2f6f4e.svg)](#target-profiles)
 [![Package Workflow: Local First](https://img.shields.io/badge/package%20workflow-local%20first-2f6f4e.svg)](#package-workflow)
 [![LSP: Local Tooling](https://img.shields.io/badge/LSP-local%20tooling-2f6f4e.svg)](#editor-support)
@@ -60,6 +60,10 @@ It is suitable for:
   checks;
 - statically checking the experimental no-profile Fiber-compatible fungible
   invariant entry and running its local CKB-VM matrix;
+- using bounded resolved-CellDep identity checks, fixed-width SHA-256/SHA256d,
+  depth-16 Merkle verification, and an explicit BIP340 verifier-CellDep ABI;
+- extending the non-production Spore and RGB++ identity-adapter cookbook
+  packages without moving either protocol into the core namespace;
 - trying the local VS Code extension and LSP tooling.
 
 It is not yet recommended for unaudited mainnet deployment without manual
@@ -254,6 +258,14 @@ transformations:
   source roots, and local path dependencies.
 - **Policy gates** — build, check, metadata, and artifact verification can
   reject outputs that violate the selected target or deployment policy.
+- **Bounded CKB primitives** — exact/bounded resolved-CellDep data-hash checks,
+  fixed 32-byte SHA-256/SHA256d and 64-byte pair hashing, and depth-16 SHA256d
+  Merkle paths lower to executable CKB-VM helpers with stable failures.
+- **Explicit external signature verification** —
+  `verifier::btc::bip340::require_signature_from_cell_dep` spawns a pinned
+  verifier dependency through a fixed VM2 IPC ABI. Message domain, sighash,
+  witness selection, authority binding, and replay policy remain visible
+  application responsibilities.
 
 ## Example
 
@@ -397,11 +409,11 @@ action burn(token: Token) {
 | Example | What it shows |
 |---|---|
 | `examples/token.cell` | Mint, transfer, burn, guarded same-symbol merge |
-| `examples/timelock.cell` | Time-gated release checks, delayed claim paths |
-| `examples/multisig.cell` | Authorization thresholds, signature-oriented locks |
-| `examples/nft.cell` | Unique assets, metadata, ownership transfer |
-| `examples/vesting.cell` | Receipt-style grants and explicit claim state transitions |
-| `examples/amm_pool.cell` | Shared pool state, swap/liquidity effects |
+| `examples/timelock.cell` | HeaderDep timepoints and Token-backed normal/emergency release paths |
+| `examples/multisig.cell` | Non-cryptographic threshold approvals; real custody remains the surrounding Lock Script's responsibility |
+| `examples/nft.cell` | Collection-bound assets, ownership transfer, and typed Token settlement |
+| `examples/vesting.cell` | Receipt-style grants, repeatable partial claims, and terminal full claims |
+| `examples/amm_pool.cell` | TypeHash-bound shared pool state and swap/liquidity effects |
 | `examples/launch.cell` | Mint-authority bootstrap and launch/pool composition patterns |
 
 Non-production language examples live under `examples/language/`. They compile
@@ -470,11 +482,15 @@ or CellFabric intent engine.
 - [VS Code extension](editors/vscode-cellscript)
 - [Runtime error codes](docs/CELLSCRIPT_RUNTIME_ERROR_CODES.md)
 - [Entry witness ABI](docs/CELLSCRIPT_ENTRY_WITNESS_ABI.md)
+- [BIP340 verifier CellDep ABI](docs/CELLSCRIPT_SIGNATURE_VERIFIER_ABI.md)
 - [Collections support matrix](docs/CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md)
 - [Output bindings](docs/CELLSCRIPT_OUTPUT_BINDINGS.md)
 - [Historical signature-direction execution plan](docs/archive/0.13/CELLSCRIPT_SIGNATURE_DIRECTION_EXECUTION_PLAN.md)
 - [CKB target profile tutorial](docs/wiki/Tutorial-05-CKB-Target-Profiles.md)
 - [CKB deployment manifest](docs/CELLSCRIPT_CKB_DEPLOYMENT_MANIFEST.md)
+- [Spore and RGB++ interoperability boundaries](docs/wiki/Spore-and-RGBPP-Interop-Boundaries.md)
+- [Spore identity adapter](examples/ecosystem/spore-identity-adapter)
+- [RGB++ identity adapter](examples/ecosystem/rgbpp-identity-adapter)
 - [Capacity and builder contract](docs/CELLSCRIPT_CAPACITY_AND_BUILDER_CONTRACT.md)
 - [CKB adapter boundary](docs/CELLSCRIPT_CKB_ADAPTER.md)
 - [ckb-std compatibility](docs/CELLSCRIPT_CKB_STD_COMPAT.md)
@@ -565,8 +581,9 @@ action `transition` clauses, and all statement/expression forms.
 **5. Code generation** (`codegen/`)
 Emits ckb-vm-compatible RISC-V assembly (`.s`) or ELF (`.elf`):
 - Syscall wrappers: `ckb_load_cell_data`, `ckb_load_witness`,
-  `ckb_load_header_by_field`, `ckb_load_input_by_field`, and CKB extension
-  syscalls (`secp256k1_verify`, `load_ecdsa_signature_hash`).
+  `ckb_load_header_by_field`, and `ckb_load_input_by_field`. Signature
+  verification is not a CKB-VM syscall and remains an explicit Lock Script or
+  pinned verifier-package responsibility.
 - Cell input/output/dep index mapping, witness ABI frames, runtime scratch
   buffers, and per-entrypoint trampolines.
 - CKB syscall ABI with proper syscall number tables and source-flag conventions.

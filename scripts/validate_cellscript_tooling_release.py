@@ -76,7 +76,7 @@ def main() -> int:
     require('"--primitive-strict", "0.16"' in ckb_acceptance, "CKB acceptance runner must use the current 0.16 assurance gate")
     require("ORIGINAL_SCOPED_ACTION_FAIL_CLOSED = {}" in ckb_acceptance, "CKB acceptance runner must keep token/AMM/launch out of strict 0.16 fail-closed coverage")
     require('"token.cell": ["mint_with_authority", "transfer_token", "burn", "merge"]' in ckb_acceptance, "CKB acceptance runner must compile token actions as original strict scoped actions")
-    require('"amm_pool.cell": ["seed_pool", "swap_a_for_b", "add_liquidity", "remove_liquidity", "isqrt", "min"]' in ckb_acceptance, "CKB acceptance runner must compile AMM actions as original strict scoped actions")
+    require('"amm_pool.cell": ["seed_pool", "swap_a_for_b", "add_liquidity", "remove_liquidity"]' in ckb_acceptance, "CKB acceptance runner must compile AMM actions as original strict scoped actions")
     require('"launch.cell": ["launch_token", "bootstrap_token"]' in ckb_acceptance, "CKB acceptance runner must compile launch actions as original strict scoped actions")
 
     tutorial_08 = read("docs/wiki/Tutorial-08-Bundled-Example-Contracts.md")

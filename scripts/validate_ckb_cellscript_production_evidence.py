@@ -47,12 +47,15 @@ EXPECTED_LANGUAGE_EXAMPLES = [
     "v0_14_witness_source.cell",
     "v0_15_identity_lifecycle.cell",
     "v0_15_scoped_invariant.cell",
+    "v0_22_borrow.cell",
+    "v0_22_bounded_lifecycle.cell",
+    "v0_22_transaction_views.cell",
 ]
-EXPECTED_ACTION_COUNT = 44
+EXPECTED_ACTION_COUNT = 43
 EXPECTED_STATUS = "passed"
 EXPECTED_MODE = "production"
 EXPECTED_LOCK_SPEND_MATRIX = {
-    "multisig.cell": ["is_signer_lock", "can_execute", "can_cancel", "has_enough_signatures", "not_expired"],
+    "multisig.cell": ["is_signer_lock", "can_execute", "can_cancel", "has_enough_approvals", "not_expired"],
     "nft.cell": ["nft_ownership", "listing_seller", "offer_buyer", "valid_royalty", "collection_creator"],
     "timelock.cell": ["can_unlock_lock", "is_owner", "lock_id_commitment", "asset_matches", "not_expired", "emergency_approved"],
     "vesting.cell": ["vesting_admin"],
@@ -104,15 +107,15 @@ EXPECTED_ACTIONS_BY_RUN_KEY = {
     "multisig_action_runs": [
         "create_wallet",
         "propose_transfer",
-        "add_signature",
+        "record_approval",
         "execute_proposal",
         "cancel_proposal",
         "propose_add_signer",
         "propose_remove_signer",
         "propose_change_threshold",
     ],
-    "vesting_action_runs": ["create_vesting_config", "grant_vesting", "claim_vested", "revoke_grant"],
-    "amm_action_runs": ["seed_pool", "swap_a_for_b", "add_liquidity", "remove_liquidity", "isqrt", "min"],
+    "vesting_action_runs": ["create_vesting_config", "grant_vesting", "claim_vested", "claim_fully_vested", "revoke_grant"],
+    "amm_action_runs": ["seed_pool", "swap_a_for_b", "add_liquidity", "remove_liquidity"],
     "launch_action_runs": ["launch_token", "bootstrap_token"],
 }
 

@@ -1,5 +1,13 @@
 module cellscript::multisig
 
+// Threshold-approval workflow, not a cryptographic custody multisig.
+// Approver addresses and timestamps are entry-witness data. The surrounding
+// Lock Script must authenticate authority, and a HeaderDep-backed policy must
+// authenticate time. CellScript 0.22 has no implicit signer, but packages that
+// need cryptographic custody can call the explicit BIP340 CellDep verifier ABI.
+// This example deliberately stops at an approval record and does not transfer
+// assets or mutate signer configuration by itself.
+
 const MIN_SIGNERS: u8 = 2
 
 const MAX_SIGNERS: u8 = 10
@@ -21,7 +29,7 @@ enum OperationType {
     Custom,
 }
 
-resource MultisigWallet has store {
+resource MultisigWallet has store, create, replace, read_ref {
     wallet_id: Hash,
     signers: Vec<Address>,
     threshold: u8,
@@ -37,32 +45,31 @@ receipt Proposal has create, consume, replace, burn {
     target: Address,
     amount: u64,
     data: Vec<u8>,
-    required_signatures: u8,
-    signatures: Vec<Signature>,
+    required_approvals: u8,
+    approvals: Vec<Approval>,
     created_at: u64,
     expires_at: u64,
     state: ProposalStatus,
 }
 
-struct Signature {
-    signer: Address,
-    signature: [u8; 64],
+struct Approval {
+    approver: Address,
 }
 
-receipt SignatureConfirmation {
+receipt ApprovalConfirmation has create {
     proposal_id: u64,
-    signer: Address,
-    timestamp: u64,
+    approver: Address,
+    reported_at: u64,
 }
 
-receipt ExecutionRecord {
+receipt ExecutionRecord has create {
     proposal_id: u64,
     executor: Address,
     executed_at: u64,
     success: bool,
 }
 
-action create_wallet(wallet_id: Hash, signers: Vec<Address>, threshold: u8, current_time: u64) -> wallet: MultisigWallet {
+action create_wallet(wallet_id: Hash, signers: Vec<Address>, threshold: u8, reported_time: u64) -> wallet: MultisigWallet {
     verification
         require signers.len() >= MIN_SIGNERS as usize, "Not enough signers"
         require signers.len() <= MAX_SIGNERS as usize, "Too many signers"
@@ -72,10 +79,10 @@ action create_wallet(wallet_id: Hash, signers: Vec<Address>, threshold: u8, curr
                 require signers[i] != signers[j], "Duplicate signer"
             }
         }
-        create wallet = MultisigWallet { wallet_id, signers, threshold, nonce: 0, created_at: current_time }
+        create wallet = MultisigWallet { wallet_id, signers, threshold, nonce: 0, created_at: reported_time }
 
 }
-action propose_transfer(wallet_before: MultisigWallet, proposer: Address, target: Address, amount: u64, current_time: u64) -> (wallet_after: MultisigWallet, proposal: Proposal) {
+action propose_transfer(wallet_before: MultisigWallet, proposer: Address, target: Address, amount: u64, reported_time: u64) -> (wallet_after: MultisigWallet, proposal: Proposal) {
     verification
         require is_signer(&wallet_before, proposer), "Not a signer"
         require amount > 0, "Amount must be positive"
@@ -86,14 +93,14 @@ action propose_transfer(wallet_before: MultisigWallet, proposer: Address, target
         require wallet_after.threshold == wallet_before.threshold
         require wallet_after.nonce == proposal_id
         require wallet_after.created_at == wallet_before.created_at
-        create proposal = Proposal { wallet_id: wallet_before.wallet_id, proposal_id, proposer, operation: OperationType::Transfer, target, amount, data: [], required_signatures: wallet_before.threshold, signatures: [], created_at: current_time, expires_at: current_time + DEFAULT_TIMEOUT, state: ProposalStatus::Pending }
+        create proposal = Proposal { wallet_id: wallet_before.wallet_id, proposal_id, proposer, operation: OperationType::Transfer, target, amount, data: [], required_approvals: wallet_before.threshold, approvals: [], created_at: reported_time, expires_at: reported_time + DEFAULT_TIMEOUT, state: ProposalStatus::Pending }
 
 }
-action add_signature(proposal_before: Proposal, read wallet: MultisigWallet, signer: Address, signature: [u8; 64], current_time: u64) -> (proposal_after: Proposal, confirmation: SignatureConfirmation) {
+action record_approval(proposal_before: Proposal, read wallet: MultisigWallet, approver: Address, reported_time: u64) -> (proposal_after: Proposal, confirmation: ApprovalConfirmation) {
     verification
-        require current_time < proposal_before.expires_at, "Proposal expired"
-        require is_signer(wallet, signer), "Not a signer"
-        require !has_signed(&proposal_before, signer), "Already signed"
+        require reported_time < proposal_before.expires_at, "Reported approval time is outside the proposal window"
+        require is_signer(wallet, approver), "Approver is not a configured member"
+        require !has_approved(&proposal_before, approver), "Already approved"
         require proposal_after.wallet_id == proposal_before.wallet_id
         require proposal_after.proposal_id == proposal_before.proposal_id
         require proposal_after.proposer == proposal_before.proposer
@@ -101,23 +108,26 @@ action add_signature(proposal_before: Proposal, read wallet: MultisigWallet, sig
         require proposal_after.target == proposal_before.target
         require proposal_after.amount == proposal_before.amount
         require proposal_after.data == proposal_before.data
-        require proposal_after.required_signatures == proposal_before.required_signatures
-        require proposal_after.signatures.len() == proposal_before.signatures.len() + 1
+        require proposal_after.required_approvals == proposal_before.required_approvals
+        require proposal_after.approvals.len() == proposal_before.approvals.len() + 1
+        for i in 0..proposal_before.approvals.len() {
+            require proposal_after.approvals[i].approver == proposal_before.approvals[i].approver, "Existing approvals changed"
+        }
+        require proposal_after.approvals[proposal_before.approvals.len()].approver == approver
         require proposal_after.created_at == proposal_before.created_at
         require proposal_after.expires_at == proposal_before.expires_at
         require proposal_after.state == proposal_before.state
-        create confirmation = SignatureConfirmation { proposal_id: proposal_before.proposal_id, signer, timestamp: current_time }
+        create confirmation = ApprovalConfirmation { proposal_id: proposal_before.proposal_id, approver, reported_at: reported_time }
 
 }
-action execute_proposal(read wallet: MultisigWallet, proposal: Proposal, executor: Address, current_time: u64) -> record: ExecutionRecord {
+action execute_proposal(read wallet: MultisigWallet, proposal: Proposal, executor: Address, reported_time: u64) -> record: ExecutionRecord {
     verification
         require is_signer(wallet, executor), "Not a signer"
-        require current_time < proposal.expires_at, "Proposal expired"
-        require proposal.signatures.len() >= proposal.required_signatures as usize, "Not enough signatures"
+        require reported_time < proposal.expires_at, "Reported execution time is outside the proposal window"
+        require proposal.approvals.len() >= proposal.required_approvals as usize, "Not enough recorded approvals"
         require proposal.wallet_id == wallet.wallet_id, "Wallet mismatch"
-        let success = match proposal.operation { OperationType::Transfer => { true }, _ => { false } }
         destroy proposal
-        create record = ExecutionRecord { proposal_id: proposal.proposal_id, executor, executed_at: current_time, success }
+        create record = ExecutionRecord { proposal_id: proposal.proposal_id, executor, executed_at: reported_time, success: true }
 
 }
 action cancel_proposal(read wallet: MultisigWallet, proposal: Proposal, canceller: Address) {
@@ -127,7 +137,7 @@ action cancel_proposal(read wallet: MultisigWallet, proposal: Proposal, cancelle
         destroy proposal
 
 }
-action propose_add_signer(wallet_before: MultisigWallet, proposer: Address, new_signer: Address, current_time: u64) -> (wallet_after: MultisigWallet, proposal: Proposal) {
+action propose_add_signer(wallet_before: MultisigWallet, proposer: Address, new_signer: Address, reported_time: u64) -> (wallet_after: MultisigWallet, proposal: Proposal) {
     verification
         require is_signer(&wallet_before, proposer), "Not a signer"
         require !is_signer(&wallet_before, new_signer), "Already a signer"
@@ -140,10 +150,10 @@ action propose_add_signer(wallet_before: MultisigWallet, proposer: Address, new_
         require wallet_after.created_at == wallet_before.created_at
         let mut data: Vec<u8> = []
         data.extend_from_slice(&new_signer.0)
-        create proposal = Proposal { wallet_id: wallet_before.wallet_id, proposal_id, proposer, operation: OperationType::AddSigner, target: new_signer, amount: 0, data, required_signatures: wallet_before.threshold, signatures: [], created_at: current_time, expires_at: current_time + DEFAULT_TIMEOUT, state: ProposalStatus::Pending }
+        create proposal = Proposal { wallet_id: wallet_before.wallet_id, proposal_id, proposer, operation: OperationType::AddSigner, target: new_signer, amount: 0, data, required_approvals: wallet_before.threshold, approvals: [], created_at: reported_time, expires_at: reported_time + DEFAULT_TIMEOUT, state: ProposalStatus::Pending }
 
 }
-action propose_remove_signer(wallet_before: MultisigWallet, proposer: Address, signer_to_remove: Address, current_time: u64) -> (wallet_after: MultisigWallet, proposal: Proposal) {
+action propose_remove_signer(wallet_before: MultisigWallet, proposer: Address, signer_to_remove: Address, reported_time: u64) -> (wallet_after: MultisigWallet, proposal: Proposal) {
     verification
         require is_signer(&wallet_before, proposer), "Not a signer"
         require is_signer(&wallet_before, signer_to_remove), "Not a signer"
@@ -154,10 +164,10 @@ action propose_remove_signer(wallet_before: MultisigWallet, proposer: Address, s
         require wallet_after.threshold == wallet_before.threshold
         require wallet_after.nonce == proposal_id
         require wallet_after.created_at == wallet_before.created_at
-        create proposal = Proposal { wallet_id: wallet_before.wallet_id, proposal_id, proposer, operation: OperationType::RemoveSigner, target: signer_to_remove, amount: 0, data: [], required_signatures: wallet_before.threshold, signatures: [], created_at: current_time, expires_at: current_time + DEFAULT_TIMEOUT, state: ProposalStatus::Pending }
+        create proposal = Proposal { wallet_id: wallet_before.wallet_id, proposal_id, proposer, operation: OperationType::RemoveSigner, target: signer_to_remove, amount: 0, data: [], required_approvals: wallet_before.threshold, approvals: [], created_at: reported_time, expires_at: reported_time + DEFAULT_TIMEOUT, state: ProposalStatus::Pending }
 
 }
-action propose_change_threshold(wallet_before: MultisigWallet, proposer: Address, new_threshold: u8, current_time: u64) -> (wallet_after: MultisigWallet, proposal: Proposal) {
+action propose_change_threshold(wallet_before: MultisigWallet, proposer: Address, new_threshold: u8, reported_time: u64) -> (wallet_after: MultisigWallet, proposal: Proposal) {
     verification
         require is_signer(&wallet_before, proposer), "Not a signer"
         require new_threshold >= MIN_SIGNERS && new_threshold <= wallet_before.signers.len() as u8, "Invalid threshold"
@@ -169,7 +179,7 @@ action propose_change_threshold(wallet_before: MultisigWallet, proposer: Address
         require wallet_after.created_at == wallet_before.created_at
         let mut data: Vec<u8> = []
         data.push(new_threshold)
-        create proposal = Proposal { wallet_id: wallet_before.wallet_id, proposal_id, proposer, operation: OperationType::ChangeThreshold, target: Address::zero(), amount: new_threshold as u64, data, required_signatures: wallet_before.threshold, signatures: [], created_at: current_time, expires_at: current_time + DEFAULT_TIMEOUT, state: ProposalStatus::Pending }
+        create proposal = Proposal { wallet_id: wallet_before.wallet_id, proposal_id, proposer, operation: OperationType::ChangeThreshold, target: Address::zero(), amount: new_threshold as u64, data, required_approvals: wallet_before.threshold, approvals: [], created_at: reported_time, expires_at: reported_time + DEFAULT_TIMEOUT, state: ProposalStatus::Pending }
 
 }
 fn is_signer(wallet: &MultisigWallet, addr: Address) -> bool {
@@ -181,9 +191,9 @@ fn is_signer(wallet: &MultisigWallet, addr: Address) -> bool {
     false
 }
 
-fn has_signed(proposal: &Proposal, addr: Address) -> bool {
-    for sig in &proposal.signatures {
-        if sig.signer == addr {
+fn has_approved(proposal: &Proposal, addr: Address) -> bool {
+    for approval in &proposal.approvals {
+        if approval.approver == addr {
             return true
         }
     }
@@ -195,9 +205,9 @@ lock is_signer_lock(protected wallet: MultisigWallet, witness addr: Address) -> 
         require is_signer(wallet, addr)
 
 }
-lock can_execute(protected proposal: Proposal, witness current_time: u64) -> bool {
+lock can_execute(protected proposal: Proposal, witness reported_time: u64) -> bool {
     verification
-        require proposal.signatures.len() >= proposal.required_signatures as usize && current_time < proposal.expires_at
+        require proposal.approvals.len() >= proposal.required_approvals as usize && reported_time < proposal.expires_at
 
 }
 lock can_cancel(protected proposal: Proposal, witness caller: Address) -> bool {
@@ -205,12 +215,12 @@ lock can_cancel(protected proposal: Proposal, witness caller: Address) -> bool {
         require proposal.proposer == caller
 
 }
-lock has_enough_signatures(protected proposal: Proposal) -> bool {
+lock has_enough_approvals(protected proposal: Proposal) -> bool {
     verification
-        require proposal.signatures.len() >= proposal.required_signatures as usize
+        require proposal.approvals.len() >= proposal.required_approvals as usize
 
 }
-lock not_expired(protected proposal: Proposal, witness current_time: u64) -> bool {
+lock not_expired(protected proposal: Proposal, witness reported_time: u64) -> bool {
     verification
-        require current_time < proposal.expires_at
+        require reported_time < proposal.expires_at
 }

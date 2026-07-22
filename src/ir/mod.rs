@@ -1753,6 +1753,30 @@ impl IrGenerator {
                 footprint.has_consume = true;
                 self.check_expr_effects(&destroy.expr, footprint);
             }
+            Expr::Claim(claim) => {
+                self.apply_effect_to_footprint(EffectClass::Mutating, footprint);
+                self.check_expr_effects(&claim.receipt, footprint);
+            }
+            Expr::Settle(settle) => {
+                self.apply_effect_to_footprint(EffectClass::Mutating, footprint);
+                self.check_expr_effects(&settle.expr, footprint);
+            }
+            Expr::CreateUnique(create) => {
+                self.apply_effect_to_footprint(EffectClass::Creating, footprint);
+                for (_, value) in &create.fields {
+                    self.check_expr_effects(value, footprint);
+                }
+                if let Some(lock) = &create.lock {
+                    self.check_expr_effects(lock, footprint);
+                }
+            }
+            Expr::ReplaceUnique(replace) => {
+                self.apply_effect_to_footprint(EffectClass::Mutating, footprint);
+                self.check_expr_effects(&replace.expr, footprint);
+                for (_, value) in &replace.fields {
+                    self.check_expr_effects(value, footprint);
+                }
+            }
             Expr::ReadRef(_) => {
                 footprint.has_read_ref = true;
             }
@@ -5296,9 +5320,55 @@ impl IrGenerator {
                     blocks,
                     vars,
                 ),
+                "ckb::hash_sha256" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__ckb_hash_sha256",
+                    "ckb_hash_sha256",
+                    IrType::Hash,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "ckb::hash_sha256d" if call.args.len() == 1 => self.lower_simple_runtime_call(
+                    "__ckb_hash_sha256d",
+                    "ckb_hash_sha256d",
+                    IrType::Hash,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "ckb::hash_sha256_pair" if call.args.len() == 2 => self.lower_simple_runtime_call(
+                    "__ckb_hash_sha256_pair",
+                    "ckb_hash_sha256_pair",
+                    IrType::Hash,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "ckb::hash_sha256d_pair" if call.args.len() == 2 => self.lower_simple_runtime_call(
+                    "__ckb_hash_sha256d_pair",
+                    "ckb_hash_sha256d_pair",
+                    IrType::Hash,
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
+                "ckb::require_sha256d_merkle_root" if call.args.len() == 5 => {
+                    self.lower_void_runtime_call("__ckb_require_sha256d_merkle_root", &call.args, current, blocks, vars)
+                }
                 "verifier::btc::bip340::require_signature" if call.args.len() == 3 => {
                     self.lower_void_runtime_call("__novaseal_bip340_require_signature", &call.args, current, blocks, vars)
                 }
+                "verifier::btc::bip340::require_signature_from_cell_dep" if call.args.len() == 4 => self.lower_void_runtime_call(
+                    "__novaseal_bip340_require_signature_from_cell_dep",
+                    &call.args,
+                    current,
+                    blocks,
+                    vars,
+                ),
                 "ckb::cell_lock_hash_low" if call.args.len() == 1 => self.lower_simple_runtime_call(
                     "__ckb_cell_lock_hash_low",
                     "ckb_cell_lock_hash_low",
@@ -5448,6 +5518,12 @@ impl IrGenerator {
                 }
                 "ckb::require_cell_type_hash" if call.args.len() == 2 => {
                     self.lower_void_runtime_call("__ckb_require_cell_type_hash", &call.args, current, blocks, vars)
+                }
+                "ckb::require_cell_data_hash" if call.args.len() == 2 => {
+                    self.lower_void_runtime_call("__ckb_require_cell_data_hash", &call.args, current, blocks, vars)
+                }
+                "ckb::require_bounded_cell_dep_data_hash" if call.args.len() == 2 => {
+                    self.lower_void_runtime_call("__ckb_require_bounded_cell_dep_data_hash", &call.args, current, blocks, vars)
                 }
                 "ckb::require_current_script_args_empty" if call.args.is_empty() => {
                     self.lower_void_runtime_call("__ckb_require_current_script_args_empty", &call.args, current, blocks, vars)
@@ -8042,13 +8118,12 @@ fn collect_call_names_from_expr(expr: &Expr, names: &mut HashSet<String>) {
                 collect_call_names_from_expr(&arm.value, names);
             }
         }
-        Expr::Integer(_)
-        | Expr::Bool(_)
-        | Expr::String(_)
-        | Expr::ByteString(_)
-        | Expr::Identifier(_)
-        | Expr::ReadRef(_)
-        | Expr::StdlibCall(_) => {}
+        Expr::Integer(_) | Expr::Bool(_) | Expr::String(_) | Expr::ByteString(_) | Expr::Identifier(_) | Expr::ReadRef(_) => {}
+        Expr::StdlibCall(call) => {
+            for arg in &call.args {
+                collect_call_names_from_expr(arg, names);
+            }
+        }
     }
 }
 
@@ -8232,6 +8307,30 @@ fn collect_ast_expr_effects(expr: &Expr, footprint: &mut EffectFootprint) {
             footprint.has_consume = true;
             collect_ast_expr_effects(&destroy.expr, footprint);
         }
+        Expr::Claim(claim) => {
+            apply_effect_to_footprint(EffectClass::Mutating, footprint);
+            collect_ast_expr_effects(&claim.receipt, footprint);
+        }
+        Expr::Settle(settle) => {
+            apply_effect_to_footprint(EffectClass::Mutating, footprint);
+            collect_ast_expr_effects(&settle.expr, footprint);
+        }
+        Expr::CreateUnique(create) => {
+            apply_effect_to_footprint(EffectClass::Creating, footprint);
+            for (_, value) in &create.fields {
+                collect_ast_expr_effects(value, footprint);
+            }
+            if let Some(lock) = &create.lock {
+                collect_ast_expr_effects(lock, footprint);
+            }
+        }
+        Expr::ReplaceUnique(replace) => {
+            apply_effect_to_footprint(EffectClass::Mutating, footprint);
+            collect_ast_expr_effects(&replace.expr, footprint);
+            for (_, value) in &replace.fields {
+                collect_ast_expr_effects(value, footprint);
+            }
+        }
         Expr::ReadRef(_) => footprint.has_read_ref = true,
         Expr::Assert(assert_expr) => {
             collect_ast_expr_effects(&assert_expr.condition, footprint);
@@ -8260,6 +8359,13 @@ fn collect_ast_expr_effects(expr: &Expr, footprint: &mut EffectFootprint) {
         Expr::Call(call) => {
             if is_read_only_runtime_call(call) {
                 footprint.has_read_ref = true;
+            }
+            if let Expr::Identifier(name) = call.func.as_ref() {
+                match name.as_str() {
+                    "__cellscript_consume_each" => apply_effect_to_footprint(EffectClass::Mutating, footprint),
+                    "__cellscript_create_each" => apply_effect_to_footprint(EffectClass::Creating, footprint),
+                    _ => {}
+                }
             }
             for arg in &call.args {
                 collect_ast_expr_effects(arg, footprint);
@@ -8291,6 +8397,15 @@ fn collect_ast_expr_effects(expr: &Expr, footprint: &mut EffectFootprint) {
                 collect_ast_expr_effects(&arm.value, footprint);
             }
         }
+        Expr::StdlibCall(call) => {
+            let qualified = format!("std::{}::{}", call.namespace, call.name);
+            if matches!(qualified.as_str(), "std::lifecycle::transfer" | "std::receipt::claim" | "std::lifecycle::settle") {
+                apply_effect_to_footprint(EffectClass::Mutating, footprint);
+            }
+            for arg in &call.args {
+                collect_ast_expr_effects(arg, footprint);
+            }
+        }
         Expr::Block(stmts) => {
             for stmt in stmts {
                 collect_ast_stmt_effects(stmt, footprint);
@@ -8301,7 +8416,7 @@ fn collect_ast_expr_effects(expr: &Expr, footprint: &mut EffectFootprint) {
                 collect_ast_expr_effects(item, footprint);
             }
         }
-        _ => {}
+        Expr::Integer(_) | Expr::Bool(_) | Expr::String(_) | Expr::ByteString(_) | Expr::Identifier(_) => {}
     }
 }
 
@@ -9172,6 +9287,45 @@ action run(amount: u64) -> u64 {
         assert!(
             error.message.contains("declared effect Pure is too weak for function 'hidden_issue'")
                 && error.message.contains("inferred effect is Mutating"),
+            "unexpected error: {}",
+            error.message
+        );
+    }
+
+    #[test]
+    fn unique_lifecycle_operations_cannot_hide_behind_pure_effects() {
+        let source = r#"
+module test
+
+resource Token has store, create
+    identity(field(id))
+{
+    id: u64
+}
+
+#[effect(Pure)]
+action issue(id: u64) -> Token {
+    verification
+        create_unique<Token>(identity = field(id)) { id: id }
+}
+"#;
+        let ast = parse(&lex(source).unwrap()).unwrap();
+        crate::types::check(&ast).unwrap();
+        crate::flow::check(&ast).unwrap();
+        let action = ast
+            .items
+            .iter()
+            .find_map(|item| match item {
+                Item::Action(action) if action.name == "issue" => Some(action),
+                _ => None,
+            })
+            .expect("issue action");
+
+        assert_eq!(infer_action_effect_without_call_graph(action), EffectClass::Creating);
+        let error = generate(&ast).unwrap_err();
+        assert!(
+            error.message.contains("declared effect Pure is too weak for action 'issue'")
+                && error.message.contains("inferred effect is Creating"),
             "unexpected error: {}",
             error.message
         );

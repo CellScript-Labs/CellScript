@@ -1,0 +1,17 @@
+module cellscript::language::v0_22_transaction_views
+
+resource AuditedCell has store {
+    amount: u64,
+}
+
+action inspect_transaction() -> u64 {
+    verification
+        let input = ckb::input<AuditedCell>(0)
+        let output = ckb::output<AuditedCell>(0)
+        let dep = ckb::cell_dep(0)
+        let witness_args = witness::args(0)
+        let out_point = input.out_point
+        let lock = input.lock
+        require lock.args_empty || lock.hash_type <= 4
+        return input.capacity + output.output_index + dep.data_size + witness_args.size + out_point.index
+}

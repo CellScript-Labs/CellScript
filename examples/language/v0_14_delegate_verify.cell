@@ -1,16 +1,21 @@
 module cellscript::language::v0_14_delegate_verify
 
 struct Proof {
-    pubkey: Hash,
-    signature: Hash,
+    message_hash: Hash,
+    pubkey: [u8; 32],
+    signature: [u8; 64],
 }
 
-action verify_with_delegate(proof: Proof) -> u64 {
+action verify_with_delegate(witness proof: Proof) -> bool {
     verification
-        // Spawn is bounded verifier reuse. It does not add a second type script to
-        // any existing Cell; the child verifier must still be present as a CellDep.
-        let pid = spawn("secp256k1_verifier")
-        let status = wait()
-        require status == 0, "delegate verification failed"
-        return pid
+        // The explicit ABI binds all proof bytes sent to the verifier selected at
+        // CellDep index 0. Message-domain and deployment pinning remain package
+        // obligations; there is still no implicit signer identity.
+        verifier::btc::bip340::require_signature_from_cell_dep(
+            0,
+            proof.message_hash,
+            proof.pubkey,
+            proof.signature,
+        )
+        true
 }

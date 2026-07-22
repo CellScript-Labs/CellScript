@@ -6016,6 +6016,51 @@ impl<'a> TypeChecker<'a> {
                             }
                             Type::Hash
                         }
+                        ("ckb", "hash_sha256" | "hash_sha256d") => {
+                            self.validate_builtin_arity(name, 1, arg_types, call.span)?;
+                            if arg_types[0] != Type::Hash {
+                                return Err(CompileError::new(format!("{} expects Hash input", name), call.span));
+                            }
+                            Type::Hash
+                        }
+                        ("ckb", "hash_sha256_pair" | "hash_sha256d_pair") => {
+                            self.validate_builtin_arity(name, 2, arg_types, call.span)?;
+                            if arg_types.iter().any(|ty| *ty != Type::Hash) {
+                                return Err(CompileError::new(format!("{} expects (Hash, Hash)", name), call.span));
+                            }
+                            Type::Hash
+                        }
+                        ("ckb", "require_sha256d_merkle_root") => {
+                            self.validate_builtin_arity(name, 5, arg_types, call.span)?;
+                            let siblings_ty = Type::Array(Box::new(Type::Hash), 16);
+                            if arg_types[0] != Type::Hash
+                                || arg_types[1] != siblings_ty
+                                || arg_types[2] != Type::U64
+                                || arg_types[3] != Type::U64
+                                || arg_types[4] != Type::Hash
+                            {
+                                return Err(CompileError::new(
+                                    "ckb::require_sha256d_merkle_root expects (leaf: Hash, siblings: [Hash; 16], depth: u64, leaf_index: u64, expected_root: Hash)",
+                                    call.span,
+                                ));
+                            }
+                            match &call.args[2] {
+                                Expr::Integer(0..=16) => {}
+                                Expr::Integer(_) => {
+                                    return Err(CompileError::new(
+                                        "ckb::require_sha256d_merkle_root depth must be in 0..=16",
+                                        call.span,
+                                    ));
+                                }
+                                _ => {
+                                    return Err(CompileError::new(
+                                        "ckb::require_sha256d_merkle_root depth must be an integer literal",
+                                        call.span,
+                                    ));
+                                }
+                            }
+                            Type::Unit
+                        }
                         ("ckb", "cell_data_hash_at") => {
                             self.validate_builtin_arity(name, 2, arg_types, call.span)?;
                             if !Self::is_cell_view_type(&arg_types[0]) || arg_types[1] != Type::U64 {
@@ -6064,13 +6109,38 @@ impl<'a> TypeChecker<'a> {
                             }
                             Type::Bool
                         }
-                        ("ckb", "require_cell_lock_hash" | "require_cell_type_hash") => {
+                        ("ckb", "require_cell_lock_hash" | "require_cell_type_hash" | "require_cell_data_hash") => {
                             self.validate_builtin_arity(name, 2, arg_types, call.span)?;
                             if !Self::is_cell_view_type(&arg_types[0]) || arg_types[1] != Type::Hash {
                                 return Err(CompileError::new(
                                     format!("{} expects (source_view: u64, expected_hash: Hash)", name),
                                     call.span,
                                 ));
+                            }
+                            Type::Unit
+                        }
+                        ("ckb", "require_bounded_cell_dep_data_hash") => {
+                            self.validate_builtin_arity(name, 2, arg_types, call.span)?;
+                            if arg_types[0] != Type::U64 || arg_types[1] != Type::Hash {
+                                return Err(CompileError::new(
+                                    "ckb::require_bounded_cell_dep_data_hash expects (max_deps: u64, expected_data_hash: Hash)",
+                                    call.span,
+                                ));
+                            }
+                            match &call.args[0] {
+                                Expr::Integer(1..=64) => {}
+                                Expr::Integer(_) => {
+                                    return Err(CompileError::new(
+                                        "ckb::require_bounded_cell_dep_data_hash max_deps must be in 1..=64",
+                                        call.span,
+                                    ));
+                                }
+                                _ => {
+                                    return Err(CompileError::new(
+                                        "ckb::require_bounded_cell_dep_data_hash max_deps must be an integer literal",
+                                        call.span,
+                                    ));
+                                }
                             }
                             Type::Unit
                         }
@@ -6137,15 +6207,42 @@ impl<'a> TypeChecker<'a> {
                             }
                             Type::Unit
                         }
-                        ("verifier::btc::bip340", "require_signature") => {
-                            self.validate_builtin_arity(name, 3, arg_types, call.span)?;
+                        ("verifier::btc::bip340", "require_signature" | "require_signature_from_cell_dep") => {
+                            let explicit_dep = suffix == "require_signature_from_cell_dep";
+                            self.validate_builtin_arity(name, if explicit_dep { 4 } else { 3 }, arg_types, call.span)?;
+                            let value_offset = usize::from(explicit_dep);
                             let pubkey_ty = Type::Array(Box::new(Type::U8), 32);
                             let signature_ty = Type::Array(Box::new(Type::U8), 64);
-                            if arg_types[0] != Type::Hash || arg_types[1] != pubkey_ty || arg_types[2] != signature_ty {
+                            if (explicit_dep && arg_types[0] != Type::U64)
+                                || arg_types[value_offset] != Type::Hash
+                                || arg_types[value_offset + 1] != pubkey_ty
+                                || arg_types[value_offset + 2] != signature_ty
+                            {
                                 return Err(CompileError::new(
-                                    "verifier::btc::bip340::require_signature expects (message_hash: Hash, pubkey: [u8; 32], signature: [u8; 64])",
+                                    if explicit_dep {
+                                        "verifier::btc::bip340::require_signature_from_cell_dep expects (dep_index: u64, message_hash: Hash, pubkey: [u8; 32], signature: [u8; 64])"
+                                    } else {
+                                        "verifier::btc::bip340::require_signature expects (message_hash: Hash, pubkey: [u8; 32], signature: [u8; 64])"
+                                    },
                                     call.span,
                                 ));
+                            }
+                            if explicit_dep {
+                                match &call.args[0] {
+                                    Expr::Integer(0..=63) => {}
+                                    Expr::Integer(_) => {
+                                        return Err(CompileError::new(
+                                            "verifier::btc::bip340::require_signature_from_cell_dep dep_index must be in 0..=63",
+                                            call.span,
+                                        ));
+                                    }
+                                    _ => {
+                                        return Err(CompileError::new(
+                                            "verifier::btc::bip340::require_signature_from_cell_dep dep_index must be an integer literal",
+                                            call.span,
+                                        ));
+                                    }
+                                }
                             }
                             Type::Unit
                         }
@@ -9133,6 +9230,80 @@ action inspect() -> u64 {
 
         let err = check(&module).unwrap_err();
         assert!(err.message.contains("consume requires a cell-backed linear value"), "unexpected error: {}", err.message);
+    }
+
+    #[test]
+    fn bounded_cell_dep_scan_requires_a_small_literal_bound() {
+        for (bound, expected) in [("0", "must be in 1..=64"), ("65", "must be in 1..=64"), ("max_deps", "must be an integer literal")]
+        {
+            let module = source_module(&format!(
+                r#"
+module test
+
+action inspect(witness expected_hash: Hash, witness max_deps: u64) -> bool {{
+    verification
+        ckb::require_bounded_cell_dep_data_hash({bound}, expected_hash)
+        true
+}}
+"#
+            ));
+            let err = check(&module).unwrap_err();
+            assert!(err.message.contains(expected), "unexpected error for bound {bound}: {}", err.message);
+        }
+    }
+
+    #[test]
+    fn bounded_sha256d_merkle_requires_a_small_literal_depth() {
+        for (depth, expected) in [("17", "must be in 0..=16"), ("runtime_depth", "must be an integer literal")] {
+            let module = source_module(&format!(
+                r#"
+module test
+
+action inspect(
+    witness leaf: Hash,
+    witness siblings: [Hash; 16],
+    witness runtime_depth: u64,
+    witness leaf_index: u64,
+    witness expected_root: Hash,
+) -> bool {{
+    verification
+        ckb::require_sha256d_merkle_root(leaf, siblings, {depth}, leaf_index, expected_root)
+        true
+}}
+"#
+            ));
+            let err = check(&module).unwrap_err();
+            assert!(err.message.contains(expected), "unexpected error for depth {depth}: {}", err.message);
+        }
+    }
+
+    #[test]
+    fn bip340_explicit_cell_dep_requires_a_small_literal_index() {
+        for (dep_index, expected) in [("64", "must be in 0..=63"), ("runtime_index", "must be an integer literal")] {
+            let module = source_module(&format!(
+                r#"
+module test
+
+action inspect(
+    witness runtime_index: u64,
+    witness message_hash: Hash,
+    witness xonly_pubkey: [u8; 32],
+    witness signature: [u8; 64],
+) -> bool {{
+    verification
+        verifier::btc::bip340::require_signature_from_cell_dep(
+            {dep_index},
+            message_hash,
+            xonly_pubkey,
+            signature,
+        )
+        true
+}}
+"#
+            ));
+            let err = check(&module).unwrap_err();
+            assert!(err.message.contains(expected), "unexpected error for dep index {dep_index}: {}", err.message);
+        }
     }
 
     #[test]

@@ -2,6 +2,44 @@
 
 ## 0.22.0 - 2026-07-19
 
+- Correct the misleading bundled `multisig.cell` surface: the example now
+  models explicitly non-cryptographic `Approval` records, removes discarded
+  64-byte signature payloads, labels witness time as reported rather than chain
+  time, and keeps real signer authentication, sighash binding, witness layout,
+  replay policy, and verification in an explicit Lock Script or pinned verifier
+  package. The README no longer describes nonexistent CKB signature syscalls.
+- Bind every `multi_phase_dao.cell` transition to the same
+  `env::current_timepoint()` evidence path instead of mixing it with public
+  witness time arguments.
+- Harden the bundled contract examples around real Cell identities and asset
+  settlement: AMM pools bind both token TypeHashes and geometric LP supply;
+  NFT sales consume and relock typed Token payments; timelocks and swaps
+  release actual Token outputs; DAO votes lock and redeem voting Tokens; and
+  vesting separates repeatable partial claims from the terminal fully-vested
+  transition. Package mirrors and acceptance action matrices track the same
+  canonical sources.
+- Document fail-closed Spore and RGB++ adapter boundaries, including maintained
+  SDK selection, contract/deployment identity, Molecule and witness layouts,
+  Bitcoin confirmation policy, and positive/negative fixture requirements.
+- Add compile-checked Spore and RGB++ identity-adapter packages under
+  `examples/ecosystem/`. They bind exact CKB Script identities and transaction
+  positions while deliberately leaving Spore rules, RGB++ commitments,
+  Bitcoin validation, witnesses, confirmations, and orchestration to pinned
+  protocol packages and builders.
+- Add executable exact and bounded resolved-CellDep data-hash checks. The
+  bounded scan requires a literal `1..=64` maximum, uses the real
+  `LOAD_CELL_BY_FIELD(DATA_HASH)` syscall path, stops on
+  `INDEX_OUT_OF_BOUND`, and fails with stable runtime code `63` when absent.
+  Original DepGroup identity remains manifest/builder evidence.
+- Add fixed-width executable SHA-256 and SHA256d helpers for 32-byte values and
+  64-byte pairs, plus a SHA256d Merkle verifier bounded to 16 siblings. Rust
+  reference vectors and positive/negative CKB-VM tests cover the generated
+  RISC-V; this is explicitly not a Bitcoin SPV implementation.
+- Add `verifier::btc::bip340::require_signature_from_cell_dep` for an explicit
+  literal verifier dependency index, retain the index-0 spelling for
+  compatibility, and document the fixed 144-byte VM2 IPC envelope. The caller
+  still owns message domain, ScriptGroup/WitnessArgs and sighash construction,
+  authority binding, replay policy, deployment pinning, and external review.
 - Migrate every in-tree Rust crate to Edition 2024 and Rust 1.97.1, adopt the
   Edition 2024 dependency resolver, pin the repository toolchain, and align CI,
   release builds, rustfmt, fixtures, and generated helper manifests.

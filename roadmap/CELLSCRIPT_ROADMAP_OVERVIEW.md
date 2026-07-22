@@ -87,6 +87,7 @@ Each release answers a specific question:
 | v0.21 planned scope | Semantic closure, authenticated compiler evidence, CLI UX reorganisation, dedicated MCP server and CellScript programming skills, derived cyclic ProtocolGraph views, type-level TemplateLayout metadata, and deferred optional template Merkleisation. | [v0.21 roadmap](../docs/CELLSCRIPT_0_21_ROADMAP.md), [v0.21 CLI UX plan](CELLSCRIPT_0_21_CLI_UX_PLAN.md) |
 | v0.22 draft scope | Draft type-theory and set-theory guided language hardening proposal. This scope requires pre-talk soundness fixes and Nervos Talk Discussion before adoption: callable effects for ordinary functions, terminal flow metadata, typed transaction-view handles, finite source-view quantifiers, bounded cell-collection design, type validity blocks, explicit borrow regions, capability algebra explanations, concrete payload ADTs, and ProtocolGraph role UX. | [v0.22 type and set theory roadmap draft](CELLSCRIPT_0_22_TYPE_AND_SET_THEORY_ROADMAP.md) |
 | v0.22 Fiber native-support proposal | Proposed no-profile integration for structurally compatible fungible CellScript Type Scripts. Compatibility must be derived from compiler evidence, requires no Fiber fork, and is not complete until the pinned CKB/Fiber lifecycle matrix passes. | [v0.22 no-profile Fiber native-support plan](CELLSCRIPT_0_22_FIBER_NATIVE_SUPPORT_PLAN.md) |
+| Spore/RGB++ adapters | Proposed package/adapter slices for a deployable signature verifier, executable bounded CellDep scans, bounded hash/Merkle primitives, and pinned Spore/RGB++ cookbook integrations. None are current production-support claims. | [Spore/RGB++ interoperability plan](CELLSCRIPT_SPORE_RGBPP_INTEROP_PLAN.md) |
 | CKB language fit | CKB-first design is confirmed; remaining hardening areas are signer binding, continuity policy, capacity policy, and declarative time policy. | [CKB target profiles](../docs/wiki/Tutorial-05-CKB-Target-Profiles.md), [production gates](../docs/wiki/Tutorial-06-Metadata-Verification-and-Production-Gates.md) |
 | Surface syntax | Low-risk syntax pass is implemented; authority-sensitive syntax remains staged. | [Surface elegance RFC](../docs/CELLSCRIPT_SURFACE_ELEGANCE_RFC.md) |
 | Collections | Stack-backed fixed-width `Vec<T>` helper surface is implemented; cell-backed and generic map ownership remain fail-closed. | [Collections support matrix](../docs/CELLSCRIPT_COLLECTIONS_SUPPORT_MATRIX.md), [v0.13 release scope](../docs/releases/CELLSCRIPT_0_13_RELEASE_SCOPE.md) |
@@ -423,7 +424,8 @@ v0.14 makes CKB witness and Source selection explicit:
 lock standard_lock(pubkey_hash: Hash160) -> bool {
     let sig = witness::lock<RecoverableSignature>(source: source::group_input(0))
     let sighash = env::sighash_all(source: source::group_input(0))
-    return secp256k1_verify(pubkey_hash, sig, sighash)
+    // Proposed pinned verifier-package call; not a CKB syscall or std helper.
+    return verifier_package::verify(pubkey_hash, sig, sighash)
 }
 
 action prove_type_transition(state: &mut State) {

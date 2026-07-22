@@ -8037,10 +8037,12 @@ action propose(proposer: Address, proposal_id: Hash, end_timepoint: u64) -> prop
 
 }
 
-action activate_proposal(proposal_before: Proposal, current_timepoint: u64) -> proposal_after: Proposal {
+action activate_proposal(proposal_before: Proposal) -> proposal_after: Proposal {
     transition proposal_before.state: Draft -> proposal_after.state: Active
     verification
+        let now = env::current_timepoint()
         require proposal_before.state == Proposal::Draft, "not draft"
+        require now < proposal_before.end_timepoint, "activation window closed"
         preserve proposal_after from proposal_before {
             proposal_id
             proposer
@@ -8053,15 +8055,16 @@ action activate_proposal(proposal_before: Proposal, current_timepoint: u64) -> p
 
 }
 
-action execute_proposal(proposal_before: Proposal, read config: DaoConfig, current_timepoint: u64) -> (proposal_after: Proposal, record: ExecutionRecord) {
+action execute_proposal(proposal_before: Proposal, read config: DaoConfig) -> (proposal_after: Proposal, record: ExecutionRecord) {
     transition proposal_before.state: Active -> proposal_after.state: Executed
     verification
+        let now = env::current_timepoint()
         require proposal_before.state == Proposal::Active, "not active"
-        require current_timepoint >= proposal_before.end_timepoint, "voting not closed"
+        require now >= proposal_before.end_timepoint, "voting not closed"
         require proposal_before.for_votes > proposal_before.against_votes, "not enough for-votes"
         consume proposal_before
         create proposal_after = Proposal { proposal_id: proposal_before.proposal_id, state: Proposal::Executed, proposer: proposal_before.proposer, for_votes: proposal_before.for_votes, against_votes: proposal_before.against_votes, end_timepoint: proposal_before.end_timepoint } with_lock(proposal_before.proposer)
-        create record = ExecutionRecord { proposal_id: proposal_before.proposal_id, executed_at: current_timepoint, for_votes: proposal_before.for_votes, against_votes: proposal_before.against_votes }
+        create record = ExecutionRecord { proposal_id: proposal_before.proposal_id, executed_at: now, for_votes: proposal_before.for_votes, against_votes: proposal_before.against_votes }
 
 }
 "#,

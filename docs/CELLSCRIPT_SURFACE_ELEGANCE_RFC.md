@@ -174,7 +174,7 @@ create proposal = Proposal {
     proposer
     target
     amount
-    required_signatures: wallet.threshold
+    required_approvals: wallet.threshold
 }
 ```
 

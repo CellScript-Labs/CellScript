@@ -151,6 +151,13 @@ status, and `u64` count overflow policy. Until a selected entry emits the named
 bounded scan helper, their tier is `runtime-helper-required`, never
 `checked-runtime` or `metadata-only`.
 
+The explicit `ckb::require_bounded_cell_dep_data_hash` operation is a narrower
+checked-runtime exception, not an automatic promotion of arbitrary
+quantifiers. It has a compile-time `1..=64` bound, emits a real resolved
+`Source::CellDep` `LOAD_CELL_BY_FIELD(DATA_HASH)` loop, and is covered by
+positive/missing-dependency CKB-VM cases. Out point, dep type, and original
+DepGroup identity remain manifest/builder evidence.
+
 Bounded Cell collections use the same finite-evidence rule. An action may take
 `input cells: BoundedCellSet<T, N>` and discharge its linear ownership exactly
 once with `consume_each`. A fixed-width witness plan may use

@@ -191,8 +191,8 @@ lock bad_owner_check(protected wallet: Wallet, witness signer: Address) -> bool 
 }
 ```
 
-Prefer names such as `claimed_owner` or `provided_owner` until the language has
-explicit signer verification primitives.
+Prefer names such as `claimed_owner` or `provided_owner` unless the value is
+bound to an explicit verifier result.
 
 ## Recipe: Bind A Lock Predicate To Script Args
 
@@ -216,7 +216,81 @@ lock owner_boundary(
 This makes the data source visible: `owner` comes from CKB `Script.args`, while
 `claimed_owner` and `witness_lock` come from witness data. It still does not
 turn either value into signer authority by name. Keep signature verification
-explicit when that primitive lands; do not treat `Address` as a signature proof.
+explicit; do not treat `Address` as a signature proof.
+
+## Recipe: Pin And Spawn A BIP340 Verifier
+
+Use an explicit resolved CellDep index and bind its data hash before the VM2
+spawn:
+
+```cellscript
+lock verify_authority(
+    lock_args pinned_verifier_hash: Hash,
+    witness message_hash: Hash,
+    witness xonly_pubkey: [u8; 32],
+    witness signature: [u8; 64],
+) -> bool {
+    verification
+        ckb::require_cell_data_hash(source::cell_dep(3), pinned_verifier_hash)
+        verifier::btc::bip340::require_signature_from_cell_dep(
+            3,
+            message_hash,
+            xonly_pubkey,
+            signature,
+        )
+        true
+}
+```
+
+In production, `pinned_verifier_hash` must come from reviewed package
+configuration, not witness authority. The builder also pins the out point and
+`dep_type`. The verifier checks the supplied BIP340 prehash; the application
+still owns the domain, ScriptGroup/WitnessArgs selection, sighash, key binding,
+and replay policy. See the
+[BIP340 verifier ABI](../CELLSCRIPT_SIGNATURE_VERIFIER_ABI.md).
+
+## Recipe: Find A Pinned CellDep Within A Bound
+
+Use the bounded scan when the resolved dependency index is builder-selected:
+
+```cellscript
+ckb::require_bounded_cell_dep_data_hash(8, expected_data_hash)
+```
+
+The bound must be a literal in `1..=64`. The helper scans the resolved CellDep
+sequence and fails if the hash is not found. It cannot recover the original
+DepGroup container identity; keep out point and dep type in manifest/builder
+evidence.
+
+## Recipe: Check A Small SHA256d Merkle Path
+
+For a fixed path of at most 16 siblings:
+
+```cellscript
+ckb::require_sha256d_merkle_root(
+    leaf,
+    siblings,
+    12,
+    leaf_index,
+    expected_root,
+)
+```
+
+`siblings` has type `[Hash; 16]`; only the first `depth` entries are read. The
+depth must be a literal in `0..=16`. Each node is raw
+`SHA256d(left_32 || right_32)`, with ordering selected by the corresponding
+`leaf_index` bit. This verifies one bounded Merkle path, not Bitcoin headers,
+difficulty, confirmations, reorg policy, or RGB++ witnesses.
+
+## Recipe: Compose With Spore Or RGB++
+
+Start with the compile-checked packages under
+`examples/ecosystem/spore-identity-adapter` and
+`examples/ecosystem/rgbpp-identity-adapter`. They bind exact script identities
+and transaction positions while leaving protocol rules to the maintained SDKs
+and deployed scripts. Read
+[Spore and RGB++ Interoperability Boundaries](Spore-and-RGBPP-Interop-Boundaries.md)
+before extending them; neither package is a production-compatibility claim.
 
 ## Recipe: Use Empty Vec Literals Safely
 
@@ -229,7 +303,7 @@ create proposal = Proposal {
     proposal_id,
     proposer,
     data: [],
-    signatures: []
+    approvals: []
 }
 ```
 
@@ -299,7 +373,7 @@ Start with the smallest example that teaches the idea you need:
 | Linear resource effects | `examples/token.cell` |
 | Unique assets and ownership | `examples/nft.cell` |
 | Time-gated releases | `examples/timelock.cell` |
-| Threshold proposals | `examples/multisig.cell` |
+| Non-cryptographic threshold approvals | `examples/multisig.cell` |
 | Claim receipts | `examples/vesting.cell` |
 | Shared liquidity state | `examples/amm_pool.cell` |
 | Composition patterns | `examples/launch.cell` |
@@ -308,3 +382,9 @@ Start with the smallest example that teaches the idea you need:
 
 Read one example for one idea. The examples are easier to learn from when you do
 not treat them as one large feature checklist.
+
+For Spore or RGB++ work, do not start from a simplified local clone of the
+protocol schema. First read the
+[Spore and RGB++ interoperability boundaries](Spore-and-RGBPP-Interop-Boundaries.md),
+then pin the maintained SDK, contract identities, deployments, and fixtures in
+an adapter package.

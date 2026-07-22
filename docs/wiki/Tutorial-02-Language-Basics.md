@@ -242,7 +242,7 @@ let mut owners: Vec<Address> = [primary_owner, backup_owner]
 
 create proposal = Proposal {
     data: [],
-    signatures: []
+    approvals: []
 }
 ```
 
@@ -593,14 +593,29 @@ lock owner_boundary(
 `lock_args Address` tells the reader where the owner value comes from. It still
 does not prove a signature. `env::sighash_all(input)` makes the digest surface
 visible, and `witness::lock(input)` makes the witness field visible, but the
-example above is still a boundary-classification example. Until explicit
-signature verification primitives are available, treat `Address`,
-`lock_args Address`, and `witness Address` as data only.
+example above is still a boundary-classification example. Treat `Address`,
+`lock_args Address`, and `witness Address` as data unless an explicit verifier
+result and key-to-authority binding prove otherwise.
 
 `lock_args Address` is already bound to the executing lock script's typed
 `Script.args` bytes. That makes it a stable script-argument value, but it still
-does not verify a transaction signature unless the lock also calls an explicit
-signature verification primitive.
+does not verify a transaction signature. CellScript 0.22 exposes the explicit
+external-verifier boundary
+`verifier::btc::bip340::require_signature_from_cell_dep(index, message_hash,
+xonly_pubkey, signature)`. Its dependency index must be a literal in `0..=63`,
+and new packages should first bind that resolved dependency with
+`ckb::require_cell_data_hash`. The verifier checks the supplied prehash only;
+the application still owns domain separation, ScriptGroup/WitnessArgs and
+sighash construction, key binding, and replay policy. See the
+[BIP340 verifier ABI](../CELLSCRIPT_SIGNATURE_VERIFIER_ABI.md).
+
+CKB-facing finite helpers use compile-time bounds. For example,
+`ckb::require_bounded_cell_dep_data_hash(max_deps, expected_hash)` requires a
+literal `max_deps` in `1..=64`, while
+`ckb::require_sha256d_merkle_root(leaf, siblings, depth, leaf_index, root)`
+requires `[Hash; 16]` siblings and a literal depth in `0..=16`. These helpers
+execute in CKB-VM; the latter is a Merkle primitive, not a complete Bitcoin SPV
+implementation.
 
 ## Invariant Assertions
 

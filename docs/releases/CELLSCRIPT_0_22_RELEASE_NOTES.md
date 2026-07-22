@@ -45,6 +45,44 @@ The 0.22 line adds:
 Unsupported dynamic, recursive, generic, unbounded, or authority-ambiguous
 forms remain rejected or explicitly recorded as deferred/runtime-required.
 
+## Bundled Example Hardening
+
+The checked examples now model asset settlement directly. AMM pools bind both
+token TypeHashes and derive initial LP supply geometrically; NFT listing and
+offer settlement consume and relock typed Token inputs; timelock and swap
+release paths create actual Token outputs; DAO vote receipts lock and redeem
+the voting Token; and vesting separates repeatable partial claims from the
+terminal `FullyClaimed` transition. Pure AMM helpers are no longer exposed as
+transaction entries. The seven-example production matrix therefore contains
+43 business actions and 17 locks.
+
+## Bounded CKB Crypto And Dependency Helpers
+
+The CKB runtime surface now includes exact-index and literal-bounded resolved
+CellDep data-hash checks, fixed-width SHA-256/SHA256d for 32-byte values and
+64-byte pairs, and a SHA256d Merkle path with a literal depth in `0..=16`.
+Generated RISC-V is exercised against Rust reference hashes in CKB-VM, including
+missing-dependency and wrong-root rejection. The VM sees resolved CellDeps, so
+out points, dep type, and original DepGroup identity remain builder/manifest
+evidence.
+
+`verifier::btc::bip340::require_signature_from_cell_dep` selects a literal
+CellDep index and sends the fixed 144-byte
+`cellscript-btc-bip340-ipc-v0` request through VM2 pipe/spawn/wait. This verifies
+only the supplied prehash. Message domain, ScriptGroup/WitnessArgs selection,
+sighash construction, key authority, replay policy, deployment pinning, and
+external verifier review remain package obligations. See
+`docs/CELLSCRIPT_SIGNATURE_VERIFIER_ABI.md`.
+
+## Spore And RGB++ Identity Adapters
+
+The compile-checked packages under `examples/ecosystem/` demonstrate bounded
+identity composition with Spore and RGB++ scripts. They pin exact Script
+identities and transaction positions without adding protocol namespaces to the
+core language. They do not reimplement Spore, RGB++ commitments, Bitcoin SPV,
+confirmation/reorg policy, or SDK transaction construction, and are not a
+production-compatibility claim.
+
 ## Metadata Schema 55
 
 Current artifacts emit compile metadata schema 55. It carries the 0.22

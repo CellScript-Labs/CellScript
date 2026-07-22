@@ -61,6 +61,8 @@ pub enum CellScriptRuntimeError {
     Bip340PubkeyMaterializationUnresolved = 60,
     Bip340SignatureMaterializationUnresolved = 61,
     PackedHashPreimageMaterializationUnresolved = 62,
+    BoundedCellDepNotFound = 63,
+    MerkleRootMismatch = 64,
 }
 
 impl CellScriptRuntimeError {
@@ -125,6 +127,8 @@ impl CellScriptRuntimeError {
             Self::Bip340PubkeyMaterializationUnresolved => "bip340-pubkey-materialization-unresolved",
             Self::Bip340SignatureMaterializationUnresolved => "bip340-signature-materialization-unresolved",
             Self::PackedHashPreimageMaterializationUnresolved => "packed-hash-preimage-materialization-unresolved",
+            Self::BoundedCellDepNotFound => "bounded-cell-dep-not-found",
+            Self::MerkleRootMismatch => "merkle-root-mismatch",
         }
     }
 
@@ -201,6 +205,10 @@ impl CellScriptRuntimeError {
             Self::PackedHashPreimageMaterializationUnresolved => {
                 "The backend could not materialize canonical packed bytes for a packed hash preimage."
             }
+            Self::BoundedCellDepNotFound => {
+                "A bounded CellDep scan did not find the required data hash before reaching the declared scan limit."
+            }
+            Self::MerkleRootMismatch => "A bounded Merkle proof did not reconstruct the expected root.",
         }
     }
 
@@ -291,6 +299,10 @@ impl CellScriptRuntimeError {
             Self::PackedHashPreimageMaterializationUnresolved => {
                 "Inspect packed-hash lowering and schema-backed fixed aggregate materialization."
             }
+            Self::BoundedCellDepNotFound => {
+                "Check the expected data hash, resolved CellDep order, scan limit, and manifest-pinned DepGroup origin."
+            }
+            Self::MerkleRootMismatch => "Check leaf byte order, sibling order, depth, leaf index, hash algorithm, and expected root.",
         }
     }
 
@@ -351,6 +363,8 @@ impl CellScriptRuntimeError {
             60 => Some(Self::Bip340PubkeyMaterializationUnresolved),
             61 => Some(Self::Bip340SignatureMaterializationUnresolved),
             62 => Some(Self::PackedHashPreimageMaterializationUnresolved),
+            63 => Some(Self::BoundedCellDepNotFound),
+            64 => Some(Self::MerkleRootMismatch),
             _ => None,
         }
     }
@@ -420,6 +434,8 @@ pub const ALL_RUNTIME_ERRORS: &[CellScriptRuntimeError] = &[
     CellScriptRuntimeError::Bip340PubkeyMaterializationUnresolved,
     CellScriptRuntimeError::Bip340SignatureMaterializationUnresolved,
     CellScriptRuntimeError::PackedHashPreimageMaterializationUnresolved,
+    CellScriptRuntimeError::BoundedCellDepNotFound,
+    CellScriptRuntimeError::MerkleRootMismatch,
 ];
 
 pub const RESERVED_RUNTIME_ERROR_CODES: &[u64] = &[6, 19, 27, 28, 29, 30, 31];

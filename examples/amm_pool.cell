@@ -12,6 +12,8 @@ receipt LPReceipt has store, create, consume {
 }
 
 shared Pool has store, create, replace {
+    token_a_type: Hash,
+    token_b_type: Hash,
     token_a_symbol: [u8; 8],
     token_b_symbol: [u8; 8],
     reserve_a: u64,
@@ -32,7 +34,7 @@ action seed_pool(token_a: Token, token_b: Token, fee_rate_bps: u16, provider: Ad
         require initial_lp > 0, "zero lp supply"
         consume token_a
         consume token_b
-        create pool = Pool { token_a_symbol: token_a.symbol, token_b_symbol: token_b.symbol, reserve_a: token_a.amount, reserve_b: token_b.amount, total_lp: initial_lp, fee_rate_bps }
+        create pool = Pool { token_a_type: token_a.type_hash(), token_b_type: token_b.type_hash(), token_a_symbol: token_a.symbol, token_b_symbol: token_b.symbol, reserve_a: token_a.amount, reserve_b: token_b.amount, total_lp: initial_lp, fee_rate_bps }
         create receipt = LPReceipt { pool_id: pool.type_hash(), lp_amount: initial_lp, provider } with_lock(provider)
 
 }
@@ -41,6 +43,7 @@ action swap_a_for_b(pool_before: Pool, input: Token, min_output: u64, to: Addres
 
     verification
         require input.symbol == pool_before.token_a_symbol, "wrong input token"
+        require input.type_hash() == pool_before.token_a_type, "wrong input token type"
         require input.amount > 0, "zero input"
         require pool_before.reserve_a > 0 && pool_before.reserve_b > 0, "empty pool"
         require pool_before.total_lp > 0, "zero lp supply"
@@ -56,6 +59,8 @@ action swap_a_for_b(pool_before: Pool, input: Token, min_output: u64, to: Addres
         require amount_out < pool_before.reserve_b, "insufficient reserves"
         require amount_out > 0, "zero output"
         preserve pool_after from pool_before {
+            token_a_type
+            token_b_type
             token_a_symbol
             token_b_symbol
             total_lp
@@ -63,6 +68,7 @@ action swap_a_for_b(pool_before: Pool, input: Token, min_output: u64, to: Addres
         }
         require pool_after.reserve_a == pool_before.reserve_a + input.amount
         require pool_after.reserve_b == pool_before.reserve_b - amount_out
+        require token_out.type_hash() == pool_before.token_b_type, "wrong output token type"
         consume input
         create token_out = Token { amount: amount_out, symbol: pool_before.token_b_symbol } with_lock(to)
 
@@ -73,6 +79,8 @@ action add_liquidity(pool_before: Pool, token_a: Token, token_b: Token, provider
     verification
         require token_a.symbol == pool_before.token_a_symbol, "wrong token a"
         require token_b.symbol == pool_before.token_b_symbol, "wrong token b"
+        require token_a.type_hash() == pool_before.token_a_type, "wrong token a type"
+        require token_b.type_hash() == pool_before.token_b_type, "wrong token b type"
         require token_a.amount > 0 && token_b.amount > 0, "zero deposit"
         require pool_before.reserve_a > 0 && pool_before.reserve_b > 0 && pool_before.total_lp > 0, "empty pool"
         require token_a.amount <= U64_MAX - pool_before.reserve_a, "reserve a overflow"
@@ -85,6 +93,8 @@ action add_liquidity(pool_before: Pool, token_a: Token, token_b: Token, provider
         require lp_amount > 0, "zero lp minted"
         require lp_amount <= U64_MAX - pool_before.total_lp, "lp supply overflow"
         preserve pool_after from pool_before {
+            token_a_type
+            token_b_type
             token_a_symbol
             token_b_symbol
             fee_rate_bps
@@ -112,6 +122,8 @@ action remove_liquidity(pool_before: Pool, receipt: LPReceipt, provider: Address
         let amount_b = receipt.lp_amount * pool_before.reserve_b / pool_before.total_lp
         require amount_a > 0 && amount_b > 0, "zero withdrawal"
         preserve pool_after from pool_before {
+            token_a_type
+            token_b_type
             token_a_symbol
             token_b_symbol
             fee_rate_bps
@@ -119,13 +131,14 @@ action remove_liquidity(pool_before: Pool, receipt: LPReceipt, provider: Address
         require pool_after.reserve_a == pool_before.reserve_a - amount_a
         require pool_after.reserve_b == pool_before.reserve_b - amount_b
         require pool_after.total_lp == pool_before.total_lp - receipt.lp_amount
+        require token_a_out.type_hash() == pool_before.token_a_type, "wrong token a output type"
+        require token_b_out.type_hash() == pool_before.token_b_type, "wrong token b output type"
         consume receipt
         create token_a_out = Token { amount: amount_a, symbol: pool_before.token_a_symbol } with_lock(provider)
         create token_b_out = Token { amount: amount_b, symbol: pool_before.token_b_symbol } with_lock(provider)
 
 }
-action isqrt(n: u64) -> u64 {
-    verification
+fn isqrt(n: u64) -> u64 {
         if n == 0 {
             return 0
         }
@@ -138,8 +151,7 @@ action isqrt(n: u64) -> u64 {
         x
 
 }
-action min(a: u64, b: u64) -> u64 {
-    verification
+fn min(a: u64, b: u64) -> u64 {
         if a < b {
             a
         } else {

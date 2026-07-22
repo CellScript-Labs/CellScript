@@ -14,11 +14,11 @@ example.
 | Example | What it teaches |
 |---|---|
 | `examples/token.cell` | Minting, transfer, burn, and guarded token merge. |
-| `examples/nft.cell` | Unique assets, metadata, ownership transitions, and owner locks. |
-| `examples/timelock.cell` | Time-gated release checks, release requests, and approval flow. |
-| `examples/multisig.cell` | Threshold policy, proposal records, signatures-as-data, and lock-boundary predicates. |
-| `examples/vesting.cell` | Vesting grants, receipts, claim flow, and admin-boundary comments. |
-| `examples/amm_pool.cell` | Shared pool state, bounded swap logic, liquidity receipts, LP ownership checks, and settlement effects. |
+| `examples/nft.cell` | Collection-bound assets, ownership transitions, typed Token settlement, and owner locks. |
+| `examples/timelock.cell` | HeaderDep timepoints, Token-backed release checks, release requests, and approval flow. |
+| `examples/multisig.cell` | Non-cryptographic threshold approvals, proposal records, and lock-boundary predicates. |
+| `examples/vesting.cell` | Repeatable partial claims, terminal full claims, revocation, and admin-boundary comments. |
+| `examples/amm_pool.cell` | TypeHash-bound pool state, bounded swap logic, liquidity receipts, LP ownership checks, and settlement effects. |
 | `examples/launch.cell` | Mint-authority bootstrap and launch/pool composition patterns. |
 | `examples/registry.cell` | Registry/package language surface and compiler tooling; non-production. |
 | `examples/atomic_swap.cell` | Atomic swap flow-edge validation and settlement lifecycle; non-production. |
@@ -34,6 +34,8 @@ The package examples deliberately show the current multi-file boundary:
 
 - `examples/amm_pool` imports `Token` from `examples/token`;
 - `examples/vesting` imports `Token` from `examples/token`;
+- `examples/atomic_swap`, `examples/multi_phase_dao`, `examples/nft`, and
+  `examples/timelock` import `Token` from `examples/token`;
 - `examples/launch` imports `Token` and `MintAuthority` from `examples/token`,
   plus `Pool` and `LPReceipt` from `examples/amm_pool`.
 
@@ -42,6 +44,15 @@ into one deployed program; each package entry still compiles to its own artifact
 There are no checked-in `examples/business` or `examples/acceptance` mirrors;
 acceptance-only profile/effect/scheduler metadata belongs in runner
 configuration or generated files under `target/`.
+
+Despite its legacy filename, `multisig.cell` is not a signature verifier or a
+standalone custody Lock Script. Its `Approval` values and `reported_time`
+arguments are witness data. A surrounding Lock Script must authenticate the
+approver, and any production time policy must bind a HeaderDep-derived value.
+CellScript 0.22 has no implicit signer identity, sighash selection, or witness
+layout. Packages that need cryptographic custody may call the explicit BIP340
+CellDep verifier ABI, but the bundled threshold-approval example deliberately
+does not do so.
 
 ## Fiber Interoperability Examples
 

@@ -94,10 +94,12 @@ interpret raw syscall status registers or VM trap diagnostics with this table.
 | 60 | `bip340-pubkey-materialization-unresolved` | The backend could not materialize the 32-byte BIP340 x-only pubkey for verifier IPC. | Inspect the nested witness pubkey field source and copied ABI bytes. |
 | 61 | `bip340-signature-materialization-unresolved` | The backend could not materialize the 64-byte BIP340 signature for verifier IPC. | Inspect the nested witness signature field source and copied ABI bytes. |
 | 62 | `packed-hash-preimage-materialization-unresolved` | The backend could not materialize canonical packed bytes for a packed hash preimage. | Inspect packed-hash lowering and schema-backed fixed aggregate materialization. |
+| 63 | `bounded-cell-dep-not-found` | A bounded resolved CellDep scan did not find the required data hash. | Check the compile-time scan bound, resolved CellDep order, expected data hash, and builder manifest. |
+| 64 | `merkle-root-mismatch` | A bounded SHA256d Merkle proof did not reconstruct the expected root. | Check leaf byte order, sibling order, depth, leaf index, hash algorithm, and expected root. |
 
 ## Stability
 
 - Existing numeric codes must not be reused for a different condition.
 - New generated fail-closed paths must add a registry entry before they can
   emit a new non-zero code.
-- Codes `6`, `19`, `27` through `31`, and values above `62` are currently reserved.
+- Codes `6`, `19`, `27` through `31`, and values above `64` are currently reserved.

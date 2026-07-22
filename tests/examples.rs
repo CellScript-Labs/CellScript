@@ -19,18 +19,20 @@ const BUNDLED_EXAMPLES: [&str; 9] = [
     "token.cell",
     "vesting.cell",
 ];
+const PACKAGE_EXAMPLES: [&str; 10] =
+    ["amm_pool", "atomic_swap", "launch", "multi_phase_dao", "multisig", "nft", "registry", "timelock", "token", "vesting"];
 const BACKEND_SHAPE_BASELINE_JSON: &str = include_str!("backend_shape_baseline.json");
 
 const BUNDLED_EXAMPLE_ELF_SIZE_BUDGETS: [(&str, usize); 9] = [
-    ("amm_pool.cell", 80 * 1024),
+    ("amm_pool.cell", 96 * 1024),
     ("atomic_swap.cell", 80 * 1024),
-    ("launch.cell", 36 * 1024),
+    ("launch.cell", 48 * 1024),
     ("multi_phase_dao.cell", 80 * 1024),
     ("multisig.cell", 108 * 1024),
-    ("nft.cell", 63 * 1024),
-    ("timelock.cell", 72 * 1024),
+    ("nft.cell", 96 * 1024),
+    ("timelock.cell", 96 * 1024),
     ("token.cell", 18 * 1024),
-    ("vesting.cell", 28 * 1024),
+    ("vesting.cell", 52 * 1024),
 ];
 
 const ARTIFACT_SIZE_EXPERIMENT_EXAMPLES: [&str; 4] = ["amm_pool.cell", "nft.cell", "token.cell", "vesting.cell"];
@@ -49,11 +51,11 @@ const FULL_METADATA_SIZE_BUDGETS: [(&str, FullMetadataSizeBudget); 4] = [
     (
         "nft.cell",
         FullMetadataSizeBudget {
-            max_compact_metadata_bytes: 270 * 1024,
-            max_proof_plan_records: 72,
-            max_compact_proof_plan_bytes: 60 * 1024,
-            max_source_units: 1,
-            max_compact_source_units_bytes: 256,
+            max_compact_metadata_bytes: 340 * 1024,
+            max_proof_plan_records: 90,
+            max_compact_proof_plan_bytes: 80 * 1024,
+            max_source_units: 2,
+            max_compact_source_units_bytes: 512,
         },
     ),
     (
@@ -69,9 +71,9 @@ const FULL_METADATA_SIZE_BUDGETS: [(&str, FullMetadataSizeBudget); 4] = [
     (
         "vesting.cell",
         FullMetadataSizeBudget {
-            max_compact_metadata_bytes: 148 * 1024,
-            max_proof_plan_records: 38,
-            max_compact_proof_plan_bytes: 33 * 1024,
+            max_compact_metadata_bytes: 200 * 1024,
+            max_proof_plan_records: 50,
+            max_compact_proof_plan_bytes: 48 * 1024,
             max_source_units: 2,
             max_compact_source_units_bytes: 512,
         },
@@ -79,17 +81,17 @@ const FULL_METADATA_SIZE_BUDGETS: [(&str, FullMetadataSizeBudget); 4] = [
 ];
 
 const FULL_METADATA_ENTRY_COUNTS: [(&str, FullMetadataEntryCounts); 4] = [
-    ("amm_pool.cell", FullMetadataEntryCounts { actions: 6, locks: 0 }),
+    ("amm_pool.cell", FullMetadataEntryCounts { actions: 4, locks: 0 }),
     ("nft.cell", FullMetadataEntryCounts { actions: 10, locks: 5 }),
     ("token.cell", FullMetadataEntryCounts { actions: 4, locks: 0 }),
-    ("vesting.cell", FullMetadataEntryCounts { actions: 4, locks: 1 }),
+    ("vesting.cell", FullMetadataEntryCounts { actions: 5, locks: 1 }),
 ];
 
 const ENTRY_ARTIFACT_SIZE_BUDGETS: [(&str, EntryArtifactSizeBudget); 4] = [
     (
         "amm_pool.cell",
         EntryArtifactSizeBudget {
-            max_elf_bytes: 32 * 1024,
+            max_elf_bytes: 40 * 1024,
             max_compact_metadata_bytes: 64 * 1024,
             max_proof_plan_records: 11,
             max_compact_proof_plan_bytes: 10 * 1024,
@@ -100,10 +102,10 @@ const ENTRY_ARTIFACT_SIZE_BUDGETS: [(&str, EntryArtifactSizeBudget); 4] = [
     (
         "nft.cell",
         EntryArtifactSizeBudget {
-            max_elf_bytes: 26 * 1024,
-            max_compact_metadata_bytes: 70 * 1024,
-            max_proof_plan_records: 13,
-            max_compact_proof_plan_bytes: 12 * 1024,
+            max_elf_bytes: 48 * 1024,
+            max_compact_metadata_bytes: 120 * 1024,
+            max_proof_plan_records: 30,
+            max_compact_proof_plan_bytes: 32 * 1024,
             max_actions: 1,
             max_locks: 1,
         },
@@ -122,10 +124,10 @@ const ENTRY_ARTIFACT_SIZE_BUDGETS: [(&str, EntryArtifactSizeBudget); 4] = [
     (
         "vesting.cell",
         EntryArtifactSizeBudget {
-            max_elf_bytes: 16 * 1024,
-            max_compact_metadata_bytes: 70 * 1024,
-            max_proof_plan_records: 13,
-            max_compact_proof_plan_bytes: 12 * 1024,
+            max_elf_bytes: 28 * 1024,
+            max_compact_metadata_bytes: 100 * 1024,
+            max_proof_plan_records: 20,
+            max_compact_proof_plan_bytes: 20 * 1024,
             max_actions: 1,
             max_locks: 1,
         },
@@ -136,17 +138,17 @@ const BUNDLED_EXAMPLE_ASM_SHAPE_BUDGETS: [(&str, AssemblyShapeBudget); 9] = [
     (
         "amm_pool.cell",
         AssemblyShapeBudget {
-            max_lines: 18_000,
+            max_lines: 22_000,
             max_fail_handlers: 32,
             max_shared_epilogues: 8,
-            max_text_bytes: 74 * 1024,
+            max_text_bytes: 92 * 1024,
             max_relaxed_branches: 4,
             max_cond_branch_abs_distance: 6_400,
-            max_machine_blocks: 2_100,
+            max_machine_blocks: 2_600,
             max_machine_block_bytes: 512,
-            max_cfg_edges: 3_800,
-            max_call_edges: 850,
-            max_unreachable_machine_blocks: 1_800,
+            max_cfg_edges: 4_900,
+            max_call_edges: 1_100,
+            max_unreachable_machine_blocks: 2_300,
         },
     ),
     (
@@ -184,36 +186,35 @@ const BUNDLED_EXAMPLE_ASM_SHAPE_BUDGETS: [(&str, AssemblyShapeBudget); 9] = [
     (
         "nft.cell",
         AssemblyShapeBudget {
-            max_lines: 15_000,
+            max_lines: 22_000,
             max_fail_handlers: 80,
             max_shared_epilogues: 18,
-            max_text_bytes: 59 * 1024,
+            max_text_bytes: 90 * 1024,
             max_relaxed_branches: 4,
-            max_cond_branch_abs_distance: 9_600,
-            max_machine_blocks: 2_500,
-            max_machine_block_bytes: 320,
-            max_cfg_edges: 4_100,
-            max_call_edges: 560,
-            max_unreachable_machine_blocks: 2_250,
+            max_cond_branch_abs_distance: 12_800,
+            max_machine_blocks: 3_300,
+            max_machine_block_bytes: 512,
+            max_cfg_edges: 5_800,
+            max_call_edges: 950,
+            max_unreachable_machine_blocks: 3_100,
         },
     ),
     (
         "timelock.cell",
         AssemblyShapeBudget {
-            max_lines: 17_800,
+            max_lines: 21_000,
             max_fail_handlers: 64,
             max_shared_epilogues: 22,
-            max_text_bytes: 68 * 1024,
+            max_text_bytes: 84 * 1024,
             max_relaxed_branches: 4,
             max_cond_branch_abs_distance: 4_500,
-            max_machine_blocks: 2_050,
+            max_machine_blocks: 2_400,
             max_machine_block_bytes: 21_000,
-            max_cfg_edges: 3_500,
-            // Canonical fixed-width enum layouts replace several dynamic lower-bound
-            // guards with exact-size guards. This keeps text/CFG size below the
-            // release baseline while moving the helper-call mix to 460 edges.
-            max_call_edges: 465,
-            max_unreachable_machine_blocks: 2_000,
+            max_cfg_edges: 4_200,
+            // Chain-bound timepoints and Token release checks intentionally add
+            // helper calls while keeping the complete example within this budget.
+            max_call_edges: 700,
+            max_unreachable_machine_blocks: 2_300,
         },
     ),
     (
@@ -235,17 +236,17 @@ const BUNDLED_EXAMPLE_ASM_SHAPE_BUDGETS: [(&str, AssemblyShapeBudget); 9] = [
     (
         "vesting.cell",
         AssemblyShapeBudget {
-            max_lines: 6_100,
-            max_fail_handlers: 28,
-            max_shared_epilogues: 6,
-            max_text_bytes: 23 * 1024,
+            max_lines: 10_000,
+            max_fail_handlers: 36,
+            max_shared_epilogues: 8,
+            max_text_bytes: 42 * 1024,
             max_relaxed_branches: 4,
-            max_cond_branch_abs_distance: 3_000,
-            max_machine_blocks: 850,
+            max_cond_branch_abs_distance: 8_000,
+            max_machine_blocks: 1_250,
             max_machine_block_bytes: 512,
-            max_cfg_edges: 1_500,
-            max_call_edges: 320,
-            max_unreachable_machine_blocks: 780,
+            max_cfg_edges: 2_200,
+            max_call_edges: 500,
+            max_unreachable_machine_blocks: 1_150,
         },
     ),
     (
@@ -260,7 +261,7 @@ const BUNDLED_EXAMPLE_ASM_SHAPE_BUDGETS: [(&str, AssemblyShapeBudget); 9] = [
             max_machine_blocks: 2_600,
             max_machine_block_bytes: 21_000,
             max_cfg_edges: 4_200,
-            max_call_edges: 560,
+            max_call_edges: 800,
             max_unreachable_machine_blocks: 2_400,
         },
     ),
@@ -276,7 +277,7 @@ const BUNDLED_EXAMPLE_ASM_SHAPE_BUDGETS: [(&str, AssemblyShapeBudget); 9] = [
             max_machine_blocks: 2_200,
             max_machine_block_bytes: 21_000,
             max_cfg_edges: 3_600,
-            max_call_edges: 560,
+            max_call_edges: 800,
             max_unreachable_machine_blocks: 2_000,
         },
     ),
@@ -430,11 +431,23 @@ fn canonical_examples_are_the_single_checked_in_business_source() {
 }
 
 #[test]
+fn package_examples_exactly_mirror_the_top_level_reading_sources() {
+    let examples_root = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples");
+    for package in PACKAGE_EXAMPLES {
+        let flat_path = examples_root.join(format!("{package}.cell"));
+        let package_path = examples_root.join(package).join("src/main.cell");
+        let flat = std::fs::read_to_string(&flat_path).unwrap_or_else(|err| panic!("failed to read {flat_path}: {err}"));
+        let packaged = std::fs::read_to_string(&package_path).unwrap_or_else(|err| panic!("failed to read {package_path}: {err}"));
+        assert_eq!(packaged, flat, "package source {package_path} drifted from canonical reading source {flat_path}");
+    }
+}
+
+#[test]
 fn all_checked_in_cell_examples_compile() {
     let files = checked_in_example_cell_files();
     assert_eq!(
         files.len(),
-        BUNDLED_EXAMPLES.len() + 1 + 12,
+        BUNDLED_EXAMPLES.len() + 1 + 15,
         "expected bundled examples, top-level registry.cell, and language examples"
     );
 
@@ -534,7 +547,7 @@ fn token_amm_bootstrap_docs_cover_builder_friction_boundary() {
         flows.contains("Materialise Pool and LPReceipt outputs"),
         "launch flow should describe direct Pool and LPReceipt output materialisation"
     );
-    assert!(flows.contains("all 44 business actions"), "business flow guide should track the full production action count");
+    assert!(flows.contains("all 43 business actions"), "business flow guide should track the full production action count");
     assert!(
         flows.contains("Use `create_collection` to materialise the first live `Collection` Cell"),
         "NFT flow should document the Collection bootstrap action"
@@ -1284,18 +1297,75 @@ fn bundled_examples_compile_to_non_empty_assembly() {
 
 #[test]
 fn bundled_package_examples_compile_with_cross_package_source_units() {
-    for package in ["amm_pool", "launch", "vesting"] {
+    for package in PACKAGE_EXAMPLES {
         let package_root = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples").join(package);
         let result = compile_path(&package_root, CompileOptions::default()).unwrap_or_else(|err| {
             panic!("failed to compile package example {}: {}", package, err);
         });
         let roles = result.metadata.source_units.iter().map(|unit| unit.role.as_str()).collect::<BTreeSet<_>>();
         assert!(roles.contains("entry"), "{} should bind its entry source unit", package);
-        assert!(roles.contains("dependency"), "{} should bind dependency source units", package);
+        if ["amm_pool", "atomic_swap", "launch", "multi_phase_dao", "nft", "timelock", "vesting"].contains(&package) {
+            assert!(roles.contains("dependency"), "{} should bind dependency source units", package);
+            assert!(
+                result.metadata.source_units.iter().any(|unit| unit.path.contains("examples/token/src/main.cell")),
+                "{} should include token package source evidence",
+                package
+            );
+        }
+    }
+}
+
+#[test]
+fn non_production_business_examples_model_token_custody_explicitly() {
+    let swap = compile_file(example_path("atomic_swap.cell"), CompileOptions::default()).expect("atomic swap should compile");
+    assert!(
+        action(&swap.metadata, "initiate_swap")
+            .consume_set
+            .iter()
+            .any(|pattern| pattern.binding == "token" && pattern.operation == "consume"),
+        "atomic swap initiation should consume the locked Token"
+    );
+    assert_create(action(&swap.metadata, "claim_with_preimage"), "Token", "atomic swap claim");
+    assert_create(action(&swap.metadata, "refund_after_timeout"), "Token", "atomic swap refund");
+
+    let dao = compile_file(example_path("multi_phase_dao.cell"), CompileOptions::default()).expect("DAO example should compile");
+    let cast_vote = action(&dao.metadata, "cast_vote");
+    assert!(
+        cast_vote.consume_set.iter().any(|pattern| pattern.operation == "consume" && pattern.binding == "proposal_before"),
+        "DAO vote accounting should consume the prior Proposal: {:?}",
+        cast_vote.consume_set
+    );
+    assert!(
+        cast_vote
+            .create_set
+            .iter()
+            .any(|pattern| { pattern.ty == "Proposal" && pattern.operation == "output" && pattern.binding == "proposal_after" }),
+        "DAO vote accounting should create the updated Proposal: {:?}",
+        cast_vote.create_set
+    );
+    assert!(
+        cast_vote.consume_set.iter().any(|pattern| pattern.binding == "voting_token" && pattern.operation == "consume"),
+        "DAO vote custody should consume the voting Token"
+    );
+    assert_create(cast_vote, "VoteReceipt", "DAO vote custody");
+    let redeem_vote = action(&dao.metadata, "redeem_vote");
+    assert!(
+        redeem_vote.consume_set.iter().any(|pattern| pattern.binding == "vote" && pattern.operation == "consume"),
+        "DAO vote redemption should consume the VoteReceipt"
+    );
+    assert_create(redeem_vote, "Token", "DAO vote redemption");
+}
+
+#[test]
+fn ecosystem_identity_adapter_packages_compile() {
+    for package in ["spore-identity-adapter", "rgbpp-identity-adapter"] {
+        let package_root = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples").join("ecosystem").join(package);
+        let result =
+            compile_path(&package_root, CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() })
+                .unwrap_or_else(|err| panic!("failed to compile ecosystem adapter {package}: {err}"));
         assert!(
-            result.metadata.source_units.iter().any(|unit| unit.path.contains("examples/token/src/main.cell")),
-            "{} should include token package source evidence",
-            package
+            !result.metadata.actions.is_empty() || !result.metadata.locks.is_empty(),
+            "ecosystem adapter {package} must expose an executable entry"
         );
     }
 }
@@ -1364,7 +1434,7 @@ fn ckb_scoped_entry_keeps_called_action_helpers() {
     .expect("seed_pool scoped CKB artifact should compile");
     let assembly = std::str::from_utf8(&result.artifact_bytes).expect("assembly should be utf-8");
 
-    assert!(assembly.contains("\nisqrt:\n"), "scoped seed_pool artifact should retain called action helper isqrt");
+    assert!(assembly.contains("\nisqrt:\n"), "scoped seed_pool artifact should retain called pure helper isqrt");
     assert_eq!(result.metadata.constraints.target_profile, "ckb");
     assert!(result.metadata.constraints.ckb.is_some(), "CKB scoped artifact should expose CKB production constraints");
     assert!(result.metadata.constraints.ckb.is_some(), "CKB scoped artifact should report CKB constraints");
@@ -1692,14 +1762,8 @@ fn vesting_phase2_remaining_obligations_are_explicit() {
         "claim_vested should no longer carry fail-closed verifier debt: {:?}",
         claim_vested.fail_closed_runtime_features
     );
-    assert!(
-        claim_vested.verifier_obligations.iter().any(|obligation| {
-            obligation.category == "state-transition"
-                && obligation.feature == "VestingGrant.state"
-                && obligation.status == "checked-runtime"
-        }),
-        "claim_vested should expose the runtime-checked state transition obligation"
-    );
+    assert_create(claim_vested, "Token", "vesting partial claim");
+    assert_create(claim_vested, "VestingGrant", "vesting partial claim");
     assert!(
         claim_vested.transaction_runtime_input_requirements.iter().any(|requirement| {
             requirement.feature == "consume-input:VestingGrant:grant"
@@ -1712,6 +1776,24 @@ fn vesting_phase2_remaining_obligations_are_explicit() {
         }),
         "claim_vested should expose structured consume-input runtime requirements: {:?}",
         claim_vested.transaction_runtime_input_requirements
+    );
+
+    let claim_fully_vested =
+        result.metadata.actions.iter().find(|action| action.name == "claim_fully_vested").expect("claim_fully_vested metadata");
+    assert!(
+        claim_fully_vested.fail_closed_runtime_features.is_empty(),
+        "claim_fully_vested should not carry fail-closed verifier debt: {:?}",
+        claim_fully_vested.fail_closed_runtime_features
+    );
+    assert_create(claim_fully_vested, "Token", "vesting terminal claim");
+    assert_create(claim_fully_vested, "VestingGrant", "vesting terminal claim");
+    assert!(
+        claim_fully_vested.verifier_obligations.iter().any(|obligation| {
+            obligation.category == "state-transition"
+                && obligation.feature == "VestingGrant.state"
+                && obligation.status == "checked-runtime"
+        }),
+        "claim_fully_vested should expose the runtime-checked Active -> FullyClaimed transition"
     );
     assert!(
         claim_vested.transaction_runtime_input_requirements.iter().any(|requirement| {
@@ -1848,6 +1930,25 @@ fn nft_core_actions_expose_action_specific_builder_metadata() {
     assert_destroy(burn, "nft", "nft burn");
     assert_runtime_requirement(burn, "destroy-input:NFT:nft", "checked-runtime", "destroy-input-data", "nft burn");
     assert_runtime_requirement(burn, "destroy-output-scan:NFT", "checked-runtime", "destroy-output-absence", "nft burn");
+
+    for settlement in ["buy_from_listing", "accept_offer"] {
+        let settlement = action(&result.metadata, settlement);
+        assert_eq!(
+            settlement
+                .consume_set
+                .iter()
+                .filter(|pattern| matches!(pattern.binding.as_str(), "royalty_payment" | "seller_payment"))
+                .count(),
+            2
+        );
+        assert_eq!(settlement.create_set.iter().filter(|pattern| pattern.ty == "Token").count(), 2);
+        assert!(
+            settlement.fail_closed_runtime_features.is_empty(),
+            "{} should keep typed Token settlement verifier-covered: {:?}",
+            settlement.name,
+            settlement.fail_closed_runtime_features
+        );
+    }
 }
 
 #[test]
@@ -1891,6 +1992,7 @@ fn timelock_core_actions_expose_time_and_release_metadata() {
     assert_destroy(execute_release, "locked_asset", "timelock execute_release");
     assert_destroy(execute_release, "request", "timelock execute_release");
     assert_create(execute_release, "ReleaseRecord", "timelock execute_release");
+    assert_create(execute_release, "Token", "timelock execute_release");
     assert_runtime_requirement(
         execute_release,
         "destroy-input:TimeLock:time_lock",
@@ -1921,6 +2023,7 @@ fn timelock_core_actions_expose_time_and_release_metadata() {
     );
     let execute_emergency_release = action(&result.metadata, "execute_emergency_release");
     assert_create(execute_emergency_release, "ReleaseRecord", "timelock execute_emergency_release");
+    assert_create(execute_emergency_release, "Token", "timelock execute_emergency_release");
     assert_runtime_requirement(
         execute_emergency_release,
         "create-output:ReleaseRecord:record",
@@ -1999,7 +2102,7 @@ fn multisig_core_actions_expose_threshold_flow_metadata() {
     );
     assert!(
         asm.contains("# cellscript abi: verify output dynamic field Proposal.data as constructed Molecule byte vector len=0")
-            && asm.contains("# cellscript abi: verify output dynamic field Proposal.signatures as empty Molecule vector"),
+            && asm.contains("# cellscript abi: verify output dynamic field Proposal.approvals as empty Molecule vector"),
         "multisig propose_transfer should verify empty Molecule vector output fields:\n{}",
         asm
     );
@@ -2010,18 +2113,18 @@ fn multisig_core_actions_expose_threshold_flow_metadata() {
         asm
     );
 
-    let add_signature = action(&result.metadata, "add_signature");
-    assert_eq!(add_signature.effect_class, "Mutating");
-    assert_create(add_signature, "SignatureConfirmation", "multisig add_signature");
-    assert_no_runtime_requirement(add_signature, "mutable-cell:Proposal", "mutate-field-equality", "multisig add_signature");
-    assert_no_runtime_requirement(add_signature, "mutable-cell:Proposal", "mutate-field-transition", "multisig add_signature");
-    assert_input_output_binding(add_signature, "Proposal", "proposal_before", "proposal_after", "multisig add_signature");
+    let record_approval = action(&result.metadata, "record_approval");
+    assert_eq!(record_approval.effect_class, "Mutating");
+    assert_create(record_approval, "ApprovalConfirmation", "multisig record_approval");
+    assert_no_runtime_requirement(record_approval, "mutable-cell:Proposal", "mutate-field-equality", "multisig record_approval");
+    assert_no_runtime_requirement(record_approval, "mutable-cell:Proposal", "mutate-field-transition", "multisig record_approval");
+    assert_input_output_binding(record_approval, "Proposal", "proposal_before", "proposal_after", "multisig record_approval");
     assert!(
-        add_signature.consume_set.iter().any(|pattern| pattern.operation == "input" && pattern.binding == "proposal_before")
-            && add_signature.create_set.iter().any(|pattern| pattern.operation == "output" && pattern.binding == "proposal_after"),
-        "multisig add_signature should expose Proposal input/output bindings: {:?} {:?}",
-        add_signature.consume_set,
-        add_signature.create_set
+        record_approval.consume_set.iter().any(|pattern| pattern.operation == "input" && pattern.binding == "proposal_before")
+            && record_approval.create_set.iter().any(|pattern| pattern.operation == "output" && pattern.binding == "proposal_after"),
+        "multisig record_approval should expose Proposal input/output bindings: {:?} {:?}",
+        record_approval.consume_set,
+        record_approval.create_set
     );
 
     let propose_add_signer = action(&result.metadata, "propose_add_signer");
@@ -2151,10 +2254,11 @@ fn amm_pool_input_output_params_are_scheduler_visible() {
         "AMM input/output bindings should bind Pool input/output parameters through transaction cells:\n{}",
         asm
     );
-    for field in ["reserve_a", "reserve_b", "total_lp"] {
+    for field in ["token_a_type", "token_b_type", "reserve_a", "reserve_b", "total_lp"] {
         assert!(
             asm.contains(&format!("# cellscript abi: schema field Pool.{field}"))
                 || asm.contains(&format!("# cellscript abi: verify output field Pool.{field}"))
+                || asm.contains(&format!("# cellscript abi: verify output bytes field Pool.{field}"))
                 || asm.contains(&format!("# cellscript abi: expected field Pool.{field}")),
             "AMM input/output bindings should verify Pool {field} through explicit require checks:\n{}",
             asm
@@ -2174,8 +2278,8 @@ fn launch_seed_pool_composition_is_scheduler_visible() {
     let launch_token = result.metadata.actions.iter().find(|action| action.name == "launch_token").expect("launch_token metadata");
 
     assert!(
-        !asm.contains("\nseed_pool:\n") && !asm.contains("\nisqrt:\n"),
-        "launch_token models output topology directly; action outputs are not runtime return values"
+        !asm.contains("\nseed_pool:\n") && asm.contains("\nisqrt:\n"),
+        "launch_token should materialise Pool outputs directly while retaining its local pure isqrt helper"
     );
     assert!(!asm.contains("\nadd_liquidity:\n"), "launch_token should not link unrelated AMM actions");
     assert!(!asm.contains("\nremove_liquidity:\n"), "launch_token should not link unrelated AMM actions");

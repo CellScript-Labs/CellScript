@@ -10,7 +10,7 @@ use cellscript::fungible_token::Token
 shared DaoConfig has store, create, read_ref {
     admin: Address,
     voting_token_symbol: [u8; 8],
-    quorum_bps: u64,
+    quorum_votes: u64,
 }
 
 enum ProposalState {
@@ -36,6 +36,7 @@ receipt VoteReceipt has store, create, consume, burn {
     voter: Address,
     weight: u64,
     support: bool,
+    token_symbol: [u8; 8],
 }
 
 receipt ExecutionRecord has create {
@@ -54,6 +55,16 @@ flow Proposal.state {
     Active -> Defeated;
 }
 
+action create_dao_config(
+    admin: Address,
+    voting_token_symbol: [u8; 8],
+    quorum_votes: u64,
+) -> config: DaoConfig {
+    verification
+        require quorum_votes > 0, "zero quorum"
+        create config = DaoConfig { admin, voting_token_symbol, quorum_votes } with_lock(admin)
+}
+
 action propose(
     read config: DaoConfig,
     proposer: Address,
@@ -64,18 +75,19 @@ action propose(
     verification
         require voting_duration > 0, "zero voting duration"
         let now = env::current_timepoint()
+        require voting_duration <= 18446744073709551615 - now, "voting end overflow"
         create proposal = Proposal { proposal_id, state: ProposalState::Draft, proposer, for_votes: 0, against_votes: 0, start_timepoint: now, end_timepoint: now + voting_duration, execution_payload_hash } with_lock(proposer)
 
 }
 
 action activate_proposal(
     proposal_before: Proposal,
-    current_timepoint: u64,
 ) -> proposal_after: Proposal {
     transition proposal_before.state: Draft -> proposal_after.state: Active
     verification
+        let now = env::current_timepoint()
         require proposal_before.state == ProposalState::Draft, "not draft"
-        require current_timepoint >= proposal_before.start_timepoint, "not started"
+        require now >= proposal_before.start_timepoint, "not started"
         preserve proposal_after from proposal_before {
             proposal_id
             proposer
@@ -85,41 +97,68 @@ action activate_proposal(
             execution_payload_hash
         }
         require proposal_after.state == ProposalState::Active
-        require proposal_after.start_timepoint == current_timepoint
+        require proposal_after.start_timepoint == now
         consume proposal_before
-        create proposal_after = Proposal { proposal_id: proposal_before.proposal_id, state: ProposalState::Active, proposer: proposal_before.proposer, for_votes: proposal_before.for_votes, against_votes: proposal_before.against_votes, start_timepoint: current_timepoint, end_timepoint: proposal_before.end_timepoint, execution_payload_hash: proposal_before.execution_payload_hash } with_lock(proposal_before.proposer)
+        create proposal_after = Proposal { proposal_id: proposal_before.proposal_id, state: ProposalState::Active, proposer: proposal_before.proposer, for_votes: proposal_before.for_votes, against_votes: proposal_before.against_votes, start_timepoint: now, end_timepoint: proposal_before.end_timepoint, execution_payload_hash: proposal_before.execution_payload_hash } with_lock(proposal_before.proposer)
 
 }
 
 action cast_vote(
-    read proposal: Proposal,
+    proposal_before: Proposal,
+    read config: DaoConfig,
     voting_token: Token,
     voter: Address,
     support: bool,
-    current_timepoint: u64,
-) -> (vote: VoteReceipt) {
+) -> (proposal_after: Proposal, vote: VoteReceipt) {
     verification
-        require proposal.state == ProposalState::Active, "proposal not active"
-        require current_timepoint < proposal.end_timepoint, "voting closed"
+        let now = env::current_timepoint()
+        require proposal_before.state == ProposalState::Active, "proposal not active"
+        require now < proposal_before.end_timepoint, "voting closed"
         require voting_token.amount > 0, "zero weight"
+        require voting_token.symbol == config.voting_token_symbol, "wrong voting token"
+        require !support || voting_token.amount <= 18446744073709551615 - proposal_before.for_votes, "for-vote overflow"
+        require support || voting_token.amount <= 18446744073709551615 - proposal_before.against_votes, "against-vote overflow"
+        let for_votes = if support { proposal_before.for_votes + voting_token.amount } else { proposal_before.for_votes }
+        let against_votes = if support { proposal_before.against_votes } else { proposal_before.against_votes + voting_token.amount }
+        preserve proposal_after from proposal_before {
+            proposal_id
+            proposer
+            start_timepoint
+            end_timepoint
+            execution_payload_hash
+            state
+        }
+        require proposal_after.for_votes == for_votes
+        require proposal_after.against_votes == against_votes
+        consume proposal_before
         consume voting_token
-        create vote = VoteReceipt { proposal_id: proposal.proposal_id, voter, weight: voting_token.amount, support } with_lock(voter)
+        create proposal_after = Proposal { proposal_id: proposal_before.proposal_id, state: ProposalState::Active, proposer: proposal_before.proposer, for_votes, against_votes, start_timepoint: proposal_before.start_timepoint, end_timepoint: proposal_before.end_timepoint, execution_payload_hash: proposal_before.execution_payload_hash } with_lock(proposal_before.proposer)
+        create vote = VoteReceipt { proposal_id: proposal_before.proposal_id, voter, weight: voting_token.amount, support, token_symbol: voting_token.symbol } with_lock(voter)
 
+}
+
+action redeem_vote(read proposal: Proposal, vote: VoteReceipt) -> token: Token {
+    verification
+        let now = env::current_timepoint()
+        require now >= proposal.end_timepoint, "voting not closed"
+        require vote.proposal_id == proposal.proposal_id, "proposal mismatch"
+        require vote.weight > 0, "zero vote weight"
+        consume vote
+        create token = Token { amount: vote.weight, symbol: vote.token_symbol } with_lock(vote.voter)
 }
 
 action execute_proposal(
     proposal_before: Proposal,
     read config: DaoConfig,
-    current_timepoint: u64,
 ) -> (proposal_after: Proposal, record: ExecutionRecord) {
     transition proposal_before.state: Active -> proposal_after.state: Executed
     verification
+        let now = env::current_timepoint()
         require proposal_before.state == ProposalState::Active, "not active"
-        require current_timepoint >= proposal_before.end_timepoint, "voting not closed"
+        require now >= proposal_before.end_timepoint, "voting not closed"
+        require proposal_before.against_votes <= 18446744073709551615 - proposal_before.for_votes, "vote total overflow"
         let total_votes = proposal_before.for_votes + proposal_before.against_votes
-        require total_votes > 0, "no votes cast"
-        let quorum_threshold = total_votes * config.quorum_bps / 10000
-        require proposal_before.for_votes >= quorum_threshold, "quorum not met"
+        require total_votes >= config.quorum_votes, "quorum not met"
         require proposal_before.for_votes > proposal_before.against_votes, "not enough for-votes"
         preserve proposal_after from proposal_before {
             proposal_id
@@ -133,18 +172,18 @@ action execute_proposal(
         require proposal_after.state == ProposalState::Executed
         consume proposal_before
         create proposal_after = Proposal { proposal_id: proposal_before.proposal_id, state: ProposalState::Executed, proposer: proposal_before.proposer, for_votes: proposal_before.for_votes, against_votes: proposal_before.against_votes, start_timepoint: proposal_before.start_timepoint, end_timepoint: proposal_before.end_timepoint, execution_payload_hash: proposal_before.execution_payload_hash } with_lock(proposal_before.proposer)
-        create record = ExecutionRecord { proposal_id: proposal_before.proposal_id, executed_at: current_timepoint, for_votes: proposal_before.for_votes, against_votes: proposal_before.against_votes }
+        create record = ExecutionRecord { proposal_id: proposal_before.proposal_id, executed_at: now, for_votes: proposal_before.for_votes, against_votes: proposal_before.against_votes }
 
 }
 
 action defeat_proposal(
     proposal_before: Proposal,
-    current_timepoint: u64,
 ) -> proposal_after: Proposal {
     transition proposal_before.state: Active -> proposal_after.state: Defeated
     verification
+        let now = env::current_timepoint()
         require proposal_before.state == ProposalState::Active, "not active"
-        require current_timepoint >= proposal_before.end_timepoint, "voting not closed"
+        require now >= proposal_before.end_timepoint, "voting not closed"
         require proposal_before.for_votes <= proposal_before.against_votes, "still passing"
         preserve proposal_after from proposal_before {
             proposal_id

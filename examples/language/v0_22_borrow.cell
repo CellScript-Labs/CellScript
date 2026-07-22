@@ -1,0 +1,20 @@
+module cellscript::language::v0_22_borrow
+
+resource BorrowedToken has store, consume, burn {
+    amount: u64,
+}
+
+#[effect(Pure)]
+fn amount_is(token: &BorrowedToken, expected: u64) -> bool {
+    return token.amount == expected
+}
+
+action inspect_then_destroy(token: BorrowedToken, expected: u64) -> u64 {
+    verification
+        borrow token as view {
+            require amount_is(view, expected)
+            require view.amount > 0
+        }
+        destroy token
+        return expected
+}

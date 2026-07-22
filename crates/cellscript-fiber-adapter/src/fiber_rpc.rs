@@ -30,12 +30,18 @@ impl FiberRpcClient {
     pub fn trusted_local(url: impl Into<String>) -> anyhow::Result<Self> {
         let url = url.into();
         let parsed = reqwest::Url::parse(&url)?;
+        if !matches!(parsed.scheme(), "http" | "https") {
+            anyhow::bail!("Fiber RPC URL must use http or https");
+        }
         let host = parsed.host_str().ok_or_else(|| anyhow::anyhow!("Fiber RPC URL has no host"))?;
         let trusted = host == "localhost" || host == "::1" || host.parse::<std::net::IpAddr>().is_ok_and(|ip| ip.is_loopback());
         if !trusted {
             anyhow::bail!("refusing unauthenticated non-loopback Fiber RPC endpoint '{url}'");
         }
-        let client = reqwest::blocking::Client::builder().timeout(std::time::Duration::from_secs(10)).build()?;
+        let client = reqwest::blocking::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(std::time::Duration::from_secs(10))
+            .build()?;
         Ok(Self { url, client })
     }
 
@@ -153,16 +159,33 @@ fn udt_semantically_equal(observed: &Value, expected: &FiberUdtArgInfo) -> bool 
     let Some(dependencies) = observed.get("cell_deps").and_then(Value::as_array) else {
         return false;
     };
-    dependencies.len() == expected.cell_deps.len()
-        && expected
-            .cell_deps
+    dependencies_semantically_equal(dependencies, &expected.cell_deps)
+}
+
+fn dependencies_semantically_equal(observed: &[Value], expected: &[crate::FiberUdtDep]) -> bool {
+    if observed.len() != expected.len() {
+        return false;
+    }
+    let mut matched = vec![false; observed.len()];
+    expected.iter().all(|expected_dep| {
+        let Some(index) = observed
             .iter()
-            .all(|expected_dep| dependencies.iter().any(|observed_dep| dependency_equal(observed_dep, expected_dep)))
+            .enumerate()
+            .position(|(index, observed_dep)| !matched[index] && dependency_equal(observed_dep, expected_dep))
+        else {
+            return false;
+        };
+        matched[index] = true;
+        true
+    })
 }
 
 fn dependency_equal(observed: &Value, expected: &crate::FiberUdtDep) -> bool {
     match (&expected.cell_dep, &expected.type_id) {
         (Some(expected), None) => {
+            if observed.get("type_id").is_some_and(|value| !value.is_null()) {
+                return false;
+            }
             let Some(cell_dep) = observed.get("cell_dep").filter(|value| !value.is_null()) else {
                 return false;
             };
@@ -176,6 +199,9 @@ fn dependency_equal(observed: &Value, expected: &crate::FiberUdtDep) -> bool {
                     == Some(expected.dep_type.to_ascii_lowercase())
         }
         (None, Some(expected)) => {
+            if observed.get("cell_dep").is_some_and(|value| !value.is_null()) {
+                return false;
+            }
             let Some(type_id) = observed.get("type_id").filter(|value| !value.is_null()) else {
                 return false;
             };
@@ -220,6 +246,8 @@ fn parse_u128(value: Option<&Value>) -> Option<u128> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
 
     #[test]
     fn semantic_config_comparison_accepts_fiber_hex_quantities() {
@@ -242,7 +270,7 @@ mod tests {
                 type_id: None,
             }],
         };
-        let observed = json!({
+        let mut observed = json!({
             "name": "asset",
             "script": {"code_hash": expected.script.code_hash, "hash_type": "Data2", "args": "^0x22$"},
             "auto_accept_amount": "0x2a",
@@ -252,10 +280,42 @@ mod tests {
             }]
         });
         assert!(udt_semantically_equal(&observed, &expected));
+
+        observed["cell_deps"][0]["type_id"] = json!({
+            "code_hash": format!("0x{}", "44".repeat(32)),
+            "hash_type": "type",
+            "args": format!("0x{}", "55".repeat(32)),
+        });
+        assert!(!udt_semantically_equal(&observed, &expected));
     }
 
     #[test]
     fn remote_unauthenticated_rpc_is_rejected() {
         assert!(FiberRpcClient::trusted_local("http://example.com:8227").is_err());
+        assert!(FiberRpcClient::trusted_local("ftp://127.0.0.1:8227").is_err());
+    }
+
+    #[test]
+    fn trusted_local_rpc_does_not_follow_redirects() {
+        let target = TcpListener::bind("127.0.0.1:0").unwrap();
+        target.set_nonblocking(true).unwrap();
+        let target_url = format!("http://{}", target.local_addr().unwrap());
+        let redirect = TcpListener::bind("127.0.0.1:0").unwrap();
+        let redirect_url = format!("http://{}", redirect.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = redirect.accept().unwrap();
+            let mut request = [0u8; 4096];
+            let _ = stream.read(&mut request).unwrap();
+            write!(
+                stream,
+                "HTTP/1.1 307 Temporary Redirect\r\nLocation: {target_url}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            )
+            .unwrap();
+        });
+
+        let client = FiberRpcClient::trusted_local(redirect_url).unwrap();
+        assert!(client.rpc("node_info", json!([])).is_err());
+        server.join().unwrap();
+        assert!(matches!(target.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock));
     }
 }

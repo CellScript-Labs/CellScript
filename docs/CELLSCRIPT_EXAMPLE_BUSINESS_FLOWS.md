@@ -15,7 +15,7 @@ examples on a local CKB chain:
 - `token.cell`
 - `vesting.cell`
 
-For those examples, all 44 business actions are strict-compiled, deployed, dry-
+For those examples, all 43 business actions are strict-compiled, deployed, dry-
 run, committed, and measured with builder-generated CKB transactions. The report
 also records cycles, consensus transaction size, occupied capacity, malformed
 transaction rejection, and output-capacity sufficiency.
@@ -102,7 +102,7 @@ flowchart TD
 
     H["Pool input Cell"] --> I["swap_a_for_b"]
     J["Token A input Cell"] --> I
-    I --> K["Check input symbol, live reserves, fee cap, arithmetic bounds, and slippage"]
+    I --> K["Check input TypeHash/symbol, live reserves, fee cap, arithmetic bounds, and slippage"]
     K --> L["Consume input token"]
     L --> M["Update Pool reserves"]
     M --> N["Create Token B output Cell"]
@@ -110,7 +110,7 @@ flowchart TD
     O["Pool input Cell"] --> P["add_liquidity"]
     Q["Token A input Cell"] --> P
     R["Token B input Cell"] --> P
-    P --> S["Check token symbols, live reserves, deposit bounds, and LP mint amount"]
+    P --> S["Check both token TypeHashes/symbols, live reserves, deposit bounds, and LP mint amount"]
     S --> T["Update Pool reserves and total LP"]
     T --> U["Create LPReceipt output Cell"]
 
@@ -122,8 +122,9 @@ flowchart TD
     AA --> AB["Create Token A and Token B outputs"]
 ```
 
-CKB acceptance status: all six actions are builder-backed and run on-chain,
-including the helper actions `isqrt` and `min` as scoped entries. The AMM is
+CKB acceptance status: all four business actions are builder-backed and run
+on-chain. The pure `isqrt` and `min` functions are linked only when a selected
+entry calls them; they are not transaction entry points. The AMM is
 still an educational one-direction constant-product pool, not a complete DEX:
 there is no oracle/TWAP, routing, protocol-fee withdrawal, or concentrated
 liquidity. There are no lock entries in this example.
@@ -139,9 +140,8 @@ flowchart TD
     B --> D["Check initial mint, pool seed, and distribution totals"]
     D --> E["Create MintAuthority output Cell"]
     E --> F["Create recipient Token outputs"]
-    F --> G["Create pool seed Token"]
-    G --> H["Materialise Pool and LPReceipt outputs"]
-    H --> I["Create Pool and LPReceipt outputs"]
+    F --> G["Bind both token TypeHashes and reserves in Pool"]
+    G --> H["Materialise Pool and LPReceipt outputs with geometric initial supply"]
 
     J["Bootstrap token parameters"] --> K["bootstrap_token"]
     K --> L["Check initial mint and recipient totals"]
@@ -159,8 +159,11 @@ materialise a `Pool` plus `LPReceipt` directly. It does not call the
 
 ## `multisig.cell`
 
-Business purpose: threshold wallet creation, proposal records, signature
-collection, execution, cancellation, and signer/threshold governance proposals.
+Business purpose: threshold wallet creation, proposal records, non-cryptographic
+approval collection, execution, cancellation, and member/threshold governance
+proposals. The legacy filename does not imply signature verification: approval
+addresses and reported times are witness data, while a surrounding Lock Script
+must authenticate authority.
 
 ```mermaid
 flowchart TD
@@ -173,11 +176,11 @@ flowchart TD
     F --> G["Increment wallet nonce"]
     G --> H["Create transfer Proposal receipt"]
 
-    H --> I["add_signature"]
+    H --> I["record_approval"]
     D --> I
-    I --> J["Check signer, expiry, and no duplicate signature"]
-    J --> K["Append Signature to proposed Proposal output"]
-    K --> L["Create SignatureConfirmation receipt"]
+    I --> J["Check member, reported expiry, and no duplicate approval"]
+    J --> K["Append Approval to proposed Proposal output"]
+    K --> L["Create ApprovalConfirmation receipt"]
 
     H --> M["execute_proposal"]
     D --> M
@@ -201,7 +204,7 @@ flowchart LR
     A["is_signer_lock"] --> B["Signer membership predicate"]
     C["can_execute"] --> D["Threshold and expiry predicate"]
     E["can_cancel"] --> F["Proposer predicate"]
-    G["has_enough_signatures"] --> H["Threshold predicate"]
+    G["has_enough_approvals"] --> H["Threshold predicate"]
     I["not_expired"] --> J["Expiry predicate"]
 ```
 
@@ -238,20 +241,22 @@ flowchart TD
 
     F --> O["buy_from_listing"]
     L --> O
-    O --> P["Check payment covers price"]
+    BA["Royalty and seller Token inputs"] --> O
+    O --> P["Check collection/listing identity and exact payment split"]
     P --> Q["Update NFT.owner with buyer"]
     Q --> R["Destroy Listing"]
-    R --> S["Create royalty and seller payment receipts"]
+    R --> S["Relock royalty and seller Token payouts"]
 
     T["Offer parameters"] --> U["create_offer"]
     U --> V["Create Offer receipt"]
 
     F --> W["accept_offer"]
     V --> W
-    W --> X["Check offer not expired"]
+    BB["Royalty and seller Token inputs"] --> W
+    W --> X["Check collection, payment token, amount split, and expiry"]
     X --> Y["Update NFT.owner with buyer"]
     Y --> Z["Destroy Offer"]
-    Z --> AA["Create royalty and seller payment receipts"]
+    Z --> AA["Relock royalty and seller Token payouts"]
 
     F --> AB["burn"]
     AB --> AC["Destroy NFT"]
@@ -299,8 +304,9 @@ flowchart TD
 
     D --> I["lock_asset"]
     H --> I
-    I --> J["Check amount > 0"]
-    J --> K["Create LockedAsset Cell bound to lock hash"]
+    BA["Token input Cell"] --> I
+    I --> J["Check amount > 0 and consume Token"]
+    J --> K["Create LockedAsset Cell bound to token symbol and lock id"]
 
     D --> L["request_release"]
     L --> M["Check lock is unlockable"]
@@ -311,14 +317,14 @@ flowchart TD
     N --> O
     O --> P["Check owner, unlock height, and hash matches"]
     P --> Q["Destroy TimeLock, LockedAsset, and ReleaseRequest"]
-    Q --> R["Create ReleaseRecord receipt"]
+    Q --> R["Create released Token and ReleaseRecord outputs"]
 
     D --> S["request_emergency_release"]
     S --> T["Check owner and not already unlockable"]
     T --> U["Create EmergencyRelease receipt"]
 
     U --> V["approve_emergency_release"]
-    V --> W["Check approver not duplicated"]
+    V --> W["Reject requester/self and duplicate approvals"]
     W --> X["Append approver to proposed EmergencyRelease output"]
 
     D --> Y["execute_emergency_release"]
@@ -326,7 +332,7 @@ flowchart TD
     U --> Y
     Y --> Z["Check owner, approvals, and hash matches"]
     Z --> AA["Destroy locked inputs"]
-    AA --> AB["Create ReleaseRecord receipt"]
+    AA --> AB["Create released Token and ReleaseRecord outputs"]
 
     D --> AC["extend_lock"]
     AC --> AD["Check owner and still locked"]
@@ -370,12 +376,16 @@ flowchart TD
     H --> I["Consume grant tokens"]
     I --> J["Create VestingGrant receipt"]
 
-    J --> K["claim_vested"]
-    K --> L["Check cliff reached and not fully claimed"]
+    J --> K["claim_vested before end"]
+    K --> L["Check cliff reached and grant still active"]
     L --> M["Compute vested and claimable amount"]
     M --> N["Consume old VestingGrant"]
     N --> O["Create claim Token output"]
     O --> P["Create updated VestingGrant receipt"]
+
+    J --> W["claim_fully_vested at/after end"]
+    W --> X["Pay remaining Token amount"]
+    X --> Y["Create terminal FullyClaimed grant"]
 
     D --> Q["revoke_grant"]
     J --> Q
@@ -393,7 +403,7 @@ flowchart LR
     A["vesting_admin"] --> B["claimed_admin equals config.admin"]
 ```
 
-CKB acceptance status: all four actions are builder-backed and run on-chain. The
+CKB acceptance status: all five actions are builder-backed and run on-chain. The
 `vesting_admin` lock strict-compiles and has builder-backed valid-spend and
 invalid-spend cases. The `claimed_admin` action parameter is not, by itself, a
 signature authorization proof.

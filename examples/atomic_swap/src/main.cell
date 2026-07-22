@@ -1,5 +1,7 @@
 module cellscript::atomic_swap
 
+use cellscript::fungible_token::Token
+
 // HTLC-style atomic swap: a participant locks an asset behind a hashlock +
 // timelock, then either the counterparty claims it by revealing a preimage,
 // or the original owner refunds it once the timeout expires. This example
@@ -20,7 +22,7 @@ resource SwapLock has store, create, consume, replace, burn, read_ref {
     participant: Address,
     hashlock: Hash,
     timeout_timepoint: u64,
-    asset_type: AssetType,
+    token_symbol: [u8; 8],
     amount: u64,
     state: SwapState,
 }
@@ -38,11 +40,6 @@ receipt RefundClaim has create, consume, burn {
     refunded_at: u64,
 }
 
-enum AssetType {
-    Native,
-    Token(Hash),
-}
-
 flow SwapLock.state {
     initial Pending;
     terminal Claimed, Refunded;
@@ -57,13 +54,15 @@ action initiate_swap(
     participant: Address,
     hashlock: Hash,
     timeout_timepoint: u64,
-    asset_type: AssetType,
-    amount: u64,
+    token: Token,
 ) -> swap_lock: SwapLock {
     verification
-        require amount > 0, "zero amount"
-        require timeout_timepoint > 0, "zero timeout"
-        create swap_lock = SwapLock { swap_id, initiator, participant, hashlock, timeout_timepoint, asset_type, amount, state: SwapState::Pending } with_lock(initiator)
+        let now = env::current_timepoint()
+        require token.amount > 0, "zero amount"
+        require timeout_timepoint > now, "timeout is not in the future"
+        require timeout_timepoint <= 18446744073709551515, "refund timeout overflow"
+        consume token
+        create swap_lock = SwapLock { swap_id, initiator, participant, hashlock, timeout_timepoint, token_symbol: token.symbol, amount: token.amount, state: SwapState::Pending } with_lock(initiator)
 
 }
 
@@ -71,12 +70,12 @@ action claim_with_preimage(
     lock: SwapLock,
     preimage: Hash,
     claimed_by: Address,
-    current_timepoint: u64,
-) -> (claim: PreimageClaim, updated_lock: SwapLock) {
+) -> (released_token: Token, claim: PreimageClaim, updated_lock: SwapLock) {
     transition lock.state: Pending -> updated_lock.state: Claimed
     verification
+        let now = env::current_timepoint()
         require claimed_by == lock.participant, "not the participant"
-        require current_timepoint < lock.timeout_timepoint, "claim window expired"
+        require now < lock.timeout_timepoint, "claim window expired"
         require hash_blake2b(preimage) == lock.hashlock, "wrong preimage"
         require lock.state == SwapState::Pending, "not pending"
         preserve updated_lock from lock {
@@ -85,36 +84,38 @@ action claim_with_preimage(
             participant
             hashlock
             timeout_timepoint
-            asset_type
+            token_symbol
             amount
         }
         consume lock
-        create claim = PreimageClaim { swap_id: lock.swap_id, preimage, claimed_by, claimed_at: current_timepoint }
-        create updated_lock = SwapLock { swap_id: lock.swap_id, initiator: lock.initiator, participant: lock.participant, hashlock: lock.hashlock, timeout_timepoint: lock.timeout_timepoint, asset_type: lock.asset_type, amount: lock.amount, state: SwapState::Claimed } with_lock(lock.initiator)
+        create released_token = Token { amount: lock.amount, symbol: lock.token_symbol } with_lock(lock.participant)
+        create claim = PreimageClaim { swap_id: lock.swap_id, preimage, claimed_by, claimed_at: now }
+        create updated_lock = SwapLock { swap_id: lock.swap_id, initiator: lock.initiator, participant: lock.participant, hashlock: lock.hashlock, timeout_timepoint: lock.timeout_timepoint, token_symbol: lock.token_symbol, amount: lock.amount, state: SwapState::Claimed } with_lock(lock.initiator)
 
 }
 
 action refund_after_timeout(
     lock: SwapLock,
     refunded_by: Address,
-    current_timepoint: u64,
-) -> (refund: RefundClaim, updated_lock: SwapLock) {
+) -> (released_token: Token, refund: RefundClaim, updated_lock: SwapLock) {
     transition lock.state: Pending -> updated_lock.state: Refunded
     verification
+        let now = env::current_timepoint()
         require refunded_by == lock.initiator, "not the initiator"
-        require current_timepoint >= lock.timeout_timepoint + REFUND_LOCK_PERIOD, "timeout not reached"
+        require now >= lock.timeout_timepoint + REFUND_LOCK_PERIOD, "timeout not reached"
         require lock.state == SwapState::Pending, "not pending"
         preserve updated_lock from lock {
             swap_id
             participant
             hashlock
             timeout_timepoint
-            asset_type
+            token_symbol
             amount
         }
         consume lock
-        create refund = RefundClaim { swap_id: lock.swap_id, refunded_by, refunded_at: current_timepoint }
-        create updated_lock = SwapLock { swap_id: lock.swap_id, initiator: lock.initiator, participant: lock.participant, hashlock: lock.hashlock, timeout_timepoint: lock.timeout_timepoint, asset_type: lock.asset_type, amount: lock.amount, state: SwapState::Refunded } with_lock(refunded_by)
+        create released_token = Token { amount: lock.amount, symbol: lock.token_symbol } with_lock(lock.initiator)
+        create refund = RefundClaim { swap_id: lock.swap_id, refunded_by, refunded_at: now }
+        create updated_lock = SwapLock { swap_id: lock.swap_id, initiator: lock.initiator, participant: lock.participant, hashlock: lock.hashlock, timeout_timepoint: lock.timeout_timepoint, token_symbol: lock.token_symbol, amount: lock.amount, state: SwapState::Refunded } with_lock(refunded_by)
 
 }
 

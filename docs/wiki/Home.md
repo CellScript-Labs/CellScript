@@ -56,6 +56,10 @@ If you already know what you need, jump directly:
 - driving `cellc` from an agent: read [Agentic Loops and cellscript-mcp](Tutorial-13-Agentic-Loops-and-cellscript-mcp.md).
 - using CellScript fungible assets with Fiber: read the
   [bounded Fiber interoperability guide](https://github.com/CellScript-Labs/CellScript/blob/nightly-0.22/examples/fiber/README.md).
+- evaluating Spore or RGB++ integration: read
+  [Spore and RGB++ Interoperability Boundaries](Spore-and-RGBPP-Interop-Boundaries.md).
+- spawning a pinned BIP340 verifier: read the
+  [verifier CellDep ABI](../CELLSCRIPT_SIGNATURE_VERIFIER_ABI.md).
 
 ## Tutorial Path
 

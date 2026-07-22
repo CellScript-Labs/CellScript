@@ -74,7 +74,12 @@ impl HttpCkbEvidenceProvider {
     pub fn new(ckb_rpc_url: impl Into<String>, ckb_indexer_rpc_url: Option<String>) -> anyhow::Result<Self> {
         let ckb_rpc_url = ckb_rpc_url.into();
         let ckb_indexer_rpc_url = ckb_indexer_rpc_url.unwrap_or_else(|| ckb_rpc_url.clone());
-        let client = reqwest::blocking::Client::builder().timeout(std::time::Duration::from_secs(15)).build()?;
+        validate_rpc_url(&ckb_rpc_url, "CKB RPC")?;
+        validate_rpc_url(&ckb_indexer_rpc_url, "CKB indexer RPC")?;
+        let client = reqwest::blocking::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(std::time::Duration::from_secs(15))
+            .build()?;
         Ok(Self { ckb_rpc_url, ckb_indexer_rpc_url, client })
     }
 
@@ -91,6 +96,14 @@ impl HttpCkbEvidenceProvider {
         }
         response.get("result").cloned().ok_or_else(|| anyhow::anyhow!("CKB JSON-RPC method {method} returned no result"))
     }
+}
+
+fn validate_rpc_url(url: &str, label: &str) -> anyhow::Result<()> {
+    let parsed = reqwest::Url::parse(url)?;
+    if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+        anyhow::bail!("{label} URL must be an absolute http or https URL");
+    }
+    Ok(())
 }
 
 impl CkbEvidenceProvider for HttpCkbEvidenceProvider {
@@ -294,11 +307,13 @@ pub fn resolve_asset_from_action_plan(
 ) -> anyhow::Result<ResolvedAssetScript> {
     let path = path.as_ref();
     let plan = cellscript_ckb_adapter::load_action_plan(path)?;
-    if let Some(plan_hash) = plan.artifact_hash.as_deref() {
-        let plan_hash = canonical_digest(plan_hash, "action plan artifact_hash")?;
-        if plan_hash != descriptor.artifact_hash {
-            anyhow::bail!("materialized ActionPlan artifact hash does not match the checked fungible artifact");
-        }
+    let plan_hash = plan
+        .artifact_hash
+        .as_deref()
+        .ok_or_else(|| anyhow::anyhow!("materialized ActionPlan is missing artifact_hash for the checked fungible artifact"))?;
+    let plan_hash = canonical_digest(plan_hash, "action plan artifact_hash")?;
+    if plan_hash != descriptor.artifact_hash {
+        anyhow::bail!("materialized ActionPlan artifact hash does not match the checked fungible artifact");
     }
     let resolved = cellscript_ckb_adapter::resolve_materialized_action_plan_with_manifest(&plan, Some(manifest))?;
     let mut candidates = Vec::new();
@@ -531,6 +546,12 @@ mod tests {
     }
 
     #[test]
+    fn http_evidence_provider_rejects_non_http_urls() {
+        assert!(HttpCkbEvidenceProvider::new("file:///etc/passwd", None).is_err());
+        assert!(HttpCkbEvidenceProvider::new("http://127.0.0.1:8114", Some("file:///etc/passwd".to_string())).is_err());
+    }
+
+    #[test]
     fn deployment_rejects_stale_or_wrong_artifact_cell() {
         let descriptor = descriptor(b"expected");
         let out_point = OutPointRef { tx_hash: format!("0x{}", "33".repeat(32)), index: 1 };
@@ -620,5 +641,67 @@ mod tests {
         let resolved = resolve_asset_from_live_cell(&provider, &asset_out_point, &descriptor, &deployment).unwrap();
         assert_eq!(resolved.script.args, "0x010203");
         assert_ne!(resolved.script.args, deployment.code_cell_type_id.as_ref().unwrap().args);
+    }
+
+    #[test]
+    fn action_plan_asset_resolution_requires_artifact_hash() {
+        let descriptor = descriptor(b"artifact");
+        let out_point = OutPointRef { tx_hash: format!("0x{}", "99".repeat(32)), index: 0 };
+        let deployment = CodeDeploymentIdentity {
+            artifact_hash: descriptor.artifact_hash.clone(),
+            deployment_name: "asset-code".to_string(),
+            code_hash: descriptor.artifact_hash.clone(),
+            hash_type: "data2".to_string(),
+            code_cell_out_point: out_point.clone(),
+            code_cell_type_id: None,
+        };
+        let manifest = cellscript_ckb_adapter::DeploymentManifest {
+            schema: cellscript_ckb_adapter::DEPLOYMENT_MANIFEST_SCHEMA.to_string(),
+            version: 1,
+            deployments: vec![cellscript_ckb_adapter::DeploymentRef {
+                name: deployment.deployment_name.clone(),
+                code_hash: deployment.code_hash.clone(),
+                hash_type: deployment.hash_type.clone(),
+                args: "0x".to_string(),
+                dep_type: "code".to_string(),
+                out_point: out_point.display(),
+            }],
+        };
+        let plan = json!({
+            "policy": cellscript_ckb_adapter::ACTION_PLAN_POLICY,
+            "action": "mint",
+            "metadata_hash": "00".repeat(32),
+            "transaction_draft": {
+                "state": "ActionPlan",
+                "can_submit": false,
+                "requires_packed_materialization": true,
+                "outputs": [{
+                    "capacity": 20_000_000_000u64,
+                    "lock": {
+                        "code_hash": format!("0x{}", "11".repeat(32)),
+                        "hash_type": "data1",
+                        "args": format!("0x{}", "22".repeat(20)),
+                    },
+                    "type": {
+                        "code_hash": descriptor.artifact_hash.clone(),
+                        "hash_type": "data2",
+                        "args": format!("0x{}", "33".repeat(32)),
+                    },
+                }],
+                "outputs_data": [format!("0x{}", "00".repeat(16))],
+            },
+            "adapter_contract": {
+                "schema": cellscript_ckb_adapter::ADAPTER_CONTRACT_SCHEMA,
+                "compiler_core_dependency": "no-ckb-sdk-rust",
+                "transaction_realizer": "red-team-test",
+                "resolved_tx_required_fields": ["outputs_data", "cell_deps", "lineage"],
+            },
+        });
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("asset-plan.json");
+        std::fs::write(&path, serde_json::to_vec_pretty(&plan).unwrap()).unwrap();
+
+        let error = resolve_asset_from_action_plan(&path, &manifest, &descriptor, &deployment).unwrap_err();
+        assert!(error.to_string().contains("missing artifact_hash"), "unexpected error: {error:#}");
     }
 }
