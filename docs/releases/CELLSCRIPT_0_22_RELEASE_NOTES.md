@@ -215,7 +215,9 @@ binary build or GitHub publication. Release evidence requires:
   commit, input-liveness, output-liveness, cycles, serialized size, and occupied
   capacity checks;
 - exact 20-byte ELF entry-trampoline verification;
-- fresh size-gated WASM and VS Code packaging; and
+- fresh WASM packaging with an explicit Binaryen `wasm-opt -Oz` pass and the
+  600 KB gzip budget enforced (the audited 0.22 bundle is about 549 KB gzip),
+  plus fresh VS Code packaging; and
 - tests and clippy for every workspace package.
 
 The gate labels transaction origins honestly. The on-chain transaction matrix

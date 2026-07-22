@@ -8,6 +8,8 @@
   43-action stateful coverage with per-step commit/liveness/measurement checks,
   a freshly built and archived CKB executable, complete 20-byte ELF trampoline verification,
   fresh WASM/VS Code packaging, and tests/clippy across every workspace crate.
+  The WASM build now runs Binaryen `wasm-opt -Oz` explicitly before enforcing
+  the 600 KB gzip budget.
   Public `action build`/`gen-builder` contracts are verified separately from
   explicitly handwritten Python acceptance transactions; always-success
   resource Type Scripts remain a recorded fixture-only non-claim.
