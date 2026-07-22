@@ -1154,7 +1154,7 @@ impl CommandExecutor {
                     }));
                 }
                 Err(error) => {
-                    let message = error.message;
+                    let message = error.into_message();
                     test_reports.push(serde_json::json!({
                         "path": utf8.to_string(),
                         "status": "failed",
@@ -10896,11 +10896,11 @@ fn validate_check_policy(metadata: &crate::CompileMetadata, args: &CheckArgs) ->
 
     if args.primitive_compat.as_deref() == Some("0.16") {
         if let Err(error) = crate::proof_plan::soundness::validate_metadata(metadata, true) {
-            violations.push(error.message);
+            violations.push(error.into_message());
         }
     } else if matches!(args.primitive_compat.as_deref(), Some("0.17" | "0.18")) {
         if let Err(error) = crate::validate_primitive_strict_017_metadata(metadata) {
-            violations.push(error.message);
+            violations.push(error.into_message());
         }
     } else if metadata.runtime.proof_plan_soundness.status == "failed" {
         violations.push(format!("ProofPlan soundness failed: {} issue(s)", metadata.runtime.proof_plan_soundness.issue_count));

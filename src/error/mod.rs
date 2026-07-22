@@ -235,31 +235,59 @@ impl RelatedDiagnosticList {
     }
 }
 
+/// Heap-backed compiler diagnostic.
+///
+/// The diagnostic payload is intentionally rich, but errors are the slow path.
+/// Keeping the public handle pointer-sized prevents every `Result<T,
+/// CompileError>` in the compiler from reserving the full diagnostic envelope
+/// on its success path. `Deref` preserves the existing field-access surface.
 #[derive(Debug, Clone)]
 pub struct CompileError {
+    pub category: CompileErrorCategory,
+    inner: Box<CompileErrorData>,
+}
+
+#[doc(hidden)]
+#[derive(Debug, Clone)]
+pub struct CompileErrorData {
     pub message: String,
     pub span: Span,
     pub file: Option<Utf8PathBuf>,
     pub code: Option<String>,
     pub severity: DiagnosticSeverity,
     pub related: RelatedDiagnostics,
-    pub category: CompileErrorCategory,
     pub details: Option<serde_json::Value>,
     cause: Option<Arc<dyn std::error::Error + Send + Sync>>,
+}
+
+impl std::ops::Deref for CompileError {
+    type Target = CompileErrorData;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl std::ops::DerefMut for CompileError {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
+    }
 }
 
 impl CompileError {
     pub fn new(message: impl Into<String>, span: Span) -> Self {
         Self {
-            message: message.into(),
-            span,
-            file: None,
-            code: None,
-            severity: DiagnosticSeverity::Error,
-            related: RelatedDiagnostics::default(),
             category: CompileErrorCategory::Compilation,
-            details: None,
-            cause: None,
+            inner: Box::new(CompileErrorData {
+                message: message.into(),
+                span,
+                file: None,
+                code: None,
+                severity: DiagnosticSeverity::Error,
+                related: RelatedDiagnostics::default(),
+                details: None,
+                cause: None,
+            }),
         }
     }
 
@@ -311,6 +339,10 @@ impl CompileError {
     pub fn with_details(mut self, details: serde_json::Value) -> Self {
         self.details = Some(details);
         self
+    }
+
+    pub fn into_message(self) -> String {
+        self.inner.message
     }
 }
 
@@ -513,6 +545,11 @@ mod tests {
         assert_eq!(error.severity, DiagnosticSeverity::Error);
         assert_eq!(error.category, CompileErrorCategory::Compilation);
         assert_eq!(error.exit_code(), 1);
+    }
+
+    #[test]
+    fn compile_error_handle_stays_pointer_sized() {
+        assert!(std::mem::size_of::<CompileError>() <= 2 * std::mem::size_of::<usize>());
     }
 
     #[test]
