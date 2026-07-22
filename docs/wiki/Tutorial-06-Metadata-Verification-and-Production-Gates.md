@@ -427,7 +427,7 @@ obsolete-syntax oracles with compact reports under
 `target/syntax-combo-audit/`.
 
 For CellScript releases, `quick` is part of the pre-push gate and `ci` runs
-before builder-backed CKB acceptance. A direct CKB acceptance run does not
+before local CKB acceptance. A direct CKB acceptance run does not
 replace this preflight because it only proves selected concrete transactions.
 
 ## Unified Gate Entry Points
@@ -504,13 +504,15 @@ to `./scripts/cellscript_gate.sh release-quick`. The legacy
 `./scripts/cellscript_ckb_release_gate.sh full` command is also supported as a
 compatibility wrapper for `./scripts/cellscript_gate.sh release`. The production
 mode is the release-facing gate because it first runs compiler and
-backend-contract evidence, then runs builder-backed local CKB transactions and
-stateful scenario/action coverage.
+backend-contract evidence, then runs pinned local CKB acceptance transactions,
+public builder-contract generation, and mandatory stateful scenario/action
+coverage.
 
 The CKB validator records primitive-strict original bundled-example coverage,
 including strict v0.16 PP0150 fail-closed records, then requires scoped action
-and lock compile coverage, builder-backed action runs, source-bound acceptance provenance,
-builder-backed lock valid-spend and invalid-spend matrices, valid
+and lock compile coverage, public `action build`/`gen-builder` contracts,
+source-bound acceptance provenance, acceptance-harness action and lock
+valid-spend/invalid-spend matrices, valid
 transaction dry-runs, committed valid transactions, malformed rejection,
 measured cycles, consensus-serialized transaction size, occupied-capacity evidence,
 exact-artifact build reports, live code-cell data-hash linkage, no
@@ -522,10 +524,30 @@ The report must explicitly record a passed final production hardening gate and
 source provenance for the repository commit, tracked source file list, tracked
 source hash, acceptance runner hash, and evidence validator hash. It must also
 record `cellscript_build_reports`: each row binds the compiled RISC-V ELF,
-`verify-artifact` result, ELF entry ABI result, CKB data hash, and any live
+`verify-artifact` result, the exact 20-byte ELF entry trampoline, CKB data hash, and any live
 devnet code-cell deployment whose data hash equals that compiled artifact hash.
 Compile-only reports keep the live deployment list empty and are not external
 release evidence.
+
+Release evidence is accepted only from a completely clean CellScript checkout.
+The full run also binds the local CKB checkout to
+`scripts/ckb_acceptance_pin.json`: exact revision, clean worktree, version
+string, executable hash, source and effective template hashes, and genesis
+hash. Production does not accept a supplied or cached CKB binary: it builds the
+pinned source in a fresh dedicated Cargo target directory and archives that
+executable with the report. Each stateful step must also carry a committed
+transaction, dead consumed inputs, live declared outputs, measured cycles,
+serialized size, and occupied-capacity evidence. Tagged GitHub releases cannot
+build or publish until this full gate has passed, and the tag/version must match
+the workspace version.
+
+The local action, lock, and stateful transactions are handwritten Python
+acceptance harnesses and are labelled that way in the report. The separate
+public-builder contract gate proves that every production action is exposed by
+`cellc action build` and `cellc gen-builder`; it does not claim those generated
+packages constructed the acceptance transactions. Likewise, `always_success`
+resource Type Scripts are fixture-only. They prove scoped verifier behaviour
+and transaction shape, not the production resource-identity deployment story.
 
 For the current NovaSeal profile set, production-ready source-package evidence
 means the live local devnet runners pass for core, Agreement, and the six

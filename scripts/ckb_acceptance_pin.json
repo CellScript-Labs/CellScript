@@ -1,0 +1,10 @@
+{
+  "schema": "cellscript-ckb-acceptance-pin-v0.22",
+  "repository": "https://github.com/nervosnetwork/ckb.git",
+  "revision": "f7fa4436737756f97a24e254f22c13a36316ecea",
+  "version": "0.207.0",
+  "template_paths": [
+    "test/template/ckb.toml",
+    "test/template/specs/integration.toml"
+  ]
+}

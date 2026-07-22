@@ -79,6 +79,7 @@ check_trailing_whitespace() {
 
     local files=(
         ".github/workflows/ci.yml"
+        ".github/workflows/release.yml"
         ".github/workflows/website-build.yml"
         "Cargo.toml"
         "CODING_STYLE.md"
@@ -552,11 +553,20 @@ check_ckb_acceptance_boundaries() {
         'scripts/ckb_cellscript_acceptance.sh::SOURCE_PROVENANCE_SCHEMA'
         'scripts/ckb_cellscript_acceptance.sh::BUILD_REPORT_SCHEMA'
         'scripts/ckb_cellscript_acceptance.sh::tracked_source_sha256'
+        'scripts/ckb_cellscript_acceptance.sh::ckb_acceptance_pin.json'
+        'scripts/ckb_cellscript_acceptance.sh::cellscript-ckb-runtime-provenance-v0.22'
+        'scripts/ckb_cellscript_acceptance.sh::fresh-dedicated-cargo-target'
+        'scripts/ckb_cellscript_acceptance.sh::binary_archived_with_report'
+        'scripts/ckb_cellscript_acceptance.sh::cellscript-public-builder-contract-gate-v0.22'
         'scripts/ckb_cellscript_acceptance.sh::cellscript_build_reports'
         'scripts/ckb_cellscript_acceptance.sh::live_code_cell_data_hash_matches_artifact'
-        'scripts/ckb_cellscript_acceptance.sh::builder_backed_action_count'
+        'scripts/ckb_cellscript_acceptance.sh::public_builder_contract_action_count'
         'scripts/ckb_cellscript_acceptance.sh::final_production_hardening_gate'
         'scripts/validate_ckb_cellscript_production_evidence.py::validate_source_provenance'
+        'scripts/validate_ckb_cellscript_production_evidence.py::validate_public_builder_contracts'
+        'scripts/validate_ckb_cellscript_production_evidence.py::validate_ckb_runtime_provenance'
+        'scripts/validate_ckb_cellscript_production_evidence.py::fresh-dedicated-cargo-target'
+        'scripts/validate_ckb_cellscript_production_evidence.py::stateful branch scenarios must cover every action absent from end-to-end flows exactly once'
         'scripts/validate_ckb_cellscript_production_evidence.py::validate_build_reports'
         'scripts/validate_ckb_cellscript_production_evidence.py::tracked_source_sha256'
         'scripts/validate_ckb_cellscript_production_evidence.py::valid CKB CellScript'
@@ -693,6 +703,45 @@ check_script_syntax() {
     fi
 }
 
+check_release_source_identity() {
+    require_cmd git
+    require_cmd python3
+
+    local dirty version expected_tag exact_tags
+    dirty="$(git status --porcelain --untracked-files=all)"
+    if [[ -n "$dirty" ]]; then
+        printf 'release gates require a clean source tree; commit or remove every tracked and untracked change first:\n%s\n' "$dirty" >&2
+        exit 1
+    fi
+
+    version="$(python3 - "$ROOT_DIR/Cargo.toml" <<'PY'
+import sys
+import tomllib
+from pathlib import Path
+
+manifest = tomllib.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+print(manifest["workspace"]["package"]["version"])
+PY
+)"
+    if [[ -n "${CELLSCRIPT_RELEASE_VERSION:-}" && "$CELLSCRIPT_RELEASE_VERSION" != "$version" ]]; then
+        printf 'release version mismatch: requested %s, Cargo workspace declares %s\n' "$CELLSCRIPT_RELEASE_VERSION" "$version" >&2
+        exit 1
+    fi
+
+    if [[ "${CELLSCRIPT_RELEASE_REQUIRE_TAG:-0}" == "1" ]]; then
+        expected_tag="v$version"
+        exact_tags="$(git tag --points-at HEAD)"
+        if ! grep -Fxq "$expected_tag" <<<"$exact_tags"; then
+            printf 'release tag mismatch: HEAD must carry exact tag %s (tags at HEAD: %s)\n' "$expected_tag" "${exact_tags:-none}" >&2
+            exit 1
+        fi
+        if [[ -n "${GITHUB_REF_NAME:-}" && "$GITHUB_REF_NAME" != "$expected_tag" ]]; then
+            printf 'release ref mismatch: GITHUB_REF_NAME=%s, expected %s\n' "$GITHUB_REF_NAME" "$expected_tag" >&2
+            exit 1
+        fi
+    fi
+}
+
 run_website_build_check() {
     require_cmd npm
     require_cmd python3
@@ -712,6 +761,16 @@ run_website_build_check() {
 
     run_in_dir website npm exec -- astro check
     run_in_dir website npm exec -- astro build
+}
+
+check_wasm_release_bundle() {
+    require_cmd wasm-pack
+    run website/scripts/build-wasm.sh
+    if ! git -C website diff --quiet -- public/wasm; then
+        printf 'website WASM bundle is stale; rebuild and commit website/public/wasm before release\n' >&2
+        git -C website status --short -- public/wasm >&2
+        exit 1
+    fi
 }
 
 check_ckb_tx_measure_tool() {
@@ -760,6 +819,9 @@ run_dev_gate() {
     cargo_fmt_workspace
     run cargo check --locked -p cellscript --all-targets
     run cargo check --locked -p cellscript-fiber-adapter --all-targets
+    run cargo check --locked -p cellscript-ckb-adapter --all-targets
+    run cargo check --locked -p cellscript-wasm --all-targets --features wasm
+    run cargo check --locked -p cellscript-ckb-sdk-builder-example --all-targets
     run ./scripts/cellscript_strict_backend_audit.sh quick
     run ./scripts/cellscript_syntax_combo_audit.sh quick
     run python3 scripts/check_cellscript_skill_pack.py
@@ -783,8 +845,14 @@ run_ci_gate() {
     cargo_fmt_workspace --check
     run cargo test --locked -p cellscript -- --test-threads=1
     run cargo test --locked -p cellscript-fiber-adapter -- --test-threads=1
+    run cargo test --locked -p cellscript-ckb-adapter -- --test-threads=1
+    run cargo test --locked -p cellscript-wasm --features wasm -- --test-threads=1
+    run cargo test --locked -p cellscript-ckb-sdk-builder-example -- --test-threads=1
     run cargo clippy --locked -p cellscript --all-targets -- -D warnings
     run cargo clippy --locked -p cellscript-fiber-adapter --all-targets -- -D warnings
+    run cargo clippy --locked -p cellscript-ckb-adapter --all-targets -- -D warnings
+    run cargo clippy --locked -p cellscript-wasm --all-targets --features wasm -- -D warnings
+    run cargo clippy --locked -p cellscript-ckb-sdk-builder-example --all-targets -- -D warnings
     run ./scripts/cellscript_strict_backend_audit.sh ci
     run python3 scripts/check_cellscript_skill_pack.py
     check_cellscript_doc_status_freshness
@@ -829,11 +897,16 @@ run_release_auxiliary_checks() {
     check_ckb_tx_measure_tool
     check_novaseal_rust_tooling
     check_novaseal_verifier_pinning
+    check_wasm_release_bundle
+    if [[ ! -d editors/vscode-cellscript/node_modules ]]; then
+        run npm --prefix editors/vscode-cellscript ci
+    fi
     run_in_dir editors/vscode-cellscript npm exec -- vsce package --no-dependencies --out /tmp/cellscript-vscode-dry-run.vsix
     run node editors/vscode-cellscript/scripts/validate.mjs
 }
 
 run_release_quick_gate() {
+    check_release_source_identity
     run_ci_gate
     run_release_auxiliary_checks
     run ./scripts/ckb_cellscript_acceptance.sh --compile-only --production "$@"
@@ -842,6 +915,7 @@ run_release_quick_gate() {
 }
 
 run_release_gate() {
+    check_release_source_identity
     run_ci_gate
     run_release_auxiliary_checks
     run ./scripts/ckb_cellscript_acceptance.sh --production --stateful-scenarios "$@"

@@ -2,6 +2,19 @@
 
 ## 0.22.0 - 2026-07-19
 
+- Make GitHub publication depend on the full release gate. Release evidence now
+  requires a clean version/tag-matched CellScript tree, an exact clean CKB
+  revision and version pin, hashed node/template/genesis provenance, mandatory
+  43-action stateful coverage with per-step commit/liveness/measurement checks,
+  a freshly built and archived CKB executable, complete 20-byte ELF trampoline verification,
+  fresh WASM/VS Code packaging, and tests/clippy across every workspace crate.
+  Public `action build`/`gen-builder` contracts are verified separately from
+  explicitly handwritten Python acceptance transactions; always-success
+  resource Type Scripts remain a recorded fixture-only non-claim.
+- Classify field-preserving N-input/N-output resource permutations as checked
+  runtime conservation. This closes the strict CKB ProofPlan gap for NFT
+  royalty/seller payment pairs without adding action-name-specific backend
+  rules.
 - Correct the misleading bundled `multisig.cell` surface: the example now
   models explicitly non-cryptographic `Approval` records, removes discarded
   64-byte signature payloads, labels witness time as reported rather than chain

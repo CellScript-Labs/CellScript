@@ -1871,6 +1871,11 @@ fn token_mint_authority_input_output_binding_is_explicit() {
 #[test]
 fn nft_core_actions_expose_action_specific_builder_metadata() {
     let result = compile_file(example_path("nft.cell"), CompileOptions::default()).expect("nft example should compile");
+    let ckb_result = compile_file(
+        example_path("nft.cell"),
+        CompileOptions { target_profile: Some("ckb".to_string()), ..CompileOptions::default() },
+    )
+    .expect("nft CKB profile should compile");
     let asm = String::from_utf8(result.artifact_bytes.clone()).expect("nft asm should be utf8");
 
     let create_collection = action(&result.metadata, "create_collection");
@@ -1947,6 +1952,17 @@ fn nft_core_actions_expose_action_specific_builder_metadata() {
             "{} should keep typed Token settlement verifier-covered: {:?}",
             settlement.name,
             settlement.fail_closed_runtime_features
+        );
+        let ckb_settlement = action(&ckb_result.metadata, settlement.name.as_str());
+        assert!(
+            ckb_settlement.verifier_obligations.iter().any(|obligation| {
+                obligation.feature == "resource-conservation:Token"
+                    && obligation.status == "checked-runtime"
+                    && obligation.detail.contains("preserved into 2 paired Outputs")
+            }),
+            "{} should classify the two payment/payout pairs as checked conservation: {:?}",
+            settlement.name,
+            ckb_settlement.verifier_obligations
         );
     }
 }

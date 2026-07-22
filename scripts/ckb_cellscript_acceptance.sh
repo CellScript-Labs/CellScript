@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+CKB_PIN_FILE="$SCRIPT_DIR/ckb_acceptance_pin.json"
 
 default_ckb_repo() {
   local parent grandparent
@@ -27,6 +28,7 @@ CKB_DIR="$RUN_DIR/ckb-node"
 CKB_LOG="$RUN_DIR/ckb.log"
 REPORT_JSON="$RUN_DIR/ckb-cellscript-acceptance-report.json"
 CKB_PID=""
+CKB_BUILD_TARGET_DIR="$RUN_DIR/.ckb-build-target"
 
 usage() {
   cat <<'USAGE'
@@ -39,15 +41,16 @@ expected fail-closed entries, or non-original artifacts.
 
 Options:
   --ckb-repo <path>   Parent CKB checkout. Defaults to ../ckb.
-  --ckb-bin <path>    Existing CKB executable. Defaults to target/debug/ckb,
-                      building `cargo build --bin ckb` in --ckb-repo if needed.
+  --ckb-bin <path>    Existing CKB executable for bounded on-chain runs only.
+                      Production rejects this option and freshly rebuilds the
+                      pinned source in an isolated Cargo target directory.
   --compile-only      Compile and verify the CKB-profile CellScript artifacts,
                       but skip local CKB node deployment/spend checks. This
                       mode does not require a CKB checkout or executable.
   --stateful-scenarios
-                      After the production action/lock matrix, run additional
-                      local CKB transactions that feed live outputs from one
-                      action into the next action.
+                      Run additional local CKB transactions that feed live
+                      outputs from one action into the next. Production
+                      on-chain mode always enables this requirement.
   --production        Enforce the production gate. This is the default.
   --bounded           Run the bounded development coverage matrix. This keeps
                       bounded harnesses visible, but it is not a
@@ -102,6 +105,17 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if [[ "$ACCEPTANCE_MODE" == "production" ]]; then
+  if [[ -n "$(git -C "$REPO_ROOT" status --porcelain --untracked-files=all)" ]]; then
+    echo "production acceptance requires a clean CellScript source tree" >&2
+    git -C "$REPO_ROOT" status --short >&2
+    exit 1
+  fi
+  if [[ "$RUN_ONCHAIN" == "1" ]]; then
+    RUN_STATEFUL_SCENARIOS=1
+  fi
+fi
+
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
     echo "missing required command: $1" >&2
@@ -120,6 +134,31 @@ PY
 }
 
 resolve_ckb_bin() {
+  if [[ "$ACCEPTANCE_MODE" == "production" ]]; then
+    if [[ -n "$CKB_BIN" ]]; then
+      echo "production acceptance does not accept --ckb-bin/CKB_BIN; the pinned CKB source must be rebuilt in a fresh target directory" >&2
+      exit 1
+    fi
+
+    local fresh_candidate archived_candidate
+    mkdir -p "$CKB_BUILD_TARGET_DIR" "$RUN_DIR/ckb-runtime"
+    echo "Building pinned CKB checkout in a fresh dedicated Cargo target directory" >&2
+    (
+      cd "$CKB_REPO"
+      cargo build --locked --bin ckb --target-dir "$CKB_BUILD_TARGET_DIR"
+    )
+    fresh_candidate="$CKB_BUILD_TARGET_DIR/debug/ckb"
+    if [[ ! -x "$fresh_candidate" ]]; then
+      echo "fresh CKB build finished but executable was not found at $fresh_candidate" >&2
+      exit 1
+    fi
+    archived_candidate="$RUN_DIR/ckb-runtime/ckb"
+    cp "$fresh_candidate" "$archived_candidate"
+    chmod 0755 "$archived_candidate"
+    printf '%s\n' "$archived_candidate"
+    return
+  fi
+
   if [[ -n "$CKB_BIN" ]]; then
     if [[ ! -x "$CKB_BIN" ]]; then
       echo "CKB_BIN is not executable: $CKB_BIN" >&2
@@ -137,8 +176,8 @@ resolve_ckb_bin() {
     fi
   done
 
-  echo "No existing CKB executable found; building parent CKB checkout with cargo build --bin ckb" >&2
-  (cd "$CKB_REPO" && cargo build --bin ckb)
+  echo "No existing CKB executable found; building pinned CKB checkout with cargo build --locked --bin ckb" >&2
+  (cd "$CKB_REPO" && cargo build --locked --bin ckb)
   candidate="$CKB_REPO/target/debug/ckb"
   if [[ ! -x "$candidate" ]]; then
     echo "CKB build finished but executable was not found at $candidate" >&2
@@ -160,12 +199,16 @@ cleanup() {
   if [[ "$KEEP_NODE_LOGS" != "1" && -f "$CKB_LOG" ]]; then
     rm -f "$CKB_LOG"
   fi
+  if [[ -n "$CKB_BUILD_TARGET_DIR" && "$CKB_BUILD_TARGET_DIR" == "$RUN_DIR/"* && -d "$CKB_BUILD_TARGET_DIR" ]]; then
+    rm -rf -- "$CKB_BUILD_TARGET_DIR"
+  fi
 }
 trap cleanup EXIT
 
 require_cmd cargo
 require_cmd python3
 if [[ "$RUN_ONCHAIN" == "1" ]]; then
+  require_cmd git
   require_cmd curl
 fi
 
@@ -181,10 +224,52 @@ if [[ "$RUN_ONCHAIN" == "1" ]]; then
     echo "CKB repo does not contain test/template/ckb.toml: $CKB_REPO" >&2
     exit 1
   fi
+  if [[ ! -f "$CKB_PIN_FILE" ]]; then
+    echo "missing CKB acceptance pin: $CKB_PIN_FILE" >&2
+    exit 1
+  fi
+
+  mapfile -t CKB_PIN_VALUES < <(python3 - "$CKB_PIN_FILE" <<'PY'
+import json
+import pathlib
+import sys
+
+pin = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+print(pin["revision"])
+print(pin["version"])
+for path in pin["template_paths"]:
+    print(path)
+PY
+)
+  CKB_PIN_REVISION="${CKB_PIN_VALUES[0]}"
+  CKB_PIN_VERSION="${CKB_PIN_VALUES[1]}"
+  CKB_PIN_TEMPLATE="${CKB_PIN_VALUES[2]}"
+  CKB_PIN_SPEC="${CKB_PIN_VALUES[3]}"
+  CKB_REPO="$(cd "$CKB_REPO" && pwd)"
+  CKB_REPO_HEAD="$(git -C "$CKB_REPO" rev-parse HEAD)"
+  if [[ "$CKB_REPO_HEAD" != "$CKB_PIN_REVISION" ]]; then
+    echo "CKB acceptance revision mismatch: checkout has $CKB_REPO_HEAD, pin requires $CKB_PIN_REVISION" >&2
+    exit 1
+  fi
+  if [[ -n "$(git -C "$CKB_REPO" status --porcelain --untracked-files=all)" ]]; then
+    echo "CKB acceptance requires a clean pinned CKB checkout: $CKB_REPO" >&2
+    git -C "$CKB_REPO" status --short >&2
+    exit 1
+  fi
+  for required_template in "$CKB_PIN_TEMPLATE" "$CKB_PIN_SPEC"; do
+    if [[ ! -f "$CKB_REPO/$required_template" ]]; then
+      echo "pinned CKB checkout is missing template file: $required_template" >&2
+      exit 1
+    fi
+  done
 
   CKB_BIN="$(resolve_ckb_bin)"
-  CKB_REPO="$(cd "$CKB_REPO" && pwd)"
   CKB_BIN="$(cd "$(dirname "$CKB_BIN")" && pwd)/$(basename "$CKB_BIN")"
+  CKB_BIN_VERSION_OUTPUT="$("$CKB_BIN" --version)"
+  if [[ "$CKB_BIN_VERSION_OUTPUT" != *"$CKB_PIN_VERSION"* || "$CKB_BIN_VERSION_OUTPUT" != *"${CKB_PIN_REVISION:0:7}"* ]]; then
+    echo "CKB executable provenance mismatch: '$CKB_BIN_VERSION_OUTPUT' does not match version $CKB_PIN_VERSION at ${CKB_PIN_REVISION:0:7}" >&2
+    exit 1
+  fi
   RPC_PORT="$(pick_port)"
   P2P_PORT="$(pick_port)"
   RPC_URL="http://127.0.0.1:$RPC_PORT"
@@ -282,15 +367,18 @@ run_dir = pathlib.Path(sys.argv[3])
 report_path = pathlib.Path(sys.argv[4])
 acceptance_mode = sys.argv[5]
 
-SOURCE_PROVENANCE_SCHEMA = "cellscript-ckb-acceptance-source-provenance-v0.1"
+SOURCE_PROVENANCE_SCHEMA = "cellscript-ckb-acceptance-source-provenance-v0.22"
 BUILD_REPORT_SCHEMA = "cellscript-ckb-build-report-v0.20"
 SOURCE_PROVENANCE_PATHS = [
     "Cargo.lock",
     "Cargo.toml",
+    "rust-toolchain.toml",
+    ".github/workflows/release.yml",
     "src",
     "examples",
     "scripts/cellscript_gate.sh",
     "scripts/cellscript_ckb_release_gate.sh",
+    "scripts/ckb_acceptance_pin.json",
     "scripts/ckb_cellscript_acceptance.sh",
     "scripts/validate_ckb_cellscript_production_evidence.py",
 ]
@@ -354,7 +442,7 @@ LOCK_ACCEPTANCE_SCOPE = {
     "required_cases_per_lock_when_promoted": ["valid_spend", "invalid_spend"],
     "scope_note": (
         "Scoped lock entries are strict-compiled under the CKB profile and counted as strict lock coverage. "
-        "They are not counted as builder-backed on-chain lock spend/deny-spend transactions."
+        "They are not counted as on-chain acceptance-harness lock spend/deny-spend transactions."
     ),
 }
 LOCK_BEHAVIOR_ACCEPTANCE_SCOPE = {
@@ -369,12 +457,12 @@ LOCK_BEHAVIOR_ACCEPTANCE_SCOPE = {
     "required_cases_per_lock": ["valid_spend", "invalid_spend"],
     "scope_note": (
         "Scoped lock entries are strict-compiled under the CKB profile and each lock is exercised "
-        "through builder-backed local CKB valid-spend and invalid-spend transactions."
+        "through handwritten Python acceptance-harness valid-spend and invalid-spend transactions."
     ),
 }
 TRUNCATE = 12000
 UNEXPECTED_PROFILE_TRAILER = bytes.fromhex("53504f5241424900")
-ELF_ENTRY_ABI_SCHEMA = "cellscript-ckb-elf-entry-abi-v0.20"
+ELF_ENTRY_ABI_SCHEMA = "cellscript-ckb-elf-entry-abi-v0.22"
 ELF64_HEADER_SIZE = 64
 ELF64_PROGRAM_HEADER_SIZE = 56
 ELF_PT_LOAD = 1
@@ -1702,7 +1790,7 @@ def source_provenance_report():
         .isoformat()
         .replace("+00:00", "Z"),
         "repo_commit": git_stdout(["rev-parse", "HEAD"]),
-        "git_dirty": bool(git_stdout(["status", "--porcelain", "--untracked-files=no"])),
+        "git_dirty": bool(git_stdout(["status", "--porcelain", "--untracked-files=all"])),
         "tracked_source_paths": SOURCE_PROVENANCE_PATHS,
         "tracked_source_files": files,
         "tracked_source_file_count": len(files),
@@ -1901,13 +1989,58 @@ def audit_ckb_elf_entry_abi(name, artifact_bytes):
     entry_file_offset = header["file_offset"] + (entry - header["virtual_address"])
     if entry_file_offset + ENTRY_TRAMPOLINE_SIZE > len(artifact_bytes):
         raise RuntimeError(f"{name} ELF entry trampoline exceeds artifact size")
-    first_instruction = read_u32_le(artifact_bytes, entry_file_offset)
+    instructions = [
+        read_u32_le(artifact_bytes, entry_file_offset + index * 4)
+        for index in range(ENTRY_TRAMPOLINE_SIZE // 4)
+    ]
+    first_instruction, call_instruction, exit_lui, exit_addi, exit_ecall = instructions
     first_opcode = first_instruction & 0x7f
     first_rd = (first_instruction >> 7) & 0x1f
     if first_opcode != 0x17 or first_rd != 1:
         raise RuntimeError(
             f"{name} ELF entry trampoline must start with auipc ra, not instruction 0x{first_instruction:08x}"
         )
+    if (
+        call_instruction & 0x7f != 0x67
+        or (call_instruction >> 7) & 0x1f != 1
+        or (call_instruction >> 12) & 0x7 != 0
+        or (call_instruction >> 15) & 0x1f != 1
+    ):
+        raise RuntimeError(
+            f"{name} ELF entry trampoline second instruction must be jalr ra, imm(ra), got 0x{call_instruction:08x}"
+        )
+
+    def sign_extend(value, bits):
+        sign = 1 << (bits - 1)
+        return (value ^ sign) - sign
+
+    call_hi = sign_extend(first_instruction & 0xfffff000, 32)
+    call_lo = sign_extend(call_instruction >> 20, 12)
+    call_target = (entry + call_hi + call_lo) & ~1
+    expected_call_target = entry + ENTRY_TRAMPOLINE_SIZE
+    if call_target != expected_call_target:
+        raise RuntimeError(
+            f"{name} ELF entry trampoline must call the first instruction after the trampoline: "
+            f"target=0x{call_target:x}, expected=0x{expected_call_target:x}"
+        )
+    if (
+        exit_lui & 0x7f != 0x37
+        or (exit_lui >> 7) & 0x1f != 17
+        or exit_lui >> 12 != 0
+        or exit_addi & 0x7f != 0x13
+        or (exit_addi >> 7) & 0x1f != 17
+        or (exit_addi >> 12) & 0x7 != 0
+        or (exit_addi >> 15) & 0x1f != 17
+        or sign_extend(exit_addi >> 20, 12) != 93
+        or exit_ecall != 0x00000073
+    ):
+        raise RuntimeError(
+            f"{name} ELF entry trampoline must end with exact li a7, 93; ecall sequence, got "
+            + ", ".join(f"0x{instruction:08x}" for instruction in instructions[2:])
+        )
+    written_registers = [(instruction >> 7) & 0x1f for instruction in instructions[:-1]]
+    if 2 in written_registers:
+        raise RuntimeError(f"{name} ELF entry trampoline writes the CKB VM stack pointer")
 
     return {
         "schema": ELF_ENTRY_ABI_SCHEMA,
@@ -1927,11 +2060,18 @@ def audit_ckb_elf_entry_abi(name, artifact_bytes):
         "trampoline": {
             "size_bytes": ENTRY_TRAMPOLINE_SIZE,
             "entry_file_offset": entry_file_offset,
+            "bytes_hex": artifact_bytes[entry_file_offset:entry_file_offset + ENTRY_TRAMPOLINE_SIZE].hex(),
+            "instructions_le_hex": [f"0x{instruction:08x}" for instruction in instructions],
             "first_instruction_le_hex": f"0x{first_instruction:08x}",
             "first_instruction_opcode": "auipc",
             "first_instruction_rd": "ra",
+            "call_instruction_opcode": "jalr",
+            "call_target": f"0x{call_target:x}",
+            "expected_call_target": f"0x{expected_call_target:x}",
+            "exit_syscall_number": 93,
+            "exit_sequence_exact": True,
             "calls_entry_with_ra": True,
-            "preserves_ckb_vm_stack_pointer": True,
+            "preserves_ckb_vm_stack_pointer": 2 not in written_registers,
             "forbidden_sp_initialisation": False,
         },
     }
@@ -2409,6 +2549,12 @@ def collect_elf_entry_abi_gate():
                 "executable_segment_rx_only": executable.get("flags_symbolic") == "R|X" and executable.get("writable") is False,
                 "executable_segment_file_size_equals_memory_size": executable.get("file_size_equals_memory_size") is True,
                 "first_instruction_le_hex": trampoline.get("first_instruction_le_hex"),
+                "trampoline_bytes_hex": trampoline.get("bytes_hex"),
+                "trampoline_instructions_le_hex": trampoline.get("instructions_le_hex"),
+                "call_target": trampoline.get("call_target"),
+                "expected_call_target": trampoline.get("expected_call_target"),
+                "exit_syscall_number": trampoline.get("exit_syscall_number"),
+                "exit_sequence_exact": trampoline.get("exit_sequence_exact") is True,
                 "entry_point": audit.get("entry_point"),
             })
         rows.append(row)
@@ -2461,7 +2607,7 @@ def collect_elf_entry_abi_gate():
 
     unique_failures = sorted(set(failures))
     return {
-        "schema": "cellscript-ckb-elf-entry-abi-gate-v0.20",
+        "schema": "cellscript-ckb-elf-entry-abi-gate-v0.22",
         "status": "passed" if not unique_failures else "failed",
         "requires_ckb_vm_stack_pointer_preserved": True,
         "requires_entry_trampoline_call_sequence": True,
@@ -2556,10 +2702,116 @@ def collect_build_reports():
         "reports": rows,
     }
 
+def generate_public_builder_contracts():
+    builder_root = run_dir / "public-builders"
+    contracts = []
+    for example_name in EXAMPLES:
+        source = production_example_path(example_name)
+        output_dir = builder_root / example_name.removesuffix(".cell")
+        result = run([
+            cellc,
+            "gen-builder",
+            source,
+            "--target",
+            "typescript",
+            "--target-profile",
+            "ckb",
+            "--output",
+            output_dir,
+            "--package-name",
+            f"@cellscript-acceptance/{example_name.removesuffix('.cell')}",
+            "--json",
+        ])
+        if result["returncode"] != 0:
+            raise RuntimeError(f"public gen-builder failed for {example_name}: {result['stderr']}")
+        summary = json.loads(result["stdout"])
+        manifest_path = output_dir / "cellscript-builder-manifest.json"
+        manifest = load_json(manifest_path)
+        expected_actions = source_entries(example_name, "action")
+        manifest_actions = [action["name"] for action in manifest["actions"]]
+        if summary.get("status") != "ok" or summary.get("actions") != expected_actions or manifest_actions != expected_actions:
+            raise RuntimeError(
+                f"public generated builder action mismatch for {example_name}: "
+                f"summary={summary.get('actions')}, manifest={manifest_actions}, expected={expected_actions}"
+            )
+
+        action_plans = []
+        action_plan_dir = output_dir / "action-plans"
+        action_plan_dir.mkdir(parents=True, exist_ok=True)
+        for action in expected_actions:
+            plan_path = action_plan_dir / f"{action}.json"
+            plan_result = run([
+                cellc,
+                "action",
+                "build",
+                source,
+                "--action",
+                action,
+                "--target-profile",
+                "ckb",
+                "--output",
+                plan_path,
+            ])
+            if plan_result["returncode"] != 0:
+                raise RuntimeError(f"public action build failed for {example_name}:{action}: {plan_result['stderr']}")
+            plan = load_json(plan_path)
+            if (
+                plan.get("status") != "ok"
+                or plan.get("policy") != "cellscript-action-builder-plan-v1"
+                or plan.get("action") != action
+                or plan.get("target_profile") != "ckb"
+            ):
+                raise RuntimeError(f"invalid public action build plan for {example_name}:{action}")
+            action_plans.append({
+                "action": action,
+                "contract_id": f"{example_name}:{action}",
+                "policy": plan["policy"],
+                "artifact_hash": plan.get("artifact_hash"),
+                "plan_path": str(plan_path),
+                "plan_sha256": sha256_hex(plan_path.read_bytes()),
+                "status": "passed",
+            })
+
+        generated_files = sorted(path for path in output_dir.rglob("*") if path.is_file())
+        tree_hash = hashlib.sha256()
+        for path in generated_files:
+            relative = path.relative_to(output_dir).as_posix()
+            tree_hash.update(relative.encode("utf-8"))
+            tree_hash.update(b"\0")
+            tree_hash.update(hashlib.sha256(path.read_bytes()).digest())
+        contracts.append({
+            "example": example_name,
+            "source": str(source),
+            "status": "passed",
+            "generator_schema": summary.get("schema"),
+            "builder_manifest_schema": manifest.get("schema"),
+            "target": summary.get("target"),
+            "target_profile": manifest.get("target_profile"),
+            "actions": expected_actions,
+            "action_count": len(expected_actions),
+            "manifest_path": str(manifest_path),
+            "manifest_sha256": sha256_hex(manifest_path.read_bytes()),
+            "generated_tree_sha256": "0x" + tree_hash.hexdigest(),
+            "generated_file_count": len(generated_files),
+            "action_plans": action_plans,
+            "runtime_adapter_execution": "not-proven-by-this-contract-gate",
+        })
+    return {
+        "schema": "cellscript-public-builder-contract-gate-v0.22",
+        "status": "passed",
+        "example_count": len(contracts),
+        "action_count": sum(contract["action_count"] for contract in contracts),
+        "requires_gen_builder": True,
+        "requires_action_build": True,
+        "transaction_origin_claim": "acceptance-python-harness-not-generated-builder",
+        "contracts": contracts,
+    }
+
 ckb_elf_entry_abi_gate = collect_elf_entry_abi_gate()
 if ckb_elf_entry_abi_gate["status"] != "passed":
     raise RuntimeError("CKB ELF entry ABI gate failed: " + json.dumps(ckb_elf_entry_abi_gate["failures"], sort_keys=True))
 build_reports = collect_build_reports()
+public_builder_contracts = generate_public_builder_contracts()
 
 report = {
     "status": "artifact-verified",
@@ -2587,6 +2839,7 @@ report = {
     "lock_acceptance_scope": LOCK_ACCEPTANCE_SCOPE,
     "ckb_elf_entry_abi_gate": ckb_elf_entry_abi_gate,
     "cellscript_build_reports": build_reports,
+    "public_builder_contracts": public_builder_contracts,
     "bundled_examples_strict_admitted": [
         record["name"]
         for record in bundled_examples
@@ -2622,6 +2875,13 @@ report = {
 
 def production_gate_failures(report):
     failures = []
+    builder_contracts = report.get("public_builder_contracts") or {}
+    if (
+        builder_contracts.get("status") != "passed"
+        or builder_contracts.get("example_count") != len(EXAMPLES)
+        or builder_contracts.get("action_count") != sum(len(actions) for actions in ORIGINAL_SCOPED_ACTIONS.values())
+    ):
+        failures.append("public action-build/gen-builder contract coverage is incomplete")
     if report.get("strict_original_ckb_compile_policy_fail_closed"):
         failures.append(
             "primitive-strict original bundled examples still fail strict CKB/ProofPlan policy: "
@@ -2679,6 +2939,7 @@ report["production_gate"] = {
     "requires_all_bundled_examples_strict_original_ckb": True,
     "requires_ckb_elf_entry_abi_gate": True,
     "requires_cellscript_build_reports": True,
+    "requires_public_builder_contracts": True,
 }
 if acceptance_mode == "production" and production_failures:
     report["status"] = "failed-production-gate"
@@ -2753,22 +3014,25 @@ if [[ "$ready" != "1" ]]; then
   exit 1
 fi
 
-python3 - "$RPC_URL" "$REPORT_JSON" "$CKB_REPO" "$CKB_BIN" "$CKB_LOG" "$REPO_ROOT" "$RUN_STATEFUL_SCENARIOS" <<'PY'
+python3 - "$RPC_URL" "$REPORT_JSON" "$CKB_REPO" "$CKB_BIN" "$CKB_LOG" "$REPO_ROOT" "$RUN_STATEFUL_SCENARIOS" "$CKB_DIR" "$CKB_PIN_FILE" <<'PY'
 import hashlib
 import json
 import os
 import pathlib
 import re
 import shutil
+import subprocess
 import sys
 import time
 import urllib.error
 import urllib.request
 
-rpc_url, report_path, ckb_repo, ckb_bin, ckb_log, repo_root, run_stateful_scenarios = sys.argv[1:]
+rpc_url, report_path, ckb_repo, ckb_bin, ckb_log, repo_root, run_stateful_scenarios, ckb_dir, ckb_pin_file = sys.argv[1:]
 report_path = pathlib.Path(report_path)
 ckb_repo = pathlib.Path(ckb_repo)
 repo_root = pathlib.Path(repo_root)
+ckb_dir = pathlib.Path(ckb_dir)
+ckb_pin_file = pathlib.Path(ckb_pin_file)
 run_stateful_scenarios = run_stateful_scenarios == "1"
 
 ALWAYS_SUCCESS_CODE_HASH = "0x28e83a1277d48add8e72fadaa9248559e1b632bab2bd60b27955ebc4c03800a5"
@@ -2786,11 +3050,50 @@ LOCK_BEHAVIOR_ACCEPTANCE_SCOPE = {
     "required_cases_per_lock": ["valid_spend", "invalid_spend"],
     "scope_note": (
         "Scoped lock entries are strict-compiled under the CKB profile and each lock is exercised "
-        "through builder-backed local CKB valid-spend and invalid-spend transactions."
+        "through handwritten Python acceptance-harness valid-spend and invalid-spend transactions."
     ),
 }
 
 report = json.loads(report_path.read_text(encoding="utf-8"))
+ckb_pin = json.loads(ckb_pin_file.read_text(encoding="utf-8"))
+
+def file_sha256(path):
+    return "0x" + hashlib.sha256(path.read_bytes()).hexdigest()
+
+ckb_version_output = subprocess.check_output([ckb_bin, "--version"], text=True).strip()
+ckb_repo_head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ckb_repo, text=True).strip()
+ckb_repo_dirty = bool(subprocess.check_output(
+    ["git", "status", "--porcelain", "--untracked-files=all"],
+    cwd=ckb_repo,
+    text=True,
+).strip())
+ckb_runtime_provenance = {
+    "schema": "cellscript-ckb-runtime-provenance-v0.22",
+    "pin_schema": ckb_pin["schema"],
+    "pin_file_sha256": file_sha256(ckb_pin_file),
+    "repository": ckb_pin["repository"],
+    "revision": ckb_pin["revision"],
+    "repo_head": ckb_repo_head,
+    "repo_dirty": ckb_repo_dirty,
+    "version": ckb_pin["version"],
+    "version_output": ckb_version_output,
+    "build_mode": (
+        "fresh-dedicated-cargo-target"
+        if report.get("acceptance_mode") == "production"
+        else "bounded-provided-cached-or-on-demand"
+    ),
+    "binary_path": ckb_bin,
+    "binary_archived_with_report": pathlib.Path(ckb_bin).resolve().is_relative_to(report_path.parent.resolve()),
+    "binary_sha256": file_sha256(pathlib.Path(ckb_bin)),
+    "source_template_path": str(ckb_repo / ckb_pin["template_paths"][0]),
+    "source_template_sha256": file_sha256(ckb_repo / ckb_pin["template_paths"][0]),
+    "source_spec_path": str(ckb_repo / ckb_pin["template_paths"][1]),
+    "source_spec_sha256": file_sha256(ckb_repo / ckb_pin["template_paths"][1]),
+    "effective_config_path": str(ckb_dir / "ckb.toml"),
+    "effective_config_sha256": file_sha256(ckb_dir / "ckb.toml"),
+    "effective_spec_path": str(ckb_dir / "specs" / "integration.toml"),
+    "effective_spec_sha256": file_sha256(ckb_dir / "specs" / "integration.toml"),
+}
 artifacts = report.get("artifacts", [])
 if not artifacts:
     raise RuntimeError("acceptance report does not contain artifacts")
@@ -2816,6 +3119,7 @@ report.update({
     "ckb_bin": ckb_bin,
     "ckb_log": ckb_log,
     "rpc_url": rpc_url,
+    "ckb_runtime_provenance": ckb_runtime_provenance,
     "onchain": {
         "status": "running",
         "chain_template": "ckb/test/template integration devnet",
@@ -2962,6 +3266,8 @@ def update_ckb_business_coverage(onchain_actions):
         report.get("acceptance_mode") == "production"
         and coverage["status"] == "complete"
         and (report.get("production_gate") or {}).get("status") == "passed"
+        and (report.get("final_production_hardening_gate") or {}).get("ready") is True
+        and (report.get("ckb_runtime_provenance") or {}).get("repo_dirty") is False
     )
 
 RPC_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
@@ -7076,6 +7382,11 @@ def run_stateful_scenario_suite(always_success_dep):
         covered_ids.update(run.get("action_ids", []))
     branch_runs = run_stateful_action_branch_coverage(always_success_dep, required_records, covered_ids)
     runs = main_runs + branch_runs
+    for run in runs:
+        run["acceptance_harness_name"] = run.get("builder_name")
+        run["harness_origin"] = "handwritten-python-acceptance-transaction"
+        run["transaction_origin"] = "acceptance-python-harness"
+        run["builder_backed"] = False
     for run in branch_runs:
         covered_ids.update(run.get("action_ids", []))
     missing_stateful_action_ids = sorted(set(required_ids) - covered_ids)
@@ -7115,8 +7426,10 @@ try:
     }
     report["onchain"].update({
         "tip_before": tip_before,
+        "genesis_hash": genesis["header"]["hash"],
         "genesis_cellbase_hash": genesis_cellbase_hash,
     })
+    report["ckb_runtime_provenance"]["genesis_hash"] = genesis["header"]["hash"]
     write_report()
 
     for artifact_record in bundled_example_deployment_artifacts:
@@ -7287,8 +7600,25 @@ try:
         + report["onchain"]["amm_action_runs"]
         + report["onchain"]["launch_action_runs"]
     )
-    report["onchain"]["builder_backed_action_count"] = sum(1 for run in all_action_runs if run.get("builder_backed"))
-    report["onchain"]["handwritten_harness_action_count"] = sum(1 for run in all_action_runs if not run.get("builder_backed"))
+    public_builder_action_ids = {
+        plan["contract_id"]
+        for contract in report["public_builder_contracts"]["contracts"]
+        for plan in contract["action_plans"]
+        if plan.get("status") == "passed"
+    }
+    for run in all_action_runs:
+        run["acceptance_harness_name"] = run.get("builder_name")
+        run["acceptance_harness_implementation"] = run.get("harness_origin")
+        run["harness_origin"] = "handwritten-python-acceptance-transaction"
+        run["transaction_origin"] = "acceptance-python-harness"
+        run["builder_backed"] = False
+        run["public_builder_contract_id"] = run["name"]
+        run["public_builder_contract_verified"] = run["name"] in public_builder_action_ids
+    report["onchain"]["builder_backed_action_count"] = 0
+    report["onchain"]["acceptance_harness_action_count"] = len(all_action_runs)
+    report["onchain"]["public_builder_contract_action_count"] = sum(
+        1 for run in all_action_runs if run.get("public_builder_contract_verified")
+    )
     report["onchain"]["measured_cycles_action_count"] = sum(
         1
         for run in all_action_runs
@@ -7305,11 +7635,16 @@ try:
         if ((run.get("measured_constraints") or {}).get("occupied_capacity_shannons")) is not None
     )
     all_lock_runs = report["onchain"]["lock_spend_matrix_runs"]
+    for run in all_lock_runs:
+        run["acceptance_harness_name"] = run.get("builder_name")
+        run["acceptance_harness_implementation"] = run.get("harness_origin")
+        run["harness_origin"] = "handwritten-python-acceptance-transaction"
+        run["transaction_origin"] = "acceptance-python-harness"
+        run["builder_backed"] = False
     expected_lock_spend_count = len(original_scoped_lock_artifacts)
     report["onchain"]["lock_spend_matrix_count"] = len(all_lock_runs)
-    report["onchain"]["builder_backed_lock_spend_matrix_count"] = sum(
-        1 for run in all_lock_runs if run.get("builder_backed")
-    )
+    report["onchain"]["builder_backed_lock_spend_matrix_count"] = 0
+    report["onchain"]["acceptance_harness_lock_spend_matrix_count"] = len(all_lock_runs)
     report["onchain"]["lock_valid_spend_count"] = sum(
         1
         for run in all_lock_runs
@@ -7340,15 +7675,26 @@ try:
     report["onchain"]["locks_behavior_exercised"] = [run["name"] for run in all_lock_runs]
     report["onchain"]["all_locks_behavior_exercised"] = (
         report["onchain"]["lock_spend_matrix_count"] == expected_lock_spend_count
-        and report["onchain"]["builder_backed_lock_spend_matrix_count"] == expected_lock_spend_count
+        and report["onchain"]["acceptance_harness_lock_spend_matrix_count"] == expected_lock_spend_count
         and report["onchain"]["lock_valid_spend_count"] == expected_lock_spend_count
         and report["onchain"]["lock_invalid_spend_count"] == expected_lock_spend_count
     )
+    report["onchain"]["resource_identity_evidence_scope"] = {
+        "status": "fixture-only",
+        "always_success_resource_types": True,
+        "production_resource_identity_proven": False,
+        "scope_note": (
+            "Action/stateful harnesses use always_success fixture Type Scripts for resource cells. "
+            "They prove scoped verifier behavior and transaction shape, not production passive resource identity deployment."
+        ),
+    }
     final_hardening_failures = []
-    handwritten_actions = [f"{run['name']}" for run in all_action_runs if not run.get("builder_backed")]
-    if handwritten_actions:
+    missing_public_builder_contracts = [
+        run["name"] for run in all_action_runs if not run.get("public_builder_contract_verified")
+    ]
+    if missing_public_builder_contracts:
         final_hardening_failures.append(
-            "builder-generated transactions are still missing for: " + ", ".join(handwritten_actions)
+            "public action-build/gen-builder contracts are missing for: " + ", ".join(missing_public_builder_contracts)
         )
     missing_tx_size_actions = [
         run["name"]
@@ -7375,30 +7721,33 @@ try:
     ]
     if under_capacity_actions:
         final_hardening_failures.append(
-            "builder-generated transactions contain under-capacity outputs: " + ", ".join(under_capacity_actions)
+            "acceptance transactions contain under-capacity outputs: " + ", ".join(under_capacity_actions)
         )
     missing_lock_matrix = [
         run["name"]
         for run in all_lock_runs
-        if not run.get("builder_backed")
-        or (run.get("valid_spend") or {}).get("status") != "passed"
+        if (run.get("valid_spend") or {}).get("status") != "passed"
         or ((run.get("invalid_spend") or {}).get("rejection") or {}).get("expected_reason_matched") is not True
         or ((run.get("invalid_spend") or {}).get("rejection") or {}).get("policy_or_capacity_reason") is not False
     ]
     if len(all_lock_runs) != expected_lock_spend_count or missing_lock_matrix:
         final_hardening_failures.append(
-            "builder-backed lock valid/invalid spend matrix is incomplete: "
+            "acceptance-harness lock valid/invalid spend matrix is incomplete: "
             + ", ".join(missing_lock_matrix or [f"{len(all_lock_runs)}/{expected_lock_spend_count} locks"])
         )
     stateful_scenarios = report["onchain"].get("stateful_scenarios")
     if run_stateful_scenarios:
         stateful_coverage = (stateful_scenarios or {}).get("stateful_action_coverage") or {}
+        exact_stateful_action_ids = expected_stateful_action_ids()
         if (
             not stateful_scenarios
             or stateful_scenarios.get("status") != "passed"
             or stateful_coverage.get("status") != "passed"
+            or stateful_coverage.get("required_action_ids") != exact_stateful_action_ids
+            or stateful_coverage.get("covered_action_ids") != exact_stateful_action_ids
             or stateful_coverage.get("missing_action_ids")
             or stateful_coverage.get("missing_artifact_ids")
+            or stateful_coverage.get("unexpected_artifact_ids")
         ):
             final_hardening_failures.append(
                 "stateful scenario coverage is incomplete: "
@@ -7420,7 +7769,7 @@ try:
     ]
     if under_capacity_locks:
         final_hardening_failures.append(
-            "builder-generated lock spend transactions contain under-capacity outputs: " + ", ".join(under_capacity_locks)
+            "acceptance lock spend transactions contain under-capacity outputs: " + ", ".join(under_capacity_locks)
         )
     build_report_gate = refresh_build_report_deployments()
     if build_report_gate.get("status") != "passed":
@@ -7438,11 +7787,15 @@ try:
     report["final_production_hardening_gate"] = {
         "status": "passed" if not final_hardening_failures else "blocked",
         "ready": not final_hardening_failures,
-        "requires_builder_generated_transactions": True,
+        "requires_builder_generated_transactions": False,
+        "requires_public_builder_contracts": True,
+        "requires_acceptance_harness_transactions": True,
         "requires_measured_cycles": True,
         "requires_consensus_serialized_tx_size": True,
         "requires_exact_occupied_capacity": True,
-        "requires_stateful_action_coverage": run_stateful_scenarios,
+        "requires_stateful_action_coverage": report.get("acceptance_mode") == "production",
+        "production_resource_identity_claim": False,
+        "resource_identity_evidence_scope": "always-success-fixture-only",
         "requires_build_report_live_artifact_linkage": True,
         "failures": final_hardening_failures,
     }

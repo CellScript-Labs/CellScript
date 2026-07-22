@@ -9547,6 +9547,16 @@ fn resource_conservation_checked_detail(
         ));
     }
 
+    if resource_conservation_pairs_are_checked(body, type_layouts, availability, consumed, created) {
+        return Some(format!(
+            "Compiler-emitted runtime verifier checks {} consumed '{}' Inputs are preserved into {} paired Outputs; resource-conservation=checked-runtime; fields: {}",
+            consumed.len(),
+            type_name,
+            created.len(),
+            fields
+        ));
+    }
+
     if resource_conservation_amount_merge_is_checked(body, type_layouts, availability, consumed, created) {
         return Some(format!(
             "Compiler-emitted runtime verifier checks {} consumed '{}' Inputs are merged into one created Output by a verifier-recomputed u64 amount sum; resource-conservation=checked-runtime; fields: amount",
@@ -9599,6 +9609,28 @@ fn resource_conservation_pair_is_checked(
         };
         aliases.get(&var.id).is_some_and(|alias| alias.root_id == consumed.id && alias.field == field.as_str())
     })
+}
+
+fn resource_conservation_pairs_are_checked(
+    body: &ir::IrBody,
+    type_layouts: &MetadataTypeLayouts,
+    availability: &MetadataPreludeAvailability,
+    consumed: &[ir::IrVar],
+    created: &[ir::CreatePattern],
+) -> bool {
+    if consumed.len() < 2 || consumed.len() != created.len() {
+        return false;
+    }
+    let mut unmatched = consumed.iter().collect::<Vec<_>>();
+    for output in created {
+        let Some(index) =
+            unmatched.iter().position(|input| resource_conservation_pair_is_checked(body, type_layouts, availability, input, output))
+        else {
+            return false;
+        };
+        unmatched.remove(index);
+    }
+    unmatched.is_empty()
 }
 
 fn resource_conservation_amount_merge_is_checked(

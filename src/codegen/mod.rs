@@ -20981,9 +20981,9 @@ mod tests {
         assert_eq!(headers[0].file_size, headers[0].memory_size, "code segment should not fake stack memory in PT_LOAD");
 
         let text_offset = elf_text_file_offset(&elf);
-        let first_instruction = read_u32_le(&elf, text_offset);
-        assert_eq!(first_instruction & 0x7f, 0x17, "trampoline should call the entrypoint, not load sp");
-        assert_eq!((first_instruction >> 7) & 0x1f, 1, "trampoline call should target ra");
+        let trampoline = (0..START_TRAMPOLINE_SIZE / 4).map(|index| read_u32_le(&elf, text_offset + index * 4)).collect::<Vec<_>>();
+        assert_eq!(trampoline, vec![0x0000_0097, 0x0140_80e7, 0x0000_08b7, 0x05d8_8893, 0x0000_0073]);
+        assert!(trampoline[..4].iter().all(|instruction| (instruction >> 7) & 0x1f != 2), "trampoline must not write sp");
 
         let entry_instruction = read_u32_le(&elf, text_offset + START_TRAMPOLINE_SIZE);
         assert_eq!(entry_instruction, 0x0000_8067, "entry body should start after the 20-byte trampoline");

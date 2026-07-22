@@ -14,14 +14,40 @@ deciding whether a change is ready.
 
 | Mode | When to run | Evidence boundary |
 |---|---|---|
-| `dev` | Local development before pushing | Formatting, Rust check, strict backend quick audit, syntax-combination quick audit, skill-pack freshness, README-linked CellScript doc Status freshness, local markdown link check, whitespace diff check |
-| `ci` | Pull requests, pushes, and routine merge readiness | Full Rust tests, clippy, strict backend CI audit, syntax-combination CI audit through the strict backend runner, package verification, skill-pack and CellScript doc Status freshness, local markdown link check, script syntax checks |
+| `dev` | Local development before pushing | Formatting, all workspace-package Rust checks, strict backend quick audit, syntax-combination quick audit, skill-pack freshness, README-linked CellScript doc Status freshness, local markdown link check, whitespace diff check |
+| `ci` | Pull requests, pushes, and routine merge readiness | Tests and clippy for the compiler, Fiber adapter, CKB adapter, WASM crate, and CKB SDK builder example; strict backend CI audit; package verification; skill-pack/doc freshness; local-link and script syntax checks |
 | `backend` | Changes touching IR, codegen, assembler, ABI, ELF, or RISC-V behavior | Full Rust tests, clippy, and strict backend full audit, including stateful CKB scenarios |
-| `release` | Nightly/stable release candidates and any production CKB claim | `ci` plus tooling/docs boundary checks, VS Code validation, builder-backed CKB production acceptance, and stateful scenario/action coverage |
+| `release` | Nightly/stable release candidates and any production CKB claim | Clean tagged source plus `ci`, a fresh size-gated website WASM rebuild, tooling/docs and VS Code checks, pinned-CKB acceptance harnesses, public builder-contract generation, and mandatory stateful scenario/action coverage |
 | `release-quick` | Wrapper compatibility and local compile-only preflight | `ci` plus compile-only production acceptance; not external live/devnet evidence |
 
 `release-quick` is kept for `scripts/cellscript_ckb_release_gate.sh quick`.
 Use `release` for any production or external live/devnet claim.
+
+Both release modes fail before doing expensive work unless the CellScript tree
+is completely clean, including untracked files. CI additionally requires the
+exact `v<workspace-version>` tag at `HEAD`; a manual release dispatch must name
+the same version as `[workspace.package].version`. The GitHub Release workflow
+runs the full `release` gate first, and binary builds plus publication depend on
+that job succeeding.
+
+The full gate reads `scripts/ckb_acceptance_pin.json` and rejects a CKB checkout
+whose revision or worktree differs from the pin. Its report binds the CKB
+version string, executable SHA-256, source-template hashes, effective devnet
+configuration hashes, and genesis hash. Production on-chain acceptance always
+rebuilds CKB from that source in a fresh dedicated Cargo target directory and
+archives the executable with the report; supplied or cached binaries cannot
+satisfy the production gate. It then runs the exact stateful 43-action matrix
+and validates every step's commit, spent-input liveness, live outputs, cycles,
+serialized size, and occupied capacity. `--stateful-scenarios` remains only as
+an explicit option for bounded runs.
+
+The transaction matrix is intentionally described as a Python acceptance
+harness. It is not relabelled as generated-builder output. Separately, the gate
+runs the public `cellc action build` and `cellc gen-builder` surfaces for every
+production action and hashes their generated contracts. Resource Type Scripts
+in these local transactions remain `always_success` fixtures; the report
+records that this proves verifier behaviour and transaction shape, not a
+production passive-resource-identity deployment.
 
 ### Fiber integration evidence
 

@@ -17,10 +17,95 @@ concurrency:
 env:
   CARGO_INCREMENTAL: "0"
   CKB_SDK_RUST_REF: v5.1.0
+  CKB_ACCEPTANCE_REVISION: f7fa4436737756f97a24e254f22c13a36316ecea
 
 jobs:
+  release-gate:
+    name: Release gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            website/package-lock.json
+            editors/vscode-cellscript/package-lock.json
+
+      - name: Install Rust release toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.97.1"
+          components: rustfmt, clippy
+          targets: riscv64imac-unknown-none-elf, wasm32-unknown-unknown
+
+      - name: Install pinned WASM packaging tool
+        run: cargo install wasm-pack --version 0.13.1 --locked
+
+      - name: Check out pinned CKB SDK
+        run: |
+          git clone --depth 1 --branch "$CKB_SDK_RUST_REF" \
+            https://github.com/nervosnetwork/ckb-sdk-rust.git \
+            "$GITHUB_WORKSPACE/../ckb-sdk-rust"
+
+      - name: Check out pinned CKB node source
+        run: |
+          mkdir "$GITHUB_WORKSPACE/../ckb"
+          git -C "$GITHUB_WORKSPACE/../ckb" init
+          git -C "$GITHUB_WORKSPACE/../ckb" remote add origin https://github.com/nervosnetwork/ckb.git
+          git -C "$GITHUB_WORKSPACE/../ckb" fetch --depth 1 origin "$CKB_ACCEPTANCE_REVISION"
+          git -C "$GITHUB_WORKSPACE/../ckb" checkout --detach FETCH_HEAD
+          test "$(git -C "$GITHUB_WORKSPACE/../ckb" rev-parse HEAD)" = "$CKB_ACCEPTANCE_REVISION"
+          test -z "$(git -C "$GITHUB_WORKSPACE/../ckb" status --porcelain --untracked-files=all)"
+
+      - name: Install pinned CKB build toolchain
+        run: |
+          CKB_TOOLCHAIN="$(python3 - <<'PY'
+          import tomllib
+          from pathlib import Path
+          print(tomllib.loads(Path('../ckb/rust-toolchain.toml').read_text(encoding='utf-8'))['toolchain']['channel'])
+          PY
+          )"
+          rustup toolchain install "$CKB_TOOLCHAIN" --profile minimal
+
+      - name: Resolve release version
+        id: version
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          fi
+          printf 'version=%s\n' "$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Run authoritative release gate
+        env:
+          CELLSCRIPT_RELEASE_REQUIRE_TAG: "1"
+          CELLSCRIPT_RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          CKB_REPO: ${{ github.workspace }}/../ckb
+        run: ./scripts/cellscript_gate.sh release
+
+      - name: Upload release evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cellscript-release-gate-evidence
+          if-no-files-found: warn
+          path: |
+            target/ckb-cellscript-acceptance/**
+            target/cellscript-backend-shape/*.json
+            target/cellscript-schema-manifest/*.json
+
   build:
     name: Build ${{ matrix.target }}
+    needs: release-gate
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -38,6 +123,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           submodules: recursive
 
       - name: Check out ckb-sdk-rust path dependency
@@ -97,7 +183,7 @@ jobs:
 
   release:
     name: Create GitHub Release
-    needs: build
+    needs: [release-gate, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write

@@ -11,15 +11,18 @@ import subprocess
 from typing import Any
 
 
-SOURCE_PROVENANCE_SCHEMA = "cellscript-ckb-acceptance-source-provenance-v0.1"
+SOURCE_PROVENANCE_SCHEMA = "cellscript-ckb-acceptance-source-provenance-v0.22"
 BUILD_REPORT_SCHEMA = "cellscript-ckb-build-report-v0.20"
 SOURCE_PROVENANCE_PATHS = [
     "Cargo.lock",
     "Cargo.toml",
+    "rust-toolchain.toml",
+    ".github/workflows/release.yml",
     "src",
     "examples",
     "scripts/cellscript_gate.sh",
     "scripts/cellscript_ckb_release_gate.sh",
+    "scripts/ckb_acceptance_pin.json",
     "scripts/ckb_cellscript_acceptance.sh",
     "scripts/validate_ckb_cellscript_production_evidence.py",
 ]
@@ -118,6 +121,49 @@ EXPECTED_ACTIONS_BY_RUN_KEY = {
     "amm_action_runs": ["seed_pool", "swap_a_for_b", "add_liquidity", "remove_liquidity"],
     "launch_action_runs": ["launch_token", "bootstrap_token"],
 }
+EXPECTED_ACTION_IDS = sorted(
+    f"{example}:{action}"
+    for run_key, actions in EXPECTED_ACTIONS_BY_RUN_KEY.items()
+    for example in [{
+        "token_action_runs": "token.cell",
+        "nft_action_runs": "nft.cell",
+        "timelock_action_runs": "timelock.cell",
+        "multisig_action_runs": "multisig.cell",
+        "vesting_action_runs": "vesting.cell",
+        "amm_action_runs": "amm_pool.cell",
+        "launch_action_runs": "launch.cell",
+    }[run_key]]
+    for action in actions
+)
+EXPECTED_PUBLIC_ACTIONS_BY_EXAMPLE = {
+    "token.cell": EXPECTED_ACTIONS_BY_RUN_KEY["token_action_runs"],
+    "nft.cell": EXPECTED_ACTIONS_BY_RUN_KEY["nft_action_runs"],
+    "timelock.cell": [
+        "create_absolute_lock",
+        "create_relative_lock",
+        "lock_asset",
+        "request_release",
+        "execute_release",
+        "request_emergency_release",
+        "approve_emergency_release",
+        "execute_emergency_release",
+        "extend_lock",
+        "batch_create_locks",
+    ],
+    "multisig.cell": EXPECTED_ACTIONS_BY_RUN_KEY["multisig_action_runs"],
+    "vesting.cell": EXPECTED_ACTIONS_BY_RUN_KEY["vesting_action_runs"],
+    "amm_pool.cell": EXPECTED_ACTIONS_BY_RUN_KEY["amm_action_runs"],
+    "launch.cell": EXPECTED_ACTIONS_BY_RUN_KEY["launch_action_runs"],
+}
+EXPECTED_END_TO_END_STATEFUL_SCENARIOS = [
+    "token.mint-with-authority-transfer-mint-with-authority-merge-burn",
+    "nft.mint-list-transfer-by-listing",
+    "timelock.create-lock-lock-asset-request-release-execute",
+    "launch.launch-token-then-mint-with-authority",
+    "amm.seed-add-swap-remove",
+    "vesting.create-config-grant-revoke",
+    "multisig.create-propose-approve-approve-execute",
+]
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -173,7 +219,7 @@ def require_hex_hash(value: Any, context: str) -> str:
 def validate_elf_entry_abi_gate(report: dict[str, Any]) -> None:
     gate = report.get("ckb_elf_entry_abi_gate")
     require(isinstance(gate, dict), "ckb_elf_entry_abi_gate must be an object")
-    require_field(gate, "schema", "cellscript-ckb-elf-entry-abi-gate-v0.20", "ckb_elf_entry_abi_gate")
+    require_field(gate, "schema", "cellscript-ckb-elf-entry-abi-gate-v0.22", "ckb_elf_entry_abi_gate")
     require_field(gate, "status", EXPECTED_STATUS, "ckb_elf_entry_abi_gate")
     require_field(gate, "requires_ckb_vm_stack_pointer_preserved", True, "ckb_elf_entry_abi_gate")
     require_field(gate, "requires_entry_trampoline_call_sequence", True, "ckb_elf_entry_abi_gate")
@@ -204,7 +250,17 @@ def validate_elf_entry_abi_gate(report: dict[str, Any]) -> None:
         require_field(row, "executable_segment_rx_only", True, context)
         require_field(row, "executable_segment_file_size_equals_memory_size", True, context)
         require(isinstance(row.get("artifact"), str) and row["artifact"], f"{context}.artifact must be a non-empty string")
-        require(isinstance(row.get("first_instruction_le_hex"), str), f"{context}.first_instruction_le_hex must be present")
+        require_field(row, "first_instruction_le_hex", "0x00000097", context)
+        require_field(
+            row,
+            "trampoline_instructions_le_hex",
+            ["0x00000097", "0x014080e7", "0x000008b7", "0x05d88893", "0x00000073"],
+            context,
+        )
+        require_field(row, "trampoline_bytes_hex", "97000000e7804001b70800009388d80573000000", context)
+        require_field(row, "call_target", row.get("expected_call_target"), context)
+        require_field(row, "exit_syscall_number", 93, context)
+        require_field(row, "exit_sequence_exact", True, context)
 
 
 def git_stdout(repo_root: Path, args: list[str]) -> str:
@@ -248,7 +304,7 @@ def current_source_provenance(repo_root: Path) -> dict[str, Any]:
     files = tracked_source_files(repo_root)
     return {
         "repo_commit": git_stdout(repo_root, ["rev-parse", "HEAD"]),
-        "git_dirty": bool(git_stdout(repo_root, ["status", "--porcelain", "--untracked-files=no"])),
+        "git_dirty": bool(git_stdout(repo_root, ["status", "--porcelain", "--untracked-files=all"])),
         "tracked_source_paths": SOURCE_PROVENANCE_PATHS,
         "tracked_source_files": files,
         "tracked_source_file_count": len(files),
@@ -263,7 +319,7 @@ def validate_source_provenance(report: dict[str, Any], repo_root: Path) -> None:
     require(isinstance(provenance, dict), "source_provenance must be an object")
     require_field(provenance, "schema", SOURCE_PROVENANCE_SCHEMA, "source_provenance")
     require(isinstance(provenance.get("generated_at_utc"), str), "source_provenance.generated_at_utc must be a timestamp string")
-    require_bool(provenance.get("git_dirty"), "source_provenance.git_dirty")
+    require_field(provenance, "git_dirty", False, "source_provenance")
 
     current = current_source_provenance(repo_root)
     for key in (
@@ -277,6 +333,126 @@ def validate_source_provenance(report: dict[str, Any], repo_root: Path) -> None:
         "validator_script_sha256",
     ):
         require_field(provenance, key, current[key], "source_provenance")
+
+
+def validate_public_builder_contracts(report: dict[str, Any]) -> None:
+    gate = report.get("public_builder_contracts")
+    require(isinstance(gate, dict), "public_builder_contracts must be an object")
+    require_field(gate, "schema", "cellscript-public-builder-contract-gate-v0.22", "public_builder_contracts")
+    require_field(gate, "status", EXPECTED_STATUS, "public_builder_contracts")
+    require_field(gate, "example_count", len(EXPECTED_EXAMPLES), "public_builder_contracts")
+    require_field(gate, "action_count", EXPECTED_ACTION_COUNT, "public_builder_contracts")
+    require_field(gate, "requires_gen_builder", True, "public_builder_contracts")
+    require_field(gate, "requires_action_build", True, "public_builder_contracts")
+    require_field(
+        gate,
+        "transaction_origin_claim",
+        "acceptance-python-harness-not-generated-builder",
+        "public_builder_contracts",
+    )
+    contracts = gate.get("contracts")
+    require(isinstance(contracts, list), "public_builder_contracts.contracts must be a list")
+    require([contract.get("example") for contract in contracts] == EXPECTED_EXAMPLES, "public builder examples must match exact release scope")
+    seen_action_ids: list[str] = []
+    for contract in contracts:
+        example = contract["example"]
+        context = f"public_builder_contracts.{example}"
+        expected_actions = EXPECTED_PUBLIC_ACTIONS_BY_EXAMPLE[example]
+        require_field(contract, "status", EXPECTED_STATUS, context)
+        require_field(contract, "generator_schema", "cellscript-generated-builder-summary-v0.20", context)
+        require_field(contract, "builder_manifest_schema", "cellscript-generated-action-builder-v0.20", context)
+        require_field(contract, "target", "typescript", context)
+        require_field(contract, "target_profile", "ckb", context)
+        require_field(contract, "actions", expected_actions, context)
+        require_field(contract, "action_count", len(expected_actions), context)
+        require_field(contract, "runtime_adapter_execution", "not-proven-by-this-contract-gate", context)
+        require_hex_hash(contract.get("manifest_sha256"), f"{context}.manifest_sha256")
+        require_hex_hash(contract.get("generated_tree_sha256"), f"{context}.generated_tree_sha256")
+        require_positive_int(contract.get("generated_file_count"), f"{context}.generated_file_count")
+        manifest_path = Path(contract.get("manifest_path", ""))
+        require(manifest_path.is_file(), f"{context}.manifest_path does not exist: {manifest_path}")
+        require("0x" + file_sha256(manifest_path) == contract["manifest_sha256"], f"{context}.manifest_sha256 does not match file")
+        manifest = load_json(manifest_path)
+        require([action.get("name") for action in manifest.get("actions", [])] == expected_actions, f"{context} manifest action mismatch")
+        generated_files = sorted(path for path in manifest_path.parent.rglob("*") if path.is_file())
+        tree_hash = hashlib.sha256()
+        for path in generated_files:
+            relative = path.relative_to(manifest_path.parent).as_posix()
+            tree_hash.update(relative.encode("utf-8"))
+            tree_hash.update(b"\0")
+            tree_hash.update(hashlib.sha256(path.read_bytes()).digest())
+        require_field(contract, "generated_file_count", len(generated_files), context)
+        require_field(contract, "generated_tree_sha256", "0x" + tree_hash.hexdigest(), context)
+        plans = contract.get("action_plans")
+        require(isinstance(plans, list) and len(plans) == len(expected_actions), f"{context}.action_plans must cover every action")
+        for plan, action in zip(plans, expected_actions, strict=True):
+            plan_context = f"{context}.action_plans.{action}"
+            require_field(plan, "action", action, plan_context)
+            require_field(plan, "contract_id", f"{example}:{action}", plan_context)
+            require_field(plan, "policy", "cellscript-action-builder-plan-v1", plan_context)
+            require_field(plan, "status", EXPECTED_STATUS, plan_context)
+            require_hex_hash(plan.get("plan_sha256"), f"{plan_context}.plan_sha256")
+            plan_path = Path(plan.get("plan_path", ""))
+            require(plan_path.is_file(), f"{plan_context}.plan_path does not exist: {plan_path}")
+            require_field(plan, "plan_sha256", "0x" + file_sha256(plan_path), plan_context)
+            plan_json = load_json(plan_path)
+            require_field(plan_json, "status", "ok", f"{plan_context}.file")
+            require_field(plan_json, "policy", "cellscript-action-builder-plan-v1", f"{plan_context}.file")
+            require_field(plan_json, "action", action, f"{plan_context}.file")
+            require_field(plan_json, "target_profile", "ckb", f"{plan_context}.file")
+            seen_action_ids.append(plan["contract_id"])
+    require(sorted(seen_action_ids) == EXPECTED_ACTION_IDS, "public builder action contracts must match the exact production action matrix")
+
+
+def validate_ckb_runtime_provenance(report: dict[str, Any], repo_root: Path, report_dir: Path) -> None:
+    pin_path = repo_root / "scripts/ckb_acceptance_pin.json"
+    pin = load_json(pin_path)
+    require_field(pin, "schema", "cellscript-ckb-acceptance-pin-v0.22", "ckb_acceptance_pin")
+    provenance = report.get("ckb_runtime_provenance")
+    require(isinstance(provenance, dict), "ckb_runtime_provenance must be an object")
+    context = "ckb_runtime_provenance"
+    require_field(provenance, "schema", "cellscript-ckb-runtime-provenance-v0.22", context)
+    require_field(provenance, "pin_schema", pin["schema"], context)
+    require_field(provenance, "pin_file_sha256", "0x" + file_sha256(pin_path), context)
+    require_field(provenance, "repository", pin["repository"], context)
+    require_field(provenance, "revision", pin["revision"], context)
+    require_field(provenance, "repo_head", pin["revision"], context)
+    require_field(provenance, "repo_dirty", False, context)
+    require_field(provenance, "version", pin["version"], context)
+    require_field(provenance, "build_mode", "fresh-dedicated-cargo-target", context)
+    require_field(provenance, "binary_archived_with_report", True, context)
+    version_output = provenance.get("version_output")
+    require(
+        isinstance(version_output, str)
+        and pin["version"] in version_output
+        and pin["revision"][:7] in version_output,
+        f"{context}.version_output must bind version and revision, got {version_output!r}",
+    )
+
+    ckb_repo = Path(report.get("ckb_repo", "")).resolve()
+    require(ckb_repo.is_dir(), f"ckb_repo does not exist: {ckb_repo}")
+    require(git_stdout(ckb_repo, ["rev-parse", "HEAD"]) == pin["revision"], "current CKB checkout does not match pin")
+    require(not git_stdout(ckb_repo, ["status", "--porcelain", "--untracked-files=all"]), "current CKB checkout must be clean")
+    binary_path = Path(provenance.get("binary_path", "")).resolve()
+    require(binary_path.is_file(), f"{context}.binary_path does not exist: {binary_path}")
+    require_field(provenance, "binary_path", str((report_dir / "ckb-runtime" / "ckb").resolve()), context)
+    require_field(provenance, "binary_sha256", "0x" + file_sha256(binary_path), context)
+    require_field(provenance, "version_output", subprocess.check_output([binary_path, "--version"], text=True).strip(), context)
+
+    expected_paths = {
+        "source_template_path": ckb_repo / pin["template_paths"][0],
+        "source_spec_path": ckb_repo / pin["template_paths"][1],
+    }
+    for key, path in expected_paths.items():
+        require_field(provenance, key, str(path), context)
+        require(path.is_file(), f"{context}.{key} does not exist: {path}")
+        require_field(provenance, key.replace("_path", "_sha256"), "0x" + file_sha256(path), context)
+    for key in ("effective_config", "effective_spec"):
+        path = Path(provenance.get(f"{key}_path", ""))
+        require(path.is_file(), f"{context}.{key}_path does not exist: {path}")
+        require_field(provenance, f"{key}_sha256", "0x" + file_sha256(path), context)
+    require_hex_hash(provenance.get("genesis_hash"), f"{context}.genesis_hash")
+    require_field(provenance, "genesis_hash", report.get("onchain", {}).get("genesis_hash"), context)
 
 def validate_build_reports(report: dict[str, Any], *, compile_only: bool) -> None:
     build_index = report.get("cellscript_build_reports")
@@ -416,6 +592,7 @@ def validate_compile_gate(report: dict[str, Any], *, compile_only: bool = False)
     require_field(gate, "requires_all_bundled_examples_strict_original_ckb", True, "production_gate")
     require_field(gate, "requires_ckb_elf_entry_abi_gate", True, "production_gate")
     require_field(gate, "requires_cellscript_build_reports", True, "production_gate")
+    require_field(gate, "requires_public_builder_contracts", True, "production_gate")
     validate_elf_entry_abi_gate(report)
     validate_build_reports(report, compile_only=compile_only)
 
@@ -504,19 +681,26 @@ def validate_onchain_gate(report: dict[str, Any]) -> None:
     require_field(onchain, "all_vesting_actions_exercised", True, "onchain")
     require_field(onchain, "all_amm_actions_exercised", True, "onchain")
     require_field(onchain, "all_launch_actions_exercised", True, "onchain")
-    require_field(onchain, "builder_backed_action_count", EXPECTED_ACTION_COUNT, "onchain")
-    require_field(onchain, "handwritten_harness_action_count", 0, "onchain")
+    require_field(onchain, "builder_backed_action_count", 0, "onchain")
+    require_field(onchain, "acceptance_harness_action_count", EXPECTED_ACTION_COUNT, "onchain")
+    require_field(onchain, "public_builder_contract_action_count", EXPECTED_ACTION_COUNT, "onchain")
     require_field(onchain, "measured_cycles_action_count", EXPECTED_ACTION_COUNT, "onchain")
     require_field(onchain, "tx_size_measured_action_count", EXPECTED_ACTION_COUNT, "onchain")
     require_field(onchain, "occupied_capacity_measured_action_count", EXPECTED_ACTION_COUNT, "onchain")
     require_field(onchain, "lock_spend_matrix_count", EXPECTED_LOCK_COUNT, "onchain")
-    require_field(onchain, "builder_backed_lock_spend_matrix_count", EXPECTED_LOCK_COUNT, "onchain")
+    require_field(onchain, "builder_backed_lock_spend_matrix_count", 0, "onchain")
+    require_field(onchain, "acceptance_harness_lock_spend_matrix_count", EXPECTED_LOCK_COUNT, "onchain")
     require_field(onchain, "lock_valid_spend_count", EXPECTED_LOCK_COUNT, "onchain")
     require_field(onchain, "lock_invalid_spend_count", EXPECTED_LOCK_COUNT, "onchain")
     require_field(onchain, "measured_cycles_lock_count", EXPECTED_LOCK_COUNT, "onchain")
     require_field(onchain, "tx_size_measured_lock_count", EXPECTED_LOCK_COUNT, "onchain")
     require_field(onchain, "occupied_capacity_measured_lock_count", EXPECTED_LOCK_COUNT, "onchain")
     require_field(onchain, "all_locks_behavior_exercised", True, "onchain")
+    resource_scope = onchain.get("resource_identity_evidence_scope")
+    require(isinstance(resource_scope, dict), "onchain.resource_identity_evidence_scope must be an object")
+    require_field(resource_scope, "status", "fixture-only", "onchain.resource_identity_evidence_scope")
+    require_field(resource_scope, "always_success_resource_types", True, "onchain.resource_identity_evidence_scope")
+    require_field(resource_scope, "production_resource_identity_proven", False, "onchain.resource_identity_evidence_scope")
 
     deployment_runs = onchain.get("bundled_example_deployment_runs")
     require(isinstance(deployment_runs, list), "onchain.bundled_example_deployment_runs must be a list")
@@ -551,12 +735,126 @@ def validate_onchain_gate(report: dict[str, Any]) -> None:
     require(isinstance(final_gate, dict), "final_production_hardening_gate must be an object")
     require_field(final_gate, "status", EXPECTED_STATUS, "final_production_hardening_gate")
     require_field(final_gate, "ready", True, "final_production_hardening_gate")
-    require_field(final_gate, "requires_builder_generated_transactions", True, "final_production_hardening_gate")
+    require_field(final_gate, "requires_builder_generated_transactions", False, "final_production_hardening_gate")
+    require_field(final_gate, "requires_public_builder_contracts", True, "final_production_hardening_gate")
+    require_field(final_gate, "requires_acceptance_harness_transactions", True, "final_production_hardening_gate")
     require_field(final_gate, "requires_measured_cycles", True, "final_production_hardening_gate")
     require_field(final_gate, "requires_consensus_serialized_tx_size", True, "final_production_hardening_gate")
     require_field(final_gate, "requires_exact_occupied_capacity", True, "final_production_hardening_gate")
+    require_field(final_gate, "requires_stateful_action_coverage", True, "final_production_hardening_gate")
+    require_field(final_gate, "production_resource_identity_claim", False, "final_production_hardening_gate")
+    require_field(final_gate, "resource_identity_evidence_scope", "always-success-fixture-only", "final_production_hardening_gate")
     require_field(final_gate, "requires_build_report_live_artifact_linkage", True, "final_production_hardening_gate")
     require_empty(final_gate, "failures", "final_production_hardening_gate")
+
+    stateful = onchain.get("stateful_scenarios")
+    require(isinstance(stateful, dict), "onchain.stateful_scenarios must be an object")
+    require_field(stateful, "status", EXPECTED_STATUS, "onchain.stateful_scenarios")
+    require_positive_int(stateful.get("scenario_count"), "onchain.stateful_scenarios.scenario_count")
+    require_positive_int(stateful.get("step_count"), "onchain.stateful_scenarios.step_count")
+    require_field(
+        stateful,
+        "end_to_end_scenario_count",
+        len(EXPECTED_END_TO_END_STATEFUL_SCENARIOS),
+        "onchain.stateful_scenarios",
+    )
+    require_field(
+        stateful,
+        "action_branch_scenario_count",
+        stateful["scenario_count"] - len(EXPECTED_END_TO_END_STATEFUL_SCENARIOS),
+        "onchain.stateful_scenarios",
+    )
+    coverage = stateful.get("stateful_action_coverage")
+    require(isinstance(coverage, dict), "onchain.stateful_scenarios.stateful_action_coverage must be an object")
+    require_field(coverage, "status", EXPECTED_STATUS, "stateful_action_coverage")
+    require_field(coverage, "required_action_count", EXPECTED_ACTION_COUNT, "stateful_action_coverage")
+    require_field(coverage, "covered_action_count", EXPECTED_ACTION_COUNT, "stateful_action_coverage")
+    require_field(coverage, "required_action_ids", EXPECTED_ACTION_IDS, "stateful_action_coverage")
+    require_field(coverage, "covered_action_ids", EXPECTED_ACTION_IDS, "stateful_action_coverage")
+    require_empty(coverage, "missing_action_ids", "stateful_action_coverage")
+    require_empty(coverage, "missing_artifact_ids", "stateful_action_coverage")
+    require_empty(coverage, "unexpected_artifact_ids", "stateful_action_coverage")
+    stateful_runs = stateful.get("runs")
+    require(isinstance(stateful_runs, list) and len(stateful_runs) == stateful["scenario_count"], "stateful scenario runs must match scenario_count")
+    require(
+        [run.get("name") for run in stateful_runs[: len(EXPECTED_END_TO_END_STATEFUL_SCENARIOS)]]
+        == EXPECTED_END_TO_END_STATEFUL_SCENARIOS,
+        "stateful end-to-end scenario names/order must match the production matrix",
+    )
+    seen_stateful_names: set[str] = set()
+    main_action_ids: set[str] = set()
+    branch_action_ids: list[str] = []
+    observed_step_count = 0
+    for index, stateful_run in enumerate(stateful_runs):
+        context = f"onchain.stateful_scenarios.runs[{index}]"
+        require(isinstance(stateful_run, dict), f"{context} must be an object")
+        name = stateful_run.get("name")
+        require(isinstance(name, str) and name, f"{context}.name must be a non-empty string")
+        require(name not in seen_stateful_names, f"duplicate stateful scenario name: {name}")
+        seen_stateful_names.add(name)
+        require_field(stateful_run, "status", EXPECTED_STATUS, context)
+        require_field(stateful_run, "builder_backed", False, context)
+        require_field(stateful_run, "transaction_origin", "acceptance-python-harness", context)
+        require_field(stateful_run, "harness_origin", "handwritten-python-acceptance-transaction", context)
+        require(isinstance(stateful_run.get("acceptance_harness_name"), str) and stateful_run["acceptance_harness_name"], f"{context} missing acceptance_harness_name")
+        action_ids = stateful_run.get("action_ids")
+        require(isinstance(action_ids, list) and action_ids, f"{context}.action_ids must be a non-empty list")
+        require(set(action_ids).issubset(EXPECTED_ACTION_IDS), f"{context}.action_ids contains actions outside the production matrix")
+        steps = stateful_run.get("steps")
+        require(isinstance(steps, list) and steps, f"{context}.steps must be a non-empty list")
+        observed_step_count += len(steps)
+        if index < len(EXPECTED_END_TO_END_STATEFUL_SCENARIOS):
+            require_field(stateful_run, "kind", "stateful-scenario", context)
+            require(len(steps) >= 2, f"{context} end-to-end scenario must contain at least two committed steps")
+            main_action_ids.update(action_ids)
+        else:
+            require_field(stateful_run, "kind", "stateful-action-branch", context)
+            require(len(action_ids) == 1 and len(steps) == 1, f"{context} branch scenario must bind exactly one action and one step")
+            branch_action_ids.extend(action_ids)
+
+        for step_index, step in enumerate(steps):
+            step_context = f"{context}.steps[{step_index}]"
+            require(isinstance(step, dict), f"{step_context} must be an object")
+            require(isinstance(step.get("step"), str) and step["step"], f"{step_context}.step must be a non-empty string")
+            require_field(step, "status", EXPECTED_STATUS, step_context)
+            dry_run = step.get("dry_run")
+            require(isinstance(dry_run, dict), f"{step_context}.dry_run must be an object")
+            require(
+                isinstance(dry_run.get("cycles"), str) and dry_run["cycles"].startswith("0x"),
+                f"{step_context}.dry_run.cycles must be a hex quantity",
+            )
+            commit = step.get("commit")
+            require(isinstance(commit, dict), f"{step_context}.commit must be an object")
+            require_hex_hash(commit.get("tx_hash"), f"{step_context}.commit.tx_hash")
+            commit_status = commit.get("status")
+            require(isinstance(commit_status, dict), f"{step_context}.commit.status must be an object")
+            require_field(commit_status, "status", "committed", f"{step_context}.commit.status")
+            constraints = step.get("measured_constraints")
+            require(isinstance(constraints, dict), f"{step_context}.measured_constraints must be an object")
+            require_positive_int(constraints.get("measured_cycles"), f"{step_context}.measured_constraints.measured_cycles")
+            require_positive_int(
+                constraints.get("consensus_serialized_tx_size_bytes"),
+                f"{step_context}.measured_constraints.consensus_serialized_tx_size_bytes",
+            )
+            require_positive_int(
+                constraints.get("occupied_capacity_shannons"),
+                f"{step_context}.measured_constraints.occupied_capacity_shannons",
+            )
+            require_field(constraints, "capacity_is_sufficient", True, f"{step_context}.measured_constraints")
+            require_empty(constraints, "under_capacity_output_indexes", f"{step_context}.measured_constraints")
+            consumed_inputs = step.get("consumed_inputs")
+            require(isinstance(consumed_inputs, list), f"{step_context}.consumed_inputs must be a list")
+            require(
+                all(isinstance(cell, dict) and cell.get("status") != "live" for cell in consumed_inputs),
+                f"{step_context}.consumed_inputs contains a still-live or malformed cell",
+            )
+            outputs_live = step.get("outputs_live")
+            require(isinstance(outputs_live, dict), f"{step_context}.outputs_live must be an object")
+            require(all(value is True for value in outputs_live.values()), f"{step_context}.outputs_live contains a dead output")
+
+    require_field(stateful, "step_count", observed_step_count, "onchain.stateful_scenarios")
+    expected_branch_ids = sorted(set(EXPECTED_ACTION_IDS) - main_action_ids)
+    require(sorted(branch_action_ids) == expected_branch_ids, "stateful branch scenarios must cover every action absent from end-to-end flows exactly once")
 
     runs = all_action_runs(report)
     require(len(runs) == EXPECTED_ACTION_COUNT, f"expected {EXPECTED_ACTION_COUNT} action runs, got {len(runs)}")
@@ -570,9 +868,13 @@ def validate_onchain_gate(report: dict[str, Any]) -> None:
         require(isinstance(action, str) and action, f"{name} is missing action")
         require(name.endswith(f":{action}"), f"{name} must end with action suffix :{action}")
         require_field(run, "status", EXPECTED_STATUS, name)
-        require(run.get("builder_backed") is True, f"{name} is not builder-backed")
-        require(isinstance(run.get("builder_name"), str) and run["builder_name"], f"{name} missing builder_name")
-        require(isinstance(run.get("harness_origin"), str) and run["harness_origin"], f"{name} missing harness_origin")
+        require_field(run, "builder_backed", False, name)
+        require_field(run, "transaction_origin", "acceptance-python-harness", name)
+        require_field(run, "harness_origin", "handwritten-python-acceptance-transaction", name)
+        require(isinstance(run.get("acceptance_harness_name"), str) and run["acceptance_harness_name"], f"{name} missing acceptance_harness_name")
+        require(isinstance(run.get("acceptance_harness_implementation"), str) and run["acceptance_harness_implementation"], f"{name} missing acceptance_harness_implementation")
+        require_field(run, "public_builder_contract_id", name, name)
+        require_field(run, "public_builder_contract_verified", True, name)
 
         code = run.get("code")
         require(isinstance(code, dict), f"{name} missing code section")
@@ -647,9 +949,11 @@ def validate_onchain_gate(report: dict[str, Any]) -> None:
         require(isinstance(lock, str) and lock, f"{name} is missing lock")
         require(name.endswith(f":{lock}"), f"{name} must end with lock suffix :{lock}")
         require_field(run, "status", EXPECTED_STATUS, name)
-        require(run.get("builder_backed") is True, f"{name} lock run is not builder-backed")
-        require(isinstance(run.get("builder_name"), str) and run["builder_name"], f"{name} missing builder_name")
-        require(isinstance(run.get("harness_origin"), str) and run["harness_origin"], f"{name} missing harness_origin")
+        require_field(run, "builder_backed", False, name)
+        require_field(run, "transaction_origin", "acceptance-python-harness", name)
+        require_field(run, "harness_origin", "handwritten-python-acceptance-transaction", name)
+        require(isinstance(run.get("acceptance_harness_name"), str) and run["acceptance_harness_name"], f"{name} missing acceptance_harness_name")
+        require(isinstance(run.get("acceptance_harness_implementation"), str) and run["acceptance_harness_implementation"], f"{name} missing acceptance_harness_implementation")
 
         code = run.get("code")
         require(isinstance(code, dict), f"{name} missing code section")
@@ -739,8 +1043,10 @@ def main() -> int:
     repo_root = args.repo_root.resolve()
     report = load_json(report_path)
     validate_source_provenance(report, repo_root)
+    validate_public_builder_contracts(report)
     validate_compile_gate(report, compile_only=args.compile_only)
     if not args.compile_only:
+        validate_ckb_runtime_provenance(report, repo_root, report_path.parent)
         validate_onchain_gate(report)
 
     mode = "compile-only " if args.compile_only else ""
