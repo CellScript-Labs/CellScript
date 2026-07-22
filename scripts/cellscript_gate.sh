@@ -720,7 +720,7 @@ import tomllib
 from pathlib import Path
 
 manifest = tomllib.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-print(manifest["workspace"]["package"]["version"])
+print(manifest["package"]["version"])
 PY
 )"
     if [[ -n "${CELLSCRIPT_RELEASE_VERSION:-}" && "$CELLSCRIPT_RELEASE_VERSION" != "$version" ]]; then

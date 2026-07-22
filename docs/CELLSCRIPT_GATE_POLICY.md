@@ -26,7 +26,7 @@ Use `release` for any production or external live/devnet claim.
 Both release modes fail before doing expensive work unless the CellScript tree
 is completely clean, including untracked files. CI additionally requires the
 exact `v<workspace-version>` tag at `HEAD`; a manual release dispatch must name
-the same version as `[workspace.package].version`. The GitHub Release workflow
+the same version as the root `[package].version`. The GitHub Release workflow
 runs the full `release` gate first, and binary builds plus publication depend on
 that job succeeding.
 

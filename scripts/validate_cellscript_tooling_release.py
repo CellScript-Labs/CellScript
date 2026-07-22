@@ -250,6 +250,14 @@ def main() -> int:
         "RUSTUP_TOOLCHAIN" not in tx_measure_gate,
         "CKB transaction measure tooling must use CellScript's pinned Rust toolchain",
     )
+    require(
+        'print(manifest["package"]["version"])' in gate_script,
+        "release source identity must read the root package version from Cargo.toml",
+    )
+    require(
+        'manifest["workspace"]["package"]' not in gate_script,
+        "release source identity must not assume a virtual workspace package table",
+    )
     require_contains(
         ".github/workflows/website-build.yml",
         [
