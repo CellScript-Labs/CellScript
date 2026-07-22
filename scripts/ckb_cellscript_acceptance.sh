@@ -4745,10 +4745,25 @@ def run_token_action(action_record, always_success_dep):
     })
     return result
 
+def action_runtime_input_bindings(action_record):
+    metadata = json.loads(pathlib.Path(action_record["metadata"]).read_text(encoding="utf-8"))
+    indexed_bindings = []
+    for access in (metadata.get("runtime") or {}).get("ckb_runtime_accesses", []):
+        if access.get("source") == "Input":
+            indexed_bindings.append((int(access["index"]), access["binding"]))
+    indexed_bindings.sort()
+    indexes = [index for index, _ in indexed_bindings]
+    if indexes != list(range(len(indexes))):
+        raise RuntimeError(
+            f"{action_record['name']} metadata has non-contiguous CKB input bindings: {indexed_bindings}"
+        )
+    return [binding for _, binding in indexed_bindings]
+
 def build_nft_action_case(action_record, cellscript_lock, cellscript_type, destination_lock, current_owner, destination_owner, metadata_hash, royalty_recipient, nft_type, listing_type, offer_type, royalty_payment_type, cell_deps):
     action = action_record["action"]
     original_scoped = action_record.get("kind") == "original-scoped-action-strict"
     flow_state = 0 if original_scoped else None
+    input_bindings = None
 
     if action == "create_collection":
         name = b"Acceptance Collection"
@@ -4878,16 +4893,21 @@ def build_nft_action_case(action_record, cellscript_lock, cellscript_type, desti
         payment_symbol = b"PAYM0001"
         created_at = 70
         nft_payload = nft_data(token_id, current_owner, metadata_hash, royalty_recipient, 250)
-        initial = create_script_locked_cells(
-            "nft.buy_from_listing",
-            [
-                {"capacity": 1000 * 100_000_000, "lock": cellscript_lock, "type": nft_type, "data": nft_payload},
-                {"capacity": 500 * 100_000_000, "lock": cellscript_lock, "type": listing_type, "data": listing_data(token_id, current_owner, price, created_at, state=flow_state)},
-                {"capacity": 200 * 100_000_000, "lock": cellscript_lock, "type": royalty_payment_type, "data": token_data(royalty_amount, payment_symbol)},
-                {"capacity": 200 * 100_000_000, "lock": cellscript_lock, "type": royalty_payment_type, "data": token_data(seller_amount, payment_symbol)},
-            ],
-            cell_deps,
+        nft_input = {"capacity": 1000 * 100_000_000, "lock": cellscript_lock, "type": nft_type, "data": nft_payload}
+        listing_input = {"capacity": 500 * 100_000_000, "lock": cellscript_lock, "type": listing_type, "data": listing_data(token_id, current_owner, price, created_at, state=flow_state)}
+        royalty_input = {"capacity": 200 * 100_000_000, "lock": cellscript_lock, "type": royalty_payment_type, "data": token_data(royalty_amount, payment_symbol)}
+        seller_input = {"capacity": 200 * 100_000_000, "lock": cellscript_lock, "type": royalty_payment_type, "data": token_data(seller_amount, payment_symbol)}
+        input_specs = (
+            [nft_input, royalty_input, seller_input, listing_input]
+            if original_scoped
+            else [nft_input, listing_input, royalty_input, seller_input]
         )
+        input_bindings = (
+            ["nft_before", "royalty_payment", "seller_payment", "listing"]
+            if original_scoped
+            else ["nft_before", "listing", "royalty_payment", "seller_payment"]
+        )
+        initial = create_script_locked_cells("nft.buy_from_listing", input_specs, cell_deps)
         outputs = [
             {"capacity": hex_u64(1000 * 100_000_000), "lock": cellscript_lock, "type": nft_type},
             {"capacity": hex_u64(200 * 100_000_000), "lock": destination_lock, "type": royalty_payment_type},
@@ -4930,16 +4950,21 @@ def build_nft_action_case(action_record, cellscript_lock, cellscript_type, desti
         expires_at = 200
         header_dep = get_block_by_number(0)["header"]["hash"]
         nft_payload = nft_data(token_id, current_owner, metadata_hash, royalty_recipient, 250)
-        initial = create_script_locked_cells(
-            "nft.accept_offer",
-            [
-                {"capacity": 1000 * 100_000_000, "lock": cellscript_lock, "type": nft_type, "data": nft_payload},
-                {"capacity": 500 * 100_000_000, "lock": cellscript_lock, "type": offer_type, "data": offer_data(token_id, destination_owner, price, expires_at, state=flow_state, payment_symbol=payment_symbol)},
-                {"capacity": 200 * 100_000_000, "lock": cellscript_lock, "type": royalty_payment_type, "data": token_data(royalty_amount, payment_symbol)},
-                {"capacity": 200 * 100_000_000, "lock": cellscript_lock, "type": royalty_payment_type, "data": token_data(seller_amount, payment_symbol)},
-            ],
-            cell_deps,
+        nft_input = {"capacity": 1000 * 100_000_000, "lock": cellscript_lock, "type": nft_type, "data": nft_payload}
+        offer_input = {"capacity": 500 * 100_000_000, "lock": cellscript_lock, "type": offer_type, "data": offer_data(token_id, destination_owner, price, expires_at, state=flow_state, payment_symbol=payment_symbol)}
+        royalty_input = {"capacity": 200 * 100_000_000, "lock": cellscript_lock, "type": royalty_payment_type, "data": token_data(royalty_amount, payment_symbol)}
+        seller_input = {"capacity": 200 * 100_000_000, "lock": cellscript_lock, "type": royalty_payment_type, "data": token_data(seller_amount, payment_symbol)}
+        input_specs = (
+            [nft_input, royalty_input, seller_input, offer_input]
+            if original_scoped
+            else [nft_input, offer_input, royalty_input, seller_input]
         )
+        input_bindings = (
+            ["nft_before", "royalty_payment", "seller_payment", "offer"]
+            if original_scoped
+            else ["nft_before", "offer", "royalty_payment", "seller_payment"]
+        )
+        initial = create_script_locked_cells("nft.accept_offer", input_specs, cell_deps)
         outputs = [
             {"capacity": hex_u64(1000 * 100_000_000), "lock": cellscript_lock, "type": nft_type},
             {"capacity": hex_u64(200 * 100_000_000), "lock": destination_lock, "type": royalty_payment_type},
@@ -5004,6 +5029,7 @@ def build_nft_action_case(action_record, cellscript_lock, cellscript_type, desti
     return {
         "builder_name": "nft-action-builder-v1",
         "initial": initial,
+        "input_bindings": input_bindings,
         "valid_tx": valid_tx,
         "malformed_tx": malformed_tx,
     }
@@ -5053,7 +5079,17 @@ def run_nft_action(action_record, always_success_dep):
     initial = nft_case["initial"]
     valid_tx = nft_case["valid_tx"]
     malformed_tx = nft_case["malformed_tx"]
+    actual_input_bindings = nft_case["input_bindings"]
     result["builder_name"] = nft_case["builder_name"]
+    if actual_input_bindings is not None:
+        expected_input_bindings = action_runtime_input_bindings(action_record)
+        if actual_input_bindings[:len(expected_input_bindings)] != expected_input_bindings:
+            raise RuntimeError(
+                f"{name} builder input bindings do not match compiler metadata: "
+                f"builder={actual_input_bindings} metadata={expected_input_bindings}"
+            )
+        result["builder_input_bindings"] = actual_input_bindings
+        result["metadata_input_bindings"] = expected_input_bindings
 
     malformed_rejection = expect_dry_run_rejected(
         malformed_tx,
