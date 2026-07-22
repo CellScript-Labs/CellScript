@@ -6934,7 +6934,19 @@ def run_stateful_nft_listing_sale(always_success_dep):
         ],
         actions["buy_from_listing"]["cell_deps"],
     )
-    sale_inputs = [nft_for_sale, listing, *payment_initial["cells"]]
+    sale_cells_by_binding = {
+        "nft_before": nft_for_sale,
+        "listing": listing,
+        "royalty_payment": payment_initial["cells"][0],
+        "seller_payment": payment_initial["cells"][1],
+    }
+    sale_input_bindings = action_runtime_input_bindings(actions["buy_from_listing"]["record"])
+    if set(sale_input_bindings) != set(sale_cells_by_binding):
+        raise RuntimeError(
+            "stateful NFT listing-sale inputs do not match compiler metadata: "
+            f"builder={sorted(sale_cells_by_binding)} metadata={sale_input_bindings}"
+        )
+    sale_inputs = [sale_cells_by_binding[binding] for binding in sale_input_bindings]
     tx4 = transaction(
         sale_inputs,
         [
