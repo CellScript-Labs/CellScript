@@ -78,6 +78,8 @@ def main() -> int:
     require('"token.cell": ["mint_with_authority", "transfer_token", "burn", "merge"]' in ckb_acceptance, "CKB acceptance runner must compile token actions as original strict scoped actions")
     require('"amm_pool.cell": ["seed_pool", "swap_a_for_b", "add_liquidity", "remove_liquidity"]' in ckb_acceptance, "CKB acceptance runner must compile AMM actions as original strict scoped actions")
     require('"launch.cell": ["launch_token", "bootstrap_token"]' in ckb_acceptance, "CKB acceptance runner must compile launch actions as original strict scoped actions")
+    require("mapfile" not in ckb_acceptance and "readarray" not in ckb_acceptance, "CKB acceptance runner must remain compatible with macOS Bash 3.2")
+    require("while IFS= read -r value" in ckb_acceptance, "CKB acceptance pin parsing must use the portable read loop")
 
     tutorial_08 = read("docs/wiki/Tutorial-08-Bundled-Example-Contracts.md")
     require("strict v0.16 ProofPlan gate" in tutorial_08, "bundled example tutorial must document the strict 0.16 ProofPlan gate")

@@ -229,7 +229,10 @@ if [[ "$RUN_ONCHAIN" == "1" ]]; then
     exit 1
   fi
 
-  mapfile -t CKB_PIN_VALUES < <(python3 - "$CKB_PIN_FILE" <<'PY'
+  CKB_PIN_VALUES=()
+  while IFS= read -r value; do
+    CKB_PIN_VALUES[${#CKB_PIN_VALUES[@]}]="$value"
+  done < <(python3 - "$CKB_PIN_FILE" <<'PY'
 import json
 import pathlib
 import sys
