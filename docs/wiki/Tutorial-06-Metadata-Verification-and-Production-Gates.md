@@ -427,7 +427,7 @@ obsolete-syntax oracles with compact reports under
 `target/syntax-combo-audit/`.
 
 For CellScript releases, `quick` is part of the pre-push gate and `ci` runs
-before local CKB acceptance. A direct CKB acceptance run does not
+before builder-backed CKB acceptance. A direct CKB acceptance run does not
 replace this preflight because it only proves selected concrete transactions.
 
 ## Unified Gate Entry Points
