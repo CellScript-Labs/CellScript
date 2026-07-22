@@ -9,9 +9,10 @@ CKB ckb-vm RISC-V artifacts (assembly or ELF), together with typed metadata for
 auditing, policy checks, schema binding, and scheduler-aware execution. The
 crate at the repo root is `cellscript` (workspace member `.`); a sibling crate
 `crates/cellscript-wasm` exposes the metadata-only compile path to browsers via
-`wasm-bindgen`; `crates/cellscript-ckb-adapter` is a CKB-side adapter. The
-website submodule under `website/` ships an Astro + WASM playground that loads
-the prebuilt bundle.
+`wasm-bindgen`; `crates/cellscript-ckb-adapter` is a CKB-side adapter; and
+`crates/cellscript-fiber-adapter` implements the bounded no-profile Fiber
+interoperability path. The website submodule under `website/` ships an Astro +
+WASM playground that loads the prebuilt bundle.
 
 Version line: the workspace `Cargo.toml` pins `version = "0.22.0"`, Rust
 Edition 2024, and `rust-version = "1.97.1"`. `rust-toolchain.toml` and CI pin
@@ -87,10 +88,10 @@ require extra tooling.
 
 | Mode | What it does |
 | --- | --- |
-| `dev` | Explicit workspace-package formatting, `cargo check --locked -p cellscript --all-targets`, strict backend audit (quick), syntax combo audit (quick), forbidden tracked-file check, `git diff --check`. Run before committing. |
-| `ci` | `dev` checks plus `cargo test --locked -p cellscript -- --test-threads=1`, `cargo clippy --locked -p cellscript --all-targets -- -D warnings`, full package contents check, website build check (requires `npm`), shell + Python syntax check, trailing-whitespace check. Run before claiming merge-readiness. |
+| `dev` | Explicit workspace-package formatting and checks for the compiler, Fiber adapter, CKB adapter, WASM crate, and CKB SDK builder example; strict backend audit (quick); syntax combo audit (quick); forbidden tracked-file check; `git diff --check`. Run before committing. |
+| `ci` | `dev` coverage plus tests and clippy for every workspace package, full package contents check, website build check (requires `npm`), shell + Python syntax check, and trailing-whitespace check. Run before claiming merge-readiness. |
 | `backend` | For IR / codegen / assembler / ABI / ELF / RISC-V changes: explicit workspace-package format checking, `cargo check --locked -p cellscript --all-targets`, `cargo test --locked -p cellscript`, `cargo clippy ... -D warnings`, strict backend audit (full, which itself fires the CKB stateful-scenarios harness via `cellscript_ckb_stateful_scenarios.sh`), `git diff --check`. |
-| `release` / `release-quick` | Everything `ci` does plus release-auxiliary checks (CKB acceptance, NovaSeal pinning, NovaSeal Rust tooling for RISC-V, VS Code extension validate + publish dry-run, CKB tx measure tool, etc.) and the CKB acceptance harness (`scripts/ckb_cellscript_acceptance.sh`). These modes need the CKB submodule, the NovaSeal submodule, a sibling `ckb-sdk-rust` checkout at tag `v5.1.0`, and `riscv64imac-unknown-none-elf` for NovaSeal verifier builds. Do not run them casually. |
+| `release` / `release-quick` | Everything `ci` does plus release-auxiliary checks (CKB acceptance, NovaSeal pinning, NovaSeal Rust tooling for RISC-V, fresh WASM + VS Code packaging, CKB tx measure tool, etc.) and the CKB acceptance harness (`scripts/ckb_cellscript_acceptance.sh`). These modes need the pinned sibling CKB checkout from `scripts/ckb_acceptance_pin.json`, the NovaSeal submodule, a sibling `ckb-sdk-rust` checkout at tag `v5.1.0`, and `riscv64imac-unknown-none-elf` for NovaSeal verifier builds. Do not run them casually. |
 
 Focused commands are still useful while debugging — `cargo check --locked -p
 cellscript --all-targets`, `cargo test --locked -p cellscript`, clippy with
@@ -114,6 +115,7 @@ The root `Cargo.toml` declares a virtual workspace with these members:
 
 - `.` (the `cellscript` library + `cellc` bin at `src/main.rs`)
 - `crates/cellscript-ckb-adapter`
+- `crates/cellscript-fiber-adapter`
 - `crates/cellscript-wasm`
 - `examples/ckb-sdk-builder`
 
@@ -250,8 +252,8 @@ Existing command families to be aware of:
 - `tests/support/{ckb_script_runner.rs,ickb_model.rs}` and `tests/compat/ckb_standard/`
   support the CKB-compat and iCKB suites.
 - `tests/benchmarks/` is a submodule (`cellscript-ickb-equivalence`) and is
-  intentionally empty in this checkout — `git submodule update --init` if you
-  need to run benchmark code. When a coordinated change needs to update iCKB
+  empty until initialized — run `git submodule update --init` if you need to
+  inspect or run benchmark code. When a coordinated change needs to update iCKB
   benchmark specs or their docs (e.g. a new release line renames or consolidates
   test files the submodule cites), edit the submodule in place, commit inside
   it, and then bump the parent's submodule pointer in the same change. Do not

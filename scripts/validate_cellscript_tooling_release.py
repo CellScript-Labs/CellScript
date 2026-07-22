@@ -238,6 +238,18 @@ def main() -> int:
             "node editors/vscode-cellscript/scripts/validate.mjs",
         ],
     )
+    gate_script = read("scripts/cellscript_gate.sh")
+    tx_measure_gate = gate_script.split("check_ckb_tx_measure_tool() {", 1)[1].split(
+        "check_novaseal_rust_tooling() {", 1
+    )[0]
+    require(
+        "cargo test --manifest-path tools/ckb-tx-measure/Cargo.toml --locked" in tx_measure_gate,
+        "CKB transaction measure tooling must be tested by the release gate",
+    )
+    require(
+        "RUSTUP_TOOLCHAIN" not in tx_measure_gate,
+        "CKB transaction measure tooling must use CellScript's pinned Rust toolchain",
+    )
     require_contains(
         ".github/workflows/website-build.yml",
         [

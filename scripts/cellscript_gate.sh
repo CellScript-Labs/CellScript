@@ -774,26 +774,7 @@ check_wasm_release_bundle() {
 }
 
 check_ckb_tx_measure_tool() {
-    local ckb_repo="$ROOT_DIR/../ckb"
-    local toolchain=""
-    if [[ -f "$ckb_repo/rust-toolchain.toml" ]]; then
-        toolchain="$(python3 - "$ckb_repo/rust-toolchain.toml" <<'PY'
-import re
-import sys
-from pathlib import Path
-
-match = re.search(r'channel\s*=\s*"([^"]+)"', Path(sys.argv[1]).read_text(encoding="utf-8"))
-if match:
-    print(match.group(1))
-PY
-)"
-    fi
-
-    if [[ -n "$toolchain" ]]; then
-        run env RUSTUP_TOOLCHAIN="$toolchain" cargo test --manifest-path tools/ckb-tx-measure/Cargo.toml --locked
-    else
-        run cargo test --manifest-path tools/ckb-tx-measure/Cargo.toml --locked
-    fi
+    run cargo test --manifest-path tools/ckb-tx-measure/Cargo.toml --locked
 }
 
 check_novaseal_rust_tooling() {

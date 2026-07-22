@@ -2,138 +2,259 @@
 
 **Status**: Stable release notes for CellScript 0.22.0.
 
-**Updated**: 2026-07-21.
+**Updated**: 2026-07-22.
 
-CellScript 0.22 extends the typed language and evidence model while tightening
-the CLI, diagnostics, LSP, and bounded Fiber interoperability path. The release
-keeps CKB's Cell model and evidence boundaries explicit: compiler success is
-not a production or live-chain claim.
+CellScript 0.22 makes contract intent easier to express and easier to audit. It
+adds typed transaction views, finite verification constructs, explicit
+capability and flow evidence, clearer diagnostics, and a bounded Fiber asset
+path. It also strengthens the release process so compiler evidence, builder
+evidence, CKB-VM execution, and committed-chain evidence are no longer easy to
+confuse.
 
-## CLI And Diagnostics
+CKB remains a Cell-model blockchain: transactions consume live Cells and create
+new Cells, while Lock Scripts control spending and Type Scripts validate state
+rules. A successful compile is therefore useful evidence, but it is not by
+itself proof that a transaction can be built, accepted, or committed.
 
-`--json` is the single public machine-output switch. Success and failure emit
-exactly one JSON document on stdout; the hidden `--message-format=json` spelling
-remains only for compatibility. Public help and `cellc --list` show the
-canonical nested command tree.
+## At A Glance
 
-Backend diagnostics use stable `E2xxx` codes. JSON diagnostics include code,
-name, description, and recovery hint; `cellc explain E2202 --json` exposes the
-same registry. LSP diagnostics carry the standard `code` field and a
-`codeDescription` link. VM and simulator `cellc run --json` results now share
-one schema, with unavailable `cycles` or `steps` represented as `null`.
+| Area | What changes for you |
+| --- | --- |
+| Language | More verification logic is typed, finite, and explicit instead of encoded in strings or conventions. |
+| Auditing | Every ProofPlan obligation has one of six evidence tiers, making the remaining owner of a proof visible. |
+| CLI and LSP | `--json` is the canonical machine interface; diagnostics have stable codes and matching editor links. |
+| CKB integration | New bounded CellDep, hashing, Merkle, and external BIP340-verifier helpers have explicit trust boundaries. |
+| Examples | Bundled contracts model real Cell identities and asset settlement more faithfully. |
+| Ecosystem | Fiber, Spore, and RGB++ paths are available within deliberately narrow, documented scopes. |
+| Release safety | The full gate binds clean source, pinned CKB source and binary provenance, generated artifacts, public builder contracts, and stateful transaction evidence. |
 
-## Typed 0.22 Language Surface
+## Install Or Upgrade
+
+Install the published binary:
+
+```bash
+CELLSCRIPT_VERSION=0.22.0 curl -fsSL https://raw.githubusercontent.com/CellScript-Labs/CellScript/main/scripts/install.sh | sh
+cellc --version
+```
+
+To build from source, use the repository-pinned Rust 1.97.1 toolchain and
+initialize submodules recursively:
+
+```bash
+git clone --recurse-submodules https://github.com/CellScript-Labs/CellScript.git
+cd CellScript
+cargo install --locked --path .
+```
+
+Published binaries do not require a local Rust toolchain. Source builds and
+workspace contributors do: all in-tree crates now use Rust Edition 2024 and
+declare `rust-version = "1.97.1"`.
+
+## How To Read 0.22 Evidence
+
+The release makes the evidence hand-off explicit:
+
+```mermaid
+flowchart LR
+    A["CellScript source"] --> B["Static compiler checks"]
+    B --> C["RISC-V ELF + schema 55 metadata"]
+    C --> D["Builder contract + transaction shape"]
+    D --> E["CKB-VM execution and measurements"]
+    E --> F["Committed transaction evidence"]
+    B -. "does not prove" .-> F
+    C -. "does not prove" .-> F
+```
+
+Every ProofPlan record now identifies exactly one evidence tier:
+
+| Tier | Who or what must discharge it |
+| --- | --- |
+| `checked-static` | Compiler or static analysis. |
+| `checked-runtime` | Generated verifier code. |
+| `runtime-helper-required` | A known helper that the selected artifact has not emitted. |
+| `builder-evidence-required` | Transaction builder or indexer. |
+| `metadata-only` | Audit metadata with no executable enforcement. |
+| `chain-evidence-required` | Dry-run, tx-pool, commit, capacity, or cycle evidence. |
+
+`--production` rejects enforcement-like claims that remain metadata-only. It
+does not silently promote builder or chain obligations into compiler proof.
+
+## Typed Language And Verification Surface
 
 The 0.22 line adds:
 
-- checked casts, transitive callable effects, initial/terminal flow evidence,
-  typed aggregate targets, and a six-tier ProofPlan evidence taxonomy;
+- checked casts and transitive callable-effect checking;
+- enum-backed flows with one initial state, explicit terminal states, and
+  checked terminal-by-output-state evidence;
 - typed read-only transaction handles such as `InputView<T>`, `OutputView<T>`,
   `CellDepView`, `HeaderDepView`, and `WitnessArgsView`;
 - finite `forall` and `count(...)` invariant quantification over closed source
   views;
-- source-aware `BoundedCellSet<T, N>` and witness/static
-  `BoundedList<T, N>` contracts with `consume_each` and `create_each`;
-- a closed capability algebra with explicit entailment evidence;
-- concrete fixed-width payload enums with exhaustive matching and bounded ABI
-  support;
-- canonical type `validity` blocks, including the explicit
-  builder-evidence boundary for `env::block_number()`;
-- compile-time-only `borrow root as view { ... }` regions;
-- deterministic participant-role attribution in ProtocolGraph metadata.
+- source-aware `BoundedCellSet<T, N>` and `BoundedList<T, N>` contracts with
+  `consume_each` and `create_each`;
+- a closed, versioned capability algebra with explicit entailment records;
+- concrete fixed-width payload enums, exhaustive matching, and a bounded
+  register-pair return ABI;
+- canonical type `validity` blocks;
+- compile-time-only `borrow root as view { ... }` regions; and
+- deterministic participant-role candidates in ProtocolGraph metadata.
 
-Unsupported dynamic, recursive, generic, unbounded, or authority-ambiguous
-forms remain rejected or explicitly recorded as deferred/runtime-required.
+The compiler continues to fail closed on dynamic or recursive payload ADTs,
+generic payload enums, unbounded resource iteration, authority borrowed from a
+container, escaping borrow views, and unsupported validity environments.
 
-## Bundled Example Hardening
-
-The checked examples now model asset settlement directly. AMM pools bind both
-token TypeHashes and derive initial LP supply geometrically; NFT listing and
-offer settlement consume and relock typed Token inputs; timelock and swap
-release paths create actual Token outputs; DAO vote receipts lock and redeem
-the voting Token; and vesting separates repeatable partial claims from the
-terminal `FullyClaimed` transition. Pure AMM helpers are no longer exposed as
-transaction entries. The seven-example production matrix therefore contains
-43 business actions and 17 locks.
-
-## Bounded CKB Crypto And Dependency Helpers
-
-The CKB runtime surface now includes exact-index and literal-bounded resolved
-CellDep data-hash checks, fixed-width SHA-256/SHA256d for 32-byte values and
-64-byte pairs, and a SHA256d Merkle path with a literal depth in `0..=16`.
-Generated RISC-V is exercised against Rust reference hashes in CKB-VM, including
-missing-dependency and wrong-root rejection. The VM sees resolved CellDeps, so
-out points, dep type, and original DepGroup identity remain builder/manifest
-evidence.
-
-`verifier::btc::bip340::require_signature_from_cell_dep` selects a literal
-CellDep index and sends the fixed 144-byte
-`cellscript-btc-bip340-ipc-v0` request through VM2 pipe/spawn/wait. This verifies
-only the supplied prehash. Message domain, ScriptGroup/WitnessArgs selection,
-sighash construction, key authority, replay policy, deployment pinning, and
-external verifier review remain package obligations. See
-`docs/CELLSCRIPT_SIGNATURE_VERIFIER_ABI.md`.
-
-## Spore And RGB++ Identity Adapters
-
-The compile-checked packages under `examples/ecosystem/` demonstrate bounded
-identity composition with Spore and RGB++ scripts. They pin exact Script
-identities and transaction positions without adding protocol namespaces to the
-core language. They do not reimplement Spore, RGB++ commitments, Bitcoin SPV,
-confirmation/reorg policy, or SDK transaction construction, and are not a
-production-compatibility claim.
+`env::block_number()` is intentionally builder evidence rather than a fictional
+ambient CKB-VM syscall. Transaction-view reads inside validity predicates remain
+unsupported.
 
 ## Metadata Schema 55
 
-Current artifacts emit compile metadata schema 55. It carries the 0.22
-callable/flow evidence, transaction-view handles, bounded collections,
-capability proofs, enum layouts, protocol-role candidates, validity predicates,
-borrow regions, and the bounded Fiber compatibility contract. Source, artifact,
-and constraints sub-schemas retain their own version fields.
+Current artifacts emit compile metadata schema 55. It carries callable and flow
+evidence, transaction-view handles, bounded collections, capability proofs,
+enum layouts, protocol-role candidates, validity predicates, borrow regions,
+and the bounded Fiber compatibility record.
 
-Consumers must compare the emitted version rather than assuming that an older
-schema number remains current. Historical release documents may still name the
-schema in which a field first appeared.
+Metadata consumers must compare the emitted version and reject unsupported
+versions. Recompile old artifacts and regenerate receipts or audit bundles
+instead of copying schema-44-era assumptions into a 0.22 workflow.
 
-## Bounded Fiber Interoperability
+## CLI, Diagnostics, And Editor Experience
 
-The separate `cellscript-fiber-adapter` crate derives a dedicated
-`fungible-type-group-v1` artifact and native Fiber UDT configuration from typed
-compiler, deployment, live-cell, and node evidence. It does not add a Fiber
-target profile or depend on `fiber-lib`.
+`--json` is now the single public machine-output switch. Success and failure
+emit exactly one JSON document on stdout. The hidden
+`--message-format=json` spelling remains temporarily available for compatibility.
 
-The path is deliberately narrow: exact 16-byte little-endian `u128` Cell data,
-full Type Script group conservation, and closed issuance/destruction authority
-formats. Local-devnet scenarios cover bounded multi-hop payment and watchtower
-force-close flows. The clean pinned full lifecycle/negative matrix remains
-pending, so 0.22 does not claim production-ready Fiber interoperability.
+Backend diagnostics use stable `E2xxx` codes. JSON diagnostics contain the code,
+name, description, and recovery hint; `cellc explain E2202 --json` exposes the
+same registry. LSP diagnostics carry the standard `code` field and a
+`codeDescription` link. VM and simulator `cellc run --json` output now shares
+one schema, using `null` when cycles or steps are unavailable.
 
-See `examples/fiber/README.md` for the operator workflow and examples.
+The VS Code extension is released from the `editors/vscode-cellscript`
+submodule. Version 0.22 adds grammar, snippets, hover, completion, and validation
+coverage for the new syntax while continuing to delegate semantic decisions to
+`cellc`. `cellscript-mcp` remains a read-only compiler/documentation interface,
+not a second compiler or deployment client.
 
-## Editor And Agent Tooling
+## Bundled Contract Hardening
 
-The VS Code extension is maintained as the
-`editors/vscode-cellscript` submodule. The 0.22 extension release adds grammar
-and snippet coverage for the new language forms while continuing to delegate
-semantic diagnostics and reports to `cellc`.
+The examples now model assets as Cells rather than treating identifiers or
+witness values as settlement:
 
-`cellscript-mcp` adds bounded 0.22 language, Fiber interoperability, and roadmap
-documentation topics. MCP remains read-only and does not become a second
-compiler, builder, or deployment client.
+- AMM pools bind both token TypeHashes and derive initial LP supply
+  geometrically;
+- NFT sales consume and relock typed Token payments;
+- timelocks and atomic swaps release actual Token outputs;
+- DAO votes lock and redeem voting Tokens;
+- vesting separates repeatable partial claims from the terminal
+  `FullyClaimed` transition; and
+- resource permutations that preserve typed fields are checked as runtime
+  conservation without action-name-specific backend rules.
 
-## Deferred And External Evidence
+The bundled multisig example now says what it actually proves. Its `Approval`
+records are non-cryptographic approvals; signer authentication, sighash and
+WitnessArgs binding, replay policy, and real signature verification belong in a
+Lock Script or pinned verifier package.
 
-The following remain outside a compiler-only 0.22 claim:
+The production example matrix contains 43 business actions and 17 locks. Pure
+AMM helpers are no longer exposed as transaction entries.
+
+## CKB Crypto And CellDep Helpers
+
+New runtime helpers include:
+
+- exact-index and literal-bounded resolved CellDep data-hash checks;
+- fixed-width SHA-256 and SHA256d for 32-byte values and 64-byte pairs; and
+- SHA256d Merkle verification with a literal depth in `0..=16`.
+
+The bounded CellDep scan accepts only a literal maximum in `1..=64`, uses the
+real resolved-CellDep data-hash syscall path, and fails with a stable runtime
+error when no match is found. CKB-VM sees resolved CellDeps; out points, dep
+types, and original DepGroup identity remain builder or manifest evidence.
+
+`verifier::btc::bip340::require_signature_from_cell_dep` selects a literal
+CellDep index and uses a fixed 144-byte VM2 IPC envelope. It verifies only the
+supplied prehash. The calling package still owns message-domain construction,
+ScriptGroup/WitnessArgs and sighash selection, key authority, replay policy,
+deployment pinning, and external verifier review. See the
+[signature verifier ABI](../CELLSCRIPT_SIGNATURE_VERIFIER_ABI.md).
+
+## Fiber, Spore, And RGB++ Boundaries
+
+The new `cellscript-fiber-adapter` crate derives a dedicated
+`fungible-type-group-v1` artifact and native Fiber UDT configuration from
+compiler, deployment, live-Cell, and node evidence. The executable boundary is
+narrow: exact 16-byte little-endian `u128` data, full Type Script group
+conservation, and closed issuance/destruction authority formats.
+
+Bounded local-devnet runs covered Fiber's official multi-hop UDT payment and
+pending-TLC watchtower force-close collections. The clean pinned full
+lifecycle/negative matrix is still pending, so this is not a production-ready
+or general Fiber compatibility claim. See the
+[Fiber operator guide](../../examples/fiber/README.md).
+
+The compile-checked Spore and RGB++ identity-adapter examples bind exact Script
+identities and transaction positions. They do not reimplement protocol rules,
+Bitcoin SPV, confirmation/reorg policy, witnesses, or SDK transaction
+construction. See the
+[interop boundary guide](../wiki/Spore-and-RGBPP-Interop-Boundaries.md).
+
+## Release Gate Hardening
+
+The full release workflow now runs the authoritative release gate before any
+binary build or GitHub publication. Release evidence requires:
+
+- a completely clean CellScript tree and, for publication, an exact
+  version-matched tag;
+- the pinned clean CKB revision from `scripts/ckb_acceptance_pin.json`;
+- a freshly built CKB executable from that source in a dedicated Cargo target,
+  archived and hashed with the evidence report;
+- source template, effective configuration, genesis, executable, and artifact
+  provenance;
+- all 43 stateful action paths plus all 17 valid/invalid lock-spend paths, with
+  commit, input-liveness, output-liveness, cycles, serialized size, and occupied
+  capacity checks;
+- exact 20-byte ELF entry-trampoline verification;
+- fresh size-gated WASM and VS Code packaging; and
+- tests and clippy for every workspace package.
+
+The gate labels transaction origins honestly. The on-chain transaction matrix
+is a handwritten Python acceptance harness. Separately, every production action
+must pass the public `cellc action build` and `cellc gen-builder` contract gate.
+The local resource Type Scripts are `always_success` fixtures, so this evidence
+proves scoped verifier behaviour and transaction shape, not a production
+passive-resource-identity deployment.
+
+## Migration Checklist
+
+Before moving a 0.21 workflow to 0.22:
+
+1. Pin or install CellScript 0.22.0 and confirm `cellc --version`.
+2. Use `--json` for automation and require exactly one stdout document.
+3. Update metadata consumers to schema 55 and fail closed on unknown versions.
+4. Recompile ELF artifacts and regenerate metadata, receipts, builders, and
+   audit bundles.
+5. If building from source, use Rust 1.97.1 and initialize submodules
+   recursively.
+6. Re-run the gate matching the claim you intend to make; compiler success does
+   not replace builder or chain evidence.
+
+## Deliberate Boundaries
+
+CellScript 0.22 does not claim:
 
 - production Fiber readiness without the pinned external lifecycle matrix;
-- builder, capacity, tx-pool, commit, and live-chain evidence represented by
-  non-compiler ProofPlan tiers;
-- dynamic/generic payload ADTs and unbounded collection iteration;
+- builder, capacity, tx-pool, commit, or live-chain evidence from compiler-only
+  ProofPlan tiers;
+- dynamic, recursive, or generic payload ADTs;
+- unbounded collection iteration;
 - transaction-view reads inside type validity predicates;
-- consensus-checked TemplateLayout commitments and canonical AST/IR receipt
-  hashes.
+- consensus-checked TemplateLayout commitments;
+- canonical AST/IR receipt hashes; or
+- production Spore, RGB++, Bitcoin SPV, or external BIP340-verifier assurance
+  without their pinned packages and independent evidence.
 
-## Validation Boundary
+## Validation Commands
 
 Routine local work:
 
@@ -147,11 +268,21 @@ Merge readiness:
 ./scripts/cellscript_gate.sh ci
 ```
 
-Backend changes:
+IR, codegen, assembler, ABI, ELF, or RISC-V changes:
 
 ```bash
 ./scripts/cellscript_gate.sh backend
 ```
 
-Production-facing release claims still require the release gate and its
-external CKB/Fiber evidence dependencies.
+Release-facing CKB evidence:
+
+```bash
+./scripts/cellscript_gate.sh release
+```
+
+`release-quick` is a compile-only preflight. It is not external live/devnet
+evidence.
+
+For the exact trust and evidence boundaries, read the
+[gate policy](../CELLSCRIPT_GATE_POLICY.md) and
+[metadata verification tutorial](../wiki/Tutorial-06-Metadata-Verification-and-Production-Gates.md).
