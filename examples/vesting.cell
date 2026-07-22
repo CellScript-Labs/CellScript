@@ -32,6 +32,7 @@ flow VestingGrant.state {
     initial Active;
     terminal FullyClaimed;
 
+    Active -> Active;
     Active -> FullyClaimed;
 }
 

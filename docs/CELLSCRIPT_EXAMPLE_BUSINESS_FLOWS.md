@@ -376,14 +376,14 @@ flowchart TD
     H --> I["Consume grant tokens"]
     I --> J["Create VestingGrant receipt"]
 
-    J --> K["claim_vested before end"]
+    J --> K["claim_vested before end: Active → Active"]
     K --> L["Check cliff reached and grant still active"]
     L --> M["Compute vested and claimable amount"]
     M --> N["Consume old VestingGrant"]
     N --> O["Create claim Token output"]
     O --> P["Create updated VestingGrant receipt"]
 
-    J --> W["claim_fully_vested at/after end"]
+    J --> W["claim_fully_vested at/after end: Active → FullyClaimed"]
     W --> X["Pay remaining Token amount"]
     X --> Y["Create terminal FullyClaimed grant"]
 

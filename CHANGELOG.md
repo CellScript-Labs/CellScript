@@ -10,6 +10,8 @@
   fresh WASM/VS Code packaging, and tests/clippy across every workspace crate.
   The WASM build now runs Binaryen `wasm-opt -Oz` explicitly before enforcing
   the 600 KB gzip budget.
+  Website provenance and assurance snapshots are regenerated from CellScript
+  0.22.0 rather than displaying stale 0.17 compiler and metadata versions.
   Public `action build`/`gen-builder` contracts are verified separately from
   explicitly handwritten Python acceptance transactions; always-success
   resource Type Scripts remain a recorded fixture-only non-claim.
@@ -31,8 +33,9 @@
   NFT sales consume and relock typed Token payments; timelocks and swaps
   release actual Token outputs; DAO votes lock and redeem voting Tokens; and
   vesting separates repeatable partial claims from the terminal fully-vested
-  transition. Package mirrors and acceptance action matrices track the same
-  canonical sources.
+  transition, with an explicit runtime-checked `Active -> Active` self-loop for
+  each partial claim. Package mirrors and acceptance action matrices track the
+  same canonical sources.
 - Document fail-closed Spore and RGB++ adapter boundaries, including maintained
   SDK selection, contract/deployment identity, Molecule and witness layouts,
   Bitcoin confirmation policy, and positive/negative fixture requirements.

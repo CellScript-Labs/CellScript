@@ -136,6 +136,10 @@ coverage for the new syntax while continuing to delegate semantic decisions to
 `cellc`. `cellscript-mcp` remains a read-only compiler/documentation interface,
 not a second compiler or deployment client.
 
+The website's provenance and assurance snapshots are regenerated from the
+0.22 compiler output; they no longer show stale 0.17 compiler or metadata
+versions.
+
 ## Bundled Contract Hardening
 
 The examples now model assets as Cells rather than treating identifiers or
@@ -146,8 +150,9 @@ witness values as settlement:
 - NFT sales consume and relock typed Token payments;
 - timelocks and atomic swaps release actual Token outputs;
 - DAO votes lock and redeem voting Tokens;
-- vesting separates repeatable partial claims from the terminal
-  `FullyClaimed` transition; and
+- vesting declares an `Active -> Active` self-loop for repeatable partial
+  claims, while keeping `Active -> FullyClaimed` as the terminal transition;
+  and
 - resource permutations that preserve typed fields are checked as runtime
   conservation without action-name-specific backend rules.
 

@@ -1764,6 +1764,19 @@ fn vesting_phase2_remaining_obligations_are_explicit() {
     );
     assert_create(claim_vested, "Token", "vesting partial claim");
     assert_create(claim_vested, "VestingGrant", "vesting partial claim");
+    let vesting_grant = result.metadata.types.iter().find(|ty| ty.name == "VestingGrant").expect("VestingGrant metadata");
+    assert!(
+        vesting_grant.flow_transitions.iter().any(|transition| transition.from == "Active" && transition.to == "Active"),
+        "repeatable partial claims must declare the runtime-checked Active -> Active transition"
+    );
+    assert!(
+        claim_vested.verifier_obligations.iter().any(|obligation| {
+            obligation.category == "state-transition"
+                && obligation.feature == "VestingGrant.state"
+                && obligation.status == "checked-runtime"
+        }),
+        "claim_vested should expose the runtime-checked Active -> Active transition"
+    );
     assert!(
         claim_vested.transaction_runtime_input_requirements.iter().any(|requirement| {
             requirement.feature == "consume-input:VestingGrant:grant"

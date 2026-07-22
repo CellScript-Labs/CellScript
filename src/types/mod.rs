@@ -726,9 +726,6 @@ impl<'a> TypeChecker<'a> {
                     &transition.to,
                     transition.span,
                 )?;
-                if from == to {
-                    return Err(CompileError::new(format!("state transition '{} -> {}' is a no-op", from, to), transition.span));
-                }
                 if !seen_transitions.insert((from.clone(), to.clone())) {
                     return Err(CompileError::new(format!("duplicate state transition '{} -> {}'", from, to), transition.span));
                 }

@@ -21886,6 +21886,29 @@ action activate(ticket: Ticket) -> output: Ticket {
 }
 "#;
 
+    const FLOW_SELF_LOOP_UPDATE_PROGRAM: &str = r#"
+module test
+
+receipt Ticket has store {
+    state: u8,
+    claimed: u64,
+}
+
+flow Ticket.state {
+    Active -> Active;
+    Active -> Closed;
+}
+
+action claim(ticket: Ticket) -> output: Ticket {
+    transition ticket.state: Active -> output.state: Active
+    verification
+        create output = Ticket {
+            state: Active,
+            claimed: ticket.claimed + 1,
+        }
+}
+"#;
+
     const FLOW_INITIAL_STATE_NAME_CREATE_PROGRAM: &str = r#"
 module test
 
@@ -27527,6 +27550,27 @@ action mint(amount: u64, symbol: [u8; 8]) -> Token {
         assert!(asm.contains("li a0, 9"), "missing old-state range failure code:\n{}", asm);
         assert!(asm.contains("li t3, 2"), "missing output state range check:\n{}", asm);
         assert!(asm.contains("li a0, 8"), "missing output state range failure code:\n{}", asm);
+    }
+
+    #[test]
+    fn compile_accepts_explicit_flow_self_loop_for_repeatable_updates() {
+        let result = compile(FLOW_SELF_LOOP_UPDATE_PROGRAM, CompileOptions::default()).unwrap();
+        let asm = String::from_utf8(result.artifact_bytes.clone()).unwrap();
+        let ticket = result.metadata.types.iter().find(|ty| ty.name == "Ticket").expect("Ticket type metadata");
+        let action = result.metadata.actions.iter().find(|action| action.name == "claim").expect("claim metadata");
+        let layout =
+            result.metadata.template_layouts.iter().find(|layout| layout.type_name == "Ticket").expect("Ticket template layout");
+
+        assert!(ticket.flow_transitions.iter().any(|transition| {
+            transition.from == "Active" && transition.to == "Active" && transition.from_index == 0 && transition.to_index == 0
+        }));
+        assert!(action.verifier_obligations.iter().any(|obligation| {
+            obligation.category == "state-transition" && obligation.feature == "Ticket.state" && obligation.status == "checked-runtime"
+        }));
+        assert!(!layout.state_machine_acyclic);
+        assert_eq!(layout.cycle_policy, "RootRequired");
+        assert!(asm.contains("# cellscript abi: state transition Ticket.state state_count=2"));
+        assert!(asm.contains("li a0, 7"), "missing self-loop transition failure code:\n{}", asm);
     }
 
     #[test]
