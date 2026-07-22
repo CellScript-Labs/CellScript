@@ -541,13 +541,14 @@ serialized size, and occupied-capacity evidence. Tagged GitHub releases cannot
 build or publish until this full gate has passed, and the tag/version must match
 the workspace version.
 
-The local action, lock, and stateful transactions are handwritten Python
-acceptance harnesses and are labelled that way in the report. The separate
-public-builder contract gate proves that every production action is exposed by
-`cellc action build` and `cellc gen-builder`; it does not claim those generated
-packages constructed the acceptance transactions. Likewise, `always_success`
-resource Type Scripts are fixture-only. They prove scoped verifier behaviour
-and transaction shape, not the production resource-identity deployment story.
+The report's builder-backed action runs, lock cases, and stateful transactions
+come from handwritten Python acceptance harnesses and are labelled that way.
+The separate public-builder contract gate proves that every production action
+is exposed by `cellc action build` and `cellc gen-builder`; it does not claim
+those generated packages constructed the acceptance transactions. Likewise,
+`always_success` resource Type Scripts are fixture-only. They prove scoped
+verifier behaviour and transaction shape, not the production resource-identity
+deployment story.
 
 For the current NovaSeal profile set, production-ready source-package evidence
 means the live local devnet runners pass for core, Agreement, and the six
