@@ -54,6 +54,11 @@ jobs:
           rg --version
           wasm-opt --version
 
+      - name: Configure Git identity for local registry fixtures
+        run: |
+          git config --global user.name "CellScript CI"
+          git config --global user.email "ci@cellscript.dev"
+
       - name: Install pinned WASM packaging tool
         run: cargo install wasm-pack --version 0.13.1 --locked
 
