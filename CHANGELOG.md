@@ -8,8 +8,10 @@
   43-action stateful coverage with per-step commit/liveness/measurement checks,
   a freshly built and archived CKB executable, complete 20-byte ELF trampoline verification,
   fresh WASM/VS Code packaging, and tests/clippy across every workspace crate.
-  The WASM build now runs Binaryen `wasm-opt -Oz` explicitly before enforcing
-  the 600 KB gzip budget.
+  The WASM build now runs in a digest-pinned canonical Linux/amd64 container,
+  remaps repository and Cargo source paths, uses SHA-256-pinned official
+  wasm-pack 0.13.1, wasm-bindgen 0.2.121, and Binaryen 131 tools, and runs
+  `wasm-opt -Oz` before enforcing the 600 KB gzip budget.
   Website provenance and assurance snapshots are regenerated from CellScript
   0.22.0 rather than displaying stale 0.17 compiler and metadata versions.
   Public `action build`/`gen-builder` contracts are verified separately from

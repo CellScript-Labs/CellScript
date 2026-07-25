@@ -222,7 +222,9 @@ binary build or GitHub publication. Release evidence requires:
 - exact 20-byte ELF entry-trampoline verification;
 - a path-normalized, symbol-stripped NovaSeal RISC-V verifier ELF whose pinned
   bytes reproduce across the audited macOS arm64 and Linux amd64 builders;
-- fresh WASM packaging with an explicit Binaryen `wasm-opt -Oz` pass and the
+- fresh, path-normalized WASM packaging in a digest-pinned canonical
+  Linux/amd64 container with SHA-256-pinned official wasm-pack 0.13.1,
+  wasm-bindgen 0.2.121, and Binaryen 131 tools, a `wasm-opt -Oz` pass, and the
   600 KB gzip budget enforced (the audited 0.22 bundle is about 549 KB gzip),
   plus fresh VS Code packaging; and
 - tests and clippy for every workspace package.
