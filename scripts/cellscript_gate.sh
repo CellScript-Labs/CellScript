@@ -764,7 +764,7 @@ run_website_build_check() {
 }
 
 check_wasm_release_bundle() {
-    require_cmd wasm-pack
+    require_cmd docker
     run website/scripts/build-wasm.sh
     if ! git -C website diff --quiet -- public/wasm; then
         printf 'website WASM bundle is stale; rebuild and commit website/public/wasm before release\n' >&2
