@@ -44,7 +44,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.97.1"
-          components: rustfmt, clippy
+          components: rustfmt, clippy, llvm-tools-preview
           targets: riscv64imac-unknown-none-elf, wasm32-unknown-unknown
 
       - name: Install release gate system dependencies

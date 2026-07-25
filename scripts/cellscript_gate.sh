@@ -251,7 +251,7 @@ def source_tree_hash() -> str:
                 continue
             if not path.is_file():
                 continue
-            if path.suffix == ".rs" or path.name in {"Cargo.toml", "Cargo.lock", "README.md"}:
+            if path.suffix in {".rs", ".sh"} or path.name in {"Cargo.toml", "Cargo.lock", "README.md"}:
                 files.append(path)
     tree_hash = hashlib.sha256()
     for path in sorted(files):
@@ -783,7 +783,7 @@ check_novaseal_rust_tooling() {
     run cargo test --locked --manifest-path proposals/novaseal/v0-mvp-skeleton/verifier/novaseal_btc_verifier_riscv/Cargo.toml --lib
     run cargo check --locked --manifest-path proposals/novaseal/v0-mvp-skeleton/verifier/novaseal_btc_verifier_core/Cargo.toml --target riscv64imac-unknown-none-elf
     run cargo build --locked --manifest-path proposals/novaseal/v0-mvp-skeleton/verifier/novaseal_btc_verifier_riscv/Cargo.toml --target riscv64imac-unknown-none-elf --bin novaseal_btc_verifier_riscv
-    run cargo build --locked --manifest-path proposals/novaseal/v0-mvp-skeleton/verifier/novaseal_btc_verifier_riscv/Cargo.toml --release --target riscv64imac-unknown-none-elf --bin novaseal_btc_verifier_riscv
+    run proposals/novaseal/v0-mvp-skeleton/verifier/novaseal_btc_verifier_riscv/build_reproducible_release.sh
     run cargo check --locked --manifest-path proposals/novaseal/v0-mvp-skeleton/harness/ckb_vm/Cargo.toml --all-targets
     run cargo check --locked --manifest-path proposals/novaseal/agreement-profile-v0/harness/ckb_vm/Cargo.toml --all-targets
 }

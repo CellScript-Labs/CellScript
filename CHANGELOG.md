@@ -15,6 +15,9 @@
   Public `action build`/`gen-builder` contracts are verified separately from
   explicitly handwritten Python acceptance transactions; always-success
   resource Type Scripts remain a recorded fixture-only non-claim.
+- Make the pinned NovaSeal RISC-V verifier artifact reproducible across the
+  audited macOS arm64 and Linux amd64 builders by remapping source paths and
+  stripping the release ELF with Rust's pinned `rust-objcopy`.
 - Classify field-preserving N-input/N-output resource permutations as checked
   runtime conservation. This closes the strict CKB ProofPlan gap for NFT
   royalty/seller payment pairs without adding action-name-specific backend

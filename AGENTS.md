@@ -278,7 +278,9 @@ Existing command families to be aware of:
   recomputes BLAKE2b + SHA-256 hashes, and compares them against
   `Cell.toml` manifests and `proofs/*.template.json` hashes. It rejects
   symlinks inside the verifier TCB source tree and inside NovaSeal profile
-  source trees.
+  source trees. The release ELF must be built with the verifier crate's
+  `build_reproducible_release.sh`, which normalizes source paths and strips
+  symbols with the pinned toolchain's `rust-objcopy`.
 - `proposals/novaseal` is a submodule (`NovaSeal.git`, branch `main`). Same
   for `proposals/evolving-dob/evolving-dob-profile-v1`.
 - `tools/ckb-tx-measure` depends on `../ckb/util/jsonrpc-types` and

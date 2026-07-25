@@ -220,6 +220,8 @@ binary build or GitHub publication. Release evidence requires:
   commit, input-liveness, output-liveness, cycles, serialized size, and occupied
   capacity checks;
 - exact 20-byte ELF entry-trampoline verification;
+- a path-normalized, symbol-stripped NovaSeal RISC-V verifier ELF whose pinned
+  bytes reproduce across the audited macOS arm64 and Linux amd64 builders;
 - fresh WASM packaging with an explicit Binaryen `wasm-opt -Oz` pass and the
   600 KB gzip budget enforced (the audited 0.22 bundle is about 549 KB gzip),
   plus fresh VS Code packaging; and
