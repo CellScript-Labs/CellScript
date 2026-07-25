@@ -4,6 +4,7 @@
 </p>
 
 [![CellScript CI](https://github.com/CellScript-Labs/CellScript/actions/workflows/ci.yml/badge.svg)](https://github.com/CellScript-Labs/CellScript/actions/workflows/ci.yml)
+[![Release: v0.22.0](https://img.shields.io/badge/release-v0.22.0-2f6f4e.svg)](https://github.com/CellScript-Labs/CellScript/releases/tag/v0.22.0)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE-MIT)
 [![Rust 1.97.1](https://img.shields.io/badge/rust-1.97.1-orange.svg)](Cargo.toml)
 [![Targets: CKB](https://img.shields.io/badge/targets-CKB-2f6f4e.svg)](#target-profiles)
@@ -17,6 +18,11 @@ CellScript is a domain-specific language for Cell-based smart contracts on
 CKB. It compiles `.cell` source into ckb-vm RISC-V assembly or ELF
 artifacts, together with typed metadata for auditing, policy checks, schema
 binding, and scheduler-aware execution.
+
+The current stable release is
+[CellScript v0.22.0](https://github.com/CellScript-Labs/CellScript/releases/tag/v0.22.0).
+See the [0.22 release notes](docs/releases/CELLSCRIPT_0_22_RELEASE_NOTES.md)
+for its shipped surface, evidence boundaries, and migration checklist.
 
 In this README, metadata means machine-readable semantic facts emitted by the
 compiler: schema layout, Cell effects, access summaries, source hashes,
@@ -101,7 +107,7 @@ matrix described in
 
 ## Quick Start
 
-Install a published release (one line, four platform binaries):
+Install the current stable release (one line, four platform binaries):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/CellScript-Labs/CellScript/main/scripts/install.sh | sh
@@ -113,13 +119,17 @@ Or pin a specific version:
 CELLSCRIPT_VERSION=0.22.0 curl -fsSL https://raw.githubusercontent.com/CellScript-Labs/CellScript/main/scripts/install.sh | sh
 ```
 
-Build from this repository instead (tracks `main`):
+The release page publishes `SHA256SUMS` alongside all four platform archives.
+
+Build the exact published source instead:
 
 ```bash
-git clone https://github.com/CellScript-Labs/CellScript.git
+git clone --branch v0.22.0 --depth 1 https://github.com/CellScript-Labs/CellScript.git
 cd CellScript
-cargo install --path .
+cargo install --locked --path .
 ```
+
+For active development and maintenance lines, see [BRANCHES.md](BRANCHES.md).
 
 Compile your first contract:
 
