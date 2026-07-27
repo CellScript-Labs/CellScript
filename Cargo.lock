@@ -384,6 +384,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "cellscript-tools"
+version = "0.22.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "regex",
+ "serde_json",
+ "toml 0.8.19",
+]
+
+[[package]]
 name = "cellscript-wasm"
 version = "0.22.0"
 dependencies = [

@@ -3,6 +3,7 @@ members = [
     ".",
     "crates/cellscript-ckb-adapter",
     "crates/cellscript-fiber-adapter",
+    "crates/cellscript-tools",
     "crates/cellscript-wasm",
     "examples/ckb-sdk-builder",
 ]

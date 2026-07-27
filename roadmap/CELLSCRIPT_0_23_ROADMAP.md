@@ -162,11 +162,14 @@ historical comparisons remain valid.
 
 Concretely:
 
-- introduce a `cellscript-tools` workspace crate (already partially present
-  as `crates/cellscript-tools`) that hosts the Rust ports of the
-  backend-audit, syntax-combo driver, production-evidence validator, and
-  tooling-release validator. Each port keeps the same output schema and the
-  same exit-code contract as the Python original.
+- introduce a `cellscript-tools` workspace crate. Phase 1 now hosts the Rust
+  ports of `check_cellscript_skill_pack.py` and
+  `validate_cellscript_tooling_release.py`; the relevant dev, CI, and release
+  checks dual-run each port against the retained Python implementation and
+  require byte-identical stdout plus the same exit code. Backend-audit,
+  syntax-combo, production-evidence, and proposal live-runner ports remain
+  future phases and continue using their Python implementations until their
+  own parity gates pass.
 - move the NovaSeal and Evolving-DOB proposal scripts into per-proposal
   Rust harnesses under their existing `proposals/*/` trees, preserving the
   content-addressed evidence-file discipline (CKB Blake2b-256 digest,

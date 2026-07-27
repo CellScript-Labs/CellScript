@@ -40,6 +40,7 @@ cargo_fmt_workspace() {
         --package cellscript \
         --package cellscript-ckb-adapter \
         --package cellscript-fiber-adapter \
+        --package cellscript-tools \
         --package cellscript-wasm \
         --package cellscript-ckb-sdk-builder-example \
         "$@"
@@ -116,6 +117,7 @@ check_trailing_whitespace() {
         "scripts/cellscript_strict_backend_audit.sh"
         "scripts/cellscript_strict_backend_audit.py"
         "scripts/ckb_cellscript_acceptance.sh"
+        "scripts/dev/dual_run_tools.sh"
         "scripts/validate_cellscript_tooling_release.py"
         "scripts/validate_ckb_cellscript_production_evidence.py"
         "tests/syntax_combo/matrix.toml"
@@ -803,9 +805,10 @@ run_dev_gate() {
     run cargo check --locked -p cellscript-ckb-adapter --all-targets
     run cargo check --locked -p cellscript-wasm --all-targets --features wasm
     run cargo check --locked -p cellscript-ckb-sdk-builder-example --all-targets
+    run cargo check --locked -p cellscript-tools --all-targets
     run ./scripts/cellscript_strict_backend_audit.sh quick
     run ./scripts/cellscript_syntax_combo_audit.sh quick
-    run python3 scripts/check_cellscript_skill_pack.py
+    run ./scripts/dev/dual_run_tools.sh check-skill-pack
     check_cellscript_doc_status_freshness
     check_markdown_local_links
     check_forbidden_tracked_files
@@ -829,13 +832,15 @@ run_ci_gate() {
     run cargo test --locked -p cellscript-ckb-adapter -- --test-threads=1
     run cargo test --locked -p cellscript-wasm --features wasm -- --test-threads=1
     run cargo test --locked -p cellscript-ckb-sdk-builder-example -- --test-threads=1
+    run cargo test --locked -p cellscript-tools -- --test-threads=1
     run cargo clippy --locked -p cellscript --all-targets -- -D warnings
     run cargo clippy --locked -p cellscript-fiber-adapter --all-targets -- -D warnings
     run cargo clippy --locked -p cellscript-ckb-adapter --all-targets -- -D warnings
     run cargo clippy --locked -p cellscript-wasm --all-targets --features wasm -- -D warnings
     run cargo clippy --locked -p cellscript-ckb-sdk-builder-example --all-targets -- -D warnings
+    run cargo clippy --locked -p cellscript-tools --all-targets -- -D warnings
     run ./scripts/cellscript_strict_backend_audit.sh ci
-    run python3 scripts/check_cellscript_skill_pack.py
+    run ./scripts/dev/dual_run_tools.sh check-skill-pack
     check_cellscript_doc_status_freshness
     check_markdown_local_links
     check_package_contents
@@ -870,7 +875,7 @@ run_backend_gate() {
 run_release_auxiliary_checks() {
     require_cmd npm
 
-    run python3 scripts/validate_cellscript_tooling_release.py
+    run ./scripts/dev/dual_run_tools.sh validate-tooling-release
     check_release_roadmap_docs
     check_ckb_release_docs
     check_ckb_acceptance_boundaries

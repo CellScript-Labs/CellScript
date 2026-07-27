@@ -88,8 +88,8 @@ require extra tooling.
 
 | Mode | What it does |
 | --- | --- |
-| `dev` | Explicit workspace-package formatting and checks for the compiler, Fiber adapter, CKB adapter, WASM crate, and CKB SDK builder example; strict backend audit (quick); syntax combo audit (quick); forbidden tracked-file check; `git diff --check`. Run before committing. |
-| `ci` | `dev` coverage plus tests and clippy for every workspace package, full package contents check, website build check (requires `npm`), shell + Python syntax check, and trailing-whitespace check. Run before claiming merge-readiness. |
+| `dev` | Explicit workspace-package formatting and checks for the compiler, Fiber adapter, CKB adapter, WASM crate, CKB SDK builder example, and `cellscript-tools`; strict backend audit (quick); syntax combo audit (quick); parity-gated skill-pack freshness; forbidden tracked-file check; `git diff --check`. Run before committing. |
+| `ci` | `dev` coverage plus tests and clippy for every workspace package, including `cellscript-tools`; full package contents check, website build check (requires `npm`), shell + Python syntax check, parity-gated skill-pack freshness, and trailing-whitespace check. Run before claiming merge-readiness. |
 | `backend` | For IR / codegen / assembler / ABI / ELF / RISC-V changes: explicit workspace-package format checking, `cargo check --locked -p cellscript --all-targets`, `cargo test --locked -p cellscript`, `cargo clippy ... -D warnings`, strict backend audit (full, which itself fires the CKB stateful-scenarios harness via `cellscript_ckb_stateful_scenarios.sh`), `git diff --check`. |
 | `release` / `release-quick` | Everything `ci` does plus release-auxiliary checks (CKB acceptance, NovaSeal pinning, NovaSeal Rust tooling for RISC-V, fresh WASM + VS Code packaging, CKB tx measure tool, etc.) and the CKB acceptance harness (`scripts/ckb_cellscript_acceptance.sh`). These modes need the pinned sibling CKB checkout from `scripts/ckb_acceptance_pin.json`, the NovaSeal submodule, a sibling `ckb-sdk-rust` checkout at tag `v5.1.0`, Docker for the canonical Linux/amd64 WASM build, and `riscv64imac-unknown-none-elf` for NovaSeal verifier builds. Do not run them casually. |
 
@@ -116,6 +116,7 @@ The root `Cargo.toml` declares a virtual workspace with these members:
 - `.` (the `cellscript` library + `cellc` bin at `src/main.rs`)
 - `crates/cellscript-ckb-adapter`
 - `crates/cellscript-fiber-adapter`
+- `crates/cellscript-tools`
 - `crates/cellscript-wasm`
 - `examples/ckb-sdk-builder`
 
@@ -124,6 +125,12 @@ Excluded from the workspace (still buildable through their own manifests):
 `proposals/novaseal/agreement-profile-v0/harness/ckb_vm`. `tools/ckb-tx-measure`
 defines its own `[workspace]` (no parent) because it pulls `ckb-jsonrpc-types`
 and `ckb-types` from a sibling CKB checkout (`../ckb`).
+
+The 0.23 Python-to-Rust tooling migration is intentionally staged. Only
+`check-skill-pack` and `validate-tooling-release` are currently implemented in
+`cellscript-tools`; `scripts/dev/dual_run_tools.sh` requires their stdout and
+exit codes to match the retained Python implementations. Keep every other
+Python tool authoritative until its own port has equivalent parity evidence.
 
 Features (root crate):
 

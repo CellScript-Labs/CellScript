@@ -1,0 +1,19 @@
+[package]
+name = "cellscript-tools"
+version = "0.22.0"
+edition = "2024"
+rust-version = "1.97.1"
+publish = false
+description = "Release, audit, and validation tooling for the CellScript workspace"
+license = "MIT"
+
+[[bin]]
+name = "cellscript-tools"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0"
+clap = { version = "=4.5.49", features = ["derive"] }
+regex = "1"
+serde_json = "1.0"
+toml = "0.8"
