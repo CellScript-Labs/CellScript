@@ -30,13 +30,11 @@ the same version as the root `[package].version`. The GitHub Release workflow
 runs the full `release` gate first, and binary builds plus publication depend on
 that job succeeding.
 
-The 0.23 tooling migration is staged. `cellscript-tools` currently ports only
-`check_cellscript_skill_pack.py` and
-`validate_cellscript_tooling_release.py`. The relevant dev, CI, and release
-checks run each Rust port beside the retained Python implementation and require
-byte-identical stdout plus the same exit code. Other Python tooling remains the
-authoritative implementation until its own parity evidence exists; a partial
-port is not sufficient grounds for deleting the Python baseline.
+The 0.23 tooling migration is complete. `cellscript-tools` owns the backend,
+syntax-combination, skill-pack, tooling-release, CKB production-evidence,
+NovaSeal, and Evolving-DOB gate logic. Website data generation is implemented
+by Node scripts in `website/scripts/`. Dev, CI, backend, and release gates have
+no Python runtime dependency and reject tracked Python source files.
 
 The full gate reads `scripts/ckb_acceptance_pin.json` and rejects a CKB checkout
 whose revision or worktree differs from the pin. Its report binds the CKB

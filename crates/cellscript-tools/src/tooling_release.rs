@@ -1,4 +1,4 @@
-//! Port of `scripts/validate_cellscript_tooling_release.py`.
+//! Tooling-release boundary validator used by the repository gate.
 //!
 //! Asserts that the CellScript release boundary is consistent across
 //! `Cargo.toml`, `Cargo.lock`, the VS Code extension, the changelogs, the
@@ -171,7 +171,7 @@ pub fn run(root: &Path) -> Result<()> {
     }
 
     // --- Stage E: ckb_acceptance ------------------------------------------
-    let ckb_acceptance = read_text(root, "scripts/ckb_cellscript_acceptance.sh")?;
+    let ckb_acceptance = read_text(root, "crates/cellscript-tools/src/ckb_acceptance.rs")?;
     require(
         !ckb_acceptance.contains(r#""--primitive-strict", "0.15""#),
         "CKB acceptance runner must not use the retired 0.15 assurance gate",
@@ -181,26 +181,36 @@ pub fn run(root: &Path) -> Result<()> {
         "CKB acceptance runner must use the current 0.16 assurance gate",
     )?;
     require(
-        ckb_acceptance.contains("ORIGINAL_SCOPED_ACTION_FAIL_CLOSED = {}"),
+        ckb_acceptance.contains(r#""strict_original_ckb_compile_policy_fail_closed":[]"#),
         "CKB acceptance runner must keep token/AMM/launch out of strict 0.16 fail-closed coverage",
     )?;
+    let production_evidence = read_text(root, "crates/cellscript-tools/src/production_evidence.rs")?;
     require(
-        ckb_acceptance.contains(r#""token.cell": ["mint_with_authority", "transfer_token", "burn", "merge"]"#),
+        production_evidence
+            .contains(r#"("token_action_runs", "token.cell", &["mint_with_authority", "transfer_token", "burn", "merge"])"#),
         "CKB acceptance runner must compile token actions as original strict scoped actions",
     )?;
     require(
-        ckb_acceptance.contains(r#""amm_pool.cell": ["seed_pool", "swap_a_for_b", "add_liquidity", "remove_liquidity"]"#),
+        production_evidence
+            .contains(r#"("amm_action_runs", "amm_pool.cell", &["seed_pool", "swap_a_for_b", "add_liquidity", "remove_liquidity"])"#),
         "CKB acceptance runner must compile AMM actions as original strict scoped actions",
     )?;
     require(
-        ckb_acceptance.contains(r#""launch.cell": ["launch_token", "bootstrap_token"]"#),
+        production_evidence.contains(r#"("launch_action_runs", "launch.cell", &["launch_token", "bootstrap_token"])"#),
         "CKB acceptance runner must compile launch actions as original strict scoped actions",
     )?;
+    let ckb_acceptance_shell = read_text(root, "scripts/ckb_cellscript_acceptance.sh")?;
     require(
-        !ckb_acceptance.contains("mapfile") && !ckb_acceptance.contains("readarray"),
+        ckb_acceptance_shell.contains("ckb-acceptance")
+            && !ckb_acceptance_shell.contains("mapfile")
+            && !ckb_acceptance_shell.contains("readarray"),
         "CKB acceptance runner must remain compatible with macOS Bash 3.2",
     )?;
-    require(ckb_acceptance.contains("while IFS= read -r value"), "CKB acceptance pin parsing must use the portable read loop")?;
+    let ckb_acceptance_live = read_text(root, "crates/cellscript-tools/src/ckb_acceptance_live.rs")?;
+    require(
+        ckb_acceptance_live.contains("ckb_acceptance_pin.json"),
+        "CKB acceptance runner must validate the pinned CKB source identity",
+    )?;
 
     // --- Stage F: Tutorial-08 ---------------------------------------------
     let tutorial_08 = read_text(root, "docs/wiki/Tutorial-08-Bundled-Example-Contracts.md")?;
@@ -388,7 +398,7 @@ pub fn run(root: &Path) -> Result<()> {
         root,
         "website/package.json",
         &[
-            r#""prepare:registry": "python3 scripts/generate-registry-data.py""#,
+            r#""prepare:registry": "node scripts/generate-registry-data.mjs""#,
             r#""build": "npm run prepare:registry && astro check && astro build && npm run check:docs && npm run check:dist""#,
             r#""check:docs": "node scripts/check-doc-links.mjs""#,
             r#""check:dist": "node scripts/check-dist-regressions.mjs""#,
@@ -421,11 +431,11 @@ pub fn run(root: &Path) -> Result<()> {
         "CKB transaction measure tooling must use CellScript's pinned Rust toolchain",
     )?;
     require(
-        gate_script.contains(r#"print(manifest["package"]["version"])"#),
+        gate_script.contains("--root \"$ROOT_DIR\" workspace-version"),
         "release source identity must read the root package version from Cargo.toml",
     )?;
     require(
-        !gate_script.contains(r#"manifest["workspace"]["package"]"#),
+        !gate_script.contains("workspace.package.version"),
         "release source identity must not assume a virtual workspace package table",
     )?;
 
@@ -503,18 +513,11 @@ pub fn run(root: &Path) -> Result<()> {
     // --- Stage O: Cargo.toml exclude array --------------------------------
     // The `excluded` literals include the surrounding double quotes so they
     // match the TOML array element verbatim via substring on the raw text.
-    for excluded in
-        &[r#"".github/""#, r#""docs/""#, r#""docs/wiki/""#, r#""editors/""#, r#""proposals/""#, r#""scripts/__pycache__/""#]
-    {
+    for excluded in &[r#"".github/""#, r#""docs/""#, r#""docs/wiki/""#, r#""editors/""#, r#""proposals/""#] {
         require(cargo_toml.contains(excluded), format!("Cargo.toml package exclude is missing {excluded}"))?;
     }
 
-    // --- Stage P: .gitignore ----------------------------------------------
-    let gitignore = read_text(root, ".gitignore")?;
-    require(gitignore.contains("__pycache__/"), ".gitignore must ignore generated Python bytecode directories")?;
-    require(gitignore.contains("*.py[cod]"), ".gitignore must ignore generated Python bytecode files")?;
-
-    // --- Stage Q: success -------------------------------------------------
+    // --- Stage P: success -------------------------------------------------
     println!("valid CellScript tooling release boundary");
     Ok(())
 }

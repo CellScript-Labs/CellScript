@@ -280,8 +280,10 @@ cargo test --locked -p cellscript -- --test-threads=1
 git diff --check
 ./scripts/ckb_cellscript_acceptance.sh --production --stateful-scenarios
 ./scripts/cellscript_ckb_stateful_scenarios.sh
-python3 scripts/validate_ckb_cellscript_production_evidence.py \
-  target/ckb-cellscript-acceptance/<run>/ckb-cellscript-acceptance-report.json
+cargo run --quiet --locked -p cellscript-tools --bin cellscript-tools -- \
+  --root . validate-production-evidence \
+  target/ckb-cellscript-acceptance/<run>/ckb-cellscript-acceptance-report.json \
+  --repo-root .
 ```
 
 The stateful section is intentionally stricter than a few happy-path flows:

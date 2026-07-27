@@ -45,7 +45,6 @@ exclude = [
     "docs/wiki/",
     "editors/",
     "proposals/",
-    "scripts/__pycache__/",
     "services/",
     "src/bin/",
     "tools/",

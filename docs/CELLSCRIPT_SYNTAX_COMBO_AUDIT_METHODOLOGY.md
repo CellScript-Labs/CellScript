@@ -83,8 +83,9 @@ The repository includes the first executable runner:
 
 ```text
 scripts/cellscript_syntax_combo_audit.sh
-scripts/cellscript_syntax_combo_audit.py
+crates/cellscript-tools/src/syntax_combo.rs
 tests/syntax_combo/matrix.toml
+tests/syntax_combo/cases.json
 tests/syntax_combo/seeds/*.cell
 ```
 

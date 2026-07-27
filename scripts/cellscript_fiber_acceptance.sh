@@ -110,25 +110,9 @@ if [[ "$actual_revision" != "$FIBER_REVISION" ]]; then
   exit 1
 fi
 
-python3 - "$COMPATIBILITY_REPORT" "$ACCEPTANCE_REPORT" "$FIBER_REVISION" <<'PY'
-import json
-import pathlib
-import sys
-
-compatibility_path = pathlib.Path(sys.argv[1])
-acceptance_path = pathlib.Path(sys.argv[2])
-expected_fiber_revision = sys.argv[3]
-
-compatibility = json.loads(compatibility_path.read_text(encoding="utf-8"))
-acceptance = json.loads(acceptance_path.read_text(encoding="utf-8"))
-
-if compatibility.get("binding", {}).get("fiber_revision") != expected_fiber_revision:
-    raise SystemExit("compatibility report Fiber revision does not match the pinned checkout")
-if compatibility.get("binding_fingerprint") != acceptance.get("binding_fingerprint"):
-    raise SystemExit("acceptance report is not bound to compatibility.json")
-if compatibility.get("status") not in {"LocalNodeAdvertised", "ChannelReady", "TopologyCertified"}:
-    raise SystemExit("full acceptance requires at least LocalNodeAdvertised compatibility evidence")
-PY
+cargo run --quiet --locked -p cellscript-tools --bin cellscript-tools -- \
+  --root "$REPO_ROOT" fiber-report-binding \
+  "$COMPATIBILITY_REPORT" "$ACCEPTANCE_REPORT" "$FIBER_REVISION"
 
 cargo run --locked -p cellscript-fiber-adapter --bin cellscript-fiber -- accept "$ACCEPTANCE_REPORT" \
   --compatibility-report "$COMPATIBILITY_REPORT" \

@@ -1,4 +1,4 @@
-//! Port of `scripts/check_cellscript_skill_pack.py`.
+//! CellScript skill-pack validator used by the repository gate.
 //!
 //! Validates that the CellScript programming skill-pack stays fresh against
 //! the current CLI: every expected skill directory exists, each `SKILL.md`
@@ -20,8 +20,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use regex::Regex;
-use serde_json::{json, Value};
+use serde_json::json;
 use std::sync::OnceLock;
+
+use crate::shared::python_json_pretty;
 
 /// The expected skill directory names, mirrored verbatim from
 /// `EXPECTED_SKILLS` in the Python script. Order is irrelevant (Python uses a
@@ -288,29 +290,7 @@ pub fn run(root: &Path) -> anyhow::Result<i32> {
     // `serde_json::Map` (BTreeMap-backed when the `preserve_order` feature is
     // off, which it is here). The trailing newline from Python's `print()` is
     // added by `println!`.
-    println!("{}", render_report(&report));
+    println!("{}", python_json_pretty(&report)?);
 
     Ok(if failures.is_empty() { 0 } else { 1 })
-}
-
-/// Render the report as `json.dumps(report, indent=2, sort_keys=True)` would.
-///
-/// `serde_json::to_string_pretty` produces 2-space indentation with `,` and
-/// `: ` separators, matching Python's defaults. Keys are emitted in sorted
-/// order because `serde_json::Map` is a `BTreeMap` unless the
-/// `preserve_order` feature is enabled (we do not enable it).
-fn render_report(report: &Value) -> String {
-    let json = serde_json::to_string_pretty(report).expect("report must serialise");
-    let mut python_compatible = String::with_capacity(json.len());
-    for character in json.chars() {
-        if character.is_ascii() {
-            python_compatible.push(character);
-        } else {
-            for unit in character.encode_utf16(&mut [0; 2]) {
-                use std::fmt::Write as _;
-                write!(python_compatible, "\\u{unit:04x}").expect("writing to String cannot fail");
-            }
-        }
-    }
-    python_compatible
 }

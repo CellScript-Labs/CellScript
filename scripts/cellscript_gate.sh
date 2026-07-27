@@ -46,17 +46,6 @@ cargo_fmt_workspace() {
         "$@"
 }
 
-python_syntax_check() {
-    python3 - "$@" <<'PY'
-import sys
-from pathlib import Path
-
-for raw in sys.argv[1:]:
-    path = Path(raw)
-    compile(path.read_text(encoding="utf-8"), str(path), "exec")
-PY
-}
-
 check_trailing_whitespace() {
     local tracked_rust_files=()
     local tracked_rust_file
@@ -70,7 +59,7 @@ check_trailing_whitespace() {
     local tracked_website_file
     while IFS= read -r tracked_website_file; do
         case "$tracked_website_file" in
-            website/*.json|website/*.mjs|website/**/*.astro|website/**/*.css|website/**/*.js|website/**/*.json|website/**/*.py|website/**/*.ts)
+            website/*.json|website/*.mjs|website/**/*.astro|website/**/*.css|website/**/*.js|website/**/*.json|website/**/*.mjs|website/**/*.ts)
                 if [[ -f "$tracked_website_file" ]]; then
                     tracked_website_files+=("$tracked_website_file")
                 fi
@@ -113,13 +102,8 @@ check_trailing_whitespace() {
         "scripts/cellscript_ckb_release_gate.sh"
         "scripts/cellscript_0_14_scope_audit.sh"
         "scripts/cellscript_syntax_combo_audit.sh"
-        "scripts/cellscript_syntax_combo_audit.py"
         "scripts/cellscript_strict_backend_audit.sh"
-        "scripts/cellscript_strict_backend_audit.py"
         "scripts/ckb_cellscript_acceptance.sh"
-        "scripts/dev/dual_run_tools.sh"
-        "scripts/validate_cellscript_tooling_release.py"
-        "scripts/validate_ckb_cellscript_production_evidence.py"
         "tests/syntax_combo/matrix.toml"
         "tests/syntax_combo/seeds/require-block-lifecycle.cell"
         "docs/releases/CELLSCRIPT_0_20_RELEASE_NOTES.md"
@@ -148,219 +132,21 @@ check_forbidden_tracked_files() {
     local forbidden=()
     local path
     while IFS= read -r path; do
-        forbidden+=("$path")
-    done < <(git ls-files '*DS_Store')
+        if [[ -e "$path" ]]; then
+            forbidden+=("$path")
+        fi
+    done < <(git ls-files '*DS_Store' '*.py')
 
     if ((${#forbidden[@]} > 0)); then
-        printf 'Forbidden macOS metadata files are tracked:\n' >&2
+        printf 'Forbidden metadata or Python source files are tracked:\n' >&2
         printf '  %s\n' "${forbidden[@]}" >&2
         exit 1
     fi
 }
 
 check_novaseal_verifier_pinning() {
-    python3 - <<'PY'
-import hashlib
-import json
-import subprocess
-import sys
-from pathlib import Path
-
-try:
-    import tomllib
-except ModuleNotFoundError:
-    print("Python tomllib is required for NovaSeal verifier pinning checks", file=sys.stderr)
-    sys.exit(127)
-
-root = Path.cwd()
-core_root = root / "proposals/novaseal/v0-mvp-skeleton"
-release_elf = (
-    core_root
-    / "verifier/novaseal_btc_verifier_riscv/target/"
-    / "riscv64imac-unknown-none-elf/release/novaseal_btc_verifier_riscv"
-)
-if not release_elf.is_file():
-    print(f"missing NovaSeal RISC-V verifier release ELF: {release_elf}", file=sys.stderr)
-    sys.exit(1)
-
-artifact = release_elf.read_bytes()
-artifact_hash = "0x" + hashlib.sha256(artifact).hexdigest()
-data_hash = "0x" + hashlib.blake2b(artifact, digest_size=32, person=b"ckb-default-hash").hexdigest()
-size_bytes = len(artifact)
-
-failures: list[str] = []
-
-manifest_paths = [
-    root / rel
-    for rel in subprocess.check_output(
-        ["git", "ls-files", "proposals/novaseal/**/Cell.toml"],
-        cwd=root,
-        text=True,
-    ).splitlines()
-]
-novaseal_root = root / "proposals/novaseal"
-if novaseal_root.is_dir():
-    manifest_paths.extend(
-        novaseal_root / rel
-        for rel in subprocess.check_output(
-            ["git", "-C", str(novaseal_root), "ls-files", "**/Cell.toml"],
-            cwd=root,
-            text=True,
-        ).splitlines()
-    )
-manifest_paths = sorted(set(manifest_paths))
-if not manifest_paths:
-    failures.append("no tracked NovaSeal Cell.toml manifests found")
-
-for path in manifest_paths:
-    manifest = tomllib.loads(path.read_text(encoding="utf-8"))
-    deps = manifest.get("deploy", {}).get("ckb", {}).get("cell_deps", [])
-    runtime_deps = [
-        dep
-        for dep in deps
-        if dep.get("role") == "runtime_verifier"
-        or dep.get("name") == "cellscript_btc_bip340_verifier_riscv"
-    ]
-    if not runtime_deps:
-        failures.append(f"{path.relative_to(root)} has no NovaSeal runtime verifier CellDep")
-        continue
-    for index, dep in enumerate(runtime_deps):
-        if dep.get("data_hash") != data_hash:
-            failures.append(
-                f"{path.relative_to(root)} runtime verifier #{index} data_hash "
-                f"{dep.get('data_hash')} != {data_hash}"
-            )
-        if dep.get("artifact_hash") != artifact_hash:
-            failures.append(
-                f"{path.relative_to(root)} runtime verifier #{index} artifact_hash "
-                f"{dep.get('artifact_hash')} != {artifact_hash}"
-            )
-
-def source_tree_hash() -> str:
-    verifier_dirs = [
-        core_root / "verifier/novaseal_btc_verifier_core",
-        core_root / "verifier/novaseal_btc_verifier_riscv",
-        core_root / "verifier/novaseal_btc_verifier",
-    ]
-    files: list[Path] = []
-    for verifier_dir in verifier_dirs:
-        for path in verifier_dir.rglob("*"):
-            rel_parts = path.relative_to(verifier_dir).parts
-            if any(part in {"target", "build", ".git", "__pycache__"} for part in rel_parts):
-                continue
-            if path.is_symlink():
-                failures.append(f"{path.relative_to(root)} is a symlink inside the NovaSeal verifier TCB source tree")
-                continue
-            if not path.is_file():
-                continue
-            if path.suffix in {".rs", ".sh"} or path.name in {"Cargo.toml", "Cargo.lock", "README.md"}:
-                files.append(path)
-    tree_hash = hashlib.sha256()
-    for path in sorted(files):
-        rel = path.relative_to(root).as_posix()
-        digest = hashlib.sha256(path.read_bytes()).digest()
-        tree_hash.update(rel.encode("utf-8"))
-        tree_hash.update(b"\0")
-        tree_hash.update(digest)
-    return "0x" + tree_hash.hexdigest()
-
-current_source_tree_hash = source_tree_hash()
-
-def profile_source_tree_hash(paths: list[str]) -> str:
-    files: set[Path] = set()
-    allowed_suffixes = {".cell", ".schema", ".toml", ".py", ".json", ".rs"}
-    for raw in paths:
-        path = root / raw
-        if path.is_symlink():
-            failures.append(f"{path.relative_to(root)} is a symlink inside the NovaSeal profile source tree")
-            continue
-        if path.is_file():
-            files.add(path)
-        elif path.is_dir():
-            for child in path.rglob("*"):
-                rel_parts = child.relative_to(path).parts
-                if any(part in {"target", "build", ".git", "__pycache__"} for part in rel_parts):
-                    continue
-                if child.is_symlink():
-                    failures.append(f"{child.relative_to(root)} is a symlink inside the NovaSeal profile source tree")
-                    continue
-                if child.is_file() and (child.name == "Cargo.lock" or child.suffix in allowed_suffixes):
-                    files.add(child)
-    h = hashlib.sha256()
-    for path in sorted(files):
-        rel_path = path.relative_to(root).as_posix()
-        h.update(rel_path.encode("utf-8"))
-        h.update(b"\0")
-        h.update(hashlib.sha256(path.read_bytes()).digest())
-    return "0x" + h.hexdigest()
-
-public_template_path = core_root / "proofs/public_shared_cell_dep_attestation.template.json"
-public_template = json.loads(public_template_path.read_text(encoding="utf-8"))
-public_template_hash = public_template.get("runtime_verifier", {}).get("artifact_hash")
-if public_template_hash != artifact_hash:
-    failures.append(
-        f"{public_template_path.relative_to(root)} runtime_verifier.artifact_hash "
-        f"{public_template_hash} != {artifact_hash}"
-    )
-
-external_template_path = core_root / "proofs/bip340_external_tcb_review_attestation.template.json"
-external_template = json.loads(external_template_path.read_text(encoding="utf-8"))
-if external_template.get("artifact_hash") != artifact_hash:
-    failures.append(
-        f"{external_template_path.relative_to(root)} artifact_hash "
-        f"{external_template.get('artifact_hash')} != {artifact_hash}"
-    )
-if external_template.get("source_tree_sha256") != current_source_tree_hash:
-    failures.append(
-        f"{external_template_path.relative_to(root)} source_tree_sha256 "
-        f"{external_template.get('source_tree_sha256')} != {current_source_tree_hash}"
-    )
-
-rwa_source_tree_hash = profile_source_tree_hash(
-    [
-        "proposals/novaseal/rwa-receipt-profile-v0/Cell.toml",
-        "proposals/novaseal/rwa-receipt-profile-v0/src/nova_rwa_receipt_type.cell",
-        "proposals/novaseal/rwa-receipt-profile-v0/src/nova_rwa_receipt_lifecycle_type.cell",
-        "proposals/novaseal/rwa-receipt-profile-v0/schemas",
-        "proposals/novaseal/rwa-receipt-profile-v0/fixtures",
-        "proposals/novaseal/rwa-receipt-profile-v0/proofs/invariant_matrix.json",
-    ]
-)
-rwa_template_path = root / "proposals/novaseal/rwa-receipt-profile-v0/proofs/legal_registry_review_evidence.template.json"
-rwa_template = json.loads(rwa_template_path.read_text(encoding="utf-8"))
-if rwa_template.get("profile_source_tree_sha256") != rwa_source_tree_hash:
-    failures.append(
-        f"{rwa_template_path.relative_to(root)} profile_source_tree_sha256 "
-        f"{rwa_template.get('profile_source_tree_sha256')} != {rwa_source_tree_hash}"
-    )
-
-mapping_path = core_root / "proofs/proofplan_mapping.json"
-mapping = json.loads(mapping_path.read_text(encoding="utf-8"))
-artifact_summary = mapping.get("btc_verifier_riscv_shell_artifact", {}).get("current_summary", {})
-if artifact_summary.get("staged_release_elf_sha256") != artifact_hash.removeprefix("0x"):
-    failures.append(
-        f"{mapping_path.relative_to(root)} staged_release_elf_sha256 "
-        f"{artifact_summary.get('staged_release_elf_sha256')} != {artifact_hash.removeprefix('0x')}"
-    )
-if artifact_summary.get("staged_release_elf_size_bytes") != size_bytes:
-    failures.append(
-        f"{mapping_path.relative_to(root)} staged_release_elf_size_bytes "
-        f"{artifact_summary.get('staged_release_elf_size_bytes')} != {size_bytes}"
-    )
-
-if failures:
-    print("NovaSeal verifier pinning check failed:", file=sys.stderr)
-    for failure in failures:
-        print(f"  - {failure}", file=sys.stderr)
-    sys.exit(1)
-
-print(
-    "NovaSeal verifier pinning check passed: "
-    f"artifact_hash={artifact_hash} data_hash={data_hash} "
-    f"source_tree_sha256={current_source_tree_hash} "
-    f"rwa_profile_source_tree_sha256={rwa_source_tree_hash} size_bytes={size_bytes}"
-)
-PY
+    run cargo run --quiet --locked -p cellscript-tools --bin cellscript-tools -- \
+        --root "$ROOT_DIR" check-novaseal-verifier-pinning
 }
 
 check_release_roadmap_docs() {
@@ -412,167 +198,45 @@ check_ckb_release_docs() {
 }
 
 check_cellscript_doc_status_freshness() {
-    python3 - <<'PY'
-import re
-import sys
-from pathlib import Path
-
-root = Path.cwd()
-readme = (root / "README.md").read_text(encoding="utf-8")
-readme_links = sorted(
-    set(re.findall(r"\]\((docs/CELLSCRIPT_[^)#]+\.md)(?:#[^)]+)?\)", readme))
-)
-
-tracked_docs = []
-try:
-    import subprocess
-
-    tracked_docs = subprocess.check_output(
-        ["git", "ls-files", "docs/CELLSCRIPT_*.md"],
-        cwd=root,
-        text=True,
-    ).splitlines()
-except Exception:
-    tracked_docs = []
-
-filesystem_docs = [
-    str(path.relative_to(root))
-    for path in (root / "docs").glob("CELLSCRIPT_*.md")
-]
-tracked_existing_docs = [
-    rel for rel in tracked_docs
-    if (root / rel).is_file()
-]
-docs_to_scan = sorted(set(readme_links + filesystem_docs + tracked_existing_docs))
-stale_patterns = [
-    "formal 0.19 headless Rust adapter crate",
-    "0.19 scope compatibility contract",
-    "Active 0.19 grammar-governance contract",
-    "Proposed. Implementation gated",
-    "**Status**: In progress",
-]
-
-failures: list[str] = []
-for rel in docs_to_scan:
-    path = root / rel
-    if not path.is_file():
-        failures.append(f"README-linked CellScript doc is missing: {rel}")
-        continue
-    head = "\n".join(path.read_text(encoding="utf-8").splitlines()[:40])
-    normalized_head = " ".join(head.split())
-    for pattern in stale_patterns:
-        if pattern in normalized_head:
-            failures.append(f"{rel} has stale Status header pattern: {pattern}")
-
-required_current = {
-    "docs/CELLSCRIPT_CKB_ADAPTER.md": "production contract for the current CellScript CKB profile",
-    "docs/CELLSCRIPT_CKB_STD_COMPAT.md": "production compatibility contract for the current CellScript CKB profile",
-    "docs/CELLSCRIPT_GRAMMAR_GOVERNANCE_RFC.md": "Active grammar-governance contract",
-    "docs/CELLSCRIPT_WEBSITE_PARADIGM_UPGRADE_RFC.md": "Implemented across the 0.20-0.21 line",
-}
-for rel, marker in required_current.items():
-    path = root / rel
-    head = "\n".join(path.read_text(encoding="utf-8").splitlines()[:20])
-    normalized_head = " ".join(head.split())
-    if marker not in normalized_head:
-        failures.append(f"{rel} Status header is missing freshness marker: {marker}")
-
-if failures:
-    print("CellScript documentation Status freshness check failed:", file=sys.stderr)
-    for failure in failures:
-        print(f"  - {failure}", file=sys.stderr)
-    sys.exit(1)
-PY
+    run cargo run --quiet --locked -p cellscript-tools --bin cellscript-tools -- \
+        --root "$ROOT_DIR" check-doc-status
 }
 
 check_markdown_local_links() {
-    python3 - <<'PY'
-import os
-import re
-import sys
-import urllib.parse
-from pathlib import Path
-
-root = Path.cwd()
-scan_roots = [
-    root / "README.md",
-    root / "docs",
-    root / "roadmap",
-    root / "editors/vscode-cellscript/README.md",
-    root / "editors/vscode-cellscript/docs",
-]
-skip_dirs = {".git", ".mavis", "dist", "node_modules", "target"}
-markdown_files: list[Path] = []
-
-for start in scan_roots:
-    if start.is_file():
-        markdown_files.append(start)
-    elif start.is_dir():
-        for dirpath, dirnames, filenames in os.walk(start):
-            dirnames[:] = [name for name in dirnames if name not in skip_dirs]
-            for filename in filenames:
-                if filename.endswith(".md"):
-                    markdown_files.append(Path(dirpath) / filename)
-
-link_re = re.compile(r"(?!!)\[[^\]]+\]\(([^)\s]+(?:\s+\"[^\"]*\")?)\)")
-failures: list[str] = []
-
-for path in sorted(markdown_files):
-    text = path.read_text(encoding="utf-8")
-    for lineno, line in enumerate(text.splitlines(), 1):
-        for match in link_re.finditer(line):
-            raw = match.group(1).strip()
-            if " " in raw and not raw.startswith("<"):
-                raw = raw.split(" ", 1)[0]
-            raw = raw.strip("<>")
-            target = raw.split("#", 1)[0]
-            if not target:
-                continue
-            if target.startswith(("#", "http://", "https://", "mailto:", "tel:", "app://")):
-                continue
-            if target.startswith("/"):
-                continue
-            candidate = (path.parent / urllib.parse.unquote(target)).resolve()
-            if not candidate.exists():
-                failures.append(f"{path.relative_to(root)}:{lineno}: missing local markdown link target {raw}")
-
-if failures:
-    print("Local markdown link check failed:", file=sys.stderr)
-    for failure in failures:
-        print(f"  - {failure}", file=sys.stderr)
-    sys.exit(1)
-PY
+    run cargo run --quiet --locked -p cellscript-tools --bin cellscript-tools -- \
+        --root "$ROOT_DIR" check-markdown-links
 }
 
 check_ckb_acceptance_boundaries() {
     local required=(
         'scripts/ckb_cellscript_acceptance.sh::Usage: scripts/ckb_cellscript_acceptance.sh'
-        'scripts/ckb_cellscript_acceptance.sh::strict-original-ckb'
-        'scripts/ckb_cellscript_acceptance.sh::bundled_examples_exact_order'
-        'scripts/ckb_cellscript_acceptance.sh::language_examples_exact_order'
-        'scripts/ckb_cellscript_acceptance.sh::strict_original_ckb_compile_policy_fail_closed'
-        'scripts/ckb_cellscript_acceptance.sh::strict_original_ckb_compile_unexpected_failures'
-        'scripts/ckb_cellscript_acceptance.sh::SOURCE_PROVENANCE_SCHEMA'
-        'scripts/ckb_cellscript_acceptance.sh::BUILD_REPORT_SCHEMA'
-        'scripts/ckb_cellscript_acceptance.sh::tracked_source_sha256'
-        'scripts/ckb_cellscript_acceptance.sh::ckb_acceptance_pin.json'
-        'scripts/ckb_cellscript_acceptance.sh::cellscript-ckb-runtime-provenance-v0.22'
-        'scripts/ckb_cellscript_acceptance.sh::fresh-dedicated-cargo-target'
-        'scripts/ckb_cellscript_acceptance.sh::binary_archived_with_report'
-        'scripts/ckb_cellscript_acceptance.sh::cellscript-public-builder-contract-gate-v0.22'
-        'scripts/ckb_cellscript_acceptance.sh::cellscript_build_reports'
-        'scripts/ckb_cellscript_acceptance.sh::live_code_cell_data_hash_matches_artifact'
-        'scripts/ckb_cellscript_acceptance.sh::public_builder_contract_action_count'
-        'scripts/ckb_cellscript_acceptance.sh::final_production_hardening_gate'
-        'scripts/validate_ckb_cellscript_production_evidence.py::validate_source_provenance'
-        'scripts/validate_ckb_cellscript_production_evidence.py::validate_public_builder_contracts'
-        'scripts/validate_ckb_cellscript_production_evidence.py::validate_ckb_runtime_provenance'
-        'scripts/validate_ckb_cellscript_production_evidence.py::fresh-dedicated-cargo-target'
-        'scripts/validate_ckb_cellscript_production_evidence.py::stateful branch scenarios must cover every action absent from end-to-end flows exactly once'
-        'scripts/validate_ckb_cellscript_production_evidence.py::validate_build_reports'
-        'scripts/validate_ckb_cellscript_production_evidence.py::tracked_source_sha256'
-        'scripts/validate_ckb_cellscript_production_evidence.py::valid CKB CellScript'
-        'scripts/validate_cellscript_tooling_release.py::valid CellScript tooling release boundary'
+        'scripts/ckb_cellscript_acceptance.sh::ckb-acceptance'
+        'crates/cellscript-tools/src/ckb_acceptance.rs::strict-original-ckb'
+        'crates/cellscript-tools/src/ckb_acceptance.rs::bundled_examples_exact_order'
+        'crates/cellscript-tools/src/ckb_acceptance.rs::language_examples_exact_order'
+        'crates/cellscript-tools/src/ckb_acceptance.rs::strict_original_ckb_compile_policy_fail_closed'
+        'crates/cellscript-tools/src/ckb_acceptance.rs::strict_original_ckb_compile_unexpected_failures'
+        'crates/cellscript-tools/src/ckb_acceptance.rs::SOURCE_PROVENANCE_SCHEMA'
+        'crates/cellscript-tools/src/ckb_acceptance.rs::BUILD_REPORT_SCHEMA'
+        'crates/cellscript-tools/src/ckb_acceptance.rs::tracked_source_sha256'
+        'crates/cellscript-tools/src/ckb_acceptance_live.rs::ckb_acceptance_pin.json'
+        'crates/cellscript-tools/src/ckb_acceptance_live.rs::cellscript-ckb-runtime-provenance-v0.22'
+        'crates/cellscript-tools/src/ckb_acceptance_live.rs::fresh-dedicated-cargo-target'
+        'crates/cellscript-tools/src/ckb_acceptance_live.rs::binary_archived_with_report'
+        'crates/cellscript-tools/src/ckb_acceptance.rs::cellscript-public-builder-contract-gate-v0.22'
+        'crates/cellscript-tools/src/ckb_acceptance.rs::cellscript_build_reports'
+        'crates/cellscript-tools/src/ckb_acceptance_live.rs::live_code_cell_data_hash_matches_artifact'
+        'crates/cellscript-tools/src/ckb_acceptance_live.rs::public_builder_contract_action_count'
+        'crates/cellscript-tools/src/ckb_acceptance_live.rs::final_production_hardening_gate'
+        'crates/cellscript-tools/src/production_evidence.rs::validate_source_provenance'
+        'crates/cellscript-tools/src/production_evidence.rs::validate_public_builder_contracts'
+        'crates/cellscript-tools/src/production_evidence.rs::validate_ckb_runtime_provenance'
+        'crates/cellscript-tools/src/production_evidence.rs::fresh-dedicated-cargo-target'
+        'crates/cellscript-tools/src/production_evidence.rs::stateful branch scenarios must cover every action absent from end-to-end flows exactly once'
+        'crates/cellscript-tools/src/production_evidence.rs::validate_build_reports'
+        'crates/cellscript-tools/src/production_evidence.rs::tracked_source_sha256'
+        'crates/cellscript-tools/src/production_evidence.rs::valid CKB CellScript'
+        'crates/cellscript-tools/src/tooling_release.rs::valid CellScript tooling release boundary'
         'src/lib.rs::cellscript-template-layout-v0.21'
         'src/cli/commands.rs::cellscript-protocol-graph-v0.22'
         'src/cli/commands.rs::cellscript-action-scan-selectors-v0.21'
@@ -599,10 +263,10 @@ check_novaseal_acceptance_boundaries() {
         'src/cli/novaseal_certification.rs::real BTC SPV and Fiber endpoint production acceptance'
         'src/cli/novaseal_certification.rs::current_source_valid'
         'src/cli/novaseal_certification.rs::source_tree_invalid_paths_empty'
-        'scripts/novaseal_bip340_tcb_review.py::invalid_paths'
-        'scripts/novaseal_devnet_stateful_live.py::invalid_paths'
-        'scripts/novaseal_external_evidence_handoff_bundle.py::source tree path must not be a symlink'
-        'scripts/cellscript_gate.sh::is a symlink inside the NovaSeal'
+        'crates/cellscript-tools/src/bip340_tcb.rs::invalid_paths'
+        'crates/cellscript-tools/src/ckb_devnet.rs::invalid_paths'
+        'crates/cellscript-tools/src/external_handoff.rs::source tree path must not be a symlink'
+        'crates/cellscript-tools/src/verifier_pinning.rs::is a symlink inside the NovaSeal'
         'scripts/novaseal_devnet_stateful_acceptance.sh::acceptance_blocker_count'
         'scripts/novaseal_devnet_stateful_acceptance.sh::local_blocker_count'
         'scripts/novaseal_devnet_stateful_acceptance.sh::blocker_count'
@@ -636,49 +300,8 @@ check_package_contents() {
     package_files="$(mktemp)"
     printf '\n==> cargo package --list --locked --allow-dirty --offline\n'
     cargo package --list --locked --allow-dirty --offline | tee "$package_files"
-    if ! python3 - "$package_files" <<'PY'; then
-import sys
-from pathlib import Path
-
-allowed_root_files = {
-    ".cargo_vcs_info.json",
-    "Cargo.lock",
-    "Cargo.toml",
-    "Cargo.toml.orig",
-    "CHANGELOG.md",
-    "CODING_STYLE.md",
-    "LICENSE-MIT",
-    "README.md",
-}
-allowed_root_dirs = {
-    "assets",
-    "examples",
-    "roadmap",
-    "scripts",
-    "src",
-    "tests",
-}
-forbidden_suffixes = (".pyc", ".pyo")
-
-unexpected: list[str] = []
-for raw in Path(sys.argv[1]).read_text(encoding="utf-8").splitlines():
-    path = raw.strip()
-    if not path:
-        continue
-    root = path.split("/", 1)[0]
-    if path.endswith(forbidden_suffixes) or "__pycache__/" in path:
-        unexpected.append(path)
-    elif "/" not in path and path not in allowed_root_files:
-        unexpected.append(path)
-    elif "/" in path and root not in allowed_root_dirs:
-        unexpected.append(path)
-
-if unexpected:
-    print("crates.io package includes repository-only files:", file=sys.stderr)
-    for path in unexpected:
-        print(f"  {path}", file=sys.stderr)
-    sys.exit(1)
-PY
+    if ! cargo run --quiet --locked -p cellscript-tools --bin cellscript-tools -- \
+        --root "$ROOT_DIR" check-package-contents "$package_files"; then
         printf 'crates.io package includes repository-only files or unpublished helper binaries\n' >&2
         exit 1
     fi
@@ -692,22 +315,15 @@ check_script_syntax() {
         shell_scripts+=("$shell_script")
     done < <(git ls-files '*.sh')
     for shell_script in "${shell_scripts[@]}"; do
-        run bash -n "$shell_script"
+        if [[ -f "$shell_script" ]]; then
+            run bash -n "$shell_script"
+        fi
     done
 
-    local python_scripts=()
-    local python_script
-    while IFS= read -r python_script; do
-        python_scripts+=("$python_script")
-    done < <(git ls-files '*.py')
-    if ((${#python_scripts[@]} > 0)); then
-        run python_syntax_check "${python_scripts[@]}"
-    fi
 }
 
 check_release_source_identity() {
     require_cmd git
-    require_cmd python3
 
     local dirty version expected_tag exact_tags
     dirty="$(git status --porcelain --untracked-files=all)"
@@ -716,15 +332,8 @@ check_release_source_identity() {
         exit 1
     fi
 
-    version="$(python3 - "$ROOT_DIR/Cargo.toml" <<'PY'
-import sys
-import tomllib
-from pathlib import Path
-
-manifest = tomllib.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-print(manifest["package"]["version"])
-PY
-)"
+    version="$(cargo run --quiet --locked -p cellscript-tools --bin cellscript-tools -- \
+        --root "$ROOT_DIR" workspace-version)"
     if [[ -n "${CELLSCRIPT_RELEASE_VERSION:-}" && "$CELLSCRIPT_RELEASE_VERSION" != "$version" ]]; then
         printf 'release version mismatch: requested %s, Cargo workspace declares %s\n' "$CELLSCRIPT_RELEASE_VERSION" "$version" >&2
         exit 1
@@ -746,7 +355,6 @@ PY
 
 run_website_build_check() {
     require_cmd npm
-    require_cmd python3
 
     if [[ ! -d website/node_modules ]]; then
         run npm --prefix website ci
@@ -796,7 +404,6 @@ run_dev_gate() {
         exit 2
     fi
     require_cmd cargo
-    require_cmd python3
     require_cmd rg
 
     cargo_fmt_workspace
@@ -808,7 +415,8 @@ run_dev_gate() {
     run cargo check --locked -p cellscript-tools --all-targets
     run ./scripts/cellscript_strict_backend_audit.sh quick
     run ./scripts/cellscript_syntax_combo_audit.sh quick
-    run ./scripts/dev/dual_run_tools.sh check-skill-pack
+    run cargo run --quiet --locked -p cellscript-tools --bin cellscript-tools -- \
+        --root "$ROOT_DIR" check-skill-pack
     check_cellscript_doc_status_freshness
     check_markdown_local_links
     check_forbidden_tracked_files
@@ -821,7 +429,6 @@ run_ci_gate() {
         exit 2
     fi
     require_cmd cargo
-    require_cmd python3
     require_cmd rg
     require_cmd npm
 
@@ -840,7 +447,8 @@ run_ci_gate() {
     run cargo clippy --locked -p cellscript-ckb-sdk-builder-example --all-targets -- -D warnings
     run cargo clippy --locked -p cellscript-tools --all-targets -- -D warnings
     run ./scripts/cellscript_strict_backend_audit.sh ci
-    run ./scripts/dev/dual_run_tools.sh check-skill-pack
+    run cargo run --quiet --locked -p cellscript-tools --bin cellscript-tools -- \
+        --root "$ROOT_DIR" check-skill-pack
     check_cellscript_doc_status_freshness
     check_markdown_local_links
     check_package_contents
@@ -858,7 +466,6 @@ run_backend_gate() {
         exit 2
     fi
     require_cmd cargo
-    require_cmd python3
     require_cmd rg
 
     cargo_fmt_workspace --check
@@ -875,7 +482,8 @@ run_backend_gate() {
 run_release_auxiliary_checks() {
     require_cmd npm
 
-    run ./scripts/dev/dual_run_tools.sh validate-tooling-release
+    run cargo run --quiet --locked -p cellscript-tools --bin cellscript-tools -- \
+        --root "$ROOT_DIR" validate-tooling-release
     check_release_roadmap_docs
     check_ckb_release_docs
     check_ckb_acceptance_boundaries
