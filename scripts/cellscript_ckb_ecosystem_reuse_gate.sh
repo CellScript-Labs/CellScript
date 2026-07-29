@@ -34,7 +34,6 @@ cargo_fmt_workspace() {
         --package cellscript \
         --package cellscript-ckb-adapter \
         --package cellscript-fiber-adapter \
-        --package cellscript-tools \
         --package cellscript-wasm \
         --package cellscript-ckb-sdk-builder-example \
         "$@"
@@ -53,13 +52,56 @@ validate_cli_contract_outputs() {
 
     run_capture "$compat_json" cargo run --locked -p cellscript --bin cellc -- ckb-std-compat --json
     run_capture "$action_json" cargo run --locked -p cellscript --bin cellc -- action build examples/token.cell --action mint_with_authority --json
-    run cargo run --quiet --locked -p cellscript-tools --bin cellscript-tools -- \
-        --root "$ROOT_DIR" ecosystem-reuse-contracts "$compat_json" "$action_json"
+
+    run python3 - "$compat_json" "$action_json" <<'PY'
+import json
+import sys
+
+compat_path, action_path = sys.argv[1:3]
+with open(compat_path, "r", encoding="utf-8") as handle:
+    compat = json.load(handle)
+with open(action_path, "r", encoding="utf-8") as handle:
+    action = json.load(handle)
+
+assert compat["status"] == "ok"
+assert compat["schema"] == "cellscript-ckb-std-compat-report-v0.19"
+assert compat["inline_abi"]["syscalls"]["load_cell_by_field"] == 2081
+assert compat["inline_abi"]["syscalls"]["load_witness"] == 2074
+assert compat["inline_abi"]["sources"]["group_input"] == ((1 << 56) | 1)
+assert compat["inline_abi"]["sources"]["group_output"] == ((1 << 56) | 2)
+assert compat["witness_args_policy"]["entry_payload_abi"] == "cellscript-entry-witness-v1"
+assert compat["witness_args_policy"]["final_witness_args_owner"] == "adapter"
+assert compat["adapter_boundary"]["compiler_core_uses_ckb_sdk_rust"] is False
+assert compat["test_evidence"]["script_construction_api"] is True
+assert compat["adapter_boundary"]["script_construction"]["packed_type"] == "ckb_types::packed::Script"
+assert compat["adapter_boundary"]["script_construction"]["evidence_schema"] == "cellscript-ckb-script-evidence-v0.19"
+assert "args_exact_prefix_suffix" in compat["adapter_boundary"]["script_construction"]["supports"]
+assert "script_ref_readback" in compat["adapter_boundary"]["script_construction"]["supports"]
+assert "explicit_cell_dep_binding" in compat["adapter_boundary"]["script_construction"]["supports"]
+
+assert action["status"] == "ok"
+assert action["policy"] == "cellscript-action-builder-plan-v1"
+assert action["headless"] is True
+assert action["ui_scope"] == "none"
+assert action["transaction_draft"]["state"] == "ActionPlan"
+assert action["transaction_draft"]["can_submit"] is False
+assert action["transaction_draft"]["requires_packed_materialization"] is True
+assert action["transaction_draft"]["packed_materialization"]["transaction"] == "ckb_types::packed::Transaction"
+assert action["transaction_draft"]["packed_materialization"]["script"] == "ckb_types::packed::Script"
+assert action["transaction_draft"]["packed_materialization"]["out_point"] == "ckb_types::packed::OutPoint"
+assert action["adapter_contract"]["schema"] == "cellscript-ckb-adapter-contract-v0.19"
+assert action["adapter_contract"]["witness_policy"]["default_action_payload_field"] == "input_type"
+assert action["adapter_contract"]["witness_policy"]["lock_signature_policy"] == "explicit-adapter-owned-do-not-overwrite"
+required_fields = set(action["adapter_contract"]["resolved_tx_required_fields"])
+assert {"outputs_data", "cell_deps", "lineage"}.issubset(required_fields)
+assert action["adapter_contract"]["acceptance_report_template"]["schema"] == "cellscript-ckb-action-acceptance-report-v0.19"
+PY
 }
 
 run_quick_gate() {
     require_cmd cargo
     require_cmd git
+    require_cmd python3
 
     cargo_fmt_workspace --check
     run cargo test --locked -p cellscript --test ckb_std_compat -- --test-threads=1

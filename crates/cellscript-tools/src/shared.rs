@@ -1,12 +1,12 @@
 //! Shared helpers for the cellscript-tools binaries.
 //!
-//! These helpers preserve the historical report encodings and path semantics
-//! so the native Rust tools remain compatible with existing evidence.
+//! These helpers mirror the behaviour of the in-tree Python scripts under
+//! `scripts/`. Behavioural fidelity matters: the dev/CI gate runs both the
+//! Python and Rust implementations and requires byte-identical stdout and a
+//! matching exit code. See `scripts/dev/dual_run_tools.sh`.
 
 use std::fs;
 use std::path::{Path, PathBuf};
-
-use serde_json::Value;
 
 /// Resolve the CellScript repository root.
 ///
@@ -77,83 +77,4 @@ pub fn slice_between<'a>(text: &'a str, start: &str, end: &str) -> anyhow::Resul
         .map(|(before, _)| before)
         .ok_or_else(|| anyhow::anyhow!("slice_between: end marker not found: {end:?}"))?;
     Ok(before_end)
-}
-
-/// Apply the lexical normalisation performed by Python's `pathlib.Path`:
-/// collapse repeated separators and `.` components without resolving
-/// symlinks or parent components.
-pub fn python_path(path: &Path) -> PathBuf {
-    path.components().collect()
-}
-
-/// Render a JSON value like Python's
-/// `json.dumps(value, indent=2, sort_keys=True)`.
-pub fn python_json_pretty(value: &Value) -> anyhow::Result<String> {
-    let json = serde_json::to_string_pretty(value)?;
-    Ok(escape_json_non_ascii(&json))
-}
-
-/// Render a JSON value like Python's
-/// `json.dumps(value, sort_keys=True, separators=(",", ":"))`.
-pub fn python_json_compact(value: &Value) -> anyhow::Result<String> {
-    let json = serde_json::to_string(value)?;
-    Ok(escape_json_non_ascii(&json))
-}
-
-/// Render a JSON value like Python's `json.dumps(value, sort_keys=True)`.
-/// Python's default compact formatter keeps one space after commas and
-/// colons; serde_json's compact formatter does not, so add those separators
-/// while respecting string literals and escapes.
-pub fn python_json_default(value: &Value) -> anyhow::Result<String> {
-    let json = serde_json::to_string(value)?;
-    let mut rendered = String::with_capacity(json.len() + json.len() / 8);
-    let mut in_string = false;
-    let mut escaped = false;
-    for character in json.chars() {
-        rendered.push(character);
-        if in_string {
-            if escaped {
-                escaped = false;
-            } else if character == '\\' {
-                escaped = true;
-            } else if character == '"' {
-                in_string = false;
-            }
-        } else if character == '"' {
-            in_string = true;
-        } else if matches!(character, ',' | ':') {
-            rendered.push(' ');
-        }
-    }
-    Ok(escape_json_non_ascii(&rendered))
-}
-
-/// Match Python's default `ensure_ascii=True` JSON behaviour. `serde_json`
-/// emits non-ASCII Unicode directly, while Python writes UTF-16 `\u` escapes
-/// (including surrogate pairs for non-BMP characters).
-fn escape_json_non_ascii(json: &str) -> String {
-    let mut escaped = String::with_capacity(json.len());
-    for character in json.chars() {
-        if character.is_ascii() {
-            escaped.push(character);
-        } else {
-            for unit in character.encode_utf16(&mut [0; 2]) {
-                use std::fmt::Write as _;
-                write!(escaped, "\\u{unit:04x}").expect("writing to String cannot fail");
-            }
-        }
-    }
-    escaped
-}
-
-#[cfg(test)]
-mod tests {
-    use serde_json::json;
-
-    use super::*;
-
-    #[test]
-    fn python_default_json_spacing_ignores_string_punctuation() {
-        assert_eq!(python_json_default(&json!({"a": [1, 2], "b": "x,y:z\""})).unwrap(), r#"{"a": [1, 2], "b": "x,y:z\""}"#);
-    }
 }

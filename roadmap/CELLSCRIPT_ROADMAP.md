@@ -312,11 +312,12 @@ infrastructure and absorbs Myelin's off-chain needs into upstream:
   and `cellc publish` / `cellc auth capability *` to the live JoyID-rooted
   write API; keep hash-first verification and the static
   `/packages/*` read path as the read authority.
-- **Python tooling ported to Rust**: the gate-driving backend, syntax,
-  production-evidence, tooling-release, NovaSeal, and Evolving-DOB tools now
-  live in Rust crates; website data generation uses Node modules. Evidence
-  schemas and exit-code contracts remain stable, and gates no longer require
-  a Python runtime.
+- **Python tooling ported to Rust**: move the gate-driving Python
+  (`cellscript_strict_backend_audit.py`, `cellscript_syntax_combo_audit.py`,
+  the production-evidence and tooling-release validators, the NovaSeal /
+  Evolving-DOB proposal scripts, and the website data scripts) into the
+  `cellscript-tools` crate or TS scripts, with byte-identical evidence
+  output and the same exit-code contract.
 - **Deeper RGB++ and Fiber integration**: close the pinned Fiber full
   lifecycle/negative matrix, promote the Fiber harness to a release-mode
   gate once it is reproducible, and advance the RGB++ ecosystem adapter

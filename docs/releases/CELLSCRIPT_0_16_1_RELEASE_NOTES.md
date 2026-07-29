@@ -34,8 +34,7 @@ transactions:
 
 ```bash
 ./scripts/ckb_cellscript_acceptance.sh --production --stateful-scenarios
-cargo run --quiet --locked -p cellscript-tools --bin cellscript-tools -- \
-  --root . validate-production-evidence <report.json> --repo-root .
+python3 scripts/validate_ckb_cellscript_production_evidence.py <report.json>
 ```
 
 The validated evidence covers all bundled strict original scoped actions, lock

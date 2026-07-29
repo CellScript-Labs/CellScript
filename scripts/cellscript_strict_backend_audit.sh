@@ -8,5 +8,4 @@ if [[ $# -gt 0 ]]; then
 fi
 
 cd "$ROOT_DIR"
-exec cargo run --quiet --locked -p cellscript-tools --bin cellscript-tools -- \
-    --root "$ROOT_DIR" strict-backend "$MODE" "$@"
+python3 scripts/cellscript_strict_backend_audit.py "$MODE" "$@"

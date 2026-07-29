@@ -152,10 +152,9 @@ sub-module (e.g. `assembler.rs`, `runtime.rs`, `abi.rs`):
 4. **Delete from back to front.** When removing code by line number with `sed`,
    delete later ranges first to keep earlier line numbers stable.
 
-5. **Check delimiters after every deletion.** Run `cargo fmt --check`, then the
-   focused `cargo check --locked -p cellscript --all-targets` before the next
-   extraction. Off-by-one deletion ranges can leave orphaned lines or consume
-   closing braces.
+5. **Brace-count after every deletion.** Use `python3 -c` to verify brace
+   balance before attempting compilation. Off-by-one `sed` ranges can leave
+   orphaned lines or eat closing braces.
 
 ### Module Boundary: Schema vs Cell Operations vs Orchestration
 

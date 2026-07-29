@@ -77,8 +77,12 @@ jobs:
 
       - name: Install pinned CKB build toolchain
         run: |
-          CKB_TOOLCHAIN="$(sed -n 's/^channel = "\(.*\)"$/\1/p' ../ckb/rust-toolchain.toml | head -n 1)"
-          test -n "$CKB_TOOLCHAIN"
+          CKB_TOOLCHAIN="$(python3 - <<'PY'
+          import tomllib
+          from pathlib import Path
+          print(tomllib.loads(Path('../ckb/rust-toolchain.toml').read_text(encoding='utf-8'))['toolchain']['channel'])
+          PY
+          )"
           rustup toolchain install "$CKB_TOOLCHAIN" --profile minimal
 
       - name: Resolve release version

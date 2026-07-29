@@ -116,8 +116,8 @@ documentation instead of becoming a second compiler or deployment client.
 
 The repository also ships six CellScript programming skills under
 `docs/skills/`. The unified dev, CI, and release-auxiliary gates run
-`cellscript-tools check-skill-pack` to ensure the skill pack still points at
-current docs and command names.
+`scripts/check_cellscript_skill_pack.py` to ensure the skill pack still points
+at current docs and command names.
 
 ## Release-Candidate Validation Hardening
 

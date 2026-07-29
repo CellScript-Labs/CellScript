@@ -1,0 +1,2364 @@
+#!/usr/bin/env python3
+"""Matrix-driven CellScript syntax-combination audit runner.
+
+The runner is intentionally token-light: stdout prints a compact summary and the
+full command outputs/artifacts stay under target/syntax-combo-audit/<run>.
+"""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import hashlib
+import json
+import os
+import random
+import shutil
+import subprocess
+import sys
+import textwrap
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - exercised only by older Python runners.
+    try:
+        import tomli as tomllib  # type: ignore[import-not-found]
+    except ModuleNotFoundError:
+        tomllib = None  # type: ignore[assignment]
+
+
+ROOT = Path(__file__).resolve().parents[1]
+MATRIX = ROOT / "tests" / "syntax_combo" / "matrix.toml"
+SEEDS = ROOT / "tests" / "syntax_combo" / "seeds"
+
+MODE_RANK = {"quick": 0, "ci": 1, "deep": 2, "repro": 3}
+
+GOVERNANCE_RELEASE_MATRIX: tuple[dict[str, str], ...] = (
+    {
+        "track": "canonical_action_lock_surface",
+        "layer": "parser_formatter_lsp_docs",
+        "status": "covered_by_gate",
+        "evidence": "action and lock cases parse, format, and use the verification section",
+        "gate": "syntax-combo accepted action/lock cases plus VS Code validate/dry-run in release gate",
+    },
+    {
+        "track": "local_explicit_sugar",
+        "layer": "type_lowering_metadata",
+        "status": "covered_by_gate",
+        "evidence": "preserve and anonymous require-block cases are type/effect checked and metadata-checked",
+        "gate": "syntax-combo preserve/require-block positive and negative cases",
+    },
+    {
+        "track": "stdlib_lifecycle_patterns",
+        "layer": "type_lowering_metadata_codegen",
+        "status": "covered_by_gate",
+        "evidence": "transfer/claim/settle emit consume, create, locked output, and field obligations",
+        "gate": "syntax-combo stdlib lifecycle metadata oracles",
+    },
+    {
+        "track": "source_qualifier_boundary",
+        "layer": "type_effect",
+        "status": "covered_by_gate",
+        "evidence": "read/protected/witness/lock_args boundaries reject linear lifecycle misuse",
+        "gate": "syntax-combo lock source qualifier and read-param reject cases",
+    },
+    {
+        "track": "deferred_rejected_surfaces",
+        "layer": "parser_type_policy",
+        "status": "covered_by_gate",
+        "evidence": "unknown stdlib patterns and hidden lifecycle proof forms fail closed",
+        "gate": "syntax-combo reject seeds and required bug classes",
+    },
+    {
+        "track": "metadata_fidelity",
+        "layer": "ir_metadata_codegen",
+        "status": "covered_by_gate",
+        "evidence": "accepted cases compile to non-empty assembly and metadata matches consume/create/lock obligations",
+        "gate": "syntax-combo metadata/codegen oracles",
+    },
+)
+
+BUG_CLASS_CONTRACTS: tuple[dict[str, Any], ...] = (
+    {
+        "id": "SCA-BUG-STD-LIFECYCLE-LOCKED-OUTPUT",
+        "name": "stdlib lifecycle pattern must create and lock the declared output",
+        "min_mode": "quick",
+        "required_cases": ("stdlib-transfer",),
+        "required_origins": ("generated",),
+        "release_boundary": "std::lifecycle::transfer(input, output, to) cannot drop to or omit create output with_lock(to)",
+    },
+    {
+        "id": "SCA-BUG-PRESERVE-TYPE-EQUIVALENCE",
+        "name": "preserve sugar must be type-equivalent to canonical require equality",
+        "min_mode": "quick",
+        "required_cases": ("reject-preserve-type-mismatch",),
+        "required_origins": ("generated",),
+        "release_boundary": "preserve output from input { field } must reject field type mismatches",
+    },
+    {
+        "id": "SCA-BUG-REQUIRE-BLOCK-PURITY",
+        "name": "anonymous require block cannot hide lifecycle or verifier-boundary operations",
+        "min_mode": "quick",
+        "required_cases": ("reject-require-block-lifecycle", "seed-require-block-lifecycle"),
+        "required_origins": ("generated", "tests/syntax_combo/seeds/require-block-lifecycle.cell"),
+        "release_boundary": "require { ... } remains pure boolean grouping sugar",
+    },
+    {
+        "id": "SCA-BUG-STDLIB-NAMESPACE-FAIL-CLOSED",
+        "name": "unknown stdlib namespaces and helper names fail closed",
+        "min_mode": "quick",
+        "required_cases": ("reject-unknown-stdlib",),
+        "required_origins": ("generated",),
+        "release_boundary": "unsupported std::* calls cannot compile as inert boolean expressions",
+    },
+    {
+        "id": "SCA-BUG-SOURCE-QUALIFIER-LINEARITY",
+        "name": "source-qualified values cannot be consumed by lifecycle operations",
+        "min_mode": "quick",
+        "required_cases": ("reject-consume-read-param",),
+        "required_origins": ("generated",),
+        "release_boundary": "read/protected/witness/lock_args values do not escape into consume/destroy/stdlib lifecycle",
+    },
+    {
+        "id": "SCA-BUG-RECEIPT-CLAIM-CONTRACT",
+        "name": "receipt claim helpers require receipt inputs and declared claim output type",
+        "min_mode": "quick",
+        "required_cases": ("reject-claim-without-output-arrow",),
+        "required_origins": ("generated",),
+        "release_boundary": "claim semantics come from stdlib helper validation, not action names",
+    },
+    {
+        "id": "SCA-BUG-LOCK-SOURCE-QUALIFIERS",
+        "name": "lock protected, witness, and lock_args source qualifiers stay parse/type checked",
+        "min_mode": "quick",
+        "required_cases": ("lock-source-qualifiers",),
+        "required_origins": ("generated",),
+        "release_boundary": "lock authorization data sources remain explicit in the surface and metadata path",
+    },
+    {
+        "id": "SCA-BUG-0.22-CELLSET-UNBOUNDED",
+        "name": "transaction-backed Cell collections require an explicit finite maximum cardinality",
+        "min_mode": "quick",
+        "required_cases": ("seed-bounded-collection-missing-cardinality-reject",),
+        "required_origins": ("tests/syntax_combo/seeds/bounded-collection-missing-cardinality-reject.cell",),
+        "release_boundary": "BoundedCellSet<T, N> cannot omit N or use an unbounded transaction source",
+    },
+    {
+        "id": "SCA-BUG-0.22-CELLSET-VEC-RESOURCE",
+        "name": "generic Vec<Resource> cannot stand in for a source-aware Cell set",
+        "min_mode": "quick",
+        "required_cases": ("seed-bounded-collection-vec-resource-reject",),
+        "required_origins": ("tests/syntax_combo/seeds/bounded-collection-vec-resource-reject.cell",),
+        "release_boundary": "transaction Cell membership and ownership are never inferred from local Vec storage",
+    },
+    {
+        "id": "SCA-BUG-0.22-CONSUME-EACH-DUPLICATE",
+        "name": "consume_each consumes one bounded Cell set exactly once",
+        "min_mode": "quick",
+        "required_cases": ("seed-bounded-collection-duplicate-consume-reject",),
+        "required_origins": ("tests/syntax_combo/seeds/bounded-collection-duplicate-consume-reject.cell",),
+        "release_boundary": "linear bounded input sets cannot be consumed twice or silently partially consumed",
+    },
+    {
+        "id": "SCA-BUG-0.22-CREATE-EACH-CARDINALITY-MISSING",
+        "name": "create_each carries output cardinality and capacity builder obligations",
+        "min_mode": "quick",
+        "required_cases": ("seed-bounded-collection",),
+        "required_origins": ("tests/syntax_combo/seeds/bounded-collection.cell",),
+        "release_boundary": "bounded output plans compile only with metadata and ProofPlan builder-evidence contracts",
+    },
+    {
+        "id": "SCA-BUG-0.22-VALIDITY-EVIDENCE-MISSING",
+        "name": "type validity predicates carry canonical metadata and ProofPlan evidence tiers",
+        "min_mode": "quick",
+        "required_cases": ("seed-type-validity",),
+        "required_origins": ("tests/syntax_combo/seeds/type-validity.cell",),
+        "release_boundary": "every accepted validity predicate is paired with a canonical evidence tier and ProofPlan record",
+    },
+    {
+        "id": "SCA-BUG-0.22-VALIDITY-ENV-UNKNOWN",
+        "name": "unknown validity environment reads fail closed",
+        "min_mode": "quick",
+        "required_cases": ("seed-type-validity-unknown-env-reject",),
+        "required_origins": ("tests/syntax_combo/seeds/type-validity-unknown-env-reject.cell",),
+        "release_boundary": "env::block_number is the only approved 0.22 validity environment read",
+    },
+    {
+        "id": "SCA-BUG-0.22-BORROW-EFFECT-COMPAT",
+        "name": "borrowed linear views may reach only Pure or ReadOnly helpers with dedicated &T parameters",
+        "min_mode": "quick",
+        "required_cases": ("seed-explicit-borrow", "seed-explicit-borrow-effect-reject"),
+        "required_origins": (
+            "tests/syntax_combo/seeds/explicit-borrow.cell",
+            "tests/syntax_combo/seeds/explicit-borrow-effect-reject.cell",
+        ),
+        "release_boundary": "borrow calls are checked against authenticated callable effects and explicit read-only reference parameters",
+    },
+    {
+        "id": "SCA-BUG-0.22-BORROW-ESCAPE",
+        "name": "borrowed View<T> markers cannot acquire layout, storage, ABI, or return representation",
+        "min_mode": "quick",
+        "required_cases": ("seed-explicit-borrow-escape-reject",),
+        "required_origins": ("tests/syntax_combo/seeds/explicit-borrow-escape-reject.cell",),
+        "release_boundary": "borrow markers cannot escape through local aggregates, assignments, returns, or generic calls",
+    },
+    {
+        "id": "SCA-BUG-0.22-BORROW-CROSSES-CONSUME",
+        "name": "borrowed views cannot cross lifecycle discharge of their linear root",
+        "min_mode": "quick",
+        "required_cases": ("seed-explicit-borrow-cross-consume-reject",),
+        "required_origins": ("tests/syntax_combo/seeds/explicit-borrow-cross-consume-reject.cell",),
+        "release_boundary": "every path rejects consume, destroy, transfer, claim, or settle of a root while its borrow block is active",
+    },
+    {
+        "id": "SCA-BUG-0.22-CAPABILITY-OVERGRANT",
+        "name": "composite lifecycle authority is derived only by the closed versioned entailment relation",
+        "min_mode": "quick",
+        "required_cases": ("seed-capability-entailment", "seed-capability-missing-identity-reject"),
+        "required_origins": (
+            "tests/syntax_combo/seeds/capability-entailment.cell",
+            "tests/syntax_combo/seeds/capability-missing-identity-reject.cell",
+        ),
+        "release_boundary": "destroy requires consume+burn and replace_unique requires replace plus an exact declared identity condition",
+    },
+    {
+        "id": "SCA-BUG-0.22-CAPABILITY-TRANSITIVE-GRANT",
+        "name": "container capability sets never grant authority over another Cell resource",
+        "min_mode": "quick",
+        "required_cases": ("seed-capability-transitive-grant-reject",),
+        "required_origins": ("tests/syntax_combo/seeds/capability-transitive-grant-reject.cell",),
+        "release_boundary": "capability lookup uses the exact lifecycle operand type and does not traverse container-like declarations",
+    },
+    {
+        "id": "SCA-BUG-0.22-PAYLOAD-MATCH-NONEXHAUSTIVE",
+        "name": "payload enum matches remain exhaustive after destructuring",
+        "min_mode": "quick",
+        "required_cases": ("seed-payload-enum", "seed-payload-enum-nonexhaustive-reject"),
+        "required_origins": (
+            "tests/syntax_combo/seeds/payload-enum.cell",
+            "tests/syntax_combo/seeds/payload-enum-nonexhaustive-reject.cell",
+        ),
+        "release_boundary": "every concrete payload variant is covered exactly once unless a final non-linear wildcard arm is explicit",
+    },
+    {
+        "id": "SCA-BUG-0.22-PAYLOAD-DYNAMIC-ACCEPTED",
+        "name": "payload enum layout accepts only concrete fixed-width values",
+        "min_mode": "quick",
+        "required_cases": ("seed-payload-enum-dynamic-reject", "seed-payload-enum-generic-reject"),
+        "required_origins": (
+            "tests/syntax_combo/seeds/payload-enum-dynamic-reject.cell",
+            "tests/syntax_combo/seeds/payload-enum-generic-reject.cell",
+        ),
+        "release_boundary": "dynamic and generic payload ADTs fail closed before IR, ABI, or metadata claims are emitted",
+    },
+    {
+        "id": "SCA-BUG-0.22-PAYLOAD-LINEAR-DROP",
+        "name": "linear Cell payload ownership is discharged inside every match arm",
+        "min_mode": "quick",
+        "required_cases": ("seed-payload-enum-linear-drop-reject",),
+        "required_origins": ("tests/syntax_combo/seeds/payload-enum-linear-drop-reject.cell",),
+        "release_boundary": "a Cell payload cannot disappear through wildcard binding or implicit arm-local drop",
+    },
+    {
+        "id": "SCA-BUG-0.22-PROTOCOLGRAPH-ROLE-OVERCLAIM",
+        "name": "field-name role hints remain weak metadata and never authorization evidence",
+        "min_mode": "quick",
+        "required_cases": ("seed-protocolgraph-role-weak",),
+        "required_origins": ("tests/syntax_combo/seeds/protocolgraph-role-weak.cell",),
+        "release_boundary": "a participant-like Address field records source=field-name, evidence_tier=metadata-only, and authorization_proven=false",
+    },
+    {
+        "id": "SCA-BUG-0.22-PROTOCOLGRAPH-ROLE-CONFLICT",
+        "name": "conflicting ProtocolGraph role sources remain attributed and deterministically ordered",
+        "min_mode": "quick",
+        "required_cases": ("seed-protocolgraph-role-conflict",),
+        "required_origins": ("tests/syntax_combo/seeds/protocolgraph-role-conflict.cell",),
+        "release_boundary": "explicit predicates precede witness/lock_args bindings and weak field names without entering ProofPlan",
+    },
+    {
+        "id": "SCA-BUG-STDLIB-ARGUMENT-VALIDATION",
+        "name": "stdlib lifecycle helpers validate arity, cell kind, lock target, and claim output",
+        "min_mode": "ci",
+        "required_cases": (
+            "matrix-reject-claim-non-receipt",
+            "matrix-reject-claim-extra-args",
+            "matrix-reject-transfer-extra-args",
+            "matrix-reject-settle-missing-args",
+            "matrix-reject-claim-output-type-mismatch",
+            "matrix-reject-settle-lock-target-type",
+        ),
+        "required_origins": ("matrix:reject/stdlib-lifecycle",),
+        "release_boundary": "stdlib lifecycle patterns fail closed before lowering when arguments, lock targets, or claim outputs are invalid",
+    },
+    {
+        "id": "SCA-BUG-METADATA-HELPER-VALIDATION",
+        "name": "cell metadata helpers reject non-cell arguments",
+        "min_mode": "ci",
+        "required_cases": ("matrix-reject-cell-metadata-non-cell",),
+        "required_origins": ("matrix:reject/metadata",),
+        "release_boundary": "std::cell::* metadata helpers cannot be used as generic boolean predicates",
+    },
+    {
+        "id": "SCA-BUG-RECEIPT-LIFECYCLE-OUTPUT",
+        "name": "receipt claim and settle helpers emit locked output obligations",
+        "min_mode": "ci",
+        "required_cases": ("matrix-stdlib-claim-require-block", "matrix-stdlib-settle-preserve-capacity"),
+        "required_origins": ("matrix:receipt/proof", "matrix:receipt/metadata"),
+        "release_boundary": "claim/settle helpers must lower to explicit consume/create/lock obligations",
+    },
+    {
+        "id": "SCA-BUG-DEEP-HIDDEN-LIFECYCLE",
+        "name": "deep reject variants keep stdlib lifecycle out of pure proof positions",
+        "min_mode": "deep",
+        "required_cases": ("matrix-deep-reject-require-block-transfer",),
+        "required_origins": ("matrix:deep/reject/proof-purity", "seeded:deep/reject"),
+        "release_boundary": "release-local deep replay covers hidden lifecycle mutations beyond the quick corpus",
+    },
+    {
+        "id": "SCA-BUG-DEEP-READ-STDLIB-LIFECYCLE",
+        "name": "deep reject variants cover stdlib lifecycle on read parameters",
+        "min_mode": "deep",
+        "required_cases": ("matrix-deep-reject-transfer-read-param",),
+        "required_origins": ("matrix:deep/reject/source-qualifier",),
+        "release_boundary": "read-param lifecycle rejection is covered for both explicit consume and stdlib lifecycle syntax",
+    },
+    {
+        "id": "SCA-BUG-DEEP-UNKNOWN-STDLIB",
+        "name": "deep reject variants cover unknown stdlib helper families",
+        "min_mode": "deep",
+        "required_cases": ("matrix-deep-reject-unknown-accounting",),
+        "required_origins": ("matrix:deep/reject/stdlib-namespace",),
+        "release_boundary": "unsupported helper families stay rejected under release-local deep replay",
+    },
+    {
+        "id": "SCA-BUG-FLOW-EDGE-UNDECLARED",
+        "name": "flow state transitions must use edges declared in the flow block",
+        "min_mode": "ci",
+        "required_cases": ("reject-flow-undeclared-edge", "accept-flow-declared-cyclic-edge"),
+        "required_origins": ("generated",),
+        "release_boundary": "transition input.state: A -> output.state: B must fail closed when A -> B is not a declared flow edge",
+    },
+    {
+        "id": "SCA-BUG-FLOW-CREATE-STATE-CONTRACT",
+        "name": "initial create of a flow type must set a statically known declared state",
+        "min_mode": "ci",
+        "required_cases": ("reject-flow-create-missing-state", "reject-flow-create-non-static-initial"),
+        "required_origins": ("generated",),
+        "release_boundary": "flow-typed create must set the state field to a declared state literal, not a runtime value",
+    },
+    {
+        "id": "SCA-BUG-AGGREGATE-INVARIANT-CONTRACT",
+        "name": "xUDT group amount conservation invariant must lower to the matching runtime helper",
+        "min_mode": "ci",
+        "required_cases": ("accept-invariant-xudt-conserved",),
+        "required_origins": ("generated",),
+        "release_boundary": "assert_sum(group_outputs<T>.amount) == assert_sum(group_inputs<T>.amount) is recognised as the xUDT conserved aggregate and surfaces the runtime-helper-required gap",
+    },
+)
+
+
+@dataclass(frozen=True)
+class Expected:
+    phase: str
+    contains: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class Oracle:
+    action: str | None = None
+    consume_bindings: tuple[str, ...] = ()
+    create_bindings: tuple[str, ...] = ()
+    locked_outputs: tuple[str, ...] = ()
+    create_fields: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    obligation_contains: tuple[str, ...] = ()
+    validity_type: str | None = None
+    validity_tiers: tuple[str, ...] = ()
+    borrow_scope: str | None = None
+    borrow_view_type: str | None = None
+    capability_operation: str | None = None
+    capability_type: str | None = None
+    payload_enum: str | None = None
+    protocol_role_action: str | None = None
+    protocol_role: str | None = None
+    protocol_role_source: str | None = None
+    protocol_role_conflict: bool | None = None
+
+
+@dataclass(frozen=True)
+class AuditCase:
+    name: str
+    source: str
+    expected: Expected
+    oracle: Oracle = field(default_factory=Oracle)
+    origin: str = "generated"
+
+    @property
+    def case_id(self) -> str:
+        digest = hashlib.blake2b(
+            f"{self.name}\n{self.source}".encode("utf-8"),
+            digest_size=6,
+        ).hexdigest()
+        return digest
+
+
+def read_matrix() -> dict[str, Any]:
+    if not MATRIX.exists():
+        return {}
+    text = MATRIX.read_text(encoding="utf-8")
+    if tomllib is not None:
+        return tomllib.loads(text)
+    return parse_matrix_toml_subset(text)
+
+
+def parse_matrix_toml_subset(text: str) -> dict[str, Any]:
+    """Parse the matrix file subset needed by this runner.
+
+    This fallback intentionally supports only the simple TOML shapes used by
+    tests/syntax_combo/matrix.toml: dotted tables, scalar ints/bools/strings,
+    and string arrays.
+    """
+    root: dict[str, Any] = {}
+    current = root
+    lines = text.splitlines()
+    index = 0
+    while index < len(lines):
+        raw = lines[index].strip()
+        index += 1
+        if not raw or raw.startswith("#"):
+            continue
+        if raw.startswith("[") and raw.endswith("]"):
+            current = root
+            for part in raw[1:-1].split("."):
+                current = current.setdefault(part, {})
+            continue
+        if "=" not in raw:
+            continue
+        key, value = [part.strip() for part in raw.split("=", 1)]
+        if value == "[":
+            items: list[str] = []
+            while index < len(lines):
+                item = lines[index].strip()
+                index += 1
+                if item == "]":
+                    break
+                item = item.rstrip(",")
+                if item.startswith('"') and item.endswith('"'):
+                    items.append(item[1:-1])
+            current[key] = items
+        elif value.startswith("[") and value.endswith("]"):
+            raw_items = value[1:-1].strip()
+            current[key] = [] if not raw_items else [item.strip().strip('"') for item in raw_items.split(",")]
+        elif value.startswith('"') and value.endswith('"'):
+            current[key] = value[1:-1]
+        elif value in {"true", "false"}:
+            current[key] = value == "true"
+        else:
+            current[key] = int(value)
+    return root
+
+
+def compact(text: str, limit: int = 1200) -> str:
+    text = text.replace(str(ROOT), "$ROOT")
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "\n...<truncated>..."
+
+
+def run_cmd(cmd: list[str], *, timeout: int = 30) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        cmd,
+        cwd=ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        timeout=timeout,
+        check=False,
+    )
+
+
+def require_tool(path_or_name: str) -> str:
+    if "/" in path_or_name:
+        path = Path(path_or_name)
+        if path.exists() and os.access(path, os.X_OK):
+            return str(path)
+    resolved = shutil.which(path_or_name)
+    if not resolved:
+        raise SystemExit(f"missing required tool: {path_or_name}")
+    return resolved
+
+
+def cellc_bin() -> str:
+    env = os.environ.get("CELLC_BIN")
+    if env:
+        return require_tool(env)
+    target_dir_env = os.environ.get("CARGO_TARGET_DIR")
+    target_dir = Path(target_dir_env) if target_dir_env else ROOT / "target"
+    if not target_dir.is_absolute():
+        target_dir = ROOT / target_dir
+    candidate = target_dir / "debug" / "cellc"
+    if candidate.exists() and os.access(candidate, os.X_OK):
+        return str(candidate)
+    build = run_cmd(["cargo", "build", "--locked", "--bin", "cellc"], timeout=120)
+    if build.returncode != 0:
+        raise SystemExit(compact(build.stdout, 4000))
+    return str(candidate)
+
+
+BASE_TYPES = """\
+module cellscript::audit::{module_name}
+
+resource Coin has store, create, consume, replace, burn, relock {{
+    amount: u64,
+    nonce: u64,
+}}
+
+receipt Voucher -> Coin has create, consume, burn {{
+    amount: u64,
+    nonce: u64,
+    holder: Address,
+}}
+
+resource Wallet has store, create, consume, replace, burn, relock {{
+    owner: Address,
+}}
+"""
+
+
+def module_source(module_name: str, body: str) -> str:
+    return BASE_TYPES.format(module_name=module_name) + "\n" + textwrap.dedent(body).strip() + "\n"
+
+
+def matrix_cases(include_deep: bool) -> list[AuditCase]:
+    cases: list[AuditCase] = []
+
+    helper_specs = [
+        ("preserve_type", "std::cell::preserve_type", ()),
+        ("same_lock", "std::cell::same_lock", ("cell-metadata-equality:lock_hash",)),
+        ("preserve_lock", "std::cell::preserve_lock", ("cell-metadata-equality:lock_hash",)),
+        ("preserve_capacity", "std::cell::preserve_capacity", ("cell-metadata-equality:capacity",)),
+        ("conserved", "std::accounting::conserved", ()),
+    ]
+    for short_name, helper, obligations in helper_specs:
+        action = f"matrix_{short_name}"
+        cases.append(
+            AuditCase(
+                name=f"matrix-cell-helper-{short_name}",
+                source=module_source(
+                    f"matrix_cell_helper_{short_name}",
+                    f"""
+                    action {action}(coin_before: Coin) -> coin_after: Coin {{
+                        verification
+                        {helper}(coin_after, coin_before)
+                    }}
+                    """,
+                ),
+                expected=Expected("accept"),
+                oracle=Oracle(action=action, obligation_contains=obligations),
+                origin="matrix:continuity/std-cell",
+            )
+        )
+
+    cases.extend(
+        [
+            AuditCase(
+                name="matrix-explicit-transfer-branch-require",
+                source=module_source(
+                    "matrix_explicit_transfer_branch_require",
+                    """
+                    action branch_keep(coin: Coin, to: Address) -> next_coin: Coin {
+                        verification
+                        consume coin
+
+                        create next_coin = Coin {
+                            amount: coin.amount,
+                            nonce: coin.nonce
+                        } with_lock(to)
+
+                        if next_coin.amount == coin.amount {
+                            require next_coin.nonce == coin.nonce
+                        } else {
+                            require next_coin.nonce == coin.nonce
+                        }
+                    }
+                    """,
+                ),
+                expected=Expected("accept"),
+                oracle=Oracle(
+                    action="branch_keep",
+                    consume_bindings=("coin",),
+                    create_bindings=("next_coin",),
+                    locked_outputs=("next_coin",),
+                    create_fields={"next_coin": ("amount", "nonce")},
+                ),
+                origin="matrix:lifecycle/proof/control-flow",
+            ),
+            AuditCase(
+                name="matrix-explicit-transfer-let-proof",
+                source=module_source(
+                    "matrix_explicit_transfer_let_proof",
+                    """
+                    action let_keep(coin: Coin, to: Address) -> next_coin: Coin {
+                        verification
+                        consume coin
+
+                        create next_coin = Coin {
+                            amount: coin.amount,
+                            nonce: coin.nonce
+                        } with_lock(to)
+
+                        let same_amount = next_coin.amount == coin.amount
+                        require same_amount
+                        require next_coin.nonce == coin.nonce
+                    }
+                    """,
+                ),
+                expected=Expected("accept"),
+                oracle=Oracle(
+                    action="let_keep",
+                    consume_bindings=("coin",),
+                    create_bindings=("next_coin",),
+                    locked_outputs=("next_coin",),
+                    create_fields={"next_coin": ("amount", "nonce")},
+                ),
+                origin="matrix:lifecycle/proof/local-binding",
+            ),
+            AuditCase(
+                name="matrix-stdlib-transfer-require-block",
+                source=module_source(
+                    "matrix_stdlib_transfer_require_block",
+                    """
+                    action transfer_with_block(coin: Coin, to: Address) -> next_coin: Coin {
+                        verification
+                        std::lifecycle::transfer(coin, next_coin, to) {
+                            amount
+                            nonce
+                        }
+
+                        require {
+                            next_coin.amount == coin.amount
+                            next_coin.nonce == coin.nonce
+                        }
+                    }
+                    """,
+                ),
+                expected=Expected("accept"),
+                oracle=Oracle(
+                    action="transfer_with_block",
+                    consume_bindings=("coin",),
+                    create_bindings=("next_coin",),
+                    locked_outputs=("next_coin",),
+                    create_fields={"next_coin": ("amount", "nonce")},
+                    obligation_contains=("create-output-lock", "consume-input:Coin:coin"),
+                ),
+                origin="matrix:stdlib-lifecycle/proof",
+            ),
+            AuditCase(
+                name="matrix-stdlib-transfer-lock-capacity",
+                source=module_source(
+                    "matrix_stdlib_transfer_lock_capacity",
+                    """
+                    action transfer_with_metadata(coin: Coin, to: Address) -> next_coin: Coin {
+                        verification
+                        std::lifecycle::transfer(coin, next_coin, to) {
+                            amount
+                            nonce
+                        }
+                        std::cell::preserve_lock(next_coin, coin)
+                        std::cell::preserve_capacity(next_coin, coin)
+                    }
+                    """,
+                ),
+                expected=Expected("accept"),
+                oracle=Oracle(
+                    action="transfer_with_metadata",
+                    consume_bindings=("coin",),
+                    create_bindings=("next_coin",),
+                    locked_outputs=("next_coin",),
+                    create_fields={"next_coin": ("amount", "nonce")},
+                    obligation_contains=("cell-metadata-equality:lock_hash", "cell-metadata-equality:capacity"),
+                ),
+                origin="matrix:stdlib-lifecycle/metadata",
+            ),
+            AuditCase(
+                name="matrix-stdlib-claim-require-block",
+                source=module_source(
+                    "matrix_stdlib_claim_require_block",
+                    """
+                    action claim_with_block(voucher: Voucher) -> coin: Coin {
+                        verification
+                        std::receipt::claim(voucher, coin, voucher.holder) {
+                            amount
+                            nonce
+                        }
+
+                        require {
+                            coin.amount == voucher.amount
+                            coin.nonce == voucher.nonce
+                        }
+                    }
+                    """,
+                ),
+                expected=Expected("accept"),
+                oracle=Oracle(
+                    action="claim_with_block",
+                    consume_bindings=("voucher",),
+                    create_bindings=("coin",),
+                    locked_outputs=("coin",),
+                    create_fields={"coin": ("amount", "nonce")},
+                ),
+                origin="matrix:receipt/proof",
+            ),
+            AuditCase(
+                name="matrix-stdlib-settle-preserve-capacity",
+                source=module_source(
+                    "matrix_stdlib_settle_preserve_capacity",
+                    """
+                    action settle_with_capacity(voucher: Voucher) -> coin: Coin {
+                        verification
+                        std::lifecycle::settle(voucher, coin, voucher.holder) {
+                            amount
+                            nonce
+                        }
+                        std::cell::preserve_capacity(coin, voucher)
+                    }
+                    """,
+                ),
+                expected=Expected("accept"),
+                oracle=Oracle(
+                    action="settle_with_capacity",
+                    consume_bindings=("voucher",),
+                    create_bindings=("coin",),
+                    locked_outputs=("coin",),
+                    create_fields={"coin": ("amount", "nonce")},
+                    obligation_contains=("cell-metadata-equality:capacity",),
+                ),
+                origin="matrix:receipt/metadata",
+            ),
+            AuditCase(
+                name="matrix-lock-protected-only",
+                source=module_source(
+                    "matrix_lock_protected_only",
+                    """
+                    lock protected_wallet(protected wallet: Wallet) -> bool {
+                        verification
+                        require wallet.owner == wallet.owner
+                    }
+                    """,
+                ),
+                expected=Expected("accept"),
+                origin="matrix:lock/source-qualifier",
+            ),
+            AuditCase(
+                name="matrix-lock-witness-only",
+                source=module_source(
+                    "matrix_lock_witness_only",
+                    """
+                    lock witness_owner(witness owner: Address) -> bool {
+                        verification
+                        require owner == owner
+                    }
+                    """,
+                ),
+                expected=Expected("accept"),
+                origin="matrix:lock/source-qualifier",
+            ),
+            AuditCase(
+                name="matrix-lock-args-only",
+                source=module_source(
+                    "matrix_lock_args_only",
+                    """
+                    lock args_owner(lock_args owner: Address) -> bool {
+                        verification
+                        require owner == owner
+                    }
+                    """,
+                ),
+                expected=Expected("accept"),
+                origin="matrix:lock/source-qualifier",
+            ),
+            AuditCase(
+                name="matrix-reject-require-block-assignment",
+                source=module_source(
+                    "matrix_reject_require_block_assignment",
+                    """
+                    action hidden_mutation(flag: bool) {
+                        verification
+                        let mut ok = flag
+                        require {
+                            ok = false
+                        }
+                    }
+                    """,
+                ),
+                expected=Expected("reject_compile", ("require block", "assignment")),
+                origin="matrix:reject/proof-purity",
+            ),
+            AuditCase(
+                name="matrix-reject-claim-non-receipt",
+                source=module_source(
+                    "matrix_reject_claim_non_receipt",
+                    """
+                    action bad_claim(coin: Coin, to: Address) -> next_coin: Coin {
+                        verification
+                        std::receipt::claim(coin, next_coin, to) {
+                            amount
+                            nonce
+                        }
+                    }
+                    """,
+                ),
+                expected=Expected("reject_compile", ("claim requires a receipt",)),
+                origin="matrix:reject/stdlib-lifecycle",
+            ),
+            AuditCase(
+                name="matrix-reject-claim-extra-args",
+                source=module_source(
+                    "matrix_reject_claim_extra_args",
+                    """
+                    action bad_claim(voucher: Voucher) -> coin: Coin {
+                        verification
+                        std::receipt::claim(voucher, coin, voucher.holder, voucher.holder) {
+                            amount
+                            nonce
+                        }
+                    }
+                    """,
+                ),
+                expected=Expected("reject_compile", ("claim expects 3 arguments",)),
+                origin="matrix:reject/stdlib-lifecycle",
+            ),
+            AuditCase(
+                name="matrix-reject-transfer-extra-args",
+                source=module_source(
+                    "matrix_reject_transfer_extra_args",
+                    """
+                    action bad_transfer(coin: Coin, to: Address) -> next_coin: Coin {
+                        verification
+                        std::lifecycle::transfer(coin, next_coin, to, to) {
+                            amount
+                            nonce
+                        }
+                    }
+                    """,
+                ),
+                expected=Expected("reject_compile", ("transfer expects 3 arguments",)),
+                origin="matrix:reject/stdlib-lifecycle",
+            ),
+            AuditCase(
+                name="matrix-reject-settle-missing-args",
+                source=module_source(
+                    "matrix_reject_settle_missing_args",
+                    """
+                    action bad_settle(voucher: Voucher) -> coin: Coin {
+                        verification
+                        std::lifecycle::settle(voucher, coin) {
+                            amount
+                            nonce
+                        }
+                    }
+                    """,
+                ),
+                expected=Expected("reject_compile", ("settle expects 3 arguments",)),
+                origin="matrix:reject/stdlib-lifecycle",
+            ),
+            AuditCase(
+                name="matrix-reject-claim-output-type-mismatch",
+                source=module_source(
+                    "matrix_reject_claim_output_type_mismatch",
+                    """
+                    resource Badge has store, create, consume, replace, burn, relock {
+                        amount: u64,
+                        nonce: u64,
+                    }
+
+                    action bad_claim_output(voucher: Voucher, to: Address) -> badge: Badge {
+                        verification
+                        std::receipt::claim(voucher, badge, to) {
+                            amount
+                            nonce
+                        }
+                    }
+                    """,
+                ),
+                expected=Expected("reject_compile", ("claim output type mismatch",)),
+                origin="matrix:reject/stdlib-lifecycle",
+            ),
+            AuditCase(
+                name="matrix-reject-settle-lock-target-type",
+                source=module_source(
+                    "matrix_reject_settle_lock_target_type",
+                    """
+                    action bad_settle_lock(voucher: Voucher) -> coin: Coin {
+                        verification
+                        std::lifecycle::settle(voucher, coin, voucher.amount) {
+                            amount
+                            nonce
+                        }
+                    }
+                    """,
+                ),
+                expected=Expected("reject_compile", ("settle lock target must be Address or Hash",)),
+                origin="matrix:reject/stdlib-lifecycle",
+            ),
+            AuditCase(
+                name="matrix-reject-cell-metadata-non-cell",
+                source=module_source(
+                    "matrix_reject_cell_metadata_non_cell",
+                    """
+                    action bad_metadata(amount: u64) -> out: Coin {
+                        verification
+                        std::cell::preserve_capacity(out, amount)
+                    }
+                    """,
+                ),
+                expected=Expected("reject_compile", ("preserve_capacity input must be a cell-backed value",)),
+                origin="matrix:reject/metadata",
+            ),
+        ]
+    )
+
+    if include_deep:
+        cases.extend(
+            [
+                AuditCase(
+                    name="matrix-deep-reject-transfer-read-param",
+                    source=module_source(
+                        "matrix_deep_reject_transfer_read_param",
+                        """
+                        action bad_transfer(read coin: Coin, to: Address) -> next_coin: Coin {
+                            verification
+                            std::lifecycle::transfer(coin, next_coin, to) {
+                                amount
+                                nonce
+                            }
+                        }
+                        """,
+                    ),
+                    expected=Expected("reject_compile", ("cell-backed linear",)),
+                    origin="matrix:deep/reject/source-qualifier",
+                ),
+                AuditCase(
+                    name="matrix-deep-reject-require-block-transfer",
+                    source=module_source(
+                        "matrix_deep_reject_require_block_transfer",
+                        """
+                        action hidden_transfer(coin: Coin, to: Address) -> next_coin: Coin {
+                            verification
+                            require {
+                                std::lifecycle::transfer(coin, next_coin, to) {
+                                    amount
+                                    nonce
+                                }
+                            }
+                        }
+                        """,
+                    ),
+                    expected=Expected("reject_compile", ("require block", "verifier-boundary syntax")),
+                    origin="matrix:deep/reject/proof-purity",
+                ),
+                AuditCase(
+                    name="matrix-deep-reject-unknown-accounting",
+                    source=module_source(
+                        "matrix_deep_reject_unknown_accounting",
+                        """
+                        action bad_accounting(coin_before: Coin) -> coin_after: Coin {
+                            verification
+                            std::accounting::minted(coin_after, coin_before)
+                        }
+                        """,
+                    ),
+                    expected=Expected("reject_compile", ("unknown stdlib pattern",)),
+                    origin="matrix:deep/reject/stdlib-namespace",
+                ),
+            ]
+        )
+
+    return cases
+
+
+def generated_cases() -> list[AuditCase]:
+    cases: list[AuditCase] = [
+        AuditCase(
+            name="explicit-transfer",
+            source=module_source(
+                "explicit_transfer",
+                """
+                action transfer_coin(coin: Coin, to: Address) -> next_coin: Coin {
+                    verification
+                    consume coin
+
+                    create next_coin = Coin {
+                        amount: coin.amount,
+                        nonce: coin.nonce
+                    } with_lock(to)
+                }
+                """,
+            ),
+            expected=Expected("accept"),
+            oracle=Oracle(
+                action="transfer_coin",
+                consume_bindings=("coin",),
+                create_bindings=("next_coin",),
+                locked_outputs=("next_coin",),
+                create_fields={"next_coin": ("amount", "nonce")},
+                obligation_contains=("create-output-lock",),
+            ),
+        ),
+        AuditCase(
+            name="pure-require-block",
+            source=module_source(
+                "pure_require_block",
+                """
+                action keep_fields(coin: Coin, to: Address) -> next_coin: Coin {
+                    verification
+                    consume coin
+
+                    create next_coin = Coin {
+                        amount: coin.amount,
+                        nonce: coin.nonce
+                    } with_lock(to)
+
+                    require {
+                        next_coin.amount == coin.amount
+                        next_coin.nonce == coin.nonce
+                    }
+                }
+                """,
+            ),
+            expected=Expected("accept"),
+            oracle=Oracle(
+                action="keep_fields",
+                consume_bindings=("coin",),
+                create_bindings=("next_coin",),
+                locked_outputs=("next_coin",),
+                create_fields={"next_coin": ("amount", "nonce")},
+            ),
+        ),
+        AuditCase(
+            name="preserve-sugar",
+            source=module_source(
+                "preserve_sugar",
+                """
+                action preserve_fields(coin: Coin, to: Address) -> next_coin: Coin {
+                    verification
+                    consume coin
+
+                    create next_coin = Coin {
+                        amount: coin.amount,
+                        nonce: coin.nonce
+                    } with_lock(to)
+
+                    preserve next_coin from coin {
+                        amount
+                        nonce
+                    }
+                }
+                """,
+            ),
+            expected=Expected("accept"),
+            oracle=Oracle(
+                action="preserve_fields",
+                consume_bindings=("coin",),
+                create_bindings=("next_coin",),
+                locked_outputs=("next_coin",),
+                create_fields={"next_coin": ("amount", "nonce")},
+            ),
+        ),
+        AuditCase(
+            name="stdlib-transfer",
+            source=module_source(
+                "stdlib_transfer",
+                """
+                action transfer_coin(coin: Coin, to: Address) -> next_coin: Coin {
+                    verification
+                    std::lifecycle::transfer(coin, next_coin, to) {
+                        amount
+                        nonce
+                    }
+                }
+                """,
+            ),
+            expected=Expected("accept"),
+            oracle=Oracle(
+                action="transfer_coin",
+                consume_bindings=("coin",),
+                create_bindings=("next_coin",),
+                locked_outputs=("next_coin",),
+                create_fields={"next_coin": ("amount", "nonce")},
+                obligation_contains=("create-output-lock", "consume-input:Coin:coin"),
+            ),
+        ),
+        AuditCase(
+            name="stdlib-claim",
+            source=module_source(
+                "stdlib_claim",
+                """
+                action claim_voucher(voucher: Voucher) -> coin: Coin {
+                    verification
+                    std::receipt::claim(voucher, coin, voucher.holder) {
+                        amount
+                        nonce
+                    }
+                }
+                """,
+            ),
+            expected=Expected("accept"),
+            oracle=Oracle(
+                action="claim_voucher",
+                consume_bindings=("voucher",),
+                create_bindings=("coin",),
+                locked_outputs=("coin",),
+                create_fields={"coin": ("amount", "nonce")},
+            ),
+        ),
+        AuditCase(
+            name="stdlib-settle",
+            source=module_source(
+                "stdlib_settle",
+                """
+                action settle_voucher(voucher: Voucher) -> coin: Coin {
+                    verification
+                    std::lifecycle::settle(voucher, coin, voucher.holder) {
+                        amount
+                        nonce
+                    }
+                }
+                """,
+            ),
+            expected=Expected("accept"),
+            oracle=Oracle(
+                action="settle_voucher",
+                consume_bindings=("voucher",),
+                create_bindings=("coin",),
+                locked_outputs=("coin",),
+                create_fields={"coin": ("amount", "nonce")},
+            ),
+        ),
+        AuditCase(
+            name="cell-metadata-helpers",
+            source=module_source(
+                "cell_metadata_helpers",
+                """
+                action preserve_boundary(coin_before: Coin) -> coin_after: Coin {
+                    verification
+                    std::cell::preserve_type(coin_after, coin_before)
+                    std::cell::preserve_lock(coin_after, coin_before)
+                    std::cell::preserve_capacity(coin_after, coin_before)
+                    std::accounting::conserved(coin_after, coin_before)
+                }
+                """,
+            ),
+            expected=Expected("accept"),
+            oracle=Oracle(
+                action="preserve_boundary",
+                obligation_contains=(
+                    "cell-metadata-equality:lock_hash",
+                    "cell-metadata-equality:capacity",
+                ),
+            ),
+        ),
+        AuditCase(
+            name="lock-source-qualifiers",
+            source=module_source(
+                "lock_source_qualifiers",
+                """
+                lock owner_only(
+                    protected wallet: Wallet,
+                    lock_args owner: Address,
+                    witness claimed_owner: Address
+                ) -> bool {
+                    verification
+                    require wallet.owner == owner
+                    require claimed_owner == owner
+                }
+                """,
+            ),
+            expected=Expected("accept"),
+        ),
+        AuditCase(
+            name="if-tuple-projection",
+            source=module_source(
+                "if_tuple_projection",
+                """
+                action choose(flag: bool) -> u64 {
+                    verification
+                    let pair = if flag { (1, 2) } else { (3, 4) }
+                    return pair.0
+                }
+                """,
+            ),
+            expected=Expected("accept"),
+            origin="matrix:edge/tuple-projection",
+        ),
+        AuditCase(
+            name="match-tuple-projection",
+            source=module_source(
+                "match_tuple_projection",
+                """
+                enum Flag {
+                    Off,
+                    On,
+                }
+
+                action choose(flag: Flag) -> u64 {
+                    verification
+                    let pair = match flag {
+                        Flag::Off => { (1, 2) },
+                        _ => { (3, 4) },
+                    }
+                    return pair.1
+                }
+                """,
+            ),
+            expected=Expected("accept"),
+            origin="matrix:edge/tuple-projection",
+        ),
+        AuditCase(
+            name="byte-string-fixed-length",
+            source=module_source(
+                "byte_string_fixed_length",
+                """
+                action symbol() -> [u8; 4] {
+                    verification
+                    return b"TEST"
+                }
+                """,
+            ),
+            expected=Expected("accept"),
+            origin="matrix:edge/bytestring-length",
+        ),
+        AuditCase(
+            name="reject-require-block-lifecycle",
+            source=module_source(
+                "reject_require_block_lifecycle",
+                """
+                action bad(voucher: Voucher) -> coin: Coin {
+                    verification
+                    require {
+                        std::receipt::claim(voucher, coin, voucher.holder) {
+                            amount
+                            nonce
+                        }
+                    }
+                }
+                """,
+            ),
+            expected=Expected("reject_compile", ("require block", "verifier-boundary syntax")),
+        ),
+        AuditCase(
+            name="reject-wildcard-match-non-last",
+            source=module_source(
+                "reject_wildcard_match_non_last",
+                """
+                enum Flag {
+                    Off,
+                    On,
+                }
+
+                action bad(flag: Flag) -> u64 {
+                    verification
+                    return match flag {
+                        _ => { 1 },
+                        Flag::Off => { 2 },
+                    }
+                }
+                """,
+            ),
+            expected=Expected("reject_compile", ("wildcard pattern '_'", "last match arm")),
+            origin="matrix:edge/wildcard-match-order",
+        ),
+        AuditCase(
+            name="reject-byte-string-length-mismatch",
+            source=module_source(
+                "reject_byte_string_length_mismatch",
+                """
+                action bad() -> [u8; 3] {
+                    verification
+                    return b"TEST"
+                }
+                """,
+            ),
+            expected=Expected("reject_compile", ("type mismatch",)),
+            origin="matrix:edge/bytestring-length",
+        ),
+        AuditCase(
+            name="reject-preserve-type-mismatch",
+            source="""\
+module cellscript::audit::reject_preserve_type_mismatch
+
+resource Coin has store, create, consume, replace, burn, relock {
+    amount: u64,
+}
+
+resource BadCoin has store, create, consume, replace, burn, relock {
+    amount: bool,
+}
+
+action bad(coin: Coin) -> bad_coin: BadCoin {
+    verification
+    preserve bad_coin from coin {
+        amount
+    }
+}
+""",
+            expected=Expected("reject_compile", ("type mismatch",)),
+        ),
+        AuditCase(
+            name="reject-transfer-missing-field",
+            source=module_source(
+                "reject_transfer_missing_field",
+                """
+                action bad(coin: Coin, to: Address) -> next_coin: Coin {
+                    verification
+                    std::lifecycle::transfer(coin, next_coin, to) {
+                        amount
+                    }
+                }
+                """,
+            ),
+            expected=Expected("reject_compile", ("missing nonce",)),
+        ),
+        AuditCase(
+            name="reject-consume-read-param",
+            source=module_source(
+                "reject_consume_read_param",
+                """
+                action bad(read coin: Coin) {
+                    verification
+                    consume coin
+                }
+                """,
+            ),
+            expected=Expected("reject_compile", ("cell-backed linear",)),
+        ),
+        AuditCase(
+            name="reject-unknown-stdlib",
+            source=module_source(
+                "reject_unknown_stdlib",
+                """
+                action bad(coin_before: Coin) -> coin_after: Coin {
+                    verification
+                    std::cell::teleport(coin_after, coin_before)
+                }
+                """,
+            ),
+            expected=Expected("reject_compile", ("unknown stdlib pattern",)),
+        ),
+        AuditCase(
+            name="reject-claim-without-output-arrow",
+            source="""\
+module cellscript::audit::reject_claim_without_output_arrow
+
+resource Coin has store, create, consume, replace, burn, relock {
+    amount: u64,
+    nonce: u64,
+}
+
+receipt Voucher has create, consume, burn {
+    amount: u64,
+    nonce: u64,
+    holder: Address,
+}
+
+action bad(voucher: Voucher) -> coin: Coin {
+    verification
+    std::receipt::claim(voucher, coin, voucher.holder) {
+        amount
+        nonce
+    }
+}
+""",
+                expected=Expected("reject_compile", ("declare a claim output type",)),
+        ),
+        AuditCase(
+            name="reject-flow-undeclared-edge",
+            source="""\
+module cellscript::audit::reject_flow_undeclared_edge
+
+resource Offer has store {
+    state: u8
+    amount: u64
+}
+
+flow Offer.state {
+    Live -> Filled;
+    Filled -> Cancelled;
+    Cancelled -> Filled;
+}
+
+action cancel(input: Offer) -> output: Offer {
+    transition input.state: Live -> output.state: Cancelled
+    verification
+        require input.amount == output.amount
+}
+""",
+            expected=Expected("reject_compile", ("is not declared in the flow",)),
+        ),
+        AuditCase(
+            name="accept-flow-declared-cyclic-edge",
+            source="""\
+module cellscript::audit::accept_flow_declared_cyclic_edge
+
+resource Pool has store {
+    state: u8
+    reserve: u64
+}
+
+flow Pool.state {
+    Open -> Closed;
+    Closed -> Open;
+}
+
+action close(pool_before: Pool) -> pool_after: Pool {
+    transition pool_before.state: Open -> pool_after.state: Closed
+    verification
+        require pool_after.reserve == pool_before.reserve
+}
+
+action reopen(pool_before: Pool) -> pool_after: Pool {
+    transition pool_before.state: Closed -> pool_after.state: Open
+    verification
+        require pool_after.reserve == pool_before.reserve
+}
+""",
+            expected=Expected("accept"),
+        ),
+        AuditCase(
+            name="reject-flow-create-missing-state",
+            source="""\
+module cellscript::audit::reject_flow_create_missing_state
+
+resource Offer has store, create {
+    state: u8
+    amount: u64
+}
+
+flow Offer.state {
+    Live -> Filled;
+}
+
+action seed(recipient: Address) -> output: Offer {
+    verification
+        create output = Offer { amount: 0 } with_lock(recipient)
+}
+""",
+            expected=Expected("reject_compile", ("must set its state field",)),
+        ),
+        AuditCase(
+            name="reject-flow-create-non-static-initial",
+            source="""\
+module cellscript::audit::reject_flow_create_non_static_initial
+
+resource Offer has store, create {
+    state: u8
+    amount: u64
+}
+
+flow Offer.state {
+    Live -> Filled;
+}
+
+action seed(dynamic_state: u8, recipient: Address) -> output: Offer {
+    verification
+        create output = Offer { state: dynamic_state, amount: 0 } with_lock(recipient)
+}
+""",
+            expected=Expected("reject_compile", ("must use a statically known declared state",)),
+        ),
+        AuditCase(
+            name="accept-invariant-xudt-conserved",
+            source="""\
+module cellscript::audit::accept_invariant_xudt_conserved
+
+resource Token has store, create, consume {
+    amount: u128,
+}
+
+invariant xudt_group_transfer_conservation {
+    trigger: type_group
+    scope: group
+    reads: group_inputs<Token>.amount, group_outputs<Token>.amount
+    assert_sum(group_outputs<Token>.amount) == assert_sum(group_inputs<Token>.amount)
+}
+
+action transfer(input: Token) -> output: Token {
+    verification
+        xudt::require_group_amount_conserved()
+        preserve output from input {
+            amount
+        }
+}
+""",
+            expected=Expected("accept"),
+        ),
+    ]
+    return cases
+
+
+def seeded_deep_cases(seed: int) -> list[AuditCase]:
+    rng = random.Random(seed)
+    suffix = f"{seed & 0xffff_ffff:x}"
+    field_order = ["amount", "nonce"]
+    rng.shuffle(field_order)
+    transfer_fields = "\n".join(f"                        {field}" for field in field_order)
+    helper = rng.choice(
+        [
+            "std::cell::preserve_type",
+            "std::cell::same_lock",
+            "std::cell::preserve_lock",
+            "std::cell::preserve_capacity",
+        ]
+    )
+    reject = rng.choice(
+        [
+            (
+                "require_block_lifecycle",
+                """
+                action seeded_reject_lifecycle_{suffix}(coin: Coin, to: Address) -> next_coin: Coin {
+                    verification
+                    require {
+                        std::lifecycle::transfer(coin, next_coin, to) {
+                            amount
+                            nonce
+                        }
+                    }
+                }
+                """,
+                ("require block", "verifier-boundary syntax"),
+            ),
+            (
+                "unknown_stdlib",
+                """
+                action seeded_reject_unknown_{suffix}(coin_before: Coin) -> coin_after: Coin {
+                    verification
+                    std::cell::teleport(coin_after, coin_before)
+                }
+                """,
+                ("unknown stdlib pattern",),
+            ),
+            (
+                "transfer_missing_field",
+                """
+                action seeded_reject_missing_{suffix}(coin: Coin, to: Address) -> next_coin: Coin {
+                    verification
+                    std::lifecycle::transfer(coin, next_coin, to) {
+                        amount
+                    }
+                }
+                """,
+                ("missing nonce",),
+            ),
+        ]
+    )
+    reject_name, reject_body, reject_tokens = reject
+    return [
+        AuditCase(
+            name=f"seeded-deep-transfer-{suffix}",
+            source=module_source(
+                f"seeded_deep_transfer_{suffix}",
+                f"""
+                action seeded_transfer_{suffix}(coin: Coin, to: Address) -> next_coin: Coin {{
+                    verification
+                    std::lifecycle::transfer(coin, next_coin, to) {{
+{transfer_fields}
+                    }}
+                }}
+                """,
+            ),
+            expected=Expected("accept"),
+            oracle=Oracle(
+                action=f"seeded_transfer_{suffix}",
+                consume_bindings=("coin",),
+                create_bindings=("next_coin",),
+                locked_outputs=("next_coin",),
+                create_fields={"next_coin": tuple(field_order)},
+                obligation_contains=("create-output-lock", "consume-input:Coin:coin"),
+            ),
+            origin="seeded:deep/stdlib-lifecycle",
+        ),
+        AuditCase(
+            name=f"seeded-deep-cell-helper-{suffix}",
+            source=module_source(
+                f"seeded_deep_cell_helper_{suffix}",
+                f"""
+                action seeded_helper_{suffix}(coin_before: Coin) -> coin_after: Coin {{
+                    verification
+                    {helper}(coin_after, coin_before)
+                }}
+                """,
+            ),
+            expected=Expected("accept"),
+            oracle=Oracle(action=f"seeded_helper_{suffix}"),
+            origin="seeded:deep/cell-helper",
+        ),
+        AuditCase(
+            name=f"seeded-deep-reject-{reject_name}-{suffix}",
+            source=module_source(
+                f"seeded_deep_reject_{reject_name}_{suffix}",
+                reject_body.replace("{suffix}", suffix),
+            ),
+            expected=Expected("reject_compile", reject_tokens),
+            origin="seeded:deep/reject",
+        ),
+    ]
+
+
+def parse_seed(path: Path) -> AuditCase:
+    text = path.read_text(encoding="utf-8")
+    phase = "accept"
+    contains: list[str] = []
+    validity_type: str | None = None
+    validity_tiers: list[str] = []
+    borrow_scope: str | None = None
+    borrow_view_type: str | None = None
+    capability_operation: str | None = None
+    capability_type: str | None = None
+    payload_enum: str | None = None
+    protocol_role_action: str | None = None
+    protocol_role: str | None = None
+    protocol_role_source: str | None = None
+    protocol_role_conflict: bool | None = None
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("// audit:"):
+            continue
+        payload = stripped.removeprefix("// audit:").strip()
+        if "=" not in payload:
+            continue
+        key, value = [part.strip() for part in payload.split("=", 1)]
+        if key == "phase":
+            phase = value
+        elif key == "contains":
+            contains.append(value)
+        elif key == "validity_type":
+            validity_type = value
+        elif key == "validity_tier":
+            validity_tiers.append(value)
+        elif key == "borrow_scope":
+            borrow_scope = value
+        elif key == "borrow_view_type":
+            borrow_view_type = value
+        elif key == "capability_operation":
+            capability_operation = value
+        elif key == "capability_type":
+            capability_type = value
+        elif key == "payload_enum":
+            payload_enum = value
+        elif key == "protocol_role_action":
+            protocol_role_action = value
+        elif key == "protocol_role":
+            protocol_role = value
+        elif key == "protocol_role_source":
+            protocol_role_source = value
+        elif key == "protocol_role_conflict":
+            protocol_role_conflict = value.lower() == "true"
+    return AuditCase(
+        name=f"seed-{path.stem}",
+        source=text,
+        expected=Expected(phase, tuple(contains)),
+        oracle=Oracle(
+            validity_type=validity_type,
+            validity_tiers=tuple(validity_tiers),
+            borrow_scope=borrow_scope,
+            borrow_view_type=borrow_view_type,
+            capability_operation=capability_operation,
+            capability_type=capability_type,
+            payload_enum=payload_enum,
+            protocol_role_action=protocol_role_action,
+            protocol_role=protocol_role,
+            protocol_role_source=protocol_role_source,
+            protocol_role_conflict=protocol_role_conflict,
+        ),
+        origin=str(path.relative_to(ROOT)),
+    )
+
+
+def load_cases(mode: str, budget: int | None, seed: int) -> list[AuditCase]:
+    include_matrix = mode in {"ci", "deep", "repro"}
+    include_deep = mode in {"deep", "repro"}
+    cases = generated_cases()
+    if include_matrix:
+        cases.extend(matrix_cases(include_deep=include_deep))
+    if include_deep:
+        cases.extend(seeded_deep_cases(seed))
+
+    seed_cases: list[AuditCase] = []
+    if SEEDS.exists():
+        seed_cases = [parse_seed(path) for path in sorted(SEEDS.glob("*.cell")) if path.is_file()]
+
+    if mode == "quick":
+        default_budget = read_matrix().get("mode", {}).get("quick", {}).get("budget", len(cases))
+    elif mode == "ci":
+        default_budget = read_matrix().get("mode", {}).get("ci", {}).get("budget", len(cases))
+    else:
+        default_budget = read_matrix().get("mode", {}).get("deep", {}).get("budget", len(cases))
+    limit = budget or default_budget or len(cases)
+    selected = cases[: min(limit, len(cases))]
+
+    # Regression seeds are never dropped by a small generation budget.
+    existing = {case.name for case in selected}
+    for seed_case in seed_cases:
+        if seed_case.name not in existing:
+            selected.append(seed_case)
+            existing.add(seed_case.name)
+    return selected
+
+
+def contract_failure(code: str, summary: str) -> dict[str, Any]:
+    return {
+        "case": "-",
+        "name": "mode-contract",
+        "origin": str(MATRIX.relative_to(ROOT)),
+        "phase": "contract",
+        "code": code,
+        "summary": summary,
+        "shrunk": "",
+        "output": "",
+    }
+
+
+def required_for_mode(contract: dict[str, Any], mode: str) -> bool:
+    min_mode = str(contract.get("min_mode", "quick"))
+    return MODE_RANK.get(mode, 0) >= MODE_RANK.get(min_mode, 0)
+
+
+def evaluate_bug_class_coverage(mode: str, cases: list[AuditCase]) -> list[dict[str, Any]]:
+    case_names = {case.name for case in cases}
+    origins = {case.origin for case in cases}
+    coverage: list[dict[str, Any]] = []
+    for contract in BUG_CLASS_CONTRACTS:
+        required = required_for_mode(contract, mode)
+        required_cases = tuple(contract.get("required_cases", ()))
+        required_origins = tuple(contract.get("required_origins", ()))
+        missing_cases = [name for name in required_cases if name not in case_names]
+        missing_origins = [origin for origin in required_origins if origin not in origins]
+        status = "covered" if not missing_cases and not missing_origins else "missing"
+        coverage.append(
+            {
+                "id": contract["id"],
+                "name": contract["name"],
+                "status": status if required else "not_required_for_mode",
+                "required": required,
+                "min_mode": contract.get("min_mode", "quick"),
+                "required_cases": list(required_cases),
+                "required_origins": list(required_origins),
+                "missing_cases": missing_cases if required else [],
+                "missing_origins": missing_origins if required else [],
+                "release_boundary": contract["release_boundary"],
+            }
+        )
+    return coverage
+
+
+def governance_oracles() -> dict[str, bool]:
+    configured = read_matrix().get("required_oracles", {})
+    return {
+        "parser": bool(configured.get("parse")),
+        "formatter_roundtrip": bool(configured.get("formatter_roundtrip")),
+        "type_effect": bool(configured.get("type_effect")),
+        "ir_metadata": bool(configured.get("ir_metadata")),
+        "codegen_assembly": bool(configured.get("codegen_assembly")),
+        "compact_report": bool(configured.get("compact_report")),
+    }
+
+
+def validate_mode_contract(mode: str, report: dict[str, Any]) -> list[dict[str, Any]]:
+    if mode == "repro":
+        return []
+    config = read_matrix().get("mode", {}).get(mode, {})
+    failures: list[dict[str, Any]] = []
+    numeric_contracts = [
+        ("min_cases", "generated", "SCA-CONTRACT-CASES"),
+        ("min_accept", "accepted", "SCA-CONTRACT-ACCEPT"),
+        ("min_reject", "rejected", "SCA-CONTRACT-REJECT"),
+    ]
+    for config_key, report_key, code in numeric_contracts:
+        expected = config.get(config_key)
+        if expected is None:
+            continue
+        actual = report.get(report_key, 0)
+        if actual < expected:
+            failures.append(contract_failure(code, f"{mode} {report_key} floor {expected} not met; got {actual}"))
+
+    origins = report.get("origins", {})
+    missing_origins = [origin for origin in config.get("required_origins", []) if origin not in origins]
+    if missing_origins:
+        failures.append(contract_failure("SCA-CONTRACT-ORIGIN", f"{mode} missing required origins: {', '.join(missing_origins)}"))
+    missing_bug_classes = [
+        item
+        for item in report.get("known_bug_classes", [])
+        if item.get("required") and item.get("status") != "covered"
+    ]
+    for item in missing_bug_classes:
+        details: list[str] = []
+        if item.get("missing_cases"):
+            details.append("missing cases: " + ", ".join(item["missing_cases"]))
+        if item.get("missing_origins"):
+            details.append("missing origins: " + ", ".join(item["missing_origins"]))
+        failures.append(contract_failure(item["id"], f"{mode} bug-class coverage missing for {item['name']}: {'; '.join(details)}"))
+    return failures
+
+
+def failure(
+    case: AuditCase,
+    phase: str,
+    code: str,
+    summary: str,
+    run_dir: Path,
+    output: str = "",
+) -> dict[str, Any]:
+    shrink_dir = run_dir / "shrink"
+    shrink_dir.mkdir(parents=True, exist_ok=True)
+    shrink_path = shrink_dir / f"{case.case_id}.cell"
+    compact_source = "\n".join(
+        line for line in case.source.splitlines() if line.strip() and not line.strip().startswith("//")
+    )
+    shrink_path.write_text(compact_source + "\n", encoding="utf-8")
+    return {
+        "case": case.case_id,
+        "name": case.name,
+        "origin": case.origin,
+        "phase": phase,
+        "code": code,
+        "summary": summary,
+        "shrunk": str(shrink_path.relative_to(run_dir)),
+        "output": compact(output),
+    }
+
+
+def output_matches(text: str, needles: tuple[str, ...]) -> bool:
+    if not needles:
+        return True
+    lowered = text.lower()
+    return all(needle.lower() in lowered for needle in needles)
+
+
+def find_action(metadata: dict[str, Any], name: str) -> dict[str, Any] | None:
+    for action in metadata.get("actions", []):
+        if action.get("name") == name:
+            return action
+    return None
+
+
+def validate_metadata(case: AuditCase, metadata_path: Path, run_dir: Path) -> list[dict[str, Any]]:
+    failures: list[dict[str, Any]] = []
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except Exception as exc:  # noqa: BLE001 - report compact audit failure
+        return [failure(case, "metadata", "SCA-META-JSON", f"metadata JSON decode failed: {exc}", run_dir)]
+
+    required_keys = {"actions", "compiler_version", "constraints", "lowering", "runtime", "target_profile"}
+    missing = sorted(required_keys - set(metadata))
+    if missing:
+        failures.append(failure(case, "metadata", "SCA-META-KEYS", f"metadata missing keys: {', '.join(missing)}", run_dir))
+
+    target_profile = metadata.get("target_profile", {})
+    if target_profile.get("name") != "ckb":
+        failures.append(failure(case, "metadata", "SCA-META-PROFILE", "metadata target_profile.name is not ckb", run_dir))
+
+    oracle = case.oracle
+    if oracle.capability_operation:
+        registry = metadata.get("capability_registry", {})
+        canonical = ["store", "create", "consume", "destroy", "replace", "burn", "relock", "retarget_type", "read_ref"]
+        if registry.get("capability_set_version") != 1 or registry.get("entailment_version") != 1:
+            failures.append(
+                failure(case, "metadata", "SCA-META-CAPABILITY-VERSION", "capability registry versions are not set to v1", run_dir)
+            )
+        if registry.get("capabilities") != canonical:
+            failures.append(
+                failure(case, "metadata", "SCA-META-CAPABILITY-REGISTRY", "capability registry is not canonical", run_dir)
+            )
+        proofs = [
+            proof
+            for proof in metadata.get("runtime", {}).get("capability_proofs", [])
+            if proof.get("operation") == oracle.capability_operation
+            and (oracle.capability_type is None or proof.get("type_name") == oracle.capability_type)
+        ]
+        if not proofs:
+            failures.append(
+                failure(
+                    case,
+                    "metadata",
+                    "SCA-META-CAPABILITY-PROOF",
+                    f"missing capability proof for {oracle.capability_operation}",
+                    run_dir,
+                )
+            )
+        else:
+            proof = proofs[0]
+            required_fields = {"required", "provided", "entailed", "missing", "capability_set_version", "entailment_version"}
+            if not required_fields.issubset(proof) or proof.get("missing") != []:
+                failures.append(
+                    failure(
+                        case,
+                        "metadata",
+                        "SCA-META-CAPABILITY-EVIDENCE",
+                        "capability proof is missing required/provided/entailed/missing/version evidence",
+                        run_dir,
+                    )
+                )
+    if oracle.payload_enum:
+        layouts = [layout for layout in metadata.get("enum_layouts", []) if layout.get("name") == oracle.payload_enum]
+        if not layouts:
+            failures.append(
+                failure(case, "metadata", "SCA-META-PAYLOAD-ENUM", f"missing payload enum layout for {oracle.payload_enum}", run_dir)
+            )
+        else:
+            layout = layouts[0]
+            variants = layout.get("variants", [])
+            payload_fields = [field for variant in variants for field in variant.get("fields", [])]
+            if (
+                layout.get("generic") is not False
+                or layout.get("layout") != "packed-tagged-union-v1"
+                or layout.get("tag_width_bytes") != 1
+                or layout.get("encoded_size_bytes", 0) <= 1
+                or not payload_fields
+            ):
+                failures.append(
+                    failure(
+                        case,
+                        "metadata",
+                        "SCA-META-PAYLOAD-ENUM-LAYOUT",
+                        "payload enum metadata is missing its concrete fixed-width tagged-union contract",
+                        run_dir,
+                    )
+                )
+    if oracle.protocol_role_action:
+        action = find_action(metadata, oracle.protocol_role_action)
+        if action is None:
+            failures.append(
+                failure(
+                    case,
+                    "metadata",
+                    "SCA-META-PROTOCOL-ROLE-ACTION",
+                    f"missing ProtocolGraph role action {oracle.protocol_role_action}",
+                    run_dir,
+                )
+            )
+        else:
+            candidates = action.get("protocol_role_candidates", [])
+            if not candidates:
+                failures.append(
+                    failure(case, "metadata", "SCA-META-PROTOCOL-ROLE", "missing attributed role candidates", run_dir)
+                )
+            else:
+                selected = candidates[0]
+                if selected.get("role") != oracle.protocol_role or selected.get("source") != oracle.protocol_role_source:
+                    failures.append(
+                        failure(
+                            case,
+                            "metadata",
+                            "SCA-META-PROTOCOL-ROLE-PRECEDENCE",
+                            f"selected role/source {selected.get('role')!r}@{selected.get('source')!r} does not match {oracle.protocol_role!r}@{oracle.protocol_role_source!r}",
+                            run_dir,
+                        )
+                    )
+                if any(
+                    candidate.get("evidence_tier") != "metadata-only" or candidate.get("authorization_proven") is not False
+                    for candidate in candidates
+                ):
+                    failures.append(
+                        failure(
+                            case,
+                            "metadata",
+                            "SCA-META-PROTOCOL-ROLE-OVERCLAIM",
+                            "role candidates must remain metadata-only with authorization_proven=false",
+                            run_dir,
+                        )
+                    )
+                roles = {candidate.get("role") for candidate in candidates}
+                actual_conflict = len(roles) > 1
+                if oracle.protocol_role_conflict is not None and actual_conflict != oracle.protocol_role_conflict:
+                    failures.append(
+                        failure(
+                            case,
+                            "metadata",
+                            "SCA-META-PROTOCOL-ROLE-CONFLICT",
+                            f"role conflict={actual_conflict} does not match expected {oracle.protocol_role_conflict}",
+                            run_dir,
+                        )
+                    )
+                if any(plan.get("category") == "protocol-role" for plan in action.get("proof_plan", [])):
+                    failures.append(
+                        failure(
+                            case,
+                            "metadata",
+                            "SCA-META-PROTOCOL-ROLE-PROOFPLAN",
+                            "ProtocolGraph roles must not appear as ProofPlan authorization evidence",
+                            run_dir,
+                        )
+                    )
+    if oracle.borrow_scope:
+        borrow_regions = [
+            region
+            for region in metadata.get("runtime", {}).get("borrow_regions", [])
+            if region.get("scope_name") == oracle.borrow_scope
+        ]
+        if not borrow_regions:
+            failures.append(
+                failure(case, "metadata", "SCA-META-BORROW-REGION", f"missing borrow metadata for {oracle.borrow_scope}", run_dir)
+            )
+        else:
+            region = borrow_regions[0]
+            expected_view = oracle.borrow_view_type
+            if expected_view and region.get("view_type") != expected_view:
+                failures.append(
+                    failure(
+                        case,
+                        "metadata",
+                        "SCA-META-BORROW-VIEW",
+                        f"borrow view type {region.get('view_type')!r} does not match {expected_view!r}",
+                        run_dir,
+                    )
+                )
+            if region.get("storage") != "none" or region.get("abi") != "none" or region.get("evidence_tier") != "checked-static":
+                failures.append(
+                    failure(
+                        case,
+                        "metadata",
+                        "SCA-META-BORROW-EVIDENCE",
+                        "borrow region must declare storage=none, abi=none, and checked-static evidence",
+                        run_dir,
+                    )
+                )
+            proof_plan = metadata.get("runtime", {}).get("proof_plan", [])
+            borrow_plans = [
+                plan
+                for plan in proof_plan
+                if str(plan.get("origin", "")).startswith(f"action:{oracle.borrow_scope}#borrow-region:")
+            ]
+            if not borrow_plans or borrow_plans[0].get("evidence_tier") != "checked-static":
+                failures.append(
+                    failure(
+                        case,
+                        "metadata",
+                        "SCA-META-BORROW-PROOFPLAN",
+                        "borrow region is missing a checked-static ProofPlan record",
+                        run_dir,
+                    )
+                )
+    if oracle.validity_type:
+        type_metadata = next((item for item in metadata.get("types", []) if item.get("name") == oracle.validity_type), None)
+        if type_metadata is None:
+            failures.append(
+                failure(case, "metadata", "SCA-META-VALIDITY-TYPE", f"missing type metadata for {oracle.validity_type}", run_dir)
+            )
+        else:
+            predicates = type_metadata.get("validity_predicates", [])
+            if not predicates:
+                failures.append(
+                    failure(case, "metadata", "SCA-META-VALIDITY", "validity metadata has no predicate records", run_dir)
+                )
+            canonical_tiers = {
+                "checked-static",
+                "checked-runtime",
+                "runtime-helper-required",
+                "builder-evidence-required",
+                "metadata-only",
+                "chain-evidence-required",
+            }
+            actual_tiers = tuple(predicate.get("evidence_tier") for predicate in predicates)
+            if any(tier not in canonical_tiers for tier in actual_tiers):
+                failures.append(
+                    failure(
+                        case,
+                        "metadata",
+                        "SCA-META-VALIDITY-TIER",
+                        f"validity metadata contains non-canonical evidence tiers: {actual_tiers!r}",
+                        run_dir,
+                    )
+                )
+            for tier in oracle.validity_tiers:
+                if tier not in actual_tiers:
+                    failures.append(
+                        failure(
+                            case,
+                            "metadata",
+                            "SCA-META-VALIDITY-TIER",
+                            f"validity metadata is missing evidence tier {tier!r}",
+                            run_dir,
+                        )
+                    )
+            proof_plan = metadata.get("runtime", {}).get("proof_plan", [])
+            validity_plans = [
+                plan for plan in proof_plan if str(plan.get("origin", "")).startswith(f"validity:{oracle.validity_type}#")
+            ]
+            if len(validity_plans) < len(predicates):
+                failures.append(
+                    failure(
+                        case,
+                        "metadata",
+                        "SCA-META-VALIDITY-PROOFPLAN",
+                        f"validity ProofPlan count {len(validity_plans)} is smaller than predicate count {len(predicates)}",
+                        run_dir,
+                    )
+                )
+    if oracle.action:
+        action = find_action(metadata, oracle.action)
+        if action is None:
+            failures.append(failure(case, "metadata", "SCA-META-ACTION", f"missing action metadata for {oracle.action}", run_dir))
+            return failures
+
+        consume_bindings = tuple(item.get("binding") for item in action.get("consume_set", []))
+        if oracle.consume_bindings and consume_bindings != oracle.consume_bindings:
+            failures.append(
+                failure(
+                    case,
+                    "metadata",
+                    "SCA-META-CONSUME",
+                    f"consume bindings {consume_bindings!r} != {oracle.consume_bindings!r}",
+                    run_dir,
+                )
+            )
+        if len(consume_bindings) != len(set(consume_bindings)):
+            failures.append(failure(case, "metadata", "SCA-META-DUP-CONSUME", "duplicate consume binding", run_dir))
+
+        create_set = action.get("create_set", [])
+        create_by_binding = {item.get("binding"): item for item in create_set}
+        for binding in oracle.create_bindings:
+            if binding not in create_by_binding:
+                failures.append(failure(case, "metadata", "SCA-META-CREATE", f"missing create binding {binding}", run_dir))
+        for binding in oracle.locked_outputs:
+            if not create_by_binding.get(binding, {}).get("has_lock"):
+                failures.append(failure(case, "metadata", "SCA-META-LOCK", f"create binding {binding} is not locked", run_dir))
+        for binding, fields in oracle.create_fields.items():
+            actual = tuple(create_by_binding.get(binding, {}).get("fields", []))
+            if actual != fields:
+                failures.append(
+                    failure(
+                        case,
+                        "metadata",
+                        "SCA-META-FIELDS",
+                        f"create fields for {binding} {actual!r} != {fields!r}",
+                        run_dir,
+                    )
+                )
+
+        obligations_text = json.dumps(action.get("verifier_obligations", []), sort_keys=True)
+        for needle in oracle.obligation_contains:
+            if needle not in obligations_text:
+                failures.append(
+                    failure(
+                        case,
+                        "metadata",
+                        "SCA-META-OBLIGATION",
+                        f"missing obligation containing {needle!r}",
+                        run_dir,
+                    )
+                )
+
+        if action.get("fail_closed_runtime_features"):
+            failures.append(
+                failure(
+                    case,
+                    "metadata",
+                    "SCA-META-FAIL-CLOSED",
+                    "accepted audit case contains fail_closed_runtime_features",
+                    run_dir,
+                )
+            )
+    return failures
+
+
+def audit_case(case: AuditCase, run_dir: Path, cellc: str) -> tuple[str, list[dict[str, Any]]]:
+    # Parse-reject cases are isolated in a separate directory so that their
+    # intentionally-invalid syntax does not contaminate compile runs of other
+    # cases that share the cases/ directory (cellc resolves sibling modules).
+    if case.expected.phase == "reject_parse":
+        case_path = run_dir / "parse_reject" / f"{case.case_id}.cell"
+    else:
+        case_path = run_dir / "cases" / f"{case.case_id}.cell"
+    fmt_path = run_dir / "fmt" / f"{case.case_id}.cell"
+    asm_path = run_dir / "asm" / f"{case.case_id}.s"
+    meta_path = run_dir / "meta" / f"{case.case_id}.json"
+    for path in [case_path.parent, fmt_path.parent, asm_path.parent, meta_path.parent]:
+        path.mkdir(parents=True, exist_ok=True)
+    case_path.write_text(case.source, encoding="utf-8")
+
+    parse = run_cmd([cellc, "--parse", str(case_path)], timeout=20)
+    if case.expected.phase == "reject_parse":
+        if parse.returncode == 0:
+            return "failed", [failure(case, "parse", "SCA-PARSE-ACCEPTED", "expected parse rejection, got success", run_dir, parse.stdout)]
+        if not output_matches(parse.stdout, case.expected.contains):
+            return "failed", [
+                failure(
+                    case,
+                    "parse",
+                    "SCA-PARSE-DIAGNOSTIC",
+                    f"parse diagnostic missing expected tokens {case.expected.contains!r}",
+                    run_dir,
+                    parse.stdout,
+                )
+            ]
+        return "rejected", []
+    if parse.returncode != 0:
+        return "failed", [failure(case, "parse", "SCA-PARSE-FAILED", "unexpected parse failure", run_dir, parse.stdout)]
+
+    if case.expected.phase == "accept":
+        fmt_path.write_text(case.source, encoding="utf-8")
+        fmt = run_cmd([cellc, "fmt", "--json", str(fmt_path)], timeout=20)
+        if fmt.returncode != 0:
+            return "failed", [failure(case, "fmt", "SCA-FMT-FAILED", "formatter failed", run_dir, fmt.stdout)]
+        fmt_check = run_cmd([cellc, "fmt", "--check", "--json", str(fmt_path)], timeout=20)
+        if fmt_check.returncode != 0:
+            return "failed", [failure(case, "fmt", "SCA-FMT-NON-IDEMPOTENT", "formatted source is not idempotent", run_dir, fmt_check.stdout)]
+        parse_fmt = run_cmd([cellc, "--parse", str(fmt_path)], timeout=20)
+        if parse_fmt.returncode != 0:
+            return "failed", [failure(case, "fmt", "SCA-FMT-PARSE", "formatted source does not parse", run_dir, parse_fmt.stdout)]
+
+    compile_cmd = [
+        cellc,
+        str(case_path),
+        "--target",
+        "riscv64-asm",
+        "--target-profile",
+        "ckb",
+        "--primitive-strict",
+        "0.15",
+        "-o",
+        str(asm_path),
+    ]
+    compiled = run_cmd(compile_cmd, timeout=30)
+    if case.expected.phase == "reject_compile":
+        if compiled.returncode == 0:
+            return "failed", [
+                failure(case, "compile", "SCA-COMPILE-ACCEPTED", "expected compile rejection, got success", run_dir, compiled.stdout)
+            ]
+        if not output_matches(compiled.stdout, case.expected.contains):
+            return "failed", [
+                failure(
+                    case,
+                    "compile",
+                    "SCA-COMPILE-DIAGNOSTIC",
+                    f"compile diagnostic missing expected tokens {case.expected.contains!r}",
+                    run_dir,
+                    compiled.stdout,
+                )
+            ]
+        return "rejected", []
+    if compiled.returncode != 0:
+        return "failed", [failure(case, "compile", "SCA-COMPILE-FAILED", "unexpected compile failure", run_dir, compiled.stdout)]
+
+    if not asm_path.exists() or asm_path.stat().st_size == 0:
+        return "failed", [failure(case, "codegen", "SCA-CODEGEN-EMPTY", "assembly output is missing or empty", run_dir, compiled.stdout)]
+    asm_text = asm_path.read_text(encoding="utf-8", errors="replace")
+    for obsolete in ("IrTransfer", "IrClaim", "IrSettle"):
+        if obsolete in asm_text:
+            return "failed", [failure(case, "codegen", "SCA-CODEGEN-OBSOLETE", f"assembly contains obsolete token {obsolete}", run_dir)]
+
+    metadata = run_cmd(
+        [
+            cellc,
+            "metadata",
+            str(case_path),
+            "--target",
+            "riscv64-asm",
+            "--target-profile",
+            "ckb",
+            "-o",
+            str(meta_path),
+        ],
+        timeout=30,
+    )
+    if metadata.returncode != 0:
+        return "failed", [failure(case, "metadata", "SCA-META-FAILED", "metadata command failed", run_dir, metadata.stdout)]
+    meta_failures = validate_metadata(case, meta_path, run_dir)
+    if meta_failures:
+        return "failed", meta_failures
+    return "accepted", []
+
+
+def write_reports(run_dir: Path, report: dict[str, Any], failures: list[dict[str, Any]]) -> None:
+    (run_dir / "report.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    with (run_dir / "report.jsonl").open("w", encoding="utf-8") as handle:
+        for item in failures:
+            handle.write(json.dumps(item, sort_keys=True) + "\n")
+
+
+def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(description="Run CellScript syntax-combination audit")
+    parser.add_argument("mode", nargs="?", default="quick", choices=["quick", "ci", "deep", "repro"])
+    parser.add_argument("--seed", type=int, default=20260503)
+    parser.add_argument("--budget", type=int)
+    parser.add_argument("--case", help="case name or id for repro mode")
+    args = parser.parse_args(argv)
+
+    require_tool("cargo")
+    require_tool("python3")
+    cellc = cellc_bin()
+
+    timestamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%d-%H%M%S")
+    run_dir = ROOT / "target" / "syntax-combo-audit" / f"{timestamp}-{args.mode}-{args.seed}"
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    cases = load_cases(args.mode, args.budget, args.seed)
+    if args.mode == "repro":
+        if not args.case:
+            raise SystemExit("repro mode requires --case <name-or-id>")
+        cases = [case for case in cases if case.name == args.case or case.case_id == args.case]
+        if not cases:
+            raise SystemExit(f"unknown repro case: {args.case}")
+
+    failures: list[dict[str, Any]] = []
+    accepted = 0
+    rejected = 0
+    phase_counts: dict[str, dict[str, int]] = {}
+    origin_counts: dict[str, int] = {}
+
+    for case in cases:
+        origin_counts[case.origin] = origin_counts.get(case.origin, 0) + 1
+        status, case_failures = audit_case(case, run_dir, cellc)
+        expected_phase = case.expected.phase
+        phase_counts.setdefault(expected_phase, {"passed": 0, "failed": 0})
+        if case_failures:
+            phase_counts[expected_phase]["failed"] += 1
+            failures.extend(case_failures)
+        else:
+            phase_counts[expected_phase]["passed"] += 1
+        if status == "accepted":
+            accepted += 1
+        elif status == "rejected":
+            rejected += 1
+
+    report = {
+        "status": "passed" if not failures else "failed",
+        "mode": args.mode,
+        "seed": args.seed,
+        "generated": len(cases),
+        "accepted": accepted,
+        "rejected": rejected,
+        "failures_count": len(failures),
+        "governance_release_matrix": list(GOVERNANCE_RELEASE_MATRIX),
+        "governance_oracles": governance_oracles(),
+        "known_bug_classes": evaluate_bug_class_coverage(args.mode, cases),
+        "phases": phase_counts,
+        "origins": origin_counts,
+        "failures": failures[:10],
+    }
+    contract_failures = validate_mode_contract(args.mode, report)
+    if contract_failures:
+        failures.extend(contract_failures)
+        report["status"] = "failed"
+        report["failures_count"] = len(failures)
+        report["failures"] = failures[:10]
+    write_reports(run_dir, report, failures)
+
+    print(
+        "syntax-combo-audit: "
+        f"{report['status']} seed={args.seed} mode={args.mode} "
+        f"generated={len(cases)} accepted={accepted} rejected={rejected} failures={len(failures)}"
+    )
+    print(f"report={run_dir / 'report.json'}")
+    if failures:
+        print("top:")
+        for item in failures[:5]:
+            print(f"  {item['code']} {item['summary']} case={item['case']} phase={item['phase']}")
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

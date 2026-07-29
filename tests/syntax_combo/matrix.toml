@@ -1,4 +1,4 @@
-# Matrix metadata for the Rust `cellscript-tools syntax-combo-audit` runner.
+# Matrix metadata for scripts/cellscript_syntax_combo_audit.py.
 # The first runner version keeps generation deterministic and small, while this
 # file records the axes that must stay covered as the generator grows.
 

@@ -23,7 +23,7 @@ acceptance coverage itself.
 
 | Area | Previous behaviour | Updated behaviour | Risk |
 | --- | --- | --- | --- |
-| Release auxiliary checks | `release` and `release-quick` run `run_ci_gate`, then repeated `cellscript-tools check-skill-pack`, `check_script_syntax`, and `check_trailing_whitespace` inside `run_release_auxiliary_checks`. | Release modes now inherit those checks from the embedded CI gate and keep release auxiliary checks focused on release-only docs, CKB, NovaSeal, and VS Code evidence. | Low. The checks still run before release-only checks. |
+| Release auxiliary checks | `release` and `release-quick` run `run_ci_gate`, then repeated `check_cellscript_skill_pack.py`, `check_script_syntax`, and `check_trailing_whitespace` inside `run_release_auxiliary_checks`. | Release modes now inherit those checks from the embedded CI gate and keep release auxiliary checks focused on release-only docs, CKB, NovaSeal, and VS Code evidence. | Low. The checks still run before release-only checks. |
 | Website build in the unified gate | `run_website_build_check` ran `npm --prefix website run prepare:registry`, checked generated data, then ran `npm --prefix website run build`; the `build` script ran `prepare:registry` again. | The gate still prepares and checks registry data once, then directly runs `astro check` and `astro build` from `website/`. | Low. The same Astro checks and build still run. |
 | Website build workflow | `.github/workflows/website-build.yml` ran automatically on PRs and pushes, duplicating the website build already covered by the unified CI gate. It also ran `npm --prefix website run build`, which generated registry data again. | The workflow is now manual-only via `workflow_dispatch`, keeping the `website/dist` artifact path available on demand. It also generates and checks registry data once, then directly runs `astro check` and `astro build`. | Low. Automatic merge-readiness coverage remains in the unified CI gate. |
 | VS Code release path | Release auxiliary checks ran `npm run validate`, which built the extension, then `npm run publish:dry-run`, which explicitly built again and then let `vsce package` run `vscode:prepublish`, building again. | The gate directly runs `vsce package --no-dependencies`, letting `vsce` perform the one required prepublish build, then runs `node scripts/validate.mjs` directly against the built output. | Low. The VSIX dry-run and manifest validation still run. |
@@ -75,8 +75,7 @@ The updated paths were checked with:
 
 ```bash
 bash -n scripts/cellscript_gate.sh
-cargo run --quiet --locked -p cellscript-tools --bin cellscript-tools -- \
-  --root . validate-tooling-release
+python3 scripts/validate_cellscript_tooling_release.py
 git diff --check
 npm --prefix website run prepare:registry
 (cd website && npm exec -- astro check && npm exec -- astro build)
