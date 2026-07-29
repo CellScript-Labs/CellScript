@@ -123,7 +123,11 @@ for path in paths:
     target_profile = metadata.get("target_profile", {})
     require(target_profile.get("name") == "ckb", f"{path} did not compile under ckb profile")
     require(target_profile.get("source_encoding") == "ckb-source-group-high-bit", f"{path} missing CKB Source encoding")
-    require(target_profile.get("witness_abi") == "ckb-molecule-witness-args+cellscript-entry-witness-v1", f"{path} missing WitnessArgs ABI")
+    require(
+        target_profile.get("witness_abi")
+        == "ckb-molecule-witness-args-input-type-v2+cellscript-entry-witness-v1+raw-v1-compat",
+        f"{path} missing WitnessArgs ABI",
+    )
     require(target_profile.get("spawn_ipc_abi") == "ckb-vm-v2-spawn-ipc-syscalls-2601-2608", f"{path} missing Spawn/IPC ABI")
     require(target_profile.get("output_data_abi") == "ckb-outputs-and-outputs-data-index-aligned", f"{path} missing outputs_data ABI")
     require(target_profile.get("type_id_abi") == "ckb-type-id-v1", f"{path} missing TYPE_ID ABI")

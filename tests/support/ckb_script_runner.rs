@@ -290,6 +290,11 @@ pub struct CkbVmFixture {
     pub script_args: Bytes,
     /// Input cells.
     pub inputs: Vec<FixtureCell>,
+    /// Input indexes that carry the CellScript type script under test.
+    ///
+    /// This is separate from `FixtureCell::type_script` so tests can express a
+    /// real type-script group whose first member is not transaction input 0.
+    pub current_type_script_input_indices: Vec<usize>,
     /// Output cells.
     pub outputs: Vec<FixtureCell>,
     /// Additional cell deps (beyond the script code cell itself).
@@ -388,11 +393,17 @@ pub fn execute_cellscript_script(elf_bytes: &[u8], fixture: &CkbVmFixture) -> Ck
     let input_out_points: Vec<packed::OutPoint> = fixture
         .inputs
         .iter()
-        .map(|cell| {
+        .enumerate()
+        .map(|(index, cell)| {
+            let input_type_script = if fixture.current_type_script_input_indices.contains(&index) {
+                Some(type_script.clone())
+            } else {
+                cell.type_script.clone()
+            };
             let output = packed::CellOutput::new_builder()
                 .capacity::<packed::Uint64>(cell.capacity.pack())
                 .lock(always_success_lock.clone())
-                .type_(packed::ScriptOpt::from(cell.type_script.clone()))
+                .type_(packed::ScriptOpt::from(input_type_script))
                 .build();
             context.create_cell(output, cell.data.clone())
         })
@@ -518,6 +529,7 @@ pub fn build_simple_fixture(
     CkbVmFixture {
         script_args,
         inputs,
+        current_type_script_input_indices: Vec::new(),
         outputs,
         cell_deps: Vec::new(),
         witnesses: Vec::new(),
@@ -563,6 +575,7 @@ pub fn build_dao_fixture(
     CkbVmFixture {
         script_args,
         inputs,
+        current_type_script_input_indices: Vec::new(),
         outputs,
         cell_deps: Vec::new(),
         witnesses: Vec::new(),
@@ -595,6 +608,7 @@ pub fn build_dao_data_fixture(
     CkbVmFixture {
         script_args,
         inputs,
+        current_type_script_input_indices: Vec::new(),
         outputs,
         cell_deps: Vec::new(),
         witnesses: Vec::new(),

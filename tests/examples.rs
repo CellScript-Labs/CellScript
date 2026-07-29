@@ -173,7 +173,9 @@ const BUNDLED_EXAMPLE_ASM_SHAPE_BUDGETS: [(&str, AssemblyShapeBudget); 9] = [
             max_lines: 24_500,
             max_fail_handlers: 64,
             max_shared_epilogues: 20,
-            max_text_bytes: 92 * 1024,
+            // The v2 placement parser adds 68 bytes to the full multisig text
+            // surface while the focused transfer entry remains below 7 KiB.
+            max_text_bytes: 93 * 1024,
             max_relaxed_branches: 4,
             max_cond_branch_abs_distance: 7_700,
             max_machine_blocks: 3_600,

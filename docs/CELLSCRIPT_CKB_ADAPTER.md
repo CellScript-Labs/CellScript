@@ -90,8 +90,9 @@ RPC, and exposes signer, `estimate_cycles`, `test_tx_pool_accept`, and optional
 submission as adapter-owned node calls. It also builds headless deploy
 transactions that create TYPE_ID code cells from a `DeployArtifactSpec`, and
 generates `DeploymentManifest` records from the resulting evidence. It also
-tests that CellScript entry witness bytes are placed into an explicit
-`WitnessArgs` field without overwriting lock signatures, and that TYPE_ID
+tests that CellScript entry witness bytes use the versioned
+`cellscript-witnessargs-input-type-v2` contract and are placed into
+`WitnessArgs.input_type` without overwriting lock signatures, and that TYPE_ID
 args are computed from the packed first input plus output index before
 adapter submission.
 

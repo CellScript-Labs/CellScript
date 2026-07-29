@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Add the explicit `cellscript-witnessargs-input-type-v2` placement ABI for
+  parameterized CKB entries. Generated wrappers now resolve witnesses relative
+  to the active script group, decode the `CSARGv1` payload from
+  `WitnessArgs.input_type`, preserve wallet/multisig ownership of `lock`, reject
+  malformed or wrongly placed payloads, and retain group-relative raw-v1
+  compatibility. A canonical multisig-v2 CKB-VM regression covers a type group
+  whose first input is not transaction input zero.
+
 ## 0.22.0 - 2026-07-19
 
 - Make GitHub publication depend on the full release gate. Release evidence now

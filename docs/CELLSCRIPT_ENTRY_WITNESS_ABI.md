@@ -4,15 +4,44 @@
 tooling.
 
 CellScript action and lock entrypoints are normal RISC-V functions at the machine
-level. Most public arguments come through the grouped input witness. Lock
+level. Most public arguments come through the current script group's witness. Lock
 parameters declared as `lock_args T` instead come from the executing lock
 script's `Script.args` bytes. The compiler-generated `_cellscript_entry` wrapper
 loads the required source(s), validates the envelope or script-args layout,
 decodes positional arguments, and then tail-calls the selected action or lock.
 
-## Envelope
+## Placement ABI v2
 
-Every parameterized entry witness that has witness-backed arguments starts with:
+The current CKB placement contract is
+`cellscript-witnessargs-input-type-v2`:
+
+```text
+WitnessArgs {
+  lock:       wallet / lock-script signatures,
+  input_type: CellScript CSARGv1 entry payload,
+  output_type: protocol-specific output witness data,
+}
+```
+
+The generated wrapper first loads `GroupInput#0`. If the active script group
+has no input, it loads `GroupOutput#0`. It never substitutes transaction-global
+`Input#0`, because the first member of one lock/type group may be any global
+input index. The selected witness must be a canonical three-field Molecule
+`WitnessArgs`; its `input_type` `BytesOpt` must contain the entry payload.
+
+This split lets canonical lock scripts, including multisig-v2, retain exclusive
+ownership of `WitnessArgs.lock`. Builders must preserve an existing lock field
+and fail rather than overwrite an existing `input_type` field.
+
+For compatibility with transactions built before placement v2, the same
+group-relative source may still contain the raw v1 payload directly. Raw-v1 is
+recognized only by the exact `CSARGv1\0` prefix. A malformed `WitnessArgs`, an
+absent `input_type`, or a payload placed in `lock`/`output_type` fails closed
+with runtime error `25 entry-witness-abi-invalid`; those forms are not aliases.
+
+## Payload Envelope v1
+
+Every parameterized entry payload that has witness-backed arguments starts with:
 
 ```text
 43 53 41 52 47 76 31 00
@@ -20,8 +49,8 @@ Every parameterized entry witness that has witness-backed arguments starts with:
 
 This is the ASCII magic `CSARGv1\0`.
 
-Wrong magic, missing bytes, or unsupported parameter placement fails closed with
-runtime error `25 entry-witness-abi-invalid`.
+Wrong magic, missing bytes, malformed Molecule, or unsupported parameter
+placement fails closed with runtime error `25 entry-witness-abi-invalid`.
 
 Entries whose parameters are entirely runtime-bound or `lock_args`-backed do not
 require a witness envelope.

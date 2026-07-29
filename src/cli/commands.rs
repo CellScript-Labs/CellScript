@@ -7,7 +7,8 @@ use crate::{
     compile_path, compile_path_metadata_with_diagnostics, compile_path_with_entry_action, compile_path_with_entry_lock,
     default_metadata_path_for_artifact, default_output_path_for_input, load_modules_for_input, resolve_input_path,
     validate_artifact_metadata, validate_source_units_on_disk, ArtifactFormat, CompileMetadata, CompileOptions, EntryWitnessArg,
-    ParamMetadata, ProofPlanMetadata, TargetProfile, ENTRY_WITNESS_ABI,
+    ParamMetadata, ProofPlanMetadata, TargetProfile, ENTRY_WITNESS_ABI, ENTRY_WITNESS_PLACEMENT_ABI, ENTRY_WITNESS_PLACEMENT_FIELD,
+    ENTRY_WITNESS_PLACEMENT_SOURCE,
 };
 use base64::Engine;
 use camino::Utf8Path;
@@ -1863,6 +1864,10 @@ impl CommandExecutor {
         let summary = serde_json::json!({
             "status": if entry_constraints.unsupported { "fail" } else { "ok" },
             "abi": ENTRY_WITNESS_ABI,
+            "placement_abi": ENTRY_WITNESS_PLACEMENT_ABI,
+            "witness_args_field": ENTRY_WITNESS_PLACEMENT_FIELD,
+            "witness_source": ENTRY_WITNESS_PLACEMENT_SOURCE,
+            "raw_v1_compatible": true,
             "target_profile": result.metadata.target_profile.name,
             "entry_kind": selected.kind,
             "entry": selected.name,
@@ -2085,9 +2090,12 @@ impl CommandExecutor {
             },
             "witness_args_policy": {
                 "entry_payload_abi": ENTRY_WITNESS_ABI,
+                "placement_abi": ENTRY_WITNESS_PLACEMENT_ABI,
                 "entry_payload_owner": "compiler",
                 "final_witness_args_owner": "adapter",
-                "default_action_payload_field": "input_type",
+                "default_action_payload_field": ENTRY_WITNESS_PLACEMENT_FIELD,
+                "runtime_source": ENTRY_WITNESS_PLACEMENT_SOURCE,
+                "raw_v1_compatible": true,
                 "lock_signature_policy": "explicit-adapter-owned-do-not-overwrite",
                 "placement_requires_deployment_role": true,
                 "ckb_reference": "ckb_types::packed::WitnessArgs",
@@ -2842,9 +2850,12 @@ impl CommandExecutor {
             "must_emit_lineage": true,
             "witness_policy": {
                 "entry_payload_abi": ENTRY_WITNESS_ABI,
+                "placement_abi": ENTRY_WITNESS_PLACEMENT_ABI,
                 "entry_payload_owner": "compiler",
                 "final_witness_args_owner": "adapter",
-                "default_action_payload_field": "input_type",
+                "default_action_payload_field": ENTRY_WITNESS_PLACEMENT_FIELD,
+                "runtime_source": ENTRY_WITNESS_PLACEMENT_SOURCE,
+                "raw_v1_compatible": true,
                 "lock_signature_policy": "explicit-adapter-owned-do-not-overwrite",
                 "placement_requires_deployment_role": true,
             },
@@ -3099,6 +3110,10 @@ impl CommandExecutor {
             machine: serde_json::json!({
                 "status": "ok",
                 "abi": ENTRY_WITNESS_ABI,
+                "placement_abi": ENTRY_WITNESS_PLACEMENT_ABI,
+                "witness_args_field": ENTRY_WITNESS_PLACEMENT_FIELD,
+                "witness_source": ENTRY_WITNESS_PLACEMENT_SOURCE,
+                "raw_v1_compatible": true,
                 "entry_kind": selected.kind,
                 "entry": selected.name,
                 "witness_hex": witness_hex,

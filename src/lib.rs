@@ -215,6 +215,12 @@ pub const MAX_SOURCE_BYTES: usize = 1024 * 1024;
 const STACK_COLLECTION_BACKING_BYTES: usize = 256;
 pub const ENTRY_WITNESS_ABI: &str = "cellscript-entry-witness-v1";
 pub(crate) const ENTRY_WITNESS_ABI_MAGIC: &[u8; 8] = b"CSARGv1\0";
+/// Versioned CKB placement contract for parameterized entry payloads.
+pub const ENTRY_WITNESS_PLACEMENT_ABI: &str = "cellscript-witnessargs-input-type-v2";
+/// Canonical `WitnessArgs` field owned by the CellScript entry placement ABI.
+pub const ENTRY_WITNESS_PLACEMENT_FIELD: &str = "input_type";
+/// Script-group-relative witness lookup order used by generated CKB entries.
+pub const ENTRY_WITNESS_PLACEMENT_SOURCE: &str = "group-input-0-then-group-output-0";
 pub const CKB_DEFAULT_HASH_PERSONALIZATION: &[u8; 16] = b"ckb-default-hash";
 pub const CKB_BLANK_HASH: [u8; 32] = [
     68, 244, 198, 151, 68, 213, 248, 197, 93, 100, 32, 98, 148, 157, 202, 228, 155, 196, 231, 239, 67, 211, 136, 197, 161, 47, 66,
@@ -284,7 +290,7 @@ impl TargetProfile {
                 },
                 header_abi: "ckb-header".to_string(),
                 scheduler_abi: "none".to_string(),
-                witness_abi: "ckb-molecule-witness-args+cellscript-entry-witness-v1".to_string(),
+                witness_abi: "ckb-molecule-witness-args-input-type-v2+cellscript-entry-witness-v1+raw-v1-compat".to_string(),
                 lock_args_abi: "ckb-script-args-typed-fixed-bytes".to_string(),
                 source_encoding: "ckb-source-group-high-bit".to_string(),
                 spawn_ipc_abi: "ckb-vm-v2-spawn-ipc-syscalls-2601-2608".to_string(),
@@ -31168,14 +31174,23 @@ action spend(amount: u64) -> u64 {
 
         assert!(asm.contains(".global _cellscript_entry"), "parameterized entrypoints need a generated ELF entry wrapper:\n{}", asm);
         assert!(
-            asm.contains("# cellscript entry abi: _cellscript_entry loads Input#0 witness args for spend and falls back to GroupInput#0/GroupOutput#0"),
+            asm.contains(
+                "# cellscript entry abi: _cellscript_entry loads GroupInput#0 witness args for spend and falls back to GroupOutput#0"
+            ),
             "entry wrapper did not document its target ABI:\n{}",
             asm
         );
         assert!(
-            asm.contains("# cellscript abi: LOAD_WITNESS reason=entry_args source=Input index=0")
-                && asm.contains("# cellscript abi: LOAD_WITNESS reason=entry_args_fallback_group_input source=GroupInput index=0"),
-            "entry wrapper did not load positional arguments from Input witness with GroupInput fallback:\n{}",
+            asm.contains("# cellscript abi: LOAD_WITNESS reason=entry_args source=GroupInput index=0")
+                && asm.contains("# cellscript abi: LOAD_WITNESS reason=entry_args_fallback_group_output source=GroupOutput index=0")
+                && !asm.contains("LOAD_WITNESS reason=entry_args source=Input index=0"),
+            "entry wrapper did not use script-group-relative witness sourcing:\n{}",
+            asm
+        );
+        assert!(
+            asm.contains("# cellscript entry placement v2: detect raw-v1 before parsing WitnessArgs.input_type")
+                && asm.contains("# cellscript entry placement v2: copy input_type payload over the table envelope"),
+            "entry wrapper did not expose the versioned WitnessArgs.input_type placement ABI:\n{}",
             asm
         );
         assert!(

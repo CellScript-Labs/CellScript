@@ -343,11 +343,19 @@ pub struct ScriptCodeDepEvidence {
     pub dep_type: String,
 }
 
+pub const ENTRY_WITNESS_PLACEMENT_ABI: &str = "cellscript-witnessargs-input-type-v2";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub enum WitnessPlacement {
-    Lock,
-    InputType,
-    OutputType,
+pub enum EntryWitnessPlacementAbi {
+    WitnessArgsInputTypeV2,
+}
+
+impl EntryWitnessPlacementAbi {
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::WitnessArgsInputTypeV2 => ENTRY_WITNESS_PLACEMENT_ABI,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1421,29 +1429,17 @@ pub fn require_script_code_dep(script: &Script, deps: &[ScriptCodeDep]) -> Resul
     Ok(dep.to_cell_dep())
 }
 
-pub fn place_entry_witness_payload(base: &WitnessArgs, placement: WitnessPlacement, payload: Bytes) -> Result<WitnessArgs> {
+pub fn place_entry_witness_payload(base: &WitnessArgs, placement: EntryWitnessPlacementAbi, payload: Bytes) -> Result<WitnessArgs> {
     if payload.is_empty() {
         bail!("CellScript entry witness payload must be non-empty");
     }
 
     match placement {
-        WitnessPlacement::Lock => {
-            if base.lock().to_opt().is_some() {
-                bail!("refusing to overwrite WitnessArgs.lock; lock signatures must stay explicit");
-            }
-            Ok(base.clone().as_builder().lock(Some(payload).pack()).build())
-        }
-        WitnessPlacement::InputType => {
+        EntryWitnessPlacementAbi::WitnessArgsInputTypeV2 => {
             if base.input_type().to_opt().is_some() {
                 bail!("refusing to overwrite WitnessArgs.input_type");
             }
             Ok(base.clone().as_builder().input_type(Some(payload).pack()).build())
-        }
-        WitnessPlacement::OutputType => {
-            if base.output_type().to_opt().is_some() {
-                bail!("refusing to overwrite WitnessArgs.output_type");
-            }
-            Ok(base.clone().as_builder().output_type(Some(payload).pack()).build())
         }
     }
 }
@@ -2355,13 +2351,16 @@ mod tests {
     fn places_cellscript_entry_payload_without_hiding_lock_signatures() {
         let base = WitnessArgs::new_builder().lock(Some(Bytes::from(vec![0x77u8; 65])).pack()).build();
         let payload = Bytes::from(b"CSARGv1\0\x4d\0\0\0\0\0\0\0".to_vec());
-        let witness = place_entry_witness_payload(&base, WitnessPlacement::InputType, payload.clone()).unwrap();
+        let placement = EntryWitnessPlacementAbi::WitnessArgsInputTypeV2;
+        assert_eq!(placement.name(), "cellscript-witnessargs-input-type-v2");
+        let witness = place_entry_witness_payload(&base, placement, payload.clone()).unwrap();
         assert_eq!(witness.lock().to_opt().expect("lock preserved").raw_data().len(), 65);
         assert_eq!(witness.input_type().to_opt().expect("entry payload").raw_data(), payload);
         assert!(witness.output_type().to_opt().is_none());
 
-        let error = place_entry_witness_payload(&base, WitnessPlacement::Lock, Bytes::from(vec![1u8])).unwrap_err().to_string();
-        assert!(error.contains("lock signatures must stay explicit"), "{error}");
+        let occupied = witness;
+        let error = place_entry_witness_payload(&occupied, placement, Bytes::from(vec![1u8])).unwrap_err().to_string();
+        assert!(error.contains("refusing to overwrite WitnessArgs.input_type"), "{error}");
     }
 
     #[test]

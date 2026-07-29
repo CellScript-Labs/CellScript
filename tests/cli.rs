@@ -2196,7 +2196,10 @@ action main(value: u64) -> u64 {
     assert_eq!(dep["tx_hash"], "0x1111111111111111111111111111111111111111111111111111111111111111");
     assert_eq!(dep["index"], 0);
     assert_eq!(dep["hash_type"], "type");
-    assert_eq!(ckb["profile_abi_contract"]["witness_abi"], "ckb-molecule-witness-args+cellscript-entry-witness-v1");
+    assert_eq!(
+        ckb["profile_abi_contract"]["witness_abi"],
+        "ckb-molecule-witness-args-input-type-v2+cellscript-entry-witness-v1+raw-v1-compat"
+    );
     assert_eq!(ckb["profile_abi_contract"]["lock_args_abi"], "ckb-script-args-typed-fixed-bytes");
     assert_eq!(ckb["profile_abi_contract"]["source_encoding"], "ckb-source-group-high-bit");
     assert_eq!(ckb["profile_abi_contract"]["cell_dep_abi"], "ckb-cell-dep-outpoint-and-dep-group");
@@ -6597,7 +6600,7 @@ fn cellc_explain_profile_reports_ckb_v0_14_contract() {
 
     let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(summary["profile"], "ckb");
-    assert_eq!(summary["witness_abi"], "ckb-molecule-witness-args+cellscript-entry-witness-v1");
+    assert_eq!(summary["witness_abi"], "ckb-molecule-witness-args-input-type-v2+cellscript-entry-witness-v1+raw-v1-compat");
     assert_eq!(summary["lock_args_abi"], "ckb-script-args-typed-fixed-bytes");
     assert_eq!(summary["source_encoding"], "ckb-source-group-high-bit");
     assert_eq!(summary["spawn_ipc_abi"], "ckb-vm-v2-spawn-ipc-syscalls-2601-2608");
@@ -7437,7 +7440,10 @@ action mint(amount: u64) -> Token {
     assert_eq!(plan["adapter_contract"]["accepted_output_state"], "AcceptedActionTx");
     assert_eq!(plan["adapter_contract"]["must_not_infer_protocol_semantics_from_action_name"], true);
     assert_eq!(plan["adapter_contract"]["witness_policy"]["entry_payload_abi"], "cellscript-entry-witness-v1");
+    assert_eq!(plan["adapter_contract"]["witness_policy"]["placement_abi"], "cellscript-witnessargs-input-type-v2");
     assert_eq!(plan["adapter_contract"]["witness_policy"]["default_action_payload_field"], "input_type");
+    assert_eq!(plan["adapter_contract"]["witness_policy"]["runtime_source"], "group-input-0-then-group-output-0");
+    assert_eq!(plan["adapter_contract"]["witness_policy"]["raw_v1_compatible"], true);
     assert_eq!(plan["adapter_contract"]["witness_policy"]["lock_signature_policy"], "explicit-adapter-owned-do-not-overwrite");
     assert!(plan["adapter_contract"]["resolved_tx_required_fields"]
         .as_array()
@@ -8823,6 +8829,10 @@ action main(amount: u64) -> u64 {
     let stdout: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(stdout["status"], "ok");
     assert_eq!(stdout["abi"], "cellscript-entry-witness-v1");
+    assert_eq!(stdout["placement_abi"], "cellscript-witnessargs-input-type-v2");
+    assert_eq!(stdout["witness_args_field"], "input_type");
+    assert_eq!(stdout["witness_source"], "group-input-0-then-group-output-0");
+    assert_eq!(stdout["raw_v1_compatible"], true);
     assert_eq!(stdout["entry_kind"], "action");
     assert_eq!(stdout["entry"], "main");
     assert_eq!(stdout["witness_hex"], "43534152477631004d00000000000000");
@@ -9098,6 +9108,10 @@ fn cellc_ckb_std_compat_reports_runtime_boundary() {
     assert_eq!(report["ckb_std_refs"]["type_id"], "ckb_std::type_id");
     assert_eq!(report["inline_abi"]["fields"]["cell_occupied_capacity"], 6);
     assert_eq!(report["witness_args_policy"]["entry_payload_abi"], "cellscript-entry-witness-v1");
+    assert_eq!(report["witness_args_policy"]["placement_abi"], "cellscript-witnessargs-input-type-v2");
+    assert_eq!(report["witness_args_policy"]["default_action_payload_field"], "input_type");
+    assert_eq!(report["witness_args_policy"]["runtime_source"], "group-input-0-then-group-output-0");
+    assert_eq!(report["witness_args_policy"]["raw_v1_compatible"], true);
     assert_eq!(report["witness_args_policy"]["final_witness_args_owner"], "adapter");
     assert_eq!(report["witness_args_policy"]["lock_signature_policy"], "explicit-adapter-owned-do-not-overwrite");
     assert_eq!(report["adapter_boundary"]["transaction_realizer"], "ckb-sdk-rust-or-CCC-adapter");

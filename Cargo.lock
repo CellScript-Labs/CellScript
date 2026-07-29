@@ -315,6 +315,7 @@ dependencies = [
  "blake2b_simd",
  "camino",
  "cellscript-ckb-adapter",
+ "ckb-sdk",
  "ckb-std",
  "ckb-testtool",
  "ckb-types",
