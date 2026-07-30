@@ -92,9 +92,11 @@ transactions that create TYPE_ID code cells from a `DeployArtifactSpec`, and
 generates `DeploymentManifest` records from the resulting evidence. It also
 tests that CellScript entry witness bytes use the versioned
 `cellscript-witnessargs-input-type-v2` contract and are placed into
-`WitnessArgs.input_type` without overwriting lock signatures, and that TYPE_ID
-args are computed from the packed first input plus output index before
-adapter submission.
+`WitnessArgs.input_type` before SDK signing while preserving the lock
+placeholder. A signed multisig-v2 CKB-VM regression verifies both the lock and
+the CellScript type script, and proves that post-signing witness mutation is
+rejected. TYPE_ID args are computed from the packed first input plus output
+index before adapter submission.
 
 The full transaction lifecycle bridge includes:
 

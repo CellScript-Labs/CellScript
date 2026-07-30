@@ -33,6 +33,15 @@ This split lets canonical lock scripts, including multisig-v2, retain exclusive
 ownership of `WitnessArgs.lock`. Builders must preserve an existing lock field
 and fail rather than overwrite an existing `input_type` field.
 
+Builders must place the CellScript payload before lock-script signing. CKB
+signers commit to the complete serialized `WitnessArgs` while replacing only
+the `lock` signature bytes with their zero placeholder; consequently,
+`input_type` and `output_type` are part of the signed message. Any change to
+those fields after signing invalidates the signature. The adapter helper is
+therefore named `place_entry_witness_payload_before_signing`, accepts a lock
+placeholder, validates the `CSARGv1\0` payload magic, and must run before the
+SDK unlock/sign step.
+
 For compatibility with transactions built before placement v2, the same
 group-relative source may still contain the raw v1 payload directly. Raw-v1 is
 recognized only by the exact `CSARGv1\0` prefix. A malformed `WitnessArgs`, an

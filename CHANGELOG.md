@@ -7,8 +7,12 @@
   to the active script group, decode the `CSARGv1` payload from
   `WitnessArgs.input_type`, preserve wallet/multisig ownership of `lock`, reject
   malformed or wrongly placed payloads, and retain group-relative raw-v1
-  compatibility. A canonical multisig-v2 CKB-VM regression covers a type group
-  whose first input is not transaction input zero.
+  compatibility. Builders place `input_type` before SDK signing because the
+  complete `WitnessArgs` is signed. A canonical signed multisig-v2 CKB-VM
+  regression covers a type group whose first input is not transaction input
+  zero and rejects post-signing witness mutation. The Rust-native v0.23
+  transaction recipes are rebound to the resulting audited ELF data hashes so
+  the production stateful gate cannot silently replay stale code identities.
 
 ## 0.22.0 - 2026-07-19
 

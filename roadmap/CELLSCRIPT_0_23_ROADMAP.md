@@ -130,61 +130,32 @@ Source documents:
 
 ## Pillar 2: Python Tooling Ported To Rust
 
-CellScript currently carries a non-trivial Python surface in `scripts/`,
-`proposals/*/scripts/`, and `website/scripts/`. None of it is the compiler,
-but several pieces are load-bearing for the gate, for NovaSeal/Evolving-DOB
-evidence, and for the website registry data:
+CellScript's load-bearing tooling is now Python-free. Gate, evidence, and
+proposal logic lives in Rust; Astro-facing website data generation stays in
+the website's native Node runtime.
 
-- `cellscript_strict_backend_audit.py` — drives the strict backend audit
-  mode of the gate.
-- `cellscript_syntax_combo_audit.py` — drives the syntax-combination matrix
-  in `tests/syntax_combo/`.
-- `validate_ckb_cellscript_production_evidence.py`,
-  `validate_cellscript_tooling_release.py` — release evidence validators
-  consumed by `scripts/ckb_cellscript_acceptance.sh` and the gate.
-- `novaseal_*.py` and `evolving_dob_*.py` — proposal-scoped devnet/stateful
-  harnesses, signing vectors, and external evidence adapters under
-  `proposals/novaseal/scripts/`, `proposals/novaseal/v0-mvp-skeleton/scripts/`,
-  `proposals/novaseal/agreement-profile-v0/scripts/`, and
-  `proposals/evolving-dob/evolving-dob-profile-v1/scripts/`.
-- `check_cellscript_skill_pack.py` — validates the CellScript programming
-  skill pack surface.
-- `website/scripts/regen-website-data.py`,
-  `website/scripts/generate-registry-data.py`,
-  `website/scripts/fetch-github-data.py` — website data regeneration.
+### Implemented Scope
 
-### Scope
-
-Port the load-bearing Python surface into Rust workspace members or
-crate-local test harnesses, with one rule: any ported tool that the release
-gate depends on must continue to produce byte-identical evidence reports so
-historical comparisons remain valid.
-
-Concretely:
-
-- introduce a `cellscript-tools` workspace crate (already partially present
-  as `crates/cellscript-tools`) that hosts the Rust ports of the
-  backend-audit, syntax-combo driver, production-evidence validator, and
-  tooling-release validator. Each port keeps the same output schema and the
-  same exit-code contract as the Python original.
-- move the NovaSeal and Evolving-DOB proposal scripts into per-proposal
-  Rust harnesses under their existing `proposals/*/` trees, preserving the
-  content-addressed evidence-file discipline (CKB Blake2b-256 digest,
-  non-empty regular file, reject symlinks/parent traversal/absolute paths).
-- replace `website/scripts/*.py` with TypeScript/Node scripts under
-  `website/scripts/` that the Astro build already understands, so the
-  website build stops pulling a Python runtime.
-- delete the original Python files only after the Rust/TS port passes the
-  same gate mode that the Python original gated.
-- update `scripts/cellscript_gate.sh` mode definitions (`dev`, `ci`,
-  `backend`, `release`, `release-quick`) to invoke the Rust/TS ports, and
-  drop the `python3` shell-syntax check arm once no tracked Python remains.
+- `crates/cellscript-tools` owns strict backend and syntax-combination audits,
+  repository checks, release validators, CKB acceptance, NovaSeal fixtures,
+  external-evidence adapters, Fiber experiments, and live/stateful runners.
+- `proposals/novaseal/tools` owns NovaSeal package-local vector, schema, ABI,
+  audit-surface, and fixture harnesses.
+- `proposals/evolving-dob/evolving-dob-profile-v1/tools` owns registry pressure
+  and devnet workflow validation.
+- `website/scripts/*.mjs` owns registry, compiler-output, and GitHub activity
+  data generation without introducing a second runtime into the Astro build.
+- `scripts/cellscript_gate.sh` invokes only Rust, shell, and Node tooling. The
+  Python syntax-check arm and all tracked Python sources have been removed.
+- Evidence producers preserve their established JSON shape where it remains
+  part of the release contract; implementation-origin fields now truthfully
+  identify the Rust harness and transaction-recipe replay path.
 
 ### Acceptance Boundary
 
 - `./scripts/cellscript_gate.sh dev` and `ci` pass without Python installed.
-- Every historical evidence report a ported tool used to produce can still be
-  reproduced bit-for-bit from the same inputs.
+- Deterministic static reports remain byte-stable for the same inputs; live
+  reports preserve their schemas while binding fresh devnet transactions.
 - The NovaSeal verifier pinning check still recomputes BLAKE2b and SHA-256
   over the same ELF and compares against the same `Cell.toml` and
   `proofs/*.template.json` hashes.

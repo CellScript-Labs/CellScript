@@ -8,10 +8,9 @@ editors/vscode-cellscript/dist/
 .idea/
 .vscode/
 .cap/
+.zcode/
 .playwright-mcp/
 .wrangler/
-__pycache__/
-*.py[cod]
 *.swp
 *.swo
 
@@ -55,14 +54,12 @@ proposals/novaseal/v0-mvp-skeleton/build/
 proposals/novaseal/**/.cell/
 proposals/novaseal/v0-mvp-skeleton/target/
 proposals/novaseal/v0-mvp-skeleton/src/.cell/
-proposals/novaseal/v0-mvp-skeleton/scripts/__pycache__/
 proposals/novaseal/v0-mvp-skeleton/verifier/**/target/
 proposals/novaseal/v0-mvp-skeleton/harness/**/target/
 proposals/novaseal/agreement-profile-v0/target/
 proposals/novaseal/agreement-profile-v0/harness/**/target/
 proposals/novaseal/agreement-profile-v0/src/.cell/
 proposals/novaseal/agreement-profile-v0/harness/**/.cell/
-proposals/novaseal/agreement-profile-v0/scripts/__pycache__/
 proposals/novaseal/fungible-xudt-profile-v0/target/
 proposals/novaseal/fungible-xudt-profile-v0/src/.cell/
 proposals/novaseal/rwa-receipt-profile-v0/target/
@@ -77,8 +74,6 @@ proposals/novaseal/fiber-candidate-profile-v0/target/
 proposals/novaseal/fiber-candidate-profile-v0/src/.cell/
 proposals/novaseal/**/.DS_Store
 proposals/novaseal/**/.cap/
-proposals/novaseal/**/__pycache__/
-proposals/novaseal/**/*.py[cod]
 proposals/novaseal/**/*.s
 proposals/novaseal/**/*.elf
 proposals/novaseal/**/*.meta.json
@@ -86,9 +81,7 @@ proposals/evolving-dob/evolving-dob-profile-v1/build/
 proposals/evolving-dob/evolving-dob-profile-v1/target/
 proposals/evolving-dob/evolving-dob-profile-v1/.cell/
 proposals/evolving-dob/evolving-dob-profile-v1/src/.cell/
-proposals/evolving-dob/evolving-dob-profile-v1/scripts/__pycache__/
 proposals/evolving-dob/evolving-dob-profile-v1/.DS_Store
-proposals/evolving-dob/evolving-dob-profile-v1/**/*.py[cod]
 proposals/evolving-dob/evolving-dob-profile-v1/**/*.s
 proposals/evolving-dob/evolving-dob-profile-v1/**/*.elf
 proposals/evolving-dob/evolving-dob-profile-v1/**/*.meta.json

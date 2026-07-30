@@ -344,6 +344,7 @@ pub struct ScriptCodeDepEvidence {
 }
 
 pub const ENTRY_WITNESS_PLACEMENT_ABI: &str = "cellscript-witnessargs-input-type-v2";
+pub const ENTRY_WITNESS_PAYLOAD_MAGIC: &[u8; 8] = b"CSARGv1\0";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum EntryWitnessPlacementAbi {
@@ -1429,9 +1430,19 @@ pub fn require_script_code_dep(script: &Script, deps: &[ScriptCodeDep]) -> Resul
     Ok(dep.to_cell_dep())
 }
 
-pub fn place_entry_witness_payload(base: &WitnessArgs, placement: EntryWitnessPlacementAbi, payload: Bytes) -> Result<WitnessArgs> {
-    if payload.is_empty() {
-        bail!("CellScript entry witness payload must be non-empty");
+/// Places a CellScript entry payload before any lock-script signing occurs.
+///
+/// `base.lock` may contain an SDK placeholder, but it must not contain live
+/// signatures. CKB lock signers commit to the complete serialized
+/// `WitnessArgs`, including `input_type`; mutating this field after signing
+/// invalidates the signatures.
+pub fn place_entry_witness_payload_before_signing(
+    base: &WitnessArgs,
+    placement: EntryWitnessPlacementAbi,
+    payload: Bytes,
+) -> Result<WitnessArgs> {
+    if !payload.starts_with(ENTRY_WITNESS_PAYLOAD_MAGIC) {
+        bail!("CellScript entry witness payload must start with CSARGv1\\0");
     }
 
     match placement {
@@ -2348,19 +2359,24 @@ mod tests {
     }
 
     #[test]
-    fn places_cellscript_entry_payload_without_hiding_lock_signatures() {
-        let base = WitnessArgs::new_builder().lock(Some(Bytes::from(vec![0x77u8; 65])).pack()).build();
+    fn places_cellscript_entry_payload_before_signing() {
+        let base = WitnessArgs::new_builder().lock(Some(Bytes::from(vec![0u8; 65])).pack()).build();
         let payload = Bytes::from(b"CSARGv1\0\x4d\0\0\0\0\0\0\0".to_vec());
         let placement = EntryWitnessPlacementAbi::WitnessArgsInputTypeV2;
         assert_eq!(placement.name(), "cellscript-witnessargs-input-type-v2");
-        let witness = place_entry_witness_payload(&base, placement, payload.clone()).unwrap();
+        let witness = place_entry_witness_payload_before_signing(&base, placement, payload.clone()).unwrap();
         assert_eq!(witness.lock().to_opt().expect("lock preserved").raw_data().len(), 65);
         assert_eq!(witness.input_type().to_opt().expect("entry payload").raw_data(), payload);
         assert!(witness.output_type().to_opt().is_none());
 
         let occupied = witness;
-        let error = place_entry_witness_payload(&occupied, placement, Bytes::from(vec![1u8])).unwrap_err().to_string();
+        let error = place_entry_witness_payload_before_signing(&occupied, placement, payload.clone()).unwrap_err().to_string();
         assert!(error.contains("refusing to overwrite WitnessArgs.input_type"), "{error}");
+
+        let error = place_entry_witness_payload_before_signing(&base, placement, Bytes::from_static(b"not-cellscript"))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("must start with CSARGv1"), "{error}");
     }
 
     #[test]

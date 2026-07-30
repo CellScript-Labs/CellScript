@@ -3,6 +3,7 @@ members = [
     ".",
     "crates/cellscript-ckb-adapter",
     "crates/cellscript-fiber-adapter",
+    "crates/cellscript-tools",
     "crates/cellscript-wasm",
     "examples/ckb-sdk-builder",
 ]
@@ -44,7 +45,6 @@ exclude = [
     "docs/wiki/",
     "editors/",
     "proposals/",
-    "scripts/__pycache__/",
     "services/",
     "src/bin/",
     "tools/",
@@ -119,7 +119,9 @@ pretty_assertions = "1.4"
 tempfile = "3.10"
 ckb-testtool = "1.1"
 ckb-sdk = { path = "../ckb-sdk-rust" }
+ckb-system-scripts-v0_6_0 = { package = "ckb-system-scripts", version = "=0.6.0" }
 ckb-std = { version = "1.1.0", default-features = false, features = ["type-id"] }
+secp256k1 = { version = "=0.30.0", features = ["recovery"] }
 sha2 = "0.10"
 regex = "1"
 cellscript-ckb-adapter = { path = "crates/cellscript-ckb-adapter" }
