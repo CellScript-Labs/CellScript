@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Restore the 0.23 release gate after the Python-to-Rust tooling migration by
+  checking the semantic `requires_all_bundled_examples_strict_original_ckb`
+  and emitted `source_provenance` CKB boundaries plus the Rust-backed NovaSeal
+  acceptance summary instead of retired temporary-directory, helper, and shell
+  field names, and refresh the NovaSeal external TCB review template to the
+  current Rust-migrated verifier source-tree hash. CKB transaction-recipe
+  replay now tops up fresh devnet funding when a fixture has no disposable
+  change output and its replacement input cannot fund every typed output.
+  Rebuild the website WASM bundle with the witness-placement-v2 compiler so the
+  playground and native release artifacts expose the same ABI.
 - Add the explicit `cellscript-witnessargs-input-type-v2` placement ABI for
   parameterized CKB entries. Generated wrappers now resolve witnesses relative
   to the active script group, decode the `CSARGv1` payload from

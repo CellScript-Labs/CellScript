@@ -8,7 +8,8 @@ use serde_json::{json, Map, Value};
 
 use crate::ckb_acceptance::{self, ArtifactRecord, CompileEvidence};
 use crate::ckb_devnet::{
-    always_success_dep, decode_hex, deploy_code, out_point, resolve_ckb_bin, sha256_hex, CkbDevnet, ALWAYS_SUCCESS_CODE_HASH,
+    always_success_dep, decode_hex, deploy_code, funding_cells, out_point, resolve_ckb_bin, sha256_hex, CkbDevnet,
+    ALWAYS_SUCCESS_CODE_HASH,
 };
 use crate::production_evidence::{ACTION_RUNS, EXPECTED_END_TO_END_STATEFUL_SCENARIOS, EXPECTED_EXAMPLES, LOCKS};
 
@@ -183,7 +184,7 @@ impl Replayer<'_> {
         Ok(tx)
     }
 
-    fn balance_change_capacity(&self, tx: &mut Value) -> Result<()> {
+    fn balance_change_capacity(&mut self, tx: &mut Value) -> Result<()> {
         let mut input_capacity = 0_u64;
         for input in tx["inputs"].as_array().context("transaction inputs missing")? {
             let live = self.devnet.rpc("get_live_cell", vec![input["previous_output"].clone(), json!(false)])?;
@@ -210,16 +211,35 @@ impl Replayer<'_> {
                     && output["type"].is_null()
                     && data.as_str().is_some_and(|value| value == "0x")
             })
-            .map(|(index, _)| index)
-            .context("rebound transaction is under-capacity and has no adjustable change output")?;
-        let old_change = parse_hex_u64(&outputs[candidate]["capacity"])?;
-        let fixed = output_capacity - old_change;
-        let new_change = input_capacity.checked_sub(fixed).context("rebound transaction inputs cannot fund fixed outputs")?;
+            .map(|(index, _)| index);
         const ALWAYS_SUCCESS_EMPTY_OCCUPIED: u64 = 4_100_000_000;
-        if new_change < ALWAYS_SUCCESS_EMPTY_OCCUPIED {
-            bail!("rebound change output would be under occupied capacity: {new_change}");
+        if let Some(candidate) = candidate {
+            let old_change = parse_hex_u64(&outputs[candidate]["capacity"])?;
+            let fixed = output_capacity - old_change;
+            if let Some(new_change) = input_capacity.checked_sub(fixed)
+                && new_change >= ALWAYS_SUCCESS_EMPTY_OCCUPIED
+            {
+                tx["outputs"][candidate]["capacity"] = json!(format!("0x{new_change:x}"));
+                return Ok(());
+            }
         }
-        tx["outputs"][candidate]["capacity"] = json!(format!("0x{new_change:x}"));
+
+        // Some recipe transactions intentionally have no disposable change
+        // output: every output is a typed scenario cell. A replacement
+        // cellbase input can be smaller than the original fixture input, so
+        // add fresh always-success funding instead of mutating scenario state.
+        let deficit = output_capacity - input_capacity;
+        let funding = self.devnet.collect_spendable(deficit)?;
+        let inputs = tx["inputs"].as_array_mut().context("transaction inputs missing")?;
+        for cell in funding_cells(&funding) {
+            inputs.push(json!({
+                "previous_output": out_point(
+                    cell["tx_hash"].as_str().context("funding transaction hash missing")?,
+                    cell["index"].as_u64().context("funding output index missing")?,
+                ),
+                "since": "0x0",
+            }));
+        }
         Ok(())
     }
 }
