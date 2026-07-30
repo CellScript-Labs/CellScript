@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 use serde_json::{json, Value};
 
 use crate::crypto::canonical_report_hash;
-use crate::shared::{python_json_pretty, python_path};
+use crate::shared::{lexical_path, stable_json_pretty};
 
 const PERSON: &[u8] = b"NovaBtcSpvReqV0";
 const PROFILES: [&str; 3] = ["btc-transaction-commitment-profile-v0", "btc-utxo-seal-profile-v0", "dual-seal-profile-v0"];
@@ -242,8 +242,8 @@ pub fn run(root: &Path, service_builder: Option<&Path>, template: Option<&Path>,
     let default_service = root.join("target/novaseal-service-builder-fixtures.json");
     let default_template = root.join("proposals/novaseal/v0-mvp-skeleton/proofs/public_btc_spv_evidence.template.json");
     let default_output = root.join("target/novaseal-btc-spv-evidence-adapter.json");
-    let service = serde_json::from_slice::<Value>(&fs::read(python_path(service_builder.unwrap_or(&default_service)))?)?;
-    let template = serde_json::from_slice::<Value>(&fs::read(python_path(template.unwrap_or(&default_template)))?)?;
+    let service = serde_json::from_slice::<Value>(&fs::read(lexical_path(service_builder.unwrap_or(&default_service)))?)?;
+    let template = serde_json::from_slice::<Value>(&fs::read(lexical_path(template.unwrap_or(&default_template)))?)?;
     let cases = profile_cases(&service, &template)?;
     let matched = cases.iter().filter(|case| case["status"] == "passed").count();
     let passed = matched == cases.len();
@@ -260,9 +260,9 @@ pub fn run(root: &Path, service_builder: Option<&Path>, template: Option<&Path>,
         "summary": { "total": cases.len(), "matched": matched, "required_profiles": PROFILES },
         "cases": cases
     });
-    let output = python_path(output.unwrap_or(&default_output));
+    let output = lexical_path(output.unwrap_or(&default_output));
     fs::create_dir_all(output.parent().context("output path has no parent")?)?;
-    fs::write(&output, format!("{}\n", python_json_pretty(&report)?))?;
+    fs::write(&output, format!("{}\n", stable_json_pretty(&report)?))?;
     if pretty {
         println!(
             "wrote {} status={} profiles={}/{}",

@@ -4,18 +4,14 @@
 //! `Cargo.toml`, `Cargo.lock`, the VS Code extension, the changelogs, the
 //! wiki, the gate script, the website, and the source pin points.
 //!
-//! Behavioural contract (must match the Python script byte-for-byte on stdout
-//! and on exit code; stderr text is allowed to differ):
+//! Stable behavioural contract:
 //! - success: prints exactly `valid CellScript tooling release boundary` to
 //!   stdout and returns exit code 0;
 //! - assertion failure: prints
 //!   `invalid CellScript tooling release boundary: <message>` to stderr and
 //!   returns exit code 1;
 //! - structural failure (missing file / malformed JSON or TOML / missing gate
-//!   marker): the Python original raises an uncaught traceback and exits 1;
-//!   this port returns exit code 1 with a clean `anyhow` message. The dev/CI
-//!   gate only compares stdout and exit code, so this is a strictly-better
-//!   diagnostic without changing the contract.
+//!   marker): returns exit code 1 with a clean `anyhow` diagnostic.
 
 use std::path::Path;
 use std::sync::OnceLock;
@@ -27,11 +23,8 @@ use crate::shared::{contains, read_text, slice_between};
 
 /// A small helper for the substring-check idiom `token in text`.
 ///
-/// Mirrors `require_contains(path, tokens)` from the Python script: re-reads
-/// the file once per call (the Python original also re-reads on every call) so
-/// the behaviour is preserved exactly, including the per-token error message
-/// format `<path> is missing '<token>'` (single quotes, matching Python
-/// `repr()` of a string that contains double quotes).
+/// Re-reads the file once per call and retains the stable per-token error
+/// format `<path> is missing '<token>'`.
 fn require_contains(root: &Path, path: &str, tokens: &[impl AsRef<str>]) -> Result<()> {
     let text = read_text(root, path)?;
     for token in tokens {
@@ -43,10 +36,9 @@ fn require_contains(root: &Path, path: &str, tokens: &[impl AsRef<str>]) -> Resu
     Ok(())
 }
 
-/// Mirror `require(condition, message)` from the Python script. The message is
-/// the inner text only; the wrapping
+/// The message is the inner text only; the wrapping
 /// `invalid CellScript tooling release boundary: ` prefix is added here so
-/// that callers can use the bare inner message, matching the Python source.
+/// callers can use the bare inner message.
 fn require(condition: bool, message: impl Into<String>) -> Result<()> {
     if condition {
         Ok(())
@@ -55,9 +47,7 @@ fn require(condition: bool, message: impl Into<String>) -> Result<()> {
     }
 }
 
-/// Same as `require`, but the message is constructed only when the condition
-/// fails. Mirrors Python's eager `f""` interpolation while skipping the work
-/// in the common (passing) case.
+/// Same as `require`, but constructs the message only on failure.
 fn require_with<F: FnOnce() -> String>(condition: bool, msg: F) -> Result<()> {
     if condition {
         Ok(())
@@ -66,10 +56,8 @@ fn require_with<F: FnOnce() -> String>(condition: bool, msg: F) -> Result<()> {
     }
 }
 
-/// The single regex used by the script: capture the semver from the first
-/// `## <semver> - ` heading. Python uses `re.MULTILINE`, equivalent to `(?m)`
-/// here, so `^` matches at every line start; `re.search` returns the first
-/// match anywhere in the text.
+/// Capture semver from the first `## <semver> - ` heading. `(?m)` lets `^`
+/// match every line start.
 fn changelog_head() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
@@ -85,8 +73,8 @@ fn release_surface(crate_version: &str) -> String {
     base.split('.').take(2).collect::<Vec<_>>().join(".")
 }
 
-/// Entry point. Returns `Ok(())` (exit 0) on a valid boundary; otherwise an
-/// error whose display string is the full Python-shaped message.
+/// Entry point. Returns `Ok(())` on a valid boundary and a stable diagnostic on
+/// failure.
 pub fn run(root: &Path) -> Result<()> {
     // --- Stage A: load inputs and derive version-dependent values ---------
     let cargo_toml = read_text(root, "Cargo.toml")?;

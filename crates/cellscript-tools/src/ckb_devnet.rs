@@ -128,10 +128,7 @@ fn collect_source_files(root: &Path, path: &Path, files: &mut BTreeSet<PathBuf>,
         let entry = entry?;
         let child = entry.path();
         let relative = child.strip_prefix(path).unwrap_or(&child);
-        if relative
-            .components()
-            .any(|component| matches!(component.as_os_str().to_str(), Some("target" | "build" | ".git" | "__pycache__")))
-        {
+        if relative.components().any(|component| matches!(component.as_os_str().to_str(), Some("target" | "build" | ".git"))) {
             continue;
         }
         let metadata = fs::symlink_metadata(&child)?;

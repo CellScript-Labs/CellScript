@@ -150,6 +150,8 @@ enum Command {
     CheckDocStatus,
     /// Validate repository-local Markdown link targets.
     CheckMarkdownLinks,
+    /// Reject retired runtime sources, artifacts, and active-tooling residue.
+    CheckSourcePolicy,
     /// Validate the file list emitted by `cargo package --list`.
     CheckPackageContents { package_files: PathBuf },
     /// Print the root package version from Cargo.toml.
@@ -397,6 +399,10 @@ fn main() -> ExitCode {
             Err(error) => failure(error),
         },
         Command::CheckMarkdownLinks => match repository_checks::check_markdown_links(&root) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => failure(error),
+        },
+        Command::CheckSourcePolicy => match repository_checks::check_source_policy(&root) {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => failure(error),
         },

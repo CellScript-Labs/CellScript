@@ -128,22 +128,6 @@ check_trailing_whitespace() {
     fi
 }
 
-check_forbidden_tracked_files() {
-    local forbidden=()
-    local path
-    while IFS= read -r path; do
-        if [[ -e "$path" ]]; then
-            forbidden+=("$path")
-        fi
-    done < <(git ls-files '*DS_Store' '*.py')
-
-    if ((${#forbidden[@]} > 0)); then
-        printf 'Forbidden metadata or Python source files are tracked:\n' >&2
-        printf '  %s\n' "${forbidden[@]}" >&2
-        exit 1
-    fi
-}
-
 check_novaseal_verifier_pinning() {
     run cargo run --quiet --locked -p cellscript-tools --bin cellscript-tools -- \
         --root "$ROOT_DIR" check-novaseal-verifier-pinning
@@ -419,7 +403,8 @@ run_dev_gate() {
         --root "$ROOT_DIR" check-skill-pack
     check_cellscript_doc_status_freshness
     check_markdown_local_links
-    check_forbidden_tracked_files
+    run cargo run --quiet --locked -p cellscript-tools --bin cellscript-tools -- \
+        --root "$ROOT_DIR" check-source-policy
     run git diff --check
 }
 
@@ -456,7 +441,8 @@ run_ci_gate() {
     run_website_build_check
     check_script_syntax
     run git diff --check
-    check_forbidden_tracked_files
+    run cargo run --quiet --locked -p cellscript-tools --bin cellscript-tools -- \
+        --root "$ROOT_DIR" check-source-policy
     check_trailing_whitespace
 }
 

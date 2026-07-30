@@ -47,13 +47,14 @@ and validates every step's commit, spent-input liveness, live outputs, cycles,
 serialized size, and occupied capacity. `--stateful-scenarios` remains only as
 an explicit option for bounded runs.
 
-The transaction matrix is intentionally described as a Python acceptance
-harness. It is not relabelled as generated-builder output. Separately, the gate
-runs the public `cellc action build` and `cellc gen-builder` surfaces for every
-production action and hashes their generated contracts. Resource Type Scripts
-in these local transactions remain `always_success` fixtures; the report
-records that this proves verifier behaviour and transaction shape, not a
-production passive-resource-identity deployment.
+The transaction matrix is produced by the native Rust acceptance harness and
+is intentionally labelled as recipe-replayer evidence, not generated-builder
+output. Separately, the gate runs the public `cellc action build` and
+`cellc gen-builder` surfaces for every production action and hashes their
+generated contracts. Resource Type Scripts in these local transactions remain
+`always_success` fixtures; the report records that this proves verifier
+behaviour and transaction shape, not a production passive-resource-identity
+deployment.
 
 ### Fiber integration evidence
 

@@ -6,7 +6,7 @@ use std::process::Command;
 use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
 
-use crate::shared::{python_json_default, python_json_pretty};
+use crate::shared::{stable_json_pretty, stable_json_spaced};
 
 #[derive(Clone, Copy)]
 pub(crate) struct Contract {
@@ -239,9 +239,9 @@ fn not_run(contract: Contract) -> Value {
 
 fn render(value: &Value, pretty: bool) -> Result<String> {
     if pretty {
-        python_json_pretty(value)
+        stable_json_pretty(value)
     } else {
-        python_json_default(value)
+        stable_json_spaced(value)
     }
 }
 

@@ -40,7 +40,7 @@ impl Drop for TestDir {
 #[test]
 fn repository_policy_commands_pass_without_an_interpreter() {
     let root = repo_root();
-    for command in ["check-skill-pack", "validate-tooling-release"] {
+    for command in ["check-skill-pack", "validate-tooling-release", "check-source-policy"] {
         let output = run(&root, &[command]);
         assert!(
             output.status.success(),

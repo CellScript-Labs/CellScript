@@ -11,7 +11,7 @@ use regex::Regex;
 use serde_json::{json, Map, Value};
 use wait_timeout::ChildExt;
 
-use crate::shared::python_json_pretty;
+use crate::shared::stable_json_pretty;
 
 const SCHEMA: &str = "novaseal-fiber-node-execution-v0.4";
 const PREVIOUS_SCHEMAS: &[&str] =
@@ -499,7 +499,7 @@ pub fn run(
         "tooling": {"npm": which("npm"), "cargo": which("cargo"), "ckb": which("ckb"), "ckb_cli": which("ckb-cli")}
     });
     fs::create_dir_all(output.parent().context("output path has no parent")?)?;
-    let text = if pretty { python_json_pretty(&report)? } else { serde_json::to_string(&report)? };
+    let text = if pretty { stable_json_pretty(&report)? } else { serde_json::to_string(&report)? };
     fs::write(&output, format!("{}\n", text.trim_end_matches('\n')))?;
     println!("{}", output.display());
     Ok(if matches!(status, "missing_fiber_clone" | "incomplete" | "failed") { 1 } else { 0 })

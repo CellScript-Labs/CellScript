@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
 
-use crate::shared::python_json_pretty;
+use crate::shared::stable_json_pretty;
 
 fn read_json(path: &Path) -> Result<Value> {
     serde_json::from_slice(&fs::read(path).with_context(|| format!("failed to read {}", path.display()))?)
@@ -295,7 +295,7 @@ pub fn scope_014(out_dir: &Path, metadata_paths: &[PathBuf]) -> Result<()> {
         "capacity_floor_types": capacity_types,
     });
     let report_path = out_dir.join("cellscript-0-14-scope-audit-report.json");
-    fs::write(&report_path, format!("{}\n", python_json_pretty(&report)?))?;
+    fs::write(&report_path, format!("{}\n", stable_json_pretty(&report)?))?;
     println!("valid CellScript 0.14 scope audit: {}", report_path.display());
     Ok(())
 }

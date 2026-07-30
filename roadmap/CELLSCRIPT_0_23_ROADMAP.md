@@ -1,9 +1,9 @@
 # CellScript 0.23 Roadmap
 
 **Status**: Draft, pending release-line coordination before adoption
-**Scope**: public registry production deployment on `cellscript.dev`, Python
-test/fixture scaffolding ported to Rust, deeper RGB++ / Fiber integration, and
-a Myelin-aligned Off-Chain Session Runtime profile with initial concurrency
+**Scope**: public registry production deployment on `cellscript.dev`, completed
+native test/fixture tooling, deeper RGB++ / Fiber integration, and a
+Myelin-aligned Off-Chain Session Runtime profile with initial concurrency
 support
 **Depends on**: the 0.22 typed transaction views, bounded collections, stable
 `E2xxx` diagnostics, the existing `cellscript-fiber-adapter` no-profile path,
@@ -128,7 +128,7 @@ Source documents:
 - [Registry Phase 1 walkthrough](../docs/CELLSCRIPT_REGISTRY_PHASE1.md)
 - [Registry API service README](../services/registry-api/README.md)
 
-## Pillar 2: Python Tooling Ported To Rust
+## Pillar 2: Native Tooling Migration Complete
 
 CellScript's load-bearing tooling is now Python-free. Gate, evidence, and
 proposal logic lives in Rust; Astro-facing website data generation stays in
@@ -146,14 +146,16 @@ the website's native Node runtime.
 - `website/scripts/*.mjs` owns registry, compiler-output, and GitHub activity
   data generation without introducing a second runtime into the Astro build.
 - `scripts/cellscript_gate.sh` invokes only Rust, shell, and Node tooling. The
-  Python syntax-check arm and all tracked Python sources have been removed.
+  retired syntax-check arm and all tracked interpreter sources have been
+  removed; a repository-wide native source policy prevents reintroduction.
 - Evidence producers preserve their established JSON shape where it remains
   part of the release contract; implementation-origin fields now truthfully
   identify the Rust harness and transaction-recipe replay path.
 
 ### Acceptance Boundary
 
-- `./scripts/cellscript_gate.sh dev` and `ci` pass without Python installed.
+- `./scripts/cellscript_gate.sh dev` and `ci` pass with only the declared Rust,
+  shell, and Node runtimes.
 - Deterministic static reports remain byte-stable for the same inputs; live
   reports preserve their schemas while binding fresh devnet transactions.
 - The NovaSeal verifier pinning check still recomputes BLAKE2b and SHA-256
@@ -165,8 +167,8 @@ the website's native Node runtime.
 ### Non-Goals
 
 - No rewrite of the compiler, the gate script's bash orchestration, or the
-  CKB acceptance harness's bash wrappers. Only the Python leaves the
-  contract.
+  CKB acceptance harness's bash wrappers. The migration changes the native
+  tooling implementation, not those orchestration boundaries.
 - No change to the evidence schema or file naming.
 - No dropping of historical evidence files; the ports must keep reading
   them.
@@ -341,9 +343,8 @@ Source documents:
 
 0.23 does not relax any existing project contract:
 
-- Trailing-whitespace, forbidden tracked-file, and `git diff --check` gates
-  still apply. The Python-to-Rust port must re-run `cargo fmt` and fix
-  whitespace.
+- Trailing-whitespace, native source-policy, and `git diff --check` gates still
+  apply. Native tooling changes must re-run `cargo fmt` and fix whitespace.
 - The website build still regenerates
   `website/src/data/registry-packages.json` and fails if it is dirty in the
   working tree; if the production registry changes what gets regenerated,
@@ -364,8 +365,9 @@ Source documents:
 The four pillars are largely independent and can be tracked as parallel
 work streams. Suggested ordering for *release-blocking* slices:
 
-1. Pillar 2 (Python → Rust) lands first, because it changes the shape of the
-   gate itself and every later pillar's evidence runs through that gate.
+1. Pillar 2 (native tooling migration) lands first, because it changes the
+   shape of the gate itself and every later pillar's evidence runs through
+   that gate.
 2. Pillar 1 (registry production) lands next, because it unblocks real
    package publishing for everything else.
 3. Pillar 4 (Off-Chain Session Runtime profile) lands next, because Myelin
@@ -381,9 +383,9 @@ work streams. Suggested ordering for *release-blocking* slices:
   Hyperdrive/R2/Neon integration issues that the test suite does not cover.
   Mitigation: staging-first, fail-fast-before-object-storage, full admin
   audit log.
-- **Python-to-Rust port drift**. A subtle difference in evidence-report
-  formatting breaks historical comparisons. Mitigation: byte-identical
-  output requirement, parallel-run period before Python deletion.
+- **Native tooling serialization drift**. A subtle difference in
+  evidence-report formatting breaks historical comparisons. Mitigation:
+  byte-identical output requirements, stable schemas, and regression vectors.
 - **Off-Chain Session Runtime scope creep**. The profile can easily grow
   into a general concurrency model. Mitigation: bounded scheduler-visible
   operations only, fail-closed when the host does not provide them, no

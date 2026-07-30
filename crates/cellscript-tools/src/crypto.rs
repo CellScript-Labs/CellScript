@@ -5,7 +5,7 @@ use blake2b_ref::Blake2bBuilder;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-use crate::shared::python_json_compact;
+use crate::shared::stable_json_compact;
 
 pub fn hex0x(bytes: &[u8]) -> String {
     format!("0x{}", hex::encode(bytes))
@@ -38,7 +38,7 @@ pub fn ckb_blake2b256(bytes: &[u8]) -> Result<[u8; 32]> {
 }
 
 pub fn canonical_report_hash(personalization: &[u8], label: &str, value: &Value) -> Result<String> {
-    let canonical = python_json_compact(value)?;
+    let canonical = stable_json_compact(value)?;
     let digest = personalized_blake2b256(personalization, &[label.as_bytes(), b"\0", canonical.as_bytes()])?;
     Ok(hex0x(&digest))
 }

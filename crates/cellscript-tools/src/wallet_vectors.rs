@@ -8,7 +8,7 @@ use anyhow::{bail, Context, Result};
 use serde_json::{json, Map, Value};
 
 use crate::crypto::{bytes32, ckb_blake2b256, decode_hex0x, hex0x, personalized_blake2b256};
-use crate::shared::{python_json_pretty, python_path};
+use crate::shared::{lexical_path, stable_json_pretty};
 
 const PACKED_HASH_DOMAIN: &[u8] = b"CellScriptPackedHashV0\0";
 const VECTOR_PERSON: &[u8] = b"NovaSealWalletV0";
@@ -447,8 +447,8 @@ fn agreement_vectors() -> Result<Vec<Value>> {
 pub fn run(root: &Path, core_vectors_path: Option<&Path>, output: Option<&Path>, pretty: bool) -> Result<i32> {
     let default_core = root.join("proposals/novaseal/v0-mvp-skeleton/target/novaseal-canonical-vectors.json");
     let default_output = root.join("target/novaseal-wallet-signing-vectors.json");
-    let core_path = python_path(core_vectors_path.unwrap_or(&default_core));
-    let output = python_path(output.unwrap_or(&default_output));
+    let core_path = lexical_path(core_vectors_path.unwrap_or(&default_core));
+    let output = lexical_path(output.unwrap_or(&default_output));
     let mut vectors = core_vectors(&core_path)?;
     vectors.extend(agreement_vectors()?);
     let matched = vectors.iter().filter(|vector| vector["status"] == "passed").count();
@@ -477,7 +477,7 @@ pub fn run(root: &Path, core_vectors_path: Option<&Path>, output: Option<&Path>,
     });
     let parent = output.parent().filter(|parent| !parent.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(parent).with_context(|| format!("failed to create {}", parent.display()))?;
-    fs::write(&output, format!("{}\n", python_json_pretty(&payload)?))
+    fs::write(&output, format!("{}\n", stable_json_pretty(&payload)?))
         .with_context(|| format!("failed to write {}", output.display()))?;
     if pretty {
         println!(

@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 use crate::crypto::sha256_hex;
-use crate::shared::{python_json_pretty, python_path};
+use crate::shared::{lexical_path, stable_json_pretty};
 
 fn load(root: &Path, path: &Path) -> Result<Value> {
     if !path.exists() {
@@ -30,7 +30,7 @@ fn collect_source(root: &Path, directory: &Path, files: &mut Vec<PathBuf>, inval
         }
         if metadata.is_dir() {
             let name = entry.file_name();
-            if ["target", "build", ".git", "__pycache__"].iter().any(|skip| name == *skip) {
+            if ["target", "build", ".git"].iter().any(|skip| name == *skip) {
                 continue;
             }
             collect_source(root, &path, files, invalid)?;
@@ -257,9 +257,9 @@ pub fn run(root: &Path, output: Option<&Path>, pretty: bool) -> Result<i32> {
         }
     });
     let default_output = target.join("novaseal-bip340-tcb-review.json");
-    let output = python_path(output.unwrap_or(&default_output));
+    let output = lexical_path(output.unwrap_or(&default_output));
     fs::create_dir_all(output.parent().context("output path has no parent")?)?;
-    fs::write(&output, format!("{}\n", python_json_pretty(&report)?))?;
+    fs::write(&output, format!("{}\n", stable_json_pretty(&report)?))?;
     if pretty {
         println!(
             "wrote {} status={} artifact={} local_gates={}",

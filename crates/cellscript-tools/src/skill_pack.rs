@@ -6,14 +6,11 @@
 //! stays inside the repo, and every `cellc` command token used in a skill is
 //! present in the live CLI registry extracted from `src/cli/commands.rs`.
 //!
-//! Behavioural contract (must match the Python script byte-for-byte on stdout
-//! and on exit code; stderr text is allowed to differ):
+//! Stable behavioural contract:
 //! - always emits exactly one JSON document on stdout (pass or fail);
 //! - exit 0 iff no failures; exit 1 if any failure was recorded;
-//! - a structurally malformed `SKILL.md` (missing/unterminated/malformed
-//!   front matter) is a hard error: the Python original raises an uncaught
-//!   `ValueError` and dies without emitting JSON; this port mirrors that by
-//!   returning an `Err` before any JSON is printed.
+//! - a structurally malformed `SKILL.md` is a hard error returned before any
+//!   JSON is printed.
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -23,11 +20,9 @@ use regex::Regex;
 use serde_json::json;
 use std::sync::OnceLock;
 
-use crate::shared::python_json_pretty;
+use crate::shared::stable_json_pretty;
 
-/// The expected skill directory names, mirrored verbatim from
-/// `EXPECTED_SKILLS` in the Python script. Order is irrelevant (Python uses a
-/// `set`); we keep them sorted for readability.
+/// Expected skill directory names, kept sorted for readability.
 const EXPECTED_SKILLS: &[&str] = &[
     "cellscript-ckb-model",
     "cellscript-diagnostics",
@@ -37,16 +32,14 @@ const EXPECTED_SKILLS: &[&str] = &[
     "cellscript-package-cli",
 ];
 
-/// The single regex used to extract visible CLI command names from
-/// `src/cli/commands.rs`. Verbatim from the Python script.
+/// Extract visible CLI command names from `src/cli/commands.rs`.
 fn cli_command_regex() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(r#"ClapCommand::new\("([^"]+)"\)"#).expect("CLI command regex must compile"))
 }
 
-/// A parsed front-matter field. Mirrors the Python
-/// `dict[str, list[str] | str]` without collapsing scalars into lists: the
-/// validator deliberately rejects scalar `references` and `commands`.
+/// A parsed front-matter field. Scalars remain distinct from lists so the
+/// validator can reject scalar `references` and `commands`.
 enum FrontMatterValue {
     Scalar(String),
     List(Vec<String>),
@@ -57,8 +50,8 @@ struct FrontMatter {
     fields: std::collections::BTreeMap<String, FrontMatterValue>,
 }
 
-/// Hand-rolled YAML front-matter parser, byte-for-byte compatible with
-/// `parse_front_matter()` in the Python script.
+/// Hand-rolled YAML front-matter parser for the deliberately narrow skill-pack
+/// schema.
 ///
 /// Semantics mirrored exactly:
 /// - the file MUST start with `---\n` at byte 0 (no leading whitespace, no
@@ -76,8 +69,7 @@ fn parse_front_matter(text: &str, path: &Path) -> anyhow::Result<FrontMatter> {
     if !text.starts_with("---\n") {
         return Err(anyhow::anyhow!("{} is missing YAML-style front matter", path.display()));
     }
-    // Python: text.split("---\n", 2)[1]. The same split semantics: split into
-    // at most 3 parts on the literal delimiter. The first part is everything
+    // Split into at most three parts on the literal delimiter. The first is
     // before the opening `---\n` (empty, since the file starts with it); the
     // second part is the front matter; the third is the body.
     let parts: Vec<&str> = text.splitn(3, "---\n").collect();
@@ -87,9 +79,7 @@ fn parse_front_matter(text: &str, path: &Path) -> anyhow::Result<FrontMatter> {
     let mut current_list: Option<String> = None;
 
     for raw_line in header.split('\n') {
-        // Python uses `raw_line.rstrip()` which strips only trailing
-        // whitespace (spaces and tabs and newlines, but splitlines already
-        // removed newlines). Rust's `trim_end` matches that.
+        // Strip trailing whitespace after line splitting.
         let line = raw_line.trim_end();
         if line.is_empty() {
             continue;
@@ -113,11 +103,10 @@ fn parse_front_matter(text: &str, path: &Path) -> anyhow::Result<FrontMatter> {
         let key = key.trim().to_string();
         let value = value.trim();
         if !value.is_empty() {
-            // Scalar: overwrite any prior list/scalar (Python dict assignment).
+            // Scalar values replace any prior field value.
             fm.fields.insert(key, FrontMatterValue::Scalar(value.to_string()));
         } else {
-            // List head: replace any prior scalar/list with a fresh list,
-            // matching Python's `result[key] = []`.
+            // A list head replaces any prior field value with a fresh list.
             fm.fields.insert(key.clone(), FrontMatterValue::List(Vec::new()));
             current_list = Some(key);
         }
@@ -167,8 +156,7 @@ fn discover_skills(root: &Path) -> anyhow::Result<Vec<(PathBuf, String)>> {
             found.push((skill_md, dir_name));
         }
     }
-    // Python's `sorted(glob)` sorts the absolute PathBufs lexically; mirror
-    // that by sorting on the path.
+    // Keep discovery deterministic by sorting absolute paths lexically.
     found.sort_by(|a, b| a.0.cmp(&b.0));
     Ok(found)
 }
@@ -184,8 +172,8 @@ fn validate_skill(skill_md: &Path, fm: &FrontMatter, root: &Path, command_names:
     let name_is_missing = match fm.fields.get("name") {
         None => true,
         Some(FrontMatterValue::Scalar(value)) => value.trim().is_empty(),
-        // Python applies `str(...)` before `strip()`. Both `[]` and every
-        // non-empty list therefore count as a present name.
+        // Any list value counts as present here and fails later type-specific
+        // validation where appropriate.
         Some(FrontMatterValue::List(_)) => false,
     };
     if name_is_missing {
@@ -243,10 +231,8 @@ fn validate_skill(skill_md: &Path, fm: &FrontMatter, root: &Path, command_names:
 
 /// Entry point. Returns the exit code the binary should propagate.
 ///
-/// On a structurally malformed `SKILL.md` the Python original raises an
-/// uncaught `ValueError` (no JSON emitted). This port mirrors that: the
-/// `anyhow::Error` propagates and `main.rs` prints it to stderr and returns
-/// exit code 1 without printing any JSON.
+/// A structurally malformed `SKILL.md` propagates an `anyhow::Error`; `main.rs`
+/// prints it to stderr and returns exit code 1 without printing JSON.
 pub fn run(root: &Path) -> anyhow::Result<i32> {
     let skill_files = discover_skills(root)?;
     let found: BTreeSet<String> = skill_files.iter().map(|(_, name)| name.clone()).collect();
@@ -269,8 +255,7 @@ pub fn run(root: &Path) -> anyhow::Result<i32> {
     let command_names = visible_command_names(root)?;
     for (skill_md, _name) in &skill_files {
         let text = fs::read_to_string(skill_md)?;
-        // A malformed file propagates as a hard error (no JSON emitted),
-        // mirroring the Python uncaught ValueError.
+        // A malformed file propagates as a hard error with no JSON emitted.
         let fm = parse_front_matter(&text, skill_md)?;
         validate_skill(skill_md, &fm, root, &command_names, &mut failures);
     }
@@ -284,13 +269,9 @@ pub fn run(root: &Path) -> anyhow::Result<i32> {
         "skill_count": skill_files.len(),
         "failures": failures,
     });
-    // Python: `json.dumps(report, indent=2, sort_keys=True)` followed by
-    // `print()`. `serde_json::to_string_pretty` matches `indent=2`. Keys are
-    // already sorted alphabetically because `report` is built from a
-    // `serde_json::Map` (BTreeMap-backed when the `preserve_order` feature is
-    // off, which it is here). The trailing newline from Python's `print()` is
-    // added by `println!`.
-    println!("{}", python_json_pretty(&report)?);
+    // Stable pretty JSON uses sorted keys; `println!` adds the required final
+    // newline.
+    println!("{}", stable_json_pretty(&report)?);
 
     Ok(if failures.is_empty() { 0 } else { 1 })
 }

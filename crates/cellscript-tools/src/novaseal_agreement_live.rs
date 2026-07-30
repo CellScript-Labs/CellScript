@@ -12,7 +12,7 @@ use crate::ckb_devnet::{
     schnorr_sign, transaction, u16_bytes, u32_bytes, u64_bytes, u8_bytes, xonly_pubkey, CkbDevnet, RECEIPT_CAPACITY, SHANNONS,
     STATE_CAPACITY, TEST_AUX_RAND, TEST_SECRET_KEY, ZERO_HASH,
 };
-use crate::shared::{python_json_default, python_json_pretty};
+use crate::shared::{stable_json_pretty, stable_json_spaced};
 
 const VERSION: u64 = 0;
 const ASSET_KIND_CKB: u64 = 0;
@@ -1369,7 +1369,7 @@ pub fn run(
         None => root.join("target/novaseal-agreement-devnet-stateful-live.json"),
     };
     fs::create_dir_all(output.parent().context("output path has no parent")?)?;
-    let text = if pretty { python_json_pretty(&report)? } else { python_json_default(&report)? };
+    let text = if pretty { stable_json_pretty(&report)? } else { stable_json_spaced(&report)? };
     fs::write(&output, format!("{text}\n"))?;
     println!(
         "wrote {} status={} live_devnet_rpc_executed={}",
@@ -1398,7 +1398,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn deterministic_lender_key_matches_python_contract() {
+    fn deterministic_lender_key_matches_reference_contract() {
         assert_eq!(
             hex0x(&xonly_pubkey(&LENDER_SECRET).unwrap()),
             "0x4f355bdcb7cc0af728ef3cceb9615d90684bb5b2ca5f859ab0f0b704075871aa"

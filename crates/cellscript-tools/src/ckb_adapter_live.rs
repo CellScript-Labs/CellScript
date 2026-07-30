@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 use crate::ckb_devnet::{
     always_success_dep, always_success_lock, ckb_hash_hex, decode_hex, hex0x, out_point, resolve_ckb_bin, transaction, CkbDevnet,
 };
-use crate::shared::{python_json_compact, python_json_pretty};
+use crate::shared::{stable_json_compact, stable_json_pretty};
 
 const FEE: u64 = 1_000;
 
@@ -81,8 +81,8 @@ pub fn run(ckb_repo: &Path, ckb_bin: Option<&Path>, run_dir: &Path, action_plan_
         Some(&artifact),
     )?;
 
-    let smoke_text = python_json_compact(&smoke_tx)?;
-    let deploy_text = python_json_compact(&deploy_tx)?;
+    let smoke_text = stable_json_compact(&smoke_tx)?;
+    let deploy_text = stable_json_compact(&deploy_tx)?;
     let report = json!({
         "schema": "cellscript-ckb-adapter-local-node-acceptance-v0.19",
         "status": "passed",
@@ -125,7 +125,7 @@ pub fn run(ckb_repo: &Path, ckb_bin: Option<&Path>, run_dir: &Path, action_plan_
         ],
         "implementation": {"language": "rust", "tool": "cellscript-tools", "source": "crates/cellscript-tools/src/ckb_adapter_live.rs"},
     });
-    fs::write(report_path, format!("{}\n", python_json_pretty(&report)?))?;
+    fs::write(report_path, format!("{}\n", stable_json_pretty(&report)?))?;
     println!("{}", report_path.display());
     devnet.stop();
     Ok(0)

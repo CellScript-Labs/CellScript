@@ -1,7 +1,7 @@
 //! Shared helpers for the cellscript-tools binaries.
 //!
-//! These helpers preserve the historical report encodings and path semantics
-//! so the native Rust tools remain compatible with existing evidence.
+//! These helpers preserve stable report encodings and path semantics so native
+//! tools remain compatible with existing evidence.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -10,13 +10,10 @@ use serde_json::Value;
 
 /// Resolve the CellScript repository root.
 ///
-/// Mirrors the Python scripts' `Path(__file__).resolve().parents[1]` (the
-/// parent of `scripts/`), but the Rust binary does not live under `scripts/`,
-/// so resolution is performed by walking up from the current directory until a
-/// `Cargo.toml` declaring `name = "cellscript"` is found.
+/// Resolution walks up from the current directory until a `Cargo.toml`
+/// declaring `name = "cellscript"` is found.
 ///
-/// `--root` overrides the walk and is canonicalised, matching
-/// `Path(__file__).resolve()` in the Python scripts. This matters on platforms
+/// `--root` overrides the walk and is canonicalised. This matters on platforms
 /// such as macOS where `/var` resolves to `/private/var`.
 pub fn resolve_repo_root(override_root: Option<&Path>) -> anyhow::Result<PathBuf> {
     if let Some(root) = override_root {
@@ -41,8 +38,7 @@ pub fn resolve_repo_root(override_root: Option<&Path>) -> anyhow::Result<PathBuf
 
 /// Read a UTF-8 text file relative to the repo root.
 ///
-/// Mirrors `read(path)` in the Python tooling scripts, which always reads
-/// `(ROOT / path)` as UTF-8 and propagates `FileNotFoundError` on absence.
+/// The path is resolved beneath `root` and decoded as UTF-8.
 pub fn read_text(root: &Path, relative: &str) -> anyhow::Result<String> {
     let full = root.join(relative);
     fs::read_to_string(&full).map_err(|e| anyhow::anyhow!("failed to read {}: {e}", full.display()))
@@ -50,23 +46,16 @@ pub fn read_text(root: &Path, relative: &str) -> anyhow::Result<String> {
 
 /// Substring containment check.
 ///
-/// Mirrors `token in text` from the Python `require_contains` helper: a plain
-/// substring match, not a line-based one. Tokens may contain embedded
-/// newlines; the match is byte-for-byte on the original text.
+/// This is a plain substring match, not a line-based one. Tokens may contain
+/// embedded newlines; the match is byte-for-byte on the original text.
 pub fn contains(text: &str, token: &str) -> bool {
     text.contains(token)
 }
 
 /// Slice the text strictly between two marker substrings.
 ///
-/// Mirrors the Python pattern
-/// `text.split(start, 1)[1].split(end, 1)[0]`, returning the text after the
-/// first `start` and before the first subsequent `end`.
-///
-/// Unlike the Python original, which raises `IndexError` when a marker is
-/// missing, this surfaces a clean error message identifying the missing
-/// marker. The dev/CI gate compares stdout and exit code only, so this is a
-/// strictly-better diagnostic.
+/// Returns the text after the first `start` and before the first subsequent
+/// `end`, with a diagnostic naming either missing marker.
 pub fn slice_between<'a>(text: &'a str, start: &str, end: &str) -> anyhow::Result<&'a str> {
     let after_start = text
         .split_once(start)
@@ -79,32 +68,26 @@ pub fn slice_between<'a>(text: &'a str, start: &str, end: &str) -> anyhow::Resul
     Ok(before_end)
 }
 
-/// Apply the lexical normalisation performed by Python's `pathlib.Path`:
-/// collapse repeated separators and `.` components without resolving
-/// symlinks or parent components.
-pub fn python_path(path: &Path) -> PathBuf {
+/// Collapse repeated separators and `.` components without resolving symlinks
+/// or parent components.
+pub fn lexical_path(path: &Path) -> PathBuf {
     path.components().collect()
 }
 
-/// Render a JSON value like Python's
-/// `json.dumps(value, indent=2, sort_keys=True)`.
-pub fn python_json_pretty(value: &Value) -> anyhow::Result<String> {
+/// Render stable pretty JSON with sorted object keys and ASCII-only escapes.
+pub fn stable_json_pretty(value: &Value) -> anyhow::Result<String> {
     let json = serde_json::to_string_pretty(value)?;
     Ok(escape_json_non_ascii(&json))
 }
 
-/// Render a JSON value like Python's
-/// `json.dumps(value, sort_keys=True, separators=(",", ":"))`.
-pub fn python_json_compact(value: &Value) -> anyhow::Result<String> {
+/// Render stable compact JSON with sorted object keys and ASCII-only escapes.
+pub fn stable_json_compact(value: &Value) -> anyhow::Result<String> {
     let json = serde_json::to_string(value)?;
     Ok(escape_json_non_ascii(&json))
 }
 
-/// Render a JSON value like Python's `json.dumps(value, sort_keys=True)`.
-/// Python's default compact formatter keeps one space after commas and
-/// colons; serde_json's compact formatter does not, so add those separators
-/// while respecting string literals and escapes.
-pub fn python_json_default(value: &Value) -> anyhow::Result<String> {
+/// Render stable single-line JSON with one space after commas and colons.
+pub fn stable_json_spaced(value: &Value) -> anyhow::Result<String> {
     let json = serde_json::to_string(value)?;
     let mut rendered = String::with_capacity(json.len() + json.len() / 8);
     let mut in_string = false;
@@ -128,9 +111,8 @@ pub fn python_json_default(value: &Value) -> anyhow::Result<String> {
     Ok(escape_json_non_ascii(&rendered))
 }
 
-/// Match Python's default `ensure_ascii=True` JSON behaviour. `serde_json`
-/// emits non-ASCII Unicode directly, while Python writes UTF-16 `\u` escapes
-/// (including surrogate pairs for non-BMP characters).
+/// Escape non-ASCII text as UTF-16 `\u` units, including surrogate pairs for
+/// non-BMP characters, so report bytes remain platform-independent.
 fn escape_json_non_ascii(json: &str) -> String {
     let mut escaped = String::with_capacity(json.len());
     for character in json.chars() {
@@ -153,7 +135,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn python_default_json_spacing_ignores_string_punctuation() {
-        assert_eq!(python_json_default(&json!({"a": [1, 2], "b": "x,y:z\""})).unwrap(), r#"{"a": [1, 2], "b": "x,y:z\""}"#);
+    fn stable_spaced_json_spacing_ignores_string_punctuation() {
+        assert_eq!(stable_json_spaced(&json!({"a": [1, 2], "b": "x,y:z\""})).unwrap(), r#"{"a": [1, 2], "b": "x,y:z\""}"#);
     }
 }

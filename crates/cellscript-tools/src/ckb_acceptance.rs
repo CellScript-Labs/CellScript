@@ -614,7 +614,7 @@ mod tests {
     }
 
     #[test]
-    fn transaction_recipe_fixture_is_rust_migration_v023() {
+    fn transaction_recipe_fixture_is_native_v023() {
         let fixture: Value = serde_json::from_str(include_str!("../fixtures/ckb_acceptance/transactions-v0.23.json")).unwrap();
         assert_eq!(fixture["schema"], "cellscript-ckb-acceptance-transaction-recipes-v0.23");
         assert_eq!(fixture["action_cases"].as_array().unwrap().len(), 43);

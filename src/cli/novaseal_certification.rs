@@ -3234,7 +3234,7 @@ fn collect_source_tree_files(
         let entry = entry?;
         let child = entry.path();
         let relative_parts = child.strip_prefix(root).unwrap_or(&child).components().map(|part| part.as_os_str().to_string_lossy());
-        if relative_parts.clone().any(|part| matches!(part.as_ref(), "target" | "build" | ".git" | "__pycache__")) {
+        if relative_parts.clone().any(|part| matches!(part.as_ref(), "target" | "build" | ".git")) {
             continue;
         }
         let metadata = std::fs::symlink_metadata(&child)?;
@@ -8385,7 +8385,7 @@ mod tests {
     }
 
     #[test]
-    fn novaseal_handoff_hash_matches_python_generator_vector() {
+    fn novaseal_handoff_hash_matches_reference_generator_vector() {
         let value = json!({
             "z": 1,
             "a": ["b", true, null],

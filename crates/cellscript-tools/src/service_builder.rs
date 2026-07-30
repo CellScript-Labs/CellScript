@@ -9,7 +9,7 @@ use serde_json::{json, Map, Value};
 
 use crate::btc_anchor::public_btc_anchor_shape_matches_profile;
 use crate::crypto::{canonical_report_hash, nonzero_hex32};
-use crate::shared::{python_json_pretty, python_path};
+use crate::shared::{lexical_path, stable_json_pretty};
 
 const REPORT_PERSON: &[u8] = b"NovaSvcBuildV0";
 
@@ -176,15 +176,15 @@ fn build_report(operator_fixtures: &Value) -> Result<Value> {
 pub fn run(root: &Path, operator_fixtures: Option<&Path>, output: Option<&Path>, pretty: bool) -> Result<i32> {
     let default_operator = root.join("target/novaseal-profile-operator-fixtures.json");
     let default_output = root.join("target/novaseal-service-builder-fixtures.json");
-    let operator_path = python_path(operator_fixtures.unwrap_or(&default_operator));
-    let output_path = python_path(output.unwrap_or(&default_output));
+    let operator_path = lexical_path(operator_fixtures.unwrap_or(&default_operator));
+    let output_path = lexical_path(output.unwrap_or(&default_output));
     let operator: Value =
         serde_json::from_slice(&fs::read(&operator_path).with_context(|| format!("failed to read {}", operator_path.display()))?)
             .with_context(|| format!("{} is not valid JSON", operator_path.display()))?;
     let report = build_report(&operator)?;
     let parent = output_path.parent().filter(|parent| !parent.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(parent).with_context(|| format!("failed to create {}", parent.display()))?;
-    fs::write(&output_path, format!("{}\n", python_json_pretty(&report)?))
+    fs::write(&output_path, format!("{}\n", stable_json_pretty(&report)?))
         .with_context(|| format!("failed to write {}", output_path.display()))?;
     if pretty {
         println!(

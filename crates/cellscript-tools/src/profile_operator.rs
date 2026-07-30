@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 
 use crate::btc_anchor::public_btc_anchor_shape_matches_profile;
 use crate::crypto::{canonical_report_hash, ckb_blake2b256, hex0x, sha256_hex};
-use crate::shared::{python_json_compact, python_json_pretty, python_path};
+use crate::shared::{lexical_path, stable_json_compact, stable_json_pretty};
 
 const REPORT_PERSON: &[u8] = b"NovaProfileFxV0";
 const PACKED_DOMAIN: &[u8] = b"NovaSealProfileOperatorFixtureV0\0";
@@ -215,7 +215,7 @@ fn packed_hash(type_name: &str, packed: &[u8]) -> Result<(String, String)> {
     Ok((hex0x(&preimage), hex0x(&ckb_blake2b256(&preimage)?)))
 }
 
-fn python_truthy(value: &Value) -> bool {
+fn json_truthy(value: &Value) -> bool {
     match value {
         Value::Null => false,
         Value::Bool(value) => *value,
@@ -303,7 +303,7 @@ fn build_case(root: &Path, profile: &ProfileCase, action_case: &ActionCase) -> R
         "public_btc_anchor": public_btc_anchor,
         "external_boundary": profile.external_boundary,
     });
-    let packed = python_json_compact(&intent_body)?.into_bytes();
+    let packed = stable_json_compact(&intent_body)?.into_bytes();
     let (preimage, digest) = packed_hash(profile.signed_type, &packed)?;
     let tx_skeleton = json!({
         "profile": profile.profile,
@@ -319,10 +319,9 @@ fn build_case(root: &Path, profile: &ProfileCase, action_case: &ActionCase) -> R
     let live_passed = live_report.as_ref().and_then(|report| report.get("status")).and_then(Value::as_str) == Some("passed")
         || profile.external_boundary == Some("package_fixture_only_external_btc_and_ckb_finality_required");
     let fiber_passed = fiber_report.as_ref().is_none_or(|report| {
-        !python_truthy(report)
-            || report.pointer("/workflow_coverage/all_required_workflows_executed_passed") == Some(&Value::Bool(true))
+        !json_truthy(report) || report.pointer("/workflow_coverage/all_required_workflows_executed_passed") == Some(&Value::Bool(true))
     });
-    let anchor_present = !public_btc_required || python_truthy(&public_btc_anchor);
+    let anchor_present = !public_btc_required || json_truthy(&public_btc_anchor);
     let anchor_shape = !public_btc_required || public_btc_anchor_shape_matches_profile(profile.profile, Some(&public_btc_anchor));
     let checks = json!({
         "fixture_expected_accepted": fixture_expected,
@@ -389,11 +388,11 @@ fn build_report(root: &Path) -> Result<Value> {
 
 pub fn run(root: &Path, output: Option<&Path>, pretty: bool) -> Result<i32> {
     let default_output = root.join("target/novaseal-profile-operator-fixtures.json");
-    let output = python_path(output.unwrap_or(&default_output));
+    let output = lexical_path(output.unwrap_or(&default_output));
     let report = build_report(root)?;
     let parent = output.parent().filter(|parent| !parent.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(parent).with_context(|| format!("failed to create {}", parent.display()))?;
-    fs::write(&output, format!("{}\n", python_json_pretty(&report)?))
+    fs::write(&output, format!("{}\n", stable_json_pretty(&report)?))
         .with_context(|| format!("failed to write {}", output.display()))?;
     if pretty {
         println!(

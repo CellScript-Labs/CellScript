@@ -8,7 +8,7 @@ use anyhow::{Context, Result};
 use serde_json::{json, Value};
 
 use crate::crypto::canonical_report_hash;
-use crate::shared::{python_json_pretty, python_path};
+use crate::shared::{lexical_path, stable_json_pretty};
 
 const PERSON: &[u8] = b"NovaExtAttReqV0";
 
@@ -181,9 +181,9 @@ pub fn run(
     let default_public = root.join("proposals/novaseal/v0-mvp-skeleton/proofs/public_shared_cell_dep_attestation.template.json");
     let default_external = root.join("proposals/novaseal/v0-mvp-skeleton/proofs/bip340_external_tcb_review_attestation.template.json");
     let default_output = root.join("target/novaseal-external-attestation-adapter.json");
-    let tcb = read_json(&python_path(tcb_review.unwrap_or(&default_tcb)))?;
-    let public = read_json(&python_path(public_template.unwrap_or(&default_public)))?;
-    let external = read_json(&python_path(external_template.unwrap_or(&default_external)))?;
+    let tcb = read_json(&lexical_path(tcb_review.unwrap_or(&default_tcb)))?;
+    let public = read_json(&lexical_path(public_template.unwrap_or(&default_public)))?;
+    let external = read_json(&lexical_path(external_template.unwrap_or(&default_external)))?;
     let cases = vec![public_case(&public, &tcb)?, external_case(&external, &tcb)?];
     let matched = cases.iter().filter(|case| case["status"] == "passed").count();
     let passed = matched == cases.len();
@@ -201,9 +201,9 @@ pub fn run(
         "summary": { "total": cases.len(), "matched": matched, "required_attestations": cases.iter().map(|case| case["name"].clone()).collect::<Vec<_>>() },
         "cases": cases
     });
-    let output = python_path(output.unwrap_or(&default_output));
+    let output = lexical_path(output.unwrap_or(&default_output));
     fs::create_dir_all(output.parent().context("output path has no parent")?)?;
-    fs::write(&output, format!("{}\n", python_json_pretty(&report)?))?;
+    fs::write(&output, format!("{}\n", stable_json_pretty(&report)?))?;
     if pretty {
         println!(
             "wrote {} status={} attestations={}/{}",

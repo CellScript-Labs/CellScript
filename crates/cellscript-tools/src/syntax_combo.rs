@@ -3,7 +3,7 @@
 //! The deterministic case declarations are frozen in
 //! `tests/syntax_combo/cases.json`. Runtime behaviour, seed annotations,
 //! compiler execution, metadata oracles, shrinking, and report generation
-//! remain implemented here so the gate has no Python dependency.
+//! remain implemented here so the gate has one native implementation.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -21,7 +21,7 @@ use time::format_description;
 use time::OffsetDateTime;
 use wait_timeout::ChildExt;
 
-use crate::shared::{python_json_compact, python_json_pretty};
+use crate::shared::{stable_json_compact, stable_json_pretty};
 
 const DEFAULT_SEED: u64 = 20_260_503;
 
@@ -203,14 +203,14 @@ fn parse_seed(root: &Path, path: &Path) -> Result<AuditCase> {
     })
 }
 
-/// Minimal implementation of CPython's MT19937 integer-seed path and
-/// `_randbelow`, used solely to preserve historical deep-audit case IDs.
-struct PythonRandom {
+/// Frozen MT19937 integer-seed and bounded-selection implementation used solely
+/// to preserve historical deep-audit case IDs.
+struct StableMt19937 {
     state: [u32; 624],
     index: usize,
 }
 
-impl PythonRandom {
+impl StableMt19937 {
     fn new(seed: u64) -> Self {
         let key = [seed as u32, (seed >> 32) as u32];
         let key = if key[1] == 0 { &key[..1] } else { &key[..] };
@@ -292,7 +292,7 @@ fn module_source(module_name: &str, body: &str) -> String {
 }
 
 fn seeded_deep_cases(seed: u64) -> Vec<AuditCase> {
-    let mut rng = PythonRandom::new(seed);
+    let mut rng = StableMt19937::new(seed);
     let suffix = format!("{:x}", seed & 0xffff_ffff);
     let mut fields = vec!["amount", "nonce"];
     rng.shuffle(&mut fields);
@@ -384,7 +384,7 @@ fn load_cases(
     budget: Option<usize>,
     seed: u64,
 ) -> Result<Vec<AuditCase>> {
-    // The manifest preserves Python's declaration order: 24 generated cases,
+    // The manifest preserves the established declaration order: 24 generated cases,
     // followed by 22 CI matrix cases and 3 deep-only matrix cases. Some of the
     // generated edge cases intentionally carry a `matrix:edge/*` provenance,
     // so origin filtering would incorrectly remove them from quick mode.
@@ -850,7 +850,7 @@ fn validate_metadata(root: &Path, case: &AuditCase, metadata_path: &Path, run_di
                 )?;
             }
         }
-        let obligations = python_json_compact(action.get("verifier_obligations").unwrap_or(&Value::Null))?;
+        let obligations = stable_json_compact(action.get("verifier_obligations").unwrap_or(&Value::Null))?;
         for needle in &oracle.obligation_contains {
             if !obligations.contains(needle) {
                 push_failure(
@@ -1214,10 +1214,10 @@ fn validate_mode_contract(mode: &str, matrix: &toml::Value, report: &Value) -> V
 }
 
 fn write_reports(run_dir: &Path, report: &Value, failures: &[Value]) -> Result<()> {
-    fs::write(run_dir.join("report.json"), format!("{}\n", python_json_pretty(report)?))?;
+    fs::write(run_dir.join("report.json"), format!("{}\n", stable_json_pretty(report)?))?;
     let mut jsonl = String::new();
     for item in failures {
-        jsonl.push_str(&python_json_compact(item)?);
+        jsonl.push_str(&stable_json_compact(item)?);
         jsonl.push('\n');
     }
     fs::write(run_dir.join("report.jsonl"), jsonl)?;

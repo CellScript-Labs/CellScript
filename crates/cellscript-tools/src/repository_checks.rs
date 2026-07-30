@@ -1,4 +1,4 @@
-//! Repository-policy checks formerly embedded as Python heredocs in the gate.
+//! Native repository-policy checks used by every gate mode.
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -8,6 +8,73 @@ use std::process::Command;
 use anyhow::{bail, Context, Result};
 use percent_encoding::percent_decode_str;
 use regex::Regex;
+
+fn tracked_paths(root: &Path) -> Result<Vec<PathBuf>> {
+    let output = Command::new("git")
+        .args(["ls-files", "--recurse-submodules", "-z"])
+        .current_dir(root)
+        .output()
+        .context("failed to enumerate tracked repository and submodule files")?;
+    if !output.status.success() {
+        bail!("git ls-files --recurse-submodules failed: {}", String::from_utf8_lossy(&output.stderr).trim());
+    }
+    output
+        .stdout
+        .split(|byte| *byte == 0)
+        .filter(|path| !path.is_empty())
+        .map(|path| std::str::from_utf8(path).map(PathBuf::from).context("tracked path is not valid UTF-8"))
+        .filter(|path| path.as_ref().is_ok_and(|path| root.join(path).is_file()))
+        .collect()
+}
+
+fn forbidden_source_artifact(path: &Path) -> bool {
+    let forbidden_extension = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| matches!(extension, "py" | "pyi" | "pyc" | "pyo"));
+    forbidden_extension
+        || path.file_name().and_then(|name| name.to_str()) == Some(".DS_Store")
+        || path.components().any(|component| matches!(component.as_os_str().to_str(), Some("__pycache__" | ".cap")))
+}
+
+fn active_tooling_source(path: &Path) -> bool {
+    if path.file_name().and_then(|name| name.to_str()).is_some_and(|name| matches!(name, "package.json" | "Makefile" | "Justfile")) {
+        return true;
+    }
+    path.extension().and_then(|extension| extension.to_str()).is_some_and(|extension| {
+        matches!(extension, "rs" | "sh" | "bash" | "zsh" | "yml" | "yaml" | "toml" | "mjs" | "js" | "ts" | "tsx")
+    })
+}
+
+pub fn check_source_policy(root: &Path) -> Result<()> {
+    let retired_runtime_name = ["py", "thon"].concat();
+    let mut forbidden = Vec::new();
+    let mut runtime_residue = Vec::new();
+    for relative in tracked_paths(root)? {
+        if forbidden_source_artifact(&relative) {
+            forbidden.push(relative.clone());
+        }
+        if active_tooling_source(&relative) {
+            let path = root.join(&relative);
+            let text =
+                fs::read_to_string(&path).with_context(|| format!("failed to read active tooling source {}", path.display()))?;
+            if text.to_ascii_lowercase().contains(&retired_runtime_name) {
+                runtime_residue.push(relative);
+            }
+        }
+    }
+    if forbidden.is_empty() && runtime_residue.is_empty() {
+        return Ok(());
+    }
+    eprintln!("Repository source-language policy failed:");
+    for path in forbidden {
+        eprintln!("  forbidden source or generated artifact: {}", path.display());
+    }
+    for path in runtime_residue {
+        eprintln!("  retired runtime residue in active tooling source: {}", path.display());
+    }
+    bail!("repository source-language policy failed")
+}
 
 fn normalized_head(path: &Path, lines: usize) -> Result<String> {
     let text = fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?;
@@ -208,4 +275,25 @@ pub fn workspace_version(root: &Path) -> Result<String> {
         .and_then(toml::Value::as_str)
         .map(ToOwned::to_owned)
         .context("Cargo.toml package.version is missing")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn source_policy_recognizes_forbidden_artifact_paths() {
+        assert!(forbidden_source_artifact(Path::new("scripts/legacy.py")));
+        assert!(forbidden_source_artifact(Path::new("src/__pycache__/legacy.pyc")));
+        assert!(forbidden_source_artifact(Path::new(".cap/logs/run.log")));
+        assert!(!forbidden_source_artifact(Path::new("src/main.rs")));
+    }
+
+    #[test]
+    fn active_tooling_source_scope_excludes_historical_prose() {
+        assert!(active_tooling_source(Path::new("src/main.rs")));
+        assert!(active_tooling_source(Path::new(".github/workflows/ci.yml")));
+        assert!(active_tooling_source(Path::new("website/package.json")));
+        assert!(!active_tooling_source(Path::new("docs/archive/history.md")));
+    }
 }

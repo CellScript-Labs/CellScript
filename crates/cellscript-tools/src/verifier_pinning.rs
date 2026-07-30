@@ -40,7 +40,7 @@ fn collect_tree_files(
         }
         if metadata.is_dir() {
             let name = entry.file_name();
-            if ["target", "build", ".git", "__pycache__"].iter().any(|skip| name == *skip) {
+            if ["target", "build", ".git"].iter().any(|skip| name == *skip) {
                 continue;
             }
             collect_tree_files(root, &path, allowed_extensions, allowed_names, label, files, failures)?;

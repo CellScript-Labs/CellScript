@@ -12,7 +12,7 @@ use crate::ckb_devnet::{
     schnorr_sign, transaction, u16_bytes, u32_bytes, u64_bytes, u8_bytes, xonly_pubkey, CkbDevnet, RECEIPT_CAPACITY, STATE_CAPACITY,
     TEST_AUX_RAND, TEST_SECRET_KEY, ZERO_HASH,
 };
-use crate::shared::{python_json_default, python_json_pretty};
+use crate::shared::{stable_json_pretty, stable_json_spaced};
 
 const VERSION: u64 = 0;
 const OP_BOOTSTRAP: u64 = 0;
@@ -447,7 +447,7 @@ pub fn run(
         let bootstrap_funding = devnet.collect_spendable(STATE_CAPACITY + 100 * crate::ckb_devnet::SHANNONS)?;
         let bootstrap_tx =
             bootstrap(&bootstrap_funding, lifecycle["data_hash"].as_str().unwrap(), deps.clone(), &header, &initial_data)?;
-        fs::write(run_dir.join("bootstrap-tx.json"), format!("{}\n", python_json_pretty(&bootstrap_tx)?))?;
+        fs::write(run_dir.join("bootstrap-tx.json"), format!("{}\n", stable_json_pretty(&bootstrap_tx)?))?;
         let bootstrap_dry = devnet.rpc("dry_run_transaction", vec![bootstrap_tx.clone()])?;
         let bootstrap_commit = devnet.submit_and_commit(&bootstrap_tx, "novaseal bootstrap")?;
         let type_script = json!({"code_hash": lifecycle["data_hash"], "hash_type": "data2", "args": "0x"});
@@ -473,7 +473,7 @@ pub fn run(
             ckb_hash(b"novaseal devnet state after transition"),
             false,
         )?;
-        fs::write(run_dir.join("transition-tx.json"), format!("{}\n", python_json_pretty(&transition_tx)?))?;
+        fs::write(run_dir.join("transition-tx.json"), format!("{}\n", stable_json_pretty(&transition_tx)?))?;
         let transition_dry = devnet.rpc("dry_run_transaction", vec![transition_tx.clone()])?;
         let transition_commit = devnet.submit_and_commit(&transition_tx, "novaseal key-auth transition")?;
         let bootstrap_dead = devnet.wait_dead_cell(bootstrap_commit["tx_hash"].as_str().unwrap(), 0)?;
@@ -508,7 +508,7 @@ pub fn run(
             ckb_hash(b"novaseal devnet rejected state"),
             true,
         )?;
-        fs::write(run_dir.join("wrong-signature-tx.json"), format!("{}\n", python_json_pretty(&negative_tx)?))?;
+        fs::write(run_dir.join("wrong-signature-tx.json"), format!("{}\n", stable_json_pretty(&negative_tx)?))?;
         let rejection = devnet.dry_run_rejects(
             &negative_tx,
             "wrong signature transition",
@@ -550,7 +550,7 @@ pub fn run(
         None => root.join("target/novaseal-devnet-stateful-live.json"),
     };
     fs::create_dir_all(output.parent().context("output path has no parent")?)?;
-    let text = if pretty { python_json_pretty(&report)? } else { python_json_default(&report)? };
+    let text = if pretty { stable_json_pretty(&report)? } else { stable_json_spaced(&report)? };
     fs::write(&output, format!("{text}\n"))?;
     println!(
         "wrote {} status={} live_devnet_rpc_executed={}",

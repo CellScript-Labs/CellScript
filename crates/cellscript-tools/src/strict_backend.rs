@@ -12,7 +12,7 @@ use anyhow::{Context, Result};
 use serde_json::{json, Value};
 use time::OffsetDateTime;
 
-use crate::shared::{python_json_pretty, python_path};
+use crate::shared::{lexical_path, stable_json_pretty};
 
 const FEATURE_IDS: &[&str] = &[
     "ir.cfg.block-id-uniqueness",
@@ -267,9 +267,9 @@ pub fn run(root: &Path, mode: &str) -> Result<i32> {
     }
 
     let report_path = match env::var_os("CELLSCRIPT_STRICT_BACKEND_AUDIT_REPORT") {
-        // Python's `Path(value)` collapses repeated separators and `.`
-        // components without resolving symlinks or `..`.
-        Some(path) => python_path(&PathBuf::from(path)),
+        // Collapse repeated separators and `.` without resolving symlinks or
+        // `..` components.
+        Some(path) => lexical_path(&PathBuf::from(path)),
         None => default_report_path(root, mode)?,
     };
     let report_parent = report_path.parent().filter(|parent| !parent.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."));
@@ -308,7 +308,7 @@ pub fn run(root: &Path, mode: &str) -> Result<i32> {
         "ckb_vm": {"cycles": Value::Null, "transaction_size_bytes": Value::Null},
         "commands": results,
     });
-    fs::write(&report_path, format!("{}\n", python_json_pretty(&report)?))
+    fs::write(&report_path, format!("{}\n", stable_json_pretty(&report)?))
         .with_context(|| format!("failed to write {}", report_path.display()))?;
     println!("strict backend audit report: {}", report_path.display());
     Ok(if passed { 0 } else { 1 })

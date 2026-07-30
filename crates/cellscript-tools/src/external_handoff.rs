@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 
 use crate::btc_spv_adapter::{field_constraints as btc_field_constraints, required_fields as btc_required_fields};
 use crate::crypto::{canonical_report_hash, sha256_hex};
-use crate::shared::{python_json_pretty, python_path};
+use crate::shared::{lexical_path, stable_json_pretty};
 
 const PERSON: &[u8] = b"NovaExtHandoff";
 const HASH_ALGORITHM: &str = "blake2b-256(person=NovaExtHandoff)";
@@ -278,7 +278,7 @@ fn collect_hash_files(root: &Path, path: &Path, files: &mut BTreeSet<PathBuf>) -
         let entry = entry?;
         let child = entry.path();
         let name = entry.file_name();
-        if child.is_dir() && ["target", "build", ".git", "__pycache__"].iter().any(|skip| name == *skip) {
+        if child.is_dir() && ["target", "build", ".git"].iter().any(|skip| name == *skip) {
             continue;
         }
         let child_meta = fs::symlink_metadata(&child)?;
@@ -375,8 +375,8 @@ pub fn run(
     let default_btc = root.join("target/novaseal-btc-spv-evidence-adapter.json");
     let default_attestation = root.join("target/novaseal-external-attestation-adapter.json");
     let default_output = root.join("target/novaseal-external-evidence-handoff-bundle.json");
-    let btc: Value = serde_json::from_slice(&fs::read(python_path(btc_adapter.unwrap_or(&default_btc)))?)?;
-    let attestation: Value = serde_json::from_slice(&fs::read(python_path(attestation_adapter.unwrap_or(&default_attestation)))?)?;
+    let btc: Value = serde_json::from_slice(&fs::read(lexical_path(btc_adapter.unwrap_or(&default_btc)))?)?;
+    let attestation: Value = serde_json::from_slice(&fs::read(lexical_path(attestation_adapter.unwrap_or(&default_attestation)))?)?;
     let celldep_fields = [
         "network",
         "attested_at",
@@ -456,9 +456,9 @@ pub fn run(
             .collect::<Map<_, _>>()
             .into(),
     )?);
-    let output = python_path(output.unwrap_or(&default_output));
+    let output = lexical_path(output.unwrap_or(&default_output));
     fs::create_dir_all(output.parent().context("output path has no parent")?)?;
-    fs::write(&output, format!("{}\n", python_json_pretty(&report)?))?;
+    fs::write(&output, format!("{}\n", stable_json_pretty(&report)?))?;
     if pretty {
         println!(
             "wrote {} status={} groups={}/{}",
