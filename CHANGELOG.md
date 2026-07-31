@@ -11,7 +11,11 @@
   editions and older persisted schemas are rejected; no migration or
   compatibility reader is provided. Generated CKB entries also remove the
   raw-`CSARGv1` witness fallback, so Edition 2026 accepts the payload only
-  inside canonical `WitnessArgs.input_type`. See the
+  inside canonical `WitnessArgs.input_type`. The public registry contract is
+  hard-cut to publish protocol v2 and registry schema 2: signed entries,
+  persisted rows, CDN JSON, and the website all require Edition 2026 and the
+  compatibility-profile hash. The generic admin API can no longer manufacture
+  `verified_build` or `deployed` claims without an evidence-specific path. See the
   [0.23 development release notes](docs/releases/CELLSCRIPT_0_23_RELEASE_NOTES.md).
 - Complete the native-tooling cleanup: neutralize migration-era identifiers,
   remove tracked legacy traceback logs and cache exclusions, rename the native

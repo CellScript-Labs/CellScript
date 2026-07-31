@@ -31,7 +31,7 @@ function authPayload(principalId = "0x1111111111111111111111111111111111111111")
     nonce: "0x1111111111111111",
     issued_at: "2026-06-23T12:00:00Z",
     expires_at: "2026-06-23T12:10:00Z",
-    cli_version: "cellc 0.20.0",
+    cli_version: "cellc 0.23.0",
   };
 }
 
@@ -61,7 +61,7 @@ function revokePayload(keyId: string, principalId = "0x1111111111111111111111111
     nonce: "0x3333333333333333",
     issued_at: "2026-06-23T12:00:00Z",
     expires_at: "2026-06-23T12:10:00Z",
-    cli_version: "cellc 0.20.0",
+    cli_version: "cellc 0.23.0",
   };
 }
 
@@ -94,12 +94,23 @@ async function publishPayload(keyId: string): Promise<PublishPayload> {
     nonce: "0x2222222222222222",
     issued_at: "2026-06-23T12:00:00Z",
     expires_at: "2026-06-23T12:10:00Z",
-    cli_version: "cellc 0.20.0",
+    cli_version: "cellc 0.23.0",
     registry_entry: {
+      schema_version: 2,
       namespace: "cellscript",
       name: "demo",
-      version: "1.2.3",
       repository: "https://github.com/cellscript/demo",
+      versions: [{
+        version: "1.2.3",
+        tag: "v1.2.3",
+        source_hash: `0x${"ab".repeat(32)}`,
+        cellscript_version: "0.23.0",
+        edition: "2026",
+        compatibility_profile_hash: "ef".repeat(32),
+        dependencies: {},
+        status: "source_published",
+        yanked: false,
+      }],
     },
   };
 }
@@ -305,8 +316,11 @@ describe("registry api", () => {
     expect(staticEntry).toBeTruthy();
     const staticBody = JSON.parse(utf8(staticEntry!.body)) as any;
     expect(staticBody.kind).toBe("cellscript.registry.package_version");
+    expect(staticBody.schema_version).toBe(2);
     expect(staticBody.coordinate).toBe("cellscript/demo@1.2.3");
     expect(staticBody.status).toBe("source_published");
+    expect(staticBody.edition).toBe("2026");
+    expect(staticBody.compatibility_profile_hash).toBe("ef".repeat(32));
     expect(store.packageVersions.get("cellscript/demo@1.2.3")?.status).toBe("source_published");
     expect(store.capabilities.get(capability.key_id)?.last_used_at).toBeTruthy();
     expect(store.auditEvents.some((event) => event.event_type === "capability.used" && event.capability_key_id === capability.key_id)).toBe(true);
@@ -319,7 +333,7 @@ describe("registry api", () => {
         async get(key) {
           expect(key).toBe("packages/cellscript/demo/versions/1.2.3.json");
           return {
-            body: JSON.stringify({ schema_version: 1, coordinate: "cellscript/demo@1.2.3", status: "source_published" }),
+            body: JSON.stringify({ schema_version: 2, coordinate: "cellscript/demo@1.2.3", status: "source_published" }),
             contentType: "application/json; charset=utf-8",
             etag: "\"static-entry\"",
           };
@@ -332,6 +346,40 @@ describe("registry api", () => {
     expect(response.headers.get("cache-control")).toContain("max-age=60");
     expect(response.headers.get("etag")).toBe("\"static-entry\"");
     expect((await response.json() as any).coordinate).toBe("cellscript/demo@1.2.3");
+  });
+
+  it("rejects pre-Edition registry schemas and mismatched nested identities", async () => {
+    const { app } = testApp();
+    const publish = await publishPayload("cap_11111111111111111111111111111111");
+    const sourceSnapshot = {
+      content_base64: base64("source snapshot"),
+      content_type: "application/vnd.cellscript.source+tar",
+      size_bytes: "source snapshot".length,
+      source_hash: publish.source_hash,
+    };
+    const submit = (payload: unknown) =>
+      post(app, "/v1/packages/cellscript/demo/versions", {
+        payload,
+        capability_signature: { algorithm: "p256-sha256", signature: "sig" },
+        source_snapshot: sourceSnapshot,
+      });
+
+    const oldSchema = await submit({
+      ...publish,
+      registry_entry: { ...publish.registry_entry, schema_version: 1 },
+    });
+    expect(oldSchema.status).toBe(400);
+    expect((await oldSchema.json() as any).error.code).toBe("unsupported_registry_schema");
+
+    const wrongVersion = await submit({
+      ...publish,
+      registry_entry: {
+        ...publish.registry_entry,
+        versions: [{ ...publish.registry_entry.versions[0], version: "1.2.4", tag: "v1.2.4" }],
+      },
+    });
+    expect(wrongVersion.status).toBe(400);
+    expect((await wrongVersion.json() as any).error.code).toBe("registry_identity_mismatch");
   });
 
   it("replays a successful publish response for the same Idempotency-Key without rewriting objects", async () => {
@@ -405,7 +453,15 @@ describe("registry api", () => {
       ...publish,
       version: "1.2.4",
       source_hash: `0x${"ef".repeat(32)}`,
-      registry_entry: { ...publish.registry_entry, version: "1.2.4" },
+      registry_entry: {
+        ...publish.registry_entry,
+        versions: [{
+          ...publish.registry_entry.versions[0],
+          version: "1.2.4",
+          tag: "v1.2.4",
+          source_hash: `0x${"ef".repeat(32)}`,
+        }],
+      },
     };
     const conflict = await post(app, "/v1/packages/cellscript/demo/versions", {
       payload: changed,
@@ -453,7 +509,15 @@ describe("registry api", () => {
       ...publish,
       version: "1.2.4",
       source_hash: `0x${"ef".repeat(32)}`,
-      registry_entry: { ...publish.registry_entry, version: "1.2.4" },
+      registry_entry: {
+        ...publish.registry_entry,
+        versions: [{
+          ...publish.registry_entry.versions[0],
+          version: "1.2.4",
+          tag: "v1.2.4",
+          source_hash: `0x${"ef".repeat(32)}`,
+        }],
+      },
     };
     const replay = await post(app, "/v1/packages/cellscript/demo/versions", {
       payload: replayedNonce,
@@ -585,6 +649,16 @@ describe("registry api", () => {
       },
     });
     expect(publishResponse.status).toBe(202);
+
+    const unsupportedPromotion = await post(
+      app,
+      "/v1/admin/packages/cellscript/demo/versions/1.2.3/status",
+      { status: "verified_build", reason: "manual claim without evidence" },
+      adminEnv,
+      adminHeaders,
+    );
+    expect(unsupportedPromotion.status).toBe(400);
+    expect((await unsupportedPromotion.json() as any).error.code).toBe("invalid_package_version_status");
 
     const quarantineResponse = await post(
       app,
@@ -868,7 +942,7 @@ describe("registry api", () => {
   it("runs scheduled cleanup for expired replay and quota state", async () => {
     const { app, store } = testApp();
     store.usedNonces.set("old-nonce", {
-      protocol: "cellscript-registry-publish-v1",
+      protocol: PUBLISH_PROTOCOL,
       action: "publish",
       nonce: "0xaaaaaaaaaaaaaaaa",
       request_id: "old-request",
@@ -876,7 +950,7 @@ describe("registry api", () => {
       created_at: "2026-06-23T11:50:00Z",
     });
     store.usedNonces.set("live-nonce", {
-      protocol: "cellscript-registry-publish-v1",
+      protocol: PUBLISH_PROTOCOL,
       action: "publish",
       nonce: "0xbbbbbbbbbbbbbbbb",
       request_id: "live-request",

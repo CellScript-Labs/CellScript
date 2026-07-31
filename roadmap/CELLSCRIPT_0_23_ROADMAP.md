@@ -130,6 +130,13 @@ path, idempotent publish, and admin-gated status transitions. The 0.23 work
 is to actually deploy it on `cellscript.dev` and to wire the frontend and CLI
 into the same trust model.
 
+The Edition 2026 contract slice is complete: publish protocol v2 and registry
+schema 2 are a hard cut across the Rust publisher/reader, API validation,
+Postgres schema, R2 package-version object, checked-in registry fixture, and
+website data model. There is no schema-1 compatibility path. Generic admin
+status changes cannot create `verified_build` or `deployed` claims; an
+evidence-specific promotion path remains production work.
+
 ### Production Domains And Hosting
 
 ```text
@@ -198,9 +205,10 @@ Production-readiness for the registry means all of:
 - the first real CellScript source package is published through the
   production flow and resolves on a clean machine via `cellc install`.
 
-The existing `services/registry-api` test suite is the baseline. New
-end-to-end coverage belongs in a deployable scenario harness, not in the
-compiler test gate.
+The existing `services/registry-api` typecheck, unit suite, and dry-run Worker
+build run in the unified `ci` gate as the local contract baseline. Deployed
+end-to-end coverage still belongs in a staging scenario harness; local compiler
+CI is not Cloudflare/R2/Hyperdrive/Neon evidence.
 
 ### Non-Goals
 

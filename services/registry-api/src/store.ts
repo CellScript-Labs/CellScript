@@ -41,7 +41,9 @@ export interface PackageVersionRecord {
   version: string;
   status: RegistryEntryStatus;
   source_hash: string;
-  manifest_hash?: string;
+  manifest_hash: string;
+  edition: "2026";
+  compatibility_profile_hash: string;
   capability_key_id: string;
   principal_type: string;
   principal_id: string;

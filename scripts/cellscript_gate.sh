@@ -357,6 +357,15 @@ run_website_build_check() {
     run_in_dir website npm exec -- astro build
 }
 
+run_registry_api_check() {
+    if [[ ! -d services/registry-api/node_modules ]]; then
+        run npm --prefix services/registry-api ci
+    fi
+    run npm --prefix services/registry-api run check
+    run npm --prefix services/registry-api test
+    run npm --prefix services/registry-api run build
+}
+
 check_wasm_release_bundle() {
     require_cmd docker
     run website/scripts/build-wasm.sh
@@ -438,6 +447,7 @@ run_ci_gate() {
     check_markdown_local_links
     check_package_contents
     run cargo package --locked --offline --allow-dirty
+    run_registry_api_check
     run_website_build_check
     check_script_syntax
     run git diff --check

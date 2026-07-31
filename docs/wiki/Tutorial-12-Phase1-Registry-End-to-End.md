@@ -64,6 +64,34 @@ cellc publish --json
 The public write API admits package metadata, but consumers still verify the
 source and build identity locally.
 
+## Edition 2026 Registry Contract
+
+Public publishing uses `cellscript-registry-publish-v2` and registry schema 2.
+The signed payload contains one complete version entry, and the API checks that
+its namespace, package name, version, and source hash equal the outer signed
+identity. The entry must also contain:
+
+```json
+{
+  "schema_version": 2,
+  "versions": [{
+    "edition": "2026",
+    "compatibility_profile_hash": "<32-byte hex hash>"
+  }]
+}
+```
+
+These are not website labels. `edition` identifies the selected language and
+CKB ABI rule bundle; `compatibility_profile_hash` binds the resolved details of
+that bundle. The API stores both as typed fields and exposes them in its static
+package-version JSON. Schema 1, a missing field, or a mismatched nested identity
+is rejected. There is no v1 migration or compatibility reader.
+
+`source_published` means the signed source snapshot was admitted; it does not
+mean the build or deployment was verified. The generic admin endpoint cannot
+promote an entry to `verified_build` or `deployed`. Those labels require a
+future evidence-specific verification flow.
+
 ## Consumer Flow
 
 Add a dependency, resolve it, and check the resulting package graph:

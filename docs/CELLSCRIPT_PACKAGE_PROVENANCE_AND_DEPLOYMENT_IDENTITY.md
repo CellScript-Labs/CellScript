@@ -793,7 +793,7 @@ for audit, offline fixtures, and direct-Git fallback:
       "version": "1.2.0",
       "tag": "v1.2.0",
       "source_hash": "blake2b:0xabcd...",
-      "cellscript_version": "0.19.0",
+      "cellscript_version": "0.22.0",
       "dependencies": {
         "token": { "namespace": "cellscript", "version": "0.3.0" }
       },
@@ -1093,7 +1093,7 @@ alongside `Cell.toml`, for audit and offline use:
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "name": "amm",
   "namespace": "cellscript",
   "versions": [
@@ -1102,6 +1102,8 @@ alongside `Cell.toml`, for audit and offline use:
       "tag": "v1.2.0",
       "source_hash": "blake2b:0xabcd...",
       "cellscript_version": "0.19.0",
+      "edition": "2026",
+      "compatibility_profile_hash": "42d297cd7879917ade58c89cdc5dcbbb38a5d39b720788387db80e918a3f7fd9",
       "dependencies": {
         "token": { "namespace": "cellscript", "version": "0.3.0" }
       },
@@ -1109,6 +1111,7 @@ alongside `Cell.toml`, for audit and offline use:
       "schema_hash": "blake2b:0x9abc...",
       "license": "MIT",
       "released_at": "2026-04-24T00:00:00Z",
+      "status": "source_published",
       "yanked": false,
       "audit": {
         "report_hash": "blake2b:0x5555...",
@@ -1118,6 +1121,10 @@ alongside `Cell.toml`, for audit and offline use:
   ]
 }
 ```
+
+The current Edition 2026 reader accepts only schema 2. The older schema-1
+shape described in the historical Phase 1 audit below is not a compatibility
+surface.
 
 The `tag` field maps each version to a git tag in the source repository.
 This allows `cellc install` to clone the exact commit without needing

@@ -4,6 +4,7 @@ import {
   ApiError,
   DEFAULT_REGISTRY_ORIGIN,
   DEFAULT_STATIC_REGISTRY_ORIGIN,
+  REGISTRY_SCHEMA_VERSION,
   WebCryptoP256Verifier,
   base64ToBytes,
   canonicalJson,
@@ -374,7 +375,7 @@ async function handleAdminPackageVersionStatus(
   const version = validateVersion(versionFromPath);
   const status = requireOneOf(
     String(body["status"] ?? ""),
-    ["source_published", "indexed_pending", "verified_build", "deployed", "deprecated", "yanked", "quarantined"],
+    ["source_published", "indexed_pending", "deprecated", "yanked", "quarantined"],
     "invalid_package_version_status",
   );
   const reason = typeof body["reason"] === "string" && body["reason"].trim() !== "" ? body["reason"].trim() : undefined;
@@ -671,12 +672,16 @@ async function handlePublishVersion(
       request_id: requestId,
     });
     const directUrl = staticPackageVersionUrl(staticOrigin, payload.namespace, payload.name, payload.version);
+    const publishedRegistryVersion = payload.registry_entry.versions[0];
     const versionInput = {
       namespace: payload.namespace,
       name: payload.name,
       version: payload.version,
       status: "source_published",
       source_hash: payload.source_hash,
+      manifest_hash: payload.manifest_hash,
+      edition: publishedRegistryVersion.edition,
+      compatibility_profile_hash: publishedRegistryVersion.compatibility_profile_hash,
       capability_key_id: capability.key_id,
       principal_type: capability.principal_type,
       principal_id: capability.principal_id,
@@ -685,10 +690,9 @@ async function handlePublishVersion(
       direct_url: directUrl,
       created_at: now.toISOString(),
     } as const;
-    const version = payload.manifest_hash ? { ...versionInput, manifest_hash: payload.manifest_hash } : versionInput;
-    await writeStaticRegistryVersionObject(env, deps, version);
+    await writeStaticRegistryVersionObject(env, deps, versionInput);
     await store.recordSnapshot(snapshotRecord);
-    const recordedVersion = await store.recordPackageVersion(version);
+    const recordedVersion = await store.recordPackageVersion(versionInput);
     await store.recordCapabilityUsage({
       key_id: capability.key_id,
       principal_type: capability.principal_type,
@@ -860,7 +864,7 @@ type SnapshotPackageVersionRecord = Awaited<ReturnType<RegistryStore["recordPack
 
 function staticRegistryVersionPayload(version: SnapshotPackageVersionRecord): Record<string, unknown> {
   return {
-    schema_version: 1,
+    schema_version: REGISTRY_SCHEMA_VERSION,
     kind: "cellscript.registry.package_version",
     coordinate: `${version.namespace}/${version.name}@${version.version}`,
     namespace: version.namespace,
@@ -868,7 +872,9 @@ function staticRegistryVersionPayload(version: SnapshotPackageVersionRecord): Re
     version: version.version,
     status: version.status,
     source_hash: version.source_hash,
-    ...(version.manifest_hash ? { manifest_hash: version.manifest_hash } : {}),
+    manifest_hash: version.manifest_hash,
+    edition: version.edition,
+    compatibility_profile_hash: version.compatibility_profile_hash,
     capability_key_id: version.capability_key_id,
     principal_type: version.principal_type,
     principal_id: version.principal_id,

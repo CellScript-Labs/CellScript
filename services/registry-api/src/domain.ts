@@ -3,8 +3,10 @@ import type { SignChallengeResponseData } from "@joyid/ckb";
 export const AUTH_PROTOCOL = "cellscript-registry-auth-v1";
 export const AUTH_ACTION = "authorize_capability";
 export const AUTH_REVOKE_CAPABILITY_ACTION = "revoke_capability";
-export const PUBLISH_PROTOCOL = "cellscript-registry-publish-v1";
+export const PUBLISH_PROTOCOL = "cellscript-registry-publish-v2";
 export const PUBLISH_ACTION = "publish";
+export const REGISTRY_SCHEMA_VERSION = 2;
+export const CELLSCRIPT_EDITION = "2026";
 export const DEFAULT_REGISTRY_ORIGIN = "https://api.registry.cellscript.dev";
 export const DEFAULT_STATIC_REGISTRY_ORIGIN = "https://registry.cellscript.dev";
 export const ACCEPTED_PRINCIPAL_TYPE = "joyid_ckb";
@@ -56,13 +58,34 @@ export interface PublishPayload {
   name: string;
   version: string;
   source_hash: string;
-  manifest_hash?: string;
+  manifest_hash: string;
   capability_key_id: string;
   nonce: string;
   issued_at: string;
   expires_at: string;
   cli_version: string;
-  registry_entry: Record<string, unknown>;
+  registry_entry: RegistryIndexEntry;
+}
+
+export interface RegistryVersionEntry {
+  version: string;
+  tag: string;
+  source_hash: string;
+  cellscript_version: string;
+  edition: typeof CELLSCRIPT_EDITION;
+  compatibility_profile_hash: string;
+  dependencies: Record<string, { namespace: string; version: string }>;
+  status: "source_published";
+  yanked: false;
+  [key: string]: unknown;
+}
+
+export interface RegistryIndexEntry {
+  schema_version: typeof REGISTRY_SCHEMA_VERSION;
+  namespace: string;
+  name: string;
+  versions: [RegistryVersionEntry];
+  [key: string]: unknown;
 }
 
 export interface SourceSnapshotInput {
@@ -333,15 +356,15 @@ export function validatePublishPayload(payload: unknown, registryOrigin: string,
   const name = validatePackageIdent(requireString(obj, "name"), "name");
   const version = validateVersion(requireString(obj, "version"));
   const sourceHash = requireString(obj, "source_hash");
-  if (!/^([a-z0-9_-]+:)?0x[0-9a-fA-F]{32,128}$/.test(sourceHash) && !/^[0-9a-fA-F]{32,128}$/.test(sourceHash)) {
-    throw new ApiError(400, "invalid_source_hash", "source_hash must be a hex content hash");
-  }
+  validateHash(sourceHash, "source_hash", "invalid_source_hash");
+  const manifestHash = requireString(obj, "manifest_hash");
+  validateHash(manifestHash, "manifest_hash", "invalid_manifest_hash");
   const capabilityKeyId = requireString(obj, "capability_key_id");
   const nonce = requireString(obj, "nonce");
   const issuedAt = requireString(obj, "issued_at");
   const expiresAt = requireString(obj, "expires_at");
   const cliVersion = requireString(obj, "cli_version");
-  const registryEntry = assertPlainObject(obj["registry_entry"], "invalid_registry_entry");
+  const registryEntry = validateRegistryEntry(obj["registry_entry"], { namespace, name, version, sourceHash });
   parseTimestamp(issuedAt, "issued_at");
   if (parseTimestamp(expiresAt, "expires_at").getTime() <= now.getTime()) {
     throw new ApiError(401, "publish_payload_expired", "publish payload has expired");
@@ -358,6 +381,7 @@ export function validatePublishPayload(payload: unknown, registryOrigin: string,
     name,
     version,
     source_hash: sourceHash,
+    manifest_hash: manifestHash,
     capability_key_id: capabilityKeyId,
     nonce,
     issued_at: issuedAt,
@@ -365,10 +389,67 @@ export function validatePublishPayload(payload: unknown, registryOrigin: string,
     cli_version: cliVersion,
     registry_entry: registryEntry,
   };
-  if (typeof obj["manifest_hash"] === "string") {
-    result.manifest_hash = obj["manifest_hash"];
-  }
   return result;
+}
+
+function validateHash(value: string, field: string, code: string): void {
+  if (!/^(?:0x)?[0-9a-fA-F]{64}$/.test(value)) {
+    throw new ApiError(400, code, `${field} must be a 32-byte hex content hash`);
+  }
+}
+
+function validateRegistryEntry(
+  input: unknown,
+  outer: { namespace: string; name: string; version: string; sourceHash: string },
+): RegistryIndexEntry {
+  const entry = assertPlainObject(input, "invalid_registry_entry");
+  if (entry["schema_version"] !== REGISTRY_SCHEMA_VERSION) {
+    throw new ApiError(
+      400,
+      "unsupported_registry_schema",
+      `registry_entry.schema_version must be ${REGISTRY_SCHEMA_VERSION}`,
+    );
+  }
+  if (requireString(entry, "namespace") !== outer.namespace || requireString(entry, "name") !== outer.name) {
+    throw new ApiError(400, "registry_identity_mismatch", "registry_entry namespace/name must match the signed publish identity");
+  }
+
+  const versions = entry["versions"];
+  if (!Array.isArray(versions) || versions.length !== 1) {
+    throw new ApiError(400, "invalid_registry_versions", "registry_entry.versions must contain exactly the published version");
+  }
+  const published = assertPlainObject(versions[0], "invalid_registry_version");
+  const version = validateVersion(requireString(published, "version"));
+  const sourceHash = requireString(published, "source_hash");
+  if (version !== outer.version || sourceHash !== outer.sourceHash) {
+    throw new ApiError(400, "registry_identity_mismatch", "registry version and source_hash must match the signed publish identity");
+  }
+  if (requireString(published, "tag") !== `v${outer.version}`) {
+    throw new ApiError(400, "invalid_registry_tag", "registry version tag must be v<version>");
+  }
+  requireString(published, "cellscript_version");
+  if (published["edition"] !== CELLSCRIPT_EDITION) {
+    throw new ApiError(400, "unsupported_cellscript_edition", `registry version edition must be ${CELLSCRIPT_EDITION}`);
+  }
+  const compatibilityProfileHash = requireString(published, "compatibility_profile_hash");
+  validateHash(compatibilityProfileHash, "compatibility_profile_hash", "invalid_compatibility_profile_hash");
+  if (published["status"] !== "source_published" || published["yanked"] !== false) {
+    throw new ApiError(
+      400,
+      "invalid_initial_registry_status",
+      "new registry versions must be source_published and not yanked",
+    );
+  }
+
+  const dependencies = assertPlainObject(published["dependencies"], "invalid_registry_dependencies");
+  for (const [dependencyName, dependencyValue] of Object.entries(dependencies)) {
+    validatePackageIdent(dependencyName, "dependency name");
+    const dependency = assertPlainObject(dependencyValue, "invalid_registry_dependency");
+    validatePackageIdent(requireString(dependency, "namespace"), "dependency namespace");
+    validateVersion(requireString(dependency, "version"));
+  }
+
+  return entry as unknown as RegistryIndexEntry;
 }
 
 export function validateSnapshot(input: unknown, payload: PublishPayload, maxBytes: number): SourceSnapshotInput {

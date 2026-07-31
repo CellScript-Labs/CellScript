@@ -3732,7 +3732,7 @@ impl CommandExecutor {
                     name: manifest.package.name.clone(),
                     version: manifest.package.version.clone(),
                     source_hash: source_hash.clone(),
-                    manifest_hash: Some(hash_json_value("package manifest", &manifest)?),
+                    manifest_hash: hash_json_value("package manifest", &manifest)?,
                     capability_key_id,
                     nonce,
                     issued_at,

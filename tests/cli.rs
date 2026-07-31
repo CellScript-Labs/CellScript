@@ -1267,7 +1267,7 @@ fn cellc_publish_print_payload_outputs_signable_registry_publish_payload() {
     assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
     let envelope: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(envelope["endpoint"], "https://api.registry.cellscript.dev/v1/packages/cellscript/demo/versions");
-    assert_eq!(envelope["payload"]["protocol"], "cellscript-registry-publish-v1");
+    assert_eq!(envelope["payload"]["protocol"], "cellscript-registry-publish-v2");
     assert_eq!(envelope["payload"]["action"], "publish");
     assert_eq!(envelope["payload"]["registry_origin"], "https://api.registry.cellscript.dev");
     assert_eq!(envelope["payload"]["namespace"], "cellscript");

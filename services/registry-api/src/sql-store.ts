@@ -390,6 +390,7 @@ export class SqlRegistryStore implements RegistryStore {
     return this.withClient(async (client) => {
       const result = await client.query(
         `select namespace, name, version, status, source_hash, manifest_hash,
+                edition, compatibility_profile_hash,
                 capability_key_id, principal_type, principal_id, registry_entry,
                 snapshot_hash, direct_url, created_at
          from package_versions
@@ -406,10 +407,11 @@ export class SqlRegistryStore implements RegistryStore {
       const result = await client.query(
         `insert into package_versions(
            namespace, name, version, status, source_hash, manifest_hash,
+           edition, compatibility_profile_hash,
            capability_key_id, principal_type, principal_id, registry_entry,
            snapshot_hash, direct_url
          )
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, $12)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13, $14)
          on conflict (namespace, name, version) do nothing
          returning namespace`,
         [
@@ -418,7 +420,9 @@ export class SqlRegistryStore implements RegistryStore {
           input.version,
           input.status,
           input.source_hash,
-          input.manifest_hash ?? null,
+          input.manifest_hash,
+          input.edition,
+          input.compatibility_profile_hash,
           input.capability_key_id,
           input.principal_type,
           input.principal_id,
@@ -496,6 +500,7 @@ export class SqlRegistryStore implements RegistryStore {
                verified_at = case when $4 = 'verified_build' then coalesce(verified_at, now()) else verified_at end
            where namespace = $1 and name = $2 and version = $3
            returning namespace, name, version, status, source_hash, manifest_hash,
+                     edition, compatibility_profile_hash,
                      capability_key_id, principal_type, principal_id, registry_entry,
                      snapshot_hash, direct_url, created_at`,
           [input.namespace, input.name, input.version, input.status, input.reason ?? null],
@@ -762,7 +767,9 @@ function packageVersionFromRow(row: any): PackageVersionRecord {
     version: row.version,
     status: row.status,
     source_hash: row.source_hash,
-    ...(row.manifest_hash ? { manifest_hash: row.manifest_hash } : {}),
+    manifest_hash: row.manifest_hash,
+    edition: row.edition,
+    compatibility_profile_hash: row.compatibility_profile_hash,
     capability_key_id: row.capability_key_id,
     principal_type: row.principal_type,
     principal_id: row.principal_id,

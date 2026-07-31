@@ -29,6 +29,9 @@ snapshots and static registry read objects are stored in R2.
 - Namespace claim cooldown for newly claimed namespaces by the same JoyID
   principal; invalid JoyID signatures do not consume principal quota.
 - Publish admission path for source packages.
+- Hard-cut `cellscript-registry-publish-v2` admission: the signed
+  `registry_entry` must use registry schema 2, contain exactly the published
+  version, and bind Edition 2026 plus its compatibility-profile hash.
 - Namespace owner ACL check before publish admission.
 - P-256 capability-signature verification for daily publish payloads.
 - One-time signed nonce consumption for capability creation, capability
@@ -50,7 +53,10 @@ snapshots and static registry read objects are stored in R2.
 - Future `policy_hooks` and `bond_policy_hooks` tables for later bond or
   refundable-deposit policies; no on-chain fee or bond is enforced now.
 - Token-gated admin operations for reserved namespaces, namespace review
-  status, and package-version status transitions.
+  status, and conservative package-version status transitions. Generic admin
+  status changes cannot claim `verified_build` or `deployed`; those promotions
+  remain unavailable until an evidence-specific endpoint verifies and stores
+  the corresponding proof.
 - Suppressive package-version admin transitions (`deprecated`, `yanked`,
   `quarantined`) update the static read object before changing the write-store
   status, so public reads fail conservative during incident response.
@@ -128,19 +134,21 @@ for controlled staging tests.
 Admin operations require `Authorization: Bearer <REGISTRY_ADMIN_TOKEN>` or
 `x-registry-admin-token`. The optional `x-registry-admin-actor` header is stored
 in audit logs so manual review, reserved namespace changes, quarantine, yanks,
-deprecations, and verification promotions are attributable.
+and deprecations are attributable.
 
 Supported package-version status transitions through the admin API are:
 
 ```text
 source_published
 indexed_pending
-verified_build
-deployed
 deprecated
 yanked
 quarantined
 ```
+
+`verified_build`, `deployed`, and `on_chain_attested` remain registry states,
+but this generic endpoint cannot create those claims. A future promotion path
+must validate evidence rather than accepting an operator-supplied label.
 
 Audit events can be queried with:
 
@@ -193,7 +201,7 @@ cellscript-registry-auth-v1 / authorize_capability
 Daily publish signs the canonical JSON form of:
 
 ```text
-cellscript-registry-publish-v1 / publish
+cellscript-registry-publish-v2 / publish
 ```
 
 The API rejects a publish unless:
@@ -203,6 +211,10 @@ The API rejects a publish unless:
 - the capability scope covers `publish:namespace/package`;
 - the namespace exists and is active;
 - the capability principal owns the namespace;
+- the signed nested registry entry is schema 2, names the same package/version
+  and source hash, and records `edition = "2026"` plus a 32-byte
+  `compatibility_profile_hash`;
+- the signed manifest hash is present;
 - the capability signature verifies;
 - the signed publish nonce has not already been consumed;
 - the package version does not already exist;
@@ -232,7 +244,9 @@ https://registry.cellscript.dev/packages/:namespace/:name/versions/:version.json
 
 The route is served from R2 and sets short CDN cache headers. It does not
 require Hyperdrive or the write store, so ordinary package reads stay isolated
-from authenticated write-path dependencies.
+from authenticated write-path dependencies. Its JSON object is also schema 2
+and repeats `edition` and `compatibility_profile_hash` at the top level so
+consumers do not need to trust an untyped nested blob.
 
 CLI publish has two supported signing shapes:
 

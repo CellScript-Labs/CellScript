@@ -186,7 +186,7 @@ source_roots = ["contracts"]
 fn registry_index_write_read_round_trip() {
     let temp = tempfile::tempdir().unwrap();
     let index = RegistryIndex {
-        schema_version: 1,
+        schema_version: RegistryIndex::CURRENT_SCHEMA_VERSION,
         name: "token".to_string(),
         namespace: "cellscript".to_string(),
         versions: vec![RegistryVersion {
@@ -213,7 +213,7 @@ fn registry_index_write_read_round_trip() {
     index.write_to_repo(temp.path()).unwrap();
     let read_back = RegistryIndex::read_from_repo(temp.path()).unwrap();
 
-    assert_eq!(read_back.schema_version, 1);
+    assert_eq!(read_back.schema_version, RegistryIndex::CURRENT_SCHEMA_VERSION);
     assert_eq!(read_back.name, "token");
     assert_eq!(read_back.namespace, "cellscript");
     assert_eq!(read_back.versions.len(), 1);

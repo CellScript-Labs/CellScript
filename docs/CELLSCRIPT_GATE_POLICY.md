@@ -15,7 +15,7 @@ deciding whether a change is ready.
 | Mode | When to run | Evidence boundary |
 |---|---|---|
 | `dev` | Local development before pushing | Rust formatting, canonical CellScript example formatting, all workspace-package Rust checks (including `cellscript-tools`), strict backend quick audit, syntax-combination quick audit, parity-gated skill-pack freshness, README-linked CellScript doc Status freshness, local markdown link check, whitespace diff check |
-| `ci` | Pull requests, pushes, and routine merge readiness | Canonical CellScript example formatting; tests and clippy for the compiler, Fiber adapter, CKB adapter, WASM crate, CKB SDK builder example, and `cellscript-tools`; strict backend CI audit; package verification; parity-gated skill-pack/doc freshness; local-link and script syntax checks |
+| `ci` | Pull requests, pushes, and routine merge readiness | Canonical CellScript example formatting; tests and clippy for the compiler, Fiber adapter, CKB adapter, WASM crate, CKB SDK builder example, and `cellscript-tools`; registry API typecheck/tests/dry-run Worker build; strict backend CI audit; package verification; parity-gated skill-pack/doc freshness; local-link and script syntax checks |
 | `backend` | Changes touching IR, codegen, assembler, ABI, ELF, or RISC-V behavior | Full Rust tests, clippy, and strict backend full audit, including stateful CKB scenarios |
 | `release` | Nightly/stable release candidates and any production CKB claim | Clean tagged source plus `ci`, a fresh size-gated website WASM rebuild, tooling/docs and VS Code checks, pinned-CKB acceptance harnesses, public builder-contract generation, and mandatory stateful scenario/action coverage |
 | `release-quick` | Wrapper compatibility and local compile-only preflight | `ci` plus compile-only production acceptance; not external live/devnet evidence |
@@ -52,6 +52,11 @@ migrated. See
 [`CELLSCRIPT_EDITION_POLICY.md`](CELLSCRIPT_EDITION_POLICY.md). Edition-owned
 ABI changes require the `backend` gate in addition to ordinary `dev` and `ci`
 coverage.
+
+The `ci` gate also typechecks, tests, and performs a Wrangler dry-run build of
+`services/registry-api`. This pins the publish-protocol/schema contract to the
+compiler-generated registry entry. It is local service coverage, not evidence
+that Cloudflare, R2, Hyperdrive, Neon, DNS, or a production deployment works.
 
 The full gate reads `scripts/ckb_acceptance_pin.json` and rejects a CKB checkout
 whose revision or worktree differs from the pin. Its report binds the CKB

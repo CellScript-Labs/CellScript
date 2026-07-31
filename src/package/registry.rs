@@ -22,7 +22,7 @@ pub const DEFAULT_PUBLIC_REGISTRY_ORIGIN: &str = "https://api.registry.cellscrip
 pub const REGISTRY_AUTH_PROTOCOL: &str = "cellscript-registry-auth-v1";
 pub const AUTHORIZE_CAPABILITY_ACTION: &str = "authorize_capability";
 pub const REVOKE_CAPABILITY_ACTION: &str = "revoke_capability";
-pub const REGISTRY_PUBLISH_PROTOCOL: &str = "cellscript-registry-publish-v1";
+pub const REGISTRY_PUBLISH_PROTOCOL: &str = "cellscript-registry-publish-v2";
 pub const PUBLISH_ACTION: &str = "publish";
 
 /// Effective discovery index URL.
@@ -148,8 +148,7 @@ pub struct RegistryPublishPayload {
     pub name: String,
     pub version: String,
     pub source_hash: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub manifest_hash: Option<String>,
+    pub manifest_hash: String,
     pub capability_key_id: String,
     pub nonce: String,
     pub issued_at: String,
@@ -407,7 +406,18 @@ pub struct RegistryAuditInfo {
 }
 
 impl RegistryIndex {
-    pub const CURRENT_SCHEMA_VERSION: u32 = 1;
+    pub const CURRENT_SCHEMA_VERSION: u32 = 2;
+
+    fn ensure_current_schema(&self) -> Result<()> {
+        if self.schema_version != Self::CURRENT_SCHEMA_VERSION {
+            return Err(CompileError::without_span(format!(
+                "unsupported registry.json schema_version {}; Edition 2026 requires schema_version {}",
+                self.schema_version,
+                Self::CURRENT_SCHEMA_VERSION,
+            )));
+        }
+        Ok(())
+    }
 
     /// Read registry.json from a repository directory.
     pub fn read_from_repo(repo_dir: &Path) -> Result<Self> {
@@ -419,11 +429,13 @@ impl RegistryIndex {
             std::fs::read_to_string(&path).map_err(|e| CompileError::without_span(format!("failed to read registry.json: {}", e)))?;
         let index: Self =
             serde_json::from_str(&content).map_err(|e| CompileError::without_span(format!("failed to parse registry.json: {}", e)))?;
+        index.ensure_current_schema()?;
         Ok(index)
     }
 
     /// Write registry.json to a repository directory.
     pub fn write_to_repo(&self, repo_dir: &Path) -> Result<()> {
+        self.ensure_current_schema()?;
         let path = repo_dir.join("registry.json");
         let content = serde_json::to_string_pretty(self)
             .map_err(|e| CompileError::without_span(format!("failed to serialize registry.json: {}", e)))?;
@@ -804,7 +816,7 @@ mod tests {
     #[test]
     fn registry_index_find_matching_version() {
         let index = RegistryIndex {
-            schema_version: 1,
+            schema_version: RegistryIndex::CURRENT_SCHEMA_VERSION,
             name: "token".to_string(),
             namespace: "cellscript".to_string(),
             versions: vec![
@@ -884,7 +896,7 @@ mod tests {
     #[test]
     fn registry_index_skips_yanked_versions() {
         let index = RegistryIndex {
-            schema_version: 1,
+            schema_version: RegistryIndex::CURRENT_SCHEMA_VERSION,
             name: "pkg".to_string(),
             namespace: "ns".to_string(),
             versions: vec![RegistryVersion {
@@ -1047,7 +1059,7 @@ mod tests {
     #[test]
     fn missing_registry_status_is_unverified_by_default() {
         let json = r#"{
-          "schema_version": 1,
+          "schema_version": 2,
           "name": "amm",
           "namespace": "cellscript",
           "versions": [
@@ -1076,6 +1088,34 @@ mod tests {
     }
 
     #[test]
+    fn registry_index_rejects_pre_edition_schema() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("registry.json"),
+            r#"{
+              "schema_version": 1,
+              "name": "amm",
+              "namespace": "cellscript",
+              "versions": [{
+                "version": "1.0.0",
+                "tag": "v1.0.0",
+                "source_hash": "hash-v100",
+                "cellscript_version": "0.23.0",
+                "edition": "2026",
+                "compatibility_profile_hash": "test-compatibility-profile",
+                "dependencies": {},
+                "status": "source_published",
+                "yanked": false
+              }]
+            }"#,
+        )
+        .unwrap();
+
+        let error = RegistryIndex::read_from_repo(dir.path()).unwrap_err();
+        assert!(error.to_string().contains("Edition 2026 requires schema_version 2"));
+    }
+
+    #[test]
     fn discovery_entry_serialization_round_trip() {
         let entry = DiscoveryEntry {
             name: "amm".to_string(),
@@ -1093,7 +1133,7 @@ mod tests {
     #[test]
     fn registry_index_serialization_round_trip() {
         let index = RegistryIndex {
-            schema_version: 1,
+            schema_version: RegistryIndex::CURRENT_SCHEMA_VERSION,
             name: "amm_pool".to_string(),
             namespace: "cellscript".to_string(),
             versions: vec![RegistryVersion {

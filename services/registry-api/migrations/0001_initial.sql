@@ -92,7 +92,9 @@ create table if not exists package_versions (
   version text not null,
   status text not null,
   source_hash text not null,
-  manifest_hash text,
+  manifest_hash text not null,
+  edition text not null,
+  compatibility_profile_hash text not null,
   capability_key_id text not null references capabilities(key_id),
   principal_type text not null,
   principal_id text not null,
@@ -117,7 +119,11 @@ create table if not exists package_versions (
     'deprecated',
     'yanked',
     'quarantined'
-  ))
+  )),
+  check (source_hash ~ '^(0x)?[0-9A-Fa-f]{64}$'),
+  check (manifest_hash ~ '^(0x)?[0-9A-Fa-f]{64}$'),
+  check (edition = '2026'),
+  check (compatibility_profile_hash ~ '^(0x)?[0-9A-Fa-f]{64}$')
 );
 
 create table if not exists idempotency_keys (
